@@ -95,13 +95,6 @@ ntp_parse_ip(const char *s, uint8_t out[4])
     return (*s == '\0') ? 1u : 0u;
 }
 
-/** @brief Print the last two decimal digits of @p v, zero-padded. */
-static void
-ntp_put2(uint8_t v)
-{
-    SHELL_PRINTF("%u%u", (unsigned)((v / 10u) % 10u), (unsigned)(v % 10u));
-}
-
 /** @brief Begin (or restart) the SNTP query phase against ntp_srv. */
 static void
 ntp_begin_query(void)
@@ -247,16 +240,10 @@ tiku_shell_cmd_ntp_tick(void)
                  * certificate validity, /sys/time, the BASIC functions DATE$
                  * and NOW()) have a real time without `write /sys/time`. */
                 int saved = tiku_rtc_set_seconds_status((uint32_t)ts);
-                SHELL_PRINTF("ntp: %u-", (unsigned)tm.year);
-                ntp_put2(tm.month);
-                SHELL_PRINTF("-");
-                ntp_put2(tm.day);
-                SHELL_PRINTF(" ");
-                ntp_put2(tm.hour);
-                SHELL_PRINTF(":");
-                ntp_put2(tm.minute);
-                SHELL_PRINTF(":");
-                ntp_put2(tm.second);
+                SHELL_PRINTF("ntp: %u-%02u-%02u %02u:%02u:%02u",
+                             (unsigned)tm.year, (unsigned)tm.month,
+                             (unsigned)tm.day, (unsigned)tm.hour,
+                             (unsigned)tm.minute, (unsigned)tm.second);
                 SHELL_PRINTF(" UTC  stratum %u  (%s)\n",
                              (unsigned)tiku_kits_time_ntp_get_stratum(),
                              saved == 0 ? "clock set" : "clock persistence failed");

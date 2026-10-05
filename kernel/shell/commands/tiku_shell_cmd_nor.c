@@ -350,18 +350,6 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
                      "   unestablished; confirm on a scope first.\n");
         return;
     }
-    if (argc >= 4 && tiku_cmd_streq(argv[2], "ls") && 0) {
-        /* Compiled out by `&& 0`: drives the load-switch pad low, high or
-         * high-Z (argv[3] 0, 1 or z) and reads identity in that state. */
-        int lv = tiku_cmd_streq(argv[3], "z") ? -1 : (argv[3][0] == '1' ? 1 : 0);
-        tiku_nor_ls_set(lv);
-        rc = tiku_nor_init_serial(TIKU_NOR_CLK_24MHZ);
-        if (rc == TIKU_NOR_OK) { rc = tiku_nor_read_id(&id); }
-        SHELL_PRINTF("nor ls=%s: mfr %02x type %02x cap %02x -- %s\n",
-                     (lv < 0) ? "hi-Z" : (lv ? "high" : "low"),
-                     id.mfr, id.type, id.capacity, nor_errname(rc));
-        return;
-    }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "erases")) {
         SHELL_PRINTF("nor: %lu erases performed this boot (scratch"
                      " sector %08lx)\n",

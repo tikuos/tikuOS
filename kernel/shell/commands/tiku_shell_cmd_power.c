@@ -26,7 +26,7 @@
 #include "tiku_shell_cmd_psram.h"
 #include "tiku_shell_cmd_usb.h"
 #include "tiku_shell_cmd_nor.h"
-#include <string.h>
+#include "tiku_shell_cmd_util.h"
 
 #if defined(PLATFORM_NORDIC)
 #include <arch/nordic/tiku_power_arch.h>
@@ -36,22 +36,6 @@
 #if defined(PLATFORM_AMBIQ) && (TIKU_AMBIQ_POWER_PROBE + 0)
 #include <arch/ambiq/tiku_power_ambiq.h>
 #include <arch/ambiq/tiku_timer_arch.h>       /* stimer reclock / rate       */
-#include <arch/ambiq/tiku_cpu_common.h>
-#include <kernel/cpu/tiku_hang.h>
-#if (TIKU_DRV_NOR_ENABLE + 0)
-#include <arch/ambiq/tiku_nor_arch.h>          /* MSPI1 + U12 external NOR    */
-#endif
-#if (TIKU_DRV_EMMC_ENABLE + 0)
-#include <arch/ambiq/tiku_emmc_arch.h>         /* SDIO0 + U11 8 GB eMMC       */
-#endif
-#if (TIKU_DRV_USB_ENABLE + 0)
-#include <arch/ambiq/tiku_usb_arch.h>          /* USB device controller       */
-#include <kernel/scheduler/tiku_sched.h>
-#endif
-#if (TIKU_DRV_PSRAM_ENABLE + 0)
-#include <arch/ambiq/tiku_psram_arch.h>        /* MSPI0 + U14 external PSRAM  */
-#include <kernel/memory/tiku_mem.h>
-#endif
 #include <kernel/timers/tiku_clock.h>         /* tickless begin/end (guard)  */
 #include <arch/ambiq/tiku_cpu_freq_boot_arch.h>  /* SIMOBUCK enable hook     */
 #if (TIKU_AMBIQ_POWER_PROBE_GPU + 0)
@@ -68,37 +52,6 @@
 #include <arch/esp32c61/tiku_cpu_freq_boot_arch.h>
 #include <arch/esp32c61/tiku_esp32c61_regs.h>
 #endif
-
-/** @brief Non-zero when @p a and @p b are equal strings. */
-static int streq(const char *a, const char *b)
-{
-    return strcmp(a, b) == 0;
-}
-
-/** @brief Parse leading decimal digits; 0 when there are none.
- *  Marked unused: only some driver configurations reference it. */
-static uint32_t parse_u32(const char *tok) __attribute__((unused));
-static uint32_t parse_u32(const char *tok)
-{
-    uint32_t v = 0u;
-    while (*tok >= '0' && *tok <= '9') {
-        v = v * 10u + (uint32_t)(*tok++ - '0');
-    }
-    return v;
-}
-
-/** @brief Parse "on"/"1" and "off"/"0"; -1 if neither. */
-static int parse_on_off(const char *tok) __attribute__((unused));
-static int parse_on_off(const char *tok)
-{
-    if (streq(tok, "on") || streq(tok, "1")) {
-        return 1;
-    }
-    if (streq(tok, "off") || streq(tok, "0")) {
-        return 0;
-    }
-    return -1;
-}
 
 /** @brief Print the clocks and idle mode, plus nRF54L cache/DC-DC/debug. */
 static void power_report(void)
@@ -161,30 +114,45 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
     (void)argv;     /* read only by the platform branches below */
 
 #if defined(PLATFORM_NORDIC)
-    if (streq(argv[1], "stat")) {
+    if (tiku_cmd_streq(argv[1], "stat")) {
         power_stat();
         return;
     }
-    if ((streq(argv[1], "idle") || streq(argv[1], "spin")) && argc >= 3) {
+    if ((tiku_cmd_streq(argv[1], "idle") ||
+         tiku_cmd_streq(argv[1], "spin")) && argc >= 3) {
         /* idle and spin share one parser so both get the same peripheral
          * releases, and their difference measures the CPU rather than the
          * peripherals.
          *   idle <ms>  WFI          spin <ms>  while(1)
          * plus "quiet" as shorthand for pll, uart, hfxo, tim and deep. */
-        int spin = streq(argv[1], "spin");
+        int spin = tiku_cmd_streq(argv[1], "spin");
         unsigned flags = 0u, i;
         uint32_t ms = 0u, us;
         const char *p = argv[2];
         while (*p >= '0' && *p <= '9') { ms = ms * 10u + (uint32_t)(*p++ - '0'); }
         for (i = 3u; i < (unsigned)argc; i++) {
-            if (streq(argv[i], "pll"))  { flags |= TIKU_SLEEP_STOP_PLL; }
-            if (streq(argv[i], "uart")) { flags |= TIKU_SLEEP_STOP_UART; }
-            if (streq(argv[i], "hfxo")) { flags |= TIKU_SLEEP_STOP_HFXO; }
-            if (streq(argv[i], "deep")) { flags |= TIKU_SLEEP_DEEP; }
-            if (streq(argv[i], "tim"))  { flags |= TIKU_SLEEP_STOP_TIM; }
-            if (streq(argv[i], "tick")) { flags |= TIKU_SLEEP_STOP_TICK; }
-            if (streq(argv[i], "sysc")) { flags |= TIKU_SLEEP_STOP_SYSC; }
-            if (streq(argv[i], "quiet")) {
+            if (tiku_cmd_streq(argv[i], "pll")) {
+                flags |= TIKU_SLEEP_STOP_PLL;
+            }
+            if (tiku_cmd_streq(argv[i], "uart")) {
+                flags |= TIKU_SLEEP_STOP_UART;
+            }
+            if (tiku_cmd_streq(argv[i], "hfxo")) {
+                flags |= TIKU_SLEEP_STOP_HFXO;
+            }
+            if (tiku_cmd_streq(argv[i], "deep")) {
+                flags |= TIKU_SLEEP_DEEP;
+            }
+            if (tiku_cmd_streq(argv[i], "tim")) {
+                flags |= TIKU_SLEEP_STOP_TIM;
+            }
+            if (tiku_cmd_streq(argv[i], "tick")) {
+                flags |= TIKU_SLEEP_STOP_TICK;
+            }
+            if (tiku_cmd_streq(argv[i], "sysc")) {
+                flags |= TIKU_SLEEP_STOP_SYSC;
+            }
+            if (tiku_cmd_streq(argv[i], "quiet")) {
                 flags |= TIKU_SLEEP_STOP_PLL | TIKU_SLEEP_STOP_UART |
                          TIKU_SLEEP_STOP_HFXO | TIKU_SLEEP_STOP_TIM |
                          TIKU_SLEEP_DEEP;
@@ -192,7 +160,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         }
         if (ms == 0u) {
             SHELL_PRINTF("Usage: power %s <ms> "
-                         "[quiet|deep|tim|tick|uart|pll|hfxo]\n", argv[1]);
+                         "[quiet|deep|tim|tick|uart|pll|hfxo|sysc]\n", argv[1]);
             return;
         }
         /* Every flag is printed: this line is the provenance record in a
@@ -238,7 +206,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
 #endif
         return;
     }
-    if (streq(argv[1], "mem") && argc >= 4) {
+    if (tiku_cmd_streq(argv[1], "mem") && argc >= 4) {
         /* power mem <kind> <ms> -- price one memory access.
          * Reports accesses and the traversal checksum, so two configurations
          * can be checked for equal work; accesses, not time, are the
@@ -250,7 +218,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         uint32_t ms = 0u, us, n, i;
         const char *p2 = argv[3];
         for (i = 0u; i < TIKU_MEM_KIND_COUNT; i++) {
-            if (streq(argv[2], names[i])) {
+            if (tiku_cmd_streq(argv[2], names[i])) {
                 kind = i;
             }
         }
@@ -273,17 +241,17 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                      (unsigned long)tiku_nordic_mem_checksum());
         return;
     }
-    if (streq(argv[1], "lfclk")) {
+    if (tiku_cmd_streq(argv[1], "lfclk")) {
         /* Start the 32.768 kHz low-frequency clock, which the port does not
          * start at boot: without it the GRTC keeps time off the HF path, and
          * timekeeping that needs HF keeps the HF domain from being gated,
          * whatever else a sleep releases.  The datasheet's ~3 uA System ON
          * idle figure is quoted with the GRTC on the 32 kHz crystal. */
         uint32_t src = CLOCK_LFCLK_SRC_SRC_LFXO;       /* DK has the crystal */
-        if (argc >= 3 && streq(argv[2], "lfrc")) {
+        if (argc >= 3 && tiku_cmd_streq(argv[2], "lfrc")) {
             src = CLOCK_LFCLK_SRC_SRC_LFRC;
         }
-        if (argc >= 3 && streq(argv[2], "synth")) {
+        if (argc >= 3 && tiku_cmd_streq(argv[2], "synth")) {
             src = CLOCK_LFCLK_SRC_SRC_LFSYNT;
         }
         NRF_CLOCK_S->LFCLK.SRC = src;
@@ -305,7 +273,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         }
         return;
     }
-    if (streq(argv[1], "floor")) {
+    if (tiku_cmd_streq(argv[1], "floor")) {
         /* Everything that can hold the idle floor up, in one read: the
          * register state attributes what the current alone cannot.  Plain
          * reads only. */
@@ -342,7 +310,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
 #endif
         return;
     }
-    if (streq(argv[1], "why")) {
+    if (tiku_cmd_streq(argv[1], "why")) {
         /* RESETREAS decode: which source woke the part from System OFF.  A
          * button, the GRTC and the debugger each implicate a different
          * subsystem. */
@@ -358,13 +326,13 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                      (r & (1u << 11)) ? " GRTC"     : "",
                      (r & (1u << 12)) ? " nfc"      : "",
                      (r & (1u << 14)) ? " vbus"     : "");
-        if (argc >= 3 && streq(argv[2], "clear")) {
+        if (argc >= 3 && tiku_cmd_streq(argv[2], "clear")) {
             *(volatile uint32_t *)0x5010E600UL = r;   /* W1C */
             SHELL_PRINTF("cleared\n");
         }
         return;
     }
-    if (streq(argv[1], "off")) {
+    if (tiku_cmd_streq(argv[1], "off")) {
         /* System OFF: the deepest state the part has, ~uA class per datasheet,
          * wake by reset/GPIO only.  P14 measures the VDDM rail; current that
          * remains with the SoC in System OFF belongs to the board or the
@@ -374,7 +342,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         tiku_nordic_system_off();               /* does not return */
     }
 
-    if (streq(argv[1], "bench")) {
+    if (tiku_cmd_streq(argv[1], "bench")) {
         uint32_t us = 0u, hit = 0u, miss = 0u, sum;
         tiku_nordic_cache_profile_start();
         sum = tiku_nordic_cache_workload(&us);
@@ -387,7 +355,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                      (unsigned long)hit, (unsigned long)miss);
         return;
     }
-    if (streq(argv[1], "clock")) {
+    if (tiku_cmd_streq(argv[1], "clock")) {
         unsigned long meas = tiku_nordic_cpu_hz_measure();
         unsigned long rep  = tiku_cpu_mclk_hz();
         SHELL_PRINTF("reported %lu Hz\n", rep);
@@ -399,20 +367,20 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                          ? "AGREE" : "MISMATCH");
         return;
     }
-    if (streq(argv[1], "probe")) {
+    if (tiku_cmd_streq(argv[1], "probe")) {
         int det = tiku_nordic_dcdc_probe_inductor();
         SHELL_PRINTF("inductor: %s\n", det ? "detected" : "absent");
         SHELL_PRINTF("dcdc:     %s\n",
                      tiku_nordic_dcdc_enabled() ? "on" : "off");
         return;
     }
-    if (streq(argv[1], "clear")) {
+    if (tiku_cmd_streq(argv[1], "clear")) {
         tiku_nordic_cache_profile_start();
         SHELL_PRINTF("cache counters cleared and running\n");
         return;
     }
-    if (streq(argv[1], "cache") && argc >= 3) {
-        int on = parse_on_off(argv[2]);
+    if (tiku_cmd_streq(argv[1], "cache") && argc >= 3) {
+        int on = tiku_cmd_parse_on_off(argv[2]);
         if (on < 0) {
             SHELL_PRINTF("Usage: power cache on|off\n");
             return;
@@ -423,8 +391,8 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         SHELL_PRINTF("cache: %s\n", tiku_nordic_cache_enabled() ? "on" : "off");
         return;
     }
-    if (streq(argv[1], "dcdc") && argc >= 3) {
-        int on = parse_on_off(argv[2]);
+    if (tiku_cmd_streq(argv[1], "dcdc") && argc >= 3) {
+        int on = tiku_cmd_parse_on_off(argv[2]);
         if (on < 0) {
             SHELL_PRINTF("Usage: power dcdc on|off\n");
             return;
@@ -437,6 +405,10 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         SHELL_PRINTF("dcdc: %s\n", tiku_nordic_dcdc_enabled() ? "on" : "off");
         return;
     }
+    SHELL_PRINTF("Usage: power [stat | idle|spin <ms> [flags] | mem <kind> <ms>"
+                 " | lfclk [lfrc|synth] | floor | why [clear] | off | bench"
+                 " | clock | probe | clear | cache on|off | dcdc on|off]\n");
+    return;
 #endif
 
 #if defined(PLATFORM_ESP32C61)
@@ -444,9 +416,9 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
      * reset: `off` checkpoints durable state first, and `why` says what ended
      * the last one.  `nap` is light sleep, which keeps everything and
      * returns -- early on a keystroke, or on GPIO9 low with `pin`. */
-    if (streq(argv[1], "nap") && argc >= 3) {
-        uint32_t ms = parse_u32(argv[2]);
-        unsigned flags = (argc >= 4 && streq(argv[3], "pin")) ?
+    if (tiku_cmd_streq(argv[1], "nap") && argc >= 3) {
+        uint32_t ms = tiku_cmd_parse_u32(argv[2]);
+        unsigned flags = (argc >= 4 && tiku_cmd_streq(argv[3], "pin")) ?
                          TIKU_ESP32C61_NAP_PIN : 0U;
         uint64_t t0 = tiku_cpu_esp32c61_systimer();
         uint32_t w = tiku_esp32c61_light_sleep((uint64_t)ms * 1000ULL, flags);
@@ -459,7 +431,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                      (w & ESP32C61_PMU_WAKE_GPIO)  ? " gpio"  : "");
         return;
     }
-    if (streq(argv[1], "why")) {
+    if (tiku_cmd_streq(argv[1], "why")) {
         uint32_t w = tiku_esp32c61_wake_cause();
 
         SHELL_PRINTF("reset: rom code %lu%s\n",
@@ -473,8 +445,8 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                      (w & ESP32C61_PMU_WAKE_UART0) ? " uart0" : "");
         return;
     }
-    if (streq(argv[1], "off")) {
-        uint32_t ms = (argc >= 3) ? parse_u32(argv[2]) : 0u;
+    if (tiku_cmd_streq(argv[1], "off")) {
+        uint32_t ms = (argc >= 3) ? tiku_cmd_parse_u32(argv[2]) : 0u;
 
         if (ms == 0u) {
             SHELL_PRINTF("deep sleep -- wake by RESET only\n");
@@ -492,7 +464,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
     /* Apollo510 verbs, separate from the nRF54L ones: the two parts have
      * different release vocabularies, cache architectures and timebases, so a
      * shared verb would mean different things on each. */
-    if (streq(argv[1], "floor")) {
+    if (tiku_cmd_streq(argv[1], "floor")) {
         uint32_t ic = 0u, dc = 0u, ln = 0u;
         tiku_ambiq_cache_geometry(&ic, &dc, &ln);
         SHELL_PRINTF("cache: I %lu B  D %lu B  line %lu B  (read from CCSIDR,"
@@ -526,7 +498,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                      (unsigned long)tiku_ambiq_mem_cold_bytes());
         return;
     }
-    if (streq(argv[1], "dev") && argc >= 4) {
+    if (tiku_cmd_streq(argv[1], "dev") && argc >= 4) {
         /* Per-domain power switches, so an idle floor can be attributed by
          * turning one domain off at a time.  Each verb prints EN and STATUS
          * after the write; STATUS shows whether the domain followed.
@@ -538,32 +510,32 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
          *                its contents are lost -- measure, then reboot
          *   trc:         DEMCR.TRCENA and the DWT cycle counter
          * nvm1, rom and ssram refuse `off` unless followed by `force`. */
-        int on = parse_on_off(argv[3]);
+        int on = tiku_cmd_parse_on_off(argv[3]);
         if (on < 0) {
             SHELL_PRINTF("Usage: power dev <crypto|otp|nvm1|rom|ssram|trc> on|off\n");
             return;
         }
-        if (streq(argv[2], "crypto")) {
+        if (tiku_cmd_streq(argv[2], "crypto")) {
             PWRCTRL->DEVPWREN_b.PWRENCRYPTO = (uint32_t)on;
-        } else if (streq(argv[2], "otp")) {
+        } else if (tiku_cmd_streq(argv[2], "otp")) {
             PWRCTRL->DEVPWREN_b.PWRENOTP = (uint32_t)on;
-        } else if (streq(argv[2], "nvm1")) {
+        } else if (tiku_cmd_streq(argv[2], "nvm1")) {
             /* The carved NVM region (tier + file store) can extend into the
              * upper bank, so a running OS that writes /data or a persist cell
              * touches unpowered memory and faults. */
-            if (!on && (argc < 5 || !streq(argv[4], "force"))) {
+            if (!on && (argc < 5 || !tiku_cmd_streq(argv[4], "force"))) {
                 SHELL_PRINTF("nvm1 off can fault a running OS (the carved NVM "
                              "region may span it).  Add 'force' if the image "
                              "does not touch it.\n");
                 return;
             }
             PWRCTRL->MEMPWREN_b.PWRENNVM1 = (uint32_t)on;
-        } else if (streq(argv[2], "rom")) {
+        } else if (tiku_cmd_streq(argv[2], "rom")) {
             /* MRAM writes on this part go through the boot ROM, and the OS
              * writes NVM on its own (boot counter, persist cells, /data): with
              * the ROM off the next write faults, and the fault loop can keep
              * SWD from attaching until a power cycle. */
-            if (!on && (argc < 5 || !streq(argv[4], "force"))) {
+            if (!on && (argc < 5 || !tiku_cmd_streq(argv[4], "force"))) {
                 SHELL_PRINTF("rom off breaks bootrom-mediated MRAM writes and "
                              "has wedged this board (fault loop + SWD attach "
                              "failure, power cycle to recover).  Worth ~14 uA. "
@@ -572,8 +544,8 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                 return;
             }
             PWRCTRL->MEMPWREN_b.PWRENROM = (uint32_t)on;
-        } else if (streq(argv[2], "ssram")) {
-            if (!on && (argc < 5 || !streq(argv[4], "force"))) {
+        } else if (tiku_cmd_streq(argv[2], "ssram")) {
+            if (!on && (argc < 5 || !tiku_cmd_streq(argv[4], "force"))) {
                 SHELL_PRINTF("ssram off LOSES the tier arena (1 MB lives "
                              "there in this build).  'power dev ssram off "
                              "force', then reboot before trusting /data-tier "
@@ -591,7 +563,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                                           | (0x7u << 12));
                 PWRCTRL->SSRAMPWREN = 0x0u;
             }
-        } else if (streq(argv[2], "trc")) {
+        } else if (tiku_cmd_streq(argv[2], "trc")) {
             /* The DWT clock measurement sets DEMCR.TRCENA and leaves it on;
              * `off` releases it. */
             volatile uint32_t *demcr = (volatile uint32_t *)0xE000EDFCUL;
@@ -621,7 +593,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                      (unsigned long)PWRCTRL->SSRAMPWRST);
         return;
     }
-    if (streq(argv[1], "buck")) {
+    if (tiku_cmd_streq(argv[1], "buck")) {
         /* The Apollo counterpart of `power dcdc`.  Enable-only: the vendor
          * sequence hands the load from the LDOs to the buck and there is no
          * validated reverse path here, so a reboot returns to LDO. */
@@ -636,15 +608,15 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         SHELL_PRINTF("core still %lu Hz\n", tiku_ambiq_cpu_hz_measure());
         return;
     }
-    if (streq(argv[1], "clock")) {
+    if (tiku_cmd_streq(argv[1], "clock")) {
         unsigned long hz = tiku_ambiq_cpu_hz_measure();
         SHELL_PRINTF("core measured %lu Hz (DWT cycle counter timed against "
                      "the always-on STIMER)%s\n", hz,
                      hz ? "" : " -- REFUSED: DWT unavailable or wrapped");
         return;
     }
-    if (streq(argv[1], "cache") && argc >= 3) {
-        int on = parse_on_off(argv[2]);
+    if (tiku_cmd_streq(argv[1], "cache") && argc >= 3) {
+        int on = tiku_cmd_parse_on_off(argv[2]);
         if (on < 0) {
             SHELL_PRINTF("Usage: power cache on|off\n");
             return;
@@ -654,30 +626,30 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         return;
     }
 #if (TIKU_DRV_USB_ENABLE + 0)
-    if (streq(argv[1], "usb")) {
+    if (tiku_cmd_streq(argv[1], "usb")) {
         tiku_shell_cmd_usb(argc, argv);
         return;
     }
 #endif
 #if (TIKU_DRV_EMMC_ENABLE + 0)
-    if (streq(argv[1], "emmc")) {
+    if (tiku_cmd_streq(argv[1], "emmc")) {
         tiku_shell_cmd_emmc(argc, argv);
         return;
     }
 #endif
 #if (TIKU_DRV_NOR_ENABLE + 0)
-    if (streq(argv[1], "nor")) {
+    if (tiku_cmd_streq(argv[1], "nor")) {
         tiku_shell_cmd_nor(argc, argv);
         return;
     }
 #endif
 #if (TIKU_DRV_PSRAM_ENABLE + 0)
-    if (streq(argv[1], "psram")) {
+    if (tiku_cmd_streq(argv[1], "psram")) {
         tiku_shell_cmd_psram(argc, argv);
         return;
     }
 #endif
-    if (streq(argv[1], "stimer")) {
+    if (tiku_cmd_streq(argv[1], "stimer")) {
         /* Timebase health: current rate, whether the counter is counting,
          * and whether the tickless guard accepts or refuses a stretch.
          *
@@ -685,7 +657,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
          * the guard refuse a stretch on the dead clock, then restores the
          * crystal and shows recovery, all in one verb, so the board is never
          * left on a dead timebase. */
-        int kill = (argc >= 3 && streq(argv[2], "kill"));
+        int kill = (argc >= 3 && tiku_cmd_streq(argv[2], "kill"));
         int pass;
         for (pass = 0; pass < (kill ? 2 : 1); pass++) {
             uint32_t rate, c0, c1, spin_n = 4000000u;
@@ -712,32 +684,44 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         }
         return;
     }
-    if (streq(argv[1], "reclock") && argc >= 3) {
+    if (tiku_cmd_streq(argv[1], "reclock") && argc >= 3) {
         /* power reclock lfrc|xtal -- exercise the deep-sleep timebase switch
          * from the shell, so the switch can be checked without a deep-sleep
          * window around it. */
-        int lf = streq(argv[2], "lfrc");
+        int lf = tiku_cmd_streq(argv[2], "lfrc");
         uint32_t hz = tiku_ambiq_stimer_reclock(lf ? 1 : 0);
         SHELL_PRINTF("reclock %s -> %lu Hz%s\n", lf ? "lfrc" : "xtal",
                      (unsigned long)hz,
                      hz ? "" : " (FAILED, timebase left on XTAL)");
         return;
     }
-    if ((streq(argv[1], "idle") || streq(argv[1], "spin")) && argc >= 3) {
-        int spin = streq(argv[1], "spin");
+    if ((tiku_cmd_streq(argv[1], "idle") ||
+         tiku_cmd_streq(argv[1], "spin")) && argc >= 3) {
+        int spin = tiku_cmd_streq(argv[1], "spin");
         unsigned flags = 0u, i;
         uint32_t ms = 0u, us;
         const char *p = argv[2];
         while (*p >= '0' && *p <= '9') { ms = ms * 10u + (uint32_t)(*p++ - '0'); }
         for (i = 3u; i < (unsigned)argc; i++) {
-            if (streq(argv[i], "deep")) { flags |= TIKU_AMBIQ_SLEEP_DEEP; }
-            if (streq(argv[i], "uart")) { flags |= TIKU_AMBIQ_SLEEP_STOP_UART; }
-            if (streq(argv[i], "tick")) { flags |= TIKU_AMBIQ_SLEEP_STOP_TICK; }
-            if (streq(argv[i], "dbg"))  { flags |= TIKU_AMBIQ_SLEEP_DBGLOCK; }
-            if (streq(argv[i], "lfrc")) { flags |= TIKU_AMBIQ_SLEEP_LFRC; }
+            if (tiku_cmd_streq(argv[i], "deep")) {
+                flags |= TIKU_AMBIQ_SLEEP_DEEP;
+            }
+            if (tiku_cmd_streq(argv[i], "uart")) {
+                flags |= TIKU_AMBIQ_SLEEP_STOP_UART;
+            }
+            if (tiku_cmd_streq(argv[i], "tick")) {
+                flags |= TIKU_AMBIQ_SLEEP_STOP_TICK;
+            }
+            if (tiku_cmd_streq(argv[i], "dbg")) {
+                flags |= TIKU_AMBIQ_SLEEP_DBGLOCK;
+            }
+            if (tiku_cmd_streq(argv[i], "lfrc")) {
+                flags |= TIKU_AMBIQ_SLEEP_LFRC;
+            }
         }
         if (ms == 0u) {
-            SHELL_PRINTF("Usage: power %s <ms> [deep|uart|tick|dbg]\n", argv[1]);
+            SHELL_PRINTF("Usage: power %s <ms> [deep|uart|tick|dbg|lfrc]\n",
+                         argv[1]);
             return;
         }
         /* Every flag is printed: this line is the provenance record. */
@@ -767,7 +751,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         }
         return;
     }
-    if (streq(argv[1], "mem") && argc >= 4) {
+    if (tiku_cmd_streq(argv[1], "mem") && argc >= 4) {
         static const char *const names[TIKU_AMBIQ_MEM_KIND_COUNT] = {
             "nop", "sram_r", "sram_w", "sram_stride", "mram_hot", "mram_cold"
         };
@@ -775,7 +759,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         uint32_t ms = 0u, us, n;
         const char *p2 = argv[3];
         for (i = 0u; i < TIKU_AMBIQ_MEM_KIND_COUNT; i++) {
-            if (streq(argv[2], names[i])) { kind = i; }
+            if (tiku_cmd_streq(argv[2], names[i])) { kind = i; }
         }
         while (*p2 >= '0' && *p2 <= '9') {
             ms = ms * 10u + (uint32_t)(*p2++ - '0');
@@ -807,7 +791,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
      *                                         lose TCM, so this verb refuses it
      * ELP level 1 avoids the power-up stall on wake; level 2 trades wake
      * latency for power; level 3 is refused (hard-float). */
-    if (streq(argv[1], "cpdlp")) {
+    if (tiku_cmd_streq(argv[1], "cpdlp")) {
         static const char *const lp[4] = { "ON", "ON-clk-off", "RET", "OFF" };
         uint32_t v;
         if (argc >= 4) {
@@ -817,7 +801,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                 return;
             }
             v = PWRMODCTL->CPDLPSTATE;
-            if (streq(argv[2], "elp")) {
+            if (tiku_cmd_streq(argv[2], "elp")) {
                 /* ELP=OFF discards the FP/MVE register state on every
                  * low-power entry.  This build is hard-float: the kernel holds
                  * live floating-point context across sleeps, so losing it
@@ -828,7 +812,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                     return;
                 }
                 v = (v & ~(3u << 4)) | (nv << 4);
-            } else if (streq(argv[2], "clp")) {
+            } else if (tiku_cmd_streq(argv[2], "clp")) {
                 /* CLP=OFF belongs to the deep-sleep path, which the SDK never
                  * requests from here, so the verb refuses it. */
                 if (nv == 3u) {
@@ -854,13 +838,13 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
     }
 
 #if (TIKU_AMBIQ_POWER_PROBE_SIMD + 0)
-    if (streq(argv[1], "simd") && argc >= 2) {
+    if (tiku_cmd_streq(argv[1], "simd") && argc >= 2) {
         static const char *const kn[TIKU_SP_KIND_COUNT] = {
             "fill", "copy", "multiply", "scale", "affine", "lut",
             "sum", "addsat", "saxpy", "dot"
         };
         /* ---- power simd verify : both backends agree on every kernel ---- */
-        if (argc >= 3 && streq(argv[2], "verify")) {
+        if (argc >= 3 && tiku_cmd_streq(argv[2], "verify")) {
             uint32_t mism = 0u;
             int ok = tiku_simd_power_verify(&mism);
             SHELL_PRINTF("simd verify %s mismatch %08lx native %s\n",
@@ -879,11 +863,11 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
             uint32_t nb = 0u, ms = 0u, us;
             const char *a = argv[5], *b = argv[6];
             for (i = 0u; i < TIKU_SP_KIND_COUNT; i++) {
-                if (streq(argv[2], kn[i])) { k = i; }
+                if (tiku_cmd_streq(argv[2], kn[i])) { k = i; }
             }
-            be = streq(argv[3], "helium") ? TIKU_SP_BACKEND_HELIUM
+            be = tiku_cmd_streq(argv[3], "helium") ? TIKU_SP_BACKEND_HELIUM
                                           : TIKU_SP_BACKEND_SCALAR;
-            tr = streq(argv[4], "ssram")  ? TIKU_SP_TIER_SSRAM
+            tr = tiku_cmd_streq(argv[4], "ssram")  ? TIKU_SP_TIER_SSRAM
                                           : TIKU_SP_TIER_DTCM;
             while (*a >= '0' && *a <= '9') { nb = nb*10u + (uint32_t)(*a++ - '0'); }
             while (*b >= '0' && *b <= '9') { ms = ms*10u + (uint32_t)(*b++ - '0'); }
@@ -920,7 +904,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
     }
 #endif
 #if (TIKU_AMBIQ_POWER_PROBE_GPU + 0)
-    if (streq(argv[1], "gpu") && argc >= 3) {
+    if (tiku_cmd_streq(argv[1], "gpu") && argc >= 3) {
         static const char *const wn[TIKU_GPU_W_KIND_COUNT] = {
             "fill", "copy", "multiply", "scale", "lut", "reduce"
         };
@@ -928,12 +912,12 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
             "LP-96", "HP1-192", "HP2-125", "HP3-250"
         };
         /* ---- power gpu off | on [perf] ---- */
-        if (streq(argv[2], "off")) {
+        if (tiku_cmd_streq(argv[2], "off")) {
             tiku_gpu_deinit();
             SHELL_PRINTF("gpu off: powered %d\n", tiku_gpu_powered());
             return;
         }
-        if (streq(argv[2], "on")) {
+        if (tiku_cmd_streq(argv[2], "on")) {
             unsigned perf = 0u;
             tiku_gpu_err_t rc;
             if (argc >= 4) {
@@ -983,7 +967,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
          * default for this field is NONE; banks wake on access anyway
          * (datasheet 4.3.4).  This verb sets the field so its cost can be
          * measured. */
-        if (streq(argv[2], "ram") && argc >= 4) {
+        if (tiku_cmd_streq(argv[2], "ram") && argc >= 4) {
             unsigned v = (unsigned)(argv[3][0] - '0') & 7u;
             unsigned before = PWRCTRL->SSRAMRETCFG_b.SSRAMACTGFX;
             PWRCTRL->SSRAMRETCFG_b.SSRAMACTGFX = v;
@@ -995,14 +979,14 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         }
 
         /* ---- power gpu <work|cpu|contend> ... ---- */
-        if (streq(argv[2], "work") && argc >= 6) {
+        if (tiku_cmd_streq(argv[2], "work") && argc >= 6) {
             unsigned k = TIKU_GPU_W_KIND_COUNT, i;
             uint32_t side = 0u, ms = 0u, us;
             const char *a = argv[4], *b = argv[5];
             /* "async" alone = batch 1 (one draw per list); "async <N>"
              * batches N draws into each submitted list. */
             int async = 0;
-            if (argc >= 7 && streq(argv[6], "async")) {
+            if (argc >= 7 && tiku_cmd_streq(argv[6], "async")) {
                 async = 1;
                 if (argc >= 8) {
                     const char *q = argv[7]; int n = 0;
@@ -1011,7 +995,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                 }
             }
             for (i = 0u; i < TIKU_GPU_W_KIND_COUNT; i++) {
-                if (streq(argv[3], wn[i])) { k = i; }
+                if (tiku_cmd_streq(argv[3], wn[i])) { k = i; }
             }
             while (*a >= '0' && *a <= '9') { side = side*10u + (uint32_t)(*a++ - '0'); }
             while (*b >= '0' && *b <= '9') { ms   = ms*10u   + (uint32_t)(*b++ - '0'); }
@@ -1040,9 +1024,9 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                          tiku_gpu_power_exact());
             return;
         }
-        if (streq(argv[2], "cpu") && argc >= 6) {
+        if (tiku_cmd_streq(argv[2], "cpu") && argc >= 6) {
             uint32_t side = 0u, ms = 0u, us;
-            unsigned k = streq(argv[3], "copy") ? TIKU_GPU_CPU_COPY
+            unsigned k = tiku_cmd_streq(argv[3], "copy") ? TIKU_GPU_CPU_COPY
                                                 : TIKU_GPU_CPU_FILL;
             const char *a = argv[4], *b = argv[5];
             while (*a >= '0' && *a <= '9') { side = side*10u + (uint32_t)(*a++ - '0'); }
@@ -1065,7 +1049,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                          tiku_gpu_power_exact());
             return;
         }
-        if (streq(argv[2], "contend") && argc >= 5) {
+        if (tiku_cmd_streq(argv[2], "contend") && argc >= 5) {
             uint32_t side = 0u, ms = 0u, us;
             const char *a = argv[3], *b = argv[4];
             while (*a >= '0' && *a <= '9') { side = side*10u + (uint32_t)(*a++ - '0'); }
@@ -1096,8 +1080,25 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         return;
     }
 #endif
-    SHELL_PRINTF("Usage: power [floor | clock | cache on|off | idle <ms> [deep]"
-                 " | spin <ms> | mem <kind> <ms>"
+    SHELL_PRINTF("Usage: power [floor | dev <name> on|off | buck | clock"
+                 " | cache on|off | stimer [kill] | reclock lfrc|xtal"
+                 " | idle|spin <ms> [flags] | mem <kind> <ms>"
+                 " | cpdlp [elp|clp <0-3>]"
+#if (TIKU_DRV_USB_ENABLE + 0)
+                 " | usb ..."
+#endif
+#if (TIKU_DRV_EMMC_ENABLE + 0)
+                 " | emmc ..."
+#endif
+#if (TIKU_DRV_NOR_ENABLE + 0)
+                 " | nor ..."
+#endif
+#if (TIKU_DRV_PSRAM_ENABLE + 0)
+                 " | psram ..."
+#endif
+#if (TIKU_AMBIQ_POWER_PROBE_SIMD + 0)
+                 " | simd ..."
+#endif
 #if (TIKU_AMBIQ_POWER_PROBE_GPU + 0)
                  " | gpu ..."
 #endif
@@ -1105,7 +1106,8 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
     return;
 #endif
 
-    SHELL_PRINTF("Usage: power [cache on|off | dcdc on|off | bench | clock | probe | stat | clear]\n");
+    /* A port without a branch above has no verbs: `power` reports only. */
+    SHELL_PRINTF("Usage: power\n");
 }
 
 #endif /* TIKU_SHELL_CMD_POWER */

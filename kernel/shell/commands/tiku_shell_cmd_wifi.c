@@ -44,21 +44,13 @@ static int str_eq(const char *a, const char *b)
     return *a == 0 && *b == 0;
 }
 
-/** @brief Print @p b as two lowercase hex digits. */
-static void put_hex2(uint8_t b)
-{
-    static const char digits[] = "0123456789abcdef";
-    tiku_shell_io_putc(digits[(b >> 4) & 0xFU]);
-    tiku_shell_io_putc(digits[b & 0xFU]);
-}
-
 /** @brief Print a BSSID or MAC as six colon-separated hex pairs. */
 static void put_bssid(const uint8_t bssid[6])
 {
     uint8_t k;
     for (k = 0U; k < 6U; ++k) {
         if (k > 0U) tiku_shell_io_putc(':');
-        put_hex2(bssid[k]);
+        SHELL_PRINTF("%02x", (unsigned)bssid[k]);
     }
 }
 
