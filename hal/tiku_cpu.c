@@ -68,6 +68,7 @@ static inline void tiku_arm_enable_irq(void) {
 #include "arch/esp32c61/tiku_cpu_common.h"
 #include "arch/esp32c61/tiku_irq_arch.h"
 #include "arch/esp32c61/tiku_sleep_arch.h"
+#include "arch/esp32c61/tiku_psram_arch.h"
 #include <stdint.h>
 #endif
 
@@ -309,8 +310,9 @@ void tiku_cpu_dcache_clean(const void *addr, unsigned long len) {
 #elif defined(PLATFORM_RA8P1)
     tiku_ra8p1_dcache_clean(addr, len);
 #elif defined(PLATFORM_ESP32C61)
-    /* SRAM is uncached; the flash driver invalidates what it writes. */
-    (void)addr; (void)len;
+    /* SRAM is uncached and the flash is not written through the cache, so
+     * only a PSRAM range has lines to write back. */
+    tiku_esp32c61_psram_clean(addr, len);
 #endif
 }
 
@@ -329,8 +331,9 @@ void tiku_cpu_dcache_invalidate(const void *addr, unsigned long len) {
 #elif defined(PLATFORM_RA8P1)
     tiku_ra8p1_dcache_invalidate(addr, len);
 #elif defined(PLATFORM_ESP32C61)
-    /* The flash driver invalidates what it writes. */
-    (void)addr; (void)len;
+    /* The flash driver invalidates what it writes; a PSRAM range is dropped
+     * here. */
+    tiku_esp32c61_psram_invalidate(addr, len);
 #endif
 }
 

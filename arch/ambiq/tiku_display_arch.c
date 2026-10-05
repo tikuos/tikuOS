@@ -53,7 +53,11 @@ of_gpu(tiku_gpu_err_t e)
 int
 tiku_display_arch_init(tiku_display_t *d)
 {
-    (void)d;
+    /* The panel's size is fixed: a smaller framebuffer would cover only part
+     * of it, and a larger one fails its first flush, so either is refused. */
+    if (d->w != TIKU_DC_PANEL_W || d->h != TIKU_DC_PANEL_H) {
+        return TIKU_DISPLAY_ERR_INVALID;
+    }
     if (tiku_gpu_init(TIKU_GPU_PERF_LP_96MHZ) != TIKU_GPU_OK) {
         return TIKU_DISPLAY_ERR_STATE;
     }

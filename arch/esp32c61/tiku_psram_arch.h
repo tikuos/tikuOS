@@ -54,4 +54,21 @@ uint32_t tiku_esp32c61_psram_id(void);
 /** @brief Mapped bytes, 0 until init succeeds. */
 uint32_t tiku_esp32c61_psram_size(void);
 
+/**
+ * @brief Write the cached lines over [addr, addr + len) back to the PSRAM.
+ *
+ * The PSRAM is the cached memory the core writes; a range not wholly inside
+ * the mapped PSRAM is left alone.
+ */
+void tiku_esp32c61_psram_clean(const void *addr, unsigned long len);
+
+/**
+ * @brief Drop the cached lines over [addr, addr + len) so the next read
+ *        refetches from the PSRAM.
+ *
+ * A dirty line in the range is discarded; a range not wholly inside the mapped
+ * PSRAM is left alone.
+ */
+void tiku_esp32c61_psram_invalidate(const void *addr, unsigned long len);
+
 #endif /* TIKU_ESP32C61_PSRAM_ARCH_H_ */

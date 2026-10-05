@@ -47,16 +47,17 @@ static void cpu_spin(unsigned long iters)
  *
  * One long spin rather than N short ones: the calibration does not include
  * call overhead, so N calls would spend it N times outside the measurement.
+ * The count is 64-bit because a few seconds at 1 GHz overflow 32 bits.
  *
  * @param iters  Total iterations
  */
-static void cpu_spin_total(unsigned long iters)
+static void cpu_spin_total(unsigned long long iters)
 {
-    while (iters > 0x08000000UL) {
+    while (iters > 0x08000000ULL) {
         cpu_spin(0x08000000UL);
-        iters -= 0x08000000UL;
+        iters -= 0x08000000ULL;
     }
-    cpu_spin(iters);
+    cpu_spin((unsigned long)iters);
 }
 
 /**
@@ -125,7 +126,8 @@ void tiku_cpu_ra8p1_delay_us(unsigned int us)
     unsigned long whole  = (unsigned long)(us / 1000U);
     unsigned long frac   = (unsigned long)(us % 1000U);
 
-    cpu_spin_total((whole * per_ms) + ((frac * per_ms) / 1000UL));
+    cpu_spin_total(((unsigned long long)whole * per_ms) +
+                   ((frac * per_ms) / 1000UL));
 }
 
 void tiku_cpu_ra8p1_delay_ms(unsigned int ms)
@@ -159,7 +161,7 @@ void tiku_cpu_ra8p1_delay_ms(unsigned int ms)
         return;
     }
 
-    cpu_spin_total((unsigned long)ms * tiku_cpu_ra8p1_spin_per_ms());
+    cpu_spin_total((unsigned long long)ms * tiku_cpu_ra8p1_spin_per_ms());
 }
 
 uint8_t tiku_cpu_ra8p1_unique_id(uint8_t *buf, uint8_t len)

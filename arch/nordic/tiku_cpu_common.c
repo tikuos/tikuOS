@@ -56,10 +56,11 @@ void tiku_nordic_dwt_init(void)
 }
 
 /** @brief Busy-wait for @p cycles core cycles using SysTick (polled). */
-static void tiku_nordic_delay_cycles(uint32_t cycles)
+static void tiku_nordic_delay_cycles(uint64_t cycles)
 {
     while (cycles != 0U) {
-        uint32_t chunk = (cycles > TIKU_SYSTICK_MAX) ? TIKU_SYSTICK_MAX : cycles;
+        uint32_t chunk = (cycles > TIKU_SYSTICK_MAX) ? TIKU_SYSTICK_MAX
+                                                     : (uint32_t)cycles;
 
         TIKU_SYSTICK->CTRL = 0U;                 /* stop + clear COUNTFLAG   */
         TIKU_SYSTICK->LOAD = chunk;              /* counts chunk+1 cycles    */
@@ -77,7 +78,9 @@ static void tiku_nordic_delay_cycles(uint32_t cycles)
 
 void tiku_cpu_nordic_delay_us(uint32_t us)
 {
-    tiku_nordic_delay_cycles(us * (tiku_nordic_cpu_hz_now() / 1000000UL));
+    /* 64-bit: at 128 MHz a 32-bit cycle count wraps past about 33 s. */
+    tiku_nordic_delay_cycles((uint64_t)us *
+                             (tiku_nordic_cpu_hz_now() / 1000000UL));
 }
 
 void tiku_cpu_nordic_delay_ms(uint32_t ms)

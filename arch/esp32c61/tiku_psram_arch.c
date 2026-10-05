@@ -254,3 +254,22 @@ uint32_t tiku_esp32c61_psram_id(void) {
 uint32_t tiku_esp32c61_psram_size(void) {
     return psram_bytes;
 }
+
+/** @brief Whether [a, a + n) lies wholly in the PSRAM mapped so far. */
+static int psram_holds(uintptr_t a, unsigned long n) {
+    return n != 0UL && a >= TIKU_ESP32C61_PSRAM_BASE && n <= psram_bytes &&
+           a - TIKU_ESP32C61_PSRAM_BASE <= psram_bytes - n;
+}
+
+void tiku_esp32c61_psram_clean(const void *addr, unsigned long len) {
+    if (psram_holds((uintptr_t)addr, len)) {
+        (void)ESP32C61_ROM_CACHE_WB((uint32_t)(uintptr_t)addr, (uint32_t)len);
+    }
+}
+
+void tiku_esp32c61_psram_invalidate(const void *addr, unsigned long len) {
+    if (psram_holds((uintptr_t)addr, len)) {
+        (void)ESP32C61_ROM_CACHE_INVAL((uint32_t)(uintptr_t)addr,
+                                       (uint32_t)len);
+    }
+}
