@@ -1998,9 +1998,13 @@ SRCS += arch/ambiq/tiku_htimer_arch.c
 # register map, neither of which exists on Apollo4.  Advertised as a -D
 # capability macro (not a device-header macro) so the shell command can gate on
 # it without depending on include order -- the trap documented in
-# kernel/shell/tiku_shell_config.h.
+# kernel/shell/tiku_shell_config.h.  TIKU_AMBIQ_POWER_PROBE=0 leaves it out:
+# its read targets take 132 KB of the 384 KB code window.
+TIKU_AMBIQ_POWER_PROBE ?= 1
+ifeq ($(TIKU_AMBIQ_POWER_PROBE),1)
 SRCS += arch/ambiq/tiku_power_ambiq.c
 CFLAGS += -DTIKU_AMBIQ_POWER_PROBE=1
+endif
 # Experiment 3: Helium-vs-scalar energy.  tiku_simd_scalar.c compiles
 # hal/tiku_simd.c a SECOND time with the vector backend forced off and its
 # symbols renamed, so both backends sit in ONE image -- see the header for why
