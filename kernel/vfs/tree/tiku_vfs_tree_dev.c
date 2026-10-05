@@ -386,7 +386,19 @@ devzero_read(char *buf, size_t max)
 /* NODE TABLES                                                               */
 /*---------------------------------------------------------------------------*/
 
-/* Type descriptors (const, FRAM) for the typed /dev nodes below. */
+/* Type descriptors (const, FRAM) for the typed /dev nodes below.  A bus scan
+ * addresses every device on the bus and a console read takes input, so
+ * neither is a passive read. */
+static const tiku_vfs_desc_t desc_scan = TIKU_VFS_DESC_FLAGS(
+    TIKU_VFS_T_STR, TIKU_VFS_U_NONE, TIKU_VFS_FRESH_LIVE, TIKU_VFS_E_BUS,
+    TIKU_VFS_DF_READ_EFFECT);
+static const tiku_vfs_desc_t desc_console = TIKU_VFS_DESC_FLAGS(
+    TIKU_VFS_T_STR, TIKU_VFS_U_NONE, TIKU_VFS_FRESH_LIVE, TIKU_VFS_E_CHEAP,
+    TIKU_VFS_DF_READ_CONSUMES);
+static const tiku_vfs_desc_t desc_bus_config = TIKU_VFS_DESC(
+    TIKU_VFS_T_STR, TIKU_VFS_U_NONE, TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
+static const tiku_vfs_desc_t desc_uart_count = TIKU_VFS_DESC(
+    TIKU_VFS_T_U32, TIKU_VFS_U_COUNT, TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
 /* 12-bit raw conversions, sampled live (each read wakes the ADC), so
  * both carry a read-coalescing window: repeated reads inside the window
  * share one conversion.  Temperature drifts slowly -> ~100 ms; supply
@@ -407,10 +419,13 @@ static const tiku_vfs_desc_t desc_led =
 
 /** /dev/uart directory table — RX health + configured baud */
 static const tiku_vfs_node_t dev_uart_children[] = {
-    { "overruns", TIKU_VFS_FILE, uart_overruns_read, NULL, NULL, 0 },
-    { "baud",     TIKU_VFS_FILE, uart_baud_read,     NULL, NULL, 0 },
+    { "overruns", TIKU_VFS_FILE, uart_overruns_read, NULL, NULL, 0,
+      &desc_uart_count },
+    { "baud",     TIKU_VFS_FILE, uart_baud_read,     NULL, NULL, 0,
+      &desc_bus_config },
 #if defined(PLATFORM_NORDIC)
-    { "recoveries", TIKU_VFS_FILE, uart_recoveries_read, NULL, NULL, 0 },
+    { "recoveries", TIKU_VFS_FILE, uart_recoveries_read, NULL, NULL, 0,
+      &desc_uart_count },
 #endif
 };
 #define DEV_UART_NCHILD \
@@ -424,12 +439,13 @@ static const tiku_vfs_node_t dev_adc_children[] = {
 
 /** /dev/i2c directory table — the live bus scanner */
 static const tiku_vfs_node_t dev_i2c_children[] = {
-    { "scan", TIKU_VFS_FILE, i2c_scan_read, NULL, NULL, 0 },
+    { "scan", TIKU_VFS_FILE, i2c_scan_read, NULL, NULL, 0, &desc_scan },
 };
 
 /** /dev/spi directory table — read-only configuration view */
 static const tiku_vfs_node_t dev_spi_children[] = {
-    { "config", TIKU_VFS_FILE, spi_config_read, NULL, NULL, 0 },
+    { "config", TIKU_VFS_FILE, spi_config_read, NULL, NULL, 0,
+      &desc_bus_config },
 };
 
 /*
@@ -451,7 +467,8 @@ static const tiku_vfs_node_t dev_children[] = {
 #if TIKU_BOARD_LED_COUNT >= 4
     { "led3",     TIKU_VFS_FILE, led3_read, led3_write, NULL, 0, &desc_led, NULL, TIKU_VFS_CAP_HW },
 #endif
-    { "console",  TIKU_VFS_FILE, console_read, console_write, NULL, 0 },
+    { "console",  TIKU_VFS_FILE, console_read, console_write, NULL, 0,
+      &desc_console },
     { "null",     TIKU_VFS_FILE, devnull_read, devnull_write, NULL, 0 },
     { "zero",     TIKU_VFS_FILE, devzero_read, NULL, NULL, 0 },
     { "gpio",     TIKU_VFS_DIR,  NULL, NULL,

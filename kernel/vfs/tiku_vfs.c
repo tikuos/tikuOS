@@ -460,7 +460,9 @@ int tiku_vfs_read_node(const tiku_vfs_node_t *node, char *buf, size_t max)
     /* Cacheable nodes (a freshness window in the descriptor) route through
      * the read-coalescing cache: a fresh hit skips the handler entirely;
      * a miss samples the handler and stores the rendering. */
-    if (node->desc != NULL && node->desc->fresh_ticks > 0u) {
+    if (node->desc != NULL && node->desc->fresh_ticks > 0u &&
+        (node->desc->flags & (TIKU_VFS_DF_READ_EFFECT |
+                              TIKU_VFS_DF_READ_CONSUMES)) == 0u) {
         int hit = tiku_vfs_cache_get(node, buf, max);
         if (hit >= 0) {
             return hit;
@@ -488,6 +490,60 @@ int tiku_vfs_read(const char *path, char *buf, size_t max)
     }
     rc = vfs_dyn_read(path, buf, max);               /* dynamic /data/<file> */
     return (rc < 0) ? TIKU_VFS_ENOENT : rc;          /* neither static nor dynamic → not found */
+}
+
+/**
+ * @brief Name what reading a node does, from its descriptor alone.
+ *
+ * Read flags win over freshness and cost; a freshness value outside
+ * tiku_vfs_fresh_t is "unknown" rather than a guess.
+ */
+const char *tiku_vfs_read_policy(const tiku_vfs_node_t *node)
+{
+    const tiku_vfs_desc_t *d = (node != NULL) ? node->desc : NULL;
+
+    if (node == NULL || node->type != TIKU_VFS_FILE || node->read == NULL) {
+        return "none";
+    }
+    if (d == NULL) {
+        return "unknown";
+    }
+    if (d->flags & TIKU_VFS_DF_READ_CONSUMES) {
+        return "consume";
+    }
+    if (d->flags & TIKU_VFS_DF_READ_EFFECT) {
+        return "effect";
+    }
+    if (d->fresh == TIKU_VFS_FRESH_LIVE || d->ecost >= TIKU_VFS_E_PERIPH) {
+        return "sample";
+    }
+    if (d->fresh > TIKU_VFS_FRESH_LIVE) {
+        return "unknown";
+    }
+    return "poll";
+}
+
+/**
+ * @brief Read a node only when the read is a pure observation.
+ *
+ * Only "poll" nodes that are not secret are read; the policy check never
+ * calls the handler of a node it refuses.
+ */
+int tiku_vfs_read_passive(const char *path, char *buf, size_t max)
+{
+    const tiku_vfs_node_t *node = tiku_vfs_resolve(path);
+
+    if (node == NULL) {
+        return TIKU_VFS_ENOENT;
+    }
+    if (buf == NULL || max == 0u) {
+        return TIKU_VFS_EINVAL;
+    }
+    if (strcmp(tiku_vfs_read_policy(node), "poll") != 0 ||
+        (node->desc->flags & TIKU_VFS_DF_SECRET) != 0u) {
+        return TIKU_VFS_EACCES;
+    }
+    return tiku_vfs_read_node(node, buf, max);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -711,11 +767,12 @@ int tiku_vfs_desc_str(const tiku_vfs_node_t *node, char *buf, size_t max)
         return snprintf(buf, max, "untyped\n");
     }
 
-    n = snprintf(buf, max, "%s %s cost=%s fresh=%s",
+    n = snprintf(buf, max, "%s %s cost=%s fresh=%s read=%s",
                  VFS_NAME_OF(vfs_vtype_names, d->vtype),
                  VFS_NAME_OF(vfs_unit_names, d->unit),
                  VFS_NAME_OF(vfs_ecost_names, d->ecost),
-                 VFS_NAME_OF(vfs_fresh_names, d->fresh));
+                 VFS_NAME_OF(vfs_fresh_names, d->fresh),
+                 tiku_vfs_read_policy(node));
     if (n < 0) {
         return -1;
     }
@@ -1383,13 +1440,13 @@ uint8_t tiku_vfs_depth(void)
  * external agent can learn the device's capabilities in a single read instead
  * of walking it with ls/cat.  Six columns: path type perms meta cap id
  * (type = d|f; perms = rw|r-|-w|--; meta is "-" for an untyped node, else the
- * packed descriptor "vtype,unit,fresh,cost[,lo..hi]"; cap is the capability a
- * writer must hold -- "-" (open), "hw", "sys", "fs", "net" -- so the whole
- * write-access policy is enumerable in one read).  Dynamic directories
- * (/data) are
- * listed but their runtime children are NOT walked -- those are data, not
- * capability metadata (use `ls` for them).  Only node metadata is touched, so
- * a manifest read costs nothing and never samples a live sensor.
+ * packed descriptor "vtype,unit,fresh,cost[,lo..hi];read=policy", followed by
+ * ";secret" for a secret node; cap is the capability a writer must hold --
+ * "-" (open), "hw", "sys", "fs", "net" -- so the whole write-access policy is
+ * enumerable in one read).  Dynamic directories (/data) are listed but their
+ * runtime children are NOT walked -- those are data, not capability metadata
+ * (use `ls` for them).  Only node metadata is touched, so a manifest read
+ * costs nothing and never samples a live sensor.
  */
 typedef struct {
     char  *out;
@@ -1420,7 +1477,7 @@ static void manifest_line(vfs_manifest_sink_t *s, const char *path,
                      : n->read               ? "r-"
                      : n->write              ? "-w"
                      :                         "--";
-    char   meta[48];   /* packed descriptor: "vtype,unit,fresh,cost[,lo..hi]" */
+    char   meta[72];   /* packed descriptor, read policy, secret flag */
     size_t room = (s->off < s->max) ? (s->max - s->off) : 0u;
     char  *dst  = s->out + ((s->off < s->max) ? s->off : s->max);
     int    m;
@@ -1444,6 +1501,14 @@ static void manifest_line(vfs_manifest_sink_t *s, const char *path,
                        VFS_NAME_OF(vfs_unit_names,  d->unit),
                        VFS_NAME_OF(vfs_fresh_names, d->fresh),
                        VFS_NAME_OF(vfs_ecost_names, d->ecost));
+    }
+
+    if (d != NULL) {
+        size_t used = strlen(meta);
+
+        (void)snprintf(meta + used, sizeof meta - used, ";read=%s%s",
+                       tiku_vfs_read_policy(n),
+                       (d->flags & TIKU_VFS_DF_SECRET) ? ";secret" : "");
     }
 
     /* The id is what lets a reader tell "the node I had, renamed" from "a

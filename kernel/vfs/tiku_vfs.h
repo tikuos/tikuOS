@@ -194,6 +194,10 @@ typedef enum {
 #define TIKU_VFS_DF_RANGE   0x0001u  /**< vmin/vmax are meaningful */
 #define TIKU_VFS_DF_HEX     0x0002u  /**< Natural rendering is hex */
 #define TIKU_VFS_DF_SECRET  0x0004u  /**< Hide on remote/agent channels */
+/** Read changes state or starts an operation */
+#define TIKU_VFS_DF_READ_EFFECT   0x0008u
+/** Read removes data from a stream or queue */
+#define TIKU_VFS_DF_READ_CONSUMES 0x0010u
 
 /**
  * @brief A decoded, machine-usable node value.
@@ -236,6 +240,11 @@ typedef struct tiku_vfs_desc {
 #define TIKU_VFS_DESC(vt, un, fr, ec)                                       \
     { (uint8_t)(vt), (uint8_t)(un), (uint8_t)(fr), (uint8_t)(ec),           \
       TIKU_VFS_DF_NONE, 0u, 0, 0, 0, 0 }
+
+/** @brief Build a plain descriptor carrying TIKU_VFS_DF_* flags @p fl. */
+#define TIKU_VFS_DESC_FLAGS(vt, un, fr, ec, fl)                             \
+    { (uint8_t)(vt), (uint8_t)(un), (uint8_t)(fr), (uint8_t)(ec),           \
+      (fl), 0u, 0, 0, 0, 0 }
 
 /** @brief Build a ranged descriptor (DF_RANGE set; vmin..vmax meaningful). */
 #define TIKU_VFS_DESC_R(vt, un, fr, ec, lo, hi)                             \
@@ -350,6 +359,32 @@ void tiku_vfs_init(const tiku_vfs_node_t *root);
  *       inside a tiku_vfs_list() callback.
  */
 int tiku_vfs_mount(const char *parent, const tiku_vfs_node_t *node);
+
+/**
+ * @brief Name what reading a node does, without calling its handler.
+ *
+ * "poll" is a plain read; "sample" wakes a peripheral or a bus; "consume"
+ * drains data; "effect" changes state.  An untyped node is "unknown", not
+ * assumed safe, and a node that is not a readable file is "none".
+ *
+ * @param node  Node to classify (NULL tolerated)
+ * @return One of the names above; never NULL
+ */
+const char *tiku_vfs_read_policy(const tiku_vfs_node_t *node);
+
+/**
+ * @brief Read a node only when the read is a pure observation.
+ *
+ * Refuses, without calling the handler, any node whose policy is not "poll"
+ * and any secret node.  tiku_vfs_read() still reads every readable node.
+ *
+ * @param path  Absolute path
+ * @param buf   Output buffer
+ * @param max   Buffer capacity; must be non-zero
+ * @return Bytes rendered (snprintf-style); TIKU_VFS_ENOENT, TIKU_VFS_EINVAL
+ *         for a bad buffer, or TIKU_VFS_EACCES for a refused node
+ */
+int tiku_vfs_read_passive(const char *path, char *buf, size_t max);
 
 /**
  * @brief Extract the next segment of a slash-separated path.

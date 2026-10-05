@@ -1676,6 +1676,10 @@ static const tiku_vfs_node_t sys_flpr_children[] = {
 };
 #endif /* TIKU_FLPR_ENABLE */
 
+static const tiku_vfs_desc_t desc_lifetime = TIKU_VFS_DESC_FLAGS(
+    TIKU_VFS_T_U32, TIKU_VFS_U_SECONDS, TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_CHEAP,
+    TIKU_VFS_DF_READ_EFFECT);
+
 static const tiku_vfs_node_t sys_children[] = {
     { "version",    TIKU_VFS_FILE, version_read,    NULL, NULL, 0 },
     { "device",     TIKU_VFS_DIR,  NULL, NULL, sys_device_children, 7 },
@@ -1688,7 +1692,7 @@ static const tiku_vfs_node_t sys_children[] = {
     { "last_reset", TIKU_VFS_FILE,
       tiku_vfs_tree_boot_last_reset_read, NULL, NULL, 0 },
     { "cold_boots", TIKU_VFS_FILE,
-      tiku_vfs_tree_boot_cold_boots_read, NULL, NULL, 0 },
+      tiku_vfs_tree_boot_cold_boots_read, NULL, NULL, 0, &desc_lifetime },
     { "mem",      TIKU_VFS_DIR,  NULL, NULL, sys_mem_children,
       SYS_MEM_NCHILD },
     { "cpu",      TIKU_VFS_DIR,  NULL, NULL, sys_cpu_children,

@@ -328,11 +328,17 @@ _Static_assert(sizeof(tiku_vfs_tree_watch_children) /
 /*
  * Manifest schema version -- bump when the manifest LINE FORMAT changes so an
  * external agent consuming /sys/vfs/manifest can pin or adapt instead of
- * silently mis-parsing.  rev 3 = the six-column form (path type perms
- * meta cap id), which adds the stable per-node identity; rev 2 was the
- * five-column form; rev 1 was the pre-capability four-column form.
+ * silently mis-parsing.  rev 4 = the six-column form (path type perms meta
+ * cap id) whose typed meta ends in ";read=<policy>", then ";secret" for a
+ * secret node; rev 3 was the same six columns without those suffixes; rev 2
+ * was the five-column form; rev 1 was the pre-capability four-column form.
  */
-#define TIKU_VFS_MANIFEST_REV  3u
+#define TIKU_VFS_MANIFEST_REV  4u
+
+/* Reading /sys/vfs/events drains the change ring. */
+static const tiku_vfs_desc_t desc_events = TIKU_VFS_DESC_FLAGS(
+    TIKU_VFS_T_STR, TIKU_VFS_U_NONE, TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE,
+    TIKU_VFS_DF_READ_CONSUMES);
 
 /**
  * @brief Read handler for /sys/vfs/manifest_rev.
@@ -354,7 +360,8 @@ const tiku_vfs_node_t tiku_vfs_tree_vfs_children[] = {
     { "depth",        TIKU_VFS_FILE, vfs_depth_read,        NULL, NULL, 0 },
     { "manifest",     TIKU_VFS_FILE, vfs_manifest_read,     NULL, NULL, 0 },
     { "manifest_rev", TIKU_VFS_FILE, vfs_manifest_rev_read, NULL, NULL, 0 },
-    { "events",       TIKU_VFS_FILE, vfs_events_read,       NULL, NULL, 0 },
+    { "events",       TIKU_VFS_FILE, vfs_events_read,       NULL, NULL, 0,
+      &desc_events },
     { "events_pending", TIKU_VFS_FILE, vfs_events_pending_read,
       NULL, NULL, 0 },
     { "events_dropped", TIKU_VFS_FILE, vfs_events_dropped_read,
