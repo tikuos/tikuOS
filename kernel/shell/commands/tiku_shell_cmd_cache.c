@@ -23,20 +23,40 @@
 #include <arch/stm32n6/tiku_dma_arch.h>
 #include <arch/stm32n6/tiku_stm32n6_regs.h>
 #include <hal/tiku_cpu.h>
+#include <kernel/memory/tiku_mem.h>
 
-/* The workload walks 256 KB of the tier arena: larger than either cache, so
- * the miss path is always exercised, and read-write so both allocate paths
- * are. The arena's front is free to scribble on before the tier hands it out,
- * but this deliberately uses its LAST portion, below anything allocated. */
-extern uint32_t __axisram_end;
+/* The workload walks 256 KB borrowed from the SRAM tier: larger than either
+ * cache, so the miss path is always exercised, and read-write so both
+ * allocate paths are. */
 #define BENCH_WORDS  (65536U)
+#define BENCH_BYTES  (BENCH_WORDS * sizeof(uint32_t))
+#define CACHE_LINE   (32U)
 
-/** @brief DWT cycles for one pass of the read-modify-write walk. */
-static uint32_t cache_bench_pass(void) {
-    volatile uint32_t *buf =
-        (volatile uint32_t *)((uintptr_t)&__axisram_end -
-                              (BENCH_WORDS * sizeof(uint32_t)));
+/**
+ * @brief Borrow @p size bytes from the SRAM tier, aligned to a cache line.
+ *
+ * @param ws    Workspace to open; the caller closes it
+ * @param size  Bytes wanted
+ * @return The buffer, or NULL when the tier has no room for it
+ */
+static uint8_t *cache_borrow(tiku_mem_workspace_t *ws, uint32_t size) {
+    uint8_t *p;
 
+    if (tiku_tier_arena_create(ws, TIKU_MEM_SRAM, size + 2U * CACHE_LINE,
+                               0U) != TIKU_MEM_OK) {
+        return NULL;
+    }
+    p = (uint8_t *)tiku_arena_alloc(ws, size + CACHE_LINE);
+    if (p == NULL) {
+        (void)tiku_mem_workspace_close(ws);
+        return NULL;
+    }
+    return (uint8_t *)(((uintptr_t)p + CACHE_LINE - 1U) &
+                       ~(uintptr_t)(CACHE_LINE - 1U));
+}
+
+/** @brief DWT cycles for one pass of the read-modify-write walk over @p buf. */
+static uint32_t cache_bench_pass(volatile uint32_t *buf) {
     TIKU_REG32(STM32N6_SCB_DEMCR)  |= STM32N6_SCB_DEMCR_TRCENA;
     TIKU_REG32(STM32N6_DWT_CTRL)   |= STM32N6_DWT_CTRL_CYCCNTENA;
 
@@ -55,8 +75,19 @@ void tiku_shell_cmd_cache(uint8_t argc, const char *argv[]) {
     } else if (argc >= 2 && strcmp(argv[1], "bench") == 0) {
         /* Two passes: the first warms the cache (or proves there is none),
          * the second is the steady state a running system actually sees. */
-        uint32_t cold = cache_bench_pass();
-        uint32_t warm = cache_bench_pass();
+        tiku_mem_workspace_t ws;
+        volatile uint32_t *buf =
+            (volatile uint32_t *)cache_borrow(&ws, BENCH_BYTES);
+        uint32_t cold, warm;
+
+        if (buf == NULL) {
+            SHELL_PRINTF("  bench: no room for %u KB in the SRAM tier\n",
+                         (unsigned)(BENCH_BYTES / 1024U));
+            return;
+        }
+        cold = cache_bench_pass(buf);
+        warm = cache_bench_pass(buf);
+        (void)tiku_mem_workspace_close(&ws);
         SHELL_PRINTF("  %u words r/m/w: cold %lu cycles, warm %lu"
                      " (%lu.%02lu/word)\n",
                      (unsigned)BENCH_WORDS,
@@ -69,12 +100,16 @@ void tiku_shell_cmd_cache(uint8_t argc, const char *argv[]) {
         /* The coherency proof: the source is dirty in the cache when the
          * transfer starts and the destination stale after it finishes, so a
          * mismatch means a missing clean or invalidate, not a broken DMA. */
-        volatile uint8_t *src =
-            (volatile uint8_t *)((uintptr_t)&__axisram_end - 8192U);
-        volatile uint8_t *dst =
-            (volatile uint8_t *)((uintptr_t)&__axisram_end - 4096U);
+        tiku_mem_workspace_t ws;
+        volatile uint8_t *src = cache_borrow(&ws, 8192U);
+        volatile uint8_t *dst;
         unsigned bad = 0U;
 
+        if (src == NULL) {
+            SHELL_PRINTF("  dma: no room in the SRAM tier\n");
+            return;
+        }
+        dst = src + 4096U;
         for (unsigned i = 0U; i < 256U; i++) {
             src[i] = (uint8_t)(i ^ 0x5AU);
             dst[i] = 0U;
@@ -82,6 +117,7 @@ void tiku_shell_cmd_cache(uint8_t argc, const char *argv[]) {
         tiku_dma_arch_init();
         if (tiku_dma_arch_memcpy((void *)dst, (const void *)src, 256U,
                                  NULL, NULL) != 0) {
+            (void)tiku_mem_workspace_close(&ws);
             SHELL_PRINTF("  dma: start failed\n");
             return;
         }
@@ -92,6 +128,7 @@ void tiku_shell_cmd_cache(uint8_t argc, const char *argv[]) {
                 bad++;
             }
         }
+        (void)tiku_mem_workspace_close(&ws);
         SHELL_PRINTF("  dma copied 256 bytes, %u mismatches%s\n", bad,
                      (bad == 0U) ? " (coherent)" : "");
         return;
