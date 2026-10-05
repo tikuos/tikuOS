@@ -385,6 +385,24 @@ static void feed_responder(uint8_t op, const uint8_t *pdu, uint16_t len)
     }
 }
 
+/** @brief Shortest PDU the handlers read for opcode @p op, opcode included. */
+static uint16_t min_len(uint8_t op)
+{
+    switch (op) {
+    case SMP_PAIRING_REQUEST:
+    case SMP_PAIRING_RESPONSE:
+        return 4u;
+    case SMP_PAIRING_PUBLIC_KEY:
+        return 65u;
+    case SMP_PAIRING_CONFIRM:
+    case SMP_PAIRING_RANDOM:
+    case SMP_PAIRING_DHKEY_CHECK:
+        return 17u;
+    default:
+        return 1u;
+    }
+}
+
 int tiku_ble_smp_pair_feed(const uint8_t *pdu, uint16_t len)
 {
     uint8_t op;
@@ -404,6 +422,11 @@ int tiku_ble_smp_pair_feed(const uint8_t *pdu, uint16_t len)
      * DHKey Check. */
     if (sc.state != TIKU_BLE_SMP_STATE_PAIRING &&
         !(sc.state == TIKU_BLE_SMP_STATE_DONE && op == sc.last_rx_op)) {
+        return 0;
+    }
+    /* Checked before the dedup below: a short PDU recorded as the last
+     * opcode would make the next good one a repeat, which clears the queue. */
+    if (len < min_len(op)) {
         return 0;
     }
     if (op == sc.last_rx_op) {

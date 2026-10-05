@@ -331,7 +331,8 @@ typedef int (*tiku_bt_char_read_t)(void *user, uint8_t *out,
  * @param user  The @p user pointer from the char definition
  * @param data  Incoming bytes (lifetime: until callback returns)
  * @param len   Length of @p data in bytes
- * @return 0 on success; non-zero surfaces as ATT Error Response.
+ * @return 0 on success; non-zero surfaces as ATT Error Response to a Write
+ *         Request (a write without response is never answered).
  */
 typedef int (*tiku_bt_char_write_t)(void *user, const uint8_t *data,
                                           uint16_t len);

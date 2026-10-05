@@ -359,6 +359,11 @@ static void host_prepare_write(const uint8_t *att, uint16_t alen)
     uint16_t handle = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
     uint16_t offset = (uint16_t)(att[3] | ((uint16_t)att[4] << 8));
     uint16_t n = (uint16_t)(alen - 5u), k;
+    /* host_rc also holds the 65-byte SMP Public Key, so an ATT PDU can
+     * exceed the MTU; the echo below has room for MTU - 5 value bytes. */
+    if (n > (uint16_t)(TIKU_BLE_HOST_MTU - 5u)) {
+        n = (uint16_t)(TIKU_BLE_HOST_MTU - 5u);
+    }
     if (handle != host_prep_h) {                 /* new target: restart       */
         host_prep_h = handle; host_prep_len = 0u;
     }
