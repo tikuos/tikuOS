@@ -59,7 +59,8 @@ static const tiku_nvm_region_t regions[] = {
  * @brief Initialise the NVM region map.
  *
  * Claims each active region in the region registry, so another subsystem's
- * later overlapping claim is refused.  A failed claim here is ignored.
+ * later overlapping claim is refused.  A failed claim is not fatal: the region
+ * still serves tiku_nvm_region_get(), only without that guard.
  *
  * @note Call once at boot.
  */

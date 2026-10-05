@@ -588,7 +588,8 @@ tiku_mem_err_t tiku_persist_cell_commit_status(const tiku_persist_cell_t *c,
  * to direct stores: one on 32-bit parts, two 16-bit words on MSP430.
  *
  * @param c  Cell descriptor; a cell of another size takes the first
- *           min(size, 4) bytes of @p v through the NVM HAL
+ *           min(size, 4) bytes of @p v through the NVM HAL, gated as
+ *           tiku_persist_cell_write() gates a value of that length
  * @param v  New value
  * @return TIKU_MEM_OK, TIKU_MEM_ERR_INVALID on a NULL argument, or
  *         TIKU_MEM_ERR_IO when the relock flush fails
@@ -620,9 +621,17 @@ tiku_mem_err_t tiku_persist_cell_write_u32_status(const tiku_persist_cell_t *c,
             *c->gate = c->key;
         }
     } else {
-        tiku_mem_arch_nvm_write((uint8_t *)c->data, (const uint8_t *)&v,
-                                (c->size < sizeof(uint32_t))
-                                    ? c->size : (uint16_t)sizeof(uint32_t));
+        uint16_t n = (c->size < sizeof(uint32_t))
+                         ? c->size : (uint16_t)sizeof(uint32_t);
+
+        /* The same tear rule as tiku_persist_cell_write_status(). */
+        if (CELL_CAN_TEAR(n)) {
+            *c->gate = 0;
+        }
+        tiku_mem_arch_nvm_write((uint8_t *)c->data, (const uint8_t *)&v, n);
+        if (CELL_CAN_TEAR(n)) {
+            *c->gate = c->key;
+        }
     }
     status = tiku_mpu_lock_nvm_status(saved);
     tiku_atomic_exit();

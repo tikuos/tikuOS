@@ -988,6 +988,7 @@ static tiku_mem_err_t claim(tiku_mem_ticket_t h, void *descriptor, uint8_t kind)
     if (due(tiku_clock_time(), t->status.deadline)) {
         tiku_reclaim_drop(t->result.handle);
         finish(t, TIKU_MEM_TICKET_CANCELLED, TIKU_MEM_RECLAIM_EXPIRED);
+        counters.cancelled++;
         return TIKU_MEM_ERR_INVALID;
     }
     if (t->result.owner.slot_plus_one && !stable_control(descriptor,
