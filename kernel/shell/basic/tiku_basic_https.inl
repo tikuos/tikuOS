@@ -47,10 +47,18 @@ _Static_assert(TIKU_BASIC_HTTP_HOST_MAX + TIKU_BASIC_HTTP_PATH_MAX +
 #include <arch/msp430/tiku_trng_arch.h>
 #elif defined(PLATFORM_NORDIC)
 #include <arch/nordic/tiku_trng_arch.h>            /* CRACEN ring-osc TRNG */
+#elif defined(PLATFORM_STM32N6)
+#include <arch/stm32n6/tiku_trng_arch.h>
+#elif defined(PLATFORM_RA8P1)
+#include <arch/ra8p1/tiku_trng_arch.h>
+#elif defined(PLATFORM_ESP32C61)
+#include <arch/esp32c61/tiku_trng_arch.h>
 #endif
 
 #if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
-    defined(PLATFORM_MSP430) || defined(PLATFORM_NORDIC)
+    defined(PLATFORM_MSP430) || defined(PLATFORM_NORDIC) || \
+    defined(PLATFORM_STM32N6) || defined(PLATFORM_RA8P1) || \
+    defined(PLATFORM_ESP32C61)
 #include <tikukits/crypto/hmac/tiku_kits_crypto_hmac.h>
 
 /*
@@ -376,6 +384,8 @@ static void basic_crypto_worker_body(void *arg)
  * @note @p fn is a crypto closure over connect()'s stack.  If the worker cannot
  *       start, @p fn runs inline.  tiku_current_process, which call_process()
  *       clears as it fans out, is restored on return.
+ * @note At the deadline the step fails, but the worker, which cannot be
+ *       cancelled, may still be running @p fn over that stack.
  */
 static int basic_https_offload(int (*fn)(void *), void *arg)
 {
@@ -387,7 +397,7 @@ static int basic_https_offload(int (*fn)(void *), void *arg)
     }
     basic_crypto_fn  = fn;
     basic_crypto_arg = arg;
-    basic_crypto_rc  = 0;
+    basic_crypto_rc  = -1;           /* a failure until the worker stores fn's */
     basic_crypto_busy = 1;
 
     if (tiku_thread_start(&basic_crypto_worker,
