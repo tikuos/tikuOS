@@ -90,6 +90,17 @@ void tiku_cpu_freq_ra8p1_init(unsigned int mhz);
 int tiku_cpu_freq_ra8p1_supported(unsigned int mhz);
 
 /**
+ * @brief Report whether the last rung change failed.
+ *
+ * Set when the oscillator, the PLL or a transition the change waits on never
+ * settled, even if the tree got back to the previous rung; cleared by the next
+ * change that succeeds.  A refused rate leaves it as it was.
+ *
+ * @return 1 after a failed rung change, 0 otherwise
+ */
+int tiku_cpu_ra8p1_clock_has_fault(void);
+
+/**
  * @brief Prepare whatever clock state the rest of the port depends on.
  *
  * Nothing, deliberately: the boot path runs on the reset tree and the rung is

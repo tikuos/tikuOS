@@ -113,3 +113,15 @@ void tiku_stm32n6_dcache_clean(const void *addr, size_t len) {
 void tiku_stm32n6_dcache_invalidate(const void *addr, size_t len) {
     dcache_range(STM32N6_SCB_DCIMVAC, addr, len);
 }
+
+void tiku_stm32n6_icache_invalidate(void) {
+    if ((TIKU_REG32(STM32N6_SCB_CCR) & STM32N6_SCB_CCR_IC) == 0UL) {
+        return;                                  /* nothing cached to drop */
+    }
+    /* The leading barrier completes the writes that changed the code; the
+     * trailing ones complete the invalidate and drop instructions already
+     * fetched. */
+    __asm__ volatile ("dsb" ::: "memory");
+    TIKU_REG32(STM32N6_SCB_ICIALLU) = 0UL;
+    __asm__ volatile ("dsb\n\tisb" ::: "memory");
+}

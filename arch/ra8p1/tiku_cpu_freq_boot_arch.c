@@ -571,6 +571,9 @@ static int pll_up(const ra8p1_opoint_t *op)
 /** @brief The rung currently established, for falling back to. */
 static const ra8p1_opoint_t *cur_op;
 
+/** @brief Set by a rung change that failed, cleared by one that succeeds. */
+static uint8_t clock_fault;
+
 /** @brief The table entry for @p mhz, or NULL when there is none. */
 static const ra8p1_opoint_t *opoint_of(unsigned int mhz)
 {
@@ -634,6 +637,7 @@ void tiku_cpu_freq_ra8p1_init(unsigned int mhz)
         __asm__ volatile ("cpsid i" ::: "memory");
 
         if (pll_up(op) != 0) {
+            clock_fault = 1U;
             if (cur_op == 0 || pll_up(cur_op) != 0) {
                 tiku_cpu_ra8p1_spin_invalidate();
                 (void)tiku_ra8p1_clock_arch_retune(tiku_cpu_ra8p1_iclk_get_hz());
@@ -646,6 +650,7 @@ void tiku_cpu_freq_ra8p1_init(unsigned int mhz)
             return;
         }
         cur_op = op;
+        clock_fault = 0U;
 
         /* Still masked: the retune and console re-init below are part of
          * the same inconsistent window -- a tick against the stale reload or
@@ -669,6 +674,11 @@ void tiku_cpu_freq_ra8p1_init(unsigned int mhz)
 int tiku_cpu_freq_ra8p1_supported(unsigned int mhz)
 {
     return (opoint_of(mhz) != 0) ? 1 : 0;
+}
+
+int tiku_cpu_ra8p1_clock_has_fault(void)
+{
+    return clock_fault;
 }
 
 void tiku_cpu_boot_ra8p1_init(void)

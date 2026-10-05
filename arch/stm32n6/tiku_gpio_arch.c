@@ -117,6 +117,17 @@ int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val) {
     if (!gpio_valid(port, pin)) {
         return -1;
     }
+    /* A write leaves the pin a push-pull output, as on the other ports.  BSRR
+     * takes the level before MODER switches the pin, so it never drives the
+     * other level first; a pin that already drives costs one read. */
+    if (tiku_gpio_arch_get_dir(port, pin) != 1) {
+        tiku_stm32n6_gpio_clock_enable(port);
+        tiku_stm32n6_gpio_set(port, pin, val);
+        TIKU_REG32(STM32N6_GPIO_OTYPER(port)) &= ~(1UL << pin);
+        gpio_field2(STM32N6_GPIO_PUPDR(port), pin, 0UL);
+        gpio_field2(STM32N6_GPIO_MODER(port), pin, STM32N6_GPIO_MODE_OUTPUT);
+        return 0;
+    }
     tiku_stm32n6_gpio_set(port, pin, val);
     return 0;
 }

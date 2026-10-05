@@ -31,6 +31,7 @@
 #include "arch/ambiq/tiku_cpu_freq_boot_arch.h"
 #elif defined(PLATFORM_STM32N6)
 #include "arch/stm32n6/tiku_cpu_freq_boot_arch.h"
+#include "arch/stm32n6/tiku_cache_arch.h"
 #elif defined(PLATFORM_RA8P1)
 #include "arch/ra8p1/tiku_cpu_freq_boot_arch.h"
 #include "arch/ra8p1/tiku_cache_arch.h"
@@ -303,7 +304,7 @@ void tiku_cpu_dcache_clean(const void *addr, unsigned long len) {
      * line. */
     (void)addr; (void)len;
 #elif defined(PLATFORM_STM32N6)
-    (void)addr; (void)len;
+    tiku_stm32n6_dcache_clean(addr, len);
 #elif defined(PLATFORM_RA8P1)
     tiku_ra8p1_dcache_clean(addr, len);
 #elif defined(PLATFORM_ESP32C61)
@@ -323,7 +324,7 @@ void tiku_cpu_dcache_invalidate(const void *addr, unsigned long len) {
     /* An NVM write drops the cache lines it touches. */
     (void)addr; (void)len;
 #elif defined(PLATFORM_STM32N6)
-    (void)addr; (void)len;
+    tiku_stm32n6_dcache_invalidate(addr, len);
 #elif defined(PLATFORM_RA8P1)
     tiku_ra8p1_dcache_invalidate(addr, len);
 #elif defined(PLATFORM_ESP32C61)
@@ -335,6 +336,8 @@ void tiku_cpu_dcache_invalidate(const void *addr, unsigned long len) {
 void tiku_cpu_icache_invalidate(void) {
 #if defined(PLATFORM_AMBIQ)
     tiku_cpu_ambiq_icache_invalidate();
+#elif defined(PLATFORM_STM32N6)
+    tiku_stm32n6_icache_invalidate();
 #elif defined(PLATFORM_RA8P1)
     tiku_ra8p1_icache_invalidate();
 #elif defined(PLATFORM_ESP32C61)
@@ -415,6 +418,10 @@ int tiku_cpu_clock_has_fault(void) {
     return tiku_cpu_ambiq_clock_has_fault() ? 1 : 0;
 #elif defined(PLATFORM_NORDIC)
     return tiku_cpu_nordic_clock_has_fault() ? 1 : 0;
+#elif defined(PLATFORM_STM32N6)
+    return tiku_cpu_stm32n6_clock_has_fault() ? 1 : 0;
+#elif defined(PLATFORM_RA8P1)
+    return tiku_cpu_ra8p1_clock_has_fault() ? 1 : 0;
 #elif defined(PLATFORM_ESP32C61)
     return tiku_cpu_esp32c61_clock_has_fault() ? 1 : 0;
 #else

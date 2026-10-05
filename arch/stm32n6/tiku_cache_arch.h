@@ -49,4 +49,12 @@ void tiku_stm32n6_dcache_clean(const void *addr, size_t len);
  */
 void tiku_stm32n6_dcache_invalidate(const void *addr, size_t len);
 
+/**
+ * @brief Invalidate the whole instruction cache.
+ *
+ * For code that changed under the cache, such as a loaded module.  No-op
+ * while the I-cache is off.
+ */
+void tiku_stm32n6_icache_invalidate(void);
+
 #endif /* TIKU_STM32N6_CACHE_ARCH_H_ */
