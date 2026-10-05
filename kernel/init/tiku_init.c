@@ -238,10 +238,10 @@ init_commit(uint16_t saved)
 }
 
 /**
- * @brief Compare two NUL-terminated strings for equality.
+ * @brief Compare two entry names as tiku_init_add() stores them.
  *
- * Simple byte-by-byte comparison used for entry name matching.
- * Returns 1 if the strings are identical, 0 otherwise.
+ * Only the first TIKU_INIT_NAME_SIZE-1 characters count, so a name longer
+ * than that matches the truncated entry it was added as.
  *
  * @param a  First string.
  * @param b  Second string.
@@ -250,14 +250,7 @@ init_commit(uint16_t saved)
 static uint8_t
 init_name_match(const char *a, const char *b)
 {
-    while (*a && *b) {
-        if (*a != *b) {
-            return 0;
-        }
-        a++;
-        b++;
-    }
-    return (*a == *b);
+    return strncmp(a, b, TIKU_INIT_NAME_SIZE - 1) == 0;
 }
 
 /**

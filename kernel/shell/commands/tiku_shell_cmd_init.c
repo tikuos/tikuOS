@@ -41,7 +41,10 @@ cmd_streq(const char *a, const char *b)
     return (*a == *b);
 }
 
-/** Return 1 if the init table holds an entry named @p name. */
+/**
+ * Return 1 if the init table holds an entry named @p name, comparing the
+ * first TIKU_INIT_NAME_SIZE-1 characters as the table does.
+ */
 static uint8_t
 cmd_init_has(const char *name)
 {
@@ -49,7 +52,8 @@ cmd_init_has(const char *name)
 
     for (i = 0; i < tiku_init_count(); i++) {
         const tiku_init_entry_t *e = tiku_init_get(i);
-        if (e != (const tiku_init_entry_t *)0 && cmd_streq(e->name, name)) {
+        if (e != (const tiku_init_entry_t *)0 &&
+            strncmp(e->name, name, TIKU_INIT_NAME_SIZE - 1) == 0) {
             return 1;
         }
     }

@@ -1314,13 +1314,16 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
                  TIKU_DEVICE_NVM_LABEL,
                  (unsigned long)(TIKU_DEVICE_FRAM_SIZE / 1024));
     SHELL_PRINTF(SH_DIM "  Type 'help' for commands." SH_RST "\n\n");
+#endif
 #if TIKU_INIT_ENABLE
     /* Init-table entries run here, in the shell's first pass, so each one
      * behaves like a typed command: the parser's command table and the
      * backend are set up above, and main() has already run the VFS and
-     * driver init. */
+     * driver init.  A TCP-only shell has no backend yet, so their output
+     * is dropped. */
     tiku_init_run_all();
 #endif
+#if !TIKU_SHELL_TCP_ENABLE || TIKU_SHELL_NET_TEST
     shell_print_prompt();
 #endif
 
