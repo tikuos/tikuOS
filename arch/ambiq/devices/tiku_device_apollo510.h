@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_device_apollo510.h - Ambiq Apollo510 silicon-level constants.
+ * tiku_device_apollo510.h - Ambiq Apollo510 silicon constants.
  *
- * A Cortex-M55 with 512 KB DTCM, 3 MB shared SRAM and 256 KB ITCM, plus 4 MB MRAM
- * with the application image above the secure bootloader.  Pure constants: the arch
- * files pull in only the bare CMSIS register header.
+ * Used for the Apollo510 and Apollo510B: a Cortex-M55 with 512 KB DTCM, 3 MB
+ * shared SRAM and 256 KB ITCM, plus 4 MB MRAM with the image above the
+ * secure bootloader.  Constants only.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,7 +23,7 @@
 /* DEVICE IDENTIFICATION                                                     */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Human-readable device name string exposed via /sys/device. */
+/** @brief Device name, read by /sys/device/mcu. */
 #define TIKU_DEVICE_NAME            "Apollo510"
 
 /*---------------------------------------------------------------------------*/
@@ -31,11 +31,10 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief MSP430-style GPIO port presence flags.
+ * @brief MSP430-style GPIO port flags; the Ambiq build does not read them.
  *
- * /dev/gpio takes its layout from tiku_gpio_geometry.h rather than from these
- * flags: virtual ports 1..28 of eight pads each cover pads 0..223, with
- * pad = (port - 1) * 8 + pin, so the board LEDs' pads are inside that range.
+ * /dev/gpio takes its ports from tiku_gpio_geometry.h: ports 1..28 of eight
+ * pads cover pads 0..223, with pad = (port - 1) * 8 + pin.
  */
 #define TIKU_DEVICE_HAS_PORT1       1
 #define TIKU_DEVICE_HAS_PORT2       1
@@ -53,14 +52,14 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Oscillator configuration for the Apollo510 EVB.
+ * @brief Oscillators: a 32.768 kHz crystal (LFXT) clocks STIMER, and the core
+ *        runs from the internal HFRC and HFRC2.
  *
- * The EVB carries a 32.768 kHz crystal (LFXT) used as the low-frequency
- * reference for STIMER and the RTC. The high-frequency clock is the
- * internal HFRC; there is no external HF crystal.
+ * The Ambiq build reads none of these.  A board's high-speed crystal for USB
+ * is declared in BOARD_CAPS (USBHS_CLK_XTAL), not here.
  */
 #define TIKU_DEVICE_HAS_LFXT        1        /**< 32.768 kHz LFXT present. */
-#define TIKU_DEVICE_HAS_HFXT        0        /**< No external HF crystal. */
+#define TIKU_DEVICE_HAS_HFXT        0        /**< Core uses no HF crystal. */
 #define TIKU_DEVICE_XOSC_HZ         32768UL  /**< LFXT frequency in Hz. */
 
 /*---------------------------------------------------------------------------*/
@@ -68,25 +67,23 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Clock system type selectors.
+ * @brief Clock-system selectors.
  *
- * Used by the portable clock HAL to dispatch to the correct arch
- * implementation at compile time. Apollo510 uses its own clock tree
- * (HFRC/HFRC2/LFRC/XTAL) — there is no MSP430-style CS key.
+ * There is no MSP430-style CS unlock key.  No code reads
+ * TIKU_DEVICE_CS_TYPE_APOLLO510.
  */
 #define TIKU_DEVICE_CS_HAS_KEY        0  /**< No CS unlock key required. */
-#define TIKU_DEVICE_CS_TYPE_APOLLO510 1  /**< Select Apollo510 clock driver. */
+#define TIKU_DEVICE_CS_TYPE_APOLLO510 1  /**< Apollo510 clock tree. */
 
 /*---------------------------------------------------------------------------*/
 /* CLOCK CAPABILITIES                                                        */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Maximum stable core frequency in MHz.
+ * @brief Core clock in high-performance mode (HFRC2), in MHz; no code reads it.
  *
- * HFRC2 can boost to ~250 MHz; HFRC free-runs at ~96 MHz (the default
- * after SBL hand-off). Override TIKU_MAIN_CPU_FREQ at build time to run
- * at a lower frequency for power savings.
+ * The core boots at 96 MHz in low-power mode; MAIN_CPU_FREQ above 96
+ * selects high-performance mode.
  */
 #define TIKU_DEVICE_MAX_STABLE_MHZ  250
 
@@ -95,37 +92,36 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Primary RAM (DTCM) base address and size.
+ * @brief Primary RAM: the 512 KB DTCM at 0x20000000, and the 3 MB SSRAM.
  *
- * DTCM is the primary RAM pool holding .data, .bss, the heap, and the
- * main stack. It is the lowest-latency SRAM bank on the Cortex-M55.
+ * DTCM holds .data, .bss, the durable .uninit image and the main stack.  The
+ * SSRAM holds the large static buffers and the SRAM tier.
  */
 #define TIKU_DEVICE_RAM_SIZE        (512UL * 1024UL) /**< 512 KB DTCM. */
 #define TIKU_DEVICE_RAM_START       0x20000000UL     /**< DTCM base address. */
-#define TIKU_DEVICE_RAM2_START      0x20080000UL     /**< Shared SRAM base (SSRAM). */
-#define TIKU_DEVICE_RAM2_SIZE       (3UL * 1024UL * 1024UL) /**< 3 MB SSRAM: the tier arena's bank. */
+#define TIKU_DEVICE_RAM2_START      0x20080000UL     /**< SSRAM base. */
+#define TIKU_DEVICE_RAM2_SIZE       (3UL * 1024UL * 1024UL) /**< 3 MB SSRAM */
 
 /**
- * @brief Non-volatile memory (MRAM) map.
+ * @brief Non-volatile memory map: 4 MB of MRAM at 0x00400000.
  *
- * The "FRAM" naming follows the portable TikuOS convention; on Apollo510 the
- * NVM is internal MRAM.  The usable region starts at 0x00410000 because the low
- * 64 KB is reserved for the Secure Bootloader.
+ * The portable TIKU_DEVICE_FRAM_* names describe whatever the part's NVM is;
+ * here it is MRAM.  The low 64 KB, below 0x410000, holds the Secure
+ * Bootloader.
  */
-#define TIKU_DEVICE_FRAM_SIZE       (4128768UL)   /**< ~3.94 MB usable MRAM. */
-#define TIKU_DEVICE_FRAM_START      0x00410000UL  /**< First usable MRAM addr. */
-#define TIKU_DEVICE_FRAM_END        0x007FFFFFUL  /**< Last MRAM address. */
-#define TIKU_DEVICE_NVM_LABEL       "MRAM"        /**< NVM technology (UI label). */
+#define TIKU_DEVICE_FRAM_SIZE       (4128768UL)   /**< MRAM above 0x410000. */
+#define TIKU_DEVICE_FRAM_START      0x00410000UL  /**< First usable byte. */
+#define TIKU_DEVICE_FRAM_END        0x007FFFFFUL  /**< Last MRAM byte. */
+#define TIKU_DEVICE_NVM_LABEL       "MRAM"        /**< Name shown to users. */
 
 /**
- * @brief Init-table and app-slot sizing constants.
+ * @brief Init-table region and app-slot sizes.
  *
- * Init-table backing region is RAM-resident at this milestone. Sized as
- * on RP2350 (4-byte header + 8 entries) with headroom rounding.
- * App slots are 4 KB pages reserved in MRAM for dynamic module storage.
+ * tiku_nvm_map.c backs the init table with a TIKU_DURABLE array of
+ * TIKU_DEVICE_FRAM_CONFIG_SIZE bytes.  No code reads the app-slot sizes.
  */
-#define TIKU_DEVICE_FRAM_CONFIG_SIZE      576U   /**< Init-table region (bytes). */
-#define TIKU_DEVICE_FRAM_APP_SLOT_SIZE    4096U  /**< One app slot size (bytes). */
+#define TIKU_DEVICE_FRAM_CONFIG_SIZE      576U   /**< Init table, bytes. */
+#define TIKU_DEVICE_FRAM_APP_SLOT_SIZE    4096U  /**< One app slot, bytes. */
 #define TIKU_DEVICE_FRAM_APP_SLOT_COUNT   4      /**< Number of app slots. */
 
 /*---------------------------------------------------------------------------*/
@@ -133,10 +129,10 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief ARMv8-M MPU availability flag.
+ * @brief The Cortex-M55 has an ARMv8-M MPU.
  *
- * The Cortex-M55 includes the ARMv8-M MPU. The full W^X driver lands in
- * Milestone 2/3; the initial tiku_mpu_arch.c is a pass-through shim.
+ * tiku_mpu_arch.c programs it in the kernel build; a MINIMAL=1 build leaves
+ * it off.
  */
 #define TIKU_DEVICE_HAS_MPU         1
 
@@ -145,10 +141,7 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Default UART baud rate.
- *
- * Applied when the board header does not override TIKU_BOARD_UART_BAUD.
- * 115200 bps is the standard rate for SWO and wire-UART on Apollo510.
+ * @brief Console baud rate unless the board header sets one.
  */
 #ifndef TIKU_BOARD_UART_BAUD
 #define TIKU_BOARD_UART_BAUD        115200U

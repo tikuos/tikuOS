@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_gpio_arch.h - Apollo510 GPIO access.
+ * tiku_gpio_arch.h - Ambiq GPIO access (Apollo510 and Apollo4 Lite).
  *
- * Two layers: the (port,pin)-indexed API shared with the other ports, which maps
- * the low pads onto the 8-pin-per-port VFS view, and raw-pad helpers for the board
- * LED macros, whose pads sit well above that range.
+ * Two layers: the (port, pin) API shared with the other ports, which maps port
+ * N pin P to pad (N-1)*8 + P, and raw-pad helpers that take a pad number, used
+ * by drivers and the board LED macros.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,7 +23,7 @@
  * @brief Configure a GPIO pin as a push-pull output.
  *
  * Part of the shared (port, pin) API used by the VFS /dev/gpio nodes.
- * Maps port N, pin P to Apollo510 pad (N-1)*8 + P.
+ * Maps port N, pin P to pad (N-1)*8 + P.
  *
  * @param port  Virtual port number (1-based, matching /dev/gpio/N).
  * @param pin   Pin index within the port (0..7).
@@ -41,7 +41,7 @@ int8_t tiku_gpio_arch_set_output(uint8_t port, uint8_t pin);
 int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin);
 
 /**
- * @brief Write a logic level to an output-configured GPIO pin.
+ * @brief Configure a GPIO pin as a push-pull output and drive it.
  *
  * @param port  Virtual port number (1-based).
  * @param pin   Pin index within the port (0..7).
@@ -51,7 +51,7 @@ int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin);
 int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val);
 
 /**
- * @brief Toggle the output level of a GPIO pin.
+ * @brief Configure a GPIO pin as a push-pull output and invert its level.
  *
  * @param port  Virtual port number (1-based).
  * @param pin   Pin index within the port (0..7).
@@ -78,37 +78,38 @@ int8_t tiku_gpio_arch_read(uint8_t port, uint8_t pin);
 int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin);
 
 /**
- * @brief Configure a raw Apollo510 pad as a push-pull output.
+ * @brief Configure a pad as a push-pull GPIO output, input buffer on.
  *
- * Operates on the full pad number space (0..AM_HAL_GPIO_MAX_PADS-1).
- * Used by the board LED macros for high-numbered EVB pads (165, 89, 92)
- * that lie outside the 8-pin-per-port VFS window.
+ * @p pad is not range-checked.
  *
- * @param pad  Apollo510 GPIO pad number.
+ * @param pad  GPIO pad number.
  */
 void tiku_ambiq_gpio_init_output(uint32_t pad);
 
 /**
- * @brief Write a raw pad-configuration register under the PADKEY lock.
+ * @brief Write @p cfg to a pad's PINCFG register under the PADKEY lock.
  *
- * For drivers assigning pads to an alternate function (MSPI, SDIO): the
- * caller composes the PINCFG value, this owns the unlock/relock.  Out-of-
- * range pads are ignored.
+ * For drivers that give pads to a peripheral (MSPI, SDIO): the caller
+ * composes the whole PINCFG value.  A pad number of 224 or more is ignored.
+ *
+ * @note Defined for the Apollo510 only; the Apollo4 Lite file lacks it.
  */
 void tiku_ambiq_gpio_pad_config(uint32_t pad, uint32_t cfg);
 
 /**
- * @brief Drive a raw Apollo510 pad to a logic level.
+ * @brief Drive a pad to a logic level through the WTS / WTC registers.
  *
- * @param pad    Apollo510 GPIO pad number.
+ * @param pad    GPIO pad number.
  * @param value  Output level: 0 = low, non-zero = high.
  */
 void tiku_ambiq_gpio_set(uint32_t pad, uint8_t value);
 
 /**
- * @brief Toggle a raw Apollo510 pad output level.
+ * @brief Invert a pad's output level by read-modify-write of its WT bank.
  *
- * @param pad  Apollo510 GPIO pad number.
+ * @param pad  GPIO pad number.
+ * @note Not atomic: a write to the same 32-pad bank between the read and the
+ *       write is lost.
  */
 void tiku_ambiq_gpio_toggle(uint32_t pad);
 

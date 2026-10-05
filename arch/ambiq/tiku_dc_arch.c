@@ -7,20 +7,20 @@
  *
  * tiku_dc_arch.c - Apollo510 display path: NemaDC, DSI host and CO5300 panel.
  *
- * From-scratch and register-level, with no vendor code linked.  Every sequence
- * was cross-checked against three sources: the MIT-granted ThinkSi register map,
- * disassembly of the vendored blobs, and a J-Link capture of the vendor demo.
+ * Register-level, with no vendor code linked.  Comments cite their source:
+ * [TSI] the ThinkSi register map, [DIS] disassembly of the vendor libraries,
+ * [CAP] a J-Link capture of the vendor demo's register writes.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "tiku_dc_arch.h"
-#include "apollo510.h"            /* CMSIS: PWRCTRL/GPIO bases + GPIO_Type    */
+#include "apollo510.h"            /* CMSIS: PWRCTRL, GPIO, CLKGEN, MCUCTRL    */
 #include <hal/tiku_cpu.h>         /* tiku_cpu_dcache_clean                    */
 #include <kernel/cpu/tiku_common.h>   /* tiku_common_delay_ms / _us           */
 
 /*---------------------------------------------------------------------------*/
-/* Register access                                                           */
+/* REGISTER ACCESS                                                           */
 /*---------------------------------------------------------------------------*/
 
 #define REG32(a)        (*(volatile uint32_t *)(uintptr_t)(a))
@@ -30,14 +30,16 @@
 #define DSI_RD(off)     REG32(DSI_BASE + (off))
 #define DSI_WR(off, v)  (REG32(DSI_BASE + (off)) = (v))
 
-/* Blocks the CMSIS header names but whose members are addressed by offset so
- * every write maps 1:1 onto the recovered sequences. */
+/* CLKGEN registers addressed by offset, so each write matches a recovered
+ * vendor sequence one to one. */
 #define CLKGEN_DISPCLKCTRL   REG32(CLKGEN_BASE + 0x84u)
 #define CLKGEN_CLKCTRL       REG32(CLKGEN_BASE + 0x120u)
 
 /*---------------------------------------------------------------------------*/
-/* NemaDC register map ([TSI] nema_dc_regs.h; offsets from DC_BASE)          */
+/* NEMADC REGISTER MAP                                                       */
 /*---------------------------------------------------------------------------*/
+
+/* Offsets from DC_BASE ([TSI] nema_dc_regs.h). */
 
 #define DC_MODE          0x000u   /* NEMADC_ONE_FRAME=b17, OUTP_OFF=b3        */
 #define DC_CLKCTRL       0x004u
@@ -61,7 +63,7 @@
 #define DC_IDREG         0x0F4u
 #define DC_INTERRUPT     0x0F8u   /* b4 = frame-end enable                    */
 #define DC_STATUS        0x0FCu
-#define DC_L0_CDEC_XY    0x104u   /* IP > 0x220300 only (ours: 0x230601)      */
+#define DC_L0_CDEC_XY    0x104u   /* IP > 0x220300 only (here 0x230601)       */
 #define DC_L0_FORMAT     0x114u   /* IP > 0x2301FF only                       */
 #define DC_IP_VERSION    0x180u
 #define DC_FORMAT_CTRL   0x1A0u   /* DSI data-type / cmd-type                 */
@@ -75,15 +77,17 @@
 
 /* Interface config for DBIDSI + RGB888-over-DBI16 + no TE:
  * DBI_EN | RESX | EXT_CTRL | BLANKING_EN | EN_STALL | MIPICFG_16RGB888_OPT0.
- * [TSI] composition, [CAP] golden 0x82203087. */
+ * [TSI] composition, [CAP] value 0x82203087. */
 #define DC_IFCFG_DSI_RGB888   0x82203087u
 #define DC_IFCFG_SPI_HOLD     (1u << 17)
 #define DC_CMD_EXT            0x02000000u  /* EXT_CTRL cmd flag (DSI)         */
 #define DC_CMD_DBI            0x40000000u  /* command (vs data) FIFO flag     */
 
 /*---------------------------------------------------------------------------*/
-/* DSI host registers ([DIS] am_hal_dsi.o; offsets from DSI_BASE)            */
+/* DSI HOST REGISTERS                                                        */
 /*---------------------------------------------------------------------------*/
+
+/* Offsets from DSI_BASE ([DIS] am_hal_dsi.o). */
 
 #define DSI_DEVICEREADY     0x00u
 #define DSI_INTRSTAT        0x04u          /* b28 INITDONE (RW1C), b19 LOWC   */
@@ -105,11 +109,8 @@
 #define DSI_AFETRIM3        0x84u
 
 /*
- * D-PHY timing words for FREQ_TRIM_X20 (240 MHz PLL, 480 Mbps/lane). The
- * vendor computes these from D-PHY spec targets in double-precision at run
- * time; the selection logic is not recovered bit-exact, so this carries the
- * words [CAP]tured from this board at this trim. Recompute/redump if the
- * trim ever changes.
+ * D-PHY timing words for FREQ_TRIM_X20 (240 MHz PLL, 480 Mbps/lane), [CAP]
+ * from this board.  They hold only for this trim.
  */
 #define DSI_TRIM_X20            0x0Au
 #define DSI_LPBYTECLK_X20       0x00000002u
@@ -117,19 +118,21 @@
 #define DSI_CLKLANETIM_X20      0x05040F02u
 
 /*---------------------------------------------------------------------------*/
-/* Board pins (Apollo510 EVB display kit; [DIS] libam_bsp.a)                 */
+/* BOARD PINS                                                                */
 /*---------------------------------------------------------------------------*/
+
+/* Apollo510 EVB display kit ([DIS] libam_bsp.a). */
 
 #define PIN_DISP_QSPI_CS   209u   /* driven high in DSI mode (strap/deassert) */
 #define PIN_DISP_TE         33u   /* FNCSEL 9 = dedicated DISP_TE             */
 #define PIN_DISP_RST        63u   /* panel reset, active low                  */
 #define PIN_VDD18_SW        58u   /* MIPI 1.8 V rail switch                   */
 
-#define PINCFG_GPIO_OUT    0x00000503u    /* FNCSEL=3 GPIO, push-pull, DS 0.5x */
-#define PINCFG_DISP_TE     0x00000C09u    /* FNCSEL=9 DISP_TE, DS 3 (verbatim) */
+#define PINCFG_GPIO_OUT    0x00000503u    /* GPIO, push-pull, DS 0.5x */
+#define PINCFG_DISP_TE     0x00000C09u    /* FNCSEL 9 DISP_TE, DS 3 */
 
 /*---------------------------------------------------------------------------*/
-/* State                                                                     */
+/* STATE                                                                     */
 /*---------------------------------------------------------------------------*/
 
 #define DC_SPIN_MAX   4000000u   /* ~100 ms-class bound at scanout speeds     */
@@ -138,9 +141,10 @@ static uint32_t s_frames;        /* frames successfully presented            */
 static uint32_t s_ipver;         /* DC IP_VERSION ([CAP] 0x00230601)          */
 
 /*---------------------------------------------------------------------------*/
-/* Small helpers                                                             */
+/* HELPERS                                                                   */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Write a pad's PINCFG register under the PADKEY unlock. */
 static void
 pin_config(uint32_t pad, uint32_t cfg)
 {
@@ -149,6 +153,7 @@ pin_config(uint32_t pad, uint32_t cfg)
     GPIO->PADKEY = 0u;
 }
 
+/** @brief Drive a GPIO pad high (non-zero @p level) or low. */
 static void
 pin_write(uint32_t pad, uint32_t level)
 {
@@ -157,7 +162,7 @@ pin_write(uint32_t pad, uint32_t level)
     else       { (&GPIO->WTC0)[pad >> 5] = mask; }
 }
 
-/** Bounded poll: wait until (reg & mask) == want. 1 on success. */
+/** @brief Poll until (reg & mask) == want; 1, or 0 after DC_SPIN_MAX reads. */
 static int
 poll32(uintptr_t addr, uint32_t mask, uint32_t want)
 {
@@ -170,10 +175,12 @@ poll32(uintptr_t addr, uint32_t mask, uint32_t want)
     return 1;
 }
 
+/** @brief Wait for STATUS.PENDCMD to clear; 1, or 0 on timeout. */
 static int  dc_wait_pendcmd(void)  { return poll32(DC_BASE + DC_STATUS, DC_STAT_PENDCMD, 0u); }
+/** @brief Wait for the DBI busy bits to clear; 1, or 0 on timeout. */
 static int  dc_wait_dbi_idle(void) { return poll32(DC_BASE + DC_STATUS, DC_STAT_DBI_BUSY, 0u); }
 
-/** FIFO write with the mandatory pending-cmd poll before it. [DIS] */
+/** @brief Write one command-FIFO word after the pending-command poll. [DIS] */
 static void
 dc_fifo(uint32_t word)
 {
@@ -182,11 +189,14 @@ dc_fifo(uint32_t word)
 }
 
 /*---------------------------------------------------------------------------*/
-/* DSI command channel (LP mode) -- [TSI] nema_dc_hal.c dsi_dcs_write /      */
-/* dsi_generic_write, reduced to the short-write forms the panel init uses.  */
+/* DSI COMMAND CHANNEL                                                       */
 /*---------------------------------------------------------------------------*/
 
-/** DCS command with n parameter bytes (n may be 0). */
+/* LP-mode writes: [TSI] nema_dc_hal.c dsi_dcs_write and dsi_generic_write,
+ * reduced to the forms the panel init uses: DCS commands with up to four
+ * parameter bytes and two-byte generic writes. */
+
+/** @brief Send a DCS command with @p n parameter bytes (@p n may be 0). */
 static void
 dsi_dcs(uint8_t cmd, const uint8_t *p, uint32_t n)
 {
@@ -207,7 +217,7 @@ dsi_dcs(uint8_t cmd, const uint8_t *p, uint32_t n)
     (void)dc_wait_dbi_idle();
 }
 
-/** Generic (non-DCS) 2-byte write: register address + one value byte. */
+/** @brief Generic (non-DCS) 2-byte write: register address, one value byte. */
 static void
 dsi_generic2(uint8_t reg, uint8_t val)
 {
@@ -226,7 +236,7 @@ dsi_generic2(uint8_t reg, uint8_t val)
     DC_WR(DC_GPIO, DC_RD(DC_GPIO) & ~0x8u);         /* short (non-overlong)   */
     (void)dc_wait_pendcmd();
     DC_WR(DC_IF_CFG, cfg | DC_IFCFG_SPI_HOLD);
-    for (i = 0u; i < 2u; i++) {                     /* n<3: cmd-flag each byte */
+    for (i = 0u; i < 2u; i++) {                     /* n<3: flag each byte */
         dc_fifo(DC_CMD_DBI | DC_CMD_EXT | b[i]);
     }
     (void)dc_wait_pendcmd();
@@ -235,10 +245,10 @@ dsi_generic2(uint8_t reg, uint8_t val)
 }
 
 /*---------------------------------------------------------------------------*/
-/* Bring-up stages                                                           */
+/* BRING-UP STAGES                                                           */
 /*---------------------------------------------------------------------------*/
 
-/** Display pins ([DIS] am_bsp_disp_pins_enable, DSI order; touch INT skipped). */
+/** @brief Display pins, in [DIS] am_bsp_disp_pins_enable's DSI order. */
 static void
 dc_pins_init(void)
 {
@@ -247,10 +257,10 @@ dc_pins_init(void)
     pin_config(PIN_DISP_TE, PINCFG_DISP_TE);
     pin_config(PIN_DISP_RST, PINCFG_GPIO_OUT);
     pin_write(PIN_DISP_RST, 1u);
-    pin_config(PIN_VDD18_SW, PINCFG_GPIO_OUT);      /* rail switched in dsi   */
+    pin_config(PIN_VDD18_SW, PINCFG_GPIO_OUT);  /* high in dsi_clocks_init() */
 }
 
-/** DISPPHY power + DSI/DC clock tree ([DIS] am_hal_dsi_init). */
+/** @brief DISPPHY power and the DSI/DC clock tree ([DIS] am_hal_dsi_init). */
 static tiku_dc_err_t
 dsi_clocks_init(void)
 {
@@ -270,13 +280,15 @@ dsi_clocks_init(void)
     CLKGEN_DISPCLKCTRL &= ~0x600u;                  /* DBICLKSEL = DBIB       */
     CLKGEN_CLKCTRL     |= 0x100u;                   /* DISPCTRLCLKEN          */
     CLKGEN_DISPCLKCTRL |= 0x100u;                   /* DCCLKEN                */
-    CLKGEN_DISPCLKCTRL = (CLKGEN_DISPCLKCTRL & ~0xFu) | 0x2u; /* PLL ref HFRC12 */
+    CLKGEN_DISPCLKCTRL = (CLKGEN_DISPCLKCTRL & ~0xFu) | 0x2u; /* PLL: HFRC12 */
     CLKGEN_DISPCLKCTRL |= 0x10u;                    /* PLLCLKEN               */
     return TIKU_DC_OK;
 }
 
-/** DSI PHY parameter config ([DIS] am_hal_dsi_para_config: 1 lane, DBI16,
- *  trim X20, no ULPS pattern). */
+/**
+ * @brief DSI PHY parameters ([DIS] am_hal_dsi_para_config): 1 lane, DBI16,
+ *        trim X20, no ULPS pattern; TIKU_DC_ERR_DSI if INITDONE never sets.
+ */
 static tiku_dc_err_t
 dsi_phy_config(void)
 {
@@ -291,17 +303,18 @@ dsi_phy_config(void)
     DSI_WR(DSI_CLKEOT,      0x2u);                  /* non-continuous clock   */
     DSI_WR(DSI_CLKEOT,      DSI_RD(DSI_CLKEOT) | 0x1u);   /* EOT packets      */
 
-    /* D-PHY timing for trim X20 ([CAP] golden words, see constants above). */
+    /* D-PHY timing for trim X20 ([CAP] words, see the constants above). */
     DSI_WR(DSI_LPBYTECLK,   DSI_LPBYTECLK_X20);
     DSI_WR(DSI_DPHYPARAM,   DSI_DPHYPARAM_X20);
     DSI_WR(DSI_CLKLANETIM,  DSI_CLKLANETIM_X20);
     DSI_WR(DSI_AFETRIM1, (DSI_RD(DSI_AFETRIM1) & ~0x7Fu) | DSI_TRIM_X20);
 
-    /* Analog front-end trims -- verbatim magic, do not "clean up". [DIS] */
+    /* Analog front-end trims, copied as they are from the vendor sequence;
+     * the values are undocumented. [DIS] */
     DSI_WR(DSI_AFETRIM2, 0x10000000u);
     DSI_WR(DSI_AFETRIM2, DSI_RD(DSI_AFETRIM2) | 0x480000u);   /* 1-lane       */
     DSI_WR(DSI_AFETRIM1, DSI_RD(DSI_AFETRIM1) | 0x2000u);
-    if ((MCUCTRL->CHIPREV & 0xFFu) != 0x21u) {      /* [CAP] ours: 0x23       */
+    if ((MCUCTRL->CHIPREV & 0xFFu) != 0x21u) {      /* [CAP] this part: 0x23  */
         DSI_WR(DSI_AFETRIM0, DSI_RD(DSI_AFETRIM0) | 0x20000u);
     }
 
@@ -316,7 +329,7 @@ dsi_phy_config(void)
     return TIKU_DC_OK;
 }
 
-/** DC block init + DBIDSI configure ([TSI] nemadc_init/_configure + [CAP]). */
+/** @brief Power the DC block and check its ID register ([TSI] nemadc_init). */
 static tiku_dc_err_t
 dc_core_init(void)
 {
@@ -336,8 +349,10 @@ dc_core_init(void)
     return TIKU_DC_OK;
 }
 
-/* nemadc_timing(w,1,1,1, h,1,1,1) -- the [CAP]-verified 468x468 words
- * generalized to an arbitrary region size (all porches = 1). */
+/**
+ * @brief Program DC timing for a w x h region with every porch 1, as
+ *        nemadc_timing(w,1,1,1, h,1,1,1) does; [CAP] for 468x468.
+ */
 static void
 dc_timing(uint16_t w, uint16_t h)
 {
@@ -348,7 +363,7 @@ dc_timing(uint16_t w, uint16_t h)
     DC_WR(DC_STARTXY,    ((uint32_t)(w + 1u) << 16) | h);
 }
 
-/** Bytes per pixel for a scanout format. */
+/** @brief Bytes per pixel for a scanout format. */
 static uint32_t
 dc_bpp(tiku_dc_fmt_t fmt)
 {
@@ -356,9 +371,10 @@ dc_bpp(tiku_dc_fmt_t fmt)
 }
 
 /**
- * Set the panel's addressable window via DCS CASET/RASET. The CO5300 has a
- * 6-column X offset (baked into panel_init's full window); a damage rect at
- * framebuffer column x therefore maps to panel column x + 6.
+ * @brief Set the panel's addressable window with DCS CASET/RASET.
+ *
+ * The CO5300 has a 6-column X offset, as in panel_init's full window:
+ * framebuffer column x is panel column x + 6.
  */
 static void
 dc_set_window(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
@@ -374,11 +390,14 @@ dc_set_window(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
     dsi_dcs(0x2Bu, raset, 4u);       /* row address set    */
 }
 
-/*
- * One-shot DC transfer of a w x h region starting at @p base (physical), with
- * @p stride bytes between rows. Programs layer 0, timing, issues DCS
- * write_memory_start, launches one frame, and polls to completion. Shared by
- * the full-frame and partial-rect present paths.
+/**
+ * @brief One-shot DC transfer of a w x h region at physical @p base, with
+ *        @p stride bytes between rows.
+ *
+ * Programs layer 0 and the timing, issues DCS write_memory_start, launches one
+ * frame and polls to completion; both present paths use it.
+ *
+ * @return TIKU_DC_OK or TIKU_DC_ERR_TIMEOUT
  */
 static tiku_dc_err_t
 dc_do_transfer(uint32_t base, uint16_t w, uint16_t h,
@@ -424,11 +443,12 @@ dc_do_transfer(uint32_t base, uint16_t w, uint16_t h,
     return ok ? TIKU_DC_OK : TIKU_DC_ERR_TIMEOUT;
 }
 
+/** @brief Configure the DC: clock dividers, DBIDSI RGB888, 468x468 timing. */
 static void
 dc_configure(void)
 {
     /* Divider: DISPCLKSEL=HFRC96 -> primary div 1; div2=1, prefetch=4.
-     * [CAP] golden 0x02000401 (new-IP 7-bit-divider layout). */
+     * [CAP] value 0x02000401 (the 7-bit-divider layout of this IP). */
     DC_WR(DC_CLKCTRL, 0x02000401u);
     DC_WR(DC_FORMAT_CTRL2, 0x2u << 30);             /* DBIB clk = fmt clk / 2 */
     (void)dc_wait_pendcmd();
@@ -437,7 +457,7 @@ dc_configure(void)
     DC_WR(DC_CLKCTRL_CG, 1u);                       /* pixel-clock out enable */
 }
 
-/** CO5300 panel init over DSI ([DIS] BSP + open raydium driver, no-TE path). */
+/** @brief CO5300 panel init over DSI, without TE. [DIS] */
 static void
 panel_init(void)
 {
@@ -470,13 +490,13 @@ panel_init(void)
     dsi_dcs(0x29u, 0, 0u);        tiku_common_delay_ms(200u); /* display on   */
 
     dc_timing(TIKU_DC_PANEL_W, TIKU_DC_PANEL_H);
-    dsi_dcs(0x2Au, caset, 4u);                                /* column window */
+    dsi_dcs(0x2Au, caset, 4u);                                /* col window */
     dsi_dcs(0x2Bu, raset, 4u);    tiku_common_delay_ms(200u); /* row window   */
     dsi_dcs(0x34u, 0, 0u);        tiku_common_delay_ms(10u);  /* tearing off  */
 }
 
 /*---------------------------------------------------------------------------*/
-/* Public API                                                                */
+/* PUBLIC API                                                                */
 /*---------------------------------------------------------------------------*/
 
 tiku_dc_err_t

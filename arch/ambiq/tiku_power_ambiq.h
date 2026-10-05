@@ -7,9 +7,9 @@
  *
  * tiku_power_ambiq.h - Apollo510 power-measurement instruments.
  *
- * The timebase is the always-on STIMER, which survives WFI where SysTick does not.
- * The cache is the M55's architectural L1 and its geometry is READ from
- * CLIDR/CCSIDR, never assumed.  Instruments, not an API: each restores what it changed.
+ * Probes time their windows on the always-on STIMER, which keeps counting
+ * through WFI.  The cache controls drive the M55's architectural L1, whose
+ * geometry is read from CCSIDR.  A sleep probe reverses each flag it applies.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,14 +23,15 @@
 /* TIMEBASE                                                                  */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Voted read of the always-on STIMER counter (32.768 kHz). */
+/** @brief Voted read of the STIMER counter (32.768 kHz on the crystal). */
 uint32_t tiku_ambiq_stimer_now(void);
 
 /**
- * @brief Convert STIMER counts to microseconds, exactly and without floats.
+ * @brief Convert STIMER counts to whole microseconds in integer arithmetic.
  *
- * 1e6/32768 = 15625/512 is exact, so the conversion introduces no rounding
- * beyond the counter's own 30.5 us tick.
+ * On the crystal the factor 1e6/32768 = 15625/512 is exact and the result is
+ * truncated.  Once tiku_ambiq_power_autorun() has moved the STIMER to the
+ * LFRC, the conversion uses the 900 Hz nominal rate.
  */
 uint32_t tiku_ambiq_stimer_us(uint32_t counts);
 
@@ -45,26 +46,30 @@ void tiku_ambiq_cache_set(int on);
 int tiku_ambiq_cache_enabled(void);
 
 /**
- * @brief Report L1 cache geometry as the silicon describes it.
+ * @brief Report the L1 cache geometry read from CCSIDR.
  *
- * Reads CLIDR/CCSIDR rather than trusting a datasheet transcription, because
- * every working-set size in the memory experiment is chosen relative to this.
+ * Any output pointer may be NULL.  CSSELR is restored on return.
  *
- * @param i_bytes  Out: I-cache size in bytes (0 if absent).
- * @param d_bytes  Out: D-cache size in bytes (0 if absent).
- * @param line     Out: line length in bytes.
+ * @param i_bytes  Out: I-cache size in bytes, sets x ways x line.
+ * @param d_bytes  Out: D-cache size in bytes, sets x ways x line.
+ * @param line     Out: line length in bytes, of the I-cache.
  */
 void tiku_ambiq_cache_geometry(uint32_t *i_bytes, uint32_t *d_bytes,
                                uint32_t *line);
 
 /*---------------------------------------------------------------------------*/
-/* CLOCK ORACLE                                                              */
+/* CORE CLOCK MEASUREMENT                                                    */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Measure the core clock in Hz by timing SysTick against the STIMER.
+ * @brief Measure the core clock in Hz by counting DWT CYCCNT cycles over a
+ *        ~16 ms STIMER window.
  *
- * Blocks ~50 ms.  Returns 0 if the window did not elapse.
+ * Leaves DEMCR.TRCENA and the cycle counter on.
+ *
+ * @note Spins until the window elapses, with no bound: a stopped STIMER
+ *       hangs the call.
+ * @return Core clock in Hz, or 0 if CYCCNT does not advance
  */
 unsigned long tiku_ambiq_cpu_hz_measure(void);
 
@@ -72,100 +77,104 @@ unsigned long tiku_ambiq_cpu_hz_measure(void);
 /* PROBES                                                                    */
 /*---------------------------------------------------------------------------*/
 
-/** Release bits for tiku_ambiq_sleep_probe().  Deliberately a SHORTER list
- *  than the Nordic port's: each is added only once its effect is measured on
- *  this part.  `quiet` does not exist here on purpose -- that word's meaning is
- *  frozen by published nRF54L experiments. */
+/* Flags for tiku_ambiq_sleep_probe(), OR'd together.  The probe applies
+ * each one for the window and reverses it before returning. */
 #define TIKU_AMBIQ_SLEEP_DEEP  0x1u   /**< WFI with SCR.SLEEPDEEP set */
-#define TIKU_AMBIQ_SLEEP_STOP_UART 0x2u /**< power the console UART1 domain off
-                                             for the window; its clock request
-                                             is what keeps HFRC from gating in
-                                             deep sleep.  Restored after */
-#define TIKU_AMBIQ_SLEEP_STOP_TICK 0x4u /**< stretch the 128 Hz kernel tick
-                                             across the window via the tickless
-                                             path -- ~1 wake instead of 128/s */
-#define TIKU_AMBIQ_SLEEP_DBGLOCK   0x8u /**< write MCUCTRL.DEBUGGER lockout for
-                                             the window.  An attached probe's
-                                             latched power request may ignore it,
-                                             which is what this measures */
-#define TIKU_AMBIQ_SLEEP_LFRC     0x10u /**< reclock the STIMER timebase to the
-                                             ~900 Hz LFRC for the window: the
-                                             crystal dies under real deep sleep.
-                                             Verified switch, degrading to XTAL */
+/** @brief Power the console UART1 domain off for the window: its clock
+ *         request keeps HFRC running in deep sleep. */
+#define TIKU_AMBIQ_SLEEP_STOP_UART 0x2u
+/** @brief Stretch the kernel tick past the end of the window through the
+ *         tickless path. */
+#define TIKU_AMBIQ_SLEEP_STOP_TICK 0x4u
+/** @brief Set the MCUCTRL.DEBUGGER lockout for the window and clear it after;
+ *         an attached probe's latched power request may override it. */
+#define TIKU_AMBIQ_SLEEP_DBGLOCK   0x8u
+/** @brief Time the window on the ~900 Hz LFRC, which keeps running when deep
+ *         sleep stops the 32 kHz crystal; if the LFRC is not seen counting,
+ *         the window is timed on the crystal. */
+#define TIKU_AMBIQ_SLEEP_LFRC     0x10u
 
 /**
  * @brief Sit in WFI for @p ms; returns elapsed microseconds (STIMER-timed).
  *
- * The wake count is published separately: a WFI that returns immediately is not
- * sleeping, and from the outside that is indistinguishable from one that is.
+ * The window ends early if the STIMER stops counting.  The number of WFI
+ * returns is kept for tiku_ambiq_sleep_wake_count().
+ *
+ * @param ms     Window length in milliseconds
+ * @param flags  TIKU_AMBIQ_SLEEP_* flags, OR'd together
  */
 uint32_t tiku_ambiq_sleep_probe(uint32_t ms, unsigned flags);
 
-/** @brief WFI returns during the last sleep probe. */
+/** @brief WFI returns in the last probe window (0 after a spin probe). */
 uint32_t tiku_ambiq_sleep_wake_count(void);
 
 /**
  * @brief Run a register-only busy loop for @p ms; returns elapsed microseconds.
  *
- * The reference workload, matched to the Nordic port's so the two parts can be
- * compared on identical work.  Alignment-pinned: on the other platform an
- * unrelated build option moved this loop and shifted its current by 956 uA.
+ * Each pass is tiku_ambiq_spin_inner() iterations of a two-instruction
+ * subs/bne loop that sits in its own 16-byte-aligned section.
  */
 uint32_t tiku_ambiq_spin_probe(uint32_t ms);
 
-/** @brief Outer passes retired by the last busy probe, and iterations per pass. */
+/** @brief Passes retired in the last probe window (0 after a sleep probe). */
 uint32_t tiku_ambiq_spin_pass_count(void);
+/** @brief Loop iterations in one spin-probe pass. */
 uint32_t tiku_ambiq_spin_inner(void);
 
 /*---------------------------------------------------------------------------*/
 /* MEMORY-ACCESS WORKLOADS                                                   */
 /*---------------------------------------------------------------------------*/
 
-#define TIKU_AMBIQ_MEM_NOP          0u
-#define TIKU_AMBIQ_MEM_SRAM_R       1u
-#define TIKU_AMBIQ_MEM_SRAM_W       2u
-#define TIKU_AMBIQ_MEM_SRAM_STRIDE  3u
+/** @brief Workload kinds for tiku_ambiq_mem_probe(). */
+#define TIKU_AMBIQ_MEM_NOP          0u   /**< spin passes, no memory      */
+#define TIKU_AMBIQ_MEM_SRAM_R       1u   /**< DTCM reads, sequential      */
+#define TIKU_AMBIQ_MEM_SRAM_W       2u   /**< DTCM writes, sequential     */
+#define TIKU_AMBIQ_MEM_SRAM_STRIDE  3u   /**< DTCM reads, 17-word stride  */
 #define TIKU_AMBIQ_MEM_MRAM_HOT     4u   /**< small set: cache-resident   */
 #define TIKU_AMBIQ_MEM_MRAM_COLD    5u   /**< large set + stride: misses  */
-#define TIKU_AMBIQ_MEM_KIND_COUNT   6u
+#define TIKU_AMBIQ_MEM_KIND_COUNT   6u   /**< number of kinds             */
 
 /**
- * @brief Run a memory workload for @p ms; returns microseconds (STIMER-timed).
+ * @brief Run memory workload @p kind for @p ms; returns elapsed microseconds.
  *
- * The MRAM counterpart of the nRF54L's RRAM sweep, so "what does one access
- * cost" can be answered on two different non-volatile technologies with one
- * method.  Access count is the denominator for energy per access.
+ * Every pass counts 256 accesses toward tiku_ambiq_mem_access_count().  An
+ * unknown @p kind runs the NOP workload.
  */
 uint32_t tiku_ambiq_mem_probe(unsigned kind, uint32_t ms);
 
 /** @brief Accesses retired by the last memory probe. */
 uint32_t tiku_ambiq_mem_access_count(void);
 
-/** @brief Checksum of the traversal (live for SRAM kinds; see the .c note). */
+/** @brief Checksum of the last memory probe; 0 for the MRAM and NOP kinds. */
 uint32_t tiku_ambiq_mem_checksum(void);
 
-/** @brief Working-set sizes actually compiled in, so a report can state them. */
+/** @brief Size in bytes of the MRAM_HOT working set. */
 uint32_t tiku_ambiq_mem_hot_bytes(void);
+/** @brief Size in bytes of the MRAM_COLD and SRAM working sets. */
 uint32_t tiku_ambiq_mem_cold_bytes(void);
 
 /*---------------------------------------------------------------------------*/
-/* FLOOR DUMP                                                                */
+/* DEEP-SLEEP AUTORUN AND DEBUGGER STATE                                     */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Console-free deep-sleep staircase; never returns.
+ * @brief Run the console-free deep-sleep sequence; never returns.
  *
- * spin 3 s / idle 10 s / deep-sleep 45 s, forever, after a one-time tidy
- * (buck + crypto/OTP/NVM1/ROM/TRCENA).  Built for the J16-unplugged
- * measurement where the trace itself is the report.
+ * After one-time power-down steps (SIMOBUCK on; crypto, OTP, NVM1, ROM and
+ * trace off) it loops: spin 3 s, WFI 8 s, deep sleep 30 s, spin 2 s,
+ * tick-stretched deep sleep 20 s.
+ *
+ * @note Runs in place of the scheduler.  Real deep sleep needs the J-Link
+ *       (J16) unplugged: while it powers the debug domain, SLEEPDEEP acts as
+ *       plain sleep.
  */
 void tiku_ambiq_power_autorun(void);
 
 /**
- * @brief Non-zero if a debugger is attached (MCUCTRL.DEBUGGER).
+ * @brief Non-zero if the SWD lockout, bit 0 of MCUCTRL.DEBUGGER, is clear.
  *
- * Worth its own function because on the other platform a forgotten debug
- * session cost ~130 uA and silently made every low-power figure an upper bound.
+ * A clear lockout lets a debugger attach; it does not show that one is
+ * connected.
  */
 int tiku_ambiq_debugger_attached(void);
 

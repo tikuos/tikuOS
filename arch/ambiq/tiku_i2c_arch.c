@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_i2c_arch.c - Apollo 510 I2C driver (stub)
+ * tiku_i2c_arch.c - Ambiq I2C driver (stub)
  *
- * Not yet supported. A real am_hal_iom backend lands with the peripheral
- * pass.
+ * This port has no I2C driver: every call that returns a status returns -1
+ * (TIKU_I2C_ERR_NACK) and no call touches the hardware.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,11 +18,8 @@
 /**
  * @brief Initialize the I2C peripheral (stub)
  *
- * Not yet implemented. A real backend brings up an am_hal_iom instance
- * in I2C master mode and configures the bus speed from @p config.
- *
  * @param config  Pointer to the I2C configuration struct
- * @return -1 always (not supported yet)
+ * @return -1 always
  */
 int tiku_i2c_arch_init(const tiku_i2c_config_t *config) {
     (void)config;
@@ -30,10 +27,7 @@ int tiku_i2c_arch_init(const tiku_i2c_config_t *config) {
 }
 
 /**
- * @brief Release the I2C peripheral (stub)
- *
- * Not yet implemented. A real backend calls am_hal_iom_disable() and
- * am_hal_iom_deinitialize().
+ * @brief Release the I2C peripheral (stub); does nothing
  */
 void tiku_i2c_arch_close(void) {
 }
@@ -41,12 +35,10 @@ void tiku_i2c_arch_close(void) {
 /**
  * @brief Write bytes to an I2C device (stub)
  *
- * Not yet implemented.
- *
  * @param addr  7-bit I2C device address
  * @param buf   Source buffer in SRAM
  * @param len   Number of bytes to write
- * @return -1 always (not supported yet)
+ * @return -1 always
  */
 int tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len) {
     (void)addr; (void)buf; (void)len;
@@ -56,12 +48,10 @@ int tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len) {
 /**
  * @brief Read bytes from an I2C device (stub)
  *
- * Not yet implemented.
- *
  * @param addr  7-bit I2C device address
  * @param buf   Destination buffer in SRAM
  * @param len   Number of bytes to read
- * @return -1 always (not supported yet)
+ * @return -1 always
  */
 int tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len) {
     (void)addr; (void)buf; (void)len;
@@ -71,12 +61,10 @@ int tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len) {
 /**
  * @brief Probe an I2C address (stub)
  *
- * Not yet implemented.  Lands with the am_hal_iom backend (task #31), which
- * will issue an address-only (or 1-byte) transaction and report the ACK so
- * the `i2c scan` shell command can detect devices on Apollo.
+ * Every address reads as not acknowledged, so `i2c scan` finds no device.
  *
  * @param addr  7-bit I2C device address
- * @return -1 always (not supported yet)
+ * @return -1 always
  */
 int tiku_i2c_arch_probe(uint8_t addr) {
     (void)addr;
@@ -86,15 +74,12 @@ int tiku_i2c_arch_probe(uint8_t addr) {
 /**
  * @brief Write then read an I2C device in a single transaction (stub)
  *
- * Not yet implemented. A real backend performs a combined write/read
- * with a repeated START between the two phases.
- *
  * @param addr    7-bit I2C device address
  * @param tx_buf  Source buffer for the write phase
  * @param tx_len  Number of bytes to write
  * @param rx_buf  Destination buffer for the read phase
  * @param rx_len  Number of bytes to read
- * @return -1 always (not supported yet)
+ * @return -1 always
  */
 int tiku_i2c_arch_write_read(uint8_t addr,
                              const uint8_t *tx_buf, uint16_t tx_len,

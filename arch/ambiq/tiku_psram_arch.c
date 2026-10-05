@@ -7,9 +7,9 @@
  *
  * tiku_psram_arch.c - Apollo510 MSPI0 and APS512 octal-DDR PSRAM bring-up.
  *
- * Every register field is written through its CMSIS enum name, so the compiler
- * owns the encoding.  Configure the controller before the pads, bound every wait
- * with a distinct error, and read identity at the lowest clock before trusting it.
+ * Configures the controller before the pads, bounds every wait, and checks the
+ * device identity before use.  Also PIO, DMA and command-queue transfers, the
+ * XIP aperture, half sleep, a GPIO bit-bang probe and a bandwidth bench.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,8 +21,8 @@
 #include "tiku_psram_arch.h"
 #include "tiku_gpio_arch.h"      /* tiku_ambiq_gpio_pad_config()             */
 #include "tiku_cpu_common.h"     /* tiku_cpu_ambiq_delay_us()                */
-#include "hal/tiku_cpu.h"        /* dcache clean/invalidate for the bench    */
-#include <kernel/cpu/tiku_hang.h>   /* bench loops block on purpose          */
+#include "hal/tiku_cpu.h"        /* D-cache clean and invalidate             */
+#include <kernel/cpu/tiku_hang.h>   /* check-in from the bench loops         */
 #include <kernel/shell/tiku_shell_io.h> /* bench reports via SHELL_PRINTF    */
 #include <kernel/memory/tiku_mem.h>    /* the TIKU_MEM_PSRAM tier attach     */
 #include "apollo510.h"           /* CMSIS register map -- register defs only */
@@ -37,7 +37,7 @@
 #define PSRAM_CMD_REG_READ       0x4040u
 #define PSRAM_CMD_REG_WRITE      0xC0C0u
 
-/** Identity constants -- the M1 gate. */
+/* Identity the device must report: MR1.VID, MR2.DENSITY, MR2.GB. */
 #define PSRAM_VID_AP_MEMORY      0x0Du
 #define PSRAM_DENSITY_512MBIT    0x06u
 #define PSRAM_GB_PASS            0x06u
@@ -47,19 +47,18 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * GP64..GP73 carry MSPI0 signal indices 0..9: 0-7 are data, 8 is CLK, 9 is
- * DQS0/DM0.  On those pads the MSPI0 function is FNCSEL 0 (they are
- * dedicated MSPI pads).  GP199 is the chip select, where MNCE0 is FNCSEL 1.
- * Transcribed from am_bsp_pins.c: output driver DISABLED on data/clock/DQS
- * (PADOUTEN in the controller owns direction), drive strength 0.5x, no
- * pull.  CE is push-pull with NCESRC=0 and active-low polarity.
+ * GP64..GP73 carry MSPI0 signals 0..9: 0-7 are data, 8 is CLK, 9 is
+ * DQS0/DM0.  They are dedicated MSPI pads, where MSPI0 is FNCSEL 0.  The chip
+ * select is the board's pad, where MNCE0 is FNCSEL 1.  Data, clock and DQS
+ * leave OUTCFG at 0 (the controller's PADOUTEN owns direction) and take 0.5x
+ * drive and no pull; CE is push-pull, NCESRC=0, active low.
  */
 #define PSRAM_PAD_D0        64u
 #define PSRAM_PAD_D7        71u
 #define PSRAM_PAD_CLK       72u
 #define PSRAM_PAD_DQS       73u
-/* The chip select is a BOARD fact (see the board header); D0..DQS above are
- * MSPI0's dedicated pads and are silicon, which is why only this one moved. */
+/* The chip select comes from the board header; D0..DQS are the same MSPI0
+ * pads on every board. */
 #if !defined(TIKU_BOARD_PSRAM_PAD_CE)
 #error "This board declares no TIKU_BOARD_PSRAM_PAD_CE. The build system \
 should not have compiled the PSRAM driver for it -- see BOARD_CAPS/PSRAM in \
@@ -73,11 +72,7 @@ the Makefile."
 #define PAD_OUTCFG_PUSHPULL (1u << 8)    /* OUTCFG[9:8] = push-pull         */
 #define PAD_NCEPOL_LOW      (0u << 22)   /* NCEPOL: active low              */
 
-/** Data/CLK/DQS: function select + drive strength + INPUT ENABLE.
- *
- * The vendor BSP leaves INPEN clear on these pads and its driver works, so the
- * receive path presumably bypasses the GPIO input gate.  But the bit-bang probe
- * showed the GPIO path DOES read these pins, and the buffer costs nothing. */
+/* Data/CLK/DQS: MSPI0 function, 0.5x drive and the input buffer (INPEN). */
 #define PAD_INPEN           (1u << 4)
 #define PAD_CFG_MSPI_IO     (PAD_FNCSEL_MSPI0 | PAD_DS_0P5X | PAD_INPEN)
 /** CE: driven by the controller's NCE0 source, push-pull, active low. */
@@ -90,38 +85,33 @@ the Makefile."
 
 /*
  * CLKGEN.MSPIIOCLKCTRL.MSPIxIOCLKSEL encodings, from am_hal_mspi.h's
- * am_hal_mspi_io_clock_sel_e.  READ, NOT COUNTED: the enum starts at
- * HFRC_750KHZ = 0 and doubles, so the two sources this driver uses sit at 8
- * and 10 -- assuming 1 and 2 (the order they appear in the frequency switch)
- * selects HFRC_1P5MHZ and HFRC_3MHZ instead, which is a 128x clock error
- * that still "works" slowly enough to look like a timing problem.
+ * am_hal_mspi_io_clock_sel_e.  The enum starts at HFRC_750KHZ = 0 and
+ * doubles up to HFRC 192 MHz at 8; HFRC2 250 MHz is 10.  Values 1 and 2
+ * select 1.5 MHz and 3 MHz.
  */
 #define IOCLK_SEL_HFRC_192MHZ   8u
 #define IOCLK_SEL_HFRC2_250MHZ 10u
 
-/* DEV0CFG.CLKDIV0: the field is a raw divider count, not an enum with
- * surprises -- CLKDIV1 == 1.  Verified against the register header. */
+/* DEV0CFG.CLKDIV0 is a raw divider count: 1 divides by 1. */
 #define CLKDIV_1  1u
 #define CLKDIV_2  2u
 
+/** @brief One IO clock row: source, divider and TX clock edge. */
 typedef struct {
     uint8_t  ioclk_sel;   /**< MSPIIOCLKCTRL source select                  */
     uint8_t  clkdiv;      /**< DEV0CFG.CLKDIV0                              */
     uint8_t  sdr250;      /**< DEV0CFG1.SDR250EN0 -- bypasses the /2        */
-    uint8_t  txneg;       /**< DEV0CFG.TXNEG0 -- FREQUENCY-DEPENDENT        */
+    uint8_t  txneg;       /**< DEV0CFG.TXNEG0, set by frequency             */
     uint32_t hz;          /**< nominal IO clock, for reporting              */
 } psram_clk_t;
 
 /* Order matches TIKU_PSRAM_CLK_*.  Every row obeys
  * hz = source / (2 * clkdiv), except where sdr250 bypasses the /2.
  *
- * TXNEG is the TX clock-edge select and the vendor picks it BY FREQUENCY:
- * 0 at 62.5 MHz and below, 1 at 96 MHz and above.  The first cut of this
- * driver hard-coded 1 (the fast-clock value) at the 48 MHz bring-up clock,
- * which launches every command bit half a clock early -- the device decodes
- * garbage, never answers, and the controller-side "success" of TX-only
- * commands hides it.  Bug #7 of this bring-up, and the one that silenced
- * the device completely. */
+ * TXNEG selects the TX clock edge by frequency, as the vendor does: 0 at
+ * 62.5 MHz and below, 1 at 96 MHz and above.  TXNEG = 1 at 48 MHz launches
+ * every command bit half a clock early: the device never answers, while
+ * TX-only commands still complete on the controller side. */
 static const psram_clk_t s_clk[] = {
     { IOCLK_SEL_HFRC_192MHZ,  CLKDIV_2, 0u, 0u,  48000000u },
     { IOCLK_SEL_HFRC_192MHZ,  CLKDIV_1, 0u, 1u,  96000000u },
@@ -136,70 +126,51 @@ static const psram_clk_t s_clk[] = {
 /*---------------------------------------------------------------------------*/
 
 /*
- * TURNAROUND and WRITELATENCY are the controller's count of bus cycles it
- * must idle after the address before read data appears, or before write data
- * may be driven.  They MUST match the device's MR0.RLC / MR4.WLC.
+ * TURNAROUND and WRITELATENCY count the bus cycles the controller idles after
+ * the address before read data arrives, or before write data may be driven.
+ * They must match the device's MR0.RLC and MR4.WLC: in DQS mode TURNAROUND
+ * is RLC * 2 (12 at RLC 6), and without DQS it is 22; WRITELATENCY is
+ * WLC * 2 in both modes (12 at WLC 6).
  *
- * TRANSCRIBED FROM THE VENDOR'S ARITHMETIC, NOT FROM ITS STRUCT INITIALISER
- * -- and that distinction cost a debugging session.  APMDDROctalMSPIConfig
- * declares `.ui8TurnAround = 6`, which is what a reader copies; but
- * am_devices_mspi_peripheral_init() then OVERWRITES it before use:
- *
- *     ui8TurnAround = (RLC_6 + 4) * 2                       [USE_APS51216BA]
- *     with the RLC enum starting at RLC_4 = 0 on this part, so RLC_6 = 2
- *     => (2 + 4) * 2 = 12
- *     if DQS is disabled:  (12 - 1) * 2 = 22
- *
- *     WriteLatency = wlc_to_lc(WLC_6) * 2 = 6 * 2 = 12      [both modes]
- *
- * With 6 instead of 12 the read window sits before the data and the DQS
- * strobe never lands inside it: the controller waits forever with BUSY set
- * and no error bit -- which is exactly how this first appeared.
- *
- * The default here is DQS mode.  M2 recomputes these when it programs MR0/MR4
- * for a higher clock; changing one side alone is the classic way to get a bus
- * that returns shifted data instead of failing.
+ * A TURNAROUND of 6 at RLC 6 opens the read window before the data, the DQS
+ * strobe never falls inside it, and the controller waits with BUSY set and
+ * no error bit.  The default here is DQS mode.  psram_program_latency() sets
+ * both sides for a new clock; one side changed alone returns shifted data
+ * and no error.
  */
 #define PSRAM_TURNAROUND_DQS     12u
 #define PSRAM_TURNAROUND_NODQS   22u
 #define PSRAM_BRINGUP_WRITELAT   12u
 
 /*
- * M2: the device's latency codes, programmed to match the clock.  The device
- * powers up at RLC 6 (reads good to 133 MHz) and WLC 6 (writes good to
- * 109 MHz); faster clocks need higher codes in MR0/MR4, and the controller's
- * TURNAROUND / WRITELATENCY must move in lockstep: TURNAROUND = RLC * 2,
- * WRITELATENCY = WLC * 2 (the vendor's own arithmetic, verified against the
- * working example's register file).  The datasheet ceiling for this die is
- * 200 MHz, so the ladder tops out at 192.
+ * The device's latency codes per clock row, programmed into MR0/MR4.  The
+ * controller's TURNAROUND = RLC * 2 and WRITELATENCY = WLC * 2 move with
+ * them.  RLC 6 reads up to 133 MHz; WLC 5 writes up to 66 MHz and WLC 6 up to
+ * 109 MHz.  The die is rated to 200 MHz.
  *
  *   clock    RLC (MR0[4:2] code)     WLC (MR4[7:5] code)
- *   48/96    6 (011, default)        6 (110, default)
- *   125      6 (011)                 7 (001)  -- WLC6 only reaches 109 MHz
+ *   48       6 (011, default)        5 (010, default)
+ *   96       6 (011)                 6 (110)
+ *   125      6 (011)                 7 (001)
  *   192      8 (101)                 9 (011)
+ *   250      8 (101)                 9 (011)
+ *
+ * After reset MR4 reads 0x40, WLC code 010 (LC5).  tiku_psram_set_speed()
+ * programs the codes of whichever row it moves to, the 48 MHz row included.
  */
 typedef struct { uint8_t rlc, rlc_code, wlc, wlc_code; } psram_lat_t;
-/* THE DEVICE'S OWN DEFAULT DISAGREES WITH THE VENDOR COMMENT: MR4 reads back
- * 0x40 after reset = WLC code 010 = LC5, not the "LC6 default" the APS25616BA
- * driver comment claims for this family.  The bit-bang arbiter proved it:
- * with the controller at LC6 timing (12 edges) the write stream landed 2
- * bytes late; at 10 edges it landed exactly.  So the 48 MHz row keeps the
- * device's real default (WLC5 covers 66 MHz), and every row is PROGRAMMED,
- * never assumed. */
 static const psram_lat_t s_lat[] = {
     { 6u, 0x3u, 5u, 0x2u },   /* 48 MHz  -- device power-up defaults        */
     { 6u, 0x3u, 6u, 0x6u },   /* 96 MHz  */
     { 6u, 0x3u, 7u, 0x1u },   /* 125 MHz */
     { 8u, 0x5u, 9u, 0x3u },   /* 192 MHz */
-    { 8u, 0x5u, 9u, 0x3u },   /* 250 MHz: BEYOND THE DIE'S 200 MHz RATING --
-                                 kept in the table so a deliberate overclock
-                                 experiment is expressible, never a default */
+    { 8u, 0x5u, 9u, 0x3u },   /* 250 MHz: above the die's 200 MHz rating */
 };
 static uint8_t s_asleep;      /**< 1 while the device is in half sleep      */
-static uint8_t s_tap = 0xFFu; /**< shipped RXDQSDELAY tap (0xFF = unscanned) */
+static uint8_t s_tap = 0xFFu; /**< RXDQSDELAY tap from the last passing scan */
 static uint8_t s_turnaround = PSRAM_TURNAROUND_DQS;   /* live values        */
-static uint8_t s_writelat   = 10u;   /* matches the device's REAL power-up
-                                        default, WLC5 -- see s_lat[]         */
+static uint8_t s_writelat   = 10u;   /* WLC5 * 2: the device's power-up
+                                        default, see s_lat[]                 */
 
 /*---------------------------------------------------------------------------*/
 /* STATE                                                                     */
@@ -208,23 +179,21 @@ static uint8_t s_writelat   = 10u;   /* matches the device's REAL power-up
 /**
  * @brief Optional step tracer.
  *
- * Bring-up on a dead bus can HANG rather than fail: a register write to a
- * peripheral whose clock is wrong stalls the bus with no fault and no output.
- * With a tracer installed, the last line printed names the step that wedged.
+ * A register write to a peripheral whose clock is wrong can stall the bus
+ * with no fault and no output; the last step traced names where it stopped.
  */
 static void (*s_trace)(const char *step);
 
+/** @brief Report @p step to the tracer, if one is installed. */
 static void trace(const char *step)
 {
     if (s_trace) { s_trace(step); }
 }
 
 /*
- * Snapshot taken INSIDE a transfer, at the moments that distinguish causes.
- * A configuration that reads back perfect and still hangs needs evidence
- * from during the transfer, not more evidence from before it: whether the
- * FIFO word is consumed separates "the controller has no clock" from "the
- * controller is clocking and waiting on the device".
+ * Register values captured inside PIO transfers.  Whether the first TX FIFO
+ * word is consumed separates a controller with no clock from one that is
+ * clocking and waiting on the device.
  */
 static struct {
     uint32_t ctrl_after_start;
@@ -238,70 +207,65 @@ static struct {
 static uint8_t  s_up;        /**< 1 once init() completed                    */
 static uint8_t  s_clk_idx;   /**< index into s_clk of the live setting       */
 static uint8_t  s_faulted;   /**< 1 while fault injection is active           */
-static uint8_t  s_nodqs;     /**< 1 to bring up WITHOUT the DQS strobe        */
+static uint8_t  s_nodqs;     /**< 1 to bring up without the DQS strobe        */
 static uint8_t  s_ta_override; /**< non-zero: use this TURNAROUND instead     */
-static uint8_t  s_rxneg;       /**< DEV0CFG.RXNEG0 override                    */
-static uint8_t  s_rxcap;       /**< DEV0CFG.RXCAP0 override                    */
-static uint8_t  s_rxsmp = 1u;  /**< DEV0CFG1.RXSMP0 (vendor default 1)         */
+static uint8_t  s_rxneg;       /**< DEV0CFG.RXNEG0 override                   */
+static uint8_t  s_rxcap;       /**< DEV0CFG.RXCAP0 override                   */
+static uint8_t  s_rxsmp = 1u;  /**< DEV0CFG1.RXSMP0 (vendor default 1)        */
 
 /*---------------------------------------------------------------------------*/
 /* PIO TRANSFER (table 2)                                                    */
 /*---------------------------------------------------------------------------*/
 
-/** Bound for any single PIO transfer, in poll iterations.  Generous: the
- *  point is to terminate, not to time. */
+/** Poll-iteration bound on each wait inside a PIO transfer. */
 #define PSRAM_PIO_SPINS  400000u
 
 /** MSPI FIFO depth in words (AM_HAL_MSPI_MAX_FIFO_SIZE). */
 #define PSRAM_FIFO_WORDS 32u
 
-/**
- * @brief One PIO command, optionally with an address and a data phase.
- *
- * Transcribed from am_hal_mspi_blocking_transfer's PIO path: INSTR and ADDR are
- * staged, then a single CTRL write with START launches it; RX data drains from
- * RXFIFO as RXENTRIES reports words; completion is CTRL.STATUS going to 1.
- *
- * @note INTEN is left alone -- this driver never enables MSPI interrupts, so
- *       there is nothing to save and restore.
- * @param instr    2-byte octal-DDR opcode
- * @param addr     device address (byte address, or MR number for reg access)
- * @param data     word buffer in/out, may be NULL when n_bytes is 0
- * @param n_bytes  data phase length
- * @param is_read  non-zero for RX (adds turnaround + write-latency enable)
- */
 static tiku_psram_err_t psram_pio2(uint16_t instr, uint32_t addr,
                                    uint32_t *data, uint32_t n_bytes,
                                    int is_read, int wlat);
 
+/** @brief psram_pio2() with ENWLAT for reads only (MR writes need none). */
 static tiku_psram_err_t psram_pio(uint16_t instr, uint32_t addr,
                                   uint32_t *data, uint32_t n_bytes,
                                   int is_read)
 {
-    /* Register commands: no write latency on TX (MR writes take data
-     * immediately) -- proven by MR programming round-trips. */
     return psram_pio2(instr, addr, data, n_bytes, is_read, is_read ? 1 : 0);
 }
 
+/**
+ * @brief Run one PIO command: opcode, address and an optional data phase.
+ *
+ * As am_hal_mspi_blocking_transfer's PIO path: INSTR and ADDR are staged, one
+ * CTRL write with START launches it, RX words drain as RXENTRIES reports
+ * them, and CTRL.STATUS = 1 marks completion.  INTEN is not touched.
+ *
+ * @param instr    2-byte octal-DDR opcode
+ * @param addr     device address (byte address, or MR number for reg access)
+ * @param data     word buffer in/out, may be NULL when n_bytes is 0
+ * @param n_bytes  data phase length
+ * @param is_read  non-zero for RX (turns the bus around)
+ * @param wlat     non-zero to apply the write-latency count (ENWLAT)
+ * @return TIKU_PSRAM_OK, ERR_ARG while XIP is on, or ERR_TIMEOUT
+ */
 static tiku_psram_err_t psram_pio2(uint16_t instr, uint32_t addr,
                                    uint32_t *data, uint32_t n_bytes,
                                    int is_read, int wlat)
 {
     uint32_t ctrl = 0u;
 
-    /* HARD GUARD, measured the hard way: a PIO command issued while the XIP
-     * aperture is enabled deadlocks the controller's APB interface -- the
-     * whole peripheral becomes unreadable and the first wedge of this
-     * bring-up needed a physical power cycle.  PIO and XIP never mix. */
+    /* A PIO command issued while the XIP aperture is enabled deadlocks the
+     * controller's APB interface: the peripheral stays unreadable until a
+     * power cycle. */
     if (MSPI0->DEV0XIP_b.XIPEN0 != 0u) {
         return TIKU_PSRAM_ERR_ARG;
     }
-    /* FIFO traffic is in whole 32-bit words, but a transfer length need not
-     * be a multiple of four -- the device reset carries a 2-byte payload.
-     * TX must therefore round UP (a truncating divide sends nothing at all
-     * while XFERBYTES still promises data, and the controller waits forever
-     * -- the first bring-up's timeout); RX reads the whole words then takes
-     * the leftover bytes from one final word. */
+    /* The FIFO moves whole 32-bit words, but a length need not be a multiple
+     * of four (the device reset sends 2 bytes).  TX rounds up: XFERBYTES
+     * promises the bytes, and with no word in the FIFO the controller waits
+     * forever.  RX takes the leftover bytes from one final word. */
     uint32_t full_words = n_bytes / 4u;
     uint32_t leftover   = n_bytes - (full_words * 4u);
     uint32_t tx_words   = full_words + ((leftover != 0u) ? 1u : 0u);
@@ -316,44 +280,33 @@ static tiku_psram_err_t psram_pio2(uint16_t instr, uint32_t addr,
     ctrl |= MSPI0_CTRL_SENDA_Msk;      /* octal DDR always sends an address */
     ctrl |= MSPI0_CTRL_START_Msk;
     if (is_read) {
-        /* TXRX = 0 IS RECEIVE.  Bug #8 of this bring-up and the root cause
-         * of both terminal symptoms: the vendor enum is AM_HAL_MSPI_RX = 0,
-         * AM_HAL_MSPI_TX = 1, and this driver had it inverted -- so every
-         * "read" was issued as a TRANSMIT (completes instantly, captures
-         * nothing: the eternally-empty RX FIFO) and every "write" as a
-         * RECEIVE (in DQS mode, waits forever for a strobe the device was
-         * never asked to send: the eternal BUSY stall).  Found by halting
-         * the vendor's own example after its reset command and seeing
-         * CTRL.TXRX = 1 on a WRITE.  A read needs the bus turned around and
-         * the write-latency count applied (vendor sets both). */
+        /* TXRX = 0 is receive (AM_HAL_MSPI_RX = 0, AM_HAL_MSPI_TX = 1).  A
+         * read issued as a transmit completes at once and captures nothing;
+         * a write issued as a receive waits in DQS mode for a strobe that
+         * never comes.  A read turns the bus around (ENTURN) and, with
+         * @p wlat, applies the latency count (ENWLAT), as the vendor does. */
         ctrl |= MSPI0_CTRL_ENTURN_Msk;
         if (wlat) { ctrl |= MSPI0_CTRL_ENWLAT_Msk; }
     } else {
         ctrl |= (1u << MSPI0_CTRL_TXRX_Pos) & MSPI0_CTRL_TXRX_Msk;
-        /* ARRAY writes must insert the device's write latency; the bit-bang
-         * arbiter measured data landing 8 bytes early without it (physical
-         * 0x4000 held byte index 8 of the stream).  Register writes pass
-         * wlat=0: MRs take data immediately. */
+        /* Array writes apply the device's write latency; without it the
+         * stored data is shifted by 8 bytes.  Register writes pass wlat = 0:
+         * MRs take data at once. */
         if (wlat) { ctrl |= MSPI0_CTRL_ENWLAT_Msk; }
     }
 
-    /* NO FIFORESET HERE, deliberately, and it was tried: pulsing FIFORESET
-     * before each command (its documented "manually flush the FIFO" use)
-     * makes even the WRITE path hang -- the transfer state machine does not
-     * survive it mid-stream.  Stale-FIFO risk is handled by draining after
-     * completion instead. */
+    /* FIFORESET is not pulsed here: pulsed before a command it hangs even
+     * the write path, because the transfer state machine does not survive
+     * it.  No drain runs after completion either: a read takes its words as
+     * they arrive, below, and words a timed-out read leaves in the RX FIFO
+     * stay there. */
     MSPI0->INTCLR = 0xFFFFFFFFu;
     MSPI0->CTRL   = ctrl;
     s_dbg.ctrl_after_start = MSPI0->CTRL;
 
     if (is_read && data != (uint32_t *)0) {
-        /* Drain AS DATA ARRIVES (the vendor's shape).  Historical note: an
-         * earlier revision waited for completion first and drained after --
-         * a workaround for RXENTRIES "never" filling, which was actually
-         * bug #8's reads-issued-as-transmits.  With the direction right,
-         * RXENTRIES tracks arrival normally -- and draining-as-you-go is
-         * REQUIRED, not optional: a transfer larger than the 32-word FIFO
-         * can only complete if the CPU keeps making room. */
+        /* Drain as data arrives: a transfer larger than the 32-word FIFO
+         * completes only if the CPU keeps making room. */
         uint32_t total_words = full_words + ((leftover != 0u) ? 1u : 0u);
         for (i = 0u; i < total_words; i++) {
             uint32_t w;
@@ -377,8 +330,8 @@ static tiku_psram_err_t psram_pio2(uint16_t instr, uint32_t addr,
             }
         }
     } else if (!is_read && data != (uint32_t *)0) {
-        /* Write first, then wait for room -- the vendor's order.  Waiting
-         * before the first write would stall on an empty FIFO's threshold. */
+        /* Write a word, then wait for room, as the vendor does: waiting
+         * before the first write stalls on the empty FIFO's threshold. */
         for (i = 0u; i < tx_words; i++) {
             MSPI0->TXFIFO = data[i];
             if (i == 0u) {
@@ -424,23 +377,18 @@ static tiku_psram_err_t psram_power_on(void)
 
 /** @brief Table-1 step 2: select and enable the MSPI0 IO clock.
  *
- * TWO STEPS, and the first is easy to miss: the oscillator block must be FORCED
- * ON before a peripheral can clock from it.  Without CLKGEN.MISC.FRCHFRC the
- * MSPI's IO clock branch has no source and every transfer times out. */
+ * The source oscillator is forced on first (CLKGEN.MISC.FRCHFRC or FRCHFRC2):
+ * without it the IO clock has no source and every transfer times out.
+ * Returns TIKU_PSRAM_ERR_CLOCK if the enable does not read back set. */
 static tiku_psram_err_t psram_ioclk_on(uint8_t sel)
 {
     uint32_t v;
 
-    /* THE VENDOR'S CLKGEN.MISC STATE, replicated.  Breakpointing the
-     * vendor's own example at its ID-read moment (the experiment that ended
-     * this hunt) showed its DEV0* configuration essentially identical to
-     * this one -- but CLKGEN.MISC = 0x08FBBFC1 against 0x08000021 here.  The
-     * difference is the clock-gate-enable + power-on-clock chicken-bit block
-     * that am_hal_pwrctrl_low_power_init() writes at vendor boot and this
-     * port's bare-metal boot never has.  Replicated verbatim: bits 6-13 and 15-17
-     * (PWRONCLKEN family), 19-23 (clock-gate enables, including the APB DMA
-     * CPU clock gate), AXIXACLKENOVRRIDE (14) explicitly cleared, exactly as
-     * the vendor leaves them. */
+    /* The vendor's boot (am_hal_pwrctrl_low_power_init()) sets clock-gate
+     * and power-on-clock bits in CLKGEN.MISC that this port's boot does not.
+     * They are set here as the vendor leaves them: bits 6-13 and 15-17
+     * (PWRONCLKEN family) and 19-23 (clock-gate enables, including the APB
+     * DMA CPU clock gate) set, AXIXACLKENOVRRIDE (14) clear. */
     {
         uint32_t misc = CLKGEN->MISC;
         misc |= 0x00FBBFC0u;
@@ -449,10 +397,8 @@ static tiku_psram_err_t psram_ioclk_on(uint8_t sel)
         __DSB();
     }
 
-    /* Force the oscillator block this source comes from.  Both are left on
-     * afterwards: releasing them belongs to the M4 lifecycle verb, together
-     * with the controller domain, not to a helper that only knows it needs a
-     * clock right now. */
+    /* Force on the oscillator this source comes from.  It is left on here;
+     * releasing it belongs with powering the controller domain down. */
     if (sel == IOCLK_SEL_HFRC2_250MHZ) {
         CLKGEN->MISC |= CLKGEN_MISC_FRCHFRC2_Msk;
     } else {
@@ -470,15 +416,14 @@ static tiku_psram_err_t psram_ioclk_on(uint8_t sel)
     __DSB();
     tiku_cpu_ambiq_delay_us(10u);      /* vendor's settle after the enable */
 
-    /* A clock is trusted only after the enable is seen to have stuck --
-     * the same discipline the STIMER reclock work forced on this port. */
+    /* The enable must read back set. */
     if ((CLKGEN->MSPIIOCLKCTRL & CLKGEN_MSPIIOCLKCTRL_MSPI0IOCLKEN_Msk) == 0u) {
         return TIKU_PSRAM_ERR_CLOCK;
     }
     return TIKU_PSRAM_OK;
 }
 
-/** @brief Table-1 steps 3-15: the controller, with the pads still GPIO. */
+/** @brief Table-1 steps 3-15: configure the controller for clock row @p c. */
 static void psram_controller_config(const psram_clk_t *c)
 {
     uint32_t cfg;
@@ -486,16 +431,12 @@ static void psram_controller_config(const psram_clk_t *c)
                                        : (s_nodqs ? PSRAM_TURNAROUND_NODQS
                                                   : (uint32_t)s_turnaround);
 
-    /* Step 3: the SDR250 tap, before DEV0CFG so CLKDIV means what it says. */
+    /* Step 3: the SDR250 tap, set before the DEV0CFG divider. */
     MSPI0->DEV0CFG1_b.SDR250EN0 = c->sdr250;
 
-    /* Step 4+5: command format, clock divider, bus width, in ONE write --
-     * DEV0CFG holds all of it and a read-modify-write per field would let
-     * the controller see intermediate combinations. */
-    /* Every field below uses the register header's own enum name.  Four of
-     * these were wrong on the first attempt because they were derived from
-     * the order values appear in vendor code instead of read from the
-     * encoding table -- see the file header's note. */
+    /* Steps 4 and 5: command format, clock divider and bus width in one
+     * DEV0CFG write, so the controller never sees a partial combination.
+     * Enumerated fields use the register header's enum names. */
     cfg  = ((uint32_t)MSPI0_DEV0CFG_ASIZE0_A4 << MSPI0_DEV0CFG_ASIZE0_Pos)
            & MSPI0_DEV0CFG_ASIZE0_Msk;
     cfg |= ((uint32_t)MSPI0_DEV0CFG_ISIZE0_I16 << MSPI0_DEV0CFG_ISIZE0_Pos)
@@ -506,11 +447,9 @@ static void psram_controller_config(const psram_clk_t *c)
            & MSPI0_DEV0CFG_WRITELATENCY0_Msk;
     cfg |= ((uint32_t)c->clkdiv << MSPI0_DEV0CFG_CLKDIV0_Pos)
            & MSPI0_DEV0CFG_CLKDIV0_Msk;
-    /* SPI mode 0: CPOL = CPHA = 0.  RXNEG = RXCAP = 0 at every speed per
-     * the vendor; TXNEG comes from the clock row.  The RX knobs are
-     * overridable because the capture point is being HUNTED -- the device is
-     * proven alive (bit-bang reads MR1=0x8D) while the controller captures
-     * nothing, so the wrongness is in these bits or their DEV0CFG1 cousins. */
+    /* SPI mode 0: CPOL = CPHA = 0.  TXNEG comes from the clock row.  The
+     * vendor uses RXNEG = RXCAP = 0 at every speed; tiku_psram_set_rx() can
+     * override them. */
     if (c->txneg) { cfg |= MSPI0_DEV0CFG_TXNEG0_Msk; }
     if (s_rxneg)  { cfg |= MSPI0_DEV0CFG_RXNEG0_Msk; }
     if (s_rxcap)  { cfg |= MSPI0_DEV0CFG_RXCAP0_Msk; }
@@ -531,9 +470,8 @@ static void psram_controller_config(const psram_clk_t *c)
         (((uint32_t)PSRAM_CMD_WRITE << MSPI0_DEV0INSTR_WRITEINSTR0_Pos)
           & MSPI0_DEV0INSTR_WRITEINSTR0_Msk);
 
-    /* Step 9+10: XIP framing.  Programmed now even though the aperture is
-     * not enabled until M3 -- the fields live in the same register as the
-     * mixed-mode select and the vendor programs them together. */
+    /* Steps 9 and 10: XIP framing, in the register that holds the
+     * mixed-mode select; tiku_psram_xip_enable() turns the aperture on. */
     MSPI0->DEV0XIP_b.XIPMIXED0       = 0u;   /* NORMAL for octal DDR        */
     MSPI0->DEV0XIP_b.XIPACK0         = MSPI0_DEV0XIP_XIPACK0_TERMINATE;
     MSPI0->DEV0XIP_b.XIPSENDA0       = 1u;
@@ -543,41 +481,20 @@ static void psram_controller_config(const psram_clk_t *c)
     MSPI0->DEV0XIP_b.XIPENWLAT0      = 1u;
     MSPI0->DEV0XIP_b.XIPWRITELATENCY0 = s_writelat;
 
-    /* Step 11: 1 KB DMA boundary -- the device's row boundary.
-     *
-     * DMATIMELIMIT stays at the vendor's 40, and the A/B that decided it is
-     * worth keeping: DMA throughput clamps at ~50 MB/s per KB-boundary
-     * (clock-independent: 96 and 192 MHz within 10 %; chunk-independent:
-     * 16 KB = 64 KB), i.e. ~17 us of per-kilobyte machinery.  Suspecting a
-     * pause knob, TIMELIMIT=2 was tried: dma-write COLLAPSED 58x and an
-     * integrity leg failed -- the field is a CE-window limit, and small
-     * values fragment every burst into command-overhead confetti.  40 is
-     * the proven setting; the per-KB cost is an accepted open question for
-     * the CQ path (the vendor's own bandwidth example uses the command
-     * queue, not plain DMA). */
+    /* Step 11: 1 KB DMA boundary, the device's row boundary.  DMATIMELIMIT
+     * is the vendor's 40: it limits the CE window, and a small value splits
+     * every burst into command overhead. */
     MSPI0->DEV0BOUNDARY_b.DMABOUND0     = MSPI0_DEV0BOUNDARY_DMABOUND0_BREAK1K;
     MSPI0->DEV0BOUNDARY_b.DMATIMELIMIT0 = 40u;
 
-    /* Step 12: DQS receive -- delay-line taps FROM SILICON, NOT FROM THE SDK
-     * SOURCE.  The device driver's struct says TxDQSDelay=0 / RxDQSDelay=16,
-     * but the vendor's own prebuilt example, halted on THIS board after a
-     * successful bring-up, reads back DEV0DDR = 0x4945: TXDQSDELAY = 10,
-     * RXDQSDELAY = 18.  The datasheet (16.4.3) says TX taps delay the output
-     * SCLK relative to output data -- with 0 taps the clock edge lands on the
-     * data transition at the device, which matches the one-edge-off TX the
-     * bit-bang loopback measured.  Struct initialisers have lied twice now
-     * (TURNAROUND was the other); registers read back from working silicon
-     * do not.
-     *
-     * DQS off remains a DIAGNOSTIC mode only: the datasheet's timing chapters
-     * define DDR receive solely as "DDR with DQS", and the 176-cell capture
-     * sweep confirmed non-DQS DDR never captures on this part. */
+    /* Step 12: DQS receive.  TX taps delay the output SCLK relative to the
+     * output data (datasheet 16.4.3).  The datasheet defines DDR receive only
+     * with DQS, and without it the controller does not capture on this part,
+     * so DQS off (tiku_psram_set_dqs()) is for diagnosis only. */
     MSPI0->DEV0DDR_b.ENABLEDQS0       = s_nodqs ? 0u : 1u;
     MSPI0->DEV0DDR_b.DQSSYNCNEG0      = 0u;
     MSPI0->DEV0DDR_b.ENABLEFINEDELAY0 = 0u;
-    /* Octal-phase values from the breakpoint dump (DEV0DDR = 0x4005 at the
-     * vendor's own ID read): TX 0, RX 16.  The 10/18 pair seen in the final
-     * dump belongs to the later hex phase. */
+    /* The vendor's taps for octal mode: TX 0 and RX 16. */
     MSPI0->DEV0DDR_b.TXDQSDELAY0      = 0u;
     MSPI0->DEV0DDR_b.RXDQSDELAY0      = 16u;
     MSPI0->DEV0DDR_b.RXDQSDELAYNEG0   = 0u;
@@ -588,8 +505,8 @@ static void psram_controller_config(const psram_clk_t *c)
     MSPI0->DEV0DDRDLYEXT_b.RXDQS0PDLYEXT0 = 0u;
     MSPI0->DEV0DDRDLYEXT_b.RXDQS0NDLYEXT0 = 0u;
 
-    /* Step 13: RX sampling.  Vendor values for this device; not guesses,
-     * and not tunable knobs until something measures them. */
+    /* Step 13: RX sampling, the vendor's values for this device; RXSMP can
+     * be overridden through tiku_psram_set_rx(). */
     MSPI0->DEV0CFG1_b.DQSTURN0   = 2u;
     MSPI0->DEV0CFG1_b.RXSMP0     = s_rxsmp;
     MSPI0->DEV0CFG1_b.TAFOURTH0  = 1u;
@@ -601,22 +518,16 @@ static void psram_controller_config(const psram_clk_t *c)
     MSPI0->DEV0CFG1_b.SCLKRXHALT0 = 0u;
     MSPI0->DEV0CFG1_b.RXCAPEXT0  = 0u;
 
-    /* Step 14: FIFO threshold + DMA burst sizing.  DMABCOUNT was missing
-     * from the first DMA bring-up (the vendor sets it only on its CQ path);
-     * 32 is its value for every speed class. */
+    /* Step 14: FIFO threshold and DMA burst size; DMABCOUNT 32 is the
+     * vendor's value for every speed class. */
     MSPI0->THRESHOLD_b.RXTHRESH = 30u;
     MSPI0->DMABCOUNT            = 32u;
     MSPI0->DMATHRESH_b.DMATXTHRESH = 32u - 4u;
     MSPI0->DMATHRESH_b.DMARXTHRESH = 8u;
 
-    /* Step 15: no IOM is bridged through this controller.
-     *
-     * DISABLED is 15 ("No IOM selected. Signals always zero").  The vendor
-     * HAL writes 7 here via its own AM_HAL_MSPI_LINK_NONE constant, but 7 is
-     * IOM7 in this register's encoding; the header's DISABLED is what the
-     * silicon documents, so that is what this port writes.  Getting this
-     * wrong is not cosmetic: 6 selects IOM6, which on this package is the
-     * internal SPI-HCI link to the EM9305 radio die. */
+    /* Step 15: no IOM is bridged through this controller: IOMSEL =
+     * DISABLED (15, "No IOM selected").  Values 0-7 select IOM0-7; 6 is
+     * IOM6, the SPI-HCI link to the EM9305 radio die. */
     MSPI0->MSPICFG_b.IOMSEL = MSPI0_MSPICFG_IOMSEL_DISABLED;
     MSPI0->MSPICFG_b.APBCLK = MSPI0_MSPICFG_APBCLK_DIS;
     __DSB();
@@ -642,15 +553,12 @@ tiku_psram_err_t tiku_psram_init(unsigned clk)
     }
 
     trace("power");
-    /* init() ends in a DEVICE RESET, which restores the device's power-up
-     * latencies (RLC6 / WLC5) -- so the controller's live latency state must
-     * be restored to match, whatever a previous set_speed() left behind.
-     * Found by the retention gate failing 100 % after a 192 MHz session:
-     * stale WLC9 timing against a freshly-reset WLC5 device shifts every
-     * write.  Speed changes go through tiku_psram_set_speed(), which
-     * programs BOTH sides. */
+    /* Init ends in a device reset, which restores the power-up latencies
+     * (RLC6, WLC5), so the controller's counts are reset to match, whatever
+     * tiku_psram_set_speed() set before.  A stale WLC9 count against a
+     * reset WLC5 device shifts every write. */
     s_turnaround = PSRAM_TURNAROUND_DQS;   /* RLC6 * 2 */
-    s_writelat   = 10u;                    /* WLC5 * 2 -- the real default  */
+    s_writelat   = 10u;                    /* WLC5 * 2, the default         */
 
     rc = psram_power_on();
     if (rc != TIKU_PSRAM_OK) {
@@ -659,7 +567,7 @@ tiku_psram_err_t tiku_psram_init(unsigned clk)
     trace("ioclk");
     rc = psram_ioclk_on(s_clk[clk].ioclk_sel);
     if (rc != TIKU_PSRAM_OK) {
-        /* Fail closed: do not leave a powered controller with no clock. */
+        /* Power the domain back off when its clock does not start. */
         PWRCTRL->DEVPWREN &= ~PWRCTRL_DEVPWREN_PWRENMSPI0_Msk;
         return rc;
     }
@@ -763,7 +671,7 @@ tiku_psram_err_t tiku_psram_read_id(tiku_psram_id_t *out)
 
     if (!s_up) { return TIKU_PSRAM_ERR_POWER; }
 
-    /* Zero first: a partially filled report is worse than an empty one. */
+    /* Zeroed first, so the fields after a failed read report 0. */
     id.mr0 = 0u; id.mr1 = 0u; id.mr2 = 0u; id.mr3 = 0u;
     id.mr4 = 0u; id.mr8 = 0u;
     id.vendor_id = 0u; id.density_code = 0u; id.generation = 0u;
@@ -798,8 +706,7 @@ tiku_psram_err_t tiku_psram_read_id(tiku_psram_id_t *out)
                                 ? 1u : 0u);
     id.size_bytes   = psram_density_bytes(id.density_code);
 
-    /* THE GATE.  All three must hold; a plausible-looking wrong answer is
-     * the failure mode this check exists for. */
+    /* The identity gate: vendor, density and good-die must all match. */
     if (id.vendor_id != PSRAM_VID_AP_MEMORY ||
         id.density_code != PSRAM_DENSITY_512MBIT ||
         id.good_die == 0u) {
@@ -814,13 +721,11 @@ done:
 }
 
 /*---------------------------------------------------------------------------*/
-/* M2 -- MEMORY ACCESS (PIO), SPEED, TIMING SCAN                             */
+/* MEMORY ACCESS (PIO), SPEED, TIMING SCAN                                   */
 /*---------------------------------------------------------------------------*/
 
-/* One PIO transfer is bounded by the FIFO and the device's 1 KB row: chunk
- * bulk access at 256 B, well inside both.  With the direction bit finally
- * right, RXENTRIES tracks arrival and the vendor's poll-as-you-drain shape
- * works; TX paces on FIFO fullness the same way. */
+/* Bulk PIO access moves 256-byte chunks, inside the device's 1 KB row; each
+ * chunk drains or fills the 32-word FIFO as the transfer runs. */
 #define PSRAM_CHUNK 256u
 
 tiku_psram_err_t tiku_psram_mem_read(uint32_t addr, void *buf, uint32_t n)
@@ -873,9 +778,10 @@ tiku_psram_err_t tiku_psram_mem_write(uint32_t addr, const void *buf, uint32_t n
 /**
  * @brief Program the device's MR0/MR4 latency codes for clock row @p clk.
  *
- * Must run at a clock the CURRENT codes support (i.e., before raising the
- * clock).  Read-back verifies the write landed -- an MR write is the one
- * operation whose failure would otherwise surface as a mistimed bus later.
+ * Read-modify-writes both registers and sets the controller's matching
+ * TURNAROUND and WRITELATENCY for the next psram_controller_config().
+ *
+ * @note Run at a clock the current codes support, before raising the clock.
  */
 static tiku_psram_err_t psram_program_latency(unsigned clk)
 {
@@ -895,16 +801,13 @@ static tiku_psram_err_t psram_program_latency(unsigned clk)
     rc = tiku_psram_reg_write(4u, v & 0xFFu);
     if (rc != TIKU_PSRAM_OK) { return rc; }
 
-    /* Controller-side counterparts take effect at the next init.  wlc*2
-     * exactly -- the earlier "-2 calibration" was compensating for assuming
-     * WLC6 while the device actually defaults to WLC5 (see the table). */
+    /* The controller-side counts take effect at the next
+     * psram_controller_config(); tiku_psram_init() resets them. */
     s_turnaround = (uint8_t)(L->rlc * 2u);
     s_writelat   = (uint8_t)(L->wlc * 2u);
 
-    /* Verify with the OLD timing (register reads still honour the newly
-     * programmed RLC only after... the device applies MRs immediately, so
-     * re-read with the new turnaround after reinit -- done by the caller's
-     * identity gate, not here). */
+    /* The new codes are not read back here; tiku_psram_up() reads the
+     * identity again at the new clock. */
     return TIKU_PSRAM_OK;
 }
 
@@ -914,10 +817,9 @@ tiku_psram_err_t tiku_psram_set_speed(unsigned clk)
 
     if (clk >= PSRAM_CLK_COUNT) { return TIKU_PSRAM_ERR_ARG; }
 
-    /* Sequence: at a known-good clock, program the device MRs for the
-     * TARGET clock; then reconfigure the controller at the target with the
-     * matching turnaround -- WITHOUT a device reset, which would restore
-     * default MRs and undo step one. */
+    /* At the current clock, program the device MRs for the target clock,
+     * then reconfigure the controller at the target.  No device reset in
+     * between: a reset restores the default MRs. */
     if (!s_up) {
         s_turnaround = PSRAM_TURNAROUND_DQS;
         s_writelat   = PSRAM_BRINGUP_WRITELAT;
@@ -939,8 +841,8 @@ tiku_psram_err_t tiku_psram_set_speed(unsigned clk)
 /**
  * @brief One timing-scan cell: pattern-verify @p bytes at @p rxdqs delay.
  *
- * Address-in-address plus a lane-exercising constant, split across two
- * regions (one low, one past 32 MB so the high address bits are proven).
+ * The pattern mixes the byte address with a constant, written in 512-byte
+ * chunks to two regions, one past 32 MB so the high address bits are used.
  * Returns 1 on bit-exact readback, 0 on any mismatch or transfer error.
  */
 static int psram_scan_cell(unsigned rxdqs, uint32_t bytes)
@@ -988,7 +890,7 @@ uint32_t tiku_psram_timing_scan(uint32_t *pass_mask, unsigned *center)
             run = 0u;
         }
     }
-    /* Ship the centre of the widest passing window; restore it live. */
+    /* Apply the centre of the widest passing window. */
     if (best_len != 0u) {
         unsigned c = best_start + best_len / 2u;
         MSPI0->DEV0DDR_b.RXDQSDELAY0 = (c & 0x1Fu);
@@ -1003,30 +905,25 @@ uint32_t tiku_psram_timing_scan(uint32_t *pass_mask, unsigned *center)
 }
 
 /*---------------------------------------------------------------------------*/
-/* M3 -- XIP APERTURE + DMA                                                  */
+/* XIP APERTURE AND DMA                                                      */
 /*---------------------------------------------------------------------------*/
 
 tiku_psram_err_t tiku_psram_xip_enable(int enable)
 {
     if (!s_up) { return TIKU_PSRAM_ERR_POWER; }
     if (enable) {
-        /* Aperture: base 0x60000000, 64 MB, read-write.  BASE0 encodes bits
-         * 28:16 of the offset within the region -- zero for the region start
-         * (verified against the working example: DEV0AXI reads 0x0000000A). */
+        /* Aperture at 0x60000000, 64 MB (SIZE0 = 10).  BASE0 holds bits
+         * 28:16 of the offset within the region: 0 for the region start. */
         MSPI0->DEV0AXI =
             ((10u << MSPI0_DEV0AXI_SIZE0_Pos) & MSPI0_DEV0AXI_SIZE0_Msk);
         __DSB();
         MSPI0->DEV0XIP_b.XIPEN0 = 1u;
     } else {
-        /* CLEAN AND INVALIDATE THE D-CACHE BEFORE THE APERTURE GOES AWAY.
-         * The aperture is write-back cacheable, and a session that staged a
-         * model has megabytes of its writes sitting as dirty lines.  Disable
-         * the aperture with those still resident and they evict later, under
-         * whatever code happens to be running -- an IMPRECISE bus fault with
-         * a misleading PC.  That was the `reboot` hardfault at psram_pio2
-         * (cfsr=0x400) and the wedge after `power psram down`; one
-         * mechanism, two symptoms.  Whole-cache by set/way: 64 KB of cache
-         * against 64 MB of aperture makes by-address the wrong tool. */
+        /* The aperture is write-back cacheable.  A dirty line still cached
+         * when the aperture goes away evicts later under whatever code runs,
+         * as an imprecise bus fault.  So the whole D-cache is cleaned and
+         * invalidated by set/way first: it is 64 KB against a 64 MB
+         * aperture. */
         __DSB();
         SCB_CleanInvalidateDCache();
         MSPI0->DEV0XIP_b.XIPEN0 = 0u;
@@ -1040,23 +937,13 @@ int tiku_psram_xip_enabled(void)
     return (s_up && MSPI0->DEV0XIP_b.XIPEN0 != 0u) ? 1 : 0;
 }
 
-/**
- * @brief Blocking DMA transfer between SRAM and the device.
- *
- * The plain DMA engine (not the command queue): target address, device
- * address, count, direction, enable, poll DMACPL.  Cache coherency is the
- * CALLER's job -- this moves bytes between the device and physical SRAM.
- */
-/*
- * Split form of the transfer below: arm it, go and do something else, then
- * collect it.
- *
- * The blocking call polls with a 20 us backoff, so a caller that streams a
- * weight matrix spends the whole transfer idle. Splitting start from wait
- * lets the CPU work on the previous slice while the current one lands.
- */
+/** @brief 1 while a transfer armed by tiku_psram_dma_start() is uncollected. */
 static uint32_t s_dma_busy;
 
+/*
+ * Split form of tiku_psram_dma(): arm the transfer, return, and collect it
+ * with tiku_psram_dma_wait(), so the CPU can work while the transfer runs.
+ */
 tiku_psram_err_t tiku_psram_dma_start(uint32_t dev_addr, void *sram,
                                       uint32_t n, int to_device)
 {
@@ -1081,8 +968,8 @@ tiku_psram_err_t tiku_psram_dma_start(uint32_t dev_addr, void *sram,
 /**
  * @brief Collect a transfer armed by tiku_psram_dma_start().
  *
- * @note Spins without a backoff: the caller has already done its work and
- *       any sleep here is pure added latency.
+ * Spins without a backoff, for up to 40000000 polls.  A DMA error returns
+ * TIKU_PSRAM_ERR_TIMEOUT.
  */
 tiku_psram_err_t tiku_psram_dma_wait(void)
 {
@@ -1104,6 +991,11 @@ tiku_psram_err_t tiku_psram_dma_wait(void)
     return TIKU_PSRAM_OK;
 }
 
+/*
+ * Blocking DMA on the plain DMA engine (tiku_psram_cq_xfer() drives the
+ * command queue): target address, device address, count, direction, enable,
+ * then poll DMACPL.  Cache coherency is the caller's job.
+ */
 tiku_psram_err_t tiku_psram_dma(uint32_t dev_addr, void *sram, uint32_t n,
                                 int to_device)
 {
@@ -1124,8 +1016,8 @@ tiku_psram_err_t tiku_psram_dma(uint32_t dev_addr, void *sram, uint32_t n,
         ((to_device ? 1u : 0u) << MSPI0_DMACFG_DMADIR_Pos);
     __DSB();
 
-    /* Backoff poll -- same reason as the CQ wait: the tight spin WAS the
-     * bandwidth plateau. */
+    /* Poll with a 20 us backoff: a tight poll is APB traffic into the
+     * controller doing the transfer and limits its throughput. */
     while (((MSPI0->DMASTAT &
              (MSPI0_DMASTAT_DMACPL_Msk | MSPI0_DMASTAT_DMAERR_Msk)) == 0u)
            && --spins != 0u) {
@@ -1142,36 +1034,30 @@ tiku_psram_err_t tiku_psram_dma(uint32_t dev_addr, void *sram, uint32_t n,
 }
 
 /*---------------------------------------------------------------------------*/
-/* M3.5 -- COMMAND QUEUE: hardware-chained DMA segments                      */
+/* COMMAND QUEUE: HARDWARE-CHAINED DMA SEGMENTS                              */
 /*---------------------------------------------------------------------------*/
 
 /*
- * TABLE 3 -- THE CQ ENTRY (transcribed from am_hal_mspi.c's
- * am_hal_mspi_cq_dma_entry_t and the am_hal_cmdq engine):
+ * TABLE 3 -- THE CQ ENTRY (am_hal_mspi.c's am_hal_mspi_cq_dma_entry_t and the
+ * am_hal_cmdq engine).
  *
  * The CQ hardware fetches 8-byte {register-address, value} pairs from SRAM
- * at CQADDR and performs each as a register write.  Two special behaviours
- * make chained DMA work with no CPU in the seams:
+ * at CQADDR and performs each as a register write.  Two behaviours chain the
+ * DMA segments with no CPU between them:
  *
- *   1. A write to DMACFG while a DMA is in progress STALLS THE ENGINE until
- *      that DMA completes -- so the vendor's per-segment tail write of
- *      DMAEN=0 is simultaneously the completion wait and the teardown, and
- *      the next segment's writes follow with no software involvement.
- *   2. CQPAUSE holds a condition mask evaluated against CQFLAGS; the mask
- *      bit CQIDX ("CURIDX == ENDIDX") makes the engine pause exactly when
- *      it runs out of posted work.  A queue-borne write to CQCURIDX is how
- *      a block marks its own retirement.
+ *   1. A write to DMACFG while a DMA is in progress stalls the engine until
+ *      that DMA completes, so the per-segment tail write of DMAEN=0 is both
+ *      the completion wait and the teardown.
+ *   2. CQPAUSE holds a condition mask evaluated against CQFLAGS; the CQIDX
+ *      bit ("CURIDX == ENDIDX") pauses the engine when it runs out of posted
+ *      work.  A queue-borne write to CQCURIDX marks the block retired.
  *
- * One segment, verbatim from the vendor (8 pairs, 64 bytes):
- *      CQPAUSE    := pause mask (IDX)      DMATARGADDR := sram
- *      CQPAUSE    := pause mask (IDX)      DMADEVADDR  := device addr
- *      DMATOTCOUNT:= bytes                 DMACFG      := DIR|PRI|EN=3
- *      DMACFG     := EN=0   <-- the stall  CQSETCLEAR  := 0
+ * One segment, in the order tiku_psram_cq_xfer() writes it (8 pairs, 64 B):
+ *      CQPAUSE    := pause mask (IDX)      CQPAUSE     := pause mask (IDX)
+ *      DMATARGADDR:= sram                  DMADEVADDR  := device addr
+ *      DMATOTCOUNT:= bytes                 DMACFG      := DIR | EN (3)
+ *      DMACFG     := 0      <-- the stall  CQSETCLEAR  := 0
  * and the block terminator: { CQCURIDX, n_segments }.
- *
- * WHY THIS EXISTS: plain DMA measured ~50 MB/s with a ~17 us per-kilobyte
- * cost that is clock- and chunk-independent -- CPU-visible seams.  This
- * engine is the vendor's only bulk path and removes every seam.
  */
 
 #define CQ_PAIRS_PER_SEG   8u
@@ -1197,7 +1083,7 @@ tiku_psram_err_t tiku_psram_cq_xfer(uint32_t dev_addr, void *sram,
     n_segs = total / seg_bytes;
     if (n_segs == 0u || n_segs > CQ_MAX_SEGS) { return TIKU_PSRAM_ERR_ARG; }
 
-    /* Build the queue: one vendor-shaped segment per chunk. */
+    /* Build the queue: one table 3 segment per chunk. */
     for (i = 0u; i < n_segs; i++) {
         uint32_t cfg_on =
             ((to_device ? 1u : 0u) << MSPI0_DMACFG_DMADIR_Pos) |
@@ -1217,9 +1103,8 @@ tiku_psram_err_t tiku_psram_cq_xfer(uint32_t dev_addr, void *sram,
     /* Terminator: retire the whole block -- behaviour 2 above. */
     s_cq[w++] = (uint32_t)&MSPI0->CQCURIDX;        s_cq[w++] = n_segs;
 
-    /* The ENGINE reads these pairs as a bus master: clean them from the
-     * D-cache or it executes stale descriptors -- the GPU command-list
-     * lesson verbatim. */
+    /* The engine reads these pairs as a bus master, so they are cleaned
+     * from the D-cache; a dirty line leaves it running stale descriptors. */
     tiku_cpu_dcache_clean(s_cq, w * 4u);
     __DSB();
 
@@ -1233,14 +1118,10 @@ tiku_psram_err_t tiku_psram_cq_xfer(uint32_t dev_addr, void *sram,
                     | (1u << MSPI0_CQCFG_CQPRI_Pos);
     __DSB();
 
-    /* Done when the queue-borne CQCURIDX write lands AND the last DMA has
-     * been torn down.  POLL WITH BACKOFF: a tight spin on these registers is
-     * itself APB traffic into the very controller doing the work, and the
-     * plateau hunt found the smoking gun in its own hand -- throughput was
-     * invariant under clock, chunk, engine, DMATIMELIMIT and DMABOUND, i.e.
-     * under everything except the CPU hammering the register file during the
-     * transfer.  ~50 us between glances costs at most one glance of latency
-     * and takes the reader off the bus. */
+    /* Done when the queue-borne CQCURIDX write has taken effect and the last
+     * DMA is torn down.  The poll waits 50 us between reads: a tight poll is
+     * APB traffic into the controller doing the transfer and limits its
+     * throughput. */
     while (((MSPI0->CQCURIDX & 0xFFu) != n_segs ||
             (MSPI0->DMASTAT & MSPI0_DMASTAT_DMATIP_Msk) != 0u)
            && --spins != 0u) {
@@ -1261,22 +1142,20 @@ tiku_psram_err_t tiku_psram_cq_xfer(uint32_t dev_addr, void *sram,
 }
 
 /*---------------------------------------------------------------------------*/
-/* M4 -- LIFECYCLE: up / down / half sleep, and the memory tier              */
+/* LIFECYCLE: UP, DOWN, HALF SLEEP AND THE MEMORY TIER                       */
 /*---------------------------------------------------------------------------*/
 
 /*
- * The GPU lesson, applied to a memory: power late, use, release -- except a
- * RAM has one state the GPU does not: HALF SLEEP, where the die keeps its
- * contents on self-refresh at microamp-class current while the interface
- * sleeps.  So the ladder is:
+ * Three states:
  *
- *   down    domain off, tier detached, contents GONE
- *   asleep  contents RETAINED, tier stays attached, every access refused
+ *   down    domain off, tier detached, contents lost
+ *   asleep  half sleep: the die keeps its contents on self-refresh at
+ *           microamp-class current; tier stays attached, every access refused
  *   up      mapped at 0x60000000, tier attached, full speed
  *
- * Transcribed timing (vendor, APS25616BA_tHS/tXHS with margin): 155 us into
- * and out of half sleep.  Enter = write MR6 = 0xF0 (one byte); exit on this
- * part = any dummy command to pulse CE, then the wake delay.
+ * Half sleep takes 155 us to enter and to leave (the vendor's
+ * APS25616BA_tHS/tXHS with margin).  Entry writes MR6 = 0xF0 (one byte); exit
+ * is any dummy command to pulse CE, then the same delay.
  */
 #define PSRAM_THS_US   155u
 #define PSRAM_MR6_HALFSLEEP 0xF0u
@@ -1308,7 +1187,7 @@ tiku_psram_err_t tiku_psram_wake(void)
     (void)psram_pio(0x0000u, 0u, &dummy, 2u, 0);
     tiku_cpu_ambiq_delay_us(PSRAM_THS_US);
     s_asleep = 0u;
-    /* The device is only trusted awake once it ANSWERS: identity again. */
+    /* The wake succeeds only if the identity reads back. */
     rc = tiku_psram_read_id((tiku_psram_id_t *)0);
     return rc;
 }
@@ -1334,7 +1213,7 @@ tiku_psram_err_t tiku_psram_up(unsigned clk, int scan)
     if (rc != TIKU_PSRAM_OK) { return rc; }
     if (scan) {
         if (tiku_psram_timing_scan((uint32_t *)0, (unsigned *)0) == 0u) {
-            return TIKU_PSRAM_ERR_TIMEOUT; /* no passing tap: do not ship   */
+            return TIKU_PSRAM_ERR_TIMEOUT; /* no passing tap                */
         }
     }
     rc = tiku_psram_xip_enable(1);
@@ -1342,8 +1221,8 @@ tiku_psram_err_t tiku_psram_up(unsigned clk, int scan)
     if (tiku_tier_attach_psram((void *)TIKU_PSRAM_XIP_BASE,
                                (tiku_mem_arch_size_t)TIKU_PSRAM_SIZE_BYTES)
             != TIKU_MEM_OK) {
-        /* Already attached is fine on a re-up; anything else is not, but the
-         * attach only fails on double-attach or bad args here. */
+        /* Ignored: on a re-up the tier is already attached.  Any other
+         * attach failure is ignored as well. */
     }
     return TIKU_PSRAM_OK;
 }
@@ -1360,20 +1239,24 @@ tiku_psram_err_t tiku_psram_down(int force)
 }
 
 /*---------------------------------------------------------------------------*/
-/* M3 -- PSRAMBENCH: the bandwidth numbers everything else consumes          */
+/* PSRAM BANDWIDTH BENCH                                                     */
 /*---------------------------------------------------------------------------*/
 
 /*
- * DWT-timed, work-denominated, checksum-gated -- the mrambench pattern.
- * Every leg reports bytes moved and a checksum verdict; a leg that cannot
- * prove its bytes were the right bytes reports FAIL, not a bandwidth.
+ * Each leg is timed on DWT CYCCNT and prints bytes moved, time, MB/s and a
+ * verdict.  dma-rd*, cq-rd16k and xip-read compare a checksum and the cq-wr
+ * legs fail on a transfer error; xip-write, dma-write and random512 always
+ * print bit-exact.
  *
- * Legs, chosen for what the LLM design actually needs to know:
- *   xip-read   CPU streaming reads through the aperture (weights per token)
- *   xip-write  CPU streaming writes (staging a model into the tier)
- *   dma-read   device -> SRAM engine transfers (bulk load path)
- *   dma-write  SRAM -> device
- *   random     512 B reads at pseudo-random offsets (the PLE table shape)
+ *   xip-write   CPU streaming stores through the aperture
+ *   dma-rd16k   device -> SRAM DMA in 16 KB and 64 KB transfers
+ *   dma-rd64k
+ *   dma-write   SRAM -> device DMA, inverted pattern
+ *   cq-wr16k    SRAM -> device through the command queue, 16 KB and
+ *   cq-wr64k    64 KB segments
+ *   cq-rd16k    device -> SRAM through the command queue
+ *   xip-read    CPU streaming loads through the aperture
+ *   random512   512 B reads at pseudo-random offsets across the 64 MB
  */
 
 extern unsigned long tiku_cpu_ambiq_clock_get_hz(void);
@@ -1382,6 +1265,7 @@ extern unsigned long tiku_cpu_ambiq_clock_get_hz(void);
 #define BENCH_BUF   65536u
 static uint8_t s_bench_buf[BENCH_BUF] __attribute__((aligned(32)));
 
+/** @brief Enable DWT CYCCNT, saving DEMCR and DWT_CTRL; returns CYCCNT. */
 static uint32_t bench_cycles_begin(uint32_t *demcr0, uint32_t *ctl0)
 {
     volatile uint32_t *demcr  = (volatile uint32_t *)0xE000EDFCUL;
@@ -1393,11 +1277,12 @@ static uint32_t bench_cycles_begin(uint32_t *demcr0, uint32_t *ctl0)
     return *cyccnt;
 }
 
+/** @brief Print one leg: KB moved, microseconds, MB/s and the verdict. */
 static void bench_report(const char *leg, uint32_t bytes, uint32_t cyc,
                          int exact)
 {
     unsigned long hz = tiku_cpu_ambiq_clock_get_hz();
-    /* MB/s = bytes * (hz / cyc) / 1e6, ordered to keep 32-bit-safe. */
+    /* kbps is thousands of bytes per second, printed as MB/s to 3 places. */
     unsigned long kbps = (unsigned long)(((uint64_t)bytes * hz) /
                                          ((uint64_t)cyc * 1000u));
     SHELL_PRINTF("  %-9s %7lu KB  %8lu us  %6lu.%03lu MB/s  %s\n", leg,
@@ -1407,12 +1292,13 @@ static void bench_report(const char *leg, uint32_t bytes, uint32_t cyc,
                  exact ? "bit-exact" : "FAIL");
 }
 
-/** Pattern byte for absolute device address @p a -- shared by every leg. */
+/** @brief Pattern byte for device address @p a, shared by every leg. */
 static inline uint8_t bench_pat(uint32_t a)
 {
     return (uint8_t)(a ^ (a >> 8) ^ (a >> 16) ^ 0xC3u);
 }
 
+/** @brief Run the PSRAM bandwidth bench and print one line per leg. */
 void tiku_psram_bench_run(void)
 {
     volatile uint8_t *ap = (volatile uint8_t *)TIKU_PSRAM_XIP_BASE;
@@ -1444,14 +1330,13 @@ void tiku_psram_bench_run(void)
     tiku_cpu_dcache_clean((const void *)ap, BENCH_SPAN);
     t1 = *cyccnt;
     tiku_hang_checkin();
-    /* Verified by the DMA-read leg below, which bypasses the cache. */
+    /* The dma-rd legs check the last tile of what this leg wrote. */
     bench_report("xip-write", BENCH_SPAN, t1 - t0, 1);
 
     /* ---- leg 2: DMA READ back (device -> SRAM) -------------------------- */
-    /* Timing covers the DMA ONLY; the checksum runs untimed afterwards on
-     * the final tile (each tile overwrites the buffer, so the earlier tiles
-     * are verified implicitly by leg 4's full-span checksum instead).  Two
-     * chunk sizes expose the per-operation overhead. */
+    /* Only the DMA is timed.  Each tile overwrites the buffer, so the
+     * checksum, run untimed afterwards, covers the final tile only.  The two
+     * chunk sizes show the per-transfer overhead. */
     (void)tiku_psram_xip_enable(0);
     {
         static const uint32_t chunks[2] = { 16384u, 65536u };
@@ -1493,10 +1378,10 @@ void tiku_psram_bench_run(void)
     t1 = *cyccnt;
     bench_report("dma-write", BENCH_SPAN, t1 - t0, 1);
 
-    /* ---- leg 3b: CQ chained transfers -- the M3.5 measurement ----------- */
-    /* Same span, same verification style: the write leg re-lays the SAME
-     * inverted pattern (so leg 4's expected checksum stays true), the read
-     * leg is verified on its final tile. */
+    /* ---- leg 3b: CQ chained transfers ---------------------------------- */
+    /* The write legs lay the same inverted pattern as leg 3, so leg 4's
+     * expected checksum still holds; the read leg is checked on its final
+     * tile. */
     {
         static const uint32_t cq_seg[2] = { 16384u, 65536u };
         uint32_t c2;
@@ -1510,11 +1395,9 @@ void tiku_psram_bench_run(void)
                 s_bench_buf[i] = (uint8_t)~bench_pat(i % 16384u);
             }
             tiku_cpu_dcache_clean(s_bench_buf, BENCH_BUF);
-            /* Move the WHOLE span: BENCH_BUF per call, chained segments of
-             * @p seg inside each call.  (The first cut of this leg moved one
-             * buffer per outer step and divided the full span by its time --
-             * reporting 872 MB/s on a 384 MB/s wire.  Impossible numbers are
-             * bugs; the denominator must be bytes actually moved.) */
+            /* Each call moves BENCH_BUF in segments of seg bytes, and the
+             * loop covers the whole span, so the bytes reported are the bytes
+             * moved. */
             t0 = *cyccnt;
             for (off = 0u; off < BENCH_SPAN; off += BENCH_BUF) {
                 if (tiku_psram_cq_xfer(off, s_bench_buf, BENCH_BUF,
@@ -1525,10 +1408,9 @@ void tiku_psram_bench_run(void)
             bench_report((c2 == 0u) ? "cq-wr16k" : "cq-wr64k",
                          BENCH_SPAN, t1 - t0, exact);
         }
-        /* CQ read: 1 MB in one call of 64 x 16 K segments into the 64 K
-         * buffer round-robin?  The engine writes tiles over each other in
-         * SRAM -- acceptable for a BANDWIDTH leg; verification reads the
-         * final tile only, like dma-read. */
+        /* CQ read: the span in 64 KB calls of four 16 KB segments, each call
+         * overwriting the last in the 64 KB buffer; the checksum covers the
+         * final buffer only, as in dma-read. */
         exact = 1;
         t0 = *cyccnt;
         for (off = 0u; off < BENCH_SPAN; off += (64u * 16384u)) {
@@ -1564,14 +1446,14 @@ void tiku_psram_bench_run(void)
     }
     t1 = *cyccnt;
     tiku_hang_checkin();
-    /* Leg 3 wrote ~pattern over the span through BENCH_BUF-sized tiles. */
+    /* Legs 3 and 3b wrote the inverted pattern in BENCH_BUF tiles. */
     expect = 0u;
     for (off = 0u; off < BENCH_SPAN; off++) {
         expect += (uint8_t)~bench_pat(off % 16384u);
     }
     bench_report("xip-read", BENCH_SPAN, t1 - t0, sum == expect);
 
-    /* ---- leg 5: random 512 B reads through XIP (the PLE table shape) ---- */
+    /* ---- leg 5: random 512 B reads through XIP ------------------------- */
     {
         uint32_t lcg = 0x2026u, n_reads = 2048u, r;
         static uint8_t tmp[512];
@@ -1596,7 +1478,7 @@ void tiku_psram_bench_run(void)
     }
     (void)tiku_psram_xip_enable(0);
 
-    /* restore the DWT state the boot tidy chose */
+    /* restore the DWT state saved at the start */
     {
         volatile uint32_t *demcr  = (volatile uint32_t *)0xE000EDFCUL;
         volatile uint32_t *dwtctl = (volatile uint32_t *)0xE0001000UL;
@@ -1606,28 +1488,25 @@ void tiku_psram_bench_run(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* BIT-BANG PROBE -- the controller-free ground truth                        */
+/* BIT-BANG PROBE (no MSPI controller)                                       */
 /*---------------------------------------------------------------------------*/
 
 /*
- * Drives the octal-DDR register-read waveform with plain GPIO, no MSPI
- * involvement whatsoever.  Exists because after seven fixed bugs the
- * controller path still returns nothing, and every remaining hypothesis
- * needs the one fact only the wire can give: IS THE DEVICE ALIVE, and does
- * it answer an octal command?  A slow manual waveform sidesteps every
- * timing question -- in DDR the device changes data once per edge, so at
- * microsecond edge rates the data sits stable for sampling.
+ * Drives the octal-DDR command waveform with plain GPIO, without the MSPI
+ * controller, to show whether the device answers an octal command.  The
+ * device changes data once per edge, so at microsecond edge rates the data
+ * sits stable for sampling and no timing setting is involved.
  *
- * The read does not guess the latency: it clocks 32 edges after the address
- * and reports ALL of them.  The mode registers appear somewhere in that
- * stream if the device answers; all-zeros or all-ones means it does not.
- * (tCEM, the DRAM refresh bound on CE-low time, is violated at this speed
- * -- harmless for a REGISTER read; nothing here touches the array.)
+ * The read assumes no latency: it clocks n_edges edges after the address and
+ * reports every sample.  A device that answers puts its data somewhere in
+ * that stream; all zeros or all ones means it does not.  At these rates CE
+ * stays low longer than tCEM, the bound that lets the die refresh its array.
  */
 
-#define BB_GPIO_OUT   (3u | (1u << 8) | (1u << 4))   /* GPIO fn, push-pull, INPEN */
-#define BB_GPIO_IN    (3u | (1u << 4))                /* GPIO fn, input only       */
+#define BB_GPIO_OUT   (3u | (1u << 8) | (1u << 4))  /* GPIO, push-pull, INPEN */
+#define BB_GPIO_IN    (3u | (1u << 4))               /* GPIO, input only      */
 
+/** @brief Drive pad @p pad high or low through GPIO WTS/WTC. */
 static inline void bb_set(uint32_t pad, int v)
 {
     uint32_t mask = 1u << (pad & 31u);
@@ -1635,12 +1514,14 @@ static inline void bb_set(uint32_t pad, int v)
     else   { (&GPIO->WTC0)[pad >> 5] = mask; }
 }
 
+/** @brief Sample D0-7 as one byte. */
 static inline uint32_t bb_get_d0_7(void)
 {
     /* D0-7 = GP64..71: one contiguous byte in RD2 (pads 64..95). */
     return (&GPIO->RD0)[2] & 0xFFu;
 }
 
+/** @brief Drive @p b onto D0-7, bit n on Dn. */
 static void bb_drive_byte(uint8_t b)
 {
     uint32_t pad;
@@ -1649,14 +1530,14 @@ static void bb_drive_byte(uint8_t b)
     }
 }
 
+/** @brief Wait about 1 us at 96 MHz, far above any DDR minimum timing. */
 static inline void bb_dwell(void)
 {
-    /* ~1 us at 96 MHz: far slower than any DDR timing requirement. */
     uint32_t n = 100u;
     while (n--) { __asm__ volatile ("nop"); }
 }
 
-/** Clock one DDR edge with @p b driven on D0-7 (TX phase). */
+/** @brief Clock one DDR edge with @p b driven on D0-7 (TX phase). */
 static void bb_tx_edge(uint8_t b, int clk_level)
 {
     bb_drive_byte(b);
@@ -1677,11 +1558,9 @@ void tiku_psram_bitbang_reg(uint32_t mr, uint8_t *edges, uint32_t n_edges)
 
 void tiku_psram_bitbang_mem(uint32_t addr, uint8_t *edges, uint32_t n_edges)
 {
-    /* Array read: same waveform with the linear-read opcode.  The device
-     * streams from @p addr after its read latency; the caller matches the
-     * sampled stream against the expected pattern to learn WHERE data
-     * physically lives -- the arbiter between a read-path and a write-path
-     * address offset. */
+    /* Array read: the same waveform with the linear-read opcode.  The device
+     * streams from @p addr after its read latency; matching the samples
+     * against a written pattern shows where the data is stored. */
     tiku_psram_bitbang_cmd(0x2020u, addr, edges, n_edges);
 }
 
@@ -1733,11 +1612,12 @@ void tiku_psram_bitbang_cmd(uint32_t opcode, uint32_t addr,
 
     bb_set(PSRAM_PAD_CE, 1);
     bb_set(PSRAM_PAD_CLK, 0);
-    /* Leave the pads as inputs; the next tiku_psram_init() reclaims them. */
+    /* Leave the pads as GPIO, data and DQS as inputs, CE high and the clock
+     * low; the next tiku_psram_init() reclaims them. */
 }
 
 /*---------------------------------------------------------------------------*/
-/* FAULT INJECTION -- so the guards can be SEEN to fire                      */
+/* DIAGNOSTICS AND FAULT INJECTION                                           */
 /*---------------------------------------------------------------------------*/
 
 void tiku_psram_regs(tiku_psram_regs_t *out)
@@ -1786,10 +1666,9 @@ tiku_psram_err_t tiku_psram_cmd_probe(uint32_t *ctrl_out)
     tiku_psram_err_t rc;
 
     if (!s_up) { return TIKU_PSRAM_ERR_POWER; }
-    /* A command with NO data phase.  If even this never clears BUSY, the
-     * controller is not driving the bus at all and no amount of device-side
-     * theorising helps; if it completes, the bus clocks and the failure is
-     * in the data phase. */
+    /* A global reset with no data phase: if it times out the controller is
+     * not driving the bus; if it completes the bus clocks, and a failing
+     * transfer fails in its data phase. */
     rc = psram_pio(PSRAM_CMD_GLOBAL_RESET, 0u, (uint32_t *)0, 0u, 0);
     if (ctrl_out) { *ctrl_out = MSPI0->CTRL; }
     return rc;
@@ -1803,9 +1682,9 @@ void tiku_psram_set_trace(void (*fn)(const char *step))
 void tiku_psram_fault_inject(int enable)
 {
     if (enable) {
-        /* Take D0 away from the controller: FNCSEL 3 is plain GPIO on these
-         * pads.  The device can no longer receive a well-formed command, so
-         * the next transfer must return an error rather than a value. */
+        /* Take D0 away from the controller (FNCSEL 3 is GPIO on these
+         * pads): the device then cannot receive a well-formed command, so
+         * the next transfer fails. */
         tiku_ambiq_gpio_pad_config(PSRAM_PAD_D0, 3u);
         s_faulted = 1u;
     } else {

@@ -5,7 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mem_arch.h - Apollo 510 memory architecture constants
+ * tiku_mem_arch.h - Ambiq memory architecture interface.
+ *
+ * Shared by the Apollo510 (tiku_mem_arch.c) and Apollo4 Lite
+ * (tiku_mem_apollo4l.c) backends: durable state in .uninit, mirrored to MRAM.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,10 +20,7 @@
 #include <stdint.h>
 
 /**
- * @brief Native word alignment for the Cortex-M55.
- *
- * 4-byte alignment avoids unaligned access penalties on ARMv8.1-M and
- * satisfies the ABI requirement for data placed in DTCM or MRAM.
+ * @brief Native word alignment: 4 bytes on the Cortex-M55 and Cortex-M4F.
  */
 #define TIKU_MEM_ARCH_ALIGNMENT  4U
 
@@ -29,19 +29,20 @@
 /**
  * @brief Platform memory size type.
  *
- * 32-bit unsigned integer matching the Cortex-M55 native word width.
- * Used throughout the memory subsystem for buffer sizes, offsets,
- * and allocation counts.
+ * 32-bit unsigned integer matching the native word width.  Used throughout
+ * the memory subsystem for buffer sizes, offsets, and allocation counts.
  */
 typedef uint32_t tiku_mem_arch_size_t;
 #endif
 
 /**
- * @brief Initialize the Apollo510 memory subsystem.
+ * @brief Restore .uninit from the MRAM mirror, or zero it.
  *
- * Sets up the NVM backing region and registers the platform memory
- * map with the region registry. Called once at early boot before
- * any arena or pool is created.
+ * Restores a mirror that tiku_nvm_mirror_image() accepts, or a legacy V1
+ * mirror; otherwise zeroes .uninit so every persist cell primes its default.
+ * The outcome is kept for tiku_mem_arch_nvm_restore_status().
+ *
+ * @note Called from tiku_mem_init() before any arena or pool is created.
  */
 void tiku_mem_arch_init(void);
 
@@ -58,27 +59,26 @@ void tiku_mem_arch_init(void);
 void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len);
 
 /**
- * @brief Copy bytes from NVM (MRAM) into an SRAM destination.
+ * @brief Copy bytes from the NVM working copy (.uninit) into a buffer.
  *
- * On Apollo510 MRAM reads are bus-accessible and do not require a
- * special HAL; this is a plain memcpy wrapper that may gain
- * cache-coherence handling in a future pass.
+ * .uninit is memory-mapped SRAM, so this is a plain memcpy.
  *
  * @param dst  Destination SRAM buffer.
- * @param src  Source NVM (MRAM) address.
+ * @param src  Source address in .uninit.
  * @param len  Number of bytes to copy.
  */
 void tiku_mem_arch_nvm_read(uint8_t *dst, const uint8_t *src,
                              tiku_mem_arch_size_t len);
 
 /**
- * @brief Copy bytes from SRAM into NVM (MRAM).
+ * @brief Copy bytes into the NVM working copy (.uninit).
  *
- * Writes are word-aligned on MRAM; the implementation pads
- * sub-word writes internally. The MPU NVM window must already be
- * unlocked by the caller before invoking this function.
+ * Writes RAM only (on Apollo510 it also cleans the D-cache over @p dst); the
+ * MRAM commit happens when the matching tiku_mpu_lock_nvm() relock calls
+ * tiku_mem_arch_nvm_flush_status().
  *
- * @param dst  Destination NVM (MRAM) address.
+ * @note The caller must have the MPU NVM window unlocked.
+ * @param dst  Destination address in .uninit.
  * @param src  Source SRAM buffer.
  * @param len  Number of bytes to write.
  */
@@ -86,27 +86,33 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
                               tiku_mem_arch_size_t len);
 
 /**
- * @brief Flush in-RAM NVM modifications to MRAM.
- *
- * At this milestone persistent state lives in the SRAM .uninit region
- * (warm-reset durable). A later pass mirrors it to an MRAM page via
- * am_hal_mram for full power-cycle durability; for now this is a no-op.
+ * @brief Commit .uninit to the MRAM mirror; tiku_mem_arch_nvm_flush_status()
+ *        with the result discarded.
  */
 void tiku_mem_arch_nvm_flush(void);
+
+/**
+ * @brief Commit .uninit to the reserved MRAM mirror page.
+ *
+ * Composes the mirror header and image and programs the page through the
+ * bootrom, unless the mirror already holds the same image.
+ *
+ * @return 0 on success or when nothing changed, -1 when .uninit is larger
+ *         than the page or the bootrom reports a failure
+ */
 int tiku_mem_arch_nvm_flush_status(void);
 
 /**
  * @brief Program an arbitrary MRAM span via the on-chip bootrom.
  *
- * Absolute-address twin of the carved-region write path: chunked
- * read-modify-program through the SSRAM staging window, D-cache cleaned before
- * each bootrom call and the programmed span invalidated after.
+ * Read-modify-programs 16-byte-aligned chunks through a staging buffer, so a
+ * sub-16-byte edge keeps the MRAM bytes beside it, then drops cached copies.
+ * Defined in tiku_nvm_region_apollo510.c and tiku_nvm_region_apollo4l.c.
  *
- * @note Sub-16-byte edges merge with existing MRAM contents.  Spans touching
- *       the SBL/vector area or running past the end of MRAM are refused.
- *       Apollo510/510b only (bootrom nv_program_main2 backend).
- * @param dst  Absolute destination address in MRAM (>= 0x00410000).
- * @param src  Source bytes (any address space; staged through SSRAM).
+ * @note Spans below user MRAM (0x00410000 on Apollo510, 0x00018000 on Apollo4
+ *       Lite) or past the end of MRAM are refused.
+ * @param dst  Absolute destination address in MRAM.
+ * @param src  Source bytes (any address space; staged first).
  * @param len  Number of bytes to program.
  * @return 0 on success, -1 on bounds violation or bootrom failure.
  */

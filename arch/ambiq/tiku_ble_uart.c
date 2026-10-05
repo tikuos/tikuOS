@@ -7,9 +7,9 @@
  *
  * tiku_ble_uart.c - minimal connectable GATT peripheral (BLE UART service).
  *
- * A hand-rolled BLE host over the EM9305 SPI-HCI transport: connectable
- * advertising, a polled HCI event and ACL pump, LE connection handling, and an
- * L2CAP-LE plus ATT server.  No Cordio, no AmbiqSuite.
+ * A BLE host over the EM9305 SPI-HCI transport: connectable advertising, a
+ * polled HCI event and ACL pump, LE connection handling, and an L2CAP-LE and
+ * ATT server for the BLE UART service.  Uses no vendor host stack.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,11 +19,11 @@
 #include <arch/ambiq/tiku_em9305.h>
 #include <string.h>
 
-/* ------------------------------------------------------------------ *
- *  HCI constants
- * ------------------------------------------------------------------ */
+/*---------------------------------------------------------------------------*/
+/* HCI CONSTANTS                                                             */
+/*---------------------------------------------------------------------------*/
 
-/* Command opcodes (mirrors the private set in tiku_em9305.c). */
+/* Command opcodes (tiku_em9305.c keeps its own copies). */
 #define HCI_OP_RESET               0x0C03u
 #define HCI_OP_LE_SET_EVENT_MASK   0x2001u
 #define HCI_OP_LE_SET_ADV_PARAM    0x2006u
@@ -37,25 +37,25 @@
 
 /* HCI event codes. */
 #define HCI_EVT_DISCONN_COMPLETE   0x05u
-#define HCI_EVT_NUM_COMPLETE       0x13u   /* Number Of Completed Packets      */
+#define HCI_EVT_NUM_COMPLETE       0x13u   /* Number Of Completed Packets */
 #define HCI_EVT_LE_META            0x3Eu
 
-/* LE Meta subevent codes. A controller reports a new link as either the legacy
- * Connection Complete (0x01) or the Enhanced Connection Complete (0x0A); the two
- * share identical leading fields (status, handle, role, peer address), so the
- * same parse handles both -- it only has to accept both subevent codes. */
+/* LE Meta subevent codes.  A controller reports a new link as either the
+ * legacy Connection Complete (0x01) or the Enhanced Connection Complete
+ * (0x0A); both start with status, handle, role and peer address, so one parse
+ * serves both. */
 #define HCI_LE_CONN_COMPLETE       0x01u
 #define HCI_LE_ENH_CONN_COMPLETE   0x0Au
 
 /* Advertising types. */
-#define ADV_IND                    0x00u   /* connectable undirected           */
+#define ADV_IND                    0x00u   /* connectable undirected */
 
 #define CONN_HANDLE_NONE           0xFFFFu
 
-/* ---- L2CAP / ATT / GATT (BLE UART service) ---- */
+/* L2CAP, ATT and GATT constants for the BLE UART service. */
 
 #define L2CAP_CID_ATT              0x0004u
-#define L2CAP_CID_LE_SIG           0x0005u   /* LE signaling channel           */
+#define L2CAP_CID_LE_SIG           0x0005u   /* LE signaling channel */
 
 /* GATT declaration UUIDs (16-bit). */
 #define GATT_PRIMARY_SVC           0x2800u
@@ -87,60 +87,63 @@
 #define ATT_ERR_ATTR_NOT_FOUND     0x0Au
 
 /* BLE UART attribute handles (fixed layout). */
-#define ATT_H_SVC                  0x0001u   /* primary service declaration     */
-#define ATT_H_RX_DECL              0x0002u   /* RX characteristic declaration   */
-#define ATT_H_RX_VAL               0x0003u   /* RX value (phone -> device write) */
-#define ATT_H_TX_DECL              0x0004u   /* TX characteristic declaration   */
-#define ATT_H_TX_VAL               0x0005u   /* TX value (device -> phone notify) */
-#define ATT_H_TX_CCCD              0x0006u   /* TX client config descriptor     */
-#define ATT_H_LAST                 0x0006u   /* last handle in the service      */
+#define ATT_H_SVC                  0x0001u   /* primary service declaration */
+#define ATT_H_RX_DECL              0x0002u   /* RX characteristic declaration */
+#define ATT_H_RX_VAL               0x0003u   /* RX value (phone writes) */
+#define ATT_H_TX_DECL              0x0004u   /* TX characteristic declaration */
+#define ATT_H_TX_VAL               0x0005u   /* TX value (device notifies) */
+#define ATT_H_TX_CCCD              0x0006u   /* TX client config descriptor */
+#define ATT_H_LAST                 0x0006u   /* last handle in the service */
 
 /* Characteristic properties. */
-#define CHAR_PROP_WRITE_NR         0x04u     /* write without response          */
-#define CHAR_PROP_WRITE            0x08u     /* write                           */
-#define CHAR_PROP_NOTIFY           0x10u     /* notify                          */
+#define CHAR_PROP_WRITE_NR         0x04u     /* write without response */
+#define CHAR_PROP_WRITE            0x08u     /* write */
+#define CHAR_PROP_NOTIFY           0x10u     /* notify */
 
 /* ATT MTU offered. Notifications carry up to MTU-3 bytes of shell output. */
 #define BLEUART_SERVER_MTU             247u
 
-/* ------------------------------------------------------------------ *
- *  State
- * ------------------------------------------------------------------ */
+/*---------------------------------------------------------------------------*/
+/* STATE                                                                     */
+/*---------------------------------------------------------------------------*/
 
 static tiku_ble_uart_conn_t s_conn = { CONN_HANDLE_NONE, 0u, 0u, {0,0,0,0,0,0} };
 static uint8_t             s_started;
 
 /* ATT connection state. */
-static uint16_t            s_att_mtu = 23u;   /* negotiated ATT MTU (23 default) */
-static uint16_t            s_tx_cccd;         /* TX CCCD value (bit0 = notify on) */
+static uint16_t            s_att_mtu = 23u;   /* negotiated ATT MTU */
+static uint16_t            s_tx_cccd;         /* TX CCCD (bit0 = notify on) */
 
-/* Controller TX flow control: the EM9305 holds a handful of ACL buffers and
- * SILENTLY DROPS a packet sent with none free. Track packets in flight against
- * the controller-reported budget (HCI LE Read Buffer Size) and gate every
- * notification on a free credit; Number-Of-Completed-Packets returns them. */
-static int                 s_acl_inflight;    /* ACL packets sent, not yet acked */
-static int                 s_acl_credits = 2; /* controller ACL buffer count     */
-static uint16_t            s_acl_pkt_len = 27u; /* controller max ACL data bytes */
+/* Controller TX flow control: the EM9305 holds a few ACL buffers and drops,
+ * with no error, a packet sent when none is free.  Packets in flight are
+ * counted against the budget from HCI LE Read Buffer Size, a notification is
+ * sent only while a credit is free, and Number-Of-Completed-Packets returns
+ * them. */
+static int                 s_acl_inflight;    /* ACL sent, not yet acked */
+static int                 s_acl_credits = 2; /* controller ACL buffers */
+static uint16_t            s_acl_pkt_len = 27u; /* max ACL data bytes */
 
-/* Live LL TX payload limit, from the LE Data Length Change event. A link opens
- * at the 27-octet LL default, and the EM9305 DROPS (rather than fragments) an
- * ACL bigger than this -- so every outbound packet is sized to it. The central
- * typically raises it to ~251 moments after connecting. */
+/* LL TX payload limit, from the LE Data Length Change event.  A link opens at
+ * the 27-octet LL default, and the EM9305 drops an ACL packet bigger than the
+ * limit without fragmenting it, so tiku_ble_uart_flush() sizes each
+ * notification to it.  The central may raise it, up to 251, after
+ * connecting. */
 static uint16_t            s_ll_tx_octets = 27u;
 
-/* Inbound HCI reassembly stream. The radio's SPI side is a byte STREAM: one
- * framed read may carry a partial packet (large ACL writes span frames) or
- * several whole packets back-to-back (coalesced completed-packet events --
- * losing one of those permanently leaks a TX credit). Frames append here and
- * complete packets are peeled off by their HCI header length. */
+/* Inbound HCI reassembly stream.  The radio's SPI side is a byte stream: one
+ * framed read may carry part of a packet (large ACL writes span frames) or
+ * several whole packets back to back, such as coalesced completed-packet
+ * events, and losing one of those loses its TX credits.  Frames append here
+ * and complete packets come off by their HCI header length. */
 static uint8_t             s_stream[560];
 static uint16_t            s_stream_len;
 
-/* Defined with the ATT server below; used by the connection-setup path too. */
+/* Forward declaration; defined with the ATT server below. */
 static int bleuart_l2cap_send(uint16_t cid, const uint8_t *pdu, uint16_t len);
 
 /* RX ring: bytes the phone wrote to the RX characteristic, drained by the
- * shell as console input. TX buffer: shell output, flushed as TX notifications. */
+ * shell as console input.  TX buffer: shell output, flushed as TX
+ * notifications. */
 #define BLEUART_RX_RING        256u
 #define BLEUART_TX_BUF         1024u
 static uint8_t             s_rx_ring[BLEUART_RX_RING];
@@ -148,41 +151,42 @@ static uint16_t            s_rx_head, s_rx_tail;
 static uint8_t             s_tx_buf[BLEUART_TX_BUF];
 static uint16_t            s_tx_len;
 
+/** @brief Append bytes to the RX ring; bytes that do not fit are dropped. */
 static void bleuart_rx_push(const uint8_t *d, uint16_t n) {
     uint16_t i;
     for (i = 0u; i < n; i++) {
         uint16_t nxt = (uint16_t)((s_rx_head + 1u) % BLEUART_RX_RING);
         if (nxt == s_rx_tail) {
-            break;                          /* ring full -- drop the rest       */
+            break;                          /* ring full: drop the rest */
         }
         s_rx_ring[s_rx_head] = d[i];
         s_rx_head = nxt;
     }
 }
 
-/* 128-bit base UUID 6E400001-B5A3-F393-E0A9-E50E24DCCA9E in little-endian wire
- * order. Byte [12] selects the member: 01 = service, 02 = RX, 03 = TX. These
- * are deliberately the well-known Nordic UART Service UUIDs: keeping them lets
- * stock BLE-serial apps (nRF Connect, etc.) and generic clients interoperate
- * with this hand-rolled server unchanged -- no vendor code, only the UUIDs. */
+/* 128-bit base UUID 6E400001-B5A3-F393-E0A9-E50E24DCCA9E, little-endian as on
+ * the wire; byte [12] selects the member: 01 = service, 02 = RX, 03 = TX.
+ * These are the Nordic UART Service UUIDs, so BLE-serial apps such as nRF
+ * Connect work with this server. */
 static const uint8_t       BLEUART_UUID_BASE[16] = {
     0x9Eu, 0xCAu, 0xDCu, 0x24u, 0x0Eu, 0xE5u, 0xA9u, 0xE0u,
     0x93u, 0xF3u, 0xA3u, 0xB5u, 0x01u, 0x00u, 0x40u, 0x6Eu
 };
 
-/* Raw bytes of the most recent LE Meta event, kept for bring-up diagnostics
- * (lets the shell confirm which connection-complete subevent the radio sends). */
+/* Raw bytes of the most recent LE Meta event, for diagnostics: the shell
+ * shows which connection-complete subevent the radio sent. */
 static uint8_t             s_last_meta[24];
 static uint8_t             s_last_meta_len;
 
-/* Trace ring of the last few raw packets the pump read (type + head bytes),
- * so a session dump shows exactly what the controller delivered. */
+/* Trace ring of the last few raw packets the pump read (type and first
+ * bytes), for the shell's session dump. */
 #define BLEUART_TRACE_N        8u
 #define BLEUART_TRACE_CAP      18u
 static struct { uint8_t len; uint8_t b[BLEUART_TRACE_CAP]; } s_trace[BLEUART_TRACE_N];
 static uint8_t             s_trace_head;   /* next slot to write */
-static uint8_t             s_trace_count;  /* valid entries (<= BLEUART_TRACE_N) */
+static uint8_t             s_trace_count;  /* valid entries, <= TRACE_N */
 
+/** @brief Record the first bytes of a packet in the trace ring. */
 static void bleuart_trace(const uint8_t *p, uint16_t len) {
     uint8_t n = (len < BLEUART_TRACE_CAP) ? (uint8_t)len : (uint8_t)BLEUART_TRACE_CAP;
     memcpy(s_trace[s_trace_head].b, p, n);
@@ -193,27 +197,24 @@ static void bleuart_trace(const uint8_t *p, uint16_t len) {
     }
 }
 
-/* Scratch buffer for one framed HCI packet (event or ACL). The EM9305 hands
- * back whole packets bounded by its STS2 space byte; 255 covers HCI events and
- * a single ATT MTU worth of ACL. */
+/* One complete HCI packet (event or ACL) taken off the stream.  260 bytes
+ * hold any HCI event and an ACL packet carrying a full ATT MTU; a longer
+ * packet is truncated. */
 static uint8_t             s_pkt[260];
 
-/* Per-step diagnostics for the last tiku_ble_uart_start(): result code + status
- * byte of each setup HCI command. Exposed for the shell so a failed bring-up
- * says exactly which command timed out. */
+/* Per-step diagnostics for the last tiku_ble_uart_start(): result code and
+ * status byte of each setup HCI command, which the shell reports. */
 #define BLEUART_MAX_STEPS      6u
 static int8_t              s_dbg_rc[BLEUART_MAX_STEPS];
 static uint8_t             s_dbg_st[BLEUART_MAX_STEPS];
 static uint8_t             s_dbg_nsteps;
 
-/*
- * Drain any HCI packets the controller already has waiting (RDY asserted).
+/**
+ * @brief Discard the HCI packets the controller has waiting, up to 8 frames.
  *
- * The EM9305 signals "I have something to send" by raising RDY; starting a
- * host *write* while a *read* is pending the framed transaction collides and
- * the command is lost. An HCI host must service events between commands, so
- * clear the pipe (non-blocking: timeout 0 reads only if RDY is already high)
- * before issuing the next command.
+ * The EM9305 raises RDY when it has data; a host write started then collides
+ * with the pending read and is lost, so each setup command is preceded by
+ * this.  Non-blocking: a timeout of 0 reads only while RDY is already high.
  */
 static void bleuart_drain(void) {
     uint8_t  tmp[64];
@@ -225,30 +226,37 @@ static void bleuart_drain(void) {
     }
 }
 
-/* Pull every SPI frame the radio has pending (RDY high) into the reassembly
- * stream. Bounded, non-blocking. Also called before each host WRITE so a
- * pending inbound frame can never collide with (and lose) the write. */
+/**
+ * @brief Append the frames the radio has pending (RDY high) to the stream.
+ *
+ * Non-blocking, at most 16 frames.  Called at each poll and before each ACL
+ * send: a send that starts while a frame is pending collides with it and is
+ * lost.
+ */
 static void bleuart_slurp(void) {
     int guard = 16;
     while (guard-- > 0) {
         uint16_t room = (uint16_t)(sizeof(s_stream) - s_stream_len);
         uint16_t l = 0u;
         if (room == 0u) {
-            break;                          /* stream full -- extract first    */
+            break;                          /* stream full: extract first */
         }
         if (tiku_em9305_recv(s_stream + s_stream_len, room, &l, 0u)
             != TIKU_EM9305_OK) {
-            break;                          /* nothing (more) pending          */
+            break;                          /* nothing (more) pending */
         }
         s_stream_len = (uint16_t)(s_stream_len + l);
     }
 }
 
-/*
- * Peel one complete HCI packet off the front of the stream into @p out.
- * Packet length comes from the HCI header: event = 3 + len byte, ACL = 5 +
- * 16-bit data length. Returns the packet length, or 0 if the stream holds
- * only a partial packet (more frames needed).
+/**
+ * @brief Move one complete HCI packet from the front of the stream to @p out.
+ *
+ * The HCI header gives the length: event = 3 + its length byte, ACL = 5 + its
+ * 16-bit data length.
+ *
+ * @return Bytes copied (the packet length, at most @p cap), or 0 when only
+ *         part of a packet is buffered
  */
 static uint16_t bleuart_stream_extract(uint8_t *out, uint16_t cap) {
     for (;;) {
@@ -257,8 +265,8 @@ static uint16_t bleuart_stream_extract(uint8_t *out, uint16_t cap) {
         if (s_stream_len == 0u) {
             return 0u;
         }
-        /* Resync guard: a stream must start with an event (0x04) or ACL
-         * (0x02) type byte; anything else is desync -- shed a byte and retry. */
+        /* Resync: the stream must start with an event (0x04) or ACL (0x02)
+         * type byte; anything else is dropped a byte at a time. */
         if (s_stream[0] != 0x04u && s_stream[0] != 0x02u) {
             memmove(s_stream, s_stream + 1, (uint16_t)(s_stream_len - 1u));
             s_stream_len--;
@@ -266,7 +274,7 @@ static uint16_t bleuart_stream_extract(uint8_t *out, uint16_t cap) {
         }
         if (s_stream[0] == 0x04u) {
             if (s_stream_len < 3u) {
-                return 0u;                  /* header incomplete               */
+                return 0u;                  /* header incomplete */
             }
             need = (uint16_t)(3u + s_stream[2]);
         } else {
@@ -276,14 +284,14 @@ static uint16_t bleuart_stream_extract(uint8_t *out, uint16_t cap) {
             need = (uint16_t)(5u + (s_stream[3] | ((uint16_t)s_stream[4] << 8)));
         }
         if (need > (uint16_t)sizeof(s_stream)) {
-            s_stream_len = 0u;              /* impossible length: hard resync  */
+            s_stream_len = 0u;              /* impossible length: hard resync */
             return 0u;
         }
         if (s_stream_len < need) {
-            return 0u;                      /* wait for the rest               */
+            return 0u;                      /* wait for the rest */
         }
         if (need > cap) {
-            need = cap;                     /* truncate into caller's buffer   */
+            need = cap;                     /* truncate into caller's buffer */
         }
         memcpy(out, s_stream, need);
         {
@@ -299,12 +307,15 @@ static uint16_t bleuart_stream_extract(uint8_t *out, uint16_t cap) {
     }
 }
 
-/* ------------------------------------------------------------------ *
- *  Advertising setup
- * ------------------------------------------------------------------ */
+/*---------------------------------------------------------------------------*/
+/* ADVERTISING SETUP                                                         */
+/*---------------------------------------------------------------------------*/
 
-/* Service pending events, issue one setup command, and record diagnostics.
- * @p i is the step index (0..3). Returns the hci_cmd result. */
+/**
+ * @brief Drain pending packets, send setup command @p i (0..4) and record its
+ *        result and status; a non-zero status is ORed into *bad.
+ * @return The tiku_em9305_hci_cmd() result
+ */
 static int bleuart_step(uint8_t i, uint16_t op, const uint8_t *p, uint8_t plen,
                     uint8_t *bad) {
     uint8_t st = 0xFFu;
@@ -325,29 +336,33 @@ static int bleuart_step(uint8_t i, uint16_t op, const uint8_t *p, uint8_t plen,
     return rc;
 }
 
-/*
- * Build + program the LE advertising set as a CONNECTABLE peripheral named
- * @p name, then enable advertising. Mirrors tiku_em9305_beacon() but with
- * ADV_IND (0x00) so a central may connect. Statuses OR'd into *bad (0 = ok).
+/**
+ * @brief Program the advertising set as a connectable peripheral (ADV_IND)
+ *        named @p name, then enable advertising.
+ *
+ * Steps: HCI Reset, LE event mask, parameters, data, enable.  The status of
+ * each is ORed into *bad, so 0 means every step succeeded.
+ *
+ * @return TIKU_EM9305_OK, or TIKU_EM9305_ERR_TIMEOUT for a step that got no
+ *         Command Complete
  */
 static int bleuart_advertise(const char *name, uint8_t *bad) {
     static const uint8_t adv_params[15] = {
-        0xA0u, 0x00u,          /* min interval 160 * 0.625ms = 100 ms          */
-        0xA0u, 0x00u,          /* max interval 100 ms                          */
-        ADV_IND,               /* connectable undirected                       */
-        0x00u,                 /* own address type: public                     */
-        0x00u,                 /* peer address type                            */
-        0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,  /* peer address (unused)    */
-        0x07u,                 /* channel map 37/38/39                         */
-        0x00u                  /* filter policy: allow any                     */
+        0xA0u, 0x00u,          /* min interval 160 * 0.625ms = 100 ms */
+        0xA0u, 0x00u,          /* max interval 100 ms */
+        ADV_IND,               /* connectable undirected */
+        0x00u,                 /* own address type: public */
+        0x00u,                 /* peer address type */
+        0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,  /* peer address (unused) */
+        0x07u,                 /* channel map 37/38/39 */
+        0x00u                  /* filter policy: allow any */
     };
     static uint8_t adv_data[32];
     uint8_t nlen, idx, en;
 
-    /* Enable the LE meta events this driver depends on. The controller gates
-     * (Connection Complete, etc.) behind this mask; on the EM9305 a bare HCI
-     * Reset leaves them off, so without this the host never learns a central
-     * connected even though the link (and ATT) is live. Enable bits 0..15. */
+    /* LE event mask, bits 0..15 on.  After HCI Reset the EM9305 reports no
+     * LE meta events, Connection Complete among them, until a mask enables
+     * them. */
     static const uint8_t le_evt_mask[8] = {
         0xFFu, 0xFFu, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u
     };
@@ -363,7 +378,7 @@ static int bleuart_advertise(const char *name, uint8_t *bad) {
         return TIKU_EM9305_ERR_TIMEOUT;
     }
 
-    /* LE Set Event Mask -> deliver Connection Complete & friends. */
+    /* LE Set Event Mask -> deliver Connection Complete and the rest. */
     if (bleuart_step(1u, HCI_OP_LE_SET_EVENT_MASK, le_evt_mask,
                  (uint8_t)sizeof(le_evt_mask), bad) != TIKU_EM9305_OK) {
         return TIKU_EM9305_ERR_TIMEOUT;
@@ -378,18 +393,18 @@ static int bleuart_advertise(const char *name, uint8_t *bad) {
     /* Advertising data: [sig-len][Flags AD][Complete Local Name AD]. */
     memset(adv_data, 0, sizeof(adv_data));
     idx = 1u;
-    adv_data[idx++] = 0x02u;               /* Flags AD: len                    */
-    adv_data[idx++] = 0x01u;               /*           type = Flags           */
-    adv_data[idx++] = 0x06u;               /* LE General Disc + no BR/EDR      */
+    adv_data[idx++] = 0x02u;               /* Flags AD: length */
+    adv_data[idx++] = 0x01u;               /* Flags AD: type */
+    adv_data[idx++] = 0x06u;               /* LE general disc, no BR/EDR */
     nlen = (uint8_t)strlen(name);
     if (nlen > 26u) {
-        nlen = 26u;                        /* keep within the 31-byte AD budget */
+        nlen = 26u;                        /* fit the 31-byte AD field */
     }
-    adv_data[idx++] = (uint8_t)(nlen + 1u);/* Name AD: len                     */
-    adv_data[idx++] = 0x09u;               /*          type = Complete Local Name */
+    adv_data[idx++] = (uint8_t)(nlen + 1u);/* Name AD: length */
+    adv_data[idx++] = 0x09u;               /* Name AD: Complete Local Name */
     memcpy(adv_data + idx, name, nlen);
     idx = (uint8_t)(idx + nlen);
-    adv_data[0] = (uint8_t)(idx - 1u);     /* significant byte count           */
+    adv_data[0] = (uint8_t)(idx - 1u);     /* significant byte count */
     if (bleuart_step(3u, HCI_OP_LE_SET_ADV_DATA, adv_data,
                  (uint8_t)sizeof(adv_data), bad) != TIKU_EM9305_OK) {
         return TIKU_EM9305_ERR_TIMEOUT;
@@ -405,19 +420,23 @@ static int bleuart_advertise(const char *name, uint8_t *bad) {
     return TIKU_EM9305_OK;
 }
 
-/* Toggle advertising on/off. The adv set (params + data) persists in the
- * controller across connections, so re-advertising after a disconnect is just
- * a re-enable. */
+/**
+ * @brief Turn advertising on or off.
+ *
+ * The controller keeps the advertising parameters and data across
+ * connections, so advertising again after a disconnect needs only this.
+ */
 static int bleuart_adv_enable(uint8_t on) {
     uint8_t st;
     return tiku_em9305_hci_cmd(HCI_OP_LE_SET_ADV_ENABLE, &on, 1u, &st);
 }
 
-/*
- * HCI LE Read Buffer Size (0x2002): learn the controller's ACL data budget --
- * max bytes per ACL packet and how many it can hold. Those two numbers drive
- * the TX flow control (credits) and the notification chunk size; the defaults
- * (27/2) are the spec minimums and stay if the query fails.
+/**
+ * @brief HCI LE Read Buffer Size (0x2002): read the controller's maximum ACL
+ *        data length and ACL buffer count.
+ *
+ * They set the notification size and the TX credits; the defaults, 27 bytes
+ * and 2 buffers, stay if the query fails.
  */
 static void bleuart_read_buffer_size(void) {
     static const uint8_t cmd[4] = { 0x01u, 0x02u, 0x20u, 0x00u };
@@ -474,24 +493,27 @@ int tiku_ble_uart_start(const char *name) {
     if (bad != 0u) {
         return TIKU_EM9305_ERR_NOTREADY;
     }
-    bleuart_read_buffer_size();       /* ACL packet size + credit budget for TX */
+    bleuart_read_buffer_size();       /* ACL packet size and TX credits */
     s_started = 1u;
     return TIKU_EM9305_OK;
 }
 
-/* ------------------------------------------------------------------ *
- *  L2CAP-LE + ATT server (BLE UART service)
- * ------------------------------------------------------------------ */
+/*---------------------------------------------------------------------------*/
+/* L2CAP-LE AND ATT SERVER (BLE UART SERVICE)                                */
+/*---------------------------------------------------------------------------*/
 
-/* Write a BLE UART member UUID (01 = service, 02 = RX, 03 = TX) into @p out[16]. */
+/** @brief Write UUID @p member (1 service, 2 RX, 3 TX) to @p out[16]. */
 static void bleuart_uuid(uint8_t *out, uint8_t member) {
     memcpy(out, BLEUART_UUID_BASE, 16);
     out[12] = member;
 }
 
-/* Send one L2CAP PDU on @p cid to the peer as an HCI ACL packet. Returns 0 on
- * success (the controller accepted it -- one TX credit consumed), negative if
- * the write could not be delivered. */
+/**
+ * @brief Send one L2CAP PDU on @p cid as an HCI ACL packet, truncated to
+ *        BLEUART_SERVER_MTU bytes.
+ * @return 0 when sent (one more TX credit in flight), -1 with no link or on a
+ *         transport error
+ */
 static int bleuart_l2cap_send(uint16_t cid, const uint8_t *pdu, uint16_t len) {
     static uint8_t out[9u + BLEUART_SERVER_MTU];
     uint16_t acl;
@@ -503,10 +525,10 @@ static int bleuart_l2cap_send(uint16_t cid, const uint8_t *pdu, uint16_t len) {
     if (len > BLEUART_SERVER_MTU) {
         len = BLEUART_SERVER_MTU;
     }
-    acl = (uint16_t)(4u + len);            /* L2CAP header + payload           */
+    acl = (uint16_t)(4u + len);            /* L2CAP header + payload */
     out[0] = HCI_PKT_ACL;
     out[1] = (uint8_t)(s_conn.handle & 0xFFu);
-    out[2] = (uint8_t)((s_conn.handle >> 8) & 0x0Fu);  /* PB=00 (start) BC=00  */
+    out[2] = (uint8_t)((s_conn.handle >> 8) & 0x0Fu);  /* PB=00 (start) BC=00 */
     out[3] = (uint8_t)(acl & 0xFFu);
     out[4] = (uint8_t)(acl >> 8);
     out[5] = (uint8_t)(len & 0xFFu);
@@ -514,22 +536,23 @@ static int bleuart_l2cap_send(uint16_t cid, const uint8_t *pdu, uint16_t len) {
     out[7] = (uint8_t)(cid & 0xFFu);
     out[8] = (uint8_t)(cid >> 8);
     memcpy(out + 9, pdu, len);
-    bleuart_slurp();                        /* pending inbound frame must not
-                                         * collide with (and lose) this write */
+    /* Take pending inbound frames first: a write that starts while one is
+     * pending collides with it and is lost. */
+    bleuart_slurp();
     rc = tiku_em9305_send(out, (uint16_t)(9u + len));
     if (rc != TIKU_EM9305_OK) {
         return -1;
     }
-    s_acl_inflight++;                   /* controller now holds one more packet */
+    s_acl_inflight++;                   /* one more packet in the controller */
     return 0;
 }
 
-/* Send one ATT PDU over the ATT fixed channel. */
+/** @brief Send one ATT PDU on the ATT fixed channel. */
 static int bleuart_att_send(const uint8_t *att, uint16_t att_len) {
     return bleuart_l2cap_send(L2CAP_CID_ATT, att, att_len);
 }
 
-/* Send an ATT Error Response for @p req_op on @p handle with code @p err. */
+/** @brief Send ATT Error Response @p err for @p req_op on @p handle. */
 static void bleuart_att_error(uint8_t req_op, uint16_t handle, uint8_t err) {
     uint8_t r[5];
     r[0] = ATT_ERROR_RSP;
@@ -540,17 +563,19 @@ static void bleuart_att_error(uint8_t req_op, uint16_t handle, uint8_t err) {
     bleuart_att_send(r, 5u);
 }
 
-/* Little read helpers for request fields. */
+/** @brief Read a little-endian 16-bit request field. */
 static uint16_t rd16(const uint8_t *p) {
     return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
 }
 
-/*
- * Dispatch one ATT request (@p att[0..att_len-1], opcode at att[0]) and send the
- * matching response. Implements just enough of the ATT server for a phone to
- * discover the BLE UART service and enable notifications.
+/**
+ * @brief Serve one ATT request (opcode at @p att[0]) and send its response.
  *
- * @return TIKU_BLE_EVT_RX if RX data arrived (Stage 3), else TIKU_BLE_EVT_ATT.
+ * Covers what a client needs to discover the BLE UART service, enable
+ * notifications and write RX data; other requests get an Error Response.
+ *
+ * @return TIKU_BLE_EVT_RX after an RX write, TIKU_BLE_EVT_NONE for an empty
+ *         PDU, else TIKU_BLE_EVT_ATT
  */
 static int bleuart_att_handle(const uint8_t *att, uint16_t len) {
     uint8_t op;
@@ -586,7 +611,7 @@ static int bleuart_att_handle(const uint8_t *att, uint16_t len) {
             start <= ATT_H_SVC && end >= ATT_H_SVC) {
             uint8_t r[2u + 4u + 16u];
             r[0] = ATT_READ_BY_GRP_RSP;
-            r[1] = 4u + 16u;              /* each entry: handles(4) + UUID(16)   */
+            r[1] = 4u + 16u;              /* entry: handles(4) + UUID(16) */
             r[2] = (uint8_t)(ATT_H_SVC & 0xFFu);  r[3] = (uint8_t)(ATT_H_SVC >> 8);
             r[4] = (uint8_t)(ATT_H_LAST & 0xFFu); r[5] = (uint8_t)(ATT_H_LAST >> 8);
             bleuart_uuid(r + 6, 0x01u);
@@ -608,7 +633,7 @@ static int bleuart_att_handle(const uint8_t *att, uint16_t len) {
             uint8_t *p = r + 2;
             uint8_t  n = 0u;
             r[0] = ATT_READ_BY_TYPE_RSP;
-            r[1] = 2u + 1u + 2u + 16u;    /* handle + props + val handle + UUID */
+            r[1] = 2u + 1u + 2u + 16u;    /* handle, props, value hdl, UUID */
             if (start <= ATT_H_RX_DECL && ATT_H_RX_DECL <= end) {
                 p[0] = (uint8_t)(ATT_H_RX_DECL & 0xFFu);
                 p[1] = (uint8_t)(ATT_H_RX_DECL >> 8);
@@ -647,7 +672,7 @@ static int bleuart_att_handle(const uint8_t *att, uint16_t len) {
         if (start <= ATT_H_TX_CCCD && ATT_H_TX_CCCD <= end) {
             uint8_t r[6];
             r[0] = ATT_FIND_INFO_RSP;
-            r[1] = 0x01u;                 /* handles + 16-bit UUIDs             */
+            r[1] = 0x01u;                 /* handles + 16-bit UUIDs */
             r[2] = (uint8_t)(ATT_H_TX_CCCD & 0xFFu);
             r[3] = (uint8_t)(ATT_H_TX_CCCD >> 8);
             r[4] = (uint8_t)(GATT_CCCD & 0xFFu);
@@ -686,7 +711,8 @@ static int bleuart_att_handle(const uint8_t *att, uint16_t len) {
                                     : (uint16_t)(len >= 3u ? att[3] : 0u);
         } else if (h == ATT_H_RX_VAL) {
             if (len > 3u) {
-                bleuart_rx_push(att + 3, (uint16_t)(len - 3u));   /* -> shell input */
+                /* The written bytes become shell input. */
+                bleuart_rx_push(att + 3, (uint16_t)(len - 3u));
             }
             rxed = 1;
         } else if (op == ATT_WRITE_REQ) {
@@ -711,11 +737,11 @@ static int bleuart_att_handle(const uint8_t *att, uint16_t len) {
     return TIKU_BLE_EVT_ATT;
 }
 
-/* ------------------------------------------------------------------ *
- *  Event / ACL pump
- * ------------------------------------------------------------------ */
+/*---------------------------------------------------------------------------*/
+/* EVENT AND ACL PUMP                                                        */
+/*---------------------------------------------------------------------------*/
 
-/* Handle one HCI *event* packet (s_pkt[0] == 0x04). */
+/** @brief Handle one HCI event packet; returns a TIKU_BLE_EVT_* code. */
 static int bleuart_on_event(const uint8_t *ev, uint16_t len) {
     if (len < 2u) {
         return TIKU_BLE_EVT_NONE;
@@ -818,17 +844,17 @@ uint8_t tiku_ble_uart_last_meta(uint8_t *buf, uint8_t cap) {
     return n;
 }
 
-/*
- * Handle one HCI ACL data packet (s_pkt[0] == 0x02): unwrap L2CAP and, for the
- * ATT fixed channel (CID 0x0004), dispatch the ATT request.
+/**
+ * @brief Handle one HCI ACL packet: unwrap L2CAP and serve an ATT request
+ *        on CID 0x0004.
  *
- * Layout: [0]=type [1..2]=handle|flags [3..4]=ACL len [5..6]=L2CAP len
- *         [7..8]=CID [9..]=ATT PDU.
- *
- * Also serves as the connection fallback: if ATT data is flowing but no
- * saw a Connection Complete event, adopt the link from the ACL handle.
+ * With no connection recorded, the packet's handle becomes the link and the
+ * result is TIKU_BLE_EVT_CONNECTED, so ATT works even when no Connection
+ * Complete event arrived.
  */
 static int bleuart_on_acl(const uint8_t *acl, uint16_t len) {
+    /* Layout: [0]=type [1..2]=handle|flags [3..4]=ACL len [5..6]=L2CAP len
+     *         [7..8]=CID [9..]=ATT PDU. */
     uint16_t cid, l2len, attlen;
     int      adopted = TIKU_BLE_EVT_NONE;
 
@@ -845,11 +871,11 @@ static int bleuart_on_acl(const uint8_t *acl, uint16_t len) {
     l2len = (uint16_t)(acl[5] | ((uint16_t)acl[6] << 8));
     cid   = (uint16_t)(acl[7] | ((uint16_t)acl[8] << 8));
     if (cid != L2CAP_CID_ATT) {
-        return adopted;                    /* not ATT -- ignore (signalling etc.) */
+        return adopted;                    /* not ATT (signalling etc.)    */
     }
     attlen = (uint16_t)(len - 9u);
     if (l2len < attlen) {
-        attlen = l2len;                    /* trust the L2CAP length field       */
+        attlen = l2len;                    /* trust the L2CAP length field */
     }
     {
         int r = bleuart_att_handle(acl + 9, attlen);
@@ -862,7 +888,7 @@ static int bleuart_on_acl(const uint8_t *acl, uint16_t len) {
 int tiku_ble_uart_poll(void) {
     uint16_t len;
 
-    /* Non-blocking: append whatever frames the radio has pending, then peel
+    /* Non-blocking: append whatever frames the radio has pending, then take
      * exactly one complete HCI packet off the stream and dispatch it. Partial
      * packets stay buffered; extra coalesced packets are served next poll. */
     bleuart_slurp();
@@ -900,7 +926,7 @@ int tiku_ble_uart_notify_enabled(void) {
     return (s_tx_cccd & 0x0001u) != 0u;
 }
 
-/* --- shell io-backend hooks: RX -> console in, console out -> TX --- */
+/* Shell I/O backend hooks: RX feeds console input; output goes out on TX. */
 
 int tiku_ble_uart_getc(void) {
     int c;
@@ -924,16 +950,16 @@ void tiku_ble_uart_flush(void) {
         return;
     }
     if (s_conn.handle == CONN_HANDLE_NONE || !(s_tx_cccd & 0x0001u)) {
-        s_tx_len = 0u;                      /* no subscriber -- drop            */
+        s_tx_len = 0u;                      /* no subscriber: drop            */
         return;
     }
     if (s_acl_inflight >= s_acl_credits) {
-        return;                             /* no TX credit -- caller retries   */
+        return;                             /* no TX credit: caller retries   */
     }
 
-    /* One notification: bounded by the ATT MTU, the controller's ACL buffer,
-     * and (hardest) the LIVE LL TX payload -- the EM9305 drops, not fragments,
-     * an ACL bigger than that (7 = 4 L2CAP + 3 notification header). */
+    /* One notification, bounded by the ATT MTU, the controller's ACL buffer
+     * and the current LL TX payload, which the EM9305 does not fragment (7 =
+     * 4 bytes of L2CAP header + 3 of notification header). */
     lim = (uint16_t)(s_att_mtu - 3u);
     if (s_acl_pkt_len > 7u && lim > (uint16_t)(s_acl_pkt_len - 7u)) {
         lim = (uint16_t)(s_acl_pkt_len - 7u);
@@ -948,7 +974,7 @@ void tiku_ble_uart_flush(void) {
     att[2] = (uint8_t)(ATT_H_TX_VAL >> 8);
     memcpy(att + 3, s_tx_buf, n);
     if (bleuart_att_send(att, (uint16_t)(3u + n)) != 0) {
-        return;                             /* keep the bytes; retry later      */
+        return;                             /* keep the bytes; retry later */
     }
     if (n < s_tx_len) {
         memmove(s_tx_buf, s_tx_buf + n, (uint16_t)(s_tx_len - n));
@@ -959,9 +985,9 @@ void tiku_ble_uart_flush(void) {
 }
 
 void tiku_ble_uart_putc(char c) {
-    /* A full buffer self-drains: pump the stack (acks return TX credits) and
-     * flush until space opens. Bounded so a dead link cannot wedge the shell;
-     * on timeout the byte is dropped rather than blocking forever. */
+    /* A full buffer drains itself: pump the stack (acks return TX credits)
+     * and flush until space opens.  The wait is bounded, so on a dead link
+     * the byte is dropped after the spin limit. */
     if (s_tx_len >= (uint16_t)sizeof(s_tx_buf)) {
         uint32_t spins = 2000000u;
         while (s_tx_len >= (uint16_t)sizeof(s_tx_buf) && spins-- > 0u) {
@@ -1006,10 +1032,10 @@ const tiku_ble_uart_conn_t *tiku_ble_uart_conn_info(void) {
 void tiku_ble_uart_stop(void) {
     uint8_t st;
 
-    /* Drop the link if one is up. Disconnect returns a Command *Status* event,
-     * not Command Complete, so fire it raw (fire-and-forget) rather than via
-     * tiku_em9305_hci_cmd(), which would stall waiting for a 0x0E it never gets.
-     * The controller closes the link and reports a Disconnection Complete. */
+    /* Drop the link if one is up.  Disconnect answers with Command Status,
+     * not the Command Complete (0x0E) that tiku_em9305_hci_cmd() waits for,
+     * so it is sent raw with no wait.  The controller then closes the link
+     * and reports Disconnection Complete. */
     if (s_conn.handle != CONN_HANDLE_NONE) {
         uint8_t p[7];
         p[0] = 0x01u;                       /* HCI command packet             */

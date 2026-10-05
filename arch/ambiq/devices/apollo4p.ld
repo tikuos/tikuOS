@@ -7,36 +7,28 @@
  *
  * apollo4p.ld - Ambiq Apollo4 Plus (Cortex-M4F) linker script.
  *
- * The Apollo4 Lite script with the shared-SRAM window grown from 1 MB to the
- * full 2 MB the Plus exposes through its two SSRAM banks.  Map, the MPU note
- * and exported symbols below.
+ * The image starts at user MRAM 0x00018000 with the vector table first, and
+ * the shared SRAM is the Plus's two 1 MB SSRAM banks.  Memory map and
+ * exported symbols below.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /*
  * Memory map (AmbiqSuite R4.5.0 apollo4p_evb / AMAP42KP):
- *   MRAM   : 2 MB   based at 0x0       (flash; low 96 KB reserved for boot/info)
- *   TCM    : 384 KB at 0x10000000      (.data / .bss / heap / stack)
- *   SSRAM  : 2 MB   at 0x10060000      (shared SRAM, both 1 MB banks, after TCM)
+ *   MRAM   : 2 MB   at 0x0          (low 96 KB reserved for boot code)
+ *   TCM    : 384 KB at 0x10000000   (.data, .bss, .uninit, stack)
+ *   SSRAM  : 2 MB   at 0x10060000   (shared SRAM: both 1 MB banks)
  *
- * This is the Apollo4 Lite script (apollo4l.ld) with the shared-SRAM window
- * grown from 1 MB to the full 2 MB the Plus exposes through the two 1 MB SSRAM
- * banks (PWRENSSRAM = 0x3, already powered in tiku_crt_early_apollo4l.c).  The
- * Plus advertises 2.75 MB of SRAM; the extra ~0.75 MB sits beyond the two banks
- * the register-compatible apollo4l.h power map can reach, so it is left for a
- * later port that vendors the Plus's own SSRAM bank/power definitions.
+ * tiku_crt_early_apollo4l.c powers both SSRAM banks (PWRENSSRAM = 0x3).  The
+ * Plus has 2.75 MB of SRAM in all; the rest lies outside the two banks that
+ * the apollo4l.h power map reaches, and this script does not use it.
  *
- * MPU note: for the Plus, tiku_mpu_apollo4l.c maps a 4 MB RW+XN region at
- * 0x10000000 (gated on TIKU_DEVICE_APOLLO4P), which fully covers the 2 MB SSRAM
- * (ends 0x10260000).  So the real bound on .ssram is the SSRAM *physical* end,
- * not the MPU window: the 1.625 MB SRAM tier plus ~182 KB of other .ssram
- * statics (the 64 KB MRAM-mirror buffer + misc) fit in 2 MB with ~206 KB spare.
- * The ASSERT below enforces the physical bound at link time so a future tier
- * bump can't silently run past SSRAM and fault at runtime.
+ * On the Plus, tiku_mpu_apollo4l.c maps a 4 MB RW+XN region at 0x10000000,
+ * which covers all of SSRAM (it ends at 0x10260000), so the bound on .ssram
+ * is the physical end of SSRAM; an ASSERT at the end checks it.
  *
- * Symbols exposed to the kernel match the Apollo510 / RP2350 ports so the
- * shared startup / memory / region code is identical:
+ * Symbols the shared startup, memory and region code read:
  *   __stack, __sram_start/end, __flash_start/end,
  *   __data_load/start/end, __bss_start/end, __uninit_start/end,
  *   _end / end / __end__ / __datastart
@@ -48,49 +40,46 @@ ENTRY(tiku_ambiq_reset_handler)
 
 MEMORY
 {
-    /* Code window: a fixed 384 KB budget for code/rodata (the 32 KB
-     * loadable-module slot is carved off its top). Everything between the
-     * module slot and the 16 KB mirror becomes the carved NVM region, so the
-     * NVM store/tier gets the bulk of MRAM. A region overflow here means code
-     * outgrew its budget. */
-    MRAM  (rx)  : ORIGIN = 0x00018000, LENGTH = 0x60000   /* 384 KB code window (M4) */
-    TCM   (rwx) : ORIGIN = 0x10000000, LENGTH = 384K      /* .data/.bss/heap/stack          */
-    SSRAM (rwx) : ORIGIN = 0x10060000, LENGTH = 2M        /* shared SRAM: both 1 MB banks    */
+    /* Code window: 384 KB for code and rodata.  Everything from its end to
+     * the 16 KB persist mirror is the carved NVM region, which the NVM tier
+     * and /data share, so changing LENGTH moves the region and /data with
+     * it. */
+    MRAM  (rx)  : ORIGIN = 0x00018000, LENGTH = 0x60000   /* code window */
+    TCM   (rwx) : ORIGIN = 0x10000000, LENGTH = 384K      /* TCM */
+    SSRAM (rwx) : ORIGIN = 0x10060000, LENGTH = 2M        /* both banks */
 }
 
 __flash_start = ORIGIN(MRAM);
 __flash_end   = ORIGIN(MRAM) + LENGTH(MRAM);
 
-/* Loadable-native-module slot (Tier 3, tiku_basic_module.h): 32 KB of MRAM at
- * the top of the code window (0x70000..0x78000). Carved from the code
- * budget, not the NVM region below -- the NVM region's interior (FS extent,
- * PERSIST/ckpt reserved tail, tier) is end-anchored on __tiku_nvmfs_size, so
- * shrinking that would shift every durable tenant and destroy on-device data.
- * Keep in sync with TIKU_MODULE_CARVE_ADDR and modules/mod_demo_apollo4l.ld. */
-/* Canonical NVM layout: inputs + shared derivation (arch/common). */
+/* Module slot: when the BASIC module loader is built, the Makefile's
+ * __tiku_module_reserve takes the top 32 KB of the code window
+ * (0x70000..0x78000), so the slot comes out of the code budget and the NVM
+ * region keeps its size.  The region's tenants are placed from its end, so
+ * a change to its size moves every durable tenant and loses the data on the
+ * device.  0x70000 must equal TIKU_MODULE_CARVE_ADDR and the CARVE origin in
+ * kernel/shell/basic/modules/mod_demo_apollo4l.ld. */
+/* NVM layout inputs; arch/common/tiku_nvm_layout.ld derives the rest. */
 __tiku_layout_top          = 0x00200000;
 __tiku_layout_code_cap     = ORIGIN(MRAM) + LENGTH(MRAM);  /* end of code */
 __tiku_layout_persist_size = 0x4000;                       /* 16 KB mirror */
 INCLUDE arch/common/tiku_nvm_layout.ld
 
-/* Carved NVM store/tier region (substrate B): ALL MRAM between the module
- * slot and the 16 KB mirror -- ~1.34 MB on this part. Read in place by
- * pointer (MPU region 0 maps all MRAM RO); written via the bootrom backend
- * (kernel/memory/tiku_nvm_region). The NVM memory tier and the file store ride
- * this. Base is PINNED (not derived from the code window) so the module-slot
- * carve cannot move the FS/persist layout. */
-/* (__tiku_nvmfs_base/__tiku_nvmfs_size come from the shared derivation.) */
+/* Carved NVM region (__tiku_nvmfs_base/__tiku_nvmfs_size, from the shared
+ * derivation): all MRAM from the end of the code window (0x78000) to the
+ * persist mirror, holding the NVM tier and /data.  Code reads it in place
+ * (MPU region 0 maps all MRAM read-only) and writes it through the boot ROM
+ * (kernel/memory/tiku_nvm_region).  The module reserve does not move it. */
 
-/* NVM mirror page (Proposal A, small hot state): 16 KB at the top of MRAM
- * (0x1F0000..0x200000), where tiku_mem_arch_nvm_flush() programs the .uninit
- * snapshot. Grown from 32 KB for more durable cells/aliases headroom. */
+/* Persist mirror: the top 16 KB of MRAM (0x1FC000..0x200000), where
+ * tiku_mem_arch_nvm_flush() programs the .uninit image. */
 __tiku_nvm_mram_start = __tiku_layout_persist_start;
 __tiku_nvm_mram_size  = __tiku_layout_persist_size;
 __sram_start  = ORIGIN(TCM);
 __sram_end    = ORIGIN(TCM) + LENGTH(TCM);
 
-/* The Cortex-M loads the initial SP from vector entry 0. Place it at the very
- * top of TCM and let the stack grow downward toward .bss. */
+/* The initial SP (vector entry 0) is the top of TCM.  The stack grows down
+ * through a 32 KB budget, with a 4 KB MPU guard below it. */
 __stack       = __sram_end;
 __tiku_stack_bottom = __stack - 32K;
 __tiku_stack_guard_start = __tiku_stack_bottom - 4K;
@@ -100,9 +89,8 @@ __ssram_bank_end = ORIGIN(SSRAM) + LENGTH(SSRAM);
 SECTIONS
 {
     /* -------- 1. Vector table (at user-MRAM origin 0x18000) ----------- */
-    /* Apollo4 Plus has 84 external IRQs, so the table needs >=400 bytes ->
-     * 512-byte VTOR alignment; 0x18000 already satisfies it. The reset
-     * handler also writes VTOR explicitly. */
+    /* 16 + 84 entries take 400 bytes, so VTOR needs 512-byte alignment;
+     * 0x18000 satisfies it.  The reset handler also writes VTOR. */
     .vectors ORIGIN(MRAM) : ALIGN(512)
     {
         __vectors_start = .;
@@ -110,8 +98,8 @@ SECTIONS
         __vectors_end = .;
     } > MRAM
 
-    /* SystemInit()-style code may set VTOR from __Vectors. This port owns the
-     * under tiku_ambiq_vectors; alias it. The reset handler also writes VTOR. */
+    /* __Vectors is the CMSIS name for the vector table, which this port
+     * defines as tiku_ambiq_vectors. */
     __Vectors = tiku_ambiq_vectors;
 
     /* -------- 2. Code & rodata --------------------------------------- */
@@ -172,36 +160,27 @@ SECTIONS
     } > TCM
 
     /* -------- 5. Persistent (skipped by zero-init) ------------------- */
-    /* ALIGN(8192) + the 8 KB pad below give the region a PMSAv7-legal
-     * power-of-2 envelope: base 8K-aligned, size exactly 8 KB, so MPU
-     * region 3 can hold it read-only outside NVM unlock windows (real
-     * cell protection -- the shared M4F backend tiku_mpu_apollo4l.c
-     * arms this on the Plus too).  Without the alignment the hardware
-     * window covered base & ~0x1FFF instead: the last few hundred bytes
-     * of .bss (newlib's __malloc_free_list/errno) plus the heap start
-     * landed inside the read-only region, and the first un-windowed
-     * libc/heap write -- the threads TLS test tripped it -- hardfaulted. */
+    /* ALIGN(8192) and the pad to 8 KB below make .uninit a legal PMSAv7
+     * region: an 8 KB-aligned base and a size of exactly 8 KB.  MPU region 3
+     * (tiku_mpu_apollo4l.c) holds it read-only outside NVM unlock windows.
+     * PMSAv7 rounds a region base down to a multiple of the region size,
+     * so an unaligned .uninit puts the read-only region over the end of
+     * .bss, where a libc write faults. */
     .uninit (NOLOAD) : ALIGN(8192)
     {
         __uninit_start = .;
-        /* TIKU_DURABLE_FIRST: the layout record opens the mirrored image, at
-         * the one offset every image agrees on; the rest follow link order. */
+        /* TIKU_DURABLE_FIRST: the layout record, when built in, is first in
+         * the mirrored image, at offset 0; the other durable data follows in
+         * link order. */
         KEEP(*(.persistent.layout))
         *(.uninit*)
-        /* DURABLE grade: exact-match .persistent -- this window is
-         * MRAM-mirrored and MPU-read-only outside unlock windows.
-         * Exact match so the RETAINED grade below cannot be
-         * wildcard-swallowed into it.  (The old EXCLUDE_FILE net-kit
-         * routing is retired: net buffers are placed explicitly at
-         * their declarations, so no net object emits .persistent.) */
+        /* DURABLE grade (.persistent): the window the MRAM mirror holds. */
         *(.persistent)
         . = ALIGN(32);
         __uninit_end = .;
-        /* RETAINED grade: survives warm resets, but
-         * sits OUTSIDE the mirror and the MPU-RO window.  Everything
-         * here chose the grade on purpose at its declaration. */
-        /* Pad to the full 8 KB MPU envelope FIRST: the RETAINED grade
-         * below must sit outside the read-only region. */
+        /* RETAINED grade: survives a warm reset, and sits outside the
+         * mirror.  The pad to the end of the 8 KB envelope comes first, so
+         * .retained starts past the read-only MPU region. */
         . = __uninit_start + 8192;
         *(.retained*)
     } > TCM
@@ -214,7 +193,8 @@ SECTIONS
     __end__ = .;
     __datastart = __data_start;
 
-    /* Starts after the full 8K MPU envelope and all retained state. */
+    /* The extra SRAM tier span runs from past the 8 KB envelope and the
+     * RETAINED data up to the stack guard. */
     __tier_sram_extra_start = ALIGN(_end, 32);
     __tier_sram_extra_end = __tiku_stack_guard_start;
     ASSERT(__tier_sram_extra_start <= __tier_sram_extra_end,
@@ -222,10 +202,8 @@ SECTIONS
     ASSERT((__tiku_stack_guard_start & 0xFFF) == 0,
            "ERROR: Apollo4 stack guard must be 4K aligned")
 
-    /* Shared SRAM (2 MB at 0x10060000). Holds the large volatile tier backing
-     * buffers (.ssram) -- 1.5 MB SRAM tier + the 64 KB MRAM-mirror staging
-     * buffer -- zero-initialised by the reset handler. ALIGN(32) for a PMSAv7
-     * MPU region base. */
+    /* Large static buffers (.ssram) in the 2 MB shared SRAM, zeroed by the
+     * reset handler.  ALIGN(32) for a PMSAv7 MPU region base. */
     .ssram (NOLOAD) : ALIGN(32)
     {
         __ssram_start = .;
@@ -243,18 +221,11 @@ SECTIONS
     } > SSRAM
 
     /*
-     * PRIMARY SRAM TIER SPAN -- the rest of the shared bank.
-     *
-     * Derived rather than compiled in, for the reason the RA8P1 script gives:
-     * a constant has to be chosen per build configuration and silently stops
-     * matching the moment a .ssram buffer is added.  Placed after .shared so
-     * it clears every other tenant of the bank.
-     *
-     * Being outside .ssram also keeps it out of the crt's zero loop
-     * (__ssram_start..__ssram_end), which the allocator has never needed --
-     * it does not promise zeroed memory.
+     * The primary SRAM tier span is the rest of the shared bank: from
+     * __ssram_top, past every static tenant, to the end of the bank.  It lies
+     * outside the crt's .ssram zero loop; the tier allocator does not promise
+     * zeroed memory.  No tail reserve: the stack and its guard are in TCM.
      */
-    /* No tail reserve: the stack and its guard live in TCM, not SSRAM. */
     __tiku_tier_span_start      = __ssram_top;
     __tiku_tier_span_limit      = ORIGIN(SSRAM) + LENGTH(SSRAM);
     __tiku_tier_reserve_default = 0;
@@ -268,16 +239,16 @@ SECTIONS
     ASSERT((__uninit_end - __uninit_start) <= (__tiku_nvm_mram_size - 16),
            "ERROR: .uninit too large for the 16 KB NVM mirror page")
 
-    /* The layout record opens the durable image in every build, so an image
-     * with other durable variables still reads it where the last one wrote. */
+    /* tiku_layout_pin must start .uninit, so a firmware image whose other
+     * durable variables differ still finds the layout record at the offset
+     * the previous image wrote it to. */
     ASSERT((DEFINED(tiku_layout_pin) ? tiku_layout_pin : __uninit_start)
            == __uninit_start,
            "ERROR: tiku_layout_pin does not open .uninit (TIKU_DURABLE_FIRST holds one object)")
 
 
-    /* .ssram must stay inside the 2 MB physical SSRAM (0x10060000..0x10260000);
-     * the Plus's MPU region 1 is 4 MB so it already covers this.  If the SRAM
-     * tier ever outgrows physical SSRAM, the tail would fault at runtime. */
+    /* .ssram must end inside the 2 MB of physical SSRAM (ending 0x10260000).
+     * MPU region 1 spans 4 MB, so it does not catch an overrun. */
     ASSERT(__ssram_end <= 0x10260000,
            "ERROR: .ssram (SRAM tier) runs past the 2 MB physical SSRAM -- shrink the .ssram statics")
 

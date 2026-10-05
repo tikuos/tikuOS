@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_board_tiku_bare.h - a custom board carrying Apollo510 silicon and nothing else.
+ * tiku_board_tiku_bare.h - an Apollo510 board with a console and nothing else.
  *
- * Describes the minimum a PCB must declare: a console, and the absence of
- * everything else.  Its empty BOARD_CAPS makes a request for eMMC, PSRAM, NOR or
- * USB fail at make time by name, rather than at run time on the bench.
+ * The minimum a board header declares: a console UART, no LEDs and no
+ * buttons.  BOARD_CAPS_tiku_bare is empty, so the Makefile refuses a build
+ * that enables the eMMC, PSRAM, NOR or USB driver for this board.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,58 +20,62 @@
 #include <arch/ambiq/tiku_gpio_arch.h>
 
 /*---------------------------------------------------------------------------*/
-/* Board identity                                                            */
+/* BOARD IDENTIFICATION                                                      */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Human-readable board name. */
 #define TIKU_BOARD_NAME             "TikuOS bare (Apollo510)"
 
 /*---------------------------------------------------------------------------*/
-/* LEDs -- none                                                              */
+/* LEDS                                                                      */
 /*---------------------------------------------------------------------------*/
-/*
- * Zero is a legitimate answer, and the LED interface already handles it: its
- * dispatch switch is bounded by TIKU_BOARD_LED_COUNT, so with 0 every case
- * compiles out and tiku_led_count() reports 0.  Nothing needs a stub.
+
+/**
+ * @brief No LEDs: tiku_led_count() returns 0 and every LED call does nothing.
+ *
+ * The LED interface bounds its dispatch by this count, so no TIKU_BOARD_LEDn
+ * macro is needed.
  */
 #define TIKU_BOARD_LED_COUNT        0
 
 /*---------------------------------------------------------------------------*/
-/* Console UART                                                              */
+/* CONSOLE UART                                                              */
 /*---------------------------------------------------------------------------*/
+
 /*
- * The one assumption this header makes, and it is deliberate: a board with no
- * console cannot report that it booted, so the proof this file exists to give
- * would be unobservable.  UART0 on pads 30/55 (FUNCSEL 4) is the Apollo510's
- * conventional UART0 pinout and matches the base EVB.
- *
- * A real custom board OVERRIDES these three lines with whatever it routes.
- * They are the only board wiring here; everything else a
- * driver might want is absent, and absence is now expressible.
+ * The console is UART0 on pads 30/55 with FUNCSEL 4, as on the Apollo510
+ * EVB.  These three values are the only board wiring this header declares.
  */
 #define TIKU_BOARD_UART_TX_PIN      30U     /**< UART0 TX pad. */
 #define TIKU_BOARD_UART_RX_PIN      55U     /**< UART0 RX pad. */
 #define TIKU_BOARD_UART_PIN_FUNCSEL 4U      /**< FUNCSEL for pads 30/55. */
-/** @brief Board-level UART pin mux init (no-op; am_hal muxes at init). */
+/** @brief Empty: the UART driver muxes the console pads itself. */
 #define TIKU_BOARD_UART_PINS_INIT() do { } while (0)
 
 /*---------------------------------------------------------------------------*/
-/* Buttons -- none                                                           */
+/* BUTTONS                                                                   */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @name Buttons
+ * The board has none: INIT does nothing and PRESSED returns 0.
+ * @{
+ */
 #define TIKU_BOARD_BTN1_INIT()      do { } while (0)
-/** @brief Read button 1 (always 0 -- no button on this board). */
 #define TIKU_BOARD_BTN1_PRESSED()   (0)
 #define TIKU_BOARD_BTN2_INIT()      do { } while (0)
-/** @brief Read button 2 (always 0 -- no button on this board). */
 #define TIKU_BOARD_BTN2_PRESSED()   (0)
+/** @} */
 
 /*---------------------------------------------------------------------------*/
-/* Bit-bang pin                                                              */
+/* BIT-BANG PIN                                                              */
 /*---------------------------------------------------------------------------*/
-/*
- * The tiku_gpio (port,pin) API encodes an Apollo510 pad as (port-1)*8 + pin,
- * so this pair selects pad 13 -- clear of the console pads above.  Overridable
- * from the build system, like every other board's.
+
+/**
+ * @brief Default bit-bang pad for the tiku_bitbang demo: port 2 pin 5.
+ *
+ * The (port, pin) GPIO API maps to pad (port - 1) * 8 + pin, so this is pad
+ * 13, clear of the console pads.  Override either value from the build.
  */
 #ifndef TIKU_BOARD_BSCAT_PORT
 #define TIKU_BOARD_BSCAT_PORT       2U   /**< Port 2 -> pad base 8. */
@@ -81,45 +85,46 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* Bus-availability gates                                                    */
+/* BUS GATES                                                                 */
 /*---------------------------------------------------------------------------*/
 
-/** @brief No ADC front end wired. */
+/*
+ * The portable ADC and I2C layers build when their gate macro is defined,
+ * whatever its value.  This port's ADC driver works; its I2C and 1-Wire
+ * drivers touch no hardware, and their init calls return -1.  No Ambiq code
+ * reads the 1-Wire, I2C0 or SPI0 pad macros.
+ */
+/** @brief ADC gate: defined, so the ADC API builds; the value is not read. */
 #define TIKU_BOARD_ADC_AVAILABLE    0
-/** @brief I2C bus rate gate (symbolic -- 100 kHz capable). */
+/** @brief I2C gate: defined, so the I2C bus API builds on the stub driver. */
 #define TIKU_BOARD_I2C_BRW_100K     1
-/** @brief No 1-Wire device wired. */
+/** @brief No 1-Wire bus: /dev/sensors carries no ds18b20 node. */
 #define TIKU_BOARD_OW_AVAILABLE     0
-/** @brief 1-Wire GPIO pad (placeholder; OW_AVAILABLE is 0). */
+/** @brief 1-Wire pad (unused). */
 #define TIKU_BOARD_OW_PIN           13U
 
-/** @brief I2C0 SDA pad (placeholder -- no device fitted). */
+/** @brief I2C0 SDA pad (unused). */
 #define TIKU_BOARD_I2C0_SDA_PIN     0U
-/** @brief I2C0 SCL pad (placeholder -- no device fitted). */
+/** @brief I2C0 SCL pad (unused). */
 #define TIKU_BOARD_I2C0_SCL_PIN     1U
 
-/** @brief SPI0 MISO pad (placeholder -- no device fitted). */
+/** @brief SPI0 MISO pad (unused). */
 #define TIKU_BOARD_SPI0_MISO_PIN    2U
-/** @brief SPI0 SCK pad (placeholder -- no device fitted). */
+/** @brief SPI0 SCK pad (unused). */
 #define TIKU_BOARD_SPI0_SCK_PIN     3U
-/** @brief SPI0 MOSI pad (placeholder -- no device fitted). */
+/** @brief SPI0 MOSI pad (unused). */
 #define TIKU_BOARD_SPI0_MOSI_PIN    4U
 
 /*---------------------------------------------------------------------------*/
-/* DELIBERATELY ABSENT                                                       */
+/* PARTS NOT FITTED                                                          */
 /*---------------------------------------------------------------------------*/
+
 /*
- * No TIKU_BOARD_EMMC_PAD_*, USB_PAD_*, PSRAM_PAD_CE or NOR_PAD_* appear in
- * this file, and that is the deliverable rather than an omission:
- *
- *   - The Makefile refuses TIKU_DRV_{EMMC,PSRAM,NOR,USB}_ENABLE for this
- *     board, because BOARD_CAPS_tiku_bare is empty.  The build stops with a
- *     message naming the board and the fix.
- *   - Should that gate ever be bypassed, each driver ALSO carries an #error
- *     on its missing pads (added in S3), so the failure is still a compile
- *     error naming the board contract -- never a silent bus at 2 a.m.
- *
- * Adding a part later is one BOARD_CAPS entry plus its pad block here.
+ * This header defines no TIKU_BOARD_EMMC_PAD_*, USB_PAD_*, PSRAM_PAD_CE or
+ * NOR_PAD_*.  The Makefile refuses TIKU_DRV_{EMMC,PSRAM,NOR,USB}_ENABLE for
+ * this board, and each of those drivers stops the compile with #error when
+ * its pads are missing.  Fitting a part takes a BOARD_CAPS entry in the
+ * Makefile and the part's pad block here.
  */
 
 #endif /* TIKU_BOARD_TIKU_BARE_H_ */

@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_simd_scalar.c - scalar twin of the Helium kernels, in the same image.
+ * tiku_simd_scalar.c - scalar build of the Helium kernels, in the same image.
  *
- * Forces the SIMD backend off, renames the public symbols and includes the
- * original source, so the scalar path can be measured against Helium in one build
- * and one boot.  See the note at the include for why it is done this way.
+ * Forces the SIMD backend off, renames the public symbols and includes
+ * hal/tiku_simd.c, so the scalar kernels sit in the same image as the Helium
+ * ones and tiku_simd_power.c can time both in one boot.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -31,14 +31,9 @@
 #define tiku_simd_lut256_u8     tiku_simd_scalar_lut256_u8
 
 /*
- * INCLUDING A .c IS DELIBERATE AND CONFINED TO THIS FILE.  hal/tiku_simd.c
- * selects its backend at COMPILE time, so on this M55 the scalar paths are
- * compiled out.  Measuring Helium against scalar across two firmware images
- * would inherit ~3 % run-to-run variance between boots, plus a loop-alignment
- * hazard that once moved a busy-current figure by 956 uA purely because an
- * unrelated build flag shifted the code.  Forcing the backend off and renaming
- * the symbols gives a scalar twin from the SAME SOURCE in the SAME IMAGE, so
- * the two paths cannot drift and both are measured at one build's alignment.
- * Nothing else in this tree does this; it is not a pattern to copy.
+ * hal/tiku_simd.c selects its backend at compile time, so on the M55 its
+ * scalar paths are compiled out of the normal build.  Included here with the
+ * backend forced off and the symbols renamed, it gives scalar kernels from the
+ * same source, in the same image and build as the Helium ones.
  */
 #include "../../hal/tiku_simd.c"

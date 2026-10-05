@@ -7,9 +7,9 @@
  *
  * tiku_region_apollo4l.c - Apollo4 Lite physical memory-region table.
  *
- * Mirrors the Apollo510 table; the only device delta is the shared-SRAM base and
- * size.  The TCM splits into a general SRAM region and an NVM overlay on .uninit,
- * which the persist and hibernate APIs require.
+ * Built on the first call from linker symbols.  The TCM splits into a general
+ * SRAM region and an NVM overlay on .uninit; the overlay is typed NVM because
+ * persist and hibernate reject buffers outside an NVM region.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -64,7 +64,8 @@ tiku_region_arch_get_table(tiku_mem_arch_size_t *count) {
             idx++;
         }
 
-        /* Starts beyond the entire 8K MPU envelope, not just its contents. */
+        /* Free TCM up to the stack guard, starting after the whole 8 KB
+         * MPU envelope of .uninit. */
         if ((uintptr_t)&__tier_sram_extra_end >
             (uintptr_t)&__tier_sram_extra_start) {
             s_regions[idx].base = &__tier_sram_extra_start;
@@ -74,7 +75,7 @@ tiku_region_arch_get_table(tiku_mem_arch_size_t *count) {
             idx++;
         }
 
-        /* The linker owns the Lite/Plus shared-bank geometry. */
+        /* Shared SRAM: the linker gives the bank for Lite and Plus. */
         s_regions[idx].base = &__ssram_bank_start;
         s_regions[idx].size = (uintptr_t)&__ssram_bank_end -
                              (uintptr_t)&__ssram_bank_start;

@@ -7,9 +7,9 @@
  *
  * tiku_usb_arch.h - Apollo510 USB 2.0 device controller.
  *
- * A Mentor/Inventra MUSB-class device core -- identified from the POWER bit order,
- * the INDEX-selected per-endpoint CSR window and read-to-clear status -- wrapped by
- * a PHY, two power domains and an auto-DMA engine.  USB is the only bulk path in.
+ * A Mentor/Inventra MUSB-class device core (identified by the POWER bit order,
+ * the INDEX-selected per-endpoint CSR window and read-to-clear status) behind
+ * a PHY, two power domains and an auto-DMA engine.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,32 +18,26 @@
 #define TIKU_USB_ARCH_H_
 
 #include <stdint.h>
-#include <kernel/shell/tiku_shell_io.h>   /* tiku_shell_io_t: the console backend */
-/* The rail pads below come from the BOARD header.  Including the selector here
- * rather than trusting every includer to have pulled tiku.h first is the whole
- * point: tiku_shell_cmd_power.c includes this header directly, and without
- * this line its translation unit saw no board macros and tripped the #error
- * below -- the include-order trap CLAUDE.md warns about, reproduced live. */
+#include <kernel/shell/tiku_shell_io.h>   /* tiku_shell_io_t, the CDC backend */
+/* The rail pads below come from the board header, which this include pulls in
+ * itself, so a file can include this header before tiku.h; without the board
+ * macros the build stops at the #error below. */
 #include "tiku_device_select.h" 
 
 /*---------------------------------------------------------------------------*/
 /* TABLE 0 -- BOARD: WHICH SOCKET, WHICH RAILS, AND WHICH BOARD              */
 /*---------------------------------------------------------------------------*/
 /*
- * *** THE EVB HAS TWO USB-C SOCKETS AND ONLY ONE IS THE DEVICE PORT. ***
+ * The EVB has two USB-C sockets and only one is the device port:
  *
- *   J18  "AP5 USB-C Connector"  -- the Apollo5 DEVICE port.  THIS ONE.
+ *   J18  "AP5 USB-C Connector"  -- the Apollo5 device port.
  *                                  nets USB0AP50P/N -> USB_AP5_P/N
- *   J16  "USB-C Connector"      -- the on-board J-Link.  Plugging the host
- *                                  here enumerates the DEBUGGER, and the
- *                                  resulting "nothing happened" looks exactly
- *                                  like a driver that never attached.
+ *   J16  "USB-C Connector"      -- the on-board J-Link.  A host plugged in
+ *                                  here enumerates the debugger only.
  *
- * D+/D- are dedicated PHY pins, not GPIO, so there is no pad configuration to
- * get wrong.  What there IS to get wrong: TWO EXTERNAL SUPPLY RAILS MUST BE
- * Switched on by GPIO, and the two boards disagree about which GPIOs (as with
- * the NOR reset pin and the eMMC reset pin).  Verified against both the BSP
- * and the Blue board's schematic, which agree here:
+ * D+/D- are dedicated PHY pins with no pad configuration.  Two external supply
+ * rails are switched on by GPIO, on different pads per board (per the BSP and
+ * the Blue board's schematic):
  *
  *              | Apollo510B EVB (Blue)      | Apollo510 EVB (green)
  *   -----------+----------------------------+-----------------------
@@ -52,68 +46,54 @@
  *   VDDUSB0P9  | GP48                       | GP90
  *              | net VDDUSB0P9_AP5_ON_GP48  |
  *
- * Both are driven HIGH to enable, and the vendor waits 50 ms after switching
- * them before touching the PHY.  Forget them and the PHY is unpowered: the
- * controller's registers read back perfectly and the bus stays dead, which is
- * the worst diagnostic shape available.
+ * Both are driven high to enable, and the PHY is touched 50 ms later, as the
+ * vendor does.  With the rails off the PHY is unpowered: the controller's
+ * registers read back normally and the host sees no device.
  */
 
-/* The rail switches are BOARD pads and now come from the board header -- the
- * two EVBs use different ones (Blue 47/48, green 91/90), so hard-coding them
- * here silently made the driver Blue-only. */
+/* The rail switches are board pads (Blue 47/48, green 91/90), from the board
+ * header. */
 #if !defined(TIKU_BOARD_USB_PAD_VDDUSB33)
 #error "This board declares no USB rail pads (TIKU_BOARD_USB_PAD_VDDUSB*). \
 The build system should not have compiled the USB driver for it -- see \
 BOARD_CAPS/USB_RAILS in the Makefile."
 #endif
-#define TIKU_USB_PAD_VDDUSB33   TIKU_BOARD_USB_PAD_VDDUSB33
-#define TIKU_USB_PAD_VDDUSB0P9  TIKU_BOARD_USB_PAD_VDDUSB0P9
-#define TIKU_USB_RAIL_SETTLE_MS 50u
+#define TIKU_USB_PAD_VDDUSB33   TIKU_BOARD_USB_PAD_VDDUSB33   /**< 3.3 V rail */
+#define TIKU_USB_PAD_VDDUSB0P9  TIKU_BOARD_USB_PAD_VDDUSB0P9  /**< 0.9 V rail */
+#define TIKU_USB_RAIL_SETTLE_MS 50u   /**< wait after the rails switch on, ms */
 
 /*---------------------------------------------------------------------------*/
-/* TABLE 1 -- THE REGISTER MAP, AND WHY CMSIS MUST NOT BE USED FOR IT        */
+/* TABLE 1 -- THE REGISTER MAP AND THE CMSIS HAZARD                          */
 /*---------------------------------------------------------------------------*/
 /*
- * *** DO NOT USE THE CMSIS BITFIELD ACCESSORS ON CFG0/CFG1/CFG2. ***
+ * The CMSIS bitfield accessors on CFG0/CFG1/CFG2 are unsafe.  The hardware
+ * registers are 8- and 16-bit MUSB registers, which CMSIS packs two or three
+ * to a 32-bit word (CFG0..CFG3); three of the packed fields are read-to-clear
+ * interrupt status:
+ *   - `USB->CFG0_b.HSEnab = 1;` is a 32-bit read-modify-write whose read
+ *     clears INTRTX, discarding every pending IN-endpoint interrupt;
+ *   - CFG1 (INTRRX) and CFG2 (INTRUSB) behave the same way: a bus reset or a
+ *     completed transfer is lost when a neighbouring field is written.
+ * This driver, like the vendor HAL, accesses them as 8- and 16-bit volatile
+ * registers at their byte offsets.
  *
- * This is the single most dangerous thing found in U0, and it is invisible
- * unless you look for it.  The hardware's registers are 8- and 16-bit MUSB
- * registers.  CMSIS has packed four of them into each 32-bit word CFG0..CFG3
- * and named the result after nothing in particular.  Three of those packed
- * fields are READ-TO-CLEAR interrupt status.
- *
- * Therefore:
- *   - `USB->CFG0_b.HSEnab = 1;` is a 32-bit READ-MODIFY-WRITE.  The read
- *     clears INTRTX, silently discarding every pending IN-endpoint interrupt.
- *   - the same applies to CFG1 (INTRRX) and CFG2 (INTRUSB): a bus reset or a
- *     completed transfer can vanish because unrelated code touched a
- *     neighbouring field.
- *
- * The bug this produces is a device that enumerates nine times out of ten.
- * The vendor HAL avoids it by casting to pointers-to-volatile-uint8_t and
- * pointers-to-volatile-uint16_t at byte offsets, and this driver does the
- * same.  ACCESS THESE AT THEIR TRUE WIDTHS.
- *
- * The true map, byte offsets from USB_BASE.  PROVENANCE, because this port
- * has paid repeatedly for values that were derived rather than read: the
- * widths and read-to-clear behaviour come from the HAL's own accessor macros;
- * the offsets were then CHECKED with offsetof() against the CMSIS struct
+ * The map, as byte offsets from USB_BASE.  Widths and read-to-clear behaviour
+ * follow the HAL's accessor macros; the offsets match the CMSIS struct
  * (CFG0/1/2/3 = 0x00/04/08/0C, IDX0/1/2 = 0x10/14/18, FIFOADD = 0x1C,
- * FIFO0..5 = 0x20 + 4n), and the POWER bit order was checked field by field
- * against USB_CFG0_*_Pos.  Nothing below is inferred from context:
+ * FIFO0..5 = 0x20 + 4n) and the POWER bits match USB_CFG0_*_Pos:
  *
  *   off  w   name       notes
  *   ---  --  ---------  ------------------------------------------------
  *   0x00  8  FADDR      FuncAddr[6:0], Update[7]
  *   0x01  8  POWER      see below -- the MUSB signature register
- *   0x02 16  INTRTX     EPn IN complete, bit n.  *** READ-TO-CLEAR ***
- *   0x04 16  INTRRX     EPn OUT complete, bit n. *** READ-TO-CLEAR ***
+ *   0x02 16  INTRTX     EPn IN complete, bit n.  read-to-clear
+ *   0x04 16  INTRRX     EPn OUT complete, bit n. read-to-clear
  *   0x06 16  INTRTXE    IN interrupt enables
  *   0x08 16  INTRRXE    OUT interrupt enables
- *   0x0A  8  INTRUSB    bus events.             *** READ-TO-CLEAR ***
+ *   0x0A  8  INTRUSB    bus events.             read-to-clear
  *   0x0B  8  INTRUSBE   bus event enables
  *   0x0C 16  FRAME      frame number
- *   0x0E  8  INDEX      *** selects which endpoint 0x10..0x1F refer to ***
+ *   0x0E  8  INDEX      selects the endpoint 0x10..0x1F refer to
  *   0x0F  8  TESTMODE   ForceHS / ForceFS / test packet
  *   0x10 16  TXMAXP     |
  *   0x12 16  CSR0/TXCSR | indexed by INDEX  (CMSIS calls the pair IDX0)
@@ -123,7 +103,7 @@ BOARD_CAPS/USB_RAILS in the Makefile."
  *   0x1C     FIFOADD    INFIFOADD[12:0], OUTFIFOADD[28:16], units of 8 B
  *   0x20+4n  FIFO0..5   per-endpoint data ports
  *
- * POWER (0x01), bit by bit -- this is what identifies the core:
+ * POWER (0x01), bit by bit; this bit order identifies the MUSB core:
  *   0 EnableSuspendM   1 SuspendMode(RO)   2 Resume        3 Reset(RO)
  *   4 HSMode(RO)       5 HSEnab            6 SOFTCONN      7 ISOUpdate
  * CMSIS calls bit 6 "AMSPECIFIC".  It is the soft-connect bit: setting it
@@ -134,81 +114,77 @@ BOARD_CAPS/USB_RAILS in the Makefile."
  */
 
 /*---------------------------------------------------------------------------*/
-/* TABLE 2 -- BRING-UP ORDER (and it is an ORDER, not a set)                 */
+/* TABLE 2 -- BRING-UP ORDER                                                 */
 /*---------------------------------------------------------------------------*/
 /*
  *  #  what                                    register / call
  * --  --------------------------------------  --------------------------
  *  1  power the controller domain             PWRCTRL periph USB
  *  2  power the PHY domain                    PWRCTRL periph USBPHY
- *     -- TWO domains.  The SDIO0 lesson generalises: one enable is never
- *        the whole story on this part.
+ *     -- both domains are needed.
  *  3  write the USB SRAM trim                 USB->SRAMCTRL
- *     -- an undocumented magic value the vendor writes unconditionally:
+ *     -- an undocumented value the vendor writes unconditionally:
  *        WABL=1 WABLM=1 RAWL=1 RAWLM=2 EMAW=0 EMAS=0 EMA=3 RET1N=1.
- *        Transcribed, not derived; the FIFO RAM is what it tunes.  Skipping
- *        an undocumented trim register has cost this port a bring-up before.
- *  4  HOLD the PHY in reset                   MCUCTRL->USBRSTCTRL: CLEAR
+ *        It tunes the FIFO RAM.
+ *  4  hold the PHY in reset                   MCUCTRL->USBRSTCTRL: clear
  *                                             USBRSTENABLE, USBPORRSTRELEASE,
  *                                             USBUTMIRSTRELEASE
- *     -- note the vendor's naming is inverted from its effect: the function
- *        called "enable_phy_reset_override" CLEARS these bits and thereby
- *        HOLDS the PHY in reset.  The names here say what they do.
- *  5  switch the external rails on            GP47 high, GP48 high
+ *     -- clearing these bits holds the PHY in reset; the vendor's function
+ *        for it is named enable_phy_reset_override.
+ *  5  switch the external rails on            VDDUSB33 and VDDUSB0P9 pads
+ *                                             high (table 0)
  *  6  wait                                    50 ms
  *  7  disconnect battery-charger detection    USB->BCDETCRTL1 = USBSWRESET=1,
  *                                             every other field 0
  *     -- the BC circuit sits on D+/D-.  Left connected, enumeration fails
  *        with no error anywhere.
- *  8  RELEASE the PHY from reset              MCUCTRL->USBRSTCTRL: SET the
+ *  8  release the PHY from reset              MCUCTRL->USBRSTCTRL: set the
  *                                             three bits from step 4
  *  9  select + enable the PHY reference clock see table 5
  * 10  set the speed                           POWER.HSEnab per table 5
- * 11  enable the Reset bus interrupt          INTRUSBE bit 2
- * 12  ATTACH                                  POWER.SOFTCONN = 1
+ * 11  enable the bus interrupts               INTRUSBE: Reset, Resume,
+ *                                             Suspend
+ * 12  attach                                  POWER.SOFTCONN = 1
+ *                                             (tiku_usb_attach())
  *
- * Steps 4-8 exist in that order because of Apollo4 errata ERR041 (an induced
- * D+ output pulse can cause an unintended disconnect); the vendor cites it in
- * the power-up path.  Do not "simplify" the sequence.
+ * Steps 4-8 follow this order because of Apollo4 erratum ERR041, which the
+ * vendor cites in its power-up path: an induced D+ output pulse can cause an
+ * unintended disconnect.
  */
 
 /*---------------------------------------------------------------------------*/
 /* TABLE 3 -- ENDPOINTS, FIFO, AND THE INDEX REGISTER HAZARD                 */
 /*---------------------------------------------------------------------------*/
 /*
- * SIX endpoints: EP0 (control, bidirectional) plus EP1..EP5, each of which
+ * Six endpoints: EP0 (control, bidirectional) plus EP1..EP5, each of which
  * has an independent IN and OUT half.  Ten ADMA channels (ADMAEP0..9) cover
  * the five IN and five OUT halves.  MSC needs one bulk IN and one bulk OUT;
- * CDC needs two bulk plus a notification endpoint.  Room to spare either way.
+ * CDC needs two bulk plus a notification endpoint.
  *
  * EP0's interrupt is reported in INTRTX bit 0 and enabled in INTRTXE bit 0 --
  * the OUT-side registers play no part for EP0.
  *
- * *** THE INDEX REGISTER IS SHARED MUTABLE STATE. ***
- * INDEX (0x0E) selects which endpoint the CSR window at 0x10..0x1F refers to.
- * Every access to TXMAXP/TXCSR/RXMAXP/RXCSR/COUNT0/FIFOADD is therefore a
- * two-step non-atomic operation, and an interrupt landing between the two
- * steps corrupts BOTH.  Since this driver is interrupt-driven (see below),
- * the rule is absolute:
+ * The INDEX register is shared mutable state.  INDEX (0x0E) selects the
+ * endpoint the CSR window at 0x10..0x1F refers to, so every access to
+ * TXMAXP/TXCSR/RXMAXP/RXCSR/COUNT0/FIFOADD takes two steps, and an interrupt
+ * between them that changes INDEX sends the second step to another
+ * endpoint.  The rule:
  *
  *   - the ISR may set INDEX freely; it is not interrupted by itself
- *   - process-context code that touches an indexed register MUST mask the
- *     USB interrupt across the whole INDEX-then-access sequence
+ *   - process-context code that touches an indexed register masks the USB
+ *     interrupt across the whole INDEX-then-access sequence
  *
- * This is the same hazard class as the VFS watch table, and it is the first
- * thing to suspect if endpoints start behaving as though they were a
- * different endpoint.
+ * A break of this rule shows as one endpoint acting on another's registers.
  *
- * FIFO ALLOCATION is manual and cumulative:
- *   - addresses and sizes are in units of 8 BYTES
+ * FIFO allocation is manual and cumulative:
+ *   - addresses and sizes are in units of 8 bytes
  *   - allocation starts at unit 8 (byte 64): the first 64 bytes belong to EP0
  *   - size code = log2(maxpacket / 8); the size table is
  *     8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096 bytes
- *   - double buffering is optional per endpoint per direction and DOUBLES
+ *   - double buffering is optional per endpoint per direction and doubles
  *     that endpoint's consumption
  *   - FIFOADD is 13 bits in 8-byte units, i.e. a 64 KB address space; the
- *     RAM actually fitted is a build option of the core and is MEASURED in
- *     U1 (allocate until it stops working), not assumed
+ *     RAM actually fitted is a build option of the core
  *
  * Budget for the MSC configuration at high speed:
  *      EP0            64 B
@@ -217,18 +193,16 @@ BOARD_CAPS/USB_RAILS in the Makefile."
  *                  ------
  *                  1088 B single-buffered, 2112 B double-buffered
  *
- * A bus reset RESETS THE ALLOCATION -- every endpoint must be re-armed and
- * the running pointer returned to unit 8.  Forgetting this leaks FIFO space
- * across replugs, which is precisely why "works once, fails on replug" is a
- * gate in the plan rather than an afterthought.
+ * A bus reset discards the allocation: every endpoint is re-armed, from unit
+ * 8, when the host configures the device again.  Allocating without starting
+ * over at unit 8 leaks FIFO space across replugs.
  */
 
 /*---------------------------------------------------------------------------*/
 /* TABLE 4 -- INTERRUPTS                                                     */
 /*---------------------------------------------------------------------------*/
 /*
- * ONE NVIC vector for the whole controller: USB0_IRQn.  Five status sources
- * are read inside it:
+ * One NVIC vector for the whole controller: USB0_IRQn.  The status sources:
  *
  *   INTRUSB          bus events: Suspend, Resume, Reset, SOF   (read-to-clear)
  *   INTRTX           IN endpoint n complete, bit n             (read-to-clear)
@@ -236,61 +210,52 @@ BOARD_CAPS/USB_RAILS in the Makefile."
  *   ADMACMPINTSTAT   auto-DMA channel completion               (write-1-clear)
  *   ADMAERRINTSTAT   auto-DMA channel error                    (write-1-clear)
  *
- * READ-TO-CLEAR MEANS READ EXACTLY ONCE.  Each of the first three must be
- * read into a local at the top of the ISR and then only that local consulted.
- * Reading INTRTX twice loses whatever arrived between the reads; reading it
- * from anywhere but the ISR loses events entirely.  This is the same shape as
- * the eMMC's INTENABLE trap (a register whose behaviour depends on how you
- * look at it), and it is why polling is not merely slow here but wrong.
+ * The ISR reads each read-to-clear register once, into a local, and consults
+ * only the local: a second read loses whatever arrived between the reads, and
+ * a read anywhere but the ISR takes events from it.  The ADMA status
+ * registers are polled by the process-context transfer, not the ISR.
  *
- * ON BUS RESET the controller does NOT tidy up on its own.  The handler must:
- *   - abort every in-flight transfer and tell the upper layer
- *   - reset the EP0 state machine to IDLE
- *   - re-init EP0 with a 64-byte max packet
- *   - DISABLE all per-endpoint interrupts (they are re-enabled by
- *     SET_CONFIGURATION)
- *   - disable SOF (enable only if some class actually wants it)
- *   - reset the FIFO allocation pointer to unit 8
- *   - re-enable the Suspend interrupt, and DISCARD any suspend event in the
- *     same batch -- reset and suspend arrive together and the suspend is
- *     spurious
- *   - read POWER.HSMode to learn what speed was negotiated
+ * On a bus reset the controller does not reset its own state.  bus_reset()
+ * in tiku_usb_arch.c:
+ *   - returns the EP0 state machine to IDLE and drops a pending SET_ADDRESS
+ *   - clears the address, the configuration, DTR and the CDC rings
+ *   - re-inits EP0 with a 64-byte max packet
+ *   - leaves only EP0's interrupt enabled; SET_CONFIGURATION runs
+ *     cdc_endpoints_open(), which allocates the FIFO again from unit 8 and
+ *     sets the endpoint interrupts
+ *   - reads POWER.HSMode for the negotiated speed and sets the bulk max
+ *     packet from it
+ * SOF is never enabled.  A suspend event that arrives with a reset is
+ * counted like any other.
  */
 
 /*---------------------------------------------------------------------------*/
-/* TABLE 5 -- SPEED, AND THE PHY REFERENCE CLOCK THIS BOARD CANNOT PROVIDE   */
+/* TABLE 5 -- SPEED AND THE PHY REFERENCE CLOCK                              */
 /*---------------------------------------------------------------------------*/
 /*
- * Speed is negotiated by the chirp handshake in HARDWARE.  Software's part is
- * small: set POWER.HSEnab before attaching, then read POWER.HSMode after the
- * bus reset to discover what was agreed.  TIMEOUT1 (chirp) and TIMEOUT2 (HS
- * resume delay) are configurable and left at their defaults for now.
+ * Speed is negotiated by the chirp handshake in hardware.  Software sets
+ * POWER.HSEnab before attaching, then reads POWER.HSMode after the bus reset
+ * for the result.  TIMEOUT1 (chirp) and TIMEOUT2 (HS resume delay) stay at
+ * their defaults.
  *
  * The PHY needs a reference clock, chosen in USB->CLKCTRL.PHYREFCLKSEL[26:24]:
  *   0 HFRC_48MHz   1 HFRC2_31MHz   2 HFRC_24MHz   3 EXTREFCLK
  *   4 EXTREFCLK_DIV2   5 XTALHS   6 XTALHS_DIV2   7 OFF
  * plus PHYREFCLKDIS[0], CTRLAPBCLKDIS[8], PHYAPBLCLKDIS[16] as gates.
  *
- * FULL SPEED wants HFRC at 24 MHz.  That is an internal oscillator, always
- * available, no dependencies.  This is why U1 targets FS.
+ * Full speed uses HFRC at 24 MHz, an internal oscillator that is always
+ * available.  For high speed the vendor's clock-source selection is:
  *
- * *** HIGH SPEED: U0 GOT THIS WRONG AND U1b CORRECTED IT ON HARDWARE. ***
- *
- * U0 traced the vendor's clock-source logic through its crystal cases, found
- * that this board has no HS crystal (AM_BSP_XTAL_HS_FREQ_HZ == 0), and
- * concluded that HS therefore falls through to the SYSPLL.  That was reading
- * three branches and stopping before the fourth.  The real selection is:
- *
- *   XTAL_HS 48 MHz  -> XTALHS_DIV2          (the GREEN board's path)
+ *   XTAL_HS 48 MHz  -> XTALHS_DIV2          (the green board's path)
  *   XTAL_HS 24 MHz  -> XTALHS
  *   EXTREF  48 MHz  -> EXTREFCLK_DIV2
  *   EXTREF  24 MHz  -> EXTREFCLK
- *   EXTREF  12 MHz  -> EXTREFCLK + PHY multiplier x20   <-- THE BLUE BOARD
+ *   EXTREF  12 MHz  -> EXTREFCLK + PHY multiplier x20   <-- the Blue board
  *   otherwise       -> SYSPLL
  *
- * The Blue board declares AM_BSP_EXTREF_CLK_FREQ_HZ == 12000000, so it takes
- * the fifth branch and never reaches the PLL.  No PLL bring-up, no lock wait:
- * high speed costs one pin, one clock-request line, and one PHY bit.
+ * The Blue board has no HS crystal (AM_BSP_XTAL_HS_FREQ_HZ == 0) and declares
+ * AM_BSP_EXTREF_CLK_FREQ_HZ == 12000000, so it takes the fifth branch: one
+ * pin, one clock-request line and one PHY bit, with no PLL.
  *
  *   USB->CLKCTRL.PHYREFCLKSEL = EXTREFCLK (3)
  *   USBPHY->REG14.BF55        = 1     x20 rather than the default x40,
@@ -299,120 +264,86 @@ BOARD_CAPS/USB_RAILS in the Makefile."
  *   GP15  in,  funcsel 10 (REFCLK_EXT)      where the clock arrives
  *   GP136 out, driven high                  AM_BSP_GPIO_AP5_12M_CLKREQ
  *
- * *** AND THE 12 MHz COMES FROM THE BLE RADIO DIE. ***
+ * The 12 MHz comes from the EM9305 BLE die in the package: GP136, named
+ * AM_BSP_GPIO_AP5_12M_CLKREQ in the BSP, requests it, and the die's crystal
+ * is the source.  The vendor's clock manager treats EXTREFCLK as available
+ * only once the EM9305 has initialised (bIsSipEnabled).
  *
- * GP136 is named AM_BSP_GPIO_AP5_12M_CLKREQ in the BSP: it REQUESTS the clock
- * from the EM9305 in the package.  The vendor's clock manager only treats
- * EXTREFCLK as available once bIsSipEnabled is set, which happens only after
- * the EM9305 initialises -- and that is not bookkeeping, it is physics.  The
- * die's crystal IS the source.
+ * With the die in reset the PHY has no reference and cannot present its
+ * pull-up, so the host sees nothing, as with an unplugged cable.
+ * tiku_usb_up() therefore boots the die for high speed, and a build without
+ * the EM9305 driver refuses high speed with TIKU_USB_ERR_CLOCK.
  *
- * Measured, because a dependency this surprising deserves evidence rather
- * than inference: requesting HS with the die still in reset produced irq 0,
- * reset 0, and a host that saw nothing at all -- with no reference the
- * PHY cannot even present its pull-up, so it is indistinguishable from an
- * unplugged cable.  Booting the die first made the identical code enumerate
- * at high speed on the next attempt.  tiku_usb_up() therefore boots it, and
- * a build without the EM9305 driver refuses HS with ERR_CLOCK rather than
- * failing silently.
- *
- * The GREEN board needs none of this: its 48 MHz crystal takes the first
- * branch, so HS there is a two-line change with no radio involved.  A fourth
- * board difference, and the largest one yet.
- *
- * Splitting U1b from U1 paid for itself regardless: the first HS attempt
- * failed completely, and because full speed was already proven on the same
- * code the only suspect was the reference clock.  Folded together, "no
- * enumeration" would have had a dozen suspects instead of one.
+ * The green board's 48 MHz crystal takes the first branch, with no radio
+ * involved.
  */
 
 /*---------------------------------------------------------------------------*/
-/* THE DECISION U0 EXISTS TO MAKE: INTERRUPT-DRIVEN, AND IT IS NOT CLOSE     */
+/* INTERRUPT-DRIVEN DESIGN                                                   */
 /*---------------------------------------------------------------------------*/
 /*
- * Every other driver in this port polls.  This one cannot, for four reasons:
+ * The ISR owns the controller:
  *
- * 1. THE STATUS REGISTERS ARE READ-TO-CLEAR.  Any reader that is not the
- *    single owner of INTRTX/INTRRX/INTRUSB destroys events for everyone else.
- *    A poll loop that races with anything -- including a diagnostic that
- *    dumps registers -- loses bus resets.
+ *   - INTRTX/INTRRX/INTRUSB are read-to-clear and need a single owner; any
+ *     other reader, a register dump included, loses bus resets.
+ *   - The host sets the enumeration deadlines, and a device that misses one
+ *     gets no error: the host gives up on it.
+ *   - The shell can block for seconds (`power emmc bench`, `fat hash` on a
+ *     large file), and the device answers the host meanwhile.
  *
- * 2. THE HOST SETS THE TIMEOUTS.  Enumeration is a conversation with
- *    deadlines set by the other end.  Missing them does not produce an error;
- *    it produces a device the host gives up on.
+ * The split of work:
  *
- * 3. THE SHELL BLOCKS FOR SECONDS.  `power emmc bench` occupies the shell
- *    process for over two seconds; a 54 MB stage for 2.2 s; `fat hash` on a
- *    large file for longer.  A polled USB device would drop off the bus every
- *    time the board did anything interesting -- and "interesting" here means
- *    exactly the operations USB exists to feed.
+ *   ISR      bus events; the EP0 state machine; standard requests answered
+ *            from static descriptor tables; the CDC pipes and the RAM-disk
+ *            MSC transport.  No allocation and no blocking, so enumeration
+ *            does not depend on what the shell is doing.
+ *   process  the CDC ring drain, and the eMMC-backed MSC transport
+ *            (tiku_usb_msc_poll()), whose EP1 interrupts stay masked.
  *
- * 4. MSC must serve the host WHILE the board is doing something else.  A
- *    polled implementation is not a slower version of that feature; it is a
- *    different, useless one.
+ * The ISR is bounded: no waits, no hang check-in and no SHELL_PRINTF; it
+ * counts instead.  The INDEX masking of table 3 applies to process context.
  *
- * SO: the ISR owns the controller.  The split of work:
- *
- *   ISR      bus events; the EP0 state machine (IDLE -> SETUP -> DATA_RX /
- *            DATA_TX -> STATUS_RX / STATUS_TX); standard requests answered
- *            from static descriptor tables; ADMA completion bookkeeping.
- *            Small, table-driven, no allocation, no blocking -- enumeration
- *            must never depend on what the shell is doing.
- *   process  class logic: MSC command dispatch, SCSI, the block backend.
- *            Bulk DATA never passes through the CPU (ADMA moves it), so only
- *            CBW/CSW-sized decisions are deferred, and the ring absorbs the
- *            latency.
- *
- * Two disciplines come with being interrupt-driven: the INDEX-masking rule in
- * table 3, and a bounded ISR (no waits, no hang_checkin, no SHELL_PRINTF from
- * interrupt context -- diagnostics go through a ring the process drains).
- *
- * The EP0 state machine, transcribed:
+ * The control transfer as the vendor's EP0 state machine describes it (this
+ * driver tracks IDLE, TX and RX):
  *      IDLE -> SETUP        on CSR0.OutPktRdy, 8 bytes read from FIFO0
  *      SETUP -> DATA_TX     control-in with a data stage
  *      SETUP -> DATA_RX     control-out with a data stage
  *      SETUP -> STATUS_TX   no data stage
  *      DATA_* -> STATUS_*   when the stage completes
  *      STATUS_* -> IDLE
- * SET_ADDRESS is the classic trap and the HAL confirms the order: send the
- * zero-length status IN packet FIRST, and only then write FADDR.  Writing the
- * address before the host has seen the acknowledgement leaves the host talking
- * to address 0 while the device answers on the new one, and enumeration stalls.
+ * SET_ADDRESS, in the HAL's order: the zero-length status IN packet goes out
+ * first, and only then is FADDR written.  An address written before the host
+ * has seen the acknowledgement leaves the host on address 0 while the device
+ * answers on the new one, and enumeration stalls.
  */
 
 /*---------------------------------------------------------------------------*/
-/* PUBLIC CONSTANTS -- what U1 will implement                                */
+/* PUBLIC CONSTANTS                                                          */
 /*---------------------------------------------------------------------------*/
 
 /** @brief Endpoints this core provides: EP0 plus EP1..EP5, IN and OUT. */
 #define TIKU_USB_EP_COUNT       6u
-#define TIKU_USB_EP_MAX         5u
+#define TIKU_USB_EP_MAX         5u   /**< highest endpoint number           */
 
 /** @brief EP0 max packet -- fixed at 64 for both speeds. */
 #define TIKU_USB_EP0_MAXPACKET  64u
 
 /** @brief FIFO allocation granularity and the units FIFOADD counts in. */
 #define TIKU_USB_FIFO_UNIT      8u
-#define TIKU_USB_FIFO_FIRST     8u   /* units; the first 64 B are EP0's      */
+#define TIKU_USB_FIFO_FIRST     8u   /**< first free unit; EP0 has 0..7     */
 
-/** @brief Result codes -- distinct causes stay distinct. */
+/** @brief Result codes of the USB driver. */
 typedef enum {
     TIKU_USB_OK = 0,
     TIKU_USB_ERR_POWER,    /**< a domain never came up                      */
-    TIKU_USB_ERR_CLOCK,    /**< PHY reference clock unavailable / no lock   */
-    TIKU_USB_ERR_TIMEOUT,  /**< a bounded wait expired                      */
-    TIKU_USB_ERR_ARG,      /**< bad endpoint, size, or descriptor           */
+    TIKU_USB_ERR_CLOCK,    /**< PHY reference clock unavailable             */
+    TIKU_USB_ERR_TIMEOUT,  /**< a bounded wait expired (not returned)       */
+    TIKU_USB_ERR_ARG,      /**< bad speed, class or backing store           */
     TIKU_USB_ERR_STATE,    /**< operation illegal in the current state      */
-    TIKU_USB_ERR_FIFO,     /**< FIFO RAM exhausted by the requested config  */
+    TIKU_USB_ERR_FIFO,     /**< FIFO RAM exhausted (not returned)           */
 } tiku_usb_err_t;
 
-/**
- * @brief Which class the device presents.  One at a time, on purpose.
- *
- * A composite CDC+MSC device is possible and is NOT what U3 builds: a host
- * that fails to bind one function on a composite device is markedly harder
- * to diagnose than one that fails to bind the only function present.
- */
+/** @brief The class the device presents: one at a time, never composite. */
 typedef enum {
     TIKU_USB_CLASS_CDC = 0,   /**< ACM serial -- the console               */
     TIKU_USB_CLASS_MSC,       /**< bulk-only mass storage                  */
@@ -426,72 +357,80 @@ typedef enum {
 } tiku_usb_speed_t;
 
 /*---------------------------------------------------------------------------*/
-/* API -- the U1 surface (bring-up + enumeration).  Classes land in U2/U3.   */
+/* BRING-UP, ENUMERATION AND MASS STORAGE                                    */
 /*---------------------------------------------------------------------------*/
 
-/** @brief ISR counters -- the whole diagnostic surface of an ISR that cannot
- *         print.  A host that never enumerates leaves a specific fingerprint
- *         here: irq==0 means the interrupt never fired (wiring/NVIC);
- *         reset>0 with setup==0 means the bus is live but EP0 is deaf. */
+/**
+ * @brief Counters kept by the ISR, which does not print.
+ *
+ * irq == 0 means the interrupt never fired (wiring or NVIC); reset > 0 with
+ * setup == 0 means the bus is live but EP0 receives nothing.
+ */
 typedef struct {
     uint32_t irq;        /**< USB interrupts taken                          */
     uint32_t reset;      /**< bus resets seen                               */
     uint32_t setup;      /**< SETUP packets decoded                         */
     uint32_t stall;      /**< requests answered with a stall                */
     uint32_t setupend;   /**< host abandoned a control transfer (normal)    */
-    uint32_t suspend;
-    uint32_t resume;
+    uint32_t suspend;    /**< suspend events                                */
+    uint32_t resume;     /**< resume events                                 */
     uint16_t last_req;   /**< bRequest << 8 | bmRequestType, most recent    */
     /** Last four stalled requests: bRequest << 8 | (wValue >> 8).  For
-     *  GET_DESCRIPTOR (0x06) the low byte is the descriptor TYPE, so 0x0606
-     *  is DEVICE_QUALIFIER and 0x0607 is OTHER_SPEED -- both of which a
-     *  full-speed-only device is REQUIRED to stall. */
+     *  GET_DESCRIPTOR (0x06) the low byte is the descriptor type: 0x0606 is
+     *  DEVICE_QUALIFIER and 0x0607 is OTHER_SPEED, which this driver stalls. */
     uint16_t stalled[4];
 } tiku_usb_counters_t;
 
 /**
  * @brief Power both domains, release the PHY, clock it, arm interrupts.
  *
- * Table 2's sequence, in its order.  Leaves the device DETACHED: call
- * tiku_usb_attach(1) to present the pull-up and let the host find us, so
- * that bring-up can be inspected before the bus starts making demands.
+ * Table 2's sequence, in its order, presenting CDC.  Leaves the device
+ * detached: tiku_usb_attach(1) presents the pull-up to the host.  Returns
+ * TIKU_USB_OK at once if USB is already up.
  */
 tiku_usb_err_t tiku_usb_up(tiku_usb_speed_t want);
 
 /**
  * @brief Bring up presenting @p cls.  tiku_usb_up() is this with CDC.
  *
- * The class is fixed for the lifetime of the bring-up: switching means
- * `power usb off` and up again, which is a real detach the host will notice.
+ * The class is fixed until tiku_usb_down(); switching means `power usb off`
+ * and up again, a detach the host sees.
  */
 tiku_usb_err_t tiku_usb_up_as(tiku_usb_speed_t want, tiku_usb_class_t cls);
 
 /**
  * @brief Bring up choosing the MSC backing store too.
  *
- * With @p use_emmc the host is shown the card MINUS the scratch region, so
- * the scratch blocks are unreachable by construction rather than by
- * convention -- no host format or partition table can touch them.
+ * With @p use_emmc the host is shown the card minus its top
+ * TIKU_EMMC_SCRATCH_BLOCKS, so no host format or partition table can reach
+ * the scratch region.
+ *
+ * @return TIKU_USB_OK; ERR_STATE if the card is not identified; ERR_ARG for
+ *         a bad speed or class, or eMMC in a build without the eMMC driver;
+ *         ERR_POWER or ERR_CLOCK from the bring-up
  */
 tiku_usb_err_t tiku_usb_up_full(tiku_usb_speed_t want, tiku_usb_class_t cls,
                                 int use_emmc);
 
 /**
- * @brief Process-context pump: at most one SCSI command per call.
+ * @brief Process-context pump for MSC over the eMMC.
  *
- * Install on the scheduler idle hook.  The eMMC answers in milliseconds, so
- * its data phase cannot live in the ISR; this is where it lives instead.
+ * Serves SCSI commands until the host goes quiet, at most 256 per call,
+ * waiting up to ~2 ms for each next command.  tiku_usb_up_full() registers it
+ * as a shell pump; it returns at once unless MSC is up over the eMMC.
  */
 void tiku_usb_msc_poll(void);
 
-/** @brief 1 while the host owns the card -- board-side access must refuse. */
+/** @brief 1 while MSC presents the eMMC; the fat and emmc shell commands then
+ *         refuse to touch the card. */
 int tiku_usb_msc_owns_emmc(void);
 
 /** @brief Which class is currently presented. */
 tiku_usb_class_t tiku_usb_class(void);
 
-/** @brief Enable/disable the ADMA data path (default on).  For measuring. */
+/** @brief Enable/disable the ADMA data path of eMMC mode (default off). */
 void tiku_usb_msc_adma(int on);
+/** @brief 1 if the ADMA data path is enabled. */
 int  tiku_usb_msc_adma_on(void);
 
 /** @brief ADMA transfer and error counts. */
@@ -502,21 +441,20 @@ void tiku_usb_msc_stats(uint32_t *cbw, uint32_t *rd, uint32_t *wr,
                         uint32_t *blocks);
 
 /**
- * @brief FNV-1a over the first @p nblocks of the RAM disk (0 = all).
- *
- * The U3 gate is not "the host mounted it" but "what the host wrote is what
- * the board holds", and only a hash on both sides can say that.
+ * @brief FNV-1a over the first @p nblocks of the RAM disk (0 or more than the
+ *        disk = all), to compare with a hash of the same bytes on the host.
  */
 uint32_t tiku_usb_msc_hash(uint32_t nblocks);
 
 /**
- * @brief Exercise the LBA bounds check against ranges that must be refused.
- * @return 0 if all cases behaved, else a bitmask naming the ones that did not.
+ * @brief Exercise the LBA bounds check on ranges it must accept and refuse.
+ * @return 0 if all cases behaved, else a bitmask with bit n set for each
+ *         case n that did not.
  */
 uint32_t tiku_usb_msc_selftest(void);
 
-/** @brief Speed REQUESTED at bring-up; tiku_usb_speed() is what was
- *         actually negotiated by the chirp handshake. */
+/** @brief Speed requested at bring-up; tiku_usb_speed() is what the chirp
+ *         handshake negotiated. */
 tiku_usb_speed_t tiku_usb_want(void);
 
 /** @brief Soft-connect (POWER.SOFTCONN): 1 attaches, 0 detaches. */
@@ -541,22 +479,21 @@ uint8_t tiku_usb_address(void);
 uint8_t tiku_usb_config(void);
 
 /*---------------------------------------------------------------------------*/
-/* U2 -- the CDC-ACM console                                                 */
+/* THE CDC-ACM CONSOLE                                                       */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Shell I/O backend for the CDC data pipes.
  *
- * Install with tiku_shell_io_set_backend(&tiku_shell_io_usbcdc).  The shell
- * itself needs no change: it has been transport-agnostic since it was
- * written, and this is simply another channel.
+ * Install with tiku_shell_io_set_backend(&tiku_shell_io_usbcdc).  The
+ * backend converts LF to CRLF, echoes, and carries full VFS capabilities.
  */
 extern const tiku_shell_io_t tiku_shell_io_usbcdc;
 
 /** @brief Queue one byte to the host (no-op unless configured and DTR set). */
 void tiku_usb_cdc_putc(char c);
 
-/** @brief 1 when the host has configured the device AND opened the terminal (DTR). */
+/** @brief 1 when the host has configured the device and set DTR. */
 int tiku_usb_cdc_ready(void);
 
 /**
@@ -567,7 +504,7 @@ int tiku_usb_cdc_ready(void);
  */
 uint32_t tiku_usb_cdc_sink(uint32_t ms);
 
-/** @brief Byte counters and the NAK count -- flow control made visible. */
+/** @brief TX and RX byte counts, TX bytes dropped, and RX back-offs (NAK). */
 void tiku_usb_cdc_stats(uint32_t *tx, uint32_t *rx, uint32_t *drop,
                         uint32_t *nak);
 
@@ -575,11 +512,11 @@ void tiku_usb_cdc_stats(uint32_t *tx, uint32_t *rx, uint32_t *drop,
 void tiku_usb_counters(tiku_usb_counters_t *out);
 
 /**
- * @brief Snapshot host registers (power-safe: 0xDEADDEAD when down).
+ * @brief Snapshot controller registers into @p out[0..n-1].
  *
- * Deliberately omits INTRUSB/INTRTX/INTRRX: they are read-to-clear, and a
- * diagnostic that steals interrupts from the ISR causes the bug it is
- * looking for.
+ * Slot 0 is PWRCTRL.DEVPWRSTATUS; while the controller is unpowered every
+ * other slot reads 0xDEADDEAD.  INTRUSB/INTRTX/INTRRX are omitted: they are
+ * read-to-clear, and a read here takes events from the ISR.
  */
 void tiku_usb_regs(uint32_t *out, unsigned n);
 

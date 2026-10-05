@@ -7,9 +7,9 @@
  *
  * tiku_simd_power.h - Helium (MVE) versus scalar energy instruments.
  *
- * Compares scalar CPU, Helium CPU and the GPU on matched kernels.  Both backends
- * live in one image (see tiku_simd_scalar.c), and the fair three-way comparison is
- * the SSRAM column -- the DTCM one is Helium-only and must not be quoted against the GPU.
+ * Times scalar and Helium builds of the same kernels in one image (the scalar
+ * copy comes from tiku_simd_scalar.c), on buffers in DTCM or shared SSRAM.  The
+ * GPU cannot reach DTCM, so only SSRAM figures compare with GPU measurements.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,8 +19,11 @@
 
 #include <stdint.h>
 
-/** Kernels, in the order the report tables use.  The first six have a GPU
- *  counterpart already measured in experiment 2; the last three do not. */
+/**
+ * @brief Kernel IDs for tiku_simd_power_probe(), in report-table order.
+ *
+ * The first six have GPU counterparts (tiku_gpu_power.h); the rest do not.
+ */
 #define TIKU_SP_FILL      0u
 #define TIKU_SP_COPY      1u
 #define TIKU_SP_MULTIPLY  2u
@@ -33,28 +36,30 @@
 #define TIKU_SP_DOT       9u
 #define TIKU_SP_KIND_COUNT 10u
 
+/** @brief Backend for tiku_simd_power_probe(); any other value is scalar. */
 #define TIKU_SP_BACKEND_SCALAR 0u
 #define TIKU_SP_BACKEND_HELIUM 1u
 
-#define TIKU_SP_TIER_DTCM  0u
-#define TIKU_SP_TIER_SSRAM 1u
+/** @brief Buffer tier for tiku_simd_power_probe(); any other value is DTCM. */
+#define TIKU_SP_TIER_DTCM  0u   /**< CPU-private tightly coupled memory */
+#define TIKU_SP_TIER_SSRAM 1u   /**< shared SRAM, which the GPU reaches */
 
-/** Largest working set per buffer.  16 KB matches the existing TikuBench simd
- *  suite (SN = 16384) so cycle figures are comparable, and three buffers of it
- *  fit DTCM comfortably. */
+/** @brief Largest working set per buffer: 16 KB, the SN of TikuBench's
+ *         tests/simd/test_simd.c, so the cycle figures compare; each tier
+ *         holds three such buffers. */
 #define TIKU_SP_MAX_BYTES 16384u
 
 /**
  * @brief Run one kernel repeatedly for @p ms; returns elapsed microseconds.
  *
- * STIMER-timed (the one clock WFI cannot stop) and hang-detector aware.  Reports
- * bytes touched, elements processed, retired passes, DWT cycles and a result
- * fingerprint, giving a durable cycles-per-element table.
+ * Timed on the STIMER, with a hang-detector check-in each pass.  The getters
+ * below report the run's bytes touched, elements, passes, DWT cycles and a
+ * fingerprint of its output.
  *
  * @param kind     TIKU_SP_*
  * @param backend  TIKU_SP_BACKEND_SCALAR or _HELIUM
  * @param tier     TIKU_SP_TIER_DTCM or _SSRAM
- * @param bytes    working-set size (clamped to TIKU_SP_MAX_BYTES)
+ * @param bytes    working-set size (clamped to 16..TIKU_SP_MAX_BYTES)
  * @param ms       window length
  * @return elapsed microseconds, or 0 if the request was rejected
  */
@@ -63,31 +68,31 @@ uint32_t tiku_simd_power_probe(unsigned kind, unsigned backend, unsigned tier,
 
 /** @brief Passes retired by the last probe. */
 uint32_t tiku_simd_power_passes(void);
-/** @brief Bytes touched -- the energy-per-byte denominator. */
+/** @brief Bytes of memory traffic in the last probe, reads plus writes. */
 uint32_t tiku_simd_power_bytes(void);
-/** @brief Elements processed -- the energy-per-element denominator. */
+/** @brief Elements processed by the last probe. */
 uint32_t tiku_simd_power_elems(void);
-/** @brief Core cycles consumed by the last probe (DWT), for the T1 table. */
+/** @brief Core cycles of the last probe (DWT CYCCNT). */
 uint32_t tiku_simd_power_cycles(void);
-/** @brief Fingerprint of the result, to prove the kernel actually computed. */
+/** @brief Fingerprint of the last probe: three words of z plus the return. */
 uint32_t tiku_simd_power_fingerprint(void);
 
 /**
  * @brief Verify the two backends agree bit-for-bit on every kernel.
  *
- * Runs each kernel on both backends over identical inputs and compares the full
- * output. No energy figure means anything for a kernel whose two paths
- * disagree, so the harness gates on this.
+ * Runs each kernel on both backends over identical inputs of 4111 elements
+ * and compares the return values and the whole output.  Overwrites the probe
+ * buffers of both tiers.
  *
  * @param out_mismatch  Out: bitmask of kernels that differed (0 = all agree).
  * @return non-zero if every kernel matched.
  */
 int tiku_simd_power_verify(uint32_t *out_mismatch);
 
-/** @brief Which backend hal/tiku_simd.c itself was compiled for (1 = Helium). */
+/** @brief Backend hal/tiku_simd.c was compiled for (1 = Helium). */
 int tiku_simd_power_native_backend(void);
 
-/** @brief Buffer addresses, so a report can prove which tier it measured. */
+/** @brief Address of the x buffer of @p tier, for reports. */
 const void *tiku_simd_power_buf(unsigned tier);
 
 #endif /* TIKU_SIMD_POWER_H_ */

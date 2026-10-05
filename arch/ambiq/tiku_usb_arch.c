@@ -7,9 +7,9 @@
  *
  * tiku_usb_arch.c - Apollo510 USB device controller: bring-up and enumeration.
  *
- * Never uses a CMSIS bitfield accessor on CFG0/CFG1/CFG2: those words pack
- * read-to-clear interrupt status, so a read-modify-write silently discards pending
- * interrupts.  Interrupt-driven by necessity -- a polled device would drop off the bus.
+ * Bring-up, enumeration, a CDC-ACM console and bulk-only mass storage.  The
+ * MUSB registers are accessed at their true widths, never through the CMSIS
+ * bitfields on CFG0..CFG2, which pack read-to-clear interrupt status.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,36 +24,35 @@
 #include "tiku_cpu_common.h"
 #include "apollo510.h"
 #include <kernel/shell/tiku_shell_io.h>   /* the console backend, below     */
-#include <kernel/shell/tiku_shell.h>      /* tiku_shell_add_pump(): S4      */
+#include <kernel/shell/tiku_shell.h>      /* tiku_shell_add_pump()          */
 #include <kernel/vfs/tiku_vfs.h>          /* TIKU_VFS_CAP_ALL               */
-#include <kernel/cpu/tiku_hang.h>         /* the sink blocks on purpose     */
+#include <kernel/cpu/tiku_hang.h>         /* check-in in blocking loops     */
 #include "hal/tiku_cpu.h"                 /* dcache maintenance for ADMA    */
 #if (TIKU_DRV_BLE_EM9305_ENABLE + 0)
 #include "tiku_em9305.h"        /* HS needs the die's 12 MHz -- see below   */
 #endif
 #if (TIKU_DRV_EMMC_ENABLE + 0)
-#include "tiku_emmc_arch.h"     /* MSC's real backing store (U4)           */
+#include "tiku_emmc_arch.h"     /* MSC's eMMC backing store                */
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* REGISTER ACCESS -- TRUE WIDTHS ONLY (table 1)                             */
+/* REGISTER ACCESS AT TRUE WIDTHS (table 1)                                  */
 /*---------------------------------------------------------------------------*/
 /*
- * Every one of these is a real MUSB register that CMSIS happens to have
- * packed into a wider word.  Going through these macros rather than the
- * CMSIS struct is not a style preference; it is the difference between a
- * driver that works and one that enumerates nine times in ten.
+ * Each macro is one MUSB register at its true width.  CMSIS packs these
+ * into wider words, and a 32-bit access there clears read-to-clear status
+ * (table 1 in the header).
  */
 #define R8(off)    (*(volatile uint8_t  *)(USB_BASE + (off)))
 #define R16(off)   (*(volatile uint16_t *)(USB_BASE + (off)))
 
 #define USB_FADDR       R8(0x00)
 #define USB_POWER       R8(0x01)
-#define USB_INTRTX      R16(0x02)   /* READ-TO-CLEAR */
-#define USB_INTRRX      R16(0x04)   /* READ-TO-CLEAR */
+#define USB_INTRTX      R16(0x02)   /* read-to-clear */
+#define USB_INTRRX      R16(0x04)   /* read-to-clear */
 #define USB_INTRTXE     R16(0x06)
 #define USB_INTRRXE     R16(0x08)
-#define USB_INTRUSB     R8(0x0A)    /* READ-TO-CLEAR */
+#define USB_INTRUSB     R8(0x0A)    /* read-to-clear */
 #define USB_INTRUSBE    R8(0x0B)
 #define USB_FRAME       R16(0x0C)
 #define USB_INDEX       R8(0x0E)
@@ -77,23 +76,20 @@
 #define POWER_ISOUPDATE (1u << 7)
 
 /*
- * THE 12 MHz REFERENCE, AND WHERE IT COMES FROM (see the header's table 5,
- * corrected in U1b).  High speed needs a PHY reference this board does not
- * have a crystal for -- but it does have a 12 MHz clock, and the BSP names
- * its request line outright: AM_BSP_GPIO_AP5_12M_CLKREQ = 136.  The source
- * is the EM9305 BLE die in the package:
+ * The 12 MHz high-speed reference of the Blue board (header table 5), which
+ * has no HS crystal.  The EM9305 BLE die in the package supplies it:
  *
- *   GP136  out  assert to ASK the die for its 12 MHz output
- *   GP15   in   funcsel 10 (REFCLK_EXT) -- where it arrives
+ *   GP136  out  asserted to request the die's 12 MHz output
+ *               (AM_BSP_GPIO_AP5_12M_CLKREQ)
+ *   GP15   in   funcsel 10 (REFCLK_EXT), where it arrives
  *
- * The PHY expects 24 MHz and multiplies by 40; at 12 MHz it must multiply by
- * 20 instead, which is USBPHY REG14 bit BF55.  Getting that wrong would not
- * fail cleanly -- it would run the PHY at the wrong rate and fail the chirp.
+ * The PHY expects 24 MHz and multiplies by 40; at 12 MHz it multiplies by 20
+ * (USBPHY REG14 bit BF55).  A wrong multiplier runs the PHY at the wrong rate
+ * and the chirp fails.
  */
-/* Only boards whose HS reference is the EM9305 have these wires at all; a
- * board with its own HS crystal deliberately defines neither (see the green
- * EVB header).  Guarded so a missing definition is a compile error naming the
- * board contract, not a pad number invented at 2 a.m. */
+/* Only boards whose HS reference is the EM9305 define these pads; a board
+ * with its own HS crystal defines neither (see the green EVB header).  A
+ * board that declares the EM9305 reference without them fails to compile. */
 #if (TIKU_BOARD_HAS_USBHS_CLK_EM9305 + 0)
 #if !defined(TIKU_BOARD_USB_PAD_CLKREQ) || !defined(TIKU_BOARD_USB_PAD_REFCLK)
 #error "Board declares USBHS_CLK_EM9305 but no TIKU_BOARD_USB_PAD_CLKREQ / \
@@ -111,8 +107,8 @@ _REFCLK. The 12 MHz reference has to arrive on some pad -- name it."
 #define INTRUSB_RESET   (1u << 2)
 #define INTRUSB_SOF     (1u << 3)
 
-/* CSR0 (INDEX == 0).  The EP0 meanings of the shared CSR bits -- see the
- * header: CMSIS names each bit for BOTH its EP0 and its EP1-5 role. */
+/* CSR0 (INDEX == 0): the EP0 meanings of the shared CSR bits.  CMSIS names
+ * each bit for both its EP0 and its EP1-5 role. */
 #define CSR0_RXPKTRDY       (1u << 0)
 #define CSR0_TXPKTRDY       (1u << 1)
 #define CSR0_SENTSTALL      (1u << 2)
@@ -156,10 +152,10 @@ _REFCLK. The 12 MHz reference has to arrive on some pad -- name it."
 /*---------------------------------------------------------------------------*/
 /*
  * EP1 carries the data pipes and EP2 the notification the class requires but
- * this driver never sends.  Bulk max-packet is NOT a free choice: USB 2.0
- * fixes it at 512 for high speed and allows at most 64 at full speed, so the
- * configuration descriptor genuinely differs between the two and is patched
- * at request time, once the chirp has settled the speed.
+ * this driver never sends.  USB 2.0 fixes bulk max-packet at 512 for high
+ * speed and allows at most 64 at full speed, so the configuration descriptor
+ * differs between the two and is patched at request time, once the chirp has
+ * settled the speed.
  */
 #define CDC_EP_DATA     1u          /* bulk IN + bulk OUT                    */
 #define CDC_EP_NOTIFY   2u          /* interrupt IN, declared, never used    */
@@ -171,9 +167,8 @@ _REFCLK. The 12 MHz reference has to arrive on some pad -- name it."
 /* DESCRIPTORS                                                               */
 /*---------------------------------------------------------------------------*/
 /*
- * VID/PID: 0x1209/0x0001 is pid.codes' explicitly reserved
- * TESTING-AND-DEVELOPMENT pair.  It must NOT ship in a product -- a real
- * allocation is a Tiku AB line item, recorded in the plan.
+ * VID/PID 0x1209/0x0001 is pid.codes' reserved testing-and-development pair,
+ * not for use in a product.
  */
 #define TIKU_USB_VID   0x1209u
 #define TIKU_USB_PID   0x0001u
@@ -187,7 +182,7 @@ _REFCLK. The 12 MHz reference has to arrive on some pad -- name it."
 static uint8_t s_desc_device[18] = {
     18, DESC_DEVICE,
     0x00, 0x02,             /* bcdUSB 2.00                                   */
-    0x02, 0x00, 0x00,       /* class 02 = Communications, at DEVICE level    */
+    0x02, 0x00, 0x00,       /* class 02 = Communications, at device level    */
     TIKU_USB_EP0_MAXPACKET,
     (uint8_t)(TIKU_USB_VID & 0xFFu), (uint8_t)(TIKU_USB_VID >> 8),
     (uint8_t)(TIKU_USB_PID & 0xFFu), (uint8_t)(TIKU_USB_PID >> 8),
@@ -199,13 +194,12 @@ static uint8_t s_desc_device[18] = {
 /*
  * CDC-ACM: a Communications interface carrying the class's functional
  * descriptors and a notification endpoint, plus a Data interface carrying the
- * two bulk pipes that actually move the console.  67 bytes total.
+ * two bulk pipes that move the console.  67 bytes total.
  *
- * The two wMaxPacketSize fields of the BULK endpoints are patched at request
+ * The two wMaxPacketSize fields of the bulk endpoints are patched at request
  * time (see ep0_get_descriptor) because their legal value depends on the
- * negotiated speed.  Their offsets are asserted below rather than trusted:
- * a descriptor edit that shifted them would otherwise corrupt a neighbouring
- * field and produce a device that enumerates but will not carry data.
+ * negotiated speed.  A descriptor edit that moves them makes the patch
+ * corrupt a neighbouring field: the device enumerates but carries no data.
  */
 #define CFG_LEN            67u
 #define CFG_OFF_BULK_OUT_MPS  (9u + 9u + 5u + 5u + 4u + 5u + 7u + 9u + 4u)
@@ -239,15 +233,15 @@ static uint8_t s_desc_config[CFG_LEN] = {
        (uint8_t)CDC_BULK_MPS_FS, 0, 0
 };
 
-/* The patch offsets must land on the wMaxPacketSize of an ENDPOINT
- * descriptor whose bDescriptorType is 5.  Checked at compile time. */
+/* The patch offsets must point at the wMaxPacketSize of an endpoint
+ * descriptor (bDescriptorType 5); these asserts check only that they lie
+ * inside the descriptor. */
 _Static_assert(CFG_OFF_BULK_OUT_MPS + 1u < CFG_LEN, "bulk OUT mps offset");
 _Static_assert(CFG_OFF_BULK_IN_MPS  + 1u < CFG_LEN, "bulk IN mps offset");
 
 /*
- * MSC: one interface, two bulk endpoints, nothing else.  Markedly simpler
- * than CDC because mass storage carries its command set INSIDE the bulk
- * pipes rather than in class-specific descriptors.
+ * MSC: one interface and two bulk endpoints.  Mass storage carries its
+ * command set inside the bulk pipes and has no class-specific descriptors.
  */
 #define MSC_CFG_LEN       32u
 #define MSC_OFF_OUT_MPS   (9u + 9u + 4u)
@@ -262,8 +256,9 @@ static uint8_t s_desc_config_msc[MSC_CFG_LEN] = {
     7, DESC_ENDPOINT, 0x80 | CDC_EP_DATA, 0x02, (uint8_t)CDC_BULK_MPS_FS, 0, 0
 };
 
-/* A device presenting mass storage must NOT claim a class at device level;
- * the interface carries it.  CDC does the opposite.  Patched at request. */
+/* A device presenting mass storage claims no class at device level; the
+ * interface carries it.  CDC claims class 02 there.  ep0_get_descriptor()
+ * copies these three bytes into the device descriptor when MSC is up. */
 static uint8_t s_dev_class_msc[3] = { 0x00, 0x00, 0x00 };
 
 /* String descriptors, UTF-16LE.  Index 0 is the language list. */
@@ -280,57 +275,40 @@ static const uint8_t s_str_serial[] = { 18, DESC_STRING,
 /* MSC: BULK-ONLY TRANSPORT OVER A RAM DISK                                  */
 /*---------------------------------------------------------------------------*/
 /*
- * U3 deliberately backs mass storage with SSRAM rather than the eMMC.  The
- * two have entirely separate failure modes and debugging them together is the
- * entangled-variables mistake `emmcdiag` was written to escape: a host that
- * will not mount could be a CBW parser bug or a block driver bug, and there
- * would be no way to tell.  With a RAM disk, a mount failure has exactly one
- * suspect.  U4 swaps the backing store and nothing else.
- *
- * *** THE SEAM U4 HAS TO BREAK. ***  A RAM disk answers a read with a
- * pointer, so the whole transport can live in the ISR.  The eMMC answers in
- * MILLISECONDS -- 14.5 ms for a 512 KB chunk, and even one block is far too
- * long to hold an interrupt.  U4 must therefore move the data phase into
- * process context and leave only the packet handshake here.  That is a
- * planned change, not a surprise; it is written down so it is not discovered.
+ * Mass storage is backed by a RAM disk in SSRAM, or by the eMMC.  The RAM
+ * disk answers a read with a pointer, so its whole transport runs in the ISR.
+ * The eMMC takes milliseconds per chunk, so in eMMC mode the data phase runs
+ * in process context (see "MSC over the eMMC" below).
  */
 
 /*
- * The wire format -- wrappers, SCSI replies, the sense latch, the range
- * check -- lives in kernel/usb/tiku_usbd_msc.c, where it is exercised on the
- * build machine against the byte offsets the specification names.  What is
- * left here is the only part that is about THIS controller: moving bytes
- * through a MUSB FIFO.
+ * The wire format (wrappers, SCSI replies, the sense latch, the range check)
+ * lives in kernel/usb/tiku_usbd_msc.c, which host tests exercise.  This file
+ * moves the bytes through the MUSB FIFOs.
  */
 #define CBW_LEN   TIKU_USBD_MSC_CBW_LEN
 #define CSW_LEN   TIKU_USBD_MSC_CSW_LEN
 
 #define MSC_BLOCK_SIZE   TIKU_USBD_MSC_BLOCK
-/* Overridable: in eMMC mode this is only ever touched in MSC_BOUNCE_BYTES
- * chunks, so the full megabyte is the RAM-DISK mode's size, not a transfer
- * requirement.  A build that only ever exposes the card (and wants the SSRAM
- * for something else) can shrink it -- the LLM overlay does exactly that,
- * because a megabyte of idle staging buffer is a megabyte the streaming
- * bounce buffers could have had. */
+/* Overridable: eMMC mode uses only MSC_BOUNCE_BYTES of it, so the megabyte is
+ * the RAM disk's size.  A build that only presents the card can shrink it to
+ * MSC_BOUNCE_BYTES (asserted below). */
 #ifndef MSC_DISK_BYTES
 #define MSC_DISK_BYTES   (1024u * 1024u)
 #endif
 #define MSC_DISK_BLOCKS  (MSC_DISK_BYTES / MSC_BLOCK_SIZE)
 
 /*
- * ONE BUFFER, TWO ROLES, NEVER BOTH AT ONCE.  In RAM-disk mode this IS the
- * disk; in eMMC mode it is the bounce buffer between the card and the bulk
- * pipes.  The modes are mutually exclusive by construction (the backing store
- * is chosen at bring-up and cannot change while attached), so sharing the
- * megabyte is honest rather than a trick -- and it keeps SSRAM for the tier.
+ * One buffer, two roles: the disk in RAM-disk mode, the bounce buffer between
+ * the card and the bulk pipes in eMMC mode.  The backing store is chosen at
+ * bring-up and cannot change while USB is up, so the roles never overlap.
  */
 static uint8_t s_disk[MSC_DISK_BYTES] __attribute__((section(".ssram")));
 
-/** Bounce chunk for eMMC mode: 64 KB was E3's efficiency knee (34.5 MB/s). */
+/** Bounce chunk for eMMC mode. */
 #define MSC_BOUNCE_BYTES  (64u * 1024u)
-/* The bounce chunk is the bound on every remaining-space expression in the
- * eMMC data path.  It exceeds a uint16_t, which is exactly how the write
- * path broke once; keep that fact in the build rather than in memory. */
+/* The bounce chunk bounds every remaining-space expression in the eMMC data
+ * path, and it exceeds a uint16_t: those expressions must be 32-bit. */
 _Static_assert(MSC_BOUNCE_BYTES > 65535u,
                "bounce exceeds 16 bits -- remaining-space vars must be 32-bit");
 _Static_assert(MSC_BOUNCE_BYTES <= MSC_DISK_BYTES,
@@ -343,7 +321,7 @@ static msc_store_t s_store = MSC_STORE_RAM;
 /**
  * @brief The medium as the host sees it: capacity, product name, sense latch.
  *
- * Blocks the host is told about -- see msc_capacity().
+ * tiku_usb_up_full() sets the capacity and the name for the backing store.
  */
 static tiku_usbd_msc_t s_msc = { MSC_DISK_BLOCKS, "RAM Disk", 0u, 0u };
 
@@ -389,44 +367,31 @@ static tiku_usb_speed_t s_want;    /**< requested at bring-up               */
 static tiku_usb_class_t s_class = TIKU_USB_CLASS_CDC;
 static uint8_t     s_em9305_up;    /**< the HS clock source has been booted  */
 
-/* Observability counters -- an ISR cannot print, so it counts.  These are
- * the whole diagnostic surface for U1 and they are enough: a host that never
- * enumerates leaves a very specific fingerprint in them. */
+/* Observability counters: the ISR does not print, so it counts. */
 static volatile uint32_t s_n_reset, s_n_setup, s_n_irq, s_n_stall,
                          s_n_suspend, s_n_resume, s_n_setupend;
 static volatile uint16_t s_last_req;   /**< bRequest<<8 | bmRequestType      */
 
 /*
- * WHICH requests are refused, not merely how many.  A stall count alone cannot
- * distinguish "correctly declining DEVICE_QUALIFIER on a full-speed device"
- * from "failing to implement something the host needs", and those look
- * identical from the outside until enumeration breaks.  The ring records the
- * last four, as bRequest<<8 | (wValue >> 8) -- for GET_DESCRIPTOR the low byte
- * is the descriptor TYPE, which is the informative half.
+ * The last four refused requests, as bRequest<<8 | (wValue >> 8); for
+ * GET_DESCRIPTOR the low byte is the descriptor type.
  */
 static volatile uint16_t s_stalled[4];
 static volatile uint8_t  s_stall_wr;
 static uint8_t s_cur_req, s_cur_type;
 
 /*---------------------------------------------------------------------------*/
-/* CDC RINGS -- and the flow control that makes a 1 MB paste survivable      */
+/* CDC RINGS AND FLOW CONTROL                                                */
 /*---------------------------------------------------------------------------*/
 /*
- * Two rings sit between the ISR and the shell process.  The RX one is where
- * flow control lives, and it is the reason this class is worth building: the
- * UART console drops bytes under a large paste (79 of them, on record) because
- * a UART has nowhere to push back from.  USB does.
- *
- * If the RX ring cannot take a whole max-packet, the ISR does NOT unload the
- * FIFO -- it masks the endpoint's interrupt and leaves the packet where it
- * is.  The controller then NAKs, the host retries, and the transfer simply
- * paces itself to whatever rate the shell can consume.  Nothing is dropped
- * because nothing is accepted that cannot be stored.  The drain side
+ * Two rings sit between the ISR and the shell process.  If the RX ring cannot
+ * take the received packet, the ISR leaves it in the FIFO and masks the
+ * endpoint's interrupt: the controller NAKs, the host retries, and the
+ * transfer paces itself to the shell with no byte dropped.  The drain side
  * re-enables the interrupt and pumps the FIFO once space appears.
  *
- * In SSRAM rather than DTCM: 8 KB of console buffering is not worth spending
- * the tightly-coupled bank on, and no DMA touches these (the FIFO is PIO), so
- * there is no coherency question.
+ * The rings sit in SSRAM.  No DMA touches them (the FIFO is PIO), so there is
+ * no cache coherency to manage.
  */
 #define CDC_TX_RING  4096u
 #define CDC_RX_RING  4096u
@@ -443,23 +408,23 @@ static uint8_t  s_dtr;                   /**< host has opened the terminal   */
 static uint16_t s_bulk_mps = CDC_BULK_MPS_FS;
 static uint8_t  s_line_coding[7] = { 0x00, 0xC2, 0x01, 0x00, 0, 0, 8 };
 
-/* Defined below with the endpoint code; used by the EP0 state machine above
- * it, which is the natural order to READ the file in even though it is not
- * the order C requires. */
+/* Defined below with the CDC and MSC endpoint code; ep0_setup() calls
+ * cdc_endpoints_open() above its definition. */
 static void cdc_endpoints_open(void);
 static void cdc_tx_fill(void);
 static void cdc_rx_pump(void);
 static void cdc_rx_resume(void);
 static void msc_rx_packet(void);
 static void msc_tx_done(void);
-/* The eMMC transport lives further down but its helpers are used by the
- * shared SCSI reply builder above it. */
+/* Defined below with the MSC transport code; adma_run() calls msc_tx_wait()
+ * and tiku_usb_msc_poll() calls msc_poll_one() above their definitions. */
 static int  msc_tx_wait(void);
 static void msc_tx_raw(const uint8_t *p, uint16_t n);
 static void msc_csw_poll(uint8_t status, uint32_t residue);
 static void msc_scsi(const tiku_usbd_msc_cbw_t *cbw);
 static int  msc_poll_one(void);
 
+/** @brief Bytes in use in a ring of @p sz with head @p h and tail @p t. */
 static inline uint16_t ring_used(uint16_t h, uint16_t t, uint16_t sz)
 {
     return (uint16_t)((h >= t) ? (h - t) : (uint16_t)(sz - t + h));
@@ -472,7 +437,7 @@ static inline uint16_t ring_used(uint16_t h, uint16_t t, uint16_t sz)
  * process-context sequence that sets INDEX and then uses it must not be
  * interrupted by an ISR that sets INDEX to something else.
  *
- * @note PROCESS CONTEXT ONLY -- never call from the ISR.
+ * @note Process context only; never call it from the ISR.
  * @return Previous enable state, so nesting cannot wrongly re-enable.
  */
 static inline uint32_t usb_lock(void)
@@ -482,6 +447,7 @@ static inline uint32_t usb_lock(void)
     __DSB(); __ISB();
     return was;
 }
+/** @brief Re-enable the USB interrupt if usb_lock() found it enabled. */
 static inline void usb_unlock(uint32_t was)
 {
     if (was) { NVIC_EnableIRQ(USB0_IRQn); }
@@ -494,9 +460,9 @@ static inline void usb_unlock(uint32_t was)
 /**
  * @brief Read @p n bytes out of an endpoint FIFO.
  *
- * The FIFO port is a 32-bit window onto a byte FIFO: byte-width accesses pop
- * one byte each, which is what a control transfer needs (8-byte SETUP packets
- * and odd-length descriptors).  Word accesses would be faster and wrong.
+ * The FIFO port is a 32-bit window onto a byte FIFO: a byte-width access pops
+ * one byte, as control transfers need for 8-byte SETUP packets and
+ * odd-length descriptors; a word access pops four.
  */
 static void fifo_read(unsigned ep, uint8_t *dst, uint16_t n)
 {
@@ -533,7 +499,7 @@ static void ep0_stall(void)
 /**
  * @brief Push the next packet of a control-IN transfer.
  *
- * DataEnd travels WITH the last packet: a short packet is itself the
+ * DataEnd travels with the last packet: a short packet is itself the
  * end-of-transfer signal, so DataEnd is set whenever this packet exhausts the
  * payload, which the caller has already clamped to wLength.
  */
@@ -582,7 +548,7 @@ static void ep0_get_descriptor(uint8_t type, uint8_t idx, uint16_t wLength)
 {
     switch (type) {
     case DESC_DEVICE:
-        /* Class lives at DEVICE level for CDC and at INTERFACE level for
+        /* Class lives at device level for CDC and at interface level for
          * MSC; the same device descriptor serves both with three bytes
          * patched. */
         if (s_class == TIKU_USB_CLASS_MSC) {
@@ -596,11 +562,9 @@ static void ep0_get_descriptor(uint8_t type, uint8_t idx, uint16_t wLength)
         ep0_reply(s_desc_device, sizeof s_desc_device, wLength);
         return;
     case DESC_CONFIG:
-        /* Patch the bulk max-packet to whatever the chirp settled on.  This
-         * is done HERE, at request time, because the host asks for the
-         * configuration only after the bus reset -- so the speed is known,
-         * and a descriptor built at compile time could only ever be right
-         * for one of the two. */
+        /* Patch the bulk max-packet to the speed the chirp settled on.  The
+         * host asks for the configuration after the bus reset, when the
+         * speed is known. */
         {
             uint8_t lo = (uint8_t)(s_bulk_mps & 0xFFu);
             uint8_t hi = (uint8_t)(s_bulk_mps >> 8);
@@ -630,10 +594,9 @@ static void ep0_get_descriptor(uint8_t type, uint8_t idx, uint16_t wLength)
         }
         break;
     default:
-        /* DEVICE_QUALIFIER (6) and OTHER_SPEED (7) are ASKED FOR BY LINUX on
-         * a 2.00 device and MUST be stalled by a full-speed-only device.
-         * Stalling them is the correct answer, not a failure -- answering
-         * them would claim a high-speed capability U1 does not have. */
+        /* DEVICE_QUALIFIER (6) and OTHER_SPEED (7), which Linux asks a 2.00
+         * device for, are stalled at both speeds: the answer USB 2.0
+         * requires of a full-speed-only device. */
         break;
     }
     ep0_stall();
@@ -654,9 +617,10 @@ static void ep0_setup(const uint8_t *p)
     s_n_setup++;
 
     /*
-     * CLASS requests (bmRequestType type field == 1) belong to CDC.  Three of
-     * them matter and the host WILL issue them before it will open the port:
-     * a device that stalls SET_LINE_CODING never gets a terminal.
+     * Class requests (bmRequestType type field 1).  MSC answers GET_MAX_LUN
+     * and the Bulk-Only reset.  CDC answers the three line requests, which
+     * the host issues before it opens the port: a device that stalls
+     * SET_LINE_CODING never gets a terminal.
      */
     if ((bmRequestType & 0x60u) == 0x20u) {
         if (s_class == TIKU_USB_CLASS_MSC) {
@@ -679,7 +643,7 @@ static void ep0_setup(const uint8_t *p)
         }
         switch (bRequest) {
         case 0x20:  /* SET_LINE_CODING -- 7 bytes of baud/parity that are
-                     * ignored, but must be ACCEPTED: this is a real
+                     * ignored, but must be accepted: this is a real
                      * control-OUT stage. */
             s_ep0 = EP0_RX;
             s_rx_expect = (wLength > sizeof s_line_coding)
@@ -702,18 +666,17 @@ static void ep0_setup(const uint8_t *p)
         }
     }
 
-    /* Anything else non-standard stalls, which is a legal and informative
-     * answer rather than a failure. */
+    /* Any other non-standard request is stalled, a legal answer. */
     if ((bmRequestType & 0x60u) != 0x00u) { ep0_stall(); return; }
 
     switch (bRequest) {
     case 0x05:  /* SET_ADDRESS */
         /*
-         * The classic trap.  The address must not take effect until the host
-         * has seen the status stage, because until then the host is still
-         * talking to address 0.  MUSB's FADDR applies the moment it is
-         * written, so the write is DEFERRED to the next EP0 interrupt --
-         * i.e. after the zero-length status packet has gone out.
+         * The address must not take effect until the host has seen the
+         * status stage, because until then the host is still talking to
+         * address 0.  MUSB's FADDR applies the moment it is written, so the
+         * write waits for the next EP0 interrupt, after the zero-length
+         * status packet has gone out.
          */
         s_addr = (uint8_t)(wValue & 0x7Fu);
         s_pending_addr = 1u;
@@ -771,7 +734,7 @@ static void ep0_irq(void)
     /*
      * SetupEnd means the host abandoned the previous control transfer before
      * it finished.  It is not an error and it is not rare (a host that only
-     * wanted the first 8 bytes of a config descriptor does exactly this).
+     * wanted the first 8 bytes of a config descriptor does this).
      * Acknowledge, drop whatever was in flight, and carry on.
      */
     if (csr & CSR0_SETUPEND) {
@@ -837,9 +800,9 @@ static void ep0_irq(void)
 /**
  * @brief Configure EP1 (bulk in + out) and EP2 (interrupt in).
  *
- * FIFO space is allocated by hand and CUMULATIVELY, in units of 8 bytes, past
- * the 64 EP0 owns.  A bus reset resets the running pointer, so this runs from
- * SET_CONFIGURATION only -- allocating twice would overlap two endpoints.
+ * FIFO space is allocated by hand, cumulatively in units of 8 bytes, from the
+ * end of EP0's 64 bytes.  Runs from SET_CONFIGURATION, after a bus reset has
+ * discarded the previous allocation.
  */
 static void cdc_endpoints_open(void)
 {
@@ -851,15 +814,11 @@ static void cdc_endpoints_open(void)
     sz = (s_bulk_mps == CDC_BULK_MPS_HS) ? 6u : 3u;   /* 512 -> 6, 64 -> 3   */
 
     /*
-     * DOUBLE-BUFFER THE BULK PIPES IN eMMC MODE, and the reason is arithmetic
-     * rather than taste.  Single-buffered, the endpoint holds ONE packet, so
-     * the pump must send and then WAIT for the host to collect before sending
-     * again -- at high speed that is one packet per 125 us microframe, i.e.
-     * 512 B / 125 us = 4.1 MB/s, which is almost exactly the 5.4 MB/s ceiling
-     * that survived both a 2.6x CPU clock increase and burst command
-     * servicing.  With two packets in flight the pump can fill one while the
-     * host drains the other.  The cost is twice the FIFO space per endpoint,
-     * which this core has room for.
+     * The bulk pipes are double-buffered in eMMC mode.  Single-buffered, the
+     * endpoint holds one packet and the pump waits for the host to collect
+     * each one: at high speed one 512 B packet per 125 us microframe, or
+     * 4.1 MB/s.  Double-buffered, the pump fills one packet while the host
+     * drains the other, at twice the FIFO space.
      */
     dbuf = (s_class == TIKU_USB_CLASS_MSC && s_store == MSC_STORE_EMMC);
 
@@ -900,8 +859,8 @@ static void cdc_endpoints_open(void)
     /* Arm only the data endpoint; the notification pipe never interrupts
      * because nothing is ever queued on it. */
     if (s_class == TIKU_USB_CLASS_MSC && s_store == MSC_STORE_EMMC) {
-        /* The pump owns EP1; the ISR keeps only EP0 and the bus events.
-         * Masking rather than arbitrating is what removes the races. */
+        /* The pump owns EP1, with its interrupts masked; the ISR keeps EP0
+         * and the bus events. */
         USB_INTRTXE = 0x0001u;
         USB_INTRRXE = 0x0000u;
     } else {
@@ -939,9 +898,8 @@ static void cdc_tx_fill(void)
 /**
  * @brief Move one received packet into the RX ring, or leave it and back off.
  *
- * Unloading a packet the ring cannot hold would drop bytes; leaving it in the
- * FIFO makes the controller NAK and the host slow down instead.  That is the
- * difference between this console and the UART one.
+ * A packet the ring cannot hold stays in the FIFO, so the controller NAKs
+ * and the host slows down; no byte is dropped.
  */
 static void cdc_rx_pump(void)
 {
@@ -975,20 +933,18 @@ static void cdc_rx_pump(void)
 /**
  * @brief Re-arm reception after the shell has made room.
  *
- * Process context.  Re-enabling the interrupt is not enough on its own:
- * INTRRX is read-to-clear and the ISR already consumed the pending bit, so a
- * packet sitting in the FIFO would never announce itself.  It is pumped here.
+ * Process context.  INTRRX is read-to-clear and the ISR has consumed the bit
+ * for the packet left in the FIFO, so re-enabling the interrupt raises no new
+ * one; this function pumps that packet itself.
  */
 static void cdc_rx_resume(void)
 {
     uint32_t was;
     if (!s_rx_stalled) { return; }
     /*
-     * Only interrupt the ISR when a WHOLE packet will now fit.  Without this
-     * test the drain path takes the NVIC lock once per byte while stalled --
-     * a disable/DSB/ISB/enable and its pipeline flush for every character --
-     * which measured 0.35 MB/s on a 1 MB transfer that was otherwise
-     * flawless.  The check is two loads and a compare; the lock is not.
+     * cdc_getc() calls this after every byte it pops, so the NVIC lock, with
+     * its barriers and pipeline flush, is taken only once a whole packet
+     * fits.
      */
     if ((uint16_t)(CDC_RX_RING - 1u -
                    ring_used(s_rx_head, s_rx_tail, CDC_RX_RING)) < s_bulk_mps) {
@@ -1009,10 +965,9 @@ static void cdc_rx_resume(void)
 /*---------------------------------------------------------------------------*/
 
 /*
- * The endianness helpers, the range check and every small SCSI reply moved
- * to kernel/usb/tiku_usbd_msc.c, where they are exercised on the build
- * machine against the byte offsets the specification names.  What remains
- * below is the transport: FIFOs, packets and the BOT state machine.
+ * The endianness helpers, the range check and the SCSI replies live in
+ * kernel/usb/tiku_usbd_msc.c.  Below is the transport: FIFOs, packets and
+ * the BOT state machine.
  */
 
 /** @brief Push one packet of the IN data phase (or the CSW) to the host. */
@@ -1043,7 +998,7 @@ static void msc_send_csw(void)
     msc_tx_packet();
 }
 
-/** @brief Latch a sense condition AND fail the command in flight. */
+/** @brief Latch a sense condition and fail the command in flight. */
 static void msc_fail(uint8_t key, uint8_t asc)
 {
     tiku_usbd_msc_fail(&s_msc, key, asc);
@@ -1053,8 +1008,8 @@ static void msc_fail(uint8_t key, uint8_t asc)
 /**
  * @brief Set up whatever data phase the decoded command asks for.
  *
- * The decision -- which opcode, which bytes, what residue -- is the core's;
- * everything here is about where those bytes live and which FIFO moves them.
+ * tiku_usbd_msc_decode() decides which opcode, which bytes and what residue;
+ * this function picks where those bytes live and which FIFO moves them.
  */
 static void msc_scsi(const tiku_usbd_msc_cbw_t *cbw)
 {
@@ -1147,53 +1102,37 @@ static void msc_tx_done(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* MSC OVER THE eMMC: THE DATA PHASE LEAVES INTERRUPT CONTEXT                */
+/* MSC OVER THE eMMC: PROCESS-CONTEXT DATA PHASE                             */
 /*---------------------------------------------------------------------------*/
 /*
- * U3 said this change would be needed and here it is.  A RAM disk answers a
- * read with a POINTER, so the whole transport fitted in the ISR.  The eMMC
- * answers in MILLISECONDS -- E3 measured 14.5 ms for a 512 KB chunk, and even
- * a single block is orders of magnitude too long to hold an interrupt while
- * the console, the tick and everything else wait behind it.
+ * The eMMC takes milliseconds per chunk, far too long to hold an interrupt
+ * while the console and the tick wait.  So in eMMC mode the ISR keeps EP0 and
+ * the bus events, EP1's interrupts stay masked, and a process-context pump
+ * owns the bulk endpoints, polling them directly.
  *
- * So in eMMC mode the ISR keeps EP0 and the bus events and gives up EP1
- * entirely: its interrupts are MASKED and a process-context pump owns the
- * bulk endpoints, polling them directly.  That removes every race between the
- * two contexts rather than trying to arbitrate one.
+ * The pump runs from the shell's pump list and serves commands until the
+ * host goes quiet.  Each command is bounded by the host's
+ * dCBWDataTransferLength; a large read blocks the shell for its own transfer.
  *
- * The pump runs from the scheduler's idle hook and handles ONE complete SCSI
- * command per call.  A command is bounded (the host's dCBWDataTransferLength),
- * so the shell stays responsive between commands even though a single large
- * read blocks for the duration of its own transfer -- which is exactly the
- * ownership rule the plan asked for, made structural.
- *
- * INDEX is still shared with the ISR, which sets it to 0 for EP0.  Every
- * sequence below therefore takes the lock around "select the endpoint and
- * touch its registers", and re-selects after any wait.
+ * INDEX is still shared with the ISR, which sets it to 0 for EP0, so every
+ * sequence below takes the lock around selecting the endpoint and touching
+ * its registers, and selects it again after any wait.
  */
 
-#define MSC_WAIT_SPINS  2000000u   /* bounded like every wait in this port  */
+#define MSC_WAIT_SPINS  2000000u   /* poll bound of each wait below         */
 
 /*---------------------------------------------------------------------------*/
-/* ADMA -- taking the CPU out of the byte path                                */
+/* ADMA: DMA FOR THE eMMC-MODE DATA PHASE                                    */
 /*---------------------------------------------------------------------------*/
 /*
- * The controller has TEN DMA channels for exactly this, and until now this
- * driver copied every byte through a volatile pointer.  U4 measured 6.9 MB/s
- * reading and showed it was neither CPU-bound (2.6x the clock moved it 1.02x)
- * nor cadence-bound (bursting commands changed nothing); double buffering
- * lifted a real ping-pong limit but not the rest.  ADMA removes the CPU from
- * the transfer entirely, which is the remaining lever the hardware offers.
- *
- * CHANNEL MAPPING, read from the HAL rather than guessed -- the channels are
- * not interchangeable, each is bound to an endpoint by ADMAEP:
+ * The controller has ten DMA channels.  They are not interchangeable: each
+ * is bound to an endpoint half by ADMAEP, per the HAL:
  *      IN  endpoint n  ->  channel n - 1     (EP1 IN  = channel 0)
  *      OUT endpoint n  ->  channel n + 4     (EP1 OUT = channel 5)
  *
- * The per-channel registers are four banks of ten, each stride 4, at fixed
- * offsets confirmed with offsetof() against the CMSIS struct.  CMSIS names
- * them individually (ADMATOTCOUNT0..9), which would mean a ten-way switch;
- * indexing the bank is the same thing without the copy-paste.
+ * The per-channel registers are four banks of ten at stride 4, at the
+ * offsets of the CMSIS struct, which names them one by one
+ * (ADMATOTCOUNT0..9); the macros below index the bank.
  */
 #define ADMA_BANK(off, ch) (*(volatile uint32_t *)(USB_BASE + (off) + 4u*(ch)))
 #define ADMA_TOTCOUNT(ch)  ADMA_BANK(0x2100u, ch)
@@ -1213,10 +1152,7 @@ static void msc_tx_done(void)
 #define RXCSR_AUTOCLEAR    (1u << 15)
 
 /*
- * ADMA defaults OFF so that flashing this build changes exactly ONE thing
- * against the proven U4 image (the pump moving to process context).  Turn it
- * on at runtime with `power usb adma on` once the board is known good.  A
- * bisect you can perform without reflashing is worth a one-line default.
+ * ADMA is off at boot; `power usb adma on` turns it on at run time.
  */
 static uint8_t  s_adma;               /**< runtime switch, for measuring    */
 static volatile uint32_t s_n_adma, s_n_adma_err;
@@ -1224,9 +1160,11 @@ static volatile uint32_t s_n_adma, s_n_adma_err;
 /**
  * @brief Run one ADMA transfer and wait for it.  Non-zero on success.
  *
- * Process context only -- it blocks.  @p bytes must be a whole number of max
- * packets, which every MSC data phase is (512-byte blocks, 512 or 64 byte
- * packets), because DMA mode 1 has no way to express a trailing short packet.
+ * @p bytes must be a whole number of max packets, which every MSC data phase
+ * is (512-byte blocks, 512 or 64 byte packets): DMA mode 1 cannot express a
+ * trailing short packet.
+ *
+ * @note Process context only; it blocks.
  */
 static int adma_run(unsigned ep, int is_in, uint8_t *buf, uint32_t bytes)
 {
@@ -1238,7 +1176,7 @@ static int adma_run(unsigned ep, int is_in, uint8_t *buf, uint32_t bytes)
     if (bytes == 0u || bytes > 0xFFFFFFu) { return 0; }   /* 24-bit count   */
     if ((bytes % s_bulk_mps) != 0u)       { return 0; }
 
-    /* The engine moves bytes on the BUS; the D-cache is not on that path.
+    /* The engine moves bytes on the bus; the D-cache is not on that path.
      * Clean either way (so no dirty line is written back over the transfer),
      * and invalidate after an OUT so the CPU sees what the engine wrote. */
     tiku_cpu_dcache_clean(buf, bytes);
@@ -1262,15 +1200,15 @@ static int adma_run(unsigned ep, int is_in, uint8_t *buf, uint32_t bytes)
     USB->ADMACMPINTEN |= mask;
     USB->ADMAERRINTEN |= mask;
 
-    /* Plain assignment, NOT |=.  The vendor ORs these, which is harmless the
-     * first time and accumulates stale bits on reuse -- and this driver
-     * reuses one channel for every chunk of every transfer. */
+    /* Plain assignment: this driver reuses one channel for every chunk of
+     * every transfer, and an OR into these registers keeps bits from the
+     * channel's previous use. */
     ADMA_TARGADDR(ch) = (uint32_t)buf;
     ADMA_EPNUM(ch)    = (uint32_t)ep & 0x7u;
     ADMA_REQSIZE(ch)  = (uint32_t)s_bulk_mps & 0xFFFu;
     ADMA_TOTCOUNT(ch) = bytes & 0xFFFFFFu;
 
-    USB->ADMAEN |= mask;                       /* GO                        */
+    USB->ADMAEN |= mask;                       /* start                     */
     USB->DMACTRL |= USB_DMACTRL_DMAEN_Msk;
     USB_INDEX = 0u;
     usb_unlock(was);
@@ -1295,13 +1233,9 @@ static int adma_run(unsigned ep, int is_in, uint8_t *buf, uint32_t bytes)
             USB->ADMACMPINTCLR = mask;
             USB->ADMAEN &= ~mask;
             /*
-             * Hand the endpoint back to PIO.  Arming DMAReqEnab/DMAReqMode
-             * puts the FIFO under the engine's control; leaving it there
-             * means the very next PIO access -- the status wrapper, or the
-             * next command wrapper -- meets a CSR that is still expecting a
-             * DMA request.  Restore the plain configuration explicitly
-             * rather than relying on a later whole-register write to clear
-             * it by accident.
+             * Hand the endpoint back to PIO.  With DMAReqEnab/DMAReqMode
+             * left set, the next PIO access (the status wrapper or the next
+             * command wrapper) meets a CSR still expecting a DMA request.
              */
             {
                 uint32_t w2 = usb_lock();
@@ -1314,9 +1248,9 @@ static int adma_run(unsigned ep, int is_in, uint8_t *buf, uint32_t bytes)
             s_n_adma++;
             if (!is_in) { tiku_cpu_dcache_invalidate(buf, bytes); }
             else {
-                /* The engine has emptied the buffer into the FIFO; the LAST
-                 * packet may still be on its way out.  Do not send the status
-                 * wrapper past it. */
+                /* The engine has emptied the buffer into the FIFO; the last
+                 * packet may still be on its way out, so wait for it before
+                 * the status wrapper. */
                 (void)msc_tx_wait();
             }
             return 1;
@@ -1328,7 +1262,8 @@ static int adma_run(unsigned ep, int is_in, uint8_t *buf, uint32_t bytes)
     return 0;
 }
 
-/** @brief Wait until the IN endpoint has room, then return non-zero. */
+/** @brief Wait until the IN endpoint has room: 1 when it has, 0 after
+ *         MSC_WAIT_SPINS polls. */
 static int msc_tx_wait(void)
 {
     uint32_t spins;
@@ -1380,16 +1315,8 @@ static void msc_tx_raw(const uint8_t *p, uint16_t n)
 /**
  * @brief Pull one packet from the OUT endpoint; returns bytes taken.
  *
- * @p cap IS uint32_t AND MUST STAY THAT WAY.  It was uint16_t, and the
- * caller's remaining-space expression reaches MSC_BOUNCE_BYTES = 65536 --
- * which truncates to ZERO.  The call then consumed a packet, copied none of
- * it, and returned 0, so the loop neither advanced nor terminated: it spun
- * discarding the host's data until the wait expired.  It presented as writes
- * failing while reads worked perfectly (4407 reads, 5 writes) and the host
- * resetting the device.
- *
- * Same family as the uint8_t-loop-counter bug already on record: a type too
- * narrow for a bound that is set by configuration rather than by the type.
+ * @p cap is uint32_t: the caller's remaining-space expression reaches
+ * MSC_BOUNCE_BYTES (65536), one more than a uint16_t holds.
  */
 static uint16_t msc_rx_raw(uint8_t *p, uint32_t cap)
 {
@@ -1474,11 +1401,9 @@ static void msc_emmc_write(uint32_t lba, uint32_t bytes, uint32_t host_len)
             }
         }
         nblk = chunk / MSC_BLOCK_SIZE;
-        /* force=1: in MSC mode the HOST owns the medium.  The scratch-region
-         * default-deny protects the card from unattended on-board tests, not
-         * from the person who deliberately plugged it into a PC -- and the
-         * scratch blocks are unreachable anyway, being outside the reported
-         * capacity (see msc_capacity). */
+        /* force=1: in MSC mode the host owns the medium.  The scratch
+         * region lies outside the capacity the host was given, so the host
+         * cannot reach it. */
 #if (TIKU_DRV_EMMC_ENABLE + 0)
         if (tiku_emmc_write_blocks(lba + (done / MSC_BLOCK_SIZE), nblk,
                                    s_disk, 1) != TIKU_EMMC_OK)
@@ -1496,33 +1421,22 @@ static void msc_emmc_write(uint32_t lba, uint32_t bytes, uint32_t host_len)
 }
 
 /**
- * @brief Process-context pump: handle at most one SCSI command per call.
+ * @brief Process-context pump: serve SCSI commands until the host goes quiet.
  *
- * Called from the scheduler idle hook.  Returns immediately unless MSC is
- * backed by the card and a command wrapper is actually waiting.
+ * Runs from the shell's pump list.  Returns at once unless MSC is up over the
+ * eMMC.
  */
 void tiku_usb_msc_poll(void)
 {
     /*
-     * Service commands until the host stops asking, not one per call.
-     *
-     * Handling a single command per idle-hook invocation made throughput a
-     * function of the scheduler's cadence rather than of the hardware:
-     * measured ~10 KB per command, so per-command overhead dominated, and
-     * raising the CPU clock 2.6x moved the number by 1.02x -- the signature
-     * of a structural limit rather than a compute one.  The bound keeps a
-     * busy host from starving everything else indefinitely.
+     * Serve commands until the host stops asking, at most 256 per call, so a
+     * busy host cannot starve the shell indefinitely.
      */
     unsigned burst, idle;
 
     /*
-     * Cheap exit when there is nothing to serve.  Without it, a build with the
-     * USB driver compiled in but MSC not up paid the full turnaround wait
-     * below on EVERY shell pass: msc_poll_one() returned 0 immediately, then
-     * this function spun 400 x 5 us = 2 ms doing nothing, once per ~47 ms
-     * tick.  The hot path is unaffected -- during an active transfer s_up and
-     * s_configured are true, so this test is false and the turnaround wait
-     * still runs, which is the thing that took formatting from 207 s to 10 s.
+     * Return at once unless MSC is up over the eMMC, so in any other mode a
+     * shell pass does not spend the 2 ms turnaround wait below.
      */
     if (!s_up || !s_configured || s_class != TIKU_USB_CLASS_MSC ||
         s_store != MSC_STORE_EMMC) {
@@ -1532,24 +1446,16 @@ void tiku_usb_msc_poll(void)
     for (burst = 0u; burst < 256u; burst++) {
         if (msc_poll_one()) { continue; }
         /*
-         * Nothing waiting is not the same as nothing coming.
-         *
-         * Bulk-Only Transport is strictly ping-pong at the command level: the
-         * host will not send the next CBW until the CSW arrives.  Returning
-         * the moment the queue looks empty hands control back to a shell that
-         * only polls every TIKU_SHELL_POLL_TICKS -- about 47 ms -- so the
-         * transfer runs at roughly ONE COMMAND PER 47 ms.  Formatting the card
-         * took 207 s that way instead of 10.
-         *
-         * So wait briefly for the host to come back before giving up.  A few
-         * hundred microseconds covers the turnaround; the bound keeps an idle
-         * device from spinning here instead of running the shell.
+         * Bulk-Only Transport is ping-pong at the command level: the host
+         * sends the next CBW only after the CSW arrives.  The pump waits up
+         * to 2 ms (400 x 5 us) for that CBW before it returns; the next shell
+         * poll comes TIKU_SHELL_POLL_TICKS (about 47 ms) later.
          */
         for (idle = 0u; idle < 400u; idle++) {
             tiku_cpu_ambiq_delay_us(5u);
             if (msc_poll_one()) { break; }
         }
-        if (idle == 400u) { return; }   /* genuinely idle: let the shell run */
+        if (idle == 400u) { return; }   /* idle: let the shell run          */
     }
 }
 
@@ -1580,9 +1486,7 @@ static int msc_poll_one(void)
     s_n_cbw++;
     s_bot_tag = c.tag;
 
-    /* The SAME decoder the ISR path uses.  Two transports, one opinion about
-     * what the bytes mean -- which is the whole reason it is a separate file
-     * rather than a second copy that drifts. */
+    /* The decoder the ISR path uses as well. */
     tiku_usbd_msc_decode(&s_msc, &c, s_bot_reply, &cmd);
 
     if (cmd.action == TIKU_USBD_MSC_ACT_READ) {
@@ -1610,9 +1514,8 @@ static int msc_poll_one(void)
 /**
  * @brief Bus reset: put everything back the way the host expects to find it.
  *
- * The controller does NOT tidy up on its own (table 4).  Getting this wrong is
- * precisely how a device enumerates once and then fails on replug, which is why
- * the acceptance gate is ten cycles rather than one.
+ * The controller does not reset its own state (table 4 in the header); stale
+ * state here shows as a device that enumerates once and fails on replug.
  */
 static void bus_reset(void)
 {
@@ -1642,12 +1545,12 @@ static void bus_reset(void)
     USB_INTRTXE = 0x0001u;
     USB_INTRRXE = 0x0000u;
 
-    /* Speed is the hardware's answer to the chirp handshake, read back
-     * rather than assumed. */
+    /* Speed is the hardware's answer to the chirp handshake, read back from
+     * POWER.HSMode. */
     s_speed = (USB_POWER & POWER_HSMODE) ? TIKU_USB_SPEED_HIGH
                                          : TIKU_USB_SPEED_FULL;
     /* Bulk max-packet is fixed by the spec at each speed, so the descriptor
-     * the host is about to ask for depends on what just happened here. */
+     * the host asks for next depends on the speed read here. */
     s_bulk_mps = (s_speed == TIKU_USB_SPEED_HIGH) ? CDC_BULK_MPS_HS
                                                   : CDC_BULK_MPS_FS;
 }
@@ -1682,11 +1585,11 @@ void tiku_ambiq_usb_isr(void)
         if (s_class == TIKU_USB_CLASS_MSC) { msc_rx_packet(); }
         else                               { cdc_rx_pump(); }
     }
-    USB_INDEX = 0u;   /* leave the window on EP0, where ep0_irq expects it   */
+    USB_INDEX = 0u;   /* INDEX is left on EP0 between accesses             */
 }
 
 /*---------------------------------------------------------------------------*/
-/* BRING-UP (table 2 -- and it is an ORDER, not a set)                       */
+/* BRING-UP (table 2)                                                        */
 /*---------------------------------------------------------------------------*/
 
 /** @brief Drive one of the external USB rail switches. */
@@ -1733,8 +1636,7 @@ tiku_usb_err_t tiku_usb_up_full(tiku_usb_speed_t want, tiku_usb_class_t cls,
 #if (TIKU_DRV_EMMC_ENABLE + 0)
         uint32_t cap = tiku_emmc_capacity_blocks();
         if (cap <= TIKU_EMMC_SCRATCH_BLOCKS) {
-            /* Not identified yet, or implausibly small: refuse rather than
-             * present a disk whose size cannot be justified. */
+            /* Card not identified, or no larger than the scratch region. */
             return TIKU_USB_ERR_STATE;
         }
         s_store = MSC_STORE_EMMC;
@@ -1749,8 +1651,7 @@ tiku_usb_err_t tiku_usb_up_full(tiku_usb_speed_t want, tiku_usb_class_t cls,
     }
     s_want = want;
 
-    /* 1+2. TWO power domains.  One enable is never the whole story on this
-     *      part -- SDIO0 taught that and it generalises. */
+    /* 1+2. The controller and the PHY power domains. */
     PWRCTRL->DEVPWREN |= PWRCTRL_DEVPWREN_PWRENUSB_Msk |
                          PWRCTRL_DEVPWREN_PWRENUSBPHY_Msk;
     __DSB();
@@ -1761,9 +1662,7 @@ tiku_usb_err_t tiku_usb_up_full(tiku_usb_speed_t want, tiku_usb_class_t cls,
     }
     if (spins == 100000u) { return TIKU_USB_ERR_POWER; }
 
-    /* 3. The undocumented FIFO-SRAM trim.  Transcribed from the vendor,
-     *    not derived -- an unwritten configuration register is exactly the
-     *    kind of omission that costs a bring-up. */
+    /* 3. The undocumented FIFO-SRAM trim, with the vendor's values. */
     USB->SRAMCTRL = (1u  << USB_SRAMCTRL_WABL_Pos)  |
                     (1u  << USB_SRAMCTRL_WABLM_Pos) |
                     (1u  << USB_SRAMCTRL_RAWL_Pos)  |
@@ -1774,16 +1673,15 @@ tiku_usb_err_t tiku_usb_up_full(tiku_usb_speed_t want, tiku_usb_class_t cls,
                     (1u  << USB_SRAMCTRL_RET1N_Pos);
     __DSB();
 
-    /* 4. HOLD the PHY in reset.  Clearing these bits is what holds it -- the
-     *    vendor's function for this is called "enable_phy_reset_override",
-     *    whose name says the opposite of its effect. */
+    /* 4. Hold the PHY in reset: clearing these bits holds it (the vendor's
+     *    enable_phy_reset_override). */
     MCUCTRL->USBRSTCTRL &= ~(MCUCTRL_USBRSTCTRL_USBRSTENABLE_Msk |
                              MCUCTRL_USBRSTCTRL_USBPORRSTRELEASE_Msk |
                              MCUCTRL_USBRSTCTRL_USBUTMIRSTRELEASE_Msk);
     __DSB();
 
-    /* 5+6. The external rails, then wait.  Forget these and the registers
-     *      all read back perfectly while the bus stays dead. */
+    /* 5+6. The external rails, then the settle wait.  With the rails off
+     *      the registers read back normally and the host sees no device. */
     rail(TIKU_USB_PAD_VDDUSB33, 1);
     rail(TIKU_USB_PAD_VDDUSB0P9, 1);
     tiku_cpu_ambiq_delay_us(TIKU_USB_RAIL_SETTLE_MS * 1000u);
@@ -1793,43 +1691,30 @@ tiku_usb_err_t tiku_usb_up_full(tiku_usb_speed_t want, tiku_usb_class_t cls,
     USB->BCDETCRTL1 = (1u << USB_BCDETCRTL1_USBSWRESET_Pos);
     __DSB();
 
-    /* 8. RELEASE the PHY. */
+    /* 8. Release the PHY. */
     MCUCTRL->USBRSTCTRL |= (MCUCTRL_USBRSTCTRL_USBRSTENABLE_Msk |
                             MCUCTRL_USBRSTCTRL_USBPORRSTRELEASE_Msk |
                             MCUCTRL_USBRSTCTRL_USBUTMIRSTRELEASE_Msk);
     __DSB();
     tiku_cpu_ambiq_delay_us(1000u);
 
-    /* 9. PHY reference clock.  The two speeds take different sources and
-     *    this is the ONLY difference between them, which is exactly why U1
-     *    and U1b are separate milestones. */
+    /* 9. PHY reference clock; the two speeds take different sources. */
     CLKGEN->MISC |= CLKGEN_MISC_FRCHFRC_Msk;
     __DSB();
     if (hs) {
         /*
-         * *** HIGH SPEED DEPENDS ON THE RADIO DIE BEING AWAKE. ***
-         *
-         * Measured, not assumed: requesting HS with the EM9305 still in
-         * reset produced irq 0, reset 0 and a host that saw nothing at all.
-         * Without a reference the PHY cannot even present the pull-up, so
-         * the failure looks identical to an unplugged cable.  Booting the
-         * die first (its crystal is the 12 MHz source) made the same code
-         * enumerate at high speed immediately.
-         *
-         * So the driver does it rather than leaving it to whoever remembers.
-         * Once is enough -- the clock stays up while the die does.
+         * Without its own HS crystal the board needs the EM9305 die out of
+         * reset: the die's crystal is the 12 MHz source, and without a
+         * reference the PHY cannot present the pull-up, so the host sees
+         * nothing.  The die is booted once; the clock stays up while the die
+         * does.
          */
 #if (TIKU_BOARD_HAS_USBHS_CLK_XTAL + 0)
         /*
          * Boards with their own high-speed crystal take it directly: 48 MHz
-         * halved to the PHY's 24 MHz reference, so no EM9305, no clock
-         * request, no external pad, and no x20 multiplier (that exists only
-         * because the Blue board's reference is 12 MHz).
-         *
-         * NOT HARDWARE-VERIFIED -- no green EVB has been on the bench.  The
-         * selector value is read from table 5 (XTAL_HS 48 MHz -> XTALHS_DIV2),
-         * not inferred, but "read from the table" is not "seen enumerate".
-         * Re-run the U1/U2 gates when a green board is available.
+         * halved to the PHY's 24 MHz reference (table 5: XTAL_HS 48 MHz ->
+         * XTALHS_DIV2), with no EM9305, clock request, external pad or x20
+         * multiplier.
          */
         USB->CLKCTRL = ((uint32_t)USB_CLKCTRL_PHYREFCLKSEL_XTALHS_DIV2
                         << USB_CLKCTRL_PHYREFCLKSEL_Pos);
@@ -1840,8 +1725,8 @@ tiku_usb_err_t tiku_usb_up_full(tiku_usb_speed_t want, tiku_usb_class_t cls,
             if (tiku_em9305_reset() != 0) { return TIKU_USB_ERR_CLOCK; }
             s_em9305_up = 1u;
 #else
-            /* Fail CLOSED and for the right reason: with no way to start the
-             * clock source, high speed is unreachable in this build. */
+            /* Without the EM9305 driver the clock source cannot start, so
+             * high speed is refused. */
             return TIKU_USB_ERR_CLOCK;
 #endif
         }
@@ -1874,8 +1759,8 @@ tiku_usb_err_t tiku_usb_up_full(tiku_usb_speed_t want, tiku_usb_class_t cls,
     }
     tiku_cpu_ambiq_delay_us(1000u);
 
-    /* 10. Speed.  HSEnab only ALLOWS high speed -- the chirp handshake in
-     *     hardware decides, and POWER.HSMode reports the verdict after the
+    /* 10. Speed.  HSEnab only allows high speed: the chirp handshake in
+     *     hardware decides, and POWER.HSMode reports the result after the
      *     bus reset.  Byte-width read-modify-write (table 1). */
     if (hs) {
         USB_POWER = (uint8_t)(USB_POWER | POWER_HSENAB | POWER_ENSUSPM);
@@ -1905,10 +1790,9 @@ tiku_usb_err_t tiku_usb_up_full(tiku_usb_speed_t want, tiku_usb_class_t cls,
     s_up = 1u;
 
     /*
-     * Hand the MSC transport to the shell rather than having the shell reach
-     * in and call it.  Registered on the way UP so a build that never brings
-     * USB up never pays for the pump; dropped again in tiku_usb_down().
-     * Registration is idempotent, so repeated `usb up` is harmless.
+     * Register the MSC pump with the shell here, so a build that never brings
+     * USB up never runs it; tiku_usb_down() removes it.  Registration is
+     * idempotent.
      */
     (void)tiku_shell_add_pump(tiku_usb_msc_poll);
     return TIKU_USB_OK;
@@ -1917,7 +1801,7 @@ tiku_usb_err_t tiku_usb_up_full(tiku_usb_speed_t want, tiku_usb_class_t cls,
 tiku_usb_err_t tiku_usb_attach(int on)
 {
     if (!s_up) { return TIKU_USB_ERR_STATE; }
-    /* Byte-width read-modify-write: a 32-bit access here would clear INTRTX. */
+    /* Byte-width read-modify-write: a 32-bit access here clears INTRTX. */
     if (on) { USB_POWER = (uint8_t)(USB_POWER |  POWER_SOFTCONN); }
     else    { USB_POWER = (uint8_t)(USB_POWER & (uint8_t)~POWER_SOFTCONN); }
     s_attached = on ? 1u : 0u;
@@ -1949,16 +1833,15 @@ void tiku_usb_down(void)
 /* THE CONSOLE BACKEND                                                       */
 /*---------------------------------------------------------------------------*/
 /*
- * The shell has been transport-agnostic since it was written; this is simply
- * another tiku_shell_io_t.  Nothing in the CLI changes.
+ * The CDC console as a tiku_shell_io_t backend.
  */
 
 /**
  * @brief Queue one byte for the host.
  *
- * Gated on DTR: a board printing into a port nobody has opened must not block
- * or fill a ring that will never drain.  With the terminal open a full ring is
- * waited on briefly, then the byte is DROPPED and COUNTED for `power usb state`.
+ * Gated on DTR, so output to a port nobody has opened neither blocks nor
+ * fills the ring.  With the terminal open, a full ring is waited on for up to
+ * ~2 s, then the byte is dropped and counted for `power usb state`.
  */
 void tiku_usb_cdc_putc(char c)
 {
@@ -2012,7 +1895,7 @@ const tiku_shell_io_t tiku_shell_io_usbcdc = {
     cdc_rx_ready,
     cdc_getc,
     TIKU_SHELL_IO_CRLF | TIKU_SHELL_IO_ECHO,
-    TIKU_VFS_CAP_ALL          /* a cable in the board IS physical presence  */
+    TIKU_VFS_CAP_ALL          /* a cable in the board is physical presence  */
 };
 
 int tiku_usb_cdc_ready(void)
@@ -2021,12 +1904,11 @@ int tiku_usb_cdc_ready(void)
 }
 
 /**
- * @brief Drain the CDC receive pipe for @p ms, counting bytes, interpreting
- *        none of them.
+ * @brief Drain the CDC receive pipe until @p ms pass with no data, counting
+ *        bytes and interpreting none of them.
  *
- * The gate has to measure the transport, so this drains the same ring and
- * flow-control path the shell uses and simply counts; bytes in must equal bytes
- * out.  Runs on whichever channel is NOT under test, so the shell stays usable.
+ * Uses the ring and flow-control path the shell uses, so the bytes the host
+ * sent must equal the count returned.
  */
 uint32_t tiku_usb_cdc_sink(uint32_t ms)
 {
@@ -2100,40 +1982,33 @@ void tiku_usb_msc_stats(uint32_t *cbw, uint32_t *rd, uint32_t *wr,
 }
 
 /**
- * @brief FNV-1a over the whole RAM disk.
+ * @brief Exercise the LBA bounds check on cases it must accept and refuse.
  *
- * The gate for U3 is not "the host mounted it" but "what the host wrote is
- * what the board holds".  Hashing the disk on the board and comparing with a
- * hash of the same bytes on the PC is the only way to say that.
- */
-/**
- * @brief Exercise the LBA bounds check with values that must be REFUSED.
+ * The refused cases include two lba + nblk sums that wrap past 2^32; the
+ * check guards the memory after the RAM disk.
  *
- * The guard stands between a hostile or buggy host and the memory after the
- * disk.  The cases include the overflow pair that defeats the naive form of
- * the check, so this is a regression test rather than a formality.
- *
- * @return 0 if every case behaved; otherwise a bitmask of the ones that did
- *         not, so a failure names itself.
+ * @return 0 if every case behaved; otherwise a bitmask with bit n set for
+ *         each case n that did not.
  */
 uint32_t tiku_usb_msc_selftest(void)
 {
     uint32_t bad = 0u;
-    /* must be ACCEPTED */
+    /* must be accepted */
     if (!tiku_usbd_msc_lba_ok(&s_msc, 0u, 1u))                        { bad |= 1u << 0; }
     if (!tiku_usbd_msc_lba_ok(&s_msc, MSC_DISK_BLOCKS - 1u, 1u))      { bad |= 1u << 1; }
     if (!tiku_usbd_msc_lba_ok(&s_msc, 0u, MSC_DISK_BLOCKS))           { bad |= 1u << 2; }
-    /* must be REFUSED */
+    /* must be refused */
     if (tiku_usbd_msc_lba_ok(&s_msc, MSC_DISK_BLOCKS, 1u))            { bad |= 1u << 3; }
     if (tiku_usbd_msc_lba_ok(&s_msc, MSC_DISK_BLOCKS - 1u, 2u))       { bad |= 1u << 4; }
     if (tiku_usbd_msc_lba_ok(&s_msc, 0u, MSC_DISK_BLOCKS + 1u))       { bad |= 1u << 5; }
-    /* the overflow pair: lba + nblk wraps to 0, which the naive check
-     * would have waved through */
+    /* the overflow pair: lba + nblk wraps to 0 */
     if (tiku_usbd_msc_lba_ok(&s_msc, 0xFFFFFF00u, 0x100u))            { bad |= 1u << 6; }
     if (tiku_usbd_msc_lba_ok(&s_msc, 0x80000000u, 0x80000000u))       { bad |= 1u << 7; }
     return bad;
 }
 
+/** @brief FNV-1a over the first @p nblocks of the RAM disk (0 or too many =
+ *         all). */
 uint32_t tiku_usb_msc_hash(uint32_t nblocks)
 {
     uint32_t h = 2166136261u, i, n;
@@ -2166,9 +2041,8 @@ void tiku_usb_regs(uint32_t *out, unsigned n)
 {
     unsigned i;
 
-    /* POWER-SAFE, by construction.  Reading an unpowered peripheral stalls
-     * the APB and hangs the CPU with no fault; it cost a board wedge during
-     * the NOR bring-up and the lesson is applied here up front. */
+    /* Reading an unpowered peripheral stalls the APB and hangs the CPU with
+     * no fault, so only DEVPWRSTATUS is read while the controller is down. */
     for (i = 0u; i < n; i++) { out[i] = 0xDEADDEADu; }
     if (n > 0u) { out[0] = PWRCTRL->DEVPWRSTATUS; }
     if (!tiku_usb_powered()) { return; }
@@ -2180,9 +2054,8 @@ void tiku_usb_regs(uint32_t *out, unsigned n)
     if (n > 6u) { out[6] = USB_INTRTXE; }
     if (n > 7u) { out[7] = USB_FRAME; }
     if (n > 8u) { out[8] = USBPHY->REG14; }
-    /* Deliberately NOT dumped: INTRUSB, INTRTX, INTRRX.  They are
-     * read-to-clear, and a diagnostic that steals interrupts from the ISR is
-     * a diagnostic that causes the bug it is looking for. */
+    /* Not dumped: INTRUSB, INTRTX, INTRRX.  They are read-to-clear, and a
+     * read here takes events from the ISR. */
 }
 
 #endif /* PLATFORM_AMBIQ && TIKU_DRV_USB_ENABLE */

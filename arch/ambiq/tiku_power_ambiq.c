@@ -7,35 +7,35 @@
  *
  * tiku_power_ambiq.c - Apollo510 power-measurement instruments.
  *
- * The second measured point behind the cross-platform durability claims, after
- * the Nordic part.  The `quiet` release set is deliberately not copied over: a
- * release vocabulary transcribed across silicon is assumptions dressed as measurement.
+ * The STIMER timebase, L1 cache controls, a core-clock measurement against
+ * DWT, the sleep, spin and memory-access probes, and the console-free
+ * deep-sleep sequence that tiku_ambiq_power_autorun() runs.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "tiku.h"
 
-/* Apollo510 only -- see the Makefile note where TIKU_AMBIQ_POWER_PROBE is set. */
+/* Apollo510 only: the Makefile sets TIKU_AMBIQ_POWER_PROBE for that part. */
 #if defined(PLATFORM_AMBIQ) && (TIKU_AMBIQ_POWER_PROBE + 0)
 
 #include "tiku_power_ambiq.h"
 #include "apollo510.h"          /* CMSIS register map: STIMER, PWRCTRL, ... */
-#include <kernel/cpu/tiku_hang.h>   /* check-in: these probes block on purpose */
-#include <arch/ambiq/tiku_timer_arch.h> /* TIKU_CLOCK_ARCH_SECOND first        */
-#include <kernel/timers/tiku_clock.h>   /* tickless stretch for the tick flag  */
-#include <arch/ambiq/tiku_uart_arch.h>  /* console re-init after the uart flag */
-#include <arch/ambiq/tiku_cpu_freq_boot_arch.h> /* SIMOBUCK enable (autorun)   */
+#include <kernel/cpu/tiku_hang.h>   /* check-in while a probe blocks          */
+#include <arch/ambiq/tiku_timer_arch.h> /* tick rate, STIMER reclock          */
+#include <kernel/timers/tiku_clock.h>   /* tickless stretch (tick flag)       */
+#include <arch/ambiq/tiku_uart_arch.h>  /* console re-init (uart flag)        */
+#include <arch/ambiq/tiku_cpu_freq_boot_arch.h> /* SIMOBUCK enable (autorun) */
 
 /*---------------------------------------------------------------------------*/
 /* TIMEBASE -- the always-on STIMER                                          */
 /*---------------------------------------------------------------------------*/
 
 /*
- * The core's SysTick is gated during WFI on this part, so it cannot time a
- * sleep window -- that is exactly why the kernel tick moved to the STIMER.  The
- * three-read vote transcribes am_hal_stimer_counter_get: the counter is in a
- * different clock domain, so a single read can catch it mid-update.
+ * SysTick stops during WFI on this part, so windows are timed on the STIMER.
+ * The counter runs in another clock domain and one read can catch it
+ * mid-update: of three reads, the first is used if the first two agree, else
+ * the third.
  */
 uint32_t tiku_ambiq_stimer_now(void)
 {
@@ -45,21 +45,18 @@ uint32_t tiku_ambiq_stimer_now(void)
     return (v0 == v1) ? v0 : v2;
 }
 
-/* RUNTIME-ADJUSTABLE, not a constant, since the deep-sleep autorun reclocks the
- * STIMER to LFRC: measured on hardware (halted core, PC in the counter-vote,
- * three identical reads), REAL deep sleep stops the 32 kHz crystal and the
- * STIMER freezes with it -- the datasheet's deep-sleep rows say "LFRC on, XTAL
- * off" for exactly this reason.  LFRC_NOMINAL is ~900 Hz and UNCALIBRATED
- * (tens of percent), so windows timed on it are approximate; for the autorun
- * that is fine -- segments identify by order and rough duration, and the LEVEL
- * is the measurement. */
+/* STIMER rate the probes time with: 32768 Hz on the crystal, or 900 Hz once
+ * tiku_ambiq_power_autorun() has moved the STIMER to LFRC_NOMINAL, because
+ * debugger-free deep sleep stops the crystal and the STIMER with it.  The LFRC
+ * is uncalibrated, so windows timed on it are approximate.  Only the autorun
+ * changes this value; tiku_ambiq_stimer_reclock() does not. */
 static uint32_t tiku_ambiq_stimer_hz = 32768u;
 #define TIKU_AMBIQ_STIMER_HZ tiku_ambiq_stimer_hz
 
 uint32_t tiku_ambiq_stimer_us(uint32_t counts)
 {
-    /* At the crystal rate this is exact (1e6/32768 == 15625/512); at the LFRC
-     * rate it is nominal-only, like everything timed on an uncalibrated RC. */
+    /* On the crystal 1e6/32768 == 15625/512 exactly; on the LFRC the result
+     * is only as accurate as the nominal rate. */
     if (tiku_ambiq_stimer_hz == 32768u) {
         return (uint32_t)(((uint64_t)counts * 15625u) >> 9);
     }
@@ -71,12 +68,9 @@ uint32_t tiku_ambiq_stimer_us(uint32_t counts)
 /*---------------------------------------------------------------------------*/
 
 /*
- * There is no vendor CACHECTRL block on this part (checked: apollo510.h has
- * none), so the cache knob is the ARCHITECTURAL one -- SCB.CCR.IC/DC plus the
- * required maintenance.  That is a real difference from the nRF54L, whose
- * ICACHE is a vendor peripheral with its own hit/miss counters; there are no
- * equivalent counters here, so "the cache is on" has to be established from
- * CCR and from the workload's own throughput rather than from a hit rate.
+ * The Apollo510 has no vendor cache controller: the L1 caches are switched
+ * through SCB.CCR.IC/DC with the CMSIS maintenance calls, and
+ * tiku_ambiq_cache_enabled() reads the state back from CCR.IC.
  */
 void tiku_ambiq_cache_set(int on)
 {
@@ -84,9 +78,8 @@ void tiku_ambiq_cache_set(int on)
         SCB_EnableICache();
         SCB_EnableDCache();
     } else {
-        /* Clean before disabling the D-cache: dirty lines must reach memory or
-         * a later read returns stale data.  CMSIS's disable does the clean, but
-         * the ordering (D first, then I) is ours to get right. */
+        /* SCB_DisableDCache() cleans dirty lines to memory as it disables the
+         * D-cache; the I-cache goes off after it. */
         SCB_DisableDCache();
         SCB_DisableICache();
     }
@@ -102,10 +95,8 @@ int tiku_ambiq_cache_enabled(void)
 void tiku_ambiq_cache_geometry(uint32_t *i_bytes, uint32_t *d_bytes,
                                uint32_t *line)
 {
-    /* READ the geometry, do not assume it.  Cortex-M55 cache sizes are an
-     * implementer choice, so a size copied from another part's datasheet is how
-     * a "cache-resident" working set silently stops being resident.  CCSIDR
-     * gives sets/ways/line for whichever cache CSSELR selects. */
+    /* Cortex-M55 cache sizes are an implementer choice.  CCSIDR gives the
+     * sets, ways and line length of the cache CSSELR selects. */
     uint32_t sel, ccsidr, sets, ways, lw, sz;
     uint32_t saved = SCB->CSSELR;
 
@@ -134,18 +125,11 @@ void tiku_ambiq_cache_geometry(uint32_t *i_bytes, uint32_t *d_bytes,
 }
 
 /*---------------------------------------------------------------------------*/
-/* CLOCK ORACLE                                                              */
+/* CORE CLOCK MEASUREMENT                                                    */
 /*---------------------------------------------------------------------------*/
 
-/* DWT, not SysTick.  SysTick counts DOWN and RELOADS: with a short RVR it wraps
- * many times inside any window the 32.768 kHz STIMER can resolve, and two
- * samples cannot tell one wrap from ten.  The first cut of this oracle did
- * exactly that and reported 14 kHz for a 96 MHz core -- wrong by 6800x, and
- * wrong in the direction that looks like a real (low) number rather than an
- * obvious failure.  DWT's CYCCNT is a free-running 32-bit core-cycle counter
- * with no reload: at 96-250 MHz it wraps every 17-45 s, so a 16 ms window is
- * unambiguous.  (mrambench already relies on DWT here, so the block is known
- * good on this part.) */
+/* DWT CYCCNT is a free-running 32-bit core-cycle counter with no reload: at
+ * 96-250 MHz it wraps every 17-45 s, so a 16 ms window is unambiguous. */
 #define TIKU_SCB_DEMCR   (*(volatile uint32_t *)0xE000EDFCUL)
 #define TIKU_DWT_CTRL    (*(volatile uint32_t *)0xE0001000UL)
 #define TIKU_DWT_CYCCNT  (*(volatile uint32_t *)0xE0001004UL)
@@ -155,22 +139,20 @@ void tiku_ambiq_cache_geometry(uint32_t *i_bytes, uint32_t *d_bytes,
 unsigned long tiku_ambiq_cpu_hz_measure(void)
 {
     uint32_t t0, dt, c0, c1;
-    uint32_t target = TIKU_AMBIQ_STIMER_HZ / 64u;    /* ~16 ms, 512 counts */
+    uint32_t target = TIKU_AMBIQ_STIMER_HZ / 64u;    /* ~16 ms             */
 
-    /* Enable the cycle counter if nothing else has.  Left enabled afterwards:
-     * it is a free-running counter with no side effects, and other benches on
-     * this part expect it available. */
+    /* TRCENA and the cycle counter are turned on and left on. */
     TIKU_SCB_DEMCR |= TIKU_SCB_TRCENA;
     TIKU_DWT_CTRL  |= TIKU_DWT_CYCCNTENA;
     __DSB();
     c0 = TIKU_DWT_CYCCNT;
     t0 = tiku_ambiq_stimer_now();
-    /* If CYCCNT is not actually incrementing, say so instead of dividing by it. */
+    /* Returns 0 if CYCCNT does not advance within 100000 polls. */
     if (TIKU_DWT_CYCCNT == c0) {
         uint32_t guard = 0u;
         while (TIKU_DWT_CYCCNT == c0 && guard < 100000u) { guard++; }
         if (TIKU_DWT_CYCCNT == c0) {
-            return 0ul;                  /* DWT unavailable on this part/config */
+            return 0ul;                  /* no DWT cycle counter */
         }
         c0 = TIKU_DWT_CYCCNT;
         t0 = tiku_ambiq_stimer_now();
@@ -182,8 +164,8 @@ unsigned long tiku_ambiq_cpu_hz_measure(void)
     if (dt == 0u) {
         return 0ul;
     }
-    /* CYCCNT counts UP and wraps only every 17-45 s, so the unsigned difference
-     * is correct even across a single wrap.  Hz = cycles / (dt / 32768). */
+    /* The unsigned difference is correct across one CYCCNT wrap.
+     * Hz = cycles * STIMER rate / dt. */
     return (unsigned long)(((uint64_t)(uint32_t)(c1 - c0) * TIKU_AMBIQ_STIMER_HZ)
                            / dt);
 }
@@ -201,25 +183,14 @@ uint32_t tiku_ambiq_sleep_wake_count(void) { return s_wakes; }
 uint32_t tiku_ambiq_spin_pass_count(void)  { return s_passes; }
 uint32_t tiku_ambiq_spin_inner(void)       { return TIKU_AMBIQ_SPIN_INNER; }
 
-/*
- * THE REFERENCE LOOP LIVES IN ITS OWN 16-BYTE-ALIGNED SECTION.
+/**
+ * @brief Count @p n down to zero; the spin probe and the NOP memory kind run
+ *        this loop.
  *
- * `.p2align 4` inside inline asm is NOT an alignment guarantee: the assembler
- * aligns within its section and the linker then places that section wherever it
- * likes.  Measured on this part, the identical two instructions ran at 1.431 and
- * 3.423 cycles/iteration depending only on where they landed -- a 2.4x spread,
- * and in the OPPOSITE direction from the nRF54L's misalignment penalty.  The
- * directive had put the loop at mod 16 = 8 while claiming otherwise.
- *
- * Fix: give the loop its own function, its own section, and a DECLARED
- * alignment, so the assembler's frame and the link-time address agree.  The
- * harness disassembles and logs the runtime address every build; a measurement
- * primitive whose cost depends on link order is not a reference.
+ * The loop's cycle cost on this core depends on its address modulo 16, and
+ * `.p2align` aligns only within a section, so the function has its own section
+ * and a declared alignment; noclone keeps GCC from emitting an .isra copy.
  */
-/* noclone as well as noinline: GCC's IPA otherwise emits a `.isra` clone, and a
- * clone is a DIFFERENT symbol that need not inherit the section or alignment --
- * the guarantee would then hold by luck, which is what this whole change exists
- * to stop. */
 __attribute__((noinline, noclone, aligned(16),
                section(".text.tiku_ambiq_spinpass")))
 static uint32_t tiku_ambiq_spin_pass(uint32_t n)
@@ -231,9 +202,13 @@ static uint32_t tiku_ambiq_spin_pass(uint32_t n)
     return n;
 }
 
-/* One body for both states, for the same reason as the Nordic port: an idle
- * figure and a busy figure are only comparable if the ONLY difference between
- * them is what the CPU is doing. */
+/**
+ * @brief Run a sleep or spin (@p spin non-zero) window of @p ms; returns its
+ *        length in microseconds.
+ *
+ * Both kinds share this body and differ only in the loop step: WFI or one
+ * spin pass.  A spin window ignores @p flags.
+ */
 static uint32_t ambiq_probe(uint32_t ms, unsigned flags, int spin)
 {
     uint32_t t0, dt = 0u;
@@ -244,19 +219,17 @@ static uint32_t ambiq_probe(uint32_t ms, unsigned flags, int spin)
     uint32_t target;
 
     if (!spin && (flags & TIKU_AMBIQ_SLEEP_STOP_UART) != 0u) {
-        /* Let the caller's announcement leave the wire, then power the UART
-         * domain off.  This is the release that matters most for deep sleep:
-         * an enabled UART is a standing HFRC request, and the datasheet's
-         * uA-class rows all assume HFRC off. */
+        /* Wait 4 ms for the caller's last console output to drain, then
+         * power the UART1 domain off: an enabled UART holds a standing HFRC
+         * request, which keeps HFRC running in deep sleep. */
         tiku_cpu_ambiq_delay_us(4000u);
         PWRCTRL->DEVPWREN_b.PWRENUART1 = 0u;
     }
     if (!spin && (flags & TIKU_AMBIQ_SLEEP_LFRC) != 0u) {
-        /* Reclock BEFORE the stretch (reclock refuses under an open stretch,
-         * by contract) and before the window target is computed, so the
-         * whole window is timed in calibrated LFRC counts.  0 = the LFRC
-         * was not seen counting; the probe degrades to the crystal rather
-         * than dying, and the caller can tell from the reported rate. */
+        /* The reclock comes before the tick stretch, which it refuses while
+         * one is open, and before the target is computed, so the whole
+         * window is timed in LFRC counts at the calibrated rate.  A return of
+         * 0 leaves the STIMER, and the window, on the crystal. */
         lfrc_hz = tiku_ambiq_stimer_reclock(1);
         if (lfrc_hz != 0u) {
             hz_used = lfrc_hz;
@@ -264,27 +237,24 @@ static uint32_t ambiq_probe(uint32_t ms, unsigned flags, int spin)
     }
     target = (uint32_t)(((uint64_t)ms * hz_used) / 1000u);
     if (!spin && (flags & TIKU_AMBIQ_SLEEP_STOP_TICK) != 0u) {
-        /* Same pattern as the nRF54L probe: stretch through the port's own
-         * tickless path, masked because begin() moves the compare under the
-         * live tick ISR.  The 510's accounting credits the whole stretch on
-         * wake, so uptime stays exact. */
+        /* Interrupts are masked because tiku_clock_tickless_begin() moves the
+         * compare the live tick ISR uses.  The stretch is credited in whole
+         * ticks on wake. */
         __asm__ volatile ("cpsid i" ::: "memory");
         (void)tiku_clock_tickless_begin(
             (tiku_clock_time_t)((ms * TIKU_CLOCK_ARCH_SECOND) / 1000u + 2u));
         __asm__ volatile ("cpsie i" ::: "memory");
     }
     if (!spin && (flags & TIKU_AMBIQ_SLEEP_DBGLOCK) != 0u) {
-        MCUCTRL->DEBUGGER = 1u;          /* lockout; restored below */
+        MCUCTRL->DEBUGGER = 1u;          /* lockout; cleared below */
     }
     if (!spin && (flags & TIKU_AMBIQ_SLEEP_DEEP) != 0u) {
-        /* ELPSTATE=RET (the P0 idle default, -937 uA) FAULTS ON WAKE FROM
-         * SLEEPDEEP: 100 % reproducible on this board (MemManage IACCVIOL /
-         * HardFault at a garbage PC -- the FP/MVE context does not survive
-         * the deep wake path), while the same cell with ELPSTATE=ON-clk-off
-         * passes every time, and RET under plain WFI is what every idle
-         * measurement ran on.  So a SLEEPDEEP window brackets the EPU up to
-         * ON-clk-off and restores the caller's choice after.  The future
-         * DEEP idle hook must do the same. */
+        /* A wake from SLEEPDEEP with ELPSTATE=RET (2) faults (MemManage
+         * IACCVIOL or HardFault at a garbage PC): the FP/MVE context does not
+         * survive the deep wake path.  ELPSTATE=1 (on, clock stopped) wakes
+         * without a fault, so the window writes 1 in place of 2 and
+         * restores 2 after.  Any SLEEPDEEP entry needs the same save and
+         * restore. */
         elp_saved = (PWRMODCTL->CPDLPSTATE >> 4) & 0x3u;
         if (elp_saved == 2u) {
             PWRMODCTL->CPDLPSTATE =
@@ -298,26 +268,21 @@ static uint32_t ambiq_probe(uint32_t ms, unsigned flags, int spin)
     t0 = tiku_ambiq_stimer_now();
     do {
         if (spin) {
-            /* PIN THE ALIGNMENT.  This is the reference workload for every core
-             * figure, so its cost must not depend on where the linker dropped
-             * it: on the nRF54L the identical two instructions measured 956 uA
-             * apart purely because an unrelated build option moved them. */
             (void)tiku_ambiq_spin_pass(TIKU_AMBIQ_SPIN_INNER);
             s_passes++;
         } else {
             __asm__ volatile ("wfi" ::: "memory");
             s_wakes++;
         }
-        /* Deliberate blocking: say so, or the check-in hang detector names this
-         * probe the culprit at 1024 stalled ticks and resets the board. */
+        /* The probe holds the CPU for the whole window, so it checks in
+         * with the hang detector on every step. */
         tiku_hang_checkin();
         {
             uint32_t now2 = tiku_ambiq_stimer_now();
             if (now2 - t0 == dt) {
-                /* Counter unchanged since last iteration: count it.  A frozen
-                 * timebase turned v1/v2 of the deep-sleep autorun into an
-                 * eternal busy-poll of a dead counter; a probe must never
-                 * trust its clock unconditionally. */
+                /* Counter unchanged since the last iteration.  After
+                 * 2000000 such iterations in a row the STIMER is taken as
+                 * stopped and the window ends early. */
                 if (++freeze != 0u && freeze > 2000000u) {
                     break;
                 }
@@ -329,8 +294,8 @@ static uint32_t ambiq_probe(uint32_t ms, unsigned flags, int spin)
     } while (dt < target);
 
     if (!spin && (flags & TIKU_AMBIQ_SLEEP_DEEP) != 0u) {
-        SCB->SCR &= ~(1ul << 2);   /* never left set: it changes every later WFI */
-        if (elp_saved == 2u) {     /* restore the caller's EPU retention choice */
+        SCB->SCR &= ~(1ul << 2);   /* else it applies to every later WFI */
+        if (elp_saved == 2u) {     /* restore the caller's ELPSTATE=RET */
             PWRMODCTL->CPDLPSTATE =
                 (PWRMODCTL->CPDLPSTATE & ~(0x3u << 4)) | (2u << 4);
         }
@@ -352,7 +317,7 @@ static uint32_t ambiq_probe(uint32_t ms, unsigned flags, int spin)
             uint32_t spin_ack = 200000u;
             while (spin_ack-- != 0u) { __asm__ volatile ("nop"); }
         }
-        tiku_uart_init();          /* full re-init: DMA/config, not just power */
+        tiku_uart_init();          /* full re-init of the UART configuration */
     }
     /* dt is in counts of whichever timebase timed the window. */
     return (hz_used == 32768u)
@@ -375,37 +340,19 @@ uint32_t tiku_ambiq_spin_probe(uint32_t ms)
 /*---------------------------------------------------------------------------*/
 
 /*
- * SIZED AGAINST THE MEASURED GEOMETRY -- and then against the LINKER.
+ * The L1 D-cache is 64 KB with 32-byte lines (CCSIDR).  The hot MRAM set is
+ * 4 KB and stays resident.  The cold set is 128 KB, twice the D-cache; a larger
+ * one does not fit the 384 KB code window and the 512 KB TCM beside the rest
+ * of the image.  A cyclic walk over a set larger than an LRU cache evicts each
+ * line before its reuse, but with a 2x margin the hot and cold throughput
+ * should be compared before the cold figure is read as all misses.
  *
- * First run on hardware read CCSIDR: **I 64 KB, D 64 KB, line 32 B**, eight
- * times the nRF54L's 8 KB.  That is exactly why the geometry is read rather than
- * transcribed: a working set sized for an 8 KB cache is fully resident in a
- * 64 KB one, and the "cache-defeating" workload would have measured a blend.
- *
- * The obvious fix -- 512 KB, 8x the cache -- does NOT FIT: this device's code
- * window is 384 KB (apollo510.ld: MRAM LENGTH = 0x60000) with ~122 KB spare, and
- * TCM is 512 KB shared with .data/.bss/heap/stack.  512 KB overflowed MRAM by
- * 262 KB and TCM by 30 KB.  So COLD is 128 KB: only **2x** the D-cache.
- *
- * Two is enough IN THEORY -- a cyclic walk over a working set larger than an LRU
- * cache evicts every line before its reuse -- but it is a much thinner margin
- * than the 8x this experiment's nRF54L counterpart had, so the hot-vs-cold
- * throughput ratio MUST be checked before the cold figure is called a miss.
- * A larger set is available without linker cost by walking the carved MRAM
- * region directly (memory-mapped above the code window) instead of a linked
- * const array; that is the right move for the full experiment.
- *
- * AND THE SRAM TIER HERE IS NOT WHAT IT IS ON THE nRF54L.  s_sram lands in DTCM
- * (0x20000000), which on Cortex-M55 is TIGHTLY COUPLED and bypasses L1
- * entirely -- so the sram_* kinds measure an UNCACHED tier, and the cache knob
- * should not move them at all.  That makes three genuinely distinct tiers here
- * (uncached TCM / cached MRAM / cache-missing MRAM) where the nRF54L had two,
- * but it also means these numbers are NOT the same measurement as experiment 7's
- * "SRAM read" and must not be put in the same column.
+ * s_sram is in DTCM (0x20000000), which bypasses the L1, so the SRAM kinds
+ * measure uncached TCM and the cache setting does not affect them.
  */
 #define TIKU_AMBIQ_MEM_HOT_WORDS   1024u    /* 4 KB   -- inside the L1 D    */
-#define TIKU_AMBIQ_MEM_COLD_WORDS 32768u    /* 128 KB -- 2x the L1 D (see below) */
-#define TIKU_AMBIQ_MEM_STRIDE        17u    /* coprime with any power-2 line */
+#define TIKU_AMBIQ_MEM_COLD_WORDS 32768u    /* 128 KB -- 2x the L1 D        */
+#define TIKU_AMBIQ_MEM_STRIDE        17u    /* odd: walk covers every word  */
 #define TIKU_AMBIQ_MEM_PASS_ACC     256u
 
 static const uint32_t s_mram_hot[TIKU_AMBIQ_MEM_HOT_WORDS]   = { 0 };
@@ -464,11 +411,9 @@ uint32_t tiku_ambiq_mem_probe(unsigned kind, uint32_t ms)
     const uint32_t cold_mask = TIKU_AMBIQ_MEM_COLD_WORDS - 1u;
     uint32_t target = (uint32_t)(((uint64_t)ms * TIKU_AMBIQ_STIMER_HZ) / 1000u);
 
-    /* Seed the SRAM buffer so ITS traversals have a live checksum.  The MRAM
-     * arrays are `const` zero-filled: the linker emits them and the loads really
-     * happen, but every word read back is 0, so for those kinds the checksum is
-     * STRUCTURALLY zero and proves nothing.  Stated here rather than left to
-     * imply a verification that is not happening. */
+    /* Seed s_sram so the SRAM kinds produce a non-zero checksum.  The MRAM
+     * arrays are zero-filled constants: their loads happen, but their
+     * checksum is always 0. */
     if (s_sram[0] == 0u) {
         uint32_t j;
         for (j = 0u; j < TIKU_AMBIQ_MEM_COLD_WORDS; j++) {
@@ -483,9 +428,8 @@ uint32_t tiku_ambiq_mem_probe(unsigned kind, uint32_t ms)
         switch (kind) {
         case TIKU_AMBIQ_MEM_NOP:
         default: {
-            /* THE SAME PRIMITIVE as tiku_ambiq_spin_probe, not a copy of it.
-             * Two hand-aligned copies of "the same" loop measured 2.1x apart
-             * on this core; one shared, section-aligned function cannot. */
+            /* The section-aligned loop the spin probe runs, so an iteration
+             * here costs what a spin-probe iteration costs. */
             (void)tiku_ambiq_spin_pass(TIKU_AMBIQ_MEM_PASS_ACC);
             break;
         }
@@ -493,7 +437,7 @@ uint32_t tiku_ambiq_mem_probe(unsigned kind, uint32_t ms)
             AMBIQ_PASS_READ(s_sram, cold_mask, 1u);
             break;
         case TIKU_AMBIQ_MEM_SRAM_W:
-            acc |= 1u;                 /* keep s_sram[0] non-zero (seed gate) */
+            acc |= 1u;                 /* s_sram[0] stays non-zero: no reseed */
             AMBIQ_PASS_WRITE(s_sram, cold_mask, 1u);
             break;
         case TIKU_AMBIQ_MEM_SRAM_STRIDE:
@@ -516,56 +460,44 @@ uint32_t tiku_ambiq_mem_probe(unsigned kind, uint32_t ms)
 }
 
 /*---------------------------------------------------------------------------*/
-/* DEEP-SLEEP AUTORUN STAIRCASE                                              */
+/* DEEP-SLEEP AUTORUN                                                        */
 /*---------------------------------------------------------------------------*/
 
 /*
- * EXISTS BECAUSE REAL DEEP SLEEP AND A CONSOLE ARE MUTUALLY EXCLUSIVE ON THIS
- * RIG.  SLEEPDEEP is demoted to normal sleep while the debug domain is powered
- * (measured: deep == plain to 3 uA, twice), the domain is powered whenever the
- * on-board J-Link has latched its DAP power request, and the J-Link's USB is
- * also the console.  So the deep-sleep measurement must run with J16 unplugged
- * -- no console, no debugger -- and the firmware carries the whole protocol
- * itself.  The trace IS the report: each state has a distinct duration and
- * level, so the meter's recording segments unambiguously without a wire.
+ * Runs in place of the scheduler and never returns.  SLEEPDEEP acts as plain
+ * sleep while the debug domain is powered, and the on-board J-Link powers it
+ * once it latches its DAP power request; its USB (J16) is also the console.
+ * So the sequence runs with J16 unplugged and the board powered from the
+ * Apollo5 USB connector, and the supply current is its only output: each
+ * state has its own duration and level.
  *
- * One cycle (Joulescope-readable):
- *     spin  3 s     high plateau -- cycle marker + liveness proof
- *     idle 10 s     plain WFI reference (all clocks running)
- *     deep 45 s     SLEEPDEEP + UART domain off + tick stretched
+ * Bring-up: step 1 unmasks interrupts (marker A, then a 5 s WFI window);
+ * step 2 turns SIMOBUCK on and crypto, OTP, NVM1, ROM, CYCCNT and TRCENA off
+ * (marker B); step 3 moves the STIMER to the LFRC, or back to the crystal if
+ * the LFRC count does not advance (marker C).  Each marker is a 2 s spin, so
+ * a trace that ends after a marker stopped in the next step.
  *
- * With the debugger attached, the deep segment reads ~2.6-2.8 mA (demoted --
- * a live rehearsal of the sequence).  With J16 unplugged and the board powered
- * from the Apollo5 USB connector, PWRSTDBG never latches and the same segment
- * should fall to the datasheet's deep-sleep-2 class: 57 uW all-retained
- * (~32 uA at 1.8 V) -- SSRAM retention is the default, NVMPWDSLP=1 already,
- * TCM retains.  The tidy steps mirror the measured ladder: buck (2.07x on
- * dynamic), crypto/OTP/NVM1/ROM off (-1.19 mA), TRCENA clear (-98 uA).
+ * Each cycle, with durations approximate on the uncalibrated LFRC:
+ *     spin   3 s   cycle marker
+ *     idle   8 s   plain WFI
+ *     deep  30 s   SLEEPDEEP with the UART domain off
+ *     spin   2 s   marker
+ *     deep  20 s   SLEEPDEEP, UART domain off, tick stretched
  *
- * Runs INSTEAD of the scheduler (the TIKU_TURBO_BENCH pattern) and never
- * returns.  Reflashing afterwards: reconnect J16 and flash as usual -- the
- * J-Link connect sequence takes the part via reset, and nothing here is
- * persistent (every register this touches reverts on POR).
+ * Every register written here reverts on power-on reset, so with J16
+ * connected again the part is flashed as usual.
  */
 void tiku_ambiq_power_autorun(void)
 {
-    /* v5 -- INSTRUMENTED BRING-UP.  v4 died in a fast reset loop (SWD could
-     * not even attach) somewhere between unmasking interrupts and the first
-     * cycle, and with no console the only debugger left is the METER: a short
-     * spin marker after every risky step turns the current trace into a
-     * progress log.  A trace that ends after marker N names step N+1.
-     * The CLKGEN LFRCCTRL writes from v4 are gone entirely -- unverified
-     * register interface, prime fault suspect; if LFRC's output is not already
-     * running, the verified-reclock step falls back to the crystal instead. */
-
-    /* step 1: unmask IRQs (reset handler masks; the scheduler normally
-     * unmasks; without this every WFI in v1-v3 fell straight through). */
+    /* Step 1: the reset handler leaves interrupts masked and no scheduler
+     * runs to unmask them; masked, every WFI here would return at once. */
     __asm__ volatile ("cpsie i" ::: "memory");
-    (void)tiku_ambiq_spin_probe(2000u);          /* marker A: survived cpsie */
+    (void)tiku_ambiq_spin_probe(2000u);          /* marker A: past cpsie */
 
-    (void)tiku_ambiq_sleep_probe(5000u, 0u);     /* attach window */
+    (void)tiku_ambiq_sleep_probe(5000u, 0u);     /* SWD can attach here */
 
-    /* step 2: regulator + standing domains (the measured ladder). */
+    /* Step 2: SIMOBUCK on; crypto, OTP, NVM1 and ROM powered down;
+     * DWT_CTRL.CYCCNTENA and DEMCR.TRCENA cleared. */
     (void)tiku_cpu_freq_ambiq_simobuck_enable();
     PWRCTRL->DEVPWREN_b.PWRENCRYPTO = 0u;
     PWRCTRL->DEVPWREN_b.PWRENOTP    = 0u;
@@ -573,10 +505,11 @@ void tiku_ambiq_power_autorun(void)
     PWRCTRL->MEMPWREN_b.PWRENROM    = 0u;
     (*(volatile uint32_t *)0xE0001000UL) &= ~1UL;
     (*(volatile uint32_t *)0xE000EDFCUL) &= ~(1UL << 24);
-    (void)tiku_ambiq_spin_probe(2000u);          /* marker B: survived tidy */
+    (void)tiku_ambiq_spin_probe(2000u);          /* marker B: past step 2 */
 
-    /* step 3: move the timebase off the sick crystal, WITH verification and
-     * fallback -- a clock is trusted only after it is seen counting. */
+    /* Step 3: the 32 kHz crystal stops in deep sleep, so the STIMER moves to
+     * LFRC_NOMINAL and stays there only if the counter is seen to advance;
+     * otherwise it returns to the crystal. */
     STIMER->STCFG = (STIMER->STCFG & ~0xFu) | 6u;   /* LFRC_NOMINAL */
     {
         uint32_t c0 = tiku_ambiq_stimer_now();
@@ -588,7 +521,7 @@ void tiku_ambiq_power_autorun(void)
             STIMER->STCFG = (STIMER->STCFG & ~0xFu) | 3u;  /* XTAL fallback */
         }
     }
-    (void)tiku_ambiq_spin_probe(2000u);          /* marker C: clock verified */
+    (void)tiku_ambiq_spin_probe(2000u);          /* marker C: past step 3 */
 
     for (;;) {
         (void)tiku_ambiq_spin_probe(3000u);
@@ -597,14 +530,11 @@ void tiku_ambiq_power_autorun(void)
                                      TIKU_AMBIQ_SLEEP_DEEP
                                      | TIKU_AMBIQ_SLEEP_STOP_UART);
         (void)tiku_ambiq_spin_probe(2000u);
-        /* THE FINAL SEGMENT IS A MEASUREMENT DISGUISED AS A DEFECT.  The
-         * tick-stretched deep sleep never wakes under real sleep (the far
-         * compare does not fire -- a genuine tickless bug on this port, on
-         * the work list).  Debugger-free, that failure mode IS the target
-         * state: an eternal, wake-free, true deep sleep -- the exact
-         * configuration of the datasheet's uW rows, held indefinitely for
-         * the meter.  One full cycle of markers runs first, so the trace
-         * proves the board was alive and which state it parked in. */
+        /* The tick stretch is armed in counts of the crystal tick period,
+         * which step 3 leaves unchanged: its 20 s of crystal counts last
+         * about 12 minutes on the 900 Hz LFRC, and on the crystal fallback,
+         * which debugger-free deep sleep stops, the compare never fires.
+         * The board stays in deep sleep with no wakes for that time. */
         (void)tiku_ambiq_sleep_probe(20000u,
                                      TIKU_AMBIQ_SLEEP_DEEP
                                      | TIKU_AMBIQ_SLEEP_STOP_UART
@@ -618,9 +548,8 @@ void tiku_ambiq_power_autorun(void)
 
 int tiku_ambiq_debugger_attached(void)
 {
-    /* MCUCTRL.DEBUGGER: a forgotten debug session cost ~130 uA on the other
-     * platform and quietly turned every low-power figure into an upper bound.
-     * Bit 0 low means the debugger interface is enabled on this part. */
+    /* Bit 0 of MCUCTRL.DEBUGGER is the SWD lockout; clear means the debug
+     * interface is enabled. */
     return ((MCUCTRL->DEBUGGER & 1u) == 0u) ? 1 : 0;
 }
 

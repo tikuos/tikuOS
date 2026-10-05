@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_device_select.h - Apollo 510 device + board include router
+ * tiku_device_select.h - Ambiq device and board include router.
  *
- * Mirrors arch/arm-rp2350/tiku_device_select.h. The Makefile sets:
- *   TIKU_DEVICE_APOLLO510       (silicon)
- *   TIKU_BOARD_APOLLO510_EVB    (board pin definitions)
+ * The Makefile defines one TIKU_DEVICE_* symbol from MCU= and one
+ * TIKU_BOARD_* symbol from BOARD=; this header includes the matching device
+ * and board headers.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,24 +24,20 @@
 /**
  * @brief Pull in silicon-level constants for the selected Ambiq device.
  *
- * The Makefile defines exactly one TIKU_DEVICE_* symbol. This block maps
- * that symbol to the corresponding device header. Add a new @c elif branch
- * here when porting to a new Ambiq silicon variant.
+ * A new Ambiq part needs its device header and an @c elif branch here.
  */
 #if defined(TIKU_DEVICE_APOLLO510B)
-/* Apollo510 Blue (the "B"/lni EVB) is the SAME Apollo510 (AMAP510) Cortex-M55
- * silicon -- identical register map, memory sizes and peripherals -- with an
- * on-board EM9305 BLE radio the base EVB lacks.  Reuse the Apollo510 device
- * header and just override the human-facing name.  Listed first so it wins
- * even though tiku.h's fallback also defines TIKU_DEVICE_APOLLO510. */
+/* The Apollo510B has the Apollo510 die (same register map, memory and
+ * peripherals) plus an EM9305 BLE die, so it takes the Apollo510 header
+ * under its own name.  It is tested first because tiku.h also defines
+ * TIKU_DEVICE_APOLLO510 for this part. */
 #include <arch/ambiq/devices/tiku_device_apollo510.h>
 #undef  TIKU_DEVICE_NAME
 #define TIKU_DEVICE_NAME "Apollo510 Blue"
 #elif defined(TIKU_DEVICE_APOLLO4P)
-/* Apollo4 Plus (AMAP42KP) reuses the register-compatible Apollo4 Lite silicon
- * header (same Cortex-M4F Apollo4 peripheral map); only the human-facing name
- * and the memory sizes (2 MB MRAM / 2.75 MB SRAM) differ.  Listed first so it
- * wins even if a generic device fallback is also set. */
+/* The Apollo4 Plus (AMAP42KP) is register-compatible with the Apollo4 Lite
+ * and takes its header under its own name; apollo4p.ld maps its larger
+ * shared SRAM. */
 #include <arch/ambiq/devices/tiku_device_apollo4l.h>
 #undef  TIKU_DEVICE_NAME
 #define TIKU_DEVICE_NAME "Apollo4 Plus"
@@ -58,11 +54,10 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Pull in board-level GPIO pin assignments for the selected board.
+ * @brief Pull in board-level pad assignments for the selected board.
  *
- * The Makefile always passes exactly one TIKU_BOARD_* (see BOARD_DEFINE_* /
- * KNOWN_BOARDS there).  The fallback below covers builds that set only the
- * device, and keeps the historical default.
+ * The Makefile passes one TIKU_BOARD_* (BOARD_DEFINE_* there).  A build that
+ * defines none gets the Apollo510 EVB.
  */
 #if defined(TIKU_BOARD_TIKU_BARE)
 #include <arch/ambiq/boards/tiku_board_tiku_bare.h>
@@ -75,7 +70,7 @@
 #elif defined(TIKU_BOARD_APOLLO510_EVB)
 #include <arch/ambiq/boards/tiku_board_apollo510_evb.h>
 #else
-/* Default to the Apollo510 EVB. */
+/* No board selected: the Apollo510 EVB. */
 #define TIKU_BOARD_APOLLO510_EVB 1
 #include <arch/ambiq/boards/tiku_board_apollo510_evb.h>
 #endif

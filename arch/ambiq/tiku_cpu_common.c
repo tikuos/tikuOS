@@ -5,25 +5,24 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_common.c - Apollo510 common CPU helpers (delays, IDs).
+ * tiku_cpu_common.c - Apollo510 CPU helpers: delays, chip ID, reset reason.
  *
- * Delays spin on SysTick rather than DWT, which ticks at twice the core on this
- * part and once broke a DWT-based delay.  SysTick also shares the system tick's
- * clock basis, so a delay and a tick can never disagree.
+ * Delays count the free-running SysTick (CLKSOURCE = processor) and scale by
+ * the core clock that tiku_cpu_ambiq_clock_get_hz() reports.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <stdint.h>
-#include "tiku.h"              /* TIKU_MAIN_CPU_HZ = 96 MHz SysTick clock */
+#include "tiku.h"              /* platform configuration */
 #include "tiku_cpu_common.h"
-#include "tiku_cpu_freq_boot_arch.h"  /* tiku_cpu_ambiq_clock_get_hz (live core clock) */
-#include "apollo510.h"         /* CMSIS register map (MCUCTRL CHIPID) -- register header only */
+#include "tiku_cpu_freq_boot_arch.h"  /* tiku_cpu_ambiq_clock_get_hz */
+#include "apollo510.h"         /* CMSIS register map: MCUCTRL, RSTGEN */
 
 /**
  * @defgroup SYST_REGS SysTick register accessors
- * @brief Cortex-M SysTick (System Control Space) — 24-bit down-counter,
- *        auto-reload. Used as the delay timebase at TIKU_MAIN_CPU_HZ.
+ * @brief Cortex-M SysTick: a 24-bit auto-reload down-counter at the core
+ *        clock, the delay timebase.
  * @{
  */
 /** Reload Value Register (24-bit) */
@@ -37,13 +36,10 @@
 /**
  * @brief Spin-delay for a given number of microseconds
  *
- * Uses the Cortex-M SysTick down-counter, which runs at the full core frequency
- * (CLKSOURCE=processor), scaled by the LIVE core clock so the delay stays
- * correct across an LP/HP perf-mode switch.
+ * Counts SysTick cycles (CLKSOURCE = processor), scaled by the core clock
+ * read at entry, so a delay after an LP/HP perf-mode switch uses the new
+ * rate.  Before SysTick is configured it spins an uncalibrated NOP loop.
  *
- * @note Tracks elapsed SysTick ticks rather than loop iterations, so it is
- *       reliable across sleep and clock changes.  Falls back to a NOP spin
- *       before SysTick is configured.
  * @param us  Delay in microseconds
  */
 void tiku_cpu_ambiq_delay_us(unsigned int us) {
@@ -58,7 +54,7 @@ void tiku_cpu_ambiq_delay_us(unsigned int us) {
     need = (uint64_t)us * per_us;
 
     if (reload <= 1u) {
-        /* SysTick not configured yet (pre clock-init) — rough NOP fallback. */
+        /* SysTick not configured yet (before clock init): rough NOP loop. */
         volatile uint32_t spin = (uint32_t)us * (per_us / 4u + 1u);
         while (spin--) {
             __asm__ volatile ("nop");
@@ -68,7 +64,7 @@ void tiku_cpu_ambiq_delay_us(unsigned int us) {
 
     last = SYST_CVR & SYST_MASK;
     while (need != 0u) {
-        now  = SYST_CVR & SYST_MASK;            /* counts down; wraps to reload-1 */
+        now  = SYST_CVR & SYST_MASK;            /* counts down; wraps to RVR */
         step = (now <= last) ? (last - now) : (last + reload - now);
         if ((uint64_t)step >= need) {
             break;
@@ -81,8 +77,8 @@ void tiku_cpu_ambiq_delay_us(unsigned int us) {
 /**
  * @brief Spin-delay for a given number of milliseconds
  *
- * Calls tiku_cpu_ambiq_delay_us(1000) in a loop. Not suitable for
- * long sleeps — use the kernel timer subsystem instead.
+ * Calls tiku_cpu_ambiq_delay_us(1000) @p ms times, keeping the core busy
+ * throughout.
  *
  * @param ms  Delay in milliseconds
  */
@@ -100,7 +96,7 @@ void tiku_cpu_ambiq_delay_ms(unsigned int ms) {
  * 8 bytes get a prefix; requests longer than 8 cap at 8.
  *
  * @param buf  Destination buffer for the unique ID
- * @param len  Number of bytes to fill (must be > 0; buf must be non-NULL)
+ * @param len  Number of bytes to fill
  * @return Number of bytes written (<= 8), or 0 if buf is NULL or len is 0
  */
 uint8_t tiku_cpu_ambiq_unique_id(uint8_t *buf, uint8_t len) {
@@ -121,20 +117,18 @@ uint8_t tiku_cpu_ambiq_unique_id(uint8_t *buf, uint8_t len) {
 /**
  * @brief Return the encoded reason for the last system reset.
  *
- * Reads the reset generator's status latch (RSTGEN->STAT) and maps it to an
- * MSP430-SYSRSTIV-compatible code, the contract the /sys reset consumers
- * expect.  Multiple causes can latch, so the most specific is reported first.
+ * Maps the reset generator's status latch (RSTGEN->STAT) to the
+ * MSP430-SYSRSTIV-style code the /sys reset nodes decode.  Several causes can
+ * latch at once; the most specific is reported.  STAT is not cleared.
  *
- * @note Read-only -- the STAT latch is left intact, so this never perturbs the
- *       reset generator.
- * @return SYSRSTIV-compatible reset-reason code (0 = clean power-on).
+ * @return SYSRSTIV-style reset-reason code (0 = power-on)
  */
 uint16_t tiku_cpu_ambiq_reset_reason(void) {
     uint32_t s = RSTGEN->STAT;
 
-    /* RSTGEN->STAT bit positions are stable across the Apollo4/5 families,
-     * but the CMSIS name for bit 1 is not (PORSTAT on Apollo4, POASTAT on
-     * Apollo5), so decode by numeric mask rather than by macro name. */
+    /* Bits are decoded by number: their positions match on Apollo4 and
+     * Apollo5, but the CMSIS name of bit 1 differs (PORSTAT on Apollo4,
+     * POASTAT on Apollo5). */
     if (s & (1UL << 6)) {               /* WDRSTAT  watchdog reset        */
         return 0x0016u;                 /*                 -> "watchdog"  */
     }

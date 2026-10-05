@@ -7,53 +7,53 @@
  *
  * tiku_gpu_arch.c - Apollo510 2.5D GPU (Nema-class) driver.
  *
- * From-scratch and register-level over the vendored CMSIS GPU_Type: no
- * AmbiqSuite, no NemaGFX.  A draw emits no fragments without a fragment shader in
- * instruction memory, so init parks a constant-colour instruction for fills.
+ * Register-level, over the CMSIS GPU_Type, with no AmbiqSuite or NemaGFX
+ * code.  A draw emits no fragments without a fragment shader in instruction
+ * memory, so init loads a constant-colour instruction for fills.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "tiku_gpu_arch.h"
-#include "apollo510.h"           /* CMSIS: GPU / PWRCTRL / NVIC (no AmbiqSuite) */
+#include "apollo510.h"           /* CMSIS: GPU / PWRCTRL / NVIC */
 #include <hal/tiku_cpu.h>        /* tiku_cpu_dcache_clean / _invalidate       */
 
-/* Settle delays for the rail/mode change (tiku_cpu_common.c, as the freq boot
- * path declares it -- same pattern, one declaration per user). */
+/* Defined in tiku_cpu_common.c; used for the rail and mode settle delays. */
 extern void tiku_cpu_ambiq_delay_us(unsigned int us);
 
 /*---------------------------------------------------------------------------*/
-/* Constants                                                                 */
+/* CONSTANTS                                                                 */
 /*---------------------------------------------------------------------------*/
 
 /*
- * Bounded spin cap for every busy-wait. Power domains settle in microseconds
- * and a SYSCLEAR is near-instant, so ~1e6 iterations (tens of ms at worst) is
- * enormous headroom -- large enough never to false-trip, small enough that a
- * dead/misaddressed block fails closed instead of wedging the bench runner.
+ * Iteration cap for every busy-wait: tens of milliseconds at most.  A power
+ * domain settles in microseconds and SYSCLEAR completes at once, so a wait
+ * that reaches the cap means a dead or misaddressed block, and the call
+ * returns an error; tiku_gpu_deinit() stops waiting and reports nothing.
  */
 #define GPU_SPIN_MAX   1000000u
 
 /*
  * STATUS busy mask -- OR of every documented per-stage busy field:
  *   SYSBSY(31) MEMBSY(30) CLBSY(29) CLPBSY(28) RASTBSY(27:24)
- *   DEPTHFIFOBSY(19:16) RENDERBSY(15:12) TEXTMAPBSY(11:8) PIPEBSY(7:4) COREBSY(3:0)
- * "Idle" == none of these set. The RASTBSY nibble (27:24) MUST be included --
- * every draw is a raster op, so omitting it lets wait_idle return mid-drain.
+ *   DEPTHFIFOBSY(19:16) RENDERBSY(15:12) TEXTMAPBSY(11:8) PIPEBSY(7:4)
+ *   COREBSY(3:0)
+ * "Idle" == none of these set.  Every draw is a raster operation, and the
+ * RASTBSY nibble (27:24) stays set while the raster drains.
  */
 #define GPU_STATUS_BUSY_MASK  0xFF0FFFFFu
 
 /*---------------------------------------------------------------------------*/
-/* State                                                                     */
+/* STATE                                                                     */
 /*---------------------------------------------------------------------------*/
 
-/** ISR fire counter (volatile: written by tiku_ambiq_gpu_isr, read by tests). */
+/** ISR run count, written by tiku_ambiq_gpu_isr(). */
 static volatile uint32_t s_irq_count;
 
-/** STATUS captured after the last drawing op (bring-up diagnostics). */
+/** STATUS read after the last drawing call. */
 static uint32_t s_last_status;
 
-/** Async command-list completion: flag set by the ISR, id of the finished CL. */
+/** Set by the ISR when a command list completes, with that list's id. */
 static volatile uint32_t s_cl_done;
 static volatile int32_t  s_cl_last_id;
 
@@ -61,32 +61,32 @@ static volatile int32_t  s_cl_last_id;
 static int32_t s_cl_seq;
 
 /*---------------------------------------------------------------------------*/
-/* Register field encodings (from the vendored GPU_Type field defs)          */
+/* REGISTER FIELD ENCODINGS                                                  */
 /*---------------------------------------------------------------------------*/
 
 /* TEXnSTRIDE: IMGSTRD[15:0] | IMGMODE[23:16] | IMGFMT[31:24]. */
 #define GPU_IMGFMT_RGBA8888   1u     /* IMGFMT enum: RGBA8888                 */
 #define GPU_IMGMODE_POINT     0u     /* IMGMODE enum: nearest-neighbour       */
 
-/* DRAWCMD primitive codes. NOT a sequential enum -- a bitfield recovered from
- * the raster disassembly: LINE=bit0, RECT=bit1, TRI=bit2, QUAD=bit0|bit2. */
+/* DRAWCMD primitive codes are bits, not a sequence (from the raster
+ * disassembly): LINE=bit0, RECT=bit1, TRI=bit2, QUAD=bit0|bit2. */
 #define GPU_DRAWCMD_LINE      1u
-#define GPU_DRAWCMD_RECT      2u     /* "fill rectangle from STARTXY to ENDXY" */
-#define GPU_DRAWCMD_TRI       4u     /* triangle from the three 16.16 vertices */
+#define GPU_DRAWCMD_RECT      2u     /* rectangle, STARTXY to ENDXY      */
+#define GPU_DRAWCMD_TRI       4u     /* triangle, three 16.16 vertices   */
 
-/* DRAWCMD flag: interpolate the rasterizer color across the primitive from the
- * RGBA interpolator registers instead of the flat DRAW_COLOR (draw_flags b27). */
+/* DRAWCMD bit 27: colour the primitive from the RGBA interpolator registers
+ * across its area; without it the colour is the flat DRAWCOLOR. */
 #define GPU_DRAWFLAG_GRADIENT 0x08000000u
 
 /* RASTCTRL (a.k.a. the matrix-multiplier control): a solid fill uses no
- * coordinate transform, so the MatMul is bypassed. Bit names from the vendored
+ * coordinate transform, so the MatMul is bypassed. Bit names from the vendor's
  * ThinkSi programming layer (nema_programHW.h, MIT grant):
  * MMUL_BYPASS = bit28, MMUL_NONPERSP = bit31. */
 #define GPU_RASTCTRL_MMUL_BYPASS   ((1u << 28) | (1u << 31))
 
 /*
  * Registers that sit in RESERVED gaps of the CMSIS GPU_Type but are named in
- * the vendored (MIT-granted) ThinkSi nema_regs.h. Written by raw offset.
+ * the vendor's (MIT-granted) ThinkSi nema_regs.h. Written by raw offset.
  */
 #define GPU_REG_ROPBLEND_MODE  0x1D0u  /* NEMA_ROPBLENDER_BLEND_MODE          */
 #define GPU_REG_ROPBLEND_CONST 0x1D8u  /* NEMA_ROPBLENDER_CONST_COLOR         */
@@ -98,14 +98,12 @@ static int32_t s_cl_seq;
  * The fragment "pico-shader" for constant-color output, and where it lives.
  *
  * The Nema pipeline emits no fragments unless DRAWCODEPTR points at a shader
- * in instruction memory -- even a solid fill. The stock programming layer
- * parks one 64-bit "output the draw color" instruction at IMEM slot 31 during
- * init and leaves slots 24..30 zeroed; every ROP-blended draw then points
- * DRAWCODEPTR at slot 31 for both foreground and background. These are the
- * 8 bytes of microcode data (plus the derived pointer word) that init loads;
- * they ship as plain init-time constants in the ThinkSi port layer, recovered
- * from the vendored port under temp/.../ThinkSi (see temp/gpuplan.md), not
- * linked from any library.
+ * in instruction memory -- even a solid fill.  Init loads one 64-bit "output
+ * the draw color" instruction at IMEM slot 31 and zeroes slots 24..30, as the
+ * stock programming layer does; every draw but the LUT pass points DRAWCODEPTR
+ * at slot 31 for both foreground and background.  The 8 bytes of microcode (and
+ * the pointer word) are the ThinkSi port layer's init-time constants; no
+ * library is linked.
  */
 #define GPU_SHADER_SLOT_FIRST  24u          /* zeroed slots 24..30            */
 #define GPU_SHADER_SLOT_FILL   31u          /* constant-color instruction     */
@@ -117,12 +115,11 @@ static int32_t s_cl_seq;
  * programming layer's no-texture path). */
 #define GPU_CODEPTR_FILL       0x141F001Fu
 
-/* DRAWCODEPTR for a textured blit: identical background (slot 31), but the
- * foreground field carries the texture-emit bit (0x8000) -- the SAME slot-31
- * shader then samples TEX1 and outputs the texel instead of DRAW_COLOR. So a
- * blit needs NO per-draw shader upload; it reuses the init-time IMEM. Recovered
- * from the ThinkSi blend path and confirmed by a live-silicon register capture
- * of the vendor demo (DRAWCODEPTR read back as 0x141F801F during a blit). */
+/* DRAWCODEPTR for a textured blit: background slot 31 as for a fill, and the
+ * foreground field with the texture-emit bit (0x8000), so the slot-31 shader
+ * samples TEX1 and outputs the texel.  A blit therefore loads no shader.  The
+ * value is the ThinkSi blend path's, and the vendor demo's DRAWCODEPTR reads
+ * 0x141F801F during a blit. */
 #define GPU_CODEPTR_BLIT       0x141F801Fu
 
 /* MatMul (RASTCTRL 0x118): apply the loaded 3x3 (non-bypass). A blit derives
@@ -131,24 +128,23 @@ static int32_t s_cl_seq;
 #define GPU_RASTCTRL_MMUL_APPLY   0u
 
 /*
- * P3 compute shader entry points (DRAWCODEPTR), recovered from the vendored
- * ThinkSi blob (disassembly of nema_set_blend's LUT composer and the
- * nema_shaderSpecific effect corpus -- see temp/gpu-roadmap.md). Each names a
- * fragment program loaded to IMEM at draw time.
+ * Compute shader entry point (DRAWCODEPTR), from the disassembly of the
+ * ThinkSi library's LUT composer (nema_set_blend).  Its fragment program is
+ * loaded to IMEM at draw time.
  */
-#define GPU_CODEPTR_LUT        0x141D8000u  /* 3-instr palette lookup, slot 0  */
+#define GPU_CODEPTR_LUT        0x141D8000u  /* palette lookup, slot 0 */
 
 /*---------------------------------------------------------------------------*/
-/* Interrupt handler                                                         */
+/* INTERRUPT HANDLER                                                         */
 /*---------------------------------------------------------------------------*/
 
 /*
- * Strong override of the weak crt_early alias. Handles the real GPU completion
+ * Strong override of the weak crt_early alias.  Handles the completion
  * interrupt raised by a command list's tail (INTERRUPTCTRL=1 after the HOLD'd
  * draw retires): record which CL finished (CLID, 0x148), acknowledge by
  * writing INTERRUPTCTRL=0, clear the NVIC pending bit, and signal the waiter.
- * Also serves the P0 CPU-side NVIC self-test (which asserts no GPU line -- the
- * CLID read and the ack write are harmless there).
+ * Also runs for tiku_gpu_irq_selftest_pend(), which asserts no GPU line; the
+ * CLID read and the ack write are harmless then.
  */
 void
 tiku_ambiq_gpu_isr(void)
@@ -162,7 +158,7 @@ tiku_ambiq_gpu_isr(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* Power / clock / reset                                                     */
+/* POWER, CLOCK AND RESET                                                    */
 /*---------------------------------------------------------------------------*/
 
 int
@@ -174,40 +170,34 @@ tiku_gpu_powered(void)
 void
 tiku_gpu_reset(void)
 {
-    /* Documented: "On write, resets the GPU." Value is don't-care. */
+    /* Any write resets the GPU; the value is ignored. */
     GPU->SYSCLEAR = 1u;
     __DSB();
     __ISB();
 }
 
-/** Write a GPU register that has no CMSIS GPU_Type member (RESERVED gap). */
+/** @brief Write a GPU register that has no CMSIS GPU_Type member. */
 static inline void
 gpu_reg_write(uint32_t offset, uint32_t value)
 {
     *(volatile uint32_t *)(GPU_BASE + offset) = value;
 }
 
-/** Load one 64-bit pico-instruction into shader instruction memory. */
+/** @brief Load one 64-bit pico-instruction into shader instruction memory. */
 static void
 gpu_imem_load(uint32_t slot, uint32_t lo, uint32_t hi)
 {
     GPU->IMEMLDIADDR   = slot;
     GPU->IMEMLDIDATAHL = lo;      /* bits 31:0                                */
-    GPU->IMEMLDIDATAHH = hi;      /* bits 63:32 -- this write commits the load */
+    GPU->IMEMLDIDATAHH = hi;      /* bits 63:32; commits the load             */
 }
 
-/*
- * Post-reset processor init -- the de-SDK'd equivalent of the stock library's
- * init sequence (init_nema_regs + blender init), reduced to what this silicon
- * config (LOADCTRL/CONFIG = 0xF4030105: ROP blender present, no depth buffer)
- * actually takes:
- *   - reset the command-list processor and status,
- *   - RAST_BYPASS = 1 (rasterizer programmed via the direct DRAW* registers),
- *   - no interrupts for now (P1 is synchronous spin-wait),
- *   - park the constant-color shader at IMEM slot 31 (slots 24..30 zeroed),
- *   - ROP blend mode = SRC, shader constants C0 = 0 / C1 = ~0.
- * Without the slot-31 shader + DRAWCODEPTR the pipeline rasterizes but emits
- * ZERO fragments -- this is the exact gap that made P1 fills silently no-op.
+/**
+ * @brief Bring the drawing pipeline to its post-init state after a reset.
+ *
+ * Follows the stock library's init_nema_regs and blender init, cut to this
+ * silicon's configuration (CONFIG 0xF4030105: ROP blender, no depth buffer).
+ * RAST_BYPASS = 1 drives the rasterizer through the direct DRAW* registers.
  */
 static void
 gpu_processor_init(void)
@@ -215,12 +205,13 @@ gpu_processor_init(void)
     uint32_t slot;
 
     GPU->CMDLISTSTATUS = 0u;               /* reset the CL processor          */
-    GPU->SYSCLEAR      = 0u;               /* status clear (stock init writes 0) */
+    GPU->SYSCLEAR      = 0u;               /* status clear, as stock init */
     (void)tiku_gpu_wait_idle();
 
     gpu_reg_write(GPU_REG_RAST_BYPASS, 1u);
     GPU->INTERRUPTCTRL = 0u;
 
+    /* Fill shader at IMEM slot 31, slots 24..30 zeroed. */
     for (slot = GPU_SHADER_SLOT_FIRST; slot < GPU_SHADER_SLOT_FILL; slot++) {
         gpu_imem_load(slot, 0u, 0u);
     }
@@ -249,7 +240,7 @@ int
 tiku_gpu_perf_needs_vddf(tiku_gpu_perf_t perf)
 {
     /* HP3 only.  The SDK compares against HIGH_PERFORMANCE, which aliases
-     * HFRC2_HP3 -- HP1 and HP2 stay on VDDC despite the name. */
+     * HFRC2_HP3; HP1 and HP2 stay on VDDC. */
     return (perf == TIKU_GPU_PERF_HP3_250MHZ) ? 1 : 0;
 }
 
@@ -281,25 +272,21 @@ tiku_gpu_init(tiku_gpu_perf_t perf)
     uint32_t spins = 0u;
     uint32_t pm;
 
-    /* HP3 rides VDDF, which only exists as a regulated rail when the SIMO buck
-     * is running.  The SDK refuses the mode outright otherwise, and so does this,
-     * rather than select a rail nothing is driving. */
+    /* HP3 runs on VDDF, which is regulated only while the SIMO buck runs;
+     * without the buck the mode is refused, as the SDK refuses it. */
     if (tiku_gpu_perf_needs_vddf(perf) &&
         PWRCTRL->VRSTATUS_b.SIMOBUCKST != PWRCTRL_VRSTATUS_SIMOBUCKST_ACT) {
         return TIKU_GPU_ERR_POWER;
     }
 
-    /* 1. Mode + rail FIRST, with the domain DOWN.  Datasheet 4.3.2: GFX mode
-     *    changes are only legal while the device is powered off, and an HP
-     *    transition sets GFXVDDSEL before GFXPERFREQ.  If a previous init left
-     *    the domain up, drop it -- reprogramming underneath a live GPU is the
-     *    case the datasheet forbids.
+    /* 1. Mode and rail first, with the domain off.  Datasheet 4.3.2: the GFX
+     *    mode may change only while the domain is off, and an HP transition
+     *    sets GFXVDDSEL before GFXPERFREQ.  A domain an earlier init left up
+     *    is powered down first.
      *
-     *    NOT DONE, and deliberately recorded: the SDK also updates the SPOT
-     *    buck Ton state here (its states 2..5 cover GPU-mode x CPU-mode, from
-     *    their own INFO1 trim words).  This port implements only the CPU-only
-     *    Ton states, so with the GPU powered the buck runs on CPU-shaped
-     *    on-times.  Effect size unmeasured -- experiment 2's H8. */
+     *    No SPOT buck Ton state is set for the GPU: this port has only the
+     *    CPU-only Ton states, so with the GPU powered the buck runs on
+     *    CPU-only on-times (the SDK's states 2..5 cover the GPU modes). */
     if (PWRCTRL->DEVPWRSTATUS_b.PWRSTGFX != 0u) {
         tiku_gpu_deinit();
     }
@@ -319,8 +306,7 @@ tiku_gpu_init(tiku_gpu_perf_t perf)
 
     __set_PRIMASK(pm);
 
-    /* 2. Now power the GFX domain (mirror of the UART-domain enable pattern:
-     *    DEVPWREN bit, then busy-wait for DEVPWRSTATUS). */
+    /* 2. Power the GFX domain: set DEVPWREN, then wait for DEVPWRSTATUS. */
     PWRCTRL->DEVPWREN_b.PWRENGFX = 1u;
     while (PWRCTRL->DEVPWRSTATUS_b.PWRSTGFX == 0u) {
         if (++spins > GPU_SPIN_MAX) {
@@ -331,14 +317,13 @@ tiku_gpu_init(tiku_gpu_perf_t perf)
     /* 3. Reset the core, then wait for idle. */
     tiku_gpu_reset();
     if (tiku_gpu_wait_idle() != TIKU_GPU_OK) {
-        /* STATUS never cleared -- likely a bad STATUS/SYSCLEAR offset
-         * ("CHECK address!") or a dead core. Leave powered so the caller can
-         * read forensics, and report the failure. */
+        /* STATUS did not clear: a dead core or a wrong register offset.
+         * The domain stays powered so the caller can read the registers. */
         return TIKU_GPU_ERR_TIMEOUT;
     }
 
-    /* 4. Sanity: the ID register must read a fixed nonzero value once the core
-     *    is alive and clocked. Zero / all-ones smells like power or offset. */
+    /* 4. IDREG reads a fixed nonzero value on a live, clocked core; 0 or
+     *    all ones means no power or a wrong offset. */
     {
         uint32_t id = GPU->IDREG;
         if (id == 0u || id == 0xFFFFFFFFu) {
@@ -350,8 +335,8 @@ tiku_gpu_init(tiku_gpu_perf_t perf)
      *    reset, RAST_BYPASS, fill shader parked at IMEM slot 31, ROP=SRC). */
     gpu_processor_init();
 
-    /* 6. Enable the GPU NVIC line (edge cleared on entry; real ack protocol is
-     *    established with the first hardware completion in a later phase). */
+    /* 6. Clear any pending GPU IRQ and enable the NVIC line; the ISR
+     *    acknowledges each completion through INTERRUPTCTRL. */
     s_irq_count = 0u;
     NVIC_ClearPendingIRQ(GPU_IRQn);
     NVIC_EnableIRQ(GPU_IRQn);
@@ -378,7 +363,7 @@ tiku_gpu_deinit(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* Introspection                                                             */
+/* INTROSPECTION                                                             */
 /*---------------------------------------------------------------------------*/
 
 uint32_t
@@ -408,7 +393,7 @@ tiku_gpu_bringup_info(tiku_gpu_bringup_t *out)
 }
 
 /*---------------------------------------------------------------------------*/
-/* IRQ plumbing self-test                                                    */
+/* IRQ SELF-TEST                                                             */
 /*---------------------------------------------------------------------------*/
 
 uint32_t
@@ -418,7 +403,7 @@ tiku_gpu_irq_count(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* P1: drawing                                                               */
+/* DRAWING                                                                   */
 /*---------------------------------------------------------------------------*/
 
 uint32_t
@@ -435,11 +420,9 @@ tiku_gpu_fill(void *dst, uint16_t w, uint16_t h,
     uint32_t  span = (uint32_t)stride_bytes * (uint32_t)h;
     tiku_gpu_err_t err;
 
-    /* Destination cache hygiene BEFORE the kick: clean writes back any dirty
-     * lines (so nothing the CPU touched -- canary init, a prior fill -- can be
-     * evicted onto the GPU's output mid-render), then invalidate drops the
-     * lines so the GPU starts from a clean slate. The GPU is a non-coherent
-     * bus master; this is mandatory, not cosmetic. */
+    /* Before the draw: clean writes back any dirty line, so nothing the CPU
+     * wrote can be evicted over the GPU's output mid-render, then invalidate
+     * drops the lines.  The GPU is a non-coherent bus master. */
     tiku_cpu_dcache_clean(dst, span);
     tiku_cpu_dcache_invalidate(dst, span);
 
@@ -450,17 +433,16 @@ tiku_gpu_fill(void *dst, uint16_t w, uint16_t h,
                       ((uint32_t)stride_bytes & 0xFFFFu);
     GPU->TEX0RES    = (uint32_t)w | ((uint32_t)h << 16);
 
-    /* Generous clip rect so a 64x64 draw cannot be clipped out regardless of
-     * how CLIP packs its coordinates. No matrix transform for a solid fill. */
+    /* A 4095 x 4095 clip rectangle does not clip the fill however CLIPMAX
+     * packs its coordinates.  A solid fill bypasses the matrix. */
     GPU->CLIPMIN  = 0u;
     GPU->CLIPMAX  = 0x0FFF0FFFu;
     GPU->RASTCTRL = GPU_RASTCTRL_MMUL_BYPASS;
 
     /* The fragment pipeline: both shader pointers at the constant-color
      * instruction (slot 31, loaded at init), ROP blender in SRC mode, and the
-     * fill color in DRAWCOLOR -- exactly what the stock fill path programs.
-     * Without DRAWCODEPTR the raster runs and writes nothing (proven on
-     * silicon twice before this was understood). */
+     * fill color in DRAWCOLOR, as the stock fill path programs them.  Without
+     * DRAWCODEPTR the raster runs and writes nothing. */
     GPU->DRAWCODEPTR = GPU_CODEPTR_FILL;
     gpu_reg_write(GPU_REG_ROPBLEND_MODE, GPU_ROPBLEND_SRC);
     GPU->DRAWCOLOR   = color;
@@ -468,31 +450,30 @@ tiku_gpu_fill(void *dst, uint16_t w, uint16_t h,
     /* Rectangle corners, packed-integer form (x | y<<16): STARTXY inclusive
      * origin, ENDXY exclusive corner -- the only two coordinate registers the
      * stock RECT path writes. */
-    GPU->DRAWPT0  = 0u;                                     /* (0,0)           */
-    GPU->DRAWPT1  = (uint32_t)w | ((uint32_t)h << 16);      /* (w,h)           */
+    GPU->DRAWPT0  = 0u;                                     /* (0,0)        */
+    GPU->DRAWPT1  = (uint32_t)w | ((uint32_t)h << 16);      /* (w,h)        */
     __DSB();
-    GPU->DRAWCMD   = GPU_DRAWCMD_RECT;                      /* START = RECT    */
+    GPU->DRAWCMD   = GPU_DRAWCMD_RECT;                      /* START = RECT */
 
     err = tiku_gpu_wait_idle();
     s_last_status = GPU->STATUS;
 
     /* The GPU wrote memory behind the cache -- drop stale copies so the CPU
-     * (and the CRC check) read the fresh pixels. */
+     * reads the fresh pixels. */
     tiku_cpu_dcache_invalidate(dst, span);
 
     return err;
 }
 
 /*---------------------------------------------------------------------------*/
-/* P2: blit + blend                                                          */
+/* BLIT AND BLEND                                                            */
 /*---------------------------------------------------------------------------*/
 
-/*
- * IEEE-754 bit pattern of a float. The MatMul registers accept this word and
- * the hardware converts to its internal 24-bit matrix format on write --
- * verified on silicon: writing 0x3F800000 (1.0f) to MM00 reads back
- * 0x000F8000; writing -38.0f reads back exactly the value the vendor demo's
- * matrix held. So the driver writes plain IEEE-754 and lets the GPU convert.
+/**
+ * @brief IEEE-754 bit pattern of @p f.
+ *
+ * The MatMul registers take IEEE-754 words and convert them to their internal
+ * 24-bit format on write: 1.0f (0x3F800000) in MM00 reads back as 0x000F8000.
  */
 static inline uint32_t
 gpu_f2u(float f)
@@ -502,13 +483,11 @@ gpu_f2u(float f)
     return x.u;
 }
 
-/*
- * Load the full 3x3 screen->texture matrix and leave the MatMul active.
- * NemaGFX writes only the coefficients it changes and relies on an identity
- * default that init never programs (both extraction passes flagged this), so
- * all nine are always written -- correctness cannot depend on reset values.
- * Off-diagonals are zero; only MM00/MM02/MM11/MM12 vary between translate and
- * scale.
+/**
+ * @brief Load the full 3x3 screen->texture matrix and leave the MatMul active.
+ *
+ * All nine coefficients are written: init programs no identity default.
+ * Off-diagonals are zero; only MM00/MM02/MM11/MM12 vary.
  */
 static void
 gpu_load_matrix(float m00, float m02, float m11, float m12)
@@ -519,11 +498,11 @@ gpu_load_matrix(float m00, float m02, float m11, float m12)
     GPU->RASTCTRL = GPU_RASTCTRL_MMUL_APPLY;   /* apply the 3x3 (non-bypass) */
 }
 
-/*
- * Common blit path. The destination rectangle is (dx,dy)..(dx+dw,dy+dh); the
- * matrix maps each destination pixel back to a source texel. For a 1:1 blit
- * dw/dh equal the source size and the matrix is a pure translate; for a scaled
- * blit dw/dh differ and the matrix carries the scale factors.
+/**
+ * @brief Common blit path: draw (dx,dy)..(dx+dw,dy+dh) of @p dst from @p src.
+ *
+ * The matrix maps each destination pixel back to a source texel: a pure
+ * translate for a 1:1 blit, with scale factors when dw/dh differ.
  */
 static tiku_gpu_err_t
 gpu_blit_core(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src,
@@ -559,7 +538,7 @@ gpu_blit_core(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src,
     /* screen->texture transform (also clears the MatMul bypass). */
     gpu_load_matrix(m00, m02, m11, m12);
 
-    /* Scissor to the destination surface: a stray coordinate cannot scribble
+    /* Scissor to the destination surface: a stray coordinate cannot write
      * beyond it (the draw rect bounds the write; this bounds the surface). */
     GPU->CLIPMIN = 0u;
     GPU->CLIPMAX = ((uint32_t)dst->h << 16) | ((uint32_t)dst->w & 0xFFFFu);
@@ -609,17 +588,17 @@ tiku_gpu_blit_rect(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src,
 }
 
 /*---------------------------------------------------------------------------*/
-/* P2.3: raster primitives (triangle, line) + color gradient                 */
+/* RASTER PRIMITIVES AND GRADIENT                                            */
 /*---------------------------------------------------------------------------*/
 
-/** Integer pixel coordinate -> 16.16 fixed point (the vertex registers). */
+/** @brief Integer pixel coordinate -> 16.16 fixed point (vertex registers). */
 static inline uint32_t
 gpu_i2fx16(int32_t v)
 {
     return (uint32_t)(v << 16);
 }
 
-/** Per-channel gradient slope (b-a)/n in signed 16.16 (channel scale 0..255). */
+/** @brief Gradient slope (b-a)/n in signed 16.16; 0 when n <= 0. */
 static inline int32_t
 gpu_grad_slope(int32_t a, int32_t b, int32_t n)
 {
@@ -627,12 +606,12 @@ gpu_grad_slope(int32_t a, int32_t b, int32_t n)
     return ((b - a) << 16) / n;
 }
 
-/*
- * Common flat-draw setup: bind dst as TEX0, clip to it, and select the
- * constant-color shader with the MatMul bypassed (the fill path -- the
- * primitives all reuse it; the rasterizer, not a texture, produces the color).
- * The caller sets color/coordinates/interpolators, writes DRAWCMD last, and
- * owns the cache discipline and idle wait.
+/**
+ * @brief Flat-draw setup: bind dst as TEX0, clip to it, select the
+ *        constant-color shader with the MatMul bypassed.
+ *
+ * The caller sets color, coordinates and interpolators, writes DRAWCMD last,
+ * and does the cache maintenance and the idle wait.
  */
 static void
 gpu_dst_setup(const tiku_gpu_surface_t *dst)
@@ -683,7 +662,7 @@ tiku_gpu_fill_rect(const tiku_gpu_surface_t *dst, int16_t x, int16_t y,
     tiku_cpu_dcache_clean(dst->base, span);
     tiku_cpu_dcache_invalidate(dst->base, span);
 
-    gpu_dst_setup(dst);   /* clips to the surface, so an oversized rect is safe */
+    gpu_dst_setup(dst);   /* clips an oversized rect to the surface */
     GPU->DRAWCOLOR = color;
     GPU->DRAWPT0 = ((uint32_t)(uint16_t)y << 16) | ((uint32_t)(uint16_t)x & 0xFFFFu);
     GPU->DRAWPT1 = ((uint32_t)(uint16_t)(y + (int16_t)h) << 16) |
@@ -760,9 +739,8 @@ tiku_gpu_fill_gradient(const tiku_gpu_surface_t *dst,
     tiku_cpu_dcache_invalidate(dst->base, span);
 
     gpu_dst_setup(dst);
-    /* Flat-color fallback so a mis-set gradient shows as solid color_a (which
-     * the test detects) rather than garbage; ignored when the gradient bit
-     * makes the rasterizer use the interpolated color. */
+    /* DRAWCOLOR holds color_a.  With the gradient bit set the rasterizer
+     * uses the interpolated color instead. */
     GPU->DRAWCOLOR = color_a;
 
     GPU->REDX = (uint32_t)dxr;  GPU->REDY = (uint32_t)dyr;
@@ -788,8 +766,7 @@ tiku_gpu_fill_gradient(const tiku_gpu_surface_t *dst,
     return err;
 }
 
-/* Integer floor(sqrt(v)) -- corner-span half-widths without a libm dependency
- * in this low-level driver. */
+/** @brief Integer floor(sqrt(@p v)), for the corner-span half-widths. */
 static uint32_t
 gpu_isqrt(uint32_t v)
 {
@@ -803,8 +780,11 @@ gpu_isqrt(uint32_t v)
     return r;
 }
 
-/* Emit one axis-aligned RECT draw (integer coords). The surface, shader,
- * color and clip must already be programmed; waits for the raster to drain. */
+/**
+ * @brief Emit one axis-aligned RECT draw (integer coords) and wait for idle.
+ *
+ * The surface, shader, color and clip must already be programmed.
+ */
 static tiku_gpu_err_t
 gpu_emit_rect(int32_t x, int32_t y, int32_t w, int32_t h)
 {
@@ -816,13 +796,12 @@ gpu_emit_rect(int32_t x, int32_t y, int32_t w, int32_t h)
     return tiku_gpu_wait_idle();
 }
 
-/*
- * Filled rounded rectangle -- and, via corner radius = w/2 = h/2, a filled
- * circle (the recovered vendor identity: a circle IS a rounded rect). Exact
- * per-pixel: a full-width center band plus, for each row of the top/bottom
- * corner bands, one horizontal span whose half-width is the circle equation
- * (no trig, no AA). Surface bind + cache happen once; each span is a direct
- * RECT draw, clipped to the surface so shapes near an edge are safe.
+/**
+ * @brief Fill a rounded rectangle; with radius w/2 = h/2 it is a circle.
+ *
+ * A full-width center band, then for each row of the corner bands one span
+ * whose half-width comes from the circle equation (no anti-aliasing).  Each
+ * span is a RECT draw clipped to the surface.
  */
 static tiku_gpu_err_t
 gpu_rounded_rect(const tiku_gpu_surface_t *dst, int32_t x0, int32_t y0,
@@ -883,7 +862,7 @@ tiku_gpu_fill_circle(const tiku_gpu_surface_t *dst, int16_t cx, int16_t cy,
 }
 
 /*---------------------------------------------------------------------------*/
-/* P2.4: async command-list submission                                       */
+/* ASYNC COMMAND LISTS                                                       */
 /*---------------------------------------------------------------------------*/
 
 /* Register offsets used when composing a command list as (offset,value)
@@ -904,13 +883,12 @@ tiku_gpu_fill_circle(const tiku_gpu_surface_t *dst, int16_t cx, int16_t cy,
 #define GPU_OFF_INTCTRL     0x0F8u
 
 /* HOLD flag OR'd into a command-list register offset: the CL processor blocks
- * until that (drawing) write retires before advancing. Mandatory on DRAWCMD so
- * the completion tail runs only after the draw is truly done. */
+ * until that (drawing) write retires before advancing.  Set on DRAWCMD so the
+ * completion tail runs only after the draw has finished. */
 #define GPU_CL_HOLD         0xFF000000u
 
-/* Wait bound: consecutive observations of an idle GPU without a completion
- * signal before tiku_gpu_wait gives up (missed-IRQ safety, never hit in
- * normal operation -- the completion IRQ sets the flag on the first wake). */
+/* Idle wakes with no completion signal that tiku_gpu_wait tolerates; the
+ * next one ends the wait, which covers a missed IRQ.  Counted per wait. */
 #define GPU_CL_IDLE_GIVEUP  8u
 
 void
@@ -932,7 +910,7 @@ tiku_gpu_cl_reset(tiku_gpu_cl_t *cl)
     cl->flush_span = 0u;
 }
 
-/** Append one (register, value) pair; silently drops if the buffer is full. */
+/** @brief Append one (register, value) pair; dropped if the buffer is full. */
 static void
 cl_add(tiku_gpu_cl_t *cl, uint32_t reg, uint32_t val)
 {
@@ -947,8 +925,8 @@ tiku_gpu_cl_fill(tiku_gpu_cl_t *cl, const tiku_gpu_surface_t *dst, uint32_t colo
 {
     uint32_t res = (uint32_t)dst->w | ((uint32_t)dst->h << 16);
 
-    /* Same register program as the synchronous tiku_gpu_fill, emitted as CL
-     * pairs; DRAWCMD carries HOLD so the completion tail waits for the draw. */
+    /* The fill's register program as CL pairs, with the surface's own format
+     * and clip; DRAWCMD carries HOLD so the completion tail waits for it. */
     cl_add(cl, GPU_OFF_TEX0BASE,   (uint32_t)(uintptr_t)dst->base);
     cl_add(cl, GPU_OFF_TEX0STRIDE, ((uint32_t)dst->format << 24) |
                                    ((uint32_t)dst->stride & 0xFFFFu));
@@ -971,7 +949,7 @@ tiku_gpu_cl_fill(tiku_gpu_cl_t *cl, const tiku_gpu_surface_t *dst, uint32_t colo
 tiku_gpu_err_t
 tiku_gpu_submit(tiku_gpu_cl_t *cl)
 {
-    /* Destination hygiene (as the synchronous path does). */
+    /* Destination cache maintenance, as the synchronous path does it. */
     if (cl->flush_span != 0u) {
         tiku_cpu_dcache_clean(cl->flush_base, cl->flush_span);
         tiku_cpu_dcache_invalidate(cl->flush_base, cl->flush_span);
@@ -999,9 +977,9 @@ tiku_gpu_wait(tiku_gpu_cl_t *cl)
 {
     uint32_t idle_seen = 0u;
 
-    /* Sleep until the completion IRQ sets the flag. __WFI wakes on the GPU
-     * IRQ (normal case, first wake) or the always-on STIMER tick. The idle
-     * fallback keeps a missed IRQ from wedging the system. */
+    /* Sleep until the completion IRQ sets the flag.  __WFI wakes on the GPU
+     * IRQ or the always-on STIMER tick; the idle count bounds the wait if the
+     * IRQ is missed. */
     while (s_cl_done == 0u) {
         __WFI();
         if ((GPU->STATUS & GPU_STATUS_BUSY_MASK) == 0u) {
@@ -1025,13 +1003,13 @@ tiku_gpu_last_cl_id(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* P3: compute -- the GPU as a 2D data / gather engine                       */
+/* COMPUTE                                                                   */
 /*---------------------------------------------------------------------------*/
 
 tiku_gpu_err_t
 tiku_gpu_convert(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src)
 {
-    /* A format-converting copy is just a 1:1 blit: the source is read in its
+    /* A format-converting copy is a 1:1 blit: the source is read in its
      * format, the destination written in its own -- the texture unit and the
      * output stage do the conversion in hardware. */
     return tiku_gpu_blit(dst, src, 0, 0, TIKU_GPU_BLEND_SRC);
@@ -1040,9 +1018,9 @@ tiku_gpu_convert(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src)
 tiku_gpu_err_t
 tiku_gpu_resample(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src)
 {
-    /* Bilinear scale src -> dst (up- or down-sample). The texture unit is a
-     * 2D gather engine with free bilinear interpolation: one pass resamples a
-     * grid to any size. Downscaling is a cheap box-ish reduction. */
+    /* Bilinear scale src -> dst (up- or down-sample) in one pass.  A
+     * downsample puts a scale factor above 1 in the matrix; see the note on
+     * scale factors below. */
     tiku_gpu_surface_t s = *src;
     s.sampling = TIKU_GPU_SAMPLE_BILINEAR;
     return tiku_gpu_blit_rect(dst, &s, 0, 0, dst->w, dst->h, TIKU_GPU_BLEND_SRC);
@@ -1082,24 +1060,19 @@ tiku_gpu_scale_const(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *sr
 }
 
 /*
- * NOTE on scalar reduction (mean-to-1x1): a downsample chain is the natural
- * implementation, but hardware probing shows MatMul SCALE FACTORS > 1 are
- * unreliable -- the IEEE->internal conversion drops precision (2.0f converts
- * to 0x00100000 where 1.0f is 0x000F8000, losing the mantissa), and ramp
- * tests show inconsistent source coordinates for SX in {2,4}. Upsample
- * (SX < 1) is proven correct. A trustworthy mean needs either the conversion
- * quirk characterized on the bench or an ADD-based pyramid; deferred rather
- * than shipped wrong.
+ * Scale factors: a MatMul scale factor above 1 (a downsample) is unreliable.
+ * The IEEE->internal conversion drops precision (2.0f converts to 0x00100000
+ * where 1.0f is 0x000F8000), and SX of 2 or 4 samples inconsistent source
+ * coordinates.  Factors below 1 (upsampling) sample correctly.
+ * tiku_gpu_reduce_mean() therefore folds with 1:1 translate blits.
  */
 
-/* Shadow palette: the hardware palette lookup NIBBLE-SWAPS the index -- it
+/* Shadow palette: the hardware palette lookup swaps the index's nibbles -- it
  * addresses the 256 entries as a 16x16 grid with x = high nibble, y = low
- * nibble, so entry = ((v & 0xF) << 4) | (v >> 4). Measured on silicon (probe
- * flashes 1-3, 2026-07-24): dense-ramp discrimination, all four RGBA lanes
- * pass through untouched. The swap is an involution, so pre-applying it to
- * the shadow POSITIONS inverts it losslessly: shadow[i] = palette[swap(i)]
- * makes dst = palette[swap(swap(v))] = palette[v] exact for all 256 values.
- * SSRAM: the GPU reads it. */
+ * nibble, so entry = ((v & 0xF) << 4) | (v >> 4); all four RGBA lanes pass
+ * through unchanged.  The swap is its own inverse, so shadow[i] =
+ * palette[swap(i)] gives dst = palette[swap(swap(v))] = palette[v] for all
+ * 256 values.  In SSRAM: the GPU reads it. */
 static uint32_t s_lut_shadow[256] __attribute__((section(".ssram"), aligned(32)));
 
 tiku_gpu_err_t
@@ -1135,19 +1108,17 @@ tiku_gpu_lut_apply(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *inde
     GPU->TEX2RES    = 256u | (1u << 16);
 
     /* 3-instruction palette-lookup shader at IMEM slots 0..2 (sample index,
-     * fetch palette[index], emit). Words J-Link-verified identical to the
-     * vendor's CL capture (2026-07-23). */
+     * fetch palette[index], emit); the words are those of the vendor
+     * library's command list. */
     gpu_imem_load(0u, 0x080C108Bu, 0x00002000u);
     gpu_imem_load(1u, 0x0000110Bu, 0x00000000u);
     gpu_imem_load(2u, 0x080C0002u, 0x8A0761C7u);
 
-    /* Coordinate law (probe flashes 1-2, 2026-07-24): the LUT shader's TEX1
-     * sample coordinate is 12.4 fixed point -- the matrix output is divided
-     * by 16 -- so MM00=16.0 yields texel = x exactly. Y needs no scaling
-     * (MM11=1.0 samples row y 1:1; verified with a row-discriminating
-     * pattern). No width clamp in steady state: exact through column 511 on
-     * a 512-wide surface. Matrix ACTIVE, never bypassed; MM02/MM12 stay 0 --
-     * a translate leaks into the PALETTE coordinate (raw/4), not the texel. */
+    /* The LUT shader's TEX1 sample coordinate is 12.4 fixed point -- the
+     * matrix output is divided by 16 -- so MM00=16.0 yields texel = x
+     * exactly, and MM11=1.0 samples row y 1:1.  The matrix stays active with
+     * MM02/MM12 at 0: a translate moves the palette coordinate (raw/4), not
+     * the texel. */
     gpu_load_matrix(16.0f, 0.0f, 1.0f, 0.0f);
     gpu_reg_write(GPU_REG_ROPBLEND_MODE, GPU_ROPBLEND_SRC);
     GPU->DRAWCODEPTR = GPU_CODEPTR_LUT;
@@ -1155,14 +1126,12 @@ tiku_gpu_lut_apply(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *inde
     GPU->CLIPMIN = 0u;
     GPU->CLIPMAX = ((uint32_t)dst->h << 16) | ((uint32_t)dst->w & 0xFFFFu);
 
-    /* Priming: the FIRST LUT-mode draw after a GPU init missamples -- the
-     * shader-coordinate 12.4 mode latches one PROGRAM+DRAW cycle late, so
-     * draw 1 sees texel = 16x+8 (the raw matrix output, undivided). Measured
-     * deterministically per init (probe flashes 1-3; a zero-area draw does
-     * NOT settle it -- no fragment reaches the latch point). So: run the
-     * full-rect draw, RE-program the mode-carrying state (IMEM, matrix,
-     * DRAWCODEPTR), and draw again -- draw 2 fully overwrites draw 1's
-     * missampled pixels with the exact result. */
+    /* Priming: the first LUT-mode draw after a GPU init missamples -- the
+     * 12.4 coordinate mode latches one program-and-draw cycle late, so that
+     * draw samples texel 16x+8 (the raw matrix output), and it latches only
+     * when a fragment reaches the latch point.  So every call draws the full
+     * rectangle, programs the IMEM, matrix and DRAWCODEPTR again, and draws
+     * again over the first draw's pixels. */
     GPU->DRAWPT0 = 0u;
     GPU->DRAWPT1 = ((uint32_t)dst->h << 16) | ((uint32_t)dst->w & 0xFFFFu);
     __DSB();
@@ -1192,36 +1161,34 @@ tiku_gpu_scale_bias(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src
 {
     tiku_gpu_err_t err;
 
-    /* Exact per-channel affine: dst = scale*src/255 + bias, saturating to
-     * [0,255]. Two fixed-function ROP passes, each independently calibrated to
-     * bit-exactness -- no custom shader, no undecoded C-registers:
+    /* Per-channel affine: dst = scale*src/255 + bias, saturating to [0,255],
+     * in two fixed-function ROP passes:
      *
-     *   1. prime dst with the constant bias (solid fill, replace mode);
-     *   2. dst = CONSTCOLOR*Src + ONE*Dst. The CONSTCOLOR source factor plus
-     *      the const-color register is the calibrated exact scale (identical to
-     *      tiku_gpu_scale_const); the ONE destination factor adds the primed
-     *      bias with saturation (identical to TIKU_GPU_BLEND_ADD).
+     *   1. fill dst with the constant bias (replace mode);
+     *   2. blend src with source factor CONSTCOLOR, the const-color register
+     *      holding scale (as in tiku_gpu_scale_const), and a destination
+     *      factor of one, which adds the bias with saturation (as
+     *      TIKU_GPU_BLEND_ADD does).
      *
-     * gpu_blit_core's read-modify blend reads the freshly-filled bias as the
-     * background, so the affine lands in a single blended pass. This replaces
-     * the former recovered-ISA kernel, whose C1*src+C2 packing did not hold
-     * affine on this silicon (see gpu-calibration-findings.md, round 2). */
+     * gpu_blit_core's read-modify blend reads the filled bias as the
+     * background, so the affine takes one blended pass after the fill. */
     err = tiku_gpu_fill(dst->base, src->w, src->h, dst->stride, bias);
     if (err != TIKU_GPU_OK) {
         return err;
     }
     gpu_reg_write(GPU_REG_ROPBLEND_CONST, scale);
-    return tiku_gpu_blit(dst, src, 0, 0, (tiku_gpu_blend_t)0x010Au); /* CONSTCOLOR|ONE */
+    /* 0x010A: source factor CONSTCOLOR, destination factor one */
+    return tiku_gpu_blit(dst, src, 0, 0, (tiku_gpu_blend_t)0x010Au);
 }
 
 tiku_gpu_err_t
 tiku_gpu_avg(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *src)
 {
-    /* Pairwise 50/50 average: dst = (dst + src)/2 per channel. The ROP applies
-     * the CONSTCOLOR factor (const-color 0x80 = x0.502) to BOTH the source and
-     * the destination, so out = 0.502*Src + 0.502*Dst -- a two-surface
-     * cross-fade and the fold behind tiku_gpu_reduce_mean. The slight high bias
-     * (0.502 vs 0.5) is absorbed by integer rounding for typical inputs. */
+    /* Pairwise 50/50 average: dst = (dst + src)/2 per channel.  The ROP
+     * applies the CONSTCOLOR factor (const-color 0x80 = x0.502) to both the
+     * source and the destination, so out = 0.502*Src + 0.502*Dst -- a
+     * two-surface cross-fade and the fold behind tiku_gpu_reduce_mean.
+     * The 0.502 factor can put the result 1 above the exact mean. */
     gpu_reg_write(GPU_REG_ROPBLEND_CONST, 0x80808080u);
     return tiku_gpu_blit(dst, src, 0, 0, TIKU_GPU_BLEND_AVG);
 }
@@ -1242,12 +1209,11 @@ tiku_gpu_reduce_mean(const tiku_gpu_surface_t *surf, uint32_t *out_mean)
     /* out = 0.502*Src + 0.502*Dst on all four lanes (see tiku_gpu_avg). */
     gpu_reg_write(GPU_REG_ROPBLEND_CONST, 0x80808080u);
 
-    /* Horizontal folds: average the right half onto the left, halving the width
-     * to 1. Each fold is a 1:1 TRANSLATE blit -- destination [0,w/2) samples
-     * source [w/2,w), disjoint regions of the SAME buffer, so there is no
-     * read/write hazard and the unreliable SX>1 downscale is never used. A
-     * balanced binary tree: after log2(w) folds column 0 holds the equal-weight
-     * mean of all w columns. */
+    /* Horizontal folds: average the right half onto the left, halving the
+     * width to 1.  Each fold is a 1:1 translate blit -- destination [0,w/2)
+     * samples source [w/2,w), disjoint regions of the same buffer, so there
+     * is no read/write hazard and no scale factor above 1.  After log2(w)
+     * folds column 0 holds the equal-weight mean of all w columns. */
     while (w > 1u) {
         uint32_t hw = w >> 1;
         err = gpu_blit_core(surf, surf, 0, 0, (uint16_t)hw, (uint16_t)h,
@@ -1273,13 +1239,11 @@ tiku_gpu_reduce_mean(const tiku_gpu_surface_t *surf, uint32_t *out_mean)
 }
 
 /*
- * NOTE on affine warp (rotation / shear): the RECT-raster MatMul on this
- * silicon applies only the diagonal (scale) + translation columns -- the
- * off-diagonal terms MM01/MM10 are ignored, verified on hardware (a rotation
- * matrix produces a pure scale, no axis mixing). Arbitrary warp therefore
- * needs the quad-raster path (rotated geometry + interpolated texture coords,
- * as the vendor's nema_blit_rotate uses DRAW_CMD=QUAD). Deferred; tiku_gpu_
- * resample covers the scale gather that the rect path does support.
+ * Rotation and shear: the RECT-raster MatMul applies only the diagonal (scale)
+ * and translation terms; MM01 and MM10 are ignored, so a rotation matrix
+ * gives a pure scale.  A warp needs the QUAD raster with interpolated texture
+ * coordinates, as the vendor's nema_blit_rotate uses; this driver has no QUAD
+ * path.
  */
 
 void

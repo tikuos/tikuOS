@@ -5,11 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_uart_arch.h - console backend for printf (Apollo510).
+ * tiku_uart_arch.h - Ambiq console UART, the backend of TIKU_PRINTF.
  *
- * Mirrors the RP2350 header so the printf HAL routes TIKU_PRINTF here unchanged.
- * The backend is the bare-metal COM UART0 driver in tiku_uart_arch.c -- no ITM and
- * no vendor stdio.
+ * The printf HAL routes TIKU_PRINTF here.  tiku_uart_arch.c implements it for
+ * the Apollo510 and tiku_uart_apollo4l.c for the Apollo4 Lite and Plus.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,15 +22,17 @@
  * @brief Initialize the console transport (wire UART).
  *
  * Brings up the board's COM UART (see the board header for pads and FUNCSEL)
- * for 8N1 at TIKU_BOARD_UART_BAUD.  Called once during boot, before any printf
- * output.
+ * for 8N1 at TIKU_BOARD_UART_BAUD, with interrupt-driven RX.
+ *
+ * @note Called during boot before any printf output, and again after the
+ *       UART's power domain has been off.
  */
 void     tiku_uart_init(void);
 
 /**
  * @brief Transmit a single character over the console.
  *
- * Blocks until the ITM FIFO accepts the byte. Used internally by
+ * Blocks until the UART TX FIFO has room.  Used internally by
  * tiku_uart_puts() and tiku_uart_printf().
  *
  * @param c  Character to transmit.
@@ -41,7 +42,8 @@ void     tiku_uart_putc(char c);
 /**
  * @brief Transmit a null-terminated string over the console.
  *
- * Calls tiku_uart_putc() for each character until the null terminator.
+ * Calls tiku_uart_putc() for each character until the null terminator,
+ * sending LF as CR+LF.  A NULL @p s sends nothing.
  *
  * @param s  Null-terminated string to transmit.
  */
@@ -68,9 +70,9 @@ void     tiku_uart_fault_drain(void);
 /**
  * @brief Formatted print over the console (printf-style).
  *
- * Implements the TIKU_PRINTF contract required by hal/tiku_printf_hal.h.
- * Backed by am_util_stdio_printf at bring-up; the format-string subset
- * supported depends on the am_util implementation.
+ * Implements the TIKU_PRINTF contract required by hal/tiku_printf_hal.h with
+ * a small built-in formatter: %c, %s, %d, %u, %x (with an optional l), %% and
+ * zero or space padding to a width.  LF goes out as CR+LF.
  *
  * @param fmt  printf-style format string.
  * @param ...  Variadic arguments matching the format specifiers.
@@ -96,20 +98,14 @@ int      tiku_uart_getc(void);
 /**
  * @brief Return the count of RX overrun events since the last reset.
  *
- * An overrun occurs when a received byte is dropped because the RX
- * buffer was full. Non-zero values indicate the console is producing
- * data faster than the application is consuming it.
+ * Counts hardware RX FIFO overruns and bytes dropped because the RX ring
+ * buffer was full.
  *
  * @return Number of RX overrun events.
  */
 uint16_t tiku_uart_overrun_count(void);
 
-/**
- * @brief Clear the RX overrun counter.
- *
- * Resets the overrun count to zero. Call after logging or handling
- * the overrun condition.
- */
+/** @brief Clear the RX overrun counter. */
 void     tiku_uart_overrun_reset(void);
 
 #ifdef HAS_TESTS

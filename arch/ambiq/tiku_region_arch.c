@@ -7,9 +7,9 @@
  *
  * tiku_region_arch.c - Apollo510 physical memory-region table.
  *
- * Built at run time from linker symbols.  The DTCM splits into a general SRAM
- * region and an NVM overlay on .uninit -- typed NVM because persist and hibernate
- * reject buffers outside an NVM region, and would silently fail without it.
+ * Built on the first call from linker symbols.  The DTCM splits into a general
+ * SRAM region and an NVM overlay on .uninit; the overlay is typed NVM because
+ * persist and hibernate reject buffers outside an NVM region.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -31,12 +31,12 @@ static tiku_mem_region_t       s_regions[6];
 static tiku_mem_arch_size_t    s_region_count;
 
 /*
- * Return the Apollo 510 physical memory-region table.
+ * Return the Apollo510 physical memory-region table.
  *
- * Built lazily on the first call from linker symbols, then cached. The regions:
+ * Built on the first call from linker symbols, then cached.  The regions:
  *
- *   1. DTCM SRAM -- from RAM start up to .uninit (volatile: .data, .bss,
- *      SRAM/NVM tier backing buffers).
+ *   1. DTCM SRAM -- from RAM start up to .uninit: .data, .bss and the
+ *      .mpu_diag fault record.
  *   2. NVM overlay on .uninit -- NOLOAD area in DTCM that survives warm
  *      reset; required so tiku_persist_register() and the hibernate marker
  *      accept their buffers, both of which reject non-NVM-region pointers.
@@ -61,9 +61,8 @@ tiku_region_arch_get_table(tiku_mem_arch_size_t *count) {
         uintptr_t uninit_end   = (uintptr_t)&__uninit_end;
         tiku_mem_arch_size_t idx = 0;
 
-        /* DTCM SRAM: RAM start up to .uninit (general volatile pool holding
-         * .data, .bss, and the SRAM/NVM tier backing buffers). Full RAM if
-         * this build has no .uninit content. */
+        /* DTCM SRAM: RAM start up to .uninit (.data, .bss and .mpu_diag).
+         * The whole of RAM if .uninit does not start above the RAM start. */
         s_regions[idx].base = (const uint8_t *)ram_start;
         s_regions[idx].size = (uninit_start > ram_start)
             ? (tiku_mem_arch_size_t)(uninit_start - ram_start)
@@ -71,10 +70,9 @@ tiku_region_arch_get_table(tiku_mem_arch_size_t *count) {
         s_regions[idx].type = TIKU_MEM_REGION_SRAM;
         idx++;
 
-        /* NVM overlay on .uninit (DTCM, NOLOAD -> survives warm reset).
-         * Emitted only when non-empty. This is what makes persist + hibernate
-         * work end-to-end. Power-cycle durability arrives with the MRAM mirror
-         * in a later step. */
+        /* NVM overlay on .uninit (DTCM, NOLOAD, so it survives a warm
+         * reset; tiku_mem_arch.c mirrors it to MRAM).  Emitted only when
+         * non-empty. */
         if (uninit_end > uninit_start) {
             s_regions[idx].base = (const uint8_t *)uninit_start;
             s_regions[idx].size =

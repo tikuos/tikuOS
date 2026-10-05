@@ -7,9 +7,9 @@
  *
  * tiku_em9305.c - EM9305 BLE controller SPI-HCI transport (bare-metal).
  *
- * Speaks the controller's framed SPI protocol over SPI and a few GPIOs: reset by
- * EN pulse and RDY handshake, then a header byte plus two status bytes before the
- * payload moves full-duplex.  No AmbiqSuite, no Cordio.
+ * The controller's framed SPI protocol over IOM6 and a few GPIOs: an EN pulse
+ * and the RDY line for reset, then per frame a header byte exchanged for two
+ * status bytes before the payload.  Uses no vendor host stack.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,13 +19,13 @@
 #if defined(TIKU_DRV_BLE_EM9305_ENABLE)
 
 #include "tiku.h"                            /* board pin macros              */
-#include "apollo510.h"                       /* GPIO PADKEY (CLK32K funcsel)   */
+#include "apollo510.h"                       /* GPIO PADKEY, PINCFG */
 #include <interfaces/bus/tiku_spi_bus.h>
 #include <arch/ambiq/tiku_gpio_arch.h>
 #include <string.h>
 
 /*---------------------------------------------------------------------------*/
-/* Protocol + board glue                                                     */
+/* PROTOCOL AND BOARD GLUE                                                   */
 /*---------------------------------------------------------------------------*/
 
 #define EM_HDR_TX       0x42u   /**< host-to-controller frame header */
@@ -55,29 +55,35 @@ static uint8_t s_dbg_saw_high;
 static uint8_t s_dbg_rdy_final;
 
 /*---------------------------------------------------------------------------*/
-/* Low-level pin + timing helpers                                            */
+/* PIN AND TIMING HELPERS                                                    */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Assert the radio's chip select (drive it low). */
 static inline void cs_assert(void)   { tiku_ambiq_gpio_set(TIKU_BOARD_EM9305_CS_PIN, 0); }
+/** @brief Release the radio's chip select (drive it high). */
 static inline void cs_release(void)  { tiku_ambiq_gpio_set(TIKU_BOARD_EM9305_CS_PIN, 1); }
+/** @brief Non-zero while the radio drives RDY high. */
 static inline int  rdy_high(void)    { return tiku_gpio_arch_read(EM_RDY_PORT, EM_RDY_PIN) == 1; }
 
-/** Rough busy delay. ~96 MHz core; a volatile decrement is ~20 iters per
- *  microsecond. Only
- *  used for short, non-critical spacing (reset pulse, inter-retry gaps). */
+/**
+ * @brief Uncalibrated busy delay of @p us * 20 volatile decrements.
+ *
+ * Sized for the 96 MHz core, and shorter at higher clocks.  It spaces the
+ * reset pulse and the frame retries, and times the RDY waits.
+ */
 static void busy_us(uint32_t us) {
     volatile uint32_t n = us * 20u;
     while (n) { n--; }
 }
 
-/** Route a GPIO pad to a peripheral function (for the 32 kHz clock export). */
+/** @brief Write a pad's FUNCSEL (for the 32 kHz clock export). */
 static void em_pad_funcsel(uint32_t pad, uint32_t funcsel) {
     GPIO->PADKEY = GPIO_PADKEY_UNLOCK;
     (&GPIO->PINCFG0)[pad] = funcsel;
     GPIO->PADKEY = 0u;
 }
 
-/** Poll RDY until high or ~timeout_ms elapses. Returns 1 on high, 0 on timeout. */
+/** @brief Poll RDY until high or about @p timeout_ms passes; 1 if high. */
 static int wait_rdy_high(uint32_t timeout_ms) {
     uint32_t spins = timeout_ms * 10u;      /* 100 us per spin */
     while (spins--) {
@@ -90,17 +96,18 @@ static int wait_rdy_high(uint32_t timeout_ms) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* Pin bring-up                                                              */
+/* PIN BRING-UP                                                              */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Set up the radio's CS, EN, CLKREQ, RDY and 32 kHz clock pads. */
 static void pins_init(void) {
     /* CS: output, released (high). */
     tiku_ambiq_gpio_init_output(TIKU_BOARD_EM9305_CS_PIN);
     cs_release();
-    /* EN: output, deasserted (low) for now -- reset() pulses it. */
+    /* EN: output, held low until tiku_em9305_reset() pulses it. */
     tiku_ambiq_gpio_init_output(TIKU_BOARD_EM9305_EN_PIN);
     tiku_ambiq_gpio_set(TIKU_BOARD_EM9305_EN_PIN, 0);
-    /* CLKREQ: output low (BSP default; asserted only for deep-sleep coexistence). */
+    /* CLKREQ: output low, the BSP default. */
     tiku_ambiq_gpio_init_output(TIKU_BOARD_EM9305_CLKREQ_PIN);
     tiku_ambiq_gpio_set(TIKU_BOARD_EM9305_CLKREQ_PIN, 0);
     /* RDY: input. */
@@ -111,19 +118,22 @@ static void pins_init(void) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* Frame handshake                                                           */
+/* FRAME HANDSHAKE                                                           */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Open a frame: wait RDY, assert CS, exchange the header + status.
+ * @brief Open a frame: assert CS, wait for RDY, exchange the header for the
+ *        two status bytes.
  *
- * On success CS is left ASSERTED -- the caller moves the payload and then calls
- * cs_release() -- and @p sts2 holds the controller's free-byte count.  On any
- * failure CS is released before returning.
+ * On success CS stays asserted for the caller to move the payload and call
+ * cs_release(), and @p sts2 holds the byte count STS2 reports.  On failure CS
+ * is released before returning.
  *
- * @note CS is asserted BEFORE waiting on RDY: a host-initiated write only gets
- *       an RDY assertion once the controller sees CS low.  The read path
- *       already has RDY high on arrival, so this order works for both.
+ * @note CS goes low before the RDY wait: the controller raises RDY for a
+ *       host-initiated write only once it sees CS low.  On the read path RDY
+ *       is already high, so the same order serves both.
+ * @return TIKU_EM9305_OK, TIKU_EM9305_ERR_TIMEOUT (no RDY or an SPI error),
+ *         or TIKU_EM9305_ERR_NOTREADY (STS never ready)
  */
 static int frame_begin(uint8_t header, uint8_t *sts2) {
     uint8_t tx[2];
@@ -141,7 +151,7 @@ static int frame_begin(uint8_t header, uint8_t *sts2) {
 
     /* Poll the two status bytes with CS held asserted throughout (the SDK
      * does the same): toggling CS between retries can make the radio
-     * mis-latch the frame and wedge its buffer accounting. */
+     * mis-latch the frame and corrupt its buffer accounting. */
     for (i = 0u; i < EM_STS_CHK_MAX; i++) {
         if (tiku_spi_write_read(tx, rx, 2u) != 0) {
             busy_us(50);
@@ -162,7 +172,7 @@ static int frame_begin(uint8_t header, uint8_t *sts2) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* Public API                                                                */
+/* PUBLIC API                                                                */
 /*---------------------------------------------------------------------------*/
 
 int tiku_em9305_reset(void) {
@@ -171,8 +181,8 @@ int tiku_em9305_reset(void) {
 
     cfg.mode      = TIKU_SPI_MODE_0;
     cfg.bit_order = TIKU_SPI_MSB_FIRST;
-    cfg.prescaler = 1u;                    /* non-zero (bus validates); the Ambiq
-                                            * IOM ignores it and sets 16 MHz */
+    cfg.prescaler = 1u;                    /* non-zero for the bus check; the
+                                            * IOM ignores it and runs 16 MHz */
 
     if (!s_pins_done) {
         pins_init();
@@ -219,8 +229,8 @@ int tiku_em9305_send(const uint8_t *data, uint16_t len) {
         }
         chunk = (uint16_t)((len - sent) < sts2 ? (len - sent) : sts2);
         rc = tiku_spi_write(data + sent, chunk);
-        busy_us(50);                       /* let the radio latch the frame
-                                            * before CS rises (SDK tx_ends)    */
+        busy_us(50);                       /* the radio latches the frame
+                                            * before CS rises (SDK tx_ends) */
         cs_release();
         if (rc != 0) {
             return TIKU_EM9305_ERR_TIMEOUT;
@@ -248,15 +258,15 @@ int tiku_em9305_recv(uint8_t *buf, uint16_t cap, uint16_t *out_len,
     }
 
     /*
-     * One framed read: STS2 bounds this frame's bytes. NOTE the radio treats
-     * its side as a byte STREAM -- one frame may carry a partial HCI packet
-     * (large packets span frames) or SEVERAL back-to-back small packets
-     * (e.g. coalesced Number-Of-Completed-Packets events). Callers that need
-     * packet boundaries must reassemble across calls (tiku_ble_nus does).
+     * One framed read: STS2 bounds this frame's bytes.  The radio's side is
+     * a byte stream: one frame may carry part of an HCI packet (large packets
+     * span frames) or several small packets back to back, such as coalesced
+     * Number-Of-Completed-Packets events.  A caller that needs packet
+     * boundaries reassembles across calls, as tiku_ble_uart.c does.
      */
     n = (uint16_t)(sts2 < cap ? sts2 : cap);
     rc = tiku_spi_read(buf, n);
-    busy_us(50);                           /* frame-end settle before CS rises */
+    busy_us(50);                           /* settle before CS rises */
     cs_release();
     if (rc != 0) {
         return TIKU_EM9305_ERR_TIMEOUT;
@@ -275,7 +285,7 @@ int tiku_em9305_probe(tiku_em9305_probe_t *out) {
     s_last_sts1 = 0u;
     s_last_sts2 = 0u;
 
-    /* --- reset + boot event (M0 first light: SPI must reach the radio) --- */
+    /* Reset, then the boot event: SPI reaches the radio. */
     p.reset_rc      = tiku_em9305_reset();
     p.spi_rc        = s_dbg_spi_rc;
     p.rdy_initial   = s_dbg_rdy0;
@@ -292,17 +302,17 @@ int tiku_em9305_probe(tiku_em9305_probe_t *out) {
             p.active_evt = 1u;
         }
     }
-    p.sts1 = s_last_sts1;   /* 0xC0 here == SPI is genuinely talking to the radio */
+    p.sts1 = s_last_sts1;   /* 0xC0: SPI reaches the radio */
     p.sts2 = s_last_sts2;
 
-    /* --- HCI Reset -> Command Complete (M1 gate: HCI is alive) --- */
+    /* HCI Reset -> Command Complete: HCI answers. */
     p.send_rc = (int8_t)tiku_em9305_send(hci_reset, sizeof(hci_reset));
     if (p.send_rc == TIKU_EM9305_OK) {
         p.recv_rc = (int8_t)tiku_em9305_recv(ev, sizeof(ev), &evlen, 1000u);
         if (p.recv_rc == TIKU_EM9305_OK) {
             memcpy(p.evt, ev, evlen < sizeof(p.evt) ? evlen : sizeof(p.evt));
             p.evt_len = evlen;
-            /* HCI Command Complete: 04 0E len 01 <op_lo> <op_hi> <status> ... */
+            /* Command Complete: 04 0E len 01 op_lo op_hi status ... */
             if (evlen >= 7u && ev[0] == 0x04u && ev[1] == 0x0Eu) {
                 p.cc_seen = 1u;
                 p.hci_status = ev[6];
@@ -315,7 +325,7 @@ int tiku_em9305_probe(tiku_em9305_probe_t *out) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* HCI command helper + LE beacon                                            */
+/* HCI COMMANDS AND LE BEACON                                                */
 /*---------------------------------------------------------------------------*/
 
 #define HCI_OP_RESET             0x0C03u
@@ -386,7 +396,7 @@ int tiku_em9305_beacon(const char *name, tiku_em9305_beacon_t *out) {
     {
         uint8_t  bev[16];
         uint16_t bl = 0u;
-        (void)tiku_em9305_recv(bev, sizeof(bev), &bl, 500u);   /* {04 FF 01 01} */
+        (void)tiku_em9305_recv(bev, sizeof(bev), &bl, 500u); /* 04 FF 01 01 */
     }
 
     /* 1. HCI Reset -> known state. */
@@ -402,19 +412,19 @@ int tiku_em9305_beacon(const char *name, tiku_em9305_beacon_t *out) {
         if (out) { *out = r; }
         return TIKU_EM9305_ERR_TIMEOUT;
     }
-    /* 3. Advertising data: [sig-len][Flags AD][Complete Local Name AD], padded
-     *    into a fixed 31-byte field (the command carries len + 31 data bytes). */
+    /* 3. Advertising data: [sig-len][Flags AD][Complete Local Name AD],
+     *    padded to the fixed 31-byte field (the command is len + 31 bytes). */
     memset(adv_data, 0, sizeof(adv_data));
     idx = 1u;
     adv_data[idx++] = 0x02u;                /* Flags AD: len */
-    adv_data[idx++] = 0x01u;                /*           type = Flags */
-    adv_data[idx++] = 0x06u;                /*           LE General Disc + no BR/EDR */
+    adv_data[idx++] = 0x01u;                /* Flags AD: type */
+    adv_data[idx++] = 0x06u;                /* LE general disc, no BR/EDR */
     nlen = (uint8_t)strlen(name);
     if (nlen > 26u) {
-        nlen = 26u;                         /* keep within the 31-byte AD budget */
+        nlen = 26u;                         /* fit the 31-byte AD field */
     }
     adv_data[idx++] = (uint8_t)(nlen + 1u); /* Name AD: len */
-    adv_data[idx++] = 0x09u;                /*          type = Complete Local Name */
+    adv_data[idx++] = 0x09u;                /* Name AD: Complete Local Name */
     memcpy(adv_data + idx, name, nlen);
     idx = (uint8_t)(idx + nlen);
     adv_data[0] = (uint8_t)(idx - 1u);      /* significant byte count */
@@ -424,7 +434,7 @@ int tiku_em9305_beacon(const char *name, tiku_em9305_beacon_t *out) {
         if (out) { *out = r; }
         return TIKU_EM9305_ERR_TIMEOUT;
     }
-    /* 4. Enable advertising -- the controller broadcasts autonomously now. */
+    /* 4. Enable advertising; the controller then broadcasts on its own. */
     en = 0x01u;
     if (tiku_em9305_hci_cmd(HCI_OP_LE_SET_ADV_ENABLE, &en, 1u, &r.st_enable)
         != TIKU_EM9305_OK) {

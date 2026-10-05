@@ -7,8 +7,9 @@
  *
  * tiku_ble_uart.h - minimal connectable GATT peripheral (BLE UART service).
  *
- * The wireless-shell transport: a tiny host stack over the EM9305 HCI transport,
- * built only for the BLE configuration.  No Cordio, no AmbiqSuite.
+ * A BLE host over the EM9305 HCI transport, used as a wireless shell link:
+ * connectable advertising and a GATT server with RX and TX characteristics.
+ * Built with TIKU_DRV_BLE_EM9305_ENABLE=1.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,22 +24,30 @@
 #define TIKU_BLE_EVT_CONNECTED     1   /**< a central connected              */
 #define TIKU_BLE_EVT_DISCONNECTED  2   /**< the link dropped                 */
 #define TIKU_BLE_EVT_ATT           3   /**< an ATT request was served        */
-#define TIKU_BLE_EVT_RX            4   /**< RX bytes arrived (M3.3)       */
+#define TIKU_BLE_EVT_RX            4   /**< the peer wrote RX bytes          */
 
 /**
- * @brief Reset the radio and begin CONNECTABLE advertising as @p name.
+ * @brief Reset the radio and begin connectable advertising as @p name.
  *
- * Resets, HCI Reset, LE Set Advertising Parameters (ADV_IND, connectable),
- * Advertising Data (Flags + Complete Local Name), Advertising Enable.
+ * Radio reset, HCI Reset, LE event mask, Advertising Parameters (ADV_IND),
+ * Advertising Data (Flags + Complete Local Name), Advertising Enable, then
+ * LE Read Buffer Size.  Clears the connection and buffer state first.
  *
- * @param name  Advertised complete local name (NULL -> "tikuOS").
- * @return 0 on success (advertising enabled), negative on failure.
+ * @param name  Advertised complete local name, at most 26 bytes used
+ *              (NULL -> "tikuOS").
+ * @return 0 when advertising is on; a reset error, TIKU_EM9305_ERR_TIMEOUT
+ *         for a command with no reply, or TIKU_EM9305_ERR_NOTREADY for a
+ *         non-zero command status.
  */
 int tiku_ble_uart_start(const char *name);
 
 /**
- * @brief Pump the stack once (non-blocking): read at most one pending HCI
- *        packet and dispatch it (connection events, ATT requests, BLE UART writes).
+ * @brief Pump the stack once without blocking.
+ *
+ * Moves the frames the radio has pending into the reassembly stream, then
+ * dispatches at most one complete HCI packet: a connection event, an ATT
+ * request or a BLE UART write.
+ *
  * @return One of TIKU_BLE_EVT_*.
  */
 int tiku_ble_uart_poll(void);
@@ -56,7 +65,7 @@ uint8_t tiku_ble_uart_start_steps(int8_t *rc, uint8_t *st, uint8_t cap);
 
 /**
  * @brief Copy the raw bytes of the most recent LE Meta event (diagnostics).
- * @return Number of bytes copied (0 if none seen yet).
+ * @return Number of bytes copied, at most @p cap (0 if none has arrived).
  */
 uint8_t tiku_ble_uart_last_meta(uint8_t *buf, uint8_t cap);
 
@@ -75,7 +84,7 @@ int tiku_ble_uart_connected(void);
 /** @brief Non-zero once the peer has enabled TX notifications (subscribed). */
 int tiku_ble_uart_notify_enabled(void);
 
-/* --- shell io-backend hooks (build a tiku_shell_io_t from these) --- */
+/* Shell I/O backend hooks; a tiku_shell_io_t is built from these. */
 
 /** @brief Pop one byte the peer wrote to RX (-1 if none). */
 int tiku_ble_uart_getc(void);
@@ -83,11 +92,20 @@ int tiku_ble_uart_getc(void);
 /** @brief Non-zero if RX bytes are waiting. */
 uint8_t tiku_ble_uart_rx_ready(void);
 
-/** @brief Queue one output byte for TX (auto-flushed when a notification
- *         fills); pair with tiku_ble_uart_flush() to push the tail. */
+/**
+ * @brief Queue one output byte for TX; tiku_ble_uart_flush() sends the queue.
+ *
+ * When the 1024-byte queue is full it pumps and flushes until space opens,
+ * and drops the byte if none does within its spin limit.
+ */
 void tiku_ble_uart_putc(char c);
 
-/** @brief Send any buffered TX bytes as a notification now. */
+/**
+ * @brief Send queued TX bytes as one notification, as many as fit.
+ *
+ * With no subscriber the queue is dropped; with no free TX credit nothing is
+ * sent and the bytes stay queued.
+ */
 void tiku_ble_uart_flush(void);
 
 /** @brief Number of TX bytes still buffered (for paced draining). */
@@ -106,11 +124,12 @@ uint16_t tiku_ble_uart_acl_pkt_len(void);
 int tiku_ble_uart_acl_credits(void);
 
 /**
- * @brief Reclaim TX credits after an ack-wait timed out.
+ * @brief Return every TX credit (in-flight count to 0) after an ack wait
+ *        times out.
  *
- * A packet the controller dropped (e.g. sized over the LL TX budget) never
- * produces a Number-Of-Completed-Packets ack; without reclaiming, each such
- * drop permanently leaks a credit until TX stalls entirely.
+ * A packet the controller dropped, such as one over the LL TX budget, is never
+ * acknowledged, so its credit stays in use until this runs; with no credits
+ * left, TX stops.
  */
 void tiku_ble_uart_tx_credit_reset(void);
 

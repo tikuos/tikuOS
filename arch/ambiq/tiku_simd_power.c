@@ -7,9 +7,9 @@
  *
  * tiku_simd_power.c - Helium (MVE) versus scalar energy instruments.
  *
- * The timebase is the always-on STIMER and cycles come from DWT, the only
- * trustworthy cycle source on this part -- SysTick reloads and wraps, and once
- * reported 14 kHz for a 96 MHz core.
+ * Runs each kernel through the Helium build of hal/tiku_simd.c or its scalar
+ * copy, over DTCM or shared-SRAM buffers.  Windows are timed on the always-on
+ * STIMER and cycles are counted on DWT CYCCNT.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,9 +18,9 @@
 #include "tiku_power_ambiq.h"        /* STIMER timebase                       */
 #include "apollo510.h"               /* DWT                                   */
 #include <hal/tiku_simd.h>           /* the native (Helium) kernels           */
-#include <kernel/cpu/tiku_hang.h>    /* probes block on purpose -- check in    */
+#include <kernel/cpu/tiku_hang.h>    /* check-in while a probe blocks         */
 
-/* The scalar twin, from tiku_simd_scalar.c. */
+/* The scalar build of the same kernels, from tiku_simd_scalar.c. */
 int      tiku_simd_scalar_backend(void);
 void     tiku_simd_scalar_fill_u8(uint8_t *d, uint8_t v, uint32_t n);
 void     tiku_simd_scalar_copy_u8(uint8_t *d, const uint8_t *s, uint32_t n);
@@ -44,14 +44,13 @@ void     tiku_simd_scalar_lut256_u8(uint8_t *d, const uint8_t *i,
 /* BUFFERS -- one set per memory tier                                        */
 /*---------------------------------------------------------------------------*/
 
-/* DTCM: plain statics land in .bss, which on this part is tightly-coupled
- * memory -- CPU-private and NOT visible to the GPU (which is exactly why the
- * GPU comparison must use the SSRAM set). */
+/* DTCM: plain statics go in .bss, which on this part is tightly coupled
+ * memory, private to the CPU; the GPU cannot reach it. */
 static uint8_t d_x[TIKU_SP_MAX_BYTES];
 static uint8_t d_y[TIKU_SP_MAX_BYTES];
 static uint8_t d_z[TIKU_SP_MAX_BYTES];
 
-/* SSRAM: the shared tier, the only one a GPU comparison is licensed against. */
+/* SSRAM: the shared tier, which the GPU reaches as well. */
 static uint8_t s_x[TIKU_SP_MAX_BYTES]
     __attribute__((section(".ssram"), aligned(32)));
 static uint8_t s_y[TIKU_SP_MAX_BYTES]
@@ -81,10 +80,11 @@ const void *tiku_simd_power_buf(unsigned tier)
 /*---------------------------------------------------------------------------*/
 
 /**
- * Bytes of memory traffic for one pass over @p n elements.
+ * @brief Bytes of memory traffic for one pass of @p kind over @p n elements.
  *
- * Counted as reads + writes, so the figure is comparable with the GPU's: a copy
- * is 2n, while a reduction reads n and writes one word so it counts as n.
+ * Counted as reads plus writes, as bytes_of() in tiku_gpu_power.c counts the
+ * GPU's: a copy is 2n, and a reduction, which reads n and writes one word,
+ * counts n.
  */
 static uint32_t sp_bytes_of(unsigned kind, uint32_t n)
 {
@@ -107,6 +107,7 @@ static uint32_t sp_bytes_of(unsigned kind, uint32_t n)
 /* KERNEL DISPATCH                                                           */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Run @p kind once; returns the SUM or DOT result, else 0. */
 static uint32_t sp_run_once(unsigned kind, unsigned backend,
                             uint8_t *x, uint8_t *y, uint8_t *z, uint32_t n)
 {
@@ -142,9 +143,9 @@ static uint32_t sp_run_once(unsigned kind, unsigned backend,
         else   { tiku_simd_scalar_add_sat_u8(z, x, y, n); }
         return 0u;
     case TIKU_SP_SAXPY:
-        /* saxpy accumulates into y, so it is the one kernel whose input drifts
-         * pass to pass.  That is fine for energy (the work per pass is
-         * identical) and it is why the fingerprint is taken from z elsewhere. */
+        /* saxpy accumulates into y, so its input changes from pass to pass
+         * while the work per pass stays the same.  It leaves z as primed, so
+         * its fingerprint does not depend on the result. */
         if (h) { tiku_simd_saxpy_u8(y, x, 0x03u, n); }
         else   { tiku_simd_scalar_saxpy_u8(y, x, 0x03u, n); }
         return 0u;
@@ -158,7 +159,7 @@ static uint32_t sp_run_once(unsigned kind, unsigned backend,
     }
 }
 
-/** Deterministic input priming, identical for both backends. */
+/** @brief Fill x, y, z and the LUT with the same fixed patterns every run. */
 static void sp_prime(uint8_t *x, uint8_t *y, uint8_t *z, uint32_t n)
 {
     uint32_t k;
@@ -172,7 +173,7 @@ static void sp_prime(uint8_t *x, uint8_t *y, uint8_t *z, uint32_t n)
     }
 }
 
-/** Cheap fingerprint: three sampled words plus the returned reduction value. */
+/** @brief Fingerprint: three sampled words of @p z plus @p ret. */
 static uint32_t sp_fingerprint(const uint8_t *z, uint32_t n, uint32_t ret)
 {
     const uint32_t *w = (const uint32_t *)(const void *)z;
@@ -201,12 +202,11 @@ tiku_simd_power_probe(unsigned kind, unsigned backend, unsigned tier,
 
     sp_passes = sp_bytes = sp_elems = sp_cycles = sp_fp = 0u;
 
-    /* Prime OUTSIDE the measured window. */
+    /* Primed before the measured window. */
     sp_prime(x, y, z, n);
 
-    /* DWT cycle counter: enable once, then read across the window.  This is the
-     * cycle source experiment 1 settled on -- SysTick wraps inside any window a
-     * 32 kHz counter can resolve. */
+    /* DWT cycle counter: turned on here and left on, read across the
+     * window. */
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
     DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 
@@ -236,8 +236,8 @@ tiku_simd_power_probe(unsigned kind, unsigned backend, unsigned tier,
 int
 tiku_simd_power_verify(uint32_t *out_mismatch)
 {
-    const uint32_t n = 4111u;      /* deliberately not a multiple of 16, so the
-                                    * predicated tail is exercised            */
+    const uint32_t n = 4111u;      /* not a multiple of 16, so the
+                                    * predicated tail runs                    */
     uint32_t mism = 0u, kind, k;
 
     for (kind = 0u; kind < TIKU_SP_KIND_COUNT; kind++) {
@@ -246,13 +246,13 @@ tiku_simd_power_verify(uint32_t *out_mismatch)
         /* Helium into s_z, then scalar into d_z, from identical inputs. */
         sp_prime(s_x, s_y, s_z, n);
         rh = sp_run_once(kind, TIKU_SP_BACKEND_HELIUM, s_x, s_y, s_z, n);
-        /* saxpy mutates y, so re-prime before the second run. */
+        /* The scalar run reads its own primed set, d_x and d_y: saxpy has
+         * already overwritten s_y. */
         sp_prime(d_x, d_y, d_z, n);
         rs = sp_run_once(kind, TIKU_SP_BACKEND_SCALAR, d_x, d_y, d_z, n);
 
         if (rh != rs) { mism |= (1u << kind); continue; }
-        /* Compare the whole output buffer, not a sample: a fingerprint could
-         * agree by luck, and this runs once per session, not per window. */
+        /* Compare every byte of the output buffer. */
         if (kind == TIKU_SP_SAXPY) {
             for (k = 0u; k < n; k++) {
                 if (s_y[k] != d_y[k]) { mism |= (1u << kind); break; }

@@ -7,9 +7,9 @@
  *
  * tiku_trng_arch.c - Ambiq CryptoCell-312 TRNG driver.
  *
- * A ring oscillator is sampled until 192 whitened bits fill the EHR.  On-die
- * health tests flag a bad run, which is treated as re-arm and retry; a dead source
- * surfaces as ERR_TIMEOUT so the TLS layer fails closed.  The CRYPTO domain is gated.
+ * A ring oscillator is sampled until 192 whitened bits fill the EHR.  A failed
+ * health test re-arms and retries; a source that never fills returns
+ * TIKU_TRNG_ERR_TIMEOUT.  The CRYPTO domain is powered once, on the first read.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -30,12 +30,9 @@
  * 0..3 = fastest..slowest).  Longer oscillators are better whitened and pass
  * autocorrelation more reliably, at the cost of fill latency.
  *
- * The slowest (3) plus 1000-cycle sampling took ~10 s to gather a
- * ClientHello's worth of entropy on Apollo510, long enough to stall the
- * TLS handshake mid-flight.  The 2nd-slowest ROSC at half the sample
- * count fills ~4x faster; the von Neumann debiaser and the
- * autocorr/CRNGT/VN health tests are the quality guarantee at any
- * setting, so this trades margin, not bias.
+ * The slowest (3) with 1000-cycle sampling fills slowly enough to stall a
+ * TLS handshake.  The von Neumann debiaser and the autocorrelation, CRNGT
+ * and VN health tests run at every setting.
  *
  * TRNG_SAMPLE_COUNT is the rng_clk cycle count between bit samples
  * (SAMPLECNT1) -- higher means more decorrelation per bit.
@@ -44,12 +41,11 @@
  * TRNG_SPIN_LIMIT bounds the wait for EHRVALID; TRNG_MAX_RETRIES bounds the
  * health-test re-arm loop.
  */
-#define TRNG_ROSC_SEL        2u          /* RNDSRCSEL: 2nd-slowest, well-whitened */
-#define TRNG_SAMPLE_COUNT    500u        /* SAMPLECNT1 rng_clk cycles/sample   */
-#define TRNG_CACHE_WORDS     6u          /* EHR_DATA[0..5]                     */
-#define TRNG_SPIN_LIMIT      4000000ul   /* ~tens of ms headroom at 96 MHz     */
-#define TRNG_MAX_RETRIES     16u         /* health-test re-arm attempts        */
-/** @} */
+#define TRNG_ROSC_SEL        2u          /* RNDSRCSEL: second slowest        */
+#define TRNG_SAMPLE_COUNT    500u        /* SAMPLECNT1 rng_clk cycles/sample */
+#define TRNG_CACHE_WORDS     6u          /* EHR_DATA[0..5]                   */
+#define TRNG_SPIN_LIMIT      4000000ul   /* EHRVALID polls per re-arm        */
+#define TRNG_MAX_RETRIES     16u         /* health-test re-arm attempts      */
 
 /* RNGISR bits this driver acts on. */
 #define RNG_ISR_EHR_VALID    (1ul << 0)
@@ -78,7 +74,7 @@ void tiku_trng_arch_init(void)
     trng_ready = 1u;
 }
 
-/* Collect one 192-bit EHR block into the cache.  OK or TIMEOUT. */
+/** @brief Fill the cache with one 192-bit EHR block; OK or ERR_TIMEOUT. */
 static int trng_collect(void)
 {
     unsigned retry;
@@ -99,12 +95,9 @@ static int trng_collect(void)
         CRYPTO->RNDSOURCEENABLE = 1u;            /* start sampling    */
 
         for (spin = 0u; spin < TRNG_SPIN_LIMIT; spin++) {
-            /* The ring-oscillator gather blocks here for up to seconds per
-             * re-arm (measured 2.5-16 s total on Apollo510 for a DRBG seed).
-             * That is liveness, not a hang: kick periodically so neither the
-             * hardware watchdog nor the check-in hang detector (which the
-             * kick also feeds) resets the board mid-gather.  Masked to every
-             * 64Ki spins -- ~100+ kicks/s, negligible poll-rate cost. */
+            /* The gather can block here for seconds.  A watchdog kick every
+             * 64Ki spins, which also feeds the hang detector, keeps either
+             * from resetting the board mid-gather. */
             if ((spin & 0xFFFFul) == 0ul) {
                 tiku_watchdog_kick();
             }

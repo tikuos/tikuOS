@@ -5,30 +5,26 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * apollo510.ld - Ambiq Apollo 510 (Cortex-M55) linker script.
+ * apollo510.ld - Ambiq Apollo510 (Cortex-M55) linker script.
  *
- * No .boot2 or .image_def header: the on-silicon Secure Boot Loader hands
- * control straight to the application vector table at the start of user MRAM.
- * Map and exported symbols below.
+ * The image starts at user MRAM 0x00410000 with the vector table first; the
+ * Secure Boot Loader loads the initial SP and reset PC from it.  Memory map
+ * and exported symbols below.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /*
  * Memory map (AmbiqSuite am_reg_base_addresses.h):
- *   ITCM   : 256 KB at 0x00000000   (not used at bring-up — see .text)
- *   MRAM   : 4 MB   at 0x00400000   (flash; low 64 KB reserved for the SBL)
- *   DTCM   : 512 KB at 0x20000000   (.data / .bss / heap / stack)
- *   SSRAM  : 3 MB   at 0x20080000   (shared SRAM: .ssram buffers, .retained, SRAM tier)
+ *   ITCM   : 256 KB at 0x00000000   (no section; modules run at 0x1000)
+ *   MRAM   : 4 MB   at 0x00400000   (low 64 KB holds the SBL)
+ *   DTCM   : 512 KB at 0x20000000   (.data, .bss, .uninit, stack)
+ *   SSRAM  : 3 MB   at 0x20080000   (.ssram, .retained, SRAM tier)
  *
- * Unlike the RP2350 port there is NO .boot2 / .image_def header: the
- * on-silicon Secure Boot Loader (resident in MRAM 0x400000..0x410000)
- * transfers control straight to the application vector table at the
- * start of user MRAM (0x410000), loading the initial SP and reset PC
- * from it the standard Cortex-M way.
+ * The image needs no boot header: the Secure Boot Loader in MRAM
+ * 0x400000..0x410000 starts it from its vector table at 0x410000.
  *
- * Symbols exposed to the kernel match the RP2350 port so the shared
- * startup / memory / region code is identical:
+ * Symbols the shared startup, memory and region code read:
  *   __stack, __sram_start/end, __flash_start/end,
  *   __data_load/start/end, __bss_start/end, __uninit_start/end,
  *   _end / end / __end__ / __datastart
@@ -40,56 +36,45 @@ ENTRY(tiku_ambiq_reset_handler)
 
 MEMORY
 {
-    /* Code window: a fixed 384 KB budget for code/rodata -- the fleet-wide
-     * contract, sized for code growth (largest measured image 130.3 KB).
-     * apollo510 carves NO module slot (its module executes from ITCM), so
-     * everything between this window and the 16 KB persist-partition mirror becomes the
-     * carved NVM region -- ~3.5 MB, which the tier and /data split. Overflow
-     * here means code outgrew its budget -- do NOT raise it to fit data. */
-    MRAM  (rx)  : ORIGIN = 0x00410000, LENGTH = 0x60000   /* 384 KB code window (M4) */
-    TCM   (rwx) : ORIGIN = 0x20000000, LENGTH = 512K      /* DTCM: .data/.bss/heap/stack    */
-    SSRAM (rwx) : ORIGIN = 0x20080000, LENGTH = 3M        /* shared SRAM: buffers, retained, tier */
+    /* Code window: 384 KB for code and rodata.  Everything from its end to
+     * the 16 KB persist mirror is the carved NVM region, which the NVM tier
+     * and /data share, so changing LENGTH moves the region and /data with
+     * it. */
+    MRAM  (rx)  : ORIGIN = 0x00410000, LENGTH = 0x60000   /* code window */
+    TCM   (rwx) : ORIGIN = 0x20000000, LENGTH = 512K      /* DTCM */
+    SSRAM (rwx) : ORIGIN = 0x20080000, LENGTH = 3M        /* shared SRAM */
 }
 
 __flash_start = ORIGIN(MRAM);
 __flash_end   = ORIGIN(MRAM) + LENGTH(MRAM);
 
-/* NO loadable-native-module slot on this part (module_size = 0). A Tier-3
- * module image is a store file (mod.bin) that the loader copies into the ITCM
- * and runs from there -- see tiku_basic_module.h and modules/
- * mod_demo_apollo510.ld. The 32 KB of executable MRAM at 0x488000..0x490000 is
- * region here rather than a slot, because carving it would count the image
- * twice: once as a .rodata blob in the code window and again as the slot it is
- * programmed into. Every other ARM part still carves the
- * slot -- each needs its own RAM window and its own verification, and only
- * Apollo510 has been measured (TikuBench tests/memory/test_mem_tcm.c). */
-/* Canonical NVM layout: inputs + shared derivation (arch/common). */
+/* No module slot: the Makefile passes no __tiku_module_reserve for this
+ * part.  The BASIC module loader copies a module image from /data into an
+ * ITCM window and runs it there (tiku_basic_module.h,
+ * kernel/shell/basic/modules/mod_demo_apollo510.ld). */
+/* NVM layout inputs; arch/common/tiku_nvm_layout.ld derives the rest. */
 __tiku_layout_top          = 0x00800000;
 __tiku_layout_code_cap     = ORIGIN(MRAM) + LENGTH(MRAM);  /* end of code */
 __tiku_layout_persist_size = 0x4000;                       /* 16 KB mirror */
 INCLUDE arch/common/tiku_nvm_layout.ld
 
-/* Carved NVM store/tier region (substrate B): ALL MRAM between the code window
- * and the 16 KB mirror -- ~3.7 MB on this part. Read in place by pointer
- * (PRIVDEFENA's default map covers MRAM above the code window); written via the
- * bootrom backend (kernel/memory/tiku_nvm_region). The NVM tier and file store
- * ride this. The base follows the code window directly now that no module slot
- * sits between them, so SHRINKING the window (P4) moves the FS -- which is a
- * reformat, not a silent corruption: the store's superblock carries its own
- * geometry and a mount over foreign bytes fails cleanly. */
-/* (__tiku_nvmfs_base/__tiku_nvmfs_size come from the shared derivation.) */
+/* Carved NVM region (__tiku_nvmfs_base/__tiku_nvmfs_size, from the shared
+ * derivation): all MRAM from the end of the code window (0x470000) to the
+ * persist mirror, holding the NVM tier and /data.  Code reads it in place
+ * through the MPU's default map (PRIVDEFENA) and writes it through the boot
+ * ROM (kernel/memory/tiku_nvm_region).  The store records its own geometry,
+ * so after the region moves the old store is not mounted. */
 
-/* NVM mirror page (mem port C, Proposal A): 16 KB at the top of MRAM
- * (0x7F0000..0x800000), where tiku_mem_arch_nvm_flush() programs the .uninit
- * snapshot. Grown from 32 KB for more durable cells/aliases headroom. The SBL
- * (0x400000) is never touched. */
+/* Persist mirror: the top 16 KB of MRAM (0x7FC000..0x800000), where
+ * tiku_mem_arch_nvm_flush() programs the .uninit image.  Nothing here places
+ * data in the SBL's 0x400000..0x410000. */
 __tiku_nvm_mram_start = __tiku_layout_persist_start;
 __tiku_nvm_mram_size  = __tiku_layout_persist_size;
 __sram_start  = ORIGIN(TCM);
 __sram_end    = ORIGIN(TCM) + LENGTH(TCM);
 
-/* The Cortex-M loads the initial SP from vector entry 0. Place it at
- * the very top of DTCM and let the stack grow downward toward .bss. */
+/* The initial SP (vector entry 0) is the top of DTCM.  The stack grows down
+ * through a 32 KB budget, with a 4 KB MPU guard below it. */
 __stack       = __sram_end;
 __tiku_stack_bottom = __stack - 32K;
 __tiku_stack_guard_start = __tiku_stack_bottom - 4K;
@@ -99,9 +84,9 @@ __ssram_bank_end = ORIGIN(SSRAM) + LENGTH(SSRAM);
 SECTIONS
 {
     /* -------- 1. Vector table (at user-MRAM origin 0x410000) ---------- */
-    /* Apollo510 requires 512-byte vector-table alignment (>=49 external
-     * IRQs); 0x410000 already satisfies it. The SBL loads SP+reset PC
-     * from here, and the reset handler also writes VTOR explicitly. */
+    /* 16 + 135 entries take 604 bytes, so VTOR needs 1024-byte alignment;
+     * the 0x410000 origin satisfies it, though ALIGN(512) alone would not.
+     * The reset handler also writes VTOR. */
     .vectors ORIGIN(MRAM) : ALIGN(512)
     {
         __vectors_start = .;
@@ -109,10 +94,8 @@ SECTIONS
         __vectors_end = .;
     } > MRAM
 
-    /* AmbiqSuite's SystemInit() (system_apollo510.c) sets VTOR from the
-     * symbol __Vectors. This port owns the vector table under a different
-     * name, so alias it here to let the SDK file link. The reset handler writes
-     * VTOR, so this is belt-and-braces. */
+    /* __Vectors is the CMSIS name for the vector table, which this port
+     * defines as tiku_ambiq_vectors. */
     __Vectors = tiku_ambiq_vectors;
 
     /* -------- 2. Code & rodata --------------------------------------- */
@@ -120,17 +103,14 @@ SECTIONS
     {
         *(.text*)
         *(.glue_7) *(.glue_7t)
-        /* AmbiqSuite marks some HAL functions for ITCM. At bring-up this
-         * run them in place from MRAM (position-independent Thumb)
-         * rather than copying to ITCM. Revisit for performance later. */
+        /* Input marked .itcm_text links here and runs in place from MRAM. */
         *(.itcm_text*)
         KEEP(*(.init))
         KEEP(*(.fini))
     } > MRAM
 
-    /* End of .text. tikuOS's `free`/ /sys/mem/free use _etext to size the
-     * FRAM-resident (here MRAM-resident) code region. Standard newlib name;
-     * `etext` aliased for code that uses the historic spelling. */
+    /* End of .text: `free` and /sys/mem/free size the MRAM-resident code
+     * from _etext.  `etext` is the same address under the older name. */
     _etext = .;
     etext  = .;
 
@@ -170,10 +150,10 @@ SECTIONS
     } > TCM
 
     /* -------- 4b. MPU diagnostics (NOLOAD, warm-reset durable) -------- */
-    /* The MemManage/HardFault handler records the violation here. After .bss
-     * (the crt zero-loop stops at __bss_end, so this survives) and before
-     * .uninit (so it lands in the SRAM_LO RW region, not the RO NVM region);
-     * outside .uninit so it is NOT mirrored to MRAM. */
+    /* The MemManage/HardFault handler records the violation here.  It sits
+     * after .bss, so the crt zero loop (which stops at __bss_end) leaves it
+     * alone, and before .uninit, so it lies in the writable SRAM_LO MPU
+     * region and is not mirrored to MRAM. */
     .mpu_diag (NOLOAD) : ALIGN(32)
     {
         __mpu_diag_start = .;
@@ -183,33 +163,24 @@ SECTIONS
     } > TCM
 
     /* -------- 5. Persistent (skipped by zero-init) ------------------- */
-    /* Mirrors the RP2350 .uninit model: survives warm reset, reseeded
-     * on power cycle. ALIGN(32) for the ARMv8-M MPU region base.
-     * (MRAM-backed NVM-mirror symbols arrive in Phase 2 with
-     * tiku_mem_arch.c.) */
+    /* The crt does not zero .uninit; tiku_mem_arch_init() restores it from
+     * the MRAM mirror at boot, or zeroes it when the mirror holds no image.
+     * ALIGN(32) for an ARMv8-M MPU region base. */
     .uninit (NOLOAD) : ALIGN(32)
     {
         __uninit_start = .;
-        /* TIKU_DURABLE_FIRST: the layout record opens the mirrored image, at
-         * the one offset every image agrees on; the rest follow link order. */
+        /* TIKU_DURABLE_FIRST: the layout record, when built in, is first in
+         * the mirrored image, at offset 0; the other durable data follows in
+         * link order. */
         KEEP(*(.persistent.layout))
         *(.uninit*)
-        /* DURABLE grade: exact-match .persistent -- this window is
-         * MRAM-mirrored (and on apollo510 MPU-read-only outside unlock
-         * windows).  Exact match so the RETAINED grade below cannot be
-         * wildcard-swallowed into it.  (The old EXCLUDE_FILE net-kit
-         * routing is retired: net buffers are placed explicitly at
-         * their declarations, so no net object emits .persistent.) */
+        /* DURABLE grade (.persistent): the window the MRAM mirror holds. */
         *(.persistent)
         . = ALIGN(32);
         __uninit_end = .;
-        /* NOTE: the RETAINED grade does NOT live here.  The secure bootloader
-         * runs through low DTCM before the crt and clears it (a J-Link marker
-         * there read back zero after a reset, 2026-07-15), but not all of
-         * DTCM: a record at 0x2004435c survived one (2026-09-25).  So DURABLE
-         * is only what the MRAM mirror restores (tiku_mem_arch_init zeroes
-         * .uninit when it holds no image), and WARM, which has no mirror,
-         * lives in the retained SSRAM instead -- see .ssram below. */
+        /* The RETAINED grade is in SSRAM (see .ssram below), not here: the
+         * secure bootloader clears part of DTCM on every reset, so DTCM data
+         * survives a reset only through the MRAM mirror. */
     } > TCM
 
     /* End of static allocations / start of the _sbrk heap. Aliases for
@@ -219,32 +190,30 @@ SECTIONS
     __end__ = .;
     __datastart = __data_start;
 
-    /* Volatile CPU working memory, outside the durable overlay and guard. */
+    /* The extra SRAM tier span runs from the end of the statics up to the
+     * stack guard. */
     __tier_sram_extra_start = ALIGN(_end, 32);
     __tier_sram_extra_end = __tiku_stack_guard_start;
     ASSERT(__tier_sram_extra_start <= __tier_sram_extra_end,
            "ERROR: DTCM statics overlap the stack guard")
 
-    /* Shared SRAM (3 MB at 0x20080000), powered in tiku_crt_early.c. Holds the
-     * large volatile tier backing buffers (.ssram), zero-initialised by the
-     * reset handler after the SSRAM is powered. ALIGN(32) for an MPU region
-     * base (mem port D). */
+    /* Large static buffers (.ssram) in the 3 MB shared SRAM, which
+     * tiku_crt_early.c powers and then zeroes.  ALIGN(32) for an MPU region
+     * base. */
     .ssram (NOLOAD) : ALIGN(32)
     {
         __ssram_start = .;
         *(.ssram*)
         . = ALIGN(32);
         __ssram_end = .;
-        /* RETAINED grade: survives warm resets, reseeded on
-         * power cycle (magic self-primes).  Placed AFTER __ssram_end so the
-         * crt's .ssram zero loop (__ssram_start..__ssram_end) skips it, and
-         * in SSRAM rather than DTCM because the bootloader clears part of
-         * DTCM on every reset (see the .uninit note above). */
+        /* RETAINED grade: survives a warm reset and is lost on a power
+         * cycle.  It sits past __ssram_end, outside the crt's .ssram zero
+         * loop. */
         *(.retained*)
     } > SSRAM
 
-    /* NOLOAD catch so any Ambiq HAL .shared / .resource_table symbols
-     * resolve cleanly. */
+    /* Collects any .shared and .resource_table input; __ssram_top marks the
+     * end of the bank's static tenants. */
     .shared (NOLOAD) :
     {
         KEEP(*(.resource_table))
@@ -254,19 +223,12 @@ SECTIONS
     } > SSRAM
 
     /*
-     * PRIMARY SRAM TIER SPAN -- the rest of the shared bank.
-     *
-     * Derived rather than compiled in, for the reason the RA8P1 script gives:
-     * a constant has to be chosen per build configuration and silently stops
-     * matching the moment a .ssram buffer is added.  Placed after .shared so
-     * it clears every other tenant of the bank, including the RETAINED grade that
-     * sits past __ssram_end on this part.
-     *
-     * Being outside .ssram also keeps it out of the crt's zero loop
-     * (__ssram_start..__ssram_end), which the allocator has never needed --
-     * it does not promise zeroed memory.
+     * The primary SRAM tier span is the rest of the shared bank: from
+     * __ssram_top, past every static tenant including the RETAINED data, to
+     * the end of the bank.  It lies outside the crt's .ssram zero loop; the
+     * tier allocator does not promise zeroed memory.  No tail reserve: the
+     * stack and its guard are in DTCM.
      */
-    /* No tail reserve: the stack and its guard live in TCM, not SSRAM. */
     __tiku_tier_span_start      = __ssram_top;
     __tiku_tier_span_limit      = ORIGIN(SSRAM) + LENGTH(SSRAM);
     __tiku_tier_reserve_default = 0;
@@ -280,8 +242,9 @@ SECTIONS
     ASSERT((__uninit_end - __uninit_start) <= (__tiku_nvm_mram_size - 16),
            "ERROR: .uninit too large for the 16 KB NVM mirror page (mem port C)")
 
-    /* The layout record opens the durable image in every build, so an image
-     * with other durable variables still reads it where the last one wrote. */
+    /* tiku_layout_pin must start .uninit, so a firmware image whose other
+     * durable variables differ still finds the layout record at the offset
+     * the previous image wrote it to. */
     ASSERT((DEFINED(tiku_layout_pin) ? tiku_layout_pin : __uninit_start)
            == __uninit_start,
            "ERROR: tiku_layout_pin does not open .uninit (TIKU_DURABLE_FIRST holds one object)")

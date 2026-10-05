@@ -7,15 +7,15 @@
  *
  * tiku_gpio_arch.c - Apollo510 GPIO access (bare-metal).
  *
- * Direct register access through the CMSIS device header, so the GPIO path pulls
- * no vendor HAL: a PADKEY-bracketed PINCFG write configures a pad, and output,
- * toggle and input use the pad/32-indexed banks.
+ * Registers are reached through the CMSIS device header, with no vendor HAL:
+ * a PADKEY-bracketed PINCFG write configures a pad, and output, toggle and
+ * input use the per-32-pad banks.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "tiku_gpio_arch.h"
-#include "apollo510.h"       /* CMSIS register defs (GPIO_Type/GPIO) -- register header only */
+#include "apollo510.h"       /* CMSIS register definitions */
 
 /** Total number of GPIO pads on Apollo510 (AM_HAL_GPIO_MAX_PADS) */
 #define TIKU_AMBIQ_GPIO_NUM_PADS  224u
@@ -37,8 +37,9 @@
 /**
  * @brief Write a pad configuration register under the PADKEY lock
  *
- * Unlocks the GPIO pad-key, writes cfg to GPIO->PINCFG[pad], then
- * relocks. Must be called before any pad mode change on Apollo510.
+ * PINCFG takes writes only while PADKEY holds the unlock key, so this
+ * unlocks, writes cfg to GPIO->PINCFG[pad] and relocks.  @p pad is not
+ * range-checked.
  *
  * @param pad  Pad index (0 .. TIKU_AMBIQ_GPIO_NUM_PADS-1)
  * @param cfg  PINCFG register value to write
@@ -50,14 +51,11 @@ static inline void pad_config(uint32_t pad, uint32_t cfg) {
 }
 
 /**
- * @brief Public pad-config write, for drivers that own alternate functions.
+ * @brief Range-checked pad_config() for drivers that give pads to a
+ *        peripheral; the caller composes the PINCFG value.
  *
- * Lets a peripheral driver hand its pads to the controller without each one
- * hand-rolling the PADKEY unlock -- the same reason the persist-cell API owns
- * the NVM unlock windows.  The caller composes the value; this owns the lock.
- *
- * @param pad  Pad index (0 .. TIKU_AMBIQ_GPIO_NUM_PADS-1); out of range is
- *             ignored rather than writing past the register array
+ * @param pad  Pad index (0 .. TIKU_AMBIQ_GPIO_NUM_PADS-1); a larger index
+ *             is ignored
  * @param cfg  Full PINCFG register value
  */
 void tiku_ambiq_gpio_pad_config(uint32_t pad, uint32_t cfg) {
@@ -67,20 +65,19 @@ void tiku_ambiq_gpio_pad_config(uint32_t pad, uint32_t cfg) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* Raw-pad helpers (used by the board LED macros)                            */
+/* RAW-PAD HELPERS                                                           */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Configure an Apollo510 pad as a push-pull GPIO output
  *
- * Sets FNCSEL=GPIO and OUTCFG=push-pull via pad_config(). Used by
- * the board LED macros.
+ * Sets FNCSEL=GPIO, OUTCFG=push-pull and INPEN via pad_config().
  *
  * @param pad  Pad index (0 .. TIKU_AMBIQ_GPIO_NUM_PADS-1)
  */
 void tiku_ambiq_gpio_init_output(uint32_t pad) {
-    /* INPEN alongside OUTCFG so the driven level is read-backable via RD
-     * (tiku_gpio_arch_read); Ambiq pads allow a simultaneous input buffer. */
+    /* INPEN with OUTCFG lets tiku_gpio_arch_read() return the driven level
+     * from RD; an Ambiq pad's input buffer works while it drives. */
     pad_config(pad, TIKU_GPIO_FNCSEL_GPIO | TIKU_GPIO_OUTCFG_PUSHPULL |
                     TIKU_GPIO_INPEN);
 }
@@ -107,7 +104,7 @@ void tiku_ambiq_gpio_set(uint32_t pad, uint8_t value) {
  * @brief Toggle an Apollo510 GPIO pad output
  *
  * XORs the pad's bit in the WT0 (output data) register, indexed by
- * pad/32.
+ * pad/32.  The read-modify-write is not atomic.
  *
  * @param pad  Pad index (0 .. TIKU_AMBIQ_GPIO_NUM_PADS-1)
  */
@@ -116,7 +113,7 @@ void tiku_ambiq_gpio_toggle(uint32_t pad) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* Shared (port,pin) API — maps port N pin p -> pad (N-1)*8 + p              */
+/* SHARED (PORT, PIN) API                                                    */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -174,7 +171,7 @@ int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin) {
 }
 
 /**
- * @brief Write a digital value to a (port, pin) GPIO output
+ * @brief Configure a (port, pin) GPIO as an output and drive it
  *
  * @param port  1-based port number
  * @param pin   Pin index within the port (0-7)
@@ -184,16 +181,16 @@ int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin) {
 int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val) {
     uint32_t pad;
     if (ambiq_pad_of(port, pin, &pad)) { return -1; }
-    /* Match the MSP430 contract: a write ensures the pad is an output (the
-     * shell `gpio` command / tiku_gpio_write rely on this rather than a
-     * separate dir_out). Idempotent if the pad is already an output. */
+    /* A write makes the pad an output, as tiku_gpio_set() documents.  The
+     * PINCFG write replaces any other pad setting, such as a pull or drive
+     * strength. */
     tiku_ambiq_gpio_init_output(pad);
     tiku_ambiq_gpio_set(pad, val);
     return 0;
 }
 
 /**
- * @brief Toggle a (port, pin) GPIO output
+ * @brief Configure a (port, pin) GPIO as an output and invert its level
  *
  * @param port  1-based port number
  * @param pin   Pin index within the port (0-7)
@@ -202,7 +199,7 @@ int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val) {
 int8_t tiku_gpio_arch_toggle(uint8_t port, uint8_t pin) {
     uint32_t pad;
     if (ambiq_pad_of(port, pin, &pad)) { return -1; }
-    tiku_ambiq_gpio_init_output(pad);   /* ensure output, like write */
+    tiku_ambiq_gpio_init_output(pad);   /* makes it an output, as write */
     tiku_ambiq_gpio_toggle(pad);
     return 0;
 }

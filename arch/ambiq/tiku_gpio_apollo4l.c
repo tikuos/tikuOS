@@ -7,17 +7,17 @@
  *
  * tiku_gpio_apollo4l.c - Apollo4 Lite GPIO access (bare-metal).
  *
- * Mirrors the Apollo510 driver: the GPIO block is register-compatible for every
- * operation used here, with the same PINCFG field positions and the same
- * pad/32-indexed set, clear, toggle and read banks.
+ * Uses the registers the same way as the Apollo510 file, tiku_gpio_arch.c:
+ * the PINCFG fields, PADKEY and the per-32-pad set, clear, toggle and read
+ * banks match.  tiku_ambiq_gpio_pad_config() is not defined for this part.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "tiku_gpio_arch.h"
-#include "apollo4l.h"       /* CMSIS register defs (GPIO_Type/GPIO) -- register header only */
+#include "apollo4l.h"       /* CMSIS register definitions */
 
-/** Pad-index upper bound for tikuOS (the GPIO register space spans pads 0-127). */
+/** PINCFG0..127 cover pads 0-104 and virtual pads 105-127. */
 #define TIKU_AMBIQ_GPIO_NUM_PADS  128u
 
 /**
@@ -46,10 +46,10 @@ static inline void pad_config(uint32_t pad, uint32_t cfg) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* Raw-pad helpers (used by the board LED macros)                            */
+/* RAW-PAD HELPERS                                                           */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Configure a pad as a push-pull GPIO output. */
+/** @brief Configure a pad as a push-pull GPIO output, input buffer on. */
 void tiku_ambiq_gpio_init_output(uint32_t pad) {
     pad_config(pad, TIKU_GPIO_FNCSEL_GPIO | TIKU_GPIO_OUTCFG_PUSHPULL |
                     TIKU_GPIO_INPEN);
@@ -65,16 +65,16 @@ void tiku_ambiq_gpio_set(uint32_t pad, uint8_t value) {
     }
 }
 
-/** @brief Toggle a GPIO pad output via WT0. */
+/** @brief Toggle a GPIO pad output via WT0 (read-modify-write, not atomic). */
 void tiku_ambiq_gpio_toggle(uint32_t pad) {
     (&GPIO->WT0)[pad >> 5] ^= (1u << (pad & 31u));
 }
 
 /*---------------------------------------------------------------------------*/
-/* Shared (port,pin) API -- maps port N pin p -> pad (N-1)*8 + p             */
+/* SHARED (PORT, PIN) API                                                    */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Convert a (port, pin) pair to a pad index, or -1 if invalid. */
+/** @brief Store pad (port-1)*8 + pin in *pad and return 0; -1 if invalid. */
 static int ambiq_pad_of(uint8_t port, uint8_t pin, uint32_t *pad) {
     uint32_t p;
     if (port < 1 || pin > 7) {
@@ -104,7 +104,7 @@ int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin) {
     return 0;
 }
 
-/** @brief Write a digital value to a (port, pin) GPIO output. */
+/** @brief Configure a (port, pin) GPIO as an output and drive it. */
 int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val) {
     uint32_t pad;
     if (ambiq_pad_of(port, pin, &pad)) { return -1; }
@@ -113,7 +113,7 @@ int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val) {
     return 0;
 }
 
-/** @brief Toggle a (port, pin) GPIO output. */
+/** @brief Configure a (port, pin) GPIO as an output and invert its level. */
 int8_t tiku_gpio_arch_toggle(uint8_t port, uint8_t pin) {
     uint32_t pad;
     if (ambiq_pad_of(port, pin, &pad)) { return -1; }

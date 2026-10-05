@@ -5,29 +5,26 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_freq_boot_apollo4l.c - Apollo4 Lite CPU/SoC bring-up and clocks.
+ * tiku_cpu_freq_boot_apollo4l.c - Apollo4 CPU/SoC bring-up and clocks.
  *
- * Mirrors the Apollo510 file for the Cortex-M4: no SCB L1 cache and no HFRC2
- * turbo, so the core runs at the ~96 MHz HFRC the boot ROM leaves configured and
- * bring-up inherits the boot rails and clock tree as-is.
+ * Boot enables the CACHECTRL cache over MRAM.  The core runs at 96 MHz in
+ * low-power mode or 192 MHz in high-performance mode, which first brings up
+ * the SIMO buck.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "apollo4l.h"       /* CMSIS register defs -- register header only */
+#include "apollo4l.h"       /* CMSIS register map */
 #include "tiku_cpu_freq_boot_arch.h"
 #include "tiku_cpu_common.h"  /* tiku_cpu_ambiq_delay_us */
 
-/** True CPU core frequency in Hz (Apollo4 Lite HFRC, low-power default). */
+/** @brief Core clock in Hz, read from the perf-mode status on each change. */
 static unsigned long s_core_hz = 96000000UL;
 
 /**
- * @brief Read the true CPU core clock from the MCU performance-mode register.
+ * @brief Read the core clock from the perf-mode status (PWRCTRL.MCUPERFREQ).
  *
- * Apollo4 Lite runs the Cortex-M4F at 96 MHz in Low-Power mode or 192 MHz in
- * High-Performance "turbo" mode.
- *
- * @return Core clock frequency in Hz (96000000 or 192000000).
+ * @return 96000000 in low-power mode, 192000000 in high-performance mode.
  */
 static unsigned long tiku_ambiq_core_hz(void) {
     if (PWRCTRL->MCUPERFREQ_b.MCUPERFSTATUS ==
@@ -38,23 +35,18 @@ static unsigned long tiku_ambiq_core_hz(void) {
 }
 
 /**
- * @brief Bare-metal Apollo4 Lite SoC bring-up.
+ * @brief Enable the CACHECTRL cache over MRAM, instruction and data sides.
  *
- * The Cortex-M4 core has no SCB I/D cache to enable, and the boot ROM leaves
- * the HFRC core clock and power rails usable.  Nothing to do at the
- * minimal/smoke milestone; the CACHECTRL cache arrives with the full backends.
+ * The Cortex-M4 has no SCB caches.  The boot ROM leaves the HFRC core clock
+ * and the power rails usable, so nothing else is set up here.
  */
 static void tiku_ambiq_soc_init(void) {
-    /* Enable the Apollo4 CPU cache. The SBL configures CACHECFG but leaves it
-     * disabled (ENABLE=0); without it every fetch from MRAM stalls the core --
-     * worse at 192 MHz, where the fixed MRAM latency costs twice the core
-     * cycles, so HP turbo gave far less than its 2x on fetch-bound code. Enable
-     * BOTH the I-cache (code) and the D-cache (read-only MRAM data). The CPU
-     * never writes MRAM through the cache -- the persistence path programs it
-     * out-of-band via the bootrom -- and tiku_mem_arch_nvm_flush() calls
-     * tiku_cpu_dcache_invalidate() after each program, so the D-cache stays
-     * coherent with the persist layer. Mirrors the AmbiqSuite cachectrl config
-     * (1-way, 128-bit line, 4096 entries) + enable + invalidate. */
+    /* The SBL configures CACHECFG but leaves it disabled; without the cache
+     * every fetch from MRAM stalls the core, more so at 192 MHz.  The D-cache
+     * holds read-only MRAM data: the CPU never writes MRAM through it (the
+     * boot ROM programs MRAM), and tiku_mem_arch_nvm_flush() invalidates it
+     * after each program.  The configuration is AmbiqSuite's: 1-way, 128-bit
+     * lines, 4096 entries, then enable and invalidate. */
     CPU->CACHECFG = (1u << CPU_CACHECFG_CLKGATE_Pos)
                   | (1u << CPU_CACHECFG_DATACLKGATE_Pos)
                   | (1u << CPU_CACHECFG_LRU_Pos)
@@ -67,11 +59,10 @@ static void tiku_ambiq_soc_init(void) {
 }
 
 /**
- * @brief Apollo4 Lite data-cache maintenance (routed from tiku_cpu_dcache_*).
+ * @brief Apollo4 data-cache maintenance, for tiku_cpu_dcache_*().
  *
- * Clean is a no-op: the CACHECTRL D-cache only holds read-only MRAM data.
- * Invalidate flushes the whole cache -- Apollo4 CACHECTRL has no by-range op --
- * which is coarse but correct, and NVM flushes are rare.
+ * Clean does nothing: the CACHECTRL D-cache holds only read-only MRAM data.
+ * Invalidate drops the whole cache, as CACHECTRL has no by-range operation.
  *
  * @note The barrier pair lets the invalidate take effect before the next
  *       fetch or load.
@@ -88,11 +79,10 @@ void tiku_cpu_ambiq_dcache_invalidate(const void *addr, unsigned long len) {
 }
 
 /**
- * @brief Apollo4 Lite instruction-cache invalidate.
+ * @brief Apollo4 I-cache invalidate, for tiku_cpu_icache_invalidate().
  *
- * The CACHECTRL cache is unified over MRAM (it serves instruction fetches
- * too), so the I-side invalidate is the same whole-cache flush as the
- * D-side one. Routed from the portable tiku_cpu_icache_invalidate() HAL.
+ * The CACHECTRL cache serves instruction fetches too, so this is the same
+ * whole-cache invalidate as the data side.
  */
 void tiku_cpu_ambiq_icache_invalidate(void) {
     CPU->CACHECTRL_b.INVALIDATE = 1u;
@@ -101,10 +91,7 @@ void tiku_cpu_ambiq_icache_invalidate(void) {
 }
 
 /**
- * @brief Initialize the Apollo4 Lite CPU at boot.
- *
- * Runs bare-metal SoC bring-up then records the core clock. Called once from
- * main() before any kernel subsystem starts.
+ * @brief Boot-time CPU setup: enable the cache, then read the core clock.
  */
 void tiku_cpu_boot_ambiq_init(void) {
     tiku_ambiq_soc_init();
@@ -112,16 +99,16 @@ void tiku_cpu_boot_ambiq_init(void) {
 }
 
 /**
- * @brief Bring up the SIMO buck regulator (LDO -> buck) so the core can enter
- *        High-Performance mode.
+ * @brief Bring up the SIMO buck (LDO -> buck) so the core can enter
+ *        high-performance mode.
  *
- * The SBL boots Apollo4 Lite on the LDO; HP (192 MHz) requires the buck active.
- * Mirrors the AmbiqSuite SIMOBUCK_INIT post-PCM path: LP-TON trims, VDDF shorted
- * to VDDS, RX compensation, buck on, force active with CORE + MEM LDOs.
+ * The SBL boots on the LDO; HP (192 MHz) needs the buck active.  The sequence
+ * is AmbiqSuite's SIMOBUCK_INIT post-PCM path: LP-TON trims, VDDF shorted to
+ * VDDS, RX compensation, buck on, forced active with the CORE and MEM LDOs.
  *
- * @note The short doubles the VDDF load cap so the buck can regulate.  The SBL
- *       already loaded the per-chip VREF trims, so the regulated voltages are
- *       unchanged and there is no over-volt risk.
+ * @note The short doubles the VDDF load capacitance so the buck can regulate.
+ *       The SBL has loaded the per-chip VREF trims, so the regulated voltages
+ *       do not change.
  * @return 0 once VRSTATUS.SIMOBUCKST == ACT, -1 on timeout.
  */
 static int tiku_ambiq_simobuck_enable(void) {
@@ -131,9 +118,10 @@ static int tiku_ambiq_simobuck_enable(void) {
         return 0;
     }
 
-    /* This part is post-PCM (INFO1 trim rev >= 2) and post-A0, so the pre-PCM
-     * active-TON-trim block is skipped -- this mirrors the AmbiqSuite
-     * SIMOBUCK_INIT GT_A0 path. */
+    /* AmbiqSuite's SIMOBUCK_INIT sequence for parts newer than revision A0
+     * with post-PCM trims (INFO1 trim rev >= 2), which leaves out the
+     * active-TON trims of pre-PCM parts.  The code does not check the part's
+     * revision. */
 
     /* Low-power-mode buck switching (TON) trims. */
     MCUCTRL->SIMOBUCK3_b.VDDCLPLOWTONTRIM  = 0xAu;
@@ -141,25 +129,25 @@ static int tiku_ambiq_simobuck_enable(void) {
     MCUCTRL->SIMOBUCK8_b.VDDFLPLOWTONTRIM  = 0xFu;
     MCUCTRL->SIMOBUCK8_b.VDDFLPHIGHTONTRIM = 0xFu;
 
-    /* MANDATORY on Apollo4 Lite: short VDDF to VDDS to double the VDDF load
-     * capacitance (2.2uF + 2.2uF). Without this the buck cannot regulate and
-     * VRSTATUS.SIMOBUCKST never reaches ACT. */
+    /* Short VDDF to VDDS to double the VDDF load capacitance (2.2 uF +
+     * 2.2 uF); without it the buck cannot regulate and VRSTATUS.SIMOBUCKST
+     * never reaches ACT. */
     MCUCTRL->PWRSW1_b.SHORTVDDFVDDSORVAL = 1u;
     MCUCTRL->PWRSW1_b.SHORTVDDFVDDSOREN  = 1u;
-    MCUCTRL->SIMOBUCK13_b.ACTTRIMVDDS    = 0u;  /* VDDS trim -> 0 (now shorted) */
+    MCUCTRL->SIMOBUCK13_b.ACTTRIMVDDS    = 0u;  /* VDDS trim 0: shorted */
 
     /* RX compensation on the VDDC / VDDS / VDDF rails. */
     MCUCTRL->SIMOBUCK0 = MCUCTRL_SIMOBUCK0_VDDCRXCOMPEN_Msk |
                          MCUCTRL_SIMOBUCK0_VDDSRXCOMPEN_Msk |
                          MCUCTRL_SIMOBUCK0_VDDFRXCOMPEN_Msk;
 
-    /* Enable the buck (post-A0: just the enable here; the active/override bits
-     * and the parallel LDOs follow), then allow dynamic trim latching. */
+    /* Enable the buck (post-A0: the enable alone; the active and override
+     * bits and the parallel LDOs follow), then allow dynamic trim latching. */
     PWRCTRL->VRCTRL_b.SIMOBUCKEN        = 1u;
     MCUCTRL->SIMOBUCK15_b.TRIMLATCHOVER = 1u;
 
-    /* Force the buck active and run the CORE + MEM LDOs in parallel with SIMO
-     * (Apollo4 Lite requires this); set each *OVER override bit last. */
+    /* Force the buck active and run the CORE and MEM LDOs in parallel with
+     * it, as Apollo4 requires; each *OVER override bit is set last. */
     MCUCTRL->VRCTRL_b.SIMOBUCKPDNB   = 1u;
     MCUCTRL->VRCTRL_b.SIMOBUCKRSTB   = 1u;
     MCUCTRL->VRCTRL_b.SIMOBUCKACTIVE = 1u;
@@ -189,15 +177,13 @@ static int tiku_ambiq_simobuck_enable(void) {
 }
 
 /**
- * @brief Select the CPU operating frequency (perf mode).
+ * @brief Select the CPU perf mode: LP (96 MHz) or HP (192 MHz).
  *
- * Apollo4 Lite has Low-Power (96 MHz) and High-Performance turbo (192 MHz),
- * selected via the PWRCTRL performance-mode request.  This part needs no manual
- * core-voltage step, so the switch is the request plus an ACK poll.
+ * A request above 96 MHz asks for HP, after bringing up the SIMO buck; any
+ * other asks for LP.  The switch is the PWRCTRL request and an ACK poll.
  *
- * @note HP only requires the SIMOBUCK regulator active.  The tick is on the
- *       STIMER and the busy delay re-reads the live core clock, so a mode
- *       change does not disturb timekeeping.
+ * @note The tick runs from STIMER and busy delays read the core clock at
+ *       entry, so a mode change does not disturb timekeeping.
  * @param cpu_freq  Requested core frequency in MHz.
  */
 void tiku_cpu_freq_ambiq_init(unsigned int cpu_freq) {
@@ -206,9 +192,10 @@ void tiku_cpu_freq_ambiq_init(unsigned int cpu_freq) {
         : PWRCTRL_MCUPERFREQ_MCUPERFREQ_LP;
     uint32_t spin;
 
-    /* HP turbo needs the SIMOBUCK regulator active. The SBL boots on the LDO,
-     * so bring the buck up on demand; if it won't reach active, decline HP and
-     * stay in the current mode rather than run 192 MHz undervolted. */
+    /* HP needs the SIMO buck active and the SBL boots on the LDO, so the
+     * buck comes up on demand.  If it does not reach ACT the request is
+     * declined and the mode stays as it is: 192 MHz on the LDO is
+     * undervolted. */
     if (want == PWRCTRL_MCUPERFREQ_MCUPERFREQ_HP &&
         PWRCTRL->VRSTATUS_b.SIMOBUCKST != PWRCTRL_VRSTATUS_SIMOBUCKST_ACT) {
         if (tiku_ambiq_simobuck_enable() != 0) {
@@ -234,7 +221,7 @@ void tiku_cpu_boot_ambiq_power_wfi_enter(void) {
 /** @brief Return the main CPU core clock frequency in Hz. */
 unsigned long tiku_cpu_ambiq_clock_get_hz(void) { return s_core_hz; }
 
-/** @brief Return the SMCLK-equivalent sub-module clock (same as core here). */
+/** @brief Return the SMCLK-equivalent clock: the core clock on this port. */
 unsigned long tiku_cpu_ambiq_smclk_get_hz(void) { return s_core_hz; }
 
 /** @brief Return the ACLK-equivalent low-frequency clock (32.768 kHz). */

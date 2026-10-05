@@ -5,10 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_adc_arch.h - Apollo 510 ADC driver interface
+ * tiku_adc_arch.h - Ambiq SAR-ADC driver interface.
  *
- * Stub at this milestone (returns not-supported); a real am_hal_adc
- * backend lands with the peripheral pass.
+ * Polled single conversions on the Apollo4 and Apollo510 SAR-ADC
+ * (tiku_adc_ambiq.inl).  Every conversion is 12-bit against the internal
+ * reference, whatever the configuration asks for.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,41 +20,40 @@
 #include <interfaces/adc/tiku_adc.h>
 
 /**
- * @brief Initialize the ADC peripheral with the given configuration.
+ * @brief Power the ADC and set it up for software-triggered conversions.
  *
- * Stub implementation — returns a not-supported error code. A real
- * am_hal_adc backend will replace this in the peripheral pass.
+ * Ignores @p config: resolution is 12 bits and the reference is internal.
  *
- * @param config  Pointer to the ADC configuration structure.
- * @return 0 on success, negative error code on failure.
+ * @param config  ADC configuration (unused).
+ * @return 0 on success, -1 if the ADC power domain does not come up.
  */
 int  tiku_adc_arch_init(const tiku_adc_config_t *config);
 
 /**
- * @brief Release the ADC peripheral and power it down.
+ * @brief Disable the ADC and remove its power.
  *
- * Stub implementation — no-op at this milestone.
+ * On the Apollo510 the HFRC force set by init stays on.
  */
 void tiku_adc_arch_close(void);
 
 /**
- * @brief Initialize a single ADC channel.
+ * @brief Check that a channel exists; no pad setup is needed.
  *
- * Stub implementation — returns a not-supported error code.
+ * Channels 0-7 are the external inputs SE0-SE7 on dedicated analog pads;
+ * 30 and 31 are the temperature and battery channels.
  *
- * @param channel  Channel index to initialize.
- * @return 0 on success, negative error code on failure.
+ * @param channel  Channel number.
+ * @return 0 for a valid channel, -1 otherwise.
  */
 int  tiku_adc_arch_channel_init(uint8_t channel);
 
 /**
- * @brief Perform a blocking ADC conversion on the given channel.
+ * @brief Run one blocking conversion on a channel.
  *
- * Stub implementation — returns a not-supported error code.
- *
- * @param channel  Channel index to sample.
- * @param value    Output: raw ADC result (caller-provided).
- * @return 0 on success, negative error code on failure.
+ * @param channel  Channel number (0-7, 30 or 31).
+ * @param value    Receives the 12-bit result, or 0 on any failure.
+ * @return 0 on success; -1 if the ADC is not initialised, the channel is
+ *         invalid or the conversion times out.
  */
 int  tiku_adc_arch_read(uint8_t channel, uint16_t *value);
 

@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_lcd_arch.c - Apollo 510 segment-LCD driver (none on this board)
+ * tiku_lcd_arch.c - Ambiq segment-LCD driver (no board has one)
  *
- * The Apollo510 EVB has no segment LCD, so this translation unit is
- * intentionally empty (mirrors arch/arm-rp2350/tiku_lcd_arch.c). The
- * generic LCD interface self-gates to no-ops via TIKU_BOARD_HAS_LCD.
+ * No Ambiq board defines TIKU_BOARD_HAS_LCD, so this translation unit is
+ * empty, like arch/arm-rp2350/tiku_lcd_arch.c; the generic LCD interface
+ * compiles to no-ops.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,11 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_gpu_power.c - GPU power-measurement instruments.
+ * tiku_gpu_power.c - GPU power-measurement probes.
  *
- * Implements the probes declared in tiku_gpu_power.h, whose two measurement rules
- * this file enforces.  The timebase is the always-on 32.768 kHz STIMER, as
- * everywhere else in the Apollo power work.
+ * Runs the probes declared in tiku_gpu_power.h on SSRAM surfaces.  The
+ * timebase is the 32.768 kHz STIMER, which keeps counting through WFI.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,17 +17,17 @@
 #include "tiku_power_ambiq.h"     /* STIMER timebase                          */
 #include "apollo510.h"
 #include <hal/tiku_cpu.h>
-#include <kernel/cpu/tiku_hang.h> /* probes block on purpose -- check in       */
+#include <kernel/cpu/tiku_hang.h> /* check-ins during the blocking probes */
 
 /*---------------------------------------------------------------------------*/
 /* SURFACES                                                                  */
 /*---------------------------------------------------------------------------*/
 
 /*
- * MUST be .ssram: the GPU is a non-coherent AHB bus master and cannot see
- * DTCM/ITCM at all.  32-byte aligned for both the GPU's requirement and clean
- * D-cache maintenance boundaries.  256 KB each, so the pair defeats the 64 KB
- * D-cache four times over while leaving most of the 3 MB SSRAM to .bss.
+ * In .ssram: the GPU is a non-coherent AHB bus master and cannot reach DTCM
+ * or ITCM.  32-byte alignment meets the GPU's requirement and keeps D-cache
+ * maintenance on line boundaries.  Each surface is 256 KB, four times the
+ * 64 KB D-cache.
  */
 #define SURF_BYTES ((uint32_t)TIKU_GPU_SURF_MAX_SIDE * \
                     (uint32_t)TIKU_GPU_SURF_MAX_SIDE * 4u)
@@ -37,8 +36,7 @@ static uint8_t s_dst[SURF_BYTES] __attribute__((section(".ssram"), aligned(32)))
 static uint8_t s_src[SURF_BYTES] __attribute__((section(".ssram"), aligned(32)));
 static uint32_t s_pal[256]       __attribute__((section(".ssram"), aligned(32)));
 /* One tiku_gpu_cl_fill() emits 24 words; tiku_gpu_submit() appends a 4-word
- * completion tail.  Sized for a 16-job batch (16*24 + 4 = 388) with headroom --
- * the whole point of P3 is that ONE list should carry MANY jobs. */
+ * completion tail.  512 words hold a batch of up to 21 fills. */
 static uint32_t s_cl[512]        __attribute__((section(".ssram"), aligned(32)));
 
 static uint32_t s_ops, s_bytes, s_cpu_ops, s_wakes, s_sum;
@@ -53,13 +51,13 @@ uint32_t tiku_gpu_power_wakes(void)    { return s_wakes; }
 uint32_t tiku_gpu_power_checksum(void) { return s_sum; }
 int      tiku_gpu_power_exact(void)    { return s_exact; }
 
+/** @brief Clamp @p side to 8..TIKU_GPU_SURF_MAX_SIDE, a power of two. */
 static uint32_t clamp_side(uint32_t side)
 {
     if (side < 8u) { return 8u; }
     if (side > TIKU_GPU_SURF_MAX_SIDE) { return TIKU_GPU_SURF_MAX_SIDE; }
-    /* Power of two: reduce_mean requires it, and the fold tree is the only op
-     * that would fail late rather than early.  Round DOWN so a request never
-     * silently grows past the buffer. */
+    /* A power of two, which tiku_gpu_reduce_mean() requires, rounded down so
+     * the result never exceeds the request. */
     {
         uint32_t p = 8u;
         while ((p << 1) <= side) { p <<= 1; }
@@ -67,6 +65,7 @@ static uint32_t clamp_side(uint32_t side)
     }
 }
 
+/** @brief Describe a point-sampled @p side square surface of @p fmt. */
 static void surf_of(tiku_gpu_surface_t *s, void *base, uint32_t side,
                     uint8_t fmt)
 {
@@ -78,9 +77,8 @@ static void surf_of(tiku_gpu_surface_t *s, void *base, uint32_t side,
     s->sampling = TIKU_GPU_SAMPLE_POINT;
 }
 
-/** Sum of the first and last words + a mid word: cheap, and enough to catch a
- *  wrong result without adding a full-surface CPU read to every window (which
- *  would pollute the very current under measurement). */
+/** @brief Sum of the surface's first, middle and last words, read after
+ *         invalidating the D-cache over it. */
 static uint32_t probe_sum(const void *base, uint32_t bytes)
 {
     const volatile uint32_t *w = (const volatile uint32_t *)base;
@@ -93,6 +91,7 @@ static uint32_t probe_sum(const void *base, uint32_t bytes)
 /* GPU WORKLOADS                                                             */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Run one pass of @p kind; @p i varies the fill colour per pass. */
 static tiku_gpu_err_t run_one(unsigned kind, const tiku_gpu_surface_t *dst,
                               const tiku_gpu_surface_t *src, uint32_t i)
 {
@@ -100,8 +99,8 @@ static tiku_gpu_err_t run_one(unsigned kind, const tiku_gpu_surface_t *dst,
 
     switch (kind) {
     case TIKU_GPU_W_FILL:
-        /* Vary the colour per pass so a dropped op is visible in the checksum
-         * rather than hidden by an idempotent write. */
+        /* The colour changes every pass, so a dropped fill shows in the
+         * checksum. */
         return tiku_gpu_fill(dst->base, dst->w, dst->h, dst->stride,
                              0xFF000000u | (i & 0xFFFFFFu));
     case TIKU_GPU_W_COPY:
@@ -116,9 +115,8 @@ static tiku_gpu_err_t run_one(unsigned kind, const tiku_gpu_surface_t *dst,
         return tiku_gpu_lut_apply(dst, &idx, s_pal);
     }
     case TIKU_GPU_W_REDUCE:
-        /* reduce_mean OVERWRITES its surface, so refill first -- the refill is
-         * inside the window and charged to this workload, which is honest:
-         * a reduction of live data always costs getting the data there. */
+        /* reduce_mean overwrites its surface, so each pass refills it first;
+         * the refill is inside the timed window and in bytes_of(). */
         (void)tiku_gpu_fill(dst->base, dst->w, dst->h, dst->stride, 0xFF404040u);
         return tiku_gpu_reduce_mean(dst, &mean);
     default:
@@ -126,7 +124,7 @@ static tiku_gpu_err_t run_one(unsigned kind, const tiku_gpu_surface_t *dst,
     }
 }
 
-/** Bytes touched by one pass of @p kind on a @p side square surface. */
+/** @brief Bytes touched by one pass of @p kind on a @p side square surface. */
 static uint32_t bytes_of(unsigned kind, uint32_t side)
 {
     uint32_t px = side * side;
@@ -158,7 +156,7 @@ tiku_gpu_power_probe(unsigned kind, uint32_t side, uint32_t ms, int async)
     surf_of(&src, s_src, side, TIKU_GPU_FMT_RGBA8888);
     per_pass = bytes_of(kind, side);
 
-    /* Prime the source and the palette once, OUTSIDE the measured window. */
+    /* Prime the source and the palette once, outside the measured window. */
     {
         uint32_t n = (side * side * 4u) / 4u, k;
         uint32_t *w = (uint32_t *)s_src;
@@ -172,22 +170,15 @@ tiku_gpu_power_probe(unsigned kind, uint32_t side, uint32_t ms, int async)
     t0 = tiku_ambiq_stimer_now();
 
     if (async && kind == TIKU_GPU_W_FILL) {
-        /* The batched leg exists only for FILL: it is the one op the
-         * command-list builder can express (tiku_gpu_cl_fill), and mixing
-         * "async" with ops that fall back to blocking would silently measure
-         * the blocking path.  A wake count of 0 afterwards means the WFI never
-         * slept -- report it rather than claim a saving that did not happen.
-         *
-         * @p async is the BATCH SIZE: how many draws ride in one submitted
-         * list.  At 1 the CPU writes a list, sleeps, wakes and rewrites for
-         * every single job, and experiment 2 measured that overhead exactly
-         * cancelling the sleep saving.  Since the GPU's 6.4 mA standing cost is
-         * architectural, shortening the powered window by batching is the only
-         * power lever the part offers -- which is what this sweep measures. */
+        /* Only FILL has an async form: tiku_gpu_cl_fill() is the only
+         * command-list builder.  @p async is the batch size, the number of
+         * fills in one submitted list; each list raises one completion IRQ.
+         * A wake count of 0 afterwards means no list signalled completion. */
         tiku_gpu_cl_t cl;
         uint32_t batch = (uint32_t)async;
         uint32_t k;
-        /* 24 words per fill + a 4-word tail must fit the buffer. */
+        /* 24 words per fill and the 4-word tail must fit the buffer; the
+         * bound reserves 8 words for the tail. */
         while (batch > 1u && (batch * 24u + 8u) > (uint32_t)(sizeof s_cl / 4u)) {
             batch--;
         }
@@ -223,10 +214,7 @@ tiku_gpu_power_probe(unsigned kind, uint32_t side, uint32_t ms, int async)
     dt = tiku_ambiq_stimer_now() - t0;
     s_ops   = i;
     s_bytes = i * per_pass;
-    /* Completions since entry, NOT the cumulative counter added per pass -- the
-     * first cut summed the running total every iteration and reported 1.6M
-     * "wakes" for 1824 ops.  One IRQ per completed list is the sane invariant,
-     * and a value far from s_ops is itself a finding. */
+    /* Completion IRQs since entry: one per completed list. */
     if (async && kind == TIKU_GPU_W_FILL) {
         s_wakes = tiku_gpu_irq_count() - irq_at_entry;
     }
@@ -291,8 +279,8 @@ tiku_gpu_power_contend_probe(uint32_t side, uint32_t ms)
     s_exact = 1;
     surf_of(&dst, s_dst, side, TIKU_GPU_FMT_RGBA8888);
 
-    /* The CPU streams the SECOND surface while the GPU owns the first: same
-     * fabric and same memory, no read/write hazard between the two agents. */
+    /* The CPU streams the second surface while the GPU fills the first:
+     * the same fabric and memory, with no overlap between the two. */
     cpu  = (volatile uint32_t *)s_src;
     n    = (side * side * 4u) / 4u;
     half = n / 2u;
@@ -305,7 +293,7 @@ tiku_gpu_power_contend_probe(uint32_t side, uint32_t ms)
         if (tiku_gpu_cl_fill(&cl, &dst, 0xFF000000u | (i & 0xFFFFFFu))
                 != TIKU_GPU_OK) { break; }
         if (tiku_gpu_submit(&cl) != TIKU_GPU_OK) { break; }
-        /* CPU work WHILE the GPU renders -- the whole point of the probe. */
+        /* CPU work while the GPU renders. */
         for (k = 0u; k < half; k++) { cpu[k] = cpu[k] + 1u; }
         c++;
         if (tiku_gpu_wait(&cl) != TIKU_GPU_OK) { break; }

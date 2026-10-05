@@ -5,18 +5,18 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_adc_ambiq.inl - shared Apollo4/Apollo5 SAR-ADC logic.
+ * tiku_adc_ambiq.inl - SAR-ADC driver shared by Apollo4 and Apollo510.
  *
- * Not a standalone unit: included from the per-part entry files, which supply the
- * CMSIS header and a clock hook.  The ADC register block is identical across both
- * parts, so the whole polled single-conversion path lives here.
+ * Polled single conversions at 12 bits.  Included from tiku_adc_apollo4l.c and
+ * tiku_adc_arch.c, which supply the CMSIS header and the clock hook
+ * TIKU_ADC_ARCH_CLK_ENABLE().
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <stddef.h>         /* NULL */
 
-/* tikuOS internal-channel sentinels (see tiku_adc.h). */
+/* TIKU_ADC_CH_TEMP and TIKU_ADC_CH_BATTERY (tiku_adc.h). */
 #define ADC_TIKU_CH_TEMP        30u
 #define ADC_TIKU_CH_BATTERY     31u
 
@@ -28,18 +28,21 @@
 /* Magic value the ADC samples as a software trigger (ADC->SWT). */
 #define AMBIQ_ADC_SWT_GO        0x37u
 
-/* CFG.CLKSEL = HFRC 24 MHz, the only legal ADC clock. The enum constant is
- * spelled ..._24MHZ on Apollo4 but ..._24MHz on Apollo5, so use the value (2)
- * directly to stay portable across both vendored headers. */
+/* CFG.CLKSEL 2 = HFRC at 24 MHz, on both parts; apollo4l.h names it the only
+ * valid setting for the Apollo4 ADC.  The value is written as a number
+ * because its CMSIS name is spelled ..._24MHZ on Apollo4 and ..._24MHz on
+ * Apollo510. */
 #define AMBIQ_ADC_CLKSEL_24MHZ  2u
 
-/* Generous spin bounds: a 24 MHz conversion is microseconds, the core MHz. */
+/* Poll bounds, far above the time a 24 MHz conversion takes; exceeding one
+ * returns -1. */
 #define AMBIQ_ADC_PWR_SPIN      100000u
 #define AMBIQ_ADC_CONV_SPIN     1000000u
 
+/** @brief Non-zero between tiku_adc_arch_init() and tiku_adc_arch_close(). */
 static int s_inited;
 
-/* Map a tikuOS channel number to an Apollo CHSEL0 code; -1 if unsupported. */
+/** @brief Map a channel to its SL0CFG.CHSEL0 code; -1 for an invalid one. */
 static int ambiq_adc_chsel(uint8_t channel, uint8_t *chsel)
 {
     if (channel == ADC_TIKU_CH_TEMP)         *chsel = AMBIQ_ADC_CHSEL_TEMP;
@@ -53,12 +56,12 @@ int tiku_adc_arch_init(const tiku_adc_config_t *config)
 {
     uint32_t spin;
 
-    (void)config;   /* fixed 12-bit + internal reference (see file header) */
+    (void)config;   /* fixed: 12-bit, internal reference */
 
-    /* Part-specific clock bring-up (Apollo5 forces HFRC on; Apollo4 no-op). */
+    /* Part-specific clock hook (Apollo510 forces HFRC on). */
     TIKU_ADC_ARCH_CLK_ENABLE();
 
-    /* Power the ADC and wait for power-good. */
+    /* Power the ADC and wait for power-good; -1 if it never comes. */
     PWRCTRL->DEVPWREN_b.PWRENADC = 1u;
     spin = AMBIQ_ADC_PWR_SPIN;
     while (PWRCTRL->DEVPWRSTATUS_b.PWRSTADC == 0u) {
@@ -67,9 +70,9 @@ int tiku_adc_arch_init(const tiku_adc_config_t *config)
         }
     }
 
-    /* 24 MHz HFRC (the only legal CLKSEL), software trigger, single scan,
-     * destructive FIFO read (so reading FIFOPR pops). ADCEN stays clear until
-     * a slot is programmed -- CFG/SLOT must be stable while the ADC is on. */
+    /* 24 MHz HFRC, software trigger, single scan, destructive FIFO read
+     * (reading FIFOPR pops).  ADCEN stays clear until a slot is programmed:
+     * CFG and the slots must not change while it is on. */
     ADC->CFG = ((uint32_t)AMBIQ_ADC_CLKSEL_24MHZ << ADC_CFG_CLKSEL_Pos) |
                ((uint32_t)ADC_CFG_TRIGSEL_SWT       << ADC_CFG_TRIGSEL_Pos) |
                ((uint32_t)1u                        << ADC_CFG_DFIFORDEN_Pos);
@@ -89,8 +92,8 @@ int tiku_adc_arch_channel_init(uint8_t channel)
 {
     uint8_t chsel;
 
-    /* Internal channels need no pad setup; external SE pins are on dedicated
-     * analog pads. Validate the channel and accept. */
+    /* Internal channels need no pad setup and the external SE inputs are on
+     * dedicated analog pads, so this only validates the channel. */
     return ambiq_adc_chsel(channel, &chsel);
 }
 
@@ -110,9 +113,9 @@ int tiku_adc_arch_read(uint8_t channel, uint16_t *value)
         return -1;
     }
 
-    /* Program slot 0 for this channel with the ADC disabled (CFG/SLOT must be
-     * stable while enabled), then enable: 12-bit precision, slot enabled,
-     * window-compare off, no averaging. */
+    /* Program slot 0 for this channel with the ADC disabled, since CFG and
+     * the slots must not change while it is on, then enable: 12-bit
+     * precision, slot enabled, window compare off, no averaging. */
     ADC->CFG_b.ADCEN = 0u;
     ADC->SL0CFG = ((uint32_t)1u << ADC_SL0CFG_SLEN0_Pos) |
                   ((uint32_t)chsel << ADC_SL0CFG_CHSEL0_Pos) |

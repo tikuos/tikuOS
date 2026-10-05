@@ -7,9 +7,9 @@
  *
  * tiku_crit_arch.c - Apollo510 critical-window IRQ masking (NVIC).
  *
- * Snapshots the NVIC enable state and clears every IRQ family outside
- * preserve_mask, restoring on exit.  SysTick is a core exception rather than an
- * NVIC line, so it is never masked and keeps advancing the clock.
+ * Snapshots the NVIC enable state and clears every IRQ outside the families
+ * named in preserve_mask, restoring the snapshot on exit.  The kernel tick
+ * (STIMER compare B, IRQ 33) is among the IRQs cleared.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,8 +20,8 @@
 
 /**
  * @defgroup NVIC_REGS NVIC enable-set/clear register arrays
- * @brief Cortex-M NVIC register base addresses. Apollo510 has 135
- *        external IRQs, so ceil(135/32) = 5 32-bit words are needed.
+ * @brief Cortex-M NVIC register bases.  Apollo510's 135 external IRQs take
+ *        ceil(135/32) = 5 32-bit words.
  * @{
  */
 /** NVIC Interrupt Set-Enable Registers (ISER[0..4]) */
@@ -34,12 +34,11 @@
 
 /**
  * @defgroup AMBIQ_IRQ Apollo510 IRQ numbers
- * @brief IRQ indices mapped to the TIKU_CRIT_PRESERVE_* flags. Only
- *        the lines that tikuOS drivers may need to keep live during a
- *        critical window are listed here.
+ * @brief The IRQs that TIKU_CRIT_PRESERVE_HTIMER, _UART and _GPIO keep
+ *        enabled; the other preserve flags keep nothing on this port.
  * @{
  */
-#define AMBIQ_IRQ_UART0         15   /**< UART0 console IRQ            */
+#define AMBIQ_IRQ_UART0         15   /**< UART0 (not UART1, IRQ 16)    */
 #define AMBIQ_IRQ_STIMER_CMPR0  32   /**< STIMER Compare0 (htimer src) */
 #define AMBIQ_IRQ_GPIO0_FIRST   56   /**< First GPIO N0 IRQ line       */
 #define AMBIQ_IRQ_GPIO0_LAST    63   /**< Last GPIO N0 IRQ line        */
@@ -49,13 +48,9 @@
 static uint32_t s_save[NVIC_WORDS];
 
 /**
- * @brief Set a single IRQ bit in a keep-mask word array
+ * @brief Set an IRQ's bit in a keep-mask word array.
  *
- * Converts an IRQ number to a word/bit index and ORs the bit into the
- * caller's keep array so that IRQ is preserved (not cleared) during a
- * critical window.
- *
- * @param keep  Per-word bitmask of IRQs to preserve (NVIC_WORDS elements)
+ * @param keep  Per-word bitmask of IRQs to keep enabled (NVIC_WORDS words)
  * @param irq   IRQ number (0-based, < NVIC_WORDS * 32)
  */
 static inline void keep_set(uint32_t *keep, unsigned irq) {
@@ -69,8 +64,9 @@ static inline void keep_set(uint32_t *keep, unsigned irq) {
  * @p preserve_mask, then clears every IRQ outside it via ICER.  A DSB+ISB fence
  * makes the new mask visible before the caller's protected code runs.
  *
- * @note SysTick is a core exception, not an NVIC line, so it is never affected
- *       and the system tick keeps advancing during a critical window.
+ * @note SysTick is a core exception, not an NVIC line, so it is never masked;
+ *       the kernel tick, IRQ 33, is, and tiku_clock_time() catches up when
+ *       the window ends.
  * @param preserve_mask  Bitmask of TIKU_CRIT_PRESERVE_* flags naming
  *                       IRQ families that must remain enabled
  */

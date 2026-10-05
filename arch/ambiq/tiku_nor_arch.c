@@ -7,9 +7,9 @@
  *
  * tiku_nor_arch.c - Apollo510 MSPI1 and IS25WX064 octal NOR bring-up.
  *
- * A NOR wakes in 1-line SPI and must be talked into octal, cannot clear bits
- * without a slow destructive erase, and remembers everything through a power
- * cycle.  Those facts shape every function here.  PIO and XIP never mix.
+ * The NOR wakes in 1-line SPI and is switched to octal DDR by command, sets
+ * bits only through a slow erase, and keeps its contents through a power
+ * cycle.  PIO and DMA are refused while the XIP aperture is open.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,7 +22,7 @@
 #include "tiku_gpio_arch.h"      /* tiku_ambiq_gpio_pad_config(), gpio_set  */
 #include "tiku_cpu_common.h"     /* tiku_cpu_ambiq_delay_us()               */
 #include "apollo510.h"           /* CMSIS register map -- defs only         */
-#include <kernel/cpu/tiku_hang.h>   /* erase waits block on purpose         */
+#include <kernel/cpu/tiku_hang.h>   /* check-ins during long waits          */
 #include <kernel/shell/tiku_shell_io.h>  /* norbench reports via SHELL_PRINTF */
 #include "hal/tiku_cpu.h"        /* dcache clean/invalidate around DMA      */
 
@@ -46,14 +46,13 @@
 #define NOR_CMD_READ_NVCR      0xB5u
 #define NOR_CMD_FAST_READ_4B   0x0Cu
 #define NOR_CMD_PAGE_PROG_4B   0x12u
-/* 4-BYTE-ADDRESS opcodes, because this driver always sends a 4-byte
- * address. 0x20/0xD8 are the 3-byte forms; pairing them with a 4-byte
+/* 4-byte-address opcodes, because this driver always sends a 4-byte
+ * address.  0x20/0xD8 are the 3-byte forms; pairing them with a 4-byte
  * address makes the device erase somewhere else, or nowhere. */
 #define NOR_CMD_SUBSEC_ERASE   0x21u
 #define NOR_CMD_SECTOR_ERASE   0xDCu
-/* NOTE: 0xB1 (write non-volatile CR) and 0xC7 (chip erase) are deliberately
- * ABSENT.  One is permanent, the other destroys the whole die; neither has
- * any business being reachable from a driver that runs unattended. */
+/* 0xB1 (write non-volatile CR, permanent) and 0xC7 (chip erase, the whole
+ * die) are not defined, so this unattended driver cannot issue them. */
 
 /* octal DDR (2-byte duplicated opcodes) */
 #define NOR_OCMD_READ          0xFDFDu
@@ -89,14 +88,10 @@ in the Makefile."
 #define NOR_PAD_DQS    TIKU_BOARD_NOR_PAD_DQS
 #define NOR_PAD_CE     TIKU_BOARD_NOR_PAD_CE
 /*
- * RSTn and the load switch also come from the board header.
- *
- * There is deliberately no per-board `#if` here carrying a second set of pads:
- * a board without a NOR declares no NOR cap, so TIKU_DRV_NOR_ENABLE=1 is
- * refused at make time and this file is never compiled for it.  Carrying pin
- * numbers for a part that is not on the board is the fiction the capability
- * split exists to end -- a future board that fits a NOR declares the cap and
- * its own pads, and this driver needs no edit at all.
+ * RSTn and the load switch also come from the board header.  A board without
+ * a NOR declares no NOR capability, so TIKU_DRV_NOR_ENABLE=1 is refused at
+ * make time and this file is not compiled for it; a board that fits a NOR
+ * declares the capability and its own pads.
  */
 #define NOR_PAD_RST    TIKU_BOARD_NOR_PAD_RST
 #define NOR_PAD_LSEN   TIKU_BOARD_NOR_PAD_LSEN
@@ -117,8 +112,8 @@ in the Makefile."
 /* CLOCKS                                                                    */
 /*---------------------------------------------------------------------------*/
 
-/* Same derived model as the PSRAM: out = source / (2 * CLKDIV), and TXNEG is
- * chosen BY FREQUENCY (0 at <= 62.5 MHz, 1 above). */
+/* As for the PSRAM: out = source / (2 * CLKDIV), and TXNEG is chosen by
+ * frequency (0 at <= 62.5 MHz, 1 above). */
 #define IOCLK_SEL_HFRC_192MHZ  8u
 
 typedef struct {
@@ -133,19 +128,16 @@ static const nor_clk_t s_clk[] = {
 };
 #define NOR_CLK_COUNT (sizeof s_clk / sizeof s_clk[0])
 
-/* Latency: serial fast-read needs 8 dummy cycles; octal DDR needs the
- * vendor's 31 (its default dummy-cycle configuration).  Program has no
- * turnaround in either mode. */
-/* 10, measured: `power nor tascan` sweeps this against the 0xA5^i stamp and
- * matches at 10 alone.  8 is the generic SPI-NOR fast-read figure and is two
- * cycles short for this part, which reads erased FF correctly -- shifting FF
- * still gives FF -- and every real byte wrong. */
+/* Read latency.  Serial fast read needs 10 dummy cycles on this part; at the
+ * generic SPI-NOR value of 8, erased bytes (0xFF) still read correctly and
+ * every other byte reads wrong.  Octal DDR array reads use 31, the default
+ * in VCR 0x01.  Programs have no turnaround in either mode. */
 #define NOR_TA_SERIAL  10u
 #define NOR_TA_OCTAL  31u   /* array reads: matches VCR 0x01 default (0x1F) */
 #define NOR_TA_OCTAL_ID     15u   /* octal READ_ID below 96 MHz  */
-/* The vendor's value.  Octal identity is unreliable on this part regardless --
- * it returns `17 01 ...`, the tail of `9d 5b 17`, at both 15 and 16 -- which
- * is why octal entry does not gate on it.  Array reads are bit-exact. */
+/* The vendor's value.  Octal identity reads are unreliable on this part --
+ * they return `17 01 ...`, the tail of `9d 5b 17`, at both 15 and 16 -- so
+ * octal entry does not gate on them.  Octal array reads are unaffected. */
 #define NOR_TA_OCTAL_ID_96  16u
 
 /*---------------------------------------------------------------------------*/
@@ -155,9 +147,10 @@ static const nor_clk_t s_clk[] = {
 static uint8_t  s_up;          /**< controller configured                   */
 static uint8_t  s_octal;       /**< device+controller in octal DDR          */
 static uint8_t  s_clk_idx;
-static uint32_t s_erases;      /**< lifetime erase counter (this boot)      */
+static uint32_t s_erases;      /**< erases issued since boot                */
 static void   (*s_trace)(const char *step);
 
+/** @brief Pass @p step to the installed tracer, if any. */
 static void trace(const char *step) { if (s_trace) { s_trace(step); } }
 
 void tiku_nor_set_trace(void (*fn)(const char *step)) { s_trace = fn; }
@@ -178,9 +171,8 @@ unsigned long tiku_nor_clock_hz(void)
 /**
  * @brief One PIO command on MSPI1.
  *
- * Deliberately a near-copy of the PSRAM's psram_pio2 rather than a shared
- * helper: the two devices disagree about instruction width, latency and which
- * phases exist, so one parameterised routine would hide what matters.
+ * Follows psram_pio2 in the PSRAM driver; the two devices differ in
+ * instruction width, latency and phases.  TIKU_NOR_ERR_ARG while XIP is on.
  *
  * @param instr    opcode (1 byte in serial, 2 duplicated bytes in octal)
  * @param addr     device address; ignored when @p send_addr is 0
@@ -201,8 +193,8 @@ static tiku_nor_err_t nor_pio(uint16_t instr, uint32_t addr,
     uint32_t total_words = full_words + ((leftover != 0u) ? 1u : 0u);
     uint32_t spins, i;
 
-    /* The PSRAM's hardest-won guard: a PIO command while the aperture is
-     * enabled deadlocks the APB and needs a power cycle. */
+    /* A PIO command while the aperture is enabled deadlocks the APB until a
+     * power cycle. */
     if (MSPI1->DEV0XIP_b.XIPEN0 != 0u) {
         return TIKU_NOR_ERR_ARG;
     }
@@ -215,7 +207,7 @@ static tiku_nor_err_t nor_pio(uint16_t instr, uint32_t addr,
     if (send_addr) { ctrl |= MSPI0_CTRL_SENDA_Msk; }
     ctrl |= MSPI0_CTRL_START_Msk;
     if (is_read) {
-        /* TXRX = 0 is RECEIVE.  See the file header. */
+        /* TXRX = 0 receives; 1 transmits. */
         if (turnaround) { ctrl |= MSPI0_CTRL_ENTURN_Msk; }
     } else {
         ctrl |= (1u << MSPI0_CTRL_TXRX_Pos) & MSPI0_CTRL_TXRX_Msk;
@@ -266,6 +258,7 @@ static uint16_t nor_op(uint8_t serial_op, uint16_t octal_op)
 /* CONTROLLER                                                                */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Power the MSPI1 domain and wait (bounded) for its status. */
 static tiku_nor_err_t nor_power_on(void)
 {
     uint32_t spins = 100000u;
@@ -276,12 +269,13 @@ static tiku_nor_err_t nor_power_on(void)
     return (spins != 0u) ? TIKU_NOR_OK : TIKU_NOR_ERR_POWER;
 }
 
+/** @brief Select and enable MSPI1's IO clock source @p sel; check it stuck. */
 static tiku_nor_err_t nor_ioclk_on(uint8_t sel)
 {
     uint32_t v;
 
-    /* Replicate the vendor's CLKGEN.MISC clock-gate/power-on-clock block and
-     * force the HFRC oscillator -- both learned on MSPI0. */
+    /* Set the CLKGEN.MISC clock-gate and power-on-clock bits and force the
+     * HFRC oscillator, as the vendor code does for MSPI0. */
     {
         uint32_t misc = CLKGEN->MISC;
         misc |= 0x00FBBFC0u;
@@ -312,7 +306,7 @@ static tiku_nor_err_t nor_ioclk_on(uint8_t sel)
     return TIKU_NOR_OK;
 }
 
-/** @brief Program the controller for serial (phase A) or octal DDR (B). */
+/** @brief Program the controller for serial or (@p octal) octal DDR. */
 static void nor_controller_config(const nor_clk_t *c, int octal)
 {
     uint32_t cfg = 0u;
@@ -363,10 +357,8 @@ static void nor_controller_config(const nor_clk_t *c, int octal)
     MSPI1->DEV0XIP_b.XIPENWLAT0       = 0u;
     MSPI1->DEV0XIP_b.XIPWRITELATENCY0 = 0u;
 
-    /* NO DMA BOUNDARY: this is flash, not DRAM -- there are no rows to break
-     * bursts at, and the vendor agrees (BOUNDARY_NONE for this part).  That
-     * makes this driver's bandwidth an independent read on whether the
-     * PSRAM's per-KB cost really was row economics. */
+    /* No DMA boundary: flash has no rows to break bursts at (the vendor
+     * uses BOUNDARY_NONE for this part). */
     MSPI1->DEV0BOUNDARY_b.DMABOUND0     = 0u;
     MSPI1->DEV0BOUNDARY_b.DMATIMELIMIT0 = 0u;
 
@@ -381,6 +373,7 @@ static void nor_controller_config(const nor_clk_t *c, int octal)
     __DSB();
 }
 
+/** @brief Give D0..DQS and CE to MSPI1. */
 static void nor_pads_config(void)
 {
     uint32_t pad;
@@ -392,21 +385,17 @@ static void nor_pads_config(void)
 
 void tiku_nor_power(int on)
 {
-    /* The load switch (GP208).  This is the only external memory on the
-     * board that TikuOS can take to true zero -- and after an off/on the
-     * device is back in serial mode with default config, so callers must
-     * re-run tiku_nor_init_serial().
+    /* The load switch (GP208) can take the NOR, alone among the board's
+     * external memories, to zero power.  After an off/on the device is back
+     * in serial mode with default config, so callers must re-run
+     * tiku_nor_init_serial().
      *
-     * DANGER, LEARNED THE HARD WAY: GP208's polarity and its true load are
-     * NOT established.  The schematic names the net MSPI1_LS_EN_GP208 into
-     * a LOADSW input without stating the sense, and the first session
-     * that drove this pad ended with the board unreachable over SWD at
-     * every speed and reset type -- a physical power cycle was required.
-     * Nothing in the bring-up path touches it any more; it is reachable
-     * only from an explicit operator verb, and only with the meter watching.
-     * Until the polarity is confirmed on a scope or by the schematic's
-     * switch part number, treat driving this pad as a hardware experiment,
-     * not a driver action. */
+     * The polarity and load of GP208 are not established: the schematic
+     * names the net MSPI1_LS_EN_GP208 into a LOADSW input without its
+     * sense, and driving this pad can leave the board unreachable over SWD
+     * at every speed and reset type until a physical power cycle.  The
+     * bring-up path does not touch it; only an explicit operator command
+     * does. */
     tiku_ambiq_gpio_pad_config(NOR_PAD_LSEN, PAD_CFG_GPIO_OUT);
     tiku_ambiq_gpio_set(NOR_PAD_LSEN, on ? 1u : 0u);
     __DSB();
@@ -433,10 +422,10 @@ void tiku_nor_deinit(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* PHASE A -- SERIAL BRING-UP AND IDENTITY                                   */
+/* SERIAL BRING-UP AND IDENTITY                                              */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Hardware reset pulse on GP54 (schematic-confirmed pin). */
+/** @brief Pulse RSTn low for 50 us, then wait 500 us for recovery. */
 static void nor_hw_reset(void)
 {
     tiku_ambiq_gpio_pad_config(NOR_PAD_RST, PAD_CFG_GPIO_OUT);
@@ -466,8 +455,8 @@ tiku_nor_err_t tiku_nor_init_serial(unsigned clk)
         return rc;
     }
 
-    /* Serial phase always runs at the slow row; @p clk names the octal
-     * target and is remembered for phase B. */
+    /* The serial phase always runs at the 24 MHz row; @p clk is only
+     * range-checked. */
     trace("controller");
     s_octal = 0u;
     nor_controller_config(&s_clk[TIKU_NOR_CLK_24MHZ], 0);
@@ -496,8 +485,8 @@ tiku_nor_err_t tiku_nor_dma_read(uint32_t addr, void *sram, uint32_t n)
     uint32_t spins = 500000u;          /* x20 us = 10 s ceiling */
 
     if (!s_up) { return TIKU_NOR_ERR_POWER; }
-    /* Same deadlock as the PIO path: a DMA started while the aperture is
-     * live wedges the APB. */
+    /* As on the PIO path: a DMA started while the aperture is live wedges
+     * the APB. */
     if (MSPI1->DEV0XIP_b.XIPEN0 != 0u) { return TIKU_NOR_ERR_ARG; }
     if (n == 0u || (n & 3u) != 0u ||
         ((uint32_t)(uintptr_t)sram & 3u) != 0u) {
@@ -529,27 +518,23 @@ tiku_nor_err_t tiku_nor_dma_read(uint32_t addr, void *sram, uint32_t n)
 }
 
 /*---------------------------------------------------------------------------*/
-/* norbench                                                                  */
+/* NORBENCH                                                                  */
 /*---------------------------------------------------------------------------*/
 /*
- * DWT-timed, work-denominated, checksum-gated, like psrambench.  Every leg
- * reports the bytes it moved and whether they were the RIGHT bytes; a leg that
- * cannot prove its content reports FAIL rather than a bandwidth.
- *
- * Everything runs inside the scratch sector.  Erase endurance is finite and
- * this benchmark is re-runnable, so it spends exactly the erases it announces.
+ * DWT-timed like psrambench.  Every leg reports the bytes it moved and whether
+ * they matched the pattern: bit-exact or FAIL.  Everything runs inside the
+ * scratch sector, and a run spends the two erases it announces.
  */
 
 extern unsigned long tiku_cpu_ambiq_clock_get_hz(void);
 
-/* 32 KB, not 4: at 4 KB a DMA read finished in 86 us and fixed setup cost was
- * a visible share of that, so the bandwidth legs were reporting a floor rather
- * than a rate.  The prepare erases the whole 128 KB scratch sector, which also
- * gives the sector-erase timing for free. */
+/* A 32 KB span keeps fixed setup cost a small share of each timed leg.  The
+ * prepare step erases the whole 128 KB scratch sector and times it. */
 #define NORB_SPAN   32768u
 #define NORB_BUF    32768u
 static uint8_t s_norb_buf[NORB_BUF] __attribute__((aligned(32)));
 
+/** @brief Save DEMCR and DWT_CTRL, start CYCCNT and return its value. */
 static uint32_t norb_cyc_begin(uint32_t *demcr0, uint32_t *ctl0)
 {
     volatile uint32_t *demcr  = (volatile uint32_t *)0xE000EDFCUL;
@@ -561,11 +546,13 @@ static uint32_t norb_cyc_begin(uint32_t *demcr0, uint32_t *ctl0)
     return *cyccnt;
 }
 
+/** @brief Current DWT cycle count. */
 static uint32_t norb_cyc_now(void)
 {
     return *(volatile uint32_t *)0xE0001004UL;
 }
 
+/** @brief Print a bandwidth leg: KB, microseconds, MB/s and the verdict. */
 static void norb_report(const char *leg, uint32_t bytes, uint32_t cyc,
                         int exact)
 {
@@ -581,7 +568,7 @@ static void norb_report(const char *leg, uint32_t bytes, uint32_t cyc,
                  exact ? "bit-exact" : "FAIL");
 }
 
-/** @brief Report a leg measured in time per operation, not bandwidth. */
+/** @brief Print a per-operation leg: ops, microseconds, us/op, verdict. */
 static void norb_report_op(const char *leg, uint32_t ops, uint32_t cyc,
                            int exact)
 {
@@ -594,15 +581,15 @@ static void norb_report_op(const char *leg, uint32_t ops, uint32_t cyc,
                  exact ? "bit-exact" : "FAIL");
 }
 
+/** @brief Pattern byte for device address @p a. */
 static inline uint8_t norb_pat(uint32_t a)
 {
     return (uint8_t)(a ^ (a >> 8) ^ (a >> 16) ^ 0x5Au);
 }
 
-/* XIP is OFF in the bench by default: a read of a mis-decoding aperture stalls
- * the bus with no software recovery -- the board needs a reflash -- and that
- * cost is not worth paying on every benchmark run.  `power nor xip` probes it
- * deliberately with a single word. */
+/* The XIP leg is off by default: a read of a mis-decoding aperture stalls
+ * the bus with no software recovery, and the board then needs a reflash.
+ * `power nor xip` probes the aperture with a single word. */
 static uint8_t s_xip_leg;
 static uint8_t s_sector_leg;
 
@@ -617,7 +604,7 @@ int tiku_nor_xip_probe(uint32_t *out)
     if (!s_up) { return -1; }
     if (tiku_nor_xip_enable(1) != TIKU_NOR_OK) { return -1; }
     ap = (volatile const uint32_t *)(TIKU_NOR_XIP_BASE + TIKU_NOR_SCRATCH_ADDR);
-    v = *ap;                       /* the single word that either works or hangs */
+    v = *ap;                       /* works, or hangs the bus */
     (void)tiku_nor_xip_enable(0);
     if (out != (uint32_t *)0) { *out = v; }
     return 0;
@@ -641,9 +628,8 @@ void tiku_nor_bench_run(void)
 
     (void)norb_cyc_begin(&demcr0, &ctl0);
 
-    /* Prepare: erase one subsector and fill it with a known pattern, timing
-     * both, so the erase and program legs are measured on the way in rather
-     * than as separate work. */
+    /* Prepare: erase the scratch sector and program the pattern, timing
+     * both as the erase and program legs. */
     t0 = norb_cyc_now();
     if (tiku_nor_erase(base, 0, 0) != TIKU_NOR_OK) {
         SHELL_PRINTF("  sector-erase  FAILED\n");
@@ -707,8 +693,8 @@ void tiku_nor_bench_run(void)
     norb_report("random512", 8u * 512u, cyc, exact);
 
     /* DMA read: the engine moves device -> SRAM with no per-chunk command
-     * from the CPU, so this is the bulk-load path.  The buffer is invalidated
-     * first because the engine writes physical SRAM behind the D-cache. */
+     * from the CPU.  The engine writes physical SRAM behind the D-cache, so
+     * the buffer is cleaned before and invalidated after. */
     for (i = 0u; i < NORB_SPAN; i++) { s_norb_buf[i] = 0u; }
     tiku_cpu_dcache_clean(s_norb_buf, NORB_SPAN);
     t0 = norb_cyc_now();
@@ -721,10 +707,9 @@ void tiku_nor_bench_run(void)
     norb_report("dma-read", NORB_SPAN, cyc, exact);
 
     /*
-     * XIP: the CPU reads the aperture directly, so there is no per-chunk
-     * command overhead and this is the leg the 100+ MB/s expectation belongs
-     * to.  PIO is refused while the aperture is live, so it goes last and the
-     * aperture is closed again before returning.
+     * XIP: the CPU reads the aperture directly, with no per-chunk command.
+     * PIO is refused while the aperture is live, so this leg follows the PIO
+     * reads and closes the aperture before the erase leg.
      */
     if (s_xip_leg && tiku_nor_xip_enable(1) == TIKU_NOR_OK) {
         const volatile uint8_t *ap =
@@ -758,7 +743,7 @@ void tiku_nor_bench_run(void)
     SHELL_PRINTF("  erases spent this run: 2 (total %lu)\n",
                  (unsigned long)s_erases);
 
-    {   /* restore the DWT state the boot tidy chose */
+    {   /* restore the DWT state saved at the start */
         volatile uint32_t *demcr  = (volatile uint32_t *)0xE000EDFCUL;
         volatile uint32_t *dwtctl = (volatile uint32_t *)0xE0001000UL;
         *dwtctl = ctl0; *demcr = demcr0;
@@ -797,17 +782,16 @@ int tiku_nor_octal_hears(void)
 
     if (!s_up || !s_octal) { return -1; }
 
-    /* Send the OCTAL software reset.  A part that is genuinely listening in
-     * octal parses it and returns to serial; one that is wedged, or in some
-     * other mode, does not.  This is a WRITE, so it needs no read capture --
-     * which is exactly what makes it able to test the command path alone,
-     * with the data-return path taken out of the question. */
+    /* Send the octal software reset.  A part listening in octal parses it
+     * and returns to serial; one that is wedged, or in another mode, does
+     * not.  It is a write, so it needs no read capture: it tests the
+     * command path alone, without the data-return path. */
     (void)nor_pio(NOR_OCMD_RESET_ENABLE, 0u, &dummy, 0u, 0, 0, 0);
     (void)nor_pio(NOR_OCMD_RESET_MEMORY, 0u, &dummy, 0u, 0, 0, 0);
     tiku_cpu_ambiq_delay_us(1000u);
 
-    /* Put the controller back to serial and ask.  An answer means the octal
-     * reset landed, so the device does hear octal commands. */
+    /* Put the controller back to serial and ask.  An answer means the device
+     * executed the octal reset, so it does parse octal commands. */
     s_octal = 0u;
     nor_controller_config(&s_clk[0], 0);
     if (nor_ioclk_on(s_clk[0].ioclk_sel) != TIKU_NOR_OK) { return -1; }
@@ -834,9 +818,9 @@ uint32_t tiku_nor_scan_rxdqs(int with_dqs)
     return mask;
 }
 
-/* Last identity that actually validated, so /sys/flash/id can be READ without
- * putting a command on the bus.  Only a plausible answer is cached: a zero or
- * shifted read must not become the file's contents. */
+/* Last identity that validated, so /sys/flash/id can be read without putting
+ * a command on the bus.  Only a plausible answer is cached: a zero or shifted
+ * read must not become the file's contents. */
 static tiku_nor_id_t s_id_cache;
 static uint8_t       s_id_valid;
 
@@ -861,7 +845,7 @@ tiku_nor_err_t tiku_nor_read_id(tiku_nor_id_t *out)
     /* READ_ID takes no address in serial mode; in octal the device expects
      * the standard address+dummy framing.
      *
-     * Octal READ_ID carries its OWN dummy count, fixed by the device and
+     * Octal READ_ID carries its own dummy count, fixed by the device and
      * unrelated to the array dummy cycles in VCR 0x01 (default 31, which is
      * what NOR_TA_OCTAL matches for reads). It is 15, or 16 at 96 MHz. Using
      * the array count here samples long past the identity window and returns
@@ -884,7 +868,7 @@ tiku_nor_err_t tiku_nor_read_id(tiku_nor_id_t *out)
         id.capacity = (uint8_t)(raw >> 16);
     }
 
-    {   /* status register: 1 byte, no address */
+    {   /* status register: 1 byte; address and turnaround in octal only */
         uint32_t s = 0u;
         if (nor_pio(nor_op(NOR_CMD_READ_STATUS, NOR_OCMD_READ_STATUS), 0u,
                     &s, 1u, 1, s_octal ? 1 : 0, s_octal ? 1 : 0)
@@ -894,8 +878,8 @@ tiku_nor_err_t tiku_nor_read_id(tiku_nor_id_t *out)
     }
 
     if (!s_octal) {
-        /* Non-volatile CR[6] -- READ ONLY.  Octal entry needs it to be
-         * 0xFF; this driver reports rather than writes (see the header). */
+        /* Non-volatile CR[6], read only.  Octal entry needs it to be 0xFF;
+         * this driver reports it and never writes it (see the header). */
         uint32_t n = 0u;
         if (nor_pio(NOR_CMD_READ_NVCR, 6u, &n, 1u, 1, 1, 1) == TIKU_NOR_OK) {
             id.ncr6 = (uint8_t)n;
@@ -913,17 +897,16 @@ tiku_nor_err_t tiku_nor_read_id(tiku_nor_id_t *out)
 }
 
 /*---------------------------------------------------------------------------*/
-/* PHASE B -- OCTAL DDR                                                      */
+/* OCTAL DDR                                                                 */
 /*---------------------------------------------------------------------------*/
 
 tiku_nor_err_t tiku_nor_force_octal(unsigned clk)
 {
-    /* Configure the CONTROLLER for octal DDR without asking the device to
-     * switch -- for the case where the device is ALREADY octal (a
-     * non-volatile IO-mode default, or a previous session's state that a
-     * board power cycle did not clear because the mode is not volatile).
-     * A serial-mode command is meaningless to such a part, which looks
-     * exactly like a dead device from the data lines' point of view. */
+    /* Configure the controller for octal DDR without asking the device to
+     * switch -- for a device that is already octal (a non-volatile IO-mode
+     * default, or a mode a board power cycle did not clear).  A serial-mode
+     * command is meaningless to such a part, which then looks dead from the
+     * data lines' point of view. */
     if (!s_up)                { return TIKU_NOR_ERR_POWER; }
     if (clk >= NOR_CLK_COUNT) { return TIKU_NOR_ERR_ARG; }
     s_octal = 1u;
@@ -950,9 +933,9 @@ tiku_nor_err_t tiku_nor_enter_octal(unsigned clk)
     rc = tiku_nor_read_id(&id);
     if (rc != TIKU_NOR_OK) { return rc; }
 
-    /* THE REFUSAL.  Octal mode wants non-volatile CR[6] == 0xFF; the vendor
-     * WRITES it when it disagrees.  Non-volatile config writes are the
-     * permanent kind, so this driver stops and reports instead. */
+    /* Octal mode needs non-volatile CR[6] == 0xFF.  Writing the
+     * non-volatile register is permanent, so the driver returns
+     * TIKU_NOR_ERR_STATE instead of changing it. */
     if (id.ncr6 != NOR_NVCR6_XIP_DISABLE) {
         return TIKU_NOR_ERR_STATE;
     }
@@ -972,9 +955,9 @@ tiku_nor_err_t tiku_nor_enter_octal(unsigned clk)
     tiku_cpu_ambiq_delay_us(100u);
 
     /*
-     * Did the device actually leave serial?  Ask in SERIAL, before the
-     * controller changes: a part that switched can no longer parse a 1-line
-     * command and must go quiet.  One that still answers 0x9D never moved,
+     * Did the device leave serial?  Ask in serial, before the controller
+     * changes: a part that switched cannot parse a 1-line command and must
+     * go quiet.  One that still answers 0x9D never moved,
      * which separates "the VCR write did not take" from "the octal side is
      * misconfigured" -- two faults that otherwise present identically as an
      * all-zero identity.
@@ -1005,27 +988,21 @@ tiku_nor_err_t tiku_nor_enter_octal(unsigned clk)
         (void)nor_pio(NOR_OCMD_WRDI, 0u, &dummy, 0u, 0, 0, 0);
     }
 
-    /* PROVE THE SWITCH: identity again, now in octal.  Two identities in two
-     * modes is this part's equivalent of the PSRAM's bit-bang arbiter. */
     /*
-     * Identity is NOT a valid octal health check on this part.  Measured on
-     * the green EVB: octal array reads come back bit-exact against a serial
-     * reference while the octal READ_ID returns zero, so gating entry on
-     * identity refuses a bus that works.  Register and array reads differ in
-     * whether the device strobes DQS, which is the likely reason.
-     *
-     * The trace still reports it, because a change there is worth seeing.
+     * Identity again, now in octal, for the trace only.  Octal READ_ID is not
+     * a health check on this part: octal array reads are bit-exact while the
+     * octal READ_ID does not return 0x9D (see NOR_TA_OCTAL_ID_96).  So rc is
+     * set to OK.
      */
     trace("id-octal");
     rc = tiku_nor_read_id(&id);
     trace(rc == TIKU_NOR_OK ? "id-octal ok" : "id-octal empty (not fatal)");
     rc = TIKU_NOR_OK;
     if (rc != TIKU_NOR_OK) {
-        /* Roll back so a caller that cannot talk octal is left somewhere it
-         * can talk.  Diagnostics that want to examine the octal state itself
-         * must use tiku_nor_enter_octal_raw(), or they end up probing a
-         * SERIAL controller against a device that is already in octal and
-         * reading the zeros that mismatch produces. */
+        /* Roll back to serial so a caller that cannot talk octal is left
+         * where it can.  Not reached while rc is set to OK above.
+         * Diagnostics that examine the octal state use
+         * tiku_nor_enter_octal_raw(). */
         s_octal = 0u;
         nor_controller_config(&s_clk[TIKU_NOR_CLK_24MHZ], 0);
         s_clk_idx = (uint8_t)TIKU_NOR_CLK_24MHZ;
@@ -1039,9 +1016,11 @@ tiku_nor_err_t tiku_nor_enter_octal_raw(unsigned clk)
     tiku_nor_err_t rc = tiku_nor_enter_octal(clk);
 
     if (rc == TIKU_NOR_ERR_ID) {
-        /* The ladder ran and the device left serial; only its closing
-         * identity read failed.  Put the controller back into octal so the
-         * caller is examining the configuration it means to examine. */
+        /* Meant for an octal entry whose closing octal identity read failed:
+         * put the controller back into octal.  tiku_nor_enter_octal()
+         * returns TIKU_NOR_ERR_ID only from its serial identity check, before
+         * the device has switched, so this sets the controller to octal while
+         * the device is still serial. */
         s_octal = 1u;
         nor_controller_config(&s_clk[clk], 1);
         s_clk_idx = (uint8_t)clk;
@@ -1081,13 +1060,11 @@ tiku_nor_err_t tiku_nor_read(uint32_t addr, void *buf, uint32_t n)
 }
 
 /**
- * @brief Poll WIP with the backoff cadence.
+ * @brief Poll WIP every @p step_us until it clears or @p max_us passes.
  *
- * @param step_us  gap between glances -- ~100 us for programs, ~10 ms for
- *                 erases.  A tight spin here would be APB traffic into the
- *                 controller that is servicing the device; the PSRAM work
- *                 measured that cost at 20 % of throughput.
- * @param max_us   bound; returns TIMEOUT rather than hanging
+ * @param step_us  gap between polls -- 100 us for programs, 10 ms for
+ *                 erases; each poll is APB traffic into the busy controller
+ * @param max_us   bound; past it the call returns TIKU_NOR_ERR_TIMEOUT
  */
 static tiku_nor_err_t nor_wait_wip(uint32_t step_us, uint32_t max_us)
 {
@@ -1106,13 +1083,17 @@ static tiku_nor_err_t nor_wait_wip(uint32_t step_us, uint32_t max_us)
     return TIKU_NOR_ERR_TIMEOUT;
 }
 
-/** @brief Read the flag-status register and translate program/erase errors. */
+/**
+ * @brief Read the flag-status register and translate program/erase errors.
+ *
+ * Serial mode only: in octal, or when the read fails, it returns TIKU_NOR_OK.
+ */
 static tiku_nor_err_t nor_check_flags(void)
 {
     uint32_t f = 0u;
     if (s_octal) { return TIKU_NOR_OK; }   /* serial-only opcode here */
     if (nor_pio(NOR_CMD_READ_FLAGSTAT, 0u, &f, 1u, 1, 0, 0) != TIKU_NOR_OK) {
-        return TIKU_NOR_OK;                /* absence of evidence, not error */
+        return TIKU_NOR_OK;                /* unreadable flags: not an error */
     }
     if ((f & (NOR_FLAG_PROG_ERR | NOR_FLAG_ERASE_ERR)) != 0u) {
         return TIKU_NOR_ERR_PROGRAM;
@@ -1166,9 +1147,8 @@ tiku_nor_err_t tiku_nor_erase(uint32_t addr, int small, int force)
     if (!s_up) { return TIKU_NOR_ERR_POWER; }
     if (addr >= TIKU_NOR_SIZE_BYTES) { return TIKU_NOR_ERR_ARG; }
 
-    /* Default-deny outside the scratch sector.  Erase endurance is finite
-     * and this driver runs unattended; protecting the rest of the die from
-     * its own test machinery is the cheapest safety there is. */
+    /* Default-deny outside the scratch sector: erase endurance is finite
+     * and this driver runs unattended. */
     if (!force && (addr < TIKU_NOR_SCRATCH_ADDR)) {
         return TIKU_NOR_ERR_ARG;
     }
@@ -1216,13 +1196,10 @@ void tiku_nor_regs(uint32_t *out, unsigned n)
 {
     unsigned i;
 
-    /* POWER-SAFE, and it is not optional: reading an MSPI register while
-     * its domain is unpowered stalls the APB and wedges the CPU with no
-     * fault -- the same class of hang the PSRAM's first IOMSEL bug caused,
-     * and this function caused it again by dumping registers before any
-     * bring-up.  The two always-available registers are reported either
-     * way; the rest read back as 0xDEADDEAD when the domain is down, which
-     * is unmistakable in a dump. */
+    /* Power-safe: reading an MSPI register while its domain is unpowered
+     * stalls the APB and hangs the CPU with no fault.  The two
+     * always-readable registers are reported either way; the rest read
+     * 0xDEADDEAD while the domain is down. */
     for (i = 0u; i < n; i++) { out[i] = 0xDEADDEADu; }
     if (n > 0u) { out[0] = PWRCTRL->DEVPWRSTATUS; }
     if (n > 1u) { out[1] = CLKGEN->MSPIIOCLKCTRL; }
@@ -1245,8 +1222,7 @@ void tiku_nor_ls_set(int level)
 {
     /* level: 0 low, 1 high, -1 leave as high-Z input.  The schematic names
      * MSPI1_LS_EN_GP208 but not its polarity, and a load switch can be
-     * either sense -- so this exists to settle it by experiment rather than
-     * by assumption. */
+     * either sense. */
     if (level < 0) {
         tiku_ambiq_gpio_pad_config(NOR_PAD_LSEN, PAD_FNCSEL_GPIO | PAD_INPEN);
     } else {
@@ -1258,15 +1234,14 @@ void tiku_nor_ls_set(int level)
 }
 
 /*---------------------------------------------------------------------------*/
-/* BIT-BANG ARBITER -- controller-free ground truth                          */
+/* BIT-BANG IDENTITY READ                                                    */
 /*---------------------------------------------------------------------------*/
 
 /*
- * The instrument that cracked the PSRAM, ported to MSPI1's pads and to
- * single-lane SPI.  Drives CE/CLK/D0 by hand and samples D1, so it answers
- * the only question that matters at first contact: IS THE DEVICE ALIVE AND
- * DOES IT SPEAK SERIAL SPI?  The controller's framing, latency and lane
- * assignment are out of the picture.
+ * Serial SPI on GPIO, as the PSRAM driver's bit-bang reader does on MSPI0:
+ * drives CE/CLK/D0 by hand and samples D1, which shows whether the device is
+ * alive and speaks serial SPI with the controller's framing, latency and lane
+ * assignment out of the picture.
  *
  * Serial SPI here is mode 0: data launched on the falling edge, sampled by
  * the device on the rising edge; the device returns data on D1, sampled after
@@ -1278,12 +1253,14 @@ void tiku_nor_ls_set(int level)
 #define BB_IN   (PAD_FNCSEL_GPIO | PAD_INPEN)
 #define NOR_PAD_D1  96u
 
+/** @brief Short busy-wait between bit-bang edges. */
 static void bb_dwell(void)
 {
     uint32_t n = 60u;
     while (n--) { __asm__ volatile ("nop"); }
 }
 
+/** @brief Level on D1 (GP96). */
 static uint32_t bb_read_d1(void)
 {
     /* D1 = GP96: RD2 covers pads 64..95, RD3 covers 96..127 -> bit 0. */
@@ -1294,11 +1271,9 @@ void tiku_nor_bitbang_id(uint8_t *out, uint32_t n_bytes)
 {
     uint32_t i, b;
 
-    /* DEASSERT RESET FIRST.  GP54 is hi-Z out of SoC reset, and if the board
-     * has no pull-up on RSTn the device sits held in reset -- answering
-     * nothing, on every lane, forever.  The controller path pulses reset in
-     * nor_hw_reset(); the bit-bang path never did, which made this the one
-     * stone left unturned when the arbiter reported all-ones. */
+    /* Deassert reset first.  GP54 is high-Z out of SoC reset, and with no
+     * pull-up on RSTn the device stays in reset, answering nothing on any
+     * lane. */
     tiku_ambiq_gpio_pad_config(NOR_PAD_RST, BB_OUT);
     tiku_ambiq_gpio_set(NOR_PAD_RST, 1u);
     tiku_cpu_ambiq_delay_us(500u);
@@ -1346,17 +1321,17 @@ void tiku_nor_bitbang_id(uint8_t *out, uint32_t n_bytes)
 
 uint32_t tiku_nor_bitbang_selftest(void)
 {
-    /* PROVE THE INSTRUMENT BEFORE BELIEVING ITS VERDICT.
+    /* Checks the bit-bang read path itself.
      *
-     * The arbiter reads D1 (GP96).  A wrong read path reports all-ones
-     * forever and looks exactly like a dead device -- so drive D1 as an
-     * output, low then high, and read it back each time.  Result bits:
-     *   b0 = value read while driving LOW  (want 0)
-     *   b1 = value read while driving HIGH (want 1)
+     * tiku_nor_bitbang_id() reads D1 (GP96).  A wrong read path reports
+     * all-ones forever and looks exactly like a dead device -- so D1 is
+     * driven as an output, low then high, and read back each time.  Bits:
+     *   b0 = value read while driving low  (want 0)
+     *   b1 = value read while driving high (want 1)
      *   b2 = value read with D1 released to input (the device's own level)
      *   b3 = same for D0 (GP95), the transmit line
-     * So 0x02 or 0x06 means the instrument works.  0x03 or 0x07 means the
-     * read is stuck high and every all-ff verdict is meaningless.
+     * So 0x02 or 0x06 means the read path works.  0x03 or 0x07 means the
+     * read is stuck high, and an all-0xFF bit-bang identity means nothing.
      */
     uint32_t r = 0u;
 

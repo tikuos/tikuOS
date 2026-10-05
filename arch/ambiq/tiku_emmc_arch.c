@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_emmc_arch.c - Apollo510 SDIO0 and IS21EF08G eMMC bring-up.
+ * tiku_emmc_arch.c - Apollo510 SDIO0 host and IS21EF08G eMMC driver.
  *
- * The card runs its own firmware and a state machine, so it must be walked idle
- * -> identify -> standby -> transfer; a command in the wrong state fails like a
- * wiring fault.  The init ladder is therefore linear, traced, and fails closed.
+ * Bring-up, block I/O, sleep and wake, HS200, a bench and PSRAM staging.  Init
+ * stops at the first failed step of the walk idle -> identify -> standby ->
+ * transfer: a command sent in the wrong state fails like a wiring fault.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,19 +27,16 @@
 #include <kernel/memory/tiku_mem.h>      /* operation-scoped bounce workspace */
 #include <string.h>
 
-#include <kernel/shell/tiku_shell_io.h>  /* the bench reports via SHELL_PRINTF */
+#include <kernel/shell/tiku_shell_io.h>  /* SHELL_PRINTF for the bench */
 
 /*---------------------------------------------------------------------------*/
-/* PADS (table 0)                                                            */
+/* PADS                                                                      */
 /*---------------------------------------------------------------------------*/
 
 /*
- * The pads are a board fact and now live in the board header.  They were
- * hard-coded here, which silently made this driver Blue-EVB-only: RSTn is
- * GP13 on the Blue board and GP12 on the green one (table 0), so an eMMC
- * build for the green EVB drove a pad that is not its reset net.  The
- * silicon-side facts -- the SDIO0 controller, its registers, the FNCSEL
- * encoding -- stay here; only "which pad" moved out.
+ * The pads and their FNCSEL values come from the board header
+ * (TIKU_BOARD_EMMC_*); RSTn is GP13 on the Apollo510 Blue EVB and GP12 on
+ * the Apollo510 EVB.
  */
 #if !defined(TIKU_BOARD_EMMC_PAD_D0)
 #error "This board declares no eMMC pads (TIKU_BOARD_EMMC_PAD_*). The build \
@@ -56,10 +53,9 @@ the Makefile."
 #define EMMC_PAD_RST   TIKU_BOARD_EMMC_PAD_RST
 
 /* emmc_pads_config() walks these as two contiguous runs (D0..CLK covers
- * DAT0-3 + CLK; D4..CMD covers DAT4-7 + CMD).  A board that re-pins the bus
- * non-contiguously would have the loops configure the WRONG pads and silently
- * leave the bus half-claimed, so the assumption is checked rather than
- * commented. */
+ * DAT0-3 + CLK; D4..CMD covers DAT4-7 + CMD), configuring every pad between
+ * the ends of each run, so these asserts reject a board whose runs are not
+ * contiguous. */
 _Static_assert(EMMC_PAD_CLK - EMMC_PAD_D0 == 4,
                "eMMC low run must be DAT0..DAT3,CLK contiguous");
 _Static_assert(EMMC_PAD_D3 - EMMC_PAD_D0 == 3,
@@ -70,18 +66,13 @@ _Static_assert(EMMC_PAD_D7 - EMMC_PAD_D4 == 3,
                "eMMC DAT4..DAT7 must be contiguous");
 
 /*
- * Function select is not uniform across this bus, AND ASSUMING IT WAS COST A
- * DEBUGGING ROUND.  Read from am_hal_pin.h, not inferred:
+ * Function select differs across this bus (am_hal_pin.h):
  *
  *   GP84..GP88  (DAT0-3, CLK)  ->  FNCSEL 2   (AM_HAL_PIN_84_SDIF0_DAT0 = 2)
  *   GP156..GP160 (DAT4-7, CMD) ->  FNCSEL 0   (AM_HAL_PIN_160_SDIF0_CMD = 0)
  *
- * With 0 written to all ten pads, DAT0-3 and CLK were left on some other
- * function entirely -- so the card was never clocked and never answered,
- * which presented as CMD-TIMEOUT on the first command that expects a
- * response.  This is the same mistake the PSRAM driver made five times over
- * (a value derived from context rather than read from the table); the fix
- * is the same discipline, applied per-pad.
+ * With FNCSEL 0 on DAT0-3 and CLK the card is never clocked, and the first
+ * command that expects a response ends in CMD-TIMEOUT.
  */
 #define PAD_FNCSEL_SDIO_LOW   TIKU_BOARD_EMMC_FNCSEL_LOW   /* GP84..GP88   */
 #define PAD_FNCSEL_SDIO_HIGH  TIKU_BOARD_EMMC_FNCSEL_HIGH  /* GP156..GP160 */
@@ -97,7 +88,7 @@ _Static_assert(EMMC_PAD_D7 - EMMC_PAD_D4 == 3,
                           PAD_INPEN)
 
 /*---------------------------------------------------------------------------*/
-/* MMC COMMANDS (table 2)                                                    */
+/* MMC COMMANDS                                                              */
 /*---------------------------------------------------------------------------*/
 
 #define MMC_GO_IDLE          0u
@@ -121,32 +112,31 @@ _Static_assert(EMMC_PAD_D7 - EMMC_PAD_D4 == 3,
 #define MMC_OCR_SECTOR_MODE  0x40FF8080u
 #define MMC_OCR_BUSY         0x80000000u
 
-/** Response encodings for TRANSFER.RESPTYPESEL (table 3). */
+/** Response encodings for TRANSFER.RESPTYPESEL (tiku_emmc_arch.h, table 3). */
 #define RESP_NONE   0u
 #define RESP_136    1u
 #define RESP_48     2u
 #define RESP_48BUSY 3u
 
-/** THE ONLY EXT_CSD INDEXES THIS DRIVER MAY WRITE.  See table 2: the rest
- *  are one-time-programmable and can brick features permanently. */
+/** The only EXT_CSD indexes emmc_switch() writes.  Others include
+ *  one-time-programmable fields whose write can disable features for good. */
 #define EXT_CSD_BUS_WIDTH   183u
 #define EXT_CSD_HS_TIMING   185u
 
-/** EXT_CSD indexes this driver READS (harmless, and there is no allow-list
- *  for reading -- only writing can destroy anything). */
+/** EXT_CSD indexes this driver reads; reads need no allow-list. */
 #define EXT_CSD_DEVICE_TYPE 196u
 #define EXT_CSD_REV         192u
 #define EXT_CSD_SEC_COUNT   212u
 #define EXT_CSD_S_A_TIMEOUT 217u   /* sleep/awake timeout: 100 ns * 2^n     */
 
-/** EXT_CSD[196] DEVICE_TYPE: which speeds the CARD says it supports. */
+/** EXT_CSD[196] DEVICE_TYPE: the speeds the card says it supports. */
 #define DEVTYPE_HS_26MHZ    (1u << 0)
 #define DEVTYPE_HS_52MHZ    (1u << 1)
 
-/** CMD6 SWITCH argument: access mode in [25:24], index [23:16], value [15:8]. */
+/** CMD6 SWITCH argument: access mode [25:24], index [23:16], value [15:8]. */
 #define SWITCH_ACCESS_WRITE_BYTE  3u
 
-/** R1 card-status bits used by the busy poll. */
+/** R1 card-status bits; emmc_wait_ready() reads all but R1_ERROR_MASK. */
 #define R1_SWITCH_ERROR    (1u << 7)
 #define R1_READY_FOR_DATA  (1u << 8)
 #define R1_STATE_Pos       9u
@@ -161,9 +151,8 @@ _Static_assert(EMMC_PAD_D7 - EMMC_PAD_D4 == 3,
  * power-of-two boundary, and software restarts it by writing the address back.
  * 512 KB (encoding 7) is the largest offered: one service per scratch transfer.
  *
- * @note A boundary field can corrupt rather than merely slow -- the PSRAM's
- *       DMABOUND gave identical timing and wrong data above 4 KB.  Every DMA
- *       leg below is therefore checksum-gated against a known pattern.
+ * @note A wrong boundary setting corrupts data; the bench checks the data
+ *       of every DMA transfer except the rand-far reads against a pattern.
  */
 #define EMMC_SDMA_BOUND     7u    /* 0=4K, 1=8K, ... 7=512K                  */
 
@@ -190,18 +179,21 @@ static uint32_t s_init_us;     /**< POR -> the configuration finally in use */
 static tiku_emmc_id_t s_id;
 static void   (*s_trace)(const char *step);
 
+/** @brief Report one bring-up step to the trace hook, if one is set. */
 static void trace(const char *s) { if (s_trace) { s_trace(s); } }
 void tiku_emmc_set_trace(void (*fn)(const char *)) { s_trace = fn; }
 
-/** EXT_CSD image, re-read after every configuration change (table 4). */
+/** EXT_CSD image, re-read after each configuration change. */
 static uint8_t s_ext[TIKU_EMMC_BLOCK_SIZE] __attribute__((aligned(4)));
 
 /*---------------------------------------------------------------------------*/
-/* CYCLE CLOCK -- shared by the init timer and the bench                     */
+/* CYCLE CLOCK                                                               */
 /*---------------------------------------------------------------------------*/
 
+/* DWT CYCCNT times the init steps, the data-phase deadlines and the bench. */
 extern unsigned long tiku_cpu_ambiq_clock_get_hz(void);
 
+/** @brief Start the DWT cycle counter (TRCENA, CYCCNTENA). */
 static void cyc_enable(void)
 {
     volatile uint32_t *demcr  = (volatile uint32_t *)0xE000EDFCUL;
@@ -210,11 +202,13 @@ static void cyc_enable(void)
     *dwtctl |= 1u;              /* CYCCNTENA                                 */
 }
 
+/** @brief Read the DWT cycle counter. */
 static inline uint32_t cyc_now(void)
 {
     return *(volatile uint32_t *)0xE0001004UL;
 }
 
+/** @brief Convert cycles to microseconds at the current core clock. */
 static uint32_t cyc_to_us(uint32_t cyc)
 {
     unsigned long hz = tiku_cpu_ambiq_clock_get_hz();
@@ -238,55 +232,36 @@ uint32_t tiku_emmc_scratch_lba(void)
 /*---------------------------------------------------------------------------*/
 
 #define EMMC_CMD_SPINS   20000u   /* -> ~200 ms per command   (see backoff)  */
-/* No EMMC_DATA_SPINS any more: data phases are bounded by TIME, below.     */
 
 /*
- * A spin count is not a time limit, AND PRETENDING OTHERWISE COST A RUN.
- *
- * The data phase originally waited a fixed 50000 iterations, which the
- * backoff schedule turns into roughly half a second.  That is comfortable at
- * 8 bits and 48 MHz, where even a 512 KB transfer finishes in 14 ms -- and
- * hopeless at 1 bit and 375 kHz, where 128 blocks need 1.4 SECONDS.  So the
- * driver timed out in the middle of transfers that were proceeding perfectly,
- * returned ERR_TIMEOUT, and left the caller holding a partly-filled buffer.
- *
- * It presented as the nastiest shape available: no controller error (a
- * timeout is OURS, so INTSTAT stays clean and s_last_err stays zero),
- * "successful-looking" legs with wrong data, and read rates six times what
- * the wire could carry -- because the bench divided a full span by the time
- * spent before the abort.  Every symptom pointed at the silicon; the bug was
- * a constant in this file.
- *
- * The fix is to stop counting iterations and start counting TIME, with the
- * budget derived from the work: bytes / (clock x width), times a slack
- * factor, plus a fixed allowance for the card's own programming.  A budget
- * that scales with the transfer cannot silently shrink when the bus slows.
+ * Data phases are bounded by time, derived from the work: the wire time of
+ * the transfer, bytes / (clock x width), times EMMC_XFER_SLACK, plus
+ * EMMC_PROGRAM_US for the card's own programming.  The budget scales with
+ * the bus: at 1 bit and 375 kHz 128 blocks take 1.4 s on the wire, at 8 bits
+ * and 48 MHz a 512 KB transfer about 11 ms.  A timeout here is this driver's
+ * own deadline: INTSTAT holds no error bit, and s_last_err is not written.
  */
 #define EMMC_XFER_SLACK      4u          /* x expected wire time             */
 #define EMMC_PROGRAM_US 500000u          /* + card programming allowance     */
 #define EMMC_READY_US  5000000u          /* CMD13 busy poll after a write    */
-#define EMMC_CHUNK_US  2000000u          /* max wire time in ONE command     */
+#define EMMC_CHUNK_US  2000000u          /* max wire time in one command     */
 
 /*
- * Backstop for the time budgets above.  A loop bounded only by a cycle counter
- * is unbounded if that counter ever stops -- and DWT's CYCCNT is a debug
- * resource that a probe detaching, or a low-power transition, can switch off.
- * The largest budget here is 8 s, which at the backoff's 10 us floor is about
- * 800k iterations, so four million is far above any legitimate wait and still
- * finite.  Bounded waits are a rule in this port, and a rule with an exception
- * for "the clock is fine" is not one.
+ * Spin ceiling behind the time budgets: a loop bounded only by DWT CYCCNT
+ * never ends if the counter stops, and a debug probe detaching or a
+ * low-power transition can stop it.  The largest budget, 8 s, is about 800k
+ * iterations at the backoff's 10 us floor, so four million is above any real
+ * wait and still finite.
  */
 #define EMMC_SPIN_CEILING 4000000u
 
 /**
- * @brief Escalating poll backoff -- tight, then 2 us, then 10 us.
+ * @brief Escalating poll backoff: no delay for the first 64 polls, 2 us each
+ *        until poll 512, then 10 us.
  *
- * A tight spin forever is bus traffic aimed at the controller doing the work
- * (20 % of the DMA plateau on the PSRAM), but a flat 10 us floor dominates once
- * the clock reaches 48 MHz, where a single-block read is ~11 us on the wire.
- *
- * @note Free for the first 64 reads (short transfers finish inside that window
- *       and pay nothing), 2 us to about half a millisecond, 10 us thereafter.
+ * The undelayed first stage keeps a fast operation, such as an 11 us
+ * single-block read at 48 MHz, from waiting on a delay; the later stages keep
+ * a long wait from loading the bus the controller is using.
  */
 static void poll_backoff(uint32_t iter)
 {
@@ -319,11 +294,11 @@ static uint32_t emmc_xfer_budget_cyc(uint32_t n_blk)
 }
 
 /**
- * @brief Blocks per command: bounded by BLKCNT and by wall-clock sanity.
+ * @brief Blocks per command: at most EMMC_MAX_BLKCNT, and at most
+ *        EMMC_CHUNK_US of wire time at the current clock and width.
  *
- * Chunking exists so no single command can run for an unbounded time at a
- * slow bus setting -- which is what keeps the budget above from having to
- * cover a 65535-block transfer at 375 kHz (twelve minutes).
+ * This keeps one command's deadline short at a slow setting: 65535 blocks
+ * at 375 kHz on one bit take about twelve minutes on the wire.
  */
 static uint32_t emmc_max_chunk(void)
 {
@@ -345,11 +320,13 @@ static tiku_emmc_err_t emmc_cmd_x(uint8_t idx, uint32_t arg, unsigned resp_type,
  *
  * @param idx        command index
  * @param arg        argument register value
- * @param resp_type  RESP_* (table 3)
+ * @param resp_type  RESP_*
  * @param crc        check the response CRC (off for R3 -- OCR has none)
  * @param idxchk     check the echoed index (off for R3 and R2)
  * @param data       non-zero if a data phase follows
  * @param resp       out: RESPONSE0..3 (may be NULL); [0] alone for 48-bit
+ * @return TIKU_EMMC_OK, TIKU_EMMC_ERR_TIMEOUT, or TIKU_EMMC_ERR_CMD with the
+ *         INTSTAT error bits in s_last_err
  */
 static tiku_emmc_err_t emmc_cmd(uint8_t idx, uint32_t arg, unsigned resp_type,
                                 int crc, int idxchk, int data, uint32_t *resp)
@@ -358,11 +335,11 @@ static tiku_emmc_err_t emmc_cmd(uint8_t idx, uint32_t arg, unsigned resp_type,
 }
 
 /**
- * @brief The full form: transfer-mode bits travel WITH the command.
+ * @brief emmc_cmd() with transfer-mode bits, which travel with the command.
  *
- * TRANSFER is one 32-bit register holding the transfer-mode fields (direction,
- * block-count enable, DMA) in its low half and the command in its high half, and
- * writing it STARTS the command -- so an earlier mode-only write gets erased.
+ * TRANSFER holds the transfer-mode fields (direction, block-count enable, DMA)
+ * in its low half and the command in its high half, and writing it starts the
+ * command, so the mode cannot be written ahead of the command.
  *
  * @param xfer_mode extra low-half bits (DXFERDIRSEL, BLKCNTEN, ...)
  */
@@ -372,11 +349,9 @@ static tiku_emmc_err_t emmc_cmd_x(uint8_t idx, uint32_t arg, unsigned resp_type,
 {
     uint32_t xfer = xfer_mode;
     uint32_t spins;
-    /* A data command additionally needs the DAT lines free.  E2 only ever
-     * issued one command per 512 bytes and the card was always long done by
-     * the time the next arrived; multi-block WRITES leave the card busy
-     * PROGRAMMING with DAT0 held low, and issuing the next command into that
-     * is how a fast write path starts failing under load and nowhere else. */
+    /* A data command also needs the DAT lines free: after a multi-block
+     * write the card holds DAT0 low while it programs, and a command issued
+     * then fails. */
     const uint32_t inhibit = SDIO0_PRESENT_CMDINHCMD_Msk |
                              (data ? SDIO0_PRESENT_CMDINHDAT_Msk : 0u);
 
@@ -403,7 +378,7 @@ static tiku_emmc_err_t emmc_cmd_x(uint8_t idx, uint32_t arg, unsigned resp_type,
     for (spins = 0u; spins < EMMC_CMD_SPINS; spins++) {
         uint32_t st = SDIO0->INTSTAT;
         if ((st & SDIO0_INTSTAT_ERRORINTERRUPT_Msk) != 0u) {
-            s_last_err = st;      /* keep it: which error matters           */
+            s_last_err = st;      /* tiku_emmc_last_error() reports it      */
             /* Reset the command line so the next attempt starts clean. */
             SDIO0->CLOCKCTRL_b.SWRSTCMD = 1u;
             { uint32_t g = 1000u;
@@ -490,12 +465,13 @@ static tiku_emmc_err_t emmc_write_buffer(const uint8_t *src)
 /**
  * @brief Wait for TRANSFERCOMPLETE, servicing SDMA boundary crossings.
  *
- * When the destination crosses the boundary in BLOCK.HOSTSDMABUFSZ the engine
- * STOPS, raises DMAINTERRUPT and leaves the continue-from address in SDMA;
- * writing it back is the whole of "restart".  Miss it and nothing completes.
+ * At each boundary set in BLOCK.HOSTSDMABUFSZ the engine stops, raises
+ * DMAINTERRUPT and leaves the resume address in SDMA; writing that address
+ * back restarts it, and an unserviced stop never completes.
  *
- * @note Boundary service does NOT back off: every microsecond here is a
- *       microsecond the bus is idle mid-transfer.
+ * @note Boundary service does not back off: the bus is idle until it runs.
+ * @return TIKU_EMMC_OK, TIKU_EMMC_ERR_CMD, or TIKU_EMMC_ERR_TIMEOUT after
+ *         @p budget_cyc cycles with no progress
  */
 static tiku_emmc_err_t emmc_wait_xfer(uint32_t budget_cyc)
 {
@@ -528,11 +504,11 @@ static tiku_emmc_err_t emmc_wait_xfer(uint32_t budget_cyc)
 }
 
 /**
- * @brief Poll CMD13 until the card is out of PROGRAMMING and back in TRAN.
+ * @brief Poll CMD13 until the card is ready for data and back in TRAN.
  *
- * CMD6 and every write leave the card busy on its own flash, and the host's
- * TRANSFERCOMPLETE says only that the BUS is free.  Issuing a SWITCH into that
- * window is how a configuration change gets silently dropped.
+ * CMD6 and every write leave the card programming its flash after the host's
+ * TRANSFERCOMPLETE, which means only that the bus is free; a SWITCH issued in
+ * that window is dropped without an error.
  */
 static tiku_emmc_err_t emmc_wait_ready(void)
 {
@@ -546,10 +522,10 @@ static tiku_emmc_err_t emmc_wait_ready(void)
         tiku_emmc_err_t rc = emmc_cmd(MMC_SEND_STATUS, s_rca << 16,
                                       RESP_48, 1, 1, 0, resp);
         if (rc != TIKU_EMMC_OK) { return rc; }
-        /* SWITCH_ERROR is sticky and reported HERE, not on the CMD6 itself:
-         * a card that refused the switch answers the command perfectly and
-         * then admits it in the next status.  Without this check the driver
-         * would reconfigure the host to a width the card never adopted. */
+        /* SWITCH_ERROR appears in the status after a CMD6, not in the CMD6
+         * response: a card that refused the switch answers the CMD6 normally.
+         * emmc_set_bus_width() and emmc_set_high_speed() change the host only
+         * after this check passes. */
         if ((resp[0] & R1_SWITCH_ERROR) != 0u) { return TIKU_EMMC_ERR_CMD; }
         if ((resp[0] & R1_READY_FOR_DATA) != 0u &&
             ((resp[0] & R1_STATE_Msk) >> R1_STATE_Pos) == MMC_STATE_TRAN) {
@@ -563,19 +539,17 @@ static tiku_emmc_err_t emmc_wait_ready(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* HOST BRING-UP (table 1)                                                   */
+/* HOST BRING-UP                                                             */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Power SDIO0, force HFRC on and enable the host's clocks. */
 static tiku_emmc_err_t emmc_power_on(void)
 {
     uint32_t spins = 100000u;
 
-    /* THREE THINGS, AND THE DOMAIN IS ONLY THE FIRST.  Powering SDIO0 gives
-     * the block a supply; it does not give it a CLOCK, and a host with no
-     * clock accepts a software-reset request and never completes it -- which
-     * is exactly how this presented (SWRSTALL set forever).  The MSPI
-     * bring-up learned the same shape: force the oscillator, then gate the
-     * peripheral's own clock enables.  Here that is:
+    /* Three steps.  The power domain alone gives the block no clock, and a
+     * host with no clock accepts a software-reset request and never
+     * completes it (SWRSTALL stays set):
      *
      *   1. PWRCTRL.DEVPWREN.PWRENSDIO0    the power domain
      *   2. CLKGEN.MISC.FRCHFRC            HFRC forced on (the clock manager
@@ -583,8 +557,9 @@ static tiku_emmc_err_t emmc_power_on(void)
      *   3. MCUCTRL.SDIO0CTRL.SDIO0SYSCLKEN + SDIO0XINCLKEN
      *                                     the host's system and card clocks
      *
-     * The vendor does (2) via am_hal_clkmgr_clock_request(HFRC) and (3)
-     * explicitly in am_hal_sdhc_power_control(). */
+     * The vendor HAL does (2) with am_hal_clkmgr_clock_request(HFRC) and (3)
+     * in am_hal_sdhc_power_control().  tiku_emmc_deinit() does not undo (2)
+     * or (3). */
     PWRCTRL->DEVPWREN |= PWRCTRL_DEVPWREN_PWRENSDIO0_Msk;
     __DSB();
     while (((PWRCTRL->DEVPWRSTATUS & PWRCTRL_DEVPWRSTATUS_PWRSTSDIO0_Msk) == 0u)
@@ -602,11 +577,14 @@ static tiku_emmc_err_t emmc_power_on(void)
 }
 
 /**
- * @brief Set the bus clock.  Divider is a power of two; enabling is a dance.
+ * @brief Set the bus clock to the highest base / 2^n (n <= 8) not above
+ *        @p target_hz.
  *
- * FREQSEL takes divider>>1, and the sequence is CLKEN -> poll CLKSTABLE ->
- * SDCLKEN.  Skipping the stability poll clocks the card before the host's PLL
- * has settled, which presents as a card that answers intermittently.
+ * FREQSEL takes divider >> 1, and the order is CLKEN, wait for CLKSTABLE,
+ * SDCLKEN: a card clocked before CLKSTABLE answers only intermittently.
+ *
+ * @return TIKU_EMMC_OK, or TIKU_EMMC_ERR_CLOCK with no base clock or if
+ *         CLKSTABLE never sets
  */
 static tiku_emmc_err_t emmc_set_clock(uint32_t target_hz)
 {
@@ -637,13 +615,11 @@ static tiku_emmc_err_t emmc_set_clock(uint32_t target_hz)
     return TIKU_EMMC_OK;
 }
 
-/*
- * PAD-BY-PAD, AND TRACED.  The first run with the corrected function selects
- * wedged the board hard enough that SWD died at every speed and reset type --
- * the third such wedge this week, and the only new thing was these ten pads.
- * So each pad announces itself before it is claimed: if it happens again the
- * last line on the wire names the exact pad, instead of leaving ten suspects.
- * Cheap insurance, and it costs nothing once the bring-up is trusted.
+/**
+ * @brief Claim the ten SDIO pads one at a time, each traced first.
+ *
+ * Each pad's number goes to the trace hook before the pad is claimed, so if
+ * claiming one hangs the board, the last trace line names it.
  */
 static void emmc_pads_config(void)
 {
@@ -670,7 +646,7 @@ static void emmc_pads_config(void)
     }
 }
 
-/** @brief Pulse the card's reset line (GP13 -- see table 0). */
+/** @brief Pulse the card's reset line (EMMC_PAD_RST, from the board). */
 static void emmc_card_reset(void)
 {
     tiku_ambiq_gpio_pad_config(EMMC_PAD_RST, PAD_CFG_GPIO_OUT);
@@ -683,7 +659,7 @@ static void emmc_card_reset(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* THE E3 UPGRADE (table 4)                                                  */
+/* BUS WIDTH AND SPEED                                                       */
 /*---------------------------------------------------------------------------*/
 
 /** @brief Read the 512-byte EXT_CSD register into @p out (PIO, one block). */
@@ -692,9 +668,8 @@ static tiku_emmc_err_t emmc_read_ext_csd(uint8_t *out)
     uint32_t resp[4];
     tiku_emmc_err_t rc;
 
-    /* PIO on purpose: this runs before DMA is trusted, it is 512 bytes once
-     * per configuration change, and keeping it on the simplest path means a
-     * DMA bug can never masquerade as a card that forgot its own settings. */
+    /* PIO: this runs once per configuration change, before any DMA
+     * transfer, and a fault in the DMA path cannot corrupt what it reads. */
     SDIO0->BLOCK = TIKU_EMMC_BLOCK_SIZE;
     rc = emmc_cmd_x(MMC_SEND_EXT_CSD, 0u, RESP_48, 1, 1, 1,
                     SDIO0_TRANSFER_DXFERDIRSEL_Msk, resp);
@@ -704,11 +679,15 @@ static tiku_emmc_err_t emmc_read_ext_csd(uint8_t *out)
 }
 
 /**
- * @brief CMD6 SWITCH -- and the allow-list that keeps this card alive.
+ * @brief CMD6 SWITCH of one EXT_CSD byte, for index 183 (BUS_WIDTH) or 185
+ *        (HS_TIMING) only, with no override.
  *
- * EXT_CSD is partly one-time-programmable, and a wrong index does not error: it
- * permanently disables a feature, repartitions the device, or locks a boot
- * configuration.  Only 183 and 185 may be written, and there is no force flag.
+ * EXT_CSD is partly one-time-programmable, and a write to a wrong index raises
+ * no error: it can disable a feature, repartition the device or lock a boot
+ * configuration for good.
+ *
+ * @return TIKU_EMMC_ERR_ARG for any other index, else the command or the
+ *         status-poll result
  */
 static tiku_emmc_err_t emmc_switch(uint8_t index, uint8_t value)
 {
@@ -724,14 +703,13 @@ static tiku_emmc_err_t emmc_switch(uint8_t index, uint8_t value)
           ((uint32_t)index << 16) | ((uint32_t)value << 8);
     rc = emmc_cmd(MMC_SWITCH, arg, RESP_48BUSY, 1, 1, 0, resp);
     if (rc != TIKU_EMMC_OK) { return rc; }
-    /* R1b means the card holds DAT0 low while it applies the change; the
-     * status poll is what makes the next command safe, and it is also where
-     * a REFUSED switch is confessed (SWITCH_ERROR). */
+    /* R1b: the card holds DAT0 low while it applies the change.  The status
+     * poll waits that out and reports a refused switch (SWITCH_ERROR). */
     return emmc_wait_ready();
 }
 
 /**
- * @brief Widen the bus: card first, then host (table 4, and the order matters).
+ * @brief Set the bus width (1, 4 or 8 bits): the card first, then the host.
  */
 static tiku_emmc_err_t emmc_set_bus_width(unsigned bits)
 {
@@ -748,9 +726,9 @@ static tiku_emmc_err_t emmc_set_bus_width(unsigned bits)
     rc = emmc_switch(EXT_CSD_BUS_WIDTH, code);
     if (rc != TIKU_EMMC_OK) { return rc; }
 
-    /* Now the host.  Between the two writes the ends disagree about the bus
-     * width; no data command may be issued in that gap, which is why this
-     * function does the whole change and callers cannot do half of it. */
+    /* Then the host.  Between the card's switch and these writes the two
+     * ends disagree about the bus width, so no data command may run in
+     * that gap. */
     SDIO0->HOSTCTRL1_b.XFERWIDTH = (bits == 8u) ? 1u : 0u;
     SDIO0->HOSTCTRL1_b.DATATRANSFERWIDTH = (bits == 4u) ? 1u : 0u;
     __DSB();
@@ -759,11 +737,11 @@ static tiku_emmc_err_t emmc_set_bus_width(unsigned bits)
 }
 
 /**
- * @brief High-speed timing, clamped to what EXT_CSD[196] says the card allows.
+ * @brief Switch to high-speed timing and set the clock, capped at what
+ *        EXT_CSD[196] DEVICE_TYPE allows (52 or 26 MHz).
  *
- * The clamp is the point: "eMMC high speed is 52 MHz" is true of the standard
- * and not necessarily of the part in front of you.  DEVICE_TYPE is a register,
- * so it is consulted rather than assumed.
+ * A card that reports no high-speed mode stays at legacy timing, and only the
+ * clock is set.
  */
 static tiku_emmc_err_t emmc_set_high_speed(uint32_t target_hz)
 {
@@ -774,7 +752,7 @@ static tiku_emmc_err_t emmc_set_high_speed(uint32_t target_hz)
     else if ((s_devtype & DEVTYPE_HS_26MHZ) != 0u) { ceiling = 26000000u; }
     else {
         /* The card claims no high-speed mode at all.  Stay at legacy timing
-         * and let the caller's clock request stand or fall on its own. */
+         * and set the requested clock with no cap. */
         return emmc_set_clock(target_hz);
     }
     if (target_hz > ceiling) { target_hz = ceiling; }
@@ -788,15 +766,16 @@ static tiku_emmc_err_t emmc_set_high_speed(uint32_t target_hz)
 }
 
 /*---------------------------------------------------------------------------*/
-/* THE LADDER (table 2)                                                      */
+/* FALLBACK                                                                  */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Put both ends back at the identification setting after a failure.
+ * @brief Put both ends back at the identification setting (1 bit, 400 kHz,
+ *        legacy timing) after a failed upgrade.
  *
- * HOST FIRST, the reverse of the upgrade order: an upgrade fails when the CARD
- * did not adopt the setting, so the host is what is out of step and narrowing it
- * is what makes the card reachable.  The CMD6s afterwards are best-effort.
+ * The host goes first, the reverse of the upgrade order: a failed upgrade
+ * leaves the card at its old setting, so the host must match it before the
+ * card can be reached.  The CMD6s that follow are best-effort.
  */
 static void emmc_fallback_slow(void)
 {
@@ -816,19 +795,21 @@ static void emmc_fallback_slow(void)
 
 /*
  * HS200 at the silicon's 96 MHz ceiling (the vendor header caps the mode's
- * 200 MHz nominal at the SDHC base clock).  Sequence per JEDEC + the vendor
- * HAL read as documentation: CMD6 HS_TIMING=2, host UHSMODESEL=SDR104,
- * divider 1, then pick the RX sample point.
+ * nominal 200 MHz at the SDHC base clock), per JEDEC and the vendor HAL:
+ * CMD6 HS_TIMING=2, host UHSMODESEL=SDR104, divider 1, then the RX sample
+ * point.
  *
- * Tuning is NOT the standard CMD21 loop: this host samples through MCUCTRL
- * delay taps (OTAPDLYSEL for TX, ITAPDLYSEL for RX, changed inside an
- * ITAPCHGWIN window), so the procedure mirrors the PSRAM rxdqs scan --
- * write a pattern to the scratch region at the proven 48 MHz, raise the
- * clock, then read it back at every RX tap and take the centre of the
- * widest passing run.  Every failure path drops cleanly back to HS 48.
+ * Tuning does not use the CMD21 loop: this host samples through MCUCTRL delay
+ * taps (OTAPDLYSEL for TX, ITAPDLYSEL for RX, changed inside an ITAPCHGWIN
+ * window).  tiku_emmc_hs200() writes a pattern to the scratch region at the
+ * current mode, raises the clock, reads the pattern back at every RX tap and
+ * takes the centre of the widest passing run.  From the HS_TIMING=2 switch
+ * on, a failure returns to HS at 48 MHz; a failure before it changes no
+ * setting.
  */
 #define EMMC_ITAP_MAX 32u
 
+/** @brief Set the TX and RX delay taps inside an ITAPCHGWIN window. */
 static void emmc_set_taps(uint32_t otap, uint32_t itap, int ena)
 {
     MCUCTRL->SDIO0CTRL_b.SDIO0ITAPCHGWIN = 1u;
@@ -882,9 +863,9 @@ tiku_emmc_err_t tiku_emmc_hs200(void)
     rc = emmc_set_clock(96000000u);
     if (rc != TIKU_EMMC_OK) { goto fallback; }
 
-    /* RX tap scan.  A failing point leaves error status and possibly a
-     * wedged data state machine; both lines are reset before the verdict
-     * is recorded so point N cannot poison point N+1. */
+    /* RX tap scan.  A failing point can leave error status set and the data
+     * state machine stuck, so after a failing point both lines are reset
+     * before the next tap is tried. */
     for (itap = 0u; itap < EMMC_ITAP_MAX; itap++) {
         emmc_set_taps(0u, itap, 1);
         rc = tiku_emmc_read_blocks(lba, 1u, rd);
@@ -924,7 +905,7 @@ fallback:
     (void)emmc_switch(EXT_CSD_HS_TIMING, 1u);
     (void)emmc_set_clock(48000000u);
     emmc_recover_lines();
-    {   /* the fallback must be PROVEN, not assumed */
+    {   /* read the pattern back to check the fallback */
         tiku_emmc_err_t v = tiku_emmc_read_blocks(lba, 1u, rd);
         SHELL_PRINTF("  hs200: failed, back at HS 48 (%s)\n",
                      (v == TIKU_EMMC_OK && memcmp(pat, rd, 512u) == 0)
@@ -955,8 +936,8 @@ tiku_emmc_err_t tiku_emmc_init_at(unsigned width, uint32_t hz)
     rc = emmc_power_on();
     if (rc != TIKU_EMMC_OK) { return rc; }
 
-    /* Full host reset before anything: the card may have been left mid-
-     * transaction by a previous boot, and SWRSTALL is the only way back. */
+    /* Reset the whole host first: a previous boot may have left it mid-
+     * transaction, and SWRSTALL clears that. */
     trace("host-reset");
     SDIO0->CLOCKCTRL_b.SWRSTALL = 1u;
     spins = 10000u;
@@ -968,36 +949,20 @@ tiku_emmc_err_t tiku_emmc_init_at(unsigned width, uint32_t hz)
     s_base_mhz = (uint8_t)SDIO0->CAPABILITIES0_b.SDCLKFREQ;
     if (s_base_mhz == 0u) { return TIKU_EMMC_ERR_CLOCK; }
 
-    /* ENABLE THE STATUS BITS, OR NOTHING IS EVER OBSERVABLE.
-     *
-     * SDHCI splits interrupt control in two: INTENABLE decides which events
-     * may APPEAR in INTSTAT at all, and INTSIG decides which of those also
-     * raise a CPU interrupt.  A driver that polls INTSTAT still needs
-     * INTENABLE set -- otherwise commands complete perfectly and the status
-     * register stays stubbornly zero, which is precisely how CMD0 presented
-     * here: no completion, no error, bus powered, clock stable, CMD line not
-     * inhibited.  INTSIG stays 0: this driver polls and takes no interrupts. */
+    /* SDHCI splits interrupt control in two: INTENABLE selects which events
+     * appear in INTSTAT at all, and INTSIG which of those also interrupt the
+     * CPU.  A polling driver still needs INTENABLE set, or commands complete
+     * with INTSTAT left at zero.  INTSIG stays 0: this driver polls. */
     SDIO0->INTENABLE = 0xFFFFFFFFu;
     SDIO0->INTSIG    = 0u;
     __DSB();
 
     /*
-     * Give the card time to answer, OR IT WILL BE CUT OFF MID-WRITE.
-     *
-     * CLOCKCTRL.TIMEOUTCNT sets the DATA timeout as 2^(13+n) ticks of TMCLK,
+     * Data timeout.  CLOCKCTRL.TIMEOUTCNT sets it as 2^(13+n) ticks of TMCLK,
      * whose rate CAPABILITIES0[7:0] reports (1 MHz here).  A software reset
-     * leaves it at 0, i.e. 8.192 ms -- and an eMMC is allowed to hold DAT0
-     * low far longer than that while it programs, hundreds of milliseconds in
-     * the worst case.  The spec's own maximum is what belongs here; the reset
-     * default is not a considered value, it is the absence of one.
-     *
-     * This bug was latent for three runs.  A warm card answered inside 8 ms
-     * every time and the bench was bit-exact at 35.8 MB/s.  The first write
-     * after a POWER CYCLE took longer -- a cold flash translation layer has
-     * work to do -- and the controller cut the transfer off at 8545 us with
-     * DATA-TIMEOUT and a knock-on Auto-CMD12 error.  An intermittent fault
-     * that depends on how recently the board was powered is the worst kind to
-     * leave in a driver whose whole job is staging megabytes reliably.
+     * leaves n = 0, 8.192 ms, and an eMMC may hold DAT0 low for hundreds of
+     * milliseconds while it programs, as on the first write after power-up,
+     * so n is set to the maximum.
      */
     SDIO0->CLOCKCTRL_b.TIMEOUTCNT = 0xEu;   /* 2^27 TMCLK -- the maximum     */
     __DSB();
@@ -1005,10 +970,10 @@ tiku_emmc_err_t tiku_emmc_init_at(unsigned width, uint32_t hz)
     trace("pads");
     emmc_pads_config();
 
-    /* VOLTAGE BEFORE POWER, and both are required.  A host controller with
-     * SDBUSPOWER set but VOLTSELECT unprogrammed does not drive the bus, so
-     * commands are accepted and never complete -- which is exactly how CMD0
-     * presented.  The eMMC's VCCQ on this board is 1.8 V. */
+    /* Voltage before power, and both are needed: with SDBUSPOWER set but
+     * VOLTSELECT unprogrammed the host does not drive the bus, and commands
+     * are accepted but never complete.  The eMMC's VCCQ on the EVBs is
+     * 1.8 V. */
     trace("bus-power");
     SDIO0->HOSTCTRL1_b.VOLTSELECT = SDIO0_HOSTCTRL1_VOLTSELECT_1_8V;
     __DSB();
@@ -1016,8 +981,8 @@ tiku_emmc_err_t tiku_emmc_init_at(unsigned width, uint32_t hz)
     __DSB();
     tiku_cpu_ambiq_delay_us(2000u);
 
-    /* Identification runs at 400 kHz on a 1-bit bus.  Both are mandatory --
-     * the card will not answer CMD1 outside them. */
+    /* Identification runs at 400 kHz on a 1-bit bus; the card does not
+     * answer CMD1 otherwise. */
     trace("clock-400k");
     rc = emmc_set_clock(400000u);
     if (rc != TIKU_EMMC_OK) { return rc; }
@@ -1035,8 +1000,8 @@ tiku_emmc_err_t tiku_emmc_init_at(unsigned width, uint32_t hz)
     if (rc != TIKU_EMMC_OK) { s_up = 0u; return rc; }
     tiku_cpu_ambiq_delay_us(2000u);
 
-    /* CMD1 is a POLL, not a command: the card reports busy until its
-     * internal init finishes, and the spec allows up to a second. */
+    /* CMD1 is polled: the card reports busy until its internal init
+     * finishes, which the spec allows to take a second. */
     trace("cmd1-opcond");
     {
         uint32_t tries = 1000u;
@@ -1056,10 +1021,8 @@ tiku_emmc_err_t tiku_emmc_init_at(unsigned width, uint32_t hz)
     if (rc != TIKU_EMMC_OK) { s_up = 0u; return rc; }
     {
         /* A 136-bit response arrives with the CRC byte shifted out, so the
-         * CID's fields sit 8 bits low across RESPONSE3..0.  Getting this
-         * wrong prints a plausible-looking product name, which is why the
-         * gate checks the decoded values rather than merely that bits
-         * arrived. */
+         * CID's fields sit 8 bits low across RESPONSE3..0.  A wrong shift
+         * still yields a plausible-looking product name. */
         uint8_t cid[16];
         int i;
         for (i = 0; i < 4; i++) {
@@ -1075,13 +1038,8 @@ tiku_emmc_err_t tiku_emmc_init_at(unsigned width, uint32_t hz)
         s_id.rev     = cid[9];
         s_id.serial  = ((uint32_t)cid[10] << 24) | ((uint32_t)cid[11] << 16) |
                        ((uint32_t)cid[12] << 8)  |  (uint32_t)cid[13];
-        /* The year's BASE depends on EXT_CSD_REV, which is not read until
-         * several rungs later -- so keep the raw nibble now and resolve it
-         * at the end.  (Decoding it as 1997+n unconditionally printed "made
-         * 11/2001" for a card whose EXT_CSD revision did not exist until
-         * years after that: a plausible-looking field that is obviously
-         * wrong once you look at it, which is the kind this port does not
-         * ship.) */
+        /* The year's base depends on EXT_CSD_REV, read later, so the raw
+         * nibble is kept here and resolved once EXT_CSD is read. */
         s_id.mfg_month = (uint8_t)(cid[14] & 0x0Fu);
         s_id.mfg_year  = (uint16_t)((cid[14] >> 4) & 0x0Fu);   /* raw */
     }
@@ -1106,9 +1064,9 @@ tiku_emmc_err_t tiku_emmc_init_at(unsigned width, uint32_t hz)
     (void)emmc_cmd(MMC_SET_BLOCKLEN, TIKU_EMMC_BLOCK_SIZE,
                    RESP_48, 1, 1, 0, resp);
 
-    /* EXT_CSD is a 512-byte data phase and carries the real capacity: a
-     * card above 2 GB reports 0xFFFFFFFF-ish nonsense in the CSD and the
-     * truth only in EXT_CSD[215:212]. */
+    /* EXT_CSD, a 512-byte data phase, carries the capacity: a card above
+     * 2 GB reports a placeholder in the CSD and its sector count only in
+     * EXT_CSD[215:212]. */
     trace("cmd8-extcsd");
     rc = emmc_read_ext_csd(s_ext);
     if (rc == TIKU_EMMC_OK) {
@@ -1125,16 +1083,13 @@ tiku_emmc_err_t tiku_emmc_init_at(unsigned width, uint32_t hz)
     s_id.mfg_year = (uint16_t)((s_id.ext_csd_rev >= 4u ? 2013u : 1997u)
                                + s_id.mfg_year);
 
-    /* TRANSFER-READY.  Everything above is the ceremony the MMC spec makes
-     * mandatory; everything below is optional speed.  Splitting the clock
-     * here is what lets E5 price "wake the card" separately from "make the
-     * card fast", which are different decisions with different answers. */
+    /* Transfer-ready.  The steps above are what the MMC spec requires; the
+     * steps below only add speed.  s_ladder_us times the required part
+     * alone (tiku_emmc_init_time()). */
     s_ladder_us = cyc_to_us(cyc_now() - t_start);
     if (rc != TIKU_EMMC_OK) { s_init_us = s_ladder_us; s_up = 0u; return rc; }
 
-    /*-------------------------------------------------------------------*/
-    /* TABLE 4: the upgrade, and the card's own account of whether it took */
-    /*-------------------------------------------------------------------*/
+    /* The upgrade, then EXT_CSD read back to see whether the card took it. */
     if (width > 1u || hz > 400000u) {
         trace("cmd6-width");
         rc = emmc_set_bus_width(width);
@@ -1142,12 +1097,9 @@ tiku_emmc_err_t tiku_emmc_init_at(unsigned width, uint32_t hz)
             trace("cmd6-hs");
             rc = emmc_set_high_speed(hz);
         }
-        /* THE GATE.  Re-reading EXT_CSD is itself a data-phase transfer at
-         * the new width and the new clock, so a bus that cannot carry data
-         * fails by being unable to produce the evidence; and a card that
-         * quietly declined the switch is caught saying so in its own
-         * register file.  A pattern test alone would happily pass a host and
-         * a card that had BOTH stayed slow. */
+        /* Re-reading EXT_CSD is a data transfer at the new width and clock,
+         * so a bus that cannot carry data fails here, and a card that
+         * declined the switch shows its old width in its own register. */
         if (rc == TIKU_EMMC_OK) {
             trace("verify-extcsd");
             rc = emmc_read_ext_csd(s_ext);
@@ -1159,8 +1111,8 @@ tiku_emmc_err_t tiku_emmc_init_at(unsigned width, uint32_t hz)
             if (s_id.ext_bus_width != want_w) { rc = TIKU_EMMC_ERR_STATE; }
         }
         if (rc != TIKU_EMMC_OK) {
-            /* Slow and proven beats fast and half-configured.  Report the
-             * failure, but leave a WORKING device behind. */
+            /* Return the failure, but leave the card working at the
+             * identification setting. */
             trace("fallback-slow");
             emmc_fallback_slow();
             (void)emmc_read_ext_csd(s_ext);
@@ -1187,25 +1139,17 @@ void tiku_emmc_init_time(uint32_t *ladder_us, uint32_t *total_us)
 }
 
 /*---------------------------------------------------------------------------*/
-/* E4 -- LIFECYCLE: the rung between "up" and "gone"                         */
+/* SLEEP AND WAKE                                                            */
 /*---------------------------------------------------------------------------*/
 /*
- * E3 measured what the alternative costs: a full bring-up is 49 ms of
- * mandatory identification plus 3 ms of upgrade.  Fifty milliseconds is far
- * too much to pay per access and cheap enough to pay per wake, which is
- * exactly the gap a sleep rung exists to fill -- the same argument the
- * PSRAM's half-sleep won on, with a number instead of an intuition.
+ * Sleep (CMD5) is accepted only in STANDBY, and normal operation leaves the
+ * card in TRANSFER, so sleeping is deselect (CMD7 with RCA 0) then CMD5
+ * sleep; waking is CMD5 awake then CMD7 select.  A card sent CMD5 in another
+ * state ignores it without an error and stays awake, so the driver tracks the
+ * state in s_asleep and every access path checks it.
  *
- * CMD5 is not issued from where the card usually lives.  Sleep is only
- * accepted in STANDBY, and normal operation leaves the card in TRANSFER, so
- * the sequence is deselect (CMD7 with RCA 0) -> CMD5 sleep.  Waking is the
- * mirror: CMD5 awake -> CMD7 select.  Getting this wrong does not produce an
- * error; it produces a card that ignores the command and stays awake, which
- * is why the state is tracked and every access path checks it.
- *
- * The busy wait after CMD5 is on DAT0, NOT on CMD13: a sleeping card does
- * not answer SEND_STATUS, so polling it would time out on a card that had
- * done exactly what it was asked.
+ * The busy wait after CMD5 is on DAT0, not CMD13: a sleeping card does not
+ * answer SEND_STATUS.
  */
 
 /** @brief Bound the CMD5 busy wait from EXT_CSD[217]: 100 ns * 2^n. */
@@ -1213,15 +1157,15 @@ static uint32_t emmc_sa_timeout_us(void)
 {
     uint32_t us = 1u;
     uint8_t  n  = s_sa_timeout;
-    /* 100 ns * 2^n, in microseconds, clamped: the field is 8 bits and a
-     * pathological value would otherwise produce an unbounded wait. */
+    /* 100 ns * 2^n, in microseconds, with n clamped at 23 (about 0.84 s) so
+     * an out-of-range field cannot make the wait unbounded. */
     if (n > 23u) { n = 23u; }
     us = (1u << n) / 10u;
     if (us < 1000u) { us = 1000u; }      /* never wait less than a ms       */
     return us;
 }
 
-/** @brief Wait for the card to release DAT0 after an R1b that ends in sleep. */
+/** @brief Wait for the card to release DAT0 after a CMD5 sleep or awake. */
 static tiku_emmc_err_t emmc_wait_dat0(uint32_t budget_us)
 {
     uint32_t spins;
@@ -1252,9 +1196,8 @@ tiku_emmc_err_t tiku_emmc_sleep(void)
     cyc_enable();
     t0 = cyc_now();
 
-    /* Finish anything the card is still programming before asking it to
-     * sleep -- a card told to sleep mid-write has a legitimate reason to
-     * refuse, and diagnosing that later is not worth the microseconds. */
+    /* Wait out any programming first: a card told to sleep mid-write may
+     * refuse. */
     rc = emmc_wait_ready();
     if (rc != TIKU_EMMC_OK) { return rc; }
 
@@ -1297,9 +1240,8 @@ tiku_emmc_err_t tiku_emmc_wake(void)
     if (rc != TIKU_EMMC_OK) { return rc; }
 
     s_asleep = 0u;
-    /* Trust it only once it answers as itself again -- the PSRAM's wake
-     * rule, and for the same reason: a device that came back wrong is worse
-     * than one that did not come back. */
+    /* The wake returns TIKU_EMMC_OK only once CMD13 reports the card ready
+     * in TRAN. */
     rc = emmc_wait_ready();
     s_op_us = cyc_to_us(cyc_now() - t0);
     return rc;
@@ -1328,9 +1270,9 @@ tiku_emmc_err_t tiku_emmc_read_id(tiku_emmc_id_t *out)
 {
     if (!s_up) { return TIKU_EMMC_ERR_POWER; }
     if (out)   { *out = s_id; }
-    /* The gate is the DECODED values, not the presence of bits: a capacity
-     * that is zero, or absurd for an 8 GB part, means the 136-bit shift is
-     * wrong even though every command "succeeded". */
+    /* The check is on decoded values: a capacity of zero, or of more than
+     * 64M sectors (32 GB), means the identification data was misread even
+     * though every command succeeded. */
     if (s_sec_count == 0u || s_sec_count > (64u * 1024u * 1024u)) {
         return TIKU_EMMC_ERR_ID;
     }
@@ -1342,11 +1284,11 @@ tiku_emmc_err_t tiku_emmc_read_id(tiku_emmc_id_t *out)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief One command covering up to 65535 blocks, DMA or PIO.
+ * @brief One read or write command of up to 65535 blocks, by DMA or PIO.
  *
- * One command per 512 bytes proves correctness and then becomes the bottleneck:
- * at 48 MHz on 8 bits the data phase is 11 us and the per-command ceremony is
- * the measurement.  Hence BLKCNT armed and Auto CMD12, so the HOST closes it.
+ * A multi-block command arms BLKCNT and Auto CMD12, so the host ends the
+ * transfer.  At 48 MHz on 8 bits one block is about 11 us on the wire, less
+ * than the overhead of a command per block.
  */
 static tiku_emmc_err_t emmc_xfer_chunk(uint32_t lba, uint32_t n_blk,
                                        uint8_t *buf, int is_write, int use_dma)
@@ -1390,15 +1332,14 @@ static tiku_emmc_err_t emmc_xfer_chunk(uint32_t lba, uint32_t n_blk,
 }
 
 /**
- * @brief Block transfer: chunking, DMA selection and cache maintenance.
+ * @brief Block transfer: chunking, DMA or PIO selection, cache maintenance.
  *
- * SDMA takes a 32-bit system address and moves whole words, so an unaligned
- * buffer is not a slow case but a WRONG one; such buffers fall back to PIO,
- * which has no alignment requirement.
+ * SDMA moves whole words from a 32-bit address and transfers wrong data for
+ * a buffer that is not 4-byte aligned, so such a buffer goes by PIO.
  *
- * @note Cache maintenance is not optional: clean before (so a dirty line cannot
- *       be written back OVER data the engine delivered) and invalidate after a
- *       read (so the CPU sees the memory the engine wrote).
+ * @note For DMA the buffer is cleaned first, so no dirty line is written back
+ *       over data the engine delivered, and invalidated after a read, so the
+ *       CPU sees what the engine wrote.
  */
 static tiku_emmc_err_t emmc_xfer(uint32_t lba, uint32_t n_blk, uint8_t *buf,
                                  int is_write)
@@ -1425,14 +1366,10 @@ static tiku_emmc_err_t emmc_xfer(uint32_t lba, uint32_t n_blk, uint8_t *buf,
 }
 
 /*
- * Split read: arm the transfer, do other work, collect it.
- *
- * The blocking path spends the whole data phase in a poll loop; a caller
- * that streams weights can compute on the previous chunk instead.  One
- * transfer outstanding at a time; must fit a single chunk (no re-chunking
- * loop is possible once control has returned to the caller).  The wait side
- * keeps the SDMA-boundary service from the blocking path: if the engine
- * pauses at a 512 KB line mid-flight it simply waits there until collect.
+ * Split read: tiku_emmc_read_start() arms a DMA read and returns, and
+ * tiku_emmc_read_wait() collects it, so the caller can compute meanwhile.
+ * One read may be outstanding, and it must fit one chunk (emmc_max_chunk()).
+ * The engine stops at each 512 KB SDMA boundary until read_wait services it.
  */
 static uint32_t s_rd_busy, s_rd_bytes, s_rd_budget, s_rd_t0;
 static uint8_t *s_rd_buf;
@@ -1498,7 +1435,7 @@ tiku_emmc_err_t tiku_emmc_read_wait(void)
 tiku_emmc_err_t tiku_emmc_read_blocks(uint32_t lba, uint32_t n_blk, void *buf)
 {
     if (!s_up)       { return TIKU_EMMC_ERR_POWER; }
-    /* A sleeping card answers nothing; refuse rather than time out. */
+    /* A sleeping card answers nothing, so the read is refused. */
     if (s_asleep)    { return TIKU_EMMC_ERR_STATE; }
     if (n_blk == 0u) { return TIKU_EMMC_ERR_ARG; }
     if (s_sec_count && (lba + n_blk) > s_sec_count) {
@@ -1518,9 +1455,8 @@ tiku_emmc_err_t tiku_emmc_write_blocks(uint32_t lba, uint32_t n_blk,
     if (s_sec_count && (lba + n_blk) > s_sec_count) {
         return TIKU_EMMC_ERR_ARG;
     }
-    /* Default-deny outside the scratch region.  The card arrived with
-     * contents this driver did not write and cannot restore; an unattended
-     * driver has no business touching them. */
+    /* Writes below the scratch region need @p force: the card holds data
+     * this driver did not write and cannot restore. */
     if (!force && lba < tiku_emmc_scratch_lba()) {
         return TIKU_EMMC_ERR_ARG;
     }
@@ -1529,46 +1465,43 @@ tiku_emmc_err_t tiku_emmc_write_blocks(uint32_t lba, uint32_t n_blk,
      * for both directions; the write leg never writes through it. */
     rc = emmc_xfer(lba, n_blk, (uint8_t *)(uintptr_t)buf, 1);
     if (rc != TIKU_EMMC_OK) { return rc; }
-    /* Do not report a write complete while the card is still programming:
-     * the next caller would meet a busy device and read a stale block. */
+    /* A write returns only once CMD13 reports the card ready in TRAN, so a
+     * write that returns TIKU_EMMC_OK has finished programming. */
     return emmc_wait_ready();
 }
 
 /*---------------------------------------------------------------------------*/
-/* E3 BENCH                                                                  */
+/* BENCH                                                                     */
 /*---------------------------------------------------------------------------*/
 /*
- * DWT-timed, work-denominated, checksum-gated -- the psrambench pattern.
- * Every leg reports the bytes it moved and a verdict; a leg that cannot
- * prove its bytes were the RIGHT bytes reports FAIL rather than a bandwidth,
- * because a fast wrong answer is the only outcome worse than a slow one.
+ * The legs, in the order they run:
+ *   seq-wr-*    writes of 4 KB, 64 KB and 512 KB per call, read back
+ *   seq-rd-*    reads of the same sizes, checked against the last write
+ *   rand-rd     single-block reads at random offsets in the scratch region
+ *   rand-far    single-block reads across the whole card, timed only
+ *   unalign-rd  a read into an unaligned buffer, which takes the PIO path
+ *   dtcm-rd     an untimed read into DTCM: whether SDMA reaches DTCM
+ *   allow-list  a CMD6 to index 179, which emmc_switch() must refuse
+ * Every leg but dtcm-rd and allow-list is timed with DWT; a leg whose data
+ * does not match its pattern reports FAIL and no bandwidth.
  *
- * WHAT EACH LEG IS FOR:
- *   seq-wr-*   staging a model onto the card from a host link
- *   seq-rd-*   the warehouse read: pulling a model back into the tier
- *   rand-rd    single-block latency -- the shape a paged weight table makes
- *   unalign    the PIO fallback, exercised through its REAL trigger
- *   dtcm       whether SDMA can reach tightly-coupled memory at all
- *
- * Every write addresses the scratch region and nowhere else, and each write
- * leg carries its OWN pattern seed so its verification read cannot be
- * satisfied by data a previous leg left behind.
+ * Writes go only to the scratch region, and each write leg uses its own
+ * pattern seed, so its check cannot pass on data an earlier leg left.
  */
 
 #define BENCH_BLOCKS  TIKU_EMMC_SCRATCH_BLOCKS               /* 1024 = 512 KB */
 #define BENCH_BYTES   (BENCH_BLOCKS * TIKU_EMMC_BLOCK_SIZE)
 
 /*
- * Reserved from the SRAM tier for one operation and released after it. As
- * a static buffer it took 512 KB from the tier in every image with the driver
- * in it, used or not. Pin to SRAM span 0 (SSRAM), where this part's large
- * DMA-touched buffers live. The +4 is headroom for the unaligned leg below.
+ * Bounce buffer, taken from SRAM tier span 0 (SSRAM, where this part's large
+ * DMA buffers live) for one operation and returned after it.  The +4 is
+ * headroom for the unaligned leg.
  */
 #define BENCH_WORKSPACE_BYTES (BENCH_BYTES + 4u)
 static uint8_t *s_bench_buf;
 static tiku_mem_workspace_t s_bench_workspace;
 
-/** A small DTCM buffer, existing only to answer the reachability question. */
+/** DTCM buffer for the dtcm-rd leg and the diagnostics. */
 static uint8_t s_dtcm_buf[4096] __attribute__((aligned(32)));
 
 /** @brief Reserve exclusive staging capacity for one operation. */
@@ -1591,7 +1524,7 @@ static void bench_workspace_close(void)
     }
 }
 
-/** @brief Report a refused span-zero workspace, without adding other spans. */
+/** @brief Report a refused workspace and the free space in SRAM span 0. */
 static void bench_buf_refused(const char *who)
 {
     tiku_mem_space_t space;
@@ -1604,18 +1537,17 @@ static void bench_buf_refused(const char *who)
                  (unsigned long)(BENCH_WORKSPACE_BYTES / 1024u), room / 1024u);
 }
 
-/** Pattern byte for scratch-region offset @p a under seed @p s. */
+/** @brief Pattern byte for scratch-region offset @p a under seed @p s. */
 static inline uint8_t bench_pat(uint32_t a, uint32_t s)
 {
     return (uint8_t)(a ^ (a >> 8) ^ (a >> 16) ^ (s * 0x9Du) ^ 0xC3u);
 }
 
 /**
- * @brief Report a leg -- and quote NO bandwidth when the leg failed.
+ * @brief Print one leg's result; a failed leg gets no bandwidth figure.
  *
- * A rate printed beside FAIL is misleading: the numerator counts the whole span
- * while the clock runs only until the transfer breaks, which once produced
- * 0.304 MB/s on a wire that cannot carry 0.047.  A failed leg quotes no rate.
+ * A failed leg's time stops where the transfer broke, but its byte count is
+ * the whole span.
  */
 static void bench_report(const char *leg, uint32_t bytes, uint32_t cyc,
                          int exact, tiku_emmc_err_t rc)
@@ -1629,11 +1561,9 @@ static void bench_report(const char *leg, uint32_t bytes, uint32_t cyc,
     if (cyc == 0u || hz == 0u) { cyc = 1u; }
     if (!exact) {
         uint32_t e = s_last_err;
-        /* rc AND intstat, because they answer different questions and the
-         * pair is what identifies the culprit.  A TIMEOUT is OURS -- the
-         * controller never raised anything, so intstat is legitimately zero
-         * and reading that as "no error" is how half a session got spent
-         * suspecting the card. */
+        /* Both rc and intstat: a TIMEOUT comes from this driver's deadline
+         * with intstat zero, since the controller raised nothing, so the pair
+         * tells a driver timeout from a controller error. */
         SHELL_PRINTF("  %-11s %6lu KB  %8lu us      -- MB/s  FAIL %s  "
                      "intstat %08lx%s%s%s%s%s%s\n", leg,
                      (unsigned long)(bytes / 1024u),
@@ -1654,14 +1584,14 @@ static void bench_report(const char *leg, uint32_t bytes, uint32_t cyc,
                  (unsigned long)cyc_to_us(cyc), kbps / 1000u, kbps % 1000u);
 }
 
-/** Fill @p len bytes of the bench buffer with seed @p s. */
+/** @brief Fill @p len bytes of the bench buffer with seed @p s. */
 static void bench_fill(uint32_t s, uint32_t len)
 {
     uint32_t i;
     for (i = 0u; i < len; i++) { s_bench_buf[i] = bench_pat(i, s); }
 }
 
-/** Compare @p len bytes at @p off against seed @p s.  1 = bit-exact. */
+/** @brief Compare @p len bytes at @p off against seed @p s; 1 if equal. */
 static int bench_check(uint32_t s, uint32_t off, uint32_t len)
 {
     uint32_t i;
@@ -1679,7 +1609,7 @@ void tiku_emmc_bench_run(void)
     static const char *const rd_nm[3] = { "seq-rd-4k", "seq-rd-64k",
                                           "seq-rd-512k" };
     uint32_t base, t0, i, k, off, span_blk, span_bytes;
-    uint32_t seed = 0u;   /* the pattern currently ON THE CARD  */
+    uint32_t seed = 0u;   /* the pattern now on the card        */
     tiku_emmc_err_t rc;
 
     if (!s_up) { SHELL_PRINTF("bench: emmc not up\n"); return; }
@@ -1688,15 +1618,11 @@ void tiku_emmc_bench_run(void)
     if (!bench_workspace_open()) { bench_buf_refused("bench"); return; }
 
     /*
-     * The span follows the wire.  At the identification setting the bus moves
-     * about 50 KB/s, so the 512 KB span used at speed would be ten seconds per
-     * leg and the better part of two minutes overall -- long enough that the
-     * hang watchdog, not the card, would decide how the run ended.  When the
-     * clock is still slow, drop to 64 KB and run only the transfer sizes that
-     * fit inside it.  Bandwidth is work-denominated, so the two spans stay
-     * directly comparable, which is the entire reason for being able to run at
-     * the slow configuration at all: the upgrade gets PRICED against the same
-     * code and the same card rather than merely asserted.
+     * The span follows the bus speed.  Below 1 MHz (the identification
+     * setting moves about 50 KB/s) a 512 KB span takes about ten seconds
+     * per leg, so the span drops to 64 KB and only the transfer sizes that
+     * fit it run.  Rates are per byte moved, so the two spans compare
+     * directly.
      */
     span_blk   = (s_clock_hz < 1000000u) ? 128u : BENCH_BLOCKS;
     span_bytes = span_blk * TIKU_EMMC_BLOCK_SIZE;
@@ -1708,11 +1634,11 @@ void tiku_emmc_bench_run(void)
     SHELL_PRINTF("  init: ladder %lu us (400 kHz 1-bit), total %lu us\n",
                  (unsigned long)s_ladder_us, (unsigned long)s_init_us);
 
-    /* ---- sequential write, three transfer sizes ---------------------- */
+    /* Sequential write, three transfer sizes. */
     for (k = 0u; k < 3u; k++) {
         if (sizes[k] > span_blk) { continue; }
-        seed = k + 1u;      /* leaves THIS leg's pattern on the card, which
-                             * is what the read legs below then verify      */
+        seed = k + 1u;      /* leaves this leg's pattern on the card, which
+                             * the read legs below then check               */
         bench_fill(seed, span_bytes);
         t0 = cyc_now();
         for (i = 0u; i < span_blk; i += sizes[k]) {
@@ -1735,8 +1661,8 @@ void tiku_emmc_bench_run(void)
         }
     }
 
-    /* ---- sequential read, same transfer sizes ------------------------ */
-    /* seed is whatever the last write leg left on the card. */
+    /* Sequential read, the same transfer sizes; seed is the pattern the
+     * last write leg left on the card. */
     for (k = 0u; k < 3u; k++) {
         if (sizes[k] > span_blk) { continue; }
         for (i = 0u; i < span_bytes; i++) { s_bench_buf[i] = 0u; }
@@ -1755,31 +1681,19 @@ void tiku_emmc_bench_run(void)
         }
     }
 
-    /* ---- single-block latency ---------------------------------------- */
     /*
-     * Two figures, because they answer different questions and only one of
-     * them can be checksummed.  Inside the scratch region the data is ours,
-     * so the latency comes with a correctness verdict -- but over so small a
-     * span the card's own translation layer may well be serving from cache.
-     * Across the whole 8 GB the seeks are real, and the contents are opaque:
-     * that leg reports TIME ONLY and says so rather than implying a gate it
-     * cannot run.
+     * Single-block latency, two figures.  Inside the scratch region the data
+     * is known, so the latency comes with a check, though over so small a
+     * span the card's translation layer may serve from its cache.  Across the
+     * whole card the contents are unknown, so that leg reports time only.
      */
     {
         const uint32_t n = 256u;
         uint32_t lcg = 12345u, bad = 0u, acc = 0u, done = 0u;
 
         /*
-         * The timer brackets the read and nothing else.  The first draft of
-         * this leg left the 512-byte verification inside the timed region
-         * and reported 270 us/blk -- against 147 us/blk for the leg that
-         * seeks across the whole 8 GB.  Random access over half a megabyte
-         * being SLOWER than random access over seven gigabytes is not a
-         * result, it is a denominator with someone else's work in it: the
-         * check walks a just-invalidated SSRAM buffer, and that cost about
-         * 120 us a block.  Same lesson as the PSRAM leg that once claimed
-         * 872 MB/s on a 384 MB/s wire -- when a number is impossible, the
-         * measurement is wrong before the hardware is.
+         * The timer brackets the read alone, not the check, which walks the
+         * just-invalidated SSRAM buffer.
          */
         for (i = 0u; i < n; i++) {
             uint32_t t;
@@ -1800,11 +1714,8 @@ void tiku_emmc_bench_run(void)
             tiku_hang_checkin();
         }
         {
-            /* PER COMPLETED READ, not per intended read.  Dividing by n after
-             * an early break understates the latency by exactly the fraction
-             * of the loop that never ran -- the same unmoved-bytes-in-the-
-             * denominator mistake the PSRAM bench made, and it turned an
-             * aborted leg into a plausible 767 us/blk. */
+            /* The average is over the completed reads, fewer than n after
+             * an early break. */
             uint32_t d  = done ? done : 1u;
             uint32_t us = cyc_to_us(acc);
             SHELL_PRINTF("  %-11s %4lu/%lu x 512 B in scratch:"
@@ -1838,12 +1749,9 @@ void tiku_emmc_bench_run(void)
         }
     }
 
-    /* ---- the unaligned fallback, through its real trigger ------------- */
     /*
-     * Not a synthetic switch: this hands the driver a buffer at offset 1,
-     * which is exactly what makes emmc_xfer() choose PIO in production.  So
-     * the leg proves the fallback both EXISTS and is correct, and its number
-     * is the honest price of an unaligned caller.
+     * The unaligned fallback: a buffer at offset 1 makes emmc_xfer() use
+     * PIO, so this leg checks and times that path.
      */
     {
         const uint32_t blks = (span_blk < 128u) ? span_blk : 128u;
@@ -1862,14 +1770,9 @@ void tiku_emmc_bench_run(void)
         }
     }
 
-    /* ---- can SDMA reach tightly-coupled memory? ----------------------- */
     /*
-     * Asked LAST, and asked rather than assumed.  MSPI's engine demonstrably
-     * reaches DTCM on this part (the PSRAM bench streams into a .bss buffer
-     * at 60 MB/s, checksum-gated), but SDIO is a different master and "the
-     * other DMA works there" is precisely the kind of inference this port has
-     * been punished for.  The answer decides whether E4's staging path may
-     * use DTCM bounce buffers or must stay in SSRAM.
+     * SDIO is a bus master of its own, separate from MSPI; this case reads
+     * into a DTCM buffer to check that SDIO's DMA reaches DTCM.
      */
     {
         const uint32_t blks = sizeof s_dtcm_buf / TIKU_EMMC_BLOCK_SIZE;
@@ -1886,16 +1789,10 @@ void tiku_emmc_bench_run(void)
                      ok ? "reachable, bit-exact" : "NOT usable");
     }
 
-    /* ---- negative gate: the CMD6 allow-list must be SEEN to refuse ---- */
     /*
-     * A guard nobody has watched fail is a guard nobody has tested, and this
-     * particular guard is the one standing between a debugging session and a
-     * permanently repartitioned 8 GB card.  So it is exercised: EXT_CSD index
-     * 179 is PARTITION_CONFIG, a real index, partly write-once, and exactly
-     * the sort of thing a slip of the fingers would reach for.  Running this
-     * is safe because the refusal happens BEFORE any register is touched --
-     * the command is never issued.  What would not be safe is shipping the
-     * allow-list having never once observed it say no.
+     * Negative check of the CMD6 allow-list: index 179 is PARTITION_CONFIG,
+     * partly write-once.  emmc_switch() refuses it before touching any
+     * register, so the command is never issued.
      */
     {
         tiku_emmc_err_t deny = emmc_switch(179u, 0u);
@@ -1911,38 +1808,27 @@ void tiku_emmc_bench_run(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* E4 -- THE WAREHOUSE: stage bulk data from the card into the PSRAM tier    */
+/* STAGING INTO PSRAM                                                        */
 /*---------------------------------------------------------------------------*/
 #if (TIKU_DRV_PSRAM_ENABLE + 0)
 
 #include "tiku_psram_arch.h"
 
 /*
- * The flow this whole part exists for: a model lives on 8 GB of eMMC, and
- * the one being run is pulled into the 64 MB working tier on demand.  Two
- * engines and a bounce buffer -- SDIO's DMA fills SSRAM from the card, the
- * MSPI command queue drains SSRAM into the PSRAM, and the CPU touches the
- * bytes only to check them.
+ * Staging copies data from the eMMC into the PSRAM tier: SDIO's DMA fills an
+ * SSRAM bounce buffer from the card, the MSPI command queue drains it into
+ * the PSRAM, and the CPU touches the bytes only to hash them.
  *
- * Why no pattern is written first.  The obvious gate would be to write a
- * known pattern and look for it at the far end, but that caps the demo at
- * the 512 KB scratch region and puts writes on a card whose contents are
- * not ours.  Instead the SOURCE checksum is accumulated from the bounce
- * buffer as it passes -- i.e. from the read path E3 proved bit-exact -- and
- * compared against a checksum of what comes back out of the PSRAM.  That
- * verifies the staging path against a known-good reference, needs no writes
- * at all, and works at any size the tier can hold.
- *
- * The checksum is not in the transfer clock.  Hashing 54 MB costs real time,
- * and folding it into the staging measurement would understate the pipeline
- * exactly the way E3's first random-read leg understated latency.  Transfer
- * time and verification time are accumulated separately and both reported.
+ * Nothing is written to the card.  The source hash is taken from the bounce
+ * buffer as it passes and compared with a hash of what is read back out of
+ * the PSRAM.  tiku_emmc_stage_run() times the hashing apart from the
+ * transfers and reports both times.
  */
 
 #define STAGE_CHUNK   BENCH_BYTES        /* 512 KB: one eMMC command's worth */
 #define STAGE_SEG     65536u             /* CQ segment size on the PSRAM side */
 
-/** @brief FNV-1a over whole words -- cheap enough not to distort the clock. */
+/** @brief FNV-1a over whole 32-bit words, skipping a trailing partial word. */
 static uint32_t stage_hash(const uint8_t *p, uint32_t n, uint32_t h)
 {
     const uint32_t *w = (const uint32_t *)(const void *)p;
@@ -1954,15 +1840,13 @@ static uint32_t stage_hash(const uint8_t *p, uint32_t n, uint32_t h)
 }
 
 /*---------------------------------------------------------------------------*/
-/* F4 -- staging driven by a FILE'S EXTENTS rather than one LBA range         */
+/* STAGING A FILE BY ITS EXTENTS                                             */
 /*---------------------------------------------------------------------------*/
 /*
- * E4's stage moves one contiguous span because it was handed a raw LBA.  A
- * file is not obliged to be contiguous, so the FAT layer drives this one run
- * at a time and the pipeline below neither knows nor cares how many runs
- * there were -- fragmentation costs shorter chunks, never correctness.
- *
- * The state lives here because the bounce buffer and the PSRAM coupling do.
+ * tiku_emmc_stage_open(), _chunk() and _close() stage a file that need not be
+ * contiguous on the card: the FAT layer passes one run of sectors per
+ * tiku_emmc_stage_chunk() call, and the chunks are written one after another
+ * into PSRAM from offset 0.
  */
 static uint32_t s_stg_off, s_stg_src, s_stg_rd, s_stg_wr;
 static int      s_stg_xip;
@@ -2003,11 +1887,9 @@ tiku_emmc_err_t tiku_emmc_stage_chunk(uint32_t lba, uint32_t nsec)
         tiku_cpu_dcache_clean(s_bench_buf, bytes);
 
         /*
-         * The command queue requires total % seg == 0, and the LAST chunk of
-         * a file is whatever is left over -- 397824 bytes here, which 64 KB
-         * does not divide. Staging worked until now only because the first
-         * file tried was exactly 108 x 512 KB. A short chunk goes as a single
-         * segment of its own length instead.
+         * The command queue needs total % seg == 0, and the last chunk of a
+         * file is whatever is left over, so a chunk that 64 KB does not
+         * divide goes as one segment of its own length.
          */
         seg = ((bytes % STAGE_SEG) == 0u) ? STAGE_SEG : bytes;
 
@@ -2035,9 +1917,8 @@ tiku_emmc_err_t tiku_emmc_stage_close(uint32_t total_bytes, uint32_t *src,
     tiku_emmc_err_t rc = (s_bench_buf != NULL) ? TIKU_EMMC_OK
                                                : TIKU_EMMC_ERR_NOMEM;
 
-    /* Read the staged image back OUT of the PSRAM and hash that.  Hashing
-     * the bounce buffer on the way in would only prove the card was read;
-     * this proves the bytes are where the tier will look for them. */
+    /* Hash the staged image as read back out of the PSRAM, where the tier
+     * reads it. */
     for (off = 0u; rc == TIKU_EMMC_OK && off < total_bytes;
          off += STAGE_CHUNK) {
         uint32_t n = ((total_bytes - off) < STAGE_CHUNK)
@@ -2088,9 +1969,8 @@ void tiku_emmc_stage_run(uint32_t mb, uint32_t src_lba)
     if (!bench_workspace_open()) { bench_buf_refused("stage"); return; }
 
     cyc_enable();
-    /* The command queue moves bytes the CPU cannot see: XIP has to come down
-     * for the transfer and go back up afterwards, because the tier's whole
-     * value is that the staged model is addressable when this returns. */
+    /* XIP is turned off for the command-queue transfers and turned back on
+     * after if it was on, which makes the staged image addressable. */
     xip_was = tiku_psram_xip_enabled();
     if (xip_was) { (void)tiku_psram_xip_enable(0); }
 
@@ -2124,9 +2004,9 @@ void tiku_emmc_stage_run(uint32_t mb, uint32_t src_lba)
         tiku_hang_checkin();
     }
 
-    /* Read it back out of the PSRAM and hash that.  Deliberately the same
-     * bounce buffer: if the staging had merely left the buffer's last chunk
-     * lying around, this would hash it and disagree with the source. */
+    /* Hash the image as read back out of the PSRAM, through the same bounce
+     * buffer: a read-back that leaves the buffer's old contents in place
+     * hashes differently from the source. */
     if (rc == TIKU_EMMC_OK) {
         for (off = 0u; off < total; off += STAGE_CHUNK) {
             uint32_t n = ((total - off) < STAGE_CHUNK) ? (total - off)
@@ -2188,11 +2068,11 @@ void tiku_emmc_stage_run(uint32_t mb, uint32_t src_lba)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Untangle a read failure by varying ONE thing at a time.
+ * @brief Read known blocks back with each combination of block count (1 or 4)
+ *        and buffer (SSRAM, DTCM, unaligned), to tell which one breaks a read.
  *
- * Block count, buffer location and DMA-vs-PIO are entangled in every bench leg,
- * so the bench says THAT a transfer was wrong and never WHICH variable did it.
- * This walks the matrix against a known-good single-block write/read into DTCM.
+ * Four blocks are written first by single-block writes; each case prints its
+ * time, whether the data matched, and where it first differs.
  */
 void tiku_emmc_diag_run(void)
 {
@@ -2208,16 +2088,16 @@ void tiku_emmc_diag_run(void)
                  s_bus_width, (unsigned long)s_clock_hz, (unsigned long)base);
     /*
      * TIMEOUTCNT (CLOCKCTRL[19:16]) sets the data timeout as 2^(13+n) ticks
-     * of TMCLK, whose frequency CAPABILITIES0[7:0] reports.  Printed because
-     * it is the first suspect whenever a transfer works fast and fails slow:
-     * a fixed timeout is a shrinking budget as the wire slows down.
+     * of TMCLK, whose frequency CAPABILITIES0[7:0] reports.  It is printed
+     * because the timeout does not scale with the bus clock, while a block
+     * takes longer on the wire at a slower clock.
      */
     SHELL_PRINTF("  timeoutcnt %lu  clockctrl %08lx  capabilities0 %08lx\n",
                  (unsigned long)SDIO0->CLOCKCTRL_b.TIMEOUTCNT,
                  (unsigned long)SDIO0->CLOCKCTRL,
                  (unsigned long)SDIO0->CAPABILITIES0);
 
-    /* Lay down four known blocks ONE AT A TIME -- the path the gate proves. */
+    /* Write four known blocks one at a time, by single-block writes. */
     for (i = 0u; i < sizeof ref; i++) { ref[i] = bench_pat(i, 42u); }
     for (i = 0u; i < 4u; i++) {
         rc = tiku_emmc_write_blocks(base + i, 1u,
@@ -2232,10 +2112,9 @@ void tiku_emmc_diag_run(void)
     if (!bench_workspace_open()) { bench_buf_refused("diag"); return; }
 
     /*
-     * Each case names its three variables and its verdict.  The time column is
-     * in microseconds; compare it against the wire: at 1 bit and 375 kHz a
-     * 512 B block cannot cross in less than 10900 microseconds, so a faster
-     * case is reporting success for data that never arrived.
+     * Each case names its variables and its result.  The time column is in
+     * microseconds: at 1 bit and 375 kHz a 512 B block needs at least
+     * 10900 us on the wire, so a faster case reports data that never arrived.
      */
     {
         struct { const char *name; uint8_t *buf; uint32_t nblk; } cases[] = {
@@ -2278,9 +2157,9 @@ void tiku_emmc_regs(uint32_t *out, unsigned n)
 {
     unsigned i;
 
-    /* POWER-SAFE.  Reading an unpowered peripheral stalls the APB and hangs
-     * the CPU with no fault -- it cost a board wedge on the NOR driver, and
-     * that lesson is applied here by construction rather than after. */
+    /* Reading an unpowered peripheral stalls the APB and hangs the CPU with
+     * no fault, so the SDIO0 registers are read only while SDIO0 is powered;
+     * slots not read hold 0xDEADDEAD. */
     for (i = 0u; i < n; i++) { out[i] = 0xDEADDEADu; }
     if (n > 0u) { out[0] = PWRCTRL->DEVPWRSTATUS; }
     if (!tiku_emmc_powered()) { return; }

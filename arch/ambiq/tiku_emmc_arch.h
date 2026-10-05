@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_emmc_arch.h - Apollo510 SDIO0 and on-board 8 GB eMMC.
+ * tiku_emmc_arch.h - Apollo510 SDIO0 host and on-board 8 GB eMMC.
  *
- * SDIO is an SD-Host-Controller-class peripheral speaking MMC to a managed flash
- * device, not an MSPI variant.  This is a minimal vertical slice: four card
- * states, PIO and simple DMA blocks, 8-bit high speed, raw LBA API, no filesystem.
+ * SDIO0 is an SD Host Controller, driven here in MMC mode.  The API covers
+ * bring-up, 8-bit high-speed and HS200 timing, PIO and SDMA block transfers
+ * by LBA, CMD5 sleep and staging into PSRAM.  There is no filesystem layer.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,67 +20,55 @@
 #include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
-/* TABLE 0 -- PINS, AND A BSP THAT CONTRADICTS ITSELF                        */
+/* TABLE 0 -- PINS                                                           */
 /*---------------------------------------------------------------------------*/
 /*
- *   signal        pad(s)              source
+ *   signal        pad(s)              board header macro
  *   ------------  ------------------  ------------------------------------
- *   DAT0..DAT3    GP84..GP87          schematic and BSP agree
- *   DAT4..DAT7    GP156..GP159        schematic and BSP agree
- *   CLK           GP88                schematic and BSP agree
- *   CMD           GP160               schematic and BSP agree
- *   RSTn          GP13                *** SCHEMATIC.  THE BSP SAYS 12. ***
+ *   DAT0..DAT3    GP84..GP87          TIKU_BOARD_EMMC_PAD_D0, _D3 (ends)
+ *   DAT4..DAT7    GP156..GP159        TIKU_BOARD_EMMC_PAD_D4, _D7 (ends)
+ *   CLK           GP88                TIKU_BOARD_EMMC_PAD_CLK
+ *   CMD           GP160               TIKU_BOARD_EMMC_PAD_CMD
+ *   RSTn          GP13 (Apollo510B)   TIKU_BOARD_EMMC_PAD_RST
+ *                 GP12 (Apollo510)
  *
- * The reset pin, RESOLVED THREE WAYS.  Yesterday a session was lost to
- * overriding a BSP with the wrong board's schematic, so this one is settled
- * carefully rather than confidently:
- *
- *   1. The Apollo510B EVB schematic -- the RIGHT board this time, verified
- *      by title block -- carries the net `SDIO0_RSTn_GP13`.
- *   2. The 510B BSP says 12, but it ALSO assigns GP12 to COM_UART_TX
- *      (am_bsp_pins.h:69 vs :919).  One pad cannot be both the console
- *      transmitter and the eMMC reset; the BSP contradicts ITSELF, which
- *      condemns it without reference to any schematic.
- *   3. The GREEN board's schematic says `SDIO0_RSTn_GP12` -- exactly the
- *      BSP's value, i.e. the BSP carries the other board's number.
- *
- * So: GP13 on the Blue board.  Note the difference between this and
- * yesterday's mistake -- there, the BSP disagreed with a schematic for a
- * DIFFERENT board and the BSP was right; here, the BSP disagrees with its
- * OWN board's schematic and disagrees with itself, and the schematic wins.
- * The lesson is not "trust schematics" or "trust BSPs"; it is *find the
- * disagreement's source before picking a side.*
+ * The board headers define the pads, and FNCSEL per run: 2 for GP84..GP88,
+ * 0 for GP156..GP160.  The Apollo510B EVB schematic names the reset net
+ * SDIO0_RSTn_GP13.  The Apollo510B BSP gives RSTn as GP12, which is
+ * the Apollo510 EVB's pad, and also assigns GP12 to COM_UART_TX
+ * (am_bsp_pins.h:69 and :919); its RSTn value is wrong for the Apollo510B.
  */
 
 /*---------------------------------------------------------------------------*/
 /* TABLE 1 -- HOST BRING-UP SEQUENCE                                         */
 /*---------------------------------------------------------------------------*/
 /*
- *  #  what                          register(s)                why
- * --  ----------------------------  -------------------------  --------------
- *  1  power the SDIO0 domain        PWRCTRL.DEVPWREN           domain is off
- *                                   wait DEVPWRSTATUS          at boot
- *  2  learn the host's own limits   CAPABILITIES0.SDCLKFREQ    base clock MHz
- *                                   SLOTSTAT.SPECVER           spec version
- *  3  pads to SDIO function         GPIO.PINCFG[84-88,156-160] after the host
- *  4  release the card reset        GP13 high (GPIO)           see table 0
- *  5  bus power + voltage           PWRCTRLREG                 3.3 V / 1.8 V
- *  6  IDENTIFICATION CLOCK, 400 kHz CLOCKCTRL.FREQSEL          the MMC spec's
- *                                   CLKEN, wait CLKSTABLE,     mandatory slow
- *                                   then SDCLKEN               start
- *  7  1-bit bus                     HOSTCTRL1.XFERWIDTH=0,     identification
- *                                   .DATATRANSFERWIDTH=0       is 1-bit only
- *  8  the card ladder               see table 2
- *  9  only THEN raise clock/width   CLOCKCTRL / HOSTCTRL1      table 3
+ *  #  what                          register(s)
+ * --  ----------------------------  ------------------------------------------
+ *  1  power the SDIO0 domain        PWRCTRL.DEVPWREN, wait DEVPWRSTATUS
+ *  2  clock the host                CLKGEN.MISC.FRCHFRC; MCUCTRL.SDIO0CTRL
+ *                                   SDIO0SYSCLKEN and SDIO0XINCLKEN
+ *  3  reset the host                CLOCKCTRL.SWRSTALL, wait for it to clear
+ *  4  read the base clock           CAPABILITIES0.SDCLKFREQ (MHz)
+ *  5  status and data timeout       INTENABLE all, INTSIG 0 (polled);
+ *                                   CLOCKCTRL.TIMEOUTCNT 0xE (2^27 TMCLK)
+ *  6  pads to the SDIO function     pad config, FNCSEL per run (table 0)
+ *  7  bus voltage, then bus power   HOSTCTRL1.VOLTSELECT 1.8 V, SDBUSPOWER
+ *  8  400 kHz identification clock  CLOCKCTRL.FREQSEL, CLKEN, wait CLKSTABLE,
+ *                                   then SDCLKEN
+ *  9  1-bit bus                     HOSTCTRL1.XFERWIDTH 0, DATATRANSFERWIDTH 0
+ * 10  pulse the card reset          RSTn pad as GPIO: high 200 us, low
+ *                                   200 us, high, then 2 ms for card boot
+ * 11  card identification           table 2
+ * 12  raise width and clock         table 4
  *
- * The divider is a power of two: FREQSEL = divider>>1 where the divider is
- * the smallest power of 2 making (base / divider) <= the target.  Enabling
- * is a three-step dance -- CLKEN, poll CLKSTABLE, then SDCLKEN -- and the
- * poll is bounded like every other wait in this port.
+ * The clock divider is the smallest power of two from 1 to 256 that brings
+ * base / divider to or below the target; FREQSEL takes divider >> 1.  The
+ * clock starts in three steps: CLKEN, a bounded poll of CLKSTABLE, SDCLKEN.
  */
 
 /*---------------------------------------------------------------------------*/
-/* TABLE 2 -- THE CARD LADDER (MMC commands, in order)                       */
+/* TABLE 2 -- CARD IDENTIFICATION (MMC commands, in order)                   */
 /*---------------------------------------------------------------------------*/
 /*
  *  cmd  name              arg                  response  what it achieves
@@ -94,28 +82,35 @@
  *   3   SET_RELATIVE_ADDR RCA<<16              R1        assign an address
  *   9   SEND_CSD          RCA<<16              R2 (136)  card-specific data
  *   7   SELECT_CARD       RCA<<16              R1b       standby -> transfer
+ *  16   SET_BLOCKLEN      512                  R1
  *   8   SEND_EXT_CSD      0                    R1 + 512B EXT_CSD; SEC_COUNT
  *                                              data      at bytes 212..215
  *                                                        = capacity
  *   6   SWITCH            see below            R1b       bus width / speed
- *  16   SET_BLOCKLEN      512                  R1
- *  17   READ_SINGLE_BLOCK LBA                  R1 + data
- *  18   READ_MULTIPLE     LBA                  R1 + data (needs CMD12)
- *  24   WRITE_BLOCK       LBA                  R1 + data
- *  25   WRITE_MULTIPLE    LBA                  R1 + data (needs CMD12)
- *  12   STOP_TRANSMISSION 0                    R1b       ends 18/25
- *  13   SEND_STATUS       RCA<<16              R1        poll ready
  *
- * *** THE ONLY CMD6 SWITCH INDEXES THIS DRIVER MAY EVER WRITE ***
+ * After identification:
+ *
+ *  17   READ_SINGLE_BLOCK LBA                  R1 + data
+ *  18   READ_MULTIPLE     LBA                  R1 + data
+ *  24   WRITE_BLOCK       LBA                  R1 + data
+ *  25   WRITE_MULTIPLE    LBA                  R1 + data
+ *  12   STOP_TRANSMISSION 0                    R1b       ends 18/25; the host
+ *                                                        sends it (Auto CMD12)
+ *  13   SEND_STATUS       RCA<<16              R1        poll ready
+ *   7   SELECT_CARD       0                    none      deselect before sleep
+ *   5   SLEEP_AWAKE       RCA<<16, bit 15      R1b       bit 15 set: sleep;
+ *                                                        clear: wake
+ *
+ * The driver's CMD6 writes only these EXT_CSD indexes:
  *
  *      183  BUS_WIDTH     (0=1bit, 1=4bit, 2=8bit)
- *      185  HS_TIMING     (0=legacy, 1=high speed)
+ *      185  HS_TIMING     (0=legacy, 1=high speed, 2=HS200)
  *
- * EXT_CSD is partly ONE-TIME-PROGRAMMABLE.  Writing the wrong index can
- * permanently disable a feature or repartition the device, irreversibly.  The
- * allowed list is enforced in the .c by a switch that REFUSES anything else,
- * not by a comment.  Boot and RPMB partitions are never addressed; all traffic
- * is the user area.
+ * Part of EXT_CSD is one-time programmable: writing another index can
+ * permanently disable a feature or repartition the device.  emmc_switch()
+ * returns TIKU_EMMC_ERR_ARG for any other index without issuing a command.
+ * Boot and RPMB partitions are never addressed; all traffic is to the user
+ * area.
  */
 
 /*---------------------------------------------------------------------------*/
@@ -128,96 +123,86 @@
  *  R1       48  status                     LEN48 (2)
  *  R1b      48  status + busy on DAT0      LEN48CHKBUSY (3)
  *  R2      136  CID / CSD                  LEN136 (1)
- *  R3       48  OCR, no CRC, no index      LEN48 (2), CRC and index checks OFF
+ *  R3       48  OCR, no CRC, no index      LEN48 (2), CRC and index checks off
  *
- * Also in TRANSFER: CMDCRCCHKEN and CMDIDXCHKEN (both OFF for R3 -- the OCR
+ * Also in TRANSFER: CMDCRCCHKEN and CMDIDXCHKEN (both off for R3, whose OCR
  * response carries neither), DATAPRSNTSEL when a data phase follows, and
  * CMDIDX.  A 136-bit response arrives in RESPONSE0..3 with the CRC byte
- * shifted out, so the fields land 8 bits low -- the classic place a CID
- * decode goes wrong and prints plausible nonsense.
+ * shifted out, so every field sits 8 bits below its position in the CID or
+ * CSD layout.
  */
 
 /*---------------------------------------------------------------------------*/
-/* TABLE 4 -- THE E3 UPGRADE: 1 BIT AT 400 kHz -> 8 BITS AT ~48 MHz          */
+/* TABLE 4 -- BUS UPGRADE: 1 BIT AT 400 kHz TO 8 BITS AT HIGH SPEED          */
 /*---------------------------------------------------------------------------*/
 /*
- * Identification is deliberately crippled: the MMC spec mandates a 1-bit bus
- * at 400 kHz because the host does not yet know what it is talking to.  That
- * is 50 KB/s of wire, and E2 measured the card through it.  E3 is the rung
- * that turns a proven-correct block device into a useful one.  Two switches,
- * a wider bus, a faster clock, and then the transfer engine stops issuing one
- * command per 512 bytes:
+ * The MMC spec requires identification on a 1-bit bus at 400 kHz, about
+ * 50 KB/s.  After identification the driver changes:
  *
  *   what              from            to              factor
  *   ----------------  --------------  --------------  ---------------------
  *   bus width         1 bit           8 bits          8x the wire
  *   clock             400 kHz         base/2          ~120x
  *   blocks/command    1               up to 65535     amortises the command
- *   byte path         CPU (PIO)       SDMA            frees the CPU
+ *   byte path         CPU (PIO)       SDMA            frees the CPU; an
+ *                                                     unaligned buffer
+ *                                                     stays on PIO
  *
- * Order is not negotiable, and each step is separately reversible:
+ * The steps run in this order:
  *
- *   1. CMD6 BUS_WIDTH -- the CARD switches first.  CMD6 travels on the CMD
- *      line, which is 1 bit wide whatever the DAT lines are doing, so the
- *      command itself is unaffected by the change it requests.
- *   2. HOSTCTRL1.XFERWIDTH -- the HOST follows.  Between (1) and (2) the two
- *      ends disagree about the bus width and NO DATA COMMAND MAY BE ISSUED.
- *   3. CMD6 HS_TIMING, then HOSTCTRL1.HISPEEDEN, then the clock divider --
- *      same shape, same reason.  Raising the clock before the card has been
- *      told to expect high-speed timing is how a bus starts corrupting data
- *      intermittently rather than failing.
+ *   1. CMD6 BUS_WIDTH: the card switches first.  CMD6 travels on the 1-bit
+ *      CMD line, so the width change does not affect the command itself.
+ *   2. HOSTCTRL1.XFERWIDTH and DATATRANSFERWIDTH: the host follows.  Between
+ *      steps 1 and 2 the two ends disagree on the width, and no data command
+ *      may be issued.
+ *   3. CMD6 HS_TIMING, then HOSTCTRL1.HISPEEDEN, then the clock divider.  A
+ *      clock raised before the card has switched to high-speed timing
+ *      corrupts data intermittently.
  *
- * *** THE GATE IS THE CARD'S OWN ACCOUNT OF ITSELF ***
+ * After the switches the driver reads EXT_CSD again, a data transfer at the
+ * new width and clock, and checks bytes 183 and 185 against the values it
+ * wrote.  A bus that cannot carry data at the new setting fails that read; a
+ * card that did not adopt a setting fails the comparison.  On either failure
+ * both ends return to 1 bit at 400 kHz.
  *
- * After the switches, EXT_CSD is read AGAIN and bytes 183 and 185 are checked
- * against what was asked for.  This is a better gate than any pattern test:
- * the re-read is itself a data-phase transfer over the new width at the new
- * clock, so a bus that cannot carry data at the new setting fails the gate by
- * being unable to deliver the evidence -- and a card that quietly declined
- * the switch is caught saying so in its own register file.  A checksum test
- * alone would pass a host and card that had BOTH stayed at the old setting.
- *
- * EXT_CSD[196] DEVICE_TYPE says which speeds this card actually supports:
+ * EXT_CSD[196] DEVICE_TYPE lists the speeds the card supports:
  *   bit 0  26 MHz   bit 1  52 MHz   bits 2-7  HS200 / HS400 / DDR variants
- * It is READ, not assumed, and the requested clock is clamped to it.  (The
- * PSRAM driver got five bugs from deriving values that were there to be read;
- * this driver has already had one.  The habit is now to look.)
+ * The requested clock is clamped to the highest of bits 0 and 1.  A card
+ * that sets neither keeps legacy timing and gets the requested clock as is.
  *
- * Out of scope, ON PURPOSE: HS200 and HS400 need a tuning procedure and 1.8 V
- * signalling changes; DDR modes need a different clock relationship.  The
- * bench prints what it did NOT test so its table cannot be read as a ceiling.
+ * tiku_emmc_hs200() takes a card already at high speed to HS200 at 96 MHz.
+ * HS400 and the DDR modes are not supported.
  */
 
 /*---------------------------------------------------------------------------*/
 /* PUBLIC CONSTANTS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Block size.  eMMC is 512-byte-addressed above 2 GB, always. */
+/** @brief Block size in bytes; a card above 2 GB is addressed by sector. */
 #define TIKU_EMMC_BLOCK_SIZE   512u
 
 /**
- * @brief Scratch region: the top 1024 blocks of the user area.
+ * @brief Size of the scratch region, the top 1024 blocks of the user area.
  *
- * Every self-test writes HERE and nowhere else.  The card's existing contents
- * are treated as opaque and precious -- this port did not put them there and
- * cannot replace them -- and low LBAs are where a filesystem would live.
+ * The bench, the diagnostic and HS200 tuning write only there, and
+ * tiku_emmc_write_blocks() refuses an LBA below it unless forced.
  */
 #define TIKU_EMMC_SCRATCH_BLOCKS  1024u
 
-/** @brief Result codes -- distinct causes stay distinct. */
+/** @brief Result codes of the eMMC driver. */
 typedef enum {
     TIKU_EMMC_OK = 0,
-    TIKU_EMMC_ERR_POWER,    /**< SDIO domain never came up                  */
-    TIKU_EMMC_ERR_CLOCK,    /**< internal clock never stabilised            */
-    TIKU_EMMC_ERR_TIMEOUT,  /**< a command or data phase never completed    */
-    TIKU_EMMC_ERR_CMD,      /**< card reported an error (CRC / index / etc) */
-    TIKU_EMMC_ERR_ID,       /**< identity implausible                       */
+    TIKU_EMMC_ERR_POWER,    /**< SDIO0 did not power up, or driver is down  */
+    TIKU_EMMC_ERR_CLOCK,    /**< clock did not start, or HS200 fell back    */
+    TIKU_EMMC_ERR_TIMEOUT,  /**< a command or data phase ran out of time    */
+    TIKU_EMMC_ERR_CMD,      /**< host or card error, or a data mismatch     */
+    TIKU_EMMC_ERR_ID,       /**< decoded capacity is 0 or above 32 GB       */
     TIKU_EMMC_ERR_ARG,      /**< bad argument, incl. a forbidden CMD6 index */
-    TIKU_EMMC_ERR_STATE,    /**< card not in the state the operation needs  */
+    TIKU_EMMC_ERR_STATE,    /**< asleep, busy, or bus width not adopted     */
     TIKU_EMMC_ERR_NOMEM,    /**< the SRAM tier could not lend the buffer    */
 } tiku_emmc_err_t;
 
-/** @brief Decoded identity -- the day-one trophy. */
+/** @brief Card identity and bus setting, filled by tiku_emmc_init_at(). */
 typedef struct {
     uint8_t  mfr_id;         /**< CID[127:120] manufacturer                 */
     uint16_t oem_id;         /**< CID OEM/application                       */
@@ -225,135 +210,177 @@ typedef struct {
     uint8_t  rev;            /**< product revision                          */
     uint32_t serial;         /**< product serial number                     */
     uint8_t  mfg_month;      /**< manufacture date                          */
-    uint16_t mfg_year;
+    uint16_t mfg_year;       /**< year; epoch set by EXT_CSD revision       */
     uint32_t rca;            /**< relative card address assigned here       */
     uint32_t sec_count;      /**< EXT_CSD[215:212]: capacity in 512 B blocks */
     uint8_t  ext_csd_rev;    /**< EXT_CSD revision                          */
     uint8_t  spec_vers;      /**< CSD spec version                          */
     uint8_t  bus_width;      /**< bus width in force (1/4/8)                */
     uint32_t clock_hz;       /**< bus clock in force                        */
-    /* --- E3: the card's own account of its configuration (table 4) ------ */
+    /* EXT_CSD as read back after the bus upgrade (table 4) */
     uint8_t  device_type;    /**< EXT_CSD[196]: speeds the card supports    */
-    uint8_t  ext_bus_width;  /**< EXT_CSD[183] READ BACK after the switch   */
-    uint8_t  ext_hs_timing;  /**< EXT_CSD[185] READ BACK after the switch   */
+    uint8_t  ext_bus_width;  /**< EXT_CSD[183] read back after the switch   */
+    uint8_t  ext_hs_timing;  /**< EXT_CSD[185] read back after the switch   */
 } tiku_emmc_id_t;
 
 /*---------------------------------------------------------------------------*/
-/* API -- E1/E2/E3 surface.  The tier and the staging demo land in E4.       */
+/* API                                                                       */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Power the host, reset the card, identify it, and go fast.
+ * @brief Bring up the host and card, then raise the bus to 8 bits, 48 MHz.
  *
- * Table 1 steps 1-8 at the mandatory 400 kHz / 1-bit identification setting,
- * then the table 4 upgrade to an 8-bit bus at high speed.  Fails closed and
- * bounded at every wait; the step tracer names the rung a wedge happened on.
+ * Runs table 1 and the table 2 identification at 400 kHz on one bit, then the
+ * table 4 upgrade.  Every wait is bounded; the first failing step's code is
+ * returned.
  *
- * @note A failed UPGRADE leaves the card in the identification configuration
- *       -- slow but proven -- so the two ends never end up disagreeing.
+ * @note When the upgrade fails, both ends return to 1 bit at 400 kHz and the
+ *       driver stays up, but the upgrade's error code is returned.
  */
 tiku_emmc_err_t tiku_emmc_init(void);
 
 /**
- * @brief Init to an explicit bus configuration -- one code path, two uses.
+ * @brief Bring the card up as tiku_emmc_init() does, at a chosen setting.
  *
- * @p width 1, 4 or 8; @p hz the requested bus clock (clamped to the card's
- * EXT_CSD[196] DEVICE_TYPE and to the host's divider grid).  `(1, 400000)`
- * reproduces the E2 configuration exactly, which is what makes the E3 bench
- * able to price the upgrade rather than merely assert it.
+ * @p width 1, 4 or 8; @p hz is clamped to the card's DEVICE_TYPE and rounded
+ * down to base / 2^n.  (1, 400000) skips the upgrade and leaves the card at
+ * the identification setting.
  */
 tiku_emmc_err_t tiku_emmc_init_at(unsigned width, uint32_t hz);
 
 /**
- * @brief Microseconds the last bring-up took: identification, and total.
+ * @brief Report how long the last tiku_emmc_init_at() took, in microseconds.
  *
- * The init ceremony is a MEASURED QUANTITY: the lifecycle policy (sleep vs
- * power off vs stay up) is decided by this number against the domain's idle
- * rent.  Either pointer may be NULL.
+ * Either pointer may be NULL.  Both read 0 when that call failed before it
+ * read EXT_CSD.
  *
- * @param ladder_us POR-to-transfer-ready at 400 kHz
- * @param total_us  including the table 4 upgrade; the difference is its cost
+ * @param ladder_us from the call to the end of the 400 kHz identification
+ * @param total_us  including the table 4 upgrade
  */
 void tiku_emmc_init_time(uint32_t *ladder_us, uint32_t *total_us);
 
-/** @brief Release the SDIO0 domain (card keeps its contents, obviously). */
+/** @brief Stop the bus and power SDIO0 down; the card keeps its contents. */
 void tiku_emmc_deinit(void);
 
-/** @brief 1 if the SDIO0 domain is powered. */
+/** @brief 1 if the SDIO0 power domain is on, else 0. */
 int tiku_emmc_powered(void);
 
-/** @brief Decoded identity after init: CID, CSD, EXT_CSD capacity. */
+/**
+ * @brief Copy the decoded identity to @p out (may be NULL).
+ *
+ * @return TIKU_EMMC_ERR_POWER when the driver is down, TIKU_EMMC_ERR_ID when
+ *         the capacity is 0 or above 32 GB, else TIKU_EMMC_OK
+ */
 tiku_emmc_err_t tiku_emmc_read_id(tiku_emmc_id_t *out);
 
-/** @brief Read @p n_blk 512-byte blocks starting at @p lba. */
+/**
+ * @brief Read @p n_blk 512-byte blocks starting at @p lba.
+ *
+ * A 4-byte-aligned @p buf is filled by SDMA, any other by PIO.  Returns
+ * TIKU_EMMC_ERR_STATE while the card sleeps, and TIKU_EMMC_ERR_ARG for zero
+ * blocks or a range past the end of the card.
+ */
 tiku_emmc_err_t tiku_emmc_read_blocks(uint32_t lba, uint32_t n_blk, void *buf);
 
-/** @brief Arm a read and return; collect it with tiku_emmc_read_wait(). */
+/**
+ * @brief Start an SDMA read and return; collect it with tiku_emmc_read_wait().
+ *
+ * One read may be outstanding; a second start returns TIKU_EMMC_ERR_STATE.
+ * @p buf must be 4-byte aligned and @p n_blk must fit one command at the
+ * current bus setting, or the call returns TIKU_EMMC_ERR_ARG.
+ */
 tiku_emmc_err_t tiku_emmc_read_start(uint32_t lba, uint32_t n_blk, void *buf);
 
-/** @brief Switch to HS200 at 96 MHz with an RX-tap scan; falls back to HS 48. */
+/**
+ * @brief Raise a card at high speed to HS200 at 96 MHz.
+ *
+ * Writes a pattern block at the scratch region, reads it at each of 32 RX
+ * taps and keeps the centre of the widest passing run.  A failure from the
+ * HS200 switch on returns the card to high speed at 48 MHz.
+ *
+ * @return TIKU_EMMC_OK; TIKU_EMMC_ERR_CLOCK after that fallback; before the
+ *         switch, TIKU_EMMC_ERR_POWER, TIKU_EMMC_ERR_STATE (asleep), or the
+ *         pattern write's error (TIKU_EMMC_ERR_CMD if it reads back wrong)
+ * @note Expects the 8-bit high-speed setting tiku_emmc_init() leaves.
+ */
 tiku_emmc_err_t tiku_emmc_hs200(void);
 
-/** @brief Wait for the read armed by tiku_emmc_read_start(). */
+/**
+ * @brief Wait for the read started by tiku_emmc_read_start().
+ *
+ * Returns TIKU_EMMC_OK at once when no read is outstanding.
+ */
 tiku_emmc_err_t tiku_emmc_read_wait(void);
 
 /**
  * @brief Write @p n_blk 512-byte blocks starting at @p lba.
  *
- * Refuses any LBA below the scratch region unless @p force -- the card's
- * existing contents are opaque and this driver runs unattended.
+ * Returns TIKU_EMMC_ERR_ARG for an LBA below the scratch region unless
+ * @p force is non-zero.  Returns once the card reports it has finished
+ * programming.
  */
 tiku_emmc_err_t tiku_emmc_write_blocks(uint32_t lba, uint32_t n_blk,
                                        const void *buf, int force);
 
-/** @brief First LBA of the scratch region (derived from EXT_CSD capacity). */
+/** @brief First LBA of the scratch region; 0 before the capacity is known. */
 uint32_t tiku_emmc_scratch_lba(void);
 
-/** @brief Install a step tracer, so a wedged bring-up names its own rung. */
+/** @brief Install @p fn to get each step's name as it starts; NULL for none. */
 void tiku_emmc_set_trace(void (*fn)(const char *step));
 
-/** @brief INTSTAT captured at the last command failure -- which error, not that. */
+/**
+ * @brief INTSTAT at the last controller-reported error.
+ *
+ * A driver timeout does not change it.
+ */
 uint32_t tiku_emmc_last_error(void);
 
-/** @brief Snapshot host registers (power-safe: returns 0xDEADDEAD when down). */
+/**
+ * @brief Copy up to 8 host registers into @p out[0..n-1].
+ *
+ * Order: DEVPWRSTATUS, PRESENT, CLOCKCTRL, HOSTCTRL1, INTSTAT, CAPABILITIES0,
+ * RESPONSE0, TRANSFER.  Entries past the eighth, and every entry after the
+ * first while SDIO0 is unpowered, read 0xDEADDEAD; no SDIO0 read is made then.
+ */
 void tiku_emmc_regs(uint32_t *out, unsigned n);
 
 /**
- * @brief E3 bench: sequential read/write, random-block latency, init cost.
+ * @brief Benchmark sequential and random reads and writes and print a table.
  *
- * DWT-timed, work-denominated and checksum-gated, like `psrambench`.  Writes
- * touch the scratch region and nowhere else, and a leg that cannot prove its
- * bytes reports FAIL.  Its 512 KB buffer is an SRAM-tier workspace for the run.
- *
- * @note The run prints what it did NOT measure, so the table cannot be read
- *       as a ceiling.
+ * Timed with the DWT cycle counter.  Writes go only to the scratch region, and
+ * a leg whose data fails its pattern check prints FAIL with no rate.  The
+ * 512 KB buffer is taken from SRAM-tier span 0 for the run.
  */
 void tiku_emmc_bench_run(void);
 
 /*---------------------------------------------------------------------------*/
-/* E4 -- LIFECYCLE AND THE WAREHOUSE                                         */
+/* SLEEP, STATE AND STAGING                                                  */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Put the card into CMD5 sleep; contents kept, bus quiet.
+ * @brief Put the card into CMD5 sleep; it keeps its contents.
  *
- * The rung between "up" and "gone": a full bring-up costs ~52 ms, too much per
- * access and acceptable per wake.  Sleep is only legal from STANDBY, so this
- * deselects first and reselects on wake; block I/O refuses while asleep.
+ * Waits for programming to finish, deselects the card (CMD5 is accepted only
+ * in standby) and sends CMD5.  Block I/O returns TIKU_EMMC_ERR_STATE while
+ * the card sleeps.  Returns TIKU_EMMC_OK at once when already asleep.
  */
 tiku_emmc_err_t tiku_emmc_sleep(void);
 
-/** @brief Wake from CMD5 sleep and reselect; trusted once it answers again. */
+/**
+ * @brief Wake the card from CMD5 sleep, reselect it and wait until ready.
+ *
+ * Returns TIKU_EMMC_OK at once when the card is not asleep.
+ */
 tiku_emmc_err_t tiku_emmc_wake(void);
 
 /** @brief 1 while the card is asleep. */
 int tiku_emmc_asleep(void);
 
 /**
- * @brief Microseconds the last sleep or wake took.
+ * @brief Microseconds the last tiku_emmc_sleep() or tiku_emmc_wake() took.
  *
- * The number the lifecycle policy turns on: sleep earns its place only
- * if waking costs far less than the ~52 ms of a full bring-up.
+ * 0 when that call was refused, had nothing to do, or failed before the card
+ * changed state.
  */
 uint32_t tiku_emmc_last_op_us(void);
 
@@ -366,47 +393,60 @@ uint32_t tiku_emmc_clock_hz(void);
 /** @brief Bus width in force (1/4/8), 0 when down. */
 unsigned tiku_emmc_bus_width(void);
 
-/** @brief Decoded identity without a validity gate -- for observability. */
+/** @brief The driver's identity record, with no power or validity check. */
 const tiku_emmc_id_t *tiku_emmc_id(void);
 
 /**
- * @brief Stage @p mb megabytes from the card into the PSRAM tier.
+ * @brief Copy @p mb MB from @p src_lba to PSRAM offset 0 and print the rates.
  *
- * eMMC DMA -> SSRAM bounce -> MSPI command queue -> PSRAM, checksum-gated
- * against the read path.  Reads only.  Transfer and verification times are
- * reported separately so the bandwidth figure is the pipeline's, not the hash's.
+ * Card -> SSRAM bounce buffer by SDMA -> PSRAM by the MSPI command queue; a
+ * hash of the source is compared with a hash read back from PSRAM.  The card
+ * is only read, and hashing time is reported apart from the transfer rates.
  *
- * @note Compiled only when the PSRAM driver is present.
+ * @note Compiled only with TIKU_DRV_PSRAM_ENABLE; PSRAM must be up and awake.
  */
 void tiku_emmc_stage_run(uint32_t mb, uint32_t src_lba);
 
-/*
- * Extent-driven staging (F4).  E4's stage takes one LBA span because that is
- * all a raw address can express; a FILE may be fragmented, so its extents are
- * fed in one at a time and appended to the PSRAM image in order.
+/**
+ * @brief Begin staging a file's extents into PSRAM, from offset 0.
  *
- *   open()            borrow the bounce buffer, XIP down, counters reset
- *   chunk(lba, nsec)  append one contiguous extent
- *   close(...)        read the image back OUT of the PSRAM, hash it, XIP up,
- *                     give the buffer back
+ * Takes the 512 KB SRAM-tier bounce buffer and turns PSRAM XIP off until
+ * tiku_emmc_stage_close().  Returns TIKU_EMMC_ERR_NOMEM when the buffer cannot
+ * be had, including while a staging run already holds it.
  *
- * close() hashes the PSRAM rather than the bounce buffer on purpose: hashing
- * on the way in would only prove the card was read correctly, not that the
- * bytes are where the tier will look for them.  open() fails with NOMEM when
- * the SRAM tier cannot lend 512 KB; a loan it made is held until close().
+ * @note Compiled only with TIKU_DRV_PSRAM_ENABLE.
  */
 tiku_emmc_err_t tiku_emmc_stage_open(void);
+
+/**
+ * @brief Append @p nsec blocks from @p lba to the PSRAM image.
+ *
+ * One call per contiguous extent, in file order.  Returns TIKU_EMMC_ERR_NOMEM
+ * outside an open staging run.
+ */
 tiku_emmc_err_t tiku_emmc_stage_chunk(uint32_t lba, uint32_t nsec);
+
+/**
+ * @brief Hash the image back out of PSRAM, restore XIP, release the buffer.
+ *
+ * The caller compares the two hashes.  Any pointer may be NULL, and a
+ * @p total_bytes of 0 releases the buffer without reading PSRAM.
+ *
+ * @param total_bytes bytes to read back from PSRAM offset 0
+ * @param src         out: hash of the bytes read from the card
+ * @param dst         out: hash of the bytes read back from PSRAM
+ * @param rd_us       out: time spent reading the card
+ * @param wr_us       out: time spent writing PSRAM
+ */
 tiku_emmc_err_t tiku_emmc_stage_close(uint32_t total_bytes, uint32_t *src,
                                       uint32_t *dst, uint32_t *rd_us,
                                       uint32_t *wr_us);
 
 /**
- * @brief Read-path diagnostic: block count x buffer location x DMA/PIO.
+ * @brief Read the scratch region six ways and print each result.
  *
- * Varies one thing at a time against a known-good reference, for when a
- * failure reports no controller error and the bench can only say that
- * something is wrong, not which of its three entangled variables did it.
+ * Writes four pattern blocks one at a time, then reads 1 and 4 blocks into
+ * SSRAM, DTCM and an unaligned (PIO) buffer, printing the first bad byte.
  */
 void tiku_emmc_diag_run(void);
 

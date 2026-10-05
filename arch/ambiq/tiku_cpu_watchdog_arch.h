@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_watchdog_arch.h - Apollo 510 watchdog interface
+ * tiku_cpu_watchdog_arch.h - Ambiq hardware watchdog interface.
  *
- * Mirrors arch/arm-rp2350/tiku_cpu_watchdog_arch.h. At this milestone
- * only _off() is real (the WDT is disabled out of reset); the rest are
- * placeholders pending an am_hal_wdt-backed implementation.
+ * The WDT runs from an LFRC tap and resets the chip on timeout; it has no
+ * interval mode here.  Implemented in tiku_cpu_watchdog_arch.c (Apollo510)
+ * and tiku_cpu_watchdog_apollo4l.c (Apollo4).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,10 +22,10 @@
 #ifndef TIKU_WDT_MODE_T_DEFINED
 #define TIKU_WDT_MODE_T_DEFINED
 /**
- * @brief Watchdog operating mode.
+ * @brief Watchdog operating mode (portable type).
  *
- * Selects whether the WDT generates a system reset on timeout
- * (WATCHDOG mode) or fires a periodic interrupt (INTERVAL mode).
+ * WATCHDOG resets the system on timeout; INTERVAL fires a periodic
+ * interrupt.  This port runs the WDT in WATCHDOG mode only.
  */
 typedef enum {
     TIKU_WDT_MODE_WATCHDOG = 0, /**< Reset system on timeout. */
@@ -36,11 +36,10 @@ typedef enum {
 #ifndef TIKU_WDT_CLK_T_DEFINED
 #define TIKU_WDT_CLK_T_DEFINED
 /**
- * @brief Watchdog clock source selector.
+ * @brief Watchdog clock source selector (portable type).
  *
- * Chooses the clock driving the WDT counter.  SMCLK is the sub-main
- * (peripheral) clock; ACLK is the ~32 kHz auxiliary clock, which extends the
- * maximum timeout and keeps the WDT running during deep-sleep.
+ * This port ignores it: the WDT always runs from an LFRC tap, which keeps
+ * counting through deep sleep.
  */
 typedef enum {
     TIKU_WDT_SRC_SMCLK = 0, /**< Sub-main clock (higher frequency). */
@@ -53,57 +52,51 @@ typedef enum {
 /**
  * @brief Watchdog timeout interval selector.
  *
- * Encodes the WDT prescaler divider value, matching the shape of the
- * MSP430 WDTIS field. The concrete mapping to microseconds depends on
- * the selected clock source and is defined in the arch implementation.
+ * A divider on a nominal 32768 Hz clock, so the timeout is isel / 32768 s;
+ * the arch implementation picks the LFRC tap and compare value that hold it.
  */
 typedef uint16_t tiku_wdt_interval_t;
 #endif
 
 /**
- * @brief Disable the Apollo510 watchdog timer.
+ * @brief Stop the watchdog counter and disable its reset.
  *
- * The WDT is disabled by default out of reset (SBL leaves it off).
- * Call this early in boot to guarantee the WDT stays off if the SBL
- * leaves it in an unknown state on future silicon revisions.
+ * The WDT is off out of reset; calling this at boot leaves it off whatever
+ * state the boot code left it in.
  */
 void tiku_cpu_ambiq_watchdog_off_arch(void);
 
 /**
- * @brief Enable and configure the Apollo510 watchdog timer.
+ * @brief Start the watchdog with a timeout of isel / 32768 s (at most 2 s).
  *
- * Placeholder at this milestone — a full am_hal_wdt-backed
- * implementation is deferred to a future peripheral pass.
+ * Arms the reset path (WDT.RESEN and RSTGEN.WDREN) and starts counting from
+ * zero.  The timeout is at least one 128 Hz LFRC tick (~7.8 ms).
  *
- * @param src   Clock source for the WDT counter.
- * @param isel  Timeout interval selector (prescaler divider value).
+ * @param src   Clock source (ignored; the WDT runs from the LFRC).
+ * @param isel  Timeout interval selector (divider on 32768 Hz).
  */
 void tiku_cpu_ambiq_watchdog_on_arch(tiku_wdt_clk_t src,
                                      tiku_wdt_interval_t isel);
 
 /**
- * @brief Pause (temporarily disable) the watchdog counter.
+ * @brief Stop the watchdog counter, keeping its timeout setting.
  *
- * Placeholder at this milestone. Intended for use around time-consuming
- * NVM operations that would otherwise trigger a false timeout.
+ * For long operations, such as NVM programming, that would outlast the
+ * timeout.
  */
 void tiku_cpu_ambiq_watchdog_pause_arch(void);
 
 /**
- * @brief Resume the watchdog counter after a pause.
+ * @brief Restart the watchdog counter after a pause.
  *
- * Placeholder at this milestone.
- *
- * @param kick_on_resume  Non-zero to service (kick) the WDT immediately
- *                        on resume, resetting the timeout counter.
+ * @param kick_on_resume  Non-zero to restart the count from zero first.
  */
 void tiku_cpu_ambiq_watchdog_resume_arch(int kick_on_resume);
 
 /**
- * @brief Service (kick) the watchdog to prevent a timeout reset.
+ * @brief Restart the watchdog count from zero (kick).
  *
- * Must be called periodically — faster than the configured WDT timeout
- * interval — when the WDT is enabled. Placeholder at this milestone.
+ * @note While the WDT is running, call it more often than the timeout.
  */
 void tiku_cpu_ambiq_watchdog_kick_arch(void);
 

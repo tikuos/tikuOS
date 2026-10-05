@@ -8,8 +8,8 @@
  * tiku_wake_arch.c - Ambiq wake-source query.
  *
  * Reports which sources are armed to bring the core out of WFI, from pure
- * Cortex-M register reads.  Both parts tick off the always-on STIMER, since
- * SysTick freezes in sleep; only the console UART IRQ number differs per part.
+ * Cortex-M register reads.  Both parts take the tick from the always-on
+ * STIMER, as SysTick stops in sleep; only the console UART IRQ differs.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -25,16 +25,16 @@
 #if defined(TIKU_DEVICE_APOLLO4L)
 #define AMBIQ_IRQ_UART           17   /**< UART2 console RX IRQ (apollo4l) */
 #elif defined(TIKU_CONSOLE_UART1)
-#define AMBIQ_IRQ_UART           16   /**< UART1 console RX IRQ (apollo510b Blue) */
+#define AMBIQ_IRQ_UART           16   /**< UART1 console RX (apollo510b Blue) */
 #else
-#define AMBIQ_IRQ_UART           15   /**< UART0 console RX IRQ (apollo510) */
+#define AMBIQ_IRQ_UART           15   /**< UART0 console RX (apollo510, 4p) */
 #endif
 #define AMBIQ_IRQ_STIMER_CMPR0   32   /**< STIMER Compare0 (htimer)  */
-#define AMBIQ_IRQ_STIMER_CMPR1   33   /**< STIMER Compare1 (Ambiq kernel tick) */
+#define AMBIQ_IRQ_STIMER_CMPR1   33   /**< STIMER Compare1 (kernel tick) */
 #define AMBIQ_IRQ_GPIO0_FIRST    56   /**< First GPIO N0 IRQ line    */
 #define AMBIQ_IRQ_GPIO0_LAST     63   /**< Last GPIO N0 IRQ line     */
 
-/** True if external IRQ @p irq is enabled in the NVIC. */
+/** @brief True if external IRQ @p irq is enabled in the NVIC. */
 static int irq_enabled(unsigned irq) {
     return (NVIC_ISER[irq >> 5] & (1u << (irq & 31u))) != 0u;
 }
@@ -42,13 +42,13 @@ static int irq_enabled(unsigned irq) {
 /**
  * @brief Query the wake sources currently armed
  *
- * Populates @p out->sources with the TIKU_WAKE_* flags whose underlying
- * interrupt is enabled: SysTick (SYST_CSR.TICKINT) and the NVIC-enabled STIMER
- * / UART0 / GPIO0 lines.  A NULL @p out is a no-op.
+ * Sets a TIKU_WAKE_* flag for each enabled NVIC line: SYSTICK for the STIMER
+ * tick (compare-B), HTIMER for compare-A, UART_RX for the console UART and
+ * GPIO for any GPIO0 line.  A NULL @p out is a no-op.
  *
  * @note The Apollo510 watchdog (NVIC IRQ 1, often left enabled by the SBL) is
- *       the reset watchdog, not the interval-interrupt wake source TIKU_WAKE_WDT
- *       denotes, so it is intentionally not reported.
+ *       the reset watchdog, not the interval-interrupt wake source
+ *       TIKU_WAKE_WDT denotes, so it is not reported.
  * @param out  Wake-source snapshot to populate
  */
 void tiku_wake_arch_query(tiku_wake_sources_t *out) {
@@ -58,9 +58,9 @@ void tiku_wake_arch_query(tiku_wake_sources_t *out) {
     }
     memset(out, 0, sizeof(*out));
 
-    /* Both Ambiq parts drive the kernel tick from the always-on STIMER compare-B
-     * (IRQ 33), not SysTick -- SysTick freezes in WFI sleep, so it carries no
-     * TICKINT and the tick wake source is that NVIC line (tiku_timer_*.c). */
+    /* On both Ambiq parts the kernel tick is the STIMER compare-B interrupt
+     * (IRQ 33): SysTick stops in WFI and runs without TICKINT, so
+     * TIKU_WAKE_SYSTICK reports that NVIC line (tiku_timer_*.c). */
     if (irq_enabled(AMBIQ_IRQ_STIMER_CMPR1)) {
         out->sources |= TIKU_WAKE_SYSTICK;
     }

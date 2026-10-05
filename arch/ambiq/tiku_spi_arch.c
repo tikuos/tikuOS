@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_spi_arch.c - Apollo510 SPI master (IOM, bare-metal).
+ * tiku_spi_arch.c - Ambiq SPI master (IOM, bare-metal).
  *
- * A blocking full-duplex master on one I/O Master, straight to the CMSIS register
- * map with no vendor HAL.  Transfers are polled through the 64-byte FIFOs, and
- * chip select is a plain GPIO the caller drives; the IOM's own nCE is unused.
+ * With TIKU_SPI_IOM_ENABLE: a blocking full-duplex master on IOM6, polled
+ * through the FIFOs; chip select is a GPIO the caller drives, not the IOM's
+ * nCE.  Without it, init and the buffer calls return -1, a byte transfer 0xFF.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,7 +19,7 @@
 #if defined(TIKU_SPI_IOM_ENABLE)
 
 #include "tiku.h"            /* board pin macros via the device-select router */
-#include "apollo510.h"       /* CMSIS register map (IOM / PWRCTRL / GPIO)      */
+#include "apollo510.h"       /* CMSIS register map (IOM / PWRCTRL / GPIO)     */
 #include <stddef.h>
 #include <string.h>
 
@@ -34,10 +34,8 @@
 #define TIKU_GPIO_PADKEY_UNLOCK 0x73u
 
 /**
- * @brief 16 MHz SPI clock: HFRC 48 MHz (FSEL=2) through the /3 prescaler.
- *
- * Matches what am_hal_iom's clock search picks for 16 MHz (the div3 solution is
- * preferred over div1+TOTPER). IOCLKEN turns the generated clock on.
+ * @brief 16 MHz SPI clock: HFRC 48 MHz (FSEL=2) through the /3 prescaler
+ *        (DIV3); IOCLKEN turns the generated clock on.
  */
 #define SPI_CLKCFG_16MHZ    ( (2u << IOM0_CLKCFG_FSEL_Pos)   |  \
                               (1u << IOM0_CLKCFG_DIV3_Pos)   |  \
@@ -66,14 +64,14 @@ static uint32_t s_rxw[SPI_CHUNK_BYTES / 4];
 /* Helpers                                                                   */
 /*---------------------------------------------------------------------------*/
 
-/** Route a GPIO pad to a peripheral function (PADKEY-guarded PINCFG write). */
+/** @brief Route a GPIO pad to a function (PADKEY-guarded PINCFG write). */
 static void spi_pad_funcsel(uint32_t pad, uint32_t funcsel) {
     GPIO->PADKEY = TIKU_GPIO_PADKEY_UNLOCK;
     (&GPIO->PINCFG0)[pad] = funcsel;
     GPIO->PADKEY = 0u;
 }
 
-/** Spin until the IOM is idle (IDLEST set, CMDACT clear), bounded. */
+/** @brief Spin until the IOM is idle (IDLEST set, CMDACT clear), bounded. */
 static void spi_wait_idle(void) {
     uint32_t guard = 0;
     while (((SPI_IOM->STATUS &
@@ -227,7 +225,7 @@ uint8_t tiku_spi_arch_transfer(uint8_t tx_byte) {
     return rx;
 }
 
-/** Shared chunking loop for the write / read / write_read entry points. */
+/** @brief Chunking loop shared by the write, read and write_read calls. */
 static int spi_xfer(const uint8_t *tx, uint8_t *rx, uint16_t len) {
     if (!s_inited) {
         return -1;
@@ -266,14 +264,14 @@ int tiku_spi_arch_write_read(const uint8_t *tx_buf, uint8_t *rx_buf,
     return spi_xfer(tx_buf, rx_buf, len);
 }
 
-#else  /* !TIKU_SPI_IOM_ENABLE -- historic stub (no SPI device wired) */
+#else  /* !TIKU_SPI_IOM_ENABLE: stub, no SPI device wired */
 
 /**
- * @brief Initialize the SPI controller (stub — not built in)
+ * @brief Initialize the SPI controller (stub)
  *
- * The real IOM backend is compiled only for the BLE build
- * (TIKU_SPI_IOM_ENABLE). Until then every entry point returns a hard failure
- * so callers can detect the missing backend.
+ * The IOM master is built only with TIKU_SPI_IOM_ENABLE (the EM9305 BLE
+ * build).  Here init and the buffer calls return -1, close does nothing and a
+ * byte transfer returns 0xFF.
  */
 int tiku_spi_arch_init(const tiku_spi_config_t *config) {
     (void)config;

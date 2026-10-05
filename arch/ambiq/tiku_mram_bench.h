@@ -7,9 +7,9 @@
  *
  * tiku_mram_bench.h - MRAM program-timing benchmark (mrambench command).
  *
- * An Ambiq-only interface shared between the arch memory backends and the shell
- * command, kept in its own header so neither the kernel memory API nor the arch
- * memory header has to cross into the other.
+ * Declarations shared by the Ambiq arch memory backends and the mrambench
+ * shell command; neither the kernel memory API nor tiku_mem_arch.h includes
+ * them.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -28,9 +28,9 @@ typedef struct {
 /**
  * @brief Time the bootrom MRAM programmer (nv_program_main2) at several spans.
  *
- * Separates the fixed per-call overhead from the per-word cost -- the numbers
- * that size a future block-granular delta flush.  Programs the UPPER half of the
- * reserved mirror page, so durable state is undisturbed and it is power-cut-safe.
+ * Times each of 16, 256, 4096 and 32768 bytes that fits in half the mirror
+ * page, best of 4, to separate per-call from per-word cost.  It programs only
+ * the page's upper half: a power cut mid-bench leaves durable state intact.
  *
  * @note Must be called inside an NVM unlock window (tiku_mpu_unlock_nvm()).
  * @param rows        Output rows (caller-provided).
@@ -46,9 +46,9 @@ uint8_t tiku_mem_arch_nvm_bench(tiku_mem_nvm_bench_row_t *rows, uint8_t max,
 /**
  * @brief Number of real mirror programs the flush has performed so far.
  *
- * Increments only when tiku_mem_arch_nvm_flush()'s dirty-check finds a change
- * and actually programs MRAM.  An idle flush leaves it unchanged, which is what
- * the mrambench dirty-check self-test asserts.
+ * Counts flushes whose dirty check found a change and whose MRAM program
+ * succeeded; a flush with nothing changed leaves it as is, which the
+ * mrambench self-test checks.
  */
 uint32_t tiku_mem_arch_nvm_program_count(void);
 

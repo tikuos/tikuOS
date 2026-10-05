@@ -7,16 +7,16 @@
  *
  * tiku_uart_arch.c - Apollo510 console (COM UART, interactive).
  *
- * Bare-metal PL011-based driver on UART0 straight to the CMSIS register map, with
- * no vendor HAL.  RX is interrupt-driven into a ring buffer, TX polls the FIFO,
- * and printf is the same self-contained formatter the other ports use.
+ * PL011 console on UART0, or UART1 with TIKU_CONSOLE_UART1, programmed through
+ * the CMSIS register map.  RX is interrupt-driven into a ring buffer, TX polls
+ * the FIFO, and tiku_uart_printf() is a small built-in formatter.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "tiku_uart_arch.h"
 #include "tiku.h"
-#include "apollo510.h"       /* CMSIS register map (UART0/PWRCTRL/GPIO) -- register header only */
+#include "apollo510.h"       /* CMSIS register map (UART/PWRCTRL/GPIO) */
 
 #include <stdarg.h>
 #include <stddef.h>
@@ -30,17 +30,13 @@
  * @defgroup UART_RXBUF RX ring buffer configuration
  * @brief Size and mask for the interrupt-driven receive ring buffer.
  *
- * Must be a power of two so the index mask works.  Default 8 KB so SLIP/IP at
- * high baud survives the stretches where the CPU stops draining -- chiefly TLS
- * cert verification, which can stall the main loop 100+ ms.
- *
- * @note At 460800 a 256 B ring buffers only ~5.5 ms and overflows on nearly
- *       every crypto pause, forcing TCP retransmits that make HTTPS slower than
- *       at 115200.  TCP flow control caps in-flight data at the board's window
- *       (<=4 KB), so >=2x cannot be overrun.  Override with
- *       -DTIKU_UART_RXBUF_SIZE=<N>.
+ * Must be a power of two so the index mask works.  Override with
+ * -DTIKU_UART_RXBUF_SIZE=<N>.
  * @{
  */
+/* The 8 KB default holds what SLIP/IP sends at high baud while the main loop
+ * stalls, as it does during TLS certificate verification.  TCP caps in-flight
+ * data at the board's window (at most 4 KB), so twice that does not overrun. */
 #ifndef TIKU_UART_RXBUF_SIZE
 #define TIKU_UART_RXBUF_SIZE  8192
 #endif
@@ -55,9 +51,9 @@
 /**
  * @brief Interrupt-driven RX ring buffer
  *
- * Written in ISR context (tiku_ambiq_uart0_isr), read from task context.  head
- * and tail are power-of-two indices masked by TIKU_UART_RXBUF_MASK; no critical
- * section is needed, since only the ISR writes head and only the consumer tail.
+ * Filled in ISR context (tiku_ambiq_uart0_isr), drained in task context with
+ * no lock: after tiku_uart_init() zeroes head and tail, head is written only
+ * by the ISR or tiku_uart_test_inject(), and tail only by the consumer.
  */
 static struct {
     volatile uint8_t  buf[TIKU_UART_RXBUF_SIZE]; /**< Circular byte store */
@@ -112,8 +108,8 @@ static struct {
  * @brief Route a GPIO pad to a peripheral function
  *
  * Writes the FUNCSEL field of the pad's PINCFG register, leaving the other
- * fields zero -- the UART drives TX and reads RX through the function mux, not
- * the GPIO path.  PADKEY is unlocked before the store, both handled here.
+ * fields zero: the UART drives TX and reads RX through the function mux.
+ * PADKEY is unlocked around the store.
  *
  * @param pad      Pad number (0-based index into GPIO->PINCFG0[])
  * @param funcsel  FUNCSEL[3:0] value to program
@@ -129,30 +125,29 @@ static void uart_pad_funcsel(uint32_t pad, uint32_t funcsel) {
 /*---------------------------------------------------------------------------*/
 
 /*
- * Initialize UART0 for 8N1 console operation.
+ * Initialize the console UART for 8N1 operation.
  *
  * The full bring-up sequence in PL011 order:
- *   1. Power: enables the UART0 peripheral domain via PWRCTRL.DEVPWREN
+ *   1. Power: enables the UART peripheral domain via PWRCTRL.DEVPWREN
  *      and waits for DEVPWRSTATUS.
- *   2. Pins: routes pads 30 (TX) and 55 (RX) to UART0 via FUNCSEL=4.
+ *   2. Pins: routes the board's TX and RX pads with its FUNCSEL.
  *   3. Clock: selects the 24 MHz HFRC tap (CLKSEL) and enables it (CLKEN);
  *      HFRC is already running, so no clock-manager request is needed.
  *   4. Baud: programs IBRD and FBRD from TIKU_BOARD_UART_BAUD and a
  *      24 MHz reference.
  *   5. Line control: 8 data bits (WLEN=3), FIFOs enabled, no parity, 1 stop.
- *   6. Interrupts: clears pending flags, enables RX, RX-timeout and overrun,
- *      then unmasks UART0 in the NVIC.
- *   7. Enable: UARTEN + TXE + RXE.
+ *   6. Interrupts: clears pending flags, enables RX, RX-timeout and overrun.
+ *   7. Enable: UARTEN + TXE + RXE, then the UART's line in the NVIC.
  */
 void tiku_uart_init(void) {
-    /* 1. Power up the UART0 peripheral domain (functional core of
-     *    am_hal_pwrctrl_periph_enable: DEVPWREN bit + wait for DEVPWRSTATUS). */
+    /* 1. Power up the console UART's peripheral domain: set its DEVPWREN
+     *    bit, then wait for DEVPWRSTATUS. */
     CON_PWREN();
     while (CON_PWRST() == 0u) {
         /* wait for the power domain to come up */
     }
 
-    /* 2. Route the COM-UART pins to UART0 TX/RX. */
+    /* 2. Route the COM-UART pins to the console UART's TX/RX. */
     uart_pad_funcsel(TIKU_UART_TX_PAD, TIKU_UART_PIN_FUNCSEL);
     uart_pad_funcsel(TIKU_UART_RX_PAD, TIKU_UART_PIN_FUNCSEL);
 
@@ -164,7 +159,7 @@ void tiku_uart_init(void) {
     CON_UART->CR_b.CLKEN  = 1u;
 
     {
-        /* IBRD = clk/(16*baud); FBRD = round(frac*64). 24 MHz / 115200. */
+        /* IBRD = clk/(16*baud); FBRD = round(frac*64), from 24 MHz. */
         uint32_t uartclk = 24000000u;
         uint32_t baudclk = 16u * (uint32_t)TIKU_BOARD_UART_BAUD;
         CON_UART->IBRD = uartclk / baudclk;
@@ -199,8 +194,8 @@ void tiku_uart_init(void) {
 }
 
 /**
- * @brief Transmit one character over UART0, blocking until the FIFO
- *        has room
+ * @brief Transmit one character over the console UART, blocking until the
+ *        FIFO has room
  *
  * @param c  Character to send
  */
@@ -216,32 +211,27 @@ void tiku_uart_putc(char c) {
 /*---------------------------------------------------------------------------*/
 
 /*
- * The fault handlers (tiku_mpu_arch.c) dump their diagnostic over the
- * console from exception context and then reset. Two hazards the normal
- * putc cannot tolerate there:
- *   - an unbounded TXFF spin wedges the handler forever if the UART has
- *     stopped draining (clock/power lost as part of the original fault),
- *     turning a diagnosable fault into a silent hang;
- *   - putc returns when the FIFO has ROOM, not when it is EMPTY, so a
- *     reset issued right after the last putc destroys up to 32 queued
- *     characters -- the tail of the fault dump never reaches the host.
- * These bounded variants cap every spin and let the handler drain the
- * FIFO before it pulls SYSRESETREQ.
+ * The fault handlers (tiku_mpu_arch.c) print their diagnostic from exception
+ * context and then reset.  The UART may have stopped draining, its clock or
+ * power lost in the fault, so the variants below bound every spin.
+ * tiku_uart_putc() returns once the FIFO has room, and a reset discards the
+ * up to 32 characters still queued; tiku_uart_fault_drain() waits for the
+ * FIFO to empty before the handler requests SYSRESETREQ.
  */
 
-/** Per-character cap: one FIFO slot frees every ~87 us at 115200 baud, so
- *  ~1e6 iterations (tens of ms) means "the transmitter is dead, move on". */
+/** Per-character spin cap: a FIFO slot frees every ~87 us at 115200 baud,
+ *  so 1e6 polls without one means the transmitter has stopped. */
 #define UART_FAULT_SPIN_MAX   1000000u
-/** Whole-FIFO drain cap: 32 chars x ~87 us is ~2.8 ms; 4e6 iterations of
- *  headroom keeps the pre-reset delay bounded even if TX wedges mid-drain. */
+/** Drain spin cap: a full 32-character FIFO empties in ~2.8 ms at 115200
+ *  baud; the cap bounds the pre-reset delay if TX stops mid-drain. */
 #define UART_FAULT_DRAIN_MAX  4000000u
 
 /**
  * @brief Fault-safe putc: transmit one character with a bounded wait
  *
- * Identical to tiku_uart_putc() except the TX-FIFO-full spin is capped;
- * if the FIFO never frees a slot the character is dropped instead of
- * wedging the fault handler.
+ * Identical to tiku_uart_putc() except the TX-FIFO-full spin is capped at
+ * UART_FAULT_SPIN_MAX polls; if no slot frees by then, the character is
+ * dropped and the call returns.
  *
  * @param c  Character to send
  */
@@ -258,9 +248,9 @@ void tiku_uart_fault_putc(char c) {
 /**
  * @brief Fault-safe drain: wait (bounded) until the TX path is idle
  *
- * Blocks until the TX FIFO is empty and the shifter has finished the
- * final stop bit, so a reset issued afterwards cannot destroy queued
- * output. Gives up after a bounded spin if the transmitter is dead.
+ * Blocks until the TX FIFO is empty and the shifter has sent the final stop
+ * bit, so a reset issued afterwards cannot destroy queued output; returns
+ * after UART_FAULT_DRAIN_MAX polls if the transmitter has stopped.
  */
 void tiku_uart_fault_drain(void) {
     uint32_t spins = 0u;
@@ -273,9 +263,9 @@ void tiku_uart_fault_drain(void) {
 }
 
 /**
- * @brief Transmit a null-terminated string over UART0
+ * @brief Transmit a null-terminated string over the console UART
  *
- * Converts bare LF to CR+LF for terminal compatibility.
+ * Sends every LF as CR+LF for terminal compatibility.
  * Silently returns if s is NULL.
  *
  * @param s  Null-terminated string to send
@@ -318,7 +308,8 @@ int tiku_uart_getc(void) {
 /**
  * @brief Return the software RX overrun counter
  *
- * Incremented when the ISR receives a byte but the ring buffer is full.
+ * The ISR increments it for a hardware RX FIFO overrun and for each byte
+ * dropped because the ring buffer was full.
  *
  * @return Cumulative overrun count since the last reset
  */
@@ -353,11 +344,11 @@ void tiku_uart_test_inject(uint8_t byte) {
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief UART0 interrupt service routine — drains the RX FIFO
+ * @brief Console UART interrupt service routine — drains the RX FIFO
  *
- * Reads every available byte from the hardware FIFO into the ring on each RX or
- * RX-timeout interrupt, incrementing overrun_count when the ring is full rather
- * than discarding silently.  Clears only the interrupts active at entry.
+ * Reads every available byte from the hardware FIFO into the ring; a byte that
+ * finds the ring full is dropped and counted in overrun_count.  Clears only
+ * the interrupts active at entry.
  *
  * @note Non-weak, so it overrides the default trap in tiku_crt_early.c at the
  *       console UART's vector slot (IRQ 15 for UART0, IRQ 16 for UART1) and
@@ -367,9 +358,9 @@ void tiku_ambiq_uart0_isr(void) {
     uint32_t mis = CON_UART->MIS;   /* masked interrupt status */
 
     /* Hardware FIFO overrun: a received byte was lost because the RX FIFO
-     * filled (e.g. while RX IRQs were masked). The OE interrupt (OEIM, enabled
-     * in init) latches it in MIS even though the ISR wasn't running to drain.
-     * Count it separately from the software ring overrun below. */
+     * filled (e.g. while RX IRQs were masked).  The OE interrupt (OEIM,
+     * enabled in init) latches it in MIS.  It goes into overrun_count, as the
+     * ring overrun below does. */
     if (mis & UART0_MIS_OEMIS_Msk) {
         rx.overrun_count++;
     }
@@ -382,7 +373,7 @@ void tiku_ambiq_uart0_isr(void) {
             rx.buf[rx.head] = b;
             rx.head = next;
         } else {
-            rx.overrun_count++;   /* software overrun: drain faster */
+            rx.overrun_count++;   /* ring full: the byte is dropped */
         }
     }
 
@@ -390,15 +381,15 @@ void tiku_ambiq_uart0_isr(void) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* Lightweight printf (same minimal subset as the RP2350 / MSP430 drivers)   */
+/* Lightweight printf                                                        */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Format and transmit an unsigned integer
  *
- * Converts v to the given base (10 or 16), right-pads to width with the
- * pad character, then emits digits via tiku_uart_putc(). Digits are
- * accumulated in a local reverse buffer so no heap is needed.
+ * Converts v to the given base (10 or 16), left-pads to width with the
+ * pad character, then emits digits via tiku_uart_putc().  Digits are
+ * accumulated in a local reverse buffer.
  *
  * @param v      Value to format
  * @param base   Numeric base (10 for decimal, 16 for hex)
@@ -450,11 +441,11 @@ static void uart_print_int(long v, unsigned width, char pad) {
 }
 
 /**
- * @brief Lightweight printf over UART0
+ * @brief Lightweight printf over the console UART
  *
- * The same minimal format subset as the RP2350 and MSP430 drivers: %c, %s, %d,
- * %ld, %u, %lu, %x, %lx, %%, and optional zero/space padding with width.  No
- * floating point, no %p, no %n.  LF is converted to CR+LF automatically.
+ * Supports %c, %s, %d, %ld, %u, %lu, %x, %lx and %%, with optional zero or
+ * space padding to a width.  No floating point, %p or %n.  LF goes out as
+ * CR+LF.
  *
  * @param fmt  printf-style format string
  * @param ...  Format arguments

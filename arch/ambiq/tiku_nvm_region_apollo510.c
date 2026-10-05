@@ -7,9 +7,9 @@
  *
  * tiku_nvm_region_apollo510.c - Apollo510 carved-MRAM region backend.
  *
- * Mirrors the Apollo4 Lite backend with the Apollo5 deltas: a different bootrom
- * entry and MRAM origin, and an L1 D-cache, so the staging buffer is cleaned
- * before the bootrom reads it and the programmed page invalidated after.
+ * Reads dereference the memory-mapped region.  Writes stage 16-byte-aligned
+ * chunks in SSRAM and program them through the bootrom; the M55 D-cache is
+ * cleaned before each program and the programmed span invalidated after.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,22 +23,25 @@
 #include <hal/tiku_cpu.h>      /* tiku_cpu_dcache_clean / _invalidate */
 
 extern uint8_t __tiku_nvmfs_base;   /* region base (memory-mapped MRAM) */
-extern uint8_t __tiku_nvmfs_size;   /* absolute symbol: its ADDRESS == size */
+extern uint8_t __tiku_nvmfs_size;   /* absolute symbol: address = size */
 
-#define AMBIQ_MRAM_BASE         0x00400000UL  /* AM_HAL_MRAM_ADDR origin       */
+#define AMBIQ_MRAM_BASE         0x00400000UL  /* AM_HAL_MRAM_ADDR origin */
 #define AMBIQ_MRAM_PROGRAM_KEY  0x12344321UL
 #define AMBIQ_MRAM_OP_PROGRAM   1U
 
+/* Bootrom nv_program_main2(key, op, src_addr, dst_word_offset, num_words);
+ * the +1 sets the Thumb bit of the entry address. */
 typedef int (*nv_program_main2_t)(uint32_t, uint32_t, uint32_t,
                                   uint32_t, uint32_t);
 #define NV_PROGRAM_MAIN2  ((nv_program_main2_t)(0x0200ff20UL + 1UL))
 
-/* 16-byte-aligned read-modify-program staging window. In SSRAM (cached on the
- * M55) and cleaned before each program, matching the mirror flush. */
+/* 16-byte-aligned read-modify-program staging window.  It sits in SSRAM,
+ * which the M55 caches, so it is cleaned before each program. */
 #define NVMR_STAGE_BYTES  256U
 static uint32_t nvmr_stage[NVMR_STAGE_BYTES / 4U]
     __attribute__((section(".ssram"), aligned(16)));
 
+/** @brief Program one staged 16-byte-aligned chunk; returns bootrom status. */
 static int mram_program_span(uintptr_t dst_addr, const uint32_t *src16,
                              size_t len)
 {
@@ -56,20 +59,19 @@ static int mram_program_span(uintptr_t dst_addr, const uint32_t *src16,
                           (uint32_t)(len / 4U));
     __asm__ volatile ("msr primask, %0" : : "r"(primask) : "memory");
 
-    /* Drop any cached copies of the freshly-programmed page. */
+    /* Drop any cached copies of the programmed span. */
     tiku_cpu_dcache_invalidate((const void *)dst_addr, len);
 
-    /* Bootrom status: 0 = programmed.  Propagate failures (previously
-     * discarded) so callers' gate-last / CRC commits fail closed. */
+    /* Bootrom status: 0 when the span is programmed. */
     return rc;
 }
 
 /**
  * @brief Program an arbitrary MRAM span via the bootrom (absolute address)
  *
- * The chunked read-modify-program loop shared by the carved-region write path
- * and the Tier-3 module loader: 16-byte-aligned spans staged through the SSRAM
- * window, edges merged with existing MRAM, D-cache cleaned before each call.
+ * Copies each 16-byte-aligned chunk of up to 256 bytes into the SSRAM staging
+ * window, overlays the new bytes on the existing MRAM contents and programs
+ * the chunk.  The carved-region write path calls it.
  *
  * @note Refuses anything below user MRAM (the SBL and its vectors live at
  *       0x400000..0x410000) or past the 4 MB MRAM end.
@@ -117,6 +119,7 @@ int tiku_nvm_mram_program(uintptr_t dst, const void *src, size_t len)
     return 0;
 }
 
+/** @brief Backend write: program @p len bytes at region offset @p off. */
 static int region_write(tiku_nvm_backend_t *be, size_t off,
                         const void *src, size_t len)
 {

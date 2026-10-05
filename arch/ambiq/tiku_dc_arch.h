@@ -7,9 +7,9 @@
  *
  * tiku_dc_arch.h - Apollo510 display path: NemaDC, DSI host and CO5300 panel.
  *
- * Drives the round 468x468 AMOLED over MIPI DSI with synchronous one-shot frame
- * pushes and polled completion.  The DC is a non-coherent bus master reading the
- * framebuffer, so present() cleans the D-cache range before each push.
+ * Drives the round 468x468 AMOLED over MIPI DSI with blocking one-shot frame
+ * pushes and polled completion.  The DC reads the framebuffer as a
+ * non-coherent bus master, so each present cleans the D-cache range first.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,42 +19,49 @@
 
 #include <stdint.h>
 
-/** Panel geometry (CO5300 round AMOLED on the EVB display kit). */
+/**
+ * @name Panel geometry, in pixels (CO5300 round AMOLED, EVB display kit)
+ * @{
+ */
 #define TIKU_DC_PANEL_W   468u
 #define TIKU_DC_PANEL_H   468u
+/** @} */
 
 /** Driver result codes. */
 typedef enum {
-    TIKU_DC_OK           =  0,
-    TIKU_DC_ERR_POWER    = -1,   /**< DISP/DISPPHY power domain never came up   */
-    TIKU_DC_ERR_ID       = -2,   /**< DC IDREG != 0x87452365 (dead/unclocked)   */
-    TIKU_DC_ERR_DSI      = -3,   /**< DSI PHY INITDONE timeout                  */
-    TIKU_DC_ERR_TIMEOUT  = -4,   /**< DBI/frame busy never cleared              */
+    TIKU_DC_OK           =  0,   /**< Success                                 */
+    TIKU_DC_ERR_POWER    = -1,   /**< DISP/DISPPHY power never came up        */
+    TIKU_DC_ERR_ID       = -2,   /**< DC IDREG != 0x87452365                  */
+    TIKU_DC_ERR_DSI      = -3,   /**< DSI PHY INITDONE timeout                */
+    TIKU_DC_ERR_TIMEOUT  = -4,   /**< DBI/frame busy stuck, or a bad rect     */
 } tiku_dc_err_t;
 
 /** Scanout formats (values are the NemaDC layer-format codes). */
 typedef enum {
-    TIKU_DC_FMT_RGB24    = 0x0B,  /**< 3 B/px, packed                           */
-    TIKU_DC_FMT_RGBA8888 = 0x0D,  /**< 4 B/px, alpha ignored on scanout         */
+    TIKU_DC_FMT_RGB24    = 0x0B,  /**< 3 B/px, packed                         */
+    TIKU_DC_FMT_RGBA8888 = 0x0D,  /**< 4 B/px, alpha ignored on scanout       */
 } tiku_dc_fmt_t;
 
 /**
  * @brief Full display bring-up: pins, VDD18, DSI PHY, DC, panel init.
  *
- * Mirrors the proven vendor order: display pins -> DISPPHY power + DSI clocks
- * -> DISP power -> DC identify -> DSI para-config -> panel hardware reset ->
- * DC configure (DBIDSI, RGB888 bridge, 468x468) -> CO5300 DCS init.
+ * Order: display pins -> DISPPHY power + DSI clocks -> DISP power + DC
+ * identify -> DSI PHY config -> DC configure (DBIDSI, RGB888, 468x468) ->
+ * panel hardware reset -> CO5300 DCS init.
  *
- * @note Blocking; includes ~700 ms of mandatory panel delays.
+ * @note Blocks for the panel's reset and init delays, about 0.8 s in all.
+ * @return TIKU_DC_OK, or the TIKU_DC_ERR_* of the stage that failed.
  */
 tiku_dc_err_t tiku_dc_init(void);
 
 /**
  * @brief Push one frame from an SSRAM surface to the panel (blocking).
  *
- * Programs layer 0 at @p fb, issues DCS write_memory_start, scans exactly one
- * frame, and polls until the transfer completes. Cleans the D-cache range
- * first; @p fb MUST be in SSRAM (never DTCM/ITCM).
+ * Cleans the D-cache over the surface, programs layer 0 at @p fb, issues DCS
+ * write_memory_start, scans one frame, and polls until the transfer ends.
+ *
+ * @note @p fb must be in SSRAM, not DTCM or ITCM.  @p w and @p h are not
+ *       checked against the panel.
  *
  * @param fb            Surface base (32-byte aligned recommended).
  * @param w             Width in pixels  (<= TIKU_DC_PANEL_W).
@@ -69,12 +76,11 @@ tiku_dc_err_t tiku_dc_present(const void *fb, uint16_t w, uint16_t h,
 /**
  * @brief Push only a sub-rectangle of a surface to the panel (partial update).
  *
- * Addresses just that window on the panel (DCS CASET/RASET) and scans the
- * sub-rect out of the framebuffer, which is far cheaper than a full frame for
- * small damage.  The full panel window is restored afterward.
+ * Sets the panel window to the rectangle (DCS CASET/RASET), scans the
+ * rectangle out of the framebuffer, then restores the full panel window.
  *
- * @param fb         Full surface base (MUST be in SSRAM).
- * @param fb_stride  Bytes per row of the FULL surface.
+ * @param fb         Full surface base (must be in SSRAM).
+ * @param fb_stride  Bytes per row of the full surface.
  * @param x,y,w,h    Damage rectangle (must lie within the panel).
  * @param fmt        Scanout format.
  * @return TIKU_DC_OK, or TIKU_DC_ERR_TIMEOUT (incl. a rect outside the panel).

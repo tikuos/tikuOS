@@ -7,9 +7,9 @@
  *
  * tiku_nvm_region_apollo4l.c - Apollo4 Lite carved-MRAM region backend.
  *
- * Reads dereference the memory-mapped region directly.  Writes go through the
- * bootrom in whole words from an aligned source, so region_write() stages,
- * overlays and programs each window; the caller must already hold the unlock.
+ * Reads dereference the memory-mapped region.  Writes go through the bootrom
+ * in whole words from an aligned source: tiku_nvm_mram_program() stages,
+ * overlays and programs each span; region_write() needs an NVM unlock window.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,17 +20,17 @@
 
 #include "kernel/memory/tiku_nvm_region.h"
 #include "tiku_mem_arch.h"     /* tiku_nvm_mram_program prototype */
-#include <hal/tiku_cpu.h>      /* tiku_cpu_dcache_invalidate (CACHECTRL flush) */
+#include <hal/tiku_cpu.h>      /* tiku_cpu_dcache_invalidate (CACHECTRL) */
 
 /*---------------------------------------------------------------------------*/
-/* Linker-carved region bounds (apollo4l.ld)                                 */
+/* LINKER-CARVED REGION BOUNDS (apollo4l.ld)                                 */
 /*---------------------------------------------------------------------------*/
 
 extern uint8_t __tiku_nvmfs_base;   /* region base (memory-mapped MRAM)      */
-extern uint8_t __tiku_nvmfs_size;   /* absolute symbol: its ADDRESS == size  */
+extern uint8_t __tiku_nvmfs_size;   /* absolute symbol: its address is size  */
 
 /*---------------------------------------------------------------------------*/
-/* Bootrom MRAM programmer (mirrors tiku_mem_apollo4l.c)                      */
+/* BOOTROM MRAM PROGRAMMER (as in tiku_mem_apollo4l.c)                       */
 /*---------------------------------------------------------------------------*/
 
 #define AMBIQ_MRAM_BASE         0x00000000UL  /* word-offset origin           */
@@ -44,8 +44,9 @@ typedef int (*nv_program_main2_t)(uint32_t, uint32_t, uint32_t,
 #define NV_PROGRAM_MAIN2  ((nv_program_main2_t)0x0800006DUL)
 
 /* 16-byte-aligned read-modify-program staging window in TCM (.bss). 256 B
- * bounds the per-program size; region_write() chunks larger writes through it.
- * 256 is a multiple of 16, so every programmed span stays 16-byte aligned. */
+ * bounds the per-program size; tiku_nvm_mram_program() chunks larger writes
+ * through it.  256 is a multiple of 16, so every programmed span stays
+ * 16-byte aligned. */
 #define NVMR_STAGE_BYTES  256U
 static uint32_t nvmr_stage[NVMR_STAGE_BYTES / 4U] __attribute__((aligned(16)));
 
@@ -72,9 +73,8 @@ static int mram_program_span(uintptr_t dst_addr, const uint32_t *src16,
                           (uint32_t)(len / 4U));
     __asm__ volatile ("msr primask, %0" : : "r"(primask) : "memory");
 
-    /* Bootrom status: 0 = programmed.  Propagate failures so callers'
-     * gate-last / CRC commits fail closed (parity with the apollo510
-     * backend, which gained this in the cross-platform validation pass). */
+    /* Bootrom status: 0 = programmed.  A failure is returned to the caller,
+     * as on the Apollo510 backend. */
     return rc;
 }
 
@@ -82,10 +82,10 @@ static int mram_program_span(uintptr_t dst_addr, const uint32_t *src16,
  * @brief Program an arbitrary MRAM span via the bootrom (absolute address)
  *
  * The chunked read-modify-program loop shared by the carved-region write path
- * and the Tier-3 module loader: 16-byte-aligned windows staged through
+ * and the BASIC module loader: 16-byte-aligned windows staged through
  * nvmr_stage (TCM, uncached), sub-16-byte edges merged with existing MRAM.
  *
- * @note Ends with a whole-cache CACHECTRL flush so same-session reads AND
+ * @note Ends with a whole-cache CACHECTRL flush so same-session reads and
  *       instruction fetches see fresh bytes; the unified Apollo4 cache serves
  *       both.  Refuses anything below user MRAM (the boot/info area occupies
  *       the low 96 KB) or past the 2 MB MRAM end.
@@ -119,7 +119,7 @@ int tiku_nvm_mram_program(uintptr_t dst, const void *src, size_t len)
         }
 
         /* Preserve the existing MRAM bytes in this window, then overlay the
-         * portion of [dst, dst+len) that lands inside it. */
+         * portion of [dst, dst+len) that falls inside it. */
         memcpy(nvmr_stage, (const void *)span, chunk);
 
         ov_start = (dst > span) ? dst : span;
@@ -137,8 +137,8 @@ int tiku_nvm_mram_program(uintptr_t dst, const void *src, size_t len)
     }
 
     /* Drop stale cached copies of the programmed range.  The Apollo4
-     * CACHECTRL has no by-range op; args are ignored, the whole cache is
-     * flushed (coarse but correct, and programs are rare). */
+     * CACHECTRL has no by-range operation: the arguments are ignored and
+     * the whole cache is invalidated. */
     tiku_cpu_dcache_invalidate((const void *)dst, len);
     return 0;
 }
@@ -161,7 +161,7 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
 }
 
 /*---------------------------------------------------------------------------*/
-/* Public accessor                                                           */
+/* PUBLIC ACCESSOR                                                           */
 /*---------------------------------------------------------------------------*/
 
 static tiku_nvm_backend_t the_region;

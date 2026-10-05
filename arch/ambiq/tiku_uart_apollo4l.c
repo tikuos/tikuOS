@@ -5,31 +5,28 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_uart_apollo4l.c - Apollo4 Lite console (COM UART2).
+ * tiku_uart_apollo4l.c - Apollo4 Lite/Plus console (COM UART2 or UART0).
  *
- * Bare-metal PL011-based driver straight to the CMSIS register map, with no
- * vendor HAL: power the instance, route the pads, select the HFRC tap, then set
- * baud and framing.  TX only for now; the interrupt RX ring lands with the shell.
+ * PL011 console programmed through the CMSIS register map: power the instance,
+ * route the pads, select the HFRC tap, then set baud and framing.  RX is
+ * interrupt-driven into a ring buffer, TX polls the FIFO.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "tiku_uart_arch.h"
 #include "tiku.h"
-#include "apollo4l.h"       /* CMSIS register map (UART2/PWRCTRL/GPIO) -- register header only */
+#include "apollo4l.h"       /* CMSIS register map (UART/PWRCTRL/GPIO) */
 
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
 
-/* The COM UART instance + pads differ per Apollo4 EVB.  Apollo4 Lite routes its
- * J-Link VCOM to UART2 (pads 54/11); Apollo4 Plus routes it to UART0 (pads
- * 60/47).  The register field layout is identical across instances (the UART0_*
- * field macros apply to all), so only the instance pointer, pads, NVIC IRQ and
- * power bit change.  TIKU_CONSOLE_UART0 (set for MCU=apollo4p) selects UART0. */
-/* WHICH peripheral is a board-routing choice expressed by TIKU_CONSOLE_UART0
- * (set by BOARD=apollo4p_evb); WHICH PADS is board wiring and now comes from
- * the board header, matching what the Apollo510 UART backend already does. */
+/* The COM UART differs per Apollo4 EVB: the Lite routes its J-Link VCOM to
+ * UART2 (pads 54/11), the Plus to UART0 (pads 60/47), selected by
+ * TIKU_CONSOLE_UART0 (set by BOARD=apollo4p_evb).  The UART0_* field macros
+ * fit every instance, so only the instance pointer, NVIC IRQ and power bit
+ * change here; the pads come from the board header. */
 #if defined(TIKU_CONSOLE_UART0)
 #define TIKU_UART              UART0     /* Apollo4 Plus EVB COM UART */
 #define TIKU_UART_IRQ          15u       /* UART0_IRQn */
@@ -41,13 +38,9 @@
 #define TIKU_UART_RX_PAD       TIKU_BOARD_UART_RX_PIN
 
 /*
- * No APOLLO4 board was on the bench when the pads moved out of this file, and
- * a wrong console pad is the worst failure mode available here: the board
- * boots, runs, and says nothing, which reads as a dead image.  So the values
- * are pinned to exactly what this file used before the move.  If a board
- * header ever disagrees, that is a COMPILE error naming the pad, not a silent
- * board -- which is as close to a hardware gate as is available without the
- * hardware.
+ * A wrong console pad leaves a board that boots and runs but prints nothing.
+ * These asserts pin the board header's pads to the EVB wiring, so a mismatch
+ * is a compile error naming the pad.
  */
 #if defined(TIKU_CONSOLE_UART0)
 _Static_assert(TIKU_UART_TX_PAD == 60u, "Apollo4P console TX pad moved");
@@ -56,24 +49,19 @@ _Static_assert(TIKU_UART_RX_PAD == 47u, "Apollo4P console RX pad moved");
 _Static_assert(TIKU_UART_TX_PAD == 54u, "Apollo4L console TX pad moved");
 _Static_assert(TIKU_UART_RX_PAD == 11u, "Apollo4L console RX pad moved");
 #endif
-/** GPIO PINCFG FUNCSEL that routes the pads to UART TX/RX (4 on all Apollo4). */
+/** GPIO PINCFG FUNCSEL routing the pads to UART TX/RX (4 on all Apollo4). */
 #define TIKU_UART_PIN_FUNCSEL  4u
 /** GPIO PINCFG input-enable bit (needed on the RX pad). */
 #define TIKU_GPIO_INPEN        (1u << 4)
 /** PADKEY unlock value required before writing any PINCFG register. */
 #define TIKU_GPIO_PADKEY_UNLOCK 0x73u
 
-/* Interrupt-driven RX ring buffer (UART2, NVIC IRQ 17). Power-of-two size so
- * the head/tail index mask works; override with -DTIKU_UART_RXBUF_SIZE=<N>.
+/* Interrupt-driven RX ring buffer.  Power-of-two size so the head/tail index
+ * mask works; override with -DTIKU_UART_RXBUF_SIZE=<N>.
  *
- * Sized at 8 KB (not a token 256 B) so SLIP/IP at high baud survives the long
- * stretches where the CPU stops draining the UART -- chiefly TLS cert
- * verification (RSA/ECDSA can stall the main loop tens to ~100+ ms). At 460800
- * a 256 B ring buffers only ~5.5 ms and overflows on nearly every crypto pause,
- * dropping bytes and forcing TCP retransmits that make HTTPS *slower* than at
- * 115200. TCP flow control caps in-flight data at the board's window (<=4 KB),
- * so >=2x that can't be overrun however long the pause lasts. Apollo SRAM is
- * MB-class, so 8 KB is free. */
+ * The 8 KB default holds what SLIP/IP sends at high baud while the main loop
+ * stalls, as it does during TLS certificate verification.  TCP caps in-flight
+ * data at the board's window (at most 4 KB), so twice that does not overrun. */
 #ifndef TIKU_UART_RXBUF_SIZE
 #define TIKU_UART_RXBUF_SIZE  8192
 #endif
@@ -92,8 +80,9 @@ _Static_assert(TIKU_UART_RX_PAD == 11u, "Apollo4L console RX pad moved");
 /**
  * @brief Interrupt-driven RX ring buffer.
  *
- * head is written only by tiku_ambiq_uart2_isr, tail only by the consumer, so
- * no critical section is needed on single-core Cortex-M.
+ * Once tiku_uart_init() has reset both indices, tiku_ambiq_uart2_isr (or
+ * tiku_uart_test_inject()) writes head and the consumer writes tail, so no
+ * critical section is needed on single-core Cortex-M.
  */
 static struct {
     volatile uint8_t  buf[TIKU_UART_RXBUF_SIZE];
@@ -119,11 +108,11 @@ static void uart_pad_cfg(uint32_t pad, uint32_t cfg) {
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Initialize UART2 for 8N1 console operation (TX path).
+ * @brief Initialize the console UART for 8N1 operation with RX interrupts.
  *
- * Powers the UART2 domain, routes pads 54/11, selects the 24 MHz HFRC clock
- * tap, programs the baud divisors + line control, and enables the UART with
- * the transmitter and receiver.
+ * Powers the UART domain, routes the board's pads, selects the 24 MHz HFRC
+ * clock tap, programs the baud divisors and line control, and enables the RX
+ * interrupts, the UART, its transmitter and receiver.
  */
 void tiku_uart_init(void) {
     /* 1. Power up the console UART peripheral domain. */
@@ -139,7 +128,7 @@ void tiku_uart_init(void) {
     }
 #endif
 
-    /* 2. Route the COM-UART pins to UART2 TX/RX (RX needs the input buffer). */
+    /* 2. Route the COM-UART pins to the UART (RX needs the input buffer). */
     uart_pad_cfg(TIKU_UART_TX_PAD, TIKU_UART_PIN_FUNCSEL);
     uart_pad_cfg(TIKU_UART_RX_PAD, TIKU_UART_PIN_FUNCSEL | TIKU_GPIO_INPEN);
 
@@ -150,7 +139,7 @@ void tiku_uart_init(void) {
     TIKU_UART->CR_b.CLKEN  = 1u;
 
     {
-        /* IBRD = clk/(16*baud); FBRD = round(frac*64). 24 MHz / 115200. */
+        /* IBRD = clk/(16*baud); FBRD = round(frac*64), from 24 MHz. */
         uint32_t uartclk = 24000000u;
         uint32_t baudclk = 16u * (uint32_t)TIKU_BOARD_UART_BAUD;
         TIKU_UART->IBRD = uartclk / baudclk;
@@ -179,12 +168,12 @@ void tiku_uart_init(void) {
     TIKU_UART->CR_b.TXE    = 1u;
     TIKU_UART->CR_b.RXE    = 1u;
 
-    /* Enable UART2 in the NVIC (IRQ 17). */
+    /* Enable the console UART's line in the NVIC (IRQ 17 or 15). */
     NVIC_ICPR[AMBIQ_IRQ_UART2 >> 5] = (1u << (AMBIQ_IRQ_UART2 & 31u));
     NVIC_ISER[AMBIQ_IRQ_UART2 >> 5] = (1u << (AMBIQ_IRQ_UART2 & 31u));
 }
 
-/** @brief Transmit one character over UART2, blocking until the FIFO has room. */
+/** @brief Transmit one character, blocking until the TX FIFO has room. */
 void tiku_uart_putc(char c) {
     while (TIKU_UART->FR_b.TXFF) {
         /* spin while the TX FIFO is full */
@@ -193,36 +182,31 @@ void tiku_uart_putc(char c) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* Fault-path console primitives (twin of tiku_uart_arch.c)                  */
+/* Fault-path console primitives                                            */
 /*---------------------------------------------------------------------------*/
 
 /*
- * The fault handlers (tiku_mpu_apollo4l.c) dump their diagnostic over the
- * console from exception context and then reset. Two hazards the normal
- * putc cannot tolerate there:
- *   - an unbounded TXFF spin wedges the handler forever if the UART has
- *     stopped draining (clock/power lost as part of the original fault),
- *     turning a diagnosable fault into a silent hang;
- *   - putc returns when the FIFO has ROOM, not when it is EMPTY, so a
- *     reset issued right after the last putc destroys up to 32 queued
- *     characters -- the tail of the fault dump never reaches the host.
- * These bounded variants cap every spin and let the handler drain the
- * FIFO before it pulls SYSRESETREQ.
+ * The fault handlers (tiku_mpu_apollo4l.c) print their diagnostic from
+ * exception context and then reset.  The UART may have stopped draining, its
+ * clock or power lost in the fault, so the variants below bound every spin.
+ * tiku_uart_putc() returns once the FIFO has room, and a reset discards the
+ * up to 32 characters still queued; tiku_uart_fault_drain() waits for the
+ * FIFO to empty before the handler requests SYSRESETREQ.
  */
 
-/** Per-character cap: one FIFO slot frees every ~87 us at 115200 baud, so
- *  ~1e6 iterations (tens of ms) means "the transmitter is dead, move on". */
+/** Per-character spin cap: a FIFO slot frees every ~87 us at 115200 baud,
+ *  so 1e6 polls without one means the transmitter has stopped. */
 #define UART_FAULT_SPIN_MAX   1000000u
-/** Whole-FIFO drain cap: 32 chars x ~87 us is ~2.8 ms; 4e6 iterations of
- *  headroom keeps the pre-reset delay bounded even if TX wedges mid-drain. */
+/** Drain spin cap: a full 32-character FIFO empties in ~2.8 ms at 115200
+ *  baud; the cap bounds the pre-reset delay if TX stops mid-drain. */
 #define UART_FAULT_DRAIN_MAX  4000000u
 
 /**
  * @brief Fault-safe putc: transmit one character with a bounded wait
  *
- * Identical to tiku_uart_putc() except the TX-FIFO-full spin is capped;
- * if the FIFO never frees a slot the character is dropped instead of
- * wedging the fault handler.
+ * Identical to tiku_uart_putc() except the TX-FIFO-full spin is capped at
+ * UART_FAULT_SPIN_MAX polls; if no slot frees by then, the character is
+ * dropped and the call returns.
  *
  * @param c  Character to send
  */
@@ -239,9 +223,9 @@ void tiku_uart_fault_putc(char c) {
 /**
  * @brief Fault-safe drain: wait (bounded) until the TX path is idle
  *
- * Blocks until the TX FIFO is empty and the shifter has finished the
- * final stop bit, so a reset issued afterwards cannot destroy queued
- * output. Gives up after a bounded spin if the transmitter is dead.
+ * Blocks until the TX FIFO is empty and the shifter has sent the final stop
+ * bit, so a reset issued afterwards cannot destroy queued output; returns
+ * after UART_FAULT_DRAIN_MAX polls if the transmitter has stopped.
  */
 void tiku_uart_fault_drain(void) {
     uint32_t spins = 0u;
@@ -281,10 +265,10 @@ int tiku_uart_getc(void) {
     return (int)c;
 }
 
-/** @brief Return the software RX overrun counter. */
+/** @brief RX overrun count: FIFO overruns plus bytes the full ring dropped. */
 uint16_t tiku_uart_overrun_count(void) { return rx.overrun_count; }
 
-/** @brief Clear the software RX overrun counter. */
+/** @brief Clear the RX overrun counter. */
 void     tiku_uart_overrun_reset(void) { rx.overrun_count = 0U; }
 
 #ifdef HAS_TESTS
@@ -303,11 +287,11 @@ void tiku_uart_test_inject(uint8_t byte) {
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief UART2 interrupt service routine -- drains the RX FIFO.
+ * @brief Console UART interrupt service routine -- drains the RX FIFO.
  *
- * Non-weak, so it overrides the default trap in tiku_crt_early_apollo4l.c
- * (vector slot 16 + IRQ 17). Reads all available bytes into the ring on every
- * RX or RX-timeout interrupt; counts overruns rather than silently dropping.
+ * Non-weak, so it overrides the default trap in tiku_crt_early_apollo4l.c at
+ * the console UART's slot (16 + IRQ 17, or 16 + 15).  Reads every available
+ * byte into the ring; a byte that finds the ring full is dropped and counted.
  */
 void tiku_ambiq_uart2_isr(void) {
     uint32_t mis = TIKU_UART->MIS;   /* masked interrupt status */
@@ -331,7 +315,7 @@ void tiku_ambiq_uart2_isr(void) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* Lightweight printf (same minimal subset as the other arch drivers)        */
+/* Lightweight printf                                                        */
 /*---------------------------------------------------------------------------*/
 
 /** @brief Format and transmit an unsigned integer in the given base. */
@@ -370,10 +354,10 @@ static void uart_print_int(long v, unsigned width, char pad) {
 }
 
 /**
- * @brief Lightweight printf over UART2.
+ * @brief Lightweight printf over the console UART.
  *
- * Same minimal subset as the RP2350/MSP430/Apollo510 drivers: %c, %s, %d, %ld,
- * %u, %lu, %x, %lx, %%, optional zero/space padding with width. LF -> CR+LF.
+ * Supports %c, %s, %d, %ld, %u, %lu, %x, %lx and %%, with optional zero or
+ * space padding to a width.  LF goes out as CR+LF.
  *
  * @param fmt  printf-style format string
  * @param ...  Format arguments
