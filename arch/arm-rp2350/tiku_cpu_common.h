@@ -18,10 +18,10 @@
 /**
  * @brief Blocking busy-wait for the given number of milliseconds.
  *
- * Implemented against the 1 µs TIMER0 reading in
- * arch/arm-rp2350/tiku_cpu_common.c. Spins the CPU; do not call from
- * an ISR or in energy-sensitive paths.
+ * Spins on the 1 us TIMER0 count in arch/arm-rp2350/tiku_cpu_common.c.
  *
+ * @note Holds the CPU for the whole wait; do not call it from an ISR or an
+ *       energy-sensitive path.
  * @param ms  Number of milliseconds to wait.
  */
 void tiku_cpu_rp2350_delay_ms(unsigned int ms);
@@ -29,9 +29,9 @@ void tiku_cpu_rp2350_delay_ms(unsigned int ms);
 /**
  * @brief Blocking busy-wait for the given number of microseconds.
  *
- * Reads TIMER0's 64-bit time_us register and spins until the target
- * time has elapsed. Resolution is 1 µs; accuracy depends on the
- * system clock being stable.
+ * Spins on the low 32 bits of TIMER0's 1 us counter (TIMERAWL) until at
+ * least @p us microseconds have passed.  TIMER0 ticks from clk_ref (the XOSC)
+ * through the TICKS block, so a CPU frequency change does not alter it.
  *
  * @param us  Number of microseconds to wait.
  */
@@ -40,13 +40,13 @@ void tiku_cpu_rp2350_delay_us(unsigned int us);
 /**
  * @brief Read the on-chip unique device identifier.
  *
- * The RP2350's flash chip holds a unique 64-bit ID, but this port exposes a
- * synthesised value derived from a few SRAM-relative addresses so tests stay
- * deterministic across reboots without a flash-readback routine.
+ * The value is synthesised from a magic constant and the addresses of three
+ * linker symbols, stable across reboots of one image; the flash chip's
+ * 64-bit UID is not read.
  *
  * @param buf  Destination buffer (caller-provided).
- * @param len  Number of bytes to copy (1..8).
- * @return Number of bytes actually written to buf.
+ * @param len  Number of bytes to copy; more than 8 is clamped to 8.
+ * @return Number of bytes written to buf, 0 for a NULL buf or a zero len.
  */
 uint8_t  tiku_cpu_rp2350_unique_id(uint8_t *buf, uint8_t len);
 
@@ -64,11 +64,8 @@ uint16_t tiku_cpu_rp2350_reset_reason(void);
  * @brief Reboot the device into USB BOOTSEL mass-storage mode.
  *
  * Drains the UART TX FIFO, disables interrupts and asks the boot ROM to reboot
- * into BOOTSEL.  On success this does not return; on a ROM lookup miss it falls
- * through to a watchdog reset, which reboots but does NOT enter BOOTSEL.
- *
- * @note Used by the test harness when TIKU_TEST_AUTO_BOOTSEL is defined, so the
- *       Python loop runner can chain test categories without a button press.
+ * into BOOTSEL.  Never returns: when no ROM call takes effect it resets
+ * through the watchdog, which restarts TikuOS without entering BOOTSEL.
  */
 void tiku_cpu_rp2350_reboot_to_bootsel(void) __attribute__((noreturn));
 

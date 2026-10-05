@@ -7,9 +7,9 @@
  *
  * tiku_gpio_irq_arch.c - RP2350 GPIO interrupt backend.
  *
- * Maps a (port, pin, edge) request onto the bank-0 IO interrupt registers, whose
- * INTR/INTE/INTS arrays hold eight pins per word with a 4-bit field per pin for
- * the level-low, level-high, edge-low and edge-high masks.
+ * Maps a (port, pin, edge) request onto the bank-0 IO interrupt registers,
+ * whose INTR/INTE/INTS arrays hold eight pins per word with a 4-bit field per
+ * pin for the level-low, level-high, edge-low and edge-high masks.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,7 +21,7 @@
 #include <kernel/process/tiku_proto.h>
 #include <stdint.h>
 
-/** Maximum zero-based GP index on the RP2350 (GP0–GP29). */
+/** @brief Highest GP index handled (the RP2350A has GP0–GP29). */
 #define MAX_GP_PIN  29U
 
 /**
@@ -118,8 +118,8 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
  * @brief Disable the GPIO edge interrupt for the given (port, pin).
  *
  * Clears all four edge/level bits for the pin's nibble in IO_BANK0 PROC0_INTE,
- * then clears any latched pending edge in INTR.  The NVIC mask for IO_BANK0 is
- * left alone; use the HAL-level disable if no other pin on the bank needs it.
+ * then clears any latched pending edge in INTR.  The IO_BANK0 NVIC line, which
+ * every pin of the bank shares, stays enabled.
  *
  * @param port  Virtual port number (1–4).
  * @param pin   Pin index within the port (0–7).
@@ -142,17 +142,15 @@ int tiku_gpio_irq_arch_disable(uint8_t port, uint8_t pin) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* IRQ handler                                                               */
+/* IRQ HANDLER                                                               */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief IO_BANK0 interrupt service routine (ISR context).
  *
- * Called by the NVIC when at least one IO_BANK0 edge has fired.  Walks
- * all four PROC0_INTS words, decodes every armed nibble into a virtual
- * (port, pin) pair, broadcasts @c TIKU_EVENT_GPIO (data packed by
- * @c TIKU_GPIO_IRQ_PACK) to all registered processes, and clears the
- * latched edge in INTR before returning.
+ * Walks the four PROC0_INTS words; for each pin with a pending edge it
+ * broadcasts @c TIKU_EVENT_GPIO with the data TIKU_GPIO_IRQ_PACK(port, pin)
+ * and clears the edge in INTR.
  */
 void tiku_rp2350_io_bank0_isr(void) {
     /* Walk the four INTS words. Each set 4-bit nibble identifies a

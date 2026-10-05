@@ -7,9 +7,8 @@
  *
  * tiku_trng_arch.h - RP2350 true random number generator HAL.
  *
- * One blocking read API over the dedicated TRNG block, backed by a 192-bit cache
- * kept full across calls, so a typical read returns from RAM and only re-arms the
- * hardware when the cache empties.
+ * Blocking reads over the TRNG block.  A 192-bit cache holds one hardware
+ * fill, and a read starts a new fill only when the cache is empty.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,49 +19,41 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/*
- * Return codes for the TRNG driver.
- *
- * TIKU_TRNG_OK            — success.
- * TIKU_TRNG_ERR_INVALID   — NULL pointer or zero-length buffer.
- * TIKU_TRNG_ERR_TIMEOUT   — hardware did not assert VALID within the
- *                           spin budget (~thousands of cycles); the
- *                           output buffer is not modified.
- * TIKU_TRNG_ERR_NOT_READY — tiku_trng_arch_init() was not called.
- */
-#define TIKU_TRNG_OK            0
-#define TIKU_TRNG_ERR_INVALID  -1
-#define TIKU_TRNG_ERR_TIMEOUT  -2
-#define TIKU_TRNG_ERR_NOT_READY -3
+#define TIKU_TRNG_OK            0  /**< Success */
+#define TIKU_TRNG_ERR_INVALID  -1  /**< NULL pointer or zero-length buffer */
+#define TIKU_TRNG_ERR_TIMEOUT  -2  /**< VALID never rose during a refill */
+#define TIKU_TRNG_ERR_NOT_READY -3 /**< A refill read all-zero or all-ones
+                                        words */
 
 /**
- * @brief One-time init: bring the TRNG block out of reset and
- *        configure the entropy source. Idempotent.
+ * @brief Bring the TRNG block out of reset and mark the cache empty.
+ *
+ * A second call returns at once; the read functions call it when needed.
  */
 void tiku_trng_arch_init(void);
 
 /**
  * @brief Block until a 32-bit random word is available; return it.
  *
- * The fast path takes the word from the 6-word software cache the hardware
- * already filled; the slow path arms the hardware and spins on VALID for a few
- * thousand cycles before giving up with TIKU_TRNG_ERR_TIMEOUT.
+ * Takes the next word from the six-word cache.  An empty cache is refilled
+ * first: the driver arms the hardware and polls VALID up to 1,500,000 times.
  *
  * @param out  Where to store the random word. Must not be NULL.
- * @return TIKU_TRNG_OK or a negative error code.
+ * @return TIKU_TRNG_OK, TIKU_TRNG_ERR_INVALID, TIKU_TRNG_ERR_TIMEOUT or
+ *         TIKU_TRNG_ERR_NOT_READY; *out is written only on TIKU_TRNG_OK.
  */
 int tiku_trng_arch_read_u32(uint32_t *out);
 
 /**
  * @brief Fill a byte buffer with `len` random bytes.
  *
- * Internally calls read_u32() repeatedly and copies bytes (any byte
- * order — bytes are uniformly random). Stops early and returns
- * TIKU_TRNG_ERR_TIMEOUT on hardware failure.
+ * Takes words from tiku_trng_arch_read_u32() and stores their bytes, low
+ * byte first.  On an error it stops; the bytes already stored stay.
  *
  * @param buf  Destination buffer.
  * @param len  Number of bytes to write.
- * @return TIKU_TRNG_OK or a negative error code.
+ * @return TIKU_TRNG_OK, TIKU_TRNG_ERR_INVALID for a NULL buffer or zero
+ *         length, or the error from tiku_trng_arch_read_u32().
  */
 int tiku_trng_arch_read_bytes(uint8_t *buf, size_t len);
 

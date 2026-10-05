@@ -21,14 +21,15 @@
 #include "kernel/memory/tiku_nvm_region.h"
 
 /*---------------------------------------------------------------------------*/
-/* Linker-carved region bounds (rp2350.ld)                                   */
+/* LINKER-CARVED REGION BOUNDS                                               */
 /*---------------------------------------------------------------------------*/
 
 extern uint8_t __tiku_nvmfs_base;   /* region base (XIP address)            */
-extern uint8_t __tiku_nvmfs_size;   /* absolute symbol: its ADDRESS == size */
+extern uint8_t __tiku_nvmfs_size;   /* absolute symbol: address is the size */
 
-/* Proven boot-ROM flash sector commit (arch/arm-rp2350/tiku_mem_arch.c):
- * erase + program one 4 KB sector with XIP suspended and interrupts masked. */
+/* Erases and programs one 4 KB sector through the boot ROM with XIP suspended
+ * and interrupts masked; 0 when the sector reads back as written, else -1.
+ * Defined in arch/arm-rp2350/tiku_mem_arch.c. */
 extern int tiku_rp2350_flash_commit_sector_status(uint32_t flash_offset,
                                             const uint8_t *src, size_t len);
 
@@ -41,23 +42,19 @@ static uint8_t nvmr_sector[RP2350_SECTOR] __attribute__((aligned(4)));
 /**
  * @brief Backend write: read-modify-erase-program @p len bytes at @p off.
  *
- * Walks the affected range one 4 KB sector at a time, preserving the bytes
- * that fall outside [off, off+len) within each sector.  Must be called inside
- * the NVM window (tiku_tier_nvm_write() provides it).
+ * Walks the range one 4 KB sector at a time; the bytes of each sector outside
+ * [off, off+len) are written back unchanged.
  *
+ * @note Needs no NVM window: the boot ROM programs the flash.
+ * @note A power cut during a sector erase or program can lose that whole
+ *       sector, including the bytes outside the range.  A TFS slot is one
+ *       4 KB sector on this part, so file data shares no sector with another.
  * @param be   Backend (its base is the XIP region address).
  * @param off  Byte offset into the region.
  * @param src  Source bytes.
  * @param len  Number of bytes to write.
- * @return 0 on success, -1 if the range is out of bounds.
- */
-/*
- * ATOMICITY.  Flash erase is sector-granular, so unlike FRAM and MRAM -- which
- * commit a single aligned word atomically -- the store's gate-last guarantee
- * degrades here to "survives a clean reboot; a power cut DURING a sector erase
- * can lose that sector".  TFS slots are sized to one 4 KB sector on this part
- * so file data keeps its own erase granule.  Full power-cut atomicity would
- * want a log-structured store.
+ * @return 0 on success, -1 if the range is out of bounds or a sector commit
+ *         fails.
  */
 static int region_write(tiku_nvm_backend_t *be, size_t off,
                         const void *src, size_t len)
@@ -100,17 +97,17 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
 }
 
 /*---------------------------------------------------------------------------*/
-/* Region accessor (strong override of the weak NULL default)                */
+/* REGION ACCESSOR                                                           */
 /*---------------------------------------------------------------------------*/
 
 static tiku_nvm_backend_t g_region;
 
 /**
- * @brief Return the carved Flash NVM region backend, or NULL if none.
+ * @brief Return the carved flash NVM region backend, or NULL if none.
  *
- * The size comes from the absolute linker symbol __tiku_nvmfs_size (its
- * address is the byte count), so it cannot be a static initializer -- the
- * struct is populated here on first use.
+ * Overrides the weak NULL-returning default in kernel/memory.  Fills the
+ * backend from the linker symbols on every call; the size is the address of
+ * the absolute symbol __tiku_nvmfs_size, and a size of 0 returns NULL.
  */
 const tiku_nvm_backend_t *tiku_nvm_backend_get(void)
 {

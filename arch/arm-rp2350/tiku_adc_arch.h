@@ -7,9 +7,9 @@
  *
  * tiku_adc_arch.h - RP2350 ADC driver interface.
  *
- * Drives the on-die 12-bit SAR ADC: four external channels on GPIO 26-29 and the
- * internal temperature sensor.  One-shot conversions only -- free-running and DMA
- * paths are unimplemented because nothing needs them.
+ * Drives the on-die 12-bit SAR ADC: four external channels on GPIO 26-29 and
+ * the internal temperature sensor.  One-shot conversions only; the driver has
+ * no free-running or DMA mode.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,46 +22,47 @@
 /**
  * @brief Initialize the ADC peripheral.
  *
- * Powers on the ADC block, enables its clock and applies the caller-supplied
- * configuration.  Must be called once before any tiku_adc_arch_channel_init()
- * or tiku_adc_arch_read().
+ * Releases the ADC from reset, runs clk_adc from the 12 MHz XOSC and records
+ * the requested resolution.  The reference in @p config is ignored.
  *
+ * @note Call it before tiku_adc_arch_read(), which fails until it succeeds.
  * @param config  Pointer to ADC configuration struct (must not be NULL).
- * @return 0 on success, negative error code on failure.
+ * @return TIKU_ADC_OK, TIKU_ADC_ERR_PARAM for a NULL config or an unknown
+ *         resolution, or TIKU_ADC_ERR_TIMEOUT if the ADC never reports READY.
  */
 int  tiku_adc_arch_init(const tiku_adc_config_t *config);
 
 /**
- * @brief Shut down the ADC peripheral and release its clock.
+ * @brief Disable the ADC.
  *
- * Powers off the ADC block. After this call all channel reads will
- * fail until tiku_adc_arch_init() is called again.
+ * Clears CS, stopping conversions and powering down the temperature sensor.
+ * tiku_adc_arch_read() returns TIKU_ADC_ERR_PARAM until the next
+ * tiku_adc_arch_init().  clk_adc stays on.
  */
 void tiku_adc_arch_close(void);
 
 /**
  * @brief Prepare a single ADC channel for sampling.
  *
- * Configures the GPIO pad (GP26..GP29) or the internal mux entry for the
- * temperature sensor.  Must follow tiku_adc_arch_init() and precede
- * tiku_adc_arch_read() on the same channel.
+ * Sets the pad of GP26..GP29 to a high-impedance analog input; the
+ * temperature channel needs no setup.
  *
- * @param channel  ADC channel index (0..3 = GP26..GP29, 4 = temp).
- * @return 0 on success, negative error code on invalid channel.
+ * @note Call it for a pin channel before reading that channel.
+ * @param channel  0..3 = GP26..GP29, 30 = temperature, 31 = battery (GP29).
+ * @return TIKU_ADC_OK, or TIKU_ADC_ERR_PARAM for any other channel.
  */
 int  tiku_adc_arch_channel_init(uint8_t channel);
 
 /**
  * @brief Perform a one-shot ADC conversion on the given channel.
  *
- * Selects the channel, starts the SAR conversion, polls the
- * READY bit, and writes the 12-bit result (0..4095) into *value.
- * Conversion takes approximately 2 µs at 48 MHz ADC clock.
+ * Selects the channel, starts the SAR conversion and polls READY, then
+ * stores the 12-bit result shifted down to the configured resolution.
  *
- * @param channel  ADC channel index (0..4); must be initialised.
- * @param value    Output: raw 12-bit sample (caller-provided).
- * @return 0 on success, negative error code on invalid channel or
- *         timeout.
+ * @param channel  0..3 = GP26..GP29, 30 = temperature, 31 = battery (GP29).
+ * @param value    Output: the sample (caller-provided).
+ * @return TIKU_ADC_OK, TIKU_ADC_ERR_PARAM before init or for a bad channel or
+ *         NULL @p value, or TIKU_ADC_ERR_TIMEOUT on a timeout or ADC error.
  */
 int  tiku_adc_arch_read(uint8_t channel, uint16_t *value);
 

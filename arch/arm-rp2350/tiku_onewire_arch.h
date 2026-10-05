@@ -7,9 +7,9 @@
  *
  * tiku_onewire_arch.h - RP2350 1-Wire driver interface.
  *
- * The part has no 1-Wire peripheral, so a single board-selected GPIO is toggled
- * with tightly timed delays covering the slot timings DS18B20-family parts need.
- * The loop spins on the 1 us TIMER0 tick, so the rate holds at any clk_sys.
+ * The part has no 1-Wire peripheral: the driver toggles one board-selected
+ * GPIO with the slot timings DS18B20-family parts need, timed on the 1 us
+ * TIMER0 counter so they hold at any clk_sys.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,37 +20,39 @@
 #include <interfaces/onewire/tiku_onewire.h>
 
 /**
- * @brief Configure the 1-Wire GPIO pin and enable the bit-bang driver.
+ * @brief Configure the 1-Wire GPIO pin and release the bus.
  *
- * Sets TIKU_BOARD_OW_PIN as an open-drain output (pull-up via the pad
- * register) and arms the TIMER0 1 us tick used for slot timing.
+ * Puts TIKU_BOARD_OW_PIN on SIO with its input buffer on and no internal
+ * pulls; an external pull-up holds the bus high.
  *
- * @return 0 on success, negative code if the pin or timer is unavailable.
+ * @return TIKU_OW_OK.
  */
 int     tiku_onewire_arch_init(void);
 
 /**
- * @brief Release the 1-Wire GPIO pin (return to high-impedance input).
+ * @brief Release the 1-Wire pin and disable its pad's output and input.
  */
 void    tiku_onewire_arch_close(void);
 
 /**
  * @brief Issue a 1-Wire reset pulse and detect device presence.
  *
- * Pulls the bus low for 480 us, releases it, then samples the presence
- * pulse within the 60–240 us window required by the 1-Wire spec.
+ * Drives the bus low for 480 us, releases it and samples it 70 us later for
+ * a device's presence pulse.
  *
- * @return 1 if at least one device responded, 0 if the bus stayed high
- *         (no devices), or a negative code on timing failure.
+ * @note Masks IRQs for about 960 us and enables them on return.
+ * @return TIKU_OW_OK if a device answered, TIKU_OW_ERR_NO_DEVICE if the bus
+ *         stayed high.
  */
 int     tiku_onewire_arch_reset(void);
 
 /**
  * @brief Write a single bit onto the 1-Wire bus.
  *
- * Drives a write-1 or write-0 slot according to the 1-Wire spec.
- * Timing is enforced by 1 us TIMER0 busy-waits.
+ * Drives a 70 us write-1 or write-0 slot, timed by busy-waits on the 1 us
+ * TIMER0 counter.
  *
+ * @note Masks IRQs for the slot and enables them on return.
  * @param bit  Value to write (0 or non-zero).
  */
 void    tiku_onewire_arch_write_bit(uint8_t bit);
@@ -58,9 +60,10 @@ void    tiku_onewire_arch_write_bit(uint8_t bit);
 /**
  * @brief Sample a single bit from the 1-Wire bus.
  *
- * Drives the bus low for the required initiation window, releases it,
- * then samples within the 15 us read window.
+ * Drives the bus low for 6 us, releases it and samples it 15 us after the
+ * slot starts.
  *
+ * @note Masks IRQs for the 70 us slot and enables them on return.
  * @return Sampled bit value (0 or 1).
  */
 uint8_t tiku_onewire_arch_read_bit(void);

@@ -7,9 +7,9 @@
  *
  * tiku_board_rpi_pico2.h - Raspberry Pi Pico 2 board definitions.
  *
- * The plain Pico 2, electrically simpler than the W: no wireless module and the
- * user LED is a real GPIO on GP25.  Every non-LED, non-wireless pin choice matches
- * the Pico 2 W, so code that avoids the CYW43 runs unchanged on both.
+ * The Pico 2 has no wireless module, and its user LED is wired to GP25.  The
+ * UART, I2C, SPI, 1-Wire and bit-bang pins match the Pico 2 W, so code that
+ * does not use the CYW43 runs on both boards.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -34,33 +34,33 @@
 /**
  * @brief Number of on-board user LEDs.
  *
- * One user LED, on GP25. The Pico 2 W has to fake LED1 onto a different
- * pin because GP25 there is WL_CS — but on plain Pico 2 the LED is wired
- * straight to GP25 and can be used directly.
+ * One user LED, wired to GP25.
  */
 #define TIKU_BOARD_LED_COUNT        1
 
 /*---------------------------------------------------------------------------*/
-/* GPIO LED helpers                                                          */
+/* GPIO LED HELPERS                                                          */
 /*---------------------------------------------------------------------------*/
 
+/* Defined in arch/arm-rp2350/tiku_gpio_arch.c and declared here, so the LED
+ * macros below need not include the GPIO header. */
+
 /**
- * @brief Forward declarations for GPIO arch helpers.
+ * @brief Configure an absolute GPIO pin as a SIO push-pull output, driven low.
  *
- * Defined in arch/arm-rp2350/tiku_gpio_arch.c. Declared here so the
- * LED macros below do not pull the full GPIO header into the include chain.
+ * Pins above GP29 are ignored.
+ *
+ * @param pin  Absolute GP pin number (0..29).
  */
 void tiku_rp2350_gpio_init_output(uint8_t pin);
 
 /**
  * @brief Drive an absolute GPIO pin to a logic level.
  *
- * Writes the SIO GPIO_OUT_SET / GPIO_OUT_CLR registers, so the update is atomic
- * and leaves every other pin alone.  The pin must already be an output, and
- * pins above GP29 are silently ignored.
+ * Writes SIO GPIO_OUT_SET or GPIO_OUT_CLR, an atomic update that leaves every
+ * other pin alone.  The pin must already be an output; pins above GP29 are
+ * ignored.
  *
- * @note SIO ignores the generic +0x2000 / +0x3000 atomic aliases; its own
- *       adjacent SET/CLR/XOR registers are the only correct way to do this.
  * @param pin    Absolute GP pin number (0..29).
  * @param value  0 drives the pin low; non-zero drives it high.
  */
@@ -70,7 +70,7 @@ void tiku_rp2350_gpio_set(uint8_t pin, uint8_t value);
  * @brief Toggle an absolute GPIO output pin.
  *
  * Writes the SIO GPIO_OUT_XOR register: one atomic flip that does not
- * disturb other pins. Pins above GP29 are silently ignored.
+ * disturb other pins.  Pins above GP29 are ignored.
  *
  * @param pin  Absolute GP pin number (0..29).
  */
@@ -89,30 +89,29 @@ void tiku_rp2350_gpio_toggle(uint8_t pin);
 #define TIKU_BOARD_LED1_TOGGLE()    tiku_rp2350_gpio_toggle(TIKU_BOARD_LED1_PIN)
 
 /*---------------------------------------------------------------------------*/
-/* Backchannel UART - TX=GP0, RX=GP1 (UART0)                                 */
+/* BACKCHANNEL UART: TX=GP0, RX=GP1 (UART0)                                  */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief UART0 backchannel pin assignments.
  *
- * Function-2 on GP0 (TX) and GP1 (RX). The IO_BANK0 / PADS_BANK0 mux
- * setup is done in tiku_uart_arch.c; these macros exist for symmetry
- * with the MSP430 board headers.
+ * Function 2 on GP0 (TX) and GP1 (RX).  tiku_uart_arch.c sets the IO_BANK0
+ * and PADS_BANK0 mux for these pins itself and does not read these macros,
+ * so TIKU_BOARD_UART_PINS_INIT() is empty.
  */
 #define TIKU_BOARD_UART_TX_PIN      0U
 #define TIKU_BOARD_UART_RX_PIN      1U
 #define TIKU_BOARD_UART_PINS_INIT() do { } while (0)
 
 /*---------------------------------------------------------------------------*/
-/* Buttons                                                                   */
+/* BUTTONS                                                                   */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Button macros (no-ops — BOOTSEL is on the QSPI bank).
+ * @brief Button macros: INIT does nothing and PRESSED is always 0.
  *
- * BOOTSEL is on the QSPI bank, not bank 0. Using it as a runtime
- * input requires temporarily disabling XIP and is not safe to expose
- * as a generic GPIO. Both button macros are no-ops.
+ * The only button is BOOTSEL, which sits on the QSPI bank, not bank 0.
+ * Reading it needs XIP disabled for the duration of the read.
  */
 #define TIKU_BOARD_BTN1_INIT()      do { } while (0)
 #define TIKU_BOARD_BTN1_PRESSED()   (0)
@@ -120,15 +119,15 @@ void tiku_rp2350_gpio_toggle(uint8_t pin);
 #define TIKU_BOARD_BTN2_PRESSED()   (0)
 
 /*---------------------------------------------------------------------------*/
-/* Bit-bang pin (tiku_bitbang demos / PIO backend / backscatter dev)         */
+/* BIT-BANG AND BACKSCATTER PIN                                              */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Bit-bang / backscatter output pin assignment.
  *
- * GP14 defaults are shared with the Pico 2 W port, with no peripheral conflict
- * on either board.  RP2350 has a single GPIO bank, so port is 0 by convention;
- * override at compile time via -DTIKU_BOARD_BSCAT_PIN=<n>.
+ * GP14 by default, clear of the UART, I2C, SPI, LED and 1-Wire pins.  The
+ * RP2350 has one GPIO bank, so the port is 0.  Override the pin with
+ * -DTIKU_BOARD_BSCAT_PIN=<n>.
  */
 #ifndef TIKU_BOARD_BSCAT_PORT
 #define TIKU_BOARD_BSCAT_PORT       0U
@@ -138,26 +137,25 @@ void tiku_rp2350_gpio_toggle(uint8_t pin);
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* Bus-availability gates                                                    */
+/* BUS AVAILABILITY                                                          */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Bus and peripheral availability flags.
  *
- * Platform-independent drivers self-gate to empty translation units when these
- * macros are absent, so declaring them here pulls in the RP2350 arch
- * implementations.  I2C_BRW_100K is symbolic; speed is set in tiku_i2c_arch.c.
+ * The platform-independent ADC, I2C and 1-Wire layers compile to empty
+ * translation units unless these are defined.  The value of I2C_BRW_100K is
+ * unused here; tiku_i2c_arch.c sets the bus speed.
  */
 #define TIKU_BOARD_ADC_AVAILABLE    1
-#define TIKU_BOARD_I2C_BRW_100K     1   /* symbolic */
+#define TIKU_BOARD_I2C_BRW_100K     1   /* presence flag; value unused */
 #define TIKU_BOARD_OW_AVAILABLE     1
 
 /**
  * @brief 1-Wire data pin assignment.
  *
- * GP15 is free here (no peripheral default, no CYW43 reservation
- * since WL_CS is absent on the plain Pico 2). An external 4.7 kohm
- * pull-up to 3V3 is required on the data line.
+ * GP15 has no other use on this board.  The data line needs an external
+ * 4.7 kohm pull-up to 3V3.
  */
 #define TIKU_BOARD_OW_PIN           15U
 
@@ -181,9 +179,7 @@ void tiku_rp2350_gpio_toggle(uint8_t pin);
 #define TIKU_BOARD_SPI0_SCK_PIN     18U
 #define TIKU_BOARD_SPI0_MOSI_PIN    19U
 
-/* No CYW43 pinout on plain Pico 2 — those macros (CYW43_WL_REG_ON
- * etc.) are deliberately absent here. The driver's Makefile gate
- * (TIKU_DRV_WIFI_CYW43_ENABLE requires BOARD=pico2w) ensures the
- * driver isn't compiled into a Pico 2 build. */
+/* This board has no CYW43 module and defines no TIKU_BOARD_CYW43_* pins.  The
+ * Makefile refuses TIKU_DRV_WIFI_CYW43_ENABLE=1 unless BOARD=pico2w. */
 
 #endif /* TIKU_BOARD_RPI_PICO2_H_ */

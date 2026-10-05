@@ -7,9 +7,9 @@
  *
  * tiku_mpu_arch.h - RP2350 MPU driver interface.
  *
- * Programs the ARMv8-M MPU with six non-overlapping regions implementing W^X plus
- * a stack guard.  Only SEG3's write bit is wired to hardware; see the note in
- * tiku_mpu_arch.c at tiku_mpu_arch_set_seg_perm().
+ * Programs six non-overlapping ARMv8-M MPU regions: W^X over flash and SRAM,
+ * .uninit read-only outside an NVM window, and a stack guard.  Of the
+ * MSP430-style segment permissions only SEG3's write bit reaches the MPU.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,36 +21,41 @@
 #include "tiku.h"
 
 /**
- * @brief Default software-SAM value used when no HIFRAM tier exists.
+ * @brief Default SAM: read and execute on SEG1-SEG3, write on none.
  *
- * On RP2350 there is no HIFRAM concept.  The constant mirrors the
- * "no HIFRAM" MSP430 SAM value so cross-platform tests that compare
- * against TIKU_MPU_DEFAULT_SAM pass unchanged.
+ * This port has no HIFRAM tier, so no segment stays writable.  With bit 9
+ * (SEG3 write) clear, the .uninit region is read-only.
  */
 #define TIKU_MPU_DEFAULT_SAM    0x0555U
 
 /**
- * @brief Read the kernel's software segment-access-map (SAM) register.
+ * @brief Read the software segment-access-map (SAM) register.
  *
- * The SAM is maintained in software to track logical permission state across
- * SEG1/SEG2/SEG3 for parity with the MSP430 port.  On RP2350 only SEG3, the
- * .uninit NVM stand-in, flows through to a real hardware permission change.
+ * The SAM holds 3-bit R/W/X permissions for SEG1-SEG3 at bits 0, 4 and 8, in
+ * the MSP430 layout.  Of these bits only SEG3's write bit reaches the MPU.
  *
  * @return Current SAM value.
  */
 uint16_t tiku_mpu_arch_get_sam(void);
 
 /**
- * @brief Write the kernel's software SAM register.
+ * @brief Write the software SAM register.
+ *
+ * Also reprograms the .uninit MPU region: read-write when bit 9 (SEG3 write)
+ * is set, read-only otherwise.
  *
  * @param sam  New SAM value.
  */
 void     tiku_mpu_arch_set_sam(uint16_t sam);
 
 /**
- * @brief Read the ARMv8-M MPU_CTRL register.
+ * @brief Read the software MPUCTL0 mirror.
  *
- * @return Raw MPU_CTRL value (ENABLE, HFNMIENA, PRIVDEFENA bits).
+ * Holds 0xA501 (password and enable) after a SAM write; bit 4 (MPUSEGIE) is
+ * set by tiku_mpu_arch_enable_violation_nmi() until the next SAM write.  The
+ * hardware MPU_CTRL register is not read.
+ *
+ * @return MPUCTL0 mirror value.
  */
 uint16_t tiku_mpu_arch_get_ctl(void);
 
@@ -65,28 +70,29 @@ void     tiku_mpu_arch_disable_irq(void);
 void     tiku_mpu_arch_enable_irq(void);
 
 /**
- * @brief Program all six ARMv8-M MPU regions from linker-symbol bounds.
+ * @brief Program the six MPU regions from linker symbols and enable the MPU.
  *
- * Configures W^X protection across flash, SRAM, and the .uninit NVM
- * region, plus a 32-byte stack-overflow guard at the bottom of the
- * descending stack.  Called once from tiku_mpu_arch_init_segments().
+ * Flash is read-execute, SRAM read-write and never executable, .uninit
+ * read-only, and a 4 KB read-only guard sits below the top 32 KB of SRAM.
+ * Also enables MemManage at priority 0 and, on a cold boot, clears .mpu_diag.
+ *
+ * @note Called by tiku_mpu_init(), before
+ *       tiku_mpu_arch_set_default_protection().
  */
 void     tiku_mpu_arch_init_segments(void);
 
 /**
- * @brief Apply the default NVM write-protection policy.
+ * @brief Apply TIKU_MPU_DEFAULT_SAM, leaving the .uninit region read-only.
  *
- * Sets SEG3 (.uninit) to read-only and enables the MemManage handler.
- * Called at the end of tiku_mpu_init() after segment init.
+ * @note Called by tiku_mpu_init() after tiku_mpu_arch_init_segments().
  */
 void     tiku_mpu_arch_set_default_protection(void);
 
 /**
- * @brief Set logical permissions on a kernel segment (SEG1/SEG2/SEG3).
+ * @brief Set the logical permissions of one segment (SEG1/SEG2/SEG3).
  *
- * Updates the software SAM and, for SEG3 only, adjusts the hardware MPU region.
- * SEG1 (flash) and SEG2 (SRAM) hardware permissions are pinned -- making flash
- * writable or SRAM executable would brick the kernel on Cortex-M33.
+ * Updates the segment's bits in the SAM.  Only SEG3's write bit changes the
+ * MPU: flash stays read-execute, and SRAM read-write and never executable.
  *
  * @param seg   Segment index (0 = SEG1, 1 = SEG2, 2 = SEG3).
  * @param perm  Permission bitmask (TIKU_MPU_READ / WRITE / EXEC).
@@ -94,48 +100,48 @@ void     tiku_mpu_arch_set_default_protection(void);
 void     tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm);
 
 /**
- * @brief Unlock the NVM (.uninit) region for writing.
+ * @brief Open an NVM write window.
  *
- * Adds write permission to the SEG3 MPU region and saves the prior
- * MPU_CTRL state so it can be restored by tiku_mpu_arch_lock_nvm().
+ * Sets the write bits of all three segments in the SAM and makes the .uninit
+ * MPU region read-write.
  *
- * @return Saved MPU state to pass to tiku_mpu_arch_lock_nvm().
+ * @return The previous SAM, to pass to tiku_mpu_arch_lock_nvm().
  */
 uint16_t tiku_mpu_arch_unlock_nvm(void);
 
 /**
- * @brief Restore MPU state and flush NVM after a write window.
+ * @brief Close an NVM write window.
  *
- * Re-applies write-protection to SEG3 using the saved state, then
- * calls tiku_mem_arch_nvm_flush() to commit the SRAM .uninit image to
- * the flash mirror sector.
+ * Restores the SAM saved by tiku_mpu_arch_unlock_nvm(); the .uninit region
+ * goes back to read-only unless that SAM had SEG3's write bit set.
  *
+ * @note Commits nothing to flash: tiku_mpu_lock_nvm() flushes the .uninit
+ *       image with tiku_mem_arch_nvm_flush_status() before calling this.
  * @param saved_state  Value returned by tiku_mpu_arch_unlock_nvm().
  */
 void     tiku_mpu_arch_lock_nvm(uint16_t saved_state);
 
 /**
- * @brief Read the persistent MemManage violation flags.
+ * @brief Read the MemManage violation flags.
  *
- * The flags are stored in the .mpu_diag NOLOAD section and survive
- * the AIRCR.SYSRESET triggered on every MemManage fault.  Bit 0
- * indicates a violation was recorded; higher bits are reserved.
+ * The MemManage handler ORs the MMFSR cause bits into these flags before it
+ * resets the chip; the flags survive that reset in the .mpu_diag section.
  *
- * @return Violation flags word.
+ * @return Violation flags word, 0 when none are recorded.
  */
 uint16_t tiku_mpu_arch_get_violation_flags(void);
 
 /**
- * @brief Clear the persistent MemManage violation flags.
+ * @brief Clear the MemManage violation flags.
  */
 void     tiku_mpu_arch_clear_violation_flags(void);
 
 /**
  * @brief Enable the MemManage handler in SCB.SHCSR.
  *
- * By default, MemManage faults escalate to HardFault.  Enabling the
- * MemManage handler lets the dedicated handler capture the faulting
- * address and violation count before triggering SYSRESET.
+ * Sets MEMFAULTENA, which tiku_mpu_arch_init_segments() also sets, and bit 4
+ * (MPUSEGIE) of the MPUCTL0 mirror.  Without MEMFAULTENA an MPU fault goes to
+ * HardFault; the MemManage handler records the fault and resets the chip.
  */
 void     tiku_mpu_arch_enable_violation_nmi(void);
 

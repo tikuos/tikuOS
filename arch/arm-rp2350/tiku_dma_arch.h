@@ -7,9 +7,9 @@
  *
  * tiku_dma_arch.h - RP2350 DMA driver interface.
  *
- * Exposes one operation on the 16-channel engine: a CPU-free word-aligned memcpy
- * on channel 0, routed to DMA_IRQ_0.  Multi-channel use would need channel
- * allocation logic that does not exist yet.
+ * Exposes one operation on the 16-channel engine: a CPU-free word-aligned
+ * memcpy on channel 0, routed to DMA_IRQ_0.  The driver uses no other channel
+ * and has no channel allocator.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -28,38 +28,42 @@
  */
 #define TIKU_DMA_OK             0   /**< Transfer accepted or completed */
 #define TIKU_DMA_ERR_BUSY      -1   /**< Channel 0 already in use */
-#define TIKU_DMA_ERR_INVALID   -2   /**< NULL or misaligned pointer, zero count */
-#define TIKU_DMA_ERR_NOT_READY -3   /**< DMA block not yet initialised */
+#define TIKU_DMA_ERR_INVALID   -2   /**< Bad pointer or count, or overlap */
+#define TIKU_DMA_ERR_NOT_READY -3   /**< Not initialised, or nothing to abort */
 
 /**
  * @brief Completion callback type; runs in DMA_IRQ_0 ISR context.
  *
- * The callback must be short and interrupt-safe. It must not block,
- * call tiku_dma_arch_memcpy(), or acquire any non-ISR-safe lock.
+ * The driver is idle when the callback runs, so it may start the next
+ * tiku_dma_arch_memcpy().
+ *
+ * @note It runs in an ISR: it must be short and must not block or take a
+ *       lock that is not ISR-safe.
  */
 typedef void (*tiku_dma_done_cb_t)(void *ctx);
 
 /**
  * @brief One-time initialisation of the DMA peripheral.
  *
- * Takes the DMA block out of reset and enables DMA_IRQ_0 in the NVIC.
- * Idempotent — safe to call more than once.
+ * Takes the DMA block out of reset and enables DMA_IRQ_0 in the NVIC.  A
+ * second call returns at once.
  */
 void tiku_dma_arch_init(void);
 
 /**
  * @brief Start a word-aligned memory-to-memory transfer on channel 0.
  *
- * Source and destination must be 4-byte aligned, and @p word_cnt counts 32-bit
- * words.  Both READ_INCR and WRITE_INCR are set so the channel walks each
- * buffer sequentially.  CPU-free; @p on_done fires from DMA_IRQ_0.
+ * Source and destination must be 4-byte aligned and must not overlap, and
+ * @p word_cnt counts 32-bit words.  The channel increments both addresses;
+ * the CPU is free meanwhile, and @p on_done fires from DMA_IRQ_0.
  *
  * @param dst       Destination buffer (must be 32-bit aligned).
  * @param src       Source buffer (must be 32-bit aligned).
  * @param word_cnt  Number of 32-bit words to copy (1..1 048 576).
  * @param on_done   Completion callback invoked from ISR, or NULL.
  * @param ctx       Opaque pointer forwarded to @p on_done.
- * @return TIKU_DMA_OK on success, or a negative error code.
+ * @return TIKU_DMA_OK, TIKU_DMA_ERR_NOT_READY before init,
+ *         TIKU_DMA_ERR_BUSY during a transfer, or TIKU_DMA_ERR_INVALID.
  */
 int tiku_dma_arch_memcpy(void       *dst,
                           const void *src,
@@ -77,10 +81,12 @@ int tiku_dma_arch_busy(void);
 /**
  * @brief Abort an in-progress channel 0 transfer.
  *
- * Disables DMA_IRQ_0, halts the channel, drains any queued bytes, and
- * clears the busy flag. The completion callback is NOT invoked.
+ * Clears the channel's EN bit, acknowledges its pending interrupt and clears
+ * the busy flag and callback.  The callback is not called, and the
+ * destination holds a partial copy.
  *
- * @return TIKU_DMA_OK on success.
+ * @return TIKU_DMA_OK, or TIKU_DMA_ERR_NOT_READY when no transfer is in
+ *         flight.
  */
 int tiku_dma_arch_abort(void);
 

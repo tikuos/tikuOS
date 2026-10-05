@@ -20,25 +20,28 @@
  *   SRAM         : 520 KB unified at 0x20000000
  *
  * Layout in flash:
- *   0x10000000 .boot2          (first 256 bytes; loaded by ROM into SRAM
- *                              and executed before XIP is alive)
- *   0x10000100 .image_def       (RP2350 IMAGE_DEF block — 16 bytes — read
- *                              by the boot ROM to verify image and pick
- *                              entry point)
- *   0x10000110 .vectors         (Cortex-M33 vector table; reset handler
- *                              is the first non-SP entry)
+ *   0x10000000 .boot2           (256 bytes: a placeholder word and padding;
+ *                               the boot ROM sets up XIP itself)
+ *   0x10000100 .image_def       (RP2350 IMAGE_DEF block, 28 bytes, which
+ *                               the boot ROM reads to identify the image
+ *                               and find the vector table)
+ *   0x10000200 .vectors         (Cortex-M33 vector table, 512-byte aligned;
+ *                               the reset handler is the first non-SP entry)
  *   0x10000xxx .text/.rodata    (rest of the image)
  *
  * Layout in SRAM:
  *   .data       (initialised RAM, copied at boot from .data LMA in flash)
  *   .bss        (zeroed at boot)
- *   .uninit     (skipped by zero-init — used for boot-counter persistence)
- *   __stack     (top of SRAM grows down toward .bss)
+ *   .mpu_diag   (MPU fault record, not zeroed)
+ *   .uninit     (durable state, not zeroed, mirrored to flash; .retained
+ *                follows inside the same output section)
+ *   SRAM tier   (the rest, up to the stack reserve)
+ *   __stack     (top of SRAM; the stack grows down)
  *
  * Symbols exposed to the kernel:
  *   __stack         — top of stack (initial SP value, also used by
  *                     /sys/mem/free for stack-headroom calc)
- *   _end            — end of .bss (start of free SRAM heap)
+ *   _end            — end of the static allocations (after .uninit)
  *   __sram_start    — base of SRAM region
  *   __sram_end      — top of SRAM region
  *   __flash_start   — base of flash region
@@ -65,17 +68,15 @@ __sram_end    = ORIGIN(SRAM) + LENGTH(SRAM);
 __flash_start = ORIGIN(FLASH);
 __flash_end   = ORIGIN(FLASH) + LENGTH(FLASH);
 
-/* NVM backup sector: the last 4 KB of QSPI flash is reserved for
- * tiku_mem_arch_nvm_write() to mirror the SRAM .uninit region.  This
- * gives "persistent" state real power-cycle durability instead of
- * relying on .uninit's warm-reset-only survival.  The boot-ROM flash
- * helpers use the flash OFFSET (from start of QSPI), not the absolute
- * XIP address; __tiku_nvm_flash_offset is that offset for convenience.
+/* NVM backup sector: the top __tiku_layout_persist_size bytes of QSPI flash
+ * (one 4 KB erase sector) hold the mirror of the SRAM .uninit region, which
+ * tiku_mem_arch_nvm_flush_status() writes and tiku_mem_arch_init() restores,
+ * so durable state survives a power cycle.  The boot-ROM flash helpers take
+ * an offset from the start of flash, not an XIP address, and
+ * __tiku_nvm_flash_offset is that offset.
  *
- * Size is one QSPI erase granule (4 KB) today; the arch driver commits
- * the mirror sector-by-sector, so growing it really is the one-number
- * change: raise __tiku_layout_persist_size below (in whole 4 KB
- * sectors) and flush, restore and the .uninit budget ASSERT follow. */
+ * The size is a whole number of 4 KB sectors; the flush, the restore and the
+ * .uninit ASSERT below all follow __tiku_layout_persist_size. */
 /* Canonical NVM layout: inputs + shared derivation (arch/common). */
 __tiku_layout_top          = ORIGIN(FLASH) + LENGTH(FLASH);
 __tiku_layout_code_cap     = ORIGIN(FLASH) + 0x60000;      /* 384 KB code */
@@ -87,22 +88,20 @@ __tiku_nvm_flash_start  = __tiku_layout_persist_start;
 __tiku_nvm_flash_end    = __tiku_layout_top;
 __tiku_nvm_flash_offset = __tiku_layout_persist_start - ORIGIN(FLASH);
 
-/* Carved NVM region (substrate B): a ~3.7 MB slice of QSPI flash just below the
- * 4 KB .uninit backup sector, owned by the /data file store + NVM tier via the
- * Flash region backend (arch/arm-rp2350/tiku_nvm_region_rp2350.c).  Sub-layout
- * (front->top): NVM tier extent (32 KB, durable TIKU_MEM_NVM) | /data FS
- * extent (all the rest, TIKU_NVMFS_FS_BYTES -- durable named data lives in it
- * as files, not in a carved tail).  4 KB-sector aligned (the erase granule).
- * Code grows up from ORIGIN(FLASH) into a 384 KB window -- the fleet-wide
- * contract (P4); an ASSERT in SECTIONS guards the flash image against
- * overrunning it.  The CYW43439 firmware blob does not fit that window and is
- * not supposed to: it is data, bound for /data.
- *   __tiku_nvmfs_base   : XIP address (read in place by pointer); == 0x10100000
- *   __tiku_nvmfs_offset : byte offset from flash start (for the boot-ROM)
- *   __tiku_nvmfs_size   : ABSOLUTE symbol -- its ADDRESS is the size */
-/* Module slot: TOP 32 KB (8 erase sectors) of the code window, installed
- * sector-by-sector via the boot-ROM path (header page programmed last).
- * Symbols come from the shared derivation above. */
+/* Carved NVM region: the QSPI flash between the 384 KB code window and the
+ * backup sector, owned by the NVM tier and the /data file store through the
+ * flash region backend (arch/arm-rp2350/tiku_nvm_region_rp2350.c).  From the
+ * bottom: the NVM tier (32 KB by default, set by the nvm.tier layout knob),
+ * then the /data store (TIKU_NVMFS_FS_BYTES), in whole 4 KB erase sectors.
+ * Code grows up from ORIGIN(FLASH) inside the 384 KB window, and an ASSERT in
+ * SECTIONS stops the flash image overrunning it.  A CYW43 build links the
+ * CYW43439 firmware into .rodata, inside that window.
+ *   __tiku_nvmfs_base   : XIP address (read in place by pointer), 0x10060000
+ *   __tiku_nvmfs_offset : byte offset from flash start (for the boot ROM)
+ *   __tiku_nvmfs_size   : absolute symbol -- its address is the size */
+/* Module slot: the top 32 KB (8 erase sectors) of the code window, installed
+ * sector by sector through the boot ROM with its header page programmed
+ * last.  Its symbols come from the shared derivation above. */
 
 /* __tiku_nvmfs_base/size come from the shared derivation; only the
  * boot-ROM byte offset is platform-local. */
@@ -127,11 +126,10 @@ SECTIONS
         KEEP(*(.image_def))
     } > FLASH
 
-    /* The Cortex-M33 VTOR alignment requirement is the smallest
-     * power-of-2 that's >= total-table-size-in-bytes, with a 128-byte
-     * minimum. The table has 80 entries × 4 = 320 bytes -> 512-byte
-     * alignment required. A misaligned VTOR silently truncates the
-     * low bits, sending exception handlers to garbage. */
+    /* VTOR needs the table aligned to the smallest power of two at or
+     * above its size, 128 bytes at least.  The table has 80 entries x 4 =
+     * 320 bytes, so 512.  VTOR drops the low address bits, so a misaligned
+     * table sends exceptions through the wrong vectors. */
     .vectors : ALIGN(512)
     {
         __vectors_start = .;
@@ -148,9 +146,9 @@ SECTIONS
         KEEP(*(.fini))
     } > FLASH
 
-    /* End of .text. tikuOS's `free`/ /sys/mem/free use _etext to size the
-     * FRAM-resident (here flash-resident) code region. Standard newlib name;
-     * `etext` aliased for code that uses the historic spelling. */
+    /* End of .text.  The `free` command and /sys/mem read _etext to size
+     * the code in flash.  `etext` is the same address under the
+     * traditional Unix name. */
     _etext = .;
     etext  = .;
 
@@ -166,8 +164,8 @@ SECTIONS
         *(.gnu.linkonce.r.*)
     } > FLASH
 
-    /* C++/static-ctor tables (not used by tikuOS but linker may emit
-     * tiny stubs from libc that are never linked). */
+    /* ARM exception-unwind tables.  tikuOS uses no C++ exceptions; library
+     * objects can still contribute small entries. */
     .ARM.extab : { *(.ARM.extab*) } > FLASH
     .ARM.exidx : { __exidx_start = .; *(.ARM.exidx*) __exidx_end = .; } > FLASH
 
@@ -191,19 +189,12 @@ SECTIONS
         __bss_end = .;
     } > SRAM
 
-    /* MPU diagnostic state — lives just before .uninit so it
-     * survives warm reset (NOLOAD) but sits OUTSIDE the MPU-protected
-     * range. The MemManage handler needs to write to its own
-     * persistent state across the reset it triggers; if that state
-     * lived in .uninit it would itself fault.
-     *
-     * IMPORTANT: pad to a 32-byte boundary at the end so the next
-     * section (.uninit) starts naturally 32-byte aligned. ARMv8-M MPU
-     * regions snap to 32-byte boundaries; if .uninit started on a
-     * non-32-aligned address, mpu_rbar_uninit() would round the BASE
-     * down and inadvertently include the last bytes of .mpu_diag in
-     * the protected region — which would fault the very write the
-     * handler tries to make to record the violation. */
+    /* MPU fault record: NOLOAD, so it survives a warm reset, and outside the
+     * MPU-protected .uninit range, because the MemManage handler writes it
+     * while .uninit is read-only.  It ends on a 32-byte boundary: MPU
+     * regions start on 32-byte boundaries, and an unaligned .uninit would
+     * make mpu_rbar_uninit() round its base down over the end of .mpu_diag,
+     * where the handler's write would then fault. */
     .mpu_diag (NOLOAD) : ALIGN(32)
     {
         __mpu_diag_start = .;
@@ -212,12 +203,10 @@ SECTIONS
         __mpu_diag_end = .;
     } > SRAM
 
-    /* "Persistent across reboot but skipped by zero-init" region.
-     * The kernel uses this for /sys/boot/count etc. on platforms that
-     * have FRAM. On RP2350 the contents survive only warm resets; a
-     * power cycle reseeds them as zero. The MPU protects this exact
-     * range — see tiku_mpu_arch.c. ALIGN(32) so the MPU region BASE
-     * snaps cleanly without rounding into .mpu_diag. */
+    /* Durable state, not zeroed at boot.  [__uninit_start, __uninit_end) is
+     * mirrored to the flash backup sector and restored from it at boot, and
+     * the MPU keeps it read-only outside an unlock window (tiku_mpu_arch.c).
+     * ALIGN(32) puts the MPU region base exactly on __uninit_start. */
     .uninit (NOLOAD) : ALIGN(32)
     {
         __uninit_start = .;
@@ -225,31 +214,22 @@ SECTIONS
          * the one offset every image agrees on; the rest follow link order. */
         KEEP(*(.persistent.layout))
         *(.uninit*)
-        /* Durable cells (boot counter, aliases, persist cells) -- backed up to
-         * the 4 KB flash sector and MPU-protected. */
-        /* DURABLE grade: exact-match `.persistent` only, so the RETAINED
-         * grade below (`.retained`) cannot be swallowed by a
-         * wildcard into the mirrored window.  (The old
-         * EXCLUDE_FILE(*tiku_kits_net_*.o) object-name routing is
-         * retired: the net kits' transient buffers are now placed
-         * explicitly at their declarations -- MSP430 FRAM spill or
-         * plain .bss -- so no net object emits .persistent here.) */
+        /* DURABLE grade: input sections named exactly `.persistent` (the
+         * boot counter, aliases, persist cells), mirrored to the flash
+         * sector and MPU-protected. */
         *(.persistent)
         . = ALIGN(32);
         __uninit_end = .;
-        /* RETAINED grade: NOLOAD SRAM after
-         * __uninit_end — survives warm resets, but sits outside the
-         * backed-up + MPU-protected window.  Everything here chose the
-         * grade on purpose at its declaration. */
+        /* RETAINED grade: NOLOAD SRAM after __uninit_end.  It survives a
+         * warm reset but is neither mirrored to flash nor MPU-protected. */
         *(.retained*)
     } > SRAM
 
-    /* End of static allocations (heap-style growth would start here).
-     * Provide a few aliases for whichever name the linked code uses:
-     *   _end          — used by tikuOS / tiku_vfs_tree.c
-     *   end           — used by newlib's libnosys _sbrk()
-     *   __end__       — used by some libgloss variants
-     *   __datastart   — used by tiku_shell_cmd_free.c
+    /* End of the static allocations, under each name linked code uses:
+     *   _end          — /sys/mem and the `free` command
+     *   end           — newlib's libnosys _sbrk()
+     *   __end__       — some libgloss variants
+     * __datastart is the start of .data, for /sys/mem and `free`.
      */
     _end = .;
     end = .;
@@ -257,52 +237,44 @@ SECTIONS
     __datastart = __data_start;
 
     /*
-     * SRAM TIER -- what .bss left over, less a small reserve.
+     * SRAM tier: the SRAM between the static allocations and the stack
+     * guard, less a reserve.  The linker places every static first, the
+     * cert-TLS and CYW43 buffers among them, and the tier takes the rest.
      *
-     * Derived rather than compiled in.  A compiled-in size has to be chosen
-     * per build configuration by hand-computing what the cert-TLS and cyw43
-     * statics take; those are statics, so the linker places them first and
-     * the remainder is the answer.
-     *
-     * 0x9000, not 0x8000: the guard here sits below the 32 KB stack reserve
-     * (mpu_stack_guard_base() in tiku_mpu_arch.c subtracts both), unlike the
-     * RA8P1 where it is inside.  Using the wrong one parks the tier on the
-     * guard.  Being outside .bss also keeps the span out of the crt's zero
-     * loop, which the allocator has never needed.
+     * The span ends 0x9000 below __stack: the 32 KB stack reserve plus the
+     * 4 KB guard below it, as mpu_stack_guard_base() in tiku_mpu_arch.c
+     * computes.  A smaller value puts the tier on the guard.  The span lies
+     * outside .bss, so the crt does not zero it.
      */
     /* The reserve is the margin between the tier's top and the guard: a
-     * frame striding past the 4 KB guard lands there before it lands on the
-     * tier.  The fragment applies it, resolves the floor from the make line
-     * and asserts both. */
+     * frame that strides past the 4 KB guard lands there before it reaches
+     * the tier.  The fragment applies it, resolves the floor from the make
+     * line and asserts both. */
     __tiku_tier_span_start      = ALIGN(32);
     __tiku_tier_span_limit      = __stack - 0x9000;
     __tiku_tier_reserve_default = 32K;
     __tiku_tier_floor_default   = 0x40000;
     INCLUDE arch/common/tiku_sram_layout.ld
 
-    /* Sanity check: static data must clear the MPU's stack + guard reservation.
-     * The ARMv8-M MPU (arch/arm-rp2350/tiku_mpu_arch.c) carves the top
-     * MPU_STACK_RESERVED_BYTES (32 KB) for the descending stack plus a
-     * MPU_STACK_GUARD_BYTES (4 KB) overflow guard just below it, and programs
-     * SEG2b (SRAM_MID) as [__uninit_end, guard_base). If _end reached within
-     * 36 KB of __stack, guard_base would fall at/below the top of live data:
-     * the guard would sit INSIDE .persistent/.bss (a write there MemManage-
-     * faults) and SRAM_MID would invert (base > limit). Require the full
-     * budget free so that can never link. 0x9000 = 32768 + 4096 -- keep in
-     * lockstep with the two C constants (and their copies in TikuBench
-     * tests/memory/test_mem_mpu.c). */
+    /* Static data must end below the MPU's stack and guard reservation.
+     * tiku_mpu_arch.c keeps the top MPU_STACK_RESERVED_BYTES (32 KB) for the
+     * stack, puts a MPU_STACK_GUARD_BYTES (4 KB) guard directly below it, and
+     * programs SEG2b (SRAM_MID) as [__uninit_end, guard_base).  With _end
+     * less than 36 KB below __stack, the guard would cover live data, where
+     * every write faults, and SRAM_MID would invert (base > limit).
+     * 0x9000 = 32768 + 4096: change it together with those two C constants
+     * and their copies in TikuBench tests/memory/test_mem_mpu.c. */
     ASSERT((__stack - _end) >= 0x9000,
            "ERROR: SRAM exhausted — need >= 36 KB free for the MPU stack + guard region")
 
-    /* Sanity check: .uninit (the SRAM region that the NVM backup
-     * sector mirrors) must fit in one flash erase granule. Growing
-     * past 4 KB will need multi-sector backup logic in the arch
-     * driver. */
+    /* .uninit, which the backup sector mirrors, must fit the backup area
+     * (__tiku_nvm_flash_size) less the mirror's 16-byte header. */
     ASSERT((__uninit_end - __uninit_start) <= (__tiku_nvm_flash_size - 16),
            "ERROR: .uninit region exceeds the 4 KB flash backup sector minus its 16-byte V2 header")
 
-    /* The layout record opens the durable image in every build, so an image
-     * with other durable variables still reads it where the last one wrote. */
+    /* tiku_layout_pin, when linked, must be the first object in .uninit:
+     * every image reads the layout record at that offset, whatever other
+     * durable variables it holds. */
     ASSERT((DEFINED(tiku_layout_pin) ? tiku_layout_pin : __uninit_start)
            == __uninit_start,
            "ERROR: tiku_layout_pin does not open .uninit (TIKU_DURABLE_FIRST holds one object)")

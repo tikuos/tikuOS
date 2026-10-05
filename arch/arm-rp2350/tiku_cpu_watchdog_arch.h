@@ -19,14 +19,14 @@
 #include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
-/* Mode + clock + interval typedefs (mirror MSP430 shape)                    */
+/* MODE, CLOCK AND INTERVAL TYPES                                            */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Watchdog operating mode.
  *
- * WATCHDOG mode resets the system when the timer reaches zero.
- * INTERVAL mode fires an IRQ instead — not exposed in the first port.
+ * WATCHDOG mode resets the system when the timer reaches zero.  INTERVAL
+ * mode, an IRQ on timeout, is not implemented on this port.
  */
 #ifndef TIKU_WDT_MODE_T_DEFINED
 #define TIKU_WDT_MODE_T_DEFINED
@@ -39,9 +39,9 @@ typedef enum {
 /**
  * @brief Watchdog clock source selector.
  *
- * Mirrors the MSP430 WDTSSEL encoding. On RP2350 the WDOG always
- * runs off the 1 µs tick block regardless of this field; the enum
- * is kept for source-level compatibility with the MSP430 HAL.
+ * The MSP430 WDTSSEL encoding, which the HAL passes through.  The RP2350
+ * watchdog always counts the 1 us tick from the TICKS block, so this port
+ * ignores it.
  */
 #ifndef TIKU_WDT_CLK_T_DEFINED
 #define TIKU_WDT_CLK_T_DEFINED
@@ -54,9 +54,8 @@ typedef enum {
 /**
  * @brief Watchdog interval/divider value.
  *
- * Same shape as MSP430's WDTIS encoding: a divider value. The
- * RP2350 implementation maps it to a microsecond timeout
- * (32768 -> ~1 s).
+ * A divider of a 32768 Hz clock: the timeout is isel * 1 000 000 / 32768 us,
+ * so 32768 gives 1 s.
  */
 #ifndef TIKU_WDT_INTERVAL_T_DEFINED
 #define TIKU_WDT_INTERVAL_T_DEFINED
@@ -70,39 +69,39 @@ typedef uint16_t tiku_wdt_interval_t;
 /**
  * @brief Disable the watchdog timer.
  *
- * Clears the WDOG_CTRL.ENABLE bit. Safe to call from any context;
- * idempotent if the watchdog is already off.
+ * Writes 0 to WD_CTRL, which stops the countdown and clears the pause bits.
+ * Repeated calls have no further effect.
+ *
+ * @note Callable from any context.
  */
 void tiku_cpu_rp2350_watchdog_off_arch(void);
 
 /**
  * @brief Enable and configure the watchdog timer.
  *
- * Loads the microsecond timeout derived from @p isel, enables the WDOG block and
- * performs the first kick.  @p src is accepted for API symmetry with the MSP430
- * HAL but ignored -- the watchdog always uses the 1 us tick source.
+ * Loads the microsecond timeout derived from @p isel, enables the watchdog and
+ * reloads the count.  @p src is ignored: the watchdog always counts the 1 us
+ * tick.
  *
- * @param src   Clock source (ignored on RP2350; present for HAL compat).
+ * @param src   Clock source (ignored on RP2350).
  * @param isel  Interval divider value — maps to microsecond timeout.
  */
 void tiku_cpu_rp2350_watchdog_on_arch(tiku_wdt_clk_t src,
                                       tiku_wdt_interval_t isel);
 
 /**
- * @brief Pause the watchdog counter without disabling it.
+ * @brief Stop the watchdog countdown where it is.
  *
- * Sets WDOG_CTRL.PAUSE_JTAG and PAUSE_DBG so the counter freezes while the CPU
- * is halted in a debugger.  Called outside a debug context it stalls the
- * counter until tiku_cpu_rp2350_watchdog_resume_arch() runs.
+ * Clears WD_CTRL.ENABLE; the count holds its value until
+ * tiku_cpu_rp2350_watchdog_resume_arch() sets ENABLE again.
  */
 void tiku_cpu_rp2350_watchdog_pause_arch(void);
 
 /**
  * @brief Resume a paused watchdog counter.
  *
- * Clears the PAUSE bits set by tiku_cpu_rp2350_watchdog_pause_arch().
- * If @p kick_on_resume is non-zero the watchdog is kicked immediately
- * on resume to avoid a stale timeout from the pause duration.
+ * Sets WD_CTRL.ENABLE again.  With @p kick_on_resume non-zero the count is
+ * first reloaded with the full timeout, so time spent paused is not charged.
  *
  * @param kick_on_resume  Non-zero to kick on resume; 0 to leave as-is.
  */
@@ -111,9 +110,10 @@ void tiku_cpu_rp2350_watchdog_resume_arch(int kick_on_resume);
 /**
  * @brief Kick (service) the watchdog to prevent a reset.
  *
- * Writes the service sequence to WDOG_LOAD, restarting the countdown
- * from the configured timeout. Must be called before the timeout
- * expires; typically invoked from the scheduler tick.
+ * Writes the armed timeout to WD_LOAD, restarting the countdown; does nothing
+ * before tiku_cpu_rp2350_watchdog_on_arch() has armed it.
+ *
+ * @note Call it more often than the timeout, or the watchdog resets the chip.
  */
 void tiku_cpu_rp2350_watchdog_kick_arch(void);
 

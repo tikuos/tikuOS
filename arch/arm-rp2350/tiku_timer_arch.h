@@ -7,9 +7,9 @@
  *
  * tiku_timer_arch.h - RP2350 system tick (Cortex-M SysTick).
  *
- * Runs at TIKU_CLOCK_ARCH_SECOND ticks per second, 128 Hz by default to match the
- * MSP430 port -- ~7.8 ms resolution, ample for the scheduler and well inside the
- * 24-bit SysTick reload at 150 MHz.
+ * Runs at TIKU_CLOCK_ARCH_SECOND ticks per second, 128 Hz (7.8 ms) by
+ * default.  At 150 MHz one tick is 1171875 cycles, inside the 24-bit SysTick
+ * reload.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -26,9 +26,9 @@
 /**
  * @brief Clock tick counter type.
  *
- * Counts SysTick interrupts since boot.  On a 32-bit platform with
- * 128 Hz ticks this wraps in ~387 days — use wraparound-safe macros
- * (TIKU_CLOCK_LT / TIKU_CLOCK_GT) for comparisons.
+ * Counts SysTick interrupts since tiku_clock_arch_init().  At 32 bits and
+ * 128 Hz it wraps after about 388 days; compare ticks with the
+ * wraparound-safe TIKU_CLOCK_LT and TIKU_CLOCK_DIFF (tiku_clock.h).
  */
 #ifndef TIKU_CLOCK_ARCH_TIME_T_DEFINED
 typedef unsigned long tiku_clock_arch_time_t;
@@ -45,22 +45,21 @@ typedef unsigned int tiku_clock_arch_counter_t;
 /**
  * @brief System tick frequency in Hz (must be a power of 2).
  *
- * Default 128 Hz matches the MSP430 port (~7.8 ms per tick).
- * Override at compile time via -DTIKU_CLOCK_ARCH_CONF_SECOND=<n>.
+ * Default 128 Hz, 7.8 ms per tick.  Override at compile time with
+ * -DTIKU_CLOCK_ARCH_CONF_SECOND=<n>.
  */
 #ifndef TIKU_CLOCK_ARCH_CONF_SECOND
-#define TIKU_CLOCK_ARCH_CONF_SECOND 128   /* must be a power of 2 */
+#define TIKU_CLOCK_ARCH_CONF_SECOND 128
 #endif
 
-/** @brief Resolved tick frequency — use this in code, not the CONF_ form. */
+/** @brief Resolved tick frequency; code uses this, not the CONF_ form. */
 #define TIKU_CLOCK_ARCH_SECOND  TIKU_CLOCK_ARCH_CONF_SECOND
 
 /**
- * @brief SysTick reload value for one tick period at the current clk_sys.
+ * @brief CPU cycles per tick at the configured MAIN_CPU_FREQ.
  *
- * SysTick uses the CPU clock, so reload = clk_sys / TICK_HZ.  TIKU_MAIN_CPU_HZ
- * tracks MAIN_CPU_FREQ, keeping the tick at TIKU_CLOCK_ARCH_SECOND Hz across
- * every supported clk_sys (12 / 48 / 100 / 125 / 133 / 150 MHz).
+ * TIKU_MAIN_CPU_HZ / TIKU_CLOCK_ARCH_SECOND.  tiku_clock_arch_init() programs
+ * SysTick from the measured clk_sys, not from this macro.
  */
 #define TIKU_CLOCK_ARCH_INTERVAL  (TIKU_MAIN_CPU_HZ / TIKU_CLOCK_ARCH_SECOND)
 
@@ -71,8 +70,10 @@ typedef unsigned int tiku_clock_arch_counter_t;
 /**
  * @brief Configure SysTick for TIKU_CLOCK_ARCH_SECOND Hz and enable it.
  *
- * Called once from the kernel boot sequence.  Uses the processor clock
- * (CSR.CLKSRC = 1).
+ * Uses the processor clock (CSR.CLKSRC = 1) and zeroes the tick and seconds
+ * counters.
+ *
+ * @note Called by tiku_clock_init() during boot.
  */
 void                   tiku_clock_arch_init(void);
 
@@ -82,14 +83,15 @@ void                   tiku_clock_arch_init(void);
  * Incremented by the SysTick ISR.  Wraparound-safe with the TIKU_CLOCK
  * arithmetic macros.
  *
- * @return Ticks since boot.
+ * @return Ticks since tiku_clock_arch_init().
  */
 tiku_clock_arch_time_t tiku_clock_arch_time(void);
 
 /**
- * @brief Return the elapsed time in whole seconds since boot.
+ * @brief Return the elapsed time in whole seconds since tiku_clock_arch_init().
  *
- * @return Seconds since boot (tick_count / TIKU_CLOCK_ARCH_SECOND).
+ * @return Seconds counter, which the tick ISR advances every
+ *         TIKU_CLOCK_ARCH_SECOND ticks.
  */
 unsigned long          tiku_clock_arch_seconds(void);
 
@@ -101,12 +103,12 @@ unsigned long          tiku_clock_arch_seconds(void);
 void                   tiku_clock_arch_set_seconds(unsigned long sec);
 
 /**
- * @brief Busy-wait until the tick counter reaches @p t.
+ * @brief Busy-wait for @p t clock ticks.
  *
- * Uses wraparound-safe comparison; safe for delays up to half the
- * counter range (~193 days at 128 Hz).
+ * Spins until the tick counter has advanced by @p t from its value at the
+ * call; works across a counter wrap.
  *
- * @param t  Target tick value (absolute, not a delta).
+ * @param t  Number of ticks to wait (a delta).
  */
 void                   tiku_clock_arch_wait(tiku_clock_arch_time_t t);
 
@@ -114,30 +116,26 @@ void                   tiku_clock_arch_wait(tiku_clock_arch_time_t t);
  * @brief Busy-wait for at least @p us microseconds.
  *
  * Spins on the TIMER0 1 us hardware counter.  Does not yield to the
- * scheduler — use only for very short delays (< 1 tick, ~7.8 ms).
+ * scheduler.
  *
  * @param us  Microseconds to wait.
  */
 void                   tiku_clock_arch_delay(unsigned int us);
 
 /**
- * @brief Read the sub-tick SysTick residue for fine-resolution timing.
+ * @brief Read the position within the current tick for fine timing.
  *
- * Returns the current SysTick CVR (count-value register) as a fraction
- * of the reload value, giving sub-tick resolution.  The value decrements
- * toward zero; compare against tiku_clock_arch_fine_max() for ordering.
+ * Scales the SysTick count (RVR - CVR) to 0..0xFFFF across the tick period:
+ * 0 at the start of a tick, rising toward 0xFFFF at its end.
  *
- * @return Sub-tick counter (0..fine_max).
+ * @return Sub-tick position (0..tiku_clock_arch_fine_max()).
  */
 unsigned short         tiku_clock_arch_fine(void);
 
 /**
  * @brief Return the maximum value of tiku_clock_arch_fine().
  *
- * Equals TIKU_CLOCK_ARCH_INTERVAL - 1 (the SysTick reload value minus
- * one, since CVR decrements from reload to 0).
- *
- * @return Maximum fine-counter value.
+ * @return 0xFFFF.
  */
 int                    tiku_clock_arch_fine_max(void);
 

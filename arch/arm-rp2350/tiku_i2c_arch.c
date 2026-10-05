@@ -7,9 +7,9 @@
  *
  * tiku_i2c_arch.c - I2C bus driver for RP2350 (DW_apb_i2c on I2C0).
  *
- * Master-only, 7-bit addressing, blocking polled I/O, with SCL counts computed at
- * init from the live clk_peri so the same driver works at 150 MHz and at the
- * 12 MHz fallback.  External pull-ups are required; the internal ones are too weak.
+ * Master-only, 7-bit addressing, blocking polled I/O, with SCL counts computed
+ * at init from the cached clk_peri rate.  The pads get no internal pulls, so
+ * the bus needs external pull-ups.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -37,9 +37,7 @@
 #define I2C_REG(off)   (RP2350_I2C0_BASE + (off))
 /** @} */
 
-/** @brief Maximum spin iterations for bus-wait loops.  Bounds every
- *         poll so a wedged bus cannot lock the kernel indefinitely.
- *         At 100 kHz, ~1 ms per byte provides ample margin. */
+/** @brief Iteration cap of every bus wait, so a stuck bus ends the wait. */
 #define I2C_SPIN_LIMIT  100000UL
 
 /** @brief Non-zero once tiku_i2c_arch_init() has completed successfully. */
@@ -48,8 +46,8 @@ static uint8_t i2c_initialised;
 /**
  * @brief Wait until the specified IC_STATUS bits become non-zero.
  *
- *        Spins up to I2C_SPIN_LIMIT iterations, returning early if a
- *        TX_ABRT interrupt fires.
+ *        Spins up to I2C_SPIN_LIMIT iterations, returning early once the
+ *        raw TX_ABRT status is set.
  *
  * @param mask  Bitmask of IC_STATUS bits to wait for (any bit set = ready).
  * @return      0 on success, -1 on timeout or abort.
@@ -71,8 +69,8 @@ static int wait_status(uint32_t mask) {
 /**
  * @brief Wait until the specified IC_STATUS bits are all zero.
  *
- *        Spins up to I2C_SPIN_LIMIT iterations, returning early if a
- *        TX_ABRT interrupt fires.
+ *        Spins up to I2C_SPIN_LIMIT iterations, returning early once the
+ *        raw TX_ABRT status is set.
  *
  * @param mask  Bitmask of IC_STATUS bits that must clear.
  * @return      0 on success, -1 on timeout or abort.
@@ -106,9 +104,8 @@ static int check_abort(void) {
     if ((raw & RP2350_I2C_INTR_TX_ABRT) == 0U) {
         return TIKU_I2C_OK;
     }
-    /* Reading abort-source latches the diagnostic bits; the W1C-style
-     * IC_CLR_TX_ABRT (read-only, but the read side-effects-clears)
-     * resets both the raw IRQ and the source register. */
+    /* IC_TX_ABRT_SOURCE is read before the clear; reading
+     * IC_CLR_TX_ABRT clears TX_ABRT and the abort source. */
     (void)_RP2350_REG(I2C_REG(RP2350_I2C_IC_TX_ABRT_SOURCE));
     (void)_RP2350_REG(I2C_REG(RP2350_I2C_IC_CLR_TX_ABRT));
     return TIKU_I2C_ERR_NACK;
@@ -134,9 +131,8 @@ static void set_target(uint8_t addr) {
  *
  * Brings I2C0 out of reset, configures the GPIO pins for I2C function, programs
  * IC_CON for master mode and the requested speed, computes SCL high/low counts
- * from the live clk_peri frequency, and enables the controller.
+ * from the cached clk_peri rate, and enables the controller.
  *
- * @note Safe to call once; re-initialisation requires tiku_i2c_arch_close().
  * @param config  Pointer to a tiku_i2c_config_t describing the desired
  *                bus speed (TIKU_I2C_SPEED_STANDARD or _FAST).
  * @return        TIKU_I2C_OK on success, TIKU_I2C_ERR_PARAM if config
@@ -179,14 +175,12 @@ int tiku_i2c_arch_init(const tiku_i2c_config_t *config) {
     }
     _RP2350_REG(I2C_REG(RP2350_I2C_IC_CON)) = con;
 
-    /* Compute SCL high/low counts from the live clk_peri Hz. The
-     * DW IP databook gives a conservative formula; using equal high
-     * and low halves at 100 kHz yields ~5 us each (well above the
-     * 4.7 us / 4.0 us SS minimums). At 400 kHz the split tilts low > high
-     * (~1.9 us / 0.6 us) to satisfy the FS minimums. */
+    /* SCL high and low counts come from the cached clk_peri rate: 5 us
+     * each at 100 kHz, above the 4.7 us low and 4.0 us high SS minimums,
+     * and 0.6 us high, 1.9 us low at 400 kHz for the FS minimums. */
     unsigned long peri_hz = tiku_cpu_rp2350_smclk_get_hz();
     if (peri_hz == 0UL) {
-        peri_hz = 12000000UL;                   /* sensible fallback */
+        peri_hz = 12000000UL;                   /* the XOSC rate */
     }
     /* cycles-per-microsecond, rounded up so the minimums always hold. */
     unsigned long cyc_per_us = (peri_hz + 999999UL) / 1000000UL;
@@ -194,7 +188,7 @@ int tiku_i2c_arch_init(const tiku_i2c_config_t *config) {
     /* Standard mode: 5 us high, 5 us low. HCNT minimum = 6 (DW IP). */
     unsigned long ss_h = (5UL * cyc_per_us);
     unsigned long ss_l = (5UL * cyc_per_us);
-    if (ss_h < 14UL) ss_h = 14UL;               /* HCNT + 8 spike + 1 */
+    if (ss_h < 14UL) ss_h = 14UL;               /* HCNT = ss_h - 8 >= 6 */
     if (ss_l < 8UL)  ss_l = 8UL;
     _RP2350_REG(I2C_REG(RP2350_I2C_IC_SS_SCL_HCNT)) = (uint32_t)(ss_h - 8UL);
     _RP2350_REG(I2C_REG(RP2350_I2C_IC_SS_SCL_LCNT)) = (uint32_t)(ss_l - 1UL);
@@ -207,11 +201,10 @@ int tiku_i2c_arch_init(const tiku_i2c_config_t *config) {
     _RP2350_REG(I2C_REG(RP2350_I2C_IC_FS_SCL_HCNT)) = (uint32_t)(fs_h - 8UL);
     _RP2350_REG(I2C_REG(RP2350_I2C_IC_FS_SCL_LCNT)) = (uint32_t)(fs_l - 1UL);
 
-    /* SDA hold time: at least 1 cycle so SDA stays valid past SCL
-     * falling edge. 1 us is fine for both speeds. */
+    /* SDA hold: 1 us after SCL falls, at either speed. */
     _RP2350_REG(I2C_REG(RP2350_I2C_IC_SDA_HOLD)) = (uint32_t)cyc_per_us;
 
-    /* Spike-filter length for fast mode: standard is 1 cycle. */
+    /* Fast-mode spike filter: 1 clk_peri cycle. */
     _RP2350_REG(I2C_REG(RP2350_I2C_IC_FS_SPKLEN)) = 1U;
 
     /* Enable. */
@@ -329,15 +322,14 @@ int tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len) {
 /**
  * @brief Probe a slave address (presence check for a bus scan).
  *
- * The DW_apb_i2c cannot issue a zero-byte transaction -- the address is only
- * clocked out alongside a queued data or read command -- so a probe is a single
+ * The DW_apb_i2c clocks out the address only alongside a queued data or read
+ * command, so it cannot issue a zero-byte transaction: a probe is a single
  * 1-byte read, and the byte read back is discarded.
  *
- * @note A missing device NACKs the address, surfacing as TX_ABRT
- *       (ABRT_7B_ADDR_NOACK).
  * @param addr  7-bit slave address.
  * @return      TIKU_I2C_OK if the device acknowledged, TIKU_I2C_ERR_NACK if
- *              not, or TIKU_I2C_ERR_PARAM / TIKU_I2C_ERR_TIMEOUT.
+ *              not (TX_ABRT with ABRT_7B_ADDR_NOACK), or TIKU_I2C_ERR_PARAM /
+ *              TIKU_I2C_ERR_TIMEOUT.
  */
 int tiku_i2c_arch_probe(uint8_t addr) {
     uint8_t dummy;

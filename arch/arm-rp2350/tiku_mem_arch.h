@@ -5,7 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mem_arch.h - RP2350 memory architecture constants
+ * tiku_mem_arch.h - RP2350 memory architecture constants and NVM interface.
+ *
+ * Alignment and size type, and the calls that keep the durable .uninit SRAM
+ * region and its flash mirror in step.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -25,11 +28,10 @@
  * @{
  */
 
-/** Cortex-M33 32-bit native word — most allocations should be 4-byte
- *  aligned to avoid the unaligned-access penalty. */
+/** @brief Allocation alignment: the Cortex-M33's 32-bit word. */
 #define TIKU_MEM_ARCH_ALIGNMENT  4U
 
-/** 32-bit address space → 32-bit size type. */
+/** @brief Size type covering the 32-bit address space. */
 #ifndef TIKU_MEM_ARCH_SIZE_T_DEFINED
 #define TIKU_MEM_ARCH_SIZE_T_DEFINED
 typedef uint32_t tiku_mem_arch_size_t;
@@ -40,9 +42,9 @@ typedef uint32_t tiku_mem_arch_size_t;
 /**
  * @brief Initialize the RP2350 memory subsystem.
  *
- * Called once at early boot.  Sets up the flash-mirror sector used as
- * the NVM backing store for .persistent variables and registers the
- * platform memory regions with tiku_region_init().
+ * Resolves the boot-ROM flash helpers and restores the durable .uninit
+ * region from its flash mirror when the mirror's image checks out; with no
+ * such image .uninit is zeroed.  tiku_mem_init() calls it at boot.
  */
 void tiku_mem_arch_init(void);
 
@@ -50,8 +52,8 @@ void tiku_mem_arch_init(void);
  * @brief Overwrite a buffer with zeros using a volatile loop.
  *
  * The volatile pointer stops the compiler eliding the zeroing when the buffer
- * is never read afterwards -- a known pitfall in security-sensitive code.  Use
- * it for keys, nonces and credentials before releasing the buffer.
+ * is never read afterwards.  Use it for keys, nonces and credentials before
+ * releasing the buffer.
  *
  * @param buf  Buffer to wipe.
  * @param len  Number of bytes to zero.
@@ -59,44 +61,50 @@ void tiku_mem_arch_init(void);
 void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len);
 
 /**
- * @brief Copy bytes from NVM (flash mirror) into SRAM.
+ * @brief Copy bytes from the durable SRAM working copy.
  *
- * On RP2350, .persistent variables reside in a NOLOAD SRAM section
- * that is mirrored to flash.  This function reads @p len bytes from
- * the flash-side copy at @p src into the SRAM buffer at @p dst.
+ * .persistent variables live in the .uninit SRAM region, which is mirrored
+ * to flash.  This reads @p len bytes at @p src in that SRAM region, not the
+ * flash copy, into @p dst.
  *
- * @param dst  SRAM destination.
- * @param src  NVM source address.
+ * @param dst  Destination buffer.
+ * @param src  Source address within the .uninit region.
  * @param len  Number of bytes to copy.
  */
 void tiku_mem_arch_nvm_read(uint8_t *dst, const uint8_t *src,
                              tiku_mem_arch_size_t len);
 
 /**
- * @brief Copy bytes from SRAM into NVM (flash mirror).
+ * @brief Copy bytes into the durable SRAM working copy.
  *
- * Writes @p len bytes from @p src into the flash-mirror sector at
- * @p dst.  The caller must hold an MPU unlock window; this function
- * does not manage the MPU itself.
+ * Writes @p len bytes into the .uninit SRAM region at @p dst; flash changes
+ * only at the next tiku_mem_arch_nvm_flush_status().
  *
- * @param dst  NVM destination address (flash mirror sector).
- * @param src  SRAM source.
+ * @note The caller must hold an MPU unlock window; this function does not
+ *       manage the MPU itself.
+ * @param dst  Destination address within the .uninit region.
+ * @param src  Source buffer.
  * @param len  Number of bytes to write.
  */
 void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
                               tiku_mem_arch_size_t len);
 
 /**
- * @brief Flush any in-RAM NVM modifications to non-volatile storage.
+ * @brief Flush the durable SRAM region to flash.
  *
- * On RP2350 this snapshots the SRAM .uninit region, which holds all .persistent
- * placements, into the dedicated 4 KB flash mirror sector, making the data
- * durable across full power cycles rather than only warm resets.
- *
- * @note Called automatically by tiku_mpu_lock_nvm() at the end of every unlock
- *       window.  A no-op where NVM writes are already durable (MSP430 FRAM).
+ * Calls tiku_mem_arch_nvm_flush_status() and discards its result.
  */
 void tiku_mem_arch_nvm_flush(void);
+
+/**
+ * @brief Commit the .uninit region to its flash mirror and report the result.
+ *
+ * Writes the region, behind a 16-byte CRC header, to the mirror sectors so it
+ * survives a power cycle; an unchanged image writes nothing.
+ *
+ * @note tiku_mpu_lock_nvm() calls it at the end of every unlock window.
+ * @return 0 when the mirror holds .uninit, -1 when the commit failed.
+ */
 int tiku_mem_arch_nvm_flush_status(void);
 
 #endif /* TIKU_RP2350_MEM_ARCH_H_ */

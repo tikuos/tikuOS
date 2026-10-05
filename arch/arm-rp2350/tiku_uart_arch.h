@@ -7,8 +7,8 @@
  *
  * tiku_uart_arch.h - UART backend for printf (RP2350 / PL011)
  *
- * Mirrors arch/msp430/tiku_uart_arch.h. Drives UART0 (PL011) with
- * an IRQ-fed RX ring buffer of 256 bytes.
+ * Drives UART0 (PL011) with an interrupt-fed RX ring buffer of
+ * TIKU_UART_RXBUF_SIZE bytes, 256 by default.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,9 +21,10 @@
 /**
  * @brief Initialize UART0 (PL011) at the board-defined baud rate.
  *
- * Unresets UART0, configures the integer and fractional baud divisors from
- * clk_peri, enables the 8N1 FIFO, and installs the NVIC handler for the RX IRQ
- * that fills the 256-byte ring buffer.  Called once at early boot.
+ * Sets the integer and fractional baud divisors from clk_peri, enables 8N1
+ * with FIFOs, and enables the RX interrupt that fills the ring buffer.
+ *
+ * @note UART0 must already be out of reset; the boot clock setup releases it.
  */
 void     tiku_uart_init(void);
 
@@ -35,18 +36,18 @@ void     tiku_uart_init(void);
 void     tiku_uart_putc(char c);
 
 /**
- * @brief Transmit a null-terminated string.
+ * @brief Transmit a null-terminated string, sending '\n' as "\r\n".
  *
- * @param s  String to send (must be null-terminated).
+ * @param s  String to send; NULL sends nothing.
  */
 void     tiku_uart_puts(const char *s);
 
 /**
  * @brief Formatted output over UART0.
  *
- * Lightweight printf implemented without heap allocation.  Supports
- * %c, %s, %d, %u, %x, %lx, %lu, %ld.  Does not support floating-point
- * or width specifiers beyond basic use.
+ * Lightweight printf without heap allocation.  Supports %c, %s, %d, %u, %x,
+ * %ld, %lu, %lx and %%, with a decimal width padded by '0' or spaces; no
+ * floating point.
  *
  * @param fmt  Format string.
  * @param ...  Format arguments.
@@ -70,10 +71,10 @@ int      tiku_uart_getc(void);
 /**
  * @brief Return the number of RX overrun events since last reset.
  *
- * An overrun occurs when the 256-byte ring buffer is full and a new
- * byte arrives from the PL011 FIFO; the new byte is dropped.
+ * Counts bytes the PL011 flagged with OE and bytes dropped because the ring
+ * buffer was full.
  *
- * @return Overrun count (saturates at UINT16_MAX).
+ * @return Overrun count; it wraps at 65536.
  */
 uint16_t tiku_uart_overrun_count(void);
 
@@ -86,8 +87,8 @@ void     tiku_uart_overrun_reset(void);
 /**
  * @brief Inject a byte directly into the RX ring (test-only).
  *
- * Simulates a received byte without going through the hardware FIFO.
- * Available only when HAS_TESTS is defined.
+ * Adds a received byte without the hardware FIFO; a full ring drops it.
+ * Built only when HAS_TESTS is defined.
  *
  * @param byte  Byte to inject.
  */

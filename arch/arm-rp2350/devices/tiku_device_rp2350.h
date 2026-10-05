@@ -7,9 +7,9 @@
  *
  * tiku_device_rp2350.h - Raspberry Pi RP2350 silicon-level constants.
  *
- * A dual-core Cortex-M33 at up to 150 MHz with 520 KB SRAM, no on-chip flash (the
- * board's QSPI part is mapped XIP at 0x10000000), 30 GPIO on bank 0, and the
- * standard NVIC, SysTick and MPU.
+ * A dual-core Cortex-M33 at up to 150 MHz with 520 KB SRAM and no on-chip
+ * flash (the board's QSPI part is mapped XIP at 0x10000000), 30 GPIO on
+ * bank 0, and the standard NVIC, SysTick and MPU.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -32,11 +32,11 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief MSP430-style GPIO port presence flags.
+ * @brief GPIO port presence flags.
  *
- * /dev/gpio takes its layout from tiku_gpio_geometry.h rather than from these
- * flags: virtual ports of eight over the one user GPIO bank, port 1 = GP0..7,
- * 2 = GP8..15, 3 = GP16..23 and 4 = GP24..29.
+ * No RP2350 code reads them: tiku_gpio_geometry.h fixes the /dev/gpio layout
+ * as virtual ports of eight over bank 0, port 1 = GP0..7, 2 = GP8..15,
+ * 3 = GP16..23 and 4 = GP24..29.
  *
  * @note Bank 0 has 48 pins on the larger packages; GP30 and above are not
  *       exposed.
@@ -59,9 +59,8 @@
 /**
  * @brief Crystal oscillator availability and frequency.
  *
- * The Pico 2 board ships a 12 MHz crystal on XOSC. The RP2350 has no
- * MSP430-style LFXT/HFXT split, but for HAL compatibility this reports
- * "HFXT present, no LFXT".
+ * The Pico 2 boards carry a 12 MHz crystal on XOSC.  The RP2350 has one
+ * crystal oscillator, reported to the HAL as HFXT present and LFXT absent.
  */
 #define TIKU_DEVICE_HAS_LFXT        0
 #define TIKU_DEVICE_HAS_HFXT        1
@@ -74,9 +73,9 @@
 /**
  * @brief Clock system type selector flags.
  *
- * TIKU_DEVICE_CS_HAS_KEY = 0 means the unlock-key mechanism (MSP430
- * CSCTL0_H) is not present. TIKU_DEVICE_CS_TYPE_RP2350 selects the
- * RP2350 PLL-based clock driver in arch/arm-rp2350/tiku_cpu_freq_*.c.
+ * TIKU_DEVICE_CS_HAS_KEY = 0: no clock-system unlock key (the MSP430 CSCTL0_H
+ * password).  TIKU_DEVICE_CS_TYPE_RP2350 names the clock system; no code
+ * tests it, as hal/tiku_cpu.c picks the clock driver by PLATFORM_RP2350.
  */
 #define TIKU_DEVICE_CS_HAS_KEY      0
 #define TIKU_DEVICE_CS_TYPE_RP2350  1
@@ -88,8 +87,8 @@
 /**
  * @brief Maximum stable CPU frequency in MHz.
  *
- * Datasheet maxes the system PLL at 150 MHz for production silicon.
- * That is also the default target frequency.
+ * The datasheet rates clk_sys at up to 150 MHz, which is also the
+ * frequency the boot code sets.
  */
 #define TIKU_DEVICE_MAX_STABLE_MHZ  150
 
@@ -100,22 +99,18 @@
 /**
  * @brief On-chip SRAM size and base address.
  *
- * 520 KB unified SRAM at 0x20000000. The boot SRAMs (SRAM8/9) are
- * 4 KB each at the top of the address range; the whole region is
- * treated as one flat 520 KB pool.
+ * 520 KB unified SRAM at 0x20000000.  SRAM8 and SRAM9 are the 4 KB banks at
+ * the top of the range; the whole region is one flat 520 KB pool.
  */
 #define TIKU_DEVICE_RAM_SIZE        (520UL * 1024UL)
 #define TIKU_DEVICE_RAM_START       0x20000000UL
 
 /**
- * @brief External XIP flash size and address range (exposed as "FRAM").
+ * @brief External XIP flash size and address range.
  *
- * "FRAM" here is the external XIP flash (4 MB on the Pico 2 board), exposed
- * under the FRAM_* names so the kernel's memory introspection and region table
- * speak one vocabulary.
- *
- * @note The device has no FRAM in the MSP430 sense; persistent storage uses a
- *       flash sector via the NVM HAL (arch/arm-rp2350/tiku_mem_arch.c).
+ * The 4 MB QSPI flash of the Pico 2 boards, under the TIKU_DEVICE_FRAM_* names
+ * that the kernel's memory reports and region table read on every port.
+ * Durable state is mirrored to a flash sector by tiku_mem_arch.c.
  */
 #define TIKU_DEVICE_FRAM_SIZE       (4UL * 1024UL * 1024UL)
 #define TIKU_DEVICE_FRAM_START      0x10000000UL
@@ -125,21 +120,18 @@
 /**
  * @brief Init-table backing region size in bytes.
  *
- * RAM-resident on this port, so volatile; a future revision can move it to a
- * dedicated flash sector.  Sized for the kernel init-table layout: a 4-byte
- * header plus 8 entries of 66 bytes = 532, rounded up to 64-byte alignment.
+ * kernel/memory/tiku_nvm_map.c places the region in TIKU_DURABLE SRAM, which
+ * the flash mirror keeps.  The table is a 4-byte header plus 8 entries of 66
+ * bytes, 532 bytes, rounded up to a multiple of 64.
  *
- * @note 512 would be 20 bytes short of slot 7's tail, and init_first_boot()
- *       would then clobber neighbouring .bss -- surfacing as cascading
- *       init-table / init-boot / init-shell-cmds failures.
+ * @note tiku_init.c fails the build when this is smaller than the table.
  */
 #define TIKU_DEVICE_FRAM_CONFIG_SIZE      576U
 
 /**
- * @brief Application slot parameters for the XIP flash region.
+ * @brief Application slot size and count.
  *
- * Each app slot is a fixed-size region within the XIP flash used by
- * the init table to store named application images.
+ * No code reads them.
  */
 #define TIKU_DEVICE_FRAM_APP_SLOT_SIZE    4096U
 #define TIKU_DEVICE_FRAM_APP_SLOT_COUNT   4
@@ -151,12 +143,9 @@
 /**
  * @brief Memory Protection Unit availability flag.
  *
- * RP2350's Cortex-M33 has the ARMv8-M MPU.  tiku_mpu_arch.c programs region 0
- * over the .uninit (NVM) range and enforces RO-by-default / RW-while-unlocked
- * via the unlock_nvm / lock_nvm pair.
- *
- * @note MemManage is wired to bump a violation counter and reset, so a write to
- *       NVM without unlocking actually faults.
+ * The Cortex-M33's ARMv8-M MPU.  tiku_mpu_arch.c keeps region 0, the .uninit
+ * (durable) range, read-only outside an unlock_nvm / lock_nvm window; a write
+ * there faults, and the MemManage handler counts it and resets the chip.
  */
 #define TIKU_DEVICE_HAS_MPU         1
 

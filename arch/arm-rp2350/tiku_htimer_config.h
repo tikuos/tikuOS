@@ -7,9 +7,9 @@
  *
  * tiku_htimer_config.h - hardware timer configuration for RP2350.
  *
- * TIMER0 runs at exactly 1 MHz from the TICKS divider, so one tick is one
- * microsecond and the 16-bit clock covers ~65 ms -- comfortably above the 7.8 ms
- * system tick period.
+ * TIMER0 counts at 1 MHz from the TICKS divider: one tick is one microsecond,
+ * and the 16-bit htimer clock spans 65.5 ms, longer than the 7.8 ms system
+ * tick.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,9 +22,9 @@
 /**
  * @brief Hardware timer tick rate: number of ticks per second.
  *
- * TIMER0 is driven at 1 MHz by the TICKS divider block (CLK_SYS /
- * 150 at the default 150 MHz). Each htimer deadline is expressed in
- * ticks; divide by TIKU_HTIMER_ARCH_SECOND to convert to seconds.
+ * TIMER0 is driven at 1 MHz by the TICKS divider block (clk_ref, the 12 MHz
+ * XOSC, divided by 12), whatever the CLK_SYS frequency.  Each htimer deadline
+ * is expressed in ticks; divide by TIKU_HTIMER_ARCH_SECOND for seconds.
  */
 #define TIKU_HTIMER_ARCH_SECOND  1000000UL
 

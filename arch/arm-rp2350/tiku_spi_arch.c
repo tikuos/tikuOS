@@ -7,9 +7,9 @@
  *
  * tiku_spi_arch.c - SPI bus driver for RP2350 (PL022 on SPI0).
  *
- * Master-only, 8-bit Motorola frames, blocking polled I/O, with chip select left
- * to the caller.  LSB-first is rejected rather than emulated, so a
- * misconfiguration is visible.  The clock is floored, never rounded up.
+ * Master-only, 8-bit Motorola frames, blocking polled I/O; the caller drives
+ * chip select.  LSB-first is refused with TIKU_SPI_ERR_PARAM.  The clock
+ * divider is rounded down, so SCLK is at or above clk_peri / prescaler.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -32,17 +32,8 @@
 /** @brief Address of an SPI0 register at byte offset @p off. */
 #define SPI_REG(off)   (RP2350_SPI0_BASE + (off))
 
-/**
- * @defgroup spi_private SPI private constants
- * @brief Spin limit for FIFO polling.
- *
- * Bounds every SSPSR spin so a stuck FIFO cannot hang the kernel.
- * At 1 MHz SPI, ~1 ms of headroom is well above any single-byte
- * transfer time.
- * @{
- */
+/** @brief SSPSR polls before a wait gives up and reports a timeout. */
 #define SPI_SPIN_LIMIT  100000UL
-/** @} */
 
 /** @brief Non-zero once tiku_spi_arch_init() has succeeded. */
 static uint8_t spi_initialised;
@@ -70,7 +61,7 @@ static int wait_status(uint32_t mask) {
  * @brief Wait until a status flag is cleared in SSPSR.
  *
  * Polls SSPSR until @p mask has all bits clear or the spin limit is
- * exhausted.  Drains BSY before closing the controller.
+ * exhausted.  tiku_spi_arch_close() uses it to wait for BSY to clear.
  *
  * @param mask  Bit mask to wait for clearance.
  * @return 0 on success, -1 on timeout.
@@ -88,12 +79,11 @@ static int wait_status_clear(uint32_t mask) {
 /**
  * @brief Compute PL022 clock divider fields (CPSR, SCR).
  *
- * Finds the smallest even CPSR in [2, 254] such that CPSR * (1 + SCR)
- * approximates @p prescaler with SCR in [0, 255]; biasing toward a small CPSR
- * gives the caller finer tunability via SCR.
+ * Takes the smallest even CPSR in [2, 254] for which SCR + 1, the prescaler
+ * divided by CPSR and rounded down, is at most 256.
  *
- * @note A prescaler too large to represent falls back to the slowest possible
- *       setting (CPSR=254, SCR=255).
+ * @note A prescaler of 65278 or more gets the slowest setting, CPSR 254 and
+ *       SCR 255.
  * @param prescaler  Desired total divider (clk_peri / SCLK).
  * @param cpsr_out   Output: SSPCPSR value to write.
  * @param scr_out    Output: SCR field for SSPCR0.
@@ -128,9 +118,8 @@ static void compute_clk(uint16_t prescaler, uint8_t *cpsr_out,
  * programs the clock divider (CPSR + SCR) and CR0 (8-bit Motorola, mode bits),
  * then enables the controller.
  *
- * @note LSB-first bit order is rejected rather than emulated: the PL022 has no
- *       hardware LSB-first mode, and a silent CPU-side bit-reversal would hide
- *       a misconfiguration.
+ * @note The PL022 has no LSB-first mode, so LSB-first bit order returns
+ *       TIKU_SPI_ERR_PARAM.
  * @param config  SPI bus parameters (mode, prescaler, bit_order).
  * @return TIKU_SPI_OK on success, TIKU_SPI_ERR_PARAM on NULL config,
  *         unsupported mode, or LSB-first bit order.
@@ -143,7 +132,7 @@ int tiku_spi_arch_init(const tiku_spi_config_t *config) {
         return TIKU_SPI_ERR_PARAM;
     }
     if (config->bit_order == TIKU_SPI_LSB_FIRST) {
-        /* PL022 has no LSB-first mode — fail loud rather than silent. */
+        /* The PL022 has no LSB-first mode. */
         return TIKU_SPI_ERR_PARAM;
     }
 
@@ -195,12 +184,11 @@ int tiku_spi_arch_init(const tiku_spi_config_t *config) {
  * @brief Disable the SPI0 controller.
  *
  * Waits for any in-flight transfer to drain (BSY clear) before
- * clearing SSPCR1.SSE, preventing a truncated CS-asserted byte.
- * Sets spi_initialised to 0 so subsequent calls return early.
+ * clearing SSPCR1.SSE, so a byte in flight is not cut short.  Until the
+ * next init, transfers return 0xFF or TIKU_SPI_ERR_PARAM.
  */
 void tiku_spi_arch_close(void) {
-    /* Wait for any in-flight transfer to drain so as not to truncate
-     * a CS-asserted byte. */
+    /* Let a byte in flight finish before disabling. */
     (void)wait_status_clear(RP2350_SPI_SR_BSY);
     _RP2350_REG(SPI_REG(RP2350_SPI_SSPCR1)) = 0U;
     spi_initialised = 0U;
@@ -214,8 +202,7 @@ void tiku_spi_arch_close(void) {
  * no write-only or read-only path at the hardware level.
  *
  * @param tx_byte  Byte to transmit.
- * @return Received byte, or 0xFF on timeout or if not initialized -- so the
- *         caller can spot an anomaly without a separate error path.
+ * @return Received byte, or 0xFF on timeout or if SPI0 is not initialised.
  */
 uint8_t tiku_spi_arch_transfer(uint8_t tx_byte) {
     if (spi_initialised == 0U) {
@@ -237,9 +224,8 @@ uint8_t tiku_spi_arch_transfer(uint8_t tx_byte) {
 /**
  * @brief Write a buffer over SPI, discarding received bytes.
  *
- * Sends each byte in @p buf and drains the RX FIFO to prevent
- * overflow.  The received data is uninteresting in write-only
- * transactions and is discarded.
+ * Sends each byte in @p buf and reads and discards the byte received for
+ * it, so the RX FIFO cannot overrun.
  *
  * @param buf  Source buffer (may be NULL only when len == 0).
  * @param len  Number of bytes to transmit.
@@ -257,8 +243,7 @@ int tiku_spi_arch_write(const uint8_t *buf, uint16_t len) {
             return TIKU_SPI_ERR_TIMEOUT;
         }
         _RP2350_REG(SPI_REG(RP2350_SPI_SSPDR)) = (uint32_t)buf[i];
-        /* Drain the RX side so the FIFO doesn't overrun. The byte
-         * itself is uninteresting — caller asked for write-only. */
+        /* Discard the received byte so the RX FIFO cannot overrun. */
         if (wait_status(RP2350_SPI_SR_RNE) < 0) {
             return TIKU_SPI_ERR_TIMEOUT;
         }

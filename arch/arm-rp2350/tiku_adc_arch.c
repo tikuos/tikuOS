@@ -8,8 +8,8 @@
  * tiku_adc_arch.c - RP2350 ADC driver.
  *
  * One 12-bit SAR ADC over AIN0-AIN3 plus the internal temperature sensor.  The
- * reference is fixed to ADC_AVDD, so the MSP430 internal-reference selectors are
- * accepted and ignored; a narrower requested resolution is shifted down.
+ * reference is fixed to ADC_AVDD, so the reference in tiku_adc_config_t is
+ * ignored; a narrower requested resolution is shifted down from 12 bits.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,19 +27,19 @@
 static uint8_t adc_result_shift;
 
 /**
- * @brief Non-zero when the ADC has been successfully initialised.
+ * @brief Non-zero after a successful tiku_adc_arch_init().
  *
- * Guards tiku_adc_arch_read() so reads before init return an error
- * instead of accessing uninitialised hardware registers.
+ * tiku_adc_arch_read() returns TIKU_ADC_ERR_PARAM while it is 0, and
+ * tiku_adc_arch_close() clears it.
  */
 static uint8_t adc_initialised;
 
 /**
  * @brief Map a kernel channel ID to the RP2350 AINSEL selector value.
  *
- * Translates the MSP430-style channel constants to the 3-bit AINSEL field:
- * channels 0..3 become AINSEL 0..3 (GPIO26..GPIO29), channel 30 (TEMP) becomes
- * 4, and channel 31 (BATTERY) becomes 3 (GP29 / VSYS / 3 divider).
+ * Channels 0..3 become AINSEL 0..3 (GPIO26..GPIO29), channel 30
+ * (TIKU_ADC_CH_TEMP) becomes 4, and channel 31 (TIKU_ADC_CH_BATTERY) becomes
+ * 3, the VSYS/3 divider on GP29.
  *
  * @param channel  Kernel ADC channel ID (0..3, 30, or 31)
  * @return AINSEL value (0..4), or 0xFF for unsupported channels
@@ -62,11 +62,8 @@ static uint8_t map_channel(uint8_t channel) {
  *
  * Decodes the requested resolution into a result-shift amount, brings the ADC
  * out of reset, points clk_adc at the 12 MHz XOSC, and waits for READY with a
- * bounded spin.
+ * bounded spin.  The reference in @p config is ignored: it is fixed to AVDD.
  *
- * @note PLL_USB is not available yet at the point this is called.  The
- *       reference is hardware-fixed to ADC_AVDD, so any selector in @p config
- *       is accepted but silently ignored.
  * @param config  ADC configuration (resolution, reference); must be non-NULL.
  * @return TIKU_ADC_OK on success, TIKU_ADC_ERR_PARAM for a NULL config
  *         or unrecognised resolution, TIKU_ADC_ERR_TIMEOUT if the READY
@@ -86,31 +83,27 @@ int tiku_adc_arch_init(const tiku_adc_config_t *config) {
         return TIKU_ADC_ERR_PARAM;
     }
 
-    /* Reference is hardware-fixed to ADC_AVDD. Other settings are
-     * accepted (so the API contract holds) but have no effect. */
+    /* The reference is fixed to ADC_AVDD; config->reference has no effect. */
     (void)config->reference;
 
     /* Bring the ADC out of reset. */
     rp2350_unreset(RP2350_RESETS_ADC);
 
-    /* Point clk_adc at XOSC (12 MHz). The boot path doesn't bring up
-     * PLL_USB, so PLL_USB-as-clk_adc isn't an option today; XOSC is
-     * always available. DIV reset value is 1 (no divide). Without
-     * this step clk_adc is gated and the ADC's READY bit never
-     * asserts -- causing init to spin forever (the previous failure
-     * mode that hung init-shell-cmds).
+    /* Run clk_adc from XOSC (12 MHz), which is always running; the boot
+     * path does not start PLL_USB.  DIV resets to 1 (no divide).  With
+     * clk_adc gated, READY never asserts.
      *
-     * Disable first to gate the glitch-free mux, then re-enable. */
+     * The generator is disabled while AUXSRC changes, so the switch does
+     * not glitch, then enabled again. */
     _RP2350_REG(RP2350_CLK_ADC_CTRL) = 0U;
     _RP2350_REG(RP2350_CLK_ADC_CTRL) =
         RP2350_CLK_ADC_AUXSRC_XOSC | RP2350_CLK_ADC_ENABLE;
 
-    /* Clear sticky error, leave free-running off, no IRQs. Enable. */
+    /* Enable the ADC; free-running mode and the temperature sensor stay off. */
     _RP2350_REG(RP2350_ADC_CS) = RP2350_ADC_CS_EN;
 
-    /* Wait for the ADC to settle (READY bit goes high when idle).
-     * Bounded so a missing clock surfaces as a clean ERR_TIMEOUT
-     * instead of a kernel hang. */
+    /* READY rises once the ADC is idle.  The spin is bounded: with no
+     * clock, init returns TIKU_ADC_ERR_TIMEOUT. */
     {
         uint32_t spin;
         for (spin = 0U; spin < 100000U; spin++) {
@@ -130,14 +123,11 @@ int tiku_adc_arch_init(const tiku_adc_config_t *config) {
 /**
  * @brief Disable the RP2350 ADC peripheral.
  *
- * Clears the CS.EN bit to stop conversions. The ADC is NOT put back
- * into reset so that the temperature-sensor bias is preserved across
- * close/re-init cycles. The disabled ADC draws negligible current.
+ * Writes 0 to CS, which clears EN and TS_EN: conversions stop and the
+ * temperature sensor powers down.  The ADC stays out of reset and clk_adc
+ * stays on.
  */
 void tiku_adc_arch_close(void) {
-    /* Disable the ADC.  It is not put back in reset -- that would
-     * also drop the temperature-sensor bias and cost a longer warm-up
-     * on the next init. The disabled ADC draws negligible current. */
     _RP2350_REG(RP2350_ADC_CS) = 0U;
     adc_initialised = 0U;
 }
@@ -153,12 +143,12 @@ void tiku_adc_arch_close(void) {
  * @return TIKU_ADC_OK on success, TIKU_ADC_ERR_PARAM for unsupported channels
  */
 int tiku_adc_arch_channel_init(uint8_t channel) {
-    /* Only external pins need GPIO config. The internal temp channel
-     * is enabled lazily in read(). */
+    /* Only external pins need GPIO config; read() powers the temperature
+     * sensor when it selects channel 30. */
     if (channel <= 3U) {
         uint8_t pin = (uint8_t)(RP2350_ADC_GPIO_BASE + channel);
         /* High-impedance analog input: input buffer off, pulls off,
-         * output disabled. Anything else loads the pin. */
+         * output disabled.  A pull or an enabled buffer loads the pin. */
         _RP2350_REG(RP2350_PADS_BANK0_GPIO(pin)) = RP2350_PADS_OD;
         return TIKU_ADC_OK;
     }
@@ -196,9 +186,8 @@ int tiku_adc_arch_read(uint8_t channel, uint16_t *value) {
         return TIKU_ADC_ERR_PARAM;
     }
 
-    /* Build the new CS value: keep EN; flip TS_EN based on whether this
-     * need the temperature sensor; clear sticky error; set AINSEL.
-     * Writing 1 to ERR_STICKY clears it (W1C). */
+    /* CS keeps EN, sets TS_EN only for the temperature channel, writes 1
+     * to ERR_STICKY, which clears it, and selects AINSEL. */
     uint32_t cs = RP2350_ADC_CS_EN | RP2350_ADC_CS_ERR_STICKY;
     if (ainsel == RP2350_ADC_CHANNEL_TEMP) {
         cs |= RP2350_ADC_CS_TS_EN;
@@ -211,8 +200,8 @@ int tiku_adc_arch_read(uint8_t channel, uint16_t *value) {
      * back as 0 once accepted; the conversion runs asynchronously. */
     _RP2350_REG(RP2350_ADC_CS) = cs | RP2350_ADC_CS_START_ONCE;
 
-    /* Wait for READY (idle). At full ADC clock this is ~2 us; bound
-     * the spin so a wedged ADC doesn't lock the kernel. */
+    /* READY rises when the conversion completes.  The spin is bounded: a
+     * stalled ADC returns TIKU_ADC_ERR_TIMEOUT. */
     {
         uint32_t spin;
         for (spin = 0U; spin < 100000U; spin++) {

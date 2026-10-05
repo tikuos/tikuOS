@@ -7,9 +7,9 @@
  *
  * tiku_cpu_freq_boot_arch.h - RP2350 CPU clock / boot interface
  *
- * Mirrors arch/msp430/tiku_cpu_freq_boot_arch.h. The RP2350 has a
- * single mainstream clock topology (XOSC -> PLL_SYS -> CLK_SYS) so
- * the API is much smaller than on MSP430.
+ * Boot-time clock bring-up, run-time PLL_SYS retuning, WFI idle and the
+ * cached clock rates.  Clocks run XOSC -> PLL_SYS -> CLK_SYS, and CLK_PERI
+ * runs from CLK_SYS.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,23 +20,26 @@
 #include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
-/* Required HAL entry points                                                 */
+/* REQUIRED HAL ENTRY POINTS                                                 */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Bring all peripherals out of reset and prepare basic state.
+ * @brief Bring up the clocks and release the kernel's peripherals from reset.
  *
- * Called once from tiku_cpu_boot_init().  Releases IO_BANK0 and PADS_BANK0 from
- * reset, clears pad ISO and configures NVIC priority grouping.  Does NOT touch
- * clocks -- that is tiku_cpu_freq_rp2350_init()'s job.
+ * Starts the XOSC, locks PLL_SYS and runs CLK_SYS and CLK_PERI at 150 MHz,
+ * releases IO_BANK0, PADS_BANK0, UART0, TIMER0 and TIMER1 from reset and
+ * starts the 1 us tick.  A step that times out leaves CLK_PERI on XOSC.
+ *
+ * @note Call it once at boot, before any peripheral driver starts.
  */
 void tiku_cpu_boot_rp2350_init(void);
 
 /**
- * @brief Configure the system clock tree.
+ * @brief Retune CLK_SYS to one of the supported frequencies.
  *
- * Starts the XOSC, locks PLL_SYS to the requested frequency and switches
- * CLK_SYS to the PLL output.
+ * Supports 12, 48, 100, 125, 133 and 150 MHz; 12 MHz runs CLK_SYS from XOSC
+ * with PLL_SYS off.  An unsupported target sets the clock-fault flag and
+ * leaves the clock as it was.
  *
  * @param target_mhz  Requested CLK_SYS frequency in MHz.
  */
@@ -45,14 +48,13 @@ void tiku_cpu_freq_rp2350_init(unsigned int target_mhz);
 /**
  * @brief Enter the processor idle state (WFI).
  *
- * Both LIGHT and DEEP idle modes map here on RP2350 — dormant mode
- * is intentionally not supported in the first port. Wakes on any
- * pending interrupt.
+ * The HAL maps the light, deep and deepest idle modes to it; this port does
+ * not use dormant mode.  Wakes on any pending interrupt.
  */
 void tiku_cpu_boot_rp2350_power_wfi_enter(void);
 
 /*---------------------------------------------------------------------------*/
-/* Clock-rate queries                                                        */
+/* CLOCK-RATE QUERIES                                                        */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -65,8 +67,8 @@ unsigned long tiku_cpu_rp2350_clock_get_hz(void);
 /**
  * @brief Return the current CLK_PERI frequency in Hz.
  *
- * CLK_PERI gates the UART, SPI, I2C, and other peripheral blocks.
- * On the first port this is derived from CLK_SYS and equals it.
+ * CLK_PERI clocks the UART, SPI, I2C and other peripheral blocks.  The
+ * cached rate always equals CLK_SYS.
  *
  * @return CLK_PERI frequency in Hz.
  */
@@ -75,21 +77,20 @@ unsigned long tiku_cpu_rp2350_smclk_get_hz(void);
 /**
  * @brief Return the low-frequency auxiliary clock frequency in Hz.
  *
- * The RP2350 has no MSP430-style low-frequency ACLK; this function
- * always returns 0 for HAL compatibility.
+ * This port runs no low-frequency auxiliary clock, so it returns 0 for the
+ * HAL's ACLK query.
  *
  * @return Always 0 (no low-frequency clock on RP2350).
  */
 unsigned long tiku_cpu_rp2350_aclk_get_hz(void);
 
 /**
- * @brief Return non-zero if the PLL has lost lock or the clock is
- *        in a fault state.
+ * @brief Report whether the last clock init or retune failed.
  *
- * Reads the PLL_SYS lock status. A fault typically indicates that
- * the XOSC failed to start or the VCO fell out of range.
+ * Returns a flag set when an unsupported frequency was requested or a PLL or
+ * mux step timed out, and cleared by a successful init or retune.
  *
- * @return 0 if the clock tree is healthy; non-zero on a fault.
+ * @return 1 after a fault, 0 otherwise.
  */
 int           tiku_cpu_rp2350_clock_has_fault(void);
 

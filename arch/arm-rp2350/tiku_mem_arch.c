@@ -7,9 +7,9 @@
  *
  * tiku_mem_arch.c - RP2350 memory operations and flash-backed NVM.
  *
- * Durable state lives in SRAM .uninit and is mirrored verbatim into a 4 KB XIP
- * flash sector, restored at boot when the sector's magic matches.  The flash op is
- * deferred to the MPU relock boundary, amortising its ~20 ms over an unlock window.
+ * Durable state lives in SRAM .uninit and is mirrored, behind a 16-byte CRC
+ * header, to the flash backup sector; boot restores it when the image checks
+ * out.  Writes land in SRAM and the flash commit runs at the MPU relock.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,41 +22,34 @@
 #include <string.h>
 
 /*---------------------------------------------------------------------------*/
-/* Linker symbols                                                            */
+/* LINKER SYMBOLS                                                            */
 /*---------------------------------------------------------------------------*/
 
 extern uint8_t  __uninit_start;
 extern uint8_t  __uninit_end;
-extern uint32_t __tiku_nvm_flash_start[]; /* incomplete array: no assumed size */
+extern uint32_t __tiku_nvm_flash_start[]; /* incomplete array: no size */
 extern uint32_t __tiku_nvm_flash_offset;
 extern uint32_t __tiku_nvm_flash_size;
 
 /**
- * @brief Flash geometry and NVM snapshot magic for the RP2350 mirror sector.
+ * @brief Flash geometry of the mirror: the erase sector and the program page.
  *
- * SECTOR_SIZE is the erase granule; PAGE_SIZE is the program-page granule.
- * MAGIC ('NVMT') marks a valid snapshot at the head of the mirror sector.
+ * The mirror's magic words and header layout come from tiku_nvm_mirror.h.
  */
 #define RP2350_NVM_SECTOR_SIZE   0x1000U   /* 4 KB QSPI erase granule */
 #define RP2350_NVM_PAGE_SIZE     0x100U    /* 256-byte program page */
 #include "kernel/memory/tiku_nvm_mirror.h"
 
 /*---------------------------------------------------------------------------*/
-/* Boot-ROM function lookups                                                 */
-/*                                                                            */
-/* Same pattern as tiku_cpu_rp2350_reboot_to_bootsel(): the 16-bit pointer    */
-/* at flash offset 0x16 is the address of the table-lookup function.  It    */
-/* try lookup masks 0x0004 (ARM_SEC) then 0x0010 (ARM_NONSEC) until one      */
-/* of them resolves each function.  Codes are pico-sdk ROM_TABLE_CODE(c1,c2) */
-/* which encodes as c1 | (c2 << 8).                                          */
+/* BOOT-ROM FUNCTION LOOKUPS                                                 */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief ROM_TABLE_CODE keys for the boot-ROM flash operation functions.
  *
- * Each value is encoded as c1 | (c2 << 8), matching pico-sdk's
- * ROM_TABLE_CODE(c1, c2).  Looked up via the 16-bit pointer at flash offset
- * 0x16 with mask 0x0004 (ARM_SEC) or 0x0010 (ARM_NONSEC).
+ * Encoded as c1 | (c2 << 8), as pico-sdk's ROM_TABLE_CODE(c1, c2).  The ROM's
+ * table-lookup function, whose 16-bit address sits at ROM address 0x16, finds
+ * each under mask 0x0004 (ARM_SEC) or 0x0010 (ARM_NONSEC).
  */
 #define ROM_FUNC_CONNECT_INTERNAL_FLASH   0x4649U  /* 'I' | ('F'<<8) */
 #define ROM_FUNC_FLASH_EXIT_XIP           0x5845U  /* 'E' | ('X'<<8) */
@@ -77,8 +70,8 @@ typedef void (*rom_flash_program_fn_t)(uint32_t flash_offset,
 /**
  * @brief Resolved boot-ROM flash function pointers and resolution flag.
  *
- * Populated once by rom_resolve_once(); remain NULL until that call
- * succeeds.  g_rom_resolved is set to 1 after a successful resolution.
+ * rom_resolve_once() fills them; a function the ROM table does not list
+ * stays NULL.  g_rom_resolved is 1 once the lookups have run.
  */
 static rom_void_fn_t          g_rom_connect_flash;
 static rom_void_fn_t          g_rom_flash_exit_xip;
@@ -91,13 +84,12 @@ static uint8_t                g_rom_resolved;
 /**
  * @brief Look up a boot-ROM function, trying ARM_SEC then ARM_NONSEC mask.
  *
- * @param lookup  Boot-ROM table-lookup function obtained from flash offset 0x16.
+ * @param lookup  Boot-ROM table-lookup function, from ROM address 0x16.
  * @param code    ROM_TABLE_CODE value identifying the desired function.
  * @return Pointer to the ROM function, or NULL if not found under either mask.
  */
 static void *rom_lookup_any(rom_lookup_fn_t lookup, uint32_t code) {
-    /* Try ARM_SEC first, fall back to ARM_NONSEC if the boot ROM exposed
-     * the function under a different mask. */
+    /* ARM_SEC first, then ARM_NONSEC for a function listed only there. */
     void *p = lookup(code, 0x0004U);
     if (p == NULL) {
         p = lookup(code, 0x0010U);
@@ -108,12 +100,9 @@ static void *rom_lookup_any(rom_lookup_fn_t lookup, uint32_t code) {
 /**
  * @brief Resolve all boot-ROM flash function pointers exactly once.
  *
- * Reads the 16-bit lookup-function address from flash offset 0x16 and calls
- * rom_lookup_any() for each required flash operation; later calls return
- * immediately once g_rom_resolved is set.
- *
- * @note All pointers stay NULL if the boot ROM does not expose the table, in
- *       which case the flash ops become no-ops.
+ * Reads the 16-bit lookup-function address at boot ROM address 0x16 and calls
+ * rom_lookup_any() per flash operation; a repeat call returns at once.  With no
+ * lookup function every pointer stays NULL, and flash commits fail.
  */
 static void rom_resolve_once(void) {
     uint16_t lookup_addr;
@@ -126,7 +115,7 @@ static void rom_resolve_once(void) {
     lookup_addr = *(volatile uint16_t *)(uintptr_t)0x16U;
     lookup = (rom_lookup_fn_t)(uintptr_t)lookup_addr;
     if (lookup == NULL) {
-        return;     /* leave fn pointers NULL; flush path becomes a no-op */
+        return;     /* pointers stay NULL: flash commits return -1 */
     }
 
     g_rom_connect_flash =
@@ -164,41 +153,38 @@ static int rom_flash_ready(void) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* Flush buffer                                                              */
-/*                                                                            */
-/* One sector's worth of SRAM, used as the source for flash programming.     */
-/* Layout: 4-byte magic, then the .uninit region verbatim, then 0xFF tail.   */
+/* FLUSH BUFFER                                                              */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief One-sector SRAM staging buffer used as flash program source.
  *
- * Holds one sector's SLICE of the virtual mirror image (16-byte header,
- * .uninit contents, 0xFF padding).  The flush loop stages and commits the
- * mirror through it sector by sector, so it can span several without growing.
+ * Holds one sector's slice of the mirror image (16-byte header, .uninit
+ * contents, 0xFF padding).  The flush stages and commits the mirror through
+ * it one sector at a time, so a mirror of several sectors needs no more SRAM.
  */
 static uint8_t g_flush_buf[RP2350_NVM_SECTOR_SIZE]
     __attribute__((aligned(4)));
 
-/** Sectors actually erased+programmed (dirty flushes), for observability
- *  and the TikuBench dirty-check assertion.  Same accessor name as the
- *  Ambiq backends. */
+/** @brief Flushes that erased and programmed the mirror since boot. */
 static uint32_t g_nvm_flush_programs;
 
+/** @brief Return the number of flushes that wrote flash since boot. */
 uint32_t tiku_mem_arch_nvm_program_count(void)
 {
     return g_nvm_flush_programs;
 }
 
-/** Boot-time mirror-restore outcome (see tiku_nvm_restore_t). */
+/** @brief Boot-time mirror-restore outcome (see tiku_nvm_restore_t). */
 static tiku_nvm_restore_t g_nvm_restore;
 
+/** @brief Return how tiku_mem_arch_init() treated the mirror at boot. */
 tiku_nvm_restore_t tiku_mem_arch_nvm_restore_status(void)
 {
     return g_nvm_restore;
 }
 
-/** Base of the XIP-mapped flash mirror, for tests/diagnostics. */
+/** @brief Base of the XIP-mapped flash mirror, for tests/diagnostics. */
 const uint8_t *tiku_mem_arch_nvm_mirror(void)
 {
     return (const uint8_t *)__tiku_nvm_flash_start;
@@ -224,11 +210,12 @@ uint8_t *tiku_mem_arch_durable_live(size_t *len)
  *
  * Masks all interrupts around the operation, because XIP is suspended during
  * erase and program and an ISR fetching code from flash would bus-fault.
- * Returns without touching flash if rom_flash_ready() is false.
+ * Without the boot-ROM helpers it returns -1 and leaves flash untouched.
  *
  * @param flash_offset  Byte offset from the start of flash for the sector.
  * @param src           SRAM buffer to program (must be at least len bytes).
  * @param len           Number of bytes to program (typically one sector).
+ * @return 0 when the sector reads back equal to @p src, -1 otherwise.
  */
 static int flash_commit_sector(uint32_t flash_offset,
                                 const uint8_t *src,
@@ -261,9 +248,9 @@ static int flash_commit_sector(uint32_t flash_offset,
 /**
  * @brief Public: erase + program one flash sector via the boot-ROM helpers.
  *
- * Thin export of flash_commit_sector() so the carved NVM region backend
- * (tiku_nvm_region_rp2350.c) shares this one proven, interrupt-masked
- * XIP-suspended path instead of duplicating the boot-ROM dance.
+ * flash_commit_sector() with its result discarded; the BASIC module installer
+ * (tiku_basic_module.c) uses it.  tiku_rp2350_flash_commit_sector_status()
+ * returns the result.
  *
  * @param flash_offset  Sector-aligned byte offset from the start of flash.
  * @param src           Replacement sector contents (SRAM).
@@ -271,9 +258,19 @@ static int flash_commit_sector(uint32_t flash_offset,
  */
 void tiku_rp2350_flash_commit_sector(uint32_t flash_offset,
                                      const uint8_t *src, size_t len) {
-    (void)flash_commit_sector(flash_offset, src, len); /* Unchecked compatibility. */
+    (void)flash_commit_sector(flash_offset, src, len); /* result unused */
 }
 
+/**
+ * @brief Public: erase + program one flash sector and report the result.
+ *
+ * The carved NVM region backend (tiku_nvm_region_rp2350.c) uses it.
+ *
+ * @param flash_offset  Sector-aligned byte offset from the start of flash.
+ * @param src           Replacement sector contents (SRAM).
+ * @param len           Bytes to program (typically one whole sector).
+ * @return 0 when the sector reads back equal to @p src, -1 otherwise.
+ */
 int tiku_rp2350_flash_commit_sector_status(uint32_t flash_offset,
                                            const uint8_t *src, size_t len)
 {
@@ -281,11 +278,11 @@ int tiku_rp2350_flash_commit_sector_status(uint32_t flash_offset,
 }
 
 /**
- * @brief Public: program flash WITHOUT erasing, via the boot-ROM helpers.
+ * @brief Public: program flash without erasing it, via the boot-ROM helpers.
  *
- * The same interrupt-masked, XIP-suspended dance as the sector commit, minus
- * the erase -- for gate-last writers such as the Tier-3 module installer, which
- * deliberately leave a page erased during the commit and program it afterwards.
+ * Masks interrupts and suspends XIP as the sector commit does, but skips the
+ * erase.  The module installer uses it to program the header page it left
+ * erased while it committed the rest of the slot.
  *
  * @note @p flash_offset and @p len must satisfy the boot-ROM's 256-byte program
  *       alignment.  Programming cells that are not erased does not set bits;
@@ -315,36 +312,30 @@ void tiku_rp2350_flash_program(uint32_t flash_offset,
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Initialise the RP2350 memory architecture and restore NVM state.
+ * @brief Initialise the RP2350 memory architecture and restore durable state.
  *
- * Resolves boot-ROM flash function pointers, then checks the flash mirror
- * sector for a valid magic word and copies the snapshot back into the SRAM
- * .uninit region, so persistent state survives a full power cycle.
- *
- * @note With no image that checks out (fresh chip, post-erase, torn flush)
- *       .uninit is zeroed and per-subsystem first-boot logic handles it.
+ * Resolves boot-ROM flash function pointers, then copies the mirror back into
+ * the SRAM .uninit region when its image checks out, so durable state
+ * survives a power cycle.  With no such image .uninit is zeroed.
  */
 void tiku_mem_arch_init(void) {
     const uint32_t *flash = (const uint32_t *)__tiku_nvm_flash_start;
     size_t uninit_size =
         (size_t)((uintptr_t)&__uninit_end - (uintptr_t)&__uninit_start);
 
-    /* Resolve ROM functions early so a later nvm_write doesn't pay the
-     * lookup cost.  rom_resolve_once() is idempotent. */
+    /* Resolve the ROM functions here, so the first flush does not pay for
+     * the lookup.  rom_resolve_once() runs its lookups once. */
     rom_resolve_once();
 
-    /* V2 mirrors are CRC-validated: a power cut during the (NON-atomic
-     * on NOR: erase, then program) flush leaves an image that fails the
-     * check and is NOT restored -- .uninit is zeroed and per-subsystem
-     * first-boot priming runs.  V1 (pre-CRC) mirrors are
-     * accepted once for seamless upgrade; the first flush rewrites V2.
+    /* A V2 mirror is restored only when its CRC checks out.  A power cut
+     * during a flush (erase, then program) leaves an image that fails the
+     * check; .uninit is then zeroed and each subsystem's first-boot setup
+     * runs.  A V1 mirror, which has no CRC, is restored, and the next flush
+     * rewrites it as V2.
      *
-     * The restore memcpys write .uninit.  At FIRST boot the MPU is not
-     * armed yet, but tiku_mem_init() is legitimately re-callable
-     * (tests, recovery) -- and by then region 0 is read-only, so an
-     * unbracketed restore is a MemManage fault (found exactly that way
-     * on apollo510 when its region went RO-by-default).  Bracket with
-     * the ARCH window: no flush side-effects, nest-safe. */
+     * tiku_mem_init() can run again after the MPU is armed, when region 0
+     * is read-only, so the restore writes .uninit inside the arch unlock
+     * window, which does not flush and nests. */
     {
         uint16_t mpu_saved = tiku_mpu_arch_unlock_nvm();
         size_t len;
@@ -363,8 +354,8 @@ void tiku_mem_arch_init(void) {
         memcpy(&__uninit_start, (const uint8_t *)&flash[1], uninit_size);
         g_nvm_restore = TIKU_NVM_RESTORE_V1;
     } else {
-        /* A fresh part or a torn flush: a warm reset keeps SRAM, so zero
-         * .uninit rather than let a value from before it pass as restored. */
+        /* A fresh part or a torn flush: zero .uninit.  SRAM survives a
+         * warm reset, and its old contents are not a restored image. */
         memset(&__uninit_start, 0, uninit_size);
         g_nvm_restore =
             (flash[TIKU_NVM_MIRROR_W_MAGIC] == TIKU_NVM_MIRROR_MAGIC_V2)
@@ -395,9 +386,9 @@ void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len) {
 /**
  * @brief Read bytes from the NVM-backed SRAM working copy.
  *
- * The .uninit SRAM region is the live working copy of persistent state;
- * after tiku_mem_arch_init() restores it from flash it is identical to
- * the mirror.  This function is a plain byte-copy from that region.
+ * The .uninit SRAM region is the live working copy of durable state; flash
+ * holds the copy from the last flush.  This function is a plain byte-copy
+ * from the SRAM copy.
  *
  * @param dst  Destination buffer.
  * @param src  Source address within the .uninit region.
@@ -405,9 +396,6 @@ void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len) {
  */
 void tiku_mem_arch_nvm_read(uint8_t *dst, const uint8_t *src,
                              tiku_mem_arch_size_t len) {
-    /* Reads come from the SRAM working copy -- which is exactly the
-     * mirror image after tiku_mem_arch_init() restores it.  Plain
-     * memcpy semantics. */
     tiku_mem_arch_size_t i;
     for (i = 0; i < len; i++) {
         dst[i] = src[i];
@@ -417,9 +405,9 @@ void tiku_mem_arch_nvm_read(uint8_t *dst, const uint8_t *src,
 /**
  * @brief Stage bytes into the SRAM working copy for deferred flash commit.
  *
- * Copies into the .uninit SRAM region only; the flash mirror is updated later
- * by tiku_mem_arch_nvm_flush() at the matching MPU relock boundary, which
- * amortises the ~20 ms erase+program across every write in one unlock window.
+ * Copies into the .uninit SRAM region only; the flush at the matching MPU
+ * relock commits the mirror, once per unlock window however many writes the
+ * window held.
  *
  * @param dst  Destination address within the .uninit region.
  * @param src  Source buffer.
@@ -427,16 +415,9 @@ void tiku_mem_arch_nvm_read(uint8_t *dst, const uint8_t *src,
  */
 void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
                               tiku_mem_arch_size_t len) {
-    /* SRAM-only.  The flash commit happens at the matching
-     * tiku_mpu_lock_nvm() relock point (via tiku_mem_arch_nvm_flush)
-     * so direct stores into .persistent variables inside the unlock
-     * window are captured in the same snapshot.  Doing the flash op
-     * here would (a) double-write when callers combine direct stores
-     * with arch writes, and (b) miss the direct stores entirely.
-     *
-     * Cost of a single relock: one ~20 ms erase+program cycle,
-     * regardless of how many byte-level writes happened inside the
-     * window.  Long transactions therefore amortise. */
+    /* SRAM only.  The flash commit runs at the tiku_mpu_lock_nvm() relock,
+     * so stores made directly to .persistent variables in the same unlock
+     * window land in the same snapshot. */
     tiku_mem_arch_size_t i;
     for (i = 0; i < len; i++) {
         dst[i] = src[i];
@@ -446,24 +427,22 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
 /**
  * @brief Flush the SRAM .uninit region to the flash mirror sector.
  *
- * Snapshots the whole region with the magic word prepended into g_flush_buf,
- * then erases and programs the mirror sectors. Returns failure if completion
- * cannot be established; a failed write may leave a partial mirror.
+ * Stages the 16-byte header (magic, CRC, length) and the region in
+ * g_flush_buf, then erases and programs the mirror sectors; an unchanged
+ * image writes nothing.
+ *
+ * @return 0 when the mirror holds .uninit, -1 for a layout that does not fit,
+ *         missing boot-ROM helpers or a sector that does not verify, which
+ *         can leave a partial mirror.
  */
 int tiku_mem_arch_nvm_flush_status(void) {
-    /* Snapshot the live .uninit region and commit it to the flash
-     * mirror.  This is the explicit durability checkpoint: every kernel
-     * write to .persistent / .uninit eventually flows through this on
-     * its way to surviving a power cycle.
-     *
-     * The mirror may span SEVERAL 4 KB erase sectors (its size is the
-     * linker's __tiku_nvm_flash_size; one sector today).  The virtual
-     * image is 16-byte header || .uninit contents || 0xFF padding; each
-     * sector's slice is staged through the one-sector g_flush_buf and
-     * committed in ascending order.  A power cut anywhere mid-commit
-     * leaves a mix of old and new sectors whose CRC cannot validate, so
-     * boot lands in RESTORE_CRC_FAIL rather than restoring a torn image
-     * -- the same failure class as a mid-sector cut always had. */
+    /* Every store to .persistent / .uninit reaches flash through this
+     * flush.  The mirror is __tiku_nvm_flash_size bytes, a whole number of
+     * 4 KB erase sectors.  Its image is the 16-byte header, the .uninit
+     * contents and 0xFF padding; each sector's slice is staged in
+     * g_flush_buf and committed in ascending order.  A power cut mid-commit
+     * leaves an image that fails its check at boot, and .uninit then
+     * starts blank. */
     const uint32_t *mirror = (const uint32_t *)__tiku_nvm_flash_start;
     const uint8_t  *mirror8 = (const uint8_t *)__tiku_nvm_flash_start;
     uint32_t mirror_bytes = (uint32_t)(uintptr_t)&__tiku_nvm_flash_size;
@@ -479,20 +458,14 @@ int tiku_mem_arch_nvm_flush_status(void) {
         return -1;
     }
 
-    /* Dirty check (same policy as the Ambiq backends): skip the erase+
-     * program when the live image already matches the mirror.  Compared
-     * directly against the XIP-mapped mirror -- header words (magic,
-     * length; NOT the CRC word, which on an unchanged image is
-     * necessarily the CRC of this same content) and the image bytes.
-     * Padding needs no compare: equal lengths mean the pad spans
-     * coincide, and both are post-erase 0xFF.  The mirror is cache-
-     * coherent here — the boot-ROM sequence ends with flush_cache after
-     * every program, and a cold boot starts with a cold cache.  On NOR
-     * this matters far more than on MRAM: a skipped flush saves a
-     * ~20 ms IRQs-off erase+program AND a sector endurance cycle
-     * (~100 K lifetime), so relocks whose window touched nothing in
-     * .uninit (e.g. TCP paths writing .bss buffers) become free instead
-     * of costing flash wear per packet. */
+    /* Dirty check: nothing is written when the XIP-mapped mirror's magic
+     * and length words match and its image bytes equal .uninit.  The CRC
+     * word follows from the bytes, and equal lengths give equal 0xFF
+     * padding.  The XIP read is coherent: every commit ends with the boot
+     * ROM's cache flush, and a cold boot starts with a cold cache.  A
+     * skipped commit saves an interrupts-off erase and program and one
+     * sector erase cycle, so a relock whose window left .uninit unchanged
+     * costs no flash wear. */
     if (mirror[TIKU_NVM_MIRROR_W_MAGIC] == TIKU_NVM_MIRROR_MAGIC_V2 &&
         mirror[TIKU_NVM_MIRROR_W_LEN]   == (uint32_t)uninit_size &&
         memcmp(uninit, mirror8 + TIKU_NVM_MIRROR_HDR_BYTES,
@@ -532,7 +505,7 @@ int tiku_mem_arch_nvm_flush_status(void) {
     return 0;
 }
 
-/** @brief Unchecked compatibility wrapper. */
+/** @brief tiku_mem_arch_nvm_flush_status() with the result discarded. */
 void tiku_mem_arch_nvm_flush(void)
 {
     (void)tiku_mem_arch_nvm_flush_status();

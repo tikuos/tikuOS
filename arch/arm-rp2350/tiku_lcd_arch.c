@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_lcd_arch.c - RP2350 (no on-chip LCD controller) — empty TU
+ * tiku_lcd_arch.c - RP2350 LCD backend, an empty translation unit.
  *
- * The Pico 2 W has no on-chip LCD peripheral. The interfaces/lcd
- * layer self-gates to no-ops on builds where TIKU_BOARD_HAS_LCD is
- * unset, so this file just needs to compile.
+ * The RP2350 has no LCD controller and the Pico 2 boards define no
+ * TIKU_BOARD_HAS_LCD, so the interfaces/lcd calls do nothing and this file
+ * holds no code.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

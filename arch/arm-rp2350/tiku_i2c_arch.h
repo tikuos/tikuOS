@@ -7,9 +7,9 @@
  *
  * tiku_i2c_arch.h - RP2350 I2C driver interface.
  *
- * Drives the DW_apb_i2c controller in master mode, 7-bit addressing, standard or
- * fast speed.  SCL counts are recomputed from clk_peri so the driver is correct at
- * every supported clk_sys; SDA/SCL pins are board-defined and function-checked.
+ * Drives the DW_apb_i2c controller in master mode, 7-bit addressing, standard
+ * or fast speed.  SCL counts are computed from the cached clk_peri rate at
+ * init; the SDA and SCL pins come from the board header.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,16 +23,20 @@
  * @brief Initialize the DW_apb_i2c controller with the given config.
  *
  * Takes the I2C block out of reset, configures SCL high/low counts from
- * clk_peri for the requested speed, and enables the controller.  Must be
- * called before any transfer function.
+ * clk_peri for the requested speed, and enables the controller.
  *
- * @param config  Bus configuration (speed, pin assignments).
- * @return 0 on success, negative errno-style code on failure.
+ * @note Call it before any transfer function; transfers return
+ *       TIKU_I2C_ERR_PARAM until it has run.
+ * @param config  Bus configuration (the speed).
+ * @return 0 on success, TIKU_I2C_ERR_PARAM for a NULL @p config.
  */
 int  tiku_i2c_arch_init(const tiku_i2c_config_t *config);
 
 /**
- * @brief Disable the I2C controller and release its pins.
+ * @brief Disable the I2C controller.
+ *
+ * Clears IC_ENABLE; transfers return TIKU_I2C_ERR_PARAM until the next
+ * tiku_i2c_arch_init().  The pins stay routed to I2C.
  */
 void tiku_i2c_arch_close(void);
 
@@ -67,8 +71,8 @@ int  tiku_i2c_arch_read (uint8_t addr, uint8_t *buf, uint16_t len);
  * @brief Architecture-specific address probe (bus-scan presence check).
  *
  * Reports whether a device acknowledges @p addr.  The DW_apb_i2c cannot do a
- * zero-byte transaction, so the backend probes with a single 1-byte read and
- * `i2c scan` uses this rather than the zero-length write the bus layer rejects.
+ * zero-byte transaction, so the probe is a single 1-byte read whose byte is
+ * discarded; `i2c scan` calls it for each address.
  *
  * @param addr  7-bit slave address (unshifted).
  * @return 0 (TIKU_I2C_OK) if acknowledged, negative errno-style code if not.

@@ -7,8 +7,8 @@
  *
  * tiku_wake_arch.c - RP2350 backend for the wake-source HAL
  *
- * Reads NVIC enable state to figure out which wake sources are
- * currently armed. Mirrors arch/msp430/tiku_wake_arch.c.
+ * Reports which wake sources are armed, from the NVIC enables, SysTick's
+ * TICKINT bit and the IO_BANK0 PROC0_INTE registers.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,14 +20,12 @@
 /**
  * @brief Query the currently armed wake sources on RP2350.
  *
- * Reads NVIC ISER0 and the SysTick CSR, then maps them to the
- * platform-agnostic bit-field: TICKINT -> SYSTICK, TIMER0_0 -> HTIMER,
- * UART0 -> UART_RX, IO_BANK0 -> GPIO.
+ * Maps SysTick TICKINT -> SYSTICK and the NVIC enables of TIMER0_0 -> HTIMER,
+ * UART0 -> UART_RX and IO_BANK0 -> GPIO; gpio_ie[] gets one bit per pin for
+ * GPIO 0-31, 8 pins per byte, from PROC0_INTE.
  *
- * @note The WDT bit is left clear intentionally -- the watchdog armed state
- *       lives in the tiku_watchdog layer and the "wake" command queries it
- *       separately.  gpio_ie[] comes from scanning PROC0_INTE (4 words, 4 bits
- *       per pin), compressed into the MSP430-compatible 8-bit-per-port layout.
+ * @note TIKU_WAKE_WDT is never set: the RP2350 watchdog resets the chip and
+ *       raises no interrupt.
  * @param out  Destination for wake source bitmap (must be non-NULL).
  *             If NULL the function returns immediately.
  */
@@ -39,8 +37,8 @@ void tiku_wake_arch_query(tiku_wake_sources_t *out) {
 
     uint32_t iser = *(volatile uint32_t *)RP2350_NVIC_ISER0;
 
-    /* SysTick lives in the SCB (system exception 15). It is enabled
-     * via the SYST_CSR.TICKINT bit; check that instead. */
+    /* SysTick is system exception 15, outside the NVIC; SYST_CSR.TICKINT
+     * enables its interrupt. */
     if (_RP2350_REG(RP2350_SYST_CSR) & RP2350_SYST_CSR_TICKINT) {
         out->sources |= TIKU_WAKE_SYSTICK;
     }
@@ -54,18 +52,12 @@ void tiku_wake_arch_query(tiku_wake_sources_t *out) {
     if (iser & (1U << RP2350_IRQ_IO_BANK0)) {
         out->sources |= TIKU_WAKE_GPIO;
     }
-    /* Watchdog reset is always armed when the watchdog is enabled —
-     * the kernel's tiku_watchdog tracks its own enabled flag and the
-     * "wake" command queries that separately, so WDT is left cleared
-     * here. */
-
-    /* Per-port GPIO IE summary: scan PROC0_INTE for non-zero words.
-     * Each word covers 8 pins (one virtual port). */
+    /* Per-port GPIO IE summary from PROC0_INTE.  Each word covers 8 pins,
+     * reported as one gpio_ie[] byte. */
     uint8_t i;
     for (i = 0U; i < 4U && i < TIKU_WAKE_MAX_GPIO_PORTS; i++) {
         uint32_t inte = _RP2350_REG(RP2350_IO_BANK0_PROC0_INTE(i));
-        /* Compress the 4-bits-per-pin word into a 1-bit-per-pin byte
-         * so the snapshot fits the MSP430-style 8-bit layout. */
+        /* A pin with any of its four enable bits set gets its bit. */
         uint8_t pinbits = 0U;
         uint8_t p;
         for (p = 0U; p < 8U; p++) {

@@ -7,9 +7,9 @@
  *
  * tiku_crt_early.c - RP2350 (Cortex-M33) startup.
  *
- * The minimum path from boot ROM to main(): the .boot2 stub that brings up QSPI
- * for XIP, the IMAGE_DEF block the ROM scans for, a 256-entry vector table of weak
- * handlers, and a reset handler that copies .data, zeroes .bss and calls main.
+ * The minimum path from boot ROM to main(): a .boot2 placeholder, the IMAGE_DEF
+ * block the ROM scans for, an 80-entry vector table of weak handlers, and a
+ * reset handler that masks IRQs, sets VTOR, copies .data and zeroes .bss.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,7 +17,7 @@
 #include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
-/* Linker-script symbols                                                     */
+/* LINKER-SCRIPT SYMBOLS                                                     */
 /*---------------------------------------------------------------------------*/
 
 extern uint32_t __data_load;
@@ -30,7 +30,7 @@ extern uint32_t __uninit_start;
 extern uint32_t __uninit_end;
 
 /*---------------------------------------------------------------------------*/
-/* main()                                                                    */
+/* ENTRY POINT AND VECTOR TABLE DECLARATION                                  */
 /*---------------------------------------------------------------------------*/
 
 extern int main(void);
@@ -41,15 +41,14 @@ typedef void (*rp2350_isr_t)(void);
 extern const rp2350_isr_t tiku_rp2350_vectors[16 + RP2350_NUM_EXT_IRQS];
 
 /*---------------------------------------------------------------------------*/
-/* Default handlers (override with own functions of the same name)           */
+/* DEFAULT HANDLERS                                                          */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Default ISR handler — spin forever on an unhandled exception.
+ * @brief Default ISR handler: park the core in a WFE loop.
  *
- * Alias target for all weak exception/IRQ stubs. Spinning on WFE keeps
- * the core in a low-power state so a debugger halt lands on a recognisable
- * PC rather than a random instruction stream.
+ * Every weak exception and IRQ stub aliases it, so an unhandled exception
+ * stops here, at a PC a debugger recognises, with the core in low power.
  */
 static void rp2350_default_handler(void) {
     while (1) {
@@ -61,13 +60,9 @@ static void rp2350_default_handler(void) {
  * @defgroup rp2350_exception_stubs Cortex-M33 weak exception/IRQ stubs
  * @brief Weak aliases that default to rp2350_default_handler.
  *
- * Each stub can be overridden by a non-weak definition of the same name in any
- * driver or kernel file; the vector table references these symbols so the
- * linker prefers the real implementation when present.
- *
- * @note SysTick is included so the vector table can be populated before the
- *       timer arch driver installs its own non-weak handler.  External IRQs
- *       wired: TIMER0_ALARM0, UART0, IO_BANK0, PIO0_IRQ0, DMA_IRQ0.
+ * A non-weak definition of the same name in any file replaces a stub at link
+ * time.  The vector table wires these, SysTick, and five IRQs: TIMER0 alarm 0,
+ * DMA_IRQ_0, PIO0_IRQ_0, IO_IRQ_BANK0 and UART0.
  */
 void tiku_rp2350_nmi_handler(void)        __attribute__((weak, alias("rp2350_default_handler")));
 void tiku_rp2350_hard_fault_handler(void) __attribute__((weak, alias("rp2350_default_handler")));
@@ -78,9 +73,7 @@ void tiku_rp2350_secure_fault_handler(void) __attribute__((weak, alias("rp2350_d
 void tiku_rp2350_svc_handler(void)        __attribute__((weak, alias("rp2350_default_handler")));
 void tiku_rp2350_pendsv_handler(void)     __attribute__((weak, alias("rp2350_default_handler")));
 
-/* SysTick lives here so the vector table can be populated before the
- * timer arch driver supplies the real handler. The arch file overrides
- * this with a non-weak definition. */
+/* tiku_timer_arch.c defines the non-weak SysTick handler. */
 void tiku_rp2350_systick_handler(void) __attribute__((weak, alias("rp2350_default_handler")));
 
 /* External IRQ stubs wired up here: TIMER0 alarm 0, UART0, IO_BANK0,
@@ -92,7 +85,7 @@ void tiku_rp2350_pio0_irq0_handler(void) __attribute__((weak, alias("rp2350_defa
 void tiku_rp2350_dma_irq0_handler(void)  __attribute__((weak, alias("rp2350_default_handler")));
 
 /*---------------------------------------------------------------------------*/
-/* Reset handler                                                             */
+/* RESET HANDLER                                                             */
 /*---------------------------------------------------------------------------*/
 
 void tiku_rp2350_reset_handler(void) __attribute__((naked, section(".text"), used));
@@ -102,29 +95,21 @@ void tiku_rp2350_reset_handler(void) __attribute__((naked, section(".text"), use
  *
  * Runs with SP already set by the boot ROM.  Masks all maskable IRQs, writes
  * VTOR, copies .data from flash to SRAM, zeros .bss and calls main(); .uninit
- * is left untouched so warm-reset state survives.
- *
- * @note The early mask stops SysTick or any other early-programmed source
- *       firing before the scheduler is ready.  Naked, so the compiler emits no
- *       prologue that would touch uninitialised call-saved registers.
+ * is not zeroed.
  */
 void tiku_rp2350_reset_handler(void) {
-    /* Mask all maskable IRQs *immediately*. Cortex-M resets with
-     * PRIMASK = 0 (IRQs enabled), so anything that programs an IRQ
-     * source during kernel initialisation — for
-     * instance SysTick.TICKINT in tiku_clock_arch_init() — would
-     * fire its handler before tiku_sched_init() has built the
-     * process queue, dereferencing NULL.
+    /* Mask all maskable IRQs first.  Cortex-M resets with PRIMASK = 0
+     * (IRQs enabled), and a source programmed during kernel init, such
+     * as SysTick.TICKINT in tiku_clock_arch_init(), would otherwise run
+     * its handler before tiku_sched_init() has built the process queue,
+     * dereferencing NULL.
      *
      * The scheduler re-enables IRQs at the top of tiku_sched_loop(). */
     __asm__ volatile ("cpsid i" ::: "memory");
 
-    /* Point the M33 VTOR at the vector table explicitly. The boot
-     * ROM is supposed to do this from the IMAGE_DEF VECTOR_TABLE
-     * item, but if anything is off the resulting silent hard fault
-     * is brutal to diagnose, so do it ourselves. The vector-table
-     * address must be aligned per VTOR.TBLOFF requirements (the
-     * align to 512 in the linker script). */
+    /* Set VTOR to the vector table.  The boot ROM also sets it from the
+     * IMAGE_DEF VECTOR_TABLE item.  VTOR.TBLOFF needs the 512-byte
+     * alignment the linker script gives .vectors. */
     *(volatile uint32_t *)0xE000ED08U = (uint32_t)tiku_rp2350_vectors;
 
     /* Copy .data from flash to SRAM. */
@@ -140,32 +125,33 @@ void tiku_rp2350_reset_handler(void) {
         *dst++ = 0U;
     }
 
-    /* The .uninit region is intentionally NOT zeroed — it holds
-     * boot-counter / device-name state that survives warm resets. */
+    /* .uninit is not zeroed: it holds the durable state (boot counter,
+     * device name, persist cells), restored from flash by
+     * tiku_mem_arch_init(). */
 
     (void)main();
 
-    /* Should never return; if it does, halt cleanly. */
+    /* main() does not return; if it does, park the core. */
     while (1) {
         __asm__ volatile ("wfe");
     }
 }
 
 /*---------------------------------------------------------------------------*/
-/* Vector table                                                              */
+/* VECTOR TABLE                                                              */
 /*---------------------------------------------------------------------------*/
 
 /*
  * Cortex-M33 vector table for RP2350.
  *
  * Placed in .vectors so the linker aligns it to the VTOR.TBLOFF requirement.
- * The boot ROM reads SCB.VTOR from the IMAGE_DEF VECTOR_TABLE item and loads SP
- * from entry 0 before jumping to entry 1.
+ * The boot ROM sets VTOR from the IMAGE_DEF VECTOR_TABLE item, loads SP from
+ * entry 0 and jumps to entry 1.
  *
- * RP2350 exposes IRQs 0..51 (datasheet 3.6.1).  The array is sized to 16 system
- * exceptions + 64 external IRQs = 80 entries, covering every used IRQ with
- * margin; unused slots hold rp2350_default_handler so an unexpected IRQ lands
- * in a debuggable spin loop rather than executing a NULL pointer.
+ * RP2350 exposes IRQs 0..51 (datasheet 3.6.1).  The array holds 16 system
+ * exceptions + 64 external IRQs = 80 entries.  Every slot without a driver
+ * handler holds rp2350_default_handler; a NULL slot would hard-fault when
+ * taken.
  *
  * rp2350_isr_t and RP2350_NUM_EXT_IRQS are declared near the top of this file
  * so the reset handler can reference the array before it is defined textually.
@@ -201,10 +187,8 @@ __attribute__((section(".vectors"), used)) = {
     [16 + 21] = tiku_rp2350_io_bank0_isr,      /* IRQ 21  IO_IRQ_BANK0 */
     [16 + 33] = tiku_rp2350_uart0_isr,         /* IRQ 33  UART0_IRQ    */
 
-    /* All remaining slots default to rp2350_default_handler via the
-     * designated-init zero, which the linker fills with NULL — but
-     * NULL is a valid pointer here that would cause a hard fault
-     * if dispatched. Replace nulls explicitly. */
+    /* The remaining slots would be NULL, which hard-faults when taken;
+     * these ranges fill them with rp2350_default_handler. */
     [16 +  5 ... 16 +  9] = rp2350_default_handler,
     [16 + 11 ... 16 + 14] = rp2350_default_handler,
     [16 + 16 ... 16 + 20] = rp2350_default_handler,
@@ -213,7 +197,7 @@ __attribute__((section(".vectors"), used)) = {
 };
 
 /*---------------------------------------------------------------------------*/
-/* RP2350 IMAGE_DEF block                                                    */
+/* RP2350 IMAGE_DEF BLOCK                                                    */
 /*---------------------------------------------------------------------------*/
 
 /*
@@ -225,7 +209,7 @@ __attribute__((section(".vectors"), used)) = {
  *
  *   word 0  marker_start = 0xffffded3
  *
- *   word 1  IMAGE_TYPE item — packs everything into ONE word:
+ *   word 1  IMAGE_TYPE item, all of it in one word:
  *             byte 0 = type 0x42
  *             byte 1 = item size in words = 1
  *             bytes 2-3 = 16-bit IMAGE_TYPE flags
@@ -264,11 +248,9 @@ __attribute__((section(".vectors"), used)) = {
 /**
  * @brief RP2350 IMAGE_DEF block layout as a C struct.
  *
- * The boot ROM scans the first 4 KB of flash for a block bounded by
- * marker_start (0xFFFFDED3) and marker_end (0xAB123579).  This is the minimal
- * "executable, ARM, secure" descriptor plus a VECTOR_TABLE item.
- *
- * @note See pico-sdk picobin.h for the authoritative field encoding.
+ * The boot ROM scans the first 4 KB of flash for a block from marker_start
+ * (0xFFFFDED3) to marker_end (0xAB123579): here the minimal "executable, ARM,
+ * secure" descriptor and a VECTOR_TABLE item, encoded per pico-sdk picobin.h.
  */
 struct rp2350_image_def {
     uint32_t marker_start;     /**< Block start magic: 0xFFFFDED3 */
@@ -296,8 +278,10 @@ struct rp2350_image_def {
  * @brief RP2350 IMAGE_DEF descriptor placed in the .image_def flash section.
  *
  * Consumed by the boot ROM to identify the image type and locate the
- * Cortex-M33 vector table. Must remain in the .image_def section (defined
- * in the linker script at a fixed offset within the first 4 KB of flash).
+ * Cortex-M33 vector table.
+ *
+ * @note It must stay in .image_def, which the linker script places at
+ *       0x10000100, inside the first 4 KB of flash that the boot ROM scans.
  */
 const struct rp2350_image_def tiku_rp2350_image_def
 __attribute__((section(".image_def"), used)) = {
@@ -315,32 +299,18 @@ __attribute__((section(".image_def"), used)) = {
 };
 
 /*---------------------------------------------------------------------------*/
-/* Boot2: minimal QSPI XIP setup                                             */
+/* BOOT2 PLACEHOLDER                                                         */
 /*---------------------------------------------------------------------------*/
 
-/*
- * On RP2350 the boot ROM bootloader is much more capable than on the
- * RP2040 — for a basic image marked with the IMAGE_DEF block above,
- * the ROM enables XIP itself and jumps to the reset handler with
- * flash already executing.  The .boot2 region therefore only has to
- * exist (the linker pads it to 256 bytes) and need not contain any
- * special second-stage payload. Keep an explicit 16-bit literal so
- * the section is non-empty and the linker layout stays well-defined.
- *
- * If you ever need to swap to a non-default flash chip that requires
- * a custom CS/CLK ratio or different read command, replace this stub
- * with a hand-tuned routine in arch/arm-rp2350/devices/boot2_*.S
- * (see the RP2350 SDK for reference implementations).
- */
 /**
- * @brief Minimal .boot2 placeholder for RP2350 (boot ROM already enables XIP).
+ * @brief Placeholder word that keeps .boot2 non-empty.
  *
- * The boot ROM handles XIP setup before jumping to the reset handler, so .boot2
- * needs no real second-stage payload; this constant just keeps the section
- * non-empty so the linker layout is well-defined.
+ * For an image with the IMAGE_DEF block above, the boot ROM sets up XIP and
+ * jumps to the reset handler itself, so .boot2 holds no second-stage loader;
+ * the linker pads the section to 256 bytes.
  *
- * @note Replace with a hand-tuned routine if a non-default flash chip needs a
- *       custom CS/CLK ratio or read command.
+ * @note A flash chip that needs another clock divider or read command needs
+ *       a real boot2 routine in place of this word.
  */
 const uint32_t tiku_rp2350_boot2_marker
 __attribute__((section(".boot2"), used)) = 0xDEADBE2FU;

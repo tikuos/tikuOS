@@ -7,8 +7,9 @@
  *
  * tiku_device_select.h - RP2350 device and board include router.
  *
- * Mirrors the MSP430 router: the Makefile names the silicon and the board PCB
- * separately.  A new board needs a header in boards/ and one #elif here.
+ * The Makefile names the silicon and the board separately, and this header
+ * includes the matching device and board headers.  A new board needs a header
+ * in boards/ and one #elif here.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,9 +24,9 @@
 /**
  * @brief Route the silicon-level device header.
  *
- * The Makefile must define TIKU_DEVICE_RP2350. Any other RP2350
- * silicon variant would add an @c #elif here and a matching device
- * header under devices/.
+ * TIKU_DEVICE_RP2350 selects tiku_device_rp2350.h; without it the build
+ * stops at the #error.  Another silicon variant needs an @c #elif here and a
+ * device header under devices/.
  */
 #if defined(TIKU_DEVICE_RP2350)
 #include <arch/arm-rp2350/devices/tiku_device_rp2350.h>
@@ -49,8 +50,7 @@
 #elif defined(TIKU_BOARD_RPI_PICO2)
 #include <arch/arm-rp2350/boards/tiku_board_rpi_pico2.h>
 #else
-/* Default to the Pico 2 W board if nothing is selected — this is the
- * primary supported board. */
+/* Neither board selected: the Pico 2 W. */
 #define TIKU_BOARD_RPI_PICO2_W 1
 #include <arch/arm-rp2350/boards/tiku_board_rpi_pico2_w.h>
 #endif

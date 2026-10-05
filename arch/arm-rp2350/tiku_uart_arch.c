@@ -8,8 +8,8 @@
  * tiku_uart_arch.c - PL011 UART driver for the RP2350
  *
  * Drives UART0 on GP0 (TX) / GP1 (RX) at the board's TIKU_BOARD_UART_BAUD
- * (default 115200, 8N1). The RX ring buffer mirrors the MSP430 driver's
- * shape so the platform-agnostic shell IO sits unchanged on top.
+ * (default 115200, 8N1).  The RX interrupt fills a ring buffer that
+ * tiku_uart_getc() drains; transmit blocks on the TX FIFO.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,28 +22,25 @@
 #include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
-/* RX ring buffer                                                            */
+/* RX RING BUFFER                                                            */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @defgroup uart_rxbuf UART RX ring buffer configuration
- * @brief Power-of-two ring buffer for UART0 receive data.
+ * @brief UART0 RX ring buffer size in bytes, 256 by default.
  *
- * TIKU_UART_RXBUF_SIZE must be a power of two so the mask wrapping
- * can use bitwise AND.  Override at compile time if the default 256 B
- * is too large or too small for the target.
- * @{
+ * Must be a power of two: indices wrap with TIKU_UART_RXBUF_MASK.  The ring
+ * holds one byte less than its size.
  */
 #ifndef TIKU_UART_RXBUF_SIZE
-#define TIKU_UART_RXBUF_SIZE  256 /**< RX buffer size in bytes (power of 2). */
+#define TIKU_UART_RXBUF_SIZE  256
 #endif
 
 #if (TIKU_UART_RXBUF_SIZE & (TIKU_UART_RXBUF_SIZE - 1)) != 0
 #error "TIKU_UART_RXBUF_SIZE must be a power of two"
 #endif
 
-#define TIKU_UART_RXBUF_MASK  (TIKU_UART_RXBUF_SIZE - 1) /**< Index wrap mask. */
-/** @} */
+/** @brief Ring index wrap mask. */
+#define TIKU_UART_RXBUF_MASK  (TIKU_UART_RXBUF_SIZE - 1)
 
 /*
  * UART0 receive ring buffer state.
@@ -61,7 +58,7 @@ static struct {
 } rx;
 
 /*---------------------------------------------------------------------------*/
-/* Helpers                                                                   */
+/* HELPERS                                                                   */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -85,7 +82,7 @@ static inline void uart_write(uint32_t off, uint32_t val) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* Pin / pad mux                                                             */
+/* PIN AND PAD MUX                                                           */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -109,29 +106,25 @@ static void uart_pins_init(void) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* Public API                                                                */
+/* PUBLIC API                                                                */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Initialize UART0 at TIKU_BOARD_UART_BAUD, 8N1.
  *
- * Computes the PL011 integer and fractional baud divisors from the live
- * peripheral clock, configures pads, enables the RX FIFO at 1/8 threshold and
- * installs the RX interrupt mask.
- *
- * @note Drains any boot-time FIFO noise, resets the ring buffer, enables the
- *       UART with TX+RX, and unmasks UART0 in the NVIC so the ISR fires.
+ * Sets the baud divisors from the live clk_peri, muxes GP0/GP1, enables the
+ * FIFOs with the RX interrupt at 1/8 full and on RX timeout, empties the RX
+ * FIFO and the ring buffer, then enables the UART and its NVIC line.
  */
 void tiku_uart_init(void) {
     /* PL011 baud divisor formula:
      *   bauddiv  = CLK_PERI / (16 * baud)            (fractional)
      *   IBRD     = floor(bauddiv)                    (16-bit)
-     *   FBRD     = round((bauddiv - IBRD) * 64)      ( 6-bit)
+     *   FBRD     = (bauddiv - IBRD) * 64, truncated  ( 6-bit)
      *
-     * Use the actual peripheral clock frequency (set by the boot
-     * sequence — 150 MHz on PLL, 12 MHz on XOSC fallback). Compute
-     * bauddiv as a 26.6 fixed-point value so IBRD = top 20 bits,
-     * FBRD = bottom 6 bits. */
+     * clk_peri is the clock the boot sequence set: 150 MHz from the PLL,
+     * 12 MHz on the XOSC fallback.  bauddiv below holds the divisor with
+     * 6 fraction bits: IBRD is bauddiv >> 6 and FBRD its low 6 bits. */
     const uint32_t clk_peri = (uint32_t)tiku_cpu_rp2350_smclk_get_hz();
     const uint32_t baud     = TIKU_BOARD_UART_BAUD;
     /* (clk_peri * 4) / baud  ==  (clk_peri / (16 * baud)) << 6  */
@@ -152,9 +145,8 @@ void tiku_uart_init(void) {
     uart_write(RP2350_UART_LCR_H,
                RP2350_UART_LCR_WLEN_8 | RP2350_UART_LCR_FEN);
 
-    /* IFLS: RX trigger at 1/8 (highest sensitivity) so byte arrival
-     * generates an IRQ promptly rather than waiting for a half-full
-     * FIFO. */
+    /* IFLS 0: the RX interrupt fires at 1/8 full; fewer bytes raise the
+     * RX timeout interrupt. */
     uart_write(RP2350_UART_IFLS, 0U);
 
     /* Enable RX-IRQ mask (RX FIFO at threshold + RX timeout). */
@@ -227,8 +219,7 @@ uint8_t tiku_uart_rx_ready(void) {
 /**
  * @brief Consume one byte from the RX ring buffer.
  *
- * @return The received byte as an unsigned int in [0, 255], or -1
- *         if the buffer is empty.
+ * @return The received byte, 0 to 255, or -1 if the buffer is empty.
  */
 int tiku_uart_getc(void) {
     if (rx.head == rx.tail) {
@@ -245,7 +236,7 @@ int tiku_uart_getc(void) {
  * Counts both hardware overruns (PL011 OE bit in DR) and software
  * overruns (ring buffer full when the ISR tries to enqueue a byte).
  *
- * @return Total overrun count.
+ * @return Total overrun count; it wraps at 65536.
  */
 uint16_t tiku_uart_overrun_count(void) {
     return rx.overrun_count;
@@ -254,12 +245,10 @@ uint16_t tiku_uart_overrun_count(void) {
 /**
  * @brief Reset the overrun counter to zero.
  *
- * The single 16-bit store is atomic with respect to the ISR's 16-bit
- * increment on Cortex-M, so no interrupt masking is needed.
+ * A single 16-bit store, which the ISR's increment cannot split, so it runs
+ * with interrupts enabled.
  */
 void tiku_uart_overrun_reset(void) {
-    /* Atomic w.r.t. ISR: a single 16-bit store on Cortex-M is atomic
-     * with respect to a 16-bit ISR write — no extra masking needed. */
     rx.overrun_count = 0U;
 }
 
@@ -267,9 +256,9 @@ void tiku_uart_overrun_reset(void) {
 /**
  * @brief Inject a byte into the RX ring buffer (test only).
  *
- * Silently drops the byte if the ring buffer is full.  Available only
- * when HAS_TESTS is defined so tests can exercise the RX path without
- * real hardware.
+ * Drops the byte, counting nothing, if the ring buffer is full.  Built only
+ * when HAS_TESTS is defined; tests use it to feed the RX path without the
+ * UART.
  *
  * @param byte  Byte to inject.
  */
@@ -283,19 +272,15 @@ void tiku_uart_test_inject(uint8_t byte) {
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* IRQ handler                                                               */
+/* IRQ HANDLER                                                               */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief UART0 interrupt handler — drains the RX FIFO into the ring buffer.
+ * @brief UART0 interrupt handler: drains the RX FIFO into the ring buffer.
  *
- * Non-weak, so the linker resolves here rather than to the default trap.
- * Handles both the FIFO threshold (RXIM) and timeout (RTIM) interrupts, and
- * acknowledges every asserted source at exit via ICR.
- *
- * @note For each byte read from DR the hardware OE bit is checked and counted;
- *       bytes that would overflow the ring count as software overruns and are
- *       discarded.
+ * Strong definition of the vector table's weak alias.  On the FIFO threshold
+ * (RXIM) or timeout (RTIM) interrupt it moves every byte into the ring,
+ * counting OE flags and full-ring drops as overruns, then clears via ICR.
  */
 void tiku_rp2350_uart0_isr(void) {
     uint32_t mis = uart_read(RP2350_UART_MIS);
@@ -311,7 +296,7 @@ void tiku_rp2350_uart0_isr(void) {
                 rx.buf[rx.head] = (uint8_t)(dr & 0xFFU);
                 rx.head = next;
             } else {
-                /* Software overrun: caller didn't drain fast enough. */
+                /* Ring full: drop the byte, count a software overrun. */
                 rx.overrun_count++;
             }
         }
@@ -322,15 +307,15 @@ void tiku_rp2350_uart0_isr(void) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* Lightweight printf                                                        */
+/* LIGHTWEIGHT PRINTF                                                        */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Print an unsigned integer in the given base over UART0.
  *
- * Supports an optional minimum field width and a pad character.  Renders digits
- * LSD to MSD into a local 20-char buffer, then emits them in order, which keeps
- * newlib-nano's printf out of the link.
+ * Supports an optional minimum field width and a pad character.  Renders
+ * digits least significant first into a local 20-char buffer, then emits them
+ * in reverse.
  *
  * @param v      Value to print.
  * @param base   Numeric base (10 or 16).
@@ -384,8 +369,8 @@ static void uart_print_int(long v, unsigned width, char pad) {
  * @brief Lightweight printf over UART0.
  *
  * Supports %s, %c, %d, %u, %x, %ld, %lu, %lx, %% and an optional decimal width
- * prefix with '0' or ' ' padding.  Converts a bare '\n' to "\r\n", and covers
- * the banner and ps/free/info output without linking newlib-nano's printf.
+ * prefix with '0' or ' ' padding; %s pads with spaces.  Converts '\n' in the
+ * format to "\r\n" and prints an unknown conversion as written.
  *
  * @param fmt  printf-style format string (must be non-NULL).
  * @param ...  Arguments matching the format specifiers.
@@ -476,7 +461,7 @@ void tiku_uart_printf(const char *fmt, ...) {
             tiku_uart_putc('%');
             break;
         default:
-            /* Unknown spec: just print it literally. */
+            /* Unknown conversion: print it as written. */
             tiku_uart_putc('%');
             tiku_uart_putc(spec);
             break;

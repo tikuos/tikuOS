@@ -7,9 +7,9 @@
  *
  * tiku_crit_arch.c - RP2350 IRQ-mask backend for tiku_crit.
  *
- * The NVIC has per-source enables and no MSP430-style IE families, so masking
- * snapshots ISER0, clears everything outside the preserve set and restores it.
- * The GPIO bank is one source for all pins, so it is kept or dropped whole.
+ * Masking snapshots NVIC ISER0, disables every enabled IRQ outside the preserve
+ * set and later writes the snapshot back.  The GPIO bank has one IRQ for all
+ * its pins, so it is kept or masked whole.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,29 +21,25 @@
 
 /**
  * @defgroup rp2350_crit_bits RP2350 NVIC bit-position aliases for crit section
- * @brief Maps TikuOS TIKU_CRIT_PRESERVE_* flags to NVIC ISER0 bit positions.
+ * @brief Maps TikuOS TIKU_CRIT_PRESERVE_* flags to NVIC ISER0 bit masks.
  *
- * SysTick is a system exception (not an NVIC source) so it is left alone;
- * its bit position is defined as 0 (no NVIC bit) to avoid accidental
- * disable. All other sources are direct NVIC IRQ lines.
+ * SysTick is a system exception, not an NVIC IRQ, so IRQ_BIT_TICK is 0 and
+ * no mask covers it.  The other sources are NVIC IRQ lines.
  */
 /** @brief Helper to form a single-bit mask. */
 #define BIT(n) (1U << (n))
 
-#define IRQ_BIT_TICK    0U   /* SysTick is a system exception, not NVIC,
-                                so masking it requires touching the SCB
-                                instead — for the first port this just
-                                leave the system tick alone. */
+#define IRQ_BIT_TICK    0U   /* SysTick is not an NVIC IRQ: no bit */
 #define IRQ_BIT_HTIMER  BIT(RP2350_IRQ_TIMER0_0)
-#define IRQ_BIT_UART    BIT(RP2350_IRQ_UART0)
+#define IRQ_BIT_UART    BIT(RP2350_IRQ_UART0)   /* IRQ 33: not in ISER0 */
 #define IRQ_BIT_GPIO    BIT(RP2350_IRQ_IO_BANK0)
 #define IRQ_BIT_PIO     BIT(RP2350_IRQ_PIO0_0)
 
 /**
  * @brief Critical-section state saved across mask/unmask pairs.
  *
- * Only ISER0 (IRQs 0..31) is saved; RP2350 uses far fewer than 32
- * external IRQs so one register is sufficient.
+ * Only ISER0, IRQs 0..31, is saved and masked.  IRQs 32 and above, UART0
+ * (33) among them, are outside this register.
  */
 static struct {
     uint32_t iser0_saved; /**< NVIC ISER0 snapshot taken at mask time */
@@ -52,16 +48,16 @@ static struct {
 /**
  * @brief Mask NVIC IRQs, keeping only those listed in @p preserve_mask.
  *
- * Snapshots NVIC ISER0, builds a keep-set from the TIKU_CRIT_PRESERVE_* bits and
- * writes the difference to ICER0.  A DSB+ISB pair makes the disable
+ * Snapshots NVIC ISER0, builds a keep-set from the TIKU_CRIT_PRESERVE_* bits
+ * and writes the difference to ICER0.  A DSB+ISB pair makes the disable
  * architecturally visible before the critical section body runs.
  *
- * @note SysTick is not in the NVIC, so it is always left enabled.
+ * @note SysTick and IRQs 32 and above (UART0, ADC, I2C) stay enabled.
  * @param preserve_mask  OR of TIKU_CRIT_PRESERVE_* flags for sources to
  *                       keep enabled (HTIMER, UART, GPIO, PIO)
  */
 void tiku_crit_arch_mask_irqs(uint8_t preserve_mask) {
-    /* Snapshot what's enabled today. */
+    /* Snapshot the enabled IRQs. */
     crit_state.iser0_saved = *(volatile uint32_t *)RP2350_NVIC_ISER0;
 
     /* Compute the keep-mask: bits that should remain enabled. */
@@ -70,17 +66,16 @@ void tiku_crit_arch_mask_irqs(uint8_t preserve_mask) {
     if (preserve_mask & TIKU_CRIT_PRESERVE_UART)   keep |= IRQ_BIT_UART;
     if (preserve_mask & TIKU_CRIT_PRESERVE_GPIO)   keep |= IRQ_BIT_GPIO;
     if (preserve_mask & TIKU_CRIT_PRESERVE_PIO)    keep |= IRQ_BIT_PIO;
-    /* TICK / I2C / ADC / WDT not represented yet — kept across the
-     * window unconditionally because the SysTick is not in the
-     * NVIC and the I2C/ADC drivers are stubs. */
+    /* TICK, I2C, ADC and WDT have no mask here: SysTick is not an NVIC
+     * IRQ, the I2C and ADC IRQs are above 31 and the watchdog raises
+     * none, so they stay enabled whatever preserve_mask says. */
 
     uint32_t to_mask = crit_state.iser0_saved & ~keep;
     if (to_mask != 0U) {
         *(volatile uint32_t *)RP2350_NVIC_ICER0 = to_mask;
-        /* DSB+ISB so the NVIC disable takes architectural effect
-         * before any caller code runs. Without this the NVIC write
-         * may not be visible to the CPU's interrupt-acceptance
-         * logic until the next memory barrier or pipeline flush. */
+        /* DSB+ISB so the NVIC disable takes effect before any caller
+         * code runs; without them the CPU can still take a masked IRQ
+         * until the next barrier or pipeline flush. */
         __asm__ volatile ("dsb" ::: "memory");
         __asm__ volatile ("isb" ::: "memory");
     }

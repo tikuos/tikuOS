@@ -7,9 +7,9 @@
  *
  * tiku_pio_arch.h - RP2350 PIO (programmable I/O) driver.
  *
- * One state machine on PIO0 runs a four-instruction program that shifts a data
- * word out to a pin and raises an IRQ when done.  Single-shot per call; bursts
- * longer than 32 bits push several words and the SM auto-pulls.
+ * One state machine on PIO0 runs a six-instruction program that shifts a data
+ * word of up to 32 bits out to a pin and raises an IRQ when done.  One word
+ * per call; there is no autopull.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,31 +23,25 @@
 /* RETURN CODES                                                              */
 /*---------------------------------------------------------------------------*/
 
-/*
- * Return codes for the PIO bit-bang driver.
- *
- * TIKU_PIO_OK           — operation succeeded.
- * TIKU_PIO_ERR_BUSY     — a transmission is already in progress.
- * TIKU_PIO_ERR_INVALID  — a parameter is out of range (pin > 47,
- *                         bit_count < 1 or > 32, bit_period_us < 1).
- * TIKU_PIO_ERR_NOT_READY — the driver was not initialised, or abort
- *                          was called when no tx was active.
- */
-#define TIKU_PIO_OK              0
-#define TIKU_PIO_ERR_BUSY       -1
-#define TIKU_PIO_ERR_INVALID    -2
-#define TIKU_PIO_ERR_NOT_READY  -3
+#define TIKU_PIO_OK              0  /**< Operation succeeded */
+#define TIKU_PIO_ERR_BUSY       -1  /**< A transmission is in progress */
+#define TIKU_PIO_ERR_INVALID    -2  /**< Pin > 47, bit_count outside 1-32,
+                                         or bit_period_us 0 */
+#define TIKU_PIO_ERR_NOT_READY  -3  /**< Driver not initialised, or abort
+                                         with no transmission running */
 
 /*---------------------------------------------------------------------------*/
 /* CALLBACK                                                                  */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Completion callback. Runs in PIO0_IRQ_0 ISR context.
+ * @brief Completion callback, called in PIO0_IRQ_0 ISR context.
  *
- * Invoked once the state machine has shifted out the final bit and
- * executed the `irq 0` instruction.  Keep the callback short: it
- * runs inside the NVIC ISR window.
+ * Called once the state machine has shifted out the final bit and executed
+ * its `irq nowait 0` instruction.
+ *
+ * @note Keep it short: it runs inside the ISR.
+ * @param ctx  The ctx given to tiku_pio_arch_bitbang_tx().
  */
 typedef void (*tiku_pio_done_cb_t)(void *ctx);
 
@@ -56,10 +50,10 @@ typedef void (*tiku_pio_done_cb_t)(void *ctx);
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief One-time init: take PIO0 out of reset, install the bitbang
- *        program at address 0.
+ * @brief Take PIO0 out of reset, load the bit-bang program at address 0 and
+ *        enable PIO0_IRQ_0 in the NVIC.
  *
- * Idempotent. Safe to call multiple times.
+ * A second call returns at once.
  */
 void tiku_pio_arch_init(void);
 
@@ -71,12 +65,12 @@ void tiku_pio_arch_init(void);
  * SM.  Returns immediately; @p on_done fires from the PIO0 IRQ.
  *
  * @param gpio_pin     GPIO number (0..47) to drive
- * @param data         Up to 32 bits, packed MSB-first if msb_first=1
- *                     else LSB-first (matching the kernel bitbang
- *                     convention)
+ * @param data         Up to 32 bits in the kernel bit-bang packing:
+ *                     MSB-first data starts at bit 31, LSB-first data
+ *                     at bit 0
  * @param bit_count    Number of bits to shift out (1..32)
- * @param msb_first    1 = MSB of data shifts out first;
- *                     0 = LSB-first
+ * @param msb_first    1 = bit 31 of data shifts out first;
+ *                     0 = bit 0 first
  * @param bit_period_us  Bit period in microseconds (>= 1)
  * @param on_done      Completion callback; may be NULL
  * @param ctx          Opaque pointer passed to on_done
@@ -95,15 +89,16 @@ int tiku_pio_arch_bitbang_tx(uint8_t  gpio_pin,
 /**
  * @brief Return non-zero while a transmission is in progress.
  *
- * @return Non-zero if the state machine is active, 0 if idle.
+ * @return Non-zero from a successful tiku_pio_arch_bitbang_tx() until its
+ *         completion interrupt or an abort, 0 otherwise.
  */
 int tiku_pio_arch_bitbang_busy(void);
 
 /**
- * @brief Abort the in-progress bitbang transmission.
+ * @brief Abort the in-progress bit-bang transmission.
  *
  * Disables the SM, drains the TX FIFO, and clears the busy flag.
- * The completion callback is NOT invoked.
+ * The completion callback is not called.
  *
  * @return TIKU_PIO_OK, or TIKU_PIO_ERR_NOT_READY if no tx is active.
  */

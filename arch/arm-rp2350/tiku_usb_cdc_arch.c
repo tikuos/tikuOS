@@ -7,21 +7,21 @@
  *
  * tiku_usb_cdc_arch.c - RP2350 native USB CDC-ACM console backend.
  *
- * A polled USB 1.1 full-speed device stack: PLL_USB, controller, DPRAM endpoint
- * setup, EP0 enumeration, then bulk IN/OUT.  The register layout follows the
- * RP2040 device block, which is the same IP; not yet validated on hardware.
+ * A polled full-speed USB device stack: PLL_USB, controller, DPRAM endpoint
+ * setup, EP0 enumeration, then bulk IN/OUT for one CDC-ACM port.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <arch/arm-rp2350/tiku_usb_cdc_arch.h>
 #include <arch/arm-rp2350/tiku_rp2350_regs.h>
-#include <kernel/vfs/tiku_vfs.h>   /* TIKU_VFS_CAP_ALL for the console backend */
+#include <kernel/vfs/tiku_vfs.h>   /* TIKU_VFS_CAP_ALL for the backend */
 #include <stdarg.h>
 #include <stddef.h>
 
-/* Bring-up trace -> UART directly (NOT TIKU_PRINTF, which would recurse back
- * through the USB putc). Enable with -DTIKU_USB_CDC_DEBUG=1. */
+/* UDBG() traces bring-up straight to the UART with tiku_uart_printf();
+ * TIKU_PRINTF would recurse into the USB putc.  Enable with
+ * -DTIKU_USB_CDC_DEBUG=1. */
 #ifdef TIKU_USB_CDC_DEBUG
 #include <arch/arm-rp2350/tiku_uart_arch.h>
 #define UDBG(...) tiku_uart_printf(__VA_ARGS__)
@@ -30,7 +30,7 @@
 #endif
 
 /*===========================================================================*/
-/* RP2350 USB controller + DPRAM registers (verify vs datasheet on bring-up) */
+/* USB CONTROLLER AND DPRAM REGISTERS                                        */
 /*===========================================================================*/
 
 #define USB_REGS_BASE        0x50110000UL
@@ -96,33 +96,39 @@
 #define BUFF_STATUS_EP2_OUT          (1U << 5)
 #define BUFF_STATUS_EP3_IN           (1U << 6)
 
-/* clk_usb routing bits (mirror the CLK_PERI pattern in tiku_rp2350_regs.h) */
+/* CLK_USB_CTRL fields */
 #define CLK_USB_CTRL_ENABLE          (1U << 11)
 #define CLK_USB_CTRL_AUXSRC_PLL_USB  (0U << 5)
 
 #define USB_EP_PKT_MAX               64U
 
+/** @brief Read the USB controller register at @p off. */
 static inline uint32_t usb_rd(uint32_t off) {
     return _RP2350_REG(USB_REGS_BASE + off);
 }
+/** @brief Write @p v to the USB controller register at @p off. */
 static inline void usb_wr(uint32_t off, uint32_t v) {
     _RP2350_REG(USB_REGS_BASE + off) = v;
 }
+/** @brief Set bits @p m of a USB controller register via the SET alias. */
 static inline void usb_set(uint32_t off, uint32_t m) {
     _RP2350_REG_SET(USB_REGS_BASE + off, m);
 }
+/** @brief Read the 32-bit DPRAM word at @p off. */
 static inline uint32_t dp_rd(uint32_t off) {
     return _RP2350_REG(USB_DPRAM_BASE + off);
 }
+/** @brief Write @p v to the 32-bit DPRAM word at @p off. */
 static inline void dp_wr(uint32_t off, uint32_t v) {
     _RP2350_REG(USB_DPRAM_BASE + off) = v;
 }
+/** @brief Byte pointer to the DPRAM buffer at @p off. */
 static inline volatile uint8_t *dp_buf(uint32_t off) {
     return (volatile uint8_t *)(USB_DPRAM_BASE + off);
 }
 
 /*===========================================================================*/
-/* USB / CDC descriptors                                                     */
+/* USB AND CDC DESCRIPTORS                                                   */
 /*===========================================================================*/
 
 static const uint8_t dev_desc[] = {
@@ -173,21 +179,20 @@ static const uint8_t str_prod[]   = { 30, 0x03, 'T',0,'i',0,'k',0,'u',0,'O',0,
 static const uint8_t str_serial[] = { 10, 0x03, '0',0,'0',0,'0',0,'1',0 };
 
 /*===========================================================================*/
-/* Driver state                                                              */
+/* DRIVER STATE                                                              */
 /*===========================================================================*/
 
 #define TX_RING_SIZE   512U   /* power of two */
 #define RX_RING_SIZE   256U   /* power of two */
 #define TX_RING_MASK   (TX_RING_SIZE - 1U)
 #define RX_RING_MASK   (RX_RING_SIZE - 1U)
-/* Bounded wait for a free TX slot when the ring is full: ~2 USB full-speed
- * frames, long enough for a reading host to drain a bulk-IN packet, short
- * enough that a not-reading host only stalls once (then drop-fast latches). */
+/* Longest wait in microseconds for a free TX slot when the ring is full: two
+ * 1 ms full-speed frames, in which a reading host takes a bulk-IN packet. */
 #define TX_FULL_WAIT_US  2000U
 
-/* EP0 control-transfer phase. A control transfer is SETUP, then an optional
- * DATA stage (IN for reads / OUT for writes), then an opposite-direction
- * zero-length STATUS stage. Conflating these is what breaks enumeration. */
+/* EP0 control-transfer phase.  A control transfer is SETUP, then an optional
+ * DATA stage (IN for reads / OUT for writes), then a zero-length STATUS stage
+ * in the opposite direction; a finished EP0 buffer is handled by phase. */
 enum { PH_IDLE = 0, PH_DATA_IN, PH_STATUS_OUT, PH_DATA_OUT, PH_STATUS_IN };
 
 static struct {
@@ -201,31 +206,34 @@ static struct {
     uint8_t  ep2_pid;          /* next bulk-OUT PID                         */
     uint8_t  ep3_busy;         /* bulk-IN transfer in flight                */
     const uint8_t *in_ptr;     /* remaining EP0 control-IN payload          */
-    uint16_t in_rem;
+    uint16_t in_rem;           /* bytes left at in_ptr                      */
     /* TX (device->host) and RX (host->device) byte rings */
     volatile uint8_t  tx[TX_RING_SIZE];
     volatile uint16_t tx_head, tx_tail;
-    volatile uint8_t  tx_stalled;  /* full-ring wait timed out: host isn't
-                                    * reading -> drop-fast (no per-byte wait)
-                                    * until it drains again (see putc)       */
+    volatile uint8_t  tx_stalled;  /* set when a full-ring wait times out;
+                                    * putc then drops bytes without waiting
+                                    * until a slot frees                    */
     volatile uint8_t  rx[RX_RING_SIZE];
     volatile uint16_t rx_head, rx_tail;
     volatile uint16_t overrun;
 } u;
 
 /*===========================================================================*/
-/* Low-level endpoint helpers                                                */
+/* ENDPOINT HELPERS                                                          */
 /*===========================================================================*/
 
-/* Arm a buffer-control register: write info, brief settle, then AVAIL (the
- * controller requires a delay between the descriptor write and AVAIL). */
+/**
+ * @brief Arm a buffer-control register: write @p val, settle, then AVAIL.
+ *
+ * The controller needs a delay between the buffer-control write and AVAIL.
+ */
 static void ep_arm(uint32_t bufctrl_off, uint32_t val) {
     dp_wr(bufctrl_off, val);
     __asm volatile("nop\nnop\nnop");
     dp_wr(bufctrl_off, val | BUF_CTRL_AVAIL);
 }
 
-/* Send up to 64 bytes on EP0 IN with the current PID, toggling it. */
+/** @brief Send up to 64 bytes on EP0 IN with the current PID, toggling it. */
 static void ep0_in(const uint8_t *data, uint16_t len) {
     if (len > USB_EP_PKT_MAX) len = USB_EP_PKT_MAX;
     for (uint16_t i = 0; i < len; i++) dp_buf(DP_EP0_BUF)[i] = data[i];
@@ -235,15 +243,19 @@ static void ep0_in(const uint8_t *data, uint16_t len) {
     ep_arm(DP_EP0_IN_BUFCTRL, v);
 }
 
-/* Zero-length EP0 IN status (the device's ack of a no-data/write transfer). */
+/** @brief Send the zero-length EP0 IN status of a no-data or write transfer. */
 static void ep0_status_in(void) {
     u.ep0_pid = 1U;                 /* status stage is always DATA1 */
     u.ep0_phase = PH_STATUS_IN;
     ep0_in((const uint8_t *)0, 0);
 }
 
-/* Begin a (possibly multi-packet) EP0 control-IN (read) of `len` bytes from
- * `data`, capped at the host's wLength. */
+/**
+ * @brief Begin an EP0 control-IN (read) of @p len bytes from @p data.
+ *
+ * The length is capped at the host's @p wlen; more than 64 bytes go out as
+ * several packets, the rest sent from handle_buff_status().
+ */
 static void ep0_send(const uint8_t *data, uint16_t len, uint16_t wlen) {
     if (len > wlen) len = wlen;
     u.ep0_pid = 1U;                 /* first data packet after SETUP = DATA1 */
@@ -259,13 +271,13 @@ static void ep0_send(const uint8_t *data, uint16_t len, uint16_t wlen) {
     }
 }
 
-/* Enable an endpoint by writing its endpoint-control register in DPRAM. */
+/** @brief Enable an endpoint through its endpoint-control word in DPRAM. */
 static void ep_enable(uint32_t epctrl_off, uint32_t buf_off, uint32_t type) {
     dp_wr(epctrl_off, EP_CTRL_ENABLE | EP_CTRL_INT_1BUF |
                       (type << EP_CTRL_TYPE_LSB) | buf_off);
 }
 
-/* Arm the bulk-OUT endpoint to receive a packet. */
+/** @brief Arm the bulk-OUT endpoint to receive a packet. */
 static void rx_arm(void) {
     uint32_t v = USB_EP_PKT_MAX;
     if (u.ep2_pid) v |= BUF_CTRL_DATA1_PID;
@@ -273,9 +285,14 @@ static void rx_arm(void) {
 }
 
 /*===========================================================================*/
-/* TX path (bulk IN, device -> host)                                         */
+/* TX PATH (BULK IN)                                                         */
 /*===========================================================================*/
 
+/**
+ * @brief Move up to 64 queued TX bytes into EP3 and arm a bulk-IN transfer.
+ *
+ * Does nothing before SET_CONFIGURATION or while a bulk-IN is in flight.
+ */
 static void tx_kick(void) {
     if (!u.configured || u.ep3_busy) return;
     uint16_t n = 0;
@@ -292,9 +309,16 @@ static void tx_kick(void) {
 }
 
 /*===========================================================================*/
-/* EP0 control / enumeration                                                 */
+/* EP0 CONTROL AND ENUMERATION                                               */
 /*===========================================================================*/
 
+/**
+ * @brief Answer the SETUP packet in DPRAM.
+ *
+ * Handles the standard requests and the CDC line-state and line-coding
+ * requests.  An unknown descriptor type stalls EP0; an unrecognised request
+ * gets a zero-length status.
+ */
 static void handle_setup(void) {
     uint8_t  bmRequestType = dp_buf(DP_SETUP_PKT)[0];
     uint8_t  bRequest      = dp_buf(DP_SETUP_PKT)[1];
@@ -332,7 +356,7 @@ static void handle_setup(void) {
         }
         case 0x05:                                    /* SET_ADDRESS        */
             u.pending_addr = (uint8_t)(wValue & 0x7FU);
-            ep0_status_in();                             /* addr applied later */
+            ep0_status_in();                      /* addr set after status */
             break;
         case 0x09:                                    /* SET_CONFIGURATION  */
             u.configured = 1U;
@@ -386,9 +410,13 @@ static void handle_setup(void) {
 }
 
 /*===========================================================================*/
-/* Buffer-status (transfer-complete) handling                               */
+/* BUFFER-STATUS HANDLING                                                    */
 /*===========================================================================*/
 
+/**
+ * @brief Handle finished buffers: EP0 data and status stages, received
+ *        bulk-OUT bytes and completed bulk-IN packets.
+ */
 static void handle_buff_status(void) {
     uint32_t bs = usb_rd(USB_BUFF_STATUS);
 
@@ -446,7 +474,7 @@ static void handle_buff_status(void) {
 }
 
 /*===========================================================================*/
-/* Public: poll / init                                                       */
+/* POLL AND INIT                                                             */
 /*===========================================================================*/
 
 void tiku_usb_cdc_poll(void) {
@@ -471,12 +499,17 @@ void tiku_usb_cdc_poll(void) {
     tx_kick();
 }
 
+/**
+ * @brief Start PLL_USB at 48 MHz and run clk_usb from it.
+ *
+ * 12 MHz reference x 100 = 1200 MHz VCO, divided by 5 and 5.  Continues after
+ * 1,000,000 polls of CS.LOCK whether or not the PLL locked.
+ */
 static void pll_usb_48mhz(void) {
-    /* Mirror rp2350_pll_sys_init for PLL_USB: 12 MHz ref * 100 = 1200 MHz
-     * VCO, /5 /5 = 48 MHz. */
     rp2350_unreset(RP2350_RESETS_PLL_USB);
-    _RP2350_REG(RP2350_PLL_USB_BASE + RP2350_PLL_CS) = 1U;          /* REFDIV 1 */
-    _RP2350_REG(RP2350_PLL_USB_BASE + RP2350_PLL_FBDIV_INT) = 100U; /* VCO 1200 */
+    /* REFDIV 1, then FBDIV 100: VCO 1200 MHz */
+    _RP2350_REG(RP2350_PLL_USB_BASE + RP2350_PLL_CS) = 1U;
+    _RP2350_REG(RP2350_PLL_USB_BASE + RP2350_PLL_FBDIV_INT) = 100U;
     _RP2350_REG_CLR(RP2350_PLL_USB_BASE + RP2350_PLL_PWR,
                     RP2350_PLL_PWR_PD | RP2350_PLL_PWR_VCOPD);
     for (uint32_t i = 0; i < 1000000U; i++) {
@@ -510,15 +543,15 @@ void tiku_usb_cdc_init(void) {
     usb_wr(USB_MAIN_CTRL, USB_MAIN_CTRL_CONTROLLER_EN);   /* HOST_NDEVICE=0 */
     usb_wr(USB_SIE_CTRL, USB_SIE_CTRL_EP0_INT_1BUF);
 
-    /* Present the pull-up: the host now sees a device and starts enumerating. */
+    /* Present the pull-up: the host sees a device and starts enumerating. */
     usb_set(USB_SIE_CTRL, USB_SIE_CTRL_PULLUP_EN);
     u.inited = 1U;                  /* poll() may now touch the controller */
 
-    /* Service enumeration synchronously. The host's reset / SETUP / SET_ADDRESS
-     * sequence needs prompt EP0 responses, but this runs early in boot -- long
-     * before the scheduler (and the idle-hook poll) exists. Spin-poll until the
-     * device is configured (a host is present) or a bounded number of spins
-     * elapse (no host -> just continue booting; idle-hook poll takes over). */
+    /* Service enumeration here: the host's reset / SETUP / SET_ADDRESS
+     * sequence needs prompt EP0 answers, and this runs before the scheduler
+     * and its idle-hook poll exist.  Polls until the host configures the
+     * device or 4,000,000 polls pass; with no host, boot continues and the
+     * idle-hook poll then serves the bus. */
     for (uint32_t i = 0; i < 4000000U && !u.configured; i++) {
         tiku_usb_cdc_poll();
     }
@@ -529,19 +562,16 @@ uint8_t tiku_usb_cdc_connected(void) {
 }
 
 /*===========================================================================*/
-/* Public: output                                                            */
+/* OUTPUT                                                                    */
 /*===========================================================================*/
 
 void tiku_usb_cdc_putc(char c) {
     uint16_t nxt = (uint16_t)((u.tx_head + 1U) & TX_RING_MASK);
 
     if (nxt == u.tx_tail && !u.tx_stalled) {
-        /* Ring full and the host has been keeping up: give the bus a bounded
-         * window to drain a slot rather than silently dropping the byte (the
-         * host reads a bulk-IN packet ~once per 1 ms USB frame).  If it stays
-         * full to the deadline the host isn't reading -- latch tx_stalled so
-         * the rest of a burst drops fast instead of paying the wait per byte
-         * and freezing the console. */
+        /* Ring full: poll the bus for up to TX_FULL_WAIT_US for a free
+         * slot.  If the ring is still full, set tx_stalled; while it is
+         * set, a full ring drops the byte at once. */
         uint32_t t0 = _RP2350_REG(RP2350_TIMER0_TIMERAWL);
         do {
             tiku_usb_cdc_poll();
@@ -554,9 +584,9 @@ void tiku_usb_cdc_putc(char c) {
     if (nxt != u.tx_tail) {
         u.tx[u.tx_head] = (uint8_t)c;
         u.tx_head = nxt;
-        u.tx_stalled = 0U;   /* took a slot cleanly: the host is draining */
+        u.tx_stalled = 0U;   /* a slot was free: clear the stall latch */
     }
-    /* Service the bus so the byte actually leaves and the ring drains. */
+    /* Service the bus so queued bytes go out. */
     tiku_usb_cdc_poll();
 }
 
@@ -566,9 +596,8 @@ void tiku_usb_cdc_puts(const char *s) {
 }
 
 void tiku_usb_cdc_flush(void) {
-    /* Drive the TX ring empty AND wait out the last in-flight IN packet, so
-     * the host has pulled every byte. Bounded so a vanished host (port
-     * closed, cable out) can't wedge a reboot path forever. */
+    /* Poll until the TX ring is empty and the last IN packet has gone, or
+     * 4,000,000 polls pass when no host is taking the data. */
     uint32_t spins = 0U;
     while ((u.tx_head != u.tx_tail || u.ep3_busy) && spins < 4000000U) {
         tiku_usb_cdc_poll();
@@ -576,7 +605,7 @@ void tiku_usb_cdc_flush(void) {
     }
 }
 
-/* --- lightweight formatter (mirrors tiku_uart_printf) --------------------- */
+/** @brief Print @p v in @p base, left-padded with @p pad to @p width. */
 static void cdc_print_uint(unsigned long v, unsigned base, unsigned width,
                            char pad) {
     char tmp[20];
@@ -591,6 +620,7 @@ static void cdc_print_uint(unsigned long v, unsigned base, unsigned width,
     while (n) tiku_usb_cdc_putc(tmp[--n]);
 }
 
+/** @brief Print @p v in decimal: any '-' first, then the padded digits. */
 static void cdc_print_int(long v, unsigned width, char pad) {
     if (v < 0) { tiku_usb_cdc_putc('-'); cdc_print_uint((unsigned long)(-v),
                                                         10U, width, pad); }
@@ -643,7 +673,7 @@ void tiku_usb_cdc_printf(const char *fmt, ...) {
 }
 
 /*===========================================================================*/
-/* Public: input                                                             */
+/* INPUT                                                                     */
 /*===========================================================================*/
 
 uint8_t tiku_usb_cdc_rx_ready(void) {
@@ -663,7 +693,7 @@ uint16_t tiku_usb_cdc_overrun_count(void) { return u.overrun; }
 void     tiku_usb_cdc_overrun_reset(void) { u.overrun = 0U; }
 
 /*===========================================================================*/
-/* Shell I/O backend                                                         */
+/* SHELL I/O BACKEND                                                         */
 /*===========================================================================*/
 
 const tiku_shell_io_t tiku_shell_io_usbcdc = {
@@ -671,7 +701,7 @@ const tiku_shell_io_t tiku_shell_io_usbcdc = {
     tiku_usb_cdc_rx_ready,
     tiku_usb_cdc_getc,
     TIKU_SHELL_IO_ECHO | TIKU_SHELL_IO_CRLF,
-    TIKU_VFS_CAP_ALL   /* native-USB console = full authority (like UART); without
-                        * this the fail-closed default (CAP_NONE) would EPERM every
-                        * HW/SYS/FS write from the local console */
+    TIKU_VFS_CAP_ALL   /* full VFS authority, as on the UART console; a
+                        * backend that leaves this 0 (CAP_NONE) is refused
+                        * every HW/SYS/FS write */
 };

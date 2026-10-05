@@ -7,9 +7,9 @@
  *
  * tiku_trng_arch.c - RP2350 TRNG driver.
  *
- * The entropy holding register fills atomically across six words, so each re-arm
- * drains all six into a static cache rather than discarding entropy and paying
- * for another slow sampling pass.  A stalled VALID reports ERR_TIMEOUT.
+ * Each refill reads all six entropy holding register (EHR) words into a static
+ * cache, and reads take words from the cache until it is empty.  A refill
+ * whose VALID flag never rises returns TIKU_TRNG_ERR_TIMEOUT.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,23 +18,16 @@
 #include "tiku_rp2350_regs.h"
 
 /*
- * TRNG private configuration -- tuning constants for the RP2350 driver.
+ * TRNG_SAMPLE_COUNT is written to SAMPLE_CNT1: the rng_clk cycles between two
+ * ring-oscillator samples.  A larger count decorrelates the samples further
+ * and makes each refill slower.
  *
- * TRNG_SAMPLE_COUNT controls ROSC clocks per sample: higher values improve
- * whitening at the cost of latency.  pico-sdk uses ~0x4E20 (120 ms EHR fill);
- * TikuOS uses 100 for responsiveness.  Raise it if AUTOCORR_STATISTIC trips
- * downstream.
- *
- * TRNG_FILL_SPIN_LIMIT is the maximum spin waiting for VALID after arming the
- * random source; ~10 ms headroom at 150 MHz is well above the worst-case EHR
- * fill at SAMPLE_COUNT=100.
- *
- * TRNG_CACHE_WORDS is the number of 32-bit EHR data registers (0..5).
+ * TRNG_FILL_SPIN_LIMIT is how many times a refill polls VALID before it
+ * returns TIKU_TRNG_ERR_TIMEOUT.
  */
-#define TRNG_SAMPLE_COUNT       0x0064U   /**< ROSC cycles per sample */
-#define TRNG_FILL_SPIN_LIMIT    1500000UL /**< Spin budget for EHR fill */
+#define TRNG_SAMPLE_COUNT       0x0064U   /**< rng_clk cycles per sample */
+#define TRNG_FILL_SPIN_LIMIT    1500000UL /**< VALID polls per refill */
 #define TRNG_CACHE_WORDS        6U        /**< EHR_DATA[0..5] word count */
-/** @} */
 
 /** @brief Cached EHR words, drained from hardware on each refill. */
 static uint32_t trng_cache[TRNG_CACHE_WORDS];
@@ -46,12 +39,12 @@ static uint8_t  trng_initialised;
 /**
  * @brief Refill the EHR cache from the TRNG hardware.
  *
- * Stops the random source, clears pending IRQ status, programs SAMPLE_CNT1 and
- * re-arms.  Spins on EHR_VALID up to TRNG_FILL_SPIN_LIMIT, then drains all six
- * EHR_DATA registers into trng_cache and disables the source.
+ * Stops the random source, clears pending IRQ status, programs TRNG_CONFIG and
+ * SAMPLE_CNT1 and re-arms.  Spins on EHR_VALID up to TRNG_FILL_SPIN_LIMIT
+ * times, then reads all six EHR_DATA registers into trng_cache and stops.
  *
- * @note As defence in depth an all-zero or all-ones 192-bit fill is rejected,
- *       leaving trng_cache_used at TRNG_CACHE_WORDS so the next call retries.
+ * @note An all-zero or all-ones 192-bit fill is rejected and the cache stays
+ *       empty, so the next read refills again.
  * @return TIKU_TRNG_OK on success, TIKU_TRNG_ERR_TIMEOUT if EHR_VALID
  *         never asserted within the spin budget, TIKU_TRNG_ERR_NOT_READY
  *         if the fill was all-zero or all-ones.
@@ -65,14 +58,11 @@ trng_refill(void)
     /* Stop the source so writes to CONFIG / SAMPLE_CNT1 take effect. */
     _RP2350_REG(RP2350_TRNG_RND_SOURCE_ENABLE) = 0U;
 
-    /* Clear pending interrupt status bits — datasheet says writing
-     * the same bit pattern to ICR clears the corresponding ISR.  This
-     * clears every known source (EHR_VALID + a few error
-     * bits); leftover bits in higher positions are reserved. */
+    /* Writing a 1 to an ICR bit clears that bit of RNG_ISR: EHR_VALID,
+     * CRNGT_ERR and VN_ERR.  AUTOCORR_ERR clears only on a TRNG reset. */
     _RP2350_REG(RP2350_TRNG_TRNG_ICR) = 0x3FU;
 
-    /* Fastest ROSC chain (selector 0). Raise if statistical tests
-     * downstream report bias. */
+    /* Ring-oscillator selector 0, the fastest chain. */
     _RP2350_REG(RP2350_TRNG_CONFIG)   = 0U;
     _RP2350_REG(RP2350_TRNG_SAMPLE_CNT1) = TRNG_SAMPLE_COUNT;
 
@@ -98,13 +88,10 @@ trng_refill(void)
     trng_cache[4] = _RP2350_REG(RP2350_TRNG_EHR_DATA4);
     trng_cache[5] = _RP2350_REG(RP2350_TRNG_EHR_DATA5);
 
-    /* Idle the source — entropy preserved in the cache, to be
-     * re-enable next refill. */
+    /* Stop the source until the next refill. */
     _RP2350_REG(RP2350_TRNG_RND_SOURCE_ENABLE) = 0U;
 
-    /* Defence in depth: if some pathological state delivered an
-     * all-zero or all-ones 192-bit fill, treat as failure and let
-     * the caller retry. Real fills almost never look like this. */
+    /* Reject an all-zero or all-ones fill; the cache stays empty. */
     {
         uint32_t and_all = 0xFFFFFFFFU;
         uint32_t or_all  = 0U;
@@ -124,10 +111,8 @@ trng_refill(void)
 /**
  * @brief Initialize the RP2350 TRNG peripheral.
  *
- * Brings the TRNG out of reset and marks the cache empty.  Idempotent.
- *
- * @note The EHR is not prefilled: the boot-time entropy budget is tight and a
- *       refill takes milliseconds, so the first reader pays the cost.
+ * Brings the TRNG out of reset and marks the cache empty; the first read
+ * fills it.  A second call returns at once.
  */
 void
 tiku_trng_arch_init(void)
@@ -138,10 +123,7 @@ tiku_trng_arch_init(void)
 
     rp2350_unreset(RP2350_RESETS_TRNG);
 
-    /* Mark the cache empty so the first read does a hardware refill.
-     * No preemptive refill here: the boot-time entropy
-     * budget is tight and a refill takes ~milliseconds. The first
-     * caller pays the cost, not boot. */
+    /* Mark the cache empty so the first read does a hardware refill. */
     trng_cache_used   = TRNG_CACHE_WORDS;
     trng_initialised  = 1;
 }
@@ -188,8 +170,8 @@ tiku_trng_arch_read_u32(uint32_t *out)
  *
  * @param buf  Destination buffer (must be non-NULL).
  * @param len  Number of random bytes to produce.
- * @return TIKU_TRNG_OK on success, TIKU_TRNG_ERR_INVALID if buf is
- *         NULL, or a tiku_trng_arch_read_u32() error code on failure.
+ * @return TIKU_TRNG_OK on success, TIKU_TRNG_ERR_INVALID if buf is NULL or
+ *         len is 0, or a tiku_trng_arch_read_u32() error code on failure.
  */
 int
 tiku_trng_arch_read_bytes(uint8_t *buf, size_t len)
