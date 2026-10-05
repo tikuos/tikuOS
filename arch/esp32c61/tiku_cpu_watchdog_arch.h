@@ -7,10 +7,9 @@
  *
  * tiku_cpu_watchdog_arch.h - ESP32-C61 watchdog on TIMG0's main watchdog.
  *
- * Counts off the crystal, so it outlives any core-clock change; one stage,
- * which resets the system when it runs out.  A bite that cuts a cache fetch
- * from flash short can still wedge the ROM's boot until EN; the resets
- * software asks for avoid that through tiku_cpu_esp32c61_restart().
+ * One stage on the crystal clock, so it outlives a core-clock change; it
+ * resets the system when it runs out.  A bite mid flash fetch can wedge the
+ * ROM's boot until EN, so software resets use tiku_cpu_esp32c61_restart().
  *
  * SPDX-License-Identifier: Apache-2.0
  */

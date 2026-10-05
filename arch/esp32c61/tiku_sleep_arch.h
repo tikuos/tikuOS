@@ -29,9 +29,11 @@ uint32_t tiku_esp32c61_lp_hz(void);
  * @brief Checkpoint durable state, then sleep until @p us have passed.
  *
  * Does not return: the wake is a reset, and 0 arms no timer, so only the
- * reset line wakes it.  A sleep that never takes the core, or a timed one
- * whose wake never comes, resets the part a second late instead -- the
- * latter through the LP watchdog -- and tiku_esp32c61_sleep_missed() says so.
+ * reset line wakes it.
+ *
+ * @note A sleep that never takes the core, or a timed one whose wake never
+ *       comes, resets the part a second late instead (the latter through the
+ *       LP watchdog), and tiku_esp32c61_sleep_missed() reports it.
  */
 void tiku_esp32c61_deep_sleep(uint64_t us) __attribute__((noreturn));
 

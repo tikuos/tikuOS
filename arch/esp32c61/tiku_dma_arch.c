@@ -7,10 +7,9 @@
  *
  * tiku_dma_arch.c - ESP32-C61 memory-to-memory copy on AHB DMA pair 0.
  *
- * A descriptor carries at most 4064 bytes, whole 32-byte bursts, so a copy
- * runs as batches of eight a side; each batch ends in an EOF whose interrupt
- * queues the next.  A PSRAM source is written back from the cache before the copy;
- * a PSRAM destination is written back and dropped before, and dropped after.
+ * A descriptor holds at most 4064 bytes in 32-byte bursts; a copy runs in
+ * batches of eight a side, each EOF interrupt queueing the next.  PSRAM is
+ * cleaned before, and a PSRAM destination invalidated before and after.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -7,10 +7,9 @@
  *
  * tiku_timer_arch.c - ESP32-C61 system tick on SYSTIMER alarm 0.
  *
- * Each tick re-arms the alarm for the next due count, and the interrupt
- * counts every tick that fell due, so a long masked window cannot lose one.
- * The same counting makes the tickless stretch exact: the alarm moves out
- * to the next deadline, and whatever wakes the core credits what elapsed.
+ * Each tick re-arms the alarm, and the interrupt counts every tick that fell
+ * due, so a long masked window loses none and a tickless stretch is exact:
+ * the alarm moves to the next deadline and the wake credits what elapsed.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

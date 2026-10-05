@@ -7,10 +7,9 @@
  *
  * tiku_sleep_arch.c - ESP32-C61 deep and light sleep through the PMU.
  *
- * The settings are the PMU's sleep defaults, with the regulator trims the
- * factory fused and the wake-path waits counted from the PMU's timing
- * constants at the oscillators' rates.  Light sleep keeps the crystal, so
- * the console and the system timer run straight through it.
+ * PMU sleep defaults, with the factory-fused regulator trims and wake waits
+ * counted from the PMU's timing constants at the oscillators' rates.  Light
+ * sleep keeps the crystal, so the console and system timer run through it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

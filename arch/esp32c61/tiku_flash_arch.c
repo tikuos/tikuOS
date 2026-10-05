@@ -8,9 +8,8 @@
  * tiku_flash_arch.c - ESP32-C61 external flash over the ROM's routines.
  *
  * Erase and program go through SPI1 with the cache suspended, then the bytes
- * they touched are invalidated in the window so the next read sees them.  A
- * source the ROM cannot read meanwhile -- flash or PSRAM -- is copied to SRAM
- * a piece at a time first.
+ * they touched are invalidated so the next read sees them.  A source in flash
+ * or PSRAM, unreadable meanwhile, is copied to SRAM a piece at a time first.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

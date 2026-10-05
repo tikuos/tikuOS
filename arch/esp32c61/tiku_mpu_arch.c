@@ -8,9 +8,8 @@
  * tiku_mpu_arch.c - ESP32-C61 memory protection: the portable state machine.
  *
  * The MSP430-style segment mask is a software shadow, so the portable MPU
- * tests run one state machine.  PMP binds machine mode only through a locked
- * entry, which cannot reopen for a durable write, so it enforces one rule
- * that never needs to: a NULL guard over the first 4 KB.
+ * tests run one state machine.  A locked PMP entry, the only kind that binds
+ * machine mode, cannot reopen, so it only guards the first 4 KB (NULL).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -100,7 +99,10 @@ uint16_t tiku_mpu_arch_unlock_nvm(void) {
     return saved;
 }
 
-/** @brief Close an NVM write window. @param saved_state  unlock_nvm()'s value */
+/**
+ * @brief Close an NVM write window.
+ * @param saved_state  The value tiku_mpu_arch_unlock_nvm() returned
+ */
 void tiku_mpu_arch_lock_nvm(uint16_t saved_state) {
     tiku_mpu_arch_set_sam(saved_state);
 }
