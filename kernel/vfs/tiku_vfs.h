@@ -28,13 +28,13 @@
  * and the value says which one: the shell, BASIC or an agent driving the
  * namespace can tell "no such node" from "read-only" from "bad value".
  *
- * A read returns a byte count >= 0 on success; it is snprintf-style, so the
- * value is the full length of the rendering and a return >= the buffer size
- * means the text was truncated.  Writes and typed reads return TIKU_VFS_OK
- * (0) on success.
+ * A read returns the number of bytes it left in the buffer, never more than
+ * the buffer's size: text that did not fit keeps size - 1 characters and a
+ * NUL.  tiku_vfs_read_total() also reports the full length.  Writes and typed
+ * reads return TIKU_VFS_OK (0) on success.
  *
  * E2BIG reports exhausted bounded capacity, such as a full boot-mount table;
- * text truncation is signalled by the snprintf-style length, not an error.
+ * a read cut to fit its buffer is not an error.
  * EIO reports a backend or hardware failure.
  */
 enum {
@@ -202,8 +202,8 @@ typedef struct {
     uint8_t  unit;    /**< tiku_vfs_unit_t (copied from the descriptor) */
     int16_t  scale;   /**< Decimal exponent for FIXED (value = raw*10^scale) */
     union {
-        uint32_t u;   /**< U32 / FIXED / BOOL magnitude */
-        int32_t  i;   /**< I32 */
+        uint32_t u;   /**< U32 / BOOL */
+        int32_t  i;   /**< I32, and FIXED's signed raw value */
     } as;
 } tiku_vfs_val_t;
 
@@ -273,9 +273,11 @@ typedef void (*tiku_vfs_dyn_list_cb)(const char *name, void *ctx);
 typedef struct tiku_vfs_dynops {
     /** Enumerate every child by name. */
     void (*list)  (tiku_vfs_dyn_list_cb cb, void *ctx);
-    /** Read a child; bytes rendered or a negative status. */
+    /** Read a child into at most max bytes; its full length, or a negative
+     *  status the reader receives as it is (TIKU_VFS_ENOENT: no such child). */
     int  (*read)  (const char *name, char *buf, size_t max);
-    /** Write or create a child; 0 or a negative status. */
+    /** Write or create a child; 0 or a negative status, which the writer
+     *  receives as it is (TIKU_VFS_E2BIG for a full store). */
     int  (*write) (const char *name, const char *buf, size_t len);
     /** Delete a child; 0 or a negative status. */
     int  (*unlink)(const char *name);
@@ -374,8 +376,9 @@ const char *tiku_vfs_read_policy(const tiku_vfs_node_t *node);
  * @param path  Absolute path
  * @param buf   Output buffer
  * @param max   Buffer capacity; must be non-zero
- * @return Bytes rendered (snprintf-style); TIKU_VFS_ENOENT, TIKU_VFS_EINVAL
- *         for a bad buffer, or TIKU_VFS_EACCES for a refused node
+ * @return Bytes left in @p buf, as tiku_vfs_read_node(); TIKU_VFS_ENOENT,
+ *         TIKU_VFS_EINVAL for a bad buffer, or TIKU_VFS_EACCES for a refused
+ *         node
  */
 int tiku_vfs_read_passive(const char *path, char *buf, size_t max);
 
@@ -419,11 +422,27 @@ const tiku_vfs_node_t *tiku_vfs_resolve(const char *path);
  * @param path  Absolute path to a FILE node
  * @param buf   Output buffer
  * @param max   Buffer capacity
- * @return Bytes rendered (snprintf-style); TIKU_VFS_ENOENT when nothing
- *         matches, TIKU_VFS_EACCES for a node that is not a readable file,
- *         or the handler's negative status
+ * @return Bytes left in @p buf, at most @p max (see STATUS CODES);
+ *         TIKU_VFS_ENOENT when nothing matches, TIKU_VFS_EACCES for a node
+ *         that is not a readable file, or the handler's or the dynamic
+ *         directory's negative status
  */
 int tiku_vfs_read(const char *path, char *buf, size_t max);
+
+/**
+ * @brief Read from a path, and report the full length of what is there.
+ *
+ * As tiku_vfs_read(); @p total also receives the length the handler rendered
+ * or the store holds, which passes the return when @p buf was too small.
+ *
+ * @param path   Absolute path to a FILE node
+ * @param buf    Output buffer
+ * @param max    Buffer capacity
+ * @param total  Out: the full length, 0 on an error; may be NULL
+ * @return As tiku_vfs_read()
+ */
+int tiku_vfs_read_total(const char *path, char *buf, size_t max,
+                        size_t *total);
 
 /**
  * @brief Read directly from a resolved node, skipping the path walk.
@@ -435,8 +454,9 @@ int tiku_vfs_read(const char *path, char *buf, size_t max);
  * @param node  Node to read; NULL yields TIKU_VFS_ENOENT
  * @param buf   Output buffer
  * @param max   Buffer capacity
- * @return Bytes rendered (snprintf-style), TIKU_VFS_EACCES for a node that
- *         is not a readable file, or the handler's negative status
+ * @return Bytes left in @p buf, at most @p max (see STATUS CODES),
+ *         TIKU_VFS_EACCES for a node that is not a readable file, or the
+ *         handler's negative status
  */
 int tiku_vfs_read_node(const tiku_vfs_node_t *node, char *buf, size_t max);
 
@@ -503,7 +523,7 @@ int tiku_vfs_desc_str(const tiku_vfs_node_t *node, char *buf, size_t max);
  *         TIKU_VFS_ENOENT when neither a static node nor a dynamic directory
  *         takes the write; TIKU_VFS_EACCES for a node that is not writable;
  *         TIKU_VFS_EPERM when the caller lacks the capability; or the
- *         handler's negative status
+ *         handler's or the dynamic directory's negative status
  */
 int tiku_vfs_write(const char *path, const char *data, size_t len);
 

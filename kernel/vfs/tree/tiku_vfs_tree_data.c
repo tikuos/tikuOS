@@ -503,6 +503,27 @@ data_dyn_list(tiku_vfs_dyn_list_cb cb, void *ctx)
 }
 
 /**
+ * @brief The VFS status a file-store result reaches the caller as.
+ *
+ * Keeps a full, busy or failing store apart from a missing file.
+ */
+static int
+data_status(int rc)
+{
+    switch (rc) {
+    case TFS_OK:           return TIKU_VFS_OK;
+    case TFS_ERR_NOTFOUND: return TIKU_VFS_ENOENT;
+    case TFS_ERR_NOSPACE:
+    case TFS_ERR_TOOBIG:   return TIKU_VFS_E2BIG;
+    case TFS_ERR_NAMELEN:  return TIKU_VFS_EINVAL;
+    case TFS_ERR_BUSY:     return TIKU_VFS_EBUSY;
+    case TFS_ERR_IO:       return TIKU_VFS_EIO;
+    case TFS_ERR_CORRUPT:  return TIKU_VFS_ECORRUPT;
+    default:               return TIKU_VFS_ERR;
+    }
+}
+
+/**
  * @brief Read op for /data/<name> dynamic files.
  *
  * Reads up to @p max bytes of file @p name from the store into @p buf.
@@ -510,17 +531,21 @@ data_dyn_list(tiku_vfs_dyn_list_cb cb, void *ctx)
  * @param name  File name under /data
  * @param buf   Output buffer
  * @param max   Capacity of @p buf
- * @return Bytes read, or -1 if the store is unmounted or the file is absent
+ * @return The file's full length, of which at most @p max bytes were
+ *         copied; TIKU_VFS_ENOTSUP while the store is not mounted, or the
+ *         store's failure as a VFS status (TIKU_VFS_ENOENT: absent)
  */
 static int
 data_dyn_read(const char *name, char *buf, size_t max)
 {
     size_t n = 0;
+    int rc;
     if (data_tfs_ensure() != 0) {
-        return -1;
+        return TIKU_VFS_ENOTSUP;
     }
-    if (tiku_tfs_read(&data_fs, name, buf, max, &n) != TFS_OK) {
-        return -1;
+    rc = tiku_tfs_read(&data_fs, name, buf, max, &n);
+    if (rc != TFS_OK) {
+        return data_status(rc);
     }
     return (int)n;
 }
@@ -534,15 +559,16 @@ data_dyn_read(const char *name, char *buf, size_t max)
  * @param name  File name under /data
  * @param buf   Bytes to store
  * @param len   Number of bytes
- * @return 0 on success, -1 on mount failure or a full/failed store
+ * @return 0; TIKU_VFS_ENOTSUP while the store is not mounted, or the store's
+ *         failure as a VFS status (TIKU_VFS_E2BIG: full or file too long)
  */
 static int
 data_dyn_write(const char *name, const char *buf, size_t len)
 {
     if (data_tfs_ensure() != 0) {
-        return -1;
+        return TIKU_VFS_ENOTSUP;
     }
-    return (tiku_tfs_write(&data_fs, name, buf, len) == TFS_OK) ? 0 : -1;
+    return data_status(tiku_tfs_write(&data_fs, name, buf, len));
 }
 
 /**

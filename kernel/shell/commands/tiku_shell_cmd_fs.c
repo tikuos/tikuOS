@@ -339,7 +339,7 @@ tiku_shell_cmd_send(uint8_t argc, const char *argv[])
     /* A /data file is read in place from the store, so it goes out whole at
      * any size recv can write.  A static node (/data/basic) resolves first,
      * as in the VFS; it and every other node render into the buffer, and one
-     * that does not fit (snprintf-style length) is refused. */
+     * whose full length does not fit is refused. */
     dname = fs_data_name(resolved);
     if (dname != NULL && tiku_vfs_resolve(resolved) == NULL) {
         fs = tiku_vfs_tree_data_store();
@@ -352,13 +352,14 @@ tiku_shell_cmd_send(uint8_t argc, const char *argv[])
         }
         src = (const uint8_t *)p;
     } else {
-        int r = tiku_vfs_read(resolved, (char *)fs_xfer_buf,
-                              sizeof(fs_xfer_buf));
+        size_t total;
+        int r = tiku_vfs_read_total(resolved, (char *)fs_xfer_buf,
+                                    sizeof(fs_xfer_buf), &total);
         if (r < 0) {
             SHELL_PRINTF("send: cannot read '%s'\n", resolved);
             return;
         }
-        if ((size_t)r >= sizeof(fs_xfer_buf)) {
+        if (total >= sizeof(fs_xfer_buf)) {
             SHELL_PRINTF("send: '%s' is longer than %u bytes\n", resolved,
                          (unsigned)sizeof(fs_xfer_buf) - 1u);
             return;

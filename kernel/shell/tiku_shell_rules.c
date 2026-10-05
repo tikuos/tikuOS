@@ -618,7 +618,7 @@ rules_eval_one(tiku_shell_rule_t *r)
         r->last_match = 0;
         return;
     }
-    if (n > (int)sizeof(readbuf) - 1) {     /* a read returns the full length */
+    if (n > (int)sizeof(readbuf) - 1) {     /* keep the NUL inside the buffer */
         n = (int)sizeof(readbuf) - 1;
     }
     readbuf[n] = '\0';

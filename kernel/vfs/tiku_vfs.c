@@ -340,14 +340,15 @@ static const tiku_vfs_node_t *vfs_parent_of(const char *path,
 
 /**
  * @brief Read a dynamic child through its directory's dyn ops.
- * @return The read op's result, or -1 when no dynamic directory holds @p path
+ * @return The read op's result, or TIKU_VFS_ENOENT when no dynamic directory
+ *         holds @p path
  */
 static int vfs_dyn_read(const char *path, char *buf, size_t max)
 {
     const char *name = NULL;
     const tiku_vfs_node_t *par = vfs_parent_of(path, &name);
     if (par == NULL || par->dyn == NULL || par->dyn->read == NULL) {
-        return -1;
+        return TIKU_VFS_ENOENT;
     }
     return par->dyn->read(name, buf, max);
 }
@@ -358,7 +359,8 @@ static int vfs_dyn_read(const char *path, char *buf, size_t max)
  * On success the directory is notified, which records a CHANGED event for
  * it; a directory has no watchers, since tiku_vfs_watch() takes files only.
  *
- * @return The write op's result, or -1 when no dynamic directory holds @p path
+ * @return The write op's result, or TIKU_VFS_ENOENT when no dynamic directory
+ *         holds @p path
  */
 static int vfs_dyn_write(const char *path, const char *data, size_t len)
 {
@@ -366,7 +368,7 @@ static int vfs_dyn_write(const char *path, const char *data, size_t len)
     const tiku_vfs_node_t *par = vfs_parent_of(path, &name);
     int rc;
     if (par == NULL || par->dyn == NULL || par->dyn->write == NULL) {
-        return -1;
+        return TIKU_VFS_ENOENT;
     }
     rc = par->dyn->write(name, data, len);
     if (rc == 0) {
@@ -496,19 +498,12 @@ static int vfs_read_dispatch(const tiku_vfs_node_t *node, char *buf,
 }
 
 /**
- * @brief Invoke a resolved node's read handler directly.
- *
- * Callers already holding a node pointer skip the tree walk: a watch event
- * delivers the changed node, and the rules engine and `watch` cache it at
- * arm time.  Validation matches tiku_vfs_read() for a static node.
- *
- * @param node  Node to read; NULL yields TIKU_VFS_ENOENT
- * @param buf   Output buffer
- * @param max   Buffer capacity
- * @return Bytes rendered (snprintf-style), TIKU_VFS_EACCES for a node that
- *         is not a readable file, or the handler's negative status
+ * @brief Run a node's read with tiku_vfs_serving() reporting the node.
+ * @return The full length the handler or the cache reported, or a negative
+ *         status
  */
-int tiku_vfs_read_node(const tiku_vfs_node_t *node, char *buf, size_t max)
+static int vfs_read_node_full(const tiku_vfs_node_t *node, char *buf,
+                              size_t max)
 {
     const tiku_vfs_node_t *outer = vfs_serving;
     int rc;
@@ -519,27 +514,91 @@ int tiku_vfs_read_node(const tiku_vfs_node_t *node, char *buf, size_t max)
     return rc;
 }
 
+/**
+ * @brief The characters a text read left in a buffer of @p max bytes.
+ *
+ * A handler returns its full length, snprintf-style; text that did not fit
+ * holds max - 1 characters and a NUL.
+ */
+static int vfs_text_kept(int rc, size_t max)
+{
+    if (rc >= 0 && (size_t)rc >= max) {
+        return (max > 0u) ? (int)(max - 1u) : 0;
+    }
+    return rc;
+}
+
+/**
+ * @brief Invoke a resolved node's read handler directly.
+ *
+ * Callers already holding a node pointer skip the tree walk: a watch event
+ * delivers the changed node, and the rules engine and `watch` cache it at
+ * arm time.  Validation matches tiku_vfs_read() for a static node.
+ *
+ * @param node  Node to read; NULL yields TIKU_VFS_ENOENT
+ * @param buf   Output buffer
+ * @param max   Buffer capacity
+ * @return Bytes left in @p buf, at most @p max (tiku_vfs.h), TIKU_VFS_EACCES
+ *         for a node that is not a readable file, or the handler's negative
+ *         status
+ */
+int tiku_vfs_read_node(const tiku_vfs_node_t *node, char *buf, size_t max)
+{
+    return vfs_text_kept(vfs_read_node_full(node, buf, max), max);
+}
+
 const tiku_vfs_node_t *tiku_vfs_serving(void)
 {
     return vfs_serving;
 }
 
 /**
- * @brief Resolve a path and invoke the file's read handler.
+ * @brief Read @p path, cut to @p max; @p total receives the full length.
  *
- * Resolves once and reads the node; a path with no static node falls back
- * to its dynamic directory's read op.  TIKU_VFS_ENOENT when neither
- * matches, TIKU_VFS_EACCES for a node that is not a readable file.
+ * A static node's text is cut as tiku_vfs_read_node() cuts it.  A dynamic
+ * directory's store copies at most @p max bytes and returns its full length.
  */
-int tiku_vfs_read(const char *path, char *buf, size_t max)
+static int vfs_read_path(const char *path, char *buf, size_t max,
+                         size_t *total)
 {
     const tiku_vfs_node_t *node = tiku_vfs_resolve(path);
     int rc;
+
     if (node != NULL) {
-        return tiku_vfs_read_node(node, buf, max);   /* static node */
+        rc = vfs_read_node_full(node, buf, max);     /* static node */
+        *total = (rc > 0) ? (size_t)rc : 0u;
+        return vfs_text_kept(rc, max);
     }
     rc = vfs_dyn_read(path, buf, max);               /* dynamic /data/<file> */
-    return (rc < 0) ? TIKU_VFS_ENOENT : rc;          /* no node matched */
+    *total = (rc > 0) ? (size_t)rc : 0u;
+    return (rc > 0 && (size_t)rc > max) ? (int)max : rc;
+}
+
+/**
+ * @brief Resolve a path and invoke the file's read handler.
+ *
+ * A path with no static node falls back to its dynamic directory's read op,
+ * whose status is returned as it is.  TIKU_VFS_ENOENT when neither matches,
+ * TIKU_VFS_EACCES for a node that is not a readable file.
+ */
+int tiku_vfs_read(const char *path, char *buf, size_t max)
+{
+    size_t total;
+
+    return vfs_read_path(path, buf, max, &total);
+}
+
+/** @brief tiku_vfs_read() that also reports the full length. */
+int tiku_vfs_read_total(const char *path, char *buf, size_t max,
+                        size_t *total)
+{
+    size_t full;
+    int rc = vfs_read_path(path, buf, max, &full);
+
+    if (total != NULL) {
+        *total = full;
+    }
+    return rc;
 }
 
 /**
@@ -687,7 +746,6 @@ static int vfs_decode_text(const char *s, const tiku_vfs_desc_t *d,
 
     switch (d->vtype) {
     case TIKU_VFS_T_U32:
-    case TIKU_VFS_T_FIXED:
         if (vfs_parse_num(s, &mag, &neg) != 0) {
             return -1;
         }
@@ -696,10 +754,11 @@ static int vfs_decode_text(const char *s, const tiku_vfs_desc_t *d,
         return 0;
 
     case TIKU_VFS_T_I32:
+    case TIKU_VFS_T_FIXED:
         if (vfs_parse_num(s, &mag, &neg) != 0) {
             return -1;
         }
-        out->vtype = TIKU_VFS_T_I32;
+        out->vtype = d->vtype;
         out->as.i = neg ? -(int32_t)mag : (int32_t)mag;
         return 0;
 
@@ -779,12 +838,7 @@ int tiku_vfs_read_val_node(const tiku_vfs_node_t *node, tiku_vfs_val_t *out)
     if (n <= 0) {
         return (n < 0) ? n : TIKU_VFS_ERR;   /* an empty rendering: ERR */
     }
-    /* snprintf-style handlers return the would-be length; clamp so the
-     * scratch buffer is always a valid, NUL-terminated C string. */
-    if ((size_t)n >= sizeof(tmp)) {
-        n = (int)sizeof(tmp) - 1;
-    }
-    tmp[n] = '\0';
+    tmp[n] = '\0';                /* a read keeps at most sizeof(tmp) - 1 */
 
     return vfs_decode_text(tmp, d, out);
 }
@@ -898,7 +952,8 @@ static uint8_t vfs_cap_permitted(tiku_vfs_cap_t req)
  * knowing watchers exist.  A failed write does not notify.
  *
  * @return TIKU_VFS_OK; TIKU_VFS_EINVAL, TIKU_VFS_ENOENT, TIKU_VFS_EACCES or
- *         TIKU_VFS_EPERM; or the handler's negative status
+ *         TIKU_VFS_EPERM; or the handler's or the dynamic directory's
+ *         negative status
  */
 int tiku_vfs_write(const char *path, const char *data, size_t len)
 {
@@ -918,8 +973,7 @@ int tiku_vfs_write(const char *path, const char *data, size_t len)
         if (!vfs_cap_permitted(TIKU_VFS_CAP_FS)) {
             return TIKU_VFS_EPERM;
         }
-        rc = vfs_dyn_write(path, data, len);
-        return (rc < 0) ? TIKU_VFS_ENOENT : rc;  /* no store took the write */
+        return vfs_dyn_write(path, data, len);
     }
     if (node->type != TIKU_VFS_FILE || node->write == NULL) {
         return TIKU_VFS_EACCES;                  /* exists, but not writable */

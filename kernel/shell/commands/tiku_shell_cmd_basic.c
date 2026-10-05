@@ -40,8 +40,9 @@ static char basic_file_buf[TIKU_BASIC_FILE_MAX];
 static void
 basic_from_file(const char *path, int run)
 {
-    char resolved[TIKU_SHELL_CWD_SIZE];
-    int  n;
+    char   resolved[TIKU_SHELL_CWD_SIZE];
+    size_t total;
+    int    n;
 
     /* Refuse re-entry into a live interactive BASIC session.  Reachable when a
      * scheduled `basic run/load <path>` job or rule fires (jobs tick before the
@@ -51,15 +52,14 @@ basic_from_file(const char *path, int run)
         return;
     }
     tiku_shell_cwd_resolve(path, resolved, sizeof resolved);
-    n = tiku_vfs_read(resolved, basic_file_buf, sizeof basic_file_buf);
+    n = tiku_vfs_read_total(resolved, basic_file_buf, sizeof basic_file_buf,
+                            &total);
     if (n < 0) {
         SHELL_PRINTF("basic: cannot read '%s'\n", resolved);
         return;
     }
-    /* A /data read returns the stored length and a text node its full
-     * length, either of which can pass the bytes copied; a file that does
-     * not fit with its NUL is refused. */
-    if ((size_t)n >= sizeof basic_file_buf) {
+    /* A file that does not fit with its NUL is refused, not cut. */
+    if (total >= sizeof basic_file_buf) {
         SHELL_PRINTF("basic: '%s' is longer than %u bytes\n", resolved,
                      (unsigned)(sizeof basic_file_buf - 1u));
         return;
