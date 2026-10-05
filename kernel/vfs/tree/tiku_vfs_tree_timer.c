@@ -119,16 +119,19 @@ timer_fired_read(char *buf, size_t max)
 static int
 timer_next_read(char *buf, size_t max)
 {
-    tiku_clock_time_t next = tiku_timer_next_expiration();
-    tiku_clock_time_t now  = tiku_clock_time();
+    tiku_clock_time_t next;
+    tiku_clock_time_t now = tiku_clock_time();
 
-    if (next == 0) {
+    /* A deadline can fall on tick 0, so 0 from next_expiration() is not
+     * "none"; the timer list is asked directly. */
+    if (!tiku_timer_any_pending()) {
         return snprintf(buf, max, "none\n");
     }
+    next = tiku_timer_next_expiration();
 
-    if (next > now) {
+    if (TIKU_CLOCK_LT(now, next)) {
         return snprintf(buf, max, "%lu\n",
-                        (unsigned long)(next - now));
+                        (unsigned long)(tiku_clock_time_t)(next - now));
     }
 
     return snprintf(buf, max, "0\n");

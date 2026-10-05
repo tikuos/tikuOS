@@ -564,11 +564,11 @@ const char *tiku_vfs_read_policy(const tiku_vfs_node_t *node)
     if (d->flags & TIKU_VFS_DF_READ_EFFECT) {
         return "effect";
     }
-    if (d->fresh == TIKU_VFS_FRESH_LIVE || d->ecost >= TIKU_VFS_E_PERIPH) {
-        return "sample";
-    }
     if (d->fresh > TIKU_VFS_FRESH_LIVE) {
         return "unknown";
+    }
+    if (d->fresh == TIKU_VFS_FRESH_LIVE || d->ecost >= TIKU_VFS_E_PERIPH) {
+        return "sample";
     }
     return "poll";
 }
@@ -1195,7 +1195,8 @@ void tiku_vfs_unwatch_all(struct tiku_process *p)
 /*
  * A fixed ring in SRAM.  When it is full the oldest record is dropped and
  * the drop counter rises; a reader that sees a non-zero drop count re-reads
- * instead of trusting the records it drained.
+ * instead of trusting the records it drained.  GPIO ISRs push through
+ * tiku_vfs_notify(), so every update of the ring runs with interrupts masked.
  */
 static tiku_vfs_change_t vfs_events[TIKU_VFS_EVENTS_MAX];
 static uint8_t  vfs_ev_head;      /* next write slot                       */
@@ -1216,6 +1217,7 @@ static void vfs_events_push(const tiku_vfs_node_t *node, uint8_t op)
 {
     tiku_vfs_change_t *r;
 
+    tiku_atomic_enter();
     if (vfs_ev_count >= TIKU_VFS_EVENTS_MAX) {
         /* Drop the oldest and say so, rather than the newest in silence:
          * the recent records are the ones a reader can still act on. */
@@ -1228,6 +1230,7 @@ static void vfs_events_push(const tiku_vfs_node_t *node, uint8_t op)
     r->seq = vfs_ev_seq++;
     vfs_ev_head = (uint8_t)((vfs_ev_head + 1u) % TIKU_VFS_EVENTS_MAX);
     vfs_ev_count++;
+    tiku_atomic_exit();
 }
 
 uint8_t tiku_vfs_events_take(tiku_vfs_change_t *out, uint8_t max)
@@ -1235,13 +1238,20 @@ uint8_t tiku_vfs_events_take(tiku_vfs_change_t *out, uint8_t max)
     uint8_t n = 0;
     uint8_t tail;
 
-    while (vfs_ev_count > 0u && n < max) {
+    /* Masked one record at a time, so an ISR waits for one copy at most. */
+    while (n < max) {
+        tiku_atomic_enter();
+        if (vfs_ev_count == 0u) {
+            tiku_atomic_exit();
+            break;
+        }
         tail = (uint8_t)((vfs_ev_head + TIKU_VFS_EVENTS_MAX - vfs_ev_count) %
                          TIKU_VFS_EVENTS_MAX);
         if (out != NULL) {
             out[n] = vfs_events[tail];
         }
         vfs_ev_count--;
+        tiku_atomic_exit();
         n++;
     }
     return n;

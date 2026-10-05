@@ -369,7 +369,7 @@ static int
 mem_failed_read(char *buf, size_t max)
 {
     static const tiku_mem_tier_t all[] = {
-        TIKU_MEM_SRAM, TIKU_MEM_NVM, TIKU_MEM_HIFRAM
+        TIKU_MEM_SRAM, TIKU_MEM_NVM, TIKU_MEM_HIFRAM, TIKU_MEM_PSRAM
     };
     tiku_mem_stats_t st;
     unsigned long total = 0;
@@ -396,8 +396,8 @@ extern char __stack;
  * @brief Read handler for /sys/mem/free.
  *
  * Reports live SP headroom above static data, including this handler's frames.
- * Nordic, Ambiq and ESP32-C61 measure to their explicit stack floor, leaving
- * out allocator space.  Returns zero when the stack has reached that bound.
+ * Nordic, Ambiq, RA8P1 and ESP32-C61 measure to their explicit stack floor,
+ * leaving out allocator space; zero once the stack has reached that bound.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -423,7 +423,7 @@ mem_free_read(char *buf, size_t max)
     __asm__ volatile ("mov %0, sp" : "=r"(sp));
     return snprintf(buf, max, "%lu\n",
                     sp > bottom ? (unsigned long)(sp - bottom) : 0UL);
-#elif defined(PLATFORM_RP2350)
+#elif defined(PLATFORM_RP2350) || defined(PLATFORM_STM32N6)
     /* Cortex-M: 32-bit SP. The stack grows down from __stack toward
      * _end; live free space is (SP - _end). */
     uintptr_t sp;
@@ -434,6 +434,14 @@ mem_free_read(char *buf, size_t max)
                         (unsigned long)(sp - end_addr));
     }
     return snprintf(buf, max, "0\n");
+#elif defined(PLATFORM_RA8P1)
+    /* The SRAM tier lies between the statics and the stack, so the headroom
+     * is SP down to the stack floor the port declares, not down to _end. */
+    uintptr_t sp;
+    uintptr_t bottom = (uintptr_t)tiku_stack_arch_bottom();
+    __asm__ volatile ("mov %0, sp" : "=r"(sp));
+    return snprintf(buf, max, "%lu\n",
+                    sp > bottom ? (unsigned long)(sp - bottom) : 0UL);
 #elif defined(PLATFORM_ESP32C61)
     /* The tier span ends where the stack's reserve begins, so the headroom
      * is SP down to that edge, not down to _end. */
@@ -819,6 +827,12 @@ static const tiku_vfs_desc_t desc_mem_live =       /* free, used: vary, cheap */
 static const tiku_vfs_desc_t desc_mem_map =        /* one fact a line */
     TIKU_VFS_DESC(TIKU_VFS_T_STR, TIKU_VFS_U_NONE,
                   TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
+static const tiku_vfs_desc_t desc_mem_kind =       /* kind: a fixed word */
+    TIKU_VFS_DESC(TIKU_VFS_T_STR, TIKU_VFS_U_NONE,
+                  TIKU_VFS_FRESH_STATIC, TIKU_VFS_E_FREE);
+static const tiku_vfs_desc_t desc_mem_count =      /* failed: a count */
+    TIKU_VFS_DESC(TIKU_VFS_T_U32, TIKU_VFS_U_COUNT,
+                  TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
 static const tiku_vfs_desc_t desc_freq =
     TIKU_VFS_DESC(TIKU_VFS_T_U32, TIKU_VFS_U_HERTZ,
                   TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
@@ -1051,7 +1065,7 @@ nvm_map_read(char *buf, size_t max)
 static const tiku_vfs_node_t sys_mem_children[] = {
     { "sram", TIKU_VFS_FILE, sram_read,      NULL, NULL, 0, &desc_mem_static },
     { "nvm",  TIKU_VFS_FILE, nvm_read,       NULL, NULL, 0, &desc_mem_static },
-    { "kind", TIKU_VFS_FILE, mem_kind_read,  NULL, NULL, 0, &desc_mem_static },
+    { "kind", TIKU_VFS_FILE, mem_kind_read,  NULL, NULL, 0, &desc_mem_kind },
     { "free", TIKU_VFS_FILE, mem_free_read,  NULL, NULL, 0, &desc_mem_live },
     { "used", TIKU_VFS_FILE, mem_used_read,  NULL, NULL, 0, &desc_mem_live },
     { "nvmfree", TIKU_VFS_FILE, nvmfree_read, NULL, NULL, 0, &desc_mem_live },
@@ -1061,7 +1075,8 @@ static const tiku_vfs_node_t sys_mem_children[] = {
     { "reclaim", TIKU_VFS_DIR, NULL, NULL, mem_reclaim_children,
       sizeof mem_reclaim_children / sizeof mem_reclaim_children[0] },
 #endif
-    { "failed",  TIKU_VFS_FILE, mem_failed_read, NULL, NULL, 0, &desc_mem_live },
+    { "failed",  TIKU_VFS_FILE, mem_failed_read, NULL, NULL, 0,
+      &desc_mem_count },
     { "stack_free", TIKU_VFS_FILE, stack_free_read, NULL, NULL, 0,
       &desc_mem_live },
     { "sram_map", TIKU_VFS_FILE, sram_map_read, NULL, NULL, 0,

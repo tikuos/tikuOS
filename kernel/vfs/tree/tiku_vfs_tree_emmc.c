@@ -58,9 +58,13 @@ static int
 emmc_size_read(char *buf, size_t max)
 {
     uint64_t bytes = (uint64_t)tiku_emmc_capacity_blocks() * 512u;
-    return snprintf(buf, max, "%lu%09lu\n",
-                    (unsigned long)(bytes / 1000000000u),
-                    (unsigned long)(bytes % 1000000000u));
+    unsigned long hi = (unsigned long)(bytes / 1000000000u);
+    unsigned long lo = (unsigned long)(bytes % 1000000000u);
+
+    if (hi == 0u) {
+        return snprintf(buf, max, "%lu\n", lo);
+    }
+    return snprintf(buf, max, "%lu%09lu\n", hi, lo);
 }
 
 /** @brief Bus clock in Hz (0 when the host is down). */

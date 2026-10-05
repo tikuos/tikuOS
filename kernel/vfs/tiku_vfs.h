@@ -588,8 +588,8 @@ int tiku_vfs_is_dir(const char *path);
  *
  * Context rules: tiku_vfs_notify() is ISR-safe.  Besides posting events
  * (tiku_process_post() is ISR-safe) it appends to the change ring and
- * drops the node's read-cache entry; watch-table mutation is
- * interrupt-masked.  watch/unwatch are process-context calls.
+ * drops the node's read-cache entry; watch-table and change-ring updates
+ * are interrupt-masked.  watch/unwatch are process-context calls.
  */
 
 /** Forward declaration — receivers are kernel processes */
