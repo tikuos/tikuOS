@@ -7,18 +7,23 @@
  *
  * tiku_basic_ext.inl - native builtin registry implementation.
  *
- * Not a standalone unit; included from tiku_basic.c after the expression parser,
- * whose entry points the service shims wrap.  The table lives in the state piece
- * and the dispatch hooks sit at each chain's fallthrough.
+ * Included from tiku_basic.c after the expression parser, whose entry points
+ * the service shims wrap.  The table lives in the state piece and the
+ * dispatch hooks sit at each chain's fallthrough.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #if TIKU_BASIC_EXT_MAX > 0
 
-/* Validate + normalize a registration name.  Uppercase identifier, fits the
- * slot, not a crunched keyword (builtins win; rejecting the collision at
- * register time removes the silently-shadowed class entirely). */
+/**
+ * @brief Validate a registration name.
+ *
+ * Upper-case identifier, fits the slot, no builtin's name: builtins win, so a
+ * colliding name is refused here rather than silently shadowed.
+ *
+ * @return 1 if @p name may be registered, else 0.
+ */
 static int
 basic_ext_name_ok(const char *name, int allow_dollar)
 {
@@ -30,7 +35,7 @@ basic_ext_name_ok(const char *name, int allow_dollar)
      * a numeric/statement name has no '$' at all. */
     if (allow_dollar) {
         if (n < 2u || name[n - 1u] != '$') return 0;
-        n--;                                      /* validate the prefix only  */
+        n--;                                      /* validate the prefix only */
     }
     for (i = 0; i < n; i++) {
         char c = name[i];
@@ -42,7 +47,11 @@ basic_ext_name_ok(const char *name, int allow_dollar)
     return 1;
 }
 
-/* Find name's slot, or a free slot, or -1.  Idempotent re-registration. */
+/**
+ * @brief Slot holding @p name, else the first free slot, else -1.
+ *
+ * Re-registering a name reuses its slot, so registration is idempotent.
+ */
 static int
 basic_ext_slot(const char *name)
 {
@@ -103,7 +112,7 @@ tiku_basic_register_strfn(const char *name, tiku_basic_ext_strfn fn)
     return 0;
 #else
     (void)name; (void)fn;
-    return -1;                                    /* no strings in this build  */
+    return -1;                                    /* no strings in this build */
 #endif
 }
 

@@ -7,9 +7,9 @@
  *
  * tiku_basic.h - public API of the Tiku BASIC interpreter engine.
  *
- * The engine is a complex extension of the shell rather than one command: it owns
- * its arena, its durable persistence and its REPL, and the `basic` command is a
- * thin dispatch stub over the entry points declared here.
+ * The engine is an extension of the shell rather than one command: it owns its
+ * arena, its durable storage and its REPL, and the `basic` command is a thin
+ * dispatch stub over the entry points declared here.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,7 +24,7 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * BASIC as a non-blocking shell MODE.
+ * BASIC as a non-blocking shell mode.
  *
  * The interpreter is a mode of the shell process (like watch / ping /
  * mqtt), not a blocking takeover: `basic` enters the mode and returns,
@@ -37,15 +37,17 @@
 void tiku_basic_mode_enter(void);
 
 /**
- * @brief Run the saved program headlessly as a non-blocking mode
- *        (the `basic run` command); returns 0 if a program started, else -1.
+ * @brief Run the saved program headlessly as a non-blocking mode (the
+ *        `basic run` command).
+ * @return 0 if a program started, else -1
  */
 int tiku_basic_mode_run_saved(void);
 
 /**
- * @brief Resume (or first-boot start) the saved program headlessly as a
- *        non-blocking mode -- F1's power-failure-transparent autostart
- *        (the `basic run resume` command); returns 0 if running, else -1.
+ * @brief Resume the saved program from its checkpoint, or start it fresh when
+ *        there is none, headlessly as a non-blocking mode: the
+ *        power-failure-transparent autostart (`basic run resume`).
+ * @return 0 if running, else -1
  */
 int tiku_basic_mode_resume_saved(void);
 
@@ -68,29 +70,31 @@ void tiku_basic_mode_set_stream(const struct tiku_shell_io *io);
 /** @brief Non-zero while the mode is driven from a stream, not the console. */
 int tiku_basic_mode_streamed(void);
 
-/** @brief Advance a running program by up to one batch of steps (poll-loop hook). */
+/** @brief Run up to one batch of program steps (poll-loop hook). */
 void tiku_basic_mode_tick(void);
 
 /**
- * @brief Notify BASIC that a watched VFS node changed (F2 event-driven
- *        ON CHANGE).  Call from the shell's TIKU_EVENT_VFS dispatch with the
- *        changed node pointer.  Safe to call always (no-op when the feature
- *        is compiled out or no program is running).
+ * @brief Notify BASIC that a watched VFS node changed (event-driven
+ *        ON CHANGE).
+ * @note Call from the shell's TIKU_EVENT_VFS dispatch with the changed node
+ *       pointer.  Always safe: a no-op when the feature is compiled out or no
+ *       program is running.
  */
 void tiku_basic_mode_on_vfs(const void *node);
 
 /**
  * @brief Consume the "BASIC mode just exited" edge (shell poll-loop hook).
- * @return 1 once after the mode leaves (so the shell reprints its prompt), else 0.
+ * @return 1 once after the mode leaves (so the shell reprints its prompt),
+ *         else 0.
  */
 int tiku_basic_mode_take_exit(void);
 
 /**
- * @brief Load the persisted BASIC program from FRAM and RUN it once.
+ * @brief Load the saved program and RUN it to completion (blocking).
  *
- * Pair with the kernel init system (e.g. `init add 50 boot
- * 'basic run'`) to launch a saved program at every boot without
- * entering the REPL.  Returns silently if no program is saved.
+ * `basic run <path>` uses this after storing the file as the saved program;
+ * `basic run` uses tiku_basic_mode_run_saved() instead.  Runs nothing if no
+ * program is saved or a BASIC session is live.
  */
 void tiku_basic_autorun(void);
 
@@ -113,7 +117,7 @@ void tiku_basic_run_source(const char *source);
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Read the persisted BASIC program text into @p buf.
+ * @brief Read the saved BASIC program text into @p buf.
  *
  * Used as the read handler for the /data/basic VFS file node.
  *
@@ -126,8 +130,8 @@ void tiku_basic_run_source(const char *source);
 int tiku_basic_vfs_read(char *buf, unsigned int max);
 
 /**
- * @brief Write @p len bytes of program text into the FRAM-backed
- *        persistent BASIC slot.
+ * @brief Write @p len bytes of program text into the saved-program slot
+ *        (prog.bas, or the persist store on MSP430/host).
  *
  * Used as the write handler for the /data/basic VFS file node.
  * Each line should be a numbered BASIC statement separated by '\n',
@@ -141,7 +145,7 @@ int tiku_basic_vfs_read(char *buf, unsigned int max);
 int tiku_basic_vfs_write(const char *buf, unsigned int len);
 
 /**
- * @brief Error sink callback: receives every interpreter error (A5).
+ * @brief Error sink callback: receives every interpreter error.
  *
  * @param cat  Error category, one of TIKU_BASIC_ERR_* (tiku_basic_config.h).
  * @param msg  Bare message text (no color codes, no "? " prefix, no newline).

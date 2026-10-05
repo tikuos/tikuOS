@@ -7,9 +7,9 @@
  *
  * tiku_basic_string.inl - string heap and string-expression parser.
  *
- * A bump-allocated heap backs the string variables, reset at each RUN start with
- * no GC and no per-line reclamation.  The whole piece is gated: with strings off,
- * none of these symbols are emitted and PRINT falls back to numeric only.
+ * A bump-allocated heap backs the string variables: it is reset at each RUN
+ * start and compacted when an allocation does not fit.  The whole piece is
+ * gated: with strings off none of it is emitted and PRINT is numeric only.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,11 +18,11 @@
 /* FORWARD DECLARATIONS                                                      */
 /*---------------------------------------------------------------------------*/
 
-/* Forward declaration: parse_expr is the top of the grammar.
- * Hierarchy: parse_expr -> expr_or (OR/XOR) -> expr_and (AND)
- *            -> expr_rel (= < > <= >= <>) -> expr_sum (+ -)
- *            -> expr_term (* /) -> expr_unary (- + NOT)
- *            -> expr_prim (literal, paren, call, var, const). */
+/* parse_expr is the top of the grammar:
+ *   parse_expr -> expr_or (OR XOR) -> expr_and (AND)
+ *   -> expr_rel (= < > <= >= <>) -> expr_sum (+ -)
+ *   -> expr_term (* / MOD) -> expr_unary (- + NOT) -> expr_pow (^)
+ *   -> expr_prim (literal, paren, call, var, const). */
 static long parse_expr(const char **p);
 #if TIKU_BASIC_STRVARS_ENABLE
 static long parse_cond(const char **p);
@@ -31,14 +31,14 @@ static long parse_cond(const char **p);
 #endif
 
 #if TIKU_BASIC_VFS_ENABLE
-/* Forward decls: VFSREAD lives in expr_call (defined above the
- * VFS-bridge block) but its implementation is below. */
+/* Defined in tiku_basic_stmt.inl, after their users here and in
+ * expr_call(). */
 static int  parse_path_literal(const char **p, char *buf, size_t cap);
 static long basic_vfsread(const char *path);
 #endif
 #if TIKU_BASIC_NET_ENABLE && (TIKU_KITS_NET_MQTT_ENABLE + 0)
-/* MQTTWAIT$ is dispatched here but implemented in tiku_basic_net.inl,
- * which is included after this file -- forward-declare it. */
+/* MQTTWAIT$ is dispatched here and implemented in tiku_basic_net.inl,
+ * which is included after this file. */
 static int basic_net_mqtt_wait(const char *ipstr, const char *topic,
                                long secs, char *out, size_t cap);
 #endif
@@ -53,28 +53,26 @@ static int basic_net_mqtt_wait(const char *ipstr, const char *topic,
 /* STRING-HEAP MARK-COMPACT                                                  */
 /*---------------------------------------------------------------------------*/
 /*
- * The heap bump-allocates and never frees a string mid-RUN, so the reassigning
- * idiom -- `10 A$ = STR$(N) : N = N+1 : GOTO 10` -- leaks the old copy on every
- * pass and dies with `? out of string heap`.  That is exactly the always-on
- * agent-loop workload F1 exists to keep running across a power cut, so it must
- * not die on the string heap first.
+ * The heap bump-allocates and frees nothing mid-RUN, so a loop that reassigns
+ * a string -- `10 A$ = STR$(N) : N = N+1 : GOTO 10` -- leaves a dead copy on
+ * every pass.  When an allocation does not fit, the heap is compacted.
  *
- * A mark-compact fixes it.  The live roots are FULLY ENUMERABLE -- the scalar
- * string vars A$..Z$ + the named slots (basic_strvars[]) and every string-array
- * element -- and strings are leaf data (no cycles), so this is the whole story:
- * no tracing, no marks in the heap.  Assignment always allocates a fresh copy
- * (RHS is evaluated into a stack buffer first) and SWAP only exchanges two root
- * pointers, so each live heap string has EXACTLY ONE root -- no aliasing to
- * dedup.  Live strings slide down in address order, rewriting each root
- * to its new home, and reclaim everything in between.
+ * The live roots are enumerable -- the string variables A$..Z$ and the named
+ * slots (basic_strvars[]), every string-array element, and the caller strings
+ * saved on the SUB/LOCAL scope stack -- and strings are leaf data, so no
+ * tracing and no marks in the heap are needed.  Assignment always allocates a
+ * fresh copy (the RHS is evaluated into a stack buffer first) and SWAP only
+ * exchanges two root pointers, so each live heap string has one root.  Live
+ * strings slide down in address order, each root is rewritten to the new
+ * home, and the gaps between them are reclaimed.
  */
 
 /**
  * @brief Lowest-addressed live-string root at or above @p from, or NULL.
  *
- * Scans the complete root set (scalar string vars + string-array elements).
- * Repeated calls with @p from advanced past each moved string walk the live
- * strings in ascending heap-address order without a temp array.
+ * Scans every root: string variables, string-array elements and saved scope
+ * strings.  Calls with @p from advanced past each moved string walk the live
+ * strings in ascending address order without a temporary array.
  */
 static char **
 basic_str_lowest_root(char *from)
@@ -111,9 +109,9 @@ basic_str_lowest_root(char *from)
     }
 #endif
 #if TIKU_BASIC_SUBS_ENABLE
-    /* SUB param / LOCAL saved strings (F3): a caller's shadowed string is
-     * reachable only through the scope stack, so it is a live root the
-     * compactor must relocate too. */
+    /* SUB param / LOCAL saved strings: a caller's shadowed string is
+     * reachable only through the scope stack, so it is a root the compactor
+     * relocates too. */
     for (i = 0; i < basic_scope_sp; i++) {
         if (basic_scope[i].is_str) {
             char *v = basic_scope[i].old_str;
@@ -132,7 +130,7 @@ basic_str_lowest_root(char *from)
  *        left by reassigned/overwritten allocations, rewriting the roots.
  *
  * Afterwards basic_str_heap_pos is the compacted high-water and [0, pos) holds
- * exactly the live strings, packed.  Strings move only DOWN, in ascending
+ * exactly the live strings, packed.  Strings move only down, in ascending
  * address order, so a live string never overlaps a not-yet-moved one.
  */
 static void
@@ -154,11 +152,15 @@ basic_str_compact(void)
     basic_str_heap_pos = write_pos;
 }
 
-/* Bump-allocate a NUL-terminated copy of @src[0..len).  On a full heap it
- * reclaims dead strings via a mark-compact and retries once; returns NULL only
- * when the LIVE strings genuinely leave no room.  @src is always a caller stack
- * buffer (the RHS is evaluated before allocation), never a heap pointer, so a
- * compaction that relocates heap strings cannot invalidate it. */
+/**
+ * @brief Bump-allocate a NUL-terminated copy of @p src[0..len).
+ *
+ * A full heap is compacted once and the allocation retried.
+ *
+ * @return The copy, or NULL when the live strings leave no room.
+ * @note @p src must not point into the heap (callers pass a stack buffer):
+ *       a compaction moves heap strings and would invalidate it.
+ */
 static char *
 basic_str_alloc(const char *src, size_t len)
 {
@@ -168,7 +170,7 @@ basic_str_alloc(const char *src, size_t len)
         basic_str_compact();                     /* reclaim + retry once */
         if ((size_t)basic_str_heap_pos + len + 1u >
             (size_t)TIKU_BASIC_STR_HEAP_BYTES) {
-            return NULL;                          /* live strings fill the heap */
+            return NULL;                     /* live strings fill the heap */
         }
     }
     dst = basic_str_heap + basic_str_heap_pos;
@@ -178,16 +180,19 @@ basic_str_alloc(const char *src, size_t len)
     return dst;
 }
 
-/* Detect whether the cursor sits on the start of a string expression:
- * a `"..."` literal, a single-letter `A$` variable, or one of the
- * string-returning function keywords. Used by PRINT and condition
- * parsing to decide which sub-grammar to dispatch to. */
+/**
+ * @brief 1 when the cursor sits on the start of a string expression.
+ *
+ * Matches a `"..."` literal, a string variable (A$, NAME$) or array element
+ * (A$(...)), or a string function, spelled or crunched, whose name ends in
+ * '$'.  Callers use it to choose between the string and numeric grammars.
+ */
 static int
 peek_string_expr(const char *p)
 {
     while (*p == ' ' || *p == '\t') p++;
     if (*p == '"') return 1;
-    /* A2: a crunched string-function token (spelling ends in '$'). */
+    /* A crunched string-function token (spelling ends in '$'). */
     {
         uint8_t b = (uint8_t)*p;
         if (b >= BASIC_TOK_BASE && b < BASIC_TOK_BASE + BASIC_TOK_N) {
@@ -215,12 +220,15 @@ peek_string_expr(const char *p)
 
 static int parse_strexpr(const char **p, char *out, size_t cap);
 
-/* Resolve a reader's SOURCE argument to a (ptr, len) pair. A big-buffer
- * reference `#n` (a FETCH target) yields the arena buffer IN PLACE -- no copy,
- * so a whole multi-KB reply is readable past STR_BUF_CAP. Anything else is a
- * normal string expression parsed into the caller's stack buffer. Readers that
- * scan a large source (JSON$, LINE$, BETWEEN$) use this instead of
- * parse_strexpr; their small results still go through the 1 KB out buffer. */
+/**
+ * @brief Resolve a reader's source argument to a (pointer, length) pair.
+ *
+ * `#n` (a FETCH target) yields big buffer n in place, so a reply longer than
+ * STR_BUF_CAP stays readable; anything else is a string expression parsed
+ * into @p stackbuf.  JSON$, LINE$, BETWEEN$ and LEN(#n) read their source so.
+ *
+ * @return 0 with @p op and @p olen set, -1 on error.
+ */
 static int
 parse_str_ref(const char **p, const char **op, size_t *olen,
               char *stackbuf, size_t cap)
@@ -248,12 +256,15 @@ parse_str_ref(const char **p, const char **op, size_t *olen,
 }
 
 #if TIKU_BASIC_JSON_ENABLE
-/* JSON$ core: navigate `json` (jlen bytes) by a dotted `path` -- object keys and
- * array indices (e.g. "choices.0.message.content") -- and render the target
- * SCALAR into out[cap]: strings are un-escaped, numbers/bools become text, and
- * null / not-found / a non-scalar target yield "".  Wraps the codec/json
- * pull-parser (validated against real LLM-response shapes on host).  The agent
- * primitive for reading an API reply. */
+/**
+ * @brief JSON$ core: follow dotted @p path through @p json, render the scalar.
+ *
+ * The path holds object keys and array indices ("choices.0.message.content").
+ * Strings are un-escaped, numbers and booleans become text; null, a missing
+ * path or a non-scalar target yield "".  Wraps the codec/json pull-parser.
+ *
+ * @return 0 when the path resolved, -1 when it did not or the JSON is bad.
+ */
 static int
 basic_json_extract(const char *json, uint16_t jlen, const char *path,
                    char *out, size_t cap)
@@ -275,14 +286,16 @@ basic_json_extract(const char *json, uint16_t jlen, const char *path,
             for (;;) {                          /* object: find key == seg */
                 const char *ks; uint16_t kl;
                 if (tiku_kits_codec_json_next_token(&r, &t) != TIKU_KITS_CODEC_OK) return -1;
-                if (t != TIKU_KITS_CODEC_JSON_TOK_STRING) return -1;   /* RBRACE/malformed */
+                /* Not a key: the object ended or is malformed. */
+                if (t != TIKU_KITS_CODEC_JSON_TOK_STRING) return -1;
                 tiku_kits_codec_json_token_string(&r, &ks, &kl);
                 if (tiku_kits_codec_json_next_token(&r, &t) != TIKU_KITS_CODEC_OK ||
                     t != TIKU_KITS_CODEC_JSON_TOK_COLON) return -1;
-                if ((size_t)kl == sl && memcmp(ks, seg, sl) == 0) break;   /* found */
+                if ((size_t)kl == sl && memcmp(ks, seg, sl) == 0) break;
                 if (tiku_kits_codec_json_skip_value(&r) != TIKU_KITS_CODEC_OK) return -1;
                 if (tiku_kits_codec_json_next_token(&r, &t) != TIKU_KITS_CODEC_OK) return -1;
-                if (t != TIKU_KITS_CODEC_JSON_TOK_COMMA) return -1;   /* end of object */
+                /* No comma: the object ended without the key. */
+                if (t != TIKU_KITS_CODEC_JSON_TOK_COMMA) return -1;
             }
         } else if (t == TIKU_KITS_CODEC_JSON_TOK_LBRACKET) {
             long idx = 0, i;                     /* array: index seg */
@@ -291,10 +304,11 @@ basic_json_extract(const char *json, uint16_t jlen, const char *path,
             for (i = 0; i < idx; i++) {
                 if (tiku_kits_codec_json_skip_value(&r) != TIKU_KITS_CODEC_OK) return -1;
                 if (tiku_kits_codec_json_next_token(&r, &t) != TIKU_KITS_CODEC_OK) return -1;
-                if (t != TIKU_KITS_CODEC_JSON_TOK_COMMA) return -1;   /* out of range */
+                /* No comma: the index is past the end. */
+                if (t != TIKU_KITS_CODEC_JSON_TOK_COMMA) return -1;
             }
         } else {
-            return -1;                           /* path descends into a scalar */
+            return -1;                       /* path descends into a scalar */
         }
         if (last) {
             if (tiku_kits_codec_json_next_token(&r, &vt) != TIKU_KITS_CODEC_OK) return -1;
@@ -348,19 +362,20 @@ basic_json_extract(const char *json, uint16_t jlen, const char *path,
     }
     if (vt == TIKU_KITS_CODEC_JSON_TOK_TRUE  && cap > 4u) { memcpy(out, "true", 5);  return 0; }
     if (vt == TIKU_KITS_CODEC_JSON_TOK_FALSE && cap > 5u) { memcpy(out, "false", 6); return 0; }
-    out[0] = '\0';                               /* null / object / array -> "" */
+    out[0] = '\0';                           /* null / object / array -> "" */
     return 0;
 }
 #endif /* TIKU_BASIC_JSON_ENABLE */
 
-/* parse_strprim: a single string atom -- literal, variable, or a
- * string-returning function call. Stores the resulting NUL-terminated
- * string in @out (cap bytes). Returns 0 on success, -1 on error. */
 #if TIKU_BASIC_CRYPTO_ENABLE
-/* Encode n raw bytes as 2n lowercase hex chars + NUL into out. The
- * caller guarantees out holds 2n+1 bytes.  Used by SHA256$ / HMAC$,
- * which return their digests as hex text (raw bytes cannot survive a
- * NUL-terminated string interpreter). */
+/**
+ * @brief Encode @p n bytes as 2n lowercase hex digits and a NUL in @p out.
+ *
+ * SHA256$ and HMAC$ return their digests as hex text, since raw bytes cannot
+ * survive a NUL-terminated string.
+ *
+ * @note @p out must hold 2n+1 bytes.
+ */
 static void
 basic_hex_encode(const uint8_t *src, size_t n, char *out)
 {
@@ -374,12 +389,21 @@ basic_hex_encode(const uint8_t *src, size_t n, char *out)
 }
 #endif
 
+/**
+ * @brief Parse one string atom: a literal, a variable or a string function.
+ *
+ * The builtin string functions match before the bare variable lookup, so a
+ * name that could be either is the function.
+ *
+ * @return 0 with the NUL-terminated result in @p out (@p cap bytes), -1 on
+ *         error.
+ */
 static int
 parse_strprim(const char **p, char *out, size_t cap)
 {
     skip_ws(p);
 
-    /* Literal "..." -- mirrors PRINT's escape handling. */
+    /* Literal "..." with backslash escapes (print_escape()). */
     if (cur_peek(p) == '"') {
         size_t n = 0;
         cur_advance(p);
@@ -426,12 +450,7 @@ parse_strprim(const char **p, char *out, size_t cap)
         return 0;
     }
 #endif
-    /* String functions: LEFT$(s, n)  RIGHT$(s, n)  MID$(s, i [, n])
-     *                   CHR$(n)      STR$(n)
-     *
-     * These match before the bare variable lookup so an identifier
-     * that happens to match a function name is dispatched to the
-     * function rather than treated as a variable. */
+    /* LEFT$(s, n), RIGHT$(s, n), MID$(s, i [, n]). */
     if (match_kw(p, "LEFT$")) {
         char src[TIKU_BASIC_STR_BUF_CAP];
         long n;
@@ -524,8 +543,7 @@ parse_strprim(const char **p, char *out, size_t cap)
         return 0;
     }
     /* UPPER$(s$) / LOWER$(s$) -- ASCII case fold (leaves non-letters, incl.
-     * UTF-8 multibyte bytes, untouched). Table stakes for case-insensitive
-     * matching in agent/text programs. */
+     * UTF-8 multibyte bytes, untouched). */
     {
         int case_up = 0;                    /* 1 = upper, 2 = lower */
         if (match_kw(p, "UPPER$")) case_up = 1;
@@ -584,8 +602,7 @@ parse_strprim(const char **p, char *out, size_t cap)
     if (match_kw(p, "WORD$")) {
         /* WORD$(s$, n [, delim$]) -- the nth field (1-based) of s$, split on
          * any char in delim$ (default: whitespace). Empty runs are skipped, so
-         * "a,,b" with delim "," yields WORD$=... 1:"a" 2:"b". Out of range -> "".
-         * The tokenizer for "parse text, extract words". */
+         * "a,,b" split on "," has fields "a" and "b". Out of range -> "". */
         char src[TIKU_BASIC_STR_BUF_CAP], delim[TIKU_BASIC_STR_BUF_CAP];
         long idx;
         const char *dl;
@@ -678,7 +695,7 @@ parse_strprim(const char **p, char *out, size_t cap)
     if (match_kw(p, "LINE$")) {
         /* LINE$(s$, n) -- the nth 1-based line (split on \n; a trailing \r is
          * dropped so CRLF text works). Empty lines are counted (unlike WORD$);
-         * out of range -> "". Walks multi-line LLM/API output. */
+         * out of range -> "". */
         char src[TIKU_BASIC_STR_BUF_CAP];
         const char *S; size_t SL;
         long idx, ln = 1;
@@ -717,9 +734,9 @@ parse_strprim(const char **p, char *out, size_t cap)
         return 0;
     }
     if (match_kw(p, "BETWEEN$")) {
-        /* BETWEEN$(s$, a$, b$) -- text between the first a$ and the next b$ after
-         * it (empty a$ = from start, empty b$ = to end). Either marker absent
-         * -> "". Extracts fenced code, quoted values, tag/bracket contents. */
+        /* BETWEEN$(s$, a$, b$) -- text between the first a$ and the next b$
+         * after it (empty a$ = from start, empty b$ = to end). Either marker
+         * absent -> "". */
         char src[TIKU_BASIC_STR_BUF_CAP], am[128], bm[128];
         const char *sa, *sb, *S;
         size_t alen, blen, rlen, SL;
@@ -821,7 +838,7 @@ parse_strprim(const char **p, char *out, size_t cap)
     }
     /* INKEY$ -- non-blocking single-key read (no parens).  Returns the
      * pending input character as a 1-char string, or "" if none is waiting.
-     * The reactive complement to INPUT for event loops / games under A1. */
+     * The non-blocking complement to INPUT. */
     if (match_kw(p, "INKEY$")) {
         if (cap < 2u) {
             basic_throw(TIKU_BASIC_ERR_GENERAL, "string too long");
@@ -976,7 +993,7 @@ parse_strprim(const char **p, char *out, size_t cap)
 #endif
 #if TIKU_BASIC_VFS_ENABLE
     /* VFSREAD$("path") -- read a VFS node and return its raw text.
-     * The trailing newline is stripped (most read callbacks emit
+     * Trailing whitespace is stripped (most read callbacks emit
      * "value\n"). Pairs with VFSREAD() for nodes whose value is a
      * string (e.g. /sys/device/name, /sys/init/<n>/name,
      * /proc/<n>/name). */
@@ -997,8 +1014,6 @@ parse_strprim(const char **p, char *out, size_t cap)
         }
         if ((size_t)n >= cap) n = (int)cap - 1;
         out[n] = '\0';
-        /* Strip a single trailing newline / whitespace so callers
-         * don't have to. */
         while (n > 0 &&
                (out[n - 1] == '\n' || out[n - 1] == '\r' ||
                 out[n - 1] == ' '  || out[n - 1] == '\t')) {
@@ -1074,9 +1089,9 @@ parse_strprim(const char **p, char *out, size_t cap)
     }
     /* BLESCAN$(secs) -- passive scan of the BLE advertising channels for
      * `secs` seconds (clamped 1..20); returns "AA:BB:CC:DD:EE:FF,rssi,name;"
-     * per distinct device heard, strongest first not guaranteed -- discovery
-     * order.  Blocking and watchdog-kicked like HTTPGET$ (the cooperative-
-     * blocking rule in tiku_basic_net.inl). */
+     * per distinct device heard, in discovery order.  Blocking and
+     * watchdog-kicked like HTTPGET$ (see the cooperative-blocking rule in
+     * tiku_basic_net.inl). */
     if (match_kw(p, "BLESCAN$")) {
         tiku_ble_adv_report_t reps[8];
         long secs;
@@ -1131,10 +1146,10 @@ parse_strprim(const char **p, char *out, size_t cap)
         return 0;
     }
 #if (TIKU_KITS_NET_HTTP_ENABLE + 0)
-    /* HTTPGET$("host", "path") -- HTTPS GET over the certificate-based TLS 1.3
-     * client (basic_https_get): DNS + TCP + cert-validated TLS to a real https
-     * server, returning the response body capped at the string buffer.  The
-     * call drives the net stack itself (WiFi RX drain + TCP timers) so the
+    /* HTTPGET$("host", "path") -- HTTPS GET through basic_https_get(): DNS,
+     * TCP and certificate-validated TLS to an https server, returning the raw
+     * response (status line, headers and body) capped at the string buffer.
+     * The call drives the net stack itself (WiFi RX drain + TCP timers) so the
      * console stays alive; HTTPSTATUS() exposes the parsed status code. */
     if (match_kw(p, "HTTPGET$")) {
         char host[TIKU_BASIC_HTTP_HOST_MAX], path[TIKU_BASIC_HTTP_PATH_MAX];
@@ -1152,18 +1167,17 @@ parse_strprim(const char **p, char *out, size_t cap)
         if (cur_peek(p) != ')') goto fn_paren_err;
         cur_advance(p);
         /* On failure basic_https_get() leaves out[] untouched, and out[] is a
-         * shared string buffer -- so discarding the result printed whatever the
-         * last string operation had left there, a screenful of stale bytes after
-         * every error line.  A failed fetch is the empty string. */
+         * shared string buffer still holding the last string operation's
+         * bytes, so a failed fetch is set to the empty string. */
         if (basic_https_get("GET", host, path, NULL, NULL, out, cap) < 0) {
             out[0] = '\0';
         }
         return 0;
     }
     /* HTTPPOST$("host","path", body$ [, ctype$]) -- HTTPS POST body$ (default
-     * Content-Type application/json) over the same cert-TLS client, returning
-     * the response body.  Set Authorization/other headers first with HTTPHEADER.
-     * The agent write path: pair with JSON$ to read the reply. */
+     * Content-Type application/json) through the same client, returning the
+     * raw response like HTTPGET$.  Set Authorization or other headers first
+     * with HTTPHEADER.  FETCH drops the header block, so JSON$ can parse #n. */
     if (match_kw(p, "HTTPPOST$")) {
         char host[TIKU_BASIC_HTTP_HOST_MAX], path[TIKU_BASIC_HTTP_PATH_MAX],
              ctype[TIKU_BASIC_HTTP_CTYPE_MAX];
@@ -1186,7 +1200,7 @@ parse_strprim(const char **p, char *out, size_t cap)
         cur_advance(p);
         if (parse_strexpr(p, body, sizeof(body)) != 0) return -1;
         skip_ws(p);
-        if (cur_peek(p) == ',') {                       /* optional content-type */
+        if (cur_peek(p) == ',') {                   /* optional content-type */
             cur_advance(p);
             if (parse_strexpr(p, ctype, sizeof(ctype)) != 0) return -1;
             have_ct = 1;
@@ -1196,7 +1210,7 @@ parse_strprim(const char **p, char *out, size_t cap)
         cur_advance(p);
         if (basic_https_get("POST", host, path, body,
                             have_ct ? ctype : NULL, out, cap) < 0) {
-            out[0] = '\0';            /* same shared-buffer hazard as HTTPGET$ */
+            out[0] = '\0';           /* same shared-buffer hazard as HTTPGET$ */
         }
         return 0;
     }
@@ -1204,9 +1218,9 @@ parse_strprim(const char **p, char *out, size_t cap)
 #if (TIKU_KITS_NET_MQTT_ENABLE + 0)
     /* MQTTWAIT$("broker_ip", "topic", secs) -- the inbound dual of
      * MQTTPUB: subscribe and block up to `secs` for one PUBLISH, then
-     * return its payload ("" on timeout).  This is how a device is
-     * commanded: LET C$ = MQTTWAIT$(B$, "cmd/dev1", 30).  Pairs with
-     * ON ERROR (ERR()=6 on link failure) for a robust wait loop. */
+     * return its payload ("" on timeout), e.g.
+     * LET C$ = MQTTWAIT$(B$, "cmd/dev1", 30).  A link failure raises
+     * ERR() = 6 (NET), which an ON ERROR handler can retry. */
     if (match_kw(p, "MQTTWAIT$")) {
         char host[20], topic[48];
         long secs;
@@ -1377,9 +1391,9 @@ parse_strprim(const char **p, char *out, size_t cap)
     }
 
 #if TIKU_BASIC_CRYPTO_ENABLE
-    /* BASE64$(s$) -- RFC 4648 Base64 of the bytes of s$.  The reverse
-     * (decode) is intentionally omitted: it would yield raw bytes that
-     * a NUL-terminated string cannot hold. */
+    /* BASE64$(s$) -- RFC 4648 Base64 of the bytes of s$.  There is no
+     * decode: it would yield raw bytes that a NUL-terminated string cannot
+     * hold. */
     if (match_kw(p, "BASE64$")) {
         char src[TIKU_BASIC_STR_BUF_CAP];
         skip_ws(p);
@@ -1418,8 +1432,7 @@ parse_strprim(const char **p, char *out, size_t cap)
         return 0;
     }
     /* HMAC$(key$, msg$) -- HMAC-SHA256(key, msg), 64-char lowercase hex.
-     * The on-device request-signing primitive: pair with HTTPHEADER to
-     * build an Authorization header for an API call. */
+     * With HTTPHEADER it signs an API request (an Authorization header). */
     if (match_kw(p, "HMAC$")) {
         char    key[TIKU_BASIC_STR_BUF_CAP], msg[TIKU_BASIC_STR_BUF_CAP];
         uint8_t mac[TIKU_KITS_CRYPTO_HMAC_SHA256_SIZE];
@@ -1468,14 +1481,11 @@ parse_strprim(const char **p, char *out, size_t cap)
     }
 #endif
 
-    /* Bare string variable: A$ / NAME$ / etc.  Must come AFTER the
+    /* Bare string variable: A$ / NAME$ / etc.  Must come after the
      * function-name matchers above so that LEFT$(...) and friends
      * aren't mis-tokenised as a variable named LEFT followed by a
-     * stray `$` and `(`.
-     *
-     * For arrays of named string variables this would need
-     * `NAME$(idx)` -- not supported (string arrays are still
-     * single-letter; see DIM). */
+     * stray `$` and `(`.  `NAME$(idx)` is not supported: string arrays
+     * are single-letter (see DIM). */
     {
         const char *save = cur_mark(p);
         int idx;
@@ -1501,8 +1511,10 @@ fn_paren_err:
     return -1;
 }
 
-/* Full string expression: a sequence of string atoms separated by
- * `+` (concatenation). Result NUL-terminated in @out. */
+/**
+ * @brief Parse a string expression: string atoms joined by `+`.
+ * @return 0 with the NUL-terminated result in @p out, -1 on error.
+ */
 static int
 parse_strexpr(const char **p, char *out, size_t cap)
 {

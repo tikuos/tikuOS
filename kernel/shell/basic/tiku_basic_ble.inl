@@ -7,7 +7,7 @@
  *
  * tiku_basic_ble.inl - Bluetooth Low Energy words for BASIC.
  *
- * General words built on the driver-agnostic facades, not tied to one radio.  Two
+ * Words built on the driver-agnostic facades, not tied to one radio.  Two
  * independent capabilities light up their own vocabularies: connection-capable
  * serial words, and broadcast beacon and scan words.
  *
@@ -17,12 +17,16 @@
 #if TIKU_BASIC_BLE_ENABLE
 
 /* Advertised names ride in a 31-byte LE adv PDU (Flags + Complete Local Name),
- * so anything past ~26 chars would be truncated by the radio anyway. */
+ * so anything past ~26 chars would be truncated anyway. */
 #define BASIC_BLE_NAME_CAP  24
 
 #if TIKU_BLE_SERIAL_PRESENT
-/* BLEADV ["name"] -- advertise connectably as a BLE serial peripheral.  A bare
- * BLEADV (or "") uses the default name.  Connection-capable backends only. */
+/**
+ * @brief BLEADV ["name"]: advertise connectably as a BLE serial peripheral.
+ *
+ * A bare BLEADV (or "") uses the default name.  Connection-capable backends
+ * only.
+ */
 static void
 exec_bleadv(const char **p)
 {
@@ -30,7 +34,7 @@ exec_bleadv(const char **p)
     char        name[BASIC_BLE_NAME_CAP];
     const char *nm;
     skip_ws(p);
-    if (cur_peek(p) == '\0' || cur_peek(p) == ':') {        /* bare BLEADV -> default name */
+    if (cur_peek(p) == '\0' || cur_peek(p) == ':') {    /* bare: default name */
         name[0] = '\0';
     } else if (parse_strexpr(p, name, sizeof(name)) != 0) {
         return;
@@ -41,7 +45,7 @@ exec_bleadv(const char **p)
     }
 }
 
-/* BLESEND expr$ -- send a string to the connected central. */
+/** @brief BLESEND expr$: send a string to the connected central. */
 static void
 exec_blesend(const char **p)
 {
@@ -55,7 +59,11 @@ exec_blesend(const char **p)
 }
 #endif /* TIKU_BLE_SERIAL_PRESENT */
 
-/* BLEOFF -- stop advertising / beaconing and drop any link. */
+/**
+ * @brief BLEOFF: stop advertising and beaconing and drop any link.
+ *
+ * The background observer keeps running; BLEOBSERVE OFF stops it.
+ */
 static void
 exec_bleoff(const char **p)
 {
@@ -68,29 +76,24 @@ exec_bleoff(const char **p)
 #endif
 }
 
-/* BLEBEACON ["name"][,interval_ms[,data$[,dbm]]] -- start a
- * non-connectable beacon.
+/**
+ * @brief BLEBEACON ["name"][,interval_ms[,data$[,dbm]]]: start a beacon.
  *
- * On a broadcast backend (tiku_ble_adv) the beacon is a BACKGROUND kernel
- * timer: RUN can end and the board keeps advertising while it sleeps
- * (tickless), until BLEOFF.  The optional interval (default 1000 ms,
- * clamped to the BLE legal range) is the microwatt knob: energy scales
- * linearly with burst rate.
- *
- * The optional data$ is a telemetry payload carried in the manufacturer
- * data after the 'TK' company id -- the broadcast-sensor pattern:
- *   10 BLEBEACON "TIKU-T", 1000, "T=" + STR$(A)
- * makes the reading visible to any observer with no connection.  Calling
- * BLEBEACON again swaps the payload in place (also on the offloaded
- * coprocessor path).
- *
- * The optional dbm is the second microwatt knob: TX power in signed dBm,
- * discrete silicon steps only (+8..-46 on nRF54L; an illegal step throws
- * rather than rounding).  Broadcast backends only; serial backends parse
- * and ignore it. */
+ * A non-connectable beacon; on a broadcast backend (tiku_ble_adv) it is a
+ * background kernel timer that keeps advertising after RUN ends, until
+ * BLEOFF.  Serial backends parse interval_ms, data$ and dbm and ignore them.
+ */
 static void
 exec_blebeacon(const char **p)
 {
+    /* interval_ms defaults to 1000 and is clamped to the legal BLE range;
+     * energy scales with the burst rate.  data$ is a telemetry payload in
+     * the manufacturer data after the 'TK' company id, readable by any
+     * observer without a connection, and a repeat BLEBEACON swaps it in
+     * place (also when the beacon runs on the coprocessor):
+     *   10 BLEBEACON "TIKU-T", 1000, "T=" + STR$(A)
+     * dbm is the TX power in discrete silicon steps (+8..-46 on nRF54L); an
+     * illegal step throws rather than rounding. */
     BASIC_RECLAIM_EXTERNAL();
     char        name[BASIC_BLE_NAME_CAP];
     const char *nm;
@@ -155,26 +158,24 @@ exec_blebeacon(const char **p)
 }
 
 #if TIKU_BLE_ADV_PRESENT
-/* BLEOBSERVE [secs] | BLEOBSERVE OFF -- background observer (R7).
+/**
+ * @brief BLEOBSERVE [secs] | BLEOBSERVE OFF: run the background observer.
  *
- * Non-blocking radio awareness: the IRQ+hardware-window engine scans
- * while the program keeps running (and after RUN ends), filling a
- * 12-slot dedup table read back with BLESEEN() / BLESEEN$(i).  secs
- * 0/absent = until BLEOBSERVE OFF (or BLEOFF? no -- BLEOFF is the
- * beacon's; the observer has its own OFF so the two never surprise
- * each other).  The ownership arbiter applies: starting while a beacon
- * runs throws (one radio, one owner).
+ * The radio scans while the program runs, and after RUN ends, filling the
+ * dedup table BLESEEN() / BLESEEN$(i) read.  secs 0 or absent runs until
+ * BLEOBSERVE OFF; BLEOFF leaves the observer running.
  *
- * The agent loop this enables -- react to the radio environment
- * without ever blocking:
- *   10 BLEOBSERVE 0
- *   20 IF BLESEEN() = 0 THEN DELAY 200 : GOTO 20
- *   30 PRINT "heard: "; BLESEEN$(0)
- *   40 BLEOBSERVE OFF
+ * @note Starting throws unless the radio is idle or runs a timer-driven
+ *       beacon, which then shares it with the observer.
  */
 static void
 exec_bleobserve(const char **p)
 {
+    /* Reacting to the radio without blocking:
+     *   10 BLEOBSERVE 0
+     *   20 IF BLESEEN() = 0 THEN DELAY 200 : GOTO 20
+     *   30 PRINT "heard: "; BLESEEN$(0)
+     *   40 BLEOBSERVE OFF */
     BASIC_RECLAIM_EXTERNAL();
     long secs = 0;
     skip_ws(p);

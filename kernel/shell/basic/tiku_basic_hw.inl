@@ -25,9 +25,8 @@ static uint8_t basic_adc_ready;
 /**
  * @brief Lazily initialise the ADC HAL for channel @p ch.
  *
- * Default config is 12-bit conversion, AVCC reference -- the
- * sensible "just give me a number" behaviour that 90% of casual
- * BASIC programs want.
+ * The HAL is set up once, for 12-bit conversion against the AVCC
+ * reference; the channel is initialised on every call.
  *
  * @return 0 on success, -1 on HAL failure.
  */

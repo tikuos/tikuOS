@@ -31,6 +31,7 @@ basic_debug_parked(void)
     return basic_debug_paused;
 }
 
+/** @brief Turn the debugger off and clear its breakpoints and watches. */
 static void
 basic_debug_reset(void)
 {
@@ -42,7 +43,7 @@ basic_debug_reset(void)
     memset(basic_debug_watches, 0, sizeof basic_debug_watches);
 }
 
-/** Resolve existing scalar slots only: inspecting allocates nothing. */
+/** @brief Print watch @p name; finds existing slots, allocates none. */
 static void
 basic_debug_watch(const char *name)
 {
@@ -80,6 +81,7 @@ basic_debug_watch(const char *name)
 #endif
 }
 
+/** @brief Print the [TDBG PAUSED] snapshot for @p line and every watch. */
 static void
 basic_debug_snapshot(unsigned line)
 {
@@ -93,7 +95,14 @@ basic_debug_snapshot(unsigned line)
     SHELL_PRINTF("[TDBG READY]\n");
 }
 
-/** Stop before a line, not mid-statement, and yield normally while paused. */
+/**
+ * @brief Decide whether the run stops before the line at basic_pc.
+ *
+ * Pauses on a breakpoint or a finished step and prints a snapshot; while
+ * paused the run yields normally.  A run never stops mid-statement.
+ *
+ * @return 1 to hold the line back, 0 to run it.
+ */
 static int
 basic_debug_before_step(void)
 {
@@ -116,6 +125,7 @@ basic_debug_before_step(void)
     return 0;
 }
 
+/** @brief Start a run; a debugged run pauses before its first line. */
 static void
 basic_debug_begin(void)
 {
@@ -124,6 +134,7 @@ basic_debug_begin(void)
     basic_debug_steps = 0;
 }
 
+/** @brief Close a debugged run with a final snapshot and [TDBG END]. */
 static void
 basic_debug_end(void)
 {
@@ -136,7 +147,11 @@ basic_debug_end(void)
     basic_debug_steps = 0;
 }
 
-/** A small, strict protocol: an invalid request alters no state. */
+/**
+ * @brief Run one DEBUG request: ON, OFF, STEP, CONT, SNAP, BREAK or WATCH.
+ *
+ * An invalid request alters no state and prints a [TDBG ERROR] line.
+ */
 static void
 basic_debug_command(const char *p)
 {
@@ -217,6 +232,7 @@ bad:
     SHELL_PRINTF("[TDBG ERROR invalid-command-or-limit]\n");
 }
 #else
+/* Debugger compiled out: the hooks are inert and DEBUG reports it. */
 static void basic_debug_reset(void) { }
 static void basic_debug_begin(void) { }
 static void basic_debug_end(void) { }

@@ -8,8 +8,8 @@
  * mod_demo.c - a runtime-loadable native module.
  *
  * Compiled separately from the firmware at a fixed address with no firmware
- * symbols linked, reaching the interpreter only through the jump table passed to
- * module_init().  Its handlers are pure, so the module holds no state.
+ * symbols linked, it reaches the interpreter only through the jump table passed
+ * to module_init().  Its handlers are pure, so the module holds no state.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,8 +17,7 @@
 #define TIKU_MODULE_BUILD 1
 #include "../tiku_basic_module.h"
 
-/* MODFIB(n): the nth Fibonacci number (MODFIB(10) = 55).  Pure integer math
- * -- calls no firmware service, so it needs no jump-table state. */
+/** @brief MODFIB(n): the nth Fibonacci number (MODFIB(10) = 55). */
 static int
 mod_fib(const long *args, int argc, long *out)
 {
@@ -33,8 +32,7 @@ mod_fib(const long *args, int argc, long *out)
     return 0;
 }
 
-/* MODMUL(a, b): a * b -- a second word, to prove multiple registrations from
- * one module. */
+/** @brief MODMUL(a, b): a * b, a second word registered by the same module. */
 static int
 mod_mul(const long *args, int argc, long *out)
 {
@@ -43,15 +41,17 @@ mod_mul(const long *args, int argc, long *out)
     return 0;
 }
 
-/* Image header at the carve base (.modhdr, placed first by the linker).
- * init_off = 16 | 1: module_init sits immediately after this 16-byte header,
- * with the Thumb bit set so the loader calls (carve_base + init_off). */
+/** Image header (.modhdr, placed first by the module script); module_init
+ *  follows it at offset 16, encoded with TIKU_MODULE_INIT_OFF(). */
 __attribute__((section(".modhdr"), used))
 const tiku_module_header_t mod_header = {
     TIKU_MODULE_MAGIC, TIKU_MODULE_ABI, TIKU_MODULE_INIT_OFF(16u), 0u
 };
 
-/* Entry point -- the linker forces it to carve_base + 16 (.modinit). */
+/**
+ * @brief Entry point, placed at image offset 16 (.modinit) by the module
+ *        script: registers MODFIB and MODMUL through the service table.
+ */
 __attribute__((section(".modinit"), used))
 void
 module_init(const tiku_basic_syscalls_t *sys)

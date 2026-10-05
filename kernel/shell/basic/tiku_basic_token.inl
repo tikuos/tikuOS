@@ -7,38 +7,34 @@
  *
  * tiku_basic_token.inl - keyword crunching.
  *
- * A stored line folds each keyword to a single byte and LIST detokenizes back.
- * Execution is dual: the matchers accept either the token byte or the spelled-out
- * word, so immediate mode runs raw and untabled keywords keep working.
+ * A stored line folds each keyword to one byte and LIST expands it again.
+ * The matchers accept either the token byte or the spelled-out word, so
+ * immediate mode runs raw text and keywords outside the table still work.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 /*
- Crunch rules:
+ * Crunch rules:
  *   - Only maximal identifier runs fold, and only on an exact, word-bounded
- *     match (PRINTER / TOTAL / FORI never fold -- same word-boundary rule
- *     match_kw itself applies, so semantics are unchanged).
+ *     match (PRINTER / TOTAL / FORI never fold -- the same word-boundary rule
+ *     match_kw applies, so semantics are unchanged).
  *   - A trailing '$' joins the word first (STR$ folds; A$ does not).
+ *   - Labels stay raw: a line-leading `name:` and the words after GOTO or
+ *     GOSUB, so a label spelled like a keyword still works.
  *   - Nothing folds inside "..." string literals, which end where the
  *     string parser ends them: a backslash keeps the byte after it inside.
  *   - After REM (or the ' alias) and after DATA, the rest of the line is
  *     stored raw: comment text and DATA items are data, not keywords.
  *   - Outside those raw regions, stray bytes >= 0x80 in the input are
- *     replaced with '?', so in stored text a high byte IS a valid token.
+ *     replaced with '?', so in stored text a high byte is always a token.
  *
- * The on-media SAVE format stays detokenized (human-readable) text, so
- * programs saved by an earlier build load unchanged, and the identity CRC
- * (computed over the crunched bytes) is stable across SAVE/LOAD because
- * crunching is deterministic.
- *
- * Known (pathological) limitation: a GOTO/GOSUB label spelled exactly like a
- * table keyword (e.g. `print:`) now folds and stops working as a label.
- *
+ * SAVE writes detokenized text, so a saved program does not depend on the
+ * token table, and the identity CRC (computed over the crunched bytes) is
+ * stable across SAVE/LOAD because crunching is deterministic.
  */
 
-
-/* Char predicates are defined in tiku_basic_lex.inl (included after us);
- * same-TU forward declarations keep the include order simple. */
+/* Char predicates are defined in tiku_basic_lex.inl (included after this
+ * file); same-TU forward declarations keep the include order simple. */
 static char to_upper(char c);
 static int  is_alpha(char c);
 static int  is_word_cont(char c);
@@ -47,9 +43,8 @@ static int  is_word_cont(char c);
 /* TOKEN TABLE                                                               */
 /*---------------------------------------------------------------------------*/
 
-/* X-macro keeps the enum and the spelling table in lockstep.  Entries the C
- * code references by name (REM/DATA raw-tail handling, the scanners, the
- * dispatch switch) come first; order is otherwise cosmetic. */
+/* The X-macro keeps the enum and the spelling table in lockstep; an entry's
+ * position in the list sets its token byte. */
 #define BASIC_TOK_LIST(X)                                                     \
     /* control flow + statements */                                           \
     X(REM,     "REM")     X(DATA,    "DATA")    X(IF,      "IF")              \
@@ -92,6 +87,7 @@ static int  is_word_cont(char c);
     X(ADC,     "ADC")     X(PIN,     "PIN")     X(DIGREAD, "DIGREAD")         \
     X(DIGWRITE,"DIGWRITE")X(LED,     "LED")
 
+/** Token ids BASIC_TOK_<id>, in list order; BASIC_TOK_N counts them. */
 enum {
 #define X(id, s) BASIC_TOK_##id,
     BASIC_TOK_LIST(X)
@@ -99,13 +95,16 @@ enum {
     BASIC_TOK_N
 };
 
+/** Upper-case spelling of each token, indexed by token id. */
 static const char *const basic_tok_tab[] = {
 #define X(id, s) s,
     BASIC_TOK_LIST(X)
 #undef X
 };
 
+/** First token byte; stored text below it is plain characters. */
 #define BASIC_TOK_BASE      0x80u
+/** Token byte of keyword @p id, e.g. BASIC_TOK_BYTE(PRINT). */
 #define BASIC_TOK_BYTE(id)  ((uint8_t)(BASIC_TOK_BASE + BASIC_TOK_##id))
 
 _Static_assert(BASIC_TOK_N <= 128, "token bytes must fit 0x80..0xFF");
@@ -114,10 +113,10 @@ _Static_assert(BASIC_TOK_N <= 128, "token bytes must fit 0x80..0xFF");
 /* HELPERS                                                                   */
 /*---------------------------------------------------------------------------*/
 
-/* Longest table keyword is 8 chars ("CONTINUE", "DIGWRITE", "VFSWRITE"). */
+/** Longest word basic_crunch looks up; no table keyword exceeds 8 chars. */
 #define BASIC_TOK_KW_MAX 10u
 
-/* Exact-match lookup of an UPPERCASE word; -1 if it is not a keyword. */
+/** @brief Token id of the upper-case @p word, or -1 if it is no keyword. */
 static int
 basic_tok_find(const char *word)
 {
@@ -134,7 +133,7 @@ basic_tok_find(const char *word)
  *
  * The raw-text case assumes @p t sits at a word start (every caller scans
  * from a line start, after whitespace, or after a non-word byte).  @p kw is
- * an UPPERCASE table spelling.
+ * an upper-case table spelling.
  *
  * @return Bytes consumed on a match (1 for a token), 0 on no match.
  */
@@ -172,7 +171,7 @@ basic_crunch(char *dst, size_t cap, const char *src)
 {
     size_t      o          = 0;
     int         in_str     = 0;
-    int         at_start   = 1;   /* at line start (label-definition position) */
+    int         at_start   = 1;   /* at line start: where labels are defined */
     int         label_ref  = 0;   /* word right after GOTO/GOSUB is a label   */
 
     while (*src != '\0' && o + 1u < cap) {
@@ -199,7 +198,7 @@ basic_crunch(char *dst, size_t cap, const char *src)
             break;
         }
         if (is_alpha(c)) {
-            /* Maximal identifier run [+ optional '$'] -> fold iff the WHOLE
+            /* Maximal identifier run [+ optional '$'] -> fold iff the whole
              * word is a keyword (word-bounded by construction). */
             const char *w = src;
             char        word[BASIC_TOK_KW_MAX + 2];
@@ -213,7 +212,7 @@ basic_crunch(char *dst, size_t cap, const char *src)
             if ((at_start && *w == ':') || label_ref) {
                 tok = -1;
             } else if (*w == '$') {
-                /* word$: fold only the FULL `NAME$` spelling; never fold the
+                /* word$: fold only the full `NAME$` spelling; never fold the
                  * bare prefix of a string identifier/function. */
                 if ((size_t)(w - src) <= BASIC_TOK_KW_MAX) {
                     const char *r;
@@ -267,8 +266,8 @@ basic_crunch(char *dst, size_t cap, const char *src)
 /**
  * @brief Expand token bytes back to canonical keyword text.
  *
- * Exact inverse of basic_crunch for crunched input (quote-aware; REM / DATA
- * raw tails copied verbatim).
+ * Inverse of basic_crunch up to keyword case (quote-aware; REM / DATA raw
+ * tails copied verbatim).
  *
  * @return Number of bytes written (excluding the NUL), or -1 if @p cap was
  *         too small for the full expansion (dst still NUL-terminated).
@@ -309,8 +308,12 @@ basic_detok(char *dst, size_t cap, const char *src)
     return (*src == '\0') ? (int)o : -1;
 }
 
-/* Stream a crunched line through SHELL_PRINTF without a detok buffer --
- * used by LIST and the TRACE echo (display is human-paced). */
+/**
+ * @brief Print a crunched line with its keywords expanded.
+ *
+ * Streams through SHELL_PRINTF without a detok buffer; LIST and the TRACE
+ * echo use it.
+ */
 static void
 basic_detok_print(const char *src)
 {

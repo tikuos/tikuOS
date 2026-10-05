@@ -7,16 +7,17 @@
  *
  * tiku_basic_renum.inl - RENUM with line-reference rewriting.
  *
- * Renumbers from a start with a step and rewrites every GOTO, GOSUB, THEN and ON
- * target to track it.  A reference matching no existing line is left alone -- it
- * was already broken, and remapping it to a live line would break it harder.
+ * Renumbers from a start with a step and rewrites the line numbers after
+ * GOTO, GOSUB (including ON ... lists), THEN and ELSE to match.  A reference
+ * to a line that does not exist is left unchanged.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* Look up an old line number in the renumber map; returns the new
- * number, or the original old number if not in the map (i.e. the
- * GOTO referenced a non-existent line, which is left alone). */
+/**
+ * @brief New number for line @p old, or @p old itself when it is not in the
+ *        map (a reference to a line that does not exist).
+ */
 static uint16_t
 renum_lookup(const uint16_t *old_nos, const uint16_t *new_nos,
              int n, uint16_t old)
@@ -28,15 +29,17 @@ renum_lookup(const uint16_t *old_nos, const uint16_t *new_nos,
     return old;
 }
 
-/* Match a keyword at *q (case-insensitive, word-bounded). On match,
- * advances *q past the keyword and returns 1. Same convention as
- * match_kw but takes a single-pointer and doesn't skip trailing ws. */
+/**
+ * @brief match_kw() without skipping the whitespace after the keyword.
+ * @return 1 with *q past the keyword (case-insensitive, word-bounded, or one
+ *         crunched byte), 0 otherwise
+ */
 static int
 match_kw_no_ws(const char **q, const char *kw)
 {
     const char *r = cur_mark(q);
     uint8_t     b = (uint8_t)*r;
-    if (b >= BASIC_TOK_BASE) {               /* A2: crunched keyword byte */
+    if (b >= BASIC_TOK_BASE) {               /* crunched keyword byte */
         if (b >= BASIC_TOK_BASE + BASIC_TOK_N ||
             strcmp(basic_tok_tab[b - BASIC_TOK_BASE], kw) != 0) return 0;
         cur_set(q, r + 1);
@@ -51,19 +54,16 @@ match_kw_no_ws(const char **q, const char *kw)
     return 1;
 }
 
-/* Rewrite line numbers inside a body string. Walks the source and
- * looks for `GOTO`/`GOSUB`/`THEN`/`ELSE` followed by a digit run;
- * each digit run gets remapped via the (old_nos, new_nos) tables.
- * Quoted strings ("...", a backslash keeping the byte after it inside, as
- * the string parser reads them) are copied unchanged, and so is the rest
- * of a line after REM, an apostrophe or DATA, which the crunch stores raw.
- * A spelled-out word counts only where no word character runs into it.
+/**
+ * @brief Copy body @p src to @p dst, remapping the line numbers after GOTO,
+ *        GOSUB, THEN and ELSE (a comma list after GOTO/GOSUB, for ON).
  *
- * After GOTO/GOSUB comma-separated number lists are also accepted, to
- * cover `ON expr GOTO l1, l2, ...`.
+ * Quoted strings (a backslash keeps the next byte inside) and the rest of a
+ * line after REM, an apostrophe or DATA are copied unchanged.  A spelled-out
+ * keyword counts only where no word character runs into it.
  *
- * Returns 0 on success, -1 if the rewritten line would exceed the
- * caller's buffer. */
+ * @return 0, or -1 when the result would not fit @p cap bytes
+ */
 static int
 renum_rewrite_body(const char *src, char *dst, size_t cap,
                    const uint16_t *old_nos, const uint16_t *new_nos,
@@ -116,7 +116,6 @@ renum_rewrite_body(const char *src, char *dst, size_t cap,
             else if (match_kw_no_ws(&p, "THEN"))   { matched = 1; is_list = 0; }
             else if (match_kw_no_ws(&p, "ELSE"))   { matched = 1; is_list = 0; }
             if (matched) {
-                /* Emit the keyword. */
                 while (kw_start < p) { EMIT_CHAR(*kw_start); kw_start++; }
                 /* Emit any whitespace between keyword and number. */
                 while (*p == ' ' || *p == '\t') { EMIT_CHAR(*p); p++; }
@@ -153,6 +152,7 @@ renum_rewrite_body(const char *src, char *dst, size_t cap,
 #undef EMIT_CHAR
 }
 
+/** @brief RENUM [start [, step]]: renumber the program and its references. */
 static void
 exec_renum(const char **q)
 {
@@ -186,7 +186,7 @@ exec_renum(const char **q)
         }
     }
     /* Sort old_nos ascending (insertion sort -- N is at most
-     * TIKU_BASIC_PROGRAM_LINES, default 24). */
+     * TIKU_BASIC_PROGRAM_LINES). */
     for (i = 1; i < n_lines; i++) {
         uint16_t key = old_nos[i];
         j = i - 1;
@@ -200,9 +200,8 @@ exec_renum(const char **q)
         new_nos[i] = (uint16_t)(start + (long)i * step);
     }
 
-    /* Rewrite each line's body using the map. Do this BEFORE
-     * change the line numbers, so the prog table is still self-
-     * consistent during the rewrite. */
+    /* Rewrite every body through the map first, then apply the new
+     * numbers. */
     for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) {
         if (prog[i].number == 0) continue;
         if (renum_rewrite_body(prog[i].text, tmp, sizeof(tmp),
@@ -214,13 +213,12 @@ exec_renum(const char **q)
         prog[i].text[TIKU_BASIC_LINE_MAX - 1] = '\0';
     }
 
-    /* Now apply the new line numbers. */
     for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) {
         if (prog[i].number == 0) continue;
         prog[i].number =
             renum_lookup(old_nos, new_nos, n_lines, prog[i].number);
     }
-    basic_line_index_ok = 0;                  /* A3: RENUM changed line numbers */
+    basic_line_index_ok = 0;                  /* RENUM changed line numbers */
     SHELL_PRINTF("renumbered %d lines from %u step %u\n",
                  n_lines, (unsigned)start, (unsigned)step);
 }

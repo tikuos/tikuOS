@@ -7,9 +7,9 @@
  *
  * tiku_basic_multi_if.inl - multi-line IF / ELSE / END IF helpers.
  *
- * Holds the depth-aware forward scanner that finds the matching ELSE or END IF,
- * plus the per-keyword detectors and the no-op statements the runner sees when
- * execution walks onto an ELSE or END IF line.  exec_if itself lives in dispatch.
+ * Holds the depth-aware scanners that find a block's ELSEIF, ELSE and END IF,
+ * the line detectors they use, and the ELSEIF / ELSE / END IF statements met
+ * by fall-through.  exec_if itself lives in dispatch.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,32 +19,31 @@
  *
  *   IF cond THEN              <- line ends in THEN, no body after
  *      ...body...
+ *   ELSEIF cond THEN           <- optional, any number of them
+ *      ...body...
  *   ELSE                       <- optional, alone on its own line
  *      ...else-body...
  *   END IF                     <- or "ENDIF"
  *
- * Detection at parse time: after `IF cond THEN`, the cursor sits at
- * end-of-statement (whitespace + EOL or `:`). When that's the case
- * exec_if dispatches to the multi-line path; otherwise it stays on
- * the existing single-line path.
+ * exec_if takes the multi-line path during RUN when nothing but blanks
+ * follows `IF cond THEN` before the end of the statement (EOL or `:`).
  *
- * Runtime: a true cond simply falls through to the body. When
- * ELSE is eventually reached, that is the signal that the THEN branch
- * just finished -- skip forward to matching END IF. When cond is
- * false at multi-line entry, the scan goes forward for the first matching
- * ELSE or END IF and jump past it.
+ * A true condition falls through into the body.  A false one walks the
+ * ELSEIF / ELSE chain: the first ELSEIF whose condition is true, else the
+ * ELSE body, else past END IF.  Reaching an ELSEIF or ELSE by fall-through
+ * means a branch has finished, so execution skips past the matching END IF.
  *
- * Nesting works because the forward scans are depth-aware: a nested
- * `IF cond THEN` (with empty body) bumps depth, a matching END IF
- * decrements it. The scanner never confuses inner ELSE with outer.
- *
- * No runtime frame stack is needed.  The single-line IF (where THEN
- * has a body) keeps its existing implementation untouched.
+ * The forward scans are depth-aware: a nested multi-line IF raises the depth
+ * and its END IF lowers it, so an inner ELSE is never taken for an outer one.
+ * No runtime frame stack is needed.
  */
 
-/* Does this line text begin with `IF` and end (after trailing
- * whitespace) with `THEN`? Used by the depth-aware forward scanner
- * to detect nested multi-line IFs without parsing the condition. */
+/**
+ * @brief Does this line open a multi-line IF (`IF ...` ending in THEN)?
+ *
+ * Lets the depth-aware scanners spot a nested multi-line IF without parsing
+ * its condition.  A leading `name:` label is skipped.
+ */
 static int
 multi_if_starts_here(const char *t)
 {
@@ -73,7 +72,7 @@ multi_if_starts_here(const char *t)
     return 1;
 }
 
-/* Is this line just `ELSE` (with optional whitespace / label)? */
+/** @brief Does this line start with the ELSE keyword (after any label)? */
 static int
 line_is_else_kw(const char *t)
 {
@@ -90,9 +89,13 @@ line_is_else_kw(const char *t)
     return 0;
 }
 
-/* Is this line `ELSEIF <cond> THEN`?  Returns a pointer to the condition
- * text (just past the ELSEIF keyword) if so, else NULL.  Token-exact --
- * a plain `ELSE` never matches (distinct token / word boundary). */
+/**
+ * @brief Is this line `ELSEIF <cond> THEN` (after any label)?
+ *
+ * Token-exact: a plain ELSE never matches.
+ *
+ * @return Pointer to the condition text just past ELSEIF, or NULL.
+ */
 static const char *
 line_is_elseif(const char *t)
 {
@@ -110,7 +113,7 @@ line_is_elseif(const char *t)
     return (k != 0) ? t + k : NULL;
 }
 
-/* Is this line `END IF` or `ENDIF`? */
+/** @brief Does this line start with END IF or ENDIF (after any label)? */
 static int
 line_is_endif(const char *t)
 {
@@ -136,12 +139,15 @@ line_is_endif(const char *t)
     return 0;
 }
 
-/* From `start_line`, walk forward in line-number order looking for
- * the matching ELSE or END IF at the same nesting level.
- *   Returns:
- *     0 + sets *out_else   = prog index of matching ELSE (or -1)
- *         sets *out_endif  = prog index of matching END IF
- *    -1 if no matching END IF was found in the program. */
+/**
+ * @brief Find the ELSE and END IF at the nesting level of @p start_line.
+ *
+ * Walks forward in line-number order.
+ *
+ * @param out_else   Receives the matching ELSE's prog[] index, or -1
+ * @param out_endif  Receives the matching END IF's prog[] index
+ * @return 0, or -1 when the program has no matching END IF.
+ */
 static int
 find_if_else_or_endif(uint16_t start_line,
                       int *out_else, int *out_endif)
@@ -169,8 +175,13 @@ find_if_else_or_endif(uint16_t start_line,
     return -1;
 }
 
-/* Same as above but only reports END IF -- used by ELSE jumping
- * forward past the rest of its enclosing IF block. */
+/**
+ * @brief Find the END IF that closes the block containing @p start_line.
+ *
+ * ELSE and ELSEIF use it to skip the rest of their block.
+ *
+ * @return The prog[] index, or -1 when there is none.
+ */
 static int
 find_matching_endif(uint16_t start_line)
 {
@@ -182,12 +193,16 @@ find_matching_endif(uint16_t start_line)
     return endif_idx;
 }
 
-/* Branch keywords the false-path chain walker stops on. */
+/** Branch keywords the false-path chain walker stops on. */
 enum { MIF_NONE = 0, MIF_ELSEIF, MIF_ELSE, MIF_ENDIF };
 
-/* From start_line, find the first depth-0 ELSEIF / ELSE / END IF, returning
- * its prog index and setting *out_type.  Depth-aware: a nested multi-line IF
- * bumps depth so its inner branch keywords are skipped.  -1 if none. */
+/**
+ * @brief Find the first depth-0 ELSEIF, ELSE or END IF after @p start_line.
+ *
+ * A nested multi-line IF raises the depth, so its branch keywords are skipped.
+ *
+ * @return The prog[] index with *out_type set, or -1 with MIF_NONE.
+ */
 static int
 find_next_if_branch(uint16_t start_line, int *out_type)
 {
@@ -212,8 +227,10 @@ find_next_if_branch(uint16_t start_line, int *out_type)
     return -1;
 }
 
-/* Resume execution at the line AFTER prog index idx (a branch's body, or the
- * line past END IF).  If idx was the program's last line, end the run. */
+/**
+ * @brief Continue at the line after prog index @p idx (a branch's body, or
+ *        the line past END IF); end the run if @p idx is the last line.
+ */
 static void
 multi_if_enter_after(int idx)
 {
@@ -227,11 +244,13 @@ multi_if_enter_after(int idx)
     basic_pc_set = 1;
 }
 
-/* A multi-line IF (or a prior ELSEIF) evaluated FALSE at from_line.  Walk the
- * ELSEIF/ELSE chain: enter the first ELSEIF whose condition is true, else the
- * ELSE body, else fall past END IF.  This is the whole multi-line branch
- * selection -- reaching an ELSEIF/ELSE by fall-through always means "skip to
- * END IF" (a branch already ran), handled by exec_elseif / exec_else_kw. */
+/**
+ * @brief Pick the branch after a multi-line IF that was false at @p from_line.
+ *
+ * Enters the first ELSEIF whose condition is true, else the ELSE body, else
+ * continues past END IF.  An ELSEIF or ELSE reached by fall-through means a
+ * branch already ran; exec_elseif / exec_else_kw skip to END IF then.
+ */
 static void
 multi_if_take_false(uint16_t from_line, const char **p)
 {
@@ -263,8 +282,10 @@ multi_if_take_false(uint16_t from_line, const char **p)
     }
 }
 
-/* ELSEIF reached as a top-level statement -- like ELSE, it means a taken
- * branch's body just finished, so skip forward past the matching END IF. */
+/**
+ * @brief ELSEIF reached by fall-through: a branch finished, so skip past the
+ *        matching END IF.
+ */
 static void
 exec_elseif(const char **p)
 {
@@ -282,9 +303,10 @@ exec_elseif(const char **p)
     while (cur_peek(p)) cur_advance(p);
 }
 
-/* ELSE encountered as a top-level statement -- this means a multi-
- * line IF's THEN branch just finished. Skip forward past the
- * matching END IF. */
+/**
+ * @brief ELSE reached by fall-through: a branch finished, so skip past the
+ *        matching END IF.
+ */
 static void
 exec_else_kw(const char **p)
 {
@@ -313,8 +335,7 @@ exec_else_kw(const char **p)
     while (cur_peek(p)) cur_advance(p);
 }
 
-/* END IF / ENDIF is a marker; reaching it in normal execution is a
- * no-op (control just falls through to the next line). */
+/** @brief END IF / ENDIF in normal flow: a marker, so nothing to do. */
 static void
 exec_endif(const char **p)
 {

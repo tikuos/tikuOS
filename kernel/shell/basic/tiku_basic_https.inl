@@ -5,32 +5,34 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_https.inl - HTTPS GET backend for BASIC.
+ * tiku_basic_https.inl - HTTPS client backend for BASIC.
  *
- * Drives the certificate-based TLS 1.3 client over the TCP stack.  The send and
- * receive callbacks pump the radio drain and TCP timers while they wait, so the
- * console stays alive and the RX path keeps flowing through the handshake.
+ * Drives the http kit's certificate engine (TLS 1.3, falling back to 1.2) over
+ * the TCP stack.  The send and receive callbacks pump the radio drain and TCP
+ * timers while they wait, so the console and the RX path stay alive.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #if TIKU_BASIC_NET_ENABLE && (TIKU_KITS_NET_HTTP_ENABLE + 0)
 
-#include "tiku_basic_https_roots.inl"  /* tiku_https_roots[] + TIKU_HTTPS_NROOTS */
-#include <tikukits/net/tls/tls12/tiku_kits_crypto_tls12.h>  /* TLS 1.2 fallback */
-#include <tikukits/net/http/tiku_kits_net_http.h>  /* shared cert HTTPS engine */
+#include "tiku_basic_https_roots.inl"  /* trust store from /data/roots.bin */
+#include <tikukits/net/tls/tls12/tiku_kits_crypto_tls12.h>  /* TLS 1.2 */
+#include <tikukits/net/http/tiku_kits_net_http.h>  /* cert HTTPS engine */
 
-static int basic_net_parse_ip(const char *s, uint8_t out[4]); /* in tiku_basic_net.inl */
+/* Defined in tiku_basic_net.inl. */
+static int basic_net_parse_ip(const char *s, uint8_t out[4]);
 
-static int basic_http_status;          /* last HTTPGET$/HTTPPOST$ status */
-static char basic_http_hdrs[TIKU_BASIC_HTTP_HDRS_MAX];  /* extra request headers
-                                        * set by HTTPHEADER ("Name: value\r\n"...); "" = none */
+/** Status code of the last HTTPS request, read by HTTPSTATUS(). */
+static int basic_http_status;
+/** Extra request headers from HTTPHEADER ("Name: value\r\n"...), or "". */
+static char basic_http_hdrs[TIKU_BASIC_HTTP_HDRS_MAX];
 
 /* Compile-time budget for req[] in basic_https_get(): the four bounded inputs
- * (host + path + HTTPHEADER block + content-type) plus a generous fixed
- * allowance (128) for the method, the HTTP/Host/Connection/Content-* tokens, the
- * decimal Content-Length and the CRLFs.  Bumping any cap in tiku_basic_config.h
- * without growing REQ_MAX breaks the build here instead of overflowing req[]. */
+ * (host + path + HTTPHEADER block + content-type) plus a fixed allowance (128)
+ * for the method, the HTTP/Host/Connection/Content-* tokens, the decimal
+ * Content-Length and the CRLFs.  Raising a cap in tiku_basic_config.h without
+ * growing REQ_MAX breaks the build here instead of overflowing req[]. */
 _Static_assert(TIKU_BASIC_HTTP_HOST_MAX + TIKU_BASIC_HTTP_PATH_MAX +
                TIKU_BASIC_HTTP_HDRS_MAX + TIKU_BASIC_HTTP_CTYPE_MAX + 128u
                <= TIKU_BASIC_HTTP_REQ_MAX,
@@ -52,25 +54,17 @@ _Static_assert(TIKU_BASIC_HTTP_HOST_MAX + TIKU_BASIC_HTTP_PATH_MAX +
 #include <tikukits/crypto/hmac/tiku_kits_crypto_hmac.h>
 
 /*
- * RNG for the TLS handshake: an HMAC-DRBG (NIST SP 800-90A) seeded ONCE from
- * the on-die hardware TRNG, then expanded in software.
+ * RNG for the TLS handshake: an HMAC-DRBG (NIST SP 800-90A) seeded once from
+ * the platform TRNG, then expanded in software.  The TRNG is slow -- on Ambiq
+ * and RP2350 a ClientHello's worth of entropy (the 32-byte client random and
+ * the 32-byte P-256 ECDHE private key) takes several blocking refills -- and
+ * the builtin pumps the net cooperatively, so reading it mid-handshake stalls
+ * the TCP ACKs until the server times the handshake out.
  *
- * Why not read the TRNG directly per handshake (what this replaced): the
- * CryptoCell-312 / RP2350 ring-oscillator TRNG is slow -- a ClientHello's worth
- * of entropy (32-byte client random + the 32-byte P-256 ECDHE private key)
- * drains the 24-byte EHR cache several times, and each refill is a blocking
- * ring-oscillator fill with health-test re-arms. Measured at 2.5-16 s on
- * Apollo510. Because the builtin pumps the net cooperatively, that block also
- * stalls TCP ACKs, so the handshake overran the server's ~10 s timeout and the
- * peer RST it -- about half of back-to-back fetches failed purely on timing
- * luck (tun0 pcap: handshake completes, then 5-16 s of silence before the
- * ClientHello, peer FIN/RST with ack=1 = it received zero bytes).
- *
- * Fix: pay the slow TRNG once to seed the DRBG (basic_https_rng_prepare(),
- * called before the TCP connect so nothing is waiting on the handshake), then
- * every ClientHello pulls from the DRBG in microseconds. Reseed only every
- * DRBG_RESEED_INTERVAL generates (also pre-connect) for forward secrecy -- in
- * practice never within a browsing session.
+ * basic_https_rng_prepare() therefore seeds the DRBG before the TCP connect,
+ * when no server is waiting, and every ClientHello draws from the DRBG.  It
+ * reseeds every DRBG_RESEED_INTERVAL generates, also before a connect, for
+ * forward secrecy.
  */
 #define DRBG_SEED_BYTES       48u     /* >=256-bit entropy + nonce margin */
 #define DRBG_RESEED_INTERVAL  4096u   /* generates between reseeds (rare) */
@@ -80,7 +74,10 @@ static uint8_t  drbg_V[32];
 static uint8_t  drbg_ready;
 static uint32_t drbg_reseed_ctr;
 
-/* HMAC-SHA256 into an aliasing-safe temp, so `out` may equal `key` or `data`. */
+/**
+ * @brief HMAC-SHA256 through a temporary, so @p out may alias @p key or
+ *        @p data.
+ */
 static void drbg_hmac(const uint8_t *key, const uint8_t *data, uint16_t dlen,
                       uint8_t out[32])
 {
@@ -89,10 +86,14 @@ static void drbg_hmac(const uint8_t *key, const uint8_t *data, uint16_t dlen,
     memcpy(out, tmp, 32u);
 }
 
-/* HMAC_DRBG Update (SP 800-90A 10.1.2.2). pd may be NULL when pd_len == 0. */
+/**
+ * @brief HMAC_DRBG Update (SP 800-90A 10.1.2.2).
+ * @param pd      Provided data; may be NULL when @p pd_len is 0.
+ * @param pd_len  Length of @p pd.
+ */
 static void drbg_update(const uint8_t *pd, uint16_t pd_len)
 {
-    uint8_t buf[32u + 1u + DRBG_SEED_BYTES];      /* V || tag || provided_data */
+    uint8_t buf[32u + 1u + DRBG_SEED_BYTES];  /* V || tag || provided_data */
     memcpy(buf, drbg_V, 32u);
     buf[32] = 0x00u;
     if (pd_len) memcpy(buf + 33, pd, pd_len);
@@ -107,15 +108,18 @@ static void drbg_update(const uint8_t *pd, uint16_t pd_len)
     }
 }
 
-/* The only place the slow hardware TRNG is read: gather a fresh seed and
- * (re)key the DRBG, then wipe the transient entropy from the stack. */
+/**
+ * @brief Gather a fresh seed from the TRNG and rekey the DRBG.
+ *
+ * The only place the TRNG is read; the raw entropy is wiped afterwards.
+ */
 static void drbg_reseed(void)
 {
     uint8_t seed[DRBG_SEED_BYTES];
     size_t  i;
     if (tiku_trng_arch_read_bytes(seed, sizeof seed) != TIKU_TRNG_OK) {
-        /* Healthy hardware never lands here; if the TRNG faults, mix the clock
-         * so at least a fixed state is not reused, rather than hanging. */
+        /* On a TRNG fault, mix in the clock so a fixed state is not reused,
+         * rather than hanging. */
         for (i = 0; i < sizeof seed; i++)
             seed[i] ^= (uint8_t)(tiku_clock_time() >> ((i & 3u) * 8u));
     }
@@ -124,8 +128,11 @@ static void drbg_reseed(void)
     drbg_reseed_ctr = 0u;
 }
 
-/* Seed-if-needed; call before opening the connection. Slow only the first time
- * and on the rare reseed boundary -- both with no server waiting. */
+/**
+ * @brief Seed the DRBG on first use and reseed it when the interval is due.
+ * @note Call before opening the connection: it is slow the first time and at
+ *       each reseed, and no server should be waiting then.
+ */
 static void basic_https_rng_prepare(void)
 {
     if (!drbg_ready) {
@@ -138,8 +145,11 @@ static void basic_https_rng_prepare(void)
     }
 }
 
-/* The TLS RNG callback: HMAC-DRBG generate. Never touches the TRNG, so it is
- * always microseconds and never stalls a live handshake. */
+/**
+ * @brief TLS RNG callback: HMAC-DRBG generate.
+ *
+ * Never reads the TRNG, so it does not stall a live handshake.
+ */
 static void basic_https_rng(uint8_t *b, size_t n)
 {
     size_t off = 0u;
@@ -154,53 +164,55 @@ static void basic_https_rng(uint8_t *b, size_t n)
     drbg_reseed_ctr++;
 }
 #else
-static void basic_https_rng_prepare(void) { /* no HW TRNG: nothing to seed */ }
+/** @brief No TRNG on this build: nothing to seed. */
+static void basic_https_rng_prepare(void) { }
 
+/**
+ * @brief TLS RNG for a build without a TRNG: clock-derived and weak, for
+ *        development builds only.
+ */
 static void
 basic_https_rng(uint8_t *b, size_t n)
 {
-    size_t i;                          /* no HW TRNG (weak -- dev builds only) */
+    size_t i;
     for (i = 0; i < n; i++) b[i] = (uint8_t)(tiku_clock_time() >> (i & 7));
 }
 #endif
 
-/* Milestone hook: kick the watchdog at each handshake step so a legitimately
- * slow handshake survives while a genuine hang still trips the WDT. */
+/**
+ * @brief Handshake-step hook: kick the watchdog, so a slow handshake survives
+ *        while a hang still trips the WDT.
+ */
 static void basic_tls13_dbg(const char *m)
 {
     (void)m;
     tiku_watchdog_kick();
 }
 
-/* One pump step: deliver inbound packets every call (fast, no timers), but pace
- * tcp_periodic to ~8 Hz -- it advances connect/retransmit timeouts per call,
- * so a tight loop calling it every iteration would blow through them (the
- * same trap as dns_poll).
+/**
+ * @brief One pump step while a fetch waits: deliver packets, run TCP timers.
  *
- * RX delivery is transport-specific. On WiFi the radio RX is a separate channel,
- * delivered via tiku_wireless_rx_poll() (which also lends the CPU to a radio
- * whose task is a worker); the console UART is unrelated, so it also drops a
- * stray keystroke that would otherwise pile up. On a SLIP build the
- * console UART *is* the IP transport, and the shell loop that normally runs the
- * shared RX demux is blocked inside this builtin -- so it drives that same demux
- * here via tiku_shell_net_pump().  It must be the shell's demux (not a private
- * slip_poll_rx loop): a SLIP frame trickles in at the line rate over several ms,
- * far slower than this is polled, so a caller-local accumulator gets reset
- * between calls and shreds the frame into 1-byte garbage.  The shell demux keeps
- * its frame buffer in static state, so it reassembles correctly.  It must also
- * NOT read via the console getc, which would discard the SLIP bytes.  Without
- * this, HTTPGET$ over SLIP never sees a single reply (DNS / SYN-ACK / TLS). */
+ * Inbound packets are delivered on every call; tcp_periodic is paced to about
+ * 8 Hz, because each call advances the connect and retransmit timeouts and a
+ * tight loop would expire them early (the same hazard as dns_poll).
+ */
 static void
 basic_https_pump(void)
 {
     static tiku_clock_time_t last_tcp;
     tiku_clock_time_t now = tiku_clock_time();
     tiku_watchdog_kick();
+    /* WiFi: radio RX arrives through tiku_wireless_rx_poll(), which also lends
+     * the CPU to a radio whose task is a worker; a stray keystroke is dropped.
+     * SLIP: the console line is the IP transport and the shell loop is blocked
+     * in this builtin, so the console decoder is pumped here.  A frame
+     * trickles in over many calls and the decoder keeps its state between
+     * them; tiku_shell_io_getc() would steal the SLIP bytes. */
 #if (TIKU_DRV_WIFI_CYW43_ENABLE + 0) || (TIKU_DRV_WIFI_ESP_ENABLE + 0)
     (void)tiku_wireless_rx_poll();
     if (tiku_shell_io_rx_ready()) (void)tiku_shell_io_getc();
 #elif TIKU_SHELL_CMD_SLIP
-    tiku_shell_net_pump();          /* shell's persistent SLIP demux -> ipv4_input */
+    tiku_shell_net_pump();          /* console decoder: SLIP -> ipv4_input */
 #endif
     if ((tiku_clock_time_t)(now - last_tcp) >= (tiku_clock_time_t)(TIKU_CLOCK_SECOND / 8)) {
         last_tcp = now;
@@ -208,14 +220,22 @@ basic_https_pump(void)
     }
 }
 
+/** Last TCP event on the fetch's connection (TIKU_KITS_NET_TCP_EVT_*). */
 static volatile uint8_t basic_https_evt;
+/** @brief TCP event callback: record the event for the wait loops. */
 static void basic_https_on_evt(tiku_kits_net_tcp_conn_t *c, uint8_t e){ (void)c; basic_https_evt = e; }
+/** @brief TCP receive callback: unused, the reads poll the connection. */
 static void basic_https_on_rx (tiku_kits_net_tcp_conn_t *c, uint16_t a){ (void)c; (void)a; }
 
+/* Each blocking wait in a fetch gives up 20 s after it starts. */
 #define BASIC_HTTPS_DEADLINE() \
     ((tiku_clock_time_t)(tiku_clock_time() + 20u * TIKU_CLOCK_SECOND))
 #define BASIC_HTTPS_EXPIRED(dl)  (!TIKU_CLOCK_LT(tiku_clock_time(), (dl)))
 
+/**
+ * @brief TLS send callback: transmit @p n bytes in MSS-sized segments.
+ * @return @p n, or -1 when the deadline passes first.
+ */
 static int
 basic_https_send(void *ctx, const uint8_t *b, size_t n)
 {
@@ -223,12 +243,9 @@ basic_https_send(void *ctx, const uint8_t *b, size_t n)
     size_t off = 0;
     tiku_clock_time_t dl = BASIC_HTTPS_DEADLINE();
     while (off < n) {
-        /* tcp_send transmits exactly ONE segment and rejects data_len >
-         * snd_mss; chunk by the negotiated MSS (88 over SLIP, larger on WiFi),
-         * never a fixed 512 -- otherwise on a small-MTU link every chunk
-         * exceeds snd_mss, tcp_send returns OVERFLOW forever, and only sub-MSS
-         * writes (e.g. the 5-byte TLS record header) ever go out while the
-         * record body is silently dropped until the deadline. */
+        /* tcp_send transmits one segment and rejects data_len > snd_mss, so
+         * cut by the negotiated MSS, which is small over SLIP: a fixed larger
+         * chunk would be refused on every try until the deadline. */
         uint16_t mss = c->snd_mss ? c->snd_mss : TIKU_KITS_NET_TCP_MSS;
         size_t chunk = n - off; if (chunk > mss) chunk = mss;
         if (tiku_kits_net_tcp_send(c, b + off, (uint16_t)chunk) == TIKU_KITS_NET_OK)
@@ -239,6 +256,11 @@ basic_https_send(void *ctx, const uint8_t *b, size_t n)
     return (int)n;
 }
 
+/**
+ * @brief TLS receive callback: read up to @p n bytes, pumping until some come.
+ * @return Bytes read, or -1 on a reset, a close with nothing left, or the
+ *         deadline.
+ */
 static int
 basic_https_recv(void *ctx, uint8_t *b, size_t n)
 {
@@ -258,12 +280,13 @@ basic_https_recv(void *ctx, uint8_t *b, size_t n)
     }
 }
 
-/*
- * HTTPGET$ backend.  Returns body length (>= 0) into out[0..cap-1] (NUL-
- * terminated) and sets basic_http_status, or -1 on any failure.
+/**
+ * @brief Open a TCP connection to @p ip port 443 and pump until it connects.
+ *
+ * Serves the first attempt and the TLS 1.2 retry.
+ *
+ * @return The connection, or NULL if it fails or the deadline passes.
  */
-/* Open a TCP connection to ip:443 and block (pumping) until CONNECTED.
- * Returns the conn or NULL; reused for the initial attempt and the 1.2 retry. */
 static tiku_kits_net_tcp_conn_t *
 basic_https_open(const uint8_t ip[4], uint16_t src_port)
 {
@@ -282,7 +305,7 @@ basic_https_open(const uint8_t ip[4], uint16_t src_port)
     return tcp;
 }
 
-/* Human label for a tiku_kits_crypto_tls13_last_stage code (see the header). */
+/** @brief Label for a tiku_kits_crypto_tls13_last_stage code. */
 static const char *
 basic_tls_stage_str(int s)
 {
@@ -302,19 +325,17 @@ basic_tls_stage_str(int s)
     }
 }
 
-/* --------------------------------------------------------------------------
- * Heavy-crypto offload onto a worker thread (threads phase-1).
+/*
+ * Heavy-crypto offload onto a worker thread.
  *
- * The handshake's CPU-bound public-key ops (ECDHE, CertVerify, cert-chain
- * verify) run inline on the shell thread by default -- tens to hundreds of ms
- * each during which NOTHING pumps the net (the peer can RST -- the apollo510
- * half-fail class) and no kernel timer or rule is serviced.  When
- * worker threads are available io.offload is installed: the handshake runs each
- * of those ops on ONE dedicated worker while this drive loop keeps the net
- * pumped and dispatches the rest of the kernel's processes.  With threads off
- * (or the knob cleared) io.offload stays NULL and the handshake is exactly as
- * before -- the tikukits change is additive.
- * ------------------------------------------------------------------------- */
+ * The handshake's public-key operations (ECDHE, CertVerify, chain verify)
+ * otherwise run inline on the shell thread, and while each runs nothing pumps
+ * the net (the peer can reset the connection) and no kernel timer or rule is
+ * serviced.  With worker threads available io.offload runs each of them on
+ * one dedicated worker while the drive loop keeps the net pumped and
+ * dispatches the other processes.  With threads off, or the knob cleared,
+ * io.offload stays NULL and the handshake runs inline.
+ */
 #ifndef TIKU_BASIC_HTTPS_OFFLOAD
 #  if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
 #    define TIKU_BASIC_HTTPS_OFFLOAD 1
@@ -336,31 +357,32 @@ TIKU_THREAD(basic_crypto_worker, 8192);
 static int  (* volatile basic_crypto_fn)(void *);
 static void *  volatile basic_crypto_arg;
 static volatile int      basic_crypto_rc;
-static volatile uint8_t  basic_crypto_busy;   /* crypto in flight -> no nesting */
+static volatile uint8_t  basic_crypto_busy;   /* crypto in flight */
 
+/** @brief Worker entry: run the queued crypto closure and keep its result. */
 static void basic_crypto_worker_body(void *arg)
 {
     (void)arg;
     basic_crypto_rc = basic_crypto_fn(basic_crypto_arg);
 }
 
-/*
- * io.offload: run @p fn (a pure handshake-crypto closure over connect()'s
- * still-live stack) on the worker while keeping the kernel alive.  This drive
- * loop mirrors the scheduler idle branch -- pump the net, dispatch every ready
- * process EXCEPT this one (tiku_process_run_except so a queued shell event can't
- * recursively re-enter this very command), then hand the CPU to the worker
- * until an event wakes it.  tiku_current_process, which call_process() clears
- * as it fans out, is restored before returning to the handshake.  Any failure
- * to start the worker falls back to running @p fn inline -- byte-identical to
- * the no-offload path -- so correctness never depends on the worker.
+/**
+ * @brief io.offload: run @p fn on the crypto worker while the kernel runs.
+ *
+ * Like the scheduler's idle branch, the loop pumps the net, dispatches every
+ * ready process except this one (so a queued shell event cannot re-enter this
+ * command) and yields the CPU to the worker until an event wakes it.
+ *
+ * @note @p fn is a crypto closure over connect()'s stack.  If the worker cannot
+ *       start, @p fn runs inline.  tiku_current_process, which call_process()
+ *       clears as it fans out, is restored on return.
  */
 static int basic_https_offload(int (*fn)(void *), void *arg)
 {
     struct tiku_process *owner = tiku_current_process;
     tiku_clock_time_t dl;
 
-    if (basic_crypto_busy) {         /* non-reentrant primitives: never overlap */
+    if (basic_crypto_busy) {         /* non-reentrant primitives */
         return fn(arg);
     }
     basic_crypto_fn  = fn;
@@ -371,39 +393,42 @@ static int basic_https_offload(int (*fn)(void *), void *arg)
     if (tiku_thread_start(&basic_crypto_worker,
                           basic_crypto_worker_body, 0) != 0) {
         basic_crypto_busy = 0;
-        return fn(arg);              /* worker unavailable -> inline, identical */
+        return fn(arg);              /* worker unavailable: inline */
     }
 
     dl = BASIC_HTTPS_DEADLINE();
     while (basic_crypto_worker.state != TIKU_THREAD_DONE) {
-        basic_https_pump();                          /* net + WDT stay alive  */
-        while (tiku_process_run_except(owner)) { }   /* others' timers/rules  */
+        basic_https_pump();                          /* net + WDT stay alive */
+        while (tiku_process_run_except(owner)) { }   /* others' timers/rules */
         tiku_atomic_enter();
         if (!tiku_process_queue_dispatchable_except(owner) &&
             tiku_thread_worker_ready()) {
-            tiku_thread_kernel_block();               /* CPU -> the crypto     */
+            tiku_thread_kernel_block();               /* CPU -> the crypto */
         }
         tiku_atomic_exit();
-        if (BASIC_HTTPS_EXPIRED(dl)) {                /* safety: never wedge   */
+        if (BASIC_HTTPS_EXPIRED(dl)) {                /* never wedge */
             break;
         }
     }
 
-    tiku_current_process = owner;    /* the drain cleared it via call_process  */
+    tiku_current_process = owner;    /* the drain cleared it */
     basic_crypto_busy = 0;
     return basic_crypto_rc;
 }
 #endif /* TIKU_BASIC_HTTPS_OFFLOAD */
 
-/* --------------------------------------------------------------------------
+/*
  * Adapters that let basic_https_get() drive the shared kit HTTPS engine
- * (tiku_kits_net_http_cert_exchange) over BASIC's own proven transport: a
- * reconnect for the TLS 1.2 fallback and a sink that collects the response.
- * ------------------------------------------------------------------------- */
+ * (tiku_kits_net_http_cert_exchange) over BASIC's own transport: a reconnect
+ * for the TLS 1.2 fallback and a sink that collects the response.
+ */
 
-/* Reconnect: close the spent socket and reopen a fresh 4-tuple (src+1) -- the
- * same reopen the old inline fallback did. */
+/** Reconnect context: the server address and the first source port. */
 struct basic_https_rc_ctx { const uint8_t *ip; uint16_t src; };
+/**
+ * @brief Reconnect for the TLS 1.2 fallback: close @p old and open a fresh
+ *        4-tuple (source port + 1).
+ */
 static void *
 basic_https_reconnect(void *c, void *old)
 {
@@ -412,9 +437,12 @@ basic_https_reconnect(void *c, void *old)
     return basic_https_open(x->ip, (uint16_t)(x->src + 1));
 }
 
-/* Sink: append decrypted bytes into out[] up to cap-1, mirroring the old inline
- * read loop's "stop when the buffer is full" behaviour. */
+/** Sink context: the output buffer and the bytes stored so far. */
 struct basic_https_sink_ctx { char *out; size_t cap; size_t total; };
+/**
+ * @brief Response sink: append decrypted bytes to out[] up to cap - 1.
+ * @return 1 to keep reading, 0 once out[] is full.
+ */
 static uint8_t
 basic_https_sink(void *c, const uint8_t *d, uint16_t len)
 {
@@ -426,30 +454,36 @@ basic_https_sink(void *c, const uint8_t *d, uint16_t len)
     return (uint8_t)(s->total + 1 < s->cap);   /* 0 = full -> stop reading */
 }
 
+/**
+ * @brief HTTPS @p method request for @p host @p path, raw response in @p out.
+ *
+ * Resolves, connects and runs the kit's certificate TLS, pumping throughout.
+ * Every request carries the HTTPHEADER lines; a non-NULL @p body is sent with
+ * Content-Type @p ctype (default JSON).  Sets basic_http_status.
+ *
+ * @return The response length (status line, headers and body, NUL-terminated
+ *         in @p out, at most @p cap - 1), or -1 on any failure.
+ */
 static int
 basic_https_get(const char *method, const char *host, const char *path,
                 const char *body, const char *ctype, char *out, size_t cap)
 {
-    /* TLS connection state now lives inside the shared kit engine
-     * (tiku_kits_net_http_cert_exchange), not here. */
     tiku_kits_crypto_tls13_io_t io;
     tiku_kits_net_tcp_conn_t   *tcp;
     uint8_t  ip[4];
-    char     req[TIKU_BASIC_HTTP_REQ_MAX];  /* method+path+host+HTTPHEADER+POST hdrs; budget _Static_assert'd above */
+    char     req[TIKU_BASIC_HTTP_REQ_MAX];  /* request head, asserted above */
     size_t   total = 0, rl;
     tiku_clock_time_t dl;
     const tiku_kits_crypto_x509_root_t *roots = NULL;
     int      nroots = 0;
-    static uint16_t src_seq = 49150;     /* fresh ephemeral port pair per call */
+    static uint16_t src_seq = 49150;  /* fresh ephemeral port pair per call */
 
     basic_http_status = 0;
 
-    /* Trust FIRST, before DNS and TCP.  The roots live in /data now, so they can
-     * be missing -- and a board that cannot validate anything should say so in
-     * one line instead of spending a DNS timeout and a connect to arrive at the
-     * same answer.  Refusing by name also keeps "unprovisioned" from being
-     * misread as a network fault, which is what an empty trust store looks like:
-     * every host failing signature validation. */
+    /* Trust is checked before DNS and TCP.  The roots live in /data and can
+     * be missing; a board without them says so in one line instead of after a
+     * DNS lookup and a connect.  Naming the store also keeps it from looking
+     * like a network fault, where every host fails to verify. */
     if (basic_https_roots_get(&roots, &nroots) != 0) {
         basic_report(TIKU_BASIC_ERR_IO,
                      "HTTPGET: no trust store -- provision /data/"
@@ -466,15 +500,15 @@ basic_https_get(const char *method, const char *host, const char *path,
         return -1;
     }
 #endif
-    /* Advance the source port every call so a redirect refetch to the SAME
+    /* Advance the source port every call so a redirect refetch to the same
      * server IP (e.g. host -> www.host sharing one Cloudflare anycast IP)
      * doesn't reuse the just-closed connection's 4-tuple (TIME_WAIT) and get
-     * its SYN dropped -- which showed as "TCP connect failed". */
+     * its SYN dropped. */
     src_seq = (src_seq >= 60000u) ? 49152u : (uint16_t)(src_seq + 2);
 
     /* Initialise the TCP table: on a lean WiFi build nothing else does (the
      * NET_TEST init + SLIP net process are absent), so tcp_connect() would
-     * otherwise allocate from an uninitialised table (same as BASIC MQTTPUB). */
+     * otherwise allocate from an uninitialised table (as in MQTTPUB). */
     tiku_kits_net_tcp_init();
 
     /* resolve host (literal dotted-quad accepted directly) */
@@ -509,10 +543,8 @@ basic_https_get(const char *method, const char *host, const char *path,
         tiku_kits_net_dns_get_addr(ip);
     }
 
-    /* Seed the TLS RNG (HMAC-DRBG) before opening the connection: the one-time
-     * hardware-TRNG gather is slow (seconds), and doing it here means no peer
-     * is waiting on the handshake while it runs.  After this, every ClientHello
-     * draws randomness from the DRBG in microseconds. */
+    /* Seed the TLS RNG (HMAC-DRBG) before opening the connection: the TRNG
+     * gather is slow, and here no peer is waiting on the handshake. */
     basic_https_rng_prepare();
 
     /* TCP connect :443 */
@@ -528,7 +560,7 @@ basic_https_get(const char *method, const char *host, const char *path,
     strcat(req, method); strcat(req, " "); strcat(req, path);
     strcat(req, " HTTP/1.0\r\nHost: "); strcat(req, host);
     strcat(req, "\r\nConnection: close\r\n");
-    if (basic_http_hdrs[0]) strcat(req, basic_http_hdrs);   /* each line ends \r\n */
+    if (basic_http_hdrs[0]) strcat(req, basic_http_hdrs);  /* lines end \r\n */
     if (body) {
         char cl[16], tmp[16]; size_t bl = strlen(body); int ci = 0, ti = 0;
         strcat(req, "Content-Type: ");
@@ -541,7 +573,7 @@ basic_https_get(const char *method, const char *host, const char *path,
         strcat(req, cl);
         strcat(req, "\r\n");
     }
-    strcat(req, "\r\n");                                     /* end of headers */
+    strcat(req, "\r\n");                                   /* end of headers */
     rl = strlen(req);
 
     /* Hand the connected socket to the shared kit engine: it runs the TLS 1.3
@@ -552,15 +584,14 @@ basic_https_get(const char *method, const char *host, const char *path,
      *
      * now_unix gates cert validity: set only after an explicit SETTIME/NTP
      * (tiku_rtc_is_set), else 0 to skip the date window -- signature + trust
-     * anchor + hostname stay enforced.  Gate on is_set(), NOT a bare
+     * anchor + hostname stay enforced.  Gate on is_set(), not a bare
      * get_seconds(): once tiku_rtc_init() has stamped the soft-RTC gate (any
      * prior boot; on Ambiq it survives in MRAM across reflashes), get_seconds()
      * returns a small non-zero boot-uptime value that would make every live
      * cert "not yet valid" (stage -11) for every site.
      *
-     * Do NOT pause the WDT: basic_tls13_dbg kicks it per handshake step so a
-     * legitimately slow handshake survives while a genuine hang still trips the
-     * WDT for recovery. */
+     * The WDT is not paused: basic_tls13_dbg kicks it per handshake step, so a
+     * slow handshake survives while a hang still trips the WDT. */
     io.send = basic_https_send; io.recv = basic_https_recv; io.ctx = tcp;
 #if TIKU_BASIC_HTTPS_OFFLOAD
     io.offload = basic_https_offload;   /* run heavy crypto on the worker */

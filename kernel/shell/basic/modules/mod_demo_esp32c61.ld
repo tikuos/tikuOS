@@ -7,7 +7,7 @@
  *
  * mod_demo_esp32c61.ld - loadable native module script (ESP32-C61).
  *
- * Position-FIXED at the PSRAM execution window, so VMA == LMA and every
+ * Links the module at its PSRAM execution window, so VMA == LMA and every
  * internal reference resolves at run address.
  *
  * SPDX-License-Identifier: Apache-2.0

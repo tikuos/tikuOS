@@ -7,9 +7,9 @@
  *
  * tiku_basic_trig.inl - SIN and COS via a 65-entry quarter-circle LUT.
  *
- * Q.3 fixed point in and out: reduce modulo 2*pi, reflect into the first quadrant,
- * then interpolate between samples.  Max error ~5e-4, inside Q.3 precision, for
- * about 130 bytes of rodata.  TAN is SIN/COS at the call site.
+ * Q.3 fixed point in and out: reduce modulo 2*pi, reflect into the first
+ * quadrant, then interpolate between samples.  Max error ~5e-4, inside Q.3
+ * precision, for 130 bytes of rodata.  TAN is SIN/COS at the call site.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -79,7 +79,7 @@ basic_sin_q3(long angle_q3)
     }
 
     /* Map angle in [0, HPI] to [0, 64] LUT index, in Q.6 to keep
-     * the linear-interp fraction.  idx_q = angle * 64 / HPI; the
+     * the linear-interp fraction.  idx_q = angle * 64 * 64 / HPI; the
      * fractional part is (idx_q & 63). */
     if (angle_q3 <= 0) {
         return 0;

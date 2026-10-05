@@ -7,22 +7,25 @@
  *
  * tiku_basic_subs.inl - multi-line subroutines with parameters and locals.
  *
- * Parameters and locals are ordinary global slots whose prior values are pushed on
- * a save-stack at entry and restored at exit, so every existing word stays
- * untouched.  A SUB reached by fall-through is skipped; the body runs only via CALL.
+ * Parameters and locals are ordinary global slots whose prior values are pushed
+ * on a save-stack at entry and restored at exit, so the other words need no
+ * changes.  A SUB reached by fall-through is skipped; only CALL runs the body.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #if TIKU_BASIC_SUBS_ENABLE
 
-/* TIKU_BASIC_CALL_DEPTH / TIKU_BASIC_SCOPE_MAX, the basic_frame_t / basic_scope_t
- * types, and the basic_frames / basic_scope stacks are declared in
- * tiku_basic_state.inl (ahead of the F1 checkpoint, which serializes them).
+/* TIKU_BASIC_CALL_DEPTH, TIKU_BASIC_SCOPE_MAX, the basic_frame_t and
+ * basic_scope_t types and the basic_frames / basic_scope stacks are declared
+ * in tiku_basic_state.inl, ahead of the checkpoint code that serializes them.
  * This file owns the SUB / CALL / LOCAL logic that operates on them. */
 
-/* Does a (whitespace-stripped) line text start with keyword KW followed by a
- * word boundary? KW must be upper-case.  Accepts crunched token bytes. */
+/**
+ * @brief Does line text @p t start with keyword @p kw, after any blanks?
+ *
+ * @p kw is upper-case; its crunched token byte matches as well as the word.
+ */
 static int
 subs_line_kw(const char *t, const char *kw)
 {
@@ -30,9 +33,14 @@ subs_line_kw(const char *t, const char *kw)
     return tok_kw_at(t, kw) != 0;
 }
 
-/* Find a `SUB <name>` definition line via the A3 registry (built once per
- * edit-generation; overflow falls back to the full scan).  Returns the prog
- * index, or -1. */
+/**
+ * @brief Find the `SUB <name>` line that defines @p name.
+ *
+ * The SUB registry (rebuilt after each program edit) answers; prog[] is scanned
+ * only when the registry overflowed.
+ *
+ * @return The prog[] index, or -1.
+ */
 static int
 prog_find_sub(const char *name, size_t nlen)
 {
@@ -69,7 +77,7 @@ prog_find_sub(const char *name, size_t nlen)
     return -1;
 }
 
-/* Restore one saved scope slot to its caller value (numeric or string). */
+/** @brief Restore one saved scope slot to its caller's value. */
 static void
 basic_scope_restore_one(const basic_scope_t *s)
 {
@@ -82,7 +90,7 @@ basic_scope_restore_one(const basic_scope_t *s)
     basic_vars[s->idx] = s->old;
 }
 
-/* Unwind the scope stack back to `base`, restoring each slot. */
+/** @brief Pop the scope stack down to @p base, restoring each slot. */
 static void
 basic_scope_unwind(uint8_t base)
 {
@@ -92,8 +100,11 @@ basic_scope_unwind(uint8_t base)
     }
 }
 
-/* SUB reached by fall-through: skip the body, resume after the matching
- * ENDSUB. Nested SUBs bump depth (defensive -- they aren't really nestable). */
+/**
+ * @brief SUB reached by fall-through: skip to the line after its ENDSUB.
+ *
+ * A SUB line inside the body raises the depth, though SUBs do not nest.
+ */
 static void
 exec_sub(const char **p)
 {
@@ -122,8 +133,13 @@ exec_sub(const char **p)
     }
 }
 
-/* CALL name(arg, arg, ...) -- bind args to the SUB's params positionally,
- * snapshot the param slots, jump into the body. */
+/**
+ * @brief CALL name(arg, ...): bind the arguments to the SUB's parameters in
+ *        order and jump into its body.
+ *
+ * Each parameter's previous value goes on the scope stack; ENDSUB restores it,
+ * and a failed binding restores it at once.
+ */
 static void
 exec_call(const char **p)
 {
@@ -150,7 +166,7 @@ exec_call(const char **p)
     /* Position sp at the SUB header's parameter list. */
     sp = prog[si].text;
     while (*sp == ' ' || *sp == '\t') sp++;
-    sp += tok_kw_at(sp, "SUB");                    /* past SUB (token or text) */
+    sp += tok_kw_at(sp, "SUB");                    /* past SUB, token or text */
     while (*sp == ' ' || *sp == '\t') sp++;
     while (is_word_cont(*sp)) sp++;                /* past the name */
     skip_ws(&sp);
@@ -181,8 +197,9 @@ exec_call(const char **p)
         if (is_str) {
             char buf[TIKU_BASIC_STR_BUF_CAP];
             if (parse_strexpr(p, buf, sizeof(buf)) != 0) break;   /* err set */
-            /* Push the saved pointer BEFORE allocating: the alloc may trigger
-             * A4 compaction, which must see the shadowed string as a root. */
+            /* Save the caller's pointer before allocating: the allocation may
+             * compact the heap, and the compaction must see the shadowed
+             * string as a root. */
             s->old_str = basic_strvars[idx];
             s->old     = 0;
             basic_scope_sp++;
@@ -214,8 +231,11 @@ exec_call(const char **p)
     basic_pc_set = 1;
 }
 
-/* LOCAL v1, v2 -- inside a SUB: snapshot each slot and zero it (a fresh
- * local), restored at ENDSUB. */
+/**
+ * @brief LOCAL v1, v2, ...: inside a SUB, save each variable and clear it.
+ *
+ * ENDSUB restores the saved values.
+ */
 static void
 exec_local(const char **p)
 {
@@ -258,7 +278,10 @@ exec_local(const char **p)
     }
 }
 
-/* ENDSUB -- restore the frame's params+locals, return to the caller. */
+/**
+ * @brief ENDSUB: restore the frame's parameters and locals and return to the
+ *        caller; a no-op outside a CALL.
+ */
 static void
 exec_endsub(void)
 {
@@ -270,8 +293,12 @@ exec_endsub(void)
     basic_pc_set = 1;
 }
 
-/* RESULT expr -- set the SUB's return value.  The caller reads it back with
- * the bare `RESULT` numeric function (expr_call) right after CALL. */
+/**
+ * @brief RESULT expr: set the SUB's return value.
+ *
+ * The caller reads it back with the bare RESULT function (expr_call) after
+ * CALL.
+ */
 static void
 exec_result(const char **p)
 {

@@ -18,10 +18,10 @@
 /* ARG-LIST HELPERS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/* Helpers for parsing function-call arg lists. Each consumes the
- * '(', the comma-separated args, and the ')'.  On error they set
- * basic_error and return 0.  The 1-arg form takes a single
- * expression; the 2-arg form takes two. */
+/**
+ * @brief Consume `(expr)` and evaluate the one argument into @p a.
+ * @return 1 on success, 0 with basic_error set on a syntax error
+ */
 static int
 parse_call_1arg(const char **p, long *a)
 {
@@ -40,6 +40,10 @@ parse_call_1arg(const char **p, long *a)
     return 1;
 }
 
+/**
+ * @brief Consume `(expr, expr)` and evaluate the arguments into @p a, @p b.
+ * @return 1 on success, 0 with basic_error set on a syntax error
+ */
 static int
 parse_call_2arg(const char **p, long *a, long *b)
 {
@@ -65,9 +69,14 @@ parse_call_2arg(const char **p, long *a, long *b)
     return 1;
 }
 
-/* Zero-arg call: consume an empty `()`.  Used by ERR()/ERL() and any
- * other stateful builtin that takes no argument but keeps the parens
- * so the lexer treats it as a function rather than an identifier. */
+/**
+ * @brief Consume the empty `()` of a builtin that takes no argument.
+ *
+ * ERR(), ERL() and the other argument-less builtins keep the parentheses so
+ * the parser treats them as functions rather than variables.
+ *
+ * @return 1 on success, 0 with basic_error set on a syntax error
+ */
 static int
 parse_call_0arg(const char **p)
 {
@@ -84,10 +93,15 @@ parse_call_0arg(const char **p)
     return 1;
 }
 
-/* Detect and dispatch a built-in function call. Returns 1 if the
- * cursor sat on a function call (advanced past the closing paren,
- * @p out_v filled), 0 otherwise. Each branch must consume `(`...`)`
- * via parse_call_Narg and assign *out_v. */
+/**
+ * @brief Detect and evaluate a builtin, DEF FN or extension function call.
+ *
+ * Builtins are tried first, then DEF FN, then registered extensions.  Each
+ * branch consumes its own argument list and assigns @p out_v.
+ *
+ * @return 1 when the cursor sat on a call (consumed, and @p out_v set or
+ *         basic_error raised), 0 with the cursor unmoved otherwise
+ */
 static int
 expr_call(const char **p, long *out_v)
 {
@@ -136,8 +150,8 @@ expr_call(const char **p, long *out_v)
         return 1;
     }
     if (match_kw(p, "INT")) {
-        /* No-op for the integer dialect; reserved as a forward hook
-         * for a future fixed/float type. */
+        /* The identity: every value is already an integer, and a Q.3
+         * value is not truncated (INT(1.5) is 1500). */
         if (!parse_call_1arg(p, &a)) return 1;
         *out_v = a;
         return 1;
@@ -268,7 +282,7 @@ expr_call(const char **p, long *out_v)
     }
 #endif
 #if TIKU_BASIC_BLE_ENABLE && TIKU_BLE_SERIAL_PRESENT
-    /* BLEUP() -- 1 when a central is connected AND subscribed (ready to send),
+    /* BLEUP() -- 1 when a central is connected and subscribed (ready to send),
      * else 0.  Empty-paren form.  Polls the BLE stack as a side effect, so a
      * `IF BLEUP()=0 THEN ...` wait loop keeps the link serviced. */
     if (match_kw(p, "BLEUP")) {
@@ -288,16 +302,15 @@ expr_call(const char **p, long *out_v)
 #if TIKU_BASIC_BLE_ENABLE && TIKU_BLE_ADV_PRESENT
     /* BLESEEN() -- distinct advertisers in the observer table (live while
      * BLEOBSERVE runs; the table persists after it stops).  Allocation-
-     * free, so a poll loop `IF BLESEEN() > 0 THEN ...` costs nothing --
-     * the agent-reacts-to-its-radio-environment predicate.
-     * '$' is NOT a word-boundary char (is_word_cont), so a bare keyword
+     * free, so a poll loop `IF BLESEEN() > 0 THEN ...` uses no string heap.
+     * '$' is not a word-continuation char (is_word_cont), so a bare keyword
      * match would swallow the BLESEEN$ string function's prefix --
      * restore and fall through when '$' follows. */
     {
         const char *save = cur_mark(p);
         if (match_kw(p, "BLESEEN")) {
             if (cur_peek(p) == '$') {
-                cur_rewind(p, save);              /* BLESEEN$: the string parser's */
+                cur_rewind(p, save);   /* BLESEEN$: the string parser's */
             } else {
                 if (!parse_call_0arg(p)) return 1;
                 *out_v = (long)tiku_ble_adv_last_scan_count();
@@ -306,8 +319,8 @@ expr_call(const char **p, long *out_v)
         }
     }
 #endif
-    /* Time builtins. Both take a () with no arg so the parser knows
-     * they're functions (otherwise MILLIS would parse as a multi-char
+    /* Time builtins.  MILLIS, NOW and SECS take an empty () so the parser
+     * knows they are functions (otherwise MILLIS would parse as a multi-char
      * identifier with nothing to do). */
     if (match_kw(p, "MILLIS")) {
         skip_ws(p);
@@ -320,9 +333,9 @@ expr_call(const char **p, long *out_v)
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); return 1;
         }
         cur_advance(p);
-        /* tiku_clock_time() is uint16_t; (ticks*1000)/HZ keeps the
-         * computation in 32-bit and wraps at the same ~512 s as the
-         * underlying tick. Good enough for short timing patterns. */
+        /* Milliseconds since boot, wrapping when the tick counter wraps
+         * (512 s with MSP430's 16-bit tick at 128 Hz).  Meant for short
+         * timing patterns. */
         *out_v = (long)tiku_clock_time() * 1000L / (long)TIKU_CLOCK_SECOND;
         return 1;
     }
@@ -366,7 +379,7 @@ expr_call(const char **p, long *out_v)
     }
     if (match_kw(p, "FPOW")) {
         /* Q.3 fixed-point power: base is Q.3, the exponent is a plain
-         * INTEGER count, and the result is Q.3.  This is the explicit
+         * integer count, and the result is Q.3.  This is the explicit
          * fixed-point counterpart to the integer `^` operator -- since
          * the engine cannot tell "2000" from "2.000", the caller states
          * intent by choosing `^` (integer) or FPOW (Q.3).  A negative
@@ -433,8 +446,8 @@ expr_call(const char **p, long *out_v)
     }
 #endif
 #if TIKU_BASIC_MATHX_ENABLE
-    /* Extended fixed-point math (Q.3). LOG is natural log; POW(b,e)=b^e
-     * (also reachable via the '^' operator). See tiku_basic_mathx.inl. */
+    /* Extended fixed-point math (Q.3). LOG is natural log; POW(b,e)=b^e in
+     * Q.3 (the '^' operator is integer-only). See tiku_basic_mathx.inl. */
     if (match_kw(p, "LOG")) {
         if (!parse_call_1arg(p, &a)) return 1;
         *out_v = basic_log_q3(a);
@@ -504,7 +517,8 @@ expr_call(const char **p, long *out_v)
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "'(' expected"); return 1;
         }
         cur_advance(p);
-        if (parse_str_ref(p, &S, &SL, buf, sizeof(buf)) != 0) return 1;  /* LEN(#n) too */
+        /* parse_str_ref also takes a big buffer, so LEN(#n) works too. */
+        if (parse_str_ref(p, &S, &SL, buf, sizeof(buf)) != 0) return 1;
         (void)S;
         skip_ws(p);
         if (cur_peek(p) != ')') {
@@ -599,8 +613,8 @@ expr_call(const char **p, long *out_v)
         *out_v = match ? (long)(match - haystack + 1) : 0;
         return 1;
     }
-    /* COUNT(haystack, needle) -- number of non-overlapping occurrences (0 if the
-     * needle is empty or absent). Count list items, lines COUNT(s$,CHR$(10)),
+    /* COUNT(haystack, needle) -- number of non-overlapping occurrences (0 if
+     * the needle is empty or absent): list items, lines (COUNT(s$,CHR$(10))),
      * delimiters, keyword hits in LLM/API text. */
     if (match_kw(p, "COUNT")) {
         char haystack[TIKU_BASIC_STR_BUF_CAP];

@@ -7,8 +7,8 @@
  *
  * tiku_basic_repl.inl - the REPL line dispatcher.
  *
- * process_line decides whether input is a numbered statement to store, a direct
- * command, or a bare statement to run immediately.  The HELP body is feature-gated
+ * process_line decides whether input is a numbered line to store, a direct
+ * command, or a statement to run immediately.  The HELP text is feature-gated
  * so the printed reference matches what was compiled in.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -37,13 +37,12 @@ process_line(const char *raw)
         }
         body = p;
         skip_ws(&body);
-        /* NOTE: deliberately NO basic_ckpt_invalidate() here.  This branch is
-         * also the LOAD/replay path (basic_load_from_persist and `basic load`
-         * replay every stored line through process_line), so invalidating
-         * per-line would destroy the checkpoint RUN RESUME is about to use --
-         * the exact F1 power-cut recovery flow.  A checkpoint made stale by an
-         * interactive edit is instead rejected at restore time by the
-         * program-identity CRC bound into the slot (basic_ckpt_read). */
+        /* No basic_ckpt_invalidate() here: this branch is also the LOAD
+         * replay path (basic_load_from_persist replays every stored line
+         * through process_line), so invalidating per line would destroy the
+         * checkpoint RUN RESUME is about to use after a power cut.  A
+         * checkpoint made stale by an interactive edit is rejected at restore
+         * time by the program-identity CRC it carries (basic_ckpt_read). */
         if (prog_store((uint16_t)ln, body) < 0) {
             basic_reportf(TIKU_BASIC_ERR_NOMEM, "program full (%u lines)",
                           (unsigned)TIKU_BASIC_PROGRAM_LINES);
@@ -70,12 +69,12 @@ process_line(const char *raw)
         }
         q = p;
         if (match_kw(&q, "RUN")) {
-            /* `RUN RESUME` (F1): continue a checkpointed program mid-loop from
-             * the durable execution-state slot instead of starting over. Plain
-             * `RUN` starts fresh. In the interactive shell MODE, the step
-             * machine is started and the shell poll loop pumps it (non-blocking:
-             * the scheduler runs between batches); in synchronous contexts
-             * (embedded run_source) it is driven to completion inline. */
+            /* `RUN RESUME`: continue a checkpointed program mid-loop from the
+             * durable checkpoint instead of starting over.  Plain `RUN` starts
+             * fresh.  In the interactive shell mode the step machine is started
+             * and the shell poll loop pumps it (non-blocking: the scheduler
+             * runs between batches); in synchronous contexts (embedded
+             * run_source) it is driven to completion inline. */
             int resume;
             skip_ws(&q);
             resume = match_kw(&q, "RESUME") ? 1 : 0;
@@ -137,7 +136,7 @@ process_line(const char *raw)
         if (match_kw(&q, "IMPORT")) { exec_import(&q); return; }
 #if TIKU_BASIC_MODULE_ENABLE
         q = p;
-        if (match_kw(&q, "MODLOAD")) {            /* Tier 3: install + run   */
+        if (match_kw(&q, "MODLOAD")) {            /* install + run module    */
             SHELL_PRINTF(tiku_basic_module_load() == 0
                          ? "module loaded\n" : "? module load failed\n");
             return;
@@ -323,10 +322,11 @@ process_line(const char *raw)
 #if TIKU_BASIC_SUBS_ENABLE || TIKU_BASIC_RTC_ENABLE ||                        \
     TIKU_BASIC_MATHX_ENABLE || TIKU_BASIC_FILE_ENABLE ||                      \
     TIKU_BASIC_NET_ENABLE || TIKU_BASIC_BLE_ENABLE
-            /* Full-profile words (RP2350 / Apollo). Each clause is gated, so
-             * the line lists exactly what was built in.  Each fragment is its
-             * own SHELL_PRINTF so no #if sits inside a macro-call argument --
-             * that pattern is non-portable (ISO C) and -Wpedantic flags it. */
+            /* Full-profile words (on by default on TIER_BIG parts).  Each
+             * clause is gated, so the line lists what was built in.  Each
+             * fragment is its own SHELL_PRINTF so no #if sits inside a
+             * macro-call argument -- that pattern is non-portable (ISO C) and
+             * -Wpedantic flags it. */
             SHELL_PRINTF("  " SH_CYAN "Full:      " SH_RST);
 #if TIKU_BASIC_SUBS_ENABLE
             SHELL_PRINTF(" SUB(p) LOCAL CALL ENDSUB");

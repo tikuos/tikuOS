@@ -7,14 +7,14 @@
  *
  * tiku_basic_cursor.inl - the parse-cursor vocabulary.
  *
- * The interpreter threads one cursor through the lexer, the expression parser and
- * every statement handler.  These inline helpers name the raw pointer operations
- * so call sites read as intent -- peek, advance, match -- not as mechanics.
+ * The interpreter threads one cursor through the lexer, the expression parser
+ * and every statement handler.  These inline helpers name the raw pointer
+ * operations, so call sites read as peek, advance and match.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 /*
- Invariants the vocabulary relies on:
+ * Invariants the vocabulary relies on:
  *
  *  - The buffer behind the cursor is NUL-terminated.  Bounded
  *    lookahead (cur_peek_at) is therefore safe without a length:
@@ -25,23 +25,21 @@
  *    cur_peekb(), which yields the byte as uint8_t -- plain
  *    cur_peek() returns char, whose sign for bytes >= 0x80 is
  *    implementation-defined.
- *  - Whitespace handling is NEVER implicit.  cur_match() consumes
+ *  - Whitespace is never skipped implicitly.  cur_match() consumes
  *    exactly one character and skips nothing; where a grammar rule
  *    tolerates blanks, the call site says so with skip_ws().
- *    (Several rules are deliberately ws-sensitive: the `$` sigil
- *    must touch its identifier, string literals take every byte.)
+ *    (Several rules are whitespace-sensitive: the `$` sigil must
+ *    touch its identifier, string literals take every byte.)
  *
  * Two cursor modes, one representation:
  *
- *  - COMMITTED: helpers taking `const char **p` advance the shared
+ *  - Committed: helpers taking `const char **p` advance the shared
  *    cursor; the caller (and its caller) see the consumption.
- *  - PROBE: cur_mark() copies the position, the probe scans or
+ *  - Probe: cur_mark() copies the position, the probe scans or
  *    parses ahead, then either falls through (commit) or calls
  *    cur_rewind() to un-consume everything since the mark.  A probe
  *    that cannot fail needs no mark.
- *
  */
-
 
 /*---------------------------------------------------------------------------*/
 /* PEEK -- look, consume nothing                                             */
@@ -74,9 +72,8 @@ cur_peekb(const char **p)
 /* CONSUME -- step the cursor forward                                        */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Consume one character.  Returns nothing by design: use
- *  cur_take() when the consumed character is wanted, so a call can
- *  never silently both test and consume. */
+/** @brief Consume one character.  Returns nothing; cur_take() returns
+ *  the consumed character. */
 static inline void
 cur_advance(const char **p)
 {

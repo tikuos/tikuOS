@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_shell.inl - public engine entry points.
+ * tiku_basic_shell.inl - session setup and the run-once entry points.
  *
- * The REPL, the saved-program autorun and the embedded source runner.  All three
- * call basic_session_begin() to reset interpreter state and lazily allocate the
- * AUTO-tier arena behind the line table, variables and stacks.
+ * basic_session_begin() resets interpreter state and lazily allocates the
+ * AUTO-tier arena; the REPL mode, the saved-program autorun and the embedded
+ * source runner all start with it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,8 +22,8 @@
  * @brief Allocate the BASIC arena and reset transient interpreter
  *        state at the start of a session.
  *
- * @return 0 on success, -1 on out-of-memory (the user-facing error
- *         is printed by this function).
+ * @return 0 on success, -1 while a memory reclaim holds BASIC or when the
+ *         arena cannot be allocated (this function prints why).
  */
 static int
 basic_session_begin(void)
@@ -32,7 +32,7 @@ basic_session_begin(void)
         SHELL_PRINTF("? basic: memory reconstruction in progress\n");
         return -1;
     }
-    /* Register the native builtin words ONCE, before any dispatch can reach
+    /* Register the native builtin words once, before any dispatch can reach
      * the registry fallthroughs.  Extensions are firmware config, not session
      * state, so they live across sessions; the guard makes re-entry a no-op. */
     {
@@ -40,9 +40,9 @@ basic_session_begin(void)
         if (!ext_registered) {
             basic_ext_register_kits();
 #if TIKU_BASIC_MODULE_ENABLE
-            /* Re-register a durably-installed native module (Tier 3): its
-             * code persists in RRAM across reboots; only the volatile Tier-2
-             * table needs re-populating.  No-op if no module is resident. */
+            /* Re-register a durably installed native module: its words go
+             * back into the registry, and on the RAM-execution parts its code
+             * is copied back into its window.  No-op if none is resident. */
             (void)tiku_basic_module_activate();
 #endif
             ext_registered = 1u;
@@ -70,31 +70,30 @@ basic_session_begin(void)
 /*---------------------------------------------------------------------------*/
 
 /*
- * The interactive REPL is no longer a blocking loop here.  It is a
- * non-blocking MODE of the shell process (tiku_basic_mode_enter and the
- * tiku_basic_mode_* poll-loop hooks in tiku_basic_mode.inl), so the scheduler
- * stays live for the whole BASIC session -- see that file's header.  The
- * `basic` command dispatches to tiku_basic_mode_enter().
+ * The interactive REPL is a non-blocking mode of the shell process
+ * (tiku_basic_mode_enter and the tiku_basic_mode_* poll-loop hooks in
+ * tiku_basic_mode.inl), so the scheduler stays live for the whole BASIC
+ * session.  The `basic` command dispatches to tiku_basic_mode_enter().
  */
 
 /*---------------------------------------------------------------------------*/
-/* AUTORUN (saved program from FRAM)                                         */
+/* SAVED-PROGRAM AUTORUN                                                     */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Load the persisted program from FRAM and RUN it once.
+ * @brief Load the saved program and RUN it to completion (blocking).
  *
- * Pair with tiku_init_add(seq, name, "basic run") to launch a saved
- * program on every boot.  Returns silently if no program is saved.
+ * `basic run <path>` reaches this after storing the file as the saved
+ * program; `basic run` goes through tiku_basic_mode_run_saved() instead.
  */
 void
 tiku_basic_autorun(void)
 {
-    /* Refuse re-entry while an interactive BASIC mode session is live.  A
-     * scheduled `basic run <path>` job reaches here (jobs/rules tick before the
-     * BASIC mode tick), and it would otherwise reset interpreter state,
-     * overwrite the in-memory program, and drive a blocking run on top of the
-     * user's session.  Boot-time autorun runs before any mode, so no-op there. */
+    /* Refuse re-entry while an interactive BASIC session is live: a scheduled
+     * `basic run <path>` job reaches here (jobs and rules tick before the
+     * BASIC mode tick), and would otherwise reset interpreter state, overwrite
+     * the in-memory program and drive a blocking run on top of the user's
+     * session.  At boot no mode is active, so the check passes. */
     if (basic_mode_on) {
         return;
     }
@@ -168,9 +167,9 @@ tiku_basic_run_source(const char *source)
         }
     }
 
-    /* Auto-RUN unless the source already issued one.  This lets a
-     * user drop a plain numbered .bas file in and have it just work;
-     * advanced users can put `RUN` (or other direct commands) inline. */
+    /* Auto-RUN unless the source already issued one, so a plain numbered
+     * .bas file runs as it is; a source can also put `RUN` or other direct
+     * commands inline. */
     if (!saw_run) {
         exec_run();
     }

@@ -7,9 +7,9 @@
  *
  * tiku_basic_mathx.inl - extended fixed-point math for the full BASIC profile.
  *
- * LOG, EXP, POW and ATAN in Q.3 fixed point, in the same style as the bit-iterative
- * SQR and the LUT trig.  Intermediates are 64-bit and results are coarse to about
- * three decimals, which is what the representation allows.
+ * LOG, EXP, POW and ATAN in Q.3 fixed point, in the style of the
+ * bit-iterative SQR and the LUT trig.  Intermediates are 64-bit and results
+ * are coarse to about three decimals, which is what the representation allows.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,8 +20,12 @@
 #define MX_LN2    693L                                  /* ln(2) in Q.3   */
 #define MX_E      2718L                                 /* e     in Q.3   */
 
-/* sqrt(x) for x in Q.3, result in Q.3 -- same bit-by-bit isqrt as the
- * SQR builtin, broken out as a helper for ATAN's argument reduction. */
+/**
+ * @brief sqrt(x) for x in Q.3, result in Q.3.
+ *
+ * The bit-by-bit isqrt the SQR builtin uses, with 64-bit intermediates, for
+ * ATAN's argument reduction.
+ */
 static long mx_sqrt_q3(long x)
 {
     long long t, res = 0, bit;
@@ -37,9 +41,13 @@ static long mx_sqrt_q3(long x)
     return (long)res;
 }
 
-/* ln(x) for x in Q.3, x > 0. Returns Q.3. Reduce x = m * 2^k with m in
- * [1,2): ln(x) = k*ln2 + ln(m); ln(m) = 2*atanh(t), t = (m-1)/(m+1),
- * via the odd-power series (t small, converges fast). */
+/**
+ * @brief ln(x) for x in Q.3, x > 0; result in Q.3.
+ *
+ * Reduces x = m * 2^k with m in [1,2): ln(x) = k*ln2 + ln(m), and
+ * ln(m) = 2*atanh(t) with t = (m-1)/(m+1), summed as the odd-power series
+ * (t is small, so it converges fast).  x <= 0 raises a domain error.
+ */
 static long basic_log_q3(long x)
 {
     long k = 0;
@@ -60,9 +68,13 @@ static long basic_log_q3(long x)
     return (long)((long long)k * MX_LN2 + sum);
 }
 
-/* e^x for x in Q.3. Returns Q.3. Split x = n + f (n integer real part,
- * f in [0,1) Q.3): e^x = e^n * e^f; e^n by repeated *e, e^f by Taylor.
- * Negative x via reciprocal. Guarded against overflow. */
+/**
+ * @brief e^x for x in Q.3; result in Q.3.
+ *
+ * Splits x = n + f (integer n, f in [0,1)): e^x = e^n * e^f, e^n by repeated
+ * multiplication and e^f by Taylor series.  Negative x takes the reciprocal;
+ * an integer part above 14 raises an overflow error.
+ */
 static long basic_exp_q3(long x)
 {
     long n, f, i2;
@@ -85,7 +97,7 @@ static long basic_exp_q3(long x)
     }
 }
 
-/* b^e for b,e in Q.3, b > 0: POW = exp(e * ln(b)). */
+/** @brief b^e for b, e in Q.3 and b > 0, as exp(e * ln(b)). */
 static long basic_pow_q3(long b, long e)
 {
     long lb, prod;
@@ -99,9 +111,13 @@ static long basic_pow_q3(long b, long e)
     return basic_exp_q3(prod);
 }
 
-/* atan(x) for x in Q.3, result radians in Q.3. |x|>1 -> pi/2 - atan(1/x);
- * then two argument halvings (atan(x)=2*atan(x/(1+sqrt(1+x^2)))) so the
- * odd-power series converges quickly. */
+/**
+ * @brief atan(x) for x in Q.3; result in radians, Q.3.
+ *
+ * |x| > 1 uses pi/2 - atan(1/x).  Two argument halvings,
+ * atan(x) = 2*atan(x/(1+sqrt(1+x^2))), make the odd-power series converge
+ * quickly.
+ */
 static long basic_atan_q3(long x)
 {
     int neg = 0, gt1 = 0, i;

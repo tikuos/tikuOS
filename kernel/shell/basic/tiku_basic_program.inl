@@ -7,24 +7,22 @@
  *
  * tiku_basic_program.inl - the line table and its accessors.
  *
- * A flat array of lines with number 0 marking an empty slot, plus helpers to
- * store, walk in numeric order, look up and list.  Every caller goes through
- * them, so the array layout stays encapsulated.
+ * A flat array of lines, number 0 marking an empty slot, with helpers to store,
+ * walk in line order, look up and list.  Ordered walks and exact lookups
+ * binary-search a sorted index that every edit invalidates.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* The prog_* helpers below scan prog[] with a uint16_t loop counter, so the
- * configured line-table size must fit in 16 bits.  A narrower (uint8_t)
- * counter silently looped forever once the per-tier PROGRAM_LINES limits were
- * raised above 255 (1024 on Apollo4 Lite/RP2350, 2048 on Apollo510, 256 on
- * FRAM): `i < TIKU_BASIC_PROGRAM_LINES` stayed perpetually true and prog_store
- * spun on the first stored line. */
+/* The prog_* helpers scan prog[] with a uint16_t loop counter, so the
+ * configured line-table size must fit in 16 bits. */
 _Static_assert(TIKU_BASIC_PROGRAM_LINES <= 0xFFFFu,
                "PROGRAM_LINES must fit the uint16_t prog[] scan counter");
 
-/* A3: any edit invalidates the derived line-number index AND the SUB/label
- * registry (both are rebuilt on their next lookup). */
+/**
+ * @brief Mark the line index and the SUB/label registry stale after an edit;
+ *        both are rebuilt on their next lookup.
+ */
 #define PROG_INDEX_INVALIDATE()  (basic_line_index_ok = 0, basic_symreg_ok = 0)
 
 /** @brief Mark every line slot empty. */
@@ -36,6 +34,11 @@ prog_clear(void)
     PROG_INDEX_INVALIDATE();
 }
 
+/**
+ * @brief Store line @p lineno, replacing any line of that number; an empty
+ *        @p body deletes it.
+ * @return 0, or -1 when the table is full
+ */
 static int
 prog_store(uint16_t lineno, const char *body)
 {
@@ -51,12 +54,11 @@ prog_store(uint16_t lineno, const char *body)
         }
         return 0;
     }
-    /* A2: crunch keywords to token bytes at store time.  Output is never
-     * longer than the input, and LIST / SAVE detokenize, so the on-media and
+    /* Crunch keywords to token bytes at store time.  Output is never longer
+     * than the input, and LIST / SAVE detokenize, so the on-media and
      * on-screen forms stay plain text. */
     basic_crunch(crn, sizeof(crn), t);
     t = crn;
-    /* Replace existing line. */
     for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) {
         if (prog[i].number == lineno) {
             strncpy(prog[i].text, t, TIKU_BASIC_LINE_MAX - 1);
@@ -64,7 +66,6 @@ prog_store(uint16_t lineno, const char *body)
             return 0;
         }
     }
-    /* Find empty slot. */
     for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) {
         if (prog[i].number == 0) {
             prog[i].number = lineno;
@@ -76,8 +77,7 @@ prog_store(uint16_t lineno, const char *body)
     return -1;
 }
 
-/*--- A3: linear fallbacks (used when the index isn't ready + to build it) ---*/
-
+/** @brief prog_next_index() by linear scan, for when no index is allocated. */
 static int
 prog_next_index_linear(uint16_t lineno)
 {
@@ -95,6 +95,7 @@ prog_next_index_linear(uint16_t lineno)
     return best;
 }
 
+/** @brief prog_find_exact() by linear scan. */
 static int
 prog_find_exact_linear(uint16_t lineno)
 {
@@ -105,10 +106,12 @@ prog_find_exact_linear(uint16_t lineno)
     return -1;
 }
 
-/* Build basic_line_order[] = active prog[] indices, ascending by line number.
- * Collect in physical order (== insertion order, usually already ascending)
- * then insertion-sort -- O(N) on a program entered in order, O(N^2) worst case
- * on a reverse-entered one, paid once per edit and amortized over the run. */
+/**
+ * @brief Rebuild basic_line_order[]: active prog[] indices by line number.
+ *
+ * Collects in slot order, then insertion-sorts: O(N) for a program entered in
+ * order, O(N^2) for one entered in reverse, paid once per edit.
+ */
 static void
 basic_line_index_build(void)
 {
@@ -130,9 +133,14 @@ basic_line_index_build(void)
     basic_line_index_ok = 1;
 }
 
-/* Index of the lowest-numbered line whose number >= @p lineno; -1 if none.
- * O(log N) lower-bound over the sorted index (identical result to the linear
- * scan, which it falls back to before the arena / index is ready). */
+/**
+ * @brief Slot of the lowest-numbered line whose number is >= @p lineno.
+ *
+ * A lower-bound search over the sorted index; before the arena holds an index
+ * it falls back to the linear scan, with the same result.
+ *
+ * @return The prog[] index, or -1 when no such line exists
+ */
 static int
 prog_next_index(uint16_t lineno)
 {
@@ -148,13 +156,17 @@ prog_next_index(uint16_t lineno)
     return (lo < basic_line_count) ? (int)basic_line_order[lo] : -1;
 }
 
+/**
+ * @brief Slot of line @p lineno, by binary search over the sorted index.
+ * @return The prog[] index (for 0, the first empty slot), or -1 when absent
+ */
 static int
 prog_find_exact(uint16_t lineno)
 {
     uint16_t lo, hi;
-    /* Line 0 marks an empty slot, never a real line -- preserve the linear
-     * scan's exact-0 behaviour (returns the first empty slot) for any caller
-     * that relies on it; the index holds only active lines. */
+    /* Line 0 marks an empty slot, never a real line, and the index holds
+     * only active lines, so 0 takes the linear scan and finds the first
+     * empty slot. */
     if (lineno == 0)              return prog_find_exact_linear(0);
     if (basic_line_order == NULL) return prog_find_exact_linear(lineno);
     if (!basic_line_index_ok)     basic_line_index_build();
@@ -169,6 +181,7 @@ prog_find_exact(uint16_t lineno)
     return -1;
 }
 
+/** @brief Print the program in line order with keywords expanded (LIST). */
 static void
 prog_list(void)
 {
@@ -177,7 +190,7 @@ prog_list(void)
         int idx = prog_next_index(cur);
         if (idx < 0) break;
         SHELL_PRINTF("%u ", (unsigned)prog[idx].number);
-        basic_detok_print(prog[idx].text);   /* A2: expand token bytes */
+        basic_detok_print(prog[idx].text);   /* expand token bytes */
         SHELL_PRINTF("\n");
         if (prog[idx].number == 0xFFFFu) break;
         cur = (uint16_t)(prog[idx].number + 1);

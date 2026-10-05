@@ -7,9 +7,9 @@
  *
  * tiku_basic.c - Tiku BASIC interpreter engine (orchestrator).
  *
- * The engine is one translation unit amalgamated from themed .inl pieces by the
- * includes below, which keeps its statics private, lets the optimiser see the
- * whole engine, and avoids a header per piece.  Include order follows dependency.
+ * One translation unit amalgamated from themed .inl pieces by the includes
+ * below: the statics stay private, the optimiser sees the whole engine, and
+ * no piece needs a header.  Include order follows dependency.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,8 +19,8 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_basic.h"
-#include "tiku_basic_ext.h"           /* native builtin registry (Tier 2) */
-#include <kernel/shell/tiku_shell.h>  /* first: the device's NVM label wins */
+#include "tiku_basic_ext.h"           /* native builtin registry */
+#include <kernel/shell/tiku_shell.h>  /* before config: device NVM label wins */
 #include "tiku_basic_config.h"
 #include <kernel/memory/tiku_mem.h>
 #include <kernel/memory/tiku_reclaim.h>
@@ -30,12 +30,10 @@
 #include <stdarg.h>
 #include <string.h>
 
-/* Hardware-bridge headers.  Each is pulled in only when the matching
- * BASIC bridge is enabled, so a slim BASIC build (e.g. no GPIO, no
- * I2C) doesn't drag in unused HAL code. */
-/* The BASIC hardware-bridge code (tiku_basic_*.inl) is platform-agnostic, so
- * these declarations must be visible on every arch, not just MSP430. The gpio
- * interface header dispatches to the right per-MCU arch header internally. */
+/* Hardware-bridge headers, each included only when its BASIC bridge is
+ * enabled, so a slim build (no GPIO, no I2C) leaves that HAL code out.  The
+ * bridges are platform-agnostic; the gpio interface header picks the per-MCU
+ * arch header itself. */
 #if TIKU_BASIC_GPIO_ENABLE
 #include <interfaces/gpio/tiku_gpio.h>
 #endif
@@ -65,7 +63,7 @@
 #endif
 #endif
 #if TIKU_BASIC_JSON_ENABLE
-#include <tikukits/codec/json/tiku_kits_codec_json.h>  /* JSON$ path extractor */
+#include <tikukits/codec/json/tiku_kits_codec_json.h>  /* JSON$ */
 #endif
 #if TIKU_BASIC_CRYPTO_ENABLE
 #include <tikukits/crypto/base64/tiku_kits_crypto_base64.h>  /* BASE64$ */
@@ -82,8 +80,8 @@
 #include <tikukits/net/mqtt/tiku_kits_net_mqtt.h>  /* MQTTPUB */
 #endif
 #if (TIKU_KITS_NET_HTTP_ENABLE + 0)
-/* HTTPGET$ runs over the certificate-based TLS 1.3 client (not the PSK-only
- * http kit): TCP transport + DNS + X.509 trust store + the tls13 client. */
+/* HTTPGET$ runs over the http kit's certificate engine: TCP transport, DNS,
+ * the X.509 trust store and the TLS 1.3 client (TLS 1.2 as the fallback). */
 #include <tikukits/net/ipv4/tiku_kits_net_tcp.h>
 #include <tikukits/net/ipv4/tiku_kits_net_dns.h>
 #include <tikukits/net/tls/x509/tiku_kits_crypto_x509.h>
@@ -97,21 +95,21 @@
 #endif
 #endif
 #if TIKU_BASIC_BLE_ENABLE
-#include <interfaces/bluetooth/tiku_ble_serial.h>  /* BLEADV/BLESEND/BLEUP/BLEGET$ */
-#include <interfaces/bluetooth/tiku_ble_adv.h>     /* BLEBEACON/BLESCAN$ (broadcast) */
+#include <interfaces/bluetooth/tiku_ble_serial.h>  /* serial-over-BLE */
+#include <interfaces/bluetooth/tiku_ble_adv.h>     /* BLEBEACON/BLESCAN$ */
 #endif
 
 /*---------------------------------------------------------------------------*/
 /* AMALGAMATION                                                              */
 /*---------------------------------------------------------------------------*/
 
-#include "tiku_basic_cursor.inl"      /* parse-cursor vocabulary (before all parsers) */
+#include "tiku_basic_cursor.inl"      /* cursor ops, before all parsers */
 #include "tiku_basic_state.inl"
 #include "tiku_basic_reclaim_state.inl"
-#include "tiku_basic_token.inl"       /* A2: keyword crunch (before all users) */
+#include "tiku_basic_token.inl"       /* keyword crunch, before its users */
 #include "tiku_basic_arena.inl"
 #include "tiku_basic_persist.inl"
-#include "tiku_basic_ckpt.inl"        /* F1: PERSIST / RUN RESUME (needs arena + persist) */
+#include "tiku_basic_ckpt.inl"        /* checkpoint (needs arena + persist) */
 #include "tiku_basic_vfs_file.inl"
 #include "tiku_basic_peek_poke.inl"
 #include "tiku_basic_hw.inl"
@@ -127,7 +125,7 @@
 #include "tiku_basic_expr.inl"
 #include "tiku_basic_ext.inl"         /* registry impl (needs parse_expr) */
 #include "tiku_basic_ext_kits.inl"    /* bundled native words (first client) */
-#include "tiku_basic_module.h"        /* Tier 3: loadable native module API  */
+#include "tiku_basic_module.h"        /* loadable native module ABI */
 #include "tiku_basic_program.inl"
 #include "tiku_basic_stmt.inl"
 #include "tiku_basic_net.inl"
@@ -136,7 +134,7 @@
 #include "tiku_basic_multi_if.inl"
 #include "tiku_basic_select.inl"
 #include "tiku_basic_renum.inl"
-#include "tiku_basic_import.inl"      /* IMPORT (needs renum + subs + persist) */
+#include "tiku_basic_import.inl"      /* IMPORT: needs renum, subs, persist */
 #include "tiku_basic_named_slots.inl"
 #include "tiku_basic_dispatch.inl"
 #include "tiku_basic_debug.inl"

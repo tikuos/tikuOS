@@ -7,16 +7,19 @@
  *
  * tiku_basic_net.inl - networking statements for the full BASIC profile.
  *
- * exec_run only pumps the console between statements, so any net operation that
- * waits must pump it itself or the board hard-hangs.  UDP is instant, MQTT pumps
- * through a helper, and HTTP self-pumps the stack.
+ * exec_run pumps the console only between statements, so a net word that waits
+ * must pump it itself or the board hangs.  UDP is instant, MQTT pumps through
+ * a helper, and the HTTPS words pump the stack themselves.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #if TIKU_BASIC_NET_ENABLE
 
-/* Parse a dotted-quad "a.b.c.d" into 4 bytes. Returns 0 on success. */
+/**
+ * @brief Parse a dotted quad "a.b.c.d" into @p out.
+ * @return 0 on success, -1 if @p s is not a dotted quad.
+ */
 static int
 basic_net_parse_ip(const char *s, uint8_t out[4])
 {
@@ -37,16 +40,19 @@ basic_net_parse_ip(const char *s, uint8_t out[4])
 }
 
 #if (TIKU_KITS_NET_HTTP_ENABLE + 0)
-/* HTTPHEADER "Name", value$ -- append a request header sent by the next
- * HTTPGET$/HTTPPOST$ (e.g. HTTPHEADER "Authorization", "Bearer " + K$).  Bare
- * HTTPHEADER (no args) clears them; headers otherwise accumulate. */
+/**
+ * @brief HTTPHEADER "Name", value$: add a header to the following requests.
+ *
+ * E.g. HTTPHEADER "Authorization", "Bearer " + K$.  Headers accumulate and
+ * go with every HTTPS request; a bare HTTPHEADER clears them.
+ */
 static void
 exec_httpheader(const char **p)
 {
     char   name[48], val[TIKU_BASIC_STR_BUF_CAP];
     size_t nl, vl, cur;
     skip_ws(p);
-    if (cur_peek(p) == '\0' || cur_peek(p) == ':') {        /* bare HTTPHEADER -> clear */
+    if (cur_peek(p) == '\0' || cur_peek(p) == ':') {        /* bare: clear */
         basic_http_hdrs[0] = '\0';
         return;
     }
@@ -68,10 +74,13 @@ exec_httpheader(const char **p)
     basic_http_hdrs[cur] = '\0';
 }
 #if TIKU_BASIC_BIGBUF_COUNT > 0
-/* FETCH #n, "host", "path" [, body$] -- GET (or POST when body$ is given)
- * straight into big-buffer #n, past the STR_BUF_CAP limit, so a whole multi-KB
- * reply is retained. Read it with JSON$(#n,...), LINE$(#n,i), BETWEEN$(#n,a$,b$)
- * and LEN(#n); HTTPSTATUS() reports the code. Any HTTPHEADER lines apply. */
+/**
+ * @brief FETCH #n, "host", "path" [, body$]: GET, or POST with body$, into #n.
+ *
+ * The reply body lands in big buffer #n, so a reply past STR_BUF_CAP is kept,
+ * up to TIKU_BASIC_BIGBUF_SIZE; read it with JSON$(#n,...), LINE$(#n,i),
+ * BETWEEN$(#n,a$,b$) and LEN(#n).  HTTPHEADER lines apply.
+ */
 static void
 exec_fetch(const char **p)
 {
@@ -106,7 +115,7 @@ exec_fetch(const char **p)
                          have_body ? body : NULL, NULL,
                          basic_bigbuf[n], (size_t)TIKU_BASIC_BIGBUF_SIZE);
     /* basic_https_get stores the whole reply (status line + headers + body).
-     * The #n extractors (JSON$/LINE$/BETWEEN$) want the reply BODY -- a JSON$
+     * The #n extractors (JSON$/LINE$/BETWEEN$) want the reply body -- a JSON$
      * parse from byte 0 would choke on "HTTP/1.1 ..." -- so drop the header
      * block here: keep everything past the first blank line (CRLF CRLF).
      * HTTPSTATUS() still reports the code.  A reply with no header terminator
@@ -118,7 +127,7 @@ exec_fetch(const char **p)
             if (buf[i] == '\r' && buf[i + 1] == '\n' &&
                 buf[i + 2] == '\r' && buf[i + 3] == '\n') { hdr = i + 4u; break; }
         }
-        if (hdr > 0) {                  /* shift the body down over the headers */
+        if (hdr > 0) {        /* shift the body down over the headers */
             size_t blen = total - hdr, j;
             for (j = 0; j < blen; j++) buf[j] = buf[hdr + j];
             buf[blen] = '\0';
@@ -128,9 +137,7 @@ exec_fetch(const char **p)
         }
     } else {
         /* Terminate as well as zero the length: PRINT reads the buffer as a C
-         * string, so a failed fetch that only cleared the length printed
-         * whatever the buffer happened to hold -- a screenful of garbage after
-         * every error line. */
+         * string. */
         basic_bigbuf[n][0] = '\0';
         basic_biglen[n] = 0;
     }
@@ -138,8 +145,11 @@ exec_fetch(const char **p)
 #endif
 #endif
 
-/* UDPSEND "a.b.c.d", port, expr$ -- fire-and-forget a datagram. Instant
- * (the stack queues + transmits synchronously), so no pump needed. */
+/**
+ * @brief UDPSEND "a.b.c.d", port, expr$: send one datagram, fire and forget.
+ *
+ * The stack queues and transmits synchronously, so no pump is needed.
+ */
 static void
 exec_udpsend(const char **p)
 {
@@ -172,18 +182,19 @@ exec_udpsend(const char **p)
 }
 
 #if (TIKU_KITS_NET_HTTP_ENABLE + 0)
-/* BROWSE "host[/path]" -- fetch a page over cert-TLS and render it to the
- * console as plain text (the BASIC web browser). Unlike STRIP$(HTTPGET$(...)),
- * which is bounded by the BASIC string scratch, this fetches into a dedicated
- * buffer so it shows a whole simple page. basic_https_get self-pumps the net
- * stack, so no separate pump loop is needed here. */
+/* BROWSE page buffer: unlike STRIP$(HTTPGET$(...)), which is bounded by the
+ * string scratch, BROWSE fetches here, so it shows a whole simple page. */
 #ifndef TIKU_BASIC_BROWSE_BUF
 #define TIKU_BASIC_BROWSE_BUF  16384
 #endif
 static char basic_browse_buf[TIKU_BASIC_BROWSE_BUF];
-/* If resp is an HTTP 3xx redirect carrying a Location header, copy the target
- * URL into out[outcap] and return 1; otherwise return 0.  Only the header
- * region (before the blank line) is scanned. */
+/**
+ * @brief Copy the Location of an HTTP 3xx response @p resp into @p out.
+ *
+ * Only the header region, before the blank line, is scanned.
+ *
+ * @return 1 when @p resp is a redirect with a Location that fits, else 0.
+ */
 static int
 basic_http_redirect(const char *resp, char *out, size_t outcap)
 {
@@ -217,11 +228,13 @@ basic_http_redirect(const char *resp, char *out, size_t outcap)
     return 0;
 }
 
-/* BROWSE "host[/path]" -- fetch a page over cert-TLS and render it to the
- * console as plain text (the BASIC web browser).  Follows up to 3 HTTP
- * redirects (so e.g. google.com -> www.google.com lands on the real page),
- * handling absolute and same-host relative Location targets. basic_https_get
- * self-pumps the net stack, so no separate pump loop is needed here. */
+/**
+ * @brief BROWSE "host[/path]": fetch a page over HTTPS, print it as text.
+ *
+ * Follows up to 3 redirects (e.g. google.com -> www.google.com), absolute or
+ * same-host relative.  basic_https_get() pumps the net stack itself, so no
+ * separate pump loop is needed.
+ */
 static void
 exec_browse(const char **p)
 {
@@ -251,7 +264,7 @@ exec_browse(const char **p)
         }
         if (basic_https_get("GET", host, path, NULL, NULL, basic_browse_buf,
                             sizeof basic_browse_buf) < 0) {
-            basic_error = 1;      /* basic_https_get already printed the reason */
+            basic_error = 1;      /* basic_https_get printed the reason */
             basic_errcat = TIKU_BASIC_ERR_NET;
             return;
         }
@@ -269,11 +282,10 @@ exec_browse(const char **p)
         int code = (sp && sp[1] >= '0' && sp[1] <= '9')
                  ? (sp[1] - '0') * 100 + (sp[2] - '0') * 10 + (sp[3] - '0') : 0;
         if (code == 0) {
-            /* Nothing parsed -- surface WHY the TLS read broke.  The red stage
-             * print is lost in the shared console/SLIP mux, so report the
-             * post-handshake read break here instead: rdfail 1 no-record /
-             * 2 wire-type / 3 decrypt-fail / 4 alert, with the wire record type
-             * and the server app read-seq (which post-handshake record broke). */
+            /* Nothing parsed: report how the post-handshake TLS read broke --
+             * rdfail 1 no-record / 2 wire-type / 3 decrypt-fail / 4 alert,
+             * with the wire record type and the server's application read
+             * sequence number (which record broke). */
             SHELL_PRINTF("[%s: HTTP 0, 0 B  rdfail=%d type=%u seq=%u]\n", host,
                          tiku_kits_crypto_tls13_last_read_fail,
                          (unsigned)tiku_kits_crypto_tls13_last_read_type,
@@ -290,8 +302,9 @@ exec_browse(const char **p)
 #if (TIKU_KITS_NET_MQTT_ENABLE + 0)
 /* MQTT publish (QoS 0). The broker exchange is poll-based, so it is driven
  * across a bounded deadline, pumping the console between polls so the board
- * never hard-hangs (the ADC-hang class). */
+ * never hard-hangs. */
 static volatile uint8_t basic_mqtt_evt;
+/** @brief MQTT event callback: record the latest event. */
 static void basic_mqtt_event_cb(uint8_t e) { basic_mqtt_evt = e; }
 
 /* Inbound capture for MQTTWAIT$: the last PUBLISH the broker delivered,
@@ -301,6 +314,7 @@ static void basic_mqtt_event_cb(uint8_t e) { basic_mqtt_evt = e; }
 static volatile uint8_t basic_mqtt_rx_pending;
 static char basic_mqtt_rx_topic[48];
 static char basic_mqtt_rx_msg[TIKU_BASIC_MQTT_RX_CAP];
+/** @brief MQTT message callback: copy a PUBLISH out and latch it pending. */
 static void basic_mqtt_msg_cb(const char *t, uint16_t tl, const uint8_t *d,
                               uint16_t dl, uint8_t q, uint8_t r)
 {
@@ -317,19 +331,22 @@ static void basic_mqtt_msg_cb(const char *t, uint16_t tl, const uint8_t *d,
     basic_mqtt_rx_pending = 1;
 }
 
-/* One pump step: the shared shell pump (watchdog + WiFi drain + paced
- * tcp_periodic + SLIP-aware Ctrl-C — every ingredient device-proven,
- * see kernel/shell/tiku_shell_pump.c) with MQTT housekeeping hooked
- * at the paced net service point: TCP first (advances the connect
- * handshake / retransmits / ACKs), then MQTT reacts to the resulting
- * connection events. Returns 1 on Ctrl-C. */
+/**
+ * @brief One pump step for the MQTT words.
+ *
+ * The shared shell pump (watchdog, WiFi drain, paced tcp_periodic, SLIP-aware
+ * Ctrl-C; kernel/shell/tiku_shell_pump.c) with MQTT housekeeping at the paced
+ * service point, after TCP, so MQTT sees the connection events TCP produced.
+ *
+ * @return 1 on Ctrl-C, else 0.
+ */
 static int
 basic_net_mqtt_pump(void)
 {
     return tiku_shell_pump_net(tiku_kits_net_mqtt_periodic);
 }
 
-/* MQTTPUB "broker_ip", "topic", expr$ -- connect, publish QoS0, disconnect. */
+/** @brief MQTTPUB "broker_ip", "topic", expr$: connect, publish, disconnect. */
 static void
 exec_mqttpub(const char **p)
 {
@@ -353,11 +370,10 @@ exec_mqttpub(const char **p)
     if (parse_strexpr(p, payload, sizeof(payload)) != 0) return;
 
     /* Initialise the TCP connection table. On a lean WiFi profile nothing
-     * else does: the NET_TEST init and the SLIP net process (the two normal
-     * tcp_init sites) are both absent here, so without this mqtt_connect()'s
-     * tcp_connect() allocates from an uninitialised table and never
-     * establishes. Idempotent for BASIC -- each MQTTPUB is a fresh
-     * connect/publish/disconnect with no persistent connections. */
+     * else does: the NET_TEST init and the SLIP net process are both absent
+     * there, so without this mqtt_connect()'s tcp_connect() allocates from an
+     * uninitialised table and never establishes. The init is idempotent, and
+     * each MQTTPUB is a fresh connect/publish/disconnect. */
     tiku_kits_net_tcp_init();
     tiku_kits_net_mqtt_init();
     tiku_kits_net_mqtt_set_server(ip, 1883);
@@ -393,13 +409,16 @@ exec_mqttpub(const char **p)
     while (TIKU_CLOCK_LT(tiku_clock_time(), deadline)) (void)basic_net_mqtt_pump();
 }
 
-/* MQTTWAIT$("broker_ip", "topic", secs) helper -- the inbound dual of
- * MQTTPUB.  Connect, SUBSCRIBE to `topic`, pump until one PUBLISH lands
- * or `secs` elapses, then disconnect; the payload is written to out[cap]
- * ("" on timeout).  Returns 0 if a message arrived, -1 on timeout, and
- * sets basic_error (category NET) on a hard failure (bad IP / connect).
- * Reuses the exact connect/pump/disconnect lifecycle MQTTPUB is proven
- * on -- no persistent connection is held across statements. */
+/**
+ * @brief MQTTWAIT$ backend: wait up to @p secs for one PUBLISH on @p topic.
+ *
+ * Connect, subscribe, pump until a PUBLISH lands or the time is up, then
+ * disconnect -- the MQTTPUB lifecycle, so no connection outlives the call.
+ * The payload goes to @p out ("" on timeout).
+ *
+ * @return 0 if a message arrived, -1 otherwise; a bad IP or a failed connect
+ *         also sets basic_error (category NET).
+ */
 static int
 basic_net_mqtt_wait(const char *ipstr, const char *topic, long secs,
                     char *out, size_t cap)

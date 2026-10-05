@@ -7,9 +7,9 @@
  *
  * tiku_basic_lex.inl - lexical helpers for Tiku BASIC.
  *
- * Character predicates, case folding, whitespace skipping, escape decoding and
- * keyword matching with a word-boundary check.  parse_unum() covers every literal
- * form: decimal, C-style and BASIC-style hex and binary, and fixed-point.
+ * Character predicates, case folding, whitespace skipping, escape decoding
+ * and keyword matching with a word-boundary check.  parse_unum() covers every
+ * literal form: decimal, C-style and BASIC-style hex and binary, fixed point.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,24 +18,29 @@
 /* CHARACTER PREDICATES                                                      */
 /*---------------------------------------------------------------------------*/
 
+/** @brief ASCII upper case of @p c; any other character is unchanged. */
 static char
 to_upper(char c) { return (c >= 'a' && c <= 'z') ? (char)(c - 32) : c; }
 
+/** @brief 1 if @p c is an ASCII letter. */
 static int
 is_alpha(char c)
 {
     return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
 }
 
+/** @brief 1 if @p c is a decimal digit. */
 static int
 is_digit(char c) { return c >= '0' && c <= '9'; }
 
+/** @brief 1 if @p c is a hex digit, in either case. */
 static int
 is_hex_digit(char c)
 {
     return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
 
+/** @brief Value of @p c, a character is_hex_digit() accepted. */
 static int
 hex_value(char c)
 {
@@ -44,6 +49,7 @@ hex_value(char c)
     return c - 'a' + 10;
 }
 
+/** @brief 1 if @p c can continue an identifier: letter, digit or '_'. */
 static int
 is_word_cont(char c) { return is_alpha(c) || is_digit(c) || c == '_'; }
 
@@ -51,16 +57,19 @@ is_word_cont(char c) { return is_alpha(c) || is_digit(c) || c == '_'; }
 /* WHITESPACE / ESCAPES                                                      */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Advance the cursor past spaces and tabs. */
 static void
 skip_ws(const char **p)
 {
     while (cur_peek(p) == ' ' || cur_peek(p) == '\t') cur_advance(p);
 }
 
-/* Translate a backslash-escape inside a "..." literal. Recognises
- * \n \t \r \" \\ ; unknown escapes pass through as the literal char.
- * Used by both PRINT (numeric expr context) and the string-expression
- * parser, which is why it lives here rather than next to exec_print. */
+/**
+ * @brief Translate the character after a backslash in a "..." literal.
+ *
+ * Recognises `n`, `t`, `r`, `"` and the backslash; any other character passes
+ * through as itself.  Shared by the string-expression parser and READ.
+ */
 static char
 print_escape(char esc)
 {
@@ -78,10 +87,15 @@ print_escape(char esc)
 /* KEYWORDS / NUMBERS / VARIABLES                                            */
 /*---------------------------------------------------------------------------*/
 
-/* Case-insensitive keyword match with word-boundary check.  DUAL: a
- * crunched token byte matches its spelling in one compare, so stored program
- * lines dispatch on bytes while immediate-mode raw text keeps the char path.
- * @p kw is always an UPPERCASE literal (matches the table spellings). */
+/**
+ * @brief Match keyword @p kw case-insensitively, at a word boundary.
+ *
+ * A crunched token byte matches its spelling in one compare, so stored lines
+ * dispatch on bytes while immediate-mode text takes the character path.
+ *
+ * @note @p kw is an upper-case literal, spelled as in the token table.
+ * @return 1 with the cursor past the keyword and any blanks after it, else 0.
+ */
 static int
 match_kw(const char **p, const char *kw)
 {
@@ -104,6 +118,14 @@ match_kw(const char **p, const char *kw)
     return 1;
 }
 
+/**
+ * @brief Parse an unsigned numeric literal.
+ *
+ * Accepts decimal, 0x/0b and &H/&B hex and binary, and, with
+ * TIKU_BASIC_FIXED_ENABLE, a decimal fraction scaled by TIKU_BASIC_FIXED_SCALE.
+ *
+ * @return 1 with the value in @p out and the cursor past the literal, else 0.
+ */
 static int
 parse_unum(const char **p, long *out)
 {
@@ -132,9 +154,8 @@ parse_unum(const char **p, long *out)
         *out = v;
         return 1;
     }
-    /* BASIC-style &H.. and &B.. literals. Cannot serve as line numbers
-     * (process_line guards on is_digit) but that's fine -- they appear
-     * inside expressions next to PEEK / POKE / SHL etc. */
+    /* BASIC-style &H.. and &B.. literals, for expressions only:
+     * process_line reads a line number only after is_digit(). */
     if (cur_peek(p) == '&' && to_upper(cur_peek_at(p, 1)) == 'H') {
         q = cur_mark(p) + 2;
         if (!is_hex_digit(*q)) return 0;
@@ -165,9 +186,7 @@ parse_unum(const char **p, long *out)
      *   1.5555  -> 1555 (4th digit dropped)
      *   0.001   -> 1
      *   1.      -> 1000
-     * Pure integers (no '.') retain their existing meaning, so any
-     * old program that did its own scaling (`PI = 3142`) keeps
-     * working unchanged. */
+     * Integers without a '.' are not scaled. */
     if (cur_match(p, '.')) {
         long frac = 0;
         long div  = 1;
@@ -178,7 +197,7 @@ parse_unum(const char **p, long *out)
             cur_advance(p);
         }
         while (div < max_div) { frac *= 10; div *= 10; }
-        while (is_digit(cur_peek(p))) cur_advance(p); /* skip trailing precision */
+        while (is_digit(cur_peek(p))) cur_advance(p); /* drop excess digits */
         v = v * (long)TIKU_BASIC_FIXED_SCALE + frac;
     }
 #endif
@@ -245,8 +264,8 @@ basic_named_lookup(const char *name, int is_string)
 #else
     tbl = basic_namedvar_names;
 #endif
-    /* A3 #3: the hot loop re-references one named variable per statement --
-     * check the most-recent hit before rescanning the table. */
+    /* A hot loop re-references one named variable per statement, so check
+     * the most recent hit before rescanning the table. */
     i = basic_named_mru[t];
     if (i >= 0 && tbl[i][0] != '\0' && strcmp(tbl[i], name) == 0) {
         return 26 + i;
@@ -269,12 +288,13 @@ basic_named_lookup(const char *name, int is_string)
 }
 
 /**
- * @brief Parse a numeric variable name (single letter or
- *        multi-letter), returning its slot index.
+ * @brief Parse a numeric variable name (single or multi-letter).
  *
  * A trailing `$` is rejected here because the caller wanted a
  * numeric variable.  Use parse_var_full() when the type sigil is
  * to be detected dynamically.
+ *
+ * @return 1 with the slot index in @p idx, or 0 with the cursor restored.
  */
 static int
 parse_var(const char **p, int *idx)

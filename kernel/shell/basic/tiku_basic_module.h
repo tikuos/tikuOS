@@ -7,9 +7,9 @@
  *
  * tiku_basic_module.h - runtime-loadable native module ABI.
  *
- * A module is machine code compiled separately at a fixed address, so it cannot
- * link against firmware symbols and reaches every service through a jump table
- * passed to its entry point.  Included by both the firmware and the module build.
+ * A module is compiled separately at a fixed address and cannot link against
+ * firmware symbols, so it reaches every service through a jump table passed to
+ * its entry point.  Included by both the firmware and the module build.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,231 +21,156 @@
 #include <stdint.h>
 #include "tiku_basic_ext.h"      /* the handler typedefs the table exposes */
 
-/* 'TMOD' little-endian -- first word of a module image. */
+/** First word of a module image: 'TMOD' little-endian. */
 #define TIKU_MODULE_MAGIC    0x444F4D54u
+/** Version of the image header and the service table; others are refused. */
 #define TIKU_MODULE_ABI      1u
 
-/* Fixed module slot -- EXECUTABLE NVM (32 KB on ARM parts, ~4 KB on
- * MSP430).  The slot is the TOP 32 KB of the code window, [cap - 32 KB,
- * cap): not a layout estate of its own, but a reserve inside slack the code
- * contract already guarantees, claimed only in builds that compile this
- * loader (the Makefile passes --defsym=__tiku_module_reserve so the link
- * ASSERT keeps the image below it).  Keep these addresses equal to the
- * device script's code cap less 32 KB, and to the module's own .ld VMA.
- * The module is linked at this VMA; the loader installs the image here and
- * runs it XIP (durable in place -- it survives reboot and power loss).
+/*
+ * Where each part keeps and runs a module.  A module is linked for one
+ * absolute address, so the address below, the ORIGIN in the module's linker
+ * script (modules/mod_demo*.ld) and the device linker script must agree.
  *
- *   nordic (nRF54L15 + nRF54LM20): RRAM at the top of the shared 384 KB code
- *     window -- the SAME address on both parts, so one module image is
- *     family-portable.  SRAM is W^X (execute-never), so a module MUST run
- *     from RRAM -- which is byte-writable, so install is a store loop
- *     behind the WEN gate.
- *   apollo510/510b:     NO NVM slot -- the image is copied into the ITCM and
- *     run from there (TIKU_MODULE_EXEC_ADDR), a RAM window measured to work.
- *   esp32c61:           NO NVM slot either -- copied into a 32 KB window at
- *     the base of the in-package PSRAM and run from there.
- *   apollo4l/4p:        same MRAM personality as apollo510 (bootrom-programmed,
- *     XIP), different geometry: 2 MB MRAM at 0x0, slot at the top of the
- *     0x18000-based code window.  The unified CACHECTRL cache is flushed
- *     after install (both parts define AM_PART_APOLLO4L).
- *   rp2350 (Pico 2):    QSPI flash, XIP; the slot spans EIGHT 4 KB erase
- *     sectors at the top of the code window.  Install walks them in a loop,
- *     staging each sector through a 4 KB SRAM buffer and committing
- *     erase+program via the boot-ROM path, with sector 0's header page left
- *     blank and programmed LAST -- flash can only clear bits, so the gate
- *     stays invalid until that final program.
- *   msp430 fr5994/fr6989: FRAM at the top of HIFRAM -- byte-writable in
- *     place (behind the MPU unlock window) and natively executable (the
- *     HIFRAM MPU segment is already R+W+X).  No cache, no barrier. */
+ *   nRF54L15, nRF54LM20  RRAM slot 0x58000, run in place; one address for
+ *                        both parts, so one image serves both.  Installed by
+ *                        CPU stores behind the WEN gate.  SRAM is
+ *                        execute-never on these parts.
+ *   Apollo4 Lite/Plus    MRAM slot 0x70000, run in place; installed through
+ *                        the bootrom programmer.
+ *   RP2350               flash slot 0x10058000 (eight 4 KB erase sectors),
+ *                        run in place; installed through the boot-ROM path.
+ *   MSP430FR5994/FR6989  0xFF0-byte FRAM slot at 0x43000 / 0x23000, the top
+ *                        of HIFRAM, written and run in place (the HIFRAM MPU
+ *                        segment is R+W+X).
+ *   Apollo510/510B       no slot: copied from the store file into an ITCM
+ *                        window at 0x1000 at every activate.  The ITCM is
+ *                        powered by the reset default of PWRCTRL
+ *                        MEMPWREN.PWRENTCM, which nothing programs.
+ *   ESP32-C61            no slot: copied from the store file into a 32 KB
+ *                        window at the PSRAM base at every activate.
+ *
+ * On the ARM parts with a slot it is the top 32 KB of the code window,
+ * reserved only in builds with the loader (the Makefile passes
+ * --defsym=__tiku_module_reserve and the link ASSERT keeps the firmware below
+ * it).  MSP430 holds its slot back in the device linker script.
+ *
+ * Only Apollo510 and the ESP32-C61 run a module from RAM, from memory no other
+ * code needs: the ITCM, and 32 KB the PSRAM tier leaves out.  SRAM is
+ * execute-never on the Nordic parts and RP2350, and Apollo4's one TCM holds
+ * .data, .bss and the stack, so the other parts run in place from NVM.
+ */
+
+/**
+ * @brief Base of the NVM module slot; not defined where a module runs from a
+ *        RAM window.
+ *
+ * Must equal the module script's ORIGIN and, on the ARM parts, the device
+ * script's code cap less 32 KB.
+ */
 #if defined(AM_PART_APOLLO510)
-/* DELIBERATELY UNDEFINED on this part: there is no NVM carve (the module
- * executes from the ITCM -- see TIKU_MODULE_EXEC_ADDR below), and 0x488000 is
- * the NVM REGION BASE here, which is to say the NVM tier.  A stale reference
- * would program over live tier data, so leaving this undefined turns that
- * mistake into a compile error instead. */
+/* Not defined on this part: the MRAM above the code window is the NVM region
+ * (tier and /data), which a stale slot address would program over.  Leaving
+ * the macro undefined makes any such use a compile error. */
 #elif defined(AM_PART_APOLLO4L)
 #define TIKU_MODULE_CARVE_ADDR  0x70000u
 #elif defined(PLATFORM_RP2350)
-/* Top 32 KB (8 erase sectors) of the flash code window; XIP.
- * Install goes sector-by-sector through the boot-ROM erase/program path. */
 #define TIKU_MODULE_CARVE_ADDR  0x10058000u
 #elif defined(TIKU_DEVICE_MSP430FR5994) || defined(__MSP430FR5994__)
-/* Top 4 KB of HIFRAM (which the MPU already maps R+W+X, SAM 0x0755).
- * FRAM: byte-writable in place AND natively executable.  The slot ends
- * at 0x43FF0, short of the stock region's odd 0x43FF7 end (CPU47). */
+/* The slot ends at 0x43FF0, short of the stock region's odd 0x43FF7 end
+ * (CPU47). */
 #define TIKU_MODULE_CARVE_ADDR  0x43000u
 #define TIKU_MODULE_CARVE_SIZE  0xFF0u
 #elif defined(TIKU_DEVICE_MSP430FR6989) || defined(__MSP430FR6989__)
 #define TIKU_MODULE_CARVE_ADDR  0x23000u
 #define TIKU_MODULE_CARVE_SIZE  0xFF0u
 #elif defined(PLATFORM_ESP32C61)
-/* DELIBERATELY UNDEFINED, as on apollo510: no NVM carve.  The image runs from
- * a 32 KB window at the base of the in-package PSRAM (TIKU_MODULE_EXEC_ADDR
- * below), copied there from its store file at every activate. */
+/* Not defined, as on Apollo510: the module runs from a PSRAM window. */
 #elif defined(PLATFORM_NORDIC)
-/* nRF54L15 and nRF54LM20 alike: RRAM slot at the top of the shared 384 KB
- * code window.  Both parts use the SAME slot address, so one module image
- * is binary-compatible across the Nordic family. */
 #define TIKU_MODULE_CARVE_ADDR  0x58000u
 #else
-/* Deliberately UNDEFINED, not defaulted: a platform without its own branch
- * inheriting another's slot address is how a module gets installed over
- * whatever happens to live there.  With the loader compiled in that is a
- * hard error right here; without it, any stray use of the address fails to
- * compile instead.  Porting Tier-3 means choosing this part's address (its
- * code cap less 32 KB) on purpose. */
+/* Not defaulted: a part without its own branch must not inherit another
+ * part's slot address.  A build with the loader stops here until the port
+ * chooses one (its code cap less 32 KB). */
 #if defined(TIKU_BASIC_MODULE_ENABLE) && TIKU_BASIC_MODULE_ENABLE
 #error "no Tier-3 module slot defined for this platform"
 #endif
 #endif
+/** Bytes in the NVM slot, or in the RAM window where the module is copied. */
 #ifndef TIKU_MODULE_CARVE_SIZE
 #define TIKU_MODULE_CARVE_SIZE  0x8000u
 #endif
 
-/*
- * Where the image comes from.  A blob linked into the firmware would be
- * counted TWICE -- once as .rodata in the code window, once as the reserved
- * slot it is copied into.  The image is therefore an ordinary store file, and
- * the embedded blob is only an optional
- * SEEDER: when a board has never been provisioned, the first install writes the
- * embedded copy into the store and thereafter the FILE is authoritative.  That
- * is what makes a module replaceable over serial instead of by reflashing, and
- * it is why deleting the embedded copy (TIKU_BASIC_MODULE_EMBED=0) cannot brick
- * a provisioned board.
+/**
+ * @brief The /data file holding the module image.
  *
- * Flat name, matching prog.bas / prog.ckpt: /data has a static "basic" node, so
- * a "mod/" prefix would render as a phantom folder beside it.
+ * Install takes the image from this file, first writing the embedded copy
+ * there when the file is absent (TIKU_BASIC_MODULE_EMBED).  Parts with a RAM
+ * window copy the image from this file at every activate.
  */
 #define TIKU_MODULE_FILE  "mod.bin"
 
-/* Ship the embedded seeder by default: a board with no provisioned file must
- * still be able to install.  Set to 0 for a provisioning-only image once the
- * fleet is seeded -- that is what reclaims the image bytes. */
+/**
+ * @brief 1 to embed a module image in the firmware as the seed for
+ *        TIKU_MODULE_FILE; with 0, install needs the file already in /data.
+ */
 #ifndef TIKU_BASIC_MODULE_EMBED
 #define TIKU_BASIC_MODULE_EMBED  1
 #endif
 
-/*
- * WHERE THE MODULE EXECUTES -- A SETTLED DECISION, NOT PENDING WORK.
+/**
+ * @brief Where a module runs: TIKU_MODULE_EXEC_IN_RAM is 1 where the loader
+ *        copies it into a RAM window, 0 where it runs in place from its slot.
  *
- * A module is pre-linked to an absolute address, so SOME fixed window is
- * unavoidable; nothing requires it to be in NVM.  The plan once read as "move
- * every platform's window into RAM and delete the NVM carve".  Measurement
- * turned that into a per-platform answer, because the condition that makes a
- * RAM window free holds on exactly two parts:
- *
- *   apollo510   ITCM window at 0x1000, NO NVM carve (module_size = 0)
- *   esp32c61    PSRAM window at 0x42800000, NO NVM carve
- *   apollo4l/p  XIP from the 32 KB NVM carve
- *   nRF54L15    XIP from the 32 KB NVM carve
- *   nRF54LM20   XIP from the 32 KB NVM carve
- *   rp2350      XIP from the 32 KB NVM carve
- *   MSP430      XIP from its 4 KB HIFRAM slot (natively executable; non-goal)
- *
- * Why APOLLO510 is the exception.  Its ITCM sits at 0x00000000 in a separate
- * address space and is not even declared in the linker script's MEMORY block --
- * dedicated instruction memory that nothing else can use.  Spending it costs
- * nothing, which is what let the NVM carve go.  The window starts 4 KB in
- * rather than at ITCM base so no module address can be zero and be mistaken for
- * a null pointer, by the loader's checks or the module's; it must match the
- * module's .ld exactly.
- *
- * Why the ESP32-C61 is the other.  Its 2 MB of in-package PSRAM is RAM no
- * kernel code depends on, so 32 KB of it costs 1.6% of a tier, where a flash
- * carve would need erase-and-gate installs through the ROM.  PMA entry 12
- * flips the window between read/write and read/execute in time.
- *
- * The power question is now measured, not inferred.  ITCM and DTCM power share
- * one field, PWRCTRL->MEMPWREN.PWRENTCM, and nothing in arch/ambiq programs it,
- * so the reset default is what applies.  Arguing "the linker declares 512 KB
- * of DTCM, therefore PWRENTCM must be 7" would be unsound -- the port uses
- * ~30 KB of DTCM, so PWRENTCM=1 would fit too -- which is why a window needing
- * 36 KB against a possible 32 KB was a real risk.
- *
- * Run on an Apollo510B EVB, 2026-07-26 (TikuBench tests/memory/test_mem_tcm.c):
- * MEMPWREN=0x3f and MEMPWRSTATUS=0xdf both decode PWRENTCM/PWRSTTCM = 7, i.e.
- * ITCM 256 KB and DTCM 512 KB are powered at the reset default; ITCM accepts a
- * write and reads back through all 256 KB; and a stub copied there executes.
- * The 36 KB window fits with room to spare and the DTCM the linker declares is
- * genuinely there.  Keep the probe: nothing PROGRAMS PWRENTCM, so this is a
- * property of the reset default, and a silicon or SDK revision could move it.
- *
- * WHY EVERY OTHER PART KEEPS THE CARVE -- three independent reasons, each
- * measured or read out of the tree rather than assumed:
- *
- *   1. SRAM is the scarce resource; NVM is not.  The carve costs 0.9% (rp2350)
- *      to 2.8% (l15) of a part's NVM.  A 32 KB SRAM window would cost ~13% of
- *      the nRF54LM20's 240 KB primary bank -- the bank BASIC's arena and Axon's
- *      interlayer buffer already contend for.  Trading 2% of the abundant
- *      resource for 13% of the contested one is backwards.
- *   2. Their NVM already executes in place.  RRAM rides the background map as
- *      Normal RX (arch/nordic/tiku_mpu_arch.c deliberately does NOT re-gate it)
- *      and rp2350 runs XIP from flash by construction.  XIP needs no window, no
- *      MPU exception, and no copy.
- *   3. On Nordic, RAM execution is a HARD FAULT BY DESIGN.  TikuBench's RAM Exec
- *      Probe (tests/memory/test_mem_ramexec.c) measured it on an nRF54LM20: the
- *      primary bank accepts the write and reads it back, then executing faults
- *      (IPSR=3 over SWD), because tiku_mpu_arch.c marks both banks RW+XN as W^X
- *      hardening (2026-07 D.1).  rp2350's port uses the same W^X shape, so the
- *      same is presumed there and remains untested -- no board on the bench.
- *   And apollo4l/4p simply have no idle instruction memory to spend: one 384 KB
- *   TCM at 0x10000000, already carrying .data, .bss, heap and stack.
- *
- * Two alternatives considered and rejected.  Punching a permanently executable
- * hole in W^X recreates the exact write-then-execute primitive the hardening
- * removes.  Flipping a window's permissions in time instead (RW+XN to hold the
- * image, RO+X to run it, never both at once) preserves the invariant honestly --
- * but on Nordic it would still require reserving the 32 KB of SRAM, and an
- * unconditional feature-shaped carve is the pathology the whole v0.06 memory
- * rework exists to delete.  It is the right pattern only where a window already
- * exists: apollo510's is currently RWX with no MPU coverage at all, and that is
- * where the flip belongs.
- *
- * THE PATH THAT ACTUALLY DELETES THE CARVE is relocatable modules -- ROPI, or a
- * load-time relocation table -- so a module executes from wherever its store
- * file happens to land, with no fixed window anywhere and no SRAM cost.  The
- * design of record names it as the end state ("the RAM window is a waypoint,
- * not the end state").  It should not be built separately: P3d's A2 already
- * needs a GENERIC relocation backend for Nordic's compiled models, whose
- * baked-absolute-address problem is the same one, and absorbing this there is
- * how it gets done once instead of twice.
+ * TIKU_MODULE_EXEC_ADDR is the image base the module is linked for.  The ITCM
+ * window starts 4 KB in from the ITCM base, so no module address is zero.
  */
 #if defined(AM_PART_APOLLO510)
 #define TIKU_MODULE_EXEC_IN_RAM  1
-#define TIKU_MODULE_EXEC_ADDR    0x00001000u   /* ITCM + 4 KB (mod_demo_apollo510.ld) */
+#define TIKU_MODULE_EXEC_ADDR    0x00001000u   /**< ITCM base + 4 KB */
 #elif defined(PLATFORM_ESP32C61)
 #define TIKU_MODULE_EXEC_IN_RAM  1
-#define TIKU_MODULE_EXEC_ADDR    0x42800000u   /* PSRAM base (mod_demo_esp32c61.ld) */
+#define TIKU_MODULE_EXEC_ADDR    0x42800000u   /**< PSRAM base */
 #else
 #define TIKU_MODULE_EXEC_IN_RAM  0
 #define TIKU_MODULE_EXEC_ADDR    TIKU_MODULE_CARVE_ADDR
 #endif
 
-/* Entry-offset convention: ARM Thumb entry addresses carry bit0 SET so
- * the loader can branch (carve_base + init_off) directly; MSP430 and RISC-V
- * have no Thumb bit and entry offsets are plain (even) byte offsets.  Modules
- * use this macro so one source builds for any of the CPUs. */
+/**
+ * @brief Encode a module entry offset for tiku_module_header_t.init_off.
+ *
+ * On ARM the Thumb bit (bit 0) is set so the loader can branch to
+ * TIKU_MODULE_EXEC_ADDR + init_off directly; MSP430 and RISC-V use the plain
+ * even offset.  One module source builds for every CPU through this macro.
+ */
 #if defined(__MSP430__) || defined(__riscv)
 #define TIKU_MODULE_INIT_OFF(off)  (off)
 #else
 #define TIKU_MODULE_INIT_OFF(off)  ((off) | 1u)
 #endif
 
-/* Image header at the carve base.  init_off is the byte offset from the carve
- * base to the module's init routine, with the Thumb bit (bit0) SET so the
- * loader can call (carve_base + init_off) directly. */
+/**
+ * @brief Header at the start of every module image.
+ *
+ * The loader runs a module only when magic and abi_version match and init_off
+ * lands past the header, inside the slot (or the copied image), with the
+ * CPU's entry convention.
+ */
 typedef struct {
-    uint32_t magic;          /* TIKU_MODULE_MAGIC                          */
-    uint32_t abi_version;    /* TIKU_MODULE_ABI                            */
-    uint32_t init_off;       /* offset to init routine | 1 (Thumb)         */
-    uint32_t reserved;       /* 0 (image size / CRC live in the gate)      */
+    uint32_t magic;          /**< TIKU_MODULE_MAGIC                        */
+    uint32_t abi_version;    /**< TIKU_MODULE_ABI                          */
+    uint32_t init_off;       /**< TIKU_MODULE_INIT_OFF(entry offset)       */
+    uint32_t reserved;       /**< 0; the loader does not read it           */
 } tiku_module_header_t;
 
-/* The firmware services a module may call -- the Tier-2 ABI as a table.  A
- * module stores nothing global for the MVP (its handlers are pure), but the
- * table is passed so stateful modules and the durable path can use it. */
+/**
+ * @brief The firmware services a module may call, passed to its entry point.
+ *
+ * Each entry is the tiku_basic_ext.h service of the same name: register_fn is
+ * tiku_basic_register_fn(), parse_expr is tiku_basic_ext_parse_expr(), and so
+ * on.
+ */
 typedef struct {
-    uint32_t abi_version;
+    uint32_t abi_version;    /**< TIKU_MODULE_ABI */
     int  (*register_fn)(const char *name, uint8_t arity,
                         tiku_basic_ext_nfn fn);
     int  (*register_strfn)(const char *name, tiku_basic_ext_strfn fn);
@@ -257,24 +182,33 @@ typedef struct {
     int  (*expect)(const char **p, char ch);
 } tiku_basic_syscalls_t;
 
-/* Module entry point.  The module defines this; the loader calls it. */
+/** @brief Module entry point: the module defines it, the loader calls it. */
 typedef void (*tiku_module_init_fn)(const tiku_basic_syscalls_t *sys);
 
 /* --- Firmware-side loader (not seen by the module build) --- */
 #ifndef TIKU_MODULE_BUILD
 
 /**
- * @brief Install the embedded image into the RRAM slot (gate-last, durable)
- *        and activate it (validate + run init -> registers its BASIC words).
- * @return 0 loaded, -1 no image / too big / bad magic / feature off.
+ * @brief Install the module image into the part's slot and activate it.
+ *
+ * The image comes from TIKU_MODULE_FILE, which the embedded copy seeds when
+ * the file is absent.  Parts that run modules from RAM have no slot to write,
+ * so they go straight to activate.
+ *
+ * @return 0 installed and activated; -1 no image, bad header, a slot that
+ *         disagrees with the link, a failed install, or the feature off.
  */
 int tiku_basic_module_load(void);
 
 /**
- * @brief Activate the module already resident in the RRAM slot: validate its
- *        header and run its init (re-registers its words).  Safe to call every
- *        boot -- a no-op (-1) when the slot holds no valid module.
- * @return 0 activated, -1 no valid resident module / feature off.
+ * @brief Activate the installed module: validate its header and run its init,
+ *        which registers its BASIC words.
+ *
+ * Parts with a RAM window first copy the image from TIKU_MODULE_FILE into it;
+ * activate never seeds the file from the embedded copy.
+ *
+ * @note Safe to call at every boot: without a valid module it returns -1.
+ * @return 0 activated, -1 no valid module or the feature off.
  */
 int tiku_basic_module_activate(void);
 

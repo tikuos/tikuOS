@@ -1,13 +1,28 @@
-/* BASIC callback owner: exact source plus lossless execution-state snapshot.
- * This is same-boot memory reconstruction, not automatic power-cut recovery.
- * SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_basic_reclaim.inl - BASIC as a memory-reclaim owner.
+ *
+ * Before the kernel rebuilds the backing under BASIC's arena, BASIC writes its
+ * exact source and a lossless state snapshot to a /data file, then restores
+ * from it.  This is same-boot reconstruction, not power-cut recovery.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #if BASIC_RECLAIM_ENABLE
 #if !TIKU_TFS_HOLD_ENABLE
 #error BASIC reconstruction requires TIKU_TFS_HOLD_ENABLE
 #endif
 #define BASIC_RECLAIM_FILE ".basic-reclaim"
 #define BASIC_RECLAIM_CHUNK 512u
+/* Job stages: save source, save state, committed; then on RESTORE verify the
+ * file, load the source lines and read the state back. */
 enum { BR_IDLE, BR_SOURCE, BR_STATE, BR_COMMITTED, BR_VERIFY, BR_LOAD, BR_READ };
+/** The reclaim job; registered as the owner context, outside the arena. */
 static struct {
     tiku_tfs_t *fs;
     tiku_tfs_wr_t writer;
@@ -22,8 +37,13 @@ static struct {
                   TIKU_BASIC_LINE_MAX + 6u : BASIC_RECLAIM_CHUNK];
 } basic_reclaim;
 
-/* One predicate serves both PREPARE and read-only owners telemetry. No
- * operation that silently loses state is treated as a successful checkpoint. */
+/**
+ * @brief Why BASIC cannot be reclaimed now, or "eligible".
+ *
+ * Serves both PREPARE and the read-only owners telemetry.  Any state the
+ * snapshot would lose (a statement in flight, timers, watches, big buffers,
+ * arrays past the checkpoint budget) makes BASIC ineligible.
+ */
 static const char *basic_reclaim_eligibility(void)
 {
     unsigned i;
@@ -69,6 +89,7 @@ static const char *basic_reclaim_eligibility(void)
     return "eligible";
 }
 
+/** @brief Owner status token for telemetry: the job's stage or eligibility. */
 static const char *basic_reclaim_describe(void *context)
 {
     (void)context;
@@ -82,6 +103,14 @@ static const char *basic_reclaim_describe(void *context)
     return basic_reclaim_eligibility();
 }
 
+/**
+ * @brief Copy state-snapshot bytes [@p at, @p at + @p n) into @p out.
+ *
+ * Re-runs the checkpoint serializer on every call, so no whole-state buffer
+ * exists; with @p out NULL it only measures.
+ *
+ * @return Total snapshot size, or 0 on a serializer error.
+ */
 static size_t basic_reclaim_window(size_t at, uint8_t *out, size_t n)
 {
     basic_ckpt_wr_t w = {0};
@@ -94,6 +123,7 @@ static size_t basic_reclaim_window(size_t at, uint8_t *out, size_t n)
     return w.err ? 0 : w.pos;
 }
 
+/** @brief Append @p n bytes to the snapshot file and its running CRC. */
 static int basic_reclaim_append(const void *data, size_t n)
 {
     if (tiku_tfs_write_chunk(&basic_reclaim.writer, data, n) != TFS_OK) return -1;
@@ -101,6 +131,7 @@ static int basic_reclaim_append(const void *data, size_t n)
     return 0;
 }
 
+/** @brief Drop the writer, the hold and the snapshot file; back to idle. */
 static void basic_reclaim_cleanup(void)
 {
     int rc;
@@ -119,6 +150,12 @@ static void basic_reclaim_cleanup(void)
     basic_reclaim.image = NULL;
 }
 
+/**
+ * @brief Owner step: save in PREPARE, rebuild in RESTORE, clean up on ABORT.
+ *
+ * Each call does one bounded piece and returns WAIT until its phase is done;
+ * BUSY refuses a PREPARE BASIC cannot honour.
+ */
 static tiku_mem_owner_result_t basic_reclaim_step(void *context,
     tiku_mem_job_t job, tiku_mem_owner_phase_t phase)
 {
@@ -262,16 +299,18 @@ save_failed:
     if (basic_reclaim.stage == BR_READ) {
         if (basic_ckpt_read(basic_reclaim.image + basic_reclaim.at, basic_reclaim.state_bytes)) goto restore_failed;
         basic_reclaim_cleanup();
-        /* running/mode/stream and prompt state never changed. The shell's next
-         * tick continues at the saved PC once the coordinator opens the gate. */
+        /* running/mode/stream and prompt state never changed.  The shell's
+         * next tick continues at the saved PC once the coordinator opens the
+         * gate. */
         return TIKU_MEM_OWNER_DONE;
     }
 restore_failed:
-    basic_reclaim.stage = BR_COMMITTED; /* retry verifies and rebuilds from scratch */
+    basic_reclaim.stage = BR_COMMITTED; /* a retry verifies and rebuilds */
     basic_reclaim.detail = "restore_failed";
     return TIKU_MEM_OWNER_FAULT;
 }
 
+/** @brief Register BASIC as the owner of its arena; a no-op once done. */
 static int basic_reclaim_register(void)
 {
     tiku_mem_owner_registration_t reg = {0};

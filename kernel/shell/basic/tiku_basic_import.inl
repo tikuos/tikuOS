@@ -7,17 +7,18 @@
  *
  * tiku_basic_import.inl - IMPORT: merge a module file of SUBs into the program.
  *
- * A merge, not a replace: the module renumbers into a free band above the program
- * and internal references are rewritten by the RENUM machinery.  The contract is
- * validated before anything is stored, and any failure leaves the program untouched.
+ * A merge, not a replace: the module renumbers into a free band above the
+ * program and the RENUM machinery rewrites its internal references.  The
+ * module is checked before anything is stored; a failure changes nothing.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* Modules ARE files of SUBs, so IMPORT requires the SUB machinery; builds
+/* Modules are files of SUBs, so IMPORT requires the SUB machinery; builds
  * without it (the lean/FRAM tiers) get a clear message instead of a load. */
 #if !TIKU_BASIC_SUBS_ENABLE
 
+/** @brief IMPORT without SUB support: report that it is unavailable. */
 static void
 exec_import(const char **q)
 {
@@ -37,14 +38,19 @@ exec_import(const char **q)
 /* SUB definitions per module (duplicate-name checking table). */
 #define BASIC_IMPORT_SUBS_MAX 16
 
+/**
+ * @brief IMPORT "path": merge a module file of SUBs into the program.
+ *
+ * The module may hold only SUB blocks and comments, with names not yet
+ * defined; its lines land at the next multiple of 1000 above the program.
+ */
 static void
 exec_import(const char **q)
 {
     char         path[48];
     char *const  tmp     = basic_persist_scratch;
-    /* Whatever the scratch actually is -- 4 KB on the region-backed parts (one
-     * /data file, which is the largest thing this can be handed), the whole
-     * program buffer on MSP430/host.  IMPORT accepts at most
+    /* The scratch caps the module size: 4 KB on the region-backed parts, the
+     * whole program buffer on MSP430/host.  IMPORT accepts at most
      * TIKU_BASIC_IMPORT_LINES_MAX lines either way, and needs the file
      * resident and mutable because pass 1 splits it in place. */
     const size_t tmp_cap = sizeof basic_persist_scratch;

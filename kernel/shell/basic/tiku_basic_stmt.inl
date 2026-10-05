@@ -7,9 +7,9 @@
  *
  * tiku_basic_stmt.inl - one exec_<keyword> per BASIC statement.
  *
- * Covers control flow, loops, DIM and DEF FN, DATA and READ, the hardware bridges,
+ * Control flow, loops, DIM and DEF FN, DATA and READ, the hardware bridges,
  * reactive registrations and error handling.  The keyword switch and the
- * colon-separated runner live in dispatch, since they reference symbols from here.
+ * colon-separated runner live in dispatch, which references these symbols.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -115,6 +115,13 @@ sep:
     }
 }
 
+/**
+ * @brief LET var = expr: assign a numeric or string variable.
+ *
+ * A CONST name is read-only.
+ *
+ * @param already_consumed_var  Unused; callers pass 0.
+ */
 static void
 exec_let(const char **p, int already_consumed_var)
 {
@@ -157,9 +164,12 @@ exec_let(const char **p, int already_consumed_var)
     basic_vars[idx] = v;
 }
 
-/* CONST NAME = expr (F4): evaluate expr once and bind NAME as a read-only
- * numeric named constant.  Reassigning it afterwards is rejected in exec_let.
- * (String constants are not supported -- use a plain string var.) */
+/**
+ * @brief CONST NAME = expr: bind a multi-letter numeric name as read-only.
+ *
+ * expr is evaluated once; exec_let rejects any later assignment.  String
+ * constants are not supported.
+ */
 static void
 exec_const(const char **p)
 {
@@ -197,7 +207,7 @@ exec_const(const char **p)
  *
  * @note Excess source bytes are dropped and missing ones leave the original
  *       characters, matching QuickBASIC.  An unbound A$ is treated as empty.
- * @param p     Cursor; on entry points at the keyword, on success
+ * @param p     Cursor; on entry at the '(' after the keyword, on success
  *              advanced past the RHS expression.
  * @param kind  Which slice form: 'L' = LEFT$, 'R' = RIGHT$,
  *              'M' = MID$.
@@ -310,6 +320,12 @@ exec_strslice_assign(const char **p, char kind)
 }
 #endif /* TIKU_BASIC_STRVARS_ENABLE */
 
+/**
+ * @brief INPUT ["prompt";] var: read a console line into a variable.
+ *
+ * A string variable takes the line as typed; a numeric one evaluates it as an
+ * expression.
+ */
 static void
 exec_input(const char **p)
 {
@@ -319,10 +335,7 @@ exec_input(const char **p)
     long v;
     const char *q;
 
-    /* Optional prompt: INPUT "prompt"; var  -- the literal prefix is
-     * printed before the `? ` so users can write
-     *   INPUT "name"; A$
-     * without manually wrapping it in PRINT. */
+    /* An optional "prompt" literal is printed before the `? `. */
     skip_ws(p);
     if (cur_peek(p) == '"') {
         cur_advance(p);
@@ -364,15 +377,13 @@ exec_input(const char **p)
     basic_vars[idx] = v;
 }
 
-/* Look up a `name:` label. Walks the program in storage order looking
- * for a line whose first non-whitespace token is `name` followed by
- * a colon. Returns the prog[] index, or -1 if not found.
+/**
+ * @brief Collect label definitions (`name:` at line start) and SUB headers
+ *        into the registries in one walk over prog[].
  *
- * Labels are matched case-insensitively and must be at line start
- * (immediately after any leading whitespace -- not after a number or
- * other statement). */
-/* A3 #2: one walk over prog[] collecting label definitions (`name:` at line
- * start) and SUB headers into the registries.  Rebuilt after any edit. */
+ * Runs lazily, on the next lookup after a program edit or a fresh arena
+ * clears basic_symreg_ok.
+ */
 static void
 basic_symreg_build(void)
 {
@@ -424,6 +435,15 @@ basic_symreg_build(void)
     basic_symreg_ok = 1;
 }
 
+/**
+ * @brief Find the line that defines label @p name.
+ *
+ * A label is `name:` at the start of a line (after blanks only), matched
+ * case-insensitively.  The label registry answers; prog[] is scanned only when
+ * the registry overflowed.
+ *
+ * @return The prog[] index, or -1 when no line defines it.
+ */
 static int
 prog_find_label(const char *name, size_t name_len)
 {
@@ -456,14 +476,16 @@ prog_find_label(const char *name, size_t name_len)
     return -1;
 }
 
-/* Try to consume a label-style identifier. If the cursor sits on an
- * alpha char that is followed by another word-cont char (so it cannot
- * be a single-letter variable parsed as a numeric expression), copy
- * the identifier into @p out and advance @p p past it; resolve to a
- * line number via the label table.  Returns:
- *   1  -> matched and resolved -> *out_target = line number
- *   0  -> not a label (caller should fall back to parse_expr)
- *  -1  -> matched but unknown -> basic_error set */
+/**
+ * @brief Try to read a label reference: an identifier of two or more chars.
+ *
+ * A single letter is left to parse_expr as a variable.  A label is resolved
+ * with prog_find_label() and the cursor moves past it.
+ *
+ * @return 1 with *out_target set to the label's line number, 0 when the text
+ *         is not a label (the caller parses an expression), -1 with
+ *         basic_error set when the label is unknown.
+ */
 static int
 parse_label_ref(const char **p, long *out_target)
 {
@@ -494,6 +516,7 @@ parse_label_ref(const char **p, long *out_target)
     return 1;
 }
 
+/** @brief GOTO line|label: jump to the target (run mode only). */
 static void
 exec_goto(const char **p)
 {
@@ -512,9 +535,14 @@ exec_goto(const char **p)
     basic_pc_set = 1;
 }
 
-/* Resolve the line number that should run AFTER `current_line`
- * (for setting up the GOSUB return address). 0 means "fall off
- * the program -> end RUN". */
+/**
+ * @brief Number of the line after @p current_line, or 0 when it is the last.
+ *
+ * Gives GOSUB return addresses and loop-body starts.
+ *
+ * @note A caller must handle 0 itself, as the end of the run: the RUN loop
+ *       does not stop on a PC of 0.
+ */
 static uint16_t
 line_after(uint16_t current_line)
 {
@@ -522,6 +550,7 @@ line_after(uint16_t current_line)
     return (n < 0) ? 0u : prog[n].number;
 }
 
+/** @brief GOSUB line|label: push the return line and jump (run mode only). */
 static void
 exec_gosub(const char **p)
 {
@@ -545,6 +574,7 @@ exec_gosub(const char **p)
     basic_pc_set = 1;
 }
 
+/** @brief RETURN: pop the GOSUB stack; a return line of 0 ends the run. */
 static void
 exec_return(void)
 {
@@ -562,18 +592,6 @@ exec_return(void)
     basic_pc = r;
     basic_pc_set = 1;
 }
-
-/* FOR var = e1 TO e2 [STEP e3]
- *
- * Pushes a frame whose `loop_line` is the line right after the FOR
- * statement, sets var to e1, and falls through. NEXT pops or jumps
- * back to `loop_line`. STEP defaults to 1.
- *
- * MVP restrictions:
- *   - Run-mode only (FOR/NEXT can't be used in immediate mode).
- *   - Re-entering an active FOR (e.g. `FOR I = 1 TO 5` while a frame
- *     for I already exists) starts a fresh frame on top -- it does
- *     not reuse or close the prior one. */
 
 /*---------------------------------------------------------------------------*/
 /* LOOP-MATCHING SCANNERS                                                    */
@@ -638,7 +656,7 @@ find_matching_until(uint16_t start_line)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Helper: jump basic_pc to the line AFTER @p idx in prog[].
+ * @brief Jump basic_pc to the line after prog[] index @p idx.
  *
  * If @p idx is the last line, the run ends.
  */
@@ -796,6 +814,16 @@ exec_continue(const char **p)
 /* FOR / NEXT                                                                */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief FOR var = e1 TO e2 [STEP e3]: open a counted loop.
+ *
+ * Sets var to e1 and pushes a frame whose loop_line is the line after the
+ * FOR's line; NEXT steps var and jumps back or pops.  STEP defaults to 1 and
+ * may not be 0.
+ *
+ * @note Run mode only.  Re-entering an active FOR on the same variable pushes
+ *       a fresh frame on top; the earlier frame is not reused or closed.
+ */
 static void
 exec_for(const char **p)
 {
@@ -842,21 +870,20 @@ exec_for(const char **p)
     for_stack[for_sp].var_idx  = (uint16_t)idx;
     for_stack[for_sp].target   = e2;
     for_stack[for_sp].step     = e3;
-    /* Loop body starts at the line AFTER the current FOR line. */
+    /* The loop body starts at the line after the FOR's line. */
     for_stack[for_sp].loop_line = line_after(basic_pc);
     for_sp++;
-    /* If the loop is already past the end on entry, skip the body. */
     if ((e3 > 0 && e1 > e2) || (e3 < 0 && e1 < e2)) {
-        /* Empty body: pop immediately. There is no convenient way to scan
-         * forward to the matching NEXT here without a parser, so the
-         * common case is handled by NEXT itself terminating the loop
-         * on first iteration if the entry condition was already past
-         * the target. To match traditional BASIC, run the body once
-         * and then let NEXT terminate -- this matches BBC BASIC and
-         * most TinyBASIC variants. So: do nothing here. */
+        /* Already past the target: the body still runs once and NEXT ends
+         * the loop, as in BBC BASIC and most Tiny BASICs. */
     }
 }
 
+/**
+ * @brief NEXT [var]: step the innermost FOR, then loop back or pop it.
+ *
+ * A named var must match the innermost frame's variable.
+ */
 static void
 exec_next(const char **p)
 {
@@ -898,19 +925,15 @@ exec_next(const char **p)
     basic_pc_set = 1;
 }
 
-/* Walk a single line of source (the text AFTER this IF's THEN) and find
- * the ELSE that binds to *this* IF.  Returns a pointer inside @p src to
- * the 'E' of that ELSE, or NULL if this IF has none.  Case-insensitive,
- * word-bounded; characters inside double-quoted strings are skipped so a
- * PRINT body containing the substring doesn't trigger a false match.
+/**
+ * @brief Find the ELSE that binds to this IF in @p src, the text after THEN.
  *
- * Nesting (A6 fix): ELSE binds to the *nearest* IF, the conventional
- * rule.  A nested `IF ... THEN` in the THEN-branch opens an inner IF that
- * claims the next ELSE, so unmatched inner THENs are counted and only
- * an ELSE once that count is zero.  Thus in
- *     IF a THEN IF b THEN x ELSE y
- * the ELSE binds to `IF b` (this function returns NULL for the outer IF),
- * not to the outer IF as the old first-ELSE scan did. */
+ * ELSE binds to the nearest IF: each inner THEN claims the next ELSE, so in
+ * `IF a THEN IF b THEN x ELSE y` the ELSE belongs to `IF b`.  Word-bounded and
+ * case-insensitive; text inside double quotes is skipped.
+ *
+ * @return Pointer to that ELSE (its token byte or first letter), or NULL.
+ */
 static const char *
 scan_for_else(const char *src)
 {
@@ -921,7 +944,7 @@ scan_for_else(const char *src)
         uint8_t b = (uint8_t)*q;
         if (b == '"') { in_str = !in_str; q++; continue; }
         if (in_str)   { q++; continue; }
-        /* A2: crunched keyword bytes (unambiguous, no boundary checks). */
+        /* Crunched keyword bytes (unambiguous, no boundary checks). */
         if (b == BASIC_TOK_BYTE(THEN)) { pending++; q++; continue; }
         if (b == BASIC_TOK_BYTE(ELSE)) {
             if (pending > 0) { pending--; q++; continue; }
@@ -955,9 +978,10 @@ scan_for_else(const char *src)
 }
 
 #if TIKU_BASIC_GPIO_ENABLE
-/* Helper: parse `port, pin` (two integer args separated by a comma).
- * Used by PIN and DIGWRITE; returns 0 on success with values stored,
- * sets basic_error and returns -1 on syntax failure. */
+/**
+ * @brief Parse `port, pin` for PIN and DIGWRITE.
+ * @return 0 with both values stored, or -1 with basic_error set.
+ */
 static int
 parse_port_pin(const char **p, long *port, long *pin)
 {
@@ -974,7 +998,7 @@ parse_port_pin(const char **p, long *port, long *pin)
     return 0;
 }
 
-/* PIN port, pin, mode  -- mode 0 = input, 1 = output. */
+/** @brief PIN port, pin, mode: mode 0 makes the pin an input, else output. */
 static void
 exec_pin(const char **p)
 {
@@ -997,7 +1021,7 @@ exec_pin(const char **p)
     }
 }
 
-/* DIGWRITE port, pin, val  -- 0 / 1 / 2-or-other = toggle. */
+/** @brief DIGWRITE port, pin, val: write 0 or 1; any other value toggles. */
 static void
 exec_digwrite(const char **p)
 {
@@ -1022,7 +1046,7 @@ exec_digwrite(const char **p)
 #endif
 
 #if TIKU_BASIC_I2C_ENABLE
-/* I2CWRITE addr, reg, val  -- writes 2 bytes [reg, val] to addr. */
+/** @brief I2CWRITE addr, reg, val: write the two bytes [reg, val] to addr. */
 static void
 exec_i2cwrite(const char **p)
 {
@@ -1059,9 +1083,13 @@ exec_i2cwrite(const char **p)
 #endif
 
 #if TIKU_BASIC_REBOOT_ENABLE
-/* REBOOT -- mirror what the shell `reboot` command does: configure the
- * watchdog for a short interval and spin until it fires. Code after
- * REBOOT is unreachable, so there is no return to exec_stmts. */
+/**
+ * @brief REBOOT: reset the board the way the shell `reboot` command does.
+ *
+ * Arms the watchdog with a short interval and spins until it fires; the
+ * ESP32-C61 stops its cache and resets through its arch call first.  Nothing
+ * after REBOOT runs.
+ */
 static void
 exec_reboot(void)
 {
@@ -1076,9 +1104,11 @@ exec_reboot(void)
 #endif
 
 #if TIKU_BASIC_LED_ENABLE
-/* LED idx, val  -- val is 0 (off), 1 (on), or anything else (toggle).
- * idx is 0-based; tiku_led_count() reports the board LED count. The
- * underlying interface dispatches to per-board GPIO pins. */
+/**
+ * @brief LED idx, val: val 0 turns the LED off, 1 on, anything else toggles.
+ *
+ * idx is 0-based and checked against tiku_led_count().
+ */
 static void
 exec_led(const char **p)
 {
@@ -1105,11 +1135,13 @@ exec_led(const char **p)
 #endif
 
 #if TIKU_BASIC_VFS_ENABLE
-/* Helper: parse a quoted string literal into a stack buffer. Used by
- * VFSREAD / VFSWRITE; lets BASIC programs name a path inline without
- * needing the full string-vars infrastructure. Honors no escapes --
- * VFS paths shouldn't contain them. Returns 0 on success, -1 on
- * syntax / overflow with basic_error set. */
+/**
+ * @brief Parse a double-quoted literal (a path, host or topic) into @p buf.
+ *
+ * No escapes are honoured.
+ *
+ * @return 0, or -1 with basic_error set on a missing quote or overflow.
+ */
 static int
 parse_path_literal(const char **p, char *buf, size_t cap)
 {
@@ -1137,9 +1169,11 @@ parse_path_literal(const char **p, char *buf, size_t cap)
     return 0;
 }
 
-/* VFSWRITE "path", val  -- writes val rendered as a decimal string
- * into the VFS node. Useful for /dev/led0, /dev/gpio/X/Y, and other
- * write-an-integer endpoints. */
+/**
+ * @brief VFSWRITE "path", val: write val as decimal text to a VFS node.
+ *
+ * For write-an-integer nodes such as /dev/led0 or /dev/gpio/<port>/<pin>.
+ */
 static void
 exec_vfswrite(const char **p)
 {
@@ -1167,9 +1201,12 @@ exec_vfswrite(const char **p)
     }
 }
 
-/* VFSWRITE$ "path", str$ -- write a STRING value to a VFS node.  Pairs with
- * VFSREAD$ for text nodes (/sys/device/name, /data files, ...); unlike
- * VFSWRITE (which renders an integer) the string is written verbatim. */
+/**
+ * @brief VFSWRITE$ "path", str$: write a string verbatim to a VFS node.
+ *
+ * The text counterpart of VFSWRITE, for the nodes VFSREAD$ reads (/data files,
+ * /sys/device/name, ...).
+ */
 static void
 exec_vfswrite_str(const char **p)
 {
@@ -1190,10 +1227,14 @@ exec_vfswrite_str(const char **p)
     }
 }
 
-/* VFSREAD("path") -- read the node, parse the leading integer (decimal
- * or 0x-prefixed hex via strtol base 0), return as long. Trims trailing
- * whitespace so paths whose values include a newline don't trip the
- * parser. */
+/**
+ * @brief Read a VFS node and return its leading integer (VFSREAD, ON CHANGE).
+ *
+ * strtol base 0 takes decimal, 0x hex and leading-0 octal.  A node with no
+ * numeric prefix, such as a status string, reads as 0 rather than an error.
+ *
+ * @return The value, or 0 with basic_error set when the read fails.
+ */
 static long
 basic_vfsread(const char *path)
 {
@@ -1225,9 +1266,12 @@ basic_vfsread(const char *path)
 #endif
 
 #if TIKU_BASIC_RTC_ENABLE
-/* SETTIME <epoch> -- set the wall clock to an absolute Unix timestamp
- * (seconds). Persisted by the RTC layer, so DATE$/TIME$/NOW read it back
- * across reboots. Typically fed from an `ntp` fetch or a known constant. */
+/**
+ * @brief SETTIME epoch: set the wall clock to a Unix time in seconds.
+ *
+ * The RTC layer stores it durably, so DATE$, TIME$ and NOW read it back across
+ * reboots.
+ */
 static void
 exec_settime(const char **p)
 {
@@ -1242,17 +1286,21 @@ exec_settime(const char **p)
 #endif
 
 #if TIKU_BASIC_FILE_ENABLE
-/* Whole-file logging to /data (or any writable VFS path). TFS has no append
- * primitive, so APPEND is read-modify-write bounded by this scratch buffer,
- * which also caps a file at the TFS slot size on the target. */
+/**
+ * @brief Scratch for APPEND, which reads a file, adds a line and writes the
+ *        whole file back; a file APPEND extends is capped at this many bytes.
+ */
 #ifndef TIKU_BASIC_FILE_BUF
 #define TIKU_BASIC_FILE_BUF 2048
 #endif
 static char basic_file_scratch[TIKU_BASIC_FILE_BUF];
 
-/* APPEND "path", expr$ -- append the string plus a newline, preserving the
- * existing contents. Errors (never silently truncates) if the result would
- * exceed the scratch buffer / slot. */
+/**
+ * @brief APPEND "path", expr$: add the string and a newline to a file.
+ *
+ * A missing file starts empty.  A result over TIKU_BASIC_FILE_BUF is an error;
+ * the file is never silently truncated.
+ */
 static void
 exec_append(const char **p)
 {
@@ -1284,7 +1332,7 @@ exec_append(const char **p)
     }
 }
 
-/* FWRITE "path", expr$ -- truncating whole-file write (no trailing newline). */
+/** @brief FWRITE "path", expr$: replace a file's contents (no newline). */
 static void
 exec_fwrite(const char **p)
 {
@@ -1305,6 +1353,7 @@ exec_fwrite(const char **p)
 #endif
 
 #if TIKU_BASIC_PEEK_POKE_ENABLE
+/** @brief POKE addr, val: store the low byte of val through basic_poke(). */
 static void
 exec_poke(const char **p)
 {
@@ -1323,25 +1372,22 @@ exec_poke(const char **p)
 }
 #endif
 
+/** @brief CLS: clear the screen and home the cursor (ANSI escapes). */
 static void
 exec_cls(void)
 {
-    /* ANSI clear screen + cursor home. Correct for any UART backend
-     * driving a VT100-class terminal; on raw / framebuffer backends
-     * the escape bytes are harmless noise. */
+    /* A VT100-class terminal acts on these; a raw or framebuffer backend
+     * shows the escape bytes as noise. */
     SHELL_PRINTF("\033[2J\033[H");
 }
 
-/* Busy-wait for `ms` milliseconds. Polls Ctrl-C between iterations
- * so a runaway DELAY can be interrupted from the keyboard. The
- * granularity is one tick (TIKU_CLOCK_SECOND Hz, so ~7.81 ms at the
- * default 128 Hz). Negative or zero argument returns immediately.
- * Bounded by tiku_clock_time_t's 16-bit width: roughly 256 s safe
- * at 128 Hz; for longer waits, chain DELAYs. */
-/* Can the current wait yield (park the step machine) instead of spinning?
- * Shell mode only, during RUN, from the MAIN line walker -- nested contexts
- * (IF-THEN scratch, EVERY bodies via the reactive poll) keep the blocking
- * path because their transient buffers cannot be resumed across ticks. */
+/**
+ * @brief 1 when a wait may park the step machine instead of spinning.
+ *
+ * Only in shell mode, during RUN, from the main line walker: nested contexts
+ * (the IF-THEN scratch, EVERY bodies run by the reactive poll) cannot resume
+ * their transient buffers across ticks, so they keep the blocking wait.
+ */
 static int
 basic_wait_can_yield(void)
 {
@@ -1349,6 +1395,16 @@ basic_wait_can_yield(void)
            !basic_in_reactive && basic_stmt_depth == 1;
 }
 
+/**
+ * @brief Wait @p ms milliseconds, in whole ticks (1/TIKU_CLOCK_SECOND s).
+ *
+ * When basic_wait_can_yield() allows, the step machine parks until the
+ * deadline; otherwise the wait spins, polling Ctrl-C.  A wait under one tick
+ * returns at once.
+ *
+ * @note The tick count is a tiku_clock_time_t: 16 bits on MSP430, so chain
+ *       DELAYs past about 256 s at 128 Hz; 32 bits on the other ports.
+ */
 static void
 exec_delay_ms(long ms)
 {
@@ -1396,6 +1452,7 @@ exec_delay_ms(long ms)
     }
 }
 
+/** @brief DELAY ms: wait ms milliseconds (see exec_delay_ms()). */
 static void
 exec_delay(const char **p)
 {
@@ -1404,18 +1461,16 @@ exec_delay(const char **p)
     exec_delay_ms(ms);
 }
 
-/* Low-power wait for `ticks` kernel ticks.  Unlike exec_delay_ms (a busy
- * spin, kept for DELAY's short precise waits), this enters the platform's
- * DEEP idle between wakes, so the CPU actually goes low-power for the
- * duration -- the point of SLEEP on a microwatt part.  DEEP keeps the
- * kernel tick alive on every supported target (MSP430 LPM3 wakes on the
- * Timer_A ISR; the Ambiq/RP2350 tick survives WFI), so the core wakes at
- * least once per tick to re-check the deadline and poll Ctrl-C; DEEPEST
- * would gate the tick and never wake, so it is deliberately not used.
- * `ticks` must stay below half the tick counter's range for the
- * wrap-safe compare -- exec_sleep chunks large sleeps to guarantee this.
- * If the platform offers no DEEP hook the loop degrades to a spin that
- * still honours the deadline. */
+/**
+ * @brief Wait @p ticks kernel ticks in DEEP idle, polling Ctrl-C at each wake.
+ *
+ * DEEP keeps the tick interrupt running (LPM3 on MSP430), so the core wakes
+ * every tick to re-check the deadline.  DEEPEST is not used: on MSP430 it is
+ * LPM4, which stops the tick.  Without a DEEP hook the loop spins instead.
+ *
+ * @note @p ticks must stay below half the tick counter's range for the
+ *       wrap-safe compare; exec_sleep chunks long sleeps to keep it there.
+ */
 static void
 basic_lp_wait_ticks(tiku_clock_time_t ticks)
 {
@@ -1442,24 +1497,21 @@ basic_lp_wait_ticks(tiku_clock_time_t ticks)
     }
 }
 
+/** @brief SLEEP s: wait s seconds in low power; Ctrl-C aborts. */
 static void
 exec_sleep(const char **p)
 {
     long s = parse_expr(p);
     if (basic_error) return;
     if (s <= 0) return;
-    /* SLEEP N -- go low-power for N seconds.  Chunked into <=10 s waits
-     * so each stays well under the tick counter's wrap regardless of the
-     * platform tick rate (10 s is <32k ticks up to ~3.2 kHz).  Unlike
-     * DELAY, this enters DEEP idle: the microwatt-part use case is
-     * "go dark for a while", not a precise busy pause.  Ctrl-C aborts;
-     * the 24 h cap is a sanity bound, not a hardware limit. */
+    /* Waits are chunked to at most 10 s, which stays under half the tick
+     * counter's range at any tick rate up to ~3.2 kHz.  The 24 h cap is a
+     * sanity bound, not a hardware limit. */
     if (s > 86400L) s = 86400L;
     if (basic_wait_can_yield()) {
-        /* Park (first <=10 s chunk now, the step machine re-arms the rest):
-         * in mode the kernel idles the core between poll ticks, so the
-         * low-power goal is met by yielding rather than by spinning in the
-         * DEEP-idle loop below. */
+        /* Park for the first chunk; the step machine re-arms the rest.
+         * The core then idles between poll ticks in the scheduler's idle
+         * mode, which is LIGHT unless the power policy sets a deeper one. */
         long chunk = (s > 10L) ? 10L : s;
         basic_wait_start   = tiku_clock_time();
         basic_wait_ticks   =
@@ -1476,12 +1528,13 @@ exec_sleep(const char **p)
     }
 }
 
-/* EVERY ms : stmt  -- register a recurring statement. The RUN loop
- * polls each registration between program lines and fires it when
- * the interval has elapsed (wrap-aware via the tick counter).
+/**
+ * @brief EVERY ms : stmt: register a statement to run every ms milliseconds.
  *
- * Scope: cleared at every RUN start. Use inside saved programs to
- * build periodic blink / sample / report patterns. */
+ * The RUN loop polls the registrations between program lines and fires each
+ * one when its interval has elapsed (wrap-aware via the tick counter).  The
+ * table is cleared at every RUN start.
+ */
 static void
 exec_every(const char **p)
 {
@@ -1530,19 +1583,22 @@ exec_every(const char **p)
 }
 
 #if TIKU_BASIC_ONCHG_EVENT
-/* F2: resolve an ON CHANGE slot's node and, if it is WRITABLE, subscribe the
- * shell process so writes deliver TIKU_EVENT_VFS (event-driven; the poll tick
- * then skips it).  Sensor/read-only or unresolved nodes stay polled.  This is
- * idempotent -- tiku_vfs_watch dedups -- so the mode tick re-calls it every
- * pass to self-heal after the rules engine's wholesale unwatch_all(). */
+/**
+ * @brief Resolve an ON CHANGE slot's node and, in shell mode, event-arm it
+ *        when writable.
+ *
+ * A writable node subscribes the shell process, so writes deliver
+ * TIKU_EVENT_VFS and the poll tick skips the slot; other nodes stay polled.
+ * Idempotent, so the mode tick re-arms every pass after an unwatch_all().
+ */
 static void
 basic_onchg_arm(basic_onchg_t *o)
 {
     o->node = tiku_vfs_resolve(o->path);
-    /* Event-arm ONLY in shell mode: the synchronous exec_run driver blocks
+    /* Event-arm only in shell mode: the synchronous exec_run driver blocks
      * the shell loop, so TIKU_EVENT_VFS could never dispatch mid-run there
-     * -- an armed slot would gate on a pending mark that cannot arrive.
-     * The sync driver keeps the per-pass poll instead. */
+     * and an armed slot would wait on a pending mark that cannot arrive.
+     * The synchronous driver keeps the per-pass poll instead. */
     if (basic_run_shell_mode &&
         o->node != NULL && o->node->write != NULL) {
         (void)tiku_vfs_watch(o->path, &tiku_shell_process);
@@ -1553,12 +1609,13 @@ basic_onchg_arm(basic_onchg_t *o)
 }
 #endif
 
-/* ON CHANGE "/path" GOTO line   or   ... GOSUB line
- * Registers a reactive watch. Writable nodes are event-armed via
- * tiku_vfs_watch (F2); sensor/read-only nodes are polled by the RUN loop.
- * On value change it either jumps (GOTO) or pushes a return address (GOSUB)
- * to the handler. The "last value" baseline is captured at register time, so
- * a watch never fires on its own first read. */
+/**
+ * @brief ON CHANGE "/path" GOTO|GOSUB line: register a reactive watch.
+ *
+ * With TIKU_BASIC_ONCHG_EVENT, a writable node is event-armed in shell mode
+ * through tiku_vfs_watch(); other nodes are polled by the RUN loop.  The
+ * baseline is read at registration, so a watch never fires on its first read.
+ */
 static void
 exec_on_change(const char **p)
 {
@@ -1610,10 +1667,14 @@ exec_on_change(const char **p)
 #endif
 }
 
-/* Re-read one ON CHANGE slot's value and, if it changed, fire its handler
- * (GOTO jump / GOSUB push+jump); return 1 iff it fired.  Called only at a
- * statement boundary, so the GOSUB return address (line_after(basic_pc)) is
- * correct.  Shared by the poll tick and the event path (F2). */
+/**
+ * @brief Re-read one ON CHANGE slot and fire its handler if the value changed.
+ *
+ * Runs only at a statement boundary, so a GOSUB's return address
+ * (line_after(basic_pc)) is right.  Shared by the poll tick and the event path.
+ *
+ * @return 1 when the handler fired (GOTO jump or GOSUB push and jump), else 0.
+ */
 static int
 basic_onchg_check(basic_onchg_t *o)
 {
@@ -1637,10 +1698,12 @@ basic_onchg_check(basic_onchg_t *o)
     return 1;
 }
 
-/* Called from the RUN loop between program statements. Walks the
- * EVERY and ON CHANGE registrations and fires any that are due.
- * Errors inside a fired handler bubble up via basic_error like any
- * other statement and reach the RUN-loop error trap. */
+/**
+ * @brief Fire the EVERY and ON CHANGE registrations that are due.
+ *
+ * Called by the RUN loop between program lines.  An error inside a fired
+ * handler propagates through basic_error to the RUN loop's error trap.
+ */
 static void
 basic_poll_reactive(void)
 {
@@ -1685,11 +1748,12 @@ basic_poll_reactive(void)
 #endif
 }
 
-/* RESUME [NEXT | line]
- * RESUME       -- continue from the line that errored
- * RESUME NEXT  -- continue from the line after the one that errored
- * RESUME line  -- continue from a specific line
- * Only meaningful inside an ON-ERROR handler. */
+/**
+ * @brief RESUME [NEXT | line]: leave an ON ERROR handler.
+ *
+ * RESUME retries the line that failed, RESUME NEXT continues after it and
+ * RESUME line continues at that line.
+ */
 static void
 exec_resume(const char **p)
 {
@@ -1721,11 +1785,13 @@ exec_resume(const char **p)
     basic_pc_set = 1;
 }
 
-/* ON expr GOTO l1, l2, ...   /   ON expr GOSUB l1, l2, ...
- * ON ERROR GOTO line          (or ON ERROR GOTO 0 to clear)
- * ON CHANGE "/path" GOTO line (registers a reactive watch -- handled
- *                              in exec_on_change below)
- * Computed-dispatch path: if expr=N, jump to the Nth target. */
+/**
+ * @brief ON statement: computed GOTO / GOSUB, ON ERROR, ON TIMER, ON CHANGE.
+ *
+ * `ON expr GOTO|GOSUB l1, l2, ...` jumps to the expr-th target (no-op when out
+ * of range); `ON ERROR GOTO line` sets the error handler (0 clears it); ON
+ * TIMER registers an EVERY; ON CHANGE goes to exec_on_change().
+ */
 static void
 exec_on(const char **p)
 {
@@ -1751,8 +1817,8 @@ exec_on(const char **p)
         basic_err_handler = (uint16_t)target;     /* 0 = disabled */
         return;
     }
-    /* ON TIMER n GOSUB L (or GOTO L) -- sugar for EVERY n : GOSUB L.  Reads
-     * better than EVERY for periodic tasks and reuses the EVERY registry. */
+    /* ON TIMER n GOSUB L (or GOTO L) -- the same as EVERY n : GOSUB L, in
+     * the EVERY table. */
     if (match_kw(p, "TIMER")) {
         long ms, ln;
         int  is_gsub, i, slot = -1;
@@ -1834,7 +1900,7 @@ exec_on(const char **p)
     basic_pc_set = 1;
 }
 
-/* TRACE ON / TRACE OFF -- toggle line-echo during RUN. */
+/** @brief TRACE ON | TRACE OFF: print each line as RUN executes it. */
 static void
 exec_trace(const char **p)
 {
@@ -1846,10 +1912,12 @@ exec_trace(const char **p)
     }
 }
 
-/* PERSIST ON / PERSIST OFF -- F1: arm/disarm execution-state checkpointing so a
- * running program can survive a reset / power cut and be continued with RUN
- * RESUME.  Distinct from SAVE (which persists the program text): PERSIST
- * persists the running machine. */
+/**
+ * @brief PERSIST ON | PERSIST OFF: arm or disarm run-state checkpointing.
+ *
+ * An armed program can be continued with RUN RESUME after a reset or power
+ * cut.  SAVE keeps the program text; PERSIST keeps the running machine.
+ */
 static void
 exec_persist(const char **p)
 {
@@ -1868,8 +1936,7 @@ exec_persist(const char **p)
 #endif
 }
 
-/* RESTORE -- reset the DATA read pointer to the start. Subsequent
- * READs walk the DATA list from the beginning again. */
+/** @brief RESTORE: rewind the DATA read pointer to the first DATA item. */
 static void
 exec_restore(void)
 {
@@ -1877,10 +1944,12 @@ exec_restore(void)
     basic_data_off = 0;
 }
 
-/* Find the prog[] index of the first DATA line whose number is >=
- * `from_lineno`, or -1 if none. Sets *out_off to the byte offset
- * inside that line's text immediately after the DATA keyword (so
- * the caller can resume parsing values from there). */
+/**
+ * @brief Find the first DATA line numbered @p from_lineno or later.
+ *
+ * @param out_off  Receives the offset just past that line's DATA keyword
+ * @return The prog[] index, or -1 when there is none.
+ */
 static int
 data_find_next_line(uint16_t from_lineno, int *out_off)
 {
@@ -1900,11 +1969,14 @@ data_find_next_line(uint16_t from_lineno, int *out_off)
     return -1;
 }
 
-/* At the current (basic_data_idx, basic_data_off), advance past any
- * delimiting whitespace and commas, returning 1 if a value is
- * available. At end-of-line, walk forward to the next DATA
- * statement. Sets basic_data_idx = -2 to mark exhaustion so as not to
- * keep re-scanning the program. */
+/**
+ * @brief Move the DATA cursor to the next value, crossing to later DATA lines.
+ *
+ * Skips blanks and one separating comma.  Exhaustion sets basic_data_idx to -2
+ * so later READs do not rescan the program.
+ *
+ * @return 1 when a value is available, 0 when the DATA is used up.
+ */
 static int
 data_seek_value(void)
 {
@@ -1937,11 +2009,13 @@ data_seek_value(void)
     }
 }
 
-/* READ var [, var ...] -- consume DATA values into variables. Only
- * works inside RUN (DATA lines are walked in line-number order).
- * Both numeric (READ A) and string (READ A$) targets are supported;
- * the DATA item type must match -- a quoted "..." is a string item,
- * an unquoted token is parsed as a numeric expression. */
+/**
+ * @brief READ var [, var ...]: take the next DATA values (run mode only).
+ *
+ * A numeric variable parses the item as an expression; a string variable takes
+ * a quoted item (PRINT escapes apply) or an unquoted token up to a comma or
+ * blank.  Reading past the last item is an "out of DATA" error.
+ */
 static void
 exec_read(const char **p)
 {
@@ -2030,33 +2104,24 @@ exec_read(const char **p)
     }
 }
 
-/* DATA - executed as a statement is a no-op; values are consumed
- * lazily by READ via the data_seek_value helper. */
+/**
+ * @brief DATA as a statement: skip the rest of the line; READ parses it.
+ *
+ * DATA runs to the end of the line, colons included.
+ */
 static void
 exec_data_noop(const char **p)
 {
-    /* Skip everything until end-of-line / colon ... actually, DATA
-     * carries arbitrary values up to end-of-line, but a colon could
-     * legitimately end it. For simplicity, treat colons inside DATA
-     * as part of the data. The simplest, correct thing is to drop
-     * the rest of the line, like REM does -- READ is what parses
-     * DATA contents. */
     while (cur_peek(p)) cur_advance(p);
 }
 
 #if TIKU_BASIC_ARRAYS_ENABLE
-/* DIM A(n)              -- 1D integer array
- * DIM A(m, n)           -- 2D integer array
- * DIM A$(n)             -- 1D string array (each element NULL)
- * DIM A$(m, n)          -- 2D string array
- * Multiple DIMs separated by commas in a single statement.
- * Element max per dimension is TIKU_BASIC_ARRAY_MAX; total element
- * count must also fit. Re-DIM of the same name (numeric A and string
- * A$ are independent slots) is an error within a session.
+/**
+ * @brief DIM A(n), A(m, n), A$(n) or A$(m, n): allocate arrays in the arena.
  *
- * Storage:
- *   - 1D: dim1 = size, dim2 = 0; flat[i]
- *   - 2D: dim1 = m,    dim2 = n; flat[i * n + j]
+ * Several arrays may be DIMmed in one statement.  Each dimension and the total
+ * are capped at TIKU_BASIC_ARRAY_MAX.  A and A$ are separate slots; DIMming
+ * one again before the next RUN, NEW or LOAD is an error.
  */
 static void
 exec_dim(const char **p)
@@ -2165,9 +2230,15 @@ exec_dim(const char **p)
     }
 }
 
-/* Parse `(i [, j])` after a leading letter, returning the linear
- * offset for that array's element. *p must already be past the
- * opening `(`. Sets basic_error and returns -1 on out-of-range. */
+/**
+ * @brief Parse `i [, j])` and return the element's offset in the array.
+ *
+ * The cursor sits past the opening `(`.  A 1-D array (dim2 = 0) takes one
+ * index; a 2-D array keeps element (i, j) at i * dim2 + j.
+ *
+ * @return The offset, or -1 with basic_error set when the array is not DIMmed,
+ *         the index count is wrong or an index is out of range.
+ */
 static long
 parse_array_index(const char **p, basic_array_t *slot, char letter)
 {
@@ -2219,12 +2290,13 @@ parse_array_index(const char **p, basic_array_t *slot, char letter)
 #endif
 
 #if TIKU_BASIC_DEFN_ENABLE
-/* DEF FN name(a [, b, ...]) = body  -- register a single-line user
- * function. Body is stored verbatim and re-parsed on each call.
- * Up to TIKU_BASIC_DEFN_ARGS arguments (default 4); each must be a
- * single-letter variable name. The argument variables' values are
- * saved before the call and restored after, so DEF FN inc(X)
- * doesn't clobber a caller's X. Only numeric (int) values. */
+/**
+ * @brief DEF FN name(a [, b ...]) = body: register a one-line function.
+ *
+ * The body is stored as text and parsed again at each call.  It takes up to
+ * TIKU_BASIC_DEFN_ARGS single-letter numeric arguments, saved and restored
+ * around the call, so FN inc(X) leaves the caller's X alone.
+ */
 static void
 exec_def(const char **p)
 {
@@ -2323,10 +2395,12 @@ exec_def(const char **p)
 }
 #endif
 
-/* Find the prog index of the matching WEND for a WHILE that begins
- * at @p start_line. Walks forward in line-number order, tracking
- * nesting depth (WHILE++ / WEND--) so nested loops resolve correctly.
- * Returns the index, or -1 if no matching WEND is found. */
+/**
+ * @brief Scan forward for the WEND that matches the WHILE at @p start_line,
+ *        tracking nested WHILE / WEND depth.
+ *
+ * @return prog[] index of the matching WEND, or -1 if not found.
+ */
 static int
 find_matching_wend(uint16_t start_line)
 {
@@ -2346,11 +2420,12 @@ find_matching_wend(uint16_t start_line)
     return -1;
 }
 
-/* WHILE expr  -- enter a condition-tested loop. If @p expr is true,
- * push a frame whose back_line is the WHILE line itself (so the
- * condition is re-evaluated on each WEND), and fall through to the
- * body. If false, scan forward to the matching WEND and jump past
- * it without pushing a frame. */
+/**
+ * @brief WHILE expr: enter a pre-tested loop.
+ *
+ * A true condition pushes a frame whose back_line is the WHILE line, so each
+ * WEND re-evaluates it; a false one jumps past the matching WEND, no frame.
+ */
 static void
 exec_while(const char **p)
 {
@@ -2367,7 +2442,7 @@ exec_while(const char **p)
             basic_throw(TIKU_BASIC_ERR_GENERAL, "WHILE without WEND");
             return;
         }
-        /* Jump to the line AFTER WEND. */
+        /* Jump to the line after WEND. */
         {
             int next = prog_next_index(
                 (uint16_t)(prog[idx].number + 1));
@@ -2390,10 +2465,12 @@ exec_while(const char **p)
     loop_sp++;
 }
 
-/* WEND  -- pop one loop frame and jump back to the WHILE line, which
- * will re-evaluate the condition. The frame is popped so the WHILE
- * can re-push it on entry; this avoids any state confusion if the
- * WEND is reached from within a different control flow than expected. */
+/**
+ * @brief WEND: pop the loop frame and jump back to its WHILE line.
+ *
+ * The WHILE re-evaluates its condition and pushes a fresh frame, so a WEND
+ * reached by an unexpected path leaves no stale frame behind.
+ */
 static void
 exec_wend(const char **p)
 {
@@ -2411,8 +2488,11 @@ exec_wend(const char **p)
     loop_sp--;
 }
 
-/* REPEAT  -- mark the top of a post-tested loop. The body lines
- * follow on subsequent program lines; UNTIL pops or loops back here. */
+/**
+ * @brief REPEAT: open a post-tested loop whose body starts on the next line.
+ *
+ * UNTIL pops the frame or loops back to the line after this one.
+ */
 static void
 exec_repeat(const char **p)
 {
@@ -2425,14 +2505,15 @@ exec_repeat(const char **p)
         basic_throw(TIKU_BASIC_ERR_NOMEM, "loop stack overflow");
         return;
     }
-    /* back_line = REPEAT line itself; the loop runs starting at the
-     * line AFTER it, which line_after() resolves cleanly. */
+    /* back_line is the REPEAT line; UNTIL loops to line_after() of it. */
     loop_stack[loop_sp].back_line = basic_pc;
     loop_sp++;
 }
 
-/* UNTIL expr  -- if expr is false (loop NOT yet done), jump back to
- * the line after REPEAT. If true, pop the frame and fall through. */
+/**
+ * @brief UNTIL expr: loop back to the line after REPEAT while expr is false;
+ *        pop the frame and fall through once it is true.
+ */
 static void
 exec_until(const char **p)
 {
@@ -2463,11 +2544,10 @@ exec_until(const char **p)
 
 
 /**
- * @brief SWAP a, b  -- exchange two scalar variables.
+ * @brief SWAP a, b: exchange two scalar variables.
  *
- * Both operands must be the same type (numeric or both string).
- * Multi-letter names work for either operand.  Atomic in the
- * sense that nothing observes the partial state.
+ * Both operands must be numeric or both string; multi-letter names work for
+ * either.
  */
 static void
 exec_swap(const char **p)
@@ -2549,21 +2629,6 @@ exec_print_using(const char **p)
     }
     cur_advance(p);
 
-    /* Walk the format left-to-right.  Two kinds of placeholder:
-     *
-     *   `#...#` is a numeric field; the run of `#`s defines the
-     *   width and embedded `.` / `,` are kept as literal characters
-     *   within the field (so `##.##` is one numeric field with a
-     *   decimal point, not a width-2 field followed by a width-2
-     *   field).  Consumes one numeric argument; overflow renders
-     *   the digit positions as `*`.
-     *
-     *   `&` is a string field; the whole string argument is emitted
-     *   verbatim (no padding, no truncation).  Consumes one string
-     *   argument.
-     *
-     * Any other character outside a `#` run is emitted literally.
-     */
     i = 0;
     while (i < flen) {
         if (fmt[i] == '#') {

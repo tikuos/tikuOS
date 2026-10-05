@@ -7,9 +7,9 @@
  *
  * tiku_basic_select.inl - SELECT CASE, CASE and END SELECT helpers.
  *
- * Evaluates the controlling expression once, scans forward for the first matching
- * arm and jumps past it; reaching another CASE during normal flow means the arm
- * finished.  Nesting works through depth-aware scanning.
+ * Evaluates the controlling expression once, scans forward for the first
+ * matching arm and jumps past it; reaching another CASE during normal flow
+ * means the arm finished.  Nesting works through depth-aware scanning.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -52,14 +52,12 @@ line_is_end_select(const char *t)
 /**
  * @brief Test whether @p value matches the patterns on a CASE line.
  *
- * @p t points just past the `CASE` keyword.  Patterns are
- * comma-separated, where each pattern is either:
- *   - `expr`              -- value == expr
- *   - `lo TO hi`          -- value >= lo and value <= hi
+ * Patterns are comma-separated; each is `expr` (equal) or `lo TO hi`
+ * (inclusive range).  CASE ELSE is not parsed here: the callers detect its
+ * leading ELSE and treat it as a catch-all.
  *
- * The literal `CASE ELSE` is not parsed here; callers detect it via
- * a leading `ELSE` keyword and treat it as a catch-all.
- *
+ * @param t      Line text just past the `CASE` keyword
+ * @param value  Value of the SELECT CASE expression
  * @return 1 if any pattern matches, 0 otherwise.  basic_error is
  *         set on parser failure (caller should treat as fatal).
  */
@@ -193,7 +191,7 @@ exec_select_case(const char **p)
         basic_throw(TIKU_BASIC_ERR_GENERAL, "SELECT without END SELECT");
         return;
     }
-    /* Jump to the line AFTER the arm header (or after END SELECT
+    /* Jump to the line after the arm header (or after END SELECT
      * if no arm matched). */
     {
         int next = prog_next_index((uint16_t)(prog[idx].number + 1));

@@ -7,9 +7,9 @@
  *
  * tiku_basic_named_slots.inl - multi-slot named SAVE, LOAD and DIR.
  *
- * Two backends: ordinary /data files on the region-backed parts, visible to the
- * shell, and a fixed array of durable slots on MSP430 and host.  The whole piece
- * compiles to nothing when named slots are disabled.
+ * Two backends: /data files on region parts, visible to the shell, and a fixed
+ * slot array on MSP430 (durable) and host.  The whole piece compiles to nothing
+ * when named slots are disabled.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,26 +17,13 @@
 #if TIKU_BASIC_NAMED_SLOTS > 0
 #if BASIC_NVM_ON_REGION
 /*
- * NAMED PROGRAMS ARE ORDINARY /data FILES: "/data/<name>.bas".
- *
- * A fixed slot array carrying BASIC_NVM_PERSISTENT cannot work here: that grade
- * is TIKU_DURABLE only on MSP430 -- .ssram on Ambiq (zeroed at boot, like .bss)
- * and EMPTY everywhere else -- so on Nordic, RP2350 and Ambiq a `SAVE "name"`
- * would be silently lost across a reset, with no region-tail fallback.  Such an
- * array also costs 6,180 B of always-resident RAM and caps a named program at
- * TIKU_BASIC_NAMED_SLOT_BYTES (2,048), which a BIG-tier program exceeds after
- * about thirteen lines.
- *
- * Riding the file store settles all of it at once: durable on every platform for
- * free, 4 KB per program, and as many programs as /data has room for (222 on the
- * LM20, not 3).  They also stop being invisible -- `ls /data`,
- * `cat /data/foo.bas`, and `send` to copy one off the board.
- *
- * MSP430 keeps the slot array below: its /data files are 512 B, SMALLER than the
- * slot it has today, and its slots are genuinely durable already.
+ * Named programs are /data files, "/data/<name>.bas": durable, visible to
+ * `ls` and `cat`, and as many as the store has room for.  BASIC_NVM_PERSISTENT
+ * is durable only on MSP430, so a static slot array would not survive a reset
+ * here.  A named program is at most one serialization scratch (4 KB).
  */
 #define BASIC_NAMED_SUFFIX    ".bas"
-/* Keeps "<name>.bas" comfortably inside the file store's name field. */
+/* Keeps "<name>.bas" within the store's name field (TIKU_TFS_NAME_MAX). */
 #define BASIC_NAMED_NAME_MAX  16u
 
 /**
@@ -60,13 +47,17 @@ basic_named_path(char *out, size_t cap, const char *name)
     return (n > 0 && (size_t)n < cap) ? 0 : -1;
 }
 
+/**
+ * @brief SAVE "name": write the program to /data/<name>.bas.
+ * @return 0, or -1 after reporting why (bad name, too large, write failed)
+ */
 static int
 basic_save_to_named(const char *name)
 {
     char         path[48];
-    /* The 4 KB serialization scratch is exactly one /data file, and named SAVE
-     * is a single interactive command -- never concurrent with the unnamed
-     * SAVE/LOAD that shares it. */
+    /* The serialization scratch bounds a named program.  Named SAVE is one
+     * interactive command, never concurrent with the unnamed SAVE/LOAD that
+     * shares the buffer. */
     char *const  tmp = basic_persist_scratch;
     const size_t cap = sizeof basic_persist_scratch;
     size_t       pos = 0;
@@ -116,6 +107,10 @@ basic_save_to_named(const char *name)
     return 0;
 }
 
+/**
+ * @brief LOAD "name": replace the program with /data/<name>.bas.
+ * @return 0, or -1 after reporting why (bad name, not found, empty)
+ */
 static int
 basic_load_from_named(const char *name)
 {
@@ -133,8 +128,8 @@ basic_load_from_named(const char *name)
         basic_reportf(TIKU_BASIC_ERR_SYNTAX, "'%s' not found", name);
         return -1;
     }
-    /* /data reports the file's TRUE length, which can exceed what it copied --
-     * clamp before walking, or an over-long file would read past the buffer. */
+    /* /data reports the file's full length, which can exceed what it copied:
+     * clamp before walking, or an over-long file reads past the buffer. */
     got = ((size_t)rd < cap - 1u) ? (size_t)rd : cap - 1u;
     if (got == 0u) {
         basic_reportf(TIKU_BASIC_ERR_IO, "'%s' is empty", name);
@@ -145,7 +140,7 @@ basic_load_from_named(const char *name)
     basic_clear_vars();
 
     /* Dispatch through the dedicated line buffer, not the scratch being
-     * walking: process_line() can reach commands that use the scratch. */
+     * walked: process_line() can reach commands that use the scratch. */
     for (i = 0; i <= got; i++) {
         char c = (i < got) ? tmp[i] : '\n';
 
@@ -188,6 +183,7 @@ basic_named_dir_cb(const tiku_vfs_node_t *node, void *vctx)
     *(int *)vctx = 1;
 }
 
+/** @brief DIR: list the saved programs in /data. */
 static void
 basic_list_named_slots(void)
 {
@@ -201,18 +197,20 @@ basic_list_named_slots(void)
     }
 }
 
-#else  /* MSP430 / host: the durable FRAM slot array */
+#else  /* MSP430 / host: a fixed slot array, durable FRAM on MSP430 */
 
+/** One named program slot. */
 typedef struct {
-    char     name[8];                                     /* "" = empty */
-    uint16_t length;
-    uint8_t  pad[2];                                      /* 4-byte align */
-    char     data[TIKU_BASIC_NAMED_SLOT_BYTES];
+    char     name[8];                                     /**< "" = empty  */
+    uint16_t length;                                      /**< bytes used  */
+    uint8_t  pad[2];                                      /**< 4-byte align */
+    char     data[TIKU_BASIC_NAMED_SLOT_BYTES];           /**< program text */
 } basic_named_slot_t;
 
 static BASIC_NVM_PERSISTENT
 basic_named_slot_t basic_named_slots[TIKU_BASIC_NAMED_SLOTS];
 
+/** @brief Index of the slot holding @p name, or -1. */
 static int
 basic_slot_find_by_name(const char *name)
 {
@@ -225,6 +223,7 @@ basic_slot_find_by_name(const char *name)
     return -1;
 }
 
+/** @brief Slot for @p name: its own, else the first free one, else -1. */
 static int
 basic_slot_alloc(const char *name)
 {
@@ -236,6 +235,10 @@ basic_slot_alloc(const char *name)
     return -1;
 }
 
+/**
+ * @brief SAVE "name": write the program into a named slot.
+ * @return 0, or -1 when the program exceeds a slot or every slot is taken
+ */
 static int
 basic_save_to_named(const char *name)
 {
@@ -285,6 +288,7 @@ basic_save_to_named(const char *name)
     return 0;
 }
 
+/** @brief LOAD "name": replace the program with a named slot's text. */
 static int
 basic_load_from_named(const char *name)
 {
@@ -317,6 +321,7 @@ basic_load_from_named(const char *name)
     return 0;
 }
 
+/** @brief DIR: list the named slots in use, with their sizes. */
 static void
 basic_list_named_slots(void)
 {
@@ -334,11 +339,3 @@ basic_list_named_slots(void)
 }
 #endif /* BASIC_NVM_ON_REGION */
 #endif /* TIKU_BASIC_NAMED_SLOTS */
-
-/* Scratch buffer for IF/THEN truncation -- when ELSE is present the
- * need to stop the THEN branch's exec_stmt from consuming the ELSE
- * keyword as if it were part of its own arguments. The simplest
- * portable approach is to copy the THEN branch into a buffer with
- * the ELSE position turned into a NUL. The buffer lives at file
- * scope rather than on the stack so deep IF nesting (which can
- * happen via GOSUB) won't blow the limited MSP430 stack. */

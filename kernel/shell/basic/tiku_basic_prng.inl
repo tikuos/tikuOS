@@ -7,9 +7,9 @@
  *
  * tiku_basic_prng.inl - linear-congruential RND() generator.
  *
- * Lazily seeded from the clock on first call.  Output draws from the high 16 bits
- * of the state, which are the best-behaved of an LCG, and costs one multiply, one
- * add and one shift.
+ * Lazily seeded from the clock on first call.  Output draws from the high 16
+ * bits of the state, which are the best-behaved of an LCG, and costs one
+ * multiply, one add and one shift.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,9 +23,8 @@ static long
 basic_rnd(long n)
 {
     /* Lazy seeding -- avoids paying clock-read cost when RND is
-     * never called.  Seed mixes the kernel tick with a small
-     * constant so 0-tick boots don't all start with the same
-     * sequence. */
+     * never called.  Seed mixes the kernel tick with a constant
+     * so 0-tick boots don't all start with the same sequence. */
     if (!basic_prng_seeded) {
         basic_prng_state = (uint32_t)tiku_clock_time() * 2654435761UL +
                             0x9E3779B9UL;

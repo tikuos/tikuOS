@@ -7,21 +7,25 @@
  *
  * tiku_basic_expr.inl - recursive-descent numeric expression parser.
  *
- * Grammar layers run from primary through unary, term, sum, relation, AND and OR.
- * parse_cond also accepts a top-level string comparison, used only by IF, WHILE
- * and UNTIL -- mixed-type subexpressions are deliberately not allowed.
+ * Layers run from primary through ^, unary, term, sum, relation, AND and OR.
+ * parse_cond also accepts a string comparison: as an IF, ELSEIF, WHILE or UNTIL
+ * condition and inside any parentheses.  Mixed-type comparisons are refused.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /*---------------------------------------------------------------------------*/
-/* PRIMARY / UNARY                                                           */
+/* PRIMARY                                                                   */
 /*---------------------------------------------------------------------------*/
 
 #if TIKU_BASIC_STRVARS_ENABLE
 static long parse_cond(const char **p);   /* fwd: lets (A$ = B$) be a value */
 #endif
 
+/**
+ * @brief Primary: a parenthesized expression, number, named constant,
+ *        function call, array element or variable.
+ */
 static long
 expr_prim(const char **p)
 {
@@ -31,7 +35,7 @@ expr_prim(const char **p)
     if (cur_peek(p) == '(') {
         cur_advance(p);
 #if TIKU_BASIC_STRVARS_ENABLE
-        v = parse_cond(p);      /* a numeric expr OR a string comparison */
+        v = parse_cond(p);      /* a numeric expr or a string comparison */
 #else
         v = parse_expr(p);
 #endif
@@ -41,11 +45,9 @@ expr_prim(const char **p)
         return v;
     }
     if (parse_unum(p, &v))                return v;
-    /* Named constants -- checked before single-letter variables so
-     * TRUE/FALSE/PI as multi-char identifiers resolve to literals.
-     * Single-letter T/F/P remain available as variables (parse_var
-     * checks the next char isn't a word continuation, so it can't
-     * accidentally swallow T from "TRUE"). */
+    /* Named constants, matched as whole words before variables, so
+     * TRUE/FALSE/PI resolve to literals while single-letter T, F and P
+     * stay variables. */
     if (match_kw(p, "TRUE"))              return 1;
     if (match_kw(p, "FALSE"))             return 0;
     if (match_kw(p, "PI"))                return TIKU_BASIC_PI_Q3;
@@ -72,20 +74,17 @@ expr_prim(const char **p)
 }
 
 /*---------------------------------------------------------------------------*/
-/* EXPONENT (^) -- right-associative, binds tighter than unary               */
+/* OPERATORS                                                                 */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Right-associative power operator: base ^ exp -- INTEGER only.
+ * @brief Right-associative power operator: base ^ exp, integer only.
  *
- * `^` is integer exponentiation unconditionally, and does NOT infer a type from
- * magnitude: `2000 ^ 2` is 4000000, consistent with `2000 * 2000`.  For Q.3
- * fixed-point power use the explicit FPOW(base, n) builtin.
+ * `^` binds tighter than unary minus (`-2^2 == -4`), `x ^ 0 == 1` and a
+ * negative exponent yields 0.  For Q.3 fixed-point power use FPOW(base, n).
  *
- * @note The engine carries no per-value type bit -- it cannot tell the integer
- *       2000 from the Q.3 value 2.000 -- so guessing from magnitude gave the
- *       same operands incompatible readings.  A negative exponent yields 0,
- *       `x ^ 0 == 1`, and precedence beats unary minus so `-2^2 == -4`.
+ * @note No value carries a type -- the integer 2000 and the Q.3 value 2.000
+ *       are the same number -- so `2000 ^ 2` is 4000000, as `2000 * 2000` is.
  */
 static long
 expr_pow(const char **p)
@@ -113,6 +112,7 @@ expr_pow(const char **p)
     return base;
 }
 
+/** @brief Unary minus, plus and NOT (bitwise complement). */
 static long
 expr_unary(const char **p)
 {
@@ -126,6 +126,7 @@ expr_unary(const char **p)
     return expr_pow(p);
 }
 
+/** @brief Multiplicative layer: `*`, `/` and infix MOD. */
 static long
 expr_term(const char **p)
 {
@@ -148,8 +149,8 @@ expr_term(const char **p)
             }
         } else if (match_kw(p, "MOD")) {
             /* Infix `a MOD b`, same precedence as * and /.  The MOD(a,b)
-             * builtin still works: expr_call consumes `MOD(` as a primary
-             * before this infix check ever sees it. */
+             * builtin is unaffected: expr_call consumes `MOD(` as a primary
+             * before this infix check sees it. */
             rhs = expr_unary(p);
             if (rhs == 0) {
                 basic_throw(TIKU_BASIC_ERR_DIVZERO, "MOD by zero");
@@ -164,6 +165,7 @@ expr_term(const char **p)
     return v;
 }
 
+/** @brief Additive layer: `+` and `-`. */
 static long
 expr_sum(const char **p)
 {
@@ -180,7 +182,7 @@ expr_sum(const char **p)
     return v;
 }
 
-/* Relational operators: =, <, >, <=, >=, <> -- yield 1 / 0. */
+/** @brief Relational operators =, <, >, <=, >=, <>, yielding 1 or 0. */
 static long
 expr_rel(const char **p)
 {
@@ -210,8 +212,10 @@ expr_rel(const char **p)
     return result ? 1 : 0;
 }
 
-/* Bitwise AND -- one precedence below relational, matching the
- * conventional `IF a < 5 AND b > 3 THEN ...` reading. */
+/**
+ * @brief Bitwise AND, one level below relational, so
+ *        `IF a < 5 AND b > 3 THEN ...` reads conventionally.
+ */
 static long
 expr_and(const char **p)
 {
@@ -225,8 +229,7 @@ expr_and(const char **p)
     return v;
 }
 
-/* Bitwise OR / XOR -- below AND so AND binds tighter, again matching
- * the standard reading. */
+/** @brief Bitwise OR and XOR, below AND so AND binds tighter. */
 static long
 expr_or(const char **p)
 {
@@ -241,15 +244,18 @@ expr_or(const char **p)
     return v;
 }
 
+/** @brief Evaluate a numeric expression from the top (OR) layer. */
 static long
 parse_expr(const char **p) { return expr_or(p); }
 
 #if TIKU_BASIC_STRVARS_ENABLE
-/* parse_cond: a numeric expression OR a string comparison, yielding 0/1.
- * Reached both as an IF condition (`IF A$ = "hi" THEN ...`) and, via
- * expr_prim's parenthesized primary, as a value anywhere an expression is
- * allowed (`LET X = (A$ = "hi")`, `PRINT (A$ < B$)`). Supported relops:
- * = <> < > <= >=. */
+/**
+ * @brief A numeric expression, or a string comparison yielding 1 or 0.
+ *
+ * Reached as an IF / ELSEIF / WHILE / UNTIL condition and, through
+ * expr_prim's parentheses, as a value anywhere (`LET X = (A$ = "hi")`).
+ * String relops: = <> < > <= >=.
+ */
 static long
 parse_cond(const char **p)
 {

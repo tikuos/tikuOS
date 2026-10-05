@@ -1,24 +1,31 @@
 /*
- * Tiku Operating System v0.05 -- loadable native module linker script.
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
  *
- * The module is position-FIXED at the carve VMA (TIKU_MODULE_CARVE_ADDR): the
- * loader copies the flat image there and jumps in, so VMA == LMA == the carve
- * base and every internal reference resolves at run address.  Layout:
- *   +0    .modhdr   (tiku_module_header_t, exactly 16 bytes)
- *   +16   .modinit  (module_init entry -- header's init_off points here)
- *   ...   .text / .rodata
- * No .data/.bss: the MVP module holds no writable state (pure handlers), so a
- * missing RAM/copy step cannot bite.  Keep in sync with the header + device .ld.
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * mod_demo.ld - loadable native module script (nRF54L15 / nRF54LM20).
+ *
+ * Links the module at its RRAM slot, so VMA == LMA and every internal
+ * reference resolves at run address.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/*
+ * Layout:
+ *   +0    .modhdr   (tiku_module_header_t, 16 bytes)
+ *   +16   .modinit  (module_init; the header's init_off points here)
+ *   ...   .text / .rodata
+ * No .data or .bss: a module holds no writable state (see .modwritable).
+ */
+
 MEMORY
 {
-    /* Executable RRAM slot at the top of the shared 800 KB Nordic code
-     * window -- SAME address on nRF54L15 and nRF54LM20, so one module image
-     * serves both (nordic W^X forbids SRAM execution).  Kept in sync
-     * with TIKU_MODULE_CARVE_ADDR. */
+    /* RRAM slot at the top of the 384 KB Nordic code window, at the same
+     * address on nRF54L15 and nRF54LM20, so one image serves both (SRAM is
+     * execute-never there).  Kept in sync with TIKU_MODULE_CARVE_ADDR. */
     CARVE (rx) : ORIGIN = 0x58000, LENGTH = 0x8000   /* 32 KB */
 }
 
@@ -40,15 +47,12 @@ SECTIONS
     ASSERT(SIZEOF(.mod) <= LENGTH(CARVE), "module image overflows the carve")
 
     /*
-     * Writable module state is NOT SUPPORTED, and saying so at link time is
-     * the point of this section.  Modules run execute-in-place from NVM and
-     * are never copied to RAM: there is no load step, no .data initialiser
-     * copy, and the syscall jump table exposes no allocator.  These inputs
-     * would be silently dropped by a /DISCARD/ entry, so a module declaring a
-     * global would be accepted and shipped with its state pointing at nothing.
-     * Collect them instead and require the result to be empty, so the mistake
-     * is a link error naming the cause.  --gc-sections still drops a global
-     * that nothing references, so only state a handler actually uses trips it.
+     * Modules get no data RAM: nothing copies a .data initialiser or clears a
+     * .bss, and the service table has no allocator.  A /DISCARD/ entry would
+     * drop these inputs silently and ship a global pointing at nothing, so
+     * they are collected here and required to be empty, which makes writable
+     * state a link error naming the cause.  --gc-sections still drops a
+     * global that nothing references, so only state a handler uses trips it.
      */
     .modwritable (NOLOAD) : { *(.bss*) *(.data*) *(COMMON) }
 

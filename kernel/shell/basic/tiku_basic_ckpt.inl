@@ -7,67 +7,34 @@
  *
  * tiku_basic_ckpt.inl - power-failure-transparent RUN.
  *
- * The interpreter's whole machine state is reified in file-static globals, which
- * makes it checkpointable: while PERSIST is armed each yield boundary writes that
- * state to a durable file, and RUN RESUME continues mid-loop across a power cut.
+ * The interpreter's machine state lives in file-static globals, which makes it
+ * checkpointable: while PERSIST is armed, yield boundaries write that state to
+ * durable memory, and RUN RESUME continues mid-loop across a power cut.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 /*
- --- Why the serialization is pointer-free ------------------------------------
- * Almost every piece of state is a value: basic_pc (u16), the stacks (line
- * numbers, var indices, longs), basic_vars[] (long[]), the named-var name
- * tables (fixed char[]).  The ONLY pointers are the string variables, which
- * point INTO basic_str_heap, so the used heap prefix is serialized verbatim and
- * store each string pointer as a HEAP OFFSET (ptr - basic_str_heap; 0xFFFF ==
- * NULL/unbound).  On resume the arena is freshly allocated (stable, in-order
- * sub-allocations), the heap prefix is copied back, and each offset is rebound
- * to basic_str_heap + off.  No arena-base assumption, no pointer rebasing.
+ * The serialization is pointer-free.  Every piece of state is a value except
+ * the pointers into basic_str_heap (string variables, string-array elements,
+ * saved LOCAL strings), so the used heap prefix is written verbatim and each
+ * such pointer as a heap offset (0xFFFF = NULL).  Resume copies the prefix
+ * back and rebinds each offset, so nothing depends on where the arena sits.
  *
- * --- Why a power cut needs no detection --------------------------------------
- * Checkpoints are taken at yield boundaries while armed, and the durable slot
- * is INVALIDATED on any *orderly* termination (END / STOP / fell off the end /
- * Ctrl-C break).  A power cut is precisely the case where that orderly-clear
- * never executes -- so the last per-batch checkpoint survives on FRAM and RUN
- * RESUME finds it.  Resume replays at most one batch of lines (the window
- * between the last checkpoint and the cut), so side effects in that window
- * repeat; this is inherent to checkpoint/replay and is documented.
+ * A power cut needs no detection.  Checkpoints are taken at yield boundaries
+ * while armed, and every orderly end (END, STOP, the last line, Ctrl-C, NEW,
+ * PERSIST OFF) invalidates the checkpoint; a cut skips that, so RUN RESUME
+ * finds the last one.  Resume replays what ran since it -- at most one batch,
+ * or one TIKU_BASIC_CKPT_INTERVAL_S and a batch where saves are paced -- so
+ * the side effects of those lines repeat.
  *
- * --- Storage backends + torn-write safety ------------------------------------
- * The durable slot has TWO backings, chosen by BASIC_NVM_ON_REGION (the same
- * split as the saved program -- see tiku_basic_config.h):
- *
- *   Byte-writable (MSP430 .persistent FRAM; host .bss = session-only):
- *   [u32 gate][u32 version][u32 len][payload].  A save invalidates the gate,
- *   serializes the payload, stamps version + len, then writes the magic gate
- *   LAST -- single-word FRAM stores commit atomically, so a cut mid-write
- *   leaves the gate invalid.
- *
- *   Carved NVM region (Nordic RRAM, Ambiq MRAM, RP2350 flash): a fixed slot at
- *   the TOP of the region's reserved tail (the saved program owns the base).
- *   The image is [u32 magic][u32 version][u32 len][u32 crc][payload], and
- *   validity is magic + version + CRC32(payload) -- the CRC is the gate, so any
- *   torn write (including a power cut mid-sector-erase) fails it and RESUME
- *   restarts instead.  How the bytes get there depends on the medium
- *   (BASIC_CKPT_STREAMING, see the sizing section): where a write is cheap and
- *   fine-grained the payload is STREAMED through a 512 B chunk with the header
- *   written last, so no whole-image RAM buffer exists; on erase-based flash the
- *   image is staged whole and committed in ONE call, because the checkpoint is
- *   periodic and chunking would multiply sector erases.
- *
- * Either way: losing an in-flight checkpoint (restart instead of resume) is
- * acceptable; resuming garbage is not.  The slot is sized to the compile-time
- * worst case, so serialization can never overflow it and there is no
- * "checkpoint too large" runtime path for the core state.  (Since v5/v6 the
- * payload also carries DIMmed arrays, EVERY timers, ON CHANGE registrations,
- * DEF FNs, SUB frames, and CONST flags -- the full running machine.)
- *
- * --- Checkpoint cadence ------------------------------------------------------
- * TIKU_BASIC_CKPT_INTERVAL_S (config) paces saves: 0 = every yield batch
- * (FRAM-class endurance), nonzero = at most one save per interval (flash
- * sector-erase wear, MRAM bootrom-call jitter).  The replay window after a
- * power cut grows accordingly -- see the config comment for the arithmetic.
- *
+ * Storage follows BASIC_NVM_ON_REGION, as the saved program does:
+ *   region parts:  the /data file prog.ckpt, [payload][version][len][crc].
+ *   MSP430, host:  a byte-writable buffer (durable FRAM on MSP430, .bss on
+ *                  host), [gate][version][len][payload], gate written last.
+ * A cut during a save leaves the previous checkpoint (region parts) or none
+ * (the gate is cleared first), so a torn checkpoint is never resumed; one
+ * from another program or payload version is rejected.  The payload has a
+ * compile-time bound (BASIC_CKPT_PAYLOAD_MAX).
  */
 
 
@@ -84,22 +51,22 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* SLOT FORMAT + SIZING                                                       */
+/* CHECKPOINT FORMAT AND SIZING                                              */
 /*---------------------------------------------------------------------------*/
 
-/* Distinct from TIKU_PERSIST_MAGIC so a checkpoint slot is never confused with
- * a program-store entry, and from BASIC_REGION_MAGIC ('BASP'). */
-#define BASIC_CKPT_MAGIC    0x424B5054u   /* 'BKPT' */
-#define BASIC_CKPT_VERSION  6u            /* 2: +program id; 3: +SUB/scope/DEF FN;
-                                           * 4: string scope slots + RESULT (F3);
-                                           * 5: EVERY + ON CHANGE + arrays (F1 f/u);
-                                           * 6: CONST read-only flags */
-#define BASIC_CKPT_HDR      12u           /* [gate u32][version u32][len u32] */
-#define BASIC_CKPT_RGN_HDR  16u           /* [magic][version][len][crc]       */
+/* Gate word of the byte-writable checkpoint ('BKPT'), distinct from
+ * TIKU_PERSIST_MAGIC so it is never taken for a persist-store entry. */
+#define BASIC_CKPT_MAGIC    0x424B5054u
+/** Payload layout version.  A checkpoint of any other version is rejected,
+ *  so this changes whenever basic_ckpt_write() changes what it writes. */
+#define BASIC_CKPT_VERSION  6u
+#define BASIC_CKPT_HDR      12u           /* [gate][version][len], u32 each */
+#define BASIC_CKPT_RGN_HDR  16u           /* slack in the RP2350 staging
+                                           * buffer, which holds the payload */
 
 #if TIKU_BASIC_STRVARS_ENABLE
 #define BASIC_CKPT_STR_MAX ( \
-      (size_t)TIKU_BASIC_NAMEDVAR_LEN * TIKU_BASIC_NAMEDVAR_MAX  /* str names */ \
+      (size_t)TIKU_BASIC_NAMEDVAR_LEN * TIKU_BASIC_NAMEDVAR_MAX  /* $ names */ \
     + sizeof(uint16_t)                       /* heap_pos           */ \
     + (size_t)TIKU_BASIC_STR_HEAP_BYTES      /* full heap prefix   */ \
     + sizeof(uint16_t) * BASIC_VAR_TABLE_LEN)/* strvar offsets     */
@@ -109,8 +76,8 @@
 
 #if TIKU_BASIC_SUBS_ENABLE
 #define BASIC_CKPT_SUBS_MAX ( \
-      1u + sizeof(basic_frame_t) * TIKU_BASIC_CALL_DEPTH   /* SUB call frames */ \
-    + 1u + sizeof(basic_scope_t) * TIKU_BASIC_SCOPE_MAX    /* LOCAL scope     */ \
+      1u + sizeof(basic_frame_t) * TIKU_BASIC_CALL_DEPTH   /* call frames */ \
+    + 1u + sizeof(basic_scope_t) * TIKU_BASIC_SCOPE_MAX    /* LOCAL scope */ \
     + sizeof(long))                                        /* RESULT register */
 #else
 #define BASIC_CKPT_SUBS_MAX 0u
@@ -121,7 +88,7 @@
 #define BASIC_CKPT_DEFN_MAX_B 0u
 #endif
 
-/* F1 follow-up budgets: EVERY timers, ON CHANGE regs, and DIMmed arrays. */
+/* Budgets for EVERY timers, ON CHANGE registrations and DIMmed arrays. */
 #if TIKU_BASIC_EVERY_MAX > 0
 #define BASIC_CKPT_EVERY_B (1u + (size_t)TIKU_BASIC_EVERY_MAX *                \
     (sizeof(long) + TIKU_BASIC_EVERY_STMT_LEN))
@@ -135,9 +102,9 @@
 #define BASIC_CKPT_ONCHG_B 0u
 #endif
 #if TIKU_BASIC_ARRAYS_ENABLE
-/* Fixed data budget for the array checkpoint; DIMmed arrays whose serialized
- * bytes overflow it write present=0 and reset on resume (not corruption).
- * Plus a present byte + two dims across the 26 numeric + 26 string slots. */
+/** Data budget for DIMmed arrays in a checkpoint: an array whose bytes would
+ *  overflow it is written as absent and not restored.  BASIC_CKPT_ARR_B adds
+ *  a present byte and two dims for each of the 52 array slots. */
 #define BASIC_CKPT_ARR_BYTES ((size_t)TIKU_BASIC_STR_HEAP_BYTES)
 #define BASIC_CKPT_ARR_B     (52u * (1u + 2u * sizeof(uint16_t)) + \
                               BASIC_CKPT_ARR_BYTES)
@@ -146,61 +113,44 @@
 #define BASIC_CKPT_ARR_B     0u
 #endif
 
-/* Compile-time upper bound on the serialized payload.  Generous fixed slack
- * absorbs struct padding differences so the buffer is never undersized. */
+/* Compile-time upper bound on the serialized payload; the fixed slack
+ * absorbs struct padding. */
 #define BASIC_CKPT_PAYLOAD_MAX ( \
-      sizeof(uint32_t)                                             /* prog identity */ \
-    + 24u                                                          /* pc + flags */ \
-    + 1u + sizeof(uint16_t) * TIKU_BASIC_GOSUB_DEPTH               /* gosub */ \
-    + 1u + sizeof(basic_for_frame_t) * TIKU_BASIC_FOR_DEPTH        /* for */ \
-    + 1u + sizeof(basic_loop_frame_t) * TIKU_BASIC_LOOP_DEPTH      /* loop */ \
-    + sizeof(long) * BASIC_VAR_TABLE_LEN                           /* numeric vars */ \
-    + (size_t)TIKU_BASIC_NAMEDVAR_LEN * TIKU_BASIC_NAMEDVAR_MAX    /* numeric names */ \
-    + (size_t)TIKU_BASIC_NAMEDVAR_MAX                              /* CONST flags */ \
+      sizeof(uint32_t)                               /* prog identity */ \
+    + 24u                                            /* pc + flags */ \
+    + 1u + sizeof(uint16_t) * TIKU_BASIC_GOSUB_DEPTH /* gosub */ \
+    + 1u + sizeof(basic_for_frame_t) * TIKU_BASIC_FOR_DEPTH /* for */ \
+    + 1u + sizeof(basic_loop_frame_t) * TIKU_BASIC_LOOP_DEPTH /* loop */ \
+    + sizeof(long) * BASIC_VAR_TABLE_LEN             /* numeric vars */ \
+    + (size_t)TIKU_BASIC_NAMEDVAR_LEN * TIKU_BASIC_NAMEDVAR_MAX /* names */ \
+    + (size_t)TIKU_BASIC_NAMEDVAR_MAX                /* CONST flags */ \
     + BASIC_CKPT_STR_MAX \
-    + BASIC_CKPT_SUBS_MAX                                          /* SUB frames + scope */ \
-    + BASIC_CKPT_DEFN_MAX_B                                        /* DEF FN table */ \
-    + BASIC_CKPT_EVERY_B                                           /* EVERY timers */ \
-    + BASIC_CKPT_ONCHG_B                                           /* ON CHANGE regs */ \
-    + BASIC_CKPT_ARR_B                                             /* DIMmed arrays */ \
-    + 64u)                                                         /* err/data/prng + slack */
+    + BASIC_CKPT_SUBS_MAX                            /* SUB frames + scope */ \
+    + BASIC_CKPT_DEFN_MAX_B                          /* DEF FN table */ \
+    + BASIC_CKPT_EVERY_B                             /* EVERY timers */ \
+    + BASIC_CKPT_ONCHG_B                             /* ON CHANGE regs */ \
+    + BASIC_CKPT_ARR_B                               /* DIMmed arrays */ \
+    + 64u)                                           /* err/data/prng + slack */
 
 #define TIKU_BASIC_CKPT_BYTES  (BASIC_CKPT_HDR + BASIC_CKPT_PAYLOAD_MAX)
 
 #if BASIC_NVM_ON_REGION
 /*
- * CHECKPOINT SLOT -- an ordinary /data file, not a carve.
- *
- * This was the reserved tail's SECOND tenant, at a fixed offset below its top.
- * With it and prog.bas moved out, the tail had no tenants and was deleted
- * outright -- which is what finally stopped a core memory header from being
- * sized by a shell feature's line capacity.
- *
- * Named flat, like prog.bas: /data carries a static VFS node called "basic",
- * so a "basic/" prefix would make `ls /data` show a phantom folder beside it.
- *
- * TRAILER, NOT HEADER.  The old slot led with [magic][ver][len][crc] and wrote
- * that header LAST, because the header landing was the commit point.  A store
- * write is append-only and its commit is TFS's own dirent flip, so the framing
- * moves to the END: [payload][version][len][crc].  Nothing is lost --
- *   - tearing: TFS commit is atomic, so a committed file is whole BY
- *     CONSTRUCTION; that is a stronger guarantee than the CRC gate it replaces
- *     (a cut now leaves the PREVIOUS checkpoint, where before it left none);
- *   - version: still essential -- a v6 payload must never be read by a v7
- *     build, and the file name cannot say which it is;
- *   - len: kept as a cheap cross-check that the file length and the payload
- *     length agree;
- *   - crc: no longer needed against tearing, retained against bit rot.
+ * On region parts the checkpoint is the /data file BASIC_CKPT_FILE, named flat
+ * like prog.bas.  A store write is append-only and commits by flipping a
+ * directory entry, so the framing is a trailer: [payload][version][len][crc].
+ * The commit leaves either the new file whole or the previous one; a version
+ * other than BASIC_CKPT_VERSION is rejected, len must agree with the file
+ * length, and the CRC guards against bit rot.
  */
 #define BASIC_CKPT_FILE     "prog.ckpt"
-#define BASIC_CKPT_TRAILER  12u        /* [version][len][crc] after the payload */
+#define BASIC_CKPT_TRAILER  12u        /* [version][len][crc], u32 each */
 #define BASIC_CKPT_IMG_MAX  (BASIC_CKPT_PAYLOAD_MAX + BASIC_CKPT_TRAILER)
 
-/* Both durable BASIC objects must fit the store TOGETHER, with the checkpoint
- * counted at the span a REPLACE needs (its own run plus a second one, since the
- * new run must exist before the dirent flips).  This is necessary, not
- * sufficient: the store is shared, so a program plus a provisioned model can
- * still exhaust it at run time -- that is a NOSPACE, not a corruption. */
+/* Both durable BASIC objects must fit the store together, the checkpoint at
+ * twice its span because a replace writes the new run before the directory
+ * entry flips.  Necessary, not sufficient: other files share the store and can
+ * exhaust it at run time, which is a NOSPACE error, not corruption. */
 _Static_assert(TIKU_TFS_SPAN_FOR(TIKU_BASIC_SAVE_BUF_BYTES)
                    + 2u * TIKU_TFS_SPAN_FOR(BASIC_CKPT_IMG_MAX)
                    <= TIKU_TFS_MIN_SLOTS,
@@ -208,7 +158,7 @@ _Static_assert(TIKU_TFS_SPAN_FOR(TIKU_BASIC_SAVE_BUF_BYTES)
 _Static_assert(TIKU_BASIC_SAVE_BUF_BYTES <= TIKU_TFS_FILE_MAX_GUARANTEED,
                "BASIC's saved program exceeds the largest possible store file");
 
-static tiku_tfs_wr_t basic_ckpt_wr;    /* open between save's begin and commit */
+static tiku_tfs_wr_t basic_ckpt_wr;    /* open while a save is in flight */
 
 /** @brief The /data store, or NULL when none is mounted. */
 static tiku_tfs_t *
@@ -218,25 +168,12 @@ basic_ckpt_fs(void)
 }
 
 /*
- * Stream the payload, OR STAGE IT WHOLE?
- *
- * Staging the whole image costs BASIC_CKPT_RGN_HDR + PAYLOAD_MAX of always-
- * resident RAM -- 12,534 B, which after the v0.06 SAVE/LOAD diet is the single
- * largest static buffer BASIC owns.  Streaming it into the slot in bounded
- * chunks removes all but the chunk, exactly as SAVE now does.
- *
- * But the checkpoint is PERIODIC, and that changes the calculus on erase-based
- * NVM in a way it did not for SAVE.  On RP2350 every backend write is a 4 KB
- * read-modify-ERASE-program; region_write() loops the sectors of ONE call, so
- * the whole image today costs 4 sector erases, while N chunked writes at
- * unaligned offsets cost closer to 2N.  For an interactive command that is a
- * fair trade; for something the interpreter does at every yield batch (which is
- * precisely why flash checkpoints are interval-gated at all) it is not.
- *
- * So: stream where a write is cheap and fine-grained -- RRAM stores, MRAM
- * 16-byte granules -- and keep the single-call commit where a write is an
- * erase.  The condition is the erase granule, and only one supported platform
- * has one.
+ * Streaming or staging.  Streaming the payload in bounded chunks keeps one
+ * chunk of RAM; staging keeps a whole image.  Where a write lands in place
+ * (MRAM, RRAM) the payload streams.  Where a write erases (RP2350 flash erases
+ * and reprograms every 4 KB sector a write touches) the image is staged and
+ * written in one call: the checkpoint recurs, and chunked appends would erase
+ * a sector once per chunk instead of once per checkpoint.
  */
 #if defined(PLATFORM_RP2350)
 #define BASIC_CKPT_STREAMING  0
@@ -245,22 +182,19 @@ basic_ckpt_fs(void)
 #endif
 
 #if BASIC_CKPT_STREAMING
-/* Bounded staging: RAM cost is independent of the payload size.  512 B keeps
- * the flush count modest (~25 for a full payload) while costing 4% of what the
- * whole-image buffer did. */
+/* Bounded staging: the RAM cost is one chunk, whatever the payload size. */
 #define BASIC_CKPT_CHUNK  512u
 static uint8_t basic_ckpt_chunk[BASIC_CKPT_CHUNK];
 #else
-/* RAM staging for the single-call region write (BASIC_SCRATCH: .bss on
- * RP2350 -- transient, rebuilt on every save). */
+/* Whole-image staging for the single-call write; BASIC_SCRATCH is plain .bss
+ * on RP2350, rebuilt on every save. */
 static BASIC_SCRATCH uint8_t
     basic_ckpt_scratch[BASIC_CKPT_RGN_HDR + BASIC_CKPT_PAYLOAD_MAX];
 #endif
 
 #else
-/* Byte-writable slot.  .persistent FRAM on MSP430 (durable); plain .bss on host
- * (session-only -- matches SAVE's durability envelope there).  Not built on any
- * region-backed part: all three have a reserved tail now. */
+/* Byte-writable slot: durable FRAM on MSP430, plain .bss on host (session-only,
+ * as SAVE is there).  Not built on region parts. */
 static BASIC_NVM_PERSISTENT uint8_t basic_ckpt_buf[TIKU_BASIC_CKPT_BYTES];
 #define BASIC_CKPT_STREAMING  0
 #endif
@@ -269,23 +203,25 @@ static BASIC_NVM_PERSISTENT uint8_t basic_ckpt_buf[TIKU_BASIC_CKPT_BYTES];
 /* BYTE CURSORS                                                               */
 /*---------------------------------------------------------------------------*/
 
+/** Serialization cursor for basic_ckpt_write(). */
 typedef struct {
-    uint8_t *base;          /* staging buffer: whole image, or the chunk */
-    size_t   pos;           /* payload bytes written so far, logically   */
-    size_t   cap;           /* capacity of base[]                        */
-    int      err;
+    uint8_t *base;          /**< whole image, the chunk, or NULL to measure */
+    size_t   pos;           /**< payload bytes written so far, logically    */
+    size_t   cap;           /**< capacity of base[]                         */
+    int      err;           /**< set on overflow or a refused write         */
 #if BASIC_CKPT_STREAMING
-    size_t   fill;          /* bytes currently buffered in base[]        */
-    size_t   limit;         /* payload bytes the file can hold           */
-    uint32_t crc;           /* running CRC over flushed + buffered bytes */
+    size_t   fill;          /**< bytes currently buffered in base[]         */
+    size_t   limit;         /**< payload bound, BASIC_CKPT_PAYLOAD_MAX      */
+    uint32_t crc;           /**< running CRC over the flushed bytes         */
 #endif
 } basic_ckpt_wr_t;
+/** Deserialization cursor for basic_ckpt_read(). */
 typedef struct { const uint8_t *base; size_t pos, len; int err; } basic_ckpt_rd_t;
 
 #if BASIC_RECLAIM_ENABLE
-/* Re-run the value serializer into one selected output window. No NVM writes
- * occur here; the owner writes at most one chunk per scheduler callback.
- * This trades bounded rescanning for avoiding a whole-state RAM buffer. */
+/** Output window for tiku_basic_reclaim.inl: while active, ckpt_w() copies
+ *  only payload bytes [start, start + size) into out and writes no NVM, so the
+ *  state is serialized a chunk at a time without a whole-state buffer. */
 static struct {
     int active;
     uint8_t *out;
@@ -299,10 +235,11 @@ static struct {
 static int ckpt_flush(basic_ckpt_wr_t *w);
 #endif
 
-/*
- * Append n bytes of state.  The 51 call sites are purely sequential -- nothing
- * seeks or back-patches -- which is what makes the streaming mode below a drop-in
- * substitution for a single large buffer.
+/**
+ * @brief Append @p n bytes of state to @p w (or only count or window them).
+ *
+ * Callers write strictly in sequence -- nothing seeks or back-patches -- so
+ * the same calls serve a whole image, a streamed chunk and a reclaim window.
  */
 static void
 ckpt_w(basic_ckpt_wr_t *w, const void *src, size_t n)
@@ -363,6 +300,7 @@ ckpt_w(basic_ckpt_wr_t *w, const void *src, size_t n)
 #endif
 }
 
+/** @brief Read @p n bytes; past the end, zero @p dst and set r->err. */
 static void
 ckpt_r(basic_ckpt_rd_t *r, void *dst, size_t n)
 {
@@ -372,12 +310,15 @@ ckpt_r(basic_ckpt_rd_t *r, void *dst, size_t n)
 }
 
 /*---------------------------------------------------------------------------*/
-/* PROGRAM IDENTITY (binds a checkpoint to the program it was captured from)   */
+/* PROGRAM IDENTITY                                                          */
 /*---------------------------------------------------------------------------*/
 
-/* Incremental CRC-32 (reflected, poly 0xEDB88320): seed with 0xFFFFFFFF and
- * XOR the result with 0xFFFFFFFF to finalize.  Backs both the program identity
- * below and the region-slot payload CRC (basic_ckpt_crc32). */
+/**
+ * @brief Incremental CRC-32 (reflected, poly 0xEDB88320).
+ *
+ * Seed with 0xFFFFFFFF and XOR the result with 0xFFFFFFFF to finalize.  Backs
+ * the program identity, the prog.ckpt CRC and the reclaim image CRC.
+ */
 static uint32_t
 basic_crc32_step(uint32_t c, const uint8_t *p, size_t n)
 {
@@ -395,13 +336,12 @@ basic_crc32_step(uint32_t c, const uint8_t *p, size_t n)
 
 #if BASIC_CKPT_STREAMING
 /**
- * @brief Push the buffered chunk into the slot's payload area.
+ * @brief Append the buffered chunk to the open prog.ckpt writer.
  *
- * Folds the chunk into the running CRC on the way out, so the checksum is
- * computed once, incrementally, and never needs the whole payload resident.
- * The destination offset is (pos - fill), since w->pos already counts them.
+ * Folds the chunk into the running CRC on the way out, so the checksum never
+ * needs the whole payload resident.
  *
- * @return 0 on success, -1 if the backend refused the write (w->err is set).
+ * @return 0 on success, -1 if the store refused the write (w->err is set).
  */
 static int
 ckpt_flush(basic_ckpt_wr_t *w)
@@ -410,8 +350,7 @@ ckpt_flush(basic_ckpt_wr_t *w)
         return 0;
     }
     w->crc = basic_crc32_step(w->crc, w->base, w->fill);
-    /* Append-only: the store's writer holds the position, so the old
-     * (pos - fill) destination arithmetic is gone with the fixed slot. */
+    /* Append-only: the store's writer holds the position. */
     if (tiku_tfs_write_chunk(&basic_ckpt_wr, w->base, w->fill) != TFS_OK) {
         w->err = 1;
         return -1;
@@ -422,12 +361,12 @@ ckpt_flush(basic_ckpt_wr_t *w)
 #endif
 
 /**
- * @brief CRC-32 fingerprint of the in-memory program (each line's number +
- *        text, in ascending line order -- the shape LIST / SAVE emit).
+ * @brief CRC-32 fingerprint of the in-memory program (each line's number and
+ *        stored text, in line order).
  *
- * The checkpoint stores the fingerprint of the program that was RUNNING when it
- * was captured, and RESUME recomputes it against what is actually loaded,
- * rejecting a mismatch.  Empty program -> 0.
+ * The checkpoint stores the fingerprint of the program that was running when
+ * it was captured, and RESUME rejects it unless the loaded program matches.
+ * An empty program gives 0.
  *
  * @note That check is what keeps a basic_pc / GOSUB / FOR stack full of line
  *       numbers from being replayed against a different or edited program.
@@ -467,7 +406,7 @@ basic_prog_identity(void)
  * @brief Serialize the reified execution state into @p w.
  *
  * Order matters only in that it must mirror basic_ckpt_read().  The string
- * block writes heap_pos and the heap prefix BEFORE the strvar offsets, so the
+ * block writes heap_pos and the heap prefix before the strvar offsets, so the
  * reader can validate each offset against the restored heap length.
  */
 static void
@@ -502,7 +441,7 @@ basic_ckpt_write(basic_ckpt_wr_t *w)
     ckpt_w(w, basic_namedstrvar_names,
            (size_t)TIKU_BASIC_NAMEDVAR_LEN * TIKU_BASIC_NAMEDVAR_MAX);
     ckpt_w(w, &basic_str_heap_pos, sizeof(basic_str_heap_pos));
-    ckpt_w(w, basic_str_heap, basic_str_heap_pos);          /* used prefix only */
+    ckpt_w(w, basic_str_heap, basic_str_heap_pos);          /* used prefix */
     for (i = 0; i < BASIC_VAR_TABLE_LEN; i++) {
         uint16_t off = (basic_strvars[i] == NULL)
                      ? 0xFFFFu
@@ -521,15 +460,14 @@ basic_ckpt_write(basic_ckpt_wr_t *w)
     ckpt_w(w, &basic_prng_seeded, sizeof(basic_prng_seeded));
 
 #if TIKU_BASIC_SUBS_ENABLE
-    /* SUB call frames + LOCAL restore stack: a program checkpointed mid-CALL
-     * resumes inside the SUB with its LOCALs intact, instead of the frame
-     * silently vanishing (ENDSUB falling through, LOCALs never restored). */
+    /* SUB call frames and the LOCAL restore stack, so a program checkpointed
+     * mid-CALL resumes inside the SUB with its LOCALs intact. */
     ckpt_w(w, &basic_call_sp, 1);
     for (i = 0; i < basic_call_sp; i++)
         ckpt_w(w, &basic_frames[i], sizeof(basic_frame_t));
     ckpt_w(w, &basic_scope_sp, 1);
     for (i = 0; i < basic_scope_sp; i++) {
-        /* Serialize old_str as a heap OFFSET (a raw pointer would not survive
+        /* Serialize old_str as a heap offset (a raw pointer would not survive
          * a power cut), mirroring the strvar block above. */
         basic_scope_t *s = &basic_scope[i];
         uint16_t soff = (!s->is_str || s->old_str == NULL)
@@ -544,8 +482,7 @@ basic_ckpt_write(basic_ckpt_wr_t *w)
 #endif
 #if TIKU_BASIC_DEFN_ENABLE
     /* DEF FN table: active definitions only (lookup is by name, so restoring
-     * them compacted into slots 0..n-1 is fine).  Without this, resume clears
-     * basic_defns and every post-resume FN...() errors. */
+     * them compacted into slots 0..n-1 is fine). */
     {
         uint8_t nd = 0, k;
         for (k = 0; k < TIKU_BASIC_DEFN_MAX; k++)
@@ -558,9 +495,9 @@ basic_ckpt_write(basic_ckpt_wr_t *w)
 #endif
 
 #if TIKU_BASIC_EVERY_MAX > 0
-    /* F1 follow-up: EVERY timer slots.  Only interval + stmt are saved;
-     * next_due is re-armed relative to the current clock on restore (an
-     * absolute deadline is meaningless after the clock resets). */
+    /* EVERY timer slots.  Only interval + stmt are saved; next_due is
+     * re-armed relative to the current clock on restore (an absolute
+     * deadline is meaningless after the clock resets). */
     {
         uint8_t n = 0, k;
         for (k = 0; k < TIKU_BASIC_EVERY_MAX; k++) if (basic_everys[k].active) n++;
@@ -574,7 +511,7 @@ basic_ckpt_write(basic_ckpt_wr_t *w)
 #endif
 #if TIKU_BASIC_ONCHG_MAX > 0
     /* ON CHANGE registrations: path + baseline value + handler.  The runtime
-     * node cache / armed / pending (F2) are re-derived by the mode tick. */
+     * node cache, armed and pending flags are re-derived by the mode tick. */
     {
         uint8_t n = 0, k;
         for (k = 0; k < TIKU_BASIC_ONCHG_MAX; k++) if (basic_onchgs[k].active) n++;
@@ -590,10 +527,9 @@ basic_ckpt_write(basic_ckpt_wr_t *w)
 #endif
 #if TIKU_BASIC_ARRAYS_ENABLE
     /* DIMmed arrays, budget-capped (BASIC_CKPT_ARR_BYTES).  Each slot writes a
-     * present byte; a DIMmed array that would overflow the budget writes
-     * present=0 and is left to reset on resume (documented limitation, not a
-     * corruption).  Numeric data is verbatim longs; string elements are heap
-     * offsets, mirroring the strvar block. */
+     * present byte; an array that would overflow the budget writes present=0
+     * and is not restored.  Numeric data is verbatim longs; string elements
+     * are heap offsets, mirroring the strvar block. */
     {
         uint16_t budget = BASIC_CKPT_ARR_BYTES;
         uint8_t  which, slot;
@@ -652,10 +588,10 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
     uint8_t  u8, sp;
     uint32_t pid;
 
-    /* Program-identity gate FIRST, before any state is touched: a checkpoint's
+    /* Program-identity gate first, before any state is touched: a checkpoint's
      * PC and GOSUB/FOR line numbers are only meaningful for the exact program
      * it was captured from.  If the loaded program differs (edited, or a
-     * different SAVE clobbered the store since), reject cleanly -> fresh RUN. */
+     * different SAVE clobbered the store since), reject cleanly: fresh RUN. */
     ckpt_r(&r, &pid, sizeof(pid));
     if (r.err || pid != basic_prog_identity()) {
         return -1;
@@ -776,7 +712,7 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
             ckpt_r(&r, &basic_onchgs[k].is_gosub, 1);
             basic_onchgs[k].active = 1;
 #if TIKU_BASIC_ONCHG_EVENT
-            /* Arena memory is not zeroed: reset the F2 runtime fields
+            /* Arena memory is not zeroed: reset the event runtime fields
              * explicitly; the mode tick re-arms on its next pass. */
             basic_onchgs[k].node    = NULL;
             basic_onchgs[k].armed   = 0;
@@ -837,7 +773,7 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
 }
 
 /*---------------------------------------------------------------------------*/
-/* DURABLE SLOT                                                               */
+/* DURABLE CHECKPOINT                                                        */
 /*---------------------------------------------------------------------------*/
 
 #if BASIC_NVM_ON_REGION
@@ -849,9 +785,12 @@ basic_ckpt_crc32(const uint8_t *p, size_t n)
     return basic_crc32_step(0xFFFFFFFFu, p, n) ^ 0xFFFFFFFFu;
 }
 
-/** @brief Invalidate the region checkpoint (magic := 0; one word program).
- *  Idempotent: skips the NVM write when the slot is already invalid, so
- *  repeated calls (e.g. per-line edits) cost no flash sector erase. */
+/**
+ * @brief Delete prog.ckpt if it exists.
+ *
+ * Idempotent: with no checkpoint it writes nothing, so repeated calls cost no
+ * NVM write (on flash even a one-word delete is a sector operation).
+ */
 static void
 basic_ckpt_invalidate(void)
 {
@@ -861,9 +800,6 @@ basic_ckpt_invalidate(void)
     if (fs == NULL) {
         return;
     }
-    /* Still idempotent, and for the same reason: stat first so the common
-     * "already invalid" case costs no NVM write (a delete is one dirent-gate
-     * word, but on erase-based flash even that is a sector operation). */
     if (tiku_tfs_stat(fs, BASIC_CKPT_FILE, &len) != TFS_OK) {
         return;
     }
@@ -871,9 +807,9 @@ basic_ckpt_invalidate(void)
 }
 
 /**
- * @brief Serialize the current state and commit it to the region slot in ONE
- *        backend write ([magic][ver][len][crc][payload]; CRC gates validity).
- * @return 0 on success, -1 on serialization failure or no usable backend.
+ * @brief Serialize the current state into prog.ckpt: the payload, then the
+ *        [version][len][crc] trailer; the store commit makes it valid.
+ * @return 0 on success, -1 on serialization failure or no usable store.
  */
 static int
 basic_ckpt_save(void)
@@ -888,9 +824,7 @@ basic_ckpt_save(void)
     if (basic_ckpt_wr.active) {
         tiku_tfs_abort(&basic_ckpt_wr);   /* an abandoned save, released */
     }
-    /* The file reserves what this checkpoint writes: the worst case (256 KB on
-     * an Apollo510) failed on a store without that much contiguous room, and
-     * a commit keeps only the slots it filled anyway. */
+    /* The file reserves only what this checkpoint writes, measured first. */
 #if BASIC_CKPT_STREAMING
     memset(&w, 0, sizeof w);              /* base NULL: measure the payload */
     w.limit = BASIC_CKPT_PAYLOAD_MAX;
@@ -900,10 +834,9 @@ basic_ckpt_save(void)
                         w.pos + BASIC_CKPT_TRAILER) != TFS_OK) {
         return -1;
     }
-    /* Payload appended in bounded chunks -- RAM cost is one chunk regardless of
-     * program size -- then the trailer. TFS's dirent flip is the commit point,
-     * so a cut anywhere before it leaves the PREVIOUS checkpoint intact (the
-     * fixed slot could only leave NONE, because it had no room for a shadow). */
+    /* Payload in bounded chunks, then the trailer.  The store's directory
+     * flip is the commit point, so a cut before it leaves the previous
+     * checkpoint. */
     w.base  = basic_ckpt_chunk;
     w.cap   = sizeof basic_ckpt_chunk;
     w.pos   = 0;
@@ -918,12 +851,11 @@ basic_ckpt_save(void)
     }
     tr[0] = BASIC_CKPT_VERSION;
     tr[1] = (uint32_t)w.pos;
-    tr[2] = w.crc ^ 0xFFFFFFFFu;           /* same value basic_ckpt_crc32 gives */
+    tr[2] = w.crc ^ 0xFFFFFFFFu;           /* = basic_ckpt_crc32(payload) */
 #else
-    /* Erase-based flash: stage the whole image and hand it over in ONE
-     * write_chunk.  Chunked appends would land repeatedly inside the same 4 KB
-     * sector, multiplying erases on something the interpreter does every few
-     * seconds -- which is the entire reason this path exists. */
+    /* Erase-based flash: stage the whole image and hand it over in one
+     * write_chunk, since chunked appends would erase a 4 KB sector once per
+     * chunk. */
     w.base = basic_ckpt_scratch;
     w.pos  = 0;
     w.cap  = sizeof basic_ckpt_scratch;
@@ -954,9 +886,8 @@ basic_ckpt_save(void)
 /**
  * @brief Restore state from the checkpoint file if it holds a valid one.
  *
- * Read IN PLACE: the store hands back a pointer straight into memory-mapped
- * NVM, and because a file's slots are contiguous that stays ONE pointer even
- * across several of them.  Nothing is copied to RAM to be parsed.
+ * Reads in place: the store maps the file, and a file's slots are contiguous,
+ * so one pointer covers the whole image.
  *
  * @return 0 if a checkpoint was restored, -1 if none / stale / short / corrupt.
  */
@@ -994,9 +925,12 @@ basic_ckpt_load(void)
 
 #else  /* byte-writable slot: gate-last multi-store */
 
-/** @brief Invalidate the durable checkpoint (gate := 0).  Idempotent: skips the
- *  MPU-unlock + store when the gate is already clear (repeated per-edit calls
- *  stay free). */
+/**
+ * @brief Invalidate the durable checkpoint (gate := 0).
+ *
+ * Idempotent: skips the MPU unlock and the store when the gate is already
+ * clear, so repeated calls cost nothing.
+ */
 static void
 basic_ckpt_invalidate(void)
 {
@@ -1013,9 +947,9 @@ basic_ckpt_invalidate(void)
 }
 
 /**
- * @brief Serialize the current state into the durable slot, gate-last.
- * @return 0 on success, -1 if serialization failed (buffer undersized -- can't
- *         happen for the compile-time-bounded core state, but checked anyway).
+ * @brief Serialize the current state into the durable slot, gate last.
+ * @return 0 on success, -1 if the payload overflowed the slot (the
+ *         compile-time bound makes that unreachable).
  */
 static int
 basic_ckpt_save(void)
@@ -1035,7 +969,7 @@ basic_ckpt_save(void)
         len32 = (uint32_t)w.pos;
         memcpy(basic_ckpt_buf + 4, &ver, 4);
         memcpy(basic_ckpt_buf + 8, &len32, 4);
-        memcpy(basic_ckpt_buf, &magic, 4);         /* gate LAST -> now valid */
+        memcpy(basic_ckpt_buf, &magic, 4);         /* gate last: now valid */
     }
     tiku_mpu_lock_nvm(mpu);
     return w.err ? -1 : 0;
@@ -1062,7 +996,7 @@ basic_ckpt_load(void)
 #endif /* BASIC_NVM_ON_REGION */
 
 /*---------------------------------------------------------------------------*/
-/* CADENCE (substrate-aware pacing of saves)                                  */
+/* CHECKPOINT CADENCE                                                        */
 /*---------------------------------------------------------------------------*/
 
 #if TIKU_BASIC_CKPT_INTERVAL_S > 0
@@ -1073,9 +1007,8 @@ static unsigned long basic_ckpt_last_s;
 /**
  * @brief 1 when a checkpoint is due at this yield boundary.
  *
- * Interval 0 (byte-writable FRAM-class NVM) checkpoints every batch; a nonzero
- * interval (flash sector-erase wear, MRAM bootrom-call jitter) allows at most
- * one save per TIKU_BASIC_CKPT_INTERVAL_S, counted from PERSIST ON.
+ * Interval 0 checkpoints every batch; a nonzero TIKU_BASIC_CKPT_INTERVAL_S
+ * allows at most one save per interval since PERSIST ON or the last save.
  */
 static int
 basic_ckpt_due(void)
@@ -1098,12 +1031,15 @@ basic_ckpt_mark(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* ARM / DISARM (the PERSIST statement)                                       */
+/* ARM AND DISARM                                                            */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Arm (1) or disarm (0) checkpointing.  Disarming drops any slot;
- *  arming restarts the cadence interval so the first save lands one full
- *  interval after PERSIST ON. */
+/**
+ * @brief Arm (1) or disarm (0) checkpointing, for PERSIST ON / OFF.
+ *
+ * Disarming drops any checkpoint; arming restarts the cadence interval, so
+ * the first save lands one full interval after PERSIST ON.
+ */
 static void
 basic_ckpt_arm(int on)
 {
@@ -1117,8 +1053,8 @@ basic_ckpt_arm(int on)
 
 #else  /* !TIKU_BASIC_PERSIST_RUN_ENABLE */
 
-/* Stubs for the call sites the run loop / mode driver reach unconditionally
- * (basic_ckpt_armed is always 0 here, so these never actually fire).  arm() is
+/* Stubs for the call sites the run loop, mode driver and REPL reach
+ * unconditionally: nothing is saved, and a load finds no checkpoint.  arm() is
  * omitted: it is reached only from exec_persist's enabled branch, which is
  * compiled out on this build, so defining it would trip -Wunused-function. */
 static int  basic_ckpt_save(void)       { return -1; }

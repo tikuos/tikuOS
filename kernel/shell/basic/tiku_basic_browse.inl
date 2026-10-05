@@ -7,14 +7,14 @@
  *
  * tiku_basic_browse.inl - a tiny HTML-to-text renderer for BASIC.
  *
- * Strips tags, skips script and style contents, decodes common entities and turns
- * block tags into breaks.  Deliberately tiny -- a lynx-style view of a simple page,
- * not a parser: unknown tags are dropped and attributes ignored.
+ * Strips tags, skips script and style contents, decodes common entities and
+ * turns block tags into breaks.  A lynx-style view of a simple page, not a
+ * parser: unknown tags are dropped and attributes ignored.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* Case-insensitive: does @p p start with the lowercase literal @p lit? */
+/** @brief 1 when @p p starts with the lowercase @p lit, in any case. */
 static int
 basic_ci_starts(const char *p, const char *lit)
 {
@@ -27,8 +27,10 @@ basic_ci_starts(const char *p, const char *lit)
     return 1;
 }
 
-/* Does the tag at @p p (pointing at '<') open/close a block element, i.e.
- * should it become a line break in the text rendering? */
+/**
+ * @brief 1 when the tag at @p p (at its '<') opens or closes a block element,
+ *        which the text rendering turns into a line break.
+ */
 static int
 basic_html_block(const char *p)
 {
@@ -56,9 +58,15 @@ basic_html_block(const char *p)
            !strcmp(name, "table") || !strcmp(name, "title");
 }
 
-/* Decode the HTML entity at @p p (pointing at '&'); set *adv to the bytes
- * consumed and return the decoded character.  Handles the common named
- * entities plus decimal &#NN;; anything else passes '&' through literally. */
+/**
+ * @brief Decode the HTML entity at @p p (at its '&').
+ *
+ * Handles the common named entities and decimal &#NN;; anything else passes
+ * the '&' through literally.
+ *
+ * @param adv  Receives the number of bytes consumed.
+ * @return The decoded character.
+ */
 static char
 basic_html_entity(const char *p, int *adv)
 {
@@ -86,16 +94,20 @@ basic_html_entity(const char *p, int *adv)
     return '&';
 }
 
-/* Render HTML @p html to plain text.  If @p out is non-NULL, write up to
- * outcap-1 bytes there (NUL-terminated); otherwise print it via SHELL_PRINTF
- * (line-buffered).  Skips a leading HTTP header block if one is present. */
+/**
+ * @brief Render HTML @p html as plain text.
+ *
+ * With @p out, up to @p outcap - 1 bytes go there, NUL-terminated; with NULL
+ * the text is printed through SHELL_PRINTF, a line at a time.  A leading HTTP
+ * header block, if present, is skipped.
+ */
 static void
 basic_html_render(const char *html, char *out, size_t outcap)
 {
     const char *p, *body;
     char   line[100];
     size_t li = 0, oi = 0;
-    int    in_tag = 0, skip = 0, sp = 1;     /* sp: at a fresh line / after space */
+    int    in_tag = 0, skip = 0, sp = 1;     /* sp: line start or after space */
 
     body = strstr(html, "\r\n\r\n");         /* drop HTTP headers if present */
     p = body ? body + 4 : html;

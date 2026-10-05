@@ -7,8 +7,9 @@
  *
  * tiku_basic_config.h - compile-time tunables for the BASIC engine.
  *
- * Every macro is #ifndef-guarded so a build can override it.  They control buffer
- * sizes, optional language features and which hardware bridges are compiled in.
+ * Each tunable is #ifndef-guarded so a build can override it.  They set buffer
+ * sizes, optional language features and which hardware bridges are compiled
+ * in.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -16,44 +17,43 @@
 #ifndef TIKU_BASIC_CONFIG_H_
 #define TIKU_BASIC_CONFIG_H_
 
-/* Line debugger: bounded state, no expression evaluation or memory writes. */
+/** Line debugger (DEBUG): bounded state; it never evaluates an expression or
+ *  writes interpreter memory. */
 #ifndef TIKU_BASIC_DEBUG_ENABLE
 #define TIKU_BASIC_DEBUG_ENABLE 1
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* MEMORY TIER -- drives the default limits below                            */
+/* MEMORY TIER                                                               */
 /*---------------------------------------------------------------------------*/
 
-/* The interpreter's entire working set (line table, variables, control-flow
- * stacks, string heap, arrays) is allocated from ONE kernel arena, sized from
- * the limits below (see tiku_basic_arena.inl) and drawn from the AUTO memory
- * tier.  So a bigger limit just asks the arena for more -- it does NOT cost
- * static BSS (only ~50 bytes of pointers are fixed).  Since v0.06 that is true
- * of the SAVE path too: on the region-backed parts SAVE streams through a fixed
- * 4 KB chunk and LOAD parses the program in place, so NOTHING static scales with
- * PROGRAM_LINES there.  The DURABLE slot still does (= PROGRAM_LINES *
- * (LINE_MAX + 8)), and on MSP430/host so does the staging buffer.
+/* The interpreter's working set (line table, variables, control-flow stacks,
+ * EVERY and ON CHANGE tables, string heap, DEF FN, arrays, big buffers) comes
+ * from one kernel arena, sized from the limits below (tiku_basic_arena.inl)
+ * and drawn from the AUTO memory tier, so a larger limit asks the arena for
+ * more rather than costing static BSS.  On region parts SAVE streams through a
+ * 4 KB chunk and LOAD parses the program in place, so no static buffer scales
+ * with PROGRAM_LINES; the saved file does, and on MSP430/host so does the
+ * staging buffer.
  *
- * The sensible default therefore depends on how much that tier can give, which
- * is a property of the board.  Three tiers:
+ * The defaults follow what the tier can give, which is a property of the
+ * board:
  *
- *   BIG  - Apollo (3 MB / 384 KB SSRAM) and RP2350 (520 KB SRAM): generous.
- *   FRAM - MSP430 FR5994/FR6989 with MEMORY_MODEL=large: the arena routes to
- *          HIFRAM (256 KB FRAM), so the 8 KB SRAM is not the bound -> roomy.
- *   else - FR5969 (2 KB SRAM) and the host test harness: the original lean
- *          limits, left EXACTLY as they were.
+ *   BIG  - Ambiq, RP2350, Nordic, STM32N6, RA8P1 and ESP32-C61: generous.
+ *   FRAM - MSP430 with MEMORY_MODEL=large: the arena draws on the HIFRAM tier
+ *          pool (TIKU_TIER_HIFRAM_SIZE), so SRAM is not the bound.
+ *   else - small-model MSP430 and the host harness: the lean limits.
  *
  * Every macro stays -D-overridable; these branches only choose the default. */
 
-/*
- * What to CALL the non-volatile memory in user-facing text (HELP says "SAVE /
+/**
+ * Name of the non-volatile memory in user-facing text (HELP prints "SAVE /
  * LOAD persist across reboots in <label>").  Device headers declare the real
- * technology -- FRAM / RRAM / MRAM / Flash -- and kernel/memory/tiku_nvm_map.h
- * carries the canonical fallback for a header that forgot to.  BASIC needs its
- * own copy of that fallback because the host BASIC harness deliberately stubs
- * tiku_mem.h out (it defines TIKU_MEM_H_ to keep the real one from being read),
- * so nvm_map.h's definition never reaches a host build.
+ * technology -- FRAM, RRAM, MRAM or Flash.
+ *
+ * @note kernel/memory/tiku_nvm_map.h carries the same fallback, but nothing
+ *       BASIC includes on a host build reaches it (the host harness stubs
+ *       tiku_shell.h), so BASIC repeats it here.
  */
 #ifndef TIKU_DEVICE_NVM_LABEL
 #define TIKU_DEVICE_NVM_LABEL     "NVM"
@@ -62,102 +62,77 @@
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
     defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
     defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C61)
-/* Nordic runs the BIG tier too (2026-07: it previously ran the middle FRAM
- * tier, an MSP430-class 96-line BASIC on Ambiq-class silicon).  The LM20's
- * tier arena lives in its own 256 KB SRAM bank (RAM2), so it takes the
- * full BIG defaults; the L15 shares 240 KB with TLS/radio, so it caps
- * PROGRAM_LINES below (capacity is the only lever that needs trimming --
- * the string sizes are pure win). */
-#define TIKU_BASIC_TIER_BIG  1
+/* Nordic is BIG as well: the LM20's arena has its own 256 KB SRAM bank
+ * (RAM2), and the L15, which shares its SRAM with TLS and the radio, caps
+ * PROGRAM_LINES below. */
+#define TIKU_BASIC_TIER_BIG  1         /**< generous defaults */
 #elif defined(TIKU_MEMORY_MODEL_LARGE)
-#define TIKU_BASIC_TIER_FRAM 1
+#define TIKU_BASIC_TIER_FRAM 1         /**< MSP430 large model: HIFRAM arena */
 #endif
 
 /* The ESP32-C61 runs its image from its 320 KB SRAM, leaving the SRAM tier no
  * room for a BIG arena; the arena lives in the in-package PSRAM instead, which
- * BASIC attaches and its request admits (TIKU_MEM_ALLOW_EXTERNAL).  The floor
- * is the smallest PSRAM the part ships with. */
+ * BASIC attaches and its request admits (TIKU_MEM_ALLOW_EXTERNAL). */
 #if defined(PLATFORM_ESP32C61)
+/** The arena may come from external memory. */
 #define TIKU_BASIC_ARENA_EXTERNAL     1
+/** Smallest PSRAM the part ships with: the arena's build-time bound. */
 #define TIKU_BASIC_ARENA_EXTERNAL_MIN (2UL * 1024UL * 1024UL)
 #endif
 
-/* Apollo510 (Apollo5) has the most RAM of the BIG-class parts -- 512 KB TCM
- * plus 3 MB SSRAM -- so it gets the largest PROGRAM_LINES.  It is also
- * PLATFORM_AMBIQ, so it already inherits every BIG secondary limit above; only
- * the program size differs from Apollo4 Lite / RP2350. */
+/* Apollo510 has 512 KB TCM plus 3 MB SSRAM, so it gets a larger
+ * PROGRAM_LINES; as PLATFORM_AMBIQ it inherits every other BIG limit. */
 #if defined(AM_PART_APOLLO510)
-#define TIKU_BASIC_TIER_HUGE 1
+#define TIKU_BASIC_TIER_HUGE 1         /**< BIG, with more program lines */
 #endif
 
 /*---------------------------------------------------------------------------*/
 /* CORE LIMITS                                                               */
 /*---------------------------------------------------------------------------*/
 
-/* Uniform across every platform: a BASIC line -- and each stored program line
- * -- can be this long everywhere, so a command that fits on Apollo also fits on
- * RP2350/MSP430 (portable, no silent per-part truncation of e.g. an HTTPPOST$
- * with a JSON body).  RAM is scaled instead via TIKU_BASIC_PROGRAM_LINES (how
- * MANY lines fit) per tier below.  The interactive reader is line_buf[LINE_MAX +
- * 16]; keeping LINE_MAX <= 255 keeps every byte index within a uint8_t. */
+/**
+ * Longest BASIC line, typed or stored, the same on every platform: a line that
+ * fits on one part fits on all (no per-part truncation of, e.g., an HTTPPOST$
+ * with a JSON body).  RAM scales through TIKU_BASIC_PROGRAM_LINES instead.
+ *
+ * @note The interactive reader is basic_mode_line[LINE_MAX + 16]; keeping
+ *       LINE_MAX <= 255 keeps every byte index within a uint8_t.
+ */
 #ifndef TIKU_BASIC_LINE_MAX
 #define TIKU_BASIC_LINE_MAX        144
 #endif
 
-/* PROGRAM_LINES scales program CAPACITY (line count) to the arena/RAM -- the
- * knob that varies per platform now that LINE_MAX is uniform.  It sizes the
- * prog[] arena block (PROGRAM_LINES * LINE_MAX) and the DURABLE save file
- * (PROGRAM_LINES * (LINE_MAX + 8)).  On the region-backed parts that file is
- * prog.bas in /data, so what caps it is the STORE's capacity -- a spanned file
- * cannot exceed the free slots -- not SSRAM and no longer a carved tail (the
- * _Static_assert in tiku_basic_ckpt.inl checks prog.bas and prog.ckpt against
- * the store together); .persistent FRAM on MSP430.  Since v0.06 the save file
- * no longer implies a same-sized RAM buffer on the region parts (SAVE streams
- * through 4 KB, LOAD reads in place).
- * At LINE_MAX=144 that is ~152 bytes/line.  The last column is what prog.bas
- * costs in /data slots out of the platform's total -- the real ceiling now, and
- * why raising a line count is cheap: it buys slots, not a bigger carve.
- *   HUGE (Apollo510) 1700 -> ~239 KB prog + ~252 KB file   ( 64 of 910 slots)
- *   LM20              1400 -> ~200 KB prog + ~208 KB file   ( 52 of 420 slots)
- *   BIG  (Apollo4)    1024 -> ~147 KB prog + ~156 KB file   ( 38 of 387 slots)
- *   RP2350             512 ->  ~74 KB prog +  ~78 KB file   ( 20 of 934 slots)
- *   L15                256 ->  ~37 KB prog +  ~39 KB file   ( 10 of 293 slots)
- *   FRAM (MSP430)       96 ->  ~14 KB prog +  ~15 KB FRAM + a same-sized buffer
- *   else (host/small)   50 ->   ~7 KB
- * RP2350 is split out from Apollo (both TIER_BIG) because its arena is an order
- * of magnitude smaller, so it can't afford 1024 x 144.  Line numbers are
- * uint16_t, so the hard ceiling is 65533 lines. */
+/**
+ * Program capacity in lines, the knob that varies per platform.  Each line
+ * costs LINE_MAX + 4 bytes of arena (text, number, index) and up to
+ * LINE_MAX + 8 bytes saved (TIKU_BASIC_SAVE_BUF_BYTES).
+ *
+ * @note On region parts the saved program is prog.bas in /data, bounded by the
+ *       store's capacity: the _Static_assert in tiku_basic_ckpt.inl checks
+ *       prog.bas and prog.ckpt against the store, and the one in
+ *       tiku_basic_arena.inl checks the arena against its tier.  Line numbers
+ *       are uint16_t, so the hard ceiling is 65533 lines.
+ */
 #ifndef TIKU_BASIC_PROGRAM_LINES
 #  if defined(PLATFORM_RP2350)
+     /* RP2350's SRAM tier is far smaller than Ambiq's. */
 #    define TIKU_BASIC_PROGRAM_LINES 512
 #  elif defined(TIKU_DEVICE_NRF54L15)
-     /* 256 KB shared SRAM: a 256-line arena (~40 KB + BIG buffers) fits
-      * every L15 tier profile; the save slot (256 x 152 B) still fits the
-      * 64 KB reserved area with room for the resume snapshot. */
+     /* The L15 shares its SRAM with TLS and the radio: a 256-line arena fits
+      * every L15 tier profile. */
 #    define TIKU_BASIC_PROGRAM_LINES 256
 #  elif defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
-     /* The LM20's arena lives in its OWN SRAM bank (RAM2), so program capacity
-      * costs nothing in the primary bank -- and since v0.06 nothing static
-      * scales with PROGRAM_LINES there either (SAVE streams, LOAD reads in
-      * place, the checkpoint streams).  That makes RAM2 the binding constraint
-      * rather than .bss: 148*N + 41344 <= 261120 usable allows N <= 1484, and
-      * the reserved tail (N*152 + 8 + 16 KB checkpoint <= 256 KB) allows 1616.
-      * 1400 takes most of it while keeping ~5 KB of tier slack, 7 KB of RAM2
-      * unclaimed and 32 KB of tail spare.  The _Static_assert in
-      * tiku_basic_arena.inl checks the arena against the pool, and the one in
-      * tiku_basic_ckpt.inl checks the two slots against the tail. */
+     /* The LM20's arena lives in its own SRAM bank (RAM2), and nothing static
+      * scales with PROGRAM_LINES, so RAM2 is the bound: each line takes 148
+      * arena bytes on top of the fixed working set. */
 #    define TIKU_BASIC_PROGRAM_LINES 1400
 #  elif defined(PLATFORM_RA8P1)
-     /* SRAM is not the constraint here (1.6 MB), the /data store is: the saved
-      * program and its checkpoint both come out of the same 106 slots, so the
-      * BIG 1024 would spend a third of the store on one program.  512 keeps
-      * the same slots-per-program share RP2350 runs at. */
+     /* The /data store, not SRAM, bounds RA8P1: prog.bas and prog.ckpt both
+      * come out of it, and 1024 lines would spend a large share of it on one
+      * program. */
 #    define TIKU_BASIC_PROGRAM_LINES 512
 #  elif defined(TIKU_BASIC_TIER_HUGE)
-#    define TIKU_BASIC_PROGRAM_LINES 1700   /* capped by the 320 KB NVM save tail
-                                             * (apollo510 carries a larger tail
-                                             * than the 256 KB shared default
-                                             * precisely to hold 1700 lines) */
+#    define TIKU_BASIC_PROGRAM_LINES 1700
 #  elif defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_PROGRAM_LINES 1024
 #  elif defined(TIKU_BASIC_TIER_FRAM)
@@ -167,7 +142,8 @@
 #  endif
 #endif
 
-#ifndef TIKU_BASIC_GOSUB_DEPTH       /* sp is uint8_t -> hard max 255 */
+/** GOSUB nesting depth (gosub_sp is a uint8_t, so at most 255). */
+#ifndef TIKU_BASIC_GOSUB_DEPTH
 #  if defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_GOSUB_DEPTH   32
 #  elif defined(TIKU_BASIC_TIER_FRAM)
@@ -177,6 +153,7 @@
 #  endif
 #endif
 
+/** FOR nesting depth (at most 255). */
 #ifndef TIKU_BASIC_FOR_DEPTH
 #  if defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_FOR_DEPTH     16
@@ -187,6 +164,7 @@
 #  endif
 #endif
 
+/** WHILE / REPEAT nesting depth (at most 255). */
 #ifndef TIKU_BASIC_LOOP_DEPTH
 #  if defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_LOOP_DEPTH    16
@@ -201,10 +179,9 @@
 /* OPTIONAL LANGUAGE FEATURES                                                */
 /*---------------------------------------------------------------------------*/
 
-/* Direct memory access via PEEK / POKE. Defaults on for MSP430 (the
- * intended use case: poking GPIO / peripheral registers from BASIC),
- * off everywhere else. Set to 0 in builds where giving the user
- * unrestricted memory writes is not desirable. */
+/** PEEK / POKE direct memory access: on by default for MSP430 (peripheral
+ *  registers from BASIC) and the host harness (a simulated map), off on
+ *  other targets.  Set 0 where unrestricted memory writes are not wanted. */
 #ifndef TIKU_BASIC_PEEK_POKE_ENABLE
 #ifdef PLATFORM_MSP430
 #define TIKU_BASIC_PEEK_POKE_ENABLE 1
@@ -213,41 +190,40 @@
 #endif
 #endif
 
-/* Hardware bridges. Each can be disabled individually for ultra-thin
- * BASIC builds; defaults are on so a fresh user can blink an LED in
- * three lines. */
+/* Hardware bridges.  Each can be disabled for a thin BASIC build; all default
+ * on, so a new user can blink an LED in three lines. */
 #ifndef TIKU_BASIC_GPIO_ENABLE
-#define TIKU_BASIC_GPIO_ENABLE      1
+#define TIKU_BASIC_GPIO_ENABLE      1   /**< GPIO words */
 #endif
 #ifndef TIKU_BASIC_ADC_ENABLE
-#define TIKU_BASIC_ADC_ENABLE       1
+#define TIKU_BASIC_ADC_ENABLE       1   /**< ADC words */
 #endif
 #ifndef TIKU_BASIC_I2C_ENABLE
-#define TIKU_BASIC_I2C_ENABLE       1
+#define TIKU_BASIC_I2C_ENABLE       1   /**< I2C words */
 #endif
 #ifndef TIKU_BASIC_LED_ENABLE
-#define TIKU_BASIC_LED_ENABLE       1
+#define TIKU_BASIC_LED_ENABLE       1   /**< LED words */
 #endif
 #ifndef TIKU_BASIC_VFS_ENABLE
-#define TIKU_BASIC_VFS_ENABLE       1
+#define TIKU_BASIC_VFS_ENABLE       1   /**< VFS read/write words */
 #endif
 
 /*---------------------------------------------------------------------------*/
 /* FULL-PROFILE FEATURE GATES                                                */
 /*---------------------------------------------------------------------------*/
 
-/* These default ON for the resource-rich Cortex-M parts (RP2350 / Apollo4 /
- * Apollo510 -- all TIER_BIG) and OFF for the FRAM/small parts (MSP430), giving
- * a "lite" BASIC on MSP430 and a "full" BASIC on the bigger controllers. Each
- * is still -D-overridable. Several also need their kit compiled in (the gate
- * encodes that dependency) so an enabled feature can never dangle at link.
+/* These default on for the TIER_BIG parts and off for MSP430 and the host,
+ * giving a lite BASIC on MSP430 and a full one on the larger controllers.  Each
+ * is -D-overridable.  Several also need their kit compiled in, and the gate
+ * says so, so an enabled feature cannot dangle at link.
  *
  *   RTC   : NOW / DATE$ / TIME$ / SETTIME wall-clock (DATE$/TIME$ also need
- *           TIKU_KIT_TIME_ENABLE for the calendar breakdown -- gated in-file).
- *   MATHX : LOG / EXP / POW / ATAN + the '^' operator (fixed-point).
+ *           TIKU_KIT_TIME_ENABLE for the calendar breakdown, gated in-file).
+ *   MATHX : LOG / EXP / POW / ATAN in Q.3 fixed point.
  *   FILE  : APPEND / FWRITE / FREAD$ logging to /data (via the VFS).
- *   NET   : UDPSEND / MQTTPUB / HTTPGET$ -- requires the net kit.
+ *   NET   : UDPSEND / MQTTPUB / HTTPGET$; requires the net kit.
  *   SUBS  : multi-line SUB / FUNCTION / LOCAL / CALL with call frames. */
+/** Wall-clock words (see the list above). */
 #ifndef TIKU_BASIC_RTC_ENABLE
 #  if defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_RTC_ENABLE    1
@@ -255,6 +231,7 @@
 #    define TIKU_BASIC_RTC_ENABLE    0
 #  endif
 #endif
+/** Extended fixed-point math words. */
 #ifndef TIKU_BASIC_MATHX_ENABLE
 #  if defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_MATHX_ENABLE  1
@@ -262,6 +239,7 @@
 #    define TIKU_BASIC_MATHX_ENABLE  0
 #  endif
 #endif
+/** /data logging words. */
 #ifndef TIKU_BASIC_FILE_ENABLE
 #  if defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_FILE_ENABLE   1
@@ -269,11 +247,9 @@
 #    define TIKU_BASIC_FILE_ENABLE   0
 #  endif
 #endif
+/** Net words: on by default for TIER_BIG parts (Nordic included) that compile
+ *  the net kit. */
 #ifndef TIKU_BASIC_NET_ENABLE
-/* Net words ride the big tier's roomy buffers by default; nRF54L runs the
- * FRAM tier (BIG's buffers overflow its 256 KB SRAM) but has the full net
- * kit + CRACEN TRNG, so it opts in too -- HTTPGET$/HTTPPOST$ results are
- * simply capped at the FRAM-tier string length (status line + head fit). */
 #  if (defined(TIKU_BASIC_TIER_BIG) || defined(PLATFORM_NORDIC)) && \
       (TIKU_KIT_NET_ENABLE + 0)
 #    define TIKU_BASIC_NET_ENABLE    1
@@ -281,16 +257,16 @@
 #    define TIKU_BASIC_NET_ENABLE    0
 #  endif
 #endif
-/* BLE : BLEADV / BLEOFF / BLESEND / BLEBEACON + BLEUP / BLEGET$ -- a "serial
- *       over BLE" vocabulary on the driver-agnostic facade
- *       (interfaces/bluetooth/tiku_ble_serial), plus BLEBEACON / BLESCAN$ on
- *       the broadcast/observer facade (tiku_ble_adv).  GENERAL, not
- *       chip-specific: on whenever the build has ANY BLE radio backend,
- *       which the Makefile signals via the generic capabilities --
- *       TIKU_HAS_BLE (connection-capable: EM9305 on apollo510b) and/or
- *       TIKU_HAS_BLE_ADV (broadcast: nRF54L15 on-die RADIO).  Words for an
- *       absent capability are compiled out individually inside the .inl.
- *       -D-overridable like the rest. */
+/**
+ * BLE words: BLEADV / BLEOFF / BLESEND / BLEUP / BLEGET$, a serial-over-BLE
+ * vocabulary on the tiku_ble_serial facade, and BLEBEACON / BLESCAN$ on the
+ * broadcast facade (tiku_ble_adv).
+ *
+ * @note Not chip-specific: on whenever the build has a BLE radio backend,
+ *       which the Makefile signals with TIKU_HAS_BLE (connection-capable,
+ *       EM9305 on apollo510b) or TIKU_HAS_BLE_ADV (broadcast, the Nordic
+ *       on-die RADIO).  Words for an absent capability compile out singly.
+ */
 #ifndef TIKU_BASIC_BLE_ENABLE
 #  if (TIKU_HAS_BLE + 0) || (TIKU_HAS_BLE_ADV + 0)
 #    define TIKU_BASIC_BLE_ENABLE    1
@@ -298,10 +274,9 @@
 #    define TIKU_BASIC_BLE_ENABLE    0
 #  endif
 #endif
-/* JSON$ -- extract a value by dotted path (keys + array indices) from a JSON
- * string; the agent primitive for parsing API/LLM replies. Wraps the
- * codec/json pull-parser, so it needs TIKU_KIT_CODEC_ENABLE (which compiles
- * tikukits/codec/json). BIG-only. */
+/** JSON$: extract a value by dotted path (keys and array indices) from a JSON
+ *  string, for parsing API and LLM replies.  Wraps the codec/json pull-parser,
+ *  so it needs TIKU_KIT_CODEC_ENABLE; TIER_BIG only. */
 #ifndef TIKU_BASIC_JSON_ENABLE
 #  if defined(TIKU_BASIC_TIER_BIG) && (TIKU_KIT_CODEC_ENABLE + 0)
 #    define TIKU_BASIC_JSON_ENABLE   1
@@ -309,13 +284,15 @@
 #    define TIKU_BASIC_JSON_ENABLE   0
 #  endif
 #endif
-/* BASE64$ / SHA256$ / HMAC$ -- expose the crypto kit (base64, SHA-256,
- * HMAC-SHA256) as string builtins so programs can sign API requests
- * (Authorization headers) and hash data on-device.  Wraps
- * tikukits/crypto/{base64,sha256,hmac}; hashes return lowercase hex.
- * BIG-only.  Auto-on when the full crypto kit is compiled; the Makefile
- * otherwise forces -DTIKU_BASIC_CRYPTO_ENABLE=1 and pulls just those
- * three sources whenever BASIC is built (TIKU_BASIC_CRYPTO=0 drops it). */
+/**
+ * BASE64$ / SHA256$ / HMAC$: the crypto kit's base64, SHA-256 and HMAC-SHA256
+ * as string builtins, so programs can sign API requests and hash data on the
+ * device; hashes return lowercase hex.
+ *
+ * @note The Makefile sets it, and compiles those three kit sources, in every
+ *       BASIC build unless TIKU_BASIC_CRYPTO=0; the default below applies
+ *       when it does not.
+ */
 #ifndef TIKU_BASIC_CRYPTO_ENABLE
 #  if defined(TIKU_BASIC_TIER_BIG) && (TIKU_KIT_CRYPTO_ENABLE + 0)
 #    define TIKU_BASIC_CRYPTO_ENABLE 1
@@ -325,25 +302,25 @@
 #endif
 
 /* ERR category codes returned by the ERR() builtin inside an ON ERROR
- * handler.  The classification is deliberately coarse: it exists so a
- * handler can branch on "is this worth retrying?" (NET) versus "is my
- * program wrong?" (RANGE/DIVZERO/TYPE).  Sites that cannot cheaply
- * classify leave the error as GENERAL.  ERL() returns the line number. */
-#define TIKU_BASIC_ERR_GENERAL  1   /* uncategorised */
-#define TIKU_BASIC_ERR_SYNTAX   2   /* malformed statement/expression */
-#define TIKU_BASIC_ERR_TYPE     3   /* string/number type mismatch */
-#define TIKU_BASIC_ERR_RANGE    4   /* array subscript / bounds */
-#define TIKU_BASIC_ERR_DIVZERO  5   /* divide (or MOD) by zero */
-#define TIKU_BASIC_ERR_NET      6   /* HTTP / MQTT / socket failure */
-#define TIKU_BASIC_ERR_IO       7   /* VFS / file access */
-#define TIKU_BASIC_ERR_NOMEM    8   /* string heap / arena exhausted */
+ * handler.  The classification is coarse: it lets a handler branch on "is
+ * this worth retrying?" (NET) versus "is my program wrong?" (RANGE, DIVZERO,
+ * TYPE).  Sites that cannot cheaply classify leave the error as GENERAL.
+ * ERL() returns the line number. */
+#define TIKU_BASIC_ERR_GENERAL  1   /**< uncategorised */
+#define TIKU_BASIC_ERR_SYNTAX   2   /**< malformed statement/expression */
+#define TIKU_BASIC_ERR_TYPE     3   /**< string/number type mismatch */
+#define TIKU_BASIC_ERR_RANGE    4   /**< array subscript / bounds */
+#define TIKU_BASIC_ERR_DIVZERO  5   /**< divide (or MOD) by zero */
+#define TIKU_BASIC_ERR_NET      6   /**< HTTP / MQTT / socket failure */
+#define TIKU_BASIC_ERR_IO       7   /**< VFS / file access */
+#define TIKU_BASIC_ERR_NOMEM    8   /**< string heap / arena exhausted */
 
-/* MQTTWAIT$ inbound payload cap.  Received PUBLISH bodies longer than
- * this are truncated.  Kept small (commands are short) so the static
- * capture buffer costs little SRAM. */
+/** MQTTWAIT$ inbound payload cap: longer PUBLISH bodies are truncated.  Small,
+ *  since commands are short and the capture buffer is static. */
 #ifndef TIKU_BASIC_MQTT_RX_CAP
 #  define TIKU_BASIC_MQTT_RX_CAP  256
 #endif
+/** Multi-line SUB / FUNCTION / LOCAL / CALL (see the list above). */
 #ifndef TIKU_BASIC_SUBS_ENABLE
 #  if defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_SUBS_ENABLE   1
@@ -356,39 +333,40 @@
 /* HTTP REQUEST ASSEMBLY BUDGET (HTTPGET$ / HTTPPOST$)                        */
 /*---------------------------------------------------------------------------*/
 
-/* Single source of truth for the bounded inputs basic_https_get() concatenates
- * into its request buffer.  The caller (tiku_basic_string.inl) sizes its
- * host/path/content-type buffers from these; HTTPHEADER bounds its block to
- * TIKU_BASIC_HTTP_HDRS_MAX; and a _Static_assert in tiku_basic_https.inl proves
- * the worst-case assembled request still fits TIKU_BASIC_HTTP_REQ_MAX.  So the
- * req[] budget is enforced at compile time across all three files -- bumping any
- * cap without growing REQ_MAX breaks the build instead of overflowing req[]. */
+/* The bounded inputs basic_https_get() concatenates into its request buffer,
+ * defined once.  Callers size their host, path and content-type buffers from
+ * these; HTTPHEADER bounds its block to TIKU_BASIC_HTTP_HDRS_MAX; and a
+ * _Static_assert in tiku_basic_https.inl checks that the worst-case request
+ * fits TIKU_BASIC_HTTP_REQ_MAX, so raising a cap without REQ_MAX breaks the
+ * build instead of overflowing req[]. */
 #ifndef TIKU_BASIC_HTTP_HOST_MAX
-#define TIKU_BASIC_HTTP_HOST_MAX    64
+#define TIKU_BASIC_HTTP_HOST_MAX    64    /**< host name, incl. NUL */
 #endif
 #ifndef TIKU_BASIC_HTTP_PATH_MAX
-#define TIKU_BASIC_HTTP_PATH_MAX    80
+#define TIKU_BASIC_HTTP_PATH_MAX    80    /**< request path, incl. NUL */
 #endif
 #ifndef TIKU_BASIC_HTTP_CTYPE_MAX
-#define TIKU_BASIC_HTTP_CTYPE_MAX   48
+#define TIKU_BASIC_HTTP_CTYPE_MAX   48    /**< POST content type, incl. NUL */
 #endif
 #ifndef TIKU_BASIC_HTTP_HDRS_MAX
-#define TIKU_BASIC_HTTP_HDRS_MAX    192
+#define TIKU_BASIC_HTTP_HDRS_MAX    192   /**< HTTPHEADER block */
 #endif
 #ifndef TIKU_BASIC_HTTP_REQ_MAX
-#define TIKU_BASIC_HTTP_REQ_MAX     576
+#define TIKU_BASIC_HTTP_REQ_MAX     576   /**< assembled request */
 #endif
 
 /*---------------------------------------------------------------------------*/
 /* MULTI-LETTER VARIABLE NAMES                                               */
 /*---------------------------------------------------------------------------*/
 
-/* Beyond the 26 single-letter A..Z slots, BASIC supports a small
- * pool of named variables (e.g. NAME, COUNT, X1).  Each slot
- * stores a name up to TIKU_BASIC_NAMEDVAR_LEN-1 chars (NUL-
- * terminated) plus the value cell, allocated lazily on first use.
- * Numeric and string named vars share the same maximum count but
- * occupy independent name tables, so MYVAR and MYVAR$ can coexist. */
+/**
+ * Named variables (e.g. NAME, COUNT, X1) beyond the 26 single-letter slots.
+ * Each slot holds a name of up to TIKU_BASIC_NAMEDVAR_LEN - 1 chars and a
+ * value, taken on first use.
+ *
+ * @note Numeric and string named variables share this count but have
+ *       separate name tables, so MYVAR and MYVAR$ can coexist.
+ */
 #ifndef TIKU_BASIC_NAMEDVAR_MAX
 #  if defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_NAMEDVAR_MAX  64
@@ -398,47 +376,52 @@
 #    define TIKU_BASIC_NAMEDVAR_MAX  16
 #  endif
 #endif
-/* Native builtin registry (tiku_basic_ext.h): boot-time registered
- * statement/function words from kernel services and tikukits.  Slots are a
- * few bytes of SRAM each; 0 compiles the whole feature out. */
+/** Slots in the native builtin registry (tiku_basic_ext.h), one small SRAM
+ *  entry each and shared by every registrant; the bundled words take 6.  0
+ *  compiles the registry out. */
 #ifndef TIKU_BASIC_EXT_MAX
-#define TIKU_BASIC_EXT_MAX          16      /* bundled kit uses 6; rest for
-                                            * kernel services + tikukits */
+#define TIKU_BASIC_EXT_MAX          16
 #endif
 
-/* Tier 3 (loadable.md): the runtime-loadable native-module loader
- * (tiku_basic_module.c).  Opt-in and platform-specific -- it needs an
- * executable byte-writable RRAM slot + the separately-built module blob, so
- * the Makefile turns it on only for the nordic module build. */
+/**
+ * The runtime-loadable native-module loader (tiku_basic_module.c).  Opt-in
+ * with TIKU_BASIC_MODULE_ENABLE=1 on the make line, which also builds the
+ * module image.
+ *
+ * @note The Makefile supports it only on parts with a module window (Nordic,
+ *       RP2350, Apollo4, Apollo510, MSP430 FR5994/FR6989, ESP32-C61) and stops
+ *       with an error elsewhere.
+ */
 #ifndef TIKU_BASIC_MODULE_ENABLE
 #define TIKU_BASIC_MODULE_ENABLE    0
 #endif
 
-/* Ship the bundled native words (GCD/ISQRT/BITCNT/HEXPR, tiku_basic_ext_kits
- * .inl) through the registry at boot.  On by default when the registry exists;
- * set 0 to keep the seam but drop the bundle (each word is a handler + a few
- * bytes of table). */
+/** Register the bundled native words (GCD, ISQRT, BITCNT, HEXPR, REV$,
+ *  ROMAN$; tiku_basic_ext_kits.inl) at the first BASIC session.  Set 0 to
+ *  keep the registry but drop the bundle. */
 #ifndef TIKU_BASIC_EXT_KITS
 #define TIKU_BASIC_EXT_KITS         1
 #endif
 
 #ifndef TIKU_BASIC_NAMEDVAR_LEN
-#define TIKU_BASIC_NAMEDVAR_LEN     8       /* 7 chars + NUL */
+#define TIKU_BASIC_NAMEDVAR_LEN     8       /**< 7 chars + NUL */
 #endif
 
 /*---------------------------------------------------------------------------*/
 /* STRING / DEF FN / ARRAY / SLOT / FIXED-POINT TUNABLES                     */
 /*---------------------------------------------------------------------------*/
 
-/* String variables A$..Z$ + string functions. The heap is reset at
- * the start of every RUN, so a single program run is bounded by
- * TIKU_BASIC_STR_HEAP_BYTES of total string allocation. There is no
- * GC -- if you exceed the heap mid-run, the program errors. The
- * single-statement scratch buffer caps any one string-expression
- * result at TIKU_BASIC_STR_BUF_CAP bytes. */
+/**
+ * String variables A$..Z$ and the string functions.  Strings live in a heap
+ * of TIKU_BASIC_STR_HEAP_BYTES, reset at every RUN; a full heap is compacted
+ * once, and the program errors only when the live strings fill it.
+ *
+ * @note TIKU_BASIC_STR_BUF_CAP caps any one string-expression result.
+ */
 #ifndef TIKU_BASIC_STRVARS_ENABLE
 #define TIKU_BASIC_STRVARS_ENABLE   1
 #endif
+/** String heap size, in bytes. */
 #ifndef TIKU_BASIC_STR_HEAP_BYTES
 #  if defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_STR_HEAP_BYTES 4096
@@ -448,13 +431,13 @@
 #    define TIKU_BASIC_STR_HEAP_BYTES 512
 #  endif
 #endif
+/** Largest string-expression result; each temporary is a stack buffer of
+ *  this size. */
 #ifndef TIKU_BASIC_STR_BUF_CAP
 #  if defined(TIKU_BASIC_TIER_BIG)
-/* 1 KB on the big-RAM parts (Apollo/RP2350): each string-expression temporary
- * is a stack buffer of this size, and the stacks here are huge, so this lets
- * STRIP$()/HTTPGET$ clear the HTTP header block and show a chunk of the body
- * without risking deep-nesting overflow. BROWSE uses its own 16 KB buffer for
- * whole pages, so this only bounds the in-BASIC-string path. */
+/* 1 KB on TIER_BIG parts, whose stacks are large, so STRIP$(HTTPGET$(...))
+ * can clear the HTTP header block and show a chunk of the body.  BROWSE has
+ * its own page buffer (TIKU_BASIC_BROWSE_BUF), so this bounds only strings. */
 #    define TIKU_BASIC_STR_BUF_CAP  1024
 #  elif defined(TIKU_BASIC_TIER_FRAM)
 #    define TIKU_BASIC_STR_BUF_CAP  128
@@ -463,11 +446,13 @@
 #  endif
 #endif
 
-/* Big response buffers (referenced as #0, #1, ...): arena-backed, filled by the
- * FETCH statement, read in place by the extractors (JSON$/LINE$/BETWEEN$ with a
- * #n source, LEN(#n)). They hold a whole HTTP/LLM reply past the STR_BUF_CAP
- * scratch limit -- FETCH writes straight into the arena, bypassing the 1 KB
- * stack buffer. BIG-tier only (each buffer is real arena RAM). */
+/**
+ * Big response buffers #0, #1, ...: arena-backed, filled by FETCH and read in
+ * place by JSON$, LINE$, BETWEEN$ with a #n source and LEN(#n), so a whole
+ * HTTP or LLM reply fits past TIKU_BASIC_STR_BUF_CAP.
+ *
+ * @note TIER_BIG only: each buffer is real arena RAM.
+ */
 #ifndef TIKU_BASIC_BIGBUF_COUNT
 #  if defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_BIGBUF_COUNT 2
@@ -476,16 +461,18 @@
 #  endif
 #endif
 #ifndef TIKU_BASIC_BIGBUF_SIZE
-#  define TIKU_BASIC_BIGBUF_SIZE    8192
+#  define TIKU_BASIC_BIGBUF_SIZE    8192    /**< bytes per big buffer */
 #endif
 
-/* DEF FN single-line user functions. Each entry stores a name (up
- * to 7 chars), the argument-letter index, and an expression body
- * up to TIKU_BASIC_DEFN_BODY chars long. Calls evaluate the body
- * with the call-site argument bound to the named variable. */
+/**
+ * DEF FN single-line user functions: a name of up to 7 chars, up to
+ * TIKU_BASIC_DEFN_ARGS argument letters and a body under TIKU_BASIC_DEFN_BODY
+ * chars; a call binds each argument to its letter for the body.
+ */
 #ifndef TIKU_BASIC_DEFN_ENABLE
 #define TIKU_BASIC_DEFN_ENABLE      1
 #endif
+/** DEF FN table entries. */
 #ifndef TIKU_BASIC_DEFN_MAX
 #  if defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_DEFN_MAX     16
@@ -495,6 +482,7 @@
 #    define TIKU_BASIC_DEFN_MAX      4
 #  endif
 #endif
+/** DEF FN body buffer, in chars including the NUL. */
 #ifndef TIKU_BASIC_DEFN_BODY
 #  if defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_DEFN_BODY    64
@@ -503,18 +491,20 @@
 #  endif
 #endif
 
-/* DIM A(n) integer arrays. 26 slots (one per A..Z); each starts
- * unallocated. DIM bumps an arena allocation. Re-DIMming the same
- * variable in a single session is rejected. Arrays are zero-filled
- * at every RUN start to match basic_vars semantics. */
+/**
+ * DIM A(n[,m]) and A$(n[,m]): 26 numeric and 26 string array slots whose
+ * elements DIM takes from the arena, zero-filled.  RUN, NEW and LOAD release
+ * every array; a second DIM of one before that is rejected.
+ */
 #ifndef TIKU_BASIC_ARRAYS_ENABLE
 #define TIKU_BASIC_ARRAYS_ENABLE    1
 #endif
 /* ARRAY_MAX caps each DIM's per-dimension and total element count;
  * ARRAY_TOTAL_LONGS is the shared arena pool that backs every array's element
- * storage (must be >= one ARRAY_MAX array, more for several).  They scale
- * together.  ARRAY_TOTAL_LONGS is consumed in tiku_basic_arena.inl, which is
- * included after this header, so defining it here wins. */
+ * storage (at least one ARRAY_MAX array, more for several), so they scale
+ * together.  tiku_basic_arena.inl, included after this header, falls back to
+ * its own ARRAY_TOTAL_LONGS only when this one is absent. */
+/** Most elements per dimension, and in total, for one DIM. */
 #ifndef TIKU_BASIC_ARRAY_MAX
 #  if defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_ARRAY_MAX    4096
@@ -524,6 +514,7 @@
 #    define TIKU_BASIC_ARRAY_MAX    128
 #  endif
 #endif
+/** Arena elements shared by every DIMmed array. */
 #ifndef TIKU_BASIC_ARRAY_TOTAL_LONGS
 #  if defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_ARRAY_TOTAL_LONGS 4096u
@@ -534,20 +525,21 @@
 #  endif
 #endif
 
-/* Multi-slot named SAVE / LOAD.  The default unnamed SAVE / LOAD keep the
- * region tail (or the "prog" persist key on MSP430).  Named saves have two
- * backends since v0.06, see tiku_basic_named_slots.inl: on the region-backed
- * parts they are ordinary /data FILES ("/data/<name>.bas"), so neither macro
- * below applies there -- capacity is one file each and the count is whatever
- * /data has room for.  Only MSP430/host still use the static table these
- * macros size. */
+/**
+ * Named SAVE / LOAD slots (tiku_basic_named_slots.inl); 0 disables named
+ * saves.  The unnamed SAVE / LOAD use prog.bas in /data, or the "prog" persist
+ * key on MSP430/host.
+ *
+ * @note On region parts named programs are /data/<name>.bas files, one file
+ *       each and as many as /data has room for, so the count and the slot
+ *       size apply only to the static table on MSP430/host.
+ */
 #ifndef TIKU_BASIC_NAMED_SLOTS
 #define TIKU_BASIC_NAMED_SLOTS      3
 #endif
-/* MSP430/host only.  Each slot must hold a whole serialized program, and these
- * are static durable bytes -- so despite the name they do NOT scale with
- * TIKU_BASIC_PROGRAM_LINES, and a program larger than the slot is refused.
- * That mismatch is why the region-backed parts moved to files. */
+/** Bytes per named slot (MSP430/host): each holds a whole serialized program
+ *  in static durable bytes, so it does not scale with
+ *  TIKU_BASIC_PROGRAM_LINES and a larger program is refused. */
 #ifndef TIKU_BASIC_NAMED_SLOT_BYTES
 #  if defined(TIKU_BASIC_TIER_BIG)
 #    define TIKU_BASIC_NAMED_SLOT_BYTES 2048
@@ -560,9 +552,9 @@
 
 /* Fixed-point math.  Numbers with a decimal point in source (`1.5`,
  * `0.001`, ...) are scaled by TIKU_BASIC_FIXED_SCALE on parse and
- * stored as plain integers. The default scale of 1000 matches the
- * existing PI = 3142 (= 3.142 * 1000) convention; this lets FMUL,
- * FDIV, and FSTR$ all share that same Q.3 base. Operations:
+ * stored as plain integers.  The default scale of 1000 matches
+ * PI = 3142 (3.142 * 1000), so FMUL, FDIV and FSTR$ share one Q.3
+ * base.  Operations:
  *
  *    +, -                    work directly on Q.3 integers
  *    a * pure_int            works directly
@@ -574,19 +566,15 @@
  * Intermediate products use 64-bit (long long) so values up to a few
  * thousand multiply safely without overflow. */
 #ifndef TIKU_BASIC_FIXED_ENABLE
-#define TIKU_BASIC_FIXED_ENABLE     1
+#define TIKU_BASIC_FIXED_ENABLE     1       /**< decimals and the F words */
 #endif
 #ifndef TIKU_BASIC_FIXED_SCALE
-#define TIKU_BASIC_FIXED_SCALE      1000L
+#define TIKU_BASIC_FIXED_SCALE      1000L   /**< Q.3: three decimal places */
 #endif
 
-/* REBOOT triggers the watchdog and spins; only meaningful on real
- * silicon. Defaults off in host builds because the spin would hang
- * the test driver.  (Was msp430-only -- the same stale single-platform
- * gate shape as the 2026-07 durability audit's bug class; found live on
- * the LM20 when the F1 resume proof dispatched REBOOT and got "? syntax".
- * All real parts have the watchdog path: the shell `reboot` command uses
- * it everywhere.) */
+/** REBOOT: trigger the watchdog and spin.  On for every target, which all
+ *  have the watchdog path the shell `reboot` uses; off for host builds,
+ *  where the spin would hang the test driver. */
 #ifndef TIKU_BASIC_REBOOT_ENABLE
 #if defined(TIKU_TEST_HOST)
 #define TIKU_BASIC_REBOOT_ENABLE    0
@@ -595,16 +583,15 @@
 #endif
 #endif
 
-/* Pi as a Q.3 fixed-point literal (3.142). Lets the user do
- * coarse-grained trig-style math without floats: e.g.
- * `LET CIRC = D * PI / 1000`. */
+/** Pi as a Q.3 fixed-point literal (3.142), for coarse trig-style math
+ *  without floats, e.g. `LET CIRC = D * PI / 1000`. */
 #ifndef TIKU_BASIC_PI_Q3
 #define TIKU_BASIC_PI_Q3            3142
 #endif
 
-/* FRAM serialization buffer for the saved program. Sized to fit the
- * worst-case stored representation: every line at full length plus
- * a 5-digit line number, a separator, and a newline. */
+/** Largest serialized program: every line at full length plus a 5-digit
+ *  line number, a separator and a newline.  It bounds prog.bas, and sizes the
+ *  staging buffer on MSP430/host. */
 #ifndef TIKU_BASIC_SAVE_BUF_BYTES
 #define TIKU_BASIC_SAVE_BUF_BYTES \
     ((tiku_mem_arch_size_t)(TIKU_BASIC_PROGRAM_LINES * \
@@ -615,51 +602,42 @@
 /* INTERNAL CONSTANTS                                                        */
 /*---------------------------------------------------------------------------*/
 
-#define BASIC_CTRL_C       0x03
-#define BASIC_PERSIST_KEY  "prog"
+#define BASIC_CTRL_C       0x03       /**< break key */
+#define BASIC_PERSIST_KEY  "prog"     /**< persist-store key, MSP430/host */
 
 /*---------------------------------------------------------------------------*/
-/* F1: POWER-FAILURE-TRANSPARENT RUN (execution-state checkpoint / resume)    */
+/* POWER-FAILURE-TRANSPARENT RUN                                             */
 /*---------------------------------------------------------------------------*/
 /*
- * PERSIST ON checkpoints the reified interpreter state (program counter,
- * control-flow stacks, scalar + string variables, error / DATA / PRNG state)
- * into durable NVM at yield boundaries; RUN RESUME continues a program mid-loop
- * after a reset or power cut instead of restarting.  This is distinct from SAVE
- * / LOAD, which persist the *program text*: PERSIST persists the *running
- * machine*.  See tiku_basic_ckpt.inl for the slot formats and torn-write
- * discipline.
+ * PERSIST ON checkpoints the interpreter's running state (program counter,
+ * stacks, variables, arrays, DEF FN, SUB frames, EVERY and ON CHANGE
+ * registrations, error, DATA and PRNG state) at yield boundaries; RUN RESUME
+ * continues a program mid-loop after a reset or power cut.  SAVE / LOAD keep
+ * the program text; PERSIST keeps the running machine.  Big response buffers
+ * are not checkpointed.  Formats and torn-write rules: tiku_basic_ckpt.inl.
  *
- * v1 checkpoints the core scalar machine.  Arrays (DIM), big response buffers,
- * DEF FN, and the EVERY / ON CHANGE timer tables are NOT yet in the checkpoint
- * -- PERSIST ON warns if any are live so the boundary is never silent.
- *
- * Durability by substrate (same envelope as SAVE, see BASIC_NVM_ON_REGION):
- *   MSP430          .persistent FRAM      -- durable, per-batch checkpoints
- *   Ambiq / RP2350  carved NVM region     -- durable, interval-gated (below)
- *   Nordic          carved NVM region     -- durable (the old note here said
- *                   session-only because the nRF54 durable reserve was 8 KB;
- *                   the reserved tail is 256 KB on the LM20 and 64 KB on the
- *                   L15 now, so BASIC_NVM_ON_REGION is set and the checkpoint
- *                   rides the region tail like Ambiq's)
- *   host            .bss                  -- session-only */
+ * Storage follows BASIC_NVM_ON_REGION, as SAVE does:
+ *   region parts   /data file prog.ckpt   durable, paced per medium (below)
+ *   MSP430         FRAM buffer            durable, every yield batch
+ *   host           .bss buffer            session-only
+ */
+/** PERSIST and RUN RESUME (tiku_basic_ckpt.inl). */
 #ifndef TIKU_BASIC_PERSIST_RUN_ENABLE
 #define TIKU_BASIC_PERSIST_RUN_ENABLE 1
 #endif
 
-/* Minimum seconds between run-state checkpoints, counted from PERSIST ON.
- * 0 = checkpoint every yield batch, the finest resume granularity -- right
- * where NVM writes are cheap byte stores with effectively unlimited endurance
- * (MSP430 FRAM ~1e15).  Nonzero paces the program-op substrates:
- *   RP2350 QSPI flash : each checkpoint read-modify-ERASES its 4 KB sectors
- *                       (~1e5 cycles); 60 s ~= 69 days of continuous armed
- *                       running before the rated limit.
- *   Ambiq MRAM        : bootrom word-program, no erase, but each save is a
- *                       masked-IRQ bootrom call -- 5 s keeps that jitter rare.
- *   Nordic RRAM       : byte-writable, no erase, but ~1e5-class write
- *                       endurance -- 5 s paces the wear like Ambiq.
- * Coarser interval = longer replay window after a power cut (the program
- * re-runs at most the last interval's worth of lines). */
+/* Checkpoint pacing.  0 checkpoints every yield batch, the finest resume
+ * granularity, for media whose writes are cheap byte stores with practically
+ * unlimited endurance (MSP430 FRAM, ~1e15 cycles).  A nonzero interval paces
+ * media that wear or stall:
+ *   RP2350 QSPI flash  each save erases and reprograms its 4 KB sectors,
+ *                      rated ~1e5 cycles: 60 s
+ *   Ambiq MRAM         no erase, but each save is a masked-IRQ bootrom
+ *                      call: 5 s keeps that jitter rare
+ *   Nordic RRAM        no erase, but limited write endurance: 5 s
+ * A longer interval lengthens the replay after a power cut: the program
+ * re-runs at most the last interval's worth of lines. */
+/** Minimum seconds between run-state checkpoints while PERSIST is on. */
 #ifndef TIKU_BASIC_CKPT_INTERVAL_S
 #  if defined(PLATFORM_RP2350)
 #    define TIKU_BASIC_CKPT_INTERVAL_S 60
@@ -670,50 +648,41 @@
 #  endif
 #endif
 
-/* Where BASIC's durable slots (saved program + F1 run-state checkpoint) live.
- * Two backings, ONE decision point, keyed on the REGION LAYOUT rather than a
- * platform list so a new port lights up automatically:
+/* Where BASIC's saved program and run-state checkpoint live.  Two backings,
+ * one decision point, keyed on the region layout rather than a platform list,
+ * so a new port is included without being named:
  *
- *   BASIC_NVM_ON_REGION = 1 -- the /data store riding the carved NVM region
- *     (TIKU_NVM_HAS_REGION: Ambiq MRAM, RP2350 QSPI flash, Nordic RRAM).
- *     Both durable objects are ordinary files there -- the saved program is
- *     prog.bas and the run-state checkpoint is prog.ckpt -- so neither has a
- *     fixed offset any more.
+ *   BASIC_NVM_ON_REGION = 1 -- files in the /data store on the carved NVM
+ *     region (TIKU_NVM_HAS_REGION: every target but MSP430 and host): the
+ *     saved program is prog.bas and the checkpoint prog.ckpt.
  *
- *   BASIC_NVM_ON_REGION = 0 -- byte-writable buffers.  On MSP430 they carry
- *     TIKU_DURABLE (.persistent FRAM).  On host they land in plain .bss
- *     (volatile test harness).
- *
- * Keyed on the REGION existing, not on the reserved tail: the tail is a
- * feature-shaped carve being deleted, while "is there a carved NVM region
- * with a store on it" is the question this flag actually asks. */
+ *   BASIC_NVM_ON_REGION = 0 -- byte-writable buffers: TIKU_DURABLE FRAM on
+ *     MSP430, plain .bss on host (a volatile test harness). */
 #include <kernel/memory/tiku_nvm_region.h>
 #ifndef TIKU_NVM_HAS_REGION
 #error "tiku_nvm_region.h did not define TIKU_NVM_HAS_REGION -- a missing \
 include here would silently select the non-region storage backend"
 #endif
 #if TIKU_NVM_HAS_REGION
-#define BASIC_NVM_ON_REGION  1
+#define BASIC_NVM_ON_REGION  1   /**< durable objects are /data files */
 #else
-#define BASIC_NVM_ON_REGION  0
+#define BASIC_NVM_ON_REGION  0   /**< durable objects are static buffers */
 #endif
 
+/* Placement of the byte-writable durable buffers, which only MSP430 (FRAM)
+ * and host (plain .bss, the empty definition) build.  Region parts keep their
+ * durable objects in /data, so the Ambiq definition goes unused. */
 #ifdef PLATFORM_MSP430
 #define BASIC_NVM_PERSISTENT TIKU_DURABLE   /* FRAM in place (tiku_mem.h) */
 #elif defined(PLATFORM_AMBIQ)
-/* On the region-backed parts the persist-store buffers are not built (the
- * durable slots live in the carved region).  This attribute is unused there,
- * kept defined for symmetry. */
 #define BASIC_NVM_PERSISTENT __attribute__((section(".ssram")))
 #else
 #define BASIC_NVM_PERSISTENT
 #endif
 
-/* Transient SAVE/LOAD serialization scratch (a worst-case whole-program image:
- * ~90 KB at 1024 lines, ~176 KB at 2048). The two buffers are never live at the
- * same time, but together they would dominate the scarce DTCM (384-512 KB), so
- * on Ambiq they ride the multi-MB .ssram pool (zeroed at boot, like .bss); the
- * durable copy lives in the NVM region. Elsewhere the scratch stays in .bss. */
+/* Placement of the transient SAVE/LOAD scratch: the multi-MB .ssram pool on
+ * Ambiq (zeroed at boot, like .bss), keeping it out of the DTCM; plain .bss
+ * elsewhere. */
 #if defined(PLATFORM_AMBIQ)
 #define BASIC_SCRATCH __attribute__((section(".ssram")))
 #else

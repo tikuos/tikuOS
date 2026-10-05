@@ -7,9 +7,9 @@
  *
  * tiku_basic_vfs_file.inl - VFS bridge for /data/basic.
  *
- * Lets a read and write of /data/basic round-trip the saved program text through
- * the same durable store SAVE and LOAD use.  Its two entry points are the only
- * non-static symbols here.
+ * Lets a read and write of /data/basic round-trip the saved program text
+ * through the same durable slot SAVE and LOAD use.  Its two entry points are
+ * the only non-static symbols here.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,7 +21,7 @@
 /**
  * @brief Read handler for the /data/basic VFS node.
  *
- * Mirrors tiku_persist_read into the caller's buffer.
+ * Copies the saved program into the caller's buffer (basic_prog_fetch).
  *
  * @param buf  Destination buffer.
  * @param max  Capacity of @p buf in bytes.
@@ -37,7 +37,7 @@ tiku_basic_vfs_read(char *buf, unsigned int max)
     if (buf == NULL || max == 0u) {
         return -1;
     }
-    /* Same default-slot storage as SAVE/LOAD (NVM region on Ambiq). */
+    /* Same default slot as SAVE/LOAD: prog.bas, or the MSP430/host store. */
     if (basic_prog_fetch(buf, (size_t)max, &n_read) != 0) {
         buf[0] = '\0';      /* no saved program */
         return 0;
@@ -48,9 +48,8 @@ tiku_basic_vfs_read(char *buf, unsigned int max)
 /**
  * @brief Write handler for the /data/basic VFS node.
  *
- * Mirrors tiku_persist_write under MPU bracketing.  The caller-supplied data is
- * taken verbatim -- the user is responsible for sending text LOAD can parse,
- * meaning numbered lines separated by '\n'.
+ * Stores the text through basic_prog_store(), verbatim: the writer must send
+ * text LOAD can parse, numbered lines separated by '\n'.
  *
  * @param buf  Source buffer.
  * @param len  Number of bytes to write.
@@ -63,6 +62,6 @@ tiku_basic_vfs_write(const char *buf, unsigned int len)
     if (buf == NULL || len > TIKU_BASIC_SAVE_BUF_BYTES) {
         return -1;
     }
-    /* Same default-slot storage as SAVE/LOAD (NVM region on Ambiq). */
+    /* Same default slot as SAVE/LOAD: prog.bas, or the MSP430/host store. */
     return basic_prog_store(buf, (size_t)len);
 }
