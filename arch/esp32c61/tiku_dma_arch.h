@@ -7,9 +7,9 @@
  *
  * tiku_dma_arch.h - ESP32-C61 memory-to-memory copy on AHB DMA pair 0.
  *
- * The RP2350's contract: word-aligned, whole words, one copy at a time, a
- * callback from the interrupt.  Either end may be SRAM or PSRAM, and the
- * source may also be flash; the cache is kept coherent for the PSRAM ends.
+ * Copies are word-aligned and whole words, one at a time, with a callback
+ * from the interrupt.  Either end may be SRAM or PSRAM, and the source may
+ * also be flash; the cache is kept coherent for the PSRAM ends.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,22 +22,24 @@
 
 #define TIKU_DMA_OK             0   /**< Transfer accepted or completed */
 #define TIKU_DMA_ERR_BUSY      -1   /**< A copy is already running */
-#define TIKU_DMA_ERR_INVALID   -2   /**< NULL, misaligned, overlapping, or out of reach */
-#define TIKU_DMA_ERR_NOT_READY -3   /**< tiku_dma_arch_init() not yet called */
+#define TIKU_DMA_ERR_INVALID   -2   /**< NULL, misaligned or bad range */
+#define TIKU_DMA_ERR_NOT_READY -3   /**< tiku_dma_arch_init() has not run */
 
-/** @brief Called from interrupt context when a copy finishes; keep it short. */
+/** @brief Completion callback; runs in the DMA interrupt when a copy ends. */
 typedef void (*tiku_dma_done_cb_t)(void *ctx);
 
 /** @brief Clock the engine, put pair 0 in memory mode, route its interrupt;
- *         safe to repeat. */
+ *         a repeat call does nothing. */
 void tiku_dma_arch_init(void);
 
 /**
  * @brief Copy @p word_cnt 32-bit words from @p src to @p dst without the core.
  *
- * Both 4-byte aligned, not overlapping, 1..1048576 words; @p dst in SRAM or
- * PSRAM.  A PSRAM destination must not share cache lines with data the core
- * writes while the copy runs.  @p on_done(ctx) runs once, from the interrupt.
+ * @p on_done(ctx) runs once, from the interrupt, when the copy ends.
+ *
+ * @note Both ends 4-byte aligned and not overlapping, 1..1048576 words;
+ *       @p dst in SRAM or PSRAM, @p src also in flash.  A PSRAM destination
+ *       must not share cache lines with data the core writes during the copy.
  * @return TIKU_DMA_OK, or a negative TIKU_DMA_ERR_*
  */
 int tiku_dma_arch_memcpy(void *dst, const void *src, uint32_t word_cnt,
@@ -46,7 +48,8 @@ int tiku_dma_arch_memcpy(void *dst, const void *src, uint32_t word_cnt,
 /** @brief Non-zero while a copy is running. */
 int tiku_dma_arch_busy(void);
 
-/** @brief Stop a running copy; its callback is not called. @return TIKU_DMA_OK */
+/** @brief Stop a running copy; its callback is not called.
+ *  @return TIKU_DMA_OK */
 int tiku_dma_arch_abort(void);
 
 #endif /* TIKU_ESP32C61_DMA_ARCH_H_ */

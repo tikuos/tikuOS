@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_flash_arch.h - ESP32-C61 external flash: storage, never code.
+ * tiku_flash_arch.h - ESP32-C61 external flash driver.
  *
  * The ROM's routines erase and program it; the MMU maps it, one-to-one and
- * cached, into the external-memory window for pointer reads.
+ * cached, into the external-memory window for pointer reads and XIP code.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,7 +21,7 @@
 /** @brief Result of a flash call. */
 typedef enum {
     TIKU_FLASH_OK        = 0,
-    TIKU_FLASH_ERR_PARAM = -1,  /**< range outside the part */
+    TIKU_FLASH_ERR_PARAM = -1,  /**< NULL buffer, or range outside the part */
     TIKU_FLASH_ERR_IO    = -2,  /**< the ROM reported an error or a timeout */
     TIKU_FLASH_ERR_DOWN  = -3,  /**< init has not succeeded */
 } tiku_flash_err_t;
@@ -60,6 +60,8 @@ typedef enum {
  * @brief Attach the part, lift write protection, map it, read its identity.
  *
  * @return TIKU_FLASH_OK, or an error leaving the driver down
+ * @note Call before tiku_esp32c61_psram_init(): the mapping resets every MMU
+ *       entry, the PSRAM's included.
  */
 tiku_flash_err_t tiku_flash_init(void);
 
@@ -98,7 +100,8 @@ tiku_flash_err_t tiku_flash_erase_sector(uint32_t addr);
  */
 tiku_flash_err_t tiku_flash_program(uint32_t addr, const void *buf, uint32_t len);
 
-/** @brief Where @p addr reads by pointer, or NULL when the driver is down. */
+/** @brief Where @p addr reads by pointer, or NULL when the driver is down or
+ *         @p addr is past the part. */
 const uint8_t *tiku_flash_map(uint32_t addr);
 
 #endif /* TIKU_ESP32C61_FLASH_ARCH_H_ */

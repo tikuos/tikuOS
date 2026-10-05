@@ -20,12 +20,6 @@ extern uint32_t __uninit_start;
 extern uint32_t __uninit_end;
 extern uint32_t __tier_sram_end;    /* top of the tier span, below the stack */
 
-/*
- * The table answers "what kind of memory is this address", so the bank is
- * listed whole: a static buffer in .bss must classify as SRAM, or
- * tiku_arena_create() rejects it.  The durable cells are cut out as NVM
- * rather than overlapped, since an overlapping table installs nothing.
- */
 /**
  * @brief Lowest address the stack may occupy: the tier span's top.
  *
@@ -36,6 +30,13 @@ uint32_t tiku_stack_arch_bottom(void) {
     return (uint32_t)(uintptr_t)&__tier_sram_end;
 }
 
+/*
+ * The table answers "what kind of memory is this address", so the bank is
+ * listed whole: a static buffer in .bss must classify as SRAM, or
+ * tiku_arena_create() rejects it.  The durable cells are an NVM entry
+ * between two SRAM entries, since a table with overlapping entries installs
+ * nothing.
+ */
 static tiku_mem_region_t c61_region_table[3];
 static tiku_mem_arch_size_t c61_region_count;
 

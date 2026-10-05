@@ -89,7 +89,9 @@ uint64_t tiku_esp32c61_alarm_due(uint64_t now) {
 }
 
 /**
- * @brief Count every tick due by @p now; how many were counted.
+ * @brief Count every tick due by @p now.
+ *
+ * @return The number of ticks counted
  */
 static unsigned long tick_account(uint64_t now) {
     unsigned long n = 0UL;
@@ -109,8 +111,7 @@ static unsigned long tick_account(uint64_t now) {
 /**
  * @brief Alarm 0: count every tick now due, arm the next, wake the scheduler.
  *
- * The notify is not optional: without it expired timers never dispatch and
- * the failure looks like a dead console rather than a dead timer.
+ * Without tiku_sched_notify() expired timers never dispatch.
  */
 static void tick_isr(void) {
     uint64_t now;
@@ -164,8 +165,9 @@ void tiku_clock_arch_set_seconds(unsigned long sec) {
 void tiku_clock_arch_wait(tiku_clock_arch_time_t t) {
     tiku_clock_arch_time_t target = g_ticks + t;
 
-    /* A tick that cannot run cannot end the wait, yet its pending line still
-     * ends every wfi: count the time on SYSTIMER instead. */
+    /* With the tick stopped, MIE off or the tick line disabled, the wait
+     * counts SYSTIMER time: a pending tick line would end every wfi without
+     * advancing g_ticks. */
     if (!g_running ||
         (ESP32C61_CSR_READ(mstatus) & ESP32C61_MSTATUS_MIE) == 0UL ||
         (tiku_esp32c61_irq_enabled() &
@@ -223,8 +225,12 @@ unsigned char tiku_clock_arch_fault(void) {
 /**
  * @brief Move the tick alarm out to the deadline @p ticks_ahead ticks on.
  *
- * Interrupts are masked by the caller.  g_due is the next boundary, so the
- * deadline is ticks_ahead - 1 boundaries past it; nothing is credited here.
+ * g_due is the next boundary, so the deadline is ticks_ahead - 1 boundaries
+ * past it; nothing is credited here.
+ *
+ * @return 1 when the alarm moved, 0 when the tick is stopped or
+ *         @p ticks_ahead is under 2
+ * @note Call with interrupts masked.
  */
 int tiku_clock_tickless_begin(tiku_clock_time_t ticks_ahead) {
     if (!g_running || ticks_ahead < 2U) {

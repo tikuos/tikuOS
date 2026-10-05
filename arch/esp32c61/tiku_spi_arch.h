@@ -7,9 +7,9 @@
  *
  * tiku_spi_arch.h - ESP32-C61 SPI contract.
  *
- * No backend on this port: the calls exist so the kernel links.  Every call
- * with an error channel fails; tiku_spi_arch_transfer() has none and returns
- * 0xFF, the value an idle MISO line reads.
+ * This port has no SPI driver: every call with a return code returns
+ * TIKU_SPI_ERR_PARAM; tiku_spi_arch_transfer() returns 0xFF, the value an
+ * idle MISO line reads.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,28 +19,29 @@
 
 #include <interfaces/bus/tiku_spi_bus.h>
 
-/** @brief Configure a bus. @param config  Requested settings @return Error */
+/**
+ * @brief Configures nothing.
+ * @param config  Ignored
+ * @return TIKU_SPI_ERR_PARAM
+ */
 int     tiku_spi_arch_init(const tiku_spi_config_t *config);
 
-/** @brief Release the bus. */
+/** @brief Does nothing. */
 void    tiku_spi_arch_close(void);
 
-/** @brief Exchange one byte. @param tx_byte  Byte to send @return Byte read */
+/** @brief Sends nothing. @param tx_byte  Ignored @return 0xFF */
 uint8_t tiku_spi_arch_transfer(uint8_t tx_byte);
 
-/** @brief Send bytes. @param buf  Bytes @param len  Length @return Error */
+/** @brief Sends nothing. @return TIKU_SPI_ERR_PARAM */
 int     tiku_spi_arch_write(const uint8_t *buf, uint16_t len);
 
-/** @brief Receive bytes. @param buf  Destination @param len  Length @return Error */
+/** @brief Reads nothing into @p buf. @return TIKU_SPI_ERR_PARAM */
 int     tiku_spi_arch_read (uint8_t *buf, uint16_t len);
 
 /**
- * @brief Full-duplex transfer of equal-length buffers.
+ * @brief Transfers nothing; @p rx_buf is left as it is.
  *
- * @param tx_buf  Bytes to send
- * @param rx_buf  Receives the bytes read
- * @param len     Length of both buffers
- * @return TIKU_SPI_OK, or an error
+ * @return TIKU_SPI_ERR_PARAM
  */
 int     tiku_spi_arch_write_read(const uint8_t *tx_buf, uint8_t *rx_buf,
                                  uint16_t len);

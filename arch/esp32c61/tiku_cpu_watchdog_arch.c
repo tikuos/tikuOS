@@ -25,7 +25,7 @@ static struct {
     uint8_t paused;
 } wdt_state;
 
-/** @brief CONFIG0 with the update latch, inside the write-protect window. */
+/** @brief Write CONFIG0 and latch it, inside the write-protect window. */
 static void wdt_config0(uint32_t v) {
     TIKU_REG32(ESP32C61_TIMG_WDTWPROTECT(WDT)) = ESP32C61_WDT_WKEY;
     TIKU_REG32(ESP32C61_TIMG_WDTCONFIG0(WDT)) = v;
@@ -33,6 +33,7 @@ static void wdt_config0(uint32_t v) {
     TIKU_REG32(ESP32C61_TIMG_WDTWPROTECT(WDT)) = 0UL;
 }
 
+/** @brief Feed the watchdog, inside the write-protect window. */
 static void wdt_feed(void) {
     TIKU_REG32(ESP32C61_TIMG_WDTWPROTECT(WDT)) = ESP32C61_WDT_WKEY;
     TIKU_REG32(ESP32C61_TIMG_WDTFEED(WDT)) = 1UL;

@@ -16,15 +16,20 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define TIKU_TRNG_OK             0
-#define TIKU_TRNG_ERR_INVALID   -1
-#define TIKU_TRNG_ERR_TIMEOUT   -2
-#define TIKU_TRNG_ERR_NOT_READY -3
+#define TIKU_TRNG_OK             0  /**< Random data delivered */
+#define TIKU_TRNG_ERR_INVALID   -1  /**< NULL output pointer */
+#define TIKU_TRNG_ERR_TIMEOUT   -2  /**< Not returned on this port */
+#define TIKU_TRNG_ERR_NOT_READY -3  /**< No fresh samples in the poll bound */
 
 /** @brief Start the noise sampling that feeds the generator. */
 void tiku_trng_arch_init(void);
 
-/** @brief One word, once fresh samples have been mixed in. @return Error */
+/**
+ * @brief Read one word once fresh samples have been mixed in.
+ *
+ * @return TIKU_TRNG_OK, TIKU_TRNG_ERR_INVALID for a NULL @p out, or
+ *         TIKU_TRNG_ERR_NOT_READY when no fresh samples arrive
+ */
 int tiku_trng_arch_read_u32(uint32_t *out);
 
 /** @brief Fill @p buf with random bytes. @return TIKU_TRNG_OK or an error */

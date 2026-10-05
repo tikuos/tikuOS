@@ -20,12 +20,11 @@
 
 #define TIKU_BOARD_NAME             "ESP32-C61-DevKitC"
 
-/* One addressable RGB LED (WS2812-class, GRB order) on GPIO8 -- Espressif's
- * blink example drives it there on this board. */
+/* One addressable RGB LED (WS2812-class, GRB order) on GPIO8. */
 #define TIKU_BOARD_RGB_LED_GPIO     8U
 
-/* The kernel's three user LEDs are that LED's three colours -- red, green,
- * blue -- each a lamp of its own, mixed in the one package. */
+/* The kernel's three LEDs are that LED's red, green and blue channels
+ * (tiku_esp32c61_led_set() channels 0, 1 and 2), each switched alone. */
 #define TIKU_BOARD_LED_COUNT        3
 #define TIKU_BOARD_LED_PIN          TIKU_BOARD_RGB_LED_GPIO
 #define TIKU_BOARD_LED1_INIT()      tiku_esp32c61_gpio_init_output(TIKU_BOARD_LED_PIN)
@@ -58,9 +57,9 @@
 #define TIKU_BOARD_BTN2_INIT()      do { } while (0)
 #define TIKU_BOARD_BTN2_PRESSED()   (0)
 
-/* ADC, I2C, one-wire and SPI have no arch backend on this port yet, so
- * nothing is claimed for them; nor is a backscatter pin, which needs a header
- * pin known to be free (the in-package PSRAM shares some). */
+/* ADC, I2C, 1-Wire and SPI have no driver on this port, so their pins are
+ * placeholders.  No backscatter pin is defined: the in-package PSRAM shares
+ * some of the header pins. */
 #define TIKU_BOARD_ADC_AVAILABLE    0
 #define TIKU_BOARD_I2C_BRW_100K     1   /* symbolic */
 #define TIKU_BOARD_OW_AVAILABLE     0

@@ -7,8 +7,8 @@
  *
  * tiku_cpu_freq_boot_arch.h - ESP32-C61 boot: watchdogs and the core clock.
  *
- * The clock is measured, not assumed: mcycle against SYSTIMER, which runs
- * from the crystal whatever the core is clocked from.
+ * The core clock is measured by counting mcycle against SYSTIMER, which runs
+ * from the crystal whatever clocks the core.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,7 +18,8 @@
 
 #include <stdint.h>
 
-/* Core rate assumed only when SYSTIMER cannot be read to measure it. */
+/* Core rate reported before the boot measures it, and kept when neither the
+ * clock tree nor SYSTIMER yields one. */
 #ifndef TIKU_ESP32C61_CPU_HZ
 #define TIKU_ESP32C61_CPU_HZ        40000000UL
 #endif
@@ -32,17 +33,20 @@
 /**
  * @brief Boot bring-up: stop the watchdogs, unroute interrupts, time the core.
  *
- * Once, before anything attaches a line: a second call detaches them all.
+ * @note Call once, before anything attaches an interrupt line: a second call
+ *       detaches them all.
  */
 void tiku_cpu_boot_esp32c61_init(void);
 
 /** @brief Idle until an interrupt: the scheduler's idle hook. */
 void tiku_cpu_boot_esp32c61_power_wfi_enter(void);
 
-/** @brief Measured core clock in Hz (the fallback until measured). */
+/** @brief Core clock in Hz, measured at boot and at each rate change; a
+ *         failed measurement leaves the rate the clock tree implies. */
 unsigned long tiku_cpu_esp32c61_clock_get_hz(void);
 
-/** @brief Peripheral (APB) clock in Hz, for the kernel's SMCLK figure. */
+/** @brief APB clock in Hz for the kernel's SMCLK figure: the core rate,
+ *         capped at 40 MHz. */
 unsigned long tiku_cpu_esp32c61_smclk_get_hz(void);
 
 /** @brief 1 when the clock could not be measured and is assumed. */
@@ -55,7 +59,7 @@ uint8_t tiku_cpu_esp32c61_wdt_found(void);
 uint64_t tiku_cpu_esp32c61_systimer(void);
 
 /*---------------------------------------------------------------------------*/
-/* Core frequency                                                            */
+/* CORE FREQUENCY                                                            */
 /*---------------------------------------------------------------------------*/
 
 /** @brief The clock tree as the PCR holds it, for `freq probe`. */
@@ -73,11 +77,22 @@ typedef struct {
 void tiku_cpu_esp32c61_clock_probe(tiku_esp32c61_clock_t *out);
 
 /**
- * @brief Move the core onto the crystal for a sleep that stops the PLL, and
- *        back: park returns the tree as it was, unpark restores it, and the
- *        rate measured at the last change stands -- no 2 ms re-measurement.
+ * @brief Move the core onto the crystal at 40 MHz for a sleep that stops the
+ *        PLL.
+ *
+ * The measured rate is not updated: tiku_cpu_esp32c61_clock_get_hz() keeps
+ * the rate from before the park, so a delay run while parked is scaled by
+ * the ratio of the two rates.
+ *
+ * @return The clock tree as it was, for tiku_cpu_esp32c61_clock_unpark()
  */
 uint32_t tiku_cpu_esp32c61_clock_park(void);
+
+/**
+ * @brief Restore the clock tree tiku_cpu_esp32c61_clock_park() returned.
+ *
+ * The rate measured before the park stands; no 2 ms re-measurement runs.
+ */
 void tiku_cpu_esp32c61_clock_unpark(uint32_t saved);
 
 /** @brief 1 when @p mhz is a core rate the tree makes exactly. */

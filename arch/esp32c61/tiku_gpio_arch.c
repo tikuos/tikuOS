@@ -8,7 +8,8 @@
  * tiku_gpio_arch.c - ESP32-C61 GPIO, and the board's addressable RGB LED.
  *
  * A pin is a GPIO when IO_MUX selects function 1 and the GPIO matrix routes
- * the GPIO_OUT bit (signal 256) to it; both are set on every init.
+ * the GPIO_OUT bit (signal 256) to it; tiku_esp32c61_gpio_init_output() sets
+ * both.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,7 +22,8 @@
 /** @brief GPIO_FUNCn_OUT_SEL_CFG.OUT_SEL: the matrix signal driving the pin. */
 #define GPIO_OUT_SEL_MSK    0x1FFUL
 
-/** @brief IO_MUX: function GPIO, drive strength 2, input as asked. */
+/** @brief Set @p pin's IO_MUX to function GPIO and drive strength 2, with
+ *         input enabled when @p input is non-zero. */
 static void gpio_mux(uint8_t pin, int input) {
     uint32_t mux = TIKU_REG32(ESP32C61_IO_MUX_GPIO(pin));
 
@@ -98,7 +100,7 @@ void tiku_esp32c61_led_set(uint8_t pin, uint8_t channel, int on) {
     } else {
         lit &= (uint8_t)~bit;
     }
-    /* Dim: it sits under the eye. */
+    /* A lit channel is driven at 16 of 255. */
     tiku_esp32c61_rgb_set(pin, (lit & 1U) ? 16U : 0U, (lit & 2U) ? 16U : 0U,
                           (lit & 4U) ? 16U : 0U);
 }
@@ -110,8 +112,8 @@ void tiku_esp32c61_led_set(uint8_t pin, uint8_t channel, int on) {
 /**
  * @brief The GPIO number a kernel (port, pin) names, or -1.
  *
- * Ports are 1-based banks of eight, as on the RP2350: port 1 pin 0 is GPIO0
- * and port 4 pin 5 is GPIO29, the last the part has.
+ * Ports are 1-based banks of eight: port 1 pin 0 is GPIO0 and port 4 pin 5
+ * is GPIO29, the last the part has.
  */
 int tiku_esp32c61_gpio_num(uint8_t port, uint8_t pin) {
     unsigned n = (unsigned)(port - 1U) * 8U + pin;
@@ -150,8 +152,8 @@ static void gpio_claim(uint8_t n) {
     }
 }
 
-/* Write and toggle claim the pin as an output first, as every port does: a
- * level written to an input is otherwise held nowhere. */
+/* Write and toggle make the pin an output first (gpio_claim()), so the level
+ * reaches the pad. */
 int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val) {
     int n = tiku_esp32c61_gpio_num(port, pin);
 

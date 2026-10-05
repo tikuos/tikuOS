@@ -47,7 +47,8 @@ void tiku_esp32c61_trap_entry(void);
 uint32_t *tiku_esp32c61_trap(uint32_t *frame);
 
 /**
- * @brief Interrupt hook, weak until the interrupt layer provides it.
+ * @brief Interrupt hook: tiku_irq_arch.c defines it, and a weak default in
+ *        tiku_crt_early.c returns @p frame.
  *
  * @param id     CLIC id from mcause
  * @param frame  The saved context
@@ -58,7 +59,8 @@ uint32_t *tiku_esp32c61_irq_dispatch(uint32_t id, uint32_t *frame);
 /** @brief Non-zero while a handler runs: the stack is the ISR stack. */
 int tiku_esp32c61_in_isr(void);
 
-/** @brief After an exception's dump: parks unless the kernel takes it. */
+/** @brief Called after an exception's dump: the weak default parks, and
+ *         tiku_fault_arch.c's version records the fault and resets. */
 void tiku_esp32c61_fault(uint32_t *frame, uint32_t cause)
     __attribute__((noreturn));
 

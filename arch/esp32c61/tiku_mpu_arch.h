@@ -7,8 +7,8 @@
  *
  * tiku_mpu_arch.h - ESP32-C61 memory-protection contract.
  *
- * The segment mask is a software shadow of the MSP430 model the portable
- * tests check; PMP enforces only a NULL guard over the first 4 KB.
+ * The segment access mask is a software shadow of the MSP430 MPU, which the
+ * portable tests check; a locked PMP entry guards the first 4 KB (NULL).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,16 +27,16 @@ uint16_t tiku_mpu_arch_get_sam(void);
 /** @brief Set the segment access mask. @param sam  New mask */
 void     tiku_mpu_arch_set_sam(uint16_t sam);
 
-/** @brief MPU control word. @return Control register image */
+/** @brief The MPUCTL0 shadow. @return Password and enable bits */
 uint16_t tiku_mpu_arch_get_ctl(void);
 
-/** @brief Mask MPU violation interrupts. */
+/** @brief Does nothing: this port raises no MPU violation interrupt. */
 void     tiku_mpu_arch_disable_irq(void);
 
-/** @brief Unmask MPU violation interrupts. */
+/** @brief Does nothing: this port raises no MPU violation interrupt. */
 void     tiku_mpu_arch_enable_irq(void);
 
-/** @brief Build the segment layout from the linker symbols. */
+/** @brief Reset the mask to its default and lock the PMP NULL guard. */
 void     tiku_mpu_arch_init_segments(void);
 
 /** @brief Apply the default protection policy. */
@@ -61,13 +61,13 @@ uint16_t tiku_mpu_arch_unlock_nvm(void);
 /** @brief Restore protection. @param saved_state  Value from unlock */
 void     tiku_mpu_arch_lock_nvm(uint16_t saved_state);
 
-/** @brief Violation flags. @return Latched violation bits */
+/** @brief Violation flags; none latch on this port. @return 0 */
 uint16_t tiku_mpu_arch_get_violation_flags(void);
 
-/** @brief Clear latched violation flags. */
+/** @brief Does nothing: no violation flags latch on this port. */
 void     tiku_mpu_arch_clear_violation_flags(void);
 
-/** @brief Route violations to the NMI handler. */
+/** @brief Does nothing: this port has no violation NMI. */
 void     tiku_mpu_arch_enable_violation_nmi(void);
 
 #endif /* TIKU_ESP32C61_MPU_ARCH_H_ */

@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_onewire_arch.c - ESP32-C61 1-Wire, unimplemented.
+ * tiku_onewire_arch.c - ESP32-C61 1-Wire stub.
  *
- * No hardware backend yet. Every call fails cleanly so a caller learns the
- * bus is absent instead of reading zeros as data.
+ * This port has no 1-Wire driver: init and reset return errors, the writes
+ * do nothing, and the reads return the idle-high bus pattern.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -24,7 +24,8 @@
 /* 16 MHz over 1 MHz: one microsecond is 16 counts. */
 #define COUNTS_PER_US   (ESP32C61_SYSTIMER_HZ / TIKU_HTIMER_ARCH_SECOND)
 
-/** @brief Alarms taken, for localising "the ISR never fired" reports. */
+/** @brief Alarm interrupts taken with an alarm outstanding; main_minimal.c's
+ *         htimer check reads it. */
 volatile uint32_t tiku_htimer_arch_isr_count;
 
 /** @brief Whether an alarm is outstanding. */

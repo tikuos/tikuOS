@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_adc_arch.c - ESP32-C61 ADC, unimplemented.
+ * tiku_adc_arch.c - ESP32-C61 ADC stub.
  *
- * No hardware backend yet. Every call fails cleanly so a caller learns the
- * bus is absent instead of reading zeros as data.
+ * This port has no ADC driver: every call that returns a code returns
+ * TIKU_ADC_ERR_PARAM, and tiku_adc_arch_read() also stores 0 in *value.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

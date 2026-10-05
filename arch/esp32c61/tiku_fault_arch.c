@@ -7,8 +7,9 @@
  *
  * tiku_fault_arch.c - ESP32-C61 exception record across the reset.
  *
- * The crt prints the dump; this records it in the durable region, flushes
- * the mirror, and resets, so `diag fault` can show it on the way back up.
+ * The crt prints the dump; this file records it in the durable region,
+ * flushes the flash mirror and resets.  `diag fault` shows the record after
+ * the reboot.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -69,7 +70,6 @@ void tiku_esp32c61_fault(uint32_t *frame, uint32_t cause) {
     fault_rec.sp     = (uint32_t)(uintptr_t)frame + TIKU_ESP32C61_FRAME_BYTES;
     /* A failed flush costs only the record: the dump is already out. */
     (void)tiku_mem_arch_nvm_flush_status();
-    /* The faulting instruction cannot be stepped over, so returning would
-     * fault again forever. */
+    /* Returning would run the faulting instruction again, and fault again. */
     tiku_cpu_esp32c61_restart(0);
 }

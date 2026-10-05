@@ -73,10 +73,11 @@ void tiku_esp32c61_c_start(void) {
 }
 
 /**
- * @brief The C library's state, for errno and friends.
+ * @brief The C library's reentrancy state, for errno and stdio.
  *
- * Espressif's newlib asks the OS for it per thread; one core and one
- * context here, so it is always the static one.  libnosys's stub faults.
+ * Espressif's newlib asks for the running thread's state; this port returns
+ * the one static _impure_ptr to every caller, worker threads included.
+ * libnosys's version of this function faults.
  */
 struct _reent *__getreent(void) {
     return _impure_ptr;
@@ -86,16 +87,17 @@ struct _reent *__getreent(void) {
 /* TRAPS                                                                     */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Handlers run here, not on whichever stack was interrupted. */
+/** @brief The stack every trap handler runs on. */
 static uint32_t isr_stack[TIKU_ESP32C61_ISR_STACK_WORDS]
     __attribute__((aligned(16), used));
 
 /**
- * @brief Trap entry: the whole context to the stack, then C on the ISR stack.
+ * @brief Trap entry: save the context on the interrupted stack, then run C
+ *        on the ISR stack.
  *
- * Exceptions and non-vectored interrupts both land here, 64-byte aligned as
- * CLIC mode requires.  tiku_esp32c61_trap() returns the frame to resume --
- * the same one, or another thread's -- and that is what mret goes back to.
+ * Exceptions and non-vectored interrupts land here; CLIC mode requires the
+ * 64-byte alignment.  mret resumes the frame tiku_esp32c61_trap() returns:
+ * this one, or another thread's.
  */
 __attribute__((naked, aligned(64)))
 void tiku_esp32c61_trap_entry(void) {
@@ -119,7 +121,8 @@ void tiku_esp32c61_trap_entry(void) {
         "call tiku_esp32c61_trap\n"
         "mv sp, a0\n"
         /* mcause after mstatus: with the CLIC it carries the interrupt level
-         * mret restores, and aliases the MPIE/MPP bits mstatus just set. */
+         * mret restores, and aliases the MPIE/MPP bits the mstatus write
+         * set. */
         "lw t0, 116(sp)\n"   "csrw mstatus, t0\n"
         "lw t0, 120(sp)\n"   "csrw mcause, t0\n"
         "lw t0, 112(sp)\n"   "csrw mepc, t0\n"
@@ -146,7 +149,8 @@ int tiku_esp32c61_in_isr(void) {
            sp < (uintptr_t)isr_stack + sizeof isr_stack;
 }
 
-/** @brief One character straight into UART0's FIFO, bounded. */
+/** @brief Write one character to UART0's FIFO; a FIFO that stays full drops
+ *         it. */
 static void trap_putc(char c) {
     for (unsigned long spins = 200000UL; spins > 0UL; spins--) {
         uint32_t st = TIKU_REG32(ESP32C61_UART_STATUS(ESP32C61_UART0_BASE));
@@ -158,7 +162,7 @@ static void trap_putc(char c) {
     }
 }
 
-/** @brief A string, character by character. */
+/** @brief Write a string through trap_putc(). */
 static void trap_puts(const char *s) {
     while (*s != '\0') {
         trap_putc(*s++);
@@ -193,14 +197,16 @@ static const char *trap_kind(uint32_t code) {
     }
 }
 
-/** @brief Default for interrupts until the interrupt layer claims them. */
+/** @brief Weak default: resumes @p frame.  tiku_irq_arch.c's definition
+ *         replaces it. */
 __attribute__((weak))
 uint32_t *tiku_esp32c61_irq_dispatch(uint32_t line, uint32_t *frame) {
     (void)line;
     return frame;
 }
 
-/** @brief Default after the dump: park.  The kernel records and resets. */
+/** @brief Weak default after the dump: parks in wfi.  tiku_fault_arch.c's
+ *         definition, where linked, records the fault and resets. */
 __attribute__((weak, noreturn))
 void tiku_esp32c61_fault(uint32_t *frame, uint32_t cause) {
     (void)frame;

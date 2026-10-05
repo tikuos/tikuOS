@@ -8,8 +8,8 @@
  * esp32c61.ld - ESP32-C61 linker script.
  *
  * The image lives in HP SRAM, where the ROM loads it and jumps to the entry.
- * Flash is storage, and a code window only for what a build places in XIP
- * below (the radio's libraries): `make` writes that part as xip.bin.
+ * Flash is storage, and a code window for the sections an XIP fragment
+ * places there; `make` writes that part as xip.bin.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,8 +18,8 @@
  * Memory map (HP SRAM, 320 KB at 0x40800000, one space for code and data):
  *   0x40800000  .text, .rodata, .data, .bss, .uninit, then the SRAM tier
  *   0x4084C000  __stack, growing down into a reserve the tier never takes
- *   0x4084C670  the ROM's stack and data, to the top -- left alone: its delay
- *               and flash routines keep their state there
+ *   0x4084C670  to the top: the ROM's stack and data, which its delay and
+ *               flash routines use; the image does not touch it
  *
  * Symbols the kernel expects:
  *   __stack, _end, _etext, __data_load, __data_start, __data_end,
@@ -31,8 +31,8 @@ ENTRY(tiku_esp32c61_reset_handler)
 MEMORY
 {
     SRAM (rwx) : ORIGIN = 0x40800000, LENGTH = 0x4C000
-    /* Flash 1 MB on, through the 1:1 map, below /data at 2 MB.  Empty unless
-     * a driver registers a fragment placing an output section .xip* here. */
+    /* Flash from offset 1 MB, through the 1:1 map, below /data at 2 MB.
+     * Empty unless a registered fragment places an .xip* section here. */
     XIP (rx)   : ORIGIN = 0x42100000, LENGTH = 0xF0000
     /* PSRAM past the module window, once the boot has mapped it.  Empty
      * unless psram_data.ld places buffers here (TIKU_ESP32C61_PSRAM_DATA). */
@@ -53,9 +53,9 @@ SECTIONS
     {
         KEEP(*(.text.entry))
         *(.text .text.*)
-        /* Code a library marks as needing RAM, should XIP hold the rest
-         * (the BLE controller's hot paths and the coexistence library's
-         * always stay here). */
+        /* Code a library marks as needing RAM, such as the BLE controller's
+         * hot paths and the coexistence library, stays in SRAM when XIP
+         * holds the rest. */
         *(.iram1 .iram1.*)
         *(.high_perf_code_iram1 .high_perf_code_iram1.*)
         *(.coexiram .coexiram.*)
@@ -85,8 +85,8 @@ SECTIONS
         __data_start = .;
         *(.data .data.*)
         *(.dram1 .dram1.*)
-        /* gp sits 2 KB into the small data so one signed 12-bit offset
-         * reaches all of it. */
+        /* gp sits 2 KB into the small data, so a signed 12-bit offset from
+         * gp reaches its first 4 KB. */
         . = ALIGN(8);
         __global_pointer$ = . + 0x800;
         *(.sdata .sdata.*)
@@ -94,8 +94,8 @@ SECTIONS
         __data_end = .;
     } > SRAM
 
-    /* Loaded whole, so load and run addresses agree and the startup copy
-     * is a no-op kept for the day a stage copies the image from flash. */
+    /* The ROM loads the image whole, so .data's load and run addresses
+     * agree and the startup copy is skipped. */
     __data_load = LOADADDR(.data);
     __datastart = __data_start;
 
@@ -130,9 +130,8 @@ SECTIONS
     __stack = __sram_end;
 
     /*
-     * SRAM TIER -- what is left between the image and the stack, derived as
-     * the other ports derive theirs, so it follows the image rather than a
-     * constant chosen once.  The reserve is the stack's.
+     * SRAM tier: the span between the end of the image and __stack, which
+     * moves with the image.  The reserve below __stack is the stack's.
      */
     __tiku_tier_span_start      = ALIGN(__uninit_end, 32);
     __tiku_tier_span_limit      = __stack;

@@ -37,22 +37,22 @@ typedef enum {
 } tiku_wdt_clk_t;
 #endif
 
-/** @brief Timeout selector, in the kernel's interval-code units. */
+/** @brief Watchdog timeout in 1/32768 s (the TIKU_WDT_INTERVAL_* values). */
 typedef uint16_t tiku_wdt_interval_t;
 
-/** @brief Stop the watchdog: this one has a real off. */
+/** @brief Stop the watchdog and clear its running and paused state. */
 void tiku_cpu_esp32c61_watchdog_off_arch(void);
 
 /**
  * @brief Start the watchdog.
  *
  * @param src       Clock source request; the crystal feeds it either way
- * @param interval  Timeout in 1/32768 s, the wall clock the other ports keep
+ * @param interval  Timeout in 1/32768 s, rounded up to the 0.5 ms tick
  */
 void tiku_cpu_esp32c61_watchdog_on_arch(tiku_wdt_clk_t src,
                                         tiku_wdt_interval_t interval);
 
-/** @brief Halt the counter across a long critical section. */
+/** @brief Disable a running watchdog across a long critical section. */
 void tiku_cpu_esp32c61_watchdog_pause_arch(void);
 
 /**

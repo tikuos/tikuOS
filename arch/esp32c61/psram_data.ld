@@ -1,12 +1,22 @@
 /*
- * psram_data.ld - big buffers in PSRAM (ESP32-C61), with
- * TIKU_ESP32C61_PSRAM_DATA=1: TLS's records and handshake, the crypto's
- * bignum scratch, BASIC's browse and scratch buffers.  The boot brings the
- * PSRAM up and zeroes them before anything runs that uses them.
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
  *
- * No interrupt touches them and nothing DMAs them; thread stacks stay in
- * SRAM, which a trap may push onto while a flash write has the cache off.
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * psram_data.ld - ESP32-C61 big buffers in PSRAM (TIKU_ESP32C61_PSRAM_DATA=1).
+ *
+ * The .bss of TLS and the crypto kit, and BASIC's browse, persist, file and
+ * HTTPS-roots buffers.  tiku_esp32c61_psram_data_boot() brings the PSRAM up
+ * and zeroes them at boot, before anything uses them.
+ *
+ * SPDX-License-Identifier: Apache-2.0
  */
+
+/* No interrupt handler touches these buffers and nothing DMAs them.  Thread
+ * stacks stay in SRAM, which a trap may push onto while a flash write has
+ * the cache off. */
 
 .psram.bss (NOLOAD) :
 {

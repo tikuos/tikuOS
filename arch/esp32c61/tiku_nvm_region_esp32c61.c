@@ -27,9 +27,8 @@
 #define NVMR_DBG(...)  do { } while (0)
 #endif
 
-/* One sector of staging for the erase path. It sits in the image window's .bss
- * rather than the arena because the region backend runs before the tier is
- * anyone's to allocate from. */
+/* One sector of staging for the erase path, in .bss: the region backend
+ * runs before the tier has memory to allocate. */
 static uint8_t nvmr_sector[TIKU_FLASH_SECTOR_SIZE] __attribute__((aligned(4)));
 
 /**
@@ -43,8 +42,8 @@ static uint8_t nvmr_sector[TIKU_FLASH_SECTOR_SIZE] __attribute__((aligned(4)));
 static int nvmr_bits_only_clear(const uint8_t *cur, const uint8_t *new_,
                                 size_t len) {
     for (size_t i = 0U; i < len; i++) {
-        /* A program can turn a 1 into a 0 but never the reverse, so the write
-         * lands as-is exactly when it asks for no bit that is already 0. */
+        /* Programming turns 1s into 0s only, so the write lands as-is
+         * exactly when it asks for no 1 where the flash holds a 0. */
         if ((uint8_t)(cur[i] & new_[i]) != new_[i]) {
             return 0;
         }
@@ -55,25 +54,19 @@ static int nvmr_bits_only_clear(const uint8_t *cur, const uint8_t *new_,
 /**
  * @brief Backend write: program @p len bytes at @p off within the region.
  *
- * Must be called inside the NVM window (tiku_tier_nvm_write provides it).
+ * A write that only clears bits, such as a fresh store's gate words on
+ * erased flash, is programmed in place; any other write reads its sector
+ * back, erases it and programs it whole.
  *
  * @param be   Backend; its base is the memory-mapped region address
  * @param off  Byte offset into the region
  * @param src  Source bytes
  * @param len  Byte count
  * @return 0 on success, negative on a bad range or a flash failure
- */
-/*
- * Why the fast path exists.  A store format writes one gate word per directory
- * entry, ~2000 of them. Read-modify-erase-program per call would erase the same
- * sector hundreds of times over -- minutes of wall clock, and a chunk of a
- * finite erase budget spent on a fresh store. Erased NOR is all ones, so those
- * writes need no erase at all, and the slow path is reached only by a genuine
- * overwrite.
- *
- * ATOMICITY. Erase is sector-granular, so as on RP2350 the store's gate-last
- * guarantee degrades to "survives a clean reboot; a power cut during an erase
- * can lose that sector". TFS slots are one sector here for that reason.
+ * @note Call inside the NVM window (tiku_tier_nvm_write() opens it).
+ * @note A power cut during an erase can lose that whole sector, so the
+ *       store's gate-last ordering holds only across a clean reboot.  TFS
+ *       slots are one sector each here, so the loss stays within one slot.
  */
 static int region_write(tiku_nvm_backend_t *be, size_t off,
                         const void *src, size_t len) {
@@ -102,8 +95,8 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
             n = end - off;
         }
 
-        /* Read only the target bytes first: the common case needs nothing
-         * else, and a whole-sector read would dominate a 4-byte gate write. */
+        /* Only the target bytes are read first; the whole sector is read
+         * only when an erase is needed. */
         if (tiku_flash_read(flash, nvmr_sector, (uint32_t)n) != TIKU_FLASH_OK) {
             NVMR_DBG("nvmr: read %08lx failed\n", (unsigned long)flash);
             rc = -1;
@@ -144,15 +137,15 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
     return rc;
 }
 
-/** @brief The region descriptor, populated on first use. */
+/** @brief The region descriptor, filled by each tiku_nvm_backend_get(). */
 static tiku_nvm_backend_t g_region;
 
 /**
- * @brief Return the flash-backed region, or NULL before the flash is up.
+ * @brief Return the flash-backed region, or NULL while the flash driver is
+ *        down.
  *
- * The base is the mapped address of the region, so a caller reads it by
- * dereferencing; a failed flash init leaves every consumer to see no region
- * rather than a window that answers with garbage.
+ * The base is the region's mapped address, so a caller reads it by
+ * dereferencing.  After a failed flash init every call returns NULL.
  */
 const tiku_nvm_backend_t *tiku_nvm_backend_get(void) {
     if (!tiku_flash_ready()) {

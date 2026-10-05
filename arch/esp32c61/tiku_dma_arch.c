@@ -7,9 +7,9 @@
  *
  * tiku_dma_arch.c - ESP32-C61 memory-to-memory copy on AHB DMA pair 0.
  *
- * A descriptor holds at most 4064 bytes in 32-byte bursts; a copy runs in
- * batches of eight a side, each EOF interrupt queueing the next.  PSRAM is
- * cleaned before, and a PSRAM destination invalidated before and after.
+ * A descriptor holds at most 4064 bytes; a copy runs in batches of eight a
+ * side, each EOF interrupt queueing the next.  A PSRAM source is written
+ * back first, and a PSRAM destination invalidated before and after.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,7 +24,7 @@
 #include "tiku_flash_arch.h"
 #include "tiku_esp32c61_regs.h"
 
-#define DMA_DESC_BYTES  4064UL      /* the most a descriptor holds, in bursts */
+#define DMA_DESC_BYTES  4064UL      /* descriptor max, whole 32-byte bursts */
 #define DMA_RING        8U
 #define DMA_MAX_WORDS   1048576UL
 #define DMA_OWNER       (1UL << 31)
@@ -44,7 +44,8 @@ static dma_desc_t rx_ring[DMA_RING] __attribute__((aligned(4)));
 static volatile uint8_t dma_busy;
 static uint8_t dma_ready;
 
-/* The copy in flight: what is still to queue, and what to drop after. */
+/* The copy in flight: the part still to queue, and the destination range
+ * invalidated when it ends. */
 static const uint8_t *job_src;
 static uint8_t *job_dst;
 static uint32_t job_left;
@@ -59,7 +60,7 @@ static int in_sram(uintptr_t a, uint32_t n) {
            a + n <= TIKU_DEVICE_RAM_START + TIKU_DEVICE_RAM_SIZE;
 }
 
-/** @brief Whether [a, a + n) lies in the PSRAM mapped so far. */
+/** @brief Whether [a, a + n) lies in the mapped PSRAM. */
 static int in_psram(uintptr_t a, uint32_t n) {
     return a >= TIKU_ESP32C61_PSRAM_BASE &&
            a + n <= TIKU_ESP32C61_PSRAM_BASE + tiku_esp32c61_psram_size();
@@ -114,9 +115,10 @@ static void dma_halt(void) {
 }
 
 /**
- * @brief An EOF queues the next batch, or ends the copy: what the cache may
- *        have pulled in of the destination meanwhile is dropped first.  A
- *        fault ends it too, so whoever waits on the callback is not left.
+ * @brief DMA interrupt: an EOF queues the next batch or ends the copy.
+ *
+ * A fault halts both sides and ends the copy too.  Ending invalidates the
+ * cache over a PSRAM destination, then calls the callback once.
  */
 static void dma_isr(void) {
     uint32_t st = TIKU_REG32(ESP32C61_DMA_IN_INT_ST);
@@ -155,8 +157,8 @@ void tiku_dma_arch_init(void) {
     TIKU_REG32(ESP32C61_PCR_GDMA_CONF) |= ESP32C61_PCR_GDMA_RST;
     TIKU_REG32(ESP32C61_PCR_GDMA_CONF) &= ~ESP32C61_PCR_GDMA_RST;
     TIKU_REG32(ESP32C61_DMA_MISC_CONF) |= ESP32C61_DMA_MISC_CLK_EN;
-    /* SRAM, flash and PSRAM, as IDF opens it: from SRAM's base up to 1 GB +
-     * 64 MB, past the external windows. */
+    /* The engine may reach from SRAM's base up to 1 GB + 64 MB, which covers
+     * SRAM and the flash and PSRAM windows. */
     TIKU_REG32(ESP32C61_DMA_MEM_START) = TIKU_DEVICE_RAM_START;
     TIKU_REG32(ESP32C61_DMA_MEM_END) = 0x44000000UL;
 

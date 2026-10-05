@@ -7,9 +7,9 @@
  *
  * tiku_thread_arch.c - ESP32-C61 worker-thread switcher.
  *
- * PendSV's part goes to a software-raised interrupt at the lowest CLIC
- * level: handlers never nest, so it is taken only once the others return.
- * The trap entry saves whole frames, so a switch is choosing another one.
+ * The context switch runs on a software-raised interrupt at the lowest CLIC
+ * level; handlers never nest, so it is taken only after the others return.
+ * The trap entry saves whole frames, so a switch returns another frame.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,13 +20,14 @@
 #include "tiku_irq_arch.h"
 #include "tiku_esp32c61_regs.h"
 
-/** Policy hop: kernel/threads/tiku_thread.c picks the next context. */
+/** @brief The scheduler in kernel/threads/tiku_thread.c: given the saved
+ *         frame, the frame to resume. */
 extern uint32_t *tiku_thread_switch(uint32_t *old_sp);
 
-/* What mret needs to land a fresh worker at its entry: machine mode,
- * interrupts on once it runs (MPIE), at no interrupt level (MPIL 0) --
- * and the interrupt bit, without which this core leaves the level where
- * the switch put it, and no later switch can preempt the worker. */
+/* The CSR words of a fresh worker's frame: machine mode, interrupts on once
+ * it runs (MPIE) and interrupt level 0 (MPIL).  mcause also needs its
+ * interrupt bit: without it this core keeps the level where the switch put
+ * it, and no later switch can preempt the worker. */
 #define MSTATUS_MPP_M    (3UL << 11)
 #define MSTATUS_MPIE     (1UL << 7)
 #define MCAUSE_INTERRUPT (1UL << 31)
@@ -40,7 +41,7 @@ static uint32_t *thread_switch_isr(uint32_t *frame) {
     return tiku_thread_switch(frame);
 }
 
-/** @brief One-time bring-up: the switch line; nothing to migrate. */
+/** @brief Attach and enable the context-switch line. @note Call once. */
 void tiku_thread_arch_boot(void) {
     TIKU_REG32(ESP32C61_INTPRI_FROM_CPU0) = 0UL;
     tiku_esp32c61_irq_attach_switch(TIKU_ESP32C61_LINE_SWITCH,

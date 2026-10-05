@@ -25,11 +25,13 @@
 #define ROM_OK          0
 #define CMD_READ_ID     0x9FU
 
-/* Words for a source the ROM cannot read in place: it loads whole words. */
+/* Words staged for a source that is not word-aligned: the ROM loads whole
+ * words. */
 #define STAGE_WORDS     16U
 
-/* Bytes of a source outside SRAM copied at a time, cache on, before going
- * down: flash and PSRAM do not answer while the cache is suspended. */
+/* Bytes of a source outside SRAM copied to SRAM at a time, with the cache
+ * on, before each program: flash and PSRAM do not answer while the cache is
+ * suspended. */
 #define PIECE_BYTES     256U
 
 static uint8_t  flash_up;
@@ -51,7 +53,7 @@ tiku_flash_err_t tiku_flash_init(void) {
     uint32_t rom_word = 0UL;
 
     flash_up = 0U;
-    /* Single SPI on its default pins, not the legacy flash mode. */
+    /* The default flash pins (ishspi 0), with legacy mode off. */
     ESP32C61_ROM_FLASH_ATTACH(0UL, 0UL);
     if (ESP32C61_ROM_FLASH_CONFIG(0UL, TIKU_FLASH_SIZE_BYTES,
                                   TIKU_FLASH_BLOCK_SIZE, TIKU_FLASH_SECTOR_SIZE,
@@ -63,8 +65,8 @@ tiku_flash_err_t tiku_flash_init(void) {
     }
     (void)ESP32C61_ROM_FLASH_USER_CMD(&flash_id, CMD_READ_ID);
 
-    /* The whole part, one-to-one, in 64 KB pages: nothing else uses the MMU
-     * while the image runs from SRAM. */
+    /* The whole part, one-to-one, in 64 KB pages.  ROM_MMU_INIT clears every
+     * MMU entry, so this runs before the PSRAM is mapped. */
     ESP32C61_ROM_MMU_INIT();
     if (ESP32C61_ROM_MMU_SET(0UL, 0UL, TIKU_FLASH_MMAP_BASE, 0UL, 64UL,
                              TIKU_FLASH_SIZE_BYTES / 0x10000UL, 0UL) != 0) {
@@ -73,7 +75,7 @@ tiku_flash_err_t tiku_flash_init(void) {
     ESP32C61_ROM_CACHE_ENABLE(0UL);
     (void)ESP32C61_ROM_CACHE_INVAL(TIKU_FLASH_MMAP_BASE, TIKU_FLASH_SIZE_BYTES);
 
-    /* The window and the ROM must agree, or a pointer read would lie. */
+    /* A read of offset 0 through the window must match the ROM's read. */
     if (ESP32C61_ROM_FLASH_READ(0UL, &rom_word, 4) != ROM_OK ||
         rom_word != *(volatile const uint32_t *)(uintptr_t)window(0UL)) {
         return TIKU_FLASH_ERR_IO;
@@ -109,9 +111,12 @@ tiku_flash_err_t tiku_flash_read(uint32_t addr, void *buf, uint32_t len) {
 }
 
 /**
- * @brief Hold what may not run while the cache is suspended: handlers whose
- *        code is in flash, and the thread switch, which could resume a
- *        thread there.  @return The lines held, for the release
+ * @brief Hold the lines that may not run while the cache is suspended.
+ *
+ * Those are the handlers whose code is in flash, and the thread switch,
+ * which could resume a thread running there.
+ *
+ * @return The lines held, for tiku_esp32c61_irq_release()
  */
 static uint32_t flash_quiet(void) {
     return tiku_esp32c61_irq_hold(tiku_esp32c61_irq_flash_lines() |
@@ -142,7 +147,7 @@ tiku_flash_err_t tiku_flash_erase_sector(uint32_t addr) {
 /**
  * @brief Program whole words at a word-aligned address.
  *
- * A source the ROM cannot load word by word goes through the stage first.
+ * A source that is not word-aligned is copied through flash_stage first.
  */
 static int program_words(uint32_t addr, const uint8_t *src, uint32_t len) {
     if (((uintptr_t)src & 3U) == 0U) {
@@ -174,9 +179,10 @@ static int in_sram(const void *p, uint32_t len) {
 }
 
 /**
- * @brief Program from a source outside SRAM -- the image's flash constants,
- *        or PSRAM: each piece is copied to SRAM with the cache on, then goes
- *        down as an SRAM source would.
+ * @brief Program from a source outside SRAM, such as XIP constants or PSRAM.
+ *
+ * Each piece is copied to flash_piece with the cache on, then programmed as
+ * an SRAM source.
  */
 static tiku_flash_err_t program_pieces(uint32_t addr, const uint8_t *s,
                                        uint32_t len) {

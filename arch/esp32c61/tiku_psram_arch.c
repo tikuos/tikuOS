@@ -7,7 +7,7 @@
  *
  * tiku_psram_arch.c - ESP32-C61 in-package PSRAM bring-up.
  *
- * The device is reset, identified and put in QPI mode with ROM SPI user
+ * The device is identified, reset and put in QPI mode with ROM SPI user
  * commands on SPI1; SPI0 then serves cache misses to it with quad reads and
  * writes, and the MMU maps it as PSRAM pages after the flash.
  *
@@ -78,20 +78,22 @@ static void psram_cmd(int qpi, uint32_t cmd, uint32_t addr, uint32_t addr_bits,
                                PSRAM_CS1, 0);
 }
 
-/** @brief Reset, identify and switch the device to QPI; 0 or an error. */
+/** @brief Probe, identify, reset and switch the device to QPI.
+ *  @return TIKU_ESP32C61_PSRAM_OK, or an error */
 static tiku_esp32c61_psram_err_t psram_device_up(void) {
     uint32_t probe = PROBE_WORD, back = 0UL, id = 0UL;
     uint32_t density;
 
-    /* It may still be in QPI from before a reset that spared it. */
+    /* The device may still be in QPI mode across a reset that did not power
+     * it down. */
     psram_cmd(1, CMD_EXIT_QPI, 0UL, 0U, NULL, 0U, NULL, 0U);
     psram_cmd(0, CMD_WRITE, 0UL, 24U, &probe, 32U, NULL, 0U);
     psram_cmd(0, CMD_READ, 0UL, 24U, NULL, 0U, &back, 32U);
     if (back != PROBE_WORD) {
         return TIKU_ESP32C61_PSRAM_ABSENT;
     }
-    /* The first ID read after power-up can come back wrong on 16 Mbit parts:
-     * Espressif's driver reads twice, and so does this. */
+    /* The first ID read after power-up can come back wrong on 16 Mbit parts,
+     * so a bad KGD byte is read once more. */
     psram_cmd(0, CMD_READ_ID, 0UL, 24U, NULL, 0U, &id, 24U);
     if (((id >> 8) & 0xFFUL) != ID_KGD) {
         psram_cmd(0, CMD_READ_ID, 0UL, 24U, NULL, 0U, &id, 24U);
@@ -151,8 +153,8 @@ tiku_esp32c61_psram_err_t tiku_esp32c61_psram_init(void) {
     TIKU_REG32(ESP32C61_SPI0_SMEM_AC) |=
         ESP32C61_SMEM_CS_SETUP | ESP32C61_SMEM_CS_HOLD;
 
-    /* SPI1 is the flash's too: what the ROM flash calls left there comes
-     * back when the device is up, whatever happened meanwhile. */
+    /* SPI1 also serves the flash: its CTRL, CLOCK and MISC are restored
+     * after the bring-up, whatever its result. */
     ctrl = TIKU_REG32(ESP32C61_SPI1_CTRL);
     clock = TIKU_REG32(ESP32C61_SPI1_CLOCK);
     misc = TIKU_REG32(ESP32C61_SPI1_MISC);
@@ -178,8 +180,8 @@ tiku_esp32c61_psram_err_t tiku_esp32c61_psram_init(void) {
     }
     (void)ESP32C61_ROM_CACHE_INVAL(TIKU_ESP32C61_PSRAM_BASE, psram_bytes);
 
-    /* A pattern at each end, written back past the cache and read again,
-     * so what is checked is the device and not a cache line. */
+    /* A pattern at each end is written back and invalidated, then read
+     * again from the device. */
     w[0] = 0xA5A55A5AUL;
     w[psram_bytes / 4UL - 1UL] = 0x3C3CC3C3UL;
     (void)ESP32C61_ROM_CACHE_WB_INVAL(TIKU_ESP32C61_PSRAM_BASE, psram_bytes);
@@ -194,8 +196,8 @@ tiku_esp32c61_psram_err_t tiku_esp32c61_psram_init(void) {
 extern char __tiku_psram_data_start[] __attribute__((weak));
 extern char __tiku_psram_data_end[] __attribute__((weak));
 
-/** @brief An address the compiler cannot reason about: two weak symbols
- *         may both be absent, and so equal. */
+/** @brief @p p as an integer the compiler cannot fold: two absent weak
+ *         symbols are equal, yet it may assume distinct symbols differ. */
 static uintptr_t opaque(const void *p) {
     uintptr_t a = (uintptr_t)p;
 
@@ -255,7 +257,7 @@ uint32_t tiku_esp32c61_psram_size(void) {
     return psram_bytes;
 }
 
-/** @brief Whether [a, a + n) lies wholly in the PSRAM mapped so far. */
+/** @brief Whether [a, a + n) lies wholly in the mapped PSRAM. */
 static int psram_holds(uintptr_t a, unsigned long n) {
     return n != 0UL && a >= TIKU_ESP32C61_PSRAM_BASE && n <= psram_bytes &&
            a - TIKU_ESP32C61_PSRAM_BASE <= psram_bytes - n;

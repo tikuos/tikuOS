@@ -30,8 +30,8 @@ static uint8_t gpio_line_ready;
 static void gpio_isr(void) {
     uint32_t st = TIKU_REG32(ESP32C61_GPIO_PCPU_INT) & gpio_armed;
 
-    /* Cleared before the posts: an edge arriving meanwhile sets the bit
-     * again and is serviced again rather than swallowed. */
+    /* Cleared before the posts: an edge during them sets the bit again and
+     * raises the interrupt again. */
     TIKU_REG32(ESP32C61_GPIO_STATUS_W1TC) = st;
     while (st != 0UL) {
         unsigned n = (unsigned)__builtin_ctz(st);
@@ -63,8 +63,8 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
           ~(ESP32C61_GPIO_PIN_TYPE_MSK | ESP32C61_GPIO_PIN_ENA_MSK);
     reg |= type << ESP32C61_GPIO_PIN_TYPE_POS;
     TIKU_REG32(ESP32C61_GPIO_PIN(n)) = reg;
-    /* Drop whatever the pad did while it was configured, so arming does not
-     * deliver an edge nobody caused. */
+    /* Clear any edge latched while the pin was being configured, so arming
+     * delivers no stale edge. */
     TIKU_REG32(ESP32C61_GPIO_STATUS_W1TC) = 1UL << n;
 
     s = tiku_esp32c61_mie_off();

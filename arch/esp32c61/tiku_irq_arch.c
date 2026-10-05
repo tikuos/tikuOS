@@ -24,11 +24,12 @@ static volatile uint32_t   irq_on;
 static volatile uint32_t   irq_spurious;
 static volatile uint32_t   irq_flash;   /* lines whose handlers run in flash */
 
-/* The switching handler and its line; one, as there is one PendSV. */
+/* The switching handler and its line; there is at most one. */
 static tiku_esp32c61_switch_t irq_switch;
 static uint32_t irq_switch_line = ESP32C61_CLIC_LINES;
 
-/** @brief One line's IE bit, then a read back so the write has landed. */
+/** @brief Set or clear one line's IE bit, then read it back so the write has
+ *         landed. */
 static void line_ie(unsigned line, int on) {
     uint32_t a = ESP32C61_CLIC_CTRL(ESP32C61_CLIC_LINE_ID(line));
 
@@ -52,11 +53,13 @@ void tiku_esp32c61_irq_init(void) {
     irq_flash = 0UL;
     irq_switch = NULL;
     irq_switch_line = ESP32C61_CLIC_LINES;
-    /* Whatever the ROM routed goes: a source raises nothing until attached. */
+    /* Clear every source's map, the ROM's routes included: a source raises
+     * no line until it is attached. */
     for (unsigned s = 0U; s < ESP32C61_INTMTX_SOURCES; s++) {
         TIKU_REG32(ESP32C61_INTMTX_MAP(s)) = 0UL;
     }
-    /* Level bits reset to none, which flattens every line to one level. */
+    /* MNLBITS resets to 0, which flattens every line to one level; it is
+     * set to NLBITS. */
     cfg = TIKU_REG32(ESP32C61_CLIC_CONFIG) & ~ESP32C61_CLIC_MNLBITS_MSK;
     TIKU_REG32(ESP32C61_CLIC_CONFIG) = cfg | ESP32C61_CLIC_NLBITS;
     ESP32C61_CSR_WRITE(ESP32C61_CSR_MINTTHRESH, 0UL);  /* every level */

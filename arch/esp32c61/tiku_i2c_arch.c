@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_i2c_arch.c - ESP32-C61 I2C, unimplemented.
+ * tiku_i2c_arch.c - ESP32-C61 I2C stub.
  *
- * No hardware backend yet. Every call fails cleanly so a caller learns the
- * bus is absent instead of reading zeros as data.
+ * This port has no I2C driver: every call that returns a code returns
+ * TIKU_I2C_ERR_PARAM, and no call touches a buffer.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

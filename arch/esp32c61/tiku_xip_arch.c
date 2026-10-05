@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_xip_arch.c - ESP32-C61 XIP image: is xip.bin this build's?
+ * tiku_xip_arch.c - ESP32-C61 check that xip.bin is this build's.
  *
  * The header and the code section's bounds are link-time facts, read through
  * weak references: a build with no XIP part links neither, and passes.
@@ -44,8 +44,8 @@ int tiku_esp32c61_xip_ok(void) {
            h->bss_end == (uint32_t)(uintptr_t)__bss_end;
 }
 
-/** @brief An address the compiler cannot reason about: two weak symbols
- *         may both be absent, and so equal. */
+/** @brief @p p as an integer the compiler cannot fold: two absent weak
+ *         symbols are equal, yet it may assume distinct symbols differ. */
 static uintptr_t opaque(const void *p) {
     uintptr_t a = (uintptr_t)p;
 

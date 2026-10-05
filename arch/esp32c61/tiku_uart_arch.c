@@ -26,7 +26,7 @@
 
 /* Received bytes wait here; a power of two so the index wraps by mask.  The
  * console link keeps two 260-byte frames in flight while the board echoes
- * one back: 256 bytes overran on every burst, 2 KB holds ~178 ms at 115200. */
+ * one back; 2 KB holds about 178 ms of input at 115200 baud. */
 #ifndef TIKU_UART_RXBUF_SIZE
 #define TIKU_UART_RXBUF_SIZE    2048U
 #endif
@@ -86,7 +86,7 @@ void tiku_uart_init(void) {
     uint32_t v;
 
     TIKU_REG32(ESP32C61_UART_INT_ENA(UART_BASE)) = 0UL;
-    /* Whatever arrived before anyone listened is noise, not input. */
+    /* Bytes received before init are discarded. */
     while (ESP32C61_UART_RXCNT(TIKU_REG32(ESP32C61_UART_STATUS(UART_BASE)))) {
         (void)TIKU_REG32(ESP32C61_UART_FIFO(UART_BASE));
     }
@@ -167,14 +167,14 @@ int tiku_uart_getc(void) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* Lightweight printf                                                        */
+/* LIGHTWEIGHT PRINTF                                                        */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Emit an unsigned value in the given base with optional padding.
  *
- * Digits are rendered least significant first into a local buffer and then
- * replayed in order, which keeps newlib's printf out of the link.
+ * Digits are rendered least significant first into a local buffer, then
+ * sent most significant first.
  *
  * @param v      Value to print
  * @param base   Numeric base, 10 or 16
@@ -296,7 +296,7 @@ void tiku_uart_printf(const char *fmt, ...) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* Receive overruns                                                          */
+/* RECEIVE OVERRUNS                                                          */
 /*---------------------------------------------------------------------------*/
 
 uint16_t tiku_uart_overrun_count(void) {

@@ -27,16 +27,19 @@
 #define TIKU_ESP32C61_LINE_UART0    13U
 #define TIKU_ESP32C61_LINE_SWITCH   14U     /* worker threads' context switch */
 #define TIKU_ESP32C61_LINE_DMA      15U     /* AHB DMA channel 0, copy done */
-#define TIKU_ESP32C61_LINE_RADIO    16U     /* the radio's: its timer, then */
-#define TIKU_ESP32C61_LINES_RADIO   4U      /* what its libraries ask for */
+/* The radio's LINES_RADIO lines from LINE_RADIO: the first for its timer,
+ * the rest for what its libraries ask for. */
+#define TIKU_ESP32C61_LINE_RADIO    16U
+#define TIKU_ESP32C61_LINES_RADIO   4U
 
-/* Levels run 1..7; the timers outrank everything that may join them, and
- * the context switch yields to everything, as PendSV does. */
+/* Levels run 1..7: the timers take the highest and the context switch the
+ * lowest, so a switch waits for every other pending handler. */
 #define TIKU_ESP32C61_LEVEL_TIMER   7U
 #define TIKU_ESP32C61_LEVEL_DEFAULT 3U
 #define TIKU_ESP32C61_LEVEL_SWITCH  1U
 
-/** @brief A line's handler; the source is cleared inside it, not after. */
+/** @brief A line's handler; it clears its source before returning, since
+ *         every line is level-triggered. */
 typedef void (*tiku_esp32c61_isr_t)(void);
 
 /** @brief A switching handler: given the saved frame, the frame to resume. */

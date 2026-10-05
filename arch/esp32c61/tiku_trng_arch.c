@@ -16,10 +16,11 @@
 #include "tiku_trng_arch.h"
 #include "tiku_esp32c61_regs.h"
 
-/* Samples mixed in per word: about 20 us at the ~1.8 MHz the counter runs. */
+/* New samples a word waits for before it is read. */
 #define TRNG_FRESH      32U
 
-/* Bounded so a stalled sampler returns an error rather than the caller. */
+/* Polls of the sample counter before a read gives up with
+ * TIKU_TRNG_ERR_NOT_READY, so a stalled sampler cannot hang the caller. */
 #define TRNG_SPINS      200000UL
 
 static uint8_t trng_ready;
@@ -44,8 +45,8 @@ int tiku_trng_arch_read_u32(uint32_t *out) {
     if (!trng_ready) {
         tiku_trng_arch_init();
     }
-    /* No fresh samples means no noise in the word, and a word without noise
-     * is a counter, not a random number: refuse rather than return it. */
+    /* A word is read only after TRNG_FRESH new samples: without fresh noise
+     * the generator's output is predictable. */
     start = trng_count();
     for (unsigned long spins = TRNG_SPINS; spins > 0UL; spins--) {
         seen = (trng_count() - start) & 0xFFUL;

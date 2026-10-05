@@ -18,8 +18,8 @@
 #include "tiku_irq_arch.h"
 
 void tiku_cpu_esp32c61_delay_us(unsigned int us) {
-    /* Cycles per 1/64 us: a measured rate is no whole number of MHz, and
-     * truncating it to one ran 20 MHz delays 5% short. */
+    /* Cycles per 1/64 us, which keeps the fraction of a measured rate that
+     * is not a whole number of MHz. */
     uint32_t per64 = (uint32_t)(tiku_cpu_esp32c61_clock_get_hz() / 15625UL);
 
     /* 100 ms at a time keeps chunk * per64 inside 32 bits at 160 MHz. */
@@ -63,8 +63,8 @@ uint32_t tiku_cpu_esp32c61_reset_code(void) {
 }
 
 uint16_t tiku_cpu_esp32c61_reset_reason(void) {
-    /* The MSP430 SYSRSTIV-style codes the kernel speaks, as the other ports
-     * report them: /sys/boot/reason renders those and nothing else. */
+    /* The MSP430 SYSRSTIV-style codes, the only ones /sys/boot/reason
+     * renders. */
     switch (tiku_cpu_esp32c61_reset_code()) {
     case ESP32C61_RESET_TG0_WDT_SYS:
     case ESP32C61_RESET_TG1_WDT_SYS:
@@ -86,7 +86,8 @@ uint16_t tiku_cpu_esp32c61_reset_reason(void) {
     case ESP32C61_RESET_BROWNOUT:
         return 0x0002U;     /* brownout */
     default:
-        /* The EN pin reads as power-on too; the ROM code keeps the rest. */
+        /* Power-on, the EN pin and every other code read as none;
+         * tiku_cpu_esp32c61_reset_code() keeps the detail. */
         return 0x0000U;     /* none */
     }
 }
@@ -100,7 +101,8 @@ void tiku_cpu_esp32c61_restart(int by_watchdog) {
     uint32_t us;
 
     (void)tiku_esp32c61_mie_off();
-    /* The console's FIFO out, but bounded: a reset must not hang on it. */
+    /* Drain the console FIFO for at most 20 ms: a stuck UART must not hold
+     * off the reset. */
     for (us = 0UL; us < 20000UL &&
          ESP32C61_UART_TXCNT(TIKU_REG32(ESP32C61_UART_STATUS(
              ESP32C61_UART0_BASE))) != 0UL; us += 10UL) {
@@ -113,7 +115,8 @@ void tiku_cpu_esp32c61_restart(int by_watchdog) {
     /* Nothing below touches flash or PSRAM. */
     (void)ESP32C61_ROM_CACHE_DISABLE();
     if (by_watchdog) {
-        /* About 2 ms: a hold of one tick never fires. */
+        /* 64/32768 s is a hold of 4 watchdog ticks, about 2 ms; a hold of
+         * one tick never fires. */
         tiku_cpu_esp32c61_watchdog_on_arch(TIKU_WDT_SRC_ACLK, 64U);
     } else {
         ESP32C61_ROM_SOFTWARE_RESET();

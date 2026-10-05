@@ -19,6 +19,7 @@
 #include <stdint.h>
 
 #ifndef TIKU_CLOCK_ARCH_TIME_T_DEFINED
+/** @brief A tick count. */
 typedef unsigned long tiku_clock_arch_time_t;
 #define TIKU_CLOCK_ARCH_TIME_T_DEFINED
 #endif
@@ -28,7 +29,7 @@ typedef unsigned long tiku_clock_arch_time_t;
 #define TIKU_CLOCK_ARCH_CONF_SECOND 128
 #endif
 
-/** @brief Resolved tick frequency -- use this, not the CONF_ form. */
+/** @brief Ticks per second; a build sets it through the CONF_ form. */
 #define TIKU_CLOCK_ARCH_SECOND  TIKU_CLOCK_ARCH_CONF_SECOND
 
 /** @brief SYSTIMER counts per tick: 125000 at 128 Hz, exact. */
@@ -41,7 +42,7 @@ typedef unsigned long tiku_clock_arch_time_t;
 #define TIKU_ESP32C61_ALARM_DRIVER  2U
 
 /*---------------------------------------------------------------------------*/
-/* HAL entry points                                                          */
+/* HAL ENTRY POINTS                                                          */
 /*---------------------------------------------------------------------------*/
 
 /** @brief Start the tick and zero the tick and seconds counters. */
@@ -72,7 +73,8 @@ int                    tiku_clock_arch_fine_max(void);
  *         @p now: @p now when one has fired untaken, ~0 if none. */
 uint64_t               tiku_esp32c61_alarm_due(uint64_t now);
 
-/** @brief Clock-source fault; the crystal has no fallback. @return NONE */
+/** @brief Clock-source fault; the crystal has no fallback.
+ *  @return TIKU_CLOCK_ARCH_FAULT_NONE */
 unsigned char          tiku_clock_arch_fault(void);
 
 /** @brief Milliseconds to ticks, rounded up so a wait is never short. */
@@ -84,7 +86,7 @@ unsigned char          tiku_clock_arch_fault(void);
     (((unsigned long)(ticks) * 1000UL) / TIKU_CLOCK_ARCH_SECOND)
 
 /*---------------------------------------------------------------------------*/
-/* Port internals                                                            */
+/* PORT INTERNALS                                                            */
 /*---------------------------------------------------------------------------*/
 
 /** @brief Arm SYSTIMER alarm @p n for absolute count @p at; a past one

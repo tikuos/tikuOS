@@ -51,8 +51,8 @@ uint16_t tiku_cpu_esp32c61_reset_reason(void);
 /** @brief The ROM's reset code (ESP32C61_RESET_* in the register header). */
 uint32_t tiku_cpu_esp32c61_reset_code(void);
 
-/** @brief Code just written through the cache becomes what the core fetches:
- *         every line written back and dropped, then fence.i. */
+/** @brief Write back and drop every cache line, then fence.i, so the core
+ *         fetches code newly written through the cache. */
 void tiku_cpu_esp32c61_icache_invalidate(void);
 
 /**
@@ -62,9 +62,9 @@ void tiku_cpu_esp32c61_icache_invalidate(void);
  * boot stalled until EN or power.  Interrupts go off, the console drains, the
  * core returns to the PLL and the cache stops first, all from SRAM.
  *
- * @param by_watchdog  Non-zero: a TG0 bite, so the next boot reads a
- *                     watchdog reset, as a reboot does elsewhere; zero: the
- *                     ROM's software reset
+ * @param by_watchdog  Non-zero: a TG0 watchdog bite, which the next boot
+ *                     reads as a watchdog reset; zero: the ROM's software
+ *                     reset
  */
 __attribute__((noreturn)) void tiku_cpu_esp32c61_restart(int by_watchdog);
 

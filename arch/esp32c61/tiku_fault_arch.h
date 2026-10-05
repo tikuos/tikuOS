@@ -31,7 +31,7 @@ typedef struct {
 /** @brief The record; check its magic before trusting the rest. */
 const tiku_esp32c61_fault_record_t *tiku_esp32c61_fault_last(void);
 
-/** @brief Forget the record. */
+/** @brief Clear the record and flush the clearing to the flash mirror. */
 void tiku_esp32c61_fault_clear(void);
 
 /** @brief A name for an exception code. @param code  mcause & 0xfff */

@@ -7,8 +7,8 @@
  *
  * tiku_esp32c61_regs.h - ESP32-C61 registers and CSRs this port touches.
  *
- * Hand-written from Espressif's register headers rather than vendoring an
- * SDK, in the RP2350 and STM32N6 style: each block names its peripheral.
+ * Addresses and fields follow Espressif's register headers and ROM linker
+ * script; each block names its peripheral.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,14 +18,16 @@
 
 #include <stdint.h>
 
+/** @brief The 32-bit register at address @p a. */
 #define TIKU_REG32(a)               (*(volatile uint32_t *)(uintptr_t)(a))
 
 /*---------------------------------------------------------------------------*/
 /* CSRS                                                                      */
 /*---------------------------------------------------------------------------*/
 
-/* The CSR is named in the instruction itself, so these stay macros; the
- * name expands first, so a numbered CSR may be passed by its macro. */
+/* Read, write, set bits in and clear bits in a CSR.  The CSR is encoded in
+ * the instruction, so these are macros; the name is expanded first, so a CSR
+ * number may be passed by its macro (ESP32C61_CSR_MINTTHRESH). */
 #define ESP32C61_STR_(x)            #x
 #define ESP32C61_STR(x)             ESP32C61_STR_(x)
 #define ESP32C61_CSR_READ(csr) __extension__ ({                             \
@@ -61,21 +63,27 @@
 /* ROM ENTRY POINTS (esp32c61.rom.ld)                                        */
 /*---------------------------------------------------------------------------*/
 
-/* Reset cause codes, as the ROM reports them. */
+/* A core's reset cause (ESP32C61_RESET_* below), and the software reset. */
 #define ESP32C61_ROM_RESET_REASON   ((uint32_t (*)(int))0x40000018UL)
 #define ESP32C61_ROM_SOFTWARE_RESET ((void (*)(void))0x40000094UL)
-/* The ROM's own delays read this after every core clock change. */
+/* Sets the core rate the ROM's delays count with; called after every core
+ * clock change. */
 #define ESP32C61_ROM_SET_CPU_MHZ    ((void (*)(uint32_t))0x40000044UL)
 
 /* SPI flash, through the ROM's own routines: 0 is success, 1 an error,
  * 2 a timeout.  Write and read take 4-byte aligned addresses and lengths. */
+/** @brief ROM flash setup: identity, size and erase/program geometry. */
 typedef int (*esp32c61_rom_flash_config_t)(uint32_t id, uint32_t size,
                                            uint32_t block, uint32_t sector,
                                            uint32_t page, uint32_t status_mask);
+/** @brief ROM flash program of @p len bytes from @p src at @p addr. */
 typedef int (*esp32c61_rom_flash_write_t)(uint32_t addr, const uint32_t *src,
                                           int32_t len);
+/** @brief ROM flash read of @p len bytes at @p addr into @p dst. */
 typedef int (*esp32c61_rom_flash_read_t)(uint32_t addr, uint32_t *dst,
                                          int32_t len);
+/** @brief ROM MMU map: @p pages pages of @p page_kb KB, @p paddr at
+ *         @p vaddr; @p ext_ram marks PSRAM pages. */
 typedef int (*esp32c61_rom_mmu_set_t)(uint32_t sensitive, uint32_t ext_ram,
                                       uint32_t vaddr, uint32_t paddr,
                                       uint32_t page_kb, uint32_t pages,
@@ -84,7 +92,8 @@ typedef int (*esp32c61_rom_mmu_set_t)(uint32_t sensitive, uint32_t ext_ram,
 #define ESP32C61_ROM_FLASH_ATTACH   ((void (*)(uint32_t, uint32_t))0x400001F0UL)
 #define ESP32C61_ROM_FLASH_CONFIG   ((esp32c61_rom_flash_config_t)0x40000170UL)
 #define ESP32C61_ROM_FLASH_UNLOCK   ((int (*)(void))0x40000164UL)
-#define ESP32C61_ROM_FLASH_ERASE    ((int (*)(uint32_t))0x40000154UL)  /* sector */
+/* Erase takes a sector number. */
+#define ESP32C61_ROM_FLASH_ERASE    ((int (*)(uint32_t))0x40000154UL)
 #define ESP32C61_ROM_FLASH_WRITE    ((esp32c61_rom_flash_write_t)0x4000015CUL)
 #define ESP32C61_ROM_FLASH_READ     ((esp32c61_rom_flash_read_t)0x40000160UL)
 #define ESP32C61_ROM_FLASH_USER_CMD ((int (*)(uint32_t *, uint8_t))0x40000174UL)
@@ -99,11 +108,12 @@ typedef int (*esp32c61_rom_mmu_set_t)(uint32_t sensitive, uint32_t ext_ram,
 #define ESP32C61_ROM_CACHE_WB       ((int (*)(uint32_t, uint32_t))0x4000063CUL)
 #define ESP32C61_ROM_CACHE_WB_INVAL ((int (*)(uint32_t, uint32_t))0x40000640UL)
 #define ESP32C61_ROM_CACHE_WB_INVAL_ALL ((void (*)(void))0x40000650UL)
-/* Off, every tag invalid: the cache as a reset should find it. */
+/* Turns the cache off with every tag invalid, the state a reset needs. */
 #define ESP32C61_ROM_CACHE_DISABLE  ((uint32_t (*)(void))0x40000690UL)
 
 /* ROM SPI user commands, for devices on the MSPI bus other than the flash:
  * the PSRAM's reset, identity and mode changes go out through these. */
+/** @brief One ROM SPI user command: opcode, address, data out and in. */
 typedef struct {
     uint16_t  cmd;
     uint16_t  cmd_bits;
@@ -122,6 +132,7 @@ typedef struct {
 #define ESP32C61_ROM_SPI_MODE_QIO   0
 #define ESP32C61_ROM_SPI_MODE_SLOW  5           /* plain SPI, one line */
 
+/* Reset cause codes, as ESP32C61_ROM_RESET_REASON returns them. */
 #define ESP32C61_RESET_POWERON      1U
 #define ESP32C61_RESET_SW_SYS       3U
 #define ESP32C61_RESET_DEEPSLEEP    5U
@@ -183,7 +194,8 @@ typedef struct {
 #define ESP32C61_GPIO_ENABLE_W1TC   (ESP32C61_GPIO_BASE + 0x3CUL)
 #define ESP32C61_GPIO_IN            (ESP32C61_GPIO_BASE + 0x64UL)
 #define ESP32C61_GPIO_STATUS_W1TC   (ESP32C61_GPIO_BASE + 0x7CUL)
-#define ESP32C61_GPIO_PCPU_INT      (ESP32C61_GPIO_BASE + 0xA4UL)  /* armed+fired */
+/* The pins that fired and are armed for the CPU. */
+#define ESP32C61_GPIO_PCPU_INT      (ESP32C61_GPIO_BASE + 0xA4UL)
 #define ESP32C61_GPIO_PIN(n)        (ESP32C61_GPIO_BASE + 0xD4UL + 4UL * (n))
 #define ESP32C61_GPIO_PIN_TYPE_POS  7U      /* 1 rise, 2 fall, 3 any edge */
 #define ESP32C61_GPIO_PIN_TYPE_MSK  (7UL << 7)
@@ -268,8 +280,9 @@ typedef struct {
 #define ESP32C61_SRC_UART0          40U
 #define ESP32C61_SRC_USB_JTAG       44U
 #define ESP32C61_SRC_SYSTIMER(n)    (52U + (n))
-/* The matrix's own map, not IDF's interrupts.h: that enum lists a temperature
- * sensor at 56 that has no map register, so it runs one high from there. */
+/* Numbered by the matrix's map registers.  IDF's interrupts.h lists a
+ * temperature sensor at 56 that has no map register, so its numbers above 56
+ * are one higher than these. */
 #define ESP32C61_SRC_DMA_IN0        58U     /* AHB DMA, channel 0's RX side */
 
 /* Software's own interrupt source: 1 raises it, 0 drops it. */
@@ -327,7 +340,8 @@ typedef struct {
 #define ESP32C61_RWDT_WPROTECT      (ESP32C61_LP_WDT_BASE + 0x18UL)
 #define ESP32C61_SWD_CONFIG         (ESP32C61_LP_WDT_BASE + 0x1CUL)
 #define ESP32C61_SWD_WPROTECT       (ESP32C61_LP_WDT_BASE + 0x20UL)
-#define ESP32C61_RWDT_CONFIG1       (ESP32C61_LP_WDT_BASE + 0x04UL)  /* stage 0 */
+/* CONFIG1 holds stage 0's timeout, in slow-clock ticks. */
+#define ESP32C61_RWDT_CONFIG1       (ESP32C61_LP_WDT_BASE + 0x04UL)
 #define ESP32C61_RWDT_FEED          (ESP32C61_LP_WDT_BASE + 0x14UL)
 #define ESP32C61_RWDT_EN            (1UL << 31)
 #define ESP32C61_RWDT_STG0_SYS_RESET (3UL << 28)        /* HP only: LP kept */
@@ -345,8 +359,9 @@ typedef struct {
 #define ESP32C61_LPPERI_RNG_CLK     (1UL << 24)
 #define ESP32C61_RNG_CFG            (ESP32C61_LPPERI_BASE + 0x24UL)
 #define ESP32C61_RNG_SAMPLE_EN      (1UL << 0)
-#define ESP32C61_RNG_CNT_POS        24U         /* samples taken, 8-bit, wraps */
-#define ESP32C61_RNG_DATA           (ESP32C61_LPPERI_BASE + 0x28UL)  /* synced */
+#define ESP32C61_RNG_CNT_POS        24U         /* sample count, 8-bit, wraps */
+/* The synced data register. */
+#define ESP32C61_RNG_DATA           (ESP32C61_LPPERI_BASE + 0x28UL)
 
 /*---------------------------------------------------------------------------*/
 /* EFUSE -- the factory MAC is the part's identity                           */
@@ -373,7 +388,8 @@ typedef struct {
 #define ESP32C61_PMU_HP_ACT_SYSCLK     (ESP32C61_PMU_BASE + 0x024UL)
 #define ESP32C61_PMU_HP_ACT_REGULATOR0 (ESP32C61_PMU_BASE + 0x028UL)
 #define ESP32C61_PMU_ICG_SYSCLK_EN  (1UL << 27)         /* HP sysclk: running */
-#define ESP32C61_PMU_XPD_PLL_ALL    (7UL << 28)         /* bb_i2c, pll_i2c, pll */
+/* XPD_PLL_ALL powers up bb_i2c, pll_i2c and the PLL. */
+#define ESP32C61_PMU_XPD_PLL_ALL    (7UL << 28)
 #define ESP32C61_PMU_MODEM_CODE_ACTIVE (2UL << 30)
 /* The HP system asleep. */
 #define ESP32C61_PMU_HP_SLP_DIG_POWER  (ESP32C61_PMU_BASE + 0x068UL)
@@ -445,8 +461,9 @@ typedef struct {
 #define ESP32C61_PMU_IMM_MODEM_ICG  (ESP32C61_PMU_BASE + 0x0DCUL)
 #define ESP32C61_PMU_UPDATE_ICG_MODEM (1UL << 31)
 
-/* Power-domain forces, six bits each, set at reset: a forced domain never
- * powers down, so a "deep" sleep keeps it on and resumes instead. */
+/* Power-domain forces, six bits each, set at reset.  A forced domain never
+ * powers down: a deep sleep with a force left set keeps that domain powered
+ * and wakes without a reset. */
 #define ESP32C61_PMU_PD_TOP_CNTL    (ESP32C61_PMU_BASE + 0x0F8UL)
 #define ESP32C61_PMU_PD_HPAON_CNTL  (ESP32C61_PMU_BASE + 0x0FCUL)
 #define ESP32C61_PMU_PD_HPCPU_CNTL  (ESP32C61_PMU_BASE + 0x100UL)
@@ -479,7 +496,7 @@ typedef struct {
 #define ESP32C61_PMU_WAKE_UART0     (1UL << 6)
 
 /*---------------------------------------------------------------------------*/
-/* LP timer -- the always-on count deep sleep wakes on                       */
+/* LP TIMER -- the always-on count deep sleep wakes on                       */
 /*---------------------------------------------------------------------------*/
 
 #define ESP32C61_LP_TIMER_BASE      0x600B0C00UL
@@ -493,15 +510,15 @@ typedef struct {
 #define ESP32C61_LP_TIMER_INT_CLR   (ESP32C61_LP_TIMER_BASE + 0x34UL)
 #define ESP32C61_LP_TIMER_WAKE_CLR  (1UL << 31)
 
-/* LP clocks: the slow clock counts the LP timer, the fast one clocks the
- * PMU and LP peripherals -- from the crystal at reset (XTAL/2). */
+/* LP clocks: the slow clock counts the LP timer; the fast one clocks the
+ * PMU and LP peripherals, and runs from the crystal (XTAL/2) at reset. */
 #define ESP32C61_LP_CLKRST_BASE     0x600B0400UL
 #define ESP32C61_LP_CLK_CONF        (ESP32C61_LP_CLKRST_BASE + 0x00UL)
 #define ESP32C61_LP_FAST_SEL_MSK    (3UL << 2)
 #define ESP32C61_LP_FAST_RC_FAST    (0UL << 2)
 
-/* HP SRAM, all of it: what the CPU reads without the cache -- so the one
- * source a flash write may read while the cache is suspended. */
+/* HP SRAM, all of it.  The CPU reads it without the cache, so it is the
+ * only source a flash write may read while the cache is suspended. */
 #define ESP32C61_HP_SRAM_BASE       0x40800000UL
 #define ESP32C61_HP_SRAM_END        0x40850000UL
 
@@ -535,12 +552,13 @@ typedef struct {
 #define ESP32C61_SPI1_CLOCK         (ESP32C61_MSPI1_BASE + 0x014UL)
 #define ESP32C61_SPI1_MISC          (ESP32C61_MSPI1_BASE + 0x034UL)
 #define ESP32C61_MMU_ACCESS_PSRAM   (1UL << 9)
-/* PMA, the attribute checker beside the PMP: the ROM's entry 15 makes the
- * whole external window read/execute, as flash; a lower entry, which wins,
- * makes the PSRAM pages data -- written, never run. */
+/* PMA, the attribute checker beside the PMP.  The ROM's entry 15 makes the
+ * whole external window read/execute; entry 13, which takes priority, makes
+ * the PSRAM pages read/write and not executable. */
 #define ESP32C61_CSR_PMACFG13       0xBCD
 #define ESP32C61_CSR_PMAADDR13      0xBDD
-/* Entry 12, above 13, holds the module window to W^X: written, or run. */
+/* Entry 12, which takes priority over 13, holds the module window to W^X:
+ * writable or executable, never both. */
 #define ESP32C61_CSR_PMACFG12       0xBCC
 #define ESP32C61_CSR_PMAADDR12      0xBDC
 #define ESP32C61_PMA_NAPOT_RW       0xC0000019UL    /* NAPOT, R, W, on */
@@ -550,9 +568,9 @@ typedef struct {
 #define ESP32C61_IO_MUX_MCU_SEL_MSK (7UL << 12)
 #define ESP32C61_IO_MUX_FUN_IE      (1UL << 9)
 
-/* APM: access filters on the bus masters, on at reset.  With no trusted and
- * untrusted worlds here, they come off at boot, as IDF does without its TEE:
- * left on, the DMA cannot read even its own descriptors. */
+/* APM: access filters on the bus masters, on at reset.  This port has no
+ * trusted world, so the boot turns them off; while they are on, the DMA
+ * cannot read its own descriptors. */
 #define ESP32C61_HP_APM_FUNC_CTRL   0x600990C4UL
 #define ESP32C61_LP_APM_FUNC_CTRL   0x600B38C4UL
 #define ESP32C61_CPU_APM_FUNC_CTRL  0x6009A0C4UL

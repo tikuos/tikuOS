@@ -27,14 +27,17 @@
 
 #define RC_FAST_HZ      17500000UL  /* the PMU's work clock, nominal */
 
-/* A light sleep costs about a millisecond in and out: nearer deadlines idle
- * in wfi, and a sleep ends that far ahead of the one it waits for. */
+/* Light idle: a deadline nearer than LIGHT_IDLE_MIN_US idles in wfi, and a
+ * light sleep, whose entry and exit take about a millisecond, ends
+ * LIGHT_IDLE_EARLY_US before its deadline and lasts at most
+ * LIGHT_IDLE_MAX_US. */
 #define LIGHT_IDLE_MIN_US   3000ULL
 #define LIGHT_IDLE_EARLY_US 1000ULL
 #define LIGHT_IDLE_MAX_US   1000000ULL
 #define SLEEP_MISSED    0x534C5021UL    /* "SLP!" in LP AON store 9 */
 
-/* Deep-sleep trims for a part fused without them. */
+/* Deep-sleep LP trims for a part fused without them, and the HP debug
+ * attenuation every deep sleep uses. */
 #define DSLP_DBG_DEFAULT    13UL
 #define DSLP_DBIAS_DEFAULT  23UL
 #define HP_DBG_DEEPSLEEP    13UL
@@ -78,6 +81,7 @@ static uint32_t cycles(uint32_t us, uint32_t hz) {
     return (uint32_t)(((uint64_t)us * hz + 999999ULL) / 1000000ULL);
 }
 
+/** @brief @p v, limited to @p max. */
 static uint32_t cap(uint32_t v, uint32_t max) {
     return (v > max) ? max : v;
 }
@@ -88,9 +92,14 @@ static void field(uint32_t reg, uint32_t msk, uint32_t val) {
 }
 
 /**
- * @brief What every sleep shares: the domains handed to the state machine,
- *        the HP system as each wake restores it, and the wake path's waits
- *        -- @p min_us asleep at least, @p lp_analog_us for the LP supply.
+ * @brief Program what every sleep shares.
+ *
+ * The power domains go to the PMU's state machine, the HP active state is
+ * the one each wake restores, and the wake path's waits are set.
+ *
+ * @param slow_hz       LP slow clock rate
+ * @param min_us        Shortest sleep
+ * @param lp_analog_us  Settling time for the LP supply
  */
 static void pmu_wake_config(uint32_t slow_hz, uint32_t min_us,
                             uint32_t lp_analog_us) {
@@ -108,9 +117,9 @@ static void pmu_wake_config(uint32_t slow_hz, uint32_t min_us,
     }
     TIKU_REG32(ESP32C61_PMU_PD_MEM_CNTL) &= ~ESP32C61_PMU_MEM_NO_ISO_MSK;
 
-    /* HP awake, as the PMU restores it on a wake: reset leaves the system
-     * clock gated and the PLL off here, which nothing applies until the
-     * first state change -- a wake from sleep. */
+    /* HP active state, which the PMU applies on each wake.  Reset leaves the
+     * system clock gated and the PLL off in it, and nothing applies it
+     * before the first wake from sleep. */
     TIKU_REG32(ESP32C61_PMU_HP_ACT_SYSCLK) = ESP32C61_PMU_ICG_SYSCLK_EN;
     TIKU_REG32(ESP32C61_PMU_HP_ACT_CLK_POWER) = ESP32C61_PMU_XPD_PLL_ALL;
     TIKU_REG32(ESP32C61_PMU_HP_ACT_ICG_MODEM) = ESP32C61_PMU_MODEM_CODE_ACTIVE;
@@ -150,11 +159,11 @@ static void pmu_deep_config(uint32_t slow_hz) {
     }
     pmu_wake_config(slow_hz, 450U, 500U);
 
-    /* HP asleep, each register whole as IDF's boot and deep-sleep settings
-     * leave it: every domain down, the flash's supply too; no clocks, the
-     * core stalled, and the system clock moved to the crystal and gated on
-     * the way down -- left unset, the PMU stops the PLL under a system still
-     * running from it, and the part freezes half asleep. */
+    /* HP sleep state, each register written whole: every domain down, the
+     * flash's supply too, no clocks, the core stalled, and the system clock
+     * moved to the crystal and gated on the way down.  Without that move the
+     * PMU stops the PLL under a system still running from it, and the part
+     * hangs half asleep. */
     TIKU_REG32(ESP32C61_PMU_HP_SLP_DIG_POWER) =
         ESP32C61_PMU_PD_VDD_SPI | ESP32C61_PMU_PD_WIFI | ESP32C61_PMU_PD_CPU |
         ESP32C61_PMU_PD_HP_AON | ESP32C61_PMU_PD_TOP;
@@ -190,10 +199,11 @@ static void pmu_deep_config(uint32_t slow_hz) {
 }
 
 /**
- * @brief The PMU's light-sleep settings: every domain stays powered and the
- *        core stalls with the PLL off, while the crystal, UART0, SYSTIMER and
- *        the pads keep their clocks -- so both regulators stay at the
- *        voltages the system runs on now, as IDF does with the crystal up.
+ * @brief Program the PMU's light-sleep state.
+ *
+ * Every domain but the WiFi one stays powered and the core stalls with the
+ * PLL off; the crystal, UART0, SYSTIMER and the pads keep their clocks, so
+ * both regulators stay at their active voltages.
  */
 static void pmu_light_config(uint32_t slow_hz) {
     uint32_t hp = TIKU_REG32(ESP32C61_PMU_HP_ACT_REGULATOR0) &
@@ -233,9 +243,10 @@ static void pmu_light_config(uint32_t slow_hz) {
 }
 
 /**
- * @brief The safety net: should the wake not come, the LP watchdog resets the
- *        HP system @p hold slow ticks from now.  The LP domain, and what the
- *        PMU last recorded, outlive that reset.
+ * @brief Arm the LP watchdog to reset the HP system @p hold slow ticks from
+ *        now, for a wake that never comes.
+ *
+ * The LP domain and what the PMU last recorded survive that reset.
  */
 static void sleep_safety_net(uint64_t hold) {
     TIKU_REG32(ESP32C61_RWDT_WPROTECT) = ESP32C61_WDT_WKEY;
@@ -340,8 +351,9 @@ uint32_t tiku_esp32c61_light_sleep(uint64_t us, unsigned flags) {
     }
     lp_timer_wake(us, hz);
 
-    /* Light, so the ROM must not take a later reset for a deep wake.  A
-     * byte or a pin already waiting refuses the sleep instead of ending it. */
+    /* A light sleep: the deep flag is cleared so the ROM does not take a
+     * later reset for a deep wake.  A UART byte or pin wake already pending
+     * rejects the sleep. */
     TIKU_REG32(ESP32C61_LP_AON_STORE(8)) &= ~1UL;
     TIKU_REG32(ESP32C61_PMU_SLP_CNTL2) = wakes;
     TIKU_REG32(ESP32C61_PMU_SLP_CNTL1) =
@@ -388,8 +400,9 @@ void tiku_esp32c61_light_idle(void) {
     uint64_t now = tiku_cpu_esp32c61_systimer();
     uint64_t due = tiku_esp32c61_alarm_due(now), us;
 
-    /* A byte already held would refuse the sleep, and a DMA copy or a held
-     * radio would stop with its clock: wfi until their interrupts instead. */
+    /* A byte already in the FIFO would reject the sleep, and a DMA copy or a
+     * held radio would stop with its clock; these, and a deadline nearer
+     * than LIGHT_IDLE_MIN_US, idle in wfi. */
     if (ESP32C61_UART_RXCNT(TIKU_REG32(ESP32C61_UART_STATUS(
             ESP32C61_UART0_BASE))) != 0UL || tiku_dma_arch_busy() ||
         sleep_holds != 0U || due < now + LIGHT_IDLE_MIN_US * 16ULL) {

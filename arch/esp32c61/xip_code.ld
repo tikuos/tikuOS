@@ -1,15 +1,24 @@
 /*
- * xip_code.ld - kernel code that runs from flash (ESP32-C61), with
- * TIKU_ESP32C61_XIP_CODE=1: BASIC, the shell's commands, the IP stack above
- * SLIP, TLS and the crypto under it, the BLE host, and the /sys, /sys/boot
- * and Wi-Fi nodes -- code and constants; data stays put.
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
  *
- * None of it runs in an interrupt or while a flash write has the cache
- * suspended, and the flash driver stages a write whose source is a constant
- * here through SRAM.  SLIP stays in SRAM: its bytes may come from the UART.
- * The nodes are here to keep SRAM bank 3 out of the kernel's image: the
- * SDR receiver captures into all 64 KB of it.
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * xip_code.ld - ESP32-C61 kernel code that runs from flash.
+ *
+ * With TIKU_ESP32C61_XIP_CODE=1: code and constants of BASIC, shell commands,
+ * the crypto, IPv4, HTTP, MQTT, TLS, WiFi and Bluetooth kits, and the /sys,
+ * /sys/boot and Wi-Fi VFS nodes.  Their data stays in SRAM.
+ *
+ * SPDX-License-Identifier: Apache-2.0
  */
+
+/* None of this code runs in an interrupt or while a flash write has the
+ * cache suspended, and the flash driver copies a write's source from here
+ * to SRAM before programming it.  The SLIP kit stays in SRAM: its bytes may
+ * come from the UART.  The VFS nodes are here to keep SRAM bank 3 out of the
+ * kernel's image: the SDR receiver captures into all 64 KB of it. */
 
 .xip.code :
 {

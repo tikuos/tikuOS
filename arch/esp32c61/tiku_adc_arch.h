@@ -7,8 +7,8 @@
  *
  * tiku_adc_arch.h - ESP32-C61 ADC contract.
  *
- * No backend on this port yet: the calls exist so the kernel links, and each
- * reports failure rather than pretending a transfer happened.
+ * This port has no ADC driver: every call that returns a code returns
+ * TIKU_ADC_ERR_PARAM.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,21 +18,29 @@
 
 #include <interfaces/adc/tiku_adc.h>
 
-/** @brief Configure the ADC. @param config  Requested settings @return Error */
+/**
+ * @brief Configures nothing.
+ * @param config  Ignored
+ * @return TIKU_ADC_ERR_PARAM
+ */
 int  tiku_adc_arch_init(const tiku_adc_config_t *config);
 
-/** @brief Release the ADC. */
+/** @brief Does nothing. */
 void tiku_adc_arch_close(void);
 
-/** @brief Prepare one channel. @param channel  Channel @return Error */
+/**
+ * @brief Prepares nothing.
+ * @param channel  Ignored
+ * @return TIKU_ADC_ERR_PARAM
+ */
 int  tiku_adc_arch_channel_init(uint8_t channel);
 
 /**
- * @brief Convert one channel.
+ * @brief Converts nothing.
  *
- * @param channel  Channel to sample
- * @param value    Receives the raw reading
- * @return TIKU_ADC_OK, or an error
+ * @param channel  Ignored
+ * @param value    Receives 0 when not NULL
+ * @return TIKU_ADC_ERR_PARAM
  */
 int  tiku_adc_arch_read(uint8_t channel, uint16_t *value);
 

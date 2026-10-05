@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_sleep_arch.h - ESP32-C61 deep sleep and the LP timer it wakes on.
+ * tiku_sleep_arch.h - ESP32-C61 deep and light sleep, and the LP timer.
  *
- * Deep sleep powers the HP domain down -- core, SRAM, the flash's supply --
- * leaving the LP timer and the PMU running.  Waking is a reset: the boot after
- * it restores durable state from the flash mirror, as after any other.
+ * Deep sleep powers the HP domain down (core, SRAM, the flash's supply) and
+ * leaves the LP timer and the PMU running.  Its wake is a reset, and the boot
+ * restores durable state from the flash mirror.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -32,8 +32,8 @@ uint32_t tiku_esp32c61_lp_hz(void);
  * reset line wakes it.
  *
  * @note A sleep that never takes the core, or a timed one whose wake never
- *       comes, resets the part a second late instead (the latter through the
- *       LP watchdog), and tiku_esp32c61_sleep_missed() reports it.
+ *       comes, ends in a reset a second late (the latter through the LP
+ *       watchdog), and tiku_esp32c61_sleep_missed() reports it.
  */
 void tiku_esp32c61_deep_sleep(uint64_t us) __attribute__((noreturn));
 
@@ -41,29 +41,41 @@ void tiku_esp32c61_deep_sleep(uint64_t us) __attribute__((noreturn));
 #define TIKU_ESP32C61_NAP_PIN   (1U << 0)
 
 /**
- * @brief Light sleep: the core stalls and the PLL stops, while the crystal,
- *        UART0 and SYSTIMER run on -- RAM, time and console input survive.
+ * @brief Light sleep: the core stalls and the PLL stops; the crystal, UART0
+ *        and SYSTIMER run on, so RAM, time and console input survive.
  *
- * Ends after @p us (0: no timer), on a byte arriving at UART0, which is kept,
- * or with @p flags TIKU_ESP32C61_NAP_PIN on GPIO9 low.  Returns the PMU's
- * wake cause (ESP32C61_PMU_WAKE_*), 0 when a waiting wake refused the sleep.
+ * Ends after @p us (0: no timer), on a byte arriving at UART0, which is
+ * kept, or, with TIKU_ESP32C61_NAP_PIN in @p flags, on GPIO9 low.
+ *
+ * @return The PMU's wake cause (ESP32C61_PMU_WAKE_*), or 0 when a pending
+ *         wake rejected the sleep or no wake came within @p us + 2 s
  */
 uint32_t tiku_esp32c61_light_sleep(uint64_t us, unsigned flags);
 
 /**
- * @brief The idle hook for `sleep lpm3`: light sleep until the next SYSTIMER
- *        deadline, or wfi when that is too near to pay for the way in.
+ * @brief The idle hook for `sleep lpm3` and `sleep lpm4`: light sleep until
+ *        the next SYSTIMER deadline.
  *
- * Only timers and console bytes end it.  Other interrupts wait for the next
- * deadline, which is why it is chosen, never the default.
+ * A deadline under 3 ms away, a received byte waiting, a DMA copy or a sleep
+ * hold leaves it in wfi.  Only timers and console bytes end the sleep; other
+ * interrupts wait for the next deadline.
  */
 void tiku_esp32c61_light_idle(void);
 
-/** @brief Keep the light-sleep idle to wfi while held (the radio's PLL
- *         clocks), counted.  @param on  Non-zero to take, 0 to give back */
+/**
+ * @brief Take (@p on non-zero) or give back a hold that keeps the light-sleep
+ *        idle in wfi; holds are counted.
+ *
+ * The radio drivers hold it while they need the PLL clocks.
+ */
 void tiku_esp32c61_sleep_hold(int on);
 
-/** @brief Latch why this boot began; once, early in every boot. */
+/**
+ * @brief Latch this boot's LP time, the deep-sleep wake cause and the
+ *        missed-sleep flag.
+ *
+ * @note Call once, early in every boot.
+ */
 void tiku_esp32c61_sleep_boot(void);
 
 /** @brief PMU wake-cause bits (ESP32C61_PMU_WAKE_*) after a deep-sleep wake,

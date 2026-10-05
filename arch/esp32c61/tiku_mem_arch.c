@@ -22,7 +22,8 @@
 #include <kernel/memory/tiku_nvm_mirror.h>
 
 /* The durable region is the .uninit span the linker script carves; a slot
- * holds a 16-byte header and then as much of it as fits its four sectors. */
+ * holds a 16-byte header and then the region, which the script asserts fits
+ * in four sectors. */
 extern uint32_t __uninit_start;
 extern uint32_t __uninit_end;
 
@@ -32,7 +33,7 @@ extern uint32_t __uninit_end;
 /** @brief What the boot-time restore found. */
 static uint8_t mem_restore_status = TIKU_NVM_RESTORE_VIRGIN;
 
-/** @brief Erase/program cycles spent this boot. */
+/** @brief Mirror slots written this boot. */
 static uint32_t mem_program_count;
 
 /* The slot holding the newest image that checks, and its generation (header
@@ -51,8 +52,8 @@ static const uint32_t *slot_hdr(unsigned slot) {
  * @brief Find the slot holding the newest image that checks.
  *
  * When both check, the later generation is the later flush, compared modulo
- * 2^32 so the count may wrap.  A mirror from before the slots sits in slot 0
- * with generation 0xFFFFFFFF, and the next flush's 0 counts as later.
+ * 2^32 so the count may wrap; an erased generation word, 0xFFFFFFFF, counts
+ * as older than the 0 a flush writes after it.
  *
  * @return Nonzero when either slot carries the V2 magic, checked or not
  */
@@ -80,7 +81,7 @@ static int mirror_search(void) {
     return seen;
 }
 
-/** @brief Byte length of the durable region, capped at what the mirror holds. */
+/** @brief The durable region's byte length, capped at what a slot holds. */
 static size_t mem_uninit_size(void) {
     size_t n = (size_t)((uintptr_t)&__uninit_end - (uintptr_t)&__uninit_start);
 
@@ -101,7 +102,7 @@ void tiku_mem_arch_init(void) {
         mem_restore_status = TIKU_NVM_RESTORE_VIRGIN;   /* fresh or erased */
         return;
     }
-    /* A magic but no slot that checks: every image was torn, or rotted. */
+    /* A magic but no slot that checks: every image is torn or corrupt. */
     if (mirror_slot == MIRROR_NONE) {
         mem_restore_status = TIKU_NVM_RESTORE_CRC_FAIL;
         return;
@@ -198,8 +199,8 @@ int tiku_mem_arch_nvm_flush_status(void) {
         (void)mirror_search();
     }
     crc = tiku_nvm_crc32(&__uninit_start, len);
-    /* Skip a mirror that already matches: an erase costs one cycle of a finite
-     * per-sector budget and tens of milliseconds, for no change. */
+    /* A mirror that already matches is left alone: each erase costs a cycle
+     * of a finite per-sector budget and tens of milliseconds. */
     if (mirror_slot != MIRROR_NONE &&
         slot_hdr(mirror_slot)[TIKU_NVM_MIRROR_W_LEN] == (uint32_t)len &&
         slot_hdr(mirror_slot)[TIKU_NVM_MIRROR_W_CRC] == crc) {
@@ -236,7 +237,7 @@ int tiku_mem_arch_nvm_flush_status(void) {
     return 0;
 }
 
-/** @brief Unchecked compatibility wrapper. */
+/** @brief tiku_mem_arch_nvm_flush_status(), with the result discarded. */
 void tiku_mem_arch_nvm_flush(void) {
     (void)tiku_mem_arch_nvm_flush_status();
 }

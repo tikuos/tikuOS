@@ -7,8 +7,8 @@
  *
  * tiku_cpu_freq_boot_arch.c - ESP32-C61 boot: watchdogs and the core clock.
  *
- * A flash boot leaves watchdogs armed that a RAM load does not; both are
- * handled the same way so the two load paths behave alike.
+ * A flash boot leaves watchdogs armed that a RAM load does not; the boot
+ * stops every one it finds and records which were running.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -41,8 +41,8 @@ static void mwdt_off(uint32_t base, uint8_t bit) {
 /**
  * @brief Stop the RTC watchdog and put the super watchdog on auto-feed.
  *
- * The super watchdog has no off switch the ROM leaves unlocked, so it is
- * fed by hardware instead, as ESP-IDF does.
+ * The ROM leaves the super watchdog's disable locked, so it is put on
+ * hardware auto-feed.
  */
 static void lp_wdt_off(void) {
     uint32_t cfg = TIKU_REG32(ESP32C61_RWDT_CONFIG0);
@@ -85,8 +85,8 @@ uint64_t tiku_cpu_esp32c61_systimer(void) {
 /**
  * @brief Count core cycles across 2 ms of SYSTIMER time.
  *
- * Bounded twice over: a SYSTIMER that never moves, or never latches, leaves
- * the rate the clock tree implies in place and flags it.
+ * If SYSTIMER never latches, or never moves within the bounded wait, cpu_hz
+ * keeps the rate the clock tree implies and the fault flag stays set.
  */
 static void measure_cpu_hz(void) {
     uint64_t t0, t;
@@ -121,9 +121,9 @@ void tiku_cpu_boot_esp32c61_init(void) {
     mwdt_off(ESP32C61_TIMG0_BASE, TIKU_ESP32C61_WDT_MWDT0);
     mwdt_off(ESP32C61_TIMG1_BASE, TIKU_ESP32C61_WDT_MWDT1);
     lp_wdt_off();
-    /* The LP side's fast clock -- the PMU's own -- from RC_FAST, as IDF sets
-     * it: the reset default is the crystal, which stops when the part
-     * sleeps, and the PMU that would wake it stops with it. */
+    /* The LP fast clock, which clocks the PMU, from RC_FAST.  Its reset
+     * source is the crystal, which stops in sleep and would stop the PMU
+     * that ends the sleep. */
     TIKU_REG32(ESP32C61_LP_CLK_CONF) =
         (TIKU_REG32(ESP32C61_LP_CLK_CONF) & ~ESP32C61_LP_FAST_SEL_MSK) |
         ESP32C61_LP_FAST_RC_FAST;
@@ -150,8 +150,8 @@ unsigned long tiku_cpu_esp32c61_clock_get_hz(void) {
 }
 
 unsigned long tiku_cpu_esp32c61_smclk_get_hz(void) {
-    /* Not yet read from the clock tree: APB is taken to follow the core up
-     * to 40 MHz and hold there above it, as on the parts this one extends. */
+    /* The core rate capped at 40 MHz, without reading the PCR's APB
+     * divider; this matches the tree while that divider is 1. */
     return cpu_hz < 40000000UL ? cpu_hz : 40000000UL;
 }
 
@@ -164,7 +164,7 @@ uint8_t tiku_cpu_esp32c61_wdt_found(void) {
 }
 
 /*---------------------------------------------------------------------------*/
-/* Core frequency                                                            */
+/* CORE FREQUENCY                                                            */
 /*---------------------------------------------------------------------------*/
 
 void tiku_cpu_esp32c61_clock_probe(tiku_esp32c61_clock_t *out) {
@@ -236,7 +236,7 @@ int tiku_cpu_freq_esp32c61_set(unsigned int mhz) {
         return -1;
     }
     if (mhz >= 80U) {
-        /* AHB stays at 40 MHz, a whole fraction of the core, as it must. */
+        /* AHB stays at 40 MHz: its rate must divide the core rate evenly. */
         clock_tree_set(ESP32C61_PCR_SOC_CLK_PLL160, 160U / mhz, 4UL);
     } else {
         clock_tree_set(ESP32C61_PCR_SOC_CLK_XTAL, 40U / mhz, 40U / mhz);

@@ -7,9 +7,9 @@
  *
  * tiku_mpu_arch.c - ESP32-C61 memory protection: the portable state machine.
  *
- * The MSP430-style segment mask is a software shadow, so the portable MPU
- * tests run one state machine.  A locked PMP entry, the only kind that binds
- * machine mode, cannot reopen, so it only guards the first 4 KB (NULL).
+ * The segment access mask is a software shadow of the MSP430 MPU and
+ * enforces nothing.  A locked PMP entry faults any access below 4 KB (NULL),
+ * and PMA entry 12 holds the module window to W^X.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,8 +19,7 @@
 #include "tiku_esp32c61_regs.h"
 #include "tiku_psram_arch.h"
 
-/** @brief WRITE bits across the three SAM segment fields (MSP430 model,
- *         the 0x0222 the other ports' shadows use). */
+/** @brief The WRITE bits of the three SAM segment fields. */
 #define TIKU_MPU_SAM_WRITE_BITS  0x0222U
 
 /** @brief Software segment-access-mask shadow (MSP430 SAM model). */
@@ -34,9 +33,10 @@ uint16_t tiku_mpu_arch_get_sam(void) {
 }
 
 /**
- * @brief Update the software SAM, mirroring the MSP430 MPUCTL0 sequence.
+ * @brief Set the software SAM.
  *
- * Bookkeeping only; the password-write pattern is kept for test parity.
+ * Bookkeeping only: mpu_ctl records the MSP430 MPUCTL0 password write, then
+ * password | enable, which the portable MPU tests read back.
  */
 void tiku_mpu_arch_set_sam(uint16_t sam) {
     mpu_ctl = 0xA500U;                  /* mirror MSP430 password write */
@@ -55,10 +55,11 @@ void tiku_mpu_arch_enable_irq(void) {
 }
 
 /**
- * @brief The shadow's default, and the NULL guard.
+ * @brief Reset the shadow to its default and lock the NULL guard.
  *
- * Nothing lives below 4 KB, yet the bus answers loads there with silence, so
- * a NULL dereference would read zeros on.  Locked: a second call is a no-op.
+ * Nothing lives below 4 KB, and the bus answers loads there with zeros; PMP
+ * entry 0, locked with no permissions, makes any access there fault.  The
+ * lock holds until reset, so the PMP writes of a second call are ignored.
  */
 void tiku_mpu_arch_init_segments(void) {
     tiku_mpu_arch_set_sam(TIKU_MPU_DEFAULT_SAM);
@@ -77,7 +78,7 @@ void tiku_mpu_arch_set_default_protection(void) {
  * @brief Set the 3-bit permission field for one software SAM segment.
  *
  * Each segment occupies 4 bits of the SAM word, the TIKU_MPU_READ/WRITE/EXEC
- * flags in bits [2:0] of it -- the same math as the other ports.
+ * flags in bits [2:0] of it.
  */
 void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm) {
     uint16_t shift = (uint16_t)(seg * 4U);
@@ -107,7 +108,7 @@ void tiku_mpu_arch_lock_nvm(uint16_t saved_state) {
     tiku_mpu_arch_set_sam(saved_state);
 }
 
-/** @brief Nothing enforces, so nothing is ever flagged. @return 0 */
+/** @brief No violation flags latch on this port. @return 0 */
 uint16_t tiku_mpu_arch_get_violation_flags(void) {
     return 0U;
 }
@@ -118,8 +119,13 @@ void tiku_mpu_arch_clear_violation_flags(void) {
 void tiku_mpu_arch_enable_violation_nmi(void) {
 }
 
-/** @brief The module window, W^X: writable to load, then run but never
- *         written -- PMA entry 12 outranks the PSRAM's read/write/execute. */
+/**
+ * @brief Set PMA entry 12 over the module window: read/execute when
+ *        @p enable is non-zero, read/write otherwise.
+ *
+ * Entry 12 takes priority over the PSRAM's read/write entry 13, so the
+ * window is never writable and executable at once.
+ */
 void tiku_mpu_arch_module_window_exec(int enable) {
     ESP32C61_CSR_WRITE(ESP32C61_CSR_PMAADDR12,
                        (TIKU_ESP32C61_MODULE_WINDOW |

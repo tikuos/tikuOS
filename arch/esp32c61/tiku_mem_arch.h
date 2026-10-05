@@ -7,8 +7,8 @@
  *
  * tiku_mem_arch.h - ESP32-C61 memory helpers and the durable mirror.
  *
- * Durable state lives in SRAM and is mirrored to the last four sectors of the
- * external flash, so it survives a power cycle rather than only a warm reset.
+ * Durable state lives in SRAM and is mirrored to two four-sector slots at the
+ * top of the external flash, which carry it across a power cycle.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,7 +17,7 @@
 #define TIKU_ESP32C61_MEM_ARCH_H_
 
 #include <stdint.h>
-#include <stddef.h>   /* NULL -- kept in the mem-HAL chain like the other ports */
+#include <stddef.h>   /* NULL, for files that reach it through the mem HAL */
 
 /** @brief Word alignment the allocator rounds to. */
 #define TIKU_MEM_ARCH_ALIGNMENT  4U
@@ -25,7 +25,13 @@
 /** @brief Size type for arch memory calls. */
 typedef uint32_t tiku_mem_arch_size_t;
 
-/** @brief Prepare arch-level memory state; nothing to unlock on this part. */
+/**
+ * @brief Restore the durable region from the newest flash mirror slot that
+ *        checks.
+ *
+ * @note Call after tiku_flash_init(); with the flash down the region keeps
+ *       its reset contents.
+ */
 void tiku_mem_arch_init(void);
 
 /**
@@ -58,17 +64,24 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
                              tiku_mem_arch_size_t len);
 
 /**
- * @brief Commit the durable SRAM region to the flash mirror.
+ * @brief Commit the durable region to the flash mirror, discarding the
+ *        result.
  *
- * The explicit durability checkpoint: the state survives a power cycle once the
- * mirror carries it. Skipped when the mirror already matches, which costs an
- * erase cycle out of a finite budget for nothing.
- *
- * @note Failure is silent -- a flash that is not ready, a failed erase or a
- *       failed program returns with the mirror stale or erased, and the only
- *       signal is that tiku_mem_arch_nvm_program_count() did not advance.
+ * @note Failure is silent: a flash that is not ready, a failed erase or a
+ *       failed program leaves the mirror stale, and the only signal is that
+ *       tiku_mem_arch_nvm_program_count() did not advance.
  */
 void tiku_mem_arch_nvm_flush(void);
+
+/**
+ * @brief Commit the durable SRAM region to the flash mirror's other slot.
+ *
+ * The state survives a power cycle once the mirror carries it.  A mirror
+ * whose length and CRC already match is left as it is.
+ *
+ * @return 0 when the mirror matches the region, -1 when the flash is down,
+ *         the region is larger than a slot, or an erase or program fails
+ */
 int tiku_mem_arch_nvm_flush_status(void);
 
 /**
@@ -79,9 +92,9 @@ int tiku_mem_arch_nvm_flush_status(void);
 int tiku_mem_arch_nvm_restore_status(void);
 
 /**
- * @brief Count of mirror commits since boot.
+ * @brief Mirror slots written since boot.
  *
- * @return Number of erase/program cycles this boot has spent
+ * @return The count; a flush that finds the mirror current adds nothing
  */
 uint32_t tiku_mem_arch_nvm_program_count(void);
 

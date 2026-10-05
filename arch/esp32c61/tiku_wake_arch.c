@@ -7,8 +7,9 @@
  *
  * tiku_wake_arch.c - ESP32-C61 wake-source reporting.
  *
- * Idle is a wfi, which any enabled CLIC line ends, so a source is armed
- * exactly when its line is enabled.  Deep sleep's wake sources come later.
+ * The wfi idle ends on any enabled CLIC line, so a source reads as armed
+ * when its line is enabled.  Deep sleep's wake sources, and the light-sleep
+ * idle's narrower set (timers and UART0), are not reported.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
