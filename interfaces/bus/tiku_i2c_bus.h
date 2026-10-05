@@ -109,13 +109,9 @@ int tiku_i2c_read(uint8_t addr, uint8_t *buf, uint16_t len);
 /**
  * @brief Probe an I2C address (presence check for a bus scan).
  *
- * The bus equivalent of a "ping": checks whether a device acknowledges
- * @p addr without transferring data (START, address, sample ACK, STOP).
- * This is a distinct primitive from tiku_i2c_write() -- a zero-length write
- * is intentionally rejected (write requires len >= 1), so a scan must use
- * this.  Where the controller cannot issue a true zero-byte transaction
- * (e.g. RP2350's DW_apb_i2c) the arch backend probes with a single 1-byte
- * read instead; either way an ACK means the device is present.
+ * Checks whether a device acknowledges @p addr without transferring data.  A
+ * scan must use this: tiku_i2c_write() rejects a zero-length write.  A backend
+ * that cannot issue a zero-byte transaction probes with a 1-byte read.
  *
  * @param addr  7-bit slave address (unshifted)
  * @return TIKU_I2C_OK if the device acknowledged, TIKU_I2C_ERR_NACK if no

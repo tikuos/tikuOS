@@ -7,9 +7,9 @@
  *
  * tiku_cpu.c - platform-agnostic CPU abstraction implementation.
  *
- * Atomic sections, IRQ control, clock-rate queries and idle hooks, each
- * forwarding to the active port's arch backend.  The atomics use MSP430
- * intrinsics directly rather than tiku.h, which would pull in boot init too early.
+ * Atomic sections, IRQ control, clock-rate queries, cache maintenance and
+ * idle hooks.  Most calls forward to the active port's arch backend; the
+ * atomics and the selectable-rate tables are implemented here.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -39,21 +39,25 @@
 #endif
 #include <stdint.h>
 
-/* ARM Cortex-M PRIMASK helpers, written out rather than pulled from
- * <cmsis_gcc.h> or <core_cm33.h> to keep tikuOS dependency-free. The
- * instructions are identical on Cortex-M33 (RP2350 / nRF54L), M55
- * (Apollo510 / STM32N6) and M85 (RA8P1). */
+/* Cortex-M PRIMASK helpers, written out rather than taken from CMSIS so this
+ * file needs no vendor header.  The instructions are the same on every
+ * Cortex-M port: M4F (Apollo4), M33, M55 and M85. */
+
+/** @brief Read PRIMASK: 0 when interrupts are enabled, 1 when masked. */
 static inline uint32_t tiku_arm_get_primask(void) {
     uint32_t v;
     __asm__ volatile ("mrs %0, primask" : "=r"(v));
     return v;
 }
+/** @brief Write PRIMASK. */
 static inline void tiku_arm_set_primask(uint32_t v) {
     __asm__ volatile ("msr primask, %0" : : "r"(v) : "memory");
 }
+/** @brief Mask interrupts (cpsid i). */
 static inline void tiku_arm_disable_irq(void) {
     __asm__ volatile ("cpsid i" ::: "memory");
 }
+/** @brief Unmask interrupts (cpsie i). */
 static inline void tiku_arm_enable_irq(void) {
     __asm__ volatile ("cpsie i" ::: "memory");
 }
@@ -70,18 +74,17 @@ static inline void tiku_arm_enable_irq(void) {
 /*---------------------------------------------------------------------------*/
 
 /*
- * Atomic section nesting depth and saved GIE state.
+ * Atomic section nesting depth and saved interrupt-enable state.
  *
- * The outermost tiku_atomic_enter() (nesting == 0) snapshots the GIE bit
- * BEFORE disabling interrupts; the matching outermost exit re-enables only
- * if GIE was originally set, so an atomic section never enables interrupts
- * as a side-effect.
+ * The outermost tiku_atomic_enter() (nesting == 0) reads the enable bit (GIE,
+ * PRIMASK or mstatus.MIE) before disabling interrupts; the matching outermost
+ * exit re-enables only if it was set, so an atomic section never enables
+ * interrupts as a side effect.
  *
- * ISR safety: an ISR firing between __get_interrupt_state() and
- * __disable_interrupt() runs its own balanced enter/exit pair (nesting == 0,
- * GIE == 0 because the hardware cleared it on entry, so its exit re-enables
- * nothing).  RETI restores GIE from the stacked SR and the interrupted
- * context continues with its local `sr` still valid on the stack.
+ * An ISR that fires between the read and the disable runs its own balanced
+ * enter/exit pair, which restores the enable state the ISR started with and
+ * leaves the nesting count at 0; the interrupted code then saves from its own
+ * local copy of the bit.
  */
 static volatile unsigned int tiku_atomic_nesting = 0;
 static volatile unsigned int tiku_atomic_gie_saved = 0;
@@ -291,17 +294,21 @@ void tiku_cpu_dcache_clean(const void *addr, unsigned long len) {
 #if defined(PLATFORM_MSP430)
     (void)addr; (void)len;            /* no data cache */
 #elif defined(PLATFORM_RP2350)
-    (void)addr; (void)len;            /* XIP cache: no D-side coherency op needed */
+    /* SRAM is uncached; the flash write path flushes the XIP cache. */
+    (void)addr; (void)len;
 #elif defined(PLATFORM_AMBIQ)
     tiku_cpu_ambiq_dcache_clean(addr, len);
 #elif defined(PLATFORM_NORDIC)
-    (void)addr; (void)len;            /* nRF54L M33: no data cache */
+    /* SRAM is uncached; the NVM cache is write-around and holds no dirty
+     * line. */
+    (void)addr; (void)len;
 #elif defined(PLATFORM_STM32N6)
-    (void)addr; (void)len;            /* caches are not enabled on this port */
+    (void)addr; (void)len;
 #elif defined(PLATFORM_RA8P1)
     tiku_ra8p1_dcache_clean(addr, len);
 #elif defined(PLATFORM_ESP32C61)
-    (void)addr; (void)len;            /* SRAM is uncached; no flash data yet */
+    /* SRAM is uncached; the flash driver invalidates what it writes. */
+    (void)addr; (void)len;
 #endif
 }
 
@@ -313,13 +320,15 @@ void tiku_cpu_dcache_invalidate(const void *addr, unsigned long len) {
 #elif defined(PLATFORM_AMBIQ)
     tiku_cpu_ambiq_dcache_invalidate(addr, len);
 #elif defined(PLATFORM_NORDIC)
-    (void)addr; (void)len;            /* nRF54L M33: no data cache */
+    /* An NVM write drops the cache lines it touches. */
+    (void)addr; (void)len;
 #elif defined(PLATFORM_STM32N6)
-    (void)addr; (void)len;            /* caches are not enabled on this port */
+    (void)addr; (void)len;
 #elif defined(PLATFORM_RA8P1)
     tiku_ra8p1_dcache_invalidate(addr, len);
 #elif defined(PLATFORM_ESP32C61)
-    (void)addr; (void)len;            /* SRAM is uncached; no flash data yet */
+    /* The flash driver invalidates what it writes. */
+    (void)addr; (void)len;
 #endif
 }
 
@@ -331,7 +340,8 @@ void tiku_cpu_icache_invalidate(void) {
 #elif defined(PLATFORM_ESP32C61)
     tiku_cpu_esp32c61_icache_invalidate();
 #endif
-    /* MSP430 / RP2350 / nRF54L M33: no instruction cache -- no-op. */
+    /* MSP430 has no instruction cache, an nRF54L NVM write drops the lines
+     * it touches, and the RP2350 flash write path flushes the XIP cache. */
 }
 
 /*---------------------------------------------------------------------------*/
@@ -348,7 +358,8 @@ unsigned long tiku_cpu_mclk_hz(void) {
 #elif defined(PLATFORM_NORDIC)
     return tiku_cpu_nordic_clock_get_hz();
 #elif defined(PLATFORM_STM32N6)
-    /* Estimate: the boot-ROM clock is inherited and varies between resets. */
+    /* Measured against LPTIM1; decoded from the clock tree before the
+     * timer runs. */
     return tiku_cpu_stm32n6_clock_get_hz();
 #elif defined(PLATFORM_RA8P1)
     return tiku_cpu_ra8p1_clock_get_hz();
@@ -436,8 +447,8 @@ tiku_cpu_idle_enter_t tiku_cpu_idle_hook(tiku_cpu_idle_mode_t mode) {
              * UART RX still wake the core. */
             return tiku_cpu_boot_rp2350_power_wfi_enter;
         case TIKU_CPU_IDLE_DEEPEST:
-            /* Dormant mode would be deeper but is harder to bring back
-             * without losing state — skip for the first port. */
+            /* WFI as well: dormant mode, which stops the clocks, is not
+             * used. */
             return tiku_cpu_boot_rp2350_power_wfi_enter;
         case TIKU_CPU_IDLE_OFF:
         default:
@@ -448,8 +459,8 @@ tiku_cpu_idle_enter_t tiku_cpu_idle_hook(tiku_cpu_idle_mode_t mode) {
         case TIKU_CPU_IDLE_LIGHT:
         case TIKU_CPU_IDLE_DEEP:
         case TIKU_CPU_IDLE_DEEPEST:
-            /* Plain WFI on Cortex-M55 — SysTick / STIMER / peripherals
-             * still wake the core. Deeper Ambiq sleep modes land later. */
+            /* Plain WFI on every Ambiq part: the STIMER tick and enabled
+             * peripheral interrupts wake the core; SysTick stops in WFI. */
             return tiku_cpu_boot_ambiq_power_wfi_enter;
         case TIKU_CPU_IDLE_OFF:
         default:
@@ -460,8 +471,8 @@ tiku_cpu_idle_enter_t tiku_cpu_idle_hook(tiku_cpu_idle_mode_t mode) {
         case TIKU_CPU_IDLE_LIGHT:
         case TIKU_CPU_IDLE_DEEP:
         case TIKU_CPU_IDLE_DEEPEST:
-            /* Plain WFI on Cortex-M33 — the TIMER10 tick / any enabled IRQ
-             * still wakes the core.  Deeper nRF54L System OFF sleep lands later. */
+            /* Plain WFI: the GRTC tick (TIMER10 when selected) or any
+             * enabled IRQ wakes the core. */
             return tiku_cpu_boot_nordic_power_wfi_enter;
         case TIKU_CPU_IDLE_OFF:
         default:
@@ -472,10 +483,9 @@ tiku_cpu_idle_enter_t tiku_cpu_idle_hook(tiku_cpu_idle_mode_t mode) {
         case TIKU_CPU_IDLE_LIGHT:
         case TIKU_CPU_IDLE_DEEP:
         case TIKU_CPU_IDLE_DEEPEST:
-            /* Sleep mode (WFI) on Cortex-M85 — SysTick / console RX / an armed
-             * htimer all still wake the core.  RA8 Software Standby is deeper
-             * but stops the clocks, so it needs wake sources wired through the
-             * ICU first; see the entry function. */
+            /* Sleep mode (WFI): SysTick, console RX and an armed htimer all
+             * wake the core.  Software Standby is not used: it stops the
+             * clocks, and only wake sources set in the ICU end it. */
             return tiku_cpu_boot_ra8p1_power_wfi_enter;
         case TIKU_CPU_IDLE_OFF:
         default:
@@ -490,7 +500,8 @@ tiku_cpu_idle_enter_t tiku_cpu_idle_hook(tiku_cpu_idle_mode_t mode) {
         case TIKU_CPU_IDLE_DEEP:
         case TIKU_CPU_IDLE_DEEPEST:
             /* PMU light sleep to the next timer deadline: timers and console
-             * bytes end it, other interrupts wait -- so chosen, not default. */
+             * bytes end it and other interrupts wait, so it is opt-in rather
+             * than the default mode. */
             return tiku_esp32c61_light_idle;
         case TIKU_CPU_IDLE_OFF:
         default:
@@ -506,13 +517,14 @@ int tiku_cpu_idle_mode_wakes_on_tick(tiku_cpu_idle_mode_t mode) {
 #if defined(PLATFORM_MSP430)
     /* Timer A0 runs from ACLK, which survives LPM0-LPM3; its ISR
      * clears the LPM bits on exit.  LPM4 stops every clock, so the
-     * tick can never fire, let alone wake the core. */
+     * tick never fires. */
     return mode != TIKU_CPU_IDLE_DEEPEST;
 #elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
       defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
       defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C61)
-    /* Every supported mode is a WFI variant; any enabled interrupt
-     * (SysTick / STIMER tick included) wakes the core. */
+    /* The tick ends every mode on these ports: WFI wakes on any enabled
+     * interrupt, and ESP32-C61 light sleep ends at the next SYSTIMER
+     * alarm. */
     (void)mode;
     return 1;
 #else
@@ -529,8 +541,9 @@ unsigned int tiku_cpu_idle_mode_wakes(tiku_cpu_idle_mode_t mode) {
 #if defined(PLATFORM_MSP430)
     switch (mode) {
         case TIKU_CPU_IDLE_DEEP:
-            /* LPM3 keeps only ACLK, which runs the tick.  The htimer and
-             * the UART run from SMCLK, and the watchdog may too. */
+            /* LPM3 keeps only ACLK, which runs the tick.  The UART runs from
+             * SMCLK, as does the htimer in its SMCLK presets (the default),
+             * and the watchdog may too. */
             return TIKU_WAKE_SYSTICK | TIKU_WAKE_GPIO;
         case TIKU_CPU_IDLE_DEEPEST:
             /* LPM4 stops every clock: only a pin edge wakes the core. */

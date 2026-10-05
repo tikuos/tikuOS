@@ -7,9 +7,9 @@
  *
  * tiku_bt.h - driver-agnostic Bluetooth Low Energy API.
  *
- * The stack in tikukits/net/bluetooth/ implements HCI, L2CAP, ATT, GATT, GAP and
- * SMP over an abstract transport, so a driver plugs in its own without the stack
- * changing.  Public application API only; internals live beside the stack.
+ * The stack in tikukits/net/bluetooth/ implements HCI, L2CAP, ATT, GATT, GAP
+ * and SMP over an abstract transport, so a driver plugs in its own without the
+ * stack changing.  Public application API only; internals live beside it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -29,54 +29,56 @@ extern "C" {
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Bring the BT subsystem online.
+ * @brief Bring the protocol stack online over the registered transport.
  *
- * Must run after the WiFi side has loaded its firmware and raised the HT clock.
- * Powers BT up, uploads its firmware, waits for ready, zeroes the ring pointers
- * and completes the host handshake.
+ * Resets the stack state, registers the built-in demo service, starts the BT
+ * runner and runs HCI_Reset, the event masks, Read_Local_Version and
+ * Read_BD_ADDR; a failed identity query is not fatal.
  *
- * @return TIKU_DRV_OK on success, otherwise an error from the bring-up
- *         step that failed.
+ * @return TIKU_DRV_OK, or an error when the stack's scratch arena cannot be
+ *         set up.
+ * @note The transport driver calls it from its own init, after its chip
+ *       bring-up and tiku_bt_register_transport().
  */
 int tiku_bt_init(void);
 
 /**
- * @brief Send one HCI command or ACL packet to the chip.
+ * @brief Send one HCI command or ACL packet through the transport.
  *
- * The buffer must start with an HCI packet-type byte.  The caller serialises
- * calls -- the runner does, and ad-hoc callers must not race it.
+ * The buffer must start with an HCI packet-type byte.
  *
  * @param packet  HCI packet bytes including the 1-byte type prefix
  * @param len     Total length including the type byte
- * @return TIKU_DRV_OK on success, TIKU_DRV_ERR_INVALID on bad args,
- *         TIKU_DRV_ERR_TIMEOUT on no buffer space in the ring.
+ * @return TIKU_DRV_ERR_NOT_PRESENT without a transport, else the
+ *         transport's send() result.
+ * @note The caller serialises calls: the runner does, and ad-hoc callers must
+ *       not race it.
  */
 int tiku_bt_send(const uint8_t *packet, uint16_t len);
 
 /**
- * @brief Try to receive one HCI packet from the chip.
+ * @brief Try to receive one HCI packet.
  *
- * Non-blocking. If a packet is available in the BT2H ring, copies it
- * (including the 1-byte type prefix) into @p out and returns the
- * length. If the ring is empty, returns 0.
+ * Non-blocking: forwards to the transport's recv(), which copies a pending
+ * packet (including the 1-byte type prefix) into @p out.
  *
  * @param out      Destination buffer
  * @param out_max  Capacity of @p out in bytes
- * @return Length of the packet copied (1..out_max), or 0 if no
- *         packet was available, or a negative error code.
+ * @return Length of the packet copied, 0 when nothing is pending or no
+ *         transport is registered, or a negative error from the transport.
  */
 int tiku_bt_recv(uint8_t *out, uint16_t out_max);
 
 /**
- * @brief Return true if the BT subsystem has been brought up
- *        successfully and is ready for HCI traffic.
+ * @brief Return 1 once a transport is registered and ready and
+ *        tiku_bt_init() has run, so HCI traffic can flow; 0 otherwise.
  */
 int tiku_bt_is_ready(void);
 
 /**
  * @brief Information returned by HCI Read_Local_Version_Information.
  *
- * Cached on bring-up and valid once tiku_bt_is_ready() returns 1.  The fields
+ * Cached by tiku_bt_init() and read with tiku_bt_local_version().  The fields
  * follow the Core Spec command of the same name: HCI and LMP versions, the
  * vendor revisions, and the SIG manufacturer id.
  */
@@ -89,63 +91,67 @@ typedef struct {
 } tiku_bt_version_t;
 
 /**
- * @brief Read back the chip's BD_ADDR (= Bluetooth MAC).
+ * @brief Read back the controller's BD_ADDR (= Bluetooth MAC).
  *
  * Cached during bring-up via HCI_Read_BD_ADDR. The 6 bytes are written
- * in big-endian order (MSB at index 0) — that's the standard
- * print order, e.g. 28:CD:C1:00:11:22.
+ * in big-endian order (MSB at index 0), the usual print order, e.g.
+ * 28:CD:C1:00:11:22.
  *
- * @return TIKU_DRV_OK on success, TIKU_DRV_ERR_NOT_PRESENT if the BT
- *         subsystem isn't up.
+ * @return TIKU_DRV_OK on success, TIKU_DRV_ERR_NOT_PRESENT until bring-up
+ *         has cached a BD_ADDR.
  */
 int tiku_bt_addr(uint8_t out[6]);
 
 /**
- * @brief Read back the chip's HCI/LMP version info cached at bring-up.
+ * @brief Read back the controller's HCI/LMP version info cached at bring-up.
  *
- * @return TIKU_DRV_OK on success, TIKU_DRV_ERR_NOT_PRESENT if the BT
- *         subsystem isn't up.
+ * @return TIKU_DRV_OK on success, TIKU_DRV_ERR_NOT_PRESENT until bring-up
+ *         has cached a BD_ADDR.
  */
 int tiku_bt_local_version(tiku_bt_version_t *out);
 
 /**
- * @brief Return the BTFW version string baked into the firmware blob
- *        header (e.g. "CYW4343A2_001.003.016.0031.0000_Generic_SDIO_..").
+ * @brief Return the controller firmware version the transport reports
+ *        (the CYW43 BTFW header string, the ESP32-C61 library build id).
  *
- * The pointer is into flash (read-only) and remains valid for the
- * lifetime of the program. The string is NUL-terminated.
+ * @return NUL-terminated string owned by the transport, or "" when the
+ *         transport reports none.
  */
 const char *tiku_bt_fw_version(void);
 
 /*---------------------------------------------------------------------------*/
-/* GAP advertising (phase 7)                                                 */
+/* GAP ADVERTISING                                                           */
 /*---------------------------------------------------------------------------*/
 
-/*
- * Maximum local-name length accepted by tiku_bt_advertise_start().  A legacy
- * advertising PDU carries 31 bytes of AD records; a 3-byte Flags record plus
- * the name record's own 2 bytes of overhead leave 26.
+/**
+ * @brief Longest local name tiku_bt_advertise_start() sends: 31 bytes of AD
+ *        data less the 3-byte Flags record and the name record's 2 bytes.
  */
 #define TIKU_BT_ADV_NAME_MAX     26U
 
 /**
- * @brief Start advertising with the given local name.
+ * @brief Start advertising (ADV_IND, 100-150 ms) with the given local name.
  *
- * Sets the advertising parameters, then the data (Flags plus Complete Local
- * Name), then enables.  Each step waits for a successful Command Complete, and
- * a failure aborts the sequence and disables anything already started.
+ * Disables advertising, then sets the parameters, the data (Flags plus
+ * Complete Local Name) and the enable, each awaiting a successful Command
+ * Complete; a failure stops the sequence with advertising off.
  *
- * @param name  UTF-8 local name, 1..26 chars. NULL or empty rejected.
- * @return TIKU_DRV_OK on success, TIKU_DRV_ERR_INVALID for bad name,
- *         TIKU_DRV_ERR_NOT_PRESENT if BT isn't up, or a transport rc.
+ * @param name  UTF-8 local name; NULL or empty is rejected, and a name longer
+ *              than TIKU_BT_ADV_NAME_MAX bytes is cut to that length.
+ * @return TIKU_DRV_OK on success, TIKU_DRV_ERR_INVALID for a bad name or a
+ *         refused command, TIKU_DRV_ERR_NOT_PRESENT if BT isn't up, or a
+ *         transport rc.
  */
 int tiku_bt_advertise_start(const char *name);
 
 /**
  * @brief Stop advertising.
  *
- * Issues LE_Set_Advertising_Enable(0). Safe to call when advertising
- * is already off (the chip just returns success).
+ * Issues LE_Set_Advertising_Enable(0).  Safe to call when advertising is
+ * already off: a non-zero status from the controller is ignored.
+ *
+ * @return TIKU_DRV_OK, TIKU_DRV_ERR_NOT_PRESENT if BT isn't up, or a
+ *         transport rc.
  */
 int tiku_bt_advertise_stop(void);
 
@@ -153,12 +159,10 @@ int tiku_bt_advertise_stop(void);
 int tiku_bt_is_advertising(void);
 
 /*---------------------------------------------------------------------------*/
-/* GAP scanning (phase 8)                                                    */
+/* GAP SCANNING                                                              */
 /*---------------------------------------------------------------------------*/
 
-/** Hard cap on the scan-results cache. Sized so a busy office BLE
- *  environment (~10..30 devices) fits without truncation; a value above
- *  16 would spill into FRAM and lose the bound-allocator simplicity. */
+/** @brief Scan-cache entries; a device first heard once it is full is lost. */
 #define TIKU_BT_SCAN_MAX         16U
 
 /** Max bytes of local name kept per scan entry (not NUL-terminated). */
@@ -188,10 +192,11 @@ typedef struct {
  * @param active        1 = active scan (sends SCAN_REQ to scannable
  *                      advertisers and collects SCAN_RSP), 0 = passive
  * @param interval_ms   Scan repeat interval in ms (rounded to chip
- *                      0.625 ms units). Valid range 3..10240 ms.
- * @param window_ms     Scan-on window per interval in ms; must be
- *                      <= interval_ms.
- * @return TIKU_DRV_OK on success.
+ *                      0.625 ms units), clamped to 3..10240 ms.
+ * @param window_ms     Scan-on window per interval in ms, clamped to
+ *                      3..interval_ms.
+ * @return TIKU_DRV_OK on success, TIKU_DRV_ERR_NOT_PRESENT if BT isn't up,
+ *         TIKU_DRV_ERR_INVALID if the controller refuses, or a transport rc.
  */
 int tiku_bt_scan_start(uint8_t active, uint16_t interval_ms,
                              uint16_t window_ms);
@@ -224,22 +229,19 @@ uint8_t tiku_bt_scan_results(tiku_bt_scan_entry_t *out,
                                    uint8_t max);
 
 /**
- * @brief Drain pending LE Advertising Report events from the BT2H ring.
+ * @brief Drain pending HCI events and ACL packets from the transport.
  *
- * Idempotent and cheap, with an early return when nothing is pending.  The
- * runner calls it every tick while a scan, link or advertising is active, so
- * events do not pile up in the chip's ring.
+ * Handles at most 8 packets per call and returns at once while nothing is on
+ * air (no scan, advertising or link).  The runner calls it every tick while
+ * one of those is active, so events do not pile up in the controller.
  */
 void tiku_bt_poll(void);
 
 /*---------------------------------------------------------------------------*/
-/* Connection management (phase 9)                                           */
+/* CONNECTION MANAGEMENT                                                     */
 /*---------------------------------------------------------------------------*/
 
-/** Maximum simultaneous LE connections. The CYW43439 firmware
- *  supports several but the host-side state is sized for one to keep
- *  the demo footprint small; bump when GATT client work (Phase 12)
- *  needs multiple. */
+/** @brief Simultaneous LE connections; the host-side state is sized for one. */
 #define TIKU_BT_CONN_MAX         1U
 
 /**
@@ -275,33 +277,33 @@ uint8_t tiku_bt_connections(tiku_bt_connection_t *out,
 /**
  * @brief Tear down an LE link.
  *
- * Issues HCI_Disconnect with "remote user terminated".  The chip answers with a
- * Command Status; the Disconnection Complete arrives later and is what clears
- * the connection-table entry, not this call.
+ * Sends HCI_Disconnect with "remote user terminated" and returns without
+ * waiting; the Disconnection Complete arrives later and is what clears the
+ * connection-table entry, not this call.
  *
  * @param handle  Connection handle returned via tiku_bt_connections.
  *                Pass 0xFFFF to disconnect the first active link
  *                (convenience for single-connection demos).
- * @return TIKU_DRV_OK on Command Status accept, otherwise an error.
+ * @return TIKU_DRV_OK once the command is sent, TIKU_DRV_ERR_NOT_PRESENT if
+ *         BT isn't up or no link is active, TIKU_DRV_ERR_INVALID for an
+ *         unknown handle, or a transport rc.
  */
 int tiku_bt_disconnect(uint16_t handle);
 
 /*---------------------------------------------------------------------------*/
-/* GATT server (phase 11) + notifications (phase 12)                         */
+/* GATT SERVER AND NOTIFICATIONS                                             */
 /*---------------------------------------------------------------------------*/
 
-/** Characteristic property bits (matches Bluetooth Core Spec
- *  Vol 3 Part G 3.3.1.1). */
-#define TIKU_BT_PROP_READ        0x02U
-#define TIKU_BT_PROP_WRITE_NORSP 0x04U
-#define TIKU_BT_PROP_WRITE       0x08U
-#define TIKU_BT_PROP_NOTIFY      0x10U
-#define TIKU_BT_PROP_INDICATE    0x20U
+/* Characteristic property bits (Core Spec Vol 3 Part G 3.3.1.1). */
+#define TIKU_BT_PROP_READ        0x02U  /**< value can be read            */
+#define TIKU_BT_PROP_WRITE_NORSP 0x04U  /**< write without response       */
+#define TIKU_BT_PROP_WRITE       0x08U  /**< write with response          */
+#define TIKU_BT_PROP_NOTIFY      0x10U  /**< notifications, gets a CCCD   */
+#define TIKU_BT_PROP_INDICATE    0x20U  /**< indications, gets a CCCD     */
 
-/* Phase-11 sizing knobs. Bump alongside any new service that needs
- * more headroom; both are static so growing them only costs SRAM. */
-#define TIKU_BT_SVC_MAX          4U   /* GAP + GATT + 2 user */
-#define TIKU_BT_CHAR_MAX         8U   /* across all services */
+/* Registry sizing; both are static, so growing them costs only SRAM. */
+#define TIKU_BT_SVC_MAX          4U   /**< services, the demo one included */
+#define TIKU_BT_CHAR_MAX         8U   /**< services + characteristics in all */
 
 /**
  * @brief Read callback for a characteristic value
@@ -312,7 +314,7 @@ int tiku_bt_disconnect(uint16_t handle);
  *
  * @param user      The @p user pointer from the char definition
  * @param out       Destination for the value bytes
- * @param out_max   Capacity of @p out (currently ATT_MTU_DEFAULT - 1)
+ * @param out_max   Capacity of @p out (ATT_MTU_DEFAULT - 1)
  * @param out_len   Set to the number of bytes written
  * @return 0 on success; non-zero surfaces as ATT Error Response.
  */
@@ -369,27 +371,29 @@ typedef struct {
  *
  * Called once per service, typically from a process init.  Its attributes are
  * appended to the table and later registrations get higher handles; the next
- * ATT request sees them, with no service-changed indication sent today.
+ * ATT request sees them, and no Service Changed indication is sent.
  *
- * @return TIKU_DRV_OK on success, TIKU_DRV_ERR_INVALID if @p svc is
- *         NULL or if the registry is full (cap = TIKU_BT_SVC_MAX).
+ * @return TIKU_DRV_OK on success, TIKU_DRV_ERR_INVALID if @p svc is NULL,
+ *         has more than TIKU_BT_CHAR_MAX characteristics, or the registry
+ *         is full (cap = TIKU_BT_SVC_MAX).
  */
 int tiku_bt_register_service(const tiku_bt_service_t *svc);
 
 /*---------------------------------------------------------------------------*/
-/* GATT client (phase 13)                                                    */
+/* GATT CLIENT                                                               */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Initiate an LE central-role connection to a peer.
  *
- * Issues LE Create Connection with sensible defaults.  The Connection Complete
- * event fires asynchronously, after which tiku_bt_connections() shows the new
- * entry with role 0.
+ * Sends LE Create Connection (30-50 ms interval, 5 s supervision timeout).
+ * The Connection Complete event fires asynchronously, after which
+ * tiku_bt_connections() shows the new entry with role 0.
  *
  * @param peer_addr       BD_ADDR in MSB-first order (display order)
  * @param peer_addr_type  0 = public, 1 = random
- * @return TIKU_DRV_OK on command-status accept.
+ * @return TIKU_DRV_OK once the command is sent, TIKU_DRV_ERR_NOT_PRESENT if
+ *         BT isn't up, or a transport rc.
  */
 int tiku_bt_connect_to(const uint8_t peer_addr[6],
                              uint8_t peer_addr_type);
@@ -397,13 +401,13 @@ int tiku_bt_connect_to(const uint8_t peer_addr[6],
 /**
  * @brief Send ATT Read Request on a connection.
  *
- * The response (Read Response or Error Response) arrives
- * asynchronously and is logged via CYW43_BT_PRINTF. Phase 13.x
- * will add callback delivery; today it's print-only.
+ * The response (Read Response or Error Response) arrives asynchronously and
+ * is only logged, via TIKU_BT_PRINTF.
  *
  * @param conn_handle  Connection handle from tiku_bt_connections
  * @param attr_handle  Attribute handle on the peer to read
- * @return TIKU_DRV_OK if the request was queued for send.
+ * @return TIKU_DRV_OK if the request was queued for send,
+ *         TIKU_DRV_ERR_INVALID for an unknown connection handle.
  */
 int tiku_bt_client_read(uint16_t conn_handle, uint16_t attr_handle);
 
@@ -413,7 +417,9 @@ int tiku_bt_client_read(uint16_t conn_handle, uint16_t attr_handle);
  * @param conn_handle  Connection handle
  * @param attr_handle  Attribute handle on the peer to write
  * @param value        Bytes to write
- * @param len          Length of @p value (must fit in MTU-3)
+ * @param len          Length of @p value (must fit in the default MTU - 3)
+ * @return TIKU_DRV_OK if the request was queued for send,
+ *         TIKU_DRV_ERR_INVALID for an unknown connection or a bad value.
  */
 int tiku_bt_client_write(uint16_t conn_handle, uint16_t attr_handle,
                                const uint8_t *value, uint16_t len);
@@ -439,39 +445,42 @@ int tiku_bt_client_subscribe(uint16_t conn_handle,
 /**
  * @brief Push a Handle Value Notification for a characteristic.
  *
- * Finds the characteristic by UUID, confirms NOTIFY is in its properties, and
- * sends the notification to every connection whose CCCD has it enabled.  A
- * silent no-op when nobody is subscribed.
+ * Finds the characteristic by UUID and, when its CCCD has notifications
+ * enabled, sends the notification on every connection.  A silent no-op when
+ * nobody is subscribed or the characteristic has no CCCD.
  *
  * @param char_uuid  16-bit UUID of the characteristic
  * @param value      Bytes to put in the notification PDU
- * @param len        Length of @p value (must fit in MTU-3)
+ * @param len        Length of @p value (must fit in the default MTU - 3)
  * @return TIKU_DRV_OK on send (or no-subscriber no-op),
- *         TIKU_DRV_ERR_INVALID for bad UUID / oversize.
+ *         TIKU_DRV_ERR_INVALID if BT isn't up or for a NULL value, an
+ *         unknown UUID or an oversize value.
  */
 int tiku_bt_notify(uint16_t char_uuid, const uint8_t *value,
                          uint16_t len);
 
 /*---------------------------------------------------------------------------*/
-/* SMP bonding store (phase 14)                                              */
+/* SMP BONDING STORE                                                         */
 /*---------------------------------------------------------------------------*/
 
-/** Max stored bonds. Sized for one slot today; bumps to N when
- *  multi-link bonding lands in Phase 14. The schema below is fixed
- *  32-byte width so growing the slot count costs only sizeof bytes
- *  in .persistent and no on-disk migration. */
+/**
+ * @brief Stored bonds.  The record is a fixed 32 bytes, so more slots cost
+ *        only their size and need no migration of stored records.
+ */
 #define TIKU_BT_BOND_MAX         1U
 
-/** Magic placed at the head of each bond record (ASCII "BOND" LE)
- *  to distinguish a populated slot from uninitialised NVM. */
+/**
+ * @brief Magic at the head of each bond record ("BOND" read most-significant
+ *        byte first), telling a populated slot from uninitialised NVM.
+ */
 #define TIKU_BT_BOND_MAGIC       0x424F4E44UL
 
 /**
  * @brief One stored LE bond (LTK and peer identity).
  *
- * A 32-byte fixed-width record, laid out so real LTK and IRK material can drop
- * in later without shifting bytes or migrating storage.  `magic` marks a
- * populated slot and `peer_addr` is MSB-first, matching scan and connection.
+ * A 32-byte fixed-width record holding the peer identity and its LTK.  `magic`
+ * marks a populated slot and `peer_addr` is MSB-first, matching scan and
+ * connection.
  */
 typedef struct {
     uint32_t magic;
@@ -491,7 +500,8 @@ typedef struct {
  *
  * @param slot  Bond index in [0, TIKU_BT_BOND_MAX)
  * @param rec   Record to store; magic is set automatically
- * @return TIKU_DRV_OK on success.
+ * @return TIKU_DRV_OK on success, TIKU_DRV_ERR_INVALID for a bad slot or a
+ *         NULL @p rec.
  */
 int tiku_bt_bond_save(uint8_t slot,
                             const tiku_bt_bond_record_t *rec);
@@ -505,7 +515,8 @@ int tiku_bt_bond_save(uint8_t slot,
  *
  * @param slot  Bond index in [0, TIKU_BT_BOND_MAX)
  * @param out   Destination record (must not be NULL)
- * @return TIKU_DRV_OK on success.
+ * @return TIKU_DRV_OK on success, TIKU_DRV_ERR_INVALID for a bad slot or a
+ *         NULL @p out.
  */
 int tiku_bt_bond_load(uint8_t slot, tiku_bt_bond_record_t *out);
 
@@ -513,10 +524,10 @@ int tiku_bt_bond_load(uint8_t slot, tiku_bt_bond_record_t *out);
  * @brief Clear a stored bond
  *
  * Zeros the on-NVM slot so the next tiku_bt_bond_load returns an
- * empty record. Used by Phase 14's "forget pairing" entry point.
+ * empty record. The bt shell command uses it to forget a pairing.
  *
  * @param slot  Bond index in [0, TIKU_BT_BOND_MAX)
- * @return TIKU_DRV_OK on success.
+ * @return TIKU_DRV_OK on success, TIKU_DRV_ERR_INVALID for a bad slot.
  */
 int tiku_bt_bond_clear(uint8_t slot);
 

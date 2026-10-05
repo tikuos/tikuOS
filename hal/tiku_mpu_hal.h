@@ -8,8 +8,7 @@
  * tiku_mpu_hal.h - Platform-routing header for MPU (Memory Protection Unit)
  *
  * Routes to the correct architecture-specific MPU header based on the
- * selected platform. Provides portable fallback stubs when no platform
- * is selected (e.g. host-mode testing).
+ * selected platform and declares the functions each port implements.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -40,7 +39,7 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* LOW-LEVEL REGISTER ACCESS (diagnostic / test use)                         */
+/* LOW-LEVEL REGISTER ACCESS (DIAGNOSTIC AND TEST USE)                       */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -94,22 +93,24 @@ void tiku_mpu_arch_disable_irq(void);
 void tiku_mpu_arch_enable_irq(void);
 
 /*---------------------------------------------------------------------------*/
-/* REQUIRED PLATFORM FUNCTIONS (called by kernel)                            */
+/* REQUIRED PLATFORM FUNCTIONS (CALLED BY THE KERNEL)                        */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Configure MPU segment boundaries
  *
  * Sets the hardware boundary registers to partition NVM into segments.
- * Must be called before enabling MPU protection so that the permission
- * settings map to meaningful address ranges.
+ *
+ * @note Call before enabling MPU protection, so the permission settings map
+ *       to meaningful address ranges.
  */
 void tiku_mpu_arch_init_segments(void);
 
 /**
  * @brief Set default NVM protection on all segments
  *
- * Configures all MPU segments to read+execute with no write permission.
+ * Applies the port default, TIKU_MPU_DEFAULT_SAM: every segment read+execute,
+ * except on MSP430 parts with HIFRAM, where that segment stays writable.
  * The specific register encoding is handled entirely by the arch layer.
  */
 void tiku_mpu_arch_set_default_protection(void);

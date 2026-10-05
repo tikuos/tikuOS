@@ -7,9 +7,9 @@
  *
  * tiku_gpio_irq_hal.h - platform-agnostic GPIO interrupt interface.
  *
- * Bridges per-pin edge interrupts into TIKU_EVENT_GPIO process events.  The arch
- * backend owns edge-select, IE, IFG and the ISR; this side is one API plus one
- * event id, whose payload packs the port and pin (see the macros below).
+ * Bridges per-pin edge interrupts into TIKU_EVENT_GPIO process events.  The
+ * arch backend owns edge selection, the enable and pending flags and the ISR;
+ * this side is one API plus one event id, whose payload packs port and pin.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,19 +23,20 @@
 /* EDGE-SELECT TYPE                                                          */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Which edge of a pin raises its interrupt. */
 typedef enum {
     TIKU_GPIO_EDGE_RISING  = 0,  /**< Trigger on low->high transitions */
     TIKU_GPIO_EDGE_FALLING = 1,  /**< Trigger on high->low transitions */
-    TIKU_GPIO_EDGE_BOTH    = 2,  /**< Trigger on either edge (toggle IES on each fire) */
+    TIKU_GPIO_EDGE_BOTH    = 2,  /**< Trigger on either edge */
 } tiku_gpio_edge_t;
 
 /*---------------------------------------------------------------------------*/
 /* RETURN CODES                                                              */
 /*---------------------------------------------------------------------------*/
 
-#define TIKU_GPIO_IRQ_OK            0
+#define TIKU_GPIO_IRQ_OK            0   /**< Success */
 #define TIKU_GPIO_IRQ_ERR_INVALID  -1   /**< Bad port/pin/edge */
-#define TIKU_GPIO_IRQ_ERR_UNSUP    -2   /**< Port has no IRQ vector on this device */
+#define TIKU_GPIO_IRQ_ERR_UNSUP    -2   /**< No interrupt for this pin here */
 
 /*---------------------------------------------------------------------------*/
 /* EVENT PAYLOAD HELPERS                                                     */
@@ -75,6 +76,8 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
  * Pin direction and pull state are left unchanged so the
  * application can read the line via tiku_gpio_read() afterwards
  * if desired.
+ *
+ * @return TIKU_GPIO_IRQ_OK or a negative error code.
  */
 int tiku_gpio_irq_arch_disable(uint8_t port, uint8_t pin);
 

@@ -19,8 +19,8 @@
 
 #include <stdint.h>
 
-/** @brief Outcomes; a caller that only tests != OK still behaves. */
-#define TIKU_DISPLAY_OK              0
+/* Outcomes; a caller that only tests != OK still behaves. */
+#define TIKU_DISPLAY_OK              0  /**< success                       */
 #define TIKU_DISPLAY_ERR_STATE      -1  /**< not initialised, or busy      */
 #define TIKU_DISPLAY_ERR_INVALID    -2  /**< geometry or buffer refused    */
 #define TIKU_DISPLAY_ERR_UNSUPPORTED -3 /**< backend has no such primitive */
@@ -32,12 +32,12 @@ typedef enum {
 } tiku_display_fmt_t;
 
 /*
- * Optional primitives.  A backend advertises only what its hardware really
- * does; asking for one it lacks is refused rather than emulated, so a caller
+ * Optional primitives.  A backend advertises only what its hardware does;
+ * asking for one it lacks is refused rather than emulated, so a caller
  * can tell "drew nothing" from "drew slowly in software".
  */
-#define TIKU_DISPLAY_CAP_CIRCLE   (1u << 0)
-#define TIKU_DISPLAY_CAP_ROUNDED  (1u << 1)
+#define TIKU_DISPLAY_CAP_CIRCLE   (1u << 0)  /**< fills circles            */
+#define TIKU_DISPLAY_CAP_ROUNDED  (1u << 1)  /**< fills rounded rectangles */
 #define TIKU_DISPLAY_CAP_FLIP     (1u << 2)  /**< can swap whole buffers  */
 
 /**
@@ -75,7 +75,7 @@ typedef struct {
 int tiku_display_init(tiku_display_t *d, void *fb, uint16_t w, uint16_t h);
 
 /**
- * @brief Which optional primitives this backend really has.
+ * @brief Which optional primitives this backend has.
  *
  * @note Ask after tiku_display_init(): a capability can depend on resources
  *       the screen only claims as it comes up, so the answer before then is

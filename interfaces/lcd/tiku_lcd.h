@@ -25,10 +25,12 @@
 /*===========================================================================*/
 
 #ifndef TIKU_BOARD_HAS_LCD
+/** @brief 1 when the board header declares an LCD; 0 by default. */
 #define TIKU_BOARD_HAS_LCD          0
 #endif
 
 #ifndef TIKU_BOARD_LCD_NUM_CHARS
+/** @brief Character cells on the board's LCD; 0 without one. */
 #define TIKU_BOARD_LCD_NUM_CHARS    0
 #endif
 
@@ -117,7 +119,7 @@ void tiku_lcd_puts_right(const char *s);
 void tiku_lcd_puts_at(uint8_t pos, const char *s);
 
 /*===========================================================================*/
-/* NUMBER FORMATTING (all right-aligned, blank-padded)                        */
+/* NUMBER FORMATTING (RIGHT-ALIGNED, BLANK-PADDED)                            */
 /*===========================================================================*/
 
 /**
@@ -172,7 +174,7 @@ void tiku_lcd_put_hex(uint32_t value, uint8_t digits);
 void tiku_lcd_put_fixed(int32_t value, uint8_t decimals);
 
 /*===========================================================================*/
-/* ICONS (only available when TIKU_BOARD_LCD_HAS_ICONS)                       */
+/* ICONS (WITH TIKU_BOARD_LCD_HAS_ICONS)                                      */
 /*===========================================================================*/
 
 #if defined(TIKU_BOARD_LCD_HAS_ICONS) && TIKU_BOARD_LCD_HAS_ICONS

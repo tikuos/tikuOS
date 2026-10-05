@@ -20,7 +20,9 @@
 /* VERSION                                                                   */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Kernel version string. */
 #define TIKU_VERSION        "0.06"
+/** @brief Project tagline. */
 #define TIKU_TAGLINE        "Simple. Ubiquitous. Intelligence, Everywhere."
 
 /*---------------------------------------------------------------------------*/
@@ -29,8 +31,7 @@
 
 /*
  * The Makefile sets exactly one PLATFORM_* define on the command line.
- * With nothing set the build falls back to MSP430, so the historical
- * default keeps working out-of-the-box for legacy targets.
+ * With nothing set the build falls back to MSP430.
  */
 #if !defined(PLATFORM_MSP430) && !defined(PLATFORM_RP2350) && \
     !defined(PLATFORM_AMBIQ) && !defined(PLATFORM_NORDIC) && \
@@ -70,9 +71,9 @@
 #elif defined(PLATFORM_RP2350)
 
 /*
- * Raspberry Pi RP2350 (used on Pico 2, Pico 2 W, etc.). Only one
- * silicon variant for now; a board define (TIKU_BOARD_RPI_PICO2_W)
- * comes from the Makefile and selects the matching board header.
+ * Raspberry Pi RP2350 (Pico 2, Pico 2 W).  One silicon variant; the
+ * Makefile passes the board define (TIKU_BOARD_RPI_PICO2 or _PICO2_W)
+ * that selects the board header.
  */
 #ifndef TIKU_DEVICE_RP2350
 #define TIKU_DEVICE_RP2350 1
@@ -81,18 +82,17 @@
 #elif defined(PLATFORM_AMBIQ)
 
 /*
- * Ambiq silicon. The Makefile passes the specific device define via
- * DEVICE_DEFINE -- TIKU_DEVICE_APOLLO510 (Cortex-M55) or TIKU_DEVICE_APOLLO4L
- * (Cortex-M4 Apollo4 Lite) -- with the matching board define alongside it.
- * Default to Apollo510 ONLY when no device was selected: the device-select
- * router checks APOLLO510 first, so an unconditional default here would mask an
- * explicit -DTIKU_DEVICE_APOLLO4L and silently build the wrong device.
+ * Ambiq silicon.  The Makefile passes the device define derived from MCU --
+ * TIKU_DEVICE_APOLLO510 or _APOLLO510B (Cortex-M55), _APOLLO4L or _APOLLO4P
+ * (Cortex-M4F) -- with the matching board define alongside it.  Apollo510 is
+ * the default only when no device was selected: the device-select router
+ * checks APOLLO510 before APOLLO4L, so an unconditional default here would
+ * build the wrong device.
  *
- * The exclusion list must name every explicitly-selectable device, or the
- * fallback fires alongside it and defines APOLLO510 too.  That is benign for
- * Apollo510B (same M55 silicon -- it WANTS the APOLLO510 code paths) but wrong
- * for the M4F Apollo4 Plus: it would pull Cortex-M55-only code (e.g. the
- * ARMv8-M MPU diag) into an M4F build and fail to link.
+ * Every M4F device must be in the exclusion list, or the fallback would also
+ * define APOLLO510 and pull Cortex-M55-only code (e.g. the ARMv8-M MPU diag)
+ * into an M4F build, which fails to link.  Apollo510B is not listed: it is the
+ * same M55 die and wants the APOLLO510 code paths.
  */
 #if !defined(TIKU_DEVICE_APOLLO510) && !defined(TIKU_DEVICE_APOLLO4L) && \
     !defined(TIKU_DEVICE_APOLLO4P)
@@ -105,8 +105,7 @@
  * Nordic nRF54L silicon. The Makefile derives one TIKU_DEVICE_NRF54* macro
  * from MCU=... and passes it on the command line, along with the matching
  * board define. With no nordic device selected the build falls back to the
- * nRF54L15 (the first-supported / primary part) so a bare PLATFORM_NORDIC
- * build still resolves a device.
+ * nRF54L15, so a bare PLATFORM_NORDIC build still resolves a device.
  */
 #if !defined(TIKU_DEVICE_NRF54L15) && !defined(TIKU_DEVICE_NRF54LM20A) && \
     !defined(TIKU_DEVICE_NRF54LM20B)
@@ -116,20 +115,17 @@
 #endif /* PLATFORM_* */
 
 /*---------------------------------------------------------------------------*/
-/* SYSTEM CONFIGURATION (before includes to avoid circular dependencies)    */
+/* SYSTEM CONFIGURATION                                                      */
 /*---------------------------------------------------------------------------*/
 
-/*
- * Clock time type.
+/* Defined before the includes below, which depend on them. */
+
+/**
+ * @brief Clock time type: 16 bits on MSP430, 32 bits elsewhere.
  *
- * 16 bits wraps every 512 s at 128 Hz, and any interval measured as a single
- * difference past that is silently wrong -- a 605 s measurement once read
- * back as 92 s.  A 16-bit MCU keeps the narrow type because every timer
- * compare pays for the width; parts with a 32-bit ALU do not, and 32 bits
- * moves the wrap from 512 seconds to 388 days.
- *
- * TIKU_CLOCK_LT / _DIFF follow this type's width automatically, so changing
- * it here is sufficient -- they no longer assume 16 bits.
+ * 16 bits wraps every 512 s at 128 Hz, past which a single-difference interval
+ * is wrong; MSP430 keeps it because every timer compare pays for the width.
+ * 32 bits moves the wrap to 388 days.  TIKU_CLOCK_LT / _DIFF follow the type.
  */
 #if defined(PLATFORM_MSP430)
 #define TIKU_CLOCK_CONF_TIME_T unsigned short
@@ -137,54 +133,49 @@
 #define TIKU_CLOCK_CONF_TIME_T unsigned long
 #endif
 
-/*
- * Target CPU frequency setting.  On MSP430 an enum index into a small table of
- * DCO presets (1=1MHz .. 7=8MHz; 16 MHz is disabled for stability).  On RP2350
- * there is one shipped configuration, so the value is ignored at the arch level
- * and kept only to satisfy callers of tiku_cpu_full_init().
+/**
+ * @brief Boot CPU frequency, passed to tiku_cpu_full_init().
+ *
+ * On MSP430 an index into the DCO presets (1 = 1 MHz .. 7 = 8 MHz; 8, for
+ * 16 MHz, is clamped to 8 MHz); on the other ports the boot rate in MHz.
  */
 #if defined(PLATFORM_RP2350)
 /* RP2350 PLL_SYS target in MHz. Supported values (see
  * arch/arm-rp2350/tiku_cpu_freq_boot_arch.c rp2350_freq_table[]):
  *   12, 48, 100, 125, 133, 150
- * Anything else falls back to 12 MHz with the clock-fault flag set. */
+ * Anything else keeps the 150 MHz boot clock and sets the clock-fault flag. */
 #ifndef MAIN_CPU_FREQ
 #define MAIN_CPU_FREQ 150
 #endif
 #elif defined(PLATFORM_AMBIQ)
-/* Apollo510: the CPU core runs at 96 MHz (Low-Power mode; 250 MHz in the
- * High-Performance "turbo" mode). The Cortex-M55 SysTick is driven from the
- * processor clock (SYST_CSR.CLKSOURCE=1 in tiku_timer_arch.c) -- i.e. the full
- * 96 MHz core -- so this value, which feeds the SysTick reload (TIKU_MAIN_CPU_HZ
- * / TIKU_CLOCK_ARCH_SECOND) AND the SysTick busy-delays, must be 96. (An earlier
- * 48 here -- a wrong "SysTick = core/2" assumption -- ran the tick at 256 Hz,
- * 2x fast; caught by a TikuBench `every` timing measurement, 2026-06-12.) The
- * runtime core clock for /sys + info is read from the MCU perf-mode register --
- * see tiku_cpu_ambiq_clock_get_hz(). */
+/* Apollo: 96 boots the core in Low-Power mode at 96 MHz; a larger value asks
+ * tiku_cpu_freq_init() for turbo (250 MHz on Apollo510, 192 MHz on Apollo4).
+ * The tick runs from the STIMER.  TIKU_MAIN_CPU_HZ sets the reload of the
+ * free-running SysTick that the busy-delays count, and they scale by the live
+ * core clock, which tiku_cpu_ambiq_clock_get_hz() reads from the perf-mode
+ * register. */
 #ifndef MAIN_CPU_FREQ
 #define MAIN_CPU_FREQ 96
 #endif
 #elif defined(PLATFORM_NORDIC)
-/* nRF54L15-DK runs the core at 128 MHz (OSCILLATORS.PLL.CURRENTFREQ reads
- * CK128M on hardware). The kernel tick is driven from GRTC/LFCLK (independent
- * of the core clock); this value feeds the SysTick busy-delays, which must
- * match the real core clock or delays run at the wrong rate. */
+/* nRF54L: tiku_cpu_freq_init() ignores this value.  The core runs at
+ * TIKU_NORDIC_CPU_MHZ (128 by default) or the saved choice, set once by
+ * tiku_cpu_boot_nordic_init(); delays read the live PLL rate, and the tick
+ * runs from the GRTC.  128 keeps TIKU_MAIN_CPU_HZ at the default rate. */
 #ifndef MAIN_CPU_FREQ
 #define MAIN_CPU_FREQ 128
 #endif
 #elif defined(PLATFORM_RA8P1)
-/* Boot rate: MEASURED, not chosen.  SCKDIVCR reads 0 out of reset, so every
- * divider is /1 and the core runs from the 8 MHz middle-speed oscillator.
- * R4 brings the PLL up to 1 GHz; until then every derived constant -- the
- * console divisor, the SysTick reload -- follows this number. */
+/* Boot rate, applied by tiku_cpu_freq_init(): PLL1 comes up at 240 MHz, and
+ * `freq` moves between 240, 480 and 1000 at run time. */
 #ifndef MAIN_CPU_FREQ
 #define MAIN_CPU_FREQ 240
 #endif
 #elif defined(PLATFORM_STM32N6)
 /* Boot rate, applied by tiku_cpu_freq_init(): 150 MHz is what the boot ROM
- * hands over, so booting here changes nothing but makes the tree ours rather
- * than inherited. `freq <mhz>` moves it up to 800 or down to 10 at runtime;
- * the tick and console run from HSI and do not follow. */
+ * hands over, so booting here changes nothing but puts the clock tree under
+ * the kernel's own setup.  `freq <mhz>` moves it up to 800 or down to 10 at
+ * runtime; the tick and console run from HSI and do not follow. */
 #ifndef MAIN_CPU_FREQ
 #define MAIN_CPU_FREQ 150
 #endif
@@ -199,9 +190,9 @@
 #define MAIN_CPU_FREQ 7    /* MSP430: 8 MHz (maximum supported) */
 #endif
 
-/** Compile-time mapping from MAIN_CPU_FREQ to actual Hz, used by htimer
- *  and other subsystems that need the clock frequency as a compile-time
- *  constant.
+/**
+ * @brief MAIN_CPU_FREQ in Hz, for the htimer and other subsystems that need
+ *        the clock frequency as a compile-time constant.
  */
 #if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
     defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
@@ -264,12 +255,13 @@
 /*---------------------------------------------------------------------------*/
 /* TEST CONFIGURATION                                                       */
 /*---------------------------------------------------------------------------*/
-/* Included early so that feature-gate macros (e.g. TIKU_LC_PERSISTENT)     */
-/* are visible to the kernel headers below.                                  */
+/* Included early so that feature-gate macros (e.g. TIKU_LC_PERSISTENT) are
+ * visible to the kernel headers below. */
 
 #if defined(HAS_TESTS)
 #include <tests/tiku_test_config.h>
 #else
+/** @brief 1 when a test build enables the test runner; 0 otherwise. */
 #define TEST_ENABLE 0
 #endif
 
@@ -305,10 +297,14 @@
 #include <interfaces/onewire/tiku_onewire.h>
 
 /*---------------------------------------------------------------------------*/
-/* SHELL CONFIGURATION (kernel service — orthogonal to tests/examples/apps) */
+/* SHELL CONFIGURATION                                                       */
 /*---------------------------------------------------------------------------*/
 
 #ifndef TIKU_SHELL_ENABLE
+/**
+ * @brief 1 to build the shell (make TIKU_SHELL_ENABLE=1).  It is a kernel
+ *        service, so it coexists with tests, examples or an app.
+ */
 #define TIKU_SHELL_ENABLE 0
 #endif
 
@@ -317,10 +313,14 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* INIT SYSTEM (FRAM-backed configurable boot — requires shell for parsing)  */
+/* INIT SYSTEM                                                               */
 /*---------------------------------------------------------------------------*/
 
 #ifndef TIKU_INIT_ENABLE
+/**
+ * @brief 1 to build the init system: shell commands kept in NVM and run at
+ *        boot through the shell parser, so it needs the shell.
+ */
 #define TIKU_INIT_ENABLE 0
 #endif
 
@@ -331,6 +331,7 @@
 #if defined(HAS_EXAMPLES)
 #include <examples/tiku_example_config.h>
 #else
+/** @brief 1 when the examples config enables an example; 0 otherwise. */
 #define TIKU_EXAMPLES_ENABLE 0
 #endif
 
@@ -338,14 +339,14 @@
 /* APP CONFIGURATION                                                        */
 /*---------------------------------------------------------------------------*/
 
-/* The application firmware layer (formerly the in-tree apps/ dir with its
- * tiku_app_config.h) now lives out-of-tree in the TikuBench harness.  The old
- * config header only ever defined this master switch off, so core defines it
- * directly — no app selection is compiled into the kernel itself. */
+/**
+ * @brief App master switch.  No app selection is compiled into the kernel (the
+ *        app firmware lives in the TikuBench harness), so it is 0.
+ */
 #define TIKU_APPS_ENABLE 0
 
 /*---------------------------------------------------------------------------*/
-/* MUTUAL EXCLUSION: only one of tests, examples, apps may be active         */
+/* MUTUAL EXCLUSION OF TESTS, EXAMPLES AND APPS                              */
 /*---------------------------------------------------------------------------*/
 
 #if (!!TEST_ENABLE + !!TIKU_EXAMPLES_ENABLE + !!TIKU_APPS_ENABLE) > 1

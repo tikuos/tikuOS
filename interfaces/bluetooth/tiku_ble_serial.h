@@ -8,8 +8,8 @@
  * tiku_ble_serial.h - driver-agnostic "serial port over BLE" facade.
  *
  * Advertise as a connectable peripheral exposing a byte pipe (the Nordic UART
- * Service layout), report when a central subscribes, and push or pull bytes -- the
- * wireless twin of a UART, with no HCI, L2CAP or ATT in the caller's view.
+ * Service layout), report when a central subscribes, and push or pull bytes:
+ * the wireless twin of a UART, with no HCI, L2CAP or ATT in the caller's view.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,17 +23,20 @@
 extern "C" {
 #endif
 
-/* 1 when a BLE-serial backend is compiled in, 0 otherwise.  TIKU_HAS_BLE is the
- * generic capability the build sets from whichever radio driver is enabled; the
- * concrete-driver fallback keeps this correct even if a caller pulls the header
- * in without the Makefile's -D (e.g. a unit build). */
+/**
+ * @brief 1 when a BLE-serial backend is compiled in, 0 otherwise.
+ *
+ * The build sets TIKU_HAS_BLE for the EM9305.  The driver tests keep this right
+ * for a caller that includes the header without the Makefile's -D (e.g. a unit
+ * build), and select Nordic's FLPR controller, which has no TIKU_HAS_BLE.
+ */
 #if (defined(TIKU_HAS_BLE) && (TIKU_HAS_BLE + 0)) ||                          \
     (defined(TIKU_DRV_BLE_EM9305_ENABLE) && (TIKU_DRV_BLE_EM9305_ENABLE + 0)) \
     || (defined(TIKU_FLPR_ENABLE) && (TIKU_FLPR_ENABLE + 0) &&                \
         defined(TIKU_HAS_BLE_ADV) && (TIKU_HAS_BLE_ADV + 0))
-/* Nordic: the FLPR (VPR RISC-V coprocessor) is the on-die BLE controller
- * (kintsugi/radio.md L6); the M33 talks to it over the shared-page mailbox
- * exactly as it talks HCI to the EM9305 -- same facade, different transport. */
+/* Nordic: the FLPR (VPR RISC-V coprocessor) is the on-die BLE controller; the
+ * M33 exchanges L2CAP fragments with it over the shared-page mailbox and runs
+ * ATT/GATT itself. */
 #define TIKU_BLE_SERIAL_PRESENT 1
 #else
 #define TIKU_BLE_SERIAL_PRESENT 0
@@ -48,11 +51,13 @@ int tiku_ble_serial_available(void);
 /**
  * @brief Start connectable advertising as a BLE serial peripheral.
  *
- * A central (phone app, tikuble.py, the mac GUI) can then connect and subscribe;
- * after that, tiku_ble_serial_ready() turns true and send/recv carry data.
+ * A central (phone app, tikuble.py, the mac GUI) can then connect and
+ * subscribe; after that, tiku_ble_serial_ready() turns true and send/recv
+ * carry data.
  *
- * @param name  Advertised local name (NULL -> a sensible default).
- * @return 0 on success, negative on failure (no radio / HCI error).
+ * @param name  Advertised local name (NULL -> a default).
+ * @return 0 on success, negative on failure (no radio, the radio already
+ *         claimed, or a controller error).
  */
 int tiku_ble_serial_start(const char *name);
 
@@ -60,13 +65,13 @@ int tiku_ble_serial_start(const char *name);
 void tiku_ble_serial_stop(void);
 
 /**
- * @brief 1 when a central is connected AND subscribed to notifications, i.e.
- *        it is safe to send.  Polls the stack as a side effect, so a poll loop
+ * @brief 1 when a central is connected and subscribed to notifications, i.e.
+ *        it is safe to send.  Pumps the stack as a side effect, so a poll loop
  *        on this keeps the link serviced.
  *
- * A brief settle window is enforced after a fresh subscribe (notifications sent
- * while the central is still arming its subscription are silently dropped), so
- * the first send after this returns true actually lands.
+ * The EM9305 backend also waits 5/8 s after a fresh subscribe, since
+ * notifications sent while the central is still arming are dropped.  The
+ * Nordic backend re-advertises a dropped link from here.
  */
 int tiku_ble_serial_ready(void);
 
@@ -75,9 +80,10 @@ int tiku_ble_serial_ready(void);
  *        and the link runs encrypted under that key; 0 otherwise, including
  *        while it is still being agreed.
  *
- * The backend answers a central's pairing itself and keeps the key, so a
- * central seen before skips pairing; what a link confers to what crosses
- * it follows this, not the address alone.
+ * The Nordic backend pairs and bonds the central itself, so a central seen
+ * before skips pairing; the EM9305 backend does no pairing and returns 0.
+ *
+ * @note Base trust in what crosses the link on this, not on the peer address.
  */
 int tiku_ble_serial_secured(void);
 
@@ -85,29 +91,36 @@ int tiku_ble_serial_secured(void);
 int tiku_ble_serial_connected(void);
 
 /** @brief Where the connection's security stands: 0 none, 1 pairing,
- *         2 key agreed or recalled, 3 encrypted under it. */
+ *         2 key agreed or recalled, 3 encrypted under it (always 0 on the
+ *         EM9305 backend). */
 int tiku_ble_serial_secure_state(void);
 
 /**
- * @brief Pump the stack once (drain events/RX, service TX acks).  Cheap and
- *        non-blocking; ready()/recv()/send() all call it, so an app that polls
- *        any of them need not call this explicitly.
+ * @brief Pump the stack once: drain events and RX, push queued TX.
+ *
+ * ready() calls it on both backends, and rx_ready() and recv() call it on the
+ * EM9305 one; on Nordic an app that polls only rx_ready()/recv() must call it.
  */
 void tiku_ble_serial_service(void);
 
 /**
- * @brief Send @p len bytes to the connected central (flow-controlled).
+ * @brief Send @p len bytes to the connected central.
  *
- * Blocks only as long as controller credits require, bounded by a stall
- * deadline so a dead link cannot wedge the caller.
+ * EM9305: queues every byte and drains under controller flow control, giving
+ * up on the rest after a 1 s stall.  Nordic: one notification of at most
+ * MTU - 3 bytes, refused while unsubscribed or while TX is busy.
  *
- * @return Number of bytes accepted (== @p len) or negative if not connected.
+ * @return Bytes accepted (EM9305: @p len; Nordic: up to MTU - 3, or 0 when
+ *         unsubscribed or busy), or -1 if not connected or @p data is NULL.
  */
 int tiku_ble_serial_send(const uint8_t *data, uint16_t len);
 
 /**
- * @brief Are there received bytes waiting to be read?  Polls the stack, so this
- *        is the cheap, allocation-free predicate to gate a recv() poll loop on.
+ * @brief Are there received bytes waiting to be read?
+ *
+ * The EM9305 backend pumps the stack first; the Nordic one only checks the
+ * buffer that tiku_ble_serial_service() fills.
+ *
  * @return 1 if at least one byte is waiting, 0 otherwise.
  */
 int tiku_ble_serial_rx_ready(void);
@@ -120,6 +133,10 @@ int tiku_ble_serial_recv(uint8_t *buf, uint16_t cap);
 
 /**
  * @brief Start a non-connectable beacon advertising @p name.
+ *
+ * On Nordic the broadcast facade (tiku_ble_adv.h) owns beacons, and this
+ * returns -1.
+ *
  * @return 0 on success, negative on failure.
  */
 int tiku_ble_serial_beacon(const char *name);

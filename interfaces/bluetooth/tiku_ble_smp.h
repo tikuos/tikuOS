@@ -5,11 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_ble_smp.h - LE Secure Connections (SMP) pairing, Just Works.
+ * tiku_ble_smp.h - LE Secure Connections crypto: AES-CMAC and f4/f5/f6/g2.
  *
- * The Security Manager on L2CAP CID 0x0006: feature exchange, P-256 public keys,
- * confirm/random, then f5 key derivation leaving both peers with the same LTK.
- * Role-aware and transport-agnostic -- it only consumes and produces SMP PDUs.
+ * The SMP key functions (Core Spec Vol 3, Part H, 2.2) over the CRACEN AES, and
+ * a self-test.  The pairing engine that uses them is tiku_ble_smp_pair.h.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,16 +19,20 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/** @brief AES-CMAC (RFC 4493) over the CRACEN AES-ECB.  @return 0 on success. */
+/**
+ * @brief AES-CMAC (RFC 4493) over the CRACEN AES-ECB.
+ * @return 0 on success.
+ */
 int tiku_ble_smp_aes_cmac(const uint8_t key[16], const uint8_t *msg,
                           size_t len, uint8_t mac[16]);
 
 /*
- * All f4/f5/f6 inputs and outputs are in SMP wire order (little-endian), as
- * they appear on the L2CAP channel.  Internally each function byte-swaps to
- * the big-endian order the CMAC core operates on and swaps the result back,
- * so callers never see the endianness flip (Core Spec Vol 3, Part H, 2.2.5-7;
- * verified byte-exact against the spec sample data -- see the self-test KATs).
+ * All f4/f5/f6/g2 inputs and the f4/f5/f6 outputs are in SMP wire order
+ * (little-endian), as they appear on the L2CAP channel.  Internally each
+ * function byte-swaps to the big-endian order the CMAC core operates on and
+ * swaps the result back, so callers never see the endianness flip (Core Spec
+ * Vol 3, Part H, 2.2.5-7); the self-test checks them against the spec's
+ * sample data.
  */
 
 /**
@@ -72,10 +75,10 @@ uint32_t tiku_ble_smp_g2(const uint8_t u[32], const uint8_t v[32],
                          const uint8_t x[16], const uint8_t y[16]);
 
 /**
- * @brief Crypto self-test: AES-CMAC RFC-4493 KAT, f4/f5/f6 spec KATs, and a
- *        P-256 ECDH round-trip.
+ * @brief Crypto self-test: AES-CMAC RFC-4493 KAT, f4/f5/f6 and g2 spec KATs,
+ *        and a P-256 ECDH round-trip.
  * @return bitmask of passes: bit0 CMAC KAT, bit1 ECDH match, bit2 f4/f5/f6
- *         Core-spec KATs (7 == all pass).
+ *         Core-spec KATs, bit3 g2 KAT (15 == all pass).
  */
 int tiku_ble_smp_selftest(void);
 

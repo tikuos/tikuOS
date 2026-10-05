@@ -7,9 +7,9 @@
  *
  * tiku_simd.c - portable u8 vector kernels (Helium/MVE + scalar backends).
  *
- * Both backends live in one translation unit, selected by __ARM_FEATURE_MVE -- a
- * property of the -mcpu, not of any vendor SDK.  The MVE paths use <arm_mve.h>
- * with VCTP tail predication; the scalar paths are the bit-identical reference.
+ * Both backends live in one unit, selected by __ARM_FEATURE_MVE (set by the
+ * -mcpu, not a vendor SDK).  The MVE paths use <arm_mve.h> with VCTP tail
+ * predication; the scalar paths are the bit-identical reference.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,15 +17,11 @@
 #include "tiku_simd.h"
 
 /*
- * TIKU_SIMD_MVE normally follows the target's own capability, and that is the
- * only thing production builds should do.  It is left OVERRIDABLE for exactly
- * one purpose: a measurement translation unit can force it to 0 and include
- * this file a second time under renamed symbols, producing a scalar twin of
- * every kernel *from this same source* in one firmware image.  That matters
- * because the alternative -- two firmware images -- would compare across builds,
- * and cross-build comparison on this part carries a ~3 % variance plus a
- * loop-alignment hazard that has already manufactured one fake result.
- * See arch/ambiq/tiku_simd_power.c.
+ * TIKU_SIMD_MVE follows the target's capability in production builds.  A
+ * measurement unit (arch/ambiq/tiku_simd_scalar.c) forces it to 0 and includes
+ * this file again under renamed symbols, so a scalar twin of every kernel sits
+ * in the same image as the MVE one: compared across two builds, loop alignment
+ * skews the result.
  */
 #ifndef TIKU_SIMD_MVE
 #if defined(__ARM_FEATURE_MVE) && (__ARM_FEATURE_MVE & 1)
@@ -46,15 +42,16 @@ tiku_simd_backend(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* MVE helpers                                                               */
+/* MVE HELPERS                                                               */
 /*---------------------------------------------------------------------------*/
 
 #if TIKU_SIMD_MVE
 
-/*
- * Exact floor(v/255) on eight u16 lanes:  (v + 1 + (v >> 8)) >> 8
- * No overflow: v <= 255*255 = 65025, so the sum <= 65280 still fits u16.  This
- * is what makes the MVE product match the scalar (x*y)/255 bit for bit.
+/**
+ * @brief Exact floor(v/255) on eight u16 lanes: (v + 1 + (v >> 8)) >> 8.
+ *
+ * v <= 255*255 = 65025, so the sum stays <= 65280 and fits u16; this keeps the
+ * MVE product bit-identical to the scalar (x*y)/255.
  */
 static inline uint16x8_t
 simd_div255_u16(uint16x8_t v)
@@ -63,7 +60,7 @@ simd_div255_u16(uint16x8_t v)
     return vshrq_n_u16(v, 8);
 }
 
-/** floor(a*b/255) per u8 lane: widen even/odd lanes, divide, narrow back. */
+/** @brief floor(a*b/255) per u8 lane: widen even/odd lanes, divide, narrow. */
 static inline uint8x16_t
 simd_mul_div255_u8(uint8x16_t a, uint8x16_t b)
 {
@@ -79,7 +76,7 @@ simd_mul_div255_u8(uint8x16_t a, uint8x16_t b)
 #endif /* TIKU_SIMD_MVE */
 
 /*---------------------------------------------------------------------------*/
-/* Kernels                                                                   */
+/* KERNELS                                                                   */
 /*---------------------------------------------------------------------------*/
 
 void
@@ -244,7 +241,7 @@ tiku_simd_dot_u8(const uint8_t *x, const uint8_t *w, uint32_t n)
         mve_pred16_t p = vctp8q(n - i);
         uint8x16_t vx = vldrbq_z_u8(&x[i], p);
         uint8x16_t vw = vldrbq_z_u8(&w[i], p);
-        acc = vmladavaq_p_u8(acc, vx, vw, p);   /* 16 u8 MACs per beat pair  */
+        acc = vmladavaq_p_u8(acc, vx, vw, p);   /* 16 u8 MACs per instruction */
     }
     return acc;
 #else

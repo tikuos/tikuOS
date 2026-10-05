@@ -45,8 +45,8 @@ void tiku_crit_arch_mask_irqs(uint8_t preserve_mask);
  * @brief Restore the IE state captured by the most recent
  *        tiku_crit_arch_mask_irqs() call.
  *
- * Pairs 1:1 with tiku_crit_arch_mask_irqs(). Calling this without
- * a matching mask is undefined.
+ * @note Call only after a matching tiku_crit_arch_mask_irqs(), one unmask per
+ *       mask; without one the result is undefined.
  */
 void tiku_crit_arch_unmask_irqs(void);
 

@@ -7,9 +7,9 @@
  *
  * tiku_spi_bus.h - platform-independent SPI bus interface.
  *
- * A portable SPI master API with all four clock modes, configurable bit order and
- * a raw prescaler.  All operations block, and chip select is the application's
- * to drive over GPIO.
+ * A portable SPI master API with all four clock modes, configurable bit order
+ * and a raw prescaler.  All operations block, and chip select is the
+ * application's to drive over GPIO.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -29,10 +29,10 @@
 
 /** @defgroup TIKU_SPI_MODE SPI Clock Modes (CPOL | CPHA)
  * @{ */
-#define TIKU_SPI_MODE_0     0   /**< CPOL=0, CPHA=0 (idle low, sample rising) */
-#define TIKU_SPI_MODE_1     1   /**< CPOL=0, CPHA=1 (idle low, sample falling) */
-#define TIKU_SPI_MODE_2     2   /**< CPOL=1, CPHA=0 (idle high, sample falling) */
-#define TIKU_SPI_MODE_3     3   /**< CPOL=1, CPHA=1 (idle high, sample rising) */
+#define TIKU_SPI_MODE_0     0   /**< CPOL=0, CPHA=0: idle low, sample rise */
+#define TIKU_SPI_MODE_1     1   /**< CPOL=0, CPHA=1: idle low, sample fall */
+#define TIKU_SPI_MODE_2     2   /**< CPOL=1, CPHA=0: idle high, sample fall */
+#define TIKU_SPI_MODE_3     3   /**< CPOL=1, CPHA=1: idle high, sample rise */
 /** @} */
 
 /** @defgroup TIKU_SPI_BITORDER SPI Bit Order
@@ -54,11 +54,14 @@
 
 /**
  * @brief SPI bus configuration.
+ *
+ * The prescaler divides the port's own SPI source clock (SMCLK on MSP430); a
+ * port may clamp it to what its divider can take, or ignore it.
  */
 typedef struct tiku_spi_config {
     uint8_t  mode;       /**< TIKU_SPI_MODE_0 .. TIKU_SPI_MODE_3 */
     uint8_t  bit_order;  /**< TIKU_SPI_MSB_FIRST or TIKU_SPI_LSB_FIRST */
-    uint16_t prescaler;  /**< Clock divider: SPI_CLK = SMCLK / prescaler */
+    uint16_t prescaler;  /**< Divider of the port's SPI source clock */
 } tiku_spi_config_t;
 
 /*---------------------------------------------------------------------------*/
@@ -68,9 +71,9 @@ typedef struct tiku_spi_config {
 /**
  * @brief Initialize the SPI bus in master mode.
  *
- * Configures the underlying hardware peripheral (eUSCI_A on MSP430)
- * for 3-pin SPI master operation. Chip select is not managed by the
- * driver; the application must assert/deassert CS via GPIO.
+ * Configures the underlying hardware peripheral (eUSCI_A1 or eUSCI_B1 on
+ * MSP430, per board) for 3-pin SPI master operation. Chip select is not
+ * managed by the driver; the application must assert/deassert CS via GPIO.
  *
  * @param config  Pointer to configuration structure
  * @return TIKU_SPI_OK on success, negative error code on failure

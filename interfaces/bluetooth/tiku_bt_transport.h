@@ -7,9 +7,9 @@
  *
  * tiku_bt_transport.h - driver-agnostic Bluetooth transport interface.
  *
- * The vtable each driver implements to carry HCI for the portable stack, whether
- * that is BTSDIO over a chip's shared RAM rings or an HCI UART.  Keeps the stack
- * independent of any one Bluetooth part.
+ * The vtable each driver implements to carry HCI for the portable stack,
+ * whether that is BTSDIO over a chip's shared RAM rings or a controller's
+ * in-memory HCI.  Keeps the stack independent of any one Bluetooth part.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -28,7 +28,7 @@ extern "C" {
  *
  * Called by the generic stack as it pumps HCI traffic.  Implementations must be
  * synchronous, since they run from shell context, the runner and ISR
- * follow-ups; only one caller touches the transport at a time today.
+ * follow-ups; only one caller touches the transport at a time.
  */
 typedef struct {
     /**

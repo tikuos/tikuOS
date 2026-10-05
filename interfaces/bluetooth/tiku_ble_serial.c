@@ -7,8 +7,9 @@
  *
  * tiku_ble_serial.c - driver-agnostic BLE-serial facade implementation.
  *
- * Dispatches the facade in tiku_ble_serial.h to whichever radio backend the build
- * compiled in.  Adding a second backend adds an #elif here; callers never change.
+ * Dispatches the facade in tiku_ble_serial.h to whichever radio backend the
+ * build compiled in: the EM9305 host stack or the Nordic FLPR controller.
+ * Adding a backend adds an #elif here; callers never change.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -16,23 +17,23 @@
 #include "tiku_ble_serial.h"
 
 /*===========================================================================*/
-/* Backend: EM9305 host stack (Apollo510 Blue)                               */
+/* BACKEND: EM9305 HOST STACK (APOLLO510 BLUE)                               */
 /*===========================================================================*/
 #if (defined(TIKU_DRV_BLE_EM9305_ENABLE) && (TIKU_DRV_BLE_EM9305_ENABLE + 0))
 
-#include <arch/ambiq/tiku_ble_uart.h>       /* the connectable GATT host stack */
-#include <arch/ambiq/tiku_em9305.h>         /* non-connectable beacon helper   */
-#include <arch/ambiq/tiku_timer_arch.h>     /* TIKU_CLOCK_ARCH_SECOND (before clock.h) */
-#include <kernel/timers/tiku_clock.h>       /* credit-drain + subscribe settle */
-#include <kernel/cpu/tiku_watchdog.h>       /* keep the WDT happy while draining*/
+#include <arch/ambiq/tiku_ble_uart.h>       /* connectable GATT host stack */
+#include <arch/ambiq/tiku_em9305.h>         /* non-connectable beacon helper */
+#include <arch/ambiq/tiku_timer_arch.h>     /* tick rate, before clock.h */
+#include <kernel/timers/tiku_clock.h>       /* credit drain, subscribe settle */
+#include <kernel/cpu/tiku_watchdog.h>       /* kicked while draining */
 
-/* How many HCI packets to drain per service() call.  The pump reads one packet
- * per poll; a small burst empties a typical event/RX backlog without spinning. */
+/* HCI packets drained per service() call.  The pump reads one packet per
+ * poll; a small burst empties a typical event/RX backlog without spinning. */
 #define BLE_SERIAL_POLL_BURST   8u
 
-/* Subscribe-settle: notifications sent in the ~½ s after a central subscribes
- * are silently discarded while it finishes arming, so hold ready() off that
- * long (mirrors the wireless-shell greet delay). */
+/* Subscribe-settle: notifications sent shortly after a central subscribes are
+ * discarded while it finishes arming, so ready() waits 5/8 s first, as the
+ * wireless shell's greet delay does. */
 static tiku_clock_time_t s_settle_at;
 static uint8_t           s_sub_armed;
 
@@ -76,7 +77,7 @@ tiku_ble_serial_ready(void)
         s_sub_armed = 0u;
         return 0;
     }
-    if (!s_sub_armed) {                 /* just subscribed -> start the settle */
+    if (!s_sub_armed) {                 /* just subscribed: start settling */
         s_sub_armed = 1u;
         s_settle_at = (tiku_clock_time_t)(tiku_clock_time() +
                                           (TIKU_CLOCK_SECOND * 5u) / 8u);
@@ -187,7 +188,7 @@ tiku_ble_serial_beacon(const char *name)
 }
 
 /*===========================================================================*/
-/* Backend: Nordic on-die FLPR controller (nRF54L, L6)                       */
+/* BACKEND: NORDIC ON-DIE FLPR CONTROLLER (NRF54L)                           */
 /*===========================================================================*/
 #elif (defined(TIKU_FLPR_ENABLE) && (TIKU_FLPR_ENABLE + 0) &&                 \
        defined(TIKU_HAS_BLE_ADV) && (TIKU_HAS_BLE_ADV + 0))
@@ -195,21 +196,21 @@ tiku_ble_serial_beacon(const char *name)
 #include <arch/nordic/tiku_flpr_arch.h>        /* the on-die BLE controller  */
 #include <arch/nordic/tiku_radio_arch.h>       /* adv_build + link cfg + TIFS */
 #include <arch/nordic/tiku_device_select.h>    /* NRF_RADIO_S (TIFS)          */
-#include <interfaces/bluetooth/tiku_ble_adv.h> /* R7 radio-ownership arbiter  */
+#include <interfaces/bluetooth/tiku_ble_adv.h> /* radio-ownership arbiter     */
 #include <kernel/cpu/tiku_common.h>            /* unique id -> AdvA           */
-#include <interfaces/bluetooth/tiku_ble_host.h>  /* Phase B: M33 ATT/GATT host */
-#include <interfaces/bluetooth/tiku_ble_bond.h>  /* a central seen before      */
-#include <kernel/cpu/tiku_watchdog.h>          /* kick while draining the slot */
+#include <interfaces/bluetooth/tiku_ble_host.h>  /* M33 ATT/GATT host         */
+#include <interfaces/bluetooth/tiku_ble_bond.h>  /* a central seen before */
+#include <kernel/cpu/tiku_watchdog.h>          /* kicked while draining */
 #include <string.h>
 
-/* Phase B: the FLPR is a pure CONTROLLER -- it forwards L2CAP frames over the
+/* The FLPR is the controller: it forwards L2CAP frames over the
  * mailbox.  This backend pumps them through the M33 ATT/GATT host in
  * service() (called from ready()): a received frame -> tiku_ble_host_rx ->
  * response; a NUS RX write surfaces as bytes callers read via recv(), and
  * send() is an ATT notification.  start() programs the static link config
  * while RADIO is secure, then hands RADIO+UARTE21 to the FLPR. */
 #define BLE_SERIAL_NAME_CAP  24u
-#define BLE_SERIAL_RXBUF     (TIKU_BLE_HOST_MTU)   /* hold a full recombined msg*/
+#define BLE_SERIAL_RXBUF     (TIKU_BLE_HOST_MTU)   /* a full recombined msg */
 
 static uint8_t s_started;
 static uint8_t s_adv[48];                          /* stored for re-advertise */
@@ -227,10 +228,12 @@ static uint8_t s_smp_armed;
 static uint8_t s_paired;
 static uint8_t s_enc;
 
-/* The SCAN_RSP a discovering host gets: the NUS service UUID.  It must NOT
- * repeat the advert's own data -- a scanner's duplicate filter drops such a
- * response, and a host that reports a device only once the pair is complete
- * then never reports it at all. */
+/**
+ * @brief Build the SCAN_RSP a discovering host gets: the NUS service UUID.  It
+ *        must not repeat the advert's own data: a scanner's duplicate filter
+ *        drops such a response, and a host that reports a device only once the
+ *        pair is complete then never reports it at all.
+ */
 static uint8_t ble_serial_scanrsp(uint8_t *rsp, const uint8_t *addr)
 {
     static const uint8_t nus_svc[16] = {
@@ -262,7 +265,7 @@ tiku_ble_serial_start(const char *name)
     if (tiku_flpr_arch_start() != 0 || !tiku_flpr_arch_running()) {
         return -1;
     }
-    if (tiku_ble_adv_conn_claim() != 0) {      /* R7: one radio, one owner    */
+    if (tiku_ble_adv_conn_claim() != 0) {      /* one radio, one owner        */
         return -1;                             /* a beacon/observer holds it  */
     }
     tiku_common_unique_id(addr, 6u);
@@ -282,7 +285,7 @@ tiku_ble_serial_start(const char *name)
     tiku_radio_arch_init();                    /* static link cfg (secure)    */
     NRF_RADIO_S->TIFS = 150u;                  /* T_IFS turnaround            */
     tiku_radio_arch_constlat_hold(1);
-    tiku_ble_host_reset();                     /* Phase B: fresh ATT server   */
+    tiku_ble_host_reset();                     /* fresh ATT server            */
     s_rx_len = 0u;
     rc = tiku_flpr_arch_conn_start(adv, advlen, rsp, rsplen,
                                    addr);            /* non-blocking      */
@@ -308,11 +311,13 @@ tiku_ble_serial_start(const char *name)
     return 0;
 }
 
-/* Auto-reconnect: the FLPR controller drops to conn_state 3 (ended) on
- * supervision timeout / peer disconnect, or 2 (gave up) if an advertise
- * window expired with no central.  In either idle state, re-advertise so the
- * service stays reachable; conn_start resets conn_state to 0 (advertising),
- * so this fires once per drop, not every poll. */
+/**
+ * @brief Re-advertise after the link drops, so the service stays reachable.
+ *
+ * The FLPR drops to conn_state 3 (ended) on supervision timeout or peer
+ * disconnect, or 2 (gave up) when an advertise window expires with no central;
+ * conn_start resets it to 0, so this fires once per drop, not every poll.
+ */
 static void serial_reconnect(void)
 {
     uint32_t st;
@@ -320,11 +325,11 @@ static void serial_reconnect(void)
         return;
     }
     st = tiku_flpr_arch_conn_state();
-    if (st != 0u && st != 1u) {                /* not advertising, not connected*/
-        tiku_flpr_arch_conn_stop();            /* reclaim the RADIO to secure   */
-        tiku_radio_arch_init();                /* re-set the ADV link config    */
+    if (st != 0u && st != 1u) {                /* not advertising/connected */
+        tiku_flpr_arch_conn_stop();            /* RADIO back to secure */
+        tiku_radio_arch_init();                /* re-set the ADV link config */
         NRF_RADIO_S->TIFS = 150u;
-        tiku_ble_host_reset();                 /* fresh ATT server for the next */
+        tiku_ble_host_reset();                 /* fresh ATT server */
         s_rx_len = 0u;
         (void)tiku_flpr_arch_conn_start(s_adv, s_advlen, s_rsp, s_rsplen,
                                         s_addr);
@@ -337,14 +342,16 @@ tiku_ble_serial_stop(void)
     if (s_started) {
         tiku_flpr_arch_conn_stop();
         tiku_radio_arch_constlat_hold(0);
-        tiku_ble_adv_conn_release();           /* R7: free the radio          */
+        tiku_ble_adv_conn_release();           /* free the radio              */
         s_started = 0u;
     }
 }
 
-/* Drain the host's pending TX PDU as data-PDU-sized fragments (each with its
- * LLID), retrying while the mailbox slot is busy, until sent or the link
- * drops. */
+/**
+ * @brief Drain the host's pending TX PDU as data-PDU-sized fragments (each with
+ *        its LLID), retrying while the mailbox slot is busy, until sent or the
+ *        link drops.
+ */
 static void serial_drain_tx(void)
 {
     uint8_t  frag[32], llid;
@@ -440,7 +447,7 @@ int
 tiku_ble_serial_ready(void)
 {
     serial_reconnect();                        /* re-advertise a dropped link */
-    tiku_ble_serial_service();                 /* pump the L2CAP <-> host loop */
+    tiku_ble_serial_service();                 /* pump L2CAP <-> host */
     return (tiku_flpr_arch_conn_active() &&
             tiku_ble_host_subscribed()) ? 1 : 0;
 }
@@ -514,7 +521,7 @@ tiku_ble_serial_beacon(const char *name)
 }
 
 /*===========================================================================*/
-/* No backend: honest stub so a stray enable still links                     */
+/* NO BACKEND: STUBS, SO A STRAY ENABLE STILL LINKS                          */
 /*===========================================================================*/
 #else
 

@@ -44,7 +44,10 @@ uint16_t tiku_154_chan_offset(uint8_t chan)
     return (f == 0u) ? 0xFFFFu : (uint16_t)(f - 2400u);
 }
 
-/* Reserved mode (1) has no valid length -- callers reject frames using it. */
+/**
+ * @brief Address length in bytes for @p mode; 0 for NONE and for the reserved
+ *        mode 1, which callers reject.
+ */
 static uint8_t addr_len(uint8_t mode)
 {
     if (mode == TIKU_154_ADDR_SHORT) {
@@ -89,7 +92,7 @@ uint16_t tiku_154_mhr_build(uint8_t *buf, const tiku_154_mhr_t *h)
         o = (uint8_t)(o + dl);
     }
     if (h->src_mode != TIKU_154_ADDR_NONE) {
-        /* Src PAN present iff src addressing present AND not compressed. */
+        /* Src PAN present iff src addressing present and not compressed. */
         if (!h->pan_compress) {
             buf[o++] = (uint8_t)(h->src_pan & 0xFFu);
             buf[o++] = (uint8_t)(h->src_pan >> 8);

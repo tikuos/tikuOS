@@ -20,11 +20,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Reconstruction's short metadata transitions rely on kernel-only mutation.
- * Cortex-M exposes exception context independently of the worker scheduler.
- * Host tests may supply a predicate without embedding target assembly. */
+/**
+ * @def TIKU_MEM_ARCH_IN_EXCEPTION()
+ * @brief Non-zero while an interrupt or exception handler runs.
+ *
+ * TIKU_MEM_EXCEPTION_GUARD reads it so memory mutators refuse handler context.
+ * Cortex-M reads IPSR and ESP32-C61 the CLIC level; other ports report 0.  A
+ * host test may define the macro first to supply its own predicate.
+ */
 #ifndef TIKU_MEM_ARCH_IN_EXCEPTION
 #if defined(__arm__) || defined(__thumb__)
+/** @brief Non-zero in an exception handler: IPSR holds its number. */
 static inline int tiku_mem_arch_in_exception(void)
 {
     uint32_t ipsr;
@@ -33,8 +39,10 @@ static inline int tiku_mem_arch_in_exception(void)
 }
 #define TIKU_MEM_ARCH_IN_EXCEPTION() tiku_mem_arch_in_exception()
 #elif defined(PLATFORM_ESP32C61)
-/* CLIC: mintstatus holds the level of the interrupt being served in its top
- * byte, and zero outside every handler. */
+/**
+ * @brief Non-zero in an interrupt handler: mintstatus holds the CLIC level
+ *        being served in its top byte, and zero outside every handler.
+ */
 static inline int tiku_mem_arch_in_exception(void)
 {
     uint32_t st;
@@ -69,7 +77,7 @@ static inline int tiku_mem_arch_in_exception(void)
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* FALLBACK DEFAULTS (host / unknown platform)                               */
+/* FALLBACK DEFAULTS (HOST OR UNKNOWN PLATFORM)                              */
 /*---------------------------------------------------------------------------*/
 
 #ifndef TIKU_MEM_ARCH_ALIGNMENT
@@ -121,7 +129,11 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
                               tiku_mem_arch_size_t len);
 
 #if !defined(PLATFORM_MSP430)
-/** @brief Zero for completed/no work, negative if completion was not established. */
+/**
+ * @brief Make pending NVM writes durable (commit the mirror or write buffer).
+ * @return 0 when done or nothing was pending, negative if completion was not
+ *         established
+ */
 int tiku_mem_arch_nvm_flush_status(void);
 /** @brief Unchecked compatibility wrapper for the checked flush. */
 void tiku_mem_arch_nvm_flush(void);

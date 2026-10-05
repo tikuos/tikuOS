@@ -8,7 +8,8 @@
  * tiku_display.c - damage tracking over whichever screen backend is built.
  *
  * Clipping and the damage rectangle are the same arithmetic on every part, so
- * they live here; the backend sees only on-screen geometry.
+ * they live here: rectangles reach the backend clipped, while circles and
+ * rounded rectangles arrive as given for the backend to clip.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -74,7 +75,7 @@ clip_rect(const tiku_display_t *d, int32_t *x, int32_t *y,
 }
 
 /*---------------------------------------------------------------------------*/
-/* Lifecycle                                                                 */
+/* LIFECYCLE                                                                 */
 /*---------------------------------------------------------------------------*/
 
 int
@@ -124,7 +125,7 @@ tiku_display_bpp(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* Drawing                                                                   */
+/* DRAWING                                                                   */
 /*---------------------------------------------------------------------------*/
 
 int
@@ -185,7 +186,7 @@ tiku_display_fill_rounded_rect(tiku_display_t *d, int16_t x, int16_t y,
 }
 
 /*---------------------------------------------------------------------------*/
-/* Buffer pairing                                                            */
+/* BUFFER PAIRING                                                            */
 /*---------------------------------------------------------------------------*/
 
 int
@@ -238,7 +239,7 @@ tiku_display_flip(tiku_display_t *d)
 }
 
 /*---------------------------------------------------------------------------*/
-/* Present                                                                   */
+/* PRESENT                                                                   */
 /*---------------------------------------------------------------------------*/
 
 int

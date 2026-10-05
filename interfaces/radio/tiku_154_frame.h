@@ -8,8 +8,8 @@
  * tiku_154_frame.h - IEEE 802.15.4-2006 MAC frame primitives (PHY-free).
  *
  * FCS, channel<->frequency and MHR build/parse with its addressing-mode and
- * PAN-ID-compression rules.  Deliberately register-free so it host-compiles and
- * self-tests off target, which a sniffer, an ACK builder and any host path need.
+ * PAN-ID-compression rules.  Register-free, so it host-compiles and self-tests
+ * off target (TikuBench/tests/host/test_154_frame.c).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,19 +24,19 @@ extern "C" {
 #endif
 
 /* Frame types (FCF bits 0-2). */
-#define TIKU_154_FT_BEACON   0u
-#define TIKU_154_FT_DATA     1u
-#define TIKU_154_FT_ACK      2u
-#define TIKU_154_FT_CMD      3u
+#define TIKU_154_FT_BEACON   0u   /**< beacon frame                */
+#define TIKU_154_FT_DATA     1u   /**< data frame                  */
+#define TIKU_154_FT_ACK      2u   /**< acknowledgement             */
+#define TIKU_154_FT_CMD      3u   /**< MAC command                 */
 
-/* Addressing modes (FCF bits 10-11 dest, 14-15 src). */
-#define TIKU_154_ADDR_NONE   0u
-#define TIKU_154_ADDR_SHORT  2u   /* 16-bit */
-#define TIKU_154_ADDR_EXT    3u   /* 64-bit */
+/* Addressing modes (FCF bits 10-11 dest, 14-15 src); mode 1 is reserved. */
+#define TIKU_154_ADDR_NONE   0u   /**< no address                  */
+#define TIKU_154_ADDR_SHORT  2u   /**< 16-bit short address        */
+#define TIKU_154_ADDR_EXT    3u   /**< 64-bit extended address     */
 
 /* 2.4 GHz O-QPSK channels. */
-#define TIKU_154_CHAN_MIN    11u
-#define TIKU_154_CHAN_MAX    26u
+#define TIKU_154_CHAN_MIN    11u  /**< lowest 2.4 GHz channel      */
+#define TIKU_154_CHAN_MAX    26u  /**< highest 2.4 GHz channel     */
 
 /**
  * @brief IEEE 802.15.4 FCS: CRC-16/KERMIT (poly x^16+x^12+x^5+1, reflected
@@ -67,8 +67,9 @@ typedef struct {
 /**
  * @brief Serialise a MAC header into @p buf.
  * @return Header length in bytes (the payload offset); 0 on a reserved
- *         addressing mode.  @p buf must hold >= 23 bytes (worst case:
- *         FCF+seq + dstPAN+ext + srcPAN+ext).
+ *         addressing mode.
+ * @note @p buf must hold >= 23 bytes (worst case: FCF+seq + dstPAN+ext +
+ *       srcPAN+ext).
  */
 uint16_t tiku_154_mhr_build(uint8_t *buf, const tiku_154_mhr_t *h);
 

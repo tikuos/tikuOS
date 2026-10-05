@@ -7,9 +7,8 @@
  *
  * tiku_compiler.h - Compiler abstraction for CCS and GCC
  *
- * Provides portable macros for ISR declarations, weak symbols,
- * and other compiler-specific constructs so that TikuOS builds
- * with both TI CCS (cl430) and msp430-elf-gcc.
+ * Gives TIKU_ISR and TIKU_WEAK for TI CCS (cl430) and for GCC on MSP430,
+ * Cortex-M and RISC-V.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,9 +23,9 @@
 /**
  * @brief Declare an ISR portably across CCS and GCC.
  *
- * The `lower` attribute pins the handler in lower FRAM.  MSP430 vectors are
- * 16-bit, so an ISR that drifts into HIFRAM under the large model has its
- * address truncated and the vector silently points at garbage.
+ * On msp430-elf-gcc the `lower` attribute keeps the handler in lower FRAM:
+ * MSP430 vectors are 16-bit, so an ISR placed in HIFRAM under the large
+ * model would have its address truncated and the vector would be wrong.
  */
 #if defined(__TI_COMPILER_VERSION__)
 #define TIKU_ISR(vec, name) \
@@ -35,18 +34,16 @@
 #define TIKU_ISR_STRINGIFY_(x) #x
 
 #elif defined(__GNUC__) && defined(PLATFORM_MSP430)
-/* msp430-elf-gcc: interrupt + lower attributes pin the handler in
- * lower FRAM (see comment above). */
 #define TIKU_ISR(vec, name) \
     __attribute__((interrupt(vec), lower)) \
     void name(void)
 
 #elif defined(__GNUC__)
-/* arm-none-eabi-gcc and other Cortex-M toolchains: ISRs are plain
- * C functions. The vector-table entry in arch/<platform>/tiku_crt_early.c
- * (or equivalent startup file) takes the function's address at link
- * time. The vector argument here is informational only — kept to
- * preserve the call-site syntax with MSP430 ports. */
+/* Other GCC targets: an ISR is a plain C function.  A Cortex-M port's
+ * startup code (arch/<platform>/tiku_crt_early.c) places its address in the
+ * vector table; ESP32-C61 reaches its handlers through the interrupt
+ * dispatcher in tiku_irq_arch.c.  The vector argument is unused; it keeps the
+ * call sites the same as on MSP430. */
 #define TIKU_ISR(vec, name) \
     void name(void)
 
@@ -59,7 +56,7 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Mark a symbol as weak so user code can override it.
+ * @brief Mark a symbol as weak so a strong definition elsewhere overrides it.
  *
  * Usage:
  *   TIKU_WEAK struct tiku_process * const tiku_autostart_processes[] = {NULL};

@@ -26,7 +26,7 @@
  */
 int tiku_display_arch_init(tiku_display_t *d);
 
-/** @brief Optional primitives this backend really performs. */
+/** @brief Optional primitives this backend performs in hardware. */
 uint32_t tiku_display_arch_caps(void);
 
 /** @brief The framebuffer layout this backend scans. */

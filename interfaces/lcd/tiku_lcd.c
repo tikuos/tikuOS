@@ -8,8 +8,8 @@
  * tiku_lcd.c - generic segment-LCD glue.
  *
  * Forwards the portable API to the active arch driver and owns the formatting
- * helpers, so an arch only implements init/clear/putchar.  Every entry point is a
- * no-op where the board has no LCD, so portable code links without #ifdef.
+ * helpers, so an arch implements init/clear/putchar, plus icon_set/icon_toggle
+ * on boards with icons.  Every entry point is a no-op without an LCD.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -139,11 +139,14 @@ tiku_lcd_puts_at(uint8_t pos, const char *s)
 /*===========================================================================*/
 
 #if TIKU_BOARD_HAS_LCD
-/* Render a base-10 unsigned value into the END of buf, returning the
- * number of digits written. buf is left untouched outside the digit
- * span — caller is responsible for blanking the rest. Returns 0 if
- * the value would overflow `width` cells, in which case the buffer
- * is filled with '9's by the caller. */
+/**
+ * @brief Render a base-10 unsigned value into the end of @p buf.
+ *
+ * @p buf is left untouched outside the digit span; the caller blanks the rest
+ * and, when the value overflows @p width cells, fills the buffer with '9's.
+ *
+ * @return Digits written, or 0 on overflow
+ */
 static uint8_t
 fmt_uint_into(char *buf, uint8_t width, uint32_t value)
 {
@@ -232,9 +235,9 @@ tiku_lcd_put_int(int32_t value)
         return;
     }
 
-    /* Negative: reserve cell 0 for the sign, render magnitude into
-     * the remaining width-1 cells. INT32_MIN handled via unsigned
-     * negate trick (-(uint32_t)v == |v| for two's complement). */
+    /* Negative: render the magnitude into the right width-1 cells and put
+     * the sign just left of the digits.  -(value + 1) + 1 gives the
+     * magnitude without overflowing at INT32_MIN. */
     mag = (uint32_t)(-(value + 1)) + 1U;
     digits = fmt_uint_into(buf + 1, (uint8_t)(width - 1), mag);
     if (digits == 0) {
@@ -252,14 +255,18 @@ tiku_lcd_put_int(int32_t value)
 }
 
 /*---------------------------------------------------------------------------*/
-/* FIXED-POINT (uses inter-digit dot icons if the board exposes them)        */
+/* FIXED-POINT                                                               */
 /*---------------------------------------------------------------------------*/
+
+/* The decimal point uses the inter-digit dot icons where the board has them. */
 
 #if TIKU_BOARD_HAS_LCD && \
     defined(TIKU_BOARD_LCD_DOT_COUNT) && TIKU_BOARD_LCD_DOT_COUNT > 0
 
-/* Turn off every inter-digit dot. Runs before lighting the wanted one,
- * so a previous put_fixed doesn't leave a stale separator. */
+/**
+ * @brief Turn off every inter-digit dot.  Runs before lighting the wanted
+ *        one, so a previous put_fixed does not leave a stale separator.
+ */
 static void
 clear_all_dots(void)
 {

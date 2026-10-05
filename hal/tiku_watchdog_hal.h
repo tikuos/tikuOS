@@ -7,9 +7,9 @@
  *
  * tiku_watchdog_hal.h - Platform-routing header for watchdog timer
  *
- * Routes to the correct architecture-specific watchdog header based
- * on the selected platform. This is the single point where the arch
- * watchdog header enters the include chain.
+ * Routes to the active platform's watchdog header and maps the
+ * tiku_watchdog_arch_* calls that kernel/cpu/tiku_watchdog.c makes onto
+ * that port's driver.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -37,12 +37,11 @@
 /* HAL-NAMED INTERVAL CONSTANTS                                              */
 /*---------------------------------------------------------------------------*/
 
-/*
- * Platform-neutral aliases for the watchdog interval divider. On MSP430
- * the value plugs straight into WDTCTL. On other platforms the arch
- * converts the divider to a microsecond timeout (e.g. 32768 / 32 kHz
- * ≈ 1 s on MSP430; the RP2350 arch reproduces the same wall-clock
- * effect against the 1 us tick clock).
+/**
+ * @brief Platform-neutral names for the watchdog interval divider.
+ *
+ * On MSP430 the value plugs straight into WDTCTL.  Other ports convert the
+ * divider to the timeout it gives on a 32 kHz clock (32768 / 32 kHz ~ 1 s).
  */
 #if defined(PLATFORM_MSP430)
 #define TIKU_WDT_INTERVAL_64        WDTIS__64
@@ -64,21 +63,20 @@
 #endif
 #endif
 
+/** @brief Default interval: the 32768 divider, about 1 s. */
 #define TIKU_WDT_INTERVAL_DEFAULT   TIKU_WDT_INTERVAL_32768
 
 /*
- * Semantic timeout aliases. The MSP430 divider model only naturally
- * yields four time points when paired with a 32 kHz ACLK, so those four
- * carry names that read like wall-clock timeouts:
+ * Timeout names.  Four of the MSP430 dividers give these timeouts with a
+ * 32 kHz ACLK, so they carry names that read like wall-clock timeouts:
  *
  *   TIKU_WDT_TIMEOUT_2MS    ~  1.95 ms  (divider /64)
  *   TIKU_WDT_TIMEOUT_16MS   ~ 15.6  ms  (divider /512)
  *   TIKU_WDT_TIMEOUT_250MS  ~ 250   ms  (divider /8192)
  *   TIKU_WDT_TIMEOUT_1000MS ~ 1000  ms  (divider /32768)
  *
- * Use these in portable code; reach for the underlying
- * TIKU_WDT_INTERVAL_* only if you genuinely care about the divider
- * (e.g. MSP430-specific tests asserting WDTCTL bit patterns).
+ * Portable code uses these; the TIKU_WDT_INTERVAL_* names are for code that
+ * needs the divider itself (e.g. MSP430 tests asserting WDTCTL bit patterns).
  */
 #define TIKU_WDT_TIMEOUT_2MS        TIKU_WDT_INTERVAL_64
 #define TIKU_WDT_TIMEOUT_16MS       TIKU_WDT_INTERVAL_512
@@ -86,8 +84,27 @@
 #define TIKU_WDT_TIMEOUT_1000MS     TIKU_WDT_INTERVAL_32768
 
 /*---------------------------------------------------------------------------*/
-/* HAL-to-arch mapping macros                                                */
+/* HAL-TO-ARCH MAPPING                                                       */
 /*---------------------------------------------------------------------------*/
+
+/*
+ * Each port maps the calls kernel/cpu/tiku_watchdog.c makes onto its driver:
+ *
+ *   tiku_watchdog_arch_on(src, isel)   start in reset mode
+ *   tiku_watchdog_arch_off()           stop
+ *   tiku_watchdog_arch_kick()          restart the countdown
+ *   tiku_watchdog_arch_pause()         hold the counter
+ *   tiku_watchdog_arch_resume(kick)    release it, clearing the count first
+ *                                      when kick is non-zero
+ *   tiku_watchdog_arch_config(mode, src, isel, held, kick)
+ *                                      full setup, where interval mode exists
+ */
+
+/**
+ * @def TIKU_WATCHDOG_INTERVAL_SUPPORTED
+ * @brief 1 where the watchdog can also run as an interval timer (MSP430);
+ *        there the kernel sets it up with tiku_watchdog_arch_config().
+ */
 
 #if defined(PLATFORM_MSP430)
 #define TIKU_WATCHDOG_INTERVAL_SUPPORTED 1
@@ -167,8 +184,8 @@
 #define tiku_watchdog_arch_resume(kick) \
     tiku_cpu_ra8p1_watchdog_resume_arch(kick)
 #elif defined(PLATFORM_ESP32C61)
-/* Stage 0 could interrupt instead of reset, but interval mode stays absent
- * until something on this port asks for it. */
+/* Stage 0 could interrupt instead of reset; interval mode is not
+ * implemented. */
 #define TIKU_WATCHDOG_INTERVAL_SUPPORTED 0
 #define tiku_watchdog_arch_on(src, isel) \
     tiku_cpu_esp32c61_watchdog_on_arch((src), (isel))

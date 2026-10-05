@@ -14,8 +14,8 @@
  * @file tiku_htimer_hal.h
  * @brief Platform-agnostic hardware timer interface.
  *
- * Declares what each platform must provide for the htimer subsystem, with no
- * platform headers included.  The arch file supplies the timer control.
+ * Routes to the active platform's htimer config header and states the arch
+ * contract; the arch prototypes are in kernel/timers/tiku_htimer.h.
  */
 
 #ifndef TIKU_HTIMER_HAL_H_
@@ -42,9 +42,9 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * The htimer kernel module requires three arch functions -- _init(), _schedule()
- * and _now() -- declared in tiku_htimer.h.  The platform must also define
- * TIKU_HTIMER_ARCH_SECOND as the hardware tick frequency.
+ * The htimer kernel module requires three arch functions -- _init(),
+ * _schedule() and _now() -- declared in tiku_htimer.h.  The platform must
+ * also define TIKU_HTIMER_ARCH_SECOND as the hardware tick frequency.
  */
 
 /*---------------------------------------------------------------------------*/
@@ -52,8 +52,9 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * The platform timer ISR must call tiku_htimer_run_next() when the compare-match
- * interrupt fires; that dispatches the pending callback and reschedules.
+ * The platform timer ISR must call tiku_htimer_run_next() when the
+ * compare-match interrupt fires; that dispatches the pending callback, which
+ * may re-arm the timer.
  */
 
 #endif /* TIKU_HTIMER_HAL_H_ */

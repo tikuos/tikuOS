@@ -8,14 +8,22 @@
  * tiku_printf_hal.h - platform routing for debug printf.
  *
  * Defines TIKU_PRINTF() per platform, selecting the low-level output channel
- * (semihosting, UART, RTT) and suppressing it where a transport owns the link,
- * as SLIP owns the UART.  A new port adds one #elif block.
+ * (semihosting, UART, USB CDC) and suppressing it where a transport owns the
+ * link, as SLIP owns the UART.  A new port adds one #elif block.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #ifndef TIKU_PRINTF_HAL_H_
 #define TIKU_PRINTF_HAL_H_
+
+/**
+ * @def TIKU_PRINTF(...)
+ * @brief printf-style debug output on the platform's console channel.
+ *
+ * Compiles to nothing with no platform selected, and in MSP430 GCC builds of
+ * the net app (TIKU_APP_NET), whose UART carries SLIP.
+ */
 
 /*---------------------------------------------------------------------------*/
 /* MSP430                                                                    */
@@ -42,7 +50,7 @@
 #endif /* __TI_COMPILER_VERSION__ */
 
 /*---------------------------------------------------------------------------*/
-/* Raspberry Pi RP2350 (Pico 2 / Pico 2 W)                                   */
+/* RP2350                                                                    */
 /*---------------------------------------------------------------------------*/
 
 #elif defined(PLATFORM_RP2350)
@@ -65,45 +73,53 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* Ambiq Apollo 510 (Cortex-M55) — console over SWO/ITM                       */
+/* AMBIQ APOLLO                                                              */
 /*---------------------------------------------------------------------------*/
 
 #elif defined(PLATFORM_AMBIQ)
+/* Console over the COM UART. */
 #include <arch/ambiq/tiku_uart_arch.h>
 #define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
 
+/*---------------------------------------------------------------------------*/
+/* NORDIC NRF54L                                                             */
+/*---------------------------------------------------------------------------*/
+
 #elif defined(PLATFORM_NORDIC)
-/* nRF54L: console over UARTE (polled EasyDMA). No SLIP transport yet, so
- * debug printf routes straight to the UARTE backend. */
+/* Console over UARTE (polled EasyDMA); debug printf goes straight to the
+ * UARTE backend. */
 #include <arch/nordic/tiku_uart_arch.h>
 #define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
 
 /*---------------------------------------------------------------------------*/
-/* STM32N6 (Cortex-M55) — console over USART1, the ST-LINK virtual COM port   */
+/* STM32N6                                                                   */
 /*---------------------------------------------------------------------------*/
 
 #elif defined(PLATFORM_STM32N6)
+/* Console over USART1, the ST-LINK virtual COM port. */
 #include <arch/stm32n6/tiku_uart_arch.h>
 #define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
 
 /*---------------------------------------------------------------------------*/
-/* RA8P1 (Cortex-M85) — console over SCI8, the kit's J-Link OB virtual COM    */
+/* RA8P1                                                                     */
 /*---------------------------------------------------------------------------*/
 
 #elif defined(PLATFORM_RA8P1)
+/* Console over SCI8, the kit's J-Link OB virtual COM port. */
 #include <arch/ra8p1/tiku_uart_arch.h>
 #define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
 
 /*---------------------------------------------------------------------------*/
-/* ESP32-C61 (RISC-V) — console over UART0, the DevKitC's CP2102N bridge     */
+/* ESP32-C61                                                                 */
 /*---------------------------------------------------------------------------*/
 
 #elif defined(PLATFORM_ESP32C61)
+/* Console over UART0, the DevKitC's CP2102N bridge. */
 #include <arch/esp32c61/tiku_uart_arch.h>
 #define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
 
 /*---------------------------------------------------------------------------*/
-/* Fallback: no platform defined — suppress output                           */
+/* FALLBACK: NO PLATFORM, NO OUTPUT                                          */
 /*---------------------------------------------------------------------------*/
 
 #elif !defined(TIKU_PRINTF)

@@ -67,11 +67,12 @@ typedef struct {
 
 /**
  * @brief Snapshot the platform's currently-armed wake sources.
- * @param out  Destination snapshot. Cleared then populated.
  *
- * Reads volatile peripheral state, so call from a non-ISR context
- * if a coherent picture matters. Returns immediately; no side
- * effects on the hardware.
+ * Returns immediately, with no side effect on the hardware.
+ *
+ * @param out  Destination snapshot. Cleared then populated.
+ * @note Reads volatile peripheral state: call from non-ISR context for a
+ *       coherent snapshot.
  */
 void tiku_wake_arch_query(tiku_wake_sources_t *out);
 

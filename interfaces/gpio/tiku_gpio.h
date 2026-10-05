@@ -7,9 +7,9 @@
  *
  * tiku_gpio.h - platform-agnostic raw GPIO interface.
  *
- * A stable port/pin-indexed API for kernel code needing direct pin control, with
- * no dependency on the per-board LED indirection.  Header-only: every call is a
- * static inline resolving to the arch driver, so it costs nothing extra.
+ * A stable port/pin-indexed API for kernel code needing direct pin control,
+ * with no dependency on the per-board LED indirection.  Header-only: every call
+ * is a static inline resolving to the arch driver.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -39,8 +39,8 @@
 /* RETURN CODES                                                              */
 /*---------------------------------------------------------------------------*/
 
-#define TIKU_GPIO_OK           0
-#define TIKU_GPIO_ERR_INVALID -1
+#define TIKU_GPIO_OK           0    /**< success                   */
+#define TIKU_GPIO_ERR_INVALID -1    /**< bad port or pin           */
 
 /*---------------------------------------------------------------------------*/
 /* CORE API                                                                  */

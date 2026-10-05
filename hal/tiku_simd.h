@@ -19,9 +19,9 @@
 
 #include <stdint.h>
 
-/* Every kernel accepts any n >= 0: the MVE paths tail-predicate, so there is no
- * alignment or multiple-of-16 requirement.  Buffers may sit in any readable RAM;
- * on Apollo510 DTCM is single-cycle while SSRAM goes through the cache. */
+/* Every kernel accepts any n >= 0: the MVE paths tail-predicate, so there is
+ * no alignment or multiple-of-16 requirement.  Buffers may sit in any readable
+ * RAM; on Apollo510 DTCM is single-cycle while SSRAM goes through the cache. */
 
 /** @brief Compiled backend: 0 = portable scalar, 1 = Helium/MVE. */
 int tiku_simd_backend(void);
@@ -43,19 +43,19 @@ void tiku_simd_multiply_u8(uint8_t *dst, const uint8_t *x, const uint8_t *y,
 /** @brief dst[i] = floor(x[i]*a/255) -- constant scale (GPU CONSTCOLOR). */
 void tiku_simd_scale_u8(uint8_t *dst, const uint8_t *x, uint8_t a, uint32_t n);
 
-/** @brief dst[i] = sat(floor(x[i]*a/255) + b) -- exact affine (GPU F2). */
+/** @brief dst[i] = sat(floor(x[i]*a/255) + b) -- the GPU's exact affine. */
 void tiku_simd_affine_u8(uint8_t *dst, const uint8_t *x, uint8_t a, uint8_t b,
                          uint32_t n);
 
-/** @brief y[i] = sat(floor(x[i]*a/255) + y[i]) -- SAXPY, accumulate in place. */
+/** @brief y[i] = sat(floor(x[i]*a/255) + y[i]) -- SAXPY, in place. */
 void tiku_simd_saxpy_u8(uint8_t *y, const uint8_t *x, uint8_t a, uint32_t n);
 
-/** @brief Sum of all lanes (exact integer; contrast the GPU's fold-tree mean). */
+/** @brief Sum of all lanes, exact (unlike the GPU's fold-tree mean). */
 uint32_t tiku_simd_sum_u8(const uint8_t *x, uint32_t n);
 
 /**
  * @brief Inner product sum(x[i]*w[i]) in a u32 accumulator -- the matvec core
- *        (MVE: VMLADAVA, 16 u8 MACs per beat). Exact for n < 66051.
+ *        (MVE: VMLADAVA, 16 u8 MACs per instruction). Exact for n < 66051.
  */
 uint32_t tiku_simd_dot_u8(const uint8_t *x, const uint8_t *w, uint32_t n);
 

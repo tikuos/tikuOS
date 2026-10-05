@@ -8,8 +8,8 @@
  * tiku_154.h - IEEE 802.15.4 MAC-min facade.
  *
  * Ties the PHY to the frame layer: addressed data frames with 16-bit PAN/short
- * addressing, receive address filtering, unslotted CSMA-CA on the hardware CCA,
- * and auto-ACK on the T_IFS turnaround.  Shell and stacks sit here, not on registers.
+ * addressing, receive filtering, unslotted CSMA-CA on the hardware CCA and
+ * auto-ACK on the T_IFS turnaround.  Shell and stacks use this, not registers.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -26,7 +26,7 @@
 typedef struct {
     uint16_t src;           /**< source short address                     */
     uint8_t  seq;           /**< sequence number                          */
-    uint8_t  acked;         /**< 1 if an ACK was sent for it (N2.3)        */
+    uint8_t  acked;         /**< 1 if an ACK was sent for it              */
     int8_t   rssi;          /**< RSSI in dBm                              */
 } tiku_154_rx_t;
 
@@ -49,10 +49,12 @@ uint16_t tiku_154_addr(void);
 uint32_t tiku_154_tx_counter(void);
 
 /**
- * @brief Install the 128-bit link key and enable/disable securing outgoing
- *        frames (IEEE 802.15.4 security level 6 = ENC-MIC-64, AES-CCM*).
- *        Received secured frames are always decrypted + MIC-verified when a
- *        key is set.  @p key NULL clears the key.
+ * @brief Install the 128-bit link key for security level 6 (ENC-MIC-64,
+ *        AES-CCM*) and start a fresh replay window.
+ *
+ * Received secured frames are decrypted and MIC-verified while a key is set;
+ * tiku_154_set_secure() turns on securing outgoing frames.  @p key NULL
+ * clears the key and stops securing.
  */
 void tiku_154_set_key(const uint8_t *key);
 
@@ -61,7 +63,7 @@ void tiku_154_set_secure(int on);
 
 /**
  * @brief Send a data frame to @p dst (TIKU_154_ADDR_BCAST for all).
- * @param ack  request an ACK and wait/retry for it (N2.3).
+ * @param ack  request an ACK and wait/retry for it.
  * @return 0 sent (ACK seen if requested), -1 bad length, -2 channel busy
  *         after CSMA backoff, -3 no ACK after retries.
  */
@@ -70,9 +72,11 @@ int tiku_154_send(uint16_t dst, const uint8_t *payload, uint8_t len,
 
 /**
  * @brief Receive one data frame addressed to this node or broadcast, up to
- *        @p timeout_ms.  Frames for other addresses are skipped within the
- *        window.  ACKs an ack-requesting frame before returning (N2.3).
- * @return payload length, 0 timeout, -1 error.
+ *        @p timeout_ms.  Frames for other addresses, and secured frames that
+ *        fail to decrypt or verify, are skipped within the window.  An
+ *        ack-requesting frame is ACKed before this returns.
+ * @return payload length; 0 also when the window closes with nothing
+ *         delivered.
  */
 int tiku_154_recv(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
                   tiku_154_rx_t *info);

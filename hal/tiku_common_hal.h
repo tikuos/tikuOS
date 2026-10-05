@@ -7,15 +7,37 @@
  *
  * tiku_common_hal.h - Platform-routing header for common utilities
  *
- * Routes to the correct architecture-specific common header based
- * on the selected platform. This is the single point where the arch
- * common header enters the include chain.
+ * Routes to the active platform's tiku_cpu_common.h and maps the
+ * tiku_common_arch_* calls that kernel/cpu/tiku_common.c makes onto that
+ * port's delay, unique-ID and reset-reason functions.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #ifndef TIKU_COMMON_HAL_H_
 #define TIKU_COMMON_HAL_H_
+
+/**
+ * @def tiku_common_arch_delay_ms(ms)
+ * @brief Busy-wait @p ms milliseconds.
+ */
+
+/**
+ * @def tiku_common_arch_delay_us(us)
+ * @brief Busy-wait @p us microseconds.
+ */
+
+/**
+ * @def tiku_common_arch_unique_id(b, l)
+ * @brief Copy up to @p l bytes of the chip's unique ID into @p b.
+ * @return Number of bytes written
+ */
+
+/**
+ * @def tiku_common_arch_reset_reason()
+ * @brief Cause of the last reset in the port's own encoding: an MSP430
+ *        SYSRSTIV-style code on most ports.
+ */
 
 #if defined(PLATFORM_MSP430)
 #include "arch/msp430/tiku_cpu_common.h"

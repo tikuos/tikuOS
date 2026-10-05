@@ -7,9 +7,9 @@
  *
  * tiku_ble_enc.h - shared parameters for the LL data-encryption demo.
  *
- * Once encryption startup has agreed the session key and IV, one AES-CCM payload
- * is sent and MIC-verified.  This header only fixes what both ends must agree on:
- * the demo plaintext, the 1-byte AAD and the BLE nonce layout.
+ * Once encryption startup has agreed the session key and IV, one AES-CCM
+ * payload is sent and MIC-verified.  This header fixes what both ends must
+ * agree on: the demo plaintext, the 1-byte AAD and the BLE nonce layout.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,12 +19,14 @@
 
 #include <stdint.h>
 
-/* A fixed plaintext both ends compile in, so the two-board test proves the
- * ciphertext decrypts to exactly this (not just "MIC happened to verify"). */
+/**
+ * @brief Plaintext both ends compile in, so the two-board test proves the
+ *        ciphertext decrypts to exactly this, not only that the MIC verified.
+ */
 #define TIKU_BLE_ENC_DEMO_PT \
     { 'T','I','K','U','-','L','L','-','C','C','M','-','D','E','M','O' }
-#define TIKU_BLE_ENC_DEMO_PT_LEN 16u
-#define TIKU_BLE_ENC_DEMO_AAD    0x00u      /* 1-byte AAD (LL-header stand-in) */
+#define TIKU_BLE_ENC_DEMO_PT_LEN 16u        /**< bytes in the plaintext     */
+#define TIKU_BLE_ENC_DEMO_AAD    0x00u      /**< AAD, an LL-header stand-in */
 
 /**
  * @brief Build the 13-byte BLE AES-CCM nonce = packetCounter(5) || IV(8).

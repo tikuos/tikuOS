@@ -7,9 +7,9 @@
  *
  * tiku_cpu.h - platform-agnostic CPU abstraction interface.
  *
- * Atomic section entry/exit, IRQ control, clock-rate queries and idle-mode entry.
- * Every function delegates to the active platform's arch implementation, which
- * each port supplies.
+ * Atomic sections, IRQ control, clock rates, cache maintenance and idle modes.
+ * Most calls go to the active port's arch layer; the atomics and rate tables
+ * are in tiku_cpu.c, the saved rate in tiku_cpu_settings.c except on nRF54L.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,15 +21,24 @@
 /* ATOMIC / IRQ CONTROL                                                      */
 /*---------------------------------------------------------------------------*/
 
-void tiku_atomic_enter(void); /* Enter nested atomic section */
-void tiku_atomic_exit(void);  /* Exit nested atomic section */
+/**
+ * @brief Enter a nested atomic section: disable interrupts, saving the
+ *        enable state on the outermost entry.
+ */
+void tiku_atomic_enter(void);
+
+/**
+ * @brief Leave an atomic section; the outermost exit re-enables interrupts
+ *        only if they were enabled at the matching entry.
+ */
+void tiku_atomic_exit(void);
 
 /**
  * @brief Unconditionally enable global interrupts.
  *
  * Used by boot-time code that wants the scheduler's first run to
  * have IRQs on. Most kernel code should prefer the atomic_enter/
- * atomic_exit pair, which preserves caller GIE state.
+ * atomic_exit pair, which preserves the caller's interrupt state.
  */
 void tiku_cpu_irq_enable(void);
 
@@ -42,16 +51,27 @@ void tiku_cpu_irq_disable(void);
 /* BOOT / FREQUENCY                                                          */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Run the port's one-time CPU bring-up.
+ *
+ * What it covers is per port: GPIO and LOCKLPM5 on MSP430, the clock tree on
+ * RP2350, power domains and caches on Ambiq, the PLL and HFXO on nRF54L, the
+ * watchdogs on ESP32-C61.
+ *
+ * @note Call once at boot, before tiku_cpu_freq_init().
+ */
 void tiku_cpu_boot_init(void);
 
 /**
  * @brief Apply a core-clock frequency to the platform clock tree.
  *
- * Call after tiku_cpu_boot_init() and before anything timed off the core or
- * peripheral clock.  A request the part cannot honour is clamped or ignored
- * rather than failing, so a caller that cares must confirm with _mclk_hz().
+ * A request the part cannot honour is clamped or ignored rather than failing,
+ * so a caller that cares must confirm with tiku_cpu_mclk_hz().
  *
- * @param cpu_freq  Requested core frequency in MHz
+ * @param cpu_freq  Requested core frequency in MHz; on MSP430 a DCO preset
+ *                  index (CPU_FREQ_* in tiku_cpu_freq_boot_arch.h)
+ * @note Call after tiku_cpu_boot_init() and before anything timed off the
+ *       core or peripheral clock.
  */
 void tiku_cpu_freq_init(unsigned int cpu_freq);
 
@@ -59,7 +79,7 @@ void tiku_cpu_freq_init(unsigned int cpu_freq);
 const char *tiku_cpu_freq_change_mode(void);
 /** @brief Enumerate selectable rates in Hz; zero terminates the list. */
 unsigned long tiku_cpu_freq_available(unsigned int index);
-/** @brief Saved next-boot rate, or the current rate on fixed platforms. */
+/** @brief Saved next-boot rate, or the boot rate when none is saved. */
 unsigned long tiku_cpu_freq_target_hz(void);
 /** @brief Save a supported rate in Hz; return -1 on rejection or failure. */
 int tiku_cpu_freq_target_set(unsigned long hz);
@@ -99,9 +119,8 @@ unsigned long tiku_cpu_aclk_hz(void);
 /**
  * @brief Non-zero if the platform reports a clock-source fault.
  *
- * Used by /sys/boot/clock/fault and the shell info command. On MSP430
- * this aggregates LFXT/HFXT/DCO oscillator-fault flags. Platforms
- * with no equivalent should return 0.
+ * Read by /sys/boot/clock/fault.  On MSP430 it reports OFIFG, which collects
+ * the oscillator-fault flags.  Platforms with no equivalent return 0.
  */
 int tiku_cpu_clock_has_fault(void);
 
@@ -113,26 +132,26 @@ int tiku_cpu_clock_has_fault(void);
  * @brief Clean (write back) the data cache over an address range.
  *
  * Pushes dirty lines to memory so an out-of-band reader such as a DMA or ROM
- * agent sees them; the memory module calls it before handing a staging buffer
- * to the NVM programmer.  A no-op where the range is not cached.
+ * agent sees them, e.g. before a staging buffer goes to the NVM programmer.
+ * A no-op where the range is not cached.
  */
 void tiku_cpu_dcache_clean(const void *addr, unsigned long len);
 
 /**
  * @brief Invalidate the data cache over an address range.
  *
- * Drops cached copies so the next read sees what an out-of-band writer left --
- * the key to D-cache coherence with the persist layer.  Where the controller
- * has no by-range op the whole cache is invalidated: coarser but correct.
+ * Drops cached copies so the next read sees what an out-of-band writer left.
+ * Where the controller has no by-range op the whole cache is invalidated.
  */
 void tiku_cpu_dcache_invalidate(const void *addr, unsigned long len);
 
 /**
  * @brief Invalidate the entire instruction cache.
  *
- * Required after out-of-band writes to executable memory and before the first
- * fetch from the modified range.  Full invalidate, because modules are small
- * and installs are rare, so by-address precision buys nothing.
+ * The whole cache rather than a range: modules are small and installs rare.
+ *
+ * @note Call after an out-of-band write to executable memory and before the
+ *       first fetch from the modified range.
  */
 void tiku_cpu_icache_invalidate(void);
 
@@ -140,10 +159,12 @@ void tiku_cpu_icache_invalidate(void);
 /* IDLE / LOW-POWER MODES                                                    */
 /*---------------------------------------------------------------------------*/
 
-/*
- * Generic idle-mode classifications, mapped by each platform to its native
- * low-power state.  On MSP430: OFF is a busy-wait, LIGHT is LPM0 (CPU off),
- * DEEP is LPM3 (SMCLK off too) and DEEPEST is LPM4 (all clocks off, GPIO wake).
+/**
+ * @brief Generic idle modes, each mapped by the port to a native state.
+ *
+ * MSP430: OFF busy-waits, LIGHT is LPM0, DEEP LPM3, DEEPEST LPM4 (GPIO wake).
+ * RP2350, Ambiq, nRF54L and RA8P1 use WFI for every mode; ESP32-C61 uses WFI
+ * for LIGHT and PMU light sleep for DEEP and DEEPEST.
  */
 typedef enum {
     TIKU_CPU_IDLE_OFF      = 0,
@@ -166,8 +187,8 @@ tiku_cpu_idle_enter_t tiku_cpu_idle_hook(tiku_cpu_idle_mode_t mode);
  * @brief Does the system tick interrupt wake this idle mode?
  *
  * Deadline-aware idle sleeps with timers armed only if the tick can wake the
- * CPU to dispatch them.  True for every MSP430 mode but LPM4, and always true
- * on the Cortex-M parts, where each mode is a WFI variant.
+ * CPU to dispatch them.  True for every MSP430 mode but LPM4, and for every
+ * mode on the other ports.
  *
  * @return Non-zero if the tick wakes the CPU out of @p mode
  */

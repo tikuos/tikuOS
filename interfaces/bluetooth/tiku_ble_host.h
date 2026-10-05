@@ -7,9 +7,9 @@
  *
  * tiku_ble_host.h - M33-side BLE host: L2CAP plus the ATT/GATT server.
  *
- * A BLE data PDU carries at most ~27 bytes, so a larger L2CAP PDU is fragmented
- * and tagged by the LL header's LLID.  This host recombines inbound fragments
- * before running ATT and fragments its own responses back.
+ * Without Data Length Extension a BLE data PDU carries 27 bytes, so a larger
+ * L2CAP PDU is fragmented and tagged by the LL header's LLID.  This host
+ * recombines inbound fragments before running ATT and fragments its replies.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,22 +19,22 @@
 
 #include <stdint.h>
 
-/** ATT MTU this host offers (and its L2CAP recombination bound). */
+/** ATT MTU this host offers. */
 #define TIKU_BLE_HOST_MTU    64u
 
-/** @brief Reset per-connection host state (ATT, CCCD, recomb + TX buffers). */
+/** @brief Reset per-connection state (ATT, CCCD, recomb + TX buffers, SMP). */
 void tiku_ble_host_reset(void);
 
 /**
  * @brief Feed one incoming L2CAP fragment from the controller.
  *
+ * Recombines; a whole L2CAP PDU goes to the ATT/GATT server, the signalling
+ * channel or SMP, and any response is queued for tiku_ble_host_next_tx().
+ * A NUS RX write is buffered for tiku_ble_host_nus_recv().
+ *
  * @param frag  fragment bytes (a slice of the L2CAP PDU).
  * @param len   fragment length.
  * @param llid  2 = start of an L2CAP PDU, 1 = continuation.
- *
- * Recombines; when a whole L2CAP PDU has arrived it runs the ATT/GATT server
- * and queues any response for tiku_ble_host_next_tx().  A NUS RX write is
- * buffered for tiku_ble_host_nus_recv().
  * @return 1 if a complete L2CAP PDU was processed this call, else 0.
  */
 int tiku_ble_host_rx(const uint8_t *frag, uint16_t len, uint8_t llid);
@@ -82,27 +82,31 @@ int tiku_ble_host_request_conn_param(uint16_t interval_min,
 int tiku_ble_host_conn_param_result(void);
 
 /**
- * @brief Phase F1 (Data Length Extension): set the TX fragment size to the
- *        negotiated max LL payload, so a whole L2CAP PDU rides one LL PDU.
- *        Clamped to >= the 27-byte legacy minimum.
+ * @brief Data Length Extension: set the TX fragment size to the negotiated max
+ *        LL payload, so a whole L2CAP PDU rides one LL PDU.  Clamped to >= the
+ *        27-byte legacy minimum.
  */
 void tiku_ble_host_set_frag_max(uint8_t n);
 
-/** @brief Largest L2CAP PDU received whole in one LL PDU this connection
- *         (> 31 = a >27-byte payload arrived un-fragmented, i.e. DLE worked). */
+/**
+ * @brief Largest L2CAP PDU received whole in one LL PDU this connection;
+ *        above 31 a payload over 27 bytes arrived unfragmented (DLE works).
+ */
 uint16_t tiku_ble_host_max_single_frag(void);
 
-/* --- SMP pairing (responder, L2CAP CID 0x0006, Phase E) ----------------- */
+/* --- SMP pairing (responder, L2CAP CID 0x0006) -------------------------- */
 
 /**
- * @brief Arm the SMP responder for this connection (call once, connected).
+ * @brief Arm the SMP responder for this connection.
+ *
+ * Incoming CID 0x0006 PDUs then drive the LE-SC pairing;
+ * tiku_ble_host_smp_pump() wraps the engine's replies in L2CAP and queues them.
+ *
  * @param inita  initiator (central) address A (6 B, little-endian).
  * @param at     A's address type (1 = random, 0 = public).
  * @param adva   advertiser (local) address B (6 B).
  * @param bt     B's address type.
- *
- * Incoming CID 0x0006 PDUs then drive the LE-SC pairing; the host wraps the
- * engine's replies in L2CAP and hands them to tiku_ble_host_smp_pump().
+ * @note Call once per connection, after it is up.
  */
 void tiku_ble_host_smp_start(const uint8_t inita[6], uint8_t at,
                              const uint8_t adva[6], uint8_t bt);

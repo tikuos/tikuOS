@@ -8,8 +8,8 @@
  * tiku_ble_bond.h - durable LTK bond store (BLE bonding).
  *
  * A bonded device remembers {peer address -> LTK} across reboots, so a later
- * reconnection skips pairing and goes straight to encryption.  Transport-agnostic:
- * each side keys the bond on the other's address from the CONNECT_IND.
+ * reconnection skips pairing and goes straight to encryption.  Each side keys
+ * the bond on the other's address from the CONNECT_IND, on any transport.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,7 +19,7 @@
 
 #include <stdint.h>
 
-/** Bond slots.  Small: this is a demo/embedded peer set, not a phone. */
+/** @brief Number of bond slots. */
 #define TIKU_BLE_BOND_MAX 4u
 
 /** One stored bond: peer identity + the pairing-derived LTK. */
@@ -30,7 +30,10 @@ typedef struct {
     uint8_t ltk[16];                    /**< Long Term Key                   */
 } tiku_ble_bond_t;
 
-/** @brief Validate the durable bond table (call once at boot). */
+/**
+ * @brief Validate the durable bond table and load its SRAM mirror.
+ *        Idempotent; every other call here runs it first.
+ */
 void tiku_ble_bond_init(void);
 
 /**

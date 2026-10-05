@@ -24,10 +24,13 @@
 /* PORT TABLES                                                               */
 /*---------------------------------------------------------------------------*/
 
-/*
- * TIKU_GPIO_PORTS(X) expands X(port, pin_count) once per port, in the port
- * numbering the raw GPIO interface takes.  A pin count must have a PINS_<n>
- * expander in tiku_vfs_tree_gpio.c (6, 8, 16 and 32 do).
+/**
+ * @def TIKU_GPIO_PORTS(X)
+ * @brief Expands X(port, pin_count) once per port, in the port numbering the
+ *        raw GPIO interface takes.
+ *
+ * A pin count must have a PINS_<n> expander in tiku_vfs_tree_gpio.c (6, 8,
+ * 16 and 32 do).
  */
 #if defined(PLATFORM_NORDIC)
 /* Virtual ports 1..3 are P0..P2; port 4 is P3 on parts that have it. */

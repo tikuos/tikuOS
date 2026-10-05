@@ -7,8 +7,8 @@
  *
  * tiku_region_hal.h - HAL interface for the memory region registry.
  *
- * Declares the arch-level region table accessor every port implements, returning
- * a const table of descriptors for its physical memory map (SRAM, NVM,
+ * Declares the arch-level region table accessor every port implements,
+ * returning a table of descriptors for its physical memory map (SRAM, NVM,
  * peripherals, flash).
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -31,17 +31,12 @@ struct tiku_mem_region;
 /* REQUIRED PLATFORM FUNCTION                                                */
 /*---------------------------------------------------------------------------*/
 
-/*
- * Each platform port implements this function in its arch directory
- * (e.g. arch/msp430/tiku_region_arch.c) to return a const array of
- * tiku_mem_region_t descriptors that describe the physical memory map.
- */
-
 /**
  * @brief Return the platform's memory region table.
  *
- * A const array of descriptors for the physical memory map, expected to live in
- * NVM and stay valid for the lifetime of the system.
+ * Descriptors for the physical memory map, valid for the lifetime of the
+ * system: a const table, or one the port fills in at run time.  Each port
+ * implements it in its arch directory (e.g. arch/msp430/tiku_region_arch.c).
  *
  * @param count  Output: number of entries in the returned table
  * @return Pointer to the platform's region descriptor array (const)

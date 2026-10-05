@@ -23,17 +23,19 @@
  * Presence and capacity arrive as -D globals from the Makefile beside the
  * backend, never from a board or device header -- those are include-order
  * dependent.  Each backend asserts the published cap against its own mailbox
- * constant, which is what keeps the two from drifting apart.
+ * constant, so the two cannot drift apart.
  */
 #ifndef TIKU_HAS_COPROC
+/** @brief 1 when the build has a coprocessor backend, else 0. */
 #define TIKU_HAS_COPROC         0
 #endif
 #ifndef TIKU_COPROC_MSG_CAP
+/** @brief Largest message tiku_coproc_send() takes, in bytes; 0 without one. */
 #define TIKU_COPROC_MSG_CAP     0u
 #endif
 
-/** @brief Outcomes; a caller that only tests != OK still behaves. */
-#define TIKU_COPROC_OK           0
+/* Outcomes; a caller that only tests != OK still behaves. */
+#define TIKU_COPROC_OK           0  /**< success                            */
 #define TIKU_COPROC_ERR_STATE   -1  /**< nothing running to talk to        */
 #define TIKU_COPROC_ERR_IMAGE   -2  /**< payload absent or too big         */
 #define TIKU_COPROC_ERR_LEN     -3  /**< message empty or over the cap     */
@@ -52,8 +54,8 @@ typedef enum {
 /**
  * @brief The launch cannot be undone; the engine stays powered until reset.
  *
- * Every backend so far: one core cannot be returned to power gating, the
- * other resumes at its current PC rather than its entry point.  A caller
+ * On the present backends one core cannot be returned to power gating and
+ * the other resumes at its current PC rather than its entry point.  A caller
  * that needs the pre-launch machine back must reset the board.
  */
 #define TIKU_COPROC_F_ONESHOT   (1u << 0)
@@ -90,7 +92,7 @@ int tiku_coproc_stop(void);
 /**
  * @brief Is the payload executing now, as opposed to having once run?
  *
- * @note BLOCKS for a short bounded interval: a counter that is merely
+ * @note Blocks for a short bounded interval: a counter that is merely
  *       non-zero proves the payload started, and only a moving one proves
  *       it has not since wedged.  Not for a hot loop, not for an ISR.
  * @return Non-zero when the magic is published and the heartbeat advances
@@ -129,10 +131,9 @@ int tiku_coproc_send(const void *data, uint32_t len);
 /**
  * @brief Make this core's view of the coprocessor current.
  *
- * @note Must precede reply_seq() and reply() for their answers to be fresh.
- *       What it does varies -- refetch memory the other core wrote, drain a
- *       queue, stand in for a doorbell that does not fire -- and none of
- *       that is the caller's business.
+ * @note Call before reply_seq() and reply() for their answers to be fresh.
+ *       What it does varies by backend: refetch memory the other core wrote,
+ *       drain a queue, or stand in for a doorbell that does not fire.
  * @return 1 when a reply arrived since the previous call, else 0
  */
 int tiku_coproc_poll(void);
@@ -140,7 +141,7 @@ int tiku_coproc_poll(void);
 /**
  * @brief A value that changes exactly when a new reply lands.
  *
- * @note OPAQUE.  Backends variously count replies or echo the sequence they
+ * @note Opaque: backends variously count replies or echo the sequence they
  *       answered, so compare it against a value saved earlier -- never
  *       against a sequence believed sent, and never assume it starts at zero
  *       or advances by one.

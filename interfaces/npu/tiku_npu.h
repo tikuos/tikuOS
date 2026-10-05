@@ -23,7 +23,7 @@
 #define TIKU_HAS_NPU            0
 #endif
 
-#define TIKU_NPU_OK              0
+#define TIKU_NPU_OK              0  /**< success                           */
 #define TIKU_NPU_ERR_STATE      -1  /**< gated, or nothing loaded to run   */
 #define TIKU_NPU_ERR_MODEL      -2  /**< no such model, or not for this part */
 #define TIKU_NPU_ERR_TIMEOUT    -3  /**< submitted, never reached the end   */
@@ -34,6 +34,7 @@
 /** @brief Integer quantised networks only; no float path exists. */
 #define TIKU_NPU_F_INT_ONLY     (1u << 1)
 
+/** @brief Where the accelerator is in its lifecycle. */
 typedef enum {
     TIKU_NPU_ABSENT = 0,    /**< no accelerator on this part      */
     TIKU_NPU_GATED,         /**< present, powered down            */
@@ -47,12 +48,12 @@ typedef struct {
     uint16_t macs;          /**< multiply-accumulates per cycle   */
     uint16_t shram_kb;      /**< the accelerator's own memory     */
     uint32_t arena;         /**< working buffer the model needs   */
-    uint32_t in_bytes;      /**< 0 until a model is loaded        */
-    uint32_t out_bytes;
+    uint32_t in_bytes;      /**< input size; 0 until a model loads  */
+    uint32_t out_bytes;     /**< output size; 0 until a model loads */
 } tiku_npu_info_t;
 
 /**
- * @brief Which parts of this contract the backend actually implements.
+ * @brief Which parts of this contract the backend implements.
  *
  * @return A mask of TIKU_NPU_F_*
  */

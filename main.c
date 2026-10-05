@@ -61,8 +61,9 @@ int main(void) {
   /* Step 1: Disable watchdog immediately (before any other init) */
   tiku_watchdog_off();
 
-  /* Step 2: Full system boot sequence
-   *   - CPU frequency configuration
+  /* Step 2: Full system boot sequence (boot/tiku_boot.c)
+   *   - CPU bring-up and frequency configuration
+   *   - Memory init, then the saved CPU rate
    *   - UART init (enables printf under GCC; no-op under CCS)
    *   - Clock initialization
    *   - Process subsystem, hardware timer, software timers (via scheduler)
@@ -116,16 +117,15 @@ int main(void) {
   /* Load only.  Execution happens in the shell process's first schedule
    * (tiku_shell.c): the parser's command table and the console backend are
    * process-startup state, so an entry dispatched from here hits a NULL
-   * table and silently does nothing -- five bus-touching entries once
-   * echoed at boot with no effect, no output, and no error.  Running from
-   * the shell also puts entries after the driver registry and the VFS
-   * tree, so they behave exactly like typed commands. */
+   * table and silently does nothing.  Running from the shell also puts
+   * entries after the driver registry and the VFS tree, so they behave
+   * exactly like typed commands. */
   tiku_nvm_map_init();
   tiku_init_load();
 #endif
 
-  /* Initialize the VFS tree.  (/proc rebuilds its node table on every
-   * lookup, so process-registration order does not matter to it.) */
+  /* Initialize the VFS tree.  /proc is assembled here, once: a process
+   * registered after this point has no /proc/<pid> directory. */
   tiku_vfs_tree_init();
 
   /* Hand off to the driver registry. With HAS_DRIVERS=0 the table

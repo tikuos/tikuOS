@@ -7,9 +7,9 @@
  *
  * tiku_ble_bond.c - durable LTK bond store (BLE bonding).
  *
- * The whole bond table is one magic-gated persist cell, so a store rewrites every
- * slot behind the cell API's MPU discipline.  An SRAM mirror answers reconnect
- * lookups without unlocking NVM.
+ * The whole bond table is one magic-gated persist cell, so a store rewrites
+ * every slot behind the cell API's MPU discipline.  An SRAM mirror answers
+ * reconnect lookups without unlocking NVM.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -30,6 +30,7 @@ TIKU_PERSIST_CELL(bond_cell, bond_persist, TIKU_BLE_BOND_MAGIC, NULL, 0);
 static tiku_ble_bond_t bond_mirror[TIKU_BLE_BOND_MAX];
 static uint8_t         bond_inited;
 
+/** @brief 1 when @p b is a valid bond for @p addr of the same address type. */
 static int bond_addr_eq(const tiku_ble_bond_t *b, const uint8_t addr[6],
                         uint8_t addr_type)
 {

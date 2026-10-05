@@ -1,14 +1,15 @@
 /*
  * Tiku Operating System v0.06
  * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_ble_host.c - M33-side L2CAP (frag/recomb) + a TABLE-DRIVEN ATT/GATT
- * server.  Phase D: the ATT ops walk a declarative attribute table instead
- * of a hardcoded NUS if/else, so arbitrary services + characteristics are
- * served (here NUS + a Device Information service + a scratch service), with
- * long reads (Read Blob) and long writes (Prepare/Execute Write) past the MTU.
+ * tiku_ble_host.c - M33-side L2CAP and a table-driven ATT/GATT server.
+ *
+ * L2CAP PDUs are recombined on RX and fragmented on TX.  The ATT ops walk a
+ * declarative attribute table (NUS, Device Information and a scratch service),
+ * with long reads (Read Blob) and long writes (Prepare/Execute Write).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -41,7 +42,7 @@ typedef struct {
     uint16_t        cap;         /* buffer capacity (writes clamp to this)   */
 } host_attr_t;
 
-/* NUS 128-bit UUIDs (base 6E400001-B5A3-...; byte[12] = 01 svc / 02 rx /03 tx)*/
+/* NUS 128-bit UUIDs (6E400001-B5A3-...; byte[12]: 01 svc, 02 rx, 03 tx) */
 static const uint8_t nus_svc_uuid[16] = {
     0x9Eu, 0xCAu, 0xDCu, 0x24u, 0x0Eu, 0xE5u, 0xA9u, 0xE0u,
     0x93u, 0xF3u, 0xA3u, 0xB5u, 0x01u, 0x00u, 0x40u, 0x6Eu };
@@ -96,7 +97,7 @@ static uint16_t host_rc_len, host_rc_expect;
 static uint8_t  host_tx[HOST_L2_MAX];             /* one pending TX L2CAP PDU */
 static uint16_t host_tx_len, host_tx_off;
 static uint8_t  host_sig_id;                      /* L2CAP signalling ident   */
-static uint8_t  host_cpu_resp;                    /* 0 none, 1 accept, 2 reject*/
+static uint8_t  host_cpu_resp;                    /* 0 none, 1 ok, 2 rejected */
 static uint16_t host_prep_h;                      /* Prepare-Write handle     */
 static uint8_t  host_prep[HOST_SCRATCH_CAP];      /* accumulated long write   */
 static uint16_t host_prep_len;
@@ -111,7 +112,7 @@ void tiku_ble_host_reset(void)
     host_tx_len = 0u; host_tx_off = 0u;
     host_sig_id = 0u; host_cpu_resp = 0u;
     host_prep_h = 0u; host_prep_len = 0u;
-    host_frag_max = HOST_FRAG_MAX;               /* F1: pre-DLE default (27)  */
+    host_frag_max = HOST_FRAG_MAX;               /* pre-DLE default (27)      */
     host_max_single = 0u;
     host_cccd[0] = 0u; host_cccd[1] = 0u;
     /* Deterministic long values so a client can verify a long read/write. */
@@ -128,6 +129,7 @@ int tiku_ble_host_subscribed(void)
     return (host_sub != 0u) ? 1 : 0;
 }
 
+/** @brief The attribute with @p handle, or NULL. */
 static host_attr_t *host_find(uint16_t handle)
 {
     uint16_t i;
@@ -139,7 +141,7 @@ static host_attr_t *host_find(uint16_t handle)
     return (host_attr_t *)0;
 }
 
-/* End handle of the service that @p idx starts: one before the next service. */
+/** @brief End handle of the service at @p idx: one before the next service. */
 static uint16_t host_service_end(uint16_t idx)
 {
     uint16_t j;
@@ -151,7 +153,7 @@ static uint16_t host_service_end(uint16_t idx)
     return gatt_db[GATT_N - 1u].handle;
 }
 
-/* Queue a whole L2CAP PDU for (possibly fragmented) TX. */
+/** @brief Queue a whole L2CAP PDU for (possibly fragmented) TX. */
 static void host_store_tx(const uint8_t *pdu, uint16_t len)
 {
     uint16_t i;
@@ -165,7 +167,7 @@ static void host_store_tx(const uint8_t *pdu, uint16_t len)
     host_tx_off = 0u;
 }
 
-/* Wrap an ATT PDU (<= MTU bytes) in an L2CAP frame (CID 0x0004) and queue it. */
+/** @brief Wrap an ATT PDU (<= MTU bytes) in L2CAP (CID 0x0004) and queue it. */
 static void host_reply(const uint8_t *att, uint16_t alen)
 {
     uint8_t  pdu[HOST_L2_MAX];
@@ -181,6 +183,7 @@ static void host_reply(const uint8_t *att, uint16_t alen)
     host_store_tx(pdu, (uint16_t)(4u + alen));
 }
 
+/** @brief Queue an ATT Error Response for @p req_op on handle @p h. */
 static void host_error(uint8_t req_op, uint16_t h, uint8_t err)
 {
     uint8_t e[5];
@@ -190,7 +193,7 @@ static void host_error(uint8_t req_op, uint16_t h, uint8_t err)
     host_reply(e, 5u);
 }
 
-/* Read By Group Type (0x10): service discovery (type 0x2800/0x2801). */
+/** @brief Read By Group Type (0x10): service discovery (0x2800/0x2801). */
 static void host_read_by_group(const uint8_t *att)
 {
     uint16_t start = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
@@ -220,7 +223,7 @@ static void host_read_by_group(const uint8_t *att)
     host_error(0x10u, start, 0x0Au);
 }
 
-/* Read By Type (0x08): characteristic discovery (0x2803) or read-by-UUID. */
+/** @brief Read By Type (0x08): characteristic discovery (0x2803) or by UUID. */
 static void host_read_by_type(const uint8_t *att)
 {
     uint16_t start = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
@@ -248,7 +251,7 @@ static void host_read_by_type(const uint8_t *att)
     host_error(0x08u, start, 0x0Au);
 }
 
-/* Find Information (0x04): descriptor discovery -> [handle, UUID] pairs. */
+/** @brief Find Information (0x04): descriptor discovery, [handle, UUID]. */
 static void host_find_info(const uint8_t *att)
 {
     uint16_t start = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
@@ -278,7 +281,7 @@ static void host_find_info(const uint8_t *att)
     host_error(0x04u, start, 0x0Au);
 }
 
-/* Read (0x0A) / Read Blob (0x0C): value at @p offset, up to MTU-1 bytes. */
+/** @brief Read (0x0A) / Read Blob (0x0C): value at @p offset, <= MTU-1 B. */
 static void host_read(const uint8_t *att, uint16_t offset, uint8_t is_blob)
 {
     uint16_t handle = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
@@ -308,7 +311,7 @@ static void host_read(const uint8_t *att, uint16_t offset, uint8_t is_blob)
     host_reply(r, (uint16_t)(1u + n));
 }
 
-/* Apply a value to a writable attribute + fire the NUS byte-pipe hooks. */
+/** @brief Apply a value to a writable attribute; feeds the NUS byte pipe. */
 static void host_apply_write(host_attr_t *a, const uint8_t *v, uint16_t n)
 {
     uint16_t k;
@@ -326,7 +329,7 @@ static void host_apply_write(host_attr_t *a, const uint8_t *v, uint16_t n)
     }
 }
 
-/* Write (0x12) / Write Command (0x52). */
+/** @brief Write Request (0x12) / Write Command (0x52). */
 static void host_write(const uint8_t *att, uint16_t alen, uint8_t with_rsp)
 {
     uint16_t handle = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
@@ -350,7 +353,7 @@ static void host_write(const uint8_t *att, uint16_t alen, uint8_t with_rsp)
     }
 }
 
-/* Prepare Write (0x16): accumulate a long-write fragment; echo it back. */
+/** @brief Prepare Write (0x16): accumulate a long-write fragment, echo it. */
 static void host_prepare_write(const uint8_t *att, uint16_t alen)
 {
     uint16_t handle = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));
@@ -377,7 +380,7 @@ static void host_prepare_write(const uint8_t *att, uint16_t alen)
     }
 }
 
-/* Execute Write (0x18): flags 1 = commit the accumulated write, 0 = cancel. */
+/** @brief Execute Write (0x18): flags 1 commits the long write, 0 cancels. */
 static void host_execute_write(const uint8_t *att)
 {
     uint8_t rsp = 0x19u;
@@ -391,7 +394,7 @@ static void host_execute_write(const uint8_t *att)
     host_reply(&rsp, 1u);
 }
 
-/* ATT dispatch on a whole, recombined L2CAP PDU (CID 0x0004). */
+/** @brief ATT dispatch on a whole, recombined L2CAP PDU (CID 0x0004). */
 static void host_att(const uint8_t *l2cap, uint16_t len)
 {
     const uint8_t *att;
@@ -432,7 +435,7 @@ static void host_att(const uint8_t *l2cap, uint16_t len)
     }
 }
 
-/* L2CAP signalling (CID 0x0005): note the central's Conn Param Update Rsp. */
+/** @brief L2CAP signalling (CID 0x0005): note a Conn Param Update Response. */
 static void host_sig(const uint8_t *l2cap, uint16_t len)
 {
     const uint8_t *sig;
@@ -451,7 +454,7 @@ static void host_sig(const uint8_t *l2cap, uint16_t len)
 void tiku_ble_host_smp_start(const uint8_t inita[6], uint8_t at,
                              const uint8_t adva[6], uint8_t bt)
 {
-    /* A = initiator (central) = inita; B = responder (us) = adva. */
+    /* A = initiator (central) = inita; B = responder (this device) = adva. */
     (void)tiku_ble_smp_pair_start(TIKU_BLE_SMP_ROLE_RESPONDER,
                                   inita, at, adva, bt);
 }
@@ -488,7 +491,7 @@ int tiku_ble_host_smp_ltk(uint8_t ltk[16])
     return tiku_ble_smp_pair_ltk(ltk);
 }
 
-/* Feed a recombined SMP L2CAP PDU to the engine, then stage the first reply. */
+/** @brief Feed a recombined SMP PDU to the engine; stage the first reply. */
 static void host_smp(const uint8_t *l2cap, uint16_t len)
 {
     if (len < 5u) {
@@ -518,7 +521,7 @@ int tiku_ble_host_rx(const uint8_t *frag, uint16_t len, uint8_t llid)
     }
     if (host_rc_expect >= 4u && host_rc_len >= host_rc_expect) {
         if (llid == 2u && host_rc_expect > host_max_single) {
-            host_max_single = host_rc_expect;    /* F1: whole PDU in one LL PDU*/
+            host_max_single = host_rc_expect;    /* whole PDU in one LL PDU   */
         }
         if (host_rc[2] == 0x05u && host_rc[3] == 0x00u) {
             host_sig(host_rc, host_rc_expect);   /* L2CAP signalling channel  */
@@ -630,13 +633,11 @@ int tiku_ble_host_conn_param_result(void)
     return (host_cpu_resp == 1u) ? 1 : ((host_cpu_resp == 2u) ? -1 : 0);
 }
 
-/* Phase F1 (DLE): set the TX fragment size (the negotiated max LL payload). */
 void tiku_ble_host_set_frag_max(uint8_t n)
 {
     host_frag_max = (n < HOST_FRAG_MAX) ? HOST_FRAG_MAX : n;
 }
 
-/* Largest L2CAP PDU received whole in a single LL PDU (> 31 proves DLE). */
 uint16_t tiku_ble_host_max_single_frag(void)
 {
     return host_max_single;
