@@ -173,13 +173,14 @@ void tiku_shell_remove_pump(tiku_shell_pump_fn fn);
  *       arriving across many calls reassemble correctly.
  */
 void tiku_shell_net_pump(void);
+#endif
 
 /**
  * @brief Console-aware non-blocking getc for a blocking builtin that needs
  *        input.
  *
- * Like tiku_shell_net_pump(), but for a builtin that also reads the keyboard
- * while a SLIP link is up.  Frame bytes go to their channel and the next
+ * For a builtin that reads the keyboard while it holds the shell loop: frame
+ * bytes go to their channel (the IP stack, a window session) and the next
  * genuine console byte, or -1, comes back.
  *
  * @note Routing the frame bytes away is what stops a teardown or a
@@ -187,6 +188,5 @@ void tiku_shell_net_pump(void);
  *       editor.  With no channel registered every byte is a keystroke.
  */
 int tiku_shell_net_getc(void);
-#endif
 
 #endif /* TIKU_SHELL_H_ */

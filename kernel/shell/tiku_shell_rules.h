@@ -75,11 +75,13 @@ typedef struct {
     tiku_shell_rule_state_t state;
     tiku_shell_rule_op_t    op;
     uint8_t                 last_match;
-    uint8_t                 _reserved;
+    uint8_t                 armed;      /**< 1 while the node's watch is
+                                             held: events evaluate the
+                                             rule, the poll tick skips it */
     /** @brief Resolved node, cached at (re-)arm time.
-      *  Non-NULL with a write handler = event-armed; non-NULL
-      *  without one = a sensor-side rule on the poll path; NULL
-      *  = the path did not resolve, and the poll path retries. */
+      *  A writable node whose watch is held is event-armed; any other
+      *  node is on the poll path; NULL = the path did not resolve,
+      *  and the poll path retries. */
     const tiku_vfs_node_t  *node;
     char                    path[TIKU_SHELL_RULES_PATH_MAX];
     char                    value[TIKU_SHELL_RULES_VALUE_MAX];

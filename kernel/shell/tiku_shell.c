@@ -375,13 +375,14 @@ tiku_shell_net_pump(void)
 {
     tiku_console_pump();
 }
+#endif
 
 /*
  * Console-aware non-blocking getc -- see the header.  A blocking builtin that
- * reads the keyboard while a SLIP link is up (the BASIC REPL / INPUT after a
- * BROWSE) calls this instead of tiku_shell_io_getc(): frame bytes (a closed
- * connection's lingering teardown / retransmits) go to their channel rather
- * than landing in the line editor as garbage and wedging the console.
+ * reads the keyboard (the BASIC REPL / INPUT after a BROWSE, a busy-wait's
+ * Ctrl-C poll) calls this instead of tiku_shell_io_getc(): frame bytes (a
+ * closed connection's lingering teardown, a window session's messages) go to
+ * their channel rather than landing in the line editor as garbage.
  */
 int
 tiku_shell_net_getc(void)
@@ -396,7 +397,6 @@ tiku_shell_net_getc(void)
     tiku_watchdog_kick();
     return shell_getc();
 }
-#endif
 
 /*---------------------------------------------------------------------------*/
 /* HTIMER SELF-TEST                                                          */

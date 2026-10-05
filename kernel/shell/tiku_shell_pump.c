@@ -20,7 +20,6 @@
 
 #include "tiku_shell_pump.h"
 #include <kernel/shell/tiku_shell.h>        /* config, tiku_shell_net_getc */
-#include <kernel/shell/tiku_shell_io.h>     /* rx_ready / getc fallback    */
 #include <kernel/timers/tiku_clock.h>       /* pacing                      */
 #include <kernel/cpu/tiku_watchdog.h>       /* tiku_watchdog_kick          */
 
@@ -91,22 +90,14 @@ int tiku_shell_pump_net(void (*periodic)(void))
     (void)periodic;
 #endif
 
-    /* Ctrl-C break.  On a SLIP build the console and the IP link
-     * share one line, so read through the console decoder: it hands
-     * IP frames to the stack and returns only console text.  The raw
-     * getc would read a payload byte 0x03 as Ctrl-C -- aborting the
-     * operation with an uncategorised error -- and would also take
-     * bytes meant for the TCP stack. */
-#if TIKU_SHELL_CMD_SLIP
+    /* Ctrl-C break, read through the console decoder: the console line
+     * carries frames for every registered channel (the IP link, a window
+     * session) beside the text, and the decoder hands each frame to its
+     * channel and returns only text.  The raw getc would read a payload
+     * byte 0x03 as Ctrl-C -- aborting the operation with an uncategorised
+     * error -- and would take bytes meant for a channel. */
     if (tiku_shell_net_getc() == PUMP_CTRL_C) {
         return 1;
     }
-#else
-    if (tiku_shell_io_rx_ready()) {
-        if (tiku_shell_io_getc() == PUMP_CTRL_C) {
-            return 1;
-        }
-    }
-#endif
     return 0;
 }

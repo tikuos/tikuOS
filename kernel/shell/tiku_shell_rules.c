@@ -207,9 +207,9 @@ rules_evaluate(const char *lhs, tiku_shell_rule_op_t op, const char *rhs)
 /**
  * @brief Re-derive every rule's trigger path from current state.
  *
- * Drops every watch the shell process holds, then re-caches each active
- * rule's node and re-subscribes those whose node is writable.  Called from
- * init and after every successful add, del and clear.
+ * Drops every watch the shell process holds, then re-caches each active rule's
+ * node and re-subscribes the writable ones; a refused watch leaves its rule on
+ * the poll tick.  Called from init and after each successful add, del, clear.
  */
 static void
 rules_rearm(void)
@@ -218,7 +218,9 @@ rules_rearm(void)
 
     /* The cached node decides an active rule's path:
      *   - a node with a write handler is event-armed: watched, and evaluated
-     *     by tiku_shell_rules_on_vfs() rather than the poll tick;
+     *     by tiku_shell_rules_on_vfs() rather than the poll tick.  When the
+     *     watch table is full the watch is refused, and the rule stays on
+     *     the poll tick;
      *   - a node without one is sensor-side and stays on the poll tick,
      *     since its value changes without writes and no event fires;
      *   - an unresolved path leaves node NULL and stays on the poll tick,
@@ -229,14 +231,16 @@ rules_rearm(void)
     for (i = 0; i < TIKU_SHELL_RULES_MAX; i++) {
         tiku_shell_rule_t *r = &rule_table[i];
 
+        r->armed = 0;
         if (r->state != TIKU_SHELL_RULE_ACTIVE) {
             r->node = (const tiku_vfs_node_t *)0;
             continue;
         }
         r->node = tiku_vfs_resolve(r->path);
         if (r->node != (const tiku_vfs_node_t *)0 &&
-            r->node->write != (tiku_vfs_write_fn)0) {
-            (void)tiku_vfs_watch(r->path, &tiku_shell_process);
+            r->node->write != (tiku_vfs_write_fn)0 &&
+            tiku_vfs_watch(r->path, &tiku_shell_process) >= 0) {
+            r->armed = 1;
         }
     }
 }
@@ -556,15 +560,15 @@ rules_copy_action(char *actionbuf, const tiku_shell_rule_t *r)
  *   - POLL (tiku_shell_rules_tick, once per shell tick): sensor-side rules --
  *     nodes without a write handler, whose values change in the world rather
  *     than through tiku_vfs_write() -- plus rules whose path did not resolve at
- *     arm time, retried each pass.  Event-armed rules are skipped, so they
- *     cost nothing per tick, side-effectful reads such as ADC conversions
- *     included.
+ *     arm time, retried each pass, and rules whose watch the full table
+ *     refused.  Event-armed rules are skipped, so they cost nothing per tick,
+ *     side-effectful reads such as ADC conversions included.
  *
  *   - EVENT (tiku_shell_rules_on_vfs, on TIKU_EVENT_VFS): rules whose node is
- *     writable.  Every successful write posts the event and the matching rules
- *     evaluate at once, so write-to-reaction latency is one dispatch rather
- *     than up to a full poll period, and a value that pulses between ticks is
- *     still seen.
+ *     writable and watched.  Every successful write posts the event and the
+ *     matching rules evaluate at once, so write-to-reaction latency is one
+ *     dispatch rather than up to a full poll period, and a value that pulses
+ *     between ticks is still seen.
  *
  * Evaluation (both paths): read the path into a stack buffer, strip the
  * trailing '\n'/'\r'/' ' run, and on a read failure clear last_match so the
@@ -683,10 +687,8 @@ tiku_shell_rules_tick(void)
 
         /* Event-armed rules (writable node, watched) are evaluated
          * by tiku_shell_rules_on_vfs() the moment a write lands;
-         * the poll path carries only sensor-side rules and paths
-         * that did not resolve at arm time. */
-        if (r->node != (const tiku_vfs_node_t *)0 &&
-            r->node->write != (tiku_vfs_write_fn)0) {
+         * the poll path carries every other rule. */
+        if (r->armed) {
             continue;
         }
 
