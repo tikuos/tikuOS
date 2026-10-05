@@ -8,8 +8,8 @@
  * tiku_shell_cmd_sdr.c - "sdr" command: the radio as a receiver.
  *
  * `sdr start` lends the capture bank and brings the radio up; `sdr spec` and
- * `sdr sweep` print the SPEC lines TikuSDR draws; `sdr stop` gives it all
- * back.  `sdr cap`, `scan` and `hex` look at a raw snapshot by hand.
+ * `sdr sweep` print the SPEC lines TikuSDR draws at the gain `sdr gain` holds;
+ * `sdr stop` gives it all back.  `cap`, `scan` and `hex` look by hand.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,8 +27,9 @@ static void sdr_help(void)
 {
     SHELL_PRINTF("usage: sdr start | stop | info | spec <MHz> [rate] [nfft]"
                  " | sweep <lo> <hi> <step> [rate] [nfft]\n"
-                 "       sdr reserve | release | cap <MHz> [rate 0-5] [words]"
-                 " [reps] | scan | hex <offset> <count>\n"
+                 "       sdr gain [auto | <index>] | reserve | release |"
+                 " cap <MHz> [rate 0-5] [words] [reps] | scan |"
+                 " hex <offset> <count>\n"
                  "  rate: 0 80, 1 40, 2 20, 3 10, 4 8, 5 4 MS/s; words up to"
                  " %lu\n", (unsigned long)TIKU_DRV_SDR_ESP_WORDS_MAX);
 }
@@ -173,9 +174,9 @@ static void sdr_scan(void)
 /* SPECTRUM LINES                                                            */
 /*---------------------------------------------------------------------------*/
 
-/** @brief "SPEC <MHz> <Hz> <gain> <nfft> <hex bins>": one bin a byte,
- *         half-decibels, low to high.  The hex digits are built here and
- *         printed 64 at a time. */
+/** @brief "SPEC <MHz> <Hz> <gain> <nfft> <hex bins>[ held]": one bin a
+ *         byte, half-decibels, low to high, "held" when the gain was held
+ *         through the capture.  The hex is printed 64 digits at a time. */
 static int sdr_spec_line(uint32_t mhz, uint8_t rate, unsigned nfft)
 {
     static const char hexd[] = "0123456789abcdef";
@@ -200,7 +201,7 @@ static int sdr_spec_line(uint32_t mhz, uint8_t rate, unsigned nfft)
             n = 0U;
         }
     }
-    SHELL_PRINTF("\n");
+    SHELL_PRINTF(tiku_drv_sdr_esp_held() >= 0 ? " held\n" : "\n");
     return 0;
 }
 
@@ -251,6 +252,21 @@ static void sdr_sweep(uint8_t argc, const char *argv[])
         n++;
     }
     SHELL_PRINTF("SWEEP %lu\n", (unsigned long)n);
+}
+
+/** @brief `sdr gain [auto | <index>]`: the gain index captures are held at,
+ *         or the AGC's; with no word, say which. */
+static void sdr_gain(uint8_t argc, const char *argv[])
+{
+    if (argc >= 3) {
+        tiku_drv_sdr_esp_hold(strcmp(argv[2], "auto") == 0 ? -1
+                              : (int)strtoul(argv[2], NULL, 10));
+    }
+    if (tiku_drv_sdr_esp_held() < 0) {
+        SHELL_PRINTF("SDR gain auto\n");
+    } else {
+        SHELL_PRINTF("SDR gain %d\n", tiku_drv_sdr_esp_held());
+    }
 }
 
 #if TIKU_DRV_SDR_ESP_PROBE
@@ -369,10 +385,13 @@ void tiku_shell_cmd_sdr(uint8_t argc, const char *argv[])
     } else if (strcmp(argv[1], "start") == 0) {
         sdr_start();
     } else if (strcmp(argv[1], "stop") == 0) {
+        tiku_drv_sdr_esp_hold(TIKU_DRV_SDR_ESP_HOLD);
         tiku_drv_sdr_esp_release();
         SHELL_PRINTF("SDR stopped\n");
     } else if (strcmp(argv[1], "info") == 0) {
         sdr_info();
+    } else if (strcmp(argv[1], "gain") == 0) {
+        sdr_gain(argc, argv);
     } else if (strcmp(argv[1], "spec") == 0 && argc >= 3) {
         (void)sdr_spec_line((uint32_t)strtoul(argv[2], NULL, 10),
             argc >= 4 ? (uint8_t)strtoul(argv[3], NULL, 10) : 1U,
