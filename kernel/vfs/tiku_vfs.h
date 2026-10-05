@@ -442,6 +442,16 @@ int tiku_vfs_read(const char *path, char *buf, size_t max);
  */
 int tiku_vfs_read_node(const tiku_vfs_node_t *node, char *buf, size_t max);
 
+/**
+ * @brief The node whose read or write handler the VFS is running.
+ *
+ * Set by tiku_vfs_read_node() and tiku_vfs_write() for the length of the
+ * handler call, so one handler can serve several nodes and tell them apart.
+ *
+ * @return The node being served, or NULL outside a handler call
+ */
+const tiku_vfs_node_t *tiku_vfs_serving(void);
+
 /*---------------------------------------------------------------------------*/
 /* TYPED ACCESS — descriptor-driven, machine-facing reads                    */
 /*---------------------------------------------------------------------------*/

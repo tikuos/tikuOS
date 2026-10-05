@@ -475,6 +475,8 @@ static const tiku_vfs_node_t dev_children[] = {
       tiku_vfs_tree_gpio_children,     TIKU_VFS_TREE_GPIO_NPORTS },
     { "gpio_dir", TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_gpio_dir_children, TIKU_VFS_TREE_GPIO_NPORTS },
+    { "gpio_owner", TIKU_VFS_DIR, NULL, NULL,
+      tiku_vfs_tree_gpio_owner_children, TIKU_VFS_TREE_GPIO_NPORTS },
     { "uart",     TIKU_VFS_DIR,  NULL, NULL, dev_uart_children,
       DEV_UART_NCHILD },
     { "adc",      TIKU_VFS_DIR,  NULL, NULL, dev_adc_children, 2 },

@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_gpio.c - /dev/gpio and /dev/gpio_dir VFS nodes.
+ * tiku_vfs_tree_gpio.c - /dev/gpio, /dev/gpio_dir and /dev/gpio_owner nodes.
  *
- * Pin-level GPIO through the filesystem.  VFS handlers take no user argument, so
- * macro-generated per-pin wrappers hardcode the port and pin around two common
- * workers; ports are gated on TIKU_DEVICE_HAS_PORTn so only real silicon appears.
+ * Pin-level GPIO through the filesystem.  Every pin file shares one read and
+ * one write handler, which find their pin from tiku_vfs_serving(); the ports
+ * and their widths come from tiku_gpio_geometry.h.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,294 +20,369 @@
 
 #include "tiku_vfs_tree_gpio.h"
 #include <interfaces/gpio/tiku_gpio.h>
+#include <interfaces/gpio/tiku_gpio_owner.h>
 #include <stdio.h>
 
 /*---------------------------------------------------------------------------*/
-/* /dev/gpio_dir — per-port direction summary                                */
+/* WORKERS                                                                   */
 /*---------------------------------------------------------------------------*/
+
+/** @brief What a write to a pin file asks for. */
+typedef enum {
+    GPIO_ACT_NONE,          /**< Text not recognised */
+    GPIO_ACT_LOW,           /**< Write a low level */
+    GPIO_ACT_HIGH,          /**< Write a high level */
+    GPIO_ACT_TOGGLE,        /**< Toggle the output level */
+    GPIO_ACT_INPUT          /**< Select the platform's input configuration */
+} gpio_action_t;
+
+/**
+ * @brief Direction character for one pin of a /dev/gpio_dir summary.
+ *
+ * @param port  Port number
+ * @param pin   Pin within the port
+ * @return 'O' output, 'I' input, '?' for an owned pin or an unreadable one
+ */
+static char
+gpio_dir_char(uint8_t port, uint8_t pin)
+{
+    int dir;
+
+    if (tiku_gpio_owner(port, pin) != NULL) {
+        return '?';
+    }
+    dir = tiku_gpio_get_dir(port, pin);
+    if (dir == 1) {
+        return 'O';
+    }
+    return (dir == 0) ? 'I' : '?';
+}
 
 /**
  * @brief Shared renderer for one port's direction summary.
  *
- * One character per pin 0..7 plus a newline -- 'O' output, 'I' input, '?' when
- * the direction is indeterminate (e.g. a peripheral function) -- so a port with
- * pins 2 and 3 as outputs reads "IIOOIIII\n".  Wrapped by the GPIO_DIR() macro.
+ * One character per pin plus a newline, so an eight-pin port with pins 2 and
+ * 3 as outputs reads "IIOOIIII\n".  Wrapped per port by PORT_WRAPPERS().
  *
- * @param port  Port number (1-based, matching MSP430 P1..P4)
+ * @param port  Port number
  * @param buf   Output buffer for the rendered text
  * @param max   Capacity of @p buf in bytes
- * @return Bytes written
+ * @return Length of the whole summary (snprintf-style)
  */
 static int
 gpio_dir_read(uint8_t port, char *buf, size_t max)
 {
-    int pos = 0;
+    char line[TIKU_GPIO_PORT_PINS_MAX + 2u];
+    uint8_t count = tiku_gpio_pin_count(port);
     uint8_t pin;
-    for (pin = 0; pin < 8 && pos < (int)max - 4; pin++) {
-        int d = tiku_gpio_get_dir(port, pin);
-        pos += snprintf(buf + pos, max - pos, "%c",
-                        d == 1 ? 'O' : (d == 0 ? 'I' : '?'));
+
+    for (pin = 0; pin < count; pin++) {
+        line[pin] = gpio_dir_char(port, pin);
     }
-    if (pos < (int)max - 1) {
-        buf[pos++] = '\n';
-        buf[pos] = '\0';
-    }
-    return pos;
+    line[count] = '\n';
+    line[count + 1u] = '\0';
+    return snprintf(buf, max, "%s", line);
 }
 
 /**
- * @brief Generate a fixed-port wrapper around gpio_dir_read().
+ * @brief Shared renderer for one port's /dev/gpio_owner file.
+ *
+ * One "<pin> <owner>\n" line per pin, where a free pin's owner reads "free".
+ *
+ * @param port  Port number
+ * @param buf   Output buffer for the rendered text
+ * @param max   Capacity of @p buf in bytes
+ * @return Length of the whole listing (snprintf-style)
  */
-#define GPIO_DIR(p)                                                         \
-    static int gpio_dir_##p(char *buf, size_t max) {                        \
-        return gpio_dir_read(p, buf, max);                                  \
+static int
+gpio_owners_read(uint8_t port, char *buf, size_t max)
+{
+    uint8_t count = tiku_gpio_pin_count(port);
+    uint8_t pin;
+    size_t total = 0;
+
+    for (pin = 0; pin < count; pin++) {
+        const char *owner = tiku_gpio_owner(port, pin);
+        size_t at = (total < max) ? total : max;
+        int n = snprintf(buf + at, max - at, "%u %s\n", (unsigned)pin,
+                         (owner != NULL) ? owner : "free");
+
+        if (n < 0) {
+            return TIKU_VFS_ERR;
+        }
+        total += (size_t)n;
     }
-
-#if TIKU_DEVICE_HAS_PORT1
-GPIO_DIR(1)
-#endif
-#if TIKU_DEVICE_HAS_PORT2
-GPIO_DIR(2)
-#endif
-#if TIKU_DEVICE_HAS_PORT3
-GPIO_DIR(3)
-#endif
-#if TIKU_DEVICE_HAS_PORT4
-GPIO_DIR(4)
-#endif
-
-/*---------------------------------------------------------------------------*/
-/* /dev/gpio — per-pin VFS nodes                                             */
-/*---------------------------------------------------------------------------*/
+    return (int)total;
+}
 
 /**
  * @brief Shared read worker for one GPIO pin.
  *
- * Renders the input level as "0\n" or "1\n", or "err\n" when the driver
- * rejects the port/pin.  Reads PxIN, so the value is the sampled level for
- * inputs and the driven level for outputs.
+ * Renders the level the driver reads back as "0\n" or "1\n".
  *
- * @param port  Port number (1-based)
- * @param pin   Pin number (0..7)
+ * @param port  Port number
+ * @param pin   Pin within the port
  * @param buf   Output buffer for the rendered text
  * @param max   Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return Bytes written, or TIKU_VFS_ENOTSUP when the driver rejects the pin
  */
 static int
 gpio_pin_read(uint8_t port, uint8_t pin, char *buf, size_t max)
 {
     int v = tiku_gpio_read(port, pin);
+
     if (v < 0) {
-        return snprintf(buf, max, "err\n");
+        return TIKU_VFS_ENOTSUP;
     }
     return snprintf(buf, max, "%u\n", (unsigned)v);
 }
 
 /**
+ * @brief Parse the text written to a pin file.
+ *
+ * Accepts "0", "1", "t", "i" and "in", each with optional trailing
+ * whitespace.
+ *
+ * @param buf  Input text
+ * @param len  Input length in bytes
+ * @return The requested action, or GPIO_ACT_NONE for anything else
+ */
+static gpio_action_t
+gpio_parse_action(const char *buf, size_t len)
+{
+    while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r' ||
+                       buf[len - 1] == ' ' || buf[len - 1] == '\t')) {
+        len--;
+    }
+    if (len == 2 && buf[0] == 'i' && buf[1] == 'n') {
+        return GPIO_ACT_INPUT;
+    }
+    if (len != 1) {
+        return GPIO_ACT_NONE;
+    }
+    switch (buf[0]) {
+    case '0':
+        return GPIO_ACT_LOW;
+    case '1':
+        return GPIO_ACT_HIGH;
+    case 't':
+        return GPIO_ACT_TOGGLE;
+    case 'i':
+        return GPIO_ACT_INPUT;
+    default:
+        return GPIO_ACT_NONE;
+    }
+}
+
+/**
  * @brief Shared write worker for one GPIO pin.
  *
- * The first payload byte selects the action: '0' drive low, '1' drive high
- * (both switch the pin to output), 't' toggle the output latch, 'i'
- * reconfigure as input with pull-up.  Anything else is ignored.
+ * '0' and '1' go to tiku_gpio_write(), 't' to tiku_gpio_toggle(), and 'i' or
+ * "in" to tiku_gpio_dir_in().  The text is checked before the pin's owner, so
+ * unrecognised text is EINVAL on an owned pin as well.
  *
- * @param port  Port number (1-based)
- * @param pin   Pin number (0..7)
- * @param buf   Input text; only buf[0] is examined
- * @param len   Input length in bytes (unused)
- * @return 0 always
+ * @param port  Port number
+ * @param pin   Pin within the port
+ * @param buf   Input text
+ * @param len   Input length in bytes
+ * @return TIKU_VFS_OK, TIKU_VFS_EINVAL for unrecognised text, TIKU_VFS_EBUSY
+ *         for an owned pin, or TIKU_VFS_ENOTSUP when the driver refuses
  */
 static int
 gpio_pin_write(uint8_t port, uint8_t pin, const char *buf, size_t len)
 {
-    if (len == 0) {
+    gpio_action_t action = gpio_parse_action(buf, len);
+    int rc;
+
+    if (action == GPIO_ACT_NONE) {
         return TIKU_VFS_EINVAL;
     }
-    if (buf[0] == '1') {
-        tiku_gpio_write(port, pin, 1);
-    } else if (buf[0] == '0') {
-        tiku_gpio_write(port, pin, 0);
-    } else if (buf[0] == 't') {
-        tiku_gpio_toggle(port, pin);
-    } else if (buf[0] == 'i') {
-        tiku_gpio_dir_in(port, pin);
-    } else {
-        /* Was a silent no-op success; reject so an agent's bad write is
-         * legible.  Accepts 0 / 1 / t(oggle) / i(nput). */
-        return TIKU_VFS_EINVAL;
+    if (tiku_gpio_owner(port, pin) != NULL) {
+        return TIKU_VFS_EBUSY;
     }
-    return 0;
+    switch (action) {
+    case GPIO_ACT_LOW:
+        rc = tiku_gpio_write(port, pin, 0);
+        break;
+    case GPIO_ACT_HIGH:
+        rc = tiku_gpio_write(port, pin, 1);
+        break;
+    case GPIO_ACT_TOGGLE:
+        rc = tiku_gpio_toggle(port, pin);
+        break;
+    default:                /* GPIO_ACT_INPUT */
+        rc = tiku_gpio_dir_in(port, pin);
+        break;
+    }
+    return (rc == TIKU_GPIO_OK) ? TIKU_VFS_OK : TIKU_VFS_ENOTSUP;
 }
 
-/**
- * @brief Generate a read and a write handler for one port/pin pair.
- *
- * Each wrapper is ~10 bytes of code (load constants, tail call).  Generating
- * them beats storing port/pin in the node struct, which would grow every node
- * in the whole VFS by two bytes for this module's benefit alone.
- */
-#define GPIO_PIN(p, b)                                                      \
-    static int gpio_r_##p##_##b(char *buf, size_t max) {                    \
-        return gpio_pin_read(p, b, buf, max);                               \
+/*---------------------------------------------------------------------------*/
+/* PER-PORT WRAPPERS                                                         */
+/*---------------------------------------------------------------------------*/
+
+/** @brief Generate one port's direction summary and owner listing readers. */
+#define PORT_WRAPPERS(p, n)                                                 \
+    static int dir_##p(char *buf, size_t max) {                             \
+        return gpio_dir_read(p, buf, max);                                  \
     }                                                                       \
-    static int gpio_w_##p##_##b(const char *buf, size_t len) {              \
-        return gpio_pin_write(p, b, buf, len);                              \
+    static int owners_##p(char *buf, size_t max) {                          \
+        return gpio_owners_read(p, buf, max);                               \
     }
 
-/**
- * Pin name strings "0".."7", shared by every port directory: node
- * names are pointers, so all four ports reference the same eight
- * literals instead of duplicating them.
- */
-static const char pn0[] = "0", pn1[] = "1", pn2[] = "2", pn3[] = "3",
-                  pn4[] = "4", pn5[] = "5", pn6[] = "6", pn7[] = "7";
+TIKU_GPIO_PORTS(PORT_WRAPPERS)
 
-/* Generate handlers for each available port */
-#if TIKU_DEVICE_HAS_PORT1
-GPIO_PIN(1,0) GPIO_PIN(1,1) GPIO_PIN(1,2) GPIO_PIN(1,3)
-GPIO_PIN(1,4) GPIO_PIN(1,5) GPIO_PIN(1,6) GPIO_PIN(1,7)
-#endif
-#if TIKU_DEVICE_HAS_PORT2
-GPIO_PIN(2,0) GPIO_PIN(2,1) GPIO_PIN(2,2) GPIO_PIN(2,3)
-GPIO_PIN(2,4) GPIO_PIN(2,5) GPIO_PIN(2,6) GPIO_PIN(2,7)
-#endif
-#if TIKU_DEVICE_HAS_PORT3
-GPIO_PIN(3,0) GPIO_PIN(3,1) GPIO_PIN(3,2) GPIO_PIN(3,3)
-GPIO_PIN(3,4) GPIO_PIN(3,5) GPIO_PIN(3,6) GPIO_PIN(3,7)
-#endif
-#if TIKU_DEVICE_HAS_PORT4
-GPIO_PIN(4,0) GPIO_PIN(4,1) GPIO_PIN(4,2) GPIO_PIN(4,3)
-GPIO_PIN(4,4) GPIO_PIN(4,5) GPIO_PIN(4,6) GPIO_PIN(4,7)
-#endif
-
-/**
- * @brief Build one pin-file node entry for a port table.
- */
-#define GPIO_NODE(p, b) \
-    { pn##b, TIKU_VFS_FILE, gpio_r_##p##_##b, gpio_w_##p##_##b, NULL, 0,        \
-      NULL, NULL, TIKU_VFS_CAP_HW }   /* actuating a pin needs CAP_HW */
-
-/** Per-port pin tables: /dev/gpio/<port>/0../7 (eight files each) */
-#if TIKU_DEVICE_HAS_PORT1
-static const tiku_vfs_node_t gpio_p1[] = {
-    GPIO_NODE(1,0), GPIO_NODE(1,1), GPIO_NODE(1,2), GPIO_NODE(1,3),
-    GPIO_NODE(1,4), GPIO_NODE(1,5), GPIO_NODE(1,6), GPIO_NODE(1,7),
-};
-#endif
-#if TIKU_DEVICE_HAS_PORT2
-static const tiku_vfs_node_t gpio_p2[] = {
-    GPIO_NODE(2,0), GPIO_NODE(2,1), GPIO_NODE(2,2), GPIO_NODE(2,3),
-    GPIO_NODE(2,4), GPIO_NODE(2,5), GPIO_NODE(2,6), GPIO_NODE(2,7),
-};
-#endif
-#if TIKU_DEVICE_HAS_PORT3
-static const tiku_vfs_node_t gpio_p3[] = {
-    GPIO_NODE(3,0), GPIO_NODE(3,1), GPIO_NODE(3,2), GPIO_NODE(3,3),
-    GPIO_NODE(3,4), GPIO_NODE(3,5), GPIO_NODE(3,6), GPIO_NODE(3,7),
-};
-#endif
-#if TIKU_DEVICE_HAS_PORT4
-static const tiku_vfs_node_t gpio_p4[] = {
-    GPIO_NODE(4,0), GPIO_NODE(4,1), GPIO_NODE(4,2), GPIO_NODE(4,3),
-    GPIO_NODE(4,4), GPIO_NODE(4,5), GPIO_NODE(4,6), GPIO_NODE(4,7),
-};
-#endif
+static int gpio_pin_file_read(char *buf, size_t max);
+static int gpio_pin_file_write(const char *buf, size_t len);
 
 /*---------------------------------------------------------------------------*/
 /* NODE TABLES                                                               */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Expand X(port, pin) for pins 0..5 of port @p p. */
+#define PINS_6(X, p)  X(p, 0) X(p, 1) X(p, 2) X(p, 3) X(p, 4) X(p, 5)
+
+/** @brief Expand X(port, pin) for pins 0..7 of port @p p. */
+#define PINS_8(X, p)  PINS_6(X, p) X(p, 6) X(p, 7)
+
+/** @brief Expand X(port, pin) for pins 0..15 of port @p p. */
+#define PINS_16(X, p)                                                       \
+    PINS_8(X, p) X(p, 8) X(p, 9) X(p, 10) X(p, 11) X(p, 12) X(p, 13)        \
+    X(p, 14) X(p, 15)
+
+/** @brief Expand X(port, pin) for pins 0..31 of port @p p. */
+#define PINS_32(X, p)                                                       \
+    PINS_16(X, p) X(p, 16) X(p, 17) X(p, 18) X(p, 19) X(p, 20) X(p, 21)     \
+    X(p, 22) X(p, 23) X(p, 24) X(p, 25) X(p, 26) X(p, 27) X(p, 28)          \
+    X(p, 29) X(p, 30) X(p, 31)
+
+/* A pin file holds a level; the summaries and owner listings hold text. */
+static const tiku_vfs_desc_t desc_gpio = TIKU_VFS_DESC(
+    TIKU_VFS_T_BOOL, TIKU_VFS_U_BOOL, TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
+static const tiku_vfs_desc_t desc_text = TIKU_VFS_DESC(
+    TIKU_VFS_T_STR, TIKU_VFS_U_NONE, TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
+
+/** @brief One pin file; actuating a pin needs TIKU_VFS_CAP_HW. */
+#define PIN_NODE(p, b)                                                      \
+    { #b, TIKU_VFS_FILE, gpio_pin_file_read, gpio_pin_file_write, NULL, 0,  \
+      &desc_gpio, NULL, TIKU_VFS_CAP_HW },
+
+/** @brief One port's pin table. */
+#define PORT_TABLE(p, n)                                                    \
+    static const tiku_vfs_node_t pins_##p[] = { PINS_##n(PIN_NODE, p) };
+
+TIKU_GPIO_PORTS(PORT_TABLE)
+
+/** @brief One /dev/gpio/<port> directory. */
+#define PORT_DIR(p, n)                                                      \
+    { #p, TIKU_VFS_DIR, NULL, NULL, pins_##p, n },
+
+/** @brief One /dev/gpio_dir/<port> summary file. */
+#define PORT_SUMMARY(p, n)                                                  \
+    { #p, TIKU_VFS_FILE, dir_##p, NULL, NULL, 0, &desc_text },
+
+/** @brief One /dev/gpio_owner/<port> listing file. */
+#define PORT_OWNERS(p, n)                                                   \
+    { #p, TIKU_VFS_FILE, owners_##p, NULL, NULL, 0, &desc_text },
+
 /*
- * /dev/gpio directory table -- one "1".."4" subdirectory per available port,
- * each pointing at its eight-pin table above.  Exported so tiku_vfs_tree_dev.c
- * can attach it as the "gpio" directory; the entry count is
- * TIKU_VFS_TREE_GPIO_NPORTS, derived from the same TIKU_DEVICE_HAS_PORTn flags
- * that gate the entries (asserted below).
+ * The three exported tables hold one entry per port in the platform geometry,
+ * in its order; tiku_vfs_tree_dev.c attaches them as /dev/gpio, /dev/gpio_dir
+ * and /dev/gpio_owner with TIKU_VFS_TREE_GPIO_NPORTS entries each.
  */
 const tiku_vfs_node_t tiku_vfs_tree_gpio_children[] = {
-#if TIKU_DEVICE_HAS_PORT1
-    { "1", TIKU_VFS_DIR, NULL, NULL, gpio_p1, 8 },
-#endif
-#if TIKU_DEVICE_HAS_PORT2
-    { "2", TIKU_VFS_DIR, NULL, NULL, gpio_p2, 8 },
-#endif
-#if TIKU_DEVICE_HAS_PORT3
-    { "3", TIKU_VFS_DIR, NULL, NULL, gpio_p3, 8 },
-#endif
-#if TIKU_DEVICE_HAS_PORT4
-    { "4", TIKU_VFS_DIR, NULL, NULL, gpio_p4, 8 },
-#endif
+    TIKU_GPIO_PORTS(PORT_DIR)
 };
 
-/**
- * /dev/gpio_dir directory table — one direction-summary file per
- * available port.
- *
- * Exported alongside the pin tree; same port gating and count.
- */
 const tiku_vfs_node_t tiku_vfs_tree_gpio_dir_children[] = {
-#if TIKU_DEVICE_HAS_PORT1
-    { "1", TIKU_VFS_FILE, gpio_dir_1, NULL, NULL, 0 },
-#endif
-#if TIKU_DEVICE_HAS_PORT2
-    { "2", TIKU_VFS_FILE, gpio_dir_2, NULL, NULL, 0 },
-#endif
-#if TIKU_DEVICE_HAS_PORT3
-    { "3", TIKU_VFS_FILE, gpio_dir_3, NULL, NULL, 0 },
-#endif
-#if TIKU_DEVICE_HAS_PORT4
-    { "4", TIKU_VFS_FILE, gpio_dir_4, NULL, NULL, 0 },
-#endif
+    TIKU_GPIO_PORTS(PORT_SUMMARY)
+};
+
+const tiku_vfs_node_t tiku_vfs_tree_gpio_owner_children[] = {
+    TIKU_GPIO_PORTS(PORT_OWNERS)
 };
 
 _Static_assert(sizeof(tiku_vfs_tree_gpio_children) /
                sizeof(tiku_vfs_tree_gpio_children[0])
                == TIKU_VFS_TREE_GPIO_NPORTS,
                "TIKU_VFS_TREE_GPIO_NPORTS out of sync");
-_Static_assert(sizeof(tiku_vfs_tree_gpio_dir_children) /
-               sizeof(tiku_vfs_tree_gpio_dir_children[0])
-               == TIKU_VFS_TREE_GPIO_NPORTS,
-               "TIKU_VFS_TREE_GPIO_NPORTS out of sync");
+
+/** @brief Fail the build when a port is wider than gpio_dir_read()'s line. */
+#define PORT_WIDTH_CHECK(p, n)                                              \
+    _Static_assert((n) <= TIKU_GPIO_PORT_PINS_MAX,                          \
+                   "port " #p " is wider than TIKU_GPIO_PORT_PINS_MAX");
+
+TIKU_GPIO_PORTS(PORT_WIDTH_CHECK)
 
 /*---------------------------------------------------------------------------*/
-/* DRIVER NOTIFY — ring /dev/gpio watchers on a hardware edge                 */
+/* PIN FILE HANDLERS                                                         */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Ring the watchers of /dev/gpio/<port>/<pin> after a pin edge.
+ * @brief Find the port and pin of the pin file the VFS is serving.
  *
- * The bridge from the GPIO edge interrupt to the watch layer: the port ISR
- * calls this with the pin that fired and it rings that node's watchers, so a
- * rule or `watch` reacts to a physical edge as it would to a write.
- *
- * @note ISR-safe -- a bounds check, a constant-time table index, and the
- *       ISR-safe tiku_vfs_notify() scan.  An out-of-range or device-absent
- *       port/pin falls through to a NULL node, which notify() ignores.
- * @param port  Port number (1-based, P1..P4)
- * @param pin   Pin number (0..7)
+ * @param port  Out: port number
+ * @param pin   Out: pin within the port
+ * @return 1 when tiku_vfs_serving() is a pin file, 0 otherwise
  */
+static int
+gpio_served_pin(uint8_t *port, uint8_t *pin)
+{
+    uintptr_t at = (uintptr_t)tiku_vfs_serving();
+
+#define PIN_OF(p, n)                                                        \
+    if (at - (uintptr_t)pins_##p < sizeof pins_##p) {                       \
+        *port = p;                                                          \
+        *pin = (uint8_t)((at - (uintptr_t)pins_##p) / sizeof pins_##p[0]);  \
+        return 1;                                                           \
+    }
+    TIKU_GPIO_PORTS(PIN_OF)
+#undef PIN_OF
+    return 0;
+}
+
+/** @brief Read handler shared by every /dev/gpio pin file. */
+static int
+gpio_pin_file_read(char *buf, size_t max)
+{
+    uint8_t port, pin;
+
+    if (!gpio_served_pin(&port, &pin)) {
+        return TIKU_VFS_ERR;
+    }
+    return gpio_pin_read(port, pin, buf, max);
+}
+
+/** @brief Write handler shared by every /dev/gpio pin file. */
+static int
+gpio_pin_file_write(const char *buf, size_t len)
+{
+    uint8_t port, pin;
+
+    if (!gpio_served_pin(&port, &pin)) {
+        return TIKU_VFS_ERR;
+    }
+    return gpio_pin_write(port, pin, buf, len);
+}
+
+/*---------------------------------------------------------------------------*/
+/* DRIVER NOTIFY — ring /dev/gpio watchers on a hardware edge                */
+/*---------------------------------------------------------------------------*/
+
 void
 tiku_vfs_tree_gpio_notify(uint8_t port, uint8_t pin)
 {
-    const tiku_vfs_node_t *node = NULL;
-
-    if (pin > 7) {
+    if (pin >= tiku_gpio_pin_count(port)) {
         return;
     }
     switch (port) {
-#if TIKU_DEVICE_HAS_PORT1
-    case 1: node = &gpio_p1[pin]; break;
-#endif
-#if TIKU_DEVICE_HAS_PORT2
-    case 2: node = &gpio_p2[pin]; break;
-#endif
-#if TIKU_DEVICE_HAS_PORT3
-    case 3: node = &gpio_p3[pin]; break;
-#endif
-#if TIKU_DEVICE_HAS_PORT4
-    case 4: node = &gpio_p4[pin]; break;
-#endif
-    default: break;
+#define NOTIFY_PORT(p, n)                                                   \
+    case p:                                                                 \
+        tiku_vfs_notify(&pins_##p[pin]);                                    \
+        break;
+    TIKU_GPIO_PORTS(NOTIFY_PORT)
+#undef NOTIFY_PORT
+    default:
+        break;
     }
-
-    tiku_vfs_notify(node);   /* NULL -> no-op */
 }

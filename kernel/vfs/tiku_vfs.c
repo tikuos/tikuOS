@@ -31,6 +31,9 @@
 
 static const tiku_vfs_node_t *vfs_root;
 
+/** Node whose handler is running; tiku_vfs_serving() reports it. */
+static const tiku_vfs_node_t *vfs_serving;
+
 /** One boot-time mount: a subtree attached under a static directory. */
 typedef struct {
     const tiku_vfs_node_t *parent;   /**< directory the subtree sits in */
@@ -436,18 +439,15 @@ int tiku_vfs_unlink(const char *path)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Invoke a resolved node's read handler directly.
- *
- * Callers already holding a node pointer skip the tree walk: a watch event
- * delivers the changed node, and the rules engine and `watch` cache it at
- * arm time.  Validation matches tiku_vfs_read(), so both share one contract.
+ * @brief Run a readable file's handler, or answer from the read cache.
  *
  * @param node  Node to read (NULL tolerated → -1)
  * @param buf   Output buffer
  * @param max   Buffer capacity
  * @return Bytes written, or -1 if @p node is not a readable file
  */
-int tiku_vfs_read_node(const tiku_vfs_node_t *node, char *buf, size_t max)
+static int vfs_read_dispatch(const tiku_vfs_node_t *node, char *buf,
+                             size_t max)
 {
     if (node == NULL) {
         return TIKU_VFS_ENOENT;
@@ -472,6 +472,34 @@ int tiku_vfs_read_node(const tiku_vfs_node_t *node, char *buf, size_t max)
 #endif
 
     return node->read(buf, max);
+}
+
+/**
+ * @brief Invoke a resolved node's read handler directly.
+ *
+ * Callers already holding a node pointer skip the tree walk: a watch event
+ * delivers the changed node, and the rules engine and `watch` cache it at
+ * arm time.  Validation matches tiku_vfs_read(), so both share one contract.
+ *
+ * @param node  Node to read (NULL tolerated → -1)
+ * @param buf   Output buffer
+ * @param max   Buffer capacity
+ * @return Bytes written, or -1 if @p node is not a readable file
+ */
+int tiku_vfs_read_node(const tiku_vfs_node_t *node, char *buf, size_t max)
+{
+    const tiku_vfs_node_t *outer = vfs_serving;
+    int rc;
+
+    vfs_serving = node;
+    rc = vfs_read_dispatch(node, buf, max);
+    vfs_serving = outer;          /* a handler may itself read a node */
+    return rc;
+}
+
+const tiku_vfs_node_t *tiku_vfs_serving(void)
+{
+    return vfs_serving;
 }
 
 /**
@@ -855,6 +883,7 @@ static uint8_t vfs_cap_permitted(tiku_vfs_cap_t req)
 int tiku_vfs_write(const char *path, const char *data, size_t len)
 {
     const tiku_vfs_node_t *node;
+    const tiku_vfs_node_t *outer;
     int rc;
 
     if (data == NULL) {
@@ -879,7 +908,10 @@ int tiku_vfs_write(const char *path, const char *data, size_t len)
         return TIKU_VFS_EPERM;                    /* mediated: caller lacks capability */
     }
 
+    outer = vfs_serving;
+    vfs_serving = node;
     rc = node->write(data, len);
+    vfs_serving = outer;
     if (rc == 0) {
         tiku_vfs_notify(node);
     }
