@@ -429,10 +429,16 @@ static void vfs_dyn_list_thunk(const char *name, void *vad)
     }
 }
 
-/* Delete a file (or other dynamic child) at @p path.  Static nodes have no
- * unlink and return -1; the write path's notify contract applies here too. */
+static uint8_t vfs_cap_permitted(tiku_vfs_cap_t req);
+
+/* Delete a file (or other dynamic child) at @p path.  Removing needs FS, as
+ * creating does; static nodes have no unlink and return -1.  The write
+ * path's notify contract applies here too. */
 int tiku_vfs_unlink(const char *path)
 {
+    if (!vfs_cap_permitted(TIKU_VFS_CAP_FS)) {
+        return TIKU_VFS_EPERM;
+    }
     return vfs_dyn_unlink(path);
 }
 

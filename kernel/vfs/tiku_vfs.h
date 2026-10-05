@@ -520,12 +520,13 @@ tiku_vfs_cap_t tiku_vfs_caller_cap_get(void);
 /**
  * @brief Delete a file at @p path.
  *
- * Only dynamic directories (a file store mounted via dynops) support removal;
- * a static node, or a directory without an unlink op, returns -1.  On success
+ * Only dynamic directories (a file store mounted via dynops) support removal,
+ * and the caller needs TIKU_VFS_CAP_FS, as for creating a file.  On success
  * the parent directory's watchers are rung, exactly like a write.
  *
  * @param path  Absolute path to a dynamic FILE node
- * @return 0 on success, -1 on error (not found / not removable)
+ * @return 0 on success, TIKU_VFS_EPERM without TIKU_VFS_CAP_FS, or -1 when
+ *         the path is not a removable file
  */
 int tiku_vfs_unlink(const char *path);
 
