@@ -199,10 +199,13 @@ exec_call(const char **p)
             if (parse_strexpr(p, buf, sizeof(buf)) != 0) break;   /* err set */
             /* Save the caller's pointer before allocating: the allocation may
              * compact the heap, and the compaction must see the shadowed
-             * string as a root. */
+             * string as a root.  The compaction rewrites one root per string,
+             * so the variable is cleared to leave the scope slot the only
+             * one. */
             s->old_str = basic_strvars[idx];
             s->old     = 0;
             basic_scope_sp++;
+            basic_strvars[idx] = NULL;
             basic_strvars[idx] = basic_str_alloc(buf, strlen(buf));
             if (basic_strvars[idx] == NULL) {
                 basic_throw(TIKU_BASIC_ERR_NOMEM, "out of string heap");

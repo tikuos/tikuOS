@@ -1316,8 +1316,10 @@ exec_append(const char **p)
     cur_advance(p);
     if (parse_strexpr(p, val, sizeof(val)) != 0) return;
 
-    have = tiku_vfs_read(path, basic_file_scratch,
-                         (size_t)(TIKU_BASIC_FILE_BUF - 2));
+    /* A read reports the file's whole length, or fills the buffer when the
+     * file does not fit, so a file that was not read whole fails the size
+     * check below. */
+    have = tiku_vfs_read(path, basic_file_scratch, sizeof basic_file_scratch);
     if (have < 0) have = 0;                       /* file doesn't exist yet */
     vlen  = (int)strlen(val);
     total = have + vlen + 1;                       /* +1 for the newline */

@@ -91,12 +91,14 @@ exec_if(const char **p)
         }
         if (else_pos != NULL) {
             /* Copy THEN branch into scratch with ELSE chopped off
-             * so exec_stmts's parsers won't see the ELSE keyword. */
+             * so exec_stmts's parsers won't see the ELSE keyword.  An IF
+             * nested in an outer IF's THEN branch already runs from
+             * if_then_scratch, so the two ranges can overlap. */
             size_t len = (size_t)(else_pos - *p);
             if (len >= sizeof(if_then_scratch)) {
                 len = sizeof(if_then_scratch) - 1;
             }
-            memcpy(if_then_scratch, *p, len);
+            memmove(if_then_scratch, *p, len);
             if_then_scratch[len] = '\0';
             exec_p = if_then_scratch;
             exec_stmts(&exec_p);

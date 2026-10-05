@@ -44,14 +44,32 @@ extern const uint8_t _binary_mod_demo_bin_end[];
  * refused image leaves the resident module and its registered words intact.
  *
  * @param src  Mapped image bytes, at least a header long
- * @return Non-zero when magic and ABI match
+ * @param len  Image length, or 0 for an installed image of unknown length
+ * @return Non-zero when magic and ABI match and init_off is a valid entry
  */
 static int
-module_src_ok(const uint8_t *src)
+module_src_ok(const uint8_t *src, uint32_t len)
 {
     const tiku_module_header_t *h = (const tiku_module_header_t *)(uintptr_t)src;
 
-    return h->magic == TIKU_MODULE_MAGIC && h->abi_version == TIKU_MODULE_ABI;
+    if (h->magic != TIKU_MODULE_MAGIC || h->abi_version != TIKU_MODULE_ABI) {
+        return 0;
+    }
+    /* The entry must land past the header and inside the image, and follow
+     * the CPU's entry convention: bit 0 set on ARM (Thumb), clear on MSP430
+     * and RISC-V.  An installed image of unknown length is bounded by the
+     * slot alone. */
+    if (h->init_off < sizeof(tiku_module_header_t) ||
+        h->init_off >= TIKU_MODULE_CARVE_SIZE ||
+        (len != 0u && h->init_off >= len) ||
+#if defined(__MSP430__) || defined(__riscv)
+        (h->init_off & 1u) != 0u) {
+#else
+        (h->init_off & 1u) == 0u) {
+#endif
+        return 0;
+    }
+    return 1;
 }
 
 /**
@@ -86,7 +104,9 @@ module_image(const uint8_t **src, uint32_t *len, int seed)
             return -1;
         }
         /* Seed the store so the file becomes the source from now on.  A failure
-         * here is not fatal: the install can still proceed from .rodata. */
+         * here is not fatal: the install can still proceed from .rodata.  On a
+         * part with a RAM window the module then lasts until the next reset,
+         * since activate at boot copies from the file. */
         if (fs != NULL) {
             (void)tiku_tfs_write(fs, TIKU_MODULE_FILE,
                                  _binary_mod_demo_bin_start, elen);
@@ -127,8 +147,16 @@ static const tiku_basic_syscalls_t module_syscalls = {
     tiku_basic_ext_expect,
 };
 
-int
-tiku_basic_module_activate(void)
+/**
+ * @brief Activate the module: on a part with a RAM window copy the image in
+ *        first, then validate the resident header and run its init.
+ *
+ * @param src  Image for the RAM window, or NULL to take the store file
+ * @param len  Bytes in @p src
+ * @return 0 activated, -1 no valid module
+ */
+static int
+module_activate(const uint8_t *src, uint32_t len)
 {
     const tiku_module_header_t *hdr;
     tiku_module_init_fn init;
@@ -144,10 +172,10 @@ tiku_basic_module_activate(void)
      * needs no relocation.
      */
     {
-        const uint8_t *src = NULL;
-        uint32_t       len = 0u;
-
-        if (module_image(&src, &len, 0) != 0 || !module_src_ok(src)) {
+        if (src == NULL && module_image(&src, &len, 0) != 0) {
+            return -1;
+        }
+        if (!module_src_ok(src, len)) {
             return -1;
         }
 #if defined(PLATFORM_ESP32C61)
@@ -167,28 +195,18 @@ tiku_basic_module_activate(void)
          * the M55 reaches its TCMs without the D-cache. */
         tiku_cpu_icache_invalidate();
     }
+#else
+    (void)src;
+    (void)len;
 #endif
 
     hdr = (const tiku_module_header_t *)(uintptr_t)TIKU_MODULE_EXEC_ADDR;
 
-    if (hdr->magic != TIKU_MODULE_MAGIC ||
-        hdr->abi_version != TIKU_MODULE_ABI) {
-        return -1;                                /* no valid resident module */
-    }
-    /* The entry must land past the header and inside the image, and follow
-     * the CPU's entry convention: bit 0 set on ARM (Thumb), clear on MSP430
-     * and RISC-V.  Where the image was copied in, the copied length bounds it
-     * as well as the window, since the window past the copy holds stale
+    /* Where the image was copied in, the copied length bounds init_off as
+     * well as the window, since the window past the copy holds stale
      * bytes. */
-    if (hdr->init_off < sizeof(tiku_module_header_t) ||
-        hdr->init_off >= TIKU_MODULE_CARVE_SIZE ||
-        (img_len != 0u && hdr->init_off >= img_len) ||
-#if defined(__MSP430__) || defined(__riscv)
-        (hdr->init_off & 1u) != 0u) {
-#else
-        (hdr->init_off & 1u) == 0u) {
-#endif
-        return -1;
+    if (!module_src_ok((const uint8_t *)hdr, img_len)) {
+        return -1;                                /* no valid resident module */
     }
     /*
      * W^X in time, on the parts with a RAM window: the window becomes
@@ -204,6 +222,12 @@ tiku_basic_module_activate(void)
     init(&module_syscalls);   /* from the RAM window, or in place in the slot */
     module_activated = 1u;
     return 0;
+}
+
+int
+tiku_basic_module_activate(void)
+{
+    return module_activate(NULL, 0u);
 }
 
 int
@@ -226,19 +250,19 @@ tiku_basic_module_load(void)
         }
     }
 #endif
-    if (module_image(&src, &len, 1) != 0 || !module_src_ok(src)) {
+    if (module_image(&src, &len, 1) != 0 || !module_src_ok(src, len)) {
         return -1;
     }
 
 #if TIKU_MODULE_EXEC_IN_RAM
     /*
      * Nothing to install: the durable copy is the store file, which
-     * module_image() has seeded if it was missing, and activate() copies it
-     * into the RAM window.  The store commits a file atomically, so no
-     * gate-last programming is needed here.
+     * module_image() has seeded if it was missing.  The window takes the
+     * image already in hand, so a seed write that failed does not fail the
+     * load.  The store commits a file atomically, so no gate-last programming
+     * is needed here.
      */
-    (void)src;
-    return tiku_basic_module_activate();   /* same contract as every backend */
+    return module_activate(src, len);      /* same contract as every backend */
 #elif defined(AM_PART_APOLLO4L)
     /* MRAM install through the bootrom programmer (apollo4l/4p), in three
      * phases so a power cut at any point, a reinstall included, leaves an
