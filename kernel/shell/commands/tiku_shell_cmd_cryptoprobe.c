@@ -73,7 +73,7 @@ static void probe_one(uint32_t cfg, uint8_t quiet)
     }
 }
 
-void tiku_shell_cmd_cryptoprobe(int argc, char **argv)
+void tiku_shell_cmd_cryptoprobe(uint8_t argc, const char *argv[])
 {
     if (argc >= 2 && strcmp(argv[1], "hwcfg") == 0) {
         static const char *names[7] = {

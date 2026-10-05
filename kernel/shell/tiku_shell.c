@@ -435,16 +435,19 @@ static void tiku_shell_cmd_htimer(uint8_t argc, const char *argv[]) {
     (void)argv;
 
     /* Measure the raw htimer count rate against one second of system ticks,
-     * independent of TIKU_HTIMER_ARCH_SECOND. */
+     * independent of TIKU_HTIMER_ARCH_SECOND.  The 16-bit count wraps within
+     * the second on a MHz-class htimer, so it is summed in short steps. */
     {
-        tiku_htimer_clock_t rc0 = tiku_htimer_arch_now();
-        tiku_clock_time_t   rm0 = tiku_clock_time();
+        tiku_htimer_clock_t prev = tiku_htimer_arch_now();
+        tiku_clock_time_t   rm0  = tiku_clock_time();
+        unsigned long       counted = 0;
         while ((unsigned long)(tiku_clock_time() - rm0) < (unsigned long)TIKU_CLOCK_SECOND) {
-            /* wait ~1 real second */
+            tiku_htimer_clock_t cur = tiku_htimer_arch_now();
+            counted += (tiku_htimer_clock_t)(cur - prev);
+            prev = cur;
         }
-        SHELL_PRINTF("htimer: STIMER measured ~%u Hz (configured %lu)\n",
-                     (unsigned)(uint16_t)(tiku_htimer_arch_now() - rc0),
-                     (unsigned long)TIKU_HTIMER_SECOND);
+        SHELL_PRINTF("htimer: measured ~%lu Hz (configured %lu)\n",
+                     counted, (unsigned long)TIKU_HTIMER_SECOND);
     }
 
     s_htimer_selftest_fired = 0u;
@@ -564,8 +567,10 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #if TIKU_SHELL_CMD_BLE
     {"ble",     "EM9305 BLE radio: probe | beacon [name] | stop", tiku_shell_cmd_ble},
 #endif
-#if TIKU_SHELL_CMD_HISTORY
+#if TIKU_SHELL_CMD_HISTORY && defined(PLATFORM_MSP430)
     {"history", "Last N commands from " TIKU_DEVICE_NVM_LABEL, tiku_shell_cmd_history},
+#elif TIKU_SHELL_CMD_HISTORY
+    {"history", "Last N commands, kept across a warm reset", tiku_shell_cmd_history},
 #endif
 #if TIKU_SHELL_CMD_WIFI
     {"wifi",    "WiFi: on/off/scan/connect/status", tiku_shell_cmd_wifi},
@@ -661,7 +666,8 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
      tiku_shell_cmd_layout},
 #endif
 #if TIKU_MEM_RECLAIM_ENABLE
-    {"mem", "Reconstruction: mem reclaim [status|owners|mode|retry]", tiku_shell_cmd_reclaim},
+    {"mem", "Reconstruction: mem reclaim [status|last|pending|owners|stats|mode|retry|cancel]",
+                tiku_shell_cmd_reclaim},
 #endif
 #if TIKU_SHELL_CMD_FAT
     {"fat",     "FAT32 on the eMMC: mount|ls|hash|runs", tiku_shell_cmd_fat},
@@ -734,7 +740,7 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
     CMD_CATEGORY("Networking"),
 #endif
 #if TIKU_SHELL_CMD_SLIP
-    {"slip",    "Hand the UART to SLIP/IP net", tiku_shell_cmd_slip},
+    {"slip",    "Carry SLIP/IP on the console line", tiku_shell_cmd_slip},
 #endif
 #if TIKU_SHELL_CMD_PING
     {"ping",    "ICMP echo a host over SLIP",   tiku_shell_cmd_ping},
@@ -885,7 +891,8 @@ static struct {
 /* cli.pos and the tab-completion lengths are uint8_t, so a line must index
  * within 0..255: widen them before raising TIKU_SHELL_LINE_SIZE past 256. */
 _Static_assert(TIKU_SHELL_LINE_SIZE <= 256,
-               "cli.pos is uint8_t; widen it before TIKU_SHELL_LINE_SIZE > 256");
+               "cli.pos and the tab-completion lengths are uint8_t; "
+               "widen them before TIKU_SHELL_LINE_SIZE > 256");
 
 #if TIKU_SHELL_CMD_HISTORY
 /**

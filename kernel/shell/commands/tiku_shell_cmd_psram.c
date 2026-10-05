@@ -222,7 +222,6 @@ void tiku_shell_cmd_psram(uint8_t argc, const char *argv[])
          * requested) clock.  A valid scan shows failing taps on both sides
          * of the passing window. */
         uint32_t mask = 0u; unsigned center = 0u, width, t;
-        if (argc >= 5) { }
         if (argc >= 4) {
             unsigned n = 0u; const char *q = argv[3];
             while (*q >= '0' && *q <= '9') { n = n*10u + (unsigned)(*q++ - '0'); }
@@ -300,7 +299,7 @@ void tiku_shell_cmd_psram(uint8_t argc, const char *argv[])
                              (unsigned long)i, (unsigned long)xorh[i]);
             }
         }
-        SHELL_PRINTF("mem: 64 KB x2 regions @ %lu Hz: %lu errors,"
+        SHELL_PRINTF("mem: 32 KB x2 regions @ %lu Hz: %lu errors,"
                      " checksum %08lx -- %s\n",
                      tiku_psram_clock_hz(), (unsigned long)errs,
                      (unsigned long)sum,

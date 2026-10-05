@@ -13,6 +13,7 @@
 #ifndef TIKU_SHELL_CMD_CRYPTOPROBE_H_
 #define TIKU_SHELL_CMD_CRYPTOPROBE_H_
 
+#include <stdint.h>                          /* uint8_t in the handler type */
 #include <kernel/shell/tiku_shell_config.h>
 
 #if TIKU_SHELL_CMD_CRYPTOPROBE
@@ -26,8 +27,10 @@
  * @param argc  Argument count
  * @param argv  Argument vector; argv[1] selects the sub-command, argv[2]
  *              carries its hex config word or mode name
+ * @note The signature must match tiku_shell_handler_t (tiku_shell.h): the
+ *       command table stores it directly.
  */
-void tiku_shell_cmd_cryptoprobe(int argc, char **argv);
+void tiku_shell_cmd_cryptoprobe(uint8_t argc, const char *argv[]);
 #endif
 
 #endif /* TIKU_SHELL_CMD_CRYPTOPROBE_H_ */

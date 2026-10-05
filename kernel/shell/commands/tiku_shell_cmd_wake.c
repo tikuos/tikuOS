@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_wake.c - "wake" command implementation.
  *
- * Shows which interrupt sources can wake the CPU and which low-power levels
- * each supports.  Detection goes through the wake HAL; the tables below
- * describe how each level interacts with each source.
+ * Shows which interrupt sources can wake the CPU, as the wake HAL reports
+ * them.  MSP430 and nRF54L also name each source's peripheral and the
+ * low-power levels it wakes; other ports show the armed state only.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -69,7 +69,7 @@ tiku_shell_cmd_wake(uint8_t argc, const char *argv[])
 
     SHELL_PRINTF("\nNote: nRF54L idle = WFI at every LPM level;\n");
     SHELL_PRINTF("  any enabled source above wakes the core.\n");
-#else
+#elif defined(PLATFORM_MSP430)
     SHELL_PRINTF("  Timer A0 (sys clock)  %s  wakes LPM0-3\n",
                  (w.sources & TIKU_WAKE_SYSTICK) ? "[on ]" : "[off]");
 
@@ -96,5 +96,31 @@ tiku_shell_cmd_wake(uint8_t argc, const char *argv[])
 
     SHELL_PRINTF("\nNote: LPM4 disables all clocks.\n");
     SHELL_PRINTF("  Only GPIO IRQ can wake from LPM4.\n");
+#else
+    /* Each port encodes gpio_ie[] its own way and decides which sleep depth
+     * a source wakes, so only the armed state and the raw masks are shown. */
+    SHELL_PRINTF("  sys tick              %s\n",
+                 (w.sources & TIKU_WAKE_SYSTICK) ? "[on ]" : "[off]");
+
+    SHELL_PRINTF("  htimer                %s\n",
+                 (w.sources & TIKU_WAKE_HTIMER) ? "[on ]" : "[off]");
+
+    SHELL_PRINTF("  UART RX  (console)    %s\n",
+                 (w.sources & TIKU_WAKE_UART_RX) ? "[on ]" : "[off]");
+
+    SHELL_PRINTF("  watchdog (interval)   %s\n",
+                 (w.sources & TIKU_WAKE_WDT) ? "[on ]" : "[off]");
+
+    if (w.sources & TIKU_WAKE_GPIO) {
+        SHELL_PRINTF("  GPIO IRQ              [on ]\n");
+        for (i = 0; i < TIKU_WAKE_MAX_GPIO_PORTS; i++) {
+            if (w.gpio_ie[i]) {
+                SHELL_PRINTF("    gpio_ie[%u] = 0x%02X\n",
+                             (unsigned)i, w.gpio_ie[i]);
+            }
+        }
+    } else {
+        SHELL_PRINTF("  GPIO IRQ              [off]\n");
+    }
 #endif
 }

@@ -18,8 +18,8 @@
 /**
  * @brief "wake" command handler — show active wake sources.
  *
- * Lists which interrupts can wake the CPU from low-power mode, and which LPM
- * levels each source supports.
+ * Lists which interrupts can wake the CPU from low-power mode.  On MSP430
+ * and nRF54L it also gives the levels each source wakes.
  *
  * @param argc  Argument count
  * @param argv  Argument vector

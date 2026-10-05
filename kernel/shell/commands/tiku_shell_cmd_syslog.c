@@ -22,7 +22,8 @@
 #include "tiku_shell_cmd_slip.h"                     /* slip_enable */
 #include <string.h>                                  /* strcmp (net-test) */
 #include <kernel/shell/tiku_shell.h>                 /* SHELL_PRINTF */
-#include <tikukits/net/tiku_kits_net.h>              /* TIKU_KITS_NET_IP_ADDR */
+#include <tikukits/net/tiku_kits_net.h>              /* TIKU_KITS_NET_OK */
+#include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>    /* the address in use */
 #include <tikukits/net/ipv4/tiku_kits_net_udp.h>     /* udp_init */
 #include <tikukits/net/ipv4/tiku_kits_net_syslog.h>
 
@@ -35,7 +36,7 @@ void
 tiku_shell_cmd_syslog(uint8_t argc, const char *argv[])
 {
     static uint8_t udp_ready;
-    static const uint8_t self[4] = TIKU_KITS_NET_IP_ADDR;
+    const uint8_t *self = tiku_kits_net_ipv4_get_addr();
     uint8_t  server[4];
     char     msg[SYSLOG_MSG_MAX];
     uint8_t  i;

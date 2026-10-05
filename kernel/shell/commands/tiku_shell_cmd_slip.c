@@ -79,11 +79,12 @@ tiku_shell_cmd_slip(uint8_t argc, const char *argv[])
 
     if (want) {
         tiku_shell_cmd_slip_enable();
-        SHELL_PRINTF("SLIP on. UART carries SLIP/IP + console; drive it with"
-                     " the slmux host tool ('ping <ip>' works too).\n");
+        SHELL_PRINTF("SLIP on. The console line carries SLIP/IP and text;"
+                     " drive it with the slmux host tool ('ping <ip>' works"
+                     " too).\n");
     } else {
         tiku_console_remove_channel(0x40u, 0xF0u);
         slip_on = 0;
-        SHELL_PRINTF("SLIP off -- console-only on the UART.\n");
+        SHELL_PRINTF("SLIP off -- text only on the console line.\n");
     }
 }

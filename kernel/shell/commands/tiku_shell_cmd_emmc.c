@@ -51,7 +51,7 @@ void tiku_shell_cmd_emmc(uint8_t argc, const char *argv[])
      *                     stage mb megabytes card -> PSRAM tier (PSRAM builds)
      *   power emmc off    release the SDIO0 domain
      *
-     * Any other verb, or none, runs id.
+     * No verb runs id; any other verb prints the usage.
      */
     /* Names for tiku_emmc_err_t, indexed by value: keep in enum order. */
     static const char *const en[] = { "ok", "POWER", "CLOCK", "TIMEOUT",
@@ -179,9 +179,20 @@ void tiku_shell_cmd_emmc(uint8_t argc, const char *argv[])
     }
     {
         /* "slow" brings the card up at 1-bit, 400 kHz, for comparing the
-         * bench with the default bus; any other verb runs the default init. */
+         * bench with the default bus; "id" or no verb runs the default
+         * init. */
         const int slow = (argc >= 3 && tiku_cmd_streq(argv[2], "slow"));
         uint32_t ladder_us, total_us;
+
+        if (argc >= 3 && !slow && !tiku_cmd_streq(argv[2], "id")) {
+            SHELL_PRINTF("usage: power emmc [id|slow|hs200|regs|gate|bench"
+                         "|diag|sleep|wake"
+#if (TIKU_DRV_PSRAM_ENABLE + 0)
+                         "|stage <mb> [lba]"
+#endif
+                         "|off]\n");
+            return;
+        }
 
         tiku_emmc_set_trace(emmc_trace);
         rc = slow ? tiku_emmc_init_at(1u, 400000u) : tiku_emmc_init();

@@ -192,8 +192,9 @@ static void axons_diff(void)
 /* This configuration compiles no model, and so not the vendor test app that
  * defines these globals and AxonnnModelPrepare() in a baked build.  They are
  * defined here under the same names and types, so the store path below is
- * the same code in both configurations.  AxonnnModelPrepare() has nothing to
- * prepare: the descriptor and the vectors both come from the store. */
+ * the same code in both configurations.  The descriptor and the vectors both
+ * come from the store, so AxonnnModelPrepare() only clears the vectors: a run
+ * that names no .kat then finds none, not the last run's. */
 nrf_axon_nn_compiled_model_s const *the_full_model_static_info[1];
 nrf_axon_nn_compiled_model_layer_s const **the_model_layers_static_info[1]
                                                                     = { NULL };
@@ -202,6 +203,7 @@ nrf_axon_nn_model_test_info_s the_test_vectors[1];
 
 int AxonnnModelPrepare(void)
 {
+    memset(the_test_vectors, 0, sizeof the_test_vectors);
     return 0;
 }
 #else
@@ -869,7 +871,15 @@ void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
 
     axons_info();
 #if defined(TIKU_AXON_ENABLE) && TIKU_AXON_ENABLE
-    SHELL_PRINTF("usage: axonsprobe [en|off|dump <off> <n>|diff|irq|hw|acc]\n");
+    SHELL_PRINTF("usage: axonsprobe [en|off|dump <off> <n>|diff|irq|hw|acc"
+                 "|fir|hold <ms>|busy <ms>"
+#if defined(AXONS_HAVE_NN)
+                 "|modelstore [<model.axm> [<file.kat>]]"
+#endif
+#if defined(TIKU_AXON_MODEL_TEST) && TIKU_AXON_MODEL_TEST
+                 "|model|modelbaked"
+#endif
+                 "]\n");
 #else
     SHELL_PRINTF("usage: axonsprobe [en|off|dump <off> <n>|diff|irq]\n");
 #endif

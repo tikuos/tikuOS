@@ -129,7 +129,9 @@ stack_used(void)
         return top - sp;
     }
     return 0;
-#elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC)
+#elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
+      defined(PLATFORM_NORDIC) || defined(PLATFORM_RA8P1) || \
+      defined(PLATFORM_STM32N6)
     /* Cortex-M: 32-bit SP, clamped to 0xFFFF for the uint16_t result. */
     uintptr_t sp;
     uintptr_t top = (uintptr_t)&__stack;

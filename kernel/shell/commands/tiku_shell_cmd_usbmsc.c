@@ -20,7 +20,7 @@
 
 #if defined(TIKU_USBHS_MSC)
 
-void tiku_shell_cmd_usbmsc(int argc, char **argv)
+void tiku_shell_cmd_usbmsc(uint8_t argc, const char *argv[])
 {
     if (argc < 2) {
         SHELL_PRINTF("usage: usbmsc up|down|stats|peek <lba>\n");
