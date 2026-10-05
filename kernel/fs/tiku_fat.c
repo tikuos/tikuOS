@@ -136,6 +136,7 @@ tiku_fat_err_t tiku_fat_mount(tiku_fat_t *fs, tiku_fat_read_fn read, void *ctx)
     uint8_t sec[TIKU_FAT_SECTOR];
     tiku_fat_err_t rc;
     unsigned i;
+    int wrong_width;
 
     if (fs == NULL || read == NULL) { return TIKU_FAT_ERR_ARG; }
     fs->read = read;
@@ -147,6 +148,7 @@ tiku_fat_err_t tiku_fat_mount(tiku_fat_t *fs, tiku_fat_read_fn read, void *ctx)
      * partition table and its BPB sits right here. */
     rc = bpb_parse(fs, sec, 0u);
     if (rc == TIKU_FAT_OK) { return rc; }
+    wrong_width = (rc == TIKU_FAT_ERR_NOT_FAT32);
 
     /*
      * Otherwise look for an MBR.  The partition type byte (0x0B / 0x0C for
@@ -167,10 +169,11 @@ tiku_fat_err_t tiku_fat_mount(tiku_fat_t *fs, tiku_fat_read_fn read, void *ctx)
         if (read(start, 1u, part, ctx) != 0) { continue; }
         rc = bpb_parse(fs, part, start);
         if (rc == TIKU_FAT_OK) { return rc; }
+        if (rc == TIKU_FAT_ERR_NOT_FAT32) { wrong_width = 1; }
     }
-    /* A partition that is a FAT of the wrong width is reported as such rather
-     * than as "no filesystem". */
-    return (rc == TIKU_FAT_ERR_NOT_FAT32) ? rc : TIKU_FAT_ERR_NOFS;
+    /* A FAT of the wrong width anywhere on the device is reported as such
+     * rather than as "no filesystem", whichever candidate was parsed last. */
+    return wrong_width ? TIKU_FAT_ERR_NOT_FAT32 : TIKU_FAT_ERR_NOFS;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -278,6 +281,7 @@ tiku_fat_err_t tiku_fat_readdir(tiku_fat_t *fs, tiku_fat_dir_t *dir,
     char     lfn[TIKU_FAT_NAME_MAX];
     uint8_t  lfn_sum = 0u;
     int      lfn_have = 0;
+    unsigned lfn_next = 0u;            /* ordinal the next piece must carry */
 
     if (fs == NULL || dir == NULL || out == NULL) { return TIKU_FAT_ERR_ARG; }
     lfn[0] = '\0';
@@ -319,8 +323,15 @@ tiku_fat_err_t tiku_fat_readdir(tiku_fat_t *fs, tiku_fat_dir_t *dir,
                     lfn[0] = '\0';
                     lfn_sum = e[13];
                     lfn_have = 1;
+                    lfn_next = ord;
                 }
-                if (!lfn_have || e[13] != lfn_sum) { lfn_have = 0; continue; }
+                /* Pieces count down to 1 with none missing: a gap would leave
+                 * unwritten bytes in the name. */
+                if (!lfn_have || e[13] != lfn_sum || ord != lfn_next) {
+                    lfn_have = 0;
+                    continue;
+                }
+                lfn_next = ord - 1u;
                 lfn_chars(e, part);
                 /* Pieces arrive last first, so piece `ord` occupies
                  * characters (ord-1)*13 onward. */
@@ -341,11 +352,13 @@ tiku_fat_err_t tiku_fat_readdir(tiku_fat_t *fs, tiku_fat_dir_t *dir,
             if (e[11] & ATTR_VOLID) { lfn_have = 0; lfn[0] = '\0'; continue; }
 
             /*
-             * A short entry ends the run.  The long name is used only if its
-             * checksum matches this entry; an orphaned or mismatched sequence
-             * is discarded and the 8.3 name used instead.
+             * A short entry ends the run.  The long name is used only if it
+             * reached piece 1 and its checksum matches this entry; an orphaned,
+             * incomplete or mismatched sequence is discarded and the 8.3 name
+             * used instead.
              */
-            if (lfn_have && lfn_sum == sfn_checksum(e) && lfn[0] != '\0') {
+            if (lfn_have && lfn_next == 0u && lfn_sum == sfn_checksum(e) &&
+                lfn[0] != '\0') {
                 unsigned k;
                 for (k = 0u; k < TIKU_FAT_NAME_MAX - 1u && lfn[k]; k++) {
                     out->name[k] = lfn[k];
@@ -390,6 +403,11 @@ static tiku_fat_err_t path_walk(tiku_fat_t *fs, const char *path,
 {
     uint32_t clus = fs->root_clus;
     const char *p = path;
+    unsigned n;
+
+    for (n = 0u; path[n] != '\0'; n++) {
+        if (n >= TIKU_FAT_PATH_MAX) { return TIKU_FAT_ERR_ARG; }
+    }
 
     out->is_dir     = 1u;
     out->size       = 0u;
@@ -475,7 +493,10 @@ tiku_fat_err_t tiku_fat_seek(tiku_fat_t *fs, tiku_fat_file_t *f, uint32_t pos)
     if (pos > f->size)           { return TIKU_FAT_ERR_ARG; }
 
     bytes_per_clus = (uint32_t)fs->sec_per_clus * fs->bytes_per_sec;
-    want = pos / bytes_per_clus;
+    /* On a boundary the cursor stays on the cluster ending there, as after a
+     * sequential read: the next read follows the link, and a seek to the end
+     * of a file that ends on a boundary needs no cluster past its last. */
+    want = (pos == 0u) ? 0u : (pos - 1u) / bytes_per_clus;
 
     /* Walk from the start rather than caching a chain: a chain of N clusters
      * costs N FAT reads, and the sequential path below never seeks. */
@@ -510,7 +531,12 @@ int32_t tiku_fat_read(tiku_fat_t *fs, tiku_fat_file_t *f, void *buf,
         uint8_t  sec[TIKU_FAT_SECTOR];
         uint32_t off_in_clus, sec_in_clus, off_in_sec, chunk, i;
 
-        /* Advance to the next cluster when the current one is exhausted. */
+        /*
+         * Advance to the next cluster when the current one is exhausted.  The
+         * read stops at the file size, so it follows no more links than the
+         * size implies.  A chain that loops back within that count is caught
+         * by tiku_fat_verify(), not here.
+         */
         if ((f->pos % bytes_per_clus) == 0u && f->pos != 0u) {
             uint32_t next;
             tiku_fat_err_t rc = fat_next(fs, f->clus, &next);
@@ -518,15 +544,6 @@ int32_t tiku_fat_read(tiku_fat_t *fs, tiku_fat_file_t *f, void *buf,
             if (next == 0u) { return -(int32_t)TIKU_FAT_ERR_CORRUPT; }
             f->clus = next;
             f->clus_idx++;
-            /*
-             * The read never steps past the cluster count the file size
-             * implies.  This does not detect a chain that loops back within
-             * that count; tiku_fat_verify() does.
-             */
-            if (f->clus_idx >=
-                ((f->size + bytes_per_clus - 1u) / bytes_per_clus)) {
-                return -(int32_t)TIKU_FAT_ERR_CORRUPT;
-            }
         }
 
         off_in_clus = f->pos % bytes_per_clus;

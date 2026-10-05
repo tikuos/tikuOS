@@ -51,12 +51,23 @@ static int img_read(uint32_t lba, uint32_t n, void *buf, void *ctx)
 
 /*---------------------------------------------------------------------------*/
 
-/** Recompute the corpus payload: the generator writes (i*37 + 11) & 0xFF. */
+/**
+ * @brief Corpus payload byte at offset @p off.
+ *
+ * The generator writes each little-endian 32-bit word as its own byte offset,
+ * so bytes read from the wrong cluster never match.
+ */
+static uint8_t payload_at(uint32_t off)
+{
+    return (uint8_t)((off & ~3u) >> ((off & 3u) * 8u));
+}
+
+/** Check @p n bytes read from offset @p off against the corpus payload. */
 static int payload_ok(const uint8_t *p, uint32_t n, uint32_t off)
 {
     uint32_t i;
     for (i = 0u; i < n; i++) {
-        if (p[i] != (uint8_t)(((off + i) * 37u + 11u) & 0xFFu)) { return 0; }
+        if (p[i] != payload_at(off + i)) { return 0; }
     }
     return 1;
 }
@@ -98,6 +109,121 @@ static void check_file(tiku_fat_t *fs, const char *path, uint32_t expect_size)
     snprintf(msg, sizeof msg, "%s: %u bytes, content %s", path, total,
              good ? "exact" : "WRONG");
     ok(good && total == f.size, msg);
+}
+
+#define RUNS_MAX 16u
+
+/** @brief Byte offset at which each run of a file's chain ends. */
+typedef struct {
+    uint32_t end[RUNS_MAX];
+    uint32_t n;         /**< runs seen (may exceed RUNS_MAX)               */
+    uint32_t sectors;   /**< sectors reported so far                       */
+} runs_t;
+
+/** @brief tiku_fat_runs() callback: record where each run ends. */
+static int runs_cb(uint32_t lba, uint32_t nsec, void *ctx)
+{
+    runs_t *r = (runs_t *)ctx;
+    (void)lba;
+    r->sectors += nsec;
+    if (r->n < RUNS_MAX) { r->end[r->n] = r->sectors * TIKU_FAT_SECTOR; }
+    r->n++;
+    return 0;
+}
+
+/**
+ * @brief Seek to one position, read across the next boundary, check it.
+ * @return 1 if the seek and the read were right, else 0 with @p why set.
+ */
+static int seek_read_at(tiku_fat_t *fs, tiku_fat_file_t *f, uint32_t pos,
+                        uint32_t len, char *why, size_t whysz)
+{
+    static uint8_t buf[2u * 4096u];
+    uint32_t want;
+    int32_t got;
+    tiku_fat_err_t rc = tiku_fat_seek(fs, f, pos);
+
+    if (rc != TIKU_FAT_OK) {
+        snprintf(why, whysz, "seek(%u) -> %s", pos, tiku_fat_strerror(rc));
+        return 0;
+    }
+    if (len > sizeof buf) { len = sizeof buf; }
+    want = f->size - pos;
+    if (want > len) { want = len; }
+    got = tiku_fat_read(fs, f, buf, len);
+    if (got < 0) {
+        snprintf(why, whysz, "read at %u -> %s", pos,
+                 tiku_fat_strerror((tiku_fat_err_t)(-got)));
+        return 0;
+    }
+    if ((uint32_t)got != want) {
+        snprintf(why, whysz, "read at %u: %d bytes, expected %u", pos,
+                 (int)got, want);
+        return 0;
+    }
+    if (!payload_ok(buf, want, pos)) {
+        snprintf(why, whysz, "read at %u: content WRONG", pos);
+        return 0;
+    }
+    return 1;
+}
+
+/**
+ * @brief Seek beside cluster boundaries and read across each one.
+ *
+ * Covers 0, the end, and one byte either side of each boundary: all of a short
+ * file's, and a long file's first and last few, every 61st and every joint
+ * between runs of its chain.
+ *
+ * @return The number of runs in the file's chain.
+ */
+static uint32_t check_seek(tiku_fat_t *fs, const char *path,
+                           uint32_t expect_size)
+{
+    tiku_fat_file_t f;
+    runs_t r;
+    uint32_t bpc, nclus, k, i, tried = 0u, failed = 0u;
+    char msg[384], why[128] = "", this_why[128];
+    tiku_fat_err_t rc = tiku_fat_open(fs, path, &f);
+
+    if (rc != TIKU_FAT_OK || f.size != expect_size) {
+        snprintf(msg, sizeof msg, "%s: seek: open -> %s, size %u", path,
+                 tiku_fat_strerror(rc), (rc == TIKU_FAT_OK) ? f.size : 0u);
+        ok(0, msg);
+        return 0u;
+    }
+    bpc   = (uint32_t)fs->sec_per_clus * fs->bytes_per_sec;
+    nclus = (f.size + bpc - 1u) / bpc;
+    memset(&r, 0, sizeof r);
+    if (tiku_fat_runs(fs, &f, runs_cb, &r) != TIKU_FAT_OK) { r.n = 0u; }
+
+    for (k = 0u; k <= nclus + 1u; k++) {
+        /* k == nclus + 1 stands for the end of the file. */
+        uint32_t b = (k <= nclus) ? k * bpc : f.size;
+        uint32_t pos[3];
+        int pick = (nclus <= 64u) || (k <= 2u) || (k + 2u >= nclus) ||
+                   ((k % 61u) == 0u);
+
+        for (i = 0u; (i + 1u) < r.n && i < RUNS_MAX; i++) {
+            if (r.end[i] == b) { pick = 1; }
+        }
+        if (!pick || b > f.size) { continue; }
+        pos[0] = b - 1u;
+        pos[1] = b;
+        pos[2] = b + 1u;
+        for (i = 0u; i < 3u; i++) {
+            if ((b == 0u && i == 0u) || pos[i] > f.size) { continue; }
+            tried++;
+            if (!seek_read_at(fs, &f, pos[i], bpc + 2u, this_why,
+                              sizeof this_why)) {
+                if (failed++ == 0u) { memcpy(why, this_why, sizeof why); }
+            }
+        }
+    }
+    snprintf(msg, sizeof msg, "%s: seek+read at %u positions, %u wrong%s%s",
+             path, tried, failed, failed ? "; first: " : "", why);
+    ok(failed == 0u && tried > 0u, msg);
+    return r.n;
 }
 
 static void expect_mount(const char *dir, const char *name,
@@ -211,6 +337,108 @@ static void expect_file_loop_refused(const char *dir)
     fclose(im.f);
 }
 
+/** @brief Copy image @p src to @p dst; 0 on success. */
+static int copy_image(const char *src, const char *dst)
+{
+    static char cp[65536];
+    FILE *a = fopen(src, "rb"), *b = fopen(dst, "wb");
+    size_t n;
+    int rc = (a && b) ? 0 : -1;
+
+    while (rc == 0 && (n = fread(cp, 1, sizeof cp, a)) > 0) {
+        if (fwrite(cp, 1, n, b) != n) { rc = -1; }
+    }
+    if (a) { fclose(a); }
+    if (b) { fclose(b); }
+    return rc;
+}
+
+/**
+ * @brief Drop the middle piece of a three-piece long name and list the root.
+ *
+ * Piece 3 moves into piece 2's slot and its own slot is marked deleted, so the
+ * run reads 3, 1 and then the short entry.  A name with a gap must come back
+ * as the 8.3 name, not with unwritten bytes where the lost piece belonged.
+ */
+static void expect_lfn_gap_refused(const char *dir)
+{
+    char src[512], dst[512], msg[256], sfn[13] = "";
+    uint8_t clus[8u * TIKU_FAT_SECTOR];
+    img_t im;
+    tiku_fat_t fs;
+    tiku_fat_dir_t d;
+    tiku_fat_dirent_t e;
+    uint32_t i, idx = 0u, first = 0u;
+    long at = -1;
+    int seen = 0, good = 0;
+    FILE *w;
+
+    snprintf(src, sizeof src, "%s/fat32_spc8.img", dir);
+    snprintf(dst, sizeof dst, "%s/fat32_lfngap.img", dir);
+    if (copy_image(src, dst) != 0) { ok(0, "lfngap: cannot copy image"); return; }
+
+    im.f = fopen(dst, "rb"); im.base = 0u;
+    if (!im.f || tiku_fat_mount(&fs, img_read, &im) != TIKU_FAT_OK ||
+        fs.sec_per_clus > 8u ||
+        img_read(fs.data_lba + (fs.root_clus - 2u) * fs.sec_per_clus,
+                 fs.sec_per_clus, clus, &im) != 0) {
+        ok(0, "lfngap: cannot read the root directory");
+        if (im.f) { fclose(im.f); }
+        return;
+    }
+    fclose(im.f);
+
+    /* Pieces 3, 2, 1 of "a rather long file name.dat", then its 8.3 entry. */
+    for (i = 2u; i + 1u < fs.sec_per_clus * TIKU_FAT_SECTOR / 32u; i++) {
+        const uint8_t *p = &clus[i * 32u];
+        if (p[0] == 0x01u && p[11] == 0x0Fu && p[1] == 'a' && p[3] == ' ' &&
+            p[-32] == 0x02u && p[-64] == 0x43u && p[32 + 11] != 0x0Fu) {
+            const uint8_t *s = p + 32;
+            unsigned k, n = 0u;
+            for (k = 0u; k < 8u && s[k] != ' '; k++) { sfn[n++] = (char)s[k]; }
+            if (s[8] != ' ') {
+                sfn[n++] = '.';
+                for (k = 8u; k < 11u && s[k] != ' '; k++) {
+                    sfn[n++] = (char)s[k];
+                }
+            }
+            sfn[n] = '\0';
+            first = ((uint32_t)(s[20] | (s[21] << 8)) << 16) |
+                    (uint32_t)(s[26] | (s[27] << 8));
+            idx = i - 2u;
+            at = (long)((fs.data_lba + (fs.root_clus - 2u) * fs.sec_per_clus) *
+                        TIKU_FAT_SECTOR) + (long)(idx * 32u);
+            break;
+        }
+    }
+    if (at < 0) { ok(0, "lfngap: long-name run not found"); return; }
+
+    w = fopen(dst, "r+b");
+    if (!w) { ok(0, "lfngap: cannot reopen"); return; }
+    fseek(w, at + 32, SEEK_SET);                /* piece 2's slot <- piece 3 */
+    fwrite(&clus[idx * 32u], 1, 32, w);
+    fseek(w, at, SEEK_SET);                     /* piece 3's slot: deleted   */
+    fputc(0xE5, w);
+    fclose(w);
+
+    im.f = fopen(dst, "rb"); im.base = 0u;
+    if (im.f && tiku_fat_mount(&fs, img_read, &im) == TIKU_FAT_OK &&
+        tiku_fat_opendir(&fs, "/", &d) == TIKU_FAT_OK) {
+        while (tiku_fat_readdir(&fs, &d, &e) == TIKU_FAT_OK) {
+            if (e.first_clus == first) {
+                seen = 1;
+                good = (strcmp(e.name, sfn) == 0);
+                snprintf(msg, sizeof msg,
+                         "lfngap: name with a lost piece -> \"%.40s\" "
+                         "(wanted the 8.3 name \"%s\")", e.name, sfn);
+            }
+        }
+    }
+    if (!seen) { snprintf(msg, sizeof msg, "lfngap: entry not listed"); }
+    ok(seen && good, msg);
+    if (im.f) { fclose(im.f); }
+}
+
 /** The chain-loop image: the walk must FAIL, not hang. */
 static void expect_loop_refused(const char *dir)
 {
@@ -285,10 +513,23 @@ static void run_image(const char *dir, const char *name, uint32_t base)
 
     check_file(&fs, "/SMALL.BIN", 1000u);
     check_file(&fs, "/EXACT.BIN", 4096u);
+    check_file(&fs, "/BOUND.BIN", 12288u);
     check_file(&fs, "/big.bin", 1500000u);
     check_file(&fs, "/FRAGGED.BIN", 1500000u);      /* deliberately fragmented */
     check_file(&fs, "/sub/deeper/NESTED.BIN", 4096u);
     check_file(&fs, "/big.BIN", 1500000u);          /* case-insensitive */
+
+    /* Seeks next to cluster boundaries, including the end of a file that
+     * ends on one and the joint between two runs of a fragmented chain. */
+    check_seek(&fs, "/SMALL.BIN", 1000u);
+    check_seek(&fs, "/EXACT.BIN", 4096u);
+    check_seek(&fs, "/BOUND.BIN", 12288u);
+    check_seek(&fs, "/big.bin", 1500000u);
+    {
+        uint32_t runs = check_seek(&fs, "/FRAGGED.BIN", 1500000u);
+        snprintf(msg, sizeof msg, "/FRAGGED.BIN: chain has %u runs", runs);
+        ok(runs > 1u, msg);
+    }
 
     ok(found_long, "long file name assembled");
     if (found_long) {
@@ -308,6 +549,30 @@ static void run_image(const char *dir, const char *name, uint32_t base)
         snprintf(msg, sizeof msg, "open a directory -> %s",
                  tiku_fat_strerror(rc));
         ok(rc == TIKU_FAT_ERR_NOTDIR, msg);
+    }
+
+    /* A real path of TIKU_FAT_PATH_MAX characters resolves; one longer is
+     * refused.  "sub/../" repeats through the ".." entry back to the root. */
+    {
+        char longp[TIKU_FAT_PATH_MAX + 2u];
+        tiku_fat_file_t f;
+        unsigned k, at = 0u;
+        tiku_fat_err_t rc2;
+        longp[at++] = '/';
+        for (k = 0u; k < 35u; k++) {
+            memcpy(&longp[at], "sub/../", 7u);
+            at += 7u;
+        }
+        memcpy(&longp[at], "SMALL.BIN", 10u);       /* 255 characters */
+        rc = tiku_fat_open(&fs, longp, &f);
+        memmove(&longp[1], longp, strlen(longp) + 1u);   /* 256: "//sub..." */
+        rc2 = tiku_fat_open(&fs, longp, &f);
+        snprintf(msg, sizeof msg,
+                 "path of %u chars -> %s, of %u chars -> %s (wanted ok, ARG)",
+                 (unsigned)TIKU_FAT_PATH_MAX, tiku_fat_strerror(rc),
+                 (unsigned)TIKU_FAT_PATH_MAX + 1u, tiku_fat_strerror(rc2));
+        ok(strlen(longp) == TIKU_FAT_PATH_MAX + 1u && rc == TIKU_FAT_OK &&
+           rc2 == TIKU_FAT_ERR_ARG, msg);
     }
     fclose(im.f);
 }
@@ -339,10 +604,12 @@ int main(int argc, char **argv)
 
     printf("\nNEGATIVE corpus (every one of these must be refused):\n");
     expect_mount(dir, "fat16.img", TIKU_FAT_ERR_NOT_FAT32);
+    expect_mount(dir, "fat16_mbr.img", TIKU_FAT_ERR_NOT_FAT32);
     expect_mount(dir, "fat12.img", TIKU_FAT_ERR_NOT_FAT32);
     expect_mount(dir, "zeros.img", TIKU_FAT_ERR_NOFS);
     expect_loop_refused(dir);
     expect_file_loop_refused(dir);
+    expect_lfn_gap_refused(dir);
 
     printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

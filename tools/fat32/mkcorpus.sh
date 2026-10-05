@@ -21,17 +21,21 @@ for t in mkfs.vfat mcopy mmd; do
 done
 
 # Deterministic payloads: the test recomputes these, so they must not be random.
+# Every little-endian 32-bit word holds its own byte offset, so bytes read from
+# the wrong cluster never match the ones expected.
 gen() {  # gen <file> <size>
     python3 - "$1" "$2" <<'PY'
-import sys
+import struct, sys
 p, n = sys.argv[1], int(sys.argv[2])
-open(p, "wb").write(bytes(((i * 37 + 11) & 0xFF) for i in range(n)))
+data = b"".join(struct.pack("<I", o) for o in range(0, n, 4))
+open(p, "wb").write(data[:n])
 PY
 }
 
 echo "corpus -> $OUT"
 gen "$OUT/small.bin"  1000          # smaller than a sector
 gen "$OUT/exact.bin"  4096          # exact cluster multiple
+gen "$OUT/bound.bin"  12288         # ends on a boundary at both cluster sizes
 gen "$OUT/big.bin"    1500000       # many clusters
 gen "$OUT/frag_a.bin" 300000
 gen "$OUT/frag_b.bin" 300000
@@ -47,6 +51,7 @@ for SPC in 1 8; do
     mmd   -i "$IMG" ::/sub/deeper                           2>/dev/null || true
     mcopy -i "$IMG" "$OUT/small.bin" ::/SMALL.BIN
     mcopy -i "$IMG" "$OUT/exact.bin" ::/EXACT.BIN
+    mcopy -i "$IMG" "$OUT/bound.bin" ::/BOUND.BIN
     mcopy -i "$IMG" "$OUT/big.bin"   ::/big.bin
     mcopy -i "$IMG" "$OUT/small.bin" "::/a rather long file name.dat"
     # Names that fill their last 13-character piece carry no terminator.
@@ -60,6 +65,19 @@ for SPC in 1 8; do
     mcopy -i "$IMG" "$OUT/frag_a.bin" ::/FRAGA.BIN
     mcopy -i "$IMG" "$OUT/frag_b.bin" ::/FRAGB.BIN
     mdel  -i "$IMG" ::/FRAGA.BIN 2>/dev/null || true
+    # mtools allocates from the FSInfo next-free hint, which points past
+    # FRAGB.BIN.  Setting it to 0xFFFFFFFF ("unknown") starts the search at
+    # cluster 2, so FRAGGED.BIN fills the hole and continues past FRAGB.BIN.
+    python3 - "$IMG" <<'PY'
+import struct, sys
+f = open(sys.argv[1], "r+b")
+b = f.read(512)
+bps = struct.unpack_from("<H", b, 11)[0]
+fsinfo = struct.unpack_from("<H", b, 48)[0]
+f.seek(fsinfo * bps + 492)
+f.write(struct.pack("<I", 0xFFFFFFFF))
+f.close()
+PY
     mcopy -i "$IMG" "$OUT/big.bin"   ::/FRAGGED.BIN
     echo "  $IMG (spc=$SPC)"
 done
@@ -87,6 +105,26 @@ echo "  $IMG (MBR, partition at LBA 2048)"
 rm -f "$OUT/fat16.img"; truncate -s 32M "$OUT/fat16.img"
 mkfs.vfat -F 16 -n TIKUFAT16 "$OUT/fat16.img" >/dev/null
 echo "  $OUT/fat16.img (must be refused: NOT_FAT32)"
+
+# FAT16 in the first partition and a non-FAT one after it: refused as
+# NOT_FAT32, though the last partition parsed has no filesystem at all.
+IMG="$OUT/fat16_mbr.img"
+rm -f "$IMG"; truncate -s 33M "$IMG"
+python3 - "$IMG" <<'PY'
+import struct, sys
+img = sys.argv[1]
+fat16 = (32 * 1024 * 1024) // 512
+mbr = bytearray(512)
+mbr[446:462] = struct.pack("<BBBBBBBBII", 0, 0,0,0, 0x06, 0,0,0, 2048, fat16)
+mbr[462:478] = struct.pack("<BBBBBBBBII", 0, 0,0,0, 0x83, 0,0,0,
+                           2048 + fat16, 2048)
+mbr[510], mbr[511] = 0x55, 0xAA
+with open(img, "r+b") as f:
+    f.write(mbr)
+PY
+mkfs.vfat -F 16 --offset 2048 -n TIKUF16P "$IMG" >/dev/null
+truncate -s 34M "$IMG"                  # the second partition: zeros
+echo "  $IMG (must be refused: NOT_FAT32)"
 
 rm -f "$OUT/fat12.img"; truncate -s 2M "$OUT/fat12.img"
 mkfs.vfat -F 12 -n TIKUFAT12 "$OUT/fat12.img" >/dev/null

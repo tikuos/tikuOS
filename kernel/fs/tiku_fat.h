@@ -26,7 +26,7 @@
 /** @brief Longest name, including its NUL, this reader returns or resolves. */
 #define TIKU_FAT_NAME_MAX 128u
 
-/** @brief Longest full path this reader resolves. */
+/** @brief Longest full path, excluding its NUL, this reader resolves. */
 #define TIKU_FAT_PATH_MAX 255u
 
 /**
@@ -91,12 +91,17 @@ typedef struct {
     uint8_t  done;
 } tiku_fat_dir_t;
 
-/** @brief An open file. */
+/**
+ * @brief An open file.
+ *
+ * At a cluster boundary other than 0, @c clus is the cluster ending there; the
+ * next read follows its link.
+ */
 typedef struct {
     uint32_t first_clus;
     uint32_t size;
     uint32_t pos;
-    uint32_t clus;      /**< cluster holding @c pos                         */
+    uint32_t clus;      /**< cluster holding byte @c pos - 1 (first at 0)   */
     uint32_t clus_idx;  /**< which cluster of the file that is              */
 } tiku_fat_file_t;
 
@@ -122,8 +127,8 @@ tiku_fat_err_t tiku_fat_opendir(tiku_fat_t *fs, const char *path,
  * @brief Next entry, or ERR_NOENT at the end.
  *
  * Long names are assembled and their checksum checked against the 8.3 entry
- * they belong to; an orphaned or mismatched sequence falls back to the short
- * name.
+ * they belong to; an orphaned, incomplete or mismatched sequence falls back to
+ * the short name.
  */
 tiku_fat_err_t tiku_fat_readdir(tiku_fat_t *fs, tiku_fat_dir_t *dir,
                                 tiku_fat_dirent_t *out);
