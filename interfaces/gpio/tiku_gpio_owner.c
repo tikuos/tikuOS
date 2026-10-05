@@ -37,7 +37,7 @@ static gpio_claim_t claims[TIKU_GPIO_CLAIM_LIMIT];
 
 /** @brief Labels tiku_gpio_owner() or /dev/gpio_owner report; unclaimable. */
 static const char *const reserved_names[] = {
-    "free", "console", "peripheral", "unreadable", "invalid"
+    "free", "console", "peripheral", "unreadable", "invalid", "wifi"
 };
 
 /**
