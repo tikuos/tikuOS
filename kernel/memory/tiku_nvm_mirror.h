@@ -7,9 +7,9 @@
  *
  * tiku_nvm_mirror.h - layout and integrity check for the .uninit NVM mirror.
  *
- * On the mirror platforms (Ambiq MRAM page, RP2350 flash sector) .persistent
- * lives in SRAM and is snapshotted to NVM at relock.  A 16-byte header carries a
- * CRC-32, so a torn program is refused rather than restored as good.
+ * On the mirror platforms (Ambiq, RP2350, STM32N6, ESP32-C61) .persistent lives
+ * in SRAM and is copied to NVM at relock.  A 16-byte header carries a CRC-32,
+ * so a torn program is refused rather than restored as good.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,10 +20,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/** V1 mirror magic ('NVMT'): image follows at word 1, no integrity
- *  check.  Still ACCEPTED by the boot restore so devices upgrade
- *  seamlessly — the first post-upgrade flush rewrites the mirror as
- *  V2.  Never written anymore. */
+/** V1 mirror magic ('NVMT'): image at word 1, no CRC.  The Ambiq and RP2350
+ *  boot restores accept it and the next flush writes V2; nothing writes V1. */
 #define TIKU_NVM_MIRROR_MAGIC_V1   0x4E564D54U
 
 /** V2 mirror magic ('NVM2' bytes): 16-byte header, CRC-validated. */
@@ -53,15 +51,15 @@
  * @brief What the boot-time mirror restore found.
  *
  * Exposed by tiku_mem_arch_nvm_restore_status() on mirror platforms.
- * CRC_FAIL on an established device means a flush was torn by a power
- * cut (or the mirror rotted) — state fell back to defaults by design.
+ * CRC_FAIL on an established device means a power cut tore a flush or the
+ * mirror decayed; durable state then starts from its defaults.
  */
 typedef enum {
     TIKU_NVM_RESTORE_VIRGIN   = 0, /**< no magic: fresh part / erased  */
-    TIKU_NVM_RESTORE_V1       = 1, /**< legacy mirror accepted (upgrade) */
+    TIKU_NVM_RESTORE_V1       = 1, /**< V1 mirror accepted (no CRC)    */
     TIKU_NVM_RESTORE_V2_OK    = 2, /**< CRC-validated restore           */
     TIKU_NVM_RESTORE_CRC_FAIL = 3  /**< V2 magic but CRC mismatch: torn
-                                        program detected, NOT restored  */
+                                        program detected, not restored  */
 } tiku_nvm_restore_t;
 
 /**
@@ -94,9 +92,8 @@ static inline uint32_t tiku_nvm_crc32_update(uint32_t crc, const void *data,
 /**
  * @brief CRC-32 (reflected, poly 0xEDB88320, init/final 0xFFFFFFFF).
  *
- * A nibble-table implementation: 64 bytes of table and about two lookups per
- * byte, small enough to inline in every mirror backend and fast enough that a
- * whole 4 KB sector costs well under a millisecond.
+ * A nibble-table implementation: 64 bytes of table and two lookups per byte,
+ * small enough to inline in every mirror backend.
  */
 static inline uint32_t tiku_nvm_crc32(const void *data, size_t len)
 {

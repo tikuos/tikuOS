@@ -9,7 +9,7 @@
  *
  * On-NVM layout is [superblock | directory | data slots].  The slot count is
  * derived at mount from the extent the backend reports and recorded in the
- * superblock, so a store is never parsed under a geometry it was not written with.
+ * superblock, so a store is never parsed under another geometry.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,16 +18,18 @@
 
 #include <string.h>
 
-/* Handles live outside mapped storage. The list also lets mount() check for a
- * lease without reading an uninitialised caller-supplied filesystem object. */
+/* Leases live in a list outside mapped storage, so mount() can check for one
+ * without reading the uninitialised tiku_tfs_t its caller hands it. */
 #if TIKU_TFS_HOLD_ENABLE
 static tiku_tfs_hold_t *tfs_holds;
+/** @brief Whether a lease is held on @p fs itself. */
 static int tfs_handle_held(const tiku_tfs_t *fs)
 {
     const tiku_tfs_hold_t *h;
     for (h = tfs_holds; h; h = h->next) if (h->fs == fs) return 1;
     return 0;
 }
+/** @brief Whether a lease is held on a store whose backend overlaps @p be. */
 static int tfs_backing_held(const tiku_nvm_backend_t *be)
 {
     const tiku_tfs_hold_t *h;
@@ -39,6 +41,7 @@ static int tfs_backing_held(const tiku_nvm_backend_t *be)
     }
     return 0;
 }
+/** @brief Whether a lease on @p fs, or on an overlapping store, blocks it. */
 static int tfs_held(const tiku_tfs_t *fs)
 { return tfs_handle_held(fs) || tfs_backing_held(fs->be); }
 int tiku_tfs_hold(tiku_tfs_t *fs, tiku_tfs_hold_t *hold)
@@ -60,6 +63,7 @@ int tiku_tfs_release(tiku_tfs_hold_t *hold)
     return TFS_ERR_INVAL;
 }
 #else
+/* Leases compiled out: nothing is ever held, and hold/release refuse. */
 static int tfs_held(const tiku_tfs_t *fs) { (void)fs; return 0; }
 static int tfs_handle_held(const tiku_tfs_t *fs) { (void)fs; return 0; }
 static int tfs_backing_held(const tiku_nvm_backend_t *be) { (void)be; return 0; }
@@ -76,75 +80,52 @@ int tiku_tfs_release(tiku_tfs_hold_t *hold)
 #define TFS_MAGIC    0x54465331u   /* "TFS1" -- store is formatted */
 
 /*
- * Superblock = magic + an UNPACKED geometry descriptor, one u32 per parameter,
- * compared element-wise at mount.
- *
- * Every dirent and slot offset is a function of the geometry, so a store
- * written with one geometry must never be parsed with another: the magic would
- * still match while every offset had moved, and the mount would either report
- * corruption or hand back another file's bytes.  The mount therefore refuses a
- * store whose recorded geometry differs, and leaves the decision to reformat to
- * an explicit caller.
- *
- * WHY UNPACKED, having previously been four bit-fields in one word.  The packed
- * word was exactly full ([31:28] version, [27:16] MAX_FILES, [15:5]
- * SLOT_BYTES/4, [4:0] NAME_MAX) and it did not encode TIKU_TFS_SECT -- which
- * DOES move the data region, because TIKU_TFS_DATA_OFF is sector-aligned.  So
- * distinct layouts aliased to one word: on RP2350's geometry, six legal SECT
- * values all encode as 0x43A68018 while producing five different data-region
- * bases, and nothing at build time or mount time could tell them apart.  A
- * store formatted under one and mounted under another finds the directory where
- * it expects and the DATA somewhere else.
- *
- * That is not fixable by re-laying bits, because the word had none spare; and
- * the same crowding capped NAME_MAX at 31 and the format version at 15.  One
- * word per parameter costs 24 bytes of a multi-megabyte store, removes every
- * width limit, and makes adding a parameter later a one-line change instead of
- * another format break.  The offsets are recorded alongside the inputs so a
- * future input that feeds them cannot alias the way SECT did.
+ * Superblock: the magic, then a geometry descriptor of one u32 per parameter,
+ * compared word by word at mount.  Every dirent and slot offset follows from
+ * the geometry, so a store parsed under another geometry would be read at the
+ * wrong offsets: mount refuses a recorded geometry that differs
+ * (TFS_ERR_GEOMETRY) and leaves reformatting to the caller.  The derived data
+ * offset is recorded beside its inputs, so no two layouts share a descriptor.
  */
-#define TFS_FMT_VERSION  5u        /* 5: unpacked geometry descriptor        */
-                                   /* 4: spanned files (dirent run word)     */
+#define TFS_FMT_VERSION  5u        /* on-NVM format version */
 
-/* Descriptor word indices.  Word 0 is the magic and is written LAST. */
+/* Descriptor word indices.  Word 0 is the magic and is written last. */
 #define TFS_SB_MAGIC_W   0u
 #define TFS_SB_VER_W     1u
 #define TFS_SB_FILES_W   2u
 #define TFS_SB_SLOT_W    3u
 #define TFS_SB_NAME_W    4u
-#define TFS_SB_SECT_W    5u        /* the field whose absence caused aliasing */
+#define TFS_SB_SECT_W    5u        /* erase granule; moves the data base */
 #define TFS_SB_DE_W      6u
-#define TFS_SB_DATA_W    7u        /* derived, recorded so inputs cannot alias */
+#define TFS_SB_DATA_W    7u        /* derived data offset */
 #define TFS_SB_WORDS     8u
 
 #define TFS_GATE     0x4C495645u   /* "LIVE" -- directory entry is in use */
 
 #define TFS_ALIGN4(n)   (((n) + 3u) & ~3u)
 
-#define TFS_SB_BYTES    TIKU_TFS_SB_BYTES                   /* magic + geometry */
-#define TFS_DE_BYTES    TFS_ALIGN4(8u + TIKU_TFS_NAME_MAX)  /* gate+slot+name  */
+#define TFS_SB_BYTES    TIKU_TFS_SB_BYTES                   /* magic+geometry */
+#define TFS_DE_BYTES    TFS_ALIGN4(8u + TIKU_TFS_NAME_MAX)  /* gate+run+name  */
 #define TFS_DIR_OFF     TFS_SB_BYTES
-/* TFS_DIR_BYTES / TFS_DATA_OFF / TFS_REGION were compile-time; the directory
- * length and the data base now follow the DERIVED file count, so they live in
- * tiku_tfs_t (fs->nfiles, fs->data_off) and are computed at mount. */
-/* Slot size and data-region base are sector-aligned in the header (TIKU_TFS_SECT)
- * so each file's data slot owns whole erase sectors; single-sourced here. */
+/* The directory length and the data base follow the file count derived at
+ * mount (fs->nfiles, fs->data_off). */
+/* Slot size and data base are aligned to the erase granule (TIKU_TFS_SECT) in
+ * tiku_tfs.h, so each slot owns whole erase sectors. */
 #define TFS_SLOT_BYTES  TIKU_TFS_SLOT_BYTES
 /* Smallest extent this build will mount: the floor's worth of store. */
 #define TFS_MIN_REGION  TIKU_TFS_EXTENT_FOR_SLOTS(TIKU_TFS_MIN_SLOTS)
 
 /* field offsets within a dirent / a slot */
 #define TFS_DE_GATE  0u
-#define TFS_DE_SLOT  4u            /* the RUN word: first | span<<16 */
+#define TFS_DE_SLOT  4u            /* the run word: first | span<<16 */
 #define TFS_DE_NAME  8u
 #define TFS_SL_LEN   0u
 #define TFS_SL_DATA  4u
 
 /*
- * Run word packing.  Both halves must fit 16 bits, which bounds NSLOTS -- a
- * 3.5 MB store is ~900 slots, so the headroom is ample, but assert it rather
- * than assume it: an overflow here would alias two different runs onto the
- * same word and silently hand back another file's bytes.
+ * Run word: first slot in the low 16 bits, span in the high 16.  The first
+ * typedef fails the build if TIKU_TFS_MAX_SLOTS outgrows a half, which would
+ * alias two runs onto one word; the second if the floor exceeds the ceiling.
  */
 typedef char tfs_maxslots_check[(TIKU_TFS_MAX_SLOTS <= 0xFFFFu) ? 1 : -1];
 typedef char tfs_floor_check[(TIKU_TFS_MIN_SLOTS <= TIKU_TFS_MAX_SLOTS) ? 1 : -1];
@@ -153,7 +134,7 @@ typedef char tfs_floor_check[(TIKU_TFS_MIN_SLOTS <= TIKU_TFS_MAX_SLOTS) ? 1 : -1
 #define TFS_RUN_FIRST(w)           ((unsigned)((w) & 0xFFFFu))
 #define TFS_RUN_SPAN(w)            ((unsigned)((w) >> 16))
 
-/** @brief Content capacity of a run of @p span slots (the n==1 case == SLOT_DATA). */
+/** @brief Content bytes a run of @p span slots holds (span 1: SLOT_DATA). */
 #define TFS_RUN_CAP(span)  ((size_t)(span) * TFS_SLOT_BYTES - TFS_SL_DATA)
 
 /*---------------------------------------------------------------------------*/
@@ -166,7 +147,7 @@ typedef char tfs_floor_check[(TIKU_TFS_MIN_SLOTS <= TIKU_TFS_MAX_SLOTS) ? 1 : -1
 static uint32_t rd32(tiku_tfs_t *fs, size_t off)
 {
     uint32_t v;
-    memcpy(&v, fs->be->base + off, sizeof v);   /* alignment-safe read */
+    memcpy(&v, fs->be->base + off, sizeof v);
     return v;
 }
 
@@ -186,12 +167,15 @@ static int wr32(tiku_tfs_t *fs, size_t off, uint32_t v)
     return wr(fs, off, &v, sizeof v);
 }
 
+/** @brief Byte offset of directory entry @p i. */
 static size_t dirent_off(unsigned i) { return TFS_DIR_OFF + (size_t)i * TFS_DE_BYTES; }
+/** @brief Byte offset of data slot @p s. */
 static size_t slot_off(tiku_tfs_t *fs, unsigned s)
 {
     return (size_t)fs->data_off + (size_t)s * TFS_SLOT_BYTES;
 }
 
+/** @brief Gate word of dirent @p i; TFS_GATE when the entry is live. */
 static uint32_t de_gate(tiku_tfs_t *fs, unsigned i) { return rd32(fs, dirent_off(i) + TFS_DE_GATE); }
 /** @brief Raw run word of dirent @p i (first | span<<16). */
 static uint32_t de_run(tiku_tfs_t *fs, unsigned i) { return rd32(fs, dirent_off(i) + TFS_DE_SLOT); }
@@ -211,9 +195,9 @@ static const char *de_name(tiku_tfs_t *fs, unsigned i)
  */
 static uint32_t sl_len(tiku_tfs_t *fs, unsigned s)
 {
-    /* Defensive: stat/list/list_dir pass de_slot() straight in, so a corrupt
-     * dirent could index past the data region -- clamp out-of-range to 0. The
-     * bounds-checked callers (read/map/mount) pass an already-validated index. */
+    /* list and list_dir pass de_first() unchecked, so a corrupt dirent could
+     * index past the data region: an out-of-range slot reads as length 0.
+     * run_check() validates the index for every other caller. */
     if (s >= fs->nslots) {
         return 0u;
     }
@@ -227,9 +211,11 @@ static const uint8_t *sl_data(tiku_tfs_t *fs, unsigned s)
     return fs->be->base + slot_off(fs, s) + TFS_SL_DATA;
 }
 
-/* in-RAM data-slot allocation map */
+/** @brief Mark slot @p i used in the in-RAM allocation map @p bm. */
 static void bm_set(uint8_t *bm, unsigned i) { bm[i >> 3] |= (uint8_t)(1u << (i & 7u)); }
+/** @brief Mark slot @p i free in the allocation map @p bm. */
 static void bm_clr(uint8_t *bm, unsigned i) { bm[i >> 3] &= (uint8_t)~(1u << (i & 7u)); }
+/** @brief Whether slot @p i is marked used in the allocation map @p bm. */
 static int  bm_get(const uint8_t *bm, unsigned i) { return (bm[i >> 3] >> (i & 7u)) & 1u; }
 
 /**
@@ -291,7 +277,7 @@ static int free_run(tiku_tfs_t *fs, unsigned span)
         }
         return -1;
     }
-    /* Top-down: try the highest start first, walking back one slot at a time. */
+    /* Top-down: the highest start first, then back one slot at a time. */
     for (s = fs->nslots - span + 1u; s-- > 0u; ) {
         for (k = 0u; k < span; k++) {
             if (bm_get(fs->slot_used, s + k)) {
@@ -342,11 +328,11 @@ static unsigned run_span_for(size_t len)
 }
 
 /**
- * @brief Validate dirent @p i's stored run and hand back its first slot + length.
+ * @brief Validate dirent @p i's run word; return its first slot and length.
  *
- * The one place a run word from NVM is checked.  Do NOT rewrite the bound as
- * `first + span > NSLOTS`: both halves land in `unsigned`, 16-bit on MSP430, so
- * that sum wraps for a corrupt word and indexes fs->slot_used out of bounds.
+ * Read, map, stat and mount validate through this.  The bound subtracts
+ * rather than adds: `first + span` can wrap in a 16-bit unsigned (MSP430) for
+ * a corrupt word and index fs->slot_used out of bounds.
  *
  * @param i      Directory index (caller has already confirmed the gate).
  * @param first  Out: index of the run's first slot.  May be NULL.
@@ -388,9 +374,9 @@ size_t tiku_tfs_region_size(void)
 /**
  * @brief Largest file count whose store fits in an extent of @p ext bytes.
  *
- * The closed form charges a full sector of directory padding, so it can come out
- * one file short when alignment absorbs the slack.  One correction step recovers
- * it, and one suffices because a file costs more than the SECT-1 given away.
+ * The closed form charges a full sector of directory padding, so it can come
+ * out one file short when alignment absorbs the slack; one correction step
+ * recovers it, since a file costs more than the SECT-1 given away.
  *
  * @param ext Extent in bytes.
  * @return File count, clamped to the addressing ceiling; 0 if nothing fits.
@@ -430,14 +416,14 @@ static int tfs_geom_for(size_t ext, tfs_geom_t *g)
     unsigned n = tfs_fit(ext);
 
     if (n < (unsigned)TIKU_TFS_MIN_SLOTS) {
-        return 0;               /* carve shrank below what this class promises */
+        return 0;               /* carve below what this class promises */
     }
     g->nfiles   = (uint16_t)n;
     g->data_off = (uint32_t)TIKU_TFS_DATA_OFF_FOR(n);
     return 1;
 }
 
-/** @brief Adopt the geometry implied by @p ext.  Returns 0 if it is too small. */
+/** @brief Adopt the geometry for @p ext; 0 if the extent is too small. */
 static int tfs_derive(tiku_tfs_t *fs, size_t ext)
 {
     tfs_geom_t g;
@@ -462,7 +448,7 @@ static uint32_t tfs_word_for(const tfs_geom_t *g, unsigned w)
     case TFS_SB_SECT_W:  return (uint32_t)TIKU_TFS_SECT;
     case TFS_SB_DE_W:    return (uint32_t)TFS_DE_BYTES;
     case TFS_SB_DATA_W:  return g->data_off;
-    default:             return 0u;              /* padding stays zero */
+    default:             return 0u;              /* word 0, the magic */
     }
 }
 
@@ -479,9 +465,9 @@ static uint32_t tfs_sb_word(tiku_tfs_t *fs, unsigned w)
 /**
  * @brief Does the stored descriptor describe the geometry this build uses?
  *
- * Element-wise, so a difference in ANY recorded parameter is a mismatch and the
- * caller reformats.  The magic is excluded: it is the separate "formatted at
- * all" flag, and it is written last so a torn format cannot look complete.
+ * Compared word by word: any difference is a mismatch, and mount refuses the
+ * store with TFS_ERR_GEOMETRY.  The magic is excluded: it is the separate
+ * "formatted at all" flag, written last so a torn format cannot look complete.
  */
 static int tfs_sb_matches(tiku_tfs_t *fs)
 {
@@ -494,7 +480,7 @@ static int tfs_sb_matches(tiku_tfs_t *fs)
     return 1;
 }
 
-/** @brief Write the descriptor, then the magic.  Returns non-zero on IO error. */
+/** @brief Write the descriptor, then the magic; non-zero on an IO error. */
 static int tfs_sb_write(tiku_tfs_t *fs)
 {
     unsigned w;
@@ -522,18 +508,17 @@ int tiku_tfs_format(tiku_tfs_t *fs)
     if (fs->wr_open || tfs_held(fs)) {
         return TFS_ERR_BUSY;
     }
-    /* Invalidate the magic FIRST.  The descriptor is several words now, so
-     * writing it over an already-formatted store has a window in which the
-     * magic is valid but the geometry is half old and half new -- a power cut
-     * there would leave a store that mounts and reads the directory at the
-     * wrong offset.  Clearing the magic makes that window read as virgin, which
-     * is recoverable.  (The single-word descriptor this replaced was atomic and
-     * needed no such step.) */
+    /* Invalidate the magic first.  The descriptor spans several words, so
+     * rewriting it over a formatted store has a window in which the magic is
+     * valid but the geometry is half old and half new; a power cut there
+     * would leave a store that mounts and reads the directory at the wrong
+     * offset.  With the magic cleared, that window reads as no store. */
     if (wr32(fs, TFS_SB_MAGIC_W * 4u, 0u)) {
         return TFS_ERR_IO;
     }
-    /* Free every directory entry BEFORE stamping the superblock, so a valid
-     * magic always implies a clean directory (a torn format reads as virgin). */
+    /* Free every directory entry before stamping the superblock, so a valid
+     * magic always implies a clean directory (a torn format reads as no
+     * store). */
     for (i = 0; i < fs->nfiles; i++) {
         if (wr32(fs, dirent_off(i) + TFS_DE_GATE, 0u)) {
             return TFS_ERR_IO;
@@ -557,7 +542,7 @@ int tiku_tfs_mount(tiku_tfs_t *fs, tiku_nvm_backend_t *be)
     fs->be = be;
     fs->mounted = 0;
     fs->wr_open = 0;          /* a remount abandons any half-open writer */
-    /* Derive BEFORE reading the superblock: every offset below, including the
+    /* Derive before reading the superblock: every offset below, including the
      * superblock comparison's own view of the directory, depends on it. */
     if (!tfs_derive(fs, be->size)) {
         return TFS_ERR_NOSPACE;
@@ -568,9 +553,9 @@ int tiku_tfs_mount(tiku_tfs_t *fs, tiku_nvm_backend_t *be)
     if (!tfs_sb_matches(fs)) {
         return TFS_ERR_GEOMETRY;
     }
-    /* Rebuild the data-slot allocation map from the live directory. Every run
-     * is bounds-checked and claimed slot by slot, so an overlap between two
-     * files is caught here rather than discovered as corrupted content later. */
+    /* Rebuild the data-slot allocation map from the live directory.  Every
+     * run is bounds-checked and claimed slot by slot, so an overlap between
+     * two files is caught here rather than found as corrupted content later. */
     memset(fs->slot_used, 0, sizeof fs->slot_used);
     for (i = 0; i < fs->nfiles; i++) {
         if (de_gate(fs, i) == TFS_GATE) {
@@ -670,7 +655,7 @@ static void tfs_classify(const uint8_t *base, size_t size, int full,
             uint32_t n;
 
             if (sp == 0u || f > g.nfiles || sp > g.nfiles + 1u - f) {
-                continue;                     /* the mount will call it corrupt */
+                continue;                     /* mount will call it corrupt */
             }
             n = rd32_at(base, g.data_off + (size_t)f * TFS_SLOT_BYTES + TFS_SL_LEN);
             if ((size_t)n <= TFS_RUN_CAP(sp)) {
@@ -749,8 +734,8 @@ int tiku_tfs_may_provision(const tiku_nvm_backend_t *region, size_t base_off,
     if (tiku_tfs_probe(&at, &p) != TFS_OK || p.kind != TFS_PROBE_BLANK) {
         return 0;
     }
-    /* A static array may be initialized only if the WHOLE backing region is
-     * blank, not just the guessed store suffix. Region-backed /data additionally
+    /* A static array may be initialized only if the whole backing region is
+     * blank, not just the guessed store suffix.  Region-backed /data also
      * requires explicit ownership; this predicate grants none. */
     (void)step;
     if (base_off != 0u) {
@@ -803,12 +788,12 @@ int tiku_tfs_create(tiku_tfs_t *fs, const char *name)
     if (s < 0) {
         return TFS_ERR_NOSPACE;
     }
-    if (wr32(fs, slot_off(fs, (unsigned)s) + TFS_SL_LEN, 0u)) {       /* empty slot */
+    if (wr32(fs, slot_off(fs, (unsigned)s) + TFS_SL_LEN, 0u)) {
         return TFS_ERR_IO;
     }
     memset(nb, 0, sizeof nb);
     memcpy(nb, name, nl);
-    /* name + run, then GATE last (the commit point). */
+    /* name + run, then the gate last (the commit point). */
     if (wr(fs, dirent_off((unsigned)i) + TFS_DE_NAME, nb, TIKU_TFS_NAME_MAX) ||
         wr32(fs, dirent_off((unsigned)i) + TFS_DE_SLOT,
              TFS_RUN_MAKE((unsigned)s, 1u)) ||
@@ -819,19 +804,6 @@ int tiku_tfs_create(tiku_tfs_t *fs, const char *name)
     return TFS_OK;
 }
 
-/**
- * @brief Write a file's content atomically, creating it if absent.
- *
- * Stages the content and its length in a fresh shadow slot, then repoints the
- * dirent at that slot with one aligned word write.  A power cut before the
- * flip leaves the old content intact; after it, the old slot is reclaimed.
- *
- * @param fs    Mounted file store.
- * @param name  File to write (created on first write).
- * @param data  Source bytes; may be NULL only when @p len is 0.
- * @param len   Byte count, at most TIKU_TFS_SLOT_DATA.
- * @return      TFS_OK, or a negative TFS_ERR_* code.
- */
 int tiku_tfs_open_w(tiku_tfs_t *fs, tiku_tfs_wr_t *w,
                     const char *name, size_t max_len)
 {
@@ -849,28 +821,19 @@ int tiku_tfs_open_w(tiku_tfs_t *fs, tiku_tfs_wr_t *w,
     if (nl == 0 || nl >= TIKU_TFS_NAME_MAX) {
         return TFS_ERR_NAMELEN;
     }
-    /* Claim the directory entry's availability up front: discovering a full
-     * directory only at commit would waste the whole stream. */
+    /* Check for a free directory entry up front, so a full directory fails
+     * here rather than after the whole stream (commit checks again). */
     if (tfs_find(fs, name) < 0 && free_dirent(fs) < 0) {
         return TFS_ERR_NOSPACE;
     }
     /*
-     * SINGLE WRITER, ENFORCED BY REFUSAL.
-     *
-     * Modules, radio firmware, models and BASIC's checkpoint all share the
-     * store, and a streamed write spans many calls with a yield between them.
-     * Two writers interleaving would stage into each other's run or race the
-     * dirent flip, so all writers serialise through this one interlock.
-     *
-     * This REFUSES rather than blocks, deliberately.  Scheduling here is
-     * cooperative, so a blocking lock could only be released by the holder
-     * running again -- which needs a scheduler this file is not allowed to know
-     * about (it depends on tiku_nvm_backend.h and nothing else, which is what
-     * keeps it host-testable).  A refusal needs no scheduler, cannot deadlock,
-     * and turns "two tenants wrote at once" from silent corruption into a
-     * distinct, loggable error at the point of the mistake.
-     *
-     * Readers are unaffected: they map in place and never take this.
+     * One writer at a time.  A streamed write spans many calls with yields
+     * between them, and two interleaved writers would stage into each other's
+     * run or race the dirent flip, so every other writer gets TFS_ERR_BUSY.
+     * It is refused rather than blocked because a blocking lock would need the
+     * scheduler, and this file depends on tiku_nvm_backend.h alone so that it
+     * builds on the host.  read, map and stat ignore the interlock;
+     * tiku_tfs_hold() is refused until the stream commits or aborts.
      */
     if (fs->wr_open || tfs_held(fs)) {
         return TFS_ERR_BUSY;
@@ -879,23 +842,13 @@ int tiku_tfs_open_w(tiku_tfs_t *fs, tiku_tfs_wr_t *w,
     span = run_span_for(max_len);
 #if defined(PLATFORM_MSP430)
     /*
-     * MSP430 stays a one-slot-per-file store, exactly as it was before spans.
-     *
-     * The commit point is a 32-bit run word (first | span<<16), and 32-bit
-     * stores are TWO instructions on a 16-bit machine -- so the "single
-     * architecture-word commit" the durability model rests on only holds here
-     * while the high half never changes, i.e. while every span is 1.  Break
-     * that and a torn flip no longer leaves the old file: it leaves an
-     * inconsistent run, mount() rejects the whole store, and every file in
-     * /data is lost rather than one.
-     *
-     * Today no MSP430 writer can exceed a slot (the shell's transfer buffer is
-     * exactly TIKU_TFS_SLOT_DATA and BASIC uses the persist store on this
-     * part), so this refusal is currently unreachable -- which is precisely why
-     * it is written down.  It is the guard that keeps the next caller from
-     * silently re-enabling store-wide loss, and it keeps the redesign's stated
-     * non-goal ("no MSP430 change") true.  Lifting it means giving this part a
-     * 16-bit-atomic commit, not a bigger buffer.
+     * MSP430 keeps one slot per file.  The commit point is the 32-bit run
+     * word (first | span<<16), and a 32-bit store is two instructions on this
+     * 16-bit CPU, so the commit is atomic only while the high half never
+     * changes, that is while every span is 1.  A torn flip of a longer span
+     * could leave an inconsistent run, and mount rejects the whole store for
+     * it.  Allowing spans here needs a 16-bit-atomic commit, not a bigger
+     * buffer.
      */
     if (span > 1u) {
         return TFS_ERR_TOOBIG;
@@ -905,10 +858,10 @@ int tiku_tfs_open_w(tiku_tfs_t *fs, tiku_tfs_wr_t *w,
     if (r < 0) {
         return TFS_ERR_NOSPACE;
     }
-    /* Reserve in the RAM map so nothing else takes the run mid-stream. This
-     * is deliberately NOT durable: if power fails before commit, the next
-     * mount rebuilds the map from live dirents, none of which reference the
-     * staged run -- so it is free again with no cleanup pass. */
+    /* Reserve in the RAM map so nothing else takes the run mid-stream.  The
+     * reservation is RAM-only: if power fails before commit, the next mount
+     * rebuilds the map from live dirents, none of which reference the staged
+     * run, so it is free again with no cleanup pass. */
     run_mark(fs, (unsigned)r, span, 1);
     w->fs     = fs;
     w->first  = (unsigned)r;
@@ -961,9 +914,9 @@ int tiku_tfs_commit(tiku_tfs_wr_t *w)
             return TFS_ERR_NOSPACE;            /* directory filled mid-stream */
         }
         /* Create-with-content is one transaction: the run and the name are
-         * already durable, so stamping GATE last is the single commit point.
-         * Creating the entry earlier would expose a durable empty file if
-         * power failed before the content landed. */
+         * already durable, so stamping the gate last is the single commit
+         * point.  Creating the entry earlier would expose a durable empty file
+         * if power failed before the content landed. */
         memset(nb, 0, sizeof nb);
         memcpy(nb, w->name, strlen(w->name));
         if (wr(fs, dirent_off((unsigned)i) + TFS_DE_NAME,
@@ -975,7 +928,7 @@ int tiku_tfs_commit(tiku_tfs_wr_t *w)
         }
     } else {
         /* Atomic flip: one aligned word repoints the dirent at the new run.
-         * A power cut before it leaves the dirent on the OLD run. */
+         * A power cut before it leaves the dirent on the old run. */
         uint32_t old = de_run(fs, (unsigned)i);
         if (wr32(fs, dirent_off((unsigned)i) + TFS_DE_SLOT,
                  TFS_RUN_MAKE(w->first, keep))) {
@@ -984,10 +937,9 @@ int tiku_tfs_commit(tiku_tfs_wr_t *w)
         run_mark(fs, TFS_RUN_FIRST(old), TFS_RUN_SPAN(old), 0);  /* reclaim */
     }
     /* Only now that the directory names the short run does the unused tail go
-     * back.  A writer that reserved its worst case (BASIC's SAVE and checkpoint
-     * take 256 KB on the Apollo510) kept all of it for a few hundred bytes.
-     * The content starts at the run's first slot, so the tail is its high
-     * end; the map is RAM only, and a remount derives the same from the run. */
+     * back.  The content starts at the run's first slot, so the tail is its
+     * high end; the map is RAM only, and a remount derives the same from the
+     * run. */
     if (keep < w->span) {
         run_mark(fs, w->first + keep, w->span - keep, 0);
     }
@@ -1005,10 +957,18 @@ void tiku_tfs_abort(tiku_tfs_wr_t *w)
     }
 }
 
-/*
- * Whole-buffer write, expressed as a one-chunk stream.  Sharing the streamed
- * path is the point: allocation, the commit sequence and the crash discipline
- * exist once, so the two entry points cannot drift apart.
+/**
+ * @brief Write a file's content atomically, creating it if absent.
+ *
+ * A one-chunk stream.  A power cut before the commit word lands (the run
+ * word of an existing file, the gate of a new one) leaves the old content;
+ * after it, the old run is reclaimed.
+ *
+ * @param fs    Mounted file store.
+ * @param name  File to write (created on first write).
+ * @param data  Source bytes; may be NULL only when @p len is 0.
+ * @param len   Byte count, at most TIKU_TFS_FILE_MAX (one slot on MSP430).
+ * @return      TFS_OK, or a negative TFS_ERR_* code.
  */
 int tiku_tfs_write(tiku_tfs_t *fs, const char *name, const void *data, size_t len)
 {
@@ -1108,8 +1068,8 @@ int tiku_tfs_map(tiku_tfs_t *fs, const char *name, const void **p, size_t *len)
             return rc;                 /* never hand out an unchecked length */
         }
         s = f;
-        /* One pointer covers the whole run: only the first slot's length word is
-         * metadata, so the content bytes are contiguous across the span. */
+        /* One pointer covers the whole run: only the first slot's length
+         * word is metadata, so the content is contiguous across the span. */
         *p = sl_data(fs, (unsigned)s);         /* points into the NVM region */
         *len = n;
     }
@@ -1124,9 +1084,8 @@ int tiku_tfs_delete(tiku_tfs_t *fs, const char *name)
     if (fs == NULL || !fs->mounted || name == NULL) {
         return TFS_ERR_INVAL;
     }
-    /* Does not go through open_w, so it needs the interlock explicitly: a
-     * delete during someone else's stream could reclaim slots that stream has
-     * staged into. */
+    /* Does not go through open_w, so it checks the interlock itself: like
+     * every other mutation, it is refused while a stream or a lease is open. */
     if (fs->wr_open || tfs_held(fs)) {
         return TFS_ERR_BUSY;
     }
@@ -1154,7 +1113,7 @@ int tiku_tfs_stat(tiku_tfs_t *fs, const char *name, size_t *len)
     if (i < 0) {
         return TFS_ERR_NOTFOUND;
     }
-    rc = run_check(fs, (unsigned)i, NULL, &n);  /* callers size buffers off this */
+    rc = run_check(fs, (unsigned)i, NULL, &n);  /* callers size buffers by it */
     if (rc != TFS_OK) {
         return rc;
     }
@@ -1180,9 +1139,9 @@ int tiku_tfs_list(tiku_tfs_t *fs, tiku_tfs_iter_cb cb, void *ctx)
     return n;
 }
 
-/* List the IMMEDIATE children under @p prefix, presenting the flat store as a
+/* List the immediate children under @p prefix, presenting the flat store as a
  * tree (path-as-name): a file directly in the directory is reported by its leaf
- * name; a deeper path contributes its first segment ONCE, with a trailing '/'
+ * name; a deeper path contributes its first segment once, with a trailing '/'
  * so the caller can tell folders from files.  prefix is "" for the store root
  * or "logs/" for a sub-folder; the empty marker entry "<dir>/" (mkdir) is
  * skipped here but still surfaces the folder one level up. */
@@ -1220,7 +1179,7 @@ int tiku_tfs_list_dir(tiku_tfs_t *fs, const char *prefix,
         } else {                               /* a sub-folder: first segment */
             size_t seglen = (size_t)(slash - rest) + 1;   /* include the '/' */
             int    dup = 0;
-            for (j = 0; j < i; j++) {           /* emit once: dedup vs earlier */
+            for (j = 0; j < i; j++) {           /* emit each folder once */
                 const char *nm2;
                 if (de_gate(fs, j) != TFS_GATE) {
                     continue;

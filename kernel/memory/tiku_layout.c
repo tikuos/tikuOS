@@ -25,7 +25,7 @@
 /* KNOBS                                                                     */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Bounds of the NVM tier: whole steps, leaving the store its minimum. */
+/** @brief Bounds of the NVM tier: whole steps, leaving the store its floor. */
 static int
 nvm_tier_bounds(const tiku_layout_env_t *e, tiku_layout_knob_t *k)
 {
@@ -194,9 +194,9 @@ contract_of(const tiku_layout_env_t *e)
 /**
  * @brief Find this region's record at another offset of the durable image.
  *
- * Before the record had a fixed place, each image put it wherever its own
- * durable variables left room.  One distinct record written for this region
- * is adopted; two are not ours to choose between, so neither is taken.
+ * An older image kept the record wherever its durable variables left room.
+ * One distinct record written for this region is adopted; two different ones
+ * are both refused.
  */
 static int
 rec_rescue(const tiku_layout_env_t *e, tiku_layout_record_t *out)
@@ -242,6 +242,7 @@ rec_fresh(const tiku_layout_env_t *e, tiku_layout_record_t *r)
     r->contract = contract_of(e);
 }
 
+/** @brief Seal @p r and commit it: TIKU_LAYOUT_OK or TIKU_LAYOUT_E_IO. */
 static int
 commit(const tiku_layout_env_t *e, tiku_layout_record_t *r)
 {
@@ -285,6 +286,7 @@ sub_backend(const tiku_layout_env_t *e, size_t off, sub_ctx_t *c,
     be->ctx   = c;
 }
 
+/** @brief Whether the region is larger than the smallest store needs. */
 static int
 region_present(const tiku_layout_env_t *e)
 {
@@ -381,7 +383,11 @@ check_kvs(const tiku_layout_env_t *e, const tiku_layout_record_t *r,
     return TIKU_LAYOUT_OK;
 }
 
-/** Validate an extent before any pointer arithmetic or persistent write. */
+/**
+ * @brief Whether @p base is a tier extent the knob allows.
+ *
+ * Checked before any pointer arithmetic or durable write uses it.
+ */
 static int
 base_valid(const tiku_layout_env_t *e, uint32_t base)
 {
@@ -390,6 +396,12 @@ base_valid(const tiku_layout_env_t *e, uint32_t base)
            base <= k.ceiling && base % k.step == 0u;
 }
 
+/**
+ * @brief Whether @p r is a valid record for this image with one valid tier.
+ *
+ * @return TIKU_LAYOUT_OK, TIKU_LAYOUT_E_STALE for another image's record, or
+ *         TIKU_LAYOUT_E_RECOVERY
+ */
 static int
 record_usable(const tiku_layout_env_t *e, const tiku_layout_record_t *r)
 {
@@ -511,7 +523,7 @@ tiku_layout_stage_env(const tiku_layout_env_t *e,
         return rc;                               /* a no-op writes nothing */
     }
     if (r.revision == UINT32_MAX || r.generation == UINT32_MAX) {
-        return TIKU_LAYOUT_E_RANGE;              /* never wrap replay counters */
+        return TIKU_LAYOUT_E_RANGE;            /* never wrap replay counters */
     }
     r.n_pending = 0u;
     for (i = 0u; i < req->n; i++) {
@@ -665,7 +677,7 @@ boot_request(const tiku_layout_env_t *e, tiku_layout_record_t *r,
     dst = tiku_layout_kv_get(r->pending, r->n_pending, TIKU_KNOB_NVM_TIER, src);
     if (src != dst && !store_empty(e, src, &p) &&
         r->method != TIKU_LAYOUT_METHOD_ERASE) {
-        refuse(e, r, st, TIKU_LAYOUT_E_LOSS);    /* files arrived since staging */
+        refuse(e, r, st, TIKU_LAYOUT_E_LOSS);  /* files arrived since staging */
         return;
     }
     w = *r;
@@ -886,7 +898,7 @@ tiku_layout_boot_env(const tiku_layout_env_t *e, tiku_layout_state_t *st)
         return TIKU_LAYOUT_OK;
     }
     if (r.phase == TIKU_LAYOUT_PHASE_PROVISIONING) {
-        finish_provision(e, &r, st);             /* a reset cut the first boot */
+        finish_provision(e, &r, st);           /* a reset cut the first boot */
         return TIKU_LAYOUT_OK;
     }
     if (st->record != TIKU_LAYOUT_RECORD_ABSENT &&
@@ -1213,7 +1225,7 @@ static const tiku_persist_cell_t layout_cell = {
     &tiku_layout_pin.rec, &tiku_layout_pin.gate, NULL,
     (uint16_t)sizeof tiku_layout_pin.rec, 0u, 0x4C415932UL
 };
-/* A word cell that is its own gate: holding its key is its whole value. */
+/* A word cell that is its own gate: its value is its key. */
 static const tiku_persist_cell_t pin_cell = {
     &tiku_layout_pin.pinned, &tiku_layout_pin.pinned, NULL,
     (uint16_t)sizeof tiku_layout_pin.pinned, 0u, LAYOUT_PINNED
@@ -1301,8 +1313,12 @@ board_commit(void *ctx, const tiku_layout_record_t *r)
     return ok ? 0 : -1;
 }
 
-/** Polled, lazily initialized RNG: fresh provisioning and explicit recovery.
- * Existing owned boots never need entropy. No time/PRNG fallback is allowed. */
+/**
+ * @brief Fill @p out from the TRNG, for a fresh ownership identity.
+ *
+ * Only provisioning and explicit recovery ask; a boot that owns its store
+ * needs no entropy.  There is no time or pseudo-random fallback.
+ */
 static int
 board_random(void *ctx, uint8_t *out, size_t len)
 {

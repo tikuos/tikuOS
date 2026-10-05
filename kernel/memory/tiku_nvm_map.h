@@ -28,21 +28,21 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Stable region identifiers (same across all devices and NVM types).
+ * @brief Stable region identifiers, the same on every device and NVM type.
  *
- * APP slots are defined here for future use but are not allocated
- * until TIKU_NVM_APP_ENABLE is set.
+ * APP0-APP7 are reserved ids with no backing: tiku_nvm_region_get() returns
+ * NULL for them.
  */
 typedef enum {
-    TIKU_NVM_REGION_CONFIG = 0,    /**< Init table, credentials, etc. */
-    TIKU_NVM_REGION_APP0,          /**< Loadable app slot 0 (future) */
-    TIKU_NVM_REGION_APP1,          /**< Loadable app slot 1 (future) */
-    TIKU_NVM_REGION_APP2,          /**< Loadable app slot 2 (future) */
-    TIKU_NVM_REGION_APP3,          /**< Loadable app slot 3 (future) */
-    TIKU_NVM_REGION_APP4,          /**< Loadable app slot 4 (future) */
-    TIKU_NVM_REGION_APP5,          /**< Loadable app slot 5 (future) */
-    TIKU_NVM_REGION_APP6,          /**< Loadable app slot 6 (future) */
-    TIKU_NVM_REGION_APP7,          /**< Loadable app slot 7 (future) */
+    TIKU_NVM_REGION_CONFIG = 0,    /**< init table (tiku_init) */
+    TIKU_NVM_REGION_APP0,          /**< reserved, no backing */
+    TIKU_NVM_REGION_APP1,          /**< reserved, no backing */
+    TIKU_NVM_REGION_APP2,          /**< reserved, no backing */
+    TIKU_NVM_REGION_APP3,          /**< reserved, no backing */
+    TIKU_NVM_REGION_APP4,          /**< reserved, no backing */
+    TIKU_NVM_REGION_APP5,          /**< reserved, no backing */
+    TIKU_NVM_REGION_APP6,          /**< reserved, no backing */
+    TIKU_NVM_REGION_APP7,          /**< reserved, no backing */
     TIKU_NVM_REGION_COUNT
 } tiku_nvm_region_id_t;
 
@@ -71,10 +71,12 @@ typedef struct {
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Boot-time initialisation — validates NVM region integrity.
+ * @brief Claim each active region in the region registry.
  *
- * Call once during early boot, before any subsystem that uses
- * NVM regions (init system, future app loader, etc.).
+ * Another subsystem's later claim over a region is then refused.  A failed
+ * claim here is ignored.
+ *
+ * @note Call once at boot.
  */
 void tiku_nvm_map_init(void);
 
@@ -94,12 +96,12 @@ const tiku_nvm_region_t *tiku_nvm_region_get(tiku_nvm_region_id_t id);
 uint8_t tiku_nvm_region_count(void);
 
 /*---------------------------------------------------------------------------*/
-/* BACKWARD-COMPATIBLE ALIASES                                               */
-/*                                                                           */
-/* These map the old tiku_fram_* names to the new tiku_nvm_* names so        */
-/* existing code compiles without changes.  Prefer tiku_nvm_* for new code.  */
+/* TIKU_FRAM_* ALIASES                                                       */
 /*---------------------------------------------------------------------------*/
 
+/* The tiku_fram_* names of this API (the function names are at the end of
+ * the file).  No file in the tree uses them; they are kept for out-of-tree
+ * code. */
 typedef tiku_nvm_region_id_t  tiku_fram_region_id_t;
 typedef tiku_nvm_region_t     tiku_fram_region_t;
 
@@ -116,36 +118,32 @@ typedef tiku_nvm_region_t     tiku_fram_region_t;
 #define TIKU_FRAM_REGION_ACTIVE   TIKU_NVM_REGION_ACTIVE
 
 /*---------------------------------------------------------------------------*/
-/* NVM TECHNOLOGY LABEL -- what to CALL the non-volatile memory in output    */
+/* MEMORY REPORT LABELS                                                      */
 /*---------------------------------------------------------------------------*/
-/*
- * The internal macros still speak the MSP430-era "FRAM_*" vocabulary for the
- * NVM window (TIKU_DEVICE_FRAM_START/END/SIZE) because every port reuses that
- * shape; the aliases above are the same story for the region API.  But nothing
- * the USER reads should call RRAM "FRAM".  Every device header declares its
- * real technology in TIKU_DEVICE_NVM_LABEL -- "FRAM" (MSP430), "RRAM"
- * (nRF54L), "MRAM" (Apollo), "Flash" (RP2350) -- and anything printing a
- * memory report must use that label, never a literal.
+
+/**
+ * @brief The NVM technology's name ("FRAM", "RRAM", "MRAM", "Flash", "NOR").
  *
- * The fallback below is the last resort for a device header that forgot to
- * declare one; it lives here, in the header every memory reporter already
- * includes, so the definition is not duplicated per command.
+ * Memory reports print this rather than a literal, since the NVM window
+ * macros are named TIKU_DEVICE_FRAM_* on every port.  "NVM" is the fallback
+ * for a device header that does not set it.
  */
 #ifndef TIKU_DEVICE_NVM_LABEL
 #define TIKU_DEVICE_NVM_LABEL     "NVM"
 #endif
 
-/*
- * App-usable SRAM, for the same reason and in the same place: a memory report
- * must not print the BANK size when part of the bank is carved away before the
- * linker ever sees it (the nRF54L parts hold back 16 KB of the primary bank for
- * the FLPR coprocessor, so a bank-sized `free` over-reports by that much).
- * Devices that hand their whole bank to the application need declare nothing.
+/**
+ * @brief SRAM the application can use, for memory reports.
+ *
+ * Smaller than the bank where part of it is held back before the link (the
+ * nRF54L parts keep 16 KB of the primary bank for the FLPR coprocessor).  A
+ * device that gives the application its whole bank need not set it.
  */
 #ifndef TIKU_DEVICE_RAM_USABLE
 #define TIKU_DEVICE_RAM_USABLE    TIKU_DEVICE_RAM_SIZE
 #endif
 
+/* The tiku_fram_* function names, with the type and id aliases above. */
 #define tiku_fram_map_init        tiku_nvm_map_init
 #define tiku_fram_region_get      tiku_nvm_region_get
 #define tiku_fram_region_count    tiku_nvm_region_count

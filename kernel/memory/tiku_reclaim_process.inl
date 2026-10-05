@@ -1,10 +1,20 @@
-/* Process-owner half of the coordinator. Included once by tiku_reclaim.c.
- * SPDX-License-Identifier: Apache-2.0
+/*
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
  *
- * Actions live in the coordinator, not event payloads. A poll is only a hint.
- * Exit and start hooks are synchronous so dropped EXITED/INIT events cannot
- * transfer an obligation to the wrong process instance. */
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_reclaim_process.inl - process owners of the coordinator.
+ *
+ * Included once by tiku_reclaim.c.  Actions live in the coordinator, not in
+ * event payloads; the exit and start hooks run synchronously, so a dropped
+ * EXITED or INIT event cannot hand an obligation to the wrong instance.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
+/** @brief Slot of the owner registered for process @p p, or -1. */
 static int process_index(const struct tiku_process *p)
 {
     unsigned i;
@@ -13,6 +23,7 @@ static int process_index(const struct tiku_process *p)
         if (owners[i].live && owners[i].registration.process == p) return (int)i;
     return -1;
 }
+/** @brief Non-zero while the job holds credits and selects owner @p oi. */
 static int process_gated(unsigned oi)
 { return job.active && job.credits && (job.owners & (1u << oi)); }
 int tiku_reclaim_process_owner_valid(tiku_mem_owner_t owner, const void *control, size_t size)
@@ -20,6 +31,10 @@ int tiku_reclaim_process_owner_valid(tiku_mem_owner_t owner, const void *control
     int oi = owner_index(owner);
     return oi >= 0 && owners[oi].registration.process && stable_control(control, size);
 }
+/**
+ * @brief Non-zero when the caller is owner @p oi's gated process instance
+ *        with a PREPARE, ABORT or RESTORE action due.
+ */
 static int process_owner_current(unsigned oi)
 {
     const owner_t *o = &owners[oi];
@@ -98,7 +113,8 @@ int tiku_mem_reclaim_process_exit_valid(const struct tiku_process *p)
 int tiku_mem_reclaim_process_exit(struct tiku_process *p)
 {
     unsigned i; int oi;
-    /* Cancel before an 8-bit event generation can wrap or supervision restarts. */
+    /* Cancel before an 8-bit event generation can wrap or supervision
+     * restarts. */
     for (i = 0; i < TIKU_MEM_MAX_TICKETS; i++)
         if (tickets[i].live && !terminal(&tickets[i]) && tickets[i].process == p)
             cancel(&tickets[i], TIKU_MEM_RECLAIM_CANCELLED);
@@ -111,7 +127,8 @@ int tiku_mem_reclaim_process_exit(struct tiku_process *p)
         return 1;
     }
     /* An unexpected exit is not release consent. Hold the old/partial objects
-     * until the explicitly registered cleanup callback attests stopped access. */
+     * until the explicitly registered cleanup callback attests stopped
+     * access. */
     owners[oi].consent = 0; owners[oi].init_failed = 1;
     job.touched |= (uint16_t)(1u << oi);
     p->exit_reason = TIKU_EXIT_FAILED;
@@ -155,6 +172,12 @@ int tiku_mem_reclaim_process_dispatch(const struct tiku_process *p, unsigned ev)
            ev == TIKU_EVENT_TIMER;
 }
 
+/**
+ * @brief Drive process owner @p oi one step: poll it, or restart it once its
+ *        cleanup and any holds at the original places are done.
+ * @return WAIT while the process works, FAULT when it cannot run again, or a
+ *         cleanup result other than DONE
+ */
 static tiku_mem_owner_result_t process_step(unsigned oi)
 {
     owner_t *o = &owners[oi];

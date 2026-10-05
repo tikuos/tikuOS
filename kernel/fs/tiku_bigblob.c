@@ -16,15 +16,10 @@
 #include <kernel/memory/tiku_nvm_mirror.h>
 
 /*
- * HEADER LAST, AND THAT IS THE WHOLE DURABILITY STORY.
- *
- * Erasing the header first makes the slot read as empty for the entire
- * minutes-long payload write, so a power cut anywhere in the middle leaves
- * "no blob" rather than "a blob that is partly the old one and partly the
- * new".  The magic word going down last is what publishes it, and the CRC
- * beside it is what makes the publication checkable rather than merely
- * present -- the same gate-last discipline the persist cells use, at a
- * different scale.
+ * The header is erased first and written last.  Until its magic word lands
+ * the slot reads as empty, so a power cut during the payload write leaves no
+ * blob rather than a mix of old and new; the CRC beside the magic lets a
+ * reader check the payload.
  */
 #define BIGBLOB_MAGIC   0x424C4232UL      /* "BLB2" */
 
@@ -66,7 +61,7 @@ static const bigblob_hdr_t *hdr_at(tiku_nvm_backend_t *be, uint32_t slot_off)
     return h;
 }
 
-/** @brief Payload ground covered per step; see the header for the sizing. */
+/** @brief Payload bytes erased and programmed per step: one erase sector. */
 #define BIGBLOB_STEP  4096u
 
 /** @brief Validate ranges without overflowing the 32-bit cursor arithmetic. */
@@ -132,7 +127,7 @@ int tiku_bigblob_open(tiku_nvm_backend_t *be, uint32_t slot_off,
     memcpy(w->name, name, strlen(name));
 
     /* Unpublish first: from here the slot reads as empty, so a power cut
-     * during the minutes that follow leaves no blob rather than a splice. */
+     * before the header is rewritten leaves no blob rather than a splice. */
     if (be->erase(be, slot_off, TIKU_BIGBLOB_HDR_BYTES) != 0) {
         return TIKU_BIGBLOB_ERR_IO;
     }
@@ -154,7 +149,7 @@ int tiku_bigblob_step(tiku_bigblob_wr_t *w, uint32_t *done)
         if (n > BIGBLOB_STEP) {
             n = BIGBLOB_STEP;
         }
-        /* Erase and program the same ground in one step, so the medium is
+        /* Erase and program the same range in one step, so the medium is
          * never left erased-but-unwritten across a return to the caller. */
         if (w->be->erase(w->be, payload + w->done, n) != 0 ||
             w->be->write(w->be, payload + w->done, &w->src[w->done], n) != 0) {

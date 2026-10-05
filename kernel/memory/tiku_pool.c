@@ -76,20 +76,13 @@ static tiku_mem_arch_size_t min_block_size(void)
  */
 
 /**
- * @brief Build the freelist by chaining all blocks together
+ * @brief Write one freelist next-pointer into a block.
  *
- * Walks the buffer from block 0 to block (count-1), writing a next
- * pointer at the start of each block. The last block's next pointer
- * is NULL, terminating the list.
+ * An NVM-tier pool (pool->nvm) writes through tiku_tier_nvm_write(), which
+ * opens the NVM window and uses the region backend (MSP430: its FRAM array);
+ * a direct CPU store faults on program-op NVM.  An SRAM pool stores directly.
  *
- * @param pool   Pool whose freelist to build
- */
-/*
- * Write one freelist "next" pointer into a block, honouring the backing.
- * An NVM-tier pool (pool->nvm) routes the word through tiku_tier_nvm_write()
- * -- the bootrom program op on MRAM, the flash program on RP2350, an in-place
- * store on FRAM -- because a direct CPU store would bus-fault on program-op
- * NVM. An SRAM pool stores directly (the hot path, unchanged).
+ * @return TIKU_MEM_OK, or the tiku_tier_nvm_write() error
  */
 static tiku_mem_err_t pool_write_next(const tiku_pool_t *pool,
                                       void *block, void *next)
@@ -103,15 +96,13 @@ static tiku_mem_err_t pool_write_next(const tiku_pool_t *pool,
 }
 
 /*
- * Program-op NVM (carved MRAM / RP2350 Flash) is written a whole erase granule
- * at a time, so routing each freelist "next" pointer through pool_write_next()
- * one block at a time erases+reprograms a block's sector once PER block -- a
- * pool whose blocks share a sector erases it ~block_count times just at create.
- * Stage a run of whole blocks in SRAM, overlay every next-pointer in the run,
- * and write the run in a single tiku_tier_nvm_write(): the region backend then
- * coalesces to one erase per sector. Only program-op parts need this (and have
- * the SRAM for it); MSP430 FRAM / host write in place, so they keep the simple
- * per-block path below.
+ * Program-op NVM (carved MRAM, RP2350 flash) is rewritten a whole window or
+ * sector at a time, so writing the freelist through pool_write_next() one
+ * block at a time rewrites a sector that several blocks share once per
+ * block.  The batch stages a run of whole blocks in SRAM, overlays every
+ * next-pointer in the run and writes the run with one tiku_tier_nvm_write().
+ * It is built for Ambiq and RP2350; every other port takes the per-block
+ * path in build_freelist().
  */
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350)
 #define TIKU_POOL_NVM_BATCH 1
@@ -123,9 +114,8 @@ static uint8_t pool_nvm_stage[TIKU_POOL_NVM_STAGE_BYTES];
 /**
  * @brief Thread a pool's free-list through NVM-backed block storage.
  *
- * The NVM path cannot rewrite a block in place without an erase per pointer, so
- * blocks at least a stage wide get a direct next-pointer write while smaller
- * ones sharing a sector are coalesced and written a staged run at a time.
+ * Blocks wider than a stage get a direct next-pointer write each; smaller
+ * blocks are coalesced and written a staged run of whole blocks at a time.
  *
  * @param pool  Pool whose block_count / block_size / buf describe the region.
  * @return TIKU_MEM_OK, or an NVM-tier error on write failure (leaving a
@@ -137,8 +127,8 @@ static tiku_mem_err_t build_freelist_nvm(tiku_pool_t *pool)
     const tiku_mem_arch_size_t n  = pool->block_count;
     tiku_mem_arch_size_t i;
 
-    /* A block at least a stage wide already owns its sector(s): a per-block
-     * pointer write is one erase each, with nothing to coalesce. */
+    /* A block wider than a stage does not fit the staging buffer, so each
+     * of its pointers is written on its own. */
     if (bs > (tiku_mem_arch_size_t)TIKU_POOL_NVM_STAGE_BYTES) {
         for (i = 0; i < n; i++) {
             uint8_t *blk = pool->buf + (i * bs);
@@ -187,6 +177,15 @@ static tiku_mem_err_t build_freelist_nvm(tiku_pool_t *pool)
 #define TIKU_POOL_NVM_BATCH 0
 #endif /* program-op NVM batch */
 
+/**
+ * @brief Build the freelist by chaining all blocks together.
+ *
+ * Writes a next-pointer at the start of each block, from block 0 to block
+ * (count-1); the last block's is NULL.  free_head is set only on success.
+ *
+ * @param pool   Pool whose freelist to build
+ * @return TIKU_MEM_OK, or the NVM write error, leaving the freelist partial
+ */
 static tiku_mem_err_t build_freelist(tiku_pool_t *pool)
 {
     tiku_mem_arch_size_t i;
@@ -194,8 +193,8 @@ static tiku_mem_err_t build_freelist(tiku_pool_t *pool)
     uint8_t *block;
 
 #if TIKU_POOL_NVM_BATCH
-    /* NVM-tier pool on program-op NVM: build the freelist a run at a time so
-     * each sector is erased once, not once per block (see build_freelist_nvm). */
+    /* NVM-tier pool on program-op NVM: write the freelist a run of blocks
+     * at a time, not once per block (see build_freelist_nvm). */
     if (pool->nvm) {
         err = build_freelist_nvm(pool);
         if (err != TIKU_MEM_OK) {
@@ -214,7 +213,6 @@ static tiku_mem_err_t build_freelist(tiku_pool_t *pool)
         }
     }
 
-    /* Last block terminates the list */
     block = pool->buf + ((pool->block_count - 1U) * pool->block_size);
     err = pool_write_next(pool, block, NULL);
     if (err != TIKU_MEM_OK) {
@@ -225,9 +223,13 @@ static tiku_mem_err_t build_freelist(tiku_pool_t *pool)
     return TIKU_MEM_OK;
 }
 
-/* Bounded freelist membership check that rejects a double-free.  Pool free is
- * normally O(1); the validation walk is O(n), but embedded pools are small and
- * preventing a used_count underflow / cyclic freelist is worth the bound. */
+/**
+ * @brief Whether @p block is already on the freelist (a double free).
+ *
+ * The walk is O(n) and stops after block_count entries.  Refusing a double
+ * free keeps used_count from underflowing and the freelist from turning
+ * cyclic.
+ */
 static int block_is_already_free(const tiku_pool_t *pool, const void *block)
 {
     const void *cur = pool->free_head;
@@ -247,17 +249,24 @@ static int block_is_already_free(const tiku_pool_t *pool, const void *block)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Initialize a pool without region-registry validation.
+ * @brief Initialize a pool; the shared worker of the three pool creators.
  *
- * For library code needing a pool over an embedded struct member before the
- * registry exists.  Marked SRAM tier with id 0; every other operation behaves
- * identically.
+ * Raises the block size to the freelist minimum, rounds it to the alignment
+ * and builds the freelist through a local copy, which is published to
+ * @p pool only on success.
  *
  * @param pool         Pool control block to initialize
- * @param buf          Pointer to the backing buffer
+ * @param buf          Backing buffer, aligned to TIKU_MEM_ARCH_ALIGNMENT and
+ *                     to a pointer
  * @param block_size   Requested size of each block in bytes
  * @param block_count  Number of blocks
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad arguments
+ * @param id           Caller label stored in the pool
+ * @param nvm          Non-zero for an NVM-tier pool, written through
+ *                     tiku_tier_nvm_write()
+ * @return TIKU_MEM_OK, TIKU_MEM_ERR_INVALID on bad arguments,
+ *         TIKU_MEM_ERR_BUSY while @p pool still holds a tracked reservation,
+ *         TIKU_MEM_ERR_NOMEM when the blocks overflow the address space, or
+ *         the NVM write error
  */
 static tiku_mem_err_t pool_create(tiku_pool_t *pool, uint8_t *buf,
         tiku_mem_arch_size_t block_size, tiku_mem_arch_size_t block_count,
@@ -314,6 +323,7 @@ tiku_mem_err_t tiku_pool_create_nvm(tiku_pool_t *pool, uint8_t *buf,
     return pool_create(pool, buf, block_size, block_count, id, 1);
 }
 
+/** @brief Whether @p pool is active, consistent and matches its backing. */
 static int pool_valid(const tiku_pool_t *pool)
 {
     return pool != NULL && pool->active && pool->buf != NULL &&
@@ -345,8 +355,8 @@ tiku_mem_err_t tiku_pool_destroy(tiku_pool_t *pool)
  * chose it at create time.
  *
  * @param pool   Pool to allocate from (must be active)
- * @return Pointer to the allocated block, or NULL if the pool is empty
- *         or the arguments are invalid
+ * @return Pointer to the allocated block, or NULL if the pool is empty or
+ *         invalid, its last reset failed, or a reclaim job holds its owner
  */
 void *tiku_pool_alloc(tiku_pool_t *pool)
 {
@@ -362,14 +372,12 @@ void *tiku_pool_alloc(tiku_pool_t *pool)
         return NULL;
     }
 
-    /* Pop the head of the freelist */
     block    = pool->free_head;
     next_ptr = (void **)(void *)block;
     pool->free_head = *next_ptr;
 
     pool->used_count++;
 
-    /* Track lifetime high-water mark */
     if (pool->used_count > pool->peak_count) {
         pool->peak_count = pool->used_count;
     }
@@ -386,8 +394,10 @@ void *tiku_pool_alloc(tiku_pool_t *pool)
  *
  * @param pool   Pool the block belongs to
  * @param ptr    Pointer previously returned by tiku_pool_alloc
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if ptr is
- *         outside the pool or not aligned to a block boundary
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if ptr is outside
+ *         the pool, off a block boundary or already free (or the pool is
+ *         invalid or failed its last reset), TIKU_MEM_ERR_BUSY while a
+ *         reclaim job holds the pool's owner, or the NVM write error
  */
 tiku_mem_err_t tiku_pool_free(tiku_pool_t *pool, void *ptr)
 {
@@ -459,6 +469,7 @@ tiku_mem_err_t tiku_pool_free(tiku_pool_t *pool, void *ptr)
  * @param pool   Pool to query
  * @param stats  Output structure (caller-provided)
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on a NULL argument
+ *         or an invalid pool
  */
 tiku_mem_err_t tiku_pool_stats(const tiku_pool_t *pool,
                                 tiku_mem_stats_t *stats)
@@ -479,12 +490,14 @@ tiku_mem_err_t tiku_pool_stats(const tiku_pool_t *pool,
 /**
  * @brief Reset the pool, returning all blocks to the freelist.
  *
- * Re-chains every block and zeroes used_count, keeping the peak so it stays a
- * lifetime figure.  Unlike an arena this is O(n), since each block needs its
- * next-pointer written -- cheap at the pool sizes in use.
+ * Re-chains every block and zeroes used_count; the peak stays a lifetime
+ * figure.  O(n), since each block's next-pointer is rewritten.  After a
+ * failed rebuild, alloc and free refuse the pool until a reset succeeds.
  *
  * @param pool   Pool to reset
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if pool is NULL
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID for an invalid pool,
+ *         TIKU_MEM_ERR_BUSY while a reclaim job holds the pool's owner, or
+ *         the NVM write error
  */
 tiku_mem_err_t tiku_pool_reset(tiku_pool_t *pool)
 {

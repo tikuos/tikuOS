@@ -27,13 +27,9 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * The hibernate marker is a small struct persisted to FRAM via the
- * persist store. It contains a magic number for validation, a
- * monotonic boot count, and a timestamp supplied by the caller.
- *
- * The persist store and its FRAM backing buffer are module-private.
- * The store is initialized lazily on the first call to hibernate or
- * resume.
+ * The hibernate marker (magic, monotonic boot count, the caller's timestamp
+ * and a CRC) is kept in the caller's NVM buffer through a module-private
+ * persist store, initialized on the first call to hibernate or resume.
  */
 
 static tiku_persist_store_t hibernate_store;
@@ -49,7 +45,7 @@ static uint8_t              hibernate_initialized;
  * Initializes the store and registers the marker key. Safe to call
  * multiple times — subsequent calls are no-ops.
  *
- * @param fram_buf   FRAM buffer for the marker (caller-provided)
+ * @param fram_buf   NVM buffer for the marker (caller-provided)
  * @return TIKU_MEM_OK on success, or an error code
  */
 static tiku_mem_err_t hibernate_ensure_init(uint8_t *fram_buf)
@@ -85,12 +81,11 @@ static tiku_mem_err_t hibernate_ensure_init(uint8_t *fram_buf)
 /**
  * @brief Reset the hibernate subsystem to uninitialised state.
  *
- * Test-only.  hibernate_initialized lives in SRAM and survives across calls,
- * unlike a real power cycle, so independent test groups that each expect
- * boot_count to start at 1 need this between them.
+ * hibernate_initialized lives in SRAM, so within one boot it stays set
+ * across calls; independent test groups that each expect boot_count to start
+ * at 1 need this between them.
  *
- * @note Only for test use.  Has no effect on NVM contents beyond
- *       clearing the SRAM-resident persist-store cache.
+ * @note Test use only.  Clears the SRAM persist store; NVM is untouched.
  */
 void tiku_mem_hibernate_reset(void)
 {
@@ -102,13 +97,13 @@ void tiku_mem_hibernate_reset(void)
  * @brief Prepare the memory subsystem for hibernation.
  *
  * Flushes every dirty cache, then writes a marker holding the incremented boot
- * count and the caller's timestamp, all in one MPU window.  Call immediately
- * before entering a sleep mode that loses SRAM.
+ * count and the caller's timestamp.  A failed cache flush skips the marker.
  *
- * @param fram_buf   FRAM buffer for the hibernate marker (must reside
- *                   in NVM, at least sizeof(tiku_hibernate_marker_t))
+ * @param fram_buf   NVM buffer for the hibernate marker, at least
+ *                   sizeof(tiku_hibernate_marker_t)
  * @param timestamp  Caller-supplied timestamp (RTC ticks, epoch, etc.)
  * @return TIKU_MEM_OK on success, or an error code
+ * @note Call immediately before entering a sleep mode that loses SRAM.
  */
 tiku_mem_err_t tiku_mem_hibernate(uint8_t *fram_buf, uint32_t timestamp)
 {
@@ -126,8 +121,7 @@ tiku_mem_err_t tiku_mem_hibernate(uint8_t *fram_buf, uint32_t timestamp)
         return err;
     }
 
-    /* Read existing marker to get current boot count (may fail on
-     * first hibernate — that's fine, the count starts from zero). */
+    /* A missing or invalid marker (the first hibernate) starts at 1. */
     memset(&existing, 0, sizeof(existing));
     if (tiku_persist_read(&hibernate_store, TIKU_HIBERNATE_KEY,
                            (uint8_t *)&existing, sizeof(existing),
@@ -145,10 +139,9 @@ tiku_mem_err_t tiku_mem_hibernate(uint8_t *fram_buf, uint32_t timestamp)
     marker.crc       = tiku_nvm_crc32(&marker.boot_count,
                                       2 * sizeof(uint32_t));
 
-    /* Each operation owns its window; a failed flush must not be retried here. */
+    /* Each call opens its own NVM window; a failed flush is not retried. */
     err = tiku_cache_flush_all();
 
-    /* Write the hibernate marker */
     if (err == TIKU_MEM_OK) {
         err = tiku_persist_write(&hibernate_store, TIKU_HIBERNATE_KEY,
                                   (const uint8_t *)&marker, sizeof(marker));
@@ -160,15 +153,16 @@ tiku_mem_err_t tiku_mem_hibernate(uint8_t *fram_buf, uint32_t timestamp)
 /**
  * @brief Check for a warm resume after hibernation.
  *
- * Call after tiku_mem_init() on every boot.  A valid marker means warm resume:
- * every cached region is reloaded from NVM and the marker is preserved so the
- * boot count stays readable.  No marker means a cold boot.
+ * A valid marker means warm resume: every cached region is reloaded from NVM
+ * and the marker is preserved so the boot count stays readable.  No marker
+ * means a cold boot.
  *
- * @param fram_buf    FRAM buffer that was used for the hibernate marker
+ * @param fram_buf    NVM buffer that was used for the hibernate marker
  * @param marker_out  Output: hibernate marker (may be NULL if not needed)
  * @return TIKU_MEM_OK if warm resume (valid marker found),
  *         TIKU_MEM_ERR_NOT_FOUND if cold boot (no marker),
  *         or another error code on failure
+ * @note Call after tiku_mem_init() on every boot.
  */
 tiku_mem_err_t tiku_mem_resume(uint8_t *fram_buf,
                                 tiku_hibernate_marker_t *marker_out)
@@ -187,7 +181,6 @@ tiku_mem_err_t tiku_mem_resume(uint8_t *fram_buf,
         return err;
     }
 
-    /* Try to read the hibernate marker */
     memset(&marker, 0, sizeof(marker));
     err = tiku_persist_read(&hibernate_store, TIKU_HIBERNATE_KEY,
                              (uint8_t *)&marker, sizeof(marker),
@@ -197,15 +190,15 @@ tiku_mem_err_t tiku_mem_resume(uint8_t *fram_buf,
         return TIKU_MEM_ERR_NOT_FOUND;
     }
 
-    /* Validate the marker: magic AND payload CRC.  Magic-only let a
-     * torn marker write masquerade as a valid warm-resume record. */
+    /* Magic and payload CRC: the CRC rejects a torn marker whose magic
+     * survived. */
     if (marker.magic != TIKU_HIBERNATE_MAGIC ||
         marker.crc != tiku_nvm_crc32(&marker.boot_count,
                                      2 * sizeof(uint32_t))) {
         return TIKU_MEM_ERR_NOT_FOUND;
     }
 
-    /* Valid warm resume — reload all cached regions from FRAM */
+    /* Valid warm resume: reload all cached regions from NVM. */
     for (i = 0; i < tiku_cache_get_count(); i++) {
         tiku_cached_region_t *r = tiku_cache_get_region(i);
 

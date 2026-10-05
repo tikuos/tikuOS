@@ -21,25 +21,15 @@
 #include <kernel/fs/tiku_nvm_backend.h>
 
 /*
- * Why not TFS, AND WHY NOT tiku_blob.
- *
- * Both exist and both are the right answer for what they were built for:
- * many small files on byte-writable NVM.  Neither fits a 62 MB model on NOR
- * flash.  TFS allocates fixed-size slots and assumes a 4-byte write
- * granularity, where this medium erases in 4 KB blocks and cannot rewrite in
- * place at all; tiku_blob spans an object across at most 1000 TFS slots, so
- * the same object would need 62 KB slots and more of them than TFS has.
- *
- * The access pattern is also nothing like a filesystem's.  A model is written
- * once, read whole, and never modified -- so the structure that fits is a
- * slot, a length, a checksum, and nothing else.  Directories, free lists and
- * in-place update are all machinery for a problem this does not have.
+ * A slot is one header erase block (magic, length, CRC, name) followed by the
+ * payload.  There is no directory, free list or in-place update; many small
+ * files belong in TFS or tiku_blob.
  */
 
 /** @brief Result codes (0 = success, negative = failure). */
 typedef enum {
     TIKU_BIGBLOB_OK        =  0,
-    TIKU_BIGBLOB_ERR_PARAM = -1,  /**< NULL argument or an impossible size  */
+    TIKU_BIGBLOB_ERR_PARAM = -1,  /**< NULL, empty, unaligned or too long   */
     TIKU_BIGBLOB_ERR_NOENT = -2,  /**< the slot holds no blob               */
     TIKU_BIGBLOB_ERR_SPACE = -3,  /**< the blob does not fit the medium     */
     TIKU_BIGBLOB_ERR_CRC   = -4,  /**< contents do not match the header     */
@@ -49,18 +39,11 @@ typedef enum {
 /** @brief Longest blob name, excluding the terminator. */
 #define TIKU_BIGBLOB_NAME_MAX  23u
 
-/*
- * Sized to the LARGEST erase granularity the medium offers, not to the header,
- * so the payload begins on a block boundary and a blob's erase can never reach
- * into a neighbouring slot's block.  That is a containment property, not a
- * speed one: this was raised from 4 KB expecting the aligned case to erase
- * faster, and measurement said otherwise -- 1 MB took 5127 ms aligned against
- * 5084 ms unaligned, because erase time on this flash tracks the AREA cleared
- * rather than the number of commands issued.  Recorded because the opposite
- * is the natural guess.
+/**
+ * @brief Bytes reserved for a slot's header: one 64 KB block, the largest the
+ *        medium erases, so the payload starts on a block boundary and a
+ *        slot's erases stay inside its own blocks.
  */
-
-/** @brief Bytes reserved for a slot's header. */
 #define TIKU_BIGBLOB_HDR_BYTES 65536u
 
 /** @brief What a slot holds, as reported by tiku_bigblob_info(). */
@@ -70,20 +53,10 @@ typedef struct {
     char     name[TIKU_BIGBLOB_NAME_MAX + 1u];
 } tiku_bigblob_info_t;
 
-/*
- * A streamed write, because a blocking one is a denial of service.
- *
- * Publishing a model-sized object takes minutes on this medium, and a device
- * that stops answering for minutes is one a host resets.  So the write is a
- * cursor the caller advances a step at a time, between whatever else it owes
- * the world.  A step is one erase sector -- around twenty milliseconds here,
- * which is inside every timeout that matters, where a whole erase block would
- * be three hundred and is not.
- *
- * The one-shot form below remains for callers with nothing else to do.
+/**
+ * @brief A streamed write in progress, advanced by tiku_bigblob_step()
+ *        between the caller's other work.  Fields are private.
  */
-
-/** @brief A write in progress.  Fields are private; the API moves the cursor. */
 typedef struct {
     tiku_nvm_backend_t *be;
     const uint8_t      *src;
@@ -113,6 +86,10 @@ int tiku_bigblob_open(tiku_nvm_backend_t *be, uint32_t slot_off,
 /**
  * @brief Advance a streamed write by one step.
  *
+ * A step erases and programs at most one 4 KB sector of payload.  The call
+ * after the last sector reads the whole payload back to check its CRC, then
+ * publishes the header.
+ *
  * @param w    the cursor
  * @param done receives bytes written so far; may be NULL
  * @return 1 while more remains, 0 when published, negative on error
@@ -121,6 +98,9 @@ int tiku_bigblob_step(tiku_bigblob_wr_t *w, uint32_t *done);
 
 /**
  * @brief Write a blob into the slot at @p slot_off, replacing any previous.
+ *
+ * Does the whole write in one call; tiku_bigblob_open() and
+ * tiku_bigblob_step() spread the same work over many.
  *
  * @param be       backend to write through
  * @param slot_off byte offset of the slot, erase-block aligned

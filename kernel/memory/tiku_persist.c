@@ -7,9 +7,9 @@
  *
  * tiku_persist.c - persistent NVM key-value store implementation.
  *
- * Maps short string keys to NVM-backed buffers registered at boot.  A magic word
- * validates entries across reboots and write counts track wear.  All NVM access
- * goes through tiku_mem_arch_nvm_read/write, so this file stays portable.
+ * Maps short string keys to NVM-backed buffers and implements the persist
+ * cells.  Value copies go through the NVM HAL; gate words, the u32 fast path
+ * and entry metadata are direct stores inside the NVM window.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -61,10 +61,12 @@ static tiku_persist_entry_t *persist_find(tiku_persist_store_t *store,
  *
  * Scans every slot, keeping entries whose magic and valid flag agree and
  * clearing the rest -- which is what separates real entries from the arbitrary
- * contents of a virgin or reused store.  Call once at boot.
+ * contents of a virgin or reused store.
  *
  * @param store   Store to initialize
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if store is NULL
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if store is NULL,
+ *         or TIKU_MEM_ERR_IO when the relock flush fails
+ * @note Call once at boot.
  */
 tiku_mem_err_t tiku_persist_init(tiku_persist_store_t *store)
 {
@@ -77,12 +79,11 @@ tiku_mem_err_t tiku_persist_init(tiku_persist_store_t *store)
         return TIKU_MEM_ERR_INVALID;
     }
 
-    /* The store API owns its MPU windows (same doctrine as the cell
-     * API): the store struct and value buffers commonly live in the
-     * protected .persistent/.uninit region, and with real write
-     * protection an un-windowed store op is a MemManage fault --
-     * found exactly that way (test_nvm_pool, hardfault @0x2000433c).
-     * Nest-safe under callers holding their own window. */
+    /* The store API owns its MPU windows, as the cell API does: the
+     * store struct and value buffers commonly live in the protected
+     * .persistent/.uninit region, where a store outside the window
+     * faults or is dropped.  Nest-safe under callers holding their own
+     * window. */
     {
         uint16_t mpu_saved;
 
@@ -119,7 +120,8 @@ tiku_mem_err_t tiku_persist_init(tiku_persist_store_t *store)
  * @param key       Null-terminated key string
  * @param fram_buf  Pointer to caller-provided NVM buffer
  * @param capacity  Size of the NVM buffer in bytes
- * @return TIKU_MEM_OK, TIKU_MEM_ERR_INVALID, or TIKU_MEM_ERR_FULL
+ * @return TIKU_MEM_OK, TIKU_MEM_ERR_INVALID, TIKU_MEM_ERR_FULL, or
+ *         TIKU_MEM_ERR_IO when the relock flush fails
  */
 tiku_mem_err_t tiku_persist_register(tiku_persist_store_t *store,
                                      const char *key,
@@ -136,17 +138,14 @@ tiku_mem_err_t tiku_persist_register(tiku_persist_store_t *store,
 
     /* Reject keys that do not fit key[TIKU_PERSIST_MAX_KEY_LEN] including
      * the NUL.  Silent truncation would store a prefix that persist_find
-     * (which compares TIKU_PERSIST_MAX_KEY_LEN chars of the caller's FULL
-     * key) could never match again -- the entry registers fine and then
-     * every write/read/delete under the same key returns NOT_FOUND (bit on
-     * nRF54LM20A HW via the persist-reset-survival test's 9-char
-     * "tb.reboot", 2026-07-14).  The persist edge test documents
-     * reject-with-INVALID as sanctioned behavior. */
+     * (which compares TIKU_PERSIST_MAX_KEY_LEN chars of the caller's full
+     * key) could never match again: the entry registers and then every
+     * write, read and delete under the same key returns NOT_FOUND. */
     if (strlen(key) >= TIKU_PERSIST_MAX_KEY_LEN) {
         return TIKU_MEM_ERR_INVALID;
     }
 
-    /* Verify the FRAM buffer resides in NVM */
+    /* The buffer must sit in an NVM region. */
     if (!tiku_region_contains(fram_buf, capacity, TIKU_MEM_REGION_NVM)) {
         return TIKU_MEM_ERR_INVALID;
     }
@@ -167,7 +166,6 @@ tiku_mem_err_t tiku_persist_register(tiku_persist_store_t *store,
             entry->capacity = capacity;
             err = TIKU_MEM_OK;
         } else {
-            /* Find first empty slot */
             for (i = 0; i < TIKU_PERSIST_MAX_ENTRIES; i++) {
                 if (!store->entries[i].valid) {
                     entry = &store->entries[i];
@@ -204,9 +202,12 @@ tiku_mem_err_t tiku_persist_register(tiku_persist_store_t *store,
  *
  * @param store     Store to read from
  * @param key       Key to look up
- * @param data      Destination buffer in SRAM
- * @param data_len  Bytes to copy
- * @return TIKU_MEM_OK, TIKU_MEM_ERR_NOT_FOUND, or TIKU_MEM_ERR_INVALID
+ * @param buf       Destination buffer in SRAM
+ * @param buf_size  Size of @p buf in bytes
+ * @param out_len   Output: the stored value's length, set even when @p buf
+ *                  is too small
+ * @return TIKU_MEM_OK, TIKU_MEM_ERR_NOT_FOUND, TIKU_MEM_ERR_NOMEM when
+ *         @p buf is smaller than the value, or TIKU_MEM_ERR_INVALID
  */
 tiku_mem_err_t tiku_persist_read(tiku_persist_store_t *store,
                                   const char *key,
@@ -248,7 +249,8 @@ tiku_mem_err_t tiku_persist_read(tiku_persist_store_t *store,
  * @param data      Source data in SRAM
  * @param data_len  Length of source data
  * @return TIKU_MEM_OK, TIKU_MEM_ERR_NOT_FOUND, TIKU_MEM_ERR_NOMEM,
- *         or TIKU_MEM_ERR_INVALID
+ *         TIKU_MEM_ERR_INVALID, or TIKU_MEM_ERR_IO when the relock flush
+ *         fails
  */
 tiku_mem_err_t tiku_persist_write(tiku_persist_store_t *store,
                                    const char *key,
@@ -296,7 +298,8 @@ tiku_mem_err_t tiku_persist_write(tiku_persist_store_t *store,
  *
  * @param store   Store to delete from
  * @param key     Key to delete
- * @return TIKU_MEM_OK, TIKU_MEM_ERR_NOT_FOUND, or TIKU_MEM_ERR_INVALID
+ * @return TIKU_MEM_OK, TIKU_MEM_ERR_NOT_FOUND, TIKU_MEM_ERR_INVALID, or
+ *         TIKU_MEM_ERR_IO when the relock flush fails
  */
 tiku_mem_err_t tiku_persist_delete(tiku_persist_store_t *store,
                                     const char *key)
@@ -332,15 +335,14 @@ tiku_mem_err_t tiku_persist_delete(tiku_persist_store_t *store,
 /**
  * @brief Check wear level for a key
  *
- * Returns the write count and whether it exceeds the warning threshold.
- * NVM technologies have finite write endurance; tracking matters for
- * safety-critical systems and hot keys.
+ * Returns the write count and whether it has reached the warning threshold,
+ * since NVM technologies have finite write endurance.
  *
  * @param store       Store to query
  * @param key         Key to check
  * @param write_count Output: number of writes to this key (may be NULL)
- * @return 1 if write_count exceeds threshold, 0 if within limits,
- *         or a negative tiku_mem_err_t on error
+ * @return 1 once write_count reaches TIKU_PERSIST_WEAR_THRESHOLD, 0 below
+ *         it, or a negative tiku_mem_err_t on error
  */
 int tiku_persist_wear_check(tiku_persist_store_t *store,
                              const char *key,
@@ -365,27 +367,27 @@ int tiku_persist_wear_check(tiku_persist_store_t *store,
 }
 
 /*---------------------------------------------------------------------------*/
-/* PERSISTENT CELLS — declared magic-gated NVM values                        */
+/* PERSISTENT CELLS                                                          */
 /*---------------------------------------------------------------------------*/
 
 /*
- * See the design discussion in tiku_mem.h.  The functions below are
- * the single implementation of the magic-gate / MPU-window / commit-
- * ordering idiom that the boot counter, lifetime accumulator, device
- * name and RTC epoch previously each hand-rolled.
+ * See TIKU_PERSIST_CELL in tiku_mem.h.  The functions below implement the
+ * magic-gate / MPU-window / commit-ordering idiom that the boot counter,
+ * lifetime accumulator, device name, RTC epoch and the other cells use.
  *
  * NVM access routing: variable-length data copies go through the
  * tiku_mem_arch_nvm_write() HAL so platforms with per-range write
  * hooks (ECC scrub, cache maintenance) see every cell write; the
  * opaque cross-TU call also acts as a compiler barrier that pins
- * the data-before-gate store order.  The two word-sized stores
- * (gate stamp, write_u32 fast path) stay direct ON PURPOSE: they
- * are the atomicity-critical stores, and a single aligned word
- * store is power-cut-atomic where the HAL's byte loop is not.
- * Durability is platform-owned either way — tiku_mpu_lock_nvm()
- * calls tiku_mem_arch_nvm_flush(), which commits everything written
- * inside the window (no-op on FRAM, flash-sector snapshot on
- * RP2350); direct stores and HAL writes are equally covered.
+ * the data-before-gate store order.  The word-sized stores (gate
+ * stamps, the write_u32 fast path) stay direct: they are the
+ * atomicity-critical stores, and a single aligned word store is
+ * power-cut-atomic where the HAL's byte loop is not.  Durability is
+ * platform-owned either way: the relock (tiku_mpu_lock_nvm_status())
+ * calls tiku_mem_arch_nvm_flush_status(), which commits everything
+ * written inside the window (a mirror snapshot on the mirror platforms,
+ * the MRAM write buffer on RA8P1); direct stores and HAL writes are
+ * equally covered.
  */
 
 /** Zero source for chunked default-fill through the NVM HAL */
@@ -418,39 +420,39 @@ static void cell_zero_fill(const tiku_persist_cell_t *c)
 static uint8_t cell_count;
 
 /**
- * Of those, cells that had to be primed (gate mismatch).  SRAM;
- * served by /sys/persist/primed.  Non-zero on an established device
- * signals a layout change, an NVM wipe, or in-field corruption.
+ * Of those, cells primed (gate mismatch), served by /sys/persist/primed.
+ * Non-zero on an established device means cells the image adds or could
+ * not carry across a layout change, an NVM wipe, or corruption.
  */
 static uint8_t cell_primed;
+
+/* A value wider than one aligned arch-word store can tear on a power
+ * cut (16-bit words on MSP430, 32-bit elsewhere).  For those, cell_write/
+ * cell_commit run the crash-consistent protocol: invalidate the gate,
+ * write the value, revalidate.  A cut mid-value then leaves an invalid
+ * gate — the next boot re-primes the default — instead of a torn value
+ * that a reader would trust.  Single-word values skip the protocol:
+ * the store itself is the atom.
+ *
+ * On the mirror platforms (Ambiq, RP2350, STM32N6, ESP32-C61) all three
+ * steps land in SRAM inside one unlock window and only the final state
+ * reaches the NVM mirror at relock; there the equivalent hole is a torn
+ * flush, which the mirror's V2 CRC (tiku_nvm_mirror.h) detects at boot
+ * restore.  On MSP430 (FRAM in place) each step is durable on its own and
+ * the protocol alone prevents the tear. */
+#define CELL_CAN_TEAR(len)  ((len) > sizeof(unsigned int))
 
 /**
  * @brief Validate a cell's gate; prime defaults on a virgin NVM.
  *
- * The commit ordering lives here once: the value bytes are fully written BEFORE
- * the gate is stamped, so a cut anywhere in the window leaves an invalid gate
- * and the next boot re-primes.  A stamped gate over half-written defaults cannot occur.
+ * The value bytes are fully written before the gate is stamped, so a cut
+ * anywhere in the window leaves an invalid gate and the next boot re-primes.
+ * A stamped gate over half-written defaults cannot occur.
  *
  * @param c  Cell descriptor (from TIKU_PERSIST_CELL)
  * @return 1 when the cell was primed this boot, 0 when the persisted
  *         value was kept
  */
-/* A value wider than one aligned arch-word store can tear on a power
- * cut (16-bit words on MSP430, 32-bit on ARM).  For those, cell_write/
- * cell_commit run the crash-consistent protocol: INVALIDATE the gate,
- * write the value, REVALIDATE.  A cut mid-value then leaves an invalid
- * gate — the next boot re-primes the default — instead of a torn value
- * that a reader would trust.  Single-word values skip the protocol:
- * the store itself is the atom.
- *
- * Mirror-platform note (Ambiq/RP2350): inside one unlock window all
- * three steps land in SRAM and only the final state reaches the NVM
- * mirror at relock — there the equivalent hole is a TORN FLUSH, which
- * the mirror's V2 CRC (tiku_nvm_mirror.h) detects at boot restore.
- * On MSP430 (FRAM in place) each step is individually durable and the
- * protocol carries the full weight. */
-#define CELL_CAN_TEAR(len)  ((len) > sizeof(unsigned int))
-
 uint8_t tiku_persist_cell_init(const tiku_persist_cell_t *c)
 {
     TIKU_MEM_KERNEL_ONLY(0);
@@ -480,7 +482,8 @@ uint8_t tiku_persist_cell_init(const tiku_persist_cell_t *c)
                                 (const uint8_t *)c->def, n);
     }
     *c->gate = c->key;          /* commit point */
-    tiku_mpu_lock_nvm(saved);   /* Unchecked: init reports priming, not completion. */
+    /* Unchecked: init reports priming, not completion. */
+    tiku_mpu_lock_nvm(saved);
     tiku_atomic_exit();
 
     cell_primed++;
@@ -508,6 +511,8 @@ uint8_t tiku_persist_cell_valid(const tiku_persist_cell_t *c)
  * @param c    Cell descriptor
  * @param src  New value bytes
  * @param len  Bytes to copy (clamped to the cell size)
+ * @return TIKU_MEM_OK, TIKU_MEM_ERR_INVALID on a NULL argument, or
+ *         TIKU_MEM_ERR_IO when the relock flush fails
  */
 tiku_mem_err_t tiku_persist_cell_write_status(const tiku_persist_cell_t *c,
                                               const void *src, uint16_t len)
@@ -544,6 +549,8 @@ tiku_mem_err_t tiku_persist_cell_write_status(const tiku_persist_cell_t *c,
  * @param c    Cell descriptor
  * @param src  New value bytes
  * @param len  Bytes to copy (clamped to the cell size)
+ * @return TIKU_MEM_OK, TIKU_MEM_ERR_INVALID on a NULL argument, or
+ *         TIKU_MEM_ERR_IO when the relock flush fails
  */
 tiku_mem_err_t tiku_persist_cell_commit_status(const tiku_persist_cell_t *c,
                                                const void *src, uint16_t len)
@@ -578,10 +585,13 @@ tiku_mem_err_t tiku_persist_cell_commit_status(const tiku_persist_cell_t *c,
  *
  * When the cell is exactly a uint32_t (the macro guarantees natural
  * alignment, since the caller declared the variable), this compiles
- * to direct stores — one on ARM, two 16-bit words on MSP430.
+ * to direct stores: one on 32-bit parts, two 16-bit words on MSP430.
  *
- * @param c  Cell descriptor (size must be 4)
+ * @param c  Cell descriptor; a cell of another size takes the first
+ *           min(size, 4) bytes of @p v through the NVM HAL
  * @param v  New value
+ * @return TIKU_MEM_OK, TIKU_MEM_ERR_INVALID on a NULL argument, or
+ *         TIKU_MEM_ERR_IO when the relock flush fails
  */
 tiku_mem_err_t tiku_persist_cell_write_u32_status(const tiku_persist_cell_t *c,
                                                   uint32_t v)
@@ -597,10 +607,11 @@ tiku_mem_err_t tiku_persist_cell_write_u32_status(const tiku_persist_cell_t *c,
     tiku_atomic_enter();
     saved = tiku_mpu_unlock_nvm();
     if (c->size == sizeof(uint32_t)) {
-        /* Direct aligned store on purpose: power-cut-atomic at word
-         * granularity on ARM.  On MSP430 a uint32_t is TWO 16-bit
-         * word stores and can tear — bracket with the gate protocol
-         * there (compile-time: CELL_CAN_TEAR(4) is false on ARM). */
+        /* A direct aligned store is power-cut-atomic at word
+         * granularity on 32-bit parts.  On MSP430 a uint32_t is two
+         * 16-bit word stores and can tear, so the gate protocol
+         * brackets it there (CELL_CAN_TEAR(4) is false on 32-bit
+         * parts). */
         if (CELL_CAN_TEAR(sizeof(uint32_t))) {
             *c->gate = 0;
         }
@@ -618,21 +629,21 @@ tiku_mem_err_t tiku_persist_cell_write_u32_status(const tiku_persist_cell_t *c,
     return status;
 }
 
-/** @brief Unchecked compatibility wrapper. */
+/** @brief tiku_persist_cell_write_status() with the status dropped. */
 void tiku_persist_cell_write(const tiku_persist_cell_t *c,
                              const void *src, uint16_t len)
 {
     (void)tiku_persist_cell_write_status(c, src, len);
 }
 
-/** @brief Unchecked compatibility wrapper. */
+/** @brief tiku_persist_cell_commit_status() with the status dropped. */
 void tiku_persist_cell_commit(const tiku_persist_cell_t *c,
                               const void *src, uint16_t len)
 {
     (void)tiku_persist_cell_commit_status(c, src, len);
 }
 
-/** @brief Unchecked compatibility wrapper. */
+/** @brief tiku_persist_cell_write_u32_status() with the status dropped. */
 void tiku_persist_cell_write_u32(const tiku_persist_cell_t *c, uint32_t v)
 {
     (void)tiku_persist_cell_write_u32_status(c, v);

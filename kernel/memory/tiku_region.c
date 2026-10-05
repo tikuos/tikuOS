@@ -7,9 +7,9 @@
  *
  * tiku_region.c - memory region registry.
  *
- * A boot-time registry of the platform's physical memory map, so a subsystem can
- * check its buffers sit in the right memory type and claim tracking can reject
- * two subsystems that overlap -- both caught at init rather than at run time.
+ * A boot-time registry of the platform's physical memory map, so a subsystem
+ * can check its buffers sit in the right memory type and claim tracking can
+ * reject two subsystems that overlap.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -26,13 +26,13 @@
 /* INTERNAL STATE                                                            */
 /*---------------------------------------------------------------------------*/
 
-/** Pointer to platform-provided region table (lives in flash) */
+/** Platform-provided region table; kept by pointer, not copied */
 static const tiku_mem_region_t *region_table;
 
 /** Number of entries in the region table */
 static tiku_mem_arch_size_t region_count;
 
-/** Claimed region tracking array (lives in SRAM) */
+/** Claimed ranges; a slot with size 0 is free */
 static tiku_mem_claimed_t claimed[TIKU_REGION_MAX_CLAIMS];
 
 /** Number of active claims */
@@ -148,7 +148,6 @@ tiku_mem_err_t tiku_region_init(const tiku_mem_region_t *table,
         return TIKU_MEM_ERR_INVALID;
     }
 
-    /* Check for pairwise overlaps in the platform's region table */
     for (i = 0; i < count; i++) {
         for (j = i + 1; j < count; j++) {
             if (ranges_overlap(table[i].base, table[i].size,
@@ -161,7 +160,6 @@ tiku_mem_err_t tiku_region_init(const tiku_mem_region_t *table,
     region_table = table;
     region_count = count;
 
-    /* Zero the claimed regions array */
     for (i = 0; i < TIKU_REGION_MAX_CLAIMS; i++) {
         claimed[i].base     = NULL;
         claimed[i].size     = 0;
@@ -242,8 +240,8 @@ tiku_mem_err_t tiku_region_contains(const uint8_t *ptr,
  * @param size      Size of the range in bytes
  * @param owner_id  Identifier of the claiming subsystem
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if the range is
- *         outside every region, TIKU_MEM_ERR_FULL if the claim table is
- *         full, or TIKU_MEM_ERR_BUSY on an overlapping claim
+ *         outside every region or overlaps a claim, or TIKU_MEM_ERR_FULL if
+ *         the claim table is full
  */
 tiku_mem_err_t tiku_region_claim(const uint8_t *ptr,
                                   tiku_mem_arch_size_t size,
@@ -261,7 +259,6 @@ tiku_mem_err_t tiku_region_claim(const uint8_t *ptr,
         return TIKU_MEM_ERR_INVALID;
     }
 
-    /* Check for overlap with existing claims */
     for (i = 0; i < TIKU_REGION_MAX_CLAIMS; i++) {
         if (claimed[i].size == 0) {
             continue;
@@ -272,7 +269,6 @@ tiku_mem_err_t tiku_region_claim(const uint8_t *ptr,
         }
     }
 
-    /* Find first empty slot */
     for (i = 0; i < TIKU_REGION_MAX_CLAIMS; i++) {
         if (claimed[i].size == 0) {
             claimed[i].base     = ptr;

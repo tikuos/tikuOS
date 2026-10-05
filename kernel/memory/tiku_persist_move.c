@@ -20,8 +20,8 @@
 #include <string.h>
 
 /* Bytes of cell values one move can carry.  The values are copied out before
- * anything is written, because on an in-place part the old image IS the live
- * one; a cell that does not fit re-primes, as every cell did before moves. */
+ * anything is written, because on an in-place part the old image is the live
+ * one; a cell that does not fit re-primes. */
 #define MOVE_SNAP_BYTES  1536u
 
 /** @brief FNV-1a over the entry count and the entries in use. */
@@ -92,6 +92,9 @@ static void manifest_build(const tiku_persist_move_env_t *e,
  * The manifest sits wherever that image's link order put it.  Two different
  * valid ones say two images' records are both present; neither is trusted,
  * but every place is reported so the move can invalidate them all.
+ *
+ * @return 1 when exactly one distinct manifest was found (copied to @p out),
+ *         else 0; @p offs lists up to @p max_offs places either way
  */
 static int manifest_find(const uint8_t *img, size_t len,
                          tiku_persist_manifest_t *out,
@@ -140,8 +143,12 @@ static int manifest_find(const uint8_t *img, size_t len,
     return found && !ambiguous;
 }
 
-/* Every store a move makes goes through the NVM HAL, word stores included, so
- * a cut can land between any two of them; a torn gate reads as no key. */
+/**
+ * @brief Store one 32-bit word through the NVM HAL.
+ *
+ * Every store a move makes goes through the HAL, word stores included, so a
+ * cut can land between any two of them; a torn gate reads as no key.
+ */
 static void move_word(uint8_t *dst, uint32_t v)
 {
     tiku_mem_arch_nvm_write(dst, (const uint8_t *)&v, (tiku_mem_arch_size_t)4u);
@@ -284,7 +291,13 @@ extern const tiku_persist_cell_t *const __tiku_cells_end[];
 /* Where this image keeps its cells; rewritten only when that changes. */
 static TIKU_DURABLE tiku_persist_manifest_t cell_manifest;
 
-/** @brief Capture ownership and cells before a shared durable-image rewrite. */
+/**
+ * @brief Run the cell move, carrying the layout record across it.
+ *
+ * The layout record captured from the old image (or its absence) is
+ * restored inside the move's write window, and is not published when the
+ * move fails.
+ */
 int tiku_persist_move_boot_env(tiku_persist_move_env_t *e)
 {
     tiku_layout_record_t record;

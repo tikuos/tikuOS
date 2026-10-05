@@ -1,4 +1,18 @@
-/* Bounded, cooperative owner reconstruction. SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_reclaim.c - bounded, cooperative reconstruction of owned backing.
+ *
+ * The owner registry, the tickets and the one running job.  Each poll does
+ * one bounded step: plan a layout, stop the owners, publish the layout, then
+ * let the owners rebuild; an owner that refuses abandons the job.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #include "tiku_reclaim_internal.h"
 #include "tiku_mem_internal.h"
 
@@ -15,64 +29,92 @@
 #if TIKU_MEM_MAX_TICKETS < 1 || TIKU_MEM_MAX_TICKETS > 255
 #error Invalid ticket table size
 #endif
+/** @brief Highest generation a slot reaches; a slot there is retired. */
 #ifndef TIKU_MEM_GENERATION_MAX
 #define TIKU_MEM_GENERATION_MAX UINT32_MAX
 #endif
+/** @brief Reservation records: the size of the job's record arrays. */
 #define N TIKU_MEM_MAX_RESERVATIONS
 #if N > 64
 #error Reconstruction supports at most 64 reservation records
 #endif
+/** @brief Claim window of a READY ticket: 10 s, within the clock's range. */
 #define CLAIM_TICKS ((tiku_clock_time_t)(TIKU_CLOCK_SECOND <= TIKU_CLOCK_MAX_INTERVAL / 10u ? \
                                         10u * TIKU_CLOCK_SECOND : TIKU_CLOCK_MAX_INTERVAL))
+/**
+ * @brief How long a ticket may wait for its job, and a final one is kept:
+ *        30 s, within the clock's range.
+ */
 #define RETAIN_TICKS ((tiku_clock_time_t)(TIKU_CLOCK_SECOND <= TIKU_CLOCK_MAX_INTERVAL / 30u ? \
                                          30u * TIKU_CLOCK_SECOND : TIKU_CLOCK_MAX_INTERVAL))
 
+/** @brief One registered owner and its progress in the running job. */
 typedef struct {
     tiku_mem_owner_registration_t registration;
-    char name[24];
-    uint32_t generation;
+    char name[24];                  /**< copy of registration.name */
+    uint32_t generation;            /**< slot generation in the handle */
     uint8_t live;
+    /** Bound process instance; consented to PREPARE; exited during the job;
+     *  exited without consent, cleanup due; being started by the job. */
     uint8_t process_generation, consent, stopped, init_failed, starting;
-    uint32_t process_restarts;
+    uint32_t process_restarts;      /**< restarts the coordinator made */
 } owner_t;
+/** @brief One submitted request and its progress. */
 typedef struct {
     tiku_mem_reclaim_request_t request;
-    tiku_reclaim_record_t result;
+    tiku_reclaim_record_t result;   /**< normalized, then the held record */
     tiku_mem_reclaim_status_t status;
-    struct tiku_process *process;
-    uint32_t generation, sequence;
+    struct tiku_process *process;   /**< submitter, or NULL for the kernel */
+    uint32_t generation, sequence;  /**< handle generation; submit order */
+    /** Slot in use; the submitter's instance; cancellation requested. */
     uint8_t live, process_generation, cancelling;
 } ticket_t;
+/** @brief The running reconstruction job; there is at most one. */
 typedef struct {
+    /** Reservation table the plan is made against; the selected owners'
+     *  records; their new places, with the request's at index count. */
     tiku_reclaim_record_t snapshot[N], old[N], layout[N + 1];
-    tiku_clock_time_t deadline[TIKU_MEM_MAX_OWNERS];
+    tiku_clock_time_t deadline[TIKU_MEM_MAX_OWNERS];  /**< phase deadlines */
+    /** Search order of the layout entries; next candidate at each depth. */
     uint16_t order[N + 1], choice[N + 1];
-    uint8_t placed[N + 1];
-    uint32_t generation, steps;
+    uint8_t placed[N + 1];          /**< layout entries placed so far */
+    uint32_t generation, steps;     /**< job generation; search steps */
+    /** Owner masks: selected; asked during this job; done with the phase;
+     *  held again at their original places in ABORT. */
     uint16_t owners, touched, done, old_rebound;
+    /** Selected records; search depth; next suffix boundary; owner turn. */
     unsigned count, depth, boundary, turn;
+    /** Running; its ticket; tier and span cursors of the planner; search
+     *  under way; layout published. */
     uint8_t active, ticket, tier_cursor, span_cursor, searching, committed;
+    /** Faulted; credits held; fast layout used (1 low, 2 high); replans. */
     uint8_t fault, credits, fast_path, replans;
 } job_t;
 static owner_t owners[TIKU_MEM_MAX_OWNERS];
 static ticket_t tickets[TIKU_MEM_MAX_TICKETS];
 static job_t job;
+/** @brief The last job that ended, for the "last" report. */
 static struct {
     uint32_t generation, steps;
     tiku_mem_ticket_state_t state;
     tiku_mem_reclaim_cause_t cause;
 } last_job;
 static tiku_mem_reclaim_stats_t counters;
-static uint32_t sequence;
+static uint32_t sequence;          /**< last ticket sequence number */
+/** Coordinator on; a poll in progress. */
 static uint8_t enabled = 1, polling;
-static int callback_owner = -1;
+static int callback_owner = -1;    /**< owner whose callback runs, or -1 */
+/* Defined in tiku_reclaim_process.inl. */
 static int process_owner_current(unsigned oi);
 static tiku_mem_owner_result_t process_step(unsigned oi);
 
+/** @brief Non-zero when two owner handles are equal. */
 static int owner_equal(tiku_mem_owner_t a, tiku_mem_owner_t b)
 { return a.slot_plus_one == b.slot_plus_one && a.generation == b.generation; }
+/** @brief Non-zero when two reservation handles are equal. */
 static int backing_equal(tiku_mem_backing_t a, tiku_mem_backing_t b)
 { return a.slot_plus_one == b.slot_plus_one && a.generation == b.generation; }
+/** @brief Slot of the live owner @p h names, or -1. */
 static int owner_index(tiku_mem_owner_t h)
 {
     unsigned i;
@@ -80,8 +122,10 @@ static int owner_index(tiku_mem_owner_t h)
     i = h.slot_plus_one - 1u;
     return owners[i].live && owners[i].generation == h.generation ? (int)i : -1;
 }
+/** @brief Current handle of owner slot @p i. */
 static tiku_mem_owner_t owner_handle(unsigned i)
 { return (tiku_mem_owner_t){owners[i].generation, (uint16_t)(i + 1)}; }
+/** @brief Live ticket @p h names, or NULL. */
 static ticket_t *ticket_get(tiku_mem_ticket_t h)
 {
     ticket_t *t;
@@ -89,16 +133,20 @@ static ticket_t *ticket_get(tiku_mem_ticket_t h)
     t = &tickets[h.slot_plus_one - 1u];
     return t->live && t->generation == h.generation ? t : NULL;
 }
+/** @brief Handle of the running job; slot 0 when none runs. */
 static tiku_mem_job_t job_handle(void)
 { return (tiku_mem_job_t){job.generation, job.active ? 1u : 0u}; }
+/** @brief Non-zero when @p h names the running job. */
 static int job_equal(tiku_mem_job_t h)
 { return job.active && h.slot_plus_one == 1 && h.generation == job.generation; }
+/** @brief Non-zero for a claimed, cancelled or failed ticket. */
 static int terminal(const ticket_t *t)
 {
     return t->status.state == TIKU_MEM_TICKET_CLAIMED ||
            t->status.state == TIKU_MEM_TICKET_CANCELLED ||
            t->status.state == TIKU_MEM_TICKET_FAILED;
 }
+/** @brief End @p t in @p state for @p cause; it is kept RETAIN_TICKS. */
 static void finish(ticket_t *t, tiku_mem_ticket_state_t state,
                     tiku_mem_reclaim_cause_t cause)
 {
@@ -106,11 +154,16 @@ static void finish(ticket_t *t, tiku_mem_ticket_state_t state,
     t->status.phase = TIKU_MEM_RECLAIM_NONE;
     t->status.deadline = tiku_clock_time() + RETAIN_TICKS;
 }
+/** @brief Non-zero once @p now has reached @p deadline. */
 static int due(tiku_clock_time_t now, tiku_clock_time_t deadline)
 { return !TIKU_CLOCK_LT(now, deadline); }
 
-/* A control object in tier backing could itself be invalidated by this or a
- * later job. Require controls outside all registered backing spans. */
+/**
+ * @brief Non-zero when @p n bytes at @p p lie outside every tier span.
+ *
+ * A control object in tier backing could be invalidated by this or a later
+ * job, so controls must lie outside all registered backing spans.
+ */
 static int stable_control(const void *p, size_t n)
 {
     unsigned tier;
@@ -130,6 +183,10 @@ static int stable_control(const void *p, size_t n)
     return 1;
 }
 
+/**
+ * @brief Non-zero when an owner's context, process and INIT data all lie
+ *        outside tier backing.
+ */
 static int owner_controls_stable(const tiku_mem_owner_registration_t *r)
 {
     if ((r->context || r->context_size) && !stable_control(r->context, r->context_size)) return 0;
@@ -218,6 +275,7 @@ int tiku_reclaim_owner_options(const tiku_mem_request_t *r, uint8_t *cls)
     return 1;
 }
 
+/** @brief Non-zero when @p owner uses @p key in a record or a live ticket. */
 static int key_used(tiku_mem_owner_t owner, uint16_t key)
 {
     unsigned i;
@@ -271,18 +329,25 @@ tiku_mem_err_t tiku_reclaim_owner_create(const tiku_mem_request_t *options,
     return key_used(options->owner, options->owner_slot) ? TIKU_MEM_ERR_BUSY : TIKU_MEM_OK;
 }
 
+/** @brief Non-zero when two records lie in the same span. */
 static int same_span(const tiku_reclaim_record_t *a, const tiku_reclaim_record_t *b)
 { return a->tier == b->tier && a->span_index == b->span_index; }
+/** @brief Non-zero when two records overlap in one span. */
 static int overlap(const tiku_reclaim_record_t *a, const tiku_reclaim_record_t *b)
 {
     return same_span(a, b) && a->offset < b->offset + b->length &&
            b->offset < a->offset + a->length;
 }
+/** @brief Non-zero for a live record of an owner the job selected. */
 static int selected(const tiku_reclaim_record_t *r)
 {
     int oi = owner_index(r->owner);
     return r->state == 1 && oi >= 0 && (job.owners & (1u << oi));
 }
+/**
+ * @brief End of the highest FIXED reservation in @p object's span, below
+ *        which nothing is placed.
+ */
 static tiku_mem_arch_size_t lower_boundary(const tiku_reclaim_record_t *object)
 {
     tiku_mem_arch_size_t low = 0;
@@ -295,8 +360,14 @@ static tiku_mem_arch_size_t lower_boundary(const tiku_reclaim_record_t *object)
     return low;
 }
 
-/* Enumerate only the low/high aligned endpoints of each free interval.
- * Re-scan all intervals at every step, including gaps left by aligned objects. */
+/**
+ * @brief Find the @p ordinal-th candidate offset for layout entry @p object.
+ *
+ * Candidates are the lowest and highest aligned offsets of each free
+ * interval; every call rescans all intervals, gaps left by alignment too.
+ *
+ * @return 1 with @p offset set, or 0 past the last candidate
+ */
 static int endpoint(unsigned object, unsigned ordinal, tiku_mem_arch_size_t *offset)
 {
     tiku_reclaim_record_t *r = &job.layout[object];
@@ -334,6 +405,7 @@ static int endpoint(unsigned object, unsigned ordinal, tiku_mem_arch_size_t *off
     }
     return 0;
 }
+/** @brief Place entry @p object at its highest (@p high) or lowest offset. */
 static int place_end(unsigned object, int high)
 {
     tiku_mem_arch_size_t at, chosen = 0;
@@ -347,7 +419,13 @@ static int place_end(unsigned object, int high)
     return found;
 }
 
-/* This validator is separate from endpoint enumeration and backtracking. */
+/**
+ * @brief Non-zero when the whole layout is consistent.
+ *
+ * Each entry is placed, aligned, inside its span and above the FIXED boundary,
+ * clear of every other record, and a moved one matches its old record.  The
+ * check is independent of the enumeration and search that built the layout.
+ */
 static int layout_valid(void)
 {
     unsigned i, j;
@@ -372,6 +450,11 @@ static int layout_valid(void)
     return 1;
 }
 
+/**
+ * @brief Non-zero when the reservation table still matches the snapshot.
+ *
+ * Once the job holds credits, records outside the fenced spans may change.
+ */
 static int snapshot_unchanged(void)
 {
     unsigned i;
@@ -389,18 +472,21 @@ static int snapshot_unchanged(void)
     }
     return 1;
 }
+/** @brief Clear the fence on every span the layout uses. */
 static void release_fences(void)
 {
     unsigned i;
     for (i = 0; i <= job.count; i++)
         (void)tiku_reclaim_fence(job.layout[i].tier, job.layout[i].span_index, 0);
 }
+/** @brief Drop the credits the job holds. */
 static void release_credits(void)
 {
     unsigned i;
     for (i = 0; i < job.credits; i++) tiku_reclaim_drop(job.layout[i].handle);
     job.credits = 0;
 }
+/** @brief End the job and settle its ticket: READY, CANCELLED or FAILED. */
 static void end_job(tiku_mem_reclaim_cause_t cause)
 {
     ticket_t *t = &tickets[job.ticket];
@@ -424,12 +510,14 @@ static void end_job(tiku_mem_reclaim_cause_t cause)
     last_job.state = t->status.state; last_job.cause = t->status.cause;
     job.active = 0;
 }
+/** @brief Fault the job; it makes no progress until a retry. */
 static void fault(tiku_mem_reclaim_cause_t cause)
 {
     ticket_t *t = &tickets[job.ticket];
     job.fault = 1; t->status.state = TIKU_MEM_TICKET_FAULT; t->status.cause = cause;
     counters.faults++;
 }
+/** @brief Set the ticket deadline to the earliest pending owner's. */
 static void phase_deadline(void)
 {
     ticket_t *t = &tickets[job.ticket];
@@ -443,6 +531,7 @@ static void phase_deadline(void)
     }
     if (!found) t->status.deadline = tiku_clock_time();
 }
+/** @brief Enter @p phase: clear owner progress and start the deadlines. */
 static void phase_begin(tiku_mem_reclaim_phase_t phase)
 {
     unsigned i; tiku_clock_time_t now = tiku_clock_time();
@@ -456,12 +545,20 @@ static void phase_begin(tiku_mem_reclaim_phase_t phase)
     }
     phase_deadline();
 }
+/** @brief Abandon the job for @p cause; the touched owners get ABORT. */
 static void abort_job(tiku_mem_reclaim_cause_t cause)
 {
     tickets[job.ticket].status.cause = cause;
     phase_begin(TIKU_MEM_RECLAIM_ABORT);
 }
 
+/**
+ * @brief Recheck the plan, take credits, fence the spans and begin PREPARE.
+ * @return 1 when the job moved on (to PREPARE, or ended for lack of
+ *         records); 0 when the plan no longer holds, a selected owner's
+ *         controls are in tier backing, or a selected process owner has
+ *         events queued
+ */
 static int freeze(void)
 {
     unsigned i;
@@ -499,8 +596,14 @@ static int freeze(void)
     return 1;
 }
 
-/* The span moved between the snapshot and the freeze: nobody has been asked
- * to stop, so take a fresh snapshot and plan again. Bounded per job. */
+/**
+ * @brief Take a fresh snapshot and plan again after the span moved.
+ *
+ * No owner has been asked to stop yet, so planning can start over, at most
+ * TIKU_MEM_RECLAIM_PLAN_ATTEMPTS times per job.
+ *
+ * @return 1 when planning starts over, 0 when the attempts are spent
+ */
 static int replan(void)
 {
     ticket_t *t = &tickets[job.ticket];
@@ -515,6 +618,11 @@ static int replan(void)
     return 1;
 }
 
+/**
+ * @brief Place the request lowest (or highest, @p high), then each moved
+ *        record as high as it fits, in old address order.
+ * @return Non-zero when that gives a valid layout
+ */
 static int fast_layout(int high)
 {
     unsigned i, j;
@@ -531,6 +639,7 @@ static int fast_layout(int high)
     job.fast_path = (uint8_t)(high ? 2 : 1);
     return layout_valid();
 }
+/** @brief Start the layout search, most aligned and then largest first. */
 static void search_start(void)
 {
     unsigned i, j;
@@ -550,6 +659,10 @@ static void search_start(void)
     job.searching = 1; job.depth = 0; job.fast_path = 0;
 }
 
+/**
+ * @brief Tier to try at tier cursor @p tc and span @p si for ticket @p t.
+ * @return 1 with @p tier set, or 0 when that cursor or span is not eligible
+ */
 static int eligible_span(const ticket_t *t, uint8_t tc, uint8_t si, tiku_mem_tier_t *tier)
 {
     if (t->request.placement != TIKU_MEM_PLACE_WORKING) {
@@ -568,8 +681,16 @@ static int eligible_span(const ticket_t *t, uint8_t tc, uint8_t si, tiku_mem_tie
     return 1;
 }
 
-/* One suffix candidate per poll. Conservative: transient obstacles remain
- * obstacles; selection always expands to an owner's entire multi-span set. */
+/**
+ * @brief Try one candidate per poll: one span's suffix from a boundary up.
+ *
+ * Every reservation in the suffix must be live and restartable under an
+ * eligible owner, so transient ones stay obstacles; selecting an owner takes
+ * its reservations in every span.
+ *
+ * @return 1 when a fast layout was found, 0 to go on planning, -1 when no
+ *         span is left
+ */
 static int candidate(void)
 {
     ticket_t *t = &tickets[job.ticket];
@@ -646,6 +767,10 @@ static int candidate(void)
     return 0;
 }
 
+/**
+ * @brief One planning step: try a candidate, or run up to
+ *        TIKU_MEM_RECLAIM_STEPS search steps.
+ */
 static void plan_step(void)
 {
     unsigned work;
@@ -678,6 +803,7 @@ static void plan_step(void)
     }
 }
 
+/** @brief Non-zero when every layout record of owner @p oi is live again. */
 static int owner_restored(unsigned oi)
 {
     unsigned i;
@@ -689,6 +815,7 @@ static int owner_restored(unsigned oi)
     }
     return 1;
 }
+/** @brief Move PREPARE, RESTORE or ABORT on by one owner step. */
 static void lifecycle_step(void)
 {
     ticket_t *t = &tickets[job.ticket];
@@ -735,11 +862,16 @@ static void lifecycle_step(void)
     }
 }
 
+/** @brief Copy the result's placement into the ticket status. */
 static void result_status(ticket_t *t)
 {
     t->status.tier = t->result.tier; t->status.span_index = t->result.span_index;
     t->status.offset = t->result.offset; t->status.length = t->result.length;
 }
+/**
+ * @brief Start ticket @p index: hold its request directly when it fits, or
+ *        start a job when an eligible span has enough free bytes in total.
+ */
 static void admit(unsigned index)
 {
     unsigned i;
@@ -836,11 +968,16 @@ tiku_mem_err_t tiku_mem_reclaim_status(tiku_mem_ticket_t h, tiku_mem_reclaim_sta
     *out = t->status;
     return TIKU_MEM_OK;
 }
+/**
+ * @brief Non-zero when the caller is the process instance that submitted
+ *        @p t, or kernel context for a ticket submitted there.
+ */
 static int caller_matches(const ticket_t *t)
 {
     return t->process == TIKU_THIS() &&
            (!t->process || (t->process->is_running && t->process->generation == t->process_generation));
 }
+/** @brief Bind a READY ticket's result to @p descriptor of @p kind. */
 static tiku_mem_err_t claim(tiku_mem_ticket_t h, void *descriptor, uint8_t kind)
 {
     ticket_t *t = ticket_get(h); tiku_mem_err_t err;
@@ -864,6 +1001,7 @@ tiku_mem_err_t tiku_mem_reclaim_claim_arena(tiku_mem_ticket_t h, tiku_arena_t *a
 tiku_mem_err_t tiku_mem_reclaim_claim_pool(tiku_mem_ticket_t h, tiku_pool_t *p)
 { return claim(h, p, TIKU_BACKING_POOL); }
 
+/** @brief Cancel @p t for @p cause: drop its result or abandon its job. */
 static void cancel(ticket_t *t, tiku_mem_reclaim_cause_t cause)
 {
     if (terminal(t)) return;
@@ -999,6 +1137,7 @@ void tiku_mem_reclaim_poll(void)
     polling = 0;
 }
 
+/** @brief Append a formatted line at @p *at; 0 when it does not fit. */
 static int report_line(char *buf, size_t max, size_t *at, const char *format, ...)
 {
     int n; va_list args;

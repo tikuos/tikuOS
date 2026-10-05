@@ -25,10 +25,9 @@
 #define BLOB_VERSION  1u
 
 /*
- * Stored as a plain struct: the store is byte-addressed memory on every
- * backend and the reader is the same build that wrote it, so there is no
- * endianness or padding question to answer.  Explicit u32 fields keep the
- * layout stable if that ever stops being true.
+ * Stored as a plain struct.  /data can outlive the image that wrote it, so a
+ * later build must read the same layout: six u32 fields have no padding on
+ * any target, and every target is little-endian.
  */
 typedef struct {
     uint32_t magic;     /**< BLOB_MAGIC                                     */
@@ -46,8 +45,8 @@ typedef struct {
 /**
  * @brief Build "<base>.mnf" (idx < 0) or "<base>.NNN" into @p out.
  *
- * Hand-rolled rather than snprintf: this runs per chunk, and the newlib-nano
- * formatter is far more machinery than three digits need.
+ * Hand-rolled rather than snprintf: it runs per chunk, and three digits do
+ * not need the newlib-nano formatter.
  *
  * @return 0, or -1 if @p base does not fit TIKU_BLOB_NAME_MAX.
  */
@@ -102,11 +101,10 @@ blob_read_mnf(tiku_tfs_t *fs, const char *name, blob_mnf_t *m)
     /*
      * chunks must be exactly what total and chunk imply.  Callers iterate on
      * chunks while sizing each copy from total, so an inflated count walks the
-     * destination past `total`: with total=100, chunk=4096, chunks=3, the second
-     * iteration computes `total - off` = 100 - 4096, which UNDERFLOWS size_t,
-     * clamps to one chunk, and writes 4096 bytes at dst+4096 -- past a buffer
-     * the cap check only ever sized against total.  Rejecting the manifest here
-     * is the single place that keeps every consumer safe.
+     * destination past `total`: with total=100, chunk=4096, chunks=3, the
+     * second iteration computes `total - off` = 100 - 4096, which underflows
+     * size_t, clamps to one chunk, and writes 4096 bytes at dst+4096, past a
+     * buffer the cap check sized against total.
      */
     if (m->chunks != (uint32_t)((m->total + m->chunk - 1u) / m->chunk)) {
         return TIKU_BLOB_ERR_CRC;            /* inconsistent manifest      */
@@ -138,25 +136,24 @@ tiku_blob_store(tiku_tfs_t *fs, const char *name, const void *src, size_t len)
         return TIKU_BLOB_ERR_SPACE;
     }
 
-    /* Manifest FIRST out of the way: from here until the new one is written
-     * the blob does not exist, so a cut can never leave a manifest standing
-     * over chunks it does not describe.  A missing previous manifest is the
-     * normal first-store case, so its result is deliberately ignored. */
+    /* The old manifest goes first: from here until the new one is written
+     * the blob does not exist, so a cut cannot leave a manifest standing
+     * over chunks it does not describe.  A missing manifest is the
+     * first-store case, so the result is ignored. */
     (void)tiku_tfs_delete(fs, nm);
 
     /*
-     * Reclaim any chunk beyond what the NEW blob needs, before writing it.
+     * Reclaim any chunk beyond what the new blob needs, before writing it.
      *
      * Storing a smaller blob over a larger one strands the surplus otherwise:
-     * the write loop only touches 0..chunks-1, and tiku_blob_delete() walks the
-     * CURRENT manifest's count, so `name.7` from a previous 8-chunk blob becomes
-     * a live file no API could ever reach -- one leaked slot per lost chunk, per
-     * shrink, permanently.  The same sweep collects the tail of a store that was
-     * cut partway through.
+     * the write loop only touches 0..chunks-1, and tiku_blob_delete() walks
+     * the current manifest's count, so `name.7` from a previous 8-chunk blob
+     * becomes a live file no API can reach, one leaked slot per lost chunk.
+     * The same sweep collects the tail of a store that was cut partway.
      *
-     * Chunk indices are written densely from 0, so the first index that is not
-     * present is the end; the manifest is already gone, so nothing visible
-     * depends on these.
+     * Chunk indices are written densely from 0, so the first index that is
+     * not present is the end; the manifest is already gone, so nothing
+     * visible depends on these.
      */
     for (i = chunks; i < TIKU_BLOB_CHUNK_MAX; i++) {
         size_t stale = 0u;

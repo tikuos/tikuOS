@@ -7,9 +7,9 @@
  *
  * tiku_nvm_map.c - NVM region table and backing storage.
  *
- * Declares durable arrays sized by device-header constants and placed by the
- * linker, plus a static table for lookup by ID.  The backing is TIKU_DURABLE on
- * every platform, so no region is silently volatile on the Cortex-M parts.
+ * Declares the config region's array, sized by the device header and placed
+ * by the linker, and a static table for lookup by ID.  The backing is
+ * TIKU_DURABLE on every platform, so no region is silently volatile.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -26,27 +26,20 @@
 /* BACKING STORAGE                                                           */
 /*---------------------------------------------------------------------------*/
 
-/** Config region — used by init table, future credentials, etc.
- *  No initializer: it lands in a NOLOAD durable section on the mirror
- *  parts, and every consumer (tiku_init's magic word) primes virgin
- *  content itself — same discipline as the persist cells. */
+/**
+ * @brief Backing of the config region (the init table).
+ *
+ * No initializer: on the mirror parts it lands in a NOLOAD durable section,
+ * and tiku_init primes virgin content itself behind its magic word.
+ */
 static TIKU_DURABLE uint8_t
     nvm_config_buf[TIKU_DEVICE_FRAM_CONFIG_SIZE];
-
-/*
- * Future: app slot arrays go here, guarded by TIKU_NVM_APP_ENABLE.
- *
- * #if TIKU_NVM_APP_ENABLE
- * static NVM_PERSISTENT uint8_t
- *     nvm_app0[TIKU_DEVICE_NVM_APP_SLOT_SIZE] = {0};
- * ...
- * #endif
- */
 
 /*---------------------------------------------------------------------------*/
 /* REGION TABLE                                                              */
 /*---------------------------------------------------------------------------*/
 
+/** @brief The regions this build backs, looked up by id. */
 static const tiku_nvm_region_t regions[] = {
     {
         .base  = nvm_config_buf,
@@ -54,7 +47,6 @@ static const tiku_nvm_region_t regions[] = {
         .id    = TIKU_NVM_REGION_CONFIG,
         .flags = TIKU_NVM_REGION_ACTIVE
     },
-    /* Future app slots will be added here */
 };
 
 #define REGION_COUNT (sizeof(regions) / sizeof(regions[0]))
@@ -66,9 +58,10 @@ static const tiku_nvm_region_t regions[] = {
 /**
  * @brief Initialise the NVM region map.
  *
- * Call once in early boot, before anything looks a region up.  Each active
- * region is claimed in the kernel registry, so overlap with another subsystem
- * is a validated error rather than silent aliasing; a failed claim is non-fatal.
+ * Claims each active region in the region registry, so another subsystem's
+ * later overlapping claim is refused.  A failed claim here is ignored.
+ *
+ * @note Call once at boot.
  */
 void
 tiku_nvm_map_init(void)
@@ -114,8 +107,8 @@ tiku_nvm_region_get(tiku_nvm_region_id_t id)
 /**
  * @brief Return the number of active NVM regions.
  *
- * Counts only regions whose TIKU_NVM_REGION_ACTIVE flag is set.
- * Inactive or future-reserved slots are excluded.
+ * Counts only regions whose TIKU_NVM_REGION_ACTIVE flag is set; the reserved
+ * APP ids have no entry and do not count.
  *
  * @return Number of active regions.
  *

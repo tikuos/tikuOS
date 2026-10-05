@@ -7,9 +7,9 @@
  *
  * tiku_proc_mem.c - per-process isolated memory contexts.
  *
- * Binds an SRAM scratch arena, an NVM persistent arena, an optional HIFRAM bulk
- * arena and a set of cached regions to one process id.  tiku_proc_alloc() routes
- * to the right arena, so an allocation cannot escape the process that made it.
+ * Binds an SRAM scratch arena, an NVM persistent arena, an optional HIFRAM
+ * bulk arena and a set of cached regions to one process id.  tiku_proc_alloc()
+ * routes to the right arena, so an allocation cannot escape its process.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -25,7 +25,7 @@
 #include <string.h>
 
 /*---------------------------------------------------------------------------*/
-/* PUBLIC FUNCTIONS                                                           */
+/* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -40,9 +40,14 @@
  * @param tier       Tier hint (AUTO places each arena in its natural tier)
  * @param sram_size  SRAM arena capacity in bytes (0 to skip)
  * @param nvm_size   NVM arena capacity in bytes (0 to skip)
+ * @param owned      Reclaim owner and key base for the arenas, or NULL
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if pmem is NULL
- *         or both sizes are zero, or the tier-allocator error from the
- *         arena that could not be created
+ *         or both sizes are zero, TIKU_MEM_ERR_BUSY while one of its arenas
+ *         still holds a tracked reservation, or the tier-allocator error
+ *         from the arena that could not be created
+ * @note While a reclaim job holds the owner, a failed NVM arena leaves the
+ *       SRAM arena in place for the coordinator's stopped-owner cleanup; a
+ *       destroy here would bypass the job's fence.
  */
 static tiku_mem_err_t proc_mem_create(tiku_proc_mem_t *pmem,
                                      uint8_t pid,
@@ -81,7 +86,6 @@ static tiku_mem_err_t proc_mem_create(tiku_proc_mem_t *pmem,
         nvm_tier  = tier;
     }
 
-    /* Create SRAM arena if requested */
     if (sram_size > 0) {
         err = tiku_tier_arena_create_opts(&pmem->sram_arena, sram_tier,
                                            sram_size, pid, owned);
@@ -90,14 +94,12 @@ static tiku_mem_err_t proc_mem_create(tiku_proc_mem_t *pmem,
         }
     }
 
-    /* Create NVM arena if requested */
     if (nvm_size > 0) {
         tiku_mem_request_t options = TIKU_MEM_REQUEST_DEFAULT;
         if (owned) { options = *owned; options.owner_slot++; }
         err = tiku_tier_arena_create_opts(&pmem->nvm_arena, nvm_tier,
                                            nvm_size, pid, owned ? &options : NULL);
         if (err != TIKU_MEM_OK) {
-            /* Roll back the SRAM arena if it was created */
             if (sram_size > 0) {
 #if TIKU_MEM_RECLAIM_ENABLE
                 /* A held restore owns partial claims until stopped cleanup;
@@ -151,12 +153,15 @@ tiku_mem_err_t tiku_proc_mem_create_owned(tiku_proc_mem_t *pmem, uint8_t pid,
  * @brief Destroy a process memory context.
  *
  * Flushes and destroys every attached cache first, so a dirty page is persisted
- * rather than silently lost, then releases every owned arena's backing.
- * The caller must first stop all users of these objects. This is not a wipe.
+ * rather than silently lost, then resets and destroys the SRAM, NVM and HIFRAM
+ * arenas, releasing their backing.
  *
  * @param pmem  Context to destroy
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if pmem is NULL
- *         or already inactive
+ *         or already inactive, TIKU_MEM_ERR_BUSY while a reclaim job holds
+ *         its owner, or the first cache or arena error
+ * @note Stop every user of the context's memory first; the memory is not
+ *       wiped.
  */
 tiku_mem_err_t tiku_proc_mem_destroy(tiku_proc_mem_t *pmem)
 {
@@ -172,7 +177,6 @@ tiku_mem_err_t tiku_proc_mem_destroy(tiku_proc_mem_t *pmem)
         return TIKU_MEM_ERR_BUSY;
 #endif
 
-    /* Flush and destroy all attached cached regions */
     for (i = 0; i < pmem->cache_count; i++) {
         if (pmem->caches[i] != NULL && pmem->caches[i]->active) {
             tiku_mem_err_t status = tiku_cache_flush(pmem->caches[i]);
@@ -206,8 +210,8 @@ tiku_mem_err_t tiku_proc_mem_destroy(tiku_proc_mem_t *pmem)
  * @brief Allocate within a process context (bounds-checked).
  *
  * SRAM and NVM go straight to their arena; HIFRAM returns NULL unless one was
- * attached, deliberately, so a placement bug surfaces rather than falling
- * through. AUTO uses only arenas backed by SRAM or HIFRAM.
+ * attached, so a placement bug surfaces rather than falling through to NVM.
+ * AUTO uses only arenas backed by SRAM or HIFRAM.
  *
  * @param pmem  Active process memory context
  * @param tier  Memory tier (SRAM, NVM, HIFRAM, or AUTO)
@@ -234,12 +238,7 @@ void *tiku_proc_alloc(tiku_proc_mem_t *pmem,
         return tiku_arena_alloc(&pmem->nvm_arena, size);
 
     case TIKU_MEM_HIFRAM:
-        /* Caller must have attached a HIFRAM arena first via
-         * tiku_proc_mem_attach_hifram(). NULL on missing/inactive
-         * is the cleanest signal — the alternative (silently
-         * routing to NVM) would mask placement bugs in user code
-         * that legitimately needs HIFRAM (e.g., crossing the
-         * 64 KB barrier for large lookup tables). */
+        /* Only an arena attached with tiku_proc_mem_attach_hifram(). */
         if (pmem->hifram_arena.active) {
             return tiku_arena_alloc(&pmem->hifram_arena, size);
         }
@@ -293,7 +292,9 @@ void *tiku_proc_alloc(tiku_proc_mem_t *pmem,
  *
  * @param pmem  Active process memory context
  * @param size  HIFRAM arena capacity in bytes
- * @return TIKU_MEM_OK on success
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad arguments or
+ *         when a HIFRAM arena is already attached, or the tier-allocator
+ *         error
  */
 tiku_mem_err_t tiku_proc_mem_attach_hifram(tiku_proc_mem_t *pmem,
                                             tiku_mem_arch_size_t size)
@@ -303,9 +304,6 @@ tiku_mem_err_t tiku_proc_mem_attach_hifram(tiku_proc_mem_t *pmem,
         return TIKU_MEM_ERR_INVALID;
     }
 
-    /* Already attached? Reject rather than silently re-allocate —
-     * the caller almost certainly didn't mean to abandon their
-     * existing HIFRAM arena. */
     if (pmem->hifram_arena.active) {
         return TIKU_MEM_ERR_INVALID;
     }
@@ -330,7 +328,8 @@ tiku_mem_err_t tiku_proc_mem_attach_hifram(tiku_proc_mem_t *pmem,
  *
  * @param pmem    Active process memory context
  * @param region  Cached region to attach (must be active)
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_FULL if at capacity
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_FULL if at capacity, or
+ *         TIKU_MEM_ERR_INVALID on bad arguments or a reclaim-owned context
  */
 tiku_mem_err_t tiku_proc_mem_attach_cache(tiku_proc_mem_t *pmem,
                                            tiku_cached_region_t *region)

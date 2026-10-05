@@ -5,10 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mem.c - Arena allocator implementation
+ * tiku_mem.c - arena allocator and memory module init.
  *
  * Implements the arena (bump-pointer) allocator for fragmentation-free
- * memory management on microcontrollers with small SRAM.
+ * memory management on microcontrollers with small SRAM, and brings the
+ * memory module up at boot.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -60,7 +61,8 @@ static tiku_mem_arch_size_t align_up(tiku_mem_arch_size_t size)
  * @param arena    Arena control block to initialize
  * @param buf      Pointer to the backing buffer
  * @param size     Size of the backing buffer in bytes
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad arguments
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad arguments,
+ *         TIKU_MEM_ERR_BUSY while @p arena holds a tracked reservation
  */
 tiku_mem_err_t tiku_arena_create_raw(tiku_arena_t *arena, uint8_t *buf,
                                       tiku_mem_arch_size_t size)
@@ -116,7 +118,9 @@ tiku_mem_err_t tiku_arena_create_raw(tiku_arena_t *arena, uint8_t *buf,
  * @param buf      Pointer to the backing buffer
  * @param size     Size of the backing buffer in bytes
  * @param id       User-assigned identifier for debugging
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad arguments
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad arguments,
+ *         TIKU_MEM_ERR_BUSY while @p arena holds a tracked reservation, or
+ *         the tiku_region_claim() error
  */
 tiku_mem_err_t tiku_arena_create(tiku_arena_t *arena, uint8_t *buf,
                                  tiku_mem_arch_size_t size, uint8_t id)
@@ -148,6 +152,7 @@ tiku_mem_err_t tiku_arena_create(tiku_arena_t *arena, uint8_t *buf,
     return TIKU_MEM_OK;
 }
 
+/** @brief Whether @p arena is active, consistent and matches its backing. */
 static int arena_valid(const tiku_arena_t *arena)
 {
     return arena != NULL && arena->active && arena->buf != NULL &&
@@ -206,7 +211,6 @@ void *tiku_arena_alloc(tiku_arena_t *arena, tiku_mem_arch_size_t size)
 
     aligned = align_up(size);
 
-    /* Check for overflow: would the new offset exceed capacity? */
     if (aligned < size || aligned > arena->capacity - arena->offset) {
         arena->fail++;
         return NULL;
@@ -215,7 +219,6 @@ void *tiku_arena_alloc(tiku_arena_t *arena, tiku_mem_arch_size_t size)
     ptr = &arena->buf[arena->offset];
     arena->offset += aligned;
 
-    /* Track lifetime high-water mark */
     if (arena->offset > arena->peak) {
         arena->peak = arena->offset;
     }
@@ -228,12 +231,13 @@ void *tiku_arena_alloc(tiku_arena_t *arena, tiku_mem_arch_size_t size)
 /**
  * @brief Reset an arena, reclaiming all allocations at once.
  *
- * Sets the offset back to zero.  The buffer is NOT zeroed -- that would make
- * reset O(n) and defeat a bump allocator -- so callers must not assume it is.
- * The peak high-water mark survives, so it stays a lifetime maximum.
+ * Sets the offset back to zero.  The buffer is not zeroed -- that would make
+ * reset O(n) -- so callers must not assume it is.  The peak high-water mark
+ * survives, so it stays a lifetime maximum.
  *
  * @param arena    Arena to reset
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if arena is NULL
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID for an invalid arena,
+ *         TIKU_MEM_ERR_BUSY while a reclaim job holds its owner
  */
 tiku_mem_err_t tiku_arena_reset(tiku_arena_t *arena)
 {
@@ -263,7 +267,6 @@ tiku_mem_err_t tiku_arena_secure_reset(tiku_arena_t *arena)
     }
     if (!tiku_backing_can_mutate(arena->backing)) return TIKU_MEM_ERR_BUSY;
 
-    /* Delegate to the arch layer for a platform-optimized secure wipe. */
     tiku_mem_arch_secure_wipe(arena->buf, arena->capacity);
 
     arena->offset = 0;
@@ -277,7 +280,8 @@ tiku_mem_err_t tiku_arena_secure_reset(tiku_arena_t *arena)
  *
  * @param arena    Arena to query
  * @param stats    Output structure
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if either is NULL
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID for an invalid arena
+ *         or a NULL @p stats
  */
 tiku_mem_err_t tiku_arena_stats(const tiku_arena_t *arena,
                                 tiku_mem_stats_t *stats)
@@ -299,13 +303,6 @@ tiku_mem_err_t tiku_arena_stats(const tiku_arena_t *arena,
 /* MODULE INIT                                                               */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialize the memory management module.
- *
- * The region registry goes first, because arena and persist registrations
- * validate their buffers against it.  Then MPU NVM write-protection is armed,
- * and finally the HAL does the platform's own memory setup.
- */
 #if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
 /** Worker-context calls refused by TIKU_MEM_KERNEL_ONLY since boot. */
 static uint32_t mem_guard_violations;
@@ -326,6 +323,13 @@ uint32_t tiku_mem_guard_violations(void)
 }
 #endif /* TIKU_THREADS_ENABLE */
 
+/**
+ * @brief Initialize the memory management module.
+ *
+ * The region registry goes first, because arena and persist registrations
+ * validate their buffers against it.  Then come the platform's memory setup,
+ * MPU NVM protection and, with the cell table, the persist-cell move.
+ */
 void tiku_mem_init(void)
 {
     tiku_mem_arch_size_t count;
@@ -335,12 +339,10 @@ void tiku_mem_init(void)
     table = tiku_region_arch_get_table(&count);
     tiku_region_init(table, count);
 
-    /* arch_init runs FIRST so any port that mirrors .uninit out to
-     * non-volatile storage (e.g. RP2350's flash backup sector) can
-     * restore the SRAM working copy via plain memcpy.  Activating the
-     * MPU first would write-protect .uninit before that restore could
-     * land its bytes -- the MemManage handler would then reset the
-     * chip on the very first persist read. */
+    /* arch_init runs before the MPU is armed, so a port that mirrors
+     * .uninit out to non-volatile storage (e.g. RP2350's flash backup
+     * sector) can restore the SRAM working copy before .uninit is
+     * write-protected. */
     tiku_mem_arch_init();
 
     /* Activate NVM write-protection now that the working copy is in

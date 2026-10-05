@@ -5,11 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_fram_map.h - backward-compatibility shim for tiku_nvm_map.h.
+ * tiku_fram_map.h - former name of tiku_nvm_map.h.
  *
- * Every tiku_fram_* name is now tiku_nvm_*.  This header just includes the new
- * one, which defines aliases for the old names.  New code should include
- * kernel/memory/tiku_nvm_map.h directly.
+ * Includes tiku_nvm_map.h, which defines the tiku_fram_* aliases.  No file in
+ * the tree includes this one; it is kept for out-of-tree code.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

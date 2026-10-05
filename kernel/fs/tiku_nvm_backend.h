@@ -5,11 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_nvm_backend.h - the NVM "region" substrate (the B layer).
+ * tiku_nvm_backend.h - memory-mapped NVM region and its write/erase backend.
  *
- * A memory-mapped non-volatile region plus a thin write/erase backend: reads are
- * a pointer dereference into `base`, writes go through the backend, which is the
- * only thing that differs across FRAM, MRAM and Flash.
+ * Reads are a pointer dereference into `base`; writes go through the backend,
+ * the only part that differs across FRAM, MRAM, RRAM and flash.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -25,10 +24,11 @@ struct tiku_nvm_backend;
 /**
  * @brief Program @p len bytes at byte offset @p off within the region.
  *
- * The data is durable once this returns 0.  Writes must occur inside the
- * platform's NVM write window (tiku_mpu_unlock_nvm()/lock_nvm()); the backend
- * does not open it itself.
+ * The data is durable once this returns 0.
  *
+ * @note The caller holds the platform's NVM write window
+ *       (tiku_mpu_unlock_nvm()/lock_nvm()) where the region needs one; a
+ *       backend may rely on it rather than open the window itself.
  * @return 0 on success, negative on failure.
  */
 typedef int (*tiku_nvm_write_fn)(struct tiku_nvm_backend *be,
@@ -37,7 +37,8 @@ typedef int (*tiku_nvm_write_fn)(struct tiku_nvm_backend *be,
 /**
  * @brief Erase @p len bytes at @p off (block-granular).
  *
- * NULL for byte-writable backends (FRAM, MRAM) that need no erase.
+ * NULL when write() needs no separate erase: byte-writable media, and flash
+ * backends that erase inside write().
  *
  * @return 0 on success, negative on failure.
  */
@@ -48,11 +49,11 @@ typedef int (*tiku_nvm_erase_fn)(struct tiku_nvm_backend *be,
  * @brief A reserved, memory-mapped NVM region + its write/erase backend.
  */
 typedef struct tiku_nvm_backend {
-    uint8_t          *base;   /**< memory-mapped region base (read by pointer) */
-    size_t            size;   /**< region size in bytes                        */
-    tiku_nvm_write_fn write;  /**< program bytes (required)                    */
-    tiku_nvm_erase_fn erase;  /**< erase block (NULL on FRAM/MRAM)             */
-    void             *ctx;    /**< backend-private state                       */
+    uint8_t          *base;   /**< mapped region base, read by pointer      */
+    size_t            size;   /**< region size in bytes                     */
+    tiku_nvm_write_fn write;  /**< program bytes (required)                 */
+    tiku_nvm_erase_fn erase;  /**< erase blocks; NULL if write() needs none */
+    void             *ctx;    /**< backend-private state                    */
 } tiku_nvm_backend_t;
 
 #endif /* TIKU_NVM_BACKEND_H_ */
