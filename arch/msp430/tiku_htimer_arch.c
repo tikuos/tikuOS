@@ -8,17 +8,10 @@
  * tiku_htimer_arch.c - MSP430 hardware timer architecture implementation
  *
  * Timer A1-based single-shot compare-match timer for the htimer
- * subsystem.  Runs in continuous mode; a compare interrupt on
- * CCR0 fires the callback registered via tiku_htimer_set().
+ * subsystem.  Runs in continuous mode; the CCR0 compare interrupt runs
+ * the next htimer through tiku_htimer_run_next().
  *
  * SPDX-License-Identifier: Apache-2.0
- */
-
-/**
- * @file tiku_htimer_arch.c
- * @brief MSP430 hardware timer implementation
- *
- * Timer A1 based hardware timer for the htimer subsystem.
  */
 
 /*---------------------------------------------------------------------------*/
@@ -35,6 +28,7 @@
 /* INTERRUPT HANDLER                                                         */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Timer A1 CCR0 compare ISR: runs the next htimer. */
 TIKU_ISR(TIMER1_A0_VECTOR, tiku_htimer_isr)
 {
     HTIMER_ARCH_PRINTF("Timer interrupt fired at %u\n",
@@ -51,8 +45,8 @@ TIKU_ISR(TIMER1_A0_VECTOR, tiku_htimer_isr)
  * @brief Configure Timer A1 for continuous-mode compare-match operation.
  *
  * Sets the clock source, dividers, and enables the CCR0 interrupt.
- * Saves and restores the interrupt state rather than unconditionally
- * enabling GIE (the scheduler loop enables GIE at the correct time).
+ * Interrupts are off while it runs and the caller's GIE state is restored
+ * on return; tiku_sched_loop() is what enables GIE.
  */
 void tiku_htimer_arch_init(void)
 {
@@ -76,10 +70,7 @@ void tiku_htimer_arch_init(void)
 
     HTIMER_ARCH_PRINTF("Timer A1 initialization complete\n");
 
-    /* Restore the interrupt state that was active before this
-     * function was called, rather than unconditionally enabling.
-     * The scheduler loop (tiku_sched_loop) enables GIE at the
-     * correct time after autostart processes are launched. */
+    /* Restore the caller's GIE state. */
     __set_interrupt_state(sr);
 }
 
@@ -88,8 +79,9 @@ void tiku_htimer_arch_init(void)
 /**
  * @brief Configure the ACLK source for Timer A1 (device-specific).
  *
- * Only relevant when TIKU_HTIMER_CLOCK_SOURCE is ACLK.  Handles
- * FR5969/FR5994 (CSCTL2) and FR2433 (CSCTL4) register differences.
+ * Does nothing unless TIKU_HTIMER_CLOCK_SOURCE is ACLK.  ACLK then runs
+ * from VLOCLK on CS_A parts and from REFOCLK on the FR2433, whatever
+ * TIKU_ACLK_CONFIG_SOURCE asks for.
  */
 void tiku_htimer_arch_configure_aclk(void)
 {
@@ -104,7 +96,7 @@ void tiku_htimer_arch_configure_aclk(void)
 #if defined(TIKU_DEVICE_CS_TYPE_FR2X33)
     /* FR2433: ACLK source is in CSCTL4 (SELA bit) */
     #if TIKU_ACLK_CONFIG_SOURCE == TIKU_ACLK_SOURCE_VLOCLK
-        /* FR2433 ACLK doesn't support VLO directly; use REFOCLK */
+        /* FR2433 ACLK has no VLO selection; REFOCLK instead */
         CSCTL4 = (CSCTL4 & ~SELA__REFOCLK) | SELA__REFOCLK;
         HTIMER_ARCH_PRINTF("ACLK source: REFOCLK (FR2433 fallback)\n");
     #else
@@ -112,7 +104,7 @@ void tiku_htimer_arch_configure_aclk(void)
         HTIMER_ARCH_PRINTF("ACLK source: REFOCLK (default)\n");
     #endif
 #else
-    /* FR5969/FR5994: ACLK source is in CSCTL2 */
+    /* FR5969/FR5994/FR6989: ACLK source is in CSCTL2 */
     #if TIKU_ACLK_CONFIG_SOURCE == TIKU_ACLK_SOURCE_VLOCLK
         CSCTL2 = (CSCTL2 & ~SELA_7) | SELA__VLOCLK;
         HTIMER_ARCH_PRINTF("ACLK source: VLOCLK (~10kHz)\n");
@@ -134,9 +126,8 @@ void tiku_htimer_arch_configure_aclk(void)
 /**
  * @brief Read the current Timer A1 counter with double-read stability.
  *
- * TA1R is an asynchronous register; reading it once may return a
- * stale value if the counter increments between the CPU's two-phase
- * read.  Reading twice until both match guarantees a valid snapshot.
+ * When the timer clock is asynchronous to MCLK, one read of TA1R can catch
+ * it mid-update.  The loop reads it twice until both reads match.
  */
 tiku_htimer_clock_t tiku_htimer_arch_now(void)
 {
@@ -206,7 +197,12 @@ unsigned int tiku_htimer_arch_get_timer_config(void)
 
 /*---------------------------------------------------------------------------*/
 
-/** @brief Print the full htimer configuration to debug output. */
+/**
+ * @brief Print the full htimer configuration to debug output.
+ *
+ * Prints through HTIMER_ARCH_PRINTF, which is empty unless DEBUG_HTIMER
+ * is set.
+ */
 void tiku_htimer_arch_print_config(void)
 {
     tiku_htimer_config_t config;
@@ -271,7 +267,7 @@ void tiku_htimer_arch_print_config(void)
 
 /*---------------------------------------------------------------------------*/
 
-/** @brief Reset the Timer A1 counter to zero (TACLR). */
+/** @brief Reset the Timer A1 counter to zero (TACLR); GIE is set on return. */
 void tiku_htimer_arch_reset_counter(void)
 {
     __disable_interrupt();

@@ -7,9 +7,9 @@
  *
  * tiku_uart_arch.c - compiler-aware UART backend (MSP430).
  *
- * Under GCC, brings up the board's eUSCI_A instance as a 9600-baud UART and
- * provides a lightweight printf.  Under CCS every entry point is a stub, because
- * CIO semihosting already routes printf over the debugger.
+ * Under GCC, brings up the board's eUSCI_A instance as a UART at
+ * TIKU_BOARD_UART_BAUD and provides a lightweight printf.  Under CCS every
+ * entry point is a stub; CIO semihosting carries printf over the debugger.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -34,11 +34,10 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * Boards default to eUSCI_A0 (matches FR5969/FR5994/FR2433 LaunchPads and
- * the external FT232 path on FR6989). Board headers may set
- * TIKU_BOARD_UART_MODULE = 1 to route the kernel UART through eUSCI_A1
- * instead — used by the FR6989 LaunchPad's on-board eZ-FET backchannel
- * (P3.4/P3.5).
+ * TIKU_BOARD_UART_MODULE picks the eUSCI_A behind the kernel UART: 0
+ * (eUSCI_A0, the default, used by the FR5969, FR5994 and FR2433
+ * LaunchPads) or 1 (eUSCI_A1, which the FR6989 board header selects for
+ * its eZ-FET backchannel on P3.4/P3.5).
  */
 #ifndef TIKU_BOARD_UART_MODULE
 #define TIKU_BOARD_UART_MODULE 0
@@ -72,6 +71,7 @@
 /* RX RING BUFFER (interrupt-driven)                                         */
 /*---------------------------------------------------------------------------*/
 
+/* RX ring size: a power of two, at most 256 (head and tail are 8-bit). */
 #ifndef TIKU_UART_RXBUF_SIZE
 #define TIKU_UART_RXBUF_SIZE  256
 #endif
@@ -82,7 +82,7 @@
 
 #define TIKU_UART_RXBUF_MASK  (TIKU_UART_RXBUF_SIZE - 1)
 
-/** UART RX state — all volatile for ISR safety */
+/** RX ring and overrun count, shared with the RX ISR. */
 static struct {
     volatile uint8_t  buf[TIKU_UART_RXBUF_SIZE];
     volatile uint8_t  head;           /* ISR writes here   */
@@ -90,6 +90,7 @@ static struct {
     volatile uint16_t overrun_count;  /* UCOE events       */
 } rx;
 
+/** @brief RX ISR: counts overruns and queues the byte; a full ring drops it. */
 TIKU_ISR(TIKU_UART_VECTOR, tiku_uart_isr)
 {
     if (TIKU_UART_IFG & UCRXIFG) {
@@ -114,7 +115,7 @@ TIKU_ISR(TIKU_UART_VECTOR, tiku_uart_isr)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Initialize the kernel UART at 9600 baud, 8N1.
+ * @brief Initialize the kernel UART at TIKU_BOARD_UART_BAUD, 8N1.
  *
  * Drives the eUSCI instance the board header selects, and enables the RX
  * interrupt so incoming bytes land in a software ring whatever the application
@@ -133,11 +134,11 @@ tiku_uart_init(void)
     /* Board-specific clock source */
     TIKU_UART_CTLW0 |= TIKU_BOARD_UART_CLK_SEL;
 
-    /* Board-specific baud-rate registers (9600 baud) */
+    /* Board-specific baud-rate registers (TIKU_BOARD_UART_BAUD) */
     TIKU_UART_BRW = TIKU_BOARD_UART_BRW;
     TIKU_UART_MCTLW = TIKU_BOARD_UART_MCTLW;
 
-    /* Clear any stale status from boot/flash-tool traffic before enabling RX. */
+    /* Clear status and RX data left from boot or flash-tool traffic. */
     TIKU_UART_STATW = 0;
     while (TIKU_UART_IFG & UCRXIFG) {
         (void)TIKU_UART_RXBUF;

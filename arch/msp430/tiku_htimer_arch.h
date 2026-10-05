@@ -7,15 +7,10 @@
  *
  * tiku_htimer_arch.h - MSP430 hardware timer architecture interface
  *
- * SPDX-License-Identifier: Apache-2.0
- */
-
-/**
- * @file tiku_htimer_arch.h
- * @brief MSP430 hardware timer architecture header
+ * Includes the htimer configuration (for TIKU_HTIMER_ARCH_SECOND) and
+ * declares the MSP430-only htimer functions.
  *
- * MSP430-specific htimer header. Includes the platform configuration
- * (for TIKU_HTIMER_ARCH_SECOND) and declares MSP430-only functions.
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 #ifndef TIKU_HTIMER_ARCH_H_
@@ -28,7 +23,7 @@
 #include "tiku_htimer_config.h"
 #include <kernel/timers/tiku_htimer.h>
 
-/* Verify that configuration defined the required macro */
+/* tiku_htimer_config.h must define TIKU_HTIMER_ARCH_SECOND. */
 #ifndef TIKU_HTIMER_ARCH_SECOND
 #error "TIKU_HTIMER_ARCH_SECOND not defined by tiku_htimer_config.h"
 #endif
@@ -40,8 +35,9 @@
 /**
  * @brief Configure ACLK source if using ACLK for timer
  *
- * Should be called before tiku_htimer_arch_init() if the timer
- * is configured to use ACLK.
+ * Changes ACLK for every ACLK user, the system tick included.
+ *
+ * @note Call before tiku_htimer_arch_init() when the timer runs from ACLK.
  */
 void tiku_htimer_arch_configure_aclk(void);
 
@@ -60,14 +56,18 @@ unsigned int tiku_htimer_arch_get_timer_config(void);
 /**
  * @brief Print current timer configuration
  *
- * Displays clock source, dividers, and calculated frequency
- * for debugging purposes.
+ * Prints clock source, dividers and calculated frequency through
+ * HTIMER_ARCH_PRINTF, which is empty unless DEBUG_HTIMER is set.
  */
 void tiku_htimer_arch_print_config(void);
 
 /**
  * @brief Reset timer counter to zero
- * @warning Use with caution - will disrupt timing!
+ *
+ * Returns with interrupts enabled, whatever their state before.
+ *
+ * @warning Pending htimer deadlines are absolute counter values, so after
+ *          the reset they fire late.
  */
 void tiku_htimer_arch_reset_counter(void);
 

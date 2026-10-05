@@ -7,9 +7,9 @@
  *
  * tiku_i2c_arch.c - I2C master driver for MSP430 eUSCI_B0.
  *
- * Blocking master transactions, with pin routing and clock prescaler taken from
- * the board header's TIKU_BOARD_I2C_* macros.  Every busy-wait is bounded by a
- * timeout so a stuck bus cannot hang the caller.
+ * Blocking master transactions, with pin routing and clock prescaler taken
+ * from the board header's TIKU_BOARD_I2C_* macros.  Every busy-wait gives up
+ * after I2C_TIMEOUT polls, so a stuck bus cannot hang the caller.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,7 +27,7 @@
 /* CONSTANTS                                                                 */
 /*---------------------------------------------------------------------------*/
 
-/** Busy-wait loop iteration limit to prevent infinite hangs. */
+/** Busy-wait iteration limit. */
 #define I2C_TIMEOUT     10000U
 
 /*---------------------------------------------------------------------------*/
@@ -36,6 +36,9 @@
 
 /**
  * @brief Wait for a flag in UCB0IFG with timeout and NACK detection.
+ *
+ * A NACK sends STOP and returns TIKU_I2C_ERR_NACK; a timeout requests STOP
+ * and returns TIKU_I2C_ERR_TIMEOUT.
  *
  * @param flag  The interrupt flag bit to wait for (e.g. UCTXIFG0)
  * @return TIKU_I2C_OK if flag was set, negative error code otherwise
@@ -89,8 +92,8 @@ i2c_wait_stop(void)
 /**
  * @brief Initialize eUSCI_B0 for I2C master operation.
  *
- * Clocked from SMCLK, with the prescaler taken from the board's macro for the
- * requested speed mode -- standard 100 kHz or fast 400 kHz.
+ * Clocked from SMCLK, with the prescaler taken from the board's macro for
+ * the requested speed: 100 kHz standard or 400 kHz fast.
  */
 int
 tiku_i2c_arch_init(const tiku_i2c_config_t *config)
@@ -111,7 +114,7 @@ tiku_i2c_arch_init(const tiku_i2c_config_t *config)
         UCB0BRW = TIKU_BOARD_I2C_BRW_100K;
     }
 
-    /* Auto STOP when byte counter reaches UCB0TBCNT (disabled: manual) */
+    /* UCASTP_0: no automatic STOP; the driver sends STOP itself */
     UCB0CTLW1 = UCASTP_0;
 
     /* Release from reset — I2C is now active */
@@ -181,8 +184,8 @@ tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len)
  *
  * Sequence: START → addr+R → data[0..len-1] → NACK → STOP
  *
- * For a single-byte read the STOP must be issued right after the
- * address phase completes (before the first byte is clocked in).
+ * For a single-byte read, STOP is set as soon as the address phase ends
+ * (UCTXSTT clears), while that byte is being received.
  */
 int
 tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len)
@@ -203,8 +206,8 @@ tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len)
 
     if (len == 1) {
         /*
-         * Single-byte read: must send STOP while START is still
-         * pending so that only one byte is clocked.
+         * Single-byte read: STOP goes out as soon as UCTXSTT clears,
+         * while the byte is being received, so only one byte is clocked.
          */
         timeout = I2C_TIMEOUT;
         while (UCB0CTLW0 & UCTXSTT) {
@@ -244,9 +247,8 @@ tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len)
 /**
  * @brief Probe a slave address (presence check, no data transferred).
  *
- * START, address with write bit, sample the ACK, STOP.  No data byte is loaded,
- * so this is a true zero-byte bus-scan probe, which the eUSCI_B supports
- * natively; a NACK issues STOP and reports ERR_NACK.
+ * START, address with the write bit, ACK check, STOP; no data byte is sent.
+ * A NACK sends STOP and returns TIKU_I2C_ERR_NACK.
  */
 int
 tiku_i2c_arch_probe(uint8_t addr)

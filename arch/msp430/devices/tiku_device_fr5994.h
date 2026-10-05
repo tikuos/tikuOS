@@ -21,6 +21,7 @@
 /* DEVICE IDENTIFICATION                                                     */
 /*---------------------------------------------------------------------------*/
 
+/** Part name, reported by the shell and /sys. */
 #define TIKU_DEVICE_NAME            "MSP430FR5994"
 #define TIKU_DEVICE_NVM_LABEL       "FRAM"   /**< NVM technology (UI label). */
 
@@ -28,6 +29,8 @@
 /* GPIO PORT AVAILABILITY                                                    */
 /*---------------------------------------------------------------------------*/
 
+/** @name 1 for each GPIO port the part has, 0 for each it lacks
+ * @{ */
 #define TIKU_DEVICE_HAS_PORT1       1
 #define TIKU_DEVICE_HAS_PORT2       1
 #define TIKU_DEVICE_HAS_PORT3       1
@@ -38,88 +41,98 @@
 #define TIKU_DEVICE_HAS_PORT8       1
 #define TIKU_DEVICE_HAS_PORT9       0
 #define TIKU_DEVICE_HAS_PORTJ       1
+/** @} */
 
 /*---------------------------------------------------------------------------*/
 /* CRYSTAL PIN ROUTING                                                       */
 /*---------------------------------------------------------------------------*/
 
-/** LFXT (32.768 kHz) crystal pins: PJ.4 = LFXIN, PJ.5 = LFXOUT */
+/**
+ * @name LFXT (32.768 kHz) crystal pins: PJ.4 = LFXIN, PJ.5 = LFXOUT
+ * Crystal start-up sets PSEL_BITS in PSEL_REG and clears PSEL1_BITS in
+ * PSEL1_REG.
+ * @{
+ */
 #define TIKU_DEVICE_LFXT_PSEL_REG       PJSEL0
 #define TIKU_DEVICE_LFXT_PSEL_BITS      (BIT4 | BIT5)
 #define TIKU_DEVICE_LFXT_PSEL1_REG      PJSEL1
 #define TIKU_DEVICE_LFXT_PSEL1_BITS     (BIT4 | BIT5)
+/** @} */
 
-/** HFXT crystal pins: PJ.6 = HFXIN, PJ.7 = HFXOUT */
+/**
+ * @name HFXT crystal pins: PJ.6 = HFXIN, PJ.7 = HFXOUT
+ * Crystal start-up sets PSEL_BITS in PSEL_REG and clears PSEL1_BITS in
+ * PSEL1_REG.
+ * @{
+ */
 #define TIKU_DEVICE_HFXT_PSEL_REG       PJSEL0
 #define TIKU_DEVICE_HFXT_PSEL_BITS      (BIT6 | BIT7)
 #define TIKU_DEVICE_HFXT_PSEL1_REG      PJSEL1
 #define TIKU_DEVICE_HFXT_PSEL1_BITS     (BIT6 | BIT7)
+/** @} */
 
 /*---------------------------------------------------------------------------*/
 /* CLOCK CAPABILITIES                                                        */
 /*---------------------------------------------------------------------------*/
 
-#define TIKU_DEVICE_HAS_LFXT        1
-#define TIKU_DEVICE_HAS_HFXT        1
-#define TIKU_DEVICE_CS_HAS_KEY      1
-#define TIKU_DEVICE_MAX_STABLE_MHZ  16
+#define TIKU_DEVICE_HAS_LFXT        1   /**< LFXT crystal oscillator present */
+#define TIKU_DEVICE_HAS_HFXT        1   /**< HFXT crystal oscillator present */
+#define TIKU_DEVICE_CS_HAS_KEY      1   /**< CS registers unlock with CSKEY */
+#define TIKU_DEVICE_MAX_STABLE_MHZ  16  /**< Maximum stable MCLK, in MHz */
 
 /*---------------------------------------------------------------------------*/
 /* MEMORY SIZES                                                              */
 /*---------------------------------------------------------------------------*/
 
-#define TIKU_DEVICE_FRAM_SIZE       (256 * 1024UL)  /* 256 KB FRAM */
+#define TIKU_DEVICE_FRAM_SIZE       (256 * 1024UL)  /**< 256 KB FRAM */
 
 /*
- * MSP430FR5994 has 8 KB physical SRAM split by the toolchain's stock
- * linker script into RAM (4 KB) + LEARAM (~3.7 KB) + LEASTACK (312 B).
- * When LEA is not used (the TikuOS default, controlled by the
- * `LEA_ENABLE` Makefile flag), the project-local LD override merges
- * all three into one 8 KB RAM region, doubling general-purpose SRAM.
- *
- * TIKU_FR5994_LEA_DISABLED is defined by the Makefile when
- * LEA_ENABLE=0 so this header can report the actually-available
- * RAM size to higher layers (`free`, /sys/mem, hibernate budgeting,
- * etc.). Build with `make MCU=msp430fr5994 LEA_ENABLE=1` to keep
- * the stock 4 KB layout if you bring up an LEA-using driver.
+ * The FR5994 has 8 KB of SRAM.  The toolchain's stock linker script splits it
+ * into RAM (4 KB), LEARAM (~3.7 KB) and LEASTACK (312 B).  The Makefile links
+ * msp430fr5994_8k_ram.ld, which merges the three into one 8 KB RAM region,
+ * and defines TIKU_FR5994_LEA_DISABLED; it refuses LEA_ENABLE=1.  A build
+ * outside the Makefile keeps the stock 4 KB RAM region.
  */
 #ifdef TIKU_FR5994_LEA_DISABLED
-#define TIKU_DEVICE_RAM_SIZE        (8 * 1024UL)    /* 8 KB merged (default) */
+#define TIKU_DEVICE_RAM_SIZE        (8 * 1024UL)    /**< 8 KB merged RAM */
 #else
-#define TIKU_DEVICE_RAM_SIZE        (4 * 1024UL)    /* 4 KB, LEA gets 4 KB */
+#define TIKU_DEVICE_RAM_SIZE        (4 * 1024UL)    /**< 4 KB stock RAM */
 #endif
-#define TIKU_DEVICE_RAM_START       0x1C00U         /* First byte of SRAM */
+#define TIKU_DEVICE_RAM_START       0x1C00U         /**< First byte of SRAM */
 
 /*---------------------------------------------------------------------------*/
-/* FRAM REGION SIZING (used by kernel/memory/tiku_fram_map)                  */
+/* FRAM REGION SIZING (used by kernel/memory/tiku_nvm_map)                   */
 /*---------------------------------------------------------------------------*/
 
-/*
- * Per-device sizing for FRAM-backed regions.  The kernel/memory/tiku_fram_map
- * module reads these to declare storage arrays; the linker places them.
- * Adjust sizes per device — the rest of the system adapts automatically.
+/**
+ * @brief Bytes of the config region, which holds the init table.
+ *
+ * kernel/memory/tiku_nvm_map.c declares the region at this size and the
+ * linker places it; kernel/init/tiku_init.c asserts the init table fits.
  */
-#define TIKU_DEVICE_FRAM_CONFIG_SIZE      1024U   /* Init table + credentials */
+#define TIKU_DEVICE_FRAM_CONFIG_SIZE      1024U   /* Init table */
 
-/* Future: loadable app slots (reserved IDs, not allocated until enabled) */
-#define TIKU_DEVICE_FRAM_APP_SLOT_SIZE    8192U   /* 8 KB per app slot */
-#define TIKU_DEVICE_FRAM_APP_SLOT_COUNT   8       /* 8 slots on 256 KB part */
+/** @name Loadable app slot geometry; no code in the tree allocates slots
+ * @{ */
+#define TIKU_DEVICE_FRAM_APP_SLOT_SIZE    8192U   /**< 8 KB per app slot */
+#define TIKU_DEVICE_FRAM_APP_SLOT_COUNT   8       /**< 8 slots */
+/** @} */
 
 /*---------------------------------------------------------------------------*/
 /* FRAM ADDRESS RANGE                                                        */
 /*---------------------------------------------------------------------------*/
 
-#define TIKU_DEVICE_FRAM_START      0x4000U  /* First byte of main FRAM */
-#define TIKU_DEVICE_FRAM_END        0xFFFFU  /* Last byte of lower 64 KB */
+#define TIKU_DEVICE_FRAM_START      0x4000U  /**< First byte of main FRAM */
+#define TIKU_DEVICE_FRAM_END        0xFFFFU  /**< Last byte of lower 64 KB */
 
 /*
- * The remaining ~192 KB of FRAM lives at 0x10000+ (HIFRAM). Reach it for
- * *data* via the TIKU_HIFRAM* macros in <kernel/memory/tiku_mem.h>; code
- * only goes up there with MEMORY_MODEL=large.
+ * The other ~208 KB of FRAM lives at 0x10000+ (HIFRAM).  Data reaches it
+ * through the TIKU_HIFRAM* macros in <kernel/memory/tiku_mem.h>; code is
+ * placed there only with MEMORY_MODEL=large.
  */
-#define TIKU_DEVICE_HAS_HIFRAM      1
-#define TIKU_DEVICE_HIFRAM_START    0x10000UL  /* First byte of HIFRAM */
-#define TIKU_DEVICE_HIFRAM_END      0x43FF6UL  /* Last byte of HIFRAM (~208 KB) */
+#define TIKU_DEVICE_HAS_HIFRAM      1          /**< FRAM above 64 KB exists */
+#define TIKU_DEVICE_HIFRAM_START    0x10000UL  /**< First byte of HIFRAM */
+#define TIKU_DEVICE_HIFRAM_END      0x43FF6UL  /**< Last byte of HIFRAM */
 
 /*---------------------------------------------------------------------------*/
 /* MPU (MEMORY PROTECTION UNIT)                                              */
@@ -128,14 +141,17 @@
 #define TIKU_DEVICE_HAS_MPU         1   /**< FR5994 has hardware MPU */
 
 /*
- * Segment 3 covers HIFRAM only so MEMORY_MODEL=large can place
- * .upper.bss / .upper.data there with R+W+X while segments 1-2 keep
- * lower FRAM (code, vectors, persistent data) at R+X. Without this,
- * granting W on segment 3 to permit large-mode kernel writes would
- * also grant W on lower-FRAM code at 0xC000-0xFFFF.
+ * Segments 1 (0x4000-0x7FFF) and 2 (0x8000-0xFFFF) hold lower FRAM: code,
+ * vectors and persistent data, at R+X.  Segment 3 starts at HIFRAM and is
+ * R+W+X (TIKU_MPU_DEFAULT_SAM), so .upper.bss and .upper.data need no unlock
+ * under MEMORY_MODEL=large.  A SEG3_START below 0x10000 would give that
+ * write permission to lower-FRAM code too.
  */
+/** @name MPU segment boundaries, written by tiku_mpu_arch_init_segments()
+ * @{ */
 #define TIKU_DEVICE_MPU_SEG2_START  0x8000U
 #define TIKU_DEVICE_MPU_SEG3_START  0x10000UL
+/** @} */
 
 /*---------------------------------------------------------------------------*/
 /* eUSCI PERIPHERAL AVAILABILITY                                             */
@@ -155,12 +171,13 @@
 /*---------------------------------------------------------------------------*/
 
 #define TIKU_DEVICE_HAS_ADC12B      1   /**< ADC12_B present (12-bit SAR) */
-#define TIKU_DEVICE_ADC_CHANNELS    32  /**< External channels A0-A31 */
+#define TIKU_DEVICE_ADC_CHANNELS    32  /**< ADC12_B input channels A0-A31 */
 
-/*
- * External analog input pin per ADC12_B channel, encoded as (port << 4) | bit.
- * A0-A15 match the FR5969 assignment and this part adds A16-A19 on P7.4-P7.7;
- * above A19 there is no external pin.  Source: SLASE54D pinout.
+/**
+ * @brief External pin of each ADC12_B channel, encoded (port << 4) | bit.
+ *
+ * A16-A19 are P7.4-P7.7; channels above A19 have no external pin.  Source:
+ * SLASE54D pinout.
  */
 #define TIKU_DEVICE_ADC_PIN_MAP                                     \
     { 0x10, 0x11, 0x12, 0x13,   /* A0-A3   P1.0-P1.3 */             \

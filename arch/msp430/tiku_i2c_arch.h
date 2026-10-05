@@ -34,7 +34,7 @@
  * specified in @p config. Sets up SDA/SCL pins via board macros.
  *
  * @param config  Pointer to I2C configuration
- * @return TIKU_I2C_OK on success, negative error code on failure
+ * @return TIKU_I2C_OK
  */
 int tiku_i2c_arch_init(const tiku_i2c_config_t *config);
 
@@ -51,7 +51,7 @@ void tiku_i2c_arch_close(void);
  * @param addr  7-bit slave address
  * @param buf   Data to transmit
  * @param len   Number of bytes
- * @return TIKU_I2C_OK on success, negative error code on failure
+ * @return TIKU_I2C_OK, TIKU_I2C_ERR_NACK or TIKU_I2C_ERR_TIMEOUT
  */
 int tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len);
 
@@ -61,7 +61,7 @@ int tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len);
  * @param addr  7-bit slave address
  * @param buf   Buffer for received data
  * @param len   Number of bytes to read
- * @return TIKU_I2C_OK on success, negative error code on failure
+ * @return TIKU_I2C_OK, TIKU_I2C_ERR_NACK or TIKU_I2C_ERR_TIMEOUT
  */
 int tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len);
 
@@ -69,8 +69,7 @@ int tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len);
  * @brief Architecture-specific address probe (bus-scan presence check).
  *
  * Reports whether a device acknowledges @p addr without transferring data.
- * The `i2c scan` command uses this instead of a zero-length write (which the
- * bus layer rejects).
+ * The `i2c scan` command uses it; the bus layer refuses zero-length writes.
  *
  * @param addr  7-bit slave address (unshifted)
  * @return TIKU_I2C_OK if acknowledged, TIKU_I2C_ERR_NACK if not, or another
@@ -88,7 +87,7 @@ int tiku_i2c_arch_probe(uint8_t addr);
  * @param tx_len  Transmit length
  * @param rx_buf  Buffer for received data
  * @param rx_len  Receive length
- * @return TIKU_I2C_OK on success, negative error code on failure
+ * @return TIKU_I2C_OK, TIKU_I2C_ERR_NACK or TIKU_I2C_ERR_TIMEOUT
  */
 int tiku_i2c_arch_write_read(uint8_t addr,
                               const uint8_t *tx_buf, uint16_t tx_len,

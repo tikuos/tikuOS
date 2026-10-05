@@ -76,11 +76,9 @@ gpio_get_port(uint8_t port)
     };
 
 #if TIKU_DEVICE_HAS_PORTJ
-    /* Port J registers are declared as 16-bit on MSP430 (PJ is shared
-     * with JTAG), but the gpio_port_t struct stores the byte-wide
-     * register pointer because the upper byte is reserved.  Cast to
-     * silence the incompatible-pointer-type warning; on little-endian
-     * MSP430 the byte access at &PJxN reads/writes the 8 GPIO bits. */
+    /* The PJ registers are declared 16-bit; the casts take their low byte,
+     * which on little-endian MSP430 holds the eight GPIO bits (the upper
+     * byte is reserved). */
     static const gpio_port_t portj = {
         (volatile uint8_t *)&PJIN,
         (volatile uint8_t *)&PJOUT,
@@ -140,7 +138,7 @@ tiku_gpio_arch_set_input(uint8_t port, uint8_t pin)
     }
     *p->dir &= ~(1 << pin);
     *p->ren |= (1 << pin);       /* Enable pull resistor */
-    *p->out |= (1 << pin);       /* Pull-up (not pull-down) */
+    *p->out |= (1 << pin);       /* OUT = 1 selects the pull-up */
     return 0;
 }
 

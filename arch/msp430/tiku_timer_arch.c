@@ -7,15 +7,10 @@
  *
  * tiku_timer_arch.c - MSP430 timer architecture implementation
  *
- * SPDX-License-Identifier: Apache-2.0
- */
-
-/**
- * @file tiku_timer_arch.c
- * @brief MSP430 architecture-specific clock implementation
+ * The system clock: Timer A0 from ACLK raises one interrupt per tick, which
+ * advances the tick and second counts and polls the timer process.
  *
- * System clock using Timer A0 on MSP430. Provides tick
- * counting, delays, and time measurement functionality.
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 /*---------------------------------------------------------------------------*/
@@ -55,7 +50,8 @@
 /* CONFIGURATION CHECKS                                                      */
 /*---------------------------------------------------------------------------*/
 
-/* Ensure CLOCK_SECOND is power of 2 for efficient modulo operation */
+/* TIKU_CLOCK_ARCH_CONF_SECOND must be a power of two: the ISR's modulo then
+ * compiles to a mask. */
 #if (TIKU_CLOCK_ARCH_CONF_SECOND & (TIKU_CLOCK_ARCH_CONF_SECOND - 1)) != 0
 #error TIKU_CLOCK_ARCH_CONF_SECOND must be a power of two (e.g., 128, 256)
 #endif
@@ -64,6 +60,8 @@
 /* CONSTANTS                                                                 */
 /*---------------------------------------------------------------------------*/
 
+/* Half the tick range, and a wrap-safe a < b on 16-bit counts (unused in
+ * this file). */
 #define TIKU_ARCH_MAX_TICKS (~((tiku_clock_arch_time_t)0) / 2)
 #define TIKU_CLOCK_ARCH_LT(a, b) ((signed short)((a)-(b)) < 0)
 
@@ -71,6 +69,8 @@
 /* MODULE STATE                                                              */
 /*---------------------------------------------------------------------------*/
 
+/* Seconds and ticks since init, TA0R at the last tick, and the ACLK fault
+ * code tiku_clock_arch_fault() returns. */
 static volatile unsigned long tiku_arch_seconds = 0;
 static volatile tiku_clock_arch_time_t tiku_arch_count = 0;
 static volatile unsigned short tiku_arch_last_tar = 0;
@@ -100,8 +100,9 @@ tiku_arch_read_tar(void)
 /**
  * @brief Configure clock source for Timer A0.
  *
- * On devices with LFXT (FR5969, FR5994): uses 32.768 kHz crystal on ACLK.
- * On devices without LFXT (FR2433): uses REFOCLK (32.768 kHz internal) on ACLK.
+ * Parts with LFXT run ACLK from the 32.768 kHz crystal, or from VLOCLK with
+ * fault code TIKU_CLOCK_ARCH_FAULT_LFXT_VLO when it still faults after 50000
+ * polls.  The FR2433 runs ACLK from REFOCLK (32.768 kHz internal).
  */
 static void tiku_configure_aclk_source(void)
 {
@@ -129,7 +130,7 @@ static void tiku_configure_aclk_source(void)
         }
     } while (CSCTL5 & LFXTOFFG);
 
-    CSCTL4 = (CSCTL4 & ~LFXTDRIVE_3) | LFXTDRIVE_0; /* Reduce drive once stable */
+    CSCTL4 = (CSCTL4 & ~LFXTDRIVE_3) | LFXTDRIVE_0; /* Low drive once stable */
 
     CSCTL2 = SELA__LFXTCLK | SELS__DCOCLK | SELM__DCOCLK;
 
@@ -138,8 +139,8 @@ static void tiku_configure_aclk_source(void)
     CLOCK_PRINTF("XT1 crystal configured (32.768 kHz)\n");
 
 #else
-    /* No external crystal — use REFOCLK (32.768 kHz internal reference)
-     * for ACLK on FR2433. MCLK+SMCLK stay on DCOCLKDIV. */
+    /* No crystal: ACLK runs from REFOCLK (32.768 kHz internal reference)
+     * and MCLK and SMCLK stay on DCOCLKDIV. */
     TIKU_CS_UNLOCK();
 
     CSCTL4 = SELA__REFOCLK | SELMS__DCOCLKDIV;
@@ -154,7 +155,12 @@ static void tiku_configure_aclk_source(void)
 /* INTERRUPT HANDLER                                                         */
 /*---------------------------------------------------------------------------*/
 
-/** Timer A0 CCR0 interrupt service routine */
+/**
+ * @brief Timer A0 CCR0 ISR: one system tick.
+ *
+ * Advances the tick and second counts, polls the timer process outside a
+ * tiku_crit window, and leaves LPM3 on exit.
+ */
 TIKU_ISR(TIMER0_A0_VECTOR, timer0_a0_isr)
 {
     tiku_arch_last_tar = TA0R;
@@ -191,10 +197,10 @@ void tiku_clock_arch_init(void)
     CLOCK_PRINTF("Configuring ACLK source\n");
     tiku_configure_aclk_source();
 
-    /* Save and restore interrupt state — do NOT unconditionally
-     * enable GIE.  The application (or test runner) decides when
-     * global interrupts are safe to enable.  The hardware counter
-     * (TA0R) runs regardless of GIE; only the CCR0 ISR needs it. */
+    /* Interrupts are off while Timer A0 is set up, and the caller's GIE
+     * state comes back afterwards; the application or test runner decides
+     * when to set GIE.  TA0R counts whatever GIE is; only the CCR0 ISR
+     * needs it. */
     state = __get_interrupt_state();
     __disable_interrupt();
 
@@ -214,10 +220,10 @@ void tiku_clock_arch_init(void)
 
     __set_interrupt_state(state);
 
-    /* Timer counter runs independently of GIE — verify it's ticking.
-     * The reads are kept (not behind DEBUG_RTIMER) because tearing them
-     * out changes the post-init timing window; (void) suppresses the
-     * unused-variable warning when CLOCK_PRINTF expands to nothing. */
+    /* Two TA0R reads 10000 cycles apart show the counter running; only
+     * DEBUG_CLOCK_ARCH builds print them.  The reads and the delay run in
+     * every build, so every build spends the same time here after init;
+     * the (void) casts cover builds where CLOCK_PRINTF is empty. */
     unsigned short tar1 = TA0R;
     __delay_cycles(10000);
     unsigned short tar2 = TA0R;
@@ -233,7 +239,8 @@ void tiku_clock_arch_init(void)
 /**
  * @brief Get current clock time in ticks
  *
- * Atomic read of the volatile tick counter.
+ * Reads the tick count twice until both reads agree, so a tick that lands
+ * mid-read cannot tear the 32-bit value.
  */
 tiku_clock_arch_time_t tiku_clock_arch_time(void)
 {
@@ -320,7 +327,8 @@ void tiku_clock_arch_wait(tiku_clock_arch_time_t t)
 /**
  * @brief CPU delay loop
  *
- * Each unit is approximately 2.83us at 8MHz CPU clock.
+ * Each unit is four NOPs plus the loop overhead, so its length depends on
+ * MCLK and on the code the compiler emits for the loop.
  */
 void tiku_clock_arch_delay(unsigned int i)
 {
@@ -337,7 +345,8 @@ void tiku_clock_arch_delay(unsigned int i)
 /**
  * @brief Get fine-grained clock value
  *
- * Returns timer counter value within current tick period.
+ * Returns the Timer A0 count since the last tick (TA0R minus its value at
+ * that tick).
  */
 unsigned short tiku_clock_arch_fine(void)
 {

@@ -7,9 +7,9 @@
  *
  * tiku_adc_arch.c - ADC driver for the MSP430 ADC12_B.
  *
- * Blocking single-channel conversions at 8/10/12-bit resolution, over external
- * channels A0-A15 and the internal temperature and battery channels.  Every
- * busy-wait is bounded by a timeout so a hardware fault cannot hang the caller.
+ * Blocking single-channel conversions at 8/10/12-bit resolution, over the
+ * external channels the device header maps and the internal temperature and
+ * battery channels.  Every busy-wait gives up after ADC_TIMEOUT polls.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,14 +27,14 @@
 /* CONSTANTS                                                                 */
 /*---------------------------------------------------------------------------*/
 
-/** Busy-wait loop iteration limit to prevent infinite hangs. */
+/** Busy-wait iteration limit. */
 #define ADC_TIMEOUT     10000U
 
 /*---------------------------------------------------------------------------*/
 /* PRIVATE STATE                                                             */
 /*---------------------------------------------------------------------------*/
 
-/** Saved reference configuration for use during reads. */
+/** Reference (TIKU_ADC_REF_*) from init, applied again on every read. */
 static uint8_t adc_reference;
 
 /*---------------------------------------------------------------------------*/
@@ -42,7 +42,7 @@ static uint8_t adc_reference;
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Map TIKU_ADC_RES_* to ADC12RES_* register value.
+ * @brief Map TIKU_ADC_RES_* to the ADC12RES_* value; others give 12-bit.
  */
 static uint16_t
 adc_resolution_bits(uint8_t resolution)
@@ -89,6 +89,8 @@ adc_reference_bits(uint8_t reference)
 
 /**
  * @brief Wait for reference voltage to stabilize after enabling.
+ *
+ * Gives up after ADC_TIMEOUT polls without reporting it.
  */
 static void
 adc_wait_ref_ready(void)
@@ -101,7 +103,7 @@ adc_wait_ref_ready(void)
 
     while (!(REFCTL0 & REFGENRDY)) {
         if (--timeout == 0) {
-            return;  /* Best-effort; proceed anyway */
+            return;  /* Timed out: the reference may not be settled */
         }
     }
 }
@@ -123,7 +125,7 @@ tiku_adc_arch_init(const tiku_adc_config_t *config)
     /*
      * ADC12CTL0:
      *   ADC12ON  - Turn on ADC12_B
-     *   ADC12SHT0_6 - Sample-and-hold: 128 cycles (safe for temp sensor)
+     *   ADC12SHT0_6 - Sample-and-hold: 128 cycles (enough for the temp sensor)
      */
     ADC12CTL0 = ADC12ON | ADC12SHT0_6;
 
@@ -167,9 +169,8 @@ tiku_adc_arch_close(void)
 }
 
 /*
- * External analog input pin per ADC12_B channel, supplied by the device header
- * as (port << 4) | bit.  The map is per-device because the family disagrees:
- * FR5969 and FR5994 match, but on FR6989 only A0-A3 do.
+ * External analog input pin of each ADC12_B channel, from the device
+ * header's TIKU_DEVICE_ADC_PIN_MAP as (port << 4) | bit.
  */
 static const uint8_t adc_pin_map[] = TIKU_DEVICE_ADC_PIN_MAP;
 
@@ -181,9 +182,8 @@ static const uint8_t adc_pin_map[] = TIKU_DEVICE_ADC_PIN_MAP;
 /**
  * @brief Switch one mapped pin to its analog function.
  *
- * Sets both PxSEL0 and PxSEL1, which is what selects the ADC input on these
- * parts.  Ports beyond 4 compile only where the device has them, so a part
- * without P7-P9 never names registers it lacks.
+ * Sets both PxSEL0 and PxSEL1, the analog-input selection on these parts.
+ * The P7-P9 cases exist only where the device header has the port.
  *
  * @param enc  Pin encoded as (port << 4) | bit
  * @return TIKU_ADC_OK, or TIKU_ADC_ERR_PARAM for an unmappable port
@@ -219,8 +219,8 @@ int
 tiku_adc_arch_channel_init(uint8_t channel)
 {
     /*
-     * Internal channels (temp sensor ch30, battery ch31)
-     * don't need pin configuration.
+     * Channels 30 and up are internal (temperature 30, battery 31) and
+     * need no pin configuration.
      */
     if (channel >= 30) {
         return TIKU_ADC_OK;

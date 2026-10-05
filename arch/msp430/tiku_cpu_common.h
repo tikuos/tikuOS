@@ -7,8 +7,8 @@
  *
  * tiku_cpu_common.h - MSP430 CPU common functions
  *
- * This file provides MSP430FR5969-specific hardware definitions and
- * function prototypes for common CPU operations.
+ * MSP430 busy-wait delays, the die-record unique ID, the reset cause, and
+ * MSP430_FR5969_* names for the board's LED and button macros.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -30,15 +30,13 @@
 
 /**
  * @defgroup TIKU_BOARD_GPIO Board GPIO Definitions
- * @brief Generic GPIO macros that delegate to the active board header
+ * @brief MSP430_FR5969_* names for the board's LED and button macros.
  *
- * The actual pin assignments are defined in the board header selected
- * via tiku_device_select.h (e.g. tiku_board_fr5969_launchpad.h).
- * Old MSP430_FR5969_* names are kept as backward-compatible aliases.
+ * Each name expands to the TIKU_BOARD_* macro of the same role, which the
+ * board header picked by tiku_device_select.h defines.
  * @{
  */
 
-/* Backward-compatible aliases -- map old names to new board macros */
 #define MSP430_FR5969_LED1_INIT()       TIKU_BOARD_LED1_INIT()
 #define MSP430_FR5969_LED1_ON()         TIKU_BOARD_LED1_ON()
 #define MSP430_FR5969_LED1_OFF()        TIKU_BOARD_LED1_OFF()
@@ -70,14 +68,14 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief MSP430-specific delay function
+ * @brief Busy-wait about @p ms milliseconds.
  * @param ms Number of milliseconds to delay
  */
 void tiku_cpu_msp430_delay_ms(unsigned int ms);
 
 /**
- * @brief MSP430-specific microsecond delay
- * @param us Number of microseconds to delay (max ~65535)
+ * @brief Busy-wait about @p us microseconds.
+ * @param us Number of microseconds to delay (at most 65535)
  */
 void tiku_cpu_msp430_delay_us(unsigned int us);
 
@@ -85,15 +83,18 @@ void tiku_cpu_msp430_delay_us(unsigned int us);
  * @brief Read the MSP430 die-record unique ID into a buffer.
  * @param buf   Destination buffer
  * @param len   Buffer size (up to 8 bytes returned)
- * @return Number of bytes written
+ * @return Bytes written: the smaller of @p len and 8, or 0 when @p buf
+ *         is NULL
  */
 uint8_t tiku_cpu_msp430_unique_id(uint8_t *buf, uint8_t len);
 
 /**
  * @brief Return the reset-cause register value captured at boot.
  *
- * The VFS tree captures SYSRSTIV at init time; this function
- * returns the same raw value for programmatic use.
+ * The first call reads SYSRSTIV and every call returns that value.
+ *
+ * @note A SYSRSTIV read pops the cause it returns: the first call must come
+ *       before any other read of the register.
  */
 uint16_t tiku_cpu_msp430_reset_reason(void);
 

@@ -7,8 +7,8 @@
  *
  * tiku_cpu_common.c - MSP430 CPU common functions
  *
- * This file provides MSP430-specific implementations of common
- * CPU functions including delay routines and hardware abstractions.
+ * Busy-wait delays scaled from the MCLK rate, the SYSRSTIV reset cause and
+ * the TLV die-record unique ID.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -25,16 +25,16 @@
 /* PRIVATE CONSTANTS                                                        */
 /*---------------------------------------------------------------------------*/
 
-/* Busy-delay loop counts scale from the original 8 MHz calibration. These
- * remain approximate: loop overhead limits accuracy at the lowest rates. */
+/* Busy-delay loop counts scale with MCLK from a calibration at 8 MHz.  Loop
+ * overhead keeps them approximate, worst at the lowest rates. */
 
 /** @brief The rate to scale a busy delay by, 8 MHz before clock setup. */
 static unsigned long delay_hz(void)
 {
     unsigned long hz = tiku_cpu_mclk_hz();
 
-    /* Called before cpu_freq_msp430_init() the live rate reads zero, and
-     * a delay scaled from that is a thousand times too short. */
+    /* tiku_cpu_mclk_hz() reads 0 until cpu_freq_msp430_init() runs, and a
+     * delay scaled from 0 is a thousand times too short; 8 MHz stands in. */
     return hz ? hz : 8000000UL;
 }
 
@@ -64,9 +64,8 @@ static unsigned long delay_hz(void)
  * @brief Delay for a specified number of milliseconds
  * @param ms Number of milliseconds to delay
  *
- * This function provides a software-based delay using nested loops.
- * The delay is approximate and depends on CPU frequency and compiler
- * optimization settings.
+ * Busy-waits in NOP loops scaled from the MCLK rate.  The delay is
+ * approximate and depends on compiler optimization settings.
  *
  * @note This is a blocking delay function
  * @warning Not suitable for precise timing requirements
@@ -109,10 +108,10 @@ void tiku_cpu_msp430_delay_us(unsigned int us)
 
 /*---------------------------------------------------------------------------*/
 
-/** Boot-time reset cause (captured once before SYSRSTIV auto-clears) */
+/** SYSRSTIV as read by the first tiku_cpu_msp430_reset_reason() call. */
 static uint16_t boot_rstiv;
 
-/** Flag so SYSRSTIV is captured only on the first call */
+/** Set once boot_rstiv holds the captured value. */
 static uint8_t  rstiv_captured;
 
 uint16_t

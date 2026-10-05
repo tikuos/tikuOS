@@ -7,8 +7,9 @@
  *
  * tiku_lcd_arch.h - MSP430 LCD_C peripheral arch interface.
  *
- * Implemented in tiku_lcd_arch.c, compiled only when the device declares LCD_C
- * and the board declares a panel; otherwise the unit leaves the build entirely.
+ * Implemented in tiku_lcd_arch.c, compiled only when the device declares
+ * LCD_C and the board declares a panel; otherwise the unit compiles to
+ * nothing.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,7 +21,8 @@
 #include "tiku.h"
 
 /**
- * @brief Bring up LCD_C and the board's LCD pins.
+ * @brief Bring up LCD_C and the board's LCD pins, with LCD memory cleared
+ *        and the panel on.
  */
 void tiku_lcd_arch_init(void);
 
@@ -32,9 +34,11 @@ void tiku_lcd_arch_clear(void);
 /**
  * @brief Render one ASCII character at a position.
  *
- * The caller has already bounds-checked the position.  Bits reserved for icons
- * are preserved across the write, so overwriting a digit does not clobber a lit
- * icon.
+ * Digits, letters of either case and '-' have glyphs; any other character
+ * is a blank cell.  Byte1 bits in TIKU_BOARD_LCD_DIGIT_BYTE1_PRESERVE_MASK
+ * keep their value, so a lit icon stays lit.
+ *
+ * @note @p pos must be below TIKU_BOARD_LCD_NUM_CHARS; it is not checked.
  */
 void tiku_lcd_arch_putchar(uint8_t pos, char ch);
 
@@ -50,7 +54,7 @@ void tiku_lcd_arch_putchar(uint8_t pos, char ch);
 void tiku_lcd_arch_icon_set(uint8_t icon_id, uint8_t on);
 
 /**
- * @brief Toggle a single icon segment.
+ * @brief Toggle a single icon segment; out-of-range IDs are ignored.
  */
 void tiku_lcd_arch_icon_toggle(uint8_t icon_id);
 

@@ -8,8 +8,8 @@
  * tiku_spi_arch.c - SPI master driver for MSP430 eUSCI modules.
  *
  * Blocking master transactions in 3-pin mode, with chip select left to the
- * application over GPIO.  The board header's TIKU_BOARD_SPI_MODULE selects which
- * eUSCI instance is driven.
+ * application over GPIO.  The board header's TIKU_BOARD_SPI_MODULE selects
+ * which eUSCI instance is driven.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -26,9 +26,8 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * Board header sets TIKU_BOARD_SPI_MODULE to choose which eUSCI
- * module backs the SPI bus. Default is 0 (eUSCI_A1) for backward
- * compatibility with the FR5969-era code that hardcoded UCA1.
+ * The board header's TIKU_BOARD_SPI_MODULE picks the eUSCI module behind
+ * the SPI bus: 0 (eUSCI_A1, the default) or 1 (eUSCI_B1).
  */
 #ifndef TIKU_BOARD_SPI_MODULE
 #define TIKU_BOARD_SPI_MODULE 0
@@ -57,7 +56,7 @@
 /* CONSTANTS                                                                 */
 /*---------------------------------------------------------------------------*/
 
-/** Busy-wait loop iteration limit to prevent infinite hangs. */
+/** Busy-wait iteration limit. */
 #define SPI_TIMEOUT     10000U
 
 /** Dummy byte sent during read operations. */
@@ -75,7 +74,7 @@
  *   UCCKPH=0 → sample on second edge (standard CPHA=1)
  *
  * @param mode  TIKU_SPI_MODE_0 .. TIKU_SPI_MODE_3
- * @return Bitmask for UCAxCTLW0
+ * @return Bitmask for the module's CTLW0 register
  */
 static uint16_t
 spi_mode_to_bits(uint8_t mode)
@@ -90,7 +89,7 @@ spi_mode_to_bits(uint8_t mode)
 }
 
 /**
- * @brief Perform one full-duplex byte exchange on eUSCI_A1.
+ * @brief Perform one full-duplex byte exchange on the SPI module.
  *
  * @param tx  Byte to transmit
  * @return Received byte, or 0 on timeout
@@ -122,7 +121,7 @@ spi_xfer_byte(uint8_t tx)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Initialize eUSCI_A1 for 3-pin SPI master operation.
+ * @brief Initialize the SPI eUSCI module for 3-pin master operation.
  *
  * Clock source is SMCLK. The prescaler divides SMCLK to produce
  * the SPI clock (e.g. 8 MHz / 8 = 1 MHz).
@@ -133,7 +132,7 @@ tiku_spi_arch_init(const tiku_spi_config_t *config)
     /* Select SPI function on board-specific SCLK/SIMO/SOMI pins */
     TIKU_BOARD_SPI_PINS_INIT();
 
-    /* Put eUSCI_A1 in reset before configuration */
+    /* Hold the module in reset while it is configured */
     TIKU_SPI_CTLW0 = UCSWRST;
 
     /* SPI master, synchronous, 3-pin mode, SMCLK source */
@@ -162,7 +161,7 @@ tiku_spi_arch_init(const tiku_spi_config_t *config)
 }
 
 /**
- * @brief Place eUSCI_A1 in software reset (SPI disabled).
+ * @brief Place the SPI eUSCI module in software reset (SPI disabled).
  */
 void
 tiku_spi_arch_close(void)

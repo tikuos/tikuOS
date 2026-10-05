@@ -7,7 +7,7 @@
  *
  * tiku_mem_arch.c - MSP430 memory architecture implementation
  *
- * Implements platform-specific memory operations for the MSP430 family.
+ * Secure wipe and the byte-copy NVM read and write for MSP430 FRAM.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,12 +21,11 @@
 /**
  * @brief Initialize MSP430-specific memory hardware.
  *
- * Currently a no-op; the hook exists for future FRAM wait-state, MPU or DMA
- * defaults.
+ * Does nothing on MSP430.
  */
 void tiku_mem_arch_init(void)
 {
-    /* Nothing to do yet on MSP430. */
+    /* Nothing to set up on MSP430. */
 }
 
 /*---------------------------------------------------------------------------*/
@@ -36,9 +35,8 @@ void tiku_mem_arch_init(void)
 /**
  * @brief Securely wipe a memory region with zeros.
  *
- * Writes through a volatile pointer so the compiler cannot elide the loop --
- * without it, an optimiser sees the memory is never read again and may drop the
- * whole thing.  Costs roughly 5-8 cycles per byte.
+ * Writes through a volatile pointer, so the compiler keeps every store even
+ * when the memory is never read again.
  *
  * @param buf   Start of the region to wipe
  * @param len   Number of bytes to zero
@@ -60,9 +58,7 @@ void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len)
 /**
  * @brief Read from FRAM into SRAM
  *
- * FRAM on MSP430 is memory-mapped, so this is a straight memcpy.
- * The abstraction exists because other NVM technologies (Flash, EEPROM)
- * may not be memory-mapped and require special read sequences.
+ * FRAM is memory-mapped, so this is a byte copy.
  *
  * @param dst   SRAM destination
  * @param src   FRAM source
@@ -85,8 +81,8 @@ void tiku_mem_arch_nvm_read(uint8_t *dst, const uint8_t *src,
 /**
  * @brief Write from SRAM into FRAM.
  *
- * FRAM is memory-mapped, so this is a straight copy.  The caller unlocks the
- * MPU, which lets several writes share one unlocked window.
+ * FRAM is memory-mapped and written in place, so this is a byte copy.  The
+ * caller holds the MPU write window, so several writes can share one.
  *
  * @param dst   FRAM destination
  * @param src   SRAM source

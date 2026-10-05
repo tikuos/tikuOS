@@ -7,8 +7,8 @@
  *
  * tiku_cpu_freq_boot_arch.c - MSP430 CPU frequency configuration.
  *
- * Clock-system setup plus the frequency set and get paths, covering
- * MSP430FR5969, FR5994 and FR2433.
+ * Clock-system setup plus the frequency set and get paths, for the CS_A
+ * module of the FR5969, FR5994 and FR6989 and the clock system of the FR2433.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,6 +20,8 @@
 /* CS MODULE ABSTRACTION MACROS                                              */
 /*---------------------------------------------------------------------------*/
 
+/* Writing CSKEY_H to CSCTL0_H unlocks the CS registers and writing 0 locks
+ * them; a CS without a key gets empty macros. */
 #if TIKU_DEVICE_CS_HAS_KEY
 #define TIKU_CS_UNLOCK()    do { CSCTL0_H = CSKEY_H; } while(0)
 #define TIKU_CS_LOCK()      do { CSCTL0_H = 0; } while(0)
@@ -28,7 +30,7 @@
 #define TIKU_CS_LOCK()      do { } while(0)
 #endif
 
-/* Module-private clock configuration */
+/* Clock settings as last applied, returned by the getters below. */
 static struct {
     tiku_clk_freq_t    freq;
     tiku_clk_div_t     smclk_div;
@@ -56,33 +58,31 @@ const char* tiku_cpu_freq_to_mhz_str(unsigned int freq_enum)
 
 }
 
-/* Global variables from header file */
+/* Clock frequency cache, documented in tiku_cpu_freq_boot_arch.h. */
 volatile unsigned long g_mclk_hz = 0;         /* MCLK frequency in Hz */
 volatile unsigned long g_smclk_hz = 0;        /* SMCLK frequency in Hz */
 volatile unsigned long g_aclk_hz = 0;         /* ACLK frequency in Hz */
-volatile unsigned long g_vlo_hz = 0;          /* Measured VLO frequency */
+volatile unsigned long g_vlo_hz = 0;          /* Never measured: stays 0 */
 volatile unsigned long g_xt1_hz = 0;          /* Crystal frequency if enabled */
 volatile bool g_xt1_enabled = false;         /* XT1 oscillator status */
 volatile bool g_clock_initialized = false;   /* Initialization status */
 
-/* Clock fault handler */
+/* Called when a crystal fails to start; NULL for none. */
 static void (*g_fault_handler)(unsigned int) = NULL;
 
-/* Forward declaration */
 static void cpu_freq_msp430_init(unsigned int freq_mhz, unsigned int sfreq_div, bool enable_lfxt_crystal, bool enable_hfxt_crystal);
 
 /**
- * @brief Initializes all GPIO pins to a default state.
+ * @brief Make every pin of each port the device has an output driven low.
  *
- * All pins are configured as outputs and driven low to prevent floating
- * inputs. Interrupts for pins with interrupt capability are disabled.
+ * No pin is left as a floating input, and PnIE is cleared wherever the port
+ * has interrupt capability.
  */
 
  void tiku_cpu_boot_msp430_pins_init_low(void)
  {
-    /* Initialize all available GPIO pins as outputs driven low.
-     * Port availability is determined by the device header.
-     * Not all ports have interrupt capability (e.g., FR2433 P3 has no P3IE). */
+    /* TIKU_DEVICE_HAS_PORTn picks the ports.  PnIE is cleared only where
+     * <msp430.h> defines it: the FR2433 P3, for one, has no P3IE. */
 
 #if TIKU_DEVICE_HAS_PORT1
     P1DIR = 0xFF; P1OUT = 0x00; P1IE = 0x00;
@@ -143,16 +143,12 @@ static void cpu_freq_msp430_init(unsigned int freq_mhz, unsigned int sfreq_div, 
 /*---------------------------------------------------------------------------*/
 
  /**
-  * @brief Enters Low Power Mode 0.
+  * @brief Enters Low Power Mode 0, with GIE set.
   *
-  * CPU is disabled. MCLK is disabled. SMCLK and ACLK remain active.
+  * The CPU and MCLK stop; SMCLK and ACLK keep running.
   */
  void tiku_cpu_boot_msp430_power_lpm0_enter(void)
  {
-
-     // Enter Low Power Mode 0
-     // LPM0_bits is the bit mask for LPM0
-     // GIE is the global interrupt enable bit
 
      __bis_SR_register(LPM0_bits | GIE);
 
@@ -161,16 +157,12 @@ static void cpu_freq_msp430_init(unsigned int freq_mhz, unsigned int sfreq_div, 
 }
 
  /**
-  * @brief Enters Low Power Mode 3.
+  * @brief Enters Low Power Mode 3, with GIE set.
   *
-  * CPU, MCLK, SMCLK, and DCO are disabled. ACLK remains active.
+  * The CPU, MCLK, SMCLK and the DCO stop; ACLK keeps running.
   */
  void tiku_cpu_boot_msp430_power_lpm3_enter(void)
  {
-
-     // Enter Low Power Mode 3
-     // LPM3_bits is the bit mask for LPM3
-     // GIE is the global interrupt enable bit
 
      __bis_SR_register(LPM3_bits | GIE);
 
@@ -179,16 +171,12 @@ static void cpu_freq_msp430_init(unsigned int freq_mhz, unsigned int sfreq_div, 
     }
 
  /**
-  * @brief Enters Low Power Mode 4.
+  * @brief Enters Low Power Mode 4, with GIE set.
   *
-  * CPU and all clocks are disabled.
+  * The CPU and every clock stop.
   */
  void tiku_cpu_boot_msp430_power_lpm4_enter(void)
  {
-
-    // Enter Low Power Mode 4
-    // LPM4_bits is the bit mask for LPM4
-    // GIE is the global interrupt enable bit
 
      __bis_SR_register(LPM4_bits | GIE);
 
@@ -231,10 +219,7 @@ static void cpu_freq_msp430_init(unsigned int freq_mhz, unsigned int sfreq_div, 
  void tiku_cpu_boot_msp430_reset(void)
  {
 
-     // Perform a software triggered reset of the device
-     // PMMMPW is the password for the PMM module
-     // PMMSWPOR is the reset command
-     // PMMCTL0 is the PMM control register
+     /* PMMPW unlocks PMMCTL0; PMMSWPOR triggers a software POR. */
 
      PMMCTL0 = PMMPW | PMMSWPOR;
 
@@ -246,39 +231,36 @@ static void cpu_freq_msp430_init(unsigned int freq_mhz, unsigned int sfreq_div, 
 
 #if TIKU_DEVICE_HAS_LFXT
 /**
- * @brief Waits ONLY for the XT1 (typically Low-Frequency) crystal fault flag
- *        to clear, ignoring all other oscillator faults.
+ * @brief Clear the LFXT fault flag and OFIFG until LFXTOFFG stays clear.
  *
- * @param timeout The number of retries before the function gives up.
- * @return true if XT1 is stable, false if a timeout occurs.
+ * Other oscillator fault flags are not checked.
+ *
+ * @param timeout Clear attempts before giving up
+ * @return true once LFXT runs, false on timeout
  */
 static bool wait_for_lfxt_fault_clear(unsigned long timeout)
 {
     unsigned long count = 0;
 
-    // Unlock CS registers
     TIKU_CS_UNLOCK();
 
     do {
-        // Attempt to clear the XT1 fault flag
         CSCTL5 &= ~LFXTOFFG;
 
-        // Clear the master fault flag
+        /* OFIFG summarises every oscillator fault. */
         SFRIFG1 &= ~OFIFG;
 
         if (++count > timeout) {
             CPU_FREQ_PRINTF("Timeout reached while waiting for LFXT fault clear\n");
 
-            // Lock CS registers
             TIKU_CS_LOCK();
 
             return false;  /* Timeout */
         }
 
-    // Check the XT1-specific fault flag directly
+    /* Loops on LFXTOFFG alone; OFIFG may stay set for another source. */
     } while (CSCTL5 & LFXTOFFG);
 
-    // Lock CS registers
     TIKU_CS_LOCK();
 
     CPU_FREQ_PRINTF("CPU_FREQ: LFXT fault cleared\n");
@@ -289,54 +271,53 @@ static bool wait_for_lfxt_fault_clear(unsigned long timeout)
 
 #if TIKU_DEVICE_HAS_HFXT
 /**
- * @brief Waits ONLY for the XT2 (High-Frequency) crystal fault flag to clear,
- *        ignoring all other oscillator faults.
+ * @brief Clear the HFXT fault flag and OFIFG until HFXTOFFG stays clear.
  *
- * @param timeout The number of retries before the function gives up.
- * @return true if XT2 is stable, false if a timeout occurs.
+ * Other oscillator fault flags are not checked.
+ *
+ * @param timeout Clear attempts before giving up
+ * @return true once HFXT runs, false on timeout
  */
 static bool wait_for_hfxt_fault_clear(unsigned long timeout)
 {
     unsigned long count = 0;
 
-    // Unlock CS registers
     TIKU_CS_UNLOCK();
 
     do {
-        // Attempt to clear the XT2 fault flag
         CSCTL5 &= ~HFXTOFFG;
 
-        // Clear the master fault flag
+        /* OFIFG summarises every oscillator fault. */
         SFRIFG1 &= ~OFIFG;
 
         if (++count > timeout) {
 
             CPU_FREQ_PRINTF("Timeout reached while waiting for HFXT fault clear\n");
 
-            // Lock CS registers
             TIKU_CS_LOCK();
 
             return false;  /* Timeout */
         }
 
-    // Check the XT2-specific fault flag directly
+    /* Loops on HFXTOFFG alone; OFIFG may stay set for another source. */
     } while (CSCTL5 & HFXTOFFG);
 
-    // Lock CS registers
     TIKU_CS_LOCK();
 
-    return true;  /* Success: XT2 is stable */
+    return true;  /* Success: HFXT is stable */
 }
 #endif /* TIKU_DEVICE_HAS_HFXT */
 
 /**
- * @brief Waits for all oscillator fault flags to clear with timeout.
-*/
+ * @brief Clear every oscillator fault flag until OFIFG stays clear.
+ *
+ * @param timeout Clear attempts before giving up
+ * @return true once OFIFG stays clear, false on timeout
+ */
 static bool wait_for_all_fault_clear(unsigned long timeout)
 {
     unsigned long count = 0;
 
-    // Unlock CS registers
     TIKU_CS_UNLOCK();
 
     do {
@@ -352,22 +333,20 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
         CSCTL7 &= ~DCOFFG;
 #endif
 
-        SFRIFG1 &= ~OFIFG;                 // clear master oscillator fault flag
+        SFRIFG1 &= ~OFIFG;                 /* summary fault flag */
 
         if (++count > timeout) {
 
             CPU_FREQ_PRINTF("Timeout reached while waiting for all fault clear\n");
 
-            // Lock CS registers
             TIKU_CS_LOCK();
 
             return false;
 
         }
 
-    } while (SFRIFG1 & OFIFG);             // loop until master flag stays clear
+    } while (SFRIFG1 & OFIFG);             /* until OFIFG stays clear */
 
-    // Lock CS registers
     TIKU_CS_LOCK();
 
     CPU_FREQ_PRINTF("All fault flags cleared\n");
@@ -383,7 +362,7 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
  /**
   * @brief Sets the CPU clocks with advanced options.
   *
-  * @param freq The desired MCLK frequency. It is not indexed as MHz.
+  * @param freq MCLK frequency code (CPU_FREQ_*), not MHz.
   * @param sfreq_div The divider for SMCLK.
   * @param aclk_source The source for ACLK.
   */
@@ -397,12 +376,12 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
          freq = CPU_FREQ_8MHZ;  /* Default/clamp to 8MHz */
      }
 
-     /* Configure FRAM wait states BEFORE touching clock system.
-      * For frequencies up to 8MHz, 0 wait states is sufficient.
+     /* FRAM wait states are set before the clocks change.  Up to 8 MHz, the
+      * only range this function selects, FRAM needs none.
       */
      CPU_FREQ_PRINTF("Configuring FRAM wait states for %s MHz\n", tiku_cpu_freq_to_mhz_str(freq));
 
-     /* 8MHz and below can use 0 wait states. FRCTLPW=0xA500 */
+     /* FRCTLPW (0xA500) unlocks FRCTL0. */
      FRCTL0 = FRCTLPW | NWAITS_0;
 
      /* Small delay for FRAM controller to apply new wait state setting */
@@ -419,10 +398,11 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
 
 #if defined(TIKU_DEVICE_CS_TYPE_FR2X33)
      /*
-      * FR2433 CS module: DCO frequency set via DCORSEL (3-bit field in CSCTL1).
-      * Disable FLL before changing DCO settings, then re-enable.
-      * DCORSEL values: 0=1MHz, 1=2.67MHz, 2=3.5MHz, 3=4MHz,
-      *                 4=5.33MHz, 5=7MHz, 6=8MHz, 7=16MHz
+      * FR2433 CS: the FLL locks DCOCLKDIV to 32768 * (FLLN + 1) Hz from REFO
+      * within the DCO range DCORSEL selects; SLAU445 gives the ranges
+      * 0..7 = 1, 2, 4, 8, 12, 16, 20 and 24 MHz.  Each case below uses
+      * DCORSEL_n with n one less than its frequency code.  SCG0 holds the
+      * FLL off while CSCTL1 and CSCTL2 change.
       */
      __bis_SR_register(SCG0);  /* Disable FLL */
 
@@ -483,12 +463,13 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
              ;
      }
 
-     /* Disable FLL to freeze DCO at the locked frequency.
-      * This eliminates FLL hunting jitter that corrupts UART. */
+     /* SCG0 holds the FLL off again, so the DCO stays at the locked tap; a
+      * running FLL keeps retuning the DCO, and that jitter corrupts UART
+      * bytes. */
      __bis_SR_register(SCG0);
 
 #else
-     /* FR5969/FR5994 CS_A module: DCO frequency set via DCOFSEL + DCORSEL.
+     /* FR5969/FR5994/FR6989 CS_A: the DCO is set by DCOFSEL and DCORSEL.
       * DCOFSEL values: 0=1MHz, 1=2.67MHz, 2=3.5MHz, 3=4MHz (low range)
       * With DCORSEL=1: 0=1MHz, 1=5.33MHz, 2=7MHz, 3=8MHz, 4=16MHz, 6=24MHz
       */
@@ -554,8 +535,8 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
             case TIKU_ACLK_VLO:
             case TIKU_ACLK_DCO:
             default:
-                /* FR2433 ACLK only supports XT1CLK or REFOCLK.
-                 * For VLO/DCO requests, fall back to REFOCLK. */
+                /* SELA selects XT1CLK or REFOCLK on this part; every
+                 * request gets REFOCLK. */
                 sela_val = SELA__REFOCLK;
                 break;
         }
@@ -581,7 +562,7 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
     }
 
 #else
-     /* FR5969/FR5994 CS_A module:
+     /* FR5969/FR5994/FR6989 CS_A:
       *   CSCTL2: SELA, SELS, SELM (independent source selects)
       *   CSCTL3: DIVA, DIVS, DIVM (independent dividers)
       */
@@ -667,7 +648,7 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
 #elif TIKU_DEVICE_HAS_LFXT
      CSCTL5 &= ~LFXTOFFG;
 #elif !defined(TIKU_DEVICE_CS_TYPE_FR2X33)
-     /* FR5969/5994 without XT: still clear fault flags */
+     /* CS_A part without LFXT: OFIFG only */
      SFRIFG1 &= ~OFIFG;
 #else
      /* FR2433: clear DCO fault flag */
@@ -678,7 +659,7 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
      /* Lock CS registers */
      TIKU_CS_LOCK();
 
-     /* Additional delay for clock to fully stabilize */
+     /* Settling time after the switch */
      __delay_cycles(500);
 
 #if TIKU_DEVICE_HAS_LFXT
@@ -706,50 +687,48 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
 #if TIKU_DEVICE_HAS_LFXT
 /**
  * @brief Initializes the LFXT crystal oscillator
- * @param bypass If true, the LFXT will be bypassed and an external clock will be used
- * @return TIKU_CLOCK_OK if the LFXT is initialized successfully, TIKU_CLOCK_FAULT_XT1 if not
+ * @param bypass true: external clock on LFXIN; false: crystal
+ * @return TIKU_CLOCK_OK, or TIKU_CLOCK_FAULT_XT1 if LFXT does not start
  */
  tiku_clock_result_t tiku_cpu_msp430_lfxt_init(bool bypass)
  {
      unsigned int count = 0;
 
-     // Unlock CS
      TIKU_CS_UNLOCK();
 
-     // Route LFXT pins (device-specific)
+     /* Route the LFXT pins (device header). */
      TIKU_DEVICE_LFXT_PSEL_REG |= TIKU_DEVICE_LFXT_PSEL_BITS;
 
      TIKU_DEVICE_LFXT_PSEL1_REG &= ~TIKU_DEVICE_LFXT_PSEL1_BITS;
 
-     // Bypass vs crystal
      if (bypass) {
 
         CPU_FREQ_PRINTF("LFXT bypassed\n");
-        CSCTL4 |= LFXTBYPASS;      // external clock on LFXIN
+        CSCTL4 |= LFXTBYPASS;      /* external clock on LFXIN */
 
     } else {
 
         clk.aclk_src = TIKU_ACLK_LFXT;
         CPU_FREQ_PRINTF("LFXT crystal mode\n");
-        CSCTL4 &= ~LFXTBYPASS;     // crystal mode
+        CSCTL4 &= ~LFXTBYPASS;     /* crystal mode */
 
     }
 
-     // Turn on LFXT and start with max drive for startup
+     /* LFXT on, at full drive for start-up. */
      CSCTL4 &= ~LFXTOFF;
 
      CSCTL4 = (CSCTL4 & ~LFXTDRIVE_3) | LFXTDRIVE_3;
 
-     // Clear oscillator fault flags until stable (or timeout)
+     /* Clear the fault flags until they stay clear, or time out. */
      do {
 
-        CSCTL5 &= ~LFXTOFFG;       // clear LFXT fault
-        SFRIFG1 &= ~OFIFG;         // clear global osc fault
-        __delay_cycles(10000);     // small settle
+        CSCTL5 &= ~LFXTOFFG;       /* LFXT fault */
+        SFRIFG1 &= ~OFIFG;         /* summary fault */
+        __delay_cycles(10000);     /* settle */
 
         if (++count > CLOCK_FAULT_TIMEOUT) {
 
-            // Give up: turn LFXT off and lock CS
+            /* Give up: LFXT off, CS locked. */
              CSCTL4 |= LFXTOFF;
 
              TIKU_CS_LOCK();
@@ -763,10 +742,9 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
          }
      } while (SFRIFG1 & OFIFG);
 
-     // Drop drive to lowest once stable (saves power)
+     /* Lowest drive once stable: less supply current. */
      CSCTL4 = (CSCTL4 & ~LFXTDRIVE_3) | LFXTDRIVE_0;
 
-     // Lock CS
      TIKU_CS_LOCK();
 
      g_xt1_enabled = true;
@@ -777,7 +755,7 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
      return TIKU_CLOCK_OK;
  }
 #else
-/* No LFXT on this device — provide stub to avoid linker errors */
+/* No LFXT on this device: every call returns TIKU_CLOCK_FAULT_XT1. */
 tiku_clock_result_t tiku_cpu_msp430_lfxt_init(bool bypass)
 {
     (void)bypass;
@@ -789,7 +767,7 @@ tiku_clock_result_t tiku_cpu_msp430_lfxt_init(bool bypass)
 #if TIKU_DEVICE_HAS_HFXT
 /**
  * @brief Initializes the HFXT high-frequency crystal oscillator (4-24 MHz).
- * @param bypass If true, HFXT will be bypassed and an external clock is expected on HFXIN.
+ * @param bypass true: external clock on HFXIN; false: crystal
  * @param freq_hz Crystal/external clock frequency in Hz.
  * @return TIKU_CLOCK_OK on success, TIKU_CLOCK_FAULT_HFXT on failure.
  */
@@ -898,7 +876,6 @@ tiku_clock_result_t tiku_cpu_msp430_hfxt_init(bool bypass, unsigned long freq_hz
  {
      CPU_FREQ_PRINTF("Clearing oscillator fault flags\n");
 
-     // Unlock CS registers
      TIKU_CS_UNLOCK();
 
      CPU_FREQ_PRINTF("CS registers unlocked for fault clearing\n");
@@ -911,10 +888,10 @@ tiku_clock_result_t tiku_cpu_msp430_hfxt_init(bool bypass, unsigned long freq_hz
 #elif defined(TIKU_DEVICE_CS_TYPE_FR2X33)
          CSCTL7 &= ~DCOFFG;
 #endif
-         SFRIFG1 &= ~OFIFG;                      // clear master fault
+         SFRIFG1 &= ~OFIFG;                      /* summary fault */
 
          CPU_FREQ_PRINTF("Clearing fault flags (SFRIFG1=0x%x)\n", SFRIFG1);
-     } while (SFRIFG1 & OFIFG);                      // repeat if it re-asserts
+     } while (SFRIFG1 & OFIFG);                      /* while it re-asserts */
 
      TIKU_CS_LOCK();
 
@@ -930,7 +907,7 @@ tiku_clock_result_t tiku_cpu_msp430_hfxt_init(bool bypass, unsigned long freq_hz
  }
 
  /**
-  * @brief Delays for specified number of CPU cycles.
+  * @brief Spin for @p cycles loop iterations, several CPU cycles each.
   */
  void tiku_cpu_msp430_delay_cycles(unsigned long cycles)
  {
@@ -948,58 +925,46 @@ tiku_clock_result_t tiku_cpu_msp430_hfxt_init(bool bypass, unsigned long freq_hz
  */
 void tiku_cpu_msp430_lfxt_disable(void)
 {
-    // Unlock CS
     TIKU_CS_UNLOCK();
 
     CPU_FREQ_PRINTF("Disabling LFXT\n");
 
-    // Turn off LFXT
     CSCTL4 |= LFXTOFF;
 
-    // Clear any lingering oscillator fault flags
+    /* Clear any fault flags left set. */
     CSCTL5 &= ~LFXTOFFG;
     SFRIFG1 &= ~OFIFG;
 
-    // Lock CS
     TIKU_CS_LOCK();
 
 }
 #else
 void tiku_cpu_msp430_lfxt_disable(void)
 {
-    /* No LFXT on this device — nothing to do */
+    /* No LFXT on this device: nothing to turn off. */
 }
 #endif /* TIKU_DEVICE_HAS_LFXT */
 
 
  /**
-  * @brief MSP430-specific CPU initialization
-  * Interface to the external world for initializing the clock frequency and other settings
+  * @brief Boot-time CPU setup: interrupts off, every pin low, LOCKLPM5 clear.
   */
 void tiku_cpu_boot_msp430_init(void)
  {
      CPU_FREQ_PRINTF("Booting up CPU\n");
 
-     // Disable global interrupts first
      CPU_FREQ_PRINTF("Disabling global interrupts\n");
      tiku_cpu_boot_msp430_global_interrupts_disable();
 
      CPU_FREQ_PRINTF("Initializing all pins as outputs and driven low\n");
-     // Initialize all pins as outputs and driven low
      tiku_cpu_boot_msp430_pins_init_low();
 
-     // ADD: Other code here if needed
-
-     // Unlock PM5 module BEFORE clock configuration (per TI reference)
-     // This activates previously configured port settings
+     /* Clearing LOCKLPM5 applies the port settings above to the pins; clock
+      * setup runs after this. */
      PM5CTL0 &= ~LOCKLPM5;
 
-     /* Do NOT enable global interrupts here.  The scheduler loop
-      * (tiku_sched_loop) enables GIE at the correct time, after
-      * autostart processes have been launched and the event queue
-      * is ready.  Enabling GIE prematurely causes timer ISRs to
-      * fire before the process system is initialized, flooding the
-      * event queue with unhandled POLL events. */
+     /* This function leaves interrupts disabled; tiku_sched_loop() enables
+      * GIE after it starts the autostart processes. */
 
      CPU_FREQ_PRINTF("Bootup completed\n");
 
@@ -1008,16 +973,15 @@ void tiku_cpu_boot_msp430_init(void)
 
 /**
  * @brief MSP430-specific frequency initialization
- * @param freq_mhz The desired MCLK frequency in MHz
+ * @param freq_mhz MCLK frequency code (CPU_FREQ_*), not MHz
  * @param sfreq_div The SMCLK divider value
- * @param enable_lfxt_crystal Whether to enable LFXT crystal
- * @param enable_hfxt_crystal Whether to enable HFXT crystal
- * Internal function for initializing the clock frequency and other settings. Not exposed to the external world.
+ * @param enable_lfxt_crystal Whether to start the LFXT crystal
+ * @param enable_hfxt_crystal Ignored
  */
 
 static void cpu_freq_msp430_init(unsigned int freq_mhz, unsigned int sfreq_div, bool enable_lfxt_crystal, bool enable_hfxt_crystal)
  {
-     (void)enable_hfxt_crystal; /* Reserved for future use */
+     (void)enable_hfxt_crystal; /* no HFXT start-up here */
 
      CPU_FREQ_PRINTF("Initializing CPU frequency: %s MHz\n", tiku_cpu_freq_to_mhz_str(freq_mhz));
 
@@ -1040,15 +1004,14 @@ static void cpu_freq_msp430_init(unsigned int freq_mhz, unsigned int sfreq_div, 
      /* Set clock frequency */
      tiku_cpu_msp430_clock_set_advanced(freq_mhz, sfreq_div, TIKU_ACLK_LFXT);
 
-     // Wait for clock to stabilize
+     /* Settling time for the clock. */
      tiku_cpu_msp430_delay_cycles(1000000);
 
-     // Check if clock is stable
+     /* LFXT still faulting after the wait: turn it off. */
      if (!wait_for_lfxt_fault_clear(CLOCK_FAULT_TIMEOUT)) {
 
         CPU_FREQ_PRINTF("LFXT crystal fault detected. Disabling crystal.\n");
 
-        // Disable crystal
         tiku_cpu_msp430_lfxt_disable();
 
       }
@@ -1061,7 +1024,7 @@ static void cpu_freq_msp430_init(unsigned int freq_mhz, unsigned int sfreq_div, 
 
         CPU_FREQ_PRINTF("Initializing Microcontroller without LFXT crystal. Sfreq divider: %d\n", sfreq_div);
 
-        /* Set clock frequency with REFO as ACLK source (available on all devices) */
+        /* REFO as the ACLK source. */
         tiku_cpu_msp430_clock_set_advanced(freq_mhz, sfreq_div, TIKU_ACLK_REFO);
 
     }
@@ -1069,15 +1032,12 @@ static void cpu_freq_msp430_init(unsigned int freq_mhz, unsigned int sfreq_div, 
     CPU_FREQ_PRINTF("CPU frequency initialization completed\n");
  }
 
-/*
-* Functions to return the clock frequency and other settings
-*
-*/
+/* Getters for the cached clock settings. */
 
 /**
- * @brief Gets the current CPU frequency in MHz.
+ * @brief Gets the MCLK frequency code last set.
  *
- * @return The CPU frequency in MHz.
+ * @return The TIKU_CLK_FREQ_* code, not MHz.
  */
 tiku_clk_freq_t tiku_cpu_msp430_clock_get_freq(void)
  {
@@ -1097,7 +1057,7 @@ tiku_clk_div_t tiku_cpu_msp430_clock_get_sfreq_div(void)
  }
 
 /**
- * @brief Gets   the current ACLK source.
+ * @brief Gets the current ACLK source.
  *
  * @return The ACLK source.
  */
@@ -1108,7 +1068,7 @@ tiku_aclk_source_t tiku_cpu_msp430_clock_get_aclk_source(void)
 
 /**
  * @brief Initialize CPU frequency on MSP430
- * @param freq_mhz Desired frequency in MHz
+ * @param freq_mhz MCLK frequency code (CPU_FREQ_*), not MHz
  */
 void tiku_cpu_freq_msp430_init(unsigned int freq_mhz)
 {

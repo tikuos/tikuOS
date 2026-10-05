@@ -7,9 +7,8 @@
  *
  * tiku_mpu_arch.c - MSP430 MPU register access.
  *
- * Keeps every MPUCTL0 and MPUSAM access in one place.  The registers are
- * password-protected: a write to MPUCTL0 must carry MPUPW in the upper byte, so a
- * wild pointer cannot alter memory protection by accident.
+ * Every MPUCTL0 and MPUSAM access is in this file.  Each MPUCTL0 write
+ * carries the password MPUPW in its upper byte.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -25,18 +24,12 @@
 /* MPU SEGMENT BOUNDARY SETUP                                                */
 /*---------------------------------------------------------------------------*/
 
-/*
- * The MPU needs valid segment boundaries before SAM permissions
- * have any effect. MPUSEGB1 and MPUSEGB2 divide the FRAM address
- * space into three segments. The register values are the actual
- * boundary addresses right-shifted by 4.
- */
 /**
  * @brief Set up the three MPU segment boundaries from device macros.
  *
- * Writes MPUSEGB1 and MPUSEGB2 (boundary addresses right-shifted by 4)
- * to divide the FRAM address space into three protection segments.
- * Must be called before SAM permissions have any effect.
+ * Writes MPUSEGB1 and MPUSEGB2 (boundary addresses right-shifted by 4) to
+ * divide the FRAM address space into three protection segments, and
+ * enables the MPU.  SAM permissions apply to the segments set here.
  */
 void tiku_mpu_arch_init_segments(void)
 {
@@ -57,16 +50,10 @@ uint16_t tiku_mpu_arch_get_sam(void)
 }
 
 /*
- * Why unlock-write-enable in every set_sam call:
- *   The MPU config registers are locked by default. Modifying MPUSAM
- *   means writing the password to MPUCTL0 first, then changing MPUSAM,
- *   then writing password | enable to MPUCTL0 to re-activate. Bundling
- *   this into set_sam means the kernel never needs to know about the
- *   password or the enable bit.
- *
- *   MPUSEGIE (violation NMI enable) is preserved across calls so that
- *   enabling violation detection is not accidentally undone by a later
- *   permission change.
+ * MPUCTL0 takes the password before MPUSAM changes and again with MPUENA
+ * after, so callers never handle the password or the enable bit.
+ * MPUSEGIE (violation NMI enable) is carried across the write, so a
+ * permission change keeps the violation NMI armed.
  */
 void tiku_mpu_arch_set_sam(uint16_t sam)
 {
@@ -99,18 +86,16 @@ void tiku_mpu_arch_enable_irq(void)
 /*---------------------------------------------------------------------------*/
 
 /*
- * These functions encapsulate MSP430-specific register-level details
- * (SAM bit layout, write-bit positions) so the kernel never needs to
- * know the register format. The kernel calls these instead of
- * manipulating SAM values directly.
+ * The functions below take portable segment numbers and permission flags
+ * and do the SAM bit arithmetic for the kernel.
  */
 
 /**
  * @brief Set default NVM protection.
  *
  * Without HIFRAM every segment is R+X, since all three hold persistent data,
- * vectors and code.  With HIFRAM, segment 3 covers kernel mutable state and
- * MUST be writable, or every store to it faults silently and bricks the boot.
+ * vectors and code.  With HIFRAM, segment 3 holds kernel mutable state and
+ * is R+W+X: a store there without W is dropped and boot fails.
  */
 void tiku_mpu_arch_set_default_protection(void)
 {
@@ -169,10 +154,8 @@ void tiku_mpu_arch_lock_nvm(uint16_t saved_state)
 /*---------------------------------------------------------------------------*/
 
 /*
- * Software-latched violation flags. Reading SYSSNIV in the NMI ISR
- * clears the corresponding MPUCTL1 flag as a hardware side effect.
- * To let callers inspect which segment was violated, the ISR saves
- * MPUCTL1 here before acknowledging the interrupt.
+ * MPUCTL1 as the SYSNMI ISR latched it before reading SYSSNIV, which
+ * clears the hardware flags.  The ISR ORs into it until a clear.
  */
 static volatile uint16_t latched_violation_flags;
 
@@ -202,10 +185,10 @@ void tiku_mpu_arch_enable_violation_nmi(void)
 /*---------------------------------------------------------------------------*/
 
 /*
- * When MPUSEGIE is set, an MPU violation triggers a System NMI instead
- * of a PUC (reset). MPUCTL1 is latched before SYSSNIV is read, because
- * that read clears the hardware violation flags. The latched value can
- * then be inspected by tiku_mpu_get_violation_flags().
+ * With MPUSEGIE set, an MPU violation raises a System NMI.  The ISR ORs
+ * MPUCTL1 into the latch before reading SYSSNIV, because that read clears
+ * the hardware violation flags; tiku_mpu_arch_get_violation_flags()
+ * returns the latch.
  */
 TIKU_ISR(SYSNMI_VECTOR, tiku_mpu_sysnmi_isr)
 {
@@ -219,6 +202,8 @@ TIKU_ISR(SYSNMI_VECTOR, tiku_mpu_sysnmi_isr)
 /* NO-OP STUBS FOR DEVICES WITHOUT MPU                                       */
 /*---------------------------------------------------------------------------*/
 
+/* Without an MPU every call does nothing and every getter returns 0; the
+ * interrupt wrappers still mask and unmask. */
 void     tiku_mpu_arch_init_segments(void)           { }
 uint16_t tiku_mpu_arch_get_sam(void)                 { return 0; }
 void     tiku_mpu_arch_set_sam(uint16_t sam)          { (void)sam; }
@@ -236,9 +221,9 @@ void     tiku_mpu_arch_enable_violation_nmi(void)    { }
 
 #endif /* TIKU_DEVICE_HAS_MPU */
 
-/* MSP430's linker places all static SRAM before _end and the descending stack
- * at the top of the selected RAM region.  Painting begins after statics, never
- * at RAM origin, so globals and fixed tier buffers are excluded. */
+/* Bottom of the stack for stack painting: the linker places all static
+ * SRAM below _end and the stack descends from the top of the selected RAM
+ * region, so painting starts above the statics and fixed tier buffers. */
 extern char _end;
 uint32_t tiku_stack_arch_bottom(void)
 {
@@ -246,10 +231,9 @@ uint32_t tiku_stack_arch_bottom(void)
 }
 
 /**
- * @brief No RAM execution window on this port -- the module runs XIP from NVM.
+ * @brief No-op: this port has no RAM execution window.
  *
- * An explicit no-op rather than an omission, so the portable call site needs no
- * #ifdef and a future port that gains a window has an obvious place to put it.
+ * A loaded module runs in place from FRAM, so there is nothing to switch.
  */
 void tiku_mpu_arch_module_window_exec(int enable)
 {

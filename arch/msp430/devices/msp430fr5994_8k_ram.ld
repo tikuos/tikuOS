@@ -7,57 +7,35 @@
  *
  * msp430fr5994_8k_ram.ld - FR5994 8 KB SRAM override.
  *
- * Collapses the stock script's three SRAM regions (RAM + LEARAM + LEASTACK)
- * into one 8 KB RAM region, since TikuOS does not use the LEA peripheral.
- * The Makefile refuses LEA_ENABLE=1 until a compatible custom layout exists.
+ * Merges the stock script's three SRAM regions (RAM, LEARAM, LEASTACK) into
+ * one 8 KB RAM region, since TikuOS does not use the LEA peripheral, holds
+ * back the top of HIFRAM and fixes the high-bss clear size.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /*
- * Why this exists
- * ===============
- * The stock msp430-elf-gcc linker script for MSP430FR5994 carves the
- * 8 KB on-chip SRAM into three regions to keep the LEA (Low-Energy
- * Accelerator) peripheral's data and command-stack buffers from
- * colliding with general .bss/stack:
+ * The stock msp430-elf-gcc script for the MSP430FR5994 splits the 8 KB of
+ * SRAM into three regions, the last two for the LEA (Low-Energy
+ * Accelerator) data and command stack:
  *
  *   RAM      : 0x1C00 length 0x1000  (4 KB general-purpose)
  *   LEARAM   : 0x2C00 length 0x0EC8  (~3.7 KB LEA data)
  *   LEASTACK : 0x3AC8 length 0x0138  (312 B LEA cmd stack)
  *
- * TikuOS does not use the LEA peripheral by default, so reserving
- * those last 4 KB of SRAM is just lost address space. This fragment
- * collapses the three regions into one 8 KB RAM region, giving the
- * kernel + processes the full physical SRAM the chip has to offer.
+ * This file makes RAM all 8 KB and gives LEARAM and LEASTACK length 0.  The
+ * stock `.leaRAM : {} > LEARAM` directive still links: an empty section in a
+ * zero-length region produces no output.  The stock script places the stack
+ * at ORIGIN(RAM) + LENGTH(RAM), so the initial SP is 0x3C00.
  *
- * The stock script's `.leaRAM : {} > LEARAM` section directive still
- * resolves cleanly because LEARAM is redeclared with LENGTH=0
- * (an empty section landing in a zero-length region produces no
- * output, which is exactly the behaviour required).
- *
- * The stack origin auto-follows: stock script uses
- *   .stack (ORIGIN(RAM) + LENGTH(RAM)) : ...
- * so growing RAM moves the initial SP from 0x2C00 to 0x3C00 with no
- * other change.
- *
- * How it's wired in
- * =================
- * Passing -T <file> on msp430-elf-gcc 9.3 *replaces* the spec-default
- * linker script — the spec-driven `-T msp430fr5994.ld` is suppressed
- * the moment a user-supplied -T appears.  So this INCLUDEs the stock
- * script first to pick up all the SECTIONS / vector tables / FRAM
- * layout, then redeclare just the three SRAM-side MEMORY regions.
- * ld(1)'s "last MEMORY declaration of a given name wins" rule applies
- * region-by-region, leaving everything else (FRAM, HIFRAM, INFOMEM,
- * vectors, etc.) exactly as the toolchain shipped it.
- *
- * The Makefile prepends this fragment via:
- *   ifeq ($(MCU),msp430fr5994)
- *   ifeq ($(LEA_ENABLE),0)
- *   LDFLAGS += -Tarch/msp430/devices/msp430fr5994_8k_ram.ld
- *
- * LEA_ENABLE=1 requires a custom layout retaining the FRAM reservations below.
+ * A -T script given to msp430-elf-gcc 9.3 replaces the spec-default
+ * msp430fr5994.ld, so this file INCLUDEs the stock script and then
+ * redeclares MEMORY regions; ld keeps the last declaration of each region
+ * name, and the regions not named here (FRAM, INFOMEM, vectors) stay as the
+ * toolchain ships them.  The Makefile passes
+ * -Tarch/msp430/devices/msp430fr5994_8k_ram.ld when MCU=msp430fr5994 and
+ * LEA_ENABLE=0, and refuses LEA_ENABLE=1: a LEA layout needs its own script
+ * that keeps the HIFRAM reservations below.
  */
 
 INCLUDE msp430fr5994.ld
@@ -66,75 +44,51 @@ MEMORY {
   RAM      (rw) : ORIGIN = 0x1C00, LENGTH = 0x2000  /* 8 KB merged */
   LEARAM        : ORIGIN = 0x3C00, LENGTH = 0
   LEASTACK      : ORIGIN = 0x3C00, LENGTH = 0
-  /* Held-back HIFRAM top: the stock script maps HIFRAM 0x10000..0x43FF7.
-   * The top 12 KB is reserved, out of the linker's reach:
-   *   0x41000..0x43000  pinned backend (tiku_nvm_region_msp430.c)
-   *                     separate from the static MSP430 /data array
-   *   0x43000..0x43FF0  Tier-3 loadable-module slot
-   *                     (TIKU_MODULE_CARVE_ADDR/SIZE; stops shy of the
-   *                     odd CPU47 region end)
-   * Keep in sync with TIKU_NVMFS_MSP430_BASE and tiku_basic_module.h. */
+  /* HIFRAM ends at 0x40FFF here; the stock script maps 0x10000..0x43FF7.
+   * The top 12 KB is out of the linker's reach:
+   *   0x41000..0x43000  pinned NVM backend (TIKU_NVMFS_MSP430_BASE in
+   *                     tiku_nvm_region_msp430.c), separate from the
+   *                     static MSP430 /data array
+   *   0x43000..0x43FF0  loadable-module slot (TIKU_MODULE_CARVE_ADDR/SIZE
+   *                     in tiku_basic_module.h), short of the odd CPU47
+   *                     region end
+   * Those two definitions name the same addresses. */
   HIFRAM  (rxw) : ORIGIN = 0x00010000, LENGTH = 0x00031000
 }
 
 /*
- * Stock-script high-bss clear size, corrected.  The crt zero-inits
- * .upper.bss by clearing __high_bsssize bytes starting at
- * __high_bssstart, so __high_bsssize must be EXACTLY the number of
- * bytes from the start marker to the end of the section's content --
- * no more (or it stomps the first opcode of the .upper.text function
- * placed immediately after), no less (or it leaves live kernel .bss
- * as stale FRAM garbage).
+ * The crt zero-fills .upper.bss by clearing __high_bsssize bytes from
+ * __high_bssstart, so the size must run from that marker to the end of the
+ * section's content:
  *
- * Two ways to get it wrong, both observed here:
- *   1. SIZEOF(.upper.bss) (the stock value, msp430fr5994.ld:345)
- *      counts the leading ALIGN(2) pad emitted when the section
- *      starts odd, while __high_bssstart is taken AFTER the pad -->
- *      overshoot by one byte into .upper.text (field report:
- *      tiku_shell_cmd_rules PUC-crashing with pmm-pwviol, its first
- *      opcode zeroed at boot).
- *   2. __high_bssend - __high_bssstart (a previous fix for #1) UNDER-
- *      clears: with a large .upper.bss (e.g. BASIC's ~64 KB arena)
- *      the linker appends orphan .upper.bss input to the output
- *      section AFTER the __high_bssend marker, so end-start covers
- *      only part of the section.  The tail -- holding
- *      tiku_process_list_head, the event queue, the tick counters --
- *      boots uninitialised and the scheduler/timer machinery wedges
- *      (symptom: shell hangs at the first prompt on large/BASIC
- *      builds; the Timer A0 tick never advances).
+ *   - SIZEOF(.upper.bss), the stock value, also counts the ALIGN(2) pad
+ *     emitted below the marker when the section starts odd, and the clear
+ *     then zeroes the first byte of the .upper.text function placed after
+ *     the section.
+ *   - __high_bssend - __high_bssstart misses the orphan .upper.bss input
+ *     that the linker appends after the __high_bssend marker when
+ *     .upper.bss is large (such as the BASIC arena).  That tail holds
+ *     tiku_process_list_head, the event queue and the tick counters, and
+ *     left uncleared it stalls the scheduler and the Timer A0 tick.
  *
- * The robust size is (true section end) - (start marker):
- *   ADDR(.upper.bss) + SIZEOF(.upper.bss)  = the true content end
- *   minus __high_bssstart                  = start after any pad
- * which excludes the leading pad (it sits below the marker) and
- * includes every byte the linker actually placed in the section.
- * Symbol assignments are order-sensitive and the LAST wins, so this
- * post-INCLUDE reassignment overrides the stock SIZEOF value.
+ * ADDR(.upper.bss) + SIZEOF(.upper.bss) - __high_bssstart excludes the pad
+ * and includes every byte placed in the section.  The last assignment to a
+ * symbol wins, so this one, after the INCLUDE, replaces the stock value.
  */
 __high_bsssize = ADDR(.upper.bss) + SIZEOF(.upper.bss) - __high_bssstart;
 
 /*
- * Expose the end-of-HIFRAM address as a linker symbol so the `free`
- * shell command can report HIFRAM usage. The stock LD provides
- * __high_bssstart / __high_bssend for .upper.bss but no end markers
- * for .upper.text or .upper.rodata, so without this the kernel can
- * only report total HIFRAM reachability (208 KB) and not what's
- * actually consumed by code/rodata/bss.
+ * __hifram_end marks the end of everything linked into HIFRAM, for the
+ * `free` shell command; the stock script has end markers for .upper.bss
+ * (__high_bssend) but none for .upper.text or .upper.rodata.
  *
- * Multiple SECTIONS blocks in a single linker script are merged
- * into one effective SECTIONS command, with sections placed in the
- * order they appear across all blocks. Putting this NOLOAD marker
- * after the INCLUDE'd standard script means it lands after every
- * standard HIFRAM-targeted section (.upper.rodata at :247,
- * .upper.bss at :337, .upper.text at :419), so __hifram_end
- * captures the end of *all* HIFRAM-resident sections. NOLOAD means
- * the marker contributes no bytes — it only snapshots the
- * location counter.
+ * SECTIONS blocks merge in order of appearance, so this NOLOAD section,
+ * after the INCLUDE, lands after .upper.rodata, .upper.bss and .upper.text.
+ * It takes no bytes; it records the location counter.
  *
- * (INSERT AFTER .upper.text does not work here: ld errors out
- * with ".upper.text not found for insert" — INSERT only resolves
- * against sections in the spec-default linker script, not against
- * sections pulled in via INCLUDE.)
+ * ld resolves INSERT only against the spec-default script, not against
+ * sections pulled in through INCLUDE: an insert after .upper.text fails here
+ * with ".upper.text not found for insert".
  */
 SECTIONS {
   .upper_end_marker (NOLOAD) :

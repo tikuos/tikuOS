@@ -7,9 +7,9 @@
  *
  * tiku_lcd_arch.c - MSP430 LCD_C peripheral driver.
  *
- * Drives the LCD_C controller with a board-supplied pin map, built only where the
- * silicon has LCD_C and the board wires a panel.  The font and per-position
- * LCDMEM map suit the FH-1138P glass; a board may override the byte indices.
+ * Drives LCD_C with the board's pin mask and per-position LCDMEM bytes,
+ * built only where the device has LCD_C and the build defines
+ * TIKU_BOARD_HAS_LCD.  The 14-segment font suits the FH-1138P glass.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,30 +27,28 @@
 /*===========================================================================*/
 
 /*
- * 14-segment encoding for the FH-1138P. Each character occupies two
- * bytes: byte0 carries one half of the segment bits (the four
- * "primary" segments per common pair) and byte1 carries the other
- * half (diagonals, middle bar split).
+ * 14-segment encoding for the FH-1138P.  Each character occupies two
+ * bytes: byte0 carries the outer segments and the middle bars, byte1 the
+ * diagonals and the centre verticals.
  *
  * Bit layout (per the FH-1138P pin map on the FR6989 LaunchPad):
- *   byte0:  bit0=A, bit1=B, bit2=C, bit3=D, bit4=E, bit5=F,
- *           bit6=G(left), bit7=M(right)
- *   byte1:  bit1=Q, bit2=K, bit3=H, bit4=N, bit5=J, bit6=P,
- *           bit7=DP (decimal point — unused on most positions)
+ *   byte0:  bit7=A, bit6=B, bit5=C, bit4=D, bit3=E, bit2=F,
+ *           bit1=G (left bar), bit0=M (right bar)
+ *   byte1:  bit7=H, bit6=J, bit5=K, bit4=P, bit3=N, bit1=Q;
+ *           bits 0 and 2 belong to icons
  *
  * Visual layout of the segments:
  *
- *        A A A
- *       FH J KB
- *       F H JKB
- *        G G M M
- *       E N JPC
- *       E NJ PC
- *        D D D
+ *        AAAAAAA
+ *       F H J K B
+ *       F  HJK  B
+ *        GGG MMM
+ *       E  NPQ  C
+ *       E N P Q C
+ *        DDDDDDD
  *
  * Values below match the encoding used by TI's MSP-EXP430FR6989
- * lcd_c_lib example. Verified to render correctly on hardware
- * for digits 0-9 and uppercase A-Z.
+ * lcd_c_lib example, for digits 0-9 and uppercase A-Z.
  */
 static const uint8_t font_digit[10][2] = {
     {0xFC, 0x28},  /* 0 */
@@ -105,9 +103,9 @@ static const uint8_t font_alpha[26][2] = {
 /*===========================================================================*/
 
 /*
- * Pull each position's two LCDMEM indices out of the board header
- * into an array indexable by position. Adding more positions or
- * porting to a different glass is a board-header-only change.
+ * Each position's two LCDMEM indices, from the board header's
+ * TIKU_BOARD_LCD_POSn_BYTE0/1, in arrays indexed by position.  The
+ * tables take up to six positions.
  */
 static const uint8_t pos_byte0_idx[TIKU_BOARD_LCD_NUM_CHARS] = {
     TIKU_BOARD_LCD_POS0_BYTE0,
@@ -147,15 +145,14 @@ static const uint8_t pos_byte1_idx[TIKU_BOARD_LCD_NUM_CHARS] = {
 #endif
 };
 
-/* Direct pointer into the LCD memory window — avoids LCDMEM[i]
- * relying on a specific symbol layout in the toolchain header.
- * 1-indexed so LCD_MEM_BYTE(1) == LCDM1. */
+/* LCD memory byte i, counted from 1: LCD_MEM_BYTE(1) is LCDM1.  It is
+ * addressed from &LCDM1, so it needs no LCDMEM array in the toolchain
+ * header. */
 #define LCD_MEM_BYTE(i)  (*((volatile uint8_t *)((uintptr_t)&LCDM1 + (i) - 1)))
 
-/* Bits in byte1 of every digit position that are reserved for
- * icons (e.g. dot, colon) on this board. The board header may
- * override; default is "no shared bits". A digit write OR-merges
- * its own bits into the byte while preserving the masked bits. */
+/* Byte1 bits that a digit write leaves alone because icons share them.
+ * A board header without a mask gets 0: digit writes own all of
+ * byte1. */
 #ifndef TIKU_BOARD_LCD_DIGIT_BYTE1_PRESERVE_MASK
 #define TIKU_BOARD_LCD_DIGIT_BYTE1_PRESERVE_MASK  0x00U
 #endif
@@ -168,17 +165,15 @@ void
 tiku_lcd_arch_init(void)
 {
     /* 1. Configure pins as LCD function. The board mask says which
-     *    Lxx pins are wired; LCDCPCTLx enables those as LCD pins.
-     *    The MSP430FR-series LCD_C peripheral takes over the
-     *    underlying GPIO when the corresponding bit is set. */
+     *    Lxx pins are wired; a set LCDCPCTLx bit hands that pin from
+     *    GPIO to LCD_C. */
     LCDCPCTL0 = TIKU_BOARD_LCD_PIN_MASK0;
     LCDCPCTL1 = TIKU_BOARD_LCD_PIN_MASK1;
     LCDCPCTL2 = TIKU_BOARD_LCD_PIN_MASK2;
 
     /* 2. Configure LCD controller:
-     *      - Source: ACLK (32.768 kHz from LFXT). On FR6989 the
-     *        clock select bit LCDSSEL is 0=ACLK / 1=VLOCLK; ACLK is
-     *        the reset default, so the bit is left clear.
+     *      - Source: ACLK (LCDSSEL = 0, the reset value, left clear):
+     *        32.768 kHz when LFXT runs.
      *      - Pre-divider 16, divider 1 → frame freq ~64 Hz at 4-mux
      *      - 4-mux operation with low-power waveform (LCDLP)
      *      - Bias defaults to 1/3 (LCD2B not set)
@@ -194,11 +189,12 @@ tiku_lcd_arch_init(void)
      *    explicit "reference enable" bit on this part. */
     LCDCVCTL = LCDCPEN | VLCD_5;
 
-    /* 4. Charge pump clock sync (per FR6989 errata recommendation). */
+    /* 4. Charge-pump clock synchronisation, as the FR6989 errata
+     *    recommends. */
     LCDCCPCTL = LCDCPCLKSYNC;
 
-    /* 5. Clear all LCD memory before turning the panel on, so no
-     *    random RAM contents get latched into the glass. */
+    /* 5. Clear LCD memory before the panel turns on, so the glass shows
+     *    no leftover RAM contents. */
     LCDCMEMCTL = LCDCLRM;
 
     /* 6. Enable the controller and turn the panel on. */
@@ -221,6 +217,12 @@ tiku_lcd_arch_clear(void)
 /* PUTCHAR                                                                    */
 /*===========================================================================*/
 
+/**
+ * @brief Look up the two segment bytes of @p ch.
+ *
+ * Digits, letters of either case and '-' have glyphs; anything else is
+ * blank.
+ */
 static void
 encode_glyph(char ch, uint8_t *b0, uint8_t *b1)
 {
@@ -255,11 +257,9 @@ tiku_lcd_arch_putchar(uint8_t pos, char ch)
 
     LCD_MEM_BYTE(pos_byte0_idx[pos]) = b0;
 
-    /* Preserve bits in byte1 that the board reserves for icon
-     * segments — on the FH-1138P, byte1 of every digit shares the
-     * LCDMEM byte with the dot / colon icons living between
-     * digits. Without this OR-merge, drawing a digit would silently
-     * clear any lit icon. */
+    /* Bits in TIKU_BOARD_LCD_DIGIT_BYTE1_PRESERVE_MASK belong to icons
+     * that share byte1 (the dots and colons between digits on the
+     * FH-1138P); the write keeps them, so a lit icon stays lit. */
     if (TIKU_BOARD_LCD_DIGIT_BYTE1_PRESERVE_MASK == 0) {
         LCD_MEM_BYTE(idx1) = b1;
     } else {
@@ -276,9 +276,8 @@ tiku_lcd_arch_putchar(uint8_t pos, char ch)
 
 #if defined(TIKU_BOARD_LCD_HAS_ICONS) && TIKU_BOARD_LCD_HAS_ICONS
 
-/* Per-icon (LCDMEM byte index, bit mask) pair. Populated from the
- * board header's TIKU_BOARD_LCD_ICON_TABLE expansion — adding or
- * renaming icons is a board-header-only change. */
+/* Per-icon (LCDMEM byte index, bit mask) pair, filled from the board
+ * header's TIKU_BOARD_LCD_ICON_TABLE. */
 struct lcd_icon_def {
     uint8_t mem_idx;
     uint8_t mask;

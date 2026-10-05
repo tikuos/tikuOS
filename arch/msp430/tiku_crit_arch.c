@@ -7,9 +7,9 @@
  *
  * tiku_crit_arch.c - MSP430 IRQ-mask backend for tiku_crit.
  *
- * Implements the two hooks in hal/tiku_crit_hal.h.  Each subsystem family is
- * guarded by its register's compile-time visibility, so the file compiles
- * unchanged across FR5969, FR5994 and FR2433.
+ * Implements the two hooks in hal/tiku_crit_hal.h.  Each register is masked
+ * only where its OFS_<reg> macro exists, so one file serves the FR5969,
+ * FR5994, FR6989 and FR2433.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,23 +27,16 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * IE state captured at mask. Each field stores the cleared
- * register's prior value so unmask can restore exactly what the
- * caller had configured. Conditionally compiled per device so a
- * missing peripheral does not leave dead BSS.
+ * Interrupt-enable state saved by mask and restored by unmask: each field
+ * holds its register's value from before the mask cleared it.  One static
+ * instance serves because tiku_crit windows do not nest (the kernel
+ * refuses re-entry with TIKU_CRIT_ERR_BUSY).
  *
- * Single static instance is fine because tiku_crit windows do not
- * nest (the kernel rejects re-entry with TIKU_CRIT_ERR_BUSY).
- *
- * NB: the per-register guards below test defined(OFS_<reg>), NOT
- * defined(<reg>).  PxIE / UCxIE / ADC12IER0 / SFRIE1 are declared
- * with sfr_b()/sfr_w() — extern symbols, not preprocessor macros —
- * so `#if defined(OFS_UCA0IE)` is FALSE under the msp430-elf-gcc headers
- * even when the peripheral exists.  That silently compiled out every
- * mask in this file, leaving tiku_crit masking only the (ungated)
- * timers.  OFS_<reg> is a real macro defined exactly for the
- * registers the selected device has, so it is the correct "does this
- * register exist on this MCU" test.
+ * The guards test defined(OFS_<reg>), a macro that exists exactly for the
+ * registers the selected device has.  The register names (PxIE, UCxIE,
+ * ADC12IER0, SFRIE1) are sfr_b()/sfr_w() symbols, not macros, so
+ * defined(UCA0IE) is false under msp430-elf-gcc even where the register
+ * exists, and a guard on it compiles the mask out.
  */
 static struct {
     uint16_t ta0_ccie;
@@ -85,9 +78,10 @@ static struct {
 /*---------------------------------------------------------------------------*/
 
 /*
- * GIE stays enabled so a preserved ISR -- typically the bit clock -- keeps
- * firing, and each register is touched at most once.  The #if guards skip
- * peripheral families the current device lacks.
+ * Clears the enable bit of every interrupt source preserve_mask does not
+ * name, saving each register first.  GIE stays set, so a preserved ISR
+ * (typically the bit clock) keeps firing.  Each register is touched at
+ * most once, and only the GPIO ports 1-4 are masked.
  */
 void
 tiku_crit_arch_mask_irqs(uint8_t preserve_mask)
@@ -147,8 +141,8 @@ tiku_crit_arch_mask_irqs(uint8_t preserve_mask)
 #endif
 
 #if defined(OFS_SFRIE1) && defined(WDTIE)
-    /* Watchdog interval-mode IRQ. The watchdog *reset* is
-     * independent and hardware -- not maskable from here. */
+    /* Watchdog interval-mode IRQ.  The watchdog reset is not an
+     * interrupt and is not masked here. */
     crit_ie_saved.sfrie1_wdtie = SFRIE1 & WDTIE;
     if (!(preserve_mask & TIKU_CRIT_PRESERVE_WDT)) {
         SFRIE1 &= ~WDTIE;
@@ -185,7 +179,8 @@ tiku_crit_arch_mask_irqs(uint8_t preserve_mask)
 }
 
 /*
- * Lost-interrupt notes for the masked window:
+ * Restores every enable bit the mask saved.  Lost interrupts in the
+ * masked window:
  *   - Timer A0: CCIFG latches only one missed tick, so several missed compares
  *     collapse into a single post-window ISR and the tick count slips.
  *   - UART RX: bytes beyond the 1-byte hardware buffer are lost, though the

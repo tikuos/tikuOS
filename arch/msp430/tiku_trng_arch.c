@@ -7,9 +7,9 @@
  *
  * tiku_trng_arch.c - MSP430 software entropy source.
  *
- * Harvests oscillator-ratio jitter between MCLK and ACLK, plus ADC thermal noise,
- * and conditions many rounds with SHA-256 chained across blocks.  A dead jitter
- * source fails the health check and the read fails closed.
+ * Harvests oscillator-ratio jitter between MCLK and ACLK, plus ADC thermal
+ * noise, and conditions many rounds with SHA-256 chained across blocks.  A
+ * dead jitter source fails the health check and the read fails closed.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,17 +23,15 @@
 #include <tikukits/crypto/sha256/tiku_kits_crypto_sha256.h>
 
 /*
- * Rounds hashed per 32-byte output block.  Each round yields only a
- * handful of unpredictable bits, so the count is deliberately large:
- * with a conservative ~1 bit/round the pool still carries >256 bits of
- * min-entropy into the SHA-256 conditioner.  At ~55 us/round this is
- * ~14 ms per block -- fine, since callers seed a DRBG from it once.
+ * Rounds hashed per 32-byte output block.  Each round yields only a few
+ * unpredictable bits; at an assumed 1 bit of min-entropy per round, the
+ * pool carries at least 256 bits into the SHA-256 conditioner.
  */
 #define TRNG_POOL_ROUNDS   256u
 #define TRNG_BLOCK_BYTES   32u   /* SHA-256 digest size */
 
-/* Upper bound on the MCLK spin so a stopped ACLK can't wedge us: 2^16
- * DCO iterations ~= 8 ms with no ACLK edge means the timer is dead. */
+/* Upper bound on the MCLK spin, so a stopped ACLK cannot hang the read:
+ * 0xFFFF iterations with no ACLK edge means the timer is dead. */
 #define TRNG_SPIN_LIMIT    0xFFFFu
 
 static uint8_t trng_ready;                       /* init done            */
@@ -49,9 +47,8 @@ tiku_trng_arch_init(void)
     }
 #ifdef TIKU_BOARD_ADC_AVAILABLE
     {
-        /* 12-bit conversions off AVCC.  The temperature sensor is a
-         * high-impedance, noisy channel: the LSBs are the point, not
-         * accuracy. */
+        /* 12-bit conversions off AVCC; only the noisy LSBs of the
+         * high-impedance temperature channel matter here. */
         tiku_adc_config_t cfg;
         cfg.resolution = TIKU_ADC_RES_12BIT;
         cfg.reference  = TIKU_ADC_REF_AVCC;
@@ -63,10 +60,11 @@ tiku_trng_arch_init(void)
 
 /*---------------------------------------------------------------------------*/
 
-/*
- * Harvest and condition one 32-byte block into @p out.  Returns
- * TIKU_TRNG_OK, or TIKU_TRNG_ERR_TIMEOUT if the jitter source never
- * varied (dead timer) -- in which case @p out is not written.
+/**
+ * @brief Harvest and condition one 32-byte block into @p out.
+ *
+ * Returns TIKU_TRNG_OK, or TIKU_TRNG_ERR_TIMEOUT with @p out unwritten when
+ * the jitter source never varied (dead timer).
  */
 static int
 trng_block(uint8_t out[TRNG_BLOCK_BYTES])
@@ -125,10 +123,9 @@ trng_block(uint8_t out[TRNG_BLOCK_BYTES])
         }
     }
 
-    /* Health test: the jitter source MUST have moved.  A count that is
-     * constant for every round means ACLK is stopped or the loop was
-     * fully deterministic -- either way there is no entropy, so refuse
-     * rather than emit conditioned constants. */
+    /* Health test: a count that never changed across the rounds means
+     * ACLK is stopped or the loop is deterministic, and the block carries
+     * no entropy; the read fails instead of emitting hashed constants. */
     if (!cnt_varied) {
         return TIKU_TRNG_ERR_TIMEOUT;
     }
@@ -155,10 +152,10 @@ tiku_trng_arch_read_bytes(uint8_t *buf, size_t len)
         size_t chunk = len - off;
         int    rc    = trng_block(block);
         if (rc != TIKU_TRNG_OK) {
-            /* Fail closed: zero whatever was written so a caller that
+            /* Fail closed: the whole buffer is zeroed, so a caller that
              * ignores the return (the void TLS RNG adapter) gets an
-             * invalid all-zero key and the handshake aborts at the peer,
-             * rather than leaking stack or using predictable bytes. */
+             * all-zero key, which the peer rejects, and never stack
+             * contents or predictable bytes. */
             memset(buf, 0, len);
             memset(block, 0, sizeof block);
             return rc;

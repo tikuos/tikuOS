@@ -7,6 +7,9 @@
  *
  * tiku_cpu_watchdog_arch.h - MSP430 CPU watchdog timer configuration
  *
+ * WDT_A control for the watchdog HAL: stop, hold, resume, kick and configure,
+ * each a password-carrying write to WDTCTL.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -16,55 +19,64 @@
 #include <msp430.h>
 #include <stdint.h>
 
-/* Add missing WDTIS constants if not defined in MSP430 headers */
+/**
+ * @name WDTIS interval selects, defined here when <msp430.h> lacks them
+ * The toolchain headers for the supported parts define WDTIS__64,
+ * WDTIS__512 and WDTIS__8192 but name /32768 WDTIS__32K, so WDTIS__32768
+ * always takes the value below.
+ * @{
+ */
 #ifndef WDTIS__64
-#define WDTIS__64       (0x0000)  /* WDT - Timer Interval Select: /64 */
+#define WDTIS__64       (0x0000)  /**< WDT - Timer Interval Select: /64 */
 #endif
 #ifndef WDTIS__512
-#define WDTIS__512      (0x0001)  /* WDT - Timer Interval Select: /512 */
+#define WDTIS__512      (0x0001)  /**< WDT - Timer Interval Select: /512 */
 #endif
 #ifndef WDTIS__8192
-#define WDTIS__8192     (0x0002)  /* WDT - Timer Interval Select: /8192 */
+#define WDTIS__8192     (0x0002)  /**< WDT - Timer Interval Select: /8192 */
 #endif
 #ifndef WDTIS__32768
-#define WDTIS__32768    (0x0003)  /* WDT - Timer Interval Select: /32768 */
+#define WDTIS__32768    (0x0003)  /**< WDT - Timer Interval Select: /32768 */
 #endif
+/** @} */
 
-/* Mode */
 #ifndef TIKU_WDT_MODE_T_DEFINED
 #define TIKU_WDT_MODE_T_DEFINED
+/** @brief WDT mode: the WDTTMSEL bit of WDTCTL. */
 enum tiku_wdt_mode {
-    TIKU_WDT_MODE_WATCHDOG = 0,          /* reset on timeout (WDTTMSEL=0) */
-    TIKU_WDT_MODE_INTERVAL = WDTTMSEL    /* periodic interrupt (WDTTMSEL=1) */
+    TIKU_WDT_MODE_WATCHDOG = 0,          /**< reset on timeout (WDTTMSEL=0) */
+    TIKU_WDT_MODE_INTERVAL = WDTTMSEL    /**< periodic interrupt (WDTTMSEL=1) */
 };
+/** @brief WDT mode. */
 typedef enum tiku_wdt_mode tiku_wdt_mode_t;
 #endif
 
-/* Clock source */
 #ifndef TIKU_WDT_CLK_T_DEFINED
 #define TIKU_WDT_CLK_T_DEFINED
+/** @brief WDT clock source: the WDTSSEL field of WDTCTL. */
 enum tiku_wdt_clk {
-    TIKU_WDT_SRC_SMCLK = WDTSSEL__SMCLK, /* usually 0 */
-    TIKU_WDT_SRC_ACLK  = WDTSSEL__ACLK
+    TIKU_WDT_SRC_SMCLK = WDTSSEL__SMCLK, /**< SMCLK (WDTSSEL = 0) */
+    TIKU_WDT_SRC_ACLK  = WDTSSEL__ACLK   /**< ACLK */
 };
+/** @brief WDT clock source. */
 typedef enum tiku_wdt_clk tiku_wdt_clk_t;
 #endif
 
-/* Interval: pass one of the device header macros, e.g.
-   WDTIS__64, WDTIS__512, WDTIS__8192, WDTIS__32768, etc. */
 #ifndef TIKU_WDT_INTERVAL_T_DEFINED
 #define TIKU_WDT_INTERVAL_T_DEFINED
+/**
+ * @brief WDTIS interval select as written to WDTCTL: WDTIS__64, WDTIS__512,
+ *        WDTIS__8192, WDTIS__32768 or another WDTIS__* of the device header.
+ */
 typedef uint16_t tiku_wdt_interval_t;
 #endif
-
-/* Watchdog control */
 
 /**
  * @brief Stop the watchdog completely (WDTPW | WDTHOLD).
  *
- * Replaces the whole control low byte rather than preserving mode, clock and
- * interval, so a later resume alone will not restore the configuration --
- * re-enable through the _on_arch or _config_arch entry points.
+ * The write clears the rest of the control byte (mode, clock, interval), so
+ * resume alone does not bring the configuration back; _on_arch or
+ * _config_arch does.
  */
 void tiku_cpu_msp430_watchdog_off_arch(void);
 
@@ -73,7 +85,9 @@ void tiku_cpu_msp430_watchdog_off_arch(void);
  *
  * Sets WDTHOLD but preserves mode, clock and interval, and leaves the counter
  * where it is.  Held is not off: resume restarts it without reconfiguring.
- * Unlike resume and kick, this read-modify-write is not interrupt-protected.
+ *
+ * @note The read-modify-write runs with interrupts enabled, so an ISR that
+ *       writes WDTCTL in between loses its change.
  */
 void tiku_cpu_msp430_watchdog_pause_arch(void);
 
@@ -81,8 +95,8 @@ void tiku_cpu_msp430_watchdog_pause_arch(void);
  * @brief Resume a paused watchdog.
  *
  * Clears WDTHOLD while preserving every other control bit.  The
- * read-modify-write runs with interrupts disabled and the prior state restored,
- * so it is safe against an ISR that also touches the register.
+ * read-modify-write runs with interrupts disabled and then restores GIE, so
+ * an ISR that writes WDTCTL cannot interleave with it.
  *
  * @param kick_on_resume  0 resumes with the counter where pause left
  *                        it; non-zero also sets WDTCNTCL so the full
@@ -93,9 +107,9 @@ void tiku_cpu_msp430_watchdog_resume_arch(int kick_on_resume);
 /**
  * @brief Kick (clear) the watchdog counter.
  *
- * Restarts the timeout window while preserving the rest of the control byte,
- * WDTHOLD included -- so kicking a paused watchdog leaves it paused.  In
- * watchdog mode this is what prevents a reset; in interval mode it defers the flag.
+ * Sets WDTCNTCL and keeps the rest of the control byte, WDTHOLD included, so
+ * a paused watchdog stays paused.  In watchdog mode a kick before expiry
+ * prevents the reset; in interval mode it postpones WDTIFG.
  */
 void tiku_cpu_msp430_watchdog_kick_arch(void);
 
@@ -104,7 +118,7 @@ void tiku_cpu_msp430_watchdog_kick_arch(void);
  *
  * The primitive behind the two _on_arch entry points: mode, clock and interval
  * are OR-ed and written as one password-protected word, so any previous
- * configuration is REPLACED rather than merged.
+ * configuration is replaced, not merged.
  *
  * @param mode           TIKU_WDT_MODE_WATCHDOG (expiry resets the
  *                       device) or TIKU_WDT_MODE_INTERVAL (expiry
@@ -138,9 +152,11 @@ void tiku_cpu_msp430_watchdog_on_arch(tiku_wdt_clk_t src, tiku_wdt_interval_t is
 /**
  * @brief Start the WDT in interval-timer mode.
  *
- * Same hardware with the timer-mode bit set: expiry raises the flag and
- * requests an interrupt instead of resetting.  The interrupt is left masked, so
- * the caller must enable it and supply a handler or expiry is silent.
+ * Same hardware with the timer-mode bit set: expiry sets WDTIFG instead of
+ * resetting the device.
+ *
+ * @note WDTIE in SFRIE1 is not touched: without the caller setting it and
+ *       providing the WDT ISR, an expiry raises no interrupt.
  *
  * @param src   TIKU_WDT_SRC_SMCLK or TIKU_WDT_SRC_ACLK
  * @param isel  Interval divider, one of WDTIS__64, WDTIS__512,

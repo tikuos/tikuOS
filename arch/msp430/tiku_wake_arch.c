@@ -7,18 +7,17 @@
  *
  * tiku_wake_arch.c - MSP430 backend for the wake-source HAL.
  *
- * Maps each TIKU_WAKE_* role flag to whichever IE register covers it on the
- * current device, with every access guarded so the file compiles unchanged across
- * FR5969, FR5994 and FR2433.  See the note below on how the guards are spelt.
+ * Reports which wake sources are armed: the two timers, UART RX, the WDT
+ * interval interrupt and GPIO edges on P1-P4.  Every register access is
+ * guarded by its OFS_<reg> macro, as the note below explains.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 /*
- * The guards below test OFS_<reg>, NOT <reg>.  PxIE / UCxIE / SFRIE1 are
- * declared with sfr_b()/sfr_w() -- extern symbols, not macros -- so
- * `#if defined(P1IE)` is FALSE under msp430-elf-gcc even where the register
- * exists, which would silently drop that source from the query.  OFS_<reg> is
- * the macro that is defined exactly when the register is present.
+ * The guards test OFS_<reg>, a macro defined exactly for the registers the
+ * device has.  PxIE, UCxIE and SFRIE1 are sfr_b()/sfr_w() symbols, not
+ * macros, so defined(P1IE) is false under msp430-elf-gcc even where the
+ * register exists, and a guard on it drops that source from the query.
  */
 
 
@@ -35,7 +34,7 @@ tiku_wake_arch_query(tiku_wake_sources_t *out)
 
     memset(out, 0, sizeof(*out));
 
-    /* System tick (Timer A0) */
+    /* System tick (Timer A0, up mode) */
     if ((TA0CTL & MC__UP) != 0) {
         out->sources |= TIKU_WAKE_SYSTICK;
     }
@@ -45,7 +44,7 @@ tiku_wake_arch_query(tiku_wake_sources_t *out)
         out->sources |= TIKU_WAKE_HTIMER;
     }
 
-    /* UART RX (eUSCI_A0) -- only family the shell currently exposes */
+    /* UART RX (eUSCI_A0) */
 #if defined(OFS_UCA0IE) && defined(UCRXIE)
     if ((UCA0IE & UCRXIE) != 0) {
         out->sources |= TIKU_WAKE_UART_RX;
@@ -59,9 +58,9 @@ tiku_wake_arch_query(tiku_wake_sources_t *out)
     }
 #endif
 
-    /* GPIO edge IRQs across P1..P4. The HAL caps the per-port array
-     * at TIKU_WAKE_MAX_GPIO_PORTS = 4, which covers every supported
-     * MSP430 variant. */
+    /* GPIO edge IRQs across P1..P4, the TIKU_WAKE_MAX_GPIO_PORTS entries of
+     * the HAL's per-port array.  The FR5994's P5-P8 also have interrupts;
+     * they are not reported. */
 #if defined(OFS_P1IE)
     out->gpio_ie[0] = P1IE;
 #endif

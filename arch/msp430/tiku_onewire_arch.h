@@ -30,9 +30,12 @@
 /**
  * @brief Architecture-specific 1-Wire initialization.
  *
- * Leaves the board's pin an input with its latch clear, so the external 4.7
- * kohm pull-up holds the line high and driving low later is a direction flip --
- * open drain.  Timings assume an 8 MHz MCLK, so the bus is reliable only there.
+ * Leaves the board's pin a GPIO input with its output latch clear: the
+ * external 4.7 kohm pull-up holds the line high, and driving it low is a
+ * direction change (open drain).
+ *
+ * @note The slot timings count MCLK cycles at 8 MHz; at any other MCLK
+ *       the bus timing is wrong.
  *
  * @return TIKU_OW_OK (this port cannot fail)
  */
@@ -49,9 +52,9 @@ void tiku_onewire_arch_close(void);
 /**
  * @brief Issue a 1-Wire reset pulse and sample for a presence pulse.
  *
- * Timing-critical, so interrupts are masked for the whole ~960 us sequence.
- * The line is checked high after release, proving the pull-up, then sampled for
- * a slave pulling it low.
+ * Interrupts are masked for the whole sequence, about 960 us.  After
+ * release the line must read high (the pull-up is present); a slave then
+ * answers by pulling it low.
  *
  * @return TIKU_OW_OK if a presence pulse was seen,
  *         TIKU_OW_ERR_NO_DEVICE if no device responded or the line
@@ -62,9 +65,9 @@ int tiku_onewire_arch_reset(void);
 /**
  * @brief Write one bit into a 1-Wire time slot.
  *
- * Timing-critical, so interrupts are masked for the slot.  A write-1 is 2 us
- * low then 62 released; a write-0 is 60 low then 4.  Slaves sample around 30 us
- * in, which the short write-1 pulse is sized for.
+ * Interrupts are masked for the slot.  A write-1 is 2 us low then 62 us
+ * released; a write-0 is 60 us low then 4.  Slaves sample about 30 us in,
+ * and the short write-1 pulse has released the line by then.
  *
  * @param bit  Value to write; only the least significant bit is used
  */
@@ -73,8 +76,8 @@ void tiku_onewire_arch_write_bit(uint8_t bit);
 /**
  * @brief Read one bit from a 1-Wire time slot.
  *
- * Timing-critical, so interrupts are masked.  Drive low 2 us, release, wait 10
- * and sample -- inside the 15 us the master has -- then idle 50.  That settle
+ * Interrupts are masked for the slot.  Drives low 2 us, releases, samples
+ * 10 us later (within the master's 15 us window) and idles 50 us; the 10 us
  * also covers the input synchroniser's two-cycle lag after a direction change.
  *
  * @return The sampled bit (0 or 1)
@@ -84,9 +87,8 @@ uint8_t tiku_onewire_arch_read_bit(void);
 /**
  * @brief Write one byte to the 1-Wire bus, least significant bit first.
  *
- * Issues eight write slots via tiku_onewire_arch_write_bit(); takes
- * roughly 512 us.  Interrupts are disabled per slot rather than for
- * the whole byte, so an ISR can run between bits.
+ * Issues eight write slots via tiku_onewire_arch_write_bit(), about
+ * 512 us.  Interrupts are masked per slot, so an ISR can run between bits.
  *
  * @param byte  Value to write
  */
@@ -95,9 +97,8 @@ void tiku_onewire_arch_write_byte(uint8_t byte);
 /**
  * @brief Read one byte from the 1-Wire bus, least significant bit first.
  *
- * Issues eight read slots via tiku_onewire_arch_read_bit(); takes
- * roughly 500 us.  Interrupts are disabled per slot rather than for
- * the whole byte, so an ISR can run between bits.
+ * Issues eight read slots via tiku_onewire_arch_read_bit(), about
+ * 500 us.  Interrupts are masked per slot, so an ISR can run between bits.
  *
  * @return The assembled byte
  */

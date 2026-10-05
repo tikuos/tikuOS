@@ -7,9 +7,9 @@
  *
  * tiku_crt_early.c - early-boot patch: disable the WDT before crt0 BSS init.
  *
- * The toolchain zeroes .upper.bss before main() can stop the watchdog, and at the
- * POR-default 8 MHz the WDT window is 4.10 ms while zeroing 6.8 KB of HIFRAM takes
- * ~4.25 ms -- a silent boot loop, confirmed on MSP430FR6989.
+ * crt0 zeroes .upper.bss before main() runs, and clearing a large .upper.bss
+ * can outlast the reset-default WDT interval, which then resets the part
+ * before main() on every boot.  This hook stops the WDT first.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -32,18 +32,18 @@
  *
  * The `naked` attribute strips the prologue/epilogue. The single
  * inline-asm instruction is the entire function body. No RET is
- * emitted, so execution falls through to .crt_0100init_bss exactly
- * the way the toolchain's own startup chain works.
+ * emitted, so execution falls through to .crt_0100init_bss, as the
+ * toolchain's own startup fragments do.
  *
  * `used` keeps the linker from gc-ing this since nothing in C
  * source ever calls __tiku_crt_early_disable_wdt() by name.
  */
 /*
- * The WDTCTL register lives at address 0x015C on every MSP430.
- * `WDTPW | WDTHOLD` = 0x5A00 | 0x0080 = 0x5A80. Both constants are
- * baked into the asm template directly so the constraint machinery
- * does not have to deal with `&WDTCTL` vs `#WDTCTL` ambiguity in
- * the immediate/absolute operand slots.
+ * The instruction writes WDTPW | WDTHOLD (0x5A00 | 0x0080 = 0x5A80) to
+ * WDTCTL at 0x015C, its address on the FR5969, FR5994 and FR6989; the
+ * FR2433 has WDTCTL at 0x01CC.  Both constants are in the asm template so
+ * the operand constraints never have to choose between `&WDTCTL` and
+ * `#WDTCTL` forms.
  */
 __attribute__((naked, used, section(".crt_0050early")))
 void __tiku_crt_early_disable_wdt(void)

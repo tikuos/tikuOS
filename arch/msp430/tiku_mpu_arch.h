@@ -28,8 +28,8 @@
  * @brief Expected access-mask value after MPU and memory init.
  *
  * Without HIFRAM every segment is R+X.  With it, segment 3 covers HIFRAM and
- * must be writable so kernel state there needs no unlock per store.  Tests
- * assert against this rather than a literal, which is what broke on FR6989.
+ * is R+W+X, so kernel state there needs no unlock per store.  Tests compare
+ * MPUSAM against this value.
  */
 #if defined(TIKU_DEVICE_HAS_HIFRAM) && TIKU_DEVICE_HAS_HIFRAM
 #define TIKU_MPU_DEFAULT_SAM    0x0755U
@@ -56,8 +56,8 @@ uint16_t tiku_mpu_arch_get_sam(void);
  * @brief Write MPUSAM register with password unlock
  *
  * Unlocks MPU config via MPUPW, writes the new MPUSAM value, and
- * re-enables the MPU. The password (0xA500) is required by hardware
- * to prevent accidental modification by wild pointer writes.
+ * re-enables the MPU, keeping MPUSEGIE.  Every MPUCTL0 write carries the
+ * password MPUPW (0xA500) in its upper byte.
  *
  * @param sam  New MPUSAM value
  */
@@ -94,33 +94,36 @@ void tiku_mpu_arch_enable_irq(void);
 /**
  * @brief Configure MPU segment boundaries.
  *
- * Partitions FRAM into three segments from the device-level boundary constants.
- * Must run before protection is enabled, so the permission bits map to
- * meaningful address ranges.
+ * Writes MPUSEGB1 and MPUSEGB2 from TIKU_DEVICE_MPU_SEG2_START and
+ * TIKU_DEVICE_MPU_SEG3_START (shifted right by 4) and enables the MPU.
+ *
+ * @note Run before any permission is set: the permissions apply to the
+ *       segments these boundaries define.
  */
 void tiku_mpu_arch_init_segments(void);
 
 /**
- * @brief Set default NVM protection: R+X (no write) on all segments
+ * @brief Set default NVM protection (TIKU_MPU_DEFAULT_SAM).
  *
- * Configures the SAM register so all three segments are read+execute
- * with no write permission. Called by the kernel during MPU init.
+ * Every segment is read+execute without write, except segment 3 on parts
+ * with HIFRAM, which is R+W+X.  Called by the kernel during MPU init.
  */
 void tiku_mpu_arch_set_default_protection(void);
 
 /**
  * @brief Set permissions on a single MPU segment.
  *
- * Updates one segment's bits without touching the others, taking the
- * platform-independent segment and permission enums as plain integers.
+ * Updates one segment's three permission bits without touching the others.
+ * @p seg 0, 1 and 2 are MPU segments 1, 2 and 3; @p perm is
+ * TIKU_MPU_READ/WRITE/EXEC or a combination.
  */
 void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm);
 
 /**
  * @brief Unlock NVM for writing on all segments
  *
- * Adds write permission to all segments. Returns an opaque saved state
- * that must be passed to tiku_mpu_arch_lock_nvm() to restore protection.
+ * Adds write permission to all segments. Returns the prior state, which
+ * tiku_mpu_arch_lock_nvm() restores.
  *
  * @return Previous protection state (opaque to the kernel)
  */
@@ -136,8 +139,9 @@ void tiku_mpu_arch_lock_nvm(uint16_t saved_state);
 /**
  * @brief Read violation flags.
  *
- * One bit per segment, low bit first; a set bit means a write was attempted on
- * that segment while it lacked write permission.
+ * One bit per segment, low bit first, as the SYSNMI ISR latched them from
+ * MPUCTL1: a set bit means a write was attempted on that segment while it
+ * lacked write permission.
  *
  * @return Violation flags (bits [2:0] meaningful)
  */
@@ -146,17 +150,17 @@ uint16_t tiku_mpu_arch_get_violation_flags(void);
 /**
  * @brief Clear all MPU violation flags
  *
- * Resets all segment violation flags so subsequent violations can be
- * detected cleanly.
+ * Clears the latched flags and MPUCTL1's segment flags, then re-enables
+ * the MPU with the violation NMI on.
  */
 void tiku_mpu_arch_clear_violation_flags(void);
 
 /**
- * @brief Enable NMI on MPU violation instead of a PUC reset.
+ * @brief Raise SYSNMI on an MPU violation (MPUSEGIE).
  *
- * Sets the segment-interrupt-enable bit, so a violation vectors to the NMI
- * handler rather than performing a full power-up clear -- detection without
- * losing system state.
+ * The SYSNMI ISR then latches the flags and the system keeps running.  With
+ * MPUSEGIE clear and the violation-select bits clear, as the default SAM
+ * leaves them, a blocked store is dropped with only an MPUCTL1 flag set.
  */
 void tiku_mpu_arch_enable_violation_nmi(void);
 

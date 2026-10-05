@@ -7,9 +7,9 @@
  *
  * tiku_uart_arch.h - UART backend for printf (MSP430).
  *
- * Routes printf through the LaunchPad backchannel UART under GCC, and is a no-op
- * under CCS where semihosting handles it.  Call tiku_uart_init() during boot,
- * after clock and GPIO are ready.
+ * The kernel UART behind printf.  Under GCC it drives the board's
+ * backchannel eUSCI_A; under CCS every call is a stub and CIO semihosting
+ * carries printf.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,16 +22,18 @@
 /**
  * @brief Initialize the UART peripheral for printf output.
  *
- * Under GCC: configures eUSCI_A0 for 9600 baud @ 8 MHz SMCLK
- * using the board-specific backchannel UART pins.
- * Under CCS: no-op (CIO handles printf).
+ * Under GCC: configures the eUSCI_A that TIKU_BOARD_UART_MODULE selects at
+ * TIKU_BOARD_UART_BAUD, 8N1, on the board's backchannel pins, empties the
+ * RX ring and enables the RX interrupt.  Under CCS: no-op.
+ *
+ * @note Call during boot, once the clock and GPIO are set up.
  */
 void tiku_uart_init(void);
 
 /**
  * @brief Transmit a single character over UART.
  *
- * Under GCC: blocking write to eUSCI_A0 TX buffer.
+ * Under GCC: blocking write to the selected eUSCI_A TX buffer.
  * Under CCS: no-op.
  *
  * @param c Character to transmit
@@ -50,8 +52,9 @@ void tiku_uart_puts(const char *s);
 /**
  * @brief Lightweight printf replacement for UART output.
  *
- * Supports: %s, %d, %u, %x, %c, %%, optional field width (e.g. %4d),
- * and long modifier (e.g. %ld, %4ld). Lightweight (~60 bytes of stack).
+ * Supports %s, %d, %u, %x, %c and %%, a field width (e.g. %4d) and the
+ * long modifier (e.g. %ld, %4ld).  A newline goes out as CR LF; any other
+ * conversion prints as written.
  */
 void tiku_uart_printf(const char *fmt, ...);
 
@@ -67,8 +70,7 @@ uint8_t tiku_uart_rx_ready(void);
 /**
  * @brief Read one character from the UART (non-blocking).
  *
- * Call tiku_uart_rx_ready() first, or check the return value.
- * Reading the hardware register clears the RX-ready flag.
+ * Takes the oldest byte from the RX ring that the UART ISR fills.
  *
  * @return The received character (0-255), or -1 if none available
  */
@@ -77,8 +79,9 @@ int tiku_uart_getc(void);
 /**
  * @brief Return the number of hardware UART overruns since init.
  *
- * An overrun happens when a byte arrives before the previous one was read out.
- * The ISR counts each, so firmware and tests can spot transport trouble.
+ * An overrun is a byte that arrived before the previous one was read from
+ * RXBUF; the RX ISR counts each one.  Bytes dropped because the software
+ * ring was full are not counted.
  *
  * @return Cumulative overrun count (reset to 0 by tiku_uart_init)
  */
@@ -87,18 +90,18 @@ uint16_t tiku_uart_overrun_count(void);
 /**
  * @brief Zero the overrun counter without re-initialising the UART.
  *
- * Scopes a "no overruns in this phase" assertion to a window.  A test's drain
- * loop swallows echoed bytes that can register an overrun on a bursty bridge
- * before the phase starts, so resetting after the resync keeps the count honest.
+ * Lets a test count overruns from a point of its choosing, such as after
+ * its drain loop has swallowed echoed bytes.
  */
 void tiku_uart_overrun_reset(void);
 
 /**
  * @brief Inject one byte into the RX ring buffer (test only).
  *
- * Feeds the receive path without the ISR running, touching no hardware; the
- * byte then appears exactly as a received one would.  A full ring drops it
- * silently, and the TI build compiles this to a stub.
+ * Feeds the receive path without the ISR or the hardware; the byte then
+ * reads back as a received one would.  A full ring drops it.
+ *
+ * @note Built only with HAS_TESTS; the TI build compiles it to a stub.
  *
  * @param byte Byte to inject
  */

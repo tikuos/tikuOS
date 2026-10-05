@@ -7,9 +7,9 @@
  *
  * tiku_gpio_irq_arch.c - MSP430 GPIO interrupt to event bridge.
  *
- * Each port has one vector for all eight pins, so dispatch reads PxIV, which
- * returns the highest-priority pending flag and clears it atomically -- keeping
- * the ISR short and lock-free.  Ports are gated on PORTn_VECTOR visibility.
+ * Each port has one vector for its eight pins: the ISR reads PxIV, which
+ * returns the highest-priority pending pin and clears its flag, and posts one
+ * event per pin.  Ports 1-4 are served, each where PORTn_VECTOR is defined.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -32,25 +32,21 @@
  * rejected up front.
  */
 typedef struct {
-    volatile uint8_t      *ie;     /* PxIE  -- interrupt enable */
-    volatile uint8_t      *ies;    /* PxIES -- edge select (0=rising, 1=falling) */
-    volatile uint8_t      *ifg;    /* PxIFG -- pending flag */
-    volatile unsigned int *iv;     /* PxIV  -- highest-priority pin (auto-clear) */
+    volatile uint8_t      *ie;     /* PxIE: interrupt enable */
+    volatile uint8_t      *ies;    /* PxIES: 0 rising, 1 falling */
+    volatile uint8_t      *ifg;    /* PxIFG: pending flags */
+    volatile unsigned int *iv;     /* PxIV: top pending pin, read clears */
 } gpio_irq_port_t;
 
+/* Highest port number with interrupt support here. */
 #define GPIO_IRQ_MAX_PORT 4
 
 /*
- * Gate each entry on PORTn_VECTOR, NOT on PxIE.  The PxIE/PxIES/...
- * registers are declared with sfr_b() — i.e. as extern symbols, not
- * preprocessor macros — so `#if defined(P1IE)` is FALSE under the
- * msp430-elf-gcc headers even though P1 plainly has interrupts.  That
- * silently zeroed every entry, making tiku_gpio_irq_arch_enable()
- * return ERR_UNSUP ("port has no IRQ") for ALL pins.  PORTn_VECTOR is
- * a real macro (and is exactly what the ISRs below gate on), so a
- * port is IRQ-capable here precisely when it has a vector.  Taking
- * &P1IE inside the branch is fine: the symbol exists regardless —
- * only the defined() test needed a macro.
+ * Each entry is gated on PORTn_VECTOR, the macro the ISRs below also use.
+ * PxIE and its siblings are sfr_b() symbols, not macros, so defined(P1IE)
+ * is false under msp430-elf-gcc even where the port has interrupts, and a
+ * guard on it would leave every entry NULL.  Taking &P1IE inside the
+ * branch needs only the symbol.
  */
 static const gpio_irq_port_t gpio_irq_ports[GPIO_IRQ_MAX_PORT + 1] = {
     [0] = { 0, 0, 0, 0 },        /* port 0 not used */
@@ -101,9 +97,8 @@ tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
     }
     mask = (uint8_t)(1u << pin);
 
-    /* Set up the pin as a pulled-up input via the existing GPIO
-     * interface. Buttons typically tie one side to ground, so the
-     * default-high pull-up + falling edge is the common case. */
+    /* The pin becomes an input with its pull-up on (tiku_gpio_dir_in()); a
+     * button to ground then gives a falling edge. */
     if (tiku_gpio_dir_in(port, pin) != TIKU_GPIO_OK) {
         return TIKU_GPIO_IRQ_ERR_INVALID;
     }
@@ -113,7 +108,7 @@ tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
 
     /* Edge select: PxIES bit = 1 -> falling, 0 -> rising. The
      * "both" mode starts on the falling edge and the ISR flips
-     * IES on each fire so the next opposite edge also catches. */
+     * IES on each fire so the next opposite edge fires too. */
     if (edge == TIKU_GPIO_EDGE_FALLING || edge == TIKU_GPIO_EDGE_BOTH) {
         *p->ies |= mask;
     } else {
@@ -160,11 +155,11 @@ tiku_gpio_irq_arch_disable(uint8_t port, uint8_t pin)
 /* SHARED ISR BODY                                                           */
 /*---------------------------------------------------------------------------*/
 
-/*
- * Read PxIV in a loop until it returns NONE. PxIV returns
- * (pin_index + 1) * 2 for the highest-priority pending pin and
- * atomically clears that pin's IFG. A loop drains every pin that
- * fired so a burst of edges does not lose events.
+/**
+ * @brief Post one TIKU_EVENT_GPIO for each pending pin of @p port.
+ *
+ * Reads PxIV until it returns 0: each read returns (pin + 1) * 2 for the
+ * highest-priority pending pin and clears that pin's flag.
  */
 static inline void
 gpio_irq_dispatch(uint8_t port)
@@ -188,10 +183,8 @@ gpio_irq_dispatch(uint8_t port)
                           (tiku_event_data_t)
                               TIKU_GPIO_IRQ_PACK(port, pin));
 
-        /* Same edge, second consumer: ring the watchers of this
-         * pin's /dev/gpio/<port>/<pin> node so a rule or `watch` on
-         * it reacts to the physical edge — the VFS watch layer's
-         * first driver-originated event source. */
+        /* Also notify the watchers of /dev/gpio/<port>/<pin>, so a rule
+         * or `watch` on the node sees the edge. */
         tiku_vfs_tree_gpio_notify(port, pin);
     }
 }

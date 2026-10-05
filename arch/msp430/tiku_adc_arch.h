@@ -34,7 +34,7 @@
  * the requested resolution and reference voltage.
  *
  * @param config  Pointer to ADC configuration
- * @return TIKU_ADC_OK on success, negative error code on failure
+ * @return TIKU_ADC_OK (init cannot fail)
  */
 int tiku_adc_arch_init(const tiku_adc_config_t *config);
 
@@ -48,12 +48,13 @@ void tiku_adc_arch_close(void);
 /**
  * @brief Configure a GPIO pin for analog input.
  *
- * Maps channel number to the corresponding port/pin and sets
- * SEL0=SEL1=1 for analog function. Internal channels (30, 31)
- * require no pin configuration.
+ * Maps the channel number to its port/pin through the device header and
+ * sets SEL0=SEL1=1 for the analog function.  Internal channels (30 and up)
+ * need no pin configuration.
  *
  * @param channel  ADC channel number
- * @return TIKU_ADC_OK on success, TIKU_ADC_ERR_PARAM if invalid
+ * @return TIKU_ADC_OK, or TIKU_ADC_ERR_PARAM for a channel with no external
+ *         pin on this device
  */
 int tiku_adc_arch_channel_init(uint8_t channel);
 
@@ -65,7 +66,8 @@ int tiku_adc_arch_channel_init(uint8_t channel);
  *
  * @param channel  ADC channel number
  * @param value    Output: raw conversion result
- * @return TIKU_ADC_OK on success, negative error code on failure
+ * @return TIKU_ADC_OK, or TIKU_ADC_ERR_TIMEOUT with @p value untouched when
+ *         the conversion does not finish within ADC_TIMEOUT polls
  */
 int tiku_adc_arch_read(uint8_t channel, uint16_t *value);
 

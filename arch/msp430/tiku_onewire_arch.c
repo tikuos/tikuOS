@@ -7,9 +7,9 @@
  *
  * tiku_onewire_arch.c - 1-Wire bus driver for MSP430 (GPIO bit-bang).
  *
- * Bit-bangs the Dallas/Maxim protocol on the board's TIKU_BOARD_OW_* pin, timed
- * from an 8 MHz MCLK.  The line needs an external 4.7 kohm pull-up, and interrupts
- * are masked across timing-critical windows.
+ * Bit-bangs the Dallas/Maxim protocol on the board's TIKU_BOARD_OW_* pin,
+ * timed for an 8 MHz MCLK.  The line needs an external 4.7 kohm pull-up, and
+ * interrupts are masked across timing-critical windows.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -28,8 +28,8 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * Microsecond delay assuming 8 MHz MCLK.
- * __delay_cycles() is available in both TI and GCC MSP430 toolchains.
+ * Microsecond delay at an 8 MHz MCLK (8 cycles a microsecond), through the
+ * __delay_cycles() intrinsic of the TI and GCC MSP430 toolchains.
  */
 #define OW_DELAY_US(us)  __delay_cycles((unsigned long)(us) * 8UL)
 
@@ -83,7 +83,7 @@ tiku_onewire_arch_init(void)
     return TIKU_OW_OK;
 }
 
-/** @brief Release the 1-Wire pin (set to input, external pull-up holds high). */
+/** @brief Release the 1-Wire pin: an input, held high by the pull-up. */
 void
 tiku_onewire_arch_close(void)
 {
@@ -94,9 +94,9 @@ tiku_onewire_arch_close(void)
 /**
  * @brief 1-Wire reset: 480 us low pulse, then listen for presence.
  *
- * Drives low 480 us and releases, first checking the line returns HIGH so the
- * pull-up is proven working, then sampling around the 70 us mark for a slave
- * pulling it LOW.  The remaining 410 us completes the reset window.
+ * Drives low 480 us and releases.  15 us later the line must read high (the
+ * pull-up works), and at about 70 us a present slave holds it low.  The
+ * remaining 410 us completes the reset window.
  */
 int
 tiku_onewire_arch_reset(void)
@@ -115,7 +115,7 @@ tiku_onewire_arch_reset(void)
     ow_release();
     OW_DELAY_US(15);
 
-    /* Verify line went HIGH after release (pull-up is working) */
+    /* High 15 us after release: the pull-up is there */
     line_high = ow_read();
 
     OW_DELAY_US(55);   /* Wait until ~70 us from release */
@@ -140,8 +140,8 @@ tiku_onewire_arch_reset(void)
  * @brief Write a single bit.
  *
  * A write-1 drives low 2 us then releases for 62; a write-0 drives low 60 then
- * releases for 4.  The slave samples around 30 us in, so the short write-1
- * pulse guarantees the line is high by then.
+ * releases for 4.  The slave samples around 30 us in, and the short
+ * write-1 pulse has released the line by then.
  */
 void
 tiku_onewire_arch_write_bit(uint8_t bit)
@@ -169,7 +169,7 @@ tiku_onewire_arch_write_bit(uint8_t bit)
 /**
  * @brief Read a single bit.
  *
- * Drive low 2 us, release, wait 10, sample, idle 50 -- the master must sample
+ * Drive low 2 us, release, wait 10, sample, idle 50: the master samples
  * within 15 us of the falling edge.  The 10 us also covers the input
  * synchroniser, which can lag a direction change by two MCLK cycles.
  */

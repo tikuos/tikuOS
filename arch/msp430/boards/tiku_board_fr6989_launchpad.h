@@ -8,8 +8,8 @@
  * tiku_board_fr6989_launchpad.h - MSP430FR6989 LaunchPad board definitions.
  *
  * PCB-level GPIO assignments for the MSP-EXP430FR6989 per TI SLAU627: LEDs,
- * buttons, the populated LFXT crystal and the on-board LCD glass.  The UART
- * transport choices are documented at TIKU_BOARD_UART_MODULE below.
+ * buttons, UART, I2C, ADC and the on-board LCD glass.  The UART transport
+ * choices are documented at TIKU_BOARD_UART_MODULE below.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,61 +21,72 @@
 /* BOARD IDENTIFICATION                                                      */
 /*---------------------------------------------------------------------------*/
 
+/** Human-readable board name. */
 #define TIKU_BOARD_NAME             "MSP430FR6989 LaunchPad"
 
 /*---------------------------------------------------------------------------*/
 /* LED COUNT                                                                 */
 /*---------------------------------------------------------------------------*/
 
+/** Number of on-board LEDs; interfaces/led indexes them from 0. */
 #define TIKU_BOARD_LED_COUNT        2
 
 /*---------------------------------------------------------------------------*/
-/* LED1 (Red) - P1.0                                                         */
+/* LED1 (RED) - P1.0                                                         */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @name LED1 on P1.0, lit when the pin is high
+ * INIT makes the pin an output and turns the LED off.
+ * @{
+ */
 #define TIKU_BOARD_LED1_INIT()      do { P1DIR |= BIT0; P1OUT &= ~BIT0; } while(0)
 #define TIKU_BOARD_LED1_ON()        do { P1OUT |= BIT0; } while(0)
 #define TIKU_BOARD_LED1_OFF()       do { P1OUT &= ~BIT0; } while(0)
 #define TIKU_BOARD_LED1_TOGGLE()    do { P1OUT ^= BIT0; } while(0)
+/** @} */
 
 /*---------------------------------------------------------------------------*/
-/* LED2 (Green) - P9.7                                                       */
+/* LED2 (GREEN) - P9.7                                                       */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @name LED2 on P9.7, lit when the pin is high
+ * INIT makes the pin an output and turns the LED off.
+ * @{
+ */
 #define TIKU_BOARD_LED2_INIT()      do { P9DIR |= BIT7; P9OUT &= ~BIT7; } while(0)
 #define TIKU_BOARD_LED2_ON()        do { P9OUT |= BIT7; } while(0)
 #define TIKU_BOARD_LED2_OFF()       do { P9OUT &= ~BIT7; } while(0)
 #define TIKU_BOARD_LED2_TOGGLE()    do { P9OUT ^= BIT7; } while(0)
+/** @} */
 
 /*---------------------------------------------------------------------------*/
-/* UART pin selection (eUSCI_A1 on P3.4/P3.5 by default)                     */
+/* UART PIN SELECTION (eUSCI_A1 ON P3.4/P3.5 BY DEFAULT)                     */
 /*---------------------------------------------------------------------------*/
 
-/*
- * On the MSP-EXP430FR6989 LaunchPad, eUSCI_A1 (P3.4 TX / P3.5 RX) is the
- * only UART path that actually reaches a physical header — both the
- * eZ-FET backchannel and the BoosterPack J1.3/J1.4 pads land on these
- * pins. eUSCI_A0 on P2.0/P2.1 is consumed by the on-board LCD glass and
- * is unreachable without a custom carrier; expose it only as an opt-in.
+/**
+ * @brief eUSCI_A module of the UART: 1 (the default) or 0.
  *
- * Override at compile time for a custom carrier:
- *   make MCU=msp430fr6989 EXTRA_CFLAGS=-DTIKU_BOARD_UART_MODULE=0
+ * 1 is eUSCI_A1 on P3.4 (TX) and P3.5 (RX), the pins wired to the eZ-FET
+ * backchannel and BoosterPack J1.3/J1.4.  0 is eUSCI_A0 on P2.0/P2.1, which
+ * the LCD glass occupies on this LaunchPad; it is for custom carriers.
  *
- * FR6989 pin-mux note: eUSCI A0/A1 sit on the *primary* peripheral slot
- * of P2.0/P2.1 and P3.4/P3.5 (PxSEL0=1, PxSEL1=0). This is the OPPOSITE
- * polarity from FR5969 where UCA0 on P2.0/P2.1 is the secondary function
- * (SEL1=1, SEL0=0). Getting this wrong silently mis-muxes the pin to a
- * Timer_B function — symptom is "UART driver runs, no bytes on the
- * cable". TI's MSP-EXP430FR6989 backchannel UART example is the
- * canonical reference for the SEL polarity.
+ * @note make MCU=msp430fr6989 EXTRA_CFLAGS=-DTIKU_BOARD_UART_MODULE=0
+ *       selects module 0.
  */
 #ifndef TIKU_BOARD_UART_MODULE
 #define TIKU_BOARD_UART_MODULE      1   /* default: eUSCI_A1 / P3.4-P3.5 */
 #endif
 
+/*
+ * Both UARTs are the primary function of their pins on this part (PxSEL0 = 1,
+ * PxSEL1 = 0).  PxSEL1 = 1, PxSEL0 = 0 selects a Timer_B function instead:
+ * the UART driver then runs and no bytes reach the cable.
+ */
 #if TIKU_BOARD_UART_MODULE == 1
 
-/* eUSCI_A1 on P3.4 = TXD, P3.5 = RXD. */
+/** Hand P3.4 (TXD) and P3.5 (RXD) to eUSCI_A1. */
 #define TIKU_BOARD_UART_PINS_INIT()                                            \
     do {                                                                       \
         P3DIR |= BIT4;                                                         \
@@ -88,9 +99,10 @@
 
 #elif TIKU_BOARD_UART_MODULE == 0
 
-/* eUSCI_A0 on P2.0 = TXD, P2.1 = RXD.
- * Note: these pins drive the on-board LCD on the stock LaunchPad —
- * useful only on custom carriers that have rerouted P2.0/P2.1. */
+/**
+ * Hand P2.0 (TXD) and P2.1 (RXD) to eUSCI_A0.  On the stock LaunchPad these
+ * pins drive the LCD glass.
+ */
 #define TIKU_BOARD_UART_PINS_INIT()                                            \
     do {                                                                       \
         P2DIR |= BIT0;                                                         \
@@ -106,13 +118,16 @@
 #endif
 
 /*
- * UART baud-rate selection from an 8 MHz SMCLK, oversampled; values from TI
- * SLAU367 Table 30-5.  9600 by default, with 19200, 38400, 57600 and 115200
- * selectable at build time through UART_BAUD.
+ * Baud-rate settings for an 8 MHz SMCLK, oversampled, from TI SLAU367 Table
+ * 30-5.  TIKU_BOARD_UART_BAUD is 9600 unless the build sets it (make
+ * UART_BAUD=...); 19200, 38400, 57600 and 115200 are the other rates here.
  */
+
+/** UART clock source: SMCLK. */
 #define TIKU_BOARD_UART_CLK_SEL     UCSSEL__SMCLK
 
 #ifndef TIKU_BOARD_UART_BAUD
+/** Console baud rate; any value without a row below fails the build. */
 #define TIKU_BOARD_UART_BAUD        9600
 #endif
 
@@ -146,34 +161,37 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* Button S1 - P1.1 (Active low)                                             */
+/* BUTTON S1 - P1.1 (ACTIVE LOW)                                             */
 /*---------------------------------------------------------------------------*/
 
+/** Make P1.1 an input with its pull-up enabled. */
 #define TIKU_BOARD_BTN1_INIT()      do { P1DIR &= ~BIT1; P1REN |= BIT1; P1OUT |= BIT1; } while(0)
+/** Non-zero while S1 is pressed (P1.1 reads low). */
 #define TIKU_BOARD_BTN1_PRESSED()   (!(P1IN & BIT1))
 
 /*---------------------------------------------------------------------------*/
-/* Button S2 - P1.2 (Active low)                                             */
+/* BUTTON S2 - P1.2 (ACTIVE LOW)                                             */
 /*---------------------------------------------------------------------------*/
 
+/** Make P1.2 an input with its pull-up enabled. */
 #define TIKU_BOARD_BTN2_INIT()      do { P1DIR &= ~BIT2; P1REN |= BIT2; P1OUT |= BIT2; } while(0)
+/** Non-zero while S2 is pressed (P1.2 reads low). */
 #define TIKU_BOARD_BTN2_PRESSED()   (!(P1IN & BIT2))
 
 /*---------------------------------------------------------------------------*/
-/* CPU-clock-out pin availability                                            */
+/* CPU-CLOCK-OUT PIN AVAILABILITY                                            */
 /*---------------------------------------------------------------------------*/
 
-/*
- * The cpuclock test (tests/cpuclock/test_cpuclock_basic.c) historically
- * routes SMCLK out of P3.4 by setting both PxSEL bits. On this board
- * P3.4 is the UCA1 UART TX, so trampling its SEL bits would silently
- * disable serial output and time out the runner. Mark the pin busy so
- * the test skips that step.
+/**
+ * @brief 1: P3.4 is taken, so the cpuclock test does not route SMCLK to it.
+ *
+ * The cpuclock test (test_cpuclock_basic.c) otherwise sets both PxSEL bits of
+ * P3.4; on this board P3.4 is the eUSCI_A1 UART TX line.
  */
 #define TIKU_BOARD_CPUCLOCK_OUT_PIN_BUSY    1
 
 /*---------------------------------------------------------------------------*/
-/* I2C on eUSCI_B0: P1.6 = SDA, P1.7 = SCL                                  */
+/* I2C ON eUSCI_B0 - P1.6 = SDA, P1.7 = SCL                                  */
 /*---------------------------------------------------------------------------*/
 
 /** Configure P1.6 and P1.7 for eUSCI_B0 I2C function (SEL1=1, SEL0=0). */
@@ -190,116 +208,99 @@
 /* ADC12_B                                                                   */
 /*---------------------------------------------------------------------------*/
 
-/*
- * ADC12_B is available.  Channel 30 is the internal temperature sensor and 31
- * the battery monitor; which external channels reach the BoosterPack headers
- * depends on PCB revision, so check the LaunchPad pinout before wiring analog.
+/**
+ * @brief 1: ADC12_B is usable on this board.
+ *
+ * Channel 30 is the temperature sensor and 31 the battery monitor.  This
+ * header does not record which external channels reach the BoosterPack
+ * headers; the LaunchPad pinout in SLAU627 does.
  */
 #define TIKU_BOARD_ADC_AVAILABLE    1
 
 /*---------------------------------------------------------------------------*/
-/* On-board segment LCD (FH-1138P, 4-mux, 96 segments)                       */
+/* ON-BOARD SEGMENT LCD (FH-1138P, 4-MUX, 96 SEGMENTS)                       */
 /*---------------------------------------------------------------------------*/
 
 /*
- * The MSP-EXP430FR6989 LaunchPad carries a 6-character 14-segment
- * alphanumeric LCD plus icon segments, driven by the FR6989 LCD_C
- * peripheral in 4-mux mode. Pin/segment routing per TI SLAU627
- * Sec. 4.10 (LCD circuit) and the lcd_c_lib reference example.
+ * The LaunchPad carries an FH-1138P glass: six 14-segment alphanumeric
+ * positions plus icon segments, driven by LCD_C in 4-mux mode at 1/3 bias
+ * with VLCD from the on-chip charge pump.  Pin and segment routing follow TI
+ * SLAU627 section 4.10 and TI's lcd_c_lib example.  COM0-COM3 drive the
+ * commons; TIKU_BOARD_LCD_PIN_MASK0-2 below list the segment pins.
  *
- * Common pins:    L0..L3   = COM0..COM3 (8mux pins repurposed)
- * Segment pins:   L4..L31, L36..L39  (28 + 4 = 32 segment lines)
- * The FH-1138P uses 4-mux at 1/3 bias with the on-chip charge pump
- * sourcing VLCD ~ 3.0 V from VDD.
- *
- * Six 14-segment alphanumeric positions, indexed left-to-right:
- *   pos 0 .. pos 5
- * Each character occupies two bytes inside the LCD memory map; the
- * arch driver knows the per-position LCDMEM index pair and pushes
- * the font byte pair into them.
+ * TIKU_BOARD_HAS_LCD is not defined in this header: the Makefile passes
+ * -DTIKU_BOARD_HAS_LCD=1 for this board (BOARD_CAPS_fr6989_launchpad := LCD),
+ * so every translation unit sees it whatever its include order.
  */
 
-/* TIKU_BOARD_HAS_LCD is no longer defined here: it is a CAPABILITY, declared
- * as BOARD_CAPS_fr6989_launchpad := LCD in the Makefile and reaching every
- * translation unit as -DTIKU_BOARD_HAS_LCD=1.  Defining it in this header made
- * it visible only to files that had already included the header -- which is
- * the include-order trap, not a style preference.  The panel geometry below
- * stays: that is board wiring, not a capability. */
+/** Character positions on the glass, numbered from 0 at the left. */
 #define TIKU_BOARD_LCD_NUM_CHARS    6
 
 /*
- * LCD pin enable mask - which Lxx pins are physically connected to
- * the FH-1138P glass on this LaunchPad. Values come from Energia's
- * LCD_Launchpad init() for FR6989, which is on-hardware verified.
+ * Lxx pins wired to the glass, from Energia's LCD_Launchpad init() for the
+ * FR6989:
  *
  *   LCDCPCTL0 (L0..L15)  = 0xFFD0 — L4,L6,L7,L8..L15
  *   LCDCPCTL1 (L16..L31) = 0xF83F — L16..L21, L27..L31
  *   LCDCPCTL2 (L32..L43) = 0x00F8 — L35..L39 (digit A4 lives here)
- *
- * (My earlier 0x0F00 mask on CPCTL2 enabled L40..L43 — pins that do
- * not exist on FR6989 — and left L36..L39 disabled, so digit A4 had
- * no LCD pins to drive: the 'U' in TIKUOS rendered as a blank cell.)
  */
+/** @name LCDCPCTL0-2 values: the Lxx pins enabled as LCD pins
+ * @{ */
 #define TIKU_BOARD_LCD_PIN_MASK0    0xFFD0U
 #define TIKU_BOARD_LCD_PIN_MASK1    0xF83FU
 #define TIKU_BOARD_LCD_PIN_MASK2    0x00F8U
+/** @} */
 
 /*
- * Per-character-position LCDMEM index pair. Each alphanumeric
- * character on the FH-1138P spans two CONSECUTIVE LCDMEM bytes:
- * byte0 carries A,B,C,D,E,F,G,M and byte1 carries H,J,K,N,P,Q,DP.
- * Positions are zero-indexed left to right.
+ * A character spans two consecutive LCDMEM bytes: byte0 carries segments
+ * A-F, G and M, byte1 carries H, J, K, N, P, Q and the icon bits named by
+ * TIKU_BOARD_LCD_DIGIT_BYTE1_PRESERVE_MASK.
  *
- * The Energia LCD_Launchpad driver and TI's MSP-EXP430FR6989 demos
- * use 0-indexed LCDMEM[] (where LCDMEM is defined as
- * `(volatile char *) &LCDM1`, so LCDMEM[0] == LCDM1). The tikuOS
- * arch driver uses LCD_MEM_BYTE(i), which is 1-indexed
- * (LCD_MEM_BYTE(1) == LCDM1), so the constants below are Energia's
- * pos values + 1.
- *
- * Energia A1=9 → LCDM10/LCDM11, A2=5 → LCDM6/LCDM7, etc.
+ * The indices count from 1, as LCD_MEM_BYTE() in tiku_lcd_arch.c does
+ * (LCD_MEM_BYTE(1) is LCDM1).  Energia's LCD_Launchpad and TI's demos index
+ * LCDMEM[] from 0 (LCDMEM[0] is LCDM1), so each value here is theirs plus
+ * one: Energia's A1 = 9 is LCDM10/LCDM11 here.
  */
-#define TIKU_BOARD_LCD_POS0_BYTE0   10      /* A1 (leftmost) - LCDM10 */
+/** @name LCDMEM byte pair of each character position, left to right
+ * @{ */
+#define TIKU_BOARD_LCD_POS0_BYTE0   10      /**< A1 (leftmost) - LCDM10 */
 #define TIKU_BOARD_LCD_POS0_BYTE1   11
-#define TIKU_BOARD_LCD_POS1_BYTE0   6       /* A2 - LCDM6 */
+#define TIKU_BOARD_LCD_POS1_BYTE0   6       /**< A2 - LCDM6 */
 #define TIKU_BOARD_LCD_POS1_BYTE1   7
-#define TIKU_BOARD_LCD_POS2_BYTE0   4       /* A3 - LCDM4 */
+#define TIKU_BOARD_LCD_POS2_BYTE0   4       /**< A3 - LCDM4 */
 #define TIKU_BOARD_LCD_POS2_BYTE1   5
-#define TIKU_BOARD_LCD_POS3_BYTE0   19      /* A4 - LCDM19 */
+#define TIKU_BOARD_LCD_POS3_BYTE0   19      /**< A4 - LCDM19 */
 #define TIKU_BOARD_LCD_POS3_BYTE1   20
-#define TIKU_BOARD_LCD_POS4_BYTE0   15      /* A5 - LCDM15 */
+#define TIKU_BOARD_LCD_POS4_BYTE0   15      /**< A5 - LCDM15 */
 #define TIKU_BOARD_LCD_POS4_BYTE1   16
-#define TIKU_BOARD_LCD_POS5_BYTE0   8       /* A6 (rightmost) - LCDM8 */
+#define TIKU_BOARD_LCD_POS5_BYTE0   8       /**< A6 (rightmost) - LCDM8 */
 #define TIKU_BOARD_LCD_POS5_BYTE1   9
+/** @} */
 
-/*
- * Each digit's byte1 LCDMEM cell is shared with two icon segments:
- *   bit 0 = a "dot" between digits  (DOT1..DOT5 / RX)
- *   bit 2 = a secondary marker      (MINUS1, COLON2, RADIO, COLON4,
- *                                    DEG5, TX)
- * Any digit-write must preserve those bits so an icon turned on by
- * the application doesn't get clobbered when the digit changes. The
- * arch driver consults this mask in tiku_lcd_arch_putchar().
+/**
+ * @brief Byte1 bits that belong to icons rather than to the character.
+ *
+ * Bit 0 is a dot between digits (DOT1..DOT5, RX), bit 2 a second marker
+ * (MINUS1, COLON2, RADIO, COLON4, DEG5, TX).  tiku_lcd_arch_putchar() keeps
+ * these bits when it writes a character, so a lit icon stays lit.
  */
 #define TIKU_BOARD_LCD_DIGIT_BYTE1_PRESERVE_MASK   0x05U
 
 /*---------------------------------------------------------------------------*/
-/* On-board LCD - icon segments                                              */
+/* ON-BOARD LCD - ICON SEGMENTS                                              */
 /*---------------------------------------------------------------------------*/
 
-/*
- * The FH-1138P glass on the FR6989 LaunchPad carries a fixed set
- * of icon segments alongside the six 14-segment digit positions.
- * The (LCDMEM-byte-index, bit-mask) pairs below come from the
- * Energia LCD_Launchpad reference (on-hardware verified). Indices
- * are in the 1-indexed LCD_MEM_BYTE() form (Energia's value + 1).
- *
- * IDs are dense, in icon-table order — keep TIKU_LCD_ICON_* and
- * TIKU_BOARD_LCD_ICON_TABLE in lockstep when adding new icons.
- */
+/** 1: the glass has icon segments, so the icon API is built. */
 #define TIKU_BOARD_LCD_HAS_ICONS    1
+/** Number of icons: the rows of TIKU_BOARD_LCD_ICON_TABLE. */
 #define TIKU_BOARD_LCD_NUM_ICONS    24
 
+/**
+ * @name Icon IDs
+ * TIKU_LCD_ICON_x is the row of icon x in TIKU_BOARD_LCD_ICON_TABLE; the IDs
+ * are dense, so a new icon takes the next ID and a new row at the end.
+ * @{
+ */
 #define TIKU_LCD_ICON_MARK          0
 #define TIKU_LCD_ICON_R             1
 #define TIKU_LCD_ICON_HEART         2
@@ -324,7 +325,14 @@
 #define TIKU_LCD_ICON_BAT4          21
 #define TIKU_LCD_ICON_DOT4          22
 #define TIKU_LCD_ICON_COLON4        23
+/** @} */
 
+/**
+ * @brief Initializer rows { LCDMEM byte, bit mask }, one per icon ID.
+ *
+ * Values from Energia's LCD_Launchpad, with byte indices counted from 1 as
+ * LCD_MEM_BYTE() counts them (Energia's value plus one).
+ */
 #define TIKU_BOARD_LCD_ICON_TABLE                                              \
     { 3,  0x01 },   /* MARK     */                                             \
     { 3,  0x02 },   /* R        */                                             \
@@ -351,17 +359,15 @@
     { 20, 0x01 },   /* DOT4     */                                             \
     { 20, 0x04 }    /* COLON4   */
 
-/*
- * Decimal-point map for tiku_lcd_put_fixed(): the FH-1138P has five
- * inter-digit dots, one between each adjacent pair of the six digit
- * positions. Number them 1..5 left-to-right; dot N sits to the right
- * of digit position (N-1) in 0-indexed terms.
- *
- *   pos: 0 . 1 . 2 . 3 . 4 . 5
- *        ^ ^ ^ ^ ^ ^ ^ ^ ^ ^ ^
- *        digits and DOT1..DOT5
- */
+/** Number of inter-digit dots, numbered 1..5 from the left. */
 #define TIKU_BOARD_LCD_DOT_COUNT    5
+
+/**
+ * @brief Icon ID of inter-digit dot @p n, or 0xFF when @p n is not 1..5.
+ *
+ * Dot n sits right of character position n - 1.  tiku_lcd_put_fixed() lights
+ * one as the decimal point.
+ */
 #define TIKU_BOARD_LCD_DOT_ICON(n)                                             \
     ((n) == 1 ? TIKU_LCD_ICON_DOT1 :                                           \
      (n) == 2 ? TIKU_LCD_ICON_DOT2 :                                           \

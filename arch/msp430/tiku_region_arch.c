@@ -22,11 +22,12 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * Static const table describing the MSP430's physical memory map.
- * Lives in flash — the region registry stores a pointer, no copy.
+ * Static const table of the MSP430's physical memory map, kept in FRAM;
+ * the region registry stores a pointer to it, not a copy.
  *
  * Entries use per-device macros defined in the device header
- * (e.g. arch/msp430/devices/tiku_device_fr5969.h).
+ * (e.g. arch/msp430/devices/tiku_device_fr5994.h).  The NVM entry is the
+ * lower FRAM window only; HIFRAM is not in the table.
  */
 static const tiku_mem_region_t msp430_region_table[] = {
     {

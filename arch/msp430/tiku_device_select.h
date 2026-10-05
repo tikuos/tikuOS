@@ -8,8 +8,8 @@
  * tiku_device_select.h - device and board include router.
  *
  * Two separate choices: TIKU_DEVICE_* picks the silicon header (memory map,
- * ports, xtal) and TIKU_BOARD_* the PCB header (LEDs, buttons, headers).  A build
- * that names only the device falls back to that part's default LaunchPad.
+ * ports, xtal) and TIKU_BOARD_* the PCB header (LEDs, buttons, headers).  A
+ * build that names only the device gets that part's LaunchPad.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -48,11 +48,11 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* BOARD DEFAULT -- only when the build system named no board                 */
+/* BOARD DEFAULT                                                             */
 /*---------------------------------------------------------------------------*/
 /*
- * The Makefile always passes -DTIKU_BOARD_* (see BOARD_DEFINE_* there).
- * This block exists for the CCS project, which sets the device only.
+ * The Makefile passes -DTIKU_BOARD_* (BOARD_DEFINE_* there).  A build that
+ * names no board, such as the CCS project, gets the device's LaunchPad here.
  */
 
 #if !defined(TIKU_BOARD_FR5969_LAUNCHPAD) && \

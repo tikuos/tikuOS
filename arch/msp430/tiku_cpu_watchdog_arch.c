@@ -7,6 +7,9 @@
  *
  * tiku_cpu_watchdog_arch.c - MSP430 CPU watchdog timer configuration
  *
+ * WDT_A driver behind the watchdog HAL: every operation is one
+ * password-carrying write to WDTCTL.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -65,16 +68,16 @@ void tiku_cpu_msp430_watchdog_interval_timer_on_arch(tiku_wdt_clk_t src, tiku_wd
 {
     /* Interval-timer mode (interrupt), running, counter cleared */
     tiku_cpu_msp430_watchdog_config_arch(TIKU_WDT_MODE_INTERVAL, src, isel, 0, 1);
-    /* Remember to enable the interrupt if you want it: SFRIE1 |= WDTIE; */
+    /* WDTIE stays as it was; the interrupt needs SFRIE1 |= WDTIE. */
 }
 
 /**
  * @brief Disables the watchdog timer.
  *
- * This function stops the watchdog timer to prevent unintended system resets.
+ * Writes WDTPW | WDTHOLD; the mode, clock and interval bits are cleared.
  *
- * @note This is a critical function to call at the beginning of the
- *       application to avoid a boot loop.
+ * @note The WDT runs from reset: boot code that neither stops nor kicks it
+ *       within the reset-default interval is reset in a loop.
  */
 void tiku_cpu_msp430_watchdog_off_arch(void)
 {
@@ -100,8 +103,8 @@ void tiku_cpu_msp430_watchdog_pause_arch(void)
  * @brief Resumes the watchdog timer from a paused state.
  * @param kick_on_resume 0 = resume as-is, nonzero = also clear counter (“kick”)
  *
- * Atomically clears WDTHOLD and optionally WDTCNTCL while preserving
- * all other WDTCTL low-byte bits. Safe against ISR races.
+ * Clears WDTHOLD and, with kick_on_resume, sets WDTCNTCL, keeping the other
+ * WDTCTL low-byte bits.  Interrupts are off for the read-modify-write.
  */
 void tiku_cpu_msp430_watchdog_resume_arch(int kick_on_resume)
 {
@@ -121,7 +124,8 @@ void tiku_cpu_msp430_watchdog_resume_arch(int kick_on_resume)
 /**
  * @brief Kicks the watchdog timer.
  *
- * Clears the watchdog timer counter so the watchdog does not reset the system.
+ * Sets WDTCNTCL to restart the count, with interrupts off for the
+ * read-modify-write.
  */
 void tiku_cpu_msp430_watchdog_kick_arch(void)
 {
