@@ -142,10 +142,11 @@ tiku_shell_cmd_rmdir(uint8_t argc, const char *argv[])
  * so multi-line and arbitrary files round-trip where the single-line `write`
  * cannot.  The host (tikuConsole/tikufs.py) speaks the same handshake.
  *
- * A /data target streams through the store's writer, so the file may be any
- * size the store holds while RAM stays at one buffer.  Every other node
- * (under /dev and /sys) takes one whole-value write of at most one buffer.
- * The shell is single-threaded, so the buffer is shared.
+ * A /data file streams: recv writes it through the store's writer and send
+ * reads it in place, so it may be any size the store holds while RAM stays at
+ * one buffer.  Every other node (under /dev and /sys) is written or read as
+ * one whole value of at most one buffer.  The shell is single-threaded, so
+ * the buffer is shared.
  */
 
 static uint8_t fs_xfer_buf[TIKU_TFS_SLOT_DATA];
@@ -153,7 +154,7 @@ static uint8_t fs_xfer_buf[TIKU_TFS_SLOT_DATA];
 /**
  * @brief The store file name after a resolved path's "/data/" prefix.
  *
- * Only these paths stream; every other node takes a fixed-size write.
+ * Only these paths stream; every other node goes through the one buffer.
  *
  * @return The name, or NULL when the path is not a file under /data/
  */
@@ -324,30 +325,57 @@ tiku_shell_cmd_send(uint8_t argc, const char *argv[])
 {
     char                   resolved[TIKU_SHELL_CWD_SIZE];
     const tiku_shell_io_t *be;
-    int                    n, i;
+    const uint8_t         *src = fs_xfer_buf;
+    const char            *dname;
+    tiku_tfs_t            *fs = NULL;
+    size_t                 n, i;
 
     if (argc < 2u) {
         SHELL_PRINTF("Usage: send <path>\n");
         return;
     }
     tiku_shell_cwd_resolve(argv[1], resolved, sizeof(resolved));
-    n = tiku_vfs_read(resolved, (char *)fs_xfer_buf, sizeof(fs_xfer_buf));
-    if (n < 0) {
-        SHELL_PRINTF("send: cannot read '%s'\n", resolved);
-        return;
+
+    /* A /data file is read in place from the store, so it goes out whole at
+     * any size recv can write.  A static node (/data/basic) resolves first,
+     * as in the VFS; it and every other node render into the buffer, and one
+     * that does not fit (snprintf-style length) is refused. */
+    dname = fs_data_name(resolved);
+    if (dname != NULL && tiku_vfs_resolve(resolved) == NULL) {
+        fs = tiku_vfs_tree_data_store();
     }
-    if ((size_t)n > sizeof(fs_xfer_buf)) {
-        n = (int)sizeof(fs_xfer_buf);
+    if (fs != NULL) {
+        const void *p;
+        if (tiku_tfs_map(fs, dname, &p, &n) != TFS_OK) {
+            SHELL_PRINTF("send: cannot read '%s'\n", resolved);
+            return;
+        }
+        src = (const uint8_t *)p;
+    } else {
+        int r = tiku_vfs_read(resolved, (char *)fs_xfer_buf,
+                              sizeof(fs_xfer_buf));
+        if (r < 0) {
+            SHELL_PRINTF("send: cannot read '%s'\n", resolved);
+            return;
+        }
+        if ((size_t)r >= sizeof(fs_xfer_buf)) {
+            SHELL_PRINTF("send: '%s' is longer than %u bytes\n", resolved,
+                         (unsigned)sizeof(fs_xfer_buf) - 1u);
+            return;
+        }
+        n = (size_t)r;
     }
     /* Handshake: the host reads this length line, then reads N raw bytes.
      * Stream the payload through the backend's raw putc so the CRLF
      * expansion that tiku_shell_io_putc() applies cannot corrupt a binary
-     * file (a stored '\n' must stay one byte, not become "\r\n"). */
-    SHELL_PRINTF("send: %d\n", n);
+     * file (a stored '\n' must stay one byte, not become "\r\n").  The loop
+     * does not return to the scheduler, so it kicks the watchdog itself. */
+    SHELL_PRINTF("send: %lu\n", (unsigned long)n);
     be = tiku_shell_io_get_backend();
     if (be != NULL && be->putc != NULL) {
         for (i = 0; i < n; i++) {
-            be->putc((char)fs_xfer_buf[i]);
+            tiku_watchdog_kick();
+            be->putc((char)src[i]);
         }
     }
 }

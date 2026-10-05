@@ -61,8 +61,8 @@ void tiku_shell_cmd_recv(uint8_t argc, const char *argv[]);
  * @brief "send" command handler — send a file to the host.
  *
  * `send <path>` prints "send: N", then streams N raw bytes of the file out
- * (binary-safe).  N is at most one transfer buffer (TIKU_TFS_SLOT_DATA bytes),
- * so a longer streamed /data file is cut short.
+ * (binary-safe).  A /data file goes out whole; any other node must render in
+ * one transfer buffer (TIKU_TFS_SLOT_DATA bytes) and is refused if it does not.
  */
 void tiku_shell_cmd_send(uint8_t argc, const char *argv[]);
 
