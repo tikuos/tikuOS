@@ -7,9 +7,9 @@
  *
  * tiku_thread.c - preemptive worker threads: portable core.
  *
- * Policy only; the PendSV switcher, frame layout and DWT live in the arch
- * backend.  Thread 0 (the kernel) has absolute priority, workers round-robin
- * what it leaves, and the switcher falls back to the kernel when nothing runs.
+ * Policy only; the switch exception, frame layout and cycle counter live in
+ * the arch backend.  Thread 0 (the kernel) has absolute priority, workers
+ * round-robin what it leaves, and with no runnable worker the kernel runs.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -26,8 +26,8 @@
 /* ARCH BACKEND INTERFACE (arch/<family>/tiku_thread_arch.c)                 */
 /*---------------------------------------------------------------------------*/
 
-/** One-time bring-up: ISR stack, MSP->PSP migration, PendSV priority,
- *  DWT cycle counter.  Runs in kernel (thread) context. */
+/** One-time bring-up (on Cortex-M: ISR stack, MSP->PSP migration, PendSV
+ *  priority, cycle counter).  Runs in kernel (thread) context. */
 extern void      tiku_thread_arch_boot(void);
 /** Pend the context-switch exception (ISR-safe, idempotent). */
 extern void      tiku_thread_arch_pend(void);
@@ -50,7 +50,7 @@ extern uint32_t *tiku_thread_arch_frame_init(uint32_t *stack_top,
 static tiku_thread_t *s_threads[TIKU_THREADS_MAX];
 
 /** @brief Currently running worker, or NULL when thread 0 (kernel)
- *  owns the CPU.  Written only inside the PendSV switcher. */
+ *  owns the CPU.  Written only inside tiku_thread_switch(). */
 static tiku_thread_t * volatile s_current;
 
 /** @brief Kernel thread runnable?  Cleared by kernel_block, set by
@@ -69,7 +69,7 @@ static uint32_t *s_kernel_sp;
 /** @brief Kernel thread cycle account (thread 0's share). */
 static unsigned long long s_kernel_cycles;
 
-/** @brief DWT snapshot at the last switch (start of current tenure). */
+/** @brief Cycle-counter snapshot at the last switch (start of tenure). */
 static uint32_t s_tenure_start;
 
 /** @brief Stack-canary violations seen at switch time. */
@@ -110,22 +110,12 @@ static void wake_due(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* THE SWITCH (called from the PendSV switcher with IRQs implicitly          */
-/* serialised — PendSV is the lowest-priority exception)                     */
+/* THE SWITCH                                                                */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Save the outgoing context's sp, account its cycles, pick next.
- *
- * Called by the arch PendSV handler with the outgoing sp, returning the incoming
- * one.  Policy: the kernel if runnable, else the next READY worker from the
- * round-robin cursor, else the kernel again -- it is what knows how to idle.
- *
- * @param old_sp  Outgoing stack pointer (past the software frame)
- * @return Incoming stack pointer
- */
-/**
- * @brief Non-zero in kernel-thread (or pre-thread boot) context, zero in a worker.
+ * @brief Non-zero in kernel-thread (or pre-thread boot) context, zero in a
+ *        worker.
  *
  * The confinement predicate for TIKU_MEM_KERNEL_ONLY: memory mutators refuse
  * worker-context calls rather than race the kernel's lock-free structures.  One
@@ -137,14 +127,16 @@ int tiku_thread_in_kernel(void)
 }
 
 /**
- * @brief Context-switch core: park the outgoing context, pick the next worker.
+ * @brief Context-switch core: park the outgoing context, pick the next one.
  *
- * Charges elapsed cycles to whoever ran, saves @p old_sp, checks the outgoing
- * stack canary, then takes the next READY in-budget worker from the round-robin
- * cursor.  With no runnable worker it returns to the kernel context.
+ * Charges elapsed cycles to whoever ran, saves @p old_sp and checks the
+ * outgoing stack canary.  Picks the kernel if runnable, else the next READY
+ * in-budget worker from the round-robin cursor, else the kernel again.
  *
  * @param old_sp  Stack pointer of the context being switched out.
  * @return The stack pointer of the context to switch in.
+ * @note Called only from the arch switch exception (PendSV, or the ESP32-C61
+ *       software interrupt), which runs at the lowest priority.
  */
 uint32_t *tiku_thread_switch(uint32_t *old_sp)
 {
@@ -172,7 +164,8 @@ uint32_t *tiku_thread_switch(uint32_t *old_sp)
 
     /* Pick the incoming context: the next READY, in-budget worker from
      * the round-robin cursor.  An exhausted worker is skipped here, so it
-     * silently loses its turn until a refill lifts it back over budget. */
+     * loses its turn until a refill raises its ceiling above the cycles it
+     * has used. */
     if (!s_kernel_ready) {
         for (i = 0; i < TIKU_THREADS_MAX; i++) {
             uint8_t idx = (uint8_t)((s_rr + i) % TIKU_THREADS_MAX);
@@ -298,7 +291,7 @@ int tiku_thread_join(tiku_thread_t *t)
         return -1;
     }
     /* Kernel-context wait: repeatedly hand the CPU to the workers.
-     * The system tick's poll post wakes the kernel every tick, so
+     * The tick wakes the kernel every tick (tiku_sched_notify()), so
      * this loop re-checks at tick granularity.  Test/teardown tool —
      * steady-state code should take a completion event instead. */
     while (t->state != TIKU_THREAD_DONE) {
@@ -399,11 +392,11 @@ int tiku_thread_is_done(const tiku_thread_t *t)
 /*---------------------------------------------------------------------------*/
 
 /*
- * budget is a 64-bit field the PendSV switcher reads while picking the
- * next worker; a two-store update could be torn by the switch, so every
- * mutation runs under the PRIMASK atomic section (PendSV is an interrupt
- * and cannot fire while it is masked).  cycles is written only by the
- * switch itself, so the comparisons never race it.
+ * budget is a 64-bit field the switch reads while picking the next
+ * worker; a two-store update could be torn by the switch, so every
+ * mutation runs inside the atomic section, which masks the switch
+ * exception.  cycles is written only by the switch itself, so the
+ * comparisons never race it.
  */
 
 void tiku_thread_budget_grant(tiku_thread_t *t, unsigned long long cycles)
@@ -428,7 +421,7 @@ void tiku_thread_budget_refill(tiku_thread_t *t, unsigned long long cycles)
         return;
     }
     tiku_atomic_enter();
-    if (t->budget != 0ull) {          /* only extend an already-enforced budget */
+    if (t->budget != 0ull) {          /* extend only an enforced budget */
         t->budget += cycles;
     }
     tiku_atomic_exit();

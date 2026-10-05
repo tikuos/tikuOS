@@ -53,7 +53,7 @@ typedef void (*tiku_timer_callback_t)(void *ptr);
  * @brief Unified software timer structure.
  *
  * In EVENT mode the process field says where the expiration goes; in CALLBACK
- * mode the func and ptr fields say what runs.  About 20-24 bytes per timer.
+ * mode the func and ptr fields say what runs.
  */
 struct tiku_timer {
   struct tiku_timer *next; /**< Linked list pointer (internal) */
@@ -80,7 +80,8 @@ struct tiku_timer {
  * @brief Initialize the timer subsystem
  *
  * Starts the internal timer management process.
- * Call once during system init, after the process system is up.
+ *
+ * @note Call once during system init, after tiku_process_init().
  */
 void tiku_timer_init(void);
 
@@ -242,7 +243,8 @@ struct tiku_timer *tiku_timer_get(uint8_t idx);
 tiku_clock_time_t tiku_timer_next_expiration(void);
 
 /**
- * @brief Request the timer process to poll (called from clock ISR)
+ * @brief Ask the timer process to scan, when any timer exists (called from
+ *        the tick and from tiku_crit_end())
  */
 void tiku_timer_request_poll(void);
 
@@ -269,9 +271,8 @@ extern struct tiku_process tiku_timer_process;
 
 /*
  * Convenience macros that wrap a one-shot tiku_timer_set_event() and
- * the matching PT_WAIT_UNTIL / PT_YIELD_UNTIL into a single call,
- * removing the repetitive timer-set-then-wait-then-stop boilerplate
- * found in many process bodies.
+ * the matching PT_WAIT_UNTIL / PT_YIELD_UNTIL into a single call, and
+ * stop the timer afterwards.
  *
  * Caller-side contract:
  *
@@ -285,18 +286,18 @@ extern struct tiku_process tiku_timer_process;
  *     cannot be posted to the process after the wait completes.
  *
  *   - The condition expression is re-evaluated whenever the process
- *     is re-scheduled, exactly the same as plain PT_WAIT_UNTIL.
+ *     is re-scheduled, as with plain PT_WAIT_UNTIL.
  *
- * Example -- replaces the four-line set/wait/stop dance:
+ * Example:
  * @code
  *   static struct tiku_timer t;
  *
  *   PT_WAIT_UNTIL_TIMEOUT(pt, &t, sensor_ready(),
  *                         TIKU_CLOCK_SECOND * 2);
  *   if (sensor_ready()) {
- *       // success path
+ *       read_sensor();
  *   } else {
- *       // timeout path
+ *       report_timeout();
  *   }
  * @endcode
  */
@@ -306,7 +307,7 @@ extern struct tiku_process tiku_timer_process;
  * @brief Block until @p cond is true or @p ticks have elapsed.
  *
  * Sets a one-shot event timer, blocks the protothread -- the process reads as
- * "waiting" in /proc -- until the condition holds or the timer fires, then
+ * "sleeping" in /proc -- until the condition holds or the timer fires, then
  * stops the timer.
  *
  * @param pt    Pointer to the protothread control block
@@ -326,8 +327,8 @@ extern struct tiku_process tiku_timer_process;
  * @brief Yield until @p cond is true or @p ticks have elapsed.
  *
  * As PT_WAIT_UNTIL_TIMEOUT but with yield semantics, so the process reads as
- * "ready" rather than "waiting" -- use it when the wait belongs to a polling
- * loop the scheduler should keep treating as runnable.
+ * "ready" rather than "sleeping".  Scheduling is the same: either form runs
+ * again on its next event, the timer's at the latest.
  *
  * @param pt    Pointer to the protothread control block
  * @param timer Pointer to a caller-owned struct tiku_timer

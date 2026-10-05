@@ -7,9 +7,9 @@
  *
  * tiku_bitbang.h - hardware-timer-driven precision bit-bang engine.
  *
- * Drives one GPIO pin through an arbitrary bit pattern at a caller-set rate, with
- * the bit clock supplied by hardware so the CPU is free between transitions.
- * One-shot per call, and only one stream may be active at a time.
+ * Drives one GPIO pin through an arbitrary bit pattern at a caller-set rate,
+ * with the bit clock supplied by hardware so the CPU is free between
+ * transitions.  One-shot per call, and only one stream may be active at a time.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,7 +24,7 @@
 /* RETURN CODES                                                              */
 /*---------------------------------------------------------------------------*/
 
-#define TIKU_BITBANG_OK            0
+#define TIKU_BITBANG_OK            0  /**< Success */
 #define TIKU_BITBANG_ERR_BUSY     -1  /**< A transmission is in progress */
 #define TIKU_BITBANG_ERR_INVALID  -2  /**< Bad config (NULL data, pin, etc.) */
 #define TIKU_BITBANG_ERR_TIMING   -3  /**< bit_time_ticks too small */
@@ -35,7 +35,8 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Completion callback. Runs in htimer ISR context.
+ * @brief Completion callback; runs in interrupt context (the htimer ISR, or
+ *        the PIO IRQ on RP2350).
  * @param ctx The ctx pointer from tiku_bitbang_t
  */
 typedef void (*tiku_bitbang_done_cb_t)(void *ctx);
@@ -48,9 +49,10 @@ typedef void (*tiku_bitbang_done_cb_t)(void *ctx);
  * @struct tiku_bitbang_t
  * @brief Bit-bang transmission descriptor.
  *
- * Lifetime: the caller must keep @p data alive until on_done fires.
- * The struct itself is copied internally so it does not need to
- * outlive the call to tiku_bitbang_tx().
+ * The struct itself is copied internally, so it need not outlive the call
+ * to tiku_bitbang_tx().
+ *
+ * @note Keep @p data alive until on_done fires.
  */
 typedef struct {
     uint8_t  port;            /**< GPIO port (1..N, or 0xFF for port J) */
@@ -79,9 +81,12 @@ typedef struct {
  * @param cfg Caller-owned config; copied internally
  * @return TIKU_BITBANG_OK or a negative error code
  *
- * Configures the pin, schedules the first edge and returns; the ISR produces
- * the rest.  Periods shorter than the htimer guard time are accepted -- the
- * engine bypasses the guard when rescheduling, but the first edge still uses it.
+ * Configures the pin and schedules the first edge; the ISR produces the rest.
+ * Periods shorter than the htimer guard time are accepted -- the engine
+ * bypasses the guard when rescheduling, but the first edge still uses it.
+ *
+ * @note On RP2350 bit_count is 1..32 per call; a longer burst takes several
+ *       calls.
  */
 int tiku_bitbang_tx(const tiku_bitbang_t *cfg);
 
@@ -95,8 +100,9 @@ int tiku_bitbang_busy(void);
 /**
  * @brief Abort the in-progress transmission.
  *
- * Cancels the pending htimer and drives the pin to the configured
- * idle level. on_done is NOT called for an aborted stream.
+ * Cancels the pending htimer (stops the PIO stream on RP2350) and drives
+ * the pin to the configured idle level.  on_done is not called for an
+ * aborted stream.
  */
 int tiku_bitbang_abort(void);
 

@@ -24,7 +24,7 @@
  * slop for an interrupt arriving mid-paint. */
 #define TIKU_STACK_MARGIN   128u
 
-/* Current stack pointer, platform-branched like /sys/mem/free's reader. */
+/** @brief Current stack pointer; 0 on a port this file has no reader for. */
 static uintptr_t stack_sp(void)
 {
 #if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
@@ -53,6 +53,7 @@ TIKU_WEAK uint32_t tiku_stack_arch_bottom(void)
     return 0u;
 }
 
+/** @brief Fill [bottom, sp - margin) with the sentinel, word-aligned. */
 static void stack_paint_between(uintptr_t bottom, uintptr_t sp, uint32_t margin)
 {
     uint32_t *lo, *hi;
@@ -68,6 +69,7 @@ static void stack_paint_between(uintptr_t bottom, uintptr_t sp, uint32_t margin)
     }
 }
 
+/** @brief Bytes of intact sentinel from @p bottom up, scanning below @p sp. */
 static uint32_t stack_free_between(uintptr_t bottom, uintptr_t sp)
 {
     const uint32_t *p, *hi;

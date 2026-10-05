@@ -7,9 +7,9 @@
  *
  * tiku_thread_cortexm.inl - generic Cortex-M worker-thread switcher.
  *
- * The one context-switch body shared by every Cortex-M part: threads run on PSP,
- * exceptions on MSP, and the kernel context migrates to PSP once at boot.  A
- * per-platform shim names its PendSV handler and includes this file.
+ * The context-switch body shared by every Cortex-M part: threads run on PSP,
+ * exceptions on MSP, and the kernel moves to PSP on the first thread start.
+ * A per-platform shim names its PendSV handler and includes this file.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,7 +22,7 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* REGISTERS (architectural -- same on M4F / M33 / M55)                      */
+/* REGISTERS (architectural -- same on M4F / M33 / M55 / M85)                */
 /*---------------------------------------------------------------------------*/
 
 #define SCB_ICSR    (*(volatile uint32_t *)0xE000ED04UL)
@@ -45,8 +45,8 @@
 /*
  * Per-thread accounting needs a free-running CPU-speed counter.  DWT
  * CYCCNT is the architectural default -- but on parts where the DWT
- * freezes without a debugger attached (nRF54L15), the shim #defines
- * TIKU_THREAD_ARCH_CUSTOM_CYCLES and provides, BEFORE including this
+ * freezes without a debugger attached (nRF54L), the shim #defines
+ * TIKU_THREAD_ARCH_CUSTOM_CYCLES and provides, before including this
  * file, its own thread_cycles_init() (static) and the public
  * tiku_thread_arch_cycles() backed by a hardware timer.
  */
@@ -93,7 +93,7 @@ static uint32_t s_isr_stack[512] __attribute__((aligned(8)));
 /**
  * @brief Migrate the calling (kernel) context from MSP to PSP in place.
  *
- * PSP := current MSP, CONTROL.SPSEL := 1 (FPCA preserved!), then MSP is
+ * PSP := current MSP, CONTROL.SPSEL := 1 (FPCA preserved), then MSP is
  * re-pointed at the dedicated ISR stack.  Returns normally -- the caller
  * continues on the same stack, now as a PSP thread.
  *
@@ -181,7 +181,7 @@ uint32_t *tiku_thread_arch_frame_init(uint32_t *stack_top,
 }
 
 /*---------------------------------------------------------------------------*/
-/* PENDSV -- THE SWITCH                                                       */
+/* PENDSV -- THE SWITCH                                                      */
 /*---------------------------------------------------------------------------*/
 
 /** Policy hop: kernel/threads/tiku_thread.c picks the next context. */
@@ -190,9 +190,9 @@ extern uint32_t *tiku_thread_switch(uint32_t *old_sp);
 /**
  * @brief PendSV handler (strong override of the vector's weak alias).
  *
- * Saves the outgoing software frame on its PSP stack, S16-S31 first when the FP
- * frame is live, asks the policy layer for the next sp, then unwinds the incoming
- * thread the same way.  EXC_RETURN travels in the frame, so the two kinds mix.
+ * Saves the outgoing software frame on its PSP stack (S16-S31 first when the
+ * FP frame is live), asks the policy layer for the next sp, then unwinds the
+ * incoming thread the same way; EXC_RETURN in the frame tells which it is.
  */
 __attribute__((naked))
 void TIKU_THREAD_ARCH_PENDSV(void)

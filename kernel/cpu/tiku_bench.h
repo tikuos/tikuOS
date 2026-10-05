@@ -19,6 +19,7 @@
 
 #include <stdint.h>
 
+/** @brief Wrapping counter value, in tiku_bench_unit() units. */
 typedef uint32_t tiku_bench_time_t;
 
 /**

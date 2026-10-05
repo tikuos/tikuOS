@@ -8,8 +8,8 @@
  * tiku_proc_vfs.h - VFS /proc subtree registration.
  *
  * Public interface to the live runtime counterpart of the static /sys subtree.
- * The VFS root assembly calls tiku_proc_vfs_get() for the top-level directory and
- * _child_count() to size it.  See the .c file for the full subtree map.
+ * The VFS root assembly calls tiku_proc_vfs_get() for the top-level directory.
+ * See the .c file for the subtree map.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,8 +23,8 @@
  * @brief Get the /proc VFS directory node.
  *
  * Rebuilt from scratch on each call, so it reflects the current registry,
- * catalog and driver state.  The node and its children live in durable storage
- * and the pointer stays valid only until the next call overwrites it.
+ * catalog and driver state.  The node and its children are static storage,
+ * so the next call rebuilds what this one returned in place.
  *
  * @return Pointer to the "proc" VFS directory node
  */

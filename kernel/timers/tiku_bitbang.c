@@ -7,8 +7,8 @@
  *
  * tiku_bitbang.c - hardware-driven precision bit-bang engine.
  *
- * Two backends behind one API: MSP430 drives each bit edge from a Timer A1 ISR
- * clocked by hardware compare-match, and RP2350 shifts bits from a PIO state
+ * Two backends behind one API: every port but RP2350 drives each bit edge
+ * from an htimer compare-match ISR, and RP2350 shifts bits from a PIO state
  * machine with no per-bit CPU work at all.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -19,22 +19,15 @@
 /*---------------------------------------------------------------------------*/
 
 #include <tiku.h>
-/* RP2350 PIO backend limit: bit_count must be in [1, 32] per tiku_bitbang_tx()
- * call.  A longer burst needs several calls, or a PIO program extended to pull
- * more than one word. */
 #include "tiku_bitbang.h"
 #include <interfaces/gpio/tiku_gpio.h>
 #include <stddef.h>
 
 /*
- * The htimer + GPIO software backend is the DEFAULT: it toggles the pin from
+ * The htimer + GPIO software backend is the default: it toggles the pin from
  * an htimer ISR using only the generic tiku_gpio / tiku_htimer APIs, so it
  * works anywhere both exist.  A platform is excepted only when it has a
  * dedicated engine to use instead -- RP2350's PIO today.
- *
- * This was a list of platforms that opted IN, which left every other target
- * falling through to the ERR_INVALID stub below: a bit-bang engine that
- * refused every valid config, with no build error to say so.
  */
 #if !defined(TIKU_BITBANG_SOFT) && !defined(PLATFORM_RP2350)
 #define TIKU_BITBANG_SOFT 1
@@ -66,11 +59,12 @@ static struct tiku_htimer bb_htimer;
 #endif
 
 /*===========================================================================*/
-/* SOFTWARE BACKEND -- htimer ISR per bit (MSP430, Apollo510)                  */
+/* SOFTWARE BACKEND -- htimer ISR per bit                                    */
 /*===========================================================================*/
 
 #if defined(TIKU_BITBANG_SOFT)
 
+/** @brief Bit @p bit_idx of the stream, in the configured bit order. */
 static inline uint8_t bb_get_bit(uint16_t bit_idx) {
     uint8_t byte = bb.cfg.data[bit_idx >> 3];
     uint8_t pos  = bb.cfg.msb_first ? (uint8_t)(7 - (bit_idx & 7))
@@ -78,6 +72,7 @@ static inline uint8_t bb_get_bit(uint16_t bit_idx) {
     return (uint8_t)((byte >> pos) & 1);
 }
 
+/** @brief htimer callback: drive the next bit and reschedule, or finish. */
 static void bb_isr(struct tiku_htimer *t, void *ptr) {
     (void)ptr;
 
@@ -105,6 +100,11 @@ static void bb_isr(struct tiku_htimer *t, void *ptr) {
     }
 }
 
+/**
+ * @brief Drive the pin to its idle level and schedule the first edge one bit
+ *        period out.
+ * @return TIKU_BITBANG_OK or a negative error code
+ */
 static int bb_soft_tx(const tiku_bitbang_t *cfg) {
     int rc;
     tiku_htimer_clock_t now;
@@ -128,6 +128,7 @@ static int bb_soft_tx(const tiku_bitbang_t *cfg) {
     return TIKU_BITBANG_OK;
 }
 
+/** @brief Cancel the htimer and drive the pin to its idle level. */
 static int bb_soft_abort(void) {
     tiku_htimer_cancel();
     tiku_gpio_write(bb.cfg.port, bb.cfg.pin, bb.cfg.idle_level);
@@ -137,15 +138,17 @@ static int bb_soft_abort(void) {
 #endif /* TIKU_BITBANG_SOFT */
 
 /*===========================================================================*/
-/* RP2350 BACKEND -- PIO state machine                                        */
+/* RP2350 BACKEND -- PIO state machine                                       */
 /*===========================================================================*/
 
 #if defined(PLATFORM_RP2350)
 
-/* Pack data[] into a uint32_t in the order the PIO program shifts.
- * For MSB-first the first byte's MSB goes first, so byte[0] sits in
- * the top byte of the word.  For LSB-first the first byte's LSB goes
- * first, so byte[0] sits in the bottom byte. */
+/**
+ * @brief Pack data[] into a word in the order the PIO program shifts.
+ *
+ * MSB-first sends byte[0]'s MSB first, so byte[0] sits in the top byte of the
+ * word; LSB-first sends its LSB first, so byte[0] sits in the bottom byte.
+ */
 static uint32_t bb_pack(const uint8_t *data, uint8_t bit_count,
                         uint8_t msb_first) {
     uint32_t word = 0U;
@@ -167,8 +170,10 @@ static uint32_t bb_pack(const uint8_t *data, uint8_t bit_count,
     return word;
 }
 
-/* PIO IRQ handler thunk -- runs in ISR context, finishes the
- * transaction with the idle-level write + user callback. */
+/**
+ * @brief PIO IRQ completion: drive the idle level, count the stream and call
+ *        on_done, in ISR context.
+ */
 static void bb_pio_done(void *ctx) {
     (void)ctx;
     tiku_gpio_write(bb.cfg.port, bb.cfg.pin, bb.cfg.idle_level);
@@ -179,6 +184,10 @@ static void bb_pio_done(void *ctx) {
     }
 }
 
+/**
+ * @brief Hand the packed stream (1..32 bits) to the PIO state machine.
+ * @return TIKU_BITBANG_OK or a negative error code
+ */
 static int bb_rp2350_tx(const tiku_bitbang_t *cfg) {
     uint32_t data_word;
     int rc;
@@ -187,8 +196,8 @@ static int bb_rp2350_tx(const tiku_bitbang_t *cfg) {
         return TIKU_BITBANG_ERR_INVALID;
     }
     /* bit_time_ticks is microseconds in the htimer "high accuracy"
-     * preset shared with htimer; the PIO arch wants microseconds too,
-     * but caps at uint16_t.  Reject pathologically long periods. */
+     * preset, and the PIO arch takes microseconds too.  Reject a zero
+     * period. */
     if (cfg->bit_time_ticks == 0U) {
         return TIKU_BITBANG_ERR_TIMING;
     }
@@ -214,6 +223,7 @@ static int bb_rp2350_tx(const tiku_bitbang_t *cfg) {
     return TIKU_BITBANG_ERR_INVALID;
 }
 
+/** @brief Stop the PIO stream and drive the pin to its idle level. */
 static int bb_rp2350_abort(void) {
     (void)tiku_pio_arch_bitbang_abort();
     tiku_gpio_write(bb.cfg.port, bb.cfg.pin, bb.cfg.idle_level);
@@ -223,7 +233,7 @@ static int bb_rp2350_abort(void) {
 #endif /* PLATFORM_RP2350 */
 
 /*===========================================================================*/
-/* PUBLIC API -- platform-agnostic                                            */
+/* PUBLIC API -- platform-agnostic                                           */
 /*===========================================================================*/
 
 int tiku_bitbang_tx(const tiku_bitbang_t *cfg) {

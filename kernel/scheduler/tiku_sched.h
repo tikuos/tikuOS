@@ -8,7 +8,8 @@
  * tiku_sched.h - scheduler interface.
  *
  * Coordinates process dispatch, timer expiration and low-power idle.  The main
- * loop lives here, so main.c only calls tiku_sched_init() and tiku_sched_loop().
+ * loop lives here: boot calls tiku_sched_init(), and main.c ends in
+ * tiku_sched_loop().
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -55,7 +56,9 @@ typedef void (*tiku_sched_idle_hook_t)(void);
  * @brief Initialize the scheduler and all managed subsystems
  *
  * Initializes the process system, software timer subsystem, and
- * hardware timer. Must be called once at startup after clock init.
+ * hardware timer.
+ *
+ * @note Call once at startup, after clock init.
  */
 void tiku_sched_init(void);
 
@@ -72,18 +75,19 @@ void tiku_sched_start(struct tiku_process *p, tiku_event_data_t data);
 /**
  * @brief Run one scheduler iteration
  *
- * Checks for expired timers, then dispatches one event from the
- * process event queue. Returns whether any work was done.
+ * Dispatches one event from the process event queue.  Returns whether
+ * any work was done.
  *
  * @return 1 if an event was dispatched, 0 if idle
  */
 uint8_t tiku_sched_run_once(void);
 
 /**
- * @brief Enter the main scheduler loop (never returns).
+ * @brief Run the main scheduler loop until tiku_sched_stop().
  *
- * Dispatches events and checks timers, calling the idle hook when nothing is
- * pending so the platform can drop into a low-power mode until an interrupt.
+ * Starts the autostart processes and enables interrupts, then dispatches
+ * events, calling the idle hook when nothing is pending so the platform can
+ * drop into a low-power mode until an interrupt.
  */
 void tiku_sched_loop(void);
 
@@ -139,10 +143,13 @@ void tiku_sched_set_idle_tick_wakes(uint8_t wakes);
 uint16_t tiku_sched_idle_count(void);
 
 /**
- * @brief Notify the scheduler from ISR context
+ * @brief The tick hook: poll the timer process when a timer exists, and wake
+ *        the kernel thread.
  *
- * Call this from any ISR that generates work (e.g., clock tick ISR).
- * It requests the timer process to poll for expired timers.
+ * Every arch tick ISR but MSP430's calls it; MSP430's polls the timer process
+ * directly.  Another ISR with work for a process posts an event instead.
+ *
+ * @note Tick ISR context.
  */
 void tiku_sched_notify(void);
 

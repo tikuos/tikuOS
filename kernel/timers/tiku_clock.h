@@ -38,7 +38,7 @@ typedef TIKU_CLOCK_CONF_TIME_T tiku_clock_time_t;
 typedef unsigned short tiku_clock_time_t;
 #else
 /* The same width tiku.h configures, decided here too because this header
- * is reachable without it: an include guard locks the FIRST typedef in, so
+ * is reachable without it: an include guard locks the first typedef in, so
  * a translation unit that reaches this file first would otherwise size
  * every struct tiku_timer it declares 4 bytes short of the one the timer
  * subsystem writes -- and the timer's own stores then land past the end of
@@ -46,18 +46,12 @@ typedef unsigned short tiku_clock_time_t;
 typedef unsigned long tiku_clock_time_t;
 #endif
 
-/*
- * How long an interval this type can measure.
+/**
+ * @brief Longest interval the clock type can measure: half its range.
  *
- * The counter wraps, and the arithmetic below is wraparound-safe only for
- * intervals shorter than half its range: 256 s at 16 bits and 128 Hz, and a
- * plain difference is wrong past 512 s.  That is not hypothetical -- a 605 s
- * encode once reported 92 s, and before that a 25 s turn reported 3 489 178,
- * both from taking one difference across a wrap.
- *
- * Measure long things as a sum of short differences, each taken in the
- * counter's own width, or use a cycle counter.  Widening this type is the
- * other option and costs a 16-bit MCU real work in every timer compare.
+ * The counter wraps; the arithmetic below is safe only for intervals shorter
+ * than this (256 s at 16 bits and 128 Hz).  Measure longer spans as a sum of
+ * short differences, each in the counter's own width, or use a cycle counter.
  */
 #define TIKU_CLOCK_MAX_INTERVAL \
     ((tiku_clock_time_t)(((tiku_clock_time_t)~(tiku_clock_time_t)0) / 2u))
@@ -77,11 +71,8 @@ typedef unsigned long tiku_clock_time_t;
 /*---------------------------------------------------------------------------*/
 
 /*
- * Both are expressed in the clock type's OWN width, with no fixed-width
- * cast anywhere.  A `signed short` cast here would be correct only while
- * the type is 16 bits, so overriding TIKU_CLOCK_CONF_TIME_T -- which the
- * typedef above openly invites -- would silently truncate every comparison
- * and every difference.
+ * Both use the clock type's own width, so they stay correct when
+ * TIKU_CLOCK_CONF_TIME_T overrides it.
  */
 
 /**
@@ -113,7 +104,9 @@ typedef unsigned long tiku_clock_time_t;
 /**
  * @brief Initialize the system clock
  *
- * Delegates to tiku_clock_arch_init(). Call once during system boot.
+ * Delegates to tiku_clock_arch_init().
+ *
+ * @note Call once during system boot.
  */
 void tiku_clock_init(void);
 

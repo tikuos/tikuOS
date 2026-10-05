@@ -7,9 +7,9 @@
  *
  * tiku_bench.c - portable micro-benchmark timebase.
  *
- * ARM prefers the DWT cycle counter with the kernel htimer as fallback; MSP430
- * uses Timer_A.  Nordic deliberately uses TIMER20 because its DWT counter freezes
- * without a live debugger, which would report plausible-looking zeros.
+ * RP2350 and Ambiq use the DWT cycle counter when init sees it advance, and
+ * the htimer otherwise, as every other port does.  Nordic stays on the
+ * htimer (TIMER20) because its DWT counter stops without a debugger attached.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -98,10 +98,8 @@ tiku_bench_hz(void)
         return (uint32_t)TIKU_HTIMER_ARCH_SECOND;
     }
     /* The DWT counts core cycles, so its rate is whatever the core is
-     * running at NOW -- not TIKU_MAIN_CPU_HZ, which is a compile-time
-     * constant and stays at the boot frequency after any runtime change.
-     * Reporting the constant scaled every converted duration on a board
-     * running at 250 MHz by 2.6x. */
+     * running at now, not TIKU_MAIN_CPU_HZ, which is a compile-time
+     * constant and stays at the boot frequency after any runtime change. */
     {
         unsigned long hz = tiku_cpu_mclk_hz();
         return (hz != 0UL) ? (uint32_t)hz : (uint32_t)TIKU_MAIN_CPU_HZ;

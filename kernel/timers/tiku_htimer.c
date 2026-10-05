@@ -58,7 +58,6 @@ int tiku_htimer_set(struct tiku_htimer *ht, tiku_htimer_clock_t time,
                     tiku_htimer_callback_t func, void *ptr) {
   tiku_htimer_clock_t now;
 
-  /* Validate */
   if (ht == NULL || func == NULL) {
     HTIMER_PRINTF("htimer: ERR_INVALID (ht=0x%x func=0x%x)\n",
                    (unsigned int)(uintptr_t)ht,
@@ -77,12 +76,10 @@ int tiku_htimer_set(struct tiku_htimer *ht, tiku_htimer_clock_t time,
     }
   }
 
-  /* Configure */
   ht->time = time;
   ht->func = func;
   ht->ptr = ptr;
 
-  /* Arm */
   pending = ht;
   tiku_htimer_arch_schedule(time);
 
@@ -120,9 +117,9 @@ int tiku_htimer_set_no_guard(struct tiku_htimer *ht, tiku_htimer_clock_t time,
 /**
  * @brief Cancel the pending hardware timer.
  *
- * Clears the pending pointer.  The hardware interrupt is not
- * disabled -- a spurious ISR will call run_next(), see
- * pending==NULL, and return harmlessly.
+ * Clears the pending pointer.  The hardware interrupt is left enabled: a
+ * spurious ISR calls run_next(), sees pending == NULL and returns, so no
+ * platform needs a disarm function.
  */
 int tiku_htimer_cancel(void) {
   if (pending == NULL) {
@@ -132,11 +129,6 @@ int tiku_htimer_cancel(void) {
   HTIMER_PRINTF("htimer: cancelled (was %u)\n", pending->time);
   pending = NULL;
 
-  /*
-   * The hardware interrupt is left enabled: a spurious ISR calls
-   * run_next(), sees pending == NULL and returns harmlessly, which
-   * avoids needing a platform-specific "disarm" function.
-   */
   return TIKU_HTIMER_OK;
 }
 

@@ -64,23 +64,13 @@ void tiku_sched_init(void)
     sched_state = TIKU_SCHED_RUNNING;
 
     /*
-     * Idle sleeps by default.  With no hook installed an idle scheduler spins
-     * the core at full speed -- measured on an nRF54LM20-DK at 6.76 mA doing
-     * nothing against 1.54 mA in WFI, a factor of 4.4 paid continuously by
-     * every board that never calls "sleep".
-     *
-     * The cost of spinning is not only the CPU: on this part the HFCLK
-     * controller stops the clock automatically once nothing requests it, and
-     * "the CPU is awake" is itself a request.  Never sleeping therefore holds
-     * the whole MCU power domain up, and the hardware's own power management
-     * never gets a chance to act.
-     *
-     * TIKU_CPU_IDLE_LIGHT is the conservative choice: a plain WFI that any
-     * interrupt wakes, with no clock or peripheral state torn down, so nothing
-     * that worked while spinning can stop working.  Deeper modes stay opt-in
-     * because they do change what remains powered.  "sleep off" restores the
-     * spin for anyone who needs it -- a tight-latency experiment, or bisecting
-     * a fault that only appears when the core never sleeps.
+     * Idle sleeps by default: with no hook installed an idle scheduler spins
+     * the core at full power.  TIKU_CPU_IDLE_LIGHT is the shallowest sleep
+     * (LPM0 on MSP430, WFI on the other ports with an idle entry): any
+     * interrupt wakes it and no clock or peripheral state is torn down, so
+     * nothing that works while spinning stops working.  Deeper modes stay
+     * opt-in because they change what remains powered.  "sleep off" restores
+     * the spin.
      */
     idle_hook = tiku_cpu_idle_hook(TIKU_CPU_IDLE_LIGHT);
     tiku_sched_set_idle_tick_wakes(
@@ -113,9 +103,9 @@ void tiku_sched_start(struct tiku_process *p, tiku_event_data_t data)
 /**
  * @brief Run one scheduler iteration.
  *
- * Dispatches one event.  Timer polling belongs to the clock ISR and to
- * timer_insert(); polling here would flood the queue with redundant POLL events
- * and drop real ones once it filled.
+ * Dispatches one event.  Timer polling belongs to the tick and to
+ * timer_insert(); polling here would keep a POLL in the queue, so the loop
+ * would never idle.
  *
  * @return 1 if an event was dispatched, 0 if idle
  */
@@ -124,7 +114,6 @@ uint8_t tiku_sched_run_once(void)
 #if TIKU_MEM_RECLAIM_ENABLE
     tiku_mem_reclaim_poll();
 #endif
-    /* Dispatch one event from the queue */
     return tiku_process_run();
 }
 
@@ -135,7 +124,7 @@ uint8_t tiku_sched_run_once(void)
  *
  * Drain every pending event, then idle until an interrupt wakes the CPU.  The
  * idle hook runs inside an atomic section so no interrupt is lost between the
- * "is there work?" check and the low-power entry, which the HAL enters atomically.
+ * "is there work?" check and the low-power entry, which the HAL makes atomic.
  */
 void tiku_sched_loop(void)
 {
@@ -150,16 +139,17 @@ void tiku_sched_loop(void)
      * which preserves GIE state, so once enabled here it stays on. */
     tiku_cpu_irq_enable();
 
-    /* Arm the check-in hang watchdog: from here the tick ISR watches for a
-     * process that wedges this loop.  (Only here -- a test harness that never
-     * enters this loop leaves the detector dormant.) */
+    /* Arm the check-in hang watchdog: from here a tick ISR that calls
+     * tiku_hang_tick() watches for a process that wedges this loop.  (Only
+     * here -- a test harness that never enters this loop leaves the detector
+     * dormant.) */
     tiku_hang_arm();
 
     while (sched_state == TIKU_SCHED_RUNNING) {
 
         /* Drain all pending work.  The heartbeat advances once per dispatched
          * event; a process that wedges inside run_once() never lets it turn,
-         * which is exactly what the tick-ISR hang detector watches for. */
+         * which is what the tick-ISR hang detector watches for. */
         while (tiku_sched_run_once()) {
             tiku_hang_checkin();
         }
@@ -171,14 +161,14 @@ void tiku_sched_loop(void)
          * check and the idle hook has its event processed on the next
          * iteration rather than missed during sleep.
          *
-         * An ARMED (not yet due) timer does not block idle when the
+         * An armed (not yet due) timer does not block idle when the
          * registered idle mode is tick-woken: the tick ISR wakes the
          * CPU, posts the timer poll, and the next loop pass
          * dispatches it (the MSP430 tick ISR clears the LPM bits on
-         * exit; the Cortex-M modes are plain WFI).  Only when the
-         * idle mode's wake set excludes the tick (idle_tick_wakes
-         * == 0, e.g. MSP430 LPM4) do armed timers keep the CPU
-         * awake — sleeping would miss the deadline forever.
+         * exit; elsewhere the tick interrupt ends the sleep).  Only
+         * when the idle mode's wake set excludes the tick
+         * (idle_tick_wakes == 0, e.g. MSP430 LPM4) do armed timers
+         * keep the CPU awake — sleeping would miss the deadline forever.
          */
         tiku_atomic_enter();
 
@@ -192,9 +182,9 @@ void tiku_sched_loop(void)
             if (tiku_thread_worker_ready()) {
                 /* Not idle — hand the CPU to the ready workers.  The
                  * switch fires at the atomic exit below; the kernel
-                 * resumes right there when any event post wakes it
-                 * (the tick's timer poll at the latest, which also
-                 * time-slices the workers).  idle_count is NOT
+                 * resumes right there when an event post or the tick
+                 * wakes it (the tick at the latest, which also
+                 * time-slices the workers).  idle_count is not
                  * bumped: running workers is work, not idle. */
                 tiku_thread_kernel_block();
             } else
@@ -208,7 +198,7 @@ void tiku_sched_loop(void)
                  * the earliest deadline instead of waking every tick
                  * to do nothing.  IRQs are masked, so the deadline
                  * cannot move.  The weak default never stretches, and
-                 * with NO timers armed the per-tick cadence is kept
+                 * with no timers armed the per-tick cadence is kept
                  * (it is what paces uptime and the counted-idle tests). */
                 if (idle_tick_wakes &&
 #if TIKU_MEM_RECLAIM_ENABLE
@@ -271,8 +261,6 @@ void tiku_sched_stop(void)
  */
 uint8_t tiku_sched_has_pending(void)
 {
-    /* Work is pending if the process event queue is non-empty
-     * or if any software timer is DUE (not merely armed). */
     if (!tiku_process_queue_empty()) {
         return 1;
     }
@@ -316,10 +304,9 @@ uint16_t tiku_sched_idle_count(void)
  * @brief The tick: wake the timer process if a timer exists, and give
  *        the kernel thread its turn.
  *
- * With workers, the tick IS preemption: a spinning worker is only ever
- * displaced because the kernel thread is woken here.  That wake used to
- * ride on the timer poll, which the tick made whether or not a timer
- * existed; now the poll is only for a timer, so the wake is its own.
+ * With workers, the tick is preemption: a spinning worker is displaced
+ * only because the kernel thread is woken here, whether or not a timer
+ * exists.
  */
 void tiku_sched_notify(void)
 {

@@ -43,9 +43,11 @@ static inline int timer_is_due(struct tiku_timer *t, tiku_clock_time_t now) {
   return (tiku_clock_time_t)(now - t->start) >= t->interval;
 }
 
-/*
- * An expiration whose owner is reconstruction-gated stays armed until the
- * gate lifts; it is not pending work, so the idle loop may sleep on it.
+/**
+ * @brief Is @p t's expiration held back by a reconstruction-gated owner?
+ *
+ * A held expiration stays armed until the gate lifts; it is not pending work,
+ * so the idle loop may sleep on it.
  */
 static int timer_held(const struct tiku_timer *t) {
 #if TIKU_MEM_RECLAIM_ENABLE
@@ -81,12 +83,10 @@ static void timer_remove(struct tiku_timer *t) {
  * typically short on embedded systems.
  */
 static void timer_insert(struct tiku_timer *t) {
-  /* Remove if already in list */
   if (t->active) {
     timer_remove(t);
   }
 
-  /* Prepend */
   t->next = timer_list;
   timer_list = t;
   t->active = 1;
@@ -120,9 +120,8 @@ TIKU_PROCESS_THREAD(tiku_timer_process, ev, data) {
      * If a critical-execution window is held, defer the scan.
      * The poll re-issued from tiku_crit_end() will pick up any
      * expirations that came due while the window was held.
-     * (The clock ISR also suppresses poll requests during a
-     * window, but check here too since other code can call
-     * tiku_timer_request_poll directly.)
+     * (MSP430's tick ISR also skips the poll during a window;
+     * on the other ports this check is the only one.)
      */
     if (tiku_crit_active()) {
       continue;
@@ -283,10 +282,10 @@ tiku_clock_time_t tiku_timer_expiration_time(struct tiku_timer *t) {
 
 /*
  * Only while a timer exists.  The tick asks on every interrupt, and a
- * poll with nothing to expire is a queue entry for nothing: 128 a second
- * on an idle board, one of them always coalesced in the queue -- which
- * is a queue that is never empty, and a wake the idle loop pays each
- * tick.  A timer inserted after this read polls from timer_insert().
+ * poll with nothing to expire is a queue entry for nothing, one per tick
+ * and always coalesced in the queue -- a queue that is never empty, and
+ * a wake the idle loop pays each tick.  A timer inserted after this read
+ * polls from timer_insert().
  */
 void tiku_timer_request_poll(void) {
   if (timer_list != NULL) {

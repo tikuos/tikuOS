@@ -31,10 +31,9 @@ struct tiku_hang_rec {
 };
 
 /*
- * Cross-reset record.  .retained survives a warm reset (the reset a
- * hang triggers) and, per tiku_mem.h, sits OUTSIDE the NVM mirror + MPU
- * windows -- so the detector can write it from the tick ISR as a plain,
- * unlocked SRAM store, no NVM program, no MPU unlock.
+ * Cross-reset record in the warm grade (TIKU_RETAINED), which survives the
+ * warm reset a hang triggers.  It is SRAM on every port but MSP430, where it
+ * is MPU-protected FRAM (see tiku_hang_record()).
  */
 static TIKU_RETAINED struct tiku_hang_rec tiku_hang_warm;
 
@@ -67,7 +66,7 @@ int8_t tiku_hang_detect_step(void)
 {
     const struct tiku_process *cur = tiku_current_process;
 
-    /* Progress (heartbeat moved) OR nobody on the CPU (idle) -> not a hang.
+    /* Progress (heartbeat moved) or nobody on the CPU (idle) -> not a hang.
      * The idle case is why a sleeping system is never flagged: between
      * dispatches tiku_current_process is NULL. */
     if (cur == NULL || tiku_hang_hb != tiku_hang_seen) {
@@ -88,10 +87,8 @@ void tiku_hang_record(const struct tiku_process *p)
 {
     const char *n = (p != NULL && p->name != NULL) ? p->name : "?";
     uint8_t i;
-    /* .retained is warm-surviving SRAM on Cortex-M but MPU-write-
-     * protected FRAM on MSP430, so open the NVM window before storing the
-     * culprit -- otherwise the MPU silently drops the write and the recovery
-     * boot finds no record. */
+    /* The warm grade is MPU-protected FRAM on MSP430: outside the NVM
+     * window the MPU drops the write and the recovery boot finds no record. */
     uint16_t mpu_state = tiku_mpu_unlock_nvm();
 
     tiku_hang_warm.pid = (p != NULL) ? p->pid : (int8_t)-1;
@@ -99,7 +96,7 @@ void tiku_hang_record(const struct tiku_process *p)
         tiku_hang_warm.name[i] = n[i];
     }
     tiku_hang_warm.name[i] = '\0';
-    tiku_hang_warm.magic = TIKU_HANG_MAGIC;   /* validate LAST (data first) */
+    tiku_hang_warm.magic = TIKU_HANG_MAGIC;   /* magic last, after the data */
 
     tiku_mpu_lock_nvm(mpu_state);
 }
@@ -108,10 +105,7 @@ void tiku_hang_tick(void)
 {
     int8_t pid;
 
-    /* Dormant until the scheduler loop arms it (tiku_hang_arm).  A test
-     * harness that drives the kernel WITHOUT the sched loop never arms it, so
-     * the live detector cannot fire mid-test -- and the pure predicate
-     * tiku_hang_detect_step() stays independently testable. */
+    /* Dormant until the scheduler loop arms it (tiku_hang_arm()). */
     if (!tiku_hang_armed) {
         return;
     }
@@ -171,7 +165,7 @@ uint8_t tiku_hang_is_culprit(const struct tiku_process *p)
         tiku_hang_boot.name[0] == '\0') {
         return 0u;
     }
-    /* Match by NAME -- pids are reassigned across a reboot, names are the
+    /* Match by name: pids are reassigned across a reboot, names are the
      * stable identity.  Bounded to the (possibly truncated) recorded name. */
     for (i = 0u; i < (TIKU_HANG_NAMELEN - 1u); i++) {
         if (p->name[i] != tiku_hang_boot.name[i]) {

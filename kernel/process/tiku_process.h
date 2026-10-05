@@ -52,15 +52,15 @@
 /* SYSTEM EVENTS                                                             */
 /*---------------------------------------------------------------------------*/
 
-#define TIKU_EVENT_INIT         0x01
-#define TIKU_EVENT_EXIT         0x02
-#define TIKU_EVENT_CONTINUE     0x03
-#define TIKU_EVENT_POLL         0x04
-#define TIKU_EVENT_EXITED       0x05
-#define TIKU_EVENT_FORCE_EXIT   0x06
-#define TIKU_EVENT_USER         0x10
-#define TIKU_EVENT_TIMER        0x88
-#define TIKU_EVENT_GPIO         0x89  /**< GPIO pin edge — data carries port/pin */
+#define TIKU_EVENT_INIT         0x01  /**< Started; data is the start arg */
+#define TIKU_EVENT_EXIT         0x02  /**< Exit request the process acts on */
+#define TIKU_EVENT_CONTINUE     0x03  /**< Resumed by tiku_process_resume() */
+#define TIKU_EVENT_POLL         0x04  /**< Queued by tiku_process_poll() */
+#define TIKU_EVENT_EXITED       0x05  /**< Exited; data is the process */
+#define TIKU_EVENT_FORCE_EXIT   0x06  /**< Exit without running the body */
+#define TIKU_EVENT_USER         0x10  /**< First application event id */
+#define TIKU_EVENT_TIMER        0x88  /**< Timer expired; data is the timer */
+#define TIKU_EVENT_GPIO         0x89  /**< GPIO edge; data packs port/pin */
 #define TIKU_EVENT_VFS          0x8A  /**< Watched VFS node changed — data
                                            carries the const tiku_vfs_node_t*
                                            (see tiku_vfs_watch()) */
@@ -72,17 +72,19 @@
 /* TYPE DEFINITIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Event identifier (TIKU_EVENT_*). */
 typedef uint8_t tiku_event_t;
+/** @brief Payload word posted with an event; see tiku_event_payload_kind(). */
 typedef void *tiku_event_data_t;
 
 /*---------------------------------------------------------------------------*/
-/* TYPED EVENT PAYLOADS                                                       */
+/* TYPED EVENT PAYLOADS                                                      */
 /*---------------------------------------------------------------------------*/
 /*
  * The event data is a bare void* on the wire, but every event id carries a
- * FIXED payload type -- EXITED a process, VFS a node, TIMER a timer, GPIO a
+ * fixed payload type -- EXITED a process, VFS a node, TIMER a timer, GPIO a
  * packed pin, INIT/USER an opaque app pointer.  The id sits in the queue slot
- * alongside the word, so it IS the type tag: tiku_event_payload_kind() states
+ * alongside the word, so it is the type tag: tiku_event_payload_kind() states
  * the contract in one place and the checked accessors below return a payload
  * only when the id matches, yielding NULL/0 instead of a misread object.
  *
@@ -107,9 +109,8 @@ typedef enum {
 tiku_event_payload_kind_t tiku_event_payload_kind(tiku_event_t ev);
 
 /*
- * Checked payload accessors.  Each returns the payload ONLY if @p ev actually
- * carries that kind, else a safe default (NULL / 0).  These replace the blind
- * void*->T* conversions at every consumer.
+ * Checked payload accessors.  Each returns the payload only if @p ev carries
+ * that kind, else a safe default (NULL / 0).
  */
 
 /**
@@ -180,13 +181,23 @@ uint32_t                    tiku_event_u32  (tiku_event_t ev, tiku_event_data_t 
  */
 void                       *tiku_event_ptr  (tiku_event_t ev, tiku_event_data_t data);
 
-/*
- * Typed post helpers: pack the payload in ONE place (the inverse of the
- * accessors), so the id<->payload contract is enforced on the way in too.
- * The generic tiku_process_post() still serves NONE / PTR / user events.
+/**
+ * @brief Post @p ev carrying a process payload (EXITED).
+ *
+ * The typed post helpers pack the payload in one place, the inverse of the
+ * accessors; the generic tiku_process_post() serves NONE, PTR and user events.
+ *
+ * @return 1 if posted, 0 if the queue is full or the target is
+ *         reconstruction-gated
  */
 uint8_t tiku_process_post_proc(struct tiku_process *dest, tiku_event_t ev,
                                struct tiku_process *arg);
+
+/**
+ * @brief Post @p ev carrying a VFS node payload (VFS).
+ * @return 1 if posted, 0 if the queue is full or the target is
+ *         reconstruction-gated
+ */
 uint8_t tiku_process_post_node(struct tiku_process *dest, tiku_event_t ev,
                                const struct tiku_vfs_node *node);
 
@@ -194,11 +205,11 @@ uint8_t tiku_process_post_node(struct tiku_process *dest, tiku_event_t ev,
  * @brief Process state for observability
  */
 typedef enum {
-    TIKU_PROCESS_STATE_RUNNING  = 0,
-    TIKU_PROCESS_STATE_READY    = 1,
-    TIKU_PROCESS_STATE_WAITING  = 2,
-    TIKU_PROCESS_STATE_SLEEPING = 3,
-    TIKU_PROCESS_STATE_STOPPED  = 4
+    TIKU_PROCESS_STATE_RUNNING  = 0,  /**< its thread is executing now */
+    TIKU_PROCESS_STATE_READY    = 1,  /**< started, resumed or yielded */
+    TIKU_PROCESS_STATE_WAITING  = 2,  /**< blocked, owns no armed timer */
+    TIKU_PROCESS_STATE_SLEEPING = 3,  /**< blocked, owns an armed timer */
+    TIKU_PROCESS_STATE_STOPPED  = 4   /**< stopped or exited */
 } tiku_process_state_t;
 
 /**
@@ -208,16 +219,17 @@ typedef enum {
  * instance straight back under the same pid.  NEVER is the default.
  */
 typedef enum {
-    TIKU_RESTART_NEVER      = 0,  /**< one-shot; never auto-restarted (default) */
-    TIKU_RESTART_ON_FAILURE = 1,  /**< restarted only if it FAILED, not on clean end */
+    TIKU_RESTART_NEVER      = 0,  /**< never auto-restarted (default) */
+    TIKU_RESTART_ON_FAILURE = 1,  /**< restarted only after a FAILED exit */
     TIKU_RESTART_ALWAYS     = 2   /**< restarted on any exit (a service) */
 } tiku_restart_policy_t;
 
 /**
  * @brief How a process ended -- the signal ON_FAILURE supervision keys on.
  *
- * A clean protothread end (PROCESS_END / return) is DONE; a process marks
- * itself FAILED via tiku_process_fail() before it ends.  NONE while running.
+ * A clean protothread end (TIKU_PROCESS_END() or TIKU_PROCESS_EXIT()) is DONE;
+ * a process marks itself FAILED via tiku_process_fail() before it ends.  NONE
+ * while running.
  */
 typedef enum {
     TIKU_EXIT_NONE   = 0,  /**< running / never exited */
@@ -247,28 +259,25 @@ typedef struct tiku_process {
     struct pt pt;                   /**< Protothread control state */
     uint8_t is_running;             /**< Non-zero if process is active */
     uint8_t generation;             /**< Fresh-instance tag for queued events */
-    void *local;                    /**< Per-process local storage pointer.
-                                         NULL if no local state.
-                                         Points to a user-defined static
-                                         struct. Cost: one pointer width. */
+    void *local;                    /**< Per-process local state (a static
+                                         struct of the caller's), or NULL */
     /* --- Observability fields --- */
     tiku_process_state_t state;     /**< Current process state */
     int8_t pid;                     /**< Registry index (-1 = unregistered) */
-    uint16_t sram_used;             /**< Self-DECLARED SRAM bytes (advisory) */
-    uint16_t fram_used;             /**< Self-DECLARED FRAM bytes (advisory) */
+    uint16_t sram_used;             /**< Self-declared SRAM bytes (advisory) */
+    uint16_t fram_used;             /**< Self-declared FRAM bytes (advisory) */
     tiku_clock_time_t start_time;   /**< Tick count when process started */
     uint16_t wake_count;            /**< Number of times scheduled */
-    const void *mem_arena;          /**< Attached tiku_arena_t (or NULL): the
-                                         MEASURED source, read through
-                                         tiku_process_sram/fram_used(), which
-                                         report measured + declared. */
+    const void *mem_arena;          /**< Attached tiku_arena_t or NULL;
+                                         tiku_process_sram/fram_used() add
+                                         its use to the declared figure */
     /* --- Supervision (per-process restart policy) --- */
-    uint8_t  restart;               /**< tiku_restart_policy_t; 0 = NEVER      */
-    uint8_t  exit_reason;           /**< tiku_exit_reason_t; set at exit        */
-    uint8_t  restart_burst;         /**< restarts inside the current backoff window */
-    uint16_t restart_total;         /**< lifetime restarts (observability)      */
-    tiku_clock_time_t restart_at;   /**< tick of the last restart (window base) */
-    tiku_event_data_t init_data;    /**< INIT payload, replayed on restart      */
+    uint8_t  restart;               /**< tiku_restart_policy_t; 0 = NEVER */
+    uint8_t  exit_reason;           /**< tiku_exit_reason_t; set at exit */
+    uint8_t  restart_burst;         /**< restarts in the current window */
+    uint16_t restart_total;         /**< lifetime restarts */
+    tiku_clock_time_t restart_at;   /**< tick of the last restart */
+    tiku_event_data_t init_data;    /**< INIT payload, replayed on restart */
 } tiku_process_t;
 
 /*---------------------------------------------------------------------------*/
@@ -293,6 +302,7 @@ typedef struct tiku_channel {
 /* MESSAGE STRUCTURE                                                         */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Message header: a type tag and the payload length. */
 struct tiku_msg {
     uint8_t type;      /**< Message type — lets receiver know how to cast */
     uint8_t len;       /**< Payload size — for validation */
@@ -363,12 +373,13 @@ struct tiku_msg {
  * @def TIKU_LOCAL(type)
  * @brief Access the current process's local storage with a typed cast
  *
- * Valid only inside a process thread body, and must be placed above
- * TIKU_PROCESS_BEGIN() so it re-runs on every re-entry.  The cast is
- * unchecked; TIKU_PROCESS_TYPED() generates a checked accessor instead.
+ * The cast is unchecked; TIKU_PROCESS_TYPED() generates a typed accessor
+ * instead.
  *
  * @param type The struct type of the local storage
  * @return Pointer to the typed local storage
+ * @note Valid only inside a process thread body, placed above
+ *       TIKU_PROCESS_BEGIN() so it re-runs on every entry.
  */
 #define TIKU_LOCAL(type) ((type *)TIKU_THIS()->local)
 
@@ -393,19 +404,36 @@ struct tiku_msg {
 /* PROCESS CONTEXT MACROS                                                    */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Open a process thread body (PT_BEGIN on process_pt). */
 #define TIKU_PROCESS_BEGIN()        PT_BEGIN(process_pt)
+/** @brief Close the body; reaching it ends the process (PT_END). */
 #define TIKU_PROCESS_END()          PT_END(process_pt)
+/** @brief Give up the CPU; the body resumes on the next event. */
 #define TIKU_PROCESS_YIELD()        PT_YIELD(process_pt)
+/** @brief Yield; resume past this point on an event once @p cond holds. */
 #define TIKU_PROCESS_YIELD_UNTIL(cond) PT_YIELD_UNTIL(process_pt, cond)
+/** @brief Wait for the next event; the same as TIKU_PROCESS_YIELD(). */
 #define TIKU_PROCESS_WAIT_EVENT()   PT_YIELD(process_pt)
+/** @brief Wait for events until @p cond holds; as YIELD_UNTIL. */
 #define TIKU_PROCESS_WAIT_EVENT_UNTIL(cond) PT_YIELD_UNTIL(process_pt, cond)
+/** @brief End the process from inside its body (PT_EXIT). */
 #define TIKU_PROCESS_EXIT()         PT_EXIT(process_pt)
+/** @brief The process whose thread is running now. */
 #define TIKU_PROCESS_CURRENT()      (tiku_current_process)
+/** @brief The process whose thread is running now. */
 #define TIKU_THIS()                 (tiku_current_process)
 
+/**
+ * @brief Run the code up to TIKU_PROCESS_CONTEXT_END() as process @p p.
+ *
+ * Sets tiku_current_process to @p p and restores the previous value at the
+ * matching TIKU_PROCESS_CONTEXT_END(), so code run on @p p's behalf, such as a
+ * timer callback, acts as @p p.
+ */
 #define TIKU_PROCESS_CONTEXT_BEGIN(p) \
     do { struct tiku_process *_saved = tiku_current_process; \
          tiku_current_process = (p)
+/** @brief Close a TIKU_PROCESS_CONTEXT_BEGIN() block. */
 #define TIKU_PROCESS_CONTEXT_END(p) \
          tiku_current_process = _saved; } while (0)
 
@@ -441,8 +469,10 @@ void tiku_autostart_start(struct tiku_process * const processes[]);
 /**
  * @brief Initialize the process scheduler
  *
- * Resets the process list and event queue. Must be called once
- * at system startup before any processes are started.
+ * Resets the process list and event queue.
+ *
+ * @note Call at startup, before interrupts are enabled and before any
+ *       process starts.
  */
 void tiku_process_init(void);
 
@@ -461,7 +491,8 @@ void tiku_process_start(struct tiku_process *p,
 /**
  * @brief Exit a process
  *
- * Marks the process as stopped and removes it from the active list.
+ * Stops the process, drops its queued events and timers, broadcasts EXITED,
+ * and restarts it at once if its restart policy says so.
  *
  * @param p Process to exit
  */
@@ -484,9 +515,11 @@ void tiku_process_set_restart(struct tiku_process *p,
 /**
  * @brief Mark @p p as FAILED so ON_FAILURE / ALWAYS supervision restarts it.
  *
- * Call from inside the process (typically `tiku_process_fail(TIKU_THIS())`)
- * on an unrecoverable error, then end the protothread (PROCESS_END / return).
- * Without this a normal end counts as a clean exit (ON_FAILURE won't restart).
+ * Without this a normal end counts as a clean exit, which ON_FAILURE does not
+ * restart.
+ *
+ * @note Call from inside the process on an unrecoverable error (typically
+ *       tiku_process_fail(TIKU_THIS())), then end with TIKU_PROCESS_END().
  */
 void tiku_process_fail(struct tiku_process *p);
 
@@ -532,7 +565,8 @@ uint8_t tiku_process_run(void);
  *
  * @param skip Process not to dispatch (typically TIKU_THIS()), or NULL for
  *             plain tiku_process_run()
- * @return 1 if an event was dispatched or discarded, 0 if no eligible work exists
+ * @return 1 if an event was dispatched or discarded, 0 if no eligible work
+ *         exists
  */
 uint8_t tiku_process_run_except(const struct tiku_process *skip);
 
@@ -551,8 +585,8 @@ uint8_t tiku_process_queue_dispatchable_except(const struct tiku_process *skip);
 /**
  * @brief Request a process to be polled
  *
- * Marks a process for polling. The process will receive a
- * TIKU_EVENT_POLL event on the next scheduler run.
+ * Queues a TIKU_EVENT_POLL for @p p, merged with one already pending; the
+ * request is dropped and counted when the queue is full.
  *
  * @param p Process to poll
  */
@@ -565,17 +599,17 @@ void tiku_process_poll(struct tiku_process *p);
 /**
  * @brief Register a process in the registry
  *
- * Assigns a pid, starts the process, and records its start_time.
+ * Assigns a pid and starts the process unless it is already running.
  * The process is added to both the registry and the active linked list.
  *
- * @param name  Human-readable name (must match process struct name)
+ * @param name  Name to give the process (NULL keeps the struct's name)
  * @param p     Process to register (already declared with TIKU_PROCESS)
  * @return pid (0..TIKU_PROCESS_MAX-1) on success, -1 if registry full
  */
 int8_t tiku_process_register(const char *name, struct tiku_process *p);
 
 /**
- * @brief Attach a memory arena to a process for MEASURED accounting.
+ * @brief Attach a memory arena to a process for measured accounting.
  *
  * ps, /proc/<pid>/sram_used|fram_used and /sys/mem/used then report the
  * arena's real bump-pointer state on top of the advisory self-declared
@@ -622,7 +656,7 @@ int8_t tiku_process_stop(int8_t pid);
 int8_t tiku_process_resume(int8_t pid);
 
 /**
- * @brief Return the number of registered (active) processes
+ * @brief Return the number of registered processes, stopped ones included
  *
  * @return Number of non-NULL registry entries
  */
@@ -658,7 +692,7 @@ typedef struct {
 } tiku_process_catalog_entry_t;
 
 /**
- * @brief Add a process to the catalog (does NOT start it).
+ * @brief Add a process to the catalog without starting it.
  *
  * @param name  Human-readable name (e.g. "net", "mqtt")
  * @param proc  Pointer to the process struct
@@ -689,7 +723,7 @@ uint8_t tiku_process_catalog_count(void);
 const tiku_process_catalog_entry_t *tiku_process_catalog_get(uint8_t idx);
 
 /**
- * @brief Find a registered (active) process by name.
+ * @brief Find a registered process by name.
  *
  * Searches the process registry, not the catalog.
  *

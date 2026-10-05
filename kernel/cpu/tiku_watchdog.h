@@ -30,8 +30,9 @@
 /**
  * @brief Configure the watchdog timer with custom parameters
  *
- * Sets mode, clock source, interval, and startup behaviour. Only
- * available on platforms whose HAL exposes these parameters.
+ * Stores mode, clock source, interval and startup behaviour, then programs
+ * the watchdog with them.  On a port without interval support, interval mode
+ * leaves the watchdog off; check tiku_watchdog_mode_supported() first.
  *
  * @param mode          Watchdog or interval timer mode
  * @param clk           Clock source selection
@@ -43,10 +44,17 @@ void tiku_watchdog_config(tiku_wdt_mode_t mode, tiku_wdt_clk_t clk,
                          tiku_wdt_interval_t interval, int start_held,
                          int kick_on_start);
 
-/** @brief Initialize the watchdog timer with default settings */
+/**
+ * @brief Program the watchdog with the stored configuration, which holds the
+ *        defaults until tiku_watchdog_config() changes it.
+ */
 void tiku_watchdog_init(void);
 
-/** @brief Kick (reset) the watchdog timer to prevent timeout */
+/**
+ * @brief Kick (reset) the watchdog timer to prevent timeout.
+ *
+ * A kick is also a hang-detector check-in (tiku_hang_checkin()).
+ */
 void tiku_watchdog_kick(void);
 
 /** @brief Pause the watchdog timer */
@@ -93,8 +101,8 @@ void tiku_watchdog_on(void);
 /**
  * @brief Return non-zero if the watchdog is currently armed.
  *
- * "Armed" means tiku_watchdog_off() has not been called since the
- * last init/config/on. Pause/resume do not affect this flag.
+ * Armed means the last init/config/on armed the hardware and
+ * tiku_watchdog_off() has not run since.  Pause/resume do not affect it.
  */
 int tiku_watchdog_is_on(void);
 

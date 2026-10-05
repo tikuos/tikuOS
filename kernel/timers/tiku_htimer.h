@@ -27,8 +27,8 @@
  * @typedef tiku_htimer_clock_t
  * @brief Hardware timer tick type
  *
- * Width depends on platform (16 or 32 bits).
- * Override by defining TIKU_HTIMER_CLOCK_T before including this header.
+ * unsigned short on every port; TIKU_HTIMER_CLOCK_DIFF and the guard check
+ * in tiku_htimer_set() assume 16 bits.
  */
 #ifndef TIKU_HTIMER_CLOCK_T_DEFINED
 typedef unsigned short tiku_htimer_clock_t;
@@ -96,7 +96,8 @@ enum tiku_htimer_status {
  * @brief Initialize the hardware timer subsystem
  *
  * Configures platform timer hardware and enables interrupts.
- * Call once during system init.
+ *
+ * @note Call once during system init.
  */
 void tiku_htimer_init(void);
 
@@ -118,8 +119,10 @@ int tiku_htimer_set(struct tiku_htimer *ht, tiku_htimer_clock_t time,
  * @brief Schedule a single-shot hardware timer without the guard-time check.
  *
  * For tight back-to-back rescheduling from inside an ISR callback where the
- * caller has done its own margin analysis.  Misuse from non-ISR context
- * produces missed compares and silent drops.
+ * caller has done its own margin analysis.
+ *
+ * @note ISR context only (inside an htimer callback); elsewhere a missed
+ *       compare drops the timer silently.
  */
 int tiku_htimer_set_no_guard(struct tiku_htimer *ht, tiku_htimer_clock_t time,
                              tiku_htimer_callback_t func, void *ptr);
@@ -139,16 +142,16 @@ int tiku_htimer_is_scheduled(void);
 /**
  * @brief Run the pending callback (called from platform ISR only)
  *
- * The platform timer interrupt handler must call this when
- * the compare-match fires. If the callback reschedules itself,
- * this function programs the next hardware interrupt automatically.
+ * The platform timer interrupt handler calls this when the
+ * compare-match fires.  The callback may reschedule with
+ * tiku_htimer_set(), which programs the next interrupt.
  *
  * @warning Only call from the hardware timer ISR.
  */
 void tiku_htimer_run_next(void);
 
 /*---------------------------------------------------------------------------*/
-/* PLATFORM INTERFACE (implemented per-architecture)                          */
+/* PLATFORM INTERFACE (implemented per-architecture)                         */
 /*---------------------------------------------------------------------------*/
 
 /** Initialize platform timer hardware */

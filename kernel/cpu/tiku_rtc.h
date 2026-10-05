@@ -7,9 +7,9 @@
  *
  * tiku_rtc.h - wall-clock RTC API.
  *
- * A soft RTC over tiku_clock_seconds() plus a persistent epoch baseline, so the
- * last set time survives warm reset everywhere and power cycle wherever
- * .persistent is FRAM- or flash-backed.  One-second resolution; backs /sys/time.
+ * A soft RTC over tiku_clock_seconds() plus a durable epoch baseline, so the
+ * last set time survives a reset and a power cycle (the host build excepted).
+ * One-second resolution; backs /sys/time.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -26,9 +26,11 @@ extern "C" {
 /**
  * @brief Initialise the RTC layer. Idempotent.
  *
- * Validates the magic word in `.persistent` storage and zeroes the
- * baseline if it has not been seen before (first boot, or virgin
- * NVM). Must be called once during boot, before any rtc_get / rtc_set.
+ * Validates the persist-cell gate and zeroes the baseline when the gate is
+ * not valid (first boot, or virgin NVM).
+ *
+ * @note Call once during boot, before tiku_rtc_get_seconds() or
+ *       tiku_rtc_set_seconds().
  */
 void tiku_rtc_init(void);
 
@@ -44,12 +46,16 @@ uint32_t tiku_rtc_get_seconds(void);
 /**
  * @brief Set the wall clock to `epoch_seconds`.
  *
- * Stores the epoch baseline in persistent NVM and pairs it with the current
- * boot's uptime. A short MPU-unlock window is opened around the write.
+ * Stores the epoch baseline in durable memory and pairs it with the current
+ * boot's uptime.  The persist-cell commit opens the MPU window around the
+ * write.
  */
 void tiku_rtc_set_seconds(uint32_t epoch_seconds);
 
-/** @brief Set the clock; return zero on persistence completion, negative on failure. */
+/**
+ * @brief Set the wall clock, reporting whether the baseline was saved.
+ * @return 0 when the persist-cell commit completed, -1 on failure
+ */
 int tiku_rtc_set_seconds_status(uint32_t epoch_seconds);
 
 /**
@@ -60,7 +66,7 @@ int tiku_rtc_is_set(void);
 
 #if defined(TIKU_RTC_TEST_HOOKS) && TIKU_RTC_TEST_HOOKS
 /**
- * @brief TEST-ONLY hook: capture the wall clock and its persist gate.
+ * @brief Test-only hook: capture the wall clock and its persist gate.
  *
  * Lets the suite save state it is about to perturb.  @p epoch receives the
  * reconstructed clock, @p gate the raw magic word; either may be NULL.
@@ -72,11 +78,11 @@ int tiku_rtc_is_set(void);
 void tiku_rtc_test_snapshot(uint32_t *epoch, uint32_t *gate);
 
 /**
- * @brief TEST-ONLY hook: put back a snapshotted clock/gate pair.
+ * @brief Test-only hook: put back a snapshotted clock/gate pair.
  *
  * Writes both into the cell in one unlock window, then re-pairs the baseline
- * with the current uptime.  Restoring a gate other than the magic deliberately
- * re-creates the never-set state so a later init re-primes.
+ * with the current uptime.  Restoring a gate other than the magic re-creates
+ * the never-set state, so a later init re-primes.
  *
  * @param epoch  Epoch baseline to store
  * @param gate   Gate word to store (the cell magic marks it valid)

@@ -7,9 +7,9 @@
  *
  * tiku_rtc.c - wall-clock RTC implementation.
  *
- * No RTC peripheral: wall clock is uptime plus a persisted epoch baseline held in
- * a persist cell, whose magic gate separates a never-set clock from a real one.
- * Uptime restarts at reset, so time elapsed while unpowered cannot be recovered.
+ * No RTC peripheral: the wall clock is uptime plus an epoch baseline held in a
+ * persist cell, whose magic gate separates a never-set clock from a real one.
+ * A reset loses the time since the last set: the clock resumes from that value.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -34,9 +34,9 @@
 #define TIKU_RTC_MAGIC  0x57414C44UL /* 'WALD': epoch-baseline layout */
 
 /*
- * The wall-clock epoch, paired with this boot's uptime baseline.  Lives in
- * .persistent so an explicitly set epoch survives reset and power loss; reads
- * add only the uptime since the pairing, and only while the gate validates.
+ * The wall-clock epoch, paired with this boot's uptime baseline.  Durable, so
+ * an explicitly set epoch survives reset and power loss; reads add only the
+ * uptime since the pairing, and only while the gate validates.
  */
 static TIKU_DURABLE uint32_t rtc_epoch_base;
 
@@ -96,6 +96,7 @@ tiku_rtc_get_seconds(void)
  * window, so the value is valid even on a virgin store.
  *
  * @param epoch_seconds  Desired wall-clock time, seconds since epoch.
+ * @return 0 when the commit completed, -1 on failure
  */
 int
 tiku_rtc_set_seconds_status(uint32_t epoch_seconds)
@@ -109,7 +110,7 @@ tiku_rtc_set_seconds_status(uint32_t epoch_seconds)
     return status == TIKU_MEM_OK ? 0 : -1;
 }
 
-/** @brief Unchecked compatibility wrapper. */
+/** @brief tiku_rtc_set_seconds_status() without the status. */
 void tiku_rtc_set_seconds(uint32_t epoch_seconds)
 {
     (void)tiku_rtc_set_seconds_status(epoch_seconds);
@@ -118,8 +119,8 @@ void tiku_rtc_set_seconds(uint32_t epoch_seconds)
 /**
  * @brief Report whether the wall clock holds a real, set value.
  *
- * True only when the gate validates AND the baseline is non-zero -- the line
- * between initialised-to-defaults, which init leaves at 0, and explicitly set.
+ * True only when the gate validates and the baseline is non-zero; init primes
+ * a never-set baseline to 0.
  *
  * @return Non-zero if the clock has been set at least once since the
  *         chip was first programmed, 0 otherwise.

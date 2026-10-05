@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_thread.h - opt-in preemptive worker threads (Cortex-M only).
+ * tiku_thread.h - opt-in preemptive worker threads (not on MSP430, STM32N6).
  *
- * Thread 0 is the entire existing kernel, cooperative and unchanged; workers are
- * statically declared, preemptible compute threads that run only when it has
- * nothing to dispatch.  A worker may compute and post events, and nothing else.
+ * Thread 0 is the cooperative kernel; workers are statically declared,
+ * preemptible compute threads that run only when it has nothing to dispatch.
+ * A worker may compute and post events, and nothing else.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -61,7 +61,7 @@ typedef struct tiku_thread {
     void                *arg;
     volatile tiku_thread_state_t state;
     const char          *name;
-    unsigned long long   cycles;      /**< DWT cycles consumed (total)    */
+    unsigned long long   cycles;      /**< CPU cycles consumed (total)    */
     unsigned long long   budget;      /**< Cycle ceiling; 0 = unlimited   */
     uint16_t             switches;    /**< Times scheduled onto the CPU   */
     uint8_t              slot;        /**< Index in the scheduler's table */
@@ -96,15 +96,16 @@ typedef struct tiku_thread {
 /**
  * @brief Start a worker thread.
  *
- * The first call performs the one-time bring-up: the kernel context migrates
- * from MSP to PSP on the same stack, MSP re-points at a dedicated ISR stack, and
- * PendSV drops to the lowest priority.  Must be called from the kernel thread.
+ * The first call performs the one-time bring-up; on Cortex-M the kernel
+ * context migrates from MSP to PSP on the same stack, MSP re-points at a
+ * dedicated ISR stack, and PendSV drops to the lowest priority.
  *
  * @param t      Thread declared with TIKU_THREAD()
  * @param entry  Worker body; returning is equivalent to tiku_thread_exit()
  * @param arg    Passed to @p entry
  * @return 0 on success, -1 (bad args / stack too small / slots full /
  *         already running)
+ * @note Kernel thread only.
  */
 int tiku_thread_start(tiku_thread_t *t, void (*entry)(void *), void *arg);
 
@@ -116,8 +117,9 @@ void tiku_thread_exit(void);
 
 /**
  * @brief Forget a finished worker: its slot empties, so its control block and
- *        stack may be freed or reused.  A worker whose memory goes away must
- *        be forgotten first.  @return 0, or -1 while @p t has not finished
+ *        stack may be freed or reused.
+ * @return 0, or -1 while @p t has not finished
+ * @note Forget a worker before its memory goes away.
  */
 int tiku_thread_forget(tiku_thread_t *t);
 
@@ -150,10 +152,13 @@ typedef struct {
 /**
  * @brief Block the caller on @p q until a wake, or for @p ticks (0: no limit).
  *
- * Call inside exactly one tiku_atomic_enter(), with the condition just found
- * false, and test it again on return: the kernel thread also returns on any
- * event post.  A worker sleeps off the CPU; the kernel hands the CPU to ready
- * workers, else idles in the CPU's wait.  @return 0 once the deadline passed
+ * The kernel thread also returns on any event post.  A worker sleeps off the
+ * CPU; the kernel hands the CPU to ready workers, else idles in the CPU's
+ * wait.
+ *
+ * @return 0 once the deadline passed, 1 otherwise
+ * @note Call inside exactly one tiku_atomic_enter(), with the condition just
+ *       found false, and test it again on return.
  */
 int tiku_thread_wait(tiku_waitq_t *q, unsigned long ticks);
 
@@ -167,7 +172,10 @@ void tiku_thread_wake_all(tiku_waitq_t *q);
 /* INTROSPECTION                                                             */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Total DWT cycles @p t has consumed on the CPU. */
+/**
+ * @brief Total cycles @p t has consumed on the CPU (DWT, or the port's cycle
+ *        counter); NULL reads the kernel thread's share.
+ */
 unsigned long long tiku_thread_cycles(const tiku_thread_t *t);
 
 /** @brief Times @p t was scheduled onto the CPU. */
@@ -189,10 +197,13 @@ int tiku_thread_next_deadline(unsigned long *at);
 /** @brief Count of stack-canary violations detected at switch time. */
 uint16_t tiku_thread_canary_faults(void);
 
-/** Non-zero in kernel/boot context, zero inside a worker (any context). */
+/** @brief Non-zero in kernel/boot context, zero in a worker (any context). */
 int tiku_thread_in_kernel(void);
 
-/** @brief Number of registered worker slots (live or done). */
+/**
+ * @brief Number of worker slots to iterate (TIKU_THREADS_MAX); an empty one
+ *        reads NULL from tiku_thread_get().
+ */
 uint8_t tiku_thread_count(void);
 
 /** @brief The i-th registered worker (0..count-1), or NULL. */
@@ -205,7 +216,7 @@ tiku_thread_state_t tiku_thread_state(const tiku_thread_t *t);
 int tiku_thread_is_done(const tiku_thread_t *t);
 
 /**
- * @brief Park the calling PROCESS until worker @p t finishes.
+ * @brief Park the calling process until worker @p t finishes.
  *
  * A protothread-level await: the process yields to the scheduler each pass and
  * resumes when @p t is DONE.  Use inside a TIKU_PROCESS_THREAD -- code running
@@ -222,7 +233,7 @@ int tiku_thread_is_done(const tiku_thread_t *t);
  *
  * Sets a cumulative ceiling at already-consumed plus @p cycles, parking the
  * worker when it is reached until a refill.  Enforcement is at switch
- * boundaries, so a worker overruns by at most one tenure.  A grant of 0 parks it.
+ * boundaries, so a worker overruns by at most one tenure.  Granting 0 parks it.
  */
 void tiku_thread_budget_grant(tiku_thread_t *t, unsigned long long cycles);
 
@@ -230,8 +241,8 @@ void tiku_thread_budget_grant(tiku_thread_t *t, unsigned long long cycles);
  * @brief Add @p cycles to @p t's ceiling (refill / periodic top-up).
  *
  * Extends the runway; if the worker was exhausted this re-enables it for
- * @p cycles more.  Deliberately a no-op on an unlimited (budget == 0)
- * worker — grant a budget first to begin enforcing.
+ * @p cycles more.  A no-op on an unlimited (budget == 0) worker: grant a
+ * budget first to begin enforcing.
  */
 void tiku_thread_budget_refill(tiku_thread_t *t, unsigned long long cycles);
 
@@ -251,9 +262,9 @@ int tiku_thread_budget_exhausted(const tiku_thread_t *t);
 /**
  * @brief Kernel thread yields the CPU to the ready workers.
  *
- * Called from the scheduler's idle branch instead of the idle hook: marks thread
- * 0 not-ready, rotates the worker cursor and pends the switch, which fires when
- * the atomic section exits.  The kernel resumes on tiku_thread_kernel_wake().
+ * Called from the scheduler's idle branch instead of the idle hook: marks
+ * thread 0 not-ready, rotates the worker cursor and pends the switch, which
+ * fires when the atomic section exits.  It resumes on kernel_wake().
  */
 void tiku_thread_kernel_block(void);
 

@@ -87,49 +87,43 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * Static storage for the /proc VFS tree.  Every array here is
- * rebuilt from scratch by tiku_proc_vfs_get() on each call so the
- * tree reflects the current registry state.  Because the contents
- * change at runtime, the tables cannot be const; they carry the
- * TIKU_RETAINED grade and are written only inside the MPU-unlock
- * window of tiku_proc_vfs_get().
+ * Static storage for the /proc VFS tree, rebuilt from scratch by
+ * tiku_proc_vfs_get() on each call so it reflects the registry at that
+ * moment.  The tables change at run time, so they cannot be const.
  *
- * WARM, not durable `.persistent`: these tables are REBUILT on every
- * tiku_proc_vfs_get() call, so power-cycle durability buys nothing.
- * On MSP430 WARM is FRAM anyway (big tables stay off the tiny SRAM,
- * and the FRAM writes still need the MPU unlock).  On RP2350/Ambiq
- * WARM sits outside the NVM mirror — ~3.6 KB of rebuilt scratch was
- * overflowing RP2350's 4 KB flash backup sector as durable state.
+ * They are TIKU_RETAINED, not TIKU_DURABLE: rebuilt on every call, they
+ * gain nothing from power-cycle durability.  On MSP430 the grade is
+ * MPU-protected FRAM, which keeps the tables off the small SRAM, so the
+ * rebuild writes them inside an MPU unlock window; on every other port it
+ * is SRAM.
  *
  * Layout (a fully populated example):
  *   proc_root ("proc", DIR)
- *     |-- "count" (FILE)
- *     |-- "0"     (DIR)  ->  pid_files[0][0..7]
- *     |-- "1"     (DIR)  ->  pid_files[1][0..7]
- *     '-- ...
+ *     |-- "count"   (FILE)
+ *     |-- "queue"   (DIR)   ->  proc_queue_children[]
+ *     |-- "catalog" (DIR)   ->  catalog_children[]
+ *     |-- "wifi"    (DIR)   ->  proc_wifi_children[]   (wireless driver)
+ *     |-- "bt"      (DIR)   ->  proc_bt_children[]     (BT driver)
+ *     |-- "threads" (FILE)                             (worker threads)
+ *     |-- "0"       (DIR)   ->  pid_files[0][0..8]
+ *     '-- ...               one per registered process
  */
 
 /*
  * Backing nodes for every per-pid directory's file children; build_pid_files()
- * fills one row.  RETAINED grade, so the writes need the MPU unlock the rebuild
- * holds.
+ * fills one row inside the rebuild's MPU unlock window.
  */
 static TIKU_RETAINED tiku_vfs_node_t
     pid_files[TIKU_PROCESS_MAX][PROC_FILES_PER_PID];
 
-/*
- * Fixed (non-pid) children directly under /proc: count, queue and catalog, plus
- * wifi where a driver is built.  It does NOT include bt -- that consumes one of
- * the per-pid spare slots, which is safe because the two never fill the array.
- */
 /* count + queue + catalog, plus one slot per compiled-in optional subtree. */
 #define PROC_FIXED_KIDS \
     (3 + PROC_WIFI_ENABLED + PROC_BT_ENABLED + PROC_THREADS_ENABLED)
 
 /*
  * Child-node table for the top-level /proc directory: the fixed entries, then
- * up to one directory per registered process.  Sized for the worst case, WARM
- * grade, and rewritten on each _get() call.
+ * up to one directory per registered process.  Sized for the worst case,
+ * RETAINED grade, and rewritten on each _get() call.
  */
 static TIKU_RETAINED tiku_vfs_node_t
     proc_children[TIKU_PROCESS_MAX + PROC_FIXED_KIDS];
@@ -160,17 +154,18 @@ static TIKU_RETAINED tiku_vfs_node_t
  * therefore generates one handler per pid, resolved at build time for
  * zero runtime overhead.
  *
- * Every generator below resolves its slot with tiku_process_get(idx),
- * which returns NULL for an empty or invalid slot.  Each handler
- * therefore renders a safe placeholder ("(none)" or "0") on NULL so a
- * read that races a process exit never dereferences a stale pointer.
- * All output is one line terminated by '\n'.  Handlers read only live
- * registry/clock state, never FRAM, so they need no MPU unlock.
+ * Every generator below but PROC_READ_PID resolves its slot with
+ * tiku_process_get(idx), which returns NULL for an empty or invalid slot.
+ * Each such handler renders a safe placeholder ("(none)" or "0") on NULL,
+ * so a read that races a process exit never dereferences a stale pointer.
+ * All output is one line terminated by '\n'.  Handlers only read, so they
+ * need no MPU unlock.
  */
 
 /*
- * Generate proc_read_name_<idx>(): backs /proc/<idx>/name.  Renders the process name, "(none)"
- * for an empty slot and "(null)" for a live slot with no name string.
+ * Generate proc_read_name_<idx>(): backs /proc/<idx>/name.  Renders the
+ * process name, "(none)" for an empty slot and "(null)" for a live slot with
+ * no name string.
  */
 #define PROC_READ_NAME(idx)                                                 \
     static int proc_read_name_##idx(char *buf, size_t max)                  \
@@ -181,8 +176,9 @@ static TIKU_RETAINED tiku_vfs_node_t
     }
 
 /*
- * Generate proc_read_state_<idx>(): backs /proc/<idx>/state.  Renders the scheduler state name from
- * tiku_process_state_str(), or "(none)" for an empty slot.
+ * Generate proc_read_state_<idx>(): backs /proc/<idx>/state.  Renders the
+ * scheduler state name from tiku_process_state_str(), or "(none)" for an
+ * empty slot.
  */
 #define PROC_READ_STATE(idx)                                                \
     static int proc_read_state_##idx(char *buf, size_t max)                 \
@@ -195,7 +191,7 @@ static TIKU_RETAINED tiku_vfs_node_t
 
 /*
  * Generate proc_read_pid_<idx>(): backs /proc/<idx>/pid.  The one reader that
- * does not consult the registry -- the pid IS the slot index baked in at macro
+ * does not consult the registry -- the pid is the slot index baked in at macro
  * expansion, so it is right even for an empty slot.
  */
 #define PROC_READ_PID(idx)                                                  \
@@ -205,8 +201,9 @@ static TIKU_RETAINED tiku_vfs_node_t
     }
 
 /*
- * Generate proc_read_sram_<idx>(): backs /proc/<idx>/sram_used.  Renders the SRAM byte count the process
- * declared, not a measured figure; "0" for an empty slot.
+ * Generate proc_read_sram_<idx>(): backs /proc/<idx>/sram_used.  Renders
+ * tiku_process_sram_used(): the declared bytes plus an attached SRAM arena's
+ * usage; "0" for an empty slot.
  */
 #define PROC_READ_SRAM(idx)                                                 \
     static int proc_read_sram_##idx(char *buf, size_t max)                  \
@@ -220,8 +217,8 @@ static TIKU_RETAINED tiku_vfs_node_t
 /**
  * Generate proc_read_fram_<idx>(): backs /proc/<idx>/fram_used.
  *
- * Renders the process's declared FRAM byte count plus newline (the
- * fram_used accounting field).  "0" when the slot is empty.
+ * Renders tiku_process_fram_used(): the declared bytes plus an attached
+ * non-SRAM arena's usage; "0" when the slot is empty.
  */
 #define PROC_READ_FRAM(idx)                                                 \
     static int proc_read_fram_##idx(char *buf, size_t max)                  \
@@ -234,8 +231,8 @@ static TIKU_RETAINED tiku_vfs_node_t
 
 /*
  * Generate proc_read_uptime_<idx>(): backs /proc/<idx>/uptime.  Elapsed ticks
- * converted to whole seconds.  The tick counter is 16-bit and wraps, so the
- * unsigned subtraction is correct for one interval but understates across a wrap.
+ * converted to whole seconds.  The difference is taken in the clock type's
+ * width, so on MSP430, whose tick is 16-bit, it reads modulo 512 s at 128 Hz.
  */
 #define PROC_READ_UPTIME(idx)                                               \
     static int proc_read_uptime_##idx(char *buf, size_t max)                \
@@ -249,8 +246,8 @@ static TIKU_RETAINED tiku_vfs_node_t
     }
 
 /*
- * Generate proc_read_wake_<idx>(): backs /proc/<idx>/wake_count.  Renders how many times the scheduler has
- * dispatched this process; "0" for an empty slot.
+ * Generate proc_read_wake_<idx>(): backs /proc/<idx>/wake_count.  Renders how
+ * many times the scheduler has dispatched this process; "0" for an empty slot.
  */
 #define PROC_READ_WAKE(idx)                                                 \
     static int proc_read_wake_##idx(char *buf, size_t max)                  \
@@ -261,9 +258,9 @@ static TIKU_RETAINED tiku_vfs_node_t
     }
 
 /*
- * Generate proc_read_events_<idx>(): backs /proc/<idx>/events.  Walks the global
- * queue counting entries targeted at this process, so broadcasts are attributed
- * to nobody.  A live snapshot -- the queue can change between reads.
+ * Generate proc_read_events_<idx>(): backs /proc/<idx>/events.  Walks the
+ * global queue counting entries targeted at this process, so broadcasts are
+ * attributed to nobody.  A live snapshot -- the queue can change between reads.
  */
 #define PROC_READ_EVENTS(idx)                                               \
     static int proc_read_events_##idx(char *buf, size_t max)                \
@@ -371,9 +368,9 @@ static const proc_readers_t readers[TIKU_PROCESS_MAX] = {
 /**
  * @brief Read handler for /proc/count.
  *
- * Renders the number of registered (active) processes as a decimal
- * line ("3\n").  Comes from tiku_process_count(), which counts
- * non-empty registry slots.
+ * Renders the number of registered processes, stopped ones included,
+ * as a decimal line ("3\n").  Comes from tiku_process_count(), which
+ * counts non-empty registry slots.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -452,9 +449,9 @@ static const tiku_vfs_node_t proc_queue_children[] = {
 /*---------------------------------------------------------------------------*/
 /*
  * Each reader below snapshots tiku_wireless_status() on demand and
- * projects a single field into text.  The status call is cheap (a
- * memcpy from the driver's cyw43_state), so reading several wifi
- * files back-to-back is fine — there is no shared cached snapshot.
+ * projects a single field into text.  The status call copies the
+ * driver's cached state, so reading several wifi files back-to-back
+ * is fine — there is no shared cached snapshot.
  * When the radio is down (status returns non-zero) or not joined,
  * every reader emits a benign placeholder ("down", "0" or an empty
  * line) so callers never have to special-case the offline state.
@@ -616,7 +613,7 @@ static const tiku_vfs_node_t proc_wifi_children[] = {
 #endif /* PROC_WIFI_ENABLED */
 
 /*---------------------------------------------------------------------------*/
-/* /proc/bt READERS (phase 11.x)                                             */
+/* /proc/bt READERS                                                          */
 /*---------------------------------------------------------------------------*/
 
 #if PROC_BT_ENABLED
@@ -782,7 +779,7 @@ static int proc_read_catalog_count(char *buf, size_t max)
 /*
  * Generate proc_read_catname_<idx>(): backs /proc/catalog/<idx>/name.  Mirrors
  * the pid name reader but resolves through the catalog, which returns NULL past
- * the populated count -- "(none)" then, "(null)" for a populated nameless entry.
+ * the populated count: "(none)" then, "(null)" for a populated nameless entry.
  */
 #define PROC_READ_CATALOG_NAME(idx)                                         \
     static int proc_read_catname_##idx(char *buf, size_t max)               \
@@ -824,7 +821,8 @@ static TIKU_RETAINED tiku_vfs_node_t
 
 /*
  * Child-node table for /proc/catalog: slot 0 is the count file, the rest hold
- * one directory per populated entry.  RETAINED grade, rebuilt on each _get() call.
+ * one directory per populated entry.  RETAINED grade, rebuilt on each _get()
+ * call.
  */
 static TIKU_RETAINED tiku_vfs_node_t
     catalog_children[1 + PROC_CATALOG_VFS_MAX];
@@ -835,21 +833,12 @@ static TIKU_RETAINED tiku_vfs_node_t
 /* TREE BUILDER                                                              */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Fill the file nodes for a single pid's /proc directory.
- *
- * Stamps each file node wired to the matching handler; the order here is the
- * order they appear under /proc/<idx>/ and must stay in step with
- * PROC_FILES_PER_PID.  The table is durable, so the caller's unlock must be held.
- *
- * @param idx  Process slot index (0..TIKU_PROCESS_MAX-1)
- */
 #if PROC_THREADS_ENABLED
-/*
- * /proc/threads -- one line per worker slot that has ever been used:
- *   <slot> <state> <cycles> <switches>
- * state = unused|ready|run|done.  Renders from the worker registry via the
- * thread introspection API; "none" when no slot has run.
+/**
+ * @brief Read handler for /proc/threads: one line per occupied worker slot.
+ *
+ * Each line is "<slot> <state> <cycles> <switches>", state being one of
+ * unused|ready|run|done; "none" when no slot is occupied.
  */
 static int proc_threads_read(char *buf, size_t max)
 {
@@ -875,6 +864,17 @@ static int proc_threads_read(char *buf, size_t max)
 }
 #endif /* PROC_THREADS_ENABLED */
 
+/**
+ * @brief Fill the file nodes for a single pid's /proc directory.
+ *
+ * Stamps each file node wired to the matching handler; the order here is the
+ * order they appear under /proc/<idx>/ and stays in step with
+ * PROC_FILES_PER_PID.
+ *
+ * @param idx  Process slot index (0..TIKU_PROCESS_MAX-1)
+ * @note On MSP430 the table is MPU-protected FRAM: call inside the caller's
+ *       unlock window.
+ */
 static void build_pid_files(uint8_t idx)
 {
     tiku_vfs_node_t *f = pid_files[idx];
@@ -907,8 +907,8 @@ static void build_pid_files(uint8_t idx)
  * @brief Build and return the live /proc directory node.
  *
  * Rebuilds the whole subtree on every call, so it mirrors registry, catalog and
- * driver state at that instant.  The node tables are durable and MPU-protected,
- * so the rebuild runs inside one unlock bracket or the writes are dropped.
+ * driver state at that instant.  On MSP430 the node tables are MPU-protected
+ * FRAM, so the rebuild runs inside one unlock bracket.
  *
  * @return Pointer to the freshly rebuilt "proc" VFS directory node
  */
@@ -920,18 +920,10 @@ const tiku_vfs_node_t *tiku_proc_vfs_get(void)
     uint8_t cat_count;
     uint16_t mpu_state;
 
-    /* All of proc_children[], catalog_children[], catalog_entry_files[],
-     * pid_files[], and proc_root live in the .persistent (FRAM) section.
-     * The default protective MPU configuration write-protects FRAM, so
-     * the rebuild below would silently fail (the static arrays would
-     * keep whatever they held from the previous successful build, or
-     * stay zero-initialized on the very first call).  That manifested
-     * as /proc/0/<file> reads returning -1 because the per-pid
-     * directory entries never made it into proc_children[].
-     *
-     * Unlock NVM for the duration of the rebuild and restore the
-     * previous protection state on exit -- same pattern as the
-     * persistent-LC fixes. */
+    /* On MSP430 the tables are MPU-protected FRAM, where a write outside
+     * an unlock window is dropped and the tables keep their previous
+     * contents.  The whole rebuild runs inside one window, and the previous
+     * protection state is restored on exit. */
     mpu_state = tiku_mpu_unlock_nvm();
 
     /* /proc/count */
@@ -1014,8 +1006,8 @@ const tiku_vfs_node_t *tiku_proc_vfs_get(void)
  * @brief Return the current number of children under /proc.
  *
  * The /proc directory contains fixed nodes (count, queue, catalog,
- * plus wifi when a wireless driver is built) plus one subdirectory
- * per registered process.
+ * plus wifi, bt and threads when built) plus one subdirectory per
+ * registered process.
  *
  * @return Total child count (PROC_FIXED_KIDS + registered processes).
  */

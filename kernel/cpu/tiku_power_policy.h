@@ -41,9 +41,9 @@ enum {
 /**
  * @brief Does the port have an entry of its own for @p mode?
  *
- * Off and light are always offered.  A deeper mode whose entry is the same
- * as a shallower one's is not, so a port where every mode is WFI offers
- * off and light only.
+ * Off is always offered, light wherever the port has an idle entry.  A
+ * deeper mode whose entry is the same as a shallower one's is not, so a port
+ * where every mode is WFI offers off and light only.
  *
  * @return Non-zero when tiku_power_policy_set() may take @p mode
  */
@@ -59,8 +59,8 @@ int tiku_power_policy_loses_console(tiku_cpu_idle_mode_t mode);
 /**
  * @brief The mode the scheduler enters when idle.
  *
- * Read from the scheduler's hook, so a mode set before this service existed
- * or by tiku_sched_init() is reported too.
+ * Read from the scheduler's hook, so a hook installed by tiku_sched_init() or
+ * tiku_sched_set_idle_hook() is reported too.
  *
  * @return A tiku_cpu_idle_mode_t value, or TIKU_POWER_CUSTOM
  */

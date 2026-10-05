@@ -7,9 +7,9 @@
  *
  * tiku_hang.h - check-in watchdog: live-hang detection with named attribution.
  *
- * A process that wedges the cooperative scheduler never lets the supervisor run,
- * so the board resets anonymously.  The tick ISR watches a progress heartbeat and
- * records which process held the CPU, so the recovery boot can quarantine it.
+ * A tick that sees the heartbeat stall while one process holds the CPU records
+ * that process and resets, so the recovery boot can quarantine it.  Only the
+ * nRF54L and Apollo4l tick ISRs call tiku_hang_tick().
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,17 +21,15 @@
 
 struct tiku_process;
 
-/*
- * Consecutive stalled ticks before a non-yielding process is declared hung.
- * Must EXCEED the longest legitimate non-yielding slice.  2 s (256 ticks)
- * proved too tight on device: an inline TLS certificate-chain verify (an
- * RSA chain, no worker offload) legitimately holds the CPU past 2 s between
- * its milestone kicks, and the web sweep's first fetch warm-reset mid-
- * handshake with the shell named in /sys/boot/hang.  8 s clears every
- * measured slice with margin while still catching a real wedge fast.
- * Unbounded waits (a REPL prompt, DELAY, INPUT) must still check in --
- * tiku_watchdog_kick() feeds the heartbeat -- no threshold covers those.
- * Override per build.
+/**
+ * @brief Consecutive stalled ticks before a non-yielding process is hung.
+ *
+ * Longer than the longest legitimate non-yielding slice: an inline RSA
+ * certificate-chain verify holds the CPU for seconds between kicks.  The
+ * default, 1024 ticks, is 8 s at the default 128 Hz tick; override per build.
+ *
+ * @note An unbounded wait (a REPL prompt, DELAY, INPUT) checks in through
+ *       tiku_hang_checkin() or tiku_watchdog_kick(); no threshold covers it.
  */
 #ifndef TIKU_HANG_THRESHOLD_TICKS
 #define TIKU_HANG_THRESHOLD_TICKS  1024u
@@ -44,13 +42,19 @@ struct tiku_process;
 /**
  * @brief Arm the detector.
  *
- * Call once when the scheduler loop starts.  Until armed the per-tick detector
- * is a no-op, so a harness driving the kernel without the loop cannot trip a
- * false hang reset while the predicate stays independently testable.
+ * Until armed the per-tick detector does nothing, so a harness that drives
+ * the kernel without the scheduler loop cannot trip a hang reset.
+ *
+ * @note Call once, when the scheduler loop starts.
  */
 void tiku_hang_arm(void);
 
-/** @brief Scheduler progress heartbeat -- call once per dispatched event. */
+/**
+ * @brief Liveness check-in: bump the heartbeat the hang detector watches.
+ *
+ * The scheduler checks in once per dispatched event; tiku_watchdog_kick() and
+ * long driver loops check in too, so a slow but live operation is not reset.
+ */
 void tiku_hang_checkin(void);
 
 /**
@@ -62,8 +66,9 @@ void tiku_hang_checkin(void);
 void tiku_hang_tick(void);
 
 /**
- * @brief One detection step (NO reset): the culprit pid once the stall has
- *        lasted TIKU_HANG_THRESHOLD_TICKS, else -1.  Exposed for testing.
+ * @brief One detection step, without the reset: the culprit pid once the
+ *        stall has lasted TIKU_HANG_THRESHOLD_TICKS, else -1.  Exposed for
+ *        testing.
  */
 int8_t tiku_hang_detect_step(void);
 
@@ -78,9 +83,10 @@ void tiku_hang_record(const struct tiku_process *p);
  * @brief Capture the pre-reset culprit for this boot, then clear the
  *        cross-reset record.
  *
- * Call once early in boot, before autostart.  The record is one-shot: it is
- * read into this boot's view and wiped, so a single hang quarantines the
- * culprit for exactly the recovery boot, not forever.
+ * The record is one-shot: it is read into this boot's view and wiped, so one
+ * hang quarantines the culprit for the recovery boot only.
+ *
+ * @note Call once, early in boot, before autostart.
  */
 void tiku_hang_boot_init(void);
 

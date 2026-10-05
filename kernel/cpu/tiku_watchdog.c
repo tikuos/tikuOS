@@ -26,7 +26,8 @@
 /* PRIVATE VARIABLES                                                         */
 /*---------------------------------------------------------------------------*/
 
-/* Default watchdog configuration — platform HAL provides the types */
+/* Stored watchdog configuration, initialised to the defaults; the platform
+ * HAL provides the types. */
 static struct {
     tiku_wdt_mode_t     mode;
     tiku_wdt_clk_t      clk;
@@ -41,10 +42,10 @@ static struct {
     .kick_on_start = 1,
 };
 
-/* Observability: armed flag and kick counter. The flag tracks
- * whether the WDT is currently armed (i.e. tiku_watchdog_off has
- * not been called since the last init/config/on). Pause/resume do
- * not flip it because the configuration is still in effect. */
+/* Observability: armed flag and kick counter.  The flag tracks whether
+ * the last init/config/on armed the WDT and tiku_watchdog_off() has not
+ * run since.  Pause/resume do not flip it because the configuration is
+ * still in effect. */
 static volatile uint8_t  wdt_enabled;
 static volatile uint32_t wdt_kick_count;
 
@@ -66,10 +67,9 @@ void tiku_watchdog_init(void)
     wdt_enabled = 1;
 #else
     if (wdt.mode == TIKU_WDT_MODE_INTERVAL) {
-        /* Never silently turn an unsupported interval request into a reset
-         * watchdog.  The caller can query mode_supported() before selecting
-         * it; keeping the hardware off is the only safe fallback for the
-         * legacy void config API. */
+        /* An unsupported interval request leaves the hardware off rather
+         * than arming a reset watchdog.  tiku_watchdog_config() returns
+         * nothing, so callers check tiku_watchdog_mode_supported() first. */
         tiku_watchdog_arch_off();
         wdt_enabled = 0;
         return;
@@ -117,16 +117,9 @@ void tiku_watchdog_kick(void)
     tiku_watchdog_arch_kick();
     wdt_kick_count++;
 
-    /* A kick is a liveness assertion, so honour it in BOTH watchdog channels:
-     * feed the check-in hang detector's heartbeat too.  The long cooperative-
-     * blocking builtins (HTTPGET$'s TLS fetch over SLIP, the MQTT waits) hold
-     * the CPU inside one dispatch for tens of seconds while kicking from
-     * their net pumps; without this the hang detector -- which otherwise only
-     * hears scheduler dispatches -- declared them wedged at
-     * TIKU_HANG_THRESHOLD_TICKS (~2 s) and warm-reset mid-fetch.  A loop that
-     * kicks while truly wedged evades the hang detector exactly as it already
-     * evades the hardware watchdog -- no recoverability is lost; the common
-     * wedge (an accidental loop that kicks nothing) is still caught. */
+    /* A kick is also a hang-detector check-in, so a long blocking builtin
+     * that kicks from its pump (an HTTPGET$ TLS fetch, an MQTT wait) is not
+     * reset as hung.  A wedged loop that kicks evades both watchdogs. */
     tiku_hang_checkin();
 }
 

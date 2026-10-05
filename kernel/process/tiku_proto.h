@@ -7,9 +7,9 @@
  *
  * tiku_proto.h - protothreads for lightweight stackless threads.
  *
- * Provides a blocking context on top of an event-driven system without the cost
- * of per-thread stacks.  Derived from the protothreads implementation in Contiki
- * OS (contiki-os.org) by Adam Dunkels.
+ * Provides a blocking context on top of an event-driven system without the
+ * cost of per-thread stacks.  Derived from the protothreads implementation in
+ * Contiki OS (contiki-os.org) by Adam Dunkels.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -59,8 +59,9 @@ struct pt {
  * @brief Initialize a protothread control structure
  * @param pt Pointer to the protothread control structure
  *
- * Must be called before starting the protothread for the first time.
- * This resets the protothread to its initial state.
+ * Resets the protothread to its initial state.
+ *
+ * @note Call before the protothread first runs.
  *
  * Example:
  * @code
@@ -79,15 +80,14 @@ struct pt {
  * @brief Declare a protothread function
  * @param name_args Function name and parameters
  * @return char - One of the PT_* return codes
- *
- * All protothread functions must return char and use this macro.
+ * @note Declare every protothread function with this macro.
  *
  * Example:
  * @code
  *   PT_THREAD(my_thread(struct pt *pt, int data))
  *   {
  *     PT_BEGIN(pt);
- *     // Thread code here
+ *     do_work(data);
  *     PT_END(pt);
  *   }
  * @endcode
@@ -99,8 +99,9 @@ struct pt {
  * @brief Mark the beginning of a protothread
  * @param pt Pointer to the protothread control structure
  *
- * This macro MUST be the first statement in a protothread function.
- * It sets up the protothread's execution context.
+ * Sets up the protothread's execution context.
+ *
+ * @note PT_BEGIN is the first statement of the protothread body.
  */
 #define PT_BEGIN(pt) {             \
   char PT_YIELD_FLAG = 1;          \
@@ -112,8 +113,9 @@ struct pt {
  * @brief Mark the end of a protothread
  * @param pt Pointer to the protothread control structure
  *
- * This macro MUST be the last statement in a protothread function.
- * It cleans up the protothread and returns PT_ENDED.
+ * Resets the protothread and returns PT_ENDED.
+ *
+ * @note PT_END is the last statement of the protothread body.
  */
 #define PT_END(pt)                  \
   LC_END((pt)->lc);                 \
@@ -206,8 +208,8 @@ struct pt {
  * @brief Restart the protothread from the beginning
  * @param pt Pointer to the protothread control structure
  *
- * Resets the thread's state and starts execution from PT_BEGIN.
- * Returns immediately with PT_WAITING.
+ * Resets the thread's state and returns PT_WAITING, so the next call
+ * starts from PT_BEGIN.
  */
 #define PT_RESTART(pt)          \
   do {                          \
@@ -220,8 +222,8 @@ struct pt {
  * @brief Exit the protothread immediately
  * @param pt Pointer to the protothread control structure
  *
- * Terminates the thread and resets its state.
- * Returns PT_EXITED to indicate abnormal termination.
+ * Terminates the thread early, resets its state and returns PT_EXITED;
+ * the process layer treats it like PT_ENDED.
  */
 #define PT_EXIT(pt)             \
   do {                          \
@@ -260,7 +262,7 @@ struct pt {
  * @code
  *   for(i = 0; i < 1000; i++) {
  *     process_item(i);
- *     PT_YIELD(pt);  // Give other threads a chance to run
+ *     PT_YIELD(pt);
  *   }
  * @endcode
  */
@@ -305,7 +307,7 @@ struct pt {
  *
  * Core-macro variants, enabled with TIKU_LC_PERSISTENT=1, that checkpoint the
  * continuation to NVM so the thread resumes at the last checkpoint after power
- * loss.  Needs tiku_lc_persist_init() and tiku_lc_persist_register(key) at boot.
+ * loss.  Needs tiku_lc_persist_init() and tiku_lc_persist_register() at boot.
  */
 
 #if TIKU_LC_PERSISTENT

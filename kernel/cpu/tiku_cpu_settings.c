@@ -1,5 +1,15 @@
-/* TikuOS -- portable next-boot clock preference.
+/*
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_cpu_settings.c - portable next-boot clock preference.
+ *
+ * The chosen rate sits in a persist cell beside its complement; on a port
+ * that mirrors durable memory, a save is checked against the durable image.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stddef.h>
@@ -137,14 +147,15 @@ void tiku_cpu_settings_boot(void)
 {
     unsigned long target;
     if (ready) return;
-    /* A port that measures its clock (ESP32-C61, STM32N6) reads 160009999
-     * for its 160 MHz; the default is the choice that stands for. */
+    /* A port that measures its clock reads slightly off an advertised
+     * choice; the default is the choice within 1 % of the reading. */
     boot_default = as_choice(tiku_cpu_mclk_hz());
     restored = 1;
 #if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
     defined(PLATFORM_STM32N6) || defined(PLATFORM_ESP32C61)
-    /* A bad mirror may leave old NOLOAD SRAM intact after a warm reset.
-     * Never mistake that working copy for a successfully restored setting. */
+    /* A bad mirror may leave old NOLOAD SRAM intact after a warm reset, so
+     * the setting counts as restored only when the mirror restore succeeded
+     * and the durable image matches the working copy. */
     restored = tiku_mem_arch_nvm_restore_status() == TIKU_NVM_RESTORE_V2_OK &&
                committed();
 #endif
