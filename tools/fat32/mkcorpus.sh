@@ -49,6 +49,9 @@ for SPC in 1 8; do
     mcopy -i "$IMG" "$OUT/exact.bin" ::/EXACT.BIN
     mcopy -i "$IMG" "$OUT/big.bin"   ::/big.bin
     mcopy -i "$IMG" "$OUT/small.bin" "::/a rather long file name.dat"
+    # Names that fill their last 13-character piece carry no terminator.
+    mcopy -i "$IMG" "$OUT/small.bin" "::/thirteen-char"
+    mcopy -i "$IMG" "$OUT/small.bin" "::/twenty-six-characters-name"
     mcopy -i "$IMG" "$OUT/exact.bin" ::/sub/deeper/NESTED.BIN
 
     # FRAGMENTATION ON PURPOSE.  Interleave two files, then delete one, then

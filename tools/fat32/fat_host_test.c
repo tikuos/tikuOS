@@ -293,6 +293,8 @@ static void run_image(const char *dir, const char *name, uint32_t base)
     ok(found_long, "long file name assembled");
     if (found_long) {
         check_file(&fs, "/a rather long file name.dat", 1000u);
+        check_file(&fs, "/thirteen-char", 1000u);
+        check_file(&fs, "/twenty-six-characters-name", 1000u);
     }
 
     /* Negative: paths that must not resolve. */

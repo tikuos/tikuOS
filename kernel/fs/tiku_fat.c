@@ -333,10 +333,10 @@ tiku_fat_err_t tiku_fat_readdir(tiku_fat_t *fs, tiku_fat_dir_t *dir,
                     lfn[idx] = part[k];
                     if (part[k] == '\0') { break; }
                 }
-                if (((ord - 1u) * 13u) < TIKU_FAT_NAME_MAX) {
-                    /* keep the string terminated as it grows */
-                    unsigned end = ((ord - 1u) * 13u) + 13u;
-                    if (end < TIKU_FAT_NAME_MAX) { lfn[end] = lfn[end]; }
+                if ((e[0] & 0x40u) && (ord * 13u) < TIKU_FAT_NAME_MAX) {
+                    /* A name that fills its last piece carries no NUL of
+                     * its own, so the end is marked here. */
+                    lfn[ord * 13u] = '\0';
                 }
                 continue;
             }
