@@ -30,15 +30,4 @@
  */
 void tiku_vfs_tree_init(void);
 
-/**
- * @brief Set the boot count value exposed via /sys/boot_count.
- *
- * Overrides only the SRAM copy that reads are served from, so the durable
- * cell keeps its true monotonic count.  Defined in tree/tiku_vfs_tree_boot.c,
- * which owns the counter.
- *
- * @param count  Value subsequent /sys/boot_count reads will report
- */
-void tiku_vfs_set_boot_count(uint32_t count);
-
 #endif /* TIKU_VFS_TREE_H_ */

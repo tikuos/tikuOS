@@ -121,10 +121,8 @@ static TIKU_DURABLE uint32_t boot_count_persist;
 TIKU_PERSIST_CELL(boot_count_cell, boot_count_persist,
                   BOOT_COUNT_MAGIC, NULL, 0);
 
-/**
- * SRAM copy of boot_count_persist, set at init and served by the read
- * handler; tiku_vfs_set_boot_count() overrides it.
- */
+/** SRAM copy of boot_count_persist, set at init and served by the read
+ *  handler. */
 static uint32_t boot_count_value;
 
 /**
@@ -542,17 +540,4 @@ tiku_vfs_tree_boot_init(void)
                                 boot_count_persist + 1U);
     boot_count_value = boot_count_persist;
     lifetime_at_boot = lifetime_seconds_persist;
-}
-
-/**
- * @brief Override the boot count exposed via /sys/boot_count.
- *
- * Only the SRAM copy changes, so the durable cell keeps its monotonic count.
- *
- * @param count  Value subsequent /sys/boot_count reads will report
- */
-void
-tiku_vfs_set_boot_count(uint32_t count)
-{
-    boot_count_value = count;
 }
