@@ -62,8 +62,8 @@
 #include "tiku_vfs_tree_watch.h"
 #include "tiku_vfs_tree_inittab.h"
 #if TIKU_SHELL_ENABLE
-#include <kernel/shell/tiku_shell_rules.h>   /* /sys/rules/* observability */
-#include <kernel/shell/tiku_shell_jobs.h>    /* /sys/jobs/* observability  */
+#include <kernel/shell/tiku_shell_rules.h>   /* /sys/rules observability   */
+#include <kernel/shell/tiku_shell_jobs.h>    /* /sys/jobs observability    */
 #endif
 #include "tiku.h"
 #include <kernel/timers/tiku_clock.h>
@@ -1727,19 +1727,22 @@ flpr_spinbench_write(const char *buf, size_t len)
 }
 
 static const tiku_vfs_node_t sys_flpr_children[] = {
+    /* Starts the core /sys/coproc/run starts, so it needs the same CAP_SYS. */
     { "run",       TIKU_VFS_FILE, flpr_run_read,       flpr_run_write,
-      NULL, 0 },
+      NULL, 0, NULL, NULL, TIKU_VFS_CAP_SYS },
+    /* spin, spinbench and pulse drive the core and, for pulse, a pin: the
+     * hardware capability, as the LED and NPU nodes take. */
     { "spin",      TIKU_VFS_FILE, flpr_spin_read,      flpr_spin_write,
-      NULL, 0 },
+      NULL, 0, NULL, NULL, TIKU_VFS_CAP_HW },
     { "spinbench", TIKU_VFS_FILE, flpr_spinbench_read, flpr_spinbench_write,
-      NULL, 0 },
+      NULL, 0, NULL, NULL, TIKU_VFS_CAP_HW },
     { "state",     TIKU_VFS_FILE, flpr_state_read,     NULL, NULL, 0 },
     { "heartbeat", TIKU_VFS_FILE, flpr_heartbeat_read, NULL, NULL, 0 },
     { "image",     TIKU_VFS_FILE, flpr_image_read,     NULL, NULL, 0 },
     { "echo",      TIKU_VFS_FILE, flpr_echo_read,      flpr_echo_write,
       NULL, 0 },
     { "pulse",     TIKU_VFS_FILE, flpr_pulse_read,     flpr_pulse_write,
-      NULL, 0 },
+      NULL, 0, NULL, NULL, TIKU_VFS_CAP_HW },
 };
 #endif /* TIKU_FLPR_ENABLE */
 
