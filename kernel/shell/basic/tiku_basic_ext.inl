@@ -16,6 +16,22 @@
 
 #if TIKU_BASIC_EXT_MAX > 0
 
+/* Builtins the chains match by spelling (match_kw) rather than by keyword
+ * token, whichever of them this build compiles in.  A test in TikuBench
+ * checks this list against the match_kw names in the sources. */
+static const char *const basic_ext_builtin_names[] = {
+    "APPEND", "ATAN", "AUTO", "BASE64$", "BETWEEN$", "BLEADV", "BLEAVAIL",
+    "BLEBEACON", "BLEGET$", "BLEOBSERVE", "BLEOFF", "BLESCAN$", "BLESEEN",
+    "BLESEEN$", "BLESEND", "BLEUP", "BROWSE", "BYE", "COUNT", "DEBUG", "DIR",
+    "EXP", "FETCH", "FREAD$", "FWRITE", "HELP", "HMAC$", "HTTPGET$",
+    "HTTPHEADER", "HTTPPOST$", "HTTPSTATUS", "I2CREAD", "I2CWRITE", "IMPORT",
+    "IPADDR$", "JSON$", "LCASE$", "LINE$", "LIST", "LOAD", "LOG", "LTRIM$",
+    "MODACT", "MODLOAD", "MQTTPUB", "MQTTWAIT$", "NETUP", "NEW", "NOW", "POW",
+    "QUIT", "REBOOT", "RENUM", "REPLACE$", "RTRIM$", "RUN", "SAVE", "SETTIME",
+    "SHA256$", "SPACE$", "SPC", "STRING$", "STRIP$", "TAB", "UCASE$",
+    "UDPSEND", "VFSREAD$", "VFSWRITE$", "WORD$",
+};
+
 /**
  * @brief Validate a registration name.
  *
@@ -44,6 +60,10 @@ basic_ext_name_ok(const char *name, int allow_dollar)
         }
     }
     if (basic_tok_find(name) >= 0) return 0;      /* crunched-keyword clash */
+    for (i = 0; i < sizeof basic_ext_builtin_names /
+                    sizeof basic_ext_builtin_names[0]; i++) {
+        if (strcmp(basic_ext_builtin_names[i], name) == 0) return 0;
+    }
     return 1;
 }
 

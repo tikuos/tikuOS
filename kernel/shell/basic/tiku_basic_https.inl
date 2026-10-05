@@ -645,13 +645,15 @@ basic_https_get(const char *method, const char *host, const char *path,
                 int      st = tiku_kits_crypto_tls13_last_stage;
                 uint32_t rx = tiku_kits_crypto_tls13_last_rx;
                 int      ev = basic_https_evt;   /* RST? closed? silent? */
-                SHELL_PRINTF(SH_RED
-                    "? HTTPGET: TLS failed -- tls1.3 stage %d (%s), %u B in, "
-                    "link=%s\n" SH_RST,
+                /* The request is spent, so req[] holds the message. */
+                snprintf(req, sizeof req,
+                    "HTTPGET: TLS failed -- tls1.3 stage %d (%s), %u B in, "
+                    "link=%s",
                     st, basic_tls_stage_str(st), (unsigned)rx,
                     (ev == TIKU_KITS_NET_TCP_EVT_ABORTED ? "RST" :
                      ev == TIKU_KITS_NET_TCP_EVT_CLOSED  ? "closed" :
                      "silent"));
+                basic_report(TIKU_BASIC_ERR_NET, req);
             }
             if (tcp) tiku_kits_net_tcp_close(tcp);
             return -1;

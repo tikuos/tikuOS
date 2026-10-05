@@ -64,7 +64,11 @@ basic_run_trap_error(uint16_t prev_pc)
         basic_error  = 0;
         return 1;
     }
-    SHELL_PRINTF(SH_RED SH_DIM "at line %u" SH_RST "\n", (unsigned)prev_pc);
+    /* The line goes to the console after the error only when the console
+     * is the sink; an installed sink already has the error. */
+    if (basic_error_sink == NULL) {
+        SHELL_PRINTF(SH_RED SH_DIM "at line %u" SH_RST "\n", (unsigned)prev_pc);
+    }
     return 0;
 }
 

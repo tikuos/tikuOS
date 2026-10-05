@@ -85,7 +85,8 @@ static void
 exec_fetch(const char **p)
 {
     long n;
-    char host[64], path[80], body[TIKU_BASIC_STR_BUF_CAP];
+    char host[TIKU_BASIC_HTTP_HOST_MAX], path[TIKU_BASIC_HTTP_PATH_MAX];
+    char body[TIKU_BASIC_STR_BUF_CAP];
     int  have_body = 0, rc;
     skip_ws(p);
     if (cur_peek(p) != '#') {
@@ -228,6 +229,21 @@ basic_http_redirect(const char *resp, char *out, size_t outcap)
     return 0;
 }
 
+/* BROWSE splits its URL into the host and path it passes to basic_https_get()
+ * (a relative redirect keeps the previous host), so these bound the request
+ * BROWSE sends, as HOST_MAX and PATH_MAX do for the other callers. */
+#ifndef TIKU_BASIC_BROWSE_URL_MAX
+#define TIKU_BASIC_BROWSE_URL_MAX   200   /**< URL, incl. NUL */
+#endif
+#ifndef TIKU_BASIC_BROWSE_HOST_MAX
+#define TIKU_BASIC_BROWSE_HOST_MAX  100   /**< host name, incl. NUL */
+#endif
+/* The worst BROWSE request: its path and host, the HTTPHEADER block and 64
+ * bytes for the method, the fixed header names and the CRLFs. */
+_Static_assert(TIKU_BASIC_BROWSE_URL_MAX + TIKU_BASIC_BROWSE_HOST_MAX +
+               TIKU_BASIC_HTTP_HDRS_MAX + 64u <= TIKU_BASIC_HTTP_REQ_MAX,
+               "BROWSE's URL does not fit the HTTP request buffer");
+
 /**
  * @brief BROWSE "host[/path]": fetch a page over HTTPS, print it as text.
  *
@@ -238,8 +254,8 @@ basic_http_redirect(const char *resp, char *out, size_t outcap)
 static void
 exec_browse(const char **p)
 {
-    char        url[200];
-    char        host[100];
+    char        url[TIKU_BASIC_BROWSE_URL_MAX];
+    char        host[TIKU_BASIC_BROWSE_HOST_MAX];
     const char *u, *path;
     int         i, hop;
 

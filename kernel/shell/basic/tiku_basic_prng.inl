@@ -23,11 +23,20 @@ static long
 basic_rnd(long n)
 {
     /* Lazy seeding -- avoids paying clock-read cost when RND is
-     * never called.  Seed mixes the kernel tick with a constant
-     * so 0-tick boots don't all start with the same sequence. */
+     * never called.  The seed mixes the kernel tick with the boot count,
+     * so boots that reach their first RND at the same tick still differ. */
     if (!basic_prng_seeded) {
+        uint32_t boots = 0u;
+#if TIKU_BASIC_VFS_ENABLE
+        char cnt[12];
+        int  len = tiku_vfs_read("/sys/boot/count", cnt, sizeof cnt - 1u);
+        if (len > 0) {
+            cnt[len] = '\0';
+            boots = (uint32_t)strtoul(cnt, NULL, 10);
+        }
+#endif
         basic_prng_state = (uint32_t)tiku_clock_time() * 2654435761UL +
-                            0x9E3779B9UL;
+                           (boots + 1u) * 0x9E3779B9UL;
         basic_prng_seeded = 1;
     }
     /* LCG step (Numerical Recipes constants): cheap on MSP430. */

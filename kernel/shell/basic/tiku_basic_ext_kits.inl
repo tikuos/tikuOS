@@ -77,7 +77,8 @@ bext_bitcnt(const long *args, int argc, long *out)
 }
 
 /**
- * @brief HEXPR n[, width]: print n as upper-case hex, with no newline.
+ * @brief HEXPR n[, width]: print n as upper-case hex, with no newline; width
+ *        (1..8) pads with leading zeros.
  *
  * A statement word, so it exercises the statement hook and the parse, print
  * and error services.
@@ -85,7 +86,7 @@ bext_bitcnt(const long *args, int argc, long *out)
 static void
 bext_hexpr(const char **p)
 {
-    long v;
+    long v, width = 1;
     unsigned long u;
     char buf[9];
     int i = 8;
@@ -94,12 +95,23 @@ bext_hexpr(const char **p)
     if (tiku_basic_ext_parse_expr(p, &v) != 0) {
         return;                  /* error already raised */
     }
+    skip_ws(p);
+    if (cur_peek(p) == ',') {
+        cur_advance(p);
+        if (tiku_basic_ext_parse_expr(p, &width) != 0) {
+            return;
+        }
+        if (width < 1 || width > 8) {
+            tiku_basic_ext_error(TIKU_BASIC_ERR_RANGE, "HEXPR width 1..8");
+            return;
+        }
+    }
     u = (unsigned long)v;
     buf[i] = '\0';
     do {
         buf[--i] = HX[u & 0xFu];
         u >>= 4;
-    } while (u != 0u && i > 0);
+    } while ((u != 0u || 8 - i < width) && i > 0);
     tiku_basic_ext_print(&buf[i]);
 }
 

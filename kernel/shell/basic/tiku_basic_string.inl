@@ -1072,7 +1072,7 @@ parse_strprim(const char **p, char *out, size_t cap)
         if (cur_peek(p) != '(') goto fn_paren_err;
         cur_advance(p);
         idx = parse_expr(p);
-        if (basic_error) return 1;
+        if (basic_error) return -1;
         skip_ws(p);
         if (cur_peek(p) != ')') goto fn_paren_err;
         cur_advance(p);
@@ -1101,7 +1101,7 @@ parse_strprim(const char **p, char *out, size_t cap)
         if (cur_peek(p) != '(') goto fn_paren_err;
         cur_advance(p);
         secs = parse_expr(p);
-        if (basic_error) return 1;
+        if (basic_error) return -1;
         skip_ws(p);
         if (cur_peek(p) != ')') goto fn_paren_err;
         cur_advance(p);

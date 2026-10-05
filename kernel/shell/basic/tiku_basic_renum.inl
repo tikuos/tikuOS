@@ -200,8 +200,8 @@ exec_renum(const char **q)
         new_nos[i] = (uint16_t)(start + (long)i * step);
     }
 
-    /* Rewrite every body through the map first, then apply the new
-     * numbers. */
+    /* Check that every body fits once rewritten before changing any, so a
+     * refused RENUM leaves the whole program as it was. */
     for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) {
         if (prog[i].number == 0) continue;
         if (renum_rewrite_body(prog[i].text, tmp, sizeof(tmp),
@@ -209,6 +209,14 @@ exec_renum(const char **q)
             basic_report(TIKU_BASIC_ERR_GENERAL, "RENUM: line too long after rewrite");
             return;
         }
+    }
+
+    /* Rewrite every body through the map first, then apply the new
+     * numbers. */
+    for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) {
+        if (prog[i].number == 0) continue;
+        (void)renum_rewrite_body(prog[i].text, tmp, sizeof(tmp),
+                                 old_nos, new_nos, n_lines);
         strncpy(prog[i].text, tmp, TIKU_BASIC_LINE_MAX - 1);
         prog[i].text[TIKU_BASIC_LINE_MAX - 1] = '\0';
     }

@@ -109,7 +109,9 @@ basic_html_render(const char *html, char *out, size_t outcap)
     size_t li = 0, oi = 0;
     int    in_tag = 0, skip = 0, sp = 1;     /* sp: line start or after space */
 
-    body = strstr(html, "\r\n\r\n");         /* drop HTTP headers if present */
+    /* An HTTP reply opens with its status line, and its header block ends at
+     * the first blank line; any other text is rendered from its start. */
+    body = basic_ci_starts(html, "http/") ? strstr(html, "\r\n\r\n") : NULL;
     p = body ? body + 4 : html;
 
 /* Emit one char to the active sink, flushing the print line on newline/full. */

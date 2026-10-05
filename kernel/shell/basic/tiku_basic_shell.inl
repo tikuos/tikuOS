@@ -49,9 +49,9 @@ basic_session_begin(void)
         }
     }
     if (basic_alloc_state() != 0) {
-        SHELL_PRINTF(SH_RED
-            "? basic: out of memory (need %u B in AUTO tier)" SH_RST "\n",
-            (unsigned)BASIC_ARENA_BYTES);
+        basic_reportf(TIKU_BASIC_ERR_NOMEM,
+                      "basic: out of memory (need %u B in AUTO tier)",
+                      (unsigned)BASIC_ARENA_BYTES);
         return -1;
     }
     gosub_sp        = 0;
@@ -134,9 +134,11 @@ tiku_basic_run_source(const char *source)
 
     SHELL_PRINTF(SH_CYAN "[basic] embedded autorun" SH_RST "\n");
 
+    /* The NUL ends the last line too, so an unterminated last line passes
+     * the same RUN check as the others. */
     line_start = source;
-    for (p = source; *p != '\0'; p++) {
-        if (*p == '\n' || *p == '\r') {
+    for (p = source; ; p++) {
+        if (*p == '\n' || *p == '\r' || *p == '\0') {
             size_t len = (size_t)(p - line_start);
             if (len > 0u && len < sizeof(line_buf)) {
                 memcpy(line_buf, line_start, len);
@@ -155,15 +157,10 @@ tiku_basic_run_source(const char *source)
                 }
                 process_line(line_buf);
             }
+            if (*p == '\0') {
+                break;
+            }
             line_start = p + 1;
-        }
-    }
-    if (*line_start != '\0') {
-        size_t len = strlen(line_start);
-        if (len < sizeof(line_buf)) {
-            memcpy(line_buf, line_start, len);
-            line_buf[len] = '\0';
-            process_line(line_buf);
         }
     }
 
