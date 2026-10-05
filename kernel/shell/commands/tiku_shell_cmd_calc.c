@@ -37,8 +37,8 @@ typedef enum {
     CALC_OP_MAX
 } calc_op_t;
 
-/* Bounded by the parser's TIKU_SHELL_MAX_ARGS (8): "calc" + 7 expr
- * tokens = at most 4 operands and 3 operators. */
+/* At most 4 operands and 3 operators; on MSP430 the parser's 8-entry argv
+ * ("calc" + 7 tokens) gives the same bound. */
 #define CALC_MAX_NUMS  4
 #define CALC_MAX_OPS   (CALC_MAX_NUMS - 1)
 
@@ -125,7 +125,7 @@ calc_parse_op(const char *s, calc_op_t *out)
  * @brief Apply a single binary operator with error reporting.
  *
  * Division and modulo by zero print an error and return 0; all other
- * operations succeed (signed overflow wraps as on the underlying ALU).
+ * operations succeed, and signed overflow is not detected.
  *
  * @return 1 on success, 0 on error (message already printed).
  */
@@ -219,8 +219,7 @@ tiku_shell_cmd_calc(uint8_t argc, const char *argv[])
     n_ops  = (uint8_t)((argc - 2) / 2);
     n_nums = (uint8_t)(n_ops + 1);
 
-    /* The argv limit (TIKU_SHELL_MAX_ARGS = 8) caps argc at 8, so
-     * n_nums cannot exceed CALC_MAX_NUMS.  Belt-and-suspenders: */
+    /* Off MSP430 the argv can hold more operands than CALC_MAX_NUMS. */
     if (n_nums > CALC_MAX_NUMS) {
         SHELL_PRINTF("calc: expression too long\n");
         return;

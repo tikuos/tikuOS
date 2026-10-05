@@ -5,8 +5,8 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_radio154.h - "radio154" shell command: 802.15.4 PHY
- *                             bring-up (tx / rx / ed) on the nRF54L RADIO.
+ * tiku_shell_cmd_radio154.h - "radio154" shell command: 802.15.4 PHY and
+ *                             MAC-min tests on the nRF54L RADIO.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,9 +19,9 @@
 /**
  * @brief "radio154" command handler.
  *
- *   radio154 tx [ch] [text]   send one frame (default ch 15, "TK15" demo)
- *   radio154 rx [ch] [secs]   listen; dump CRC-OK frames (default ch 15, 10 s)
- *   radio154 ed [ch]          energy detect one channel, or scan 11..26
+ * Usage: radio154 tx|rx|ed|ping|pong|secping|secpong [ch] [...]
+ * PHY tests (send, listen, energy detect) and MAC-min ping/pong with ACK and
+ * optional AES-CCM* security; the verb table is in the .c file.
  */
 void tiku_shell_cmd_radio154(uint8_t argc, const char *argv[]);
 

@@ -18,8 +18,8 @@
 /**
  * @brief "free" command handler — display memory usage.
  *
- * Shows SRAM and FRAM totals, used and free bytes, and a per-process
- * breakdown of memory consumption.
+ * Shows SRAM and NVM totals, used and free bytes, the tier pools, and a
+ * per-process breakdown of memory use.
  *
  * @param argc  Argument count
  * @param argv  Argument vector

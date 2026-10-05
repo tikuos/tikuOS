@@ -8,19 +8,18 @@
  * tiku_shell_cmd_freq.c - "freq" command: show or set the CPU core frequency.
  *
  * Setting drives the platform's frequency path -- the DCO on MSP430, the
- * performance mode on Ambiq.  A request the platform cannot honour leaves the
- * clock unchanged and is reported back.
+ * performance mode on Ambiq, the clock tree elsewhere.  A request the platform
+ * cannot honour leaves the clock unchanged and is reported back.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "tiku_shell_cmd_freq.h"
 #include <kernel/shell/tiku_shell.h>   /* SHELL_PRINTF */
-#include <hal/tiku_cpu.h>              /* tiku_cpu_freq_init / tiku_cpu_mclk_hz */
-#include <string.h>                    /* strcmp ("probe" subcommand)          */
+#include <hal/tiku_cpu.h>              /* tiku_cpu_freq_init, _mclk_hz */
+#include <string.h>                    /* strcmp ("probe" subcommand) */
 
-/* Round to nearest: a measured clock sits a hair under its nominal rate, and
- * truncating reported an exact 600 MHz switch as 599. */
+/* Round to nearest: a measured clock sits a hair under its nominal rate. */
 #define TIKU_HZ_TO_MHZ(hz)  (((hz) + 500000UL) / 1000000UL)
 
 #if defined(PLATFORM_STM32N6)
@@ -39,9 +38,12 @@
 #if defined(PLATFORM_AMBIQ) && defined(AM_PART_APOLLO510)
 #include <arch/ambiq/tiku_cpu_freq_boot_arch.h>   /* HP identity probe */
 
-/* "freq probe" -- dump the silicon/trim/power identity that decides whether
- * (and how) High-Performance mode can be enabled on this exact chip. Read-only:
- * changes no clock, voltage, or perf mode. */
+/**
+ * @brief "freq probe": dump the silicon, trim and power identity.
+ *
+ * That identity decides whether (and how) High-Performance mode can be
+ * enabled on this chip.  Read-only: changes no clock, voltage or perf mode.
+ */
 static void
 freq_cmd_probe(void)
 {
@@ -78,11 +80,9 @@ freq_cmd_probe(void)
                  (((p.mcuperfreq >> 3) & 3u) == 2u) ? "HP" : "LP");
     SHELL_PRINTF("  MEASURED    %lu Hz core clock (SysTick vs 32 kHz XT)\n",
                  tiku_cpu_freq_ambiq_measured_hz());
-    /* VDDF plan.  Measured HP active power sat 53% above the datasheet's
-     * IRUNHPFB row while LP was within 6% of IRUNLPFB, and P ~ V^2 makes an
-     * over-volt the prime suspect -- so print the boost this port computes and
-     * the trim the silicon is actually running.  The plan is built on the FIRST
-     * HP request, so run `freq 250` before expecting numbers here. */
+    /* VDDF: the boost this port computes for HP and the trim the silicon
+     * runs.  The boost plan is built on the first HP request, so run
+     * `freq 250` before expecting numbers here. */
     SHELL_PRINTF("  VDDF trim   applied=0x%02x (live MCUCTRL.VREFGEN4"
                  ".TVRGFVREFTRIM)\n", (unsigned)p.vddf_applied);
     if (p.vddf_plan_ok) {
@@ -98,8 +98,7 @@ freq_cmd_probe(void)
                      (unsigned)p.vddf_boost_codes,
                      (unsigned long)p.vddf_ltrim,
                      (unsigned long)p.vddf_etrim);
-        /* Plain %u only: SHELL_PRINTF's lightweight formatter has no %+d (it
-         * printed the format string verbatim), and no %p either. */
+        /* Plain %u only: the shell formatter has no '+' flag. */
         if (p.vddf_hp == p.vddf_ps13_raw) {
             SHELL_PRINTF("    -> HP runs the FACTORY state-13 trim exactly "
                          "(no boost applied)\n");
@@ -112,10 +111,8 @@ freq_cmd_probe(void)
     } else {
         SHELL_PRINTF("    plan      not computed yet -- run `freq 250` first\n");
     }
-    /* Raw regulator/buck state, for diffing LP vs HP from the host.  Raw hex
-     * on purpose: interpretation belongs to the analysis, and a firmware
-     * formatter that decodes fields is a second place for a transcription bug
-     * to hide.  Reads only. */
+    /* Raw regulator and buck registers, for diffing LP against HP on the
+     * host; reads only. */
     SHELL_PRINTF("  REGS vrefgen2=%08lx vrefgen3=%08lx vrefgen4=%08lx\n",
                  (unsigned long)p.r_vrefgen2,
                  (unsigned long)p.r_vrefgen3,
@@ -213,8 +210,8 @@ static void freq_cmd_probe_c61(void)
 /**
  * @brief Measure the live tree against the crystal, on-chip.
  *
- * Counts one clock against another with no host stopwatch involved, so a rung
- * that reports a rate it is not running at is caught rather than believed.
+ * Counts PCLKB against the crystal with the CAC, so a rung that reports a
+ * rate it is not running at shows up as a large error.
  */
 static void freq_cmd_probe_ra8p1(void)
 {

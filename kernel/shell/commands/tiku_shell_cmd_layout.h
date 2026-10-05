@@ -20,8 +20,9 @@
 /**
  * @brief "layout" command handler.
  *
- * Subcommands: show, limits, plan, stage, status, cancel and resume.  A change
- * is staged for the next boot; one that rewrites /data needs --erase.
+ * Subcommands: show, limits, status, plan, stage, cancel, resume, inspect and
+ * recover.  A change is staged for the next boot; one that rewrites /data
+ * needs --erase.
  *
  * @param argc Argument count
  * @param argv Argument vector

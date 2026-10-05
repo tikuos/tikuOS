@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_bleadv.h - nRF54L15 BLE beacon bring-up command (opt-in).
+ * tiku_shell_cmd_bleadv.h - "bleadv": BLE beacon, scan and link tests (opt-in).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,15 +18,15 @@
 
 #if TIKU_SHELL_CMD_BLEADV
 /**
- * @brief "bleadv" command handler — BLE beacon, scan and link harness.
+ * @brief "bleadv" command handler — BLE beacon, scan and link tests.
  *
- * The bare form starts a self-stopping demo beacon.  Sub-commands cover the
- * background beacon (on/off), scanning (scan/observe), extended advertising,
- * both roles (conn/central and their variants), the PHY probes and link tests.
+ * `bleadv <name> [secs]` starts a self-stopping demo beacon.  Sub-commands
+ * cover the background beacon, scanning, extended advertising, both link
+ * roles, pairing and bonding, PHY probes, crypto self-tests and FLPR tests.
  *
  * @param argc  Argument count
  * @param argv  Argument vector; argv[1] is the sub-command or the beacon
- *              name, argv[2..] carry its duration and name parameters
+ *              name, argv[2..] carry its parameters
  */
 void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[]);
 #endif

@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_mrambench.c - "mrambench" command (Ambiq).
  *
- * Times the bootrom MRAM programmer at several spans, and verifies that the flush
- * dirty-check skips idle flushes.  Both bracket the work in the NVM unlock window
- * the programmer requires.
+ * Times the bootrom MRAM programmer at several spans, and verifies that the
+ * flush dirty-check skips idle flushes.  Both bracket the work in the NVM
+ * unlock window the programmer requires.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -25,7 +25,7 @@
 static volatile uint32_t __attribute__((section(".uninit"))) s_mram_test_scratch;
 
 /*---------------------------------------------------------------------------*/
-/* mrambench verify -- dirty-check regression guard                          */
+/* DIRTY-CHECK SELF-TEST                                                     */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -52,7 +52,8 @@ mrambench_verify(void)
     tiku_mpu_lock_nvm(saved);
     c1 = tiku_mem_arch_nvm_program_count();
 
-    /* (2) Change .uninit inside the unlock window, flush -> must program once. */
+    /* (2) Change .uninit inside the unlock window, flush -> must program
+     * once. */
     saved = tiku_mpu_unlock_nvm();
     s_mram_test_scratch ^= 0xDEADBEEFuL;
     tiku_mpu_lock_nvm(saved);
@@ -76,7 +77,7 @@ mrambench_verify(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* mrambench (no arg) -- program-timing benchmark                            */
+/* PROGRAM-TIMING BENCHMARK                                                  */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -117,7 +118,7 @@ mrambench_time(void)
     }
 
     /* Two-point fit (smallest vs largest span): fixed per-call overhead and
-     * the marginal per-word cost -- what a block-granular flush is sized on. */
+     * the marginal per-word cost. */
     if (n >= 2U) {
         uint32_t w0 = (uint32_t)rows[0].bytes / 4U;
         uint32_t w1 = (uint32_t)rows[n - 1U].bytes / 4U;

@@ -7,8 +7,8 @@
  *
  * tiku_shell_cmd_ps.c - "ps" command implementation
  *
- * Walks the process linked list and prints each active process
- * with its name and running status.
+ * Walks the process registry by pid and prints each process's state, SRAM
+ * and NVM use and name, then the event-queue fill.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,8 +18,8 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_shell_cmd_ps.h"
-#include <kernel/shell/tiku_shell.h>
-#include <kernel/memory/tiku_nvm_map.h>  /* TIKU_DEVICE_NVM_LABEL */             /* SHELL_PRINTF via tiku_shell_io.h */
+#include <kernel/shell/tiku_shell.h>     /* SHELL_PRINTF via tiku_shell_io.h */
+#include <kernel/memory/tiku_nvm_map.h>  /* TIKU_DEVICE_NVM_LABEL */
 #include <kernel/process/tiku_process.h>
 
 /*---------------------------------------------------------------------------*/

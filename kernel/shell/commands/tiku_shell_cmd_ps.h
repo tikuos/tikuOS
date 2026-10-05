@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_ps.h - "ps" command: list active processes
+ * tiku_shell_cmd_ps.h - "ps" command: list registered processes
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -16,7 +16,7 @@
 #include <stdint.h>
 
 /**
- * @brief "ps" command handler — print all active processes.
+ * @brief "ps" command handler — print every registered process.
  *
  * @param argc  Argument count (unused)
  * @param argv  Argument vector (unused)

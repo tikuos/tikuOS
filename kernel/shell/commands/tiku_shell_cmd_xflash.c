@@ -63,7 +63,7 @@ static void xflash_id(void)
 /**
  * @brief Erase, program and verify the scratch sector.
  *
- * Checks the erase actually set the bytes to 0xFF before programming, so a
+ * Checks that the erase set the bytes to 0xFF before programming, so a
  * failure says which half of the cycle broke.
  */
 static void xflash_test(void)

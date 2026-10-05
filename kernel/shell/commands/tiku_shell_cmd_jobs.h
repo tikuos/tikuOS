@@ -18,9 +18,8 @@
 /**
  * @brief "jobs" command — manage scheduled jobs.
  *
- * Usage:
- *   jobs              List all scheduled jobs
- *   jobs del <id>     Free the slot at @p id
+ * `jobs` lists every scheduled job, `jobs del <id>` frees the slot at that
+ * id, and `jobs del all` frees every slot.
  *
  * @param argc  Argument count
  * @param argv  Argument vector

@@ -18,8 +18,9 @@
 /**
  * @brief Handle `power usb ...`.  argv[1] is already known to be "usb".
  *
- * Compiled only when TIKU_DRV_USB_ENABLE is set; tiku_shell_cmd_power.c guards the call
- * with the same flag, so there is no runtime "not available" stub.
+ * Compiled only when TIKU_DRV_USB_ENABLE is set; tiku_shell_cmd_power.c
+ * guards the call with the same flag, so there is no runtime "not available"
+ * stub.
  */
 void tiku_shell_cmd_usb(uint8_t argc, const char *argv[]);
 

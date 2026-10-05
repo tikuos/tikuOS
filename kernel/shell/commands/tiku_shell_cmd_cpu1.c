@@ -7,8 +7,8 @@
  *
  * tiku_shell_cmd_cpu1.c - "cpu1" command (RA8P1 Cortex-M33).
  *
- * Starts, halts and reports the second core, reading liveness out of the
- * shared page rather than from what the loader believes it did.
+ * Starts, halts, pings and reports the second core, reading liveness from
+ * the shared page, and times SHA-256 and P-256 work offloaded to it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -67,7 +67,7 @@ static uint32_t cpu1_wait_reply(void *out, uint32_t cap, uint32_t ms)
 }
 
 /**
- * @brief Handle `cpu1 start|stop|ping|info`.
+ * @brief Handle `cpu1 start|stop|ping|bench|verify|info`.
  *
  * @param argc Argument count
  * @param argv Argument vector
@@ -229,8 +229,7 @@ void tiku_shell_cmd_cpu1(uint8_t argc, const char *argv[])
     }
 
     if (argc >= 2u && tiku_cmd_streq(argv[1], "verify")) {
-        /* NIST CAVP P-256 SHA-256 vector: a known-good signature, so a
-         * wrong answer is a failure rather than an opinion. */
+        /* NIST CAVP P-256/SHA-256 vector with a known-good signature. */
         static const uint8_t qx[32] = {
             0x1c,0xcb,0xe9,0x1c,0x07,0x5f,0xc7,0xf4,0xf0,0x33,0xbf,0xa2,
             0x48,0xdb,0x8f,0xcc,0xd3,0x56,0x5d,0xe9,0x4b,0xbf,0xb1,0x2f,
@@ -334,9 +333,9 @@ void tiku_shell_cmd_cpu1(uint8_t argc, const char *argv[])
         uint32_t a = tiku_ra8p1_cpu1_heartbeat();
         uint32_t b;
 
-        /* Two reads with work between them: a counter that is merely NON-ZERO
-         * proves the payload ran once, and one that MOVES proves the core is
-         * still executing rather than stopped at a fault. */
+        /* Two reads with work between them: a non-zero counter shows the
+         * payload ran, and one that moves between the reads shows the core
+         * is still running rather than stopped at a fault. */
         for (b = 0; b < 20000u; b++) {
             __asm__ volatile ("nop");
         }

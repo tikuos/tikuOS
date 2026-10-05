@@ -18,9 +18,9 @@
 /**
  * @brief "tree" command -- recursive depth-first VFS dump.
  *
- * Lists the current working directory, or the subtree rooted at a given path,
- * using ASCII connectors with directories marked by a trailing '/'.  Recursion
- * is capped by TIKU_SHELL_TREE_MAX_DEPTH so a looping VFS cannot blow the stack.
+ * Lists the working directory, or the subtree at a given path, with ASCII
+ * connectors and a trailing '/' on directories.  Recursion is capped by
+ * TIKU_SHELL_TREE_MAX_DEPTH, so a looping VFS cannot exhaust the stack.
  */
 void tiku_shell_cmd_tree(uint8_t argc, const char *argv[]);
 

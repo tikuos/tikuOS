@@ -18,8 +18,9 @@
 /**
  * @brief "read" command handler — read and display a VFS node's value.
  *
- * Takes one absolute or CWD-relative path -- `read /sys/uptime`,
- * `read /dev/led0` -- and prints the node's rendered value.
+ * Takes one absolute or CWD-relative path -- `read /sys/uptime` -- and prints
+ * the node's rendered value; `read <path> <line> [bytes]` prints one page of
+ * whole lines from that line, within the byte budget.
  *
  * @param argc  Argument count
  * @param argv  Argument vector

@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_repeat.c - "repeat" command implementation.
  *
- * Rebuilds the trailing tokens into a template and re-runs it through the parser.
- * The parser tokenises in place, so each iteration copies the template to fresh
- * scratch.  Ctrl+C is polled per iteration; count and recursion are both bounded.
+ * Re-runs the trailing tokens through the parser <count> times, copying them to
+ * fresh scratch each pass because the parser tokenises in place.  Ctrl+C is
+ * polled per pass; count and nesting depth are both bounded.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -32,8 +32,7 @@
 #define TIKU_SHELL_REPEAT_DEPTH_MAX  2
 #endif
 
-/** Single-frame budget for the joined command line.  Matches the
- *  alias and rule action sizes so the same recipes compose. */
+/** Single-frame budget for the joined command line. */
 #ifndef TIKU_SHELL_REPEAT_CMD_MAX
 #define TIKU_SHELL_REPEAT_CMD_MAX    80
 #endif

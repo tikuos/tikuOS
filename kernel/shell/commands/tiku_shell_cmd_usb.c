@@ -7,9 +7,8 @@
  *
  * tiku_shell_cmd_usb.c - `power usb ...` verbs.
  *
- * Split out of the power command, whose top-level verb forwards here.  The verb
- * bodies were moved verbatim and gated on a before/after diff of every verb's
- * output, so this file deliberately contains no improvements.
+ * Bring-up, enumeration and mass-storage verbs for the Apollo510 USB device
+ * controller; tiku_shell_cmd_power.c forwards the `usb` verb here.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -28,31 +27,36 @@
 
 void tiku_shell_cmd_usb(uint8_t argc, const char *argv[])
 {
-    /* U1: bring-up and enumeration.
+    /* argv[2] selects the verb; anything unmatched prints the state.
      *
-     *   power usb up [hs] [msc]
+     *   power usb up [hs] [msc | emmc]
      *                      power both domains, clock the PHY, arm EP0.
      *                      default full speed + CDC console; "hs"
-     *                      requests high speed, "msc" presents mass
-     *                      storage instead of the console
-     *   power usb hash [n] FNV-1a of the RAM disk -- the U3 gate
+     *                      requests high speed, "msc" presents a RAM
+     *                      disk instead of the console, "emmc" the card
      *   power usb attach   soft-connect -- the host may now enumerate
      *   power usb detach   soft-disconnect
      *   power usb state    what the host has done so far
      *   power usb regs     host registers (power-safe)
      *   power usb console  move the shell onto the CDC pipes
      *   power usb uart     move it back (the escape hatch)
+     *   power usb hash [n] MSC counters and FNV-1a of the RAM disk
+     *   power usb selftest MSC LBA bounds-check cases
+     *   power usb adma on|off
+     *                      MSC data path by ADMA or PIO
+     *   power usb sink [ms]
+     *                      count CDC input until ms of idle
      *   power usb off      release the rails and both domains
      *
-     * `up` deliberately leaves the device DETACHED so bring-up can be
-     * inspected before the bus starts making demands with deadlines.
+     * `up` leaves the device detached so bring-up can be inspected before
+     * the bus starts making demands with deadlines.
      */
     static const char *const un[] = { "ok", "POWER", "CLOCK", "TIMEOUT",
                                       "ARG", "STATE", "FIFO" };
     if (argc >= 3 && tiku_cmd_streq(argv[2], "up")) {
-        /* Full speed unless asked otherwise.  The two paths differ in
-         * exactly one thing -- where the PHY's reference comes from --
-         * which is what makes a HS failure attributable. */
+        /* Full speed unless asked otherwise.  The two paths differ only in
+         * where the PHY's reference comes from, so a HS failure can be
+         * attributed. */
         int hs = 0, msc = 0, emmc = 0, k;
         tiku_usb_err_t rc;
         for (k = 3; k < argc; k++) {
@@ -74,10 +78,8 @@ void tiku_shell_cmd_usb(uint8_t argc, const char *argv[])
                          " `power emmc id`)\n");
         }
 #if (TIKU_DRV_EMMC_ENABLE + 0)
-        /* Guarded because TIKU_EMMC_SCRATCH_BLOCKS is an eMMC-driver
-         * symbol: without this, a USB-only build (no eMMC) failed to
-         * COMPILE -- `usb` and `emmc` were clubbed together in the shell.
-         * S4 splits this file properly; this is the one-line unblocking. */
+        /* Guarded because TIKU_EMMC_SCRATCH_BLOCKS exists only with the
+         * eMMC driver. */
         if (emmc && rc == TIKU_USB_OK) {
             uint32_t cbw, rd, wr, blocks;
             tiku_usb_msc_stats(&cbw, &rd, &wr, &blocks);
@@ -100,7 +102,7 @@ void tiku_shell_cmd_usb(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "console")) {
-        /* Announce on the CURRENT channel first -- after the switch this
+        /* Announce on the current channel first: after the switch this
          * message would go somewhere the reader is not looking. */
         if (!tiku_usb_cdc_ready()) {
             SHELL_PRINTF("usb console: refused -- not configured, or the"
@@ -184,9 +186,8 @@ void tiku_shell_cmd_usb(uint8_t argc, const char *argv[])
         return;
     }
     {
-        /* Default: state.  The counters ARE the diagnosis -- an ISR
-         * cannot print, so it counts, and the pattern says where the
-         * enumeration stopped. */
+        /* Default: state.  An ISR cannot print, so it counts; the counters
+         * show where enumeration stopped. */
         tiku_usb_counters_t c;
         static const char *const sp[] = { "none", "full", "high" };
         tiku_usb_speed_t spd = tiku_usb_speed();

@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_dns.c - "dns" command (async A-record lookup).
  *
- * Resolves a hostname over SLIP through the stub resolver.  The resolver counts
- * each no-reply poll as a retry, so polling is paced at ~1 Hz rather than once per
- * shell tick, and I/O flows through the shared demux so the shell stays interactive.
+ * Resolves a hostname over SLIP through the stub resolver, with I/O through
+ * the shared demux so the shell stays interactive.  The resolver counts each
+ * no-reply poll as a retry, so polls are paced at ~1 Hz, not every tick.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,7 +19,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_shell_cmd_dns.h"
-#include "tiku_shell_cmd_slip.h"                  /* tiku_shell_cmd_slip_enable */
+#include "tiku_shell_cmd_slip.h"                  /* slip_enable */
 #include <kernel/shell/tiku_shell.h>              /* SHELL_PRINTF */
 #include <kernel/timers/tiku_clock.h>             /* tiku_clock_time */
 #include <tikukits/net/ipv4/tiku_kits_net_udp.h>  /* udp_init */
@@ -44,6 +44,7 @@ static tiku_clock_time_t dns_last_poll;
 /* HELPERS                                                                   */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Parse a dotted-quad IPv4 address; 1 on success, 0 if malformed. */
 static uint8_t
 dns_parse_ip(const char *s, uint8_t out[4])
 {
@@ -91,9 +92,9 @@ tiku_shell_cmd_dns(uint8_t argc, const char *argv[])
     static uint8_t udp_ready;
     uint8_t server[4];
 
-    /* Default resolver: the DHCP lease's (option 6) when bound, else
-     * 8.8.8.8 -- campus networks often block external resolvers.  An
-     * explicit [resolver-ip] argument still overrides below. */
+    /* Default resolver: a configured override, else the DHCP lease's
+     * (option 6) when bound, else 8.8.8.8 -- campus networks often block
+     * external resolvers.  An explicit [resolver-ip] overrides below. */
     tiku_kits_net_dns_default_server(server);
 
     if (dns_on) {

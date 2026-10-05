@@ -26,7 +26,7 @@
 #include <arch/ra8p1/tiku_store_arch.h>
 
 /*
- * The MSC pump is registered with the SHELL, not with the scheduler's idle
+ * The MSC pump is registered with the shell, not with the scheduler's idle
  * hook.  A SCSI command can take milliseconds of process context and the
  * shell already owns a place for work of that shape; the idle hook runs when
  * the system has decided to do nothing, which is the wrong moment to start

@@ -22,8 +22,8 @@
  * @brief "peek" command -- read N bytes from a memory address.
  *
  * Address takes decimal or 0x-prefixed hex, count defaults to 1 and caps at
- * 32.  Low 64 KB only, since uintptr_t is 16-bit in the small memory model, so
- * HIFRAM is out of reach.  Reads are subject to the active MPU rules.
+ * 32.  On MSP430 only the low 64 KB is reachable (not HIFRAM); 32-bit ports
+ * take any address.  Reads are subject to the active MPU rules.
  */
 void tiku_shell_cmd_peek(uint8_t argc, const char *argv[]);
 
@@ -31,8 +31,8 @@ void tiku_shell_cmd_peek(uint8_t argc, const char *argv[]);
  * @brief "poke" command -- write a single byte to an address.
  *
  * Both arguments take decimal or 0x-prefixed hex, and the write is a plain
- * volatile store subject to the active MPU rules -- a read-only FRAM segment
- * silently drops it, so bracket the call with the NVM unlock or use `write`.
+ * volatile store under the active MPU rules: MSP430's read-only FRAM drops
+ * it, and a write-protected durable region faults.  Use `write` for NVM nodes.
  */
 void tiku_shell_cmd_poke(uint8_t argc, const char *argv[]);
 

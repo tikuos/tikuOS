@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_ntp.c - "ntp" command (async SNTP query).
  *
- * Fetches wall-clock time over SLIP and sets the system RTC, so TLS validity,
- * /sys/time and the BASIC date words get a real clock.  A hostname is resolved
- * first; polling is paced at ~1 Hz because each no-reply poll counts as a retry.
+ * Fetches wall-clock time over the IP link and sets the system RTC, so TLS
+ * validity, /sys/time and the BASIC date words get a real clock.  A hostname is
+ * resolved first; polling is paced at ~1 Hz as each no-reply poll is a retry.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,7 +19,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_shell_cmd_ntp.h"
-#include "tiku_shell_cmd_slip.h"                  /* tiku_shell_cmd_slip_enable */
+#include "tiku_shell_cmd_slip.h"                  /* slip_enable */
 #include <kernel/shell/tiku_shell.h>              /* SHELL_PRINTF */
 #include <kernel/timers/tiku_clock.h>             /* tiku_clock_time */
 #include <tikukits/net/tiku_kits_net.h>           /* TIKU_KITS_NET_OK, etc. */
@@ -41,19 +41,17 @@
 /* Overall per-phase backstop in case a state machine wedges. */
 #define NTP_DEADLINE    ((tiku_clock_time_t)(12u * TIKU_CLOCK_SECOND))
 
-/* Default NTP server for a bare `ntp` (no argument).  The SLIP host (.1) only
- * answers NTP under the TikuBench test harness; for interactive use over a
- * real internet bridge, default to a public server instead.  time.google.com
- * anycast answers SNTP directly (no DNS needed) and is the very address the
- * SNTP client header documents as its example.  Override at build time. */
+/* Default NTP server for a bare `ntp` (no argument): time.google.com anycast,
+ * which answers SNTP directly (no DNS needed).  The SLIP host (.1) answers NTP
+ * only under the TikuBench test harness.  Override at build time. */
 #ifndef TIKU_SHELL_NTP_SERVER
 #define TIKU_SHELL_NTP_SERVER  {216, 239, 35, 0}
 #endif
 
 typedef enum {
-    NTP_PH_IDLE,    /* nothing in flight */
-    NTP_PH_DNS,     /* resolving a hostname */
-    NTP_PH_NTP      /* awaiting the SNTP reply */
+    NTP_PH_IDLE,    /**< nothing in flight */
+    NTP_PH_DNS,     /**< resolving a hostname */
+    NTP_PH_NTP      /**< awaiting the SNTP reply */
 } ntp_phase_t;
 
 static ntp_phase_t       ntp_phase;
@@ -65,6 +63,7 @@ static tiku_clock_time_t ntp_last_poll; /* last library poll (for pacing) */
 /* HELPERS                                                                   */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Parse dotted IPv4 @p s into @p out; 1 on success, 0 otherwise. */
 static uint8_t
 ntp_parse_ip(const char *s, uint8_t out[4])
 {
@@ -96,15 +95,14 @@ ntp_parse_ip(const char *s, uint8_t out[4])
     return (*s == '\0') ? 1u : 0u;
 }
 
-/* Print a zero-padded two-digit field without relying on printf width
- * specifiers (SHELL_PRINTF is intentionally minimal). */
+/** @brief Print the last two decimal digits of @p v, zero-padded. */
 static void
 ntp_put2(uint8_t v)
 {
     SHELL_PRINTF("%u%u", (unsigned)((v / 10u) % 10u), (unsigned)(v % 10u));
 }
 
-/* Begin (or restart) the SNTP query phase against ntp_srv. */
+/** @brief Begin (or restart) the SNTP query phase against ntp_srv. */
 static void
 ntp_begin_query(void)
 {
@@ -134,15 +132,16 @@ tiku_shell_cmd_ntp_active(void)
 void
 tiku_shell_cmd_ntp(uint8_t argc, const char *argv[])
 {
-    static uint8_t udp_ready;   /* one-shot UDP bring-up for standalone builds */
+    static uint8_t udp_ready;   /* one-shot UDP init for standalone builds */
 
     if (ntp_phase != NTP_PH_IDLE) {
         SHELL_PRINTF("ntp already running\n");
         return;
     }
 
-    /* SLIP on so the shared RX demux delivers replies; ensure UDP dispatch
-     * is up (the net-test path already inits it; this covers shell+net). */
+    /* Turn SLIP on so the console's IPv4 channel delivers replies; ensure
+     * UDP dispatch is up (the net-test path already inits it; this covers
+     * shell+net). */
     tiku_shell_cmd_slip_enable();
     if (!udp_ready) {
         tiku_kits_net_udp_init();
@@ -155,7 +154,8 @@ tiku_shell_cmd_ntp(uint8_t argc, const char *argv[])
         } else {
             /* Hostname -> resolve via DNS first, then query. */
             uint8_t resolver[4];
-            tiku_kits_net_dns_default_server(resolver);  /* DHCP dns, else 8.8.8.8 */
+            /* The set override, else the DHCP lease's DNS, else 8.8.8.8. */
+            tiku_kits_net_dns_default_server(resolver);
             tiku_kits_net_dns_init();
             tiku_kits_net_dns_set_server(resolver);
             if (tiku_kits_net_dns_resolve(argv[1]) != TIKU_KITS_NET_OK) {
@@ -244,8 +244,8 @@ tiku_shell_cmd_ntp_tick(void)
             if (tiku_kits_time_ntp_get_tm(&tm) == TIKU_KITS_TIME_OK &&
                 tiku_kits_time_ntp_get_time(&ts) == TIKU_KITS_TIME_OK) {
                 /* Set the system wall clock so date-dependent consumers (TLS
-                 * certificate validity, /sys/time, BASIC DATE$/NOW) have a real
-                 * time without a separate `write /sys/time`. */
+                 * certificate validity, /sys/time, the BASIC functions DATE$
+                 * and NOW()) have a real time without `write /sys/time`. */
                 int saved = tiku_rtc_set_seconds_status((uint32_t)ts);
                 SHELL_PRINTF("ntp: %u-", (unsigned)tm.year);
                 ntp_put2(tm.month);

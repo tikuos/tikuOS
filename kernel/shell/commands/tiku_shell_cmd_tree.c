@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_tree.c - "tree" command implementation.
  *
- * Walks a VFS subtree depth-first with a depth budget, so a malformed or unusually
- * deep tree cannot exhaust the stack.  It recurses on the in-memory node pointers
- * rather than re-resolving paths, which keeps each frame tiny.
+ * Walks a VFS subtree depth-first with a depth budget, so a malformed or
+ * unusually deep tree cannot exhaust the stack.  It recurses on the in-memory
+ * node pointers rather than re-resolving paths, which keeps each frame small.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,9 +19,8 @@
 #include <kernel/shell/tiku_shell_cwd.h>
 #include <kernel/vfs/tiku_vfs.h>
 
-/* Two indent units per directory level keeps deep paths readable
- * within an 80-column terminal.  At the cap of 8 levels the leaf
- * line still fits comfortably. */
+/* Each level indents three columns, so at the cap of 8 levels a leaf line
+ * still leaves room for its name in an 80-column terminal. */
 #ifndef TIKU_SHELL_TREE_MAX_DEPTH
 #define TIKU_SHELL_TREE_MAX_DEPTH 8
 #endif

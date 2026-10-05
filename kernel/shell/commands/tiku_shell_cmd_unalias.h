@@ -18,8 +18,7 @@
 /**
  * @brief "unalias" command — remove a shell alias.
  *
- * The slot is freed in FRAM, so subsequent reboots will not see the removed
- * alias.
+ * The slot is freed in durable memory, so later boots do not see the alias.
  */
 void tiku_shell_cmd_unalias(uint8_t argc, const char *argv[]);
 

@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_ntp.h - "ntp" command: fetch wall-clock time over SLIP (SNTP)
+ * tiku_shell_cmd_ntp.h - "ntp" command: fetch wall-clock time over SNTP
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,9 +18,12 @@
 /**
  * @brief "ntp" command -- query an SNTP server for wall-clock time.
  *
- * Enables SLIP mode so the shell's RX demux routes the UDP reply to the IP
- * stack, sends one request (to the SLIP host by default) and prints the UTC
- * time.  Non-blocking: the reply is awaited across shell ticks.
+ * Sends one request to a public server by default, or to the given IP or host
+ * (resolved first), then prints the UTC time and sets the RTC.  Non-blocking:
+ * the reply is awaited across shell ticks.
+ *
+ * @note Turns SLIP on (tiku_shell_cmd_slip_enable()) so the reply reaches the
+ *       IP stack.
  */
 void tiku_shell_cmd_ntp(uint8_t argc, const char *argv[]);
 

@@ -18,7 +18,11 @@
 
 #include <stdint.h>
 
-/** @brief "usbprobe" command handler. */
+/**
+ * @brief "usbprobe" command handler: `usbprobe regs | vbus | up | down |
+ *        live [n] | dev [phyif] [trd] [spd] | enum | log |
+ *        try <en> <first> [fsel]`.
+ */
 void tiku_shell_cmd_usbprobe(uint8_t argc, const char *argv[]);
 
 #endif /* TIKU_SHELL_CMD_USBPROBE_H_ */

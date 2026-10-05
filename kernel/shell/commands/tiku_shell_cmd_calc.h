@@ -20,7 +20,7 @@
  *
  * Space-separated tokens over 32-bit signed integers, no floating point.
  * Two precedence classes, both left-to-right: * / % min max bind tighter
- * than + -.  The shell argv limit bounds it to four operands.
+ * than + -.  At most four operands.
  *
  * @param argc  Argument count
  * @param argv  Argument vector

@@ -7,10 +7,9 @@
  *
  * tiku_shell_cmd_sdr.c - "sdr" command: the radio as a receiver.
  *
- * `sdr start` lends the capture bank and brings the radio up; `sdr spec
- * MHZ [rate] [nfft]` and `sdr sweep LO HI STEP` print spectra computed
- * here, the SPEC lines TikuSDR draws; `sdr stop` gives it all back.
- * `sdr cap`, `scan` and `hex` look at a raw snapshot by hand.
+ * `sdr start` lends the capture bank and brings the radio up; `sdr spec` and
+ * `sdr sweep` print the SPEC lines TikuSDR draws; `sdr stop` gives it all
+ * back.  `sdr cap`, `scan` and `hex` look at a raw snapshot by hand.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,6 +22,7 @@
 #include <interfaces/wireless/tiku_wireless.h>
 #include <drivers/wifi/esp/tiku_drv_sdr_esp.h>
 
+/** @brief Print the usage. */
 static void sdr_help(void)
 {
     SHELL_PRINTF("usage: sdr start | stop | info | spec <MHz> [rate] [nfft]"
@@ -48,6 +48,7 @@ static void bar(uint32_t v)
     SHELL_PRINTF("\n");
 }
 
+/** @brief Explain a failed capture's return code. */
 static void sdr_failed(int rc)
 {
     SHELL_PRINTF("sdr: capture failed (%d): %s\n", rc,
@@ -82,6 +83,10 @@ static void sdr_line(uint32_t mhz, const tiku_drv_sdr_esp_result_t *r)
                  hi > 3UL * lo ? "  burst" : "");
 }
 
+/**
+ * @brief `sdr cap <MHz> [rate] [words] [reps]`: one snapshot in detail, or a
+ *        summary line per snapshot when reps > 1.
+ */
 static void sdr_cap(uint8_t argc, const char *argv[])
 {
     tiku_drv_sdr_esp_result_t r;
@@ -128,6 +133,7 @@ static void sdr_cap(uint8_t argc, const char *argv[])
     }
 }
 
+/** @brief `sdr hex <offset> <count>`: dump raw sample words. */
 static void sdr_hex(const char *argv[])
 {
     const uint32_t *w = tiku_drv_sdr_esp_samples();
@@ -164,12 +170,12 @@ static void sdr_scan(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* The machine lines a viewer reads: one SPEC line per spectrum.             */
+/* SPECTRUM LINES                                                            */
 /*---------------------------------------------------------------------------*/
 
 /** @brief "SPEC <MHz> <Hz> <gain> <nfft> <hex bins>": one bin a byte,
- *         half-decibels, low to high.  SHELL_PRINTF pads no hex, so the
- *         digits are built here and printed a chunk at a time. */
+ *         half-decibels, low to high.  The hex digits are built here and
+ *         printed 64 at a time. */
 static int sdr_spec_line(uint32_t mhz, uint8_t rate, unsigned nfft)
 {
     static const char hexd[] = "0123456789abcdef";
@@ -216,6 +222,7 @@ static void sdr_start(void)
     SHELL_PRINTF("SDR ready\n");
 }
 
+/** @brief One machine line: bank state, rates, FFT sizes, tuning range. */
 static void sdr_info(void)
 {
     SHELL_PRINTF("SDR bank %s rates 80 40 20 10 8 4 nfft 64 128 256 "
@@ -223,6 +230,7 @@ static void sdr_info(void)
                  tiku_drv_sdr_esp_reserved() ? "yes" : "no");
 }
 
+/** @brief `sdr sweep <lo> <hi> <step> [rate] [nfft]`: a SPEC line a step. */
 static void sdr_sweep(uint8_t argc, const char *argv[])
 {
     uint32_t lo = (uint32_t)strtoul(argv[2], NULL, 10);
@@ -246,7 +254,7 @@ static void sdr_sweep(uint8_t argc, const char *argv[])
 }
 
 #if TIKU_DRV_SDR_ESP_PROBE
-/* Probing verbs for the unit's exploration: words read or written raw. */
+/** @brief `sdr rd <hexaddr> [n]`: read raw words, for probing the unit. */
 static void sdr_rd(uint8_t argc, const char *argv[])
 {
     uintptr_t a = (uintptr_t)strtoul(argv[2], NULL, 16);
@@ -261,6 +269,7 @@ static void sdr_rd(uint8_t argc, const char *argv[])
     SHELL_PRINTF("\n");
 }
 
+/** @brief `sdr wr <hexaddr> <hexval>`: write a raw word and read it back. */
 static void sdr_wr(const char *argv[])
 {
     uintptr_t a = (uintptr_t)strtoul(argv[2], NULL, 16);

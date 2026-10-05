@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_init.h - "init" command: manage FRAM boot entries
+ * tiku_shell_cmd_init.h - "init" command: manage the boot entries
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -16,10 +16,11 @@
 #include <stdint.h>
 
 /**
- * @brief "init" command handler — manage FRAM-backed boot entries.
+ * @brief "init" command handler — manage the boot entries in the NVM config
+ *        region.
  *
  * Sub-commands: list, add <seq> <name> <cmd...>, rm <name>, enable <name>,
- * disable <name>, and run (re-execute every entry now).
+ * disable <name>, and run (execute every enabled entry now).
  *
  * @param argc  Argument count
  * @param argv  Argument vector

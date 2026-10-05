@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_diag.h - "diag" command (STM32N6).
+ * tiku_shell_cmd_diag.h - "diag" command (STM32N6, RA8P1, ESP32-C61).
  *
- * Fault records, EXTI arming and the watchdog: the pieces of the port whose
- * correctness only shows when something goes wrong on purpose.
+ * Fault records on each of these ports, plus EXTI, watchdog, sleep and PSRAM
+ * checks where the port has them.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,7 +19,8 @@
 #include <stdint.h>
 
 /**
- * @brief Shell command: inspect faults, arm EXTI, or exercise the watchdog.
+ * @brief Shell command: show or force faults, and run the port's EXTI,
+ *        watchdog, sleep or PSRAM checks.
  *
  * @param argc  Argument count
  * @param argv  Subcommand and its argument

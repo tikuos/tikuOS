@@ -7,8 +7,8 @@
  *
  * tiku_shell_cmd_diag.c - "diag" command (STM32N6, RA8P1, ESP32-C61).
  *
- * Exercises the parts of the port that only prove themselves by going wrong:
- * the fault handlers, the EXTI lines and the watchdog.
+ * Forces and reports faults, and where the port has them exercises the EXTI
+ * lines, the watchdog, the sleep settings and the PSRAM.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -52,15 +52,15 @@ static void diag_fault_show(void) {
 /**
  * @brief Provoke one fault so the handler and its record can be seen working.
  *
- * @param which  "bus", "usage" or "stack"
+ * @param which  "undef", "unalign" or "stack"
  */
 static void diag_fault_force(const char *which) {
     SHELL_PRINTF("  forcing a %s fault; the board resets and `diag fault`"
                  " then shows it\n", which);
 
     if (strcmp(which, "undef") == 0) {
-        /* The one trigger with no ambiguity: an undefined instruction is a
-         * precise UsageFault, taken at a known PC, with no bus involved. */
+        /* An undefined instruction is a precise UsageFault, taken at a
+         * known PC, with no bus involved. */
         __asm__ volatile ("udf #0");
     } else if (strcmp(which, "unalign") == 0) {
         TIKU_REG32(STM32N6_SCB_CCR) |= (1UL << 3);      /* UNALIGN_TRP */
@@ -68,8 +68,8 @@ static void diag_fault_force(const char *which) {
         volatile uint32_t *p = (volatile uint32_t *)(uintptr_t)0x34181001UL;
         (void)*p;
     } else if (strcmp(which, "stack") == 0) {
-        /* A branch to an even address clears EPSR.T: the same INVSTATE that
-         * made every early image on this port lock up identically. */
+        /* A branch to an even address clears EPSR.T and takes an INVSTATE
+         * UsageFault. */
         void (*bad)(void) = (void (*)(void))0x34180400UL;
         bad();
     } else {
@@ -95,7 +95,7 @@ static void diag_exti(uint8_t argc, const char *argv[]) {
         return;                     /* the event lands as TIKU_EVENT_GPIO */
     }
 
-    /* SWIER raises the line exactly as a pad edge does, so this proves the
+    /* SWIER raises the line exactly as a pad edge does, so this tests the
      * whole path from line to vector without touching the board. */
     uint32_t hits = tiku_stm32n6_exti_hits(DIAG_BTN_PIN);
     TIKU_REG32(STM32N6_EXTI_SWIER1) = (1UL << DIAG_BTN_PIN);
@@ -183,7 +183,7 @@ static void diag_fault_show(void) {
                  (unsigned long)f->exc, (unsigned long)f->msp,
                  (unsigned long)f->psp);
     /* The frame verbatim: when a pop lands on stacked data, the eight
-     * named fields above ARE the corruption, and only the raw words say
+     * named fields above are the corruption, and only the raw words say
      * where the real frame sat. */
     SHELL_PRINTF("  frame %lx %lx %lx %lx\n",
                  (unsigned long)f->raw[0], (unsigned long)f->raw[1],
@@ -196,20 +196,19 @@ static void diag_fault_show(void) {
                  (unsigned long)f->raw[10], (unsigned long)f->raw[11]);
 }
 
-/** @brief Take one fault on purpose, so the handler can be seen working. */
+/** @brief Force one fault, so the handler can be seen working. */
 static void diag_fault_force(const char *which) {
     SHELL_PRINTF("  forcing a %s fault; the board resets and `diag fault`"
                  " then shows it\n", which);
 
     if (strcmp(which, "undef") == 0) {
-        /* No ambiguity: an undefined instruction is a precise UsageFault at a
-         * known PC, with no bus or MPU involved. */
+        /* An undefined instruction is a precise UsageFault at a known PC,
+         * with no bus or MPU involved. */
         __asm__ volatile ("udf #0");
     } else if (strcmp(which, "durable") == 0) {
-        /* The violation this port exists to catch: a store into `.persistent`
-         * that never opened the NVM window.  MPU says read-only, so it is a
-         * DACCVIOL naming its own address in MMFAR -- and it must NOT be
-         * silently dropped, which is the whole durable-write contract. */
+        /* A store into `.persistent` without the NVM window open: the MPU
+         * maps it read-only, so it takes a DACCVIOL with its address in
+         * MMFAR instead of being dropped. */
         extern uint32_t __persistent_start;
         *(volatile uint32_t *)(uintptr_t)&__persistent_start = 0xDEADBEEFUL;
     } else {
@@ -270,7 +269,7 @@ static void diag_fault_show(void) {
  * constant it can reason about. */
 static volatile uintptr_t diag_unmapped = 0x10UL;
 
-/** @brief Take one exception on purpose, so the record can be seen working. */
+/** @brief Force one exception, so the record can be seen working. */
 static void diag_fault_force(const char *which) {
     SHELL_PRINTF("  forcing a %s fault; the board resets and `diag fault`"
                  " then shows it\n", which);

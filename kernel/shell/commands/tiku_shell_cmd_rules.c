@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_rules.c - "rules" command implementation.
  *
- * Lists active rules and frees a slot by id.  The condition field is padded to a
- * fixed width so the arrow column stays stable for short rules and extends
- * gracefully for long ones.
+ * Lists active rules and frees a slot by id.  The condition field is padded to
+ * a fixed width so the arrow column stays stable for short rules and extends
+ * for long ones.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

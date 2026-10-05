@@ -8,8 +8,8 @@
  * tiku_shell_cmd_i2c.c - "i2c" command implementation.
  *
  * Surfaces the I2C bus driver for sensor bring-up: scan, read and write.
- * Addresses parse as decimal or 0x hex, so a datasheet snippet works either way,
- * and the bus initialises lazily on first use.
+ * Addresses parse as decimal or 0x hex, so a datasheet value works either
+ * way, and the bus initialises lazily on first use.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,9 +18,9 @@
 #include <kernel/shell/tiku_shell.h>
 #include <interfaces/bus/tiku_i2c_bus.h>
 
-/* Cap the read buffer so the stack frame stays small and the
- * printed line fits comfortably on an 80-column terminal
- * (3 chars per byte + newline = 49 chars at 16). */
+/* Cap the read and write buffers so the stack frame stays small; a full
+ * read line (3 chars per byte + newline = 49 chars at 16) fits an
+ * 80-column terminal. */
 #ifndef TIKU_SHELL_I2C_MAX_BYTES
 #define TIKU_SHELL_I2C_MAX_BYTES 16
 #endif
@@ -116,8 +116,8 @@ i2c_ensure_init(void)
  * @brief Probe the standard 7-bit address range with tiku_i2c_probe();
  *        print the list of responders.
  *
- * Uses the dedicated address-probe primitive (an address-only ACK check) --
- * NOT a zero-length write, which the bus layer rejects (write requires
+ * Uses the dedicated address-probe primitive (an address-only ACK check),
+ * not a zero-length write, which the bus layer rejects (write requires
  * len >= 1).  Addresses 0x00..0x07 and 0x78..0x7F are reserved and skipped.
  */
 static void

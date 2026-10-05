@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_slip.h - "slip" command: hand the console UART to SLIP/IP
+ * tiku_shell_cmd_slip.h - "slip" command: toggle the console's IPv4 channel
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -16,11 +16,10 @@
 #include <stdint.h>
 
 /**
- * @brief "slip" command: start the net process and hand it the console UART.
+ * @brief "slip" command: turn the console's IPv4 channel on or off.
  *
- * Switches the shell into SLIP mode: the net process takes the UART for binary
- * SLIP/IP framing and the shell stops reading input.  Reset the board to
- * return to the interactive shell.
+ * `slip on` registers the channel, `slip off` removes it, and a bare `slip`
+ * toggles.  While it is on, IP frames and keystrokes share the console line.
  *
  * @param argc  Argument count (including the command name)
  * @param argv  Argument strings (argv[0] is the command name)
@@ -28,20 +27,18 @@
 void tiku_shell_cmd_slip(uint8_t argc, const char *argv[]);
 
 /**
- * @brief Whether SLIP mode is active (the net process owns the UART).
+ * @brief Whether the console's IPv4 channel is registered.
  *
- * The shell loop calls this to yield UART input to the net process while
- * SLIP mode is engaged, instead of consuming it as line-editor keystrokes.
- *
- * @return 1 if SLIP mode is active, 0 otherwise.
+ * @return 1 if SLIP is on, 0 otherwise.
  */
 uint8_t tiku_shell_cmd_slip_active(void);
 
 /**
- * @brief Turn SLIP/IP mode on (idempotent), bringing up the link.
+ * @brief Turn SLIP on (idempotent): install the SLIP link when no other link
+ *        is set, and register the console's IPv4 channel.
  *
- * Used by other net commands (e.g. ping) to ensure the shared RX demux is
- * routing SLIP frames to the IP stack before they send traffic.
+ * Net commands (ping, ntp, dns, mqtt, syslog) call this so replies reach the
+ * IP stack before they send traffic.
  */
 void tiku_shell_cmd_slip_enable(void);
 

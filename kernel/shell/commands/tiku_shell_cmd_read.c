@@ -29,22 +29,19 @@
 /* CONFIG                                                                    */
 /*---------------------------------------------------------------------------*/
 
-/* Largest node value `read`/`cat` prints in one shot.  The old 64-byte buffer
- * silently truncated /data files at 63 bytes (a newcomer's first surprise);
- * size it to a full file-store slot so whole files display.  The buffer is
- * static, not on the (small) shell-task stack, so the larger size is safe.
- * Override TIKU_SHELL_READ_MAX in the build to trade RAM for capacity. */
+/* Largest node value `read`/`cat` prints in one shot, and the most a page is
+ * taken from: a longer node arrives cut at this size.  The buffer is static,
+ * not on the (small) shell-task stack.  Override TIKU_SHELL_READ_MAX in the
+ * build to trade RAM for capacity.  MSP430 is the one carve-out, not an
+ * allow-list of big parts: a port left off such a list would cut /data files
+ * at 512 bytes. */
 #ifndef TIKU_SHELL_READ_MAX
 #  if defined(__MSP430__)
 #    define TIKU_SHELL_READ_MAX 512     /* = one MSP430 FRAM slot            */
 #  else
-#    define TIKU_SHELL_READ_MAX 8192    /* holds a whole file-store slot (4 KB)
-                                         * plus headroom for the /sys/vfs/manifest
-                                         * dump; every ARM part has the RAM.
-                                         * Keep the carve-out on MSP430, not an
-                                         * allow-list of big parts: a port left
-                                         * off such a list truncates cat of
-                                         * /data files at 512 bytes.           */
+#    define TIKU_SHELL_READ_MAX 8192    /* a 4 KB file-store slot plus
+                                         * headroom for the /sys/vfs/manifest
+                                         * dump */
 #  endif
 #endif
 
@@ -106,8 +103,9 @@ tiku_shell_cmd_read(uint8_t argc, const char *argv[])
 
     n = tiku_vfs_read(resolved, buf, sizeof(buf) - 1);
     if (n < 0) {
-        /* Keep the "cannot read" phrasing (host tooling matches it) and append
-         * the machine-readable status so an agent can tell ENOENT from EACCES. */
+        /* Keep the "cannot read" phrasing (host tooling matches it) and
+         * append the machine-readable status so an agent can tell ENOENT
+         * from EACCES. */
         SHELL_PRINTF("read: cannot read '%s' (%s)\n", resolved,
                      tiku_vfs_strerror(n));
         return;

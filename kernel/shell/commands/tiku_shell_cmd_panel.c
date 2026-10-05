@@ -28,7 +28,7 @@
 static tiku_display_t panel_disp;
 static uint8_t        panel_up;
 
-/** @brief Named colours, so the gate is "is it red" rather than a hex dump. */
+/** @brief Colours `panel <name>` accepts, as ARGB8888. */
 static const struct { const char *name; uint32_t argb; } panel_colours[] = {
     { "red",   0x00FF0000u }, { "green", 0x0000FF00u },
     { "blue",  0x000000FFu }, { "white", 0x00FFFFFFu },
@@ -53,7 +53,7 @@ static const uint8_t panel_glyphs[6][8] = {
 /**
  * @brief Claim a framebuffer from the peripheral-accessible primary SRAM span.
  *
- * @return Base address, or NULL when no tier has room
+ * @return Base address, or NULL when the SRAM tier has no room
  */
 static void *
 panel_claim(void)

@@ -7,8 +7,8 @@
  *
  * tiku_shell_cmd_cache.h - "cache" command (STM32N6).
  *
- * State, on/off toggling and a fixed timed workload for the CPU caches, so a
- * coherency suspect can be tested against the uncached truth in seconds.
+ * Shows and toggles the CPU caches, times a fixed workload, and checks that a
+ * DMA copy stays coherent with the data cache.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,10 +19,11 @@
 #include <stdint.h>
 
 /**
- * @brief Shell command: show cache state, toggle it, or run the benchmark.
+ * @brief Shell command: show cache state, toggle it, run the benchmark or
+ *        the DMA coherency check.
  *
  * @param argc  Argument count
- * @param argv  "on", "off", "bench", or nothing for the state
+ * @param argv  "on", "off", "bench", "dma", or nothing for the state
  */
 void tiku_shell_cmd_cache(uint8_t argc, const char *argv[]);
 

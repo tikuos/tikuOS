@@ -16,7 +16,7 @@
 #include <stdint.h>
 
 /**
- * @brief Handle `cpu1 start|stop|info`.
+ * @brief Handle `cpu1 start|stop|ping|bench|verify|info`.
  *
  * @param argc Argument count
  * @param argv Argument vector

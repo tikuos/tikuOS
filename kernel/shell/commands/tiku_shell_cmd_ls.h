@@ -19,7 +19,7 @@
  * @brief "ls" command handler — list VFS directory contents.
  *
  * Usage: ls [path]
- * Defaults to "/" if no path is given.
+ * Defaults to the current directory if no path is given.
  *
  * @param argc  Argument count
  * @param argv  Argument vector (argv[1] = optional path)

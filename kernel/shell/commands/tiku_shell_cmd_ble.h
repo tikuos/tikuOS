@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_ble.h - "ble" command: EM9305 radio first-contact probe.
+ * tiku_shell_cmd_ble.h - "ble" command: EM9305 probe, beacon and BLE shell.
  *
- * Runs the bring-up self-test on the Blue EVB's radio: reset it over SPI, confirm
- * the status handshake, then send an HCI Reset and report the completion.
+ * Drives the Blue EVB's EM9305 radio: a probe (reset over SPI, status
+ * handshake, HCI Reset), a beacon, and the shell over BLE.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,11 +19,15 @@
 #include <stdint.h>
 
 /**
- * @brief "ble" shell command handler -- runs tiku_em9305_probe() and prints
- *        the SPI + HCI first-contact results.
+ * @brief "ble" shell command handler.
  *
- * @param argc  Argument count (unused)
- * @param argv  Argument vector (unused)
+ * `ble en 0|1` drives the EN strap, `ble uart [name]` runs the shell over BLE,
+ * `ble beacon [name]` and `ble stop` control advertising; any other form runs
+ * tiku_em9305_probe() and prints the SPI and HCI results.
+ *
+ * @param argc  Argument count
+ * @param argv  argv[1] selects en|uart|beacon|stop; argv[2] is the EN level
+ *              or the advertised name
  */
 void tiku_shell_cmd_ble(uint8_t argc, const char *argv[]);
 

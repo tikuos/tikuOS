@@ -21,12 +21,14 @@
 #define LCD_TEXT_BUF_LEN    24
 
 /*---------------------------------------------------------------------------*/
-/* Helpers                                                                    */
+/* HELPERS                                                                   */
 /*---------------------------------------------------------------------------*/
 
-/* Concatenate argv[start..argc-1] into out, joined by single spaces.
- * Always nul-terminates. Truncates if the joined string would exceed
- * (out_len - 1). */
+/**
+ * @brief Join argv[start..argc-1] into @p out with single spaces.
+ *
+ * Always NUL-terminates; truncates to @p out_len - 1 characters.
+ */
 static void
 join_args(char *out, size_t out_len,
           uint8_t argc, const char *argv[], uint8_t start)
@@ -50,9 +52,11 @@ join_args(char *out, size_t out_len,
     out[cursor] = '\0';
 }
 
-/* Parse a decimal string. Returns 1 on success and writes the value
- * to *out, 0 on parse failure (out untouched). Accepts an optional
- * leading '-' for the int variant. */
+/**
+ * @brief Parse an unsigned decimal or 0x-hex string.
+ *
+ * @return 1 on success with the value in *out, 0 on failure (out untouched)
+ */
 static uint8_t
 parse_uint(const char *s, uint32_t *out)
 {
@@ -100,7 +104,7 @@ parse_uint(const char *s, uint32_t *out)
 }
 
 /**
- * @brief Parse an optionally-signed decimal integer string.
+ * @brief Parse an optionally signed decimal or 0x-hex integer string.
  */
 static uint8_t
 parse_int(const char *s, int32_t *out)
@@ -125,7 +129,7 @@ parse_int(const char *s, int32_t *out)
 }
 
 /*---------------------------------------------------------------------------*/
-/* Sub-commands                                                               */
+/* SUB-COMMANDS                                                              */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -146,6 +150,7 @@ do_info(void)
 #endif
 }
 
+/** @brief `lcd puts|putsr <text...>`: join the words and pass them to @p fn. */
 static void
 do_text(uint8_t argc, const char *argv[],
         uint8_t start, void (*fn)(const char *))
@@ -160,6 +165,7 @@ do_text(uint8_t argc, const char *argv[],
     }
 }
 
+/** @brief `lcd putsa <pos> <text...>`: write text starting at a position. */
 static void
 do_putsa(uint8_t argc, const char *argv[])
 {
@@ -174,6 +180,7 @@ do_putsa(uint8_t argc, const char *argv[])
     tiku_lcd_puts_at((uint8_t)pos, buf);
 }
 
+/** @brief `lcd char <pos> <ch>`: one character at a position. */
 static void
 do_char(uint8_t argc, const char *argv[])
 {
@@ -186,6 +193,7 @@ do_char(uint8_t argc, const char *argv[])
     tiku_lcd_putchar((uint8_t)pos, argv[3][0]);
 }
 
+/** @brief `lcd putu <decimal>`: a right-aligned unsigned number. */
 static void
 do_putu(uint8_t argc, const char *argv[])
 {
@@ -197,6 +205,7 @@ do_putu(uint8_t argc, const char *argv[])
     tiku_lcd_put_uint(v);
 }
 
+/** @brief `lcd puti <signed-decimal>`: a right-aligned signed number. */
 static void
 do_puti(uint8_t argc, const char *argv[])
 {
@@ -208,6 +217,7 @@ do_puti(uint8_t argc, const char *argv[])
     tiku_lcd_put_int(v);
 }
 
+/** @brief `lcd putf <int> <decimals>`: a fixed-point number with the dot. */
 static void
 do_putf(uint8_t argc, const char *argv[])
 {
@@ -221,6 +231,7 @@ do_putf(uint8_t argc, const char *argv[])
     tiku_lcd_put_fixed(v, (uint8_t)dec);
 }
 
+/** @brief `lcd puth <hex> [digits]`: right-aligned hex, full width default. */
 static void
 do_puth(uint8_t argc, const char *argv[])
 {
@@ -240,6 +251,7 @@ do_puth(uint8_t argc, const char *argv[])
     tiku_lcd_put_hex(v, (uint8_t)digits);
 }
 
+/** @brief `lcd icon <id> <on|off|toggle>`: drive one named icon. */
 static void
 do_icon(uint8_t argc, const char *argv[])
 {
@@ -268,6 +280,7 @@ do_icon(uint8_t argc, const char *argv[])
 #endif
 }
 
+/** @brief `lcd icons clear`: clear every icon. */
 static void
 do_icons(uint8_t argc, const char *argv[])
 {
@@ -307,7 +320,7 @@ print_help(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* Entry                                                                      */
+/* ENTRY                                                                     */
 /*---------------------------------------------------------------------------*/
 
 void
@@ -326,7 +339,7 @@ tiku_shell_cmd_lcd(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* Lazy bring-up: if no autostart process (e.g. the LCD demo)
+    /* Lazy init: if no autostart process (e.g. the LCD demo)
      * has already initialised the LCD_C peripheral, the panel is
      * unconfigured and writes to LCDMEM produce nothing visible.
      * Init on first use so the harness works in shell-only builds. */

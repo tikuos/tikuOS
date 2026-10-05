@@ -7,8 +7,8 @@
  *
  * tiku_shell_cmd_mqtt.c - "mqtt" command (MQTT 3.1.1 client).
  *
- * Connects to a broker over TCP and optionally publishes at QoS 0, wrapped in the
- * shell's async tick pattern so the periodic runs without blocking.  I/O flows
+ * Connects to a broker over TCP and optionally publishes at QoS 0, driven by
+ * the shell's async tick so the periodic runs without blocking.  I/O flows
  * through the shared SLIP demux, so the shell stays interactive.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -19,7 +19,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_shell_cmd_mqtt.h"
-#include "tiku_shell_cmd_slip.h"                  /* tiku_shell_cmd_slip_enable */
+#include "tiku_shell_cmd_slip.h"                  /* slip_enable */
 #include <kernel/shell/tiku_shell.h>              /* SHELL_PRINTF */
 #include <kernel/timers/tiku_clock.h>             /* tiku_clock_time */
 #include <tikukits/net/tiku_kits_net.h>           /* TIKU_KITS_NET_IP_ADDR */
@@ -65,6 +65,7 @@ mqtt_event_cb(uint8_t event)
     mqtt_evt = event;
 }
 
+/** @brief Incoming-message callback; this command subscribes to nothing. */
 static void
 mqtt_msg_cb(const char *topic, uint16_t topic_len, const uint8_t *payload,
             uint16_t payload_len, uint8_t qos, uint8_t retain)
@@ -73,6 +74,7 @@ mqtt_msg_cb(const char *topic, uint16_t topic_len, const uint8_t *payload,
     (void)payload_len; (void)qos; (void)retain;
 }
 
+/** @brief Parse a dotted-quad IPv4 address; 1 on success, 0 if malformed. */
 static uint8_t
 mqtt_parse_ip(const char *s, uint8_t out[4])
 {
@@ -227,7 +229,7 @@ tiku_shell_cmd_mqtt_tick(void)
         return;
     }
 
-    /* Pace the MQTT housekeeping (~1 Hz); the shell loop drives tcp_periodic. */
+    /* Pace the MQTT housekeeping (~1 Hz); the shell drives tcp_periodic. */
     if ((tiku_clock_time_t)(tiku_clock_time() - mqtt_last) >= MQTT_PERIODIC_EVERY) {
         mqtt_last = tiku_clock_time();
         tiku_kits_net_mqtt_periodic();

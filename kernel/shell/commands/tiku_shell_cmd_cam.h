@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_cam.h - "cam" command: camera bring-up and capture.
+ * tiku_shell_cmd_cam.h - "cam" command: capture a frame and show it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -16,10 +16,12 @@
 #include <stdint.h>
 
 /**
- * @brief Drive the camera: power, identify, and later capture.
+ * @brief Power the OV5640, capture one QVGA frame and show it on the panel.
  *
- * @param argc  Argument count
- * @param argv  Arguments
+ * A build without a display captures the frame and reports it only.
+ *
+ * @param argc  Argument count (unused)
+ * @param argv  Arguments (unused)
  */
 void tiku_shell_cmd_cam(uint8_t argc, const char *argv[]);
 

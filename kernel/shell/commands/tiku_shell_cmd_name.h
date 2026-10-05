@@ -20,8 +20,7 @@
  *        device name.
  *
  * A thin wrapper over /sys/device/name: no argument prints the current name,
- * an argument sets it (FRAM-backed, survives reboot, max 31 chars).  Intended
- * as an mDNS hostname or any user-visible identifier.
+ * an argument sets it (held in durable memory, survives reboot, max 31 chars).
  */
 void tiku_shell_cmd_name(uint8_t argc, const char *argv[]);
 

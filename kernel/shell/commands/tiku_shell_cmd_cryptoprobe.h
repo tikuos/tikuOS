@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_cryptoprobe.h - CRACEN bring-up probe (opt-in).
+ * tiku_shell_cmd_cryptoprobe.h - CRACEN diagnostic probe (opt-in).
  *
  * SPDX-License-Identifier: Apache-2.0
  */

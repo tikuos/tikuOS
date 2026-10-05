@@ -30,8 +30,9 @@ static int str_eq(const char *a, const char *b)
     return *a == 0 && *b == 0;
 }
 
-/* SHELL_PRINTF doesn't honour %02x / %04x zero-padding; emit hex
- * nibbles directly so MAC bytes + 16-bit identifiers stay aligned. */
+/**
+ * @brief Print a byte as two zero-padded hex digits.
+ */
 static void put_hex2(uint8_t b)
 {
     static const char digits[] = "0123456789abcdef";
@@ -75,8 +76,11 @@ static void bt_help(void)
     SHELL_PRINTF("bt help                 this help\n");
 }
 
-/* HCI version code -> human-readable Bluetooth Core Spec name.
- * Table per Assigned Numbers / Core Spec "HCI_Version" values. */
+/**
+ * @brief Map an HCI/LMP version code to its Bluetooth Core Spec name.
+ *
+ * Values per the Assigned Numbers "HCI_Version" table.
+ */
 static const char *hci_version_name(uint8_t v)
 {
     switch (v) {
@@ -200,6 +204,9 @@ static void bt_status(void)
 
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Handle "bt advertise <name>" and "bt advertise stop".
+ */
 static void bt_advertise(uint8_t argc, const char *argv[])
 {
     int rc;
@@ -220,6 +227,9 @@ static void bt_advertise(uint8_t argc, const char *argv[])
     }
 }
 
+/**
+ * @brief Handle "bt scan" (start an active scan) and "bt scan stop".
+ */
 static void bt_scan(uint8_t argc, const char *argv[])
 {
     int rc;
@@ -239,7 +249,9 @@ static void bt_scan(uint8_t argc, const char *argv[])
     }
 }
 
-/* Map LE advertising event-type code to a short label. */
+/**
+ * @brief Map an LE advertising event-type code to a short label.
+ */
 static const char *evt_type_name(uint8_t e)
 {
     switch (e) {
@@ -294,8 +306,6 @@ static void bt_connections(void)
                 put_hex2(conns[i].peer_addr[k]);
             }
         }
-        /* SHELL_PRINTF doesn't always honour %-Ns width; emit the
-         * fixed-column fields with %s then pad manually. */
         SHELL_PRINTF(" %s  ", bt_addr_type_name(conns[i].peer_addr_type));
         SHELL_PRINTF("%s   0x",
                      conns[i].role == 1U ? "peripheral" : "central   ");
@@ -306,7 +316,7 @@ static void bt_connections(void)
     }
 }
 
-/* ---- Phase 13 client-side shell helpers ---------------------------------- */
+/* ---- GATT client helpers ------------------------------------------------- */
 
 /** Parse "aa:bb:cc:dd:ee:ff" into 6 MSB-first bytes. Returns 0 on success. */
 static int parse_mac(const char *s, uint8_t out[6])
@@ -380,6 +390,9 @@ static uint16_t pick_conn_handle(uint8_t argc, const char *argv[], uint8_t pos)
     }
 }
 
+/**
+ * @brief Handle "bt connect <slot|addr> [public]": connect as central.
+ */
 static void bt_connect_cmd(uint8_t argc, const char *argv[])
 {
     uint8_t addr[6];
@@ -427,6 +440,9 @@ static void bt_connect_cmd(uint8_t argc, const char *argv[])
     }
 }
 
+/**
+ * @brief Handle "bt discover [N]": start service discovery on link N.
+ */
 static void bt_discover_cmd(uint8_t argc, const char *argv[])
 {
     uint16_t h = pick_conn_handle(argc, argv, 2U);
@@ -440,6 +456,9 @@ static void bt_discover_cmd(uint8_t argc, const char *argv[])
                  h, rc);
 }
 
+/**
+ * @brief Handle "bt read <handle> [N]": issue an ATT Read on link N.
+ */
 static void bt_read_cmd(uint8_t argc, const char *argv[])
 {
     uint16_t attr_handle;
@@ -462,6 +481,9 @@ static void bt_read_cmd(uint8_t argc, const char *argv[])
     SHELL_PRINTF("bt: read requested (rc=%d)\n", rc);
 }
 
+/**
+ * @brief Handle "bt subscribe <cccd> [N]": enable notifications on link N.
+ */
 static void bt_subscribe_cmd(uint8_t argc, const char *argv[])
 {
     uint16_t cccd_handle;
@@ -484,6 +506,9 @@ static void bt_subscribe_cmd(uint8_t argc, const char *argv[])
     SHELL_PRINTF("bt: subscribe requested (rc=%d)\n", rc);
 }
 
+/**
+ * @brief Handle "bt disconnect [N]": tear down link N, or the first link.
+ */
 static void bt_disconnect(uint8_t argc, const char *argv[])
 {
     int rc;
@@ -520,8 +545,11 @@ static void bt_disconnect(uint8_t argc, const char *argv[])
     }
 }
 
-/* ---- Phase 14 bonding shell helpers -------------------------------------- */
+/* ---- Bonding helpers ----------------------------------------------------- */
 
+/**
+ * @brief Handle "bt bonds": list the stored LE Secure Connections bonds.
+ */
 static void bt_bonds(void)
 {
     uint8_t slot;
@@ -557,6 +585,9 @@ static void bt_bonds(void)
     }
 }
 
+/**
+ * @brief Handle "bt unpair [N]": clear bond slot N (default 0).
+ */
 static void bt_unpair_cmd(uint8_t argc, const char *argv[])
 {
     uint8_t slot = 0U;

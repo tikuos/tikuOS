@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_mem.c - "peek" and "poke" implementation.
  *
- * Parses an address then dereferences it directly, with no MPU bypass: a write to
- * a read-only region drops exactly as it would from application code, so prompt
- * behaviour is faithful to runtime.
+ * Parses an address then dereferences it directly, with no MPU bypass: a
+ * write to a read-only region behaves exactly as it would from application
+ * code, so prompt behaviour is faithful to runtime.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -28,9 +28,7 @@
  * @brief Parse an unsigned 32-bit value (decimal or 0x-prefixed hex).
  *
  * @return 1 on success with @p out written; 0 on parse error,
- *         empty string, or value > 0xFFFFFFFF (cannot occur for
- *         a uint32_t accumulator, kept for symmetry with the
- *         narrower variants used elsewhere).
+ *         empty string, or value > 0xFFFFFFFF.
  */
 static uint8_t
 mem_parse_u32(const char *s, uint32_t *out)
@@ -69,9 +67,9 @@ mem_parse_u32(const char *s, uint32_t *out)
 /**
  * @brief Address parse, sized for the platform's pointers.
  *
- * MSP430 (small model) pointers are 16-bit, so addresses above 0xFFFF are
- * rejected there -- reaching HIFRAM needs __data20 accesses this command does
- * not do.  Every 32-bit port takes the full 32-bit range.
+ * On MSP430 addresses above 0xFFFF are rejected: reaching HIFRAM needs
+ * __data20 accesses this command does not make.  Every 32-bit port takes the
+ * full 32-bit range.
  *
  * @return 1 on success, 0 on parse error or out-of-range.
  */
@@ -92,7 +90,7 @@ mem_parse_addr(const char *s, uintptr_t *out)
 }
 
 /*---------------------------------------------------------------------------*/
-/* peek                                                                      */
+/* PEEK                                                                      */
 /*---------------------------------------------------------------------------*/
 
 void
@@ -146,7 +144,7 @@ tiku_shell_cmd_peek(uint8_t argc, const char *argv[])
 }
 
 /*---------------------------------------------------------------------------*/
-/* poke                                                                      */
+/* POKE                                                                      */
 /*---------------------------------------------------------------------------*/
 
 void
@@ -171,9 +169,9 @@ tiku_shell_cmd_poke(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* Read-back is informational: it lets the caller see whether
-     * the write took effect (handy when poking FRAM through the
-     * MPU's read-only mask) without paying for a separate peek. */
+    /* Read-back is informational: it shows whether the write took effect
+     * (MSP430 drops a store to FRAM behind the MPU's read-only mask)
+     * without paying for a separate peek. */
     p      = (volatile uint8_t *)addr;
     before = *p;
     *p     = (uint8_t)val;

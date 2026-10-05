@@ -1,4 +1,17 @@
-/* Explicit reconstruction controls; never force a stop. SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_shell_cmd_reclaim.c - "mem reclaim": backing reconstruction controls.
+ *
+ * Prints the reclaim job, last result, pending requests, owners and stats, and
+ * sets the mode or retries or cancels a request; it never forces a stop.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #include "tiku_shell_cmd_reclaim.h"
 #include "kernel/memory/tiku_reclaim_internal.h"
 #include "kernel/shell/tiku_shell.h"

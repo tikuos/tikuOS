@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_radio154.c - 802.15.4 PHY bring-up command.
+ * tiku_shell_cmd_radio154.c - 802.15.4 radio test command.
  *
- * A thin veneer over the PHY arch layer, mirroring the bleadv discipline: two
- * boards are the oracle.  The demo frame carries a tag the receiver checks, so a
- * busy 2.4 GHz band cannot spoof a pass.
+ * PHY verbs over the arch layer and MAC-min ping/pong over tiku_154, checked
+ * between two boards.  The demo frame carries a tag the receiver checks, so a
+ * busy 2.4 GHz band cannot pass for the peer.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -25,23 +25,23 @@
 #if TIKU_SHELL_CMD_RADIO154
 
 #include <arch/nordic/tiku_ieee154_arch.h>
-#include <arch/nordic/tiku_radio_arch.h>       /* constlat hold around bursts  */
-#include <arch/nordic/tiku_timer_arch.h>       /* TIKU_CLOCK_ARCH_SECOND        */
+#include <arch/nordic/tiku_radio_arch.h>       /* constlat hold around bursts */
+#include <arch/nordic/tiku_timer_arch.h>       /* TIKU_CLOCK_ARCH_SECOND */
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/cpu/tiku_watchdog.h>
-#include <interfaces/radio/tiku_154.h>         /* MAC-min: ping/pong           */
-#include <interfaces/bluetooth/tiku_ble_adv.h> /* R7 radio arbiter             */
+#include <interfaces/radio/tiku_154.h>         /* MAC-min: ping/pong */
+#include <interfaces/bluetooth/tiku_ble_adv.h> /* radio arbiter */
 
-/* Demo MAC addresses for the ping/pong ping-pong (one PAN, two nodes). */
+/* Demo MAC addresses for ping/pong (one PAN, two nodes). */
 #define R154_PAN      0xABCDu
 #define R154_PING_A   0x1111u
 #define R154_PONG_A   0x2222u
 
-/* Payload tag so the peer can tell OUR frames from ambient 15.4 traffic. */
+/* Payload tag so the peer can tell these frames from ambient 15.4 traffic. */
 static const uint8_t tk15_tag[4] = { 'T', 'K', '1', '5' };
 static uint8_t tk15_seq;
 
-/* Tiny non-negative decimal parser (no shell helper for this). */
+/** @brief Parse a non-negative decimal; -1 on NULL or a trailing non-digit. */
 static long r154_atoi(const char *s)
 {
     long v = 0;
@@ -55,6 +55,7 @@ static long r154_atoi(const char *s)
     return (*s == '\0') ? v : -1;
 }
 
+/** @brief The channel in @p arg when it is 11..26, else @p dflt. */
 static uint8_t r154_channel(const char *arg, uint8_t dflt)
 {
     long c = (arg != (const char *)0) ? r154_atoi(arg) : -1;
@@ -64,6 +65,7 @@ static uint8_t r154_channel(const char *arg, uint8_t dflt)
     return (uint8_t)c;
 }
 
+/** @brief Hex-encode @p n bytes of @p b into @p out, NUL-terminated. */
 static void r154_hex(char *out, const uint8_t *b, uint8_t n)
 {
     static const char hx[] = "0123456789ABCDEF";
@@ -75,6 +77,7 @@ static void r154_hex(char *out, const uint8_t *b, uint8_t n)
     out[n * 2u] = '\0';
 }
 
+/** @brief `radio154 tx [ch] [text]`: send one tagged frame. */
 static void r154_tx(uint8_t argc, const char *argv[])
 {
     uint8_t ch = r154_channel(argc > 2u ? argv[2] : (const char *)0, 15u);
@@ -108,6 +111,7 @@ static void r154_tx(uint8_t argc, const char *argv[])
     }
 }
 
+/** @brief `radio154 rx [ch] [secs]`: listen and dump CRC-OK frames. */
 static void r154_rx(uint8_t argc, const char *argv[])
 {
     uint8_t ch = r154_channel(argc > 2u ? argv[2] : (const char *)0, 15u);
@@ -151,6 +155,7 @@ static void r154_rx(uint8_t argc, const char *argv[])
                  (unsigned long)badcrc);
 }
 
+/** @brief `radio154 ed [ch]`: energy detect one channel, or scan 11..26. */
 static void r154_ed(uint8_t argc, const char *argv[])
 {
     if (argc > 2u) {
@@ -186,8 +191,12 @@ static const uint8_t r154_key[16] = {
     0x54, 0x49, 0x4b, 0x55, 0x2d, 0x31, 0x35, 0x2e,
     0x34, 0x20, 0x6b, 0x65, 0x79, 0x21, 0x21, 0x21 };
 
-/* MAC-min ping (initiator): addressed unicast + wait for the peer's echo,
- * counting round-trips -- the N2 PER metric.  @p secure = AES-CCM* frames. */
+/**
+ * @brief MAC-min ping (initiator): send addressed unicasts with an ACK request
+ *        and count the ACK-confirmed ones.
+ *
+ * @param secure  Non-zero to send AES-CCM* frames under the demo key
+ */
 static void r154_ping(uint8_t argc, const char *argv[], uint8_t secure)
 {
     uint8_t ch = r154_channel(argc > 2u ? argv[2] : (const char *)0, 15u);
@@ -227,8 +236,12 @@ static void r154_ping(uint8_t argc, const char *argv[], uint8_t secure)
                  (unsigned long)((ok * 100u) / (uint32_t)n));
 }
 
-/* MAC-min pong (responder): receive frames for this node and echo the payload back
- * to the source, for ~secs. */
+/**
+ * @brief MAC-min pong (responder): receive and auto-ACK frames for this node
+ *        for ~secs, counting them.
+ *
+ * @param secure  Non-zero to install the demo key for AES-CCM* frames
+ */
 static void r154_pong(uint8_t argc, const char *argv[], uint8_t secure)
 {
     uint8_t ch = r154_channel(argc > 2u ? argv[2] : (const char *)0, 15u);
@@ -267,13 +280,22 @@ static void r154_pong(uint8_t argc, const char *argv[], uint8_t secure)
 
 void tiku_shell_cmd_radio154(uint8_t argc, const char *argv[])
 {
+    /*   radio154 tx [ch] [text]    send one TK15-tagged frame (ch 15, "hello")
+     *   radio154 rx [ch] [secs]    listen; dump CRC-OK frames (10 s)
+     *   radio154 ed [ch]           energy detect one channel, or 11..26
+     *   radio154 ping|secping [ch] [n]
+     *                              n unicasts with ACK request (100)
+     *   radio154 pong|secpong [ch] [secs]
+     *                              auto-ACK responder (15 s)
+     * The sec- forms use AES-CCM* under the demo key. */
     if (argc < 2u) {
         SHELL_PRINTF("usage: radio154 tx [ch] [text] | rx [ch] [secs]"
                      " | ed [ch] | ping|pong|secping|secpong [ch] [n]\n");
         return;
     }
     /* Every subcommand mode-switches the shared RADIO to 15.4, so claim it
-     * (R7 arbiter) -- refuse rather than clobber a live beacon/observer/link. */
+     * from the radio arbiter; refuse rather than clobber a live
+     * beacon/observer/link. */
     if (tiku_ble_adv_154_claim() != 0) {
         SHELL_PRINTF("radio busy (%s) -- stop it first\n",
                      tiku_ble_adv_owner_str());

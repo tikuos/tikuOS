@@ -18,11 +18,9 @@
 /**
  * @brief "every" command — schedule a command to repeat every N seconds.
  *
- * Usage: every <seconds> <command...>
- *
- * The remaining tokens are joined with single spaces and stored as a
- * single command line; first fire is at now + seconds, then every
- * @p seconds thereafter until the slot is deleted.
+ * Usage: every <seconds> <command...>.  The remaining tokens are joined with
+ * single spaces into one command line, which first fires at now + seconds and
+ * then every @p seconds until the slot is deleted.
  *
  * @param argc  Argument count
  * @param argv  Argument vector

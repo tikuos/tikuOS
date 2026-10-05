@@ -72,7 +72,8 @@ layout_cat(char *out, size_t cap, size_t *at, const char *s)
 }
 
 /**
- * @brief Turn knob values and --identity/--expect/--op/--erase into service text.
+ * @brief Turn knob values and --identity/--expect/--op/--erase into the
+ *        service's request text.
  *
  * @return 0, or -1 on a malformed or overlong argument list.
  */

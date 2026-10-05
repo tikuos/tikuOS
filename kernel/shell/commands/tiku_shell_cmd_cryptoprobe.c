@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_cryptoprobe.c - CRACEN CryptoMaster bring-up probe.
+ * tiku_shell_cmd_cryptoprobe.c - CRACEN CryptoMaster diagnostic probe.
  *
- * An interactive diagnostic for the hardware-crypto backend: dump the fused-engine
- * words, hash with a candidate config, sweep candidates until one reproduces a
- * known vector, and time hardware against software.
+ * Dumps the fused-engine words, hashes with candidate configs to find one that
+ * reproduces a known vector, runs AES and PK known-answer tests, and times
+ * hardware against software.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,7 +19,8 @@
 #if TIKU_SHELL_CMD_CRYPTOPROBE
 
 #include <kernel/shell/tiku_shell_io.h>
-#include <arch/nordic/tiku_timer_arch.h>  /* TIKU_CLOCK_ARCH_SECOND before clock.h */
+/* TIKU_CLOCK_ARCH_SECOND, which tiku_clock.h uses but does not define. */
+#include <arch/nordic/tiku_timer_arch.h>
 #include <kernel/timers/tiku_clock.h>
 #include <arch/nordic/tiku_crypto_arch.h>
 #include <tikukits/crypto/sha256/tiku_kits_crypto_sha256.h>
@@ -36,6 +37,7 @@ static const uint8_t sha256_abc[32] = {
     0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad,
 };
 
+/** @brief Print @p n bytes of @p d as hex. */
 static void print_digest(const uint8_t *d, size_t n)
 {
     size_t i;
@@ -44,6 +46,11 @@ static void print_digest(const uint8_t *d, size_t n)
     }
 }
 
+/**
+ * @brief Hash "abc" with candidate config @p cfg and compare with SHA-256.
+ *
+ * A match is printed with its time; @p quiet suppresses the report of a miss.
+ */
 static void probe_one(uint32_t cfg, uint8_t quiet)
 {
     uint8_t  out[32];
@@ -61,7 +68,7 @@ static void probe_one(uint32_t cfg, uint8_t quiet)
                      (unsigned long)(t1 - t0));
     } else if (!quiet) {
         SHELL_PRINTF("cfg=0x%08lx rc=%d digest=", (unsigned long)cfg, rc);
-        print_digest(out, 8u);          /* first 8 bytes tell the story */
+        print_digest(out, 8u);          /* first 8 bytes only */
         SHELL_PRINTF("... (%lu us)\n", (unsigned long)(t1 - t0));
     }
 }
@@ -147,8 +154,8 @@ void tiku_shell_cmd_cryptoprobe(int argc, char **argv)
 
     if (argc >= 2 && strcmp(argv[1], "sweep") == 0) {
         /* Candidate space: mode nibble (index- or one-hot-coded) x the
-         * plausible hw-padding/final control bits seen on BA41x-family
-         * engines.  ~100 combos, microseconds each. */
+         * plausible hw-padding/final control bits of BA41x-family engines,
+         * 88 combinations. */
         static const uint32_t modes[] = {
             0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x10, 0x20, 0x40,
         };
@@ -168,10 +175,8 @@ void tiku_shell_cmd_cryptoprobe(int argc, char **argv)
     }
 
     if (argc >= 2 && strcmp(argv[1], "bench") == 0) {
-        /* Iterate each path over 4 KB and count kernel ticks -- coarse per
-         * tick (7.8 ms) but honest; the iteration count divides it down to
-         * microseconds per op.  (The GRTC fine capture proved unreliable for short
-         * deltas; ticks x N is wraparound-proof.) */
+        /* Iterate each path over 4 KB and count kernel ticks; the iteration
+         * count divides the coarse tick down to microseconds per op. */
         static uint8_t buf[4096];
         uint8_t  hw[32], sw[32];
         tiku_clock_time_t t0;
@@ -252,8 +257,9 @@ void tiku_shell_cmd_cryptoprobe(int argc, char **argv)
     }
 
     if (argc >= 2 && strcmp(argv[1], "gcm") == 0) {
-        /* hw GCM vs the NIST-vector-proven software kit: AES-256, 12-byte
-         * IV, 20-byte AAD, 67-byte payload (odd tail on purpose). */
+        /* hw GCM against the software kit, which passes the NIST vectors:
+         * AES-256, 12-byte IV, 20-byte AAD, and a 67-byte payload so the
+         * last block is partial. */
         static uint8_t key[32], iv[12], aad[32], pt[80], ct_sw[80], ct_hw[80];
         static uint8_t tag_sw[16], tag_hw[16], back[80];
         tiku_kits_crypto_gcm_ctx_t gctx;

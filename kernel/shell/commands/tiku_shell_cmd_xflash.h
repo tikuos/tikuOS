@@ -7,8 +7,9 @@
  *
  * tiku_shell_cmd_xflash.h - "xflash" command: external NOR over XSPI.
  *
- * Identity, read, and an erase/program/verify round trip against a scratch
- * sector at the top of the device.
+ * Identity, a sector dump, an erase/program/verify round trip on a scratch
+ * sector near the top of the device, and `write`, which programs an image
+ * received over the console.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,7 +20,8 @@
 #include <stdint.h>
 
 /**
- * @brief "xflash" command handler.
+ * @brief "xflash" command handler:
+ *        `xflash [id | test | dump <hexaddr> | write <hexaddr> <hexlen>]`.
  *
  * @param argc  Argument count including the command word
  * @param argv  Argument vector

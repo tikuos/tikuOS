@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_axonsprobe.h - "axonsprobe" Axon NPU bring-up probe (opt-in)
+ * tiku_shell_cmd_axonsprobe.h - "axonsprobe" Axon NPU probe and tests (opt-in)
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,20 +18,20 @@
 
 #if TIKU_SHELL_CMD_AXONSPROBE
 /**
- * @brief "axonsprobe" command handler — Axon NPU bring-up probe.
+ * @brief "axonsprobe" command handler: Axon NPU probe and tests.
  *
- * Bare form prints the AXONS ENABLE/STATUS registers and the FICR identity.
- * Sub-commands: en, off, dump, diff, irq, plus hw/acc/fir when the vendor Axon
- * driver is built in.  Read-only: it never writes the engine window.
+ * The raw sub-commands write nothing in the block but ENABLE; the others run
+ * the engine and need the vendor driver (TIKU_AXON_ENABLE).
  *
  * @param argc  Argument count
- * @param argv  Argument vector; argv[1] selects the sub-command, argv[2..]
- *              carry its offset and word-count parameters
+ * @param argv  argv[1]: none (registers and FICR identity), en, off, dump
+ *              (hex offset, word count), diff or irq; with the driver also
+ *              hw, acc, fir, hold and busy (milliseconds), modelstore
+ *              (model, .kat) in a baked-model or store-only build, and model
+ *              and modelbaked in a baked-model build
+ * @note The signature must match tiku_shell_handler_t (tiku_shell.h): the
+ *       command table stores it directly.
  */
-/* Signature MUST be tiku_shell_handler_t (tiku_shell.h): the command table
- * stores it directly.  It read (int, char **) until the Axon checkout existed
- * to build against, so nothing ever instantiated the table entry and the
- * mismatch stayed invisible. */
 void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[]);
 #endif
 

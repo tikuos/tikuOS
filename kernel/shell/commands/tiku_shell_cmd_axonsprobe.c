@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_axonsprobe.c - Axon NPU bring-up probe.
+ * tiku_shell_cmd_axonsprobe.c - Axon NPU probe and test commands.
  *
- * The public register model is only a power wrapper, with no HAL, SVD block or
- * documentation for the engine itself, so this is on-die recon: enable, dump and
- * diff the reserved window.  READ-ONLY by design -- no blind writes.
+ * The MDK documents only the power wrapper, so the raw sub-commands enable
+ * the block, dump and diff its engine window, and write nothing in it but
+ * ENABLE.  With the vendor driver built in, the rest run the engine and models.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -28,21 +28,19 @@
 #if defined(TIKU_DEVICE_HAS_AXONS) && TIKU_DEVICE_HAS_AXONS
 
 #if defined(TIKU_AXON_ENABLE) && TIKU_AXON_ENABLE
-/* First-light path: Nordic's Axon driver core linked from the gitignored
- * temp/axon-models checkout, on the TikuOS platform layer
- * (arch/nordic/tiku_axon_platform.c). */
+/* Nordic's Axon driver core from the checkout at AXON_SDK (see the Makefile),
+ * on the TikuOS platform layer (arch/nordic/tiku_axon_platform.c). */
 #include "drivers/axon/nrf_axon_driver.h"
 #include "axon/nrf_axon_platform.h"
 #include "drivers/axon/nrf_axon_dsp_intrinsics.h"
 
-/* Nordic's inference sources are compiled in two configurations, and the store
- * path is wanted in both:
+/* Nordic's inference sources build in two configurations, and the store path
+ * exists in both:
  *
- *   TIKU_AXON_MODEL_TEST       one model baked into .rodata.  The store path
- *                              runs beside it, so the two can be diffed --
- *                              this is the configuration that PROVES the store.
- *   TIKU_AXON_MODEL_FROM_STORE no model compiled at all.  The store path is the
- *                              only path -- this is the shipping shape.
+ *   TIKU_AXON_MODEL_TEST       one model baked into .rodata; the store path
+ *                              runs beside it, so the two can be compared.
+ *   TIKU_AXON_MODEL_FROM_STORE no model compiled in; the store path is the
+ *                              only path.
  */
 #if (defined(TIKU_AXON_MODEL_TEST) && TIKU_AXON_MODEL_TEST) || \
     (defined(TIKU_AXON_MODEL_FROM_STORE) && TIKU_AXON_MODEL_FROM_STORE)
@@ -67,7 +65,7 @@
 /** Reserved engine window: 256 words (0x000..0x3FF). */
 #define AXONS_WIN_WORDS   256u
 
-/** Bounded READY spin (each iteration ~a few cycles at 128 MHz). */
+/** Upper bound on the READY poll, in loop iterations. */
 #define AXONS_READY_SPIN  2000000ul
 
 /** IRQ-storm brake for the probe ISR. */
@@ -103,6 +101,7 @@ static uint32_t axons_enable_wait(void)
     return 0u;
 }
 
+/** @brief Print ENABLE, STATUS and the FICR part and revision. */
 static void axons_info(void)
 {
     SHELL_PRINTF("AXONS @ 0x%x (nRF54LM20B Axon NPU wrapper)\n",
@@ -115,6 +114,11 @@ static void axons_info(void)
                  (unsigned)*(volatile uint32_t *)0x00FFC344ul);
 }
 
+/**
+ * @brief Print @p words words of the block from byte offset @p off.
+ *
+ * @p off is rounded down to a word; a count of 0 or above 1024 prints 16.
+ */
 static void axons_dump(uint32_t off, uint32_t words)
 {
     uint32_t i;
@@ -126,8 +130,8 @@ static void axons_dump(uint32_t off, uint32_t words)
     for (i = 0u; i < words; i++) {
         uint32_t o = off + 4u * i;
         if ((i & 3u) == 0u) {
-            /* Address printed BEFORE the reads: a faulting window edge is
-             * identified by the last line that appears. */
+            /* Each row's address is printed before its reads, so if a read
+             * faults, the last line printed names the row. */
             SHELL_PRINTF("\n  +%x:", (unsigned)o);
         }
         SHELL_PRINTF(" %x", (unsigned)AXONS_REG(o));
@@ -135,6 +139,7 @@ static void axons_dump(uint32_t off, uint32_t words)
     SHELL_PRINTF("\n");
 }
 
+/** @brief Snapshot the window with the block off, enable it, print changes. */
 static void axons_diff(void)
 {
     static uint32_t before[AXONS_WIN_WORDS];  /* 1 KB: static, not stack */
@@ -166,38 +171,29 @@ static void axons_diff(void)
 
 #if defined(AXONS_HAVE_NN)
 /*---------------------------------------------------------------------------*/
-/* A2b: RUN THE SAME MODEL FROM THE STORE, AND COMPARE                       */
+/* RUNNING A MODEL FROM THE STORE                                            */
 /*---------------------------------------------------------------------------*/
 /*
  * `axonsprobe model` runs Nordic's inference test against the model compiled
- * into .rodata.  `axonsprobe modelstore` runs the IDENTICAL vendor test with the
- * same model loaded from /data instead, so the two can be diffed.
+ * into .rodata; `axonsprobe modelstore` runs the same vendor test with the
+ * model loaded from /data, so the two results can be compared.
  *
- * Everything before this proved the loader reproduces the linker's bytes, on the
- * host.  This is the first point where the NPU is in the loop, and it is the only
- * thing that can show the engine accepts a command buffer patched at runtime.
+ * The vendor harness state is global, so AxonnnModelPrepare() runs as it does
+ * on the baked path, setting the model pointer and the test vectors.  The
+ * model pointer is then repointed at a RAM copy of the descriptor whose
+ * cmd_buffer_ptr is the relocated command buffer and whose model_const_ptr is
+ * the mapped weights.  No vendor source is modified, and the pass or fail
+ * verdict is the vendor test's own.
  *
- * How the substitution works.  The vendor's harness state is global rather than
- * static, so AxonnnModelPrepare() runs exactly as the baked path runs it --
- * populating the model pointer and the test vectors -- and only then is the model
- * pointer repointed at a RAM COPY of the descriptor whose cmd_buffer_ptr is the
- * patched buffer and whose model_const_ptr is the mapped weights.  No vendor
- * source is modified, and the verdict ("output bit exact!") is the vendor's own
- * rather than one written here.
- *
- * LAYER MODELS ARE EXCLUDED deliberately.  The packer extracts only the
- * full-model command buffer, so the layer-mode buffers still hold link-time
- * addresses; running them against relocated weights would mix a relocated and an
- * unrelocated path and make the comparison meaningless.
+ * Layer models are not run: the packer extracts only the full-model command
+ * buffer, so the layer-mode buffers still hold link-time addresses.
  */
 #if defined(TIKU_AXON_MODEL_FROM_STORE) && TIKU_AXON_MODEL_FROM_STORE
-/* NO MODEL TRANSLATION UNIT IS COMPILED in this configuration, so the four
- * globals it would otherwise define live here -- same names, same types, same
- * (non-static) linkage.  Nordic's inference sources are untouched and cannot
- * tell the difference; they were already written against these as externs.
- *
- * AxonnnModelPrepare() has nothing to prepare: there is no baked model to point
- * at and no baked vectors to populate.  Both are filled in from the store. */
+/* This configuration compiles no model, and so not the vendor test app that
+ * defines these globals and AxonnnModelPrepare() in a baked build.  They are
+ * defined here under the same names and types, so the store path below is
+ * the same code in both configurations.  AxonnnModelPrepare() has nothing to
+ * prepare: the descriptor and the vectors both come from the store. */
 nrf_axon_nn_compiled_model_s const *the_full_model_static_info[1];
 nrf_axon_nn_compiled_model_layer_s const **the_model_layers_static_info[1]
                                                                     = { NULL };
@@ -214,43 +210,36 @@ extern nrf_axon_nn_model_test_info_s       the_test_vectors[];
 extern int  AxonnnModelPrepare(void);
 #endif
 
-/* The weights stay MAPPED in RRAM; only the command buffer needs RAM.  Sized for
- * the largest command buffer in the shipped tinyml set (tinyml_vww, 51,344 B) --
- * reachable only from a model-free image, which is exactly the configuration
- * that has the RAM spare. */
+/* The weights stay mapped in RRAM; only the command buffer is built in RAM.
+ * Sized for the largest command buffer in the shipped tinyml set (tinyml_vww);
+ * a larger one is refused at prepare. */
 #ifndef AXONS_STORE_CMD_MAX
 #define AXONS_STORE_CMD_MAX  53248u
 #endif
 static uint8_t axons_store_cmd[AXONS_STORE_CMD_MAX] __attribute__((aligned(8)));
 
-/* The descriptor is built INTO a real struct, so the compiler supplies the
- * alignment the engine expects rather than this code asserting it. */
+/* The descriptor is built into a real struct, so the compiler supplies the
+ * alignment the engine expects. */
 static nrf_axon_nn_compiled_model_s axons_store_desc;
 
-/* The label pointer array and the model's packed output.  Both are small and
- * both are per-model, so they are sized generously once rather than tuned:
- * the shipped models use 12 labels and 8 bytes of packed output. */
+/* Label pointers and packed output for the loaded model, sized for the
+ * largest shipped one; a model needing more of either is refused at load. */
 #define AXONS_STORE_LABEL_MAX  32u
-/* Packed output.  64 bytes looked generous next to the classifiers' 8 -- and
- * then tinyml_ad asked for 2560, because an autoencoder's output is a whole
- * reconstructed frame rather than a handful of class scores.  The model states
- * its own requirement in the file and the load refuses rather than overflows,
- * so this only ever needs to be large enough; 4 KB clears the shipped set. */
+/* An autoencoder's packed output is a whole reconstructed frame rather than a
+ * few class scores; tinyml_ad sets this size. */
 #define AXONS_STORE_POUT_MAX   4096u
 static const char *axons_store_labels[AXONS_STORE_LABEL_MAX];
 static uint8_t axons_store_pout[AXONS_STORE_POUT_MAX]
                                             __attribute__((aligned(8)));
 
 /**
- * @brief Publish the firmware addresses a packed model's table may name.
+ * @brief Register the firmware addresses a packed model's table may name.
  *
- * Registered as &thing, never as a number: a relocation against a code symbol
- * resolves Thumb-tagged, and taking the address in C supplies that bit.  A
- * hand-written constant would be one short -- a single corrupt command word.
+ * Each address is taken in C, never written as a number: a code symbol's
+ * address carries the Thumb bit, which a hand-written constant would miss.
+ * The packed-output symbol names a buffer this caller lends the model.
  *
- * @note @packed_out is registered here rather than resolved by the loader
- *       because it is neither in the file nor a fixed firmware address -- it is
- *       a buffer this caller lends the model.
+ * @return TIKU_MODEL_OK, or the first registration error
  */
 static int axons_store_register_syms(void)
 {
@@ -277,23 +266,17 @@ static int axons_store_register_syms(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* A3: THE KNOWN ANSWERS, ALSO FROM THE STORE                                */
+/* KNOWN-ANSWER VECTORS FROM THE STORE                                       */
 /*---------------------------------------------------------------------------*/
 /*
- * The vendor harness compares each inference against a shipped expected output,
- * and those vectors are C arrays too -- 315 KB of .rodata for tinyml_vww, more
- * than its weights.  A model-free image cannot carry them either, so they are
- * packed into a companion .kat file (tools/axonpack.py --kat) and read here.
+ * The vendor harness compares each inference with an expected output, and
+ * those vectors are C arrays too, so a model-free image has none.  They are
+ * packed into a companion .kat file (tools/axonpack.py --kat) and mapped from
+ * the store here.
  *
- * Deliberately a separate file, NOT A SECTION OF THE .axm.  These are the test
- * harness's known answers, not part of the model: a product provisions the
- * model and never the vectors.  Keeping them apart is what lets the shipping
- * path be the small one.
- *
- * ONLY THE FULL-MODEL VECTORS ARE PACKED.  The other 232 KB is layer-by-layer
- * data, and the store path does not run layer models -- their command buffers
- * still hold link-time addresses (see the note above), so including their
- * vectors would only invite a comparison that cannot mean anything.
+ * The .kat is a separate file, not a section of the .axm: the vectors are the
+ * test harness's, and a product provisions the model without them.  Only the
+ * full-model vectors are packed, since the store path runs no layer models.
  */
 #define AKT_MAGIC       0x31544B41u    /* 'AKT1' little-endian */
 #define AKT_VERSION     1u
@@ -306,10 +289,14 @@ static const int8_t *axons_kat_exp[AXONS_KAT_MAX];
 /**
  * @brief Map a .kat and point @p info at its vectors.
  *
- * The vectors are USED IN PLACE out of NVM -- only the two pointer arrays are
- * built in RAM, which is why an 83 KB KAT costs 64 bytes of SRAM.
+ * The vectors are used in place in NVM; only the two pointer arrays are built
+ * in RAM.
  *
- * @return 0 on success, or -1 with a reason already printed.
+ * @param fs         Store holding the file
+ * @param name       .kat file name
+ * @param info       Vendor test info to populate
+ * @param test_name  Name the vendor harness prints for the run
+ * @return 0 on success, or -1 with a reason already printed
  */
 static int axons_kat_load(tiku_tfs_t *fs, const char *name,
                           nrf_axon_nn_model_test_info_s *info,
@@ -377,16 +364,15 @@ static int axons_kat_load(tiku_tfs_t *fs, const char *name,
 
 #if defined(TIKU_AXON_MODEL_TEST) && TIKU_AXON_MODEL_TEST
 /**
- * @brief Compare the descriptor built from the store against the linked one.
+ * @brief Compare the descriptor built from the store with the linked one.
  *
- * The on-device counterpart of the packer's host-side reconstruction gate: the
- * packer proves the FILE reproduces the linker's bytes, this proves the DEVICE
- * does, using the same model at the addresses it will actually run at.
+ * The scalar fields listed below and the two interlayer-relative pointers
+ * (output_ptr, inputs[0].ptr) must match; pointers into the model's own
+ * sections and the lent output buffer differ between the two and are skipped.
  *
- * @note The pointer fields are expected to differ -- that is what relocation is
- *       for -- so they are reported rather than failed.  Everything else is a
- *       scalar the store must reproduce exactly.
- * @return the number of differing scalar fields (0 is the pass).
+ * @param got   Descriptor built from the store
+ * @param want  Descriptor the linker built
+ * @return The number of differing fields (0 is the pass)
  */
 static unsigned axons_store_desc_check(const nrf_axon_nn_compiled_model_s *got,
                                        const nrf_axon_nn_compiled_model_s *want)
@@ -430,9 +416,8 @@ static unsigned axons_store_desc_check(const nrf_axon_nn_compiled_model_s *got,
     SCALAR(persistent_vars.count, "%u");
 #undef SCALAR
 
-    /* The interlayer-relative pointers must land at the SAME offsets from the
-     * buffer base, even though the base itself is the same in both cases --
-     * this catches a descriptor whose REL addends were mispatched. */
+    /* Both descriptors point into the same interlayer buffer, so these must be
+     * equal; a difference means a REL addend was patched wrong. */
     if (got->output_ptr != want->output_ptr) {
         SHELL_PRINTF("  desc.output_ptr store=%p baked=%p\n",
                      (const void *)got->output_ptr,
@@ -449,6 +434,12 @@ static unsigned axons_store_desc_check(const nrf_axon_nn_compiled_model_s *got,
 }
 #endif  /* TIKU_AXON_MODEL_TEST */
 
+/**
+ * @brief Load model @p name from /data and run the vendor test vectors on it.
+ *
+ * @param name  Model file (.axm)
+ * @param kat   Known-answer file (.kat), or NULL to use the baked vectors
+ */
 static void axons_model_from_store(const char *name, const char *kat)
 {
     tiku_tfs_t   *fs = tiku_vfs_tree_data_store();
@@ -475,33 +466,22 @@ static void axons_model_from_store(const char *name, const char *kat)
     SHELL_PRINTF("modelstore: %s  weights %u  cmd %u  %u sites / %u syms\n",
                  name, (unsigned)m.weights_len, (unsigned)m.cmd_len,
                  (unsigned)m.nsites, (unsigned)m.nsyms);
-    /* ALIGNMENT IS REPORTED FOR DIAGNOSIS, NOT BECAUSE IT IS A CONSTRAINT.  The
-     * store does not guarantee it: a mapped file starts at slot_off + 4 (the
-     * length word) and Nordic's slot stride is 4100 bytes -- neither a multiple
-     * of 16 -- so a file's base alignment depends on which slot it landed in.
-     *
-     * That looked like a hazard, so it was measured rather than assumed, and it
-     * is NOT one.  Three models ran bit-exact from the store at weights
-     * alignment 0 (kws), 8 (ic) and 12 (ad); kws was then deliberately shifted
-     * to alignment 4 by provisioning a padding file ahead of it and produced
-     * byte-identical results again.  Four of the four possible 4-byte phases
-     * work, so the NPU is reading these blobs without an alignment requirement
-     * this layer has to satisfy.
-     *
-     * Kept because it costs one line and is the first thing worth reading if a
-     * future model ever misbehaves only in some store layouts -- but on today's
-     * evidence, "aligned 12" is an observation, not a suspect. */
+    /* Alignment is printed for diagnosis only.  The store does not align a
+     * file to 16 bytes: a mapped file starts after its slot's 4-byte length
+     * word, and slots are TIKU_TFS_SLOT_DATA + 4 bytes apart, so its
+     * alignment depends on the slot it landed in.  The NPU reads these blobs
+     * from any 4-byte-aligned address. */
     SHELL_PRINTF("modelstore: weights @%p (align %u)  cmd RAM @%p (align %u)\n",
                  (const void *)m.weights,
                  (unsigned)((uintptr_t)m.weights & 15u),
                  (const void *)axons_store_cmd,
                  (unsigned)((uintptr_t)axons_store_cmd & 15u));
 
-    /* THE DESCRIPTOR'S SIZE IS THE ABI GATE.  The packed bytes are the vendor's
-     * struct as the compiler that built the packer's input laid it out; this
-     * image's struct must be the same shape or the fields land in the wrong
-     * places -- and the engine would read a plausible, wrong model.  A vendor
-     * header change is exactly what this catches. */
+    /* The packed descriptor holds the vendor struct as compiled into the
+     * packer's input.  A different size here means this build's SDK lays it
+     * out differently, the fields would land in the wrong places, and the
+     * model must be repacked.  A layout change that keeps the size is not
+     * caught. */
     if (m.desc_len != sizeof axons_store_desc) {
         SHELL_PRINTF("modelstore: descriptor is %u B, this build expects %u -- "
                      "repack against this SDK\n",
@@ -555,27 +535,22 @@ static void axons_model_from_store(const char *name, const char *kat)
         return;
     }
 
-    /* The three pointers the FILE cannot know, because they name things this
-     * run chose: where the commands were built, where the labels were built,
-     * and where the store mapped the weights.  Everything else in the
-     * descriptor -- every dimension, every quantization constant, every buffer
-     * size -- came out of the file. */
+    /* The file cannot know three pointers, because this run chose them: where
+     * the commands and the labels were built and where the store mapped the
+     * weights.  Every other descriptor field came from the file, relocated by
+     * the loader. */
     axons_store_desc.cmd_buffer_ptr =
         (const NRF_AXON_PLATFORM_BITWIDTH_UNSIGNED_TYPE *)axons_store_cmd;
     axons_store_desc.labels = (m.nlabels != 0u) ? axons_store_labels : NULL;
-    /* model_const_ptr is read nowhere in the SDK -- the weights are reached
-     * through the command buffer's patched addresses -- but it is repointed so
-     * nothing left in the descriptor still names .rodata. */
+    /* The SDK does not read model_const_ptr (the command buffer's patched
+     * addresses reach the weights); it is repointed so no descriptor field
+     * still names .rodata. */
     axons_store_desc.model_const_ptr  = m.weights;
     axons_store_desc.model_const_size = (uint32_t)m.weights_len;
 
 #if defined(TIKU_AXON_MODEL_TEST) && TIKU_AXON_MODEL_TEST
-    /* THE ON-DEVICE RECONSTRUCTION GATE.  A baked build has the linker's own
-     * descriptor sitting right there, so the one built from the store can be
-     * compared against it field by field before either is used.  This is what
-     * turns "the store path ran and the answers matched" into "the store path
-     * built the same model" -- the second is the claim, and only this checks
-     * it directly. */
+    /* A baked build has the linker's own descriptor, so the one built from
+     * the store is compared with it field by field before either is used. */
     if (the_full_model_static_info[0] != NULL) {
         unsigned bad_fields =
             axons_store_desc_check(&axons_store_desc,
@@ -586,9 +561,8 @@ static void axons_model_from_store(const char *name, const char *kat)
 #endif
     the_full_model_static_info[0] = &axons_store_desc;
 
-    /* The known answers.  A model-free image has no baked vectors, so a KAT
-     * file is the only way to have anything to compare against -- and without a
-     * comparison "it ran" is not a result. */
+    /* Known answers come from the named .kat, else from the baked vectors; a
+     * model-free image has none baked, so it needs the .kat. */
     if (kat != NULL) {
         if (axons_kat_load(fs, kat, &the_test_vectors[0],
                            "test_nn_inference_from_store") != 0) {
@@ -628,9 +602,9 @@ void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
     }
     if (argc >= 2 && strcmp(argv[1], "off") == 0) {
 #if defined(TIKU_AXON_ENABLE) && TIKU_AXON_ENABLE
-        /* Close the driver session first: writing ENABLE=0 while the platform
-         * refcount is still non-zero leaves the two views disagreeing, and the
-         * refcount is the one that wins the moment anything reserves again. */
+        /* Close the driver session first: ENABLE=0 under a non-zero platform
+         * refcount leaves the two disagreeing, and the next reservation then
+         * trusts the refcount and skips the enable. */
         nrf_axon_platform_close();
 #endif
         AXONS_ENABLE = 0u;
@@ -662,10 +636,9 @@ void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
     }
 
 #if defined(TIKU_AXON_ENABLE) && TIKU_AXON_ENABLE
-    /* One-time vendor platform/driver init shared by every subcommand that
-     * enters the blob.  Skipping it leaves the driver's engine base NULL and
-     * the first intrinsic bus-faults at base+offset (BFAR 0x520, seen on HW
-     * when `fir` ran before `hw`). */
+    /* One-time vendor platform and driver init for hw, acc, fir, hold and
+     * busy; the model commands run their own.  Skipping it leaves the
+     * driver's engine base NULL, and the first intrinsic bus-faults. */
     {
         static int axon_inited;
         if (!axon_inited && argc >= 2 &&
@@ -697,9 +670,9 @@ void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 2 && strcmp(argv[1], "acc") == 0) {
-        /* KAT: sum of a 24-bit vector on the NPU vs the CPU loop.
-         * axon_acc_24_32 handles reservation itself (keep_reservation=false)
-         * -- but platform init must have run (axonsprobe hw first). */
+        /* Known-answer test: the sum of a 24-bit vector on the NPU against a
+         * CPU loop.  axon_acc_24_32 takes and drops its own reservation
+         * (keep_reservation=false); platform init ran above. */
         static int32_t x[16] __attribute__((aligned(4)));
         int32_t hw_out = 0;
         int32_t sw_out = 0;
@@ -725,23 +698,15 @@ void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
     if (argc >= 2 && (strcmp(argv[1], "busy") == 0 ||
                       strcmp(argv[1], "hold") == 0) && argc >= 3) {
         /*
-         * Sustained states for a controlled power measurement.
+         * Hold the NPU in one state for a caller-chosen time, so an external
+         * meter can average over the window:
          *
-         * A single inference is ~200 ms and a single intrinsic ~50 us, so
-         * neither can be averaged by an external instrument without a marker
-         * channel to bound the window.  These two hold the NPU in a KNOWN
-         * state for a caller-chosen duration instead, so a plain average over
-         * the window is the figure:
+         *   hold <ms>  block powered and reserved, nothing issued  (static)
+         *   busy <ms>  the same, issuing MAC ops back to back      (dynamic)
          *
-         *   hold <ms>  block powered and reserved, doing NOTHING  (static)
-         *   busy <ms>  the same, issuing MAC ops back to back     (dynamic)
-         *
-         * The pair is what makes the measurement controlled: subtracting them
-         * isolates the NPU's dynamic cost from its static cost, and
-         * subtracting `hold` from a run with the block DISABLED isolates what
-         * merely powering it costs.  Every difference is immune to any fixed
-         * offset on the supply rail, which matters because ~380 uA of what the
-         * rail shows is not the SoC's at all.
+         * busy minus hold is the dynamic cost, and hold minus a run with the
+         * block disabled is the cost of powering it; each difference cancels
+         * any fixed offset on the supply rail.
          */
         enum { DOT_LEN = 512 };
         static int32_t bx[DOT_LEN] __attribute__((aligned(4)));
@@ -769,49 +734,44 @@ void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
         do {
             if (busy) {
                 int32_t out = 0;
-                /* keep_reservation = FALSE.  The outer reserve_for_user()
-                 * above already holds the block powered for the whole loop, so
-                 * a per-op release never drops the refcount to zero and the
-                 * engine does not power-cycle between ops.  Passing TRUE leaks
-                 * one reference PER OP instead: measured, that left the block
-                 * still drawing 2367 uA after the loop against an 834 uA
-                 * baseline, and the experiment's own drift check caught it. */
+                /* keep_reservation = false: the reservation taken above holds
+                 * the block powered for the whole loop, so the per-op release
+                 * never drops the refcount to zero and the engine does not
+                 * power-cycle between ops.  Passing true would leak one
+                 * reference per op. */
                 (void)axon_mar_24_24_32(bx, by, &out, DOT_LEN, 0u,
                                         NRF_AXON_SYNC_MODE_BLOCKING_POLLING,
                                         false);
                 ops++;
             } else {
-                /* Powered and reserved, core asleep: the block's STATIC cost
-                 * with nothing issued to it. */
+                /* Powered and reserved with nothing issued, core asleep: the
+                 * block's static cost. */
                 __asm__ volatile ("wfi" ::: "memory");
             }
-            /* Both arms block this process deliberately for the whole window.
-             * Check in so the detector does not read a legitimate long block as
-             * a wedge -- unhandled, that is an 8 s cliff (see the note on
-             * tiku_hang_arch_reset in tiku_cpu_watchdog_arch.c). */
+            /* Both arms block this process for the whole window, so check in:
+             * the hang detector otherwise resets the board after
+             * TIKU_HANG_THRESHOLD_TICKS without progress (tiku_hang.h). */
             tiku_hang_checkin();
         } while ((uint32_t)(NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL - t0)
                  < ms * 1000u);
         nrf_axon_platform_free_reservation_from_user();
-        /* Then FORCE the session closed.  A measurement state is only useful
-         * if it can be left, and "balanced" is not the same as "off": any
-         * stray reservation anywhere keeps the engine powered and silently
-         * contaminates the next reading.  close() zeroes the refcount and
-         * disables the hardware, so the baseline is genuinely restorable. */
+        /* Then close the session: a stray reservation anywhere would keep the
+         * engine powered into the next reading, and close() zeroes the
+         * refcount and disables the block. */
         nrf_axon_platform_close();
         SHELL_PRINTF("%s done: %lu ops, ENABLE=%x\n", argv[1],
                      (unsigned long)ops, (unsigned)AXONS_ENABLE);
         return;
     }
     if (argc >= 2 && strcmp(argv[1], "fir") == 0) {
-        /* MAC-throughput benchmark with an EXACT CPU reference: a batch of
-         * dot products (axon_mar_24_24_32 -- 32-bit output, no truncation).
-         * REPS x LEN multiply-accumulates on the NPU vs a plain int32 CPU
-         * loop, both timed on the 1 MHz GRTC.  Values are bounded so 24-bit
-         * operands and the 32-bit accumulator never saturate, so hw==sw is a
-         * true KAT rather than a convention guess (the FIR intrinsic's
-         * fixed-point rounding makes a naive reference ambiguous). */
-        enum { DOT_LEN = 512, DOT_REPS = 128 };  /* 65,536 MACs/rep */
+        /* MAC-throughput benchmark with an exact CPU reference: DOT_REPS dot
+         * products of DOT_LEN elements on the NPU (axon_mar_24_24_32, 32-bit
+         * output, no rounding) against a plain int32 CPU loop, both timed on
+         * the 1 MHz GRTC.  Operands are bounded so that neither the 24-bit
+         * inputs nor the 32-bit accumulator saturates, which makes hw == sw
+         * an exact check.  The FIR intrinsic is not used: its fixed-point
+         * rounding has no exact CPU reference. */
+        enum { DOT_LEN = 512, DOT_REPS = 128 };  /* 65,536 MACs in all */
         static int32_t x[DOT_LEN] __attribute__((aligned(4)));
         static int32_t y[DOT_LEN] __attribute__((aligned(4)));
         uint32_t i, r, t0, t_hw, t_sw;
@@ -820,7 +780,8 @@ void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
         nrf_axon_result_e rc = NRF_AXON_RESULT_SUCCESS;
 
         for (i = 0u; i < DOT_LEN; i++) {
-            x[i] = (int32_t)(((i * 2654435761u) >> 20) & 0x7Fu) - 64;  /* [-64,63] */
+            /* Both in [-64, 63]. */
+            x[i] = (int32_t)(((i * 2654435761u) >> 20) & 0x7Fu) - 64;
             y[i] = (int32_t)(((i * 40503u) >> 6) & 0x7Fu) - 64;
         }
 
@@ -859,8 +820,8 @@ void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
         return;
     }
 #if defined(AXONS_HAVE_NN)
-    /* The only model command that exists in BOTH configurations -- and the only
-     * one at all in the shipping (model-free) image. */
+    /* The one model command in both configurations, and the only one in a
+     * model-free image. */
     if (argc >= 2 && strcmp(argv[1], "modelstore") == 0) {
         axons_model_from_store(argc >= 3 ? argv[2] : "kws.axm",
                                argc >= 4 ? argv[3] : NULL);
@@ -868,8 +829,8 @@ void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
     }
 #endif
 #if defined(TIKU_AXON_MODEL_TEST) && TIKU_AXON_MODEL_TEST
-    /* Baked-model commands.  These are the REFERENCE the store path is measured
-     * against, so they exist only where a model was compiled in. */
+    /* Baked-model commands, the reference the store path is compared with;
+     * they exist only where a model is compiled in. */
     if (argc >= 2 && strcmp(argv[1], "model") == 0) {
         /* Nordic's portable inference test: runs the compiled model
          * (TIKU_AXON_MODEL=... on the make line) against its shipped test
@@ -882,10 +843,8 @@ void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 2 && strcmp(argv[1], "modelbaked") == 0) {
-        /* CONTROL for modelstore: the BAKED descriptor run through the SAME
-         * restricted vendor call (full model only, no layer models).  If this
-         * behaves like modelstore then the store is exonerated and the
-         * difference is the harness restriction, not the relocation. */
+        /* The baked descriptor through the same full-model-only vendor call
+         * as modelstore (no layer models), so the two runs can be compared. */
         uint32_t t0;
         if (nrf_axon_platform_init() != NRF_AXON_RESULT_SUCCESS) {
             SHELL_PRINTF("modelbaked: axon platform init failed\n");

@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_util.h - argument helpers shared by command modules.
  *
- * Three one-liners that were file-static copies until the power command was split
- * per driver.  They are static inline, so each module gets its own copy with no
- * one-definition-rule games and the compiler drops what a module does not use.
+ * Three small helpers the command modules share.  They are static inline, so
+ * each module gets its own copy with no one-definition-rule conflict and the
+ * compiler drops what a module does not use.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,22 +20,13 @@
 #include <stdint.h>
 #include <string.h>
 
-/*
- * These are EXACT copies of what tiku_shell_cmd_power.c had as file-statics.
- * A first draft of this header "improved" them -- hex support in parse_u32,
- * enable/disable in parse_on_off.  Both were reverted: S4 is a mechanical
- * split gated on output parity, and a split that quietly changes what
- * `power psram poke 0x100` parses is not a split.  Extend them later, on
- * purpose, with their own gate.
- */
-
 /** @brief Exact string compare.  1 when equal, 0 otherwise. */
 static inline int tiku_cmd_streq(const char *a, const char *b)
 {
     return strcmp(a, b) == 0;
 }
 
-/** @brief Parse an unsigned DECIMAL; 0 on anything unparseable. */
+/** @brief Parse leading decimal digits; 0 when there are none. */
 static inline uint32_t tiku_cmd_parse_u32(const char *tok)
 {
     uint32_t v = 0u;

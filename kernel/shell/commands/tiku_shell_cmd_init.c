@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_init.c - "init" command implementation
  *
- * Shell interface to the FRAM-backed init table.  Allows listing,
- * adding, removing, enabling/disabling, and re-running boot entries
- * without recompiling.
+ * Shell interface to the init table in the NVM config region.  Allows
+ * listing, adding, removing, enabling/disabling, and re-running boot
+ * entries without recompiling.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -142,6 +142,7 @@ cmd_init_list(void)
 /* SUBCOMMAND: add                                                           */
 /*---------------------------------------------------------------------------*/
 
+/** @brief `init add <seq> <name> <cmd...>`: add or replace an entry. */
 static void
 cmd_init_add(uint8_t argc, const char *argv[])
 {
@@ -163,7 +164,6 @@ cmd_init_add(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* Reassemble the command from remaining args */
     cmd_join_args(cmd_buf, sizeof(cmd_buf), argc, argv, 4);
 
     if (tiku_init_add(seq, argv[3], cmd_buf) < 0) {
@@ -183,6 +183,7 @@ cmd_init_add(uint8_t argc, const char *argv[])
 /* SUBCOMMAND: rm                                                            */
 /*---------------------------------------------------------------------------*/
 
+/** @brief `init rm <name>`: remove an entry. */
 static void
 cmd_init_rm(uint8_t argc, const char *argv[])
 {
@@ -207,6 +208,7 @@ cmd_init_rm(uint8_t argc, const char *argv[])
 /* SUBCOMMAND: enable / disable                                              */
 /*---------------------------------------------------------------------------*/
 
+/** @brief `init enable|disable <name>`: set an entry's enabled flag. */
 static void
 cmd_init_set_enable(uint8_t argc, const char *argv[], uint8_t en)
 {

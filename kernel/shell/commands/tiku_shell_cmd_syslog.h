@@ -16,7 +16,7 @@
 #include <stdint.h>
 
 /**
- * @brief "syslog" command -- send a remote syslog line over SLIP.
+ * @brief "syslog" command -- send a remote syslog line over UDP.
  *
  * Sends one RFC 3164 datagram (UDP port 514) to the SLIP host at severity
  * INFO, facility LOCAL0.  Fire-and-forget -- syslog has no reply, so this

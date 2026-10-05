@@ -7,8 +7,8 @@
  *
  * tiku_shell_cmd_timer.c - "timer" command implementation
  *
- * Prints whether any software timers are pending, the nearest
- * expiration time, and the remaining ticks.
+ * Prints whether any software timers are pending, the nearest expiration
+ * time and the remaining ticks, and whether the hardware timer is scheduled.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

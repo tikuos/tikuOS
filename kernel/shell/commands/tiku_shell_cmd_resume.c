@@ -19,7 +19,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_shell_cmd_resume.h"
-#include <kernel/shell/tiku_shell.h>             /* SHELL_PRINTF via tiku_shell_io.h */
+#include <kernel/shell/tiku_shell.h>             /* SHELL_PRINTF */
 #include <kernel/process/tiku_process.h>
 
 /*---------------------------------------------------------------------------*/

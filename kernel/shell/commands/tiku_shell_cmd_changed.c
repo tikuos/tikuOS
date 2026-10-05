@@ -8,8 +8,8 @@
  * tiku_shell_cmd_changed.c - "changed" command implementation.
  *
  * A synchronous equivalent of an "on changed" rule, for one-off waits at the
- * prompt.  Polls at shell-tick granularity and checks for Ctrl+C every iteration.
- * Trailing whitespace is stripped so a bare newline does not read as a change.
+ * prompt.  Polls at shell-tick granularity and checks for Ctrl+C each pass;
+ * trailing whitespace is stripped so a bare newline does not read as a change.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -16,15 +16,13 @@
 #include <stdint.h>
 
 /**
- * @brief "on" command — register a reactive rule.
+ * @brief "on" command — register a reactive rule:
+ *        `on <path> <op> <value> <command...>` or
+ *        `on changed <path> <command...>`.
  *
- * Usage: on <path> <op> <value> <command...>
- *
- * Each shell tick, the path is read and compared with @p value using
- * @p op (one of > < >= <= == !=).  When the comparison transitions
- * from false to true, the command is dispatched through the shell
- * parser.  Edge-triggered, so actions are not repeated while the
- * condition stays true.
+ * The command runs when the comparison (> < >= <= == !=) turns from false to
+ * true, or when the reading changes.  Rules on writable nodes are checked on
+ * each write; the others are polled every shell tick.
  */
 void tiku_shell_cmd_on(uint8_t argc, const char *argv[]);
 

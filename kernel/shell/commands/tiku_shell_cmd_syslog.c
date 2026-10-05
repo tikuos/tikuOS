@@ -7,8 +7,9 @@
  *
  * tiku_shell_cmd_syslog.c - "syslog" command (remote log line).
  *
- * Sends one RFC 3164 datagram over SLIP to the host.  Syslog is fire-and-forget
- * with no reply, so the command sends synchronously and needs no per-tick driver.
+ * Sends one RFC 3164 datagram to the SLIP host (.1 on the device's subnet).
+ * Syslog is fire-and-forget with no reply, so the command sends synchronously
+ * and needs no per-tick driver.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,15 +19,16 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_shell_cmd_syslog.h"
-#include "tiku_shell_cmd_slip.h"                     /* tiku_shell_cmd_slip_enable */
-#include <string.h>                                  /* strcmp (net-test burst) */
+#include "tiku_shell_cmd_slip.h"                     /* slip_enable */
+#include <string.h>                                  /* strcmp (net-test) */
 #include <kernel/shell/tiku_shell.h>                 /* SHELL_PRINTF */
 #include <tikukits/net/tiku_kits_net.h>              /* TIKU_KITS_NET_IP_ADDR */
 #include <tikukits/net/ipv4/tiku_kits_net_udp.h>     /* udp_init */
 #include <tikukits/net/ipv4/tiku_kits_net_syslog.h>
 
-/* Bound on the assembled message; the device's UDP payload is capped well
- * below this by the syslog library anyway. */
+/* Bound on the joined message text.  The syslog kit also cuts the whole
+ * datagram to TIKU_KITS_NET_UDP_MAX_PAYLOAD (100 bytes at the default
+ * 128-byte MTU), which can leave less than this for the text. */
 #define SYSLOG_MSG_MAX  96u
 
 void
@@ -48,7 +50,7 @@ tiku_shell_cmd_syslog(uint8_t argc, const char *argv[])
     /* Net-test affordance: `syslog @burst` replays the exact 5-message
      * diagnostic burst the APP=net syslog process emits once at boot
      * (tiku_kits_net_syslog_process.c): boot ok + four C-path boundary
-     * cases.  On the shell+net firmware that process does NOT autostart, so
+     * cases.  On the shell+net firmware that process does not autostart, so
      * TikuBench's test_syslog_boundary.py drives it deterministically with
      * this command -- mirroring how test_syslog_send.py triggers "boot ok".
      * Synchronous send => each datagram is fully on the wire before the next,
@@ -75,10 +77,10 @@ tiku_shell_cmd_syslog(uint8_t argc, const char *argv[])
         tiku_kits_net_syslog_send(TIKU_KITS_NET_SYSLOG_SEV_INFO,
             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
-        /* 4: 16-char hostname truncated to 8  ->  <134>ABCDEFGH os: host-trunc */
+        /* 4: 16-char hostname cut to 8 -> <134>ABCDEFGH os: host-trunc */
         tiku_kits_net_syslog_set_hostname("ABCDEFGHIJKLMNOP");
         tiku_kits_net_syslog_send(TIKU_KITS_NET_SYSLOG_SEV_INFO, "host-trunc");
-        /* 5: 10-char tag truncated to 8  ->  <134>ABCDEFGH ZYXWVUTS: tag-trunc */
+        /* 5: 10-char tag cut to 8 -> <134>ABCDEFGH ZYXWVUTS: tag-trunc */
         tiku_kits_net_syslog_set_tag("ZYXWVUTSRQ");
         tiku_kits_net_syslog_send(TIKU_KITS_NET_SYSLOG_SEV_INFO, "tag-trunc");
 

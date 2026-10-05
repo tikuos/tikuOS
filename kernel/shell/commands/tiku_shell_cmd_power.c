@@ -7,9 +7,8 @@
  *
  * tiku_shell_cmd_power.c - "power": report and steer what the part costs.
  *
- * Every knob is readable and, where the silicon allows, switchable at run time.
- * A build flag is not evidence that a register was written, and one boot
- * measuring a workload both ways beats comparing two flashes.
+ * Every knob is readable and, where the silicon allows, switchable at run time,
+ * so one boot can measure a workload both ways.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,8 +20,8 @@
 #include <kernel/shell/tiku_shell_io.h>
 #include <hal/tiku_cpu.h>
 #include "tiku_shell_cmd_sleep.h"
-/* S4: the emmc/psram/usb/nor verbs moved to their own modules.  `power` keeps
- * the top-level spelling and forwards, so `power emmc id` is unchanged. */
+/* The emmc, psram, usb and nor verbs live in their own modules; `power`
+ * forwards them. */
 #include "tiku_shell_cmd_emmc.h"
 #include "tiku_shell_cmd_psram.h"
 #include "tiku_shell_cmd_usb.h"
@@ -37,8 +36,8 @@
 #if defined(PLATFORM_AMBIQ) && (TIKU_AMBIQ_POWER_PROBE + 0)
 #include <arch/ambiq/tiku_power_ambiq.h>
 #include <arch/ambiq/tiku_timer_arch.h>       /* stimer reclock / rate       */
-#include <arch/ambiq/tiku_cpu_common.h>       /* tiku_cpu_ambiq_delay_us     */
-#include <kernel/cpu/tiku_hang.h>             /* long probe loops block      */
+#include <arch/ambiq/tiku_cpu_common.h>
+#include <kernel/cpu/tiku_hang.h>
 #if (TIKU_DRV_NOR_ENABLE + 0)
 #include <arch/ambiq/tiku_nor_arch.h>          /* MSPI1 + U12 external NOR    */
 #endif
@@ -47,21 +46,21 @@
 #endif
 #if (TIKU_DRV_USB_ENABLE + 0)
 #include <arch/ambiq/tiku_usb_arch.h>          /* USB device controller       */
-#include <kernel/scheduler/tiku_sched.h>       /* idle hook for the MSC pump  */
+#include <kernel/scheduler/tiku_sched.h>
 #endif
 #if (TIKU_DRV_PSRAM_ENABLE + 0)
 #include <arch/ambiq/tiku_psram_arch.h>        /* MSPI0 + U14 external PSRAM  */
-#include <kernel/memory/tiku_mem.h>           /* TIKU_MEM_PSRAM tier gate    */
+#include <kernel/memory/tiku_mem.h>
 #endif
 #include <kernel/timers/tiku_clock.h>         /* tickless begin/end (guard)  */
 #include <arch/ambiq/tiku_cpu_freq_boot_arch.h>  /* SIMOBUCK enable hook     */
 #if (TIKU_AMBIQ_POWER_PROBE_GPU + 0)
-#include <arch/ambiq/tiku_gpu_power.h>        /* experiment 2: GPU as compute */
+#include <arch/ambiq/tiku_gpu_power.h>        /* GPU compute power probe     */
 #endif
 #if (TIKU_AMBIQ_POWER_PROBE_SIMD + 0)
-#include <arch/ambiq/tiku_simd_power.h>       /* experiment 3: Helium vs scalar */
+#include <arch/ambiq/tiku_simd_power.h>       /* Helium vs scalar probe      */
 #endif
-#include "apollo510.h"                       /* PWRCTRL / CLKGEN for `floor` */
+#include "apollo510.h"                /* PWRCTRL, CLKGEN, STIMER, PWRMODCTL */
 #endif
 #if defined(PLATFORM_ESP32C61)
 #include <arch/esp32c61/tiku_sleep_arch.h>
@@ -70,12 +69,13 @@
 #include <arch/esp32c61/tiku_esp32c61_regs.h>
 #endif
 
+/** @brief Non-zero when @p a and @p b are equal strings. */
 static int streq(const char *a, const char *b)
 {
     return strcmp(a, b) == 0;
 }
 
-/** @brief Parse an unsigned decimal; 0 on anything unparseable.
+/** @brief Parse leading decimal digits; 0 when there are none.
  *  Marked unused: only some driver configurations reference it. */
 static uint32_t parse_u32(const char *tok) __attribute__((unused));
 static uint32_t parse_u32(const char *tok)
@@ -100,6 +100,7 @@ static int parse_on_off(const char *tok)
     return -1;
 }
 
+/** @brief Print the clocks and idle mode, plus nRF54L cache/DC-DC/debug. */
 static void power_report(void)
 {
     SHELL_PRINTF("core:  %lu MHz\n", tiku_cpu_mclk_hz() / 1000000UL);
@@ -108,8 +109,8 @@ static void power_report(void)
     SHELL_PRINTF("cache: %s\n", tiku_nordic_cache_enabled() ? "on" : "off");
     {
         int det = tiku_nordic_dcdc_inductor_present();
-        /* -1 means the detector could not run because the converter is on.
-         * Saying "absent" there would be a fabricated answer. */
+        /* -1 means the detector could not run because the converter is on,
+         * so the inductor prints as unknown rather than absent. */
         SHELL_PRINTF("dcdc:  %s (inductor %s)\n",
                      tiku_nordic_dcdc_enabled() ? "on" : "off",
                      (det < 0) ? "unknown while dcdc on -- 'power probe'"
@@ -126,6 +127,7 @@ static void power_report(void)
 }
 
 #if defined(PLATFORM_NORDIC)
+/** @brief Print the cache profiling counters and the hit rate. */
 static void power_stat(void)
 {
     uint32_t hit = 0u, miss = 0u, rd = 0u, wr = 0u;
@@ -143,9 +145,8 @@ static void power_stat(void)
                      (unsigned long)(per_mille / 10u),
                      (unsigned long)(per_mille % 10u));
     } else {
-        /* A counter pair of zero means profiling was never started, not that
-         * the cache never hit -- worth distinguishing, because "0 hits" reads
-         * like a damning result and is usually just an unarmed counter. */
+        /* A zero hit+miss total means profiling was never started, not that
+         * the cache never hit. */
         SHELL_PRINTF("hit rate n/a (counters not started -- run 'power clear')\n");
     }
 }
@@ -165,11 +166,11 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         return;
     }
     if ((streq(argv[1], "idle") || streq(argv[1], "spin")) && argc >= 3) {
-        /* ONE PARSER FOR BOTH STATES so they cannot be given different
-         * peripheral releases by accident -- if they were, their difference
-         * would measure the peripherals rather than the CPU.
+        /* idle and spin share one parser so both get the same peripheral
+         * releases, and their difference measures the CPU rather than the
+         * peripherals.
          *   idle <ms>  WFI          spin <ms>  while(1)
-         * plus "quiet" as shorthand for every release this port knows. */
+         * plus "quiet" as shorthand for pll, uart, hfxo, tim and deep. */
         int spin = streq(argv[1], "spin");
         unsigned flags = 0u, i;
         uint32_t ms = 0u, us;
@@ -194,10 +195,9 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                          "[quiet|deep|tim|tick|uart|pll|hfxo]\n", argv[1]);
             return;
         }
-        /* EVERY flag is printed, including tim.  This line IS the provenance
-         * record in a measurement log: one release missing from it and a later
-         * reader attributes the current to the wrong state.  It omitted tim
-         * while `quiet` was setting it, which is exactly that failure. */
+        /* Every flag is printed: this line is the provenance record in a
+         * measurement log, and a release missing from it attributes the
+         * current to the wrong state. */
         SHELL_PRINTF("%s %lu ms flags%s%s%s%s%s%s%s -- starting\n", argv[1],
                      (unsigned long)ms,
                      (flags & TIKU_SLEEP_STOP_PLL)  ? " pll"  : "",
@@ -210,8 +210,8 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         us = spin ? tiku_nordic_spin_probe(ms, flags)
                   : tiku_nordic_sleep_probe(ms, flags);
         if (spin) {
-            /* Report the WORK as well as the window.  Without the denominator a
-             * lower current reads as a saving even when it is only a slowdown. */
+            /* Report the work as well as the window: without it a lower
+             * current reads as a saving even when it is only a slowdown. */
             uint32_t p = tiku_nordic_spin_pass_count();
             uint32_t in = tiku_nordic_spin_inner();
             SHELL_PRINTF("spin done %lu us passes %lu iter %lu kiter/s %lu\n",
@@ -227,9 +227,9 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                             tiku_nordic_sleep_wake_count() * 1000000u) / us) : 0u));
         }
 #if (TIKU_FLPR_ENABLE + 0)
-        /* Coprocessor work retired inside the SAME window, whichever state the
-         * app core was in -- so both cores' costs share one denominator and the
-         * host never has to infer the interval from shell round-trips. */
+        /* Coprocessor work retired in the same window, whichever state the
+         * app core was in, so both cores' costs share one denominator and the
+         * host need not infer the interval from shell round-trips. */
         if (tiku_nordic_flpr_pass_delta() != 0u) {
             SHELL_PRINTF("flpr passes %lu in %lu us\n",
                          (unsigned long)tiku_nordic_flpr_pass_delta(),
@@ -240,10 +240,9 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
     }
     if (streq(argv[1], "mem") && argc >= 4) {
         /* power mem <kind> <ms> -- price one memory access.
-         * Reports accesses and the traversal checksum, so a later reader can
-         * confirm two configurations did the SAME work rather than trusting
-         * that they did.  Current per unit TIME is not efficiency; accesses
-         * are the denominator. */
+         * Reports accesses and the traversal checksum, so two configurations
+         * can be checked for equal work; accesses, not time, are the
+         * denominator. */
         static const char *const names[TIKU_MEM_KIND_COUNT] = {
             "nop", "sram_r", "sram_w", "sram_stride", "rram_hot", "rram_cold"
         };
@@ -275,15 +274,11 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         return;
     }
     if (streq(argv[1], "lfclk")) {
-        /* Start the 32.768 kHz low-frequency clock.  Found NOT RUNNING by
-         * `power floor`: the port had never started it, so the GRTC has been
-         * keeping time off the HF path since boot -- and timekeeping that
-         * needs HF is a standing reason the HF domain can never be gated,
+        /* Start the 32.768 kHz low-frequency clock, which the port does not
+         * start at boot: without it the GRTC keeps time off the HF path, and
+         * timekeeping that needs HF keeps the HF domain from being gated,
          * whatever else a sleep releases.  The datasheet's ~3 uA System ON
-         * idle figure is quoted with the GRTC on the 32 kHz crystal.
-         * Deliberately a COMMAND, not a boot default, until its effect is
-         * measured: this file's header explains why register writes are made
-         * observable before they are made policy. */
+         * idle figure is quoted with the GRTC on the 32 kHz crystal. */
         uint32_t src = CLOCK_LFCLK_SRC_SRC_LFXO;       /* DK has the crystal */
         if (argc >= 3 && streq(argv[2], "lfrc")) {
             src = CLOCK_LFCLK_SRC_SRC_LFRC;
@@ -295,9 +290,8 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         NRF_CLOCK_S->EVENTS_LFCLKSTARTED = 0u;
         NRF_CLOCK_S->TASKS_LFCLKSTART = 1u;
         {
-            /* LFXO start-up is crystal-settling, hundreds of ms worst case;
-             * poll with a generous bound and report what actually happened
-             * rather than assuming. */
+            /* LFXO start-up is crystal settling, hundreds of ms worst case;
+             * poll with a generous bound and print the state reached. */
             uint32_t spin = 0u;
             while (NRF_CLOCK_S->EVENTS_LFCLKSTARTED == 0u &&
                    spin < 60000000u) {
@@ -312,10 +306,9 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         return;
     }
     if (streq(argv[1], "floor")) {
-        /* Everything plausibly holding the idle floor up, in one read.  The
-         * idle current measures ~1 mA against a ~3 uA System ON spec, and the
-         * gap cannot be attributed by current alone -- attribution needs the
-         * REGISTER state that coexists with the number.  Plain reads only. */
+        /* Everything that can hold the idle floor up, in one read: the
+         * register state attributes what the current alone cannot.  Plain
+         * reads only. */
         SHELL_PRINTF("clock: xo.run=%lu pll.run=%lu lfclk.src=%lu run=%lu"
                      " stat=%lx\n",
                      (unsigned long)NRF_CLOCK_S->XO.RUN,
@@ -350,10 +343,9 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         return;
     }
     if (streq(argv[1], "why")) {
-        /* RESETREAS decode.  Exists to answer one question: WHAT woke the
-         * part out of System OFF, because "it came back" alone cannot
-         * distinguish a button, the GRTC, or the debugger -- and each of
-         * those implicates a completely different subsystem. */
+        /* RESETREAS decode: which source woke the part from System OFF.  A
+         * button, the GRTC and the debugger each implicate a different
+         * subsystem. */
         uint32_t r = *(volatile uint32_t *)0x5010E600UL;
         SHELL_PRINTF("RESETREAS %x:%s%s%s%s%s%s%s%s%s%s\n", (unsigned)r,
                      (r & (1u << 0))  ? " pin"      : "",
@@ -374,13 +366,11 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
     }
     if (streq(argv[1], "off")) {
         /* System OFF: the deepest state the part has, ~uA class per datasheet,
-         * wake by reset/GPIO only.  This is the CONTROL for the idle-floor
-         * hunt: P14 measures the VDDM RAIL, and if hundreds of uA remain with
-         * the SoC in System OFF, that current is the BOARD's (or the debug
-         * domain's) -- no firmware change can remove it, and chasing it in
-         * software would be chasing a ghost. */
+         * wake by reset/GPIO only.  P14 measures the VDDM rail; current that
+         * remains with the SoC in System OFF belongs to the board or the
+         * debug domain, not the firmware. */
         SHELL_PRINTF("entering System OFF -- wake by RESET only\n");
-        tiku_cpu_nordic_delay_ms(20u);          /* let the line leave the wire */
+        tiku_cpu_nordic_delay_ms(20u);          /* let the line drain */
         tiku_nordic_system_off();               /* does not return */
     }
 
@@ -402,7 +392,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         unsigned long rep  = tiku_cpu_mclk_hz();
         SHELL_PRINTF("reported %lu Hz\n", rep);
         SHELL_PRINTF("measured %lu Hz\n", meas);
-        /* 2%% covers the 1 MHz GRTC's quantisation over a 50 ms window plus
+        /* 2% covers the 1 MHz GRTC's quantisation over a 50 ms window plus
          * the handful of cycles spent in the sampling code itself. */
         SHELL_PRINTF("clock: %s\n",
                      (meas > rep - rep / 50UL && meas < rep + rep / 50UL)
@@ -499,10 +489,9 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
 #endif
 
 #if defined(PLATFORM_AMBIQ) && (TIKU_AMBIQ_POWER_PROBE + 0)
-    /* Apollo510 instruments.  A SEPARATE branch, not a shared one: the two parts
-     * have different release vocabularies, different cache architectures and
-     * different timebases, and a shared verb that quietly means different things
-     * on each is how a cross-platform table ends up comparing nothing. */
+    /* Apollo510 verbs, separate from the nRF54L ones: the two parts have
+     * different release vocabularies, cache architectures and timebases, so a
+     * shared verb would mean different things on each. */
     if (streq(argv[1], "floor")) {
         uint32_t ic = 0u, dc = 0u, ln = 0u;
         tiku_ambiq_cache_geometry(&ic, &dc, &ln);
@@ -510,8 +499,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                      " not assumed)\n", (unsigned long)ic, (unsigned long)dc,
                      (unsigned long)ln);
         SHELL_PRINTF("  enabled: %s\n", tiku_ambiq_cache_enabled() ? "yes" : "no");
-        /* The per-domain visibility this board has and the nRF54L DK does not:
-         * which power domains and memories are actually on. */
+        /* Which power domains and memories are on (enable / status). */
         SHELL_PRINTF("pwr:   devpwr=%lx/%lx mempwr=%lx/%lx sys=%lx\n",
                      (unsigned long)PWRCTRL->DEVPWREN,
                      (unsigned long)PWRCTRL->DEVPWRSTATUS,
@@ -539,19 +527,17 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         return;
     }
     if (streq(argv[1], "dev") && argc >= 4) {
-        /* Per-domain power switches, for the same reason exp3 grew per-release
-         * flags on the nRF54L: a 4.3 mA idle floor cannot be attributed by
-         * current alone, only by turning one thing off at a time and watching
-         * the meter.  Each verb prints EN and STATUS after the write, because
-         * an enable bit is a request, not evidence.
-         *   crypto/otp:  DEVPWREN bits the SBL leaves on (SDK powers both off
-         *                after use -- known standing drains on this family)
+        /* Per-domain power switches, so an idle floor can be attributed by
+         * turning one domain off at a time.  Each verb prints EN and STATUS
+         * after the write; STATUS shows whether the domain followed.
+         *   crypto/otp:  DEVPWREN bits the SBL leaves on (the SDK powers both
+         *                off after use)
          *   nvm1:        the upper 2 MB MRAM bank; code+data live in NVM0
          *   rom:         boot ROM (needed again only for bootrom MRAM writes)
-         *   ssram:       all 3 MB shared SRAM.  DESTRUCTIVE HERE: the 1 MB
-         *                tier arena lives in SSRAM in this build, so contents
-         *                are lost -- measure, then reboot.  Refused unless the
-         *                caller says `off force`. */
+         *   ssram:       all 3 MB shared SRAM; the SRAM tier lives there, so
+         *                its contents are lost -- measure, then reboot
+         *   trc:         DEMCR.TRCENA and the DWT cycle counter
+         * nvm1, rom and ssram refuse `off` unless followed by `force`. */
         int on = parse_on_off(argv[3]);
         if (on < 0) {
             SHELL_PRINTF("Usage: power dev <crypto|otp|nvm1|rom|ssram|trc> on|off\n");
@@ -562,9 +548,9 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         } else if (streq(argv[2], "otp")) {
             PWRCTRL->DEVPWREN_b.PWRENOTP = (uint32_t)on;
         } else if (streq(argv[2], "nvm1")) {
-            /* GUARDED.  The carved NVM region (tier + file store) can extend
-             * into the upper bank, so a running OS that writes /data or a
-             * persist cell touches unpowered memory and faults. */
+            /* The carved NVM region (tier + file store) can extend into the
+             * upper bank, so a running OS that writes /data or a persist cell
+             * touches unpowered memory and faults. */
             if (!on && (argc < 5 || !streq(argv[4], "force"))) {
                 SHELL_PRINTF("nvm1 off can fault a running OS (the carved NVM "
                              "region may span it).  Add 'force' if the image "
@@ -573,14 +559,10 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
             }
             PWRCTRL->MEMPWREN_b.PWRENNVM1 = (uint32_t)on;
         } else if (streq(argv[2], "rom")) {
-            /* GUARDED, AND THIS ONE COST A BENCH RECOVERY.  MRAM writes on this
-             * part are BOOTROM-MEDIATED, and the OS writes NVM on its own
-             * (boot counter, persist cells, /data).  With the ROM powered down
-             * the next write faulted, the board entered a ~12 mA fault loop,
-             * and SWD attach then failed 8 times in a row -- only a power cycle
-             * recovered it.  The J-Link's own attach/reset hooks are suspected
-             * to need the ROM too.  Worth just 14 uA measured: the least
-             * valuable and most dangerous switch here. */
+            /* MRAM writes on this part go through the boot ROM, and the OS
+             * writes NVM on its own (boot counter, persist cells, /data): with
+             * the ROM off the next write faults, and the fault loop can keep
+             * SWD from attaching until a power cycle. */
             if (!on && (argc < 5 || !streq(argv[4], "force"))) {
                 SHELL_PRINTF("rom off breaks bootrom-mediated MRAM writes and "
                              "has wedged this board (fault loop + SWD attach "
@@ -602,16 +584,16 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                 PWRCTRL->SSRAMPWREN = 0x7u;
                 PWRCTRL->SSRAMRETCFG |= (0x7u << 3);   /* SSRAMACTMCU back */
             } else {
-                /* Clear the ACT force first or PWREN=0 is a CONTESTED request:
-                 * measured, that state drew 1.25 mA MORE and later
-                 * fault-rebooted the board. */
+                /* Clear the ACT force first: PWREN=0 with it still set is a
+                 * contested request that raises the current and can
+                 * fault-reboot the board. */
                 PWRCTRL->SSRAMRETCFG &= ~((0x7u << 3) | (0x7u << 9)
                                           | (0x7u << 12));
                 PWRCTRL->SSRAMPWREN = 0x0u;
             }
         } else if (streq(argv[2], "trc")) {
-            /* The measurement's own footprint: the DWT clock oracle set
-             * DEMCR.TRCENA and left it on.  Make that releasable too. */
+            /* The DWT clock measurement sets DEMCR.TRCENA and leaves it on;
+             * `off` releases it. */
             volatile uint32_t *demcr = (volatile uint32_t *)0xE000EDFCUL;
             volatile uint32_t *dwtcr = (volatile uint32_t *)0xE0001000UL;
             if (on) {
@@ -626,7 +608,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
             return;
         }
         {
-            uint32_t spin = 200000u;   /* domains ack in STATUS, not instantly */
+            uint32_t spin = 200000u;   /* domains ack in STATUS, not at once */
             while (spin-- != 0u) { __asm__ volatile ("nop"); }
         }
         SHELL_PRINTF("dev %s %s: devpwr=%lx/%lx mem=%lx/%lx ssram=%lx/%lx\n",
@@ -641,9 +623,8 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
     }
     if (streq(argv[1], "buck")) {
         /* The Apollo counterpart of `power dcdc`.  Enable-only: the vendor
-         * sequence hands the load from the LDOs to the buck, and there is no
-         * validated reverse path here, so this deliberately does not pretend to
-         * offer one -- a reboot returns to LDO. */
+         * sequence hands the load from the LDOs to the buck and there is no
+         * validated reverse path here, so a reboot returns to LDO. */
         int rc;
         SHELL_PRINTF("buck before: VRSTATUS=%lx (SIMOBUCKST=%lu, 3=ACT)\n",
                      (unsigned long)PWRCTRL->VRSTATUS,
@@ -697,14 +678,13 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
     }
 #endif
     if (streq(argv[1], "stimer")) {
-        /* Timebase health: current rate, is the counter visibly counting, and
-         * does the tickless guard accept or refuse a stretch.
+        /* Timebase health: current rate, whether the counter is counting,
+         * and whether the tickless guard accepts or refuses a stretch.
          *
-         * `power stimer kill` is the FAILURE-INJECTION form: it deliberately
-         * selects NOCLK, shows the guard REFUSE a stretch on the dead clock,
-         * then restores the crystal and shows recovery -- all in one verb, so
-         * the board can never be left parked on a dead timebase.  A guard
-         * that has never been seen to fire is a guard that may not exist. */
+         * `power stimer kill` injects the failure: it selects NOCLK, shows
+         * the guard refuse a stretch on the dead clock, then restores the
+         * crystal and shows recovery, all in one verb, so the board is never
+         * left on a dead timebase. */
         int kill = (argc >= 3 && streq(argv[2], "kill"));
         int pass;
         for (pass = 0; pass < (kill ? 2 : 1); pass++) {
@@ -734,8 +714,8 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
     }
     if (streq(argv[1], "reclock") && argc >= 3) {
         /* power reclock lfrc|xtal -- exercise the deep-sleep timebase switch
-         * from the shell, so the verified-switch path is provable without a
-         * deep-sleep window around it. */
+         * from the shell, so the switch can be checked without a deep-sleep
+         * window around it. */
         int lf = streq(argv[2], "lfrc");
         uint32_t hz = tiku_ambiq_stimer_reclock(lf ? 1 : 0);
         SHELL_PRINTF("reclock %s -> %lu Hz%s\n", lf ? "lfrc" : "xtal",
@@ -760,7 +740,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
             SHELL_PRINTF("Usage: power %s <ms> [deep|uart|tick|dbg]\n", argv[1]);
             return;
         }
-        /* EVERY flag printed -- this line is the provenance record. */
+        /* Every flag is printed: this line is the provenance record. */
         SHELL_PRINTF("%s %lu ms flags%s%s%s%s -- starting\n", argv[1],
                      (unsigned long)ms,
                      (flags & TIKU_AMBIQ_SLEEP_STOP_UART) ? " uart" : "",
@@ -820,13 +800,13 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
      * CPDLPSTATE decides what the core power domain does when the PE enters a
      * low-power state (WFI).  Three independent fields, each ON / ON-clock-off
      * / RET / OFF:
-     *   CLPSTATE  the core itself          -- never written here (= ON)
-     *   ELPSTATE  the FP/MVE extension     -- boot sets ON-clock-off (level 1)
+     *   CLPSTATE  the core itself          -- not written at boot (= ON)
+     *   ELPSTATE  the FP/MVE extension     -- boot sets TIKU_AMBIQ_ELP_STATE
+     *                                         (default 2, RET)
      *   RLPSTATE  the core's RAM           -- never written (= ON); OFF would
      *                                         lose TCM, so this verb refuses it
-     * The boot choice of ELP level 1 is the PERFORMANCE option (no power-up
-     * stall); levels 2 and 3 trade wake latency for power and have never been
-     * measured.  This verb makes that measurable. */
+     * ELP level 1 avoids the power-up stall on wake; level 2 trades wake
+     * latency for power; level 3 is refused (hard-float). */
     if (streq(argv[1], "cpdlp")) {
         static const char *const lp[4] = { "ON", "ON-clk-off", "RET", "OFF" };
         uint32_t v;
@@ -838,13 +818,10 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
             }
             v = PWRMODCTL->CPDLPSTATE;
             if (streq(argv[2], "elp")) {
-                /* ELP=OFF DISCARDS the FP/MVE register state on every
+                /* ELP=OFF discards the FP/MVE register state on every
                  * low-power entry.  This build is hard-float: the kernel holds
                  * live floating-point context across sleeps, so losing it
-                 * corrupts whatever was interrupted.  Setting it once cost a
-                 * boot-looping board and a physical power cycle (2026-07-28),
-                 * and the loop took SWD down with it until the probe speed was
-                 * dropped to 1 MHz.  Refused rather than documented. */
+                 * corrupts whatever was interrupted. */
                 if (nv == 3u) {
                     SHELL_PRINTF("cpdlp: refusing ELP=OFF -- discards FP/MVE "
                                  "state, and this build is hard-float\n");
@@ -852,8 +829,8 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                 }
                 v = (v & ~(3u << 4)) | (nv << 4);
             } else if (streq(argv[2], "clp")) {
-                /* CLP=OFF is deep-sleep territory the SDK never requests from
-                 * here; refuse it rather than invent a sequence. */
+                /* CLP=OFF belongs to the deep-sleep path, which the SDK never
+                 * requests from here, so the verb refuses it. */
                 if (nv == 3u) {
                     SHELL_PRINTF("cpdlp: refusing CLP=OFF (deep-sleep path, "
                                  "not this verb's job)\n");
@@ -882,7 +859,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
             "fill", "copy", "multiply", "scale", "affine", "lut",
             "sum", "addsat", "saxpy", "dot"
         };
-        /* ---- power simd verify : gate for every energy number ---- */
+        /* ---- power simd verify : both backends agree on every kernel ---- */
         if (argc >= 3 && streq(argv[2], "verify")) {
             uint32_t mism = 0u;
             int ok = tiku_simd_power_verify(&mism);
@@ -896,7 +873,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                             tiku_simd_power_buf(TIKU_SP_TIER_SSRAM));
             return;
         }
-        /* ---- power simd <kernel> <scalar|helium> <dtcm|ssram> <bytes> <ms> ---- */
+        /* ---- power simd <kernel> <scalar|helium> <dtcm|ssram> <bytes> <ms> */
         if (argc >= 7) {
             unsigned k = TIKU_SP_KIND_COUNT, i, be, tr;
             uint32_t nb = 0u, ms = 0u, us;
@@ -920,8 +897,8 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                          (tr == TIKU_SP_TIER_SSRAM) ? "ssram" : "dtcm",
                          (unsigned long)nb);
             us = tiku_simd_power_probe(k, be, tr, nb, ms);
-            /* cyc/elem printed as milli-units: the formatter has no floats and
-             * the figure is well below 1 for the vector paths. */
+            /* cyc/elem printed as milli-units: the formatter has no floats
+             * and the figure can be below 1. */
             SHELL_PRINTF("simd done %lu us passes %lu bytes %lu elems %lu "
                          "cycles %lu mcpe %lu fp %lx\n",
                          (unsigned long)us,
@@ -950,7 +927,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         static const char *const pn[4] = {
             "LP-96", "HP1-192", "HP2-125", "HP3-250"
         };
-        /* ---- power gpu state <off|on> [perf] : the availability ladder ---- */
+        /* ---- power gpu off | on [perf] ---- */
         if (streq(argv[2], "off")) {
             tiku_gpu_deinit();
             SHELL_PRINTF("gpu off: powered %d\n", tiku_gpu_powered());
@@ -966,11 +943,11 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                 if (perf > 3u) { perf = 0u; }
             }
             rc = tiku_gpu_init((tiku_gpu_perf_t)perf);
-            /* Report the mode and rail the SILICON has, not the request. */
-            {   /* Clock-gating forensics: CGCTRL's DISCLK* fields DISABLE
-                 * automatic gating.  The driver only ever read this register;
-                 * if the reset value has them set, an "idle" GPU is fully
-                 * clocked, which would explain a 6.37 mA standing draw. */
+            /* Report the mode and rail read back from the hardware, not the
+             * request. */
+            {   /* CGCTRL's DISCLK* fields disable automatic clock gating; the
+                 * driver never writes the register, so with them set at reset
+                 * an idle GPU stays fully clocked. */
                 tiku_gpu_bringup_t bi;
                 tiku_gpu_bringup_info(&bi);
                 SHELL_PRINTF("  cgctrl %08lx (DISCLK proc %lu cfg %lu frame %lu"
@@ -983,7 +960,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                              (unsigned long)((bi.cgctrl >> 30) & 3u),
                              (unsigned long)bi.status,
                              (unsigned long)bi.active);
-                /* The clock DELIVERED to the domain is a separate control from
+                /* The clock delivered to the domain is a separate control from
                  * the block's own gating, and lives in CLKGEN, not the GPU. */
                 SHELL_PRINTF("  clkgen clkctrl %08lx (GFXCORECLKEN %lu "
                              "GFXCORECLKSEL %lu)\n",
@@ -999,13 +976,13 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                          tiku_gpu_rail_is_vddf() ? "VDDF" : "VDDC");
             return;
         }
-        /* ---- power gpu ram <0..7> : SSRAMACTGFX forensics ----
-         * Boot state ships SSRAMACTGFX=7: ALL SSRAM banks forced ACTIVE
-         * whenever the GFX domain is powered -- including through the MCU's
-         * WFI, when they could otherwise fall back to retention.  The SDK's
-         * own default for this field is NONE; banks wake on access anyway
-         * (datasheet 4.3.4).  This verb A/Bs the field so the cost is a
-         * measurement, not an argument. */
+        /* ---- power gpu ram <0..7> : SSRAMACTGFX ----
+         * After boot SSRAMACTGFX is 7: every SSRAM bank is held active
+         * whenever the GFX domain is powered, including through the MCU's
+         * WFI, when it could otherwise fall back to retention.  The SDK's
+         * default for this field is NONE; banks wake on access anyway
+         * (datasheet 4.3.4).  This verb sets the field so its cost can be
+         * measured. */
         if (streq(argv[2], "ram") && argc >= 4) {
             unsigned v = (unsigned)(argv[3][0] - '0') & 7u;
             unsigned before = PWRCTRL->SSRAMRETCFG_b.SSRAMACTGFX;

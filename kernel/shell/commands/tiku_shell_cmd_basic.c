@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_basic.c - "basic" shell command stub.
+ * tiku_shell_cmd_basic.c - "basic" command: REPL, run/resume, /data files.
  *
- * A thin dispatch wrapper the command table calls; the interpreter itself lives
- * under kernel/shell/basic/ and is reached through tiku_basic.h.
+ * Dispatches to the interpreter under kernel/shell/basic/ (tiku_basic.h) and
+ * moves program text between the interpreter's store and /data files.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -35,7 +35,7 @@
 #endif
 static char basic_file_buf[TIKU_BASIC_FILE_MAX];
 
-/* Load @p path's program text; @p run also executes it (implicit RUN). */
+/** @brief Load @p path's program; @p run also executes it (implicit RUN). */
 static void
 basic_from_file(const char *path, int run)
 {
@@ -57,9 +57,8 @@ basic_from_file(const char *path, int run)
     }
     basic_file_buf[n] = '\0';
 
-    /* Load into the program store (the same path /data/basic uses), then -- for
-     * `run` -- execute it via autorun, which reloads from that store and runs.
-     * This reuses the proven load+autorun path. */
+    /* Load into the program store (the same path /data/basic uses); for `run`,
+     * autorun then reloads the program from that store and runs it. */
     if (tiku_basic_vfs_write(basic_file_buf, (unsigned int)n) != 0) {
         SHELL_PRINTF("basic: load failed\n");
         return;
@@ -69,7 +68,7 @@ basic_from_file(const char *path, int run)
     }
 }
 
-/* Save the current program text to @p path. */
+/** @brief Save the current program text to @p path. */
 static void
 basic_to_file(const char *path)
 {
@@ -96,9 +95,8 @@ tiku_shell_cmd_basic(uint8_t argc, const char *argv[])
 {
     const char *sub = (argc >= 2u) ? argv[1] : NULL;
 
-    /* `basic resume` / `basic run resume`: F1 power-failure-transparent
-     * autostart -- continue the saved program from its checkpoint, or start it
-     * fresh if there is none. */
+    /* `basic resume` / `basic run resume`: continue the saved program from its
+     * checkpoint, or start it fresh if there is none. */
     if (sub != NULL && strcmp(sub, "resume") == 0) {
         (void)tiku_basic_mode_resume_saved();
         return;
@@ -109,7 +107,7 @@ tiku_shell_cmd_basic(uint8_t argc, const char *argv[])
         } else if (argc >= 3u) {
             basic_from_file(argv[2], 1);       /* run <path> (blocking) */
         } else {
-            (void)tiku_basic_mode_run_saved(); /* run saved (non-blocking mode) */
+            (void)tiku_basic_mode_run_saved(); /* run saved, non-blocking */
         }
         return;
     }

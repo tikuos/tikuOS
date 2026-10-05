@@ -18,9 +18,9 @@
 /**
  * @brief "alias" command — define or list shell shortcuts.
  *
- * The body is the rest of the line joined with single spaces, with surrounding
- * double quotes stripped and ';' chaining several commands.  Aliases live in
- * FRAM and survive reset; a built-in command always wins over an alias.
+ * The body is the rest of the line joined with single spaces, surrounding
+ * double quotes stripped, ';' chaining commands.  Aliases are stored durably
+ * and survive reset; a built-in command always wins over an alias.
  */
 void tiku_shell_cmd_alias(uint8_t argc, const char *argv[]);
 

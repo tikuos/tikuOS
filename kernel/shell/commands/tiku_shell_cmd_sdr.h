@@ -19,6 +19,13 @@
 extern "C" {
 #endif
 
+/**
+ * @brief "sdr" command handler: the Wi-Fi radio as a receiver.
+ *
+ * Usage: sdr start | stop | info | spec <MHz> [rate] [nfft] |
+ *        sweep <lo> <hi> <step> [rate] [nfft] | reserve | release |
+ *        cap <MHz> [rate] [words] [reps] | scan | hex <offset> <count>
+ */
 void tiku_shell_cmd_sdr(uint8_t argc, const char *argv[]);
 
 #ifdef __cplusplus

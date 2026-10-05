@@ -7,9 +7,8 @@
  *
  * tiku_shell_cmd_emmc.c - `power emmc ...` verbs.
  *
- * Split out of the power command, whose top-level verb forwards here.  The verb
- * bodies were moved verbatim and gated on a before/after diff of every verb's
- * output, so this file deliberately contains no improvements.
+ * Identify, test, bench, sleep and stage the board's eMMC.  The power command
+ * (tiku_shell_cmd_power.c) forwards `power emmc` here.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,15 +23,12 @@
 
 #include <arch/ambiq/tiku_emmc_arch.h>
 #if (TIKU_DRV_USB_ENABLE + 0)
-/* For the ownership rule below: while the host has the card mounted over MSC,
- * board-side access is refused.  Without this include the call compiled as an
- * implicit declaration -- it linked, but assumed int-returning and would have
- * broken silently the day the signature changed. */
+/* tiku_usb_msc_owns_emmc(), for the ownership check below. */
 #include <arch/ambiq/tiku_usb_arch.h>
 #endif
 #include <kernel/cpu/tiku_hang.h>
 
-/** @brief eMMC ladder tracer -- a wedged rung names itself. */
+/** @brief Init step tracer: prints each step, so a wedged init names it. */
 static void emmc_trace(const char *step)
 {
     SHELL_PRINTF("  emmc: %s\n", step);
@@ -40,32 +36,35 @@ static void emmc_trace(const char *step)
 
 void tiku_shell_cmd_emmc(uint8_t argc, const char *argv[])
 {
-    /* E1/E2/E3 for the board's 8 GB eMMC (U11).
+    /* Verbs for the board's eMMC (U11):
      *
-     *   power emmc id     ladder + upgrade to 8-bit high speed
-     *   power emmc slow   ladder ONLY (1-bit, 400 kHz) -- the E2 config,
-     *                     kept so the upgrade can be PRICED, not asserted
-     *   power emmc regs   host registers (power-safe)
-     *   power emmc gate   write/read-back on the scratch region only
-     *   power emmc bench  E3 bench: sequential, random, init cost
+     *   power emmc id     init, then upgrade to an 8-bit high-speed bus
+     *   power emmc slow   init only (1-bit, 400 kHz), for comparison
+     *   power emmc hs200  switch to HS200; a failed switch falls back to HS 48
+     *   power emmc regs   host registers (safe while powered down)
+     *   power emmc gate   write and read back one scratch-region block
+     *   power emmc bench  sequential, random-block and init-cost bench
+     *   power emmc diag   read-path diagnostic
      *   power emmc sleep  CMD5 sleep (contents kept, bus quiet)
      *   power emmc wake   leave sleep and reselect
      *   power emmc stage <mb> [lba]
-     *                     E4: stage mb megabytes card -> PSRAM tier
+     *                     stage mb megabytes card -> PSRAM tier (PSRAM builds)
      *   power emmc off    release the SDIO0 domain
+     *
+     * Any other verb, or none, runs id.
      */
+    /* Names for tiku_emmc_err_t, indexed by value: keep in enum order. */
     static const char *const en[] = { "ok", "POWER", "CLOCK", "TIMEOUT",
                                       "CMD", "ID", "ARG", "STATE", "NOMEM" };
     tiku_emmc_id_t id;
     tiku_emmc_err_t rc;
 
 #if (TIKU_DRV_USB_ENABLE + 0)
-    /* THE OWNERSHIP RULE.  While the host has the card mounted over MSC,
-     * its filesystem driver caches blocks and assumes it is the only
-     * writer.  Board-side access would corrupt that -- not "might".
-     * Reads are refused too: a read here is harmless to the medium but
-     * tells the operator a lie, because the host's dirty blocks have not
-     * necessarily reached the card yet. */
+    /* While the host has the card mounted over MSC, its filesystem driver
+     * caches blocks and assumes it is the only writer, so board-side access
+     * is refused.  Reads are refused too: the host's dirty blocks may not
+     * have reached the card, so a read could return stale data.  Only regs,
+     * which reads host registers and not the card, is allowed. */
     if (tiku_usb_msc_owns_emmc() &&
         !(argc >= 3 && tiku_cmd_streq(argv[2], "regs"))) {
         SHELL_PRINTF("emmc: refused -- the USB host owns the card"
@@ -95,15 +94,12 @@ void tiku_shell_cmd_emmc(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 3 && (tiku_cmd_streq(argv[2], "sleep") || tiku_cmd_streq(argv[2], "wake"))) {
-        /* Both rungs report the TIME they took, because that is the
-         * number the lifecycle policy is decided on: sleep is only worth
-         * having if waking costs far less than the ~52 ms of a full
-         * bring-up.  Printing it every time keeps the claim current. */
+        /* Both print how long they took, for comparing a wake with a
+         * full init. */
         const int to_sleep = tiku_cmd_streq(argv[2], "sleep");
         rc = to_sleep ? tiku_emmc_sleep() : tiku_emmc_wake();
-        /* Quote a duration only for an operation that actually ran --
-         * printing the previous call's time beside a refusal is the
-         * same species of lie as a bandwidth beside the word FAIL. */
+        /* Only a success prints a duration; a call that finds the card
+         * already in the requested state succeeds at once and prints 0. */
         if (rc == TIKU_EMMC_OK) {
             SHELL_PRINTF("emmc %s: ok in %lu us  (state now %s)\n",
                          argv[2], (unsigned long)tiku_emmc_last_op_us(),
@@ -136,9 +132,9 @@ void tiku_shell_cmd_emmc(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "gate")) {
-        /* E2: write a pattern to the scratch region and read it back.
-         * Single block, bit-exact, and nowhere near the card's own
-         * contents. */
+        /* Write a pattern to one block of the scratch region and read it
+         * back bit-exact; the card's own contents are never touched.  A
+         * write below the scratch region must then be refused. */
         static uint8_t wr[512], rd[512];
         uint32_t lba, i, errs = 0u;
         rc = tiku_emmc_read_id(&id);
@@ -182,9 +178,8 @@ void tiku_shell_cmd_emmc(uint8_t argc, const char *argv[])
         return;
     }
     {
-        /* "slow" reproduces the E2 configuration exactly.  It exists so
-         * the E3 numbers can be a COMPARISON rather than a claim: the
-         * same bench, the same card, one variable changed. */
+        /* "slow" brings the card up at 1-bit, 400 kHz, for comparing the
+         * bench with the default bus; any other verb runs the default init. */
         const int slow = (argc >= 3 && tiku_cmd_streq(argv[2], "slow"));
         uint32_t ladder_us, total_us;
 
@@ -193,8 +188,8 @@ void tiku_shell_cmd_emmc(uint8_t argc, const char *argv[])
         tiku_emmc_set_trace((void (*)(const char *))0);
         if (rc != TIKU_EMMC_OK) {
             uint32_t e = tiku_emmc_last_error();
-            /* Show whatever identity WAS collected before the failure:
-             * a partial ladder still proves how far the card answered. */
+            /* Print whatever identity was collected before the failure:
+             * it shows how far through init the card answered. */
             (void)tiku_emmc_read_id(&id);
             if (id.mfr_id != 0u) {
                 SHELL_PRINTF("  (partial) mfr %02x product '%s' serial"
@@ -228,10 +223,9 @@ void tiku_shell_cmd_emmc(uint8_t argc, const char *argv[])
         SHELL_PRINTF("  bus %u-bit @ %lu Hz  scratch from LBA %lu\n",
                      id.bus_width, (unsigned long)id.clock_hz,
                      (unsigned long)tiku_emmc_scratch_lba());
-        /* The card's own account of its configuration -- the E3 gate.
-         * EXT_CSD[183] is what the CARD thinks the bus width is; if it
-         * disagrees with the host's, the two ends are out of step and
-         * every data transfer is a coin flip. */
+        /* EXT_CSD[183] and [185] are the card's view of the bus width and
+         * timing, read back after any switch; if they disagree with the
+         * host's, data transfers are unreliable. */
         SHELL_PRINTF("  ext_csd: bus_width %u, hs_timing %u,"
                      " device_type %02x (%s%s)\n",
                      id.ext_bus_width, id.ext_hs_timing, id.device_type,

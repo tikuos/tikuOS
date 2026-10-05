@@ -21,7 +21,7 @@
 #include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>    /* set_link, set_addr */
 #include <kernel/console/tiku_console.h>
 
-static uint8_t slip_on;       /* the IPv4 channel is registered on the console */
+static uint8_t slip_on;       /* the console's IPv4 channel is registered */
 static uint8_t link_ready;    /* SLIP link registered with the IP layer once */
 static uint8_t slip_frame_buf[TIKU_KITS_NET_MTU];
 

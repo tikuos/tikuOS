@@ -31,9 +31,9 @@
 #include <kernel/memory/tiku_mem.h>
 
 /**
- * @brief Claim the camera's frame buffer, 64-byte aligned for the VIN.
+ * @brief Claim the camera's frame buffer once, 64-byte aligned for the VIN.
  *
- * @return Base address, or NULL when no tier has room
+ * @return Base address, or NULL when the SRAM tier has no room
  */
 static void *
 cam_claim(void)
@@ -166,7 +166,7 @@ tiku_shell_cmd_cam(uint8_t argc, const char *argv[])
     }
 
     /* The VIN wrote memory behind the cache; drop any lines covering it,
-     * then prove the frame is real data before showing it. */
+     * then count the non-zero pixels for the report. */
     tiku_ra8p1_dcache_invalidate(buf, frame_bytes);
     lit = 0U;
     for (i = 0U; i < (uint32_t)TIKU_CAM_QVGA_W * TIKU_CAM_QVGA_H; i++) {

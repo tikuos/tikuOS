@@ -60,15 +60,14 @@ tiku_shell_cmd_reboot(uint8_t argc, const char *argv[])
     SHELL_PRINTF("Rebooting...\n");
 
 #if defined(PLATFORM_AMBIQ)
-    /* Descend to a boot-equivalent state BEFORE the reset fires.  A warm
+    /* Descend to a boot-equivalent state before the reset fires.  A warm
      * reset does not power-cycle the eMMC die, the PSRAM die, or the
-     * always-on power state -- and a reset taken from the fully-brought-up
-     * state (CPU HP + eMMC HS200 + PSRAM up) has wedged this chip so hard
-     * the secure bootloader never completes and SWD cannot attach, leaving
-     * a physical power cycle as the only recovery.  Nothing on the way UP
-     * can defend against that, because nothing runs; the reboot verb must
-     * hand the ROM the same machine a power-on would.  Every step is
-     * best-effort: a refusal must not block the reset. */
+     * always-on power state, and a warm reset from the fully brought-up
+     * state (CPU HP + eMMC HS200 + PSRAM up) can leave the secure
+     * bootloader hung with SWD unable to attach until a power cycle.
+     * Nothing runs on the way back up to undo that, so the ROM must be
+     * handed the machine a power-on would.  Every step is best-effort: a
+     * refusal must not block the reset. */
 #if (TIKU_DRV_EMMC_ENABLE + 0)
     if (tiku_emmc_powered()) {
         (void)tiku_emmc_sleep();       /* card quiescent: no lines driven  */

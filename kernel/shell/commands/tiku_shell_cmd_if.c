@@ -25,14 +25,16 @@
 #define IF_DEPTH_MAX 4      /* nested-if recursion guard */
 
 /* Bounds nested 'if' calls so a runaway rule (e.g. an 'if' that
- * dispatches another 'if') cannot blow the small MSP430 stack. */
+ * dispatches another 'if') cannot exhaust the stack (small on MSP430). */
 static uint8_t if_depth;
 
-/*
- * Parse a NUL-terminated string as a signed long. Accepts a
- * leading '-' or '+' and decimal digits only. Sets *out on
- * success; returns 0 on success, -1 on failure (including
- * empty string or trailing junk).
+/**
+ * @brief Parse a NUL-terminated string as a signed decimal long.
+ *
+ * Accepts a leading '-' or '+' and decimal digits only.
+ *
+ * @return 0 on success with *out set, -1 on an empty string, a lone sign or
+ *         a non-digit
  */
 static int
 parse_long(const char *s, long *out)
@@ -63,7 +65,7 @@ parse_long(const char *s, long *out)
     return 0;
 }
 
-/* Strip trailing newlines/CR — VFS reads typically include one. */
+/** @brief Strip trailing newlines/CR; VFS reads typically include one. */
 static void
 rstrip(char *s, int *len)
 {
@@ -97,7 +99,6 @@ tiku_shell_cmd_if(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* Read the path */
     n = tiku_vfs_read(argv[1], value_buf, sizeof(value_buf) - 1);
     if (n < 0) {
         SHELL_PRINTF("if: cannot read '%s'\n", argv[1]);

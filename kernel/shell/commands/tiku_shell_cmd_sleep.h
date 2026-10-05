@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_sleep.h - "sleep" command: enter low-power mode
+ * tiku_shell_cmd_sleep.h - "sleep" command: set the idle mode
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -7,9 +7,8 @@
  *
  * tiku_shell_cmd_kill.c - "kill" command implementation
  *
- * Terminates a process by posting TIKU_EVENT_FORCE_EXIT to it.
- * The PID is the 1-based index into the process list, matching
- * the output of the "ps" command.
+ * Stops a process with tiku_process_stop(): it stays registered and
+ * `resume` can restart it.  The PID is the registry slot that "ps" shows.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,7 +18,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_shell_cmd_kill.h"
-#include <kernel/shell/tiku_shell.h>             /* SHELL_PRINTF via tiku_shell_io.h */
+#include <kernel/shell/tiku_shell.h>    /* SHELL_PRINTF via tiku_shell_io.h */
 #include <kernel/process/tiku_process.h>
 
 /*---------------------------------------------------------------------------*/

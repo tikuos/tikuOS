@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_mqtt.h - "mqtt" command: connect to a broker / publish (3.1.1)
+ * tiku_shell_cmd_mqtt.h - "mqtt" command: MQTT 3.1.1 connect and publish
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,7 +27,10 @@ void tiku_shell_cmd_mqtt(uint8_t argc, const char *argv[]);
 /** @brief True while an MQTT operation is in flight. */
 uint8_t tiku_shell_cmd_mqtt_active(void);
 
-/** @brief Per-tick driver: paces mqtt_periodic, handles connect/publish/timeout. */
+/**
+ * @brief Per-tick driver: paces mqtt_periodic and reports the connect result,
+ *        the publish or the timeout.
+ */
 void tiku_shell_cmd_mqtt_tick(void);
 
 #endif /* TIKU_SHELL_CMD_MQTT_H_ */

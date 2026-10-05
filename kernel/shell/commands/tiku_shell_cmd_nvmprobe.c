@@ -7,8 +7,8 @@
  *
  * tiku_shell_cmd_nvmprobe.c - "nvmprobe" diagnostic for the carved NVM region.
  *
- * An opt-in affordance to exercise the memory-mapped region backend from the
- * shell and the bench suite: report its geometry, and read or write at an offset.
+ * Exercises the memory-mapped region backend from the shell and the bench
+ * suite: geometry, read, write and verify at an offset, and a tier self-test.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -116,13 +116,13 @@ tiku_shell_cmd_nvmprobe(uint8_t argc, const char *argv[])
     if (strcmp(sub, "tier") == 0) {
         /*
          * NVM-tier self-test: allocate from the tier, write through
-         * tiku_tier_nvm_write(), verify by plain readback, then confirm an
-         * over-capacity arena is refused, then releases its backing.
-         * "tier mark <txt>" writes
-         * <txt> instead of the fixed pattern and prints the block's region
-         * offset, so the bench can re-verify the bytes after a reset through
-         * the raw read path. Released bytes are not erased, but another
-         * allocation can overwrite them; this is not persistent file storage.
+         * tiku_tier_nvm_write(), verify by plain readback, confirm an
+         * over-capacity arena is refused, then release the arena.
+         * "tier mark <txt>" writes <txt> instead of the fixed pattern and
+         * prints the block's region offset, so the bench can re-verify the
+         * bytes after a reset through the raw read path.  Released bytes are
+         * not erased, but another allocation can overwrite them; this is not
+         * persistent file storage.
          */
         const char *txt = (argc >= 4u && strcmp(argv[2], "mark") == 0)
                           ? argv[3] : "TIER-SELFTEST";

@@ -9,7 +9,7 @@
  *
  * Thin wrapper over tiku_shell_jobs_schedule_argv() that registers a
  * single-shot job.  All parsing, validation, and diagnostics live in
- * the jobs subsystem; this file simply selects the ONCE job type.
+ * the jobs subsystem; this file selects the ONCE job type.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -5,24 +5,24 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_ble.c - "ble" command: EM9305 radio first-contact probe.
+ * tiku_shell_cmd_ble.c - "ble" command: EM9305 probe, beacon and BLE shell.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "tiku_shell_cmd_ble.h"
 
-#include <kernel/shell/tiku_shell.h>          /* SHELL_PRINTF */
-#include <kernel/shell/tiku_shell_io.h>       /* io-backend swap, rx_ready/getc */
-#include <kernel/vfs/tiku_vfs.h>              /* TIKU_VFS_CAP_* channel cap     */
-#include <kernel/shell/tiku_shell_parser.h>   /* tiku_shell_parser_execute      */
-#include <kernel/shell/tiku_shell_cwd.h>      /* tiku_shell_cwd_get (prompt)    */
-#include <kernel/timers/tiku_clock.h>         /* tiku_clock_time (heartbeat)   */
-#include <hal/tiku_cpu.h>                      /* tiku_cpu_idle_hook (pump sleep) */
+#include <kernel/shell/tiku_shell.h>         /* SHELL_PRINTF */
+#include <kernel/shell/tiku_shell_io.h>      /* backend swap, rx_ready/getc */
+#include <kernel/vfs/tiku_vfs.h>             /* TIKU_VFS_CAP_* channel cap */
+#include <kernel/shell/tiku_shell_parser.h>  /* tiku_shell_parser_execute */
+#include <kernel/shell/tiku_shell_cwd.h>     /* tiku_shell_cwd_get (prompt) */
+#include <kernel/timers/tiku_clock.h>        /* tiku_clock_time (heartbeat) */
+#include <hal/tiku_cpu.h>                    /* tiku_cpu_idle_hook */
 #include <arch/ambiq/tiku_em9305.h>
 #include <arch/ambiq/tiku_ble_uart.h>
-#include <arch/ambiq/tiku_gpio_arch.h>        /* EN-strap forensics (ble en)   */
-#include <arch/ambiq/tiku_device_select.h>    /* TIKU_BOARD_EM9305_EN_PIN      */
+#include <arch/ambiq/tiku_gpio_arch.h>       /* EN strap (ble en) */
+#include <arch/ambiq/tiku_device_select.h>   /* TIKU_BOARD_EM9305_EN_PIN */
 #include <string.h>
 
 /** Ctrl+C / ETX -- stops an interactive BLE session. */
@@ -39,11 +39,13 @@ static const tiku_shell_io_t s_ble_io = {
     TIKU_VFS_CAP_NONE          /* remote channel: restricted, like TCP */
 };
 
-/* Push buffered shell output to the phone as flow-controlled TX notifications.
- * flush() itself refuses to send without a free controller credit, so this
- * simply pumps the stack (acks return credits) and retries until the buffer is
- * empty. A stall detector bounds it: one second with zero progress (link died,
- * subscriber gone) abandons the remainder instead of wedging the shell. */
+/**
+ * @brief Push buffered shell output to the phone as TX notifications.
+ *
+ * flush() sends only with a free controller credit, so this pumps the stack
+ * (acks return credits) until the buffer is empty; one second without
+ * progress (link died, subscriber gone) abandons the rest.
+ */
 static void ble_uart_drain_tx(void) {
     uint16_t prev = tiku_ble_uart_tx_pending();
     tiku_clock_time_t deadline =
@@ -51,15 +53,15 @@ static void ble_uart_drain_tx(void) {
 
     while (tiku_ble_uart_tx_pending() > 0u) {
         uint16_t now;
-        (void)tiku_ble_uart_poll();      /* services completed-packet acks     */
+        (void)tiku_ble_uart_poll();     /* services completed-packet acks */
         tiku_ble_uart_flush();
         now = tiku_ble_uart_tx_pending();
-        if (now < prev) {               /* progress -> reset the stall clock  */
+        if (now < prev) {               /* progress: reset the stall clock */
             prev = now;
             deadline = (tiku_clock_time_t)(tiku_clock_time() +
                                            TIKU_CLOCK_SECOND);
         } else if (!TIKU_CLOCK_LT(tiku_clock_time(), deadline)) {
-            break;                      /* one second without progress        */
+            break;                      /* one second without progress */
         }
     }
 
@@ -76,8 +78,12 @@ static void ble_uart_drain_tx(void) {
     }
 }
 
-/* Route the shell's output to BLE, print @p emit (banner/prompt) and/or execute
- * @p line, then restore the UART backend and flush the notifications. */
+/**
+ * @brief Route shell output to BLE, print @p emit and/or execute @p line.
+ *
+ * Prints the prompt, then restores the UART backend and flushes the
+ * notifications.
+ */
 static void ble_uart_to_ble(const tiku_shell_io_t *uart_be,
                             const char *emit, char *line) {
     tiku_shell_io_set_backend(&s_ble_io);
@@ -107,9 +113,9 @@ static void ble_cmd_uart(uint8_t argc, const char *argv[]) {
     uint8_t  greeted = 0u;
     uint8_t  sub_armed = 0u;
     tiku_clock_time_t beat, greet_at = 0;
-    /* DEEP idle between passes: the EM9305 keeps the link autonomously (its own
-     * link layer + the 32 kHz the Apollo exports on pad 138), so the pump can
-     * sleep the core and just poll each tick instead of spinning at 100% CPU. */
+    /* Deep idle between passes: the EM9305 keeps the link on its own (its link
+     * layer and the 32 kHz clock the Apollo exports on pad 138), so the pump
+     * sleeps the core and polls each tick. */
     tiku_cpu_idle_enter_t idle = tiku_cpu_idle_hook(TIKU_CPU_IDLE_DEEP);
     int rc;
 
@@ -204,36 +210,34 @@ static void ble_cmd_uart(uint8_t argc, const char *argv[]) {
             beat = (tiku_clock_time_t)(tiku_clock_time() + TIKU_CLOCK_SECOND);
         }
 
-        /* Nothing happened this pass -> sleep the core until the next interrupt
-         * (STIMER tick ~8 ms, or UART RX). Wakes in time to poll the radio; the
-         * ~1-tick added RX latency is invisible at human/shell speed. */
+        /* Nothing happened this pass: sleep the core until the next interrupt
+         * (the STIMER tick or UART RX), which adds at most one tick of RX
+         * latency. */
         if (idle != (tiku_cpu_idle_enter_t)0 && ev == TIKU_BLE_EVT_NONE &&
             !tiku_ble_uart_rx_ready() && tiku_ble_uart_tx_pending() == 0u) {
             idle();
         }
     }
 
-    tiku_shell_io_set_backend(uart_be);   /* make sure the console is restored */
+    tiku_shell_io_set_backend(uart_be);   /* restore the console */
     tiku_ble_uart_stop();
     SHELL_PRINTF("\nble: session stopped.\n");
 }
 
 /**
- * @brief Run the EM9305 M0/M1 self-test and print the results.
+ * @brief "ble" command: en, uart, beacon and stop, or by default the probe.
  *
- * M0 gate: STS1 reads 0xC0 -- the IOM6 SPI master genuinely reaches the radio.
- * M1 gate: HCI Reset returns an HCI Command Complete event (status 0 = ok).
+ * The probe passes when STS1 reads 0xC0 (the IOM6 SPI master reaches the
+ * radio) and HCI Reset returns Command Complete with status 0.
  */
 void tiku_shell_cmd_ble(uint8_t argc, const char *argv[]) {
     tiku_em9305_probe_t p;
     int rc;
     uint16_t i;
 
-    /* "ble en 0|1" -- drive the EM9305 EN strap alone, nothing else.
-     * Power forensics (experiment 2/3 follow-up): EN low = radio hard-off,
-     * EN high = radio boots its ROM and idles unattended.  The rail delta
-     * between the two IS the radio's idle draw on the measured supply --
-     * settled by meter, not by datasheet argument. */
+    /* "ble en 0|1" -- drive the EM9305 EN strap alone.  Low holds the radio
+     * off; high lets it boot its ROM and idle, so the rail difference between
+     * the two is the radio's idle draw. */
     if (argc >= 3u && strcmp(argv[1], "en") == 0) {
         uint8_t v = (argv[2][0] == '1') ? 1u : 0u;
         tiku_ambiq_gpio_init_output(TIKU_BOARD_EM9305_EN_PIN);
@@ -281,7 +285,7 @@ void tiku_shell_cmd_ble(uint8_t argc, const char *argv[]) {
         return;
     }
 
-    /* default: M0/M1 first-contact probe. */
+    /* Default: SPI and HCI probe. */
     SHELL_PRINTF("EM9305 first-contact probe (IOM6 SPI @16MHz)...\n");
     rc = tiku_em9305_probe(&p);
 
@@ -297,7 +301,7 @@ void tiku_shell_cmd_ble(uint8_t argc, const char *argv[]) {
     }
     SHELL_PRINTF("  reset:  ok (RDY handshake completed)\n");
 
-    /* --- M0: SPI status handshake --- */
+    /* --- SPI status handshake --- */
     SHELL_PRINTF("  SPI:    STS1=0x%02x STS2=0x%02x  [M0 %s]\n",
                  (unsigned)p.sts1, (unsigned)p.sts2,
                  (p.sts1 == 0xC0u) ? "PASS: SPI talks to the radio"
@@ -305,7 +309,7 @@ void tiku_shell_cmd_ble(uint8_t argc, const char *argv[]) {
     SHELL_PRINTF("  boot:   active-state event %s\n",
                  p.active_evt ? "seen (04 FF 01 01)" : "NOT seen");
 
-    /* --- M1: HCI Reset round-trip --- */
+    /* --- HCI Reset round-trip --- */
     if (p.cc_seen) {
         SHELL_PRINTF("  HCI:    Reset -> Command Complete, status=0x%02x  "
                      "[M1 %s]\n", (unsigned)p.hci_status,

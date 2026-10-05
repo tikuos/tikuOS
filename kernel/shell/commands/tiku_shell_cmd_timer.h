@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_timer.h - "timer" command: software timer status
+ * tiku_shell_cmd_timer.h - "timer" command: software and hardware timer status
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -16,7 +16,7 @@
 #include <stdint.h>
 
 /**
- * @brief "timer" command handler — print software timer status.
+ * @brief "timer" command handler — print software and hardware timer status.
  */
 void tiku_shell_cmd_timer(uint8_t argc, const char *argv[]);
 

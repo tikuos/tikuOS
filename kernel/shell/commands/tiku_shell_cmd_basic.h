@@ -5,11 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_basic.h - "basic" shell command stub.
+ * tiku_shell_cmd_basic.h - "basic" command.
  *
- * Thin wrapper that the shell command table calls when the user
- * types `basic`.  The actual interpreter engine lives at
- * kernel/shell/basic/ -- see tiku_basic.h for the engine API.
+ * The handler the shell command table calls for `basic`; the interpreter
+ * lives under kernel/shell/basic/ (tiku_basic.h).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,9 +21,9 @@
 /**
  * @brief "basic" command handler.
  *
- * Bare `basic` enters the interactive REPL until BYE / EXIT.  `basic run` loads
- * the persisted program from FRAM and runs it to completion without the REPL,
- * which pairs with an `init` entry to autorun a saved program at boot.
+ * Forms: basic | run [<path>|resume] | resume | load <path> | save <path>.
+ * Bare `basic` enters the REPL until BYE / EXIT; `basic run` runs the saved
+ * program without the REPL, which an `init` entry can do at boot.
  *
  * @param argc  Argument count.
  * @param argv  Argument vector (argv[0] == "basic").

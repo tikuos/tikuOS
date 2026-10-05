@@ -18,10 +18,11 @@
 #include <interfaces/display/tiku_display.h>
 
 /**
- * @brief Bring the panel up and paint a colour, so a person can see it.
+ * @brief Bring the panel up and paint a colour (red by default), draw the
+ *        name "TikuOS" (`text`) or a circle (`circle`).
  *
  * @param argc  Argument count
- * @param argv  Arguments; optional colour name
+ * @param argv  Arguments; argv[1] is a colour name, `text` or `circle`
  */
 void tiku_shell_cmd_panel(uint8_t argc, const char *argv[]);
 

@@ -16,10 +16,15 @@
 #include <stdint.h>
 
 /**
- * @brief Handle `power emmc ...`.  argv[1] is already known to be "emmc".
+ * @brief Handle `power emmc ...`.
  *
- * Compiled only when TIKU_DRV_EMMC_ENABLE is set; tiku_shell_cmd_power.c guards the call
- * with the same flag, so there is no runtime "not available" stub.
+ * Compiled only when TIKU_DRV_EMMC_ENABLE is set; tiku_shell_cmd_power.c
+ * guards the call with the same flag, so there is no runtime stub.
+ *
+ * @param argc  Argument count
+ * @param argv  argv[2] is the verb: id (the default), slow, hs200, regs,
+ *              gate, bench, diag, sleep, wake, stage (PSRAM builds) or off
+ * @note The caller has already matched argv[1] to "emmc".
  */
 void tiku_shell_cmd_emmc(uint8_t argc, const char *argv[]);
 

@@ -15,7 +15,12 @@
 
 #include <stdint.h>
 
-/** @brief "nvmprobe" -- exercise the carved NVM region backend (substrate B). */
+/**
+ * @brief "nvmprobe" -- exercise the carved NVM region backend.
+ *
+ * Usage: nvmprobe [info | read <off> <len> | write <off> <txt> |
+ *                  verify <off> <txt> | tier [mark <txt>]]
+ */
 void tiku_shell_cmd_nvmprobe(uint8_t argc, const char *argv[]);
 
 #endif /* TIKU_SHELL_CMD_NVMPROBE_H_ */

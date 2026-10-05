@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_history.c - "history" command implementation.
  *
- * A circular ring of command strings in NVM, so history survives a reboot, behind
- * a magic word that detects and clears an uninitialised store.  Every write goes
- * through the MPU unlock window.
+ * A ring of command strings behind a magic word that detects and clears an
+ * uninitialised store; durable on MSP430, kept across a warm reset elsewhere.
+ * Every write goes through the MPU unlock window.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,30 +19,30 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_shell_cmd_history.h"
-#include <kernel/shell/tiku_shell.h>             /* SHELL_PRINTF, TIKU_SHELL_LINE_SIZE */
-#include <kernel/memory/tiku_mem.h>              /* tiku_mpu_unlock/lock_nvm, nvm_write */
+#include <kernel/shell/tiku_shell.h>   /* SHELL_PRINTF, TIKU_SHELL_LINE_SIZE */
+#include <kernel/memory/tiku_mem.h>    /* tiku_mpu_unlock/lock_nvm, nvm_write */
 #include <string.h>
 
 /*---------------------------------------------------------------------------*/
 /* CONFIGURATION                                                             */
 /*---------------------------------------------------------------------------*/
 
-/** Magic value to detect uninitialised FRAM on first boot */
+/** Magic value that detects an uninitialised ring on first boot */
 #define TIKU_SHELL_HISTORY_MAGIC  0xC0DEU
 
 /*---------------------------------------------------------------------------*/
-/* FRAM-BACKED RING BUFFER                                                   */
+/* RING BUFFER                                                               */
 /*---------------------------------------------------------------------------*/
 
 /*
- * History ring placement -- an EXPLICIT grade split:
+ * History ring placement by grade:
  *
- *   MSP430    TIKU_DURABLE -- FRAM in place, survives power cycles, and FRAM
- *             is ample there.
- *   Cortex-M  TIKU_RETAINED -- survives a warm reset, reseeds on a power
- *             cycle.  The ring is LINE_SIZE-scaled (~2 KB at 256 B x 8 deep),
- *             which would consume half of RP2350's entire 4 KB durable-small
- *             budget -- not worth it for command history.
+ *   MSP430     TIKU_DURABLE -- FRAM in place, survives power cycles; FRAM is
+ *              ample there.
+ *   elsewhere  TIKU_RETAINED -- survives a warm reset; a power cycle reseeds
+ *              it, except where the port mirrors retained data to NVM
+ *              (STM32N6, ESP32-C61).  The ring scales with LINE_SIZE (4 KB
+ *              at 256 B x 16 deep), the whole of RP2350's 4 KB durable budget.
  *
  * The magic word self-primes either way, so garbage-on-first-boot is handled
  * identically at both grades.
@@ -59,7 +59,7 @@ typedef struct {
 } tiku_shell_hist_entry_t;
 
 /** Ring control block (durable/warm per the grade split above).  No
- *  initializer: the sections are NOLOAD on Cortex-M and the magic word
+ *  initializer: the sections are NOLOAD off MSP430 and the magic word
  *  primes virgin content in hist_ensure_init(). */
 static HIST_PERSISTENT struct {
     uint16_t                magic;
@@ -73,9 +73,9 @@ static HIST_PERSISTENT struct {
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Write a value to an FRAM-backed variable via the kernel NVM API.
+ * @brief Write a value to a ring variable via the kernel NVM API.
  *
- * Caller must hold the MPU unlocked (single unlock window for batching).
+ * @note The caller holds the MPU unlocked (one window for a batch of writes).
  */
 #define HIST_NVM_WRITE(fram_var, sram_val) \
     do { \
@@ -86,7 +86,7 @@ static HIST_PERSISTENT struct {
     } while (0)
 
 /**
- * @brief Ensure the ring is initialised (first boot or corrupted FRAM).
+ * @brief Ensure the ring is initialised (first boot or a corrupted store).
  *
  * Reads are direct (no MPU unlock needed); writes go through the NVM API.
  */
@@ -104,7 +104,7 @@ hist_ensure_init(void)
     HIST_NVM_WRITE(hist.head, 0);
     HIST_NVM_WRITE(hist.count, 0);
 
-    /* Zero-fill the entire ring buffer in FRAM */
+    /* Zero-fill the entire ring */
     {
         uint8_t zero[TIKU_SHELL_LINE_SIZE];
         uint8_t i;
@@ -160,7 +160,7 @@ tiku_shell_history_record(const char *line)
                     ? hist.count + 1
                     : hist.count;
 
-    /* Single MPU-unlocked window for all FRAM writes */
+    /* Single MPU-unlocked window for all the ring writes */
     saved = tiku_mpu_unlock_nvm();
 
     tiku_mem_arch_nvm_write(

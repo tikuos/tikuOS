@@ -7,8 +7,8 @@
  *
  * tiku_shell_cmd_cache.c - "cache" command (STM32N6).
  *
- * Shows and toggles the Cortex-M55 caches, and times a fixed workload so the
- * effect of a toggle is a number rather than an impression.
+ * Shows and toggles the Cortex-M55 caches, times a fixed workload, and checks
+ * that a DMA copy stays coherent with the data cache.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -73,8 +73,8 @@ void tiku_shell_cmd_cache(uint8_t argc, const char *argv[]) {
     } else if (argc >= 2 && strcmp(argv[1], "off") == 0) {
         tiku_stm32n6_cache_disable();
     } else if (argc >= 2 && strcmp(argv[1], "bench") == 0) {
-        /* Two passes: the first warms the cache (or proves there is none),
-         * the second is the steady state a running system actually sees. */
+        /* Two timed passes: the first runs cold and warms the cache, the
+         * second is the steady state. */
         tiku_mem_workspace_t ws;
         volatile uint32_t *buf =
             (volatile uint32_t *)cache_borrow(&ws, BENCH_BYTES);
@@ -97,7 +97,7 @@ void tiku_shell_cmd_cache(uint8_t argc, const char *argv[]) {
                                      BENCH_WORDS));
         return;
     } else if (argc >= 2 && strcmp(argv[1], "dma") == 0) {
-        /* The coherency proof: the source is dirty in the cache when the
+        /* Coherency check: the source is dirty in the cache when the
          * transfer starts and the destination stale after it finishes, so a
          * mismatch means a missing clean or invalidate, not a broken DMA. */
         tiku_mem_workspace_t ws;

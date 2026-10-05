@@ -7,8 +7,8 @@
  *
  * tiku_shell_cmd_delay.c - "delay" command implementation.
  *
- * A synchronous wait, decomposed into one-second chunks so the 16-bit deadline
- * arithmetic stays clear of wraparound, polling for Ctrl+C each iteration.
+ * A synchronous wait that polls for Ctrl+C, run in one-second chunks so the
+ * deadline arithmetic stays clear of wraparound on MSP430's 16-bit clock.
  * Distinct from `sleep`, which changes power state rather than just waiting.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -55,11 +55,10 @@ delay_parse_ms(const char *s, unsigned long *out)
 }
 
 /**
- * @brief Wait @p ticks at most one second's worth of clock ticks,
- *        polling for Ctrl+C.  Caller must ensure ticks <=
- *        TIKU_CLOCK_SECOND so the deadline arithmetic does not
- *        wrap.
+ * @brief Wait @p ticks clock ticks, polling for Ctrl+C.
  *
+ * @note The caller keeps @p ticks <= TIKU_CLOCK_SECOND so the deadline
+ *       arithmetic does not wrap.
  * @return 1 if cancelled, 0 if the interval elapsed normally.
  */
 static uint8_t

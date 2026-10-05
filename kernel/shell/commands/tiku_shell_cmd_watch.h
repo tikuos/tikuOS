@@ -8,8 +8,8 @@
  * tiku_shell_cmd_watch.h - "watch" command: live view of a VFS node.
  *
  * Writable nodes stream event-driven, read-only nodes re-read on an interval.
- * The command returns immediately and the shell main loop drives the mode through
- * the hooks below, so the shell stays interactive.
+ * The command returns immediately and the shell main loop drives the mode
+ * through the hooks below, so the loop never blocks.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,7 +27,8 @@
  * interval seconds (1..255, default 1).  A second `watch` replaces the first.
  *
  * @note Prints the current value once immediately and returns; values then
- *       stream asynchronously while the shell stays fully interactive.
+ *       stream asynchronously, and other keystrokes are discarded until
+ *       Ctrl+C.
  * @param argc  Argument count
  * @param argv  Argument vector
  */
@@ -41,22 +42,21 @@ void tiku_shell_cmd_watch(uint8_t argc, const char *argv[]);
  * @brief Non-zero while a watch is streaming.
  *
  * The shell input path consults this to route keystrokes: Ctrl+C
- * cancels the watch, all other input is discarded (the modal feel
- * of the original blocking watch, without the blocking).
+ * cancels the watch, all other input is discarded.
  */
 uint8_t tiku_shell_cmd_watch_active(void);
 
 /**
  * @brief Per-poll-tick service.
  *
- * INTERVAL mode counts ticks and re-prints each elapsed interval.  EVENT mode
+ * Interval mode counts ticks and re-prints each elapsed interval.  Event mode
  * re-subscribes idempotently, self-healing after the rules engine's wholesale
  * tiku_vfs_unwatch_all() re-arm drops the subscription.
  */
 void tiku_shell_cmd_watch_tick(void);
 
 /**
- * @brief EVENT-mode dispatch; call on TIKU_EVENT_VFS.
+ * @brief Event-mode dispatch; call on TIKU_EVENT_VFS.
  *
  * @param node_ptr  The changed node from the event's data payload
  */
@@ -65,7 +65,7 @@ void tiku_shell_cmd_watch_on_vfs(const void *node_ptr);
 /**
  * @brief Stop the active watch (no-op when idle).
  *
- * Releases the EVENT-mode subscription.  Called by the shell's
+ * Releases the event-mode subscription.  Called by the shell's
  * Ctrl+C routing; also used internally on read failure and when a
  * new watch replaces a running one.
  */

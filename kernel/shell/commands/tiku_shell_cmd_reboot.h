@@ -18,12 +18,12 @@
 /**
  * @brief "reboot" command handler — trigger a system reset.
  *
- * Usage: reboot
+ * Usage: reboot [boot]   (boot: RP2350 only, reboot into BOOTSEL)
  * Configures the watchdog timer for a short timeout in watchdog mode,
  * then spins until the hardware resets the system.
  *
  * @param argc  Argument count
- * @param argv  Argument vector (unused)
+ * @param argv  Argument vector; argv[1] may be "boot" on RP2350
  */
 void tiku_shell_cmd_reboot(uint8_t argc, const char *argv[]);
 

@@ -7,8 +7,9 @@
  *
  * tiku_shell_cmd_wifi.c - "wifi" command implementation.
  *
- * Glue to the wireless driver's public API for status, scan and cached results.
- * No driver state lives in shell code.
+ * Glue to the tiku_wireless API: power, status, scan and cached results, joins
+ * and, with the net kit's WiFi adapter, the IP link.  No driver state lives in
+ * shell code.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,8 +21,8 @@
 
 #if defined(TIKU_KITS_NET_WIFI_ENABLE)
 /* WiFi as the IP link: bring the net stack up over the joined radio (DHCP),
- * instead of SLIP-over-UART. Needs the CYW43 driver + the net kit's WiFi
- * adapter (TIKU_DRV_WIFI_CYW43_ENABLE=1 TIKU_KITS_NET_WIFI_ENABLE=1). */
+ * instead of SLIP-over-UART.  Needs a Wi-Fi driver and the net kit's WiFi
+ * adapter (TIKU_KITS_NET_WIFI_ENABLE=1). */
 #include <kernel/process/tiku_process.h>
 #include <tikukits/net/wifi/tiku_kits_net_wifi.h>
 #include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>
@@ -30,6 +31,8 @@
 extern struct tiku_process tiku_kits_net_dhcp_process;
 #endif
 
+/*---------------------------------------------------------------------------*/
+/* HELPERS                                                                   */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -41,8 +44,7 @@ static int str_eq(const char *a, const char *b)
     return *a == 0 && *b == 0;
 }
 
-/* SHELL_PRINTF doesn't honour %02x's zero-pad — print two hex
- * nibbles explicitly so "00:0f:..." stays aligned. */
+/** @brief Print @p b as two lowercase hex digits. */
 static void put_hex2(uint8_t b)
 {
     static const char digits[] = "0123456789abcdef";
@@ -50,6 +52,7 @@ static void put_hex2(uint8_t b)
     tiku_shell_io_putc(digits[b & 0xFU]);
 }
 
+/** @brief Print a BSSID or MAC as six colon-separated hex pairs. */
 static void put_bssid(const uint8_t bssid[6])
 {
     uint8_t k;
@@ -59,6 +62,8 @@ static void put_bssid(const uint8_t bssid[6])
     }
 }
 
+/*---------------------------------------------------------------------------*/
+/* SUB-COMMANDS                                                              */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -261,10 +266,13 @@ static void wifi_list(void)
 }
 
 #if defined(TIKU_KITS_NET_WIFI_ENABLE)
-/* Bring the IP stack up over the joined radio: install the WiFi link backend in
- * place of SLIP, start the DHCP client process, and request a lease (broadcast
- * DORA over WiFi).  The lease binds asynchronously; DHCP applies it to the IPv4
- * layer on ACK, so `ip` then shows the acquired address. */
+/**
+ * @brief Bring the IP stack up over the joined radio.
+ *
+ * Installs the WiFi link backend in place of SLIP, requests a lease, then
+ * starts the DHCP client process; DHCP applies the lease to the IPv4 layer on
+ * ACK, so `ip` then shows the acquired address.
+ */
 static void wifi_up(void)
 {
     tiku_wireless_status_t st;
@@ -277,11 +285,12 @@ static void wifi_up(void)
         SHELL_PRINTF("wifi: could not install the WiFi link backend\n");
         return;
     }
-    /* Self-contained: ensure UDP is up (DHCP binds port 68). Harmless if the
-     * net-test path already did it; lets a lean net build (no NET_TEST) work. */
+    /* Self-contained: ensure UDP is up (DHCP binds port 68).  Harmless if
+     * the net-test path already did it; lets a lean net build (no NET_TEST)
+     * work. */
     tiku_kits_net_udp_init();
     tiku_kits_net_dhcp_init();
-    /* Kick off the exchange (real station MAC) BEFORE starting the poller
+    /* Kick off the exchange (real station MAC) before starting the poller
      * process, so the process sees an in-flight DISCOVER and just polls it
      * rather than self-starting a second exchange with the default MAC.  Order
      * matters: tiku_process_start() runs the process body synchronously if the
@@ -313,6 +322,8 @@ static void wifi_power(uint8_t on)
     }
 }
 
+/*---------------------------------------------------------------------------*/
+/* PUBLIC HANDLER                                                            */
 /*---------------------------------------------------------------------------*/
 
 void

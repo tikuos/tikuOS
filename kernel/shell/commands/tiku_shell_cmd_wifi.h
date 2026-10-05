@@ -7,8 +7,8 @@
  *
  * tiku_shell_cmd_wifi.h - "wifi" command: status, scan, ...
  *
- * Drives the CYW43439 WiFi driver from the shell. Available only
- * when TIKU_DRV_WIFI_CYW43_ENABLE=1 is set.
+ * Drives the Wi-Fi radio through tiku_wireless; built when a Wi-Fi driver
+ * (CYW43 or ESP32-C61) is enabled.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,11 +19,11 @@
 #include <stdint.h>
 
 /**
- * @brief "wifi" command handler — drive the CYW43439 WiFi radio.
+ * @brief "wifi" command handler — drive the Wi-Fi radio.
  *
- * Sub-commands cover status, scanning (scan/list), the WPA2-PSK and WPA3-SAE
- * joins, disconnect and forget, and `up` to bring the IP stack up over WiFi
- * via DHCP.  No argument prints the usage summary.
+ * Sub-commands cover power (on/off), status, scanning (scan/list), the
+ * WPA2-PSK and WPA3-SAE joins, disconnect and forget, and `up` to bring the
+ * IP stack up over WiFi via DHCP.  No argument prints the usage summary.
  *
  * @param argc  Argument count
  * @param argv  Argument vector; argv[1] selects the sub-command, argv[2]

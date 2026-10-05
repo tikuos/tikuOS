@@ -7,8 +7,8 @@
  *
  * tiku_shell_cmd_npu.c - "npu" shell command.
  *
- * Release the Ethos-U55 and report what it says about itself.  Running a
- * command stream on it is not yet wired.
+ * Releases the Ethos-U55 and reports what it says about itself, loads a model
+ * from /data, times it against the M85, and checks its output (`npu-test`).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -120,11 +120,8 @@ void tiku_shell_cmd_npu_test(uint8_t argc, const char *argv[])
                  (rc == TIKU_RA8P1_NPU_OK) ? "ACCEPTED (check is blind)"
                                            : npu_err(rc));
 
-    /* And the same run with the cache maintenance taken out.  It has to FAIL:
-     * a pass would mean the buffers never held dirty lines, and the maintained
-     * run above would have proven nothing about coherency. */
-    /* And with the completion interrupt masked.  It must FAIL: a pass would
-     * mean the run never depended on the interrupt at all. */
+    /* With the completion interrupt masked the run should fail: a pass would
+     * mean the run never depended on the interrupt. */
     rc = tiku_ra8p1_npu_selftest_noirq(seed);
     SHELL_PRINTF("npu: without the completion irq %s\n",
                  (rc == TIKU_RA8P1_NPU_OK) ? "PASSED (run was not irq-driven)"
@@ -139,6 +136,9 @@ void tiku_shell_cmd_npu_test(uint8_t argc, const char *argv[])
                                                : npu_err(rc));
     }
 
+    /* With the cache maintenance taken out the run should fail: a pass would
+     * mean the buffers never held dirty lines, and the maintained run above
+     * says nothing about coherency. */
     rc = tiku_ra8p1_npu_selftest_nomaint(seed);
     SHELL_PRINTF("npu: without cache maintenance %s\n",
                  (rc == TIKU_RA8P1_NPU_OK) ? "PASSED (buffers were not cached)"

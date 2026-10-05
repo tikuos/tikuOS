@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_ping.c - "ping" command (async ICMP echo).
  *
- * Enables SLIP so the shared demux routes frames to the IP stack, then sends one
- * probe per shell tick and prints RTT or a timeout.  Replies arrive on the shared
- * path, so the shell stays interactive throughout.
+ * Turns SLIP on so replies reach the IP stack, then sends one probe at a time
+ * from the shell tick and prints the RTT or a timeout.  Text and frames share
+ * the console line, so the shell stays interactive throughout.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,7 +19,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_shell_cmd_ping.h"
-#include "tiku_shell_cmd_slip.h"                      /* tiku_shell_cmd_slip_enable */
+#include "tiku_shell_cmd_slip.h"                      /* slip_enable */
 #include <kernel/shell/tiku_shell.h>                  /* SHELL_PRINTF */
 #include <kernel/timers/tiku_clock.h>                 /* tiku_clock_time */
 #include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>
@@ -49,6 +49,7 @@ static volatile uint16_t ping_got_seq;
 /* HELPERS                                                                   */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Parse dotted IPv4 @p s into @p out; 1 on success, 0 otherwise. */
 static uint8_t
 ping_parse_ip(const char *s, uint8_t out[4])
 {
@@ -95,8 +96,12 @@ ping_parse_u16(const char *s)
     return v;
 }
 
-/* ICMP echo-reply handler.  Runs in shell-loop context (shell RX demux ->
- * ipv4_input -> icmp_input), so it just records the match for the tick. */
+/**
+ * @brief ICMP echo-reply handler: records a reply to PING_ID for the tick.
+ *
+ * Over SLIP it runs in shell-loop context (console IPv4 channel ->
+ * ipv4_input -> icmp_input).
+ */
 static void
 ping_on_reply(const uint8_t *src_ip, uint16_t id, uint16_t seq)
 {
@@ -158,8 +163,8 @@ tiku_shell_cmd_ping(uint8_t argc, const char *argv[])
         ping_count = 1u;
     }
 
-    /* Make sure SLIP mode is on so the shared RX demux delivers the replies,
-     * and hook the ICMP echo-reply callback. */
+    /* Turn SLIP on so the console's IPv4 channel delivers the replies, and
+     * hook the ICMP echo-reply callback. */
     tiku_shell_cmd_slip_enable();
     tiku_kits_net_icmp_set_reply_cb(ping_on_reply);
 

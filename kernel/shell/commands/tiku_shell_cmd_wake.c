@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_wake.c - "wake" command implementation.
  *
- * Shows which interrupt sources can wake the CPU and which low-power levels each
- * supports.  Detection goes through the wake HAL; the tables below describe how
- * each level interacts with each source.
+ * Shows which interrupt sources can wake the CPU and which low-power levels
+ * each supports.  Detection goes through the wake HAL; the tables below
+ * describe how each level interacts with each source.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -59,7 +59,6 @@ tiku_shell_cmd_wake(uint8_t argc, const char *argv[])
         SHELL_PRINTF("  GPIOTE   (gpio irq)   [on ]  wakes WFI\n");
         for (i = 0; i < TIKU_WAKE_MAX_GPIO_PORTS; i++) {
             if (w.gpio_ie[i]) {
-                /* SHELL_PRINTF's tiny formatter has no width/%X -- plain %x */
                 SHELL_PRINTF("    P%u armed pins = 0x%x\n",
                              (unsigned)i, (unsigned)w.gpio_ie[i]);
             }

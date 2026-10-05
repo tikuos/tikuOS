@@ -30,7 +30,7 @@
 /* DECODERS                                                                  */
 /*---------------------------------------------------------------------------*/
 
-/* GHWCFG2.OTGARCH: how the core moves packet data. */
+/** @brief Decode GHWCFG2.OTGARCH: how the core moves packet data. */
 static const char *arch_str(uint32_t hwcfg2)
 {
     switch ((hwcfg2 >> 3) & 0x3u) {
@@ -41,7 +41,7 @@ static const char *arch_str(uint32_t hwcfg2)
     }
 }
 
-/* DSTS.ENUMSPD, valid once the host has finished a reset. */
+/** @brief Decode DSTS.ENUMSPD, valid once the host has finished a reset. */
 static const char *speed_str(uint32_t dsts)
 {
     switch ((dsts >> 1) & 0x3u) {
@@ -52,7 +52,7 @@ static const char *speed_str(uint32_t dsts)
     }
 }
 
-/* PHY.CLOCK.FSEL: which reference the PHY PLL was told it has. */
+/** @brief Decode PHY.CLOCK.FSEL: the reference the PHY PLL was told of. */
 static const char *fsel_str(uint32_t clk)
 {
     switch (clk & 0x7u) {
@@ -68,13 +68,18 @@ static const char *fsel_str(uint32_t clk)
 /* REPORTS                                                                   */
 /*---------------------------------------------------------------------------*/
 
-/* Each stage is printed before it acts: the core stalls the bus rather than
- * faulting, so the last line out names the step that did not return. */
+/**
+ * @brief Print one bring-up stage before it acts.
+ *
+ * The core stalls the bus rather than faulting, so the last line out names
+ * the step that did not return.
+ */
 static void usbprobe_note(const char *stage)
 {
     SHELL_PRINTF("  .. %s\n", stage);
 }
 
+/** @brief Print wrapper, PHY, clock, VBUS and, if powered, core registers. */
 static void usbprobe_regs(void)
 {
     tiku_nordic_usbhs_regs_t r;

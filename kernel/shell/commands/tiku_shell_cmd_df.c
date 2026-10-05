@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_df.c - "df" command implementation.
  *
- * Reports the /data store as a filesystem.  Block accounting follows the store's
- * own model -- a file occupies whole slots -- with the exact stored byte count on
- * a second line.
+ * Reports the /data store as a filesystem.  Block accounting follows the
+ * store's own model -- a file occupies whole slots -- with the exact stored
+ * byte count on a second line.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -90,7 +90,7 @@ tiku_shell_cmd_df(uint8_t argc, const char *argv[])
     df_hsize(us, sizeof us, used);
     df_hsize(av, sizeof av, avail);
     df_hsize(st, sizeof st, s.used_bytes);
-    /* Pre-format the %-bearing fields so only %s/literals reach SHELL_PRINTF. */
+    /* Pre-format the %-bearing fields so SHELL_PRINTF gets them as %s. */
     snprintf(pc, sizeof pc, "%u%%", pct);
     snprintf(fl, sizeof fl, "%u/%u",
              (unsigned)s.used_files, (unsigned)s.max_files);
@@ -104,12 +104,10 @@ tiku_shell_cmd_df(uint8_t argc, const char *argv[])
                  (unsigned)s.used_slots, (unsigned)s.total_slots, st,
                  (unsigned)s.slot_bytes);
 
-    /* Carved-region breakdown: how the NVM region divides into the tier extent
-     * and this file store.  "idle" is the point of printing it -- the two
-     * extents are meant to tile the region exactly, so anything other than 0
-     * means region space is going nowhere (which is what this layout was
-     * reworked to make impossible).  Omitted on parts whose store rides its own
-     * backing array rather than a region. */
+    /* Carved-region breakdown: the tier extent and this store should tile the
+     * NVM region, so a nonzero idle remainder is region space going nowhere
+     * and is printed in red.  Omitted on parts whose store has its own backing
+     * array rather than a region. */
     if (s.region_bytes != 0u) {
         char rg[12], ti[12], fx[12], id[12];
         df_hsize(rg, sizeof rg, s.region_bytes);

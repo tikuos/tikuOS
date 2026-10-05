@@ -33,10 +33,14 @@ streq(const char *a, const char *b)
     return (*a == *b);
 }
 
-/* Parse "P<port>.<pin>" -> port and pin. Returns 0 on success,
- * -1 on syntax error. Accepts uppercase or lowercase 'p'.  The pin field
- * is one or two decimal digits (0..31) so wide ports such as the nRF54L's
- * P1 (up to P1.15) are addressable, not just the 0..7 of narrow parts. */
+/**
+ * @brief Parse "P<port>.<pin>" (upper- or lowercase 'p') into port and pin.
+ *
+ * The pin field is one or two decimal digits (0..31), so wide ports such as
+ * the nRF54L's P1 (up to P1.15) are addressable.
+ *
+ * @return 0 on success, -1 on a syntax error
+ */
 static int
 parse_pin_spec(const char *s, uint8_t *port, uint8_t *pin)
 {
@@ -92,10 +96,9 @@ tiku_shell_cmd_irq(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* The GPIO-IRQ arch API is 1-based virtual (1 = the device's first port).
-     * The user types the physical port NAME: nRF54L parts number ports from 0,
-     * so P0/P1/P2 map to virtual 1/2/3 (matching tiku_gpio_arch.c); a part
-     * whose first port is named 1 (MSP430) already has name == virtual. */
+    /* The user types the physical port name.  The Nordic GPIO-IRQ arch
+     * numbers ports from 1, so P0/P1/P2 map to 1/2/3 (matching
+     * tiku_gpio_arch.c); other ports take the typed number as is. */
 #if defined(PLATFORM_NORDIC)
     vport = (uint8_t)(port + 1u);
 #else

@@ -15,13 +15,13 @@
 #include <kernel/shell/tiku_shell_alias.h>
 #include <string.h>
 
-/*
- * Rejoin argv[2..argc] into a single body string with one space
- * between tokens. Strips a leading '"' on the first token and a
- * trailing '"' on the last so quoted forms work despite the
- * shell tokeniser not honouring quotes itself.
+/**
+ * @brief Rejoin argv[2..argc-1] into one body string, single-spaced.
  *
- * Returns 0 on success or -1 if the rejoined body would not fit.
+ * Strips a stray '"' left at the start of the first token or the end of the
+ * last; the parser has already grouped and unquoted quoted spans.
+ *
+ * @return 0 on success, -1 if the body would not fit in @p out_size
  */
 static int
 rejoin_body(uint8_t argc, const char *argv[],
@@ -84,7 +84,7 @@ tiku_shell_cmd_alias(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* One arg: also list (could query a specific name later) */
+    /* One argument: no body given, print usage */
     if (argc < 3) {
         SHELL_PRINTF("Usage: alias <name> <body...>\n");
         return;

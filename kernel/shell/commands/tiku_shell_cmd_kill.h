@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_kill.h - "kill" command: terminate a process by PID
+ * tiku_shell_cmd_kill.h - "kill" command: stop a process by PID
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -16,10 +16,11 @@
 #include <stdint.h>
 
 /**
- * @brief "kill" command handler — terminate a process by PID.
+ * @brief "kill" command handler — stop a process by PID.
  *
  * Usage: kill <pid>
- * The PID corresponds to the index shown by the "ps" command.
+ * The PID is the one "ps" shows; the process stays registered, and `resume`
+ * restarts it.
  *
  * @param argc  Argument count
  * @param argv  Argument vector (argv[1] = PID)

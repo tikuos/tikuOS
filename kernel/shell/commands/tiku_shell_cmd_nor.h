@@ -18,8 +18,9 @@
 /**
  * @brief Handle `power nor ...`.  argv[1] is already known to be "nor".
  *
- * Compiled only when TIKU_DRV_NOR_ENABLE is set; tiku_shell_cmd_power.c guards the call
- * with the same flag, so there is no runtime "not available" stub.
+ * Compiled only when TIKU_DRV_NOR_ENABLE is set; tiku_shell_cmd_power.c
+ * guards the call with the same flag, so there is no runtime "not available"
+ * stub.
  */
 void tiku_shell_cmd_nor(uint8_t argc, const char *argv[]);
 

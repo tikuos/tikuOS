@@ -18,7 +18,8 @@
 #include <kernel/shell/tiku_shell_config.h>
 
 /**
- * @brief Handle `npu [off]`; with no argument it releases and reports.
+ * @brief Handle `npu [off | bench [rounds] | load <name>]`; with no argument
+ *        it releases and reports.
  *
  * @param argc Argument count
  * @param argv Argument vector

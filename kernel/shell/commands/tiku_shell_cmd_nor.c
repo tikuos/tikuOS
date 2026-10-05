@@ -7,9 +7,8 @@
  *
  * tiku_shell_cmd_nor.c - `power nor ...` verbs.
  *
- * Split out of the power command, whose top-level verb forwards here.  The verb
- * bodies were moved verbatim and gated on a before/after diff of every verb's
- * output, so this file deliberately contains no improvements.
+ * Bring-up and test verbs for the Apollo510 EVB's 8 MB octal NOR (U12);
+ * tiku_shell_cmd_power.c forwards the `nor` verb here.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -41,20 +40,32 @@ static const char *nor_errname(tiku_nor_err_t rc)
 
 void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
 {
-    /* N1/N2 bring-up and gates for the board's 8 MB octal NOR (U12).
+    /* argv[2] selects the verb; anything unmatched reads identity.
      *
      *   power nor id [octal]  serial bring-up + identity; "octal" also
-     *                         switches to octal DDR and re-verifies
-     *   power nor fault       the same, with D0 stolen -- the guard
-     *                         must ERROR rather than invent an answer
-     *   power nor gate        the gate only an NVM can pass: erase,
-     *                         program, verify, and report the stamp
-     *                         that a later power cycle must still find
-     *   power nor verify      re-read that stamp WITHOUT writing --
-     *                         run it after a reboot or a load-switch
-     *                         cycle to prove persistence
-     *   power nor off | on    load switch: true zero / restore
-     *   power nor erases      how many erases this boot has spent
+     *                         switches to octal DDR and re-reads it
+     *   power nor fault       the same with D0 stolen; the read must
+     *                         report an error
+     *   power nor gate        erase, program and verify the scratch
+     *                         sector, leaving a fixed stamp there
+     *   power nor verify      re-read the stamp without writing, after
+     *                         a reboot or a load-switch cycle
+     *   power nor off         load switch off: VDD_FLASH at zero
+     *   power nor lson        load switch on, then bit-bang READ_ID
+     *   power nor erases      erases spent this boot
+     *   power nor xip         read one word through the XIP aperture
+     *   power nor bench [octal] [xip] [sector]
+     *                         norbench, optionally in octal DDR
+     *   power nor tascan      serial dummy-count sweep against the stamp
+     *   power nor hears       whether the part parses octal commands
+     *   power nor arraycmp [addr]
+     *                         octal array read against serial
+     *   power nor scan        RX DQS delay sweep, DQS on and off
+     *   power nor forceoctal  identity with only the controller in octal
+     *   power nor bbtest      self-test of the bit-bang read path
+     *   power nor bb          bit-bang READ_ID, controller off the pads
+     *   power nor regs        controller register snapshot
+     *   power nor ls really   refused
      */
     tiku_nor_id_t id;
     tiku_nor_err_t rc;
@@ -87,7 +98,8 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
             SHELL_PRINTF("norbench: bring-up %s\n", nor_errname(rc));
             return;
         }
-        {   /* any trailing word may be `octal`, `xip` or `sector` */
+        {   /* argv[3] may be `octal`; any trailing word may be `xip` or
+             * `sector` */
             int k5, xip = 0, sec = 0;
             for (k5 = 3; k5 < argc; k5++) {
                 if (tiku_cmd_streq(argv[k5], "xip"))    { xip = 1; }
@@ -100,10 +112,10 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "tascan")) {
-        /* Sweep the SERIAL fast-read dummy count against the stamp the gate
+        /* Sweep the serial fast-read dummy count against the stamp `gate`
          * programs.  Erased content is a weak reference -- a misframed read of
          * all-FF is still all-FF -- so the reference here is the 0xA5^i
-         * pattern, which the octal path already reads back bit-exact. */
+         * pattern. */
         static uint8_t want[32];
         uint32_t i8, mask;
         unsigned t8;
@@ -153,11 +165,11 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "arraycmp")) {
-        /* N2's real gate: an ARRAY read in octal must agree with the same
-         * address read in serial.  Identity is a register read, and a part
-         * that strobes DQS for the array need not strobe it for registers --
-         * so an octal identity that reads zero does not by itself condemn the
-         * array path. */
+        /* An array read in octal must agree with the same address read in
+         * serial.  Identity is a register read, and a part that strobes DQS
+         * for the array need not strobe it for registers -- so an octal
+         * identity that reads zero does not by itself condemn the array
+         * path. */
         static uint8_t ser[64], oct[64];
         uint32_t addr = 0u, i7;
         int same = 1, ser_blank = 1;
@@ -231,7 +243,7 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
         SHELL_PRINTF("nor rxdqs scan @%lu Hz: dqs-on %08lx",
                      tiku_nor_clock_hz(), (unsigned long)mask);
         {   /* A part that does not strobe DQS for register reads cannot be
-             * captured at ANY delay; latching on the controller clock is the
+             * captured at any delay; latching on the controller clock is the
              * distinguishing test. */
             uint32_t nodqs = tiku_nor_scan_rxdqs(0);
             SHELL_PRINTF("  dqs-off %08lx\n", (unsigned long)nodqs);
@@ -250,9 +262,8 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "forceoctal")) {
-        /* Is the part already octal?  Configure the controller that way
-         * and ask for identity; a serial-mode part will stay silent and
-         * an octal one will finally answer. */
+        /* Configure only the controller for octal and read identity: a
+         * part in serial mode stays silent, one already in octal answers. */
         unsigned k9;
         static const unsigned rows[3] = { TIKU_NOR_CLK_24MHZ,
                                           TIKU_NOR_CLK_48MHZ,
@@ -293,12 +304,11 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
         /* Enable the flash's load switch, then ask the device who it is
          * over bit-bang (no controller involved).
          *
-         * WHY HIGH IS THE SAFE DIRECTION: the switch is an NCP451FCT2G
-         * with a 100 kohm pull-DOWN on its enable, so the flash is
-         * unpowered by default -- which is exactly what an all-ff
-         * bit-bang read means.  Driving the pad HIGH powers the device,
-         * and the part is an inrush-limited switch designed for that.
-         * This verb never drives the pad low. */
+         * The switch is an NCP451FCT2G with a 100 kohm pull-down on its
+         * enable, so the flash is unpowered by default and a bit-bang read
+         * returns all ff.  Driving the pad high powers the device, and the
+         * part is an inrush-limited switch designed for that.  This verb
+         * never drives the pad low. */
         static uint8_t idb[8];
         unsigned k8;
         tiku_nor_deinit();
@@ -341,8 +351,8 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 4 && tiku_cmd_streq(argv[2], "ls") && 0) {
-        /* Settle the load-switch polarity by experiment: drive the pad
-         * each way (and high-Z) and see which state lets identity read. */
+        /* Compiled out by `&& 0`: drives the load-switch pad low, high or
+         * high-Z (argv[3] 0, 1 or z) and reads identity in that state. */
         int lv = tiku_cmd_streq(argv[3], "z") ? -1 : (argv[3][0] == '1' ? 1 : 0);
         tiku_nor_ls_set(lv);
         rc = tiku_nor_init_serial(TIKU_NOR_CLK_24MHZ);
@@ -367,7 +377,7 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "verify")) {
-        /* Persistence check with NO writes: read the stamp back. */
+        /* Persistence check: read the stamp back without writing. */
         static uint8_t rd[64];
         uint32_t i6;
         int ok6 = 1;

@@ -8,8 +8,8 @@
  * tiku_shell_cmd_adc.c - "adc" command implementation
  *
  * Reads analog channels through the platform-independent ADC HAL.
- * Initialises the ADC on first use, reads the requested channel,
- * and shuts it down to save power.
+ * Initialises the ADC for each read, reads the requested channel,
+ * then closes it to save power.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -123,7 +123,6 @@ tiku_shell_cmd_adc(uint8_t argc, const char *argv[])
         }
     }
 
-    /* Initialise ADC (12-bit) */
     cfg.resolution = TIKU_ADC_RES_12BIT;
     cfg.reference = ref;
 
@@ -142,7 +141,6 @@ tiku_shell_cmd_adc(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* Read */
     rc = tiku_adc_read(channel, &value);
     tiku_adc_close();
 

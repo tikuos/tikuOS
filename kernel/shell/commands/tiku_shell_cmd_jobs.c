@@ -7,8 +7,8 @@
  *
  * tiku_shell_cmd_jobs.c - "jobs" command implementation.
  *
- * Lists scheduled jobs and deletes them by id.  The type and interval field is
- * padded to a fixed width so the command column always starts at the same place.
+ * Lists scheduled jobs and deletes them by id, or all at once.  The type and
+ * interval field is padded to a fixed width so the command column lines up.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
