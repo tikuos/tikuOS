@@ -26,10 +26,10 @@
  * tiku_vfs_tree_power_children — bump it when adding a node there
  * (a _Static_assert in the .c catches a forgotten update).
  */
-#define TIKU_VFS_TREE_POWER_NCHILD  2
+#define TIKU_VFS_TREE_POWER_NCHILD  4
 
 /**
- * @brief /sys/power children: mode, wake.
+ * @brief /sys/power children: mode, wake, policy, available.
  *
  * Referenced by the /sys directory table in tiku_vfs_tree_sys.c.
  */

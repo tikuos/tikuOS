@@ -116,6 +116,13 @@ uint8_t tiku_sched_has_pending(void);
 void tiku_sched_set_idle_hook(tiku_sched_idle_hook_t hook);
 
 /**
+ * @brief Get the idle hook the scheduler calls.
+ *
+ * @return The hook, whoever installed it, or NULL when none is set
+ */
+tiku_sched_idle_hook_t tiku_sched_get_idle_hook(void);
+
+/**
  * @brief Declare whether the current idle mode is woken by the tick.
  *
  * Non-zero (the default) lets the scheduler idle while timers are armed, since

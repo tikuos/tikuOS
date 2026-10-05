@@ -292,6 +292,12 @@ void tiku_sched_set_idle_hook(tiku_sched_idle_hook_t hook)
     idle_hook = hook;
 }
 
+/** @brief Get the idle hook the scheduler calls. */
+tiku_sched_idle_hook_t tiku_sched_get_idle_hook(void)
+{
+    return idle_hook;
+}
+
 /** @brief Declare whether the registered idle mode wakes on the tick. */
 void tiku_sched_set_idle_tick_wakes(uint8_t wakes)
 {

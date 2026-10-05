@@ -16,6 +16,7 @@
 
 #include <stddef.h>
 #include "tiku_cpu.h"
+#include "tiku_wake_hal.h"
 #include <kernel/cpu/tiku_cpu_settings.h>
 
 #if defined(PLATFORM_MSP430)
@@ -517,6 +518,44 @@ int tiku_cpu_idle_mode_wakes_on_tick(tiku_cpu_idle_mode_t mode) {
 #else
     (void)mode;
     return 1;
+#endif
+}
+
+/** Every wake source: what ends a WFI-class sleep. */
+#define IDLE_WAKES_ALL  (TIKU_WAKE_SYSTICK | TIKU_WAKE_HTIMER |            \
+                         TIKU_WAKE_UART_RX | TIKU_WAKE_WDT | TIKU_WAKE_GPIO)
+
+unsigned int tiku_cpu_idle_mode_wakes(tiku_cpu_idle_mode_t mode) {
+#if defined(PLATFORM_MSP430)
+    switch (mode) {
+        case TIKU_CPU_IDLE_DEEP:
+            /* LPM3 keeps only ACLK, which runs the tick.  The htimer and
+             * the UART run from SMCLK, and the watchdog may too. */
+            return TIKU_WAKE_SYSTICK | TIKU_WAKE_GPIO;
+        case TIKU_CPU_IDLE_DEEPEST:
+            /* LPM4 stops every clock: only a pin edge wakes the core. */
+            return TIKU_WAKE_GPIO;
+        case TIKU_CPU_IDLE_OFF:
+        case TIKU_CPU_IDLE_LIGHT:
+        default:
+            return IDLE_WAKES_ALL;
+    }
+#elif defined(PLATFORM_ESP32C61)
+    switch (mode) {
+        case TIKU_CPU_IDLE_DEEP:
+        case TIKU_CPU_IDLE_DEEPEST:
+            /* Light sleep ends on a SYSTIMER alarm or a byte at UART0;
+             * other interrupts wait for the next alarm. */
+            return TIKU_WAKE_SYSTICK | TIKU_WAKE_HTIMER | TIKU_WAKE_UART_RX;
+        case TIKU_CPU_IDLE_OFF:
+        case TIKU_CPU_IDLE_LIGHT:
+        default:
+            return IDLE_WAKES_ALL;
+    }
+#else
+    /* Every mode is a WFI variant: any enabled interrupt wakes the core. */
+    (void)mode;
+    return IDLE_WAKES_ALL;
 #endif
 }
 

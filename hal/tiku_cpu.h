@@ -174,6 +174,16 @@ tiku_cpu_idle_enter_t tiku_cpu_idle_hook(tiku_cpu_idle_mode_t mode);
 int tiku_cpu_idle_mode_wakes_on_tick(tiku_cpu_idle_mode_t mode);
 
 /**
+ * @brief Which wake sources still end this idle mode?
+ *
+ * An armed source outside the mask does not wake the core from @p mode.
+ * Without TIKU_WAKE_UART_RX, console input sent during the sleep is lost.
+ *
+ * @return Mask of TIKU_WAKE_* bits from hal/tiku_wake_hal.h
+ */
+unsigned int tiku_cpu_idle_mode_wakes(tiku_cpu_idle_mode_t mode);
+
+/**
  * @brief Short, platform-specific name for the mode.
  *        e.g. on MSP430: "off", "LPM0", "LPM3", "LPM4".
  */

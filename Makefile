@@ -2491,6 +2491,7 @@ SRCS += kernel/vfs/tree/tiku_vfs_tree_boot.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_timer.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_watchdog.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_power.c
+SRCS += kernel/cpu/tiku_power_policy.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_persist.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_layout.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_watch.c
