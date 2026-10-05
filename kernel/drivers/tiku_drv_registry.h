@@ -12,10 +12,10 @@
  * `drivers/` repo's tiku_drv_table.c when present, or by
  * tiku_drv_empty_table.c (zero length) otherwise.
  *
- * This header exposes just the two table symbols and the two entry
- * points (init-all, find-by-name); the descriptor type itself lives
- * in tiku_drv.h.  Keeping the surface this small is what lets the
- * optional drivers/ repo drop in without touching core kernel code.
+ * This header exposes the table, init/find and per-boot status queries;
+ * the descriptor type itself lives in tiku_drv.h.  Keeping the surface
+ * this small is what lets the optional drivers/ repo drop in without
+ * touching core kernel code.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -38,6 +38,38 @@ extern const tiku_drv_t *const tiku_drv_table[];
 extern const uint8_t           tiku_drv_table_count;
 
 /**
+ * @brief Table slots the registry keeps per-boot status and a mount for.
+ *
+ * Descriptors past this many are reported as capacity-limited and are not
+ * initialized.  Raise it for a board with more drivers.
+ */
+#ifndef TIKU_DRV_REGISTRY_MAX
+#define TIKU_DRV_REGISTRY_MAX 8
+#endif
+
+/** @brief Per-boot initialization outcome of one table slot. */
+typedef enum {
+    TIKU_DRV_DISCOVERED,   /**< not yet initialized                  */
+    TIKU_DRV_READY,        /**< init() succeeded                     */
+    TIKU_DRV_FAILED,       /**< init() returned an error             */
+    TIKU_DRV_INVALID,      /**< malformed descriptor, or no such slot */
+    TIKU_DRV_CAPACITY      /**< past TIKU_DRV_REGISTRY_MAX            */
+} tiku_drv_state_t;
+
+/**
+ * @brief Report one table slot's initialization outcome.
+ *
+ * The outcome of boot, not a live health query.  A failed mount does not
+ * undo a successful init.
+ *
+ * @param index     Descriptor-table slot
+ * @param init_rc   Receives the init() result, or NULL
+ * @param mount_rc  Receives the VFS mount result, or NULL
+ * @return The slot's state; TIKU_DRV_INVALID past the table end
+ */
+tiku_drv_state_t tiku_drv_status(uint8_t index, int *init_rc, int *mount_rc);
+
+/**
  * @brief Walk the driver table and call each driver's init().
  *
  * Called once at boot from main.c after tiku_vfs_tree_init(). Repeated calls
@@ -48,6 +80,15 @@ extern const uint8_t           tiku_drv_table_count;
  * successfully.
  */
 void tiku_drv_init_all(void);
+
+/**
+ * @brief Publish /sys/drivers and every ready driver's nodes again.
+ *
+ * tiku_vfs_init() clears the mount table; call this after registering the
+ * root again so the registry's mounts return.  Mounts still in the tree are
+ * left alone, no driver is initialized again, and before init it does nothing.
+ */
+void tiku_drv_remount_all(void);
 
 /**
  * @brief Look up a driver descriptor by exact, case-sensitive name.

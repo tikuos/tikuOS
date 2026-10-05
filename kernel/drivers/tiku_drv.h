@@ -10,7 +10,7 @@
  * The descriptor is the single contract between core kernel and
  * the optional `drivers/` repo. The kernel iterates a static
  * table of pointers to descriptors at boot, calls each driver's
- * init(), and (eventually) splices its VFS nodes under
+ * init(), and publishes successfully initialized drivers' VFS nodes under
  * /dev/<class>/<mount>/. Drivers know nothing about the kernel
  * internals; the kernel knows nothing about each driver's
  * silicon-specific code. See drivers.md for the full design.
@@ -44,6 +44,7 @@ typedef enum {
     TIKU_DRV_CLASS_STORAGE = 5,
     TIKU_DRV_CLASS_INPUT   = 6,
     TIKU_DRV_CLASS_OTHER   = 7,
+    TIKU_DRV_CLASS_COUNT   = 8,   /**< number of classes; not a class */
 } tiku_drv_class_t;
 
 /**
@@ -65,8 +66,8 @@ typedef enum {
  *        `const tiku_drv_t tiku_drv_<class>_<name>`.
  *
  * The descriptor lives in flash (`const`) so the table itself is
- * also flash-resident. SRAM cost per driver is zero — only the
- * 32-bit pointer in tiku_drv_table[] counts.
+ * also flash-resident. The kernel keeps bounded per-boot status and mount
+ * records separately; TIKU_DRV_REGISTRY_MAX controls their capacity.
  */
 typedef struct tiku_drv {
     /** Human-readable name, e.g. "wifi-cyw43" or "temp-mcp9808". */
