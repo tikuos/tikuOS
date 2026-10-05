@@ -334,6 +334,40 @@ basic_crc32_step(uint32_t c, const uint8_t *p, size_t n)
     return c;
 }
 
+/**
+ * @brief The version word stored beside a checkpoint's payload.
+ *
+ * BASIC_CKPT_VERSION folded with the limits and struct sizes that place the
+ * payload's fields, so a checkpoint written by a build with other limits is
+ * refused before any of it is read.
+ */
+static uint32_t
+basic_ckpt_format(void)
+{
+    static const uint32_t shape[] = {
+        BASIC_CKPT_VERSION, (uint32_t)sizeof(long), BASIC_VAR_TABLE_LEN,
+        TIKU_BASIC_NAMEDVAR_LEN, TIKU_BASIC_NAMEDVAR_MAX,
+        (uint32_t)sizeof(basic_for_frame_t),
+        (uint32_t)sizeof(basic_loop_frame_t),
+        TIKU_BASIC_STRVARS_ENABLE, TIKU_BASIC_STR_HEAP_BYTES,
+        TIKU_BASIC_SUBS_ENABLE, TIKU_BASIC_DEFN_ENABLE,
+        TIKU_BASIC_EVERY_MAX, TIKU_BASIC_EVERY_STMT_LEN,
+        TIKU_BASIC_ONCHG_MAX, TIKU_BASIC_ARRAYS_ENABLE,
+#if TIKU_BASIC_SUBS_ENABLE
+        (uint32_t)sizeof(basic_frame_t),
+#endif
+#if TIKU_BASIC_DEFN_ENABLE
+        (uint32_t)sizeof(basic_defn_t),
+#endif
+#if TIKU_BASIC_ONCHG_MAX > 0
+        (uint32_t)sizeof(((basic_onchg_t *)0)->path),
+#endif
+    };
+
+    return basic_crc32_step(0xFFFFFFFFu, (const uint8_t *)shape,
+                            sizeof shape) ^ 0xFFFFFFFFu;
+}
+
 #if BASIC_CKPT_STREAMING
 /**
  * @brief Append the buffered chunk to the open prog.ckpt writer.
@@ -571,12 +605,55 @@ basic_ckpt_write(basic_ckpt_wr_t *w)
 #endif
 }
 
+/** @brief Whether a text field read from a checkpoint ends inside its array. */
+static int
+ckpt_text_ok(const char *s, size_t cap)
+{
+    return memchr(s, '\0', cap) != NULL;
+}
+
+/**
+ * @brief Refuse a restore that has begun, clearing what it wrote.
+ *
+ * Empties the control stacks, the variable namespace, the reactive tables and
+ * the DATA cursor, so no value from the refused payload stays reachable.
+ *
+ * @return -1, for basic_ckpt_read() to return
+ */
+static int
+ckpt_refuse(void)
+{
+    uint8_t k;
+
+    gosub_sp = 0;
+    for_sp   = 0;
+    loop_sp  = 0;
+#if TIKU_BASIC_SUBS_ENABLE
+    basic_call_sp  = 0;
+    basic_scope_sp = 0;
+#endif
+    basic_clear_vars();
+#if TIKU_BASIC_EVERY_MAX > 0
+    for (k = 0; k < TIKU_BASIC_EVERY_MAX; k++) basic_everys[k].active = 0;
+#endif
+#if TIKU_BASIC_ONCHG_MAX > 0
+    for (k = 0; k < TIKU_BASIC_ONCHG_MAX; k++) basic_onchgs[k].active = 0;
+#endif
+    (void)k;
+    basic_data_idx    = -1;
+    basic_data_off    = 0;
+    basic_err_handler = 0;
+    basic_err_pc      = 0;
+    basic_ckpt_armed  = 0;
+    return -1;
+}
+
 /**
  * @brief Restore the reified execution state from a serialized payload.
  *
- * Stack depths and heap length are validated against the compiled limits: an
- * out-of-range value means the checkpoint came from an incompatible build or is
- * corrupt, so the restore fails rather than jumping with a bogus stack pointer.
+ * Every depth, index, heap offset and text field is checked against the
+ * compiled limits before use, and the payload must be consumed exactly; a
+ * refused restore clears what it wrote (ckpt_refuse()).
  *
  * @return 0 on a clean restore, -1 if the payload is short or inconsistent.
  */
@@ -603,15 +680,18 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
     ckpt_r(&r, &u8, 1); basic_ckpt_armed = u8;
 
     ckpt_r(&r, &sp, 1);
-    if (sp > TIKU_BASIC_GOSUB_DEPTH) return -1;
+    if (sp > TIKU_BASIC_GOSUB_DEPTH) return ckpt_refuse();
     gosub_sp = sp;
     for (i = 0; i < sp; i++) ckpt_r(&r, &gosub_stack[i], sizeof(uint16_t));
     ckpt_r(&r, &sp, 1);
-    if (sp > TIKU_BASIC_FOR_DEPTH) return -1;
+    if (sp > TIKU_BASIC_FOR_DEPTH) return ckpt_refuse();
     for_sp = sp;
-    for (i = 0; i < sp; i++) ckpt_r(&r, &for_stack[i], sizeof(basic_for_frame_t));
+    for (i = 0; i < sp; i++) {
+        ckpt_r(&r, &for_stack[i], sizeof(basic_for_frame_t));
+        if (for_stack[i].var_idx >= BASIC_VAR_TABLE_LEN) return ckpt_refuse();
+    }
     ckpt_r(&r, &sp, 1);
-    if (sp > TIKU_BASIC_LOOP_DEPTH) return -1;
+    if (sp > TIKU_BASIC_LOOP_DEPTH) return ckpt_refuse();
     loop_sp = sp;
     for (i = 0; i < sp; i++) ckpt_r(&r, &loop_stack[i], sizeof(basic_loop_frame_t));
 
@@ -619,16 +699,30 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
     ckpt_r(&r, basic_namedvar_names,
            (size_t)TIKU_BASIC_NAMEDVAR_LEN * TIKU_BASIC_NAMEDVAR_MAX);
     ckpt_r(&r, basic_namedvar_const, (size_t)TIKU_BASIC_NAMEDVAR_MAX);
+    for (i = 0; i < TIKU_BASIC_NAMEDVAR_MAX; i++) {
+        if (!ckpt_text_ok(basic_namedvar_names[i], TIKU_BASIC_NAMEDVAR_LEN)) {
+            return ckpt_refuse();
+        }
+    }
 
 #if TIKU_BASIC_STRVARS_ENABLE
     ckpt_r(&r, basic_namedstrvar_names,
            (size_t)TIKU_BASIC_NAMEDVAR_LEN * TIKU_BASIC_NAMEDVAR_MAX);
+    for (i = 0; i < TIKU_BASIC_NAMEDVAR_MAX; i++) {
+        if (!ckpt_text_ok(basic_namedstrvar_names[i],
+                          TIKU_BASIC_NAMEDVAR_LEN)) {
+            return ckpt_refuse();
+        }
+    }
     {
         uint16_t hp;
         ckpt_r(&r, &hp, sizeof(hp));
-        if (hp > TIKU_BASIC_STR_HEAP_BYTES) return -1;
+        if (hp > TIKU_BASIC_STR_HEAP_BYTES) return ckpt_refuse();
         basic_str_heap_pos = hp;
         ckpt_r(&r, basic_str_heap, hp);
+        /* Every heap string ends in a NUL, so the used prefix does too: an
+         * offset below hp then always finds its terminator inside it. */
+        if (hp > 0u && basic_str_heap[hp - 1u] != '\0') return ckpt_refuse();
         for (i = 0; i < BASIC_VAR_TABLE_LEN; i++) {
             uint16_t off;
             ckpt_r(&r, &off, sizeof(off));
@@ -637,7 +731,7 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
             } else if (off < hp) {
                 basic_strvars[i] = basic_str_heap + off;
             } else {
-                return -1;                  /* dangling offset -> reject */
+                return ckpt_refuse();       /* dangling offset -> reject */
             }
         }
     }
@@ -651,15 +745,20 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
     ckpt_r(&r, &basic_data_off, sizeof(basic_data_off));
     ckpt_r(&r, &basic_prng_state, sizeof(basic_prng_state));
     ckpt_r(&r, &basic_prng_seeded, sizeof(basic_prng_seeded));
+    /* The DATA cursor indexes prog[] and that line's text. */
+    if (basic_data_idx < -2 || basic_data_idx >= TIKU_BASIC_PROGRAM_LINES ||
+        basic_data_off < 0 || basic_data_off >= TIKU_BASIC_LINE_MAX) {
+        return ckpt_refuse();
+    }
 
 #if TIKU_BASIC_SUBS_ENABLE
     ckpt_r(&r, &sp, 1);
-    if (sp > TIKU_BASIC_CALL_DEPTH) return -1;
+    if (sp > TIKU_BASIC_CALL_DEPTH) return ckpt_refuse();
     basic_call_sp = sp;
     for (i = 0; i < sp; i++)
         ckpt_r(&r, &basic_frames[i], sizeof(basic_frame_t));
     ckpt_r(&r, &sp, 1);
-    if (sp > TIKU_BASIC_SCOPE_MAX) return -1;
+    if (sp > TIKU_BASIC_SCOPE_MAX) return ckpt_refuse();
     basic_scope_sp = sp;
     for (i = 0; i < sp; i++) {
         basic_scope_t *s = &basic_scope[i];
@@ -668,6 +767,11 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
         ckpt_r(&r, &s->is_str, sizeof(s->is_str));
         ckpt_r(&r, &s->old,    sizeof(s->old));
         ckpt_r(&r, &soff,      sizeof(soff));
+        /* ENDSUB writes the saved value back through idx and old_str. */
+        if (s->idx >= BASIC_VAR_TABLE_LEN ||
+            (soff != 0xFFFFu && soff >= basic_str_heap_pos)) {
+            return ckpt_refuse();
+        }
         s->old_str = (soff == 0xFFFFu) ? NULL : basic_str_heap + soff;
     }
     ckpt_r(&r, &basic_sub_result, sizeof(basic_sub_result));
@@ -676,10 +780,22 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
     {
         uint8_t nd, k;
         ckpt_r(&r, &nd, 1);
-        if (nd > TIKU_BASIC_DEFN_MAX) return -1;
+        if (nd > TIKU_BASIC_DEFN_MAX) return ckpt_refuse();
         for (k = 0; k < TIKU_BASIC_DEFN_MAX; k++) basic_defns[k].name[0] = '\0';
-        for (k = 0; k < nd; k++)
-            ckpt_r(&r, &basic_defns[k], sizeof(basic_defn_t));
+        for (k = 0; k < nd; k++) {
+            basic_defn_t *d = &basic_defns[k];
+            uint8_t       a;
+            ckpt_r(&r, d, sizeof(basic_defn_t));
+            /* A call binds arg_count arguments through arg_idx[]. */
+            if (!ckpt_text_ok(d->name, sizeof d->name) ||
+                !ckpt_text_ok(d->body, sizeof d->body) ||
+                d->arg_count > TIKU_BASIC_DEFN_ARGS) {
+                return ckpt_refuse();
+            }
+            for (a = 0; a < d->arg_count; a++) {
+                if (d->arg_idx[a] >= 26u) return ckpt_refuse();
+            }
+        }
     }
 #endif
 
@@ -688,11 +804,16 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
         uint8_t       n, k;
         unsigned long now = basic_ticks();
         ckpt_r(&r, &n, 1);
-        if (n > TIKU_BASIC_EVERY_MAX) return -1;
+        if (n > TIKU_BASIC_EVERY_MAX) return ckpt_refuse();
         for (k = 0; k < n; k++) {
             long interval;
             ckpt_r(&r, &interval, sizeof(long));
             ckpt_r(&r, basic_everys[k].stmt, (size_t)TIKU_BASIC_EVERY_STMT_LEN);
+            if (interval <= 0 ||
+                !ckpt_text_ok(basic_everys[k].stmt,
+                              TIKU_BASIC_EVERY_STMT_LEN)) {
+                return ckpt_refuse();
+            }
             basic_everys[k].interval_ms    = interval;
             basic_everys[k].interval_ticks =
                 basic_ms_to_ticks((unsigned long)interval, 1);
@@ -705,12 +826,16 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
     {
         uint8_t n, k;
         ckpt_r(&r, &n, 1);
-        if (n > TIKU_BASIC_ONCHG_MAX) return -1;
+        if (n > TIKU_BASIC_ONCHG_MAX) return ckpt_refuse();
         for (k = 0; k < n; k++) {
             ckpt_r(&r, basic_onchgs[k].path, sizeof(basic_onchgs[k].path));
             ckpt_r(&r, &basic_onchgs[k].last_value, sizeof(long));
             ckpt_r(&r, &basic_onchgs[k].handler_line, sizeof(uint16_t));
             ckpt_r(&r, &basic_onchgs[k].is_gosub, 1);
+            if (!ckpt_text_ok(basic_onchgs[k].path,
+                              sizeof(basic_onchgs[k].path))) {
+                return ckpt_refuse();
+            }
             basic_onchgs[k].active = 1;
 #if TIKU_BASIC_ONCHG_EVENT
             /* Arena memory is not zeroed: reset the event runtime fields
@@ -741,6 +866,13 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
                 ckpt_r(&r, &d1, sizeof(uint16_t));
                 ckpt_r(&r, &d2, sizeof(uint16_t));
                 total       = (size_t)d1 * (size_t)(d2 ? d2 : 1u);
+                /* DIM's own limits; they also bound the zero fill a short
+                 * payload makes ckpt_r() write into the elements. */
+                if (d1 < 1u || d1 > TIKU_BASIC_ARRAY_MAX ||
+                    d2 > TIKU_BASIC_ARRAY_MAX ||
+                    total > (size_t)TIKU_BASIC_ARRAY_MAX) {
+                    return ckpt_refuse();
+                }
                 a->dim1     = d1;
                 a->dim2     = d2;
                 a->is_string = (uint8_t)which;
@@ -749,10 +881,13 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
                     char **el = (char **)tiku_arena_alloc(&basic_arena,
                         (tiku_mem_arch_size_t)(sizeof(char *) * total));
                     size_t j;
-                    if (el == NULL) return -1;
+                    if (el == NULL) return ckpt_refuse();
                     for (j = 0; j < total; j++) {
                         uint16_t off;
                         ckpt_r(&r, &off, sizeof(off));
+                        if (off != 0xFFFFu && off >= basic_str_heap_pos) {
+                            return ckpt_refuse();
+                        }
                         el[j] = (off == 0xFFFFu) ? NULL : basic_str_heap + off;
                     }
                     a->data = el;
@@ -761,7 +896,7 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
                 {
                     long *el = (long *)tiku_arena_alloc(&basic_arena,
                         (tiku_mem_arch_size_t)(sizeof(long) * total));
-                    if (el == NULL) return -1;
+                    if (el == NULL) return ckpt_refuse();
                     ckpt_r(&r, el, total * sizeof(long));
                     a->data = el;
                 }
@@ -770,7 +905,8 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
     }
 #endif
 
-    return r.err ? -1 : 0;
+    /* A payload with bytes left over was written to another layout. */
+    return (r.err || r.pos != r.len) ? ckpt_refuse() : 0;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -850,7 +986,7 @@ basic_ckpt_save(void)
         tiku_tfs_abort(&basic_ckpt_wr);
         return -1;
     }
-    tr[0] = BASIC_CKPT_VERSION;
+    tr[0] = basic_ckpt_format();
     tr[1] = (uint32_t)w.pos;
     tr[2] = w.crc ^ 0xFFFFFFFFu;           /* = basic_ckpt_crc32(payload) */
 #else
@@ -872,7 +1008,7 @@ basic_ckpt_save(void)
         tiku_tfs_abort(&basic_ckpt_wr);
         return -1;
     }
-    tr[0] = BASIC_CKPT_VERSION;
+    tr[0] = basic_ckpt_format();
     tr[1] = (uint32_t)w.pos;
     tr[2] = basic_ckpt_crc32(basic_ckpt_scratch, w.pos);
 #endif
@@ -910,7 +1046,7 @@ basic_ckpt_load(void)
     memcpy(&ver,   img + n - 12, 4);
     memcpy(&len32, img + n - 8,  4);
     memcpy(&crc,   img + n - 4,  4);
-    if (ver != BASIC_CKPT_VERSION) return -1;      /* incompatible firmware */
+    if (ver != basic_ckpt_format()) return -1;     /* incompatible firmware */
     /* The payload length must agree with the file length: TFS already
      * guarantees the file is whole, so a mismatch means a foreign file wearing
      * this name, not a torn write. */
@@ -957,7 +1093,8 @@ basic_ckpt_save(void)
 {
     basic_ckpt_wr_t w;
     uint16_t mpu;
-    uint32_t z = 0u, ver = BASIC_CKPT_VERSION, magic = BASIC_CKPT_MAGIC, len32;
+    uint32_t z = 0u, ver = basic_ckpt_format(), magic = BASIC_CKPT_MAGIC;
+    uint32_t len32;
 
     mpu = tiku_mpu_unlock_nvm();
     memcpy(basic_ckpt_buf, &z, 4);                 /* gate := 0 (invalidate) */
@@ -989,7 +1126,7 @@ basic_ckpt_load(void)
     if (gate != BASIC_CKPT_MAGIC) return -1;       /* no valid checkpoint */
     memcpy(&ver,   basic_ckpt_buf + 4, 4);
     memcpy(&len32, basic_ckpt_buf + 8, 4);
-    if (ver != BASIC_CKPT_VERSION) return -1;      /* incompatible firmware */
+    if (ver != basic_ckpt_format()) return -1;     /* incompatible firmware */
     if (len32 > TIKU_BASIC_CKPT_BYTES - BASIC_CKPT_HDR) return -1;
     return basic_ckpt_read(basic_ckpt_buf + BASIC_CKPT_HDR, (size_t)len32);
 }
