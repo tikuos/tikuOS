@@ -80,18 +80,41 @@ blob_name(char out[TIKU_TFS_NAME_MAX], const char *base, int idx)
     return 0;
 }
 
+/**
+ * @brief Blob code for a failed store call.
+ *
+ * A missing file is NOENT, a full store SPACE and a corrupt entry CRC; any
+ * other refusal (a backend fault, a busy or unmounted store) is IO.
+ */
+static int
+blob_tfs_err(int rc)
+{
+    if (rc == TFS_ERR_NOTFOUND) {
+        return TIKU_BLOB_ERR_NOENT;
+    }
+    if (rc == TFS_ERR_NOSPACE || rc == TFS_ERR_TOOBIG) {
+        return TIKU_BLOB_ERR_SPACE;
+    }
+    if (rc == TFS_ERR_CORRUPT) {
+        return TIKU_BLOB_ERR_CRC;
+    }
+    return TIKU_BLOB_ERR_IO;
+}
+
 /** @brief Read and validate the manifest. */
 static int
 blob_read_mnf(tiku_tfs_t *fs, const char *name, blob_mnf_t *m)
 {
     char   nm[TIKU_TFS_NAME_MAX];
     size_t got = 0u;
+    int    rc;
 
     if (blob_name(nm, name, -1) != 0) {
         return TIKU_BLOB_ERR_PARAM;
     }
-    if (tiku_tfs_read(fs, nm, m, sizeof *m, &got) != TFS_OK) {
-        return TIKU_BLOB_ERR_NOENT;
+    rc = tiku_tfs_read(fs, nm, m, sizeof *m, &got);
+    if (rc != TFS_OK) {
+        return blob_tfs_err(rc);
     }
     if (got != sizeof *m || m->magic != BLOB_MAGIC ||
         m->version != BLOB_VERSION || m->chunk == 0u ||
@@ -124,6 +147,7 @@ tiku_blob_store(tiku_tfs_t *fs, const char *name, const void *src, size_t len)
     blob_mnf_t m;
     size_t     off;
     unsigned   i, chunks;
+    int        rc;
 
     if (fs == NULL || name == NULL || (src == NULL && len != 0u)) {
         return TIKU_BLOB_ERR_PARAM;
@@ -139,8 +163,12 @@ tiku_blob_store(tiku_tfs_t *fs, const char *name, const void *src, size_t len)
     /* The old manifest goes first: from here until the new one is written
      * the blob does not exist, so a cut cannot leave a manifest standing
      * over chunks it does not describe.  A missing manifest is the
-     * first-store case, so the result is ignored. */
-    (void)tiku_tfs_delete(fs, nm);
+     * first-store case; any other refusal stops the store with the old blob
+     * whole. */
+    rc = tiku_tfs_delete(fs, nm);
+    if (rc != TFS_OK && rc != TFS_ERR_NOTFOUND) {
+        return blob_tfs_err(rc);
+    }
 
     /*
      * Reclaim any chunk beyond what the new blob needs, before writing it.
@@ -151,9 +179,9 @@ tiku_blob_store(tiku_tfs_t *fs, const char *name, const void *src, size_t len)
      * becomes a live file no API can reach, one leaked slot per lost chunk.
      * The same sweep collects the tail of a store that was cut partway.
      *
-     * Chunk indices are written densely from 0, so the first index that is
-     * not present is the end; the manifest is already gone, so nothing
-     * visible depends on these.
+     * Chunk indices are written densely from 0 and deleted from the top down,
+     * so a cut never leaves a gap: the first index that is not present is the
+     * end.  The manifest is already gone, so nothing visible depends on these.
      */
     for (i = chunks; i < TIKU_BLOB_CHUNK_MAX; i++) {
         size_t stale = 0u;
@@ -163,7 +191,12 @@ tiku_blob_store(tiku_tfs_t *fs, const char *name, const void *src, size_t len)
         if (tiku_tfs_stat(fs, nm, &stale) != TFS_OK) {
             break;                           /* dense naming: this is the end */
         }
-        (void)tiku_tfs_delete(fs, nm);
+    }
+    while (i > chunks) {
+        i--;
+        if (blob_name(nm, name, (int)i) == 0) {
+            (void)tiku_tfs_delete(fs, nm);
+        }
     }
 
     for (i = 0u, off = 0u; i < chunks; i++, off += TIKU_BLOB_CHUNK) {
@@ -174,8 +207,9 @@ tiku_blob_store(tiku_tfs_t *fs, const char *name, const void *src, size_t len)
         if (blob_name(nm, name, (int)i) != 0) {
             return TIKU_BLOB_ERR_PARAM;
         }
-        if (tiku_tfs_write(fs, nm, p + off, this_len) != TFS_OK) {
-            return TIKU_BLOB_ERR_SPACE;      /* directory or data slots out */
+        rc = tiku_tfs_write(fs, nm, p + off, this_len);
+        if (rc != TFS_OK) {
+            return blob_tfs_err(rc);
         }
     }
 
@@ -191,8 +225,9 @@ tiku_blob_store(tiku_tfs_t *fs, const char *name, const void *src, size_t len)
     if (blob_name(nm, name, -1) != 0) {
         return TIKU_BLOB_ERR_PARAM;
     }
-    if (tiku_tfs_write(fs, nm, &m, sizeof m) != TFS_OK) {
-        return TIKU_BLOB_ERR_SPACE;
+    rc = tiku_tfs_write(fs, nm, &m, sizeof m);
+    if (rc != TFS_OK) {
+        return blob_tfs_err(rc);
     }
     return TIKU_BLOB_OK;
 }
@@ -231,8 +266,9 @@ tiku_blob_load(tiku_tfs_t *fs, const char *name,
         if (blob_name(nm, name, (int)i) != 0) {
             return TIKU_BLOB_ERR_PARAM;
         }
-        if (tiku_tfs_read(fs, nm, p + off, want, &got) != TFS_OK) {
-            return TIKU_BLOB_ERR_NOENT;      /* chunk lost -> blob is gone */
+        rc = tiku_tfs_read(fs, nm, p + off, want, &got);
+        if (rc != TFS_OK) {
+            return blob_tfs_err(rc);         /* a lost chunk is NOENT      */
         }
         if (got != want) {
             return TIKU_BLOB_ERR_CRC;        /* short chunk: torn store    */
@@ -277,14 +313,17 @@ tiku_blob_delete(tiku_tfs_t *fs, const char *name)
         return rc;
     }
     /* Manifest first: the blob stops existing at that single write, and the
-     * chunk deletions that follow are pure space reclamation.  A cut between
-     * them strands chunks; the next store of the same name reclaims them, both
-     * the ones it overwrites and any tail beyond its own chunk count. */
+     * chunk deletions that follow are pure space reclamation.  They run from
+     * the last chunk down, so a cut leaves a run from 0 that the next store of
+     * the same name reclaims: the chunks it overwrites, then its sweep. */
     if (blob_name(nm, name, -1) == 0) {
-        (void)tiku_tfs_delete(fs, nm);
+        rc = tiku_tfs_delete(fs, nm);
+        if (rc != TFS_OK) {
+            return blob_tfs_err(rc);         /* the blob is still whole    */
+        }
     }
-    for (i = 0u; i < m.chunks; i++) {
-        if (blob_name(nm, name, (int)i) == 0) {
+    for (i = m.chunks; i > 0u; i--) {
+        if (blob_name(nm, name, (int)(i - 1u)) == 0) {
             (void)tiku_tfs_delete(fs, nm);
         }
     }

@@ -125,10 +125,11 @@ int tiku_tfs_release(tiku_tfs_hold_t *hold)
 /*
  * Run word: first slot in the low 16 bits, span in the high 16.  The first
  * typedef fails the build if TIKU_TFS_MAX_SLOTS outgrows a half, which would
- * alias two runs onto one word; the second if the floor exceeds the ceiling.
+ * alias two runs onto one word; the second if the floor reaches the ceiling,
+ * since a store holds at most TIKU_TFS_MAX_SLOTS - 1 files (tfs_fit()).
  */
 typedef char tfs_maxslots_check[(TIKU_TFS_MAX_SLOTS <= 0xFFFFu) ? 1 : -1];
-typedef char tfs_floor_check[(TIKU_TFS_MIN_SLOTS <= TIKU_TFS_MAX_SLOTS) ? 1 : -1];
+typedef char tfs_floor_check[(TIKU_TFS_MIN_SLOTS < TIKU_TFS_MAX_SLOTS) ? 1 : -1];
 
 #define TFS_RUN_MAKE(first, span)  ((uint32_t)(first) | ((uint32_t)(span) << 16))
 #define TFS_RUN_FIRST(w)           ((unsigned)((w) & 0xFFFFu))
@@ -772,7 +773,9 @@ int tiku_tfs_create(tiku_tfs_t *fs, const char *name)
     if (fs == NULL || !fs->mounted || name == NULL) {
         return TFS_ERR_INVAL;
     }
-    if (tfs_held(fs)) return TFS_ERR_BUSY;
+    /* Refused while a stream is open: it could take the directory entry the
+     * stream's commit needs. */
+    if (fs->wr_open || tfs_held(fs)) return TFS_ERR_BUSY;
     nl = strlen(name);
     if (nl == 0 || nl >= TIKU_TFS_NAME_MAX) {
         return TFS_ERR_NAMELEN;
