@@ -7,9 +7,9 @@
  *
  * tiku_trng_arch.c - RA8P1 software entropy source.
  *
- * The part's hardware generator sits inside the RSIP, which is reachable only
- * through a vendor library, so entropy comes from the CAC measuring MOCO
- * against LOCO -- two independent RC oscillators -- conditioned with SHA-256.
+ * Entropy comes from the CAC measuring MOCO against LOCO, two independent RC
+ * oscillators, and the DWT cycle count at each measurement, conditioned with
+ * SHA-256.  The RSIP's hardware generator is not used.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,20 +27,21 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * Rounds folded into each 32-byte block.  A single ratio moves across only a
- * handful of values, so a round contributes single-digit bits; the count is
- * set for margin over throughput.  Measurements are in kintsugi/.
+ * Rounds folded into each 32-byte block.  A single ratio takes only a
+ * handful of values, so a round contributes a few bits at most; the count
+ * favours margin over throughput.
  */
 #define TRNG_POOL_ROUNDS    128u
 #define TRNG_BLOCK_BYTES    32u          /* SHA-256 digest */
 
-/* MOCO against LOCO: two independent RC oscillators.  The divider widens the
- * measurement window so more of the count's low bits are free to move. */
+/* MOCO against LOCO: two independent RC oscillators.  The reference
+ * divider sets the measurement window; a wider window leaves more of the
+ * count's low bits free to move. */
 #define TRNG_TARGET         RA8P1_CAC_CLK_MOCO
 #define TRNG_REFERENCE      RA8P1_CAC_CLK_LOCO
 #define TRNG_REF_DIV        0u
 
-/* DWT, already used by the bench and NPU paths; TRCENA gates the whole unit. */
+/* DWT cycle counter; TRCENA gates the whole trace unit. */
 #define TRNG_DEMCR          0xE000EDFCUL
 #define TRNG_DEMCR_TRCENA   (1UL << 24)
 #define TRNG_DWT_CTRL       0xE0001000UL
@@ -83,8 +84,7 @@ tiku_trng_arch_init(void)
     if (trng_ready) {
         return;
     }
-    /* The cycle counter needs the whole trace unit enabled, not just its own
-     * bit -- the NPU bring-up found this the hard way. */
+    /* The cycle counter counts only with TRCENA set as well as CYCCNTENA. */
     TIKU_REG32(TRNG_DEMCR)    |= TRNG_DEMCR_TRCENA;
     TIKU_REG32(TRNG_DWT_CTRL) |= TRNG_DWT_CYCCNTENA;
 
@@ -115,7 +115,8 @@ tiku_trng_arch_raw_counts(uint16_t *out, size_t n)
  * @brief Condition one 32-byte block out of TRNG_POOL_ROUNDS measurements.
  *
  * @param out  Receives TRNG_BLOCK_BYTES
- * @return TIKU_TRNG_OK, or TIKU_TRNG_ERR_TIMEOUT when the source is still
+ * @return TIKU_TRNG_OK, or TIKU_TRNG_ERR_TIMEOUT when the CAC stalls or the
+ *         ratio never changes across the pool
  */
 static int
 trng_block(uint8_t *out)
@@ -165,10 +166,9 @@ trng_block(uint8_t *out)
 
     /*
      * Health test.  A ratio that never moved across the whole pool means the
-     * two oscillators are locked, one is stopped, or the measurement is
-     * returning a constant -- in every case there is no uncertainty to
-     * condition, and hashing a constant would produce something that passes
-     * every statistical eyeball while being entirely predictable.  Refuse.
+     * two oscillators are locked, one is stopped, or the measurement returns
+     * a constant.  The block is refused: a hash of a constant looks random
+     * but is predictable.
      */
     if (!varied) {
         return TIKU_TRNG_ERR_TIMEOUT;

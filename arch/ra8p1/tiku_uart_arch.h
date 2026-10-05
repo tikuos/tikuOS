@@ -22,11 +22,13 @@
 #include <arch/ra8p1/tiku_device_select.h>
 
 /**
- * @brief Bring up SCI8 at the board's console baud rate.
+ * @brief Bring up SCI8 at the console baud rate.
  *
- * The divisor is computed from the port's current SCICLK, which is MOCO's
- * nominal 8 MHz until a rung change moves it.  Re-run after any clock change;
- * calling it more than once is safe.
+ * The rate is TIKU_BOARD_UART_BAUD or the last tiku_uart_arch_set_baud()
+ * value, and the divisor comes from the live SCICLK, MOCO's nominal 8 MHz
+ * until a rung change moves it.
+ *
+ * @note Re-run after any SCICLK change; repeated calls are safe.
  */
 void tiku_uart_init(void);
 
@@ -47,8 +49,8 @@ void tiku_uart_puts(const char *s);
 /**
  * @brief Formatted output over the console.
  *
- * Supports %s %c %d %u %x %% with an optional 'l' modifier, which covers the
- * kernel's output without linking newlib's printf.
+ * Supports %s %c %d %u %x %% with an optional zero flag, width and 'l'
+ * modifier; '\n' is sent as CR LF.
  *
  * @param fmt  Format string; NULL is ignored
  */
@@ -56,6 +58,8 @@ void tiku_uart_printf(const char *fmt, ...);
 
 /**
  * @brief Report whether a received byte is waiting.
+ *
+ * Also clears and counts a latched receive overrun.
  *
  * @return 1 when a byte can be read, 0 otherwise
  */
@@ -69,9 +73,9 @@ uint8_t tiku_uart_rx_ready(void);
 int tiku_uart_getc(void);
 
 /**
- * @brief Count of receive overruns since the counter was last cleared.
+ * @brief Bytes lost since the counter was last cleared.
  *
- * @return Overruns observed
+ * @return Bytes dropped by a full ring or a hardware overrun
  */
 uint16_t tiku_uart_overrun_count(void);
 
@@ -79,7 +83,7 @@ uint16_t tiku_uart_overrun_count(void);
 void tiku_uart_overrun_reset(void);
 
 /**
- * @brief Re-time the console for a new baud rate at the current PCLKA.
+ * @brief Re-time the console for a new baud rate at the current SCICLK.
  *
  * @param baud  Line rate to program; 0 is ignored
  */

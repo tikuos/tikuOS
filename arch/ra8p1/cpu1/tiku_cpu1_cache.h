@@ -20,9 +20,9 @@
  * The Cortex-M33 has no cache of its own (UM 2.16).  What Table 1.15 counts
  * as CPU1 cache is two 16 KB Renesas blocks outside the core: C-Cache serves
  * 0x0000_0000-0x1FFF_FFFF over the C-AHB, S-Cache 0x2000_0000-0xDFFF_FFFF
- * over the S-AHB.  This payload links into SRAM at 0x2200_0000, so BOTH its
- * fetches and its data go through the S-Cache and the C-Cache would cache
- * nothing.  Line size is 32 bytes, the same as the M85's.
+ * over the S-AHB.  The payload runs from SRAM at 0x2200_0000, so its fetches
+ * and its data both go through the S-Cache; the C-Cache holds none of it.
+ * Lines are 32 bytes, as on the M85.
  */
 #define CPU1_CACHE_BASE     0x4001C000UL        /* secure view */
 #define CPU1_SCACTL         (CPU1_CACHE_BASE + 0x040UL)

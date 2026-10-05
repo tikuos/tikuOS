@@ -7,8 +7,8 @@
  *
  * tiku_store_arch.h - the model store: staged over USB, kept in flash.
  *
- * Host writes a model to the staging disk and then a commit record; the
- * board publishes it to flash and restores it at every boot afterwards.
+ * The host writes a model to the staging disk and then a commit record; the
+ * board publishes the model to octal flash, and a restore copies it back.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,18 +19,11 @@
 #include <stdint.h>
 
 /*
- * The store keeps a commit record, not a command.
- *
- * The board has no shell in this configuration and the host has no channel
- * to it except the disk itself, so the disk has to carry the instruction.
- * A sentinel BLOCK is the least surprising way to do that: writing the last
- * block of a raw device is not something any tool does incidentally, so the
- * trigger cannot be pulled by a partition probe, a filesystem, or a stray
- * dd -- whereas block 0 is exactly where all three write.
- *
- * The record names the payload's length rather than the board inferring it,
- * because a staging disk holds whatever the previous occupant left behind
- * and "everything up to the last byte anyone wrote" is not a length.
+ * The host commits a model by writing a tiku_store_commit_t to the last
+ * block of the staging disk, tiku_ra8p1_store_commit_lba().  Partition
+ * probes, filesystems and dd write block 0, not the last block, so they do
+ * not start an import.  The record carries the payload length, counted from
+ * LBA 0, because the disk also holds whatever an earlier model left there.
  */
 
 /** @brief Magic in the commit record: "TKIM", little-endian. */
@@ -43,7 +36,7 @@
 typedef struct {
     uint32_t magic;                          /**< TIKU_STORE_MAGIC        */
     uint32_t len;                            /**< payload bytes from LBA 0 */
-    char     name[TIKU_STORE_NAME_MAX + 1u];
+    char     name[TIKU_STORE_NAME_MAX + 1u];  /**< model name              */
 } tiku_store_commit_t;
 
 /** @brief Outcome of an import attempt. */
@@ -51,7 +44,7 @@ typedef enum {
     TIKU_STORE_IDLE = 0,   /**< no commit record seen                     */
     TIKU_STORE_DONE,       /**< published and verified                    */
     TIKU_STORE_ERR_MAGIC,  /**< the sentinel block held something else    */
-    TIKU_STORE_ERR_LEN,    /**< the length does not fit the staging disk  */
+    TIKU_STORE_ERR_LEN,    /**< length is 0 or reaches the sentinel block */
     TIKU_STORE_ERR_WRITE,  /**< the flash refused it                      */
     TIKU_STORE_ERR_VERIFY, /**< it read back differently than it went in  */
     TIKU_STORE_BUSY,       /**< an import is running                      */
@@ -61,17 +54,18 @@ typedef enum {
  * @brief Begin an import if the host has just written a commit record.
  *
  * @param lba    first block of the write that just completed
- * @param blocks its length in blocks
- * @return TIKU_STORE_BUSY once started, TIKU_STORE_IDLE for other writes,
- *         or a negative-sense error state
+ * @param blocks its length in blocks; unused
+ * @return TIKU_STORE_BUSY once started or while an import runs,
+ *         TIKU_STORE_IDLE for any other block, or a TIKU_STORE_ERR_* state
  */
 tiku_store_state_t tiku_ra8p1_store_begin(uint32_t lba, uint32_t blocks);
 
 /**
- * @brief Advance an import by one step; call from the same pump as MSC.
+ * @brief Advance an import by one step; the last step verifies the flash.
  *
  * @param done receives payload bytes published so far; may be NULL
  * @return 1 while more remains, 0 when idle or finished
+ * @note Call from the pump that serves the mass-storage transport.
  */
 int tiku_ra8p1_store_step(uint32_t *done);
 
@@ -82,10 +76,13 @@ int tiku_ra8p1_store_busy(void);
 tiku_store_state_t tiku_ra8p1_store_last(void);
 
 /**
- * @brief Act on a commit record if the host has just written one.
+ * @brief Publish and verify a commit record's model before returning.
+ *
+ * Runs the whole import in one call, outside the state that
+ * tiku_ra8p1_store_busy() and tiku_ra8p1_store_last() report.
  *
  * @param lba    first block of the write that just completed
- * @param blocks its length in blocks
+ * @param blocks its length in blocks; unused
  * @return what happened; TIKU_STORE_IDLE when this was an ordinary write
  */
 tiku_store_state_t tiku_ra8p1_store_on_write(uint32_t lba, uint32_t blocks);
@@ -96,7 +93,8 @@ tiku_store_state_t tiku_ra8p1_store_on_write(uint32_t lba, uint32_t blocks);
  * @param out_ms receives how long it took, in milliseconds; may be NULL
  * @param out_len receives the payload length; may be NULL
  * @param name   receives the model name; may be NULL
- * @return 1 when a model was restored, 0 when the slot holds nothing
+ * @return 1 when a model was restored; 0 when the SDRAM is down, the flash
+ *         is absent or the slot holds nothing
  */
 int tiku_ra8p1_store_restore(uint32_t *out_ms, uint32_t *out_len, char *name);
 

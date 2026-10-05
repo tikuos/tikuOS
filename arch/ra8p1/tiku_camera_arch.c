@@ -46,7 +46,8 @@ static uint8_t cam_up;
 /**
  * @brief Run the sensor's external clock from the timer.
  *
- * @return TIKU_CAM_OK, or TIKU_CAM_ERR_STATE when the rate cannot be made
+ * @return TIKU_CAM_OK, or TIKU_CAM_ERR_STATE when PCLKD is not a whole
+ *         multiple of 24 MHz
  */
 static int
 cam_xclk_start(void)
@@ -54,9 +55,8 @@ cam_xclk_start(void)
     unsigned long pclkd = tiku_cpu_ra8p1_pclkd_get_hz();
     uint32_t n = (uint32_t)(pclkd / CAM_XCLK_HZ);
 
-    /* The sensor accepts 6..54 MHz but its PLL settings are computed for
-     * 24 MHz; a divider that cannot reach it exactly means those tables
-     * would quietly aim the MIPI link at the wrong rate. */
+    /* The sensor accepts 6..54 MHz, but the register tables below assume
+     * 24 MHz; any other XCLK puts the MIPI link at the wrong rate. */
     if (n == 0U || (pclkd % CAM_XCLK_HZ) != 0UL) {
         return TIKU_CAM_ERR_STATE;
     }
@@ -100,21 +100,18 @@ tiku_camera_arch_power_on(void)
         return TIKU_CAM_ERR_STATE;
     }
 
-    /* The board interposes a switch between the camera connector's MIPI
-     * lanes and the D-PHY pads; P108 low is what closes it.  Left at its
-     * default the lanes read dead at the receiver while the sensor streams
-     * into an open circuit -- no error surfaces anywhere. */
+    /* A board switch sits between the camera connector's MIPI lanes and the
+     * D-PHY pads; P108 low closes it.  Open, the receiver sees no lanes, and
+     * no error is raised. */
     tiku_ra8p1_gpio_init_output(CAM_MIPI_EN_PORT, CAM_MIPI_EN_PIN);
     tiku_ra8p1_gpio_set(CAM_MIPI_EN_PORT, CAM_MIPI_EN_PIN, 0);
 
     /*
-     * The EK-RA8P1 gives the sensor only a reset line (P709); its power-down is
-     * not MCU-driven -- the pin the module datasheet calls PWDN is a PMOD GPIO
-     * on this board, so driving it is wrong.  With XCLK already running, hold
-     * reset asserted long enough for the analog blocks to settle, then release
-     * and pulse once more, matching the vendor's sequence.  Too short a settle
-     * and the sensor answers its address but clock-stretches every register
-     * read while it is still coming up.
+     * The EK-RA8P1 drives only the sensor's reset (P709); the module's PWDN
+     * pin is a PMOD GPIO on this board and is left alone.  With XCLK running,
+     * reset is held for 300 ms, released, pulsed once more, and released.  A
+     * shorter hold leaves the sensor answering its address but
+     * clock-stretching every register read.
      */
     tiku_ra8p1_gpio_init_output(CAM_RST_PORT, CAM_RST_PIN);
     tiku_ra8p1_gpio_set(CAM_RST_PORT, CAM_RST_PIN, 0);
@@ -142,8 +139,8 @@ tiku_camera_arch_read_reg(uint16_t reg, uint8_t *val)
     }
     /* Repeated start, no stop between: the OV5640 read protocol keeps the bus
      * from the register-pointer write through the data read, and a stop in
-     * the middle ends the transaction before the byte is clocked.  Same
-     * bounded retry as the write path, for the same state-change stalls. */
+     * the middle ends the transaction before the byte is clocked.  It has the
+     * write path's single retry. */
     a[0] = (uint8_t)(reg >> 8);
     a[1] = (uint8_t)reg;
     for (attempt = 0U; attempt < 2U; attempt++) {
@@ -169,10 +166,9 @@ tiku_camera_arch_write_reg(uint16_t reg, uint8_t val)
     a[1] = (uint8_t)reg;
     a[2] = val;
     /*
-     * One bounded retry behind a bus rebuild: writes that change the sensor's
-     * own state -- resets, power-down entry -- can stall its SCCB for a
-     * moment, and a polled master runs registers back-to-back far faster
-     * than the vendor's interrupt-driven stack ever did.
+     * One retry after a bus rebuild: a write that changes the sensor's state
+     * (reset, power-down entry) can stall its SCCB briefly, and this polled
+     * master issues writes back to back.
      */
     for (attempt = 0U; attempt < 2U; attempt++) {
         rc = tiku_i2c_arch_write(CAM_I2C_ADDR, a, 3U);
@@ -218,12 +214,11 @@ typedef struct {
 } cam_regval_t;
 
 /*
- * The vendor's OV5640 bring-up for QVGA over two MIPI lanes (BSD-3 reference
- * shipped with the EK-RA8P1 vision example), with its runtime clock solver
- * replaced by the values it converges to for a 24 MHz XCLK and a 185 MHz
- * target: PLL x246 / pre-div 8 -> both sensor system and MIPI clock at
- * 184.5 MHz, 369 Mbps per lane.  The sensor is in software power-down for
- * the whole list and wakes in the second table.
+ * OV5640 bring-up for QVGA over two MIPI lanes, from the vendor's BSD-3
+ * reference in the EK-RA8P1 vision example, with fixed PLL values for a
+ * 24 MHz XCLK: x246 / pre-div 8 gives 184.5 MHz for the sensor system and
+ * MIPI clocks, 369 Mbps per lane.  The sensor stays in software power-down
+ * through this table and wakes in the second.
  */
 static const cam_regval_t cam_cfg_a[] = {
     { 0x3017U, 0x00U }, { 0x3018U, 0x00U }, { 0x3034U, 0x18U },
@@ -306,8 +301,8 @@ static const cam_regval_t cam_cfg_a[] = {
 
 /*
  * The wake and geometry: window the full 2592x1944 array and let the ISP
- * scale to QVGA, with the frame timing (HTS 1495, VTS 1121) computed for
- * ~55 fps at the 184.5 MHz system clock the first table set up.
+ * scale to QVGA, with frame timing (HTS 1495, VTS 1121) computed for about
+ * 55 fps at the 184.5 MHz system clock the first table sets up.
  */
 static const cam_regval_t cam_cfg_b[] = {
     { 0x3008U, 0x02U },                     /* wake from software power-down */
@@ -356,10 +351,10 @@ tiku_camera_arch_setup_qvga(void)
     uint8_t v;
     int rc;
 
-    /* Software reset.  The sensor resets its own SCCB block the moment 0x82
-     * lands, so that write's tail goes unacknowledged BY DESIGN: fire it,
-     * ignore the outcome, then rebuild the bus and give the sensor its
-     * datasheet settle before holding it in software power-down. */
+    /* Software reset: the sensor resets its SCCB block as soon as 0x82
+     * lands, so that write may go unacknowledged and its result is ignored.
+     * After the 100 ms settle the bus is rebuilt and the sensor put in
+     * software power-down (0x42). */
     rc = tiku_camera_arch_write_reg(0x3103U, 0x11U);
     if (rc != TIKU_CAM_OK) {
         return rc;
@@ -383,7 +378,7 @@ tiku_camera_arch_setup_qvga(void)
     if (rc != TIKU_CAM_OK) {
         return rc;
     }
-    /* Virtual channel 0: the two VC bits sit atop other controls. */
+    /* Virtual channel 0: clear bits 7:6 of 0x4814, keeping the others. */
     rc = tiku_camera_arch_read_reg(0x4814U, &v);
     if (rc != TIKU_CAM_OK) {
         return rc;

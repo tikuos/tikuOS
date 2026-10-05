@@ -8,8 +8,8 @@
  * tiku_cpu1_payload.c - the RA8P1 Cortex-M33's mailbox server.
  *
  * Built standalone for cortex-m33 and embedded in the M85 image as bytes.
- * Serves echo, a SHA-256 chain and a P-256 verify; links at the fixed SRAM
- * carve and must be loaded there.
+ * Serves echo, a SHA-256 chain, a P-256 verify and two test messages that
+ * fault or wedge the core; it is linked at the SRAM carve and runs only there.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,7 +21,8 @@
 #include "tiku_cpu1_cache.h"
 #include <tikukits/crypto/p256/tiku_kits_crypto_p256.h>
 
-/** @brief INITVTOR discards bits [6:0], so the image base is 128-aligned. */
+/** @brief PC bits cleared to find the image base; INITVTOR ignores bits
+ *         [6:0], so the base is 128-byte aligned. */
 #define CPU1_BASE_MASK      0x7FUL
 
 /** @brief Doorbell to the M85: bit 0 of the CPU1->CPU0 interrupt set. */
@@ -38,15 +39,16 @@
 #define CPU1_ICU1_NMICLR    0x4000C110UL   /* bit1 WDTCLR                     */
 #define CPU1_ICU1_NMISR     0x4000C120UL   /* bit1 WDTST                      */
 #define CPU1_WDT_NMI_BIT    (1UL << 1)
-/* WDTCR: TOPS 16384 x CKS /8192, no window -> ~2.1 s at PCLKB <= 62.5 MHz,
- * which outlasts the longest single cpu1_serve so healthy work never trips it. */
+/* WDTCR: TOPS 16384 cycles of PCLKB / 8192, no window: about 2.1 s at PCLKB
+ * 62.5 MHz, longer at a lower PCLKB.  Nothing refreshes WDT1 inside
+ * cpu1_serve(), so a job longer than this ends as TIKU_CPU1_MAGIC_HANG. */
 #define CPU1_WDT1_CR_VALUE  ((0x3U << 0) | (0x8U << 4) | (0x3U << 8) | (0x3U << 12))
 
 /**
- * @brief Tell the other core a reply is waiting.
+ * @brief Ring the M85's doorbell: a reply is waiting.
  *
- * @note After the sequence word and its barrier, never before: the M85's
- *       handler treats the doorbell as proof the reply is complete.
+ * @note Call after writing c2a_seq behind a barrier: tiku_coproc_poll() reads
+ *       the sequence only when the doorbell rings.
  */
 static void cpu1_ring(void)
 {
@@ -54,10 +56,9 @@ static void cpu1_ring(void)
 }
 
 /*
- * Sixteen zero words.  The loader patches SP, reset and HardFault; every
- * other vector stays zero, so a fault inside the fault handler ends in
- * LOCKUP -- which, measured, neither resets the board nor raises the M85's
- * NMI: the core simply stops fetching and the heartbeat freezes.
+ * Sixteen zero words; the loader patches SP, reset, NMI and HardFault.  A
+ * fault inside the fault handler locks the core up: it stops fetching and
+ * the heartbeat freezes, with no reset and no NMI on the M85.
  */
 __attribute__((section(".cpu1_vectors"), used))
 const uint32_t cpu1_vectors[16] = { 0 };
@@ -65,15 +66,13 @@ const uint32_t cpu1_vectors[16] = { 0 };
 #define CPU1_R32(a)  (*(volatile uint32_t *)(a))
 
 /**
- * @brief Exempt the shared page, then turn the S-Cache on.
+ * @brief Make the shared page non-cacheable, then turn the S-Cache on.
  *
- * @param base  Image base, and so the page's address
- * @note The MPU is programmed before the cache, because MAIR decides
- *       cacheability.  The default map makes all of SRAM write-back, and a
- *       cached shared page spins forever on its own copy of the halt word.
- * @note HFNMIENA is set, unlike the M85's map.  The fault handler polls this
- *       page, and an MPU bypassed during HardFault would make it cacheable
- *       again while the owner is trying to restart the core.
+ * The MPU goes first: the default map makes all of SRAM write-back, and a
+ * cached shared page would spin forever on its own copy of the halt word.
+ * HFNMIENA keeps the region in force in the HardFault and NMI handlers.
+ *
+ * @param base  Image base; the shared page is at base + TIKU_CPU1_SHARED_OFF
  */
 static void cpu1_cache_on(uint32_t base)
 {
@@ -92,8 +91,8 @@ static void cpu1_cache_on(uint32_t base)
                                CPU1_MPU_CTRL_HFNMIENA;
     __asm__ volatile ("dsb\n\tisb" ::: "memory");
 
-    /* Write-through, no write-allocate: the reset values, written out so
-     * the cache policy is stated where it is chosen. */
+    /* Write-through with no write-allocate (the reset values), then flush
+     * and enable. */
     CPU1_R32(CPU1_SCAWTA) = CPU1_SCAWTA_WT;
     CPU1_R32(CPU1_SCAFCT) = CPU1_SCAFCT_FS;
     while ((CPU1_R32(CPU1_SCAFCT) & CPU1_SCAFCT_FS) != 0UL) {
@@ -110,7 +109,7 @@ static void cpu1_cache_on(uint32_t base)
 
 void cpu1_park(uint32_t base) __attribute__((used, noreturn));
 
-/** @brief Refresh WDT1: the 0x00-then-0xFF sequence reloads the down-counter. */
+/** @brief Refresh WDT1: writing 0x00 then 0xFF reloads the down-counter. */
 static inline void cpu1_wdt_kick(void)
 {
     *(volatile uint8_t *)CPU1_WDT1_RR = 0x00U;
@@ -120,8 +119,9 @@ static inline void cpu1_wdt_kick(void)
 /**
  * @brief Arm WDT1 to supervise this payload (register-start mode).
  *
- * @note WDTRCR clears RSTIRQS so an underflow is an NMI to THIS core, not a
- *       system reset.  WDTCR is write-once; the first refresh starts counting.
+ * WDTRCR = 0 clears RSTIRQS, so an underflow raises an NMI on this core and
+ * does not reset the system.  WDTCR is write-once; the first refresh starts
+ * the count.
  */
 static inline void cpu1_wdt_arm(void)
 {
@@ -132,11 +132,13 @@ static inline void cpu1_wdt_arm(void)
 }
 
 /**
- * @brief Wait out the fault in Thread mode, then re-enter the reset path.
+ * @brief Wait out a fault in Thread mode, then re-enter the reset path once
+ *        the owner changes a2c_restart.
+ *
+ * Runs with the HardFault or NMI already deactivated, so a fault while
+ * parked is taken as a new HardFault, not a lockup.
  *
  * @param base  Image base, arriving in the fabricated frame's R0
- * @note Runs at base priority with the HardFault already deactivated, so a
- *       fault while parked is handled rather than locking the core up.
  */
 void cpu1_park(uint32_t base)
 {
@@ -154,13 +156,11 @@ void cpu1_park(uint32_t base)
 }
 
 /**
- * @brief Record the fault, then wait for the owner to order a restart.
+ * @brief HardFault: write TIKU_CPU1_MAGIC_FAULT, then exception-return into
+ *        cpu1_park() to wait for the owner's restart.
  *
- * @note Reaches the shared page through VTOR, which the activation latched
- *       to the image base -- the stacked PC of a faulting instruction is no
- *       guide to anything.  The restart re-enters the reset path in Handler
- *       mode with the exception still active, so a SECOND fault cannot be
- *       handled and ends in LOCKUP; the owner sees that as a dead core.
+ * Finds the shared page through VTOR, which activation set to the image
+ * base; the faulting PC can be anywhere.
  */
 __attribute__((section(".cpu1_fault"), used, noreturn))
 void cpu1_fault(void)
@@ -174,9 +174,9 @@ void cpu1_fault(void)
     __asm__ volatile ("dmb" ::: "memory");
 
     /*
-     * Eight words at the vector table's stack top.  The base is 8-aligned
-     * because the frame's realign bit is 0; an unstack onto an odd word
-     * leaves Thread mode with the stack 4 bytes out.
+     * An eight-word exception frame just below the initial SP from the vector
+     * table, 8-aligned because the frame's realign bit (xPSR bit 9) is 0; an
+     * unaligned frame would return to Thread mode with SP 4 bytes off.
      */
     frame = (uint32_t *)((*(volatile uint32_t *)base) & ~7UL) - 8;
     frame[0] = base;                              /* R0 -> cpu1_park arg  */
@@ -189,12 +189,12 @@ void cpu1_fault(void)
     frame[7] = CPU1_RETPSR_THUMB;
 
     /*
-     * An exception return deactivates the HardFault; branching to the reset
-     * entry instead leaves execution priority at -1, where the next fault
-     * is a LOCKUP.  PRIMASK and BASEPRI are not in the frame and do not
-     * unstack, so they are cleared here.  `mvn r0, #6` supplies the
-     * EXC_RETURN without a literal pool, which this pinned section has no
-     * room for.  The stack must not be touched between the MSR and the BX.
+     * Leave by exception return, which deactivates the HardFault; a branch
+     * would keep execution priority at -1, where the next fault locks the
+     * core up.  PRIMASK and BASEPRI do not unstack, so they are cleared here.
+     * `mvn r0, #6` makes EXC_RETURN 0xFFFFFFF9 without a literal pool, which
+     * this pinned section has no room for.  Nothing may touch the stack
+     * between the MSR and the BX.
      */
     __asm__ volatile ("mov  r1, #0\n\t"
                       "msr  primask, r1\n\t"
@@ -208,11 +208,10 @@ void cpu1_fault(void)
 }
 
 /**
- * @brief WDT1 underflow (NMI): the payload wedged.  Record and hand back.
+ * @brief WDT1 underflow (NMI): write TIKU_CPU1_MAGIC_HANG, then
+ *        exception-return into cpu1_park() as cpu1_fault() does.
  *
- * @note Same exception-return discipline as cpu1_fault -- an NMI left active
- *       makes the next fault a LOCKUP, so this returns to cpu1_park in Thread
- *       mode rather than branching.  The owner sees MAGIC_HANG and restarts.
+ * An NMI left active would make the next fault a lockup.
  */
 __attribute__((section(".cpu1_nmi"), used, noreturn))
 void cpu1_nmi(void)
@@ -224,7 +223,7 @@ void cpu1_nmi(void)
 
     sh->magic = TIKU_CPU1_MAGIC_HANG;
     __asm__ volatile ("dmb" ::: "memory");
-    /* Clear the WDT NMI status, or it re-fires the instant the handler returns. */
+    /* Clear the WDT NMI status, or the NMI fires again on return. */
     *(volatile uint32_t *)CPU1_ICU1_NMICLR = CPU1_WDT_NMI_BIT;
 
     frame = (uint32_t *)((*(volatile uint32_t *)base) & ~7UL) - 8;
@@ -249,15 +248,14 @@ void cpu1_nmi(void)
 }
 
 /**
- * @brief Answer one message: fault, hash chain, P-256 verify, or echo.
+ * @brief Answer one message: "FLT!" faults the core (UDF, then cpu1_fault()),
+ *        "HANG" spins with interrupts masked until WDT1 fires, "HSH!" runs
+ *        the hash chain, "ECV!" a P-256 verify, and anything else is echoed.
  *
- * @param sh  The shared page
- * @note Replies with the sequence it is answering, so the M85 can match a
- *       reply to its own send rather than to whatever arrived last.
- * @note TIKU_CPU1_FAULT_MSG faults this core on purpose: the undefined
- *       instruction escalates to HardFault and lands in cpu1_fault() above.
- *       The bench suite's fault leg is only evidence if the payload can
- *       really die.
+ * The reply carries @p seq in c2a_seq, so the M85 matches it to its send.
+ *
+ * @param sh   The shared page
+ * @param seq  The a2c_seq being answered
  */
 static void cpu1_serve(volatile tiku_cpu1_shared_t *sh, uint32_t seq)
 {
@@ -275,9 +273,9 @@ static void cpu1_serve(volatile tiku_cpu1_shared_t *sh, uint32_t seq)
     if (len == 4U &&
         sh->a2c_buf[0] == (uint8_t)'H' && sh->a2c_buf[1] == (uint8_t)'A' &&
         sh->a2c_buf[2] == (uint8_t)'N' && sh->a2c_buf[3] == (uint8_t)'G') {
-        /* Wedge: mask everything a payload can, then spin.  The heartbeat
-         * freezes and no fault is raised -- the case only WDT1 -> NMI catches
-         * (PRIMASK does not mask NMI).  Stops refreshing, so WDT1 underflows. */
+        /* Wedge: mask interrupts and spin without refreshing WDT1.  The
+         * heartbeat freezes and no fault is raised; WDT1's NMI, which PRIMASK
+         * does not mask, ends it. */
         __asm__ volatile ("cpsid i" ::: "memory");
         for (;;) {
             __asm__ volatile ("nop");
@@ -302,8 +300,7 @@ static void cpu1_serve(volatile tiku_cpu1_shared_t *sh, uint32_t seq)
             seed[i] = sh->a2c_buf[8U + i];
         }
         if (iters == 0U) {
-            /* Diagnostic: reply the seed as read, so the owner can see this
-             * core's view of the mailbox rather than infer it. */
+            /* Zero iterations: reply with the seed as this core read it. */
             for (i = 0U; i < 40U; i++) {
                 sh->c2a_buf[i] = seed[i];
             }
@@ -350,18 +347,19 @@ static void cpu1_serve(volatile tiku_cpu1_shared_t *sh, uint32_t seq)
     }
     sh->c2a_len = len;
 
-    /* Sequence last, and behind a barrier: the M85 takes a matching seq as
-     * proof the buffer beside it is already complete. */
+    /* Sequence last, behind a barrier: the M85 reads the reply once the
+     * sequence matches. */
     __asm__ volatile ("dmb" ::: "memory");
     sh->c2a_seq = seq;
     cpu1_ring();
 }
 
 /**
- * @brief Publish the magic word, then serve the mailbox until asked to halt.
+ * @brief Payload entry: turn the cache on, publish the magic word, arm WDT1
+ *        and serve the mailbox, pausing while halt is set.
  *
- * @note Never returns; the vector table's stack pointer covers the fault
- *       path and this function's own frame.
+ * Never returns.  It runs on the stack whose top is vector 0; the fault and
+ * NMI handlers build their return frame there, over this function's frame.
  */
 __attribute__((section(".cpu1_reset"), used, noreturn))
 void cpu1_reset(void)
@@ -373,9 +371,8 @@ void cpu1_reset(void)
     uint32_t served;
 
     /*
-     * Base masked out of the PC, so the reset path needs no relocation of
-     * its own.  Exact while the entry stays inside the first 128 bytes,
-     * which the .ld asserts.
+     * The image base is the PC with its low 7 bits cleared, exact while this
+     * code sits in the first 128 bytes; tiku_cpu1.ld pins the entry at 0x40.
      */
     __asm__ volatile ("mov %0, pc" : "=r" (pc));
     base = pc & ~CPU1_BASE_MASK;
@@ -383,15 +380,14 @@ void cpu1_reset(void)
 
     cpu1_cache_on(base);
 
-    /* Whatever is in the mailbox predates this boot; a fault restart would
-     * otherwise re-serve the very message that killed the last life. */
+    /* A message already in the mailbox predates this start and is not
+     * served: after a fault restart it is the message that caused the fault. */
     served = sh->a2c_seq;
 
     sh->magic = TIKU_CPU1_MAGIC;
 
-    /* The magic must land before the first heartbeat.  Normal memory is
-     * weakly ordered to the other core, and a moving counter with the magic
-     * still zero reads exactly like a launch that failed. */
+    /* Order the magic before the first heartbeat: the M85 reads a moving
+     * heartbeat with no magic as a failed launch. */
     __asm__ volatile ("dmb" ::: "memory");
 
     cpu1_wdt_arm();
@@ -399,8 +395,9 @@ void cpu1_reset(void)
     for (;;) {
         uint32_t seq;
 
-        /* Re-read every pass; this is the halt protocol.  The counters
-         * survive it, so a resumed payload continues where it stopped. */
+        /* The halt protocol: spin while halt is set, re-reading it every
+         * pass.  beats and served survive the halt, so a resumed payload
+         * continues where it stopped. */
         while (sh->halt != 0U) {
         }
 

@@ -7,9 +7,9 @@
  *
  * tiku_fault_arch.c - RA8P1 fault handlers: dump, record, reset.
  *
- * The record lives in warm-survivor SRAM, which is the grade the house rule
- * gives cross-reset diagnostics, and is never MPU-protected -- so a handler
- * can write it without first re-entering the protection that may have faulted.
+ * The record is TIKU_RETAINED: it survives the warm reset the handler
+ * requests, and it is not MPU-protected, so a handler writes it without
+ * opening an MPU window.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,20 +21,15 @@
 
 #include <kernel/memory/tiku_mem.h>
 
-/*
- * Warm grade, not durable.  A fault record answers "what killed the last
- * boot", which a power cycle is entitled to forget; and warm SRAM survives
- * exactly the reset this handler forces.  Putting it in the MRAM carve would
- * also mean opening the NVM window from inside a fault handler, which is the
- * last place to re-enter the MPU path.
- */
+/* The last fault, in retained SRAM: it survives the handler's warm reset
+ * and is lost at power-off. */
 static TIKU_RETAINED tiku_ra8p1_fault_record_t fault_rec;
 
 void tiku_ra8p1_fault_init(void)
 {
-    /* Configurable faults on: a MemManage that arrives AS MemManage reports
-     * its address in MMFAR, while the same access escalated to HardFault
-     * reports only "something forced a hard fault". */
+    /* With these enabled a MemManage, BusFault or UsageFault is recorded
+     * under its own kind; disabled, it escalates and is recorded as
+     * TIKU_RA8P1_FAULT_HARD. */
     TIKU_REG32(RA8P1_SCB_SHCSR) |= RA8P1_SCB_SHCSR_MEMFAULTENA |
                                    RA8P1_SCB_SHCSR_BUSFAULTENA |
                                    RA8P1_SCB_SHCSR_USGFAULTENA;
@@ -74,7 +69,7 @@ static void fault_putstr(const char *s)
     }
 }
 
-/** @brief Print " name=XXXXXXXX" with no printf machinery in a fault path. */
+/** @brief Print " name=XXXXXXXX" in hex, without printf. */
 static void fault_putfield(const char *name, uint32_t v)
 {
     static const char hex[] = "0123456789ABCDEF";
@@ -88,12 +83,6 @@ static void fault_putfield(const char *name, uint32_t v)
     }
 }
 
-/**
- * @brief Shared body: record what is known, print it, reset.
- *
- * @param frame  Stacked exception frame, or NULL if the push itself failed
- * @param kind   Which handler ran
- */
 __attribute__((used, noreturn))
 void tiku_ra8p1_fault_body(const uint32_t *frame, uint32_t kind,
                            uint32_t exc_return)
@@ -109,9 +98,8 @@ void tiku_ra8p1_fault_body(const uint32_t *frame, uint32_t kind,
         addr = TIKU_REG32(RA8P1_SCB_BFAR);
     }
 
-    /* A stacking error means the frame push faulted, so the words it points at
-     * are whatever was already there; recorded as zero rather than as fiction.
-     */
+    /* After a stacking error the frame was not written, so pc, lr, psr and
+     * raw are recorded as zero. */
     frame_ok = (frame != NULL) && ((cfsr & RA8P1_CFSR_STKERR_MSK) == 0UL);
 
     if (fault_rec.magic != TIKU_RA8P1_FAULT_MAGIC) {
@@ -131,9 +119,8 @@ void tiku_ra8p1_fault_body(const uint32_t *frame, uint32_t kind,
     __asm__ volatile ("mrs %0, msp" : "=r" (fault_rec.msp));
     __asm__ volatile ("mrs %0, psp" : "=r" (fault_rec.psp));
     {
-        /* The frame area verbatim -- twelve words spans a basic frame
-         * plus four beyond, which is where a shifted pop's real words
-         * sit.  Guarded reads: the frame pointer itself is untrusted. */
+        /* Twelve words from the frame address: the eight-word basic
+         * frame and the four words above it. */
         uint32_t i;
         for (i = 0U; i < 12U; i++) {
             fault_rec.raw[i] = frame_ok ? frame[i] : 0UL;
@@ -150,19 +137,14 @@ void tiku_ra8p1_fault_body(const uint32_t *frame, uint32_t kind,
     fault_putstr("\n");
 
     /*
-     * Clean the record out of the D-cache BEFORE resetting.
-     *
-     * Warm SRAM survives a soft reset but the cache does not: SRAM here is
-     * write-back, so the store above sits in a dirty line and SYSRESETREQ
-     * discards it.  The record then reads as never written.
+     * Clean the record out of the D-cache before the reset: SYSRESETREQ
+     * discards dirty lines, and a record still in one would be lost.
      */
     tiku_ra8p1_dcache_clean(&fault_rec, sizeof(fault_rec));
 
     /*
-     * Reset: the faulting instruction cannot be stepped over, so recording
-     * and returning would re-execute it forever.  The image lives in MRAM, so
-     * the reset re-enters it rather than the factory image, and the record
-     * survives it in warm SRAM.
+     * Reset: returning would re-execute the faulting instruction.  The reset
+     * re-enters the MRAM image, and the record survives in retained SRAM.
      */
     TIKU_REG32(RA8P1_SCB_AIRCR) = RA8P1_AIRCR_VECTKEY |
                                   RA8P1_AIRCR_SYSRESETREQ;

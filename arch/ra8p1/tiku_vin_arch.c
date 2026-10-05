@@ -20,10 +20,10 @@
 #include "tiku_cpu_common.h"
 #include "tiku_cpu_freq_boot_arch.h"
 
-/** @brief Bounded spin for every readiness wait. */
+/** @brief Iteration bound on every readiness wait. */
 #define VIN_WAIT_SPINS      1000000UL
 
-/** @brief Frame wait: QVGA at a few frames per second worst case. */
+/** @brief Bound on the frame wait, sized for QVGA at a few frames a second. */
 #define VIN_FRAME_SPINS     5000000UL
 
 static uint8_t vin_up;
@@ -56,10 +56,9 @@ tiku_vin_arch_init(void *fb, uint16_t w, uint16_t h, uint32_t ui_ps)
         return TIKU_VIN_ERR_INVALID;
     }
 
-    /* Same double gate as the 2D engine: the graphics power domain first --
-     * with it down every register here reads zero without faulting -- and
-     * only then the module stop.  PDCTRGD is written whole; its status bits
-     * refuse a fed-back write. */
+    /* The graphics power domain opens before the module stop: while it is
+     * down every register here reads zero with no fault.  PDCTRGD is written
+     * whole; a write that feeds its status bits back is refused. */
     TIKU_REG16(RA8P1_PRCR_S) = (uint16_t)(RA8P1_PRCR_KEY | RA8P1_PRCR_PRC1);
     TIKU_REG8(RA8P1_PDCTRGD) = 0U;
     TIKU_REG16(RA8P1_PRCR_S) = (uint16_t)RA8P1_PRCR_KEY;
@@ -78,10 +77,10 @@ tiku_vin_arch_init(void *fb, uint16_t w, uint16_t h, uint32_t ui_ps)
     tiku_cpu_ra8p1_delay_us(30U);
 
     /*
-     * D-PHY as a receiver: the sensor drives the lanes, so no PLL here --
-     * only the reference frequency, the analog power, and the timing windows
-     * within which HS transitions are recognised.  The counts are PCLKA
-     * cycles; the ns-plus-UI targets are the vendor's for this sensor.
+     * D-PHY as a receiver: the sensor drives the lanes, so there is no PLL to
+     * set, only the reference frequency, the analog power and the timing
+     * windows for HS transitions.  The counts are PCLKA cycles; the
+     * ns-plus-UI targets are the vendor's for this sensor.
      */
     TIKU_REG32(RA8P1_DPHY_MDC)   = 0U;                       /* receiver    */
     TIKU_REG32(RA8P1_DPHY_REFCR) = (pclka / 1000000UL) - 1U;
@@ -110,11 +109,8 @@ tiku_vin_arch_init(void *fb, uint16_t w, uint16_t h, uint32_t ui_ps)
     TIKU_REG32(RA8P1_DPHY_TIM6) = vin_tim(60U, 0U, ui_ps, pclka);
     TIKU_REG32(RA8P1_DPHY_OCR)  = RA8P1_DPHY_OCR_DPHYEN;
 
-    /*
-     * CSI receiver: reception held off, then the lane count and packet
-     * handling.  Every data type up to 0x1F is let through -- the sensor's
-     * YUV422 (0x1E) and the frame/line short packets all live there.
-     */
+    /* CSI receiver: reception held off, then the lane count and packet
+     * handling. */
     TIKU_REG32(RA8P1_CSI_MCT3) = 0U;
     for (spins = 0U; spins < VIN_WAIT_SPINS; spins++) {
         if ((TIKU_REG32(RA8P1_CSI_RTST) & RA8P1_CSI_RTST_VSRSTS) == 0U) {
@@ -126,9 +122,9 @@ tiku_vin_arch_init(void *fb, uint16_t w, uint16_t h, uint32_t ui_ps)
     }
     TIKU_REG32(RA8P1_CSI_MCT0) = RA8P1_CSI_MCT0_2LANE;
     /*
-     * Packet-end detection and lane-deskew run on ratios of the video clock
-     * to the lanes' byte clock; both fields are REQUIRED computed values
-     * (UM 67.3.3), and zero here mangles every packet into a malformed runt.
+     * Packet-end detection and lane deskew run on ratios of the video clock
+     * to the lanes' byte clock.  Both fields must be computed (UM 67.3.3); at
+     * zero every packet arrives as a malformed runt.
      */
     {
         uint32_t hsclk = (uint32_t)(1000000000000ULL / (8ULL * ui_ps));
@@ -148,8 +144,8 @@ tiku_vin_arch_init(void *fb, uint16_t w, uint16_t h, uint32_t ui_ps)
     /*
      * VIN: geometry first, colour conversion left enabled so YCbCr422 goes
      * to memory as RGB565.  Preclip coordinates are one-based and inclusive.
-     * All three buffer slots point at the same frame: the demo reads a still,
-     * and a ring would only matter once someone consumes frames continuously.
+     * All three buffer slots point at the same frame, so each frame
+     * overwrites the last.
      */
     TIKU_REG32(RA8P1_VIN_FC)       = 0U;
     TIKU_REG32(RA8P1_VIN_MC)       = RA8P1_VIN_MC_CFG;
@@ -181,9 +177,9 @@ tiku_vin_arch_start(void)
     if (!vin_up) {
         return TIKU_VIN_ERR_STATE;
     }
-    /* Initialise the unit's internal state, give it its settling reads, then
-     * enable and enter continuous capture; the receiver is opened last so
-     * frames only flow once there is somewhere for them to land. */
+    /* Initialise the unit's internal state, give it ten settling reads, then
+     * enable it and enter continuous capture.  The receiver opens last, so
+     * frames flow only once the VIN is ready. */
     TIKU_REG32(RA8P1_VIN_MC) |= RA8P1_VIN_MC_ST;
     for (i = 0U; i < 10U; i++) {
         (void)TIKU_REG32(RA8P1_VIN_MC);

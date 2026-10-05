@@ -7,9 +7,9 @@
  *
  * tiku_cpu1_arch.c - run a payload on the RA8P1's Cortex-M33.
  *
- * Loads a position-independent image into shared SRAM, points CPU1 at it and
- * releases it from power gating.  Liveness and halt travel through a shared
- * page, since the activation registers offer no way back.
+ * Copies the payload to its fixed SRAM carve, points CPU1 at it and releases
+ * it from power gating.  Liveness, halt and messages go through a shared
+ * page; the activation registers cannot return CPU1 to power gating.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -26,8 +26,8 @@
 
 /*
  * The payload, built for cortex-m33 by the sub-build in arch/ra8p1/cpu1/ and
- * wrapped into this image as bytes.  It links at the fixed SRAM carve and
- * must be copied there; SP, reset and HardFault are patched into its vector
+ * wrapped into this image as bytes.  It is linked at the SRAM carve and must
+ * be copied there; SP, reset, NMI and HardFault are patched into its vector
  * table at load time.
  */
 extern const uint8_t _binary_tiku_cpu1_bin_start[];
@@ -49,37 +49,39 @@ static uint32_t cpu1_a2c_seq;
 /** @brief Whether a payload is counting, which no register reports. */
 static uint8_t cpu1_running;
 
-/** @brief Set once the warm-persist counter below has been seeded. */
+/** @brief Set once the retained counters below have been zeroed this boot. */
 static uint8_t cpu1_nmi_seeded;
 
 /*
- * Counts NMIs, and -- measured on hardware -- a CPU1 LOCKUP raises none: the
- * core stops fetching, the board keeps running, and nothing arrives here
- * unarmed.  Fault reporting is therefore in-band (the payload's HardFault
- * handler swaps the shared magic); this handler stays so an NMI from any
- * armed source is counted rather than resetting the M85.  Strong here, so
- * the weak default stands in builds without this driver.
+ * NMIs taken by the M85, counted by tiku_ra8p1_nmi_handler() below.  A CPU1
+ * lockup raises none, so payload faults are reported through the shared
+ * magic.  The handler is the strong definition; a build without this driver
+ * keeps the weak default from tiku_crt_early.c, which records a fault and
+ * resets.
  */
 TIKU_RETAINED volatile uint32_t tiku_ra8p1_cpu1_nmi_count;
 
 /** @brief Faults the payload has reported through the shared magic. */
 TIKU_RETAINED volatile uint32_t tiku_ra8p1_cpu1_fault_count;
 
-/** @brief Whether the current fault has been counted yet. */
+/** @brief Set once the current fault has been counted. */
 static uint8_t cpu1_fault_noticed;
 
 /** @brief Restart generation last written to a faulted core. */
 static uint32_t cpu1_restart_gen;
 
-/** @brief Doorbells taken since the last poll consumed one. */
+/** @brief Set by the doorbell interrupt, cleared by
+ *         tiku_ra8p1_cpu1_bell_take(). */
 static volatile uint8_t cpu1_bell;
 
 /** @brief Doorbells seen in total, for observability. */
 volatile uint32_t tiku_ra8p1_cpu1_bell_count;
 
-/*
- * The reply doorbell.  STA is read-only, so the acknowledge goes through
- * CLR -- writing STA would clear nothing and this would re-enter forever.
+/**
+ * @brief Reply doorbell interrupt.
+ *
+ * IPC0STA0 is read-only, so the acknowledge goes through IPC0CLR0; a write
+ * to STA clears nothing, and the interrupt would re-enter forever.
  */
 void tiku_ra8p1_ipc_handler(void)
 {
@@ -120,6 +122,7 @@ int tiku_ra8p1_cpu1_bell_take(void)
     return 1;
 }
 
+/** @brief M85 NMI: count it and mark the payload stopped. */
 void tiku_ra8p1_nmi_handler(void)
 {
     tiku_ra8p1_cpu1_nmi_count++;
@@ -140,7 +143,7 @@ static void cpu1_push(void)
     __asm__ volatile ("dsb" ::: "memory");
 }
 
-/** @brief Pull CPU1's half back in; without this a stale line reads forever. */
+/** @brief Invalidate CPU1's half of the page; the next reads come from SRAM. */
 static void cpu1_pull(void)
 {
     tiku_ra8p1_dcache_invalidate((uint8_t *)CPU1_SH + TIKU_CPU1_C2A_OFF,
@@ -171,11 +174,11 @@ uint32_t tiku_ra8p1_cpu1_magic(void)
 
     cpu1_pull();
     m = CPU1_SH->magic;
-    /* Every observation path flows through here, so this is where a fault
-     * is counted -- once per fault, cleared when a payload runs again. */
+    /* Every observation goes through here, so this counts a fault, once;
+     * the flag clears when the magic reads TIKU_CPU1_MAGIC again. */
     if (m == TIKU_CPU1_MAGIC_FAULT || m == TIKU_CPU1_MAGIC_HANG) {
-        /* A WDT1 hang is a fault-class event to the owner: the payload is
-         * unusable and recovers by the same restart.  Counted once. */
+        /* A WDT1 hang counts as a fault: the payload is unusable until the
+         * same restart. */
         if (!cpu1_fault_noticed) {
             cpu1_fault_noticed = 1U;
             tiku_ra8p1_cpu1_fault_count++;
@@ -210,8 +213,8 @@ int tiku_ra8p1_cpu1_send(const void *data, uint32_t len)
     }
     CPU1_SH->a2c_len = len;
 
-    /* Sequence last, and pushed on its own: the payload treats a changed
-     * sequence as proof the buffer beside it is already complete. */
+    /* Sequence last, pushed after the buffer: the payload serves a message
+     * once its sequence changes. */
     cpu1_push();
     cpu1_a2c_seq++;
     CPU1_SH->a2c_seq = cpu1_a2c_seq;
@@ -233,7 +236,7 @@ uint32_t tiku_ra8p1_cpu1_reply(void *out, uint32_t cap)
 
     cpu1_pull();
     if (CPU1_SH->c2a_seq != cpu1_a2c_seq) {
-        return 0U;                      /* nothing answered this send yet */
+        return 0U;                      /* no reply to this send */
     }
     len = CPU1_SH->c2a_len;
     if (len > TIKU_CPU1_MSG_CAP) {
@@ -253,7 +256,7 @@ uint32_t tiku_ra8p1_cpu1_reply(void *out, uint32_t cap)
 
 void tiku_ra8p1_cpu1_raw(uint32_t out[5])
 {
-    /* SRAM truth for both halves: drop every cached copy first. */
+    /* Invalidate both halves first, so the reads come from SRAM. */
     tiku_ra8p1_dcache_invalidate((void *)CPU1_SH, sizeof(tiku_cpu1_shared_t));
     out[0] = CPU1_SH->halt;
     out[1] = CPU1_SH->a2c_restart;
@@ -275,8 +278,8 @@ int tiku_ra8p1_cpu1_alive(void)
     if (!cpu1_running || tiku_ra8p1_cpu1_magic() != TIKU_CPU1_MAGIC) {
         return 0;
     }
-    /* A counter that is merely non-zero proves the payload ran once; only a
-     * moving one proves it is still executing. */
+    /* A non-zero counter shows the payload ran; a moving one shows it still
+     * runs. */
     a = tiku_ra8p1_cpu1_heartbeat();
     for (i = 0U; i < 20000U; i++) {
         __asm__ volatile ("nop");
@@ -290,8 +293,9 @@ void tiku_ra8p1_cpu1_stop(void)
 
     cpu1_set_halt(1UL);
 
-    /* Wait for the payload to reach its halt rather than assume it did: two
-     * identical heartbeats mean it has stopped counting. */
+    /* Wait, bounded, for two equal heartbeat reads: the payload stopped
+     * counting.  A long job also stops the heartbeat, so this can return
+     * while the job still runs. */
     last = tiku_ra8p1_cpu1_heartbeat();
     for (settle = 0U; settle < 100U; settle++) {
         for (i = 0U; i < 20000U; i++) {
@@ -313,22 +317,20 @@ int tiku_ra8p1_cpu1_start(void)
     uint32_t i;
 
     if (!cpu1_nmi_seeded) {
-        /* Warm-persist memory is not zeroed at a cold boot. */
+        /* Retained SRAM is not zeroed at a cold boot. */
         tiku_ra8p1_cpu1_nmi_count = 0U;
         tiku_ra8p1_cpu1_fault_count = 0U;
         cpu1_nmi_seeded = 1U;
     }
 
     /*
-     * An already-active core cannot be launched twice: ACTREQ acts only "if
-     * ACT is 0", and nothing returns CPU1 to power gating.  A second start
-     * therefore RESUMES the payload, and must not rewrite an image the core
-     * is executing at the time.
+     * An active core cannot be launched again: ACTREQ acts only while ACT is
+     * 0, and nothing returns CPU1 to power gating.  A second start resumes
+     * the payload and leaves the image the core is executing untouched.
      */
     if (tiku_ra8p1_cpu1_active()) {
-        /* A faulted payload is parked in its HardFault handler watching the
-         * restart word; changing it re-enters the reset path.  This is the
-         * owner deciding, which no register can do for it. */
+        /* A faulted payload waits in cpu1_park() for the restart word to
+         * change; changing it re-enters the reset path. */
         uint32_t rm = tiku_ra8p1_cpu1_magic();
         if (rm == TIKU_CPU1_MAGIC_FAULT || rm == TIKU_CPU1_MAGIC_HANG) {
             uint32_t settle;
@@ -336,8 +338,8 @@ int tiku_ra8p1_cpu1_start(void)
             cpu1_restart_gen++;
             CPU1_SH->a2c_restart = cpu1_restart_gen;
             cpu1_push();
-            /* The reboot is not instant: the handler must notice the word
-             * and re-run the reset path.  Bounded, like the stop settle. */
+            /* Wait, bounded, for the restarted payload to publish its
+             * magic. */
             for (settle = 0U; settle < 100U; settle++) {
                 for (i = 0U; i < 20000U; i++) {
                     __asm__ volatile ("nop");
@@ -350,8 +352,8 @@ int tiku_ra8p1_cpu1_start(void)
             cpu1_set_halt(0UL);
         }
         cpu1_running = 1U;
-        /* A core in LOCKUP ignores both words, so the resume is confirmed
-         * against the heartbeat before it is reported. */
+        /* A locked-up core ignores both words, so the resume is checked
+         * against the heartbeat. */
         if (!tiku_ra8p1_cpu1_alive()) {
             cpu1_running = 0U;
             return TIKU_RA8P1_CPU1_ERR_DEAD;
@@ -363,8 +365,8 @@ int tiku_ra8p1_cpu1_start(void)
         return TIKU_RA8P1_CPU1_ERR_IMG;
     }
 
-    /* Zeroed before the copy: a shorter image laid over a longer one would
-     * otherwise leave the previous tail live behind it. */
+    /* Zero the whole area first: no tail of an earlier, longer image
+     * remains, and the payload's .bss and the shared page start at zero. */
     for (i = 0U; i < TIKU_CPU1_AREA_SIZE; i++) {
         cpu1_area[i] = 0U;
     }
@@ -373,9 +375,9 @@ int tiku_ra8p1_cpu1_start(void)
     }
     vec[0] = base + TIKU_CPU1_STACK_OFF;
     vec[1] = (base + TIKU_CPU1_RESET_OFF) | 1U;
-    /* HardFault only.  A fault taken while the HardFault is still active
-     * escalates to LOCKUP whatever the other vectors hold, which is why the
-     * handler exception-returns before anything else can fault. */
+    /* NMI (WDT1) and HardFault.  A fault taken while HardFault is active
+     * locks the core up whatever the other vectors hold, so both handlers
+     * exception-return before anything else can fault. */
     vec[2] = (base + TIKU_CPU1_NMI_OFF) | 1U;
     vec[3] = (base + TIKU_CPU1_FAULT_OFF) | 1U;
     cpu1_a2c_seq = 0U;
@@ -393,7 +395,7 @@ int tiku_ra8p1_cpu1_start(void)
      * core leaves reset, which activation triggers; set afterwards it
      * changes nothing and CPU1 boots from the register's reset value
      * 0x0200_0000, the M85's own vector table.  An M33 running the M85's
-     * image shares its stack and paints it.
+     * image would use and overwrite the M85's stack.
      */
     cpu1_protect(1);
     TIKU_REG32(RA8P1_CPU1INITVTOR) = base;

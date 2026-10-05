@@ -17,7 +17,7 @@
 #include "tiku_gpio_arch.h"
 #include "tiku_ra8p1_regs.h"
 
-/** @brief Reject a port/pin pair the silicon does not have. */
+/** @brief True for a port or pin this silicon does not have. */
 #define GPIO_BAD(port, pin) \
     (((port) > RA8P1_PORT_MAX) || ((pin) > 15U))
 
@@ -48,8 +48,8 @@ static void pfs_write(uint8_t port, uint8_t pin, uint32_t val)
 void tiku_ra8p1_gpio_init_output(uint8_t port, uint8_t pin)
 {
     if (GPIO_BAD(port, pin)) { return; }
-    /* PDR alone: PMR stays 0 so the pin is a general I/O, and PODR stays 0 so
-     * the pin starts low rather than at whatever it last drove. */
+    /* PDR alone: PMR = 0 makes the pin general I/O, and PODR = 0 starts it
+     * low. */
     pfs_write(port, pin, RA8P1_PFS_PDR);
 }
 
@@ -108,12 +108,9 @@ int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin)
 int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val)
 {
     if (GPIO_BAD(port, pin)) { return -1; }
-    /* A write claims the pin as an output, which is what the interface means
-     * by it: PODR on a pin still configured as an input drives nothing, and
-     * the pin then reads back whatever the board holds it at.  Direction and
-     * level go into one PFS write so the pin never drives the wrong level
-     * first.  A pin that already drives skips the interlock, leaving the
-     * bit-bang path a single read. */
+    /* A write to an input pin makes it an output: direction and level go in
+     * one PFS write, so the pin never drives the old level first.  A pin
+     * already driving is set through PCNTR3, without the PFS interlock. */
     if ((TIKU_REG32(RA8P1_PORT_PCNTR1(port)) & (1UL << pin)) == 0UL) {
         pfs_write(port, pin,
                   RA8P1_PFS_PDR | ((val != 0U) ? RA8P1_PFS_PODR : 0UL));
@@ -128,7 +125,8 @@ int8_t tiku_gpio_arch_toggle(uint8_t port, uint8_t pin)
     uint32_t podr;
 
     if (GPIO_BAD(port, pin)) { return -1; }
-    /* Through the write path, so a toggle claims the pin the same way. */
+    /* Through tiku_gpio_arch_write(), so a toggle also makes an input pin an
+     * output. */
     podr = TIKU_REG32(RA8P1_PORT_PCNTR1(port)) >> RA8P1_PORT_PODR_SHIFT;
     return tiku_gpio_arch_write(port, pin,
                                 (podr & (1UL << pin)) ? 0U : 1U);
@@ -137,8 +135,8 @@ int8_t tiku_gpio_arch_toggle(uint8_t port, uint8_t pin)
 int8_t tiku_gpio_arch_read(uint8_t port, uint8_t pin)
 {
     if (GPIO_BAD(port, pin)) { return -1; }
-    /* PIDR reflects the pin, not the drive register, so this reads back an
-     * output that a short is holding low as well as a real input. */
+    /* PIDR is the pin's level, so an output reads what the pin is at, which
+     * a short can hold low. */
     return (int8_t)((TIKU_REG32(RA8P1_PORT_PCNTR2(port)) >> pin) & 1UL);
 }
 
@@ -148,9 +146,11 @@ int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin)
     return (int8_t)((TIKU_REG32(RA8P1_PORT_PCNTR1(port)) >> pin) & 1UL);
 }
 
-/*
- * PmnPFS gives a pin away three ways: PMR to the peripheral PSEL names, ASEL
- * to an analog input and ISEL to an IRQn input.  The register is only read.
+/**
+ * @brief Report whether PmnPFS gives the pin away: PMR to the peripheral PSEL
+ *        names, ASEL to an analog input or ISEL to an IRQn input.
+ *
+ * @return 1 if so, 0 if not, -1 for a pin out of range
  */
 int tiku_gpio_arch_is_peripheral(uint8_t port, uint8_t pin)
 {

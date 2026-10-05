@@ -24,15 +24,15 @@
 /** @brief Monotonic tick counter, advanced by the SysTick exception. */
 static volatile tiku_clock_arch_time_t clock_ticks;
 
-/** @brief Reload programmed now, so fine() can invert the down-counter. */
+/** @brief Reload in SysTick, which fine() uses to invert the down-counter. */
 static uint32_t clock_reload = TIKU_CLOCK_ARCH_INTERVAL;
 
 /**
  * @brief Right-shift applied to the sub-tick count.
  *
- * The HAL types fine() as unsigned short but the reload grows with the clock:
- * 62500 at 8 MHz fits, 1875000 at 240 MHz does not.  Shifting costs resolution
- * where truncating would cost correctness.
+ * The HAL types fine() as unsigned short, and the reload grows with the
+ * clock: 62500 at 8 MHz fits in 16 bits, 1875000 at 240 MHz does not.  The
+ * shift keeps the count in range at reduced resolution.
  */
 static uint8_t clock_fine_shift;
 
@@ -55,10 +55,9 @@ static uint8_t fine_shift_for(uint32_t reload)
 void tiku_clock_arch_init(void)
 {
     /*
-     * From the LIVE clock, not TIKU_CLOCK_ARCH_INTERVAL.  The boot constant is
-     * an 8 MHz figure and the kernel starts the tick AFTER the frequency
-     * request, so the reload has to be derived here or the tick runs fast by
-     * the ratio between the live clock and 8 MHz.
+     * The reload comes from the live clock, since the kernel starts the tick
+     * after the frequency request.  TIKU_CLOCK_ARCH_INTERVAL, the 8 MHz boot
+     * figure, is used only when the live clock gives no valid reload.
      */
     unsigned long hz = tiku_cpu_ra8p1_clock_get_hz();
     unsigned long reload = hz / (unsigned long)TIKU_CLOCK_ARCH_SECOND;
@@ -83,9 +82,8 @@ int tiku_ra8p1_clock_arch_retune(unsigned long iclk_hz)
 {
     unsigned long reload = iclk_hz / (unsigned long)TIKU_CLOCK_ARCH_SECOND;
 
-    /* SysTick's reload is 24 bits.  Refusing is the honest outcome: a silent
-     * truncation would leave a tick running at some unrelated rate, and every
-     * timeout in the system would be quietly wrong. */
+    /* SysTick's reload is 24 bits; a reload that does not fit is refused and
+     * the tick is left as it was. */
     if (reload == 0UL || reload > 0x01000000UL) {
         return -1;
     }
@@ -115,7 +113,7 @@ int tiku_ra8p1_clock_arch_running(void)
 
 unsigned short tiku_clock_arch_fine(void)
 {
-    /* SysTick counts DOWN, so elapsed-within-tick is the complement. */
+    /* SysTick counts down, so the elapsed count is the reload minus CVR. */
     uint32_t cvr = TIKU_REG32(RA8P1_SYST_CVR) & 0x00FFFFFFUL;
     return (unsigned short)((clock_reload - cvr) >> clock_fine_shift);
 }
@@ -133,12 +131,10 @@ int tiku_clock_arch_fine_max(void)
 
 unsigned char tiku_clock_arch_fault(void)
 {
-    /* The tick is SysTick off the processor clock, and the processor clock is
-     * whatever the tree was switched to -- there is no lower-accuracy source
-     * it can silently fall back to, so there is no fault of this KIND to
-     * report.  A PLL that failed to lock leaves the tree on MOCO, which the
-     * clock probe reports as its source; that is a different question and is
-     * answered there rather than pretended to be answered here. */
+    /* The tick runs on the processor clock, which has no lower-accuracy
+     * source to fall back to, so there is no fault to report.  A PLL that
+     * fails to lock leaves the tree on MOCO, which the clock probe reports as
+     * its source. */
     return TIKU_CLOCK_ARCH_FAULT_NONE;
 }
 
@@ -150,18 +146,15 @@ uint32_t tiku_ra8p1_clock_arch_fine_hz(void)
 
 void tiku_clock_arch_wait(tiku_clock_arch_time_t t)
 {
-    /* DURATION, not a deadline -- that is the kernel contract.  Read as
-     * absolute, any wait shorter than the current uptime returns instantly, so
-     * every tick-paced caller stops waiting once the system has been up a
-     * while. */
+    /* t is a duration in ticks, as the kernel contract defines it. */
     tiku_clock_arch_time_t target = clock_ticks + t;
     uint32_t primask;
 
     /*
-     * A masked tick can never end this wait: with PRIMASK set the ISR cannot
-     * run, but a pending SysTick still wakes every wfi, so the loop spins at
-     * the tick rate on a counter that will never move.  Early boot holds
-     * interrupts off, so substitute a calibrated spin there.
+     * With PRIMASK set the tick ISR cannot run and the counter never moves,
+     * though a pending SysTick still ends each WFI.  Early boot holds
+     * interrupts off, so with PRIMASK set or the tick stopped the wait is a
+     * calibrated spin.
      */
     __asm__ volatile ("mrs %0, primask" : "=r" (primask));
     if (primask != 0UL || !tiku_ra8p1_clock_arch_running()) {
@@ -173,9 +166,9 @@ void tiku_clock_arch_wait(tiku_clock_arch_time_t t)
     }
 
     while ((long)(target - clock_ticks) > 0) {
-        /* WFI, not a spin: only the tick ISR can end this wait.  Through the
-         * arch entry point rather than a bare instruction, because above
-         * 240 MHz sleeping needs the divider step-down that lives there. */
+        /* Only the tick ISR advances the counter, so the core sleeps between
+         * ticks, through the arch entry point: above 240 MHz, sleeping needs
+         * the divider step-down done there. */
         tiku_cpu_boot_ra8p1_power_wfi_enter();
     }
 }
@@ -190,8 +183,7 @@ void tiku_clock_arch_delay(unsigned int i)
 /**
  * @brief SysTick exception: advance the tick and wake the scheduler.
  *
- * The notify call is not optional: without it expired timers never dispatch
- * and the failure looks like a dead console rather than a dead timer.
+ * Expired timers dispatch only after tiku_sched_notify().
  */
 void tiku_ra8p1_systick_handler(void)
 {

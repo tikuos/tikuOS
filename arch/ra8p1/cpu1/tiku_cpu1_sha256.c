@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu1_sha256.c - SHA-256, freestanding, compiled into BOTH cores.
+ * tiku_cpu1_sha256.c - freestanding SHA-256, compiled into both cores.
  *
- * One source for the M85 baseline and the M33 payload, so an A/B between
- * them compares silicon rather than implementations.  No libc, no statics
- * beyond the round constants: the payload has no .data/.bss loader.
+ * The M85 image and the M33 payload build this one source, so a timing
+ * comparison between the cores runs identical code.  It uses no C library
+ * and no writable static data.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -37,7 +37,7 @@ static const uint32_t sha_k[64] = {
 
 #define ROR(x, n)  (((x) >> (n)) | ((x) << (32 - (n))))
 
-/** @brief One compression round over a prepared 64-byte block. */
+/** @brief Run the SHA-256 compression function over one 64-byte block. */
 static void sha_block(uint32_t st[8], const uint8_t blk[64])
 {
     uint32_t w[64];
@@ -77,10 +77,10 @@ static void sha_block(uint32_t st[8], const uint8_t blk[64])
 }
 
 /**
- * @brief SHA-256 of one short message (up to 55 bytes: single block).
+ * @brief SHA-256 of a message short enough to pad into one block.
  *
- * The chain below only hashes 40-byte inputs, so the single-block form is
- * the whole need and keeps the payload free of streaming state.
+ * @note @p len must be at most 55: a longer message gives a wrong digest,
+ *       and 64 bytes or more overrun the block buffer.
  */
 static void sha_short(const uint8_t *msg, uint32_t len, uint8_t out[32])
 {

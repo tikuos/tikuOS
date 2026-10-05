@@ -31,11 +31,12 @@ extern uint32_t __tiku_nvmfs_base;
 extern uint32_t __tiku_nvm_mram_end;
 
 /**
- * @brief Region indices.  Non-overlapping: overlap is implementation-defined.
+ * @brief Region indices.  The regions are disjoint: PMSAv8 faults an access
+ *        that matches two regions.
  */
 #define MPU_RGN_TEXT        0U   /* MRAM vectors + text + rodata: RO, exec  */
 #define MPU_RGN_DATA        1U   /* data + bss: RW, XN, cacheable           */
-#define MPU_RGN_NVM         2U   /* MRAM durable carve: RO outside the window */
+#define MPU_RGN_NVM         2U   /* MRAM NVM + persist: RO outside a window */
 #define MPU_RGN_FREE        3U   /* SRAM above .uninit up to the guard      */
 #define MPU_RGN_GUARD       4U   /* RO trap under the stack                 */
 #define MPU_RGN_STACK       5U   /* the live stack                          */
@@ -43,9 +44,9 @@ extern uint32_t __tiku_nvm_mram_end;
 #define MPU_RGN_COUNT       7U
 
 /*
- * Stack budget and guard width: a 32-byte guard is LEAPT by a KB-sized frame
- * -- SP lands below it untouched and only a stray local inside the window ever
- * faults.  A 4 KB guard cannot be jumped by any frame smaller than 4 KB.
+ * Stack reserve below __stack, with the guard at its bottom.  A frame larger
+ * than the guard can move SP past it without touching it; a 4 KB guard
+ * catches every frame smaller than 4 KB.
  */
 #define MPU_STACK_RESERVED_BYTES   32768U
 #define MPU_STACK_GUARD_BYTES      4096U
@@ -53,11 +54,11 @@ extern uint32_t __tiku_nvm_mram_end;
 /** @brief Software permission mirror; see tiku_mpu_arch_set_sam(). */
 static uint16_t mpu_sam = TIKU_MPU_DEFAULT_SAM;
 
-/** @brief Bookkeeping CTL, mirroring MSP430's MPUCTL0 password|enable. */
+/** @brief Control word in MSP430 MPUCTL0 form, for tiku_mpu_arch_get_ctl(). */
 static uint16_t mpu_ctl;
 
-/** @brief Violation bits reported to the kernel; a fault resets before any
- *         handler can set them, so this only ever reads back as cleared. */
+/** @brief RAM violation latch.  Nothing sets it: a violation resets the
+ *         part, and the flag comes from the fault record. */
 static uint16_t mpu_violations;
 
 /** @brief Make an MPU register write visible before the next access. */
@@ -75,15 +76,14 @@ static inline void mpu_barrier(void)
  * @param limit  Last byte + 1, 32-byte aligned
  * @param ap     RA8P1_MPU_RBAR_AP_RW or _AP_RO
  * @param xn     Non-zero to forbid execution
- * @param attr   MAIR index: RA8P1_MPU_ATTR_NORMAL or _DEVICE
+ * @param attr   MAIR index: RA8P1_MPU_ATTR_NORMAL, _NORMAL_NC or _DEVICE
  */
 static void mpu_region(uint32_t rgn, uintptr_t base, uintptr_t limit,
                        uint32_t ap, int xn, uint32_t attr)
 {
     if (limit <= base) {
-        /* An empty span must be DISABLED, not programmed with a limit below
-         * its base -- that encoding matches nothing and the range silently
-         * falls through to the background map. */
+        /* An empty span disables the region; a limit below the base would
+         * match nothing. */
         TIKU_REG32(RA8P1_MPU_RNR)  = rgn;
         TIKU_REG32(RA8P1_MPU_RLAR) = 0UL;
         return;
@@ -111,19 +111,11 @@ static uintptr_t guard_base(void)
 static void mpu_nvm_ap(uint32_t ap)
 {
     /*
-     * The whole reserved MRAM tail -- file store AND persist partition -- in one
-     * region, because both need the same two things.
-     *
-     * Non-cacheable: this span IS the MRAM program path, and a D-cache line is
-     * 32 bytes, exactly the program granule.  A cached store would settle in a
-     * line instead of reaching the controller's buffer, then write the whole
-     * granule back at an eviction the code never chose -- outside any window,
-     * with the programming gate shut.
-     *
-     * Read-only outside the window: every write into either span goes through
-     * a bracketed path (persist cells, and the region backend, which opens its
-     * own window), so a store that arrives unbracketed is a bug and faults
-     * here rather than quietly corrupting a file.
+     * One region covers the MRAM NVM region and the persist partition.  It
+     * is non-cacheable: a cached store would wait in a 32-byte line, the MRAM
+     * program granule, and reach the controller only at a later eviction,
+     * outside any write window.  It is read-only outside a window, so an
+     * unbracketed store faults.
      */
     mpu_region(MPU_RGN_NVM, (uintptr_t)&__tiku_nvmfs_base,
                (uintptr_t)&__tiku_nvm_mram_end, ap, 1,
@@ -140,14 +132,13 @@ void tiku_mpu_arch_init_segments(void)
     tiku_mpu_arch_set_sam(TIKU_MPU_DEFAULT_SAM);
     mpu_violations = 0U;
 
-    /* Before the dregion check below, which can return early: the fault
-     * handlers are worth arming even where the part offers too few regions
-     * to program a map at all. */
+    /* Enable the fault handlers before the region-count check, which can
+     * return early. */
     tiku_ra8p1_fault_init();
 
-    /* Refuse rather than program a subset: a partial map leaves the gaps
-     * falling through to the background region, which is the opposite of the
-     * protection this is here to provide. */
+    /* With fewer than MPU_RGN_COUNT regions nothing is programmed, and the
+     * MPU and the caches stay off; a partial map would leave its gaps on the
+     * background map. */
     if (dregion < MPU_RGN_COUNT) {
         mpu_ctl = 0U;
         return;
@@ -161,15 +152,14 @@ void tiku_mpu_arch_init_segments(void)
         ((uint32_t)RA8P1_MPU_MAIR_DEVICE << 8) |
         ((uint32_t)RA8P1_MPU_MAIR_NORMAL_NC << 16);
 
-    /* W^X: the image's text is read-only AND executable; everything else is
-     * writable AND never executable.  The split is exact because the linker
-     * aligned _etext to the 32-byte granule.  The text side lives in MRAM,
-     * which is writable non-volatile memory, so this region is also what
-     * keeps a stray store from rewriting the program image. */
+    /* W^X: vectors, text and rodata are read-only and executable; every other
+     * region is execute-never.  The linker script aligns _etext to 32 bytes.
+     * The text lies in writable MRAM, so this region also stops a stray store
+     * from changing the image. */
     mpu_region(MPU_RGN_TEXT, (uintptr_t)&__vectors_start, (uintptr_t)&_etext,
                RA8P1_MPU_RBAR_AP_RO, 0, RA8P1_MPU_ATTR_NORMAL);
-    /* .data and .bss: ordinary cacheable SRAM.  This stops at __uninit_start
-     * so the warm survivors can carry different attributes below. */
+    /* .data and .bss: cacheable SRAM, up to __uninit_start; .uninit gets its
+     * own region (MPU_RGN_WARM). */
     mpu_region(MPU_RGN_DATA, (uintptr_t)&__data_start,
                (uintptr_t)&__uninit_start,
                RA8P1_MPU_RBAR_AP_RW, 1, RA8P1_MPU_ATTR_NORMAL);
@@ -182,29 +172,25 @@ void tiku_mpu_arch_init_segments(void)
     mpu_region(MPU_RGN_STACK, guard_base() + MPU_STACK_GUARD_BYTES,
                (uintptr_t)&__stack, RA8P1_MPU_RBAR_AP_RW, 1,
                RA8P1_MPU_ATTR_NORMAL);
-    /* .uninit and the RETAINED survivors, non-cacheable.  A reset discards dirty
-     * lines, so cached warm state reaches SRAM only once something happens to
-     * evict it, so the newest writes are the ones lost.  The grade promises
-     * survival, so the attribute belongs here rather than in a cache
-     * maintenance call every writer would have to remember.  It stays
-     * writable and unbracketed: tiku_hang_boot_init() stores here at boot. */
+    /* .uninit and TIKU_RETAINED data, non-cacheable: a reset discards dirty
+     * lines, which would lose the newest writes.  The region is writable
+     * without a window; tiku_hang_boot_init() writes it at boot. */
     mpu_region(MPU_RGN_WARM, (uintptr_t)&__uninit_start,
                (uintptr_t)&__uninit_end, RA8P1_MPU_RBAR_AP_RW, 1,
                RA8P1_MPU_ATTR_NORMAL_NC);
 
-    /* PRIVDEFENA keeps the default map alive underneath, so peripherals and
-     * MRAM stay reachable without a region each.  HFNMIENA is deliberately
-     * OFF: a fault handler that needs to write a diagnostic must not be
-     * blocked by the very protection that faulted. */
+    /* PRIVDEFENA keeps the default map under the regions, so peripherals and
+     * MRAM need no region of their own.  HFNMIENA is clear: the HardFault and
+     * NMI handlers run with the MPU bypassed, so a fault handler can always
+     * write its record. */
     TIKU_REG32(RA8P1_MPU_CTRL) = RA8P1_MPU_CTRL_ENABLE |
                                  RA8P1_MPU_CTRL_PRIVDEFENA;
     mpu_barrier();
 
     mpu_ctl = 0xA500U | 0x0001U;   /* password | enable, MSP430 parity */
 
-    /* Caches LAST, and from here rather than from boot: MAIR is what makes
-     * SRAM cacheable, so a cache enabled before the regions exist would run
-     * on the default memory map's attributes and then need re-doing. */
+    /* Caches last: with the MPU on, the region attributes decide what is
+     * cached, which keeps the NVM span and .uninit out of the D-cache. */
     tiku_ra8p1_cache_enable();
 }
 
@@ -247,19 +233,13 @@ void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm)
 }
 
 /*
- * TWO gates, not one.
+ * Two gates open and close together: the MPU decides whether a store to the
+ * NVM span may issue, and MRCPC1.MRCPSEN whether the MRAM controller programs
+ * what the store left in its buffer.
  *
- * The MPU decides whether the store is allowed to issue; MRCPC1.MRCPSEN
- * decides whether the MRAM controller will program what the store put in its
- * buffer.  Opening only the MPU gives a store that raises no fault and
- * commits nothing -- which is exactly the silent-loss failure the durable
- * grade exists to prevent -- so both move together here.
- *
- * The close side also FLUSHES.  A store leaves its bytes in the controller's
- * 32-byte buffer, and a read returns the buffered value, so nothing the
- * caller can observe distinguishes "written" from "durable": if lock_nvm()
- * did not commit, a power cut after a apparently-successful write would lose
- * it with no diagnostic anywhere.
+ * The lock also flushes.  A store waits in the controller's 32-byte buffer,
+ * and reads return the buffered value, so only the flush makes the write
+ * durable.
  */
 uint16_t tiku_mpu_arch_unlock_nvm(void)
 {
@@ -279,9 +259,9 @@ void tiku_mpu_arch_lock_nvm(uint16_t saved_state)
     (void)tiku_ra8p1_mram_flush();
 
     tiku_mpu_arch_set_sam(saved_state);
-    /* Nest-safe: an inner lock inside a still-open outer window restores the
-     * permission the SAVED state implies, not unconditionally RO -- and
-     * leaves the programming gate open for the outer window to close. */
+    /* Nesting: an inner lock inside an open outer window restores the saved
+     * permission (writable) and leaves the programming gate open for the
+     * outer lock to close. */
     if (!still_open) {
         tiku_ra8p1_mram_program_enable(0);
     }
@@ -293,9 +273,9 @@ uint16_t tiku_mpu_arch_get_violation_flags(void)
 {
     const tiku_ra8p1_fault_record_t *f = tiku_ra8p1_fault_last();
 
-    /* The in-RAM latch cannot outlive the reset the fault handler now forces,
-     * so the surviving evidence is the fault record: an access violation in it
-     * IS the flag, and it is still there on the next boot. */
+    /* A violation resets the part, so the flag comes from the fault record,
+     * which survives the reset: a MemManage record with DACCVIOL or IACCVIOL
+     * reports SEG1. */
     if (f->magic == TIKU_RA8P1_FAULT_MAGIC &&
         f->kind == (uint32_t)TIKU_RA8P1_FAULT_MEM &&
         (f->cfsr & (RA8P1_CFSR_DACCVIOL | RA8P1_CFSR_IACCVIOL))) {
@@ -307,9 +287,7 @@ uint16_t tiku_mpu_arch_get_violation_flags(void)
 void tiku_mpu_arch_clear_violation_flags(void)
 {
     mpu_violations = 0U;
-    /* The surviving half of the flag lives in the fault record, so clearing
-     * only the RAM latch would leave get_violation_flags() still reporting a
-     * violation from a previous boot. */
+    /* The flag comes from the fault record, so the record is cleared too. */
     tiku_ra8p1_fault_clear();
 }
 
@@ -319,7 +297,6 @@ void tiku_mpu_arch_enable_violation_nmi(void)
 }
 
 /*
- * The MemManage handler lives in tiku_fault_arch.c: it dumps, records and
- * RESETS.  Returning from an access violation instead re-executes a store that
- * can never succeed, so a handler that records and returns spins forever.
+ * The MemManage handler is in tiku_fault_arch.c: it prints, records and
+ * resets, since returning would re-execute the faulting access.
  */

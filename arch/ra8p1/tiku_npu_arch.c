@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_npu_arch.c - RA8P1 Ethos-U55 bring-up.
+ * tiku_npu_arch.c - RA8P1 Ethos-U55 bring-up, model loading and runs.
  *
  * The NPU sits behind a power domain and a module stop, both closed out of
- * reset, and the manual's release order between them is not interchangeable.
+ * reset; UM 11.5.1 powers the domain before the module stop is released.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,21 +18,20 @@
 #include "tiku_cpu_common.h"
 #include "tiku_cpu_freq_boot_arch.h"
 
-/** @brief Bounded spins for a power-gating transition; the domain settles in
- *         microseconds, so this only has to stop a wedge from hanging boot. */
+/** @brief Iteration bound on each power-gating and soft-reset wait. */
 #define NPU_POWER_SPINS     100000UL
 
-/* The cycle counter this part already uses for storage timings. */
+/* DWT cycle counter. */
 #define NPU_DEMCR       0xE000EDFCUL
 #define NPU_DEMCR_TRCENA (1UL << 24)
 #define NPU_DWT_CTRL    0xE0001000UL
 #define NPU_DWT_CYCCNT  0xE0001004UL
 
 /**
- * @brief Cycles since the counter was enabled; wraps every 2^32.
+ * @brief Read the DWT cycle counter, enabling it first; wraps every 2^32.
  *
- * @note DEMCR.TRCENA gates the whole trace block, so enabling the counter
- *       alone leaves it reading zero on a board with no debugger attached.
+ * DEMCR.TRCENA gates the whole trace block: with no debugger attached the
+ * counter reads zero until TRCENA is set.
  */
 static uint32_t npu_cycles(void)
 {
@@ -46,13 +45,13 @@ volatile uint32_t tiku_ra8p1_npu_irq_count;
 /** @brief Set by the completion interrupt; cleared before each submit. */
 static volatile uint8_t npu_done;
 
-/** @brief Set once the ID has been read back from a released block. */
+/** @brief Set when tiku_ra8p1_npu_init() succeeds; cleared by the stop. */
 static uint8_t npu_ready;
 
 /**
- * @brief Unlock or relock the registers PRCR guards.
+ * @brief Unlock the PRC1-guarded registers, or lock every PRCR_S group.
  *
- * @param unlock  Non-zero to allow writes, zero to protect again
+ * @param unlock  Non-zero to allow PRC1 writes, zero to protect again
  */
 static void npu_protect(int unlock)
 {
@@ -61,16 +60,14 @@ static void npu_protect(int unlock)
 }
 
 /**
- * @brief Spin until the gating status bits settle on @p want.
+ * @brief Spin until the PDCTRNPU bits in @p mask read as @p want.
  *
- * @note Polled rather than sampled once: the controller does not raise PDCSF
- *       in the same cycle as the PDDE write, so a single read straight after
- *       it sees the previous state and reports a failure that did not
- *       happen.
+ * PDCSF rises some cycles after the PDDE write, so a read straight after the
+ * write still shows the previous state.
  *
  * @param mask  Bits to compare
  * @param want  Value those bits must reach
- * @return Non-zero when they did, inside the budget
+ * @return 1 when they did within NPU_POWER_SPINS reads, 0 otherwise
  */
 static int npu_wait(uint8_t mask, uint8_t want)
 {
@@ -90,7 +87,7 @@ static int npu_wait_idle(void)
     return npu_wait((uint8_t)RA8P1_PDCTRNPU_PDCSF, 0U);
 }
 
-/** @brief Link NPU_IRQ to its NVIC line and unmask it. */
+/** @brief Link NPU_IRQ to its NVIC line, clear it pending and unmask it. */
 static void npu_irq_arm(void)
 {
     TIKU_REG32(RA8P1_ICU_IELSR(RA8P1_ICU_SLOT_NPU)) = RA8P1_ICU_EVENT_NPU_IRQ;
@@ -102,10 +99,11 @@ static void npu_irq_arm(void)
     __asm__ volatile ("dsb\n\tisb" ::: "memory");
 }
 
+/** @brief NPU interrupt on ICU slot RA8P1_ICU_SLOT_NPU; sets npu_done. */
 void tiku_ra8p1_npu_handler(void)
 {
-    /* Acknowledge at the NPU first: clearing the ICU latch while the block
-     * still asserts its output re-raises the line immediately. */
+    /* Acknowledge at the NPU first: an ICU latch cleared while the block
+     * still asserts its output is raised again at once. */
     TIKU_REG32(RA8P1_NPU_CMD) = RA8P1_NPU_CMD_CLEAR_IRQ;
     (void)TIKU_REG32(RA8P1_NPU_CMD);
 
@@ -122,9 +120,11 @@ void tiku_ra8p1_npu_handler(void)
 /**
  * @brief Soft-reset the block, then restore the configuration reset clears.
  *
- * @note A fault leaves the NPU needing a reset before it will accept work, so
- *       this runs before every submission and not only at bring-up.
- * @return TIKU_RA8P1_NPU_OK when the reset completed and PROT agrees
+ * A fault leaves the NPU refusing work until it is reset, so npu_run() calls
+ * this before every submission.
+ *
+ * @return TIKU_RA8P1_NPU_OK, or TIKU_RA8P1_NPU_ERR_POWER when the reset does
+ *         not finish or PROT does not read back as RA8P1_NPU_RESET_CPL
  */
 static int npu_reset_and_configure(void)
 {
@@ -144,8 +144,8 @@ static int npu_reset_and_configure(void)
         return TIKU_RA8P1_NPU_ERR_POWER;
     }
 
-    /* The reset clears these, so they belong here rather than at bring-up.
-     * Their reset value encodes one outstanding read and one write. */
+    /* The soft reset clears these.  At zero the block allows one outstanding
+     * read and one write, and a stream faults on its first data access. */
     TIKU_REG32(RA8P1_NPU_AXI_LIMIT0) = RA8P1_NPU_AXI_LIMIT;
     TIKU_REG32(RA8P1_NPU_AXI_LIMIT1) = RA8P1_NPU_AXI_LIMIT;
     TIKU_REG32(RA8P1_NPU_AXI_LIMIT2) = RA8P1_NPU_AXI_LIMIT;
@@ -163,8 +163,8 @@ int tiku_ra8p1_npu_init(void)
                    ? TIKU_RA8P1_NPU_OK : TIKU_RA8P1_NPU_ERR_ID;
     }
 
-    /* UM 11.5.1 names the MOCO as a precondition of power gating, not of the
-     * NPU, and nothing here starts it. */
+    /* UM 11.5.1 requires the MOCO running for power gating; this function
+     * does not start it. */
     if ((TIKU_REG8(RA8P1_MOCOCR) & RA8P1_MOCOCR_MCSTP) != 0U) {
         return TIKU_RA8P1_NPU_ERR_MOCO;
     }
@@ -173,10 +173,9 @@ int tiku_ra8p1_npu_init(void)
         return TIKU_RA8P1_NPU_ERR_POWER;
     }
 
-    /* PDDE reads backwards: clearing it powers the domain ON.  Assigned, not
-     * read-modify-written -- PDCSF and PDPGSF are read-only status in the same
-     * byte, and feeding a set PDPGSF back in has the write refused, which
-     * presents as the domain simply never leaving gating. */
+    /* PDDE is inverted: 0 powers the domain on.  The byte is assigned:
+     * PDCSF and PDPGSF are read-only status bits in it, and a write that
+     * carries a set PDPGSF is refused, which leaves the domain gated. */
     npu_protect(1);
     TIKU_REG8(RA8P1_PDCTRNPU) = 0U;
     npu_protect(0);
@@ -186,9 +185,9 @@ int tiku_ra8p1_npu_init(void)
         return TIKU_RA8P1_NPU_ERR_POWER;
     }
 
-    /* Only now the module stop, and only as a read-modify-write: MSTPCRA bits
-     * 21:17 read as one and must be written back as one, so a computed mask
-     * that clears any of them has the whole write refused. */
+    /* The module stop is released after the domain is powered, by a
+     * read-modify-write: MSTPCRA bits 21:17 read as 1 and must be written
+     * as 1, or the whole write is refused. */
     TIKU_REG32(RA8P1_MSTPCRA) &= ~RA8P1_MSTPA_NPU;
     (void)TIKU_REG32(RA8P1_MSTPCRA);
     tiku_cpu_ra8p1_delay_us(30U);
@@ -244,7 +243,7 @@ uint16_t tiku_ra8p1_npu_macs(void)
     if (npu_ready == 0U) {
         return 0U;
     }
-    /* The field is a log2, so 8 means 256 rather than 8. */
+    /* The field holds log2 of the MAC count: 8 means 256. */
     cfg = (TIKU_REG32(RA8P1_NPU_CONFIG) >> RA8P1_NPU_CONFIG_MACS_SHIFT) &
           RA8P1_NPU_CONFIG_MACS_MASK;
     return (uint16_t)(1UL << cfg);
@@ -261,13 +260,13 @@ uint16_t tiku_ra8p1_npu_shram_kb(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* Self-test: the loaded model, checked against this core                    */
+/* MODELS, RUNS AND SELF-TESTS                                               */
 /*---------------------------------------------------------------------------*/
 
 /*
- * With the model embedded the image carries the command stream; with it off
- * the model must come from the store, and the image stops growing with the
- * network.
+ * TIKU_NPU_EMBED_MODEL=1 compiles the max-pool command stream into the image.
+ * With 0 there is no model until tiku_ra8p1_npu_load() loads one from the
+ * store.
  */
 #ifndef TIKU_NPU_EMBED_MODEL
 #define TIKU_NPU_EMBED_MODEL 1
@@ -280,14 +279,9 @@ uint16_t tiku_ra8p1_npu_shram_kb(void)
 #include <kernel/vfs/tree/tiku_vfs_tree_data.h>
 
 /*
- * Buffer ceilings, not model sizes.  The geometry a run uses comes from the
- * loaded model, so these only have to admit the largest one this build accepts
- * A store file therefore cannot size SRAM at run time.
- */
-/*
- * Sized to admit a 512x512 max-pool and a yolo-class network; the arena a
- * packed model asks for is its input plus its output.  It costs .bss on a
- * part with SRAM to spare.
+ * Static buffer ceilings.  A run uses the geometry of the model in force, and
+ * tiku_ra8p1_npu_load() refuses a model that does not fit.  The arena default
+ * admits a 512x512 max-pool, whose arena is its input plus its output.
  */
 #ifndef TIKU_NPU_ARENA_MAX
 #define TIKU_NPU_ARENA_MAX  393216u
@@ -300,20 +294,20 @@ uint16_t tiku_ra8p1_npu_shram_kb(void)
 #endif
 
 /*
- * The NPU fetches through its own AXI master, so anything the M85 wrote is
- * only visible once its dirty lines are cleaned out, and anything the NPU
- * wrote is only visible once the stale lines are dropped.  Both buffers are
- * line-aligned, and the arenas are a whole number of lines, so the invalidate
- * after a run drops only what the accelerator wrote.
+ * The NPU reads and writes memory through its own AXI master: the M85's
+ * writes reach it only after their dirty lines are cleaned, and the NPU's
+ * writes reach the M85 only after the stale lines are invalidated.  The
+ * buffers are 32-byte aligned and whole lines long, so the invalidate after
+ * a run touches no other data.
  */
 static uint8_t npu_arena[TIKU_NPU_ARENA_MAX] __attribute__((aligned(32)));
 static uint8_t npu_cms[TIKU_NPU_CMS_MAX] __attribute__((aligned(32)));
-/* The read-only blob: weights and scales, which the stream reaches
- * through region 0 rather than the arena's region 1. */
+/* Weights and scales, which the stream reaches through region 0; the arena
+ * is region 1. */
 static uint8_t npu_wts[TIKU_NPU_WTS_MAX] __attribute__((aligned(32)));
 
-/* Geometry in force.  Compiled-in by default; tiku_ra8p1_npu_load() replaces
- * it wholesale with whatever the store hands over. */
+/* Geometry in force: the built-in model's when it is embedded, until
+ * tiku_ra8p1_npu_load() replaces it. */
 #if (TIKU_NPU_EMBED_MODEL + 0)
 static tiku_ra8p1_npu_model_t npu_model = {
     TIKU_NPU_MP_ARENA_BYTES, TIKU_NPU_MP_IFM_OFFSET, TIKU_NPU_MP_OFM_OFFSET,
@@ -326,25 +320,30 @@ static tiku_ra8p1_npu_model_t npu_model;    /* nothing to run until loaded */
 static uint8_t npu_model_from_store;
 static uint32_t npu_run_count;
 
-/** @brief The M85's answer, kept out of the stack: 128x128 at the largest
- *         geometry this build admits. */
+/** @brief The M85's reference output, kept off the stack; it must hold the
+ *         largest output a model in force can produce. */
 static int8_t npu_expect[TIKU_NPU_ARENA_MAX / 4u];
 
 /*
- * The packed header tools/npu/velapack.py writes: magic, version, the arena
- * geometry, the NPU config the stream was built for, and the stream length.
+ * Header written by tools/npu/velapack.py, little-endian: magic u32 @0,
+ * version u16 @4, kind u8 @6, channels u8 @7, arena u32 @8, ifm_off u32 @12,
+ * ofm_off u32 @16, ifm_dim u16 @20, ofm_dim u16 @22, NPU CONFIG u32 @24,
+ * cms_len u32 @28, wts_len u32 @32.  The command stream starts at byte 40
+ * and the weights follow it.
  */
 #define NPU_ETH_MAGIC   0x504E4B54UL       /* "TKNP" little-endian */
 #define NPU_ETH_HDR     40u
 #define NPU_ETH_VER     2u
 
-/** @brief Little-endian fetch; a mapped file carries no alignment promise. */
+/** @brief Read a little-endian u32 byte by byte; a mapped file may be
+ *         unaligned. */
 static uint32_t npu_rd32(const uint8_t *p)
 {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
+/** @brief Read a little-endian u16 byte by byte. */
 static uint16_t npu_rd16(const uint8_t *p)
 {
     return (uint16_t)((uint32_t)p[0] | ((uint32_t)p[1] << 8));
@@ -359,9 +358,8 @@ int tiku_ra8p1_npu_load(const char *name)
     unsigned i;
 
     if (fs == 0 || name == 0) { return TIKU_RA8P1_NPU_ERR_IMAGE; }
-    /* The config check below reads a register, and a gated NPU answers 0 for
-     * every one of them -- so a load before bring-up would reject every file
-     * it was handed rather than the wrong ones. */
+    /* The CONFIG check below reads an NPU register, and every register of a
+     * gated NPU reads 0, so the NPU is brought up first. */
     if (tiku_ra8p1_npu_init() != TIKU_RA8P1_NPU_OK) {
         return TIKU_RA8P1_NPU_ERR_IMAGE;
     }
@@ -386,8 +384,8 @@ int tiku_ra8p1_npu_load(const char *name)
     g.cms_len  = npu_rd32(h + 28);
     g.wts_len  = npu_rd32(h + 32);
 
-    /* The stream was compiled for a particular NPU; refuse one this part
-     * cannot execute rather than discover it as a parse error. */
+    /* The stream was compiled for one NPU CONFIG; a file built for another
+     * is refused. */
     if (npu_rd32(h + 24) != TIKU_REG32(RA8P1_NPU_CONFIG)) {
         return TIKU_RA8P1_NPU_ERR_IMAGE;
     }
@@ -402,8 +400,8 @@ int tiku_ra8p1_npu_load(const char *name)
     for (i = 0U; i < g.cms_len; i++) {
         npu_cms[i] = h[NPU_ETH_HDR + i];
     }
-    /* The weights follow the stream, and get their own aligned buffer for the
-     * same reason it does: the store promises no alignment. */
+    /* The weights follow the stream and are copied too: the store does not
+     * guarantee alignment. */
     for (i = 0U; i < g.wts_len; i++) {
         npu_wts[i] = h[NPU_ETH_HDR + g.cms_len + i];
     }
@@ -422,16 +420,16 @@ int tiku_ra8p1_npu_from_store(void)
     return (npu_model_from_store != 0U);
 }
 
-/** @brief Whatever the loaded model describes, computed on this core. */
+/** @brief Compute the expected output of the model in force on the M85. */
 static void npu_reference(const int8_t *ifm, int8_t *ofm)
 {
     unsigned in = npu_model.ifm_dim, out = npu_model.ofm_dim;
     unsigned r, c;
 
     if (npu_model.kind == TIKU_RA8P1_NPU_KIND_IDENTITY) {
-        /* A 3x3 kernel whose only non-zero tap is the centre, one channel to
-         * itself, at unit scale: the accelerator does the full MAC work and
-         * the answer is the input unchanged. */
+        /* The identity model is a 3x3 kernel whose only non-zero tap is the
+         * centre, one channel to itself, at unit scale: the accelerator does
+         * the full MAC work and the output equals the input. */
         unsigned n = in * in * npu_model.channels;
 
         for (r = 0U; r < n; r++) {
@@ -457,8 +455,9 @@ static void npu_reference(const int8_t *ifm, int8_t *ofm)
 /**
  * @brief Submit the staged command stream and wait for it to finish.
  *
- * @param status_out  Out: the status word read at completion, or NULL
- * @return OK, ERR_TIMEOUT, or ERR_FAULT
+ * @param status_out  Out: STATUS in bits 15:0 and QREAD in bits 31:16, or
+ *                    NULL
+ * @return TIKU_RA8P1_NPU_OK, ERR_TIMEOUT, or ERR_FAULT
  */
 static int npu_run(uint32_t *status_out)
 {
@@ -469,16 +468,13 @@ static int npu_run(uint32_t *status_out)
         return TIKU_RA8P1_NPU_ERR_FAULT;
     }
 
-    /* Every region base, not just the ones this stream names.  A base left at
-     * zero points its region at unmapped memory, and a stream that touches it
-     * even once -- an empty weight fetch is enough -- faults there rather than
-     * where the mistake is. */
+    /* Region 0 holds the weights and scales, region 1 the tensors, and the
+     * other six bases point at the arena.  A base left at zero points its
+     * region at unmapped memory, and a stream that touches it, even with an
+     * empty weight fetch, faults. */
     {
         unsigned r;
 
-        /* Region 0 is where the stream looks for weights and scales, region 1
-         * for the tensors.  The rest are given the arena so a stray reference
-         * lands somewhere mapped rather than at address zero. */
         for (r = 0U; r < 8U; r++) {
             TIKU_REG32(RA8P1_NPU_BASEP(r))     = (uint32_t)npu_arena;
             TIKU_REG32(RA8P1_NPU_BASEP(r) + 4) = 0UL;
@@ -486,16 +482,15 @@ static int npu_run(uint32_t *status_out)
         TIKU_REG32(RA8P1_NPU_BASEP(0)) = (uint32_t)npu_wts;
     }
 
-    /* QBASE is an absolute address; QCONFIG selects which limit set the
-     * queue's own fetches use, not a base to offset from. */
+    /* QBASE is an absolute address.  QCONFIG selects the AXI limit set the
+     * queue's own fetches use. */
     TIKU_REG32(RA8P1_NPU_QBASE)    = (uint32_t)npu_cms;
     TIKU_REG32(RA8P1_NPU_QBASE_HI) = 0UL;
     TIKU_REG32(RA8P1_NPU_QSIZE)    = npu_model.cms_len;
     __asm__ volatile ("dsb" ::: "memory");
 
-    /* Carry the clock and power bits over rather than writing a fresh word:
-     * they are the block's own Q-channel state, not this driver's to change,
-     * and a submission is only meant to add the run request. */
+    /* CLK_Q_EN and PWR_Q_EN are written back as read: they are the block's
+     * Q-channel state, and a submission only adds the run request. */
     npu_done = 0u;
     TIKU_REG32(RA8P1_NPU_CMD) =
         (TIKU_REG32(RA8P1_NPU_CMD) & (RA8P1_NPU_CMD_CLK_Q_EN |
@@ -503,14 +498,9 @@ static int npu_run(uint32_t *status_out)
         RA8P1_NPU_CMD_RUN;
 
     /*
-     * Wait in WFI rather than on the status register.  An inference is
-     * hundreds of microseconds, which is a long time to hold a core at its
-     * rung doing nothing but re-reading a register; the completion interrupt
-     * is already wired, so the core can be asleep for all of it.  Other
-     * interrupts wake the sleep too, hence the loop rather than one WFI.
-     *
-     * The deadline is a cycle count because the kernel tick is 128 Hz -- far
-     * too coarse to bound something this short.
+     * The core sleeps in WFI until the completion interrupt sets npu_done.
+     * Any other interrupt also ends a WFI, so the loop re-checks the flag and
+     * a deadline of 1/20 s, counted in DWT cycles at the current clock.
      */
     {
         uint32_t t0 = npu_cycles();
@@ -527,9 +517,8 @@ static int npu_run(uint32_t *status_out)
     spins = (npu_done != 0u) ? 1UL : 0UL;
 
     if (status_out != 0) {
-        /* Status in the low half, bytes of stream consumed in the high half:
-         * how far it got is what separates "never fetched" from "faulted
-         * partway through". */
+        /* STATUS in the low half, QREAD in the high half: the bytes of
+         * stream consumed show how far the run got. */
         *status_out = (sta & 0xFFFFUL) |
                       (TIKU_REG32(RA8P1_NPU_QREAD) << 16);
     }
@@ -539,15 +528,23 @@ static int npu_run(uint32_t *status_out)
     if ((sta & (RA8P1_NPU_STATUS_PARSE | RA8P1_NPU_STATUS_BUSERR)) != 0UL) {
         return TIKU_RA8P1_NPU_ERR_FAULT;
     }
-    /* Stopping is not finishing: the block also stops on a fault it did not
-     * flag here, so the end-of-stream bit is what says the work was done. */
+    /* The block also stops on faults that set neither PARSE nor BUSERR; only
+     * END marks a stream that ran to its end. */
     if ((sta & RA8P1_NPU_STATUS_END) == 0UL) {
         return TIKU_RA8P1_NPU_ERR_FAULT;
     }
     return TIKU_RA8P1_NPU_OK;
 }
 
-/** @brief Stage the stream and a seeded input, run, and compare. */
+/**
+ * @brief Stage the stream and a seeded input, run, and compare with the M85.
+ *
+ * @param seed        Varies the input pattern
+ * @param status_out  Out: as for npu_run(), or NULL
+ * @param tamper      Non-zero inverts one stream byte for this run
+ * @param maint       Zero skips the arena's cache maintenance
+ * @return TIKU_RA8P1_NPU_OK, or the first error met
+ */
 static int npu_selftest_run(uint32_t seed, uint32_t *status_out,
                             int tamper, int maint)
 {
@@ -565,9 +562,8 @@ static int npu_selftest_run(uint32_t seed, uint32_t *status_out,
         return rc;
     }
 #if (TIKU_NPU_EMBED_MODEL + 0)
-    /* The built-in stream was compiled against a specific NPU configuration
-     * and the silicon states its own; a store model carries the same field and
-     * is checked as it loads. */
+    /* The built-in stream was compiled for CONFIG TIKU_NPU_MP_CFG_EXPECT.
+     * A store model's CONFIG is checked against the silicon at load. */
     if (TIKU_REG32(RA8P1_NPU_CONFIG) != TIKU_NPU_MP_CFG_EXPECT) {
         return TIKU_RA8P1_NPU_ERR_ID;
     }
@@ -583,9 +579,9 @@ static int npu_selftest_run(uint32_t seed, uint32_t *status_out,
     if (npu_model.cms_len == 0U) {
         return TIKU_RA8P1_NPU_ERR_IMAGE;
     }
-    /* Corrupt one byte for the duration of this run only.  A store-resident
-     * stream is copied in once at load, so a tamper left in place would still
-     * be there for every later run and turn honest checks into parse faults. */
+    /* The byte is inverted for this run only.  A store stream is copied in
+     * once at load, so a corruption left in place would fault every later
+     * run. */
     if (tamper) {
         npu_cms[npu_model.cms_len / 2U] ^= 0xFFU;
     }
@@ -599,10 +595,9 @@ static int npu_selftest_run(uint32_t seed, uint32_t *status_out,
     }
     npu_reference(ifm, npu_expect);
 
-    /* The stream is always cleaned: leaving it dirty makes the NPU fault on
-     * garbage, which would mask what this is trying to show.  Only the TENSOR
-     * maintenance is under test -- without it the input the M85 just wrote is
-     * still sitting dirty in its cache. */
+    /* The stream and the weights are always cleaned; a stream left dirty
+     * makes the NPU fault.  maint covers the arena only: without its
+     * clean, the input the M85 wrote stays dirty in the D-cache. */
     tiku_ra8p1_dcache_clean(npu_cms, npu_model.cms_len);
     if (npu_model.wts_len != 0U) {
         tiku_ra8p1_dcache_clean(npu_wts, npu_model.wts_len);
@@ -620,8 +615,8 @@ static int npu_selftest_run(uint32_t seed, uint32_t *status_out,
         return rc;
     }
 
-    /* And the output the NPU just wrote is invisible until the stale lines
-     * covering it are dropped. */
+    /* The output the NPU wrote reaches the M85 only after the stale lines
+     * covering it are invalidated. */
     if (maint) {
         tiku_ra8p1_dcache_invalidate(npu_arena, npu_model.arena);
     }
@@ -730,9 +725,8 @@ int tiku_ra8p1_npu_bench(uint32_t rounds, uint32_t *npu_us, uint32_t *cpu_us)
     }
     cpu_c = npu_cycles() - t0;
 
-    /* Microseconds, not cycles.  The two sides do not share a clock -- the
-     * accelerator has its own -- so a cycle count taken on the core compares
-     * nothing once the rung moves. */
+    /* Reported in microseconds: the NPU runs on its own clock, so a core
+     * cycle count is not an NPU cycle count. */
     if (npu_us != 0) { *npu_us = (uint32_t)(npu_c / rounds / mhz); }
     if (cpu_us != 0) { *cpu_us = (uint32_t)(cpu_c / rounds / mhz); }
     return TIKU_RA8P1_NPU_OK;
@@ -760,9 +754,8 @@ int tiku_ra8p1_npu_selftest_badwts(uint32_t seed)
     if (npu_model.wts_len == 0U) {
         return TIKU_RA8P1_NPU_ERR_IMAGE;   /* nothing to corrupt */
     }
-    /* Flip a weight byte for one run.  The accelerator cannot detect this --
-     * weights are data, not a parsed stream -- so a wrong ANSWER is the only
-     * evidence that region 0 is being read at all. */
+    /* One weight byte is inverted for this run.  Weights are data, not a
+     * parsed stream, so the NPU raises no fault; only the output changes. */
     npu_wts[npu_model.wts_len / 2U] ^= 0xFFU;
     rc = npu_selftest_run(seed, (uint32_t *)0, 0, 1);
     npu_wts[npu_model.wts_len / 2U] ^= 0xFFU;
@@ -773,9 +766,9 @@ int tiku_ra8p1_npu_selftest_noirq(uint32_t seed)
 {
     int rc;
 
-    /* Mask the line the completion arrives on, run, restore.  The NPU still
-     * finishes its work; what is withdrawn is the driver's only way to learn
-     * that it did. */
+    /* The completion line is masked for the run and unmasked after.  The NPU
+     * still finishes, but npu_done stays 0 and the run ends at its deadline
+     * when it waits on the interrupt. */
     TIKU_REG32(RA8P1_NVIC_ICER(RA8P1_ICU_SLOT_NPU / 32U)) =
         (1UL << (RA8P1_ICU_SLOT_NPU % 32U));
     __asm__ volatile ("dsb\n\tisb" ::: "memory");

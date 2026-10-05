@@ -5,10 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_common.h - RA8P1 busy-wait delays.
+ * tiku_cpu_common.h - RA8P1 delays, unique ID and reset cause.
  *
- * Cycle-counted loops scaled by the measured spin rate, so their accuracy is
- * exactly the accuracy of that measurement -- see tiku_cpu_ra8p1_spin_per_ms().
+ * Delays spin a loop calibrated against the kernel tick (see
+ * tiku_cpu_ra8p1_spin_per_ms()); millisecond delays count ticks when the
+ * tick can advance.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -44,7 +45,9 @@ uint8_t tiku_cpu_ra8p1_unique_id(uint8_t *buf, uint8_t len);
 /**
  * @brief Why the part last reset, from the SYSC reset status registers.
  *
- * @return MSP430 SYSRSTIV-style cause code, as every port reports
+ * @note The first call reads and clears RSTSR0 and RSTSR1; later calls
+ *       return the value it captured.
+ * @return MSP430 SYSRSTIV-style cause code, the form every port reports
  */
 uint16_t tiku_cpu_ra8p1_reset_reason(void);
 

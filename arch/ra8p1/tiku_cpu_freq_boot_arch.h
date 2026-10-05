@@ -41,18 +41,17 @@ typedef struct {
     uint8_t       iclk_div;     /**< ICLK divider, as a divisor not a code */
     uint8_t       pclka_div;    /**< PCLKA divider, as a divisor           */
     uint8_t       pclkb_div;    /**< PCLKB divider, as a divisor           */
-    unsigned long src_hz;       /**< source rate, 0 when not yet derivable */
-    unsigned long iclk_hz;      /**< implied core rate                     */
-    unsigned long pclka_hz;     /**< implied PCLKA rate                    */
+    unsigned long src_hz;       /**< source rate; 0 for HOCO and PLL2P     */
+    unsigned long iclk_hz;      /**< ICLK: src_hz / iclk_div               */
+    unsigned long pclka_hz;     /**< PCLKA: src_hz / pclka_div             */
 } tiku_ra8p1_clock_t;
 
 /**
  * @brief Start the board's main crystal oscillator.
  *
- * Needed both as the PLL's reference and as the CAC's, so it is brought up
- * before either.
+ * The PLL and the CAC both use it as their reference.
  *
- * @return 0 when the oscillator reports stable, -1 when it never did
+ * @return 0 when the oscillator reports stable, -1 after three failed starts
  */
 int tiku_cpu_ra8p1_mosc_start(void);
 
@@ -66,18 +65,19 @@ int tiku_cpu_ra8p1_mosc_start(void);
  * @param target     Clock to measure, an RA8P1_CAC_CLK_* value
  * @param reference  Clock to measure against, an RA8P1_CAC_CLK_* value
  * @param ref_div    RCDS code: 0 = /32, 1 = /128, 2 = /1024, 3 = /8192
- * @return Target-clock count, or 0 if the measurement never completed
+ * @return Target-clock count, or 0 if the measurement timed out or overflowed
  */
 uint16_t tiku_cpu_ra8p1_cac_measure(uint8_t target, uint8_t reference,
                                     uint8_t ref_div);
 
 /**
- * @brief Move the clock tree to @p mhz.
+ * @brief Move the clock tree to the rung for @p mhz.
  *
- * Refuses a rate it cannot produce rather than approximating: `freq` naming a
- * rate the part is not running at is worse than a refusal.
+ * A rate with no rung is ignored, as is a change of rung while the octal
+ * flash is in OPI mode.  A failed change falls back to the previous rung and
+ * sets the flag tiku_cpu_ra8p1_clock_has_fault() reports.
  *
- * @param mhz  Requested core frequency in MHz
+ * @param mhz  Requested core frequency in MHz: 240, 480 or 1000
  */
 void tiku_cpu_freq_ra8p1_init(unsigned int mhz);
 
@@ -101,11 +101,11 @@ int tiku_cpu_freq_ra8p1_supported(unsigned int mhz);
 int tiku_cpu_ra8p1_clock_has_fault(void);
 
 /**
- * @brief Prepare whatever clock state the rest of the port depends on.
+ * @brief Boot-time clock hook, empty on this port.
  *
- * Nothing, deliberately: the boot path runs on the reset tree and the rung is
- * chosen explicitly by tiku_cpu_freq_ra8p1_init().  The call exists so the
- * boot sequence matches the other ports.
+ * The boot path runs on the reset tree (MOCO, 8 MHz) until
+ * tiku_cpu_freq_ra8p1_init() raises it; hal/tiku_cpu.c calls this hook on
+ * every port.
  */
 void tiku_cpu_boot_ra8p1_init(void);
 
@@ -119,7 +119,8 @@ void tiku_cpu_ra8p1_clock_probe(tiku_ra8p1_clock_t *out);
 /**
  * @brief Core clock rate in Hz.
  *
- * @return The rate the clock tree is configured for, in Hz
+ * @return The core rate of the established rung, or the MOCO rate while the
+ *         tree runs on MOCO, in Hz
  */
 unsigned long tiku_cpu_ra8p1_clock_get_hz(void);
 
@@ -131,14 +132,14 @@ unsigned long tiku_cpu_ra8p1_clock_get_hz(void);
 unsigned long tiku_cpu_ra8p1_aclk_get_hz(void);
 
 /**
- * @brief Peripheral clock A rate in Hz -- what the SCI baud divisor uses.
+ * @brief Peripheral clock A rate in Hz.
  *
- * @return The rate implied by SCKSCR and SCKDIVCR
+ * @return The rate implied by the core rate and SCKDIVCR/SCKDIVCR2
  */
 unsigned long tiku_cpu_ra8p1_pclka_get_hz(void);
 
 /**
- * @brief Peripheral clock B rate in Hz -- the CAC's measurable proxy.
+ * @brief Peripheral clock B rate in Hz; the CAC can measure PCLKB.
  *
  * @return The rate PCLKB is running at
  */
@@ -164,19 +165,19 @@ unsigned long tiku_cpu_ra8p1_pclkd_get_hz(void);
 /**
  * @brief ICLK rate in Hz, which is what SysTick counts.
  *
- * @note NOT the core rate.  SysTick's CLKSOURCE selects the processor clock,
- *       and on this part that is ICLK, which the divider table pins near 240
- *       at every rung while CPUCLK0 rides PLL1P.  A tick reload built from
- *       the core rate runs slow by exactly the ratio between them.
+ * Not the core rate: ICLK is 240 MHz at the 240 and 480 rungs and 250 MHz at
+ * 1000, while CPUCLK0 runs at the rung rate.  A tick reload computed from the
+ * core rate runs slow by their ratio.
+ *
  * @return The rate ICLK is running at
  */
 unsigned long tiku_cpu_ra8p1_iclk_get_hz(void);
 
 /**
- * @brief External bus clock (BCLK), which is also the SDRAM clock source.
+ * @brief External bus clock (BCLK) rate in Hz; BCLK also clocks the SDRAM.
  *
- * Read live rather than assumed: the SDRAM timings are derived from it, and a
- * clock change that outran the part would otherwise corrupt data silently.
+ * Computed from the established rung and the live SCKDIVCR; the SDRAM
+ * timings are derived from it.
  *
  * @return BCLK in Hz
  */
@@ -185,19 +186,19 @@ unsigned long tiku_cpu_ra8p1_bclk_get_hz(void);
 /**
  * @brief Delay-loop iterations per millisecond.
  *
- * Measured against the kernel tick on first call once the tick is running;
- * before that the compile-time estimate is reported.
+ * Measured against the kernel tick by the first call made while the tick
+ * can advance; until then the compile-time estimate is returned.
  *
  * @return Loop iterations that occupy one millisecond
  */
 unsigned long tiku_cpu_ra8p1_spin_per_ms(void);
 
 /**
- * @brief Discard the delay-loop calibration so the next caller re-measures.
+ * @brief Discard the delay-loop calibration; the next
+ *        tiku_cpu_ra8p1_spin_per_ms() call measures again.
  *
- * Called when the clock tree moves.  The figure is measured against the tick
- * and cached forever otherwise, so without this every delay after a second
- * frequency change is wrong by the ratio between the two rates.
+ * @note Call after every clock-tree change: a cached figure is wrong by the
+ *       ratio of the old and new rates.
  */
 void tiku_cpu_ra8p1_spin_invalidate(void);
 
@@ -205,7 +206,8 @@ void tiku_cpu_ra8p1_spin_invalidate(void);
  * @brief Enter Sleep mode (WFI) until any unmasked interrupt.
  *
  * Clocks keep running, so the tick, console RX and an armed htimer all wake
- * the core.  Software Standby is deeper but is not entered by this port.
+ * the core.  Above 240 MHz the SCKDIVCR2 clocks (both CPUs, MRAM, NPU) run
+ * at ICLK's rate for the sleep.  This port does not enter Software Standby.
  */
 void tiku_cpu_boot_ra8p1_power_wfi_enter(void);
 

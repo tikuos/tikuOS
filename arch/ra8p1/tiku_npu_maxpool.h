@@ -19,6 +19,7 @@
 
 #include <stdint.h>
 
+/** @brief Arena layout in bytes, and the square input and output sides. */
 #define TIKU_NPU_MP_ARENA_BYTES   81920u
 #define TIKU_NPU_MP_IFM_OFFSET    16384u
 #define TIKU_NPU_MP_OFM_OFFSET    0u
@@ -26,11 +27,12 @@
 #define TIKU_NPU_MP_OFM_BYTES     16384u
 #define TIKU_NPU_MP_IFM_DIM       256u
 #define TIKU_NPU_MP_OFM_DIM       128u
-#define TIKU_NPU_MP_REGION        1u
-#define TIKU_NPU_MP_CMS_BYTES     264u
+#define TIKU_NPU_MP_REGION        1u     /**< NPU region of the tensors */
+#define TIKU_NPU_MP_CMS_BYTES     264u   /**< command stream length     */
 /** @brief CONFIG the stream was built for; the silicon must agree. */
 #define TIKU_NPU_MP_CFG_EXPECT    0x00003008ul
 
+/** @brief The Ethos-U55 command stream, as the NPU queue executes it. */
 static const uint8_t tiku_npu_mp_cms[TIKU_NPU_MP_CMS_BYTES] = {
     0x0f, 0x01, 0x01, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00,
     0x01, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x40, 0x00, 0x00,

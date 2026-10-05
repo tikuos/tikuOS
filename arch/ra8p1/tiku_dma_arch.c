@@ -7,9 +7,8 @@
  *
  * tiku_dma_arch.c - RA8P1 DMAC channel 0, software-triggered memcpy.
  *
- * The transfer is bracketed by cache maintenance, which on this part is not
- * optional: the DMAC is a bus master that neither sees nor is seen by the
- * Cortex-M85 D-cache.
+ * The DMAC does not see the Cortex-M85 D-cache, so each transfer cleans the
+ * source and cleans and invalidates the destination.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -42,9 +41,9 @@ void tiku_dma_arch_init(void)
 
     TIKU_REG8(RA8P1_DMAC_DMCNT(DMA_CH)) = 0U;      /* channel parked */
 
-    /* Link the transfer-end event onto its slot, but leave the NVIC line
-     * masked: an unmasked slot with nothing armed is how a stale pend fires a
-     * callback that was never scheduled. */
+    /* Link the transfer-end event, with the NVIC line masked until a
+     * transfer with a callback starts; an unmasked idle slot would let a
+     * stale pend fire a callback. */
     TIKU_REG32(RA8P1_ICU_IELSR(RA8P1_ICU_SLOT_DMAC0)) = RA8P1_EVENT_DMAC0_INT;
     TIKU_REG32(RA8P1_NVIC_ICER(RA8P1_ICU_SLOT_DMAC0 >> 5)) =
         1UL << (RA8P1_ICU_SLOT_DMAC0 & 0x1FU);
@@ -73,8 +72,8 @@ int tiku_dma_arch_memcpy(void *dst, const void *src, size_t word_cnt,
     if ((((uintptr_t)dst | (uintptr_t)src) & 3U) != 0U) {
         return TIKU_DMA_ERR_INVALID;
     }
-    /* Overlapping ranges: the DMAC would race itself, and the caller almost
-     * certainly meant two buffers. */
+    /* Overlapping ranges are refused: the forward copy would overwrite
+     * source words before reading them. */
     {
         uintptr_t s = (uintptr_t)src;
         uintptr_t d = (uintptr_t)dst;
@@ -94,14 +93,11 @@ int tiku_dma_arch_memcpy(void *dst, const void *src, size_t word_cnt,
     dma_bytes = word_cnt * 4U;
 
     /*
-     * Cache discipline, and the order is load-bearing.  The destination is
-     * cleaned-and-invalidated BEFORE the transfer so no dirty line survives to
-     * land on top of the DMA data, and invalidated after to drop anything
-     * fetched while it ran.  The source is cleaned so the DMAC reads what the
-     * CPU wrote rather than what RAM held.
-     *
-     * Both buffers must be cache-line aligned; a shared edge line makes no
-     * maintenance sequence safe.
+     * Clean the source, so the DMAC reads what the CPU wrote.  Clean and
+     * invalidate the destination before the transfer, so no dirty line is
+     * written back over the DMA data later; it is invalidated again after
+     * the transfer, dropping anything fetched while it ran.  A destination
+     * edge line shared with other data loses CPU writes made to it meanwhile.
      */
     tiku_ra8p1_dcache_clean(src, dma_bytes);
     tiku_ra8p1_dcache_clean_invalidate(dst, dma_bytes);
@@ -128,10 +124,9 @@ int tiku_dma_arch_memcpy(void *dst, const void *src, size_t word_cnt,
     __asm__ volatile ("dsb" ::: "memory");
 
     /*
-     * Software trigger, and CLRS matters: with CLRS=0 the hardware clears
-     * SWREQ once the transfer STARTS, which moves exactly one unit and stops
-     * with the channel still enabled.  CLRS=1 keeps the request asserted so
-     * the DMAC runs the count down to zero.
+     * Software trigger with CLRS set.  With CLRS = 0 the hardware clears
+     * SWREQ when the transfer starts, which moves one unit and leaves the
+     * channel enabled; CLRS = 1 holds the request until the count reaches 0.
      */
     TIKU_REG8(RA8P1_DMAC_DMREQ(DMA_CH)) = (uint8_t)(RA8P1_DMREQ_CLRS |
                                                     RA8P1_DMREQ_SWREQ);
@@ -159,18 +154,17 @@ void tiku_ra8p1_dmac0_handler(void)
     TIKU_REG8(RA8P1_DMAC_DMSTS(DMA_CH)) = 0U;      /* clear DTIF */
     TIKU_REG8(RA8P1_DMAC_DMREQ(DMA_CH)) = 0U;      /* drop the held request */
 
-    /* Both halves of the ack, as every ICU slot on this port needs: the
-     * IELSR status bit AND the NVIC pending bit, or the slot re-fires the
-     * instant it is next unmasked. */
+    /* Clear both the IELSR status bit and the NVIC pending bit, or the slot
+     * fires again when next unmasked. */
     TIKU_REG32(RA8P1_ICU_IELSR(RA8P1_ICU_SLOT_DMAC0)) &= ~RA8P1_ICU_IELSR_IR;
     (void)TIKU_REG32(RA8P1_ICU_IELSR(RA8P1_ICU_SLOT_DMAC0));
     TIKU_REG32(RA8P1_NVIC_ICPR(RA8P1_ICU_SLOT_DMAC0 >> 5)) =
         1UL << (RA8P1_ICU_SLOT_DMAC0 & 0x1FU);
     __asm__ volatile ("dsb" ::: "memory");
 
-    /* Drop anything the core fetched into these lines while the DMAC was
-     * writing them.  Safe as a plain invalidate because the pre-transfer
-     * clean already wrote back everything that shared an edge line. */
+    /* Drop lines the core fetched while the DMAC wrote them.  The
+     * pre-transfer clean wrote back data sharing an edge line; CPU writes to
+     * that data during the transfer are lost here. */
     if (dma_dst != NULL && dma_bytes != 0U) {
         tiku_ra8p1_dcache_invalidate(dma_dst, dma_bytes);
     }

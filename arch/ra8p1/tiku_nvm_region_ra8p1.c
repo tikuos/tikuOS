@@ -7,9 +7,9 @@
  *
  * tiku_nvm_region_ra8p1.c - RA8P1 MRAM filestore region backend.
  *
- * MRAM is byte-writable in place with no erase, so the carved region is a plain
- * linker-reserved span: reads are pointer dereferences and a write is a copy
- * plus a commit.  Unlike the nRF54L backend this opens its own gate window.
+ * MRAM is byte-writable in place with no erase: reads of the linker-carved
+ * span are pointer dereferences, and a write is a copy plus a commit inside
+ * the write's own NVM unlock window.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,17 +21,18 @@
 #include "kernel/memory/tiku_nvm_region.h"
 #include "kernel/memory/tiku_mem.h"          /* tiku_mpu_unlock_nvm/lock_nvm */
 
-/* Linker-carved region (r7ka8p1kf.ld).  __tiku_nvmfs_size is an ABSOLUTE
- * symbol whose ADDRESS is the size -- the rp2350 / ambiq / nordic convention. */
+/* Linker-carved region (arch/common/tiku_nvm_layout.ld).  __tiku_nvmfs_size
+ * is an absolute symbol whose address is the size. */
 extern uint8_t __tiku_nvmfs_base;
 extern uint8_t __tiku_nvmfs_size;
 
 /**
  * @brief Backend write: copy @p len bytes at @p off into the MRAM region.
  *
- * Brackets its own window rather than trusting the caller to hold one: the
- * MRCPSEN gate is what decides whether the controller programs at all, and the
- * MPU keeps this span read-only outside the window.
+ * Opens its own NVM unlock window, which sets MRCPSEN and makes the span
+ * writable in the MPU; closing the window commits the write.
+ *
+ * @return 0, or -1 when the range is out of bounds or the commit fails
  */
 static int region_write(tiku_nvm_backend_t *be, size_t off,
                         const void *src, size_t len)
@@ -42,8 +43,8 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
         return -1;                          /* out of range */
     }
 
-    /* Nest-safe: lock_nvm() restores whatever the saved state implies, so an
-     * outer window already held by the caller survives this. */
+    /* Nest-safe: lock_nvm() restores the saved state, so a window the caller
+     * already holds stays open. */
     saved = tiku_mpu_unlock_nvm();
     memcpy(be->base + off, src, len);       /* MRAM in place, no erase */
     return tiku_mpu_lock_nvm_status(saved) == TIKU_MEM_OK ? 0 : -1;

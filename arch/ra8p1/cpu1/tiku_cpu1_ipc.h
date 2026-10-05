@@ -7,8 +7,8 @@
  *
  * tiku_cpu1_ipc.h - the page the M85 and the Cortex-M33 share.
  *
- * Compiled by both toolchains, so it is the single statement of the layout
- * and the protocol; neither side carries its own copy of an offset.
+ * Compiled into both the M85 image and the CPU1 payload, so both use one
+ * layout and protocol.  tiku_cpu1.ld repeats the offsets and must match.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,33 +19,30 @@
 #include <stdint.h>
 
 /*
- * Image geometry.  The loader copies the image to a 128-byte-aligned buffer
- * of TIKU_CPU1_AREA_SIZE and the payload derives its own base from the PC,
- * so these are offsets, not addresses.
+ * Image geometry.  The payload is linked at TIKU_CPU1_AREA_ADDR, the carve
+ * r7ka8p1kf.ld reserves at the bottom of SRAM, and is not relocatable.  The
+ * _OFF values are offsets from that base: the reset code finds the base from
+ * its PC, and the fault and NMI handlers from VTOR.
  */
-/* The fixed carve r7ka8p1kf.ld reserves at the bottom of SRAM.  The payload
- * LINKS at this address, so compiler-emitted absolute loads (a global
- * table's literal pool entry) resolve correctly.  The image is not
- * relocatable and must be loaded at exactly this address. */
 #define TIKU_CPU1_AREA_ADDR     0x22000000UL
 #define TIKU_CPU1_AREA_SIZE     16384U
 #define TIKU_CPU1_RESET_OFF     0x40U    /* entry, patched into vector 1   */
 #define TIKU_CPU1_FAULT_OFF     0x1800U  /* HardFault, patched into vec 3  */
 #define TIKU_CPU1_NMI_OFF       0x1880U  /* WDT1 NMI, patched into vec 2   */
 #define TIKU_CPU1_SHARED_OFF    0x1900U  /* the struct below               */
-#define TIKU_CPU1_STACK_OFF     TIKU_CPU1_AREA_SIZE
+#define TIKU_CPU1_STACK_OFF     TIKU_CPU1_AREA_SIZE  /* initial SP: area top */
 
 /*
- * Bytes a single message carries in either direction.  Sized by the largest
- * job: an ECDSA P-256 verification is 4 header bytes plus five 32-byte
- * operands (public point, hash, r, s) = 164.
+ * Bytes a message carries in either direction.  It holds the largest job, an
+ * ECDSA P-256 verify: a 4-byte tag and five 32-byte operands (public point,
+ * hash, r, s), 164 bytes.
  */
 #define TIKU_CPU1_MSG_CAP       192U
 
 /** @brief What the payload publishes once it is executing C. */
 #define TIKU_CPU1_MAGIC         0x4D333350UL    /* 'P33M' in memory order */
 
-/** @brief What the fault handler swaps the magic to; the record itself. */
+/** @brief Magic after a HardFault; the magic word is the whole record. */
 #define TIKU_CPU1_MAGIC_FAULT   0x4D333321UL    /* '!33M' in memory order */
 #define TIKU_CPU1_MAGIC_HANG    0x4D333323UL    /* '#33M': WDT1 caught a spin */
 
@@ -54,9 +51,11 @@
 #define TIKU_CPU1_FAULT_MSG     "FLT!"
 
 /*
- * Work message: 'HSH!' + iterations (LE u32) + a 40-byte seed; the reply is
- * the 32-byte chained digest.  The cap bounds how long the mailbox loop can
- * be away from its heartbeat -- alive() reads a long computation as death.
+ * Work message, exactly TIKU_CPU1_MSG_CAP bytes: 'HSH!', iterations (LE u32)
+ * and a 40-byte seed.  The reply is the 32-byte chained digest, or the seed
+ * as received when iterations is 0.  The heartbeat stops and WDT1 goes
+ * unrefreshed while the chain runs; TIKU_CPU1_WORK_MAX_ITERS caps its length,
+ * and tiku_ra8p1_cpu1_alive() reports a stopped heartbeat as a dead payload.
  */
 #define TIKU_CPU1_WORK_MAGIC0   'H'
 #define TIKU_CPU1_WORK_MAGIC1   'S'
@@ -75,19 +74,19 @@
 #define TIKU_CPU1_VERIFY_MAGIC3 '!'
 #define TIKU_CPU1_VERIFY_LEN    (4U + (5U * 32U))
 
-/** @brief The M85's D-cache line, and so the granule of every maintenance op. */
+/** @brief The M85's D-cache line size, the granule of its maintenance. */
 #define TIKU_CPU1_LINE          32U
 
 /*
- * The page is split by writer, not by meaning.  The M85 cleans the lines it
- * owns and invalidates the lines CPU1 owns.  On a line written by both, one
- * operation loses the other's data: an invalidate discards a dirty halt
- * request, a clean writes back a stale heartbeat.  Each half is padded to a
- * whole number of lines so nothing crosses.
+ * The page is split by writer.  The M85 cleans the lines it writes and
+ * invalidates the lines CPU1 writes; on a line written by both, one of those
+ * operations would lose data (an invalidate drops a pending halt request, a
+ * clean writes back a stale heartbeat).  Each half is padded to whole lines.
  *
- * CPU1's S-Cache is on, but its MPU marks this page non-cacheable, so the
- * M85 is the only side with cached copies to maintain.
+ * CPU1's S-Cache is on, but its MPU marks this page non-cacheable, so only
+ * the M85 holds cached copies.
  */
+/** @brief The page the M85 and CPU1 share, at TIKU_CPU1_SHARED_OFF. */
 typedef struct {
     /* --- written by the M85, read by CPU1 --------------------------- */
     volatile uint32_t halt;         /**< non-zero parks the payload       */
@@ -95,8 +94,8 @@ typedef struct {
     volatile uint32_t a2c_len;      /**< bytes valid in a2c_buf           */
     volatile uint32_t a2c_restart;  /**< changed = restart a faulted core */
     volatile uint8_t  a2c_buf[TIKU_CPU1_MSG_CAP];
-    /* Pads this half up to whole cache lines; the assert below is what
-     * catches a cap that stops being a multiple of the line. */
+    /* Pads this half to whole cache lines; the asserts below fail when a
+     * change to the cap breaks that. */
     volatile uint8_t  a2c_pad[16];
 
     /* --- written by CPU1, read by the M85 --------------------------- */

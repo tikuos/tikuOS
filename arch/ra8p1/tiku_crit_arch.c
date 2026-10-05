@@ -7,9 +7,9 @@
  *
  * tiku_crit_arch.c - RA8P1 critical sections over the NVIC.
  *
- * The kernel tick is SysTick, a core exception with no NVIC line, so masking
- * the NVIC never silences it -- TIKU_CRIT_PRESERVE_TICK therefore needs
- * nothing here.  TIKU_CRIT_PRESERVE_HTIMER keeps the GPT compare slot.
+ * The kernel tick is SysTick, a core exception with no NVIC line, so it runs
+ * through a masked section and TIKU_CRIT_PRESERVE_TICK needs no handling.
+ * TIKU_CRIT_PRESERVE_HTIMER keeps the GPT compare slot enabled.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -34,13 +34,11 @@ static struct {
 /**
  * @brief Disable NVIC interrupts, keeping the requested sources enabled.
  *
+ * Only TIKU_CRIT_PRESERVE_HTIMER is mapped (the GPT compare slot).  Other
+ * flags keep nothing: TIKU_CRIT_PRESERVE_UART still masks the console's
+ * interrupt-driven RX.  DSB+ISB make the disable take effect before return.
+ *
  * @param preserve_mask  OR of TIKU_CRIT_PRESERVE_* flags
- * @note TIKU_CRIT_PRESERVE_HTIMER is the only flag this backend maps; it
- *       keeps the GPT compare slot alive.  The tick is SysTick, a core
- *       exception with no NVIC line, so it runs either way and
- *       TIKU_CRIT_PRESERVE_TICK needs nothing here.  UART, I2C and ADC are
- *       polled on this port.
- * @note DSB+ISB makes the disable architecturally visible before the section.
  */
 void tiku_crit_arch_mask_irqs(uint8_t preserve_mask)
 {

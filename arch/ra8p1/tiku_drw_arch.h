@@ -7,8 +7,8 @@
  *
  * tiku_drw_arch.h - RA8P1 2D drawing engine.
  *
- * Renders into a caller-owned RGB565 framebuffer in memory; nothing here
- * knows about a panel, so it is useful with no display attached.
+ * Fills shapes into a caller-owned RGB565 framebuffer in memory with the
+ * D/AVE 2D engine; it does not need a panel.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,13 +18,14 @@
 
 #include <stdint.h>
 
-#define TIKU_DRW_OK             0
+#define TIKU_DRW_OK             0    /**< success                           */
 #define TIKU_DRW_ERR_STATE     -1   /**< engine absent or never initialised */
 #define TIKU_DRW_ERR_INVALID   -2   /**< null buffer, or geometry off-buffer */
 #define TIKU_DRW_ERR_TIMEOUT   -3   /**< the render never reported idle      */
 
 /**
- * @brief Release the module stop and confirm the engine answers.
+ * @brief Power the graphics domain, release the module stop and read the
+ *        engine's ID.
  *
  * @return TIKU_DRW_OK, or TIKU_DRW_ERR_STATE when the ID register does not
  *         read back as a D/AVE revision word
@@ -68,9 +69,10 @@ int tiku_drw_arch_wait(void);
 /**
  * @brief Fill a circle with a solid colour.
  *
- * @note Blocks until the engine is idle.  The edge is one pixel of coverage
- *       rather than a hard step, because the engine shapes it from the same
- *       value it uses for alpha.
+ * The edge is antialiased over one pixel.
+ *
+ * @note Blocks until the engine is idle.  The caller owns cache maintenance:
+ *       the engine reads and writes memory, not the CPU's D-cache.
  *
  * @param fb     Framebuffer base, RGB565, 32-bit aligned
  * @param pitch  Framebuffer width in pixels

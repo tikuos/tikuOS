@@ -7,7 +7,7 @@
  *
  * tiku_cpu_watchdog_arch.h - RA8P1 independent watchdog.
  *
- * The IWDT counts LOCO/2, so it outlives any system-clock change; once
+ * The IWDT counts LOCO/2, which no system-clock change affects; once
  * refreshed it cannot be stopped or reconfigured until a reset.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -29,7 +29,7 @@ typedef enum {
 
 #ifndef TIKU_WDT_CLK_T_DEFINED
 #define TIKU_WDT_CLK_T_DEFINED
-/** @brief Clock feeding the watchdog counter. */
+/** @brief Clock feeding the watchdog counter; this port counts IWDTCLK. */
 typedef enum {
     TIKU_WDT_SRC_SMCLK = 0, /**< Peripheral clock */
     TIKU_WDT_SRC_ACLK  = 1, /**< Low-frequency clock */
@@ -51,26 +51,30 @@ void tiku_cpu_ra8p1_watchdog_off_arch(void);
 /**
  * @brief Start the watchdog.
  *
- * @param src       Clock source request
+ * @param src       Clock source request; recorded, the IWDT counts IWDTCLK
  * @param interval  Timeout in IWDTCLK ticks (16.384 kHz)
- * @note IWDTCR accepts exactly one write between reset and the first refresh.
- *       A later call with a different interval CANNOT be honoured; it feeds
- *       the counter and leaves the period alone rather than pretending.
+ * @note IWDTCR accepts one write between reset and the first refresh.  A
+ *       later call feeds the counter and keeps the first period, which
+ *       tiku_cpu_ra8p1_watchdog_period_ms() reports.
  */
 void tiku_cpu_ra8p1_watchdog_on_arch(tiku_wdt_clk_t src,
                                      tiku_wdt_interval_t interval);
 
-/** @brief Suspend watchdog counting across a long critical section. */
+/**
+ * @brief Refresh the IWDT before a long section; the counter cannot stop, so
+ *        the section has one full period.
+ */
 void tiku_cpu_ra8p1_watchdog_pause_arch(void);
 
 /**
- * @brief Resume watchdog counting.
+ * @brief End a pause.
  *
- * @param kick_on_resume  Non-zero to reload the counter first
+ * @param kick_on_resume  Non-zero to reload the counter
  */
 void tiku_cpu_ra8p1_watchdog_resume_arch(int kick_on_resume);
 
-/** @brief Reload the watchdog counter. */
+/** @brief Reload the watchdog counter; ignored after
+ *         tiku_cpu_ra8p1_watchdog_off_arch(). */
 void tiku_cpu_ra8p1_watchdog_kick_arch(void);
 
 /**

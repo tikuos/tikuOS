@@ -7,9 +7,9 @@
  *
  * tiku_htimer_arch.c - RA8P1 high-resolution timer on GPT0.
  *
- * A 32-bit free-running counter on the synchronous PCLKD core clock, with a
- * compare event the ICU routes to the NVIC -- alarms dispatch when due, not
- * at the next kernel tick.
+ * GPT0 runs as a 32-bit free-running counter on PCLKD.  Its compare-A event
+ * reaches the NVIC through the ICU, so an alarm runs from the compare
+ * interrupt when due.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,7 +24,7 @@
 #define HT_GPT          0U
 #define HT_SLOT         RA8P1_ICU_SLOT_HTIMER
 
-/** @brief Alarms taken, for localising "the ISR never fired" reports. */
+/** @brief Alarm interrupts that dispatched, for diagnostics. */
 volatile uint32_t tiku_htimer_arch_isr_count;
 
 /**
@@ -51,10 +51,9 @@ static void icu_ack(unsigned slot)
 {
     TIKU_REG32(RA8P1_ICU_IELSR(slot)) &= ~RA8P1_ICU_IELSR_IR;
     (void)TIKU_REG32(RA8P1_ICU_IELSR(slot));
-    /* The NVIC pends independently of the ICU flag, and it pends even while
-     * the line is DISABLED -- so clearing IR alone leaves a stale interrupt
-     * that fires the instant the line is next unmasked, dispatching an alarm
-     * that was armed microseconds ago.  Clear both, always. */
+    /* The NVIC pends a line independently of IR, even while the line is
+     * disabled; a stale pend would fire as soon as the line is unmasked and
+     * dispatch an alarm armed microseconds before.  Both are cleared. */
     TIKU_REG32(RA8P1_NVIC_ICPR(slot / 32U)) = (1UL << (slot % 32U));
     __asm__ volatile ("dsb" ::: "memory");
 }
@@ -71,9 +70,10 @@ void tiku_htimer_arch_init(void)
     ht_armed = 0U;
     tiku_ra8p1_htimer_arch_retune();
 
-    /* GTCLKCR strictly BEFORE the ungate: it is locked the moment MSTPE31
-     * reads 0, and leaving it at its async reset default kills the block --
-     * see the register header for the mechanism. */
+    /* GTCLKCR is written while the module is stopped: it locks once MSTPE31
+     * reads 0, and with its asynchronous reset default GPT drops every
+     * register write (see RA8P1_GPT_GTCLKCR in tiku_ra8p1_regs.h).  BPEN
+     * selects the synchronous PCLKD. */
     TIKU_REG32(RA8P1_MSTPCRE) |= RA8P1_MSTPE_GPT0;
     TIKU_REG32(RA8P1_GPT_GTCLKCR) = RA8P1_GPT_GTCLKCR_BPEN;
     TIKU_REG32(RA8P1_MSTPCRE) &= ~RA8P1_MSTPE_GPT0;
@@ -84,9 +84,9 @@ void tiku_htimer_arch_init(void)
     TIKU_REG32(RA8P1_GPT_GTCNT(HT_GPT)) = 0UL;
     TIKU_REG32(RA8P1_GPT_GTST(HT_GPT))  = 0UL;
 
-    /* The compare event is linked but the NVIC line stays MASKED until an
-     * alarm is armed: a free-running compare fires once per wrap, and an
-     * unrequested dispatch is worse than none. */
+    /* The compare event is linked, but the NVIC line stays masked until an
+     * alarm is armed: the free-running compare matches once per counter
+     * wrap. */
     TIKU_REG32(RA8P1_ICU_IELSR(HT_SLOT)) = RA8P1_EVENT_GPT0_CCMPA;
     (void)TIKU_REG32(RA8P1_ICU_IELSR(HT_SLOT));
     TIKU_REG32(RA8P1_NVIC_ICER(HT_SLOT / 32U)) = (1UL << (HT_SLOT % 32U));
@@ -111,9 +111,9 @@ void tiku_htimer_arch_schedule(tiku_htimer_clock_t t)
     int32_t counts = (int32_t)delta_us * (int32_t)ht_per_us;
 
     if (counts < 64) {
-        /* A compare armed at or barely ahead of a 240 MHz counter is already
-         * behind it by the time the write lands; 64 counts is ~0.27 us of
-         * margin, invisible at microsecond resolution. */
+        /* A compare at or just ahead of the counter is passed before the
+         * write lands, so the delta is at least 64 counts, about 0.27 us at
+         * 240 MHz. */
         counts = 64;
     }
 

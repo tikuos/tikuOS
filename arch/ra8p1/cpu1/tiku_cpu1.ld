@@ -7,25 +7,24 @@
  *
  * tiku_cpu1.ld - layout of the RA8P1 Cortex-M33 payload.
  *
- * Links at the fixed carve r7ka8p1kf.ld reserves; the loader copies the
- * image there and patches SP, reset and HardFault into its vector table.
- * The offsets come from tiku_cpu1_ipc.h, which both toolchains compile.
+ * Links at the carve r7ka8p1kf.ld reserves at the bottom of SRAM; the loader
+ * copies the image there and patches SP, reset, NMI and HardFault into its
+ * vector table.  The offsets repeat tiku_cpu1_ipc.h and must match it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 ENTRY(cpu1_reset)
 
-/* The fixed carve the device script reserves; absolute addresses the
- * compiler emits (a global table's literal, a function pointer) are correct
- * only because the image runs exactly here.  Keep in step with
- * TIKU_CPU1_AREA_ADDR in tiku_cpu1_ipc.h and the carve in r7ka8p1kf.ld. */
+/* The payload uses absolute addresses (literal-pool entries, function
+ * pointers), so it runs only at BASE.  Keep in step with TIKU_CPU1_AREA_ADDR
+ * in tiku_cpu1_ipc.h and the carve in r7ka8p1kf.ld. */
 
 BASE = 0x22000000;
 
 SECTIONS
 {
-    /* Sixteen words.  The loader patches [0] = SP and [1] = entry | 1. */
+    /* Sixteen words.  The loader patches SP, reset, NMI and HardFault. */
     .vectors BASE : { KEEP(*(.cpu1_vectors)) }
 
     /* Pinned at TIKU_CPU1_RESET_OFF, which the loader writes into vector 1.
@@ -33,8 +32,8 @@ SECTIONS
      * PC, which is exact only inside the first 128 bytes of the image. */
     .text BASE + 0x40 : { KEEP(*(.cpu1_reset)) *(.text*) *(.rodata*) }
 
-    /* Zero-initialised data lives inside the carve, so the loader's
-     * zero-fill IS the .bss clear -- there is no crt to run one. */
+    /* .bss lies inside the carve, which the loader zero-fills; the payload
+     * has no startup code to clear it. */
     .bss (NOLOAD) : ALIGN(8) {
         __bss_start = .;
         *(.bss*) *(COMMON)
@@ -53,9 +52,8 @@ SECTIONS
     ASSERT(__fault_end <= BASE + 0x1880, "cpu1: fault handler overruns the NMI slot")
     ASSERT(__nmi_end <= BASE + 0x1900, "cpu1: NMI handler overruns the shared page")
 
-    /* TIKU_CPU1_SHARED_OFF.  Zero-filled here and by the loader; the two
-     * halves of the struct sit on separate cache lines, which the header
-     * asserts rather than this script. */
+    /* The shared page, at TIKU_CPU1_SHARED_OFF; the loader zero-fills it.
+     * tiku_cpu1_ipc.h asserts that its two halves use separate cache lines. */
     .shared BASE + 0x1900 (NOLOAD) : { . = . + 0x1C0; }
 
     /DISCARD/ : { *(.ARM.*) *(.comment) *(.debug*) *(.note*) }
@@ -71,8 +69,7 @@ ASSERT(__text_end <= BASE + 0x1800,
 ASSERT(__fault_end <= BASE + 0x1900,
        "cpu1: fault handler overruns the shared page")
 
-/* The PC-derived base is exact only while the entry sits inside the first
- * 128 bytes; past that it resolves one line low and the payload writes over
- * its own vector table. */
+/* The reset code finds the base by clearing the low 7 bits of its PC, which
+ * is exact only while that code sits inside the first 128 bytes. */
 ASSERT(ADDR(.text) + 0x40 <= BASE + 0x80,
        "cpu1: reset code leaves the window its base derivation needs")

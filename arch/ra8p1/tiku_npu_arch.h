@@ -5,11 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_npu_arch.h - bring the RA8P1's Ethos-U55 out of reset.
+ * tiku_npu_arch.h - RA8P1 Ethos-U55 bring-up, model loading and runs.
  *
- * Release the NPU power domain and module stop in the order the manual gives,
- * then report what the block says about itself.  Command streams are not this
- * layer's business.
+ * Powers the NPU domain, releases its module stop, loads a Vela command stream
+ * from the image or the store, runs it, and checks it against the M85.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,29 +20,33 @@
 
 /** @brief Bring-up outcomes; anything but OK leaves the NPU gated. */
 #define TIKU_RA8P1_NPU_OK           0
-#define TIKU_RA8P1_NPU_ERR_MOCO    -1   /**< MOCO stopped; gating needs it   */
-#define TIKU_RA8P1_NPU_ERR_POWER   -2   /**< domain never left power gating  */
-#define TIKU_RA8P1_NPU_ERR_ID      -3   /**< released, but not the expected  */
+#define TIKU_RA8P1_NPU_ERR_MOCO    -1   /**< MOCO stopped; gating needs it    */
+#define TIKU_RA8P1_NPU_ERR_POWER   -2   /**< power-up or soft reset failed    */
+#define TIKU_RA8P1_NPU_ERR_ID      -3   /**< ID or CONFIG is not as expected  */
 
 /**
  * @brief Power and ungate the NPU, then confirm it by its ID.
  *
+ * Also soft-resets the block, sets its AXI limits and arms the completion
+ * interrupt.
+ *
  * @note Idempotent: a second call on a running NPU re-checks the ID and
  *       returns without touching the power sequence.
- * @return TIKU_RA8P1_NPU_OK, or one of the errors above
+ * @return TIKU_RA8P1_NPU_OK, ERR_MOCO, ERR_POWER or ERR_ID
  */
 int tiku_ra8p1_npu_init(void);
 
 /**
  * @brief Return the NPU to module stop and power gating.
  *
- * @note The manual's order is the reverse of bring-up: stop the module first,
- *       gate the domain second.
+ * Masks the completion interrupt, sets the module stop, then gates the
+ * domain, the reverse of bring-up.  Does nothing while
+ * tiku_ra8p1_npu_ready() is 0.
  */
 void tiku_ra8p1_npu_stop(void);
 
 /**
- * @brief Is the NPU powered, ungated and answering with the expected ID?
+ * @brief Report whether a bring-up succeeded with no stop since.
  *
  * @return Non-zero when the block is usable
  */
@@ -52,149 +55,159 @@ int tiku_ra8p1_npu_ready(void);
 /**
  * @brief The NPU's identity register.
  *
- * @return The raw ID, or 0 while the block is gated
+ * @return The raw ID, or 0 while tiku_ra8p1_npu_ready() is 0
  */
 uint32_t tiku_ra8p1_npu_id(void);
 
 /**
- * @brief MACs per cycle, which fixes the command-stream compiler's target.
+ * @brief MACs per cycle, decoded from CONFIG.
  *
- * @return 256 on this die, or 0 while the block is gated
+ * @return 256 on this die, or 0 while tiku_ra8p1_npu_ready() is 0
  */
 uint16_t tiku_ra8p1_npu_macs(void);
 
 /**
  * @brief The NPU's shared-memory size in KB, as the block reports it.
  *
- * @return Size in KB, or 0 while the block is gated
+ * @return Size in KB, or 0 while tiku_ra8p1_npu_ready() is 0
  */
 uint16_t tiku_ra8p1_npu_shram_kb(void);
 
-/** @brief Interrupts taken from the NPU; 0 with work submitted means the
- *         event never reached the NVIC. */
+/** @brief Completion interrupts taken from the NPU since boot. */
 extern volatile uint32_t tiku_ra8p1_npu_irq_count;
 
-/** @brief Self-test outcomes beyond the bring-up codes above. */
-#define TIKU_RA8P1_NPU_ERR_TIMEOUT -4   /**< never reached the stream's end */
-#define TIKU_RA8P1_NPU_ERR_FAULT   -5   /**< parse error or bus fault       */
+/** @brief Load, run and self-test outcomes beyond the bring-up codes. */
+#define TIKU_RA8P1_NPU_ERR_TIMEOUT -4   /**< no completion within 50 ms      */
+#define TIKU_RA8P1_NPU_ERR_FAULT   -5   /**< faulted, or stopped before END  */
 #define TIKU_RA8P1_NPU_ERR_MISMATCH -6  /**< ran, but disagreed with the M85 */
-#define TIKU_RA8P1_NPU_ERR_IMAGE   -7   /**< no usable model in the store   */
-#define TIKU_RA8P1_NPU_ERR_ARENA   -8   /**< model arena exceeds the build */
+#define TIKU_RA8P1_NPU_ERR_IMAGE   -7   /**< no usable model or bad argument */
+#define TIKU_RA8P1_NPU_ERR_ARENA   -8   /**< arena exceeds TIKU_NPU_ARENA_MAX */
 
 /**
- * @brief Run the built-in max-pool stream and check it against the M85.
+ * @brief Run the model in force over seeded input and check it on the M85.
  *
- * Submits the Vela command stream over seeded input and compares every output
- * byte with a windowed maximum computed here.  The model carries one scale and
- * a zero zero-point, so the comparison is exact.
+ * Without a store model this is the built-in max-pool stream.  Every output
+ * byte must equal the M85's 2x2 maximum, or the input for an identity model;
+ * input and output share one scale, so the comparison is exact.
  *
  * @param seed        Varies the input pattern between runs
- * @param status_out  Out: NPU status word after completion, or NULL
- * @return TIKU_RA8P1_NPU_OK, or one of the errors above
+ * @param status_out  Out: as for tiku_ra8p1_npu_run(), or NULL
+ * @return TIKU_RA8P1_NPU_OK, or a negative TIKU_RA8P1_NPU_ERR_* code
  */
 int tiku_ra8p1_npu_selftest(uint32_t seed, uint32_t *status_out);
 
 /**
- * @brief Corrupt one command-stream byte and run, to prove the check can fail.
+ * @brief Run the self-test with one command-stream byte inverted for the run.
  *
- * @return The same codes as the self-test; anything but OK means the
- *         tampering was detected
+ * @param seed  Varies the input pattern
+ * @return The self-test's codes; anything but OK means the corruption was
+ *         detected
  */
 int tiku_ra8p1_npu_selftest_tampered(uint32_t seed);
 
 /**
- * @brief Run the same stream with the cache maintenance omitted.
+ * @brief Run the self-test without the arena's cache maintenance.
  *
- * @return OK only if the result survived anyway, which would mean the buffers
- *         were never cached and the maintained run proved nothing
+ * The command stream and the weights are still cleaned.
+ *
+ * @param seed  Varies the input pattern
+ * @return The self-test's codes; OK means the arena held no dirty or stale
+ *         lines
  */
 int tiku_ra8p1_npu_selftest_nomaint(uint32_t seed);
 
 /**
- * @brief Run once with the completion interrupt masked at the NVIC.
+ * @brief Run the self-test with the completion interrupt masked at the NVIC.
  *
- * @return Anything but OK means the run really does end on the interrupt
- *         rather than on a status poll that happens to notice
+ * @param seed  Varies the input pattern
+ * @return The self-test's codes; TIKU_RA8P1_NPU_ERR_TIMEOUT when the run
+ *         waits on the interrupt, OK when it does not
  */
 int tiku_ra8p1_npu_selftest_noirq(uint32_t seed);
 
 /**
- * @brief Run once with one weight byte corrupted.
+ * @brief Run the self-test with one weight byte inverted for the run.
  *
- * @return ERR_IMAGE when the model is weightless; otherwise anything but OK
- *         means the read-only region really is being read
+ * @param seed  Varies the input pattern
+ * @return ERR_IMAGE when the model has no weights; otherwise the self-test's
+ *         codes, where a failure means the NPU reads the weights in region 0
  */
 int tiku_ra8p1_npu_selftest_badwts(uint32_t seed);
 
 /** @brief Geometry a packed model carries; the built-in one fills it too. */
 typedef struct {
-    uint32_t arena;         /**< working buffer the stream expects  */
+    uint32_t arena;         /**< arena bytes the stream expects     */
     uint32_t ifm_off;       /**< input offset within the arena      */
     uint32_t ofm_off;       /**< output offset within the arena     */
-    uint16_t ifm_dim;
-    uint16_t ofm_dim;
-    uint32_t cms_len;
-    uint32_t wts_len;       /**< read-only blob; 0 for a weightless model */
-    uint8_t  kind;          /**< what the expected output is              */
-    uint8_t  channels;
+    uint16_t ifm_dim;       /**< side of the square input           */
+    uint16_t ofm_dim;       /**< side of the square output          */
+    uint32_t cms_len;       /**< command stream bytes; 0 = no model */
+    uint32_t wts_len;       /**< weight bytes; 0 for a weightless model */
+    uint8_t  kind;          /**< TIKU_RA8P1_NPU_KIND_* reference         */
+    uint8_t  channels;      /**< channels per input pixel                */
 } tiku_ra8p1_npu_model_t;
 
-/** @brief Reference the firmware holds the accelerator to. */
-#define TIKU_RA8P1_NPU_KIND_MAXPOOL   0u
-#define TIKU_RA8P1_NPU_KIND_IDENTITY  1u
+/** @brief Values of tiku_ra8p1_npu_model_t.kind: what the M85 computes. */
+#define TIKU_RA8P1_NPU_KIND_MAXPOOL   0u   /**< 2x2 maximum, stride 2 */
+#define TIKU_RA8P1_NPU_KIND_IDENTITY  1u   /**< output equals input   */
 
 /**
- * @brief Take the model out of the file store rather than the image.
+ * @brief Load a packed model from the /data store as the model in force.
  *
- * @note The command stream is copied into an aligned buffer because the queue
- *       base needs alignment the store does not promise; region bases carry no
- *       such rule, so weights could be pointed at where they lie.
+ * Brings the NPU up first, since the file's CONFIG word must match the
+ * silicon's.  The command stream and weights are copied to aligned buffers.
+ *
  * @param name  File in /data, packed by tools/npu/velapack.py
- * @return TIKU_RA8P1_NPU_OK, or ERR_IMAGE when the file is absent or unusable
+ * @return TIKU_RA8P1_NPU_OK, ERR_ARENA when the arena exceeds
+ *         TIKU_NPU_ARENA_MAX, or ERR_IMAGE when the file is absent or unusable
  */
 int tiku_ra8p1_npu_load(const char *name);
 
 /** @brief Geometry currently in force, from the store or built in. */
 const tiku_ra8p1_npu_model_t *tiku_ra8p1_npu_model(void);
 
-/** @brief Is the loaded model the one the store supplied? */
+/** @brief Non-zero when the model in force was loaded from the store. */
 int tiku_ra8p1_npu_from_store(void);
 
 /**
- * @brief The loaded model's input buffer, for the caller to fill.
+ * @brief The input buffer of the model in force, for the caller to fill.
  *
- * @return Pointer into the arena, or NULL with no model loaded
+ * @return Pointer into the arena, or NULL when no model is in force
  */
 void *tiku_ra8p1_npu_ifm(void);
 
 /**
- * @brief The loaded model's output buffer, valid after a run.
+ * @brief The output buffer of the model in force, valid after a run.
  *
- * @return Pointer into the arena, or NULL with no model loaded
+ * @return Pointer into the arena, or NULL when no model is in force
  */
 const void *tiku_ra8p1_npu_ofm(void);
 
 /**
- * @brief Run the loaded model over whatever the input buffer holds.
+ * @brief Run the model in force over the input buffer.
  *
- * @note Owns the cache maintenance both ways: the NPU is a second AXI master,
- *       and neither side sees the other's writes without it.
- * @param status_out  Out: status word and bytes consumed, or NULL
- * @return TIKU_RA8P1_NPU_OK, ERR_IMAGE, ERR_TIMEOUT or ERR_FAULT
+ * Cleans the stream, weights and arena from the D-cache before the run and
+ * invalidates the arena after it; the caller does no cache maintenance.
+ *
+ * @param status_out  Out: STATUS in bits 15:0 and QREAD (stream bytes
+ *                    consumed) in bits 31:16, or NULL
+ * @return TIKU_RA8P1_NPU_OK, a bring-up error, ERR_IMAGE, ERR_TIMEOUT or
+ *         ERR_FAULT
  */
 int tiku_ra8p1_npu_run(uint32_t *status_out);
 
-/** @brief Completed runs since boot. */
+/** @brief Successful tiku_ra8p1_npu_run() calls since boot. */
 uint32_t tiku_ra8p1_npu_runs(void);
 
 /**
- * @brief Time the same work on the accelerator and on this core.
+ * @brief Time the model in force on the accelerator and on this core.
  *
- * @note The accelerator's figure INCLUDES its cache maintenance, because that
- *       is part of what offloading costs; the core's is the kernel alone.
- * @param rounds   Iterations to average over
- * @param npu_us   Out: microseconds per accelerator inference
- * @param cpu_us   Out: microseconds per M85 inference
+ * Fills the input with a fixed pattern.  The accelerator's time includes its
+ * cache maintenance; the core's is the reference computation alone.
+ *
+ * @param rounds   Iterations to average over; 0 returns ERR_IMAGE
+ * @param npu_us   Out: microseconds per accelerator inference, or NULL
+ * @param cpu_us   Out: microseconds per M85 inference, or NULL
  * @return TIKU_RA8P1_NPU_OK, or the failure that stopped it
  */
 int tiku_ra8p1_npu_bench(uint32_t rounds, uint32_t *npu_us, uint32_t *cpu_us);

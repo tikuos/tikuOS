@@ -7,8 +7,8 @@
  *
  * tiku_dma_arch.h - RA8P1 DMAC channel 0, software-triggered memcpy.
  *
- * Word-count API shared with the rp2350 backend; the stm32n6 backend of the
- * same name counts BYTES and numbers its error codes differently.
+ * Counts are 32-bit words, as on rp2350; the stm32n6 backend of the same API
+ * counts bytes and numbers its error codes differently.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,7 +21,7 @@
 
 #define TIKU_DMA_OK             0   /**< Transfer accepted or completed     */
 #define TIKU_DMA_ERR_BUSY      -1   /**< Channel 0 already in use           */
-#define TIKU_DMA_ERR_INVALID   -2   /**< NULL or misaligned pointer, no count */
+#define TIKU_DMA_ERR_INVALID   -2   /**< bad pointer, count or overlap      */
 #define TIKU_DMA_ERR_NOT_READY -3   /**< DMAC not initialised               */
 
 /** @brief Completion callback; runs in ISR context and must not block. */
@@ -36,9 +36,12 @@ void tiku_dma_arch_init(void);
 /**
  * @brief Copy @p word_cnt 32-bit words from @p src to @p dst on channel 0.
  *
- * Brackets the transfer with cache maintenance: the source is cleaned so the
- * DMAC reads what the CPU wrote, and the destination invalidated so the CPU
- * does not read stale lines over what the DMAC wrote.
+ * The source is cleaned so the DMAC reads what the CPU wrote; the destination
+ * is cleaned and invalidated before the transfer and invalidated again when
+ * it completes.  Overlapping ranges are refused.
+ *
+ * @note A destination line shared with other data loses CPU writes made to
+ *       that data during the transfer; start and end @p dst on 32 bytes.
  *
  * @param dst       Destination, 32-bit aligned
  * @param src       Source, 32-bit aligned

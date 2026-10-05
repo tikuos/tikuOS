@@ -15,6 +15,7 @@
 
 #include <stddef.h>
 
+/** @brief Byte-by-byte memset for the -nostdlib payload. */
 void *memset(void *d, int c, size_t n)
 {
     unsigned char *p = (unsigned char *)d;
@@ -25,6 +26,7 @@ void *memset(void *d, int c, size_t n)
     return d;
 }
 
+/** @brief Byte-by-byte memcpy for the -nostdlib payload. */
 void *memcpy(void *d, const void *s, size_t n)
 {
     unsigned char *p = (unsigned char *)d;

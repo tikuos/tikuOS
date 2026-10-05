@@ -7,9 +7,9 @@
  *
  * tiku_cpu_watchdog_arch.c - RA8P1 independent watchdog.
  *
- * IWDTCR is writable exactly ONCE between reset and the first refresh
- * (UM 29.3.2), and nothing but a reset stops the counter -- so the period is
- * chosen on the first arm and every later call can only feed it.
+ * IWDTCR accepts one write between reset and the first refresh (UM 29.3.2),
+ * and only a reset stops the counter: the first arm sets the period and later
+ * calls feed it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,11 +18,11 @@
 #include "tiku_ra8p1_regs.h"
 
 /**
- * @brief The (CKS, TOPS) pairs the hardware offers, coarsest last.
+ * @brief The (CKS, TOPS) pairs the hardware offers, coarsest divider last.
  *
- * IWDTCLK is 16.384 kHz, so `ticks` is directly comparable to the interval the
- * kernel asks for.  The period is not a free parameter: the first entry in
- * table order that covers the request wins, and the table is not sorted.
+ * A period is div x count IWDTCLK ticks, the unit of the requested interval.
+ * The table is not sorted by period; the first entry that covers a request
+ * is used.
  */
 static const struct {
     uint8_t  cks;       /**< IWDTCR.CKS code                        */
@@ -46,7 +46,7 @@ static const struct {
 
 #define WDT_NPERIODS  (sizeof wdt_periods / sizeof wdt_periods[0])
 
-/** @brief Last requested state, so queries answer consistently. */
+/** @brief What the callers last asked for, and the period in force. */
 static struct {
     uint8_t             armed;      /**< IWDTCR has been written        */
     uint8_t             running;    /**< caller wants it counting       */
@@ -65,10 +65,9 @@ static void wdt_refresh(void)
 
 void tiku_cpu_ra8p1_watchdog_off_arch(void)
 {
-    /* There is no stop.  The manual is explicit that only a reset releases the
-     * IWDT, so the honest behaviour is to feed it once more and record that
-     * the caller wanted it off: nothing resets by surprise, and a later query
-     * does not claim a watchdog that is in fact still counting. */
+    /* Only a reset stops the IWDT (UM 29).  Feed it once and record the
+     * request: kicks are then ignored, and the part resets one period later
+     * unless the watchdog is armed again. */
     if (wdt_state.armed) {
         wdt_refresh();
     }
@@ -88,17 +87,16 @@ void tiku_cpu_ra8p1_watchdog_on_arch(tiku_wdt_clk_t src,
     wdt_state.paused   = 0U;
 
     if (wdt_state.armed) {
-        /* IWDTCR is write-once until a reset.  Re-arming can only feed the
-         * counter; the period stays whatever the first call chose.  Callers
-         * that need to know read tiku_cpu_ra8p1_watchdog_period_ms(). */
+        /* IWDTCR is write-once until a reset: re-arming feeds the counter
+         * and keeps the first call's period, which
+         * tiku_cpu_ra8p1_watchdog_period_ms() reports. */
         wdt_refresh();
         return;
     }
 
-    /* First table entry that covers the request, so a caller asking for 2 s
-     * never silently gets 0.125 s.  The table is not sorted by period, so a
-     * longer covering entry can win over a shorter one.  If nothing covers
-     * the request, the longest entry is the best the hardware can do. */
+    /* The first entry whose period covers the request, which need not be
+     * the shortest that does.  With none, the loop ends on the last entry,
+     * the longest period (32 s). */
     for (i = 0; i < WDT_NPERIODS - 1U; i++) {
         uint32_t ticks = (uint32_t)wdt_periods[i].div * wdt_periods[i].count;
         if (ticks >= want) {
@@ -114,16 +112,15 @@ void tiku_cpu_ra8p1_watchdog_on_arch(tiku_wdt_clk_t src,
     wdt_state.idx   = (uint8_t)i;
     wdt_state.armed = 1U;
 
-    /* The refresh is what starts the counter in register-start mode, and it is
-     * also what latches IWDTCR against further writes.  Nothing above may move
-     * below this line. */
+    /* The refresh starts the counter in register-start mode and locks
+     * IWDTCR, so the IWDTCR write must come first. */
     wdt_refresh();
 }
 
 void tiku_cpu_ra8p1_watchdog_pause_arch(void)
 {
-    /* Nothing halts the counter, so the closest a pause can get is a fresh
-     * full interval: the section that follows has that long to finish. */
+    /* The counter cannot be halted; a refresh gives the section that
+     * follows one full period. */
     if (wdt_state.armed) {
         wdt_refresh();
     }

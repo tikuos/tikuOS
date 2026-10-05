@@ -19,17 +19,16 @@
 #include "tiku_cpu_common.h"
 
 /*
- * Limiter decision values are fixed point.  A hard-edged rectangle only needs
- * every inside pixel to reach the clamp ceiling, so this port scales by a
- * whole pixel step and lets the hardware saturate -- which makes the geometry
- * correct whatever the fractional width turns out to be.
+ * Limiter decision values are 16.16 fixed point.  A rectangle edge adds a
+ * whole DRW_ONE per pixel, so every inside pixel saturates at full coverage
+ * and the edges are hard.
  */
 #define DRW_ONE                 (1L << 16)
 
-/** @brief Bounded spin for the idle poll; the engine is far faster. */
+/** @brief Iteration cap on the idle poll. */
 #define DRW_WAIT_SPINS          2000000UL
 
-/** @brief HWREVISION is never zero on a present engine, and never all ones. */
+/** @brief HWREVISION read at init; 0 until tiku_drw_arch_init() succeeds. */
 static uint32_t drw_id;
 
 int
@@ -69,11 +68,10 @@ tiku_drw_arch_init(void)
         return TIKU_DRW_OK;
     }
 
-    /* The graphics power domain comes up gated, and the module stop is the
-     * second gate, not the first: with the domain down the whole block reads
-     * back zero and no fault is raised, so the order here is load-bearing.
-     * PDCTRGD is written whole -- PDCSF and PDPGSF are read-only status in
-     * the same byte and feeding one back has the write refused. */
+    /* Power the graphics domain before releasing the module stop: with the
+     * domain off the block reads back zero and raises no fault.  PDCTRGD is
+     * written whole; a write that feeds back its read-only status bits
+     * (PDCSF, PDPGSF) is refused. */
     drw_protect(1);
     TIKU_REG8(RA8P1_PDCTRGD) = 0U;
     drw_protect(0);
@@ -89,9 +87,8 @@ tiku_drw_arch_init(void)
         return TIKU_DRW_ERR_STATE;
     }
 
-    /* Only now the module stop, read-modify-written like the NPU path:
-     * reserved bits here read as one and a computed mask that cleared them
-     * would have the write refused. */
+    /* Then the module stop, by read-modify-write: reserved bits read as one,
+     * and a write that clears them is refused. */
     TIKU_REG32(RA8P1_MSTPCRC) &= ~RA8P1_MSTPCRC_DRW;
     (void)TIKU_REG32(RA8P1_MSTPCRC);
     tiku_cpu_ra8p1_delay_us(30U);
@@ -111,7 +108,7 @@ tiku_drw_arch_id(void)
 }
 
 /**
- * @brief Expand a 565 pixel to the opaque 8-bit-per-channel colour COLOR1 wants.
+ * @brief Expand an RGB565 colour to the opaque ARGB8888 that COLOR1 takes.
  *
  * @param c  RGB565 source
  * @return ARGB8888 with alpha fully opaque
@@ -153,9 +150,9 @@ tiku_drw_arch_fill(void *fb, uint32_t pitch, uint32_t h,
     }
 
     /*
-     * Four half planes, one per edge, in the bounding box's own coordinates:
-     * the box IS the rectangle, so each decision value starts at or above the
-     * ceiling and only leaves it outside the box.
+     * Four half planes, one per edge, in the bounding box's coordinates.  The
+     * box is the rectangle, so each value starts at or above the ceiling and
+     * drops below it only outside the box.
      */
     TIKU_REG32(RA8P1_DRW_LSTART(0)) = (uint32_t)DRW_ONE;          /* left   */
     TIKU_REG32(RA8P1_DRW_LXADD(0))  = (uint32_t)DRW_ONE;
@@ -173,9 +170,8 @@ tiku_drw_arch_fill(void *fb, uint32_t pitch, uint32_t h,
     TIKU_REG32(RA8P1_DRW_LXADD(3))  = 0U;
     TIKU_REG32(RA8P1_DRW_LYADD(3))  = (uint32_t)(-DRW_ONE);
 
-    /* COLOR1 is 8 bits per channel with its own alpha, whatever the
-     * framebuffer format is: handing it a packed 565 word leaves alpha zero
-     * and the fill is composited away to nothing. */
+    /* COLOR1 is ARGB8888 whatever the framebuffer format; a raw 565 word
+     * has alpha 0 and fills nothing. */
     TIKU_REG32(RA8P1_DRW_COLOR1)   = drw_argb_from_565(rgb565);
     TIKU_REG32(RA8P1_DRW_SIZE)     = (w & 0xFFFFU) | (rh << 16);
     TIKU_REG32(RA8P1_DRW_PITCH)    = pitch & 0xFFFFU;
@@ -186,8 +182,8 @@ tiku_drw_arch_fill(void *fb, uint32_t pitch, uint32_t h,
                                      RA8P1_DRW_CTL_LIMEN(2) |
                                      RA8P1_DRW_CTL_LIMEN(3);
 
-    /* The bounding box's own corner, not the buffer's: the engine walks
-     * SIZE pixels from whatever address ORIGIN names. */
+    /* ORIGIN is the box's top-left pixel; the engine walks SIZE pixels from
+     * it. */
     origin = (uint32_t)(uintptr_t)fb + ((y * pitch) + x) * 2U;
 
     __asm__ volatile ("dsb" ::: "memory");
@@ -225,15 +221,12 @@ tiku_drw_arch_fill_circle(void *fb, uint32_t pitch, uint32_t h,
 
     /*
      * A quadratic limiter evaluates a*x^2 + b*y^2 + c*x + d*y + f over the
-     * bounding box (UM 63.6.2.2).  Negating the manual's circle equation
-     * makes the value positive INSIDE, which is the side that should be
-     * opaque, and the box is the circle's own square so the centre sits at
-     * (r,r): a = b = -1, c = d = 2r, f = -r^2.
+     * bounding box (UM 63.6.2.2).  With the circle equation negated the value
+     * is positive inside, the opaque side; the box is the circle's square, so
+     * the centre is at (r, r): a = b = -1, c = d = 2r, f = -r^2.
      *
-     * The scale is chosen so the value reaches full coverage exactly one
-     * pixel inside the edge, where it grows by about 2r per pixel -- which
-     * gives a hard circle with a single pixel of antialiasing rather than a
-     * disc that fades out over its whole radius.
+     * Near the edge the value grows by about 2r per pixel, so the scale
+     * k = DRW_ONE / 2r reaches full coverage one pixel inside the edge.
      */
     k  = (long)DRW_ONE / (long)(r * 2U);
     s2 = (long)r * (long)r;

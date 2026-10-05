@@ -8,7 +8,7 @@
  * tiku_display_arch.c - the RA8P1 screen behind interfaces/display.
  *
  * The 2D engine draws into the framebuffer and the display controller scans
- * it continuously, so presenting is a cache clean rather than a transfer.
+ * it continuously, so presenting cleans the changed rows out of the D-cache.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,7 +20,7 @@
 #include "tiku_cache_arch.h"
 #include "tiku_sdram_arch.h"
 
-/** @brief Whether the external array is attached and can hold a second frame. */
+/** @brief Set once the SDRAM is attached, so a second frame can be held. */
 static uint8_t display_have_sdram;
 
 /**
@@ -44,8 +44,8 @@ tiku_display_arch_init(tiku_display_t *d)
 {
     int rc;
 
-    /* The panel's geometry is fixed by the board, so a framebuffer of any
-     * other size would scan as a smear rather than fail. */
+    /* The panel geometry is fixed; a framebuffer of another size is refused,
+     * since it would scan out garbled. */
     if (d->w != TIKU_GLCDC_PANEL_W || d->h != TIKU_GLCDC_PANEL_H) {
         return TIKU_DISPLAY_ERR_INVALID;
     }
@@ -53,15 +53,14 @@ tiku_display_arch_init(tiku_display_t *d)
     if (rc != TIKU_DRW_OK) {
         return TIKU_DISPLAY_ERR_STATE;
     }
-    /* Bring the external array into the allocator so a caller can hold a
-     * second frame.  A board without it still runs single-buffered, which
-     * is why this is not an error. */
+    /* Attach the SDRAM to the allocator so a caller can hold a second
+     * frame; without it the display runs single-buffered. */
     if (!display_have_sdram &&
         tiku_ra8p1_sdram_attach() == TIKU_RA8P1_SDRAM_OK) {
         display_have_sdram = 1u;
     }
-    /* Publish the buffer before the controller starts scanning it, or the
-     * first frames show whatever the tier held. */
+    /* Clean the buffer to memory before the controller scans it, or the
+     * first frames show stale memory. */
     tiku_ra8p1_dcache_clean(d->fb, (uint32_t)d->stride * d->h);
 
     return (tiku_glcdc_arch_panel_start(d->front) == TIKU_GLCDC_OK)
@@ -71,13 +70,10 @@ tiku_display_arch_init(tiku_display_t *d)
 uint32_t
 tiku_display_arch_caps(void)
 {
-    /* Beziers are still hardware this port has not brought up, so they stay
-     * unadvertised; rectangles and circles are proved by pixel count.
-     *
-     * Flipping is offered only when a second frame can actually be held:
-     * two frames of this panel are 2.4 MB and the SRAM tier is smaller than
-     * that, so without the external array the capability would be a promise
-     * no caller could keep.
+    /* Circles are filled by the 2D engine; rounded rectangles are not
+     * supported.  Flipping needs a second frame: two frames of this panel
+     * take 2.4 MB, more than the SRAM tier, so TIKU_DISPLAY_CAP_FLIP is
+     * advertised only with the SDRAM attached.
      */
     return TIKU_DISPLAY_CAP_CIRCLE |
            (display_have_sdram ? TIKU_DISPLAY_CAP_FLIP : 0u);
@@ -121,11 +117,10 @@ tiku_display_arch_fill_rect(tiku_display_t *d, uint16_t x, uint16_t y,
     int rc;
 
     /*
-     * The engine writes memory while the CPU works through its cache, so the
-     * region has to change hands twice.  Cleaning first pushes out anything
-     * the CPU had pending -- a later clean would otherwise put those stale
-     * lines back over the engine's output -- and invalidating afterwards is
-     * what lets the CPU read what was actually drawn.
+     * The engine writes memory, not the D-cache.  The rows are cleaned and
+     * invalidated first, so no dirty line is later written back over the
+     * engine's output, and invalidated after, so the CPU reads what was
+     * drawn.
      */
     tiku_ra8p1_dcache_clean_invalidate(rows, bytes);
 
@@ -178,8 +173,8 @@ tiku_display_arch_fill_rounded_rect(tiku_display_t *d, int16_t x, int16_t y,
 int
 tiku_display_arch_set_scanout(tiku_display_t *d, void *fb)
 {
-    /* The buffer has to be in memory before the controller reads it, and
-     * the CPU may have written it without the engine's involvement. */
+    /* Clean the new buffer to memory before the controller scans it; the
+     * CPU may have written it directly. */
     tiku_ra8p1_dcache_clean(fb, (uint32_t)d->stride * d->h);
     return (tiku_glcdc_arch_rebind(fb) == TIKU_GLCDC_OK)
            ? TIKU_DISPLAY_OK : TIKU_DISPLAY_ERR_STATE;
@@ -194,9 +189,9 @@ tiku_display_arch_present(tiku_display_t *d, uint16_t x, uint16_t y,
 
     (void)x; (void)w;
     /*
-     * The controller scans memory continuously, so presenting is making the
-     * CPU's own writes reachable rather than moving anything.  Whole rows,
-     * because a partial one shares cache lines with the pixels beside it.
+     * The controller scans memory continuously, so presenting cleans the
+     * CPU's writes out of the D-cache, for the whole rows the rectangle
+     * touches.
      */
     tiku_ra8p1_dcache_clean(rows, bytes);
     return TIKU_DISPLAY_OK;

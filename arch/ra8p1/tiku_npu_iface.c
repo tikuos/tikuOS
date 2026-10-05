@@ -7,8 +7,8 @@
  *
  * tiku_npu_iface.c - interfaces/npu backed by the RA8P1's Ethos-U55.
  *
- * The contract's shape is the accelerator's, not this part's; everything here
- * is a translation of one vocabulary into the other.
+ * Maps the interfaces/npu calls and result codes onto the tiku_ra8p1_npu_*
+ * driver.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,13 +17,13 @@
 
 #include "tiku_npu_arch.h"
 
-/** @brief Sticky: a fault is only cleared by loading a model again. */
+/** @brief Set when a run times out or faults; a successful load clears it. */
 static uint8_t npu_iface_faulted;
 
 uint32_t tiku_npu_flags(void)
 {
-    /* Both are facts about the part: models come from the store because the
-     * image must not grow with them, and the Ethos-U55 has no float path. */
+    /* Models load from the /data store, and the Ethos-U55 has no float
+     * path. */
     return TIKU_NPU_F_STORE_MODEL | TIKU_NPU_F_INT_ONLY;
 }
 
@@ -57,7 +57,7 @@ int tiku_npu_load(const char *name)
     if (rc != TIKU_RA8P1_NPU_OK) {
         return TIKU_NPU_ERR_MODEL;
     }
-    npu_iface_faulted = 0u;      /* a fresh model is the way out of a fault */
+    npu_iface_faulted = 0u;      /* a successful load clears a fault */
     return TIKU_NPU_OK;
 }
 

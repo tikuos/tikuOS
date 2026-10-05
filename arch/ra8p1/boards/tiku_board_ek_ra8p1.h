@@ -23,9 +23,9 @@
 /*---------------------------------------------------------------------------*/
 /* Console                                                                   */
 /*                                                                           */
-/* Kit UM Table 13 routes the debugger's virtual COM port to PD02/PD03; the   */
-/* hardware manual's PORTD table (21.20) gives those pins as TXD8_C/RXD8_C at */
-/* PSEL=00100b, so the console is SCI8.                                      */
+/* Kit UM Table 13 routes the debugger's virtual COM port to PD02/PD03;      */
+/* the hardware manual's PORTD table (21.20) gives those pins as             */
+/* TXD8_C/RXD8_C at PSEL=00100b, so the console is SCI8.                     */
 /*---------------------------------------------------------------------------*/
 #define TIKU_BOARD_CONSOLE_SCI      8U
 #define TIKU_BOARD_CONSOLE_TX_PORT  0xDU     /* PORTD */
@@ -36,9 +36,9 @@
 /**
  * @brief Console baud rate.
  *
- * The house 115200, which needs SCICLK driven from the PLL.  The divisor
- * comes from the live SCICLK, so this constant needs no second value for the
- * 8 MHz boot clock -- it is simply unreachable there.
+ * The UART driver computes the divisor from the live SCICLK.  115200 needs
+ * SCICLK from the PLL: at the 8 MHz boot clock the nearest divisor is 8.5%
+ * fast.
  */
 #ifndef TIKU_BOARD_UART_BAUD
 #define TIKU_BOARD_UART_BAUD        115200UL
@@ -47,10 +47,9 @@
 /*---------------------------------------------------------------------------*/
 /* Oscillators fitted on the board                                           */
 /*                                                                           */
-/* Kit UM Table 8: E7/E11 tie P212/P213 to a 24 MHz crystal, E55/E56 tie      */
-/* P215/P214 to a 32.768 kHz sub-clock crystal.  The part boots on its        */
-/* internal MOCO, but the PLL reference is this number, so it belongs to the  */
-/* board rather than to the clock driver.                                     */
+/* Kit UM Table 8: E7/E11 tie P212/P213 to a 24 MHz crystal, E55/E56 tie     */
+/* P215/P214 to a 32.768 kHz sub-clock crystal.  The part boots on its       */
+/* internal MOCO; the PLL runs from the 24 MHz crystal.                      */
 /*---------------------------------------------------------------------------*/
 #define TIKU_BOARD_MOSC_HZ          24000000UL
 #define TIKU_BOARD_SUBCLK_HZ        32768UL
@@ -58,8 +57,8 @@
 /*---------------------------------------------------------------------------*/
 /* LEDs                                                                      */
 /*                                                                           */
-/* Kit UM Table 24.  Port indices follow the manual's own naming: P600 is     */
-/* port 6 pin 0, PA07 is port 0xA pin 7.                                      */
+/* Kit UM Table 24.  Port indices follow the manual's naming: P600 is        */
+/* port 6 pin 0, PA07 is port 0xA pin 7.                                     */
 /*---------------------------------------------------------------------------*/
 #define TIKU_BOARD_LED_COUNT        3
 
@@ -92,8 +91,8 @@
 /*---------------------------------------------------------------------------*/
 /* User switches                                                             */
 /*                                                                           */
-/* Kit UM Table 25.  Both sit on deep-standby-capable IRQ lines, so either    */
-/* can serve as a wake source out of deep standby.                            */
+/* Kit UM Table 25.  Both sit on deep-standby-capable IRQ lines, so          */
+/* either can serve as a wake source out of deep standby.                    */
 /*---------------------------------------------------------------------------*/
 #define TIKU_BOARD_SW1_PORT         0U      /* P009, IRQ13-DS */
 #define TIKU_BOARD_SW1_PIN          9U
@@ -113,17 +112,17 @@
 #define TIKU_BOARD_BTN2_PRESSED()   (tiku_gpio_arch_read(TIKU_BOARD_BTN2_PORT, TIKU_BOARD_BTN2_PIN) == 0)
 
 /*---------------------------------------------------------------------------*/
-/* Buses with no arch backend yet                                            */
+/* Bus placeholders                                                          */
 /*                                                                           */
-/* The EK routes plenty of these -- SCI, IIC and SPI all reach the Arduino,   */
-/* mikroBUS, Qwiic and PMOD headers -- but a board macro describes what the   */
-/* SOFTWARE can drive, and none of them has a driver on this port.  Each turns */
-/* on with its driver, not before.                                            */
+/* SCI, IIC and SPI reach the Arduino, mikroBUS, Qwiic and PMOD headers,     */
+/* but no driver on this port reads these macros: ADC, SPI and 1-Wire are    */
+/* stubs, and the I2C driver uses IIC1 on fixed pins (P512, P511).  The      */
+/* pin values are zero placeholders.                                         */
 /*---------------------------------------------------------------------------*/
 #define TIKU_BOARD_BSCAT_PORT       0U
 #define TIKU_BOARD_BSCAT_PIN        0U
 #define TIKU_BOARD_ADC_AVAILABLE    0
-#define TIKU_BOARD_I2C_BRW_100K     1   /* symbolic */
+#define TIKU_BOARD_I2C_BRW_100K     1   /* placeholder; MSP430 bit-rate value */
 #define TIKU_BOARD_OW_AVAILABLE     0
 #define TIKU_BOARD_OW_PIN           0U
 #define TIKU_BOARD_I2C0_SDA_PIN     0U

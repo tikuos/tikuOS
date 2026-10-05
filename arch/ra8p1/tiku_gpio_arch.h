@@ -9,7 +9,7 @@
  *
  * Ports are numbered the way the manual and the schematic name them: PORT0..
  * PORT9 are 0..9 and PORTA..PORTD are 0xA..0xD, so P600 is port 6 pin 0 and
- * PA07 is port 0xA pin 7 with no translation table in between.
+ * PA07 is port 0xA pin 7.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -61,15 +61,28 @@ void tiku_ra8p1_gpio_set(uint8_t port, uint8_t pin, uint8_t value);
  */
 void tiku_ra8p1_gpio_toggle(uint8_t port, uint8_t pin);
 
-/* Kernel-facing GPIO contract, shared with the other ports. -1 means the port
- * or pin is out of range; otherwise set_output/set_input/write/toggle return
- * 0, while read returns the pin level and get_dir the direction bit, 1 for
- * output. */
+/* Kernel-facing GPIO contract, shared with the other ports.  Every call
+ * returns -1 for a port or pin out of range. */
+
+/** @brief Make a pin a push-pull output, driving low. @return 0 or -1 */
 int8_t tiku_gpio_arch_set_output(uint8_t port, uint8_t pin);
+
+/** @brief Make a pin a general-purpose input. @return 0 or -1 */
 int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin);
+
+/** @brief Drive a pin; an input pin becomes an output. @return 0 or -1 */
 int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val);
+
+/**
+ * @brief Invert a pin's output level; an input pin becomes an output.
+ * @return 0 or -1
+ */
 int8_t tiku_gpio_arch_toggle(uint8_t port, uint8_t pin);
+
+/** @brief Read a pin's level from PIDR. @return 0 or 1, or -1 */
 int8_t tiku_gpio_arch_read(uint8_t port, uint8_t pin);
+
+/** @brief Read a pin's direction. @return 1 output, 0 input, or -1 */
 int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin);
 
 #endif /* TIKU_RA8P1_GPIO_ARCH_H_ */

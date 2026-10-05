@@ -7,9 +7,9 @@
  *
  * tiku_sdram_arch.c - EK-RA8P1 external SDRAM bring-up.
  *
- * Timings come from the IS42S32160F-6 datasheet in nanoseconds, converted at
- * the live bus clock rather than copied as cycle counts, so a clock change
- * cannot silently under-time the part.
+ * Timings are the IS42S32160F-6 datasheet's nanosecond figures, converted to
+ * cycles of the bus clock in force at init; a later BCLK change leaves them
+ * as they were set.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,12 +24,12 @@
 #include <kernel/shell/tiku_shell_io.h>
 
 /*
- * EK-RA8P1 wiring (board manual Table 30), 57 signals.  This is BOARD data,
- * not silicon: another RA8P1 design wiring fewer address lines or a 16-bit
- * bus needs its own table.  Every one takes PSEL = BUS.
+ * EK-RA8P1 wiring (board manual Table 30), 57 signals, all at PSEL = BUS.
+ * This is board data: another RA8P1 design with fewer address lines or a
+ * 16-bit bus needs its own table.
  *
- * Encoded as (port << 8) | pin so the table stays one flat array; port 0xA-0xD
- * are ports 10-13, matching RA8P1_PFS()'s numbering.
+ * Each entry is (port << 8) | pin; ports 0xA-0xD are ports 10-13, as in
+ * RA8P1_PFS().
  */
 #define P(port, pin)  (uint16_t)(((port) << 8) | (pin))
 
@@ -57,10 +57,10 @@ static const uint16_t sdram_pins[] = {
 static uint8_t sdram_ready;
 
 /**
- * @brief Round a nanosecond figure up to whole bus clocks.
+ * @brief Convert @p ns to whole cycles of @p hz, rounding up.
  *
- * Always up: a cycle count short of the datasheet's minimum is the failure
- * mode that passes a bring-up test and corrupts data later under load.
+ * A count short of the datasheet's minimum can pass a bring-up test and
+ * corrupt data under load.
  */
 static uint32_t ns_to_cycles(uint32_t ns, uint32_t hz)
 {
@@ -74,8 +74,7 @@ static void sdram_pins_init(void)
 {
     unsigned i;
 
-    /* PFS writes are protected: clear B0WI, then set PFSWE -- the same
-     * two-step the console pins need. */
+    /* PFS writes are protected: clear B0WI, then set PFSWE. */
     TIKU_REG8(RA8P1_PWPR_S) = 0U;
     TIKU_REG8(RA8P1_PWPR_S) = (uint8_t)RA8P1_PWPR_PFSWE;
 
@@ -83,9 +82,9 @@ static void sdram_pins_init(void)
         uint32_t port = (uint32_t)(sdram_pins[i] >> 8);
         uint32_t pin  = (uint32_t)(sdram_pins[i] & 0xFFU);
 
-        /* High-speed high drive: 57 lines switching at 120 MHz will not make
-         * their edges on the default low-drive setting, which presents as
-         * data that is almost right rather than as a dead bus. */
+        /* High-speed high drive: on the default low drive, 57 lines
+         * switching at 120 MHz miss their edges and data reads back nearly
+         * right. */
         TIKU_REG32(RA8P1_PFS(port, pin)) =
             (RA8P1_PFS_PSEL_BUS << RA8P1_PFS_PSEL_SHIFT) |
             RA8P1_PFS_DSCR_HS_HIGH | RA8P1_PFS_PMR;
@@ -108,11 +107,7 @@ int tiku_ra8p1_sdram_init(void)
         return TIKU_RA8P1_SDRAM_ERR_CLOCK;   /* -6 grade tops out at 167 MHz */
     }
 
-    /*
-     * CAS latency is a cliff, not a slope: the -6 part runs CL2 only to
-     * 100 MHz and CL3 to 167.  Choosing by clock rather than hardcoding
-     * means a future clock change cannot leave CL2 set above its limit.
-     */
+    /* The -6 part runs CL2 up to 100 MHz and CL3 up to 167 MHz. */
     cl = (hz <= 100000000UL) ? 2UL : 3UL;
 
     trcd = ns_to_cycles(18UL, hz);      /* ACT to READ/WRITE      */
@@ -120,18 +115,16 @@ int tiku_ra8p1_sdram_init(void)
     tras = ns_to_cycles(42UL, hz);      /* ACT to PRE, minimum    */
     twr  = ns_to_cycles(12UL, hz);      /* tDPL, data to precharge */
 
-    /* 8192 rows every 64 ms.  Computed in ns to keep the division exact at
-     * any clock: 64 ms / 8192 = 7812 ns. */
+    /* 8192 rows every 64 ms: one refresh every 7812 ns, rounded down from
+     * 7812.5. */
     refi = ns_to_cycles(7812UL, hz);
 
     sdram_pins_init();
 
     /*
-     * SDCLK must run before the part sees any command, and enabling it needs
-     * TWO things that are easy to miss together.  It lives in SYSC rather
-     * than the bus block -- the same one-layer-deeper placement as SCICKCR
-     * and GTCLKCR -- AND it is a clock-generation register, so PRCR_S.PRC0
-     * must be open or the write is DROPPED IN SILENCE.
+     * SDCLK must run before the part sees any command.  Its enable, SDCKOCR,
+     * is a clock-generation register in the SYSC block: PRCR_S.PRC0 must be
+     * open, or the write is dropped with no fault.
      */
     TIKU_REG16(RA8P1_PRCR_S) = (uint16_t)(RA8P1_PRCR_KEY | RA8P1_PRCR_PRC0);
     TIKU_REG8(RA8P1_SDCKOCR) = (uint8_t)RA8P1_SDCKOCR_SDCKOEN;
@@ -150,12 +143,10 @@ int tiku_ra8p1_sdram_init(void)
     TIKU_REG8(RA8P1_SDADR)  = (uint8_t)RA8P1_SDADR_MXC_9BIT;  /* 512 columns */
 
     /*
-     * Continuous access ON, and it is the single biggest number on this
-     * bus.  BE resets to 0, where the controller runs every access
-     * standalone -- activate, CL, precharge, ~9 BCLK per word, measured as
-     * 52 MB/s sequential.  With the row held open, consecutive accesses
-     * pipeline.  Writes to SDAMOD are silently IGNORED once EXENB is set,
-     * so this must happen here in the config window or not at all.
+     * Continuous access on.  BE resets to 0, where every access runs alone:
+     * activate, CL, precharge.  With the row held open, consecutive accesses
+     * pipeline.  SDAMOD ignores writes once EXENB is set, so BE is set here,
+     * before EXENB.
      */
     TIKU_REG8(RA8P1_SDAMOD) = (uint8_t)RA8P1_SDAMOD_BE;
 
@@ -167,12 +158,9 @@ int tiku_ra8p1_sdram_init(void)
 
     /*
      * The datasheet's power-up: 100 us of stable clock, precharge all, at
-     * least two auto-refresh, then the mode register.  The controller's
-     * sequencer does the last three; the 100 us is this driver's to wait.
-     *
-     * Eight refreshes rather than the minimum two: it is what JEDEC parts
-     * conventionally get, costs microseconds once, and removes any question
-     * about a marginal part needing more than the floor.
+     * least two auto-refreshes, then the mode register.  This driver waits
+     * 200 us; the controller's sequencer issues the precharge and eight
+     * auto-refreshes; the SDMOD write below sets the mode register.
      */
     tiku_cpu_ra8p1_delay_us(200U);
 
@@ -192,15 +180,15 @@ int tiku_ra8p1_sdram_init(void)
     }
 
     /*
-     * Mode register.  Burst length MUST be 1 -- UM 15.6 says operation is
-     * not guaranteed otherwise, because the controller issues one column
-     * command per access -- and the CL field must match SDTR.CL above.
-     * Standard SDR layout: A2:A0 burst length, A3 burst type, A6:A4 CL.
+     * Mode register.  UM 15.6 guarantees operation only with burst length 1,
+     * since the controller issues one column command per access; the CL
+     * field matches SDTR.CL above.  Standard SDR layout: A2:A0 burst length
+     * (000 = 1), A3 burst type, A6:A4 CL.
      */
     TIKU_REG16(RA8P1_SDMOD) = (uint16_t)((cl << 4) | 0U);
 
-    /* Writing SDMOD ISSUES the mode-register-set command; MRSST stays set
-     * while it runs, and UM Table 15.33 forbids touching the other registers
+    /* Writing SDMOD issues the mode-register-set command; MRSST stays set
+     * while it runs, and UM Table 15.33 forbids writing the other registers
      * until it clears. */
     for (spins = 2000000UL; spins != 0UL; spins--) {
         if ((TIKU_REG8(RA8P1_SDSR) & RA8P1_SDSR_MRSST) == 0U) {
@@ -256,20 +244,14 @@ int tiku_ra8p1_sdram_attach(void)
 /** @brief Staging buffer for the copy legs; SRAM side of the transfer. */
 static uint32_t sd_bench_src[1024];
 
-/**
- * @brief Report one leg as MB/s, computed from CPU cycles.
- *
- * Every leg is NAMED because a single "SDRAM bandwidth" number is a fiction:
- * sequential and strided differ by an order of magnitude on the same array,
- * and quoting one as the figure is how a benchmark misleads.
- */
+/** @brief Print one leg's name, cycle count and MB/s at @p cpu_hz. */
 static void sd_report(const char *name, uint32_t bytes, uint32_t cycles,
                       uint32_t cpu_hz)
 {
     uint32_t mbps = 0U;
 
     if (cycles != 0U) {
-        /* bytes/cycle * cpu_hz / 1e6, ordered to stay inside 32 bits. */
+        /* bytes * cpu_hz / (cycles * 1e6), in 64-bit arithmetic. */
         mbps = (uint32_t)(((uint64_t)bytes * (uint64_t)cpu_hz) /
                           ((uint64_t)cycles * 1000000ULL));
     }
@@ -290,8 +272,7 @@ void tiku_ra8p1_sdram_bench_run(void)
         return;
     }
 
-    /* DWT must actually be counting; a bench on a dead counter reports
-     * infinite bandwidth rather than failing. */
+    /* The bench stops unless the DWT cycle counter advances. */
     TIKU_REG32(SD_DEMCR) |= (1UL << 24);            /* TRCENA */
     TIKU_REG32(SD_DWT_CTRL) |= 1UL;                 /* CYCCNTENA */
     t0 = *cyc;
@@ -316,13 +297,12 @@ void tiku_ra8p1_sdram_bench_run(void)
     for (i = 0; i < words; i++) { sum += sd[i]; }
     sd_report("seq-read-32", SD_BENCH_BYTES, *cyc - t0, cpu_hz);
 
-    /* Strided by a cache line: every access a fresh line, so this is the
-     * cache-miss path rather than the streaming one. */
+    /* Strided by a 32-byte cache line: every access touches a new line. */
     t0 = *cyc;
     for (i = 0; i < words; i += 8u) { sum += sd[i]; }
     sd_report("read-stride-32B", SD_BENCH_BYTES / 8UL, *cyc - t0, cpu_hz);
 
-    /* Row-hostile: 4 KB apart is a new SDRAM row every access. */
+    /* 4 KB apart: a new SDRAM row on every access. */
     t0 = *cyc;
     for (i = 0; i < words; i += 1024u) { sum += sd[i]; }
     sd_report("read-stride-4KB", SD_BENCH_BYTES / 1024UL, *cyc - t0, cpu_hz);

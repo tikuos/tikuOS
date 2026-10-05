@@ -7,8 +7,8 @@
  *
  * tiku_cache_arch.h - Cortex-M85 cache control.
  *
- * Enabling the caches is only meaningful once the MPU has programmed region
- * attributes, since MAIR is what makes SRAM cacheable at all.
+ * tiku_mpu_arch_init_segments() enables the caches after the MPU, whose
+ * region attributes keep the MRAM NVM span and .uninit out of the D-cache.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -49,11 +49,13 @@ void tiku_ra8p1_dcache_clean(const void *addr, size_t len);
 void tiku_ra8p1_dcache_invalidate(const void *addr, size_t len);
 
 /**
- * @brief Write back then drop the lines covering @p addr.
+ * @brief Write back then drop the lines covering a range.
  *
- * The safe choice after a DMA write into a buffer that is not cache-line
- * aligned: a plain invalidate would DISCARD dirty data belonging to whatever
- * shares the first and last lines.
+ * For a buffer that is not line-aligned: a plain invalidate would discard
+ * dirty data of whatever shares its first and last lines.
+ *
+ * @param addr  Range start; rounded down to a line
+ * @param len   Range length in bytes
  */
 void tiku_ra8p1_dcache_clean_invalidate(const void *addr, size_t len);
 

@@ -22,14 +22,12 @@
 #define SCI     TIKU_BOARD_CONSOLE_SCI
 
 /*
- * Solve UM 39's asynchronous baud equation for BRR:
+ * UM 39's asynchronous baud equation, solved for BRR and rounded to nearest:
  *
- *     baud = PCLKA / (32 * 2^(2*CKS) * (BRR + 1))
+ *     baud = SCICLK / (32 * 2^(2*CKS) * (BRR + 1))
  *
- * The generator divides by 32 per bit, NOT the 16 the sampling rate suggests;
- * reading it as 16 halves the line rate, and the symptom is a silent-looking
- * port rather than an obviously wrong number.  The assert below pins the
- * result to the manual's own table entry.
+ * The generator divides by 32 per bit, not 16.  The assert below checks the
+ * formula against the manual's table.
  */
 #define SCI_BRR_FOR(pclk, baud) \
     ((uint32_t)((((pclk) + (16UL * (baud))) / (32UL * (baud))) - 1UL))
@@ -40,26 +38,21 @@
 /** @brief Baud the console is currently programmed for. */
 static unsigned long uart_baud = TIKU_BOARD_UART_BAUD;
 
-/* The manual publishes one worked example for this generator, and it is the
- * only external check on the arithmetic: 9600 from an 8 MHz SCICLK is CKS 0,
- * BRR 25 (UM Table 39.11).  Asserted against the formula rather than against
- * the live configuration, which no longer uses either number. */
+/* UM Table 39.11: 9600 baud from an 8 MHz SCICLK is CKS 0, BRR 25.  The
+ * assert checks the formula, not the live configuration. */
 _Static_assert(SCI_BRR_FOR(8000000UL, 9600UL) == 25UL,
                "SCI baud formula disagrees with UM Table 39.11 -- the "
                "generator divides by 32 per bit, not 16");
 
 /*
- * Received bytes are taken by an ISR into a ring, not polled by the shell.
+ * The receive ISR moves each byte into a ring.  The scheduler idles in WFI
+ * between ticks, so the shell reads at 128 Hz, while 8N1 characters arrive
+ * at 11520/s at 115200 baud.
  *
- * The scheduler idles in WFI between ticks, so a polled reader samples the SCI
- * at 128 Hz while 8N1 characters arrive at ~11520/s at the board's 115200
- * baud.  A one-byte hardware register cannot bridge that gap; a ring fed at
- * character rate can.
+ * A ring of N holds N-1 bytes, and it must last through a pause in the
+ * reader: a long crypto or NVM operation blocks it for tens of milliseconds.
+ * N is a power of two up to 65536; override with -DTIKU_UART_RX_RING=<N>.
  */
-/* A ring of N holds N-1.  The size that matters is the one that rides out a
- * pause: a long crypto or NVM operation blocks the reader for tens of
- * milliseconds, and at 115200 a small ring overflows on every one.  Power of
- * two; override with -DTIKU_UART_RX_RING=<N>. */
 #ifndef TIKU_UART_RX_RING
 #define TIKU_UART_RX_RING   4096U
 #endif
@@ -71,7 +64,7 @@ static volatile uint16_t uart_rx_tail;
 /** @brief Bytes lost, whether to a full ring or a hardware overrun. */
 static volatile uint16_t uart_overruns;
 
-/** @brief NVIC slots this port links the SCI events onto (map in the regs). */
+/** @brief NVIC slots the SCI events are linked to; the map is in the regs. */
 #define UART_RXI_SLOT   RA8P1_ICU_SLOT_UART_RXI
 #define UART_ERI_SLOT   RA8P1_ICU_SLOT_UART_ERI
 
@@ -85,18 +78,17 @@ static void icu_link(unsigned slot, uint32_t event)
 {
     TIKU_REG32(RA8P1_ICU_IELSR(slot)) = event;
     /* Read back before unmasking: the write crosses into the ICU's clock
-     * domain, and an NVIC enable that overtakes it would arm a slot still
-     * pointing at whatever was there before. */
+     * domain, and an NVIC enable that overtakes it arms the slot while it
+     * still carries its previous event. */
     (void)TIKU_REG32(RA8P1_ICU_IELSR(slot));
     TIKU_REG32(RA8P1_NVIC_ISER(slot / 32U)) = (1UL << (slot % 32U));
 }
 
 /**
- * @brief Clear a slot's interrupt-status flag and make the clear STICK.
+ * @brief Clear a slot's interrupt-status flag before the handler returns.
  *
- * The read-back is not decorative: without it the IELSR write may not have
- * retired when the handler returns, the NVIC re-pends, and one byte arrives
- * twice.
+ * The read-back retires the IELSR write; a handler that returns before it
+ * retires is pended again, and one byte arrives twice.
  *
  * @param slot  NVIC slot to acknowledge
  */
@@ -107,16 +99,13 @@ static void icu_ack(unsigned slot)
     __asm__ volatile ("dsb" ::: "memory");
 }
 
-/* NOTE: the console slots stay permanently unmasked, so they never
- * accumulate a stale NVIC pend the way the htimer's masked slot does; the
- * IELSR clear above is sufficient here. */
+/* The console slots stay unmasked, so they hold no stale NVIC pend and the
+ * IELSR clear is enough. */
 
 /**
  * @brief SCI error interrupt: count the overrun and restart reception.
  *
- * An overrun latches ORER and STOPS the receiver, so noticing it lazily on the
- * next rx_ready() poll leaves the port deaf and a direct read of the counter
- * sees zero.  Clearing here restarts reception where it stalled.
+ * An overrun latches ORER and stops the receiver until ORER is cleared.
  */
 void tiku_ra8p1_sci_eri_handler(void)
 {
@@ -128,11 +117,10 @@ void tiku_ra8p1_sci_eri_handler(void)
 }
 
 /**
- * @brief SCI receive interrupt: take the byte before the next one lands.
+ * @brief SCI receive interrupt: move the byte into the ring.
  *
- * A full ring drops the NEW byte rather than the oldest.  Dropping the oldest
- * would corrupt a command line already half-typed; dropping the newest loses
- * the tail, which the user can see and retype.
+ * A full ring drops the new byte and counts an overrun; the bytes already
+ * queued are kept.
  */
 void tiku_ra8p1_sci_rxi_handler(void)
 {
@@ -150,8 +138,8 @@ void tiku_ra8p1_sci_rxi_handler(void)
 
 void tiku_uart_init(void)
 {
-    /* Ungate SCI8 before any of its registers are touched: a write to a
-     * module-stopped peripheral does not fault, it is simply lost. */
+    /* SCI8 leaves module stop before its registers are written: a write to
+     * a module-stopped peripheral is lost with no fault. */
     TIKU_REG32(RA8P1_MSTPCRB) &= ~RA8P1_MSTPB_SCI8;
 
     /* PFS writes are protected.  Clear B0WI first, then set PFSWE: the two
@@ -168,11 +156,9 @@ void tiku_uart_init(void)
 
     TIKU_REG8(RA8P1_PWPR_S) = (uint8_t)RA8P1_PWPR_B0WI;   /* re-protect */
 
-    /* DRAIN before disabling.  Clearing TE stops the shifter mid-character,
-     * so a re-init while output is in flight truncates it -- one lost newline
-     * per re-init, which the marker parser sees as two records run together
-     * and which no amount of baud change fixes.  Skipped on the first init,
-     * where TE has never been set and TEND means nothing. */
+    /* Drain before disabling: clearing TE stops the shifter mid-character
+     * and truncates output in flight.  Skipped while TE is clear, as on the
+     * first init, when TEND means nothing. */
     if (TIKU_REG32(RA8P1_SCI_CCR0(SCI)) & RA8P1_SCI_CCR0_TE) {
         while ((TIKU_REG32(RA8P1_SCI_CSR(SCI)) & RA8P1_SCI_CSR_TEND) == 0UL) { }
     }
@@ -181,8 +167,8 @@ void tiku_uart_init(void)
     TIKU_REG32(RA8P1_SCI_CCR0(SCI)) = 0UL;
     while (TIKU_REG32(RA8P1_SCI_CCR0(SCI)) != 0UL) { }
 
-    /* From the live SCICLK -- the SCI's own clock, not PCLKA and not a build
-     * constant.  They coincide only at boot, when both are MOCO at /1. */
+    /* From the live SCICLK, the SCI's own clock; it equals PCLKA only at
+     * boot, when both are MOCO at /1. */
     {
         unsigned long sciclk = tiku_cpu_ra8p1_sciclk_get_hz();
         uint32_t brr = (uint32_t)(((sciclk + (16UL * uart_baud)) /
@@ -194,10 +180,8 @@ void tiku_uart_init(void)
                                           RA8P1_SCI_CCR2_CKS(0);
     }
 
-    /* CCR1, CCR3 and CCR4 keep their reset values, which are already
-     * asynchronous 8N1 with the internal clock (UM 39: MOD=000, CHR=10 for
-     * 8-bit, STP=0).  Writing them would only risk disagreeing with the
-     * manual's own defaults. */
+    /* CCR1, CCR3 and CCR4 keep their reset values: asynchronous 8N1 on the
+     * internal clock (UM 39: MOD=000, CHR=10 for 8-bit, STP=0). */
     uart_rx_head = 0U;
     uart_rx_tail = 0U;
     icu_link(UART_RXI_SLOT, RA8P1_EVENT_SCI8_RXI);
@@ -224,9 +208,8 @@ void tiku_uart_puts(const char *s)
 
 uint8_t tiku_uart_rx_ready(void)
 {
-    /* An overrun latches ORER and STOPS reception until it is cleared, so a
-     * single dropped byte would silence the port permanently -- which reads as
-     * dead hardware rather than as a lost character. */
+    /* An overrun latches ORER and stops reception until it is cleared; the
+     * poll clears it as well as the error interrupt. */
     if (TIKU_REG32(RA8P1_SCI_CSR(SCI)) & RA8P1_SCI_CSR_ORER) {
         uart_overruns++;
         TIKU_REG32(RA8P1_SCI_CFCLR(SCI)) = RA8P1_SCI_CFCLR_ORERC;
@@ -285,10 +268,9 @@ void tiku_uart_printf(const char *fmt, ...)
             continue;
         }
         fmt++;
-        /* Flags and width come before the conversion.  Skipping them leaves
-         * "%02u" unmatched, and an unmatched conversion prints its specifier
-         * without consuming its argument -- every later %s then reads one
-         * argument early and dereferences an integer. */
+        /* The zero flag and width precede the conversion.  An unknown
+         * conversion, such as %X, prints as written and consumes no
+         * argument, so every argument after it is read one place early. */
         unsigned width = 0U;
         char     pad   = ' ';
         if (*fmt == '0') { pad = '0'; fmt++; }

@@ -7,9 +7,8 @@
  *
  * tiku_onewire_arch.h - RA8P1 1-Wire contract.
  *
- * No backend on this port: the calls exist so the kernel links.  Only init
- * and reset can report the absence -- they return an error; the writes are
- * void and the reads hand back the idle-high bus pattern.
+ * This port has no 1-Wire driver: init and reset return errors, the writes
+ * do nothing, and the reads return the idle-high bus pattern.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,25 +18,25 @@
 
 #include <interfaces/onewire/tiku_onewire.h>
 
-/** @brief Claim the 1-Wire pin. @return TIKU_OW_OK, or an error */
+/** @brief Claims no pin. @return TIKU_OW_ERR_PARAM */
 int     tiku_onewire_arch_init(void);
 
-/** @brief Release the pin. */
+/** @brief Does nothing. */
 void    tiku_onewire_arch_close(void);
 
-/** @brief Send a reset pulse. @return TIKU_OW_OK when a device answers */
+/** @brief Sends no pulse. @return TIKU_OW_ERR_NO_DEVICE */
 int     tiku_onewire_arch_reset(void);
 
-/** @brief Send one bit. @param bit  Value */
+/** @brief Discards the bit. @param bit  Ignored */
 void    tiku_onewire_arch_write_bit(uint8_t bit);
 
-/** @brief Read one bit. @return The bit */
+/** @brief Samples nothing. @return 1, the idle-high bus level */
 uint8_t tiku_onewire_arch_read_bit(void);
 
-/** @brief Send one byte. @param byte  Value */
+/** @brief Discards the byte. @param byte  Ignored */
 void    tiku_onewire_arch_write_byte(uint8_t byte);
 
-/** @brief Read one byte. @return The byte */
+/** @brief Samples nothing. @return 0xFF, the idle-high bus pattern */
 uint8_t tiku_onewire_arch_read_byte(void);
 
 #endif /* TIKU_RA8P1_ONEWIRE_ARCH_H_ */

@@ -7,8 +7,8 @@
  *
  * tiku_cpu1_arch.h - lifecycle of the RA8P1's Cortex-M33.
  *
- * Start, stop and observe a payload on the second core.  Stop is cooperative
- * and there is no path back to power gating; both are hardware facts.
+ * Start, stop and observe a payload on the second core and exchange messages
+ * with it.  Stop is cooperative, and nothing returns CPU1 to power gating.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,25 +18,29 @@
 
 #include <stdint.h>
 
-/** @brief What the payload writes to its first shared word once executing. */
+/** @brief Value the payload writes to its magic word once it runs. */
 #define TIKU_RA8P1_CPU1_MAGIC   0x4D333350UL
 
-/** @brief Start outcomes; ignoring these leaves a silently dead core. */
+/** @brief Return codes of tiku_ra8p1_cpu1_start() and
+ *         tiku_ra8p1_cpu1_send(). */
 #define TIKU_RA8P1_CPU1_OK          0
-#define TIKU_RA8P1_CPU1_ERR_ACT    -1   /**< never left power gating */
+#define TIKU_RA8P1_CPU1_ERR_ACT    -1   /**< CPU1 not active, or not running */
 #define TIKU_RA8P1_CPU1_ERR_IMG    -2   /**< embedded image absent or too big */
-#define TIKU_RA8P1_CPU1_ERR_LEN    -3   /**< message longer than the mailbox */
+#define TIKU_RA8P1_CPU1_ERR_LEN    -3   /**< message empty or over the cap */
 #define TIKU_RA8P1_CPU1_ERR_DEAD   -4   /**< locked up; a reset revives it */
 
 /**
- * @brief Load the payload and release CPU1, or resume one already running.
+ * @brief Load the payload and release CPU1.  On a core already active,
+ *        resume a halted payload or restart a faulted one.
  *
- * @return TIKU_RA8P1_CPU1_OK, or TIKU_RA8P1_CPU1_ERR_ACT
+ * @return TIKU_RA8P1_CPU1_OK, or TIKU_RA8P1_CPU1_ERR_ACT, _ERR_IMG or
+ *         _ERR_DEAD
  */
 int tiku_ra8p1_cpu1_start(void);
 
 /**
- * @brief Ask the payload to halt, and wait until its heartbeat settles.
+ * @brief Ask the payload to halt, and wait, bounded, until its heartbeat
+ *        stops.
  *
  * @note Cooperative: CPUWAIT is sampled only as the core leaves reset, so a
  *       running core cannot be stalled from outside.
@@ -54,14 +58,19 @@ int tiku_ra8p1_cpu1_active(void);
 /**
  * @brief Is a payload counting, as opposed to halted?
  *
- * @return Non-zero when the payload was started and has not been halted
+ * @return Non-zero from a successful start until a stop, an NMI, or a
+ *         fault that tiku_ra8p1_cpu1_magic() sees
  */
 int tiku_ra8p1_cpu1_running(void);
 
 /**
- * @brief The magic word the payload publishes once it executes.
+ * @brief Read the payload's magic word.
  *
- * @return TIKU_RA8P1_CPU1_MAGIC when the payload has run
+ * A fault or hang value is counted once in tiku_ra8p1_cpu1_fault_count and
+ * clears the running state.
+ *
+ * @return TIKU_CPU1_MAGIC while running, TIKU_CPU1_MAGIC_FAULT or
+ *         TIKU_CPU1_MAGIC_HANG after a fault
  */
 uint32_t tiku_ra8p1_cpu1_magic(void);
 
@@ -75,7 +84,8 @@ uint32_t tiku_ra8p1_cpu1_heartbeat(void);
 /**
  * @brief Is the payload both loaded and still executing?
  *
- * @return Non-zero when the magic is published and the heartbeat moves
+ * @return Non-zero when the payload is running, its magic is
+ *         TIKU_CPU1_MAGIC and its heartbeat moves across a short spin
  */
 int tiku_ra8p1_cpu1_alive(void);
 
@@ -83,7 +93,7 @@ int tiku_ra8p1_cpu1_alive(void);
  * @brief Hand a message to the payload.
  *
  * @param data  Bytes to send
- * @param len   How many, at most TIKU_CPU1_MSG_CAP
+ * @param len   How many, 1..TIKU_CPU1_MSG_CAP
  * @return TIKU_RA8P1_CPU1_OK, ERR_LEN, or ERR_ACT when nothing is running
  */
 int tiku_ra8p1_cpu1_send(const void *data, uint32_t len);
@@ -100,7 +110,8 @@ uint32_t tiku_ra8p1_cpu1_reply_seq(void);
  *
  * @param out  Destination, or NULL to ask only for the length
  * @param cap  Bytes available at @p out
- * @return Bytes the payload replied, or 0 when it has not answered yet
+ * @return Bytes copied (at most @p cap), the reply length when @p out is
+ *         NULL, or 0 when the latest send has no reply
  */
 uint32_t tiku_ra8p1_cpu1_reply(void *out, uint32_t cap);
 
@@ -111,8 +122,8 @@ uint32_t tiku_ra8p1_cpu1_reply(void *out, uint32_t cap);
  */
 uint32_t tiku_ra8p1_cpu1_image_size(void);
 
-/** @brief Non-maskable interrupts seen from armed sources; a CPU1 LOCKUP
- *         raises none, so fault reporting is in-band. */
+/** @brief NMIs taken by the M85.  A CPU1 lockup raises none; payload faults
+ *         are reported through the shared magic word. */
 extern volatile uint32_t tiku_ra8p1_cpu1_nmi_count;
 
 /**
@@ -122,14 +133,19 @@ extern volatile uint32_t tiku_ra8p1_cpu1_nmi_count;
  */
 int tiku_ra8p1_cpu1_bell_take(void);
 
-/** @brief Doorbells taken; 0 with a payload running means polling only. */
+/** @brief Doorbell interrupts received since boot. */
 extern volatile uint32_t tiku_ra8p1_cpu1_bell_count;
 
-/** @brief Faults the payload has reported; survives a warm reset. */
+/** @brief Faults the payload has reported; kept in retained SRAM so it
+ *         survives a warm reset. */
 extern volatile uint32_t tiku_ra8p1_cpu1_fault_count;
 
-/** @brief SRAM truth of the shared page: halt, restart, a2c_seq, magic,
- *         heartbeat -- read fresh past every cached copy. */
+/**
+ * @brief Read halt, a2c_restart, a2c_seq, magic and heartbeat from SRAM,
+ *        after invalidating the cached page.
+ *
+ * @param out  Receives the five words, in that order
+ */
 void tiku_ra8p1_cpu1_raw(uint32_t out[5]);
 
 #endif /* TIKU_RA8P1_CPU1_ARCH_H_ */

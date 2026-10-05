@@ -7,8 +7,8 @@
  *
  * tiku_wake_arch.c - RA8P1 wake-source reporting.
  *
- * Reads what is actually armed rather than what the port intends: SysTick from
- * its own control register, the ICU-linked peripherals from their NVIC lines.
+ * Reports the wake sources armed in hardware: SysTick from its control
+ * register, the ICU-linked peripherals from their NVIC enable bits.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,8 +22,7 @@
 /**
  * @brief Non-zero when NVIC line @p irqn is unmasked.
  *
- * On this part the line number IS the ICU slot number: the ICU links an event
- * onto slot n, and slot n is NVIC line n.
+ * On this part NVIC line n is ICU slot n, the slot an event is linked to.
  */
 static uint32_t nvic_line_armed(uint32_t irqn)
 {
@@ -47,9 +46,9 @@ void tiku_wake_arch_query(tiku_wake_sources_t *out) {
         out->gpio_ie[i] = 0U;
     }
 
-    /* SysTick is a core exception, so it never passes through the ICU and has
-     * no NVIC line to test.  It counts only when running AND allowed to
-     * interrupt: ENABLE without TICKINT counts but wakes nothing. */
+    /* SysTick is a core exception with no ICU link and no NVIC line.  It is a
+     * wake source only with both ENABLE and TICKINT set: ENABLE alone counts
+     * but wakes nothing. */
     csr = TIKU_REG32(RA8P1_SYST_CSR);
     if ((csr & (RA8P1_SYST_CSR_ENABLE | RA8P1_SYST_CSR_TICKINT)) ==
         (RA8P1_SYST_CSR_ENABLE | RA8P1_SYST_CSR_TICKINT)) {
@@ -60,18 +59,16 @@ void tiku_wake_arch_query(tiku_wake_sources_t *out) {
         out->sources |= TIKU_WAKE_UART_RX;
     }
 
-    /* The htimer slot stays masked until an alarm is armed, so this reports
-     * the live state rather than "the driver exists". */
+    /* The htimer slot stays masked until an alarm is armed, so the bit
+     * shows a pending alarm. */
     if (nvic_line_armed(RA8P1_ICU_SLOT_HTIMER)) {
         out->sources |= TIKU_WAKE_HTIMER;
     }
 
     /*
-     * No TIKU_WAKE_WDT and no TIKU_WAKE_GPIO, and both are honest absences.
-     * The IWDT is configured to reset rather than to raise an interval
-     * interrupt, so it restarts the part instead of waking it; and
-     * tiku_gpio_irq_arch_enable() still returns UNSUP here, so no pin can be
-     * armed at all.  Reporting either would name a source the hardware would
-     * not honour.
+     * TIKU_WAKE_WDT and TIKU_WAKE_GPIO are never reported: the IWDT is set to
+     * reset the part, not to raise an interrupt, and
+     * tiku_gpio_irq_arch_enable() returns TIKU_GPIO_IRQ_ERR_UNSUP on this
+     * port, so no pin can be armed.
      */
 }

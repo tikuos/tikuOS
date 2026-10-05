@@ -31,17 +31,17 @@
 /**
  * @brief User SRAM base and extent.
  *
- * The datasheet's 1664 KB from the base, ending at 0x221A_0000.  The part
- * still responds above that; nothing is placed there.
+ * The datasheet's 1664 KB, ending at 0x221A_0000.  Addresses above that
+ * respond, but this port places nothing there.
  */
 #define TIKU_RA8P1_SRAM_BASE        0x22000000UL
 #define TIKU_RA8P1_SRAM_SIZE        (1664UL * 1024UL)
 
 /**
- * @brief CM85 TCM window: recorded, not used.
+ * @brief CM85 TCM base.
  *
- * Responds at the base.  Nothing is placed here: the TCM control registers
- * are not driven by this port, so the usable extent is not established.
+ * This port does not program the TCM control registers and places nothing
+ * in the TCM.
  */
 #define TIKU_RA8P1_TCM_BASE         0x20000000UL
 
@@ -50,11 +50,11 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Peripheral clock A after reset, in Hz.
+ * @brief MOCO rate, and the ICLK and PCLKA it gives out of reset, in Hz.
  *
- * SCKDIVCR reads 0 out of reset, so ICLK and PCLKA are both MOCO.  This is
- * MOCO's NOMINAL rate (spec 7.2/8.0/8.8), so anything derived from it before
- * the PLL is configured carries MOCO's +-10% spread.
+ * SCKDIVCR reads 0 out of reset, so ICLK and PCLKA both run at MOCO.  8 MHz
+ * is MOCO's nominal rate (7.2 to 8.8 MHz), so a rate derived from it before
+ * the PLL runs can be 10% off.
  */
 #define TIKU_RA8P1_MOCO_HZ          8000000UL
 #define TIKU_RA8P1_PCLKA_BOOT_HZ    TIKU_RA8P1_MOCO_HZ
@@ -65,9 +65,9 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * I/O ports.  The manual names them PORT0..PORT9 then PORTA..PORTD, and
- * /dev/gpio numbers them 0..13 from tiku_gpio_geometry.h rather than from
- * these flags -- so /dev/gpio/6 is PORT6, the one carrying LED1, and PA07 is
+ * I/O ports.  The manual names them PORT0..PORT9 then PORTA..PORTD.
+ * /dev/gpio numbers them 0..13 from tiku_gpio_geometry.h, not from these
+ * flags: /dev/gpio/6 is PORT6, which carries LED1, and PA07 is
  * /dev/gpio/10/7.
  */
 #define TIKU_DEVICE_HAS_PORT1       1
@@ -92,14 +92,15 @@
 /* SRAM as the port uses it: 1664 KB from the base. */
 #define TIKU_DEVICE_RAM_START       TIKU_RA8P1_SRAM_BASE
 #define TIKU_DEVICE_RAM_SIZE        TIKU_RA8P1_SRAM_SIZE
-/* What the M85 may actually use.  The first 16 KB of the bank is the CPU1
- * payload area (TIKU_CPU1_AREA_SIZE), which the M85 linker starts above, so
- * counting the whole bank overstates this core's SRAM by that much. */
+/* SRAM the M85 can use: the bank less its first 16 KB, the CPU1 payload
+ * area (TIKU_CPU1_AREA_SIZE), above which r7ka8p1kf.ld starts the M85's
+ * SRAM. */
 #define TIKU_DEVICE_RAM_USABLE      (TIKU_RA8P1_SRAM_SIZE - (16UL * 1024UL))
 
 /*
- * The code MRAM: the image runs from it, `.persistent` lives in a carve at
- * its top, and the in-use figure is derived from _etext.
+ * The kernel's FRAM_* macros describe the code MRAM: the image runs from
+ * it, `.persistent` lives in a carve at its top, and the in-use figure is
+ * derived from _etext.
  */
 #define TIKU_DEVICE_FRAM_SIZE       TIKU_RA8P1_MRAM_SIZE
 #define TIKU_DEVICE_FRAM_START      TIKU_RA8P1_MRAM_BASE
@@ -119,8 +120,7 @@
 /**
  * @brief External interrupt count, for the vector table and the NVIC loops.
  *
- * The ICU maps peripheral events onto any of these slots; 96 covers the bank
- * with room to spare and keeps the vector table one page.
+ * The ICU links any peripheral event to any of the 96 slots (IELSR0..95).
  */
 #define TIKU_RA8P1_NUM_EXT_IRQS     96
 

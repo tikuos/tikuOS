@@ -20,12 +20,11 @@
 #include "tiku_cpu_common.h"
 #include "tiku_gpio_arch.h"
 
-/** @brief LCDCLK as this driver leaves it: MOCO, undivided. */
+/** @brief LCDCLK in the MOCO mode: 8 MHz, undivided. */
 #define GLCDC_PIXEL_HZ          8000000UL
 
-/* Panel-clock divider.  The value the Renesas demo runs on this board, kept
- * because it is known to produce a pixel clock here; the tests check the frame
- * rate as a ratio between two periods, so they do not depend on it. */
+/* Panel-clock divider (PANELCLK.DCDR) in the MOCO mode; the panel mode
+ * uses 1.  7 is the vendor demo's value for this board. */
 #define GLCDC_PANEL_DCDR        7U
 
 /** @brief Bounded spin for the clock and enable handshakes. */
@@ -36,8 +35,9 @@
 
 static uint8_t glcdc_running;
 
-/* Which LCDCLK source the next start() uses.  MOCO needs no PLL and suits the
- * timing tests; a panel needs the real pixel rate, which only a PLL gives. */
+/* LCDCLK source for the next tiku_glcdc_arch_start().  MOCO needs no PLL;
+ * tiku_glcdc_arch_panel_start() selects PLL1P for the panel's 60 MHz pixel
+ * rate and restores MOCO after. */
 #define GLCDC_SRC_MOCO   0U
 #define GLCDC_SRC_PLL1P  1U
 static uint8_t glcdc_pixel_source;
@@ -50,10 +50,9 @@ static uint8_t glcdc_pixel_source;
 static void
 glcdc_protect(int unlock)
 {
-    /* PRC0 covers the clock generation circuit and PRC1 the power domain;
-     * this driver touches both, and a write made without the matching bit
-     * open is dropped rather than refused, so the symptom is a handshake
-     * that never completes. */
+    /* PRC0 unlocks the clock generation registers and PRC1 the power
+     * domain; a write without its bit open is dropped, and the handshake
+     * that follows never completes. */
     TIKU_REG16(RA8P1_PRCR_S) = (uint16_t)(RA8P1_PRCR_KEY |
                                           (unlock ? (RA8P1_PRCR_PRC0 |
                                                      RA8P1_PRCR_PRC1) : 0U));
@@ -84,7 +83,8 @@ glcdc_power_on(void)
 }
 
 /**
- * @brief Point LCDCLK at MOCO undivided, through the documented handshake.
+ * @brief Select LCDCLK through the documented handshake: MOCO undivided, or
+ *        PLL1P / 4 when glcdc_pixel_source is GLCDC_SRC_PLL1P.
  *
  * @note The clock stops while the request is asserted, so the write order is
  *       fixed: request, wait for ready, set source and divider, release.
@@ -127,9 +127,8 @@ glcdc_clock_moco(void)
 
 /*
  * The parallel graphics board's 24 data lines, then LCD_CLK and the four TCON
- * signals, as port<<8 | pin.  Board manual table 33; the data order is not
- * monotonic in the pin numbers and copying it by eye is how a display comes up
- * with its colour channels swapped.
+ * signals, as port<<8 | pin (board manual table 33).  The data order does not
+ * follow the pin numbers; a misordered entry swaps colour channels.
  */
 static const uint16_t glcdc_panel_pins[] = {
     0x090E, 0x090F, 0x0903, 0x0902, 0x090A, 0x090B, 0x090C, 0x090D, /* D0-7  */
@@ -146,12 +145,13 @@ static const uint16_t glcdc_panel_pins[] = {
 #define GLCDC_PANEL_RST_PORT    6U
 #define GLCDC_PANEL_RST_PIN     6U
 
-/*
- * Route one pin to the display controller at high drive.  Not
- * tiku_ra8p1_gpio_init_peripheral(): that leaves the drive strength at its
- * default, and an under-driven 60 MHz bus of 29 lines gives pixels that are
- * almost right rather than none at all -- the same reason the OSPI pins ask
- * for it explicitly.
+/**
+ * @brief Route one pin to the GLCDC at high drive strength.
+ *
+ * tiku_ra8p1_gpio_init_peripheral() leaves the default drive, which is too
+ * weak for the 60 MHz bus and gives subtly wrong pixels.
+ *
+ * @note Call with PFS writes unlocked (PWPR.PFSWE set).
  */
 static void
 glcdc_pin_to_glcdc(uint32_t port, uint32_t pin)
@@ -221,9 +221,9 @@ tiku_glcdc_arch_start(const tiku_glcdc_mode_t *mode, const void *fb)
         return rc;
     }
 
-    /* SWRST reads 0 out of reset and 0 MEANS held in reset, so the module
-     * accepts every configuration write below while doing nothing with any
-     * of it.  Release it before configuring, not after. */
+    /* BG_EN.SWRST reads 0 out of reset, which holds the module in reset: it
+     * accepts the configuration writes below but acts on none of them.  It is
+     * released first. */
     TIKU_REG32(RA8P1_GLCDC_BG_EN) = RA8P1_GLCDC_BG_EN_SWRST;
     tiku_cpu_ra8p1_delay_us(10U);
 
@@ -244,17 +244,17 @@ tiku_glcdc_arch_start(const tiku_glcdc_mode_t *mode, const void *fb)
 
         TIKU_REG32(RA8P1_GLCDC_GR_FLM2(1)) = (uint32_t)(uintptr_t)fb;
         TIKU_REG32(RA8P1_GLCDC_GR_FLM3(1)) = bytes << 16;
-        /* Both FLM5 counts are minus-one: DATANUM in 64-byte bursts per
-         * line, LNNUM in lines.  The demo's live values are the reference
-         * (23 bursts for 1536 bytes, 449 for a 450-line window). */
+        /* Both FLM5 counts are minus one: DATANUM in 64-byte bursts per
+         * line, LNNUM in lines (a 1536-byte, 450-line window gives 23 and
+         * 449). */
         TIKU_REG32(RA8P1_GLCDC_GR_FLM5(1)) = ((bytes / 64U) - 1U) |
                                      (((uint32_t)mode->v_active - 1U) << 16);
-        /* FLM1 as the demo runs it; the field is undocumented in the UM's
-         * text but the working configuration sets 3. */
+        /* FLM1 = 3: the UM text does not document the field; 3 is the
+         * vendor demo's value. */
         TIKU_REG32(RA8P1_GLCDC_GR_FLM1(1)) = 3U;
         TIKU_REG32(RA8P1_GLCDC_GR_FLM6(1)) = RA8P1_GLCDC_GR_FLM6_RGB565;
-        /* Where the layer lands, in the background plane's own coordinates:
-         * without this the window is whatever reset left behind. */
+        /* The layer's window, in background-plane coordinates; its reset
+         * value is not the visible window. */
         TIKU_REG32(RA8P1_GLCDC_GR_AB2(1))  = (uint32_t)mode->v_active |
             ((uint32_t)mode->v_start << 16);
         TIKU_REG32(RA8P1_GLCDC_GR_AB3(1))  = (uint32_t)mode->h_active |
@@ -264,9 +264,8 @@ tiku_glcdc_arch_start(const tiku_glcdc_mode_t *mode, const void *fb)
         TIKU_REG32(RA8P1_GLCDC_GR_VEN(1))  = RA8P1_GLCDC_GR_VEN_PVEN;
     }
 
-    /* Layer 2 sits above layer 1 and its reset state paints black over the
-     * whole frame; every lower stage can be perfect and the glass stays
-     * dark.  Pass-through unless a caller configures it for real. */
+    /* Layer 2 sits above layer 1, and its reset state paints the whole frame
+     * black; it is set to pass-through. */
     TIKU_REG32(RA8P1_GLCDC_GR_AB1(2)) = RA8P1_GLCDC_GR_AB1_DISPSEL_PASS;
     TIKU_REG32(RA8P1_GLCDC_GR_VEN(2)) = RA8P1_GLCDC_GR_VEN_PVEN;
 
@@ -290,15 +289,15 @@ tiku_glcdc_arch_start(const tiku_glcdc_mode_t *mode, const void *fb)
     TIKU_REG32(RA8P1_GLCDC_TCON_DE)    = 0U;
     TIKU_REG32(RA8P1_GLCDC_OUT_SET)    = 0U;         /* 24-bit parallel   */
 
-    /* Output correction multiplies, and zero is its reset value. */
+    /* Output brightness and contrast multiply each pixel; their reset value
+     * is zero. */
     TIKU_REG32(RA8P1_GLCDC_OUT_BRIGHT1) = RA8P1_GLCDC_BRIGHT_MID;
     TIKU_REG32(RA8P1_GLCDC_OUT_BRIGHT2) = (RA8P1_GLCDC_BRIGHT_MID << 16) |
                                           RA8P1_GLCDC_BRIGHT_MID;
     TIKU_REG32(RA8P1_GLCDC_OUT_CONTRAST) = RA8P1_GLCDC_CONTRAST_UNITY;
-    /* The output block has its OWN reflect bit, separate from BG_EN.VEN and
-     * the per-layer PVENs.  Without this pulse none of the OUT_* writes --
-     * the contrast among them -- ever reach the hardware, and the output
-     * stage keeps multiplying every pixel by its reset value of zero. */
+    /* OUT_VLATCH is the output block's reflect bit, separate from BG_EN.VEN
+     * and the layers' PVEN; without it the OUT_* writes, contrast included,
+     * never take effect and every pixel is multiplied by zero. */
     TIKU_REG32(RA8P1_GLCDC_OUT_VLATCH) = 1U;
 
     /* Arm the detectors before starting, or the flags never set. */
@@ -306,8 +305,8 @@ tiku_glcdc_arch_start(const tiku_glcdc_mode_t *mode, const void *fb)
                                          RA8P1_GLCDC_SYS_L1UNDF;
     TIKU_REG32(RA8P1_GLCDC_SYS_STCLR)  = RA8P1_GLCDC_SYS_VPOS |
                                          RA8P1_GLCDC_SYS_L1UNDF;
-    /* Panel clock: the divider and the source may only move while the
-     * output is disabled, so this is three writes rather than one. */
+    /* Panel clock: the divider and the source change only while the output
+     * is disabled, so it is disabled, set, then enabled. */
     TIKU_REG32(RA8P1_GLCDC_SYS_PANELCLK) = 0U;
     TIKU_REG32(RA8P1_GLCDC_SYS_PANELCLK) =
         RA8P1_GLCDC_PANELCLK_DCDR(glcdc_pixel_source == GLCDC_SRC_PLL1P ? 1U : GLCDC_PANEL_DCDR) |
@@ -352,7 +351,7 @@ tiku_glcdc_arch_rebind(const void *fb)
 int
 tiku_glcdc_arch_panel_start(const void *fb)
 {
-    /* The panel's own timing; the demo runs the same numbers on this board. */
+    /* The panel's timing. */
     static const tiku_glcdc_mode_t panel = {
         .h_active = TIKU_GLCDC_PANEL_W, .h_total = 1334U,
         .h_sync = 10U, .h_start = 301U,
@@ -365,8 +364,8 @@ tiku_glcdc_arch_panel_start(const void *fb)
     if (fb == 0) {
         return TIKU_GLCDC_ERR_INVALID;
     }
-    /* Already scanning: rebinding costs a register write and a frame, where
-     * a restart would blank the panel and re-run the reset dance. */
+    /* Already scanning: only the framebuffer is rebound; the panel stays lit
+     * and is not reset again. */
     if (glcdc_running) {
         return tiku_glcdc_arch_rebind(fb);
     }

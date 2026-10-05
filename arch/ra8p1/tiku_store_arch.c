@@ -20,24 +20,18 @@
 #include <kernel/fs/tiku_nvm_backend.h>
 
 /*
- * The staging disk is the SDRAM window, and the model lands at its base --
- * the same address the restore writes back to, so a model that has been
- * imported and one that has just been staged are in the same place and
- * everything downstream can stop caring which it was.
+ * The staging disk is the SDRAM window, and the model sits at its base both
+ * when the host stages it and after a restore.
  */
 #define STORE_STAGE_BASE   TIKU_RA8P1_SDRAM_ADDR
 #define STORE_STAGE_BYTES  TIKU_RA8P1_SDRAM_BYTES
 #define STORE_BLOCK        512UL
 
-/*
- * The blob sits 4 MB into the flash.  The first megabytes are left alone
- * because that is where this board shipped its own content, and overwriting
- * a factory image to save four megabytes of a sixty-four megabyte part is a
- * poor trade.
- */
+/* The blob sits 4 MB into the flash; the first 4 MB hold the board's
+ * factory content. */
 #define STORE_SLOT_OFF     0x00400000UL
 
-/** @brief Cycles per millisecond at the core clock this port runs. */
+/** @brief Cycles per millisecond at the core clock, taken as 240 MHz. */
 #define STORE_CYC_PER_MS   240000UL
 
 #define STORE_DWT_CYCCNT   0xE0001004UL
@@ -50,11 +44,9 @@ uint32_t tiku_ra8p1_store_commit_lba(void)
 }
 
 /*
- * An import owns the staging window for as long as it runs, and the window is
- * also the disk the host writes.  There is exactly one writer at a time and
- * the medium cannot arbitrate, so the transport refuses host writes while
- * this is set rather than letting the two interleave into a blob that is
- * partly one model and partly the next.
+ * An import owns the staging window while it runs, and the window is also
+ * the disk the host writes.  While store_active is set the USB transport
+ * refuses every host command, so a blob cannot mix two models.
  */
 static tiku_bigblob_wr_t   store_wr;
 static tiku_store_state_t  store_last = TIKU_STORE_IDLE;
@@ -126,7 +118,7 @@ int tiku_ra8p1_store_step(uint32_t *done)
         store_last = TIKU_STORE_ERR_WRITE;
         return 0;
     }
-    /* Verified from the medium before anything is told it succeeded. */
+    /* Verified from flash before store_last reports success. */
     store_last = tiku_ra8p1_store_verify() ? TIKU_STORE_DONE
                                            : TIKU_STORE_ERR_VERIFY;
     return 0;
@@ -148,8 +140,7 @@ tiku_store_state_t tiku_ra8p1_store_on_write(uint32_t lba, uint32_t blocks)
     if (c->magic != TIKU_STORE_MAGIC) {
         return TIKU_STORE_ERR_MAGIC;
     }
-    /* The payload must end before the sentinel, or the record would be
-     * describing a span that includes itself. */
+    /* The payload must end before the sentinel block. */
     if (c->len == 0UL ||
         c->len > ((uint32_t)lba * STORE_BLOCK)) {
         return TIKU_STORE_ERR_LEN;
@@ -167,9 +158,7 @@ tiku_store_state_t tiku_ra8p1_store_on_write(uint32_t lba, uint32_t blocks)
                            c->len) != TIKU_BIGBLOB_OK) {
         return TIKU_STORE_ERR_WRITE;
     }
-    /* Verified from the medium before the host is told anything: a model
-     * that only appears to have been stored is worse than one that plainly
-     * failed, because the failure surfaces at the next boot instead. */
+    /* Verified from flash before TIKU_STORE_DONE is returned. */
     if (tiku_bigblob_verify(be, STORE_SLOT_OFF) != TIKU_BIGBLOB_OK) {
         return TIKU_STORE_ERR_VERIFY;
     }
@@ -235,8 +224,7 @@ int tiku_ra8p1_store_restore(uint32_t *out_ms, uint32_t *out_len, char *name)
     TIKU_REG32(STORE_DWT_CTRL) |= 1UL;
     t0 = TIKU_REG32(STORE_DWT_CYCCNT);
 
-    /* Word at a time out of the memory-mapped flash: the window is already
-     * the fastest path to it, so a restore is a copy and nothing more. */
+    /* Copied a word at a time from the memory-mapped flash. */
     for (i = 0U; i < (len / 4U); i++) {
         dst[i] = src[i];
     }

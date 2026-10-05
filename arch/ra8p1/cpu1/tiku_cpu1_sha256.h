@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu1_sha256.h - the A/B compute kernel both cores compile.
+ * tiku_cpu1_sha256.h - iterated SHA-256, built into both cores.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -16,10 +16,11 @@
 #include <stdint.h>
 
 /**
- * @brief Iterated SHA-256: digest feeds the next round's input.
+ * @brief Iterated SHA-256 over a 40-byte buffer that starts as @p seed.
  *
- * Compute-bound and sequential by construction, so the time it takes is
- * the silicon's, not the mailbox's.
+ * Each round hashes the buffer and writes the digest over its first 32
+ * bytes; the last 8 bytes keep the seed's values.  Each round needs the
+ * previous digest, so the rounds run strictly in sequence.
  *
  * @param seed  40 input bytes
  * @param iters Rounds; 0 is treated as 1

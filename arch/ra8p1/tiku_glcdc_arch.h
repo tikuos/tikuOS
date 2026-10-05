@@ -7,9 +7,9 @@
  *
  * tiku_glcdc_arch.h - RA8P1 graphics LCD controller.
  *
- * Generates display timing and scans a framebuffer out of memory.  Nothing
- * here drives a panel: the pixels leave through the MIPI link, so this is
- * usable and checkable with no display attached.
+ * Generates display timing and scans an RGB565 framebuffer out of memory.
+ * tiku_glcdc_arch_start() runs on MOCO with no panel attached;
+ * tiku_glcdc_arch_panel_start() drives the board's parallel RGB panel.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,7 +19,7 @@
 
 #include <stdint.h>
 
-#define TIKU_GLCDC_OK           0
+#define TIKU_GLCDC_OK           0    /**< success                            */
 #define TIKU_GLCDC_ERR_STATE   -1   /**< not initialised, or already running */
 #define TIKU_GLCDC_ERR_INVALID -2   /**< timing outside the field widths     */
 #define TIKU_GLCDC_ERR_TIMEOUT -3   /**< a clock or enable never settled     */
@@ -39,9 +39,9 @@ typedef struct {
 /**
  * @brief Start timing generation, optionally scanning a framebuffer.
  *
- * @note Leaves LCDCLK on MOCO undivided, so the frame rate is
- *       8 MHz / (h_total * v_total) and a measured rate checks the clock and
- *       the timing registers together.
+ * Called directly, it runs LCDCLK from MOCO undivided with the panel clock at
+ * LCDCLK / 7 (PANELCLK.DCDR), so the frame rate is
+ * 8 MHz / (7 x h_total x v_total).
  *
  * @param mode  Timing to generate
  * @param fb    RGB565 framebuffer for layer 1, or NULL for timing only
@@ -73,7 +73,8 @@ int tiku_glcdc_arch_vpos_take(void);
  */
 int tiku_glcdc_arch_underflow(void);
 
-/** @brief The LCDCLK frequency this driver configures, in Hz. */
+/** @brief LCDCLK in Hz as tiku_glcdc_arch_start() sets it: 8 MHz, MOCO.
+ *         After tiku_glcdc_arch_panel_start() LCDCLK is PLL1P / 4. */
 uint32_t tiku_glcdc_arch_pixel_hz(void);
 
 /**
@@ -87,18 +88,18 @@ uint32_t tiku_glcdc_arch_pixel_hz(void);
  *       the pixel clock divides PLL1P, which follows the rung.
  *
  * @param fb  RGB565 framebuffer of TIKU_GLCDC_PANEL_W x TIKU_GLCDC_PANEL_H
- * @return TIKU_GLCDC_OK, or a negative error
+ * @return TIKU_GLCDC_OK, or a negative error; when already scanning, the
+ *         result of tiku_glcdc_arch_rebind()
  */
 int tiku_glcdc_arch_panel_start(const void *fb);
 
 /**
- * @brief Point the running layer at a different framebuffer.
- *
- * @note Takes effect at the next frame boundary, which is what makes it the
- *       basis of page flipping as well as of re-binding.
+ * @brief Point the running layer at a different framebuffer; the change
+ *        takes effect at the next frame boundary.
  *
  * @param fb  RGB565 framebuffer of the panel's geometry
- * @return TIKU_GLCDC_OK, or TIKU_GLCDC_ERR_STATE when nothing is running
+ * @return TIKU_GLCDC_OK, or TIKU_GLCDC_ERR_STATE when nothing is running or
+ *         @p fb is NULL
  */
 int tiku_glcdc_arch_rebind(const void *fb);
 

@@ -18,9 +18,10 @@
 
 #include <stdint.h>
 
+/** @brief Result codes; negative values are failures. */
 #define TIKU_RA8P1_USBHS_OK          0
-#define TIKU_RA8P1_USBHS_ERR_CLOCK  -1  /**< the PHY PLL never locked      */
-#define TIKU_RA8P1_USBHS_ERR_STATE  -2  /**< called in the wrong order     */
+#define TIKU_RA8P1_USBHS_ERR_CLOCK  -1  /**< the PHY PLL did not lock      */
+#define TIKU_RA8P1_USBHS_ERR_STATE  -2  /**< called before the bring-up    */
 
 /** @brief Speed the chirp handshake settled on, read from DVSTCTR0.RHST. */
 typedef enum {
@@ -39,19 +40,16 @@ typedef enum {
 } tiku_ra8p1_usbhs_devstate_t;
 
 /*
- * Brought up DETACHED on purpose.  Presenting the pull-up is what starts a
- * conversation with deadlines set by the other end, and being able to look
- * at the controller before that happens is the difference between debugging
- * bring-up and debugging enumeration.
- *
- * NOTE ON THIS BOARD: VBUS is not routed to the MCU -- USBHS_VBUS would be
- * P408, which the EK-RA8P1 gives to a Pmod header -- so INTSTS0.VBSTS does
- * not report whether a cable is plugged in.  Attachment has to be inferred
- * from bus activity instead.
+ * VBUS is not routed to the MCU on this board (USBHS_VBUS would be P408,
+ * which the EK-RA8P1 gives to a Pmod header), so INTSTS0.VBSTS does not show
+ * whether a cable is plugged in; attachment shows only as bus activity.
  */
 
 /**
  * @brief Power, clock and release the PHY; leave the device detached.
+ *
+ * The host starts enumeration only when tiku_ra8p1_usbhs_attach() presents
+ * the D+ pull-up.  A second call while up returns TIKU_RA8P1_USBHS_OK.
  *
  * @param want_high non-zero to enable high-speed operation
  * @return TIKU_RA8P1_USBHS_OK, or a negative error code
@@ -81,7 +79,7 @@ int tiku_ra8p1_usbhs_pll_locked(void);
 /**
  * @brief USB interrupt handler; enumeration runs entirely from here.
  *
- * @note Vector index 16 + RA8P1_ICU_SLOT_USBHS, linked to USBHS_USBIR.
+ * Vector 16 + RA8P1_ICU_SLOT_USBHS, linked to the USBHS_USBIR event.
  */
 void tiku_ra8p1_usbhs_handler(void);
 
@@ -99,20 +97,27 @@ void tiku_ra8p1_usbhs_ep0_stats(uint32_t *setup, uint32_t *stall,
                                 uint16_t *last);
 
 /**
- * @brief Read trace entry @p i (9 words: req val len ctsq dcp/ctr spins pre post).
- * @return total entries recorded, or 0 when @p i is past the end
+ * @brief Copy EP0 trace entry @p i: req, val, len, ctsq, DCPCTR and CFIFOCTR
+ *        after the write, FRDY spins, and DCPCTR before and after CCPL.
+ *
+ * @param i     Entry index, from 0
+ * @param out9  Receives the nine words
+ * @return total entries recorded, or 0 when @p i is past the end or
+ *         @p out9 is NULL
  */
 unsigned tiku_ra8p1_usbhs_ep0_trace(unsigned i, uint16_t *out9);
 
 /**
  * @brief Service one mass-storage command, if the host has sent one.
  *
- * Poll alongside ep0_poll().  Bulk transfers have no deadline of their own,
- * but the host will not send the next command until this one is answered.
+ * Runs the whole command, data phase and status included, before returning.
+ *
+ * @note Call from a regular pump: the host sends no new command until this
+ *       one is answered.
  */
 void tiku_ra8p1_usbhs_msc_poll(void);
 
-/** @brief OUT-pipe counters: packets taken, and stalls that ended a transfer. */
+/** @brief OUT-pipe counters: packets taken, and transfers that timed out. */
 void tiku_ra8p1_usbhs_msc_out_stats(uint32_t *pkts, uint32_t *stalls);
 
 /**
@@ -120,7 +125,8 @@ void tiku_ra8p1_usbhs_msc_out_stats(uint32_t *pkts, uint32_t *stalls);
  *
  * @param resets  receives Bulk-Only Reset requests served
  * @param cswfail receives status wrappers that could not be delivered
- * @return the four opcodes packed little-endian, oldest in the low byte
+ * @return ring slots 0-3 packed little-endian, slot 0 in the low byte;
+ *         accepted command n lands in slot n % 4
  */
 uint32_t tiku_ra8p1_usbhs_msc_trace(uint32_t *resets, uint32_t *cswfail);
 
@@ -133,7 +139,12 @@ uint32_t tiku_ra8p1_usbhs_msc_trace(uint32_t *resets, uint32_t *cswfail);
  */
 uint32_t tiku_ra8p1_usbhs_msc_last_write(uint32_t *lba, uint32_t *blocks);
 
-/** @brief Pipe geometry read back from hardware: cfg/buf/maxp per pipe, last DTLN. */
+/**
+ * @brief Pipe geometry read back at configuration, and the last DTLN.
+ *
+ * @param out7  Receives PIPECFG, PIPEBUF and PIPEMAXP of the IN pipe, the
+ *              same of the OUT pipe, then the last DTLN; NULL is ignored
+ */
 void tiku_ra8p1_usbhs_pipe_regs(uint16_t *out7);
 
 /** @brief MSC counters: wrappers seen, reads, writes, and failures. */
@@ -155,7 +166,10 @@ int tiku_ra8p1_usbhs_id_high(void);
 int tiku_ra8p1_usbhs_up_state(void);
 
 /**
- * @brief Snapshot the registers worth seeing, in a fixed order.
+ * @brief Snapshot the controller's status registers, in a fixed order.
+ *
+ * Each word reads 0xDEAD while the module is stopped; words past the eighth
+ * read 0.
  *
  * @param out receives SYSCFG, SYSSTS0, PLLSTA, DVSTCTR0, PHYSET, INTSTS0,
  *            LPSTS, FRMNUM

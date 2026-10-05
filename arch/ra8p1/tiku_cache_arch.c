@@ -7,8 +7,8 @@
  *
  * tiku_cache_arch.c - Cortex-M85 cache control.
  *
- * Geometry is read from CCSIDR rather than assumed, and the set/way loops
- * derive their shifts from it, so a different cache build still walks cleanly.
+ * The set/way walk reads the set and way counts from CCSIDR; the set field
+ * assumes the M85's 32-byte line.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -45,8 +45,8 @@ static void dcache_all(uint32_t op) {
 void tiku_ra8p1_cache_enable(void) {
     uint32_t ccr = TIKU_REG32(RA8P1_SCB_CCR);
 
-    /* Both caches hold junk after power-up, so each is invalidated before its
-     * enable bit lands; an already-on cache is left exactly as it is. */
+    /* Each cache is invalidated before it is enabled, since its contents
+     * after power-up are undefined; a cache already on is left as it is. */
     if ((ccr & RA8P1_SCB_CCR_IC) == 0UL) {
         TIKU_REG32(RA8P1_SCB_ICIALLU) = 0UL;
         __asm__ volatile ("dsb\n\tisb" ::: "memory");
@@ -86,13 +86,15 @@ uint32_t tiku_ra8p1_cache_state(void) {
 /**
  * @brief Shared walker for the by-address maintenance operations.
  *
+ * Does nothing while the D-cache is off.
+ *
  * @param op    Register to write per line
  * @param addr  Range start
  * @param len   Range length in bytes
  */
 static void dcache_range(uint32_t op, const void *addr, size_t len) {
     if ((TIKU_REG32(RA8P1_SCB_CCR) & RA8P1_SCB_CCR_DC) == 0UL) {
-        return;                                  /* nothing cached to maintain */
+        return;                                  /* nothing to maintain */
     }
     uintptr_t p   = (uintptr_t)addr & ~(RA8P1_CACHE_LINE - 1UL);
     uintptr_t end = (uintptr_t)addr + len;
@@ -121,8 +123,8 @@ void tiku_ra8p1_icache_invalidate(void) {
     if (!(TIKU_REG32(RA8P1_SCB_CCR) & RA8P1_SCB_CCR_IC)) {
         return;                                  /* nothing cached to drop */
     }
-    /* Whole-cache: the callers of this (a freshly written code page, a loaded
-     * module) want everything stale gone rather than one line. */
+    /* The whole I-cache: callers (a written code page, a loaded module) need
+     * every stale line gone. */
     __asm__ volatile ("dsb" ::: "memory");
     TIKU_REG32(RA8P1_SCB_ICIALLU) = 0UL;
     __asm__ volatile ("dsb\n\tisb" ::: "memory");

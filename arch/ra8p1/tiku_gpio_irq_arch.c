@@ -5,25 +5,17 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_gpio_irq_arch.c - RA8P1 pin interrupts, unimplemented.
+ * tiku_gpio_irq_arch.c - RA8P1 pin interrupts: a stub.
  *
- * Only a fixed set of pins can raise an IRQ here, chosen through the ICU's
- * IRQCR registers and PmnPFS.ISEL rather than one line per pin number.
+ * Both calls return TIKU_GPIO_IRQ_ERR_UNSUP.  On this part a pin raises an
+ * interrupt only through one of the ICU's IRQn inputs (PmnPFS.ISEL, IRQCRn).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <hal/tiku_gpio_irq_hal.h>
 
-/*
- * UNSUP, not OK.  Wiring these to the ICU means routing a pin to one of the
- * IRQn inputs (only some pins can reach any given one), setting PmnPFS.ISEL,
- * choosing the edge in IRQCRn and enabling the NVIC line -- a table of which
- * pin reaches which IRQn, which is real work rather than a rename of the
- * STM32's per-pin EXTI.  Returning OK meanwhile would leave a caller waiting
- * on an event that can never arrive, which is the failure this refuses to
- * create.
- */
+/* No pin interrupt is armed: both calls return TIKU_GPIO_IRQ_ERR_UNSUP. */
 int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
                               tiku_gpio_edge_t edge)
 {

@@ -18,8 +18,8 @@
 #include "tiku_cpu1_arch.h"
 #include "cpu1/tiku_cpu1_ipc.h"
 
-/* The published capacity is a -D, so this is what stops it drifting from the
- * mailbox it describes. */
+/* TIKU_COPROC_MSG_CAP comes from a -D flag; this fails the build when it
+ * differs from the mailbox. */
 _Static_assert(TIKU_COPROC_MSG_CAP == TIKU_CPU1_MSG_CAP,
                "coproc: the published cap must match the mailbox");
 
@@ -28,8 +28,9 @@ static uint32_t coproc_seen_seq;
 
 uint32_t tiku_coproc_flags(void)
 {
-    /* Both are hardware facts: ACTREQ acts only while ACT is 0 and nothing
-     * returns CPU1 to power gating, and the payload is its own link. */
+    /* ONESHOT: ACTREQ acts only while ACT is 0, and nothing returns CPU1 to
+     * power gating.  OWN_IMAGE: the payload is a separate image copied in at
+     * start. */
     return TIKU_COPROC_F_ONESHOT | TIKU_COPROC_F_OWN_IMAGE;
 }
 
@@ -40,11 +41,11 @@ tiku_coproc_state_t tiku_coproc_state(void)
     if (!tiku_ra8p1_cpu1_active()) {
         return TIKU_COPROC_STOPPED;
     }
-    /* The magic first: a faulted payload still holds cpu1_running until the
-     * fault is noticed, and this read is what notices it. */
+    /* Read the magic first: a faulted payload keeps the running flag set
+     * until tiku_ra8p1_cpu1_magic() sees the fault. */
     m = tiku_ra8p1_cpu1_magic();
     if (m == TIKU_CPU1_MAGIC_FAULT || m == TIKU_CPU1_MAGIC_HANG) {
-        /* A WDT1-caught hang is a fault-class state: unusable, restart it. */
+        /* A hang caught by WDT1 is reported as a fault: it needs a restart. */
         return TIKU_COPROC_FAULTED;
     }
     if (!tiku_ra8p1_cpu1_running()) {
@@ -62,8 +63,7 @@ int tiku_coproc_start(void)
         return TIKU_COPROC_ERR_IMAGE;
     }
     if (rc != TIKU_RA8P1_CPU1_OK) {
-        /* ERR_DEAD folds in: a locked-up core is a state problem the
-         * caller cannot message its way out of. */
+        /* ERR_ACT and ERR_DEAD (a locked-up core) both map here. */
         return TIKU_COPROC_ERR_STATE;
     }
     coproc_seen_seq = tiku_ra8p1_cpu1_reply_seq();
@@ -74,8 +74,9 @@ int tiku_coproc_stop(void)
 {
     tiku_ra8p1_cpu1_stop();
 
-    /* The park is inferred from heartbeat stasis, so a core that never
-     * settled is the timeout this contract promises to report. */
+    /* tiku_ra8p1_cpu1_stop() infers the park from a heartbeat that stops; a
+     * heartbeat still moving afterwards is reported as
+     * TIKU_COPROC_ERR_TIMEOUT. */
     return tiku_ra8p1_cpu1_alive() ? TIKU_COPROC_ERR_TIMEOUT : TIKU_COPROC_OK;
 }
 
@@ -108,9 +109,9 @@ int tiku_coproc_poll(void)
 {
     uint32_t seq;
 
-    /* The doorbell is the cheap path: no cache maintenance unless it rang.
-     * The sequence check stays as the authority, because a doorbell can be
-     * coalesced or arrive for a reply already collected. */
+    /* The cache maintenance of a sequence read runs only after a doorbell.
+     * The sequence decides: doorbells coalesce, and one can arrive for a reply
+     * already collected. */
     if (!tiku_ra8p1_cpu1_bell_take()) {
         return 0;
     }

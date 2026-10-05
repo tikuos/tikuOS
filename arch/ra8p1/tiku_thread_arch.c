@@ -7,8 +7,8 @@
  *
  * tiku_thread_arch.c - RA8P1 worker-thread switcher shim.
  *
- * The Cortex-M85 uses the generic switcher; naming this part's PendSV vector
- * symbol is the whole port, and the DWT supplies the cycle counter.
+ * The Cortex-M85 uses the generic Cortex-M switcher: this file names the
+ * part's PendSV vector symbol, and the DWT supplies the cycle counter.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

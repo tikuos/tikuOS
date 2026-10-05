@@ -19,9 +19,10 @@
 #include <stdint.h>
 #include <stddef.h>
 
+/** @brief Result codes; negative values are failures. */
 #define TIKU_RA8P1_SDRAM_OK          0
-#define TIKU_RA8P1_SDRAM_ERR_INIT   -1   /**< sequencer never completed  */
-#define TIKU_RA8P1_SDRAM_ERR_CLOCK  -2   /**< bus clock outside the part */
+#define TIKU_RA8P1_SDRAM_ERR_INIT   -1   /**< a sequencer timed out       */
+#define TIKU_RA8P1_SDRAM_ERR_CLOCK  -2   /**< BCLK out of range, SDCLK off */
 
 /** @brief Base and size of the mapped window. */
 #define TIKU_RA8P1_SDRAM_ADDR   0x68000000UL
@@ -30,29 +31,33 @@
 /**
  * @brief Configure the pins, controller and part; leaves the window usable.
  *
- * Idempotent.  Runs the JEDEC power-up the datasheet requires -- 100 us of
- * stable clock, precharge-all, auto-refresh, mode register -- via the
- * controller's own initialisation sequencer.
+ * Idempotent.  Runs the datasheet's power-up: 200 us of running clock, then
+ * precharge-all and eight auto-refreshes from the controller's sequencer,
+ * then the mode register.  Timings are set for the BCLK in force at the call.
  *
  * @return TIKU_RA8P1_SDRAM_OK, or a negative error code
  */
 int tiku_ra8p1_sdram_init(void);
 
-/** @brief Non-zero once init() has completed successfully. */
+/** @brief Non-zero once tiku_ra8p1_sdram_init() has succeeded. */
 int tiku_ra8p1_sdram_ready(void);
 
 /**
  * @brief Bring the array up and hand it to the tier allocator.
  *
- * Attaches as TIKU_MEM_PSRAM, the tier's name for a large external volatile
- * aperture that exists only once its controller is up -- the same role Ambiq's
- * PSRAM fills, so a model placed there is board-agnostic.
+ * Attaches the window as TIKU_MEM_PSRAM, the tier for a large external
+ * volatile memory that exists once its controller is up.
  *
- * @return TIKU_RA8P1_SDRAM_OK, or a negative error code
+ * @return TIKU_RA8P1_SDRAM_OK, an init error, or TIKU_RA8P1_SDRAM_ERR_INIT
+ *         when the tier refuses the window, as it does a second attach
  */
 int tiku_ra8p1_sdram_attach(void);
 
-/** @brief Timed read/write/copy legs over the array, each named. */
+/**
+ * @brief Time sequential, strided and memcpy legs and print each by name.
+ *
+ * @note Overwrites the first 1 MB of the window, tier allocations included.
+ */
 void tiku_ra8p1_sdram_bench_run(void);
 
 #endif /* TIKU_RA8P1_SDRAM_ARCH_H_ */

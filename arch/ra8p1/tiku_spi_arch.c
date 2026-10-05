@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_spi_arch.c - RA8P1 SPI, unimplemented.
+ * tiku_spi_arch.c - RA8P1 SPI stub.
  *
- * No hardware backend yet. Every call fails cleanly so a caller learns the
- * bus is absent instead of reading zeros as data.
+ * This port has no SPI driver: init, write, read and write_read return
+ * TIKU_SPI_ERR_PARAM, close does nothing, and transfer returns 0xFF.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

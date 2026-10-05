@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_common.c - RA8P1 busy-wait delays.
+ * tiku_cpu_common.c - RA8P1 delays, unique ID and reset cause.
  *
- * Millisecond waits ride the tick, which is a hardware timebase; the
- * calibrated spin loop is the fallback for before the tick exists.
+ * Millisecond waits count kernel ticks when the tick can advance; otherwise,
+ * and for microsecond waits, a spin loop calibrated against the tick runs.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,14 +20,14 @@
 
 #include <stdint.h>
 
-/** @brief Measured spin rate, 0 until the tick is available to time it. */
+/** @brief Measured spin rate; 0 until measured, and after an invalidate. */
 static unsigned long spin_per_ms;
 
 /**
  * @brief Spin for a given number of loop iterations.
  *
- * ONE definition: with the caches off this loop's speed depends on its fetch
- * alignment, so a copy elsewhere would not match this calibration.
+ * With the caches off the loop's speed depends on its fetch alignment, so
+ * the calibration holds for this copy of the loop only.
  *
  * @param iters  Iterations to run; zero still costs one pass
  */
@@ -43,11 +43,10 @@ static void cpu_spin(unsigned long iters)
 }
 
 /**
- * @brief Spin a total iteration count in as few calls as the range allows.
+ * @brief Spin a 64-bit iteration count in calls of at most 2^27 iterations.
  *
- * One long spin rather than N short ones: the calibration does not include
- * call overhead, so N calls would spend it N times outside the measurement.
- * The count is 64-bit because a few seconds at 1 GHz overflow 32 bits.
+ * Each call adds overhead that the calibrated rate leaves out.  The count is
+ * 64-bit: a few seconds at 1 GHz overflow 32 bits.
  *
  * @param iters  Total iterations
  */
@@ -61,10 +60,8 @@ static void cpu_spin_total(unsigned long long iters)
 }
 
 /**
- * @brief Report whether the tick CAN advance from here.
- *
- * Three register reads rather than watching the counter, which before the
- * tick exists would spend its whole budget on every call.
+ * @brief Report whether the tick can advance from here: the kernel clock
+ *        runs, PRIMASK is clear and no exception is active.
  *
  * @return 1 when a SysTick exception could be taken, 0 otherwise
  */
@@ -139,10 +136,8 @@ void tiku_cpu_ra8p1_delay_ms(unsigned int ms)
     }
 
     /*
-     * The tick first.  It is a real timebase; the spin loop is a calibrated
-     * guess whose calibration this core does not reproduce across builds.
-     * Whole ticks come from the tick, the sub-tick remainder from the spin,
-     * so the error is bounded by one tick period rather than by the loop.
+     * Whole ticks are counted on the tick and the sub-tick remainder is spun,
+     * so the error is at most one tick period.
      */
     ticks = ((unsigned long)ms * (unsigned long)TIKU_CLOCK_ARCH_SECOND) /
             1000UL;
@@ -152,8 +147,8 @@ void tiku_cpu_ra8p1_delay_ms(unsigned int ms)
         unsigned long rem_ms = ms - (unsigned int)
             ((ticks * 1000UL) / (unsigned long)TIKU_CLOCK_ARCH_SECOND);
 
-        /* Busy-wait, not WFI: a caller holding interrupts off has already
-         * been sent down the spin path by tick_can_advance(). */
+        /* Busy-wait; tick_can_advance() found interrupts enabled, so the
+         * tick advances meanwhile. */
         while ((long)(target - tiku_clock_arch_time()) > 0) { }
         if (rem_ms != 0UL) {
             cpu_spin_total(rem_ms * tiku_cpu_ra8p1_spin_per_ms());
@@ -192,17 +187,15 @@ uint16_t tiku_cpu_ra8p1_reset_reason(void)
     s0 = TIKU_REG8(RA8P1_RSTSR0);
     s1 = TIKU_REG16(RA8P1_RSTSR1);
 
-    /* Clear the flags so the NEXT boot sees only its own cause; they are
-     * sticky otherwise and every reason accumulates forever. */
+    /* Clear the flags, which are sticky, so the next boot reads only its own
+     * cause. */
     TIKU_REG8(RA8P1_RSTSR0)  = 0U;
     TIKU_REG16(RA8P1_RSTSR1) = 0U;
 
     /*
-     * Report the MSP430 SYSRSTIV-style codes the kernel already speaks, as
-     * nordic and ambiq do -- /sys/boot/reason renders those and nothing else.
-     * A private code here renders as "unknown".
-     *
-     * Most specific first: a watchdog reset also raises the power-on flag.
+     * MSP430 SYSRSTIV-style codes, the only ones /sys/boot/reason renders;
+     * any other value prints as "unknown".  Most specific first: a watchdog
+     * reset also sets the power-on flag.
      */
     if (s1 & (RA8P1_RSTSR1_IWDTRF | RA8P1_RSTSR1_WDT0RF)) {
         captured = 0x16U;       /* wdt-timeout */
@@ -211,8 +204,7 @@ uint16_t tiku_cpu_ra8p1_reset_reason(void)
     } else if (s0 & RA8P1_RSTSR0_DPSRSTF) {
         captured = 0x08U;       /* lpm5-wake: deep software standby */
     } else if (s0 & RA8P1_RSTSR0_PORF) {
-        /* RES# reports as power-on too: the silicon makes no distinction, so
-         * neither does this. */
+        /* A RES# pin reset also sets PORF and reports as power-on. */
         captured = 0x00U;       /* none: cold / power-on */
     } else {
         captured = 0x00U;

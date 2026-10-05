@@ -7,8 +7,8 @@
  *
  * tiku_crt_early.c - RA8P1 (Cortex-M85) startup.
  *
- * A vector table at the image base and a reset handler that runs .data/.bss
- * and calls main.  The image runs from MRAM, with .data copied out to SRAM.
+ * A vector table at the image base, and a reset handler that copies .data,
+ * zeroes .bss and calls main.  The image runs from MRAM; .data runs from SRAM.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -37,19 +37,17 @@ extern int main(void);
 typedef void (*ra8p1_isr_t)(void);
 
 /**
- * @brief Default handler: record an exception no other handler claims.
+ * @brief Default handler for an exception or interrupt with no handler.
  *
- * Captures the stacked frame pointer, the exception code and EXC_RETURN, then
- * branches to the fault recorder instead of parking the core.
+ * Passes the stacked frame pointer, TIKU_RA8P1_FAULT_UNEXPECTED and
+ * EXC_RETURN to tiku_ra8p1_fault_body(), which records them and resets.
  */
 __attribute__((naked)) static void ra8p1_default_handler(void)
 {
     /*
-     * Record, never park: an exception no handler claims would otherwise
-     * spin here silently, preserving nothing, and a misfetched vector lands
-     * here too carrying the stacked frame and the exception number.  Naked
-     * like the fault shims -- no C prologue may run before the frame pointer
-     * is captured, or a stack fault loses the frame.
+     * Naked, like the fault shims: no C prologue may run before the frame
+     * pointer is captured, or a stack fault loses the frame.  The stacked
+     * xPSR holds the exception number.
      */
     __asm__ volatile (
         "tst  lr, #4\n"
@@ -87,7 +85,8 @@ void tiku_ra8p1_systick_handler(void)     __attribute__((weak, alias("ra8p1_defa
 void tiku_ra8p1_sci_rxi_handler(void)     __attribute__((weak, alias("ra8p1_default_handler")));
 void tiku_ra8p1_sci_eri_handler(void)     __attribute__((weak, alias("ra8p1_default_handler")));
 
-/* htimer compare; weak so a build without it still links. */
+/* htimer compare, DMAC0, IPC doorbell, USBHS and NPU; weak so a build
+ * without the driver still links. */
 void tiku_ra8p1_gpt0_ccmpa_handler(void)  __attribute__((weak, alias("ra8p1_default_handler")));
 void tiku_ra8p1_dmac0_handler(void)       __attribute__((weak, alias("ra8p1_default_handler")));
 void tiku_ra8p1_ipc_handler(void)         __attribute__((weak, alias("ra8p1_default_handler")));
@@ -99,8 +98,8 @@ void tiku_ra8p1_startup(void);
 /**
  * @brief Image entry point: establish the stack, then run the C startup.
  *
- * Naked and assembly-only.  Entry carries whatever SP the ROM or a debugger
- * left, so SP is loaded from __stack unconditionally rather than trusted.
+ * Naked and assembly-only.  SP on entry is whatever the boot ROM or a
+ * debugger left, so it is reloaded from __stack.
  */
 __attribute__((naked, section(".text"), used))
 void tiku_ra8p1_reset_handler(void)
@@ -113,6 +112,10 @@ void tiku_ra8p1_reset_handler(void)
         ".ltorg\n");
 }
 
+/**
+ * @brief C startup: mask interrupts, set VTOR, copy .data, zero .bss and
+ *        call main().
+ */
 void tiku_ra8p1_startup(void)
 {
     /* The core resets with interrupts enabled; mask them until the kernel is
@@ -123,8 +126,8 @@ void tiku_ra8p1_startup(void)
     TIKU_REG32(RA8P1_SCB_VTOR) = (uint32_t)(uintptr_t)tiku_ra8p1_vectors;
     __asm__ volatile ("dsb\n\tisb" ::: "memory");
 
-    /* .data runs from SRAM and loads from MRAM, so the copy always runs; the
-     * guard only skips it if a link ever makes the two addresses coincide. */
+    /* .data loads from MRAM and runs from SRAM; the copy is skipped only
+     * when the two addresses are equal. */
     const uint32_t *src = &__data_load;
     uint32_t *dst = &__data_start;
     if (src != dst) {
@@ -167,14 +170,14 @@ const ra8p1_isr_t tiku_ra8p1_vectors[] = {
     tiku_ra8p1_pendsv_handler,
     tiku_ra8p1_systick_handler,
 
-    /* External IRQ 0 carries the console receive event; the ICU decides that
-     * at run time (tiku_uart_arch.c links it), but the VECTOR is a build-time
-     * choice and has to agree with UART_RXI_SLOT there.
+    /* External IRQs.  The ICU links events to slots at run time, but each
+     * handler's position here is fixed and must match its slot in
+     * tiku_ra8p1_regs.h (RA8P1_ICU_SLOT_*): 0 console RXI, 1 console ERI,
+     * 2 GPT0 compare, 3 DMAC0, 4 USBHS, 5 IPC, 6 NPU.
      *
-     * Every other slot must carry the default handler, because a zero entry
-     * vectors an unexpected interrupt to address 0 instead of recording it.
-     * The assert below is what makes a short initialiser a build error
-     * rather than a hole at the top of the table. */
+     * Every other slot holds the default handler, which records the
+     * interrupt; a zero entry would vector it to address 0.  The assert
+     * below fails the build when the table is short. */
     tiku_ra8p1_sci_rxi_handler,
     tiku_ra8p1_sci_eri_handler,
     tiku_ra8p1_gpt0_ccmpa_handler,
