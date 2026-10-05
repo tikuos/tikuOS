@@ -8,8 +8,8 @@
  * tiku_gpio_arch.c - nRF54L GPIO primitives (P0..P2, and P3 on the nRF54LM20).
  *
  * Outputs drive through OUTSET/OUTCLR, inputs read from IN, and each pin is
- * configured through PIN_CNF[].  Helpers take a physical port number matching the
- * board silk.
+ * configured through PIN_CNF[].  Helpers take a physical port number matching
+ * the board silk.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -54,8 +54,8 @@ void tiku_nordic_gpio_init_output(uint8_t port, uint8_t pin, uint8_t init_level)
     if (g == (NRF_GPIO_Type *)0) {
         return;
     }
-    /* Drive the requested level BEFORE enabling the output so the pin never
-     * glitches to the wrong state. */
+    /* The level is written before the pin turns output, so the pin does not
+     * glitch to the other level. */
     if (init_level != 0u) {
         g->OUTSET = bit;
     } else {
@@ -118,11 +118,9 @@ uint8_t tiku_nordic_gpio_read(uint8_t port, uint8_t pin)
         return 0u;
     }
     sh = (uint32_t)(pin & 0x1Fu);
-    /* Return the pin's LOGICAL level.  For an output pin the input buffer is
-     * disconnected (see init_output), so IN reads 0 no matter what is driven --
-     * read the driven level from OUT instead.  Input pins read the sensed level
-     * from IN.  This matches the read-back-what-you-drive semantics of the
-     * msp430/rp2350/ambiq ports. */
+    /* The pin's logical level.  An output pin returns the driven level from
+     * OUT: its input buffer is disconnected (see init_output), so IN reads
+     * 0.  An input pin returns the sensed level from IN. */
     if ((g->DIR >> sh) & 0x1u) {
         return (uint8_t)((g->OUT >> sh) & 0x1u);
     }

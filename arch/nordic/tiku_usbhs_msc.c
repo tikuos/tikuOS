@@ -7,9 +7,9 @@
  *
  * tiku_usbhs_msc.c - nRF54LM20 USB mass storage (Bulk-Only Transport).
  *
- * A second face for the DWC2 core: one SCSI disk over the console's own
- * bring-up, EP0 engine and 512-byte bulk endpoint.  RAM disk; the wire
- * format and SCSI replies come from the core (kernel/usb).
+ * One SCSI disk, a 64 KB RAM disk, on the DWC2 core instead of the CDC
+ * console (both define the device ISR).  The Bulk-Only wire format and the
+ * SCSI replies come from kernel/usb.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -30,7 +30,7 @@
 #if defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
 
 /*---------------------------------------------------------------------------*/
-/* CORE REGISTER BITS (shared with the CDC face, copied verbatim)            */
+/* CORE REGISTER BITS (AS IN tiku_usbhs_dev.c)                               */
 /*---------------------------------------------------------------------------*/
 
 #define GAHBCFG_GLBLINTRMSK (1u << 0)
@@ -90,10 +90,9 @@
 /* THE DISK                                                                  */
 /*---------------------------------------------------------------------------*/
 
-/* A RAM disk sized to fit SRAM with room to spare: the medium the host reads
- * and writes.  A durable backing (the carved NVM region) is a swap of these
- * two accessors and nothing else -- the whole point of routing every block
- * through the controller-independent core. */
+/* The medium the host reads and writes: a RAM disk, so its contents do not
+ * survive a reset.  Every block passes through kernel/usb's
+ * controller-independent MSC core. */
 #define MSC_DISK_BLOCKS  128u                       /* 64 KB                */
 #define MSC_DISK_BYTES   (MSC_DISK_BLOCKS * TIKU_USBD_MSC_BLOCK)
 static uint8_t msc_disk[MSC_DISK_BYTES] __attribute__((aligned(4)));
@@ -139,9 +138,10 @@ static uint8_t  s_csw_status;
 static uint32_t n_cbw, n_rd, n_wr, n_bad, n_irq;
 
 /*---------------------------------------------------------------------------*/
-/* EP0 ENGINE (copied verbatim from the proven console face)                 */
+/* EP0 ENGINE (AS IN tiku_usbhs_dev.c)                                       */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Queue @p len bytes on EP0 IN; a zero length is the status stage. */
 static void ep0_tx(const void *data, uint32_t len)
 {
     uint32_t pkts;
@@ -161,6 +161,7 @@ static void ep0_tx(const void *data, uint32_t len)
     NRF_USBHSCORE_S->DIEPCTL0 |= DEPCTL_EPENA | DEPCTL_CNAK;
 }
 
+/** @brief Arm EP0 OUT for the next SETUP packet the host sends. */
 static void ep0_arm_setup(void)
 {
     NRF_USBHSCORE_S->DOEPTSIZ0 = (3ul << DOEPTSIZ_SUPCNT_SHIFT) |
@@ -169,6 +170,7 @@ static void ep0_arm_setup(void)
     NRF_USBHSCORE_S->DOEPCTL0 |= DEPCTL_EPENA | DEPCTL_CNAK;
 }
 
+/** @brief Stall both EP0 directions and re-arm for the next SETUP. */
 static void ep0_stall(void)
 {
     NRF_USBHSCORE_S->DIEPCTL0 |= DEPCTL_STALL;
@@ -176,6 +178,7 @@ static void ep0_stall(void)
     ep0_arm_setup();
 }
 
+/** @brief Disable EP0 IN if it is still enabled and flush its FIFO. */
 static void ep0_in_reset(void)
 {
     uint32_t spin;
@@ -197,6 +200,7 @@ static void ep0_in_reset(void)
     NRF_USBHSCORE_S->DIEPINT0 = 0xFFFFFFFFul;
 }
 
+/** @brief Flush every TX FIFO, then the RX FIFO (bounded waits). */
 static void fifo_flush(void)
 {
     uint32_t spin;
@@ -232,7 +236,7 @@ static void bulk_out_arm(void *dst, uint32_t bytes)
     NRF_USBHSCORE_S->DOEPCTL2 |= DEPCTL_EPENA | DEPCTL_CNAK;
 }
 
-/** @brief Send @p bytes from @p src on bulk IN (a reply, a READ, or the CSW). */
+/** @brief Send @p bytes from @p src on bulk IN (reply, READ data or CSW). */
 static void bulk_in_send(const void *src, uint32_t bytes)
 {
     uint32_t pkts = (bytes + s_bulk_mps - 1u) / s_bulk_mps;
@@ -245,6 +249,7 @@ static void bulk_in_send(const void *src, uint32_t bytes)
     NRF_USBHSCORE_S->DIEPCTL3 |= DEPCTL_EPENA | DEPCTL_CNAK;
 }
 
+/** @brief Send the command status wrapper for the current command. */
 static void bot_send_csw(void)
 {
     tiku_usbd_msc_build_csw(csw_buf, s_csw_tag, s_csw_residue, s_csw_status);
@@ -308,6 +313,10 @@ static void msc_endpoints_open(void)
 /* EP0 CONTROL TRANSFERS                                                     */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Answer the SETUP in setup_buf through kernel/usb, applying its
+ *        effects first; a request it does not answer is stalled.
+ */
 static void ep0_setup(void)
 {
     const uint8_t *p = (const uint8_t *)setup_buf;
@@ -350,7 +359,7 @@ static void ep0_setup(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* THE INTERRUPT: arch.c dispatches here when this face is started           */
+/* INTERRUPT (DISPATCHED FROM tiku_usbhs_arch.c)                             */
 /*---------------------------------------------------------------------------*/
 
 void tiku_nordic_usbhs_dev_irq(void)
@@ -437,8 +446,11 @@ void tiku_nordic_usbhs_dev_irq(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* LIFECYCLE (the arch ISR calls _started; MSC provides it in this build)    */
+/* LIFECYCLE                                                                 */
 /*---------------------------------------------------------------------------*/
+
+/* The arch ISR calls tiku_nordic_usbhs_dev_started(); in this build it is
+ * defined here. */
 
 uint8_t tiku_nordic_usbhs_dev_started(void)
 {

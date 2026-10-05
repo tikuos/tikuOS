@@ -7,9 +7,9 @@
  *
  * tiku_mpu_arch.c - nRF54L NVM write-gate and MPU HAL.
  *
- * Enforcement here is the RRAMC WEN gate, which unlock_nvm()/lock_nvm() map onto;
- * a store through a closed gate is a precise bus fault.  The MSP430-style segment
- * mask is a software shadow so the portable MPU tests run one state machine.
+ * NVM writes are gated by the RRAMC WEN bit, which unlock_nvm()/lock_nvm()
+ * drive; a store through the closed gate is a precise bus fault.  The SAM is a
+ * software shadow.  The MPU makes SRAM execute-never and guards the stack.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -29,12 +29,11 @@
 
 #define TIKU_RRAMC_WEN   (1UL << 0)   /* RRAMC_CONFIG.WEN: 1 = writes enabled */
 
-/** @brief WRITE bits across the three SAM segment fields (MSP430 model,
- *         same 0x0222 the rp2350/ambiq shadows use). */
+/** @brief WRITE bits of the three SAM segment fields (MSP430 layout). */
 #define TIKU_MPU_SAM_WRITE_BITS  0x0222U
 
 /*---------------------------------------------------------------------------*/
-/* Software SAM/CTL shadow (portable MPU state machine)                       */
+/* SOFTWARE SAM/CTL SHADOW                                                   */
 /*---------------------------------------------------------------------------*/
 
 /** @brief Software segment-access-mask shadow (MSP430 SAM model). */
@@ -43,7 +42,7 @@ static uint16_t stub_mpusam = TIKU_MPU_DEFAULT_SAM;
 static uint16_t stub_mpuctl0;
 
 /*---------------------------------------------------------------------------*/
-/* NVM write gate (RRAMC CONFIG.WEN) -- the load-bearing part                 */
+/* NVM WRITE GATE (RRAMC CONFIG.WEN)                                         */
 /*---------------------------------------------------------------------------*/
 
 /** @brief Open/close the RRAMC write gate. */
@@ -56,14 +55,10 @@ static void rramc_wen_set(uint32_t open)
 }
 
 /**
- * @brief Open an NVM write window: SAM bookkeeping + the real WEN flip.
+ * @brief Open an NVM write window: set the SAM write bits and RRAMC WEN.
  *
- * ORs the write bits into the SAM shadow for MSP430-path parity and enables
- * RRAM writes.  Returns the prior SAM word; passing it to lock_nvm() restores
- * both the shadow and the gate, nest-safely.
- *
- * @note An inner lock inside a still-open outer window sees write bits in the
- *       saved SAM and keeps the gate open.
+ * Returns the prior SAM word.  lock_nvm() with it restores the shadow and the
+ * gate, so an unlock/lock pair inside an open window leaves WEN set.
  */
 uint16_t tiku_mpu_arch_unlock_nvm(void)
 {
@@ -75,7 +70,8 @@ uint16_t tiku_mpu_arch_unlock_nvm(void)
 }
 
 /**
- * @brief Close an NVM write window: restore the SAM shadow + the gate.
+ * @brief Restore the SAM shadow, and clear WEN unless @p saved_state has
+ *        write bits.
  *
  * @param saved_state  Value returned by the matching unlock_nvm().
  */
@@ -86,7 +82,7 @@ void tiku_mpu_arch_lock_nvm(uint16_t saved_state)
 }
 
 /*---------------------------------------------------------------------------*/
-/* MSP430-modelled MPU entry points (software shadow)                         */
+/* MSP430-MODELLED MPU ENTRY POINTS (SOFTWARE SHADOW)                        */
 /*---------------------------------------------------------------------------*/
 
 /** @brief Return the current software SAM value. */
@@ -96,10 +92,10 @@ uint16_t tiku_mpu_arch_get_sam(void)
 }
 
 /**
- * @brief Update the software SAM, mirroring the MSP430 MPUCTL0 sequence.
+ * @brief Update the software SAM, following the MSP430 MPUCTL0 sequence.
  *
- * Bookkeeping only: the RRAM gate is driven by unlock/lock_nvm above; the
- * password-write pattern is preserved for portable-test parity.
+ * Bookkeeping only: the RRAMC gate is driven by unlock/lock_nvm.  The MPUCTL0
+ * shadow takes the password write (0xA500), then password | enable.
  */
 void tiku_mpu_arch_set_sam(uint16_t sam)
 {
@@ -114,32 +110,27 @@ uint16_t tiku_mpu_arch_get_ctl(void)
     return stub_mpuctl0;
 }
 
-void tiku_mpu_arch_disable_irq(void) { /* no MPU violation IRQ on this port */ }
-void tiku_mpu_arch_enable_irq(void)  { /* no MPU violation IRQ on this port */ }
+void tiku_mpu_arch_disable_irq(void) { /* empty: IRQs stay enabled */ }
+void tiku_mpu_arch_enable_irq(void)  { /* empty */ }
 
 /*---------------------------------------------------------------------------*/
-/* ARMv8-M MPU regions: SRAM W^X + stack guard (hardening, 2026-07 D.1)       */
+/* ARMv8-M MPU REGIONS: SRAM W^X AND STACK GUARD                             */
 /*---------------------------------------------------------------------------*/
 /*
- * What the MPU adds HERE (and deliberately does not):
+ * The regions:
  *
- *   - RRAM is NOT re-gated by the MPU.  The RRAMC WEN gate is the durable
- *     write protection (above), and layering an MPU-RO window on top would
- *     re-couple the MPU to every NVM write path for no gain.  RRAM rides
- *     the PRIVDEFENA background map (Normal, RX).
- *   - SRAM becomes eXecute-Never (W^X): three non-overlapping regions --
- *     PMSAv8 overlap is UNPREDICTABLE, so the span is split around the
- *     guard exactly like the rp2350 port.
- *   - A 4 KB read-only stack guard sits STACK_RESERVED below the stack
- *     top.  Sizing copies rp2350's post-BASIC lesson (memory: a 32-byte
- *     guard is LEAPT by KB-sized locals): 32 KB reserve covers BASIC's
- *     10-24 KB frames with margin, and a 4 KB guard cannot be jumped by
- *     any frame in the tree.
- *   - LM20's RAM2 bank (the tier arena) gets RW+XN too.
+ *   - RRAM has none.  It stays on the PRIVDEFENA background map (Normal,
+ *     RX); the RRAMC WEN gate above is its write protection.
+ *   - SRAM is execute-never, in three regions that do not overlap (PMSAv8
+ *     overlap is UNPREDICTABLE): the span below the guard, the guard, and
+ *     the stack reserve.
+ *   - The stack guard is 4 KB and read-only, below a 32 KB stack reserve
+ *     (both sized in the linker script).  A single stack frame larger than
+ *     the guard can step over it without a fault.
+ *   - The LM20's RAM2 bank (the tier arena) is RW and execute-never.
  *
- * Fault policy: MEMFAULTENA is deliberately NOT set -- a guard hit or an
- * SRAM-execute escalates to HardFault, the SAME observable as a store
- * through the closed WEN gate.  One loud failure mode per port.
+ * MEMFAULTENA is not set: a guard hit or an SRAM execute escalates to
+ * HardFault, as the bus fault of a store through the closed WEN gate does.
  */
 
 #define NRF_SCS_MPU_TYPE   (*(volatile uint32_t *)0xE000ED90UL)
@@ -156,8 +147,7 @@ void tiku_mpu_arch_enable_irq(void)  { /* no MPU violation IRQ on this port */ }
 #define NRF_MPU_RBAR_AP_RO_ANY   (3UL << 1)   /* AP[2:1]=11: RO, any priv  */
 #define NRF_MPU_RLAR_EN          (1UL << 0)
 
-/* Stack budget + guard (rp2350-proven values; keep in lockstep with the
- * TikuBench MPU test constants there). */
+/* Stack reserve and guard bounds, placed by the linker script. */
 extern uint32_t __tiku_stack_bottom;
 extern uint32_t __tiku_stack_guard_start;
 
@@ -168,6 +158,7 @@ extern uint32_t __ram2_start;
 extern uint32_t __ram2_end;
 #endif
 
+/** @brief DSB then ISB: MPU writes take effect before the next instruction. */
 static inline void nrf_mpu_dsb_isb(void)
 {
     __asm__ volatile ("dsb 0xF" ::: "memory");
@@ -181,9 +172,8 @@ static void nrf_mpu_program_region(uint32_t region, uint32_t base,
 {
     NRF_SCS_MPU_RNR  = region;
     NRF_SCS_MPU_RBAR = (base & ~0x1FUL) | (0UL << 3) | ap_bits | xn_bit;
-    /* RLAR LIMIT = high bits of the inclusive limit; AttrIndx=0; EN.
-     * (Clear the low 5 bits -- setting them would select AttrIndx 15,
-     * the rp2350 port's hard-won MAIR footgun.) */
+    /* RLAR: LIMIT is the inclusive limit with its low 5 bits cleared (set,
+     * they would select AttrIndx 15), AttrIndx 0, EN. */
     NRF_SCS_MPU_RLAR = (end_inclusive & ~0x1FUL) | (0UL << 1)
                      | NRF_MPU_RLAR_EN;
 }
@@ -202,31 +192,28 @@ static void nrf_mpu_program_regions(void)
     /* R0: SRAM low span (statics + free space), RW + XN. */
     nrf_mpu_program_region(0U, sram_base, guard_base - 1U,
                            NRF_MPU_RBAR_AP_RW_ANY, NRF_MPU_RBAR_XN);
-    /* R1: the stack guard, RO + XN -- a descending stack that leaves its
-     * 32 KB reserve faults here instead of silently eating statics. */
+    /* R1: the stack guard, RO + XN: a stack that grows out of its 32 KB
+     * reserve faults here before it reaches the statics. */
     nrf_mpu_program_region(1U, guard_base, guard_end - 1U,
                            NRF_MPU_RBAR_AP_RO_ANY, NRF_MPU_RBAR_XN);
     /* R2: the live stack reserve, RW + XN. */
     nrf_mpu_program_region(2U, guard_end, stack_top - 1U,
                            NRF_MPU_RBAR_AP_RW_ANY, NRF_MPU_RBAR_XN);
 #if defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
-    /* R3: RAM2 upper bank (tier arena), RW + XN.  The M33 only ever
-     * reads/writes it; FLPR and EasyDMA are bus masters the MPU does not
-     * govern, so the coprocessor paths are unaffected. */
+    /* R3: RAM2 upper bank (tier arena), RW + XN.  The FLPR and EasyDMA
+     * reach it as bus masters that the M33 MPU does not govern. */
     nrf_mpu_program_region(3U, (uint32_t)(uintptr_t)&__ram2_start,
                            (uint32_t)(uintptr_t)&__ram2_end - 1U,
                            NRF_MPU_RBAR_AP_RW_ANY, NRF_MPU_RBAR_XN);
 #endif
 
 #if defined(TIKU_FLPR_ENABLE) && TIKU_FLPR_ENABLE
-    /* FLPR (VPR RISC-V) SRAM carve: RW + XN.  It sits ABOVE __sram_end, so
-     * R0-R2 do not reach it; without a region it stays on the PRIVDEFENA
-     * default map (SRAM = Normal, executable), leaving a fixed-address,
-     * shell-writable (/sys/flpr/echo -> tiku_flpr_arch_send) region the M33
-     * could fetch code from -- contradicting this pass's W^X guarantee.  RW so
-     * the M33 still loads the coprocessor image + drives the IPC mailboxes; the
-     * VPR runs the image via its own bus master, which the M33 MPU (and this
-     * XN) does not govern. */
+    /* FLPR (VPR RISC-V) SRAM carve: RW + XN.  It lies above __sram_end,
+     * outside R0-R2; on the background map it would be executable SRAM that
+     * the shell can write (/sys/flpr/echo -> tiku_flpr_arch_send).  It stays
+     * RW for the M33 to load the coprocessor image and drive the IPC
+     * mailboxes; the VPR fetches through its own bus master, which this XN
+     * does not govern. */
     nrf_mpu_program_region(NRF_MPU_FLPR_REGION, TIKU_FLPR_RAM_BASE,
                            TIKU_FLPR_RAM_BASE + TIKU_FLPR_RAM_SIZE - 1U,
                            NRF_MPU_RBAR_AP_RW_ANY, NRF_MPU_RBAR_XN);
@@ -258,8 +245,8 @@ void tiku_mpu_arch_set_default_protection(void)
 /**
  * @brief Set the 3-bit permission field for one software SAM segment.
  *
- * Each segment occupies 4 bits of the SAM word (bits [2:0] of the field are
- * the TIKU_MPU_READ/WRITE/EXEC flags) -- identical math to rp2350/ambiq.
+ * Each segment occupies 4 bits of the SAM word; bits [2:0] of the field are
+ * the TIKU_MPU_READ/WRITE/EXEC flags.  The RRAMC gate is not changed.
  */
 void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm)
 {
@@ -272,35 +259,25 @@ void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm)
 }
 
 /**
- * @brief Violation flags: honestly 0 -- this part is fault-not-flag.
+ * @brief Return 0: this port latches no violation flag.
  *
- * A store through the closed WEN gate raises a precise bus fault; there is
- * no latched violation flag to report (the portable violation-detect test
- * skips its trigger phase on fault-not-flag ports).
+ * A store through the closed WEN gate raises a precise bus fault instead.
  */
 uint16_t tiku_mpu_arch_get_violation_flags(void)  { return 0u; }
 void     tiku_mpu_arch_clear_violation_flags(void) { /* nothing latched */ }
 void     tiku_mpu_arch_enable_violation_nmi(void)  { /* no violation NMI  */ }
 
-/* Stack floor = the top of the MPU stack guard.  The SRAM map is now
- * [statics .. __end__][R0 free space][R1 guard 4K][R2 stack reserve 32K]
- * [__stack]: the paintable/measurable stack span is exactly the R2
- * reserve -- painting below guard_end would write into the read-only
- * guard and HardFault at boot.  The 32 KB reserve still covers BASIC's
- * deepest frames (10-24 KB) without saturating the measurement. */
+/* SRAM map: [R0: statics, free space][R1: guard, 4 KB][R2: stack reserve,
+ * 32 KB][__stack].  The stack floor is the top of the guard, so painting and
+ * measuring cover only the R2 reserve; painting below it would write the
+ * read-only guard and HardFault at boot. */
 extern uint32_t __sram_end;
 uint32_t tiku_stack_arch_bottom(void)
 {
     return (uint32_t)(uintptr_t)&__tiku_stack_bottom;
 }
 
-/**
- * @brief No RAM execution window on this port -- the module runs XIP from NVM.
- *
- * An explicit no-op rather than an omission, so the portable call site needs no
- * #ifdef and a future port that DOES gain a window has an obvious place to
- * implement it.  See tiku_basic_module.h for why only apollo510 differs.
- */
+/** @brief No-op: there is no RAM execution window; a module runs in RRAM. */
 void tiku_mpu_arch_module_window_exec(int enable)
 {
     (void)enable;

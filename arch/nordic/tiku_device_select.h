@@ -7,9 +7,9 @@
  *
  * tiku_device_select.h - Nordic nRF54L device and board include router.
  *
- * Mirrors the MSP430 router: the Makefile names the silicon and the board PCB
- * separately.  A new device or board needs a header under devices/ or boards/
- * and one #elif here.
+ * The Makefile names the silicon (TIKU_DEVICE_*) and the board
+ * (TIKU_BOARD_*) separately.  A new device or board needs a header under
+ * devices/ or boards/ and one #elif here.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

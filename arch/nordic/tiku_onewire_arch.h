@@ -7,9 +7,8 @@
  *
  * tiku_onewire_arch.h - nRF54L 1-Wire arch header (stub port).
  *
- * The backend is a stub; these prototypes mirror the RP2350 arch header so the
- * interface layer and the 1-Wire HAL routing resolve without implicit
- * declarations.
+ * Declares the 1-Wire backend the 1-Wire interface calls.  This port has no
+ * 1-Wire driver: every function is a stub.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,56 +20,49 @@
 #include <interfaces/onewire/tiku_onewire.h>
 
 /**
- * @brief Configure the 1-Wire pin and bring up the bus (stub).
+ * @brief Configures nothing.
  *
- * Not implemented on this port: a bit-banged 1-Wire master needs a
- * microsecond-class delay source.  Reports failure rather than pretending the
- * bus came up, so callers fall through to their no-device path.
- *
- * @return -1 always (never TIKU_OW_OK).
+ * @return -1 (TIKU_OW_ERR_NO_DEVICE), always
  */
 int     tiku_onewire_arch_init(void);
 
 /**
- * @brief Release the 1-Wire pin (stub -- no-op).
+ * @brief Does nothing.
  */
 void    tiku_onewire_arch_close(void);
 
 /**
- * @brief Issue a reset pulse and sample for a presence pulse (stub).
+ * @brief Sends no reset pulse.
  *
- * @return -1 always, i.e. TIKU_OW_ERR_NO_DEVICE: without the bit-bang
- *         timing backend no presence detection is possible.
+ * @return -1 (TIKU_OW_ERR_NO_DEVICE), always
  */
 int     tiku_onewire_arch_reset(void);
 
 /**
- * @brief Write a single bit onto the bus (stub -- no-op).
+ * @brief Writes nothing.
  *
- * @param bit  Bit value to write (0 or 1); ignored.
+ * @param bit  Ignored
  */
 void    tiku_onewire_arch_write_bit(uint8_t bit);
 
 /**
- * @brief Sample a single bit from the bus (stub).
+ * @brief Samples nothing.
  *
- * @return 1 always -- the level an idle, externally pulled-up 1-Wire
- *         line reads back, rather than fabricated device data.
+ * @return 1, the level of an idle pulled-up line, always
  */
 uint8_t tiku_onewire_arch_read_bit(void);
 
 /**
- * @brief Write a byte LSB-first onto the bus (stub -- no-op).
+ * @brief Writes nothing.
  *
- * @param byte  Byte value to transmit; ignored.
+ * @param byte  Ignored
  */
 void    tiku_onewire_arch_write_byte(uint8_t byte);
 
 /**
- * @brief Read a byte LSB-first from the bus (stub).
+ * @brief Samples nothing.
  *
- * @return 0xFF always -- every bit read back from an idle, pulled-high
- *         bus (see tiku_onewire_arch_read_bit()).
+ * @return 0xFF, eight idle-high bits, always
  */
 uint8_t tiku_onewire_arch_read_byte(void);
 

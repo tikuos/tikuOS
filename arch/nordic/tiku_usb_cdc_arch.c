@@ -52,8 +52,11 @@ static uint8_t  chunk[TX_CHUNK];
 /* TRANSMIT                                                                  */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Hand the endpoint the next chunk of the ring; interrupts masked
- *         by the caller, since the completion runs from the interrupt. */
+/**
+ * @brief Hand the endpoint the next chunk of the ring.
+ *
+ * @note The caller masks interrupts: the completion runs from the interrupt.
+ */
 static void tx_kick(void)
 {
     uint16_t n = 0u;
@@ -63,10 +66,9 @@ static void tx_kick(void)
         lim = TX_CHUNK;
     }
 
-    /* Configured is enough to send: a host that has not opened the port
-     * reads nothing and the ring drops its oldest, which costs no one
-     * anything, while a host whose serial layer leaves DTR low (the bench
-     * does, for the probe rigs it shares) still gets its answers. */
+    /* Sending needs a configured device, not DTR: a host that has not
+     * opened the port reads nothing and the ring drops its oldest bytes,
+     * and a host whose serial layer leaves DTR low still gets its output. */
     if (tiku_nordic_usbhs_dev_cdc_sending() != 0u ||
         tiku_nordic_usbhs_dev_cdc_configured() == 0u) {
         return;
@@ -80,13 +82,14 @@ static void tx_kick(void)
     }
 }
 
+/** @brief Bulk IN completion: send the next chunk. */
 static void on_tx_done(void)
 {
     tx_kick();
 }
 
-/** @brief Room in the receive ring for a whole OUT packet: the device layer
- *         asks before it re-arms, so a full ring NAKs rather than drops. */
+/** @brief Room in the receive ring for a whole OUT packet; the device layer
+ *         asks before it re-arms, and without room the endpoint NAKs. */
 static uint8_t out_ready(void)
 {
     uint16_t used = (uint16_t)((rx_head - rx_tail) & (RX_RING - 1u));
@@ -94,6 +97,8 @@ static uint8_t out_ready(void)
     return (uint8_t)((RX_RING - 1u - used) >= tiku_nordic_usbhs_dev_cdc_mps());
 }
 
+/** @brief Bulk OUT data: append it to the receive ring; on a full ring,
+ *         count one overrun and drop the rest of the packet. */
 static void on_rx(const uint8_t *data, uint32_t len)
 {
     uint32_t i;
@@ -134,7 +139,7 @@ void tiku_usb_cdc_poll(void)
         tiku_nordic_usbhs_down();
         up = 0u;
     }
-    /* Output queued while the port was closed leaves once it opens. */
+    /* Output queued before the device was configured leaves once it is. */
     pm = tiku_nordic_get_primask();
     tiku_nordic_disable_irq();
     tx_kick();
@@ -158,8 +163,8 @@ void tiku_usb_cdc_putc(char c)
     tiku_nordic_disable_irq();
     nxt = (uint16_t)((tx_head + 1u) & (TX_RING - 1u));
     if (nxt == tx_tail) {
-        /* Full: the oldest byte goes, never the caller's time.  A host that
-         * stops reading slows nothing here. */
+        /* Full: the oldest byte is dropped and the caller does not wait,
+         * so a host that stops reading slows nothing here. */
         tx_tail = (uint16_t)((tx_tail + 1u) & (TX_RING - 1u));
     }
     tx[tx_head] = (uint8_t)c;
@@ -218,8 +223,8 @@ void     tiku_usb_cdc_overrun_reset(void) { overrun = 0u; }
 /* SHELL BACKEND                                                             */
 /*---------------------------------------------------------------------------*/
 
-/* The native port is the board's own console and carries full authority,
- * as the UART does. */
+/* The native port is the board's own console, with every VFS capability
+ * (TIKU_VFS_CAP_ALL), like the UART. */
 const tiku_shell_io_t tiku_shell_io_usbcdc = {
     tiku_usb_cdc_putc,
     tiku_usb_cdc_rx_ready,

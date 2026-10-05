@@ -54,11 +54,11 @@ void tiku_nordic_gpio_set(uint8_t port, uint8_t pin, uint8_t level);
 void tiku_nordic_gpio_toggle(uint8_t port, uint8_t pin);
 
 /**
- * @brief Read a pin's input level.
+ * @brief Read a pin's logical level: OUT for an output pin, IN for an input.
  *
  * @param port Physical port (0=P0, 1=P1, 2=P2, 3=P3 when present).
  * @param pin  Pin index (0..31).
- * @return 0 if low, 1 if high.
+ * @return 0 if low, 1 if high (0 for an unknown port).
  */
 uint8_t tiku_nordic_gpio_read(uint8_t port, uint8_t pin);
 
@@ -87,9 +87,9 @@ int8_t tiku_gpio_arch_set_output(uint8_t port, uint8_t pin);
 /**
  * @brief Claim a pin as a digital input.
  *
- * Writes an all-zero PIN_CNF: DIR = input, input buffer connected, and
- * NO pull resistor -- unlike tiku_nordic_gpio_init_input_pullup(), so a
- * floating pin reads indeterminately unless externally biased.
+ * Writes an all-zero PIN_CNF: DIR = input, input buffer connected and no
+ * pull resistor, so a floating pin reads indeterminately unless externally
+ * biased.
  *
  * @param port Virtual port (1 = P0, 2 = P1, 3 = P2, 4 = P3 when present).
  * @param pin  Pin index (0..31).
@@ -125,9 +125,9 @@ int8_t tiku_gpio_arch_toggle(uint8_t port, uint8_t pin);
 /**
  * @brief Read a pin's logical level.
  *
- * Output pins are read back from OUT, not IN: an output's input buffer is left
- * disconnected, so IN would read 0 whatever is being driven.  This preserves
- * the read-back-what-you-drive semantics of the other ports.
+ * Output pins are read back from OUT: an output's input buffer is left
+ * disconnected, so IN reads 0 whatever is being driven.  Input pins read
+ * from IN.
  *
  * @param port Virtual port (1 = P0, 2 = P1, 3 = P2, 4 = P3 when present).
  * @param pin  Pin index (0..31).

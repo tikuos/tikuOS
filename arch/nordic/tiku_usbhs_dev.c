@@ -7,9 +7,9 @@
  *
  * tiku_usbhs_dev.c - nRF54LM20 USB device mode on the DWC2 core.
  *
- * Device configuration, the FIFO layout the core's own GHWCFG3 allows, and
- * the EP0 control engine that carries enumeration.  The core moves packets
- * by internal DMA, so every buffer here is word-aligned.
+ * Device configuration, the FIFO layout within the core's GHWCFG3 depth, EP0
+ * control transfers (answered by kernel/usb) and the CDC bulk endpoints.  The
+ * core moves packets by internal DMA, so every buffer here is word-aligned.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -114,9 +114,9 @@ static uint32_t s_bulk_mps = USB_BULK_MPS;
 /* DESCRIPTORS                                                               */
 /*---------------------------------------------------------------------------*/
 
-/* Built once from the identity and the endpoint numbers by the shared core
- * (kernel/usb), the same bytes this port shipped by hand; the configuration
- * lives in RAM because its bulk packet size follows the negotiated speed. */
+/* Built at device start by the shared core (kernel/usb) from the identity
+ * and the endpoint numbers.  The configuration lives in RAM because its bulk
+ * packet size follows the negotiated speed. */
 static uint8_t dev_desc[TIKU_USBD_DEVICE_LEN];
 static uint8_t conf_desc[TIKU_USBD_CDC_CONFIG_LEN];
 static uint8_t str_mfr[16], str_prod[32];
@@ -132,10 +132,10 @@ static tiku_usbd_ctrl_t     s_ctrl;
 static uint32_t setup_buf[6];
 #define EP0_IN_CAP          128u
 static uint8_t  ep0_in_buf[EP0_IN_CAP] __attribute__((aligned(4)));
-/* A control write's data stage lands here, NOT in the buffer armed for a
- * SETUP packet: read as a setup, its completion can carry the SETUP bit
- * and be taken for a new request, which answers the old one twice.  A
- * board rebooting with the cable in wedges within a cycle or two of it. */
+/* A control write's data stage lands here, not in the SETUP buffer: there,
+ * its completion can carry the SETUP bit and be taken for a new request,
+ * which answers the old one twice and wedges a board rebooting with the
+ * cable in. */
 static uint8_t  ep0_out_buf[64] __attribute__((aligned(4)));
 static uint8_t  serial_buf[26] __attribute__((aligned(4)));
 
@@ -157,8 +157,8 @@ static uint32_t s_tsiz_after;      /* the counter once the core was done   */
 static uint8_t  s_armed_bytes[8];  /* what the buffer held at arming       */
 static uint32_t s_armed_len;
 
-/* The last few control requests and what each was answered with: enough to
- * read the conversation rather than infer it from a single snapshot. */
+/* The last LOG_N control requests and the byte count each was answered
+ * with (0xFFFF for a stall). */
 #define LOG_N 8u
 static uint8_t  s_log_req[LOG_N][8];
 static uint16_t s_log_ans[LOG_N];
@@ -168,6 +168,7 @@ static uint8_t  s_log_head;
 /* HELPERS                                                                   */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Flush every TX FIFO, then the RX FIFO (bounded waits). */
 static void fifo_flush(void)
 {
     uint32_t spin;
@@ -224,11 +225,13 @@ static void ep0_tx(const void *data, uint32_t len)
     s_last_diepctl  = NRF_USBHSCORE_S->DIEPCTL0;
 }
 
-/* A new SETUP means the host abandoned any transfer in flight.  If the
- * previous status or data IN never completed -- its EPENA still set -- the
- * next IN armed on top of it wedges, and the host reports a protocol error
- * on alternate control writes.  Disable the endpoint and flush its FIFO so
- * the new transfer starts clean. */
+/**
+ * @brief Disable EP0 IN if it is still enabled and flush its FIFO.
+ *
+ * A new SETUP abandons any transfer in flight; an IN armed on top of one
+ * whose EPENA is still set wedges, and the host reports a protocol error on
+ * alternate control writes.
+ */
 static void ep0_in_reset(void)
 {
     uint32_t spin;
@@ -253,7 +256,7 @@ static void ep0_in_reset(void)
 /** @brief Arm EP0 OUT for a control write's data stage. */
 static void ep0_arm_data_out(void)
 {
-    /* A WHOLE packet, never the exact byte count: the core takes an OUT
+    /* A whole packet, not the exact byte count: the core takes an OUT
      * transfer size in multiples of the endpoint's packet size and refuses
      * a short one outright.  The data ends the transfer by being short. */
     NRF_USBHSCORE_S->DOEPTSIZ0 = (1ul << DOEPTSIZ_SUPCNT_SHIFT) |
@@ -263,6 +266,7 @@ static void ep0_arm_data_out(void)
     NRF_USBHSCORE_S->DOEPCTL0 |= DEPCTL_EPENA | DEPCTL_CNAK;
 }
 
+/** @brief Stall both EP0 directions and re-arm for the next SETUP. */
 static void ep0_stall(void)
 {
     NRF_USBHSCORE_S->DIEPCTL0 |= DEPCTL_STALL;
@@ -270,16 +274,13 @@ static void ep0_stall(void)
     ep0_arm_setup();
 }
 
-/** @brief The device's serial string, built from the factory device id. */
-
 /*---------------------------------------------------------------------------*/
 /* CDC DATA ENDPOINTS                                                        */
 /*---------------------------------------------------------------------------*/
 
 
-/* Two OUT buffers so the endpoint is re-armed on the alternate before the
- * received bytes are copied out, not after, closing the window a single
- * buffer left open while it was busy. */
+/* Two OUT buffers, so the endpoint can be re-armed on the alternate one
+ * before the received bytes are copied out of the other. */
 static uint8_t out_pkt[2][USB_BULK_MPS_HS] __attribute__((aligned(4)));
 static uint8_t s_out_cur;
 static uint8_t in_pkt[USB_BULK_MPS_HS] __attribute__((aligned(4)));
@@ -311,8 +312,11 @@ static void cdc_endpoints_open(void)
 /* EP0 CONTROL                                                               */
 /*---------------------------------------------------------------------------*/
 
-/* A standard request is answered here; anything else is stalled, which is
- * how a host learns a device does not implement it. */
+/**
+ * @brief Answer the SETUP in setup_buf through the shared control core
+ *        (kernel/usb), applying its effects first; a request it does not
+ *        answer is stalled.
+ */
 static void ep0_setup(void)
 {
     const uint8_t *p = (const uint8_t *)setup_buf;
@@ -353,7 +357,7 @@ static void ep0_setup(void)
         break;
     case TIKU_USBD_CTRL_ACCEPT_OUT:
         /* Its arrival is the cue for the status stage, so nothing is sent
-         * yet -- and it is read as DATA, on a buffer of its own. */
+         * yet; it is read as data, on a buffer of its own. */
         s_ep0_out_data = 1u;
         s_log_head = (uint8_t)((s_log_head + 1u) % LOG_N);
         ep0_arm_data_out();
@@ -485,7 +489,7 @@ int tiku_nordic_usbhs_dev_start_cfg(int phyif16, uint32_t trdtim,
 {
     uint32_t base;
 
-    /* The core is already powered and out of reset (tiku_nordic_usbhs_up). */
+    /* The core must be powered and out of reset (tiku_nordic_usbhs_up). */
     if ((NRF_USBHSCORE_S->GRSTCTL & GRSTCTL_AHBIDLE) == 0u) {
         return -1;
     }
@@ -540,9 +544,8 @@ int tiku_nordic_usbhs_dev_start_cfg(int phyif16, uint32_t trdtim,
 
     NRF_USBHSCORE_S->GAHBCFG = GAHBCFG_DMAEN | GAHBCFG_HBSTLEN_I4;
 
-    /* 0 negotiates high speed, 1 forces full speed on the same PHY.  A
-     * console needs no more than full speed, but the PHY is a high-speed
-     * one and its full-speed path is not the integration's default. */
+    /* DEVSPD: 0 negotiates high speed, 1 forces full speed on the same
+     * high-speed PHY. */
     NRF_USBHSCORE_S->DCFG = DCFG_NZSTSOUTHSHK | (devspd & 3ul);
 
     /* The receive FIFO first, then one transmit FIFO per IN endpoint, each

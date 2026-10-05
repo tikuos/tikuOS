@@ -7,9 +7,9 @@
  *
  * tiku_region_arch.c - nRF54L physical memory region table.
  *
- * Describes the map for kernel introspection and overlap checks.  Sizes come from
- * the selected device header via tiku_device_select.h, never a hardcoded include:
- * a stale one once shrank the LM20A's NVM region and broke every lc-persist.
+ * Describes the memory map for kernel introspection and overlap checks.
+ * Sizes come from the selected device header through tiku_device_select.h; a
+ * direct include of one device header would give every part its sizes.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -28,7 +28,8 @@ static const tiku_mem_region_t tiku_nordic_region_table[] = {
 #if defined(TIKU_DEVICE_RAM2_START)
     {
         /* Upper SRAM bank (nRF54LM20A RAM2): large buffers / tier arena.
-         * Classified SRAM so tier sub-arenas created inside it validate. */
+         * Classified SRAM: tier sub-arenas created inside it must validate
+         * as SRAM. */
         (const uint8_t *)TIKU_DEVICE_RAM2_START,
         (tiku_mem_arch_size_t)TIKU_DEVICE_RAM2_SIZE,
         TIKU_MEM_REGION_SRAM,

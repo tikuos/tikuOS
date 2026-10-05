@@ -7,22 +7,23 @@
  *
  * tiku_crypto_arch.c - nRF54L CRACEN CryptoMaster offload backend.
  *
- * An operation is a chain of FETCH descriptors routing config then data to the
- * selected engine, plus one PUSH for the result.  The engine is enabled only for
- * the operation and the DMA is soft-reset after, so no state leaks between them.
+ * An operation is a chain of FETCH descriptors routing config then data to
+ * the selected engine, plus one PUSH for the result.  The engine is enabled
+ * only for the operation and the DMA is soft-reset after it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <arch/nordic/tiku_crypto_arch.h>
 #include <arch/nordic/tiku_trng_arch.h>       /* seed source for the masker  */
-#include <arch/nordic/tiku_device_select.h>   /* NRF_CRACEN_S / NRF_CRACENCORE_S */
+#include <arch/nordic/tiku_device_select.h>   /* NRF_CRACEN_S, CRACENCORE */
 #include <string.h>
 
 /*---------------------------------------------------------------------------*/
 /* Wire format                                                               */
 /*---------------------------------------------------------------------------*/
 
+/** @brief CryptoMaster DMA descriptor: one fetch or push element. */
 typedef struct __attribute__((packed, aligned(4))) cm_desc {
     const uint8_t   *addr;
     struct cm_desc  *next;
@@ -41,12 +42,10 @@ typedef struct __attribute__((packed, aligned(4))) cm_desc {
 #define CM_TAG_CFGREG(off)  ((uint32_t)(off) << 8)
 
 /* BA413 hash CONFIG word: SHA-256 mode (one-hot 0x08) | hardware padding
- * (bit 9) | final digest (bit 10).  Semantics from the vendor driver's
- * documented encoding; verified on this die against FIPS 180-4 vectors
- * via the cryptoprobe command. */
+ * (bit 9) | final digest (bit 10), in the vendor driver's encoding. */
 #define CM_HASH_CFG_SHA256  0x00000608UL
 
-/* CRACEN.ENABLE bit for the CryptoMaster (wrapper gate). */
+/* CRACEN.ENABLE bits for a CryptoMaster operation (wrapper gate). */
 #define CRACEN_EN_CRYPTOMASTER \
     (CRACEN_ENABLE_CRYPTOMASTER_Msk | CRACEN_ENABLE_PKEIKG_Msk | \
      CRACEN_ENABLE_RNG_Msk)
@@ -85,22 +84,11 @@ void tiku_crypto_hw_counters(uint16_t *hw_ops, uint16_t *sw_ops,
      CRACENCORE_CRYPTMSTRDMA_STATUS_PUSHBUSY_Msk)
 
 /**
- * @brief Run one CryptoMaster operation and wait for completion.
+ * @brief Load the masking seed once per power cycle.
  *
- * Enables the engine, points the fetcher and pusher at the descriptor chains in
- * indirect mode, starts both, spins until idle, then soft-resets the DMA and
- * gates the engine back off.
- *
- * @note The spin is deliberate: the engine is far faster than an interrupt
- *       round-trip, and the nrfx driver documents the same choice.
- * @return 0 on success, -1 on a fetch/push error or spin timeout.
- */
-/**
- * @brief One-time masking-seed load: the CryptoMaster (and IKG) refuse to
- * run until CRACEN.SEED[0..11] is written and SEEDVALID set (observed
- * on-die as an instant fetcher error with zero bytes moved).  Seed from
- * the CRACEN TRNG -- the masker wants real entropy, and this part has the
- * proven driver for it.
+ * On the nRF54L15 the CryptoMaster and IKG refuse to run (a fetcher error
+ * with no bytes moved) until CRACEN.SEED[0..11] is written from the TRNG and
+ * SEEDVALID is set.  On the nRF54LM20 nothing needs loading.
  *
  * @return 0 once the seed is valid, -1 if the TRNG failed.
  */
@@ -114,16 +102,11 @@ static int cm_ensure_seed(void)
     }
 
 #if defined(CRACEN_SEEDVALID_VALID_Disabled)
-    /* nRF54LM20A/B CRACEN core: the CryptoMaster's SYMMETRIC engines (BA413
-     * hash, BA411E AES) do NOT require CRACEN.SEEDVALID here -- proven on-die:
-     * with SEEDVALID reading 0, a BA413 SHA-256 produces the bit-exact FIPS
-     * digest.  The SEED[0..11] block feeds the IKG (Internal Key Generator)
-     * private/symmetric key DRBG, which TikuOS does not use; and SEEDVALID is
-     * read-only on this core ("Writing this register has no effect"), so it
-     * cannot be forced from software anyway.  (On the nRF54L15 the CryptoMaster
-     * DID gate on SEEDVALID -- an instant fetcher error otherwise -- hence the
-     * #else path below.)  Just proceed; the DPA countermeasure mask
-     * (cm_ensure_mask) is the only per-op prerequisite that remains. */
+    /* nRF54LM20A/B CRACEN core: the symmetric engines (BA413 hash, BA411E
+     * AES) run with SEEDVALID reading 0.  SEED[0..11] feeds the IKG key
+     * DRBG, which TikuOS does not use, and SEEDVALID is read-only on this
+     * core ("Writing this register has no effect").  The countermeasure
+     * mask (cm_ensure_mask) is the only per-op prerequisite left. */
     (void)seed;
     (void)i;
     return 0;
@@ -148,15 +131,13 @@ static uint8_t  s_mask_loaded;
 static int cm_run_raw(cm_desc_t *fetch, cm_desc_t *push);
 
 /**
- * @brief One-time countermeasure-mask load.
+ * @brief Load the countermeasure mask once (until a PK verify clears it).
  *
- * The CryptoMaster's data path runs through a DPA masking network that stays
- * DARK until a random mask word is DMA-written to the AES engine's config
- * offset 0x68.  Loads one TRNG word; the output descriptor is null.
+ * The data path runs through a DPA masking network that passes no data from
+ * any engine, the bypass included, until a random word is DMA-written to the
+ * AES engine's config offset 0x68; the fetcher completes, the pusher starves.
  *
- * @note Config-interface writes work unmasked, but data through any engine --
- *       even the bypass -- never emerges: observed on-die as the fetcher
- *       completing while the pusher starves.
+ * @return 0 once the mask is loaded, -1 if the TRNG or the DMA failed.
  */
 static int cm_ensure_mask(void)
 {
@@ -189,6 +170,7 @@ static int cm_ensure_mask(void)
     return rc;
 }
 
+/** @brief Ensure the seed and the mask, then run one operation. */
 static int cm_run(cm_desc_t *fetch, cm_desc_t *push)
 {
     s_dbg_stage = 1;
@@ -202,6 +184,15 @@ static int cm_run(cm_desc_t *fetch, cm_desc_t *push)
     return cm_run_raw(fetch, push);
 }
 
+/**
+ * @brief Run one CryptoMaster operation and wait for completion.
+ *
+ * Enables the engine, points the fetcher and pusher at the descriptor chains
+ * in indirect mode, starts both and polls until idle (the engine finishes
+ * faster than an interrupt round trip), then soft-resets the DMA.
+ *
+ * @return 0 on success, -1 on a fetch/push error or spin timeout.
+ */
 static int cm_run_raw(cm_desc_t *fetch, cm_desc_t *push)
 {
     uint32_t spin;
@@ -221,8 +212,8 @@ static int cm_run_raw(cm_desc_t *fetch, cm_desc_t *push)
         CRACENCORE_CRYPTMSTRDMA_START_STARTFETCH_Msk |
         CRACENCORE_CRYPTMSTRDMA_START_STARTPUSH_Msk;
 
-    /* Sub-ms hardware; generous bound so a wedged engine cannot hang the
-     * cooperative loop (fail -> caller falls back to software). */
+    /* The spin bound keeps a wedged engine from hanging the scheduler loop;
+     * the caller then falls back to software. */
     for (spin = 0; spin < 2000000UL; spin++) {
         uint32_t ints = NRF_CRACENCORE_S->CRYPTMSTRDMA.INTSTATRAW;
         s_dbg_ints   = ints;
@@ -251,15 +242,18 @@ static int cm_run_raw(cm_desc_t *fetch, cm_desc_t *push)
 /* Hash (BA413)                                                              */
 /*---------------------------------------------------------------------------*/
 
-/* The CryptoMaster DMA, like every Nordic DMA, fetches from RAM only --
- * a message living in RRAM (rodata, or a cert parsed in place) faults the
- * fetcher instantly (verified on-die: FETCHERERROR with zero bytes moved).
- * One-shot inputs are therefore staged through this SRAM bounce buffer;
- * anything larger falls back to the software path until the streaming
- * (context-save) interface lands. */
+/* The CryptoMaster DMA fetches from RAM only: a message in RRAM (rodata, or
+ * a certificate parsed in place) raises FETCHERERROR with no bytes moved.
+ * One-shot inputs are staged through this SRAM buffer; a longer message
+ * returns -2 and the caller uses software. */
 #define CM_STAGE_MAX 4096u
 static uint8_t cm_stage[CM_STAGE_MAX] __attribute__((aligned(4)));
 
+/**
+ * @brief Stage @p msg and hash it on the BA413 with config word @p cfg.
+ * @return 0 on success, -2 if @p len exceeds CM_STAGE_MAX, -1 on an engine
+ *         error.
+ */
 static int hash_run(uint32_t cfg, const void *msg, size_t len,
                     uint8_t *out, size_t outlen)
 {
@@ -281,9 +275,9 @@ static int hash_run(uint32_t cfg, const void *msg, size_t len,
 
     /* Arbitrary byte lengths: REALIGN pads the FIFO transfer to a word
      * multiple, and the tag's invalid-bytes field (bits 15:8) tells the
-     * engine how many trailing pad bytes to IGNORE.  Without the field the
-     * dummies get hashed (wrong digest); without REALIGN an unaligned
-     * length faults the fetcher -- both observed on-die. */
+     * engine how many trailing pad bytes to ignore.  Without the field the
+     * pad bytes are hashed (wrong digest); without REALIGN an unaligned
+     * length faults the fetcher. */
     fetch[1].addr   = cm_stage;
     fetch[1].length = (uint32_t)len | CM_LEN_REALIGN;
     fetch[1].tag    = CM_TAG_ENGINE_HASH | CM_TAG_LAST | CM_TAG_DATATYPE(0) |
@@ -318,15 +312,13 @@ int tiku_crypto_arch_sha256(const void *msg, size_t len, uint8_t out[32])
  * decrypt bit 0; key/IV loaded through the config interface (offsets 0x8 and
  * 0x28); AAD is engine datatype 1, payload datatype 0; the final input block
  * is the 16-byte big-endian lenA||lenC pair, then the 16-byte tag follows
- * the payload on the push side.  Semantics from the vendor driver's
- * documented flow; verified on-die against the software GCM (NIST-vector
- * proven) -- see cryptoprobe gcm. */
+ * the payload on the push side.  The flow follows the vendor driver's. */
 #define CM_AES_CFG_GCM      (0x040UL << 8)
 #define CM_AES_CFG_DECRYPT  0x1UL
 #define CM_AES_REG_KEY      0x08u
 #define CM_AES_REG_IV       0x28u
 
-/* True when the DMA can fetch @p p directly (on-die SRAM). */
+/** @brief True when the DMA can fetch @p p directly (on-die SRAM). */
 static int cm_src_in_ram(const void *p)
 {
     return ((uintptr_t)p >> 24) == 0x20u;
@@ -352,8 +344,8 @@ int tiku_crypto_arch_aes_gcm(int decrypt, uint32_t cfg_extra,
     if (key_sz != 16u && key_sz != 32u) {
         return -2;
     }
-    /* Inputs the DMA cannot reach (RRAM) would need staging; the TLS/kit
-     * callers hand SRAM buffers, so keep the fast path simple. */
+    /* AAD or input outside SRAM returns -2;
+     * tiku_crypto_arch_aes_gcm_kit() stages such buffers. */
     if ((aad_sz && !cm_src_in_ram(aad)) || (in_sz && !cm_src_in_ram(in))) {
         return -2;
     }
@@ -362,7 +354,7 @@ int tiku_crypto_arch_aes_gcm(int decrypt, uint32_t cfg_extra,
     memcpy(keybuf, key, key_sz);
     memcpy(ivbuf, iv, 12u);
 
-    /* lenA || lenC, both in BITS, big-endian. */
+    /* lenA || lenC, both in bits, big-endian. */
     bits = (uint64_t)aad_sz * 8u;
     for (i = 0; i < 8; i++) {
         lenblk[i]     = (uint8_t)(bits >> (56 - 8 * i));
@@ -413,11 +405,10 @@ int tiku_crypto_arch_aes_gcm(int decrypt, uint32_t cfg_extra,
     d->tag = CM_TAG_ENGINE_AES | CM_TAG_DATATYPE(0) | CM_TAG_LAST;
     d->next = CM_DESC_STOP;
 
-    /* Output stream: the engine EMITS the AAD first (authenticated
-     * passthrough -- observed on-die: the first output bytes were the AAD),
-     * then ciphertext/plaintext, then the 16-byte tag.  The AAD block is
-     * routed to a discard sink; out gets align-16 REALIGN padding (caller
-     * guarantees headroom). */
+    /* Output stream: the engine emits the AAD first (authenticated
+     * passthrough), then the ciphertext or plaintext, then the 16-byte tag.
+     * The AAD block goes to a discard sink; out gets align-16 REALIGN
+     * padding (the caller provides the headroom). */
     {
         static uint8_t sink[64] __attribute__((aligned(4)));
         cm_desc_t *q = push;
@@ -447,11 +438,11 @@ int tiku_crypto_arch_aes_gcm(int decrypt, uint32_t cfg_extra,
 }
 
 /*---------------------------------------------------------------------------*/
-/* AES-ECB (BA411E) -- the raw block cipher, one 16-byte block.  The         */
-/* building block for a spec-correct 802.15.4 CCM* (CBC-MAC + CTR are just   */
-/* repeated ECB), so the crypto stays in hardware without needing the        */
-/* undocumented CCM00 job-list or BA411E CCM mode config.                    */
+/* AES-ECB (BA411E)                                                          */
 /*---------------------------------------------------------------------------*/
+
+/* One 16-byte block of the raw cipher; tiku_crypto_arch_aes_ccm_star()
+ * builds 802.15.4 CCM* from it (CBC-MAC and CTR are repeated ECB). */
 #define CM_AES_CFG_ECB      (0x001UL << 8)      /* one-hot mode id 0          */
 
 int tiku_crypto_arch_aes_ecb(int decrypt, const uint8_t *key, size_t key_sz,
@@ -494,12 +485,12 @@ int tiku_crypto_arch_aes_ecb(int decrypt, const uint8_t *key, size_t key_sz,
     return cm_run(fetch, push);
 }
 
-/* AES-CCM* (RFC 3610 / IEEE 802.15.4, L=2 -> 13-byte nonce) over the hardware
- * ECB: CBC-MAC for the tag, CTR for the data.  Not "software AES" -- the block
- * cipher is the BA411E; only the CCM* framing is here (the standard method
- * when no usable CCM hardware mode is documented).  encrypt: out=ciphertext,
- * mic=tag.  decrypt: m=ciphertext, out=plaintext, mic=RECOMPUTED tag (caller
- * compares in constant time with the received one). */
+/* AES-CCM* (RFC 3610 / IEEE 802.15.4, L=2 -> 13-byte nonce) over the
+ * hardware ECB: CBC-MAC for the tag, CTR for the data.  The block cipher
+ * runs on the BA411E; the CCM* framing is software.  encrypt:
+ * out=ciphertext, mic=tag.  decrypt: m=ciphertext, out=plaintext,
+ * mic=recomputed tag, which the caller compares in constant time with the
+ * received one. */
 int tiku_crypto_arch_aes_ccm_star(int decrypt, const uint8_t *key,
                                   size_t key_sz, const uint8_t nonce[13],
                                   const uint8_t *aad, size_t aad_len,
@@ -543,7 +534,7 @@ int tiku_crypto_arch_aes_ccm_star(int decrypt, const uint8_t *key,
     rc = tiku_crypto_arch_aes_ecb(0, key, key_sz, blk, x);
     if (rc) { return rc; }
 
-    if (aad_len > 0u) {                           /* 2-byte len prefix + pad   */
+    if (aad_len > 0u) {                           /* 2-byte len prefix + pad */
         size_t apos = 0;
         uint8_t first = 1u;
         while (apos < aad_len || first) {
@@ -563,7 +554,7 @@ int tiku_crypto_arch_aes_ccm_star(int decrypt, const uint8_t *key,
             if (rc) { return rc; }
         }
     }
-    for (off = 0; off < m_len; off += 16u) {      /* message blocks (padded)   */
+    for (off = 0; off < m_len; off += 16u) {      /* message blocks (padded) */
         size_t n = (m_len - off < 16u) ? (m_len - off) : 16u;
         memset(blk, 0, 16u);
         memcpy(blk, &m[off], n);
@@ -581,7 +572,7 @@ int tiku_crypto_arch_aes_ccm_star(int decrypt, const uint8_t *key,
     if (rc) { return rc; }
     for (i = 0; i < mic_len; i++) { mic[i] = x[i] ^ s[i]; }
 
-    if (!decrypt) {                               /* CTR-encrypt the payload   */
+    if (!decrypt) {                               /* CTR-encrypt the payload */
         for (off = 0; off < m_len; off += 16u) {
             size_t n = (m_len - off < 16u) ? (m_len - off) : 16u;
             ctr[0] = 1u;
@@ -599,9 +590,10 @@ int tiku_crypto_arch_aes_ccm_star(int decrypt, const uint8_t *key,
 }
 
 /**
- * @brief Kit-safe AES-GCM: stages in/out through SRAM so the caller's
- * buffers need no alignment headroom and may live in RRAM.  Encrypt or
- * decrypt (verify) up to the stage size; larger -> -2 (software path).
+ * @brief AES-GCM staged through SRAM: the caller's buffers need no alignment
+ *        headroom and may live in RRAM.
+ *
+ * Input up to CM_STAGE_MAX bytes and AAD up to 256; larger returns -2.
  */
 int tiku_crypto_arch_aes_gcm_kit(int decrypt,
                                  const uint8_t *key, size_t key_sz,
@@ -635,22 +627,17 @@ int tiku_crypto_arch_aes_gcm_kit(int decrypt,
 /* Public-key engine (BA414EP) — ECDSA verify on P-256 / P-384               */
 /*---------------------------------------------------------------------------*/
 /*
- * PROVEN on the DK (481x: P-256 verify 1.2 ms hardware vs 582 ms software;
- * P-256 + P-384 both accept valid / reject tampered signatures) -- but the
- * BA414EP is a MICROCODED core, and its microcode (CRACENCORE+0xC000) is a
- * Nordic-proprietary blob (LicenseRef-Nordic-5-Clause).  TikuOS ships NO
- * microcode, so this whole capability is a COMPILE-TIME OPT-IN, off by
- * default: a build that chooses to provide the microcode (via
- * tiku_crypto_arch_pk_load_microcode) enables it with TIKU_CRACEN_PK_ENABLE.
- * It also perturbs shared CRACEN masking state, so keeping it out of the
- * default build leaves the (blob-free, clean-room) SHA/AES-GCM engines and
- * the whole TLS path untouched.
+ * The BA414EP is a microcoded core, and its microcode (CRACENCORE+0xC000) is
+ * a Nordic-proprietary blob (LicenseRef-Nordic-5-Clause).  TikuOS ships no
+ * microcode, so this code compiles only with TIKU_CRACEN_PK_ENABLE, in a
+ * build that supplies one (tiku_crypto_arch_pk_load_microcode() or
+ * cracen_pk_microcode.h).  A verify also changes shared CRACEN masking
+ * state, which the default build's SHA and AES-GCM paths never see.
  *
- * The register/slot/command model comes from the BSD-licensed nrfx HAL and
- * the Nordic sxsymcrypt/silexpk register headers; this is a local
- * from-scratch implementation.  Operands load LITTLE-endian, LSB at the slot
- * base (determined empirically on-die -- the big-endian-flag path the vendor
- * documents gave OUT_OF_RANGE here); slots 8..12 = Qx,Qy,r,s,h; the status
+ * The register, slot and command model comes from the BSD-licensed nrfx HAL
+ * and the Nordic sxsymcrypt/silexpk register headers.  Operands load
+ * little-endian, LSB at the slot base; the vendor's big-endian flag returns
+ * OUT_OF_RANGE on this die.  Slots 8..12 = Qx, Qy, r, s, h; the status
  * result field is 0 = valid, bit 9 = invalid signature.
  */
 #if defined(TIKU_CRACEN_PK_ENABLE)
@@ -676,7 +663,8 @@ int tiku_crypto_arch_aes_gcm_kit(int decrypt,
 /* CRACEN.ENABLE gate for the public-key / IKG domain. */
 #define CRACEN_EN_PKEIKG  (CRACEN_ENABLE_PKEIKG_Msk)
 
-/** Crypto-RAM slot size: 512 B unless the die is fused for >4096-bit ops. */
+/** @brief Crypto-RAM slot size: 512 B unless the die is fused for operands
+ *         over 4096 bits. */
 static uint32_t pk_slot_sz(void)
 {
     static uint32_t sz;
@@ -690,11 +678,12 @@ static uint32_t pk_slot_sz(void)
     return sz;
 }
 
-/** Write @p len bytes (word-granular, verbatim) into a crypto-RAM slot. */
+/** @brief Write a big-endian @p op_size-byte operand into a crypto-RAM slot,
+ *         reversed so its least significant byte sits at the slot base. */
 static void pk_wr_slot(uint32_t slot, uint32_t slot_sz, uint32_t op_size,
                        const uint8_t *src)
 {
-    /* BENCH: reverse to little-endian words (operand LSB at low address). */
+    /* Little-endian words: operand LSB at the low address. */
     volatile uint8_t *dst = PK_RAM + slot * slot_sz;
     uint32_t i;
     for (i = 0; i < op_size; i += 4u) {
@@ -707,40 +696,23 @@ static void pk_wr_slot(uint32_t slot, uint32_t slot_sz, uint32_t op_size,
 
 static uint16_t s_pk_ops, s_pk_errs;
 static uint32_t s_pk_dbg_status, s_pk_dbg_cmd, s_pk_dbg_spin;
-/* Latched once the engine is found to hang on START -- the BA414EP is a
- * microcoded core and its microcode RAM (CRACENCORE+0xC000) is NOT loaded
- * on a bare TikuOS boot (the microcode blob is Nordic-proprietary,
- * LicenseRef-Nordic-5-Clause, and deliberately NOT embedded here -- see the
- * C3 note in the phase-6 plan).  With no microcode, every PK command sets
- * BUSY forever; latch that after the first timeout so callers fall straight
- * back to software instead of eating the timeout on every chain verify. */
+/* Set when a PK command stays BUSY past the spin bound, which is what the
+ * engine does with no microcode loaded at CRACENCORE+0xC000.  Every later
+ * verify then returns -1 at once, so callers fall back to software without
+ * waiting out the bound again; loading microcode clears it. */
 static int s_pk_unavailable;
 
-/**
- * @brief ECDSA signature verify on a predefined NIST curve.
- *
- * @param op_size    curve byte length (32 = P-256, 48 = P-384)
- * @param selcur     PK_FLAG_SELCUR_P256 / _P384
- * @param qx,qy      public point (op_size bytes each, big-endian)
- * @param r,s        signature (op_size bytes each, big-endian)
- * @param h          message hash (op_size bytes; leftmost bits used)
- * @return 0 = signature valid; 1 = invalid; -1 = engine/param error
- */
 #define PK_CMD_CLEAR_MEMORY 0x0Fu
 
-/* Bring the PK engine to a runnable state once per boot: power all three
- * CRACEN modules (the vendor enables CRYPTOMASTER|RNG|PKEIKG together), apply
- * the CRACEN-Lite TRNG test-threshold workaround (these reset to bad defaults
- * on every RNG power-down -- and the TRNG driver powers RNG down after each
- * read -- wedging the IKG that shares the PKE domain), then run one
- * CLEAR_MEMORY command as the microcode's boot op. */
 /*
- * User-supplied microcode: TikuOS ships NONE.  To opt into hardware PK, drop
- * a `cracen_pk_microcode.h` next to this file (gitignored) that defines
+ * User-supplied microcode: TikuOS ships none.  A `cracen_pk_microcode.h`
+ * next to this file (gitignored; see cracen_pk_microcode.h.template) that
+ * defines
  *   static const uint32_t TIKU_CRACEN_PK_UCODE[] = { ... };
  *   #define TIKU_CRACEN_PK_UCODE_WORDS <count>
- * with YOUR licensed BA414EP microcode image.  It is then auto-loaded on the
- * first PK use.  Absent, PK compiles but every verify fails-safe to software.
+ * with a licensed BA414EP microcode image is loaded on the first PK use.
+ * Without it PK compiles, and every verify returns -1 so the caller uses
+ * software.
  */
 #if defined(__has_include)
 #  if __has_include("cracen_pk_microcode.h")
@@ -751,6 +723,15 @@ static int s_pk_unavailable;
 
 static uint8_t s_pk_ucode_loaded;
 
+/**
+ * @brief Bring the PK engine to a runnable state before a verify.
+ *
+ * Powers CRYPTOMASTER, RNG and PKEIKG, rewrites the TRNG test thresholds
+ * (an RNG power-down, after every TRNG read, resets them to values that wedge
+ * the IKG), loads bundled microcode once, and runs one CLEAR_MEMORY command.
+ *
+ * @return 0 once CLEAR_MEMORY completes, -1 if the engine stays busy.
+ */
 static int pk_engine_prepare(void)
 {
     uint32_t spin;
@@ -784,6 +765,16 @@ static int pk_engine_prepare(void)
     return -1;                            /* no microcode provided: give up */
 }
 
+/**
+ * @brief ECDSA signature verify on a predefined NIST curve.
+ *
+ * @param op_size    curve byte length (32 = P-256, 48 = P-384)
+ * @param selcur     PK_FLAG_SELCUR_P256 / _P384
+ * @param qx,qy      public point (op_size bytes each, big-endian)
+ * @param r,s        signature (op_size bytes each, big-endian)
+ * @param h          message hash (op_size bytes; leftmost bits used)
+ * @return 0 = signature valid; 1 = invalid; -1 = engine/param error
+ */
 static int pk_ecdsa_verify(uint32_t op_size, uint32_t selcur,
                            const uint8_t *qx, const uint8_t *qy,
                            const uint8_t *r, const uint8_t *s,
@@ -817,8 +808,8 @@ static int pk_ecdsa_verify(uint32_t op_size, uint32_t selcur,
     PK_REG(PK_REG_COMMAND) = cmd;
     PK_REG(PK_REG_CONTROL) = PK_CONTROL_START;
 
-    /* Fail-fast: a real (microcoded) verify finishes in ~1-2 ms; ~12 ms of
-     * spin is generous.  A timeout here means no microcode -> latch off. */
+    /* A verify still busy after the spin bound means no microcode: the
+     * engine is latched unavailable. */
     for (spin = 0; spin < 500000u; spin++) {
         if ((PK_REG(PK_REG_STATUS) & PK_STATUS_BUSY) == 0u) {
             break;
@@ -844,12 +835,10 @@ static int pk_ecdsa_verify(uint32_t op_size, uint32_t selcur,
     }
 
 teardown:
-    /* Restore the module gating and force the CryptoMaster to re-seed +
-     * re-mask on its next use.  NOTE: this does NOT fully decouple the PK
-     * engine from the shared CRACEN RNG state -- interleaving hardware PK
-     * with CryptoMaster (SHA/AES-GCM) in the same session is NOT reliable,
-     * which is why the kit's TLS-path verify stays software and this engine
-     * is exposed only as a standalone, opt-in capability. */
+    /* Restore the module gating and make the CryptoMaster re-seed and
+     * re-mask on its next use.  Interleaving hardware PK with CryptoMaster
+     * operations (SHA, AES-GCM) in one session is not reliable even so: the
+     * PK engine shares CRACEN RNG state. */
     NRF_CRACEN_S->ENABLE    = en0;
     NRF_CRACEN_S->SEEDVALID = 0u;
     s_mask_loaded           = 0u;
@@ -912,12 +901,11 @@ uint32_t tiku_crypto_arch_pk_hwconfig(void)
  * @brief Upload a caller-provided BA414EP microcode image to the PK RAM.
  *
  * The PK engine is a microcoded core: its microcode RAM at CRACENCORE+0xC000
- * must be loaded before any command runs.  Generic -- it takes whatever image
- * the caller supplies and clears the unavailable latch so the PK path re-arms.
+ * must be loaded before any command runs.  Copies up to 1280 words of the
+ * caller's image and clears the unavailable latch.
  *
- * @note TikuOS ships NO microcode image (the BA414EP microcode is
- *       Nordic-proprietary, LicenseRef-Nordic-5-Clause); this exists so a build
- *       that chooses to provide one can enable hardware PK.
+ * @note TikuOS ships no microcode image (the BA414EP microcode is
+ *       Nordic-proprietary, LicenseRef-Nordic-5-Clause).
  */
 void tiku_crypto_arch_pk_load_microcode(const uint32_t *ucode, size_t words)
 {

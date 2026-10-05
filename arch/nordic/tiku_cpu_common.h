@@ -5,10 +5,9 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_common.h - nRF54L common CPU helpers: cycle-counter busy delays
- *                     and system reset.  Delays use the Cortex-M33 DWT cycle
- *                     counter so they never contend with SysTick (which a
- *                     later phase may claim for the kernel tick).
+ * tiku_cpu_common.h - nRF54L common CPU helpers: busy delays, reset, ID.
+ *
+ * Delays count SysTick at the live core clock; reset is AIRCR SYSRESETREQ.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,21 +18,19 @@
 #include <stdint.h>
 
 /**
- * @brief Core clock in Hz right now, read from the live PLL state.
+ * @brief Core clock in Hz right now, read from OSCILLATORS.PLL.CURRENTFREQ.
  *
- * 64 or 128 MHz, the only two the part supports (datasheet 5.5.3).  Reads
- * OSCILLATORS.PLL.CURRENTFREQ rather than trusting a build-time constant,
- * because a boot has been observed to land somewhere other than it asked.
- *
- * @note This is the ONLY definition of the core rate; tiku_cpu_mclk_hz() and
- *       the delay helpers both come here.
+ * 64 or 128 MHz, the only two the part supports (datasheet 5.5.3); a boot
+ * can land at a rate other than the one it requested.  tiku_cpu_mclk_hz()
+ * and the delay helpers both read the rate here.
  */
 unsigned long tiku_nordic_cpu_hz_now(void);
 
-/** @brief Enable the DWT cycle counter (used by the busy-delay helpers). */
+/** @brief No-op kept for the boot bring-up call: SysTick delays need no
+ *         setup. */
 void tiku_nordic_dwt_init(void);
 
-/** @brief Busy-wait for @p us microseconds (DWT cycle counter). */
+/** @brief Busy-wait for @p us microseconds (SysTick). */
 void tiku_cpu_nordic_delay_us(uint32_t us);
 
 /** @brief Busy-wait for @p ms milliseconds. */

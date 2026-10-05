@@ -8,18 +8,18 @@
  * tiku_ieee154_arch.c - IEEE 802.15.4 250 kbps O-QPSK PHY on the nRF54L RADIO.
  *
  * RADIO mode 0xF does the O-QPSK/DSSS PHY and SFD sync in hardware; software
- * programs the packet format and drives TXEN/RXEN.  The frame is [PHR][PSDU] with
- * CRCINC set, so the length counts the 2-byte FCS.  PHY only -- no MAC.
+ * programs the packet format and drives TXEN/RXEN.  A frame is [PHR][PSDU]
+ * with CRCINC set, so the PHR length counts the 2-byte FCS.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <arch/nordic/tiku_ieee154_arch.h>
-#include <arch/nordic/tiku_radio_arch.h>       /* constlat, hfclk, BLE restore */
-#include <arch/nordic/tiku_device_select.h>    /* MDK register types + RADIO   */
-#include <arch/nordic/tiku_timer_arch.h>       /* TIKU_CLOCK_ARCH_SECOND first  */
-#include <kernel/timers/tiku_clock.h>          /* RX wall-clock timeout        */
-#include <kernel/cpu/tiku_watchdog.h>          /* kick during a long listen    */
+#include <arch/nordic/tiku_radio_arch.h>    /* HFXO, TX power, BLE restore */
+#include <arch/nordic/tiku_device_select.h> /* MDK register types + RADIO */
+#include <arch/nordic/tiku_timer_arch.h>    /* tick rate, before clock.h */
+#include <kernel/timers/tiku_clock.h>       /* RX wall-clock timeout */
+#include <kernel/cpu/tiku_watchdog.h>       /* kick during a long listen */
 #include <string.h>
 
 #define RADIO  NRF_RADIO_S
@@ -27,9 +27,9 @@
 /* CRC-16-CCITT (x^16+x^12+x^5+1), init 0 -- the 802.15.4 FCS. */
 #define TIKU_154_CRC_POLY  0x00011021u
 #define TIKU_154_CRC_INIT  0x00000000u
-#define TIKU_154_SFD       0xA7u
+#define TIKU_154_SFD       0xA7u            /* 802.15.4 start-of-frame */
 
-/* EasyDMA frame buffers: [PHR][up to 126 B].  Word-aligned for EasyDMA. */
+/* EasyDMA frame buffers, word-aligned: [PHR][frame of up to 127 bytes]. */
 static uint8_t tx_frame[1u + TIKU_154_MAX_FRAME] __attribute__((aligned(4)));
 static uint8_t rx_frame[1u + TIKU_154_MAX_FRAME] __attribute__((aligned(4)));
 static uint8_t cur_chan = TIKU_154_CHAN_MIN;
@@ -39,8 +39,12 @@ int tiku_ieee154_arch_available(void)
     return 1;
 }
 
-/* Program the full 15.4 link config + tune to a channel.  Leaves the radio
- * DISABLED with no SHORTS armed. */
+/**
+ * @brief Program the 15.4 link config and tune to @p channel (clamped 11..26).
+ *
+ * Sets MODE, PCNF, CRC, SFD, TXPOWER and FREQUENCY and clears SHORTS; it does
+ * not change the RADIO state, which must be DISABLED.
+ */
 static void radio_154_linkcfg(uint8_t channel)
 {
     if (channel < TIKU_154_CHAN_MIN) {
@@ -67,7 +71,7 @@ static void radio_154_linkcfg(uint8_t channel)
     RADIO->CRCINIT = TIKU_154_CRC_INIT;
     RADIO->SFD     = TIKU_154_SFD;
 
-    RADIO->TXPOWER = tiku_radio_arch_txpower_code();        /* shared knob */
+    RADIO->TXPOWER = tiku_radio_arch_txpower_code();    /* shared with BLE */
     /* Channel k -> 2405 + 5(k-11) MHz; FREQUENCY register is MHz-2400. */
     RADIO->FREQUENCY = 5u + (5u * (uint32_t)(channel - TIKU_154_CHAN_MIN));
     RADIO->SHORTS = 0u;
@@ -198,10 +202,10 @@ int tiku_ieee154_arch_ed(uint8_t channel, int8_t *dbm)
      * leaving it 0 makes every ED period zero-length and EDEND never fires. */
     RADIO->EDCTRL = ((uint32_t)8u << RADIO_EDCTRL_EDCNT_Pos) |
                     ((uint32_t)0x20u << RADIO_EDCTRL_EDPERIOD_Pos);
-    /* Chain the whole measurement in hardware: RXEN ramps to READY, the
-     * READY_EDSTART short kicks the ED sample, EDEND_DISABLE tears the radio
-     * down again.  Polling READY then issuing EDSTART in software raced the
-     * ramp and the sample never ran (level was always -1). */
+    /* The measurement runs on shorts: RXEN ramps to READY, READY_EDSTART
+     * starts the ED, EDEND_DISABLE turns the radio off.  An EDSTART issued
+     * from software after polling READY races the ramp, and the ED does not
+     * run. */
     RADIO->SHORTS = ((uint32_t)1u << RADIO_SHORTS_READY_EDSTART_Pos) |
                     ((uint32_t)1u << RADIO_SHORTS_EDEND_DISABLE_Pos);
     RADIO->EVENTS_EDEND    = 0u;
@@ -214,7 +218,7 @@ int tiku_ieee154_arch_ed(uint8_t channel, int8_t *dbm)
             break;
         }
         if ((spin & 0xFFFFu) == 0u) {
-            tiku_watchdog_kick();               /* never wedge on a stuck ED  */
+            tiku_watchdog_kick();               /* keep it fed while waiting  */
         }
     }
     if (RADIO->EVENTS_EDEND != 0u) {
@@ -249,12 +253,12 @@ int tiku_ieee154_arch_rx_ack(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
     uint32_t spin = 0u;
     uint8_t  got = 0u, ack = 0u;
 
-    RADIO->TIFS = 192u;                          /* aTurnaroundTime (12 sym)   */
+    RADIO->TIFS = 192u;                          /* aTurnaroundTime (12 sym)  */
     RADIO->PACKETPTR = (uint32_t)rx_frame;
     /* RX with the turnaround pre-armed; commit or abort inside the window. */
     RADIO->SHORTS = ((uint32_t)1u << RADIO_SHORTS_READY_START_Pos) |
                     ((uint32_t)1u << RADIO_SHORTS_PHYEND_DISABLE_Pos) |
-                    ((uint32_t)1u << 2);         /* DISABLED_TXEN              */
+                    ((uint32_t)1u << 2);         /* DISABLED_TXEN             */
     RADIO->EVENTS_END      = 0u;
     RADIO->EVENTS_PHYEND   = 0u;
     RADIO->EVENTS_CRCOK    = 0u;
@@ -281,7 +285,7 @@ int tiku_ieee154_arch_rx_ack(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
             }
         }
     }
-    if (!got) {                                  /* timeout: cancel the arm    */
+    if (!got) {                                  /* timeout: cancel the arm   */
         RADIO->SHORTS = 0u;
         RADIO->EVENTS_DISABLED = 0u;
         RADIO->TASKS_DISABLE = 1u;
@@ -294,7 +298,8 @@ int tiku_ieee154_arch_rx_ack(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
         return 0;
     }
     /* T_IFS window (~192 us): the auto-TXEN is pending.  Commit an ACK only
-     * for a CRC-OK unicast DATA frame addressed to us; otherwise abort. */
+     * for a CRC-OK DATA frame with AR set whose destination PAN and short
+     * address are my_pan/my_addr; otherwise abort. */
     {
         uint16_t fcf  = (uint16_t)(rx_frame[1] | ((uint16_t)rx_frame[2] << 8));
         uint8_t  ftyp = (uint8_t)(fcf & 0x07u);
@@ -304,23 +309,23 @@ int tiku_ieee154_arch_rx_ack(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
         uint8_t  crcok = (RADIO->CRCSTATUS == RADIO_CRCSTATUS_CRCSTATUS_CRCOk);
         uint8_t  forus = (uint8_t)((dpan == my_pan) && (dadr == my_addr));
         if (crcok && ftyp == 1u && areq && forus) {
-            ack_tmpl[3] = rx_frame[3];           /* echo the seq               */
+            ack_tmpl[3] = rx_frame[3];           /* echo the seq              */
             RADIO->PACKETPTR = (uint32_t)ack_tmpl;
             RADIO->EVENTS_PHYEND = 0u;
-            /* Drop DISABLED_TXEN so the ACK's own DISABLED can't re-trigger a
-             * second TX (the BLE spurious-TX fix, 7b36d3f). */
+            /* DISABLED_TXEN is dropped: left armed, the DISABLED that ends
+             * the ACK would start a second TX. */
             RADIO->SHORTS = ((uint32_t)1u << RADIO_SHORTS_READY_START_Pos) |
                             ((uint32_t)1u << RADIO_SHORTS_PHYEND_DISABLE_Pos);
             ack = 1u;
         } else {
             RADIO->SHORTS = 0u;
-            RADIO->TASKS_DISABLE = 1u;           /* cancel the pending TXEN    */
+            RADIO->TASKS_DISABLE = 1u;           /* cancel the pending TXEN   */
         }
     }
     if (rssi != 0) {
         *rssi = (int8_t)(-(int)(RADIO->RSSISAMPLE & 0x7Fu));
     }
-    /* Wait for the radio to settle (ACK TX completes, or the abort disables). */
+    /* Wait for DISABLED: the ACK TX completes, or the abort lands. */
     RADIO->EVENTS_DISABLED = 0u;
     for (spin = 0u; spin < 600000u; spin++) {
         if (RADIO->EVENTS_DISABLED != 0u) {
@@ -353,8 +358,8 @@ int tiku_ieee154_arch_cca(void)
     uint32_t spin;
     int idle = 0;
 
-    /* Energy-detect CCA above a fixed threshold; RXREADY_CCASTART chains the
-     * measurement off the ramp so no software timing is in the loop. */
+    /* Energy-detect CCA against a fixed ED threshold of 20; the
+     * RXREADY_CCASTART short starts the measurement when the ramp ends. */
     RADIO->CCACTRL =
         ((uint32_t)RADIO_CCACTRL_CCAMODE_EdMode << RADIO_CCACTRL_CCAMODE_Pos) |
         ((uint32_t)20u << RADIO_CCACTRL_CCAEDTHRES_Pos);

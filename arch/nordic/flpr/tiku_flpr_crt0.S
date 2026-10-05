@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_flpr_crt0.S - FLPR (VPR RISC-V) startup for the nRF54L15.
+ * tiku_flpr_crt0.S - FLPR (VPR RISC-V) startup for every nRF54L part.
  *
  * The M33 loader memcpy's the whole image into the SRAM carve before setting
  * CPURUN, so there is no .data copy here: stack, global pointer, .bss, main().
@@ -15,15 +15,8 @@
  */
 
 /*
- * The whole image -- .text, .rodata, .data -- is memcpy'd into the SRAM
- * carve by the Cortex-M33 loader BEFORE CPURUN is set, so unlike a
- * flash-resident startup there is no .data copy here: only the stack, the
- * global pointer, .bss, then main().  Interrupts stay disabled; F1 runs
- * the coprocessor fully polled (CLIC/MTVT wiring arrives with the F2
- * doorbells).
- *
- * Entry: INITPC points at the carve base; this section (.init) is placed
- * first by tiku_flpr.ld, so _start IS the first instruction of the image.
+ * Interrupts stay disabled: the coprocessor runs fully polled, and mtvec
+ * serves only the trap stub below.
  */
 
     .section .init, "ax"
@@ -39,10 +32,9 @@ _start:
 
     la   sp, __stack_top
 
-    /* Trap vector, direct mode: without it a trap jumps through whatever
-     * mtvec reset to and the core is simply gone from the bus.  The stub
-     * below re-establishes the stack -- a trap may arrive with sp wrecked
-     * -- and never returns. */
+    /* Trap vector, direct mode: an unset mtvec sends a trap to whatever
+     * address it reset to.  The stub below reloads sp, since a trap may
+     * arrive with sp corrupt, calls tiku_flpr_fault() and never returns. */
     la   t0, flpr_trap
     csrw mtvec, t0
 

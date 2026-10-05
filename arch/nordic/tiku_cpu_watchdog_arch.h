@@ -7,9 +7,9 @@
  *
  * tiku_cpu_watchdog_arch.h - nRF54L watchdog (WDT30) arch interface.
  *
- * Mirrors the MSP430 and rp2350 watchdog arch shape over a 32.768 kHz countdown
- * watchdog whose timeout triggers a system reset, decoded as such by the
- * reset-reason layer.
+ * The watchdog arch interface the kernel watchdog layer calls, over WDT30: a
+ * 32.768 kHz countdown whose timeout resets the system, reported by the
+ * reset-reason decode as a watchdog reset.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,10 +19,11 @@
 
 #include <stdint.h>
 
-/* Mode + clock + interval typedefs (mirror the MSP430 / rp2350 shape so the
- * kernel watchdog layer is arch-neutral). */
+/* The kernel watchdog layer's mode, clock and interval types, guarded so
+ * another arch header can define them first. */
 #ifndef TIKU_WDT_MODE_T_DEFINED
 #define TIKU_WDT_MODE_T_DEFINED
+/** @brief Watchdog timeout action. */
 typedef enum {
     TIKU_WDT_MODE_WATCHDOG = 0, /**< System reset on timeout (default) */
     TIKU_WDT_MODE_INTERVAL = 1, /**< IRQ on timeout (not used on nRF54L) */
@@ -31,6 +32,7 @@ typedef enum {
 
 #ifndef TIKU_WDT_CLK_T_DEFINED
 #define TIKU_WDT_CLK_T_DEFINED
+/** @brief Watchdog clock source; WDT30 always runs from the LFCLK. */
 typedef enum {
     TIKU_WDT_SRC_SMCLK = 0, /**< Sub-main clock (ignored; WDT30 uses 32 kHz) */
     TIKU_WDT_SRC_ACLK  = 1, /**< Auxiliary low-frequency clock (32.768 kHz) */
@@ -39,6 +41,7 @@ typedef enum {
 
 #ifndef TIKU_WDT_INTERVAL_T_DEFINED
 #define TIKU_WDT_INTERVAL_T_DEFINED
+/** @brief Watchdog timeout in 32.768 kHz ticks (written to CRV). */
 typedef uint16_t tiku_wdt_interval_t;
 #endif
 

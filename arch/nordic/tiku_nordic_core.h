@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_nordic_core.h - hand-rolled Cortex-M33 core intrinsics.
+ * tiku_nordic_core.h - Cortex-M33 core registers and intrinsics.
  *
- * Replaces the CMSIS core_cm33.h dependency with the subset actually used: system
- * reset, vector relocation, SysTick, NVIC enable and priority, and the barrier and
- * mask intrinsics.  All addresses are architectural, so nothing is device-specific.
+ * The core subset this port uses: system reset, vector relocation, SysTick,
+ * NVIC enable and priority, barriers and PRIMASK.  All addresses are ARMv8-M
+ * architectural, so nothing here is device-specific.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,7 +20,7 @@
 #include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
-/* Core register blocks (ARMv8-M architectural addresses)                    */
+/* CORE REGISTER BLOCKS (ARMv8-M ARCHITECTURAL ADDRESSES)                    */
 /*---------------------------------------------------------------------------*/
 
 /** System Control Block (partial: what the port touches). */
@@ -58,43 +58,51 @@ typedef struct {
     volatile uint8_t  IPR[496];/**< 0xE000E400 Interrupt priority (byte).   */
 } tiku_nordic_nvic_t;
 
-#define TIKU_SCB      ((tiku_nordic_scb_t *)0xE000ED00UL)
-#define TIKU_SYSTICK  ((tiku_nordic_systick_t *)0xE000E010UL)
-#define TIKU_NVIC     ((tiku_nordic_nvic_t *)0xE000E100UL)
+#define TIKU_SCB      ((tiku_nordic_scb_t *)0xE000ED00UL)     /**< SCB      */
+#define TIKU_SYSTICK  ((tiku_nordic_systick_t *)0xE000E010UL) /**< SysTick  */
+#define TIKU_NVIC     ((tiku_nordic_nvic_t *)0xE000E100UL)    /**< NVIC     */
 
 /** nRF54L implements 3 NVIC priority bits (top bits of the 8-bit field). */
 #define TIKU_NORDIC_NVIC_PRIO_BITS   3u
 
 /* SysTick CTRL bits. */
-#define TIKU_SYSTICK_CTRL_ENABLE     (1UL << 0)
-#define TIKU_SYSTICK_CTRL_TICKINT    (1UL << 1)
-#define TIKU_SYSTICK_CTRL_CLKSOURCE  (1UL << 2)  /* 1 = processor clock */
-#define TIKU_SYSTICK_CTRL_COUNTFLAG  (1UL << 16)
+#define TIKU_SYSTICK_CTRL_ENABLE     (1UL << 0)  /**< counter enable */
+#define TIKU_SYSTICK_CTRL_TICKINT    (1UL << 1)  /**< exception at zero */
+#define TIKU_SYSTICK_CTRL_CLKSOURCE  (1UL << 2)  /**< 1 = processor clock */
+#define TIKU_SYSTICK_CTRL_COUNTFLAG  (1UL << 16) /**< counted to 0 since read */
 
 /*---------------------------------------------------------------------------*/
-/* Barrier / hint intrinsics                                                 */
+/* BARRIER AND HINT INTRINSICS                                               */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Data synchronization barrier (DSB SY). */
 static inline void tiku_nordic_dsb(void) { __asm volatile ("dsb 0xF" ::: "memory"); }
+/** @brief Instruction synchronization barrier (ISB SY). */
 static inline void tiku_nordic_isb(void) { __asm volatile ("isb 0xF" ::: "memory"); }
+/** @brief One NOP. */
 static inline void tiku_nordic_nop(void) { __asm volatile ("nop"); }
+/** @brief Wait for interrupt. */
 static inline void tiku_nordic_wfi(void) { __asm volatile ("wfi" ::: "memory"); }
+/** @brief Wait for event. */
 static inline void tiku_nordic_wfe(void) { __asm volatile ("wfe" ::: "memory"); }
 
 /*---------------------------------------------------------------------------*/
-/* Interrupt mask (PRIMASK)                                                   */
+/* INTERRUPT MASK (PRIMASK)                                                  */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Clear PRIMASK: interrupts are taken. */
 static inline void tiku_nordic_enable_irq(void)
 {
     __asm volatile ("cpsie i" ::: "memory");
 }
 
+/** @brief Set PRIMASK: interrupts are masked. */
 static inline void tiku_nordic_disable_irq(void)
 {
     __asm volatile ("cpsid i" ::: "memory");
 }
 
+/** @brief Return PRIMASK: 1 while interrupts are masked, else 0. */
 static inline uint32_t tiku_nordic_get_primask(void)
 {
     uint32_t r;
@@ -102,13 +110,14 @@ static inline uint32_t tiku_nordic_get_primask(void)
     return r;
 }
 
+/** @brief Write PRIMASK, e.g. a value saved by tiku_nordic_get_primask(). */
 static inline void tiku_nordic_set_primask(uint32_t v)
 {
     __asm volatile ("msr primask, %0" :: "r" (v) : "memory");
 }
 
 /*---------------------------------------------------------------------------*/
-/* NVIC helpers                                                               */
+/* NVIC HELPERS                                                              */
 /*---------------------------------------------------------------------------*/
 
 /** Enable an external interrupt (IRQn >= 0). */
@@ -117,7 +126,7 @@ static inline void tiku_nordic_nvic_enable(int32_t irqn)
     TIKU_NVIC->ISER[((uint32_t)irqn) >> 5] = (1UL << (((uint32_t)irqn) & 0x1Fu));
 }
 
-/** Disable an external interrupt. */
+/** Disable an external interrupt; DSB and ISB complete it before return. */
 static inline void tiku_nordic_nvic_disable(int32_t irqn)
 {
     TIKU_NVIC->ICER[((uint32_t)irqn) >> 5] = (1UL << (((uint32_t)irqn) & 0x1Fu));
@@ -131,7 +140,7 @@ static inline void tiku_nordic_nvic_clear_pending(int32_t irqn)
     TIKU_NVIC->ICPR[((uint32_t)irqn) >> 5] = (1UL << (((uint32_t)irqn) & 0x1Fu));
 }
 
-/** Set an external interrupt's priority (0 = highest, low bits ignored). */
+/** Set an external interrupt's priority, 0 (highest) to 7 (lowest). */
 static inline void tiku_nordic_nvic_set_priority(int32_t irqn, uint32_t prio)
 {
     TIKU_NVIC->IPR[(uint32_t)irqn] =
@@ -139,7 +148,7 @@ static inline void tiku_nordic_nvic_set_priority(int32_t irqn, uint32_t prio)
 }
 
 /*---------------------------------------------------------------------------*/
-/* System reset                                                              */
+/* SYSTEM RESET                                                              */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -152,7 +161,7 @@ static inline void tiku_nordic_nvic_set_priority(int32_t irqn, uint32_t prio)
 static inline void tiku_nordic_system_reset(void)
 {
     tiku_nordic_dsb();
-    TIKU_SCB->AIRCR = (0x05FAUL << 16) | (1UL << 2);  /* VECTKEY | SYSRESETREQ */
+    TIKU_SCB->AIRCR = (0x05FAUL << 16) | (1UL << 2); /* VECTKEY | SYSRESETREQ */
     tiku_nordic_dsb();
     for (;;) {
         /* wait for reset */
@@ -160,10 +169,15 @@ static inline void tiku_nordic_system_reset(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* Vector table relocation                                                   */
+/* VECTOR TABLE RELOCATION                                                   */
 /*---------------------------------------------------------------------------*/
 
-/** Point VTOR at a relocated vector table (must be 128-byte aligned). */
+/**
+ * @brief Point VTOR at a relocated vector table.
+ *
+ * @note The table must be aligned to its size rounded up to a power of two,
+ *       and to at least 128 bytes.
+ */
 static inline void tiku_nordic_set_vtor(uint32_t table_addr)
 {
     TIKU_SCB->VTOR = table_addr;

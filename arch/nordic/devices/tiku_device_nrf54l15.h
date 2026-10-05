@@ -7,9 +7,9 @@
  *
  * tiku_device_nrf54l15.h - Nordic nRF54L15 silicon-level constants.
  *
- * A Cortex-M33 wireless MCU with 256 KB SRAM and 1.5 MB write-in-place RRAM at 0x0
- * holding code and the persistent region, three GPIO ports, and the GRTC as tick
- * source.  The device runs All-Secure, so peripherals use the _S aliases.
+ * A Cortex-M33 wireless MCU: 256 KB SRAM, 1.5 MB write-in-place RRAM at 0x0
+ * holding code and the persistent region, three GPIO ports, and the GRTC as
+ * tick source.  The device runs All-Secure, so peripherals use the _S aliases.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -35,11 +35,9 @@
 /**
  * @brief Virtual GPIO port availability flags.
  *
- * The nRF54L15 exposes three physical GPIO ports, mapped to virtual 1..3 so the
- * /dev/gpio/{1..3}/{0..N} layout works: port 1 = P0 (LP domain, P0.00..P0.04),
- * port 2 = P1 (P1.00..P1.15), port 3 = P2 (P2.00..P2.10).
- *
- * @note The port-to-base-pointer mapping lives in the GPIO arch layer.
+ * Three physical GPIO ports map to virtual ports 1..3 for /dev/gpio/{1..3}:
+ * port 1 = P0 (LP domain, P0.00..P0.04), port 2 = P1 (P1.00..P1.15), port 3 =
+ * P2 (P2.00..P2.10).  tiku_gpio_arch.c maps each to its register block.
  */
 #define TIKU_DEVICE_HAS_PORT1       1   /* P0 */
 #define TIKU_DEVICE_HAS_PORT2       1   /* P1 */
@@ -59,8 +57,8 @@
 /**
  * @brief Crystal oscillator availability and frequency.
  *
- * The DK provides a 32 MHz HFXO (system high-frequency source) and a
- * 32.768 kHz LFXO (feeds LFCLK / GRTC).  Both are reported present.
+ * The DK fits a 32 MHz HFXO (the high-frequency source) and a 32.768 kHz
+ * LFXO (LFCLK, GRTC).
  */
 #define TIKU_DEVICE_HAS_LFXT        1
 #define TIKU_DEVICE_HAS_HFXT        1
@@ -71,11 +69,10 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Clock system type selector flags.
+ * @brief Clock system type flags: no unlock key, Nordic clock system.
  *
- * No MSP430-style unlock key.  TIKU_DEVICE_CS_TYPE_NORDIC selects the
- * nRF54L clock driver in arch/nordic/tiku_cpu_freq_*.c.  The core runs at
- * 128 MHz on this DK (OSCILLATORS.PLL.CURRENTFREQ reads CK128M).
+ * The Makefile compiles the Nordic clock driver, tiku_cpu_freq_boot_arch.c,
+ * for every Nordic part; it sets the core to 64 or 128 MHz once at boot.
  */
 #define TIKU_DEVICE_CS_HAS_KEY      0
 #define TIKU_DEVICE_CS_TYPE_NORDIC  1
@@ -88,11 +85,11 @@
 #define TIKU_DEVICE_MAX_STABLE_MHZ  128
 
 /**
- * @brief Core frequency on this DK, in Hz.
+ * @brief Core frequency of a default build, in Hz.
  *
- * Measured on hardware: OSCILLATORS.PLL.CURRENTFREQ reads CK128M, so the
- * core runs at 128 MHz (the CK64M register reset value is overridden by the
- * boot configuration).  SysTick-based busy-delays use this value.
+ * The boot sets the PLL to TIKU_NORDIC_CPU_MHZ (128 unless overridden) or to
+ * a saved rate.  Delays and tiku_cpu_mclk_hz() read the running rate from
+ * the PLL.
  */
 #define TIKU_DEVICE_BOOT_CPU_HZ     128000000UL
 
@@ -103,24 +100,24 @@
 /** @brief On-chip SRAM size and base address (256 KB @ 0x20000000). */
 #define TIKU_DEVICE_RAM_SIZE        (256UL * 1024UL)
 
-/* App-usable bytes of the PRIMARY bank, which is NOT the bank size: the top
- * 16 KB (0x2003C000..0x2003FFFF) is the FLPR (VPR RISC-V) coprocessor carve,
- * reserved unconditionally so the image layout does not shift with
- * TIKU_FLPR_ENABLE.  The linker's SRAM region is that smaller figure, so memory
- * reports must use this one -- RAM_SIZE above would over-report free SRAM by
- * 16 KB.  Keep in sync with LENGTH(SRAM) in the device .ld. */
+/**
+ * @brief App-usable SRAM: the bank less its top 16 KB, the FLPR (VPR RISC-V)
+ *        coprocessor carve at 0x2003C000..0x2003FFFF.
+ *
+ * Every build reserves the carve, and memory reports use this figure.  It
+ * must equal LENGTH(SRAM) in nrf54l15.ld.
+ */
 #define TIKU_DEVICE_RAM_USABLE      (240UL * 1024UL)
 #define TIKU_DEVICE_RAM_START       0x20000000UL
 
 /**
- * @brief On-chip RRAM range (exposed under the FRAM_* vocabulary).
+ * @brief On-chip RRAM range, under the FRAM_* names the kernel's memory
+ *        reports and the NVM region table use.
  *
- * 1.5 MB non-volatile RRAM at 0x0 holds code and the TikuOS persistent region.
- * The FRAM_* names let the memory introspection and the NVM region table share
- * one vocabulary; RRAM is write-in-place behind the RRAMC WEN gate.
+ * 0x17D000 bytes (1524 KB) at 0x0 hold code and the persistent region; the
+ * top 12 KB of the 1.5 MB array is reserved (MDK NRF_MEMORY_FLASH_SIZE) and
+ * bus-faults if addressed.  RRAM is written in place behind RRAMC WEN.
  */
-/* Usable application RRAM is 0x17D000 (1524 KB); the top 12 KB of the nominal
- * 1.5 MB is reserved (MDK NRF_MEMORY_FLASH_SIZE) and bus-faults if addressed. */
 #define TIKU_DEVICE_FRAM_SIZE       0x0017D000UL
 #define TIKU_DEVICE_FRAM_START      0x00000000UL
 #define TIKU_DEVICE_FRAM_END        0x0017CFFFUL
@@ -129,12 +126,12 @@
 /**
  * @brief Init-table backing region size in bytes.
  *
- * Sized to hold the 4-byte header + 8 init entries; matches the RP2350
- * port's value with headroom (see tiku_device_rp2350.h rationale).
+ * Holds the init table: a 4-byte header and TIKU_INIT_MAX_ENTRIES (8)
+ * entries; tiku_init.c asserts the fit at build time.
  */
 #define TIKU_DEVICE_FRAM_CONFIG_SIZE      576U
 
-/** @brief Application slot parameters within the RRAM region. */
+/** @brief Application slot size and count in RRAM; no code reads them. */
 #define TIKU_DEVICE_FRAM_APP_SLOT_SIZE    4096U
 #define TIKU_DEVICE_FRAM_APP_SLOT_COUNT   4
 
@@ -145,9 +142,9 @@
 /**
  * @brief Memory Protection Unit availability flag.
  *
- * The Cortex-M33 has the ARMv8-M MPU.  On this port the RRAMC WEN gate is
- * the primary NVM write barrier (like MSP430 FRAM); the MPU can additionally
- * enforce RO-by-default on the persistent region (see tiku_mpu_arch.c).
+ * The Cortex-M33 has the ARMv8-M MPU.  The RRAMC WEN gate is this port's
+ * NVM write barrier; tiku_mpu_arch.c programs the MPU for the stack guard
+ * and execute-never SRAM.
  */
 #define TIKU_DEVICE_HAS_MPU         1
 

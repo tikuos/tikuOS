@@ -7,9 +7,9 @@
  *
  * tiku_crt_early.c - Nordic nRF54L (Cortex-M33) startup.
  *
- * The part boots directly from RRAM at 0x0 -- no XIP, bootloader or image header.
- * This file supplies the vector table of weak spin handlers and a reset handler
- * that applies the factory FICR trims, copies .data, zeroes .bss and calls main.
+ * The part boots directly from RRAM at 0x0, with no XIP, bootloader or image
+ * header.  This file supplies the vector table of weak spin handlers and the
+ * reset handler: errata, FICR trims, .data copy, .bss zeroing, then main().
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -52,8 +52,8 @@ extern const nordic_isr_t tiku_nordic_vectors[16 + NORDIC_NUM_EXT_IRQS];
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Default ISR handler -- spin on WFE so an unhandled exception lands
- *        on a recognisable PC under a debugger rather than running wild.
+ * @brief Default ISR handler: spin on WFE, so an unhandled exception stops
+ *        at a recognisable PC under a debugger.
  */
 static void nordic_default_handler(void)
 {
@@ -63,9 +63,9 @@ static void nordic_default_handler(void)
 }
 
 /*
- * Weak aliases: each can be overridden by a non-weak definition of the same
- * name in any driver/kernel file.  SysTick and GRTC live here so the vector
- * table is complete before the timer driver installs the real handler.
+ * Weak aliases: a non-weak definition of the same name in any driver or
+ * kernel file overrides each one, so the table links in every build,
+ * including one without the driver that handles a line.
  */
 void tiku_nordic_nmi_handler(void)         __attribute__((weak, alias("nordic_default_handler")));
 void tiku_nordic_hard_fault_handler(void)  __attribute__((weak, alias("nordic_default_handler")));
@@ -77,9 +77,9 @@ void tiku_nordic_svc_handler(void)         __attribute__((weak, alias("nordic_de
 void tiku_nordic_pendsv_handler(void)      __attribute__((weak, alias("nordic_default_handler")));
 void tiku_nordic_systick_handler(void)     __attribute__((weak, alias("nordic_default_handler")));
 
-/* External IRQ handlers wired as the port grows.  GRTC_0 (IRQn 226) drives
- * the low-power kernel tick; TIMER10 (IRQn 133) is the tick fallback.  The
- * rest default until their subsystem lands. */
+/* External IRQ handlers.  GRTC_0 (IRQn 226) drives the low-power kernel
+ * tick; TIMER10 (IRQn 133) is the alternate tick (TIKU_NORDIC_TICK_TIMER10).
+ * A line whose driver is not in the build keeps the default handler. */
 void tiku_nordic_timer10_isr(void)         __attribute__((weak, alias("nordic_default_handler")));
 void tiku_nordic_grtc_isr(void)            __attribute__((weak, alias("nordic_default_handler")));
 /* Console UARTE RX -- SERIAL20 (198, UARTE20) or SERIAL30 (260, UARTE30); the
@@ -93,11 +93,12 @@ void tiku_nordic_gpiote20_isr(void)        __attribute__((weak, alias("nordic_de
 void tiku_nordic_gpiote30_isr(void)        __attribute__((weak, alias("nordic_default_handler")));
 /* FLPR coprocessor doorbell -- VPR00 EVENTS_TRIGGERED (IRQn 76). */
 void tiku_nordic_flpr_isr(void)            __attribute__((weak, alias("nordic_default_handler")));
-/* 2.4 GHz RADIO -- RADIO_0 (IRQn 138 = peripheral 0x8A at 0x5008A000); the
- * IRQ-driven observer path (kintsugi/radio.md R6). */
+/* 2.4 GHz RADIO -- RADIO_0 (IRQn 138 = peripheral 0x8A at 0x5008A000), used
+ * by the radio driver's interrupt-driven scan. */
 void tiku_nordic_radio_isr(void)           __attribute__((weak, alias("nordic_default_handler")));
-/* Axon NPU (nRF54LM20B only; IRQn 86).  The slot is wired on every nordic
- * device -- it stays the default handler unless a probe/driver overrides. */
+/* Axon NPU (nRF54LM20B only; IRQn 86).  The slot is wired on every Nordic
+ * device and keeps the default handler unless the Axon platform overrides
+ * it. */
 void tiku_nordic_axons_isr(void)           __attribute__((weak, alias("nordic_default_handler")));
 /* USB high speed: the DWC2 core's interrupt (90) and the VBUS regulator's
  * (289, nRF54LM20 only -- past the nRF54L15's table). */
@@ -115,7 +116,7 @@ void tiku_nordic_vregusb_isr(void)         __attribute__((weak, alias("nordic_de
  * terminated by an ADDR of 0xFFFFFFFF or 0.  Without copying each into its
  * target register the HFXO, regulators and ADC run untrimmed.
  *
- * @note Reproduces the MDK SystemInit non-TrustZone (non-CMSE) path exactly.
+ * @note Follows the MDK SystemInit non-TrustZone (non-CMSE) path.
  */
 static void tiku_nordic_apply_trims(void)
 {
@@ -140,17 +141,11 @@ static void tiku_nordic_apply_trims(void)
 #define NORDIC_FICR_TRIMV (*(volatile uint32_t *)0x00FFC334ul)
 
 /**
- * @brief Silicon errata workarounds the stock MDK SystemInit applies and a
- *        from-scratch startup must reproduce.
+ * @brief Errata workarounds that run before the factory trims (erratum 37).
  *
- * Raw register pokes from the public nRF54L errata sheet and nrfx
- * system_nrf54l.c.  Split around the trim loop to preserve the MDK's ordering:
- * erratum 37 before trims, the regulator/RADIO pokes after.
- *
- * @note Erratum 37 is present on both the nRF54L15 (part 0x1C) and the
- *       nRF54LM20A (0x29) with an identical TAD base, so it fires on both.  The
- *       ES-PDK regulator prime and errata 31/32/40 are gated to the L05/L10/L15
- *       only, so they compile in for the nRF54L15 build alone.
+ * Register writes from the nRF54L errata sheet and nrfx system_nrf54l.c, in
+ * the MDK's order around the trim loop.  Erratum 37 applies to the nRF54L15
+ * (part 0x1C) and nRF54LM20A (0x29) alike.
  */
 static void tiku_nordic_sysinit_errata_early(void)
 {
@@ -185,12 +180,9 @@ static void tiku_nordic_sysinit_errata_early(void)
 /**
  * @brief Drive one TAMPC debug signal open (unless a prior session locked it).
  *
- * Mirrors the MDK's nrf54l_handle_approtect_signal() default branch: clear the
- * write protection, then set VALUE=High with LOCK=Disabled.  A signal locked by
- * hardware or UICR is left alone.
- *
- * @note There is no ENABLE_APPROTECT product config in TikuOS, so the
- *       locked-open hard-reset branch is intentionally not replicated.
+ * The MDK's nrf54l_handle_approtect_signal() default branch: clear the write
+ * protection, then set VALUE=High with LOCK=Disabled.  A signal locked by
+ * hardware or UICR is left alone; there is no ENABLE_APPROTECT branch.
  */
 static void tiku_nordic_tampc_open(volatile uint32_t *sig)
 {
@@ -204,14 +196,9 @@ static void tiku_nordic_tampc_open(volatile uint32_t *sig)
 /**
  * @brief Re-open the debug port at every boot (MDK nrf54l_handle_approtect).
  *
- * With UICR.APPROTECT erased the nRF54L leaves the debug enables under FIRMWARE
- * control, so SystemInit must drive the TAMPC DBGEN / NIDEN / SPIDEN / SPNIDEN
- * signals, and the AUX AP DBGEN, high on every boot.
- *
- * @note Skipping TAMPC is benign on the nRF54L15-DK, but on the nRF54LM20-DK a
- *       WATCHDOG reset brings the signals up LOW and the J-Link loses access
- *       ("AP-Protect enabled") until a full chip erase -- it killed every flash
- *       following a watchdog-reset test on HW (2026-07-14).
+ * With UICR.APPROTECT erased the debug enables are under firmware control;
+ * this drives TAMPC DBGEN/NIDEN/SPIDEN/SPNIDEN and AUX AP DBGEN high.  Left
+ * low after a watchdog reset (nRF54LM20-DK), AP-Protect needs a chip erase.
  */
 static void tiku_nordic_debug_unlock(void)
 {
@@ -222,6 +209,10 @@ static void tiku_nordic_debug_unlock(void)
     tiku_nordic_tampc_open(&NRF_TAMPC_S->PROTECT.AP[0].DBGEN.CTRL);
 }
 
+/**
+ * @brief Errata workarounds that run after the factory trims: the ES-PDK
+ *        regulator prime and errata 31/32/40, on the nRF54L15 only.
+ */
 static void tiku_nordic_sysinit_errata(void)
 {
 #if defined(TIKU_DEVICE_NRF54L15)
@@ -250,9 +241,9 @@ static void tiku_nordic_sysinit_errata(void)
     *(volatile uint32_t *)0x50120624ul = (20ul | (1ul << 5));
     *(volatile uint32_t *)0x5012063Cul &= ~(1ul << 19);
 #else
-    /* nRF54LM20A: errata 31/32/40 and the ES-PDK regulator prime are not
-     * PRESENT for part 0x29 (see nrf54l_erratas.h); only erratum 37 (applied
-     * above) and the FICR trims are needed. */
+    /* nRF54LM20A: errata 31/32/40 and the ES-PDK regulator prime do not
+     * apply to part 0x29 (see nrf54l_erratas.h); only erratum 37 (applied
+     * above) and the FICR trims do. */
     (void)NORDIC_FICR_PART; (void)NORDIC_FICR_REV; (void)NORDIC_FICR_TRIMV;
 #endif
 }
@@ -264,24 +255,23 @@ static void tiku_nordic_sysinit_errata(void)
 void tiku_nordic_reset_handler(void) __attribute__((naked, section(".text"), used));
 
 /**
- * @brief nRF54L15 reset handler: C-runtime init and entry to main().
+ * @brief nRF54L reset handler: C-runtime init and entry to main().
  *
- * SP is already loaded by the CPU from vector[0].  Masks IRQs immediately,
- * points VTOR at the table, applies factory trims, copies .data and zeroes
- * .bss (leaving .uninit for warm-reset state), then calls main().
+ * SP comes from vector[0].  Masks IRQs, sets VTOR, enables the FPU, applies
+ * errata, debug unlock and factory trims, copies .data, zeroes .bss (and
+ * .ram2 on the LM20) and leaves .uninit, then calls main().
  *
- * @note Cortex-M resets with PRIMASK=0, so an early-armed source such as
- *       SysTick must not fire before the scheduler builds its queues; the
- *       scheduler re-enables IRQs at the top of its loop.  Naked, so no
- *       compiler prologue touches uninitialised call-saved registers.
+ * @note Cortex-M resets with PRIMASK=0; IRQs stay masked until
+ *       tiku_sched_loop() enables them, so an early-armed source such as
+ *       SysTick cannot fire before the scheduler's queues exist.  Naked, so
+ *       no compiler prologue touches uninitialised call-saved registers.
  */
 void tiku_nordic_reset_handler(void)
 {
     __asm__ volatile ("cpsid i" ::: "memory");
 
-    /* VTOR -> the vector table (RRAM base). The CPU boots with VTOR=0 which
-     * already points here, but set it explicitly so a relocated table or a
-     * warm reboot lands deterministically. */
+    /* VTOR resets to 0, the table's address; the explicit write keeps a
+     * relocated table or a warm reboot pointing at this one. */
     *(volatile uint32_t *)0xE000ED08U = (uint32_t)tiku_nordic_vectors;
 
     /* Enable the FPU (CPACR CP10/CP11 full access) up front: the softfp +
@@ -316,9 +306,9 @@ void tiku_nordic_reset_handler(void)
     }
 
 #if defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
-    /* Zero the RAM2 large-buffer section (upper SRAM bank; holds the tier
-     * arena, which expects .bss-like zeroed memory).  Only the used span is
-     * cleared -- symbols come from nrf54lm20a.ld. */
+    /* Zero the .ram2 statics in the upper SRAM bank, [__ram2_start,
+     * __ram2_end) from nrf54lm20a.ld.  The SRAM tier above them is not
+     * zeroed. */
     {
         extern uint32_t __ram2_start;
         extern uint32_t __ram2_end;
@@ -329,7 +319,7 @@ void tiku_nordic_reset_handler(void)
     }
 #endif
 
-    /* .uninit is intentionally left untouched (warm-reset survivor state). */
+    /* .uninit is not touched: it carries warm-reset survivor state. */
 
     (void)main();
 
@@ -343,14 +333,11 @@ void tiku_nordic_reset_handler(void)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Cortex-M33 vector table for nRF54L15.
+ * @brief Cortex-M33 vector table for the nRF54L parts.
  *
- * Placed in .vectors, which the linker locates at the base of RRAM aligned to
- * the VTOR requirement.  Index 0 is the initial SP, 1..15 the ARMv8-M system
- * exceptions, 16.. the external IRQs (272 on nRF54L15, 290 on nRF54LM20A).
- *
- * @note Unused external slots hold nordic_default_handler, so a spurious IRQ
- *       spins in a debuggable loop rather than dispatching through NULL.
+ * Placed in .vectors at the RRAM base.  Index 0 is the initial SP, 1..15 the
+ * ARMv8-M system exceptions, 16.. the external IRQs (272 on nRF54L15, 290 on
+ * nRF54LM20A); unused external slots hold nordic_default_handler.
  */
 const nordic_isr_t tiku_nordic_vectors[16 + NORDIC_NUM_EXT_IRQS]
 __attribute__((section(".vectors"), used)) = {
@@ -373,22 +360,22 @@ __attribute__((section(".vectors"), used)) = {
     tiku_nordic_systick_handler,               /* 15  SysTick           */
 
     /* External interrupts -- IRQ numbers are the MDK IRQn enum values
-     * (nrf54l15_application.h), NOT the vector-array position. */
+     * (nrf54l15_application.h), not the vector-array position. */
     [16 +  76] = tiku_nordic_flpr_isr,         /* VPR00_IRQn      = 76  */
     [16 + 133] = tiku_nordic_timer10_isr,      /* TIMER10_IRQn    = 133 */
     [16 + 138] = tiku_nordic_radio_isr,        /* RADIO_0_IRQn    = 138 */
     [16 + 198] = tiku_nordic_uart_console_isr, /* SERIAL20_IRQn   = 198 */
-    [16 + 202] = tiku_nordic_timer20_isr,      /* TIMER20_IRQn    = 202 (htimer)  */
-    [16 + 218] = tiku_nordic_gpiote20_isr,     /* GPIOTE20_0_IRQn = 218 (P1/P2)   */
+    [16 + 202] = tiku_nordic_timer20_isr,      /* TIMER20_IRQn = 202 (htimer) */
+    [16 + 218] = tiku_nordic_gpiote20_isr,     /* GPIOTE20_0 = 218 (P1/P2)    */
     [16 + 226] = tiku_nordic_grtc_isr,         /* GRTC_0_IRQn     = 226 */
     [16 + 260] = tiku_nordic_uart_console_isr, /* SERIAL30_IRQn   = 260 */
-    [16 + 268] = tiku_nordic_gpiote30_isr,     /* GPIOTE30_0_IRQn = 268 (P0)      */
+    [16 + 268] = tiku_nordic_gpiote30_isr,     /* GPIOTE30_0 = 268 (P0)       */
 
     /* Fill every remaining external slot with the default handler so no
      * slot dispatches through a NULL pointer.  Ranges are split around the
      * explicitly-wired IRQs above (no overlapping designated initializers). */
     [16 +   0 ... 16 +  75] = nordic_default_handler,
-    [16 +  86] = tiku_nordic_axons_isr,        /* AXONS_IRQn      = 86 (LM20B) */
+    [16 +  86] = tiku_nordic_axons_isr,        /* AXONS_IRQn = 86 (LM20B)     */
     [16 +  77 ... 16 +  85] = nordic_default_handler,
     [16 +  90] = tiku_nordic_usbhs_isr,        /* USBHS_IRQn      = 90        */
     [16 +  87 ... 16 +  89] = nordic_default_handler,

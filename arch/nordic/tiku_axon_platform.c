@@ -7,9 +7,9 @@
  *
  * tiku_axon_platform.c - TikuOS platform layer for the Axon NPU (nRF54LM20B).
  *
- * Implements the nrf_axon_platform_* seam the vendor driver core expects, in its
- * bare-metal flavour: reservations are a power refcount, driver events are called
- * directly rather than queued, and the IRQ forwards to the vendor handler.
+ * Implements the nrf_axon_platform_* functions the vendor driver core calls,
+ * bare-metal: reservations are a power refcount, driver events run directly
+ * in the caller, and the IRQ forwards to the vendor handler.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -34,10 +34,9 @@
 /* Model working buffers (declared extern in axon/nrf_axon_platform.h)      */
 /*---------------------------------------------------------------------------*/
 
-/* Compiled NN models stream activations through these; sizes come from the
- * Makefile (per-model; the shipped tinyml_kws needs 140000 B interlayer).
- * Placed in RAM2 -- the axon firmware carries no BASIC so the tier arena is
- * tiny there and the 255 KB bank is otherwise free. */
+/* Activation buffers the compiled models stream through; the Makefile sets
+ * their sizes.  They sit in RAM2 (.ram2), ahead of the SRAM tier, which
+ * takes what they leave of the bank. */
 #if (NRF_AXON_INTERLAYER_BUFFER_SIZE) > 0
 __attribute__((section(".ram2"), aligned(8)))
 uint32_t nrf_axon_interlayer_buffer[NRF_AXON_INTERLAYER_BUFFER_SIZE
@@ -54,22 +53,24 @@ uint32_t nrf_axon_psum_buffer[NRF_AXON_PSUM_BUFFER_SIZE / sizeof(uint32_t)];
 
 #define TIKU_AXON_BASE   ((void *)0x50056000UL)
 
+/** @brief Enable the AXONS wrapper, hold constant latency, keep RRAM in
+ *         standby. */
 static void tiku_axon_hw_enable(void)
 {
     NRF_AXONS_S->ENABLE |= (AXONS_ENABLE_EN_Enabled << AXONS_ENABLE_EN_Pos);
     __asm__ volatile ("dsb 0xF" ::: "memory");
 
-    /* Constant-latency while the NPU is up (vendor platform holds a retained
-     * sys-event for the same reason; Axon DMA streams from RRAM). */
+    /* Constant latency while the NPU is up: Axon DMA streams from RRAM. */
     NRF_POWER_S->TASKS_CONSTLAT = 1u;
 
-    /* Vendor FIXME parity: enabling Axon clears RRAMC low-power magic bit
-     * 0x20; restore it so RRAM stays in standby rather than powering off. */
+    /* Enabling Axon clears bit 0x20 of RRAMC POWER.LOWPOWERCONFIG; setting
+     * it again keeps RRAM in standby instead of powered off. */
 #if defined(RRAMC_POWER_LOWPOWERCONFIG_MODE_Pos)
     NRF_RRAMC_S->POWER.LOWPOWERCONFIG |= 0x20u;
 #endif
 }
 
+/** @brief Disable the AXONS wrapper and return to low-power mode. */
 static void tiku_axon_hw_disable(void)
 {
     NRF_AXONS_S->ENABLE &= ~(AXONS_ENABLE_EN_Enabled << AXONS_ENABLE_EN_Pos);
@@ -83,6 +84,7 @@ static void tiku_axon_hw_disable(void)
 
 static uint8_t tiku_axon_power_refs;
 
+/** @brief Take a power reference; the first one powers the engine up. */
 static void tiku_axon_power_request(void)
 {
     if (tiku_axon_power_refs++ == 0u) {
@@ -91,6 +93,7 @@ static void tiku_axon_power_request(void)
     }
 }
 
+/** @brief Drop a power reference; the last one powers the engine down. */
 static void tiku_axon_power_release(void)
 {
     if (tiku_axon_power_refs != 0u && --tiku_axon_power_refs == 0u) {
@@ -133,20 +136,10 @@ void nrf_axon_platform_free_reservation_from_driver(void)
 static volatile uint8_t tiku_axon_user_event;
 
 /*
- * DELIBERATELY UNBOUNDED, AND DELIBERATELY NOT FEEDING THE WATCHDOG.
- *
- * The temptation is to call tiku_watchdog_kick() in here, because this loop
- * blocks the calling process for as long as the NPU takes.  It was tried, on
- * the theory that a long inference was tripping the 8 s hang detector -- and
- * measurement refuted it: tinyml_vww's three vectors complete in 557 ms, and
- * they complete identically with and without the kick.
- *
- * Leaving it out is the right answer anyway.  This wait has no bound, so a kick
- * here would turn the one case that matters -- an engine that never raises its
- * event -- from "the detector resets the chip in 8 s and /sys/boot/hang names
- * the culprit" into "the board spins here forever with the watchdog cheerfully
- * fed".  A pump may only feed the watchdog if it can independently tell that
- * progress is still happening; this one cannot.
+ * Unbounded, and does not kick the watchdog: this loop cannot tell a slow
+ * inference from an engine that never raises its event.  A stuck engine is
+ * left to the hang detector, which resets the chip and names the culprit in
+ * /sys/boot/hang.
  */
 void nrf_axon_platform_wait_for_user_event(void)
 {
@@ -164,9 +157,9 @@ void nrf_axon_platform_generate_user_event(void)
 
 void nrf_axon_platform_generate_driver_event(void)
 {
-    /* Bare-metal option from the interface doc: process directly.  Called
-     * from the Axon ISR tail, so this runs in handler context; the driver
-     * treats it as its "driver thread". */
+    /* The interface's bare-metal option: process the event directly.  The
+     * call comes from the Axon ISR tail, so this runs in handler context,
+     * which the driver treats as its "driver thread". */
     (void)nrf_axon_process_driver_event();
 }
 
@@ -252,18 +245,12 @@ nrf_axon_result_e nrf_axon_platform_init(void)
 }
 
 /**
- * @brief End an Axon session: engine off, and NOBODY holding it.
+ * @brief End an Axon session: zero the power refcount and switch the engine
+ *        off.
  *
- * The refcount is FORCED to zero, not decremented.  This disables the hardware
- * directly, and the refcount in tiku_axon_power_request/release is the other
- * view of the same state, so moving one without the other leaves them at odds.
- *
- * @note That disagreement wedges the SECOND session of a boot: an inference can
- *       return with the count one higher than it started, close() then switches
- *       the engine off while the count still says three, and the next
- *       power_request() concludes the engine is already up and skips the
- *       enable.  close() is where the session is over by definition, so
- *       re-establishing the invariant here is correct either way.
+ * The refcount is set to 0, not decremented: an inference can return with it
+ * higher than it started, and a count left above zero after the engine is
+ * off makes the next power request skip the enable.
  */
 void nrf_axon_platform_close(void)
 {

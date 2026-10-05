@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_crypto_arch.h - nRF54L CRACEN CryptoMaster offload (hash first).
+ * tiku_crypto_arch.h - nRF54L CRACEN crypto offload: SHA-256, AES, ECDSA.
  *
  * Hardware acceleration behind the software crypto APIs, selected at run time:
  * auto tries the engine and falls back to software on any error, sw forces the
@@ -20,7 +20,9 @@
 #include <stdint.h>
 #include <stddef.h>
 
+/** @brief Engine mode: try the hardware, fall back to software on error. */
 #define TIKU_CRYPTO_HW_MODE_AUTO  0u
+/** @brief Engine mode: software only. */
 #define TIKU_CRYPTO_HW_MODE_SW    1u
 
 /** @brief Get the runtime engine mode (AUTO=0, SW=1). */
@@ -38,22 +40,14 @@ void    tiku_crypto_hw_count_sw(void);
 
 /**
  * @brief One-shot SHA-256 of @p len bytes at @p msg into @p out[32].
- * @return 0 on success; negative if the engine errored (caller falls back).
+ * @return 0 on success; -2 for a message over 4096 bytes, -1 on an engine
+ *         error (the caller falls back to software either way).
  */
 int tiku_crypto_arch_sha256(const void *msg, size_t len, uint8_t out[32]);
 
 /**
- * @brief One-shot AES-GCM through the BA411 engine.
- *
- * @param decrypt    0 = encrypt, 1 = decrypt (tag is PRODUCED either way;
- *                   the caller compares on decrypt)
- * @param cfg_extra  extra config-word bits (bring-up knob; 0 in production)
- * @param out        needs align-4 headroom past @p in_sz (FIFO realign)
- * @return 0 ok; -2 unsupported shape (caller falls back to software)
- */
-/**
  * @brief One-block AES-ECB through the BA411E engine (the raw block cipher).
- * @return 0 on success, -2 on bad key size / DMA error.
+ * @return 0 on success, -2 on a bad key size, -1 on an engine or DMA error.
  */
 int tiku_crypto_arch_aes_ecb(int decrypt, const uint8_t *key, size_t key_sz,
                              const uint8_t in[16], uint8_t out[16]);
@@ -70,6 +64,19 @@ int tiku_crypto_arch_aes_ccm_star(int decrypt, const uint8_t *key,
                                   const uint8_t *m, size_t m_len,
                                   uint8_t mic_len, uint8_t *out, uint8_t *mic);
 
+/**
+ * @brief One-shot AES-GCM through the BA411 engine.
+ *
+ * @param decrypt    0 = encrypt, 1 = decrypt (the tag is produced either
+ *                   way; the caller compares on decrypt)
+ * @param cfg_extra  extra config-word bits (bring-up knob; 0 in production)
+ * @param aad        in SRAM, readable up to the next 16-byte multiple
+ * @param in         in SRAM, readable up to the next 16-byte multiple
+ * @param out        needs align-16 headroom past @p in_sz (FIFO realign)
+ * @return 0 ok; -2 for a bad key size, AAD or input outside SRAM, or AAD
+ *         over 64 bytes (the caller falls back to software); -1 on an
+ *         engine error
+ */
 int tiku_crypto_arch_aes_gcm(int decrypt, uint32_t cfg_extra,
                              const uint8_t *key, size_t key_sz,
                              const uint8_t iv[12],
@@ -77,7 +84,9 @@ int tiku_crypto_arch_aes_gcm(int decrypt, uint32_t cfg_extra,
                              const uint8_t *in, size_t in_sz,
                              uint8_t *out, uint8_t tag[16]);
 
-/** @brief Kit-safe AES-GCM (staged; no caller alignment/RRAM constraints). */
+/** @brief AES-GCM staged through SRAM, so the caller's buffers need no
+ *         alignment headroom and may live in RRAM.  Up to 4096 bytes of
+ *         input and 256 of AAD; larger returns -2. */
 int tiku_crypto_arch_aes_gcm_kit(int decrypt,
                                  const uint8_t *key, size_t key_sz,
                                  const uint8_t iv[12],
@@ -86,12 +95,14 @@ int tiku_crypto_arch_aes_gcm_kit(int decrypt,
                                  uint8_t *out, uint8_t tag[16]);
 
 #if defined(TIKU_CRACEN_PK_ENABLE)
-/** @brief ECDSA-P256 verify on the BA414EP PK engine. 0=valid 1=invalid <0=err. */
+/** @brief ECDSA-P256 verify on the BA414EP PK engine.
+ *  @return 0 valid, 1 invalid, -1 engine error or no microcode. */
 int tiku_crypto_arch_p256_ecdsa_verify(const uint8_t qx[32], const uint8_t qy[32],
                                        const uint8_t *h, size_t hlen,
                                        const uint8_t r[32], const uint8_t s[32]);
 
-/** @brief ECDSA-P384 verify on the BA414EP PK engine. 0=valid 1=invalid <0=err. */
+/** @brief ECDSA-P384 verify on the BA414EP PK engine.
+ *  @return 0 valid, 1 invalid, -1 engine error or no microcode. */
 int tiku_crypto_arch_p384_ecdsa_verify(const uint8_t qx[48], const uint8_t qy[48],
                                        const uint8_t *h, size_t hlen,
                                        const uint8_t r[48], const uint8_t s[48]);
@@ -99,16 +110,19 @@ int tiku_crypto_arch_p384_ecdsa_verify(const uint8_t qx[48], const uint8_t qy[48
 /** @brief PK path counters (ops served, engine errors). */
 void tiku_crypto_arch_pk_counters(uint16_t *ops, uint16_t *errs);
 
+/** @brief Last PK command, status word and spin count, and the crypto-RAM
+ *         slot size (bring-up).  Any pointer may be NULL. */
 void tiku_crypto_arch_pk_dbg(uint32_t *status, uint32_t *cmd, uint32_t *spin,
                             uint32_t *slotsz);
 
-/** @brief Upload a caller-provided BA414EP microcode image (TikuOS ships none). */
+/** @brief Upload a caller-provided BA414EP microcode image; TikuOS ships
+ *         none. */
 void tiku_crypto_arch_pk_load_microcode(const uint32_t *ucode, size_t words);
 
 /** @brief First word of the PK microcode RAM (0 => not loaded). */
 uint32_t tiku_crypto_arch_pk_ucode0(void);
 
-/** @brief Raw PK HWCONFIG register (bring-up: max operand size in bits 0..11). */
+/** @brief Raw PK HWCONFIG register (max operand size in bits 0..11). */
 uint32_t tiku_crypto_arch_pk_hwconfig(void);
 #endif /* TIKU_CRACEN_PK_ENABLE */
 

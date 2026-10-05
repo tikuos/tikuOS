@@ -5,11 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_cpu_common.c - nRF54L busy delays (SysTick) and system reset.
+ * tiku_cpu_common.c - nRF54L busy delays, reset, device ID, reset reason.
  *
- * Delays poll SysTick as a one-shot down-counter, because it is core-internal and
- * runs with or without a debugger attached -- unlike DWT's CYCCNT, which can be
- * frozen with no trace clock and once hung the delay loop on a standalone boot.
+ * Delays poll SysTick as a one-shot down-counter at the live PLL rate;
+ * SysTick is core-internal and counts with or without a debugger attached.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,29 +18,12 @@
 #include <arch/nordic/tiku_nordic_mdk.h>
 #include <stddef.h>
 
-/* SysTick is clocked from the processor clock, whose speed is NOT fixed: the
- * PLL reset default is 64 MHz, the boot bring-up requests 128 MHz, and an
- * attached debug session can change what a given boot lands on (Phase-0
- * measured CK128M only because nrfutil was attached; standalone boots came up
- * at 64 MHz and every delay ran 2x slow -- the watchdog C-unit test caught it
- * biting through kicks that were supposed to land at half its timeout).  So
- * the delay math reads OSCILLATORS.PLL.CURRENTFREQ live instead of trusting
- * a constant. */
+/* SysTick counts processor clocks, and the core runs at 64 or 128 MHz, so
+ * the delay math reads OSCILLATORS.PLL.CURRENTFREQ through
+ * tiku_nordic_cpu_hz_now(). */
 #define TIKU_SYSTICK_MAX     0x00FFFFFFUL   /* SysTick reload is 24-bit */
 #define TIKU_PLL_CK128M      0x1UL          /* CURRENTFREQ: 128 MHz     */
 
-/*
- * THE ONE PLACE THAT ANSWERS "how fast is the core right now".
- *
- * Not static, and deliberately so.  This started as a private helper for the
- * delay math while tiku_cpu_nordic_clock_get_hz() went on returning a 128 MHz
- * constant -- so the two disagreed the moment the PLL was anything else, and
- * the constant was the one every caller outside this file saw.  A single
- * definition costs one exported symbol and removes a whole bug class: a
- * duplicated fact about hardware is a fact that will eventually be duplicated
- * WRONG (this tree has already paid for that once, with per-file copies of a
- * placement attribute silently diverging).
- */
 unsigned long tiku_nordic_cpu_hz_now(void)
 {
     return ((NRF_OSCILLATORS_S->PLL.CURRENTFREQ & 0x3UL) == TIKU_PLL_CK128M)
@@ -51,8 +33,7 @@ unsigned long tiku_nordic_cpu_hz_now(void)
 
 void tiku_nordic_dwt_init(void)
 {
-    /* Retained for API compatibility (boot bring-up calls it); SysTick-based
-     * delays need no pre-initialisation, so this is intentionally a no-op. */
+    /* No-op: SysTick delays need no setup; boot bring-up still calls it. */
 }
 
 /** @brief Busy-wait for @p cycles core cycles using SysTick (polled). */
@@ -100,7 +81,7 @@ void tiku_cpu_nordic_reset(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* Unique ID (real FICR device ID)                                           */
+/* Unique ID (FICR device ID)                                                */
 /*---------------------------------------------------------------------------*/
 
 uint8_t tiku_cpu_nordic_unique_id(uint8_t *buf, uint8_t len)
@@ -111,7 +92,7 @@ uint8_t tiku_cpu_nordic_unique_id(uint8_t *buf, uint8_t len)
     if (buf == NULL || len == 0u) {
         return 0u;
     }
-    /* Genuine per-die 64-bit identifier from FICR (no synthesis needed). */
+    /* The per-die 64-bit device ID from FICR. */
     id[0] = NRF_FICR_NS->INFO.DEVICEID[0];
     id[1] = NRF_FICR_NS->INFO.DEVICEID[1];
 
@@ -143,12 +124,11 @@ uint16_t tiku_cpu_nordic_reset_reason(void)
         return captured;
     }
 
-    /* RESETREAS is write-1-to-clear: latch the set bits away so the NEXT boot
-     * sees a clean cause (otherwise reasons accumulate across resets). */
+    /* RESETREAS is write-1-to-clear and accumulates across resets; clearing
+     * the bits read here leaves the next boot only its own cause. */
     TIKU_NORDIC_RESETREAS = r;
 
-    /* Map to the MSP430 SYSRSTIV-style codes the kernel already speaks
-     * (matching the ambiq reset-reason decode). */
+    /* Map to the MSP430 SYSRSTIV-style codes the kernel uses. */
     if (r & (TIKU_RESETREAS_DOG0 | TIKU_RESETREAS_DOG1)) {
         captured = 0x16u;   /* watchdog timeout */
     } else if (r & TIKU_RESETREAS_SREQ) {

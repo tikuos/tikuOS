@@ -7,9 +7,9 @@
  *
  * tiku_wake_arch.c - nRF54L backend for the wake-source HAL.
  *
- * Reports which wake sources are armed by inspecting the NVIC enable state of the
- * live lines.  The WDT bit stays clear deliberately: WDT30 runs in reset mode with
- * no NVIC line, and the watchdog layer tracks its own armed state.
+ * Reports which wake sources are armed from the NVIC enable state of the
+ * live lines.  The WDT bit is always clear: WDT30 runs in reset mode with no
+ * NVIC line, and the watchdog layer tracks its own armed state.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

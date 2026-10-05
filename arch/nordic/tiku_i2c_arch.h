@@ -7,9 +7,8 @@
  *
  * tiku_i2c_arch.h - nRF54L I2C (TWIM) arch header.
  *
- * Blocking TWIM master backend.  These prototypes mirror the RP2350 arch header
- * so the interface layer and the I2C HAL routing resolve without implicit
- * declarations.
+ * Declares the blocking TWIM (EasyDMA) I2C master that the I2C bus interface
+ * calls through hal/tiku_i2c_hal.h.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -46,9 +45,9 @@ void tiku_i2c_arch_close(void);
 /**
  * @brief Architecture-specific I2C write (START, addr+W, data, STOP).
  *
- * One EasyDMA transaction closed by the LASTTX->STOP short.  @p buf must
- * be in RAM -- TWIM EasyDMA cannot fetch from the RRAM code region.
+ * One EasyDMA transaction closed by the LASTTX->STOP short.
  *
+ * @note @p buf must be in RAM: TWIM EasyDMA cannot fetch from RRAM.
  * @param addr  7-bit slave address (unshifted)
  * @param buf   Data to transmit
  * @param len   Number of bytes; 0 returns TIKU_I2C_OK immediately
@@ -61,9 +60,9 @@ int  tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len);
 /**
  * @brief Architecture-specific I2C read (START, addr+R, data, NACK, STOP).
  *
- * One EasyDMA transaction closed by the LASTRX->STOP short; @p buf must
- * be in RAM.
+ * One EasyDMA transaction closed by the LASTRX->STOP short.
  *
+ * @note @p buf must be in RAM.
  * @param addr  7-bit slave address (unshifted)
  * @param buf   Buffer for received data
  * @param len   Number of bytes; 0 returns TIKU_I2C_OK immediately
@@ -76,9 +75,9 @@ int  tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len);
 /**
  * @brief Architecture-specific address probe (bus-scan presence check).
  *
- * The nRF TWIM will not clock an address for a zero-length transfer, so the
- * probe is a real 1-byte write and presence is decided solely by the address
- * ACK.  A data NACK still proves the device answered.
+ * Writes one byte, because the TWIM does not clock an address for a
+ * zero-length transfer.  Only the address ACK decides the result: a data NACK
+ * after an acknowledged address returns TIKU_I2C_OK.
  *
  * @param addr  7-bit slave address (unshifted)
  * @return TIKU_I2C_OK if the address was acknowledged, TIKU_I2C_ERR_NACK

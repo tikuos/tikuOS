@@ -7,9 +7,8 @@
  *
  * tiku_nordic_mdk.h - vendored Nordic MDK register-map router.
  *
- * Every Nordic arch file that touches registers includes this rather than a
- * device-specific MDK entry point, so one #elif chain selects the right map from
- * the single TIKU_DEVICE_NRF54* macro the Makefile defines.
+ * Includes the MDK register map for the TIKU_DEVICE_NRF54* macro the Makefile
+ * defines.  Nordic arch files that touch registers include this header.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

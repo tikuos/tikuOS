@@ -7,9 +7,9 @@
  *
  * tiku_timer_arch.h - nRF54L system tick (GRTC by default, TIMER10 fallback).
  *
- * The GRTC source keeps firing through deep sleep, which is the low-power
- * foundation; ticks are accounted against a half-count anchor so the rate re-locks
- * to the crystal and never drifts.  SysTick stays free for busy-delays.
+ * The GRTC source keeps counting through deep sleep, so tickless idle can
+ * stretch the tick; ticks are accounted against a half-count anchor, so the
+ * 128 Hz rate is exact.  SysTick stays free for busy-delays.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,13 +23,13 @@
 /* TYPE DEFINITIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Clock tick counter type (ticks since boot; wraps ~387 days). */
 #ifndef TIKU_CLOCK_ARCH_TIME_T_DEFINED
+/** @brief Clock tick counter type (ticks since boot; wraps after ~388 days). */
 typedef unsigned long tiku_clock_arch_time_t;
 #define TIKU_CLOCK_ARCH_TIME_T_DEFINED
 #endif
 
-/** @brief Fine-resolution sub-tick counter type (captured TIMER residue). */
+/** @brief Fine-resolution sub-tick counter type. */
 typedef unsigned int tiku_clock_arch_counter_t;
 
 /*---------------------------------------------------------------------------*/
@@ -37,10 +37,11 @@ typedef unsigned int tiku_clock_arch_counter_t;
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief System tick frequency in Hz (must be a power of 2).
+ * @brief System tick frequency in Hz (must be a power of 2); default 128 Hz,
+ *        ~7.8 ms per tick.
  *
- * Default 128 Hz matches the MSP430 / rp2350 / ambiq ports (~7.8 ms/tick).
- * Override via -DTIKU_CLOCK_ARCH_CONF_SECOND=<n>.
+ * Override via -DTIKU_CLOCK_ARCH_CONF_SECOND=<n>.  The GRTC tick is exact only
+ * when 2 MHz / n is an integer, which holds up to 128 Hz.
  */
 #ifndef TIKU_CLOCK_ARCH_CONF_SECOND
 #define TIKU_CLOCK_ARCH_CONF_SECOND 128   /* must be a power of 2 */
@@ -50,21 +51,22 @@ typedef unsigned int tiku_clock_arch_counter_t;
 #define TIKU_CLOCK_ARCH_SECOND  TIKU_CLOCK_ARCH_CONF_SECOND
 
 /*
- * Tick source: GRTC (default) or TIMER10 (fallback, -DTIKU_NORDIC_TICK_TIMER10).
- * The source-specific clock rate + per-tick interval live in tiku_timer_arch.c
- * (arch-internal; the kernel only speaks TIKU_CLOCK_ARCH_SECOND).  GRTC counts
- * at 1 MHz (7812.5 counts/tick -> exact 128 Hz via an alternating interval);
- * TIMER10 at 16 MHz (125000 counts/tick, exact).
+ * Tick source: GRTC (default) or TIMER10 (-DTIKU_NORDIC_TICK_TIMER10).
+ * The source-specific clock rate and per-tick interval are in
+ * tiku_timer_arch.c; the kernel uses only TIKU_CLOCK_ARCH_SECOND.  GRTC counts
+ * at 1 MHz (7812.5 counts/tick: half-count accounting alternates 7812 and
+ * 7813); TIMER10 at 16 MHz (125000 counts/tick, exact).
  */
 
 /*---------------------------------------------------------------------------*/
 /* HAL ENTRY POINTS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Configure TIMER10 for TIKU_CLOCK_ARCH_SECOND Hz and enable it. */
+/** @brief Start the tick source at TIKU_CLOCK_ARCH_SECOND Hz and enable its
+ *         interrupt. */
 void                   tiku_clock_arch_init(void);
 
-/** @brief Current tick counter (incremented by the TIMER10 compare ISR). */
+/** @brief Ticks since boot (advanced by the tick ISR and tickless code). */
 tiku_clock_arch_time_t tiku_clock_arch_time(void);
 
 /** @brief Elapsed whole seconds since boot (plus any set_seconds base). */
@@ -73,13 +75,13 @@ unsigned long          tiku_clock_arch_seconds(void);
 /** @brief Overwrite the seconds counter (RTC sync). */
 void                   tiku_clock_arch_set_seconds(unsigned long sec);
 
-/** @brief Busy-wait until the tick counter reaches absolute value @p t. */
+/** @brief Busy-wait until @p t more ticks have elapsed (a duration). */
 void                   tiku_clock_arch_wait(tiku_clock_arch_time_t t);
 
 /** @brief Busy-wait for at least @p us microseconds (SysTick busy-delay). */
 void                   tiku_clock_arch_delay(unsigned int us);
 
-/** @brief Sub-tick TIMER residue for fine-resolution timing (0..fine_max). */
+/** @brief Position within the current tick, scaled to 0..0xFFFF. */
 unsigned short         tiku_clock_arch_fine(void);
 
 /** @brief Maximum value of tiku_clock_arch_fine(). */

@@ -22,15 +22,15 @@
 #define TIKU_WDT_RR_RELOAD_KEY    0x6E524635UL   /* WDT_RR_RR_Reload          */
 #define TIKU_WDT_TSEN_ENABLE      0x6E524635UL   /* WDT_TSEN_TSEN_Enable      */
 #define TIKU_WDT_RREN_RR0         (1UL << 0)     /* enable reload request 0   */
-#define TIKU_WDT_CONFIG_SLEEP_RUN (1UL << 0)     /* keep counting while asleep */
-#define TIKU_WDT_CONFIG_STOPEN    (1UL << 6)     /* allow TASKS_STOP           */
+#define TIKU_WDT_CONFIG_SLEEP_RUN (1UL << 0)     /* keep counting asleep */
+#define TIKU_WDT_CONFIG_STOPEN    (1UL << 6)     /* allow TASKS_STOP     */
 
 /**
- * @brief Stop the running watchdog (both gates: TSEN key, then TASKS_STOP).
+ * @brief Stop the running watchdog: the TSEN key, then TASKS_STOP.
  *
- * DOUBLE-GATED, unlike the classic nRF WDT: CONFIG.STOPEN must have been set at
- * start and the TSEN key must be written immediately before TASKS_STOP.  Miss
- * either and the stop is silently ignored.  Safe to call when already stopped.
+ * CONFIG.STOPEN must have been set at start and the TSEN key written
+ * immediately before TASKS_STOP; without either the stop is ignored.  A call
+ * on a stopped watchdog has no effect.
  */
 static void wdt30_stop(void)
 {
@@ -53,8 +53,8 @@ void tiku_cpu_nordic_watchdog_on_arch(tiku_wdt_clk_t src,
 
     TIKU_WDT30->CRV    = (uint32_t)isel;          /* timeout in 32 kHz ticks */
     TIKU_WDT30->RREN   = TIKU_WDT_RREN_RR0;        /* arm reload channel 0   */
-    /* STOPEN must be decided here, at start: it cannot be added later, and
-     * without it pause/off cannot ever stop the dog again. */
+    /* STOPEN is set here, at start: it cannot be added later, and without
+     * it pause and off cannot stop the watchdog. */
     TIKU_WDT30->CONFIG = TIKU_WDT_CONFIG_SLEEP_RUN | TIKU_WDT_CONFIG_STOPEN;
 
     TIKU_WDT30->TASKS_START = 1UL;
@@ -85,13 +85,9 @@ void tiku_cpu_nordic_watchdog_kick_arch(void)
 /**
  * @brief Arch reset for the check-in hang detector (overrides the weak spin).
  *
- * tiku_hang.c's fallback spins forever on the theory that a hardware watchdog
- * still catches it -- but this port stops WDT30 at boot, so a detected hang
- * becomes an infinite 128 MHz spin at ~5.9 mA with a dead console.
- *
- * @note AIRCR.SYSRESETREQ is a warm reset, so the .retained culprit
- *       record written just before this call survives into the next boot and
- *       shows up at /sys/boot/hang.
+ * The weak default in tiku_hang.c spins for a hardware watchdog to catch, but
+ * boot stops WDT30 (main.c).  AIRCR.SYSRESETREQ is a warm reset: the
+ * .retained culprit record survives into the next boot (/sys/boot/hang).
  */
 void tiku_hang_arch_reset(void)
 {

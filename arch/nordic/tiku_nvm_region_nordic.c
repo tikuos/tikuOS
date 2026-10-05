@@ -7,9 +7,9 @@
  *
  * tiku_nvm_region_nordic.c - nRF54L RRAM filestore region backend.
  *
- * RRAM is byte-writable in place behind the RRAMC WEN gate, so the carved region
- * is a plain linker-reserved span: writes are a memcpy and reads are pointer
- * dereferences.  The write must sit inside an unlock/lock window, which TFS does.
+ * RRAM is byte-writable in place behind the RRAMC WEN gate: the carved region
+ * is a linker-reserved span, a write is a memcpy and a read a dereference.  A
+ * write must run inside an NVM unlock/lock window.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,17 +21,16 @@
 #include "kernel/memory/tiku_nvm_region.h"
 #include "arch/nordic/tiku_mem_arch.h"    /* tiku_mem_arch_nvm_flush() */
 
-/* Linker-carved region (nrf54l15.ld).  __tiku_nvmfs_size is an ABSOLUTE symbol
- * whose ADDRESS is the size (same convention as the rp2350 / ambiq backends). */
+/* Linker-carved region (arch/common/tiku_nvm_layout.ld).  __tiku_nvmfs_size
+ * is an absolute symbol: its address is the size. */
 extern uint8_t __tiku_nvmfs_base;
 extern uint8_t __tiku_nvmfs_size;
 
 /**
- * @brief Backend write: memcpy @p len bytes at @p off into the RRAM region.
+ * @brief Copy @p len bytes into the RRAM region at @p off; no erase step.
  *
- * RRAM is byte-writable in place, so this is a straight copy -- no erase, no
- * read-modify-write.  The caller holds the RRAMC WEN window (the generic
- * tiku_nvm_region / TFS layer brackets with tiku_mpu_unlock_nvm()).
+ * @return 0, or -1 if the range does not fit in the region
+ * @note The caller holds the WEN window (tiku_mpu_unlock_nvm()).
  */
 static int region_write(tiku_nvm_backend_t *be, size_t off,
                         const void *src, size_t len)
@@ -39,10 +38,9 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
     if (off > be->size || len > be->size - off) {
         return -1;                          /* out of range */
     }
-    memcpy(be->base + off, src, len);       /* RRAM in place; caller holds WEN */
-    /* Wait for the RRAMC to finish committing before the caller closes the WEN
-     * gate -- symmetry with tiku_mem_arch_nvm_write(), which spins on READY so
-     * a closing gate can't truncate the tail word of an in-flight commit. */
+    memcpy(be->base + off, src, len);       /* RRAM in place; WEN held */
+    /* Wait for RRAMC READY before the caller closes the WEN gate: closing it
+     * during a commit can truncate the last word written. */
     tiku_mem_arch_nvm_flush();
     return 0;
 }

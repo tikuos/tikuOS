@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_power_arch.c - nRF54L cache and DC/DC enables.
+ * tiku_power_arch.c - nRF54L cache, DC/DC and power probes.
  *
- * A Joulescope measured the LM20-DK idling at 6.76 mA against a datasheet 2.6 mA
- * running CoreMark -- doing nothing cost more than doing work.  The cache and the
- * DC/DC are two of the three registers that account for that gap.
+ * Cache and DC/DC enables, cache and memory-access workloads, sleep and spin
+ * probes that release clock requests one at a time, System OFF, and a
+ * core-clock measurement against the GRTC.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -25,8 +25,8 @@
 #include <arch/nordic/tiku_cpu_common.h>  /* tiku_cpu_nordic_delay_ms      */
 #include <arch/nordic/tiku_uart_arch.h>
 #include <arch/nordic/tiku_device_select.h>
-#include <arch/nordic/tiku_timer_arch.h> /* TIKU_CLOCK_ARCH_SECOND first      */
-#include <kernel/cpu/tiku_hang.h>        /* check-in: probe blocks on purpose  */
+#include <arch/nordic/tiku_timer_arch.h> /* tick rate, before clock.h         */
+#include <kernel/cpu/tiku_hang.h>        /* check-in during a blocking probe */
 #include <kernel/timers/tiku_clock.h>   /* tickless stretch for the tick flag */
 
 /*---------------------------------------------------------------------------*/
@@ -34,31 +34,25 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * ICACHE lives at 0xE0082000 in the Arm private-peripheral region and has NO
- * instance define in any of the three MDK headers -- only the NRF_CACHE_Type
- * layout and the CACHE_* field macros are vendored.  So the base comes from
- * the datasheet's own instance table (4.2.3.4: "ICACHE, APPLICATION,
- * 0xE0082000") and the layout comes from the MDK, which is the right split:
- * the address is a documented fact, the offsets are the vendor's business.
+ * ICACHE is at 0xE0082000 in the Arm private-peripheral region.  The vendored
+ * MDK headers have no instance define for it, only NRF_CACHE_Type and the
+ * CACHE_* field macros, so the base comes from the datasheet's instance table
+ * (4.2.3.4: "ICACHE, APPLICATION, 0xE0082000").
  *
  * Configuration, from the same table: 8 KB, 128 sets, two-way set associative,
- * 64-bit data unit, 4 data units per line, LRU replacement.  Both instruction
- * AND data accesses to NVM are cached.  No flush and no clean are supported --
- * only invalidate -- which is why the disable path below invalidates rather
- * than trying to write back.
+ * 64-bit data unit, 4 data units per line (32 bytes), LRU replacement.
+ * Instruction and data accesses to NVM are both cached.  The only maintenance
+ * operation is invalidate: there is no flush or clean.
  */
 #define TIKU_NORDIC_CACHE ((NRF_CACHE_Type *)0xE0082000UL)
 
 void tiku_nordic_cache_set(int on)
 {
     if (on) {
-        /* Invalidate before enabling.  The cache retains tag state across a
-         * disable, so enabling without invalidating could serve lines that
-         * describe NVM as it was before an intervening write -- and this port
-         * does write NVM at run time (the file store, persist cells, BASIC
-         * saves).  The datasheet notes writes to cached memory are
-         * write-around and invalidate their line, but that only covers writes
-         * made while the cache was ON. */
+        /* Invalidate before enabling: the cache keeps its tags across a
+         * disable, so NVM written while it was off (file store, persist
+         * cells, BASIC saves) would be served stale.  A write made while
+         * the cache is on is write-around and invalidates its own line. */
         TIKU_NORDIC_CACHE->TASKS_INVALIDATECACHE = 1UL;
         __asm__ volatile ("dsb 0xF" ::: "memory");
         TIKU_NORDIC_CACHE->ENABLE = CACHE_ENABLE_ENABLE_Enabled;
@@ -104,16 +98,10 @@ void tiku_nordic_cache_profile_read(uint32_t *hits, uint32_t *misses,
 /*---------------------------------------------------------------------------*/
 
 /*
- * INDUCTORDET is only meaningful while the converter is off.  Datasheet
- * 5.7.2.4.2: "The detection can only take place if the DC/DC converter is not
- * enabled (VREGMAIN.DCDCEN = 0)."
- *
- * Reading it at any other time returns a stale or meaningless value, and this
- * cost real confusion: a first cut reported "dcdc on, inductor absent", which
- * is not a state the hardware can be in.  The converter was on -- so the
- * detector could not run -- and the zero it read was reported as an answer.
- *
- * @return 1 detected, 0 not detected, -1 cannot tell (converter is on).
+ * INDUCTORDET is valid only while the converter is off.  Datasheet 5.7.2.4.2:
+ * "The detection can only take place if the DC/DC converter is not enabled
+ * (VREGMAIN.DCDCEN = 0)."  Read while it is on, the bit is stale, so this
+ * returns -1 then.
  */
 int tiku_nordic_dcdc_inductor_present(void)
 {
@@ -135,9 +123,8 @@ int tiku_nordic_dcdc_probe_inductor(void)
     int was_on = tiku_nordic_dcdc_enabled();
     int det;
 
-    /* Detection needs the converter off, so take it off, look, and put it
-     * back exactly as it was.  Momentary LDO operation is the reset state and
-     * is always safe; the reverse -- guessing -- is not. */
+    /* Detection needs the converter off: turn it off, read, and restore the
+     * previous state.  LDO operation is the reset state. */
     if (was_on) {
         NRF_REGULATORS_S->VREGMAIN.DCDCEN =
             REGULATORS_VREGMAIN_DCDCEN_VAL_Disabled;
@@ -156,18 +143,10 @@ int tiku_nordic_dcdc_probe_inductor(void)
 int tiku_nordic_dcdc_set(int on)
 {
     /*
-     * No software guard, DELIBERATELY.  An earlier version refused to write
-     * DCDCEN unless it had already seen an inductor, which was both wrong and
-     * unnecessary: the SILICON does this check, at exactly the right moment.
-     * Datasheet 5.7.2.4: "When enabling the DC/DC regulator, the device checks
-     * if an inductor is connected to the DCC pin.  If an inductor is not
-     * detected, the device remains in LDO mode."
-     *
-     * The guard also broke the thing it was guarding.  Detection only runs
-     * while DCDCEN is 0, so refusing to set DCDCEN on the strength of a prior
-     * INDUCTORDET read made the outcome depend on when that read happened
-     * rather than on the board.  Writing the bit and letting the part decide
-     * is both simpler and the documented sequence.
+     * DCDCEN is written without an inductor check.  Datasheet 5.7.2.4: "When
+     * enabling the DC/DC regulator, the device checks if an inductor is
+     * connected to the DCC pin.  If an inductor is not detected, the device
+     * remains in LDO mode."
      */
     NRF_REGULATORS_S->VREGMAIN.DCDCEN = on
         ? REGULATORS_VREGMAIN_DCDCEN_VAL_Enabled
@@ -181,13 +160,11 @@ int tiku_nordic_dcdc_set(int on)
 /*---------------------------------------------------------------------------*/
 
 /*
- * 16 KB of NVM -- twice the 8 KB cache -- so a full pass cannot be resident and
- * the traversal keeps missing.  Sized deliberately above the cache rather than
- * below it: a working set that FITS would report a flattering hit rate and a
- * power difference that no real workload would ever see.
+ * 16 KB of RRAM, twice the 8 KB cache, so a full pass cannot be resident and
+ * the traversal keeps missing.
  */
 #define TIKU_CACHE_WL_WORDS   4096u
-#define TIKU_CACHE_WL_STRIDE  17u     /* coprime with the line size (see below) */
+#define TIKU_CACHE_WL_STRIDE  17u     /* coprime with the line (see below) */
 #define TIKU_CACHE_WL_PASSES  64u
 
 static const uint32_t tiku_cache_wl_data[TIKU_CACHE_WL_WORDS] = { 0 };
@@ -199,11 +176,9 @@ uint32_t tiku_nordic_cache_workload(uint32_t *out_us)
 
     for (pass = 0u; pass < TIKU_CACHE_WL_PASSES; pass++) {
         for (i = 0u; i < TIKU_CACHE_WL_WORDS; i++) {
-            /* Stride 17 words is coprime with the 4-word (16-byte) line, so
-             * successive reads land in different lines and no two consecutive
-             * accesses share one -- sequential prefetch cannot help, and the
-             * cache is exercised on its actual job of retaining scattered
-             * lines rather than on streaming. */
+            /* The 17-word stride is longer than the 8-word (32-byte) line
+             * and coprime with it, so consecutive reads land in different
+             * lines and sequential prefetch cannot help. */
             idx = (idx + TIKU_CACHE_WL_STRIDE) % TIKU_CACHE_WL_WORDS;
             sum += tiku_cache_wl_data[idx];
             sum ^= idx;
@@ -220,22 +195,15 @@ uint32_t tiku_nordic_cache_workload(uint32_t *out_us)
 /*---------------------------------------------------------------------------*/
 
 /*
- * Why these exist.  Every core-power figure this port has published comes from a
- * register-only loop -- two instructions, no loads, no stores.  That is a
- * deliberate best case and it says nothing about what memory traffic costs,
- * which is most of what real code does and all of what a durability decision
- * turns on.  These six loops price one access at a time.
+ * Six loops, one memory access per counted step: NOP (register only), SRAM
+ * read, write and strided read, and RRAM reads over a HOT 4 KB set that stays
+ * resident in the 8 KB cache and a COLD 64 KB set that cannot.  The 17-word
+ * stride is coprime with the line, so consecutive accesses land in different
+ * lines and sequential prefetch cannot help.
  *
- * SIZING.  The cache is 8 KB, two-way, 128 sets.  HOT is 4 KB so a pass is
- * comfortably resident; COLD is 64 KB so a pass cannot be.  The stride is 17
- * words -- coprime with the line, so consecutive accesses land in different
- * sets and sequential prefetch cannot help.  Both mirror the existing
- * cache-workload constants, which were chosen the same way.
- *
- * The loops are 8x unrolled so loop overhead is a small fraction of the access
- * cost being measured, alignment-pinned because an unrelated build option once
- * moved a measured loop and changed its current by 956 uA, and every read feeds
- * a volatile sink so no access can be optimised away.
+ * The loops are 8x unrolled, aligned to 16 bytes (a loop's current depends on
+ * its alignment), and the accumulator ends in a volatile sink so no read can
+ * be optimised away.
  */
 #define TIKU_MEM_HOT_WORDS   1024u    /* 4 KB  -- inside the 8 KB cache      */
 #define TIKU_MEM_COLD_WORDS 16384u    /* 64 KB -- 8x the cache               */
@@ -288,9 +256,7 @@ uint32_t tiku_nordic_mem_checksum(void)     { return tiku_mem_checksum; }
 /**
  * @brief Run one memory workload for @p ms and report elapsed microseconds.
  *
- * Access count and checksum are published separately: the count is the
- * denominator for energy per access, and the checksum lets a caller confirm
- * that two configurations being compared did the SAME work.
+ * The access count and checksum are read back separately.
  */
 uint32_t tiku_nordic_mem_probe(unsigned kind, uint32_t ms)
 {
@@ -299,14 +265,10 @@ uint32_t tiku_nordic_mem_probe(unsigned kind, uint32_t ms)
     const uint32_t hot_mask  = TIKU_MEM_HOT_WORDS - 1u;
     const uint32_t cold_mask = TIKU_MEM_COLD_WORDS - 1u;
 
-    /* SEED THE SRAM BUFFER so its traversals have a live checksum.  The RRAM
-     * arrays are `const` zero-filled -- the linker emits them, and the access
-     * rates prove the loads really happen (a 64 KB strided RRAM pass runs 3.3x
-     * slower than the same pass over SRAM), but every word read back is 0, so
-     * for those kinds the checksum is STRUCTURALLY zero and proves nothing.
-     * Said plainly here rather than left to imply a verification that is not
-     * happening; the access COUNT is the denominator that matters, and it is
-     * validated independently by nop landing on its architectural 3 cycles. */
+    /* Seed the SRAM buffer with a pattern so SRAM traversals give a non-zero
+     * checksum; the RRAM arrays are zero-filled, so the RRAM kinds sum to 0.
+     * The pattern's word 0 is 0, so the buffer is reseeded before every probe
+     * until an SRAM_W probe stores a non-zero word there. */
     if (tiku_mem_sram[0] == 0u) {
         uint32_t j;
         for (j = 0u; j < TIKU_MEM_COLD_WORDS; j++) {
@@ -321,8 +283,8 @@ uint32_t tiku_nordic_mem_probe(unsigned kind, uint32_t ms)
         switch (kind) {
         case TIKU_MEM_KIND_NOP:
         default: {
-            /* The register-only reference, matched to the same accounting so
-             * "an access" and "a register op" are directly comparable. */
+            /* Register-only loop of TIKU_MEM_PASS_ACC iterations, counted
+             * like one access pass. */
             uint32_t n = TIKU_MEM_PASS_ACC;
             __asm__ volatile ("1: subs %0, %0, #1\n\t"
                               "   bne  1b\n"
@@ -333,8 +295,8 @@ uint32_t tiku_nordic_mem_probe(unsigned kind, uint32_t ms)
             TIKU_MEM_PASS_READ(tiku_mem_sram, cold_mask, 1u);
             break;
         case TIKU_MEM_KIND_SRAM_W:
-            /* idx starts at 0 and the pattern's [0] is 0 by construction, so
-             * bump acc first: the seed check above must stay true across runs. */
+            /* Setting bit 0 of acc (0 on entry) makes every stored word
+             * non-zero, including word 0, which stops the reseeding above. */
             acc |= 1u;
             TIKU_MEM_PASS_WRITE(tiku_mem_sram, cold_mask, 1u);
             break;
@@ -350,8 +312,8 @@ uint32_t tiku_nordic_mem_probe(unsigned kind, uint32_t ms)
         }
         tiku_mem_accesses += TIKU_MEM_PASS_ACC;
         tiku_mem_checksum += acc;
-        /* Deliberate blocking: tell the hang detector so it does not name this
-         * probe a wedge at 1024 stalled ticks (see power_probe's note). */
+        /* The probe blocks its caller; a check-in per pass keeps the hang
+         * detector from treating it as a wedge. */
         tiku_hang_checkin();
         now = NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL;
         now = NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL;
@@ -368,8 +330,8 @@ static uint32_t tiku_sleep_wakes;
 
 uint32_t tiku_nordic_sleep_wake_count(void) { return tiku_sleep_wakes; }
 
-/* Inner iterations per outer pass of the busy loop.  Fixed and exported so the
- * host can turn a pass count into retired instructions without guessing. */
+/* Inner iterations per outer pass of the spin loop, reported by
+ * tiku_nordic_spin_inner(). */
 #define TIKU_SPIN_INNER 4096u
 
 static uint32_t tiku_spin_passes;
@@ -377,8 +339,7 @@ static uint32_t tiku_spin_passes;
 uint32_t tiku_nordic_spin_pass_count(void) { return tiku_spin_passes; }
 
 #if (TIKU_FLPR_ENABLE + 0)
-/* Coprocessor work retired inside the last probe window.  Kept here rather than
- * left to the host: see the sampling note in power_probe(). */
+/* FLPR spin passes at probe entry, and retired inside the last window. */
 static uint32_t tiku_flpr_passes_at_entry;
 static uint32_t tiku_flpr_passes_in_window;
 
@@ -396,15 +357,11 @@ int tiku_nordic_debug_attached(void)
 }
 
 /**
- * @brief The one probe body, shared by the idle and busy measurements.
+ * @brief Release what @p flags names, run WFI (or the spin loop when @p spin
+ *        is non-zero) for @p ms, then restore.
  *
- * ONE FUNCTION AND NOT TWO: an idle figure and a busy figure are comparable
- * only if the ONLY difference is what the CPU is doing, so @p spin selects the
- * loop body and nothing else.
- *
- * @note Two paths releasing peripherals from separate copies of this list would
- *       eventually drift, and the drift would surface as a physical result
- *       about the core.
+ * @p spin selects the loop body only; the releases and restores are the same
+ * for both probes.
  */
 static uint32_t power_probe(uint32_t ms, unsigned flags, int spin)
 {
@@ -412,28 +369,24 @@ static uint32_t power_probe(uint32_t ms, unsigned flags, int spin)
     NRF_UARTE_Type *u = TIKU_BOARD_CONSOLE_UARTE;
 
     if ((flags & TIKU_SLEEP_STOP_UART) != 0u) {
-        /* Let the caller's announcement finish leaving the wire before the
-         * transmitter is torn down, or the line that says what is about to
-         * happen is the line that gets truncated.  A few ms at 115200 clears
-         * anything the shell has queued. */
+        /* Give queued console output 20 ms to leave the wire before the
+         * transmitter is disabled. */
         tiku_cpu_nordic_delay_ms(20u);
-        /* ENABLE=0 alone: on this UARTE the stop tasks live under TASKS_DMA
-         * rather than the legacy TASKS_STOPRX/STOPTX, and disabling the
-         * peripheral outright is what the probe wants anyway. */
+        /* ENABLE=0 alone disables the UARTE outright; this UARTE's stop
+         * tasks are under TASKS_DMA. */
         u->ENABLE = 0u;
     }
     if ((flags & TIKU_SLEEP_STOP_PLL) != 0u) {
-        /* The erratum-39 workaround pins this on for the life of the boot.
-         * Releasing it is the whole question: does HFCLK then stop? */
+        /* The erratum-39 workaround starts the PLL at boot and never stops
+         * it. */
         NRF_CLOCK_S->TASKS_PLLSTOP = 1u;
     }
     if ((flags & TIKU_SLEEP_STOP_HFXO) != 0u) {
         NRF_CLOCK_S->TASKS_XOSTOP = 1u;
     }
     if ((flags & TIKU_SLEEP_STOP_TIM) != 0u) {
-        /* The htimer's TIMER20 free-runs from sched init in EVERY build --
-         * a permanent PCLK16M request, i.e. a peripheral that is never idle
-         * in a system whose sleep depends on all of them being idle. */
+        /* The htimer's TIMER20 free-runs from scheduler init in every
+         * build, a standing PCLK16M request. */
         NRF_TIMER20_S->TASKS_STOP = 1u;
     }
     if ((flags & TIKU_SLEEP_DEEP) != 0u) {
@@ -441,85 +394,53 @@ static uint32_t power_probe(uint32_t ms, unsigned flags, int spin)
          * boot latched Constant Latency (the reset default is Low-power, but
          * radio bursts and the Axon shim both touch CONSTLAT). */
         NRF_POWER_S->TASKS_LOWPWR = 1u;
-        /* SLEEPDEEP is the difference between "the CPU pipeline is stalled"
-         * and "the CPU has released its clock".  Shallow WFI keeps the core's
-         * own HCLK request standing, so the HFCLK controller can never stop
-         * the clock no matter what else is released -- which is why stopping
-         * the PLL, the UARTE and the HFXO under shallow WFI measured a mere
-         * 85 uA of the 955: the biggest requestor was the sleeper itself. */
+        /* With SLEEPDEEP clear, WFI keeps the core's own HCLK request
+         * standing, and HFCLK cannot stop whatever else is released. */
         TIKU_SCB->SCR |= (1UL << 2);
     }
     __asm__ volatile ("dsb 0xF" ::: "memory");
 
-    /* COUNT THE WAKES.  A WFI that returns immediately is not sleeping, and
-     * from the outside that is indistinguishable from one that is -- the
-     * current is simply higher than it should be and nobody knows why.  The
-     * wake count separates "the part will not sleep" from "the part sleeps and
-     * something else is drawing the current". */
+    /* Count WFI returns: a high count means the part is being woken rather
+     * than sleeping. */
     tiku_sleep_wakes = 0u;
     tiku_spin_passes = 0u;
 #if (TIKU_FLPR_ENABLE + 0)
-    /* Sample the COPROCESSOR's work counter inside this window too.  Doing it
-     * from the host instead costs two shell round-trips at the window edges,
-     * which on the short windows the probe is limited to (see the ~1024-tick
-     * cliff note in experiments/power/experiment3) is a ~20% error on the
-     * rate -- and the rate is the denominator of every energy-per-work
-     * figure.  Sampling here is exact and free. */
+    /* Sample the FLPR's spin-pass counter at both window edges. */
     tiku_flpr_passes_at_entry = tiku_flpr_arch_spin_passes();
 #endif
     if ((flags & TIKU_SLEEP_STOP_TICK) != 0u) {
-        /* Stretch the kernel tick across the whole window, through the same
-         * tickless path the scheduler's deep idle uses.  Without this the CC
-         * fires 128 times a second, and each firing is not just a wake: it
-         * keeps the GRTC's SYSCOUNTER cycling through its active state and
-         * runs the accounting ISR.  The stretch is the difference between
-         * measuring "WFI as this kernel idles today" and "the floor this
-         * silicon can reach with the kernel's own timekeeping intact".
-         * Masked because begin() moves the CC under the live tick ISR. */
+        /* Stretch the kernel tick across the window through the tickless
+         * path the scheduler's deep idle uses.  Unstretched, the tick compare
+         * fires TIKU_CLOCK_SECOND times a second, waking the core and the
+         * GRTC SYSCOUNTER and running the tick ISR.  Masked because begin()
+         * moves the CC under the live tick ISR. */
         __asm__ volatile ("cpsid i" ::: "memory");
         (void)tiku_clock_tickless_begin(
             (tiku_clock_time_t)((ms * TIKU_CLOCK_SECOND) / 1000u + 2u));
         __asm__ volatile ("cpsie i" ::: "memory");
     }
     if ((flags & TIKU_SLEEP_STOP_SYSC) != 0u) {
-        /* SYSCOUNTEREN held 1 keeps the GRTC's 1 MHz counter -- an HF-domain
-         * consumer -- active through every sleep, wake or no wake.  AUTOEN
-         * (kept) re-requests it whenever a CPU is awake, so clearing the
-         * permanent enable only changes what happens DURING sleep; every
-         * SYSCOUNTER read this probe does happens awake, where AUTOEN has it
-         * running.  The wake compare falls to the 32 kHz domain, which is why
-         * this release is only offered once the LFCLK is running. */
+        /* SYSCOUNTEREN = 1 keeps the GRTC's 1 MHz counter, an HF-domain
+         * consumer, running through every sleep.  AUTOEN stays set and runs
+         * it whenever a CPU is awake, so the SYSCOUNTER reads here still
+         * work.  The wake compare then runs from the 32 kHz domain, so the
+         * LFCLK must be running. */
         NRF_GRTC_S->MODE &= ~(1UL << 1);
     }
     t0 = NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL;
     do {
         if (spin) {
-            /* THE while(1) REFERENCE.  Two instructions, no loads, no stores,
-             * resident in cache or prefetch: as close to "the core is simply
-             * running" as this part can be asked for.  Written in asm so no
-             * optimiser decision stands between the source and what retires --
-             * an empty C while(1) becomes one backward branch and a counted C
-             * loop may or may not survive -O2 intact.  The GRTC is read once
-             * per 4096 iterations, keeping the peripheral bus under ~0.1% of
-             * the window so what is measured is the core, not the bus. */
-            /* PIN THE ALIGNMENT.  This loop is the reference workload for every
-             * core-power number, so its cost must not depend on where the
-             * linker happened to drop it.  Unaligned, the same two instructions
-             * measured 956 uA higher and -- with the cache off -- 18 cycles per
-             * iteration instead of 8, purely because an unrelated build option
-             * shifted the address.  A measurement primitive that moves with
-             * link order is not a reference. */
+            /* Two instructions, no loads or stores, in inline asm so the
+             * compiler cannot change what retires.  Aligned to 16 bytes: the
+             * loop's cost depends on its alignment.  The GRTC is read once
+             * per TIKU_SPIN_INNER iterations. */
             uint32_t n = TIKU_SPIN_INNER;
             __asm__ volatile (".p2align 4\n\t"
                               "1: subs %0, %0, #1\n\t"
                               "   bne  1b\n"
                               : "+r" (n) : : "cc");
-            /* COUNT THE WORK, not just the time.  Current for a fixed DURATION
-             * cannot distinguish "this configuration draws less" from "this
-             * configuration executed less" -- and the two have opposite
-             * meanings.  It cost a real confusion: with the cache off a spin
-             * loop drew LESS current, which reads as a saving until you ask how
-             * many iterations each configuration actually retired. */
+            /* Count passes: a lower current over the same window may mean
+             * less work retired. */
             tiku_spin_passes++;
         } else {
             __asm__ volatile ("wfi" ::: "memory");
@@ -529,14 +450,9 @@ static uint32_t power_probe(uint32_t ms, unsigned flags, int spin)
          * cycle to reactivate, and the first read can be stale. */
         now = NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL;
         now = NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL;
-        /* DECLARE THE BLOCKING DELIBERATE.  This loop holds the shell process
-         * for the whole window, which is exactly the shape the check-in hang
-         * detector exists to catch: at 1024 stalled ticks (8.000 s) it names
-         * this process the culprit and warm-resets the board.  It did -- the
-         * "1024-tick cliff" that limited every experiment window to <= 7.5 s
-         * was the detector doing its job against an instrument that never
-         * said it was alive.  One check-in per pass is the honest fix; the
-         * detector stays armed for real wedges. */
+        /* This loop holds the calling process for the whole window; a
+         * check-in per pass keeps the hang detector from warm-resetting the
+         * board at TIKU_HANG_THRESHOLD_TICKS stalled ticks. */
         tiku_hang_checkin();
     } while ((uint32_t)(now - t0) < ms * 1000u);
 #if (TIKU_FLPR_ENABLE + 0)
@@ -555,14 +471,13 @@ static uint32_t power_probe(uint32_t ms, unsigned flags, int spin)
     }
 
     if ((flags & TIKU_SLEEP_DEEP) != 0u) {
-        /* Never left set: SLEEPDEEP changes what every later WFI in the
-         * system means, including the scheduler's idle hook, and that is a
-         * decision for the idle policy, not a side effect of one probe. */
+        /* Cleared again: SLEEPDEEP changes every later WFI, including the
+         * scheduler's idle hook. */
         TIKU_SCB->SCR &= ~(1UL << 2);
     }
 
-    /* Restore in the reverse order, and give the clocks time to come back
-     * before anything tries to use them. */
+    /* Restore in reverse order.  The PLL restart is waited for (bounded);
+     * the HFXO restart is not. */
     if ((flags & TIKU_SLEEP_STOP_TIM) != 0u) {
         NRF_TIMER20_S->TASKS_START = 1u;   /* free-running again; the origin
                                             * shift is harmless at idle */
@@ -572,14 +487,8 @@ static uint32_t power_probe(uint32_t ms, unsigned flags, int spin)
         NRF_CLOCK_S->TASKS_XOSTART = 1u;
     }
     if ((flags & TIKU_SLEEP_STOP_PLL) != 0u) {
-        /* BOUNDED wait, not while(!started).  An earlier version spun
-         * unconditionally on EVENTS_PLLSTARTED with a comment claiming the
-         * PLL's lock time bounds it -- but a wait is only as bounded as the
-         * event is guaranteed, and a probe that hangs in its own RESTORE path
-         * presents exactly like the measurement having killed the board.
-         * After a 20 s window the console died with 'starting' printed and
-         * 'done' never delivered; an unbounded spin here is one of the few
-         * places that can produce that signature. */
+        /* Bounded wait: if PLLSTARTED never arrives, the probe still
+         * returns. */
         uint32_t guard = 0u;
         NRF_CLOCK_S->EVENTS_PLLSTARTED = 0u;
         NRF_CLOCK_S->TASKS_PLLSTART = 1u;
@@ -588,9 +497,8 @@ static uint32_t power_probe(uint32_t ms, unsigned flags, int spin)
         }
     }
     if ((flags & TIKU_SLEEP_STOP_UART) != 0u) {
-        /* Full re-init rather than restoring ENABLE: the RX path is
-         * DMA-driven and needs its buffer and short re-armed, which only
-         * tiku_uart_init() knows how to do. */
+        /* Full re-init: the DMA-driven RX path needs its buffer and short
+         * re-armed, which tiku_uart_init() does. */
         tiku_uart_init();
     }
     return (uint32_t)(now - t0);
@@ -610,25 +518,11 @@ void tiku_nordic_system_off(void)
 {
     unsigned i;
 
-    /* DISARM EVERY WAKE SOURCE FIRST.  The kernel tick's GRTC compare is
-     * armed ~8 ms out at any moment, and a System OFF wake is a RESET, so an
-     * armed compare turns this into an instant reboot and the "measurement"
-     * is just the shell idling again.
-     *
-     * MEASURED CAVEAT (LM20-DK, 2026-07-26): disarming did NOT make System
-     * OFF hold on this rig.  The board still came back immediately, and with
-     * RESETREAS reading 0 -- a power-on-reset signature, not the OFF bit a
-     * real System OFF wake sets.  So entry collapses into a POR-class reset
-     * here, cause unresolved (candidates: a VDDM transient at the OFF
-     * load-step through the series instrument, or interference from the
-     * on-board debugger).  The disarm stays because it is necessary for the
-     * day entry works; it just is not sufficient on this bench. */
-    /* GRTC_CC_MaxCount, not a hard-coded 16: this array holds 12 entries on
-     * every nRF54L part, and looping to 16 wrote four registers PAST the end of
-     * it -- straight into whatever the GRTC map has next.  The compiler said so
-     * (-Waggressive-loop-optimizations, "iteration 12 invokes undefined
-     * behavior"); taking the bound from the MDK keeps it right if a future part
-     * changes the count. */
+    /* Disarm every GRTC compare first: the kernel tick's compare is always
+     * armed about one tick out, and a System OFF wake is a reset.  On the
+     * LM20-DK, entry is followed at once by a reset that reads as power-on
+     * (RESETREAS 0); the cause is not known.  The loop bound is the MDK's
+     * GRTC_CC_MaxCount, the size of the CC array. */
     for (i = 0u; i < (unsigned)GRTC_CC_MaxCount; i++) {
         NRF_GRTC_S->CC[i].CCEN = 0u;
     }
@@ -643,28 +537,17 @@ void tiku_nordic_system_off(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* CLOCK ORACLE                                                              */
+/* CORE CLOCK MEASUREMENT                                                    */
 /*---------------------------------------------------------------------------*/
 
 /*
- * Measure the core clock against a clock that cannot move with it.
+ * SysTick counts processor clocks; the GRTC SYSCOUNTER counts 1 MHz from a
+ * separate source.  Counting one against the other gives the core rate in Hz
+ * without reading PLL.CURRENTFREQ.
  *
- * SysTick is clocked from the processor clock; the GRTC's SYSCOUNTER runs at
- * 1 MHz from an entirely separate source.  Counting one against the other
- * yields the core rate in Hz with nothing external attached and no calibrated
- * constant to drift -- which is the whole point: reading PLL.CURRENTFREQ tells
- * you what the register SAYS, and this tells you what the core is DOING.
- *
- * That distinction is not academic on this part.  A standalone boot was once
- * observed running at 64 MHz while a debugger-attached boot of the same image
- * reported 128, and every busy-delay silently ran at half speed until someone
- * measured rather than asked.
- *
- * SysTick is a 24-bit DOWN counter, so it wraps after 16.77 M cycles -- 131 ms
- * at 128 MHz.  The window below is 50 ms, which is 6.4 M cycles at 128 MHz and
- * 3.2 M at 64: comfortably inside one span at either rate, so no wrap handling
- * is needed and none is written (unwritten wrap handling is better than
- * untested wrap handling).
+ * SysTick is a 24-bit down counter: it wraps after 16.77 M cycles, 131 ms at
+ * 128 MHz.  The 50 ms window is 6.4 M cycles at 128 MHz, inside one span, and
+ * the code has no wrap handling: a window longer than one span reads short.
  */
 #define TIKU_CLKMEAS_WINDOW_US   50000UL
 
@@ -694,13 +577,13 @@ unsigned long tiku_nordic_cpu_hz_measure(void)
     TIKU_SYSTICK->VAL  = 0U;
     TIKU_SYSTICK->CTRL = save_ctrl;
 
-    /* SysTick counts DOWN, so elapsed cycles is s0 - s1 modulo the span. */
+    /* SysTick counts down, so elapsed cycles is s0 - s1 modulo the span. */
     cycles     = (s0 - s1) & 0x00FFFFFFUL;
     elapsed_us = (uint32_t)(t1 - t0);
     if (elapsed_us == 0U) {
         return 0UL;
     }
-    /* 64-bit intermediate: cycles * 1e6 overflows 32 bits above ~4295 cycles. */
+    /* 64-bit: cycles * 1e6 overflows 32 bits above ~4295 cycles. */
     return (unsigned long)(((uint64_t)cycles * 1000000ULL) / elapsed_us);
 }
 
@@ -710,14 +593,12 @@ unsigned long tiku_nordic_cpu_hz_measure(void)
 
 void tiku_nordic_power_boot_init(void)
 {
-    /* Cache first: it changes how every subsequent instruction fetch is
-     * served, so the earlier it is on, the more of boot it covers. */
+    /* Cache first, so it serves the rest of boot. */
 #if !defined(TIKU_NORDIC_CACHE_DISABLE) || !TIKU_NORDIC_CACHE_DISABLE
     tiku_nordic_cache_set(1);
 #endif
 
-    /* Then the supply.  Silent when there is no inductor -- an LDO board is a
-     * perfectly valid board, just a thirstier one. */
+    /* Then the supply; without an inductor the part stays on its LDO. */
 #if !defined(TIKU_NORDIC_DCDC_DISABLE) || !TIKU_NORDIC_DCDC_DISABLE
     (void)tiku_nordic_dcdc_set(1);
 #endif

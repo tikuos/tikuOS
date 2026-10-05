@@ -7,15 +7,15 @@
  *
  * tiku_uart_arch.c - UARTE console backend (nRF54L, EasyDMA).
  *
- * No byte FIFO, so both directions move through EasyDMA against static aligned
- * bounce buffers.  RX re-arms in software, not via the hardware short, so an IRQ
- * blackout raises a countable overrun instead of silently overwriting.
+ * No byte FIFO: both directions move through EasyDMA against static aligned
+ * bounce buffers.  RX re-arms in software from the ISR, with no hardware
+ * short, so an IRQ blackout shows as a counted OVERRUN in ERRORSRC.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <arch/nordic/tiku_uart_arch.h>
-#include <arch/nordic/tiku_device_select.h>   /* board macros + MDK register types */
+#include <arch/nordic/tiku_device_select.h>   /* board macros, MDK types  */
 #include <arch/nordic/tiku_nordic_core.h>     /* NVIC helpers for the RX IRQ  */
 #include <arch/nordic/tiku_timer_arch.h>      /* TIKU_CLOCK_ARCH_SECOND       */
 #include <kernel/timers/tiku_clock.h>         /* wall-time wedge debounce     */
@@ -23,7 +23,7 @@
 #include <stdio.h>
 
 /*---------------------------------------------------------------------------*/
-/* Config                                                                    */
+/* CONFIG                                                                    */
 /*---------------------------------------------------------------------------*/
 
 #define TIKU_UARTE            TIKU_BOARD_CONSOLE_UARTE
@@ -45,25 +45,19 @@
 #define TIKU_PSEL(port, pin)  (((uint32_t)(port) << 5) | ((uint32_t)(pin)))
 
 /*---------------------------------------------------------------------------*/
-/* DMA bounce buffers (must be in RAM for EasyDMA)                            */
+/* DMA BOUNCE BUFFERS (RAM, FOR EASYDMA)                                     */
 /*---------------------------------------------------------------------------*/
 
 static volatile uint8_t tiku_uart_txb __attribute__((aligned(4)));
 
-/* IRQ-driven RX: the EasyDMA drops each received byte into a 1-byte bounce
- * buffer and hardware auto-restarts (DMA_RX_END -> DMA_RX_START short), so the
- * CPU can sleep and wake per byte; the DMARXEND ISR copies the byte into a
- * software ring the shell drains at its own pace -- no bytes lost in the gap
- * between shell getc() calls (the old polled single-byte RX could drop them).
+/* IRQ-driven RX: EasyDMA drops each received byte into a 1-byte bounce
+ * buffer; the DMARXEND ISR copies it into a software ring, which the shell
+ * drains at its own pace, and re-arms the DMA in software.
  *
- * Sized for SLIP/IP, not just typing: TLS cert verification stalls the pump
- * for tens to ~100+ ms, and a 256 B ring holds only ~22 ms at 115200 -- it
- * overflowed on nearly every crypto pause (30 hardware overruns in one HTTPS
- * run), dropping mid-flight bytes and turning big RSA-chain server flights
- * into TCP-retransmit crawls until the peer RSTs the link.  4 KB rides out those
- * pauses with room for SLIP escaping + retransmit duplicates (the ambiq port
- * documents the same failure and sizes its ring 8 KB).  Power of two;
- * override with -DTIKU_UART_RX_RING=<N>. */
+ * The ring is sized for SLIP/IP: TLS certificate checks stall the pump for
+ * up to ~100 ms, about 1.2 KB at 115200 baud, and 4 KB holds that with room
+ * for SLIP escaping and retransmits.  Sized as a power of two; override with
+ * -DTIKU_UART_RX_RING=<N>. */
 #ifndef TIKU_UART_RX_RING
 #define TIKU_UART_RX_RING  4096u
 #endif
@@ -74,7 +68,7 @@ static volatile uint16_t tiku_uart_rx_tail;
 static volatile uint16_t tiku_uart_overruns;
 
 /*---------------------------------------------------------------------------*/
-/* Init                                                                      */
+/* INIT                                                                      */
 /*---------------------------------------------------------------------------*/
 
 void tiku_uart_init(void)
@@ -94,20 +88,18 @@ void tiku_uart_init(void)
     TIKU_UARTE->CONFIG   = 0UL;                 /* 8N1, no parity, no flow    */
     TIKU_UARTE->ENABLE   = TIKU_UARTE_ENABLE_VAL;
 
-    /* IRQ-driven RX: 1-byte EasyDMA, software re-arm from the DMARXEND ISR
-     * (no hardware short -- see the file header: this is what makes a real
-     * hardware overrun visible in ERRORSRC instead of silently overwriting
-     * the bounce byte).  Priority 2 (above the tick at 3) so console input
-     * is not starved. */
+    /* IRQ-driven RX: 1-byte EasyDMA re-armed in software by the DMARXEND
+     * ISR (no hardware short), so a hardware overrun shows in ERRORSRC.
+     * Priority 2, above the tick at 3. */
     tiku_uart_rx_head  = 0u;
     tiku_uart_rx_tail  = 0u;
-    tiku_uart_overruns = 0u;      /* re-init zeroes the counter (rp2350 parity) */
+    tiku_uart_overruns = 0u;      /* re-init zeroes the counter */
     TIKU_UARTE->SHORTS = 0UL;
     TIKU_UARTE->ERRORSRC = TIKU_UARTE->ERRORSRC;  /* W1C: clear stale errors  */
     TIKU_UARTE->DMA.RX.PTR    = (uint32_t)(&tiku_uart_rxb);
     TIKU_UARTE->DMA.RX.MAXCNT = 1UL;
     TIKU_UARTE->EVENTS_DMA.RX.END = 0UL;
-    TIKU_UARTE->INTENSET = (1UL << 19);         /* DMARXEND                    */
+    TIKU_UARTE->INTENSET = (1UL << 19);         /* DMARXEND                   */
 
     tiku_nordic_nvic_clear_pending(TIKU_BOARD_CONSOLE_UARTE_IRQN);
     tiku_nordic_nvic_set_priority(TIKU_BOARD_CONSOLE_UARTE_IRQN, 2u);
@@ -157,7 +149,7 @@ void tiku_uart_printf(const char *fmt, ...)
 }
 
 /*---------------------------------------------------------------------------*/
-/* RX (IRQ-driven EasyDMA + software ring)                                   */
+/* RX (IRQ-DRIVEN EASYDMA AND SOFTWARE RING)                                 */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -167,9 +159,9 @@ void tiku_uart_printf(const char *fmt, ...)
  * bounce byte into the software ring, re-arms the 1-byte DMA, then folds any
  * latched hardware overrun into the same counter the ring uses.
  *
- * @note The crt wires both SERIAL20 (198) and SERIAL30 (260) here, but only the
- *       console's is NVIC-enabled.  The re-arm is in software, and that gap is
- *       what lets a genuine blackout overrun surface in ERRORSRC.
+ * @note The crt wires both SERIAL20 (198) and SERIAL30 (260) here; only the
+ *       console's is NVIC-enabled.  The software re-arm lets an overrun during
+ *       an IRQ blackout show in ERRORSRC.
  */
 void tiku_nordic_uart_console_isr(void)
 {
@@ -210,27 +202,24 @@ void tiku_nordic_uart_console_isr(void)
 }
 
 /*
- * RX-engine wedge self-heal.  Observed on hardware (heavy bidirectional
- * SLIP + console traffic during a live-HTTPS session): the 1-byte RX DMA
- * goes idle with its armed values intact -- PTR/MAXCNT correct, no END, no
- * pending IRQ, ERRORSRC clean -- i.e. a TASKS_DMA.RX.START was lost or
- * ignored, and because every re-arm rides the previous byte's END interrupt,
- * one lost START silences RX forever (console AND net).
+ * RX-engine wedge self-heal.  Under heavy two-way SLIP and console traffic
+ * the 1-byte RX DMA can go idle with its armed values intact (PTR/MAXCNT
+ * correct, no END, no pending IRQ, ERRORSRC clean): a TASKS_DMA.RX.START was
+ * lost, and since every re-arm rides the previous byte's END interrupt, RX
+ * then stays silent for good, console and net alike.
  *
- * Detection uses EVENTS_RXDRDY, which the receiver front-end latches per
- * captured byte and the ISR now clears per handled byte: RXDRDY set with no
- * END and an empty ring means a byte was captured but the engine never moved
- * it.  A normal in-flight byte shows the same signature for only the sub-ms
- * FIFO->DMA window -- but the net pump polls this in a microsecond-tight
- * loop, so the debounce must be WALL TIME, not call count (a call-counted
- * debounce fired inside the in-flight window and pulsed START against a
- * running engine, corrupting live RX).  The signature must persist for
- * several ticks (~100 ms; a real wedge persists forever) before re-arming.
+ * The signature is EVENTS_RXDRDY set (the receiver latches it per captured
+ * byte; the ISR clears it per handled byte) with no END and an empty ring.
+ * An in-flight byte shows it too, for the sub-ms FIFO->DMA window, and the
+ * net pump polls in a tight loop, so the debounce is wall time: the signature
+ * must persist past TIKU_CLOCK_SECOND / 8 before RX is re-armed.  A START
+ * pulsed against a running engine corrupts live RX.
  */
 static uint8_t           tiku_uart_rx_wedge_seen;
 static tiku_clock_time_t tiku_uart_rx_wedge_t0;
 static uint16_t          tiku_uart_rx_recoveries;
 
+/** @brief Re-arm RX once the wedge signature has lasted 1/8 s. */
 static void tiku_uart_rx_selfheal(void)
 {
     if (TIKU_UARTE->EVENTS_RXDRDY != 0UL &&

@@ -15,10 +15,10 @@
  */
 
 #include <hal/tiku_gpio_irq_hal.h>
-#include <arch/nordic/tiku_device_select.h>   /* MDK types + NRF_GPIOTExx_S      */
-#include <arch/nordic/tiku_nordic_core.h>     /* NVIC helpers                    */
-#include <arch/nordic/tiku_gpio_arch.h>       /* tiku_nordic_gpio_init_input_*  */
-#include <kernel/process/tiku_process.h>      /* tiku_process_post, event ids   */
+#include <arch/nordic/tiku_device_select.h>   /* MDK types, NRF_GPIOTExx_S */
+#include <arch/nordic/tiku_nordic_core.h>     /* NVIC helpers              */
+#include <arch/nordic/tiku_gpio_arch.h>       /* gpio_init_input_* helpers */
+#include <kernel/process/tiku_process.h>      /* tiku_process_post, events */
 #include <stdint.h>
 
 /*---------------------------------------------------------------------------*/
@@ -29,15 +29,15 @@
 #define TIKU_GPIOTE_NCH         8u
 
 /* CONFIG field layout (nrf54l15_types.h: GPIOTE_CONFIG_*). */
-#define TIKU_GPIOTE_CFG_MODE_EVENT   (1UL << 0)   /* MODE = Event                */
-#define TIKU_GPIOTE_CFG_PSEL_Pos     4u           /* pin  (5 bits)               */
+#define TIKU_GPIOTE_CFG_MODE_EVENT   (1UL << 0)   /* MODE = Event        */
+#define TIKU_GPIOTE_CFG_PSEL_Pos     4u           /* pin  (5 bits)       */
 #define TIKU_GPIOTE_CFG_PSEL_Msk     0x1Fu
-#define TIKU_GPIOTE_CFG_PORT_Pos     9u           /* port (4 bits)               */
+#define TIKU_GPIOTE_CFG_PORT_Pos     9u           /* port (4 bits)       */
 #define TIKU_GPIOTE_CFG_PORT_Msk     0xFu
-#define TIKU_GPIOTE_CFG_POL_Pos      16u          /* polarity (2 bits)           */
-#define TIKU_GPIOTE_POL_LOTOHI       1UL          /* rising                      */
-#define TIKU_GPIOTE_POL_HITOLO       2UL          /* falling                     */
-#define TIKU_GPIOTE_POL_TOGGLE       3UL          /* either edge                 */
+#define TIKU_GPIOTE_CFG_POL_Pos      16u          /* polarity (2 bits)   */
+#define TIKU_GPIOTE_POL_LOTOHI       1UL          /* rising              */
+#define TIKU_GPIOTE_POL_HITOLO       2UL          /* falling             */
+#define TIKU_GPIOTE_POL_TOGGLE       3UL          /* either edge         */
 
 /*---------------------------------------------------------------------------*/
 /* Per-instance state                                                        */
@@ -51,19 +51,19 @@
  * spurious latches on unallocated channels.
  */
 typedef struct {
-    NRF_GPIOTE_Type *reg;                 /**< GPIOTE register block            */
-    int32_t          irqn;                /**< IRQ-line-0 number (MDK enum)     */
-    uint8_t          used[TIKU_GPIOTE_NCH];/**< 1 = channel armed               */
+    NRF_GPIOTE_Type *reg;                 /**< GPIOTE register block      */
+    int32_t          irqn;                /**< IRQ-line-0 number (MDK)    */
+    uint8_t          used[TIKU_GPIOTE_NCH];/**< 1 = channel armed         */
 } gpiote_ctx_t;
 
-static gpiote_ctx_t s_gpiote20 = { NRF_GPIOTE20_S, 218, { 0 } }; /* P1, P2, P3 */
-static gpiote_ctx_t s_gpiote30 = { NRF_GPIOTE30_S, 268, { 0 } }; /* P0         */
+static gpiote_ctx_t s_gpiote20 = { NRF_GPIOTE20_S, 218, { 0 } }; /* P1-P3 */
+static gpiote_ctx_t s_gpiote30 = { NRF_GPIOTE30_S, 268, { 0 } }; /* P0    */
 
 /**
  * @brief Select the GPIOTE instance that services a given physical port.
  *
  * P0 is in the LP / always-on domain (GPIOTE30); P1/P2/P3 are in the main
- * peripheral domain (GPIOTE20).  P3 exists only on the nRF54LM20A.
+ * peripheral domain (GPIOTE20).  P3 exists only on the nRF54LM20A/B.
  *
  * @param port  Physical port number (0/1/2/3 == P0/P1/P2/P3).
  * @return Pointer to the owning instance context, or NULL for an unknown port.
@@ -161,8 +161,9 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
     uint32_t      pol;
     int           ch;
 
-    /* The GPIO API is 1-based virtual (1=P0, 2=P1, 3=P2), matching
-     * tiku_gpio_arch.c; translate to the physical (0-based) port here. */
+    /* Ports are 1-based virtual, as in tiku_gpio_arch.c; translate to the
+     * physical (0-based) port here.  Virtual port 4 (P3 on the nRF54LM20)
+     * fails this range check, although ctx_for_port() maps P3. */
     if (port < 1u || port > 3u) {
         return TIKU_GPIO_IRQ_ERR_INVALID;
     }

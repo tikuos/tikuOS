@@ -7,9 +7,9 @@
  *
  * tiku_device_nrf54lm20b.h - Nordic nRF54LM20B silicon-level constants.
  *
- * The nRF54LM20A plus the 128 MHz Axon NPU at 0x50056000, IRQn 86, in the MCU
- * power domain.  Every other block, the memory map and the IRQ enum are identical
- * to the A (diff-proven).
+ * The nRF54LM20A plus the 128 MHz Axon NPU at 0x50056000 (IRQn 86) in the MCU
+ * power domain.  Every other block, the memory map and the IRQ enum match the
+ * nRF54LM20A.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -35,26 +35,23 @@
 /* GPIO PORT AVAILABILITY                                                    */
 /*---------------------------------------------------------------------------*/
 
-/*
- * Virtual GPIO port availability flags.
- *
- * Four physical GPIO ports, mapped to virtual 1..4 so the
- * /dev/gpio/{1..4}/{0..N} layout works:
- *   port 1 = P0 (LP domain,   P0.00..P0.09)
- *   port 2 = P1 (PERI domain,  P1.00..P1.31)
- *   port 3 = P2 (MCU domain,   P2.00..P2.10)
- *   port 4 = P3 (PERI domain,  P3.00..P3.12)
- *
- * @note The port-to-base-pointer mapping lives in the GPIO arch layer.
+/**
+ * @brief USB 2.0 high-speed device: a Synopsys DWC2 core behind the Nordic
+ *        wrapper, with its own VBUS regulator.
  */
-/* USB 2.0 high-speed device: a Synopsys DWC2 core behind the Nordic
- * wrapper, with its own VBUS regulator. */
 #define TIKU_DEVICE_HAS_USBHS       1
 
+/**
+ * @brief Virtual GPIO port availability flags.
+ *
+ * Virtual ports 1..4 (/dev/gpio/{1..4}) are P0 (LP domain, P0.00..P0.09), P1
+ * (PERI, P1.00..P1.31), P2 (MCU, P2.00..P2.10) and P3 (PERI, P3.00..P3.12);
+ * tiku_gpio_arch.c maps each to its register block.
+ */
 #define TIKU_DEVICE_HAS_PORT1       1   /* P0 */
 #define TIKU_DEVICE_HAS_PORT2       1   /* P1 */
 #define TIKU_DEVICE_HAS_PORT3       1   /* P2 */
-#define TIKU_DEVICE_HAS_PORT4       1   /* P3 (new vs nRF54L15) */
+#define TIKU_DEVICE_HAS_PORT4       1   /* P3 */
 #define TIKU_DEVICE_HAS_PORT5       0
 #define TIKU_DEVICE_HAS_PORT6       0
 #define TIKU_DEVICE_HAS_PORT7       0
@@ -69,8 +66,8 @@
 /**
  * @brief Crystal oscillator availability and frequency.
  *
- * The DK provides a 32 MHz HFXO (system high-frequency source) and a
- * 32.768 kHz LFXO (feeds LFCLK / GRTC).  Both are reported present.
+ * The DK fits a 32 MHz HFXO (the high-frequency source) and a 32.768 kHz
+ * LFXO (LFCLK, GRTC).
  */
 #define TIKU_DEVICE_HAS_LFXT        1
 #define TIKU_DEVICE_HAS_HFXT        1
@@ -81,11 +78,10 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Clock system type selector flags.
+ * @brief Clock system type flags: no unlock key, Nordic clock system.
  *
- * No MSP430-style unlock key.  TIKU_DEVICE_CS_TYPE_NORDIC selects the nRF54L
- * clock driver in arch/nordic/tiku_cpu_freq_*.c; the core runs at 128 MHz (the
- * PLL FREQ options are CK64M / CK128M, as on the L15, and boot programs CK128M).
+ * The Makefile compiles the Nordic clock driver, tiku_cpu_freq_boot_arch.c,
+ * for every Nordic part; it sets the core to 64 or 128 MHz once at boot.
  */
 #define TIKU_DEVICE_CS_HAS_KEY      0
 #define TIKU_DEVICE_CS_TYPE_NORDIC  1
@@ -98,11 +94,11 @@
 #define TIKU_DEVICE_MAX_STABLE_MHZ  128
 
 /**
- * @brief Core frequency on this DK, in Hz.
+ * @brief Core frequency of a default build, in Hz.
  *
- * The shared nRF54L boot programs OSCILLATORS.PLL.FREQ = CK128M, so the core
- * runs at 128 MHz.  SysTick-based busy-delays use this value; the delay layer
- * additionally reads live CURRENTFREQ, so it stays correct either way.
+ * The boot sets the PLL to TIKU_NORDIC_CPU_MHZ (128 unless overridden) or to
+ * a saved rate.  Delays and tiku_cpu_mclk_hz() read the running rate from
+ * the PLL.
  */
 #define TIKU_DEVICE_BOOT_CPU_HZ     128000000UL
 
@@ -110,48 +106,41 @@
 /* MEMORY SIZES                                                              */
 /*---------------------------------------------------------------------------*/
 
-/** @brief On-chip SRAM size and base address.
+/**
+ * @brief Size of the lower SRAM bank (RAM, 256 KB at 0x20000000).
  *
- * 512 KB physical SRAM in two banks -- RAM (256 KB @ 0x20000000) + RAM2 (256 KB
- * @ 0x20040000).  The LOWER bank is primary: image, .uninit and the stack live
- * there, matching Nordic's nrf_common.ld.  RAM_SIZE reports the primary bank. */
+ * The part has 512 KB in two banks, RAM and RAM2 (at 0x20040000).  The image,
+ * .uninit and the stack live in the lower bank, as in Nordic's nrf_common.ld.
+ */
 #define TIKU_DEVICE_RAM_SIZE        (256UL * 1024UL)
 
-/* App-usable bytes of the PRIMARY bank, which is NOT the bank size: the top
- * 16 KB (0x2003C000..0x2003FFFF) is the FLPR (VPR RISC-V) coprocessor carve,
- * reserved unconditionally so the image layout does not shift with
- * TIKU_FLPR_ENABLE.  The linker's SRAM region is that smaller figure, so memory
- * reports must use this one -- RAM_SIZE above would over-report free SRAM by
- * 16 KB.  Keep in sync with LENGTH(SRAM) in the device .ld. */
+/**
+ * @brief App-usable SRAM: the lower bank less its top 16 KB, the FLPR (VPR
+ *        RISC-V) coprocessor carve at 0x2003C000..0x2003FFFF.
+ *
+ * Every build reserves the carve, and memory reports use this figure.  It
+ * must equal LENGTH(SRAM) in nrf54lm20a.ld.
+ */
 #define TIKU_DEVICE_RAM_USABLE      (240UL * 1024UL)
 #define TIKU_DEVICE_RAM_START       0x20000000UL
 
 /**
- * @brief RAM2: the upper SRAM bank, used for large buffers (the tier arena).
+ * @brief RAM2, the upper SRAM bank: the .ram2 statics, then the SRAM tier.
  *
- * Its own linker region (SRAM2) plus a second SRAM entry in the region table
- * so tier sub-arenas validate.  Named .ram2 statics place first; the tier is
- * carved from the rest.  The top 1 KB is margin, so 255 KB is exposed.
- *
- * @note THE TOP OF THE BANK IS NOT FULLY BACKED on this silicon: a CPU write to
- *       0x2007FF00 bus-faults (measured on the LM20-DK's nRF54LM20B eng sample
- *       -- a boot-time stack at 0x20080000 dies with STKERR, BFAR 0x2007FFF0,
- *       and a 256 B-step probe faults first at 0x2007FF00).  The MDK claims the
- *       full 0x40000.
+ * A linker region of its own (SRAM2) and a second SRAM entry in the region
+ * table.  The top of the bank is not fully backed on the DK's nRF54LM20B (CPU
+ * writes from 0x2007FF00 up bus-fault), so the top 1 KB is left out.
  */
 #define TIKU_DEVICE_RAM2_START      0x20040000UL
-#define TIKU_DEVICE_RAM2_SIZE       0x0003FC00UL   /* 255 KB (top 1 KB reserved) */
+#define TIKU_DEVICE_RAM2_SIZE       0x0003FC00UL   /* = LENGTH(SRAM2), 255 KB */
 
 /**
- * @brief On-chip RRAM range (exposed under the FRAM_* vocabulary).
+ * @brief On-chip RRAM range, under the FRAM_* names the kernel's memory
+ *        reports and the NVM region table use.
  *
- * ~2 MB non-volatile RRAM at 0x0 holds code and the TikuOS persistent / config
- * region.  The FRAM_* names let the kernel memory introspection and the NVM
- * region table share one vocabulary; RRAM is write-in-place behind RRAMC WEN.
- *
- * @note Usable application RRAM is 0x1FD000 (2036 KB); the top 12 KB of the
- *       nominal 2 MB is reserved (MDK NRF_MEMORY_FLASH_SIZE) and bus-faults if
- *       addressed -- the same reserved-tail pattern as the nRF54L15.
+ * 0x1FD000 bytes (2036 KB) at 0x0 hold code and the persistent region; the
+ * top 12 KB of the 2 MB array is reserved (MDK NRF_MEMORY_FLASH_SIZE) and
+ * bus-faults if addressed.  RRAM is written in place behind RRAMC WEN.
  */
 #define TIKU_DEVICE_FRAM_SIZE       0x001FD000UL
 #define TIKU_DEVICE_FRAM_START      0x00000000UL
@@ -161,12 +150,12 @@
 /**
  * @brief Init-table backing region size in bytes.
  *
- * Sized to hold the 4-byte header + 8 init entries; matches the nRF54L15
- * value.
+ * Holds the init table: a 4-byte header and TIKU_INIT_MAX_ENTRIES (8)
+ * entries; tiku_init.c asserts the fit at build time.
  */
 #define TIKU_DEVICE_FRAM_CONFIG_SIZE      576U
 
-/** @brief Application slot parameters within the RRAM region. */
+/** @brief Application slot size and count in RRAM; no code reads them. */
 #define TIKU_DEVICE_FRAM_APP_SLOT_SIZE    4096U
 #define TIKU_DEVICE_FRAM_APP_SLOT_COUNT   4
 
@@ -177,9 +166,9 @@
 /**
  * @brief Memory Protection Unit availability flag.
  *
- * The Cortex-M33 has the ARMv8-M MPU.  On this port the RRAMC WEN gate is
- * the primary NVM write barrier (like MSP430 FRAM); the MPU can additionally
- * enforce RO-by-default on the persistent region (see tiku_mpu_arch.c).
+ * The Cortex-M33 has the ARMv8-M MPU.  The RRAMC WEN gate is this port's
+ * NVM write barrier; tiku_mpu_arch.c programs the MPU for the stack guard
+ * and execute-never SRAM.
  */
 #define TIKU_DEVICE_HAS_MPU         1
 

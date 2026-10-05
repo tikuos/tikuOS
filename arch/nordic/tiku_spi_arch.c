@@ -7,20 +7,20 @@
  *
  * tiku_spi_arch.c - SPI master for nRF54L (SPIM + EasyDMA, blocking poll).
  *
- * The SPIM has no byte FIFO, so every transfer moves through EasyDMA, which can
- * only reach RAM.  Transmit is staged through a bounce buffer so callers may pass
- * .rodata sources; a non-RAM receive destination is rejected rather than faulting.
+ * The SPIM has no byte FIFO: every transfer moves through EasyDMA, which can
+ * only reach RAM.  Transmit data is staged through a RAM bounce buffer, so a
+ * .rodata source works; a non-RAM receive buffer gets TIKU_SPI_ERR_PARAM.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <arch/nordic/tiku_spi_arch.h>        /* prototypes + tiku_spi_config_t + codes */
-#include <arch/nordic/tiku_device_select.h>   /* MDK types, NRF_SPIMxx_S, RAM macros,   */
-                                              /*   board macros + gpio helpers          */
-#include <string.h>                           /* memcpy: transmit bounce staging        */
+#include <arch/nordic/tiku_spi_arch.h>      /* prototypes, config, codes  */
+#include <arch/nordic/tiku_device_select.h> /* MDK, RAM and board macros, */
+                                            /* GPIO helpers               */
+#include <string.h>                         /* memcpy for TX staging      */
 
 /*---------------------------------------------------------------------------*/
-/* Instance and pin selection                                                */
+/* INSTANCE AND PIN SELECTION                                                */
 /*---------------------------------------------------------------------------*/
 
 /*
@@ -30,9 +30,9 @@
  *   - no high-speed silicon workarounds (SPIM00 needs the 54L-57 errata
  *     write and has a CPU-frequency-dependent base clock; SPIM30 sits in
  *     the low-power domain with only a handful of P0 pins),
- *   - errata 54L-55/69 do NOT apply to the nRF54L15 (only to the LM20 /
- *     LS05 / LV10 / LC10 variants -- confirmed in the MDK erratas), so no
- *     magic-register workaround is required here.
+ *   - errata 54L-55/69 do not apply to the nRF54L15, only to the LM20,
+ *     LS05, LV10 and LC10 variants (per the MDK errata header); this driver
+ *     applies no workaround for them.
  * The SERIAL21 interrupt is unused; completion is polled on EVENTS_END.
  * The secure alias (_S, 0x500C7000) matches the rest of this port.
  */
@@ -44,10 +44,10 @@
  * SCK / MOSI(SDO) / MISO(SDI) pins as (port, pin).  These are free P1 pins
  * on the nRF54L15-DK (P1.04/05 = console UART, P1.08/09/13 = buttons,
  * P1.10/14 = LEDs), reachable by the peripheral-domain SERIAL21.  They are
- * a documented default, NOT a hardware-verified Arduino-header mapping --
- * override in the board header once the DK routing is confirmed.  Chip
- * select is intentionally absent: the interface layer / device driver
- * drives CS on a free GPIO around each transaction.
+ * defaults, not checked against the DK's header routing; a board header
+ * overrides them.  SCK and MOSI share P1.11/P1.12 with the I2C defaults.
+ * There is no chip select here: the device driver drives CS on a free GPIO
+ * around each transaction.
  */
 #ifndef TIKU_BOARD_SPI0_SCK_PORT
 #define TIKU_BOARD_SPI0_SCK_PORT    1u
@@ -72,7 +72,7 @@
 #define TIKU_SPIM                   TIKU_BOARD_SPI0_SPIM
 
 /*---------------------------------------------------------------------------*/
-/* Register field constants (from the MDK nrf54l15_types.h)                  */
+/* REGISTER FIELD CONSTANTS (MDK nrf54l15_types.h)                           */
 /*---------------------------------------------------------------------------*/
 
 /** @brief PSEL word: bits[4:0]=pin, bits[7:5]=port, bit31=0 -> connected. */
@@ -82,18 +82,18 @@
 /** @brief PSEL word that disconnects the pin (CONNECT bit set). */
 #define TIKU_SPI_PSEL_DISCONNECTED  0xFFFFFFFFUL
 
-/** @brief ENABLE.ENABLE enumerations (SPIM uses 0x7, unlike UARTE's 0x8). */
-#define TIKU_SPIM_ENABLE_ENABLED    0x7UL
-#define TIKU_SPIM_ENABLE_DISABLED   0x0UL
+/* ENABLE.ENABLE values; the SPIM's is 0x7, the UARTE's 0x8. */
+#define TIKU_SPIM_ENABLE_ENABLED    0x7UL        /**< SPIM enabled          */
+#define TIKU_SPIM_ENABLE_DISABLED   0x0UL        /**< SPIM disabled         */
 
-/** @brief CONFIG bit fields: ORDER (bit0), CPHA (bit1), CPOL (bit2). */
+/* CONFIG bit fields: ORDER (bit0), CPHA (bit1), CPOL (bit2). */
 #define TIKU_SPIM_CONFIG_LSBFIRST   (1UL << 0)   /**< ORDER = LsbFirst      */
 #define TIKU_SPIM_CONFIG_CPHA       (1UL << 1)   /**< CPHA  = Trailing      */
 #define TIKU_SPIM_CONFIG_CPOL       (1UL << 2)   /**< CPOL  = ActiveLow     */
 
-/** @brief PRESCALER.DIVISOR range; SCK = 16 MHz / DIVISOR, must be even. */
-#define TIKU_SPIM_DIV_MIN           2u
-#define TIKU_SPIM_DIV_MAX           126u
+/* PRESCALER.DIVISOR range; SCK = 16 MHz / DIVISOR, which must be even. */
+#define TIKU_SPIM_DIV_MIN           2u           /**< 8 MHz                 */
+#define TIKU_SPIM_DIV_MAX           126u         /**< ~127 kHz              */
 #define TIKU_SPIM_DIV_DEFAULT       16u          /**< 16 MHz / 16 = 1 MHz   */
 
 /** @brief Over-read char clocked out while receiving (read filler). */
@@ -102,23 +102,22 @@
 /**
  * @brief Poll bound for one DMA burst.
  *
- * Every hardware transaction moves at most TIKU_SPIM_CHUNK (64) bytes, whose
- * worst case is ~4 ms at the slowest SCK (~127 kHz).  At 128 MHz this ~2 M
- * iteration spin is ~60 ms: comfortably above that, still a hard ceiling.
+ * A burst moves at most TIKU_SPIM_CHUNK (64) bytes, about 4 ms at the
+ * slowest SCK (~127 kHz); 2 M polls take about 60 ms at 128 MHz.
  */
 #define TIKU_SPIM_SPIN_LIMIT        2000000UL
 
 /**
  * @brief Transmit bounce-chunk size (bytes).
  *
- * Bulk transmit is staged here so RRAM/flash-resident source buffers are
- * DMA-able; kept small to bound both the static RAM cost and the per-burst
- * transfer time relative to the poll ceiling above.
+ * Transmit data is staged in chunks of this size, so an RRAM source is
+ * DMA-able.  The size bounds the static RAM cost and each burst's time
+ * against the poll bound above.
  */
 #define TIKU_SPIM_CHUNK             64u
 
 /*---------------------------------------------------------------------------*/
-/* EasyDMA staging (must be RAM, word-aligned)                               */
+/* EASYDMA STAGING (RAM, WORD-ALIGNED)                                       */
 /*---------------------------------------------------------------------------*/
 
 /** @brief Transmit bounce buffer; also a valid RAM pointer for 0-length TX. */
@@ -131,15 +130,14 @@ static uint8_t spim_rx1 __attribute__((aligned(4)));
 static uint8_t spim_initialised;
 
 /*---------------------------------------------------------------------------*/
-/* Helpers                                                                   */
+/* HELPERS                                                                   */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Test whether an address is EasyDMA-reachable RAM.
  *
- * The nRF54L SPIM can only DMA to and from on-chip SRAM, so a receive
- * destination outside that window -- an RRAM or flash pointer -- is rejected
- * rather than allowed to raise a bus error.
+ * The SPIM DMAs only to and from on-chip SRAM: a receive buffer elsewhere
+ * (RRAM, flash) raises a bus error.  Only the TIKU_DEVICE_RAM window counts.
  *
  * @param p  Address to test.
  * @return 1 if @p p lies within on-chip RAM, 0 otherwise.
@@ -195,7 +193,7 @@ static int spim_run(uint32_t txp, uint32_t txlen,
 }
 
 /*---------------------------------------------------------------------------*/
-/* Public API                                                                */
+/* PUBLIC API                                                                */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -205,8 +203,7 @@ static int spim_run(uint32_t txp, uint32_t txlen,
  * programs CONFIG (bit order plus CPOL/CPHA), PRESCALER (SCK = 16 MHz /
  * DIVISOR) and the over-read character, then enables the peripheral.
  *
- * @note Unlike the PL022 backend the nRF54L SPIM supports LSB-first natively
- *       via CONFIG.ORDER, so TIKU_SPI_LSB_FIRST is honoured, not rejected.
+ * @note TIKU_SPI_LSB_FIRST is supported, through CONFIG.ORDER.
  * @param config  Bus parameters (mode, bit order, prescaler/divisor).
  * @return TIKU_SPI_OK on success, TIKU_SPI_ERR_PARAM on NULL config or an
  *         out-of-range mode.
@@ -298,13 +295,12 @@ void tiku_spi_arch_close(void)
 /**
  * @brief Full-duplex single-byte transfer.
  *
- * Clocks out @p tx_byte (via a 1-byte RAM bounce, EasyDMA cannot reach a
- * register/stack temporary reliably as a "buffer") and returns the byte
+ * Clocks out @p tx_byte from the RAM bounce buffer and returns the byte
  * shifted in on MISO during the same clocks.
  *
  * @param tx_byte  Byte to transmit.
  * @return Received byte, or 0xFF if not initialised or on a poll timeout
- *         (the same idle-high level a floating MISO reads back).
+ *         (the level of an idle, pulled-up MISO).
  */
 uint8_t tiku_spi_arch_transfer(uint8_t tx_byte)
 {
@@ -408,8 +404,8 @@ int tiku_spi_arch_read(uint8_t *buf, uint16_t len)
  * transmit slice stages through the RAM bounce buffer, so any source region
  * works, and the receive slice lands directly in the caller's buffer.
  *
- * @note Chip select is held by the caller across the whole call, so the brief
- *       clock gaps between chunks are transparent to the slave.
+ * @note The caller holds chip select across the whole call; SCK pauses
+ *       briefly between chunks.
  * @param tx_buf  Source bytes (non-NULL when @p len > 0).
  * @param rx_buf  Destination buffer (non-NULL, DMA-reachable RAM, when
  *                @p len > 0).

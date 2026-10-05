@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_timer_arch.c - nRF54L system tick at 128 Hz (GRTC, tickless-capable).
+ * tiku_timer_arch.c - nRF54L system tick (GRTC, tickless-capable; TIMER10).
  *
- * The GRTC's 1 MHz SYSCOUNTER already runs in the always-on domain, so the tick
- * survives deep sleep and tickless idle can stretch to the next deadline.  1 MHz /
- * 128 is fractional, so accounting anchors in half-counts: 15625 per tick, exactly.
+ * The GRTC's 1 MHz SYSCOUNTER runs in the always-on domain, so the tick
+ * survives deep sleep and tickless idle can stretch to the next deadline.
+ * 1 MHz / 128 is fractional; accounting uses half-counts, 15625 per tick.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,8 +19,8 @@
 #include <arch/nordic/tiku_nordic_core.h>
 #include <arch/nordic/tiku_cpu_common.h>
 #include <kernel/scheduler/tiku_sched.h>
-#include <kernel/timers/tiku_clock.h>   /* tiku_clock_time_t + tickless decls  */
-#include <kernel/cpu/tiku_hang.h>       /* tiku_hang_tick (per-tick wedge check)*/
+#include <kernel/timers/tiku_clock.h>   /* tiku_clock_time_t, tickless decls */
+#include <kernel/cpu/tiku_hang.h>       /* tiku_hang_tick, per-tick check    */
 #include <stdint.h>
 
 /* Tick source selection: GRTC by default, TIMER10 on request. */
@@ -37,20 +37,20 @@ static volatile unsigned long          g_seconds = 0UL;
 
 #if TIKU_NORDIC_TICK_GRTC
 /*===========================================================================*/
-/* GRTC tick (default) -- tickless-capable                                   */
+/* GRTC TICK (DEFAULT), TICKLESS-CAPABLE                                     */
 /*===========================================================================*/
 
 #define TIKU_GRTC             NRF_GRTC_S
-#define TIKU_GRTC_IRQN        226            /* GRTC_0_IRQn (MDK enum)         */
-#define TIKU_GRTC_TICK_CC     0              /* compare channel for the tick   */
-#define TIKU_GRTC_CAP_TICK    2              /* capture channel for accounting */
-#define TIKU_GRTC_CAP_FINE    1              /* capture channel for fine()     */
-#define TIKU_GRTC_HZ          1000000UL      /* SYSCOUNTER counts at 1 MHz     */
+#define TIKU_GRTC_IRQN        226            /* GRTC_0_IRQn (MDK enum)        */
+#define TIKU_GRTC_TICK_CC     0              /* compare channel for the tick  */
+#define TIKU_GRTC_CAP_TICK    2              /* capture channel, accounting   */
+#define TIKU_GRTC_CAP_FINE    1              /* capture channel for fine()    */
+#define TIKU_GRTC_HZ          1000000UL      /* SYSCOUNTER counts at 1 MHz    */
 /* Half-counts per tick: 2 * 1 MHz / 128 = 15625 (integer, exact 128 Hz). */
 #define TIKU_GRTC_STEP_HALF   (2UL * TIKU_GRTC_HZ / TIKU_CLOCK_ARCH_SECOND)
 #define TIKU_GRTC_CCEN_ENABLE 1UL
 #define TIKU_GRTC_MODE_AUTOEN   (1UL << 0)   /* active while a CPU is awake   */
-#define TIKU_GRTC_MODE_SYSCNTEN (1UL << 1)   /* MODE.SYSCOUNTEREN              */
+#define TIKU_GRTC_MODE_SYSCNTEN (1UL << 1)   /* MODE.SYSCOUNTEREN             */
 
 /** @brief SYSCOUNTER count (x2) at the last accounted tick boundary. */
 static volatile uint64_t s_anchor_half;
@@ -86,12 +86,12 @@ static uint32_t grtc_account(void)
     tiku_clock_arch_time_t old;
 
     if ((int64_t)elapsed < (int64_t)TIKU_GRTC_STEP_HALF) {
-        return 0u;                                  /* less than one tick      */
+        return 0u;                                  /* less than one tick     */
     }
     n   = (uint32_t)(elapsed / TIKU_GRTC_STEP_HALF);
     old = g_ticks;
     g_ticks += (tiku_clock_arch_time_t)n;
-    /* Add seconds crossed (not a recompute -- preserves any set_seconds base). */
+    /* Add the seconds crossed; a recompute would drop a set_seconds base. */
     g_seconds += (unsigned long)((g_ticks / TIKU_CLOCK_ARCH_SECOND) -
                                  (old / TIKU_CLOCK_ARCH_SECOND));
     s_anchor_half += (uint64_t)n * TIKU_GRTC_STEP_HALF;
@@ -122,7 +122,7 @@ void tiku_clock_arch_init(void)
      * without AUTOEN, accounting reads could therefore return the previous
      * capture even during an awake busy-delay.  AUTOEN still lets GRTC use its
      * LF-timer sleep path while all CPUs are in WFI, preserving tickless power.
-     * The boot ROM normally enables SYSCOUNTER; start it if this boot did not. */
+     * The boot ROM normally enables SYSCOUNTER; it is started here if not. */
     old_mode = TIKU_GRTC->MODE;
     TIKU_GRTC->MODE = old_mode | TIKU_GRTC_MODE_AUTOEN |
                       TIKU_GRTC_MODE_SYSCNTEN;
@@ -175,44 +175,42 @@ unsigned short tiku_clock_arch_fine(void)
     uint64_t anchor;
     uint32_t primask;
 
-    /* s_anchor_half is a 64-bit value updated by the GRTC ISR; snapshot it (and
-     * the matching syscounter) with interrupts masked so the two LDRs of the
-     * 64-bit load cannot tear against a mid-read ISR update.  Raw PRIMASK
-     * save/disable/restore -- CMSIS intrinsics aren't included here, and this
-     * matches the crt's inline-asm idiom. */
+    /* s_anchor_half is a 64-bit value updated by the GRTC ISR; snapshot it
+     * (and the matching syscounter) with interrupts masked, so the two LDRs
+     * of the 64-bit load cannot tear against a mid-read ISR update. */
     __asm__ volatile ("mrs %0, primask" : "=r" (primask));
     __asm__ volatile ("cpsid i" ::: "memory");
     anchor = s_anchor_half;
     now    = (uint32_t)grtc_syscounter(TIKU_GRTC_CAP_FINE);
     __asm__ volatile ("msr primask, %0" :: "r" (primask) : "memory");
 
-    base = (uint32_t)(anchor >> 1);                    /* current boundary     */
-    pos  = now - base;                                 /* counts into the tick */
+    base = (uint32_t)(anchor >> 1);                    /* current boundary    */
+    pos  = now - base;                                /* counts into the tick */
     span = (uint32_t)(TIKU_GRTC_STEP_HALF >> 1) + 1u;  /* ~7813 */
 
     if (pos >= span) {
-        pos = span - 1u;                               /* clamp (best-effort)  */
+        pos = span - 1u;                               /* clamp (best-effort) */
     }
     return (unsigned short)((pos * 0xFFFFUL) / span);
 }
 
 /*---------------------------------------------------------------------------*/
-/* Tickless backend (strong overrides of the weak defaults in tiku_clock.c)  */
-/* Disable with -DTIKU_NORDIC_NO_TICKLESS to fall back to per-tick wakeups.   */
+/* TICKLESS BACKEND                                                          */
 /*---------------------------------------------------------------------------*/
+/* Strong overrides of the weak defaults in tiku_clock.c.  Building with
+ * -DTIKU_NORDIC_NO_TICKLESS leaves the defaults: one wake per tick. */
 #if !defined(TIKU_NORDIC_NO_TICKLESS)
 
 /**
- * @brief Stretch the tick compare to a deadline @p ticks_ahead ticks away.
+ * @brief Stretch the tick compare to a deadline @p ticks_ahead ticks away;
+ *        returns 1.
  *
- * Called by the scheduler with IRQs masked before an idle sleep when the
- * earliest armed timer is more than one tick out.  Points CC0 at the deadline
- * boundary so the CPU sleeps through the intervening ticks.
+ * Points CC0 at that boundary past the anchor, so the CPU sleeps through the
+ * ticks in between.  g_ticks is not advanced here (the anchor matches it);
+ * tiku_clock_tickless_end() credits the elapsed ticks.
  *
- * @note Does NOT advance g_ticks here: @p ticks_ahead is relative to the
- *       current, possibly one-tick-stale g_ticks, and the anchor is tied to it,
- *       so anchor + ticks_ahead is the right absolute deadline regardless.  The
- *       wake path credits the elapsed ticks.
+ * @note Called with IRQs masked, before an idle sleep, when the earliest
+ *       armed timer is more than one tick out.
  */
 int tiku_clock_tickless_begin(tiku_clock_time_t ticks_ahead)
 {
@@ -229,14 +227,13 @@ int tiku_clock_tickless_begin(tiku_clock_time_t ticks_ahead)
 }
 
 /**
- * @brief Close a stretch window: credit elapsed ticks, restore the cadence.
+ * @brief Close a stretch window: credit the elapsed ticks and re-arm CC0 at
+ *        the next boundary.
  *
- * Runs with IRQs still masked.  On a deadline wake the stretched compare is
- * pending and grtc_account() here has already credited the ticks; re-arming to
- * the immediate boundary cancels the far compare.
+ * The re-arm cancels the far compare, so an early non-tick wake leaves no
+ * stale deadline armed.  Does nothing when no window is open.
  *
- * @note That cancellation is what stops an early non-tick wake from later
- *       firing a stale deadline.
+ * @note Called with IRQs masked.
  */
 void tiku_clock_tickless_end(void)
 {
@@ -254,7 +251,7 @@ void tiku_clock_tickless_end(void)
     }
 }
 
-/** @brief Tickless backend present. */
+/** @brief Return 1: the tickless backend is present. */
 int tiku_clock_tickless_available(void)
 {
     return 1;
@@ -264,13 +261,14 @@ int tiku_clock_tickless_available(void)
 
 #else /* !TIKU_NORDIC_TICK_GRTC */
 /*===========================================================================*/
-/* TIMER10 tick (fallback: -DTIKU_NORDIC_TICK_TIMER10, no tickless backend)  */
+/* TIMER10 TICK (-DTIKU_NORDIC_TICK_TIMER10, NO TICKLESS BACKEND)            */
 /*===========================================================================*/
 
 #define TIKU_TIMER10             NRF_TIMER10_S
 #define TIKU_TIMER10_IRQN        133   /* TIMER10_IRQn (MDK enum) */
 #define TIKU_TIMER_HZ            16000000UL
-#define TIKU_TIMER_INTERVAL      (TIKU_TIMER_HZ / TIKU_CLOCK_ARCH_SECOND)  /* 125000 */
+/* Counts per tick: 16 MHz / 128 Hz = 125000. */
+#define TIKU_TIMER_INTERVAL      (TIKU_TIMER_HZ / TIKU_CLOCK_ARCH_SECOND)
 #define TIMER_MODE_TIMER         0UL
 #define TIMER_BITMODE_32BIT      3UL
 #define TIMER_PRESCALER_16MHZ    0UL
@@ -332,7 +330,7 @@ unsigned short tiku_clock_arch_fine(void)
 #endif /* TIKU_NORDIC_TICK_GRTC */
 
 /*===========================================================================*/
-/* Shared queries (source-independent)                                       */
+/* SHARED QUERIES (SOURCE-INDEPENDENT)                                       */
 /*===========================================================================*/
 
 tiku_clock_arch_time_t tiku_clock_arch_time(void)
@@ -352,11 +350,8 @@ void tiku_clock_arch_set_seconds(unsigned long sec)
 
 void tiku_clock_arch_wait(tiku_clock_arch_time_t t)
 {
-    /* DURATION semantics (the kernel contract, same as msp430/rp2350/ambiq):
-     * spin until the tick counter has advanced by @p t from now.  Wraparound-
-     * safe.  (An earlier version treated @p t as an absolute deadline, so any
-     * wait shorter than the current uptime returned instantly -- breaking
-     * every tick-paced test/caller once the system had run for a while.) */
+    /* @p t is a duration, as the kernel contract requires: spin until the
+     * tick counter has advanced by @p t from now.  Wraparound-safe. */
     tiku_clock_arch_time_t target = g_ticks + t;
 
     while ((long)(target - g_ticks) > 0) {
@@ -376,11 +371,8 @@ int tiku_clock_arch_fine_max(void)
 
 unsigned char tiku_clock_arch_fault(void)
 {
-    /* The tick source (GRTC SYSCOUNTER / TIMER10) has no fallback path on
-     * this part -- there is no LFXT->VLO style substitution that would make
-     * timers run at a different wall-clock rate, so there is never a clock-
-     * source fault to report.  (HFXO/PLL bring-up faults affect the UART's
-     * reference accuracy, not the tick; they are surfaced separately via
-     * the /sys clock view.) */
+    /* Always 0: the tick source (GRTC SYSCOUNTER or TIMER10) has no fallback
+     * clock that would change its rate.  HFXO/PLL faults affect the UART's
+     * reference, not the tick, and the /sys clock view reports them. */
     return 0;
 }

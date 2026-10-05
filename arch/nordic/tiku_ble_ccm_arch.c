@@ -7,9 +7,9 @@
  *
  * tiku_ble_ccm_arch.c - CCM00 hardware AES-CCM for the BLE link layer.
  *
- * KEY and NONCE take the byte-REVERSED value relative to the wire, and the in/out
- * job lists are TYPED -- ALEN, MLEN, ADATA, MDATA, NULL-terminated.  Plain-data
- * jobs leave the engine waiting forever.  Job lists and buffers must be word-aligned.
+ * KEY and NONCE take the wire value byte-reversed, and the in/out job lists
+ * are typed: ALEN, MLEN, ADATA, MDATA, NULL-terminated.  Plain-data jobs
+ * leave the engine waiting forever.  Job lists and buffers are word-aligned.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -34,8 +34,8 @@
 #define CCM_ATTR_ADATA  13u
 #define CCM_ATTR_MDATA  14u
 
-/* Static, word-aligned working set: job lists + the small typed fields.
- * One crypt at a time (single-threaded LL use). */
+/* Static, word-aligned working set: job lists and the small typed fields.
+ * One crypt at a time: the driver is not reentrant. */
 static uint32_t ccm_injob[10] __attribute__((aligned(4)));
 static uint32_t ccm_outjob[10] __attribute__((aligned(4)));
 static uint16_t ccm_alen_in  __attribute__((aligned(4)));
@@ -45,8 +45,8 @@ static uint16_t ccm_mlen_out __attribute__((aligned(4)));
 static uint8_t  ccm_aad_in   __attribute__((aligned(4)));
 static uint8_t  ccm_aad_out  __attribute__((aligned(4)));
 
-/* Byte-reverse @p n bytes of @p src into the low bytes of the 16-byte
- * @p val register image (top bytes zero), then it is memcpy-ready. */
+/** @brief Write @p n bytes of @p src, byte-reversed and zero-padded to 16
+ *         bytes, into the four words of the register image @p val. */
 static void ccm_rev_load(volatile uint32_t val[4], const uint8_t *src,
                          uint8_t n)
 {
@@ -139,14 +139,13 @@ int tiku_ble_ccm_arch_crypt(int decrypt, const uint8_t sk[16],
 
 int tiku_ble_ccm_arch_selftest(void)
 {
-    /* Core-spec v5.4 Vol 6 Part C sample session: SK + IV as the datasheet's
-     * own worked register example, so the byte-order recipe is cross-checked
-     * against both the spec AND the two-board-proven software CCM. */
+    /* Core spec v5.4 Vol 6 Part C sample session key and IV, the same
+     * values as the datasheet's worked register example. */
     static const uint8_t sk[16] = {
         0x99u, 0xADu, 0x1Bu, 0x52u, 0x26u, 0xA3u, 0x7Eu, 0x3Eu,
         0x05u, 0x8Eu, 0x3Bu, 0x8Eu, 0x27u, 0xC2u, 0xC6u, 0x66u
     };
-    static const uint8_t iv[8] = {                /* IVm||IVs, LSO (E3c)     */
+    static const uint8_t iv[8] = {                /* IVm||IVs, LSO first     */
         0x24u, 0xABu, 0xDCu, 0xBAu, 0xBEu, 0xBAu, 0xAFu, 0xDEu
     };
     static const uint8_t pt[17] = {
@@ -160,7 +159,7 @@ int tiku_ble_ccm_arch_selftest(void)
     tiku_ble_enc_nonce(nonce, 1u, 1u, iv);        /* ctr=1 dir=1 (datasheet) */
     aad_masked = (uint8_t)(hdr & 0xE3u);          /* NESN/SN/MD masked       */
 
-    /* Software oracle: ciphertext + MIC via the E3c CRACEN path. */
+    /* Software reference: ciphertext + MIC from the CRACEN CCM* path. */
     if (tiku_crypto_arch_aes_ccm_star(0, sk, 16u, nonce, &aad_masked, 1u,
                                       pt, sizeof(pt), 4u, sw_ct,
                                       sw_mic) != 0) {

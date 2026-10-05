@@ -5,10 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_usbhs_arch.h - nRF54LM20 USB high-speed device: bring-up and recon.
+ * tiku_usbhs_arch.h - nRF54LM20 USB high-speed device.
  *
- * A Synopsys DWC2 core behind a Nordic wrapper with its own VBUS regulator.
- * This layer powers the three and reports what the core says about itself.
+ * A Synopsys DWC2 core behind a Nordic wrapper with its own VBUS regulator:
+ * bring-up and register report (tiku_usbhs_arch.c), device mode and CDC-ACM
+ * (tiku_usbhs_dev.c), or mass storage instead (tiku_usbhs_msc.c).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -30,17 +31,17 @@ typedef struct {
     uint32_t pll_run;       /**< the system PLL running                */
     uint32_t pclk24m;       /**< PCLK24M requested: the core's clock   */
     uint32_t snpsid;        /**< GSNPSID: the Synopsys core release    */
-    uint32_t hwcfg1;        /**< GHWCFG1..4: what this core was built  */
-    uint32_t hwcfg2;        /**<   with -- DMA architecture, endpoint  */
-    uint32_t hwcfg3;        /**<   count, FIFO depth                   */
-    uint32_t hwcfg4;
+    uint32_t hwcfg1;        /**< GHWCFG1: endpoint directions          */
+    uint32_t hwcfg2;        /**< GHWCFG2: DMA architecture, endpoints  */
+    uint32_t hwcfg3;        /**< GHWCFG3: data FIFO depth              */
+    uint32_t hwcfg4;        /**< GHWCFG4: PHY width, IN endpoints      */
     uint32_t gintsts;       /**< live interrupt status                 */
-    uint32_t grstctl;
-    uint32_t gahbcfg;
-    uint32_t gusbcfg;
-    uint32_t dcfg;
+    uint32_t grstctl;       /**< GRSTCTL: soft reset, AHB idle         */
+    uint32_t gahbcfg;       /**< GAHBCFG: DMA, global interrupt mask   */
+    uint32_t gusbcfg;       /**< GUSBCFG: PHY width, turnaround, mode  */
+    uint32_t dcfg;          /**< DCFG: device speed and address        */
     uint32_t dsts;          /**< DSTS: enumerated speed, suspend       */
-    uint32_t dctl;
+    uint32_t dctl;          /**< DCTL: soft disconnect, global NAKs    */
 } tiku_nordic_usbhs_regs_t;
 
 /**
@@ -62,7 +63,7 @@ int tiku_nordic_usbhs_vbus_present(void);
  * @brief Power the PHY and the core, start the block and soft-reset the
  *        core, leaving it idle with its interrupt armed.
  *
- * @param note  called with each stage's name BEFORE that stage acts, or
+ * @param note  called with each stage's name before that stage acts, or
  *              NULL.  A core register read against an unclocked core stalls
  *              the bus with no fault to catch, so the last name reported is
  *              the step that did not return.
@@ -71,14 +72,13 @@ int tiku_nordic_usbhs_vbus_present(void);
 int tiku_nordic_usbhs_up(void (*note)(const char *stage));
 
 /**
- * @brief Enable and start the block, wait @p settles times, and touch no
- *        core register: this cannot stall, so it is the safe way to ask
- *        whether the wrapper and PHY came up at all.
+ * @brief Enable and start the block and wait @p settles settle delays,
+ *        touching no core register, so it cannot stall the bus.
  */
 void tiku_nordic_usbhs_live(uint32_t settles);
 
 /**
- * @brief One bring-up variant, for bisecting what actually clocks the core.
+ * @brief One bring-up variant, for bisecting what clocks the core.
  *
  * @param enable      value written to the wrapper ENABLE (1 core, 2 PHY).
  * @param start_first non-zero to trigger START before ENABLE, not after.
@@ -120,7 +120,8 @@ int tiku_nordic_usbhs_dev_start(void);
 /**
  * @brief As tiku_nordic_usbhs_dev_start(), choosing the PHY's data width
  *        and turnaround time: @p phyif16 below zero keeps the reset value,
- *        @p trdtim above 15 keeps it.
+ *        @p trdtim above 15 keeps it.  @p devspd 0 negotiates high speed,
+ *        1 forces full speed.
  */
 int tiku_nordic_usbhs_dev_start_cfg(int phyif16, uint32_t trdtim,
                                     uint32_t devspd);
@@ -156,13 +157,14 @@ void tiku_nordic_usbhs_dev_cdc_out_resume(void);
 /** @brief Configured by the host: the bulk endpoints are live. */
 uint8_t tiku_nordic_usbhs_dev_cdc_configured(void);
 
-/** @brief Configured by the host AND a terminal holds DTR: the port is open. */
+/** @brief Configured by the host and a terminal holds DTR: the port is open. */
 uint8_t tiku_nordic_usbhs_dev_cdc_open(void);
 
 /**
- * @brief Send one packet (at most 64 bytes) on the bulk IN endpoint.
- * @return 0 when taken, -1 while the previous one is still on the wire or
- *         the device is not configured.  Completion arrives on_tx_done.
+ * @brief Send one packet of 1..tiku_nordic_usbhs_dev_cdc_mps() bytes on the
+ *        bulk IN endpoint; completion calls on_tx_done.
+ * @return 0 when taken, -1 while the previous one is still on the wire, when
+ *         the device is not configured, or for a bad length.
  */
 int tiku_nordic_usbhs_dev_cdc_send(const uint8_t *data, uint32_t len);
 
@@ -179,16 +181,15 @@ void tiku_nordic_usbhs_dev_stats(uint32_t *setup, uint32_t *reset,
                                  uint32_t *enum_done, uint32_t *speed,
                                  uint8_t *address, uint8_t *configured);
 
-/** @brief The last control request seen and what the IN endpoint did with
- *         its answer: for telling a request that never arrived from one
- *         whose data never left. */
+/** @brief The last control request; EP0 IN transfers armed and completed
+ *         and EP0 OUT completions; DIEPTSIZ0/DIEPCTL0 at the last arming
+ *         and the last DIEPINT0. */
 void tiku_nordic_usbhs_dev_trace(uint8_t *setup8, uint32_t *tx,
                                  uint32_t *in_done, uint32_t *out_done,
                                  uint32_t *tsiz, uint32_t *ctl, uint32_t *iint);
 
-/** @brief Where the control buffer is, what it held when a transfer was
- *         armed, and whether the core's counter drained: for telling bad
- *         data from data the core never fetched. */
+/** @brief The EP0 IN buffer address, DIEPTSIZ0 after the last completion,
+ *         and the length and first 8 bytes of the last armed answer. */
 void tiku_nordic_usbhs_dev_dma(uint32_t *addr, uint32_t *tsiz_after,
                                uint32_t *armed_len, uint8_t *armed8);
 
@@ -198,7 +199,7 @@ void tiku_nordic_usbhs_dev_log(uint8_t index, uint8_t *req8, uint16_t *ans);
 
 
 /*---------------------------------------------------------------------------*/
-/* MASS STORAGE (a second face for the core; its own build)                  */
+/* MASS STORAGE (tiku_usbhs_msc.c, BUILT INSTEAD OF THE CDC CONSOLE)         */
 /*---------------------------------------------------------------------------*/
 
 /** @brief Present the SCSI disk: device mode, endpoints, pull-up.  0 on ok. */
@@ -207,8 +208,8 @@ int tiku_nordic_usbhs_msc_start(void);
 /** @brief Drop the pull-up and stop mass storage. */
 void tiku_nordic_usbhs_msc_stop(void);
 
-/** @brief Copy up to @p n bytes of block @p lba from the disk; returns the
- *         count, so a host write can be confirmed on the board. */
+/** @brief Copy up to @p n bytes (at most one block) of block @p lba from
+ *         the disk; returns the count, 0 for a block past the disk. */
 uint32_t tiku_nordic_usbhs_msc_peek(uint32_t lba, uint8_t *dst, uint32_t n);
 
 /** @brief Command/read/write/bad/interrupt counts and the configured value. */

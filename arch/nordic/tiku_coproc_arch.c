@@ -18,7 +18,7 @@
 #include "tiku_flpr_arch.h"
 #include "flpr/tiku_flpr_ipc.h"
 
-/* The published capacity is a -D, so this is what stops it drifting from the
+/* TIKU_COPROC_MSG_CAP comes from the Makefile (-D); it must equal the
  * mailbox it describes. */
 _Static_assert(TIKU_COPROC_MSG_CAP == TIKU_FLPR_MSG_CAP,
                "coproc: the published cap must match the mailbox");
@@ -28,9 +28,9 @@ static uint32_t coproc_seen_seq;
 
 uint32_t tiku_coproc_flags(void)
 {
-    /* Both are hardware facts: the VPR cannot be returned to power gating
-     * and CPURUN re-set resumes at the current PC, and the payload is its
-     * own RISC-V link the launch copies into the SRAM carve. */
+    /* ONESHOT: the VPR cannot return to power gating, and re-setting CPURUN
+     * resumes at the current PC.  OWN_IMAGE: the payload is a separate
+     * RISC-V link that the launch copies into the SRAM carve. */
     return TIKU_COPROC_F_ONESHOT | TIKU_COPROC_F_OWN_IMAGE;
 }
 
@@ -41,8 +41,8 @@ tiku_coproc_state_t tiku_coproc_state(void)
     if (m == 0u) {
         return TIKU_COPROC_STOPPED;         /* never launched this power-on */
     }
-    /* The magic first: a faulted payload is parked in its trap handler, and
-     * this read is what notices it. */
+    /* A faulted payload parks in its trap handler with MAGIC_FAULT in the
+     * magic word. */
     if (m == TIKU_FLPR_MAGIC_FAULT) {
         return TIKU_COPROC_FAULTED;
     }
@@ -56,8 +56,9 @@ tiku_coproc_state_t tiku_coproc_state(void)
 int tiku_coproc_start(void)
 {
     if (tiku_flpr_arch_start() != 0) {
-        /* One code for both refusals: an absent or oversize image before
-         * the first launch, a core that never came back after it. */
+        /* Before the first launch the refusal is an absent or oversized
+         * image (ERR_IMAGE); after it, a faulted core that did not come
+         * back (ERR_STATE). */
         return (tiku_flpr_arch_magic() == 0u) ? TIKU_COPROC_ERR_IMAGE
                                               : TIKU_COPROC_ERR_STATE;
     }
@@ -69,13 +70,17 @@ int tiku_coproc_stop(void)
 {
     tiku_flpr_arch_stop();
 
-    /* The park is inferred from heartbeat stasis, so a core that never
-     * settled is the timeout this contract promises to report. */
+    /* The contract infers the park from heartbeat stasis: a core that is
+     * still alive after the park request is reported as ERR_TIMEOUT.
+     * tiku_flpr_arch_alive() tests only the magic word, which a parked
+     * payload keeps, so a successful park also returns ERR_TIMEOUT here. */
     return tiku_flpr_arch_alive() ? TIKU_COPROC_ERR_TIMEOUT : TIKU_COPROC_OK;
 }
 
 int tiku_coproc_alive(void)
 {
+    /* The contract asks for a published magic and an advancing heartbeat;
+     * this tests the magic only, so a parked or wedged payload reads 1. */
     return tiku_flpr_arch_alive();
 }
 
@@ -105,10 +110,8 @@ int tiku_coproc_poll(void)
 {
     uint32_t seq;
 
-    /* No doorbell-take on this backend: arch_poll() drains the VEVIF
-     * pending bit and refreshes the shared view, and the sequence is the
-     * authority for "new" -- the same rule the RA8P1 backend applies after
-     * its bell. */
+    /* tiku_flpr_arch_poll() captures a new reply as the doorbell ISR would;
+     * the reply sequence decides whether there is a new one. */
     tiku_flpr_arch_poll();
     seq = tiku_flpr_arch_reply_seq();
     if (seq == coproc_seen_seq) {

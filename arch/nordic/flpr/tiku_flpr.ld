@@ -1,15 +1,24 @@
 /*
- * Tiku Operating System v0.05 -- FLPR (VPR RISC-V) linker script, nRF54L15.
- *
- * The image is fully position-fixed in the SRAM carve (VMA == LMA == the
- * carve base): the Cortex-M33 loader memcpys the whole binary there, so
- * there is no separate load region and no .data LMA.  The top 1 KB of the
- * carve is the shared IPC page (tiku_flpr_ipc.h) and the stack grows down
- * from just below it.  Keep the geometry in sync with TIKU_FLPR_RAM_* in
- * tiku_flpr_ipc.h and the reserve in the app-core nrf54l15.ld.
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_flpr.ld - FLPR (VPR RISC-V) linker script for every nRF54L part.
+ *
+ * Links the coprocessor image at the base of its 16 KB SRAM carve.  The M33
+ * loader copies the whole binary there, so VMA == LMA and .data has no load
+ * copy.
+ *
  * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
+ * The top 1 KB of the carve is the shared IPC page (tiku_flpr_ipc.h) and the
+ * stack grows down from just below it.  The geometry must match
+ * TIKU_FLPR_RAM_* in tiku_flpr_ipc.h and the SRAM LENGTH in the app-core
+ * scripts (nrf54l15.ld, nrf54lm20a.ld).
  */
 
 MEMORY
@@ -50,7 +59,7 @@ SECTIONS
     } > FLPR_RAM
 
     /* Stack: everything left in the carve, top-anchored just under the
-     * shared page (which lies OUTSIDE this region's LENGTH). */
+     * shared page, which lies outside this region's LENGTH. */
     __stack_top = ORIGIN(FLPR_RAM) + LENGTH(FLPR_RAM);
 
     ASSERT(__bss_end <= __stack_top - 0x400,

@@ -5,58 +5,57 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_radio_arch.c - nRF54L 2.4 GHz RADIO: BLE legacy advertising plus a receiver probe.
+ * tiku_radio_arch.c - nRF54L 2.4 GHz RADIO: BLE link layer.
  *
- * A from-scratch broadcaster against the MDK register map -- no SoftDevice, no
- * sdk-nrf -- transmitting ADV_NONCONN_IND on the three primary channels, driven by
- * SHORTS so the CPU polls one event.  See the register and errata notes below.
+ * Legacy and extended advertising, an IRQ-driven observer scan, peripheral
+ * and central connection engines, PHY probes and an RF test carrier, on the
+ * MDK register map.  The register and errata notes below apply to all of it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <arch/nordic/tiku_radio_arch.h>
-#include <arch/nordic/tiku_device_select.h>   /* MDK register types + NRF_RADIO_S */
-#include <arch/nordic/tiku_nordic_core.h>      /* NVIC + WFE (IRQ scan, R6.1)   */
-#include <arch/nordic/tiku_timer_arch.h>       /* TIKU_CLOCK_ARCH_SECOND        */
-#include <kernel/timers/tiku_clock.h>          /* wall-clock bound for the scan */
-#include <kernel/cpu/tiku_watchdog.h>          /* kick during the long scan     */
-#include <interfaces/bluetooth/tiku_ble_smp_pair.h> /* Phase E: SMP initiator   */
-#include <interfaces/bluetooth/tiku_ble_bond.h>      /* durable LTK bond store   */
-#include <arch/nordic/tiku_crypto_arch.h>       /* AES-ECB + AES-CCM (E3)      */
-#include <arch/nordic/tiku_trng_arch.h>         /* SKDm/IVm entropy (E3)       */
-#include <interfaces/bluetooth/tiku_ble_enc.h>  /* E3c demo params + nonce     */
-#include <arch/nordic/flpr/tiku_flpr_ipc.h>     /* DLE max octets (F1)         */
+#include <arch/nordic/tiku_device_select.h>   /* MDK registers, NRF_RADIO_S  */
+#include <arch/nordic/tiku_nordic_core.h>      /* NVIC + WFE for the IRQ scan */
+#include <arch/nordic/tiku_timer_arch.h>       /* TIKU_CLOCK_ARCH_SECOND      */
+#include <kernel/timers/tiku_clock.h>          /* wall-clock scan bound       */
+#include <kernel/cpu/tiku_watchdog.h>          /* kick during a long scan     */
+#include <interfaces/bluetooth/tiku_ble_smp_pair.h> /* SMP initiator */
+#include <interfaces/bluetooth/tiku_ble_bond.h>      /* durable LTK bonds */
+#include <arch/nordic/tiku_crypto_arch.h>       /* AES-ECB + AES-CCM          */
+#include <arch/nordic/tiku_trng_arch.h>         /* SKDm/IVm entropy           */
+#include <interfaces/bluetooth/tiku_ble_enc.h>  /* encryption demo params     */
+#include <arch/nordic/flpr/tiku_flpr_ipc.h>     /* DLE max octets             */
 #include <string.h>
 
 /*
- * nRF54 vs nRF52 register facts that bit the bring-up (the RP2350 lesson --
- * never paste an older generation's offsets/encodings):
- *   - PACKETPTR moved to 0xED0 (was 0x504).
+ * nRF54L register facts that differ from the nRF52, whose offsets and
+ * encodings do not carry over:
+ *   - PACKETPTR is at 0xED0 (nRF52: 0x504).
  *   - Whitening is DATAWHITE (POLY bits 25:16 + IV bits 8:0), not the nRF52
  *     DATAWHITEIV-only register; the reset value 0x00890040 already carries
  *     the BLE polynomial 0x89, so per channel only the IV = 0x40|index is ORed.
- *   - TXPOWER is an ENUMERATED code (+8 dBm = 0x03F), not signed dBm.
- *   - Split interrupt banks (INTENSET00/01/10/11).  TX is POLLED (a 1.3 ms
- *     fire-and-forget burst needs no interrupt); the observer/scan path is
- *     IRQ-driven since R6.1 (RADIO_0 = IRQn 138, bank 00, priority 4 --
- *     below htimer/console/tick so scanning can never cost console bytes).
+ *   - TXPOWER is an enumerated code (+8 dBm = 0x03F), not signed dBm.
+ *   - Interrupts are in split banks (INTENSET00/01/10/11).  TX is polled; the
+ *     observer scan is IRQ-driven (RADIO_0 = IRQn 138, bank 00, priority 4,
+ *     below the htimer, console and tick, so scanning never costs console
+ *     bytes).
  *   - PHYEND (not END) is the "last bit on air" event for BLE 1M.
  *   - RXADDRESSES resets to 0: RX matches nothing until logical address 0
- *     is explicitly enabled.
+ *     is enabled.
  *
- * Silicon errata this driver works around (nRF54L15 sheet 4503_401, all
- * present on Rev 1 AND Rev 2 -- each cost a day-class debug on hardware):
+ * Silicon errata this driver works around (nRF54L15 errata sheet 4503_401,
+ * all present on Rev 1 and Rev 2):
  *
  *   Erratum 49 ("First bits of on-air packet are not correct"): with
- *   S1LEN=0 the radio corrupts the leading PAYLOAD byte(s) on air, so every
+ *   S1LEN=0 the radio corrupts the leading payload byte(s) on air, so every
  *   packet fails the receiver's CRC and is silently dropped, while the TX
  *   sequencer (READY/PHYEND/DISABLED, airtime) looks perfect.  Workaround
- *   (the errata's S1LEN==0 branch): include the *untransmitted* S1 RAM slot
+ *   (the errata's S1LEN==0 branch): include the untransmitted S1 RAM slot
  *   (PCNF0.S1INCL=Include) and duplicate the first payload byte into it --
  *   RAM layout [S0][LEN][S1=payload0][payload...], on-air format unchanged.
- *   Host-decode of the beacon flipped from 0% to reliable the moment this
- *   was applied; it is NOT optional.  Note the RX direction then also
- *   carries the S1 slot in RAM: received payload starts at buffer[3].
+ *   The RX direction then also carries the S1 slot in RAM: received payload
+ *   starts at buffer[3].
  *
  *   Erratum 20 ("RADIO payload is not transmitted"): if the MCU power
  *   domain sleeps around a radio operation the payload never leaves the PA
@@ -67,26 +66,22 @@
  *   idle power between advertising events is unaffected.
  *
  *   Erratum 39 (PLLSTART before XOSTART) and the XOTUNED wait are handled
- *   at boot in tiku_cpu_freq_boot_arch.c; the SystemInit-parity trim/errata
- *   pokes live in tiku_crt_early.c.
- *
+ *   at boot in tiku_cpu_freq_boot_arch.c; the trim and errata register
+ *   writes of Nordic's SystemInit are in tiku_crt_early.c.
  */
 
 #define RADIO  NRF_RADIO_S
 
-/* BLE 1M legacy-advertising PHY/link constants (Core spec, all ours to set). */
+/* BLE 1M legacy-advertising PHY/link constants (Core spec values). */
 #define BLE_ADV_ACCESS_BASE0   0x89BED600UL   /* access addr 0x8E89BED6:      */
 #define BLE_ADV_ACCESS_PREFIX0 0x0000008EUL   /*   PREFIX||BASE, BALEN=3      */
-#define BLE_ADV_CRC_POLY       0x0100065BUL   /* x^24+x^10+x^9+x^6+x^4+x^3+x+1 */
+#define BLE_ADV_CRC_POLY       0x0100065BUL  /* x^24+x^10+x^9+x^6+x^4+x^3+x+1 */
 #define BLE_ADV_CRC_INIT       0x00555555UL   /* advertising CRC init         */
 #define BLE_WHITE_POLY         0x00890000UL   /* DATAWHITE POLY field (0x89)  */
 
-/* TXPOWER is an ENUMERATED code, not signed dBm (+8 dBm = 0x03F, 0 dBm =
- * 0x018 -- the bring-up lesson).  The MDK's dBm-named codes are the only
- * legal contract; the table below is identical across L15/LM20A/B.
- * Discrete steps only: an unlisted dBm request is rejected, never rounded
- * -- on a microwatt budget an explicit power request that cannot be
- * honoured exactly should fail loudly. */
+/* TXPOWER takes an enumerated code, not signed dBm (+8 dBm = 0x03F, 0 dBm =
+ * 0x018).  The MDK's dBm-named codes below are the same on L15, LM20A and
+ * LM20B.  A dBm value not in the table is rejected, not rounded. */
 static const struct {
     int8_t   dbm;
     uint16_t code;
@@ -129,26 +124,25 @@ static uint8_t  radio_arch_inited;
 
 /* The three primary advertising channels: RF frequency offset (2400+f MHz)
  * and the BLE logical channel index used for the whitening IV. */
-static const uint8_t adv_freq[3] = { 2u, 26u, 80u };   /* ch37/38/39 = 2402/2426/2480 */
+static const uint8_t adv_freq[3] = { 2u, 26u, 80u }; /* 2402/2426/2480 MHz */
 static const uint8_t adv_index[3] = { 37u, 38u, 39u };
 
 /* Erratum-20 bracket: hold the MCU domain in Constant Latency for the
  * duration of any radio operation, then release to Low Power.
  *
- * For a duty-cycled beacon the facade additionally holds Constant Latency
- * across the whole session (tiku_radio_arch_constlat_hold): the sleeps
- * BETWEEN bursts then happen in constant-latency mode, per the erratum's
- * intent.  Note the hold alone is NOT what makes post-sleep bursts
- * decodable -- that is radio_hfclk_kick() below -- but it is the
- * documented erratum-20 discipline and stays.  While held, the per-burst
- * exit is a no-op. */
+ * A duty-cycled beacon also holds it across the whole session
+ * (tiku_radio_arch_constlat_hold()), so the sleeps between bursts run in
+ * constant-latency mode; while held, the per-burst exit does nothing.  A
+ * burst after a sleep also needs radio_hfclk_kick() below to be decodable. */
 static uint8_t radio_constlat_held;
 
+/** @brief Enter Constant Latency (erratum 20) before a radio operation. */
 static void radio_constlat_enter(void)
 {
     NRF_POWER_S->TASKS_CONSTLAT = 1u;
 }
 
+/** @brief Return to Low Power, unless a session hold is active. */
 static void radio_constlat_exit(void)
 {
     if (!radio_constlat_held) {
@@ -166,31 +160,25 @@ void tiku_radio_arch_constlat_hold(int on)
     }
 }
 
-/* XO/PLL observability only -- deliberately NO runtime clock manipulation.
- *
- * Post-mortem of the bring-up detours (all hardware-measured, kept here so
- * nobody re-walks them): runtime TASKS_XOSTART without PLLSTART wedges the
- * device (erratum 39); per-burst TASKS_PLLSTART opens a relock transient
- * the burst then flies inside (host silence); session-start
- * PLLSTART+XOTUNE made later sessions unreliable.  EVENTS_XOSTARTED never
- * re-fires across tickless sleeps (the XO does not park), XO.STAT stays
- * Running, and the radio's own READY fires in every failing case -- there
- * is no PASSIVE signal for the missing prerequisite.  The active fix that
- * finally proved out is the per-burst HF clock REQUEST in
- * radio_hfclk_kick() below (found via a UARTE-TX-byte discriminator:
- * one putc before each burst healed TX, because UARTE requests its
- * HFXO-derived reference; busy-waiting up to 11 ms did not).  This
- * observer only feeds the dbg counters. */
+/* XO/PLL observation only; this file starts and stops no clock at run time.
+ * Each such change is a hazard: a runtime TASKS_XOSTART without PLLSTART
+ * wedges the device (erratum 39), a per-burst TASKS_PLLSTART puts the burst
+ * inside a relock transient, and PLLSTART+XOTUNE at session start makes
+ * later sessions unreliable.  No passive signal shows a missing HF clock
+ * request: EVENTS_XOSTARTED does not re-fire across tickless sleeps, XO.STAT
+ * stays Running and READY still fires.  radio_hfclk_kick() makes the
+ * request; this observer only feeds the dbg counters. */
 uint32_t tiku_radio_arch_dbg_xo_stat, tiku_radio_arch_dbg_xo_wait;
 uint32_t tiku_radio_arch_dbg_xo_restarts;
 
+/** @brief Latch XO.STAT and count an XO found restarted or stopped. */
 static void radio_xo_observe(void)
 {
     uint32_t stat = NRF_CLOCK_S->XO.STAT;
 
     tiku_radio_arch_dbg_xo_stat = stat;
     if (NRF_CLOCK_S->EVENTS_XOSTARTED != 0u || (stat & (1ul << 16)) == 0u) {
-        tiku_radio_arch_dbg_xo_restarts++;     /* would be a NEW hardware fact */
+        tiku_radio_arch_dbg_xo_restarts++;     /* XO restarted or stopped    */
     }
 }
 
@@ -201,10 +189,10 @@ void tiku_radio_arch_init(void)
     RADIO->MODE = 3u;                          /* Ble_1Mbit                   */
 
     /* PDU layout: 1-byte S0 (the PDU header), 8-bit LENGTH, S1LEN=0 but
-     * S1INCL=Include -- the erratum-49 workaround RAM slot (see header
-     * comment); 8-bit preamble.  MAXLEN = the DLE max (Phase F1: was 37, the
-     * legacy 27+slack) so a whole L2CAP PDU rides one LL PDU; 3-byte base
-     * address, little-endian, whitening on. */
+     * S1INCL=Include -- the erratum-49 workaround RAM slot (see the errata
+     * notes above); 8-bit preamble.  MAXLEN = the DLE max, so an L2CAP PDU
+     * of that size fits one LL PDU; 3-byte base address, little-endian,
+     * whitening on. */
     RADIO->PCNF0 = (8u << 0) | (1u << 8) | (0u << 16) |
                    (1u << 20) | (0u << 24);
     RADIO->PCNF1 = (TIKU_FLPR_DLE_MAX_OCTETS << 0) | (0u << 8) | (3u << 16) |
@@ -212,22 +200,21 @@ void tiku_radio_arch_init(void)
 
     /* Access address 0x8E89BED6 on logical address 0 -- for TX (TXADDRESS
      * selects it) and RX (RXADDRESSES is a bitmask of enabled logical
-     * addresses; it RESETS TO 0, so without this the receiver can never
-     * address-match anything). */
+     * addresses; it resets to 0, and then the receiver matches nothing). */
     RADIO->BASE0       = BLE_ADV_ACCESS_BASE0;
     RADIO->PREFIX0     = BLE_ADV_ACCESS_PREFIX0;
     RADIO->TXADDRESS   = 0u;
     RADIO->RXADDRESSES = 1u;
 
-    /* 24-bit CRC, computed over the PDU but NOT the access address. */
+    /* 24-bit CRC, computed over the PDU but not the access address. */
     RADIO->CRCCNF  = (3u << 0) | (1u << 8);    /* LEN=Three, SKIPADDR=Skip    */
     RADIO->CRCPOLY = BLE_ADV_CRC_POLY;
     RADIO->CRCINIT = BLE_ADV_CRC_INIT;
 
-    RADIO->TXPOWER = radio_txpower_code;        /* enum code, not dBm!         */
+    RADIO->TXPOWER = radio_txpower_code;        /* enumerated code, not dBm   */
 
-    /* Auto-sequence: ramp-up -> READY -> (start) -> tx -> PHYEND -> (disable). */
-    RADIO->SHORTS = (1u << 0) | (1u << 19);     /* READY_START | PHYEND_DISABLE */
+    /* Auto-sequence: ramp-up -> READY -> (start) -> tx -> PHYEND -> (off). */
+    RADIO->SHORTS = (1u << 0) | (1u << 19);  /* READY_START | PHYEND_DISABLE */
     radio_arch_inited = 1u;
 }
 
@@ -241,17 +228,16 @@ int tiku_radio_arch_set_txpower(int8_t dbm)
             radio_txpower_dbm  = dbm;
             radio_txpower_code = radio_txpower_map[i].code;
             if (radio_arch_inited) {
-                /* Applied at the next ramp-up; safe between bursts.  The
-                 * CALLER guarantees the RADIO answers on the secure alias
-                 * -- while the FLPR owns it (beacon offload) this write
-                 * would be a precise bus fault, so the facade reclaims
-                 * the peripheral around it. */
+                /* Applied at the next ramp-up.  The caller guarantees the
+                 * RADIO answers on the secure alias: while the FLPR owns it
+                 * (beacon offload) this write is a precise bus fault, and
+                 * the facade reclaims the peripheral around it. */
                 RADIO->TXPOWER = radio_txpower_code;
             }
             return 0;
         }
     }
-    return -1;                                 /* not a silicon-legal step     */
+    return -1;                                 /* not a silicon-legal step    */
 }
 
 int8_t tiku_radio_arch_txpower(void)
@@ -259,9 +245,8 @@ int8_t tiku_radio_arch_txpower(void)
     return radio_txpower_dbm;
 }
 
-/* The enumerated TXPOWER code for the current setting, so the 15.4 PHY (a
- * separate arch file) programs the SAME power the BLE path + /sys/radio/
- * txpower use -- one knob for the shared radio. */
+/* The 15.4 PHY programs this code too, so BLE, 15.4 and /sys/radio/txpower
+ * share one TX power setting. */
 uint32_t tiku_radio_arch_txpower_code(void)
 {
     return radio_txpower_code;
@@ -270,9 +255,8 @@ uint32_t tiku_radio_arch_txpower_code(void)
 /**
  * @brief Transmit one PDU on a single advertising channel (blocking, polled).
  *
- * Every poll iteration also samples STATE and counts the iterations spent in
- * TXRU (0x9) and TX (0xB): dbg_tx_iters scaling linearly with the PDU length is
- * the on-die proof that the modulator ran for the whole frame.
+ * Each poll also samples STATE, counting polls in TXRU (0x9) into dbg_ru_iters
+ * and in TX (0xB) into dbg_tx_iters; dbg_tx_iters grows with the PDU length.
  */
 static void adv_tx_one(uint8_t chan, const uint8_t *pdu)
 {
@@ -310,18 +294,13 @@ uint32_t tiku_radio_arch_dbg_ready, tiku_radio_arch_dbg_disabled;
 uint32_t tiku_radio_arch_dbg_state, tiku_radio_arch_dbg_spin;
 uint32_t tiku_radio_arch_dbg_ru_iters, tiku_radio_arch_dbg_tx_iters;
 
-/* Per-burst HF clock kick (the productized form of a hardware finding):
- * a burst fired after tickless sleep is undecodable unless a PERIPHERAL
- * clock request precedes it.  One console-UARTE TX byte before each burst
- * healed TX on hardware; CPU busy-waits up to 11 ms and every CLOCK-task
- * combination (PLLSTART/XOSTART/XOTUNE, per-burst and per-session) did
- * NOT.  Whatever the UARTE transaction requests from the clock arbiter is
- * the radio's missing prerequisite, so reproduce exactly that -- minus the
- * console pollution: a 1-byte TX DMA through the unused UARTE21 with its
- * pins left disconnected (PSEL reset = 0xFFFFFFFF, nothing is driven).
- * At 1 MBd the transaction is ~10 us; the bounded wait covers a stuck
- * ENDTX (then dbg_xo_wait pins at the bound and the burst proceeds --
- * degraded, not wedged). */
+/**
+ * @brief Request the HF clock across a burst with a TX DMA through UARTE21,
+ *        whose pins stay disconnected (PSEL reset value).
+ *
+ * A burst after tickless sleep is undecodable unless a peripheral clock
+ * request precedes it; CPU busy-waits and the CLOCK tasks do not supply it.
+ */
 static void radio_hfclk_kick(void)
 {
     static uint8_t kick_bytes[16];
@@ -331,12 +310,10 @@ static void radio_hfclk_kick(void)
         u->BAUDRATE = 0x01D60000u;             /* 115200                   */
         u->ENABLE   = 8u;                      /* UARTE enable code        */
     }
-    /* The request must be HELD ACROSS THE BURST, not just pulsed: a 1-byte
-     * kick at 1 MBd (~10 us, released before the radio even finishes its
-     * ramp) measurably does NOT heal TX, while the console putc's ~87 us
-     * byte partially did.  16 bytes at 115200 spans ~1.6 ms -- longer than
-     * the whole 3-channel burst -- and runs CONCURRENTLY (no wait); the
-     * transfer self-completes after the burst and the next kick re-arms. */
+    /* The request must last through the burst: one released before the
+     * ramp ends leaves TX undecodable.  16 bytes at 115200 baud take about
+     * 1.4 ms, longer than a 3-channel burst.  The DMA runs concurrently,
+     * with no wait, and completes on its own. */
     u->EVENTS_DMA.TX.END   = 0u;
     u->DMA.TX.PTR          = (uint32_t)kick_bytes;
     u->DMA.TX.MAXCNT       = sizeof(kick_bytes);
@@ -344,17 +321,15 @@ static void radio_hfclk_kick(void)
     tiku_radio_arch_dbg_xo_wait = 0u;
 }
 
-/* Public entry to the HFCLK kick, so the 15.4 PHY (a separate arch file
- * sharing this RADIO) can start the HFXO the same erratum-safe way before
- * its own TXEN/RXEN and re-arm it across a long listen. */
+/* Public entry to the HF clock kick for the 15.4 PHY, which shares this
+ * RADIO. */
 void tiku_radio_arch_hfclk_kick(void)
 {
     radio_hfclk_kick();
 }
 
-/* Decode the live RADIO.MODE for /sys/radio/mode -- honest current PHY,
- * not a compile-time string (reads "ieee802154" while the 15.4 PHY owns
- * the radio, "ble-1m" at rest). */
+/* Decode the live RADIO.MODE for /sys/radio/mode: "ieee802154" while the
+ * 15.4 PHY owns the radio, "ble-1m" at rest. */
 const char *tiku_radio_arch_mode_str(void)
 {
     switch (RADIO->MODE) {
@@ -368,70 +343,45 @@ const char *tiku_radio_arch_mode_str(void)
 void tiku_radio_arch_adv_send(const uint8_t *pdu, uint8_t pdu_len)
 {
     uint8_t c;
-    (void)pdu_len;                             /* length is byte[1] of the PDU */
-    radio_constlat_enter();                    /* erratum 20: before any TXEN  */
-    radio_xo_observe();                        /* clock-tree dbg counters only */
-    radio_hfclk_kick();                        /* peripheral clock request     */
+    (void)pdu_len;                            /* length is byte[1] of the PDU */
+    radio_constlat_enter();                    /* erratum 20: before any TXEN */
+    radio_xo_observe();                       /* clock-tree dbg counters only */
+    radio_hfclk_kick();                        /* peripheral clock request    */
     for (c = 0; c < 3u; c++) {
         adv_tx_one(c, pdu);
     }
-    radio_constlat_exit();                     /* radio disabled again         */
+    radio_constlat_exit();                     /* radio disabled again        */
 }
 
-/**
- * @brief Observer scan: listen on the advertising channels with the exact
- *        same link config as TX, invoking @p cb per CRC-OK packet.
- *
- * Round-robins 37/38/39 in bounded listen windows until @p ms of wall clock
- * have elapsed.  RSSI is latched per packet via the ADDRESS->RSSISTART short.
- *
- * @note Besides backing BLESCAN$ and `bleadv scan`, this is the link-config
- *       oracle: if it hears the room, everything shared with TX (frequency,
- *       access address, whitening, CRC) is proven and a TX failure is TX-only.
- * @param cb          Called per CRC-OK packet with the raw RAM buffer
- *                    ([S0][LEN][S1 slot][payload...] -- the erratum-49
- *                    S1INCL slot shifts payload to byte 3), total payload
- *                    length (the LEN byte), and RSSI in dBm.  May be NULL.
- * @param ud          Opaque context for @p cb.
- * @param ms          Scan duration in milliseconds (wall clock).
- * @param addr_evts   Optional: incremented per access-address match.
- * @param crcok_evts  Optional: incremented per CRC-OK packet.
- */
 /*---------------------------------------------------------------------------*/
-/* IRQ-driven observer engine (R6.1)                                         */
+/* IRQ-DRIVEN OBSERVER ENGINE                                                */
 /*---------------------------------------------------------------------------*/
 /*
- * The polled engine burned the CPU for the whole scan (a multi-second
- * 100% spin) and its listen windows were spin-count-bounded.  Now the
- * ISR owns the per-packet work: on DISABLED (the PHYEND->DISABLE short
- * fires it per received packet) it captures the packet + RSSI into a
- * small SPSC ring and re-arms RX on the next advertising channel.  The
- * blocking API is unchanged -- the caller's context drains the ring and
- * WFEs between packets, waking on any interrupt (radio, tick, console).
- * Idle channels never fire DISABLED, so the drain loop force-rotates a
- * silent channel after ~2 ticks (the ISR's hop path handles the rest);
- * R6.2 replaces that coarse rotation with TIMER-gated windows.
+ * The ISR owns the per-packet work: on DISABLED (the PHYEND->DISABLE short
+ * fires it per received packet) it captures the packet and RSSI into a small
+ * SPSC ring and re-arms RX on the next advertising channel.  The caller's
+ * context drains the ring and WFEs between packets, waking on any interrupt
+ * (radio, tick, console).  A silent channel never fires DISABLED: the
+ * TIMER10->DPPI listen window below closes it, and the drain loop's forced
+ * rotation is the fallback.
  *
- * Coexistence rule (phase-6 risk, now enforced in code): RADIO IRQ
- * priority is 4 -- strictly below the htimer (1), console UARTE (2) and
- * tick/GPIOTE (3), so a scan can never cost console bytes; the
- * /dev/uart/overruns counter is the standing detector.
+ * RADIO IRQ priority is 4, below the htimer (1), console UARTE (2) and
+ * tick/GPIOTE (3), so a scan cannot cost console bytes; /dev/uart/overruns
+ * counts any that are lost.
  */
 
 #define TIKU_NORDIC_IRQ_RADIO   138    /* RADIO_0 = periph 0x8A @ 0x5008A000 */
 #define RADIO_INTEN00_DISABLED  (1u << 8)
 
-/* R6.2: hardware listen windows.  TIMER10 (free in GRTC-tick builds) +
- * DPPIC10 channel 0, all inside the radio power domain: COMPARE[0]
- * publishes to the channel, RADIO TASKS_DISABLE subscribes, so a silent
- * channel closes after RADIO_SCAN_WINDOW_US with ZERO CPU involvement --
- * the resulting DISABLED IRQ is the same hop path as a packet end.  The
- * drain loop keeps a coarse-tick rotation as a COUNTED safety net
- * (dbg_win_forced): with the hardware window alive it must read 0.
- * The COMPARE0->STOP short makes each window one-shot; every channel
- * arm restarts the timer.  In -DTIKU_NORDIC_TICK_TIMER10 builds the
- * timer IS the kernel tick, so the radio falls back to the coarse
- * rotation alone. */
+/* Hardware listen windows: TIMER10 (free in GRTC-tick builds) and DPPIC10
+ * channel 0, all inside the radio power domain.  COMPARE[0] publishes to the
+ * channel and RADIO TASKS_DISABLE subscribes, so a silent channel closes
+ * after RADIO_SCAN_WINDOW_US without the CPU; the DISABLED IRQ that follows
+ * takes the same hop path as a packet end.  The COMPARE0->STOP short makes
+ * each window one-shot, and every channel arm restarts the timer.  The drain
+ * loop's tick rotation is a counted safety net (dbg_win_forced) that reads 0
+ * while the window works.  In -DTIKU_NORDIC_TICK_TIMER10 builds TIMER10 is
+ * the kernel tick, and the tick rotation alone closes silent channels. */
 #if defined(TIKU_NORDIC_TICK_TIMER10)
 #define RADIO_HW_WINDOW 0
 #else
@@ -443,6 +393,7 @@ void tiku_radio_arch_adv_send(const uint8_t *pdu, uint8_t pdu_len)
 uint32_t tiku_radio_arch_dbg_win_hw, tiku_radio_arch_dbg_win_forced;
 
 #if RADIO_HW_WINDOW
+/** @brief Restart TIMER10 for a fresh one-shot listen window. */
 static void radio_window_start(void)
 {
     NRF_TIMER10_S->TASKS_STOP  = 1u;
@@ -451,6 +402,10 @@ static void radio_window_start(void)
     NRF_TIMER10_S->TASKS_START = 1u;
 }
 
+/**
+ * @brief Set TIMER10 up as a 1 MHz one-shot and wire its COMPARE[0] to
+ *        RADIO TASKS_DISABLE through DPPIC10.
+ */
 static void radio_window_wire(void)
 {
     NRF_TIMER10_S->TASKS_STOP = 1u;
@@ -465,8 +420,12 @@ static void radio_window_wire(void)
     NRF_DPPIC10_S->CHENSET   = (1u << RADIO_DPPI_CH_WINDOW);
 }
 
-/* MUST run at scan teardown: a live SUBSCRIBE_DISABLE would let a stale
- * window later kill a TX burst mid-air. */
+/**
+ * @brief Unwire the listen window.
+ *
+ * @note Required at scan teardown: a live SUBSCRIBE_DISABLE lets a stale
+ *       window kill a later TX burst mid-air.
+ */
 static void radio_window_unwire(void)
 {
     NRF_TIMER10_S->TASKS_STOP = 1u;
@@ -502,16 +461,13 @@ void tiku_radio_arch_scan_counts(uint32_t *isr, uint32_t *addr, uint32_t *crcok)
         *crcok = scan_crcok_evts;
     }
 }
-/* EVERY radio RX DMA target must hold [S0][LEN][S1 slot] + PCNF1.MAXLEN
- * (80 since DLE, Phase F1) = 83 bytes: the RADIO writes up to MAXLEN
- * payload bytes on ANY address-matched reception -- CRC pass NOT required
- * -- so a 48-byte buffer lets ambient/garbage traffic overwrite whatever
- * object follows it.  That exact overflow (into the FLPR's adv TX buffer)
- * radiated prefix-corrupted-but-CRC-valid ADV_INDs and killed connect
- * sessions for hours; see kintsugi/radioleft.md §0. */
+/* Every radio RX DMA target must hold [S0][LEN][S1 slot] plus PCNF1.MAXLEN
+ * (TIKU_FLPR_DLE_MAX_OCTETS, 80) bytes: the RADIO writes up to MAXLEN
+ * payload bytes on any address-matched reception, CRC pass or not, so a
+ * smaller buffer lets ambient traffic overwrite the object that follows it. */
 static uint8_t scan_rxbuf[TIKU_FLPR_DLE_BUF_SIZE] __attribute__((aligned(4)));
 
-/* Program the current channel and start RX (arm path + ISR hop path). */
+/** @brief Program the current scan channel and start RX (arm and hop). */
 static void radio_scan_arm_channel(void)
 {
     RADIO->FREQUENCY = adv_freq[scan_chan];
@@ -527,10 +483,14 @@ static void radio_scan_arm_channel(void)
 #endif
 }
 
-/* RADIO_0 ISR: one DISABLED per packet end (or forced rotation).  Copy
- * BEFORE re-arming -- EasyDMA would overwrite scan_rxbuf.  RSSISAMPLE
- * must also be read here (latched per ADDRESS->RSSISTART; the next
- * packet overwrites it). */
+/**
+ * @brief RADIO_0 ISR: one DISABLED per packet end, window close or forced
+ *        rotation; queues a CRC-OK packet and hops to the next channel.
+ *
+ * The packet is copied before RX is re-armed (EasyDMA would overwrite
+ * scan_rxbuf), and RSSISAMPLE is read here (latched per ADDRESS->RSSISTART;
+ * the next packet overwrites it).
+ */
 void tiku_nordic_radio_isr(void)
 {
     if (RADIO->EVENTS_DISABLED == 0u) {
@@ -556,10 +516,10 @@ void tiku_nordic_radio_isr(void)
                 n = 44u;                /* bound to the ring entry          */
             }
             memcpy(scan_ring[scan_head].buf, scan_rxbuf, (size_t)(3u + n));
-            /* The stored LENGTH must describe what this entry HOLDS, not
-             * what the air claimed.  A consumer walks the AD structures at
-             * buf[9] for LENGTH-6 bytes, so an on-air 255 sends it far
-             * past the 48-byte entry and into whatever follows it. */
+            /* The stored LENGTH is what this entry holds, not what the air
+             * claimed: a consumer walks the AD structures at buf[9] for
+             * LENGTH-6 bytes, and an on-air 255 would send it past the
+             * 48-byte entry. */
             scan_ring[scan_head].buf[1] = n;
             scan_ring[scan_head].rssi =
                 (int8_t)(-(int)(RADIO->RSSISAMPLE & 0x7Fu));
@@ -572,18 +532,20 @@ void tiku_nordic_radio_isr(void)
     }
 }
 
-/* Safety-net rotation cadence: primary in fallback-tick builds (2 ticks);
- * with the hardware window it is a counted anomaly detector only (4 ticks
- * >> the 16 ms window -- it must never fire). */
+/* Forced-rotation cadence: 2 ticks in TIMER10-tick builds, where it is the
+ * only window; 4 ticks with the hardware window, well past its 16 ms, so a
+ * forced rotation there means the window failed. */
 #define RADIO_SCAN_ROT_TICKS  ((tiku_clock_time_t)(RADIO_HW_WINDOW ? 4u : 2u))
 static tiku_clock_time_t scan_rot_wdl;
 static uint32_t          scan_rot_seen;
 
-/* Arm/disarm the RX engine WITHOUT touching Constant Latency or the
- * packet ring -- the shared core of start/stop AND pause/resume (R7.5).
- * A beacon sharing the radio (time-division) borrows it by disarm ->
- * burst -> arm, and the ring MUST survive so packets queued before the
- * burst are still delivered after it. */
+/**
+ * @brief Arm the RX engine without touching Constant Latency or the packet
+ *        ring; shared by scan start and resume.
+ *
+ * A beacon borrows the radio by disarm, burst, arm; packets queued before
+ * the burst are still delivered after it.
+ */
 static void radio_scan_arm(void)
 {
     /* RX ramps via RXREADY (distinct from TX's READY); PHYEND is
@@ -598,11 +560,15 @@ static void radio_scan_arm(void)
     radio_window_wire();                       /* TIMER10 -> DPPI -> DISABLE */
 #endif
     radio_scan_arm_channel();
-    scan_rot_seen = scan_isr_count;            /* don't false-rotate on resume */
+    scan_rot_seen = scan_isr_count;           /* don't false-rotate on resume */
     scan_rot_wdl = (tiku_clock_time_t)(tiku_clock_time()
                                        + RADIO_SCAN_ROT_TICKS);
 }
 
+/**
+ * @brief Disarm the RX engine and restore the TX-only SHORTS; Constant
+ *        Latency and the packet ring are untouched.
+ */
 static void radio_scan_disarm(void)
 {
     uint32_t spin;
@@ -625,8 +591,8 @@ static void radio_scan_disarm(void)
 
 void tiku_radio_arch_scan_start(void)
 {
-    radio_constlat_enter();                    /* erratum 20: before any RXEN  */
-    radio_xo_observe();                        /* clock-tree dbg counters only */
+    radio_constlat_enter();                    /* erratum 20: before any RXEN */
+    radio_xo_observe();                       /* clock-tree dbg counters only */
 
     scan_head = 0u;
     scan_tail = 0u;
@@ -637,10 +603,10 @@ void tiku_radio_arch_scan_start(void)
     radio_scan_arm();
 }
 
-/* Time-division borrow (R7.5): hand the radio to a TX burst and take it
- * back, ring intact, Constant Latency untouched (the beacon session
- * holds it).  pause() leaves the radio idle with TX shorts -- exactly
- * what tiku_radio_arch_adv_send() expects. */
+/* Time-division borrow: hand the radio to a TX burst and take it back,
+ * ring intact, Constant Latency untouched (the beacon session holds it).
+ * pause() leaves the radio idle with the TX shorts that
+ * tiku_radio_arch_adv_send() expects. */
 void tiku_radio_arch_scan_pause(void)
 {
     radio_scan_disarm();
@@ -655,8 +621,8 @@ uint8_t tiku_radio_arch_scan_service(tiku_radio_arch_scan_cb_t cb, void *ud)
 {
     uint8_t delivered = 0u;
 
-    /* Drain everything the ISR queued.  SPSC: tail is ours, head is the
-     * ISR's; volatile ordering is sufficient on this single core. */
+    /* Drain everything the ISR queued.  SPSC: this function owns the tail
+     * and the ISR the head; volatile ordering suffices on this one core. */
     while (scan_tail != scan_head) {
         struct radio_scan_pkt *p = &scan_ring[scan_tail];
         if (cb != (tiku_radio_arch_scan_cb_t)0) {
@@ -685,9 +651,9 @@ uint8_t tiku_radio_arch_scan_service(tiku_radio_arch_scan_cb_t cb, void *ud)
 void tiku_radio_arch_scan_stop(void)
 {
     /* Disarm the RX engine (ISR out of the loop, radio idle, TX shorts
-     * restored -- ring stragglers stay queued for one more service),
-     * then release the per-op Constant Latency.  While a beacon session
-     * holds CONSTLAT (combined mode, R7.5) the exit is suppressed. */
+     * restored; ring stragglers stay queued for one more service), then
+     * release the per-operation Constant Latency.  While a beacon session
+     * holds CONSTLAT the exit does nothing. */
     radio_scan_disarm();
     radio_constlat_exit();
 }
@@ -721,13 +687,13 @@ void tiku_radio_arch_scan(tiku_radio_arch_scan_cb_t cb, void *ud, uint32_t ms,
 }
 
 /*---------------------------------------------------------------------------*/
-/* Multi-PHY probe (R8.1)                                                    */
+/* MULTI-PHY PROBE                                                           */
 /*---------------------------------------------------------------------------*/
 
-/* Per-PHY MODE + PCNF0 preamble/coded fields (MDK encodings, verified in
- * nrf54l15_types.h -- never pasted from nRF52 folklore): PLEN@24
- * (8bit=0, 16bit=1, LongRange=3), CILEN@22, TERMLEN@29.  The base PCNF0
- * bits (LFLEN=8, S0LEN=1, erratum-49 S1INCL) stay identical across PHYs.
+/* Per-PHY MODE + PCNF0 preamble/coded fields (MDK encodings from
+ * nrf54l15_types.h): PLEN@24 (8bit=0, 16bit=1, LongRange=3), CILEN@22,
+ * TERMLEN@29.  The base PCNF0 bits (LFLEN=8, S0LEN=1, erratum-49 S1INCL)
+ * stay identical across PHYs.
  * The BLE whitening/CRC config is PHY-independent (coded PHY whitens and
  * CRCs FEC block 2 in hardware). */
 static const struct {
@@ -744,6 +710,7 @@ static const struct {
 
 #define RADIO_PCNF0_BASE  ((8u << 0) | (1u << 8) | (0u << 16) | (1u << 20))
 
+/** @brief Set MODE and the PCNF0 preamble and coded fields for @p phy. */
 static void radio_apply_phy(tiku_radio_arch_phy_t phy)
 {
     RADIO->MODE  = radio_phy_cfg[phy].mode;
@@ -786,20 +753,23 @@ int tiku_radio_arch_phy_tx_probe(tiku_radio_arch_phy_t phy,
 }
 
 /*---------------------------------------------------------------------------*/
-/* Two-board per-PHY link (R8.2): TX one prepared PDU / RX one packet at the  */
-/* given PHY on advertising channel `chan` (0..2 = 37/38/39).  Reuses the adv */
-/* access address + CRC (PHY-independent); only MODE/PCNF0 switch.  Neither   */
-/* restores 1M -- the caller loops for a PER run, holds Constant Latency      */
-/* across it (erratum 20), and re-inits afterwards for the beacon/scan        */
-/* contract.  Together they measure link PER at 2M / Coded S8 / Coded S2.     */
+/* TWO-BOARD PER-PHY LINK                                                    */
 /*---------------------------------------------------------------------------*/
+/*
+ * TX one prepared PDU, or count received packets, at a given PHY on
+ * advertising channel `chan` (0..2 = 37/38/39), on the PHY_LINK_AA access
+ * address with the advertising CRC.  Neither restores 1M: the caller loops
+ * for a PER run, holds Constant Latency across it (erratum 20) and calls
+ * tiku_radio_arch_init() afterwards.
+ */
 
 static uint8_t phy_rxbuf[TIKU_FLPR_DLE_BUF_SIZE] __attribute__((aligned(4)));
 
-/* Distinctive access address for the R8.2 link so ambient BLE (all on the
- * shared adv AA 0x8E89BED6 at 1M) is address-rejected, not received. */
+/* Access address of the PHY link, so ambient BLE (all on the shared adv AA
+ * 0x8E89BED6 at 1M) is address-rejected, not received. */
 #define PHY_LINK_AA   0x71764129u
 
+/** @brief Point logical address 0 at PHY_LINK_AA for TX and RX. */
 static void radio_phy_link_aa(void)
 {
     RADIO->BASE0   = (PHY_LINK_AA & 0x00FFFFFFu) << 8;
@@ -808,9 +778,10 @@ static void radio_phy_link_aa(void)
     RADIO->RXADDRESSES = 1u;
 }
 
-/* Force the RADIO to DISABLED so each op starts from a clean state -- a
- * prior run left mid-ramp/RXIDLE would make the next TXEN/RXEN misfire
- * (the run-to-run collapse this guards against). */
+/**
+ * @brief Force the RADIO to DISABLED with SHORTS cleared: a TXEN or RXEN
+ *        issued while a prior op is mid-ramp or in RXIDLE misfires.
+ */
 static void radio_phy_force_disable(void)
 {
     uint32_t spin;
@@ -828,10 +799,10 @@ static void radio_phy_force_disable(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* RF TEST CARRIER -- unmodulated / modulated transmit for bench work         */
+/* RF TEST CARRIER                                                           */
 /*---------------------------------------------------------------------------*/
 /*
- * Two classic radio bring-up signals, on any frequency in the 2.4 GHz
+ * Two classic radio test signals, on any frequency in the 2.4 GHz
  * band rather than only the advertising channels:
  *
  *   UNMODULATED  ramp TX up and stop.  The RADIO parks in TXIDLE and
@@ -843,10 +814,10 @@ static void radio_phy_force_disable(void)
  *                modulation of the selected PHY -- an occupied-bandwidth
  *                / eye-quality signal rather than a tone.
  *
- * The transmit stays on until tiku_radio_arch_carrier_stop().  That
- * makes this the only path in the driver that leaves the RADIO enabled
- * across a return, so the caller MUST stop it before any beacon, scan
- * or connection work -- those all assume they start from DISABLED.
+ * The transmit stays on until tiku_radio_arch_carrier_stop().  This is the
+ * only path in the driver that leaves the RADIO enabled across a return, so
+ * the caller must stop it before any beacon, scan or connection work, which
+ * all start from DISABLED.
  *
  * The ramp sequence is the one every other TX path here uses: hold
  * Constant Latency (erratum 20), observe the XO, kick HFCLK (this
@@ -857,8 +828,7 @@ static void radio_phy_force_disable(void)
 /** Non-zero while a test carrier is transmitting. */
 static uint8_t radio_carrier_on;
 
-/** PRBS-ish payload for the modulated form; content only needs to be
- *  spectrally busy, not spec-exact PRBS9. */
+/** Pseudo-random payload for the modulated form (not PRBS9). */
 static uint8_t radio_carrier_pdu[64] __attribute__((aligned(4)));
 
 int tiku_radio_arch_carrier_start(tiku_radio_arch_phy_t phy,
@@ -892,11 +862,9 @@ int tiku_radio_arch_carrier_start(tiku_radio_arch_phy_t phy,
     RADIO->SHORTS  = 0u;
 
     if (modulated) {
-        /* Deliberately does NOT touch BASE0/PREFIX0/TXADDRESS: the
-         * access address is just four more bits on the air for a
-         * spectral test, and overwriting it left the shared adv AA
-         * clobbered so a later scan address-rejected every packet
-         * (12 devices -> 0).  Whatever AA is configured gets sent. */
+        /* BASE0/PREFIX0/TXADDRESS are left alone and whatever access
+         * address is configured is sent: overwriting the shared adv AA
+         * here makes a later scan reject every packet. */
         radio_carrier_pdu[0] = 0x42u;
         radio_carrier_pdu[1] = 37u;
         for (i = 0u; i < 38u; i++) {
@@ -970,11 +938,12 @@ int tiku_radio_arch_phy_tx(tiku_radio_arch_phy_t phy, uint8_t chan,
     RADIO->FREQUENCY = adv_freq[chan];
     RADIO->DATAWHITE = BLE_WHITE_POLY | (0x40u | adv_index[chan]);
     RADIO->PACKETPTR = (uint32_t)pdu;
-    RADIO->SHORTS = (1u << 0) | (1u << 19);      /* READY_START|PHYEND_DISABLE */
+    RADIO->SHORTS = (1u << 0) | (1u << 19);     /* READY_START|PHYEND_DISABLE */
     RADIO->EVENTS_DISABLED = 0u;
     RADIO->TASKS_TXEN = 1u;
-    /* Big cap: coded S=8 airtime is ~8x 1M, far past adv_tx_one's window.
-     * Kick the dog inside the wait so a stuck ramp can't reset the board. */
+    /* Large cap: coded S=8 airtime is ~8x 1M, past adv_tx_one's window.
+     * The watchdog is kicked inside the wait, so a stuck ramp cannot reset
+     * the board. */
     for (spin = 0u; spin < 20000000u; spin++) {
         if (RADIO->EVENTS_DISABLED != 0u) {
             break;
@@ -1004,27 +973,26 @@ int tiku_radio_arch_phy_rx_count(tiku_radio_arch_phy_t phy, uint8_t chan,
         chan = 0u;
     }
     radio_phy_force_disable();
-    /* Coded RX is ALWAYS armed as Ble_LR125Kbit (MODE 5): FEC block 1
-     * (header) is coded S=8 on every long-range packet, and its Coding
-     * Indicator tells the receiver whether the PAYLOAD is S=8 or S=2 -- the
-     * hardware then auto-boosts (EVENTS_RATEBOOST: "receive mode is changed
-     * from Ble_LR125Kbit to Ble_LR500Kbit", datasheet 8-radio).  Arming
-     * MODE 6 (LR500) for RX skips block-1 decode and misses S=2 packets --
-     * the R8.2 "Coded S2 RX ~1-2%" outlier.  So map any coded RX to S8's
-     * config; TX still uses MODE 6 to EMIT S=2. */
+    /* Coded RX is always armed as Ble_LR125Kbit (MODE 5): FEC block 1 (the
+     * header) is coded S=8 on every long-range packet, and its Coding
+     * Indicator tells the receiver whether the payload is S=8 or S=2; the
+     * hardware then switches rate (EVENTS_RATEBOOST: "receive mode is
+     * changed from Ble_LR125Kbit to Ble_LR500Kbit", datasheet 8-radio).  RX
+     * armed as MODE 6 (LR500) skips block-1 decode and misses most S=2
+     * packets.  TX uses MODE 6 to send S=2. */
     radio_apply_phy((phy == TIKU_RADIO_PHY_CODED_S2)
                     ? TIKU_RADIO_PHY_CODED_S8 : phy);
     radio_phy_link_aa();
     RADIO->FREQUENCY = adv_freq[chan];
     RADIO->DATAWHITE = BLE_WHITE_POLY | (0x40u | adv_index[chan]);
     RADIO->PACKETPTR = (uint32_t)phy_rxbuf;
-    RADIO->SHORTS = (1u << 0);                   /* READY_START only           */
+    RADIO->SHORTS = (1u << 0);                   /* READY_START only          */
     RADIO->EVENTS_END      = 0u;
     RADIO->EVENTS_CRCOK    = 0u;
     RADIO->EVENTS_CRCERROR = 0u;
     RADIO->EVENTS_ADDRESS  = 0u;
     radio_hfclk_kick();
-    RADIO->TASKS_RXEN = 1u;                      /* ramp once, then stay in RX */
+    RADIO->TASKS_RXEN = 1u;                     /* ramp once, then stay in RX */
 
     for (;;) {
         if (RADIO->EVENTS_END != 0u) {          /* a packet landed            */
@@ -1039,7 +1007,7 @@ int tiku_radio_arch_phy_rx_count(tiku_radio_arch_phy_t phy, uint8_t chan,
             RADIO->EVENTS_CRCOK = 0u;
             RADIO->EVENTS_CRCERROR = 0u;
             RADIO->EVENTS_RATEBOOST = 0u;
-            RADIO->TASKS_START = 1u;             /* re-RX from RXIDLE (no ramp)*/
+            RADIO->TASKS_START = 1u;            /* re-RX from RXIDLE, no ramp */
         }
         spin++;
         if ((spin & 0xFFFFu) == 0u) {
@@ -1065,22 +1033,19 @@ int tiku_radio_arch_phy_rx_count(tiku_radio_arch_phy_t phy, uint8_t chan,
 }
 
 /*---------------------------------------------------------------------------*/
-/* Connectable advertising + CONNECT_IND capture (L1)                        */
+/* CONNECTABLE ADVERTISING AND CONNECT_IND CAPTURE                           */
 /*---------------------------------------------------------------------------*/
 /*
- * First rung of the link-layer ladder (kintsugi/radio.md L-track):
- * transmit ADV_IND (connectable) and open an RX window on the SAME
- * channel immediately after -- a central answers T_IFS=150 us after the local
- * packet ends with SCAN_REQ or CONNECT_IND.  The TX->RX turnaround is
- * pure hardware: the DISABLED_RXEN short (bit 3) re-arms the receiver
- * during the post-TX poll's first microseconds, so the radio is
- * listening long before the central's 150 us mark.  The CPU's only
- * timing duty is swapping PACKETPTR to the RX buffer inside the ~40 us
- * ramp -- a couple of register writes after the DISABLED poll hits.
+ * Transmit the advert and open an RX window on the same channel right after:
+ * a central answers T_IFS=150 us after the local packet ends, with SCAN_REQ
+ * or CONNECT_IND.  The TX->RX turnaround is hardware: the DISABLED_RXEN
+ * short (bit 3) re-arms the receiver, which is listening well before the
+ * central's 150 us mark.  The CPU swaps PACKETPTR to the RX buffer inside
+ * the ~40 us ramp.
  *
- * L1 deliberately does NOT respond (no SCAN_RSP, no connection): the
- * exit criterion is capturing and decoding a real central's CONNECT_IND
- * LLData off the air.  Fully polled, like every TX-path bring-up here.
+ * A SCAN_REQ for the advertiser gets a SCAN_RSP.  A CONNECT_IND is captured
+ * and decoded but not answered: the probe returns with its LLData.  Fully
+ * polled.
  *
  * RAM layout of a captured CONNECT_IND (erratum-49 S1 slot included):
  *   [S0][LEN=34][S1][InitA 6][AdvA 6][LLData 22]
@@ -1089,61 +1054,48 @@ int tiku_radio_arch_phy_rx_count(tiku_radio_arch_phy_t phy, uint8_t chan,
  *         Latency(2) Timeout(2) ChM(5) Hop:5|SCA:3 (1).
  */
 
-/* T_IFS the SCAN_RSP turnaround is programmed with.  Settable because the
- * RADIO's TIFS is not the number that lands on air: the measured gap runs
- * short of it, and a scan response outside the scanner's 150 us +/- 2 window
- * is never received -- which leaves a host holding the advert, waiting for
- * the pair it needs before it will report the device at all. */
+/* RADIO.TIFS during the probe: it times the TX->RX turnaround after each
+ * advert.  The SCAN_RSP turnaround is timed by connadv_txen_ticks below. */
 uint32_t tiku_radio_arch_connadv_tifs_cfg = 150u;
-/* Ticks of TIMER10 from the end of a SCAN_REQ to the TXEN that answers it.
- * The RADIO's TIFS does not govern the PHYEND_DISABLE + DISABLED_TXEN chain
- * on this part: the reply left at the ramp's own pace, ~58 us after the
- * request, outside the 150 +/- 2 a scanner listens in.  So the timer fires
- * TXEN instead, at this many ticks after the request's PHYEND cleared it,
- * and the fast ramp-up (40 us) puts the first bit at T_IFS.  The figure is
- * what a second radio scanning this one (tiku_radio_arch_scanreq_probe)
- * reads as the spec's 150 us; this radio's own capture of the reply reads
- * 40 ticks more, its receive and transmit events firing at different points
- * in a packet.  Settable so it can be trimmed on hardware. */
+/* TIMER10 ticks (us) from a SCAN_REQ's PHYEND to the TXEN that answers it.
+ * RADIO.TIFS does not govern the PHYEND_DISABLE + DISABLED_TXEN chain on
+ * this part: that reply leaves at the ramp's own pace, about 58 us after the
+ * request, outside the 150 +/- 2 us a scanner listens in.  The timer fires
+ * TXEN instead, and the 40 us fast ramp puts the first bit at T_IFS.  200 is
+ * what a second radio running tiku_radio_arch_scanreq_probe() reads as
+ * 150 us; this radio's own capture of the reply reads 40 ticks more.
+ * Settable for trimming on hardware. */
 uint32_t tiku_radio_arch_connadv_txen_ticks = 200u;
-/* The PDU type the probe advertises with: 0 ADV_IND, 2 ADV_NONCONN_IND, 6
- * ADV_SCAN_IND -- to tell a host that objects to one type from a host that
- * objects to this radio. */
+/* PDU type the probe advertises with: 0 ADV_IND, 2 ADV_NONCONN_IND, 6
+ * ADV_SCAN_IND. */
 uint32_t tiku_radio_arch_connadv_pdu_type;
 /* TIMER10 ticks per millisecond, measured against the kernel clock at every
- * probe: the number every T_IFS figure here is read in. */
+ * probe; the T_IFS figures here are in TIMER10 ticks. */
 uint32_t tiku_radio_arch_dbg_connadv_ticks_per_ms;
 uint32_t tiku_radio_arch_dbg_connadv_rxtifs;
 uint32_t tiku_radio_arch_dbg_connadv_rxtifs_n;
 uint32_t tiku_radio_arch_dbg_connadv_rxtifs_min;
 uint32_t tiku_radio_arch_dbg_connadv_rxtifs_max;
-uint32_t tiku_radio_arch_dbg_connadv_tx;      /* ADV_INDs transmitted     */
-uint32_t tiku_radio_arch_dbg_connadv_scanreq; /* SCAN_REQs heard (for us) */
-uint32_t tiku_radio_arch_dbg_connadv_rsp;     /* SCAN_RSPs launched (L2)  */
+uint32_t tiku_radio_arch_dbg_connadv_tx;      /* adverts transmitted      */
+uint32_t tiku_radio_arch_dbg_connadv_scanreq; /* SCAN_REQs for this AdvA */
+uint32_t tiku_radio_arch_dbg_connadv_rsp;     /* SCAN_RSPs launched       */
 uint32_t tiku_radio_arch_dbg_connadv_tifs;    /* measured RX-end->TX gap  */
-uint32_t tiku_radio_arch_dbg_connadv_rxother; /* CRC-OK, not for us       */
+uint32_t tiku_radio_arch_dbg_connadv_rxother; /* CRC-OK, other AdvA       */
 
-/* L2 additions on the same probe: TIFS=150 makes BOTH turnarounds
- * hardware-spaced (the radio times ramp-up so RX opens / TX first-bit
- * lands exactly at T_IFS -- the designed use of the register), and the
- * RX leg arms the DISABLED_TXEN short so a SCAN_RSP launches with zero
- * CPU in the timing path.  The CPU's decision window is the ~70 us
- * before the auto-TX's ramp: a matching SCAN_REQ -> swap PACKETPTR to the
- * SCAN_RSP; anything else -> clear the short FIRST, then disable (the
- * order matters -- a disable fires DISABLED, and a still-armed short
- * would chain a garbage TX).  After a launched response, the short is
- * cleared during the TX (post-READY) so its own DISABLED cannot chain.
+/* Turnaround timing.  TX->RX is the DISABLED_RXEN short, which RADIO.TIFS
+ * spaces.  RX->TX runs on TIMER10: every PHYEND (DPPI ch3) clears it, every
+ * ADDRESS (ch4) captures it into CC[4], and COMPARE[0] (ch5) fires the
+ * SCAN_RSP's TXEN; ch5 is enabled only after a SCAN_REQ for this AdvA has
+ * landed, and disabled again once TXEN fires.  CC[4] after a request reads
+ * the scanner's T_IFS plus 40 us of preamble and access address; after the
+ * response it reads this radio's T_IFS plus 40. */
+/**
+ * @brief Wait for the short's DISABLED, then a memory barrier, before a
+ *        received packet is parsed.
  *
- * The T_IFS oracle is hardware: TIMER10 is cleared by every PHYEND (ch3)
- * and captured into CC[4] by every ADDRESS (ch4), so after the response
- * CC[4] = its access-address end since the request's end = T_IFS + 40 us
- * of preamble+AA; the same capture after a request reads the scanner's own
- * T_IFS.  COMPARE[0] on ch5 is the TXEN that answers. */
-/* Before a received packet is parsed.  The bytes land within a tick of
- * PHYEND, but the buffer is ordinary memory the DMA writes behind the
- * compiler's back: a header byte loaded for the PREVIOUS packet is reused
- * for this one unless something tells the compiler memory has changed.  The
- * barrier is that something; the wait is for the short's DISABLED. */
+ * The DMA writes the buffer behind the compiler's back; without the barrier
+ * a header byte loaded for the previous packet is reused for this one.
+ */
 static void connadv_landed(void)
 {
     uint32_t spin;
@@ -1196,7 +1148,7 @@ int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
     /* TIMER10: the T_IFS clock.  Every PHYEND clears it, so a capture on the
      * next ADDRESS reads the gap between one packet's end and the next's
      * access address, and COMPARE[0] fires the reply's TXEN at a fixed
-     * distance from the request's end -- on a DPPI channel left DISABLED
+     * distance from the request's end, on a DPPI channel left disabled
      * until a request that deserves an answer has landed. */
     NRF_TIMER10_S->TASKS_STOP  = 1u;
     NRF_TIMER10_S->TASKS_CLEAR = 1u;
@@ -1251,12 +1203,10 @@ int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
         }
         tiku_radio_arch_dbg_connadv_tx++;
 
-        /* RX leg is ramping (hardware short).  Swap to the response
-         * shorts -- the RX's own end now chains a T_IFS-spaced TXEN --
-         * and hand the DMA its buffer, inside the ramp.  The window is
-         * watched on PHYEND, the packet's own end: it precedes whatever
-         * the chain does next, so one wait works for every chain and it
-         * leaves the whole T_IFS to decide what to answer with. */
+        /* RX leg is ramping (hardware short).  Drop DISABLED_RXEN from
+         * the shorts and hand the DMA its buffer, inside the ramp.  The
+         * window is watched on PHYEND, the packet's own end, which leaves
+         * the whole T_IFS to decide what to answer with. */
         RADIO->SHORTS = (1u << 0) | (1u << 19) | (1u << 4);
         RADIO->PACKETPTR = (uint32_t)rx;
         RADIO->EVENTS_PHYEND = 0u;
@@ -1265,8 +1215,8 @@ int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
         NRF_TIMER10_S->EVENTS_COMPARE[0] = 0u;
         (void)RADIO->EVENTS_PHYEND;
 
-        /* Listen ~2 ms: a central answers at 150 us; SCAN_REQs from
-         * ambient scanners arrive constantly and prove the window. */
+        /* Listen for an answer (a bounded poll); a central answers at
+         * 150 us. */
         for (spin = 0u; spin < 260000u; spin++) {
             if (RADIO->EVENTS_PHYEND != 0u) {
                 break;
@@ -1286,9 +1236,8 @@ int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
             forus = (RADIO->EVENTS_CRCOK != 0u &&
                      memcmp(&rx[9], addr, 6u) == 0) ? 1u : 0u;
 
-            {   /* The request's own T_IFS: its ADDRESS, counted from the
-                 * ADV_IND's end.  A scanner keeps the spec's 150, so this
-                 * is the yardstick the reply below is judged by. */
+            {   /* The request's own T_IFS: its ADDRESS time counted from
+                 * the advert's end, less 40 us of preamble and AA. */
                 uint32_t rxgap = NRF_TIMER10_S->CC[4];
                 if (forus && type == 0x03u && rx[1] == 12u &&
                     rxgap > 40u && rxgap < 4000u) {
@@ -1395,7 +1344,7 @@ int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
 }
 
 /*---------------------------------------------------------------------------*/
-/* CSA#1 channel selection (L3 groundwork)                                   */
+/* CSA#1 CHANNEL SELECTION                                                   */
 /*---------------------------------------------------------------------------*/
 /*
  * Channel Selection Algorithm #1 (Core Vol 6 Part B 4.5.8.2), the hop
@@ -1403,10 +1352,9 @@ int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
  *   unmapped = (lastUnmapped + hopIncrement) mod 37
  *   used?    -> channel = unmapped
  *   unused?  -> channel = usedChannels[unmapped mod numUsed] (ascending)
- * lastUnmapped advances to `unmapped` either way -- the classic
- * implementation bug is advancing to the REMAPPED channel.
- * Verified against an independent Python implementation via the baked
- * vectors in `bleadv csa1` (three maps incl. heavy remapping).
+ * lastUnmapped advances to `unmapped` either way, never to the remapped
+ * channel.  `bleadv csa1` checks this function against vectors from an
+ * independent implementation (three maps, including heavy remapping).
  */
 
 uint8_t tiku_radio_ll_csa1_next(uint8_t last_unmapped, uint8_t hop,
@@ -1438,32 +1386,25 @@ uint8_t tiku_radio_ll_csa1_next(uint8_t last_unmapped, uint8_t hop,
 }
 
 /*---------------------------------------------------------------------------*/
-/* Data-PDU acknowledgement / flow control (L3 groundwork)                   */
+/* DATA-PDU ACKNOWLEDGEMENT AND FLOW CONTROL                                 */
 /*---------------------------------------------------------------------------*/
 /*
- * The SN/NESN 1-bit sliding window (Core Vol 6 Part B 4.5.9), the other
- * classic link-layer bug-nest.  Each side carries in every Data PDU
- * header its own SN (the seq number of the PDU it is sending) and NESN
- * (the seq number it expects next = an ack of the peer's last PDU).
+ * The SN/NESN 1-bit sliding window (Core Vol 6 Part B 4.5.9).  Each side
+ * carries in every Data PDU header its own SN (the sequence number of the
+ * PDU it sends) and NESN (the one it expects next, which acks the peer's
+ * last PDU).
  *
- * On receiving a CRC-valid Data PDU (rx_sn, rx_nesn, has_payload):
- *   - ACK of MY transmission: rx_nesn != my sn  =>  peer moved past my
- *     SN, so my PDU landed -> flip sn, load the next TX PDU.  Equal =>
- *     NAK, retransmit the SAME PDU.
- *   - NEW data from peer: rx_sn == my nesn AND the PDU carries payload
- *     =>  not a retransmission -> deliver, flip nesn.  Unequal/empty =>
- *     a resend or a keepalive I already have -> discard (ACK half still
- *     applies).
- * Both flips are INDEPENDENT: a single PDU can ack my TX and carry new
- * data.  CRITICAL: NESN advances only for PAYLOAD-bearing PDUs, never for
- * empty keepalives.  Otherwise a stream of empties walks my NESN past the
- * peer's SN, and the peer then reads my (advanced) NESN as an ACK of data
- * it never received -- a false ACK that silently drops the payload.
- * Gating NESN on payload makes it a trustworthy "I got your data" signal,
- * so the sender can retransmit until GENUINELY delivered (exactly-once),
- * which unsolicited notifications rely on (there is no app-level reply to
- * confirm them).  Empties stay flow-control-neutral except for the ACK
- * half, which they still legitimately carry.
+ * On a CRC-valid Data PDU (rx_sn, rx_nesn, has_payload):
+ *   - rx_nesn != local sn: the peer acked the local PDU; flip sn and load
+ *     the next one.  Equal: a NAK; retransmit the same PDU.
+ *   - rx_sn == local nesn and the PDU carries payload: new data; deliver
+ *     and flip nesn.  Otherwise it is a resend or an empty keepalive and is
+ *     discarded; its ack half still applies.
+ * The two flips are independent: one PDU can ack and carry new data.  NESN
+ * advances only for payload-bearing PDUs.  Advanced by empty keepalives, it
+ * would pass the peer's SN, and the peer would read it as an ack of data
+ * never received and drop that payload.  Notifications, which no reply
+ * confirms, are retransmitted until this ack arrives.
  */
 
 uint8_t tiku_radio_ll_ack(tiku_radio_ll_ack_t *a, uint8_t rx_sn,
@@ -1471,11 +1412,11 @@ uint8_t tiku_radio_ll_ack(tiku_radio_ll_ack_t *a, uint8_t rx_sn,
 {
     uint8_t r = 0u;
 
-    if ((rx_nesn & 1u) != a->sn) {             /* my last PDU acked        */
+    if ((rx_nesn & 1u) != a->sn) {             /* local PDU acked          */
         a->sn ^= 1u;
         r |= TIKU_RADIO_LL_ACKED;
     }
-    if (has_payload && (rx_sn & 1u) == a->nesn) {  /* genuinely new data   */
+    if (has_payload && (rx_sn & 1u) == a->nesn) {  /* new data             */
         a->nesn ^= 1u;
         r |= TIKU_RADIO_LL_NEWDATA;
     }
@@ -1483,35 +1424,30 @@ uint8_t tiku_radio_ll_ack(tiku_radio_ll_ack_t *a, uint8_t rx_sn,
 }
 
 /*---------------------------------------------------------------------------*/
-/* Connection engine, PERIPHERAL role (L3)                                   */
+/* CONNECTION ENGINE, PERIPHERAL ROLE                                        */
 /*---------------------------------------------------------------------------*/
 /*
- * The spine: hold a live BLE connection with a real central.  Everything
- * hard is already proven -- L2's hardware T_IFS turnaround (RX -> 150 us
- * -> auto TX, the exact short chain used here), CSA#1 hopping, and the
- * SN/NESN ack window.  L3 threads them through a per-connection-event
- * loop clocked by a free-running TIMER10 (1 MHz absolute timebase):
+ * Holds a BLE connection with a central, as a loop of connection events
+ * clocked by a free-running TIMER10 (1 MHz absolute timebase):
  *
- *   advertise ADV_IND -> capture CONNECT_IND (reuses the L1 path) and its
- *   end time -> first anchor = end + transmitWindowDelay(1250us) +
- *   WinOffset*1250 -> per event { wait the anchor, RX on the CSA#1 data
- *   channel, hardware-T_IFS respond with an empty PDU carrying the local
- *   SN/NESN, re-sync the anchor to the packet's actual arrival } until
- *   the supervision timeout (no CRC-valid packet) or the caller's cap.
+ *   advertise ADV_IND -> capture CONNECT_IND and its end time -> first
+ *   anchor = end + transmitWindowDelay (1250 us) + WinOffset * 1250 -> per
+ *   event { wait for the anchor, RX on the CSA#1 data channel, answer at
+ *   T_IFS (hardware DISABLED_TXEN) with the pending LL or ATT PDU, else an
+ *   empty one, re-sync the anchor to the packet's arrival } until the
+ *   supervision timeout, a TERMINATE_IND or the caller's cap.
  *
- * Blocking + polled, like every bring-up path here (the shell is parked
- * while connected; L6 makes it a background service).  Drift is handled
- * by re-syncing to each packet's arrival, so a small per-event window
- * suffices after the first.  Empty PDUs only -- no LL control (L4), no
- * data (L5), no encryption; enough to keep the link UP, which is L3's
- * whole exit criterion.
+ * Blocking and polled: the shell is parked while connected.  Re-syncing to
+ * each packet's arrival absorbs drift, so later windows are narrow.
  */
 
 #define BLE_TX_WIN_DELAY_US  1250u    /* LE 1M transmitWindowDelay        */
-#define CONN_PREROLL_US      300u     /* open RX this far before the anchor */
+#define CONN_PREROLL_US      300u     /* unused: RX opens 600 us early */
 
-/* Free-running 1 MHz timebase for the whole connection (CC[2]=now reads,
- * CC[1]=per-packet anchor capture). */
+/**
+ * @brief Start TIMER10 as the connection's free-running 1 MHz timebase
+ *        (CC[2] for now reads, CC[1] for per-packet anchor captures).
+ */
 static void conn_timer_start(void)
 {
     NRF_TIMER10_S->TASKS_STOP  = 1u;
@@ -1523,20 +1459,24 @@ static void conn_timer_start(void)
     NRF_TIMER10_S->TASKS_START = 1u;
 }
 
+/** @brief Return the connection timebase, in microseconds. */
 static uint32_t conn_now(void)
 {
     NRF_TIMER10_S->TASKS_CAPTURE[2] = 1u;
     return NRF_TIMER10_S->CC[2];
 }
 
-/* Data channel index k (0..36) -> RADIO FREQUENCY offset (MHz - 2400),
- * skipping the three advertising channels. */
+/**
+ * @brief Map data channel index @p k (0..36) to the RADIO FREQUENCY offset
+ *        (MHz - 2400), skipping the three advertising channels.
+ */
 static uint8_t ble_data_chan_freq(uint8_t k)
 {
     return (k <= 10u) ? (uint8_t)(4u + 2u * k)
                       : (uint8_t)(28u + 2u * (k - 11u));
 }
 
+/** @brief Set access address, CRC init, frequency and whitening for @p k. */
 static void radio_cfg_data(uint32_t aa, uint32_t crcinit, uint8_t k)
 {
     RADIO->BASE0     = aa << 8;                /* BALEN=3: base in top 3 B  */
@@ -1547,15 +1487,14 @@ static void radio_cfg_data(uint32_t aa, uint32_t crcinit, uint8_t k)
 }
 
 /*---------------------------------------------------------------------------*/
-/* LL control PDUs (L4) -- shared by both roles (own state per board)        */
+/* LL CONTROL, L2CAP AND ATT (BOTH ROLES)                                    */
 /*---------------------------------------------------------------------------*/
 /*
- * A minimal, conformant LL control layer on top of the empty-PDU link:
- * one pending control PDU at a time (retransmitted via SN/NESN until the
- * peer acks), request/response handling for VERSION/FEATURE/PING, and
- * LL_UNKNOWN_RSP for anything unrecognised (so a probing peer never
- * hangs).  PHY-independent; the connection engine calls ll_build_tx()
- * for what to send and ll_handle_rx() for what arrived.
+ * One pending PDU at a time (retransmitted via SN/NESN until the peer acks),
+ * request/response handling for VERSION/FEATURE/PING/LENGTH/ENC/PHY, and
+ * LL_UNKNOWN_RSP for any other opcode, so a probing peer gets an answer.
+ * The connection engines call ll_build_tx() for what to send and
+ * ll_handle_rx() for what arrived.
  */
 #define LL_CONNECTION_UPDATE 0x00u
 #define LL_CHANNEL_MAP_IND   0x01u
@@ -1574,21 +1513,21 @@ static void radio_cfg_data(uint32_t aa, uint32_t crcinit, uint8_t k)
 #define LL_PING_REQ          0x12u
 #define LL_PING_RSP          0x13u
 
-static uint8_t  ll_tx[TIKU_FLPR_DLE_BUF_SIZE]; /* pending PDU [hdr][len][S1][pay]*/
+static uint8_t  ll_tx[TIKU_FLPR_DLE_BUF_SIZE]; /* [hdr][len][S1][payload] */
 static uint8_t  ll_tx_len;          /* payload len; 0 = none               */
 static uint8_t  ll_tx_llid;         /* 2 = L2CAP data, 3 = LL control      */
-static uint8_t  ll_peer_vers;       /* peer VersNr (0 = not yet heard)     */
+static uint8_t  ll_peer_vers;       /* peer VersNr (0 = none heard)        */
 static uint8_t  ll_sent_vers;       /* VERSION_IND has been queued         */
 static uint8_t  ll_want_term;       /* peer sent TERMINATE_IND             */
 static uint8_t  ll_is_central;      /* role: drives ATT client vs server   */
 static uint32_t ll_ctrl_tx, ll_ctrl_rx;
-/* Phase C: L2CAP fragmentation/recombination (an ATT PDU past the 23-byte
- * default MTU spans several data PDUs).  TX SDU = the outgoing L2CAP PDU,
- * doled one <=27-byte fragment per acked LL PDU (LLID 2 start / 1 cont).
- * RX buffer = recombine incoming fragments back into a whole L2CAP PDU. */
+/* L2CAP fragmentation and recombination: an L2CAP PDU longer than the LL
+ * payload spans several data PDUs.  The TX SDU goes out one fragment of up
+ * to cen_dle_max bytes per acked LL PDU (LLID 2 start, 1 continuation); the
+ * RX buffer recombines incoming fragments into a whole L2CAP PDU. */
 #define L2_FRAG_MAX  27u            /* pre-DLE default LL data payload      */
-/* Data Length Extension (F1): raised to the negotiated max on LL_LENGTH_RSP so
- * a whole L2CAP PDU rides ONE LL PDU instead of 27-byte fragments. */
+/* Data Length Extension: raised to the negotiated max on LL_LENGTH_RSP, so
+ * an L2CAP PDU up to that size fits one LL PDU. */
 static uint8_t  cen_dle_max = L2_FRAG_MAX;
 static uint8_t  cen_dle_sent;       /* LL_LENGTH_REQ has been queued       */
 /* 72 >= the largest L2CAP PDU either side moves: the SMP Pairing Public Key
@@ -1597,25 +1536,26 @@ static uint8_t  cen_sdu[72];        /* outgoing L2CAP PDU being fragmented  */
 static uint16_t cen_sdu_len, cen_sdu_off;
 static uint8_t  cen_rc[72];         /* incoming recombination buffer        */
 static uint16_t cen_rc_len, cen_rc_expect;
-/* Phase E: SMP pairing INITIATOR.  When cen_test_smp is armed the central,
- * once the LL is up, drives LE-SC "Just Works" on CID 0x0006 to a shared LTK
- * instead of the NUS ATT flow.  A = InitA (us), B = AdvA (peer). */
+/* SMP pairing initiator.  When cen_test_smp is armed the central, once the
+ * LL is up, drives LE-SC "Just Works" on CID 0x0006 to a shared LTK instead
+ * of the NUS ATT flow.  A = InitA (this central), B = AdvA (peer). */
 static uint8_t  cen_test_smp;
 static uint8_t  cen_smp_started;
 static uint8_t  cen_smp_ready;      /* keypair generated, Pairing Req staged */
 static uint8_t  cen_smp_a[6], cen_smp_b[6];
-/* Bonding: when armed, on connect the central looks the peer's AdvA up in the
- * durable bond store.  Bonded -> SKIP SMP, encrypt with the stored LTK;
- * un-bonded -> pair as usual, then store the LTK so the NEXT reconnect skips. */
+/* Bonding: when armed, on connect the central looks the peer's AdvA up in
+ * the durable bond store.  A bonded peer skips SMP and encrypts with the
+ * stored LTK; an unbonded one pairs, and the LTK is stored for the next
+ * reconnect. */
 static uint8_t  cen_bond_mode;      /* remember/reuse the LTK across connects */
 static uint8_t  cen_bonded;         /* this connection reused a stored bond   */
-/* Scan-by-address (central hardening): when set, the initiator connects to a
- * specific AdvA instead of matching the "TIKU" device name. */
+/* Scan-by-address: when set, the initiator connects to a specific AdvA
+ * instead of matching the "TIKU" device name. */
 static uint8_t  cen_target_set;
 static uint8_t  cen_target_addr[6];
 static uint8_t  cen_bond_stored;    /* this run's fresh LTK is saved already  */
 static uint8_t  cen_bond_ltk[16];   /* the stored LTK when cen_bonded         */
-/* Phase F2 PHY-update state (declared here: used in ll_reset/ll_handle_rx). */
+/* PHY-update state (declared here: used in ll_reset/ll_handle_rx). */
 static uint8_t  cen_test_phy;       /* PHY update target: 0 off, 1 2M, 2 S8  */
 static uint8_t  cen_phy_rsp;        /* LL_PHY_RSP received                   */
 static uint8_t  cen_phy_applied;    /* central switched its RADIO             */
@@ -1628,34 +1568,33 @@ static uint8_t  cen_phy_cur;        /* live PHY in-connection (0/1M 1/2M 2/S8)*/
 static uint8_t  cen_smp_last[TIKU_BLE_SMP_PDU_MAX];
 static uint8_t  cen_smp_last_len;
 static uint16_t cen_smp_wait;
-/* Phase E3: LL encryption startup (central = initiator).  After pairing the
- * send LL_ENC_REQ and derive SK = e(LTK, SKDm||SKDs) from the LL_ENC_RSP. */
+/* LL encryption startup (central = initiator).  After pairing, the central
+ * sends LL_ENC_REQ and derives SK = e(LTK, SKDm||SKDs) from LL_ENC_RSP. */
 static uint8_t  cen_enc_stage;      /* 0 idle, 1 ENC_REQ sent, 2 SK derived  */
 static uint16_t cen_enc_wait;       /* stall counter for ENC_REQ retransmit  */
 static uint8_t  cen_skdm[8], cen_ivm[4];
 static uint8_t  cen_sk[16], cen_iv[8];
-/* Phase C signalling (CID 0x0005): a peripheral's Connection Parameter Update
- * Request sets cen_cpu_req; the master obliges by issuing an LL_CONNECTION_
- * UPDATE_IND with the requested interval (which the FLPR then follows). */
+/* L2CAP signalling (CID 0x0005): a peripheral's Connection Parameter Update
+ * Request sets cen_cpu_req; the central answers with an
+ * LL_CONNECTION_UPDATE_IND carrying the requested interval. */
 static uint8_t  cen_cpu_req;
 static uint16_t cen_cpu_interval;
 
-/* ATT/L2CAP (L5): a minimal NUS (Nordic UART Service) data path.
- *   peripheral = server: NUS RX (write target) + NUS TX (readable echo)
- *                behind a CCCD; a write to NUS RX is mirrored to TX.
- *   central    = client: MTU -> enable CCCD -> write "TK" to NUS RX ->
- *                read TX back and verify the echo.
- * The loopback is verified over the RELIABLE request/response path (each
- * request is retransmitted until answered): server-PUSHED notifications
- * on this on-die link are dropped by the peer's SN/NESN dedup and need a
- * proper LL reliability rework -- deferred (see kintsugi/radio.md L5).
- * This is the byte-pipe L6's tiku_ble_serial rides on.  Fixed handles
- * (a phone would discover them; the two-board client hard-codes them). */
+/* ATT over L2CAP: a minimal NUS (Nordic UART Service) data path.
+ *   peripheral = server: NUS RX (write target) and NUS TX behind a CCCD;
+ *                with notifications on, a write to NUS RX (up to 20 bytes
+ *                kept) is echoed as a TX notification.
+ *   central    = client: MTU -> GATT discovery -> enable CCCD -> write
+ *                NUS_TEST_MSG to NUS RX -> await the echoed notification
+ *                -> long read and long write tests.
+ * Each client request is re-sent until answered; the server's LL
+ * retransmits the notification until acked.  The handles below are the
+ * defaults the client falls back to when discovery finds nothing. */
 #define GATT_H_NUS_RX    0x0012u    /* write:  client -> server            */
-#define GATT_H_NUS_TX    0x0014u    /* readable echo (notify src, future)  */
+#define GATT_H_NUS_TX    0x0014u    /* notification source                 */
 #define GATT_H_NUS_CCCD  0x0015u    /* CCCD for the TX characteristic       */
-/* 40 bytes -> ATT 43 -> L2CAP 47: spans two data PDUs, so the write AND the
- * echoed notification both exercise L2CAP fragmentation (Phase C). */
+/* 40 bytes -> ATT 43 -> L2CAP 47: two data PDUs at the 27-byte LL payload,
+ * so without DLE the write and the echoed notification are fragmented. */
 static const uint8_t NUS_TEST_MSG[40] = {
     'F','R','A','G','-','L','2','C','A','P','-','P','H','A','S','E',
     'C','-','0','1','2','3','4','5','6','7','8','9','-','a','b','c',
@@ -1668,22 +1607,22 @@ static uint8_t  nus_rx_len;
 static uint8_t  nus_cccd;           /* server: TX notifications enabled bit */
 static uint8_t  nus_notify[20];     /* server: pending notification payload */
 static uint8_t  nus_notify_len;     /* server: >0 = queue a TX notification */
-/* Client steps: 1 mtu, 2 disc-service, 3 disc-chars, 4 disc-cccd,
- * 5 cccd-write, 6 rx-write, 7 await-notify, 8 done.  Discovery walks the
- * peer's GATT DB (Read By Group Type / Read By Type / Find Info) and uses
- * the DISCOVERED handles for the NUS ops (falling back to the well-known
- * ones if a step returns nothing), so it exercises the same ATT a phone
- * would -- kintsugi/radio.md L6 GATT discovery. */
+/* Client steps: 1 MTU, 2 discover services, 3 discover characteristics,
+ * 4 discover the CCCD, 5 CCCD write, 6 RX write, 7 await the notification,
+ * 8-9 long read, 10-12 long write, 13-14 read back, 15 done.  Discovery
+ * walks the peer's GATT DB (Read By Group Type, Read By Type, Find
+ * Information); the NUS operations use the discovered handles, falling back
+ * to the defaults above when a step finds nothing. */
 static uint8_t  att_step;
 static uint8_t  att_ok;             /* client: notification echo matched    */
 static uint8_t  att_readback;       /* client/server: first data byte seen  */
 static uint8_t  att_disc_ok;        /* client: discovered handles as expected */
 static uint16_t att_d_rx, att_d_tx, att_d_cccd; /* discovered NUS handles   */
 static uint16_t att_d_next;         /* Read-By-Type iteration cursor         */
-/* Phase D: exercise the table-driven GATT DB's long ops -- a long READ (Read
- * Blob) of the Model char (handle 0x0022, 72 B), then a long WRITE
- * (Prepare/Execute) of the scratch char (0x0032, 70 B) verified by readback.
- * Handles are hard-coded (a phone would discover them). */
+/* Long operations on the peer's GATT DB: a long read (Read Blob) of the
+ * Model characteristic (handle 0x0022, 72 bytes), then a long write
+ * (Prepare/Execute) of the scratch characteristic (0x0032, 70 bytes)
+ * verified by reading it back.  These handles are fixed, not discovered. */
 #define ATT_MODEL_H   0x0022u
 #define ATT_MODEL_LEN 72u
 #define ATT_SCR_H     0x0032u
@@ -1693,6 +1632,7 @@ static uint16_t att_long_len;
 static uint8_t  att_lread_ok;       /* Model long read matched (Read Blob)   */
 static uint8_t  att_lwrite_ok;      /* scratch long write matched (readback) */
 
+/** @brief Clear the LL, L2CAP, ATT and central state for a new connection. */
 static void ll_reset(void)
 {
     ll_tx_len = 0u; ll_tx_llid = 0u; ll_peer_vers = 0u; ll_sent_vers = 0u;
@@ -1701,19 +1641,19 @@ static void ll_reset(void)
     att_step = 0u; att_ok = 0u; att_readback = 0u;
     att_disc_ok = 0u; att_d_rx = 0u; att_d_tx = 0u; att_d_cccd = 0u;
     att_d_next = 0u;
-    att_long_len = 0u; att_lread_ok = 0u; att_lwrite_ok = 0u;  /* Phase D     */
-    cen_sdu_len = 0u; cen_sdu_off = 0u;         /* Phase C frag/recomb        */
+    att_long_len = 0u; att_lread_ok = 0u; att_lwrite_ok = 0u;  /* long ops    */
+    cen_sdu_len = 0u; cen_sdu_off = 0u;         /* frag/recomb                */
     cen_rc_len = 0u; cen_rc_expect = 0u;
-    cen_cpu_req = 0u; cen_cpu_interval = 0u;    /* Phase C signalling         */
-    cen_smp_started = 0u; cen_smp_ready = 0u;    /* Phase E: SMP not yet begun */
-    cen_bonded = 0u; cen_bond_stored = 0u;       /* bonding: fresh this conn   */
+    cen_cpu_req = 0u; cen_cpu_interval = 0u;    /* L2CAP signalling           */
+    cen_smp_started = 0u; cen_smp_ready = 0u;    /* SMP not begun             */
+    cen_bonded = 0u; cen_bond_stored = 0u;       /* bonding: fresh this conn  */
     cen_smp_last_len = 0u; cen_smp_wait = 0u;
-    cen_enc_stage = 0u;                          /* Phase E3: not encrypting   */
-    cen_dle_max = L2_FRAG_MAX; cen_dle_sent = 0u; /* Phase F1: pre-DLE         */
-    cen_phy_rsp = 0u;                            /* Phase F2: no LL_PHY_RSP yet*/
+    cen_enc_stage = 0u;                          /* not encrypting            */
+    cen_dle_max = L2_FRAG_MAX; cen_dle_sent = 0u; /* pre-DLE                  */
+    cen_phy_rsp = 0u;                            /* no LL_PHY_RSP             */
 }
 
-/* Queue a raw LL payload with the given LLID (2 L2CAP / 3 control). */
+/** @brief Queue a raw LL payload with @p llid (1/2 L2CAP, 3 control). */
 static void ll_queue_raw(uint8_t llid, const uint8_t *payload, uint8_t plen)
 {
     if (ll_tx_len != 0u || plen == 0u) {
@@ -1726,6 +1666,7 @@ static void ll_queue_raw(uint8_t llid, const uint8_t *payload, uint8_t plen)
     ll_tx_len = plen;
 }
 
+/** @brief Queue an LL control PDU: @p opcode then @p dlen bytes of @p data. */
 static void ll_queue(uint8_t opcode, const uint8_t *data, uint8_t dlen)
 {
     uint8_t p[34];
@@ -1736,20 +1677,24 @@ static void ll_queue(uint8_t opcode, const uint8_t *data, uint8_t dlen)
     ll_queue_raw(3u, p, (uint8_t)(1u + dlen));
 }
 
-/* Queue the fragment at cen_sdu_off (LLID 2 first, 1 continuation); does not
- * advance -- ll_on_acked() advances once the fragment lands. */
+/**
+ * @brief Queue the fragment at cen_sdu_off (LLID 2 first, 1 continuation),
+ *        up to cen_dle_max bytes; ll_on_acked() advances the offset.
+ */
 static void cen_sdu_frag(void)
 {
     uint16_t n = (uint16_t)(cen_sdu_len - cen_sdu_off);
     uint8_t  llid = (cen_sdu_off == 0u) ? 2u : 1u;
-    if (n > cen_dle_max) {                        /* DLE-negotiated size       */
+    if (n > cen_dle_max) {                        /* DLE-negotiated size      */
         n = cen_dle_max;
     }
     ll_queue_raw(llid, &cen_sdu[cen_sdu_off], (uint8_t)n);
 }
 
-/* Queue an L2CAP PDU on CID @p cid_lo and send it, fragmenting across data
- * PDUs when it exceeds one (Phase C). */
+/**
+ * @brief Queue an L2CAP PDU on CID @p cid_lo, fragmented across data PDUs
+ *        when it exceeds one; a PDU over sizeof(cen_sdu) is dropped.
+ */
 static void l2cap_queue(uint8_t cid_lo, const uint8_t *payload, uint8_t plen)
 {
     uint16_t i, len = (uint16_t)(4u + plen);
@@ -1765,14 +1710,16 @@ static void l2cap_queue(uint8_t cid_lo, const uint8_t *payload, uint8_t plen)
     cen_sdu_frag();                             /* first fragment            */
 }
 
-/* Wrap an ATT PDU in an L2CAP frame (CID 0x0004) and send it. */
+/** @brief Queue an ATT PDU in an L2CAP frame on CID 0x0004. */
 static void att_queue(const uint8_t *att, uint8_t alen)
 {
     l2cap_queue(0x04u, att, alen);
 }
 
-/* Phase E: pop the initiator engine's next SMP PDU and L2CAP-queue it (CID
- * 0x0006).  The initiator is strict ping-pong -- at most one PDU per step. */
+/**
+ * @brief Pop the SMP initiator's next PDU and queue it on CID 0x0006; the
+ *        initiator is strict ping-pong, at most one PDU per step.
+ */
 static void cen_smp_pump(void)
 {
     uint8_t  smp[TIKU_BLE_SMP_PDU_MAX];
@@ -1785,29 +1732,31 @@ static void cen_smp_pump(void)
     }
 }
 
-/* A recombined SMP PDU (CID 0x0006) arrived: feed the engine, send its reply. */
+/** @brief Feed a recombined SMP PDU (CID 0x0006) and queue the reply. */
 static void cen_smp_rx(const uint8_t *smp, uint16_t len)
 {
-    cen_smp_wait = 0u;                           /* progress: reset the stall  */
+    cen_smp_wait = 0u;                           /* progress: reset the stall */
     (void)tiku_ble_smp_pair_feed(smp, len);
     cen_smp_pump();
 }
 
-/* Phase F1: queue LL_LENGTH_REQ advertising the max RX/TX octets + time. */
+/** @brief Queue LL_LENGTH_REQ with the DLE max RX/TX octets and times. */
 static void cen_send_length_req(void)
 {
     uint8_t d[8];
-    d[0] = (uint8_t)TIKU_FLPR_DLE_MAX_OCTETS; d[1] = 0u;   /* MaxRxOctets      */
+    d[0] = (uint8_t)TIKU_FLPR_DLE_MAX_OCTETS; d[1] = 0u;   /* MaxRxOctets     */
     d[2] = (uint8_t)TIKU_FLPR_DLE_MAX_TIME;
-    d[3] = (uint8_t)(TIKU_FLPR_DLE_MAX_TIME >> 8);         /* MaxRxTime        */
-    d[4] = (uint8_t)TIKU_FLPR_DLE_MAX_OCTETS; d[5] = 0u;   /* MaxTxOctets      */
+    d[3] = (uint8_t)(TIKU_FLPR_DLE_MAX_TIME >> 8);         /* MaxRxTime       */
+    d[4] = (uint8_t)TIKU_FLPR_DLE_MAX_OCTETS; d[5] = 0u;   /* MaxTxOctets     */
     d[6] = (uint8_t)TIKU_FLPR_DLE_MAX_TIME;
-    d[7] = (uint8_t)(TIKU_FLPR_DLE_MAX_TIME >> 8);         /* MaxTxTime        */
+    d[7] = (uint8_t)(TIKU_FLPR_DLE_MAX_TIME >> 8);         /* MaxTxTime       */
     ll_queue(LL_LENGTH_REQ, d, 8u);
 }
 
-/* Build + queue LL_ENC_REQ from the current SKDm/IVm (Rand/EDIV = 0 for
- * LE SC).  Used for the first send and any stall retransmit (Phase E3). */
+/**
+ * @brief Queue LL_ENC_REQ from the current SKDm/IVm (Rand and EDIV 0 for
+ *        LE SC); used for the first send and for stall retransmits.
+ */
 static void cen_send_enc_req(void)
 {
     uint8_t req[22];
@@ -1824,9 +1773,10 @@ static void cen_send_enc_req(void)
     ll_queue(LL_ENC_REQ, req, 22u);
 }
 
-/* Phase E3c: CCM-encrypt the demo payload with the session key and send it as
- * an ATT Write Command to the peripheral's NUS RX (handle 0x0012).  The peer
- * decrypts + MIC-verifies it -- the SK encrypting data over the air. */
+/**
+ * @brief CCM-encrypt the demo payload with the session key and queue it as an
+ *        ATT Write Command to NUS RX (handle 0x0012) for the peer to decrypt.
+ */
 static void cen_send_enc_data(void)
 {
     static const uint8_t pt[TIKU_BLE_ENC_DEMO_PT_LEN] = TIKU_BLE_ENC_DEMO_PT;
@@ -1835,7 +1785,7 @@ static void cen_send_enc_data(void)
     uint8_t att[3u + TIKU_BLE_ENC_DEMO_PT_LEN + 4u];
     int i;
 
-    tiku_ble_enc_nonce(nonce, 0u, 1u, cen_iv);   /* counter 0, central->periph */
+    tiku_ble_enc_nonce(nonce, 0u, 1u, cen_iv);  /* counter 0, central->periph */
     if (tiku_crypto_arch_aes_ccm_star(0, cen_sk, 16u, nonce, &aad, 1u,
                                       pt, TIKU_BLE_ENC_DEMO_PT_LEN, 4u,
                                       ct, mic) != 0) {
@@ -1851,8 +1801,10 @@ static void cen_send_enc_data(void)
     l2cap_queue(0x04u, att, (uint8_t)(3u + TIKU_BLE_ENC_DEMO_PT_LEN + 4u));
 }
 
-/* L2CAP signalling (CID 0x0005): a peripheral's Connection Parameter Update
- * Request -- reply Accepted, then flag the master to issue the LL update. */
+/**
+ * @brief Handle L2CAP signalling (CID 0x0005): accept a Connection Parameter
+ *        Update Request and flag the central loop to issue the LL update.
+ */
 static void sig_handle(const uint8_t *l2cap, uint8_t len)
 {
     const uint8_t *sig = &l2cap[4];             /* [code][id][len:2][data]   */
@@ -1867,6 +1819,7 @@ static void sig_handle(const uint8_t *l2cap, uint8_t len)
     }
 }
 
+/** @brief Queue LL_VERSION_IND and mark it sent. */
 static void ll_queue_version(void)
 {
     /* VersNr 0x0C (5.3), CompId 0x0059 (Nordic), SubVersNr 0x0001. */
@@ -1875,8 +1828,10 @@ static void ll_queue_version(void)
     ll_sent_vers = 1u;
 }
 
-/* Build the outgoing PDU (pending control, else empty) with SN/NESN into
- * @p out; returns total RAM bytes ([hdr][len][S1]+payload). */
+/**
+ * @brief Build the outgoing PDU (the pending one, else empty) with SN/NESN
+ *        into @p out; returns the RAM bytes, [hdr][len][S1] plus payload.
+ */
 static uint8_t ll_build_tx(uint8_t *out, const tiku_radio_ll_ack_t *ack)
 {
     if (ll_tx_len != 0u) {
@@ -1892,9 +1847,10 @@ static uint8_t ll_build_tx(uint8_t *out, const tiku_radio_ll_ack_t *ack)
     return 3u;
 }
 
-/* The last TX was acknowledged (SN advanced): the pending PDU landed -- clear
- * the slot, and if it was an L2CAP SDU fragment, advance and queue the next
- * (Phase C fragmentation). */
+/**
+ * @brief The last TX was acked: clear the pending slot and, for an L2CAP
+ *        fragment, advance past it and queue the next one.
+ */
 static void ll_on_acked(void)
 {
     if (ll_tx_len != 0u) {
@@ -1916,11 +1872,13 @@ static void ll_on_acked(void)
     }
 }
 
-/* ATT client (L5): queue the request for the current step.  Used for the
- * initial send, each step advance, AND retransmission -- the link drops a
- * single-shot data PDU when the SN/NESN offset momentarily disfavours it
- * (the peer acks-but-ignores a "duplicate" sn), so the client re-sends
- * until the response lands.  Every request here is idempotent. */
+/**
+ * @brief ATT client: queue the request for the current step.  Used for the
+ *        first send, each step advance and each retransmission.
+ *
+ * The peer can ack a data PDU yet ignore it as a duplicate SN, so the client
+ * re-sends until the response lands; every request here is idempotent.
+ */
 static void att_client_send(void)
 {
     uint8_t  b[7];
@@ -1962,7 +1920,7 @@ static void att_client_send(void)
             w[3u + i] = NUS_TEST_MSG[i];
         }
         att_queue(w, (uint8_t)(3u + NUS_TEST_LEN));
-    } else if (att_step == 8u) {                /* Phase D: Read Model (long)*/
+    } else if (att_step == 8u) {                /* Read Model (long)         */
         att_long_len = 0u;
         b[0] = 0x0Au;
         b[1] = (uint8_t)ATT_MODEL_H; b[2] = (uint8_t)(ATT_MODEL_H >> 8);
@@ -2000,15 +1958,15 @@ static void att_client_send(void)
     /* step 7 awaits the server's pushed TX notification -- nothing to send */
 }
 
-/* ATT dispatch (L5): buf is the ATT PDU, len its length. */
+/** @brief Dispatch ATT PDU @p att of @p alen bytes (client or server). */
 static void att_handle(const uint8_t *att, uint8_t alen)
 {
     uint8_t op = att[0];
 
     if (ll_is_central) {
-        /* CLIENT: MTU -> GATT discovery -> CCCD -> write RX -> await notify.
-         * On an ATT Error (0x01) a discovery phase is simply "done", so it
-         * advance; missing handles fall back to the well-known ones. */
+        /* Client: MTU -> GATT discovery -> CCCD -> write RX -> await notify
+         * -> long read/write.  An ATT Error (0x01) ends a discovery phase,
+         * which then advances; missing handles fall back to the defaults. */
         uint16_t h_tx = att_d_tx ? att_d_tx : GATT_H_NUS_TX;
 
         if (op == 0x03u && att_step == 1u) {        /* MTU Response        */
@@ -2031,7 +1989,7 @@ static void att_handle(const uint8_t *att, uint8_t alen)
             if (att_d_rx != 0u && att_d_tx != 0u) {
                 att_step = 4u;                      /* both chars found    */
             }
-            att_client_send();                      /* next RdByType / FindInfo */
+            att_client_send();                   /* next RdByType / FindInfo */
         } else if (op == 0x05u && att_step == 4u && alen >= 6u) {
             if (att[4] == 0x02u && att[5] == 0x29u) {   /* CCCD 0x2902      */
                 att_d_cccd = (uint16_t)(att[2] | ((uint16_t)att[3] << 8));
@@ -2056,12 +2014,12 @@ static void att_handle(const uint8_t *att, uint8_t alen)
             att_step = 6u;
             att_client_send();                      /* write NUS RX        */
         } else if (op == 0x13u && att_step == 6u) { /* RX Write Response   */
-            att_step = 7u;                          /* now await notify    */
+            att_step = 7u;                          /* await the notify    */
         } else if (op == 0x1Bu && att_step == 7u) { /* Handle Value Notify */
             if (alen >= 5u && att[1] == (uint8_t)h_tx &&
                 att[2] == (uint8_t)(h_tx >> 8)) {
-                /* The whole 40-byte message must come back, recombined --
-                 * proof the notification fragmented + reassembled (Phase C). */
+                /* The whole 40-byte message must come back, recombined
+                 * from fragments when DLE is off. */
                 uint8_t ok = (uint8_t)(alen == (uint8_t)(3u + NUS_TEST_LEN));
                 uint8_t i;
                 att_readback = att[3];              /* echoed first byte   */
@@ -2072,7 +2030,7 @@ static void att_handle(const uint8_t *att, uint8_t alen)
                 }
                 att_ok = ok;                        /* full echo matched   */
                 att_step = 8u;                      /* loopback verified   */
-                att_client_send();                  /* Phase D: long read  */
+                att_client_send();                  /* long read           */
             }
         } else if ((op == 0x0Bu || op == 0x0Du) &&
                    att_step >= 8u && att_step <= 14u) {
@@ -2121,7 +2079,7 @@ static void att_handle(const uint8_t *att, uint8_t alen)
             att_client_send();
         }
     } else {
-        /* SERVER: MTU; CCCD + RX writes; a RX write pushes a TX notify. */
+        /* Server: MTU; CCCD and RX writes; an RX write queues a notify. */
         if (op == 0x02u) {                          /* Exchange MTU Req    */
             uint8_t m[3] = { 0x03u, 23u, 0u };      /* MTU Rsp, 23         */
             att_queue(m, 3u);
@@ -2150,10 +2108,12 @@ static void att_handle(const uint8_t *att, uint8_t alen)
     }
 }
 
-/* Server (L5): if a NUS TX notification is pending and the slot is free,
- * queue it as a Handle Value Notification.  Reliable now that NESN only
- * advances on payload -- the LL retransmits it until genuinely acked.
- * Called from the peripheral connection loop between events. */
+/**
+ * @brief Server: queue a pending NUS TX notification when the slot is free.
+ *
+ * The LL retransmits it until acked (NESN advances only on payload).  Called
+ * from the peripheral connection loop between events.
+ */
 static void att_server_pump(void)
 {
     if (nus_notify_len != 0u && ll_tx_len == 0u) {
@@ -2167,8 +2127,12 @@ static void att_server_pump(void)
     }
 }
 
-/* Kick off the application phase once the LL setup (VERSION + DLE) is done:
- * SMP pairing if armed, else the NUS ATT client.  Idempotent. */
+/**
+ * @brief Start the application phase once the LL setup is done: SMP pairing
+ *        if armed (or LL encryption for a bonded peer), else the ATT client.
+ *
+ * A call after the phase has started does nothing.
+ */
 static void cen_kick_app(void)
 {
     if (!ll_is_central || att_step != 0u || cen_smp_started) {
@@ -2184,7 +2148,7 @@ static void cen_kick_app(void)
             cen_smp_started = 1u;       /* don't kick the pairing exchange  */
             return;
         }
-        if (!cen_smp_ready) {           /* keygen deferred? do it now      */
+        if (!cen_smp_ready) {           /* no keypair: generate it here   */
             (void)tiku_ble_smp_pair_start(TIKU_BLE_SMP_ROLE_INITIATOR,
                                           cen_smp_a, 1u, cen_smp_b, 1u);
             cen_smp_ready = 1u;
@@ -2192,13 +2156,15 @@ static void cen_kick_app(void)
         cen_smp_started = 1u;
         cen_smp_pump();                 /* send the staged Pairing Request  */
     } else {
-        att_step = 1u;                  /* L5: kick off ATT (MTU Request)  */
+        att_step = 1u;                  /* start ATT (MTU Request)         */
         att_client_send();
     }
 }
 
-/* Process a genuinely-new received PDU (RAM [hdr][len][S1][payload], so
- * payload starts at buf[3]); may queue a response. */
+/**
+ * @brief Process a new received PDU (RAM [hdr][len][S1][payload], payload
+ *        at buf[3]); may queue a response.
+ */
 static void ll_handle_rx(const uint8_t *buf)
 {
     uint8_t llid = buf[0] & 0x03u;
@@ -2251,13 +2217,12 @@ static void ll_handle_rx(const uint8_t *buf)
             ll_peer_vers = buf[4];
         }
         if (!ll_sent_vers) {
-            ll_queue_version();     /* reply with ours                     */
+            ll_queue_version();     /* reply with the local version        */
         } else if (ll_is_central) {
-            /* DLE's payoff is the long-read/write DATA path.  Only negotiate
-             * it there; the one-time SMP handshake stays on 27-byte fragments
-             * (pre-F1 timing) -- the P-256 keygen already stresses this
-             * marginal link, and adding DLE's extra round-trip + larger PDUs
-             * on top collapses it.  So for pairing, kick SMP straight away. */
+            /* DLE is negotiated only for the ATT data path.  SMP pairing
+             * stays on 27-byte fragments: on top of the P-256 keygen load,
+             * DLE's extra round trip and larger PDUs collapse the link, so
+             * pairing starts at once. */
             if (cen_test_smp) {
                 cen_kick_app();     /* SMP now, no DLE                      */
             } else if (!cen_dle_sent) {
@@ -2266,7 +2231,7 @@ static void ll_handle_rx(const uint8_t *buf)
             }
         }
         break;
-    case LL_LENGTH_RSP:             /* Phase F1: raise the fragment size    */
+    case LL_LENGTH_RSP:             /* raise the fragment size              */
         if (buf[1] >= 5u) {
             uint16_t peer_rx = (uint16_t)(buf[4] | ((uint16_t)buf[5] << 8));
             uint8_t eff = (peer_rx < (uint16_t)TIKU_FLPR_DLE_MAX_OCTETS)
@@ -2286,7 +2251,7 @@ static void ll_handle_rx(const uint8_t *buf)
     case LL_TERMINATE_IND:
         ll_want_term = 1u;
         break;
-    case LL_ENC_RSP:                /* Phase E3: SKDs/IVs -> session key    */
+    case LL_ENC_RSP:                /* SKDs/IVs -> session key              */
         if (buf[1] >= 13u && cen_enc_stage == 1u) {
             uint8_t skd[16], ltk[16];
             int i;
@@ -2307,32 +2272,33 @@ static void ll_handle_rx(const uint8_t *buf)
             cen_enc_stage = 2u;                  /* SK ready                 */
         }
         break;
-    case LL_PHY_RSP:                /* Phase F2: peer's PHYs -> send the IND */
+    case LL_PHY_RSP:                /* peer's PHYs: the IND can go out      */
         cen_phy_rsp = 1u;
         break;
     case LL_FEATURE_RSP:
     case LL_PING_RSP:
     case LL_UNKNOWN_RSP:
-        break;                      /* responses: just counted             */
+        break;                      /* responses: only counted             */
     default:
         ll_queue(LL_UNKNOWN_RSP, &op, 1u);   /* decline gracefully         */
         break;
     }
 }
 
-/*
- * One connection event: RX the central's PDU on data channel @p k, then
- * hardware-T_IFS respond with an empty PDU carrying the local SN/NESN.  The
- * short chain (READY_START | PHYEND_DISABLE | DISABLED_TXEN) is exactly
- * L2's proven SCAN_RSP turnaround.  @p deadline bounds the RX wait
- * (absolute TIMER10 us).  Returns 2 = CRC-valid packet, 1 = packet seen
- * but CRC bad, 0 = window elapsed with nothing.  On >=1, *anchor gets
- * the packet's ADDRESS time.
- */
 /* First CRC-failed packet's RAM bytes, for the whitening/CRC diagnostic. */
 static uint8_t conn_fail_snap[5];
 static uint8_t conn_fail_have;
 
+/**
+ * @brief One peripheral connection event: RX the central's PDU on data
+ *        channel @p k, then answer at T_IFS (READY_START | PHYEND_DISABLE |
+ *        DISABLED_TXEN) with the pending PDU, else an empty one.
+ *
+ * @p deadline bounds the RX wait (absolute TIMER10 us).  On a return of 1 or
+ * 2, *anchor holds the packet's ADDRESS time.
+ *
+ * @return 2 CRC-valid packet, 1 packet seen with a bad CRC, 0 nothing heard
+ */
 static int conn_event(uint32_t aa, uint32_t crcinit, uint8_t k,
                       tiku_radio_ll_ack_t *ack, uint32_t deadline,
                       uint32_t *anchor)
@@ -2375,13 +2341,10 @@ static int conn_event(uint32_t aa, uint32_t crcinit, uint8_t k,
     NRF_TIMER10_S->TASKS_CAPTURE[1] = 1u;         /* anchor = ADDRESS time */
     *anchor = NRF_TIMER10_S->CC[1];
 
-    /* Wait for the CRC VERDICT, not just PHYEND: CRCOK/CRCERROR fire a
-     * moment AFTER the last bit (the CRC is validated post-PHYEND), so
-     * sampling EVENTS_CRCOK right at PHYEND catches it only for the
-     * shortest packets and misses it for payload-bearing ones (measured:
-     * empty PDU rx_ok, VERSION_IND "addr-only" despite valid bytes).
-     * The hardware T_IFS TX is already ramping regardless -- it still
-     * have ~150 us to stage the response before its DMA starts. */
+    /* Wait for the CRC verdict, not just PHYEND: CRCOK/CRCERROR fire after
+     * the last bit, so sampling at PHYEND misses the verdict of a
+     * payload-bearing packet.  The T_IFS TX is already ramping; there are
+     * about 150 us to stage the response before its DMA starts. */
     for (spin = 0u; spin < 400000u; spin++) {
         if (RADIO->EVENTS_CRCOK != 0u || RADIO->EVENTS_CRCERROR != 0u) {
             break;
@@ -2404,20 +2367,18 @@ static int conn_event(uint32_t aa, uint32_t crcinit, uint8_t k,
             ll_on_acked();                        /* the last PDU landed   */
         }
         if (r & TIKU_RADIO_LL_NEWDATA) {
-            ll_handle_rx(rxb);                    /* L4: control PDUs      */
+            ll_handle_rx(rxb);                    /* control and L2CAP     */
         }
     }
     /* Build the response (pending LL control PDU, else empty) with the
      * updated SN/NESN.  The hardware T_IFS TX DMAs it. */
     txn = ll_build_tx(txb, ack);
     (void)txn;
-    /* Drop DISABLED_TXEN now that the RX->TX turnaround has fired: keep
-     * only READY_START + PHYEND_DISABLE for the response.  Otherwise the
-     * response's own DISABLED re-triggers TXEN and the radio spins a
-     * spurious back-to-back TX loop -- benign for a short empty PDU (it
-     * clears before the next RX), but a longer PDU (an ATT notification)
-     * is still churning when the next event's RXEN fires and the RX is
-     * lost, collapsing the link. */
+    /* Drop DISABLED_TXEN now that the RX->TX turnaround has fired, keeping
+     * READY_START + PHYEND_DISABLE for the response.  Left armed, the
+     * response's own DISABLED re-triggers TXEN and the radio loops
+     * back-to-back TX; a long PDU (an ATT notification) is then still
+     * transmitting when the next event's RXEN fires, and that RX is lost. */
     RADIO->SHORTS = (1u << 0) | (1u << 19);
     RADIO->EVENTS_PHYEND   = 0u;                  /* next PHYEND = TX end  */
     RADIO->EVENTS_DISABLED = 0u;                  /* next DISABLED = TX    */
@@ -2553,7 +2514,7 @@ int tiku_radio_arch_connect(const uint8_t *addr, const uint8_t *ad,
     }
 
     /* --- Connection loop --- */
-    ll_reset();                                   /* L4/L5: LL state       */
+    ll_reset();                                   /* LL and ATT state      */
     ll_is_central = 0u;                           /* peripheral = ATT server */
     anchor = t_ci_end + BLE_TX_WIN_DELAY_US + (uint32_t)winoff * 1250u;
     last_valid = t_ci_end;
@@ -2568,24 +2529,21 @@ int tiku_radio_arch_connect(const uint8_t *addr, const uint8_t *ad,
 
         k = tiku_radio_ll_csa1_next(last_unmapped, hop, lldata + 16,
                                     &last_unmapped);
-        /* Pre-roll: open RX ~300 us BEFORE the anchor so the receiver has
-         * finished ramping (~40 us) and is listening when the central's
-         * single per-event packet arrives.  Without this the preamble
-         * lands during RX ramp-up and every event is missed (measured:
-         * addr_seen=0).  The first event's tail is widened by the
-         * transmitWindowSize uncertainty. */
-        /* First window spans the transmitWindowSize (the master transmits
-         * at the window START); narrow after re-sync.  A huge first
-         * window catches garbage far from the anchor and re-syncs wrong. */
+        /* Pre-roll: RX opens 600 us before the anchor, so the receiver has
+         * finished its ~40 us ramp when the central's packet arrives; a
+         * preamble that lands during the ramp is missed.  The first window
+         * also spans transmitWindowSize; later ones are narrow, since a
+         * wide window catches packets far from the anchor and re-syncs
+         * wrong. */
         rxen_at = anchor - 600u;
         deadline = first ? (anchor + (uint32_t)winsize * 1250u + 1000u)
                          : (anchor + 2500u);
 
         while ((int32_t)(conn_now() - rxen_at) < 0) {
-            /* park to the anchor; kick occasionally */
+            /* busy-wait to the RX-open time */
         }
         r = conn_event(aa, crcinit, k, &ack, deadline, &t_addr);
-        att_server_pump();                    /* L5: push pending NUS notify */
+        att_server_pump();                    /* queue a pending notify     */
         if (st != (tiku_radio_ll_conn_stats_t *)0) {
             st->events++;
         }
@@ -2613,7 +2571,7 @@ int tiku_radio_arch_connect(const uint8_t *addr, const uint8_t *ad,
 
         tiku_watchdog_kick();
 
-        if (ll_want_term) {                       /* L4: peer terminated   */
+        if (ll_want_term) {                       /* peer terminated       */
             if (st != (tiku_radio_ll_conn_stats_t *)0) {
                 st->reason = 3u;
             }
@@ -2666,30 +2624,28 @@ int tiku_radio_arch_connect(const uint8_t *addr, const uint8_t *ad,
 }
 
 /*---------------------------------------------------------------------------*/
-/* Connection engine, CENTRAL role (L3 two-board harness)                    */
+/* CONNECTION ENGINE, CENTRAL ROLE                                           */
 /*---------------------------------------------------------------------------*/
 /*
- * The debug oracle: a TikuOS central so an L3 connection can be driven
- * board-to-board with microsecond ground truth on both consoles instead
- * of a black-box phone.  As master, WE choose the CONNECT_IND parameters
- * (WinOffset small + fixed => deterministic anchor; WinSize large +
- * supervision long => lenient, so the link establishes while the
- * peripheral's timing is still being tuned) and WE define the event
- * cadence, so nothing has to be predicted.  A central event is the
- * mirror of the peripheral's: TX an empty PDU first, hardware-T_IFS
- * turnaround to RX the peripheral's response.
+ * A central for board-to-board connections.  It sets the CONNECT_IND
+ * parameters (a small fixed WinOffset for a predictable anchor, a large
+ * WinSize and a long supervision timeout) and the event cadence.  A central
+ * event sends the pending PDU, else an empty one, then opens RX by hand for
+ * the peripheral's response.
  */
 
-/* Connection parameters imposed as master (chosen for easy bring-up). */
+/* Connection parameters this central imposes. */
 #define CEN_AA        0x71764129ul     /* fallback if RNG can't satisfy rules */
 #define CEN_CRCINIT   0x00555555ul
 
-/* Central-role hardening: a real initiator picks a FRESH Access Address per
- * connection, meeting the Core-spec data-AA rules (Vol 6 Part B 2.1.2): not
- * the advertising AA, not four equal octets, no run of >6 identical bits, no
- * more than 24 transitions, and >= 2 transitions in the 6 most-significant
- * bits.  Draw from the TRNG and reject-sample; fall back to the known-good
- * fixed AA if the draws keep failing (never blocks the connection). */
+/**
+ * @brief Draw a fresh data Access Address from the TRNG that meets the
+ *        Core-spec rules (Vol 6 Part B 2.1.2); CEN_AA after 24 rejections.
+ *
+ * Rules: not the advertising AA, not four equal octets, no run of more than
+ * 6 identical bits, at most 24 transitions, at least 2 transitions in the
+ * 6 most significant bits.
+ */
 static uint32_t cen_gen_aa(void)
 {
     uint8_t  tries;
@@ -2736,16 +2692,14 @@ static uint32_t cen_gen_aa(void)
 static uint8_t cen_rxb[TIKU_FLPR_DLE_BUF_SIZE] __attribute__((aligned(4)));
 static uint8_t cen_txb[TIKU_FLPR_DLE_BUF_SIZE] __attribute__((aligned(4)));
 uint32_t tiku_radio_arch_dbg_cen_tifs;   /* measured peripheral T_IFS, us  */
-uint32_t tiku_radio_arch_dbg_phy;        /* F2 debug: stage|att<<8|rsp<<16  */
-uint32_t tiku_radio_arch_dbg_cen_aa;     /* last random central AA (hardening) */
+uint32_t tiku_radio_arch_dbg_phy;        /* PHY test state, see header     */
+uint32_t tiku_radio_arch_dbg_cen_aa;     /* last random central AA         */
 
-/* Phase A validation hook.  When armed, the master -- once the ATT loopback
- * has completed -- exercises the peripheral's LL control handling: it sends
- * LL_CHANNEL_MAP_UPDATE_IND (reduce the map), then LL_CONNECTION_UPDATE_IND
- * (lengthen the interval), applying each on its OWN side at the Instant.  A
- * peripheral that declines either (the pre-Phase-A G6 behaviour) computes a
- * different channel / keeps the old cadence and the link dies within a few
- * events; one that follows keeps servicing events past both updates. */
+/* When armed, the central, once the ATT loopback has completed, sends
+ * LL_CHANNEL_MAP_UPDATE_IND (a reduced map), then LL_CONNECTION_UPDATE_IND
+ * (a longer interval), applying each on its own side at the Instant.  A
+ * peripheral that does not follow an update loses the link within a few
+ * events. */
 static uint8_t cen_test_updates;
 
 void tiku_radio_arch_central_updates(uint8_t on)
@@ -2753,15 +2707,13 @@ void tiku_radio_arch_central_updates(uint8_t on)
     cen_test_updates = (on != 0u) ? 1u : 0u;
 }
 
-/* Phase F2: drive a PHY update on the next central() run.
- * @p target 0 = off, 1 = 2M, 2 = Coded S8 (125 kbps long range). */
+/* A @p target above 2 selects 2M. */
 void tiku_radio_arch_central_phy(uint8_t target)
 {
     cen_test_phy = (target <= 2u) ? target : 1u;
 }
 
-/* @return 1 if the central applied the 2M switch; @p survived = events it then
- * kept servicing on 2M (a rising count = the link survived the PHY change). */
+/* @p survived counts CRC-valid responses received after the switch. */
 int tiku_radio_arch_central_phy_result(uint16_t *survived)
 {
     if (survived != (uint16_t *)0) {
@@ -2770,15 +2722,15 @@ int tiku_radio_arch_central_phy_result(uint16_t *survived)
     return (cen_phy_applied != 0u) ? 1 : 0;
 }
 
-/* Phase E: arm the central as the SMP pairing INITIATOR for the next
- * connection (drives CID 0x0006 instead of the NUS ATT flow). */
+/* Arms the central as the SMP pairing initiator for the next connection
+ * (CID 0x0006 instead of the NUS ATT flow). */
 void tiku_radio_arch_central_smp(uint8_t on)
 {
     cen_test_smp = (on != 0u) ? 1u : 0u;
 }
 
-/* Bonding: arm SMP AND the durable bond store -- a first connection pairs and
- * saves the LTK; a reconnect to the same peer skips SMP and reuses it. */
+/* Arms SMP and the durable bond store: a first connection pairs and saves
+ * the LTK; a reconnect to the same peer skips SMP and reuses it. */
 void tiku_radio_arch_central_bond(uint8_t on)
 {
     cen_test_smp  = (on != 0u) ? 1u : 0u;
@@ -2804,8 +2756,7 @@ int tiku_radio_arch_central_bonded(void)
     return (cen_bonded != 0u) ? 1 : 0;
 }
 
-/* Phase E3: the session key the central derived (LL_ENC handshake complete).
- * @return 1 and fills @p sk when SK is ready, else 0. */
+/* Returns 1 and fills @p sk (if not NULL) once SK is derived, else 0. */
 int tiku_radio_arch_central_enc(uint8_t sk[16])
 {
     int i;
@@ -2820,9 +2771,12 @@ int tiku_radio_arch_central_enc(uint8_t sk[16])
     return 1;
 }
 
-/* One central event: TX empty PDU (local SN/NESN) on data channel @p k, then
- * hardware-T_IFS RX the peripheral's response.  Returns 2 = CRC-valid
- * response, 1 = response seen but CRC bad, 0 = no response. */
+/**
+ * @brief One central event: TX the pending PDU, else an empty one, on data
+ *        channel @p k, then open RX by hand for the peripheral's response.
+ *
+ * @return 2 CRC-valid response, 1 response with a bad CRC, 0 no response
+ */
 static int cen_event(uint32_t aa, uint32_t crcinit, uint8_t k,
                      tiku_radio_ll_ack_t *ack)
 {
@@ -2835,12 +2789,10 @@ static int cen_event(uint32_t aa, uint32_t crcinit, uint8_t k,
     /* Send the pending LL control PDU (else empty) with current SN/NESN. */
     (void)ll_build_tx(cen_txb, ack);
 
-    /* TX only (no turnaround short): the RX opens MANUALLY and EARLY
-     * afterwards, not via the hardware TIFS turnaround.  The turnaround
-     * opens RX at exactly TIFS=150us, but the peripheral's response T_IFS
-     * measures ~117us on this silicon, so a TIFS-timed RX opens 33us AFTER
-     * the response preamble and misses it entirely.  Opening manually
-     * right after the TX disables starts listening well before the response. */
+    /* TX only, no turnaround short: RX is opened by hand right after the
+     * TX disables.  A TIFS-timed RX opens at 150 us, after the
+     * peripheral's response has started (its T_IFS is about 117 us on this
+     * silicon), and misses it. */
     RADIO->SHORTS = (1u << 0) | (1u << 19);
     RADIO->PACKETPTR = (uint32_t)cen_txb;
     RADIO->EVENTS_PHYEND   = 0u;
@@ -2851,13 +2803,12 @@ static int cen_event(uint32_t aa, uint32_t crcinit, uint8_t k,
     (void)RADIO->EVENTS_DISABLED;
     RADIO->TASKS_TXEN = 1u;
 
-    /* All waits are TIME-bounded (conn_now us), not spin-count.  Budget for a
-     * full 27-byte fragment TX (~340 us ramp+packet), not just an empty PDU
-     * (~90 us) -- Phase C fragments large writes, and a too-short PHYEND wait
-     * would time out mid-packet and mis-time the RX turnaround.  Coded S8 is
-     * 64 us/byte plus ~400 us preamble/AA/CI/TERM framing, so every budget
-     * scales up once the connection is on the coded PHY (a DLE-max PDU is
-     * ~5.9 ms on air at S8). */
+    /* Every wait is bounded in time (conn_now, microseconds).  The PHYEND
+     * budget covers a full data PDU, not only an empty one: a wait that
+     * ends mid-packet mis-times the RX turnaround.  Coded S8 costs 64 us
+     * per byte plus about 400 us of preamble/AA/CI/TERM framing, so every
+     * budget is larger on the coded PHY (a DLE-max PDU is about 5.9 ms on
+     * air). */
     dl = conn_now() + ((cen_phy_cur == 2u) ? 7000u : 900u);
     while ((int32_t)(conn_now() - dl) < 0 && RADIO->EVENTS_PHYEND == 0u) {
     }
@@ -2907,12 +2858,10 @@ static int cen_event(uint32_t aa, uint32_t crcinit, uint8_t k,
             tiku_radio_arch_dbg_cen_tifs = (t_addr - t_txend) - 40u;
         }
     }
-    /* Wait for the CRC verdict.  It lands well AFTER PHYEND (the CRC is
-     * validated post-last-bit), and that gap scales with payload length:
-     * a 200 us budget covers empties/short responses but a full-length
-     * data PDU (an ATT notification) times out and is misread as a CRC
-     * failure, so the peer never sees the ack and retransmits forever.
-     * Budget for a max-size PDU (at S8 that is ~5.9 ms of air time). */
+    /* Wait for the CRC verdict, which fires after the last bit.  The wait
+     * starts at ADDRESS, so it covers a max-size PDU (about 5.9 ms on air at
+     * S8): a verdict the wait misses reads as a CRC failure, and the peer,
+     * never acked, retransmits forever. */
     dl = conn_now() + ((cen_phy_cur == 2u) ? 7000u : 700u);
     while ((int32_t)(conn_now() - dl) < 0) {
         if (RADIO->EVENTS_CRCOK != 0u || RADIO->EVENTS_CRCERROR != 0u) {
@@ -2929,7 +2878,7 @@ static int cen_event(uint32_t aa, uint32_t crcinit, uint8_t k,
             ll_on_acked();
         }
         if (r & TIKU_RADIO_LL_NEWDATA) {
-            ll_handle_rx(cen_rxb);               /* L4: control PDUs      */
+            ll_handle_rx(cen_rxb);               /* control and L2CAP     */
         }
     }
     RADIO->EVENTS_DISABLED = 0u;
@@ -2950,9 +2899,9 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
     tiku_radio_ll_ack_t ack = { 0u, 0u };
     int      connected = 0;
     uint8_t *ll;
-    uint8_t  att_prev = 0u, att_wait = 0u;        /* L5 transaction retry  */
-    uint8_t  dle_wait = 0u;                       /* F1: LL_LENGTH_RSP wait*/
-    /* Per-connection random Access Address + CRCInit (central hardening). */
+    uint8_t  att_prev = 0u, att_wait = 0u;        /* ATT request retry     */
+    uint8_t  dle_wait = 0u;                       /* LL_LENGTH_RSP wait    */
+    /* Per-connection random Access Address and CRCInit. */
     uint32_t cen_aa = cen_gen_aa();
     uint32_t cen_crcinit;
 
@@ -2963,8 +2912,8 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         st->reason = 2u;
         st->hop = CEN_HOP;
     }
-    cen_phy_applied = 0u; cen_phy_survived = 0u;  /* Phase F2 result           */
-    cen_phy_cur = 0u;                             /* connection starts at 1M   */
+    cen_phy_applied = 0u; cen_phy_survived = 0u;  /* PHY update result        */
+    cen_phy_cur = 0u;                             /* connection starts at 1M  */
 
     tiku_radio_arch_init();
     radio_constlat_enter();
@@ -3000,7 +2949,7 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
 
     cap_deadline = conn_now() + max_secs * 1000000u;
 
-    /* --- Scan for TIKU-CONN's ADV_IND, then hardware-T_IFS the CONNECT_IND --- */
+    /* --- Scan for the peer's ADV_IND, then send CONNECT_IND at T_IFS --- */
     while (!connected && (int32_t)(conn_now() - cap_deadline) < 0) {
         uint32_t spin;
         tiku_watchdog_kick();
@@ -3019,7 +2968,7 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         (void)RADIO->EVENTS_DISABLED;
         RADIO->TASKS_RXEN = 1u;
 
-        /* Listen ~8 ms for an ADV_IND. */
+        /* Listen for an ADV_IND (a bounded poll). */
         for (spin = 0u; spin < 260000u; spin++) {
             if (RADIO->EVENTS_PHYEND != 0u) {
                 break;
@@ -3037,18 +2986,18 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
             chan = (uint8_t)((chan + 1u) % 3u);
             continue;
         }
-        /* Heard a packet; the DISABLED_TXEN turnaround is ramping.  If it
-         * is a connectable ADV_IND named TIKU-CONN, ship the CONNECT_IND;
-         * else abort the auto-TX.  (Name at cen_rxb[14] by the peripheral's
-         * fixed AD layout: [02 01 06][len 09 T I K U ...].) */
+        /* Heard a packet; the DISABLED_TXEN turnaround is ramping.  A
+         * CRC-OK ADV_IND from the peer gets the CONNECT_IND; anything else
+         * aborts the auto-TX.  The name sits at cen_rxb[14] in the
+         * peripheral's fixed AD layout: [02 01 06][len 09 T I K U ...]. */
         for (spin = 0u; spin < 4000u; spin++) {
             if (RADIO->EVENTS_CRCOK != 0u || RADIO->EVENTS_CRCERROR != 0u) {
                 break;
             }
         }
-        /* Peer match: by explicit AdvA when a target is set (scan-by-address,
-         * central hardening), else by the "TIKU" device name (the two-board
-         * oracle's default).  ADV_IND = PDU type 0 (S0 low nibble). */
+        /* Peer match: by AdvA when a target is set (scan-by-address), else
+         * by the "TIKU" device name.  ADV_IND = PDU type 0 (S0 low
+         * nibble). */
         uint8_t peer_ok = (cen_rxb[0] & 0x0Fu) == 0x00u &&
             (cen_target_set
                  ? (memcmp(&cen_rxb[3], cen_target_addr, 6) == 0)
@@ -3056,8 +3005,8 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
                     cen_rxb[16] == 'K' && cen_rxb[17] == 'U'));
         if (RADIO->EVENTS_CRCOK != 0u && peer_ok) {
             memcpy(&cind[9], &cen_rxb[3], 6u);     /* AdvA from the ADV_IND */
-            memcpy(cen_smp_a, my_addr, 6u);        /* Phase E: A = InitA (us) */
-            memcpy(cen_smp_b, &cind[9], 6u);       /*          B = AdvA (peer)*/
+            memcpy(cen_smp_a, my_addr, 6u);        /* SMP: A = InitA (local) */
+            memcpy(cen_smp_b, &cind[9], 6u);       /*      B = AdvA (peer)   */
             RADIO->PACKETPTR = (uint32_t)cind;     /* hardware TX CONNECT_IND */
             RADIO->EVENTS_DISABLED = 0u;
             for (spin = 0u; spin < 400000u; spin++) {
@@ -3087,38 +3036,33 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         return -1;
     }
 
-    /* --- Connection loop: WE are the timing master --- */
-    ll_reset();                                   /* L4/L5: LL state       */
+    /* --- Connection loop: this central sets the timing --- */
+    ll_reset();                                   /* LL and ATT state      */
     ll_is_central = 1u;                           /* central = ATT client  */
-    ll_queue_version();                           /* initiate: send VERSION_IND */
+    ll_queue_version();                        /* initiate: send VERSION_IND */
     anchor = t_ci_end + BLE_TX_WIN_DELAY_US + (uint32_t)CEN_WINOFFSET * 1250u;
     last_valid = t_ci_end;
-    /* Phase A test state: a reduced channel map, a longer interval, and a
+    /* Update-test state: a reduced channel map, a longer interval, and a
      * small stage machine that sends each update after the loopback and
-     * applies it here at the Instant (mirroring the peripheral). */
+     * applies it here at the Instant, as the peripheral does. */
     {
-    /* AGGRESSIVE-AFH channel-map update: drop 18 of 37 channels (keep every
-     * other one), which forces real CSA#1 REMAPPING on both ends -- the hard
-     * case.  It needs the peer's connEventCount to be EXACTLY locked at the
-     * Instant, since a slip makes the two sides remap to different channels
-     * and the link dies.  This was deferred while the timebase-free FLPR's cec
-     * slipped under heavy TX; the F2 miss->events cec accounting (evt_iters,
-     * flpr_conn_hold) fixed that, so the reduction now holds (two-board: the
-     * FLPR follows it + services ~176 events past both updates, reproducible).
-     * The CONNECTION_UPDATE below is the G6 case (phones renegotiate the
-     * interval) and re-locks cleanly. */
+    /* Channel-map update: drop 18 of 37 channels (keep every other one),
+     * which forces CSA#1 remapping on both ends.  The peer's
+     * connEventCount must match exactly at the Instant: a slip makes the
+     * two sides remap to different channels and the link dies.  The
+     * connection update below lengthens the interval, as phones do. */
     static const uint8_t CM_NEW[5] = { 0x55u, 0x55u, 0x55u, 0x55u, 0x15u };
     uint16_t cec = 0u;                     /* connEventCount (wraps)         */
-    uint16_t cen_interval = CEN_INTERVAL;  /* mutable master cadence         */
+    uint16_t cen_interval = CEN_INTERVAL;  /* current central interval      */
     uint16_t cu_new = 36u;                 /* 45 ms: exercises re-converge   */
     uint8_t  upd_stage = 0u;               /* 0 idle 1 map-sent 2 map-done   */
                                            /* 3 cu-sent 4 done               */
     uint16_t cm_instant = 0u, cu_instant = 0u, settle = 0u;
-    uint8_t  sig_pend = 0u;                 /* Phase C signalling-CU state    */
+    uint8_t  sig_pend = 0u;                 /* signalling-update state        */
     uint16_t sig_instant = 0u;
-    uint8_t  phy_stage = 0u;               /* F2: 0 idle 1 req 2 ind 3 done   */
+    uint8_t  phy_stage = 0u;               /* 0 idle 1 req 2 ind 3 done       */
     uint16_t phy_instant = 0u, phy_at = 0u; /* Instant + cec at the switch    */
-    uint8_t  phy_wait = 0u;                /* F2: LL_PHY_RSP stall counter    */
+    uint8_t  phy_wait = 0u;                /* LL_PHY_RSP stall counter        */
     uint32_t phy_rxok = 0u;                /* rx_ok count at the switch       */
     for (;;) {
         uint8_t k;
@@ -3141,18 +3085,18 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
             cen_interval = cu_new;
             upd_stage = 4u;
         }
-        /* Phase C: apply a peripheral-requested interval at its Instant. */
+        /* Apply a peripheral-requested interval at its Instant. */
         if (sig_pend == 1u && (uint16_t)(cec - sig_instant) < 0x8000u) {
             cen_interval = cen_cpu_interval;
             sig_pend = 2u;
         }
-        /* Phase F2: switch the RADIO to the target PHY at the Instant -- must
-         * precede this event's RX arm, and match the FLPR's switch at the
-         * same cec.  MODE readback: 4 = 2M, 5 = Coded S8. */
+        /* Switch the RADIO to the target PHY at the Instant: before this
+         * event's RX arm, at the same cec as the peripheral's switch.
+         * MODE readback: 4 = 2M, 5 = Coded S8. */
         if (phy_stage == 2u && (uint16_t)(cec - phy_instant) < 0x8000u) {
             radio_apply_phy((cen_test_phy == 2u) ? TIKU_RADIO_PHY_CODED_S8
                                                  : TIKU_RADIO_PHY_2M);
-            cen_phy_cur = cen_test_phy;                /* scale event budgets  */
+            cen_phy_cur = cen_test_phy;                /* scale event budgets */
             cen_phy_mode_cap = (uint8_t)RADIO->MODE;
             phy_stage = 3u;
             phy_at = cec;
@@ -3177,15 +3121,15 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         if (r == 2) {
             last_valid = conn_now();
         }
-        anchor += (uint32_t)cen_interval * 1250u;  /* master cadence       */
+        anchor += (uint32_t)cen_interval * 1250u;  /* central cadence      */
 
-        /* Phase A: drive the two LL updates once the loopback is done and
-         * the control slot is free.  cec+8 Instant gives >= 6 events of lead
-         * (spec floor) for the IND to be delivered + acked before switching. */
+        /* Drive the two LL updates once the loopback is done and the
+         * control slot is free.  A cec+8 Instant gives the spec floor of 6
+         * events of lead for the IND to be delivered and acked. */
         if (cen_test_updates && ll_tx_len == 0u) {
             if (upd_stage == 0u && att_step >= 8u) {
-                /* Send both updates right after the loopback -- early, before
-                 * the anchored-RX has a chance to overshoot on a long hold. */
+                /* The map update goes out right after the loopback, before
+                 * the anchored RX can overshoot on a long hold. */
                 uint8_t d[7];
                 cm_instant = (uint16_t)(cec + 8u);
                 memcpy(d, CM_NEW, 5u);
@@ -3208,9 +3152,9 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
             }
         }
 
-        /* Phase F2: PHY update -- after the loopback, LL_PHY_REQ, then (on the
-         * peer's LL_PHY_RSP) LL_PHY_UPDATE_IND to 2M with a cec+8 Instant; both
-         * sides flip RADIO MODE at the Instant (applied above). */
+        /* PHY update: after the loopback, LL_PHY_REQ, then on the peer's
+         * LL_PHY_RSP an LL_PHY_UPDATE_IND to 2M or Coded S8 with a cec+16
+         * Instant; both sides switch RADIO MODE at the Instant (above). */
         if (cen_test_phy && ll_tx_len == 0u) {
             if (phy_stage == 0u && att_step >= 8u) {
                 uint8_t d[2];
@@ -3220,10 +3164,10 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
             } else if (phy_stage == 1u && cen_phy_rsp) {
                 uint8_t d[4];
                 uint8_t m = (cen_test_phy == 2u) ? 0x04u : 0x02u;
-                /* cec+16, not the spec-floor 6: the IND is retransmitted via
-                 * SN/NESN, and a bursty miss-stretch that outlives a small
-                 * margin leaves the peripheral on 1M at the switch -- a
-                 * one-sided flip that kills the link (observed at cec+8). */
+                /* cec+16, above the spec floor of 6: the IND is retransmitted
+                 * via SN/NESN, and a run of misses longer than the margin
+                 * leaves the peripheral on 1M at the switch, a one-sided flip
+                 * that kills the link. */
                 phy_instant = (uint16_t)(cec + 16u);
                 d[0] = m; d[1] = m;              /* C->P, P->C: 2M or Coded  */
                 d[2] = (uint8_t)phy_instant;
@@ -3238,8 +3182,8 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
             }
         }
 
-        /* Phase C: a peripheral's L2CAP Connection Parameter Update Request
-         * (parsed in sig_handle) -> issue the LL update it asked for, once the
+        /* A peripheral's L2CAP Connection Parameter Update Request (parsed
+         * in sig_handle): issue the LL update it asked for, once the
          * Response SDU has drained and the control slot is free. */
         if (cen_cpu_req != 0u && sig_pend == 0u &&
             ll_tx_len == 0u && cen_sdu_len == 0u) {
@@ -3257,9 +3201,10 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
             cen_cpu_req = 0u;
         }
 
-        /* Phase E/E3: once pairing reaches DONE, drive LL encryption startup
-         * (send LL_ENC_REQ, derive SK from LL_ENC_RSP), then end the link.
-         * FAILED pairing ends immediately. */
+        /* Once pairing is done, or a bond is reused, drive LL encryption
+         * startup (send LL_ENC_REQ, derive SK from LL_ENC_RSP), send the
+         * encrypted demo write, then end the link.  A failed pairing ends
+         * the link at once. */
         if (cen_test_smp &&
             (cen_bonded ||
              tiku_ble_smp_pair_state() >= TIKU_BLE_SMP_STATE_DONE)) {
@@ -3267,7 +3212,7 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
                 tiku_ble_smp_pair_state() == TIKU_BLE_SMP_STATE_FAILED) {
                 break;
             }
-            /* Fresh pairing just completed: remember the LTK so the next
+            /* A fresh pairing completed: remember the LTK so the next
              * reconnect skips SMP (bonding). */
             if (cen_bond_mode && !cen_bonded && !cen_bond_stored) {
                 uint8_t ltk[16];
@@ -3288,7 +3233,7 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
                 }
             } else if (cen_enc_stage == 2u &&
                        ll_tx_len == 0u && cen_sdu_len == 0u) {
-                cen_send_enc_data();                /* E3c: CCM-encrypted TX */
+                cen_send_enc_data();                /* CCM-encrypted write   */
                 cen_enc_stage = 3u; cen_enc_wait = 0u;
             } else if (cen_enc_stage == 3u) {       /* linger so peer decrypts*/
                 if (++cen_enc_wait >= 24u) {
@@ -3299,9 +3244,9 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
                 }
             }
         }
-        /* SMP stall recovery: if a reply hasn't come and the TX path is idle,
-         * re-send the last PDU to re-prompt it (esp. the final DHKey Check,
-         * whose loss would otherwise hang both ends on this no-LL-ACK link). */
+        /* SMP stall recovery: with no reply and the TX path idle, re-send
+         * the last PDU to re-prompt it; a lost final DHKey Check would
+         * otherwise hang both ends. */
         if (cen_test_smp && cen_smp_last_len != 0u &&
             tiku_ble_smp_pair_state() == TIKU_BLE_SMP_STATE_PAIRING &&
             ll_tx_len == 0u && cen_sdu_len == 0u) {
@@ -3311,18 +3256,18 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
             }
         }
 
-        /* Phase F1: if the peer never answers LL_LENGTH_REQ (no DLE support),
-         * start the app phase anyway after a few events (stays at 27-byte
-         * fragments).  For a DLE peer, LL_LENGTH_RSP already kicked it. */
+        /* If the peer never answers LL_LENGTH_REQ (no DLE support), start
+         * the app phase after a few events, on 27-byte fragments.  For a
+         * DLE peer, LL_LENGTH_RSP already started it. */
         if (ll_is_central && cen_dle_sent && att_step == 0u &&
             !cen_smp_started && ll_tx_len == 0u && ++dle_wait >= 8u) {
             cen_kick_app();
             dle_wait = 0u;
         }
 
-        /* L5 transaction retry: re-send a stalled REQUEST (steps 1-3).
-         * Step 4 awaits the server's pushed notification -- the server's
-         * LL retransmits that until acked, so the client just waits. */
+        /* ATT retry: re-send a stalled request (steps 1-14).  Step 7
+         * awaits the server's notification, which the server's LL
+         * retransmits until acked, so the client waits. */
         if (att_step >= 1u && att_step <= 14u && att_step != 7u) {
             if (att_step != att_prev) {
                 att_prev = att_step;
@@ -3351,19 +3296,19 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         }
         cec++;                                     /* one connection event  */
     }
-    if (phy_stage >= 3u) {                     /* F2: switched to 2M         */
+    if (phy_stage >= 3u) {                     /* PHY switched               */
         uint32_t final_rxok = (st != (tiku_radio_ll_conn_stats_t *)0)
                             ? st->rx_ok : 0u;
         cen_phy_applied = 1u;
-        /* Survival = RESPONSES received on 2M (not events merely run) -- a dead
-         * link would keep spinning but stop responding. */
+        /* Survival counts responses received after the switch, not events
+         * run: a dead link keeps running events but stops responding. */
         cen_phy_survived = (uint16_t)(final_rxok - phy_rxok);
     }
     tiku_radio_arch_dbg_phy = (uint32_t)phy_stage |
                               ((uint32_t)att_step << 8) |
                               ((uint32_t)cen_phy_rsp << 16) |
                               ((uint32_t)cen_phy_mode_cap << 24);
-    }  /* Phase A test scope */
+    }  /* update and PHY test scope */
 
     if (st != (tiku_radio_ll_conn_stats_t *)0) {
         st->ms = (conn_now() - t_ci_end) / 1000u;
@@ -3374,10 +3319,10 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
         st->att_ok = att_ok;
         st->att_readback = att_readback;
         st->att_disc = att_disc_ok;
-        st->att_lread = att_lread_ok;            /* Phase D long read/write   */
+        st->att_lread = att_lread_ok;            /* long read/write           */
         st->att_lwrite = att_lwrite_ok;
     }
-    radio_apply_phy(TIKU_RADIO_PHY_1M);            /* F2: back to 1M for scan  */
+    radio_apply_phy(TIKU_RADIO_PHY_1M);            /* back to 1M for scan     */
     cen_phy_cur = 0u;
     RADIO->EVENTS_DISABLED = 0u;
     RADIO->TASKS_DISABLE = 1u;
@@ -3400,14 +3345,14 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
 }
 
 /*---------------------------------------------------------------------------*/
-/* Extended advertising at 1M (R8.3a)                                        */
+/* EXTENDED ADVERTISING AT 1M                                                */
 /*---------------------------------------------------------------------------*/
 /*
- * One complete non-connectable non-scannable extended advertising event:
+ * One non-connectable, non-scannable extended advertising event:
  * ADV_EXT_IND on primary channel 37 carrying ADI + AuxPtr, then
- * AUX_ADV_IND on secondary channel 20 carrying AdvA + ADI + AdvData (the
- * >31-byte payload legacy advertising cannot).  The aux timing is
- * HARDWARE-exact -- this is what R6's fabric was built for:
+ * AUX_ADV_IND on secondary channel 20 carrying AdvA + ADI + AdvData
+ * (payloads longer than legacy advertising's 31 bytes).  The aux timing is
+ * set in hardware:
  *
  *   DPPI ch1: RADIO PUBLISH_READY -> TIMER10 CLEAR+START+CAPTURE[2]
  *             (the EXT_IND's READY fires at preamble start = the
@@ -3415,27 +3360,25 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
  *   DPPI ch2: TIMER10 COMPARE[0] (aux offset - TX ramp) -> RADIO TXEN
  *
  * Between the EXT_IND's DISABLED and the hardware TXEN (~400 us) the CPU
- * only reprograms FREQUENCY/DATAWHITE/PACKETPTR for the aux channel and
- * UNSUBSCRIBES the timer's CLEAR/START -- otherwise the aux packet's own
- * READY would restart the timer and the compare would fire a rogue TXEN
- * 560 us after the aux started.  CAPTURE[2] stays subscribed on the
- * free-running timer, so CC[2] records the aux packet's ACTUAL start
- * time: the on-die proof the AUX flew inside the AuxPtr window
- * (dbg_aux_us ~= 600).
+ * reprograms FREQUENCY/DATAWHITE/PACKETPTR for the aux channel and
+ * unsubscribes the timer's CLEAR/START: left subscribed, the aux packet's
+ * own READY restarts the timer and the compare fires a rogue TXEN 560 us
+ * after the aux starts.  CAPTURE[2] stays subscribed on the free-running
+ * timer, so CC[2] records the aux packet's actual start (dbg_aux_us, about
+ * 600 when it flew inside the AuxPtr window).
  *
- * Whitening/CRC/access address are channel-formula-identical to legacy
- * advertising; secondary channel index 20 = 2446 MHz (FREQUENCY=46).
- * MAXLEN is raised for the burst and restored (the RX scan buffer is
- * 48 B -- a permanent 255 would let EasyDMA overrun it).
+ * Whitening, CRC and access address follow the legacy advertising formulas;
+ * secondary channel index 20 is 2446 MHz (FREQUENCY=46).  MAXLEN is raised
+ * to 220 for the burst and restored: RX DMA buffers are sized for the normal
+ * MAXLEN, and a larger one left set lets EasyDMA overrun them.
  */
 
 #define EXTADV_AUX_CH_IDX     20u      /* LE channel index (2446 MHz)     */
 #define EXTADV_AUX_FREQ       46u
 #define EXTADV_AUX_OFFSET_US  600u     /* 20 x 30 us AuxPtr units         */
-/* TXEN->READY ramp, hardware-measured via the CC[2] capture: with a
- * 40 us assumption the aux preamble started at 640 us -- 10 us outside
- * the spec window [offset, offset + 1 unit] = [600, 630].  The real
- * ramp is ~80 us; aim mid-window (615) for symmetric margin. */
+/* TXEN->READY ramp, about 80 us on this part (seen in the CC[2] capture).
+ * The aux preamble must start inside the spec window [offset, offset + 1
+ * unit] = [600, 630] us; the compare aims mid-window, at 615. */
 #define EXTADV_TX_RAMP_US     80u
 #define EXTADV_AIM_SLACK_US   15u      /* land mid-window, not on its edge */
 #define EXTADV_ADI_LO         0xBCu    /* DID=0xABC, SID=0                */
@@ -3530,7 +3473,7 @@ int tiku_radio_arch_extadv_burst(const uint8_t *addr,
         rc = -1;
     } else {
         /* ~400 us until the hardware TXEN: break the READY->restart
-         * loop (the aux's own READY must NOT re-clear the timer), then
+         * loop (the aux's own READY must not re-clear the timer), then
          * point the radio at the aux channel/PDU. */
         NRF_TIMER10_S->SUBSCRIBE_CLEAR = 0u;
         NRF_TIMER10_S->SUBSCRIBE_START = 0u;
@@ -3570,12 +3513,12 @@ int tiku_radio_arch_extadv_burst(const uint8_t *addr,
 }
 
 /*
- * An active scanner, as a yardstick: listen for an advertiser by name, send
- * it a SCAN_REQ, and capture when its SCAN_RSP comes back.  The request goes
- * out through the same timer-driven TXEN the advertiser answers with, and
- * the timer, cleared by the request's own PHYEND, is read at the reply's
- * ADDRESS -- so `gap` is the reply's first bit + 40 us of preamble+AA, on a
- * clock the advertiser under test has no hand in.
+ * An active scanner used as a yardstick: listen for an advertiser by name,
+ * send it a SCAN_REQ, and capture when its SCAN_RSP comes back.  The request
+ * goes out through the same timer-driven TXEN the advertiser answers with,
+ * and the timer, cleared by the request's own PHYEND, is read at the reply's
+ * ADDRESS: `gap` is the reply's first bit plus 40 us of preamble and AA, on
+ * this radio's clock.
  */
 uint32_t tiku_radio_arch_dbg_scanreq_adv;    /* ADV_INDs from the target   */
 uint32_t tiku_radio_arch_dbg_scanreq_sent;   /* SCAN_REQs sent             */
@@ -3586,7 +3529,7 @@ uint32_t tiku_radio_arch_dbg_scanreq_gap_sum;
 uint32_t tiku_radio_arch_dbg_scanreq_crcbad; /* replies with a bad CRC   */
 uint32_t tiku_radio_arch_dbg_scanreq_wrong;  /* other packets in the window*/
 uint32_t tiku_radio_arch_dbg_scanreq_silent; /* windows with nothing in   */
-uint8_t  tiku_radio_arch_dbg_scanreq_pkt[3][16]; /* the first three heard */
+uint8_t  tiku_radio_arch_dbg_scanreq_pkt[3][16]; /* first 3 "wrong" ones */
 
 
 int tiku_radio_arch_scanreq_probe(const uint8_t *scana, const char *name,
@@ -3647,7 +3590,7 @@ int tiku_radio_arch_scanreq_probe(const uint8_t *scana, const char *name,
         uint8_t type, plen, match = 0u;
 
         tiku_watchdog_kick();
-        /* Listen on one advertising channel for ~4 ms. */
+        /* Listen on one advertising channel (a bounded poll). */
         RADIO->SHORTS = (1u << 0) | (1u << 19) | (1u << 4);
         RADIO->FREQUENCY = adv_freq[chan];
         RADIO->DATAWHITE = BLE_WHITE_POLY | (0x40u | adv_index[chan]);
@@ -3679,7 +3622,7 @@ int tiku_radio_arch_scanreq_probe(const uint8_t *scana, const char *name,
         plen = rx[1];
         if (RADIO->EVENTS_CRCOK != 0u && type == 0x00u && plen >= 6u &&
             plen <= 37u) {
-            /* ADV_IND: is the complete local name ours? */
+            /* ADV_IND: does its complete local name match @p name? */
             uint8_t i = 9u, end = (uint8_t)(3u + plen);
             while (i + 1u < end) {
                 uint8_t l = rx[i], t = rx[i + 1u];
@@ -3731,8 +3674,8 @@ int tiku_radio_arch_scanreq_probe(const uint8_t *scana, const char *name,
         }
         tiku_radio_arch_dbg_scanreq_sent++;
 
-        /* The reply: the timer restarted at the request's end.  Listen
-         * ~600 us, wide enough for any turnaround. */
+        /* The reply: the timer restarted at the request's end.  The
+         * bounded listen is wide enough for any turnaround. */
         RADIO->PACKETPTR = (uint32_t)rx;
         RADIO->EVENTS_PHYEND   = 0u;
         RADIO->EVENTS_END      = 0u;
@@ -3827,15 +3770,15 @@ uint8_t tiku_radio_arch_adv_build(uint8_t *pdu, const uint8_t *addr,
     if (ad_len > 31u) {
         ad_len = 31u;                          /* legacy adv AD cap           */
     }
-    plen = (uint8_t)(6u + ad_len);             /* AdvA(6) + AD                 */
+    plen = (uint8_t)(6u + ad_len);             /* AdvA(6) + AD                */
 
-    pdu[0] = 0x42u;                            /* ADV_NONCONN_IND, TxAdd=random */
-    pdu[1] = plen;                             /* LENGTH                        */
+    pdu[0] = 0x42u;                         /* ADV_NONCONN_IND, TxAdd=random */
+    pdu[1] = plen;                             /* LENGTH                      */
     pdu[2] = addr[0];                          /* erratum-49 S1 slot: duplicate
-                                                * of the first payload byte    */
-    memcpy(&pdu[3], addr, 6u);                 /* AdvA (little-endian on air)   */
+                                                * of the first payload byte   */
+    memcpy(&pdu[3], addr, 6u);                 /* AdvA (little-endian on air) */
     if (ad_len) {
         memcpy(&pdu[9], ad, ad_len);
     }
-    return (uint8_t)(3u + plen);               /* total bytes in the buffer     */
+    return (uint8_t)(3u + plen);               /* total bytes in the buffer   */
 }

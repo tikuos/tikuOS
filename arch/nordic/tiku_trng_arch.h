@@ -7,9 +7,8 @@
  *
  * tiku_trng_arch.h - nRF54L true random number generator (CRACEN RNG).
  *
- * Mirrors the RP2350 TRNG arch API so shared callers link unchanged.  The backend
- * blocks polling the entropy FIFO and never fabricates bytes: a hardware stall
- * returns ERR_TIMEOUT rather than substituting pseudo-random data.
+ * Reads block polling the CRACEN entropy FIFO; a hardware stall returns
+ * TIKU_TRNG_ERR_TIMEOUT.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,26 +19,15 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/*
- * Return codes for the TRNG driver (identical to the other ports).
- *
- * TIKU_TRNG_OK            — success.
- * TIKU_TRNG_ERR_INVALID   — NULL pointer.
- * TIKU_TRNG_ERR_TIMEOUT   — the RNG FIFO did not deliver in time.
- * TIKU_TRNG_ERR_NOT_READY — reserved (kept for cross-port API parity).
- */
-#define TIKU_TRNG_OK             0
-#define TIKU_TRNG_ERR_INVALID   -1
-#define TIKU_TRNG_ERR_TIMEOUT   -2
-#define TIKU_TRNG_ERR_NOT_READY -3
+/* Return codes for the TRNG driver. */
+#define TIKU_TRNG_OK             0  /**< success                           */
+#define TIKU_TRNG_ERR_INVALID   -1  /**< NULL pointer                      */
+#define TIKU_TRNG_ERR_TIMEOUT   -2  /**< the RNG FIFO did not deliver      */
+#define TIKU_TRNG_ERR_NOT_READY -3  /**< not returned by this port         */
 
-/*
- * Return codes for the TRNG driver (identical to the other ports).
- *
- * TIKU_TRNG_OK            — success.
- * TIKU_TRNG_ERR_INVALID   — NULL pointer.
- * TIKU_TRNG_ERR_TIMEOUT   — the RNG FIFO did not deliver in time.
- * TIKU_TRNG_ERR_NOT_READY — reserved (kept for cross-port API parity).
+/**
+ * @brief Mark the driver initialised; the CRACEN RNG module is enabled only
+ *        for the duration of each read.
  */
 void tiku_trng_arch_init(void);
 
@@ -54,13 +42,13 @@ void tiku_trng_arch_init(void);
 int tiku_trng_arch_read_u32(uint32_t *out);
 
 /**
- * @brief Fill a byte buffer with `len` hardware random bytes.
+ * @brief Fill a byte buffer with @p len hardware random bytes.
  *
  * @param buf  Destination buffer. Must not be NULL.
  * @param len  Number of bytes requested.
  * @return TIKU_TRNG_OK on success, TIKU_TRNG_ERR_INVALID if @p buf is
  *         NULL, or TIKU_TRNG_ERR_TIMEOUT if the RNG stalled (@p buf may
- *         be partially written; no pseudo-random data is substituted).
+ *         then be partly written).
  */
 int tiku_trng_arch_read_bytes(uint8_t *buf, size_t len);
 

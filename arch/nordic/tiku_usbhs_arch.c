@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_usbhs_arch.c - nRF54LM20 USB high-speed device: bring-up and recon.
+ * tiku_usbhs_arch.c - nRF54LM20 USB high-speed device: bring-up and report.
  *
  * Powers VREGUSB, the USB PHY and the DWC2 core, and reports the core's own
- * configuration registers.  Every wait here is bounded: a probe that hangs
- * looks exactly like silicon that is dead.
+ * configuration registers.  Every wait here is bounded; a core that never
+ * answers returns -1.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,9 +27,9 @@
 /* CONFIG                                                                    */
 /*---------------------------------------------------------------------------*/
 
-/* Bounded spins.  The core's soft reset is specified in core clocks, so a
- * few thousand reads of a register on the same bus is generous; a count
- * this size costs under a millisecond and cannot wedge a shell. */
+/* Bounded spins.  The core's soft reset is specified in core clocks and
+ * normally ends within a few thousand register reads; the bounds only limit
+ * how long a dead core holds the caller. */
 #define USBHS_RESET_SPINS   2000000u
 #define USBHS_HFXO_SPINS    200000u
 #define USBHS_SETTLE_SPINS  100000u
@@ -40,9 +40,9 @@
 #define USBHS_IRQN          90
 #define VREGUSB_IRQN        289
 
-/* VREGUSB interrupt sources (VREGUSB_INTEN_*_Pos): the detect bit is 1, not
- * 0 -- bit 0 is another source, and enabling it armed an interrupt whose
- * event this driver never clears, which stormed the part into silence. */
+/* VREGUSB interrupt sources (VREGUSB_INTEN_*_Pos): the detect bit is 1,
+ * not 0.  Bit 0 is another source whose event this driver never clears, so
+ * enabling it storms the interrupt. */
 #define VREGUSB_INT_VBUSDETECTED (1u << 1)
 #define VREGUSB_INT_VBUSREMOVED  (1u << 4)
 
@@ -72,11 +72,12 @@ static uint32_t s_gintsts_seen; /* OR of the status at every interrupt     */
 /* INTERRUPTS                                                                */
 /*---------------------------------------------------------------------------*/
 
-/*
- * The wrapper has no interrupt of its own: every device interrupt is the
- * DWC2 core's, read from GINTSTS on USBHS_IRQn.  Nothing is serviced here
- * yet -- the status is recorded and the source masked off, so a cable does
- * not leave the part spinning in an unhandled interrupt.
+/**
+ * @brief USBHS_IRQn, the DWC2 core's interrupt (the wrapper has none).
+ *
+ * Records GINTSTS.  In device mode tiku_nordic_usbhs_dev_irq() services it;
+ * otherwise the status is cleared and the core's mask zeroed, so an
+ * unserviced source cannot keep re-entering.
  */
 void tiku_nordic_usbhs_isr(void)
 {
@@ -89,7 +90,7 @@ void tiku_nordic_usbhs_isr(void)
         return;
     }
     NRF_USBHSCORE_S->GINTSTS = sts;          /* write-1-to-clear          */
-    NRF_USBHSCORE_S->GINTMSK = 0u;           /* nothing services it yet   */
+    NRF_USBHSCORE_S->GINTMSK = 0u;           /* no device mode: mask all  */
 }
 
 /** @brief VBUS appeared or went; the flag is what the probe reports. */
@@ -108,9 +109,8 @@ void tiku_nordic_vregusb_isr(void)
         s_vbus = 0u;
         served = 1u;
     }
-    /* An interrupt this driver has no event for would re-enter for ever.
-     * Disarm the block instead: a probe that goes quiet can be read, one
-     * that spins in an ISR cannot. */
+    /* An interrupt with no event this driver clears re-enters for ever, so
+     * the block's interrupts are disarmed. */
     if (served == 0u) {
         NRF_VREGUSB_S->INTENCLR = 0xFFFFFFFFul;
     }
@@ -148,9 +148,12 @@ int tiku_nordic_usbhs_vbus_present(void)
 /* BRING-UP                                                                  */
 /*---------------------------------------------------------------------------*/
 
-/* The PHY's reference is not the 32 MHz crystal directly -- PHY.CLOCK reads
- * a 24 MHz select -- so the derived source is brought up too: crystal first,
- * then the PLL that hangs off it.  Both waits are bounded. */
+/**
+ * @brief Start the HFXO, the PLL and PCLK24M, each wait bounded.
+ *
+ * The PHY's reference is the 24 MHz select in PHY.CLOCK, not the 32 MHz
+ * crystal directly, so the derived clocks are started too.
+ */
 static void usbhs_clocks_start(void)
 {
     uint32_t spin;
@@ -180,8 +183,7 @@ static void usbhs_clocks_start(void)
     }
 }
 
-/* The PHY and its PLL need time before the core is clocked from them; the
- * block publishes no readiness, so this is a settle, not a poll. */
+/** @brief Fixed settle delay: the PHY and its PLL publish no readiness. */
 static void usbhs_settle(void)
 {
     volatile uint32_t spin;
@@ -209,15 +211,15 @@ int tiku_nordic_usbhs_up(void (*note)(const char *stage))
     usbhs_settle();
     usbhs_settle();
 
-    /* The first core read of the session.  Everything above exists to make
-     * this one safe. */
     /* The enable resets the PHY block, so its clock settings are written
-     * after it: keep the reference logic, bias and PLL powered rather than
-     * letting the common-on-N bit drop them in suspend. */
+     * after it: clearing COMMONONN keeps the reference logic, bias and PLL
+     * powered in suspend. */
     if (note != (void (*)(const char *))0) { note("phy-clock"); }
     NRF_USBHS_S->PHY.CLOCK &= ~(1u << 4);
     usbhs_settle();
 
+    /* The first core read of the session; it needs the clocks, enables
+     * and settles above. */
     if (note != (void (*)(const char *))0) { note("core-read"); }
     (void)NRF_USBHSCORE_S->GSNPSID;
     s_core_up = 1u;                 /* it answered: the dump is readable */
@@ -353,7 +355,7 @@ void tiku_nordic_usbhs_read(tiku_nordic_usbhs_regs_t *out)
     out->pclk24m    = NRF_CLOCK_S->PLL24M.RUN;
 
     /* The core's registers answer only once it is powered and out of
-     * reset; read through a dark core and the bus faults. */
+     * reset; a read of a dark core stalls the bus. */
     out->snpsid = out->hwcfg1 = out->hwcfg2 = out->hwcfg3 = out->hwcfg4 = 0u;
     out->gintsts = out->grstctl = out->gahbcfg = out->gusbcfg = 0u;
     out->dcfg = out->dsts = out->dctl = 0u;

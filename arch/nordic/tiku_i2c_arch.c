@@ -7,39 +7,36 @@
  *
  * tiku_i2c_arch.c - nRF54L I2C master (TWIM, EasyDMA).
  *
- * Blocking polled master on the new EasyDMA model: pointers and counts describe
- * the transaction and SHORTS wire the STOP condition, so EVENTS_STOPPED catches
- * both success and a NACK.  EasyDMA reaches only RAM, so caller buffers pass through.
+ * Blocking polled master on the DMA.TX/DMA.RX EasyDMA model: SHORTS wire the
+ * STOP, so EVENTS_STOPPED ends a transfer that succeeded or was NACKed.
+ * Caller buffers go to EasyDMA as given, so they must be in RAM.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <arch/nordic/tiku_i2c_arch.h>
-#include <arch/nordic/tiku_device_select.h>  /* board pins + MDK TWIM/GPIO regs */
+#include <arch/nordic/tiku_device_select.h>  /* board pins, MDK TWIM/GPIO */
 
 /*---------------------------------------------------------------------------*/
 /* Instance + pin selection (board-overridable)                              */
 /*---------------------------------------------------------------------------*/
 
 /*
- * TWIM instance.  The nRF54L15 SERIAL20..23 instances each expose UARTE /
- * SPIM / TWIM at a single shared base, so an instance can only be one of
- * those at a time.  The board default console is UARTE20 (SERIAL20), which
- * rules out TWIM20; TWIM22 (SERIAL22, peripheral power domain) is free and
- * shares that domain with the working console, so the same PSEL routing to
- * P1 applies.  Secure alias (_S) because TikuOS runs All-Secure.
+ * TWIM instance: TWIM22 (SERIAL22, peripheral power domain), secure alias
+ * because TikuOS runs All-Secure.  Each SERIAL2x base is one of UARTE, SPIM
+ * or TWIM at a time; SERIAL20 is the nRF54L15-DK console (UARTE20) and
+ * SERIAL21 the SPI driver (SPIM21).  PERI-domain instances route to P1 pins.
  */
 #ifndef TIKU_BOARD_I2C_TWIM
 #define TIKU_BOARD_I2C_TWIM         NRF_TWIM22_S
 #endif
 
 /*
- * SDA / SCL as (physical port, pin): P1.11 / P1.12.  These are free on the
- * nRF54L15-DK (P1 uses .04/.05 for the console, .08/.09/.13 for buttons,
- * .10/.14 for LEDs), adjacent, and on the same port the PERI-domain console
- * already drives.  GUESS pending the DK schematic -- override from the board
- * header (TIKU_BOARD_I2C0_{SDA,SCL}_{PORT,PIN}) once the header routing is
- * confirmed.  Port numbering is physical: 0=P0, 1=P1, 2=P2.
+ * SDA / SCL as (physical port, pin): P1.11 / P1.12, adjacent pins free on the
+ * nRF54L15-DK (P1 carries .04/.05 console, .08/.09/.13 buttons, .10/.14
+ * LEDs).  They are not matched to a DK connector; a board header overrides
+ * them with TIKU_BOARD_I2C0_{SDA,SCL}_{PORT,PIN}.  Ports are physical:
+ * 0=P0, 1=P1, 2=P2.
  */
 #ifndef TIKU_BOARD_I2C0_SDA_PORT
 #define TIKU_BOARD_I2C0_SDA_PORT    1u
@@ -64,8 +61,8 @@
 /**
  * @brief Encode a (port, pin) into a TWIM PSEL value.
  *
- * bits[4:0] = pin, bits[7:5] = port, bit31 = CONNECT (0 = connected).  Same
- * encoding the console UARTE driver uses and proves on this silicon.
+ * bits[4:0] = pin, bits[7:5] = port, bit31 = CONNECT (0 = connected), the
+ * same encoding as the console UARTE driver.
  */
 #define TIKU_PSEL(port, pin) \
     (((uint32_t)(port) << 5) | ((uint32_t)(pin)))
@@ -94,15 +91,11 @@
                                      TWIM_ERRORSRC_DNACK_Msk)
 
 /**
- * @brief Upper bound on the completion spin.
+ * @brief Upper bound on the completion spin, in loop iterations.
  *
- * Not a calibrated timeout -- a backstop so a wedged bus (SDA held low, no
- * clock) cannot hang the kernel.  A live transfer breaks out the instant
- * EVENTS_STOPPED asserts, so this bound only governs how fast a BROKEN bus fails.
- *
- * @note At ~11 cycles/iteration on the 128 MHz core, 100000 iterations is ~9 ms
- *       -- ample for any short probe or read, yet quick enough that a full
- *       112-address scan of an empty bus finishes in seconds, not tens.
+ * A backstop for a wedged bus (SDA held low, no clock), not a calibrated
+ * timeout: a completed transfer leaves the loop when EVENTS_STOPPED asserts,
+ * so the bound only sets how long a broken bus takes to fail.
  */
 #define TIKU_TWIM_SPIN_LIMIT        100000UL
 
@@ -116,9 +109,8 @@ static uint8_t i2c_initialised;
 /**
  * @brief One-byte RAM source for the probe transfer.
  *
- * EasyDMA can only fetch from RAM, so the probe's dummy write byte lives in
- * .bss.  Its value is irrelevant -- a probe only cares whether the address
- * was acknowledged.
+ * EasyDMA fetches only from RAM, so the probe's dummy write byte lives in
+ * .bss.  Its value does not matter: a probe reads only the address ACK.
  */
 static uint8_t twim_probe_byte;
 
@@ -129,9 +121,9 @@ static uint8_t twim_probe_byte;
 /**
  * @brief Configure one SDA/SCL pin as open-drain input-with-pull-up.
  *
- * Mirrors nrfx's TWIM_PIN_INIT: DIR = Input, input buffer Connected so the
+ * As nrfx's TWIM_PIN_INIT: DIR = Input, input buffer Connected so the
  * peripheral can sample the line, PULL = Pull-up, DRIVE = S0D1 so the pin is
- * only ever actively driven low -- the required open-drain behaviour.
+ * only driven low, the open-drain behaviour I2C needs.
  *
  * @note The TWIM drives the pin through its PSEL connection; PIN_CNF supplies
  *       the electrical characteristics.  External 4.7 kohm pull-ups are
@@ -207,7 +199,8 @@ static int twim_run(uint8_t addr, uint32_t shorts,
     }
 
     /* A write (or write-then-read) begins with STARTTX; the LASTTX->STARTRX
-     * short then chains into the read phase.  A pure read begins with STARTRX. */
+     * short then chains into the read phase.  A pure read begins with
+     * STARTRX. */
     if (txlen > 0u) {
         TIKU_TWIM->TASKS_DMA.TX.START = 1UL;
     } else {
@@ -254,7 +247,7 @@ static int twim_run(uint8_t addr, uint32_t shorts,
  *
  * Parks SDA/SCL as open-drain pull-up pins, routes them to the TWIM via PSEL,
  * selects 100 kHz (Standard) or 400 kHz (Fast), and enables the peripheral.
- * No separate clock gate: the TWIM shares the domain with the console UARTE.
+ * No clock gate needs opening.
  *
  * @param config  Bus configuration (speed).  Must be non-NULL.
  * @return TIKU_I2C_OK on success, TIKU_I2C_ERR_PARAM if @p config is NULL.

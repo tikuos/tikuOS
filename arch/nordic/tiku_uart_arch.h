@@ -7,9 +7,9 @@
  *
  * tiku_uart_arch.h - UARTE console backend for printf (nRF54L, EasyDMA).
  *
- * Mirrors the RP2350 UART arch header.  The UARTE is DMA-only, so TX sends a byte
- * at a time from a bounce buffer and RX arms a single-byte DMA that re-arms per
- * read.  Instance and pins come from the board header.
+ * The UARTE is DMA-only: TX sends one byte at a time from a bounce buffer, and
+ * each received byte lands through a 1-byte DMA, re-armed by the ISR, in a
+ * software ring.  Instance and pins come from the board header.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -28,16 +28,20 @@ void     tiku_uart_putc(char c);
 /** @brief Transmit a null-terminated string. */
 void     tiku_uart_puts(const char *s);
 
-/** @brief Formatted output over the console UARTE (newlib-nano vsnprintf). */
+/** @brief Formatted output over the console UARTE (newlib-nano vsnprintf),
+ *         truncated to 127 characters. */
 void     tiku_uart_printf(const char *fmt, ...);
 
-/** @brief Non-zero if a received byte is available. */
+/** @brief Non-zero if a received byte is in the ring; an empty ring also
+ *         runs the RX wedge check. */
 uint8_t  tiku_uart_rx_ready(void);
 
-/** @brief Read one byte (blocking); returns 0..255. */
+/** @brief Read one byte from the RX ring: 0..255, or -1 when the ring is
+ *         empty (does not block). */
 int      tiku_uart_getc(void);
 
-/** @brief RX overrun count (bytes lost between reads); saturates. */
+/** @brief Bytes lost to a full ring or a hardware overrun since init or
+ *         the last reset; saturates at 0xFFFF. */
 uint16_t tiku_uart_overrun_count(void);
 
 /** @brief Reset the RX overrun counter. */

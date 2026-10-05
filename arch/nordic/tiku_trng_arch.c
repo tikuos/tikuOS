@@ -7,9 +7,9 @@
  *
  * tiku_trng_arch.c - nRF54L true random number generator (CRACEN RNG).
  *
- * The part has no classic RNG: entropy comes from the ring-oscillator TRNG inside
- * CRACEN, conditioned by its AES stage, which is this silicon's debiasing.  No
- * pseudo-random fallback -- a timeout returns an error and writes nothing.
+ * Entropy comes from the ring-oscillator TRNG inside CRACEN, conditioned by its
+ * AES stage.  A stall returns TIKU_TRNG_ERR_TIMEOUT; the buffer may then be
+ * partly written.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,43 +18,27 @@
 #include <arch/nordic/tiku_nordic_mdk.h>
 
 /*
- * CRACEN RNG private configuration -- tuning constants for the TRNG driver.
- *
- * The values match Nordic's nrfx_cracen defaults.  The nRF54L15 and nRF54LM20A
- * carry different CRACEN TRNG core revisions with renamed timing registers
- * (INITWAITVAL/CLKDIV/SWOFFTMRVAL vs WARMUPPERIOD/SAMPLINGPERIOD, and the LM20A
- * core drops the idle off-timer).
- *
- * trng_configure() selects the right field with the same feature-detection
- * idiom as nrfx's hal/nrf_cracen_rng.h -- keyed on the field's _ResetValue
- * macro, not a device name -- so a new nRF54L part works without edits here.
+ * CRACEN RNG tuning constants; the values match Nordic's nrfx_cracen
+ * defaults.  The nRF54L15 and nRF54LM20A carry different CRACEN TRNG core
+ * revisions with renamed timing registers (INITWAITVAL/CLKDIV/SWOFFTMRVAL vs
+ * WARMUPPERIOD/SAMPLINGPERIOD; the LM20A core has no idle off-timer).
+ * trng_configure() picks each field by testing the MDK's _ResetValue macro
+ * for it, not the device name.
  */
-/*
- * CRACEN RNG private configuration -- tuning constants for the TRNG driver.
- *
- * The values match Nordic's nrfx_cracen defaults.  The nRF54L15 and nRF54LM20A
- * carry different CRACEN TRNG core revisions with renamed timing registers
- * (INITWAITVAL/CLKDIV/SWOFFTMRVAL vs WARMUPPERIOD/SAMPLINGPERIOD, and the LM20A
- * core drops the idle off-timer).
- *
- * trng_configure() selects the right field with the same feature-detection
- * idiom as nrfx's hal/nrf_cracen_rng.h -- keyed on the field's _ResetValue
- * macro, not a device name -- so a new nRF54L part works without edits here.
- */
+/** @brief Idle off-timer (L15 SWOFFTMRVAL; the LM20A core has none). */
 #define TRNG_OFF_TIMER_VAL      0U
 /** @brief Sample rate (L15 CLKDIV / LM20A SAMPLINGPERIOD): Fs = Fpclk/(v+1). */
 #define TRNG_CLK_DIV            0U
-/** @brief Warm-up (L15 INITWAITVAL / LM20A WARMUPPERIOD): ring start-up wait. */
+/** @brief Warm-up (L15 INITWAITVAL / LM20A WARMUPPERIOD): ring start-up. */
 #define TRNG_INIT_WAIT_VAL      512U
 /** @brief NB128BITBLOCKS: 128-bit blocks folded by the AES conditioner. */
 #define TRNG_NB_128BIT_BLOCKS   4U
 /** @brief Words drawn from the FIFO to seed the AES conditioning key. */
 #define TRNG_COND_KEY_WORDS     4U
-/** @brief Bytes produced per drain pass; <= 64 B FIFO, kept conservative. */
+/** @brief Bytes produced per drain pass, half the 64-byte FIFO. */
 #define TRNG_CHUNK_BYTES        32U
 /** @brief Spin budget while polling the FSM / FIFO before giving up. */
 #define TRNG_SPIN_LIMIT         2000000UL
-/** @} */
 
 /**
  * @defgroup trng_get_result Internal drain-attempt result codes
@@ -108,9 +92,8 @@ trng_configure(void)
     NRF_CRACENCORE_S->RNGCONTROL.CONTROL =
         CRACENCORE_RNGCONTROL_CONTROL_SOFTRST_Msk;
 
-    /* Tuning counters (written while held in soft reset).  Field names differ
-     * per CRACEN TRNG core revision; select via the MDK _ResetValue macros,
-     * exactly as nrfx hal/nrf_cracen_rng.h does. */
+    /* Tuning counters, written while held in soft reset.  Field names differ
+     * per CRACEN TRNG core revision; the MDK _ResetValue macros select them. */
 #if defined(CRACENCORE_RNGCONTROL_SWOFFTMRVAL_ResetValue)
     /* nRF54L15-class core: has the idle off-timer. */
     NRF_CRACENCORE_S->RNGCONTROL.SWOFFTMRVAL = TRNG_OFF_TIMER_VAL;
@@ -137,14 +120,17 @@ trng_configure(void)
 }
 
 /**
- * @brief Soft-reset and (re-)enable the CRACEN RNG core.
+ * @brief One drain attempt: try to fill @p size bytes from the FIFO.
  *
- * Pulses SOFTRST (disabling the FSM and clearing the continuous test,
- * conditioning function and FIFO), programs the warm-up and sample-clock
- * counters, then re-enables with AES conditioning over TRNG_NB_128BIT_BLOCKS.
+ * Checks the FSM, seeds the AES conditioning key from the first four FIFO
+ * words if not done yet, then drains @p size bytes little-endian, but only
+ * when enough conditioned words are queued.  Never blocks.
  *
- * @note Leaves the FSM restarting; the caller polls trng_fsm_state() until it
- *       leaves RESET.
+ * @param dst        Destination buffer (caller guarantees @p size room).
+ * @param size       Bytes to produce this pass (<= TRNG_CHUNK_BYTES).
+ * @param p_key_set  In/out flag tracking whether KEY[] is programmed.
+ * @return TRNG_GET_OK when @p size bytes were written, TRNG_GET_PENDING
+ *         if the FIFO is not ready, TRNG_GET_RESET if the FSM faulted.
  */
 static int
 trng_get(uint8_t *dst, size_t size, int *p_key_set)
@@ -190,17 +176,16 @@ trng_get(uint8_t *dst, size_t size, int *p_key_set)
 }
 
 /**
- * @brief One drain attempt: try to fill @p size bytes from the FIFO.
+ * @brief Produce @p len random bytes with the RNG module already enabled.
  *
- * Checks the FSM, seeds the AES conditioning key from the first four FIFO words
- * if not done yet, then drains @p size bytes little-endian -- but only if
- * enough conditioned words are already queued.  Never blocks.
+ * Configures the core, then drains chunks via trng_get(), polling on PENDING
+ * and reconfiguring on RESET.  The spin budget restarts with every chunk
+ * delivered, so only a stuck FSM trips the timeout.
  *
- * @param dst        Destination buffer (caller guarantees @p size room).
- * @param size       Bytes to produce this pass (<= TRNG_CHUNK_BYTES).
- * @param p_key_set  In/out flag tracking whether KEY[] is programmed.
- * @return TRNG_GET_OK when @p size bytes were written, TRNG_GET_PENDING
- *         if the FIFO is not ready, TRNG_GET_RESET if the FSM faulted.
+ * @param buf  Destination buffer (non-NULL, @p len bytes).
+ * @param len  Number of bytes to produce (> 0).
+ * @return TIKU_TRNG_OK on success, TIKU_TRNG_ERR_TIMEOUT if the hardware
+ *         stalled past the spin budget.
  */
 static int
 trng_request(uint8_t *buf, size_t len)
@@ -236,18 +221,7 @@ trng_request(uint8_t *buf, size_t len)
     return TIKU_TRNG_OK;
 }
 
-/**
- * @brief Produce @p len random bytes with the RNG module already enabled.
- *
- * Configures the core once, then loops draining chunks via trng_get(), spinning
- * on PENDING and reconfiguring on RESET.  The spin budget resets on every byte
- * of progress, so only a genuinely stuck FSM trips the timeout.
- *
- * @param buf  Destination buffer (non-NULL, @p len bytes).
- * @param len  Number of bytes to produce (> 0).
- * @return TIKU_TRNG_OK on success, TIKU_TRNG_ERR_TIMEOUT if the hardware
- *         stalled past the spin budget.
- */
+/** @brief Mark the driver initialised; each read powers the RNG itself. */
 void
 tiku_trng_arch_init(void)
 {
@@ -261,8 +235,8 @@ tiku_trng_arch_init(void)
  * @brief Fill a byte buffer with hardware random data.
  *
  * Enables the CRACEN RNG module, drives the polled entropy path to produce
- * @p len conditioned bytes, then disables the module.  On any hardware stall
- * @p buf may be partially written; no pseudo-random data is ever substituted.
+ * @p len conditioned bytes, then disables the module.  On a hardware stall
+ * @p buf may be partly written.
  *
  * @param buf  Destination buffer (must not be NULL).
  * @param len  Number of random bytes requested.
@@ -293,16 +267,11 @@ tiku_trng_arch_read_bytes(uint8_t *buf, size_t len)
 }
 
 /**
- * @brief Fill a byte buffer with hardware random data.
+ * @brief Fetch a 32-bit random word, packed little-endian from four bytes.
  *
- * Enables the CRACEN RNG module, drives the polled entropy path to produce
- * @p len conditioned bytes, then disables the module.  On any hardware stall
- * @p buf may be partially written; no pseudo-random data is ever substituted.
- *
- * @param buf  Destination buffer (must not be NULL).
- * @param len  Number of random bytes requested.
- * @return TIKU_TRNG_OK on success, TIKU_TRNG_ERR_INVALID if @p buf is
- *         NULL, or TIKU_TRNG_ERR_TIMEOUT if the RNG did not deliver.
+ * @param out  Where to store the word (must not be NULL).
+ * @return TIKU_TRNG_OK, TIKU_TRNG_ERR_INVALID if @p out is NULL, or
+ *         TIKU_TRNG_ERR_TIMEOUT; *out is untouched on error.
  */
 int
 tiku_trng_arch_read_u32(uint32_t *out)

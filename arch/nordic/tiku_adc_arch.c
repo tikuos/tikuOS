@@ -7,9 +7,9 @@
  *
  * tiku_adc_arch.c - nRF54L SAADC one-shot single-ended driver.
  *
- * Every conversion returns through EasyDMA into a static word-aligned RAM buffer,
- * so the sequence is START/STARTED, then SAMPLE/END.  The reference is the 0.9 V
- * band-gap at 1/4 gain; TIKU_ADC_CH_TEMP errors, since die temp is not a SAADC input.
+ * Every conversion returns through EasyDMA into a static word-aligned RAM
+ * buffer, so the sequence is START/STARTED, then SAMPLE/END.  The reference is
+ * the 0.9 V band-gap at 1/4 gain; TIKU_ADC_CH_TEMP is not a SAADC input.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -41,6 +41,7 @@
  *
  * Internal 0.9 V reference, gain 1/4 (Gain2_8) -> 3.6 V full scale, normal
  * (non-burst) single-ended mode, with the acquisition/conversion times above.
+ * A 12-bit reading is V * (2/8) / 0.9 V * 4096 counts.
  */
 #define TIKU_SAADC_CH_CONFIG                                                  \
     ((SAADC_CH_CONFIG_REFSEL_Internal << SAADC_CH_CONFIG_REFSEL_Pos)         \
@@ -77,12 +78,6 @@ static uint8_t tiku_saadc_ready;
  *
  * nRF54L15 product-specification pin assignment; all analog inputs are on
  * physical port P1, and the nRF54LM20A samples the same pins.
- *
- * @note Absolute scale (measured 2026-07-14): counts = VDD * (2/8) / 0.9V *
- *       4096.  The L15-DK rail is 1.8 V -> `adc bat` ~2060; the LM20-DK ships
- *       at ~3.0 V -> ~3450.  Cross-checked by driving P1.06 high on the LM20-DK:
- *       3456 counts, byte-identical to the internal-VDD channel, so the board
- *       difference is the PMIC rail setting, not an SAADC encoding delta.
  */
 static const uint8_t tiku_saadc_ain_pin[8] = {
     4u, 5u, 6u, 7u, 11u, 12u, 13u, 14u
@@ -95,8 +90,8 @@ static const uint8_t tiku_saadc_ain_pin[8] = {
 /**
  * @brief Translate a kernel ADC channel ID into a CH[n].PSELP register value.
  *
- * External channels 0..7 select AIN0..AIN7 via the CONNECT=AnalogInput encoding;
- * channel 31 (TIKU_ADC_CH_BATTERY) selects the internal VDD rail via
+ * External channels 0..7 select AIN0..AIN7 through CONNECT=AnalogInput;
+ * channel 31 (TIKU_ADC_CH_BATTERY) selects the internal VDD rail through
  * CONNECT=Internal.  TIKU_ADC_CH_TEMP and any other ID have no SAADC input.
  *
  * @param channel  Kernel ADC channel ID.
@@ -145,13 +140,12 @@ static int tiku_saadc_wait(volatile uint32_t *event)
 /**
  * @brief Initialise and enable the SAADC.
  *
- * Decodes the requested resolution into RESOLUTION, then enables the converter.
- * The nRF54L SAADC self-clocks -- no clock or power gate to open, unlike the
- * RP2350 and Ambiq ports -- so ENABLE=1 is the only bring-up step.
+ * Decodes the requested resolution into RESOLUTION, then sets ENABLE, the
+ * only bring-up step: the SAADC self-clocks, with no clock or power gate to
+ * open.  Offset auto-calibration is not run.
  *
- * @note Offset auto-calibration is not run; it would trim a few LSB but is not
- *       needed for a valid read.  The reference selector has no nRF54L
- *       equivalent (fixed internal 0.9 V band-gap) and is accepted but ignored.
+ * @note The reference selector has no nRF54L equivalent (fixed internal
+ *       0.9 V band-gap) and is accepted but ignored.
  * @param config  ADC configuration; must be non-NULL with a known resolution.
  * @return TIKU_ADC_OK on success, TIKU_ADC_ERR_PARAM for a NULL config or an
  *         unrecognised resolution.
@@ -174,7 +168,7 @@ int tiku_adc_arch_init(const tiku_adc_config_t *config)
 
     /* nRF54L has only the internal 0.9 V band-gap or an external reference
      * pin; the interface's AVCC/1V2/2V0/2V5 selectors have no equivalent, so
-     * the request is accepted (API contract) but the fixed 0.9 V ref is used. */
+     * the request is accepted and the fixed 0.9 V reference is used. */
     (void)config->reference;
 
     TIKU_SAADC->RESOLUTION = res;
@@ -196,7 +190,7 @@ void tiku_adc_arch_close(void)
 }
 
 /**
- * @brief Validate that a channel maps to a real analog input.
+ * @brief Validate that a channel maps to an SAADC input.
  *
  * There is no pin mux to program: the SAADC connects the selected input through
  * its own switch, and a GPIO's reset state (digital input buffer disconnected)
@@ -216,9 +210,9 @@ int tiku_adc_arch_channel_init(uint8_t channel)
 /**
  * @brief Perform a one-shot single-ended conversion.
  *
- * Routes the channel onto CH[0], points EasyDMA at the static RAM sample buffer,
- * runs the START/STARTED -> SAMPLE/END handshake, then stops the converter.
- * Every wait is bounded and @p value is untouched on any failure.
+ * Routes the channel onto CH[0], points EasyDMA at the static RAM sample
+ * buffer, runs the START/STARTED -> SAMPLE/END handshake, then stops the
+ * converter.  Every wait is bounded and @p value is untouched on failure.
  *
  * @param channel  Kernel ADC channel ID (0..7, or 31 for VDD).
  * @param value    Output: raw right-aligned conversion result.
@@ -274,7 +268,7 @@ int tiku_adc_arch_read(uint8_t channel, uint16_t *value)
     tiku_nordic_dsb();
     sample = tiku_saadc_result;
 
-    /* Return the converter to idle so the next read starts cleanly. */
+    /* Stop the converter so the next read starts from idle. */
     TIKU_SAADC->TASKS_STOP = 1u;
     (void)tiku_saadc_wait(&TIKU_SAADC->EVENTS_STOPPED);
 

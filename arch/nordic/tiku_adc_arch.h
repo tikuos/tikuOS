@@ -7,9 +7,8 @@
  *
  * tiku_adc_arch.h - nRF54L ADC (SAADC) arch header.
  *
- * One-shot single-ended SAADC backend.  These prototypes mirror the RP2350 arch
- * header so the interface layer and the ADC HAL routing resolve without implicit
- * declarations.
+ * One-shot single-ended SAADC backend: the arch functions the ADC interface
+ * layer calls through hal/tiku_adc_hal.h.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -52,7 +51,7 @@ void tiku_adc_arch_close(void);
  *
  * @param channel  Channel ID: 0..7 = AIN0..AIN7 (all on port P1: pins
  *                 4/5/6/7/11/12/13/14), 31 (TIKU_ADC_CH_BATTERY) = the
- *                 internal VDD rail.  TIKU_ADC_CH_TEMP (30) is NOT an
+ *                 internal VDD rail.  TIKU_ADC_CH_TEMP (30) is not an
  *                 SAADC input on the nRF54L (die temperature is a
  *                 separate TEMP peripheral) and is rejected.
  * @return TIKU_ADC_OK for a supported channel, TIKU_ADC_ERR_PARAM
@@ -67,8 +66,8 @@ int  tiku_adc_arch_channel_init(uint8_t channel);
  * buffer and runs the START/STARTED -> SAMPLE/END handshake, TASKS_SAMPLE being
  * valid only once the DMA has started.
  *
- * @note Every wait is bounded, so a wedged conversion surfaces as a timeout
- *       rather than hanging the kernel; @p value is untouched on failure, and a
+ * @note Every wait is bounded: a conversion that never completes returns
+ *       TIKU_ADC_ERR_TIMEOUT.  @p value is untouched on failure, and a
  *       negative sample (single-ended offset on a grounded input) clamps to 0.
  * @param channel  Channel ID (0..7, or 31 for VDD)
  * @param value    Output: raw right-aligned result (0..255 / 0..1023 /
