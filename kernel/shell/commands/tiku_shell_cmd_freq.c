@@ -311,7 +311,12 @@ tiku_shell_cmd_freq(uint8_t argc, const char *argv[])
         SHELL_PRINTF("  <mhz>: 240 (boot default), 480 or 1000.\n");
 #elif defined(PLATFORM_ESP32C61)
         SHELL_PRINTF("  no arg: show the core clock; probe: the clock tree;\n");
+#if TIKU_ESP32C61_OFFER_MIN_MHZ > 40U
+        SHELL_PRINTF("  <mhz>: 80 or 160 (PLL; the radios hang on the "
+                     "crystal).\n");
+#else
         SHELL_PRINTF("  <mhz>: 10, 20 or 40 (crystal), 80 or 160 (PLL).\n");
+#endif
 #elif defined(PLATFORM_MSP430)
         SHELL_PRINTF("  no arg: show the core clock; <mhz>: 8, 4, 2 or 1 "
                      "(MCLK divided from the 8 MHz DCO).\n");

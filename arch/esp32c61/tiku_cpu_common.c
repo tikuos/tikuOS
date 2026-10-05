@@ -107,6 +107,9 @@ void tiku_cpu_esp32c61_restart(int by_watchdog) {
         tiku_cpu_esp32c61_delay_us(10U);
     }
     tiku_cpu_esp32c61_delay_us(200U);   /* the last byte leaves the shifter */
+    /* Back on the PLL: a reset taken while the core runs from the crystal
+     * leaves the ROM silent until EN. */
+    (void)tiku_cpu_freq_esp32c61_set(160U);
     /* Nothing below touches flash or PSRAM. */
     (void)ESP32C61_ROM_CACHE_DISABLE();
     if (by_watchdog) {

@@ -83,6 +83,14 @@ void tiku_cpu_esp32c61_clock_unpark(uint32_t saved);
 /** @brief 1 when @p mhz is a core rate the tree makes exactly. */
 int tiku_cpu_freq_esp32c61_supported(unsigned int mhz);
 
+/** @brief The lowest rate offered: the radios hang on the crystal, so a
+ *         build with one offers the PLL's rates alone. */
+#if (TIKU_DRV_WIFI_ESP_ENABLE + 0) || (TIKU_DRV_BLE_ESP_ENABLE + 0)
+#define TIKU_ESP32C61_OFFER_MIN_MHZ 80U
+#else
+#define TIKU_ESP32C61_OFFER_MIN_MHZ 10U
+#endif
+
 /**
  * @brief Move the core to @p mhz and re-measure it.
  *

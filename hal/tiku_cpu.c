@@ -201,8 +201,10 @@ void tiku_cpu_freq_init(unsigned int cpu_freq) {
 #elif defined(PLATFORM_RA8P1)
     tiku_cpu_freq_ra8p1_init(cpu_freq);
 #elif defined(PLATFORM_ESP32C61)
-    /* An unsupported rate is ignored: the tree keeps what it runs at. */
-    (void)tiku_cpu_freq_esp32c61_set(cpu_freq);
+    /* A rate not offered is ignored: the tree keeps what it runs at. */
+    if (cpu_freq >= TIKU_ESP32C61_OFFER_MIN_MHZ) {
+        (void)tiku_cpu_freq_esp32c61_set(cpu_freq);
+    }
 #endif
 }
 
@@ -231,10 +233,16 @@ unsigned long tiku_cpu_freq_available(unsigned int index) {
     };
     return index < sizeof rates / sizeof rates[0] ? rates[index] : 0UL;
 #elif defined(PLATFORM_ESP32C61)
-    /* The crystal divided, then the PLL divided: every rate the tree makes. */
+    /* The crystal divided, then the PLL divided: every rate the tree makes,
+     * from the lowest the build offers. */
     static const unsigned long rates[] = {
         10000000UL, 20000000UL, 40000000UL, 80000000UL, 160000000UL
     };
+    unsigned int first = 0U;
+    while (rates[first] < TIKU_ESP32C61_OFFER_MIN_MHZ * 1000000UL) {
+        first++;
+    }
+    index += first;
     return index < sizeof rates / sizeof rates[0] ? rates[index] : 0UL;
 #elif defined(PLATFORM_MSP430)
     /* Keep the board's 8 MHz UART/peripheral clock untouched. */

@@ -780,7 +780,8 @@ static int cpu_mode_read(char *buf, size_t max)
 
 #if defined(PLATFORM_NORDIC) || defined(PLATFORM_RP2350) || \
     defined(PLATFORM_AMBIQ) || defined(PLATFORM_MSP430) || \
-    defined(PLATFORM_STM32N6) || defined(PLATFORM_RA8P1)
+    defined(PLATFORM_STM32N6) || defined(PLATFORM_RA8P1) || \
+    defined(PLATFORM_ESP32C61)
 /**
  * @brief Save a strictly parsed Hz target; never retune a running CPU.
  *

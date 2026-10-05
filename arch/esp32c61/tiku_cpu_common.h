@@ -58,9 +58,9 @@ void tiku_cpu_esp32c61_icache_invalidate(void);
 /**
  * @brief Reset the HP system with the cache stopped first.
  *
- * An HP reset mid flash fetch leaves the cache unable to fetch, so the ROM
- * stalls and its boot watchdog loops until EN or power.  Interrupts go off,
- * the console drains and the cache stops first, all from SRAM.
+ * An HP reset mid flash fetch, or taken on the crystal, leaves the ROM's
+ * boot stalled until EN or power.  Interrupts go off, the console drains, the
+ * core returns to the PLL and the cache stops first, all from SRAM.
  *
  * @param by_watchdog  Non-zero: a TG0 bite, so the next boot reads a
  *                     watchdog reset, as a reboot does elsewhere; zero: the
