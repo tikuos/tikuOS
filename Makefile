@@ -2610,13 +2610,17 @@ endif
 # at the executable NVM slot VMA, flatten to a blob, and wrap it as an ARM
 # object embedded in the firmware (the "bytes that arrive over the air").
 # Per-DEVICE: the slot address, install mechanism and CPU differ --
-#   nrf54lm20a/b + nrf54l15: RRAM slot 0x0C8000, Cortex-M33 (byte-writable
+#   nrf54lm20a/b + nrf54l15: RRAM slot 0x58000, Cortex-M33 (byte-writable
 #                         XIP) -- ONE address for the whole Nordic family
-#   apollo510/apollo510b: MRAM slot 0x488000,  Cortex-M55 (bootrom-programmed)
-#   apollo4l/apollo4p:    MRAM slot 0x90000,   Cortex-M4  (bootrom-programmed)
-#   rp2350:               flash slot 0x100F8000, Cortex-M33 (boot-ROM sectors)
+#   apollo510/apollo510b: no slot; the image is copied from /data into an
+#                         ITCM window at 0x1000 at every activate (Cortex-M55)
+#   apollo4l/apollo4p:    MRAM slot 0x70000,   Cortex-M4  (bootrom-programmed)
+#   rp2350:               flash slot 0x10058000, Cortex-M33 (boot-ROM sectors)
 #   msp430fr5994/fr6989:  FRAM slot 0x43000/0x23000 (HIFRAM top, MPU-unlocked)
-# ARM slots are 32 KB (canonical order: code | module | region | persist);
+#   esp32c61:             no slot; the image is copied from /data into a PSRAM
+#                         window at 0x42800000 at every activate (RISC-V)
+# ARM slots are the top 32 KB of the 384 KB code window (canonical order:
+# code | module | region | persist);
 # MSP430 keeps ~4 KB at the top of HIFRAM (deliberate small-part exception).
 # Other MCUs have no module slot carved in their linker script -> hard error.
 ifeq ($(TIKU_BASIC_MODULE_ENABLE),1)
@@ -2634,7 +2638,7 @@ ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
 MOD_CPU_FLAGS  = -mcpu=cortex-m33 -mthumb -mfloat-abi=soft
 MOD_LDS        = kernel/shell/basic/modules/mod_demo.ld
 else ifeq ($(MCU),nrf54l15)
-# Same slot VMA as the LM20 (shared 800 KB Nordic code window), so the LM20
+# Same slot VMA as the LM20 (shared 384 KB Nordic code window), so the LM20
 # module script serves both parts and a module image is family-portable.
 MOD_CPU_FLAGS  = -mcpu=cortex-m33 -mthumb -mfloat-abi=soft -DTIKU_DEVICE_NRF54L15
 MOD_LDS        = kernel/shell/basic/modules/mod_demo.ld
@@ -3437,6 +3441,10 @@ SRCS   += tikukits/crypto/sha256/tiku_kits_crypto_sha256.c
 SRCS   += tikukits/crypto/base64/tiku_kits_crypto_base64.c
 SRCS   += tikukits/crypto/hmac/tiku_kits_crypto_hmac.c
 endif
+else
+# Passed explicitly: the config header turns the words on by default wherever
+# the full crypto kit is built.
+CFLAGS += -DTIKU_BASIC_CRYPTO_ENABLE=0
 endif
 endif
 

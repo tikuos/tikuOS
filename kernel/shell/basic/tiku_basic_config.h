@@ -637,14 +637,22 @@
  *   Nordic RRAM        no erase, but limited write endurance: 5 s
  * A longer interval lengthens the replay after a power cut: the program
  * re-runs at most the last interval's worth of lines. */
-/** Minimum seconds between run-state checkpoints while PERSIST is on. */
+/**
+ * Minimum seconds between run-state checkpoints while PERSIST is on.  Only
+ * MSP430 FRAM and the host checkpoint every yield batch (0); any port not named
+ * here waits 60 s, as sector-erased flash (RP2350, ESP32-C61, STM32N6) needs.
+ *
+ * @note RA8P1's code MRAM is rated for 100000 programs per 32 bytes, the
+ *       class of Nordic's RRAM, so it takes the same 5 s.
+ */
 #ifndef TIKU_BASIC_CKPT_INTERVAL_S
-#  if defined(PLATFORM_RP2350)
-#    define TIKU_BASIC_CKPT_INTERVAL_S 60
-#  elif defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC)
+#  if defined(PLATFORM_MSP430) || defined(TIKU_TEST_HOST)
+#    define TIKU_BASIC_CKPT_INTERVAL_S 0
+#  elif defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC) || \
+        defined(PLATFORM_RA8P1)
 #    define TIKU_BASIC_CKPT_INTERVAL_S 5
 #  else
-#    define TIKU_BASIC_CKPT_INTERVAL_S 0
+#    define TIKU_BASIC_CKPT_INTERVAL_S 60
 #  endif
 #endif
 
