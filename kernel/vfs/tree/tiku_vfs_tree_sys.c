@@ -42,6 +42,7 @@
 #include "tiku_vfs_tree_timer.h"
 #include "tiku_vfs_tree_watchdog.h"
 #include "tiku_vfs_tree_power.h"
+#include "tiku_vfs_tree_net.h"
 #if (TIKU_DRV_GPU_ENABLE + 0)
 #include "tiku_vfs_tree_gpu.h"       /* /sys/gpu -- Apollo510 GPU status     */
 #endif
@@ -1696,6 +1697,8 @@ static const tiku_vfs_node_t sys_children[] = {
       SYS_MEM_NCHILD },
     { "fs",       TIKU_VFS_DIR, NULL, NULL, tiku_vfs_tree_fs_children,
       TIKU_VFS_TREE_FS_NCHILD },
+    { "net",      TIKU_VFS_DIR, NULL, NULL,
+      tiku_vfs_tree_net_children, TIKU_VFS_TREE_NET_NCHILD },
     { "cpu",      TIKU_VFS_DIR,  NULL, NULL, sys_cpu_children,
       sizeof sys_cpu_children / sizeof sys_cpu_children[0] },
     { "power",    TIKU_VFS_DIR,  NULL, NULL,

@@ -82,7 +82,7 @@ typedef uint8_t tiku_vfs_cap_t;
 #define TIKU_VFS_CAP_HW    0x01u  /**< actuate hardware: gpio, led, i2c, pins  */
 #define TIKU_VFS_CAP_SYS   0x02u  /**< system/safety control: watchdog, clock  */
 #define TIKU_VFS_CAP_FS    0x04u  /**< mutate persistent store: /data, tier    */
-#define TIKU_VFS_CAP_NET   0x08u  /**< network config / credentials (reserved) */
+#define TIKU_VFS_CAP_NET   0x08u  /**< network config / credentials         */
 #define TIKU_VFS_CAP_ALL   0xFFu  /**< full authority: console, kernel, init   */
 
 /**

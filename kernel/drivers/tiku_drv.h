@@ -59,6 +59,7 @@ typedef enum {
 #define TIKU_DRV_ERR_NOT_PRESENT (-2)
 #define TIKU_DRV_ERR_TIMEOUT   (-3)
 #define TIKU_DRV_ERR_INVALID   (-4)
+#define TIKU_DRV_ERR_IO        (-5) /**< operation or persistent flush failed */
 
 /**
  * @brief Driver descriptor — one per driver, statically allocated

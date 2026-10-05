@@ -2492,6 +2492,8 @@ SRCS += kernel/vfs/tree/tiku_vfs_tree_timer.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_watchdog.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_power.c
 SRCS += kernel/cpu/tiku_power_policy.c
+SRCS += kernel/vfs/tree/tiku_vfs_tree_net.c
+SRCS += kernel/vfs/tree/tiku_vfs_tree_wifi.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_persist.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_layout.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_watch.c
@@ -3243,6 +3245,12 @@ comma := ,
 CFLAGS += -DTIKU_KITS_NET_IP_ADDR="{$(subst .,$(comma),$(IP))}"
 endif
 SRCS   += $(wildcard tikukits/net/slip/*.c)
+ifeq ($(TIKU_KITS_NET_DHCP_ENABLE),1)
+CFLAGS += -DTIKU_KITS_NET_DHCP_ENABLE=1
+endif
+ifeq ($(TIKU_KITS_NET_DNS_ENABLE),1)
+CFLAGS += -DTIKU_KITS_NET_DNS_ENABLE=1
+endif
 # IPv4 base set. Drops the heavy protocol modules when their per-flag
 # is off — each declares static buffers via __attribute__((section(
 # ".persistent"))) regardless of compile-time gates, and the RP2350
@@ -3259,7 +3267,6 @@ SRCS   += tikukits/net/ipv4/tiku_kits_net_udp.c
 # it fits under the 4 KB cap. Demo A (host-pings-Pico) uses it to
 # acquire an IP automatically instead of hardcoding.
 ifeq ($(TIKU_KITS_NET_DHCP_ENABLE),1)
-CFLAGS += -DTIKU_KITS_NET_DHCP_ENABLE=1
 SRCS   += tikukits/net/ipv4/tiku_kits_net_dhcp.c
 endif
 # Opt-in DNS stub resolver for MIN builds.  The non-MIN path already pulls
@@ -3268,7 +3275,6 @@ endif
 # is a tiku_kits_net_*.o so its working buffer is relocated out of the .uninit
 # backup window by the linker script -- no 4 KB-cap impact.
 ifeq ($(TIKU_KITS_NET_DNS_ENABLE),1)
-CFLAGS += -DTIKU_KITS_NET_DNS_ENABLE=1
 SRCS   += tikukits/net/ipv4/tiku_kits_net_dns.c
 endif
 # Opt-in TCP + MQTT/HTTP for MIN builds (e.g. BASIC MQTTPUB / HTTPGET$ on a

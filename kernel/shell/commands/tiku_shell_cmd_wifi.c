@@ -147,6 +147,12 @@ static void wifi_status(void)
     }
 }
 
+/**
+ * @brief Handle "wifi connect" and "wifi connect3": queue a join.
+ *
+ * Asked while joined, the radio leaves the current network for the new one.
+ * A busy radio is reported apart from a refused profile.
+ */
 static void wifi_connect(uint8_t argc, const char *argv[],
                          tiku_wireless_auth_t auth)
 {
@@ -164,9 +170,12 @@ static void wifi_connect(uint8_t argc, const char *argv[],
                      (auth == TIKU_WIRELESS_AUTH_WPA3_SAE) ? "WPA3-SAE" :
                      argv[3][0] == '\0' ? "open" : "WPA2-PSK",
                      argv[2]);
+    } else if (rc == TIKU_DRV_ERR_TIMEOUT) {
+        SHELL_PRINTF("wifi: connect rejected (rc=%d) — radio busy with a "
+                     "scan, join or disconnect; retry when it ends\n", rc);
     } else {
         SHELL_PRINTF("wifi: connect rejected (rc=%d) — radio not up, "
-                     "join already in flight, or bad creds\n", rc);
+                     "bad creds, or an auth the radio lacks\n", rc);
     }
 }
 

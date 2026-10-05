@@ -60,6 +60,8 @@ typedef enum {
 typedef struct {
     uint8_t  up;              /* 1 after the radio is reachable */
     uint8_t  scan_in_progress;
+    uint8_t  disconnect_pending; /* 1 while an accepted disconnect has
+                                  * not yet run */
     uint16_t scan_aps_found;  /* deduplicated count from last scan */
     uint8_t  mac[6];          /* MAC address of the local radio */
     uint32_t last_scan_ticks; /* duration of last completed scan
@@ -100,13 +102,19 @@ typedef struct {
 /*---------------------------------------------------------------------------*/
 /* Public API                                                                */
 /*---------------------------------------------------------------------------*/
+/*
+ * Every backend defines every call, and a radio refuses what it cannot do
+ * with the code the call's @return names: tiku_wireless_power(0) on a radio
+ * that stays on, a WPA3-SAE join on a radio without SAE, and
+ * tiku_wireless_saved_profile() on a radio that keeps no profile.
+ */
 
 /**
  * @brief Trigger an active scan (non-blocking).
  *
  * Subscribers get an AP_FOUND event per unique access point and one
- * SCAN_COMPLETE when it ends.  Fails if the radio is not up, or if a scan is
- * already in flight or the runner's queue is full.
+ * SCAN_COMPLETE when it ends.  Fails if the radio is not up, is busy with an
+ * earlier request, or its queue is full.
  */
 int tiku_wireless_scan_start(void);
 
@@ -167,18 +175,44 @@ typedef enum {
     TIKU_WIRELESS_AUTH_WPA3_SAE = 1,   /* simultaneous authentication */
 } tiku_wireless_auth_t;
 
+/** Longest SSID (802.11) a join accepts. */
+#define TIKU_WIRELESS_SSID_MAX 32U
+
+/** Longest passphrase (the WPA2-PSK limit) a join accepts; every backend
+ *  refuses a longer one, a WPA3-SAE password included. */
+#define TIKU_WIRELESS_PSK_MAX 63U
+
+/** The profile a radio keeps across boots, described without its key. */
+typedef struct {
+    uint8_t valid;                 /* 1 if a profile is stored             */
+    uint8_t auth;                  /* its tiku_wireless_auth_t             */
+    char    ssid[TIKU_WIRELESS_SSID_MAX + 1U]; /* NUL-terminated           */
+    int     last_store_result;     /* TIKU_DRV_OK, or the last failed save
+                                    * or forget this boot                 */
+} tiku_wireless_saved_profile_t;
+
 /**
- * @brief Join a WPA2-PSK network. Non-blocking — the runner does
- *        the IOCTL sequence on its next dispatch and waits for the
- *        chip's WLC_E_LINK event before transitioning state to
- *        JOINED (or FAILED). Caller observes via tiku_wireless_status.
+ * @brief Describe the stored profile without reading its passphrase.
+ *
+ * @param out  Receives the description
+ * @return TIKU_DRV_OK; TIKU_DRV_ERR_INVALID if @p out is NULL;
+ *         TIKU_DRV_ERR_NOT_PRESENT on a radio that keeps no profile
+ */
+int tiku_wireless_saved_profile(tiku_wireless_saved_profile_t *out);
+
+/**
+ * @brief Join a WPA2-PSK network.  Non-blocking: the radio joins in the
+ *        background and the link moves to JOINED or FAILED, which the
+ *        caller observes via tiku_wireless_status().
+ *
+ * Asked while joined, the radio leaves the current network for this one.
  *
  * @param ssid  Network SSID (1..32 chars, null-terminated)
  * @param psk   WPA2 passphrase (8..63 chars, null-terminated); empty joins
  *              an open network, on a radio that can (the ESP32-C61's)
  * @return TIKU_DRV_OK on enqueue; TIKU_DRV_ERR_INVALID on bad args
- *         or radio-not-up; TIKU_DRV_ERR_TIMEOUT if a join is already
- *         in flight.
+ *         or radio-not-up; TIKU_DRV_ERR_TIMEOUT while the radio is busy
+ *         with an earlier request or its queue is full.
  */
 int tiku_wireless_connect(const char *ssid, const char *psk);
 
@@ -187,8 +221,10 @@ int tiku_wireless_connect(const char *ssid, const char *psk);
  *        tiku_wireless_connect with explicit auth flavor.
  *
  * @param ssid Network SSID (1..32 chars, null-terminated)
- * @param psk  Passphrase (WPA2: 8..63; WPA3: 1..127 chars)
+ * @param psk  Passphrase (WPA2-PSK: 8..63 chars; WPA3-SAE: 1..63 chars)
  * @param auth TIKU_WIRELESS_AUTH_WPA2_PSK or _WPA3_SAE
+ * @return As tiku_wireless_connect(); TIKU_DRV_ERR_INVALID for WPA3-SAE on
+ *         a radio without it
  */
 int tiku_wireless_connect_auth(const char *ssid, const char *psk,
                                tiku_wireless_auth_t auth);
@@ -198,6 +234,10 @@ int tiku_wireless_connect_auth(const char *ssid, const char *psk,
  *        credentials (if any) are preserved — a subsequent reboot
  *        will still cold-boot-rejoin. Use tiku_wireless_forget()
  *        to also wipe the saved SSID/PSK.
+ *
+ * @return TIKU_DRV_OK on enqueue; TIKU_DRV_ERR_INVALID if the radio is not
+ *         up; TIKU_DRV_ERR_TIMEOUT while the radio is busy with an earlier
+ *         request or its queue is full
  */
 int tiku_wireless_disconnect(void);
 
@@ -208,7 +248,10 @@ int tiku_wireless_disconnect(void);
  * cold-boot rejoin on the next reboot.  Idempotent, so it is safe on a device
  * that has none.
  *
- * @return TIKU_DRV_OK on success.
+ * @return TIKU_DRV_OK; a radio that keeps a profile returns
+ *         TIKU_DRV_ERR_TIMEOUT while busy or its queue is full, leaving the
+ *         profile stored, and TIKU_DRV_ERR_IO if the erase fails.  The erase
+ *         is logical: the record reads as empty, its cells are not scrubbed.
  */
 int tiku_wireless_forget(void);
 
