@@ -253,8 +253,8 @@ next one, and `on` / `rules` register reactive rules that fire on a change.
 /
 ├── sys/           version, uptime, device/, mem/, cpu/, power/, timer/,
 │                  clock/, watchdog/, htimer/, boot/, sched/, last_reset
-├── dev/           led0..N, console, null, zero, gpio/, gpio_dir/, uart/,
-│                  adc/, i2c/, spi/
+├── dev/           led0..N, console, null, zero, gpio/, gpio_dir/,
+│                  gpio_owner/, sensors/, uart/, adc/, i2c/, spi/
 ├── data/          durable file store (df, ls, read, write)
 └── proc/          per-process state: name, state, pid, sram/fram_used,
                    uptime, wake_count, events

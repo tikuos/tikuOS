@@ -20,6 +20,7 @@
 
 #include "tiku_vfs_tree_dev.h"
 #include "tiku_vfs_tree_gpio.h"
+#include "tiku_vfs_tree_sensor.h"
 #include "tiku.h"
 #include <kernel/cpu/tiku_common.h>
 #include <kernel/timers/tiku_clock.h>   /* TIKU_CLOCK_SECOND for cache windows */
@@ -451,10 +452,13 @@ static const tiku_vfs_node_t dev_spi_children[] = {
 /*
  * The /dev directory table -- every hardware-facing node.  LED entries are
  * gated one by one on TIKU_BOARD_LED_COUNT so a one-LED board exposes exactly
- * /dev/led0; the gpio subtrees come from tiku_vfs_tree_gpio.c.  To add a node,
- * implement the handler above and append the entry here.
+ * /dev/led0; the gpio subtrees come from tiku_vfs_tree_gpio.c and sensors/
+ * from tiku_vfs_tree_sensor.c.  To add a node, implement the handler above
+ * and append the entry here.
  */
 static const tiku_vfs_node_t dev_children[] = {
+    { "sensors", TIKU_VFS_DIR, NULL, NULL,
+      tiku_vfs_tree_sensor_children, TIKU_VFS_TREE_SENSOR_NCHILD },
 #if TIKU_BOARD_LED_COUNT >= 1
     { "led0",     TIKU_VFS_FILE, led0_read, led0_write, NULL, 0, &desc_led, NULL, TIKU_VFS_CAP_HW },
 #endif
