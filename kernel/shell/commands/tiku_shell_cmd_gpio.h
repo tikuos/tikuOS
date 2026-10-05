@@ -18,9 +18,9 @@
 /**
  * @brief "gpio" command handler — read/write/toggle any GPIO pin.
  *
- * Port is 1-4 (or J) and pin is 0-7.  With no value it reads the pin; a value
- * of 0 or 1 drives it, 't' toggles, and 'in' reconfigures it as an input with
- * a pull-up.
+ * See /dev/gpio for platform port numbers and widths; J aliases port 255.
+ * With no value it reads the pin. 0/1 drive it, 't' toggles, and 'in'
+ * selects the platform's input configuration. Owned pins reject writes.
  *
  * @param argc  Argument count
  * @param argv  Argument vector
