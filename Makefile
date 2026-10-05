@@ -532,10 +532,15 @@ MSP430_SUPPORT_DIR :=
 
 else ifeq ($(TIKU_PLATFORM),esp32c61)
 
-# Espressif's crosstool-NG GCC: it carries newlib-nano for the rv32imac
-# multilib the C61 runs, which a bare riscv64-elf GCC does not.  The newest
-# version installed wins.
-TOOLCHAIN_PREFIX ?= riscv32-esp-elf-
+# A RISC-V newlib toolchain for the rv32imac multilib the C61 runs: any one
+# will do, since the kernel wants only newlib's libc, libm and libgcc.  The
+# vendor-neutral riscv-none-elf (xpack) is preferred, then Espressif's
+# riscv32-esp-elf -- on PATH, else where its installer puts it.  Override the
+# choice with TOOLCHAIN_PREFIX= and, if it is off PATH, TOOLCHAIN_DIR=.
+TOOLCHAIN_PREFIX ?= $(shell \
+	for p in riscv-none-elf- riscv32-unknown-elf- riscv32-esp-elf-; do \
+	  command -v $${p}gcc > /dev/null 2>&1 && { echo $$p; exit 0; }; \
+	done; echo riscv32-esp-elf-)
 TOOLCHAIN_DIR    ?= $(shell \
 	p=$$(command -v $(TOOLCHAIN_PREFIX)gcc 2>/dev/null) \
 	  && { dirname $$(dirname "$$p"); exit 0; }; \
