@@ -104,6 +104,9 @@ tiku_shell_cmd_changed(uint8_t argc, const char *argv[])
         SHELL_PRINTF("changed: cannot read '%s'\n", resolved);
         return;
     }
+    if (prev_n > (int)sizeof(prev) - 1) {   /* a read returns the full length */
+        prev_n = (int)sizeof(prev) - 1;
+    }
     prev[prev_n] = '\0';
     prev_n = changed_rtrim(prev, prev_n);
 
@@ -117,6 +120,9 @@ tiku_shell_cmd_changed(uint8_t argc, const char *argv[])
         if (curr_n < 0) {
             /* Transient read failure: keep waiting. */
             continue;
+        }
+        if (curr_n > (int)sizeof(curr) - 1) {
+            curr_n = (int)sizeof(curr) - 1;
         }
         curr[curr_n] = '\0';
         curr_n = changed_rtrim(curr, curr_n);

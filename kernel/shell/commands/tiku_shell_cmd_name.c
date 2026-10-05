@@ -32,6 +32,9 @@ tiku_shell_cmd_name(uint8_t argc, const char *argv[])
             SHELL_PRINTF("name: read failed\n");
             return;
         }
+        if (n > (int)sizeof(buf) - 1) {     /* a read returns the full length */
+            n = (int)sizeof(buf) - 1;
+        }
         buf[n] = '\0';
         SHELL_PRINTF("%s", buf);
         return;

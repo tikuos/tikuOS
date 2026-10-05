@@ -57,6 +57,9 @@ mem_parse_u32(const char *s, uint32_t *out)
         } else {
             return 0;
         }
+        if (val > (UINT32_MAX - digit) / (hex ? 16U : 10U)) {
+            return 0;
+        }
         val = val * (hex ? 16U : 10U) + digit;
         s++;
     }

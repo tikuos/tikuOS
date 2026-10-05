@@ -104,6 +104,9 @@ tiku_shell_cmd_if(uint8_t argc, const char *argv[])
         SHELL_PRINTF("if: cannot read '%s'\n", argv[1]);
         return;
     }
+    if (n > (int)sizeof(value_buf) - 1) {   /* a read returns the full length */
+        n = (int)sizeof(value_buf) - 1;
+    }
     value_buf[n] = '\0';
     rstrip(value_buf, &n);
 

@@ -174,7 +174,8 @@ tiku_shell_cwd_set(const char *path)
  * @note Purely lexical -- the VFS is never consulted, so this neither verifies
  *       existence nor resolves links.  Writes are bounded by @p outsz and an
  *       over-long path truncates silently; @p out is always a non-empty
- *       absolute path unless @p outsz is 0.
+ *       absolute path when @p outsz is at least 2.  A 1-byte @p out gets an
+ *       empty string, and a 0-byte one is not written.
  * @param input  User-supplied path, absolute or relative to the cwd
  * @param out    Output buffer receiving the resolved absolute path
  * @param outsz  Capacity of @p out in bytes, including the NUL
@@ -186,7 +187,11 @@ tiku_shell_cwd_resolve(const char *input, char *out, uint8_t outsz)
     const char *comp;
     size_t      complen;
 
-    if (outsz == 0) {
+    /* "/" needs two bytes; go_up() and the root fallbacks write out[1] */
+    if (outsz < 2) {
+        if (outsz == 1) {
+            out[0] = '\0';
+        }
         return;
     }
 

@@ -111,6 +111,9 @@ watch_print_value(void)
         tiku_shell_cmd_watch_cancel();
         return 0;
     }
+    if (n > (int)sizeof(buf) - 1) {         /* a read returns the full length */
+        n = (int)sizeof(buf) - 1;
+    }
     buf[n] = '\0';
     while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r'
                      || buf[n - 1] == ' ')) {

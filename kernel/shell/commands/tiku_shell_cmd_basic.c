@@ -29,7 +29,8 @@
 /*---------------------------------------------------------------------------*/
 
 /* Scratch for file<->program transfers.  Static (the shell runs commands one
- * at a time) and sized past the largest file slot so a whole program fits. */
+ * at a time).  It bounds both directions: a program file or saved program
+ * longer than TIKU_BASIC_FILE_MAX - 1 bytes is refused. */
 #ifndef TIKU_BASIC_FILE_MAX
 #define TIKU_BASIC_FILE_MAX  600u
 #endif
@@ -50,9 +51,17 @@ basic_from_file(const char *path, int run)
         return;
     }
     tiku_shell_cwd_resolve(path, resolved, sizeof resolved);
-    n = tiku_vfs_read(resolved, basic_file_buf, sizeof basic_file_buf - 1u);
+    n = tiku_vfs_read(resolved, basic_file_buf, sizeof basic_file_buf);
     if (n < 0) {
         SHELL_PRINTF("basic: cannot read '%s'\n", resolved);
+        return;
+    }
+    /* A /data read returns the stored length and a text node its full
+     * length, either of which can pass the bytes copied; a file that does
+     * not fit with its NUL is refused. */
+    if ((size_t)n >= sizeof basic_file_buf) {
+        SHELL_PRINTF("basic: '%s' is longer than %u bytes\n", resolved,
+                     (unsigned)(sizeof basic_file_buf - 1u));
         return;
     }
     basic_file_buf[n] = '\0';
@@ -76,9 +85,12 @@ basic_to_file(const char *path)
     int  n;
 
     tiku_shell_cwd_resolve(path, resolved, sizeof resolved);
-    n = tiku_basic_vfs_read(basic_file_buf, sizeof basic_file_buf);
+    /* Bounded as a load is, so a saved file always loads back.  The read
+     * gives 0 both for no program and for one too long. */
+    n = tiku_basic_vfs_read(basic_file_buf, sizeof basic_file_buf - 1u);
     if (n <= 0) {
-        SHELL_PRINTF("basic: no program to save\n");
+        SHELL_PRINTF("basic: no program to save, or longer than %u bytes\n",
+                     (unsigned)(sizeof basic_file_buf - 1u));
         return;
     }
     if (tiku_vfs_write(resolved, basic_file_buf, (size_t)n) < 0) {

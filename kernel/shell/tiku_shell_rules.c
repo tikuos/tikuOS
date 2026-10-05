@@ -614,6 +614,9 @@ rules_eval_one(tiku_shell_rule_t *r)
         r->last_match = 0;
         return;
     }
+    if (n > (int)sizeof(readbuf) - 1) {     /* a read returns the full length */
+        n = (int)sizeof(readbuf) - 1;
+    }
     readbuf[n] = '\0';
     while (n > 0 && (readbuf[n - 1] == '\n' ||
                      readbuf[n - 1] == '\r' ||
