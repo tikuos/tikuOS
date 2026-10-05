@@ -116,13 +116,13 @@ int8_t tiku_ble_adv_txpower(void);
  *
  * Deduplicates by address, keeping the strongest RSSI and the first non-empty
  * name.  A timer beacon's bursts (cooperative timer callbacks) queue behind
- * the scan; the observer or an FLPR beacon makes the scan fail.
+ * the scan; any other owner of the radio makes the scan fail.
  *
  * @param out  Report array.
  * @param max  Capacity of @p out.
  * @param ms   Scan duration in milliseconds (wall clock).
  * @return Number of distinct devices heard (<= @p max), -1 for a bad table or
- *         while the observer or an FLPR beacon owns the radio.
+ *         unless the radio is idle or held by a timer beacon.
  */
 int tiku_ble_adv_scan(tiku_ble_adv_report_t *out, uint8_t max, uint16_t ms);
 

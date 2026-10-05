@@ -98,8 +98,9 @@ int tiku_ble_serial_secure_state(void);
 /**
  * @brief Pump the stack once: drain events and RX, push queued TX.
  *
- * ready() calls it on both backends, and rx_ready() and recv() call it on the
- * EM9305 one; on Nordic an app that polls only rx_ready()/recv() must call it.
+ * ready() calls it, and so do rx_ready() and recv() (on Nordic, only while no
+ * received bytes wait), so a poll loop that reads what arrives keeps the link
+ * serviced.
  */
 void tiku_ble_serial_service(void);
 
@@ -118,8 +119,8 @@ int tiku_ble_serial_send(const uint8_t *data, uint16_t len);
 /**
  * @brief Are there received bytes waiting to be read?
  *
- * The EM9305 backend pumps the stack first; the Nordic one only checks the
- * buffer that tiku_ble_serial_service() fills.
+ * Pumps the stack first.  The Nordic backend holds one received write and
+ * pumps only once it has been read, since a pump would overwrite it.
  *
  * @return 1 if at least one byte is waiting, 0 otherwise.
  */

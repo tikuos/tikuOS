@@ -205,10 +205,11 @@ tiku_ble_serial_beacon(const char *name)
 
 /* The FLPR is the controller: it forwards L2CAP frames over the
  * mailbox.  This backend pumps them through the M33 ATT/GATT host in
- * service() (called from ready()): a received frame -> tiku_ble_host_rx ->
- * response; a NUS RX write surfaces as bytes callers read via recv(), and
- * send() is an ATT notification.  start() programs the static link config
- * while RADIO is secure, then hands RADIO+UARTE21 to the FLPR. */
+ * service() (called from ready(), rx_ready() and recv()): a received
+ * frame -> tiku_ble_host_rx -> response; a NUS RX write surfaces as bytes
+ * callers read via recv(), and send() is an ATT notification.  start()
+ * programs the static link config while RADIO is secure, then hands
+ * RADIO+UARTE21 to the FLPR. */
 #define BLE_SERIAL_NAME_CAP  24u
 #define BLE_SERIAL_RXBUF     (TIKU_BLE_HOST_MTU)   /* a full recombined msg */
 
@@ -487,17 +488,26 @@ tiku_ble_serial_send(const uint8_t *data, uint16_t len)
                  ? (TIKU_BLE_HOST_MTU - 3u) : len);
 }
 
+/* service() overwrites s_rx, so rx_ready() and recv() pump only once the
+ * bytes waiting there have been read. */
 int
 tiku_ble_serial_rx_ready(void)
 {
+    if (s_rx_len == 0u) {
+        tiku_ble_serial_service();
+    }
     return (s_rx_len > 0u) ? 1 : 0;
 }
 
 int
 tiku_ble_serial_recv(uint8_t *buf, uint16_t cap)
 {
-    uint8_t nn = s_rx_len, i;
+    uint8_t nn, i;
 
+    if (s_rx_len == 0u) {
+        tiku_ble_serial_service();
+    }
+    nn = s_rx_len;
     if (buf == (uint8_t *)0 || nn == 0u) {
         return 0;
     }

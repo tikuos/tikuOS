@@ -602,12 +602,14 @@ int tiku_ble_adv_scan_filter(tiku_ble_adv_report_t *out, uint8_t max,
                    ? (uint8_t)(TIKU_BLE_ADV_NAME_CAP + 1u)   /* matches none */
                    : (uint8_t)plen;
 
-    /* Arbiter: the engine is busy while observing, and the RADIO answers
-     * only on the NS alias while FLPR-offloaded.  An M33-timer beacon
-     * coexists (cooperative scheduling: its bursts queue behind this
-     * blocking call), so claim SCAN and restore the prior owner after. */
-    if (radio_owner == TIKU_BLE_ADV_OWNER_OBSERVE ||
-        radio_owner == TIKU_BLE_ADV_OWNER_BEACON_FLPR) {
+    /* Arbiter: only an idle radio or an M33-timer beacon admits a scan.  The
+     * beacon coexists (cooperative scheduling: its bursts queue behind this
+     * blocking call), so claim SCAN and restore the prior owner after.  The
+     * scan arms and disarms the observer's engine; an FLPR beacon or a
+     * connection drives the RADIO on the NS alias; 802.15.4 has it in
+     * another mode. */
+    if (radio_owner != TIKU_BLE_ADV_OWNER_IDLE &&
+        radio_owner != TIKU_BLE_ADV_OWNER_BEACON) {
         return -1;
     }
     {

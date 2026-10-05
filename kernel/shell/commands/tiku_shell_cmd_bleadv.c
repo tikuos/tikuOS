@@ -35,7 +35,6 @@
 #include <interfaces/bluetooth/tiku_ble_serial.h>   /* NUS serial facade      */
 #include <interfaces/bluetooth/tiku_ble_host.h>     /* M33 ATT/GATT host      */
 #include <interfaces/bluetooth/tiku_ble_smp.h>      /* SMP crypto self-test   */
-#include <arch/nordic/tiku_crypto_arch.h>           /* software CCM, unused   */
 #include <arch/nordic/tiku_ble_ccm_arch.h>          /* CCM00 hardware CCM     */
 #include <interfaces/bluetooth/tiku_ble_enc.h>      /* demo payload + nonce   */
 #include <arch/nordic/flpr/tiku_flpr_ipc.h>         /* DLE frame buffer size  */
@@ -228,7 +227,8 @@ static void bleadv_scan(unsigned secs, const char *prefix)
     n = tiku_ble_adv_scan_filter(reps, 12u, (uint16_t)(secs * 1000u),
                                  prefix);
     if (n < 0) {
-        SHELL_PRINTF(SH_RED "no broadcast radio\n" SH_RST);
+        SHELL_PRINTF(SH_RED "radio busy (%s)\n" SH_RST,
+                     tiku_ble_adv_owner_str());
         return;
     }
     for (i = 0; i < n; i++) {
@@ -1426,7 +1426,7 @@ static void bleadv_flprpair(uint8_t bond_mode, uint8_t numcmp)
              * must still go over the air, and a central that lost it
              * re-requests (dup Ea -> engine re-emits Eb).  The loop exits
              * when the central tears the link down, not when pairing ends. */
-            if (tiku_ble_host_smp_state() >= 2 && !paired) {
+            if (tiku_ble_host_smp_state() == 2 && !paired) {
                 uint32_t cmp;
                 paired = 1;
                 if (numcmp &&
