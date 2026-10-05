@@ -1,24 +1,24 @@
 # firmware_options.mk -- the build knobs a tool may offer, with their meaning.
 #
 # `make options MCU=<mcu> [BOARD=<board>] [KNOB=value ...]` prints each knob's
-# value as this configuration resolves it, and whether it applies to the board,
-# so a front end (tikubench firmware, the desktop's Firmware tab) never keeps a
-# copy of the Makefile's defaults.  A combination the Makefile refuses fails the
-# same way it would fail a build, with its own message.
+# value as this configuration resolves it, and whether it applies to the board.
+# Front ends (tikubench firmware, the desktop's Firmware tab) read the defaults
+# from it.  A combination the Makefile refuses fails with the build's own error.
+# The Makefile includes this file last, so every default is already decided.
 #
 # Output, tab-separated: one header line, the boards this platform builds for,
 # then per knob: name, value, kind, group, applies (1/0), help.
-#
-# Included last by the Makefile, so every default is decided.  Row fields:
-#   kind   bool | int | enum:<a>+<b>...
-#   where  all | arm | plat:<p>+<q> | mcu:<m>+<n> | cap:<board capability>
-#   help   one line; no commas (they split the call's arguments)
 #
 # Authors: Ambuj Varshney <ambuj@tiku-os.org>
 # SPDX-License-Identifier: Apache-2.0
 
 TIKU_OPTIONS :=
 
+# $(call tiku_option,NAME,kind,group,where,help) registers a knob:
+#   kind   bool | int | enum:<a>+<b>...
+#   where  all | arm (every platform but MSP430) | plat:<p>+<q> | mcu:<m>+<n>
+#          | cap:<board capability>
+#   help   one line; no commas (they split the call's arguments)
 define tiku_option
 TIKU_OPTIONS += $(1)
 opt_kind_$(1)  := $(2)
@@ -27,7 +27,10 @@ opt_where_$(1) := $(4)
 opt_help_$(1)  := $(5)
 endef
 
+# $(call opt_in,a+b,x) -> 1 when x is one of the +-separated names, else 0.
 opt_in = $(if $(filter $(2),$(subst +, ,$(1))),1,0)
+# $(call opt_applies,where) -> 1 when a knob with that `where` applies to this
+# MCU and board, else 0.
 opt_applies = $(strip \
   $(if $(filter all,$(1)),1, \
   $(if $(filter arm,$(1)),$(if $(filter msp430,$(TIKU_PLATFORM)),0,1), \
@@ -36,6 +39,7 @@ opt_applies = $(strip \
   $(if $(filter mcu:%,$(1)),$(call opt_in,$(patsubst mcu:%,%,$(1)),$(MCU)), \
   $(if $(filter cap:%,$(1)), \
     $(if $(call board_has,$(patsubst cap:%,%,$(1))),1,0),0))))))
+# $(call opt_value,NAME) -> the knob's resolved value; an unset bool reads 0.
 opt_value = $(strip \
   $(if $(filter bool,$(opt_kind_$(1))),$(or $($(1)),0),$($(1))))
 
@@ -133,13 +137,19 @@ opt_boards = $(BOARD) $(filter-out $(BOARD),$(foreach b,$(KNOWN_BOARDS), \
   $(if $(filter $(TIKU_PLATFORM),$(BOARD_PLATFORM_$(b))),$(b))))
 
 TAB := $(shell printf '\t')
+# A literal '#': unescaped, it would start a comment.
 opt_hash := \#
+# The header line: the format name and version (#tiku-options, 1), then MCU,
+# BOARD and PLATFORM.
 opt_head = $(opt_hash)tiku-options$(TAB)1$(TAB)MCU=$(MCU)$(TAB)$(strip \
   BOARD=$(BOARD))$(TAB)PLATFORM=$(TIKU_PLATFORM)
+# $(call opt_row,NAME) -> one knob's row, in the column order above.
 opt_row = $(1)$(TAB)$(call opt_value,$(1))$(TAB)$(opt_kind_$(1))$(TAB)$(strip \
   $(opt_group_$(1)))$(TAB)$(call opt_applies,$(opt_where_$(1)))$(TAB)$(strip \
   $(opt_help_$(1)))
 
+# Prints the header line, the boards line and one row per knob; builds
+# nothing.
 .PHONY: options
 options:
 	@$(info $(opt_head))
@@ -148,11 +158,14 @@ options:
 	@:
 
 # --- Build identity -----------------------------------------------------------
-# What /sys/device/build reports: the commit, with a + when tracked files differ
-# from it, then a checksum of the knobs above and the command line that shape
-# the image; /sys/device/board names the board.  Written only when it changes,
-# so an unchanged build recompiles nothing and a changed one cannot go stale.
+# tiku_build_id, which /sys/device/build reports: the short commit hash, with
+# a + when tracked files differ from it, then a checksum of MCU, BOARD, APP,
+# EXTRA_CFLAGS and every knob above.  tiku_build_board, which
+# /sys/device/board reports, is BOARD.  The rule runs on every build but
+# rewrites the file only when its text changes, so an unchanged build
+# recompiles nothing.
 opt_sq := '
+# $(call opt_sh,text) -> text single-quoted for the shell.
 opt_sh = '$(subst $(opt_sq),$(opt_sq)\$(opt_sq)$(opt_sq),$(1))'
 TIKU_BUILD_CONFIG_TEXT = MCU=$(MCU) BOARD=$(BOARD) APP=$(APP) \
   EXTRA_CFLAGS=$(EXTRA_CFLAGS) \
@@ -176,5 +189,6 @@ $(TIKU_BUILD_ID_O): $(TIKU_BUILD_ID_C)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+# Always out of date, so the build-id rule runs on every build.
 .PHONY: FORCE
 FORCE:
