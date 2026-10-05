@@ -3588,8 +3588,9 @@ TARGET = main.elf
 .PHONY: all clean flash run debug erase size monitor deploy docs docs-clean uf2 lint
 
 # Static placement lint: raw section(".persistent") outside the grade macros
-# is the audit's silent-volatile bug class (kintsugi/memoryfix.md Phase A).
-# Both checks always run: a failing one must not hide the other's findings.
+# is the audit's silent-volatile bug class.  Comment style (comment-style.md)
+# is checked by tools/check_comment_style.py, with --strict over the kernel.
+# Every check runs: a failing one must not hide the others' findings.
 lint:
 	@rc=0; \
 	 ./tools/check_durable_placement.sh || rc=1; \
@@ -3607,12 +3608,9 @@ lint:
 	 else \
 	   echo "usb host checks: SKIPPED -- no host C compiler"; \
 	 fi; \
-	 if [ -x ./hygiene/check_comment_style.py ]; then \
-	   ./hygiene/check_comment_style.py || rc=1; \
-	 else \
-	   echo "check_comment_style: SKIPPED -- no hygiene/ in this working copy"; \
-	   echo "  comment style is UNCHECKED; see hygiene/commentstyle.md"; \
-	 fi; \
+	 ./tools/check_comment_style.py || rc=1; \
+	 ./tools/check_comment_style.py --strict kernel hal interfaces tiku.h \
+	   main.c || rc=1; \
 	 exit $$rc
 
 # UF2 is the RP2350 deliverable; ELF is enough on MSP430.
