@@ -7,8 +7,8 @@
  *
  * tiku_vfs.c - tree walker, path resolver, read/write dispatch, watch.
  *
- * Resolves slash-separated paths against a static tree of nodes and dispatches to
- * handler functions -- no malloc, no string copies, no inodes.  Also owns the
+ * Resolves paths against static nodes and bounded boot-time mounts, then calls
+ * their handlers -- no heap allocation or inodes. Also owns the
  * watch table, rung on every successful write and by drivers via _notify().
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -30,6 +30,48 @@
 /*---------------------------------------------------------------------------*/
 
 static const tiku_vfs_node_t *vfs_root;
+
+/** One boot-time mount: a subtree attached under a static directory. */
+typedef struct {
+    const tiku_vfs_node_t *parent;   /**< directory the subtree sits in */
+    const tiku_vfs_node_t *node;     /**< root of the mounted subtree   */
+} vfs_mount_t;
+
+static vfs_mount_t mounts[TIKU_VFS_MOUNT_MAX];
+static unsigned    mount_count;
+
+/** Deepest subtree tiku_vfs_mount() walks, in levels below its root. */
+#define VFS_MOUNT_DEPTH_MAX 12u
+
+/**
+ * @brief Return a directory's child by index, mounts after static children.
+ *
+ * Resolve, list, reverse lookup, the manifest and the statistics all walk
+ * through this, so they see the same namespace.
+ *
+ * @param dir    Directory to index (a file has no children)
+ * @param index  Child index: static children first, then mounts in order
+ * @return The child, or NULL past the last one
+ */
+static const tiku_vfs_node_t *vfs_child(const tiku_vfs_node_t *dir,
+                                        unsigned index)
+{
+    unsigned i;
+
+    if (dir->type != TIKU_VFS_DIR) {
+        return NULL;
+    }
+    if (index < dir->child_count && dir->children != NULL) {
+        return &dir->children[index];
+    }
+    index -= dir->child_count;
+    for (i = 0; i < mount_count; i++) {
+        if (mounts[i].parent == dir && index-- == 0u) {
+            return mounts[i].node;
+        }
+    }
+    return NULL;
+}
 
 /**
  * @brief One watch subscription: which node rings which process.
@@ -83,12 +125,12 @@ static int comp_match(const char *comp, size_t len, const char *name)
  * @brief Register the root node of the VFS tree.
  *
  * All subsequent resolve/read/write calls walk from this root.
- * The tree is static (built at compile time); init just stores
- * the pointer.
+ * Clears boot mounts; the caller retains ownership of node storage.
  */
 void tiku_vfs_init(const tiku_vfs_node_t *root)
 {
     vfs_root = root;
+    mount_count = 0;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -106,7 +148,8 @@ const tiku_vfs_node_t *tiku_vfs_resolve(const char *path)
     const char *p;
     const char *comp;
     size_t comp_len;
-    uint8_t i;
+    unsigned i;
+    const tiku_vfs_node_t *child;
     int found;
 
     if (path == NULL || path[0] != '/' || vfs_root == NULL) {
@@ -120,15 +163,15 @@ const tiku_vfs_node_t *tiku_vfs_resolve(const char *path)
     while (tiku_vfs_next_segment(&p, &comp, &comp_len)) {
 
         /* Current node must be a directory to descend */
-        if (node->type != TIKU_VFS_DIR || node->children == NULL) {
+        if (node->type != TIKU_VFS_DIR) {
             return NULL;
         }
 
         /* Search children for matching name */
         found = 0;
-        for (i = 0; i < node->child_count; i++) {
-            if (comp_match(comp, comp_len, node->children[i].name)) {
-                node = &node->children[i];
+        for (i = 0; (child = vfs_child(node, i)) != NULL; i++) {
+            if (comp_match(comp, comp_len, child->name)) {
+                node = child;
                 found = 1;
                 break;
             }
@@ -140,6 +183,102 @@ const tiku_vfs_node_t *tiku_vfs_resolve(const char *path)
     }
 
     return node;
+}
+
+/**
+ * @brief Check a subtree before it is mounted.
+ *
+ * Rejects empty or path-unsafe names, duplicate siblings, files with
+ * children, paths too long to resolve and nodes already in the tree; the
+ * VFS_MOUNT_DEPTH_MAX bound also ends a cycle within the subtree.
+ *
+ * @param node     Subtree root to check
+ * @param depth    Levels below the mounted root
+ * @param pathlen  Length of the parent's path
+ * @return 1 if the subtree may be mounted, 0 otherwise
+ */
+static int mount_valid(const tiku_vfs_node_t *node, unsigned depth,
+                       size_t pathlen)
+{
+    unsigned i;
+    unsigned j;
+    char existing[2];
+    const char *p;
+
+    if (node == NULL || node->name == NULL || node->name[0] == '\0' ||
+        depth > VFS_MOUNT_DEPTH_MAX) {
+        return 0;
+    }
+    for (p = node->name; *p != '\0'; p++) {
+        if ((unsigned char)*p <= 32u || *p == '/' ||
+            (unsigned char)*p == 127u) {
+            return 0;
+        }
+    }
+    if (strcmp(node->name, ".") == 0 || strcmp(node->name, "..") == 0 ||
+        pathlen + 1u + strlen(node->name) >= TIKU_VFS_PATH_MAX ||
+        tiku_vfs_path_of(node, existing, sizeof existing) >= 0) {
+        return 0;
+    }
+    if (node->type == TIKU_VFS_FILE) {
+        return node->child_count == 0u && node->dyn == NULL;
+    }
+    if (node->type != TIKU_VFS_DIR ||
+        (node->child_count != 0u && node->children == NULL)) {
+        return 0;
+    }
+    for (i = 0; i < node->child_count; i++) {
+        const tiku_vfs_node_t *c = &node->children[i];
+
+        if (!mount_valid(c, depth + 1u,
+                         pathlen + 1u + strlen(node->name))) {
+            return 0;
+        }
+        for (j = 0; j < i; j++) {
+            if (strcmp(c->name, node->children[j].name) == 0) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+/**
+ * @brief Attach a static subtree under an existing directory at boot.
+ *
+ * Validates the whole subtree first, then records it; nothing is copied.
+ */
+int tiku_vfs_mount(const char *parent, const tiku_vfs_node_t *node)
+{
+    const tiku_vfs_node_t *dir = tiku_vfs_resolve(parent);
+    const tiku_vfs_node_t *c;
+    unsigned i;
+    char path[2];
+    int len;
+
+    if (dir == NULL) {
+        return TIKU_VFS_ENOENT;
+    }
+    if (dir->type != TIKU_VFS_DIR || dir->dyn != NULL) {
+        return TIKU_VFS_EACCES;
+    }
+    len = tiku_vfs_path_of(dir, path, sizeof path);
+    if (len < 0 ||
+        !mount_valid(node, 0u, (dir == vfs_root) ? 0u : (size_t)len)) {
+        return TIKU_VFS_EINVAL;
+    }
+    for (i = 0; (c = vfs_child(dir, i)) != NULL; i++) {
+        if (strcmp(c->name, node->name) == 0) {
+            return TIKU_VFS_ECONFLICT;
+        }
+    }
+    if (mount_count >= TIKU_VFS_MOUNT_MAX) {
+        return TIKU_VFS_E2BIG;
+    }
+    mounts[mount_count].parent = dir;
+    mounts[mount_count].node = node;
+    mount_count++;
+    return TIKU_VFS_OK;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -661,6 +800,12 @@ int tiku_vfs_write(const char *path, const char *data, size_t len)
     const tiku_vfs_node_t *node;
     int rc;
 
+    if (data == NULL) {
+        if (len != 0) {
+            return TIKU_VFS_EINVAL;
+        }
+        data = "";   /* a zero-length write never hands a handler NULL */
+    }
     node = tiku_vfs_resolve(path);
     if (node == NULL) {
         /* Dynamic child (create-on-write): mutating the file store needs FS. */
@@ -716,7 +861,8 @@ int tiku_vfs_list(const char *path, tiku_vfs_list_fn callback, void *ctx)
     const char *sub = NULL;
     char pbuf[TIKU_VFS_PATHBUF];
     size_t sl;
-    uint8_t i;
+    unsigned i;
+    const tiku_vfs_node_t *child;
 
     /* A NULL callback is tolerated, like every other pointer argument here:
      * "does this path exist and is it a directory" is a legitimate query with
@@ -736,8 +882,8 @@ int tiku_vfs_list(const char *path, tiku_vfs_list_fn callback, void *ctx)
         if (node->type != TIKU_VFS_DIR) {
             return -1;
         }
-        for (i = 0; i < node->child_count; i++) {
-            callback(&node->children[i], ctx);
+        for (i = 0; (child = vfs_child(node, i)) != NULL; i++) {
+            callback(child, ctx);
         }
         /* A dynamic dir (e.g. /data) also enumerates its runtime children. */
         if (node->dyn != NULL) {
@@ -825,9 +971,9 @@ int tiku_vfs_is_dir(const char *path)
 /**
  * @brief Subscribe a process to changes of a FILE node.
  *
- * Resolves the path once: the tree is static, so the node pointer is a stable
- * subscription key.  A duplicate subscription is idempotent; table mutation
- * runs inside tiku_atomic_enter()/exit() so an ISR scan sees no torn slot.
+ * Resolves the path once: nodes are never moved or freed, so the pointer is a
+ * stable key.  A duplicate subscription is idempotent; table mutation runs
+ * inside tiku_atomic_enter()/exit(), so an ISR scan sees no torn slot.
  *
  * @param path  Absolute path to a FILE node
  * @param p     Receiving process
@@ -956,9 +1102,10 @@ static uint16_t vfs_ev_dropped;
 
 uint32_t tiku_vfs_node_id(const tiku_vfs_node_t *node)
 {
-    /* The address IS the identity -- the tree is static, so it is stable for
-     * the life of the boot and equal for the same node however it was
-     * reached.  Handed out as a token, not as something to dereference. */
+    /* The address IS the identity -- nodes are never moved or freed, so it
+     * is stable for the life of the boot and equal for the same node however
+     * it was reached.  Handed out as a token, not as something to
+     * dereference. */
     return (uint32_t)(uintptr_t)node;
 }
 
@@ -1045,7 +1192,7 @@ void tiku_vfs_notify(const tiku_vfs_node_t *node)
 /*---------------------------------------------------------------------------*/
 /*
  * Read-only views over the two pieces of private VFS state — the
- * watch table and the static tree — so a /sys node can render them
+ * watch table and the tree with its mounts — so a /sys node can render them
  * (see kernel/vfs/tree/tiku_vfs_tree_watch.c).  All run in process
  * context on a cold path (a human cats a file); none lock, matching
  * the notify-scan reasoning: the cooperative scheduler gives a
@@ -1114,10 +1261,10 @@ static int path_find(const tiku_vfs_node_t *dir,
                      const tiku_vfs_node_t *target,
                      char *buf, size_t max, int pos)
 {
-    uint8_t i;
+    unsigned i;
+    const tiku_vfs_node_t *c;
 
-    for (i = 0; i < dir->child_count; i++) {
-        const tiku_vfs_node_t *c = &dir->children[i];
+    for (i = 0; (c = vfs_child(dir, i)) != NULL; i++) {
         const char *n = c->name;
         int p = pos;
 
@@ -1137,7 +1284,7 @@ static int path_find(const tiku_vfs_node_t *dir,
             buf[((size_t)p < max) ? (size_t)p : (max - 1)] = '\0';
             return p;
         }
-        if (c->type == TIKU_VFS_DIR && c->children != NULL) {
+        if (c->type == TIKU_VFS_DIR) {
             int r = path_find(c, target, buf, max, p);
             if (r >= 0) {
                 return r;
@@ -1183,12 +1330,11 @@ int tiku_vfs_path_of(const tiku_vfs_node_t *node, char *buf, size_t max)
 static uint16_t count_rec(const tiku_vfs_node_t *n)
 {
     uint16_t total = 1;
-    uint8_t i;
+    unsigned i;
+    const tiku_vfs_node_t *c;
 
-    if (n->type == TIKU_VFS_DIR && n->children != NULL) {
-        for (i = 0; i < n->child_count; i++) {
-            total = (uint16_t)(total + count_rec(&n->children[i]));
-        }
+    for (i = 0; (c = vfs_child(n, i)) != NULL; i++) {
+        total = (uint16_t)(total + count_rec(c));
     }
 
     return total;
@@ -1206,14 +1352,14 @@ uint16_t tiku_vfs_count(void)
 /** @brief Recursive max-depth (a leaf is depth 1). */
 static uint8_t depth_rec(const tiku_vfs_node_t *n)
 {
-    uint8_t i, d, deepest = 0;
+    unsigned i;
+    uint8_t d, deepest = 0;
+    const tiku_vfs_node_t *c;
 
-    if (n->type == TIKU_VFS_DIR && n->children != NULL) {
-        for (i = 0; i < n->child_count; i++) {
-            d = depth_rec(&n->children[i]);
-            if (d > deepest) {
-                deepest = d;
-            }
+    for (i = 0; (c = vfs_child(n, i)) != NULL; i++) {
+        d = depth_rec(c);
+        if (d > deepest) {
+            deepest = d;
         }
     }
 
@@ -1230,12 +1376,12 @@ uint8_t tiku_vfs_depth(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* MANIFEST — one-read, machine-readable dump of the static namespace        */
+/* MANIFEST — one-read, machine-readable dump of the namespace              */
 /*---------------------------------------------------------------------------*/
 /*
- * Render every static node as one tab-separated line so an external agent can
- * learn the device's capabilities in a single read instead of walking it with
- * ls/cat.  Five tab-separated columns:  path  type  perms  meta  cap
+ * Render every node, boot mounts included, as one tab-separated line so an
+ * external agent can learn the device's capabilities in a single read instead
+ * of walking it with ls/cat.  Six columns: path type perms meta cap id
  * (type = d|f; perms = rw|r-|-w|--; meta is "-" for an untyped node, else the
  * packed descriptor "vtype,unit,fresh,cost[,lo..hi]"; cap is the capability a
  * writer must hold -- "-" (open), "hw", "sys", "fs", "net" -- so the whole
@@ -1315,13 +1461,10 @@ static void manifest_line(vfs_manifest_sink_t *s, const char *path,
 static void manifest_rec(vfs_manifest_sink_t *s, const tiku_vfs_node_t *node,
                          char *path, size_t pathcap, size_t pathlen)
 {
-    uint8_t i;
+    unsigned i;
+    const tiku_vfs_node_t *c;
 
-    if (node->children == NULL) {
-        return;   /* leaf, or a dynamic dir: nothing static to descend */
-    }
-    for (i = 0; i < node->child_count; i++) {
-        const tiku_vfs_node_t *c = &node->children[i];
+    for (i = 0; (c = vfs_child(node, i)) != NULL; i++) {
         size_t nlen = strlen(c->name);
         size_t clen = pathlen;
 
@@ -1332,7 +1475,7 @@ static void manifest_rec(vfs_manifest_sink_t *s, const tiku_vfs_node_t *node,
             path[clen] = '\0';
         }
         manifest_line(s, path, c);
-        if (c->type == TIKU_VFS_DIR && c->children != NULL) {
+        if (c->type == TIKU_VFS_DIR) {
             manifest_rec(s, c, path, pathcap, clen);
         }
         path[pathlen] = '\0';                          /* pop back */

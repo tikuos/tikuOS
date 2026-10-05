@@ -35,9 +35,9 @@
  * means the text was truncated (the agent's truncation signal).  Writes and
  * typed reads return TIKU_VFS_OK (0) on success.
  *
- * E2BIG and EIO are reserved: the core does not yet produce them (truncation is
- * signalled by the snprintf-style length, not an error), but they are named so
- * handlers and consumers share one stable vocabulary as producers are added.
+ * E2BIG reports exhausted bounded capacity, such as a full boot-mount table;
+ * text truncation is signalled by the snprintf-style length, not an error.
+ * EIO reports a backend or hardware failure.
  */
 enum {
     TIKU_VFS_OK      =  0,   /**< success                                    */
@@ -46,8 +46,8 @@ enum {
     TIKU_VFS_EACCES  = -3,   /**< not readable / not writable / wrong type   */
     TIKU_VFS_EINVAL  = -4,   /**< malformed input or bad argument            */
     TIKU_VFS_ERANGE  = -5,   /**< value out of range / numeric overflow      */
-    TIKU_VFS_E2BIG   = -6,   /**< (reserved) buffer too small to hold value  */
-    TIKU_VFS_EIO     = -7,   /**< (reserved) backend / hardware error        */
+    TIKU_VFS_E2BIG   = -6,   /**< bounded capacity exhausted                 */
+    TIKU_VFS_EIO     = -7,   /**< backend / hardware error                    */
     TIKU_VFS_ECONFLICT = -9, /**< configuration revision/value conflict */
     TIKU_VFS_ESTALE = -10,  /**< expired request or storage incarnation */
     TIKU_VFS_EBUSY = -11,   /**< operation already in progress */
@@ -325,6 +325,33 @@ typedef void (*tiku_vfs_list_fn)(const struct tiku_vfs_node *node,
 void tiku_vfs_init(const tiku_vfs_node_t *root);
 
 /**
+ * @brief Most subtrees tiku_vfs_mount() can attach.
+ *
+ * The default fits the driver registry: /sys/drivers, one /dev/<class>
+ * directory for each of the eight driver classes, and eight drivers.
+ */
+#ifndef TIKU_VFS_MOUNT_MAX
+#define TIKU_VFS_MOUNT_MAX 17
+#endif
+
+/**
+ * @brief Attach a static subtree under an existing directory at boot.
+ *
+ * Nothing is copied or allocated and there is no unmount, so the node and
+ * its children must outlive the VFS.  tiku_vfs_init() clears every mount.
+ *
+ * @param parent  Absolute path of a directory without dynamic children
+ * @param node    Subtree root; its name must be free in @p parent
+ * @return TIKU_VFS_OK; TIKU_VFS_ENOENT for a missing parent; TIKU_VFS_EACCES
+ *         for a file or dynamic parent; TIKU_VFS_EINVAL for a malformed or
+ *         already attached subtree; TIKU_VFS_ECONFLICT for a taken name;
+ *         TIKU_VFS_E2BIG when TIKU_VFS_MOUNT_MAX mounts exist
+ * @note Call from cooperative startup code, not from an interrupt or from
+ *       inside a tiku_vfs_list() callback.
+ */
+int tiku_vfs_mount(const char *parent, const tiku_vfs_node_t *node);
+
+/**
  * @brief Extract the next segment of a slash-separated path.
  *
  * The one definition of TikuOS path lexing, shared by every segment walker so
@@ -491,8 +518,8 @@ int tiku_vfs_is_dir(const char *path);
  *   2. Drivers whose values change without a write (a GPIO edge, a
  *      sensor threshold) call tiku_vfs_notify() explicitly.
  *
- * Node-pointer identity is the subscription key: the tree is static,
- * so node addresses are stable for the life of the system, and the
+ * Node-pointer identity is the subscription key: nodes are never moved
+ * or freed, so their addresses are stable for the life of the system, and the
  * event's data field carries the same pointer back to the receiver
  * for dispatch.  The watch table is a fixed array of slots in SRAM
  * (subscriptions are per-boot; processes re-subscribe at init).
@@ -721,11 +748,11 @@ uint16_t tiku_vfs_count(void);
 uint8_t tiku_vfs_depth(void);
 
 /**
- * @brief Render the whole static namespace as a machine-readable manifest.
+ * @brief Render the namespace, boot mounts included, as a manifest.
  *
  * One tab-separated line per node, after a `#`-prefixed header row:
- * `path  type  perms  vtype  unit  fresh  cost  range`.  Dynamic-directory
- * children are not walked -- capability metadata only.
+ * `path  type  perms  meta  cap  id`.  Dynamic-directory children are not
+ * walked -- capability metadata only.
  *
  * @param buf  Output buffer
  * @param max  Buffer capacity
