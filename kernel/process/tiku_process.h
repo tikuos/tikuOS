@@ -491,8 +491,8 @@ void tiku_process_start(struct tiku_process *p,
 /**
  * @brief Exit a process
  *
- * Stops the process, drops its queued events and timers, broadcasts EXITED,
- * and restarts it at once if its restart policy says so.
+ * Stops the process, drops its queued events, timers and VFS watches,
+ * broadcasts EXITED, and restarts it at once if its restart policy says so.
  *
  * @param p Process to exit
  */

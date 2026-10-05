@@ -29,6 +29,7 @@
 #include <kernel/threads/tiku_thread.h> /* kernel_wake on every post */
 #endif
 #include <kernel/cpu/tiku_hang.h>    /* one-shot quarantine of a hung process */
+#include <kernel/vfs/tiku_vfs.h>     /* exit releases the process's watches */
 #include <stddef.h>
 #include <stdint.h>   /* uintptr_t for the typed-event payload accessors */
 #include <string.h>
@@ -355,9 +356,9 @@ static void supervisor_on_exit(struct tiku_process *p);
 /**
  * @brief Exit a process.
  *
- * Clears the running flag, unlinks it, and drops its queued events and timers
- * in one atomic section, then broadcasts EXITED and lets supervision restart
- * it.  The registry slot and pid survive, so it can still be resumed.
+ * Clears the running flag, unlinks it, and drops its queued events, timers and
+ * VFS watches in one atomic section, then broadcasts EXITED and lets
+ * supervision restart it.  The registry slot and pid survive for resume().
  *
  * @param p Process to exit
  */
@@ -377,8 +378,9 @@ void tiku_process_exit(struct tiku_process *p)
 
     PROCESS_PRINTF("Exited: %s\n", p->name);
 
-    /* The queue purge needs the queue's atomic section; the list edit and
-     * the timer cancel share it. */
+    /* The queue purge needs the queue's atomic section; the list edit, the
+     * timer cancel and the watch release share it, so no ISR notify can
+     * queue an event for the process once the section ends. */
     tiku_atomic_enter();
 
     p->is_running = 0;
@@ -396,12 +398,14 @@ void tiku_process_exit(struct tiku_process *p)
     }
     queue_purge_process_locked(p);
     tiku_timer_cancel_process(p);
+    tiku_vfs_unwatch_all(p);
 
     tiku_atomic_exit();
 
     /* Tell other processes it has exited; the data pointer carries its
      * identity.  The broadcast can be dropped or arrive after a restart, so
-     * cleanup that must happen (its timers) is done above. */
+     * cleanup that must happen (its timers and watches) is done above, before
+     * a restart's INIT can subscribe again. */
     tiku_process_post_proc(TIKU_PROCESS_BROADCAST, TIKU_EVENT_EXITED, p);
 
     /* Supervision: per the process's restart policy, bring it straight back

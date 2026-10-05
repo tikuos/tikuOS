@@ -21,6 +21,7 @@
 #include "tiku_thread.h"
 #include <hal/tiku_cpu.h>            /* tiku_atomic_enter/exit */
 #include <kernel/timers/tiku_clock.h>  /* wait deadlines */
+#include <kernel/process/tiku_process.h>  /* an exit polls its waiter */
 
 /*---------------------------------------------------------------------------*/
 /* ARCH BACKEND INTERFACE (arch/<family>/tiku_thread_arch.c)                 */
@@ -78,15 +79,15 @@ static volatile uint16_t s_canary_faults;
 /**
  * @brief Is worker @p t eligible for the CPU right now?
  *
- * READY and within its energy budget; a budget of 0 is unlimited.  The single
- * enforcement point -- both the switcher's pick loop and
+ * READY and below its cycle ceiling, budget - 1; a budget of 0 is unlimited.
+ * The single enforcement point -- both the switcher's pick loop and
  * tiku_thread_worker_ready() consult it, so the two can never disagree.
  */
 static int worker_runnable(const tiku_thread_t *t)
 {
     return t != (const tiku_thread_t *)0 &&
            t->state == TIKU_THREAD_READY &&
-           (t->budget == 0ull || t->cycles < t->budget);
+           (t->budget == 0ull || t->cycles < t->budget - 1ull);
 }
 
 /**
@@ -255,7 +256,15 @@ void tiku_thread_exit(void)
     tiku_thread_t *self = s_current;
 
     if (self != (tiku_thread_t *)0) {
+        /* DONE and the waiter's poll share one section: a switch between
+         * them would take this worker off the CPU for good, unpolled. */
+        tiku_atomic_enter();
         self->state = TIKU_THREAD_DONE;
+        if (self->waiter != (struct tiku_process *)0) {
+            tiku_process_poll(self->waiter);
+            self->waiter = (struct tiku_process *)0;
+        }
+        tiku_atomic_exit();
     }
     /* Give the CPU back for good; the kernel (or the next worker)
      * takes over at the pended switch.  Never returns. */
@@ -384,7 +393,24 @@ tiku_thread_state_t tiku_thread_state(const tiku_thread_t *t)
 int tiku_thread_is_done(const tiku_thread_t *t)
 {
     /* A NULL/never-started worker reads as done so an await can't hang. */
-    return (t == (const tiku_thread_t *)0) || (t->state == TIKU_THREAD_DONE);
+    return (t == (const tiku_thread_t *)0) || (t->state == TIKU_THREAD_DONE) ||
+           (t->state == TIKU_THREAD_UNUSED);
+}
+
+int tiku_thread_await(tiku_thread_t *t, struct tiku_process *p)
+{
+    int done;
+
+    /* This test-and-record and the exit's DONE-and-poll are both masked, so
+     * an exit either comes first and reads as done here, or finds the
+     * waiter. */
+    tiku_atomic_enter();
+    done = tiku_thread_is_done(t);
+    if (!done) {
+        t->waiter = p;
+    }
+    tiku_atomic_exit();
+    return done;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -405,13 +431,10 @@ void tiku_thread_budget_grant(tiku_thread_t *t, unsigned long long cycles)
         return;
     }
     tiku_atomic_enter();
-    /* Ceiling = already-consumed + allowance.  Guard the one aliasing
-     * corner: a never-run worker (cycles == 0) granted 0 would land on
-     * budget == 0 and read as "unlimited" — force it to the parked side. */
-    t->budget = t->cycles + cycles;
-    if (t->budget == 0ull) {
-        t->budget = 1ull;
-    }
+    /* Ceiling = already-consumed + allowance, stored plus one: a never-run
+     * worker (cycles == 0) granted 0 has a ceiling of 0, which would
+     * otherwise read as "unlimited". */
+    t->budget = t->cycles + cycles + 1ull;
     tiku_atomic_exit();
 }
 
@@ -446,7 +469,8 @@ unsigned long long tiku_thread_budget_remaining(const tiku_thread_t *t)
     tiku_atomic_enter();
     rem = (t->budget == 0ull)
         ? ~0ull
-        : ((t->cycles < t->budget) ? (t->budget - t->cycles) : 0ull);
+        : ((t->cycles < t->budget - 1ull) ? (t->budget - 1ull - t->cycles)
+                                          : 0ull);
     tiku_atomic_exit();
     return rem;
 }
@@ -458,7 +482,7 @@ int tiku_thread_budget_exhausted(const tiku_thread_t *t)
         return 0;
     }
     tiku_atomic_enter();
-    ex = (t->budget != 0ull && t->cycles >= t->budget);
+    ex = (t->budget != 0ull && t->cycles >= t->budget - 1ull);
     tiku_atomic_exit();
     return ex;
 }

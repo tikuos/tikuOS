@@ -838,22 +838,27 @@ static TIKU_RETAINED tiku_vfs_node_t
  * @brief Read handler for /proc/threads: one line per occupied worker slot.
  *
  * Each line is "<slot> <state> <cycles> <switches>", state being one of
- * unused|ready|run|done; "none" when no slot is occupied.
+ * unused|ready|run|done|blocked; "none" when no slot is occupied.
  */
 static int proc_threads_read(char *buf, size_t max)
 {
-    static const char *const st[4] = { "unused", "ready", "run", "done" };
+    /* Indexed by tiku_thread_state_t. */
+    static const char *const st[] = {
+        "unused", "ready", "run", "done", "blocked"
+    };
     uint8_t i, cnt = tiku_thread_count();
     int n = 0;
 
     for (i = 0; i < cnt; i++) {
         tiku_thread_t *t = tiku_thread_get(i);
         size_t room = ((size_t)n < max) ? (max - (size_t)n) : 0u;
+        unsigned s;
         if (t == (tiku_thread_t *)0) {
             continue;
         }
+        s = (unsigned)tiku_thread_state(t);
         n += snprintf(buf + n, room, "%u %s %llu %u\n", (unsigned)i,
-                      st[(unsigned)tiku_thread_state(t) & 3u],
+                      (s < sizeof st / sizeof st[0]) ? st[s] : "unknown",
                       (unsigned long long)tiku_thread_cycles(t),
                       (unsigned)tiku_thread_switches(t));
     }

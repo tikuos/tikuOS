@@ -37,6 +37,8 @@
 /* TYPES                                                                     */
 /*---------------------------------------------------------------------------*/
 
+struct tiku_process;
+
 /** @brief Worker thread states. */
 typedef enum {
     TIKU_THREAD_UNUSED  = 0,   /**< Slot never started                    */
@@ -51,7 +53,7 @@ typedef enum {
  *
  * Statically allocated via TIKU_THREAD().  sp holds the saved process stack
  * pointer while the thread is off the CPU; cycles accumulates CPU cycles across
- * every occupancy, and budget is the ceiling the scheduler enforces (0 = none).
+ * every occupancy, and budget is the enforced ceiling plus one (0 = none).
  */
 typedef struct tiku_thread {
     uint32_t            *sp;          /**< Saved PSP (off-CPU)            */
@@ -62,11 +64,12 @@ typedef struct tiku_thread {
     volatile tiku_thread_state_t state;
     const char          *name;
     unsigned long long   cycles;      /**< CPU cycles consumed (total)    */
-    unsigned long long   budget;      /**< Cycle ceiling; 0 = unlimited   */
+    unsigned long long   budget;      /**< Ceiling + 1; 0 = unlimited     */
     uint16_t             switches;    /**< Times scheduled onto the CPU   */
     uint8_t              slot;        /**< Index in the scheduler's table */
     uint8_t              timed;       /**< A wait with a deadline         */
     unsigned long        wake_at;     /**< That deadline, in clock ticks  */
+    struct tiku_process *waiter;      /**< Polled when the worker exits   */
 } tiku_thread_t;
 
 /*---------------------------------------------------------------------------*/
@@ -212,17 +215,25 @@ tiku_thread_t *tiku_thread_get(uint8_t i);
 /** @brief Current state of @p t (READY / RUNNING / DONE / ...). */
 tiku_thread_state_t tiku_thread_state(const tiku_thread_t *t);
 
-/** @brief Non-zero once @p t has finished (joinable). */
+/** @brief Non-zero once @p t has finished, and for a worker never started. */
 int tiku_thread_is_done(const tiku_thread_t *t);
+
+/**
+ * @brief The condition TIKU_WAIT_WORKER() tests: non-zero once @p t is done;
+ *        until then @p p is the process polled when @p t exits.
+ * @note One waiter per worker: the latest call names the process polled.
+ */
+int tiku_thread_await(tiku_thread_t *t, struct tiku_process *p);
 
 /**
  * @brief Park the calling process until worker @p t finishes.
  *
- * A protothread-level await: the process yields to the scheduler each pass and
- * resumes when @p t is DONE.  Use inside a TIKU_PROCESS_THREAD -- code running
- * mid C-callstack cannot yield and has to keep driving a pump instead.
+ * Blocks only while @p t is unfinished; the worker's exit polls the process,
+ * so it resumes with no other event.  Use inside a TIKU_PROCESS_THREAD -- code
+ * running mid C-callstack cannot yield and has to keep driving a pump instead.
  */
-#define TIKU_WAIT_WORKER(t)  PT_YIELD_UNTIL(process_pt, tiku_thread_is_done(t))
+#define TIKU_WAIT_WORKER(t) \
+    PT_WAIT_UNTIL(process_pt, tiku_thread_await((t), TIKU_THIS()))
 
 /*---------------------------------------------------------------------------*/
 /* ENERGY BUDGET (cycle-quota enforcement)                                   */
