@@ -230,7 +230,7 @@ static void host_read_by_type(const uint8_t *att)
     for (i = 0u; i < GATT_N; i++) {
         if (gatt_db[i].type16 == type && gatt_db[i].handle >= start &&
             gatt_db[i].handle <= end) {
-            uint8_t  r[2 + 2 + 22];
+            uint8_t  r[TIKU_BLE_HOST_MTU];   /* 4-byte head + MTU-4 value */
             uint16_t n = gatt_db[i].len, k;
             if (n > (uint16_t)(TIKU_BLE_HOST_MTU - 4u)) {
                 n = (uint16_t)(TIKU_BLE_HOST_MTU - 4u);
