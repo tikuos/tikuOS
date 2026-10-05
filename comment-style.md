@@ -15,6 +15,38 @@ A hazard that is still live is not history. State it and keep it:
 fact about the hardware. `assuming it was uniform cost a debugging round` is
 the story of finding it out. Keep the first, drop the second.
 
+## Write for a reader who has only the code
+
+A comment is read later, by a person or an agent who has the code in front
+of them and nothing else: not the plan, not the alternatives that were
+weighed, not the conversation that produced the change. It states facts
+about the code as it is, in plain declarative sentences, and it makes sense
+on its own.
+
+It does not walk through the author's reasoning:
+
+- **No comparison with a design the code does not use** ("instead of reading
+  zeros as data", "rather than a special case"). If the other behaviour is a
+  live hazard, state the hazard directly.
+- **No narration of what a caller learns, knows or sees**, and no "cleanly",
+  "honestly" or "safely" as decoration. Say what the caller gets: the return
+  value, the state left behind.
+- **No development state**: "yet", "for now", "not implemented yet", "until X
+  lands". Say what the code does today. A plan goes in an issue or a commit
+  message.
+- **No metaphor**: name the thing. "Locks fs->hand, or adds one level if this
+  thread already holds it", not "take the hand, or deepen a hold".
+
+| reasoning | statement |
+|---|---|
+| `No hardware backend yet. Every call fails cleanly so a caller learns the bus is absent instead of reading zeros as data.` | `This port has no ADC driver: every call returns TIKU_ADC_ERR_PARAM, and tiku_adc_arch_read() also stores 0 in *value.` |
+| `Every run is bounds-checked and claimed slot by slot, so an overlap between two files is caught here rather than found as corrupted content later.` | `Every run is bounds-checked and claimed slot by slot; two files that claim one slot fail the mount with TFS_ERR_CORRUPT.` |
+| `so these platforms take the identical code path rather than a special case` | delete it: the sentence before it already says what happens |
+
+A reason is a fact about the code, not an argument: `The source moves before
+the dividers: the dividers count from the new source.` Each sentence should
+still be true and useful if every other comment in the file were deleted.
+
 ## File header
 
 Licence, author, and two or three lines on what the file is. At most 15
@@ -37,7 +69,9 @@ lines.
  */
 ```
 
-`.py` and `.sh` files use the same shape with `#`, after any `#!` line.
+`.py` and `.sh` files use the same shape with `#`, after any `#!` line. An
+`.inl` fragment, which a `.c` file includes, carries the same header as a
+`.c` file, naming the fragment and what it holds. A file has one header.
 
 ## Doc comments
 
@@ -128,6 +162,10 @@ changed comment against this page and against the code it sits on:
 - did a later change make an earlier comment false?
 - is any number in it a measurement? It belongs in the commit message.
 - is the register plain, per the Banned table?
+- does each comment state facts a reader with only the code can use, or does
+  it walk through reasoning (see "Write for a reader who has only the code")?
+- does every "every", "all", "only" and "never" in it hold on every path, and
+  does every name it mentions exist in the code?
 
 ## Checking
 
@@ -137,15 +175,17 @@ can match. `--strict` adds single capitalised words used for emphasis, plan
 labels and the arguing words above, and counts an `@p` line and text on the
 `/**` line as prose. A word the code uses as a name (a BASIC keyword, the last
 part of a constant such as `TIKU_RESTART_NEVER`, a call such as `NOW()`) is
-not emphasis. `make lint` runs `--strict` over `kernel/`, `hal/`,
-`interfaces/`, `tiku.h` and `main.c`; the rest of the tree joins once it
-passes. A file git does not yet track is out of scope, so lint after staging.
-Vendor trees (`arch/*/cmsis`, `arch/*/mdk`, `tools/fat32`) and the nested
-repositories (`drivers/`, `TikuBench/`, `tikukits/`) are skipped; a nested
-repository lints itself from its own root.
+not emphasis. `make lint` runs `--strict` over the whole tracked tree. A file
+git does not yet track is out of scope, so lint after staging. The vendor trees
+(`arch/*/cmsis`, `arch/*/mdk`) and the nested repositories (`drivers/`,
+`TikuBench/`, `tikukits/`) are skipped; a nested repository lints itself from
+its own root. The checker does not read the Makefile or `*.mk` files: read
+their comments against this page.
 
 The desktop and its applications (the `applications` repository) follow this
 page with denser ceilings: a file header of at most 20 lines and a doc comment
 of at most 6 lines of prose. Its `tools/check_style.py` adds two rules: every
-function is documented exactly once, and a file has at most one section
-banner.
+function is documented exactly once, by the comment right above one of its
+declarations (a one-word group label documents nothing), and a file has at
+most one section marker, a banner or a one-line divider. Its `make lint` runs
+`--strict` over `system/`, `kits/` and `apps/`.

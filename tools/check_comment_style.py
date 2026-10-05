@@ -6,11 +6,11 @@
 #
 # Authors: Ambuj Varshney <ambuj@tiku-os.org>
 #
-# check_comment_style.py - keep source comments short and free of process log.
+# check_comment_style.py - check source comments against comment-style.md.
 #
-# A file header is licence, author and 2-3 lines of what the file is; a doc
-# comment is 2-3 lines of prose plus as many @tags as it needs. Design history
-# belongs in git, which already has it in full.
+# Reports file headers over HEADER_MAX lines, doc comments over PROSE_MAX lines
+# of prose and the banned vocabulary; --strict adds emphasis capitals, plan
+# labels and arguing words.  Exits 1 on findings, 2 when no path matched.
 #
 # SPDX-License-Identifier: Apache-2.0
 
@@ -21,18 +21,15 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Scope is the tracked source tree, decided by git (see tracked()). Anything
-# gitignored -- notes, scratch, experiments, separate repos -- is out of scope
-# by construction, which means a nested repo that this one ignores is not
-# checked by a plain run: it reports success without opening a file there.
-# Such a tree lints itself with --root, which points both the walk and the
-# git query at it, so it is scoped by its own tracking.
-# SKIP_DIRS (at any depth) and NESTED (at the top only, since kernel/drivers
-# is this repository's code) cover what git does track but this repo should
-# not reformat: build output and the nested repositories.
+# Scope is the source tree git tracks (see tracked()).  A gitignored file is
+# not opened, so a nested repository this one ignores is not checked by a plain
+# run, which reports success without it.  Such a tree lints itself with --root,
+# which points the walk and the git query at it.  SKIP_DIRS (at any depth) and
+# NESTED (top level only: kernel/drivers is this repository's code) cover what
+# git tracks but this check skips: build output and the nested repositories.
 SKIP_DIRS = {"build", ".git"}
 NESTED = {"drivers", "TikuBench", "tikukits", "hygiene"}
-SKIP_PATHS = ("arch/ambiq/cmsis", "arch/nordic/mdk", "tools/fat32",
+SKIP_PATHS = ("arch/ambiq/cmsis", "arch/nordic/mdk",
               # This file quotes the banned patterns in order to define them.
               "tools/check_comment_style.py")
 
@@ -43,7 +40,7 @@ C_EXT = ('.c', '.h', '.inl')
 BLOCK_EXT = ('.ld', '.S', '.m')     # /* */ header
 HASH_EXT = ('.py', '.sh')           # # header, after any #! line
 
-HEADER_MAX = 15   # boilerplate 7 + filename + blank + 3 desc + blank + SPDX + close
+HEADER_MAX = 15   # 7 boilerplate, filename, blank, 3 desc, blank, SPDX, close
 PROSE_MAX = 3     # @param/@return/@brief tag lines do not count
 
 TAG = re.compile(r'^\s*\*\s*@')
@@ -54,7 +51,8 @@ BLOCK_TAG = re.compile(r'^\s*\*\s*@(?:brief|param|return|returns|retval|note|'
                        r'typedef|defgroup|addtogroup|ingroup|file|struct|union|'
                        r'enum|fn|var|name|section|subsection|page|\{|\})(?![A-Za-z])')
 
-# --strict: what the default run cannot yet require of the whole tree.
+# --strict adds these checks; make lint runs it over kernel/, hal/,
+# interfaces/, tiku.h and main.c.
 STRICT = False
 EMPHASIS = re.compile(
     r'(?<![A-Za-z0-9_])(?:NOT|ONLY|MUST|NEVER|ALWAYS|ONE|ONCE|BOTH|EVERY|ALL|'
@@ -71,8 +69,8 @@ STRICT_BANNED = [
 DOC = re.compile(r'/\*\*.*?\*/', re.S)
 HDR = re.compile(r'/\*.*?\*/', re.S)
 
-# Process log, not documentation: build-phase names, first person, and the
-# narration of how the code came to be.
+# Banned in every run: plan labels, first person, design-history phrases,
+# capitals used for emphasis, and milestones used as headings.
 BANNED = [
     # Phase names as the plan writes them: "(P3g)", "see A2b".  A bare P0..P3
     # is a Nordic GPIO port and M3/M4 are Cortex cores, so the P-form requires
@@ -129,6 +127,7 @@ def tracked():
 
 
 def sources():
+    """Yield the root-relative path of every tracked source file checked."""
     keep = tracked()
     for dirpath, dirnames, filenames in os.walk(ROOT):
         rel = os.path.relpath(dirpath, ROOT)
@@ -150,7 +149,7 @@ def sources():
 
 
 def hash_header(text):
-    """(line count, text) of a leading '#' comment block, skipping any shebang."""
+    """(line count, text) of the leading '#' block, after any shebang."""
     lines = text.split('\n')
     i = 1 if lines and lines[0].startswith('#!') else 0
     start = i
@@ -160,7 +159,7 @@ def hash_header(text):
 
 
 def prose_lines(block):
-    """Lines of prose in a doc comment; @tags and their continuations excluded."""
+    """Prose lines in a doc comment; @tags and continuations do not count."""
     count = 0
     in_tag = False
     tag = BLOCK_TAG if STRICT else TAG
@@ -303,11 +302,8 @@ def is_name(path, prose, hit):
 
 
 def untracked_sources():
-    """Source files git does not track, and which this check therefore skips.
-
-    Reported rather than ignored: the scope rule makes a brand-new file pass
-    by never being opened, which is the moment it has least been checked.
-    """
+    """Source files git does not track: the check skips them, and main()
+    prints them as not checked."""
     try:
         out = subprocess.run(["git", "-C", ROOT, "ls-files", "--others",
                               "--exclude-standard"],
@@ -324,11 +320,11 @@ def untracked_sources():
 
 
 def main():
+    """Check the given paths; return 0, 1 on findings, 2 if none matched."""
     global ROOT
     argv = sys.argv[1:]
-    # A tree may set its own ceilings: the kernel's comments are terse,
-    # the applications tree's are written denser, and one number for
-    # both would be wrong for one of them.
+    # --prose= and --header= set another tree's ceilings: the applications
+    # repository runs 6 lines of prose and a 20-line header.
     global HEADER_MAX, PROSE_MAX, STRICT
     while argv and argv[0].startswith("--"):
         if argv[0].startswith("--root="):

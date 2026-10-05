@@ -3473,9 +3473,8 @@ TARGET = main.elf
 # .uninit section attribute outside the placement macros of
 # kernel/memory/tiku_mem.h); with a host C compiler, the tools/usbmsc checks
 # and the cpu_clock and cpu_settings host tests; and
-# tools/check_comment_style.py (comment-style.md) over the tracked tree,
-# with --strict over kernel/, hal/, interfaces/, tiku.h and main.c.  Every
-# check runs, and the target fails if any one fails.
+# tools/check_comment_style.py --strict (comment-style.md) over the tracked
+# tree.  Every check runs, and the target fails if any one fails.
 lint:
 	@rc=0; \
 	 ./tools/check_durable_placement.sh || rc=1; \
@@ -3493,9 +3492,7 @@ lint:
 	 else \
 	   echo "usb host checks: SKIPPED -- no host C compiler"; \
 	 fi; \
-	 ./tools/check_comment_style.py || rc=1; \
-	 ./tools/check_comment_style.py --strict kernel hal interfaces tiku.h \
-	   main.c || rc=1; \
+	 ./tools/check_comment_style.py --strict || rc=1; \
 	 exit $$rc
 
 # What `all` builds besides main.elf: main.bin and main.uf2 on RP2350,
