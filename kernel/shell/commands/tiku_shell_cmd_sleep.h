@@ -18,9 +18,9 @@
 /**
  * @brief "sleep" command handler — configure low-power idle mode.
  *
- * Installs the scheduler idle hook to enter a low-power mode when no events
- * are pending; the system wakes on any enabled interrupt.  Takes lpm0, lpm3,
- * lpm4 or off, and prints the current setting with no argument.
+ * Takes off, light, deep or deepest (or lpm0, lpm3, lpm4), plus
+ * "allow-console-loss" for a mode that stops console input.  With no
+ * argument, prints the mode the scheduler enters.
  *
  * @param argc  Argument count
  * @param argv  Argument vector
@@ -28,11 +28,9 @@
 void tiku_shell_cmd_sleep(uint8_t argc, const char *argv[]);
 
 /**
- * @brief Return the current LPM mode as a string.
+ * @brief Return the current idle mode's platform name, for `power`.
  *
- * Used by the /sys/power/mode VFS node.
- *
- * @return Static string like "off", "LPM0", "LPM3", "LPM4"
+ * @return Static string like "off", "LPM0", "LPM3", "WFI" or "custom"
  */
 const char *tiku_shell_sleep_mode_str(void);
 

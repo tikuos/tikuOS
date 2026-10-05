@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_sleep.c - "sleep" command implementation.
  *
- * Configures the scheduler's idle hook to enter a low-power mode when no events
- * are pending.  Modes are abstract and resolved to the platform's real entry by
- * the CPU HAL.
+ * Sets the idle mode the scheduler enters when no events are pending, through
+ * /sys/power/policy so the link's capability applies and watchers hear it.
+ * Modes are abstract; the CPU HAL resolves each to the platform's own entry.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,17 +20,13 @@
 
 #include "tiku_shell_cmd_sleep.h"
 #include <kernel/shell/tiku_shell.h>
-#include <kernel/scheduler/tiku_sched.h>
+#include <kernel/cpu/tiku_power_policy.h>
+#include <kernel/vfs/tiku_vfs.h>
 #include <hal/tiku_cpu.h>
+#include <stddef.h>
 
-/*---------------------------------------------------------------------------*/
-/* CURRENT MODE TRACKING                                                     */
-/*---------------------------------------------------------------------------*/
-
-/* Must match the hook tiku_sched_init() installs, or "sleep" reports a mode
- * the scheduler is not in.  The scheduler owns the default; this only tracks
- * it for reporting. */
-static tiku_cpu_idle_mode_t current_idle = TIKU_CPU_IDLE_LIGHT;
+/** Room for the longest request, "deepest allow-console-loss". */
+#define SLEEP_REQ_MAX  32u
 
 /*---------------------------------------------------------------------------*/
 /* HELPERS                                                                   */
@@ -53,20 +49,41 @@ streq(const char *a, const char *b)
 }
 
 /**
- * Map a user-typed token ("off", "lpm0", "lpm3", "lpm4") to a HAL idle-mode
- * enum.  Token names follow the short name tiku_cpu_idle_mode_name() returns,
- * which keeps the CLI stable while the HAL chooses the actual entry hook.
+ * @brief Map a mode name or an MSP430 alias to a HAL idle mode.
+ *
+ * Takes the policy names (off, light, deep, deepest) and the aliases lpm0,
+ * lpm3 and lpm4.
  *
  * @return 0 on match, -1 on unknown token.
  */
 static int
 parse_mode(const char *tok, tiku_cpu_idle_mode_t *out)
 {
-    if (streq(tok, "off"))  { *out = TIKU_CPU_IDLE_OFF;     return 0; }
+    int mode = tiku_power_policy_parse(tok);
+
+    if (mode >= 0) {
+        *out = (tiku_cpu_idle_mode_t)mode;
+        return 0;
+    }
     if (streq(tok, "lpm0")) { *out = TIKU_CPU_IDLE_LIGHT;   return 0; }
     if (streq(tok, "lpm3")) { *out = TIKU_CPU_IDLE_DEEP;    return 0; }
     if (streq(tok, "lpm4")) { *out = TIKU_CPU_IDLE_DEEPEST; return 0; }
     return -1;
+}
+
+/**
+ * @brief Append @p s to @p buf at @p at, keeping it NUL-terminated.
+ *
+ * @return The new length
+ */
+static size_t
+append(char *buf, size_t at, const char *s)
+{
+    while (*s != '\0' && at < SLEEP_REQ_MAX - 1u) {
+        buf[at++] = *s++;
+    }
+    buf[at] = '\0';
+    return at;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -77,26 +94,58 @@ void
 tiku_shell_cmd_sleep(uint8_t argc, const char *argv[])
 {
     tiku_cpu_idle_mode_t mode;
+    const char *token;
+    char req[SLEEP_REQ_MAX];
+    uint8_t ack;
+    size_t len;
+    int rc;
 
     if (argc < 2) {
-        SHELL_PRINTF("Idle mode: %s\n",
-                     tiku_cpu_idle_mode_desc(current_idle));
+        rc = tiku_power_policy_get();
+        SHELL_PRINTF("Idle mode: %s\n", rc == TIKU_POWER_CUSTOM
+                     ? "custom"
+                     : tiku_cpu_idle_mode_desc((tiku_cpu_idle_mode_t)rc));
         return;
     }
 
-    if (parse_mode(argv[1], &mode) != 0) {
-        SHELL_PRINTF("Usage: sleep <off|lpm0|lpm3|lpm4>\n");
+    ack = (uint8_t)(argc == 3 && streq(argv[2], "allow-console-loss"));
+    if (argc > 3 || (argc == 3 && !ack) ||
+        parse_mode(argv[1], &mode) != 0) {
+        SHELL_PRINTF("Usage: sleep <off|light|deep|deepest> "
+                     "[allow-console-loss]\n");
         return;
     }
 
-    tiku_sched_set_idle_hook(tiku_cpu_idle_hook(mode));
-    /* Tell the scheduler whether this mode is tick-woken: tick-woken
-     * modes may idle with timers armed (the tick dispatches them);
-     * tick-killing modes (MSP430 LPM4) must stay awake while any
-     * timer is armed or its deadline would never fire. */
-    tiku_sched_set_idle_tick_wakes(
-        (uint8_t)tiku_cpu_idle_mode_wakes_on_tick(mode));
-    current_idle = mode;
+    token = tiku_power_policy_token((int)mode);
+    if (!ack && tiku_power_policy_supported(mode) &&
+        tiku_power_policy_loses_console(mode)) {
+        SHELL_PRINTF("Error: %s stops console input; "
+                     "add allow-console-loss\n", token);
+        return;
+    }
+
+    /* The node checks the link's capability and tells watchers. */
+    len = append(req, 0, token);
+    if (ack) {
+        len = append(req, len, " allow-console-loss");
+    }
+    rc = tiku_vfs_write("/sys/power/policy", req, len);
+    switch (rc) {
+    case TIKU_VFS_OK:
+        break;
+    case TIKU_VFS_EPERM:
+        SHELL_PRINTF("Error: this link may not set the idle mode\n");
+        return;
+    case TIKU_VFS_ENOTSUP:
+        SHELL_PRINTF("Error: this port has no separate %s mode\n", token);
+        return;
+    case TIKU_VFS_EBUSY:
+        SHELL_PRINTF("Error: no armed wake source ends %s\n", token);
+        return;
+    default:
+        SHELL_PRINTF("Error: idle mode not set (%d)\n", rc);
+        return;
+    }
 
     if (mode == TIKU_CPU_IDLE_OFF) {
         SHELL_PRINTF("LPM disabled\n");
@@ -108,5 +157,5 @@ tiku_shell_cmd_sleep(uint8_t argc, const char *argv[])
 const char *
 tiku_shell_sleep_mode_str(void)
 {
-    return tiku_cpu_idle_mode_name(current_idle);
+    return tiku_power_policy_mode_name();
 }
