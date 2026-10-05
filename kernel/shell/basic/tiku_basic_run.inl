@@ -54,9 +54,10 @@ basic_run_trap_error(uint16_t prev_pc)
 {
     basic_erl = prev_pc;
     basic_err = basic_errcat ? basic_errcat : TIKU_BASIC_ERR_GENERAL;
-    /* A handler is one-shot in the sense that an error inside the handler is
-     * fatal -- otherwise a buggy handler could loop forever. */
-    if (basic_err_handler != 0u && basic_pc != basic_err_handler) {
+    /* An error inside the handler, from the trap until its RESUME, is fatal
+     * -- otherwise a buggy handler could loop forever.  basic_err_pc is
+     * non-zero for exactly that span. */
+    if (basic_err_handler != 0u && basic_err_pc == 0u) {
         basic_err_pc = prev_pc;
         basic_pc     = basic_err_handler;
         basic_pc_set = 1;
@@ -162,6 +163,7 @@ basic_run_step(void)
         if (basic_wait_sleep_s > 0) {
             long chunk = (basic_wait_sleep_s > 10L) ? 10L
                                                     : basic_wait_sleep_s;
+            (void)basic_ticks();     /* keep the EVERY clock within a wrap */
             basic_wait_sleep_s -= chunk;
             basic_wait_start = tiku_clock_time();
             basic_wait_ticks = (tiku_clock_time_t)
@@ -179,7 +181,10 @@ basic_run_step(void)
         goto exec_resume;
     }
 
-    idx = prog_find_exact(basic_pc);
+    /* Line 0 is never a program line, and prog_find_exact(0) finds an empty
+     * slot, whose text is a deleted line's: PC 0 continues at the first line
+     * instead. */
+    idx = (basic_pc != 0u) ? prog_find_exact(basic_pc) : -1;
     if (idx < 0) {
         int n = prog_next_index(basic_pc);
         if (n < 0) return BASIC_STEP_DONE;       /* PC fell off the end */

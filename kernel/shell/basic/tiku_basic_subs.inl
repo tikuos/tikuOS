@@ -284,6 +284,9 @@ exec_local(const char **p)
 /**
  * @brief ENDSUB: restore the frame's parameters and locals and return to the
  *        caller; a no-op outside a CALL.
+ *
+ * A CALL on the last line has no line to return to, so the run ends there, as
+ * it does after RETURN.
  */
 static void
 exec_endsub(void)
@@ -292,6 +295,11 @@ exec_endsub(void)
     if (basic_call_sp == 0) return;                /* not in a CALL -- no-op */
     f = basic_frames[--basic_call_sp];
     basic_scope_unwind(f.scope_base);
+    if (f.ret_line == 0u) {
+        basic_running = 0;
+        basic_pc = 0;
+        return;
+    }
     basic_pc = f.ret_line;
     basic_pc_set = 1;
 }

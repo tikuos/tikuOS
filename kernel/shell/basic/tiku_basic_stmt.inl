@@ -569,7 +569,10 @@ exec_gosub(const char **p)
         basic_throw(TIKU_BASIC_ERR_NOMEM, "GOSUB stack overflow");
         return;
     }
-    gosub_stack[gosub_sp++] = line_after(basic_pc);
+    /* From an EVERY or ON TIMER body the RUN loop has already moved basic_pc
+     * to the line due next, which is where the handler returns. */
+    gosub_stack[gosub_sp++] = basic_in_reactive ? basic_pc
+                                                : line_after(basic_pc);
     basic_pc = (uint16_t)target;
     basic_pc_set = 1;
 }
@@ -1414,7 +1417,7 @@ exec_delay_ms(long ms)
     tiku_clock_time_t  ticks;
     if (ms <= 0) return;
     start = tiku_clock_time();
-    ticks = TIKU_CLOCK_MS_TO_TICKS((unsigned long)ms);
+    ticks = (tiku_clock_time_t)basic_ms_to_ticks((unsigned long)ms, 0);
     if (ticks == 0u) return;
     if (basic_wait_can_yield()) {
         /* Park the step machine instead of spinning: the shell loop keeps
@@ -1527,6 +1530,7 @@ exec_sleep(const char **p)
         basic_lp_wait_ticks(
             (tiku_clock_time_t)((tiku_clock_time_t)chunk * TIKU_CLOCK_SECOND));
         s -= chunk;
+        (void)basic_ticks();         /* keep the EVERY clock within a wrap */
     }
 }
 
@@ -1578,9 +1582,9 @@ exec_every(const char **p)
         }
         basic_everys[slot].stmt[n] = '\0';
     }
-    basic_everys[slot].interval_ms = ms;
-    basic_everys[slot].next_due_ms =
-        (long)tiku_clock_time() * 1000L / (long)TIKU_CLOCK_SECOND + ms;
+    basic_everys[slot].interval_ms    = ms;
+    basic_everys[slot].interval_ticks = basic_ms_to_ticks((unsigned long)ms, 1);
+    basic_everys[slot].start          = basic_ticks();
     basic_everys[slot].active = 1;
 }
 
@@ -1693,7 +1697,8 @@ basic_onchg_check(basic_onchg_t *o)
         if (gosub_sp >= TIKU_BASIC_GOSUB_DEPTH) {
             return 0;                  /* stack full -- no re-fire */
         }
-        gosub_stack[gosub_sp++] = line_after(basic_pc);
+        /* The RUN loop polls after moving basic_pc to the line due next. */
+        gosub_stack[gosub_sp++] = basic_pc;
     }
     basic_pc     = o->handler_line;
     basic_pc_set = 1;
@@ -1710,14 +1715,14 @@ static void
 basic_poll_reactive(void)
 {
     int i;
-    long now_ms;
+    unsigned long now;
 #if TIKU_BASIC_EVERY_MAX > 0
-    now_ms = (long)tiku_clock_time() * 1000L / (long)TIKU_CLOCK_SECOND;
+    now = basic_ticks();
     for (i = 0; i < TIKU_BASIC_EVERY_MAX; i++) {
         if (!basic_everys[i].active) continue;
-        /* Wrap-tolerant compare: on reaching or passing the
-         * scheduled time, fire. */
-        if (now_ms >= basic_everys[i].next_due_ms) {
+        /* The unsigned elapsed count stays right across the count's own
+         * wrap; fire once a whole period has passed. */
+        if (now - basic_everys[i].start >= basic_everys[i].interval_ticks) {
             const char *p = basic_everys[i].stmt;
             exec_stmts(&p);
             if (basic_error) {
@@ -1726,8 +1731,7 @@ basic_poll_reactive(void)
                 basic_everys[i].active = 0;
                 return;
             }
-            basic_everys[i].next_due_ms = now_ms +
-                                          basic_everys[i].interval_ms;
+            basic_everys[i].start = now;
         }
     }
 #endif
@@ -1768,10 +1772,12 @@ exec_resume(const char **p)
     if (cur_peek(p) == '\0' || cur_peek(p) == ':') {
         basic_pc     = basic_err_pc;
         basic_pc_set = 1;
+        basic_err_pc = 0;
         return;
     }
     if (match_kw(p, "NEXT")) {
         int n = prog_next_index((uint16_t)(basic_err_pc + 1));
+        basic_err_pc = 0;
         if (n < 0) {
             basic_running = 0;
             basic_pc = 0;
@@ -1785,6 +1791,7 @@ exec_resume(const char **p)
     if (basic_error) return;
     basic_pc     = (uint16_t)target;
     basic_pc_set = 1;
+    basic_err_pc = 0;
 }
 
 /**
@@ -1856,9 +1863,10 @@ exec_on(const char **p)
         }
         snprintf(basic_everys[slot].stmt, sizeof(basic_everys[slot].stmt),
                  "%s %ld", is_gsub ? "GOSUB" : "GOTO", ln);
-        basic_everys[slot].interval_ms = ms;
-        basic_everys[slot].next_due_ms =
-            (long)tiku_clock_time() * 1000L / (long)TIKU_CLOCK_SECOND + ms;
+        basic_everys[slot].interval_ms    = ms;
+        basic_everys[slot].interval_ticks =
+            basic_ms_to_ticks((unsigned long)ms, 1);
+        basic_everys[slot].start          = basic_ticks();
         basic_everys[slot].active = 1;
         return;
     }

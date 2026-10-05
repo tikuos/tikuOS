@@ -685,18 +685,19 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
 
 #if TIKU_BASIC_EVERY_MAX > 0
     {
-        uint8_t n, k;
-        long    now_ms = (long)tiku_clock_time() * 1000L /
-                         (long)TIKU_CLOCK_SECOND;
+        uint8_t       n, k;
+        unsigned long now = basic_ticks();
         ckpt_r(&r, &n, 1);
         if (n > TIKU_BASIC_EVERY_MAX) return -1;
         for (k = 0; k < n; k++) {
             long interval;
             ckpt_r(&r, &interval, sizeof(long));
             ckpt_r(&r, basic_everys[k].stmt, (size_t)TIKU_BASIC_EVERY_STMT_LEN);
-            basic_everys[k].interval_ms = interval;
-            basic_everys[k].next_due_ms = now_ms + interval;   /* re-armed */
-            basic_everys[k].active      = 1;
+            basic_everys[k].interval_ms    = interval;
+            basic_everys[k].interval_ticks =
+                basic_ms_to_ticks((unsigned long)interval, 1);
+            basic_everys[k].start          = now;          /* re-armed */
+            basic_everys[k].active         = 1;
         }
     }
 #endif

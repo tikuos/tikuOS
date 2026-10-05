@@ -314,7 +314,8 @@ static uint8_t           basic_in_reactive;  /* inside basic_poll_reactive */
 /* ON ERROR GOTO N: when an error fires during RUN, jump to N
  * instead of aborting. 0 = handler disabled (default behaviour).
  * `basic_err_pc` records the line that errored, so RESUME and
- * RESUME NEXT know where to continue from. */
+ * RESUME NEXT know where to continue from; it is 0 again once RESUME
+ * leaves the handler, and an error while it is set is fatal. */
 static uint16_t     basic_err_handler;
 static uint16_t     basic_err_pc;
 
@@ -431,12 +432,46 @@ basic_reportf(int cat, const char *fmt, ...)
 #endif
 /** One EVERY registration. */
 typedef struct {
-    long  interval_ms;                       /**< period */
-    long  next_due_ms;                       /**< next deadline */
+    long          interval_ms;               /**< period, as written */
+    unsigned long interval_ticks;            /**< period in clock ticks */
+    unsigned long start;                     /**< basic_ticks() at last firing */
     char  stmt[TIKU_BASIC_EVERY_STMT_LEN];   /**< statement text */
     uint8_t active;                          /**< 1 = registered */
 } basic_every_t;
 static basic_every_t *basic_everys;
+
+/* Clock ticks counted from short differences of tiku_clock_time(), so an
+ * EVERY period runs on across the tick counter's wrap (every 512 s with
+ * MSP430's 16-bit tick at 128 Hz) and needs no ticks * 1000 product, which
+ * overflows a 32-bit long after 4.66 h.  The count is right while it is read
+ * at least once per wrap: the RUN loop reads it between lines, and SLEEP
+ * between its 10 s chunks. */
+static unsigned long     basic_ticks_count;
+static tiku_clock_time_t basic_ticks_seen;
+
+/** @brief Advance the tick count by the ticks since the last call; return it. */
+static unsigned long
+basic_ticks(void)
+{
+    tiku_clock_time_t t = tiku_clock_time();
+
+    basic_ticks_count += (tiku_clock_time_t)(t - basic_ticks_seen);
+    basic_ticks_seen   = t;
+    return basic_ticks_count;
+}
+
+/**
+ * @brief @p ms in clock ticks, without the overflow of ms * TIKU_CLOCK_SECOND.
+ *
+ * @param up  Non-zero rounds a part tick up, 0 rounds it down
+ */
+static unsigned long
+basic_ms_to_ticks(unsigned long ms, int up)
+{
+    return (ms / 1000u) * (unsigned long)TIKU_CLOCK_SECOND +
+           ((ms % 1000u) * (unsigned long)TIKU_CLOCK_SECOND +
+            (up ? 999u : 0u)) / 1000u;
+}
 
 /* ON CHANGE "/path" GO[SUB] line -- reactive VFS-watch handler.
  * The RUN loop polls each registration between program lines:

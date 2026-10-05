@@ -333,10 +333,18 @@ expr_call(const char **p, long *out_v)
             basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); return 1;
         }
         cur_advance(p);
-        /* Milliseconds since boot, wrapping when the tick counter wraps
-         * (512 s with MSP430's 16-bit tick at 128 Hz).  Meant for short
-         * timing patterns. */
-        *out_v = (long)tiku_clock_time() * 1000L / (long)TIKU_CLOCK_SECOND;
+        /* Milliseconds since boot modulo 2^32, so MILLIS() - T holds across
+         * the wrap at 49.7 days; the conversion never forms ticks * 1000,
+         * which overflows a 32-bit long after 4.66 h at 128 Hz.  MSP430's
+         * 16-bit tick wraps it to 0 after 511992 ms at 128 Hz.  Meant for
+         * short timing patterns. */
+        {
+            unsigned long t = (unsigned long)tiku_clock_time();
+            unsigned long ms = (t / (unsigned long)TIKU_CLOCK_SECOND) * 1000u +
+                               (t % (unsigned long)TIKU_CLOCK_SECOND) * 1000u /
+                               (unsigned long)TIKU_CLOCK_SECOND;
+            *out_v = (long)(int32_t)(uint32_t)ms;
+        }
         return 1;
     }
 #if TIKU_BASIC_RTC_ENABLE
@@ -428,9 +436,11 @@ expr_call(const char **p, long *out_v)
         if (!parse_call_1arg(p, &a)) return 1;
         if (a <= 0) { *out_v = 0; return 1; }
         /* Compute sqrt(a * SCALE) so the result is in Q.3.  The
-         * intermediate fits in long long for any 32-bit a. */
+         * intermediate fits in long long for any 32-bit a but passes 2^32
+         * from a of about 4295, so the search starts at the highest power
+         * of four a long long holds. */
         t = (long long)a * (long long)TIKU_BASIC_FIXED_SCALE;
-        bit = 1LL << 30;
+        bit = 1LL << 62;
         while (bit > t) bit >>= 2;
         while (bit > 0) {
             if (t >= res + bit) {

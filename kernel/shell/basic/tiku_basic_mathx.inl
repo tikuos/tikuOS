@@ -31,7 +31,7 @@ static long mx_sqrt_q3(long x)
     long long t, res = 0, bit;
     if (x <= 0) return 0;
     t = (long long)x * MX_SCALE;
-    bit = 1LL << 30;
+    bit = 1LL << 62;                 /* t passes 2^32 from x of about 4295 */
     while (bit > t) bit >>= 2;
     while (bit > 0) {
         if (t >= res + bit) { t -= res + bit; res = (res >> 1) + bit; }
