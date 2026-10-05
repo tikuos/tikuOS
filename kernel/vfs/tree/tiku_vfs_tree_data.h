@@ -8,8 +8,8 @@
  * tiku_vfs_tree_data.h - /data VFS nodes (user data and persisted state).
  *
  * Holds user-facing persisted content, as opposed to /sys system state and /dev
- * hardware.  The declaration is unconditional so the root assembly guards the
- * call with build flags rather than this header knowing the configuration.
+ * hardware. Both the store and its VFS presentation are available without a
+ * shell; the optional BASIC child is controlled by the BASIC build flags.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -25,12 +25,23 @@
  * @brief Get the fully-formed /data directory node.
  *
  * Returns a static, fully-initialised DIR node named "data"; the root assembly
- * copies it by value into the mutable FRAM root-children array.  Defined only
- * when TIKU_SHELL_ENABLE and TIKU_SHELL_CMD_BASIC are both set.
+ * copies it by value into the mutable root-children array. Available without
+ * a shell; the optional /data/basic child still requires BASIC and the shell.
  *
  * @return Pointer to the static /data directory node
  */
 const tiku_vfs_node_t *tiku_vfs_tree_data_get(void);
+
+/** @brief Entry count of /sys/fs. */
+#define TIKU_VFS_TREE_FS_NCHILD 1
+
+/**
+ * @brief /sys/fs children: data/, the /data store's usage.
+ *
+ * Its reads never mount or provision the store.  Referenced by the /sys
+ * directory table in tiku_vfs_tree_sys.c.
+ */
+extern const tiku_vfs_node_t tiku_vfs_tree_fs_children[TIKU_VFS_TREE_FS_NCHILD];
 
 /**
  * @brief /data file-store usage snapshot, for the `df` command.
@@ -70,9 +81,7 @@ void tiku_vfs_tree_data_extents(tiku_data_df_t *out);
  * rather than path reads -- tiku_blob, for weights, firmware and module images
  * -- work against the store directly.
  *
- * @note The store compiles only under TIKU_SHELL_ENABLE because /data began as
- *       the BASIC program store.  It is a kernel facility, and that gate has to
- *       go once modules and radio firmware become tenants.
+ * @note The store and its VFS presentation are independent of the shell.
  * @return The mounted store, or NULL when none is available (region absent or
  *         too small, or the mount failed).
  */

@@ -948,7 +948,6 @@ sram_map_read(char *buf, size_t max)
 static void
 nvm_store_map(char *buf, size_t max, size_t *at, unsigned long size)
 {
-#if TIKU_SHELL_ENABLE
     tiku_tfs_t *fs = tiku_vfs_tree_data_store_if_mounted();
     unsigned long freeb;
 
@@ -962,7 +961,6 @@ nvm_store_map(char *buf, size_t max, size_t *at, unsigned long size)
             return;
         }
     }
-#endif
     map_line(buf, max, at, "store\t%lu\n", size, 0UL, 0UL);
 }
 
@@ -1696,6 +1694,8 @@ static const tiku_vfs_node_t sys_children[] = {
       tiku_vfs_tree_boot_cold_boots_read, NULL, NULL, 0, &desc_lifetime },
     { "mem",      TIKU_VFS_DIR,  NULL, NULL, sys_mem_children,
       SYS_MEM_NCHILD },
+    { "fs",       TIKU_VFS_DIR, NULL, NULL, tiku_vfs_tree_fs_children,
+      TIKU_VFS_TREE_FS_NCHILD },
     { "cpu",      TIKU_VFS_DIR,  NULL, NULL, sys_cpu_children,
       sizeof sys_cpu_children / sizeof sys_cpu_children[0] },
     { "power",    TIKU_VFS_DIR,  NULL, NULL,

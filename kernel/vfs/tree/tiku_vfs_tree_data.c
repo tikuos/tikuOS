@@ -22,18 +22,14 @@
 #include "tiku.h"
 
 /*
- * The store is not a shell feature.
- *
- * The file has two halves.  Everything down to the DYNAMIC-DIRECTORY OPS
- * banner -- the backing memory, the backend, the mount, and the
- * tiku_vfs_tree_data_store() accessor -- is always compiled, because loadable
- * modules and radio firmware are kernel-level tenants that must mount and read
- * the store in a build with no shell at all.  The VFS presentation above it
- * (the /data node, its dynamic ops, and the df snapshot) stays behind the shell
- * gate: a namespace entry with no shell to type at it is genuinely shell-shaped.
+ * The store is not a shell feature: the backing memory, the backend, the
+ * mount, the /data namespace and /sys/fs/data are all compiled with or without
+ * a shell, because loadable modules, radio firmware and device-management
+ * transports use the store in builds that have none.
  */
 
 #include <string.h>
+#include <stdio.h>
 
 #include "kernel/fs/tiku_tfs.h"
 #include <kernel/memory/tiku_mem.h>      /* tiku_mpu_(un)lock_nvm, tiku_tier_nvm_write */
@@ -461,19 +457,10 @@ tiku_vfs_tree_data_format(void)
 }
 
 /*===========================================================================*/
-/* VFS PRESENTATION -- shell-gated.  Everything ABOVE this line is the store   */
-/* itself and is always compiled; everything below turns it into a namespace   */
-/* entry, which is what needs a shell.                                        */
-/*
- * NOTE ON THE TEST: `#if TIKU_SHELL_ENABLE`, on the VALUE, not
- * `#if defined(TIKU_SHELL_ENABLE)`.  tiku.h defines the macro UNCONDITIONALLY
- * (to 0 when the shell is off), so the `defined()` form is always true and
- * gates nothing.  The rest of kernel/vfs/tree/ spells it this way too.
- */
+/* VFS PRESENTATION -- available with or without a command shell.             */
 /*===========================================================================*/
-#if TIKU_SHELL_ENABLE
 
-#if TIKU_SHELL_CMD_BASIC
+#if TIKU_SHELL_ENABLE && TIKU_SHELL_CMD_BASIC
 #include "kernel/shell/basic/tiku_basic.h"
 #endif
 
@@ -604,7 +591,7 @@ static const tiku_vfs_dynops_t data_dynops = {
 /* /data/basic — legacy BASIC program bridge (only when BASIC is built)      */
 /*---------------------------------------------------------------------------*/
 
-#if TIKU_SHELL_CMD_BASIC
+#if TIKU_SHELL_ENABLE && TIKU_SHELL_CMD_BASIC
 
 /**
  * @brief Read handler for /data/basic (legacy BASIC program bridge).
@@ -682,14 +669,22 @@ data_df_thunk(const char *name, size_t len, void *vacc)
     a->bytes += (uint32_t)len;
 }
 
-int
-tiku_vfs_tree_data_df(tiku_data_df_t *out)
+/**
+ * @brief Fill a usage snapshot from the store only if it is mounted.
+ *
+ * Never mounts or provisions: an untouched store reports nothing.
+ *
+ * @param out  Snapshot to fill
+ * @return 0, or -1 when the store is not mounted or @p out is NULL
+ */
+static int
+data_df_mounted(tiku_data_df_t *out)
 {
     data_df_acc_t acc;
 
     acc.files = 0u;
     acc.bytes = 0u;
-    if (out == NULL || data_tfs_ensure() != 0) {
+    if (out == NULL || data_state != DATA_READY || !data_fs.mounted) {
         return -1;
     }
     (void)tiku_tfs_list(&data_fs, data_df_thunk, &acc);
@@ -708,6 +703,90 @@ tiku_vfs_tree_data_df(tiku_data_df_t *out)
     return 0;
 }
 
+int tiku_vfs_tree_data_df(tiku_data_df_t *out)
+{
+    if (out == NULL || data_tfs_ensure() != 0) {
+        return -1;
+    }
+    return data_df_mounted(out);
+}
+
+/*---------------------------------------------------------------------------*/
+/* /sys/fs/data — usage that never mounts or provisions the store            */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief /sys/fs/data/state: not-mounted, mounted, absent, refused or held.
+ *
+ * Reading it never mounts the store; usage stays unavailable until a file
+ * operation has mounted it.
+ */
+static int
+data_state_read(char *buf, size_t max)
+{
+    static const char *const states[] = {
+        "not-mounted", "mounted", "absent", "refused", "held"
+    };
+
+    return snprintf(buf, max, "%s\n", states[data_state]);
+}
+
+/* One /sys/fs/data usage handler: ENOTSUP while the store is not mounted. */
+#define DATA_STAT(name, expression)                                          \
+    static int data_stat_##name(char *buf, size_t max)                       \
+    {                                                                        \
+        tiku_data_df_t st;                                                   \
+                                                                             \
+        if (data_df_mounted(&st) != 0) {                                     \
+            return TIKU_VFS_ENOTSUP;                                         \
+        }                                                                    \
+        return snprintf(buf, max, "%lu\n", (unsigned long)(expression));     \
+    }
+
+DATA_STAT(files, st.used_files)
+DATA_STAT(used_bytes, st.used_bytes)
+DATA_STAT(capacity_bytes, st.cap_bytes)
+DATA_STAT(allocated_bytes, (uint32_t)st.used_slots * st.slot_bytes)
+DATA_STAT(free_bytes,
+          (uint32_t)(st.total_slots - st.used_slots) * st.slot_bytes)
+#undef DATA_STAT
+
+/** @brief /sys/fs/data/backing: the kind of NVM the store sits on. */
+static int
+data_backing_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%s\n", TIKU_DEVICE_NVM_LABEL);
+}
+
+static const tiku_vfs_desc_t desc_fs_text = TIKU_VFS_DESC(
+    TIKU_VFS_T_STR, TIKU_VFS_U_NONE, TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
+static const tiku_vfs_desc_t desc_fs_bytes = TIKU_VFS_DESC(
+    TIKU_VFS_T_U32, TIKU_VFS_U_BYTES, TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_CHEAP);
+static const tiku_vfs_desc_t desc_fs_count = TIKU_VFS_DESC(
+    TIKU_VFS_T_U32, TIKU_VFS_U_COUNT, TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_CHEAP);
+
+static const tiku_vfs_node_t data_stats[] = {
+    { .name = "state", .type = TIKU_VFS_FILE, .read = data_state_read,
+      .desc = &desc_fs_text },
+    { .name = "backing", .type = TIKU_VFS_FILE, .read = data_backing_read,
+      .desc = &desc_fs_text },
+    { .name = "files", .type = TIKU_VFS_FILE, .read = data_stat_files,
+      .desc = &desc_fs_count },
+    { .name = "used_bytes", .type = TIKU_VFS_FILE,
+      .read = data_stat_used_bytes, .desc = &desc_fs_bytes },
+    { .name = "capacity_bytes", .type = TIKU_VFS_FILE,
+      .read = data_stat_capacity_bytes, .desc = &desc_fs_bytes },
+    { .name = "allocated_bytes", .type = TIKU_VFS_FILE,
+      .read = data_stat_allocated_bytes, .desc = &desc_fs_bytes },
+    { .name = "free_bytes", .type = TIKU_VFS_FILE,
+      .read = data_stat_free_bytes, .desc = &desc_fs_bytes },
+};
+
+const tiku_vfs_node_t tiku_vfs_tree_fs_children[TIKU_VFS_TREE_FS_NCHILD] = {
+    { .name = "data", .type = TIKU_VFS_DIR, .children = data_stats,
+      .child_count = sizeof(data_stats) / sizeof(data_stats[0]) },
+};
+
 /*---------------------------------------------------------------------------*/
 /* PUBLIC                                                                     */
 /*---------------------------------------------------------------------------*/
@@ -717,8 +796,6 @@ tiku_vfs_tree_data_get(void)
 {
     return &data_node;
 }
-
-#endif /* TIKU_SHELL_ENABLE -- VFS presentation ends here */
 
 void tiku_vfs_tree_data_extents(tiku_data_df_t *out)
 {
