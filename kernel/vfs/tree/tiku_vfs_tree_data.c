@@ -7,9 +7,9 @@
  *
  * tiku_vfs_tree_data.c - /data VFS nodes (user data and persisted state).
  *
- * A dynamic directory backed by the Tiku File Store: files can be created,
- * written, read, listed and deleted at run time.  The store rides the carved NVM
- * region where there is one, a .persistent FRAM array on MSP430, else .bss.
+ * A dynamic directory backed by the Tiku File Store: files are created,
+ * written, read, listed and deleted at run time, in the carved NVM region, a
+ * .persistent FRAM array on MSP430, or a .bss array on the host.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -32,7 +32,7 @@
 #include <stdio.h>
 
 #include "kernel/fs/tiku_tfs.h"
-#include <kernel/memory/tiku_mem.h>      /* tiku_mpu_(un)lock_nvm, tiku_tier_nvm_write */
+#include <kernel/memory/tiku_mem.h>      /* MPU windows, tiku_tier_nvm_write */
 #include "kernel/memory/tiku_nvm_region.h"
 #include "kernel/memory/tiku_layout.h"
 #include <kernel/memory/tiku_nvm_map.h>  /* TIKU_DEVICE_NVM_LABEL fallback */
@@ -41,35 +41,26 @@
 /* NVM-BACKED FILE STORE FOR /data                                           */
 /*---------------------------------------------------------------------------*/
 
-/* The store's NVM home.  Ambiq: the FS extent of the carved NVM region (durable
- * MRAM, read in place, written via the region backend) -- no SRAM array.
- * RP2350: the FS extent of the carved Flash region (read in place via XIP,
- * written via the Flash region backend).  nRF54L: the FS extent of the carved
- * RRAM region (byte-writable NVM read in place, written via the region backend
- * through the RRAMC WEN gate).  MSP430: a `.persistent` FRAM array (in place).
- * Other parts: plain `.bss` (volatile) until a backend lands. */
+/* The store's NVM home.  Region-backed parts (Ambiq, RP2350, nRF54L,
+ * STM32N6, RA8P1, ESP32-C61) use the file-store extent of the carved NVM
+ * region, read in place and written through tiku_tier_nvm_write() -- no SRAM
+ * array.  MSP430 uses a `.persistent` FRAM array, written in place; the host
+ * build a plain `.bss` array (volatile). */
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
     defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
     defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C61)
 
 /*
- * The fit/fill assertions that stood here are GONE, not relaxed.
- *
- * They existed because TIKU_TFS_MAX_FILES was a hand-tuned number that had to
- * be kept in step with the extent by hand: one caught a store too big for its
- * extent, the other a store that left more than a file's worth of it idle.
- * Capacity is now derived from the extent at mount, so "too big" cannot be
- * expressed and "leaves space idle" is false by construction -- the derivation
- * returns the largest count that fits, and the host suite asserts that adding
- * one more file would not.  What remains worth checking is the FLOOR, which
- * mount enforces at runtime because only the linker knows the real carve.
+ * Capacity is derived from the extent at mount: the largest file count that
+ * fits.  The mount enforces the store's floor at run time, because only the
+ * linker knows the real carve.
  */
 
 static tiku_tfs_t          data_fs;
 static tiku_nvm_backend_t  data_be;
 
-/* Program through the region backend (MRAM bootrom); it brackets its own NVM
- * window, so reads stay plain pointer derefs into the FS extent. */
+/** @brief Program the extent through tiku_tier_nvm_write(), which brackets
+ *         its own NVM window; reads stay plain pointer reads of the extent. */
 static int
 data_be_write(tiku_nvm_backend_t *be, size_t off, const void *src, size_t len)
 {
@@ -202,7 +193,7 @@ data_adopt(size_t base)
 
 /*
  * MSP430 and host have no carved extent to derive from -- the store's backing
- * IS this array -- so here the geometry is stated rather than derived, and the
+ * is this array -- so here the geometry is stated rather than derived, and the
  * array is sized from it.  Mount then derives the same count straight back,
  * because TIKU_TFS_EXTENT_FOR_SLOTS is the exact inverse of the fit it does, so
  * these platforms take the identical code path rather than a special case.
@@ -260,7 +251,7 @@ data_bind(tiku_nvm_backend_t *region, size_t *base)
 /**
  * @brief Report the store's extent, for `df` (no carved region here).
  *
- * MSP430 and host builds size the backing array FROM the store's geometry, so
+ * MSP430 and host builds size the backing array from the store's geometry, so
  * the extent always fits exactly and there is no region to divide -- reporting
  * a zero region tells `df` to omit the region breakdown entirely.
  *
@@ -275,7 +266,7 @@ data_fill_extents(tiku_data_df_t *out)
     out->idle_bytes   = 0u;
 }
 
-/** @brief Create the store only in an entirely, uniformly blank static array. */
+/** @brief Create the store only in a wholly, uniformly blank static array. */
 static int
 data_may_create(const tiku_nvm_backend_t *region, size_t base)
 {
@@ -456,9 +447,10 @@ tiku_vfs_tree_data_format(void)
     return 0;
 }
 
-/*===========================================================================*/
-/* VFS PRESENTATION -- available with or without a command shell.             */
-/*===========================================================================*/
+/*---------------------------------------------------------------------------*/
+/* VFS PRESENTATION                                                          */
+/*---------------------------------------------------------------------------*/
+/* Available with or without a command shell. */
 
 #if TIKU_SHELL_ENABLE && TIKU_SHELL_CMD_BASIC
 #include "kernel/shell/basic/tiku_basic.h"
@@ -468,6 +460,7 @@ tiku_vfs_tree_data_format(void)
 /* DYNAMIC-DIRECTORY OPS — bridge /data to the file store                     */
 /*---------------------------------------------------------------------------*/
 
+/** @brief The VFS list callback and context data_list_thunk() forwards to. */
 typedef struct { tiku_vfs_dyn_list_cb cb; void *ctx; } data_list_w_t;
 
 /**
@@ -569,7 +562,7 @@ data_dyn_unlink(const char *name)
     return (tiku_tfs_delete(&data_fs, name) == TFS_OK) ? 0 : -1;
 }
 
-/* Folder-aware listing: present the flat store as a tree under @p prefix. */
+/** @brief Folder-aware list op: the flat store as a tree under @p prefix. */
 static void
 data_dyn_list_dir(const char *prefix, tiku_vfs_dyn_list_cb cb, void *ctx)
 {
@@ -588,15 +581,15 @@ static const tiku_vfs_dynops_t data_dynops = {
 };
 
 /*---------------------------------------------------------------------------*/
-/* /data/basic — legacy BASIC program bridge (only when BASIC is built)      */
+/* /data/basic — the saved BASIC program (only when BASIC is built)          */
 /*---------------------------------------------------------------------------*/
 
 #if TIKU_SHELL_ENABLE && TIKU_SHELL_CMD_BASIC
 
 /**
- * @brief Read handler for /data/basic (legacy BASIC program bridge).
+ * @brief Read handler for /data/basic, the saved BASIC program.
  *
- * Renders the BASIC interpreter's current program store as text.
+ * Renders the BASIC interpreter's saved program as text.
  *
  * @param buf  Output buffer
  * @param max  Capacity of @p buf
@@ -609,9 +602,9 @@ data_basic_read(char *buf, size_t max)
 }
 
 /**
- * @brief Write handler for /data/basic (legacy BASIC program bridge).
+ * @brief Write handler for /data/basic, the saved BASIC program.
  *
- * Loads @p len bytes of program text into the BASIC interpreter's store.
+ * Saves @p len bytes of numbered program text as the BASIC program.
  *
  * @param buf  Program text
  * @param len  Number of bytes
@@ -653,8 +646,8 @@ typedef struct { uint16_t files; uint32_t bytes; } data_df_acc_t;
 /**
  * @brief File-store accumulator for df usage stats.
  *
- * Called once per file by tiku_vfs_tree_data_df(): increments the file
- * count and adds the entry's byte length to the running total.
+ * Called once per file by data_df_mounted(): increments the file count
+ * and adds the entry's byte length to the running total.
  *
  * @param name  File name (unused)
  * @param len   File length in bytes, added to the accumulator
@@ -695,9 +688,8 @@ data_df_mounted(tiku_data_df_t *out)
     out->total_slots = data_fs.nslots;
     out->slot_bytes = (uint16_t)TIKU_TFS_SLOT_DATA;
     out->cap_bytes  = (uint32_t)data_fs.nslots * (uint32_t)TIKU_TFS_SLOT_DATA;
-    /* One source of truth for what to CALL the NVM: the device header's
-     * TIKU_DEVICE_NVM_LABEL (FRAM / RRAM / MRAM / Flash), never a per-platform
-     * ladder here -- a second copy is exactly how the two drift apart. */
+    /* The NVM's name comes from TIKU_DEVICE_NVM_LABEL in the device
+     * header. */
     out->backing = TIKU_DEVICE_NVM_LABEL;
     data_fill_extents(out);
     return 0;
@@ -731,7 +723,8 @@ data_state_read(char *buf, size_t max)
     return snprintf(buf, max, "%s\n", states[data_state]);
 }
 
-/* One /sys/fs/data usage handler: ENOTSUP while the store is not mounted. */
+/** @brief Define a /sys/fs/data usage handler; ENOTSUP while the store is
+ *         not mounted. */
 #define DATA_STAT(name, expression)                                          \
     static int data_stat_##name(char *buf, size_t max)                       \
     {                                                                        \

@@ -55,13 +55,13 @@
 /*
  * Mutable root children: sys + dev + proc + data (+ optionally gui).  Sized
  * for the maximum set; vfs_root.child_count records how many are populated.
- * Lives in .persistent (FRAM) to spare SRAM -- written only inside the
- * init-time MPU unlock window below.
+ * TIKU_DURABLE, which on MSP430 is FRAM and spares SRAM; written only inside
+ * the init-time MPU unlock window below.
  */
 static TIKU_DURABLE tiku_vfs_node_t root_children[ROOT_SLOTS];
 
-/** Mutable root node (FRAM, written at init): name "" so that
- *  resolving "/" yields it directly. */
+/** Mutable root node, written at init.  Resolving "/" returns it without
+ *  a name match, so its name is empty. */
 static TIKU_DURABLE tiku_vfs_node_t vfs_root;
 
 /*---------------------------------------------------------------------------*/
@@ -71,9 +71,9 @@ static TIKU_DURABLE tiku_vfs_node_t vfs_root;
 /**
  * @brief Build and register the system VFS tree.
  *
- * Runs the module inits in dependency order -- boot first, because it must
- * latch SYSRSTIV before anything else reads it -- copies each top-level
- * directory into the FRAM-resident root, then calls tiku_vfs_init().
+ * Runs the module inits in dependency order -- boot first, because it latches
+ * the reset cause before anything else can clear it -- copies each top-level
+ * directory into the durable root, then calls tiku_vfs_init().
  *
  * @note Call once during boot, after hardware and process init; the drivers
  *       registry and the shell start afterwards and expect a live tree.
@@ -84,23 +84,22 @@ tiku_vfs_tree_init(void)
     uint8_t n_root;
     uint16_t mpu_saved;
 
-    /* Per-subtree init: boot first (captures SYSRSTIV before
+    /* Per-subtree init: boot first (captures the reset cause before
      * anything else can clear it), then the modules with
      * hardware/persistent state.  Each module validates its own
-     * persist cells — there is no cross-module first-boot flag. */
+     * persist cells. */
     tiku_vfs_tree_boot_init();
     tiku_vfs_tree_dev_init();
     tiku_vfs_tree_sys_init();
 
-    /* Unlock FRAM — root_children, vfs_root and the /proc/ arrays
-     * are all in .persistent (FRAM) to conserve SRAM for the
-     * stack. */
+    /* Unlock NVM: root_children and vfs_root are TIKU_DURABLE, and the
+     * /proc arrays written below are TIKU_RETAINED. */
     mpu_saved = tiku_mpu_unlock_nvm();
 
     root_children[0] = *tiku_vfs_tree_sys_get();
     root_children[1] = *tiku_vfs_tree_dev_get();
 
-    /* Build and attach /proc/ (also writes to FRAM arrays) */
+    /* Build and attach /proc/ (also writes its retained arrays) */
     root_children[2] = *tiku_proc_vfs_get();
     n_root = 3;
 

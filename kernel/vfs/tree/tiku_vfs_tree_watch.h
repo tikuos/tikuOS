@@ -8,8 +8,8 @@
  * tiku_vfs_tree_watch.h - /sys/watch and /sys/vfs VFS nodes.
  *
  * Two read-only subtrees exposing the VFS core's own state through the VFS it
- * implements: watch-table contents for leak debugging, and tree statistics.
- * Same linkage contract as the sibling modules.
+ * implements: watch-table contents for leak debugging, and tree statistics,
+ * manifest, change ring and read-cache counters.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -44,7 +44,8 @@ extern const tiku_vfs_node_t tiku_vfs_tree_watch_children[];
 #define TIKU_VFS_TREE_VFS_NCHILD  8
 
 /**
- * @brief /sys/vfs children: nodes, depth, cache/.
+ * @brief /sys/vfs children: nodes, depth, manifest, manifest_rev, events,
+ *        events_pending, events_dropped, cache/.
  *
  * Referenced by the /sys directory table in tiku_vfs_tree_sys.c.
  */

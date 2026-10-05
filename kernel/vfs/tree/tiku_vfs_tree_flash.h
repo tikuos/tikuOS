@@ -7,6 +7,9 @@
  *
  * tiku_vfs_tree_flash.h - /sys/flash VFS nodes (Apollo510 EVB external NOR).
  *
+ * Linkage contract for the NOR subtree: the children table and its entry
+ * count, consumed by the /sys assembly.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 

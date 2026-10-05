@@ -16,21 +16,21 @@
 /*
  * Three properties this file has to hold:
  *
- *  1. WRAP-SAFE FRESHNESS.  Timestamps pair a 32-bit second with the 16-bit
- *     tick, which wraps every ~8.5 min.  The coarse guard CACHE_MAX_AGE_S
- *     declares anything older than a few seconds stale -- far under the wrap --
- *     so the tick subtraction below is always exact.  Freshness windows must
- *     therefore stay well under CACHE_MAX_AGE_S.
+ *  1. Wrap-safe freshness.  Timestamps pair the 32-bit seconds count with
+ *     the tick, which is 16 bits on MSP430 and wraps every 512 s at 128 Hz.
+ *     The coarse guard CACHE_MAX_AGE_S (30 s) declares anything older stale,
+ *     far under the wrap, so the tick subtraction below is always exact.
+ *     Freshness windows must therefore stay under CACHE_MAX_AGE_S.
  *
- *  2. RACE VS THE EVENT BUS.  A miss samples the handler OUTSIDE the atomic
- *     section, because a conversion is slow.  A global notify sequence is
- *     captured before the sample and re-checked under the mask before the
- *     store, so a notify arriving during the sample skips the store instead of
- *     masking the change.
+ *  2. Race against the event bus.  A miss samples the handler outside the
+ *     atomic section, because a conversion is slow.  A global notify sequence
+ *     is captured before the sample and re-checked under the mask before the
+ *     store, so a notify arriving during the sample skips the store instead
+ *     of masking the change.
  *
- *  3. CONCURRENCY.  invalidate() runs from ISR context while get()/sample()
- *     store from process context, so every table mutation is bracketed by
- *     tiku_atomic_enter()/exit() -- an ISR can never see a torn slot.
+ *  3. Concurrency.  invalidate() may run from ISR context while
+ *     get()/sample() store from process context, so every table mutation is
+ *     bracketed by tiku_atomic_enter()/exit() -- an ISR never sees a torn slot.
  */
 
 
@@ -50,16 +50,17 @@
  *  diff to a non-wrapping interval; any window must be smaller than this. */
 #define CACHE_MAX_AGE_S  30u
 
+/** @brief One cached rendering. */
 typedef struct {
     const tiku_vfs_node_t *node;     /**< NULL = free slot              */
     uint32_t               stamp_s;  /**< tiku_clock_seconds() at sample */
     tiku_clock_time_t      stamp_t;  /**< tiku_clock_time() at sample    */
     uint8_t                len;      /**< cached rendering length        */
-    char                   text[TIKU_VFS_CACHE_TEXTLEN];
+    char                   text[TIKU_VFS_CACHE_TEXTLEN]; /**< no terminator */
 } cache_slot_t;
 
 static cache_slot_t      cache[TIKU_VFS_CACHE_MAX];
-static volatile uint16_t notify_seq;   /* bumped by every invalidate */
+static volatile uint16_t notify_seq;   /* bumped by invalidate and flush */
 static uint32_t          stat_hits;
 static uint32_t          stat_misses;
 
@@ -115,13 +116,13 @@ int tiku_vfs_cache_get(const tiku_vfs_node_t *node, char *buf, size_t max)
 
 int tiku_vfs_cache_sample(const tiku_vfs_node_t *node, char *buf, size_t max)
 {
-    uint16_t seq0 = notify_seq;          /* capture BEFORE sampling */
+    uint16_t seq0 = notify_seq;          /* captured before sampling */
     int n = node->read(buf, max);        /* slow handler, unmasked  */
 
     stat_misses++;
 
     /* Store only complete renderings: n < max guarantees the snprintf-
-     * style handler did not truncate (so buf really holds all n bytes),
+     * style handler did not truncate (so buf holds all n bytes),
      * and n < TEXTLEN guarantees it fits a slot.  A truncated read
      * still returns normally -- it just isn't cached. */
     if (n > 0 && (size_t)n < max && (size_t)n < TIKU_VFS_CACHE_TEXTLEN) {
@@ -141,7 +142,7 @@ int tiku_vfs_cache_sample(const tiku_vfs_node_t *node, char *buf, size_t max)
                 }
                 if (cache[i].stamp_s < oldest) {
                     oldest = cache[i].stamp_s;
-                    slot = i;             /* LRU victim if table is full */
+                    slot = i;             /* oldest sample: the victim */
                 }
             }
             if (found >= 0) {
@@ -154,7 +155,7 @@ int tiku_vfs_cache_sample(const tiku_vfs_node_t *node, char *buf, size_t max)
             cache[slot].stamp_t = tiku_clock_time();
             /* (uint8_t) is safe: the enclosing guard already required
              * n < TIKU_VFS_CACHE_TEXTLEN, which is < 256, so no truncation.
-             * Keep TEXTLEN < 256 if you widen it, or widen `len` too. */
+             * A TEXTLEN of 256 or more needs a wider `len`. */
             cache[slot].len = (uint8_t)n;
             memcpy(cache[slot].text, buf, (size_t)n);
         }

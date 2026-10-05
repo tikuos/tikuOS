@@ -39,9 +39,9 @@
 
 /** One staging profile; never written to NVM, its password is write-only. */
 typedef struct {
-    char    ssid[TIKU_WIRELESS_SSID_MAX + 1U];    /* NUL-terminated       */
-    char    password[TIKU_WIRELESS_PSK_MAX + 1U]; /* NUL-terminated       */
-    uint8_t auth;                                 /* tiku_wireless_auth_t */
+    char    ssid[TIKU_WIRELESS_SSID_MAX + 1U];    /**< NUL-terminated     */
+    char    password[TIKU_WIRELESS_PSK_MAX + 1U]; /**< NUL-terminated     */
+    uint8_t auth;                                 /**< tiku_wireless_auth_t */
 } wifi_profile_t;
 
 static wifi_profile_t profiles[WIFI_PROFILE_COUNT];
@@ -101,7 +101,8 @@ token(const char *buf, size_t len, const char *expected)
 /**
  * @brief Map a tiku_wireless_* result to a VFS status.
  *
- * A busy radio is EBUSY, a call the radio does not support is ENOTSUP.
+ * A bad argument is EINVAL, a busy radio (TIKU_DRV_ERR_TIMEOUT) is EBUSY, a
+ * call the radio does not support is ENOTSUP, and any other failure is EIO.
  */
 static int
 wifi_result(int rc)

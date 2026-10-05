@@ -66,8 +66,8 @@ static const tiku_vfs_desc_t bus_bool = TIKU_VFS_DESC(
 /**
  * @brief Map a sensor-kit result to a VFS status.
  *
- * A driver that is not initialized, or a device that does not answer its
- * init, is ENOTSUP; any other failure is EIO.
+ * A bad parameter is EINVAL; a driver that is not initialized, or a device
+ * that does not answer its init, is ENOTSUP; any other failure is EIO.
  */
 static int
 sensor_result(int rc)

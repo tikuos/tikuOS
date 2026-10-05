@@ -7,6 +7,9 @@
  *
  * tiku_vfs_tree_npu.h - /sys/npu, the accelerator as named paths.
  *
+ * Linkage contract for the NPU subtree: the children table and its entry
+ * count, consumed by the /sys assembly.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -23,6 +26,7 @@
  */
 #define TIKU_VFS_TREE_NPU_NCHILD  5
 
+/** @brief /sys/npu children: state, info, model, run, runs. */
 extern const tiku_vfs_node_t tiku_vfs_tree_npu_children[];
 
 #endif /* TIKU_VFS_TREE_NPU_H_ */

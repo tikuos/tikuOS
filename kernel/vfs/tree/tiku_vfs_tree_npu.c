@@ -22,6 +22,8 @@
 
 #include <interfaces/npu/tiku_npu.h>
 
+/** @brief Read handler for /sys/npu/state: absent, gated, idle, ready or
+ *         faulted. */
 static int npu_state_read(char *buf, size_t max)
 {
     static const char *const names[] = {
@@ -35,6 +37,8 @@ static int npu_state_read(char *buf, size_t max)
     return snprintf(buf, max, "%s\n", names[st]);
 }
 
+/** @brief Read handler for /sys/npu/info: MACs, SHRAM, arena and I/O sizes,
+ *         or "gated". */
 static int npu_info_read(char *buf, size_t max)
 {
     tiku_npu_info_t i;
@@ -48,14 +52,17 @@ static int npu_info_read(char *buf, size_t max)
                     (unsigned long)i.out_bytes);
 }
 
+/** @brief Read handler for /sys/npu/runs: runs completed since boot. */
 static int npu_runs_read(char *buf, size_t max)
 {
     return snprintf(buf, max, "%lu\n", (unsigned long)tiku_npu_runs());
 }
 
-/*
- * Writing a name loads that model; writing nothing releases the accelerator
- * so the other nodes have something to describe.
+/**
+ * @brief Write handler for /sys/npu/model.
+ *
+ * A name loads that model from the store; an empty write powers and releases
+ * the accelerator (tiku_npu_start()) so the other nodes have it to describe.
  */
 static int npu_model_write(const char *buf, size_t len)
 {
@@ -75,19 +82,21 @@ static int npu_model_write(const char *buf, size_t len)
     return (tiku_npu_load(name) == TIKU_NPU_OK) ? 0 : TIKU_VFS_EINVAL;
 }
 
+/** @brief Read handler for /sys/npu/model: "loaded" or "none". */
 static int npu_model_read(char *buf, size_t max)
 {
     return snprintf(buf, max, "%s\n",
                     (tiku_npu_state() == TIKU_NPU_READY) ? "loaded" : "none");
 }
 
-/* Any write submits one inference; the body is not interpreted. */
+/** @brief Write handler for /sys/npu/run: any write runs one inference. */
 static int npu_run_write(const char *buf, size_t len)
 {
     (void)buf; (void)len;
     return (tiku_npu_run() == TIKU_NPU_OK) ? 0 : TIKU_VFS_EINVAL;
 }
 
+/** @brief Read handler for /sys/npu/run: the same count as runs. */
 static int npu_run_read(char *buf, size_t max)
 {
     return npu_runs_read(buf, max);

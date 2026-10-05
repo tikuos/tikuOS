@@ -58,8 +58,8 @@ timer_detail_read(uint8_t idx, char *buf, size_t max)
 /**
  * @brief Generate a fixed-index wrapper around timer_detail_read().
  *
- * VFS read handlers carry no user argument, so one tiny wrapper per
- * exposed slot hardcodes the index (~10 bytes of code each).
+ * VFS read handlers carry no user argument, so one wrapper per exposed
+ * slot hardcodes the index.
  */
 #define TIMER_DETAIL(idx)                                                   \
     static int timer_detail_##idx(char *buf, size_t max) {                  \
@@ -141,9 +141,9 @@ timer_next_read(char *buf, size_t max)
 /**
  * @brief Read handler for /sys/clock/ticks.
  *
- * Renders the raw system tick counter, a 16-bit wrapping value (~8.5 minute
- * period at the default 128 Hz).  Useful for short interval measurements and
- * for checking the tick is alive; /sys/uptime gives elapsed time.
+ * Renders the raw system tick counter: 16 bits on MSP430, wrapping every
+ * 512 s at the default 128 Hz, and 32 bits elsewhere.  Useful for short
+ * intervals and for checking the tick is alive; /sys/uptime gives uptime.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes

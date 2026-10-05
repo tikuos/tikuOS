@@ -54,13 +54,13 @@ typedef struct {
     uint16_t    used_slots;  /**< data slots held, open writes too    */
     uint16_t    total_slots; /**< data slots in the store             */
     uint16_t    slot_bytes;  /**< per-slot content size               */
-    const char *backing;     /**< "MRAM" / "FRAM" / "RAM*" (volatile) */
-    /* Carved-region accounting, so region space cannot go idle unnoticed.
-     * Zero on parts whose store rides its own backing array (MSP430 / host). */
+    const char *backing;     /**< TIKU_DEVICE_NVM_LABEL, e.g. "FRAM" */
+    /* Carved-region accounting.  region_bytes and tier_bytes are zero where
+     * the store has its own backing array (MSP430, host). */
     uint32_t    region_bytes;  /**< region the linker actually carved   */
     uint32_t    tier_bytes;    /**< NVM tier extent (region front)      */
     uint32_t    fs_bytes;      /**< file-store extent                   */
-    uint32_t    idle_bytes;    /**< region - (tier + fs): want 0        */
+    uint32_t    idle_bytes;    /**< region - (tier + fs); always 0      */
 } tiku_data_df_t;
 
 /**
@@ -110,9 +110,12 @@ void tiku_vfs_tree_data_retry(void);
 /**
  * @brief Format /data on request, whatever the extent holds.
  *
- * Erases every file. @return 0 ready, 1 reboot required after recovery,
- * -2 interrupted layout, -3 formatted but ownership recovery failed,
- * -1 otherwise. Region-backed stores require explicit erase consent.
+ * Erases every file.
+ *
+ * @return 0 ready, 1 reboot required after recovery, -2 interrupted layout,
+ *         -3 formatted but ownership not recorded, -1 otherwise
+ * @note The caller obtains explicit erase consent for a region-backed store;
+ *       this function formats without asking.
  */
 int tiku_vfs_tree_data_format(void);
 

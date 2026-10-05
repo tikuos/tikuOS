@@ -211,10 +211,9 @@ static int store_bytes_read(char *buf, size_t max)
 }
 
 /*
- * `present` re-derives the CRC from the medium rather than trusting the
- * header it sits beside, so reading it is a check and not a claim.  It costs
- * a full pass over the blob, which is why it is a separate node from the
- * name and length that merely read a header.
+ * `present` recomputes the CRC from the medium rather than trusting the
+ * header beside it, which costs a full pass over the blob; name and bytes
+ * only read the header.
  */
 
 /**

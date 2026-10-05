@@ -8,7 +8,8 @@
  * tiku_vfs_tree_layout.h - /sys/mem/layout VFS nodes.
  *
  * The memory layout service's knobs, applied map, pending request and boot
- * findings as files, and its stage, cancel and resume operations as writes.
+ * findings as files, and its stage, cancel, resume and recover operations as
+ * writes.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

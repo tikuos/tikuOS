@@ -22,9 +22,9 @@
 /**
  * @brief Build and register the system VFS tree.
  *
- * Runs the per-subtree module inits (boot counter, reset cause, LEDs, RTC
- * epoch, device name), assembles the top-level directories into the
- * FRAM-resident root and registers it with tiku_vfs_init().
+ * Runs the per-subtree module inits (boot counter and reset cause, LEDs, RTC
+ * epoch, device name, configuration journal), assembles the top-level
+ * directories into the durable root and registers it with tiku_vfs_init().
  *
  * @note Call once during boot, after hardware and process init.
  */
@@ -33,9 +33,9 @@ void tiku_vfs_tree_init(void);
 /**
  * @brief Set the boot count value exposed via /sys/boot_count.
  *
- * For the hibernate resume path: overrides only the SRAM mirror that reads are
- * served from, so the FRAM cell keeps its true monotonic count.  Defined in
- * tree/tiku_vfs_tree_boot.c, which owns the counter.
+ * Overrides only the SRAM copy that reads are served from, so the durable
+ * cell keeps its true monotonic count.  Defined in tree/tiku_vfs_tree_boot.c,
+ * which owns the counter.
  *
  * @param count  Value subsequent /sys/boot_count reads will report
  */

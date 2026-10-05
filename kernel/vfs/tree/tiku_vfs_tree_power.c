@@ -180,14 +180,14 @@ power_wake_read(char *buf, size_t max)
 /* NODE TABLE                                                                */
 /*---------------------------------------------------------------------------*/
 
+static const tiku_vfs_desc_t desc_power = TIKU_VFS_DESC(
+    TIKU_VFS_T_STR, TIKU_VFS_U_NONE, TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
+
 /*
  * /sys/power directory table, exported so tiku_vfs_tree_sys.c can attach it as
  * the "power" directory; the entry count travels as TIKU_VFS_TREE_POWER_NCHILD
  * (asserted below).  policy is writable with the SYS capability.
  */
-static const tiku_vfs_desc_t desc_power = TIKU_VFS_DESC(
-    TIKU_VFS_T_STR, TIKU_VFS_U_NONE, TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
-
 const tiku_vfs_node_t tiku_vfs_tree_power_children[] = {
     { "mode", TIKU_VFS_FILE, power_mode_read, NULL, NULL, 0, &desc_power },
     { "wake", TIKU_VFS_FILE, power_wake_read, NULL, NULL, 0, &desc_power },

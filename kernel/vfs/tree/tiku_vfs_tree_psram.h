@@ -7,6 +7,9 @@
  *
  * tiku_vfs_tree_psram.h - /sys/psram VFS nodes (Apollo510 external PSRAM)
  *
+ * Linkage contract for the PSRAM subtree: the children table and its entry
+ * count, consumed by the /sys assembly.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 

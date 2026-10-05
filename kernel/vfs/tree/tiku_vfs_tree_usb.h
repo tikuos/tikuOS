@@ -36,7 +36,8 @@
  */
 #define TIKU_VFS_TREE_STORE_NCHILD  3
 
-/** @brief /sys/usb children: state, speed, addr, config, irq, cbw. */
+/** @brief /sys/usb children: state, speed, address, config, irq, and cbw
+ *         on RA8P1 USBHS. */
 extern const tiku_vfs_node_t tiku_vfs_tree_usb_children[];
 
 /** @brief /sys/store children: name, bytes, present. */

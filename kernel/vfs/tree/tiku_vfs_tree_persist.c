@@ -7,10 +7,9 @@
  *
  * tiku_vfs_tree_persist.c - /sys/persist VFS nodes.
  *
- * Read-only: how many persist cells validated this boot, how many were primed
- * to defaults (0 on an established device, so non-zero means NVM content was
- * lost), how many this boot carried to new places, and where this image keeps
- * each cell (the manifest a tool compares with a new image before flashing).
+ * Read-only: persist cells validated this boot, cells primed to defaults
+ * (non-zero on an established device means NVM content was lost), cells moved
+ * to a new image's places, and where this image keeps each cell.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -31,9 +30,9 @@
 /**
  * @brief Read handler for /sys/persist/cells.
  *
- * Renders the number of persist cells validated this boot ("4\n" with the
- * stock tree).  tiku_persist_cell_count() counts cell_init() calls rather than
- * a registry, so a cell whose init has not run yet does not appear.
+ * Renders the number of persist cells validated this boot.
+ * tiku_persist_cell_count() counts cell_init() calls rather than a registry,
+ * so a cell whose init has not run yet does not appear.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -79,10 +78,9 @@ persist_moved_read(char *buf, size_t max)
 /**
  * @brief Read handler for /sys/persist/manifest.
  *
- * Where this image keeps each cell: one line per cell, its key in hex, then
- * the gate's and the value's offsets into the durable image and the value's
- * size.  A tool compares it with a new image's before flashing, to say which
- * values the update will carry.  "none" where the image keeps no record.
+ * One line per cell: its key in hex, the gate's and the value's offsets into
+ * the durable image, and the value's size; "none" where the image keeps no
+ * record.  A tool compares it with a new image's before flashing.
  */
 static int
 persist_manifest_read(char *buf, size_t max)

@@ -1,21 +1,48 @@
-/* TikuOS -- bounded two-bank configuration journal.
- * SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_vfs_config.c - two-bank configuration journal.
+ *
+ * Keeps a bounded journal of configuration changes in two banks; each new
+ * image goes to the inactive bank, so the active one survives a power cut.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #include "tiku_vfs_config.h"
 #include <string.h>
 
-/* Wire layout v1, little endian: header[32], resources[2][48], history[4][64],
- * reserved[12], CRC32[4]. Gate is written last, outside the CRC. Revision zero
- * means unenrolled value (use the existing setting). No counters wrap. */
+/*
+ * Bank layout, version 1, little endian, TIKU_CFG_BANK_BYTES long:
+ *
+ *   0    header     magic (the gate) 0, version 4, generation 8,
+ *                   incarnation 12..27, resource count 28
+ *   32   resources  2 x 48: id 0, schema 4, revision 8, value 12..43,
+ *                   length 44, state 45
+ *   128  history    4 x 64, newest first: resource 0, revision 4,
+ *                   token 8..23, length 24, state 28, value 32..63
+ *   384  reserved   12 bytes
+ *   396  CRC-32     of bytes 4..395
+ *
+ * The magic is the gate: it is written last and lies outside the CRC.  A
+ * resource revision of zero means no value is stored, so the system's own
+ * setting stands.  Neither the generation nor a revision wraps.
+ */
 #define CFG_MAGIC 0x31474643UL
 #define CFG_CRC 396u
 #define CFG_RESOURCE(i) (32u + 48u * (i))
 #define CFG_RECORD(i) (128u + 64u * (i))
 
+/** @brief Little-endian 32-bit load. */
 static uint32_t get32(const uint8_t *p)
 {
     return (uint32_t)p[0] | (uint32_t)p[1] << 8 |
            (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
 }
+/** @brief Little-endian 32-bit store. */
 static void put32(uint8_t *p, uint32_t v)
 {
     unsigned i;
@@ -32,30 +59,40 @@ uint32_t tiku_cfg_crc32(const uint8_t *p, size_t n)
     }
     return ~c;
 }
+/** @brief 1 when all @p n bytes at @p p equal @p v. */
 static int uniform(const uint8_t *p, size_t n, uint8_t v)
 {
     while (n--) if (*p++ != v) return 0;
     return 1;
 }
+/** @brief 1 for a sealed bank: magic, nonzero generation, matching CRC. */
 static int valid(const uint8_t *p)
 {
     return get32(p) == CFG_MAGIC && get32(p + 8) != 0 &&
            get32(p + CFG_CRC) == tiku_cfg_crc32(p + 4, CFG_CRC - 4);
 }
+/** @brief Index of resource @p id in the table, or -1. */
 static int resource_index(const tiku_cfg_t *c, uint32_t id)
 {
     unsigned i;
     for (i = 0; i < c->count; i++) if (c->resources[i].id == id) return (int)i;
     return -1;
 }
+/** @brief 1 when @p cap holds every bit resource @p i requires. */
 static int permitted(const tiku_cfg_t *c, unsigned i, uint8_t cap)
 {
     return (c->resources[i].required_cap & (uint8_t)~cap) == 0;
 }
 
-/* Preserve the active bank through all three ordered writes. On ANY I/O
- * failure the instance is poisoned until re-open: the last gate may already
- * have reached NVM even when its acknowledgement/readback failed. */
+/**
+ * @brief Seal @p next, write it to the inactive bank and switch to it.
+ *
+ * Clears the gate, writes the body, sets the gate and reads it all back, so
+ * the active bank stays intact.  An I/O failure sets TIKU_CFG_IO until
+ * re-open, since the gate may be stored even when its write reports failure.
+ *
+ * @return 0, TIKU_CFG_EXHAUSTED when the generation would wrap, or TIKU_CFG_IO
+ */
 static int commit(tiku_cfg_t *c, uint8_t *next)
 {
     static const uint8_t zero[4] = {0};
@@ -171,6 +208,10 @@ int tiku_cfg_provision(tiku_cfg_t *c, const uint8_t incarnation[TIKU_CFG_TOKEN],
     return rc;
 }
 
+/**
+ * @brief Validate request @p q and normalize its value into @p value.
+ * @return The resource index, or a negative status
+ */
 static int request_check(tiku_cfg_t *c, const tiku_cfg_request_t *q, uint8_t cap,
                          char value[TIKU_CFG_VALUE], int *length)
 {
@@ -187,9 +228,16 @@ static int request_check(tiku_cfg_t *c, const tiku_cfg_request_t *q, uint8_t cap
     return i;
 }
 
-/* expected_revision is PART of the operation identity. A client must freeze
- * the entire request across retries; changing it creates a new operation.
- * Thus an evicted request cannot execute: its revision is necessarily older. */
+/**
+ * @brief Find the history record that request @p q created.
+ *
+ * expected_revision is part of the operation identity, so a retry must repeat
+ * the request unchanged; a changed request is a new operation.  An evicted
+ * request cannot run again: the resource has already moved past its revision.
+ *
+ * @return 0 with @p out filled; TIKU_CFG_CONFLICT when that revision went to
+ *         another token or value; TIKU_CFG_STALE when no record matches
+ */
 static int lookup(tiku_cfg_t *c, const tiku_cfg_request_t *q,
                    const char *value, int length, tiku_cfg_receipt_t *out)
 {
@@ -219,6 +267,13 @@ int tiku_cfg_lookup(tiku_cfg_t *c, const tiku_cfg_request_t *q, uint8_t cap,
     return i < 0 ? i : lookup(c, q, value, length, out);
 }
 
+/**
+ * @brief Apply resource @p i's stored value and record the state in @p next.
+ *
+ * A resource without a value is skipped.  A value that no longer normalizes
+ * to itself, or any outcome but APPLIED or RESTART, is BLOCKED, and the
+ * history records of that revision take the same state.
+ */
 static int reconcile(tiku_cfg_t *c, unsigned i, uint8_t *next)
 {
     const uint8_t *r = c->image + CFG_RESOURCE(i);

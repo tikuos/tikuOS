@@ -7,8 +7,9 @@
  *
  * tiku_vfs_tree_layout.c - /sys/mem/layout VFS nodes.
  *
- * Reads render one fact a line as "name<TAB>value".  Writes take the same text
- * the shell's layout command builds, and need the system and store capabilities.
+ * Reads render one fact a line as tab-separated fields, name first.  Writes
+ * take the text the shell's layout command builds, and need the system and
+ * store capabilities.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -105,7 +106,7 @@ layout_op(const char *buf, size_t len, uint32_t *op)
 /* READS                                                                     */
 /*---------------------------------------------------------------------------*/
 
-/** @brief caps: one knob a line with its effect, floor, ceiling, step, default. */
+/** @brief caps: one knob a line: effect, floor, ceiling, step, default. */
 static int
 layout_caps_read(char *buf, size_t max)
 {
@@ -284,7 +285,10 @@ layout_resume_write(const char *buf, size_t len)
     return layout_vfs_err(rc);
 }
 
-/** Explicit ownership recovery, never discovery or implicit formatting. */
+/**
+ * @brief recover: "nvm.tier=V confirm=accept-layout" names the store's
+ *        offset; it never searches for a store or formats one.
+ */
 static int
 layout_recover_write(const char *buf, size_t len)
 {

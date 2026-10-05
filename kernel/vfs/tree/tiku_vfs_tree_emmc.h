@@ -7,6 +7,9 @@
  *
  * tiku_vfs_tree_emmc.h - /sys/emmc VFS nodes (Apollo510 SDIO0 + EVB U11)
  *
+ * Linkage contract for the eMMC subtree: the children table and its entry
+ * count, consumed by the /sys assembly.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 

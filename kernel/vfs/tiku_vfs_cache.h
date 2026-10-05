@@ -7,9 +7,9 @@
  *
  * tiku_vfs_cache.h - freshness cache (read coalescing) for the VFS.
  *
- * Remembers the rendered text of nodes declaring a freshness window, so repeated
- * reads inside it cost one handler call rather than one conversion each.
- * tiku_vfs_notify() invalidates an entry, so a write never leaves a stale value.
+ * Remembers the rendered text of nodes that declare a freshness window, so
+ * repeated reads inside it cost one handler call.  tiku_vfs_notify()
+ * invalidates an entry, so a write never leaves a stale value.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -26,12 +26,14 @@
 /*---------------------------------------------------------------------------*/
 
 /** @brief Master enable.  When 0 the cache compiles to no-ops and every
- *         read samples its handler (the pre-cache behaviour). */
+ *         read calls its handler. */
 #ifndef TIKU_VFS_CACHE_ENABLE
 #define TIKU_VFS_CACHE_ENABLE  1
 #endif
 
-/** @brief Number of cache slots (SRAM).  Each slot is ~24 bytes. */
+/** @brief Number of cache slots (SRAM).  Each slot holds
+ *         TIKU_VFS_CACHE_TEXTLEN text bytes plus a node pointer, two
+ *         timestamps and a length. */
 #ifndef TIKU_VFS_CACHE_MAX
 #define TIKU_VFS_CACHE_MAX  4
 #endif

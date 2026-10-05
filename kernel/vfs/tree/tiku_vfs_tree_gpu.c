@@ -7,9 +7,9 @@
  *
  * tiku_vfs_tree_gpu.c - /sys/gpu VFS nodes (Apollo510 2.5D GPU).
  *
- * Read-only views of the GPU driver: power state, silicon id, status register and
- * serviced interrupt count.  Register reads happen only after confirming the
- * domain is powered, so a read with the GPU off reports "off" instead of faulting.
+ * Read-only views of the GPU driver: power state, silicon id, status register
+ * and serviced interrupt count.  Registers are read only while the domain is
+ * powered, so a read with the GPU off reports "off" instead of faulting.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,7 +23,7 @@
 /* /sys/gpu/power                                                            */
 /*---------------------------------------------------------------------------*/
 
-/** @brief 1 if the GFX power domain is up (safe: reads PWRCTRL, not the GPU). */
+/** @brief "on" while the GFX power domain is up, else "off" (reads PWRCTRL). */
 static int
 gpu_power_read(char *buf, size_t max)
 {
@@ -48,7 +48,7 @@ gpu_id_read(char *buf, size_t max)
 /* /sys/gpu/status                                                           */
 /*---------------------------------------------------------------------------*/
 
-/** @brief STATUS register in hex + a busy/idle word, or "off" when unpowered. */
+/** @brief STATUS in hex and a busy/idle word, or "off" when unpowered. */
 static int
 gpu_status_read(char *buf, size_t max)
 {

@@ -8,8 +8,8 @@
  * tiku_vfs_tree_dev.h - /dev subtree (files and assembly).
  *
  * Owns /dev/led*, console, null, zero and the uart/adc/i2c/spi subtrees, and
- * assembles the complete directory, stitching in gpio from its own module.  The
- * root assembly sees only the two functions below; child tables stay private.
+ * assembles the directory, stitching in gpio and sensors from their modules.
+ * The root assembly sees only the two functions below.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,7 +24,7 @@
  *
  * Returns a static, fully-initialised DIR node named "dev" whose child count is
  * computed by sizeof inside the module, so no count macro crosses this
- * boundary; the root assembly copies it by value into the FRAM root children.
+ * boundary; the root assembly copies it by value into its root-children array.
  *
  * @return Pointer to the static /dev directory node
  */

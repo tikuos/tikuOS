@@ -9,7 +9,7 @@
  *
  * Hardware-facing nodes: board LEDs, console, null, zero, and the small static
  * subtrees for uart, adc, i2c and spi.  LED nodes keep an SRAM shadow because
- * PxOUT cannot be read back uniformly; everything else queries its driver live.
+ * an output pin cannot be read back uniformly; the rest query their drivers.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,7 +23,7 @@
 #include "tiku_vfs_tree_sensor.h"
 #include "tiku.h"
 #include <kernel/cpu/tiku_common.h>
-#include <kernel/timers/tiku_clock.h>   /* TIKU_CLOCK_SECOND for cache windows */
+#include <kernel/timers/tiku_clock.h>   /* TIKU_CLOCK_SECOND */
 #include <interfaces/led/tiku_led.h>
 #include <interfaces/adc/tiku_adc.h>
 #include <interfaces/bus/tiku_i2c_bus.h>
@@ -41,8 +41,8 @@
 /*
  * Shadow of each LED's logical state (1 = lit), maintained by the write
  * handlers and cleared in tiku_vfs_tree_dev_init().  Reads serve the mirror
- * because board wiring (active-high vs active-low) makes a raw PxOUT read
- * ambiguous; direct tiku_led_*() calls therefore go unnoticed here.
+ * because board wiring (active-high vs active-low) makes a raw output-register
+ * read ambiguous; direct tiku_led_*() calls therefore go unnoticed here.
  */
 static uint8_t led_state[TIKU_BOARD_LED_COUNT];
 
@@ -50,8 +50,8 @@ static uint8_t led_state[TIKU_BOARD_LED_COUNT];
  * @brief Generate the read/write handler pair for LED index N.
  *
  * Read renders the shadow state as "0\n" or "1\n".  Write decodes the first
- * payload byte -- '1' on, '0' off, 't' toggle, anything else ignored so
- * trailing shell whitespace is harmless -- updating hardware and shadow together.
+ * payload byte -- '1' on, '0' off, 't' toggle, anything else ignored -- and
+ * updates hardware and shadow together.
  */
 #define LED_VFS_FUNCS(N)                                                      \
 static int                                                                    \
@@ -77,7 +77,6 @@ led##N##_write(const char *buf, size_t len)                                   \
     return 0;                                                                 \
 }
 
-/* Generate read/write function pairs for each board LED */
 LED_VFS_FUNCS(0)
 #if TIKU_BOARD_LED_COUNT >= 2
 LED_VFS_FUNCS(1)
@@ -185,9 +184,9 @@ spi_config_read(char *buf, size_t max)
 /**
  * @brief Read handler for /dev/adc/temp.
  *
- * Triggers a conversion on the internal temperature channel and renders the RAW
- * ADC count ("2789\n"), or "err\n" on failure.  Degrees are left to the
- * consumer, which needs the per-device TLV calibration constants.
+ * Triggers a conversion on the internal temperature channel and renders the
+ * raw ADC count ("2789\n"), or "err\n" on failure.  Degrees are left to the
+ * consumer, which needs the per-device calibration constants (TLV on MSP430).
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -231,7 +230,7 @@ adc_battery_read(char *buf, size_t max)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Read handler for /dev/i2c/scan -- an ACTIVE prober.
+ * @brief Read handler for /dev/i2c/scan; each read probes the bus.
  *
  * Reading probes 7-bit addresses 0x08..0x77 with a zero-length write and
  * renders the responders as "0x18 0x48\n", or "none\n".  112 transactions of
@@ -276,7 +275,7 @@ i2c_scan_read(char *buf, size_t max)
  * @brief Read handler for /dev/console — drain pending UART RX.
  *
  * Non-blocking: copies only the bytes already waiting and returns their count,
- * 0 when idle.  Raw bytes with no newline appended, unlike every other node.
+ * 0 when idle.  Raw bytes with no newline appended.
  * The shell consumes the same UART, so reading it mid-session steals bytes.
  *
  * @param buf  Output buffer for the drained bytes
@@ -387,7 +386,7 @@ devzero_read(char *buf, size_t max)
 /* NODE TABLES                                                               */
 /*---------------------------------------------------------------------------*/
 
-/* Type descriptors (const, FRAM) for the typed /dev nodes below.  A bus scan
+/* Type descriptors for the typed /dev nodes below.  A bus scan
  * addresses every device on the bus and a console read takes input, so
  * neither is a passive read. */
 static const tiku_vfs_desc_t desc_scan = TIKU_VFS_DESC_FLAGS(
@@ -525,7 +524,6 @@ tiku_vfs_tree_dev_get(void)
 void
 tiku_vfs_tree_dev_init(void)
 {
-    /* Init LED hardware */
     tiku_led_init_all();
 
 #if TIKU_BOARD_LED_COUNT > 0

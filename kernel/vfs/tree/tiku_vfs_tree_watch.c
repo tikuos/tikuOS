@@ -7,9 +7,9 @@
  *
  * tiku_vfs_tree_watch.c - /sys/watch and /sys/vfs VFS nodes.
  *
- * The namespace observing itself: watch-table occupancy and per-slot contents,
- * plus tree node count and depth.  This is the diagnostic for subscription leaks.
- * Reads cost a table scan or a tree walk, both cold human-triggered paths.
+ * The namespace observing itself: watch-table occupancy and per-slot contents
+ * (the diagnostic for subscription leaks), plus node count, depth, manifest,
+ * change ring and read-cache counters.  Reading events drains the ring.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -163,9 +163,9 @@ vfs_depth_read(char *buf, size_t max)
 /**
  * @brief Read handler for /sys/vfs/manifest.
  *
- * Dumps the whole static namespace as a machine-readable, tab-separated table
- * (see tiku_vfs_manifest()) so an agent discovers every node -- path, type,
- * perms, and type descriptor -- in a single read.
+ * Dumps the namespace, boot mounts included, as a tab-separated table (see
+ * tiku_vfs_manifest()) so an agent discovers every node -- path, type, perms,
+ * descriptor, capability and id -- in a single read.
  *
  * @param buf  Output buffer
  * @param max  Buffer capacity
@@ -181,11 +181,12 @@ vfs_manifest_read(char *buf, size_t max)
 /* /sys/vfs/cache/{used,hits,misses} — freshness-cache observability         */
 /*---------------------------------------------------------------------------*/
 /*
- * The read-coalescing cache (kernel/vfs/tiku_vfs_cache.c) renders its
- * effectiveness here: a rising hit:miss ratio is the energy win made
- * visible (each hit is one ADC/bus access avoided).
+ * The read-coalescing cache (kernel/vfs/tiku_vfs_cache.c) reports its
+ * counters here; each hit is one handler call (an ADC or bus access)
+ * avoided.
  */
 
+/** @brief Read handler for /sys/vfs/cache/used: occupied cache slots. */
 static int
 vfs_cache_used_read(char *buf, size_t max)
 {
@@ -234,14 +235,11 @@ vfs_cache_misses_read(char *buf, size_t max)
 /* /sys/vfs/events — what changed, drained by reading                        */
 /*---------------------------------------------------------------------------*/
 /*
- * The change ring rendered as text.  Reading it is the drain, which is why
- * this is a node and not a shell mode: an agent already knows how to read a
- * file, and doing so does not take the shell away from anything else.
- *
- * One record per line: <op> <id> <seq>.  The trailing summary line reports
- * how many records have been LOST to a full ring since boot -- a reader that
- * sees it rise knows its picture is incomplete and must re-read rather than
- * trust what it just drained.
+ * The change ring rendered as text; reading the node drains the ring.  One
+ * tab-separated record per line: <op> <id> <seq>, where id is the node's
+ * manifest id.  A trailing "# <n> drained, <m> dropped" line reports the
+ * records dropped to a full ring since boot; a reader that sees that count
+ * rise re-reads rather than trust what it just drained.
  */
 
 /** Op names, indexed by tiku_vfs_op_t. */
@@ -249,6 +247,7 @@ static const char *const vfs_op_names[] = {
     "changed", "created", "removed", "moved"
 };
 
+/** @brief Read handler for /sys/vfs/events: drains the change ring. */
 static int
 vfs_events_read(char *buf, size_t max)
 {
@@ -321,17 +320,12 @@ _Static_assert(sizeof(tiku_vfs_tree_watch_children) /
                == TIKU_VFS_TREE_WATCH_NCHILD,
                "TIKU_VFS_TREE_WATCH_NCHILD out of sync");
 
-/**
- * /sys/vfs directory table.  Exported for tiku_vfs_tree_sys.c; the
- * entry count travels as TIKU_VFS_TREE_VFS_NCHILD.
- */
 /*
- * Manifest schema version -- bump when the manifest LINE FORMAT changes so an
+ * Manifest schema version -- bump when the manifest line format changes so an
  * external agent consuming /sys/vfs/manifest can pin or adapt instead of
- * silently mis-parsing.  rev 4 = the six-column form (path type perms meta
+ * silently mis-parsing.  Rev 4 is the six-column form (path type perms meta
  * cap id) whose typed meta ends in ";read=<policy>", then ";secret" for a
- * secret node; rev 3 was the same six columns without those suffixes; rev 2
- * was the five-column form; rev 1 was the pre-capability four-column form.
+ * secret node.
  */
 #define TIKU_VFS_MANIFEST_REV  4u
 
@@ -355,6 +349,10 @@ static int vfs_manifest_rev_read(char *buf, size_t max)
     return snprintf(buf, max, "%u\n", (unsigned)TIKU_VFS_MANIFEST_REV);
 }
 
+/**
+ * /sys/vfs directory table.  Exported for tiku_vfs_tree_sys.c; the
+ * entry count travels as TIKU_VFS_TREE_VFS_NCHILD.
+ */
 const tiku_vfs_node_t tiku_vfs_tree_vfs_children[] = {
     { "nodes",        TIKU_VFS_FILE, vfs_nodes_read,        NULL, NULL, 0 },
     { "depth",        TIKU_VFS_FILE, vfs_depth_read,        NULL, NULL, 0 },

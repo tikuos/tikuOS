@@ -19,7 +19,7 @@
 #include <arch/ambiq/tiku_nor_arch.h>
 #include <stdio.h>
 
-/** @brief The lifecycle rung, from bookkeeping only. */
+/** @brief "up" or "down", from driver bookkeeping only. */
 static int
 flash_state_read(char *buf, size_t max)
 {
@@ -29,9 +29,8 @@ flash_state_read(char *buf, size_t max)
 /**
  * @brief Cached JEDEC identity while the part is up, else "unread".
  *
- * Deliberately the CACHED value: issuing READ_ID here would make `cat` a bus
- * transaction. Down reads "unread" even after a prior success -- an identity
- * nobody can currently confirm is a claim about the past, not device state.
+ * Reads the cached identity, so no bus command is issued.  A part that is
+ * down reads "unread" even after an earlier successful read.
  */
 static int
 flash_id_read(char *buf, size_t max)
@@ -45,7 +44,7 @@ flash_id_read(char *buf, size_t max)
                     id.capacity);
 }
 
-/** @brief Live bus clock (0 when the controller is down). */
+/** @brief Bus clock in Hz (0 when the controller is down). */
 static int
 flash_hz_read(char *buf, size_t max)
 {
@@ -71,8 +70,8 @@ flash_mode_read(char *buf, size_t max)
 /**
  * @brief Erases spent since boot.
  *
- * Endurance is finite and this driver runs unattended, so the count is worth
- * being able to read without running a shell verb.
+ * Endurance is finite and the driver runs unattended, so the count can be
+ * read without a shell verb.
  */
 static int
 flash_erases_read(char *buf, size_t max)

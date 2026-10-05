@@ -1,6 +1,20 @@
-/* Included by the /sys tree. SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_vfs_tree_mem_reclaim.inl - /sys/mem/reclaim nodes.
+ *
+ * Included by tiku_vfs_tree_sys.c, whose descriptors it uses.  Each node
+ * forwards to the reclaim service's read or write entry of the same name.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #include "kernel/memory/tiku_reclaim_internal.h"
 #if TIKU_MEM_RECLAIM_ENABLE
+/** @brief Define the read handler for /sys/mem/reclaim/<name>. */
 #define RECLAIM_READER(name) \
 static int reclaim_##name##_read(char *buf, size_t max) \
 { return tiku_mem_reclaim_read(#name, buf, max); }
@@ -12,6 +26,7 @@ RECLAIM_READER(owners)
 RECLAIM_READER(stats)
 #undef RECLAIM_READER
 
+/** @brief Map a reclaim write result to a TIKU_VFS_* status. */
 static int reclaim_write_status(tiku_mem_err_t err)
 {
     switch (err) {
@@ -21,13 +36,17 @@ static int reclaim_write_status(tiku_mem_err_t err)
     default: return TIKU_VFS_EINVAL;
     }
 }
+/** @brief Write handler for /sys/mem/reclaim/mode. */
 static int reclaim_mode_write(const char *buf, size_t size)
 { return reclaim_write_status(tiku_mem_reclaim_write("mode", buf, size)); }
+/** @brief Write handler for /sys/mem/reclaim/retry. */
 static int reclaim_retry_write(const char *buf, size_t size)
 { return reclaim_write_status(tiku_mem_reclaim_write("retry", buf, size)); }
+/** @brief Write handler for /sys/mem/reclaim/cancel. */
 static int reclaim_cancel_write(const char *buf, size_t size)
 { return reclaim_write_status(tiku_mem_reclaim_write("cancel", buf, size)); }
 
+/* /sys/mem/reclaim directory table */
 static const tiku_vfs_node_t mem_reclaim_children[] = {
     {"mode", TIKU_VFS_FILE, reclaim_mode_read, reclaim_mode_write,
      NULL, 0, &desc_mem_map, NULL, TIKU_VFS_CAP_SYS},

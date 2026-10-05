@@ -7,9 +7,9 @@
  *
  * tiku_vfs_tree_sys.c - /sys subtree (files and assembly).
  *
- * Owns the /sys content too small for its own module -- version, uptime, time,
- * device identity, memory and CPU figures -- and assembles the /sys directory from
- * the sibling modules' exported tables.  A new entry is one initialiser below.
+ * Owns the /sys content too small for its own module -- version, uptime,
+ * time, device identity, memory, CPU, rules, crypto, radio and FLPR nodes --
+ * and assembles /sys from the sibling modules' exported tables.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -38,7 +38,7 @@
 #include <arch/nordic/tiku_device_select.h>     /* NRF_VPR00_NS readbacks   */
 #endif
 #include "tiku_vfs_tree_boot.h"
-#include <kernel/cpu/tiku_stack.h>   /* stack high-water for /sys/mem/stack_free */
+#include <kernel/cpu/tiku_stack.h>   /* /sys/mem/stack_free */
 #include "tiku_vfs_tree_timer.h"
 #include "tiku_vfs_tree_watchdog.h"
 #include "tiku_vfs_tree_power.h"
@@ -95,8 +95,8 @@ static int cfg_managed_write(uint32_t, const char *, size_t, int *);
  * @brief Read handler for /sys/uptime.
  *
  * Renders seconds since boot as a decimal line ("3600\n" after an hour), from
- * the 32-bit tiku_clock_seconds().  The tick from tiku_clock_time() is 16 bits
- * and wraps every ~8.5 minutes at 128 Hz, so seconds cannot come from it.
+ * the 32-bit tiku_clock_seconds().  On MSP430 the tick from tiku_clock_time()
+ * is 16 bits and wraps every 512 s at 128 Hz, so seconds cannot come from it.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -128,7 +128,7 @@ uptime_read(char *buf, size_t max)
  *
  * Renders wall-clock time as decimal seconds since the Unix epoch
  * ("1750000000\n").  Until the time is set the value is uptime plus the
- * persisted offset (0 on fresh FRAM), so a small number means never set.
+ * persisted offset, 0 on blank memory, so a small number means never set.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -146,11 +146,12 @@ time_read(char *buf, size_t max)
  *
  * Parses a strict decimal seconds-since-epoch value; any non-digit before the
  * terminator rejects the whole write, so a malformed script line cannot
- * half-set the clock.  tiku_rtc_set_seconds() then rebases and persists it.
+ * half-set the clock.  tiku_rtc_set_seconds_status() rebases and saves it.
  *
  * @param buf  Input text, decimal digits ("1750000000\n")
  * @param len  Input length in bytes
- * @return 0 on success, -1 on empty or malformed input
+ * @return 0; TIKU_VFS_EINVAL for empty or malformed input, TIKU_VFS_ERANGE
+ *         past 32 bits, or TIKU_VFS_EIO when the offset cannot be saved
  */
 static int
 time_write(const char *buf, size_t len)
@@ -168,7 +169,7 @@ time_write(const char *buf, size_t len)
             return TIKU_VFS_EINVAL;
         }
         if (v > (UINT32_MAX - (uint32_t)(c - '0')) / 10u) {
-            return TIKU_VFS_ERANGE;   /* would overflow the 32-bit seconds field */
+            return TIKU_VFS_ERANGE;   /* overflows the 32-bit seconds */
         }
         v = v * 10U + (uint32_t)(c - '0');
         seen_digit = 1;
@@ -186,9 +187,9 @@ time_write(const char *buf, size_t len)
 /**
  * @brief Read handler for /sys/mem/sram.
  *
- * Renders the device's total SRAM size in bytes ("8192\n" on FR5994).  This is
- * the silicon constant from the device header, not a live measurement -- see
- * /sys/mem/free for runtime headroom.
+ * Renders the usable SRAM size in bytes ("8192\n" on FR5994), the
+ * TIKU_DEVICE_RAM_USABLE constant from the device header, not a live
+ * measurement -- see /sys/mem/free for runtime headroom.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -202,11 +203,10 @@ sram_read(char *buf, size_t max)
 }
 
 /**
- * @brief Read handler for /sys/mem/kind: what the NVM actually IS.
+ * @brief Read handler for /sys/mem/kind: the NVM technology.
  *
- * The kernel carries every non-volatile memory under the FRAM_* names,
- * but nothing a person reads should call RRAM "FRAM".  Asked from off
- * the board, this says the technology instead of guessing at it.
+ * Renders TIKU_DEVICE_NVM_LABEL ("FRAM", "RRAM", "MRAM", "Flash", ...); the
+ * kernel's TIKU_DEVICE_FRAM_* names cover every NVM technology.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -238,9 +238,9 @@ nvm_read(char *buf, size_t max)
 /**
  * @brief Read handler for /sys/mem/nvmfree.
  *
- * Free bytes in the NVM memory tier (capacity - used). On Ambiq this is the
- * carved, memory-mapped MRAM region; on MSP430 the FRAM NVM pool. Reports 0 if
- * the tier is unavailable (e.g. no region backend on the board yet).
+ * Free bytes in the NVM memory tier (capacity - used).  On region-backed
+ * parts the tier is the front of the carved NVM region; on MSP430 the FRAM
+ * NVM pool.  Reports 0 when the tier is unavailable.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -250,9 +250,8 @@ static int
 nvmfree_read(char *buf, size_t max)
 {
     tiku_mem_stats_t st;
-    /* Same self-wire as /sys/mem/tiers: before the first allocation the tier
-     * is unwired and stats fail, so this node read 0 on a board with a full
-     * 32 KB tier free.  Init is idempotent. */
+    /* The tier wires itself on first use; the idempotent tiku_tier_init()
+     * lets stats succeed before anything has allocated. */
     (void)tiku_tier_init();
     if (tiku_tier_stats(TIKU_MEM_NVM, &st) != TIKU_MEM_OK) {
         return snprintf(buf, max, "0\n");
@@ -262,15 +261,15 @@ nvmfree_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/mem/tiers + /sys/mem/failed — measured tier-allocator truth           */
+/* /sys/mem/tiers, /sys/mem/reservations, /sys/mem/failed                    */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Read handler for /sys/mem/tiers.
  *
- * One line per available tier with the measured reservation state (capacity,
- * used, lifetime peak, carve count, refused carves) from tiku_tier_stats().
- * Unavailable tiers, such as HIFRAM on parts without one, are omitted.
+ * One line per available tier: capacity, used, peak, carves and refused
+ * carves from tiku_tier_stats(), then free, largest gap, split, live and
+ * held bytes over its spans.  A part without HIFRAM gets no HIFRAM line.
  */
 static int
 mem_tiers_read(char *buf, size_t max)
@@ -286,11 +285,9 @@ mem_tiers_read(char *buf, size_t max)
     uint8_t i;
     int n;
 
-    /* The tier wires itself on first use, so on a board where nothing has
-     * allocated yet every stats call fails and this node reads back EMPTY --
-     * which looks like "no tiers" rather than "none used".  Init is idempotent
-     * and costs nothing once done, so ask for it here: reading capacity must
-     * not depend on somebody having spent some first. */
+    /* The tier wires itself on first use; the idempotent tiku_tier_init()
+     * lets stats succeed before anything has allocated, so an unused tier
+     * is listed rather than left out. */
     (void)tiku_tier_init();
 
     for (i = 0; i < (uint8_t)(sizeof(tiers) / sizeof(tiers[0])); i++) {
@@ -329,7 +326,12 @@ mem_tiers_read(char *buf, size_t max)
     return (int)off;
 }
 
-/** Bounded diagnostic snapshot. A short buffer is an error, not a full list. */
+/**
+ * @brief Read handler for /sys/mem/reservations: one line per reservation.
+ *
+ * A bounded snapshot: a buffer too short for every line is an error, not a
+ * partial list.
+ */
 static int mem_reservations_read(char *buf, size_t max)
 {
     static const char *const names[] = {"sram", "nvm", "auto", "hifram", "psram"};
@@ -361,8 +363,7 @@ static int mem_reservations_read(char *buf, size_t max)
  * @brief Read handler for /sys/mem/failed.
  *
  * Total refused carve requests across all tiers since boot.  Non-zero
- * means something asked for memory it did not get — OOM pressure that
- * was previously invisible (the caller saw only a NULL).
+ * means something asked for memory it did not get.
  */
 static int
 mem_failed_read(char *buf, size_t max)
@@ -395,8 +396,8 @@ extern char __stack;
  * @brief Read handler for /sys/mem/free.
  *
  * Reports live SP headroom above static data, including this handler's frames.
- * Nordic and Apollo use their explicit stack floor, excluding allocator space.
- * Returns zero when the stack has reached that lower bound.
+ * Nordic, Ambiq and ESP32-C61 measure to their explicit stack floor, leaving
+ * out allocator space.  Returns zero when the stack has reached that bound.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -455,9 +456,9 @@ mem_free_read(char *buf, size_t max)
 /**
  * @brief Read handler for /sys/mem/used.
  *
- * Sums every registered process's declared proc-mem footprint plus its measured
- * live allocation (tiku_process_sram_used()); kernel statics and the stack are
- * excluded.  The accumulator is 32-bit because one BASIC arena can exceed 64 KB.
+ * Sums every registered process's declared proc-mem footprint plus its
+ * measured live allocation (tiku_process_sram_used()); kernel statics and the
+ * stack are excluded.  32 bits wide: one BASIC arena can exceed 64 KB.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -524,10 +525,8 @@ version_read(char *buf, size_t max)
 /*---------------------------------------------------------------------------*/
 
 /*
- * Device name: FRAM-backed user-set string, declared as a persist
- * cell with its own gate.  Before the cell conversion it was primed
- * off the boot module's shared magic word via a first_boot flag;
- * the cell gives it independent validity and removes that coupling.
+ * Device name: a durable user-set string in a persist cell with its own
+ * gate.
  */
 
 /**
@@ -540,7 +539,7 @@ version_read(char *buf, size_t max)
 /** Gate key for the device-name cell ('NAME') */
 #define DEVICE_NAME_MAGIC  0x4E414D45UL /* 'NAME' */
 
-/** FRAM cell: NUL-terminated user-visible device name */
+/** Durable cell: NUL-terminated user-visible device name */
 static TIKU_DURABLE char device_name_persist[DEVICE_NAME_MAX + 1];
 
 /** Gate + descriptor: primed to the default name "tiku" */
@@ -569,11 +568,12 @@ device_name_read(char *buf, size_t max)
  *
  * Stores up to DEVICE_NAME_MAX bytes as the new persistent name, stripping one
  * trailing newline and truncating longer input; an empty result is rejected.
- * tiku_persist_cell_write() owns the FRAM unlock window for the store.
+ * A usable configuration journal takes the write instead (cfg_managed_write()).
  *
  * @param buf  New name text
  * @param len  Text length in bytes
- * @return 0 on success, -1 on empty input
+ * @return 0; -1 for empty input; TIKU_VFS_EIO when the cell cannot be
+ *         saved; or the journal's status for a write it takes
  */
 static int
 device_name_write(const char *buf, size_t len)
@@ -725,7 +725,8 @@ device_board_read(char *buf, size_t max)
 /**
  * @brief Read handler for /sys/cpu/freq.
  *
- * Renders the actual CPU frequency in Hz, not the build-time constant.
+ * Renders the CPU clock in Hz as the HAL reports it (tiku_cpu_mclk_hz()),
+ * not the build-time constant.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -772,7 +773,11 @@ static int cpu_mode_read(char *buf, size_t max)
 #if defined(PLATFORM_NORDIC) || defined(PLATFORM_RP2350) || \
     defined(PLATFORM_AMBIQ) || defined(PLATFORM_MSP430) || \
     defined(PLATFORM_STM32N6) || defined(PLATFORM_RA8P1)
-/** @brief Save a strictly parsed Hz target; never retune a running CPU. */
+/**
+ * @brief Save a strictly parsed Hz target; never retune a running CPU.
+ *
+ * A usable configuration journal takes the write instead.
+ */
 static int cpu_target_write(const char *buf, size_t len)
 {
     unsigned long hz = 0;
@@ -804,7 +809,7 @@ static int cpu_target_write(const char *buf, size_t len)
 /* NODE TABLES                                                               */
 /*---------------------------------------------------------------------------*/
 
-/* Type descriptors (const, FRAM) for the typed /sys nodes below. */
+/* Type descriptors for the typed /sys nodes below. */
 static const tiku_vfs_desc_t desc_mem_static =     /* sram, nvm: fixed sizes */
     TIKU_VFS_DESC(TIKU_VFS_T_U32, TIKU_VFS_U_BYTES,
                   TIKU_VFS_FRESH_STATIC, TIKU_VFS_E_FREE);
@@ -824,12 +829,13 @@ static const tiku_vfs_desc_t desc_uptime =
     TIKU_VFS_DESC(TIKU_VFS_T_U32, TIKU_VFS_U_SECONDS,
                   TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
 
-/*
- * /sys/mem/stack_free -- worst-case stack headroom since boot (bytes): the
- * intact painted cushion above the MPU stack guard.  Unlike /sys/mem/free
- * (the live gap at this instant) this is the closest the stack has EVER come
- * to the guard -- the number to snapshot under load when sizing the stack.
- * "0" on an arch that has not declared its stack bounds (feature dormant).
+/**
+ * @brief Read handler for /sys/mem/stack_free: the lowest stack headroom
+ *        since boot, in bytes.
+ *
+ * The intact painted cushion above the MPU stack guard, unlike the live gap
+ * /sys/mem/free reports; snapshot it under load when sizing the stack.  "0"
+ * on a port that has not declared its stack bounds.
  */
 static int stack_free_read(char *buf, size_t max)
 {
@@ -875,8 +881,8 @@ map_line(char *buf, size_t max, size_t *at, const char *fmt,
  * @brief Read handler for /sys/mem/sram_map: the RAM by estate.
  *
  * The primary bank, what the image's statics take of it, the pool the
- * stack grows in with its live headroom, and the tier arena with WHICH
- * bank holds it: a part may carve the tier from a second bank.
+ * stack grows in with its lowest headroom since boot, and the tier arena
+ * with the bank that holds it: a part may carve the tier from a second bank.
  */
 static int
 sram_map_read(char *buf, size_t max)
@@ -929,7 +935,7 @@ sram_map_read(char *buf, size_t max)
         map_line(buf, max, &at, "unassigned\t%lu\n",
                  hi - lo > assigned ? hi - lo - assigned : 0UL, 0UL, 0UL);
     } else {
-        /* Older ports have no explicit guard symbols; retain their format. */
+        /* Without guard symbols the stack is the gap less the primary tier. */
         stack = stack >= primary_tier ? stack - primary_tier : 0UL;
     }
     map_line(buf, max, &at, "stack\t%lu\t%lu\n", stack,
@@ -942,7 +948,7 @@ sram_map_read(char *buf, size_t max)
 }
 
 /**
- * @brief Report Store occupancy from its allocation bitmap, when mounted.
+ * @brief Report the file store's occupancy, when mounted, from its bitmap.
  * Used includes metadata and slot slack; free is unallocated slot space.
  * A streamed write's staged slots count too, until committed or aborted.
  */
@@ -953,7 +959,7 @@ nvm_store_map(char *buf, size_t max, size_t *at, unsigned long size)
     unsigned long freeb;
 
     if (fs != NULL && fs->mounted && fs->be->size == size) {
-        /* The store's own count, the same df reports. */
+        /* Free whole slots, headers included; df counts payload only. */
         freeb = (unsigned long)(fs->nslots - tiku_tfs_used_slots(fs)) *
                 (unsigned long)TIKU_TFS_SLOT_BYTES;
         if (freeb <= size) {
@@ -970,8 +976,8 @@ nvm_store_map(char *buf, size_t max, size_t *at, unsigned long size)
  *        estate, in the order they lie: code | module | region | persist.
  *
  * The region is the tier at its front and the file store behind it, as
- * df reports them; a part whose linker carves none of this says only
- * what it is and how big.
+ * df reports them; a part without the carve symbols omits the code, module
+ * and persist lines.
  */
 static int
 nvm_map_read(char *buf, size_t max)
@@ -981,10 +987,9 @@ nvm_map_read(char *buf, size_t max)
     unsigned long lim = (unsigned long)(uintptr_t)&__tiku_code_limit;
     unsigned long text = (unsigned long)(uintptr_t)&_etext;
     unsigned long load = (unsigned long)(uintptr_t)&__data_load;
-    /* Where the image ENDS, not where .text ends: .rodata and .data's
-     * load copy sit after _etext in the same window, and on a part with
-     * a lot of rodata that is most of it.  A script without __data_load
-     * is read as it was, to _etext. */
+    /* Where the image ends, not where .text ends: .rodata and .data's
+     * load copy sit after _etext in the same window.  Without
+     * __data_load the image is taken to end at _etext. */
     unsigned long image = (load != 0UL)
         ? load + ((unsigned long)(uintptr_t)&__data_end -
                   (unsigned long)(uintptr_t)&__data_start)
@@ -1002,10 +1007,9 @@ nvm_map_read(char *buf, size_t max)
                                ? image - (unsigned long)TIKU_DEVICE_FRAM_START
                                : 0UL;
 
-        /* A SIZE, like every other line here.  The limit is a linker
-         * address -- the end of the window -- and written raw it read
-         * as a 4.4 MB code estate on a 3.9 MB part, which is what made
-         * the four estates sum to twice the memory they lie in. */
+        /* The limit is a linker address, the end of the code window;
+         * the NVM start is subtracted so the line reports a size like
+         * every other line here. */
         map_line(buf, max, &at, "code\t%lu\t%lu\n",
                  (end > (unsigned long)TIKU_DEVICE_FRAM_START)
                      ? end - (unsigned long)TIKU_DEVICE_FRAM_START : end,
@@ -1039,7 +1043,11 @@ nvm_map_read(char *buf, size_t max)
 
 #include "tiku_vfs_tree_mem_reclaim.inl"
 
-/** /sys/mem directory table — sizes (sram, nvm) + live (free, used) */
+/**
+ * /sys/mem directory table: sizes and NVM kind, live usage, tier and
+ * reservation views, reclaim/, failed carves, stack headroom, the two maps
+ * and layout/.
+ */
 static const tiku_vfs_node_t sys_mem_children[] = {
     { "sram", TIKU_VFS_FILE, sram_read,      NULL, NULL, 0, &desc_mem_static },
     { "nvm",  TIKU_VFS_FILE, nvm_read,       NULL, NULL, 0, &desc_mem_static },
@@ -1085,7 +1093,7 @@ static const tiku_vfs_node_t sys_sched_children[] = {
 /** /sys/device directory table — name is the only writable node */
 static const tiku_vfs_node_t sys_device_children[] = {
     { "name",    TIKU_VFS_FILE, device_name_read,    device_name_write, NULL, 0,
-      NULL, NULL, TIKU_VFS_CAP_FS },   /* writes commit to the persistent store */
+      NULL, NULL, TIKU_VFS_CAP_FS },   /* writes a durable cell */
     { "id",      TIKU_VFS_FILE, device_id_read,      NULL,              NULL, 0 },
     { "uid",     TIKU_VFS_FILE, device_uid_read,     NULL,              NULL, 0 },
     { "mcu",     TIKU_VFS_FILE, device_mcu_read,     NULL,              NULL, 0 },
@@ -1094,23 +1102,17 @@ static const tiku_vfs_node_t sys_device_children[] = {
     { "board",   TIKU_VFS_FILE, device_board_read,   NULL,              NULL, 0 },
 };
 
-/*
- * The /sys directory table -- the master list of everything under /sys.  Three
- * kinds of entry: files handled in this module; files whose handlers the boot
- * module exports (boot_count, last_reset, cold_boots, surfaced at the top level
- * for script convenience); and directories, either the local tables above or a
- * sibling module's exported children + NCHILD pair.  To add a node, implement
- * the handler and append the entry, keeping any NCHILD beside its pointer.
- */
 #if TIKU_SHELL_ENABLE
 /*---------------------------------------------------------------------------*/
 /* /sys/rules, /sys/jobs — read-only view of the shell's reactive automation */
 /*---------------------------------------------------------------------------*/
 /*
- * Observability only (an agent can see what automation is armed).  Mutating
- * add/del still goes through the `rules`/`on`/`every`/`once` shell commands;
- * writable VFS control is a deliberate follow-up.
+ * Read-only: an agent can see what automation is armed.  Rules and jobs are
+ * added and removed with the `rules`, `on`, `every` and `once` shell
+ * commands.
  */
+
+/** @brief Read handler for /sys/rules/count: the number of armed rules. */
 static int
 rules_count_read(char *buf, size_t max)
 {
@@ -1124,7 +1126,10 @@ rules_count_read(char *buf, size_t max)
     return snprintf(buf, max, "%u\n", n);
 }
 
-/* One line per armed rule: "<id> <path> <op> <value> -> <action>". */
+/**
+ * @brief Read handler for /sys/rules/list: one line per armed rule,
+ *        "<id> <path> <op> <value> -> <action>".
+ */
 static int
 rules_list_read(char *buf, size_t max)
 {
@@ -1171,7 +1176,10 @@ jobs_count_read(char *buf, size_t max)
     return snprintf(buf, max, "%u\n", n);
 }
 
-/* One line per scheduled job: "<id> every|once <interval>s -> <cmd>". */
+/**
+ * @brief Read handler for /sys/jobs/list: one line per scheduled job,
+ *        "<id> every|once <interval>s -> <cmd>".
+ */
 static int
 jobs_list_read(char *buf, size_t max)
 {
@@ -1211,13 +1219,13 @@ static const tiku_vfs_node_t sys_jobs_children[] = {
 /* /sys/crypto — CRACEN offload runtime switch + path counters               */
 /*---------------------------------------------------------------------------*/
 /*
- * The hardware-crypto backend keeps the kit APIs unchanged; this is the
- * runtime control surface: `mode` selects auto (hardware with software
- * fallback) or sw (software only -- the A/B switch and field kill-switch),
- * and `ops` reports which path actually served the calls, so a test can
- * assert "hardware really ran" instead of trusting the knob.
+ * Runtime control of the hardware-crypto backend: `mode` selects auto
+ * (hardware with software fallback) or sw (software only); `ops` counts the
+ * calls each path served, so a test can check that the hardware ran; `pk`
+ * reports the public-key path.
  */
 
+/** @brief Read handler for /sys/crypto/mode: "auto" or "sw". */
 static int
 crypto_mode_read(char *buf, size_t max)
 {
@@ -1226,6 +1234,7 @@ crypto_mode_read(char *buf, size_t max)
                         ? "sw" : "auto");
 }
 
+/** @brief Write handler for /sys/crypto/mode: "sw" or "auto" as a prefix. */
 static int
 crypto_mode_write(const char *buf, size_t len)
 {
@@ -1241,6 +1250,7 @@ crypto_mode_write(const char *buf, size_t len)
     return TIKU_VFS_EINVAL;
 }
 
+/** @brief Read handler for /sys/crypto/ops: "hw=<n> sw=<n> err=<n>". */
 static int
 crypto_ops_read(char *buf, size_t max)
 {
@@ -1250,6 +1260,10 @@ crypto_ops_read(char *buf, size_t max)
                     (unsigned)hw, (unsigned)sw, (unsigned)errs);
 }
 
+/**
+ * @brief Read handler for /sys/crypto/pk: "hw-capable ops=<n> errs=<n>" when
+ *        CRACEN public-key support is built, else "sw".
+ */
 static int
 crypto_pk_read(char *buf, size_t max)
 {
@@ -1281,10 +1295,11 @@ static const tiku_vfs_node_t sys_crypto_children[] = {
  * knob ("NAME[,interval_ms[,data]]" starts, "off"/"0" stops; data is a
  * telemetry payload carried after the 'TK' manufacturer id) and `txpower`
  * (signed dBm, discrete silicon steps only) is the power knob -- both
- * rules-engine and `watch` reachable; the rest report state so a bench
- * can assert "the radio really transmitted".
+ * reachable from the rules engine and `watch`; the rest report state, so a
+ * bench can check that the radio transmitted.
  */
 
+/** @brief Read handler for /sys/radio/beacon: "name,ms[,data]" or "off". */
 static int
 radio_beacon_read(char *buf, size_t max)
 {
@@ -1304,6 +1319,7 @@ radio_beacon_read(char *buf, size_t max)
                     (unsigned)tiku_ble_adv_interval_ms());
 }
 
+/** @brief Write handler for /sys/radio/beacon: start or stop the beacon. */
 static int
 radio_beacon_write(const char *buf, size_t len)
 {
@@ -1347,6 +1363,7 @@ radio_beacon_write(const char *buf, size_t len)
                ? 0 : TIKU_VFS_EINVAL;
 }
 
+/** @brief Read handler for /sys/radio/bursts: advertising bursts sent. */
 static int
 radio_bursts_read(char *buf, size_t max)
 {
@@ -1354,18 +1371,21 @@ radio_bursts_read(char *buf, size_t max)
                     (unsigned long)tiku_ble_adv_bursts());
 }
 
+/** @brief Read handler for /sys/radio/state: the radio arbiter's owner. */
 static int
 radio_state_read(char *buf, size_t max)
 {
-    /* The arbiter's owner IS the radio state:
-     * idle / beacon / beacon-flpr / scan / observe. */
+    /* The arbiter's owner is the radio state: idle, beacon, beacon-flpr,
+     * scan, observe, beacon+observe, conn or 154. */
     return snprintf(buf, max, "%s\n", tiku_ble_adv_owner_str());
 }
 
-/* R7: the background observer's new-data hook -> namespace event.  The
- * facade calls this from timer-callback context (not ISR) whenever the
- * observer delivered packets; every /sys/radio/scan watcher (the watch
- * command, the rules engine's subscribers) rings. */
+/**
+ * @brief The background observer's new-data hook: notifies /sys/radio/scan.
+ *
+ * The facade calls it from timer-callback context (not ISR) whenever the
+ * observer delivered packets, ringing every /sys/radio/scan watcher.
+ */
 static void
 radio_scan_notify_hook(void)
 {
@@ -1379,6 +1399,10 @@ radio_scan_notify_hook(void)
     }
 }
 
+/**
+ * @brief Read handler for /sys/radio/scan: the device count, and the
+ *        strongest device's address, RSSI and name when there is one.
+ */
 static int
 radio_scan_read(char *buf, size_t max)
 {
@@ -1396,16 +1420,20 @@ radio_scan_read(char *buf, size_t max)
                     (int)b->rssi, b->name);
 }
 
+/** @brief Read handler for /sys/radio/txpower: the TX power in dBm. */
 static int
 radio_txpower_read(char *buf, size_t max)
 {
     return snprintf(buf, max, "%d\n", (int)tiku_ble_adv_txpower());
 }
 
-/* dBm, signed; only the silicon's discrete steps are accepted (the facade
- * rejects everything else, never rounds).  Writable so the rules engine
- * can turn power into a policy knob -- e.g. drop to -20 dBm when a
- * voltage/energy node sags. */
+/**
+ * @brief Write handler for /sys/radio/txpower: signed dBm.
+ *
+ * Only the silicon's discrete steps are accepted; the facade rejects any
+ * other value rather than rounding it.  A rule can lower the power when a
+ * voltage or energy node sags.
+ */
 static int
 radio_txpower_write(const char *buf, size_t len)
 {
@@ -1425,19 +1453,25 @@ radio_txpower_write(const char *buf, size_t len)
     return (tiku_ble_adv_set_txpower((int8_t)v) == 0) ? 0 : TIKU_VFS_EINVAL;
 }
 
-/* Which PHY the radio is in right now -- the live RADIO.MODE, so it reads
- * "ieee802154" while the 15.4 PHY owns the radio and "ble-1m" at rest. */
+/**
+ * @brief Read handler for /sys/radio/mode: the PHY in RADIO.MODE now.
+ *
+ * "ieee802154" while the 15.4 PHY owns the radio, "ble-1m" at rest.
+ */
 static int
 radio_mode_read(char *buf, size_t max)
 {
     return snprintf(buf, max, "%s\n", tiku_radio_arch_mode_str());
 }
 
-/* L7 surface unification (#18): one /sys/radio surface over the two real
- * nordic BLE implementations -- the M33 broadcast path and the FLPR
- * connection controller.  `backend` names which is driving the radio right
- * now; `caps` lists what this build's on-die radio can do (compiled from the
- * capability flags, not speculation); `state` (above) is the arbiter owner. */
+/*
+ * One /sys/radio surface over the two nordic BLE implementations, the M33
+ * broadcast path and the FLPR connection controller.  `backend` names which
+ * is driving the radio now; `caps` lists what this build's radio can do,
+ * from the capability flags; `state` (above) is the arbiter owner.
+ */
+
+/** @brief Read handler for /sys/radio/backend: nordic-m33 or nordic-flpr. */
 static int
 radio_backend_read(char *buf, size_t max)
 {
@@ -1448,6 +1482,7 @@ radio_backend_read(char *buf, size_t max)
     return snprintf(buf, max, "%s\n", b);
 }
 
+/** @brief Read handler for /sys/radio/caps: what this build's radio can do. */
 static int
 radio_caps_read(char *buf, size_t max)
 {
@@ -1480,12 +1515,13 @@ static const tiku_vfs_node_t sys_radio_children[] = {
 /* /sys/flpr — the VPR RISC-V coprocessor                                    */
 /*---------------------------------------------------------------------------*/
 /*
- * Control + liveness for the FLPR: `run` starts (loads the embedded image
+ * Control and liveness for the FLPR: `run` starts (loads the embedded image
  * first) and stops the core; `state` distinguishes stopped / running-but-
- * not-yet-in-main / alive; `heartbeat` is the firmware's forever-counter,
- * the ground truth that RISC-V code is executing right now.
+ * not-yet-in-main / alive; `heartbeat` is the firmware's free-running
+ * counter, which advances while RISC-V code is executing.
  */
 
+/** @brief Read handler for /sys/flpr/state: "stopped", "started" or "alive". */
 static int
 flpr_state_read(char *buf, size_t max)
 {
@@ -1496,6 +1532,7 @@ flpr_state_read(char *buf, size_t max)
     return snprintf(buf, max, "%s\n", s);
 }
 
+/** @brief Read handler for /sys/flpr/heartbeat: the firmware's counter. */
 static int
 flpr_heartbeat_read(char *buf, size_t max)
 {
@@ -1503,10 +1540,13 @@ flpr_heartbeat_read(char *buf, size_t max)
                     (unsigned long)tiku_flpr_arch_heartbeat());
 }
 
+/**
+ * @brief Read handler for /sys/flpr/image: the image size and the doorbell
+ *        registers INTEN, EVENTS_TRIGGERED[16] and INTPEND.
+ */
 static int
 flpr_image_read(char *buf, size_t max)
 {
-    /* Bring-up: image size + live doorbell-plumbing readbacks. */
     return snprintf(buf, max, "%lu inten=%lx trig16=%lu intpend=%lx\n",
                     (unsigned long)tiku_flpr_arch_image_size(),
                     (unsigned long)NRF_VPR00_NS->INTEN,
@@ -1514,12 +1554,14 @@ flpr_image_read(char *buf, size_t max)
                     (unsigned long)NRF_VPR00_NS->INTPEND);
 }
 
+/** @brief Read handler for /sys/flpr/run: 1 while the core runs. */
 static int
 flpr_run_read(char *buf, size_t max)
 {
     return snprintf(buf, max, "%d\n", tiku_flpr_arch_running());
 }
 
+/** @brief Write handler for /sys/flpr/run: "1" starts the core, "0" stops. */
 static int
 flpr_run_write(const char *buf, size_t len)
 {
@@ -1533,11 +1575,13 @@ flpr_run_write(const char *buf, size_t len)
     return TIKU_VFS_EINVAL;
 }
 
-/* Echo surface over the mailbox IPC: writing sends the bytes to the FLPR
- * (its echo service mirrors them back, doorbell -> ISR capture); reading
- * returns "<reply_seq> <last reply>".  A seq that advances after a write
- * proves the ENTIRE cross-core interrupt path, which is exactly what the
- * TikuBench flpr suite asserts. */
+/**
+ * @brief Read handler for /sys/flpr/echo: "<reply_seq> <last reply>".
+ *
+ * A write sends bytes to the FLPR, whose echo service mirrors them back
+ * (doorbell, then ISR capture); the seq advances once a reply has crossed
+ * back, so the whole cross-core interrupt path ran.
+ */
 static int
 flpr_echo_read(char *buf, size_t max)
 {
@@ -1550,6 +1594,7 @@ flpr_echo_read(char *buf, size_t max)
                     (unsigned long)tiku_flpr_arch_reply_seq(), body);
 }
 
+/** @brief Write handler for /sys/flpr/echo: send the bytes over the mailbox. */
 static int
 flpr_echo_write(const char *buf, size_t len)
 {
@@ -1558,12 +1603,12 @@ flpr_echo_write(const char *buf, size_t len)
 }
 
 /* Pulse-engine surface: write "period_us,edges" -> the coprocessor emits
- * the waveform on P2.07 (LED3) while THIS core samples the pad; read
- * returns "cmd=<edges> meas=<transitions> rc=<0|err>".  A |cmd-meas|
- * within tolerance is the whole soft-peripheral story, verified. */
+ * the waveform on P2.07 (LED3) while this core samples the pad; read
+ * returns "cmd=<edges> meas=<transitions> ms=<duration> rc=<0|err>". */
 static uint32_t flpr_pulse_cmd, flpr_pulse_meas, flpr_pulse_ms;
 static int      flpr_pulse_rc = -1;
 
+/** @brief Read handler for /sys/flpr/pulse: the last run's result. */
 static int
 flpr_pulse_read(char *buf, size_t max)
 {
@@ -1573,6 +1618,7 @@ flpr_pulse_read(char *buf, size_t max)
                     (unsigned long)flpr_pulse_ms, flpr_pulse_rc);
 }
 
+/** @brief Write handler for /sys/flpr/pulse: run "period_us,edges". */
 static int
 flpr_pulse_write(const char *buf, size_t len)
 {
@@ -1601,10 +1647,13 @@ flpr_pulse_write(const char *buf, size_t len)
 }
 
 /* Compute-only coprocessor load (power characterisation).
- * "spin"      write N -> start N passes and RETURN (so the caller can sleep
- *                        while the coprocessor works); read -> passes + done
+ * "spin"      write N -> start N passes and return (so the caller can sleep
+ *                        while the coprocessor works), 0 cancels;
+ *                        read -> passes + done
  * "spinbench" write N -> run N passes and time them against the GRTC;
- *                        read -> passes, microseconds and passes/s          */
+ *                        read -> passes, microseconds and kpass/s          */
+
+/** @brief Read handler for /sys/flpr/spin: "passes=<n> done=<0|1>". */
 static int
 flpr_spin_read(char *buf, size_t max)
 {
@@ -1613,6 +1662,7 @@ flpr_spin_read(char *buf, size_t max)
                     tiku_flpr_arch_spin_done());
 }
 
+/** @brief Write handler for /sys/flpr/spin: N passes, or 0 to cancel. */
 static int
 flpr_spin_write(const char *buf, size_t len)
 {
@@ -1633,6 +1683,7 @@ flpr_spin_write(const char *buf, size_t len)
 static uint32_t flpr_sb_passes, flpr_sb_us;
 static int      flpr_sb_rc = -1;
 
+/** @brief Read handler for /sys/flpr/spinbench: the last timed run. */
 static int
 flpr_spinbench_read(char *buf, size_t max)
 {
@@ -1645,6 +1696,7 @@ flpr_spinbench_read(char *buf, size_t max)
                     (unsigned long)flpr_sb_us, kps, flpr_sb_rc);
 }
 
+/** @brief Write handler for /sys/flpr/spinbench: run and time N passes. */
 static int
 flpr_spinbench_write(const char *buf, size_t len)
 {
@@ -1680,13 +1732,21 @@ static const tiku_vfs_desc_t desc_lifetime = TIKU_VFS_DESC_FLAGS(
     TIKU_VFS_T_U32, TIKU_VFS_U_SECONDS, TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_CHEAP,
     TIKU_VFS_DF_READ_EFFECT);
 
+/*
+ * The /sys directory table -- the master list of everything under /sys.  Three
+ * kinds of entry: files handled in this module; files whose handlers the boot
+ * module exports (boot_count, last_reset, cold_boots, surfaced at the top level
+ * for script convenience); and directories, either the local tables above or a
+ * sibling module's exported children + NCHILD pair.  To add a node, implement
+ * the handler and append the entry, keeping any NCHILD beside its pointer.
+ */
 static const tiku_vfs_node_t sys_children[] = {
     { "version",    TIKU_VFS_FILE, version_read,    NULL, NULL, 0 },
     { "device",     TIKU_VFS_DIR,  NULL, NULL, sys_device_children, 7 },
     { "uptime",     TIKU_VFS_FILE, uptime_read,     NULL, NULL, 0,
       &desc_uptime },
     { "time",       TIKU_VFS_FILE, time_read,       time_write, NULL, 0,
-      NULL, NULL, TIKU_VFS_CAP_SYS },   /* clock skew breaks TLS cert validity */
+      NULL, NULL, TIKU_VFS_CAP_SYS },   /* skew breaks TLS cert validity */
     { "boot_count", TIKU_VFS_FILE,
       tiku_vfs_tree_boot_count_read,      NULL, NULL, 0 },
     { "last_reset", TIKU_VFS_FILE,
@@ -1804,11 +1864,12 @@ tiku_vfs_tree_sys_get(void)
 }
 
 /**
- * @brief Initialise /sys state (RTC epoch, device name default).
+ * @brief Initialise /sys state: RTC epoch, device name, configuration
+ *        journal and the radio scan hook.
  *
- * Validates two independent pieces of persistent state: the RTC epoch offset
- * (tiku_rtc_init() checks its own cell, so the call is idempotent) and the
- * device-name cell, primed to "tiku" when its gate reports virgin FRAM.
+ * Validates the RTC epoch offset (tiku_rtc_init() checks its own cell) and
+ * the device-name cell, primed to "tiku" on blank memory; with the journal
+ * built, opens it and applies its stored settings.
  */
 void
 tiku_vfs_tree_sys_init(void)
@@ -1825,7 +1886,7 @@ tiku_vfs_tree_sys_init(void)
 #endif
 
 #if (TIKU_HAS_BLE_ADV + 0)
-    /* R7: background-observer scan data -> /sys/radio/scan namespace
+    /* Background-observer scan data -> /sys/radio/scan namespace
      * events (watch / rules ride the bus from there). */
     tiku_ble_adv_set_scan_notify(radio_scan_notify_hook);
 #endif

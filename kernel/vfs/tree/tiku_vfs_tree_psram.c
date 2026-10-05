@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_psram.c - /sys/psram VFS nodes (Apollo510 external 64 MB PSRAM).
+ * tiku_vfs_tree_psram.c - /sys/psram VFS nodes (Apollo510 64 MB PSRAM).
  *
  * State (writable: the lifecycle verbs up/down/sleep/wake), IO clock, device
  * size and the shipped RXDQSDELAY tap.  Reads come from driver bookkeeping
@@ -20,7 +20,7 @@
 #include <stdio.h>
 #include <string.h>
 
-/** @brief The lifecycle rung, from driver bookkeeping only. */
+/** @brief "down", "asleep" or "up", from driver bookkeeping only. */
 static int
 psram_state_read(char *buf, size_t max)
 {
@@ -30,7 +30,7 @@ psram_state_read(char *buf, size_t max)
     return snprintf(buf, max, "%s\n", st);
 }
 
-/** @brief Live IO clock (0 when the controller is down). */
+/** @brief IO clock in Hz (0 when the controller is down). */
 static int
 psram_hz_read(char *buf, size_t max)
 {
