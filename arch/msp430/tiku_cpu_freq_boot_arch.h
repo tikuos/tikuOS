@@ -19,7 +19,12 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/** @brief Boot-only MCLK divider change; preserves SMCLK and ACLK. */
+/**
+ * @brief Divide MCLK alone to 8, 4, 2 or 1 MHz, at boot or at run time.
+ *
+ * SMCLK and ACLK keep their rates, so the console and the timers are not
+ * disturbed; another rate, or an SMCLK other than 8 MHz, is ignored.
+ */
 void tiku_cpu_msp430_boot_divide(unsigned long hz);
 
 /*---------------------------------------------------------------------------*/

@@ -213,7 +213,8 @@
 #elif MAIN_CPU_FREQ == 7
 #define TIKU_MAIN_CPU_HZ  8000000UL
 #elif MAIN_CPU_FREQ == 8
-#define TIKU_MAIN_CPU_HZ  16000000UL
+/* The clock code clamps the 16 MHz preset to 8 MHz, so the rate is 8 MHz. */
+#define TIKU_MAIN_CPU_HZ  8000000UL
 #else
 #error "Unknown MAIN_CPU_FREQ value"
 #endif

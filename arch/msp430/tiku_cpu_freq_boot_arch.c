@@ -1115,7 +1115,7 @@ void tiku_cpu_freq_msp430_init(unsigned int freq_mhz)
     cpu_freq_msp430_init(freq_mhz, TIKU_CLK_DIV_1, false, false);
 }
 
-/** @brief Divide only MCLK before peripheral init; keep the 8 MHz DCO. */
+/** @brief Divide only MCLK, keeping the 8 MHz DCO behind SMCLK. */
 void tiku_cpu_msp430_boot_divide(unsigned long hz)
 {
     unsigned int div;

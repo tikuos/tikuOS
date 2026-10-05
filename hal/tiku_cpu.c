@@ -22,6 +22,7 @@
 #if defined(PLATFORM_MSP430)
 #include <msp430.h>    /* MSP430 intrinsics for interrupt state management */
 #include "arch/msp430/tiku_cpu_freq_boot_arch.h"
+#include "tiku_htimer_hal.h"   /* TIKU_HTIMER_CLOCK_SOURCE */
 #elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
       defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
       defined(PLATFORM_RA8P1)
@@ -548,10 +549,15 @@ unsigned int tiku_cpu_idle_mode_wakes(tiku_cpu_idle_mode_t mode) {
 #if defined(PLATFORM_MSP430)
     switch (mode) {
         case TIKU_CPU_IDLE_DEEP:
-            /* LPM3 keeps only ACLK, which runs the tick.  The UART runs from
-             * SMCLK, as does the htimer in its SMCLK presets (the default),
-             * and the watchdog may too. */
+            /* LPM3 keeps only ACLK, which runs the tick and, in its ACLK
+             * presets, the htimer.  The UART runs from SMCLK, as does the
+             * htimer in its SMCLK presets (the default), and the watchdog
+             * may too. */
+#if TIKU_HTIMER_CLOCK_SOURCE == TIKU_HTIMER_SOURCE_ACLK
+            return TIKU_WAKE_SYSTICK | TIKU_WAKE_HTIMER | TIKU_WAKE_GPIO;
+#else
             return TIKU_WAKE_SYSTICK | TIKU_WAKE_GPIO;
+#endif
         case TIKU_CPU_IDLE_DEEPEST:
             /* LPM4 stops every clock: only a pin edge wakes the core. */
             return TIKU_WAKE_GPIO;

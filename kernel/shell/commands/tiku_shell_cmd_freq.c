@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_freq.c - "freq" command: show or set the CPU core frequency.
  *
- * Setting drives the platform's frequency path -- the DCO on MSP430, the
- * performance mode on Ambiq, the clock tree elsewhere.  A request the platform
- * cannot honour leaves the clock unchanged and is reported back.
+ * Setting drives the platform's frequency path -- the MCLK divider on MSP430,
+ * the performance mode on Ambiq, the clock tree elsewhere.  A request the
+ * platform cannot honour leaves the clock unchanged and is reported back.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,6 +21,10 @@
 
 /* Round to nearest: a measured clock sits a hair under its nominal rate. */
 #define TIKU_HZ_TO_MHZ(hz)  (((hz) + 500000UL) / 1000000UL)
+
+#if defined(PLATFORM_MSP430)
+#include <arch/msp430/tiku_cpu_freq_boot_arch.h>  /* MCLK divider */
+#endif
 
 #if defined(PLATFORM_STM32N6)
 #include <arch/stm32n6/tiku_cpu_freq_boot_arch.h> /* clock-tree read-back */
@@ -308,6 +312,9 @@ tiku_shell_cmd_freq(uint8_t argc, const char *argv[])
 #elif defined(PLATFORM_ESP32C61)
         SHELL_PRINTF("  no arg: show the core clock; probe: the clock tree;\n");
         SHELL_PRINTF("  <mhz>: 10, 20 or 40 (crystal), 80 or 160 (PLL).\n");
+#elif defined(PLATFORM_MSP430)
+        SHELL_PRINTF("  no arg: show the core clock; <mhz>: 8, 4, 2 or 1 "
+                     "(MCLK divided from the 8 MHz DCO).\n");
 #else
         SHELL_PRINTF("  no arg: show the core clock; <mhz>: request a frequency "
                      "(96, or turbo: 192 on Apollo4, 250 on Apollo510).\n");
@@ -315,7 +322,16 @@ tiku_shell_cmd_freq(uint8_t argc, const char *argv[])
         return;
     }
 
+#if defined(PLATFORM_MSP430)
+    /* tiku_cpu_freq_init() takes a DCO preset index here, and moving the DCO
+     * moves SMCLK and the console's baud rate with it.  The MCLK divider
+     * changes the core alone. */
+    if (req <= 8u) {
+        tiku_cpu_msp430_boot_divide(req * 1000000UL);
+    }
+#else
     tiku_cpu_freq_init((unsigned int)req);
+#endif
     now = TIKU_HZ_TO_MHZ(tiku_cpu_mclk_hz());
     if (now == req) {
         SHELL_PRINTF("CPU: %lu MHz\n", now);
