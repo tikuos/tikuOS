@@ -4,24 +4,18 @@ Tiku Operating System v0.06
 Simple. Ubiquitous. Intelligence, Everywhere.
 http://tiku-os.org
 
-gen_roots.py - build the HTTPS trust store as a /data file instead of .rodata.
+gen_roots.py - build the HTTPS trust store file, /data/roots.bin.
 
-WHY.  The trust store is 120 CA root certificates, 128,820 bytes of DER, and it
-shipped compiled into .rodata via a generated 677 KB C file.  That made it the
-single largest thing in the cert-TLS image (307,637 B of 256 KB window) and it
-made trust un-updatable: roots expire and get revoked, and the only way to
-change one was a firmware respin.  Certificates are DATA, so they belong in the
-one self-describing store, reachable by name.
+Authors: Ambuj Varshney <ambuj@tiku-os.org>
 
-THE MIGRATION GATE.  This tool packs from the .inl that ships TODAY, and can
-regenerate that .inl from the packed file.  Round-tripping and diffing proves
-the file carries exactly the bytes the firmware already trusts -- no
-re-derivation from an upstream bundle, no chance of a silently different root
-set.  `--self-test` does exactly that and is the thing to run before believing
-any of this.
+Packs CA roots from a Mozilla PEM bundle (--from-pem) or a generated C array
+(--from-inl), checks a packed file (--verify) and turns one back into that C
+array (--to-inl).  kernel/shell/basic/tiku_basic_https_roots.inl reads it.
 
-Refreshing the root set from upstream is a separate mode (--from-pem) and a
-separate decision; it is deliberately not part of the migration.
+SPDX-License-Identifier: Apache-2.0
+
+--self-test packs a C array, unpacks it, and checks that the round trip gives
+back every byte and descriptor.
 
 FILE FORMAT (little-endian, the byte order of every supported MCU):
 
@@ -36,13 +30,10 @@ FILE FORMAT (little-endian, the byte order of every supported MCU):
     ...           DER blob    every root's certificate, concatenated
     ...           table       count x { der_off, der_len, subj_off, subj_len }
 
-Table offsets are relative to the DER blob, not the file, so the loader adds one
-mapped base pointer and is done.  The subject DN is a slice of the cert it
-belongs to -- that is what lets anchor matching compare a DN without parsing
-every root -- so subj_off always lies inside its own entry's range, which
---verify checks.
-
-SPDX-License-Identifier: Apache-2.0
+Table offsets are relative to the DER blob, so the loader adds the blob's
+mapped address to each.  A subject DN is a slice of its own certificate, which
+lets anchor matching compare DNs without parsing a root; --verify checks that
+every subj_off lies inside its own entry.
 """
 
 import argparse
@@ -63,12 +54,12 @@ INL_COUNT = "TIKU_HTTPS_NROOTS"
 
 
 # --------------------------------------------------------------------------
-# reading the shipping .inl
+# reading a generated C array
 # --------------------------------------------------------------------------
 
 def parse_inl(path):
-    """Extract (der_bytes, [(der_off, der_len, subj_off, subj_len)]) from the
-    generated C the firmware compiles today."""
+    """Extract (der_bytes, [(der_off, der_len, subj_off, subj_len)]) from a
+    generated C .inl, as --to-inl writes it."""
     text = open(path, "r").read()
     try:
         body = text.split(INL_ARRAY + "[] = {")[1].split("};")[0]
@@ -88,13 +79,12 @@ def parse_inl(path):
 
 
 # --------------------------------------------------------------------------
-# reading an upstream Mozilla bundle (root-set REFRESH, not migration)
+# reading an upstream Mozilla PEM bundle
 # --------------------------------------------------------------------------
 
-# The verify kit supports RSA with SHA-256/384/512 and ECDSA on P-256/P-384.
-# A root outside that set cannot validate anything, so shipping it
-# would only cost bytes -- but dropping one silently would shrink the trust set
-# without anyone noticing, which is why --from-pem reports what it skipped.
+# The verify kit supports RSA with SHA-256/384/512 and ECDSA on P-256 and
+# P-384.  --from-pem drops a root whose key is outside that set, and one whose
+# subject it cannot find, and prints how many of each it dropped.
 OID_RSA_PK = bytes.fromhex("2a864886f70d010101")
 OID_EC_PK = bytes.fromhex("2a8648ce3d0201")
 OID_P256 = bytes.fromhex("2a8648ce3d030107")
@@ -126,15 +116,14 @@ def _asn1_children(buf, i):
 
 
 def find_subject_dn(der):
-    """Locate the subject DN inside a certificate, as (offset, length) covering
-    the whole RDNSequence including its tag and length bytes.
-
-    Certificate ::= SEQUENCE { tbsCertificate, signatureAlgorithm, signature }
-    TBSCertificate ::= SEQUENCE { [0] version OPTIONAL, serialNumber,
-                                  signature, issuer, validity, subject, ... }
-    so the subject is the second Name -- the 6th field with an explicit version
-    present, the 5th without.
-    """
+    """Return (offset, length) of a certificate's subject DN, covering the
+    whole RDNSequence with its tag and length bytes; raise ValueError when the
+    certificate has no delimited subject."""
+    # Certificate ::= SEQUENCE { tbsCertificate, signatureAlgorithm, signature }
+    # TBSCertificate ::= SEQUENCE { [0] version OPTIONAL, serialNumber,
+    #                               signature, issuer, validity, subject, ... }
+    # The subject is the second Name: the 6th field with an explicit version,
+    # the 5th without.
     kids = list(_asn1_children(der, 0))
     if not kids:
         raise ValueError("not a SEQUENCE")
@@ -164,6 +153,8 @@ def key_supported(der):
 
 
 def parse_pem(path):
+    """Pack the supported roots of a PEM bundle; return (der, table) and print
+    how many certificates were dropped."""
     import base64
     text = open(path, "r").read()
     blocks = re.findall(
@@ -197,6 +188,7 @@ def parse_pem(path):
 # --------------------------------------------------------------------------
 
 def pack(der, entries):
+    """Return the packed trust-store file for a DER blob and its table."""
     der_off = HDR_LEN
     pad = (-len(der)) % 4                      # keep the table 4-aligned
     table_off = der_off + len(der) + pad
@@ -209,6 +201,8 @@ def pack(der, entries):
 
 
 def unpack(blob):
+    """Check a packed file's header, size and CRC; return (der, table), or
+    exit with the first problem."""
     if len(blob) < HDR_LEN:
         raise SystemExit("file shorter than a header")
     magic, ver, count, der_off, der_len, table_off, crc = \
@@ -231,8 +225,8 @@ def unpack(blob):
 
 
 def verify(der, entries):
-    """Everything the loader is entitled to assume, checked here so it does not
-    have to be discovered on a board."""
+    """Check what the loader assumes of a DER blob and its table; return the
+    problems found, an empty list when there are none."""
     problems = []
     for i, (do, dl, so, sl) in enumerate(entries):
         if do + dl > len(der):
@@ -251,7 +245,7 @@ def verify(der, entries):
 
 
 # --------------------------------------------------------------------------
-# regenerating the .inl (the round-trip half of the gate)
+# regenerating a C array from a packed file
 # --------------------------------------------------------------------------
 
 INL_HEADER = """/*
@@ -276,6 +270,7 @@ INL_HEADER = """/*
 
 
 def to_inl(der, entries):
+    """Return the C .inl text for a DER blob and its table."""
     out = [INL_HEADER]
     out.append("static const unsigned char %s[] = {\n" % INL_ARRAY)
     for i in range(0, len(der), 16):
@@ -296,6 +291,7 @@ def to_inl(der, entries):
 # --------------------------------------------------------------------------
 
 def main(argv=None):
+    """Run the mode the arguments name; return the exit status."""
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[5])
     ap.add_argument("--from-inl", metavar="FILE",
                     help="pack from the generated C that ships today")

@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Dump a Vela-compiled model: the custom op, its tensors and their buffers."""
+"""
+Tiku Operating System v0.06
+Simple. Ubiquitous. Intelligence, Everywhere.
+http://tiku-os.org
+
+Authors: Ambuj Varshney <ambuj@tiku-os.org>
+
+dump.py - print the structure of a Vela-compiled .tflite.
+
+Prints the operator codes, the tensors with their shapes and buffers, the
+operators with their custom options, and the metadata.  Usage: dump.py <file>
+
+SPDX-License-Identifier: Apache-2.0
+"""
 import sys
 from ethosu.vela.tflite.Model import Model
 

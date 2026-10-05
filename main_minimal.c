@@ -1,11 +1,15 @@
 /*
- * Tiku Operating System v0.06 -- minimal smoke test (ARM and RISC-V ports).
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
  *
- * No kernel, scheduler or shell: brings up clocks and console, then prints a
- * heartbeat and toggles an LED in a loop.  If this does not print, the failure
- * is in boot/clock/console; if it does, the failure is higher up.
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * Build with MINIMAL=1, e.g. `make MCU=rp2350 MINIMAL=1`.
+ * main_minimal.c - bare smoke-test image, built by `make MINIMAL=1`.
+ *
+ * No kernel, scheduler or shell: brings up clocks and the console and prints
+ * a heartbeat.  RA8P1 and ESP32-C61 run hardware probes first, and the RA8P1
+ * image then serves USB mass storage in place of the heartbeat.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,9 +23,8 @@
 #include "arch/ambiq/tiku_uart_arch.h"
 #include "arch/ambiq/tiku_gpio_arch.h"
 
-/* EVB LED0: Apollo510 pad 165, Apollo4 Lite pad 12 (active-low in the BSP).
- * The console heartbeat is the primary signal; the LED toggle is a secondary
- * scope-visible indicator. */
+/* EVB LED0, active-low: Apollo510 pad 165, Apollo4 Lite pad 12.  The loop
+ * toggles it once per heartbeat line. */
 #if defined(TIKU_DEVICE_APOLLO4L)
 #define TIKU_MIN_LED_PAD   12u
 #else
@@ -30,13 +33,14 @@
 
 int main(void)
 {
-    /* Power/clock/cache bring-up (am_bsp_low_power_init under the hood —
-     * note its ~2 s silicon-settle delay before the first print). */
+    /* Caches and prefetch on; power and clocks stay as the secure bootloader
+     * set them. */
     tiku_cpu_boot_ambiq_init();
 
     tiku_ambiq_gpio_init_output(TIKU_MIN_LED_PAD);
 
-    /* SWO/ITM console @1MHz (bind am_util_stdio to am_hal_itm_print). */
+    /* Console on the EVB COM UART: UART0 on Apollo510, UART2 on Apollo4
+     * Lite. */
     tiku_uart_init();
 
     tiku_cpu_ambiq_delay_ms(100);
@@ -71,20 +75,18 @@ int main(void)
 #include "arch/nordic/tiku_cpu_common.h"
 #include "arch/nordic/tiku_uart_arch.h"
 #include "arch/nordic/tiku_gpio_arch.h"
-/* Board header (LED macros + TIKU_BOARD_NAME) via the device/board router, so
- * the smoke test uses the right pins and polarity on whichever nRF54L board is
- * selected -- the nRF54L15-DK LEDs are active-low, the nRF54LM20-DK's are
- * active-high, and the pins differ. */
+/* The board header, through the device/board router, supplies the LED macros
+ * and TIKU_BOARD_NAME: the nRF54L15-DK LEDs are active-low, the nRF54LM20-DK's
+ * active-high, on different pins. */
 #include "arch/nordic/tiku_device_select.h"
 
-/* Two on-board LEDs make the smoke test a boot beacon independent of the
- * console UART (board macros handle pin + active-high/low polarity):
- *   LED1 solid-on  = reached main() + GPIO works
- *   LED2 blinking  = reached the loop (delays work) */
+/* LED signals, independent of the console UART:
+ *   LED1 solid-on  = main() was reached and GPIO works
+ *   LED2 blinking  = the loop and its delays run */
 
-/* Fixed RAM progress markers, readable over the debugger (nrfutil device read
- * <symbol addr>) so boot/loop progress can be confirmed without eyeballing an
- * LED or relying on the console UART.  Volatile so the writes are not elided. */
+/* Progress markers in RAM, readable over the debugger (nrfutil device read at
+ * the symbol's address) without the LEDs or the console.  main() stores
+ * 0xB007B007 in the first; the second counts heartbeat lines. */
 volatile uint32_t g_nordic_main_reached;
 volatile uint32_t g_nordic_loop_count;
 
@@ -92,27 +94,26 @@ volatile uint32_t g_nordic_loop_count;
 /*
  * RRAM runtime-write probe (build with EXTRA_CFLAGS=-DTIKU_MIN_RRAM_TEST=1).
  *
- * HW result (2026-07-10, nRF54L15-DK): ALL THREE PASS -- with the WEN gate
- * open, plain CPU stores to RRAM just work, from RRAM-executing code, with or
- * without the nrfx READY/READYNEXT handshakes, buffered or not (the controller
- * stalls the bus as needed).  A store issued with WEN CLOSED faults the bus
- * instead.  Kept as a regression probe for the RRAM write path:
- *   T1  word store bracketed by the full nrfx handshake
+ * Plain CPU stores to RRAM, from code running in RRAM, with the RRAMC WEN
+ * gate open; a store with WEN closed faults the bus.  Each test prints its
+ * result and the value read back:
+ *   T1  word store bracketed by the full nrfx READY/READYNEXT handshake
  *   T2  8 back-to-back byte stores into the 32-entry write buffer, then
- *       TASKS_COMMITWRITEBUF + READY wait
- *   T3  WEN set, immediate store, no waits (the minimal path)
- * Scratch target: 0x17B000, inside the L15 persist partition (inside the
- * NVM region on the LM20) -- NOTE this clobbers durable words, so a kernel
- * image flashed afterwards re-primes (fine: a MINIMAL-only diagnostic).
+ *       TASKS_COMMITWRITEBUF and a READY wait
+ *   T3  WEN set, immediate store, no waits
+ *   T4  store, close WEN with no wait or commit, read back with WEN closed
+ * The scratch target, 0x17B000, is inside the persist partition on the
+ * nRF54L15 and inside the NVM region on the nRF54LM20, so the probe
+ * overwrites durable words a kernel image keeps there.
  */
 #include "arch/nordic/tiku_nordic_mdk.h"   /* per-device MDK router */
 
-#define RRAM_TEST_ADDR   0x0017B000UL      /* free RRAM on both devices:
-                                            * L15 persist base; LM20A mid-image
-                                            * free span (persist @0x1FB000) */
+#define RRAM_TEST_ADDR   0x0017B000UL      /* L15: persist partition;
+                                            * LM20: NVM region */
 #define RRAMC_WEN        (1UL << 0)
 #define RRAMC_BUF32      (32UL << 8)               /* WRITEBUFSIZE = 32 */
 
+/** @brief Run RRAM write tests T1 to T4 and print each result. */
 static void rram_test_run(void)
 {
     volatile uint32_t *w = (volatile uint32_t *)RRAM_TEST_ADDR;
@@ -158,9 +159,8 @@ static void rram_test_run(void)
     tiku_uart_printf("%s (b0=0x%x b7=0x%x)\n", ok ? "PASS" : "MISMATCH",
                      (unsigned int)b[0], (unsigned int)b[7]);
 
-    /* T3: the minimal path -- WEN then an immediate store, no waits.
-     * PASSes on hardware: with WEN open the controller accepts/stalls plain
-     * stores, so no handshake is strictly required for correctness. */
+    /* T3: WEN, then an immediate store with no ready waits.  With WEN open
+     * the controller stalls the bus until it accepts a plain store. */
     tiku_uart_puts("T3: minimal path (no ready waits)... ");
     NRF_RRAMC_S->CONFIG = cfg0 | RRAMC_WEN;
     *(volatile uint32_t *)(RRAM_TEST_ADDR + 16u) = 0xDEADBEEFu;
@@ -169,20 +169,16 @@ static void rram_test_run(void)
     tiku_uart_printf("PASS (read 0x%x)\n",
                      (unsigned int)*(volatile uint32_t *)(RRAM_TEST_ADDR + 16u));
 
-    /* T4: the persist-layer sequence -- store, then close the gate
-     * IMMEDIATELY (no READY wait, no commit), then read back with the gate
-     * CLOSED.  This is exactly what tiku_persist_register/write do via
-     * tiku_mpu_arch_lock_nvm().  On the nRF54L15 the read is coherent; on the
-     * nRF54LM20A this is the suspected stale-read window behind the
-     * persist-reset-survival failures (write lands in the RRAMC buffer, the
-     * closed-gate read bypasses it).  Reads again after a READY wait to show
-     * whether the data eventually commits. */
+    /* T4: store, then close WEN with no READY wait and no commit, as
+     * tiku_mpu_arch_lock_nvm() does after a write, and read back with the
+     * gate closed.  STALE-READ means that read missed the store; the second
+     * value is read again after a READY wait. */
     tiku_uart_puts("T4: store, close gate w/o commit, read... ");
     NRF_RRAMC_S->CONFIG = cfg0 | RRAMC_WEN;
     __asm__ volatile ("dsb 0xF" ::: "memory");
     while (NRF_RRAMC_S->READY == 0u)     { }        /* settle from T3    */
     *(volatile uint32_t *)(RRAM_TEST_ADDR + 24u) = 0xCAFEF00Du;
-    NRF_RRAMC_S->CONFIG = cfg0;                     /* close: NO waits   */
+    NRF_RRAMC_S->CONFIG = cfg0;                     /* close: no waits   */
     __asm__ volatile ("dsb 0xF" ::: "memory");
     {
         uint32_t first = *(volatile uint32_t *)(RRAM_TEST_ADDR + 24u);
@@ -200,17 +196,16 @@ static void rram_test_run(void)
 /*
  * RAM2 usable-span probe (build with EXTRA_CFLAGS=-DTIKU_MIN_RAM2_TEST=1).
  *
- * The nRF54LM20A has a second 256 KB SRAM bank (RAM2 @ 0x20040000) that the
- * app image does not use yet.  Phase-C bring-up proved its very top is NOT
- * CPU-writable (stacking into 0x2007FFF0 bus-faulted, CFSR STKERR) and the
- * debugger faults reading ~0x2007FF00+, so before the linker exposes the bank
- * this probe maps the exact usable boundary from the CPU side:
- *   pass 1: coarse write+verify sweep, 16 KB steps, whole bank
- *   pass 2: fine sweep of the top 8 KB, 256 B steps, printing each address
- *           BEFORE touching it -- if a write bus-faults, the last printed
- *           address is the first bad word and the default handler parks in
- *           WFE (LED2 stops blinking).
+ * The nRF54LM20A's second SRAM bank, RAM2 at 0x20040000, is 256 KB in the
+ * MDK, but its top is not backed: a store there bus-faults, and
+ * nrf54lm20a.ld stops SRAM2 1 KB short of it.  The probe finds the boundary
+ * from the CPU side:
+ *   pass 1: write and verify every 16 KB, 0x20040000 to 0x2007C000
+ *   pass 2: the top 8 KB in 256 B steps, printing each address before the
+ *           store, so after a bus fault the last address printed is the
+ *           first bad one; the default handler parks in WFE and LED2 stops.
  */
+/** @brief Sweep RAM2 coarse then fine, printing each result. */
 static void ram2_test_run(void)
 {
     uint32_t addr;
@@ -239,19 +234,19 @@ static void ram2_test_run(void)
 
 int main(void)
 {
-    /* Marker: proves execution reached main() (read this RAM word back). */
+    /* For the debugger: 0xB007B007 here shows main() ran. */
     g_nordic_main_reached = 0xB007B007u;
 
-    /* FIRST thing: light LED1 (active-low -> level 0) so a solid LED proves
-     * the reset handler ran, the C runtime came up, and GPIO works -- before
-     * any clock/delay/UART code that could hang. */
+    /* LED1 lights before any clock, delay or UART code, so a lit LED1 shows
+     * the reset handler and the C runtime ran and GPIO works. */
     TIKU_BOARD_LED1_INIT();
-    TIKU_BOARD_LED1_ON();               /* solid on = reached main() + GPIO ok */
+    TIKU_BOARD_LED1_ON();               /* on = main() reached, GPIO works */
 
-    /* Start the HFXO (UARTE reference). Delays use SysTick (no setup). */
+    /* Sets the PLL rate and starts the HFXO, the UARTE's reference.  The
+     * delays program SysTick on each call. */
     tiku_cpu_boot_nordic_init();
 
-    /* LED2 off initially; it blinks in the loop below. */
+    /* LED2 starts off and blinks in the loop below. */
     TIKU_BOARD_LED2_INIT();
 
     /* Console UARTE at TIKU_BOARD_UART_BAUD on the board-selected pins. */
@@ -299,15 +294,15 @@ int main(void)
 #include "arch/stm32n6/tiku_gpio_arch.h"
 #include "arch/stm32n6/tiku_stm32n6_regs.h"
 
-/* NUCLEO-N657X0-Q LED3, the one the boot stub proved reachable. LED1 is PG8
- * and LED2 is PG10 on the same port. */
+/* NUCLEO-N657X0-Q LED3, on PG0.  LED1 is PG8 and LED2 is PG10 on the same
+ * port. */
 #define TIKU_MIN_LED_PORT   STM32N6_GPIO_PORT_G
 #define TIKU_MIN_LED_PIN    0U
 
 int main(void)
 {
-    /* HSI only: the boot ROM's clock tree is left alone, so nothing here can
-     * strand the console the ROM already relies on. */
+    /* Turns HSI on and waits for it; the boot ROM's clock tree, which the
+     * console runs on, is otherwise unchanged. */
     tiku_cpu_boot_stm32n6_init();
 
     tiku_stm32n6_gpio_init_output(TIKU_MIN_LED_PORT, TIKU_MIN_LED_PIN);
@@ -317,8 +312,8 @@ int main(void)
 
     tiku_cpu_stm32n6_delay_ms(100);
     tiku_uart_puts("\n\n--- TikuOS minimal smoke test (NUCLEO-N657X0-Q) ---\n");
-    /* The image identifies its own delay calibration, so a heartbeat period
-     * can never be attributed to the wrong build. */
+    /* The build's fallback spin rate.  The delays measure the rate against
+     * LPTIM1 on first use and use this constant only if that fails. */
     tiku_uart_printf("spin=%u iters/ms\n",
                      (unsigned int)TIKU_STM32N6_SPIN_ITERS_PER_MS);
 
@@ -365,9 +360,8 @@ int main(void)
 
 int main(void)
 {
-    /* Nothing to do: the reset clock tree is what every constant in this image
-     * was computed from.  The call is here so the shape matches the other
-     * ports and R4 has one place to grow into. */
+    /* Empty on this port: the image starts on the reset clock tree, MOCO at
+     * 8 MHz, and tiku_cpu_freq_ra8p1_init() below raises it. */
     tiku_cpu_boot_ra8p1_init();
 
     tiku_ra8p1_gpio_init_output(TIKU_MIN_LED_PORT, TIKU_MIN_LED_PIN);
@@ -380,10 +374,9 @@ int main(void)
 
     tiku_ra8p1_clock_t c;
     tiku_cpu_ra8p1_clock_probe(&c);
-    /* NOMINAL, not measured: these are what SCKSCR and SCKDIVCR imply given
-     * the datasheet's figure for the selected source.  MOCO's own tolerance is
-     * +-10%, and on this board the real rate is 8.33 MHz -- so this line says
-     * what the tree is CONFIGURED as, and R4's job is to make it also true. */
+    /* Nominal rates: what SCKSCR and SCKDIVCR imply for the datasheet rate of
+     * the selected source.  MOCO is specified to +-10%; the cac line below
+     * measures it. */
     tiku_uart_printf("clk: cksel=%u src=%u Hz(nom) iclk=%u Hz pclka=%u Hz\n",
                      (unsigned int)c.cksel, (unsigned int)c.src_hz,
                      (unsigned int)c.iclk_hz, (unsigned int)c.pclka_hz);
@@ -391,32 +384,24 @@ int main(void)
                      (unsigned int)TIKU_REG32(RA8P1_SCB_CPUID),
                      (unsigned int)TIKU_CLOCK_ARCH_SECOND,
                      (unsigned int)TIKU_CLOCK_ARCH_INTERVAL);
-    /* SAU is readable only from the secure state, so a plausible region count
-     * here is direct evidence the image executes secure -- rather than the
-     * debugger's claim quoted back at itself. */
+    /* The SAU reads as zero outside the secure state, so a plausible region
+     * count here shows the image runs secure. */
     tiku_uart_printf("tz: sau_type=%x sau_ctrl=%x (secure-only port)\n",
                      (unsigned int)TIKU_REG32(RA8P1_SAU_TYPE),
                      (unsigned int)TIKU_REG32(RA8P1_SAU_CTRL));
 
-    /* Start the tick and let it drive the loop.  This is the whole point of
-     * the R2 smoke test: the interval between lines is measured by SysTick and
-     * by nothing else, so a line every second of WALL clock is proof the tick
-     * counts at the rate it claims.  A delay-loop heartbeat would prove only
-     * that the delay loop is self-consistent. */
+    /* Starts the SysTick tick and unmasks interrupts; the critical-section
+     * and delay tests below time themselves on the tick. */
     tiku_clock_arch_init();
     __asm__ volatile ("cpsie i" ::: "memory");
 
-    /* Prove the claim tiku_crit_arch.c makes in its header comment, rather
-     * than asserting it: hold a masked critical window across a whole tick
-     * period and show the counter advanced anyway.  It can, because SysTick is
-     * a core exception with no NVIC line for the mask to reach.  When R4 moves
-     * the tick to ULPT or AGT this test starts FAILING, which is exactly when
-     * someone needs to be told. */
+    /* A critical section masks the NVIC, and SysTick is a core exception
+     * outside that mask, so the tick advances inside the window.  The window
+     * waits for 4 ticks; a tick moved to an NVIC-routed timer prints FAIL. */
     {
         tiku_clock_arch_time_t a, b;
-        /* Bounded by ITERATIONS, not by the tick.  Waiting on the tick would
-         * make a silenced tick spin here forever -- the FAIL branch would be
-         * unreachable and the test could only ever pass. */
+        /* Bounded by an iteration budget as well as the tick, so a silenced
+         * tick ends the wait and prints FAIL. */
         unsigned long budget = 5000000UL;
 
         a = tiku_clock_arch_time();
@@ -429,9 +414,8 @@ int main(void)
                          (b != a) ? "PASS" : "FAIL -- tick was silenced");
     }
 
-    /* Is the busy-wait delay the length it claims?  Everything that paces
-     * itself without the tick -- notably a watchdog kick loop -- depends on
-     * this, and the answer is a measurement, not the spin constant. */
+    /* Times a 1000 ms busy-wait delay on the tick.  Code paced without the
+     * tick, such as a watchdog kick loop, relies on the delay's length. */
     {
         tiku_clock_arch_time_t a, b;
 
@@ -445,8 +429,8 @@ int main(void)
                          (unsigned int)tiku_cpu_ra8p1_spin_per_ms());
     }
 
-    /* The clock, stated without a host stopwatch: CAC counts one on-chip
-     * clock against the board's crystal, so this is the port's own witness. */
+    /* CAC counts MOCO against the board's main crystal, which gives MOCO's
+     * real rate. */
     {
         uint16_t n = tiku_cpu_ra8p1_cac_measure(RA8P1_CAC_CLK_MOCO,
                                                 RA8P1_CAC_CLK_MAIN, 3U);
@@ -475,9 +459,9 @@ int main(void)
     }
 
     /*
-     * SDRAM bring-up probe.  MINIMAL on purpose: no MPU and no caches,
-     * so what is measured is the controller and the part rather than a cache
-     * interaction.
+     * SDRAM bring-up probe.  Its reads test the controller and the part only
+     * with the D-cache off: this image sets up no MPU, and the default memory
+     * map makes the SDRAM at 0x68000000 write-back cacheable.
      */
     {
         volatile uint32_t *sd = (volatile uint32_t *)TIKU_RA8P1_SDRAM_ADDR;
@@ -494,8 +478,8 @@ int main(void)
                          (unsigned int)TIKU_REG8(RA8P1_SDSR));
 
         if (rc == TIKU_RA8P1_SDRAM_OK) {
-            /* Walking ones: catches a stuck or shorted data line before the
-             * long test spends a second proving the same thing. */
+            /* Walking ones on one word: a stuck or shorted data line fails
+             * here. */
             bad = 0u;
             for (i = 0; i < 32u; i++) {
                 sd[0] = (1UL << i);
@@ -505,11 +489,9 @@ int main(void)
                              (unsigned int)bad);
 
             /*
-             * WALKING ADDRESS.  Write a unique marker at each power-of-two
-             * word offset, then read them all back.  A dropped or swapped
-             * address line shows up here as one specific offset aliasing
-             * onto another, which a linear test only reports as "everything
-             * is wrong".
+             * Walking address: a unique marker at each power-of-two word
+             * offset, all read back after the writes.  A dropped or swapped
+             * address line shows as one offset aliasing onto another.
              */
             for (i = 0; i < 24u; i++) { sd[1UL << i] = 0xC0DE0000u + i; }
             sd[0] = 0xC0DEFFFFu;
@@ -531,11 +513,9 @@ int main(void)
                              " (sd0=%x)\n", (unsigned int)bad,
                              (unsigned int)sd[0]);
 
-            /* RETENTION vs ADDRESSING, isolated.  Write a small block and
-             * read it straight back, then again after >64 ms.  If the first
-             * passes and the second does not, the array is fine and refresh
-             * is not running -- which is the difference between a wiring
-             * fault and a controller one. */
+            /* Retention: 256 words read back at once and again after
+             * 150 ms, longer than the 64 ms refresh period.  A pass then a
+             * fail means the array works and refresh is not running. */
             for (i = 0; i < 256u; i++) { sd[i] = 0xA5A50000u + i; }
             bad = 0u;
             for (i = 0; i < 256u; i++) {
@@ -560,10 +540,9 @@ int main(void)
                              (unsigned int)TIKU_REG8(RA8P1_SDCKOCR));
 
             /*
-             * Address-as-data over the WHOLE 64 MB.  This is the test that
-             * matters: a wrong column shift, bus width or bank mapping shows
-             * up as ALIASING -- two addresses sharing a cell -- which any
-             * spot check passes and this cannot.
+             * Address-as-data over the whole part: a wrong column shift, bus
+             * width or bank mapping makes two addresses share a cell, which
+             * a spot check misses and this pass counts.
              */
             for (i = 0; i < words; i++) { sd[i] = i; }
             bad = 0u; first_bad = 0xFFFFFFFFu;
@@ -578,7 +557,7 @@ int main(void)
                              (unsigned int)(TIKU_RA8P1_SDRAM_BYTES >> 20),
                              (unsigned int)bad, (unsigned int)first_bad);
 
-            /* Bandwidth, GPT0 at PCLKD. */
+            /* Bandwidth: 4 MB written and read, timed on GPT0 at PCLKD. */
             TIKU_REG32(RA8P1_MSTPCRE) |= RA8P1_MSTPE_GPT0;
             TIKU_REG32(RA8P1_GPT_GTCLKCR) = RA8P1_GPT_GTCLKCR_BPEN;
             TIKU_REG32(RA8P1_MSTPCRE) &= ~RA8P1_MSTPE_GPT0;
@@ -602,8 +581,8 @@ int main(void)
         }
     }
 
-    /* Octo-SPI flash phase 1: identify the part over 1-1-1 SPI.  Known-good
-     * on this board: C2 86 3A -- Macronix, 1.8 V octaflash family, 512 Mb. */
+    /* Octo-SPI flash: the JEDEC ID over 1-1-1 SPI.  The EK-RA8P1's part reads
+     * C2 86 3A: Macronix, 1.8 V octaflash family, 512 Mb. */
     {
         uint8_t id[3] = { 0, 0, 0 };
         int rc = tiku_ra8p1_xflash_read_id(id);
@@ -612,9 +591,9 @@ int main(void)
                          (unsigned int)id[0], (unsigned int)id[1],
                          (unsigned int)id[2]);
 
-        /* SFDP offset 0 must read the JESD216 signature "SFDP".  This is the
-         * first transaction carrying an address AND dummy cycles, and it
-         * checks itself: no other four bytes are correct. */
+        /* SFDP offset 0 holds the JESD216 signature "SFDP".  This is the
+         * first transaction here with an address and dummy cycles, and only
+         * a correct one returns those four bytes. */
         {
             uint8_t sf[8] = { 0 };
             uint8_t sr = 0xFFU;
@@ -632,10 +611,9 @@ int main(void)
                              (unsigned int)((sr >> 1) & 1U));
 
             /*
-             * Memory-mapped read, cross-checked against the manual path.
-             * Agreement between two independent routes to the same bytes is
-             * the proof; a mapped window that returns plausible-looking data
-             * nobody compared is how a wrong dummy count ships.
+             * Memory-mapped read of bytes 0 to 7, compared with the same
+             * bytes read by a manual command; a wrong dummy count makes the
+             * two differ.
              */
             {
                 volatile const uint8_t *xm =
@@ -657,9 +635,9 @@ int main(void)
                                  bad);
 
                 /*
-                 * Write path on the LAST sector, deliberately far from
-                 * offset 0 which holds what this board shipped with.
-                 * Erase to FF, program a pattern, read it back both ways.
+                 * Write path on the last sector, away from the board's
+                 * factory content at offset 0: erase to FF, program a
+                 * pattern, read it back both ways.
                  */
                 {
                     const uint32_t a = TIKU_RA8P1_XFLASH_BYTES -
@@ -688,15 +666,13 @@ int main(void)
                                      re, blank, rp, match, mm_ok);
 
                     /*
-                     * OPI.  Verified against the device's own factory SFDP
-                     * inside opi_enter(), then benched here against the
-                     * single-bit baseline over the same span.
+                     * OPI: opi_enter() checks the mode against the device's
+                     * factory SFDP, then a 4 KB mapped read is timed in OPI
+                     * and in single-bit SPI.
                      *
-                     * Note the pattern programmed above was written in SPI,
-                     * so reading it back in DOPI returns it PAIR-SWAPPED --
-                     * that is the documented device behaviour, not a fault,
-                     * and it is why the check below compares against the
-                     * swapped pattern rather than the plain one.
+                     * Bytes programmed in SPI read back pair-swapped in DOPI,
+                     * as the device documents, so the check below compares
+                     * against the swapped pattern.
                      */
                     {
                         volatile uint32_t *cyc =
@@ -707,9 +683,8 @@ int main(void)
                         volatile uint32_t sink = 0;
 
                         /* DWT counts only once the trace block is powered:
-                         * DEMCR.TRCENA first, then CYCCNTENA.  Setting the
-                         * second without the first leaves the counter at
-                         * zero and a bench that reports an infinite speedup. */
+                         * DEMCR.TRCENA, then CYCCNTENA.  With TRCENA clear
+                         * the counter stays at zero. */
                         TIKU_REG32(0xE000EDFCUL) |= (1UL << 24);
                         TIKU_REG32(0xE0001000UL) |= 1UL;
                         *cyc = 0UL;
@@ -733,9 +708,9 @@ int main(void)
                             }
                             fast = *cyc - t0;
 
-                            /* The number that decides whether a model can
-                             * live in flash: a real bulk copy into SDRAM,
-                             * the way a boot-time restore would do it. */
+                            /* A 256 KB copy from mapped flash into SDRAM,
+                             * as a boot-time model restore does it, timed in
+                             * cycles. */
                             if (tiku_ra8p1_sdram_ready()) {
                                 uint32_t t1, cp;
                                 unsigned long kbps;
@@ -759,9 +734,9 @@ int main(void)
                                     (unsigned int)cp, (unsigned int)kbps,
                                     (unsigned int)(kbps ? 62800UL / kbps : 0));
                             }
-                            /* Bulk write: erase a sector, fill 4 KB with a
-                             * position-dependent pattern (so a shifted or
-                             * duplicated chunk cannot pass), read it back
+                            /* Bulk write: erase a sector, write 4 KB of a
+                             * position-dependent pattern, which a shifted or
+                             * duplicated chunk fails, and read it back
                              * through the mapped window. */
                             {
                                 static uint64_t buf[512];
@@ -792,10 +767,9 @@ int main(void)
                                                         / wc : 0));
                             }
 
-                            /* The backend path a filesystem actually
-                             * exercises: an odd offset and a length that is
-                             * no multiple of anything, so head, aligned
-                             * middle and tail all get used. */
+                            /* The NVM backend path a filesystem uses: 300
+                             * bytes at uneven offsets, so the head, the
+                             * aligned middle and the tail paths all run. */
                             {
                                 struct tiku_nvm_backend *be =
                                     tiku_ra8p1_xflash_backend();
@@ -806,9 +780,8 @@ int main(void)
                                 for (q2 = 0; q2 < 300UL; q2++) {
                                     ub[q2] = (uint8_t)(q2 * 7UL + 3UL);
                                 }
-                                /* Odd vs even start, and a 64-aligned start,
-                                 * so the failing case is isolated rather than
-                                 * inferred. */
+                                /* Offsets +5, +4 and +0 from a 64-aligned
+                                 * base: odd, even and aligned starts. */
                                 for (off2 = 0; off2 < 3U; off2++) {
                                     const uint32_t base2 =
                                         0x02010000UL + (off2 * 0x2000UL);
@@ -863,9 +836,9 @@ int main(void)
     }
 
     /*
-     * USB-HS bring-up.  A host attach produces a bus reset and DVSTCTR0.RHST
-     * reports the negotiated speed, both done by the hardware -- the chirp
-     * handshake is not software's job -- so this needs no endpoint code.
+     * USB-HS bring-up.  On a host attach the hardware performs the bus reset
+     * and the chirp handshake, and DVSTCTR0.RHST reports the negotiated
+     * speed.  EP0 is serviced by the USB-HS interrupt.
      */
     {
         static const char *const dvname[5] = {
@@ -894,19 +867,11 @@ int main(void)
             tiku_uart_printf("usbhs: attached, watching for a host...\n");
 
             /*
-             * Enumeration is a conversation with deadlines the host sets, so
-             * EP0 is serviced in a tight loop and the reporting is hung off
-             * a divider rather than the other way round.  Nothing else runs
-             * in this build, so polling is honest here; the moment a shell
-             * or scheduler shares the CPU this has to become an interrupt.
-             */
-            /*
-             * Bounded by time, NOT BY ITERATIONS.  A million turns of this
-             * loop is about a tenth of a second at 240 MHz, while the host
-             * takes seconds just to start asking -- so an iteration count
-             * silently decides how much of the enumeration gets serviced,
-             * and the answer changes with the compiler's mood.  Fifteen
-             * seconds is far longer than any host needs.
+             * Watches enumeration: polls the mass-storage pipes and, every
+             * 250 ms, prints the device state when it has changed.
+             *
+             * Bounded at 20 s of DWT cycles at 240 MHz, time for a host to
+             * enumerate.
              */
             {
                 volatile uint32_t *cyc = (volatile uint32_t *)0xE0001004UL;
@@ -972,12 +937,9 @@ int main(void)
                              " intsts0=%x frame=%u\n",
                              r[0], r[1], r[3], r[5], r[7]);
             /*
-             * Stated rather than left to be read off: a host
-             * drove a bus reset (device state left Powered) and the chirp
-             * handshake settled on high speed.  The frame counter is the
-             * corroborating evidence -- it only advances on SOF packets the
-             * host actually sends, so it cannot be produced by the device
-             * misreading its own idle bus.
+             * Summary lines: a bus reset seen (the device state left
+             * Powered), high speed negotiated, and a running frame counter,
+             * which advances only on SOF packets from the host.
              */
             {
                 int reset_seen = (tiku_ra8p1_usbhs_devstate() !=
@@ -1021,10 +983,9 @@ int main(void)
     }
 
     /*
-     * Restore whatever the last import left, BEFORE the disk is
-     * offered to a host.  Doing it first means the staging window already
-     * holds the model when the board starts serving, so a host that reads
-     * the disk sees the same bytes it wrote last session.
+     * Restores the model the last import left in flash into the staging
+     * window before the disk is served, so a host reads back what it wrote
+     * in the previous session.
      */
     {
         char mname[TIKU_STORE_NAME_MAX + 1u];
@@ -1042,19 +1003,16 @@ int main(void)
     }
 
     /*
-     * Nothing below may write the staging window or the flash slot.  Both
-     * now hold a real model, restored above, and a probe that fills either
-     * with a test pattern destroys it at every boot -- silently, because the
-     * pattern verifies against itself perfectly.  Exercise the store through
-     * the import path, which checks the same properties against data someone
-     * actually wanted.
+     * Nothing below writes the staging window or the flash slot: both hold
+     * the restored model, and a test pattern written there would replace it
+     * at every boot.  The store is exercised through the import path.
      */
 
     /*
-     * SERVE INDEFINITELY.  The gates above are a snapshot; a mass-storage
-     * device that stops answering the moment its probe loop ends looks to
-     * the host exactly like one that crashed, and the host duly resets it.
-     * Staying up is also what makes the disk usable from the other side.
+     * Serves the disk from here on and does not return: a mass-storage device
+     * that stops answering looks crashed to the host, which resets it.  Prints
+     * the USB and MSC counters every 5 s and imports a model when the host
+     * writes the commit record.
      */
     {
         volatile uint32_t *cyc = (volatile uint32_t *)0xE0001004UL;
@@ -1073,16 +1031,11 @@ int main(void)
             uint32_t c, rd, wr, bad, pk, st, iq, dv;
 
             /*
-             * DELIBERATE OBSTRUCTION, for the first thirty seconds only.
-             * Process context spends 10 ms of every iteration doing nothing,
-             * which is what a shell or a scheduler does to this loop in the
-             * real build.  Enumeration has deadlines the host sets, so a
-             * polled EP0 cannot survive it -- if the device still enumerates,
-             * the interrupt carried it rather than a free CPU.
-             *
-             * It is then lifted, because it obstructs the MSC pump too and
-             * that one IS in process context: leaving it on would prove the
-             * point and hand back a disk too slow to use.
+             * For the first 30 s each pass busy-waits 10 ms, the load a shell
+             * or scheduler puts on this loop.  Enumeration has host-set
+             * deadlines a polled EP0 would miss, so a device that enumerates
+             * meanwhile shows EP0 runs on the interrupt.  The wait then stops,
+             * since it also slows the MSC pump, which runs in this loop.
              */
             if ((*cyc - t0) < (30u * 240000000u)) {
                 tiku_cpu_ra8p1_delay_us(10000u);
@@ -1141,6 +1094,7 @@ int main(void)
         }
     }
 
+    /* Not reached: the serve loop above does not exit. */
     tiku_uart_printf("cache: state=%u (bit0 I, bit1 D)\n",
                      (unsigned int)tiku_ra8p1_cache_state());
 
@@ -1181,10 +1135,10 @@ int main(void)
 
 extern volatile uint32_t tiku_htimer_arch_isr_count;
 
-/* Dim on purpose: the LED sits under the user's eye on the desk. */
+/* RGB channel level, out of 255; it keeps the LED dim. */
 #define TIKU_MIN_RGB_LEVEL  16U
 
-/** @brief The extensions misa reports, one letter per set bit. */
+/** @brief Print the ISA from misa: one letter per extension bit set. */
 static void min_print_isa(uint32_t misa)
 {
     tiku_uart_puts("isa=rv32");
@@ -1207,10 +1161,10 @@ static void min_spin_us(unsigned long us)
 }
 
 /**
- * @brief The interrupt layer's claims, each measured on SYSTIMER.
+ * @brief Test the tick, critical sections and the htimer against SYSTIMER.
  *
- * Every wait is bounded by SYSTIMER, never by the tick, so a silent tick
- * reads as FAIL instead of a hang.
+ * Every wait is bounded by SYSTIMER, never by the tick, so with a silent tick
+ * each test still ends, printing FAIL.
  */
 static void min_tick_tests(void)
 {
@@ -1229,7 +1183,7 @@ static void min_tick_tests(void)
     tiku_htimer_arch_init();
     ESP32C61_CSR_SET(mstatus, ESP32C61_MSTATUS_MIE);
 
-    /* Rate: two seconds of crystal time should hold 256 ticks. */
+    /* Rate: 2 s of SYSTIMER time is 256 ticks; 255 to 257 passes. */
     a = tiku_clock_arch_time();
     min_spin_us(2000000UL);
     b = tiku_clock_arch_time();
@@ -1237,8 +1191,8 @@ static void min_tick_tests(void)
                      (unsigned)(b - a), 2U * TIKU_CLOCK_ARCH_SECOND,
                      ((b - a) >= 255U && (b - a) <= 257U) ? "PASS" : "FAIL");
 
-    /* A masked window holds the count still, and the first tick after it
-     * counts every tick the window hid. */
+    /* A 40 ms masked window holds the count still, and the first tick after
+     * it adds every tick the window hid. */
     a = tiku_clock_arch_time();
     tiku_crit_arch_mask_irqs(0U);
     min_spin_us(40000UL);
@@ -1309,10 +1263,10 @@ static unsigned long min_us_since(uint64_t t0)
 }
 
 /**
- * @brief The flash layer's claims, on the scratch sector only.
+ * @brief Test flash erase and program on the scratch sector only.
  *
  * Reads go through the mapped window, so every check after a write also
- * proves the invalidate: a stale cache line would show the old bytes.
+ * tests the cache invalidate: a stale line shows the old bytes.
  */
 static void min_flash_tests(void)
 {
@@ -1397,8 +1351,8 @@ int main(void)
     tiku_uart_printf("mac=%02x:%02x:%02x:%02x:%02x:%02x\n",
                      mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
-    /* Every rate the tree makes, each measured against SYSTIMER and its
-     * delay checked against the same clock, ending where it began. */
+    /* Steps through every rate the tree makes, from 160 MHz down to 10 MHz
+     * and back to 160, measuring each and a 10 ms delay against SYSTIMER. */
     static const unsigned int ladder[] = {160U, 80U, 40U, 20U, 10U, 160U};
     for (unsigned k = 0U; k < sizeof ladder / sizeof ladder[0]; k++) {
         tiku_esp32c61_clock_t tree;
@@ -1425,8 +1379,8 @@ int main(void)
     unsigned long clk = tiku_cpu_esp32c61_clock_get_hz();
     int           fault = tiku_cpu_esp32c61_clock_has_fault();
 
-    /* Paced by the tick alone, asleep in wfi between ticks: the line every
-     * second of wall clock is the tick's claim, and systimer its witness. */
+    /* Paced by the tick alone, asleep in wfi between ticks.  Each line also
+     * prints SYSTIMER, an independent clock, to check the tick's rate. */
     uint32_t i = 0;
     tiku_clock_arch_time_t next = tiku_clock_arch_time();
     while (1) {
@@ -1464,25 +1418,23 @@ int main(void)
 
 int main(void)
 {
-    /* Bring up XOSC + (try to) PLL_SYS + CLK_SYS + CLK_PERI. Falls
-     * back silently to 12 MHz XOSC if the PLL can't lock. */
+    /* XOSC, PLL_SYS, CLK_SYS and CLK_PERI.  A step that times out falls
+     * back to the 12 MHz XOSC, and the heartbeat then prints fault=1. */
     tiku_cpu_boot_rp2350_init();
 
-    /* Onboard LED pin (GP25 on plain Pico 2; on Pico 2 W this is
-     * shared with the CYW43 WL_CLK so it won't actually light an
-     * LED, but driving it as GPIO is harmless and a scope can see
-     * the toggle). */
+    /* GP25: the user LED on a Pico 2.  On a Pico 2 W it is the CYW43's
+     * WL_CS and lights nothing; the toggle still shows on a scope. */
     tiku_rp2350_gpio_init_output(25U);
 
     /* UART0 on GP0 (TX) / GP1 (RX) at TIKU_BOARD_UART_BAUD baud. */
     tiku_uart_init();
 
-    /* Burn 100 ms before the first message so any stale boot bytes
-     * from the FT232 / picotool reset settle. */
+    /* 100 ms before the first message, for stale bytes from the FT232 or
+     * picotool reset to clear. */
     tiku_cpu_rp2350_delay_ms(100);
 
-    /* Two-line preamble — easy to spot even if the UART line had
-     * pre-existing junk in the picocom buffer. */
+    /* Two blank lines set the banner apart from earlier bytes on the
+     * line. */
     tiku_uart_puts("\n\n--- TikuOS minimal smoke test (Pico 2 W) ---\n");
 
     unsigned long clk = tiku_cpu_rp2350_smclk_get_hz();

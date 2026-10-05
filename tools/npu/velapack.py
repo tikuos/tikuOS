@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""velapack.py - pack a Vela-compiled model into a store-resident .eth file.
+"""
+Tiku Operating System v0.06
+Simple. Ubiquitous. Intelligence, Everywhere.
+http://tiku-os.org
 
-WHY THIS EXISTS.  Vela emits its command stream and weights as a tensor inside
-the .tflite, and the usual way to reach them from firmware is a generated C
-array.  That array lands in .rodata, so the firmware image grows with the model
-and a bigger network costs code window rather than store -- the same trap
-tools/axonpack.py was written to escape on the Nordic side.
+Authors: Ambuj Varshney <ambuj@tiku-os.org>
 
-The file is RAW rather than relocatable.  Vela addresses everything through the
-NPU's region base pointers, so the command stream holds offsets and not
-addresses: nothing needs patching once the bases are programmed, which is the
-one place this is easier than the Axon path.
+velapack.py - pack a Vela-compiled model into a store-resident .eth file.
+
+Writes a .tflite's command stream, weights and arena layout to the file that
+tiku_ra8p1_npu_load() maps from /data.  The stream addresses memory through
+the NPU's region base pointers, so the file needs no relocation.
+
+SPDX-License-Identifier: Apache-2.0
 
 Layout, little-endian:
 
@@ -22,9 +24,8 @@ Layout, little-endian:
     12  ifm_off  u32      40  command stream, then the weights
     16  ofm_off  u32
 
-`kind` says what the expected output is, because the firmware checks the
-accelerator against its own arithmetic: 0 is the max-pool, 1 the identity
-convolution whose output is a copy of its input.
+`kind` names the expected output the firmware checks the NPU against: 0 is
+the max-pool, 1 the identity convolution, whose output equals its input.
 
 Usage: velapack.py <model_vela.tflite> <out.eth>
 """
@@ -43,7 +44,7 @@ m = Model.GetRootAs(buf, 0)
 sg = m.Subgraphs(0)
 raw = bytes(m.Buffers(sg.Tensors(0).Buffer()).DataAsNumpy())
 
-# Driver-action records, exactly as tools/npu/genc.py walks them.
+# Walks the driver-action records as tools/npu/genc.py does.
 assert raw[:4] == b"COP1", raw[:4]
 cms, cfg, i = None, 0, 4
 while i + 4 <= len(raw):
@@ -71,12 +72,13 @@ for k in range(m.MetadataLength()):
 assert off is not None, "no OfflineMemoryAllocation metadata"
 
 arena = int(sg.Tensors(2).Shape(0))
-# An empty buffer answers 0 rather than an array, so ask the length.
+# DataAsNumpy() of an empty buffer returns 0, not an array, so the length
+# is checked first.
 _wb = m.Buffers(sg.Tensors(1).Buffer())
 wts = bytes(_wb.DataAsNumpy()) if _wb.DataLength() else b""
 
-# The identity convolution is the only model with weights, and its output is
-# its input; everything else here is the max-pool.
+# A model with weights is packed as the identity convolution, one without as
+# the max-pool.
 in_t, out_t = sg.Tensors(3), sg.Tensors(4)
 if wts:
     kind = KIND_IDENTITY_CONV

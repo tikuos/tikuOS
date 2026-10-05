@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
 """
-icon_bake.py -- Convert PNG images into TikuOS gfx-kit image assets.
+Tiku Operating System v0.06
+Simple. Ubiquitous. Intelligence, Everywhere.
+http://tiku-os.org
 
-Takes a PNG (or any Pillow-readable raster), thresholds it to a chosen
-bit depth, packs it into one of the formats understood by
-`tiku_kits_gfx_image_t`, and emits a `.h`/`.c` pair declaring an
-`extern const tiku_kits_gfx_image_t <name>`.
+Authors: Ambuj Varshney <ambuj@tiku-os.org>
+
+icon_bake.py - convert a PNG into a TikuOS gfx-kit image asset.
+
+Reduces a Pillow-readable image to 1, 2 or 4 bits per pixel, packs it in a
+tiku_kits_gfx_image_t format, and writes tiku_kits_gfx_image_<name>.h and .c,
+which declare and define tiku_kits_gfx_image_<name>.
+
+SPDX-License-Identifier: Apache-2.0
 
 Usage:
 
@@ -31,13 +38,11 @@ Usage:
     python3 tools/icon_bake.py --png logo.png --name logo \\
         --threshold 96 --invert
 
-After running, `<name>.h` and `<name>.c` appear in the output dir
-(default `tikukits/gfx/icons/`). Include the header from your app
-and pass `&<name>` to any `tiku_kits_gfx_image_*` call.
+The files go to the --out directory, tikukits/gfx/icons/ by default, whose
+*.c the Makefile compiles.  An application includes the header and passes
+&tiku_kits_gfx_image_<name> to a tiku_kits_gfx_image_* call.
 
 Requires:  Pillow  (`pip install Pillow`)
-
-SPDX-License-Identifier: Apache-2.0
 """
 
 from __future__ import annotations
@@ -69,7 +74,8 @@ FORMATS = {
 # --------------------------------------------------------------------------
 
 def encode_1bpp(pixels, w, h, lsb_first):
-    """Pack a list of 0/1 ints into row-major bytes."""
+    """Pack 0/1 pixels into row-major bytes, each row padded to a whole byte;
+    the leftmost pixel is bit 7, or bit 0 with lsb_first."""
     out = bytearray()
     bytes_per_row = (w + 7) // 8
     for y in range(h):
@@ -145,6 +151,8 @@ def encode_4bpp_gray(pixels, w, h):
 # --------------------------------------------------------------------------
 
 def prepare_1bpp(img, threshold, invert):
+    """Return (pixels, w, h) at 1 bit: 1 where the grey level is below
+    threshold, flipped by invert."""
     g = img.convert("L")
     pixels = []
     for y in range(g.height):
@@ -158,6 +166,8 @@ def prepare_1bpp(img, threshold, invert):
 
 
 def prepare_4bpp_gray(img, invert):
+    """Return (pixels, w, h) as 4-bit grey levels, the top nibble of each
+    8-bit level, inverted by invert."""
     g = img.convert("L")
     pixels = []
     for y in range(g.height):
@@ -165,14 +175,14 @@ def prepare_4bpp_gray(img, invert):
             v = g.getpixel((x, y))         # 0..255
             v = 15 - (v >> 4) if invert else (v >> 4)
             pixels.append(v & 0x0F)
-        # Note: 0 is white, 15 is black after the shift only if invert is
-        # used; the gfx kit's blit thresholds at 8 regardless.
+        # Without invert 15 is white and 0 is black; invert swaps them.  The
+        # gfx kit's blit draws the levels from 8 up in either case.
     return pixels, g.width, g.height
 
 
 def prepare_2bpp_bwr(img, invert):
-    """Snap each pixel to one of {white, black, red}. Pixels with
-    high alpha < 128 are emitted as transparent (3)."""
+    """Return (pixels, w, h), each pixel snapped to white (0), black (1) or
+    red (2), the nearest in RGB; alpha below 128 gives transparent (3)."""
     rgba = img.convert("RGBA")
     pixels = []
     for y in range(rgba.height):
@@ -209,6 +219,8 @@ def prepare_2bpp_bwr(img, invert):
 # --------------------------------------------------------------------------
 
 def emit(name, fmt_enum, w, h, data, out_dir, src_path):
+    """Write tiku_kits_gfx_image_<name>.h and .c into out_dir; return both
+    paths."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -266,6 +278,7 @@ def emit(name, fmt_enum, w, h, data, out_dir, src_path):
 # --------------------------------------------------------------------------
 
 def main():
+    """Bake one image from the arguments; return the exit status."""
     p = argparse.ArgumentParser(
         description="Bake a PNG icon into a TikuOS gfx_image_t C asset.")
     p.add_argument("--png", required=True, help="Input image (any Pillow format)")

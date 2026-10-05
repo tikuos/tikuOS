@@ -1,27 +1,28 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
  *
- * ref_original.c - the PRE-EXTRACTION Apollo510 logic, copied verbatim.
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * ref_original.c - reference copy of the Apollo510 mass-storage SCSI logic.
+ *
+ * A frozen copy of the SCSI decisions and CSW layout of the Apollo510 USB
+ * driver, with a ref_ prefix: the reference msc_diff_test compares
+ * kernel/usb/tiku_usbd_msc.c against.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /*
- * This is not a reimplementation and must never become one.  It is the code
- * that shipped in arch/ambiq/tiku_usb_arch.c before U0 moved the wire format
- * out, transcribed unchanged apart from the prefixes needed to link it beside
- * its replacement.  Its only job is to be an ORACLE: the extraction claims to
- * preserve behaviour, and the way to check that claim is to run both over the
- * same inputs and demand identical answers.
- *
- * If a deliberate behaviour change is ever wanted, this file must change in
- * the same commit and the diff must say why -- otherwise the differential
- * test silently starts comparing new code against new code.
+ * The logic here stays as copied.  msc_diff_test fails on any input where
+ * tiku_usbd_msc.c answers differently, so an intended behaviour change to
+ * tiku_usbd_msc.c is made here as well, in the same commit.
  */
 
 #include "ref_original.h"
 
-/* --- state the original kept as file-scope statics ---------------------- */
+/* --- module state, exported so msc_diff_test can set and compare it ----- */
 uint32_t ref_msc_blocks = 2048u;
 uint8_t  ref_sense_key, ref_sense_asc;
 uint8_t  ref_bot_status;
@@ -44,11 +45,13 @@ int      ref_store_is_emmc;
 
 /* --- verbatim ----------------------------------------------------------- */
 
+/** @brief Read a big-endian 32-bit field. */
 static uint32_t be32(const uint8_t *p)
 {
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
            ((uint32_t)p[2] << 8) | (uint32_t)p[3];
 }
+/** @brief Write a big-endian 32-bit field. */
 static void put_be32(uint8_t *p, uint32_t v)
 {
     p[0] = (uint8_t)(v >> 24); p[1] = (uint8_t)(v >> 16);
@@ -62,6 +65,7 @@ int ref_msc_lba_ok(uint32_t lba, uint32_t nblk)
     return (nblk <= (ref_msc_blocks - lba)) ? 1 : 0;
 }
 
+/** @brief Latch sense @p key and @p asc and fail the command. */
 static void msc_fail(uint8_t key, uint8_t asc)
 {
     ref_sense_key = key;
@@ -109,7 +113,7 @@ uint16_t ref_msc_small_reply(const uint8_t *cb, uint32_t host_len)
         break;
 
     case SCSI_READ_CAPACITY10:
-        put_be32(&r[0], ref_msc_blocks - 1u);   /* LAST LBA, not the count   */
+        put_be32(&r[0], ref_msc_blocks - 1u);   /* last LBA, not the count   */
         put_be32(&r[4], MSC_BLOCK_SIZE);
         len = 8u;
         break;
@@ -134,9 +138,9 @@ uint16_t ref_msc_small_reply(const uint8_t *cb, uint32_t host_len)
 }
 
 /*
- * The decision half of the original msc_scsi(), with the FIFO calls replaced
- * by recording what they would have been asked to do.  The control flow,
- * the assignment order and every constant are unchanged.
+ * The decision half of the driver's msc_scsi(): each FIFO call is replaced by
+ * a record in *out of what it was asked to do.  Control flow, assignment
+ * order and constants are as copied.
  */
 void ref_msc_scsi(const uint8_t *cb, uint32_t host_len, ref_cmd_t *out)
 {
@@ -184,7 +188,7 @@ void ref_msc_scsi(const uint8_t *cb, uint32_t host_len, ref_cmd_t *out)
     }
 }
 
-/** @brief The original CSW layout, byte by byte as it was written. */
+/** @brief Write the 13-byte CSW, byte by byte as the driver wrote it. */
 void ref_build_csw(uint8_t *p, uint32_t tag, uint32_t residue, uint8_t status)
 {
     p[0] = 0x55; p[1] = 0x53; p[2] = 0x42; p[3] = 0x53;   /* "USBS" LE      */

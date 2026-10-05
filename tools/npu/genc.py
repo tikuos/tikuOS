@@ -1,5 +1,19 @@
 #!/usr/bin/env python3
-"""Emit the Vela command stream and its arena layout as a C header."""
+"""
+Tiku Operating System v0.06
+Simple. Ubiquitous. Intelligence, Everywhere.
+http://tiku-os.org
+
+Authors: Ambuj Varshney <ambuj@tiku-os.org>
+
+genc.py - write a Vela-compiled max-pool as arch/ra8p1/tiku_npu_maxpool.h.
+
+Takes the command stream, the CONFIG it was built for and the arena layout
+from a .tflite and writes them, comments included, as the C header.
+Usage: genc.py <model.tflite> <out.h>
+
+SPDX-License-Identifier: Apache-2.0
+"""
 import struct
 import sys
 
@@ -9,12 +23,11 @@ buf = open(sys.argv[1], "rb").read()
 m = Model.GetRootAs(buf, 0)
 sg = m.Subgraphs(0)
 raw = bytes(m.Buffers(sg.Tensors(0).Buffer()).DataAsNumpy())
-# Vela prefixes a "COP1" header carrying the NPU config the stream was built
-# for; the hardware queue must be pointed past it or the parser rejects byte 0.
-# The payload is a magic word followed by driver-action records, NOT a header
-# and a stream: 1 = optimizer config (carries the cfg the stream was built
-# for), 2 = command stream with its length in 32-BIT WORDS, 5 = nop.  Slicing
-# at a fixed offset lands inside a record and feeds the queue garbage.
+# Vela's buffer is the magic "COP1" and then driver-action records: 1 is the
+# optimizer config, carrying the CONFIG the stream was built for; 2 is the
+# command stream, its length in 32-bit words; 5 is a nop.  The NPU queue takes
+# only the command stream's payload: its parser rejects the magic, and a fixed
+# offset into the buffer can land inside a record.
 assert raw[:4] == b"COP1", raw[:4]
 cms, cfg_expect, i = None, 0, 4
 while i + 4 <= len(raw):
@@ -76,6 +89,8 @@ lines = [
     "",
     "#include <stdint.h>",
     "",
+    "/** @brief Arena layout in bytes, and the square input and output"
+    " sides. */",
     f"#define TIKU_NPU_MP_ARENA_BYTES   {arena}u",
     f"#define TIKU_NPU_MP_IFM_OFFSET    {in_off}u",
     f"#define TIKU_NPU_MP_OFM_OFFSET    {out_off}u",
@@ -83,11 +98,14 @@ lines = [
     f"#define TIKU_NPU_MP_OFM_BYTES     {out_n}u",
     f"#define TIKU_NPU_MP_IFM_DIM       {in_dim}u",
     f"#define TIKU_NPU_MP_OFM_DIM       {out_dim}u",
-    "#define TIKU_NPU_MP_REGION        1u",
-    f"#define TIKU_NPU_MP_CMS_BYTES     {len(cms)}u",
+    "#define TIKU_NPU_MP_REGION        1u"
+    "     /**< NPU region of the tensors */",
+    f"#define TIKU_NPU_MP_CMS_BYTES     {len(cms)}u"
+    "   /**< command stream length     */",
     "/** @brief CONFIG the stream was built for; the silicon must agree. */",
     f"#define TIKU_NPU_MP_CFG_EXPECT    0x{cfg_expect:08x}ul",
     "",
+    "/** @brief The Ethos-U55 command stream, as the NPU queue executes it. */",
     "static const uint8_t tiku_npu_mp_cms[TIKU_NPU_MP_CMS_BYTES] = {",
 ]
 for i in range(0, len(cms), 12):

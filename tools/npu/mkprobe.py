@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
-"""mkprobe.py - author a one-operator int8 model to ask Vela where it lands.
+"""
+Tiku Operating System v0.06
+Simple. Ubiquitous. Intelligence, Everywhere.
+http://tiku-os.org
 
-The partition is the number that decides whether a network is worth putting on
-this accelerator at all, and it is a property of the OPERATORS rather than of
-the model.  So ask one operator at a time: compile the result and read whether
-Vela kept it or handed it back to the CPU.
+Authors: Ambuj Varshney <ambuj@tiku-os.org>
 
-Usage: mkprobe.py <OPERATOR_NAME> <out.tflite> [dim]
+mkprobe.py - author a one-operator int8 model, to see where Vela places it.
+
+Builds a model of the one TFLite builtin operator named on the command line.
+Compiling it with Vela shows whether that operator runs on the NPU or falls
+back to the CPU.
+
+SPDX-License-Identifier: Apache-2.0
+
+Usage: mkprobe.py <OPERATOR_NAME> <out.tflite> [dim]   (dim defaults to 32)
 """
 import sys
 
@@ -25,6 +33,7 @@ b = flatbuffers.Builder(4096)
 
 
 def vec(start_fn, items):
+    """Build a flatbuffer vector of table offsets; return its offset."""
     start_fn(b, len(items))
     for x in reversed(items):
         b.PrependUOffsetTRelative(x)
@@ -32,6 +41,7 @@ def vec(start_fn, items):
 
 
 def ivec(start_fn, items, prepend):
+    """Build a flatbuffer vector of scalars with prepend; return its offset."""
     start_fn(b, len(items))
     for x in reversed(items):
         prepend(x)
@@ -39,6 +49,7 @@ def ivec(start_fn, items, prepend):
 
 
 def quant(scale, zp):
+    """Return QuantizationParameters with one scale and one zero-point."""
     sc = ivec(QuantizationParameters.StartScaleVector, [scale],
               b.PrependFloat32)
     z = ivec(QuantizationParameters.StartZeroPointVector, [zp],
@@ -50,6 +61,8 @@ def quant(scale, zp):
 
 
 def tensor(name, shape, buf_idx, scale, zp):
+    """Return an int8 Tensor of the given shape and buffer, quantised by
+    quant(scale, zp)."""
     nm = b.CreateString(name)
     sh = ivec(Tensor.StartShapeVector, shape, b.PrependInt32)
     q = quant(scale, zp)

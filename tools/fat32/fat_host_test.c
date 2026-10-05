@@ -1,20 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
  *
- * fat_host_test.c - F0: exercise kernel/fs/tiku_fat.c on a Linux host.
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * THE POINT OF THIS FILE.  A filesystem parser is nothing but derived values,
- * and this project has paid repeatedly for values that were derived rather
- * than read.  Here there is a reference implementation available for free --
- * the Linux kernel's own FAT driver, which wrote the corpus and can read it
- * back -- so every claim the parser makes is checked against what the rest of
- * the world thinks the same bytes mean, before the code ever sees hardware.
+ * fat_host_test.c - host test of kernel/fs/tiku_fat.c on real FAT images.
  *
- * It also runs the NEGATIVE corpus.  A reader that mounts a FAT16 volume, or
- * follows a chain that loops, fails in ways that are silent on a board and
- * obvious here.
- *
- * Build: tools/fat32/Makefile      Run: ./fat_host_test <corpus-dir>
+ * Mounts the images mkcorpus.sh writes with mkfs.vfat and mtools, reads every
+ * file back against its known payload, refuses FAT12/16 and blank images, and
+ * catches looping chains.  Run: ./fat_host_test <corpus-dir>.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -28,6 +23,7 @@
 
 static int g_pass, g_fail;
 
+/** @brief Count and print one check: a pass when @p cond is non-zero. */
 static void ok(int cond, const char *what)
 {
     if (cond) { g_pass++; } else { g_fail++; }
@@ -35,11 +31,13 @@ static void ok(int cond, const char *what)
 }
 
 /*---------------------------------------------------------------------------*/
-/* The injected block device: a file.                                        */
+/* IMAGE-FILE BLOCK DEVICE                                                   */
 /*---------------------------------------------------------------------------*/
 
+/** @brief An image file as a block device; @c base is added to every LBA. */
 typedef struct { FILE *f; uint32_t base; } img_t;
 
+/** @brief Read @p n sectors at @p lba from the image; 0, or -1 on error. */
 static int img_read(uint32_t lba, uint32_t n, void *buf, void *ctx)
 {
     img_t *im = (img_t *)ctx;
@@ -62,7 +60,7 @@ static uint8_t payload_at(uint32_t off)
     return (uint8_t)((off & ~3u) >> ((off & 3u) * 8u));
 }
 
-/** Check @p n bytes read from offset @p off against the corpus payload. */
+/** @brief 1 when @p n bytes read from offset @p off match the payload. */
 static int payload_ok(const uint8_t *p, uint32_t n, uint32_t off)
 {
     uint32_t i;
@@ -72,7 +70,7 @@ static int payload_ok(const uint8_t *p, uint32_t n, uint32_t off)
     return 1;
 }
 
-/** Read a whole file through the parser and verify every byte. */
+/** @brief Read a whole file through the parser and check every byte. */
 static void check_file(tiku_fat_t *fs, const char *path, uint32_t expect_size)
 {
     tiku_fat_file_t f;
@@ -111,6 +109,7 @@ static void check_file(tiku_fat_t *fs, const char *path, uint32_t expect_size)
     ok(good && total == f.size, msg);
 }
 
+/** @brief Run ends a runs_t records; runs past this are only counted. */
 #define RUNS_MAX 16u
 
 /** @brief Byte offset at which each run of a file's chain ends. */
@@ -226,6 +225,7 @@ static uint32_t check_seek(tiku_fat_t *fs, const char *path,
     return r.n;
 }
 
+/** @brief Mount image @p name and check the result is @p want. */
 static void expect_mount(const char *dir, const char *name,
                          tiku_fat_err_t want)
 {
@@ -250,13 +250,11 @@ static void expect_mount(const char *dir, const char *name,
 }
 
 /**
- * @brief Plant a loop in a FILE'S chain and require the reader to refuse it.
+ * @brief Plant a loop in /big.bin's chain and check the reader refuses it.
  *
- * The first version of this gate corrupted an arbitrary FAT entry and then
- * walked the ROOT -- which fits in one cluster, so the walk never followed
- * the FAT and never met the loop.  It passed without testing anything, which
- * is the failure mode negative gates exist to avoid, so it now finds a real
- * multi-cluster file, points its SECOND cluster back at its FIRST, and reads.
+ * The loop is in a multi-cluster file, since the root fits in one cluster and
+ * a walk of it never follows the FAT.  tiku_fat_verify() must return CORRUPT,
+ * and reading the file must end.
  */
 static void expect_file_loop_refused(const char *dir)
 {
@@ -282,7 +280,7 @@ static void expect_file_loop_refused(const char *dir)
         fclose(a); fclose(b);
     }
 
-    /* Learn where /big.bin starts, using the parser we are about to break. */
+    /* Find where /big.bin starts, with the parser, before the chain breaks. */
     im.f = fopen(dst, "rb"); im.base = 0u;
     if (!im.f) { ok(0, "fileloop: cannot open copy"); return; }
     if (tiku_fat_mount(&fs, img_read, &im) != TIKU_FAT_OK ||
@@ -294,7 +292,8 @@ static void expect_file_loop_refused(const char *dir)
     off   = fs.fat_lba * TIKU_FAT_SECTOR + (first + 1u) * 4u;
     fclose(im.f);
 
-    /* Point the file's SECOND cluster back at its first. */
+    /* Point FAT entry first + 1, the second cluster of the contiguous
+     * /big.bin, back at its first. */
     w = fopen(dst, "r+b");
     if (!w) { ok(0, "fileloop: cannot reopen"); return; }
     fseek(w, (long)off, SEEK_SET);
@@ -309,14 +308,14 @@ static void expect_file_loop_refused(const char *dir)
     if (!im.f) { ok(0, "fileloop: cannot reopen"); return; }
     if (tiku_fat_mount(&fs, img_read, &im) == TIKU_FAT_OK &&
         tiku_fat_open(&fs, "/big.bin", &f) == TIKU_FAT_OK) {
-        /* The documented defence: an explicit chain verification. */
+        /* tiku_fat_verify() walks the whole chain and must report it. */
         refused = (tiku_fat_verify(&fs, &f) == TIKU_FAT_ERR_CORRUPT);
         snprintf(msg, sizeof msg, "fileloop: tiku_fat_verify -> %s",
                  refused ? "CORRUPT (correct)" : "accepted a looping chain");
         ok(refused, msg);
 
-        /* And the read path must at minimum TERMINATE, which is what the
-         * plan requires of it -- bounded, never spinning. */
+        /* The read path does not detect loops, but it must end: a read past
+         * 16 MB counts as spinning. */
         {
             uint32_t total = 0u;
             int terminated = 0;
@@ -357,8 +356,7 @@ static int copy_image(const char *src, const char *dst)
  * @brief Drop the middle piece of a three-piece long name and list the root.
  *
  * Piece 3 moves into piece 2's slot and its own slot is marked deleted, so the
- * run reads 3, 1 and then the short entry.  A name with a gap must come back
- * as the 8.3 name, not with unwritten bytes where the lost piece belonged.
+ * run reads 3, 1 and then the short entry.  The listing must give the 8.3 name.
  */
 static void expect_lfn_gap_refused(const char *dir)
 {
@@ -439,7 +437,7 @@ static void expect_lfn_gap_refused(const char *dir)
     if (im.f) { fclose(im.f); }
 }
 
-/** The chain-loop image: the walk must FAIL, not hang. */
+/** @brief Walk the root of the chain-loop image: the walk must end. */
 static void expect_loop_refused(const char *dir)
 {
     char path[512], msg[256];
@@ -459,8 +457,8 @@ static void expect_loop_refused(const char *dir)
         fclose(im.f);
         return;
     }
-    /* Walking the root must terminate one way or another -- with entries, or
-     * with CORRUPT.  What it must never do is spin. */
+    /* Walking the root must end, with entries or with CORRUPT; more than
+     * 10000 entries counts as spinning. */
     if (tiku_fat_opendir(&fs, "/", &d) == TIKU_FAT_OK) {
         for (;;) {
             tiku_fat_err_t rc = tiku_fat_readdir(&fs, &d, &e);
@@ -476,6 +474,7 @@ static void expect_loop_refused(const char *dir)
     fclose(im.f);
 }
 
+/** @brief Mount one FAT32 image; run the read, seek, name and path checks. */
 static void run_image(const char *dir, const char *name, uint32_t base)
 {
     char path[512], msg[256];
@@ -515,7 +514,7 @@ static void run_image(const char *dir, const char *name, uint32_t base)
     check_file(&fs, "/EXACT.BIN", 4096u);
     check_file(&fs, "/BOUND.BIN", 12288u);
     check_file(&fs, "/big.bin", 1500000u);
-    check_file(&fs, "/FRAGGED.BIN", 1500000u);      /* deliberately fragmented */
+    check_file(&fs, "/FRAGGED.BIN", 1500000u);      /* fragmented chain */
     check_file(&fs, "/sub/deeper/NESTED.BIN", 4096u);
     check_file(&fs, "/big.BIN", 1500000u);          /* case-insensitive */
 
@@ -577,6 +576,7 @@ static void run_image(const char *dir, const char *name, uint32_t base)
     fclose(im.f);
 }
 
+/** @brief Run every check on the corpus in argv[1]; exit 1 if any failed. */
 int main(int argc, char **argv)
 {
     const char *dir = (argc > 1) ? argv[1] : "/tmp/fat32corpus";

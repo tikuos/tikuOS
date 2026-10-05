@@ -1,16 +1,19 @@
 #!/bin/sh
-# Build the FAT32 test corpus.
 #
-# Every image here is written by mkfs.vfat and populated through the Linux
-# kernel's own FAT driver, which makes the reference implementation for every
-# gate the same code the rest of the world uses.  A parser tested only against
-# images its own author generated proves considerably less.
+# Tiku Operating System v0.06
+# Simple. Ubiquitous. Intelligence, Everywhere.
+# http://tiku-os.org
 #
-# Needs: mkfs.vfat (dosfstools) and mtools (mcopy/mmd/mdel) -- mtools writes
-# into the images WITHOUT root, which is the whole reason this harness needs
-# no privileges and can run anywhere.
+# Authors: Ambuj Varshney <ambuj@tiku-os.org>
 #
-# usage: tools/fat32/mkcorpus.sh <outdir>
+# mkcorpus.sh - build the FAT images fat_host_test reads.
+#
+# Formats each image with mkfs.vfat (dosfstools) and fills it with mtools
+# (mcopy, mmd, mdel), which write into an image file without root.
+# usage: tools/fat32/mkcorpus.sh <outdir>, default /tmp/fat32corpus
+#
+# SPDX-License-Identifier: Apache-2.0
+
 set -e
 OUT="${1:-/tmp/fat32corpus}"
 mkdir -p "$OUT"
@@ -43,7 +46,7 @@ gen "$OUT/frag_b.bin" 300000
 # ---- FAT32 at two cluster sizes -------------------------------------------
 for SPC in 1 8; do
     IMG="$OUT/fat32_spc$SPC.img"
-    # 64 MB is comfortably past the 65525-cluster floor at spc=1
+    # 512 MB keeps both cluster sizes above FAT32's 65525-cluster floor
     rm -f "$IMG"; truncate -s 512M "$IMG"
     mkfs.vfat -F 32 -s "$SPC" -n TIKUTEST "$IMG" >/dev/null
 
@@ -59,9 +62,8 @@ for SPC in 1 8; do
     mcopy -i "$IMG" "$OUT/small.bin" "::/twenty-six-characters-name"
     mcopy -i "$IMG" "$OUT/exact.bin" ::/sub/deeper/NESTED.BIN
 
-    # FRAGMENTATION ON PURPOSE.  Interleave two files, then delete one, then
-    # write a third into the holes -- the chain walker's real test, and the
-    # thing a synthetic image would never produce.
+    # Fragmentation: write two files, delete the first, and write a third
+    # that fills the first one's hole and continues past the second.
     mcopy -i "$IMG" "$OUT/frag_a.bin" ::/FRAGA.BIN
     mcopy -i "$IMG" "$OUT/frag_b.bin" ::/FRAGB.BIN
     mdel  -i "$IMG" ::/FRAGA.BIN 2>/dev/null || true
@@ -101,7 +103,7 @@ mkfs.vfat -F 32 -s 8 --offset 2048 -n TIKUMBR "$IMG" >/dev/null
 mcopy -i "$IMG@@1048576" "$OUT/big.bin" ::/BIG.BIN
 echo "  $IMG (MBR, partition at LBA 2048)"
 
-# ---- the NEGATIVE corpus: these must all be REFUSED ------------------------
+# ---- images the parser must refuse -----------------------------------------
 rm -f "$OUT/fat16.img"; truncate -s 32M "$OUT/fat16.img"
 mkfs.vfat -F 16 -n TIKUFAT16 "$OUT/fat16.img" >/dev/null
 echo "  $OUT/fat16.img (must be refused: NOT_FAT32)"
@@ -133,9 +135,8 @@ echo "  $OUT/fat12.img (must be refused: NOT_FAT32)"
 head -c 1048576 /dev/zero > "$OUT/zeros.img"
 echo "  $OUT/zeros.img (must be refused: NOFS)"
 
-# A valid FAT32 whose chain has been made to LOOP.  This one matters most:
-# it is the case where a bounded walker and an unbounded one differ, and the
-# difference is a hang.
+# A valid FAT32 image whose cluster chain loops (3 -> 2): a chain walker
+# without a bound hangs on it.
 cp "$OUT/fat32_spc8.img" "$OUT/fat32_loop.img"
 python3 - "$OUT/fat32_loop.img" <<'PY'
 import struct, sys

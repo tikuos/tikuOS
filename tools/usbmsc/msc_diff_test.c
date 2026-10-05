@@ -1,26 +1,24 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
  *
- * msc_diff_test.c - U0: prove the extraction changed no behaviour.
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * Build: tools/usbmsc/Makefile     Run: ./msc_diff_test
+ * msc_diff_test.c - compare tiku_usbd_msc.c with its reference copy.
+ *
+ * Runs kernel/usb/tiku_usbd_msc.c and ref_original.c over the same commands
+ * and reports every field on which they disagree; exits 1 on any difference.
+ * Built by tools/usbmsc/Makefile; make lint runs it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /*
- * The gate this discharges.  U0 moved proven code out of a driver that only
- * an Apollo510 can exercise.  "It still compiles" is not evidence, and "the
- * new code passes its own tests" only says the new code agrees with itself.
- * What is wanted is that the extraction answers every input exactly as the
- * shipped version did -- so the shipped version is kept as an oracle and both
- * are run over the same space.
- *
- * Coverage is exhaustive where it can be: every one of the 256 opcodes, at
- * every interesting transfer length, in both sense states and both product
- * configurations, plus a directed sweep of READ/WRITE block ranges including
- * the ones that wrap 32 bits.  Anything the two disagree about is printed
- * with the input that caused it.
+ * Coverage: all 256 opcodes at every length in lens[], with both product
+ * strings and with clear and set sense; READ(10) and WRITE(10) over every
+ * lbas[] and nblks[] pair, including ranges that wrap 32 bits; the CSW
+ * builder; and the LBA range check on its own.
  */
 
 #include <stdio.h>
@@ -32,6 +30,7 @@
 static unsigned long g_cases;
 static unsigned      g_diffs;
 
+/** @brief Count one difference; print the first 12 with their command. */
 static void differ(const char *what, const uint8_t *cdb, uint32_t host_len,
                    unsigned long a, unsigned long b)
 {
@@ -45,9 +44,10 @@ static void differ(const char *what, const uint8_t *cdb, uint32_t host_len,
 }
 
 /*---------------------------------------------------------------------------*/
-/* One case: same command, both implementations, every field compared        */
+/* ONE COMMAND THROUGH BOTH IMPLEMENTATIONS                                  */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Run one command through both; compare every field and the reply. */
 static void one(const uint8_t *cdb, uint32_t host_len, int emmc,
                 uint8_t sense_key, uint8_t sense_asc)
 {
@@ -75,7 +75,8 @@ static void one(const uint8_t *cdb, uint32_t host_len, int emmc,
     m.sense_asc = sense_asc;
     memset(new_reply, 0xEE, sizeof(new_reply));
 
-    /* The old decoder took a bare CDB; the new one takes a parsed wrapper. */
+    /* ref_msc_scsi() takes a bare CDB; tiku_usbd_msc_decode() takes a parsed
+     * CBW, built here around the same CDB. */
     memset(raw, 0, sizeof(raw));
     raw[0] = 0x55; raw[1] = 0x53; raw[2] = 0x42; raw[3] = 0x43;
     raw[8]  = (uint8_t)host_len;         raw[9]  = (uint8_t)(host_len >> 8);
@@ -107,7 +108,7 @@ static void one(const uint8_t *cdb, uint32_t host_len, int emmc,
     if (old.status != neu.status)   { differ("status", cdb, host_len,
                                              old.status, neu.status); }
 
-    /* The sense latch is state, and both must have left it the same way. */
+    /* Both must leave the sense latch the same. */
     if (ref_sense_key != m.sense_key) {
         differ("sense_key", cdb, host_len, ref_sense_key, m.sense_key);
     }
@@ -115,7 +116,7 @@ static void one(const uint8_t *cdb, uint32_t host_len, int emmc,
         differ("sense_asc", cdb, host_len, ref_sense_asc, m.sense_asc);
     }
 
-    /* And the reply bytes themselves, out to whatever length was produced. */
+    /* The reply bytes, up to the reference's reply length. */
     for (i = 0u; i < old.len && i < TIKU_USBD_MSC_REPLY_MAX; i++) {
         if (ref_reply[i] != new_reply[i]) {
             differ("reply byte", cdb, host_len, ref_reply[i], new_reply[i]);
@@ -126,6 +127,7 @@ static void one(const uint8_t *cdb, uint32_t host_len, int emmc,
 
 /*---------------------------------------------------------------------------*/
 
+/** @brief Run the four sweeps; exit 1 on any difference. */
 int main(void)
 {
     static const uint32_t lens[] = {
@@ -152,9 +154,9 @@ int main(void)
                 for (sense = 0u; sense < 2u; sense++) {
                     memset(cdb, 0, sizeof(cdb));
                     cdb[0] = (uint8_t)op;
-                    /* Non-zero payload in the unused CDB bytes, so a field
-                     * read from the wrong offset shows up as a difference
-                     * rather than as two zeroes agreeing. */
+                    /* Non-zero bytes in the unused CDB positions: a field
+                     * read from the wrong offset then shows as a difference,
+                     * where zeros would agree. */
                     cdb[1] = 0x5Au; cdb[9] = 0xA5u;
                     one(cdb, lens[li], (int)emmc,
                         sense ? 0x06u : 0x00u, sense ? 0x28u : 0x00u);
@@ -163,7 +165,7 @@ int main(void)
         }
     }
 
-    /* 2. READ and WRITE across the block ranges that matter. */
+    /* 2. READ(10) and WRITE(10) over every lbas[], nblks[] and lens[]. */
     for (bi = 0u; bi < sizeof(lbas) / sizeof(lbas[0]); bi++) {
         for (ni = 0u; ni < sizeof(nblks) / sizeof(nblks[0]); ni++) {
             for (li = 0u; li < sizeof(lens) / sizeof(lens[0]); li++) {

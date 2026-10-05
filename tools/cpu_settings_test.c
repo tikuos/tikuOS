@@ -1,4 +1,16 @@
-/* Portable clock-policy tests with no physical device writes.
+/*
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * cpu_settings_test.c - host test of the portable next-boot clock preference.
+ *
+ * Compiles kernel/cpu/tiku_cpu_settings.c against stub clock and persist-cell
+ * functions and checks boot-only apply, discrete rates, torn state and
+ * rejected saves; make lint runs it.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <assert.h>
@@ -7,6 +19,9 @@
 
 static unsigned long current = 150000000UL;
 static const unsigned long choices[] = {12000000UL, 150000000UL, 1000000000UL};
+/* Stubs: the clock runs at current, with choices[] on offer unless fixed is
+ * set; a boot-time rate change counts in changes; each commit counts in writes
+ * and, while fail_write is set, stores nothing and returns TIKU_MEM_ERR_IO. */
 static int changes, writes, fail_write, fixed;
 
 unsigned long tiku_cpu_mclk_hz(void) { return current; }
@@ -40,7 +55,7 @@ int main(void)
     assert(tiku_cpu_settings_save(12000000UL) == 0);
     assert(current == 150000000UL && changes == 0);
     assert(tiku_cpu_settings_target() == 12000000UL);
-    tiku_cpu_settings_boot(); /* must not become a runtime clock setter */
+    tiku_cpu_settings_boot(); /* a second call changes no clock */
     assert(changes == 0);
     ready = 0; /* simulated reboot: persistent bytes remain */
     tiku_cpu_settings_boot();
@@ -54,9 +69,9 @@ int main(void)
     fail_write = 1;
     int before = writes;
     assert(tiku_cpu_settings_save(150000000UL) == -1);
-    assert(writes == before + 1); /* No blind retry or rollback write. */
+    assert(writes == before + 1); /* one write: no retry, no rollback */
     fail_write = 0;
-    /* Both a corrupt gate and a torn value must leave the boot clock alone. */
+    /* A corrupt gate, then a torn value: each leaves the boot clock alone. */
     saved_clock_cell_gate = 0;
     ready = 0;
     current = 150000000UL;

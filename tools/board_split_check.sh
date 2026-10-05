@@ -6,43 +6,35 @@
 #
 # Authors: Ambuj Varshney <ambuj@tiku-os.org>
 #
-# board_split_check.sh - pin the build baseline across a build-system edit.
+# board_split_check.sh - hash each image of a fixed build matrix, and diff.
 #
-# Builds the matrix and records a sha256 per image, so a "no behaviour
-# change" claim becomes falsifiable: run it before the edit and again after,
-# and the diff is the gate.  Sub-commands and the two traps are below.
+# Builds every row from scratch and records the sha256 of its main.elf, so a
+# build-system edit that should change no image can be checked: record before
+# the edit, check after.  Sub-commands are below.
 #
 # SPDX-License-Identifier: Apache-2.0
 
 #   tools/board_split_check.sh record [file]   build the matrix, write hashes
 #   tools/board_split_check.sh check  [file]   rebuild, diff against them
-#   tools/board_split_check.sh determinism     prove the build repeats at all
+#   tools/board_split_check.sh determinism     build one row twice, compare
 #
-# NOTE main.elf/main.bin/main.hex are SHARED across MCUs (one file at the repo
-# root, not per-build-dir) -- the recorded shared-ELF trap.  Every row removes
-# them first, so a row that fails to link cannot silently inherit the previous
-# row's image and be recorded as a pass.
+# main.elf, main.bin and main.hex are one file each at the repository root,
+# shared by every MCU, and a row that fails to link leaves the previous row's
+# image there.  Each row removes them before it builds.
 #
-# NOTE 2 -- why every row is built FROM SCRATCH.  Object files do not depend on
-# the Makefile: nothing declares it as a prerequisite, and the flag-change guard
-# only fires when the COMMAND LINE (MAKEOVERRIDES) changes, not when the
-# Makefile's own text does.  So an incremental run of this script after a
-# build-system edit recompiles NOTHING and reports IDENTICAL no matter what was
-# changed.  Measured, not assumed: editing the ambiq CFLAGS from -Os to -O1
-# produced a byte-identical ELF and rebuilt 0 objects.  Since this script exists
-# precisely to gate build-system edits, that made it a rubber stamp.  Each row
-# now wipes its build dir first.  It is slow; a gate that cannot fail is worse.
+# Each row also deletes build/<mcu> first.  The flag-change guard rebuilds
+# after an edit to the Makefile or to the command-line overrides, but not
+# after an edit to an included .mk file; an incremental build then recompiles
+# nothing and hashes the same.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
 BASELINE="${2:-tools/board_split_baseline.txt}"
 
-# One row per line: NAME | make arguments
-# Chosen to cover every platform, both RP2350 boards, and the Apollo510
-# driver stack that stages S2/S3 re-gated.  The last row is the S5 board: the
-# same Apollo510 silicon on a PCB carrying none of the EVB's parts.  It is here
-# so that "a boardless board still builds" stays true rather than being a claim
-# made once.
+# One row per line: NAME | make arguments.  The rows cover MSP430, RP2350
+# (both boards), Nordic and Ambiq, the Apollo510 driver options, and
+# tiku_bare: Apollo510 silicon on a board that carries none of the EVB's
+# parts.  STM32N6, RA8P1 and ESP32-C61 have no row.
 MATRIX="
 msp430fr5994-bare        | MCU=msp430fr5994
 msp430fr6989-bare        | MCU=msp430fr6989
@@ -59,9 +51,11 @@ apollo510b-full          | MCU=apollo510b TIKU_SHELL_ENABLE=1 TIKU_DRV_EMMC_ENAB
 tiku-bare                | MCU=apollo510 BOARD=tiku_bare TIKU_SHELL_ENABLE=1
 "
 
-hash_row() {   # $1 = make args; echoes "sha  ok|FAIL"
+# Build one row from scratch; echo the sha256 of its main.elf and ok, or a
+# dash and FAILED or NO-IMAGE.
+hash_row() {   # $1 = the make arguments of the row
     rm -f main.elf main.bin main.hex
-    # Wipe this row's build dir (BUILD_DIR = build/$(MCU)) -- see NOTE 2.
+    # A clean build: delete this row's build dir, build/$(MCU).
     row_mcu=$(echo "$1" | tr ' ' '\n' | sed -n 's/^MCU=//p')
     [ -n "$row_mcu" ] && rm -rf "build/$row_mcu"
     if ! make $1 >/dev/null 2>&1; then
@@ -76,6 +70,7 @@ hash_row() {   # $1 = make args; echoes "sha  ok|FAIL"
     fi
 }
 
+# Build every row of MATRIX and print one name-and-result line per row.
 run_matrix() {
     echo "$MATRIX" | while IFS='|' read -r name args; do
         name=$(echo "$name" | tr -d ' ')
@@ -86,8 +81,8 @@ run_matrix() {
 
 case "${1:-record}" in
 determinism)
-    # If the same inputs do not produce the same image, every other result
-    # here is noise.  Prove it before trusting anything else.
+    # The recorded hashes are comparable only if the same inputs give the
+    # same image: build one row twice and compare.
     echo "building apollo510b-shell twice..."
     A=$(hash_row "MCU=apollo510b TIKU_SHELL_ENABLE=1")
     B=$(hash_row "MCU=apollo510b TIKU_SHELL_ENABLE=1")

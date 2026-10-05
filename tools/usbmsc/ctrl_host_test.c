@@ -1,17 +1,22 @@
 /*
  * Tiku Operating System v0.06
- * ctrl_host_test.c - exercise kernel/usb/tiku_usbd_ctrl.c on a Linux host.
- * Build: tools/usbmsc/Makefile     Run: ./ctrl_host_test
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * ctrl_host_test.c - host test of the USB device control core.
+ *
+ * Checks kernel/usb/tiku_usbd_ctrl.c's descriptor builders against reference
+ * bytes and its request decisions against every request the console and disk
+ * answer or refuse.  Built by tools/usbmsc/Makefile; exits 1 on a failure.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /*
- * The oracle is the byte sequence the nRF54LM20 console and disk faces
- * shipped (commits 4d65dd3 and d7a001d), typed in here verbatim: the
- * builders must produce exactly those bytes, so moving the ports onto the
- * core changes nothing a host can see.  The decision engine is then walked
- * through every request the four ports answer, including the ones that
- * must be refused.
+ * The reference bytes are the nRF54LM20 console's and disk's descriptors,
+ * typed in byte for byte; the builders must reproduce them exactly.
  */
 
 #include <stdio.h>
@@ -20,13 +25,14 @@
 
 static int g_pass, g_fail;
 
+/** @brief Count and print one check: a pass when @p cond is non-zero. */
 static void ok(int cond, const char *what)
 {
     if (cond) { g_pass++; } else { g_fail++; }
     printf("  %s  %s\n", cond ? "pass" : "FAIL", what);
 }
 
-/* The LM20 console's configuration as shipped (75 bytes, bulk 64). */
+/* Reference: the LM20 console's configuration (75 bytes, bulk 64). */
 static const uint8_t lm20_cdc_conf[75] = {
     9, 0x02, 75, 0x00, 0x02, 0x01, 0x00, 0x80, 50,
     8, 0x0B, 0x00, 0x02, 0x02, 0x02, 0x00, 0x00,
@@ -40,12 +46,12 @@ static const uint8_t lm20_cdc_conf[75] = {
     7, 0x05, 0x02, 0x02, 64, 0x00, 0x00,
     7, 0x05, 0x83, 0x02, 64, 0x00, 0x00
 };
-/* The LM20 console's device descriptor as shipped. */
+/* Reference: the LM20 console's device descriptor. */
 static const uint8_t lm20_cdc_dev[18] = {
     18, 0x01, 0x00, 0x02, 0xEF, 0x02, 0x01, 64,
     0x09, 0x12, 0x01, 0x00, 0x00, 0x01, 0x01, 0x02, 0x03, 0x01
 };
-/* The LM20 disk's configuration and device descriptors as shipped. */
+/* Reference: the LM20 disk's configuration and device descriptors. */
 static const uint8_t lm20_msc_conf[32] = {
     9, 0x02, 32, 0x00, 0x01, 0x01, 0x00, 0x80, 50,
     9, 0x04, 0x00, 0x00, 0x02, 0x08, 0x06, 0x50, 0x00,
@@ -56,9 +62,11 @@ static const uint8_t lm20_msc_dev[18] = {
     18, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 64,
     0x09, 0x12, 0x02, 0x00, 0x00, 0x01, 0x01, 0x02, 0x03, 0x01
 };
+/* Reference: "TikuOS Console" as a USB string descriptor. */
 static const uint8_t lm20_str_prod[30] = { 30, 0x03, 'T',0,'i',0,'k',0,'u',0,
     'O',0,'S',0,' ',0,'C',0,'o',0,'n',0,'s',0,'o',0,'l',0,'e',0 };
 
+/** @brief The descriptor builders reproduce the reference bytes. */
 static void test_builders(void)
 {
     uint8_t buf[80];
@@ -82,7 +90,7 @@ static void test_builders(void)
         ok(n == 26u && buf[0] == 26u && buf[1] == 3u && buf[2] == '0' &&
            buf[4] == 'D' && buf[24] == '9', "serial from a 6-byte id");
     }
-    /* The high-speed patch touches only BULK endpoints. */
+    /* tiku_usbd_desc_set_bulk_mps() changes the bulk endpoints only. */
     tiku_usbd_cdc_config(buf, 1u, 2u, 3u, 64u);
     tiku_usbd_desc_set_bulk_mps(buf, 75u, 512u);
     ok(buf[49] == 0x08 && buf[50] == 0x00, "interrupt endpoint untouched");
@@ -92,9 +100,11 @@ static void test_builders(void)
     ok(memcmp(buf, lm20_cdc_conf, 75) == 0, "and back to 64, byte-exact");
 }
 
+/* The descriptor set bind() fills in for tiku_usbd_ctrl_init(). */
 static tiku_usbd_desc_set_t g_set;
 static uint8_t g_dev[18], g_conf[80], g_prod[40];
 
+/** @brief Fill g_set with the console (CDC) or the disk (MSC) descriptors. */
 static void bind(uint8_t klass, uint8_t self_powered)
 {
     uint16_t ll;
@@ -116,6 +126,7 @@ static void bind(uint8_t klass, uint8_t self_powered)
     g_set.klass = klass; g_set.self_powered = self_powered;
 }
 
+/** @brief Run one SETUP packet through the control core into @p o. */
 static void setup(tiku_usbd_ctrl_t *c, tiku_usbd_ctrl_out_t *o,
                   uint8_t t, uint8_t r, uint16_t v, uint16_t i, uint16_t l)
 {
@@ -126,6 +137,7 @@ static void setup(tiku_usbd_ctrl_t *c, tiku_usbd_ctrl_out_t *o,
     tiku_usbd_ctrl_setup(c, p, o);
 }
 
+/** @brief Standard, CDC and MSC requests: replies, stalls and effects. */
 static void test_decisions(void)
 {
     tiku_usbd_ctrl_t c;
@@ -247,6 +259,7 @@ static void test_decisions(void)
        "line state on a disk: accepted, no CDC effect");
 }
 
+/** @brief Run both groups of checks; exit 1 if any failed. */
 int main(void)
 {
     test_builders();

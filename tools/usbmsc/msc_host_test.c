@@ -1,25 +1,17 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
  *
- * msc_host_test.c - U0: exercise kernel/usb/tiku_usbd_msc.c on a Linux host.
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * Build: tools/usbmsc/Makefile     Run: ./msc_host_test
+ * msc_host_test.c - host test of the USB mass-storage wire format.
+ *
+ * Checks each field kernel/usb/tiku_usbd_msc.c emits against the offset the
+ * BOT and SCSI specifications give, and each guard against an input it must
+ * refuse.  Built by tools/usbmsc/Makefile; exits 1 on a failed check.
  *
  * SPDX-License-Identifier: Apache-2.0
- */
-
-/*
- * The point of this file.  Mass storage is a wire format, and a wire format
- * is nothing but byte offsets and endianness -- the class of thing that is
- * silent when wrong.  A CSW with its residue in the wrong byte order still
- * arrives; a READ CAPACITY off by one still mounts.  The host finds out
- * later, usually while writing a filesystem.
- *
- * So every field this code emits is checked against the offsets the
- * specification names, and every guard is checked against an input that
- * MUST be refused -- including one that a plausible wrong implementation
- * accepts, so the guard is shown to be load-bearing rather than merely
- * present.
  */
 
 #include <stdio.h>
@@ -29,12 +21,14 @@
 
 static int g_pass, g_fail;
 
+/** @brief Count and print one check: a pass when @p cond is non-zero. */
 static void ok(int cond, const char *what)
 {
     if (cond) { g_pass++; } else { g_fail++; }
     printf("  %s  %s\n", cond ? "pass" : "FAIL", what);
 }
 
+/** @brief Check that @p got equals @p want; print both on a failure. */
 static void eq(uint32_t got, uint32_t want, const char *what)
 {
     if (got == want) {
@@ -47,10 +41,10 @@ static void eq(uint32_t got, uint32_t want, const char *what)
 }
 
 /*---------------------------------------------------------------------------*/
-/* Helpers: build wrappers the way a host would                              */
+/* HELPERS: WRAPPERS AS A HOST BUILDS THEM                                   */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Lay out a command wrapper exactly as the specification orders it. */
+/** @brief Lay out a 31-byte CBW in the specification's field order. */
 static void make_cbw(uint8_t *b, uint32_t tag, uint32_t len, int dir_in,
                      const uint8_t *cdb, uint8_t cdb_len)
 {
@@ -66,7 +60,7 @@ static void make_cbw(uint8_t *b, uint32_t tag, uint32_t len, int dir_in,
     memcpy(&b[15], cdb, cdb_len);
 }
 
-/** @brief Decode one command against a 1 MB medium, returning the decision. */
+/** @brief Wrap @p cdb in a CBW and decode it against @p m into @p cmd. */
 static void run(tiku_usbd_msc_t *m, const uint8_t *cdb, uint8_t cdb_len,
                 uint32_t host_len, int dir_in,
                 uint8_t *reply, tiku_usbd_msc_cmd_t *cmd)
@@ -84,9 +78,10 @@ static void run(tiku_usbd_msc_t *m, const uint8_t *cdb, uint8_t cdb_len,
 }
 
 /*---------------------------------------------------------------------------*/
-/* 1. Command wrapper parsing                                                */
+/* 1. CBW PARSING                                                            */
 /*---------------------------------------------------------------------------*/
 
+/** @brief CBW field offsets, byte order, and the rejections the spec sets. */
 static void test_cbw(void)
 {
     uint8_t raw[TIKU_USBD_MSC_CBW_LEN];
@@ -126,9 +121,10 @@ static void test_cbw(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* 2. Status wrapper                                                         */
+/* 2. CSW LAYOUT                                                             */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Signature, tag, residue and status at their offsets. */
 static void test_csw(void)
 {
     uint8_t w[TIKU_USBD_MSC_CSW_LEN];
@@ -148,20 +144,20 @@ static void test_csw(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* 3. The range check, and proof that it is load-bearing                     */
+/* 3. LBA RANGE CHECK                                                        */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief The plausible wrong version, written out so it can be compared.
+ * @brief The range check as lba + nblk <= blocks, which a wrapping sum passes.
  *
- * This is what the check looks like when written the obvious way, and it is
- * what this test exists to rule out.
+ * test_lba() shows it accepts a range that the real check refuses.
  */
 static int naive_lba_ok(uint32_t blocks, uint32_t lba, uint32_t nblk)
 {
     return ((lba + nblk) <= blocks) ? 1 : 0;
 }
 
+/** @brief Range-check edges, and a range whose end wraps past 2^32. */
 static void test_lba(void)
 {
     tiku_usbd_msc_t m = { 2048u, "RAM Disk", 0u, 0u };   /* 1 MB */
@@ -178,10 +174,10 @@ static void test_lba(void)
        "a zero-length range is allowed wherever it points");
 
     /*
-     * The case the guard exists for.  The host controls both numbers, so it
-     * can name an LBA near 2^32; the sum then wraps small and the obvious
-     * check waves it through.  Showing the naive version ACCEPT it is the
-     * only way to know this test would notice if the guard were rewritten.
+     * The host sets both numbers, so it can name an LBA near 2^32 whose sum
+     * with nblk wraps below the disk size.  The naive check accepts the range
+     * and the real check must refuse it; their disagreeing shows the case
+     * reaches the guard.
      */
     printf("\n  the wrap case -- naive and correct must DISAGREE:\n");
     {
@@ -198,9 +194,10 @@ static void test_lba(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* 4. SCSI replies, field by field                                           */
+/* 4. SCSI REPLIES                                                           */
 /*---------------------------------------------------------------------------*/
 
+/** @brief INQUIRY fields, truncation, and the product string's padding. */
 static void test_inquiry(void)
 {
     tiku_usbd_msc_t m = { 2048u, "RAM Disk", 0u, 0u };
@@ -245,6 +242,7 @@ static void test_inquiry(void)
        "a NULL product is 16 spaces, not a crash");
 }
 
+/** @brief Unknown opcodes latch sense; REQUEST SENSE reports and clears it. */
 static void test_sense(void)
 {
     tiku_usbd_msc_t m = { 2048u, "RAM Disk", 0u, 0u };
@@ -255,7 +253,7 @@ static void test_sense(void)
 
     printf("\nREQUEST SENSE and the sense latch\n");
 
-    /* An unsupported opcode must fail AND leave a reason behind. */
+    /* An unsupported opcode fails the command and latches the reason. */
     run(&m, bogus, 6u, 0u, 0, r, &c);
     eq(c.status, 1u, "an unknown opcode fails the command");
     eq(c.action, TIKU_USBD_MSC_ACT_NONE, "...with no data phase");
@@ -280,6 +278,7 @@ static void test_sense(void)
     eq(r[2], TIKU_USBD_MSC_SENSE_NONE, "a second read reports no sense");
 }
 
+/** @brief READ CAPACITY(10): the last LBA and the block length. */
 static void test_capacity(void)
 {
     tiku_usbd_msc_t m = { 2048u, "RAM Disk", 0u, 0u };
@@ -293,9 +292,9 @@ static void test_capacity(void)
     eq(c.len, 8u, "eight bytes");
 
     /*
-     * LAST LBA, NOT THE COUNT.  Off by one here gives the host one block
-     * more than exists; it finds out by reading past the end, typically
-     * while laying down a filesystem.
+     * The reply carries the last LBA, not the block count.  The count would
+     * give the host one block that does not exist, and it would read past the
+     * end of the medium.
      */
     eq(((uint32_t)r[0] << 24) | ((uint32_t)r[1] << 16) |
        ((uint32_t)r[2] << 8) | r[3], 2047u,
@@ -305,6 +304,7 @@ static void test_capacity(void)
        "block length 512, big-endian");
 }
 
+/** @brief MODE SENSE lengths, and the commands with no data phase. */
 static void test_modes(void)
 {
     tiku_usbd_msc_t m = { 2048u, "RAM Disk", 0u, 0u };
@@ -339,9 +339,10 @@ static void test_modes(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* 5. READ/WRITE decode                                                      */
+/* 5. READ AND WRITE DECODE                                                  */
 /*---------------------------------------------------------------------------*/
 
+/** @brief READ(10) and WRITE(10): fields, clamping, range failure, wrap. */
 static void test_rw(void)
 {
     tiku_usbd_msc_t m = { 2048u, "RAM Disk", 0u, 0u };
@@ -399,6 +400,7 @@ static void test_rw(void)
        "...so no pointer is ever handed out for it");
 }
 
+/** @brief Run every check; exit 1 if any failed. */
 int main(void)
 {
     printf("tiku_usbd_msc host test\n");

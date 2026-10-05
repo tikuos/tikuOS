@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
+#
 # Tiku Operating System v0.06
+# Simple. Ubiquitous. Intelligence, Everywhere.
+# http://tiku-os.org
 #
-# mod_embed.py - embed a Tier-3 module image as a C array.
+# Authors: Ambuj Varshney <ambuj@tiku-os.org>
 #
-# Used on targets whose linker rejects objcopy binary-wrapped objects
-# (msp430-elf-ld demands .MSP430.attributes).  Emits the same two symbols
-# the objcopy wrap produces (_binary_mod_demo_bin_start/_end), so the
-# loader is embed-method-agnostic.
+# mod_embed.py - embed a loadable native module image as a C array.
 #
-# Usage: mod_embed.py <image.bin> <out.c>
+# For targets whose linker rejects objcopy binary-wrapped objects
+# (msp430-elf-ld demands .MSP430.attributes).  Defines the symbols the objcopy
+# wrap does: _binary_mod_demo_bin_start and _binary_mod_demo_bin_end.
 #
 # SPDX-License-Identifier: Apache-2.0
+
+# Usage: mod_embed.py <image.bin> <out.c>
 import sys
 
 if len(sys.argv) != 3:

@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""bas_to_c.py -- convert a Tiku BASIC source file into a C string literal.
+"""
+Tiku Operating System v0.06
+Simple. Ubiquitous. Intelligence, Everywhere.
+http://tiku-os.org
+
+Authors: Ambuj Varshney <ambuj@tiku-os.org>
+
+bas_to_c.py - convert a Tiku BASIC source file into a C string literal.
+
+The Makefile runs it for BASIC_PROGRAM=<file>.bas, and main.c runs the
+program at boot when TIKU_BASIC_EMBEDDED is set.  Each run overwrites the
+output file.
+
+SPDX-License-Identifier: Apache-2.0
 
 Usage:
     python3 tools/bas_to_c.py <input.bas> <output.c>
@@ -8,16 +21,16 @@ The generated C file looks like:
 
     /* Generated from blink.bas -- do not edit. */
     #include <stddef.h>
+
     const char tiku_basic_embedded_src[] =
         "10 PIN 4, 6, 1\n"
         "20 DIGWRITE 4, 6, 2\n"
         "30 DELAY 250\n"
-        "40 GOTO 20\n";
+        "40 GOTO 20\n"
+    ;
+
     const size_t tiku_basic_embedded_len =
         sizeof(tiku_basic_embedded_src) - 1u;
-
-The generated symbol is referenced from main.c when TIKU_BASIC_EMBEDDED
-is set. Re-running the script is safe; the file is fully overwritten.
 """
 
 import sys
@@ -27,9 +40,9 @@ import os
 def escape_for_c_string(s: str) -> str:
     """Escape a single line for inclusion in a C string literal.
 
-    Escapes backslash, double-quote, and the printable controls
-    that crop up in BASIC source (tab). Other characters pass through
-    -- byte-clean for ASCII / UTF-8.
+    Backslash, double quote and tab get their C escapes and any other control
+    character below 0x20 becomes \\xNN; every other character, UTF-8
+    included, passes through unchanged.
     """
     out = []
     for ch in s:
@@ -47,6 +60,7 @@ def escape_for_c_string(s: str) -> str:
 
 
 def main() -> int:
+    """Convert argv[1] into argv[2]; return 0, or 1 on a bad argument."""
     if len(sys.argv) != 3:
         print("usage: bas_to_c.py <input.bas> <output.c>", file=sys.stderr)
         return 1
@@ -59,8 +73,7 @@ def main() -> int:
     with open(src_path, "r", encoding="utf-8") as f:
         text = f.read()
 
-    # Normalise CRLF to LF; strip a trailing blank-only line so the
-    # output doesn't carry a stray empty line at the end.
+    # Normalise CRLF and lone CR to LF, and drop trailing blank lines.
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     lines = text.split("\n")
     while lines and not lines[-1].strip():

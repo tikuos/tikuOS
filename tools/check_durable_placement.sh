@@ -6,34 +6,30 @@
 #
 # Authors: Ambuj Varshney <ambuj@tiku-os.org>
 #
-# check_durable_placement.sh - ban raw durable/retained section attributes.
+# check_durable_placement.sh - ban raw durable and retained section attributes.
 #
-# Durable placement must go through the kernel-owned grade macros in
-# kernel/memory/tiku_mem.h, so a hand-rolled section attribute is a build
-# failure rather than a latent data-loss bug.  Scope and allow-list below.
+# Data placed in .persistent, .retained or .uninit must use the grade macros of
+# kernel/memory/tiku_mem.h.  Prints every raw section attribute outside the
+# allow-list and exits 1; make lint runs it.
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# Scope: the main repo only (kernel/ interfaces/ drivers/ boot/ hal/ apps/).
-# arch/ is allowed (linker scripts + the mem/mpu ports ARE the mechanism).
-# tikukits/ and TikuBench/ are separate repositories with their own review.
+# Scope: kernel/, interfaces/, drivers/, boot/, hal/ and apps/.  arch/ is not
+# scanned: its linker scripts and memory and MPU ports implement the grades.
+# tikukits/ and TikuBench/ are separate repositories.
 #
-# Both `.persistent` and `.uninit` are banned.  `.uninit` is not cosmetic: it
-# means DIFFERENT things per platform.  On rp2350/ambiq it sits INSIDE the
-# mirrored, MPU-protected durable window, while TIKU_RETAINED sits
-# deliberately outside it; on ra8p1/nordic the two coincide; and MSP430 has no
-# .uninit section at all, so the attribute would create an orphan.  Anyone
-# writing it to mean "survives a warm reset" gets that on some boards and
-# durable-plus-MPU-protected on others, with no diagnostic either way.
+# `.persistent`, `.retained` and `.uninit` are all banned.  `.uninit` is not one
+# grade: on RP2350 and Ambiq it is inside the mirrored, MPU-protected durable
+# window, with `.retained` outside it; on the other ARM ports and the ESP32-C61
+# the two share a section; MSP430 has no `.uninit` section, so the attribute
+# makes an orphan.  Code that means "survives a warm reset" gets durable,
+# write-protected memory on some boards, with no diagnostic.
 #
 # Allow-list:
 #   kernel/memory/tiku_mem.h - the macro definitions themselves.
-#   tiku_shell_cmd_mrambench.c - DELIBERATE, not debt: its scratch word wants
-#   to be inside the mirrored window so `mrambench verify` can force a
-#   dirty-check hit, which is the opposite of the WARM grade.  Ambiq-only
-#   (Makefile-gated), so the per-platform ambiguity above cannot bite it.
-#   (The Phase-C debt entries — tiku_nvm_map.c, tiku_shell_cmd_history.c —
-#   migrated to the grade macros on 2026-07-15; do not add new debt entries.)
+#   tiku_shell_cmd_mrambench.c - its scratch word must sit inside the mirrored
+#   window, so `mrambench verify` can force a dirty-check hit.  The Makefile
+#   builds it for Ambiq only.
 #
 # Exit 0 = clean, 1 = violations printed.
 

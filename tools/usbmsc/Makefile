@@ -1,9 +1,8 @@
-# U0: build and run the mass-storage wire format on the host.
+# tools/usbmsc/Makefile - build and run the USB device-class host tests.
 #
-# The code under test is the REAL kernel/usb/tiku_usbd_msc.c -- not a copy,
-# not a reimplementation.  That is the whole value of keeping it free of
-# controller includes: the same object the Apollo510 driver links is the one
-# checked here, so a regression cannot hide behind "the test has its own copy".
+# The tests compile kernel/usb/tiku_usbd_msc.c and tiku_usbd_ctrl.c themselves,
+# which build on the host because they have no controller includes.  make lint
+# runs `make check` here.
 CFLAGS ?= -std=c99 -Wall -Wextra -Werror -O1 -g -I../..
 
 all: msc_host_test msc_diff_test ctrl_host_test
@@ -12,8 +11,8 @@ msc_host_test: msc_host_test.c ../../kernel/usb/tiku_usbd_msc.c \
                ../../kernel/usb/tiku_usbd_msc.h
 	$(CC) $(CFLAGS) -o $@ msc_host_test.c ../../kernel/usb/tiku_usbd_msc.c
 
-# The oracle: the pre-extraction code, kept verbatim, so "behaviour is
-# unchanged" is a measured claim rather than an assertion.
+# msc_diff_test runs tiku_usbd_msc.c beside ref_original.c, a frozen copy of
+# the Apollo510 driver's SCSI logic, and fails on any difference.
 msc_diff_test: msc_diff_test.c ref_original.c ref_original.h \
                ../../kernel/usb/tiku_usbd_msc.c \
                ../../kernel/usb/tiku_usbd_msc.h

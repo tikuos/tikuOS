@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-"""mkconv.py - author an int8 CONV_2D whose weights are an identity kernel.
+"""
+Tiku Operating System v0.06
+Simple. Ubiquitous. Intelligence, Everywhere.
+http://tiku-os.org
 
-WHY AN IDENTITY.  A convolution is the first model that puts anything in the
-accelerator's read-only region, which is what makes it worth building: the
-weights path is otherwise never exercised.  But a general conv needs the exact
-requantisation TFLite specifies before its output can be checked bit-for-bit,
-and a reference that might itself be wrong proves nothing.
+Authors: Ambuj Varshney <ambuj@tiku-os.org>
 
-So the kernel is 3x3 with only the centre tap set, one channel to itself, and
-every scale is 1.0 with a zero zero-point.  The multiplier is then exactly 1,
-the accumulator is the input pixel, and the expected output is a COPY -- while
-the MAC array still does the full 3x3xC work per output element.
+mkconv.py - author an int8 CONV_2D TFLite model with an identity kernel.
 
-Usage: mkconv.py <out.tflite> [spatial] [channels]
+Its weights, in the NPU's read-only region, are a 3x3 kernel with only the
+centre tap set, each channel to itself.  Every scale is 1.0 with a zero
+zero-point, so the output equals the input; the MACs still do 3x3xC per pixel.
+
+SPDX-License-Identifier: Apache-2.0
+
+Usage: mkconv.py <out.tflite> [spatial] [channels]   (defaults 32 and 16)
 """
 import struct
 import sys
@@ -42,6 +44,7 @@ b = flatbuffers.Builder(1 << 20)
 
 
 def vec(start_fn, items):
+    """Build a flatbuffer vector of table offsets; return its offset."""
     start_fn(b, len(items))
     for x in reversed(items):
         b.PrependUOffsetTRelative(x)
@@ -49,6 +52,7 @@ def vec(start_fn, items):
 
 
 def ivec(start_fn, items, prepend):
+    """Build a flatbuffer vector of scalars with prepend; return its offset."""
     start_fn(b, len(items))
     for x in reversed(items):
         prepend(x)
@@ -56,6 +60,7 @@ def ivec(start_fn, items, prepend):
 
 
 def quant():
+    """Return QuantizationParameters with scale 1.0 and zero-point 0."""
     sc = ivec(QuantizationParameters.StartScaleVector, [1.0], b.PrependFloat32)
     zp = ivec(QuantizationParameters.StartZeroPointVector, [0],
               b.PrependInt64)
@@ -66,6 +71,8 @@ def quant():
 
 
 def tensor(name, shape, buf_idx, ttype):
+    """Return a Tensor of the given shape, buffer and type, quantised by
+    quant()."""
     nm = b.CreateString(name)
     sh = ivec(Tensor.StartShapeVector, shape, b.PrependInt32)
     q = quant()

@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-elf2uf2.py - Convert a flash binary to UF2 for the Raspberry Pi RP2350.
+Tiku Operating System v0.06
+Simple. Ubiquitous. Intelligence, Everywhere.
+http://tiku-os.org
+
+Authors: Ambuj Varshney <ambuj@tiku-os.org>
+
+elf2uf2.py - convert a raw RP2350 flash image into a UF2 file.
+
+Reads the objcopy -O binary image (main.bin) and writes the UF2 file the
+BOOTSEL ROM accepts, with the RP2350 family ID 0xe48bff59 from microsoft/uf2.
+
+SPDX-License-Identifier: Apache-2.0
 
 Usage:
   python3 tools/elf2uf2.py main.bin main.uf2
-
-The input is a raw flash image (objcopy -O binary), the output is a
-UF2 file the BOOTSEL ROM accepts. UF2 family ID for RP2350 is
-0xe48bff59 (per microsoft/uf2).
 
 The UF2 spec is one 512-byte block per 256 bytes of payload:
 
@@ -36,20 +43,21 @@ UF2_FLAG_FAMILY  = 0x00002000
 
 RP2350_FAMILY_ID = 0xE48BFF59
 
-# Pico 2 W flash starts here. Image must be loaded at the beginning
-# of XIP, where the boot ROM expects to find the .boot2 + IMAGE_DEF
-# blocks.
+# Start of the XIP flash window.  The image is written from here, where the
+# boot ROM finds the .boot2 stub and the IMAGE_DEF block.
 FLASH_BASE = 0x10000000
 
 PAYLOAD_SIZE = 256
 
 
 def usage_exit():
+    """Print the usage line and exit with status 2."""
     print("Usage: elf2uf2.py <flash.bin> <out.uf2>", file=sys.stderr)
     sys.exit(2)
 
 
 def main(argv):
+    """Write argv[2] from argv[1]: one UF2 block per 256 bytes, zero-padded."""
     if len(argv) != 3:
         usage_exit()
     in_path, out_path = argv[1], argv[2]

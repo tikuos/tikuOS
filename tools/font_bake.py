@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """
-font_bake.py -- Convert TTF/OTF fonts into TikuOS gfx-kit C arrays.
+Tiku Operating System v0.06
+Simple. Ubiquitous. Intelligence, Everywhere.
+http://tiku-os.org
 
-Takes any desktop font + a target pixel size + a character range,
-rasterizes each glyph on the host using Pillow, thresholds to 1-bit,
-packs into the column-major / LSB-top format that
-`tiku_kits_gfx_font_t` expects, and emits a matching `.h` + `.c`
-pair under `tikukits/gfx/fonts/` (or wherever you point it).
+Authors: Ambuj Varshney <ambuj@tiku-os.org>
+
+font_bake.py - convert a TTF/OTF font into a TikuOS gfx-kit C font.
+
+Rasterises each glyph of a character range with Pillow, thresholds it to one
+bit, packs it column-major with the top row in bit 0 (tiku_kits_gfx_font_t),
+and writes a .h and .c pair to tikukits/gfx/fonts/ or the --out directory.
+
+SPDX-License-Identifier: Apache-2.0
 
 Usage:
 
@@ -24,16 +30,10 @@ Usage:
                                 --size 10 --proportional \\
                                 --name plex10
 
-After running:
-
-    1. The new `.h` and `.c` files appear under `tikukits/gfx/fonts/`.
-    2. The Makefile globs `fonts/*.c`, so they're picked up automatically.
-    3. In your app, include the header and pass `&tiku_kits_gfx_font_<name>`
-       to any text-drawing call.
+The Makefile compiles every tikukits/gfx/fonts/*.c.  An application includes
+the header and passes &tiku_kits_gfx_font_<name> to a text-drawing call.
 
 Requires:  Pillow  (`pip install Pillow`)
-
-SPDX-License-Identifier: Apache-2.0
 """
 
 from __future__ import annotations
@@ -57,7 +57,8 @@ except ImportError:
 # Range parsing
 # ---------------------------------------------------------------------------
 def parse_range(spec: str) -> tuple[int, int]:
-    """Accept '0x20-0x7e', '32-126', or a single-codepoint '0x41'."""
+    """Parse '0x20-0x7e', '32-126' or one code point such as '0x41' into
+    (lo, hi); raise ValueError when lo > hi or either is outside 0..255."""
     spec = spec.strip()
     if "-" in spec:
         lo_s, hi_s = spec.split("-", 1)
@@ -83,7 +84,7 @@ def measure_font_height(font: ImageFont.FreeTypeFont) -> tuple[int, int, int]:
 
 def glyph_width(font: ImageFont.FreeTypeFont, ch: str) -> int:
     """Return the advance width Pillow recommends for @ch."""
-    # Pillow >= 10 deprecates getsize; use getbbox / getlength instead.
+    # Pillow 10 has no getsize: getlength, then getbbox.
     try:
         w = int(round(font.getlength(ch)))
         if w > 0:
@@ -101,10 +102,8 @@ def glyph_width(font: ImageFont.FreeTypeFont, ch: str) -> int:
 
 def render_glyph(font: ImageFont.FreeTypeFont, ch: str,
                   height: int, max_w: int, threshold: int) -> list[int]:
-    """Render @ch into a width x height bitmap and return the
-    list-of-rows pixel values (1 = lit, 0 = clear). Width = max_w
-    (callers use a fixed canvas; per-glyph advance is recorded
-    separately for proportional output)."""
+    """Render @ch on a max_w x height canvas and return its rows of pixels,
+    1 lit and 0 clear.  Per-glyph advances are kept separately."""
     img = Image.new("L", (max_w, height), 0)  # 8-bit greyscale, black bg
     draw = ImageDraw.Draw(img)
     # Pillow's text() positions the top of the ascender box at y=0,
@@ -217,8 +216,8 @@ def fmt_byte_array(data: list[int], indent: str = "    ",
                     bytes_per_line: int = 12,
                     glyph_size: int | None = None,
                     first_codepoint: int = 0x20) -> str:
-    """Format a byte array nicely. If glyph_size is given, group
-    bytes into per-glyph rows with a comment showing the codepoint."""
+    """Format bytes as C initialiser lines, bytes_per_line to a line; with
+    glyph_size, one line per glyph, led by a comment naming its code point."""
     out_lines: list[str] = []
     if glyph_size is None or glyph_size <= 0:
         for i in range(0, len(data), bytes_per_line):
@@ -244,6 +243,7 @@ def fmt_byte_array(data: list[int], indent: str = "    ",
 # Main
 # ---------------------------------------------------------------------------
 def main() -> int:
+    """Bake one font from the arguments; return the exit status."""
     p = argparse.ArgumentParser(
         description="Bake a TTF/OTF font into a TikuOS gfx-kit bitmap font.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -313,9 +313,8 @@ def main() -> int:
             gw = min(advances[cp - first], cell_width)
         else:
             gw = cell_width
-        # Pad: storage is always cell_width columns (sparse for narrow
-        # glyphs). Render the whole canvas; only the first gw columns
-        # carry per-glyph pixels but cell_width columns are still allocated.
+        # Every glyph is stored as cell_width columns; a narrow glyph of a
+        # proportional font fills only its first gw of them.
         packed = pack_glyph_columns(rows, cell_width, bytes_per_column)
         glyph_bytes.extend(packed)
 

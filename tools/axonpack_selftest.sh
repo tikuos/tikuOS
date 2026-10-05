@@ -6,20 +6,16 @@
 #
 # Authors: Ambuj Varshney <ambuj@tiku-os.org>
 #
-# axonpack_selftest.sh - prove axonpack is MODEL-AGNOSTIC, not vww-shaped.
+# axonpack_selftest.sh - pack and verify every Axon model with axonpack.
 #
-# Builds every model the Axon checkout ships and requires each to pass the
-# reconstruction gate: patch the packed command buffer with the address the
-# real linker used, then demand byte-identical output.  Detail below.
+# Builds the image once per model, packs the model, and runs axonpack's
+# --verify-elf check against that main.elf.  Exits 1 when any model fails to
+# build or to verify.
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# The models differ enough for this to mean something: tinyml_ad has 270 KB of
-# weights but 632 B of commands and only TWO relocation symbols, tinyml_ic has
-# 1468 relocation sites, tinyml_kws is 22 KB.  A tool that passes all of them
-# unchanged is generic by evidence rather than by claim -- and the symbol COUNT
-# varying per model is why the loader must resolve symbols through a registry
-# instead of a fixed table.
+# The four default models differ in weight size, command-buffer size, site
+# count and the number of symbols their sites name.
 #
 # Usage:  tools/axonpack_selftest.sh [model ...]      (default: all shipped)
 # Needs:  temp/axon-models checkout, MCU=nrf54lm20b toolchain.

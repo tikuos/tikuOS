@@ -1,8 +1,8 @@
-# F0: build and run the FAT32 parser on the host.
+# tools/fat32/Makefile - build the FAT32 parser host test and run it.
 #
-# The parser under test is the REAL kernel/fs/tiku_fat.c -- not a copy, not a
-# reimplementation.  That is the whole value of keeping it free of hardware
-# includes.
+# fat_host_test compiles kernel/fs/tiku_fat.c itself, which builds on the host
+# because it has no hardware includes.  `make check` runs it on the images in
+# CORPUS, and builds them with mkcorpus.sh when that directory does not exist.
 CFLAGS ?= -std=c99 -Wall -Wextra -Werror -O1 -g -I../..
 CORPUS ?= /tmp/fat32corpus
 

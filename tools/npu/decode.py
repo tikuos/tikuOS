@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
-"""Decode a Vela command stream far enough to see which regions it touches.
+"""
+Tiku Operating System v0.06
+Simple. Ubiquitous. Intelligence, Everywhere.
+http://tiku-os.org
 
-The point is not a full disassembly: it is to learn, from the stream itself,
-which base pointers must be programmed before it can run -- so the host side
-is derived rather than guessed.
+Authors: Ambuj Varshney <ambuj@tiku-os.org>
+
+decode.py - print the NPU regions a Vela command stream uses.
+
+Decodes the command stream in tensor 0's buffer of a Vela-compiled .tflite
+(argv[1]) far enough to print each REGION command, up to NPU_OP_STOP: the
+regions are the base pointers to program before the stream runs.
+
+SPDX-License-Identifier: Apache-2.0
 """
 import struct
 import sys

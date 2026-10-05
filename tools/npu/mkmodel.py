@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
-"""Author a minimal int8 MAX_POOL_2D TFLite model.
+"""
+Tiku Operating System v0.06
+Simple. Ubiquitous. Intelligence, Everywhere.
+http://tiku-os.org
 
-Deliberately the simplest network whose reference output cannot be argued
-with: input and output carry the SAME scale and a zero zero-point, so the
-operator is a plain windowed maximum over int8 and requantisation cannot
-enter.  Anything richer would make a mismatch ambiguous between "the NPU is
-wrong" and "my reference arithmetic is wrong".
+Authors: Ambuj Varshney <ambuj@tiku-os.org>
 
-Built with the flatbuffer classes Vela already bundles, so this needs no
-TensorFlow.
+mkmodel.py - author an int8 MAX_POOL_2D TFLite model.
+
+Input and output share scale 1.0 and a zero zero-point, so the expected output
+is a 2x2, stride-2 windowed maximum over int8, with no requantisation.  Built
+with the flatbuffer classes Vela bundles; TensorFlow is not needed.
+
+SPDX-License-Identifier: Apache-2.0
+
+Usage: mkmodel.py <out.tflite> [side]   (square input side, default 8)
 """
 import sys
 import flatbuffers
@@ -27,6 +33,7 @@ b = flatbuffers.Builder(4096)
 
 
 def vec(start_fn, items):
+    """Build a flatbuffer vector of table offsets; return its offset."""
     start_fn(b, len(items))
     for x in reversed(items):
         b.PrependUOffsetTRelative(x)
@@ -34,6 +41,7 @@ def vec(start_fn, items):
 
 
 def ivec(start_fn, items, prepend):
+    """Build a flatbuffer vector of scalars with prepend; return its offset."""
     start_fn(b, len(items))
     for x in reversed(items):
         prepend(x)
@@ -52,6 +60,8 @@ def quant():
 
 
 def tensor(name, shape, buf_idx):
+    """Return an int8 Tensor of the given shape and buffer, quantised by
+    quant()."""
     nm = b.CreateString(name)
     sh = ivec(Tensor.StartShapeVector, shape, b.PrependInt32)
     q = quant()
