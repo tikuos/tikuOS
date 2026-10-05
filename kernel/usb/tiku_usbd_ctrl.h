@@ -18,15 +18,13 @@
 #include <stddef.h>
 
 /*
- * What is here and what is deliberately not, in the mass-storage core's own
- * terms.  Here: every DECISION a device makes about a control transfer --
- * which descriptor answers, what a status or feature request means, how a
- * class request is routed -- and the descriptors themselves, built once
- * from an identity and endpoint numbers instead of hand-typed per port.
- * Not here: WHEN the address takes effect (before the status stage on a
- * DWC2, after it on MUSB and the RP2350, in hardware on the RA8P1), how a
- * data stage moves, or any register.  A controller drives its own EP0 and
- * asks here what each SETUP packet means.
+ * Here: the decisions a device makes about a control transfer -- which
+ * descriptor answers, what a status or feature request means, how a class
+ * request is routed -- and the descriptors themselves, built from an
+ * identity and endpoint numbers.  Not here: when the address takes effect
+ * (before the status stage on a DWC2, after it on MUSB and the RP2350, in
+ * hardware on the RA8P1), how a data stage moves, or any register.  A
+ * controller drives its own EP0 and asks here what each SETUP packet means.
  */
 
 /*---------------------------------------------------------------------------*/
@@ -46,11 +44,11 @@
 /* DESCRIPTOR BUILDERS                                                       */
 /*---------------------------------------------------------------------------*/
 
-#define TIKU_USBD_DEVICE_LEN        18u
-#define TIKU_USBD_CDC_CONFIG_LEN    75u   /* with the association descriptor */
-#define TIKU_USBD_MSC_CONFIG_LEN    32u
-#define TIKU_USBD_STRING_MAX        64u
-#define TIKU_USBD_SERIAL_LEN(n)     (2u + 4u * (n))
+#define TIKU_USBD_DEVICE_LEN        18u   /**< device descriptor bytes */
+#define TIKU_USBD_CDC_CONFIG_LEN    75u   /**< CDC config incl. association */
+#define TIKU_USBD_MSC_CONFIG_LEN    32u   /**< MSC configuration bytes */
+#define TIKU_USBD_STRING_MAX        64u   /**< room for one string descriptor */
+#define TIKU_USBD_SERIAL_LEN(n)     (2u + 4u * (n)) /**< serial of n id bytes */
 
 /**
  * @brief The 18-byte device descriptor.
@@ -98,7 +96,7 @@ const uint8_t *tiku_usbd_string_lang(uint16_t *len);
 /** @brief An ASCII string as a UTF-16LE string descriptor.  Returns bytes. */
 uint16_t tiku_usbd_string_ascii(uint8_t *out, size_t cap, const char *s);
 
-/** @brief A hex serial descriptor from @p n bytes of id (a FICR, a flash id). */
+/** @brief A hex serial descriptor from @p n id bytes (a FICR, a flash id). */
 uint16_t tiku_usbd_string_serial(uint8_t *out, size_t cap,
                                  const uint8_t *id, uint8_t n);
 
@@ -106,6 +104,7 @@ uint16_t tiku_usbd_string_serial(uint8_t *out, size_t cap,
 /* THE DESCRIPTOR SET A DEVICE PRESENTS                                      */
 /*---------------------------------------------------------------------------*/
 
+/** @brief The descriptors a device presents, and its class for routing. */
 typedef struct {
     const uint8_t *device;        /**< 18 bytes                             */
     const uint8_t *config;        /**< the configuration, patched by speed  */
@@ -130,23 +129,25 @@ typedef enum {
 } tiku_usbd_ctrl_action_t;
 
 /** @brief Side effects the request asks for, beyond the EP0 traffic. */
-#define TIKU_USBD_FX_ADDRESS    (1u << 0)  /**< apply @c address (your timing) */
-#define TIKU_USBD_FX_CONFIG     (1u << 1)  /**< configuration @c config chosen */
-#define TIKU_USBD_FX_HALT_EP    (1u << 2)  /**< halt endpoint @c ep            */
+#define TIKU_USBD_FX_ADDRESS    (1u << 0)  /**< apply @c address, at the
+                                            *   controller's own timing       */
+#define TIKU_USBD_FX_CONFIG     (1u << 1)  /**< configuration @c config set   */
+#define TIKU_USBD_FX_HALT_EP    (1u << 2)  /**< halt endpoint @c ep           */
 #define TIKU_USBD_FX_UNHALT_EP  (1u << 3)  /**< clear the halt on @c ep, and
                                             *   its data toggle with it       */
 #define TIKU_USBD_FX_LINE_STATE (1u << 4)  /**< CDC: @c dtr changed           */
 #define TIKU_USBD_FX_CLASS_RESET (1u << 5) /**< MSC: bulk-only reset          */
 
+/** @brief The decision on one SETUP packet: EP0's next step and effects. */
 typedef struct {
     tiku_usbd_ctrl_action_t action;
-    const uint8_t *data;
-    uint16_t       len;
+    const uint8_t *data;          /**< the reply, for TIKU_USBD_CTRL_REPLY  */
+    uint16_t       len;           /**< reply or OUT data-stage length       */
     uint8_t        effects;       /**< TIKU_USBD_FX_* bits                  */
-    uint8_t        address;
-    uint8_t        config;
+    uint8_t        address;       /**< for TIKU_USBD_FX_ADDRESS             */
+    uint8_t        config;        /**< for TIKU_USBD_FX_CONFIG              */
     uint8_t        ep;            /**< endpoint address for halt/unhalt     */
-    uint8_t        dtr;
+    uint8_t        dtr;           /**< for TIKU_USBD_FX_LINE_STATE          */
 } tiku_usbd_ctrl_out_t;
 
 /** @brief The device's control state; one per device, zeroed to start. */

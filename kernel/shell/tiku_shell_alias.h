@@ -7,9 +7,9 @@
  *
  * tiku_shell_alias.h - user-defined shell shortcuts (NVM-backed).
  *
- * Consulted after a built-in lookup fails; the alias body may chain commands with
- * ';'.  Built-ins always win, so a misconfigured alias cannot lock out help or
- * reboot.
+ * Consulted after a built-in lookup fails; the alias body may chain commands
+ * with ';'.  Built-ins always win, so a misconfigured alias cannot lock out
+ * help or reboot.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -31,21 +31,22 @@
 /* RETURN CODES                                                              */
 /*---------------------------------------------------------------------------*/
 
-#define TIKU_SHELL_ALIAS_OK            0
-#define TIKU_SHELL_ALIAS_ERR_FULL     -1
-#define TIKU_SHELL_ALIAS_ERR_NOTFOUND -2
-#define TIKU_SHELL_ALIAS_ERR_TOOBIG   -3
-#define TIKU_SHELL_ALIAS_ERR_INVALID  -4
+#define TIKU_SHELL_ALIAS_OK            0  /**< success */
+#define TIKU_SHELL_ALIAS_ERR_FULL     -1  /**< no free slot */
+#define TIKU_SHELL_ALIAS_ERR_NOTFOUND -2  /**< no alias by that name */
+#define TIKU_SHELL_ALIAS_ERR_TOOBIG   -3  /**< name or body over its limit */
+#define TIKU_SHELL_ALIAS_ERR_INVALID  -4  /**< NULL argument or empty name */
 
 /*---------------------------------------------------------------------------*/
 /* INIT                                                                      */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Validate the FRAM magic word; first-boot the table if absent.
+ * @brief Validate the table's gate; prime every slot empty when it fails.
  *
- * Idempotent. Safe to call multiple times. Should be called once
- * during shell startup.
+ * Idempotent: a gate that holds the magic keeps the table as it is.
+ *
+ * @note The shell calls it once at startup.
  */
 void tiku_shell_alias_init(void);
 
@@ -65,7 +66,8 @@ int tiku_shell_alias_set(const char *name, const char *body);
 
 /**
  * @brief Remove an alias by name.
- * @return TIKU_SHELL_ALIAS_OK or TIKU_SHELL_ALIAS_ERR_NOTFOUND.
+ * @return TIKU_SHELL_ALIAS_OK, TIKU_SHELL_ALIAS_ERR_NOTFOUND, or
+ *         TIKU_SHELL_ALIAS_ERR_INVALID for a NULL name.
  */
 int tiku_shell_alias_clear(const char *name);
 
@@ -75,7 +77,7 @@ int tiku_shell_alias_clear(const char *name);
 
 /**
  * @brief Look up an alias body by name.
- * @return Pointer to FRAM-resident body string, or NULL if not
+ * @return Pointer to the body in the durable table, or NULL if not
  *         defined. Caller must not modify the returned string.
  */
 const char *tiku_shell_alias_lookup(const char *name);
@@ -84,8 +86,8 @@ const char *tiku_shell_alias_lookup(const char *name);
  * @brief Iterate the alias table.
  *
  * Pass @p idx in the range [0, TIKU_SHELL_ALIAS_MAX). On success
- * sets *@p name and *@p body to FRAM-resident strings and returns
- * 1. Returns 0 if the slot at @p idx is empty.
+ * sets *@p name and *@p body to strings in the durable table and
+ * returns 1. Returns 0 if the slot at @p idx is empty.
  */
 int tiku_shell_alias_get(uint8_t idx, const char **name,
                          const char **body);

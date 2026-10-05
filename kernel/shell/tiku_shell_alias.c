@@ -9,7 +9,7 @@
  *
  * A fixed array of slots in .persistent behind a magic-word gate, so aliases
  * survive power loss and a virgin store primes exactly once.  Every mutator
- * brackets its writes with the NVM unlock; read paths never write, so they do not.
+ * brackets its writes with the NVM unlock; the read paths need none.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,13 +19,13 @@
 #include <string.h>
 
 /*---------------------------------------------------------------------------*/
-/* FRAM STORAGE                                                              */
+/* DURABLE STORAGE                                                           */
 /*---------------------------------------------------------------------------*/
 
 /**
  * Magic word guarding the persistent alias table.
  *
- * An arbitrary fixed 32-bit constant, so uninitialised FRAM matches it with
+ * An arbitrary fixed 32-bit constant, so uninitialised memory matches it with
  * probability 2^-32.  Bump it if the slot layout ever changes incompatibly.
  */
 #define ALIAS_MAGIC  0xA11A5E50UL   /* "ALIAS-EP", arbitrary fixed value */
@@ -42,7 +42,7 @@ typedef struct {
 } alias_slot_t;
 
 /**
- * FRAM-resident alias table (.persistent), TIKU_SHELL_ALIAS_MAX slots.
+ * Durable alias table (TIKU_DURABLE), TIKU_SHELL_ALIAS_MAX slots.
  *
  * Survives reset, brownout and power loss; indexed by slot number.  Mutated
  * only inside a tiku_mpu_unlock_nvm()/lock_nvm() bracket, read without one.
@@ -121,10 +121,10 @@ tiku_shell_alias_init(void)
  * @brief Define a new alias or overwrite an existing one.
  *
  * An existing @p name reuses its slot; otherwise the first free slot is
- * claimed.  Name and body are copied into FRAM and NUL-terminated inside one
- * unlock bracket, so the change is persistent immediately.
+ * claimed.  Name and body are copied into the durable table and NUL-terminated
+ * inside one unlock bracket, so the change is persistent immediately.
  *
- * @note Validation precedes any FRAM write: a NULL or empty name is rejected
+ * @note Validation precedes any NVM write: a NULL or empty name is rejected
  *       and both strings are length-checked (the trailing NUL does not count).
  * @param name  Alias name (non-empty, <= TIKU_SHELL_ALIAS_NAME_MAX)
  * @param body  Expansion text (<= TIKU_SHELL_ALIAS_BODY_MAX)
@@ -209,8 +209,8 @@ tiku_shell_alias_clear(const char *name)
 /**
  * @brief Look up an alias body by name (the parser's hot path).
  *
- * Read-only: returns a pointer to the FRAM-resident body string, so no
- * MPU unlock is needed.  A NULL @p name is treated as "not found".
+ * Read-only: returns a pointer to the body in the durable table, so no MPU
+ * unlock is needed.  A NULL @p name is treated as "not found".
  *
  * @param name  Alias name to resolve
  * @return Pointer to the body string, or NULL if @p name is NULL or
@@ -227,7 +227,7 @@ tiku_shell_alias_lookup(const char *name)
  * @brief Fetch the name and body of the alias at a given slot index.
  *
  * The enumeration helper for listing aliases: a populated slot sets the two
- * outputs to the FRAM-resident strings and returns 1.  Read-only, no MPU
+ * outputs to the strings in the durable table and returns 1.  Read-only, no MPU
  * unlock, and addressed by raw index so the caller must skip empty slots.
  *
  * @param idx   Slot index in [0, TIKU_SHELL_ALIAS_MAX)

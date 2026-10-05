@@ -5,24 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_drv_registry.c - Driver-table dispatch
+ * tiku_drv_registry.c - driver-table dispatch.
  *
- * Boot-time walker over the driver table.  Iterates tiku_drv_table[]
- * once at startup and calls each driver's init() in table order, then
- * offers a by-name lookup the shell and applications use to query a
- * driver's presence afterwards.
- *
- * The table itself is generated elsewhere — populated by drivers/
- * tiku_drv_table.c when that repo is cloned alongside this one; an
- * empty fallback in tiku_drv_empty_table.c keeps the link working
- * when drivers/ is absent.  The contract between core and the table
- * is deliberately narrow: this file only reads (const tiku_drv_t *)
- * pointers and the count, never the per-driver silicon code.
- *
- * Error policy is log-and-continue: a driver whose init() returns
- * non-zero is reported over the boot UART but does not abort the
- * sequence, so one bad sensor cannot prevent the rest of the system
- * (and the scheduler) from coming up.  See drivers.md.
+ * Calls each driver's init() at boot in table order, mounts the ready ones'
+ * nodes and keeps per-boot status; a failed init is logged and boot goes on.
+ * A driver is reached only through its descriptor.  See drivers.md.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -43,11 +30,8 @@
 /**
  * Tagged boot-log macro for the driver registry.
  *
- * Routes through TIKU_PRINTF so messages land on the same UART
- * transport as the rest of boot output.  The '[DRV]' prefix mirrors
- * '[MAIN]' / '[PROCESS]' / etc. from tiku.h, making per-subsystem
- * boot lines easy to grep.  Wrapped in an #ifndef so a build can
- * override (or silence) the tag without editing this file.
+ * Routes through TIKU_PRINTF with a '[DRV]' prefix, like tiku.h's '[MAIN]';
+ * #ifndef so a build can override or silence it.
  */
 #ifndef DRV_PRINTF
 #define DRV_PRINTF(...) TIKU_PRINTF("[DRV] " __VA_ARGS__)
@@ -236,7 +220,8 @@ static int driver_mount(uint8_t index, const tiku_drv_t *d)
  * @param index     Table slot
  * @param init_rc   Receives the init() result, or NULL
  * @param mount_rc  Receives the mount result, or NULL
- * @return The slot's state; TIKU_DRV_INVALID past the table end
+ * @return The slot's state; TIKU_DRV_INVALID past the table end and
+ *         TIKU_DRV_CAPACITY past TIKU_DRV_REGISTRY_MAX
  */
 tiku_drv_state_t tiku_drv_status(uint8_t index, int *init_rc, int *mount_rc)
 {
@@ -264,29 +249,13 @@ tiku_drv_state_t tiku_drv_status(uint8_t index, int *init_rc, int *mount_rc)
 /**
  * @brief Walk the driver table and initialise every registered driver.
  *
- * Runs once at boot (from main.c, after tiku_vfs_tree_init()).  Each
- * table slot is a pointer to a const tiku_drv_t descriptor; this
- * function calls descriptor->init() in table order and reports the
- * outcome over the boot UART.
+ * Publishes /sys/drivers, then calls each valid descriptor's init() in table
+ * order and mounts a ready driver's nodes under /dev.  A failed init or mount
+ * is logged and recorded for tiku_drv_status(), and boot goes on.
  *
- * Robustness rules, in order of appearance:
- *   - /sys/drivers is published first; an empty table initializes no
- *     devices and creates no /dev class directories.
- *   - A slot at or past TIKU_DRV_REGISTRY_MAX is logged and reported as
- *     capacity-limited; its driver is not initialized.
- *   - NULL slots, and descriptors with no init(), no name or a class
- *     outside tiku_drv_class_t, are recorded as invalid and skipped
- *     rather than dereferenced.
- *   - A non-zero init() return is logged and execution continues to
- *     the next driver — the log-and-continue policy from the file
- *     header.  A failed driver is still discoverable via
- *     tiku_drv_find(), so the app/shell can report its status.
- *   - A driver whose init() succeeded mounts its nodes under /dev; a
- *     failed mount is logged and recorded, and the driver stays ready.
- *
- * No NVM writes and no MPU interaction occur here; side effects are
- * limited to whatever each driver's init() does and the boot-log
- * output.
+ * @note Called once at boot from main.c, after tiku_vfs_tree_init(); a repeat
+ *       call does nothing.  No NVM writes or MPU interaction: side effects are
+ *       each driver's init(), the VFS mounts and the boot log.
  */
 void tiku_drv_init_all(void)
 {
@@ -329,9 +298,9 @@ void tiku_drv_init_all(void)
         driver_status[i].state = (rc == TIKU_DRV_OK) ? TIKU_DRV_READY
                                                      : TIKU_DRV_FAILED;
         if (rc != TIKU_DRV_OK) {
-            /* Log and keep going — a misbehaving driver should
-             * not block the rest of boot. The application / shell
-             * can still query its status via tiku_drv_find(). */
+            /* Log and keep going: a failed driver does not block the
+             * rest of boot, and its status stays readable through
+             * tiku_drv_status(). */
             DRV_PRINTF("driver '%s' init returned %d\n", d->name, rc);
             continue;
         }
@@ -375,14 +344,9 @@ void tiku_drv_remount_all(void)
 /**
  * @brief Look up a driver descriptor by name.
  *
- * Linear scan of the driver table comparing @p name against each
- * descriptor's name with strcmp().  The scan is bounded by
- * tiku_drv_table_count (a handful of entries at most), so cost is
- * negligible.  NULL slots and descriptors lacking a name are skipped.
- *
- * Intended for application / shell code that wants to query driver
- * state after boot (e.g. "is the WiFi driver loaded?").  Read-only:
- * it never mutates the table or any descriptor.
+ * Linear strcmp() scan of the table, skipping NULL slots and nameless
+ * descriptors.  Returns the descriptor whatever its init outcome, which
+ * tiku_drv_status() reports.
  *
  * @param name  Driver name to match (NUL-terminated); NULL yields NULL.
  * @return Pointer to the matching const descriptor, or NULL if no

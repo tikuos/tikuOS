@@ -7,9 +7,9 @@
  *
  * tiku_shell_jobs.h - periodic and one-shot scheduled shell commands.
  *
- * A tiny in-process scheduler driven by a tick from the shell main loop, so it
- * inherits cooperative scheduling and needs no synchronisation.  Jobs live in SRAM
- * and do not survive a reboot.
+ * A small scheduler driven by a tick from the shell main loop, so it inherits
+ * cooperative scheduling and needs no synchronisation.  Jobs live in SRAM and
+ * do not survive a reboot.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -28,10 +28,9 @@
 #define TIKU_SHELL_JOBS_MAX      4
 #endif
 
-/** Maximum stored length of a scheduled-job command.  Tier-gated in step with
- *  TIKU_SHELL_LINE_SIZE so a periodic job can hold a long command: 64 on
- *  MSP430-class, 255 on big-RAM parts.  Capped at 255 because the job copy
- *  length is a uint8_t, which still holds any line-editor line. */
+/** Size of a job's command buffer, NUL included: 64 on MSP430 and 255 on
+ *  big-RAM parts, in step with TIKU_SHELL_LINE_SIZE.  At most 255, because
+ *  the job copy length is a uint8_t. */
 #ifndef TIKU_SHELL_JOBS_CMD_MAX
 #  ifdef PLATFORM_MSP430
 #    define TIKU_SHELL_JOBS_CMD_MAX  64
@@ -55,8 +54,8 @@ typedef enum {
 /** A single scheduled job. */
 typedef struct {
     tiku_shell_job_type_t type;
-    uint16_t              interval_sec;     /**< Period (every) or delay (once) */
-    unsigned long         next_fire_sec;    /**< Wall-clock seconds at next fire */
+    uint16_t              interval_sec;   /**< Period (every) or delay (once) */
+    unsigned long         next_fire_sec;  /**< uptime seconds at next fire */
     char                  cmd[TIKU_SHELL_JOBS_CMD_MAX];
 } tiku_shell_job_t;
 
@@ -65,11 +64,11 @@ typedef struct {
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Initialise the jobs subsystem.  Call once at shell startup.
+ * @brief Initialise the jobs subsystem.
  *
- * The job table is statically zero-initialised, so this is a no-op
- * today, but it gives a hook for future migration to FRAM-backed
- * persistence.
+ * The job table is statically zero-initialised, so this is a no-op.
+ *
+ * @note Call once at shell startup.
  */
 void tiku_shell_jobs_init(void);
 
@@ -82,8 +81,8 @@ void tiku_shell_jobs_init(void);
  * @param type          TIKU_SHELL_JOB_EVERY or TIKU_SHELL_JOB_ONCE
  * @param interval_sec  Seconds between fires (must be >= 1)
  * @param cmd           NUL-terminated command line, copied into the slot
- * @return Slot id (0..TIKU_SHELL_JOBS_MAX-1) on success, -1 if the
- *         table is full or @p cmd is too long.
+ * @return Slot id (0..TIKU_SHELL_JOBS_MAX-1) on success; -1 on a bad
+ *         argument, a command too long for the slot, or a full table.
  */
 int8_t tiku_shell_jobs_add(tiku_shell_job_type_t type,
                             uint16_t interval_sec,

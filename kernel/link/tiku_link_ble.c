@@ -116,6 +116,10 @@ flush_out(tiku_link_ble_t *l)
     }
 }
 
+/**
+ * @brief Queue one message behind its length, then flush what the pipe takes.
+ * @return 0, or -1 while no central is subscribed or the outbox lacks room
+ */
 static int
 ble_send(tiku_link_t *link, const void *head, size_t hlen,
          const void *body, size_t blen)
@@ -194,6 +198,10 @@ tiku_link_ble_service(void)
     }
 }
 
+/**
+ * @brief Service the open link on a timer, faster while a central holds it;
+ *        ends when the link closes.
+ */
 TIKU_PROCESS_THREAD(tiku_link_ble_process, ev, data)
 {
     (void)data;
@@ -225,6 +233,10 @@ tiku_link_ble_pumping(void)
 /* THE LINK                                                                  */
 /*---------------------------------------------------------------------------*/
 
+/**
+ * @brief Drop the receiver; for the open link, also stop the facade and end
+ *        the service process.
+ */
 static void
 ble_close(tiku_link_t *link)
 {

@@ -62,11 +62,11 @@ typedef struct {
 /**
  * @brief Load and validate the init table from NVM.
  *
- * Call once during boot, after the NVM region map is initialised.  A blank
- * table, or one that fails the checks, is primed empty; a missing or undersized
- * region disables the table.
+ * A blank table, or one that fails the checks, is primed empty; a missing or
+ * undersized region disables the table.
  *
- * @note A power loss during an add or an enable leaves the old table; during a
+ * @note Call once during boot, after the NVM region map is initialised.  A
+ *       power loss during an add or an enable leaves the old table; during a
  *       replace or a remove it can leave the table empty, never torn.
  */
 void tiku_init_load(void);

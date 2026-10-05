@@ -7,9 +7,8 @@
  *
  * tiku_link.h - a link: whole messages to and from a peer, on any medium.
  *
- * The seam between a session (a desktop's window session, later others) and
- * the wire it rides.  A backend per medium earns one promise from its
- * medium: a message arrives whole and intact, or not at all.
+ * The seam between a session (a desktop's window session) and the wire it
+ * rides.  Each backend delivers a message whole and intact, or not at all.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

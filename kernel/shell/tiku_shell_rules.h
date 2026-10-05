@@ -7,9 +7,9 @@
  *
  * tiku_shell_rules.h - reactive rule engine for the shell.
  *
- * A rule is "if VFS_path OP value then run COMMAND", evaluated every shell tick
- * and dispatched only on a false-to-true transition, so an action with side
- * effects fires once per crossing rather than every tick.  Storage is SRAM-only.
+ * A rule is "if VFS_path OP value then run COMMAND", evaluated on each write
+ * to a writable node and on the shell tick otherwise.  A comparison fires on a
+ * false-to-true transition, `changed` on any change.  Storage is SRAM-only.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -48,11 +48,13 @@
 /* TYPES                                                                     */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Slot state; TIKU_SHELL_RULE_FREE is the zeroed "empty" marker. */
 typedef enum {
     TIKU_SHELL_RULE_FREE = 0,
     TIKU_SHELL_RULE_ACTIVE
 } tiku_shell_rule_state_t;
 
+/** @brief A rule's operator: a comparison, or a change of value. */
 typedef enum {
     TIKU_SHELL_RULE_OP_GT,
     TIKU_SHELL_RULE_OP_LT,
@@ -65,10 +67,9 @@ typedef enum {
 
 /** @brief A single reactive rule.
  *
- * Field semantics depend on @c op: for a comparison, @c value is the immutable
- * right-hand side and @c last_match tracks the previous match state for edge
- * detection.  For OP_CHANGED, @c value holds the last seen reading and
- * @c last_match is the "baseline established" flag.
+ * For a comparison, @c value is the fixed right-hand side and @c last_match
+ * the previous match state, for edge detection.  For OP_CHANGED, @c value
+ * holds the last seen reading and @c last_match says a baseline is set.
  */
 typedef struct {
     tiku_shell_rule_state_t state;
@@ -97,10 +98,10 @@ void tiku_shell_rules_init(void);
 /**
  * @brief Register a rule in the first free slot.
  *
- * @param path    VFS path to read each tick (must fit PATH_MAX-1).
+ * @param path    VFS path the rule reads (must fit PATH_MAX-1).
  * @param op      Comparison operator.
  * @param value   Right-hand side (must fit VALUE_MAX-1).
- * @param action  Command line dispatched on a false->true transition
+ * @param action  Command line dispatched each time the rule fires
  *                (must fit ACTION_MAX-1).
  * @return Slot id (>= 0) on success, -1 if the table is full or a
  *         field overflows its buffer.
@@ -137,9 +138,9 @@ const char *tiku_shell_rules_op_name(tiku_shell_rule_op_t op);
 /**
  * @brief Convenience for the `on` command: parse argv, validate, register.
  *
- * Comparison grammar: argv[1] = path, argv[2] = op, argv[3] = value, argv[4..]
- * = action.  Change grammar: argv[1] = "changed", argv[2] = path, argv[3..] =
- * action.  Action tokens join with single spaces; errors print via SHELL_PRINTF.
+ * Comparison grammar: argv[1] path, argv[2] op, argv[3] value, argv[4..]
+ * action.  Change grammar: argv[1] "changed", argv[2] path, argv[3..] action.
+ * Action tokens join with single spaces; errors print via SHELL_PRINTF.
  *
  * @return Slot id (>= 0) on success, -1 on error (message printed).
  */
@@ -162,12 +163,9 @@ void tiku_shell_rules_tick(void);
  * @brief Event-path evaluator; called from the shell protothread on
  *        TIKU_EVENT_VFS.
  *
- * Evaluates exactly the active rules whose cached node matches
- * @p node_ptr (the event's data payload), using the same
- * edge-triggered semantics as the poll tick.  Write-to-reaction
- * latency on this path is one event dispatch instead of up to a
- * full shell poll period, and rules on written nodes cost nothing
- * between events.
+ * Evaluates the active rules whose cached node is the event's node, with the
+ * poll tick's semantics.  A write reaches its rules within one event dispatch,
+ * and rules on written nodes cost nothing between events.
  *
  * @param node_ptr  The changed node, as delivered in the event data
  */

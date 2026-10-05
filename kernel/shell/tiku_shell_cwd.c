@@ -8,8 +8,8 @@
  * tiku_shell_cwd.c - shell working directory and path resolution.
  *
  * Keeps one always-absolute cwd string, reset to "/" each boot.  Resolution is
- * purely lexical -- it collapses ".", ".." and repeated slashes but never consults
- * the VFS -- so callers needing an existing target must validate the result.
+ * lexical: it collapses ".", ".." and repeated slashes without consulting the
+ * VFS, so a caller that needs an existing target must check the result.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -70,7 +70,6 @@ go_up(char *path)
 {
     uint8_t len = (uint8_t)strlen(path);
 
-    /* Strip trailing slash first */
     while (len > 1 && path[len - 1] == '/') {
         path[--len] = '\0';
     }
@@ -112,13 +111,11 @@ append_component(char *path, uint8_t pathsz,
 {
     uint8_t len = (uint8_t)strlen(path);
 
-    /* Add separator if not at root */
     if (len > 1 && len < pathsz - 1) {
         path[len++] = '/';
         path[len] = '\0';
     }
 
-    /* Append component */
     while (complen > 0 && len < pathsz - 1) {
         path[len++] = *comp++;
         complen--;
@@ -208,10 +205,8 @@ tiku_shell_cwd_resolve(const char *input, char *out, uint8_t outsz)
     /* Walk through each component (shared path lexer -- see
      * tiku_vfs_next_segment for the slash-run/trailing-slash rules) */
     while (tiku_vfs_next_segment(&p, &comp, &complen)) {
-        /* Handle ".." */
         if (complen == 2 && comp[0] == '.' && comp[1] == '.') {
             go_up(out);
-        /* Handle "." (no-op) */
         } else if (complen == 1 && comp[0] == '.') {
             continue;
         } else {
@@ -221,7 +216,6 @@ tiku_shell_cwd_resolve(const char *input, char *out, uint8_t outsz)
 
     strip_trailing_slash(out);
 
-    /* Ensure at least "/" */
     if (out[0] == '\0') {
         out[0] = '/';
         out[1] = '\0';

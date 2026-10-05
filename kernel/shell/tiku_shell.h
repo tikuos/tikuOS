@@ -7,9 +7,9 @@
  *
  * tiku_shell.h - interactive command-line interface (public types and API).
  *
- * Transport-agnostic: all I/O flows through the pluggable backend in
- * tiku_shell_io.h.  Declares the handler signature, the command-table entry type,
- * the sizing macros, the table accessor and tiku_shell_init().
+ * Output goes through the pluggable backend in tiku_shell_io.h.  Declares the
+ * handler signature, the command-table entry type, the sizing macros, the
+ * table accessor, tiku_shell_init() and the pump registry.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -39,9 +39,10 @@
  *
  * @note Tier-gated: MSP430-class parts keep the lean 64 (small SRAM, and the
  *       history ring is FRAM-backed there); big-RAM parts get 256 so a whole
- *       command fits inline instead of being clipped.  Must stay <= 256 --
- *       cli.pos and the history indices are uint8_t, enforced by a
- *       _Static_assert in tiku_shell.c.  #ifndef so a build can override.
+ *       command fits inline instead of being clipped.  Must stay <= 256:
+ *       cli.pos and the tab-completion lengths are uint8_t, which a
+ *       _Static_assert in tiku_shell.c checks.  #ifndef so a build can
+ *       override.
  */
 #ifndef TIKU_SHELL_LINE_SIZE
 #  ifdef PLATFORM_MSP430
@@ -61,9 +62,8 @@
 #  ifdef PLATFORM_MSP430
 #    define TIKU_SHELL_MAX_ARGS 8
 #  else
-/* 24, not 8: llm/pf-style commands take long id lists, and an argv cap
- * CLIPS SILENTLY -- six hours of timing data were once taken on commands
- * the parser had quietly truncated. */
+/* Tokens past the cap are dropped without an error, so big-RAM parts allow
+ * 24 for commands that take long lists. */
 #    define TIKU_SHELL_MAX_ARGS 24
 #  endif
 #endif
@@ -133,17 +133,17 @@ extern struct tiku_process tiku_shell_process;
 void tiku_shell_init(void);
 
 /*---------------------------------------------------------------------------*/
-/* PUMPS -- work that must run in PROCESS context, once per shell pass        */
+/* PUMPS                                                                     */
 /*---------------------------------------------------------------------------*/
 /**
- * @brief A callback the shell loop invokes once per pass.
+ * @brief A callback the shell loop invokes once per pass, in process context.
  *
- * For drivers that need servicing with interrupts ENABLED and cannot live on
+ * For drivers that need servicing with interrupts enabled and cannot live on
  * the scheduler's idle hook, which runs inside tiku_atomic_enter() -- a long
- * transfer there kills the tick, the console and the debugger's halt.
+ * transfer there stops the tick and the console, and blocks a debugger halt.
  *
- * @note The registry exists so drivers depend on the shell rather than the
- *       shell on any particular driver.  A pump runs on EVERY pass, so it must
+ * @note The registry lets drivers depend on the shell rather than the shell
+ *       on any particular driver.  A pump runs on every pass, so it must
  *       return promptly when it has nothing to do.
  */
 typedef void (*tiku_shell_pump_fn)(void);
@@ -178,7 +178,7 @@ void tiku_shell_net_pump(void);
  * @brief Console-aware non-blocking getc for a blocking builtin that needs
  *        input.
  *
- * Like tiku_shell_net_pump(), but for a builtin that ALSO reads the keyboard
+ * Like tiku_shell_net_pump(), but for a builtin that also reads the keyboard
  * while a SLIP link is up.  Frame bytes go to their channel and the next
  * genuine console byte, or -1, comes back.
  *

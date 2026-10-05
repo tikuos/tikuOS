@@ -334,7 +334,7 @@ tiku_shell_io_has_crlf(void)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief UART backend — serial terminal over the LaunchPad backchannel.
+ * @brief UART backend — the board's serial console.
  *
  * Echo and CRLF are both enabled for interactive terminal use.
  */
@@ -343,5 +343,5 @@ const tiku_shell_io_t tiku_shell_io_uart = {
     tiku_uart_rx_ready,                     /* rx_ready */
     tiku_uart_getc,                         /* getc */
     TIKU_SHELL_IO_CRLF | TIKU_SHELL_IO_ECHO,   /* flags */
-    TIKU_VFS_CAP_ALL                        /* physical console = full authority */
+    TIKU_VFS_CAP_ALL                        /* local console: all authority */
 };

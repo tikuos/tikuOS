@@ -22,8 +22,10 @@
 #include <kernel/timers/tiku_clock.h>
 
 /*---------------------------------------------------------------------------*/
-/* THE FRAME ON THE WIRE (RFC 1055, plus the NUL escape)                     */
+/* THE FRAME ON THE WIRE                                                     */
 /*---------------------------------------------------------------------------*/
+
+/* SLIP framing (RFC 1055), plus an escape for NUL. */
 
 #define TIKU_CONSOLE_END      0xC0u  /**< frame delimiter */
 #define TIKU_CONSOLE_ESC      0xDBu  /**< escape */
@@ -192,14 +194,15 @@ void tiku_console_pump(void);
  */
 uint8_t tiku_console_pumping(void);
 
-/** @brief The pump process, defined in a build without a shell. */
 struct tiku_process;
+/** @brief The pump process, defined in a build without a shell. */
 extern struct tiku_process tiku_console_process;
 
 /*---------------------------------------------------------------------------*/
 /* OBSERVABILITY                                                             */
 /*---------------------------------------------------------------------------*/
 
+/** @brief The decoder's counters; tiku_console_reset() zeroes them. */
 typedef struct {
     uint32_t frames[TIKU_CONSOLE_CHANNELS]; /**< delivered, per channel */
     uint32_t stray_end;   /**< an END outside any frame that opened none */
@@ -207,7 +210,7 @@ typedef struct {
     uint32_t phantom;     /**< frames abandoned by the age guard */
 } tiku_console_stats_t;
 
-/** @brief The counters since boot. */
+/** @brief The counters since boot or the last tiku_console_reset(). */
 const tiku_console_stats_t *tiku_console_stats(void);
 
 /**

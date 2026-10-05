@@ -7,9 +7,9 @@
  *
  * tiku_init.c - NVM-backed configurable boot (init system).
  *
- * Replays an ordered table of shell commands stored in the NVM config region, so
- * the startup sequence is reconfigurable without recompiling.  Every mutation is
- * bracketed by the MPU unlock/lock.
+ * Replays an ordered table of shell commands stored in the NVM config region,
+ * so the startup sequence is reconfigurable without recompiling.  Every
+ * mutation is bracketed by the MPU unlock/lock.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -34,7 +34,7 @@
  * Magic word distinguishing an initialised init region from blank NVM.  Written
  * last by init_commit() and checked by tiku_init_load(); a mismatch means fresh
  * or wiped storage, or an interrupted replace or remove, and triggers a prime.
- * Bump it if the layout below ever changes incompatibly, so old images re-prime.
+ * Bump it if the layout below changes incompatibly, so old images re-prime.
  */
 #define TIKU_INIT_MAGIC  0x1417U
 
@@ -72,18 +72,11 @@
  * Compile-time guard: the device's CONFIG region must be at least as
  * large as the init table needs.
  *
- * init_first_boot() zeroes every entry slot by writing through
- * init_entry_ptr(), which addresses cfg_base + OFF_ENTRIES + idx *
- * sizeof(entry).  If the device's TIKU_DEVICE_FRAM_CONFIG_SIZE is
- * smaller than TIKU_INIT_REGION_BYTES_NEEDED, those writes would run
- * past the region and clobber whatever NVM follows it — and because
- * the prime happens on first boot with the MPU unlocked, the
- * corruption would be silent.  Catching it here turns a runtime
- * memory-stomp into a build error.  The assert is gated on the macro
- * being defined so ports that size the CONFIG region differently (or
- * not via this symbol) still compile; the default sizes are 512B
- * (fr2433) up to 2048B (fr6989) against a 532B requirement at
- * TIKU_INIT_MAX_ENTRIES == 8.
+ * tiku_init_load() disables the table at run time when the region is
+ * smaller than TIKU_INIT_REGION_BYTES_NEEDED; the assert makes that a
+ * build error instead.  It applies only where the device defines
+ * TIKU_DEVICE_FRAM_CONFIG_SIZE, so ports that size the CONFIG region
+ * another way still compile.
  */
 #if defined(TIKU_DEVICE_FRAM_CONFIG_SIZE)
 _Static_assert(TIKU_DEVICE_FRAM_CONFIG_SIZE >= TIKU_INIT_REGION_BYTES_NEEDED,
@@ -153,7 +146,7 @@ init_entry_ptr(uint8_t idx)
            (uint16_t)idx * sizeof(tiku_init_entry_t));
 }
 
-/** @brief Reject malformed stored tables before exposing entries or commands. */
+/** @brief Whether the stored table is well formed; checked before any use. */
 static uint8_t
 init_table_valid(void)
 {
@@ -178,10 +171,12 @@ init_table_valid(void)
 }
 
 /**
- * @brief Write arbitrary bytes to NVM (caller must hold MPU unlocked).
+ * @brief Write @p len bytes to NVM.
  *
  * Thin wrapper around tiku_mem_arch_nvm_write() with casts for
  * convenience.
+ *
+ * @note The caller holds the MPU unlocked.
  *
  * @param fram_ptr  Destination address in NVM.
  * @param sram_ptr  Source address in SRAM.
@@ -191,9 +186,14 @@ init_table_valid(void)
     tiku_mem_arch_nvm_write((uint8_t *)(fram_ptr), \
                             (const uint8_t *)(sram_ptr), (len))
 
-/* Edits that rewrite a live entry (replace, remove, the first-boot prime)
- * clear the magic first, so a power loss empties the table instead of leaving
- * a torn or duplicated command for the next boot to run. */
+/**
+ * @brief Clear the magic before an edit that rewrites a live entry.
+ *
+ * Replace, remove and the first-boot prime call this first, so a power loss
+ * empties the table instead of leaving a torn or duplicated command to run.
+ *
+ * @return 0 once the cleared magic reads back, -1 otherwise
+ */
 static int8_t
 init_invalidate(void)
 {
@@ -206,8 +206,11 @@ init_invalidate(void)
     return init_read_magic() == 0 ? 0 : -1;
 }
 
-/* Close a write window and report whether its flush landed and left a table
- * the checks accept.  Protection is restored on every path. */
+/**
+ * @brief Close a write window: 0 if its flush landed and the table checks out.
+ *
+ * Protection is restored on every path.
+ */
 static int8_t
 init_lock(uint16_t saved)
 {
@@ -217,8 +220,11 @@ init_lock(uint16_t saved)
     return init_table_valid() ? 0 : -1;
 }
 
-/* Flush the entries before publishing their magic.  A failed flush leaves the
- * magic cleared and is reported to the caller. */
+/**
+ * @brief Flush the entries, then publish their magic.
+ *
+ * A failed flush leaves the magic cleared and returns -1.
+ */
 static int8_t
 init_commit(uint16_t saved)
 {
@@ -302,13 +308,9 @@ init_first_boot(void)
 
     saved = tiku_mpu_unlock_nvm();
 
-    /* Zero count */
     INIT_NVM_WRITE(cfg_base + OFF_COUNT, &zero, 1);
+    INIT_NVM_WRITE(cfg_base + OFF_COUNT + 1, &zero, 1);    /* reserved */
 
-    /* Zero reserved byte */
-    INIT_NVM_WRITE(cfg_base + OFF_COUNT + 1, &zero, 1);
-
-    /* Zero all entry slots */
     for (i = 0; i < TIKU_INIT_MAX_ENTRIES; i++) {
         INIT_NVM_WRITE(init_entry_ptr(i), zbuf, sizeof(zbuf));
     }
@@ -356,9 +358,9 @@ tiku_init_load(void)
 /**
  * @brief Execute every enabled entry, ordered by sequence number.
  *
- * Insertion-sorts an index array by seq, then dispatches each enabled, non-empty
- * command from an SRAM copy -- the parser tokenises in place and must not write
- * into the read-only NVM image.  No NVM writes happen here.
+ * Insertion-sorts an index array by seq, then dispatches each enabled,
+ * non-empty command from an SRAM copy: the parser tokenises in place and must
+ * not write into the read-only NVM image.  No NVM writes happen here.
  *
  * @return Number of entries actually executed (enabled, non-empty).
  */
@@ -381,7 +383,8 @@ tiku_init_run_all(void)
         return 0;
     }
 
-    /* Build index sorted by seq (simple insertion sort — max 8 entries) */
+    /* Index sorted by seq: an insertion sort over at most
+     * TIKU_INIT_MAX_ENTRIES entries. */
     for (i = 0; i < count; i++) {
         order[i] = i;
     }
@@ -445,7 +448,6 @@ tiku_init_add(uint8_t seq, const char *name, const char *cmd)
         return -1;
     }
 
-    /* Prepare entry in SRAM */
     memset(&entry, 0, sizeof(entry));
     entry.seq = seq;
     entry.enabled = 1;
@@ -456,7 +458,6 @@ tiku_init_add(uint8_t seq, const char *name, const char *cmd)
     count = init_read_count();
 
     if (idx >= 0) {
-        /* Replace existing entry */
         if (init_invalidate() != 0) {
             return -1;
         }
@@ -465,7 +466,6 @@ tiku_init_add(uint8_t seq, const char *name, const char *cmd)
         return init_commit(saved);
     }
 
-    /* Add new entry */
     if (count >= TIKU_INIT_MAX_ENTRIES) {
         return -1;
     }
@@ -511,7 +511,7 @@ tiku_init_remove(const char *name)
     }
     saved = tiku_mpu_unlock_nvm();
 
-    /* Move last entry into the removed slot (order doesn't matter — seq sorts) */
+    /* Move the last entry into the removed slot; run_all() sorts by seq. */
     if ((uint8_t)idx < count - 1) {
         tiku_init_entry_t *last = init_entry_ptr(count - 1);
         INIT_NVM_WRITE(init_entry_ptr((uint8_t)idx), last,

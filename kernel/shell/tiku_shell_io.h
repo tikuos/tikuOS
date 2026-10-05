@@ -5,11 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_io.h - I/O abstraction for the CLI.
+ * tiku_shell_io.h - I/O abstraction for the shell.
  *
- * Decouples the CLI from any transport: a backend supplies three function
- * pointers (putc, rx_ready, getc) plus a flags byte, and the active backend can be
- * swapped at run time.
+ * A backend supplies putc, rx_ready and getc, a flags byte and a capability
+ * byte; the active backend can be swapped at run time.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -41,18 +40,17 @@
  * @brief I/O backend descriptor
  *
  * Each transport fills one of these and passes it to
- * tiku_shell_io_set_backend().  The CLI never touches hardware
- * directly — all I/O goes through these three function pointers.
+ * tiku_shell_io_set_backend().  Output goes through putc; the line editor
+ * reads the console wire instead of getc, except from the TCP backend.
  */
 typedef struct tiku_shell_io {
     void    (*putc)(char c);        /**< Transmit one raw byte */
     uint8_t (*rx_ready)(void);      /**< Non-zero when getc has data */
     int     (*getc)(void);          /**< Read one byte, -1 if empty */
     uint8_t flags;                  /**< Bitwise OR of TIKU_SHELL_IO_* */
-    uint8_t cap;                    /**< Capability this channel confers on
-                                         VFS writes (a TIKU_VFS_CAP_* mask).
-                                         The console is CAP_ALL, a remote
-                                         backend restricted; 0 fails closed. */
+    uint8_t cap;                    /**< TIKU_VFS_CAP_* mask it confers on
+                                         VFS writes: CAP_ALL for the console,
+                                         less for a remote; 0 fails closed. */
 } tiku_shell_io_t;
 
 /*---------------------------------------------------------------------------*/
@@ -97,8 +95,8 @@ void tiku_shell_io_puts(const char *s);
 /**
  * @brief Lightweight formatted output through the active backend.
  *
- * Supports: %s %d %u %x %c %% and optional width / 'l' modifier.
- * Converts \n to \r\n when TIKU_SHELL_IO_CRLF is set.
+ * Supports %d %u %x %X %p %s %c %% with the '-' and '0' flags, a width and
+ * 'l'.  Converts \n to \r\n when TIKU_SHELL_IO_CRLF is set.
  */
 void tiku_shell_io_printf(const char *fmt, ...);
 
@@ -136,10 +134,10 @@ uint8_t tiku_shell_io_has_crlf(void);
 
 /**
  * @def SHELL_PRINTF(...)
- * @brief Shorthand used by CLI code and command handlers for output.
+ * @brief Shorthand used by shell code and command handlers for output.
  *
  * Routes through the I/O abstraction so the same command code works
- * over any backend (UART, network, LLM channel, etc.).
+ * over any backend (UART, USB CDC, TCP, BLE).
  */
 #define SHELL_PRINTF(...) tiku_shell_io_printf(__VA_ARGS__)
 

@@ -7,8 +7,8 @@
  *
  * tiku_usbd_msc.c - Bulk-Only Transport + SCSI, with no controller in it.
  *
- * Carved out of the Apollo510 driver, where this logic was proven against
- * Linux, macOS and Windows hosts.  Behaviour is unchanged by construction.
+ * Decodes command wrappers and SCSI commands, and builds the replies and the
+ * status wrapper; the controller's transport calls in for each decision.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -16,28 +16,34 @@
 #include "tiku_usbd_msc.h"
 
 /*---------------------------------------------------------------------------*/
-/* Byte order.  SCSI is big-endian, the BOT wrappers are little-endian, and   */
-/* mixing them up is silent -- both ends still see numbers.                   */
+/* BYTE ORDER                                                                */
 /*---------------------------------------------------------------------------*/
 
+/* SCSI is big-endian and the BOT wrappers little-endian; mixing them up is
+ * silent, since both ends still see numbers. */
+
+/** @brief Read a little-endian 32-bit value. */
 static uint32_t le32(const uint8_t *p)
 {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
+/** @brief Read a big-endian 32-bit value. */
 static uint32_t be32(const uint8_t *p)
 {
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
            ((uint32_t)p[2] << 8) | (uint32_t)p[3];
 }
 
+/** @brief Write @p v as a little-endian 32-bit value. */
 static void put_le32(uint8_t *p, uint32_t v)
 {
     p[0] = (uint8_t)v;         p[1] = (uint8_t)(v >> 8);
     p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24);
 }
 
+/** @brief Write @p v as a big-endian 32-bit value. */
 static void put_be32(uint8_t *p, uint32_t v)
 {
     p[0] = (uint8_t)(v >> 24); p[1] = (uint8_t)(v >> 16);
@@ -45,15 +51,15 @@ static void put_be32(uint8_t *p, uint32_t v)
 }
 
 /*---------------------------------------------------------------------------*/
-/* Wrappers                                                                   */
+/* WRAPPERS                                                                  */
 /*---------------------------------------------------------------------------*/
 
 /*
- * Validity is exactly the two tests the specification calls for -- 31 bytes
- * and the right signature -- and deliberately no more.  bCBWLUN and
- * bCBWCBLength are surfaced for the caller to judge rather than rejected
- * here, because a wrapper that is valid but not meaningful has a defined
- * answer (stall the pipe) that belongs to the transport, not to this file.
+ * Validity is the two tests the specification calls for: 31 bytes and the
+ * right signature.  bCBWLUN and bCBWCBLength are surfaced for the caller to
+ * judge rather than rejected here, because a wrapper that is valid but not
+ * meaningful has a defined answer (stall the pipe) that belongs to the
+ * transport, not to this file.
  */
 int tiku_usbd_msc_parse_cbw(const uint8_t *buf, uint16_t n,
                             tiku_usbd_msc_cbw_t *out)
@@ -90,13 +96,16 @@ void tiku_usbd_msc_build_csw(uint8_t *out13, uint32_t tag, uint32_t residue,
 }
 
 /*---------------------------------------------------------------------------*/
-/* SCSI                                                                       */
+/* SCSI                                                                      */
 /*---------------------------------------------------------------------------*/
 
 int tiku_usbd_msc_lba_ok(const tiku_usbd_msc_t *m, uint32_t lba, uint32_t nblk)
 {
     if (m == NULL)          { return 0; }
     if (nblk == 0u)         { return 1; }
+    /* Not (lba + nblk) > blocks: the host controls both values, and an LBA
+     * near 2^32 wraps that sum small.  Bounding lba first makes the
+     * subtraction safe. */
     if (lba >= m->blocks)   { return 0; }
     return (nblk <= (m->blocks - lba)) ? 1 : 0;
 }
@@ -109,8 +118,8 @@ void tiku_usbd_msc_fail(tiku_usbd_msc_t *m, uint8_t key, uint8_t asc)
     }
 }
 
-/** @brief Copy @p src into 16 bytes at @p dst, space padded, never truncated
- *         silently past the field. */
+/** @brief Copy @p src into the 16-byte field at @p dst, space padded; a longer
+ *         @p src is cut at 16. */
 static void pad16(uint8_t *dst, const char *src)
 {
     unsigned i = 0u;
@@ -173,7 +182,7 @@ static uint16_t small_reply(tiku_usbd_msc_t *m, const uint8_t *cb,
         r[2]  = m->sense_key;
         r[7]  = 10u;              /* additional sense length                */
         r[12] = m->sense_asc;
-        /* Reading the sense CLEARS it: the condition belongs to the command
+        /* Reading the sense clears it: the condition belongs to the command
          * that caused it, and leaving it latched fails the next one too. */
         m->sense_key = TIKU_USBD_MSC_SENSE_NONE;
         m->sense_asc = 0u;
@@ -181,9 +190,8 @@ static uint16_t small_reply(tiku_usbd_msc_t *m, const uint8_t *cb,
         break;
 
     case TIKU_USBD_MSC_READ_CAPACITY10:
-        /* LAST addressable LBA, not the block count.  Reporting the count
-         * gives the host one block more than exists, and it finds out by
-         * reading past the end -- usually while writing a filesystem. */
+        /* The last addressable LBA, not the block count: the count would
+         * give the host one block more than exists. */
         put_be32(&r[0], m->blocks - 1u);
         put_be32(&r[4], TIKU_USBD_MSC_BLOCK);
         len = 8u;
@@ -242,11 +250,9 @@ void tiku_usbd_msc_decode(tiku_usbd_msc_t *m, const tiku_usbd_msc_cbw_t *cbw,
         bytes = nblk * TIKU_USBD_MSC_BLOCK;
 
         /*
-         * Range check BEFORE the caller is handed an LBA -- and on refusal
-         * the range is NOT published either.  A caller that forgets to test
-         * the action then indexes block zero rather than off the end of the
-         * medium, which is the difference between a wrong answer and a
-         * memory fault.
+         * The range is checked before an LBA is handed out, and a refused
+         * range is not published, so a caller that skips the action check
+         * indexes block 0 rather than past the end of the medium.
          */
         if (!tiku_usbd_msc_lba_ok(m, lba, nblk)) {
             tiku_usbd_msc_fail(m, TIKU_USBD_MSC_SENSE_ILLEGAL,

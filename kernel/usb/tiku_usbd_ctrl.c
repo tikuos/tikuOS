@@ -8,7 +8,7 @@
  * tiku_usbd_ctrl.c - control transfers, descriptors and class requests.
  *
  * Pure functions over buffers plus one small context, exercised on the
- * build machine (tools/usbmsc) against the bytes the ports shipped.
+ * build machine (tools/usbmsc) against reference descriptor bytes.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -48,9 +48,10 @@ void tiku_usbd_device_desc(uint8_t *out, uint16_t pid, int composite,
     out[11] = (uint8_t)(pid >> 8);
     out[12] = 0x00u; out[13] = 0x01u;                     /* bcdDevice 1.00 */
     out[14] = 1u; out[15] = 2u; out[16] = 3u;             /* string indices */
-    out[17] = 1u;                                         /* one configuration */
+    out[17] = 1u;                                         /* configurations */
 }
 
+/** @brief Write a 7-byte endpoint descriptor at @p p; return the next byte. */
 static uint8_t *put_endpoint(uint8_t *p, uint8_t addr, uint8_t attr,
                              uint16_t mps, uint8_t interval)
 {
@@ -60,6 +61,7 @@ static uint8_t *put_endpoint(uint8_t *p, uint8_t addr, uint8_t attr,
     return p + 7;
 }
 
+/** @brief Write a 9-byte interface descriptor at @p p; return the next byte. */
 static uint8_t *put_interface(uint8_t *p, uint8_t num, uint8_t n_ep,
                               uint8_t klass, uint8_t sub, uint8_t proto)
 {
@@ -190,6 +192,7 @@ void tiku_usbd_ctrl_init(tiku_usbd_ctrl_t *c, const tiku_usbd_desc_set_t *set)
     c->set = set;
 }
 
+/** @brief Reply with @p n bytes of @p d, clamped to the @p asked length. */
 static void reply(tiku_usbd_ctrl_out_t *out, const uint8_t *d, uint16_t n,
                   uint16_t asked)
 {
@@ -198,6 +201,7 @@ static void reply(tiku_usbd_ctrl_out_t *out, const uint8_t *d, uint16_t n,
     out->len    = (n < asked) ? n : asked;
 }
 
+/** @brief Decide a class request for the class the descriptor set names. */
 static void class_request(tiku_usbd_ctrl_t *c, uint8_t req_type, uint8_t req,
                           uint16_t value, uint16_t length,
                           tiku_usbd_ctrl_out_t *out)
@@ -243,7 +247,7 @@ static void class_request(tiku_usbd_ctrl_t *c, uint8_t req_type, uint8_t req,
         }
     }
     /* A class request with no data it has no answer for: accept and say
-     * nothing, as every port did; one asking for data is stalled. */
+     * nothing; one asking for data is stalled. */
     if ((req_type & 0x80u) == 0u && length == 0u) {
         out->action = TIKU_USBD_CTRL_STATUS;
     } else {

@@ -7,9 +7,9 @@
  *
  * tiku_shell_parser.h - command-line text parser.
  *
- * Two calls: init latches the command table once, execute processes one assembled
- * line.  Transport-agnostic, and all tokenisation happens in place in the
- * caller's buffer.
+ * Two calls: init latches the command table once, execute processes one
+ * assembled line.  Transport-agnostic, and all tokenisation happens in place
+ * in the caller's buffer.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -30,9 +30,9 @@
 /**
  * @brief Register the command table used for dispatch.
  *
- * Must be called once before tiku_shell_parser_execute().
  * The table must be NULL-terminated (last entry has name == NULL).
  *
+ * @note Call once, before tiku_shell_parser_execute().
  * @param commands  Pointer to a static, NULL-terminated command array
  */
 void tiku_shell_parser_init(const tiku_shell_cmd_t *commands);
@@ -40,9 +40,9 @@ void tiku_shell_parser_init(const tiku_shell_cmd_t *commands);
 /**
  * @brief Parse and execute a complete input line.
  *
- * Tokenizes `line` in-place (inserts NUL bytes at space boundaries),
- * looks up argv[0] in the command table, and calls the handler.
- * Prints an error via SHELL_PRINTF if the command is not found.
+ * Tokenises the line in place (NULs at token ends; a quoted span is one
+ * token), looks up argv[0] in the command table and then the alias table, and
+ * prints an error if neither matches.
  *
  * @param line  Mutable, NUL-terminated input string
  */

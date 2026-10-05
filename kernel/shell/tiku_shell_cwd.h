@@ -33,9 +33,9 @@ void tiku_shell_cwd_set(const char *path);
 /**
  * @brief Resolve a user-supplied path against the cwd.
  *
- * - Absolute paths (starting with '/') are returned as-is.
- * - ".." moves up one component.
- * - Relative paths are joined to the cwd.
+ * Lexical only: an absolute path starts from '/', a relative one from the
+ * cwd; ".." moves up one component (clamped at root), and "." and repeated
+ * slashes are dropped.
  *
  * @param input  User-supplied path (absolute or relative)
  * @param out    Output buffer for the resolved absolute path

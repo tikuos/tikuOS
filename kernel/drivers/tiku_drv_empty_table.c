@@ -5,24 +5,18 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_drv_empty_table.c - Zero-length driver table
+ * tiku_drv_empty_table.c - zero-length driver table.
  *
- * Linked when HAS_DRIVERS is NOT set (the drivers/ repo
- * is absent from the tree). Provides the symbols the kernel
- * registry expects so a clean Apache-2.0 core kernel build links
- * without requiring any external driver code.
- *
- * When drivers/ IS present, drivers/tiku_drv_table.c
- * provides non-empty definitions of the same symbols and this
- * file is excluded from the build by the Makefile.
+ * Linked when HAS_DRIVERS is not set, so the core links without the drivers/
+ * repo; when drivers/ is present, its tiku_drv_table.c defines these symbols
+ * and the Makefile leaves this file out.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "tiku_drv.h"
 
-/* Length-zero array is a GNU extension; pick an idiom that builds
- * under -pedantic too. The single NULL element costs 4 bytes of
- * flash, which is below any meaningful budget. */
+/* A zero-length array is a GNU extension, so the table holds one NULL
+ * element and the count says it is empty. */
 const tiku_drv_t *const tiku_drv_table[1] = { (const tiku_drv_t *)0 };
 const uint8_t           tiku_drv_table_count = 0U;

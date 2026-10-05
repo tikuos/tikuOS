@@ -7,9 +7,9 @@
  *
  * tiku_console.c - the one SLIP decoder and encoder under every console user.
  *
- * An END is a delimiter, never a parity toggle: the byte after it decides
- * whether a frame opens and for whom, so a stray or doubled END can neither
- * strand the decoder mid-frame nor divert typed text into a frame buffer.
+ * An END is a delimiter, never a toggle: the byte after it opens a frame for
+ * the channel claiming it, or is text.  A doubled END costs only itself; after
+ * a stray one, text led by a claimed byte is lost until an END or the TTL.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -44,8 +44,9 @@ typedef struct {
     size_t   cap;
 } channel_t;
 
-/* The SLIP wire follows the console: the USB CDC port is the only wired
- * serial on an RP2350 native-USB build, and the UART everywhere else. */
+/* The wire follows the console: the USB CDC port on a USB-only console
+ * (TIKU_CONSOLE=usb on RP2350 or nRF54LM20), and the UART everywhere else,
+ * TIKU_CONSOLE=both included. */
 #if defined(TIKU_CONSOLE_USB) && !defined(TIKU_CONSOLE_BOTH)
 static const tiku_console_wire_t boot_wire = {
     tiku_usb_cdc_putc, tiku_usb_cdc_rx_ready, tiku_usb_cdc_getc, 1u
@@ -111,6 +112,10 @@ service(void)
     tiku_console_pump();
 }
 
+/**
+ * @brief The pump: drain the wire every TIKU_CONSOLE_POLL_TICKS and on a
+ *        poll, until no one listens.
+ */
 TIKU_PROCESS_THREAD(tiku_console_process, ev, data)
 {
     (void)data;
@@ -160,11 +165,13 @@ tiku_console_pumping(void)
 
 #else
 
+/** @brief Nothing to start: the shell's loop reads the wire. */
 static void
 pump_start(void)
 {
 }
 
+/** @brief Nothing to wake: the shell's loop reads the wire. */
 static void
 pump_wake(void)
 {
@@ -405,7 +412,7 @@ sort_byte(uint8_t b)
         }
         rx.closing = rx.in_frame;
         rx.in_frame = 0u;
-        rx.armed = 1u;              /* a frame may follow; the next byte decides */
+        rx.armed = 1u;              /* the next byte decides if a frame opens */
         rx.len = 0u;
         rx.esc = 0u;
         rx.overflow = 0u;

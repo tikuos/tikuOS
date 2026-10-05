@@ -5,23 +5,24 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_config.h - CLI command selection flags
+ * tiku_shell_config.h - shell command flags and backend selection.
+ *
+ * One #ifndef flag per command, defaulted per platform and capability, then
+ * forced off at the bottom of the file where the build lacks the hardware.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /*
- * tiku_shell_config.h - enable/disable individual CLI commands.
- *
- * To add a new command:
- *   1. Add a TIKU_SHELL_CMD_xxx flag here (set to 1)
- *   2. Create kernel/shell/commands/tiku_shell_cmd_xxx.h and .c
- *   3. Add #include and table entry in tiku_shell.c
- *   4. Add the .c file to the Makefile TIKU_SHELL_ENABLE section
+ * To add a command:
+ *   1. Add a TIKU_SHELL_CMD_XXX flag here.
+ *   2. Create kernel/shell/commands/tiku_shell_cmd_xxx.h and .c.
+ *   3. Include the header and add a table entry in tiku_shell.c.
+ *   4. Add the .c to the Makefile's TIKU_SHELL_ENABLE source list.
  *   5. If it drives hardware not every target has, add a rule to the
  *      HARDWARE REQUIREMENTS section at the bottom of this file so the
  *      flag resolves to 0 where the capability is absent.  Gate the
- *      whole .c on the resolved flag; no runtime "not available" stubs.
+ *      whole .c on the resolved flag; no run-time "not available" stubs.
  */
 
 #ifndef TIKU_SHELL_CONFIG_H_
@@ -32,11 +33,11 @@
  * @{
  */
 
-/* Each flag is wrapped in #ifndef so the build system can override
- * with -DTIKU_SHELL_CMD_X=0 (or =1) on the command line via
- * EXTRA_CFLAGS.  The Makefile gates the matching .c on findstring
- * checks against EXTRA_CFLAGS so the disabled command compiles to
- * zero text. */
+/* Each flag is wrapped in #ifndef so EXTRA_CFLAGS can override it with
+ * -DTIKU_SHELL_CMD_X=0 (or =1).  Set it there: the Makefile looks for that
+ * string in EXTRA_CFLAGS to add or leave out some commands' .c files.  A
+ * disabled command loses its table row, and the linker drops its
+ * unreferenced code. */
 #ifndef TIKU_SHELL_CMD_HELP
 #define TIKU_SHELL_CMD_HELP    1  /**< help    - List available commands */
 #endif
@@ -50,7 +51,7 @@
 #define TIKU_SHELL_CMD_HTIMER  1  /**< htimer  - Hardware-timer self-test */
 #endif
 #ifndef TIKU_SHELL_CMD_CONSOLE
-#define TIKU_SHELL_CMD_CONSOLE 1  /**< console - The line's channels, counters */
+#define TIKU_SHELL_CMD_CONSOLE 1  /**< console - Channels and counters */
 #endif
 #ifndef TIKU_SHELL_CMD_TIMER
 #define TIKU_SHELL_CMD_TIMER   1  /**< timer   - Software timer status */
@@ -145,7 +146,7 @@
 #endif
 #endif
 #ifndef TIKU_SHELL_CMD_HISTORY
-#define TIKU_SHELL_CMD_HISTORY 1  /**< history - Last N commands from FRAM */
+#define TIKU_SHELL_CMD_HISTORY 1  /**< history - Recall the last N commands */
 #endif
 #ifndef TIKU_SHELL_CMD_SDRAM
 /* Auto-on where the board wires external SDRAM to the bus. */
@@ -176,11 +177,12 @@
 #endif
 #endif
 #ifndef TIKU_SHELL_CMD_BLE
-/* Auto-on for the EM9305 BLE build (apollo510b); the "ble" command runs the
- * radio first-contact self-test. The .c + the driver are only compiled when
- * TIKU_DRV_BLE_EM9305_ENABLE is set (Makefile-gated). */
+/* Auto-on for the EM9305 BLE build (apollo510b); the "ble" command probes
+ * the EM9305, advertises a beacon and runs a shell session over BLE UART.
+ * The .c + the driver are only compiled when TIKU_DRV_BLE_EM9305_ENABLE is
+ * set (Makefile-gated). */
 #if defined(TIKU_DRV_BLE_EM9305_ENABLE)
-#define TIKU_SHELL_CMD_BLE 1  /**< ble - EM9305 radio first-contact probe */
+#define TIKU_SHELL_CMD_BLE 1  /**< ble - EM9305 probe, beacon, BLE shell */
 #else
 #define TIKU_SHELL_CMD_BLE 0
 #endif
@@ -190,7 +192,7 @@
  * off. Override with -DTIKU_SHELL_CMD_WIFI=0 to drop the command. */
 #if (defined(TIKU_DRV_WIFI_CYW43_ENABLE) && (TIKU_DRV_WIFI_CYW43_ENABLE == 1)) || \
     (defined(TIKU_DRV_WIFI_ESP_ENABLE) && (TIKU_DRV_WIFI_ESP_ENABLE == 1))
-#define TIKU_SHELL_CMD_WIFI    1
+#define TIKU_SHELL_CMD_WIFI    1  /**< wifi    - Wi-Fi radio control */
 #else
 #define TIKU_SHELL_CMD_WIFI    0
 #endif
@@ -201,7 +203,7 @@
 #if (defined(TIKU_DRV_WIFI_CYW43_BT_ENABLE) && \
      (TIKU_DRV_WIFI_CYW43_BT_ENABLE == 1)) || \
     (defined(TIKU_DRV_BLE_ESP_ENABLE) && (TIKU_DRV_BLE_ESP_ENABLE == 1))
-#define TIKU_SHELL_CMD_BT      1
+#define TIKU_SHELL_CMD_BT      1  /**< bt      - BLE host radio status */
 #else
 #define TIKU_SHELL_CMD_BT      0
 #endif
@@ -209,7 +211,7 @@
 #ifndef TIKU_SHELL_CMD_SDR
 /* Auto-on with the ESP32-C61's radio built as a receiver (raw I/Q). */
 #if defined(TIKU_DRV_SDR_ESP_ENABLE) && (TIKU_DRV_SDR_ESP_ENABLE == 1)
-#define TIKU_SHELL_CMD_SDR     1
+#define TIKU_SHELL_CMD_SDR     1  /**< sdr     - Radio I/Q snapshots */
 #else
 #define TIKU_SHELL_CMD_SDR     0
 #endif
@@ -218,37 +220,37 @@
 #define TIKU_SHELL_CMD_LS      1  /**< ls      - List VFS directory contents */
 #endif
 #ifndef TIKU_SHELL_CMD_CD
-#define TIKU_SHELL_CMD_CD      1  /**< cd/pwd  - Change/print working directory */
+#define TIKU_SHELL_CMD_CD      1  /**< cd/pwd  - Change/print the cwd */
 #endif
 #ifndef TIKU_SHELL_CMD_TOGGLE
 #define TIKU_SHELL_CMD_TOGGLE  1  /**< toggle  - Binary state flip via VFS */
 #endif
 #ifndef TIKU_SHELL_CMD_START
-#define TIKU_SHELL_CMD_START   1  /**< start   - Launch/resume process by name */
+#define TIKU_SHELL_CMD_START   1  /**< start   - Start/resume a process */
 #endif
 #ifndef TIKU_SHELL_CMD_WRITE
 #define TIKU_SHELL_CMD_WRITE   1  /**< write   - Write value to VFS node */
 #endif
 #ifndef TIKU_SHELL_CMD_FS
-#define TIKU_SHELL_CMD_FS      1  /**< rm/touch- Remove / create /data files */
+#define TIKU_SHELL_CMD_FS      1  /**< rm, touch, mkdir, rmdir, recv, send */
 #endif
 #ifndef TIKU_SHELL_CMD_NVMPROBE
-#define TIKU_SHELL_CMD_NVMPROBE 0 /**< nvmprobe- Carved NVM region diagnostic (opt-in) */
+#define TIKU_SHELL_CMD_NVMPROBE 0 /**< nvmprobe - NVM region diagnostic */
 #endif
 #ifndef TIKU_SHELL_CMD_CRYPTOPROBE
-#define TIKU_SHELL_CMD_CRYPTOPROBE 0 /**< cryptoprobe- CRACEN bring-up probe (opt-in) */
+#define TIKU_SHELL_CMD_CRYPTOPROBE 0 /**< cryptoprobe - CRACEN probe */
 #endif
 #ifndef TIKU_SHELL_CMD_BLEADV
-#define TIKU_SHELL_CMD_BLEADV 0 /**< bleadv- nRF54L15 BLE beacon bring-up (opt-in) */
+#define TIKU_SHELL_CMD_BLEADV 0 /**< bleadv - nRF54L BLE beacon */
 #endif
 #ifndef TIKU_SHELL_CMD_RADIO154
-#define TIKU_SHELL_CMD_RADIO154 0 /**< radio154- 802.15.4 PHY bring-up (opt-in) */
+#define TIKU_SHELL_CMD_RADIO154 0 /**< radio154 - 802.15.4 PHY test */
 #endif
 #ifndef TIKU_SHELL_CMD_RFTEST
-#define TIKU_SHELL_CMD_RFTEST 0 /**< rftest- RF test carrier, bench only (opt-in) */
+#define TIKU_SHELL_CMD_RFTEST 0 /**< rftest - RF test carrier, bench only */
 #endif
 #ifndef TIKU_SHELL_CMD_AXONSPROBE
-#define TIKU_SHELL_CMD_AXONSPROBE 0 /**< axonsprobe- Axon NPU bring-up probe (opt-in) */
+#define TIKU_SHELL_CMD_AXONSPROBE 0 /**< axonsprobe - Axon NPU probe */
 #endif
 #ifndef TIKU_SHELL_CMD_USBMSC
 #if defined(TIKU_USBHS_MSC)
@@ -259,7 +261,7 @@
 #endif
 
 #ifndef TIKU_SHELL_CMD_USBPROBE
-#define TIKU_SHELL_CMD_USBPROBE 0 /**< usbprobe- USB high-speed bring-up probe (opt-in) */
+#define TIKU_SHELL_CMD_USBPROBE 0 /**< usbprobe - USB high-speed probe */
 #endif
 #ifndef TIKU_SHELL_CMD_READ
 #define TIKU_SHELL_CMD_READ    1  /**< read    - Read value from VFS node */
@@ -294,21 +296,16 @@
 #ifndef TIKU_SHELL_CMD_NAME
 #define TIKU_SHELL_CMD_NAME    1  /**< name    - Read or set device name */
 #endif
-/* `if` is opt-in: it costs ~1 KB of FRAM.  The gate dates from the
- * 48 KB lower-FRAM cap of the FR5969 (MEMORY_MODEL=small), which is no
- * longer a supported part; FR5994/FR6989 have HIFRAM and default to
- * MEMORY_MODEL=large, so the headroom argument no longer binds.  `on`
- * (rules) still covers most interactive use cases.  Re-enable with
- *   EXTRA_CFLAGS="-DTIKU_SHELL_CMD_IF=1"
- * paired with a comparable disable (e.g. -DTIKU_SHELL_CMD_CALC=0). */
+/* `if` is opt-in; `on` (rules) covers most interactive uses.  Enable with
+ *   EXTRA_CFLAGS="-DTIKU_SHELL_CMD_IF=1" */
 #ifndef TIKU_SHELL_CMD_IF
-#define TIKU_SHELL_CMD_IF      0  /**< if      - Conditional VFS-driven action */
+#define TIKU_SHELL_CMD_IF      0  /**< if      - Conditional VFS action */
 #endif
 #ifndef TIKU_SHELL_CMD_IRQ
 #define TIKU_SHELL_CMD_IRQ     1  /**< irq     - GPIO edge interrupt -> event */
 #endif
 #ifndef TIKU_SHELL_CMD_ALIAS
-#define TIKU_SHELL_CMD_ALIAS   1  /**< alias   - FRAM-backed shell shortcuts */
+#define TIKU_SHELL_CMD_ALIAS   1  /**< alias   - Durable shell shortcuts */
 #endif
 #ifndef TIKU_SHELL_CMD_CAT
 #define TIKU_SHELL_CMD_CAT     1  /**< cat     - Alias for read */
@@ -316,16 +313,10 @@
 #ifndef TIKU_SHELL_CMD_ECHO
 #define TIKU_SHELL_CMD_ECHO    1  /**< echo    - Print arguments + newline */
 #endif
-/* `lcd` is only useful on boards that physically wire an LCD panel
- * to the LCD_C peripheral (currently FR6989 LaunchPad). Default it
- * on / off from TIKU_BOARD_HAS_LCD; user override via
- * -DTIKU_SHELL_CMD_LCD still wins.
- *
- * That macro is a BOARD_CAPS entry in the Makefile, so it arrives as a -D
- * and is visible here regardless of what this file has included.  It used
- * to be defined in the board header, which meant this test silently read
- * "no LCD" in any translation unit that reached this header first -- the
- * include-order hazard documented at the bottom of this file. */
+/* `lcd` drives a segment LCD wired to the LCD_C peripheral, which the
+ * FR6989 LaunchPad has.  It defaults from TIKU_BOARD_HAS_LCD, a Makefile
+ * BOARD_CAPS -D visible in every translation unit; -DTIKU_SHELL_CMD_LCD=0
+ * drops it, and the rule at the bottom clears it on a board without one. */
 #ifndef TIKU_SHELL_CMD_LCD
 #  if defined(TIKU_BOARD_HAS_LCD) && TIKU_BOARD_HAS_LCD
 #    define TIKU_SHELL_CMD_LCD 1  /**< lcd     - Drive segment-LCD interface */
@@ -334,14 +325,14 @@
 #  endif
 #endif
 #ifndef TIKU_SHELL_CMD_WATCH
-#define TIKU_SHELL_CMD_WATCH   1  /**< watch   - Periodic VFS read until Ctrl+C */
+#define TIKU_SHELL_CMD_WATCH   1  /**< watch   - Live VFS view until Ctrl+C */
 #endif
-/* slip: hand the console UART to SLIP/IP networking.  Auto-on only when the
- * net stack is compiled in (TIKU_KIT_NET_ENABLE=1) -- the command starts the
- * net process, which does not exist otherwise. */
+/* slip: carry SLIP/IP on the console line beside the shell's text.  Auto-on
+ * only with the net stack (TIKU_KIT_NET_ENABLE=1), whose SLIP link and IPv4
+ * input the command uses. */
 #ifndef TIKU_SHELL_CMD_SLIP
 #if defined(TIKU_KIT_NET_ENABLE) && TIKU_KIT_NET_ENABLE
-#define TIKU_SHELL_CMD_SLIP    1  /**< slip    - Hand the UART to SLIP/IP net */
+#define TIKU_SHELL_CMD_SLIP    1  /**< slip    - SLIP/IP on the console line */
 #else
 #define TIKU_SHELL_CMD_SLIP    0
 #endif
@@ -357,13 +348,13 @@
 /* ip: print the device's IPv4 address.  Same gating as slip/ping. */
 #ifndef TIKU_SHELL_CMD_IP
 #if defined(TIKU_KIT_NET_ENABLE) && TIKU_KIT_NET_ENABLE
-#define TIKU_SHELL_CMD_IP      1  /**< ip      - Print the device IPv4 address */
+#define TIKU_SHELL_CMD_IP      1  /**< ip      - Print the IPv4 address */
 #else
 #define TIKU_SHELL_CMD_IP      0
 #endif
 #endif
 /* ntp: fetch wall-clock time over SLIP (SNTP).  Same gating as slip/ping/ip;
- * the Makefile pulls in the time kit (TIKU_KIT_TIME_ENABLE) when it compiles. */
+ * the Makefile pulls in the time kit (TIKU_KIT_TIME_ENABLE) with it. */
 #ifndef TIKU_SHELL_CMD_NTP
 #if defined(TIKU_KIT_NET_ENABLE) && TIKU_KIT_NET_ENABLE
 #define TIKU_SHELL_CMD_NTP     1  /**< ntp     - Fetch network time (SNTP) */
@@ -375,7 +366,7 @@
  * the DNS stub resolver is already compiled with the net kit. */
 #ifndef TIKU_SHELL_CMD_DNS
 #if defined(TIKU_KIT_NET_ENABLE) && TIKU_KIT_NET_ENABLE
-#define TIKU_SHELL_CMD_DNS     1  /**< dns     - Resolve a hostname (A record) */
+#define TIKU_SHELL_CMD_DNS     1  /**< dns     - Resolve a hostname (A) */
 #else
 #define TIKU_SHELL_CMD_DNS     0
 #endif
@@ -397,7 +388,7 @@
  * than auto-on with net.  TikuBench's net-test build turns the kit on. */
 #ifndef TIKU_SHELL_CMD_MQTT
 #if defined(TIKU_KITS_NET_MQTT_ENABLE) && TIKU_KITS_NET_MQTT_ENABLE
-#define TIKU_SHELL_CMD_MQTT    1  /**< mqtt    - Connect/publish to an MQTT broker */
+#define TIKU_SHELL_CMD_MQTT    1  /**< mqtt    - MQTT connect/publish */
 #else
 #define TIKU_SHELL_CMD_MQTT    0
 #endif
@@ -405,20 +396,14 @@
 #ifndef TIKU_SHELL_CMD_CALC
 #define TIKU_SHELL_CMD_CALC    1  /**< calc    - Integer arithmetic */
 #endif
-/* `basic` is opt-in: the interpreter is ~3.5 KB of code plus an
- * arena allocation (~1.3 KB at default sizing).  The 3.5 KB push
- * most shell-enabled builds past the 48 KB lower-FRAM cap, so the
- * Makefile *requires* MEMORY_MODEL=large alongside BASIC and
- * refuses the build otherwise (override with
- * TIKU_SHELL_BASIC_ALLOW_SMALL=1 only if you know your part has
- * lower-FRAM headroom).  Recommended invocation:
+/* `basic` is on by default on Ambiq and opt-in elsewhere: the Makefile's
+ * TIKU_SHELL_BASIC_ENABLE=1 sets this flag.  On MSP430 the Makefile refuses
+ * BASIC without MEMORY_MODEL=large:
  *
  *   make MCU=msp430fr5994 TIKU_SHELL_ENABLE=1 \
  *        TIKU_SHELL_BASIC_ENABLE=1 MEMORY_MODEL=large
  *
- * On larger parts (FR5994 / FR6989) you can pair this with bumped
- * arena sizing via EXTRA_CFLAGS, e.g.
- *   EXTRA_CFLAGS="-DTIKU_BASIC_PROGRAM_LINES=64"  */
+ * Program capacity is TIKU_BASIC_PROGRAM_LINES (tiku_basic_config.h). */
 #ifndef TIKU_SHELL_CMD_BASIC
 #define TIKU_SHELL_CMD_BASIC   0  /**< basic   - Tiku BASIC interpreter REPL */
 #endif
@@ -429,21 +414,11 @@
 #define TIKU_SHELL_CMD_RULES   1  /**< rules   - on/rules */
 #endif
 #ifndef TIKU_SHELL_CMD_CHANGED
-#define TIKU_SHELL_CMD_CHANGED 1  /**< changed - Block until VFS value changes */
+#define TIKU_SHELL_CMD_CHANGED 1  /**< changed - Wait for a VFS change */
 #endif
-/* I2C is opt-in: it pulls in tiku_i2c_bus and arch driver, which
- * together cost ~1.4 KB of FRAM.  The gate dates from the FR5969's
- * 48 KB lower-FRAM cap, where enabling I2C meant turning off
- * something of comparable size; on the supported FR5994/FR6989 parts
- * there is ample headroom and the pairing is no longer required.
- * Two recipes that keep the trade explicit:
- *
- *   make MCU=msp430fr5994 TIKU_SHELL_ENABLE=1 \
- *        EXTRA_CFLAGS="-DTIKU_SHELL_CMD_I2C=1 -DTIKU_SHELL_CMD_HISTORY=0"
- *
- *   make MCU=msp430fr5994 TIKU_SHELL_ENABLE=1 \
- *        EXTRA_CFLAGS="-DTIKU_SHELL_CMD_I2C=1 -DTIKU_SHELL_CMD_CALC=0"
- */
+/* I2C is opt-in: it pulls tiku_i2c_bus and the arch I2C driver into the
+ * image.  The Makefile compiles the command only when enabled with
+ *   EXTRA_CFLAGS="-DTIKU_SHELL_CMD_I2C=1" */
 #ifndef TIKU_SHELL_CMD_I2C
 #define TIKU_SHELL_CMD_I2C    0  /**< i2c    - Bus scan / read / write */
 #endif
@@ -454,17 +429,11 @@
 #define TIKU_SHELL_CMD_CLEAR  1  /**< clear  - ANSI clear screen */
 #endif
 
-/* Scripting and debugging extras: enabled per-build via EXTRA_CFLAGS.
- * The gate dates from the FR5969, whose default shell sat ~250 B from
- * the 48 KB lower-FRAM cap; the supported FR5994/FR6989 parts have
- * room to spare.  Pick the combination you need; multiple flags
- * are independent.  Example:
+/* Scripting and debugging extras, each enabled per build through
+ * EXTRA_CFLAGS; the flags are independent, and the Makefile compiles each
+ * command only when its flag is set to 1.  Example:
  *   make MCU=msp430fr5994 TIKU_SHELL_ENABLE=1 \
  *        EXTRA_CFLAGS="-DTIKU_SHELL_CMD_DELAY=1 -DTIKU_SHELL_CMD_REPEAT=1"
- *
- * To enable the larger ones (peek/poke/i2c), pair them with a
- * disable of a comparable existing command, e.g.
- *   EXTRA_CFLAGS="-DTIKU_SHELL_CMD_PEEK=1 -DTIKU_SHELL_CMD_POKE=1 -DTIKU_SHELL_CMD_HISTORY=0"
  */
 #ifndef TIKU_SHELL_CMD_DELAY
 #define TIKU_SHELL_CMD_DELAY  0  /**< delay  - Synchronous ms wait */
@@ -479,7 +448,7 @@
 #define TIKU_SHELL_CMD_POKE   0  /**< poke   - Write raw memory */
 #endif
 #ifndef TIKU_SHELL_CMD_INIT
-#define TIKU_SHELL_CMD_INIT    TIKU_INIT_ENABLE  /**< init - FRAM boot entries */
+#define TIKU_SHELL_CMD_INIT    TIKU_INIT_ENABLE  /**< init - NVM boot entries */
 #endif
 
 /** @} */
@@ -535,26 +504,28 @@
  */
 
 /**
- * @brief Enable TCP (telnet) backend on port 23.
+ * @brief Enable the TCP (telnet) backend on port 23.
  *
- * Requires the TikuKits TCP stack (TIKU_KITS_NET_TCP_ENABLE=1), and the net
- * process must be auto-started alongside the CLI process -- so a build needs
- * both -DTIKU_KITS_NET_TCP_ENABLE=1 and -DTIKU_SHELL_TCP_ENABLE=1.
+ * TIKU_SHELL_NET_TEST=1 sets it and is the only build that compiles
+ * tiku_shell_io_tcp.c.  Set without net-test, it selects a TCP-only shell (no
+ * local console; a net process owns SLIP) that no Makefile path builds.
+ *
+ * @note Needs the TikuKits TCP stack (TIKU_KITS_NET_TCP_ENABLE=1).
  */
 #ifndef TIKU_SHELL_TCP_ENABLE
 #define TIKU_SHELL_TCP_ENABLE 0
 #endif
 
 /**
- * @brief Bring the net test servers (UDP echo + TCP + CoAP) up inside the shell.
+ * @brief Bring the net test servers (UDP echo, TCP, CoAP) up in the shell.
  *
- * Off by default so the normal shell stays lean.  When set, the shell inits
- * UDP/TCP and registers the CoAP server, and the `slip` RX demux feeds
+ * Off by default.  When set, the shell starts UDP and TCP, registers the CoAP
+ * server and listens for telnet; the slip command's console channel feeds
  * tiku_kits_net_ipv4_input(), which dispatches to them.
  *
- * @note No net process is started -- the shell owns the UART RX, so a second
- *       reader would conflict.  TikuBench's net suite enables this on boards
- *       without a working APP=net.
+ * @note No net process is started: the console, pumped by the shell, owns
+ *       the wire, and a second reader would conflict.  TikuBench's net suite
+ *       enables this on boards without a working APP=net.
  */
 #ifndef TIKU_SHELL_NET_TEST
 #define TIKU_SHELL_NET_TEST 0
@@ -563,26 +534,25 @@
 /** @} */
 
 /*---------------------------------------------------------------------------*/
-/* HARDWARE REQUIREMENTS -- capability resolution                            */
+/* HARDWARE REQUIREMENTS                                                     */
 /*---------------------------------------------------------------------------*/
 /*
- * A command that drives hardware the build does not have is forced OFF
- * here, AFTER every default and user override above.  This is the ONE
+ * A command that drives hardware the build does not have is forced off
+ * here, after every default and user override above.  This is the one
  * place where "command X needs capability Y" is written down; the shell
  * table, the command .c and the help listing all read the resolved
  * flag, so a `-DTIKU_SHELL_CMD_X=1` on a target without the hardware
- * yields a build without the command -- not a stub in `help` and not an
- * undefined reference at link (both of which the pre-resolution scheme
- * produced, depending on the command).
+ * yields a build without the command -- no stub in `help` and no
+ * undefined reference at link.
  *
  * The Makefile mirrors these rules where it owns the decision to
  * compile the command's .c at all, and prints a warning when a command
  * was requested on a target that cannot have it.
  *
- * Capability macros used here are -D flags from the Makefile (or, for
- * LCD/Axon, board/device-header macros -- those resolutions are only
- * meaningful in TUs that include tiku.h first, which tiku_shell.c
- * does).  Keep each rule to the same three-line shape.
+ * Capability macros used here are -D flags from the Makefile, except
+ * USBPROBE's TIKU_DEVICE_HAS_USBHS: a device-header macro, meaningful only
+ * in translation units that include tiku.h first, which tiku_shell.c does.
+ * Keep each rule to the same three-line shape.
  */
 
 /* rftest + bleadv drive the on-die 2.4 GHz RADIO (broadcast BLE). */
@@ -642,16 +612,16 @@
 #define TIKU_SHELL_CMD_MRAMBENCH 0
 #endif
 
-/* lcd drives the segment-LCD controller (board-header capability). */
+/* lcd drives the segment-LCD controller (a board capability). */
 #if TIKU_SHELL_CMD_LCD && !(TIKU_BOARD_HAS_LCD + 0)
 #undef  TIKU_SHELL_CMD_LCD
 #define TIKU_SHELL_CMD_LCD 0
 #endif
 
-/* axonsprobe (Axon NPU) has NO rule here on purpose: its capability
- * macro TIKU_DEVICE_HAS_AXONS lives in the device header, which
- * tiku_shell_cmd_axonsprobe.h pulls in AFTER this file -- a rule here
- * would evaluate before the macro exists and kill the flag in that TU
- * only.  The Makefile gates its compilation to nrf54lm20b instead. */
+/* axonsprobe (Axon NPU) has no rule here: its capability macro
+ * TIKU_DEVICE_HAS_AXONS is in the device header, which
+ * tiku_shell_cmd_axonsprobe.h includes after this file, so a rule here
+ * would clear the flag in that translation unit only.  The Makefile
+ * compiles the command only for nrf54lm20b instead. */
 
 #endif /* TIKU_SHELL_CONFIG_H_ */

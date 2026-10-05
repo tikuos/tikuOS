@@ -8,7 +8,7 @@
  * tiku_shell_parser.c - command-line text parser.
  *
  * Tokenises a mutable line in place, honouring quoted spans, then matches the
- * first token.  Built-ins are matched BEFORE aliases, so a misconfigured alias
+ * first token.  Built-ins are matched before aliases, so a misconfigured alias
  * cannot shadow help or reboot; alias-of-alias expansion is depth-bounded.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -58,15 +58,12 @@ static uint8_t alias_depth;
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Compare two NUL-terminated strings.
- *
- * A minimal local strcmp so the parser does not pull in string.h on
- * space-constrained targets.  Returns the signed difference of the first
- * differing bytes as unsigned char, matching standard strcmp ordering.
+ * @brief Compare two NUL-terminated strings, ordered as strcmp() orders them.
  *
  * @param a  First NUL-terminated string.
  * @param b  Second NUL-terminated string.
- * @return 0 if the strings are equal, non-zero otherwise.
+ * @return 0 if the strings are equal; otherwise the difference of the first
+ *         differing bytes, as unsigned char.
  */
 static int
 cli_strcmp(const char *a, const char *b)
@@ -84,9 +81,9 @@ static void execute_one(char *line);
 /**
  * @brief Expand and dispatch an alias body, one ';'-piece at a time.
  *
- * Copies the body out of read-only FRAM into a mutable stack buffer, splits it
- * on ';' and feeds each non-empty piece back through execute_one().  A piece
- * may name another alias, which is why alias_depth guards the recursion.
+ * Copies the body out of the durable alias table into a mutable stack buffer,
+ * splits it on ';' and feeds each non-empty piece back through execute_one().
+ * A piece may name another alias, which is why alias_depth guards recursion.
  *
  * @note Splitting is destructive on the local copy only -- each ';' becomes a
  *       NUL and leading spaces are skipped -- so the caller's string is never
@@ -107,8 +104,8 @@ dispatch_alias_body(const char *body)
         return;
     }
 
-    /* Copy to a mutable local buffer; the alias table lives in
-     * FRAM and tokenising happens in place. */
+    /* Copy to a mutable local buffer: the alias table is write-protected
+     * durable memory, and tokenising writes in place. */
     for (i = 0; i < sizeof(buf) - 1 && body[i] != '\0'; i++) {
         buf[i] = body[i];
     }
@@ -139,25 +136,15 @@ dispatch_alias_body(const char *body)
     alias_depth--;
 }
 
-/*
- * Tokenise a single command line and dispatch it -- the workhorse of the parser.
+/**
+ * @brief Tokenise one command line in place and dispatch it.
  *
- * Tokenises @p line IN PLACE into an argv array of up to TIKU_SHELL_MAX_ARGS
- * entries: runs of spaces separate tokens, and a double- or single-quoted span
- * groups spaces into one argument (the quotes are stripped and the closing
- * quote, or end of string, is NUL-terminated).  The NUL terminators are written
- * into @p line, so the caller's buffer is modified and argv aliases into it.
+ * Built-ins are matched first, then aliases; an empty line does nothing and an
+ * unmatched one prints "Unknown command".  ';' is not split here: a typed line
+ * is one command, and dispatch_alias_body() splits an alias body.
  *
- * Dispatch order:
- *   1. Empty line (argc == 0) -> return silently.
- *   2. Built-in table: scan cmd_table, skipping category headers, and on a
- *      name match invoke the handler.  Built-ins always win over aliases.
- *   3. Alias table: look up argv[0] and expand the body if it hits.
- *   4. Otherwise print an "Unknown command" message.
- *
- * Does NOT split on ';' -- that is dispatch_alias_body()'s job one level up, so
- * a line typed at the prompt is one command whose argv[0] may still resolve to
- * a multi-piece alias.  Returns immediately if no table is registered yet.
+ * @note Writes NULs into @p line at token ends, and argv points into it.
+ *       Returns at once while no command table is registered.
  */
 static void
 execute_one(char *line)
@@ -172,7 +159,9 @@ execute_one(char *line)
         return;
     }
 
-    /* ---- Tokenize by spaces; "..." and '...' group spaces. ---- */
+    /* Runs of spaces separate tokens; a "..." or '...' span is one token
+     * with its quotes stripped.  Text past TIKU_SHELL_MAX_ARGS tokens is
+     * not parsed. */
     while (*p && argc < TIKU_SHELL_MAX_ARGS) {
         while (*p == ' ') {
             p++;
@@ -248,14 +237,9 @@ tiku_shell_parser_init(const tiku_shell_cmd_t *commands)
 /**
  * @brief Parse and execute one complete input line.
  *
- * Public entry point invoked by the shell process once a full line
- * has been assembled.  Delegates to execute_one(), which tokenises
- * @p line in place (inserting NUL bytes at token boundaries — so the
- * caller's buffer is modified), matches the first token against the
- * built-in command table and then the alias table, and prints an
- * error via SHELL_PRINTF if neither matches.  This is the top-level
- * call, so any ';' separators are handled only through alias
- * expansion, not on the raw line itself.
+ * The shell's entry point for an assembled line: execute_one() tokenises it
+ * in place and dispatches it.  A ';' on the line is not a separator; only an
+ * alias body is split on ';'.
  *
  * @param line  Mutable, NUL-terminated input string; clobbered by
  *              in-place tokenisation.

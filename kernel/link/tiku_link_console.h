@@ -42,11 +42,11 @@
  * disagrees, or shorter than a header and a CRC, is dropped whole.
  */
 #define TIKU_LINK_CONSOLE_OVERHEAD  4u     /**< header + CRC around a message */
-#define TIKU_LINK_CONSOLE_DATA      0x00u
-#define TIKU_LINK_CONSOLE_ACK       0x01u
-#define TIKU_LINK_CONSOLE_SYN       0x02u
+#define TIKU_LINK_CONSOLE_DATA      0x00u  /**< kind: a message */
+#define TIKU_LINK_CONSOLE_ACK       0x01u  /**< kind: acknowledges a seq */
+#define TIKU_LINK_CONSOLE_SYN       0x02u  /**< kind: restart the numbering */
 #define TIKU_LINK_CONSOLE_KIND      0x03u  /**< the kind's bits of ctl */
-#define TIKU_LINK_CONSOLE_WANT_ACK  0x80u
+#define TIKU_LINK_CONSOLE_WANT_ACK  0x80u  /**< ctl bit: paced, ACK wanted */
 
 /**
  * @brief How far behind the expected seq a paced frame still counts as a
@@ -57,7 +57,7 @@
 /** @brief The console link's state: the caller keeps it, statically. */
 typedef struct {
     tiku_link_t link;
-    uint8_t     marker;
+    uint8_t     marker;        /**< the console channel it rides */
     uint8_t     tx_seq;        /**< the number of the next frame sent */
     uint8_t     paced_expect;  /**< the next WANT_ACK seq to deliver */
     uint8_t     paced_synced;  /**< paced_expect is meaningful */
@@ -73,7 +73,7 @@ typedef struct {
     uint32_t dup;     /**< paced frames seen again: answered, not delivered */
     uint32_t reject;  /**< paced frames out of order: dropped, unanswered */
     uint32_t acked;   /**< ACKs sent */
-    uint32_t gap;     /**< unpaced frames missing before one that arrived */
+    uint32_t gap;     /**< unpaced frames that arrived out of sequence */
 } tiku_link_console_stats_t;
 
 /**

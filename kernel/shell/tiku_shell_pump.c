@@ -7,9 +7,9 @@
  *
  * tiku_shell_pump.c - shared busy-wait service step.
  *
- * Implements the step described in the header: drain on every call, pace the TCP
- * timer, and poll for Ctrl-C through the SLIP-aware demux.  Each step's comment
- * records the failure it prevents.
+ * Implements the step described in the header: drain on every call, pace the
+ * TCP timer, and poll for Ctrl-C, through the console decoder on a SLIP build.
+ * Each step's comment states the failure it prevents.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,7 +24,7 @@
 #include <kernel/timers/tiku_clock.h>       /* pacing                      */
 #include <kernel/cpu/tiku_watchdog.h>       /* tiku_watchdog_kick          */
 
-/* Is the TCP client actually LINKED into this image?  Mirrors the
+/* PUMP_HAS_TCP is 1 when tcp.c is linked into this image, mirroring the
  * Makefile: the full-net profile wildcard-compiles tcp.c (whose own
  * gate then takes the tiku_kits_net.h default of enabled), while the
  * lean MIN profile compiles it only when TIKU_KITS_NET_TCP_ENABLE=1
@@ -92,11 +92,11 @@ int tiku_shell_pump_net(void (*periodic)(void))
 #endif
 
     /* Ctrl-C break.  On a SLIP build the console and the IP link
-     * share one UART, so read through the SLIP-aware demux: it routes
-     * IP frames to the stack and returns only genuine console bytes.
-     * The raw getc would misread a payload byte 0x03 as Ctrl-C —
-     * aborting the operation with an uncategorised error — and would
-     * also steal bytes meant for the TCP stack. */
+     * share one line, so read through the console decoder: it hands
+     * IP frames to the stack and returns only console text.  The raw
+     * getc would read a payload byte 0x03 as Ctrl-C -- aborting the
+     * operation with an uncategorised error -- and would also take
+     * bytes meant for the TCP stack. */
 #if TIKU_SHELL_CMD_SLIP
     if (tiku_shell_net_getc() == PUMP_CTRL_C) {
         return 1;

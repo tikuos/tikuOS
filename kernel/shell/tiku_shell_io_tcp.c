@@ -7,9 +7,9 @@
  *
  * tiku_shell_io_tcp.c - TCP (telnet) I/O backend.
  *
- * Listens on port 23 and routes the three backend calls through the TCP stack,
- * buffering output so a session does not emit one-byte segments.  Telnet IAC
- * sequences are consumed silently, so a raw client works without negotiation.
+ * Listens on port 23, buffers output so a session sends no one-byte segments,
+ * and consumes telnet IAC sequences.  The Makefile compiles this file only
+ * with TIKU_SHELL_NET_TEST.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -54,8 +54,7 @@ static uint8_t tx_buf[TIKU_SHELL_TCP_TX_BUF_SIZE];
 static uint16_t tx_pos;
 
 /**
- * @brief One-byte history flag: nonzero if the last byte the TCP stack returned to
- * tcp_getc() was a carriage return.
+ * @brief Nonzero if the last byte tcp_getc() read was a carriage return.
  *
  * Telnet line endings arrive as "\r\n", so this lets tcp_getc() drop the '\n'
  * and hand the line editor one end-of-line.  Reset on each connection.
@@ -70,8 +69,8 @@ static uint8_t last_was_cr;
  * @brief Push buffered output toward the peer, at most one segment.
  *
  * Sends at most one MSS-sized segment per call: each send blocks the CPU for a
- * SLIP transmit, so capping the burst lets the scheduler run the net process to
- * process ACKs and free TX pool slots before the next flush.
+ * SLIP transmit, and capping the burst lets incoming ACKs free TX pool slots
+ * before the next flush.
  *
  * @note A no-op with nobody connected or an empty buffer.  A successful send
  *       shifts any unsent tail to the front; a failed one (TX pool full) leaves
@@ -88,23 +87,13 @@ tiku_shell_io_tcp_flush(void)
         return;
     }
 
-    /* Send at most ONE MSS-sized segment per call.  Each call blocks
-     * the CPU for ~150 ms (SLIP TX at 9600 baud).  By sending only
-     * one segment, control returns to the scheduler sooner, giving the
-     * net process a chance to process incoming ACKs and free TX pool
-     * slots before the next flush.  The CLI poll loop calls this
-     * every cycle, so multi-segment output drains over several
-     * ticks rather than in a single burst. */
     mss = telnet_conn->snd_mss;
     chunk = tx_pos;
     if (chunk > mss) {
         chunk = mss;
     }
-    /* chunk and tx_pos are both uint16_t: a command's output can exceed 255
-     * bytes (e.g. `help` is ~1.9 KB), so a uint8_t here would wrap -- once
-     * tx_pos passed 0xFF the low byte could land on 0 and tcp_send(len=0)
-     * returns an error every poll, wedging the drain a couple of segments in
-     * (the banner, <256 B, slipped under it).  Keep the full 16-bit length. */
+    /* chunk and tx_pos are uint16_t: tx_buf holds more than 255 bytes, and
+     * a length that wrapped to 0 would make every send fail. */
 
     if (tiku_kits_net_tcp_send(telnet_conn,
                                tx_buf, chunk) != TIKU_KITS_NET_OK) {
@@ -136,9 +125,9 @@ tiku_shell_io_tcp_flush(void)
  * produced without a telnet session simply vanishes.
  *
  * @note A full buffer is flushed first and the byte dropped if it is still
- *       full, rather than indexing past the end.  Flushing on '\n' is
- *       deliberately NOT done: per-line flushing would emit one segment per
- *       line and exhaust the shared TX pool within a single poll cycle.
+ *       full, rather than indexing past the end.  Output is not flushed on
+ *       '\n': per-line flushing would emit one segment per line and exhaust
+ *       the shared TX pool within a single poll cycle.
  * @param c  Raw byte to enqueue for transmission
  */
 static void
@@ -150,7 +139,7 @@ tcp_putc(char c)
 
     /* If a previous flush failed (TX pool full), the buffer is
      * still at capacity.  Try again before writing so this never
-     * index past the end of tx_buf. */
+     * indexes past the end of tx_buf. */
     if (tx_pos >= TIKU_SHELL_TCP_TX_BUF_SIZE) {
         tiku_shell_io_tcp_flush();
         if (tx_pos >= TIKU_SHELL_TCP_TX_BUF_SIZE) {
@@ -160,12 +149,6 @@ tcp_putc(char c)
 
     tx_buf[tx_pos++] = (uint8_t)c;
 
-    /* Flush when the buffer is full.  Per-line flushing (on '\n')
-     * would exhaust the TCP TX segment pool during multi-line
-     * command output — all sends happen in one poll cycle before
-     * the net process can process ACKs and free pool slots.  The
-     * CLI process calls tcp_flush() explicitly at the end of each
-     * poll iteration. */
     if (tx_pos >= TIKU_SHELL_TCP_TX_BUF_SIZE) {
         tiku_shell_io_tcp_flush();
     }
@@ -252,9 +235,9 @@ tcp_getc(void)
 /**
  * @brief TCP data-arrival callback (tiku_kits_net_tcp_recv_cb_t).
  *
- * Registered with the listener so the stack can notify the backend.
- * Intentionally empty: the CLI is a polling consumer that checks rx_ready and
- * drains on its own schedule, so the notification itself needs no work.
+ * Registered with the listener so the stack can notify the backend.  Empty:
+ * the shell polls rx_ready and drains on its own schedule, so the
+ * notification needs no work.
  *
  * @param c          Connection that received data (unused)
  * @param available  Bytes now available in the RX ring (unused)
@@ -285,14 +268,10 @@ telnet_event_cb(struct tiku_kits_net_tcp_conn *c, uint8_t event)
         tx_pos = 0;
     } else if (event == TIKU_KITS_NET_TCP_EVT_CLOSED ||
                event == TIKU_KITS_NET_TCP_EVT_ABORTED) {
-        /* Only forget the connection if the one that closed is the one
-         * currently tracked.  There are several TCP slots, so a just-RST'd
-         * PREVIOUS client's CLOSED/ABORTED event can arrive AFTER the next
-         * client has already connected (telnet_conn = new): nulling
-         * unconditionally would drop the live session, and its first command
-         * would land on a NULL telnet_conn and produce no output (the banner,
-         * sent before the late event, still gets through -- exactly the
-         * "connects, banner ok, first command frozen" reconnect flake). */
+        /* Forget the connection only if it is the tracked one: with several
+         * TCP slots, a previous client's late CLOSED or ABORTED can arrive
+         * after the next client has connected, and clearing telnet_conn
+         * then would cut off the live session. */
         if (c == telnet_conn) {
             telnet_conn = (void *)0;
             tx_pos = 0;
@@ -309,11 +288,11 @@ telnet_event_cb(struct tiku_kits_net_tcp_conn *c, uint8_t event)
  *
  * Clears the connection handle and per-session buffers, then opens a passive
  * listener on TIKU_SHELL_TCP_PORT wiring telnet_recv_cb / telnet_event_cb as
- * the callbacks accepted connections inherit.  Call once during CLI init.
+ * the callbacks accepted connections inherit.
  *
- * @note The listener stays active for the process lifetime, so the next SYN
- *       after a disconnect is accepted automatically -- no per-connection
- *       re-listen.
+ * @note Call once, from the shell process's setup pass.  The listener stays
+ *       active for the process lifetime, so the next SYN after a disconnect
+ *       is accepted without a re-listen.
  */
 void
 tiku_shell_io_tcp_init(void)
@@ -328,9 +307,9 @@ tiku_shell_io_tcp_init(void)
 /**
  * @brief Report whether a usable telnet client is connected.
  *
- * Polled by the CLI each cycle to decide whether to keep the TCP backend
- * installed or fall back to the UART one.  Returns 1 only when the connection
- * is ESTABLISHED, and 0 for no connection or any transient state.
+ * Polled by the shell each cycle to decide whether to keep the TCP backend
+ * installed or fall back to the local console (none in a TCP-only shell).
+ * Returns 1 only when the connection is ESTABLISHED.
  *
  * @note Also where a peer's half-close is finalised: a connection in CLOSE_WAIT
  *       is closed here, the handle dropped and the TX buffer cleared, freeing
@@ -371,8 +350,8 @@ const tiku_shell_io_t tiku_shell_io_tcp = {
     tcp_getc,
     TIKU_SHELL_IO_CRLF | TIKU_SHELL_IO_ECHO,
     /* Remote channel: no capability by default -- a telnet session may read
-     * the whole namespace and write open nodes, but may NOT actuate hardware
+     * the whole namespace and write open nodes, but may not actuate hardware
      * (CAP_HW), touch safety/system state (CAP_SYS), or mutate the store
-     * (CAP_FS).  Raise deliberately if remote control is wanted. */
+     * (CAP_FS).  Raise it if remote control is wanted. */
     TIKU_VFS_CAP_NONE
 };

@@ -5,17 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_drv_registry.h - Public API to the driver-registration layer
+ * tiku_drv_registry.h - public API of the driver-registration layer.
  *
- * The kernel sees a flat array of (const tiku_drv_t *) pointers,
- * one per enabled driver. The table itself is populated by the
- * `drivers/` repo's tiku_drv_table.c when present, or by
- * tiku_drv_empty_table.c (zero length) otherwise.
- *
- * This header exposes the table, init/find and per-boot status queries;
- * the descriptor type itself lives in tiku_drv.h.  Keeping the surface
- * this small is what lets the optional drivers/ repo drop in without
- * touching core kernel code.
+ * A flat array of descriptor pointers, filled by the drivers/ repo's
+ * tiku_drv_table.c when present and by tiku_drv_empty_table.c otherwise, plus
+ * init, find and per-boot status calls.  The descriptor is in tiku_drv.h.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -35,6 +29,7 @@ extern "C" {
  *        HAS_DRIVERS=1, else in tiku_drv_empty_table.c.
  */
 extern const tiku_drv_t *const tiku_drv_table[];
+/** @brief Number of entries in tiku_drv_table. */
 extern const uint8_t           tiku_drv_table_count;
 
 /**
@@ -65,19 +60,19 @@ typedef enum {
  * @param index     Descriptor-table slot
  * @param init_rc   Receives the init() result, or NULL
  * @param mount_rc  Receives the VFS mount result, or NULL
- * @return The slot's state; TIKU_DRV_INVALID past the table end
+ * @return The slot's state; TIKU_DRV_INVALID past the table end and
+ *         TIKU_DRV_CAPACITY past TIKU_DRV_REGISTRY_MAX
  */
 tiku_drv_state_t tiku_drv_status(uint8_t index, int *init_rc, int *mount_rc);
 
 /**
  * @brief Walk the driver table and call each driver's init().
  *
- * Called once at boot from main.c after tiku_vfs_tree_init(). Repeated calls
- * are safe no-ops; each descriptor is initialized at most once per boot.
- * Init failures are logged but do not abort boot — a single bad
- * driver should not take down the whole system. The kernel
- * continues to the scheduler with whatever drivers initialised
- * successfully.
+ * A failed init is logged and boot goes on with the drivers that came up.
+ * Each descriptor is initialised at most once per boot; a repeat call does
+ * nothing.
+ *
+ * @note Called once at boot from main.c, after tiku_vfs_tree_init().
  */
 void tiku_drv_init_all(void);
 
@@ -93,9 +88,8 @@ void tiku_drv_remount_all(void);
 /**
  * @brief Look up a driver descriptor by exact, case-sensitive name.
  *
- * For use by application / shell code that wants to query state
- * (e.g. "is the WiFi driver loaded?"). If a malformed table contains a
- * duplicate name, the first declared descriptor wins deterministically.
+ * Returns the descriptor whatever its init outcome, which tiku_drv_status()
+ * reports.  With a duplicate name, the first descriptor in the table wins.
  */
 const tiku_drv_t *tiku_drv_find(const char *name);
 
