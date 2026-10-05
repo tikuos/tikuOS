@@ -1266,7 +1266,8 @@ crypto_pk_read(char *buf, size_t max)
 }
 
 static const tiku_vfs_node_t sys_crypto_children[] = {
-    { "mode", TIKU_VFS_FILE, crypto_mode_read, crypto_mode_write, NULL, 0 },
+    { "mode", TIKU_VFS_FILE, crypto_mode_read, crypto_mode_write, NULL, 0,
+      NULL, NULL, TIKU_VFS_CAP_SYS },
     { "ops",  TIKU_VFS_FILE, crypto_ops_read,  NULL,              NULL, 0 },
     { "pk",   TIKU_VFS_FILE, crypto_pk_read,   NULL,              NULL, 0 },
 };

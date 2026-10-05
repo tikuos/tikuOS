@@ -51,8 +51,8 @@ init_count_read(char *buf, size_t max)
  * @brief Generate the four handlers + children table for slot N.
  *
  * Read handlers for the entry's boot-order sequence, name and shell command,
- * plus a read/write enable flag writing through tiku_init_enable() (which
- * persists to FRAM).  Each re-fetches the entry, since `init` edits slots live.
+ * plus an enable flag that takes exactly "0" or "1" and persists it through
+ * tiku_init_enable().  Each re-fetches the entry; `init` edits slots live.
  */
 #define INIT_VFS_FUNCS(N)                                                     \
 static int init_seq_##N##_read(char *buf, size_t max)                         \
@@ -82,9 +82,17 @@ static int init_enable_##N##_read(char *buf, size_t max)                      \
 static int init_enable_##N##_write(const char *buf, size_t len)               \
 {                                                                             \
     const tiku_init_entry_t *e = tiku_init_get(N);                            \
-    (void)len;                                                                \
-    if (!e) return -1;                                                        \
-    return tiku_init_enable(e->name, (uint8_t)(buf[0] != '0'));               \
+    if (!e) {                                                                 \
+        return TIKU_VFS_ENOENT;                                               \
+    }                                                                         \
+    while (len > 0u && (buf[len - 1u] == '\n' || buf[len - 1u] == '\r' ||     \
+                        buf[len - 1u] == ' ' || buf[len - 1u] == '\t')) {     \
+        len--;                                                                \
+    }                                                                         \
+    if (len != 1u || (buf[0] != '0' && buf[0] != '1')) {                      \
+        return TIKU_VFS_EINVAL;                                               \
+    }                                                                         \
+    return tiku_init_enable(e->name, (uint8_t)(buf[0] == '1'));               \
 }                                                                             \
 static const tiku_vfs_node_t init_##N##_children[] = {                        \
     { "seq",    TIKU_VFS_FILE, init_seq_##N##_read,    NULL,                  \
@@ -94,7 +102,8 @@ static const tiku_vfs_node_t init_##N##_children[] = {                        \
     { "cmd",    TIKU_VFS_FILE, init_cmd_##N##_read,    NULL,                  \
       NULL, 0 },                                                              \
     { "enable", TIKU_VFS_FILE, init_enable_##N##_read,                        \
-                                init_enable_##N##_write, NULL, 0 },           \
+      init_enable_##N##_write, NULL, 0, NULL, NULL,                           \
+      TIKU_VFS_CAP_SYS | TIKU_VFS_CAP_FS },                                   \
 }
 
 INIT_VFS_FUNCS(0);

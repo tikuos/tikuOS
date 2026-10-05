@@ -96,8 +96,10 @@ static int npu_run_read(char *buf, size_t max)
 const tiku_vfs_node_t tiku_vfs_tree_npu_children[] = {
     { "state", TIKU_VFS_FILE, npu_state_read, NULL,           NULL, 0 },
     { "info",  TIKU_VFS_FILE, npu_info_read,  NULL,           NULL, 0 },
-    { "model", TIKU_VFS_FILE, npu_model_read, npu_model_write, NULL, 0 },
-    { "run",   TIKU_VFS_FILE, npu_run_read,   npu_run_write,  NULL, 0 },
+    { "model", TIKU_VFS_FILE, npu_model_read, npu_model_write, NULL, 0,
+      NULL, NULL, TIKU_VFS_CAP_HW },
+    { "run",   TIKU_VFS_FILE, npu_run_read,   npu_run_write,  NULL, 0,
+      NULL, NULL, TIKU_VFS_CAP_HW },
     { "runs",  TIKU_VFS_FILE, npu_runs_read,  NULL,           NULL, 0 },
 };
 
