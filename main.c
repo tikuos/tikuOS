@@ -50,10 +50,12 @@ extern const char tiku_basic_embedded_src[];
 
 /**
  * @brief Main application entry point
- * @return Should never return (infinite loop)
  *
- * Initializes the system hardware, optionally runs the test suite
- * when TEST_ENABLE is set, then enters the main application loop.
+ * Boots the system, starts the shell and loads the init entries when they are
+ * built, builds the VFS tree, starts the drivers, runs the test suite when
+ * TEST_ENABLE is set, then enters the scheduler loop.
+ *
+ * @return 0, reached only after tiku_sched_stop() ends the scheduler loop
  */
 int main(void) {
   int ret;
@@ -79,8 +81,8 @@ int main(void) {
   MAIN_PRINTF("Boot complete\n");
 
 #if defined(TIKU_POWER_AUTORUN) && TIKU_POWER_AUTORUN
-  /* Deep-sleep measurement firmware: run the console-free power staircase
-   * instead of the scheduler (see tiku_ambiq_power_autorun).  Never returns. */
+  /* Deep-sleep measurement firmware: runs the console-free power staircase
+   * (tiku_ambiq_power_autorun) and never reaches the scheduler. */
   {
     extern void tiku_ambiq_power_autorun(void);
     MAIN_PRINTF("POWER AUTORUN: spin3s / idle10s / deepsleep45s, forever.\n");
@@ -106,20 +108,19 @@ int main(void) {
 #endif
 
 #ifdef TIKU_BASIC_EMBEDDED
-  /* Build-time-embedded BASIC program: parse + RUN before anything
-   * else. Returns when the program ends (END / STOP / fall-off);
-   * the scheduler then takes over and -- if the shell is enabled
-   * -- the user gets a regular shell prompt. */
+  /* Build-time-embedded BASIC program, parsed and run here: after the shell
+   * init, before the VFS tree, the drivers and the scheduler.  It returns
+   * when the program ends (END, STOP or past its last line); the scheduler
+   * then takes over, with a shell prompt when the shell is built. */
   tiku_basic_run_source(tiku_basic_embedded_src);
 #endif
 
 #if TIKU_INIT_ENABLE
-  /* Load only.  Execution happens in the shell process's first schedule
-   * (tiku_shell.c): the parser's command table and the console backend are
-   * process-startup state, so an entry dispatched from here hits a NULL
-   * table and silently does nothing.  Running from the shell also puts
-   * entries after the driver registry and the VFS tree, so they behave
-   * exactly like typed commands. */
+  /* Load only; the shell process runs the entries on its first schedule
+   * (tiku_shell.c).  The parser's command table and the console backend are
+   * set up at process start, so an entry dispatched from here hits a NULL
+   * table and does nothing.  From the shell the entries also run after the
+   * driver registry and the VFS tree, as typed commands do. */
   tiku_nvm_map_init();
   tiku_init_load();
 #endif
@@ -152,6 +153,6 @@ int main(void) {
   MAIN_PRINTF("Entering scheduler\n");
   tiku_sched_loop();
 
-  /* Should never reach here */
+  /* Reached only after tiku_sched_stop(). */
   return 0;
 }

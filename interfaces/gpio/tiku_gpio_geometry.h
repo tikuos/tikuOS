@@ -156,8 +156,8 @@
  *
  * @param port  Port number as the raw GPIO interface takes it
  * @return Pin count, or 0 when this platform has no such port
- * @note A lookup in a compile-time table: safe from any context, interrupt
- *       handlers included.
+ * @note A switch over a compile-time table, callable from any context,
+ *       interrupt handlers included.
  */
 static inline uint8_t
 tiku_gpio_pin_count(uint8_t port)

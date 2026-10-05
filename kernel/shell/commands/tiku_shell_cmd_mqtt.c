@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_mqtt.c - "mqtt" command (MQTT 3.1.1 client).
  *
- * Connects to a broker over TCP and optionally publishes at QoS 0, driven by
- * the shell's async tick so the periodic runs without blocking.  I/O flows
- * through the shared SLIP demux, so the shell stays interactive.
+ * Connects to a broker over TCP, optionally publishes one message at QoS 0,
+ * then disconnects.  The command returns at once; the shell loop's tick calls
+ * tiku_kits_net_mqtt_periodic() once a second and prints the result.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -170,7 +170,7 @@ tiku_shell_cmd_mqtt(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* Default broker: the SLIP host (subnet .1). */
+    /* Default broker: x.y.z.1 from TIKU_KITS_NET_IP_ADDR, the SLIP host. */
     broker[0] = self[0];
     broker[1] = self[1];
     broker[2] = self[2];

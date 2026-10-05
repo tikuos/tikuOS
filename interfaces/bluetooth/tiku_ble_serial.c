@@ -8,8 +8,8 @@
  * tiku_ble_serial.c - driver-agnostic BLE-serial facade implementation.
  *
  * Dispatches the facade in tiku_ble_serial.h to whichever radio backend the
- * build compiled in: the EM9305 host stack or the Nordic FLPR controller.
- * Adding a backend adds an #elif here; callers never change.
+ * build compiled in: the EM9305 host stack or the Nordic FLPR controller.  A
+ * new backend is one more #elif here.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,13 +27,12 @@
 #include <kernel/timers/tiku_clock.h>       /* credit drain, subscribe settle */
 #include <kernel/cpu/tiku_watchdog.h>       /* kicked while draining */
 
-/* HCI packets drained per service() call.  The pump reads one packet per
- * poll; a small burst empties a typical event/RX backlog without spinning. */
+/* Most HCI packets one service() call drains, one per poll; it stops early
+ * when a poll finds nothing. */
 #define BLE_SERIAL_POLL_BURST   8u
 
-/* Subscribe-settle: notifications sent shortly after a central subscribes are
- * discarded while it finishes arming, so ready() waits 5/8 s first, as the
- * wireless shell's greet delay does. */
+/* Notifications sent shortly after a central subscribes are discarded while
+ * it finishes arming, so ready() returns 0 for 5/8 s after a subscribe. */
 static tiku_clock_time_t s_settle_at;
 static uint8_t           s_sub_armed;
 
@@ -77,7 +76,7 @@ tiku_ble_serial_ready(void)
         s_sub_armed = 0u;
         return 0;
     }
-    if (!s_sub_armed) {                 /* just subscribed: start settling */
+    if (!s_sub_armed) {                 /* new subscribe: start settling */
         s_sub_armed = 1u;
         s_settle_at = (tiku_clock_time_t)(tiku_clock_time() +
                                           (TIKU_CLOCK_SECOND * 5u) / 8u);
@@ -121,10 +120,10 @@ tiku_ble_serial_send(const uint8_t *data, uint16_t len)
         tiku_ble_uart_putc((char)data[i]);
     }
 
-    /* Flow-controlled drain: flush() refuses to transmit without a free
-     * controller credit, so pump the stack (acks return credits) until the
-     * buffer empties.  A one-second no-progress stall abandons the remainder
-     * rather than wedging the caller (dead link / gone subscriber). */
+    /* Flow-controlled drain: flush() transmits only with a free controller
+     * credit, so the stack is pumped (acks return credits) until the buffer
+     * empties.  After one second without progress (a dead link or a gone
+     * subscriber) the rest is abandoned. */
     prev = tiku_ble_uart_tx_pending();
     deadline = (tiku_clock_time_t)(tiku_clock_time() + TIKU_CLOCK_SECOND);
     while (tiku_ble_uart_tx_pending() > 0u) {
@@ -141,8 +140,8 @@ tiku_ble_serial_send(const uint8_t *data, uint16_t len)
         }
     }
 
-    /* Let the tail packets finish (bounded); reclaim a credit if a dropped
-     * packet never acks, so a single drop cannot permanently shrink TX. */
+    /* The tail packets get up to one second to finish; a credit whose packet
+     * never acks is reclaimed, so a single drop cannot shrink TX for good. */
     deadline = (tiku_clock_time_t)(tiku_clock_time() + TIKU_CLOCK_SECOND);
     while (tiku_ble_uart_tx_inflight() > 0 &&
            TIKU_CLOCK_LT(tiku_clock_time(), deadline)) {
@@ -521,8 +520,8 @@ tiku_ble_serial_recv(uint8_t *buf, uint16_t cap)
     return (int)nn;
 }
 
-/* Non-connectable beacon: the broadcast facade (tiku_ble_adv) owns that on
- * Nordic, and BASIC's BLEBEACON routes there directly, so this is unused. */
+/* On Nordic the broadcast facade (tiku_ble_adv) owns non-connectable beacons
+ * and BASIC's BLEBEACON calls it directly; this returns -1. */
 int
 tiku_ble_serial_beacon(const char *name)
 {
@@ -531,10 +530,12 @@ tiku_ble_serial_beacon(const char *name)
 }
 
 /*===========================================================================*/
-/* NO BACKEND: STUBS, SO A STRAY ENABLE STILL LINKS                          */
+/* NO BACKEND: STUBS                                                         */
 /*===========================================================================*/
 #else
 
+/* No radio backend: start(), send() and beacon() return -1, every other query
+ * and recv() return 0, and stop() and service() do nothing. */
 int  tiku_ble_serial_available(void) { return 0; }
 int  tiku_ble_serial_start(const char *name) { (void)name; return -1; }
 void tiku_ble_serial_stop(void) { }

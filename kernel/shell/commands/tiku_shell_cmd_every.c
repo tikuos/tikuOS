@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_every.c - "every" command implementation
  *
- * Thin wrapper over tiku_shell_jobs_schedule_argv() that registers a
- * recurring job.  All parsing, validation, and diagnostics live in
- * the jobs subsystem; this file only selects the EVERY job type.
+ * Passes its arguments to tiku_shell_jobs_schedule_argv() as a
+ * TIKU_SHELL_JOB_EVERY job; that function parses them, prints any error and
+ * fills a job slot.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

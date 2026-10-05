@@ -7,9 +7,9 @@
  *
  * tiku_ble_bond.c - durable LTK bond store (BLE bonding).
  *
- * The whole bond table is one magic-gated persist cell, so a store rewrites
- * every slot behind the cell API's MPU discipline.  An SRAM mirror answers
- * reconnect lookups without unlocking NVM.
+ * The whole bond table is one magic-gated persist cell: a store rewrites
+ * every slot through the cell API, which owns the MPU unlock.  An SRAM mirror
+ * answers every lookup.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,8 +18,9 @@
 #include <kernel/memory/tiku_mem.h>
 #include <string.h>
 
-/* Gate key for the bond table.  Bump if tiku_ble_bond_t's layout changes
- * (forces a clean re-prime, discarding stale-layout bonds). */
+/* Gate key for the bond table.  A new value re-primes the table at the next
+ * init and discards every stored bond; it changes with tiku_ble_bond_t's
+ * layout. */
 #define TIKU_BLE_BOND_MAGIC  0xB0DDC001UL
 
 /* Durable table + its SRAM mirror.  The default (NULL/0) primes every slot

@@ -29,7 +29,7 @@
 /** Convert \n to \r\n on output (serial terminals) */
 #define TIKU_SHELL_IO_CRLF   0x01
 
-/** Echo received characters back to the sender */
+/** The line editor echoes typed characters back to this backend */
 #define TIKU_SHELL_IO_ECHO   0x02
 
 /*---------------------------------------------------------------------------*/
@@ -40,17 +40,17 @@
  * @brief I/O backend descriptor
  *
  * Each transport fills one of these and passes it to
- * tiku_shell_io_set_backend().  Output goes through putc; the line editor
- * reads the console wire instead of getc, except from the TCP backend.
+ * tiku_shell_io_set_backend().  Output goes through putc.  The line editor
+ * calls getc only on the TCP backend and reads tiku_console_getc() otherwise.
  */
 typedef struct tiku_shell_io {
     void    (*putc)(char c);        /**< Transmit one raw byte */
     uint8_t (*rx_ready)(void);      /**< Non-zero when getc has data */
     int     (*getc)(void);          /**< Read one byte, -1 if empty */
     uint8_t flags;                  /**< Bitwise OR of TIKU_SHELL_IO_* */
-    uint8_t cap;                    /**< TIKU_VFS_CAP_* mask it confers on
-                                         VFS writes: CAP_ALL for the console,
-                                         less for a remote; 0 fails closed. */
+    uint8_t cap;                    /**< TIKU_VFS_CAP_* mask VFS writes get
+                                         while it is active; 0 allows only
+                                         writes that need none. */
 } tiku_shell_io_t;
 
 /*---------------------------------------------------------------------------*/
@@ -60,10 +60,11 @@ typedef struct tiku_shell_io {
 /**
  * @brief Install a backend as the active I/O channel.
  *
- * May be called more than once (e.g. switch from UART to network).
- * Passing NULL disables all CLI I/O.
+ * Also sets the VFS caller capability to the backend's cap, or to
+ * TIKU_VFS_CAP_ALL for NULL.  With NULL, output is dropped and getc returns
+ * -1.
  *
- * @param backend  Backend descriptor (caller keeps ownership)
+ * @param backend  Backend descriptor; it must stay valid while installed
  */
 void tiku_shell_io_set_backend(const tiku_shell_io_t *backend);
 
@@ -114,6 +115,8 @@ uint8_t tiku_shell_io_rx_ready(void);
 /**
  * @brief Read one byte from the active backend (non-blocking).
  *
+ * @note On a console backend this is the raw wire, frame bytes included; a
+ *       builtin reading keystrokes uses tiku_shell_net_getc().
  * @return 0-255 on success, -1 if nothing available.
  */
 int tiku_shell_io_getc(void);
@@ -134,10 +137,7 @@ uint8_t tiku_shell_io_has_crlf(void);
 
 /**
  * @def SHELL_PRINTF(...)
- * @brief Shorthand used by shell code and command handlers for output.
- *
- * Routes through the I/O abstraction so the same command code works
- * over any backend (UART, USB CDC, TCP, BLE).
+ * @brief Formatted output to the active backend: tiku_shell_io_printf().
  */
 #define SHELL_PRINTF(...) tiku_shell_io_printf(__VA_ARGS__)
 

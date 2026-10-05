@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_dns.c - "dns" command (async A-record lookup).
  *
- * Resolves a hostname over SLIP through the stub resolver, with I/O through
- * the shared demux so the shell stays interactive.  The resolver counts each
- * no-reply poll as a retry, so polls are paced at ~1 Hz, not every tick.
+ * Sends an A-record query through the stub resolver over the current IPv4
+ * link, turning SLIP on when there is none.  The command returns at once and
+ * the shell loop polls for the reply, one poll per second.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -29,11 +29,11 @@
 /* CONFIG + STATE                                                            */
 /*---------------------------------------------------------------------------*/
 
-/* Poll the (poll-based) resolver at the cadence it expects (~1 s); each
- * no-reply poll() counts as one retry toward its 3-strike timeout. */
+/* The resolver counts each poll() without a reply as one retry and gives up
+ * after TIKU_KITS_NET_DNS_MAX_RETRIES of them, so polls are a second apart. */
 #define DNS_POLL_EVERY  ((tiku_clock_time_t)TIKU_CLOCK_SECOND)
 
-/* Overall backstop in case the state machine wedges. */
+/* The command gives up 8 s after the query, whatever the resolver's state. */
 #define DNS_DEADLINE    ((tiku_clock_time_t)(8u * TIKU_CLOCK_SECOND))
 
 static uint8_t           dns_on;
@@ -92,9 +92,9 @@ tiku_shell_cmd_dns(uint8_t argc, const char *argv[])
     static uint8_t udp_ready;
     uint8_t server[4];
 
-    /* Default resolver: a configured override, else the DHCP lease's
-     * (option 6) when bound, else 8.8.8.8 -- campus networks often block
-     * external resolvers.  An explicit [resolver-ip] overrides below. */
+    /* Default resolver: the configured override, else the DHCP lease's
+     * (option 6) when bound, else 8.8.8.8.  A [resolver-ip] argument
+     * replaces it below. */
     tiku_kits_net_dns_default_server(server);
 
     if (dns_on) {

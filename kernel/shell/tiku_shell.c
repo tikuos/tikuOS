@@ -30,8 +30,8 @@
 #include <kernel/timers/tiku_timer.h>
 #include <kernel/timers/tiku_htimer.h>   /* htimer self-test command */
 #include <kernel/timers/tiku_clock.h>
-#include <kernel/cpu/tiku_watchdog.h>    /* liveness kick in net_getc waits */
-#include <kernel/console/tiku_console.h> /* the wire's text, frames cut out */
+#include <kernel/cpu/tiku_watchdog.h>    /* tiku_watchdog_kick() */
+#include <kernel/console/tiku_console.h> /* tiku_console_getc(), _pump() */
 #if TIKU_SHELL_CMD_JOBS
 #include "tiku_shell_jobs.h"
 #endif
@@ -303,12 +303,7 @@
 /* DECLARATIONS                                                              */
 /*---------------------------------------------------------------------------*/
 
-/*
- * The "help" built-in is defined later in this file but referenced
- * by the command table above it, so it needs a forward declaration.
- * Gated on TIKU_SHELL_CMD_HELP so a build without help compiles the
- * declaration away along with the definition and its table entry.
- */
+/* "help" is defined after the command table, which names it. */
 #if TIKU_SHELL_CMD_HELP
 static void tiku_shell_cmd_help(uint8_t argc, const char *argv[]);
 #endif
@@ -328,22 +323,17 @@ static void tiku_shell_cmd_help(uint8_t argc, const char *argv[]);
 /* PROMPT AND INPUT                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Print the prompt, which shows the working directory.
- *
- * Every reprint goes through here (the banner, after a command, Ctrl+C, a
- * cancelled watch, a TCP client connecting), e.g. "tikuOS:/sys/device> ".
- */
+/** @brief Print the prompt with the working directory: "tikuOS:/sys> ". */
 static void shell_print_prompt(void) {
     SHELL_PRINTF(SH_GREEN SH_BOLD "tikuOS:%s> " SH_RST, tiku_shell_cwd_get());
 }
 
 /**
- * @brief The next keystroke for the line editor, or -1 when there is none.
+ * @brief The line editor's next byte, or -1 when none is waiting.
  *
- * A telnet client that owns the line supplies its TCP bytes.  Otherwise the
- * console hands over the wire's text, every frame met on the way already
- * dispatched to its channel (the IP stack, a desktop's window session).
+ * Reads the telnet client while the TCP backend is active, else
+ * tiku_console_getc(), which hands every frame met on the way to its channel.
+ * Returns -1 when no backend is set.
  */
 static int
 shell_getc(void)
@@ -362,14 +352,6 @@ shell_getc(void)
 }
 
 #if TIKU_SHELL_CMD_SLIP
-/*
- * Drain the wire on behalf of a blocking builtin (e.g. BASIC HTTPGET$) that
- * has taken over the shell loop.  While such a builtin busy-waits, the main
- * loop is not running, so without this incoming SLIP frames (DNS reply,
- * TCP/TLS data) are never delivered to the IP stack.  The console's decoder
- * keeps its state across calls, so a frame that arrives across many calls
- * (the bytes trickle in at the line rate) is reassembled correctly.
- */
 void
 tiku_shell_net_pump(void)
 {
@@ -377,23 +359,13 @@ tiku_shell_net_pump(void)
 }
 #endif
 
-/*
- * Console-aware non-blocking getc -- see the header.  A blocking builtin that
- * reads the keyboard (the BASIC REPL / INPUT after a BROWSE, a busy-wait's
- * Ctrl-C poll) calls this instead of tiku_shell_io_getc(): frame bytes (a
- * closed connection's lingering teardown, a window session's messages) go to
- * their channel rather than landing in the line editor as garbage.
- */
 int
 tiku_shell_net_getc(void)
 {
-    /* A blocking builtin's input wait is liveness, not a hang: the BASIC
-     * REPL prompt, INPUT, DELAY and the RUN loop's Ctrl-C poll all spin on
-     * this call for unbounded time inside one dispatch of the shell process,
-     * so the scheduler heartbeat is frozen for the whole session.  Kick here
-     * (which also feeds the check-in hang detector) like the net pumps do,
-     * or the detector blames the shell and warm-resets a quiet BASIC prompt
-     * once TIKU_HANG_THRESHOLD_TICKS pass. */
+    /* Callers spin on this for unbounded time inside one dispatch of the
+     * shell process (the BASIC prompt, INPUT, DELAY, a RUN loop's Ctrl-C
+     * poll).  The kick is also the hang detector's check-in; without it the
+     * detector warm-resets the board after TIKU_HANG_THRESHOLD_TICKS. */
     tiku_watchdog_kick();
     return shell_getc();
 }
@@ -424,7 +396,7 @@ static void htimer_selftest_cb(struct tiku_htimer *t, void *ptr) {
  *       STIMER, off the 32 kHz crystal) has settled.
  */
 static void tiku_shell_cmd_htimer(uint8_t argc, const char *argv[]) {
-    static struct tiku_htimer ht;   /* static: the ISR uses it later */
+    static struct tiku_htimer ht;   /* static: may outlive the call */
     tiku_htimer_clock_t now;
     tiku_clock_time_t   t0;
     unsigned long       elapsed;
@@ -452,12 +424,10 @@ static void tiku_shell_cmd_htimer(uint8_t argc, const char *argv[]) {
 
     s_htimer_selftest_fired = 0u;
 
-    /* The htimer clock is 16-bit, so a deadline can be at most ~2^15 ticks
-     * ahead (the kernel's signed CLOCK_DIFF guard must stay positive).  A
-     * fixed 100 ms target only fits a slow (kHz-class) htimer: at 1 MHz it is
-     * 100000 ticks, which wraps to a negative diff and is rejected as "in the
-     * past".  Cap the delay to a safe sub-range value so the test works at any
-     * TIKU_HTIMER_SECOND (30 ms at 1 MHz, a full 100 ms at 16 kHz). */
+    /* The htimer clock is 16-bit: tiku_htimer_set() returns
+     * TIKU_HTIMER_ERR_TIME for a deadline 2^15 or more ticks ahead, whose
+     * signed difference wraps negative.  The delay is a tenth of a second,
+     * capped at 30000 ticks (30 ms at 1 MHz, the full 100 ms at 16 kHz). */
     delay_ticks = (unsigned long)TIKU_HTIMER_SECOND / 10UL;
     if (delay_ticks > 30000UL) {
         delay_ticks = 30000UL;
@@ -506,7 +476,7 @@ static void tiku_shell_cmd_htimer(uint8_t argc, const char *argv[]) {
  * Each command is gated by a build flag, mostly its TIKU_SHELL_CMD_* flag
  * from tiku_shell_config.h.  A flag set to 0 removes the row; the command's
  * code is then unreferenced and the linker drops it.  "cat" is gated on CAT
- * and READ because it reuses the "read" handler, "pwd" rides the CD flag, and
+ * and READ because it reuses the "read" handler, "pwd" is gated on CD, and
  * the "Networking" and "Boot" headers sit inside their commands' guards so
  * those categories never print empty.
  *
@@ -865,11 +835,10 @@ tiku_shell_cmd_help(uint8_t argc, const char *argv[])
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Persistent line-editor state for the shell process.
+ * @brief Line-editor state of the shell process.
  *
- * Statically allocated and file-scope rather than a protothread local, because
- * protothread locals do not survive a yield and every field here must persist
- * across the wait at the top of the poll loop.  There is exactly one shell.
+ * File scope: every field persists across the wait at the top of the poll
+ * loop, and a protothread local does not survive a yield.
  */
 static struct {
     char               buf[TIKU_SHELL_LINE_SIZE];
@@ -881,11 +850,12 @@ static struct {
     uint8_t            esc_state;   /**< ANSI CSI decoder state:
                                      *   0 = normal, 1 = saw ESC,
                                      *   2 = saw ESC then '['. */
-    int8_t             hist_age;    /**< History recall position: -1 means
-                                     *   not recalling, 0 = newest entry,
-                                     *   larger = older (see history get). */
-    struct tiku_timer  timer;       /**< Periodic I/O poll timer; posts
-                                     *   TIKU_EVENT_TIMER to this process. */
+    int8_t             hist_age;    /**< Recall position, as passed to
+                                     *   tiku_shell_history_get(): -1 =
+                                     *   not recalling, 0 = newest. */
+    struct tiku_timer  timer;       /**< I/O poll timer, re-armed each pass;
+                                     *   posts TIKU_EVENT_TIMER to this
+                                     *   process. */
 } cli;
 
 /* cli.pos and the tab-completion lengths are uint8_t, so a line must index
@@ -896,15 +866,13 @@ _Static_assert(TIKU_SHELL_LINE_SIZE <= 256,
 
 #if TIKU_SHELL_CMD_HISTORY
 /**
- * @brief Replace the current input line with a recalled history entry.
+ * @brief Replace the input line with an older or a newer history entry.
  *
- * The up/down-arrow behaviour: @p up walks towards older entries, zero towards
- * newer.  Stepping newer past the newest clears the line and resets hist_age to
- * -1; stepping older past the oldest is a no-op.
+ * Erases the line with "\b \b" and echoes the entry from
+ * tiku_shell_history_get().  Stepping newer past the newest clears the line;
+ * stepping older past the oldest changes nothing.
  *
- * @note Erases the held characters with "\b \b", then echoes the entry from
- *       the history ring (tiku_shell_history_get()).
- * @param up  Non-zero to recall an older entry, zero to step newer.
+ * @param up  Non-zero for the up arrow (older), zero for down (newer).
  */
 static void
 shell_history_arrow(uint8_t up)
@@ -955,7 +923,7 @@ shell_history_arrow(uint8_t up)
 #include "tiku_shell_cwd.h"
 #endif
 
-/** @brief Length of a NUL-terminated string (libc-free, byte-bounded). */
+/** @brief Length of a NUL-terminated string shorter than 256 bytes. */
 static uint8_t
 tab_strlen(const char *s)
 {
@@ -981,10 +949,10 @@ tab_has_prefix(const char *s, const char *pfx, uint8_t n)
 }
 
 /**
- * @brief Append up to @p n bytes of @p s to the live line and echo them.
+ * @brief Append up to @p n bytes of @p s to the input line.
  *
- * Mirrors the printable-key path: stores into the line buffer (bounded by
- * TIKU_SHELL_LINE_SIZE) and echoes when the backend wants local echo.
+ * Stops when the line holds TIKU_SHELL_LINE_SIZE - 1 characters, and echoes
+ * each byte when the backend echoes.
  */
 static void
 tab_emit(const char *s, uint8_t n)
@@ -1001,11 +969,10 @@ tab_emit(const char *s, uint8_t n)
 }
 
 /**
- * @brief Fold one candidate into the running match (count + common prefix).
+ * @brief Add one match to the running count and common prefix.
  *
- * Streaming, so completion needs no candidate array: the first match seeds
- * @p first / @p lcp; each later match shrinks @p lcp to the longest prefix
- * still shared with the first.
+ * The first match sets @p first, @p first_dir and @p lcp; each later one
+ * shrinks @p lcp to the prefix it shares with the first.
  */
 static void
 tab_accum(const char *nm, uint8_t is_dir, const char **first,
@@ -1026,15 +993,11 @@ tab_accum(const char *nm, uint8_t is_dir, const char **first,
 }
 
 /**
- * @brief Tab-complete the token at the end of the current line.
+ * @brief Tab-complete the token at the end of the input line.
  *
- * The first token completes against the command table; later tokens complete
- * against the VFS, split into a directory part resolved against the cwd and a
- * leaf prefix whose siblings supply the candidates.
- *
- * @note A unique match is filled in ('/' for a directory, ' ' otherwise); an
- *       ambiguous one extends to the longest common prefix, and a Tab with
- *       nothing left to extend lists the matches and redraws the line.
+ * The first token matches command names, a later one the VFS entries of its
+ * directory.  One match is finished with '/' (a directory) or ' '; several
+ * extend to their common prefix, or else are listed and the line redrawn.
  */
 static void
 shell_tab_complete(void)
@@ -1193,9 +1156,8 @@ TIKU_PROCESS(tiku_shell_process, "CLI");
 /*---------------------------------------------------------------------------*/
 /* PUMP REGISTRY                                                             */
 /*---------------------------------------------------------------------------*/
-/* Static and bounded: a full table is refused at registration
- * (tiku_shell_add_pump() returns -1).  #ifndef so a build with more pumping
- * drivers can raise it. */
+/* Pump table size; tiku_shell_add_pump() returns -1 when it is full.  A
+ * build may override it. */
 #ifndef TIKU_SHELL_PUMP_MAX
 #define TIKU_SHELL_PUMP_MAX 4
 #endif
@@ -1282,9 +1244,9 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
      * shell's output goes there as well. */
     tiku_shell_io_set_backend(&tiku_shell_io_usbcdc);
 #else
-    /* Net-test: the UART is both the local console and the SLIP transport,
-     * so keep it as the default backend now; the telnet backend is installed
-     * on connect (loop below) and reverts to UART on disconnect. */
+    /* Net-test: the UART is the local console and the SLIP transport.  The
+     * loop below installs the telnet backend while a client is connected
+     * and restores the UART when it leaves. */
     tiku_shell_io_set_backend(&tiku_shell_io_uart);
 #endif
 #else
@@ -1325,9 +1287,9 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 #if TIKU_INIT_ENABLE
     /* Init-table entries run here, in the shell's first pass, so each one
      * behaves like a typed command: the parser's command table and the
-     * backend are set up above, and main() has already run the VFS and
-     * driver init.  A TCP-only shell has no backend yet, so their output
-     * is dropped. */
+     * backend are set up above, and main() has run the VFS and driver init
+     * before the scheduler starts.  A TCP-only shell has no backend at this
+     * point, so their output is dropped. */
     tiku_init_run_all();
 #endif
 #if !TIKU_SHELL_TCP_ENABLE || TIKU_SHELL_NET_TEST
@@ -1352,22 +1314,16 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
         tiku_usb_cdc_poll();
 #endif
 
-        /*
-         * Registered pumps, in process context with interrupts enabled.  The
-         * scheduler's idle hook runs inside tiku_atomic_enter() (interrupts
-         * masked), and a USB mass-storage data phase blocks for a whole 64 KB
-         * transfer: that long with interrupts masked stops the tick and the
-         * console, and the debugger cannot halt the CPU.
-         */
+        /* Registered pumps, in process context with interrupts enabled: a
+         * pump can block for a whole USB mass-storage data phase, and the
+         * tick and the console need interrupts meanwhile. */
         shell_run_pumps();
 
 #if TIKU_SHELL_CMD_RULES || TIKU_SHELL_CMD_WATCH || TIKU_SHELL_CMD_BASIC
-        /* A watched VFS node changed: dispatch to the event-side
-         * consumers (rules armed on that node, the live watch view if
-         * it matches, and BASIC's event-driven ON CHANGE), then go
-         * straight back to waiting.  The poll timer is periodic and
-         * keeps running untouched, so input draining, jobs, and
-         * sensor-side rules stay on their tick cadence. */
+        /* A watched VFS node changed: run the event-side consumers (rules
+         * armed on that node, a live watch on it, BASIC's ON CHANGE) and
+         * wait again.  The poll timer stays armed, so input draining, jobs
+         * and sensor-side rules keep their cadence. */
         if (ev == TIKU_EVENT_VFS) {
             const tiku_vfs_node_t *changed = tiku_event_node(ev, data);
 #if TIKU_SHELL_CMD_RULES
@@ -1393,8 +1349,8 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
                  * (the local console this build booted with). */
                 tiku_shell_io_set_backend(&tiku_shell_io_usbcdc);
 #else
-                /* Net-test: the shell still owns the UART (console + SLIP
-                 * transport), so revert to UART rather than going dark. */
+                /* Net-test: back to the UART, the local console and SLIP
+                 * transport. */
                 tiku_shell_io_set_backend(&tiku_shell_io_uart);
 #endif
 #else
@@ -1439,12 +1395,10 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
         tiku_timer_reset(&cli.timer);
 
 #if TIKU_SHELL_TCP_ENABLE && TIKU_SHELL_NET_TEST && TIKU_SHELL_CMD_SLIP
-        /* Net-test telnet: the console wire is the SLIP transport carrying
-         * the telnet TCP, but a connected client makes the TCP backend
-         * active -- so the drain below reads the client, not the wire,
-         * which would starve telnet RX.  Pump the wire here so the telnet
-         * transport keeps flowing; console keystrokes are dropped while
-         * the remote client owns the line editor. */
+        /* Net-test telnet: while a client is connected the drain below
+         * reads the TCP backend, so the wire, whose SLIP carries the
+         * client's TCP, is pumped here.  Text typed on the console meanwhile
+         * goes to the console's text sink, or is dropped. */
         if (tiku_shell_cmd_slip_active() &&
             tiku_shell_io_get_backend() == &tiku_shell_io_tcp) {
             tiku_console_pump();
@@ -1470,10 +1424,9 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 #endif
 
 #if TIKU_SHELL_CMD_BASIC
-            /* BASIC mode owns the console: route every byte to its own line
-             * editor (printable echo, backspace, CR dispatch, Ctrl-C).  The
-             * shell's line editor and command dispatch are bypassed until the
-             * mode exits. */
+            /* An interactive BASIC mode takes every byte for its own line
+             * editor (echo, backspace, CR dispatch, Ctrl-C) until it exits.
+             * A mode driven from a stream leaves the keys to the shell. */
             if (tiku_basic_mode_active() && !tiku_basic_mode_streamed()) {
                 tiku_basic_mode_feed_char(ch);
                 continue;
@@ -1516,8 +1469,8 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
                 cli.pos      = 0;
                 cli.hist_age = -1;
                 /* A command still running (ping, ntp, dns, mqtt, BASIC mode)
-                 * gets its prompt back when it finishes, so none is printed
-                 * now. */
+                 * prints the prompt when it finishes, so none is printed
+                 * here. */
                 {
                     uint8_t streaming = 0;
 #if TIKU_SHELL_CMD_PING
@@ -1541,11 +1494,10 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
                     }
 #endif
 #if TIKU_SHELL_CMD_BASIC
-                    /* `basic` entered its own mode and printed the BASIC
-                     * prompt; don't also print the shell prompt.  A mode
-                     * driven from a stream prints its prompt down the stream
-                     * and has not taken this line, so the shell's own prompt
-                     * still ends a command here. */
+                    /* `basic` has entered its mode and printed the BASIC
+                     * prompt.  A mode driven from a stream prints its prompt
+                     * down the stream and leaves this line to the shell,
+                     * whose prompt follows. */
                     if (tiku_basic_mode_active() &&
                         !tiku_basic_mode_streamed()) {
                         streaming = 1;
@@ -1566,9 +1518,9 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
                 }
 
             } else if (ch == 0x03) {
-                /* Ctrl+C — cancel auto-firing jobs/rules, abort the
-                 * current line, and reprint the prompt.  The escape
-                 * hatch when an `every` job is flooding the shell. */
+                /* Ctrl+C: delete every scheduled job and rule, drop the
+                 * line and reprint the prompt.  This also stops an `every`
+                 * job whose output floods the shell. */
 #if TIKU_SHELL_CMD_JOBS
                 tiku_shell_jobs_clear();
 #endif
@@ -1586,8 +1538,9 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
                 shell_tab_complete();
 
             } else if (cli.pos < TIKU_SHELL_LINE_SIZE - 1) {
-                /* Printable character — store and optionally echo.
-                 * Typing past a recalled line exits recall mode. */
+                /* Any other byte is stored while the line has room, and
+                 * echoed when the backend echoes.  Typing after a recalled
+                 * line ends the recall. */
                 cli.hist_age = -1;
                 cli.buf[cli.pos++] = (char)ch;
                 if (tiku_shell_io_has_echo()) {
@@ -1608,14 +1561,14 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
         tiku_shell_rules_tick();
 #endif
 #if TIKU_SHELL_CMD_WATCH
-        /* Service the live watch: interval re-reads in sensor
-         * mode, idempotent re-subscribe (self-heal) in event
-         * mode. */
+        /* Service the live watch: interval re-reads in sensor mode; in
+         * event mode a re-subscribe, which restores a watch dropped by the
+         * rules engine's re-arm. */
         tiku_shell_cmd_watch_tick();
 #endif
 #if TIKU_SHELL_CMD_BASIC
         /* Advance a running BASIC program by one batch of lines (no-op at the
-         * REPL prompt), then -- if the mode just exited (BYE, Ctrl-C, or a
+         * REPL prompt), then -- if the mode has exited (BYE, Ctrl-C, or a
          * headless `basic run` finishing) -- restore the shell's own prompt. */
         tiku_basic_mode_tick();
         if (tiku_basic_mode_take_exit()) {

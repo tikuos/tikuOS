@@ -7,9 +7,8 @@
  *
  * tiku_shell_cmd_once.c - "once" command implementation
  *
- * Thin wrapper over tiku_shell_jobs_schedule_argv() that registers a
- * single-shot job.  All parsing, validation, and diagnostics live in
- * the jobs subsystem; this file selects the ONCE job type.
+ * Passes its arguments to tiku_shell_jobs_schedule_argv() with
+ * TIKU_SHELL_JOB_ONCE; the jobs subsystem parses them and prints any error.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

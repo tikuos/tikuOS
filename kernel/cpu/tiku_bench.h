@@ -23,7 +23,10 @@
 typedef uint32_t tiku_bench_time_t;
 
 /**
- * @brief Select and initialize the best reliable measurement backend.
+ * @brief Select the measurement backend.
+ *
+ * RP2350 and Ambiq enable the DWT cycle counter and select it when it
+ * advances; every other case selects the htimer.
  */
 void tiku_bench_init(void);
 
@@ -35,16 +38,17 @@ void tiku_bench_init(void);
 tiku_bench_time_t tiku_bench_now(void);
 
 /**
- * @brief Elapsed counter units between two reads, wrap-safe.
+ * @brief Elapsed counter units between two reads, across a counter wrap.
  *
  * @param start  Value from the earlier tiku_bench_now()
  * @param end    Value from the later tiku_bench_now()
- * @return Elapsed units, correct across a single counter wrap.
+ * @return Elapsed units modulo the counter width: 32 bits on the DWT
+ *         backend, 16 bits on the htimer backend.
  */
 uint32_t tiku_bench_delta(tiku_bench_time_t start, tiku_bench_time_t end);
 
 /*---------------------------------------------------------------------------*/
-/* METADATA — machine-readable labels for TikuBench [BM] markers             */
+/* METADATA                                                                  */
 /*---------------------------------------------------------------------------*/
 
 /**

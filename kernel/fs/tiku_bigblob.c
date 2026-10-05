@@ -16,13 +16,14 @@
 #include <kernel/memory/tiku_nvm_mirror.h>
 
 /*
- * The header is erased first and written last.  Until its magic word lands
- * the slot reads as empty, so a power cut during the payload write leaves no
- * blob rather than a mix of old and new; the CRC beside the magic lets a
- * reader check the payload.
+ * The header is erased first and written last, its magic word after the rest.
+ * Until the magic lands the slot reads as empty, so a power cut during the
+ * payload write leaves no blob; the CRC beside the magic lets a reader check
+ * the payload.
  */
 #define BIGBLOB_MAGIC   0x424C4232UL      /* "BLB2" */
 
+/** @brief A slot's header as stored at the start of its first block. */
 typedef struct {
     uint32_t magic;
     uint32_t len;
@@ -50,9 +51,9 @@ static const bigblob_hdr_t *hdr_at(tiku_nvm_backend_t *be, uint32_t slot_off)
     if (h->magic != BIGBLOB_MAGIC) {
         return NULL;
     }
-    /* A length that runs off the end means a header from a different layout,
-     * not a blob; refusing here keeps every caller's pointer arithmetic
-     * inside the medium. */
+    /* A zero length, a length that runs off the end of the medium or a name
+     * without a terminator returns NULL, which keeps every caller's pointer
+     * arithmetic inside the medium. */
     if (h->len == 0 ||
         h->len > (be->size - slot_off - TIKU_BIGBLOB_HDR_BYTES) ||
         memchr(h->name, '\0', sizeof(h->name)) == NULL) {
@@ -64,7 +65,8 @@ static const bigblob_hdr_t *hdr_at(tiku_nvm_backend_t *be, uint32_t slot_off)
 /** @brief Payload bytes erased and programmed per step: one erase sector. */
 #define BIGBLOB_STEP  4096u
 
-/** @brief Validate ranges without overflowing the 32-bit cursor arithmetic. */
+/** @brief Check a write's arguments and range without 32-bit overflow;
+ *  TIKU_BIGBLOB_OK, TIKU_BIGBLOB_ERR_PARAM or TIKU_BIGBLOB_ERR_SPACE. */
 static int writable(tiku_nvm_backend_t *be, uint32_t off,
                     const char *name, const void *src, uint32_t len)
 {
@@ -126,8 +128,8 @@ int tiku_bigblob_open(tiku_nvm_backend_t *be, uint32_t slot_off,
     w->crc      = 0xFFFFFFFFU;
     memcpy(w->name, name, strlen(name));
 
-    /* Unpublish first: from here the slot reads as empty, so a power cut
-     * before the header is rewritten leaves no blob rather than a splice. */
+    /* Unpublish first: from here the slot reads as empty, and a power cut
+     * before the header is rewritten leaves no blob. */
     if (be->erase(be, slot_off, TIKU_BIGBLOB_HDR_BYTES) != 0) {
         return TIKU_BIGBLOB_ERR_IO;
     }
@@ -156,9 +158,9 @@ int tiku_bigblob_step(tiku_bigblob_wr_t *w, uint32_t *done)
             w->active = 0U;
             return TIKU_BIGBLOB_ERR_IO;
         }
-        /* The source's CRC grows with each chunk, so the last step reads the
-         * medium once; a second pass over a model-sized source would hold the
-         * pump past the hang detector's limit. */
+        /* The source's CRC is accumulated per chunk, so the publish step
+         * reads only the medium.  One pass over a model-sized payload is the
+         * most a step can take within the hang detector's limit. */
         w->crc = tiku_nvm_crc32_update(w->crc, &w->src[w->done], n);
         w->done += n;
         if (done != NULL) {
@@ -167,8 +169,8 @@ int tiku_bigblob_step(tiku_bigblob_wr_t *w, uint32_t *done)
         return 1;
     }
 
-    /* Compare with the source: checksumming only the medium would silently
-     * accept a misprogrammed payload as the intended object. */
+    /* publish() compares the medium with the source's CRC: a misprogrammed
+     * payload returns TIKU_BIGBLOB_ERR_CRC and stays unpublished. */
     {
         int rc = publish(w->be, w->slot_off, w->name, w->crc ^ 0xFFFFFFFFU,
                          w->len);
@@ -190,7 +192,7 @@ int tiku_bigblob_write(tiku_nvm_backend_t *be, uint32_t slot_off,
     if (rc != TIKU_BIGBLOB_OK) return rc;
     payload = slot_off + TIKU_BIGBLOB_HDR_BYTES;
 
-    /* 1. Unpublish.  From here until the last step the slot reads as empty. */
+    /* 1. Unpublish.  From here until publish() the slot reads as empty. */
     if (be->erase(be, slot_off, TIKU_BIGBLOB_HDR_BYTES) != 0) {
         return TIKU_BIGBLOB_ERR_IO;
     }

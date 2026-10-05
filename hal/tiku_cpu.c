@@ -41,9 +41,9 @@
 #endif
 #include <stdint.h>
 
-/* Cortex-M PRIMASK helpers, written out rather than taken from CMSIS so this
- * file needs no vendor header.  The instructions are the same on every
- * Cortex-M port: M4F (Apollo4), M33, M55 and M85. */
+/* Cortex-M PRIMASK helpers in inline assembly; this file includes no vendor
+ * header.  The instructions are the same on every Cortex-M port: M4F
+ * (Apollo4), M33, M55 and M85. */
 
 /** @brief Read PRIMASK: 0 when interrupts are enabled, 1 when masked. */
 static inline uint32_t tiku_arm_get_primask(void) {
@@ -103,9 +103,7 @@ void tiku_atomic_enter(void) {
 #elif defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
       defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
       defined(PLATFORM_RA8P1)
-  /* PRIMASK = 0 means IRQs enabled; PRIMASK = 1 means masked. The bit is
-   * snapshotted on the outermost entry and restored on the outermost
-   * exit, mirroring the MSP430 GIE handling above. */
+  /* PRIMASK is 0 while IRQs are enabled and 1 while they are masked. */
   uint32_t pm = tiku_arm_get_primask();
   tiku_arm_disable_irq();
   if (tiku_atomic_nesting == 0) {
@@ -113,8 +111,8 @@ void tiku_atomic_enter(void) {
   }
   tiku_atomic_nesting++;
 #elif defined(PLATFORM_ESP32C61)
-  /* mstatus.MIE plays GIE's part: cleared in one instruction that also
-   * returns what it was. */
+  /* tiku_esp32c61_mie_off() clears mstatus.MIE and returns its previous
+   * value in one instruction. */
   uint32_t mie = tiku_esp32c61_mie_off();
   if (tiku_atomic_nesting == 0) {
     tiku_atomic_gie_saved = (mie != 0);
@@ -233,8 +231,9 @@ unsigned long tiku_cpu_freq_available(unsigned int index) {
     };
     return index < sizeof rates / sizeof rates[0] ? rates[index] : 0UL;
 #elif defined(PLATFORM_ESP32C61)
-    /* The crystal divided, then the PLL divided: every rate the tree makes,
-     * from the lowest the build offers. */
+    /* Every rate the clock tree makes, from the lowest the build offers:
+     * the 40 MHz crystal divided by 4, 2 or 1, and the 160 MHz PLL clock
+     * divided by 2 or 1. */
     static const unsigned long rates[] = {
         10000000UL, 20000000UL, 40000000UL, 80000000UL, 160000000UL
     };
@@ -245,7 +244,9 @@ unsigned long tiku_cpu_freq_available(unsigned int index) {
     index += first;
     return index < sizeof rates / sizeof rates[0] ? rates[index] : 0UL;
 #elif defined(PLATFORM_MSP430)
-    /* Keep the board's 8 MHz UART/peripheral clock untouched. */
+    /* With SMCLK at 8 MHz, MCLK is the 8 MHz DCO divided by 1, 2, 4 or 8
+     * and SMCLK stays at 8 MHz; any other SMCLK offers only the current
+     * rate. */
     if (tiku_cpu_smclk_hz() != 8000000UL)
         return index == 0 ? tiku_cpu_mclk_hz() : 0UL;
     return index < 4 ? (1000000UL << index) : 0UL;
@@ -462,12 +463,11 @@ tiku_cpu_idle_enter_t tiku_cpu_idle_hook(tiku_cpu_idle_mode_t mode) {
     switch (mode) {
         case TIKU_CPU_IDLE_LIGHT:
         case TIKU_CPU_IDLE_DEEP:
-            /* Both map to a plain WFI on Cortex-M33: SysTick / TIMER /
-             * UART RX still wake the core. */
+            /* Plain WFI on the Cortex-M33: SysTick, TIMER and UART RX
+             * interrupts wake the core. */
             return tiku_cpu_boot_rp2350_power_wfi_enter;
         case TIKU_CPU_IDLE_DEEPEST:
-            /* WFI as well: dormant mode, which stops the clocks, is not
-             * used. */
+            /* WFI as well: this port enters no state deeper than WFI. */
             return tiku_cpu_boot_rp2350_power_wfi_enter;
         case TIKU_CPU_IDLE_OFF:
         default:
@@ -503,8 +503,7 @@ tiku_cpu_idle_enter_t tiku_cpu_idle_hook(tiku_cpu_idle_mode_t mode) {
         case TIKU_CPU_IDLE_DEEP:
         case TIKU_CPU_IDLE_DEEPEST:
             /* Sleep mode (WFI): SysTick, console RX and an armed htimer all
-             * wake the core.  Software Standby is not used: it stops the
-             * clocks, and only wake sources set in the ICU end it. */
+             * wake the core. */
             return tiku_cpu_boot_ra8p1_power_wfi_enter;
         case TIKU_CPU_IDLE_OFF:
         default:
@@ -518,9 +517,9 @@ tiku_cpu_idle_enter_t tiku_cpu_idle_hook(tiku_cpu_idle_mode_t mode) {
             return tiku_cpu_boot_esp32c61_power_wfi_enter;
         case TIKU_CPU_IDLE_DEEP:
         case TIKU_CPU_IDLE_DEEPEST:
-            /* PMU light sleep to the next timer deadline: timers and console
-             * bytes end it and other interrupts wait, so it is opt-in rather
-             * than the default mode. */
+            /* PMU light sleep until the next timer deadline: a timer or a
+             * console byte ends it, and any other interrupt waits for the
+             * next deadline. */
             return tiku_esp32c61_light_idle;
         case TIKU_CPU_IDLE_OFF:
         default:
@@ -590,7 +589,8 @@ unsigned int tiku_cpu_idle_mode_wakes(tiku_cpu_idle_mode_t mode) {
             return IDLE_WAKES_ALL;
     }
 #else
-    /* Every mode is a WFI variant: any enabled interrupt wakes the core. */
+    /* WFI in every mode, or no sleep at all on STM32N6: any enabled
+     * interrupt wakes the core. */
     (void)mode;
     return IDLE_WAKES_ALL;
 #endif

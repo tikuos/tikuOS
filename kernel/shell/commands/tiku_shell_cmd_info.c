@@ -7,8 +7,8 @@
  *
  * tiku_shell_cmd_info.c - "info" command implementation
  *
- * Prints device name, CPU frequency, uptime, clock tick rate,
- * event queue usage, and active process count.
+ * Prints the device name, CPU frequency, uptime, clock tick rate, event
+ * queue use and the number of registered processes.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

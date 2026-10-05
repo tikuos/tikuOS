@@ -7,15 +7,16 @@
  *
  * tiku_basic_import.inl - IMPORT: merge a module file of SUBs into the program.
  *
- * A merge, not a replace: the module renumbers into a free band above the
- * program and the RENUM machinery rewrites its internal references.  The
- * module is checked before anything is stored; a failure changes nothing.
+ * The module's lines renumber into a free band above the program's own, and
+ * the RENUM machinery rewrites their internal references.  The module is
+ * checked before anything is stored; a failure changes nothing.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* Modules are files of SUBs, so IMPORT requires the SUB machinery; builds
- * without it (the lean/FRAM tiers) get a clear message instead of a load. */
+/* Modules are files of SUBs, so IMPORT requires the SUB machinery; without
+ * it (the default on MSP430 and the host) IMPORT reports "IMPORT needs SUB
+ * support". */
 #if !TIKU_BASIC_SUBS_ENABLE
 
 /** @brief IMPORT without SUB support: report that it is unavailable. */
@@ -41,8 +42,9 @@ exec_import(const char **q)
 /**
  * @brief IMPORT "path": merge a module file of SUBs into the program.
  *
- * The module may hold only SUB blocks and comments, with names not yet
- * defined; its lines land at the next multiple of 1000 above the program.
+ * The module may hold only SUB blocks and comments, with names the program
+ * does not define; its lines land at the next multiple of 1000 above the
+ * program.
  */
 static void
 exec_import(const char **q)
@@ -69,7 +71,7 @@ exec_import(const char **q)
     }
     skip_ws(q);
     if (parse_path_literal(q, path, sizeof(path)) != 0) {
-        basic_error = 0;               /* message already printed; clean REPL */
+        basic_error = 0;               /* reported; the REPL carries on */
         return;
     }
 

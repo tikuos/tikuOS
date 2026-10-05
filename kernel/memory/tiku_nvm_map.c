@@ -9,7 +9,7 @@
  *
  * Declares the config region's array, sized by the device header and placed
  * by the linker, and a static table for lookup by ID.  The backing is
- * TIKU_DURABLE on every platform, so no region is silently volatile.
+ * TIKU_DURABLE, so it survives a power cycle on every platform.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

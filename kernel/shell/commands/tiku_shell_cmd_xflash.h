@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_xflash.h - "xflash" command: external NOR over XSPI.
  *
- * Identity, a sector dump, an erase/program/verify round trip on a scratch
- * sector near the top of the device, and `write`, which programs an image
- * received over the console.
+ * Identity, a 16-byte dump at an address, an erase/program/verify round trip
+ * on a scratch sector near the top of the device, and `write`, which programs
+ * an image received over the console.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

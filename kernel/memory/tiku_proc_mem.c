@@ -32,8 +32,8 @@
  * @brief Create an isolated memory context for a process.
  *
  * Carves an SRAM and/or NVM arena from the tier allocator, either size zero to
- * skip that tier; AUTO puts each in its natural tier.  If the second arena
- * fails the first is rolled back, so a caller never sees a half-built context.
+ * skip that tier; AUTO puts each in its natural tier.  If the NVM arena fails,
+ * the SRAM arena is destroyed and the context stays inactive.
  *
  * @param pmem       Context to initialize
  * @param pid        Owning process identifier (used as arena id)
@@ -152,9 +152,9 @@ tiku_mem_err_t tiku_proc_mem_create_owned(tiku_proc_mem_t *pmem, uint8_t pid,
 /**
  * @brief Destroy a process memory context.
  *
- * Flushes and destroys every attached cache first, so a dirty page is persisted
- * rather than silently lost, then resets and destroys the SRAM, NVM and HIFRAM
- * arenas, releasing their backing.
+ * Flushes and destroys every attached cache first, so dirty cache contents
+ * reach NVM, then resets and destroys the SRAM, NVM and HIFRAM arenas,
+ * releasing their backing.
  *
  * @param pmem  Context to destroy
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if pmem is NULL
@@ -209,9 +209,8 @@ tiku_mem_err_t tiku_proc_mem_destroy(tiku_proc_mem_t *pmem)
 /**
  * @brief Allocate within a process context (bounds-checked).
  *
- * SRAM and NVM go straight to their arena; HIFRAM returns NULL unless one was
- * attached, so a placement bug surfaces rather than falling through to NVM.
- * AUTO uses only arenas backed by SRAM or HIFRAM.
+ * SRAM and NVM go straight to their arena; HIFRAM returns NULL unless a
+ * HIFRAM arena is attached.  AUTO uses only arenas backed by SRAM or HIFRAM.
  *
  * @param pmem  Active process memory context
  * @param tier  Memory tier (SRAM, NVM, HIFRAM, or AUTO)
@@ -245,7 +244,7 @@ void *tiku_proc_alloc(tiku_proc_mem_t *pmem,
         return NULL;
 
     case TIKU_MEM_AUTO:
-        /* Use local capacity and inspect backing tiers, not field names. */
+        /* An arena qualifies by its backing tier, whichever field holds it. */
 #if TIKU_TIER_AUTO_HIFRAM_THRESHOLD > 0
         if (size >= TIKU_TIER_AUTO_HIFRAM_THRESHOLD &&
             pmem->hifram_arena.active &&
@@ -286,9 +285,9 @@ void *tiku_proc_alloc(tiku_proc_mem_t *pmem,
 /**
  * @brief Attach a HIFRAM arena to an existing process context.
  *
- * A lazy opt-in kept out of create(), so a process that never touches HIFRAM
- * neither pays for it nor depends on a tier small parts lack.  Re-attaching is
- * rejected: overwriting the arena would strand its sub-buffer unreclaimably.
+ * A lazy opt-in, separate from create(): a process that never touches HIFRAM
+ * does not depend on the tier.  Re-attaching returns TIKU_MEM_ERR_INVALID,
+ * since overwriting the arena would strand its backing.
  *
  * @param pmem  Active process memory context
  * @param size  HIFRAM arena capacity in bytes
@@ -323,8 +322,8 @@ tiku_mem_err_t tiku_proc_mem_attach_hifram(tiku_proc_mem_t *pmem,
 /**
  * @brief Attach a cached region to a process context.
  *
- * Records ownership of an already-created region -- it does not create one --
- * so destroying the context flushes and destroys every attached cache.
+ * Records ownership of an already-created region, so destroying the context
+ * flushes and destroys every attached cache.
  *
  * @param pmem    Active process memory context
  * @param region  Cached region to attach (must be active)
@@ -356,9 +355,9 @@ tiku_mem_err_t tiku_proc_mem_attach_cache(tiku_proc_mem_t *pmem,
 /**
  * @brief Get statistics for a process arena.
  *
- * Fills total, used, peak and allocation count for one tier's arena -- the
- * per-process accounting hook.  AUTO is not queryable, and a HIFRAM query with
- * no arena attached returns NOT_FOUND, so "0 used" differs from "no arena".
+ * Fills total, used, peak and allocation count for one tier's arena.  AUTO
+ * returns TIKU_MEM_ERR_INVALID, and a HIFRAM query with no arena attached
+ * returns TIKU_MEM_ERR_NOT_FOUND.
  *
  * @param pmem   Active process memory context
  * @param tier   Which arena to query (SRAM, NVM, or HIFRAM; not AUTO)

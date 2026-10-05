@@ -7,18 +7,17 @@
  *
  * tiku_basic_https_roots.inl - the HTTPS trust store, loaded from /data.
  *
- * Certificates are data with expiry dates, so the CA roots live in
- * /data/roots.bin rather than .rodata.  There is no embedded fallback: a
- * board without the file refuses HTTPS by name instead of guessing.
+ * The CA roots live in /data/roots.bin, packed by tools/gen_roots.py, so a
+ * refreshed bundle needs no firmware change.  There is no embedded set: a
+ * board without the file refuses HTTPS with a message that names it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "kernel/memory/tiku_nvm_mirror.h"   /* tiku_nvm_crc32 */
 
-/** @brief Store file holding the packed trust store.  Flat name: a "basic/"
- *  prefix would collide with the static /data/basic node and list as a
- *  phantom folder. */
+/** @brief Store file holding the packed trust store.  The name must not
+ *  start with "basic/", the path of the static /data/basic node. */
 #define BASIC_HTTPS_ROOTS_FILE   "roots.bin"
 
 #define BASIC_HTTPS_ROOTS_MAGIC  0x54535254u   /* 'TRST' */
@@ -53,7 +52,7 @@ basic_https_rd32(const uint8_t *p)
  *
  * The packed table stores offsets into the DER blob, because the blob's
  * address is known only once the store has mapped it; this turns them into
- * the pointer pairs the verify kit wants.
+ * the pointer pairs the verify kit takes.
  *
  * @param out    Receives the fixed-up table (points at static storage).
  * @param nroots Receives the root count.

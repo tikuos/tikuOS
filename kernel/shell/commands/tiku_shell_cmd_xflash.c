@@ -7,8 +7,8 @@
  *
  * tiku_shell_cmd_xflash.c - "xflash" command: external NOR over XSPI.
  *
- * The test subcommand erases one sector, so it works on a scratch sector at
- * the top of the device rather than anywhere a boot image would live.
+ * STM32N6 only; other platforms print that there is no XSPI flash.  `test`
+ * erases one scratch sector near the top of the device.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,8 +24,8 @@
 #if defined(PLATFORM_STM32N6)
 #include <arch/stm32n6/tiku_xspi_arch.h>
 
-/* Sits below the durable mirror, so an erase test cannot destroy state that
- * is meant to survive; both are far from a boot image at offset 0. */
+/* The sector directly below the durable mirror, far above a boot image at
+ * offset 0, so the test's erase touches neither. */
 #define XFLASH_SCRATCH  TIKU_XSPI_SCRATCH_ADDR
 
 /** @brief Human-readable form of an XSPI result. */
@@ -63,8 +63,8 @@ static void xflash_id(void)
 /**
  * @brief Erase, program and verify the scratch sector.
  *
- * Checks that the erase set the bytes to 0xFF before programming, so a
- * failure says which half of the cycle broke.
+ * Checks that the first 64 bytes read 0xFF after the erase, then programs a
+ * pattern and reads it back; a failure prints the step that failed.
  */
 static void xflash_test(void)
 {
@@ -121,7 +121,7 @@ static void xflash_test(void)
                  (unsigned)sizeof(buf));
 }
 
-/** @brief Hex-dump the first bytes of a sector. */
+/** @brief Hex-dump the 16 bytes at @p addr. */
 static void xflash_dump(uint32_t addr)
 {
     uint8_t buf[16];
@@ -138,9 +138,8 @@ static void xflash_dump(uint32_t addr)
     SHELL_PRINTF("\n");
 }
 
-/* Staging lives in the free SRAM above the image rather than in .bss: an
- * install buffer big enough for a whole firmware image would otherwise cost
- * that much memory permanently for a command that runs once. */
+/* `write` stages the image in the free SRAM between _end and the stack,
+ * less XFLASH_STACK_RESERVE; no .bss buffer is reserved for it. */
 extern uint32_t _end;
 extern uint32_t __stack;
 
@@ -166,9 +165,9 @@ static int xflash_getc_timeout(void)
 /**
  * @brief Receive an image over the console and program it into the flash.
  *
- * The whole image is staged in RAM first, because reading and programming
- * cannot interleave: a page program outlasts the 87 us between bytes at this
- * line rate, and the UART has nowhere to hold the difference.
+ * The whole image is staged in RAM before the first erase.  The UART is
+ * polled, with only its receive FIFO to hold bytes, and a page program
+ * outlasts the 87 us one byte takes at 115200 baud.
  *
  * @param addr  Byte offset into the device
  * @param len   Image length in bytes
@@ -222,7 +221,7 @@ static void xflash_write(uint32_t addr, uint32_t len)
         return;
     }
 
-    /* Read back through the flash rather than trusting the write. */
+    /* Checksum the bytes read back from the flash. */
     uint32_t back = 0u;
     for (uint32_t off = 0u; off < len; off += 256u) {
         uint8_t tmp[256];

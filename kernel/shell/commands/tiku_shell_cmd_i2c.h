@@ -18,9 +18,9 @@
 /**
  * @brief "i2c" command -- master-mode bus operations.
  *
- * `scan` lists what ACKs an address-only probe of 0x08..0x77; `read <addr>
- * <count>` prints hex bytes; `write <addr> <byte>...` sends up to 16 bytes
- * (TIKU_SHELL_I2C_MAX_BYTES).  The bus initialises at 100 kHz on first use.
+ * `scan` lists each address in 0x08..0x77 that answers tiku_i2c_probe();
+ * `read <addr> <count>` prints hex bytes; `write <addr> <byte>...` sends up to
+ * 16.  Every subcommand first initialises the bus at 100 kHz.
  *
  * @note On MSP430 the 8-token argv fits 5 write bytes; the parser drops any
  *       further tokens without an error.

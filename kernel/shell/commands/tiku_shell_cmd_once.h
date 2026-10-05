@@ -16,10 +16,11 @@
 #include <stdint.h>
 
 /**
- * @brief "once" command — schedule a command to run a single time.
+ * @brief "once" command: `once <seconds> <command...>` runs a command once.
  *
- * Joins the remaining tokens with single spaces and stores them as a one-shot
- * job firing at now + seconds.  The slot is reclaimed after dispatch.
+ * Joins argv[2..] with single spaces and schedules it as a one-shot job due
+ * <seconds> (1 to 65535) from now; the job's slot is freed when it fires.
+ * Success prints nothing, and `jobs` lists the job.
  *
  * @param argc  Argument count
  * @param argv  Argument vector

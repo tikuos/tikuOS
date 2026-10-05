@@ -16,9 +16,9 @@
 #include <kernel/memory/tiku_mem.h>       /* TIKU_RETAINED */
 #include <hal/tiku_compiler.h>            /* TIKU_WEAK */
 
-/* Set by call_process() to the thread currently on the CPU, cleared to NULL
- * between dispatches -- so a non-NULL value in the tick ISR is the process
- * that was running (and, if stalled, the culprit). */
+/* call_process() sets this to the process it runs and clears it to NULL when
+ * the thread returns, so a non-NULL value seen by the tick ISR is the process
+ * holding the CPU. */
 extern struct tiku_process *tiku_current_process;
 
 #define TIKU_HANG_MAGIC    0x484E4721u   /* "HNG!" */
@@ -38,9 +38,9 @@ struct tiku_hang_rec {
  */
 static TIKU_RETAINED struct tiku_hang_rec tiku_hang_warm;
 
-/* This boot's view, captured by tiku_hang_boot_init() (plain .bss, zeroed at
- * boot).  Reads go here so the record stays visible all boot even after the
- * warm copy is wiped for one-shot semantics. */
+/* This boot's copy of the record, in .bss.  tiku_hang_boot_init() fills it
+ * before wiping the warm record; every reader below uses this copy, which
+ * lasts until tiku_hang_clear() or the next reset. */
 static struct tiku_hang_rec tiku_hang_boot;
 
 /* Detector state (per boot). */
@@ -68,8 +68,8 @@ int8_t tiku_hang_detect_step(void)
     const struct tiku_process *cur = tiku_current_process;
 
     /* Progress (heartbeat moved) or nobody on the CPU (idle) -> not a hang.
-     * The idle case is why a sleeping system is never flagged: between
-     * dispatches tiku_current_process is NULL. */
+     * A sleeping system is never flagged: between dispatches
+     * tiku_current_process is NULL. */
     if (cur == NULL || tiku_hang_hb != tiku_hang_seen) {
         tiku_hang_seen  = tiku_hang_hb;
         tiku_hang_stall = 0;
@@ -136,10 +136,10 @@ void tiku_hang_boot_init(void)
 }
 
 /**
- * @brief Whether a valid hang record survived into this boot.
+ * @brief Whether this boot's copy holds a hang record.
  *
- * @return Non-zero if the warm-boot record captured at boot carries the
- *         expected magic (the previous boot recorded a hang culprit).
+ * @return Non-zero when the previous boot recorded a culprit and
+ *         tiku_hang_clear() has not run since
  */
 static uint8_t tiku_hang_have(void)
 {
@@ -174,8 +174,9 @@ uint8_t tiku_hang_is_culprit(const struct tiku_process *p)
         tiku_hang_boot.name[0] == '\0') {
         return 0u;
     }
-    /* Match by name: pids are reassigned across a reboot, names are the
-     * stable identity.  Bounded to the (possibly truncated) recorded name. */
+    /* Match by name: pids are reassigned across a reboot.  A recorded name of
+     * TIKU_HANG_NAMELEN - 1 characters may be a truncation, and matches any
+     * name that starts with it. */
     for (i = 0u; i < (TIKU_HANG_NAMELEN - 1u); i++) {
         if (p->name[i] != tiku_hang_boot.name[i]) {
             return 0u;
@@ -193,7 +194,7 @@ uint8_t tiku_hang_is_culprit(const struct tiku_process *p)
 
 TIKU_WEAK void tiku_hang_arch_reset(void)
 {
-    /* No arch reset wired: spin so the failure is contained (a real hardware
-     * watchdog, where present, still catches it) rather than continuing. */
+    /* Linked when the port defines no reset: it spins, and a running
+     * hardware watchdog resets the chip. */
     for (;;) { }
 }

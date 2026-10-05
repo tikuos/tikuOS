@@ -32,9 +32,9 @@ basic_session_begin(void)
         SHELL_PRINTF("? basic: memory reconstruction in progress\n");
         return -1;
     }
-    /* Register the native builtin words once, before any dispatch can reach
-     * the registry fallthroughs.  Extensions are firmware config, not session
-     * state, so they live across sessions; the guard makes re-entry a no-op. */
+    /* Register the native builtin words at the first session, before any
+     * dispatch reaches the registry fallthroughs.  Registrations outlive the
+     * session, and later sessions skip this block. */
     {
         static uint8_t ext_registered;
         if (!ext_registered) {
@@ -65,35 +65,20 @@ basic_session_begin(void)
     return 0;
 }
 
-/*---------------------------------------------------------------------------*/
-/* INTERACTIVE REPL                                                          */
-/*---------------------------------------------------------------------------*/
-
-/*
- * The interactive REPL is a non-blocking mode of the shell process
- * (tiku_basic_mode_enter and the tiku_basic_mode_* poll-loop hooks in
- * tiku_basic_mode.inl), so the scheduler stays live for the whole BASIC
- * session.  The `basic` command dispatches to tiku_basic_mode_enter().
- */
+/* The interactive REPL is the shell mode in tiku_basic_mode.inl; the `basic`
+ * command calls tiku_basic_mode_enter(). */
 
 /*---------------------------------------------------------------------------*/
 /* SAVED-PROGRAM AUTORUN                                                     */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Load the saved program and RUN it to completion (blocking).
- *
- * `basic run <path>` reaches this after storing the file as the saved
- * program; `basic run` goes through tiku_basic_mode_run_saved() instead.
- */
 void
 tiku_basic_autorun(void)
 {
-    /* Refuse re-entry while an interactive BASIC session is live: a scheduled
-     * `basic run <path>` job reaches here (jobs and rules tick before the
-     * BASIC mode tick), and would otherwise reset interpreter state, overwrite
-     * the in-memory program and drive a blocking run on top of the user's
-     * session.  At boot no mode is active, so the check passes. */
+    /* Return while a BASIC session is live: a scheduled `basic run <path>`
+     * job reaches here (jobs and rules tick before the BASIC mode tick), and
+     * continuing would reset interpreter state, overwrite the in-memory
+     * program and run a blocking program on top of the session. */
     if (basic_mode_on) {
         return;
     }
@@ -111,15 +96,6 @@ tiku_basic_autorun(void)
 /* EMBEDDED-FIRMWARE AUTORUN (BASIC_PROGRAM=foo.bas)                         */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Parse a multi-line BASIC source string and RUN the result.
- *
- * Walks @p source line by line through process_line(): numbered lines are
- * stored, un-numbered direct commands execute as at the REPL.  exec_run() then
- * fires once unless the source already issued an explicit `RUN`.
- *
- * @param source NUL-terminated multi-line BASIC source ('\n' breaks).
- */
 void
 tiku_basic_run_source(const char *source)
 {
@@ -144,8 +120,8 @@ tiku_basic_run_source(const char *source)
                 memcpy(line_buf, line_start, len);
                 line_buf[len] = '\0';
                 {
-                    /* Detect un-numbered RUN so as to suppress the
-                     * implicit auto-RUN below. */
+                    /* An un-numbered RUN line suppresses the implicit RUN
+                     * below. */
                     const char *t = line_buf;
                     while (*t == ' ' || *t == '\t') t++;
                     if ((to_upper(t[0]) == 'R') &&
@@ -164,9 +140,8 @@ tiku_basic_run_source(const char *source)
         }
     }
 
-    /* Auto-RUN unless the source already issued one, so a plain numbered
-     * .bas file runs as it is; a source can also put `RUN` or other direct
-     * commands inline. */
+    /* RUN once unless the source issued its own RUN: a file of numbered
+     * lines runs as it is. */
     if (!saw_run) {
         exec_run();
     }

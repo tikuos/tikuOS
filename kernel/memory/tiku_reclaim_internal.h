@@ -101,7 +101,7 @@ struct tiku_process;
  * @brief Exit hook: cancel the process's tickets and settle a gated exit.
  *
  * A consented exit completes the owner's PREPARE.  Any other exit of a gated
- * process faults the job, abandoning it first if not yet committed.
+ * process faults the job, abandoning it first when it has not committed.
  *
  * @return Non-zero when the coordinator takes over the exit, so supervision
  *         does not restart the process

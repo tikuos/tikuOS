@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_bleadv.c - "bleadv" command: BLE beacon, scan and link tests.
  *
- * Beacon and scan sub-commands use the broadcast facade shared with BASIC and
- * /sys/radio; the PHY, link, pairing and FLPR tests drive the Nordic RADIO and
- * FLPR arch layers directly.  Opt-in, and needs a broadcast-capable radio.
+ * Beacon and scan sub-commands use tiku_ble_adv, as BASIC and /sys/radio do;
+ * the PHY, link, pairing and FLPR tests drive the Nordic RADIO and FLPR arch
+ * layers directly.  Opt-in, and needs a broadcast-capable radio.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -46,7 +46,7 @@
 /**
  * @brief Parse "AA:BB:CC:DD:EE:FF" (MSB first, as bleadv_fmt_addr prints it)
  *        into packet byte order, out[0] the LSB.
- * @return 1 on a clean parse, 0 on a non-hex digit
+ * @return 1 on success, 0 on a non-hex digit
  */
 static int bleadv_parse_addr(const char *s, uint8_t out[6])
 {
@@ -92,9 +92,9 @@ static void bleadv_fmt_addr(char *out, const uint8_t addr[6])
 /**
  * @brief Build the SCAN_RSP the FLPR advertisers answer a SCAN_REQ with.
  *
- * It carries the NUS service UUID, not a copy of the advert: a scanner's
- * duplicate filter drops a response that repeats the advert byte for byte,
- * and a host that waits for both then never reports the device.
+ * It carries the NUS service UUID.  A scanner's duplicate filter drops a
+ * response that repeats the advert byte for byte, and a host that waits for
+ * both then never reports the device.
  *
  * @return Bytes written to @p rsp
  */
@@ -130,9 +130,9 @@ static void bleadv_fmt_hex(char *out, const uint8_t *b, int n, int msb_first)
 }
 
 /**
- * @brief Whether the RADIO answers on the secure alias.  The SPU is the
- *        authority, not the facade's owner: any path that lends the radio
- *        to the coprocessor flips its security attribute.
+ * @brief 1 if the SPU marks the RADIO secure, so that it answers on the
+ *        secure alias; every path that lends the radio to the coprocessor
+ *        makes it non-secure, whatever tiku_ble_adv_owner() reports.
  */
 static uint8_t radio_is_ours(void)
 {
@@ -142,7 +142,7 @@ static uint8_t radio_is_ours(void)
 /**
  * @brief Print the FICR words that gate the errata workarounds (see
  *        tiku_crt_early.c), clock-tuning state and RADIO registers, then the
- *        facade, burst, XO, scan and DPPI-window counters.
+ *        tiku_ble_adv state and the burst, XO, scan and DPPI-window counters.
  */
 static void bleadv_dbg(void)
 {
@@ -161,9 +161,9 @@ static void bleadv_dbg(void)
                  (unsigned long)NRF_CLOCK_S->PLL.RUN,
                  (unsigned long)NRF_OSCILLATORS_S->PLL.CURRENTFREQ);
     if (!radio_is_ours()) {
-        /* The radio is lent to the coprocessor (by the facade, the BLE link
-         * or a session) and so non-secure: a read through the secure alias
-         * is a bus fault. */
+        /* The radio is lent to the coprocessor (by tiku_ble_adv, the BLE
+         * link or a session) and so non-secure: a read through the secure
+         * alias is a bus fault. */
         SHELL_PRINTF("RADIO: non-secure (the coprocessor's, for %s); "
                      "registers not read\n", tiku_ble_adv_owner_str());
     } else {
@@ -243,8 +243,8 @@ static void bleadv_scan(unsigned secs, const char *prefix)
 /**
  * @brief Single-board PHY airtime probe: one burst per PHY on 37/38/39.
  *
- * The polled TX window's iteration count scales with airtime, so the same
- * PDU at 2M, S2 and S8 should land near 0.5x, 3x and 8x of the 1M count.
+ * The polled TX window's iteration count scales with airtime: the same PDU
+ * at 2M, S2 and S8 gives about 0.5x, 3x and 8x the 1M count.
  */
 static void bleadv_phy(void)
 {
@@ -259,7 +259,7 @@ static void bleadv_phy(void)
 
     if (tiku_ble_adv_active()) {
         SHELL_PRINTF(SH_RED "stop the beacon first (bleadv off)\n" SH_RST);
-        return;                 /* offloaded RADIO = NS alias, keep out    */
+        return;                 /* the beacon owns RADIO, non-secure on FLPR */
     }
     tiku_radio_arch_init();     /* idempotent; probe needs the link config */
     SHELL_PRINTF("PHY airtime probe (TX-window iters, ch37/38/39):\n");
@@ -392,8 +392,8 @@ static void bleadv_phyrx(uint8_t argc, const char *argv[])
  *        AUX_ADV_IND about every 125 ms.
  *
  * The AdvData (Flags, name and a 47-byte 'TK' payload) exceeds the 31-byte
- * legacy limit.  Blocking; dbg_aux_us reports the aux packet's start, which
- * should sit on the 600 us AuxPtr offset.
+ * legacy limit.  Blocking; dbg_aux_us reports the aux packet's measured
+ * start, which the AuxPtr announces at 600 us.
  */
 static void bleadv_ext(const char *name, unsigned secs)
 {
@@ -892,8 +892,8 @@ static void bleadv_conn(unsigned secs)
 }
 
 /* Auto-stop for the `bleadv <name> [secs]` demo form: a one-shot callback
- * timer; both it and the beacon's burst timer dispatch cooperatively while
- * the shell idles at the prompt. */
+ * timer, which runs while the shell idles at the prompt.  The bursts come
+ * from tiku_ble_adv's own timer, or from the FLPR when it runs the beacon. */
 static struct tiku_timer bleadv_stop_timer;
 
 /** @brief Demo auto-stop: print the burst count and stop the beacon. */
@@ -923,9 +923,9 @@ static void bleadv_flprrx(void)
                      tiku_ble_adv_owner_str());
         return;
     }
-    /* start(), not alive(), gates the probe: alive() can read a stale magic
-     * left in SRAM across a warm reset, while the first start() after a
-     * reset scrubs the shared page and boots the core. */
+    /* tiku_flpr_arch_start() gates the probe: its first call after a reset
+     * scrubs the shared page and boots the core; a later call restarts a
+     * faulted core or resumes a parked one. */
     if (tiku_flpr_arch_start() != 0 || !tiku_flpr_arch_running()) {
         SHELL_PRINTF("FLPR not running (build with TIKU_FLPR_ENABLE=1)\n");
         return;
@@ -1195,7 +1195,7 @@ static void bleadv_flprnus(uint8_t req_cpu)
              * write surfaces bytes echoed back as a notification. */
             uint8_t llid_in;
             int n;
-            uint32_t dm = tiku_flpr_arch_dle_max();   /* DLE negotiated?      */
+            uint32_t dm = tiku_flpr_arch_dle_max(); /* 0 until DLE is agreed */
             if (dm > 27u) {
                 tiku_ble_host_set_frag_max((uint8_t)dm);
             }
@@ -1319,7 +1319,7 @@ static void bleadv_flprnus(uint8_t req_cpu)
         }
     }
     /* Park the FLPR's hold loop, reclaim the secure RADIO alias and release
-     * constlat.  Otherwise the FLPR keeps chasing the dead link and owns the
+     * constlat.  Otherwise the FLPR keeps servicing the link and owns the
      * non-secure RADIO, the next run's re-init writes to the secure alias are
      * blocked, and link config such as a 2M MODE leaks into the next
      * advertising session. */
@@ -1412,7 +1412,7 @@ static void bleadv_flprpair(uint8_t bond_mode, uint8_t numcmp)
                (tiku_clock_time_t)(TIKU_CLOCK_SECOND * 15u)) {
             uint8_t llid_in;
             int n;
-            uint32_t dm = tiku_flpr_arch_dle_max();   /* DLE negotiated?      */
+            uint32_t dm = tiku_flpr_arch_dle_max(); /* 0 until DLE is agreed */
             if (dm > 27u) {
                 tiku_ble_host_set_frag_max((uint8_t)dm);
             }
@@ -1422,10 +1422,10 @@ static void bleadv_flprpair(uint8_t bond_mode, uint8_t numcmp)
                 tiku_ble_host_rx(frame, (uint16_t)n, llid_in);
                 bleadv_flpr_drain_tx();            /* send SMP response(s)    */
             }
-            /* On DONE, mark success but keep serving: the final DHKey Check
-             * must still go over the air, and a central that lost it
-             * re-requests (dup Ea -> engine re-emits Eb).  The loop exits
-             * when the central tears the link down, not when pairing ends. */
+            /* On DONE, success is marked and the link is still served: the
+             * final DHKey Check must still go over the air, and a central
+             * that lost it re-requests (dup Ea -> engine re-emits Eb).  The
+             * loop ends when the central drops the link or after 15 s. */
             if (tiku_ble_host_smp_state() == 2 && !paired) {
                 uint32_t cmp;
                 paired = 1;
@@ -1448,7 +1448,7 @@ static void bleadv_flprpair(uint8_t bond_mode, uint8_t numcmp)
                 tiku_flpr_arch_enc_sk(sk);
                 tiku_flpr_arch_enc_iv(iv);
             }
-            /* The central's CCM-encrypted payload lands as a NUS write.
+            /* The central's CCM-encrypted payload arrives as a NUS write.
              * Decrypt with SK, verify the MIC, compare with the known text. */
             if (enc_done && !dec_ok) {
                 uint8_t cbuf[TIKU_BLE_HOST_MTU];
@@ -1907,10 +1907,10 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* Demo form: fast (100 ms) background beacon that stops itself after
-     * ~secs.  The command returns immediately -- burst and auto-stop are
-     * timer callbacks, dispatched while the shell idles at the prompt (a
-     * blocking wait here would starve them: cooperative scheduling). */
+    /* Demo form: a 100 ms background beacon that stops itself after ~secs.
+     * The command returns at once: tiku_ble_adv sends the bursts in the
+     * background, and the auto-stop is a timer callback that runs while the
+     * shell idles at the prompt. */
     name = argv[1];
     if (argc >= 3) {
         long v = strtol(argv[2], (char **)0, 10);

@@ -5,17 +5,12 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_htimer_hal.h - Hardware abstraction layer interface for hardware timers
+ * tiku_htimer_hal.h - per-port hardware timer configuration and contract.
+ *
+ * Includes the active platform's tiku_htimer_config.h and states what a port
+ * provides; the arch prototypes are in kernel/timers/tiku_htimer.h.
  *
  * SPDX-License-Identifier: Apache-2.0
- */
-
-/**
- * @file tiku_htimer_hal.h
- * @brief Platform-agnostic hardware timer interface.
- *
- * Routes to the active platform's htimer config header and states the arch
- * contract; the arch prototypes are in kernel/timers/tiku_htimer.h.
  */
 
 #ifndef TIKU_HTIMER_HAL_H_
@@ -42,9 +37,10 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * The htimer kernel module requires three arch functions -- _init(),
- * _schedule() and _now() -- declared in tiku_htimer.h.  The platform must
- * also define TIKU_HTIMER_ARCH_SECOND as the hardware tick frequency.
+ * The htimer module calls three arch functions, declared in tiku_htimer.h:
+ * tiku_htimer_arch_init(), tiku_htimer_arch_schedule() and
+ * tiku_htimer_arch_now().  The config header defines TIKU_HTIMER_ARCH_SECOND
+ * as the hardware tick frequency in Hz.
  */
 
 /*---------------------------------------------------------------------------*/

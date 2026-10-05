@@ -16,7 +16,8 @@
 #include <stdint.h>
 
 /**
- * @brief Handle `usb ...`.  argv[0] is "usb".
+ * @brief Handle `usb up|down|info` on the RA8P1 USB-HS controller; no
+ *        argument is `info`.
  *
  * @param argc Argument count
  * @param argv Argument vector
@@ -24,7 +25,8 @@
 void tiku_shell_cmd_usb(uint8_t argc, const char *argv[]);
 
 /**
- * @brief Handle `store ...`.  argv[0] is "store".
+ * @brief Handle `store`: print the model store's name, size and CRC check,
+ *        or that it is empty or importing.
  *
  * @param argc Argument count
  * @param argv Argument vector

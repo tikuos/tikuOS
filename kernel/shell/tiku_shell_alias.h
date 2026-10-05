@@ -55,12 +55,13 @@ void tiku_shell_alias_init(void);
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Define or overwrite an alias.
- * @return TIKU_SHELL_ALIAS_OK or a negative error code.
+ * @brief Define an alias, or replace the body of an existing one.
  *
- * If @p name already exists, its body is replaced. Otherwise the
- * first empty slot is used. Returns TIKU_SHELL_ALIAS_ERR_FULL if
- * neither path is available.
+ * A new name takes the first free slot.
+ *
+ * @return TIKU_SHELL_ALIAS_OK; TIKU_SHELL_ALIAS_ERR_INVALID for a NULL or
+ *         empty name or a NULL body; TIKU_SHELL_ALIAS_ERR_TOOBIG for a name or
+ *         body over its limit; TIKU_SHELL_ALIAS_ERR_FULL with no free slot.
  */
 int tiku_shell_alias_set(const char *name, const char *body);
 
@@ -83,11 +84,13 @@ int tiku_shell_alias_clear(const char *name);
 const char *tiku_shell_alias_lookup(const char *name);
 
 /**
- * @brief Iterate the alias table.
+ * @brief Read the alias in slot @p idx, for listing the table.
  *
- * Pass @p idx in the range [0, TIKU_SHELL_ALIAS_MAX). On success
- * sets *@p name and *@p body to strings in the durable table and
- * returns 1. Returns 0 if the slot at @p idx is empty.
+ * Sets *@p name and *@p body, either of which may be NULL, to the strings in
+ * the durable table.
+ *
+ * @return 1 for a defined alias; 0 for an empty slot or an @p idx at or past
+ *         TIKU_SHELL_ALIAS_MAX.
  */
 int tiku_shell_alias_get(uint8_t idx, const char **name,
                          const char **body);

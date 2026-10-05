@@ -77,12 +77,12 @@ extern uint8_t __tier_sram_extra_end;
 #endif
 #endif
 
+/* A board with neither MSP430's FRAM nor a carved region has no NVM tier,
+ * and a request for one fails at the call site. */
 /**
  * @brief NVM tier backing on MSP430: a durable array, separate from the
  *        pinned region backend.  Other boards use the carved region.
  */
-/* There is no RAM fallback: a board with neither MSP430's FRAM nor a carved
- * region has no NVM tier, and a request for one fails at the call site. */
 #ifdef PLATFORM_MSP430
 static TIKU_DURABLE uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
     tier_nvm_buf[TIKU_TIER_NVM_SIZE] = {0};
@@ -116,10 +116,10 @@ static uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Per-span capacity and reservation counters
+ * @brief Per-span capacity and reservation counters.
  *
- * The separate reservation table describes occupied intervals. Free gaps are
- * computed from those intervals; there is no bump cursor to rewind on release.
+ * Occupied intervals live in the separate reservation table; free gaps are
+ * computed from them.
  */
 typedef struct {
     uint8_t              *buf;         /**< Backing pool start */
@@ -137,9 +137,9 @@ typedef struct {
 /**
  * @brief Primary span state, indexed by tiku_mem_tier_t.
  *
- * The AUTO slot is never indexed at runtime -- AUTO resolves to a concrete tier
- * first -- but it stays in the array to keep the enum-to-index mapping direct.
- * In .bss, so every field starts at zero before init runs.
+ * AUTO resolves to a concrete tier before any lookup, so its slot is unused;
+ * it keeps the enum-to-index mapping direct.  In .bss, so every field starts
+ * at zero before init runs.
  */
 static tier_pool_state_t tier_state[TIKU_MEM_TIER_COUNT];
 
@@ -149,7 +149,10 @@ static tier_pool_state_t sram_extra;
 static tiku_mem_arch_size_t sram_peak;
 #endif
 
-/** @brief Resolve a concrete tier's backing span, without merging addresses. */
+/**
+ * @brief Span @p index of a concrete tier, or NULL when it has none: index 0
+ *        is the tier's primary span, index 1 the extra SRAM span.
+ */
 static tier_pool_state_t *tier_span(tiku_mem_tier_t tier, uint8_t index)
 {
     if (tier == TIKU_MEM_AUTO || (unsigned)tier >= TIKU_MEM_TIER_COUNT) {
@@ -307,7 +310,8 @@ tiku_mem_err_t tiku_backing_release(const void *descriptor,
     return TIKU_MEM_OK;
 }
 
-/** @brief Index of a free slot not yet retired, or -1 when none is left. */
+/** @brief Index of a free slot whose generation is below
+ *  TIKU_MEM_GENERATION_MAX, or -1 when none is left. */
 static int record_available(void)
 {
     unsigned i;
@@ -348,8 +352,8 @@ tiku_mem_err_t tiku_mem_reservation_next(uint16_t *cursor,
 /**
  * @brief Lowest-offset record on @p span at or above @p at, or NULL.
  *
- * Address order comes from a bounded scan of the record table; the backing
- * holds no list and there is no address-sized bitmap.
+ * Address order comes from a bounded scan of the record table; no metadata
+ * lives in the backing.
  */
 static const backing_record_t *record_next(const tier_pool_state_t *span,
                                            tiku_mem_arch_size_t at)
@@ -438,7 +442,7 @@ tiku_mem_err_t tiku_tier_detach_psram(int force)
         return TIKU_MEM_OK;            /* already gone: idempotent */
     }
     if ((tier_state[TIKU_MEM_PSRAM].used != 0u) && !force) {
-        return TIKU_MEM_ERR_BUSY;      /* live reservations would be stranded */
+        return TIKU_MEM_ERR_BUSY;      /* live reservations on the span */
     }
     records_invalidate(&tier_state[TIKU_MEM_PSRAM]);
     tier_state[TIKU_MEM_PSRAM].initialized = 0;
@@ -511,9 +515,8 @@ static void tier_wire_all(void)
     tier_state[TIKU_MEM_NVM].initialized = 1;
 #else
     {
-        /* tiku_nvm_backend_get() says whether this board carved a region (its
-         * weak default returns NULL), so a port has an NVM tier once it
-         * supplies a backend and none before.
+        /* tiku_nvm_backend_get() returns NULL on a board without a carved
+         * region (the weak default), and such a board has no NVM tier.
          *
          * The tier owns the front of the region up to the store's base, as
          * the layout service decided at boot.  A held store publishes no
@@ -602,7 +605,7 @@ tiku_mem_err_t tiku_tier_reset(void)
 /* CHECKED RESERVATIONS                                                      */
 /*---------------------------------------------------------------------------*/
 
-/** @brief A fit found in one span, not yet committed to a record. */
+/** @brief A fit found in one span, before it is committed to a record. */
 typedef struct {
     tier_pool_state_t *span;
     tiku_mem_arch_size_t offset, length, alignment;
@@ -638,7 +641,7 @@ static int work_request(const tiku_mem_request_t *options,
     if (!tiku_reclaim_owner_options(options, cls)) return 0;
     c = (tiku_mem_class_t)*cls;
 #else
-    /* A feature-disabled build must not silently discard an owner contract. */
+    /* Without reclaim, a request that names an owner is invalid. */
     if (options && (options->owner.slot_plus_one || options->owner.generation ||
                     options->owner_slot)) return 0;
     if (c == TIKU_MEM_CLASS_DEFAULT) c = TIKU_MEM_TRANSIENT;
@@ -771,8 +774,8 @@ static int work_select(tiku_mem_tier_t tier, int span_index,
 
 #if TIKU_MEM_RECLAIM_ENABLE
 /**
- * @brief 1 when a fenced span could have taken the request, so the caller
- *        reports BUSY rather than NOMEM.
+ * @brief 1 when a fenced span could take the request; the caller then
+ *        returns TIKU_MEM_ERR_BUSY, and on 0 TIKU_MEM_ERR_NOMEM.
  */
 static int work_fence_blocks(tiku_mem_tier_t tier, int index,
         tiku_mem_arch_size_t length, tiku_mem_arch_size_t alignment,
@@ -948,7 +951,7 @@ static tiku_mem_err_t tier_pool_create(tiku_pool_t *pool,
             reservations[slot].owner = options->owner;
             reservations[slot].owner_slot = options->owner_slot;
         }
-        /* Initialization, not a usable object yet. */
+        /* State 3: the pool is being built and is not usable. */
         reservations[slot].state = 3;
         err = w.tier == TIKU_MEM_NVM ?
             tiku_pool_create_nvm(&ready, w.span->buf + w.offset, stride, count, id) :
@@ -1015,8 +1018,9 @@ tiku_mem_err_t tiku_tier_pool_create(tiku_pool_t *pool,
 { return tiku_tier_pool_create_opts(pool, tier, size, count, id, NULL); }
 
 #if TIKU_MEM_RECLAIM_ENABLE
-/* Private coordinator seam. Holds have identities but no published descriptor.
- * Credits consume metadata only, never bytes in a physical span. */
+/* The reclaim coordinator's private interface (tiku_reclaim_internal.h).
+ * Holds have identities but no published descriptor; credits consume
+ * metadata only, never bytes of a span. */
 int tiku_reclaim_record(unsigned slot, tiku_reclaim_record_t *out)
 {
     const backing_record_t *r;
@@ -1233,7 +1237,7 @@ int tiku_reclaim_publish(const tiku_reclaim_record_t *old,
 }
 
 /* An exited process cannot resume its old protothread. On pre-commit abort,
- * end just that owner's old lifetimes and turn its reserved credits into holds
+ * end only that owner's old lifetimes and turn its reserved credits into holds
  * at exactly the original addresses, for the restarted owner to bind. Other
  * prepared owners keep their live objects. */
 int tiku_reclaim_restore_original(const tiku_reclaim_record_t *old,
@@ -1267,7 +1271,8 @@ int tiku_reclaim_restore_original(const tiku_reclaim_record_t *old,
 
 /* A failed initializer may have claimed only some slots. After its cleanup
  * contract establishes stopped access, turn those claims back into holds.
- * Refuse generation exhaustion before touching any descriptor or record. */
+ * A live record at TIKU_MEM_GENERATION_MAX fails the call before any
+ * descriptor or record changes. */
 int tiku_reclaim_rearm(tiku_reclaim_record_t *layout, unsigned count,
                        tiku_mem_owner_t owner)
 {
@@ -1344,9 +1349,9 @@ tiku_mem_err_t tiku_reclaim_context_tag(tiku_proc_mem_t *pmem,
 /**
  * @brief Query which memory tier a pointer belongs to.
  *
- * Scans the tier backing pools first, which also works on host where the static
- * arrays may not appear in the region table, then falls back to the region
- * registry so plain static buffers still classify.  Containment uses uintptr_t.
+ * Scans the tier backing spans first (on host the static arrays may be absent
+ * from the region table), then the region registry, which classifies plain
+ * static buffers as SRAM or NVM.  Containment uses uintptr_t.
  *
  * @param ptr       Address to query (must be non-NULL)
  * @param out_tier  Output: tier of the containing pool/region
@@ -1415,9 +1420,9 @@ tiku_mem_err_t tiku_tier_get(const uint8_t *ptr,
 /**
  * @brief Fill a stats struct with a tier backing pool's current state.
  *
- * Whole-tier occupancy rather than one arena's: capacity, bytes handed out, the
- * lifetime peak and the sub-allocation count.  AUTO has no pool and is
- * rejected, as is a concrete tier that was never initialised.
+ * Whole-tier occupancy, summed over the tier's spans: capacity, bytes handed
+ * out, the lifetime peak and the allocation and failure counts.  AUTO has no
+ * pool and is rejected, as is a concrete tier that is not initialised.
  *
  * @param tier   Memory tier to query (SRAM, NVM, HIFRAM or PSRAM; not AUTO)
  * @param stats  Output statistics (must be non-NULL)
@@ -1442,8 +1447,8 @@ tiku_mem_err_t tiku_tier_stats(tiku_mem_tier_t tier,
 
     ts = &tier_state[tier];
     if (!ts->initialized) {
-        /* HIFRAM on a build without it, PSRAM before it is attached, or a
-         * tier not yet initialised: all report "not available" alike. */
+        /* HIFRAM on a build without it, PSRAM while detached, or a tier that
+         * is not initialised: each returns TIKU_MEM_ERR_INVALID. */
         return TIKU_MEM_ERR_INVALID;
     }
 

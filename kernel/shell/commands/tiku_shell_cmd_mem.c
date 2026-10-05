@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_mem.c - "peek" and "poke" implementation.
  *
- * Parses an address then dereferences it directly, with no MPU bypass: a
- * write to a read-only region behaves exactly as it would from application
- * code, so prompt behaviour is faithful to runtime.
+ * Parses an address and dereferences it directly.  The MPU is left as it is,
+ * so a store to a protected region is dropped or faults as it does from any
+ * other code.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,7 +17,7 @@
 #include "tiku_shell_cmd_mem.h"
 #include <kernel/shell/tiku_shell.h>
 
-/** Cap one peek at 32 bytes so the printed line stays short. */
+/** Most bytes one peek reads; they print on one line. */
 #define MEM_PEEK_MAX     32
 
 /*---------------------------------------------------------------------------*/
@@ -121,9 +121,8 @@ tiku_shell_cmd_peek(uint8_t argc, const char *argv[])
             return;
         }
     }
-    /* Defend against wraparound at the top of the address space: a peek that
-     * would cross the pointer's ceiling is truncated rather than silently
-     * rolling over into low memory. */
+    /* A peek that would run past the top of the address space is cut short
+     * there. */
 #if defined(PLATFORM_MSP430)
     if ((uint32_t)addr + count > 0x10000UL) {
         count = 0x10000UL - (uint32_t)addr;
@@ -172,9 +171,9 @@ tiku_shell_cmd_poke(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* Read-back is informational: it shows whether the write took effect
-     * (MSP430 drops a store to FRAM behind the MPU's read-only mask)
-     * without paying for a separate peek. */
+    /* The byte is read back after the store and both values print.  A store
+     * that did not take, such as one to MSP430 FRAM behind the MPU's
+     * read-only mask, reads back the old value. */
     p      = (volatile uint8_t *)addr;
     before = *p;
     *p     = (uint8_t)val;

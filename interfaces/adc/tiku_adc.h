@@ -8,8 +8,8 @@
  * tiku_adc.h - platform-independent ADC interface.
  *
  * A portable API for reading analog sensors, with configurable resolution
- * (8/10/12-bit) and reference source.  All operations block; the hardware is
- * reached through the arch layer.
+ * (8/10/12-bit) and reference source.  All operations block.  The functions
+ * are defined only on a board that defines TIKU_BOARD_ADC_AVAILABLE.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -94,12 +94,12 @@ void tiku_adc_close(void);
 /**
  * @brief Configure a pin for analog input.
  *
- * Puts the pin backing the channel into analog function mode.  Needed once per
- * external channel before reading, and not at all for the internal temperature
- * and battery channels.
+ * Puts the pin backing the channel into analog function mode.
  *
  * @param channel  ADC channel number (0-15 for external pins)
  * @return TIKU_ADC_OK on success, TIKU_ADC_ERR_PARAM if invalid
+ * @note Call once per external channel before tiku_adc_read(); the internal
+ *       temperature and battery channels need no call.
  */
 int tiku_adc_channel_init(uint8_t channel);
 

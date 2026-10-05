@@ -84,9 +84,8 @@ emmc_width_read(char *buf, size_t max)
 /**
  * @brief Write handler for /sys/emmc/state: the lifecycle verbs.
  *
- * "up" walks the full init ladder, "down" releases the SDIO0 domain,
- * "sleep"/"wake" drive CMD5 retention; the verbs match /sys/psram/state so
- * the storage lifecycle devices read and drive alike.
+ * "up" runs the full init sequence, "down" releases the SDIO0 domain, and
+ * "sleep"/"wake" drive CMD5 retention: the same verbs as /sys/psram/state.
  */
 static int
 emmc_state_write(const char *buf, size_t len)

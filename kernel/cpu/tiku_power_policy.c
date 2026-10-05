@@ -39,7 +39,7 @@ static const char *const mode_tokens[] = { "off", "light", "deep", "deepest" };
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Is a source that wakes @p mode armed?
+ * @brief Is a source that wakes @p mode armed?  Always true for off.
  */
 static int
 wake_armed(tiku_cpu_idle_mode_t mode)

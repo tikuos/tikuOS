@@ -9,7 +9,7 @@
  *
  * Control flow, loops, DIM and DEF FN, DATA and READ, the hardware bridges,
  * reactive registrations and error handling.  The keyword switch and the
- * colon-separated runner live in dispatch, which references these symbols.
+ * colon-separated runner, which call these, live in tiku_basic_dispatch.inl.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,9 +27,9 @@ static void exec_stmts(const char **p);
  * `TAB(n)` and `SPC(n)` tap the print stream and are recognised here.
  *
  * @note TAB(n) advances to 1-based column n and does nothing if already past
- *       it; SPC(n) emits n spaces unconditionally.  The print column is local
- *       to this statement -- no global cursor -- which matches the common
- *       BASIC convention.
+ *       it; SPC(n) emits n spaces unconditionally.  The column counts from the
+ *       start of this PRINT, so after a PRINT ending in `;` TAB does not count
+ *       from the start of the line.
  */
 static void
 exec_print(const char **p)
@@ -167,8 +167,9 @@ exec_let(const char **p, int already_consumed_var)
 /**
  * @brief CONST NAME = expr: bind a multi-letter numeric name as read-only.
  *
- * expr is evaluated once; exec_let rejects any later assignment.  String
- * constants are not supported.
+ * expr is evaluated once; LET and implicit assignment reject a later write,
+ * and a later CONST of the name rebinds it.  String constants are not
+ * supported.
  */
 static void
 exec_const(const char **p)
@@ -206,7 +207,7 @@ exec_const(const char **p)
  * The length of A$ never changes.
  *
  * @note Excess source bytes are dropped and missing ones leave the original
- *       characters, matching QuickBASIC.  An unbound A$ is treated as empty.
+ *       characters.  An unbound A$ is treated as empty.
  * @param p     Cursor; on entry at the '(' after the keyword, on success
  *              advanced past the RHS expression.
  * @param kind  Which slice form: 'L' = LEFT$, 'R' = RIGHT$,
@@ -296,7 +297,7 @@ exec_strslice_assign(const char **p, char kind)
         if (start < 1) start = 1;
     }
     if (start < 1 || (size_t)start > src_len) {
-        /* Out-of-range start is a no-op (matches QuickBASIC). */
+        /* An out-of-range start changes nothing. */
         basic_strvars[sidx] = basic_str_alloc(buf, src_len);
         if (basic_strvars[sidx] == NULL) {
             basic_throw(TIKU_BASIC_ERR_NOMEM, "out of string heap");
@@ -877,8 +878,8 @@ exec_for(const char **p)
     for_stack[for_sp].loop_line = line_after(basic_pc);
     for_sp++;
     if ((e3 > 0 && e1 > e2) || (e3 < 0 && e1 < e2)) {
-        /* Already past the target: the body still runs once and NEXT ends
-         * the loop, as in BBC BASIC and most Tiny BASICs. */
+        /* Already past the target: the body still runs once, and NEXT ends
+         * the loop. */
     }
 }
 
@@ -1234,7 +1235,7 @@ exec_vfswrite_str(const char **p)
  * @brief Read a VFS node and return its leading integer (VFSREAD, ON CHANGE).
  *
  * strtol base 0 takes decimal, 0x hex and leading-0 octal.  A node with no
- * numeric prefix, such as a status string, reads as 0 rather than an error.
+ * numeric prefix, such as a status string, reads as 0 and raises no error.
  *
  * @return The value, or 0 with basic_error set when the read fails.
  */
@@ -1259,9 +1260,8 @@ basic_vfsread(const char *path)
     }
     v = strtol(buf, &end, 0);
     if (end == buf) {
-        /* No leading numeric prefix -- not a fatal error; many VFS
-         * nodes are status strings ("running", "off"). Return 0 so
-         * the program can keep going. */
+        /* No leading number: many VFS nodes are status strings ("running",
+         * "off"), which read as 0. */
         return 0;
     }
     return v;
@@ -1301,8 +1301,8 @@ static char basic_file_scratch[TIKU_BASIC_FILE_BUF];
 /**
  * @brief APPEND "path", expr$: add the string and a newline to a file.
  *
- * A missing file starts empty.  A result over TIKU_BASIC_FILE_BUF is an error;
- * the file is never silently truncated.
+ * A missing file starts empty.  A result over TIKU_BASIC_FILE_BUF raises an
+ * error and leaves the file unchanged.
  */
 static void
 exec_append(const char **p)
@@ -1323,7 +1323,7 @@ exec_append(const char **p)
      * file does not fit, so a file that was not read whole fails the size
      * check below. */
     have = tiku_vfs_read(path, basic_file_scratch, sizeof basic_file_scratch);
-    if (have < 0) have = 0;                       /* file doesn't exist yet */
+    if (have < 0) have = 0;                       /* missing file: empty */
     vlen  = (int)strlen(val);
     total = have + vlen + 1;                       /* +1 for the newline */
     if (total > TIKU_BASIC_FILE_BUF) {
@@ -1676,8 +1676,9 @@ exec_on_change(const char **p)
 /**
  * @brief Re-read one ON CHANGE slot and fire its handler if the value changed.
  *
- * Runs only at a statement boundary, so a GOSUB's return address
- * (line_after(basic_pc)) is right.  Shared by the poll tick and the event path.
+ * Runs only between lines, after the RUN loop has moved basic_pc to the line
+ * due next, which a GOSUB handler returns to.  Serves polled and event-armed
+ * slots alike.
  *
  * @return 1 when the handler fired (GOTO jump or GOSUB push and jump), else 0.
  */
@@ -1685,7 +1686,7 @@ static int
 basic_onchg_check(basic_onchg_t *o)
 {
     long v = basic_vfsread(o->path);
-    if (basic_error) {                 /* read failure -- silence and skip */
+    if (basic_error) {                 /* read failure: clear it and skip */
         basic_error = 0;
         return 0;
     }
@@ -1695,7 +1696,7 @@ basic_onchg_check(basic_onchg_t *o)
     o->last_value = v;
     if (o->is_gosub) {
         if (gosub_sp >= TIKU_BASIC_GOSUB_DEPTH) {
-            return 0;                  /* stack full -- no re-fire */
+            return 0;                  /* stack full: this change is lost */
         }
         /* The RUN loop polls after moving basic_pc to the line due next. */
         gosub_stack[gosub_sp++] = basic_pc;
@@ -2305,7 +2306,7 @@ parse_array_index(const char **p, basic_array_t *slot, char letter)
  *
  * The body is stored as text and parsed again at each call.  It takes up to
  * TIKU_BASIC_DEFN_ARGS single-letter numeric arguments, saved and restored
- * around the call, so FN inc(X) leaves the caller's X alone.
+ * around the call: after DEF FN INC(X) = X + 1, INC(5) leaves X unchanged.
  */
 static void
 exec_def(const char **p)

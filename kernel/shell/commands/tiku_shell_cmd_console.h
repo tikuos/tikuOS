@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_console.h - "console" command: the line's channels and
+ * tiku_shell_cmd_console.h - "console" command: the console's channels and
  * counters.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -17,11 +17,14 @@
 #include <stdint.h>
 
 /**
- * @brief List the console's channels and its frame counters.
+ * @brief "console" command: print the console's channels and counters.
  *
- * `console` prints the registered channels, the decoder's counters and the
- * console link's counters since boot.  `console echo on` arms a link on a
- * spare channel that echoes every message it receives; `off` releases it.
+ * Prints one line per registered channel, the decoder's totals and the
+ * console link's counters since boot.  `console echo [on|off]` opens or
+ * closes a link on channel 0xF2 that sends every message it receives back.
+ *
+ * @param argc  Argument count
+ * @param argv  Argument vector
  */
 void tiku_shell_cmd_console(uint8_t argc, const char *argv[]);
 

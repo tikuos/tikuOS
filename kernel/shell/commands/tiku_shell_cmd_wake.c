@@ -9,7 +9,7 @@
  *
  * Shows which interrupt sources can wake the CPU, as the wake HAL reports
  * them.  MSP430 and nRF54L also name each source's peripheral and the
- * low-power levels it wakes; other ports show the armed state only.
+ * low-power levels it wakes; other ports show the armed state and GPIO masks.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -41,7 +41,7 @@ tiku_shell_cmd_wake(uint8_t argc, const char *argv[])
 
 #if defined(PLATFORM_NORDIC)
     /* nRF54L: every idle mode is a WFI variant, so every NVIC-enabled
-     * source below wakes the core; the names are the real peripherals
+     * source below wakes the core; the names are the nRF54L peripherals
      * (arch/nordic/tiku_wake_arch.c scans the live NVIC lines). */
     SHELL_PRINTF("  GRTC     (sys tick)   %s  wakes WFI\n",
                  (w.sources & TIKU_WAKE_SYSTICK) ? "[on ]" : "[off]");

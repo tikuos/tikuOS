@@ -49,8 +49,8 @@
 #define TIKU_LINK_CONSOLE_WANT_ACK  0x80u  /**< ctl bit: paced, ACK wanted */
 
 /**
- * @brief How far behind the expected seq a paced frame still counts as a
- *        repeat of one delivered (its ACK was lost) rather than a stranger.
+ * @brief A paced frame 1 to this many behind the expected seq is a repeat
+ *        whose ACK was lost: it is answered again and not delivered.
  */
 #define TIKU_LINK_CONSOLE_DUP_SPAN  8u
 
@@ -81,10 +81,12 @@ typedef struct {
  *        into @p buf of @p cap bytes.
  *
  * The link sends its own frames unpaced.  A peer's paced frames are
- * acknowledged from inside the console's pump.
+ * acknowledged as the console decodes them, in tiku_console_getc() or
+ * tiku_console_pump().
  *
  * @note @p buf must hold the largest message plus TIKU_LINK_CONSOLE_OVERHEAD.
- * @return the link, or NULL when the console has no channel slot left
+ * @return the link, or NULL when @p lc is NULL or the console refuses the
+ *         channel
  */
 tiku_link_t *tiku_link_console_open(tiku_link_console_t *lc, uint8_t marker,
                                     uint8_t *buf, size_t cap);

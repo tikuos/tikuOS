@@ -7,9 +7,9 @@
  *
  * tiku_basic_prng.inl - linear-congruential RND() generator.
  *
- * Lazily seeded from the clock on first call.  Output draws from the high 16
- * bits of the state, which are the best-behaved of an LCG, and costs one
- * multiply, one add and one shift.
+ * Seeded at the first call from the kernel tick and the boot count.  Each
+ * call steps the LCG and draws from the high 16 bits of the state, the
+ * best-distributed bits of an LCG.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,9 +22,8 @@
 static long
 basic_rnd(long n)
 {
-    /* Lazy seeding -- avoids paying clock-read cost when RND is
-     * never called.  The seed mixes the kernel tick with the boot count,
-     * so boots that reach their first RND at the same tick still differ. */
+    /* The seed mixes the kernel tick with the boot count, so boots that
+     * reach their first RND at the same tick differ. */
     if (!basic_prng_seeded) {
         uint32_t boots = 0u;
 #if TIKU_BASIC_VFS_ENABLE
@@ -39,7 +38,7 @@ basic_rnd(long n)
                            (boots + 1u) * 0x9E3779B9UL;
         basic_prng_seeded = 1;
     }
-    /* LCG step (Numerical Recipes constants): cheap on MSP430. */
+    /* LCG step with the Numerical Recipes constants. */
     basic_prng_state = basic_prng_state * 1664525UL + 1013904223UL;
     if (n <= 0) {
         return 0;

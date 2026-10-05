@@ -92,9 +92,8 @@ int tiku_htimer_set(struct tiku_htimer *ht, tiku_htimer_clock_t time,
 /**
  * @brief Schedule without the guard-time gate.
  *
- * For tight rescheduling paths where the caller knows the period and takes
- * responsibility for staying ahead of the counter.  Same body as
- * tiku_htimer_set() minus the guard check.
+ * tiku_htimer_set() without the guard check: the caller keeps @p time ahead
+ * of the counter.
  */
 int tiku_htimer_set_no_guard(struct tiku_htimer *ht, tiku_htimer_clock_t time,
                              tiku_htimer_callback_t func, void *ptr) {
@@ -117,9 +116,8 @@ int tiku_htimer_set_no_guard(struct tiku_htimer *ht, tiku_htimer_clock_t time,
 /**
  * @brief Cancel the pending hardware timer.
  *
- * Clears the pending pointer.  The hardware interrupt is left enabled: a
- * spurious ISR calls run_next(), sees pending == NULL and returns, so no
- * platform needs a disarm function.
+ * Clears the pending pointer and leaves the compare interrupt armed; when it
+ * fires, run_next() finds nothing pending and returns.
  */
 int tiku_htimer_cancel(void) {
   if (pending == NULL) {

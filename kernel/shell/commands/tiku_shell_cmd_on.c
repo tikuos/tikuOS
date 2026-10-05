@@ -7,9 +7,8 @@
  *
  * tiku_shell_cmd_on.c - "on" command implementation
  *
- * Thin wrapper over tiku_shell_rules_add_argv() that registers a
- * reactive rule.  All parsing, validation, and diagnostics live in
- * the rules subsystem.
+ * Passes its arguments to tiku_shell_rules_add_argv(), which parses them,
+ * registers the rule and prints any error.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

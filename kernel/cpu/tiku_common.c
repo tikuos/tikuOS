@@ -7,9 +7,8 @@
  *
  * tiku_common.c - common utility functions.
  *
- * Blocking delays, bit manipulation (popcount, ctz, clz) and platform identity
- * (unique device id, boot reset cause), all delegating to the HAL so the API is
- * portable.
+ * Blocking delays and platform identity (unique device id, reset cause) call
+ * the HAL; the bit manipulation helpers (popcount, ctz, clz) are portable C.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -33,9 +32,9 @@
  *
  * @param ms  Number of milliseconds to delay (0 returns immediately).
  *
- * @note Blocks the caller: no other process runs, but interrupts stay enabled
- *       and ISRs still run.  For a non-blocking delay use a software timer
- *       (tiku_timer_set_event()) instead.
+ * @note Blocks the caller: no other process runs.  The interrupt mask is left
+ *       as it is, so enabled ISRs still run.  A wait that lets other
+ *       processes run uses a software timer (tiku_timer_set_event()).
  *
  * @warning Not suitable for sub-millisecond precision.  Use
  *          tiku_common_delay_us() for shorter intervals.
@@ -51,8 +50,8 @@ void tiku_common_delay_ms(unsigned int ms)
  * @brief Delay execution for a specified number of microseconds.
  *
  * A blocking busy-wait delegated to the platform HAL, for bit-banged protocols
- * and short hardware settling times.  Interrupts stay enabled but no
- * cooperative scheduling happens.
+ * and short hardware settling times.  The interrupt mask is left as it is,
+ * and no other process runs meanwhile.
  *
  * @param us  Number of microseconds to delay (0 returns immediately).
  * @see tiku_common_delay_ms()
@@ -109,7 +108,7 @@ uint8_t tiku_common_ctz(uint16_t val)
 /**
  * @brief Count leading zeros in a 16-bit value.
  *
- * A binary search rather than a linear scan, so the cost is constant.  For a
+ * A four-step binary search, so the cost does not depend on @p val.  For a
  * non-zero @p val, 15 minus the result is floor(log2(val)), the index of the
  * highest set bit.
  *
@@ -139,7 +138,7 @@ uint8_t tiku_common_clz(uint16_t val)
  * Copies up to @p len bytes of the platform's identifier, such as a die
  * record or a FICR register.  The content is per port, and STM32N6 returns 0.
  *
- * @param buf  Destination buffer (must not be NULL).
+ * @param buf  Destination buffer; NULL copies nothing.
  * @param len  Maximum number of bytes to copy.
  * @return     Number of bytes actually written (0 if buf is NULL).
  * @note RP2350 builds its id from linker addresses, so every board running

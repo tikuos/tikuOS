@@ -8,8 +8,8 @@
  * tiku_nvm_mirror.h - layout and integrity check for the .uninit NVM mirror.
  *
  * On the mirror platforms (Ambiq, RP2350, STM32N6, ESP32-C61) .persistent lives
- * in SRAM and is copied to NVM at relock.  A 16-byte header carries a CRC-32,
- * so a torn program is refused rather than restored as good.
+ * in SRAM and is copied to NVM at relock.  A 16-byte header carries a CRC-32;
+ * a torn program fails it and is not restored.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -31,7 +31,7 @@
 #define TIKU_NVM_MIRROR_HDR_BYTES  16U
 
 /*
- * Header layout -- four 32-bit words.  16 bytes keeps the image at the Ambiq
+ * Header layout: four 32-bit words.  16 bytes keeps the image at the Ambiq
  * bootrom's program-alignment unit.
  *
  *   word 0  TIKU_NVM_MIRROR_MAGIC_V2
@@ -66,8 +66,8 @@ typedef enum {
  * @brief Continue a CRC-32 over the next bytes of a stream.
  *
  * Takes and returns the running state: start it at 0xFFFFFFFF and finish it
- * with the same mask, as tiku_nvm_crc32() does, so a payload programmed in
- * chunks is checksummed once as the chunks pass rather than in a second pass.
+ * with the same mask, as tiku_nvm_crc32() does.  A payload programmed in
+ * chunks can be checksummed as the chunks pass.
  */
 static inline uint32_t tiku_nvm_crc32_update(uint32_t crc, const void *data,
                                              size_t len)
@@ -104,8 +104,8 @@ static inline uint32_t tiku_nvm_crc32(const void *data, size_t len)
  * @brief The image a mirror holds, or NULL when it holds none that checks.
  *
  * Only a V2 mirror qualifies: its length must fit in @p cap, the mirror's size
- * with the header, and its CRC must match.  The boot restore and the layout
- * service's search for an older image's record read the same verdict.
+ * with the header, and its CRC must match.  The boot restores and the layout
+ * service's search for an older image's record both use this check.
  */
 static inline const uint8_t *
 tiku_nvm_mirror_image(const uint32_t *hdr, size_t cap, size_t *len)

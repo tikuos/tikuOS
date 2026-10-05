@@ -7,9 +7,9 @@
  *
  * tiku_vfs_tree_watchdog.c - /sys/watchdog VFS nodes.
  *
- * Exposes the kernel watchdog as six files so shells, scripts and BASIC can
- * inspect and reconfigure it.  Writes to mode, clock and interval go through
- * tiku_watchdog_config() with the other two read back, so one field changes.
+ * The kernel watchdog as six files.  Writes to mode, clock and interval go
+ * through tiku_watchdog_config() with the other two read back, so a write
+ * changes one field.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -30,9 +30,8 @@
 /**
  * @brief Read handler for /sys/watchdog/mode.
  *
- * Renders the operating mode as a word ("watchdog\n" or "interval\n"), taken
- * from tiku_watchdog_mode_str() so the VFS and the shell `info` command always
- * agree.
+ * Renders the operating mode as a word ("watchdog\n" or "interval\n") from
+ * tiku_watchdog_mode_str(), the string the shell `info` command prints.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -105,9 +104,9 @@ watchdog_mode_write(const char *buf, size_t len)
 /**
  * @brief Read handler for /sys/watchdog/clock.
  *
- * Renders the watchdog clock source as "aclk\n" (32.768 kHz, keeps
- * counting in LPM3) or "smclk\n" (MCLK-derived, faster timeouts but
- * gated in deep sleep).
+ * Renders the watchdog clock source as "aclk\n" or "smclk\n".  On MSP430
+ * ACLK (32.768 kHz) keeps counting in LPM3; SMCLK (MCLK-derived) gives
+ * shorter timeouts but stops in deep sleep.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -124,9 +123,9 @@ watchdog_clock_read(char *buf, size_t max)
 /**
  * @brief Write handler for /sys/watchdog/clock.
  *
- * Accepts "aclk"/"a" or "smclk"/"s" as a whole token.  Mode and interval are
- * preserved, but the wall-clock timeout changes: the same divider counts a
- * 32.768 kHz ACLK ~244x slower than an 8 MHz SMCLK.
+ * Accepts "aclk"/"a" or "smclk"/"s" as a whole token; mode and interval are
+ * kept.  Only MSP430's timeout depends on the source: the same divider counts
+ * a 32.768 kHz ACLK about 244 times slower than an 8 MHz SMCLK.
  *
  * @param buf  Input token ("aclk"/"a" or "smclk"/"s")
  * @param len  Input length in bytes
@@ -155,8 +154,8 @@ watchdog_clock_write(const char *buf, size_t len)
 /**
  * @brief Read handler for /sys/watchdog/interval.
  *
- * Renders the WDTIS divider as its cycle count -- "64\n", "512\n", "8192\n" or
- * "32768\n", not a time unit (at 32.768 kHz ACLK, 32768 cycles is one second).
+ * Renders the interval divider as a cycle count, not a time: "64\n", "512\n",
+ * "8192\n" or "32768\n" (32768 cycles of a 32.768 kHz clock are one second).
  * A divider outside the four supported steps reads "unknown\n".
  *
  * @param buf  Output buffer for the rendered text
@@ -186,8 +185,8 @@ watchdog_interval_read(char *buf, size_t max)
  * @brief Write handler for /sys/watchdog/interval.
  *
  * Parses a leading decimal and maps it onto one of the four hardware divider
- * steps.  The value must match exactly (64, 512, 8192, 32768) -- no rounding,
- * so a typo is refused rather than arming a different timeout.
+ * steps.  The value must be exactly 64, 512, 8192 or 32768; any other value
+ * returns TIKU_VFS_EINVAL.
  *
  * @param buf  Input text, decimal digits ("8192\n")
  * @param len  Input length in bytes
@@ -202,8 +201,8 @@ watchdog_interval_write(const char *buf, size_t len)
     tiku_wdt_interval_t iv;
 
     for (i = 0; i < len && buf[i] >= '0' && buf[i] <= '9'; i++) {
-        /* Guard the uint16 accumulator: without this, "65600" wraps to 64 and
-         * would silently arm the 64-cycle step instead of failing. */
+        /* Overflow check on the uint16 accumulator: a wrapped value would
+         * turn "65600" into 64 and arm the 64-cycle step. */
         if (val > (uint16_t)((65535u - (uint16_t)(buf[i] - '0')) / 10u)) {
             return TIKU_VFS_ERANGE;
         }
@@ -230,11 +229,10 @@ watchdog_interval_write(const char *buf, size_t len)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Write handler for /sys/watchdog/kick — pet the watchdog.
+ * @brief Write handler for /sys/watchdog/kick.
  *
  * Write-only, and the payload is ignored: any write restarts the countdown via
- * tiku_watchdog_kick(), so a script can keep the system alive through a long
- * operation with `write /sys/watchdog/kick 1`.
+ * tiku_watchdog_kick().
  *
  * @param buf  Ignored
  * @param len  Ignored
@@ -256,8 +254,8 @@ watchdog_kick_write(const char *buf, size_t len)
 /**
  * @brief Read handler for /sys/watchdog/enabled.
  *
- * Renders "1\n" when the watchdog counter is running and "0\n"
- * when it is held (WDTHOLD set).
+ * Renders "1\n" while the watchdog is armed, paused or not, and "0\n" while
+ * it is off (tiku_watchdog_is_on()).
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -274,8 +272,7 @@ watchdog_enabled_read(char *buf, size_t max)
  * @brief Write handler for /sys/watchdog/enabled.
  *
  * "1" starts the watchdog, "0" stops it; any other first byte is rejected.
- * Starting resumes the configured mode, clock and interval rather than
- * resetting them to defaults.
+ * Starting keeps the configured mode, clock and interval.
  *
  * @param buf  Input text ("1" or "0")
  * @param len  Input length in bytes (unused — first byte decides)
@@ -299,8 +296,6 @@ watchdog_enabled_write(const char *buf, size_t len)
  * @brief Read handler for /sys/watchdog/kicks.
  *
  * Renders the number of kicks issued since boot as a decimal line.
- * Useful as a cheap liveness signal: a healthy system shows this
- * value growing between two reads.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes

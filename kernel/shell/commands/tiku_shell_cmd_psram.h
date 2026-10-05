@@ -16,11 +16,12 @@
 #include <stdint.h>
 
 /**
- * @brief Handle `power psram ...`.  argv[1] is already known to be "psram".
+ * @brief Handle the `power psram ...` verbs.
  *
- * Compiled only when TIKU_DRV_PSRAM_ENABLE is set; tiku_shell_cmd_power.c
- * guards the call with the same flag, so there is no runtime "not available"
- * stub.
+ * Defined only when TIKU_DRV_PSRAM_ENABLE is set.
+ *
+ * @note tiku_shell_cmd_power() calls it under the same flag, after matching
+ *       argv[1] to "psram".
  */
 void tiku_shell_cmd_psram(uint8_t argc, const char *argv[]);
 

@@ -7,9 +7,9 @@
  *
  * tiku_wireless.h - board-independent wireless-interface API.
  *
- * The kernel declares the API and types here and one driver supplies them, so
- * consumers call tiku_wireless_* rather than a driver name.  A single radio is
- * assumed, so no call takes a radio handle.
+ * The kernel declares the API and types here and one driver supplies them;
+ * consumers call tiku_wireless_*.  A build has one radio, so no call takes a
+ * radio handle.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -117,8 +117,11 @@ typedef struct {
  * @brief Trigger an active scan (non-blocking).
  *
  * Subscribers get an AP_FOUND event per unique access point and one
- * SCAN_COMPLETE when it ends.  Fails if the radio is not up, is busy with an
- * earlier request, or its queue is full.
+ * SCAN_COMPLETE when it ends.
+ *
+ * @return TIKU_DRV_OK on enqueue; TIKU_DRV_ERR_INVALID if the radio is not
+ *         up; TIKU_DRV_ERR_TIMEOUT while the radio is busy with an earlier
+ *         request or its queue is full
  */
 int tiku_wireless_scan_start(void);
 
@@ -135,6 +138,7 @@ uint8_t tiku_wireless_scan_results(tiku_wireless_ap_t *out,
 
 /**
  * @brief Snapshot interface state. Synchronous, no side effects.
+ * @return TIKU_DRV_OK, or TIKU_DRV_ERR_INVALID for a NULL @p out
  */
 int tiku_wireless_status(tiku_wireless_status_t *out);
 
@@ -169,7 +173,8 @@ int tiku_wireless_set_rx(tiku_wireless_rx_t cb, void *ctx);
 /**
  * @brief For a caller that waits on the network without returning to the
  *        scheduler (BASIC's HTTPGET$): let the radio run, then hand the
- *        receiver what came in, now.  Kernel thread only.  @return Frames
+ *        receiver what has arrived before returning.  Kernel thread only.
+ *        @return Frames delivered
  */
 int tiku_wireless_rx_poll(void);
 
@@ -234,10 +239,9 @@ int tiku_wireless_connect_auth(const char *ssid, const char *psk,
                                tiku_wireless_auth_t auth);
 
 /**
- * @brief Tear down the current association. Non-blocking. Stored
- *        credentials (if any) are preserved — a subsequent reboot
- *        will still cold-boot-rejoin. Use tiku_wireless_forget()
- *        to also wipe the saved SSID/PSK.
+ * @brief Tear down the current association. Non-blocking.  A stored
+ *        profile is kept, so the next boot rejoins; tiku_wireless_forget()
+ *        also wipes the saved SSID and PSK.
  *
  * @return TIKU_DRV_OK on enqueue; TIKU_DRV_ERR_INVALID if the radio is not
  *         up; TIKU_DRV_ERR_TIMEOUT while the radio is busy with an earlier
@@ -249,8 +253,8 @@ int tiku_wireless_disconnect(void);
  * @brief Forget the persistent WPA credentials cached after the last join.
  *
  * Tears down any current association, clears the stored SSID and PSK, and stops
- * cold-boot rejoin on the next reboot.  Idempotent, so it is safe on a device
- * that has none.
+ * cold-boot rejoin on the next reboot.  Idempotent; a device with no stored
+ * profile is not an error.
  *
  * @return TIKU_DRV_OK; a radio that keeps a profile returns
  *         TIKU_DRV_ERR_TIMEOUT while busy or its queue is full, leaving the

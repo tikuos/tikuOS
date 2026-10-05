@@ -23,9 +23,9 @@
 /**
  * @brief Get the fully-formed /sys directory node.
  *
- * Returns a static, fully-initialised DIR node named "sys" whose child count is
- * computed by sizeof inside the module, so no count macro crosses this
- * boundary; the root assembly copies it by value into its root-children array.
+ * Returns a static DIR node named "sys", its child count computed by sizeof
+ * inside the module; the root assembly copies it by value into its
+ * root-children array.
  *
  * @return Pointer to the static /sys directory node
  */

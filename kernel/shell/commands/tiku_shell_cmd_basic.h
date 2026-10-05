@@ -19,11 +19,11 @@
 #include <stdint.h>
 
 /**
- * @brief "basic" command handler.
+ * @brief "basic" command: the BASIC REPL, and running or moving programs.
  *
  * Forms: basic | run [<path>|resume] | resume | load <path> | save <path>.
- * Bare `basic` enters the REPL until BYE / EXIT; `basic run` runs the saved
- * program without the REPL, which an `init` entry can do at boot.
+ * Bare `basic` enters the REPL until BYE, EXIT or QUIT.  `basic run` starts
+ * the saved program without the REPL and returns to the prompt at once.
  *
  * @param argc  Argument count.
  * @param argv  Argument vector (argv[0] == "basic").

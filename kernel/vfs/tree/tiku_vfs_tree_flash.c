@@ -51,14 +51,14 @@ flash_hz_read(char *buf, size_t max)
     return snprintf(buf, max, "%lu\n", tiku_nor_clock_hz());
 }
 
-/** @brief Device size -- a constant of the part, not of its power state. */
+/** @brief Device size in bytes, a constant reported in any power state. */
 static int
 flash_size_read(char *buf, size_t max)
 {
     return snprintf(buf, max, "%lu\n", (unsigned long)TIKU_NOR_SIZE_BYTES);
 }
 
-/** @brief Which bus width the device is currently talking. */
+/** @brief Bus mode, "octal-ddr" or "serial"; "down" when unpowered. */
 static int
 flash_mode_read(char *buf, size_t max)
 {
@@ -67,12 +67,7 @@ flash_mode_read(char *buf, size_t max)
                     tiku_nor_is_octal() ? "octal-ddr" : "serial");
 }
 
-/**
- * @brief Erases spent since boot.
- *
- * Endurance is finite and the driver runs unattended, so the count can be
- * read without a shell verb.
- */
+/** @brief Erases issued since boot; each counts against the endurance. */
 static int
 flash_erases_read(char *buf, size_t max)
 {

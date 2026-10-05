@@ -37,15 +37,13 @@
 /*
  * History ring placement by grade:
  *
- *   MSP430     TIKU_DURABLE -- FRAM in place, survives power cycles; FRAM is
- *              ample there.
- *   elsewhere  TIKU_RETAINED -- survives a warm reset; a power cycle reseeds
+ *   MSP430     TIKU_DURABLE -- FRAM in place, survives power cycles.
+ *   elsewhere  TIKU_RETAINED -- survives a warm reset; a power cycle loses
  *              it, except where the port mirrors retained data to NVM
- *              (STM32N6, ESP32-C61).  The ring scales with LINE_SIZE (4 KB
- *              at 256 B x 16 deep), the whole of RP2350's 4 KB durable budget.
+ *              (STM32N6, ESP32-C61).  At 256-byte lines and 16 entries the
+ *              ring is 4 KB, the whole of RP2350's TIKU_DURABLE budget.
  *
- * The magic word self-primes either way, so garbage-on-first-boot is handled
- * identically at both grades.
+ * At either grade a wrong magic word makes hist_ensure_init() clear the ring.
  */
 #ifdef PLATFORM_MSP430
 #define HIST_PERSISTENT TIKU_DURABLE
@@ -58,9 +56,11 @@ typedef struct {
     char line[TIKU_SHELL_LINE_SIZE];
 } tiku_shell_hist_entry_t;
 
-/** Ring control block (durable/warm per the grade split above).  No
- *  initializer: the sections are NOLOAD off MSP430 and the magic word
- *  primes virgin content in hist_ensure_init(). */
+/**
+ * Ring control block, placed by HIST_PERSISTENT.  It has no initializer: off
+ * MSP430 the section is NOLOAD, and hist_ensure_init() primes the ring when
+ * the magic word is wrong.
+ */
 static HIST_PERSISTENT struct {
     uint16_t                magic;
     uint8_t                 head;   /* next write slot */
@@ -151,7 +151,7 @@ tiku_shell_history_record(const char *line)
         }
     }
 
-    /* Prepare the entry in SRAM before taking the MPU lock */
+    /* Build the entry in SRAM before the MPU window opens */
     memset(buf, 0, sizeof(buf));
     strncpy(buf, line, TIKU_SHELL_LINE_SIZE - 1);
 

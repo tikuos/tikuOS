@@ -317,7 +317,8 @@ static int basic_reclaim_register(void)
     if (basic_reclaim_owner.slot_plus_one) return 0;
     reg.name = "BASIC"; reg.context = &basic_reclaim; reg.context_size = sizeof basic_reclaim;
     reg.step = basic_reclaim_step; reg.describe = basic_reclaim_describe;
-    /* Bounded by the coordinator's half-range clock rule on 16-bit clocks. */
+    /* 30 s, capped at TIKU_CLOCK_MAX_INTERVAL: the coordinator's half-range
+     * limit on a 16-bit clock. */
     reg.prepare_ticks = (tiku_clock_time_t)(TIKU_CLOCK_SECOND <= TIKU_CLOCK_MAX_INTERVAL / 30u ?
                                           30u * TIKU_CLOCK_SECOND : TIKU_CLOCK_MAX_INTERVAL);
     reg.recovery_ticks = reg.prepare_ticks;

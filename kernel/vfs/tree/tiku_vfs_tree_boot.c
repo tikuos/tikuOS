@@ -42,14 +42,14 @@
 static uint16_t boot_reset_cause;
 
 /**
- * @brief Decode a raw SYSRSTIV value to its short name.
+ * @brief Decode a SYSRSTIV-style reset code to its short name.
  *
  * Decodes the causes in the table (TI SLAU367): power faults, watchdog
  * variants, FRAM errors, password and MPU segment violations, and software
  * resets.  Any other value renders as "unknown"; /sys/boot/rstiv shows it raw.
  *
- * @param iv  Raw SYSRSTIV value (even; FR5994 reports 0x0000..0x002E, and
- *            FR6989 adds 0x0030)
+ * @param iv  Code from tiku_common_reset_reason() (even; FR5994 reports
+ *            0x0000..0x002E, and FR6989 adds 0x0030)
  * @return Static string naming the cause; never NULL
  */
 static const char *
@@ -108,13 +108,13 @@ boot_reason_read(char *buf, size_t max)
  */
 
 /*
- * Gate key for the boot-counter cell: an arbitrary non-trivial constant, so
- * uninitialised memory matches it with probability 2^-32.  Bump it if the
- * cell's meaning ever changes incompatibly, which forces a clean re-prime.
+ * Gate key for the boot-counter cell; uninitialised memory matches it with
+ * probability 2^-32.  The key changes with the cell's meaning: a new key
+ * re-primes the cell to 0 at the next boot.
  */
 #define BOOT_COUNT_MAGIC  0xB007C001UL
 
-/** Durable cell: boots since first power-up (1 on the very first) */
+/** Durable cell: boots since first power-up (1 on the first) */
 static TIKU_DURABLE uint32_t boot_count_persist;
 
 /** Gate + descriptor: defaults to 0, then pre-increments each boot */
@@ -147,13 +147,14 @@ tiku_vfs_tree_boot_count_read(char *buf, size_t max)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Map raw SYSRSTIV to one of four user-facing categories.
+ * @brief Map a SYSRSTIV-style reset code to one of four user-facing
+ *        categories.
  *
  * "watchdog" (counter overflow or password violation), "power" (brownout, SVS,
  * PMM/FRAM violation, or a clean cold start), "reboot" (software BOR/POR or the
  * RST pin), "other".  /sys/boot/reason keeps the detailed name.
  *
- * @param iv  Raw SYSRSTIV value
+ * @param iv  Code from tiku_common_reset_reason()
  * @return Static category string; never NULL
  */
 static const char *
@@ -166,7 +167,7 @@ last_reset_str(uint16_t iv)
     /* Power: brownout, SVS, PMM violation, FRAM power violation */
     case 0x0002: case 0x000E: case 0x0020: case 0x001A:
         return "power";
-    /* Software-initiated: BOR, POR, NMI from RST pin */
+    /* Reboot: software BOR, software POR, or the RST pin */
     case 0x0004: case 0x0006: case 0x0014:
         return "reboot";
     /* Cold start (no reset cause) reported as power-on */
@@ -199,14 +200,12 @@ tiku_vfs_tree_boot_last_reset_read(char *buf, size_t max)
 /*---------------------------------------------------------------------------*/
 
 /*
- * Durable sum of uptime across every boot since the chip was
- * first programmed. Saved on every read: the persisted cell
- * tracks lifetime within one read interval of accuracy, so a
- * monitoring loop that polls /sys/cold_boots once a minute loses
- * at most 60 seconds on a power-loss event between reads.
+ * Durable sum of uptime across every boot since the cell was first primed.
+ * Each read of /sys/cold_boots saves it, so a power loss loses only the time
+ * since the last read.
  *
- * Lifetime = lifetime_at_boot (snapshotted at init) + current
- * uptime in seconds.
+ * Lifetime = lifetime_at_boot (snapshotted at init) + current uptime in
+ * seconds.
  */
 
 /**
@@ -361,8 +360,7 @@ boot_clock_aclk_read(char *buf, size_t max)
  * @brief Read handler for /sys/boot/clock/fault.
  *
  * Renders "1\n" when the clock system reports a fault flag
- * (oscillator failure latched since boot), "0\n" when healthy.
- * Check this first when timers drift or UART baud is off.
+ * (oscillator failure latched since boot), "0\n" otherwise.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -379,20 +377,22 @@ boot_clock_fault_read(char *buf, size_t max)
 /* /sys/boot/mpu/{violations,count,last_addr}                                */
 /*---------------------------------------------------------------------------*/
 /*
- *   violations — MPU segment violation flags from the current boot, as a
- *                hex bitmask.  Cleared on every fresh boot (.bss-backed).
- *   count      — counter incremented on every violation, surviving the
- *                fault-triggered reset on platforms with a NOLOAD
- *                diagnostic region (RP2350 .mpu_diag).  Decimal.
- *   last_addr  — fault address of the most recent violation (the MMFAR
- *                snapshot on Cortex-M), hex.
+ *   violations — MPU segment violation flags, as a hex bitmask.  RA8P1
+ *                reports them from its fault record, which survives the
+ *                reset a violation causes; on the other ports they clear
+ *                at every boot.
+ *   count      — violations counted across fault-triggered resets, kept in
+ *                the NOLOAD .mpu_diag region on RP2350 and Ambiq; 0 on the
+ *                other ports.  Decimal.
+ *   last_addr  — fault address of the most recent violation: the MMFAR
+ *                snapshot on RP2350 and Ambiq, 0 on the other ports.  Hex.
  */
 
 /**
  * @brief Read handler for /sys/boot/mpu/violations.
  *
- * Renders this boot's violation flag bitmask as two hex digits ("0x00\n" when
- * clean).  Bit meanings are defined by kernel/memory/tiku_mpu.c.
+ * Renders the violation flags in hex, at least two digits ("0x00\n" when
+ * clean), in the port's encoding (tiku_mpu_arch_get_violation_flags()).
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -409,8 +409,8 @@ boot_mpu_violations_read(char *buf, size_t max)
  * @brief Read handler for /sys/boot/mpu/count.
  *
  * Renders the cumulative violation count.  Where a NOLOAD diagnostic region
- * exists the counter survives the reset the violation triggers, so a crash-loop
- * shows up as a steadily climbing number across reboots.
+ * exists the counter survives the reset the violation triggers, so a crash
+ * loop raises it from one boot to the next.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -426,9 +426,9 @@ boot_mpu_count_read(char *buf, size_t max)
 /**
  * @brief Read handler for /sys/boot/mpu/last_addr.
  *
- * Renders the faulting address of the most recent violation as
- * eight hex digits ("0x20003ffc\n") — the MMFAR snapshot on
- * Cortex-M.  Reads 0 when no violation has been recorded.
+ * Renders the faulting address of the most recent violation as eight hex
+ * digits ("0x20003ffc\n"): the MMFAR snapshot on RP2350 and Ambiq.  Reads 0
+ * before any violation is recorded and on the other ports.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -469,8 +469,8 @@ static const tiku_vfs_node_t boot_mpu_children[] = {
 /**
  * @brief Read handler for /sys/boot/hang.
  *
- * The process the check-in watchdog caught wedging the cooperative scheduler
- * before the last reset, as "<pid> <name>", or "none".
+ * Renders the process the check-in watchdog caught holding the cooperative
+ * scheduler before the last reset, as "<pid> <name>", or "none".
  */
 static int boot_hang_read(char *buf, size_t max)
 {
@@ -514,7 +514,8 @@ _Static_assert(sizeof(tiku_vfs_tree_boot_children) /
  * validates both persist cells -- blank or corrupt ones are primed to 0 with
  * the gate stamped last -- then bumps the counter and snapshots the lifetime.
  *
- * @note Runs first in tiku_vfs_tree_init(): SYSRSTIV reads are destructive.
+ * @note Runs first in tiku_vfs_tree_init(): on MSP430 a SYSRSTIV read is
+ *       destructive.
  */
 void
 tiku_vfs_tree_boot_init(void)

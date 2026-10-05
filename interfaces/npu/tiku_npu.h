@@ -8,7 +8,8 @@
  * tiku_npu.h - the portable neural accelerator contract.
  *
  * A named model out of the file store, a buffer in, a buffer out, and one
- * blocking run.  Cache coherency belongs to the backend, not the caller.
+ * blocking run.  The backend keeps the caches coherent; a caller does no
+ * cache maintenance.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,7 +19,7 @@
 
 #include <stdint.h>
 
-/** @brief Zero where no backend is compiled in, so callers can compile out. */
+/** @brief 1 when an NPU backend is compiled in, else 0. */
 #ifndef TIKU_HAS_NPU
 #define TIKU_HAS_NPU            0
 #endif
@@ -29,7 +30,7 @@
 #define TIKU_NPU_ERR_TIMEOUT    -3  /**< submitted, never reached the end   */
 #define TIKU_NPU_ERR_FAULT      -4  /**< the accelerator rejected the work  */
 
-/** @brief Models are named files in the store rather than linked-in arrays. */
+/** @brief Models are named files in the store. */
 #define TIKU_NPU_F_STORE_MODEL  (1u << 0)
 /** @brief Integer quantised networks only; no float path exists. */
 #define TIKU_NPU_F_INT_ONLY     (1u << 1)

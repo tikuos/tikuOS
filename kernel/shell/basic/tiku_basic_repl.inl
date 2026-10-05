@@ -37,12 +37,11 @@ process_line(const char *raw)
         }
         body = p;
         skip_ws(&body);
-        /* No basic_ckpt_invalidate() here: this branch is also the LOAD
-         * replay path (basic_load_from_persist replays every stored line
-         * through process_line), so invalidating per line would destroy the
-         * checkpoint RUN RESUME is about to use after a power cut.  A
-         * checkpoint made stale by an interactive edit is rejected at restore
-         * time by the program-identity CRC it carries (basic_ckpt_read). */
+        /* This branch also replays LOAD (basic_load_from_persist() sends
+         * every stored line through process_line()), so it must not
+         * invalidate the checkpoint: RUN RESUME after a power cut needs it.
+         * A checkpoint made stale by an interactive edit fails the
+         * program-identity check in basic_ckpt_read(). */
         if (prog_store((uint16_t)ln, body) < 0) {
             basic_reportf(TIKU_BASIC_ERR_NOMEM, "program full (%u lines)",
                           (unsigned)TIKU_BASIC_PROGRAM_LINES);
@@ -105,9 +104,8 @@ process_line(const char *raw)
                     (void)basic_save_to_named(name);
                     return;
                 }
-                /* parse_path_literal already set basic_error -- reset
-                 * it here, the user will see the error message and
-                 * the REPL needs a clean state. */
+                /* parse_path_literal() has reported the error; clear
+                 * basic_error so the REPL carries on. */
                 basic_error = 0;
                 return;
             }

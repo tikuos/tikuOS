@@ -246,8 +246,8 @@ static void class_request(tiku_usbd_ctrl_t *c, uint8_t req_type, uint8_t req,
             break;
         }
     }
-    /* A class request with no data it has no answer for: accept and say
-     * nothing; one asking for data is stalled. */
+    /* Any other host-to-device class request without a data stage gets a
+     * status; the rest are stalled. */
     if ((req_type & 0x80u) == 0u && length == 0u) {
         out->action = TIKU_USBD_CTRL_STATUS;
     } else {
@@ -271,7 +271,7 @@ void tiku_usbd_ctrl_setup(tiku_usbd_ctrl_t *c, const uint8_t *p,
         class_request(c, req_type, req, value, length, out);
         return;
     }
-    if ((req_type & 0x60u) != 0u) {         /* vendor: nothing to say      */
+    if ((req_type & 0x60u) != 0u) {         /* vendor, reserved: stall     */
         return;
     }
 
@@ -292,8 +292,8 @@ void tiku_usbd_ctrl_setup(tiku_usbd_ctrl_t *c, const uint8_t *p,
                    s->string[idx] != (const uint8_t *)0) {
             reply(out, s->string[idx], s->string_len[idx], length);
         }
-        /* Qualifier, other-speed, BOS and the rest: a stall is the answer a
-         * host expects from a device that has none, not a failure. */
+        /* Device qualifier, other-speed, BOS and any other type are
+         * stalled, which a host reads as the device not having one. */
         return;
     }
     case 0x09:                               /* SET_CONFIGURATION           */

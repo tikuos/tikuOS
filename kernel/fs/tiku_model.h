@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_model.h - read a model out of the file store instead of out of .rodata.
+ * tiku_model.h - load a model from the file store.
  *
  * Opens a model by name, maps it in place and dispatches on format: RAW is
  * opaque bytes; RELOC carries a relocation table whose sites are patched from
@@ -47,9 +47,9 @@ const char *tiku_model_strerror(int status);
 
 /** @brief Model file formats, told apart by the RELOC magic. */
 typedef enum {
-    /** Opaque bytes: quantized weights, a CMSIS-NN model, a palette -- anything
-     *  addressed as base+offset, which needs no fixing up at all.  Any file
-     *  without the RELOC magic is treated as RAW. */
+    /** Opaque bytes addressed as base+offset, such as quantized weights, a
+     *  CMSIS-NN model or a palette; nothing is patched.  Any non-empty file
+     *  without the RELOC magic is RAW. */
     TIKU_MODEL_FMT_RAW   = 0,
     /** Carries a relocation table (tools/axonpack.py output, magic 'AXM1'). */
     TIKU_MODEL_FMT_RELOC = 1
@@ -80,8 +80,8 @@ typedef enum {
  * @param name  NUL-terminated symbol name as the packer recorded it.
  * @param addr  Runtime address the name resolves to, Thumb-tagged for code.
  * @return TIKU_MODEL_OK, or ERR_PARAM / ERR_FULL.
- * @note Register `&thing`, never a number: code symbols must carry the Thumb
- *       bit.
+ * @note Pass an address taken with & (`&thing`): a code symbol's address
+ *       carries the Thumb bit, which a hand-written number may lack.
  */
 int tiku_model_sym_register(const char *name, uintptr_t addr);
 
@@ -96,11 +96,13 @@ unsigned tiku_model_sym_count(void);
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief A model mapped in place, its structure already validated.
+ * @brief A model mapped in place, its structure validated by
+ *        tiku_model_open().
  *
- * Every pointer here aims into the memory-mapped store, so nothing was copied
- * to open it.  They share tiku_tfs_map()'s lifetime rule: valid until the next
- * write or delete of that file name.  Re-open after re-provisioning.
+ * Every pointer here aims into the memory-mapped store; nothing is copied.
+ *
+ * @note The pointers follow tiku_tfs_map()'s lifetime rule: valid until the
+ *       next write or delete of that file name.  Re-open after re-provisioning.
  */
 typedef struct {
     const uint8_t *base;        /**< mapped file base                        */
@@ -114,9 +116,8 @@ typedef struct {
     size_t         cmd_len;
 
     /* The engine-facing description of the model: input size, quantization,
-     * working-buffer size.  Opaque to this layer, which only relocates it; the
-     * caller knows what struct it is.  An image with no other model to borrow
-     * a descriptor from cannot run the model without it. */
+     * working-buffer size.  Opaque to this layer, which only relocates it;
+     * the engine that runs the model defines its struct. */
     const uint8_t *desc;        /**< RELOC: descriptor bytes, unrelocated    */
     size_t         desc_len;
     const uint8_t *labels;      /**< RELOC: pointer array, unrelocated       */
@@ -141,8 +142,8 @@ typedef struct {
 /**
  * @brief The sections a model can ask to have patched.
  *
- * Weights and strings are absent because they are used exactly as mapped -- a
- * section appears here only if something in it needs correcting.
+ * Weights and strings are used as mapped and never patched, so they have no
+ * entry here.
  */
 typedef enum {
     TIKU_MODEL_SECT_CMD    = 0,
@@ -151,7 +152,7 @@ typedef enum {
     TIKU_MODEL_SECT_COUNT  = 3
 } tiku_model_sect_t;
 
-/** @brief Where one section should be built, and how much room is there. */
+/** @brief Where one section is built, and the room there. */
 typedef struct {
     void  *dst;                 /**< NULL if the model has no such section   */
     size_t cap;                 /**< bytes available at @c dst               */
@@ -160,7 +161,7 @@ typedef struct {
 /**
  * @brief Open a model by file name and validate it end to end.
  *
- * Checks every header field, section bound and CRC; for RELOC, also that each
+ * For RELOC, checks every header field, section bound and CRC, and that each
  * site is a 4-byte aligned word inside the section it names (commands,
  * descriptor or labels) and names an entry of the symbol table.
  *
@@ -177,8 +178,8 @@ int tiku_model_open(tiku_tfs_t *fs, const char *name, tiku_model_t *out);
  * @brief Single-section form of tiku_model_prepare_all(): the commands only.
  *
  * A RAW model needs nothing and succeeds.  Every RELOC model carries a
- * descriptor, which this form gives no destination, so it is refused; build
- * it with tiku_model_prepare_all().
+ * descriptor, which this form gives no destination, so a RELOC model fails;
+ * build it with tiku_model_prepare_all().
  *
  * @param m        Model from tiku_model_open().
  * @param dst      Destination for the patched command buffer.
@@ -201,8 +202,9 @@ int tiku_model_prepare(const tiku_model_t *m, void *dst, size_t cap,
  * @param dst      Array of TIKU_MODEL_SECT_COUNT destinations.
  * @param bad_sym  Receives the unresolved symbol name on ERR_SYMBOL.  May be
  *                 NULL.
- * @return TIKU_MODEL_OK, or SPACE / SYMBOL / PARAM / FULL.  On an error
- *         nothing is written: sections cross-reference, so it is all or none.
+ * @return TIKU_MODEL_OK, or SPACE / SYMBOL / PARAM / FULL / FORMAT.  On an
+ *         error nothing is written: sections cross-reference, so it is all or
+ *         none.
  */
 int tiku_model_prepare_all(const tiku_model_t *m, tiku_model_dest_t *dst,
                            const char **bad_sym);

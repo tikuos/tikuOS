@@ -160,7 +160,10 @@ ssid_text(const uint8_t *src, unsigned len, char out[WIFI_SSID_TEXT_MAX])
 /* STATUS AND ACTIONS                                                        */
 /*---------------------------------------------------------------------------*/
 
-/** @brief /sys/net/wifi/state: down, disconnecting, scanning or the link. */
+/**
+ * @brief /sys/net/wifi/state: down, disconnecting, scanning, or the link
+ *        state (idle, connecting, joined, failed).
+ */
 static int
 state_read(char *buf, size_t max)
 {
@@ -341,6 +344,7 @@ scan_result_read(unsigned index, char *buf, size_t max)
                     ap->channel, ap->rssi, escaped);
 }
 
+/** @brief Generate the read handler of scan_results/<i>. */
 #define SCAN_WRAPPER(i)                                                      \
     static int scan_##i(char *buf, size_t max)                               \
     {                                                                        \
@@ -364,6 +368,7 @@ SCAN_WRAPPER(13)
 SCAN_WRAPPER(14)
 SCAN_WRAPPER(15)
 
+/** @brief One scan_results/<i> node. */
 #define SCAN_NODE(i)                                                         \
     { .name = #i, .type = TIKU_VFS_FILE, .read = scan_##i,                   \
       .desc = &text_desc }
@@ -513,6 +518,7 @@ profile_clear(unsigned i, const char *buf, size_t len)
     return TIKU_VFS_OK;
 }
 
+/** @brief Generate the handlers of profiles/<i>, bound to slot @p i. */
 #define PROFILE_WRAPPERS(i)                                                  \
     static int ssid_r_##i(char *buf, size_t max)                             \
     {                                                                        \
@@ -550,6 +556,7 @@ profile_clear(unsigned i, const char *buf, size_t len)
 PROFILE_WRAPPERS(0)
 PROFILE_WRAPPERS(1)
 
+/** @brief The node table of profiles/<i>; the password is write-only. */
 #define PROFILE_TABLE(i)                                                     \
     static const tiku_vfs_node_t profile_##i[] = {                           \
         { .name = "ssid", .type = TIKU_VFS_FILE, .read = ssid_r_##i,         \

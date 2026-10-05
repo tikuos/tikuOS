@@ -98,9 +98,8 @@ tiku_i2c_read(uint8_t addr, uint8_t *buf, uint16_t len)
 int
 tiku_i2c_probe(uint8_t addr)
 {
-    /* Address-only presence check: no buffer, so no len/NULL guard.  A bus
-     * scan uses this rather than a zero-length write, which the write path
-     * rejects (it requires len >= 1). */
+    /* Address-only presence check: there is no buffer, so no len/NULL
+     * guard. */
     return tiku_i2c_arch_probe(addr);
 }
 

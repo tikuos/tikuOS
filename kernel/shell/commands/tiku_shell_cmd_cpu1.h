@@ -16,10 +16,12 @@
 #include <stdint.h>
 
 /**
- * @brief Handle `cpu1 start|stop|ping|bench|verify|info`.
+ * @brief Handle `cpu1 start|stop|ping|bench|verify|info` for the RA8P1's
+ *        Cortex-M33; with no verb it runs info.
  *
  * @param argc Argument count
  * @param argv Argument vector
+ * @note Defined only when TIKU_SHELL_CMD_CPU1 is set.
  */
 void tiku_shell_cmd_cpu1(uint8_t argc, const char *argv[]);
 

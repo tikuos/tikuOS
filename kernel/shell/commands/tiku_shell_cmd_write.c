@@ -7,8 +7,8 @@
  *
  * tiku_shell_cmd_write.c - "write" command implementation
  *
- * Writes a value string to a writable VFS node.  More general than
- * "toggle" — supports any value the node's write handler accepts.
+ * Writes argv[2] to a VFS node through its write handler.  Success
+ * prints nothing; a failure prints the VFS status.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -46,7 +46,7 @@ tiku_shell_cmd_write(uint8_t argc, const char *argv[])
 
     rc = tiku_vfs_write(resolved, value, len);
     if (rc < 0) {
-        /* "cannot write" kept for host matchers; append the status code. */
+        /* Host tooling matches "cannot write"; the status name follows. */
         SHELL_PRINTF("write: cannot write '%s' (%s)\n", resolved,
                      tiku_vfs_strerror(rc));
     }

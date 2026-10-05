@@ -7,9 +7,9 @@
  *
  * tiku_console.c - the one SLIP decoder and encoder under every console user.
  *
- * An END is a delimiter, never a toggle: the byte after it opens a frame for
- * the channel claiming it, or is text.  A doubled END costs only itself; after
- * a stray one, text led by a claimed byte is lost until an END or the TTL.
+ * Every END ends any open frame, and the byte after it opens a frame for the
+ * channel claiming it or is text.  A doubled END costs only itself; after a
+ * stray one, text led by a claimed byte is lost until an END or the TTL.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -33,6 +33,8 @@
 /* PRIVATE STATE                                                             */
 /*---------------------------------------------------------------------------*/
 
+/** @brief A registered channel: the first byte it claims, where its frames
+ *         go. */
 typedef struct {
     uint8_t  value;                 /**< first byte, under mask */
     uint8_t  mask;
@@ -125,9 +127,10 @@ TIKU_PROCESS_THREAD(tiku_console_process, ev, data)
     while (listening()) {
         TIKU_PROCESS_WAIT_EVENT();
         if (ev == TIKU_EVENT_TIMER) {
-            /* From now, not from the last start: the spacing is drain to
-             * drain, and a start past a stalled clock reads as due at
-             * once. */
+            /* Restarted from now, so drains are TIKU_CONSOLE_POLL_TICKS
+             * apart.  tiku_timer_reset() would move the start past a
+             * stalled clock, which the expiry test reads as already due,
+             * and the timer would fire on every pass. */
             tiku_timer_restart(&pump_timer);
         }
         service();
@@ -384,7 +387,8 @@ tiku_console_write(const void *bytes, size_t len)
 /* IN                                                                        */
 /*---------------------------------------------------------------------------*/
 
-/** @brief The open frame is complete: deliver it, or drop it as a unit. */
+/** @brief The open frame is complete: deliver it, or drop it as a unit.  An
+ *         empty frame is neither delivered nor counted. */
 static void
 close_frame(void)
 {
@@ -444,8 +448,8 @@ sort_byte(uint8_t b)
     }
     if ((tiku_clock_time_t)(tiku_clock_time() - rx.opened)
         > (tiku_clock_time_t)TIKU_CONSOLE_FRAME_TTL) {
-        /* The closing END was lost: the frame is debris, and this byte
-         * and every later one is text again. */
+        /* The frame outlived TIKU_CONSOLE_FRAME_TTL: drop it.  This byte
+         * and the ones after it are text until the next END. */
         stats.phantom++;
         rx.in_frame = 0u;
         rx.esc = 0u;

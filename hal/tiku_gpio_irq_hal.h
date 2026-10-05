@@ -7,9 +7,9 @@
  *
  * tiku_gpio_irq_hal.h - platform-agnostic GPIO interrupt interface.
  *
- * Bridges per-pin edge interrupts into TIKU_EVENT_GPIO process events.  The
- * arch backend owns edge selection, the enable and pending flags and the ISR;
- * this side is one API plus one event id, whose payload packs port and pin.
+ * Declares the per-port edge-interrupt calls and the TIKU_EVENT_GPIO payload
+ * macros.  The port owns edge selection, the enable and pending flags and the
+ * ISR, which broadcasts TIKU_EVENT_GPIO with port and pin packed in the data.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -61,10 +61,13 @@ typedef enum {
 /**
  * @brief Enable an edge-triggered interrupt on the given pin.
  *
- * Configures the pin as an input with the standard pull, sets the edge, clears
- * any pending flag and unmasks.  Matching edges then post a TIKU_EVENT_GPIO
- * broadcast whose data is TIKU_GPIO_IRQ_PACK(port, pin).
+ * Makes the pin an input (pulled up on MSP430, RP2350 and nRF54L), sets the
+ * edge, clears any pending flag and unmasks.  Each matching edge broadcasts
+ * TIKU_EVENT_GPIO with data TIKU_GPIO_IRQ_PACK(port, pin).
  *
+ * @param port  GPIO port
+ * @param pin   Pin within the port
+ * @param edge  Edge that raises the interrupt
  * @return TIKU_GPIO_IRQ_OK or a negative error code.
  */
 int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
@@ -73,10 +76,11 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
 /**
  * @brief Mask the interrupt and clear any pending flag.
  *
- * Pin direction and pull state are left unchanged so the
- * application can read the line via tiku_gpio_read() afterwards
- * if desired.
+ * Leaves pin direction and pull unchanged; tiku_gpio_read() reads the line
+ * afterwards.
  *
+ * @param port  GPIO port
+ * @param pin   Pin within the port
  * @return TIKU_GPIO_IRQ_OK or a negative error code.
  */
 int tiku_gpio_irq_arch_disable(uint8_t port, uint8_t pin);

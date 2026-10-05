@@ -7,9 +7,9 @@
  *
  * tiku_basic_subs.inl - multi-line subroutines with parameters and locals.
  *
- * Parameters and locals are ordinary global slots whose prior values are pushed
- * on a save-stack at entry and restored at exit, so the other words need no
- * changes.  A SUB reached by fall-through is skipped; only CALL runs the body.
+ * Parameters and locals are ordinary global variable slots: entry pushes their
+ * prior values on a save stack and exit restores them.  A SUB reached by
+ * fall-through is skipped; only CALL runs the body.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -36,8 +36,8 @@ subs_line_kw(const char *t, const char *kw)
 /**
  * @brief Find the `SUB <name>` line that defines @p name.
  *
- * The SUB registry (rebuilt after each program edit) answers; prog[] is scanned
- * only when the registry overflowed.
+ * The SUB registry, rebuilt at the first lookup after an edit, answers; prog[]
+ * is scanned only when the registry overflowed.
  *
  * @return The prog[] index, or -1.
  */
@@ -122,9 +122,9 @@ exec_sub(const char **p)
         else if (subs_line_kw(prog[ni].text, "ENDSUB")) {
             if (--depth == 0) {
                 uint16_t after = (uint16_t)line_after(ln);
-                /* If the SUB was the last thing in the program, line_after is
-                 * 0 -- which the RUN loop would (mis)read as "restart from the
-                 * top". End the program instead. */
+                /* line_after() is 0 when the SUB ends the program, and the
+                 * RUN loop reads PC 0 as the first line, so the run ends
+                 * here. */
                 if (after == 0) basic_running = 0;
                 else { basic_pc = after; basic_pc_set = 1; }
                 return;

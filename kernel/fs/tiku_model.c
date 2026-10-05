@@ -7,9 +7,9 @@
  *
  * tiku_model.c - Tiku model loader.  See tiku_model.h for the interface.
  *
- * Validates a packed model file, then patches its relocation sites in place.
- * The file is a 96-byte little-endian header naming each section's offset and
- * length, followed by the blobs, the site table and the symbol names.
+ * Validates a packed model file and builds patched copies of its relocatable
+ * sections.  The file is a 96-byte little-endian header naming each section's
+ * offset and length, followed by the blobs, the site table and the symbols.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -28,9 +28,9 @@
 /*
  * Version 3 carries four CRCs: the weights, the commands, the descriptor with
  * the labels and strings, and the relocation table with the symbol names.
- * Structural validation keeps a corrupt site inside its section, but only the
- * table's CRC catches an in-bounds corrupt offset, which would patch the wrong
- * word.  Any other version is refused; older ones carry no descriptor.
+ * Structural validation keeps a corrupt site inside its section; only the
+ * table's CRC catches an in-bounds corrupt offset, which patches the wrong
+ * word.  Any other version is TIKU_MODEL_ERR_FORMAT.
  */
 #define AXM_VERSION      3u
 #define AXM_HDR_BYTES    96u
@@ -61,9 +61,9 @@
 #define AXM_W_CRC_M      21u           /* desc + labels + strings */
 #define AXM_W_CRC_T      22u
 
-/* Relocation targets naming a part of the model itself.  The loader owns these
- * because only it knows where each part ended up; anything else -- including an
- * unrecognised '@' name -- falls through to the symbol registry. */
+/* Relocation targets naming a part of the model itself, which the loader
+ * resolves to where that part is mapped or built.  Any other name, an
+ * unrecognised '@' name included, is looked up in the symbol registry. */
 #define AXM_SYM_WEIGHTS  "@weights"
 #define AXM_SYM_CMD      "@cmd"
 #define AXM_SYM_DESC     "@desc"
@@ -217,9 +217,9 @@ static const char *model_sym_nth(const char *tab, const char *end, uint32_t i)
 /**
  * @brief Validate a RELOC header and fill @p out.
  *
- * Every bound is a subtraction against the remaining length, never an addition
- * compared to it: two file-supplied u32s added together wrap, and a wrapped sum
- * passes a naive check.
+ * Each length is bounded by subtraction against the remaining length
+ * (`len > n - off`) before any sum uses it, so no sum of two file-supplied
+ * u32s can wrap past a check.
  */
 static int model_open_reloc(tiku_model_t *out)
 {
@@ -259,9 +259,9 @@ static int model_open_reloc(tiku_model_t *out)
     if (ver != AXM_VERSION || hdrlen != AXM_HDR_BYTES) {
         return TIKU_MODEL_ERR_FORMAT;
     }
-    /* Sections in order, each inside the file, none overlapping its neighbour.
-     * The packer emits exactly this order and pads for alignment, so anything
-     * else is a file this loader did not produce. */
+    /* Sections in order, each inside the file, none overlapping its neighbour:
+     * the order tools/axonpack.py emits, with padding for alignment.  Any other
+     * arrangement is TIKU_MODEL_ERR_FORMAT. */
     if (woff != AXM_HDR_BYTES ||
         wlen > (uint32_t)n - woff ||
         coff < woff + wlen || coff > (uint32_t)n ||
@@ -282,9 +282,8 @@ static int model_open_reloc(tiku_model_t *out)
     if (wlen == 0u || clen == 0u || dlen == 0u || nsyms == 0u) {
         return TIKU_MODEL_ERR_FORMAT;
     }
-    /* The label array is pointer-sized entries, and nlabels must agree with the
-     * section it describes -- otherwise a caller building a label list from
-     * nlabels would read past the section. */
+    /* The label array holds 4-byte pointer entries, and nlabels must match
+     * the section: callers size their label lists from nlabels. */
     if ((llen & 3u) != 0u || nlabels != llen / 4u) {
         return TIKU_MODEL_ERR_FORMAT;
     }
@@ -314,11 +313,10 @@ static int model_open_reloc(tiku_model_t *out)
     out->syms           = (const char *)(b + soff);
     out->nsyms          = nsyms;
 
-    /* Walk the whole site table now, so nothing downstream has to re-check it:
-     * a site must name a section the model actually has, must be a 4-byte word
-     * wholly inside that section, and must name a symbol index that exists.
-     * This keeps a corrupt table from turning into a write outside the buffer
-     * it was supposed to patch. */
+    /* Every site is checked here, and prepare does not re-check: each names a
+     * section the model has, is a 4-byte word wholly inside that section, and
+     * names a symbol index that exists.  A corrupt table therefore cannot
+     * direct a write outside the buffer being patched. */
     for (i = 0; i < nsites; i++) {
         const uint8_t *e = out->sites + (size_t)i * AXM_SITE_BYTES;
         uint32_t sect = (uint32_t)model_rd16(e);
@@ -339,9 +337,8 @@ static int model_open_reloc(tiku_model_t *out)
             return TIKU_MODEL_ERR_FORMAT;
         }
     }
-    /* Every name must be present and terminated inside the symbol region --
-     * checked here rather than at resolve time, so prepare() cannot walk off
-     * the end of a truncated table. */
+    /* Every name must be present and terminated inside the symbol region, so
+     * prepare cannot walk off the end of a truncated table. */
     for (i = 0; i < nsyms; i++) {
         if (model_sym_nth(out->syms, (const char *)(b + n), i) == NULL) {
             return TIKU_MODEL_ERR_FORMAT;
@@ -366,14 +363,13 @@ int tiku_model_open(tiku_tfs_t *fs, const char *name, tiku_model_t *out)
     out->len  = n;
 
     /*
-     * Format is sniffed, not configured: a file carrying the packer's magic is
-     * relocatable, anything else is opaque bytes.  That keeps "provision a
-     * palette" and "provision a compiled model" the same operation.
+     * The format comes from the file: one carrying the packer's magic is
+     * RELOC, anything else RAW, so a palette and a compiled model are
+     * provisioned the same way.
      *
-     * The magic is tested as soon as there are four bytes, not once there is
-     * a whole header: a file with the magic must be a valid RELOC model, so a
-     * truncated one is refused rather than read as RAW.  Below four bytes a
-     * truncated model cannot be told from a tiny payload.
+     * The magic is tested from four bytes on: a file with the magic must be a
+     * valid RELOC model, and a truncated one returns TIKU_MODEL_ERR_FORMAT.  A
+     * file under four bytes is RAW.
      */
     if (n >= 4u && model_rd32(out->base + AXM_W_MAGIC * 4u) == AXM_MAGIC) {
         return model_open_reloc(out);
@@ -444,8 +440,7 @@ int tiku_model_prepare_all(const tiku_model_t *m, tiku_model_dest_t *dst,
         *bad_sym = NULL;
     }
     if (m->fmt == (uint8_t)TIKU_MODEL_FMT_RAW) {
-        /* Nothing is baked in, so nothing needs correcting -- the caller reads
-         * the mapped bytes directly. */
+        /* RAW has no sites; the caller reads the mapped bytes directly. */
         return TIKU_MODEL_OK;
     }
     if (m->nsyms > TIKU_MODEL_SYM_MAX) {
@@ -454,10 +449,9 @@ int tiku_model_prepare_all(const tiku_model_t *m, tiku_model_dest_t *dst,
         return TIKU_MODEL_ERR_FULL;
     }
 
-    /* Room for every section the model has.  A section the caller did not
-     * provide for is refused here, before anything is written: its sites
-     * could not be patched, and a model patched everywhere except one
-     * section runs and answers wrongly. */
+    /* Every section the model has needs a destination with room.  A missing
+     * one fails here, before anything is written: a model patched in all but
+     * one section runs and answers wrongly. */
     for (s = 0; s < TIKU_MODEL_SECT_COUNT; s++) {
         size_t need = 0u;
         (void)model_sect_src(m, s, &need);
@@ -473,16 +467,15 @@ int tiku_model_prepare_all(const tiku_model_t *m, tiku_model_dest_t *dst,
     }
 
     /*
-     * Resolve every symbol before patching anything.  A model naming one
-     * unknown symbol fails with every section untouched, not with some sites
-     * corrected and the rest still holding bare addends, which would run and
-     * produce wrong answers.  Resolution is by name throughout, including the
-     * model's own sections.
+     * Resolve every symbol before patching anything: a model naming one
+     * unknown symbol fails with TIKU_MODEL_ERR_SYMBOL and every section
+     * untouched.  Resolution is by name throughout, including the model's own
+     * sections.
      */
     for (i = 0; i < m->nsyms; i++) {
         const char *nm = model_sym_nth(m->syms,
                                        (const char *)(m->base + m->len), i);
-        if (nm == NULL) {                    /* open() proved otherwise */
+        if (nm == NULL) {                    /* open() checked every name */
             return TIKU_MODEL_ERR_FORMAT;
         }
         if (model_resolve_own(m, dst, nm, &resolved[i])) {
@@ -535,8 +528,8 @@ int tiku_model_prepare(const tiku_model_t *m, void *dst, size_t cap,
     d[TIKU_MODEL_SECT_CMD].cap = cap;
 
     /* The single-section form.  Every RELOC model carries a descriptor, which
-     * has no destination here, so prepare_all() refuses it rather than build
-     * the commands and leave the descriptor unrelocated; only RAW succeeds. */
+     * has no destination here, so prepare_all() returns an error for it and
+     * writes nothing; only RAW succeeds. */
     rc = tiku_model_prepare_all(m, d, bad_sym);
     if (rc == TIKU_MODEL_OK && out_len != NULL) {
         *out_len = (m->fmt == (uint8_t)TIKU_MODEL_FMT_RAW) ? 0u : m->cmd_len;

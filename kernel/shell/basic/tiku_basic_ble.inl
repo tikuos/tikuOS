@@ -7,17 +7,17 @@
  *
  * tiku_basic_ble.inl - Bluetooth Low Energy words for BASIC.
  *
- * Words built on the driver-agnostic facades, not tied to one radio.  Two
- * independent capabilities light up their own vocabularies: connection-capable
- * serial words, and broadcast beacon and scan words.
+ * Words built on the driver-agnostic BLE facades.  Two capabilities each bring
+ * their own words: connection-capable serial (TIKU_BLE_SERIAL_PRESENT) and
+ * broadcast beacon and scan (TIKU_BLE_ADV_PRESENT).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #if TIKU_BASIC_BLE_ENABLE
 
-/* Advertised names ride in a 31-byte LE adv PDU (Flags + Complete Local Name),
- * so anything past ~26 chars would be truncated anyway. */
+/* Name buffer, NUL included: a 31-byte LE advertising payload, less the
+ * Flags field and the name header, holds at most 26 name bytes. */
 #define BASIC_BLE_NAME_CAP  24
 
 #if TIKU_BLE_SERIAL_PRESENT
@@ -93,7 +93,7 @@ exec_blebeacon(const char **p)
      * place (also when the beacon runs on the coprocessor):
      *   10 BLEBEACON "TIKU-T", 1000, "T=" + STR$(A)
      * dbm is the TX power in discrete silicon steps (+8..-46 on nRF54L); an
-     * illegal step throws rather than rounding. */
+     * illegal step throws and is not rounded. */
     BASIC_RECLAIM_EXTERNAL();
     char        name[BASIC_BLE_NAME_CAP];
     const char *nm;

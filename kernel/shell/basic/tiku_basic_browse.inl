@@ -8,8 +8,8 @@
  * tiku_basic_browse.inl - a tiny HTML-to-text renderer for BASIC.
  *
  * Strips tags, skips script and style contents, decodes common entities and
- * turns block tags into breaks.  A lynx-style view of a simple page, not a
- * parser: unknown tags are dropped and attributes ignored.
+ * turns block tags into line breaks; every other tag is dropped with its
+ * attributes.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

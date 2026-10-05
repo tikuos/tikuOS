@@ -44,7 +44,7 @@ static const tiku_shell_io_t s_ble_io = {
  *
  * flush() sends only with a free controller credit, so this pumps the stack
  * (acks return credits) until the buffer is empty; one second without
- * progress (link died, subscriber gone) abandons the rest.
+ * progress (link lost, subscriber gone) abandons the rest.
  */
 static void ble_uart_drain_tx(void) {
     uint16_t prev = tiku_ble_uart_tx_pending();

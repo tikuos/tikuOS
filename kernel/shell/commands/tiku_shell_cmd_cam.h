@@ -22,6 +22,8 @@
  *
  * @param argc  Argument count (unused)
  * @param argv  Arguments (unused)
+ * @note Defined only when TIKU_SHELL_CMD_CAM is set: an RA8P1 build with
+ *       TIKU_DRV_CAM_ENABLE=1.
  */
 void tiku_shell_cmd_cam(uint8_t argc, const char *argv[]);
 

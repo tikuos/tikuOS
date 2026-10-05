@@ -34,12 +34,13 @@ void tiku_shell_cmd_usb(uint8_t argc, const char *argv[])
      *                      default full speed + CDC console; "hs"
      *                      requests high speed, "msc" presents a RAM
      *                      disk instead of the console, "emmc" the card
-     *   power usb attach   soft-connect -- the host may now enumerate
+     *   power usb attach   soft-connect; the host can then enumerate
      *   power usb detach   soft-disconnect
      *   power usb state    what the host has done so far
-     *   power usb regs     host registers (power-safe)
+     *   power usb regs     USB registers; only DEVPWRSTATUS is read while
+     *                      the USB domain is off
      *   power usb console  move the shell onto the CDC pipes
-     *   power usb uart     move it back (the escape hatch)
+     *   power usb uart     move the shell back to the UART
      *   power usb hash [n] MSC counters and FNV-1a of the RAM disk
      *   power usb selftest MSC LBA bounds-check cases
      *   power usb adma on|off
@@ -48,15 +49,15 @@ void tiku_shell_cmd_usb(uint8_t argc, const char *argv[])
      *                      count CDC input until ms of idle
      *   power usb off      release the rails and both domains
      *
-     * `up` leaves the device detached so bring-up can be inspected before
-     * the bus starts making demands with deadlines.
+     * `up` leaves the device detached; the host sees it only after
+     * `attach`.
      */
     static const char *const un[] = { "ok", "POWER", "CLOCK", "TIMEOUT",
                                       "ARG", "STATE", "FIFO" };
     if (argc >= 3 && tiku_cmd_streq(argv[2], "up")) {
-        /* Full speed unless asked otherwise.  The two paths differ only in
-         * where the PHY's reference comes from, so a HS failure can be
-         * attributed. */
+        /* Full speed unless `hs` is given.  tiku_usb_up_full() takes the
+         * PHY's reference clock from a different source for each speed, and
+         * sets HSENAB in the POWER register only for high speed. */
         int hs = 0, msc = 0, emmc = 0, k;
         tiku_usb_err_t rc;
         for (k = 3; k < argc; k++) {
@@ -78,8 +79,8 @@ void tiku_shell_cmd_usb(uint8_t argc, const char *argv[])
                          " `power emmc id`)\n");
         }
 #if (TIKU_DRV_EMMC_ENABLE + 0)
-        /* Guarded because TIKU_EMMC_SCRATCH_BLOCKS exists only with the
-         * eMMC driver. */
+        /* Without the eMMC driver tiku_usb_up_full() refuses `emmc` with
+         * TIKU_USB_ERR_ARG, so this report is compiled only with it. */
         if (emmc && rc == TIKU_USB_OK) {
             uint32_t cbw, rd, wr, blocks;
             tiku_usb_msc_stats(&cbw, &rd, &wr, &blocks);
@@ -102,8 +103,8 @@ void tiku_shell_cmd_usb(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "console")) {
-        /* Announce on the current channel first: after the switch this
-         * message would go somewhere the reader is not looking. */
+        /* The announcement goes out on the current backend, before the
+         * switch. */
         if (!tiku_usb_cdc_ready()) {
             SHELL_PRINTF("usb console: refused -- not configured, or the"
                          " host has not opened the port (DTR clear)\n");
@@ -186,8 +187,8 @@ void tiku_shell_cmd_usb(uint8_t argc, const char *argv[])
         return;
     }
     {
-        /* Default: state.  An ISR cannot print, so it counts; the counters
-         * show where enumeration stopped. */
+        /* Default: print the state.  The ISR counts events, and the
+         * counters show where enumeration stopped. */
         tiku_usb_counters_t c;
         static const char *const sp[] = { "none", "full", "high" };
         tiku_usb_speed_t spd = tiku_usb_speed();

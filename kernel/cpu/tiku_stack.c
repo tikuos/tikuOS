@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_stack.c - stack high-water measurement by painting.  See tiku_stack.h
- * for the safety contract: everything here stays inside
- * [tiku_stack_arch_bottom(), SP), the arch-declared true stack region --
- * never the heap, never the armed MPU guard below it.
+ * tiku_stack.c - stack high-water measurement by painting.
+ *
+ * Every read and write here stays inside [tiku_stack_arch_bottom(), SP), the
+ * stack region the port declares, above the heap and the MPU guard.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,8 +20,8 @@
 /* Word sentinel the unused stack is filled with. */
 #define TIKU_STACK_PAINT    0xC5C5C5C5u
 
-/* Keep this much below the live SP unpainted: the painter's own frame plus
- * slop for an interrupt arriving mid-paint. */
+/* Bytes left unpainted below the live SP: the painter's own frame and an
+ * interrupt that arrives mid-paint. */
 #define TIKU_STACK_MARGIN   128u
 
 /** @brief Current stack pointer; 0 on a port this file has no reader for. */
@@ -45,9 +45,8 @@ static uintptr_t stack_sp(void)
 #endif
 }
 
-/* Weak default: bounds unknown -> the feature is dormant (nothing painted,
- * tiku_stack_free() == 0).  Arch MPU backends override this right beside
- * their guard-arming code. */
+/* Weak default for a port that declares no stack bottom: nothing is painted
+ * and tiku_stack_free() returns 0. */
 TIKU_WEAK uint32_t tiku_stack_arch_bottom(void)
 {
     return 0u;

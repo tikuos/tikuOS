@@ -20,20 +20,19 @@
 
 #include "tiku_basic.h"
 #include "tiku_basic_ext.h"           /* native builtin registry */
-#include <kernel/shell/tiku_shell.h>  /* before config: device NVM label wins */
+#include <kernel/shell/tiku_shell.h>  /* device NVM label, before the config */
 #include "tiku_basic_config.h"
 #include <kernel/memory/tiku_mem.h>
 #include <kernel/memory/tiku_reclaim.h>
 #include <kernel/timers/tiku_clock.h>
-#include <hal/tiku_cpu.h>                /* SLEEP -> real low-power idle */
+#include <hal/tiku_cpu.h>                /* SLEEP enters low-power idle */
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
 
 /* Hardware-bridge headers, each included only when its BASIC bridge is
- * enabled, so a slim build (no GPIO, no I2C) leaves that HAL code out.  The
- * bridges are platform-agnostic; the gpio interface header picks the per-MCU
- * arch header itself. */
+ * enabled.  The bridges are platform-agnostic; the gpio interface header
+ * includes the per-MCU arch header. */
 #if TIKU_BASIC_GPIO_ENABLE
 #include <interfaces/gpio/tiku_gpio.h>
 #endif
@@ -124,7 +123,7 @@
 #include "tiku_basic_call.inl"
 #include "tiku_basic_expr.inl"
 #include "tiku_basic_ext.inl"         /* registry impl (needs parse_expr) */
-#include "tiku_basic_ext_kits.inl"    /* bundled native words (first client) */
+#include "tiku_basic_ext_kits.inl"    /* native words bundled with BASIC */
 #include "tiku_basic_module.h"        /* loadable native module ABI */
 #include "tiku_basic_program.inl"
 #include "tiku_basic_stmt.inl"

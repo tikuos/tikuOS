@@ -8,7 +8,7 @@
  * tiku_shell_cmd_df.h - "df" and "mkfs": the /data store's usage and format.
  *
  * df reports capacity, usage and backing medium, or why the store is absent;
- * mkfs formats it on request.  "free" is the memory-tier view.
+ * mkfs formats it on request.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -29,8 +29,8 @@ void tiku_shell_cmd_df(uint8_t argc, const char *argv[]);
 /**
  * @brief "mkfs" command handler -- format /data on request.
  *
- * Without arguments it says what the extent holds; formatting anything but a
- * blank extent needs --erase-data, because every file is lost.
+ * Prints what the extent holds, then formats it.  An extent that is not blank
+ * is formatted only with --erase-data, since formatting erases every file.
  *
  * @param argc Argument count
  * @param argv Argument vector

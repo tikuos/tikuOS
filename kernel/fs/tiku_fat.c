@@ -21,9 +21,9 @@
 /*
  * FAT structures are packed little-endian with fields at unaligned offsets:
  * the BPB's 16-bit fields at 0x0B, 0x11 and 0x13, the 32-bit start and length
- * of an MBR partition entry, the UTF-16 units of a long-name entry.  Casting
- * a pointer into the buffer would be an unaligned access -- undefined, and on
- * some targets a fault -- so every field is read a byte at a time.
+ * of an MBR partition entry, the UTF-16 units of a long-name entry.  An
+ * unaligned pointer access is undefined in C and faults on some targets, so
+ * every field is read a byte at a time.
  */
 
 /** @brief Little-endian u16 at @p p, read a byte at a time. */
@@ -59,7 +59,7 @@ const char *tiku_fat_strerror(tiku_fat_err_t e)
 /* MOUNT                                                                     */
 /*---------------------------------------------------------------------------*/
 
-/* Cluster values with meaning rather than a location. */
+/* FAT entry values that mark a state, not a next cluster. */
 #define CLUS_FREE     0x00000000u
 #define CLUS_BAD      0x0FFFFFF7u
 #define CLUS_EOC_MIN  0x0FFFFFF8u
@@ -69,8 +69,8 @@ const char *tiku_fat_strerror(tiku_fat_err_t e)
  * @brief Validate a boot sector as a FAT BPB and fill in the geometry.
  *
  * The FAT width comes from the data cluster count (<4085 FAT12, <65525 FAT16,
- * else FAT32), never from the boot sector's type string, which the spec calls
- * informational.  Anything but FAT32 is refused with a distinct error.
+ * else FAT32); the boot sector's type string, which the spec calls
+ * informational, is not read.  Anything but FAT32 is TIKU_FAT_ERR_NOT_FAT32.
  */
 static tiku_fat_err_t bpb_parse(tiku_fat_t *fs, const uint8_t *sec,
                                 uint32_t base)
@@ -111,10 +111,10 @@ static tiku_fat_err_t bpb_parse(tiku_fat_t *fs, const uint8_t *sec,
     }
     fs->clusters = data_sec / fs->sec_per_clus;
 
-    /* The arithmetic verdict. */
+    /* The FAT width, from the cluster count. */
     if (fs->clusters < 65525u) { return TIKU_FAT_ERR_NOT_FAT32; }
 
-    /* FAT32 additionally requires no fixed root directory. */
+    /* FAT32 also has no fixed root directory and no 16-bit FAT size. */
     if (root_ent != 0u || rd16(&sec[22]) != 0u) {
         return TIKU_FAT_ERR_NOT_FAT32;
     }
@@ -171,8 +171,8 @@ tiku_fat_err_t tiku_fat_mount(tiku_fat_t *fs, tiku_fat_read_fn read, void *ctx)
         if (rc == TIKU_FAT_OK) { return rc; }
         if (rc == TIKU_FAT_ERR_NOT_FAT32) { wrong_width = 1; }
     }
-    /* A FAT of the wrong width anywhere on the device is reported as such
-     * rather than as "no filesystem", whichever candidate was parsed last. */
+    /* A FAT of the wrong width anywhere on the device returns
+     * TIKU_FAT_ERR_NOT_FAT32, whichever candidate was parsed last. */
     return wrong_width ? TIKU_FAT_ERR_NOT_FAT32 : TIKU_FAT_ERR_NOFS;
 }
 
@@ -190,8 +190,8 @@ static uint32_t clus_lba(const tiku_fat_t *fs, uint32_t clus)
  * @brief Follow one link of the chain.
  *
  * Classifies every value the FAT can hold: an out-of-range link, a bad cluster
- * and a free cluster inside a chain are all corruption and are reported rather
- * than followed.  Refuses anything it does not recognise.
+ * and a free cluster inside a chain return TIKU_FAT_ERR_CORRUPT.  An
+ * end-of-chain mark sets *next to 0.
  */
 static tiku_fat_err_t fat_next(tiku_fat_t *fs, uint32_t clus, uint32_t *next)
 {
@@ -254,8 +254,7 @@ static void lfn_chars(const uint8_t *e, char *dst)
     unsigned i;
     for (i = 0u; i < 13u; i++) {
         uint16_t u = rd16(&e[off[i]]);
-        /* Non-ASCII is rendered '?' rather than dropped, so the name keeps
-         * its length. */
+        /* Non-ASCII renders as '?', which keeps the name's length. */
         dst[i] = (u == 0u || u == 0xFFFFu) ? '\0'
                : (u < 0x80u ? (char)u : '?');
     }
@@ -325,8 +324,9 @@ tiku_fat_err_t tiku_fat_readdir(tiku_fat_t *fs, tiku_fat_dir_t *dir,
                     lfn_have = 1;
                     lfn_next = ord;
                 }
-                /* Pieces count down to 1 with none missing: a gap would leave
-                 * unwritten bytes in the name. */
+                /* Pieces count down to 1 with none missing; a piece out of
+                 * sequence drops the long name, since a gap leaves unwritten
+                 * bytes in it. */
                 if (!lfn_have || e[13] != lfn_sum || ord != lfn_next) {
                     lfn_have = 0;
                     continue;
@@ -384,7 +384,8 @@ tiku_fat_err_t tiku_fat_readdir(tiku_fat_t *fs, tiku_fat_dir_t *dir,
 /* PATHS                                                                     */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Case-insensitive compare, because FAT names are. */
+/** @brief Whether the first @p n chars of @p a equal all of @p b, ignoring
+ *  ASCII case, as FAT names do. */
 static int name_eq(const char *a, const char *b, unsigned n)
 {
     unsigned i;
@@ -442,8 +443,8 @@ static tiku_fat_err_t path_walk(tiku_fat_t *fs, const char *path,
         if (!found) { return TIKU_FAT_ERR_NOENT; }
 
         *out = e;
-        /* A directory whose first cluster is 0 is the root ("..") -- the
-         * on-disk convention, not a corruption. */
+        /* A directory entry whose first cluster is 0 names the root (".."
+         * in a first-level directory), as the on-disk format specifies. */
         clus = (e.first_clus == 0u) ? fs->root_clus : e.first_clus;
     }
     return TIKU_FAT_OK;
@@ -498,8 +499,8 @@ tiku_fat_err_t tiku_fat_seek(tiku_fat_t *fs, tiku_fat_file_t *f, uint32_t pos)
      * of a file that ends on a boundary needs no cluster past its last. */
     want = (pos == 0u) ? 0u : (pos - 1u) / bytes_per_clus;
 
-    /* Walk from the start rather than caching a chain: a chain of N clusters
-     * costs N FAT reads, and the sequential path below never seeks. */
+    /* Each seek walks the chain from the first cluster, one FAT read per
+     * cluster; tiku_fat_read() does not seek. */
     f->clus = f->first_clus;
     for (i = 0u; i < want; i++) {
         uint32_t next;

@@ -7,9 +7,9 @@
  *
  * tiku_crit.h - critical execution window.
  *
- * A kernel-aware, bounded critical section in two flavours: _begin_defer() only
- * defers software-timer dispatch and touches no IE bits, while _begin() also
- * clears every peripheral IE outside preserve_mask.  Both end with _crit_end().
+ * A critical-execution window in two flavours: tiku_crit_begin_defer() only
+ * defers software-timer dispatch, and tiku_crit_begin() also clears every
+ * peripheral IE outside preserve_mask.  tiku_crit_end() closes either.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -25,8 +25,7 @@
  *     ISR skips tiku_timer_request_poll());
  *   - the process scheduler is not frozen -- tiku_process_post() during the
  *     window queues as usual;
- *   - global interrupts stay enabled.  Never blanket-mask: the bit-clock ISR
- *     has to keep firing.
+ *   - global interrupts stay enabled, so the bit-clock ISR keeps firing.
  *
  * The watchdog reset is hardware and not maskable, so a held window must be
  * shorter than the configured WDT timeout whichever flavour is used.
@@ -45,13 +44,9 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * preserve_mask is interpreted only by tiku_crit_begin() (the masked
- * flavour). tiku_crit_begin_defer() ignores any flags because it
- * does not touch IE bits at all.
- *
- * Flags name families of interrupt sources.  The implementation may
- * mask several IE registers per family (on MSP430, UART covers both
- * UCA0 and UCA1 when present).
+ * Only tiku_crit_begin() takes preserve_mask.  Each flag names a family of
+ * interrupt sources, and a port may mask several IE registers per family (on
+ * MSP430, UART covers both UCA0 and UCA1 when present).
  */
 
 /** Bit-clock ISR (the htimer; Timer A1 CCR0 on MSP430).  Required for
@@ -74,8 +69,8 @@
  *  caller will read the result via the ISR. */
 #define TIKU_CRIT_PRESERVE_ADC     (1u << 4)
 
-/** Watchdog interval-mode ISR. Preserve if the application is
- *  using the WDT as a periodic timer rather than a reset source. */
+/** Watchdog interval-mode ISR.  Preserve while the WDT runs in
+ *  interval mode, as a periodic timer. */
 #define TIKU_CRIT_PRESERVE_WDT     (1u << 5)
 
 /** External pin edge ISRs (P1IE..P4IE on MSP430).  Preserve to keep button
@@ -87,9 +82,8 @@
  *  signal.  Ignored on the other ports. */
 #define TIKU_CRIT_PRESERVE_PIO     (1u << 7)
 
-/** Convenience: keep the bit-clock alive (typical for any bit-bang
- *  caller).  Maps to the bitbang backend's actual IRQ source: PIO0_IRQ_0
- *  on RP2350, the htimer everywhere else. */
+/** The bit-bang backend's interrupt source: PIO0 IRQ 0 on RP2350, the htimer
+ *  everywhere else.  A bit-bang caller passes at least this flag. */
 #if defined(PLATFORM_RP2350)
 #define TIKU_CRIT_PRESERVE_BITBANG TIKU_CRIT_PRESERVE_PIO
 #else
@@ -103,8 +97,11 @@
 /**
  * @brief Held flag, exposed for fast-path inline reads.
  *
- * Defined in tiku_crit.c.  Read by MSP430's tick ISR and the timer
- * dispatcher via tiku_crit_active(); never write directly -- use begin/end.
+ * Defined in tiku_crit.c.  MSP430's tick ISR and the timer dispatcher read it
+ * through tiku_crit_active().
+ *
+ * @note Written only by tiku_crit_begin(), tiku_crit_begin_defer() and
+ *       tiku_crit_end().
  */
 extern volatile uint8_t tiku_crit_held;
 
@@ -114,9 +111,9 @@ extern volatile uint8_t tiku_crit_held;
 
 /**
  * @brief Open a masked critical-execution window (strict mode).
- * @param max_us         Upper bound on duration, in microseconds. 0
- *                       disables the bound (violation counter is
- *                       not incremented).
+ * @param max_us         Expected longest duration in microseconds; a
+ *                       window that runs longer counts a violation at
+ *                       tiku_crit_end().  0 disables the check.
  * @param preserve_mask  Bitwise OR of TIKU_CRIT_PRESERVE_* flags.
  *                       Every other peripheral IRQ family the
  *                       module knows about has its enable bit
@@ -124,8 +121,8 @@ extern volatile uint8_t tiku_crit_held;
  *                       TIKU_CRIT_PRESERVE_BITBANG for bit-bang.
  * @return TIKU_CRIT_OK, or TIKU_CRIT_ERR_BUSY if a window is held.
  *
- * Use when you need precise edge timing and accept that masked
- * subsystems pause for the window. Windows do not nest.
+ * The masked interrupt families pause until tiku_crit_end().  Windows do
+ * not nest.
  */
 int tiku_crit_begin(uint16_t max_us, uint8_t preserve_mask);
 
@@ -147,6 +144,10 @@ int tiku_crit_begin_defer(uint16_t max_us);
  *
  * Restores any IE bits masked at begin and drains the timer process with a
  * fresh poll.  Exceeding max_us advances the violation counter.
+ *
+ * @note The duration is measured in 16-bit htimer ticks: a window longer
+ *       than one counter period (65.5 ms at 1 MHz) reads short and may count
+ *       no violation.
  */
 int tiku_crit_end(void);
 
@@ -168,7 +169,7 @@ static inline int tiku_crit_active(void)
 uint16_t tiku_crit_violation_count(void);
 
 /**
- * @brief Total number of windows entered since boot.
+ * @brief Total number of windows entered since boot; wraps at 65535.
  */
 uint16_t tiku_crit_enter_count(void);
 

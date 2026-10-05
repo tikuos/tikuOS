@@ -99,9 +99,8 @@ uint8_t tiku_nvm_region_count(void);
 /* TIKU_FRAM_* ALIASES                                                       */
 /*---------------------------------------------------------------------------*/
 
-/* The tiku_fram_* names of this API (the function names are at the end of
- * the file).  No file in the tree uses them; they are kept for out-of-tree
- * code. */
+/* The tiku_fram_* names of this API, for out-of-tree code; no file in the
+ * tree uses them.  The function names are at the end of the file. */
 typedef tiku_nvm_region_id_t  tiku_fram_region_id_t;
 typedef tiku_nvm_region_t     tiku_fram_region_t;
 
@@ -124,9 +123,9 @@ typedef tiku_nvm_region_t     tiku_fram_region_t;
 /**
  * @brief The NVM technology's name ("FRAM", "RRAM", "MRAM", "Flash", "NOR").
  *
- * Memory reports print this rather than a literal, since the NVM window
- * macros are named TIKU_DEVICE_FRAM_* on every port.  "NVM" is the fallback
- * for a device header that does not set it.
+ * Memory reports print this label; the NVM window macros are named
+ * TIKU_DEVICE_FRAM_* on every port, whatever the technology.  "NVM" is the
+ * fallback for a device header that does not set it.
  */
 #ifndef TIKU_DEVICE_NVM_LABEL
 #define TIKU_DEVICE_NVM_LABEL     "NVM"

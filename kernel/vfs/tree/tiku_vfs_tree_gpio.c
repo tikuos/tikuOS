@@ -366,7 +366,7 @@ gpio_pin_file_write(const char *buf, size_t len)
 }
 
 /*---------------------------------------------------------------------------*/
-/* DRIVER NOTIFY — ring /dev/gpio watchers on a hardware edge                */
+/* DRIVER NOTIFY — post TIKU_EVENT_VFS to /dev/gpio watchers on an edge      */
 /*---------------------------------------------------------------------------*/
 
 void

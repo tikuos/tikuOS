@@ -7,9 +7,9 @@
  *
  * tiku_vfs_tree_timer.h - /sys/timer, /sys/clock and /sys/htimer VFS nodes.
  *
- * One module covers all three subtrees because they observe the same subsystem.
- * Each is exported as its own children table and count macro, so the /sys
- * assembly can attach them as three separate directories.
+ * One module serves the three subtrees, which all observe the timer
+ * subsystem.  Each is exported as its own children table and count macro,
+ * and the /sys assembly attaches them as three directories.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,14 +20,15 @@
 #include <kernel/vfs/tiku_vfs.h>
 
 /**
- * @brief Entry counts for the three exported tables below.
+ * @brief Entry count of /sys/timer.
  *
- * Each must equal the number of initialisers in its table — bump
- * when adding nodes (a _Static_assert per table in the .c catches
- * a forgotten update).
+ * Each count here must equal the number of initialisers in its table; a
+ * _Static_assert per table in the .c checks it.
  */
 #define TIKU_VFS_TREE_TIMER_NCHILD   4
+/** @brief Entry count of /sys/clock. */
 #define TIKU_VFS_TREE_CLOCK_NCHILD   1
+/** @brief Entry count of /sys/htimer. */
 #define TIKU_VFS_TREE_HTIMER_NCHILD  2
 
 /** @brief /sys/timer children: count, next, fired, list/ */

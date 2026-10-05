@@ -7,9 +7,9 @@
  *
  * tiku_ble_adv.h - driver-agnostic BLE broadcaster/observer facade.
  *
- * The connection-less sibling of tiku_ble_serial.h: advertise a
- * non-connectable beacon and passively scan with RSSI, without touching radio
- * registers.  The beacon is a re-arming software timer or runs on the FLPR.
+ * Advertises a non-connectable beacon and scans passively with RSSI; the
+ * connected counterpart is tiku_ble_serial.h.  The functions exist only when
+ * TIKU_BLE_ADV_PRESENT is 1.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -44,7 +44,7 @@ typedef struct {
     char    name[TIKU_BLE_ADV_NAME_CAP + 1]; /**< Local name, "" if absent  */
 } tiku_ble_adv_report_t;
 
-/** @brief 1 when a broadcast radio backend is present in this build. */
+/** @brief Returns 1: it exists only in a build with a broadcast backend. */
 int tiku_ble_adv_available(void);
 
 /**
@@ -100,9 +100,9 @@ uint32_t tiku_ble_adv_bursts(void);
 /**
  * @brief Set the beacon TX power in dBm (default +8, the strongest).
  *
- * Only the silicon's discrete steps are legal; anything else is rejected, never
- * rounded.  It takes effect from the next burst and is safe while a beacon runs
- * -- the facade reclaims the radio, applies it and re-arms any offload.
+ * Only the silicon's discrete steps are accepted; another value is refused,
+ * not rounded.  It takes effect from the next burst; during an FLPR beacon the
+ * call reclaims the radio, applies the power and re-arms the offload.
  *
  * @return 0 on success, negative if @p dbm is not a legal step.
  */
@@ -121,18 +121,20 @@ int8_t tiku_ble_adv_txpower(void);
  * @param out  Report array.
  * @param max  Capacity of @p out.
  * @param ms   Scan duration in milliseconds (wall clock).
- * @return Number of distinct devices heard (<= @p max), -1 for a bad table or
- *         unless the radio is idle or held by a timer beacon.
+ * @return Number of distinct devices heard (<= @p max); -1 for a NULL or
+ *         empty table, or when anything but a timer beacon holds the radio.
  */
 int tiku_ble_adv_scan(tiku_ble_adv_report_t *out, uint8_t max, uint16_t ms);
 
 /**
  * @brief Passive scan of advertisers whose name starts with @p prefix.
  *
- * The filter gates slot allocation, not display, so ambient advertisers cannot
- * fill the small report table before the sought device is heard.  Nameless
- * advertisements are dropped while armed; an empty prefix behaves like _scan().
+ * Only a matching advertiser takes a report slot, so other advertisers cannot
+ * fill the table before the sought one is heard.  Nameless advertisements are
+ * dropped while a prefix is set.
  *
+ * @param prefix  Name prefix; NULL or "" scans as tiku_ble_adv_scan(), and one
+ *                longer than TIKU_BLE_ADV_NAME_CAP matches nothing
  * @return As tiku_ble_adv_scan().
  */
 int tiku_ble_adv_scan_filter(tiku_ble_adv_report_t *out, uint8_t max,
@@ -143,7 +145,7 @@ int tiku_ble_adv_scan_filter(tiku_ble_adv_report_t *out, uint8_t max,
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Who holds the radio.  Claims are denied rather than queued.
+ * @brief Who holds the radio.  A claim on a held radio is refused, not queued.
  *
  * A timer beacon and the observer time-divide the radio (BEACON_OBSERVE); an
  * FLPR beacon, a serial connection or 802.15.4 holds it alone.  A blocking scan
@@ -203,8 +205,8 @@ void tiku_ble_adv_154_release(void);
  *
  * @param secs  Auto-stop after this many seconds; 0 = until
  *              tiku_ble_adv_observe_stop().
- * @return 0 on success (time-dividing with a timer beacon if one runs), -1
- *         unless the radio is idle or held by a timer beacon.
+ * @return 0 on success (time-dividing with a timer beacon if one runs); -1
+ *         when anything but a timer beacon holds the radio.
  */
 int tiku_ble_adv_observe_start(uint16_t secs);
 
@@ -217,8 +219,8 @@ int tiku_ble_adv_observing(void);
 /**
  * @brief Copy the observer table's @p idx-th report (0-based).
  *
- * Live while observing; the table persists after observe stops, so
- * results remain queryable (BLESEEN$(i)) until the next observe.
+ * Live while observing.  The table is kept after the observer stops, and
+ * BLESEEN$(i) reads it until the next observe starts.
  *
  * @return 1 and fills @p out when idx < count; 0 otherwise.
  */
@@ -243,9 +245,9 @@ const tiku_ble_adv_report_t *tiku_ble_adv_last_scan_best(void);
 
 
 /**
- * @brief Where a scan's reports went: dropped for a context with no table,
- *        for a PDU kind or length this does not read, by the name filter,
- *        or kept as a new device.  Any pointer may be NULL.
+ * @brief Counts since boot of where scan reports went: dropped for a context
+ *        with no table, for a PDU kind or length this does not read, by the
+ *        name filter, or kept as a new device.  Any pointer may be NULL.
  */
 void tiku_ble_adv_scan_drops(uint32_t *ctx_bad, uint32_t *kind,
                              uint32_t *named, uint32_t *kept);

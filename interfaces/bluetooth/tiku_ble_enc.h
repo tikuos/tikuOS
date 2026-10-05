@@ -20,8 +20,8 @@
 #include <stdint.h>
 
 /**
- * @brief Plaintext both ends compile in, so the two-board test proves the
- *        ciphertext decrypts to exactly this, not only that the MIC verified.
+ * @brief Plaintext both ends compile in: the receiver checks the MIC and
+ *        compares the decrypted payload with these bytes.
  */
 #define TIKU_BLE_ENC_DEMO_PT \
     { 'T','I','K','U','-','L','L','-','C','C','M','-','D','E','M','O' }

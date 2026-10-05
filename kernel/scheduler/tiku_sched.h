@@ -42,9 +42,10 @@
  * @typedef tiku_sched_idle_hook_t
  * @brief Optional hook called when the scheduler has no pending work.
  *
- * The platform may register a function called whenever there are no events and
- * no timers due, typically to enter a low-power mode.  It should return; the
- * scheduler re-checks for work afterwards.
+ * Called whenever there are no events and no timers due, typically to enter a
+ * low-power mode.  It returns, and the scheduler re-checks for work.
+ *
+ * @note The scheduler calls it inside an atomic section, interrupts masked.
  */
 typedef void (*tiku_sched_idle_hook_t)(void);
 
@@ -55,8 +56,9 @@ typedef void (*tiku_sched_idle_hook_t)(void);
 /**
  * @brief Initialize the scheduler and all managed subsystems
  *
- * Initializes the process system, software timer subsystem, and
- * hardware timer.
+ * Initializes the process system, the hardware timer and the software timer
+ * subsystem, and makes the port's TIKU_CPU_IDLE_LIGHT entry, if it has one,
+ * the idle hook.
  *
  * @note Call once at startup, after clock init.
  */
@@ -65,7 +67,7 @@ void tiku_sched_init(void);
 /**
  * @brief Start a process through the scheduler
  *
- * Convenience wrapper around tiku_process_start().
+ * Calls tiku_process_start() after a SCHED_PRINTF trace.
  *
  * @param p    Process to start
  * @param data Data passed with the INIT event
@@ -85,9 +87,9 @@ uint8_t tiku_sched_run_once(void);
 /**
  * @brief Run the main scheduler loop until tiku_sched_stop().
  *
- * Starts the autostart processes and enables interrupts, then dispatches
- * events, calling the idle hook when nothing is pending so the platform can
- * drop into a low-power mode until an interrupt.
+ * Starts the autostart processes (with TIKU_AUTOSTART_ENABLE), enables
+ * interrupts and arms the hang detector, then dispatches events, calling the
+ * idle hook when nothing is pending.
  */
 void tiku_sched_loop(void);
 
@@ -95,7 +97,7 @@ void tiku_sched_loop(void);
  * @brief Stop the scheduler loop
  *
  * Sets a flag that causes tiku_sched_loop() to return on its next
- * iteration. Primarily useful for test harnesses.
+ * iteration.
  */
 void tiku_sched_stop(void);
 
@@ -138,7 +140,8 @@ tiku_sched_idle_hook_t tiku_sched_get_idle_hook(void);
 void tiku_sched_set_idle_tick_wakes(uint8_t wakes);
 
 /**
- * @brief Return the number of times the scheduler entered idle.
+ * @brief Return the number of times the scheduler entered idle, modulo
+ *        65536.
  */
 uint16_t tiku_sched_idle_count(void);
 
@@ -147,7 +150,7 @@ uint16_t tiku_sched_idle_count(void);
  *        the kernel thread.
  *
  * Every arch tick ISR but MSP430's calls it; MSP430's polls the timer process
- * directly.  Another ISR with work for a process posts an event instead.
+ * directly.  Another ISR with work for a process posts it an event.
  *
  * @note Tick ISR context.
  */

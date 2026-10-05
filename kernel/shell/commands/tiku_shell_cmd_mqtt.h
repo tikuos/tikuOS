@@ -16,11 +16,14 @@
 #include <stdint.h>
 
 /**
- * @brief "mqtt" command -- connect to an MQTT broker, optionally publish.
+ * @brief "mqtt" command: connect to an MQTT broker, optionally publish.
  *
- * Bare form connects and reports status; `pub <topic> <msg>` publishes at
- * QoS 0.  The broker defaults to the SLIP host on port 1883, and the TCP
- * handshake plus MQTT CONNECT progress across shell ticks.
+ * Usage: mqtt [broker] [port], or mqtt pub <topic> <msg> [broker] [port].
+ * The broker defaults to x.y.z.1 of TIKU_KITS_NET_IP_ADDR, port 1883.  The
+ * command returns at once; tiku_shell_cmd_mqtt_tick() finishes the work.
+ *
+ * @param argc  Argument count
+ * @param argv  Argument vector
  */
 void tiku_shell_cmd_mqtt(uint8_t argc, const char *argv[]);
 
@@ -28,8 +31,11 @@ void tiku_shell_cmd_mqtt(uint8_t argc, const char *argv[]);
 uint8_t tiku_shell_cmd_mqtt_active(void);
 
 /**
- * @brief Per-tick driver: paces mqtt_periodic and reports the connect result,
- *        the publish or the timeout.
+ * @brief Per-tick driver: paces tiku_kits_net_mqtt_periodic(), then reports
+ *        the connect result, the publish or the timeout and ends the
+ *        operation, disconnecting unless the connection failed.
+ *
+ * @note The shell poll loop calls it while tiku_shell_cmd_mqtt_active().
  */
 void tiku_shell_cmd_mqtt_tick(void);
 

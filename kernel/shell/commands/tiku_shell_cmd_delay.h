@@ -16,11 +16,13 @@
 #include <stdint.h>
 
 /**
- * @brief "delay" command -- block the shell for <ms> milliseconds.
+ * @brief "delay" command: block the shell for <ms> milliseconds, 1-60000.
  *
- * A synchronous wait at clock-tick granularity (~7.81 ms at the default
- * 128 Hz tick), unlike `sleep`, which sets the idle low-power mode.  Values
- * below one tick round up; the maximum is 60000 ms and Ctrl+C cancels.
+ * The wait has clock-tick granularity and rounds up to a whole tick.  Ctrl+C
+ * ends it early; other keys typed during the wait are dropped.
+ *
+ * @param argc  Argument count
+ * @param argv  Argument vector
  */
 void tiku_shell_cmd_delay(uint8_t argc, const char *argv[]);
 

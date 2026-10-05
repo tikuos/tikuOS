@@ -32,10 +32,10 @@
 #define TIKU_INIT_MAX_ENTRIES   8
 #endif
 
-/** Maximum length of an entry name (including NUL) */
+/** Size of an entry's name field, NUL included */
 #define TIKU_INIT_NAME_SIZE     16
 
-/** Maximum length of the shell command (including NUL) */
+/** Size of an entry's command field, NUL included */
 #define TIKU_INIT_CMD_SIZE      48
 
 /*---------------------------------------------------------------------------*/
@@ -45,11 +45,13 @@
 /**
  * @brief Single init-table entry stored in NVM.
  *
- * Layout is fixed so the NVM image is portable across firmware versions
- * (as long as sizes remain the same).
+ * A stored table is read back with this layout by later firmware, so a change
+ * to it also changes TIKU_INIT_MAGIC (tiku_init.c), which primes the table
+ * empty.
  */
 typedef struct {
-    uint8_t  seq;                          /**< Boot order (0–99) */
+    uint8_t  seq;                          /**< Boot order, lower first; the
+                                                init command takes 0-99 */
     uint8_t  enabled;                      /**< 1 = active, 0 = skipped */
     char     name[TIKU_INIT_NAME_SIZE];    /**< Human-readable label */
     char     cmd[TIKU_INIT_CMD_SIZE];      /**< Shell command to execute */
@@ -66,17 +68,20 @@ typedef struct {
  * undersized region disables the table.
  *
  * @note Call once during boot, after the NVM region map is initialised.  A
- *       power loss during an add or an enable leaves the old table; during a
- *       replace or a remove it can leave the table empty, never torn.
+ *       power loss during an add or an enable leaves the old table or the new
+ *       one; during a replace or a remove it can leave the table empty, never
+ *       torn.
  */
 void tiku_init_load(void);
 
 /**
  * @brief Execute all enabled entries in sequence-number order.
  *
- * Each entry's cmd is copied to an SRAM scratch buffer and passed
- * to tiku_shell_parser_execute().
+ * Each entry's cmd is copied to a stack buffer and passed to
+ * tiku_shell_parser_execute().
  *
+ * @note The shell process calls it in its first pass, once the parser has its
+ *       command table.
  * @return Number of entries executed
  */
 uint8_t tiku_init_run_all(void);

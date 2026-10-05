@@ -97,9 +97,10 @@ void tiku_shell_cmd_cache(uint8_t argc, const char *argv[]) {
                                      BENCH_WORDS));
         return;
     } else if (argc >= 2 && strcmp(argv[1], "dma") == 0) {
-        /* Coherency check: the source is dirty in the cache when the
-         * transfer starts and the destination stale after it finishes, so a
-         * mismatch means a missing clean or invalidate, not a broken DMA. */
+        /* With the D-cache on, the source lines are dirty when the transfer
+         * starts and the destination lines stale after it.  The copy matches
+         * only when tiku_dma_arch_memcpy() cleans the source and invalidates
+         * the destination. */
         tiku_mem_workspace_t ws;
         volatile uint8_t *src = cache_borrow(&ws, 8192U);
         volatile uint8_t *dst;

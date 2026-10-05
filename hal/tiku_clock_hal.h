@@ -5,17 +5,13 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_clock_hal.h - Hardware abstraction layer interface for system clock
+ * tiku_clock_hal.h - system clock functions every port implements.
+ *
+ * Declares the tick, seconds, delay and clock-fault calls behind
+ * kernel/timers/tiku_clock.c; each port defines them in its timer arch file.
+ * Includes no platform header.
  *
  * SPDX-License-Identifier: Apache-2.0
- */
-
-/**
- * @file tiku_clock_hal.h
- * @brief Platform-agnostic clock architecture interface
- *
- * Declares the functions that each platform must implement to provide
- * system clock functionality. No platform-specific headers are included.
  */
 
 #ifndef TIKU_CLOCK_HAL_H_
@@ -29,8 +25,8 @@
  * @typedef tiku_clock_arch_time_t
  * @brief Architecture-specific clock time type
  *
- * Platforms provide this via their arch header (e.g. tiku_timer_arch.h).
- * This fallback applies only if no arch header has defined it.
+ * Each port's tiku_timer_arch.h defines it as unsigned long; this fallback,
+ * the same type, applies when that header has not been included first.
  */
 #ifndef TIKU_CLOCK_ARCH_TIME_T_DEFINED
 typedef unsigned long tiku_clock_arch_time_t;
@@ -53,8 +49,8 @@ void tiku_clock_arch_init(void);
 tiku_clock_arch_time_t tiku_clock_arch_time(void);
 
 /**
- * @brief Get current time in seconds
- * @return Seconds since system start
+ * @brief Read the seconds counter
+ * @return Value last set (0 at init) plus whole seconds elapsed since
  */
 unsigned long tiku_clock_arch_seconds(void);
 
@@ -95,9 +91,9 @@ int tiku_clock_arch_fine_max(void);
 /**
  * @brief Clock source fault codes.
  *
- * Reported when the platform could not bring up the intended low-frequency
- * source and fell back to a less accurate one.  The tick keeps running but no
- * longer matches TIKU_CLOCK_SECOND, so every software timer drifts with it.
+ * A code other than NONE means the port could not start the configured
+ * low-frequency source and runs the tick from a less accurate one: the tick
+ * rate then differs from TIKU_CLOCK_SECOND and every software timer drifts.
  */
 enum tiku_clock_arch_fault_code {
   TIKU_CLOCK_ARCH_FAULT_NONE     = 0, /**< Configured source is in use */
@@ -107,8 +103,10 @@ enum tiku_clock_arch_fault_code {
 /**
  * @brief Return the current clock-source fault code.
  *
- * Set by tiku_clock_arch_init() if the requested source could not be
- * brought up. Stays sticky until the next init.
+ * Set by tiku_clock_arch_init() when the configured source does not start;
+ * it holds until the next init.
+ *
+ * @return A tiku_clock_arch_fault_code value
  */
 unsigned char tiku_clock_arch_fault(void);
 

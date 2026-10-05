@@ -40,7 +40,7 @@ void tiku_ble_host_reset(void);
 int tiku_ble_host_rx(const uint8_t *frag, uint16_t len, uint8_t llid);
 
 /**
- * @brief Dole out the next TX fragment of the queued response/notification.
+ * @brief Copy out the next TX fragment of the queued response/notification.
  * @param out      buffer for the fragment.
  * @param out_cap  capacity of @p out.
  * @param llid     out: 2 for the first fragment, 1 for continuations.
@@ -89,8 +89,8 @@ int tiku_ble_host_conn_param_result(void);
 void tiku_ble_host_set_frag_max(uint8_t n);
 
 /**
- * @brief Largest L2CAP PDU received whole in one LL PDU this connection;
- *        above 31 a payload over 27 bytes arrived unfragmented (DLE works).
+ * @brief Largest L2CAP PDU received whole in one LL PDU this connection; a
+ *        value above 31 means a payload over 27 bytes arrived unfragmented.
  */
 uint16_t tiku_ble_host_max_single_frag(void);
 
@@ -113,9 +113,9 @@ void tiku_ble_host_smp_start(const uint8_t inita[6], uint8_t at,
 
 /**
  * @brief Stage the next queued SMP PDU into the TX path if it is free.
- *        Call after each TX drain until it returns 0 (drives the responder's
- *        two-PDU steps, e.g. Public Key + Confirm).
  * @return 1 if a PDU was staged, 0 if none pending / TX busy.
+ * @note Call after each TX drain until it returns 0: the responder's steps
+ *       that send two PDUs (e.g. Public Key + Confirm) need it.
  */
 int tiku_ble_host_smp_pump(void);
 

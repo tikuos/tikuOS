@@ -21,8 +21,8 @@
  * @brief "cryptoprobe" command handler — CRACEN CryptoMaster probe.
  *
  * Sub-commands cover the fused-engine dump (hwcfg), the SHA config search
- * (sha/sweep), the ecb/ccm/gcm/pk known-answer tests, a hardware-vs-software
- * bench, the bypass/direct DMA probes, and mode/counters/dbg.
+ * (sha/sweep), the ecb/ccm/pk known-answer tests, the gcm hardware-vs-software
+ * check, a bench, the bypass/direct DMA probes, and mode/counters/dbg.
  *
  * @param argc  Argument count
  * @param argv  Argument vector; argv[1] selects the sub-command, argv[2]

@@ -36,9 +36,9 @@ void tiku_atomic_exit(void);
 /**
  * @brief Unconditionally enable global interrupts.
  *
- * Used by boot-time code that wants the scheduler's first run to
- * have IRQs on. Most kernel code should prefer the atomic_enter/
- * atomic_exit pair, which preserves the caller's interrupt state.
+ * Boot and the scheduler loop call it before work starts.  It does not save
+ * or restore the caller's interrupt state; tiku_atomic_enter() and
+ * tiku_atomic_exit() do.
  */
 void tiku_cpu_irq_enable(void);
 
@@ -65,8 +65,8 @@ void tiku_cpu_boot_init(void);
 /**
  * @brief Apply a core-clock frequency to the platform clock tree.
  *
- * A request the part cannot honour is clamped or ignored rather than failing,
- * so a caller that cares must confirm with tiku_cpu_mclk_hz().
+ * A rate the port cannot produce is clamped or ignored and no error is
+ * returned; tiku_cpu_mclk_hz() returns the rate in effect.
  *
  * @param cpu_freq  Requested core frequency in MHz; on MSP430 a DCO preset
  *                  index (CPU_FREQ_* in tiku_cpu_freq_boot_arch.h)
@@ -75,17 +75,31 @@ void tiku_cpu_boot_init(void);
  */
 void tiku_cpu_freq_init(unsigned int cpu_freq);
 
-/** @brief Frequency-change policy: "reboot" or "fixed" (no live retuning). */
+/**
+ * @brief "reboot" when more than one rate is selectable, else "fixed".
+ *
+ * A rate saved with tiku_cpu_freq_target_set() takes effect at the next boot.
+ */
 const char *tiku_cpu_freq_change_mode(void);
 /** @brief Enumerate selectable rates in Hz; zero terminates the list. */
 unsigned long tiku_cpu_freq_available(unsigned int index);
 /** @brief Saved next-boot rate, or the boot rate when none is saved. */
 unsigned long tiku_cpu_freq_target_hz(void);
-/** @brief Save a supported rate in Hz; return -1 on rejection or failure. */
+/**
+ * @brief Save @p hz as the rate for the next boot.
+ * @return 0, or -1 when @p hz is not selectable or the save fails
+ */
 int tiku_cpu_freq_target_set(unsigned long hz);
-/** @brief Apply a restored preference during boot, before peripherals start. */
+/**
+ * @brief Switch to the saved rate when it differs from the boot rate.
+ * @note Call once during boot, before peripherals start. No-op on nRF54L.
+ */
 void tiku_cpu_freq_boot_apply(void);
-/** @brief Arch boot-only target application; never called by a VFS write. */
+/**
+ * @brief Switch the core clock to @p hz.
+ * @note Boot only: tiku_cpu_settings_boot() calls it. MSP430 and STM32N6
+ *       divide the running clock; nRF54L ignores the call.
+ */
 void tiku_cpu_freq_boot_set(unsigned long hz);
 
 /*---------------------------------------------------------------------------*/
@@ -103,16 +117,16 @@ unsigned long tiku_cpu_mclk_hz(void);
 /**
  * @brief Current peripheral / sub-system clock frequency in Hz.
  *
- * MSP430 maps this to SMCLK. Platforms without a separate
- * peripheral clock should return the same value as tiku_cpu_mclk_hz().
+ * SMCLK on MSP430 and PCLKA on RA8P1. A port without a separate peripheral
+ * clock returns the tiku_cpu_mclk_hz() rate.
  */
 unsigned long tiku_cpu_smclk_hz(void);
 
 /**
  * @brief Current low-power / always-on clock frequency in Hz.
  *
- * MSP430 maps this to ACLK (typ. 32.768 kHz crystal or REFOCLK).
- * Platforms without an LPM-friendly clock should return 0.
+ * ACLK on MSP430 (typ. 32.768 kHz crystal or REFOCLK). A port without an
+ * always-on low-frequency clock returns 0: RP2350, STM32N6 and ESP32-C61.
  */
 unsigned long tiku_cpu_aclk_hz(void);
 
@@ -148,7 +162,8 @@ void tiku_cpu_dcache_invalidate(const void *addr, unsigned long len);
 /**
  * @brief Invalidate the entire instruction cache.
  *
- * The whole cache rather than a range: modules are small and installs rare.
+ * Invalidates every line. It does nothing on MSP430, which has no cache, or
+ * on RP2350 and nRF54L, whose NVM write paths drop the lines they touch.
  *
  * @note Call after an out-of-band write to executable memory and before the
  *       first fetch from the modified range.
@@ -163,8 +178,8 @@ void tiku_cpu_icache_invalidate(void);
  * @brief Generic idle modes, each mapped by the port to a native state.
  *
  * MSP430: OFF busy-waits, LIGHT is LPM0, DEEP LPM3, DEEPEST LPM4 (GPIO wake).
- * RP2350, Ambiq, nRF54L and RA8P1 use WFI for every mode; ESP32-C61 uses WFI
- * for LIGHT and PMU light sleep for DEEP and DEEPEST.
+ * RP2350, Ambiq, nRF54L and RA8P1 use WFI for every mode, ESP32-C61 WFI for
+ * LIGHT and PMU light sleep below it; STM32N6 busy-waits in every mode.
  */
 typedef enum {
     TIKU_CPU_IDLE_OFF      = 0,
@@ -178,24 +193,24 @@ typedef void (*tiku_cpu_idle_enter_t)(void);
 
 /**
  * @brief Return the platform's entry function for the given mode.
- * @return Hook callable as the scheduler's idle hook, or NULL when
- *         the mode is OFF or unsupported.
+ * @param mode  Idle mode
+ * @return Hook callable as the scheduler's idle hook; NULL for OFF and for
+ *         every mode on a port with no idle entry (STM32N6)
  */
 tiku_cpu_idle_enter_t tiku_cpu_idle_hook(tiku_cpu_idle_mode_t mode);
 
 /**
- * @brief Does the system tick interrupt wake this idle mode?
+ * @brief Report whether the tick interrupt wakes the core from @p mode.
  *
- * Deadline-aware idle sleeps with timers armed only if the tick can wake the
- * CPU to dispatch them.  True for every MSP430 mode but LPM4, and for every
- * mode on the other ports.
+ * The scheduler sleeps with timers armed only in a mode where this is
+ * non-zero. It is zero for MSP430 LPM4 and non-zero for every other mode.
  *
  * @return Non-zero if the tick wakes the CPU out of @p mode
  */
 int tiku_cpu_idle_mode_wakes_on_tick(tiku_cpu_idle_mode_t mode);
 
 /**
- * @brief Which wake sources still end this idle mode?
+ * @brief Wake sources that end @p mode.
  *
  * An armed source outside the mask does not wake the core from @p mode.
  * Without TIKU_WAKE_UART_RX, console input sent during the sleep is lost.

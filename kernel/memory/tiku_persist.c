@@ -27,10 +27,10 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Find an entry by key (linear scan)
+ * @brief Find an entry by key (linear scan).
  *
- * Scans valid entries for a matching key. Linear scan is appropriate
- * because the store is small (TIKU_PERSIST_MAX_ENTRIES <= 16 typical).
+ * Scans the valid entries for a matching key; the store holds at most
+ * TIKU_PERSIST_MAX_ENTRIES (default 16).
  *
  * @param store   Store to search
  * @param key     Null-terminated key to find
@@ -59,9 +59,9 @@ static tiku_persist_entry_t *persist_find(tiku_persist_store_t *store,
 /**
  * @brief Initialize the persistent store, recovering valid entries.
  *
- * Scans every slot, keeping entries whose magic and valid flag agree and
- * clearing the rest -- which is what separates real entries from the arbitrary
- * contents of a virgin or reused store.
+ * Scans every slot, keeping entries whose magic and valid flag are both set
+ * and zeroing the rest, so the arbitrary contents of a virgin or reused store
+ * become empty slots.
  *
  * @param store   Store to initialize
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if store is NULL,
@@ -112,9 +112,9 @@ tiku_mem_err_t tiku_persist_init(tiku_persist_store_t *store)
 /**
  * @brief Register an NVM buffer under a key.
  *
- * An existing key keeps its stored data and only has its pointer updated, which
- * is what lets configuration and calibration survive a firmware update that
- * moved the buffer.  A new key takes the first empty slot.
+ * An existing key keeps its length and write count and takes the new pointer
+ * and capacity; the value bytes are not copied, so they carry over only when
+ * the buffer keeps its address.  A new key takes the first empty slot.
  *
  * @param store     Store to register into
  * @param key       Null-terminated key string
@@ -137,10 +137,8 @@ tiku_mem_err_t tiku_persist_register(tiku_persist_store_t *store,
     }
 
     /* Reject keys that do not fit key[TIKU_PERSIST_MAX_KEY_LEN] including
-     * the NUL.  Silent truncation would store a prefix that persist_find
-     * (which compares TIKU_PERSIST_MAX_KEY_LEN chars of the caller's full
-     * key) could never match again: the entry registers and then every
-     * write, read and delete under the same key returns NOT_FOUND. */
+     * the NUL.  persist_find() compares TIKU_PERSIST_MAX_KEY_LEN chars of the
+     * caller's full key, so a truncated key would never match again. */
     if (strlen(key) >= TIKU_PERSIST_MAX_KEY_LEN) {
         return TIKU_MEM_ERR_INVALID;
     }
@@ -240,9 +238,8 @@ tiku_mem_err_t tiku_persist_read(tiku_persist_store_t *store,
 /**
  * @brief Write a value from SRAM into the persistent NVM store.
  *
- * Copies through the HAL, records the length and bumps write_count, which is
- * what lets an application notice a hot key approaching the medium's endurance
- * before a cell degrades.
+ * Copies through the HAL, records the length and bumps write_count, which
+ * tiku_persist_wear_check() compares with TIKU_PERSIST_WEAR_THRESHOLD.
  *
  * @param store     Store to write into
  * @param key       Key to look up
@@ -292,9 +289,10 @@ tiku_mem_err_t tiku_persist_write(tiku_persist_store_t *store,
 }
 
 /**
- * @brief Delete an entry from the persistent store
+ * @brief Delete an entry from the persistent store.
  *
- * Clears the entry slot with memset so the key can no longer be found.
+ * Zeroes the entry slot, so a later lookup of the key returns
+ * TIKU_MEM_ERR_NOT_FOUND.
  *
  * @param store   Store to delete from
  * @param key     Key to delete
@@ -333,7 +331,7 @@ tiku_mem_err_t tiku_persist_delete(tiku_persist_store_t *store,
 }
 
 /**
- * @brief Check wear level for a key
+ * @brief Check wear level for a key.
  *
  * Returns the write count and whether it has reached the warning threshold,
  * since NVM technologies have finite write endurance.
@@ -390,7 +388,7 @@ int tiku_persist_wear_check(tiku_persist_store_t *store,
  * equally covered.
  */
 
-/** Zero source for chunked default-fill through the NVM HAL */
+/** Zero source for the chunked zero-fill through the NVM HAL */
 static const uint8_t cell_zeros[16];
 
 /**
@@ -430,16 +428,16 @@ static uint8_t cell_primed;
  * cut (16-bit words on MSP430, 32-bit elsewhere).  For those, cell_write/
  * cell_commit run the crash-consistent protocol: invalidate the gate,
  * write the value, revalidate.  A cut mid-value then leaves an invalid
- * gate — the next boot re-primes the default — instead of a torn value
- * that a reader would trust.  Single-word values skip the protocol:
- * the store itself is the atom.
+ * gate, and the next boot re-primes the default.  Single-word values skip
+ * the protocol: the store itself is the atom.
  *
  * On the mirror platforms (Ambiq, RP2350, STM32N6, ESP32-C61) all three
  * steps land in SRAM inside one unlock window and only the final state
  * reaches the NVM mirror at relock; there the equivalent hole is a torn
  * flush, which the mirror's V2 CRC (tiku_nvm_mirror.h) detects at boot
- * restore.  On MSP430 (FRAM in place) each step is durable on its own and
- * the protocol alone prevents the tear. */
+ * restore.  Where `.persistent` is written in place (MSP430 FRAM, nRF54L
+ * RRAM, RA8P1 MRAM) each step is durable on its own and the protocol alone
+ * prevents the tear. */
 #define CELL_CAN_TEAR(len)  ((len) > sizeof(unsigned int))
 
 /**
@@ -470,8 +468,8 @@ uint8_t tiku_persist_cell_init(const tiku_persist_cell_t *c)
     }
 
     /* Virgin (or corrupted) NVM: prime defaults, gate stamped last.
-     * Data flows through the NVM HAL; the gate is one direct word
-     * store (power-cut-atomic — see the routing note above). */
+     * Data flows through the NVM HAL; the gate is one direct aligned
+     * word store, which a power cut cannot tear. */
     tiku_atomic_enter();        /* an ISR inside the window would have
                                  * NVM write access — keep it closed  */
     saved = tiku_mpu_unlock_nvm();
@@ -505,8 +503,8 @@ uint8_t tiku_persist_cell_valid(const tiku_persist_cell_t *c)
  * @brief Update a cell's value (crash-consistently for wide values).
  *
  * A value wider than one arch word runs invalidate, write, revalidate, so a cut
- * mid-write re-primes the default next boot rather than leaving a torn value
- * behind a valid gate.  Single-word values are written directly.
+ * mid-write leaves an invalid gate and the default re-primes next boot.
+ * Single-word values are written directly and the gate is left as it was.
  *
  * @param c    Cell descriptor
  * @param src  New value bytes

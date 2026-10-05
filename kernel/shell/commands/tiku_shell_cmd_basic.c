@@ -44,10 +44,10 @@ basic_from_file(const char *path, int run)
     size_t total;
     int    n;
 
-    /* Refuse re-entry into a live interactive BASIC session.  Reachable when a
-     * scheduled `basic run/load <path>` job or rule fires (jobs tick before the
-     * BASIC mode tick); without this it would clobber the user's in-memory
-     * program and block the cooperative scheduler mid-session. */
+    /* Returns without output while a BASIC session is active, so a job or
+     * rule that fires `basic run/load <path>` during a session (jobs tick
+     * before the BASIC mode tick) neither replaces the session's program nor
+     * starts a blocking run in the middle of it. */
     if (tiku_basic_mode_active()) {
         return;
     }
@@ -58,7 +58,7 @@ basic_from_file(const char *path, int run)
         SHELL_PRINTF("basic: cannot read '%s'\n", resolved);
         return;
     }
-    /* A file that does not fit with its NUL is refused, not cut. */
+    /* A file that does not fit with its NUL is refused whole. */
     if (total >= sizeof basic_file_buf) {
         SHELL_PRINTF("basic: '%s' is longer than %u bytes\n", resolved,
                      (unsigned)(sizeof basic_file_buf - 1u));

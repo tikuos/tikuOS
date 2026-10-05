@@ -7,9 +7,9 @@
  *
  * tiku_basic_net.inl - networking statements for the full BASIC profile.
  *
- * exec_run pumps the console only between statements, so a net word that waits
- * must pump it itself or the board hangs.  UDP is instant, MQTT pumps through
- * a helper, and the HTTPS words pump the stack themselves.
+ * A net word that waits pumps the console and the stack itself: the RUN loop
+ * services them only between statements.  UDPSEND returns at once; MQTT pumps
+ * through basic_net_mqtt_pump() and HTTPS through basic_https_pump().
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -115,12 +115,11 @@ exec_fetch(const char **p)
     rc = basic_https_get(have_body ? "POST" : "GET", host, path,
                          have_body ? body : NULL, NULL,
                          basic_bigbuf[n], (size_t)TIKU_BASIC_BIGBUF_SIZE);
-    /* basic_https_get stores the whole reply (status line + headers + body).
-     * The #n extractors (JSON$/LINE$/BETWEEN$) want the reply body -- a JSON$
-     * parse from byte 0 would choke on "HTTP/1.1 ..." -- so drop the header
-     * block here: keep everything past the first blank line (CRLF CRLF).
-     * HTTPSTATUS() still reports the code.  A reply with no header terminator
-     * (odd or truncated) is kept whole rather than discarded. */
+    /* basic_https_get() stores the whole reply (status line, headers, body);
+     * the #n extractors (JSON$, LINE$, BETWEEN$) parse from byte 0, so the
+     * header block is dropped here, keeping everything past the first blank
+     * line (CRLF CRLF).  HTTPSTATUS() still reports the code.  A reply with no
+     * header terminator is kept whole. */
     if (rc > 0) {
         char  *buf = basic_bigbuf[n];
         size_t total = (size_t)rc, i, hdr = 0;
@@ -183,8 +182,8 @@ exec_udpsend(const char **p)
 }
 
 #if (TIKU_KITS_NET_HTTP_ENABLE + 0)
-/* BROWSE page buffer: unlike STRIP$(HTTPGET$(...)), which is bounded by the
- * string scratch, BROWSE fetches here, so it shows a whole simple page. */
+/* BROWSE page buffer: one reply of up to TIKU_BASIC_BROWSE_BUF bytes, status
+ * line and headers included. */
 #ifndef TIKU_BASIC_BROWSE_BUF
 #define TIKU_BASIC_BROWSE_BUF  16384
 #endif
@@ -290,8 +289,8 @@ exec_browse(const char **p)
         }
         break;
     }
-    /* Compact status line: HTTP code + body size, so an empty or all-markup
-     * page (which renders to nothing) is explained rather than just blank. */
+    /* Status line: the HTTP code and the body size, printed before the
+     * rendered page, which is blank for an empty or all-markup page. */
     {
         const char *sp = strchr(basic_browse_buf, ' ');
         const char *bd = strstr(basic_browse_buf, "\r\n\r\n");
@@ -316,9 +315,9 @@ exec_browse(const char **p)
 #endif /* TIKU_KITS_NET_HTTP_ENABLE */
 
 #if (TIKU_KITS_NET_MQTT_ENABLE + 0)
-/* MQTT publish (QoS 0). The broker exchange is poll-based, so it is driven
- * across a bounded deadline, pumping the console between polls so the board
- * never hard-hangs. */
+/* MQTT state for MQTTPUB (QoS 0) and MQTTWAIT$.  The broker exchange is
+ * poll-based: every wait has a deadline and pumps the console and the net
+ * stack between polls. */
 static volatile uint8_t basic_mqtt_evt;
 /** @brief MQTT event callback: record the latest event. */
 static void basic_mqtt_event_cb(uint8_t e) { basic_mqtt_evt = e; }
@@ -415,7 +414,7 @@ exec_mqttpub(const char **p)
     }
     tiku_kits_net_mqtt_publish(topic, (const uint8_t *)payload,
                                (uint16_t)strlen(payload), 0, 0);
-    /* let the publish flush, then close cleanly */
+    /* let the publish flush, then disconnect */
     deadline = (tiku_clock_time_t)(tiku_clock_time() + 2u * TIKU_CLOCK_SECOND);
     while (TIKU_CLOCK_LT(tiku_clock_time(), deadline)) {
         if (basic_net_mqtt_pump()) break;
@@ -433,7 +432,8 @@ exec_mqttpub(const char **p)
  * The payload goes to @p out ("" on timeout).
  *
  * @return 0 if a message arrived, -1 otherwise; a bad IP or a failed connect
- *         also sets basic_error (category NET).
+ *         also sets basic_error (category NET), and so does Ctrl-C (no
+ *         category).
  */
 static int
 basic_net_mqtt_wait(const char *ipstr, const char *topic, long secs,

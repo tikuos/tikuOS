@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_delay.c - "delay" command implementation.
  *
- * A synchronous wait that polls for Ctrl+C, run in one-second chunks so the
- * deadline arithmetic stays clear of wraparound on MSP430's 16-bit clock.
- * Distinct from `sleep`, which changes power state rather than just waiting.
+ * Waits in chunks of at most one second, polling for Ctrl+C, so that every
+ * deadline is within the range TIKU_CLOCK_LT() compares correctly on the
+ * 16-bit MSP430 clock.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,14 +21,13 @@
 /** Ctrl+C / ETX. */
 #define DELAY_CANCEL    0x03
 
-/** Cap a single delay at one minute; longer waits should use the
- * job scheduler so the prompt stays responsive. */
+/** Longest delay accepted, in milliseconds. */
 #define DELAY_MAX_MS    60000UL
 
 /**
- * @brief Strict unsigned-decimal parse with overflow guard at
- *        DELAY_MAX_MS.  Returns 1 on success, 0 on parse error or
- *        out-of-range.
+ * @brief Parse the decimal digits in @p s into *out.
+ * @return 1 on success; 0 for an empty string, a non-digit or a value above
+ *         DELAY_MAX_MS
  */
 static uint8_t
 delay_parse_ms(const char *s, unsigned long *out)
@@ -57,8 +56,9 @@ delay_parse_ms(const char *s, unsigned long *out)
 /**
  * @brief Wait @p ticks clock ticks, polling for Ctrl+C.
  *
- * @note The caller keeps @p ticks <= TIKU_CLOCK_SECOND so the deadline
- *       arithmetic does not wrap.
+ * @note The caller keeps @p ticks <= TIKU_CLOCK_SECOND, below
+ *       TIKU_CLOCK_MAX_INTERVAL, so TIKU_CLOCK_LT() orders the deadline
+ *       correctly across a clock wrap.
  * @return 1 if cancelled, 0 if the interval elapsed normally.
  */
 static uint8_t
@@ -101,9 +101,8 @@ tiku_shell_cmd_delay(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* Split <ms> into N whole seconds plus a residual in ticks.
-     * Sub-tick requests round up to one tick so the wait always
-     * advances time by at least the resolution floor. */
+    /* Split <ms> into whole seconds and a remainder in ticks, rounded up to
+     * a whole tick. */
     whole_secs     = ms / 1000UL;
     residual_ticks = (tiku_clock_time_t)
         (((ms - whole_secs * 1000UL) * TIKU_CLOCK_SECOND + 999UL) / 1000UL);

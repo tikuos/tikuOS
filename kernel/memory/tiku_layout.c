@@ -255,6 +255,7 @@ commit(const tiku_layout_env_t *e, tiku_layout_record_t *r)
 /* THE STORE, SEEN THROUGH THE REGION                                        */
 /*---------------------------------------------------------------------------*/
 
+/** @brief A store inside the region: its environment and its offset. */
 typedef struct {
     const tiku_layout_env_t *e;
     size_t                   off;
@@ -826,8 +827,8 @@ provision_cut(const tiku_layout_env_t *e)
  * @brief Take ownership of a blank region, then write its store.
  *
  * The record is committed as provisioning before any store byte is written,
- * so a reset in between leaves an owned region the next boot finishes rather
- * than an unowned store it must hold.  Entropy failure touches nothing.
+ * so a reset in between leaves an owned region, which the next boot finishes.
+ * Entropy failure touches nothing.
  */
 static void
 boot_provision(const tiku_layout_env_t *e, tiku_layout_state_t *st)

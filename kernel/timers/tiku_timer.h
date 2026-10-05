@@ -59,7 +59,7 @@ struct tiku_timer {
   struct tiku_timer *next; /**< Linked list pointer (internal) */
 
   /* Timing state */
-  tiku_clock_time_t start;    /**< When the timer was set */
+  tiku_clock_time_t start;    /**< Tick the interval counts from */
   tiku_clock_time_t interval; /**< Duration in clock ticks */
 
   /* Dispatch info */
@@ -79,13 +79,18 @@ struct tiku_timer {
 /**
  * @brief Initialize the timer subsystem
  *
- * Starts the internal timer management process.
+ * Empties the active list and starts the internal timer management process.
  *
  * @note Call once during system init, after tiku_process_init().
  */
 void tiku_timer_init(void);
 
-/** @brief Internal lifecycle hook: cancel an owner's timers before restart. */
+/**
+ * @brief Remove every timer @p owner set (internal lifecycle hook).
+ *
+ * tiku_process_exit() calls it inside its atomic section, before supervision
+ * can start the owner again.
+ */
 void tiku_timer_cancel_process(const struct tiku_process *owner);
 
 /**
@@ -95,10 +100,10 @@ void tiku_timer_cancel_process(const struct tiku_process *owner);
  * @param func  Function to call on expiration
  * @param ptr   User data passed to func
  *
- * If the timer is already active, it is stopped and re-set.
- * Callback runs in the context of the process that called this function.
+ * If the timer is already active, it is stopped and re-set.  The callback
+ * runs in the timer process with tiku_current_process set to the process
+ * that called this function (NULL when called outside one).
  *
- * Example:
  * @code
  *   static struct tiku_timer my_timer;
  *   tiku_timer_set_callback(&my_timer, TIKU_CLOCK_SECOND * 2,
@@ -122,6 +127,8 @@ void tiku_timer_set_callback(struct tiku_timer *t, tiku_clock_time_t ticks,
  *   tiku_timer_set_event(&my_timer, TIKU_CLOCK_SECOND);
  *   TIKU_PROCESS_WAIT_EVENT_UNTIL(ev == TIKU_EVENT_TIMER);
  * @endcode
+ *
+ * @note Called outside a process, the timer expires without posting.
  */
 void tiku_timer_set_event(struct tiku_timer *t, tiku_clock_time_t ticks);
 
@@ -129,10 +136,11 @@ void tiku_timer_set_event(struct tiku_timer *t, tiku_clock_time_t ticks);
  * @brief Reset timer for drift-free periodic operation
  * @param t Timer structure
  *
- * Re-adds the timer with start = old_start + interval, keeping
- * the same mode/callback/process. This avoids cumulative drift.
+ * Re-adds the timer with start = old_start + interval, keeping the same
+ * mode, callback and process, so periods do not accumulate drift.  A timer
+ * more than one interval late is due again at once.
  *
- * Safe to call from within a callback.
+ * @note Callable from the timer's own callback.
  */
 void tiku_timer_reset(struct tiku_timer *t);
 
@@ -140,8 +148,8 @@ void tiku_timer_reset(struct tiku_timer *t);
  * @brief Restart timer from current time
  * @param t Timer structure
  *
- * Like reset but anchored to now. Use when you don't care about
- * drift (e.g., retriggering a timeout on activity).
+ * Sets start to now, keeping interval, mode, callback and process: a timeout
+ * re-armed on activity, for example.
  */
 void tiku_timer_restart(struct tiku_timer *t);
 
@@ -149,8 +157,9 @@ void tiku_timer_restart(struct tiku_timer *t);
  * @brief Stop a timer
  * @param t Timer structure
  *
- * Removes the timer from the active list. Safe to call even if
- * the timer is not active (no-op in that case).
+ * Removes the timer from the active list; does nothing for an inactive one.
+ * A TIKU_EVENT_TIMER it posted before the stop is still in the queue and is
+ * delivered.
  */
 void tiku_timer_stop(struct tiku_timer *t);
 
@@ -159,21 +168,16 @@ void tiku_timer_stop(struct tiku_timer *t);
  * @param t Timer structure
  * @return Non-zero if the timer is inactive, zero if it is pending.
  *
- * Inactive covers both never-set and set-fired-and-dispatched, and this call
- * cannot tell them apart; a caller needing that must track it.  The usual
- * set-then-wait pattern is unaffected, since the caller just set the timer.
+ * A timer is inactive when never set, when stopped and once it has fired
+ * (its event posted or its callback run); this call cannot tell these apart.
  */
 int tiku_timer_expired(struct tiku_timer *t);
 
 /**
  * @brief Get remaining time until expiration.
  * @param t Timer structure
- * @return Ticks remaining if the timer is active and pending; 0
- *         otherwise.
- *
- * A return of 0 means the timer is not currently pending, which
- * covers both "already fired" and "never set" — see
- * tiku_timer_expired() for the same caveat.
+ * @return Ticks until expiry; 0 for an inactive timer (never set, stopped or
+ *         fired) and for one that is due and still in the active list.
  */
 tiku_clock_time_t tiku_timer_remaining(struct tiku_timer *t);
 
@@ -197,20 +201,19 @@ int tiku_timer_any_pending(void);
 /**
  * @brief Check if any software timer is due right now.
  *
- * Distinct from tiku_timer_any_pending(): armed-for-later is not work, so the
- * scheduler can enter a tick-woken idle instead of spinning until expiry.
+ * A timer armed for later does not count, so the scheduler may enter a
+ * tick-woken idle while one waits.  Nor does a due timer whose owner the
+ * memory-reclaim gate holds.
  *
- * @return Non-zero if at least one active timer has expired but has
- *         not yet been dispatched
+ * @return Non-zero if a timer in the active list is due and not held
  */
 int tiku_timer_work_pending(void);
 
 /**
  * @brief Check whether a process owns at least one armed timer.
  *
- * Used by the dispatcher to classify a blocked process as SLEEPING
- * (parked on a timer deadline) rather than WAITING (parked on an
- * event with no scheduled wake-up) for /proc and `ps`.
+ * The dispatcher uses it to label a blocked process for /proc and `ps`:
+ * SLEEPING when it owns an armed timer, WAITING when it does not.
  *
  * @param p Process to look up (NULL matches timers set outside any
  *          process context)
@@ -224,7 +227,8 @@ int tiku_timer_owner_armed(const struct tiku_process *p);
 uint8_t tiku_timer_count(void);
 
 /**
- * @brief Return the total number of timer expirations since boot.
+ * @brief Return the total number of timer expirations since boot; wraps at
+ *        65535.
  */
 uint16_t tiku_timer_fired(void);
 
@@ -238,7 +242,9 @@ struct tiku_timer *tiku_timer_get(uint8_t idx);
  * @brief Get next expiration time across all timers
  * @return Nearest expiration time, or 0 if none pending
  *
- * Useful for the scheduler to know how long it can sleep.
+ * Timers are ranked by expiration minus now in the clock's width, so an
+ * overdue timer's distance wraps and ranks after every future one.  The
+ * tickless idle uses it to choose how far to stretch the tick.
  */
 tiku_clock_time_t tiku_timer_next_expiration(void);
 
@@ -256,7 +262,7 @@ void tiku_timer_request_poll(void);
 extern struct tiku_process tiku_timer_process;
 
 /*---------------------------------------------------------------------------*/
-/* CONVENIENCE MACROS                                                        */
+/* TIME CONSTANTS                                                            */
 /*---------------------------------------------------------------------------*/
 
 /** One second in timer ticks */
@@ -270,20 +276,20 @@ extern struct tiku_process tiku_timer_process;
 /*---------------------------------------------------------------------------*/
 
 /*
- * Convenience macros that wrap a one-shot tiku_timer_set_event() and
- * the matching PT_WAIT_UNTIL / PT_YIELD_UNTIL into a single call, and
- * stop the timer afterwards.
+ * These macros arm a one-shot tiku_timer_set_event(), wait with
+ * PT_WAIT_UNTIL or PT_YIELD_UNTIL for the condition or the timer, and
+ * then stop the timer.
  *
  * Caller-side contract:
  *
  *   - The caller owns a `struct tiku_timer` (typically a static
- *     variable in the process file) and passes its address to the
- *     macro.  One timer per call site is the cleanest mapping.
+ *     variable in the process file), one per call site, and passes
+ *     its address to the macro.
  *
- *   - After the macro returns, re-evaluate the same condition at the
- *     call site to distinguish "condition met" from "timed out".
- *     The macro stops the timer on exit so a stray TIKU_EVENT_TIMER
- *     cannot be posted to the process after the wait completes.
+ *   - After the macro, the caller tests the condition again: false
+ *     means the wait timed out.  Stopping the timer prevents a later
+ *     post, but a TIKU_EVENT_TIMER queued before the wait ended is
+ *     still delivered.
  *
  *   - The condition expression is re-evaluated whenever the process
  *     is re-scheduled, as with plain PT_WAIT_UNTIL.
@@ -326,9 +332,9 @@ extern struct tiku_process tiku_timer_process;
  * @def PT_YIELD_UNTIL_TIMEOUT(pt, timer, cond, ticks)
  * @brief Yield until @p cond is true or @p ticks have elapsed.
  *
- * As PT_WAIT_UNTIL_TIMEOUT but with yield semantics, so the process reads as
- * "ready" rather than "sleeping".  Scheduling is the same: either form runs
- * again on its next event, the timer's at the latest.
+ * Like PT_WAIT_UNTIL_TIMEOUT, but it yields at least once, even when @p cond
+ * already holds, and the process reads as "ready" while it waits.  Either
+ * form runs again on its next event, the timer's at the latest.
  *
  * @param pt    Pointer to the protothread control block
  * @param timer Pointer to a caller-owned struct tiku_timer
@@ -348,9 +354,9 @@ extern struct tiku_process tiku_timer_process;
  * @def PT_WAIT_UNTIL_TIMEOUT_PERSISTENT(pt, timer, cond, ticks)
  * @brief Persistent variant of PT_WAIT_UNTIL_TIMEOUT.
  *
- * The continuation point is checkpointed to NVM, but the timer lives in RAM and
- * does not survive a power cycle: on resume it reads as already expired and the
- * macro falls through, so the caller must re-check @p cond and retry.
+ * The continuation point is checkpointed to NVM.  A resume after a power cycle
+ * enters past tiku_timer_set_event(), so the timer is unarmed, reads as
+ * expired, and the macro falls through as a timeout; re-check @p cond.
  *
  * @param pt    Pointer to the protothread control block
  * @param timer Pointer to a caller-owned struct tiku_timer
@@ -369,9 +375,9 @@ extern struct tiku_process tiku_timer_process;
  * @def PT_YIELD_UNTIL_TIMEOUT_PERSISTENT(pt, timer, cond, ticks)
  * @brief Persistent variant of PT_YIELD_UNTIL_TIMEOUT.
  *
- * As the WAIT variant but with yield semantics, so the process reads as "ready"
- * while waiting.  Same post-reboot behaviour: the timer is gone and the macro
- * falls through as if it had timed out.
+ * Like PT_YIELD_UNTIL_TIMEOUT, with the continuation point checkpointed to
+ * NVM.  A resume after a power cycle finds the timer unarmed, and the macro
+ * falls through as a timeout.
  *
  * @param pt    Pointer to the protothread control block
  * @param timer Pointer to a caller-owned struct tiku_timer

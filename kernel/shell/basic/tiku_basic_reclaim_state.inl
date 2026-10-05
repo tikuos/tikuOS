@@ -35,6 +35,7 @@ static int basic_reclaim_available(void)
 /** Mark a native word, BLE or PEEK/POKE use; BASIC then stays unreclaimable. */
 #define BASIC_RECLAIM_EXTERNAL() (basic_reclaim_external = 1)
 #else
+/** @brief Reclaim compiled out: BASIC is always available (1). */
 static int basic_reclaim_available(void) { return 1; }
 #define BASIC_RECLAIM_EXTERNAL() ((void)0)
 #endif

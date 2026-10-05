@@ -115,7 +115,7 @@ void tiku_ble_host_reset(void)
     host_frag_max = HOST_FRAG_MAX;               /* pre-DLE default (27)      */
     host_max_single = 0u;
     host_cccd[0] = 0u; host_cccd[1] = 0u;
-    /* Deterministic long values so a client can verify a long read/write. */
+    /* The long-read value is '0'..'9' repeating, for a client to check. */
     for (i = 0u; i < HOST_MODEL_LEN; i++) {
         model_val[i] = (uint8_t)('0' + (i % 10u));
     }

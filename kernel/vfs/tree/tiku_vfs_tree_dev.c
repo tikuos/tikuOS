@@ -97,8 +97,7 @@ LED_VFS_FUNCS(3)
  * @brief Read handler for /dev/uart/overruns.
  *
  * Renders the count of RX bytes dropped because the ring buffer was full.  A
- * growing value means the consumer is not draining fast enough for the line
- * rate -- the first thing to check when pasted text arrives mangled.
+ * rising count means the consumer drains slower than the line delivers.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -115,9 +114,8 @@ uart_overruns_read(char *buf, size_t max)
 /**
  * @brief Read handler for /dev/uart/recoveries (nRF54L only).
  *
- * Counts RX-engine wedge self-heals since boot: a lost DMA re-arm silences RX,
- * and the driver detects the captured-but-unmoved-byte signature and repairs
- * it in place.
+ * Renders the RX-engine recoveries since boot: a lost DMA re-arm silences RX,
+ * and the driver, finding a byte captured but never moved, re-arms in place.
  */
 static int
 uart_recoveries_read(char *buf, size_t max)
@@ -131,8 +129,7 @@ uart_recoveries_read(char *buf, size_t max)
  * @brief Read handler for /dev/uart/baud.
  *
  * Renders the board header's configured baud rate as a decimal line ("9600\n"
- * on MSP430 boards, "115200\n" on RP2350) -- a build-time constant, useful to a
- * host script confirming it opened the port at the right speed.
+ * on MSP430 boards, "115200\n" on RP2350), a build-time constant.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -208,7 +205,7 @@ adc_temp_read(char *buf, size_t max)
  *
  * Same contract as adc_temp_read() but on the supply-voltage
  * channel (internally divided VCC on MSP430): raw count or
- * "err\n".  Useful for crude battery gauging on coin-cell boards.
+ * "err\n".
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -233,8 +230,8 @@ adc_battery_read(char *buf, size_t max)
  * @brief Read handler for /dev/i2c/scan; each read probes the bus.
  *
  * Reading probes 7-bit addresses 0x08..0x77 with a zero-length write and
- * renders the responders as "0x18 0x48\n", or "none\n".  112 transactions of
- * bus time, so it is a debugging aid rather than something to poll.
+ * renders the responders as "0x18 0x48\n", or "none\n".  Each read costs 112
+ * bus transactions.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -324,8 +321,7 @@ console_write(const char *buf, size_t len)
 /**
  * @brief Read handler for /dev/null — always empty.
  *
- * Returns 0 bytes, matching the Unix namesake: reading null gives
- * instant EOF.
+ * Returns 0 bytes.
  *
  * @param buf  Unused
  * @param max  Unused
@@ -342,9 +338,7 @@ devnull_read(char *buf, size_t max)
 /**
  * @brief Write handler for /dev/null — discard everything.
  *
- * Accepts and ignores any payload.  Gives scripts a portable
- * "throw this away" target and exercises the write path in tests
- * without side effects.
+ * Accepts and ignores any payload.
  *
  * @param buf  Ignored
  * @param len  Ignored
@@ -365,8 +359,8 @@ devnull_write(const char *buf, size_t len)
 /**
  * @brief Read handler for /dev/zero — fill with NUL bytes.
  *
- * Fills the buffer with zeros and returns @p max.  Programmatic consumers use
- * the return value; `read /dev/zero` shows an empty string, as on Unix.
+ * Fills the buffer with zeros and returns @p max; printed as a string, the
+ * result is empty.
  *
  * @param buf  Output buffer, fully zeroed on return
  * @param max  Capacity of @p buf in bytes
@@ -488,9 +482,8 @@ static const tiku_vfs_node_t dev_children[] = {
 };
 
 /**
- * The /dev directory node itself, fully formed with its name and a
- * sizeof-derived child count so the root assembly can copy it by
- * value (getter pattern — see tiku_vfs_tree_dev_get()).
+ * The /dev directory node, with a sizeof-derived child count;
+ * tiku_vfs_tree_dev_get() returns it for the root assembly to copy.
  */
 static const tiku_vfs_node_t dev_node = {
     "dev", TIKU_VFS_DIR, NULL, NULL, dev_children,

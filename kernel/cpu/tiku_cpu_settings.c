@@ -33,8 +33,9 @@ extern uint32_t tiku_mem_arch_nvm_program_count(void);
 #endif
 
 #if !defined(PLATFORM_NORDIC)
-/* A complementary word rejects torn multiword saves even on FRAM. The cell
- * gate additionally protects persist's commit protocol. */
+/* A save commits hz and its complement through the cell, which stores the
+ * gate last.  tiku_cpu_settings_target() takes the value only with a valid
+ * gate and a matching complement, so a save torn between the words fails. */
 static TIKU_DURABLE struct {
     uint32_t hz;
     uint32_t inverse;
@@ -43,7 +44,10 @@ TIKU_PERSIST_CELL(saved_clock_cell, saved_clock, 0x434C4B32UL, NULL, 0);
 static unsigned long boot_default;
 static int ready, restored;
 
-/** @brief Verify the durable image, not merely its SRAM working copy. */
+/**
+ * @brief Return 1 when the durable image holds saved_clock and its gate as
+ *        SRAM does; ports that write NVM in place return 1.
+ */
 static int committed(void)
 {
 #if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
@@ -64,7 +68,7 @@ static int committed(void)
     header = __tiku_nvm_mram_start;
     capacity = (uintptr_t)&__tiku_nvm_mram_size;
 #elif defined(PLATFORM_ESP32C61)
-    /* Two slots take turns; the image is the newer one that checks. */
+    /* Two slots take turns; the image is the newer valid one. */
     image = tiku_mem_arch_durable(&len);
     if (image == NULL) return 0;
     header = (const uint32_t *)(const void *)
@@ -87,11 +91,14 @@ static int committed(void)
         memcmp(image + gate, &saved_clock_cell_gate,
                sizeof saved_clock_cell_gate) == 0;
 #else
-    return 1; /* Direct NVM completion comes from the checked cell commit. */
+    return 1; /* NVM written in place: the cell commit's status is the check. */
 #endif
 }
 
-/** @brief Accept only discrete choices advertised by this platform. */
+/**
+ * @brief Return 1 when @p hz is a rate tiku_cpu_freq_available() lists and
+ *        the port lists at least two.
+ */
 static int supported(unsigned long hz)
 {
     unsigned int i;
@@ -104,7 +111,7 @@ static int supported(unsigned long hz)
     return 0;
 }
 
-/** @brief The advertised choice a measured rate stands for, within 1 %. */
+/** @brief The advertised rate within 1 % of @p hz, or @p hz if none is. */
 static unsigned long as_choice(unsigned long hz)
 {
     unsigned int i;
@@ -133,7 +140,9 @@ int tiku_cpu_settings_save(unsigned long hz)
     value[1] = ~value[0];
     if (tiku_persist_cell_commit_status(&saved_clock_cell, value, sizeof value)
             != TIKU_MEM_OK || !committed()) {
-        /* Completion is uncertain; do not issue a second write as rollback. */
+        /* Whether the value reached durable memory is unknown, and nothing
+         * is rewritten: target() reports the boot default until a save
+         * succeeds. */
         restored = 0;
         return -1;
     }

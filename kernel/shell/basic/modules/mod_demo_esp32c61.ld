@@ -17,7 +17,7 @@ MEMORY
 {
     /* 32 KB at the base of the in-package PSRAM, which the PSRAM tier leaves
      * out when the loader is built in.  The image lives in the store as an
-     * ordinary file and is copied here at activate.  Kept in sync with
+     * ordinary file and is copied here at activate.  It must equal
      * TIKU_MODULE_EXEC_ADDR and TIKU_ESP32C61_MODULE_WINDOW. */
     CARVE (rx) : ORIGIN = 0x42800000, LENGTH = 0x8000
 }
@@ -40,9 +40,9 @@ SECTIONS
 
     ASSERT(SIZEOF(.mod) <= LENGTH(CARVE), "module image overflows the carve")
 
-    /* Modules get no RAM, so any writable state is a link error naming the
-     * cause rather than a global silently pointing at nothing; small data
-     * counts too, though -msmall-data-limit=0 keeps it from appearing. */
+    /* Modules get no RAM: the .data, .bss and small-data inputs are collected
+     * here and must be empty, so writable state fails the link with a message
+     * naming the cause.  The module build passes -msmall-data-limit=0. */
     .modwritable (NOLOAD) : { *(.bss*) *(.data*) *(.sbss*) *(.sdata*) *(COMMON) }
 
     ASSERT(SIZEOF(.modwritable) == 0,

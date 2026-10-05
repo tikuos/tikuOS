@@ -8,7 +8,8 @@
  * tiku_i2c_bus.h - platform-independent I2C bus interface.
  *
  * A portable I2C master API supporting standard (100 kHz) and fast (400 kHz)
- * modes.  All operations block; the hardware is reached through the arch layer.
+ * modes.  All operations block.  On a board that does not define
+ * TIKU_BOARD_I2C_BRW_100K every call returns TIKU_I2C_ERR_PARAM.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

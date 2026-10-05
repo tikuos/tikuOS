@@ -54,7 +54,7 @@ enabled_read(char *buf, size_t max)
 /*---------------------------------------------------------------------------*/
 
 /* A temperature read can clear interrupt or status bits on some of these
- * sensors, so it is an effect, not a passive observation. */
+ * sensors, so its descriptor carries TIKU_VFS_DF_READ_EFFECT. */
 static const tiku_vfs_desc_t temperature = TIKU_VFS_DESC_FLAGS(
     TIKU_VFS_T_I32, TIKU_VFS_U_MILLICELSIUS, TIKU_VFS_FRESH_LIVE,
     TIKU_VFS_E_BUS, TIKU_VFS_DF_READ_EFFECT);

@@ -7,9 +7,8 @@
  *
  * tiku_vfs_tree_watch.h - /sys/watch and /sys/vfs VFS nodes.
  *
- * Two read-only subtrees exposing the VFS core's own state through the VFS it
- * implements: watch-table contents for leak debugging, and tree statistics,
- * manifest, change ring and read-cache counters.
+ * Two read-only subtrees: the watch table's slots, and the tree's node
+ * count, depth, manifest, change ring and read-cache counters.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,9 +21,9 @@
 /**
  * @brief Entry count of /sys/watch.
  *
- * Two summary counters (used, free) plus one node per watch slot,
- * so it tracks TIKU_VFS_WATCH_MAX automatically.  A _Static_assert
- * in the .c catches the per-slot table getting out of step.
+ * Two summary counters (used, free) and one node per watch slot.  The .c
+ * asserts that its table has this many entries and that
+ * TIKU_VFS_WATCH_MAX is 8.
  */
 #define TIKU_VFS_TREE_WATCH_NCHILD  (2 + TIKU_VFS_WATCH_MAX)
 
@@ -38,8 +37,8 @@ extern const tiku_vfs_node_t tiku_vfs_tree_watch_children[];
 /**
  * @brief Entry count of /sys/vfs.
  *
- * Must equal the number of initialisers in
- * tiku_vfs_tree_vfs_children — bump it when adding a node there.
+ * Must equal the number of initialisers in tiku_vfs_tree_vfs_children; a
+ * _Static_assert in the .c checks it.
  */
 #define TIKU_VFS_TREE_VFS_NCHILD  8
 

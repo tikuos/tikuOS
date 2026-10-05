@@ -113,14 +113,10 @@ uptime_read(char *buf, size_t max)
 /*---------------------------------------------------------------------------*/
 
 /*
- * Read returns the current wall-clock seconds. Write accepts a
- * decimal seconds-since-epoch value and rebases the offset so that
- * subsequent reads are consistent. Both sit on top of
- * tiku_rtc_*(), which keeps the persistent epoch offset and the
- * MPU-unlock handshake out of the VFS handler.
- *
- * Format choice: plain decimal. Easy to parse from a shell script,
- * easy to feed back in (`write /sys/time $(date +%s)`).
+ * Read returns the current wall-clock seconds; write takes decimal seconds
+ * since the epoch (`write /sys/time $(date +%s)`) and rebases the offset.
+ * Both go through tiku_rtc_*(), which keeps the durable epoch offset and its
+ * MPU unlock.
  */
 
 /**
@@ -250,8 +246,9 @@ static int
 nvmfree_read(char *buf, size_t max)
 {
     tiku_mem_stats_t st;
-    /* The tier wires itself on first use; the idempotent tiku_tier_init()
-     * lets stats succeed before anything has allocated. */
+    /* The tier is unwired until the first tiku_tier_init() call, which boot
+     * makes on every port but MSP430 and RA8P1; the call is idempotent, so
+     * stats succeed here before anything has allocated. */
     (void)tiku_tier_init();
     if (tiku_tier_stats(TIKU_MEM_NVM, &st) != TIKU_MEM_OK) {
         return snprintf(buf, max, "0\n");
@@ -285,9 +282,10 @@ mem_tiers_read(char *buf, size_t max)
     uint8_t i;
     int n;
 
-    /* The tier wires itself on first use; the idempotent tiku_tier_init()
-     * lets stats succeed before anything has allocated, so an unused tier
-     * is listed rather than left out. */
+    /* The tier is unwired until the first tiku_tier_init() call, which boot
+     * makes on every port but MSP430 and RA8P1; the call is idempotent, so
+     * stats succeed here before anything has allocated, and an unused tier
+     * is listed too. */
     (void)tiku_tier_init();
 
     for (i = 0; i < (uint8_t)(sizeof(tiers) / sizeof(tiers[0])); i++) {
@@ -329,8 +327,7 @@ mem_tiers_read(char *buf, size_t max)
 /**
  * @brief Read handler for /sys/mem/reservations: one line per reservation.
  *
- * A bounded snapshot: a buffer too short for every line is an error, not a
- * partial list.
+ * A buffer too short for every line returns -1, with no partial list.
  */
 static int mem_reservations_read(char *buf, size_t max)
 {
@@ -494,8 +491,7 @@ mem_used_read(char *buf, size_t max)
  * @brief Read handler for /sys/sched/idle.
  *
  * Renders the scheduler's idle counter: how many times the main loop found no
- * runnable process and dropped into the configured sleep mode.  The growth rate
- * between two reads is a cheap duty-cycle estimate.
+ * runnable process and dropped into the configured sleep mode.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -599,8 +595,7 @@ device_name_write(const char *buf, size_t len)
         len--;
     }
 
-    /* Reject empty writes — clearing the name has no use case
-     * and the read path expects a NUL-terminated string. */
+    /* An empty name is refused. */
     if (len == 0) {
         return -1;
     }
@@ -638,9 +633,9 @@ device_id_read(char *buf, size_t max)
 /**
  * @brief Read handler for /sys/device/uid.
  *
- * The whole per-die identifier as hex, however many bytes this part has --
- * /sys/device/id renders only the first two as a friendly name.  Empty when
- * the part has no unique ID rather than inventing one.
+ * Renders the whole per-die identifier as hex, however many bytes this part
+ * has; /sys/device/id renders only the first two.  A part with no unique ID
+ * renders an empty line.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -685,9 +680,8 @@ device_mcu_read(char *buf, size_t max)
 /**
  * @brief Read handler for /sys/device/version.
  *
- * Same payload as /sys/version — duplicated under device/ so a
- * single `tree /sys/device` gives the full identity picture
- * (name, id, mcu, version) in one place.
+ * Same payload as /sys/version, so /sys/device holds the whole identity:
+ * name, id, mcu and version.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -848,9 +842,9 @@ static const tiku_vfs_desc_t desc_uptime =
  * @brief Read handler for /sys/mem/stack_free: the lowest stack headroom
  *        since boot, in bytes.
  *
- * The intact painted cushion above the MPU stack guard, unlike the live gap
- * /sys/mem/free reports; snapshot it under load when sizing the stack.  "0"
- * on a port that has not declared its stack bounds.
+ * The painted stack still intact above the MPU stack guard; /sys/mem/free
+ * reports the live gap instead.  "0" on a port that has not declared its stack
+ * bounds.
  */
 static int stack_free_read(char *buf, size_t max)
 {
@@ -861,8 +855,8 @@ static int stack_free_read(char *buf, size_t max)
 /* /sys/mem/sram_map, /sys/mem/nvm_map -- each memory by estate               */
 /*---------------------------------------------------------------------------*/
 
-/* Weak: a part whose linker does not carve an estate leaves its symbol
- * at address 0, and that estate is left out rather than misreported. */
+/* Weak: where the linker does not carve an estate, its symbol is at address
+ * 0 and the maps leave that estate out. */
 extern char _etext __attribute__((weak));
 extern char __datastart __attribute__((weak));
 extern char __sram_start __attribute__((weak));
@@ -1123,9 +1117,8 @@ static const tiku_vfs_node_t sys_device_children[] = {
 /* /sys/rules, /sys/jobs — read-only view of the shell's reactive automation */
 /*---------------------------------------------------------------------------*/
 /*
- * Read-only: an agent can see what automation is armed.  Rules and jobs are
- * added and removed with the `rules`, `on`, `every` and `once` shell
- * commands.
+ * Read-only lists of the armed rules and scheduled jobs.  The `rules`, `on`,
+ * `every` and `once` shell commands add and remove them.
  */
 
 /** @brief Read handler for /sys/rules/count: the number of armed rules. */
@@ -1237,8 +1230,7 @@ static const tiku_vfs_node_t sys_jobs_children[] = {
 /*
  * Runtime control of the hardware-crypto backend: `mode` selects auto
  * (hardware with software fallback) or sw (software only); `ops` counts the
- * calls each path served, so a test can check that the hardware ran; `pk`
- * reports the public-key path.
+ * calls each path served; `pk` reports the public-key path.
  */
 
 /** @brief Read handler for /sys/crypto/mode: "auto" or "sw". */
@@ -1307,12 +1299,11 @@ static const tiku_vfs_node_t sys_crypto_children[] = {
 /* /sys/radio — BLE broadcaster/observer control + observability             */
 /*---------------------------------------------------------------------------*/
 /*
- * Control surface over the tiku_ble_adv facade: `beacon` is the writable
- * knob ("NAME[,interval_ms[,data]]" starts, "off"/"0" stops; data is a
- * telemetry payload carried after the 'TK' manufacturer id) and `txpower`
- * (signed dBm, discrete silicon steps only) is the power knob -- both
- * reachable from the rules engine and `watch`; the rest report state, so a
- * bench can check that the radio transmitted.
+ * Control over the tiku_ble_adv facade: `beacon` starts the beacon with
+ * "NAME[,interval_ms[,data]]" and stops it with "off" or "0" (data is a
+ * telemetry payload carried after the 'TK' manufacturer id), and `txpower`
+ * sets the power in signed dBm, silicon steps only.  The other nodes report
+ * state.
  */
 
 /** @brief Read handler for /sys/radio/beacon: "name,ms[,data]" or "off". */
@@ -1399,8 +1390,9 @@ radio_state_read(char *buf, size_t max)
 /**
  * @brief The background observer's new-data hook: notifies /sys/radio/scan.
  *
- * The facade calls it from timer-callback context (not ISR) whenever the
- * observer delivered packets, ringing every /sys/radio/scan watcher.
+ * tiku_ble_adv calls it outside interrupt context each time its background
+ * observer refreshes the scan summary; tiku_vfs_notify() then posts
+ * TIKU_EVENT_VFS to every /sys/radio/scan watcher.
  */
 static void
 radio_scan_notify_hook(void)
@@ -1446,9 +1438,8 @@ radio_txpower_read(char *buf, size_t max)
 /**
  * @brief Write handler for /sys/radio/txpower: signed dBm.
  *
- * Only the silicon's discrete steps are accepted; the facade rejects any
- * other value rather than rounding it.  A rule can lower the power when a
- * voltage or energy node sags.
+ * Only the silicon's discrete steps are accepted; any other value returns
+ * TIKU_VFS_EINVAL.
  */
 static int
 radio_txpower_write(const char *buf, size_t len)
@@ -1595,8 +1586,7 @@ flpr_run_write(const char *buf, size_t len)
  * @brief Read handler for /sys/flpr/echo: "<reply_seq> <last reply>".
  *
  * A write sends bytes to the FLPR, whose echo service mirrors them back
- * (doorbell, then ISR capture); the seq advances once a reply has crossed
- * back, so the whole cross-core interrupt path ran.
+ * (doorbell, then ISR capture); reply_seq advances when a reply comes back.
  */
 static int
 flpr_echo_read(char *buf, size_t max)
@@ -1731,8 +1721,8 @@ static const tiku_vfs_node_t sys_flpr_children[] = {
     /* Starts the core /sys/coproc/run starts, so it needs the same CAP_SYS. */
     { "run",       TIKU_VFS_FILE, flpr_run_read,       flpr_run_write,
       NULL, 0, NULL, NULL, TIKU_VFS_CAP_SYS },
-    /* spin, spinbench and pulse drive the core and, for pulse, a pin: the
-     * hardware capability, as the LED and NPU nodes take. */
+    /* spin, spinbench and pulse drive the core and, for pulse, a pin, so
+     * they need TIKU_VFS_CAP_HW. */
     { "spin",      TIKU_VFS_FILE, flpr_spin_read,      flpr_spin_write,
       NULL, 0, NULL, NULL, TIKU_VFS_CAP_HW },
     { "spinbench", TIKU_VFS_FILE, flpr_spinbench_read, flpr_spinbench_write,
@@ -1754,10 +1744,10 @@ static const tiku_vfs_desc_t desc_lifetime = TIKU_VFS_DESC_FLAGS(
 /*
  * The /sys directory table -- the master list of everything under /sys.  Three
  * kinds of entry: files handled in this module; files whose handlers the boot
- * module exports (boot_count, last_reset, cold_boots, surfaced at the top level
- * for script convenience); and directories, either the local tables above or a
- * sibling module's exported children + NCHILD pair.  To add a node, implement
- * the handler and append the entry, keeping any NCHILD beside its pointer.
+ * module exports (boot_count, last_reset and cold_boots); and directories,
+ * either the local tables above or a sibling module's exported children +
+ * NCHILD pair.  To add a node, implement the handler and append the entry,
+ * keeping any NCHILD beside its pointer.
  */
 static const tiku_vfs_node_t sys_children[] = {
     { "version",    TIKU_VFS_FILE, version_read,    NULL, NULL, 0 },
@@ -1855,9 +1845,8 @@ static const tiku_vfs_node_t sys_children[] = {
 };
 
 /**
- * The /sys directory node itself, fully formed with its name and a
- * sizeof-derived child count so the root assembly can copy it by
- * value (getter pattern — see tiku_vfs_tree_sys_get()).
+ * The /sys directory node, with a sizeof-derived child count;
+ * tiku_vfs_tree_sys_get() returns it for the root assembly to copy.
  */
 static const tiku_vfs_node_t sys_node = {
     "sys", TIKU_VFS_DIR, NULL, NULL, sys_children,
@@ -1905,8 +1894,8 @@ tiku_vfs_tree_sys_init(void)
 #endif
 
 #if (TIKU_HAS_BLE_ADV + 0)
-    /* Background-observer scan data -> /sys/radio/scan namespace
-     * events (watch / rules ride the bus from there). */
+    /* New background-observer scan data notifies /sys/radio/scan, which
+     * `watch` and the rules engine subscribe to. */
     tiku_ble_adv_set_scan_notify(radio_scan_notify_hook);
 #endif
 }

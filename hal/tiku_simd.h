@@ -7,9 +7,8 @@
  *
  * tiku_simd.h - portable u8 vector kernels (Helium/MVE when the ISA has it).
  *
- * One fixed arithmetic contract -- product is floor(a * b / 255), addition
- * saturates to [0, 255] -- chosen to match the Apollo510 GPU's ROP blender, so
- * scalar, Helium and GPU results are mutually checkable.
+ * Both backends use the arithmetic of the Apollo510 GPU's ROP blender: a
+ * product is floor(a * b / 255) and an addition saturates to [0, 255].
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -50,7 +49,7 @@ void tiku_simd_affine_u8(uint8_t *dst, const uint8_t *x, uint8_t a, uint8_t b,
 /** @brief y[i] = sat(floor(x[i]*a/255) + y[i]) -- SAXPY, in place. */
 void tiku_simd_saxpy_u8(uint8_t *y, const uint8_t *x, uint8_t a, uint32_t n);
 
-/** @brief Sum of all lanes, exact (unlike the GPU's fold-tree mean). */
+/** @brief Exact sum of all lanes. */
 uint32_t tiku_simd_sum_u8(const uint8_t *x, uint32_t n);
 
 /**

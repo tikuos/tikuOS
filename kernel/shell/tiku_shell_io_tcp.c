@@ -37,11 +37,11 @@
 static tiku_kits_net_tcp_conn_t *telnet_conn;
 
 /**
- * @brief Outgoing byte buffer accumulating CLI output between flushes.
+ * @brief Shell output waiting to be sent.
  *
- * tcp_putc() appends here rather than emitting a segment per byte, and the
- * flush drains it into MSS-sized segments -- coalescing matters because each
- * segment costs a SLIP TX and a shared TX pool slot.
+ * tcp_putc() appends to it and tiku_shell_io_tcp_flush() sends it in
+ * MSS-sized segments; each segment takes a SLIP transmit and a slot in the
+ * shared TCP TX pool until the peer acknowledges it.
  */
 static uint8_t tx_buf[TIKU_SHELL_TCP_TX_BUF_SIZE];
 
@@ -66,16 +66,11 @@ static uint8_t last_was_cr;
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Push buffered output toward the peer, at most one segment.
+ * @brief Send at most one MSS-sized segment of the buffered output.
  *
- * Sends at most one MSS-sized segment per call: each send blocks the CPU for a
- * SLIP transmit, and capping the burst lets incoming ACKs free TX pool slots
- * before the next flush.
- *
- * @note A no-op with nobody connected or an empty buffer.  A successful send
- *       shifts any unsent tail to the front; a failed one (TX pool full) leaves
- *       the buffer intact to retry next cycle.  Called from tcp_putc() when the
- *       buffer fills and by the CLI at the end of each poll iteration.
+ * Each send blocks for a SLIP transmit.  A sent chunk is removed from the
+ * front of the buffer; a send the stack refuses (TX pool full) leaves the
+ * buffer as it was.  Does nothing with no client or an empty buffer.
  */
 void
 tiku_shell_io_tcp_flush(void)
@@ -92,8 +87,7 @@ tiku_shell_io_tcp_flush(void)
     if (chunk > mss) {
         chunk = mss;
     }
-    /* chunk and tx_pos are uint16_t: tx_buf holds more than 255 bytes, and
-     * a length that wrapped to 0 would make every send fail. */
+    /* chunk and tx_pos are uint16_t: tx_buf can hold more than 255 bytes. */
 
     if (tiku_kits_net_tcp_send(telnet_conn,
                                tx_buf, chunk) != TIKU_KITS_NET_OK) {
@@ -118,17 +112,12 @@ tiku_shell_io_tcp_flush(void)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Backend putc: buffer one outgoing byte (tiku_shell_io_t.putc).
+ * @brief Backend putc: append one byte to the output buffer.
  *
- * Appends @p c to tx_buf rather than transmitting; the accumulated bytes go out
- * on the next flush.  Does nothing with no client connected, so CLI output
- * produced without a telnet session simply vanishes.
+ * Does nothing with no client connected.  The buffer is flushed when it
+ * fills, and a byte that finds it still full after a flush is dropped.
  *
- * @note A full buffer is flushed first and the byte dropped if it is still
- *       full, rather than indexing past the end.  Output is not flushed on
- *       '\n': per-line flushing would emit one segment per line and exhaust
- *       the shared TX pool within a single poll cycle.
- * @param c  Raw byte to enqueue for transmission
+ * @param c  Byte to send
  */
 static void
 tcp_putc(char c)
@@ -209,7 +198,7 @@ tcp_getc(void)
         uint8_t cmd;
         if (tiku_kits_net_tcp_read(telnet_conn, &cmd, 1) == 1) {
             /* WILL(0xFB) WONT(0xFC) DO(0xFD) DONT(0xFE) carry one
-             * more option byte; simpler commands are just two bytes. */
+             * more option byte; other commands are two bytes. */
             if (cmd >= 0xFB && cmd <= 0xFE) {
                 uint8_t opt;
                 tiku_kits_net_tcp_read(telnet_conn, &opt, 1);
@@ -235,9 +224,8 @@ tcp_getc(void)
 /**
  * @brief TCP data-arrival callback (tiku_kits_net_tcp_recv_cb_t).
  *
- * Registered with the listener so the stack can notify the backend.  Empty:
- * the shell polls rx_ready and drains on its own schedule, so the
- * notification needs no work.
+ * Does nothing: the shell reads the connection's RX ring through tcp_getc()
+ * on each poll.
  *
  * @param c          Connection that received data (unused)
  * @param available  Bytes now available in the RX ring (unused)
@@ -252,9 +240,9 @@ telnet_recv_cb(struct tiku_kits_net_tcp_conn *c, uint16_t available)
 /**
  * @brief TCP connection-event callback (tiku_kits_net_tcp_event_cb_t).
  *
- * CONNECTED latches the accepted connection and resets the per-session state so
- * a new client starts clean; CLOSED and ABORTED forget the connection and
- * discard buffered output, leaving the listener ready.  Other events ignored.
+ * CONNECTED records the connection and clears the session state; CLOSED or
+ * ABORTED of that connection drops it and its buffered output.  Other events
+ * are ignored.
  *
  * @param c      Connection the event pertains to
  * @param event  One of TIKU_KITS_NET_TCP_EVT_*
@@ -349,9 +337,8 @@ const tiku_shell_io_t tiku_shell_io_tcp = {
     tcp_rx_ready,
     tcp_getc,
     TIKU_SHELL_IO_CRLF | TIKU_SHELL_IO_ECHO,
-    /* Remote channel: no capability by default -- a telnet session may read
-     * the whole namespace and write open nodes, but may not actuate hardware
-     * (CAP_HW), touch safety/system state (CAP_SYS), or mutate the store
-     * (CAP_FS).  Raise it if remote control is wanted. */
+    /* No capability: a telnet session reads the whole namespace and writes
+     * only nodes that need none; hardware (CAP_HW), system (CAP_SYS), store
+     * (CAP_FS) and network (CAP_NET) writes are refused. */
     TIKU_VFS_CAP_NONE
 };

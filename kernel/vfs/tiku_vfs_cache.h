@@ -38,8 +38,8 @@
 #define TIKU_VFS_CACHE_MAX  4
 #endif
 
-/** @brief Longest rendering the cache will hold.  Renderings at or above
- *         this length are simply not cached (the read still succeeds). */
+/** @brief Text bytes per cache slot.  A rendering of this length or longer
+ *         is not cached; its read still succeeds. */
 #ifndef TIKU_VFS_CACHE_TEXTLEN
 #define TIKU_VFS_CACHE_TEXTLEN  16
 #endif
@@ -51,33 +51,34 @@
 /**
  * @brief Serve @p node from cache if a fresh entry exists.
  *
- * Only meaningful for cacheable nodes (desc != NULL && fresh_ticks > 0);
- * tiku_vfs_read_node() gates on that before calling.  An expired entry
- * is dropped in passing (self-cleaning).
+ * An expired entry found on the way is dropped.
  *
  * @param node  The node being read
- * @param buf   Output buffer (up to @p max bytes written on a hit)
+ * @param buf   Output buffer; a hit copies up to @p max bytes and no NUL
  * @param max   Buffer capacity
  * @return Bytes (snprintf-style length) on a hit, or -1 on miss/expired.
+ * @note @p node must have a descriptor with fresh_ticks > 0; the VFS read
+ *       path checks this before calling.
  */
 int tiku_vfs_cache_get(const tiku_vfs_node_t *node, char *buf, size_t max);
 
 /**
  * @brief Miss path: invoke the handler, then cache the rendering.
  *
- * Calls @c node->read(buf,max), and if the rendering fits and no
- * concurrent tiku_vfs_notify() raced the sample, stores it.  Returns
- * the handler's result unchanged.
+ * Calls @c node->read(buf,max) and stores the rendering when it fits and no
+ * tiku_vfs_notify() ran during the call.
+ *
+ * @return The handler's result, unchanged
  */
 int tiku_vfs_cache_sample(const tiku_vfs_node_t *node, char *buf, size_t max);
 
 /**
- * @brief Drop @p node's cached entry and bar any in-flight sample for it
- *        from being stored stale.  ISR-safe.  Called by tiku_vfs_notify().
+ * @brief Drop @p node's cached entry; a sample running for any node is not
+ *        stored.  ISR-safe.  Called by tiku_vfs_notify().
  */
 void tiku_vfs_cache_invalidate(const tiku_vfs_node_t *node);
 
-/** @brief Drop every cached entry (e.g. before a deep-sleep transition). */
+/** @brief Drop every cached entry; a sample running now is not stored. */
 void tiku_vfs_cache_flush(void);
 
 /**

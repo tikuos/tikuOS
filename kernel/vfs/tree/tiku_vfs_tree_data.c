@@ -22,10 +22,10 @@
 #include "tiku.h"
 
 /*
- * The store is not a shell feature: the backing memory, the backend, the
- * mount, the /data namespace and /sys/fs/data are all compiled with or without
- * a shell, because loadable modules, radio firmware and device-management
- * transports use the store in builds that have none.
+ * The backing memory, the backend, the mount, the /data namespace and
+ * /sys/fs/data are compiled with or without a shell: loadable modules, radio
+ * firmware and device-management transports use the store in builds that
+ * have none.
  */
 
 #include <string.h>
@@ -117,10 +117,11 @@ data_fill_extents(tiku_data_df_t *out)
 }
 
 /**
- * @brief Whether the store may be created at @p base without being asked.
+ * @brief Whether the store may be created at @p base unasked: never on a
+ *        carved region, so always 0.
  *
- * Region-backed stores are provisioned by boot before publishing their tier.
- * Mounting never completes a partial initialization or guesses ownership.
+ * Boot provisions a region-backed store before it publishes the tier, and the
+ * mount never completes a partial initialization or guesses ownership.
  */
 static int
 data_may_create(const tiku_nvm_backend_t *region, size_t base)
@@ -192,11 +193,10 @@ data_adopt(size_t base)
 #endif
 
 /*
- * MSP430 and host have no carved extent to derive from -- the store's backing
- * is this array -- so here the geometry is stated rather than derived, and the
- * array is sized from it.  Mount then derives the same count straight back,
- * because TIKU_TFS_EXTENT_FOR_SLOTS is the exact inverse of the fit it does, so
- * these platforms take the identical code path rather than a special case.
+ * MSP430 and host have no carved extent: the store's backing is this array,
+ * sized from DATA_TFS_SLOTS.  TIKU_TFS_EXTENT_FOR_SLOTS is the exact inverse
+ * of the fit the mount does, so the mount derives DATA_TFS_SLOTS back from the
+ * array's size.
  */
 #ifndef DATA_TFS_SLOTS
 #define DATA_TFS_SLOTS  TIKU_TFS_MIN_SLOTS
@@ -210,8 +210,8 @@ static tiku_nvm_backend_t  data_be;
  * @brief NVM backend write callback for the /data file store (FRAM/host).
  *
  * Copies @p len bytes from @p src to offset @p off within the backing
- * array, bracketing the copy in an MPU NVM-unlock window so the
- * `.persistent` FRAM region is writable.
+ * array, inside an MPU NVM-unlock window, which on MSP430 makes the FRAM
+ * array writable.
  *
  * @param be   Backend descriptor (its base is the store's backing array)
  * @param off  Byte offset within the backing store
@@ -251,9 +251,8 @@ data_bind(tiku_nvm_backend_t *region, size_t *base)
 /**
  * @brief Report the store's extent, for `df` (no carved region here).
  *
- * MSP430 and host builds size the backing array from the store's geometry, so
- * the extent always fits exactly and there is no region to divide -- reporting
- * a zero region tells `df` to omit the region breakdown entirely.
+ * The backing array is the whole extent, with no region to divide: a zero
+ * region_bytes makes `df` omit the region breakdown.
  *
  * @param out  Snapshot to fill in (extent fields only).
  */
@@ -298,12 +297,13 @@ data_adopt(size_t base)
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* MOUNT POLICY -- one rule for every platform                               */
+/* MOUNT POLICY                                                              */
 /*---------------------------------------------------------------------------*/
 
-/* The mount never formats.  A store is created without asking only on a
- * region or array that is blank end to end; anything else leaves /data absent,
- * with the reason kept so df can say why, until mkfs formats on request. */
+/* The mount formats only where data_may_create() allows it: never on a
+ * carved region, and on MSP430 and host only an array that is blank end to
+ * end.  Otherwise /data stays absent, and tiku_vfs_tree_data_why() gives the
+ * reason, until mkfs formats on request. */
 enum { DATA_UNTRIED = 0, DATA_READY, DATA_ABSENT, DATA_REFUSED, DATA_HELD };
 static uint8_t          data_state;
 static tiku_tfs_probe_t data_probe;
@@ -503,9 +503,9 @@ data_dyn_list(tiku_vfs_dyn_list_cb cb, void *ctx)
 }
 
 /**
- * @brief The VFS status a file-store result reaches the caller as.
+ * @brief Map a file-store result to a TIKU_VFS_* status.
  *
- * Keeps a full, busy or failing store apart from a missing file.
+ * Only TFS_ERR_NOTFOUND becomes TIKU_VFS_ENOENT.
  */
 static int
 data_status(int rc)
@@ -526,7 +526,8 @@ data_status(int rc)
 /**
  * @brief Read op for /data/<name> dynamic files.
  *
- * Reads up to @p max bytes of file @p name from the store into @p buf.
+ * Copies up to @p max bytes of file @p name from the store into @p buf,
+ * with no NUL.
  *
  * @param name  File name under /data
  * @param buf   Output buffer
@@ -577,7 +578,8 @@ data_dyn_write(const char *name, const char *buf, size_t len)
  * Deletes file @p name from the store.
  *
  * @param name  File name under /data
- * @return 0 on success, -1 on mount failure or if the file is absent
+ * @return 0 on success, -1 on any failure: store not mounted, file absent,
+ *         or a failed delete
  */
 static int
 data_dyn_unlink(const char *name)
@@ -653,7 +655,7 @@ static const tiku_vfs_node_t data_node = {
     NULL, &data_dynops
 };
 
-#else  /* no BASIC: /data is purely the dynamic file store */
+#else  /* no BASIC: /data holds only the dynamic file store */
 
 static const tiku_vfs_node_t data_node = {
     "data", TIKU_VFS_DIR, NULL, NULL,
@@ -832,8 +834,7 @@ tiku_tfs_t *tiku_vfs_tree_data_store_if_mounted(void)
 tiku_tfs_t *
 tiku_vfs_tree_data_store(void)
 {
-    /* Same lazy mount the VFS nodes use; callers that want whole objects
-     * (tiku_blob) work against the store rather than through path reads. */
+    /* The same lazy mount the VFS nodes use. */
     if (data_tfs_ensure() != 0) {
         return NULL;
     }

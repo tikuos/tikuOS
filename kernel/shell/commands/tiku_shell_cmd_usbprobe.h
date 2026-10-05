@@ -7,8 +7,9 @@
  *
  * tiku_shell_cmd_usbprobe.h - "usbprobe" command (nRF54LM20 USB high speed).
  *
- * Bring-up recon for the USB block: what the DWC2 core says it is, whether
- * the regulator sees a cable, and what a host's enumeration attempt reaches.
+ * Bring-up diagnostics for the USB block: the DWC2 core's identity and
+ * configuration, whether the regulator sees VBUS, and how far a host's
+ * enumeration gets.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

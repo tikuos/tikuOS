@@ -7,9 +7,9 @@
  *
  * tiku_basic_peek_poke.inl - PEEK and POKE byte memory access.
  *
- * On target these go straight to a volatile pointer cast from the address;
- * on the host harness they bounce off a small simulated buffer so tests
- * round-trip without a wild pointer.  Compiles to nothing when off.
+ * On MSP430 they go straight to a volatile pointer cast from the address;
+ * every other build reads and writes a 256-byte simulated map, which the host
+ * harness tests.  Compiles to nothing when TIKU_BASIC_PEEK_POKE_ENABLE is 0.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -45,13 +45,12 @@ basic_poke(long addr, long val)
 #else /* !PLATFORM_MSP430 */
 
 /*---------------------------------------------------------------------------*/
-/* HOST HARNESS: 256-BYTE SIMULATED MAP                                      */
+/* OTHER BUILDS: 256-BYTE SIMULATED MAP                                      */
 /*---------------------------------------------------------------------------*/
 
-/* On the host harness, route PEEK / POKE through a small simulated
- * memory map so tests can round-trip without crashing on a wild
- * pointer.  The map wraps every 256 bytes -- enough to verify the
- * keyword + parser + dispatch wiring. */
+/* PEEK / POKE on a simulated map: an address wraps modulo 256 and touches no
+ * real memory, so the host harness round-trips them without a wild
+ * pointer. */
 static uint8_t basic_peek_simbuf[256];
 
 /** @brief PEEK on the simulated map: the byte at @p addr modulo 256. */

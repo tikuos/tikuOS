@@ -8,8 +8,8 @@
  * tiku_vfs_tree_usb.c - /sys/usb and /sys/store VFS nodes.
  *
  * Read-only, serving both device stacks (RA8P1 USBHS and Ambiq USB); the
- * /sys/store model-store nodes are RA8P1-only.  Every value comes from
- * hardware or the medium rather than from a cache.
+ * /sys/store model-store nodes are RA8P1-only.  Each read queries the driver
+ * or the medium; nothing is cached here.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -33,7 +33,8 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Read handler for /sys/usb/state.
+ * @brief Read handler for /sys/usb/state: "down", "powered", "default",
+ *        "address", "configured" or "suspend".
  *
  * @param buf Output buffer
  * @param max Capacity of @p buf
@@ -72,7 +73,7 @@ static int usb_state_read(char *buf, size_t max)
 }
 
 /**
- * @brief Read handler for /sys/usb/speed.
+ * @brief Read handler for /sys/usb/speed: "none", "full" or "high".
  *
  * @param buf Output buffer
  * @param max Capacity of @p buf
@@ -125,13 +126,13 @@ static int usb_config_read(char *buf, size_t max)
 }
 
 /*
- * The interrupt count is the one number that distinguishes "enumeration is
- * being carried by the interrupt" from "the CPU happened to be free": EP0 has
- * no polling path, so a configured device with irq at zero is impossible.
+ * EP0 has no polling path, so enumeration runs only from the interrupt: a
+ * configured device always has a non-zero interrupt count.
  */
 
 /**
- * @brief Read handler for /sys/usb/irq.
+ * @brief Read handler for /sys/usb/irq: interrupts taken, then device-state
+ *        transitions (RA8P1) or SETUP packets decoded (Ambiq).
  *
  * @param buf Output buffer
  * @param max Capacity of @p buf
@@ -156,7 +157,8 @@ static int usb_irq_read(char *buf, size_t max)
 
 #if (TIKU_DRV_USBHS_ENABLE + 0)
 /**
- * @brief Read handler for /sys/usb/cbw.
+ * @brief Read handler for /sys/usb/cbw: MSC command wrappers seen, reads,
+ *        writes and failures.
  *
  * @param buf Output buffer
  * @param max Capacity of @p buf
@@ -211,9 +213,8 @@ static int store_bytes_read(char *buf, size_t max)
 }
 
 /*
- * `present` recomputes the CRC from the medium rather than trusting the
- * header beside it, which costs a full pass over the blob; name and bytes
- * only read the header.
+ * `present` recomputes the CRC over the whole blob on the medium; name and
+ * bytes read only the header.
  */
 
 /**

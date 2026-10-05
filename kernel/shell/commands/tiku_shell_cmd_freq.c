@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_freq.c - "freq" command: show or set the CPU core frequency.
  *
- * Setting drives the platform's frequency path -- the MCLK divider on MSP430,
- * the performance mode on Ambiq, the clock tree elsewhere.  A request the
- * platform cannot honour leaves the clock unchanged and is reported back.
+ * Setting a rate uses the MCLK divider on MSP430, the performance mode on
+ * Ambiq and the clock tree elsewhere.  A rate the platform cannot honour is
+ * clamped or ignored; the command prints the rate it reads back.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,7 +19,8 @@
 #include <hal/tiku_cpu.h>              /* tiku_cpu_freq_init, _mclk_hz */
 #include <string.h>                    /* strcmp ("probe" subcommand) */
 
-/* Round to nearest: a measured clock sits a hair under its nominal rate. */
+/* Round to the nearest MHz: a measured clock reads slightly under its
+ * nominal rate. */
 #define TIKU_HZ_TO_MHZ(hz)  (((hz) + 500000UL) / 1000000UL)
 
 #if defined(PLATFORM_MSP430)
@@ -43,10 +44,11 @@
 #include <arch/ambiq/tiku_cpu_freq_boot_arch.h>   /* HP identity probe */
 
 /**
- * @brief "freq probe": dump the silicon, trim and power identity.
+ * @brief "freq probe": print the silicon, trim and power identity.
  *
- * That identity decides whether (and how) High-Performance mode can be
- * enabled on this chip.  Read-only: changes no clock, voltage or perf mode.
+ * High-Performance mode depends on these values.  The probe changes no
+ * clock, voltage or performance mode; when INFO1 is in OTP it powers OTP on
+ * for the read and restores its power state after.
  */
 static void
 freq_cmd_probe(void)
@@ -85,8 +87,8 @@ freq_cmd_probe(void)
     SHELL_PRINTF("  MEASURED    %lu Hz core clock (SysTick vs 32 kHz XT)\n",
                  tiku_cpu_freq_ambiq_measured_hz());
     /* VDDF: the boost this port computes for HP and the trim the silicon
-     * runs.  The boost plan is built on the first HP request, so run
-     * `freq 250` before expecting numbers here. */
+     * runs.  The boost plan exists only after the first HP request
+     * (`freq 250`); before that the plan line says it is not computed. */
     SHELL_PRINTF("  VDDF trim   applied=0x%02x (live MCUCTRL.VREFGEN4"
                  ".TVRGFVREFTRIM)\n", (unsigned)p.vddf_applied);
     if (p.vddf_plan_ok) {
@@ -115,8 +117,7 @@ freq_cmd_probe(void)
     } else {
         SHELL_PRINTF("    plan      not computed yet -- run `freq 250` first\n");
     }
-    /* Raw regulator and buck registers, for diffing LP against HP on the
-     * host; reads only. */
+    /* Raw regulator and buck register values; reads only. */
     SHELL_PRINTF("  REGS vrefgen2=%08lx vrefgen3=%08lx vrefgen4=%08lx\n",
                  (unsigned long)p.r_vrefgen2,
                  (unsigned long)p.r_vrefgen3,
@@ -157,8 +158,9 @@ static const char *freq_n6_src(uint8_t s)
 /**
  * @brief Print the live STM32N6 clock tree.
  *
- * Reads RCC and PWR back rather than reporting what was requested, so a
- * setting that did not take shows up as itself.
+ * The tree is read back from RCC and PWR, so a setting that did not take
+ * prints as the hardware holds it.  The last line adds tiku_cpu_mclk_hz(),
+ * the core clock measured against LPTIM1.
  */
 static void freq_cmd_probe_n6(void)
 {
@@ -208,14 +210,15 @@ static void freq_cmd_probe_c61(void)
 #if defined(PLATFORM_RA8P1)
 /*
  * PCLKB is the measurable proxy for the core: the CAC cannot count CPUCLK0
- * directly, and PCLKB divides from the same PLL1P at a ratio fixed per rung.
+ * directly, and PCLKB divides the same PLL1P by a fixed ratio at each core
+ * rate `freq` accepts.
  */
 
 /**
  * @brief Measure the live tree against the crystal, on-chip.
  *
- * Counts PCLKB against the crystal with the CAC, so a rung that reports a
- * rate it is not running at shows up as a large error.
+ * Counts PCLKB against the crystal with the CAC, so a clock setting that is
+ * not running at its reported rate shows up as a large error.
  */
 static void freq_cmd_probe_ra8p1(void)
 {
@@ -230,12 +233,10 @@ static void freq_cmd_probe_ra8p1(void)
                  tiku_cpu_ra8p1_bclk_get_hz());
 
     /*
-     * Widest reference window (/8192).  At /32 one count is 750 kHz, so a
-     * perfectly good tree reads a count low and looks 1.25% out -- the
-     * measurement's own quantisation, mistakeable for a clock error.  Here a
-     * count is ~2.9 kHz, and 62.5 MHz still lands well inside the 16-bit
-     * counter.  The multiply is widened because count x 24 MHz overflows 32
-     * bits by two orders of magnitude.
+     * Reference divider /8192 (RCDS code 3): one count is about 2.9 kHz of
+     * PCLKB at a 24 MHz crystal, and PCLKB at 62.5 MHz stays inside the
+     * 16-bit counter.  count x TIKU_BOARD_MOSC_HZ overflows 32 bits, so the
+     * product is 64-bit.
      */
     count = tiku_cpu_ra8p1_cac_measure(RA8P1_CAC_CLK_PCLKB,
                                        RA8P1_CAC_CLK_MAIN, 3U);

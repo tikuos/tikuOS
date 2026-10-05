@@ -555,7 +555,7 @@ static void abort_job(tiku_mem_reclaim_cause_t cause)
 /**
  * @brief Recheck the plan, take credits, fence the spans and begin PREPARE.
  * @return 1 when the job moved on (to PREPARE, or ended for lack of
- *         records); 0 when the plan no longer holds, a selected owner's
+ *         records); 0 when the plan fails its recheck, a selected owner's
  *         controls are in tier backing, or a selected process owner has
  *         events queued
  */
@@ -599,7 +599,7 @@ static int freeze(void)
 /**
  * @brief Take a fresh snapshot and plan again after the span moved.
  *
- * No owner has been asked to stop yet, so planning can start over, at most
+ * No owner has been asked to stop, so planning can start over, at most
  * TIKU_MEM_RECLAIM_PLAN_ATTEMPTS times per job.
  *
  * @return 1 when planning starts over, 0 when the attempts are spent
@@ -947,8 +947,8 @@ tiku_mem_err_t tiku_mem_reclaim_submit(const tiku_mem_reclaim_request_t *request
         t->process = TIKU_THIS();
         if (t->process) t->process_generation = t->process->generation;
         *out = (tiku_mem_ticket_t){generation, (uint16_t)(i + 1)};
-        /* A direct fit can become READY immediately. Otherwise all work is
-         * explicit and incremental; no descriptor address was retained. */
+        /* A direct fit becomes READY at once; any other ticket waits for
+         * tiku_mem_reclaim_poll().  The ticket keeps no descriptor address. */
         if (!job.active) {
             unsigned prior;
             for (prior = 0; prior < TIKU_MEM_MAX_TICKETS; prior++)
@@ -1234,8 +1234,8 @@ tiku_mem_err_t tiku_mem_reclaim_write(const char *entry, const char *buf, size_t
         }
         tiku_mem_job_t token = {generation, 1};
         if (!strcmp(entry, "retry")) return tiku_mem_reclaim_retry(token);
-        /* Administrative VFS control, protected by CAP_SYS at the node. The
-         * generation is checked here as well as in any desktop confirmation. */
+        /* Administrative VFS control, protected by CAP_SYS at the node; the
+         * generation in the value must name the running job. */
         if (!job_equal(token)) return TIKU_MEM_ERR_INVALID;
         if (job.fault) return TIKU_MEM_ERR_BUSY;
         cancel(&tickets[job.ticket], TIKU_MEM_RECLAIM_CANCELLED);

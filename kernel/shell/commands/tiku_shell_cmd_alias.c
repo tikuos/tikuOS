@@ -16,10 +16,9 @@
 #include <string.h>
 
 /**
- * @brief Rejoin argv[2..argc-1] into one body string, single-spaced.
+ * @brief Join argv[2..argc-1] into @p out, separated by single spaces.
  *
- * Strips a stray '"' left at the start of the first token or the end of the
- * last; the parser has already grouped and unquoted quoted spans.
+ * A '"' at the start of the first token or at the end of the last is dropped.
  *
  * @return 0 on success, -1 if the body would not fit in @p out_size
  */

@@ -25,14 +25,15 @@ typedef enum {
     BASIC_STEP_BROKEN  = 2    /**< aborted: unhandled error or Ctrl-C */
 } basic_step_t;
 
-/* Runaway-loop backstop for the synchronous driver (exec_run) only.  The
- * shell-mode driver does not use it -- it relies on cooperative yielding plus
- * the shell-loop Ctrl-C to stay live, so a legitimately infinite reactive
- * program (10 GOTO 10 with EVERY handlers) runs forever without tripping it. */
+/* Step budget of the synchronous driver, exec_run_drive(), which stops a run
+ * after 100000 steps.  The shell-mode driver has no budget: a program there
+ * runs until it ends or Ctrl-C breaks it, so 10 GOTO 10 with EVERY handlers
+ * runs forever. */
 static uint32_t basic_run_guard;
 
-/* basic_run_shell_mode is declared in tiku_basic_state.inl (the yielding
- * DELAY/SLEEP path in tiku_basic_stmt.inl consults it before this file). */
+/* basic_run_shell_mode is declared in tiku_basic_state.inl: the yielding
+ * DELAY/SLEEP path in tiku_basic_stmt.inl, included before this file, reads
+ * it. */
 
 /*---------------------------------------------------------------------------*/
 /* ERROR TRAP                                                                */
@@ -54,9 +55,9 @@ basic_run_trap_error(uint16_t prev_pc)
 {
     basic_erl = prev_pc;
     basic_err = basic_errcat ? basic_errcat : TIKU_BASIC_ERR_GENERAL;
-    /* An error inside the handler, from the trap until its RESUME, is fatal
-     * -- otherwise a buggy handler could loop forever.  basic_err_pc is
-     * non-zero for exactly that span. */
+    /* An error inside the handler, from the trap until its RESUME, is fatal:
+     * routing it back into the handler could loop forever.  basic_err_pc is
+     * non-zero for that span. */
     if (basic_err_handler != 0u && basic_err_pc == 0u) {
         basic_err_pc = prev_pc;
         basic_pc     = basic_err_handler;
@@ -80,10 +81,9 @@ basic_run_trap_error(uint16_t prev_pc)
  * @brief Initialise run state and select the first program line.
  *
  * Clears the control-flow stacks, error/handler state, DATA cursor and reactive
- * registrations, then wipes the variable namespace -- the RUN-boundary reset
- * that keeps the arena budget bounded across many invocations.
+ * registrations, then clears the variable namespace and frees DIMmed arrays.
  *
- * @note Does not allocate; the arena is already bound by basic_session_begin().
+ * @note Allocates nothing: basic_session_begin() must have bound the arena.
  * @return 0 on success, -1 if there is no program (message printed).
  */
 static int
@@ -120,11 +120,11 @@ basic_run_begin(void)
     basic_data_off    = 0;
     for (i = 0; i < TIKU_BASIC_EVERY_MAX; i++) basic_everys[i].active = 0;
     for (i = 0; i < TIKU_BASIC_ONCHG_MAX; i++) basic_onchgs[i].active = 0;
-    /* Each RUN starts with a fresh variable namespace: clear scalars, string
-     * vars + heap, named vars, arrays, and DEF FN, and reclaim DIMmed array
-     * storage.  The arena never reclaims within a run, so this RUN-boundary
-     * reset keeps its budget bounded across many invocations and lets a
-     * program that DIMs an array be RUN more than once. */
+    /* Each RUN starts with an empty variable namespace: scalars, string
+     * vars and their heap, named vars, arrays and DEF FN are cleared and
+     * DIMmed array storage is freed.  The arena frees nothing within a run;
+     * without this reset a second RUN of a program that DIMs A fails with
+     * "array A already DIMmed". */
     basic_clear_vars();
     basic_pc = prog[idx].number;
     basic_debug_begin();
@@ -157,9 +157,9 @@ basic_run_step(void)
         /* Parked on a yielding DELAY / SLEEP.  Stay parked until the
          * deadline (Ctrl-C arrives via the mode feed path); then either
          * re-arm the next SLEEP chunk or resume the interrupted line's
-         * remainder.  Reactive polls stay suppressed while parked --
-         * parity with the blocking wait; pending ON CHANGE marks fire at
-         * the first statement boundary after the resume. */
+         * remainder.  Reactive polls stay suppressed while parked, as in
+         * the blocking wait; pending ON CHANGE marks fire at the first
+         * statement boundary after the resume. */
         if ((tiku_clock_time_t)(tiku_clock_time() - basic_wait_start) <
             basic_wait_ticks) {
             return BASIC_STEP_RUNNING;
@@ -297,14 +297,13 @@ basic_run_end(void)
 /**
  * @brief Resume a run from its durable checkpoint.
  *
- * The counterpart to basic_run_begin: instead of the fresh-state reset, which
- * would wipe the variables being restored, it reinstates the checkpointed
- * machine -- basic_pc, the stacks, variables, arrays and reactive handlers.
+ * The counterpart to basic_run_begin(): it skips the fresh-state reset and
+ * reinstates the checkpointed machine -- basic_pc, the stacks, variables,
+ * arrays and reactive handlers.
  *
- * @note The program must already be in prog[] -- RESUME continues an existing
- *       program, it does not load one -- and the arena must be allocated.
- *       Silent on failure: the caller owns the messaging, which differs between
- *       interactive `RUN RESUME` and the autostart path.
+ * @note The program must already be in prog[] and the arena allocated:
+ *       RESUME loads no program.  Prints nothing on failure; the caller,
+ *       interactive `RUN RESUME` or the autostart path, reports it.
  * @return 0 if a checkpoint was restored (basic_running := 1), -1 if there is
  *         no program or no valid checkpoint (the caller may then RUN fresh)
  */
@@ -324,7 +323,7 @@ basic_run_resume(void)
     basic_wait_sleep_s = 0;
     basic_stmt_depth   = 0;
     basic_in_reactive  = 0;
-    basic_debug_begin();         /* a resumed run is a run, and is watched */
+    basic_debug_begin();         /* the debugger watches a resumed run too */
     return 0;
 }
 
@@ -335,8 +334,8 @@ basic_run_resume(void)
 /**
  * @brief Drive the step machine to completion (blocking).
  *
- * A guard of 100000 steps stops a runaway loop with "? iteration cap
- * reached" instead of wedging the caller.
+ * A run stops after 100000 steps with "iteration cap reached", so a runaway
+ * loop returns to the caller.
  *
  * @note Call after basic_run_begin() or basic_run_resume() set basic_running.
  */

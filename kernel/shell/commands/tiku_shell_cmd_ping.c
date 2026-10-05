@@ -82,7 +82,7 @@ ping_parse_ip(const char *s, uint8_t out[4])
 }
 
 /**
- * @brief Parse a decimal string into a uint16_t (no error checking).
+ * @brief Parse the leading decimal digits of @p s; overflow is not detected.
  */
 static uint16_t
 ping_parse_u16(const char *s)

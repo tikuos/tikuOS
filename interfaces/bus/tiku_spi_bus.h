@@ -72,11 +72,11 @@ typedef struct tiku_spi_config {
  * @brief Initialize the SPI bus in master mode.
  *
  * Configures the underlying hardware peripheral (eUSCI_A1 or eUSCI_B1 on
- * MSP430, per board) for 3-pin SPI master operation. Chip select is not
- * managed by the driver; the application must assert/deassert CS via GPIO.
+ * MSP430, per board) for 3-pin SPI master operation.
  *
  * @param config  Pointer to configuration structure
  * @return TIKU_SPI_OK on success, negative error code on failure
+ * @note The driver does not touch chip select; the caller drives CS over GPIO.
  */
 int tiku_spi_init(const tiku_spi_config_t *config);
 
@@ -135,7 +135,8 @@ int tiku_spi_write_read(const uint8_t *tx_buf, uint8_t *rx_buf,
 
 /**
  * @brief Get the active SPI configuration.
- * @return Pointer to config, or NULL if SPI not initialized
+ * @return Pointer to the settings of the last successful init, or NULL while
+ *         the bus is closed or after a failed init
  */
 const tiku_spi_config_t *tiku_spi_get_config(void);
 

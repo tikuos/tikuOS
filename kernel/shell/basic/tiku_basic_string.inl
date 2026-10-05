@@ -50,7 +50,7 @@ static int basic_net_mqtt_wait(const char *ipstr, const char *topic,
 #if TIKU_BASIC_STRVARS_ENABLE
 
 /*---------------------------------------------------------------------------*/
-/* STRING-HEAP MARK-COMPACT                                                  */
+/* STRING-HEAP COMPACTION                                                    */
 /*---------------------------------------------------------------------------*/
 /*
  * The heap bump-allocates and frees nothing mid-RUN, so a loop that reassigns
@@ -654,7 +654,7 @@ parse_strprim(const char **p, char *out, size_t cap)
     }
     if (match_kw(p, "REPLACE$")) {
         /* REPLACE$(s$, from$, to$) -- replace every occurrence of from$ with
-         * to$. Empty from$ returns s$ unchanged (no infinite loop). */
+         * to$.  An empty from$ returns s$ unchanged. */
         char src[TIKU_BASIC_STR_BUF_CAP];
         char from[TIKU_BASIC_STR_BUF_CAP], to[TIKU_BASIC_STR_BUF_CAP];
         size_t fl, tl, srclen, i = 0, o = 0;
@@ -1023,9 +1023,9 @@ parse_strprim(const char **p, char *out, size_t cap)
     }
 #endif
 #if TIKU_BASIC_FILE_ENABLE
-    /* FREAD$("path") -- read a whole file/VFS node into a string, capped at
-     * the string buffer (a longer file truncates to cap-1). Unlike VFSREAD$ it
-     * keeps the content verbatim, newlines included -- it's for log files. */
+    /* FREAD$("path") -- a whole file or VFS node as a string, truncated to
+     * cap - 1 bytes; a missing file reads as "".  The content stays verbatim,
+     * newlines included (VFSREAD$ strips trailing whitespace). */
     if (match_kw(p, "FREAD$")) {
         char path[48];
         int  n;
@@ -1089,9 +1089,8 @@ parse_strprim(const char **p, char *out, size_t cap)
     }
     /* BLESCAN$(secs) -- passive scan of the BLE advertising channels for
      * `secs` seconds (clamped 1..20); returns "AA:BB:CC:DD:EE:FF,rssi,name;"
-     * per distinct device heard, in discovery order.  Blocking and
-     * watchdog-kicked like HTTPGET$ (see the cooperative-blocking rule in
-     * tiku_basic_net.inl). */
+     * per distinct device heard, in discovery order.  It blocks for the scan
+     * and kicks the watchdog, as HTTPGET$ does. */
     if (match_kw(p, "BLESCAN$")) {
         tiku_ble_adv_report_t reps[8];
         long secs;
@@ -1150,7 +1149,7 @@ parse_strprim(const char **p, char *out, size_t cap)
      * TCP and certificate-validated TLS to an https server, returning the raw
      * response (status line, headers and body) capped at the string buffer.
      * The call drives the net stack itself (WiFi RX drain + TCP timers) so the
-     * console stays alive; HTTPSTATUS() exposes the parsed status code. */
+     * console keeps running; HTTPSTATUS() returns the parsed status code. */
     if (match_kw(p, "HTTPGET$")) {
         char host[TIKU_BASIC_HTTP_HOST_MAX], path[TIKU_BASIC_HTTP_PATH_MAX];
         skip_ws(p);
@@ -1166,9 +1165,9 @@ parse_strprim(const char **p, char *out, size_t cap)
         skip_ws(p);
         if (cur_peek(p) != ')') goto fn_paren_err;
         cur_advance(p);
-        /* On failure basic_https_get() leaves out[] untouched, and out[] is a
-         * shared string buffer still holding the last string operation's
-         * bytes, so a failed fetch is set to the empty string. */
+        /* On failure out[], a shared string buffer, can hold an earlier
+         * string operation's bytes or an unterminated partial reply, so a
+         * failed fetch returns the empty string. */
         if (basic_https_get("GET", host, path, NULL, NULL, out, cap) < 0) {
             out[0] = '\0';
         }
@@ -1391,9 +1390,7 @@ parse_strprim(const char **p, char *out, size_t cap)
     }
 
 #if TIKU_BASIC_CRYPTO_ENABLE
-    /* BASE64$(s$) -- RFC 4648 Base64 of the bytes of s$.  There is no
-     * decode: it would yield raw bytes that a NUL-terminated string cannot
-     * hold. */
+    /* BASE64$(s$) -- RFC 4648 Base64 of the bytes of s$; encode only. */
     if (match_kw(p, "BASE64$")) {
         char src[TIKU_BASIC_STR_BUF_CAP];
         skip_ws(p);

@@ -7,9 +7,9 @@
  *
  * tiku_proto.h - protothreads for lightweight stackless threads.
  *
- * Provides a blocking context on top of an event-driven system without the
- * cost of per-thread stacks.  Derived from the protothreads implementation in
- * Contiki OS (contiki-os.org) by Adam Dunkels.
+ * Blocking-style code on top of the event-driven kernel: a protothread keeps
+ * only its resume point (struct pt), and every protothread runs on the one
+ * system stack.  Derived from Contiki OS (contiki-os.org) by Adam Dunkels.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,8 +27,10 @@
  * @struct pt
  * @brief Protothread control structure
  *
- * Each protothread requires a control structure to maintain its state.
- * This structure must be preserved between calls to the protothread function.
+ * Holds the protothread's resume point.
+ *
+ * @note It must outlive every call of the protothread function: a static, or a
+ *       field of a longer-lived structure.
  */
 struct pt {
   lc_t lc;  /**< Local continuation - stores the thread's execution state */
@@ -99,7 +101,8 @@ struct pt {
  * @brief Mark the beginning of a protothread
  * @param pt Pointer to the protothread control structure
  *
- * Sets up the protothread's execution context.
+ * Declares PT_YIELD_FLAG, opens a block and resumes at the saved
+ * continuation.  Code above it runs on every call.
  *
  * @note PT_BEGIN is the first statement of the protothread body.
  */
@@ -184,8 +187,7 @@ struct pt {
  * @param child Pointer to the child protothread control structure
  * @param thread Function call to the child protothread
  *
- * This macro initializes a child protothread and waits for it to complete.
- * It's a convenience wrapper that combines PT_INIT and PT_WAIT_THREAD.
+ * PT_INIT on @p child, then PT_WAIT_THREAD on @p thread.
  *
  * Example:
  * @code
@@ -281,8 +283,8 @@ struct pt {
  * @param pt Pointer to the protothread control structure
  * @param cond Boolean expression to evaluate
  *
- * Similar to PT_YIELD, but only resumes when the condition is true.
- * Useful for implementing cooperative waiting without blocking.
+ * Yields at least once, even when @p cond already holds, then continues past
+ * this point only on a call where @p cond is true.
  *
  * Example:
  * @code
@@ -316,9 +318,8 @@ struct pt {
  * @def PT_BEGIN_PERSISTENT(pt, key)
  * @brief Start a persistent protothread
  *
- * Like PT_BEGIN but loads the saved continuation from NVM first.
- * If a valid checkpoint exists, execution jumps to the last
- * LC_SET_PERSISTENT / PT_YIELD_PERSISTENT point.
+ * Like PT_BEGIN, but every call loads the continuation from NVM: a stored
+ * checkpoint resumes there, and a missing or zero one starts at the top.
  */
 #define PT_BEGIN_PERSISTENT(pt, key) {     \
   char PT_YIELD_FLAG = 1;                  \
@@ -329,8 +330,11 @@ struct pt {
  * @def PT_END_PERSISTENT(pt, key)
  * @brief End a persistent protothread
  *
- * Like PT_END but also clears the NVM entry so the next boot
- * starts fresh instead of resuming a completed protothread.
+ * Like PT_END, and also deletes @p key from the store, so the next run starts
+ * at the top.
+ *
+ * @note Until @p key is registered again, every checkpoint save fails and
+ *       every call of this protothread starts at the top.
  */
 #define PT_END_PERSISTENT(pt, key)         \
   LC_END((pt)->lc);                        \
@@ -344,9 +348,8 @@ struct pt {
  * @def PT_YIELD_PERSISTENT(pt)
  * @brief Yield with an NVM checkpoint
  *
- * Like PT_YIELD but the continuation point is written to NVM.
- * If power is lost before the next checkpoint, the protothread
- * resumes here instead of restarting.
+ * Like PT_YIELD, and also writes this point to NVM, where the protothread
+ * resumes after a power cycle until the next checkpoint replaces it.
  */
 #define PT_YIELD_PERSISTENT(pt)            \
   do {                                     \
@@ -399,7 +402,10 @@ struct pt {
  * @def PT_EXIT_PERSISTENT(pt, key)
  * @brief Exit persistent protothread early
  *
- * Like PT_EXIT but also clears the NVM entry.
+ * Like PT_EXIT, and also deletes @p key from the store.
+ *
+ * @note Until @p key is registered again, every checkpoint save fails and
+ *       every call of this protothread starts at the top.
  */
 #define PT_EXIT_PERSISTENT(pt, key)        \
   do {                                     \
@@ -412,8 +418,8 @@ struct pt {
  * @def PT_RESTART_PERSISTENT(pt, key)
  * @brief Restart persistent protothread from the beginning
  *
- * Like PT_RESTART, but also resets the NVM value to 0.  Reset rather than
- * clear, so the key stays registered for later checkpoints.
+ * Like PT_RESTART, and also stores 0 under @p key (LC_RESET_PERSISTENT); the
+ * key stays registered for later checkpoints.
  */
 #define PT_RESTART_PERSISTENT(pt, key)     \
   do {                                     \

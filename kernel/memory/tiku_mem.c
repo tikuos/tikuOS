@@ -7,9 +7,9 @@
  *
  * tiku_mem.c - arena allocator and memory module init.
  *
- * Implements the arena (bump-pointer) allocator for fragmentation-free
- * memory management on microcontrollers with small SRAM, and brings the
- * memory module up at boot.
+ * Implements the arena (bump-pointer) allocator, which has no per-object
+ * free and so no fragmentation, and tiku_mem_init(), which brings the memory
+ * module up at boot.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -39,8 +39,8 @@
 static tiku_mem_arch_size_t align_up(tiku_mem_arch_size_t size)
 {
     const tiku_mem_arch_size_t mask = TIKU_MEM_ARCH_ALIGNMENT - 1U;
-    /* Saturate instead of wrapping to 0 on a near-max request (16-bit on
-     * MSP430), so the caller's capacity check rejects it cleanly. */
+    /* A near-max request (16-bit on MSP430) saturates to the largest aligned
+     * value, which the caller's capacity check rejects. */
     if (size > (tiku_mem_arch_size_t)(~(tiku_mem_arch_size_t)0 - mask)) {
         return (tiku_mem_arch_size_t)(~(tiku_mem_arch_size_t)0 & ~mask);
     }
@@ -55,8 +55,8 @@ static tiku_mem_arch_size_t align_up(tiku_mem_arch_size_t size)
  * @brief Initialize an arena without region-registry validation.
  *
  * For library code needing an arena over an embedded struct member before the
- * region registry exists.  The arena is marked SRAM tier; every other operation
- * behaves identically.
+ * region registry exists.  The arena is marked SRAM tier and claims nothing in
+ * the registry; it otherwise works as one from tiku_arena_create().
  *
  * @param arena    Arena control block to initialize
  * @param buf      Pointer to the backing buffer
@@ -108,11 +108,10 @@ tiku_mem_err_t tiku_arena_create_raw(tiku_arena_t *arena, uint8_t *buf,
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Initialize an arena over a caller-provided buffer
+ * @brief Initialize an arena over a caller-provided buffer.
  *
- * The arena does not own or allocate the buffer — the caller provides
- * a static array or a section of SRAM. This avoids any dependency on
- * a heap allocator.
+ * The buffer must lie inside a registered SRAM or NVM region; the arena takes
+ * that region's tier and claims the buffer in the region registry.
  *
  * @param arena    Arena control block to initialize
  * @param buf      Pointer to the backing buffer
@@ -192,8 +191,8 @@ tiku_mem_err_t tiku_mem_workspace_close(tiku_mem_workspace_t *workspace)
  * @brief Allocate memory from an arena (bump-pointer).
  *
  * Advances the offset by the aligned size and tracks the peak for high-water
- * reporting.  There is no individual free: dropping it removes per-object
- * metadata, free-list walks and fragmentation, which small SRAM cannot afford.
+ * reporting.  The memory is not zeroed.  There is no individual free;
+ * tiku_arena_reset() reclaims every allocation at once.
  *
  * @param arena    Arena to allocate from (must be active)
  * @param size     Bytes requested (must be > 0)
@@ -231,9 +230,9 @@ void *tiku_arena_alloc(tiku_arena_t *arena, tiku_mem_arch_size_t size)
 /**
  * @brief Reset an arena, reclaiming all allocations at once.
  *
- * Sets the offset back to zero.  The buffer is not zeroed -- that would make
- * reset O(n) -- so callers must not assume it is.  The peak high-water mark
- * survives, so it stays a lifetime maximum.
+ * Sets the offset and the allocation count back to zero.  The buffer is not
+ * zeroed; tiku_arena_secure_reset() zeroes it.  The peak high-water mark is
+ * kept as a lifetime maximum.
  *
  * @param arena    Arena to reset
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID for an invalid arena,
@@ -276,7 +275,7 @@ tiku_mem_err_t tiku_arena_secure_reset(tiku_arena_t *arena)
 }
 
 /**
- * @brief Fill a stats struct with the arena's current state
+ * @brief Fill a stats struct with the arena's current state.
  *
  * @param arena    Arena to query
  * @param stats    Output structure
@@ -345,8 +344,8 @@ void tiku_mem_init(void)
      * write-protected. */
     tiku_mem_arch_init();
 
-    /* Activate NVM write-protection now that the working copy is in
-     * place.  Subsequent persist / lc-persist / init writes go through
+    /* NVM write-protection goes on once the working copy is in place.
+     * Subsequent persist / lc-persist / init writes go through
      * tiku_mpu_unlock_nvm() / lock_nvm() to bracket their changes. */
     tiku_mpu_init();
 

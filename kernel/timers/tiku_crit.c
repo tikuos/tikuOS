@@ -81,9 +81,9 @@ int tiku_crit_begin(uint16_t max_us, uint8_t preserve_mask)
     crit_enters++;
 
     /*
-     * Mask first, then set the held flag. The reverse order would
-     * leave a few cycles where tiku_crit_active() returns true
-     * but the not-yet-masked ISRs can still fire and inject jitter.
+     * Interrupts are masked before the held flag is set, so while
+     * tiku_crit_active() reports a window, its sources are already
+     * masked.
      */
     tiku_crit_arch_mask_irqs(preserve_mask);
     crit_mode      = CRIT_MODE_MASKED;
@@ -103,7 +103,8 @@ int tiku_crit_begin_defer(uint16_t max_us)
     crit_max_us      = max_us;
     crit_enters++;
 
-    /* No IE-bit changes; just flip the dispatcher-defer flag. */
+    /* No IE bit changes: only the held flag, which defers the timer
+     * dispatcher. */
     crit_mode      = CRIT_MODE_DEFER;
     tiku_crit_held = 1;
     return TIKU_CRIT_OK;

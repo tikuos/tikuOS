@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_df.c - "df" command implementation.
+ * tiku_shell_cmd_df.c - "df" and "mkfs" command implementation.
  *
  * Reports the /data store as a filesystem.  Block accounting follows the
  * store's own model -- a file occupies whole slots -- with the exact stored
@@ -33,8 +33,7 @@
 /**
  * @brief Format a byte count compactly: "<n>B" / "<n.x>K" / "<n.x>M".
  *
- * Integer-only (the lightweight shell printf has no float); the tenths
- * digit is computed from the remainder.
+ * Integer arithmetic only; the tenths digit is the truncated remainder.
  */
 static void
 df_hsize(char *buf, size_t bufsz, uint32_t bytes)
@@ -79,8 +78,8 @@ tiku_shell_cmd_df(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* Slots, not files: a file holds as many slots as its content needs, and
-     * the store's allocation map counts them.  Files stays its own column. */
+    /* Used space is counted in slots: a file holds as many whole slots as its
+     * content needs.  The file count is a column of its own. */
     used  = (uint32_t)s.used_slots * (uint32_t)s.slot_bytes;
     avail = (s.cap_bytes > used) ? (s.cap_bytes - used) : 0u;
     pct   = (s.total_slots != 0u)
@@ -90,7 +89,8 @@ tiku_shell_cmd_df(uint8_t argc, const char *argv[])
     df_hsize(us, sizeof us, used);
     df_hsize(av, sizeof av, avail);
     df_hsize(st, sizeof st, s.used_bytes);
-    /* Pre-format the %-bearing fields so SHELL_PRINTF gets them as %s. */
+    /* Use% and Files are formatted to strings here; the row pads them with
+     * %5s and %7s. */
     snprintf(pc, sizeof pc, "%u%%", pct);
     snprintf(fl, sizeof fl, "%u/%u",
              (unsigned)s.used_files, (unsigned)s.max_files);
@@ -104,10 +104,10 @@ tiku_shell_cmd_df(uint8_t argc, const char *argv[])
                  (unsigned)s.used_slots, (unsigned)s.total_slots, st,
                  (unsigned)s.slot_bytes);
 
-    /* Carved-region breakdown: the tier extent and this store should tile the
-     * NVM region, so a nonzero idle remainder is region space going nowhere
-     * and is printed in red.  Omitted on parts whose store has its own backing
-     * array rather than a region. */
+    /* The NVM tier and this store tile the carved NVM region; an idle
+     * remainder, region space neither of them uses, prints in red.  A part
+     * whose store has its own backing array reports region_bytes 0 and prints
+     * no region line. */
     if (s.region_bytes != 0u) {
         char rg[12], ti[12], fx[12], id[12];
         df_hsize(rg, sizeof rg, s.region_bytes);

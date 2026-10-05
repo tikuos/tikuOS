@@ -23,8 +23,9 @@
 
 MEMORY
 {
-    /* FRAM slot at the top of HIFRAM (R+W+X MPU segment); ends shy of CPU47.
-     * Kept in sync with TIKU_MODULE_CARVE_ADDR. */
+    /* FRAM slot at the top of HIFRAM (an R+W+X MPU segment), ending at
+     * 0x23FF0, 16 bytes short of 0x24000 (erratum CPU47).  It must equal
+     * TIKU_MODULE_CARVE_ADDR. */
     CARVE (rx) : ORIGIN = 0x23000, LENGTH = 0xFF0
 }
 
@@ -47,11 +48,10 @@ SECTIONS
 
     /*
      * Modules get no data RAM: nothing copies a .data initialiser or clears a
-     * .bss, and the service table has no allocator.  A /DISCARD/ entry would
-     * drop these inputs silently and ship a global pointing at nothing, so
-     * they are collected here and required to be empty, which makes writable
-     * state a link error naming the cause.  --gc-sections still drops a
-     * global that nothing references, so only state a handler uses trips it.
+     * .bss, and the service table has no allocator.  The .data and .bss
+     * inputs are collected here and must be empty, so writable state fails
+     * the link with a message naming the cause.  --gc-sections drops an
+     * unreferenced global first, so only state a handler uses fails it.
      */
     .modwritable (NOLOAD) : { *(.bss*) *(.data*) *(COMMON) }
 

@@ -100,8 +100,7 @@ tiku_lcd_puts_right(const char *s)
         return;
     }
 
-    /* Measure (clamped). Avoids strlen so <string.h> is not pulled in
-     * on parts where it isn't already linked. */
+    /* Length, clamped to the panel width. */
     for (p = s; *p && len < width; p++) {
         len++;
     }

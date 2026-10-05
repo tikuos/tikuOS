@@ -16,11 +16,11 @@
 #include <stdint.h>
 
 /**
- * @brief "adc" command handler — read analog channels through the HAL.
+ * @brief "adc" command: read one ADC channel through the HAL and print it.
  *
- * Takes a channel (0-15 for external pins, or "temp"/"bat" for the internal
- * sensor and battery divider) and an optional reference (avcc|1v2|2v0|2v5),
- * defaulting to a 12-bit conversion against AVCC.
+ * Usage: adc <channel|temp|bat> [ref].  The channel is 0-15 (external pins),
+ * temp (internal sensor) or bat (battery divider); ref is avcc, 1v2, 2v0 or
+ * 2v5, default avcc.  Every conversion is 12-bit.
  *
  * @param argc  Argument count
  * @param argv  Argument vector

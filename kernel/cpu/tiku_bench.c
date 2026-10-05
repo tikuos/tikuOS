@@ -97,9 +97,8 @@ tiku_bench_hz(void)
     if (s_backend != TIKU_BENCH_DWT) {
         return (uint32_t)TIKU_HTIMER_ARCH_SECOND;
     }
-    /* The DWT counts core cycles, so its rate is whatever the core is
-     * running at now, not TIKU_MAIN_CPU_HZ, which is a compile-time
-     * constant and stays at the boot frequency after any runtime change. */
+    /* The DWT counts core cycles at the clock tiku_cpu_mclk_hz() reports.
+     * TIKU_MAIN_CPU_HZ is the boot frequency, used when that returns 0. */
     {
         unsigned long hz = tiku_cpu_mclk_hz();
         return (hz != 0UL) ? (uint32_t)hz : (uint32_t)TIKU_MAIN_CPU_HZ;

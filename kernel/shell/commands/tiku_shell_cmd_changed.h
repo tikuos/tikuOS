@@ -16,11 +16,11 @@
 #include <stdint.h>
 
 /**
- * @brief "changed" command — block until @p path's VFS value changes.
+ * @brief "changed" command: wait until the value at a VFS path changes.
  *
- * Baselines the path with one read, then re-reads at shell-tick granularity
- * until the value differs (ignoring trailing whitespace) and prints the
- * old/new pair.  Ctrl+C cancels; a transient read failure keeps it waiting.
+ * Usage: changed <path>.  Re-reads the path every TIKU_CLOCK_SECOND / 20
+ * ticks and prints "old -> new" once its first 31 bytes differ, trailing
+ * spaces and line ends ignored.  A failed read is skipped; Ctrl+C ends it.
  *
  * @param argc  Argument count
  * @param argv  Argument vector

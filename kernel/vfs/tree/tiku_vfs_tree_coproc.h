@@ -7,9 +7,8 @@
  *
  * tiku_vfs_tree_coproc.h - /sys/coproc VFS nodes.
  *
- * Linkage contract for the coproc subtree: the children table is exported
- * with a compile-time entry count so the /sys assembly can embed it, and a
- * _Static_assert beside the table keeps the macro and the array in step.
+ * Exports the /sys/coproc children table and its entry count for the /sys
+ * assembly; a _Static_assert beside the table checks the count.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -41,9 +41,9 @@
 /**
  * @brief How long one frame may stay open before it is abandoned.
  *
- * A frame whose closing END was lost would otherwise swallow every later
- * keystroke as payload.  The draining pump legitimately pauses for seconds
- * mid-frame during TLS crypto, so the limit dwarfs any real frame.
+ * After it, the next byte other than END drops the open frame, counted as
+ * phantom, and is text.  TLS crypto can stop the pump for seconds mid-frame,
+ * so the limit is far longer than any frame takes to arrive.
  */
 #ifndef TIKU_CONSOLE_FRAME_TTL
 #define TIKU_CONSOLE_FRAME_TTL (30u * TIKU_CLOCK_SECOND)
@@ -65,7 +65,8 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief The physical line: three calls and whether it can carry a NUL.
+ * @brief The physical line: three byte calls and whether a NUL in a frame is
+ *        escaped.
  *
  * The boot console (the UART, or the USB CDC port on a native-USB build) is
  * installed by default; a test installs a RAM loopback in its place.
@@ -102,14 +103,17 @@ typedef void (*tiku_console_frame_fn)(void *ctx, uint8_t *buf, size_t len);
  * stack registers (0x40, 0xF0) keeping the first byte, the IPv4 version
  * nibble.  A frame that outgrows @p buf is dropped whole and counted.
  *
+ * @note Registering a (value, mask) pair again replaces its entry.
  * @param keep_first  non-zero to deliver the first byte as payload
- * @return 0, or -1 when the table is full, @p fn is NULL or @p cap is 0
+ * @return 0, or -1 when the table is full, @p fn or @p buf is NULL or @p cap
+ *         is 0
  */
 int  tiku_console_add_channel(uint8_t value, uint8_t mask, uint8_t keep_first,
                               tiku_console_frame_fn fn, void *ctx,
                               uint8_t *buf, size_t cap);
 
-/** @brief Forget the channel registered as (@p value, @p mask). */
+/** @brief Forget the channel registered as (@p value, @p mask), and drop
+ *         its open frame. */
 void tiku_console_remove_channel(uint8_t value, uint8_t mask);
 
 /*---------------------------------------------------------------------------*/
@@ -120,8 +124,7 @@ void tiku_console_remove_channel(uint8_t value, uint8_t mask);
  * @brief Send one frame on the channel @p marker names: END, the marker,
  *        @p head then @p body escaped, END.
  *
- * Two parts so a message whose payload already sits in a caller's buffer
- * needs no second copy.  Either part may be NULL with a zero length.
+ * Either part may be NULL with a zero length.
  *
  * @return 0, or -1 when there is no wire
  */
@@ -152,10 +155,11 @@ void tiku_console_write(const void *bytes, size_t len);
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief The next text byte from the wire, or -1 when there is none.
+ * @brief The next text byte, or -1 when there is none.
  *
- * Frame bytes met on the way are consumed and whole frames dispatched to
- * their channels before this returns.  The shell's line editor reads here.
+ * Injected text comes first.  Then the wire is read: frame bytes met on the
+ * way are consumed, and whole frames go to their channels before this
+ * returns.  The shell's line editor reads here.
  */
 int  tiku_console_getc(void);
 
@@ -163,10 +167,13 @@ int  tiku_console_getc(void);
 typedef int (*tiku_console_text_fn)(void *ctx, int ch);
 
 /**
- * @brief Text for the shell that did not come down the wire: a desk on a
- *        link, say.  Served by tiku_console_getc() before the wire, as
- *        text, so a frame decoder never sees it.
- * @return bytes taken; the rest had no room and are dropped
+ * @brief Queue text that did not come down the wire, such as shell input
+ *        from a desktop over a link, for tiku_console_getc().
+ *
+ * tiku_console_getc() returns it before reading the wire, and the frame
+ * decoder never sees it.  The queue holds 255 bytes.
+ *
+ * @return Bytes queued; the rest did not fit and are dropped
  */
 size_t tiku_console_inject(const uint8_t *bytes, size_t len);
 
@@ -177,7 +184,8 @@ uint8_t tiku_console_from_inject(void);
 void tiku_console_set_text_sink(tiku_console_text_fn fn, void *ctx);
 
 /**
- * @brief Drain the wire: frames to their channels, text to the sink.
+ * @brief Drain the wire: frames to their channels, text to the sink, or
+ *        dropped with none.
  *
  * For a caller that owns the console but does not read the keyboard, such
  * as a blocking builtin keeping the IP stack fed.  A build without a shell

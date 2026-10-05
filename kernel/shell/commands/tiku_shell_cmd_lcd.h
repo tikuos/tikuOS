@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_lcd.h - "lcd" shell command (segment-LCD harness)
  *
- * Drives the platform-independent tiku_lcd interface from the shell so
- * user-in-the-loop tests (TikuBench/tikubench/lcd_test.py) can paint frames
- * and ask the operator what they see.
+ * Drives the platform-independent tiku_lcd interface from the shell.  The
+ * operator-checked LCD test, TikuBench/tikubench/lcd_test.py, paints its
+ * frames through it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

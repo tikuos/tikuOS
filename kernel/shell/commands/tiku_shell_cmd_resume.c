@@ -39,7 +39,7 @@ tiku_shell_cmd_resume(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* Parse PID from argument (simple atoi for small integers) */
+    /* Parse the decimal PID */
     pid = 0;
     for (idx = 0; argv[1][idx] != '\0'; idx++) {
         if (argv[1][idx] < '0' || argv[1][idx] > '9') {

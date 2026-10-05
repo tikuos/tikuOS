@@ -270,9 +270,9 @@ int tiku_cfg_lookup(tiku_cfg_t *c, const tiku_cfg_request_t *q, uint8_t cap,
 /**
  * @brief Apply resource @p i's stored value and record the state in @p next.
  *
- * A resource without a value is skipped.  A value that no longer normalizes
- * to itself, or any outcome but APPLIED or RESTART, is BLOCKED, and the
- * history records of that revision take the same state.
+ * A resource without a value is skipped.  A stored value that does not
+ * normalize to itself, or any outcome but APPLIED or RESTART, is BLOCKED, and
+ * the history records of that revision take the same state.
  */
 static int reconcile(tiku_cfg_t *c, unsigned i, uint8_t *next)
 {

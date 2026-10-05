@@ -8,33 +8,33 @@
  * tiku_basic_token.inl - keyword crunching.
  *
  * A stored line folds each keyword to one byte and LIST expands it again.
- * The matchers accept either the token byte or the spelled-out word, so
- * immediate mode runs raw text and keywords outside the table still work.
+ * The matchers accept the token byte or the spelled-out word, so immediate
+ * mode runs raw text and a word absent from the table matches as text.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 /*
  * Crunch rules:
- *   - Only maximal identifier runs fold, and only on an exact, word-bounded
- *     match (PRINTER / TOTAL / FORI never fold -- the same word-boundary rule
- *     match_kw applies, so semantics are unchanged).
+ *   - Only a maximal identifier run folds, and only on an exact match,
+ *     the word-boundary rule of match_kw(): PRINTER, TOTAL and FORI never
+ *     fold.
  *   - A trailing '$' joins the word first (STR$ folds; A$ does not).
  *   - Labels stay raw: a line-leading `name:` and the words after GOTO or
- *     GOSUB, so a label spelled like a keyword still works.
+ *     GOSUB, so a label may be spelled like a keyword.
  *   - Nothing folds inside "..." string literals, which end where the
  *     string parser ends them: a backslash keeps the byte after it inside.
  *   - After REM (or the ' alias) and after DATA, the rest of the line is
  *     stored raw: comment text and DATA items are data, not keywords.
- *   - Outside those raw regions, stray bytes >= 0x80 in the input are
- *     replaced with '?', so in stored text a high byte is always a token.
+ *   - Outside those raw regions, a byte >= 0x80 in the input is replaced
+ *     with '?', so a high byte there in stored text is a token.
  *
  * SAVE writes detokenized text, so a saved program does not depend on the
  * token table, and the identity CRC (computed over the crunched bytes) is
  * stable across SAVE/LOAD because crunching is deterministic.
  */
 
-/* Char predicates are defined in tiku_basic_lex.inl (included after this
- * file); same-TU forward declarations keep the include order simple. */
+/* Char predicates, defined in tiku_basic_lex.inl, which is included after
+ * this file. */
 static char to_upper(char c);
 static int  is_alpha(char c);
 static int  is_word_cont(char c);
@@ -163,8 +163,8 @@ tok_kw_at(const char *t, const char *kw)
 /**
  * @brief Fold keywords in one program line to token bytes.
  *
- * Output is never longer than the input (tokens shrink), so @p cap ==
- * strlen(src)+1 always suffices; over-long input truncates safely.
+ * The output is never longer than the input, so @p cap == strlen(src) + 1
+ * holds it; a smaller @p cap truncates the output, which stays NUL-terminated.
  */
 static void
 basic_crunch(char *dst, size_t cap, const char *src)

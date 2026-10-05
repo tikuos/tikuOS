@@ -20,15 +20,14 @@
 #include <stddef.h>
 
 /*
- * Here: the CBW/CSW field layout, the SCSI replies a host needs to mount a
- * volume, the sense latch, and an LBA range check that holds for an LBA near
- * 2^32.  None of it touches a register, so it runs on a build machine against
- * known-good byte sequences as well as on a board.
+ * This module holds the CBW/CSW field layout, the SCSI replies a host needs
+ * to mount a volume, the sense latch, and an LBA range check that holds for
+ * an LBA near 2^32.  It touches no register, so it also runs on a build
+ * machine against known-good byte sequences (tools/usbmsc).
  *
- * Not here: the transport.  Whether packets arrive by interrupt from a MUSB
- * FIFO or by polling a Renesas pipe is the controller's business; each
- * controller drives its own state machine and calls in here for every
- * decision about what the bytes mean.
+ * Each controller driver moves the packets itself, by interrupt from a MUSB
+ * FIFO or by polling a Renesas pipe, runs its own state machine, and calls
+ * here to decide what each command means.
  */
 
 /** @brief Bulk-Only Transport wrapper sizes and signatures. */
@@ -46,7 +45,8 @@
 /** @brief Characters of INQUIRY product identification, space padded. */
 #define TIKU_USBD_MSC_PRODUCT_LEN 16u
 
-/** @brief SCSI opcodes this decodes.  Anything else is refused, not ignored. */
+/** @brief SCSI opcodes this decodes.  Any other opcode fails with ILLEGAL
+ *         REQUEST, invalid command operation. */
 #define TIKU_USBD_MSC_TEST_UNIT_READY  0x00u
 #define TIKU_USBD_MSC_REQUEST_SENSE    0x03u
 #define TIKU_USBD_MSC_INQUIRY          0x12u
@@ -81,7 +81,8 @@ typedef struct {
 /** @brief The medium presented, plus the sense latch REQUEST SENSE reads. */
 typedef struct {
     uint32_t    blocks;     /**< capacity, in TIKU_USBD_MSC_BLOCK units      */
-    const char *product;    /**< 16 chars for INQUIRY; NULL for a default    */
+    const char *product;    /**< INQUIRY product id, cut or space-padded to
+                                 *   16 chars; NULL gives spaces             */
     uint8_t     sense_key;  /**< latched until the host asks for it          */
     uint8_t     sense_asc;  /**< additional sense code, latched with the key */
 } tiku_usbd_msc_t;
@@ -94,7 +95,7 @@ typedef enum {
     TIKU_USBD_MSC_ACT_WRITE,    /**< receive @c bytes, store them at @c lba */
 } tiku_usbd_msc_action_t;
 
-/** @brief The decoded command: everything the transport needs, nothing more. */
+/** @brief The decoded command, as the transport carries it out. */
 typedef struct {
     tiku_usbd_msc_action_t action;
     uint32_t lba;      /**< first block, for READ and WRITE                  */
@@ -128,7 +129,7 @@ void tiku_usbd_msc_build_csw(uint8_t *out13, uint32_t tag, uint32_t residue,
                              uint8_t status);
 
 /**
- * @brief Is this block range inside the medium?
+ * @brief Whether a block range lies inside the medium; an empty range does.
  *
  * @param m    the medium
  * @param lba  first block

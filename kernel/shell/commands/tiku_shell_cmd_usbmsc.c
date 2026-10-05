@@ -5,7 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_usbmsc.c - bring up the mass-storage face and report it.
+ * tiku_shell_cmd_usbmsc.c - "usbmsc" command: present the board as a disk.
+ *
+ * Brings the nRF54LM20 USB-HS core up as a mass-storage device, stops it,
+ * and prints its counters or the first bytes of a block.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

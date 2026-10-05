@@ -16,14 +16,14 @@
 #include <stdint.h>
 
 /**
- * @brief "repeat" command -- dispatch <command> exactly <count> times.
+ * @brief "repeat" command: `repeat <count> <command...>` runs a command
+ *        <count> times, 1 to TIKU_SHELL_REPEAT_MAX_COUNT.
  *
- * The trailing tokens are joined with single spaces and re-dispatched through
- * tiku_shell_parser_execute() each iteration, with a fresh writable copy every
- * time because the parser tokenises in place.  Ctrl+C cancels between passes.
+ * Joins the trailing tokens with single spaces and passes a fresh copy to
+ * tiku_shell_parser_execute() on each pass, since the parser tokenises in
+ * place.  A Ctrl+C read between passes stops the run.
  *
- * @note Recursion is bounded by TIKU_SHELL_REPEAT_DEPTH_MAX, so a nested
- *       `repeat ... repeat ...` cannot blow the stack.
+ * @note A `repeat` nested deeper than TIKU_SHELL_REPEAT_DEPTH_MAX is refused.
  */
 void tiku_shell_cmd_repeat(uint8_t argc, const char *argv[]);
 

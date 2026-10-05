@@ -44,7 +44,7 @@ extern const uint8_t           tiku_drv_table_count;
 
 /** @brief Per-boot initialization outcome of one table slot. */
 typedef enum {
-    TIKU_DRV_DISCOVERED,   /**< not yet initialized                  */
+    TIKU_DRV_DISCOVERED,   /**< in the table; init() not run         */
     TIKU_DRV_READY,        /**< init() succeeded                     */
     TIKU_DRV_FAILED,       /**< init() returned an error             */
     TIKU_DRV_INVALID,      /**< malformed descriptor, or no such slot */
@@ -54,8 +54,8 @@ typedef enum {
 /**
  * @brief Report one table slot's initialization outcome.
  *
- * The outcome of boot, not a live health query.  A failed mount does not
- * undo a successful init.
+ * The state is the one recorded at boot.  A slot whose init succeeded stays
+ * TIKU_DRV_READY when its mount fails.
  *
  * @param index     Descriptor-table slot
  * @param init_rc   Receives the init() result, or NULL

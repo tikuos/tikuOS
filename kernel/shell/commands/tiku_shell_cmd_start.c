@@ -9,7 +9,7 @@
  *
  * Starts or resumes a process by name.  Searches the active process
  * registry first (resume if stopped), then the process catalog
- * (register + start if available but not yet running).
+ * (register and start a catalog entry that is not registered).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -95,11 +95,12 @@ tiku_shell_cmd_start(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* 2. Check the catalog — available but not yet started? */
+    /* 2. Check the catalog — available and not registered? */
     p = tiku_process_catalog_find(name);
     if (p != NULL) {
-        /* Use p->name (stable string literal from TIKU_PROCESS)
-         * rather than argv name (ephemeral parser scratch buffer) */
+        /* Register under p->name, the string literal from TIKU_PROCESS:
+         * argv[1] points into the parser's scratch buffer, which the next
+         * command line overwrites. */
         int8_t pid = tiku_process_register(p->name, p);
         if (pid >= 0) {
             SHELL_PRINTF("Started '%s' (pid %d)\n", name, pid);

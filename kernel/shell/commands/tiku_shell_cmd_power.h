@@ -5,8 +5,8 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_power.h - "power" command: report and steer the knobs that
- * decide what the part costs to run.
+ * tiku_shell_cmd_power.h - "power" command: report and switch the clock,
+ * cache, supply and sleep settings that set power draw.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,9 +21,9 @@
 /**
  * @brief "power" command handler.
  *
- * No argument prints the clocks and idle mode.  The other verbs are per
- * platform: idle, spin and memory probes with cache, supply and clock
- * switches on nRF54L and Apollo510; nap and deep sleep on ESP32-C61.
+ * No argument prints the clocks and idle mode.  Other verbs are per platform:
+ * idle, spin and memory probes with cache, supply and clock switches on
+ * nRF54L and Apollo510, and nap and deep sleep on ESP32-C61.
  *
  * @note The Apollo510 verbs, and the `usb`, `emmc`, `nor` and `psram` verbs
  *       forwarded to their own command modules, exist only with the power

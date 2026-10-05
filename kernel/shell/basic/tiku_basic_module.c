@@ -75,7 +75,7 @@ module_src_ok(const uint8_t *src, uint32_t len)
 /**
  * @brief Locate the module image: the store file, optionally seeding it.
  *
- * The file wins when its size lies between a header and the slot.  Otherwise
+ * The file is used when its size lies between a header and the slot.  Otherwise
  * only install (@p seed = 1) falls back to the embedded copy and writes it to
  * the store; activate passes 0, so it never arms the built-in module unasked.
  *

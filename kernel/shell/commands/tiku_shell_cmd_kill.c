@@ -7,8 +7,9 @@
  *
  * tiku_shell_cmd_kill.c - "kill" command implementation
  *
- * Stops a process with tiku_process_stop(): it stays registered and
- * `resume` can restart it.  The PID is the registry slot that "ps" shows.
+ * Stops a process with tiku_process_stop(): it stays registered, and `resume`
+ * continues it where it last yielded.  The PID is the registry slot that "ps"
+ * shows.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -38,7 +39,7 @@ tiku_shell_cmd_kill(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* Parse PID from argument (simple atoi for small integers) */
+    /* Parse the PID: decimal digits only. */
     pid = 0;
     for (idx = 0; argv[1][idx] != '\0'; idx++) {
         if (argv[1][idx] < '0' || argv[1][idx] > '9') {

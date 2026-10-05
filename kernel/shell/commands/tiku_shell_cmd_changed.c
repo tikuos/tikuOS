@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_changed.c - "changed" command implementation.
  *
- * A synchronous equivalent of an "on changed" rule, for one-off waits at the
- * prompt.  Polls at shell-tick granularity and checks for Ctrl+C each pass;
- * trailing whitespace is stripped so a bare newline does not read as a change.
+ * Blocks the shell until a VFS value changes, re-reading it every
+ * TIKU_CLOCK_SECOND / 20 ticks and checking for Ctrl+C on each pass.  Trailing
+ * CR, LF and spaces are stripped before two values are compared.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -32,8 +32,7 @@
 /** Ctrl+C / ETX — terminates the wait loop. */
 #define CHANGED_CANCEL    0x03
 
-/** Per-iteration buffer size for VFS reads.  32 bytes covers all
- *  realistic numeric or short-string VFS values. */
+/** Read buffer size; only the first CHANGED_BUF_SIZE - 1 bytes are compared. */
 #define CHANGED_BUF_SIZE  32
 
 /*---------------------------------------------------------------------------*/
@@ -54,15 +53,13 @@ changed_rtrim(char *s, int n)
 }
 
 /**
- * @brief Wait one shell-tick worth of time, polling for Ctrl+C.
+ * @brief Wait TIKU_CLOCK_SECOND / 20 ticks, polling for Ctrl+C.
  * @return 1 if cancelled, 0 if the interval elapsed normally.
  */
 static uint8_t
 changed_wait_tick(void)
 {
-    /* TIKU_CLOCK_SECOND/20 == ~50 ms at the default 128 Hz tick.
-     * Matches the shell's own poll cadence so detection latency
-     * tracks the rest of the system. */
+    /* The same interval as TIKU_SHELL_POLL_TICKS, the shell's poll period. */
     tiku_clock_time_t deadline =
         tiku_clock_time() + (TIKU_CLOCK_SECOND / 20);
 
@@ -118,7 +115,7 @@ tiku_shell_cmd_changed(uint8_t argc, const char *argv[])
 
         curr_n = tiku_vfs_read(resolved, curr, sizeof(curr) - 1);
         if (curr_n < 0) {
-            /* Transient read failure: keep waiting. */
+            /* A failed read is skipped and the wait goes on. */
             continue;
         }
         if (curr_n > (int)sizeof(curr) - 1) {

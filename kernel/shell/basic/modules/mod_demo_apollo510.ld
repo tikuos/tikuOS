@@ -25,7 +25,7 @@ MEMORY
 {
     /* 32 KB execution window in the ITCM, 4 KB in from its base so no module
      * address is zero.  The image lives in the store as an ordinary file and
-     * the loader copies it here at activate.  Kept in sync with
+     * the loader copies it here at activate.  It must equal
      * TIKU_MODULE_EXEC_ADDR. */
     CARVE (rx) : ORIGIN = 0x00001000, LENGTH = 0x8000  /* ITCM window */
 }
@@ -49,11 +49,10 @@ SECTIONS
 
     /*
      * Modules get no data RAM: nothing copies a .data initialiser or clears a
-     * .bss, and the service table has no allocator.  A /DISCARD/ entry would
-     * drop these inputs silently and ship a global pointing at nothing, so
-     * they are collected here and required to be empty, which makes writable
-     * state a link error naming the cause.  --gc-sections still drops a
-     * global that nothing references, so only state a handler uses trips it.
+     * .bss, and the service table has no allocator.  The .data and .bss
+     * inputs are collected here and must be empty, so writable state fails
+     * the link with a message naming the cause.  --gc-sections drops an
+     * unreferenced global first, so only state a handler uses fails it.
      */
     .modwritable (NOLOAD) : { *(.bss*) *(.data*) *(COMMON) }
 

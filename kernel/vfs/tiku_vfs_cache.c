@@ -7,30 +7,28 @@
  *
  * tiku_vfs_cache.c - freshness cache (read coalescing) implementation.
  *
- * See tiku_vfs_cache.h for the rationale; the three properties this file has to
- * hold -- wrap-safe freshness, the race against the event bus, and ISR/process
- * concurrency -- are stated below.
+ * Holds up to TIKU_VFS_CACHE_MAX renderings in SRAM, each served until its
+ * node's freshness window ends or tiku_vfs_notify() drops it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 /*
- * Three properties this file has to hold:
+ * Three properties the cache holds:
  *
  *  1. Wrap-safe freshness.  Timestamps pair the 32-bit seconds count with
  *     the tick, which is 16 bits on MSP430 and wraps every 512 s at 128 Hz.
  *     The coarse guard CACHE_MAX_AGE_S (30 s) declares anything older stale,
- *     far under the wrap, so the tick subtraction below is always exact.
- *     Freshness windows must therefore stay under CACHE_MAX_AGE_S.
+ *     well inside the wrap, so the tick subtraction below is exact.
+ *     Freshness windows must stay under CACHE_MAX_AGE_S.
  *
- *  2. Race against the event bus.  A miss samples the handler outside the
- *     atomic section, because a conversion is slow.  A global notify sequence
- *     is captured before the sample and re-checked under the mask before the
- *     store, so a notify arriving during the sample skips the store instead
- *     of masking the change.
+ *  2. Race against notify.  A miss runs the handler outside the atomic
+ *     section, because a conversion is slow.  A global notify sequence is
+ *     captured before the call and re-checked under the mask before the
+ *     store: a sample that a notify overlapped is returned but not stored.
  *
  *  3. Concurrency.  invalidate() may run from ISR context while
  *     get()/sample() store from process context, so every table mutation is
- *     bracketed by tiku_atomic_enter()/exit() -- an ISR never sees a torn slot.
+ *     bracketed by tiku_atomic_enter()/exit(), and an ISR sees no torn slot.
  */
 
 
@@ -101,7 +99,7 @@ int tiku_vfs_cache_get(const tiku_vfs_node_t *node, char *buf, size_t max)
                 memcpy(buf, cache[i].text, len);
                 ret = (int)cache[i].len;   /* snprintf-style length */
             } else {
-                cache[i].node = NULL;      /* self-clean expired entry */
+                cache[i].node = NULL;      /* drop the expired entry */
             }
             break;
         }
@@ -121,10 +119,9 @@ int tiku_vfs_cache_sample(const tiku_vfs_node_t *node, char *buf, size_t max)
 
     stat_misses++;
 
-    /* Store only complete renderings: n < max guarantees the snprintf-
-     * style handler did not truncate (so buf holds all n bytes),
-     * and n < TEXTLEN guarantees it fits a slot.  A truncated read
-     * still returns normally -- it just isn't cached. */
+    /* Store only complete renderings: n < max means the snprintf-style
+     * handler did not truncate (buf holds all n bytes), and n < TEXTLEN
+     * means it fits a slot.  A truncated read is returned but not cached. */
     if (n > 0 && (size_t)n < max && (size_t)n < TIKU_VFS_CACHE_TEXTLEN) {
         tiku_atomic_enter();
         if (notify_seq == seq0) {        /* no notify raced the sample */
@@ -153,9 +150,9 @@ int tiku_vfs_cache_sample(const tiku_vfs_node_t *node, char *buf, size_t max)
             cache[slot].node = node;
             cache[slot].stamp_s = (uint32_t)tiku_clock_seconds();
             cache[slot].stamp_t = tiku_clock_time();
-            /* (uint8_t) is safe: the enclosing guard already required
-             * n < TIKU_VFS_CACHE_TEXTLEN, which is < 256, so no truncation.
-             * A TEXTLEN of 256 or more needs a wider `len`. */
+            /* The guard above keeps n below TIKU_VFS_CACHE_TEXTLEN, so n
+             * fits uint8_t while TEXTLEN is at most 256; a larger TEXTLEN
+             * needs a wider `len`. */
             cache[slot].len = (uint8_t)n;
             memcpy(cache[slot].text, buf, (size_t)n);
         }
@@ -214,7 +211,7 @@ void tiku_vfs_cache_stats(uint32_t *hits, uint32_t *misses, uint8_t *used)
     }
 }
 
-#else /* !TIKU_VFS_CACHE_ENABLE — trivial no-ops keep the link clean */
+#else /* !TIKU_VFS_CACHE_ENABLE: no-op stubs, every read calls its handler */
 
 int tiku_vfs_cache_get(const tiku_vfs_node_t *node, char *buf, size_t max)
 {

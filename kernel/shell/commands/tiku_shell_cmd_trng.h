@@ -7,9 +7,8 @@
  *
  * tiku_shell_cmd_trng.h - "trng" command: dump entropy-source bytes as hex.
  *
- * A diagnostic for the random source behind the TLS handshake: a hardware TRNG
- * where the die has one, or the SHA-256-conditioned software source on parts
- * without.
+ * A diagnostic for the random source behind the TLS handshake: a hardware
+ * TRNG, or on MSP430 and RA8P1 a software source conditioned with SHA-256.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,9 +21,9 @@
 /**
  * @brief "trng" command handler — dump entropy-source bytes as hex.
  *
- * Reads from the platform hardware TRNG, or from the SHA-256-conditioned
- * software entropy source on parts without one, and prints the bytes as
- * lowercase hex on a single line.
+ * Reads the platform's hardware TRNG, or on MSP430 and RA8P1 a software
+ * entropy source conditioned with SHA-256, and prints the bytes as lowercase
+ * hex on a single line.
  *
  * @param argc  Argument count
  * @param argv  Argument vector; argv[1] is the optional byte count

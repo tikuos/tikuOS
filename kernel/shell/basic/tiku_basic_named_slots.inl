@@ -18,9 +18,8 @@
 #if BASIC_NVM_ON_REGION
 /*
  * Named programs are /data files, "/data/<name>.bas": durable, visible to
- * `ls` and `cat`, and as many as the store has room for.  BASIC_NVM_PERSISTENT
- * is durable only on MSP430, so a static slot array would not survive a reset
- * here.  A named program is at most one serialization scratch (4 KB).
+ * `ls` and `cat`, and as many as the store has room for.  A named program is
+ * at most one serialization scratch (4 KB).
  */
 #define BASIC_NAMED_SUFFIX    ".bas"
 /* Keeps "<name>.bas" within the store's name field (TIKU_TFS_NAME_MAX). */

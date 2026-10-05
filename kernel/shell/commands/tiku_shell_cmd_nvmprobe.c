@@ -115,14 +115,13 @@ tiku_shell_cmd_nvmprobe(uint8_t argc, const char *argv[])
 
     if (strcmp(sub, "tier") == 0) {
         /*
-         * NVM-tier self-test: allocate from the tier, write through
-         * tiku_tier_nvm_write(), verify by plain readback, confirm an
-         * over-capacity arena is refused, then release the arena.
-         * "tier mark <txt>" writes <txt> instead of the fixed pattern and
-         * prints the block's region offset, so the bench can re-verify the
-         * bytes after a reset through the raw read path.  Released bytes are
-         * not erased, but another allocation can overwrite them; this is not
-         * persistent file storage.
+         * NVM-tier self-test: create a 256-byte tier arena, write a text into
+         * a 64-byte block through tiku_tier_nvm_write(), compare it by plain
+         * readback, check that an arena of the tier's whole capacity is
+         * refused, then release the arena.  `tier mark <txt>` writes <txt>
+         * (at most 63 bytes) and prints the block's offset in the region,
+         * which `nvmprobe read` or `verify` takes after a reset.  Released
+         * bytes stay in place until another allocation reuses them.
          */
         const char *txt = (argc >= 4u && strcmp(argv[2], "mark") == 0)
                           ? argv[3] : "TIER-SELFTEST";

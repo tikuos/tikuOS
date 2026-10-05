@@ -7,8 +7,8 @@
  *
  * tiku_shell_cmd_irq.c - "irq" command implementation
  *
- * Thin parser layer over the GPIO IRQ HAL. Accepts a pin in
- * "P<port>.<pin>" form and one of the four edge keywords.
+ * Parses a pin in "P<port>.<pin>" form and an edge keyword (rising, falling,
+ * both or off), then enables or disables that pin's IRQ through the GPIO HAL.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -36,8 +36,7 @@ streq(const char *a, const char *b)
 /**
  * @brief Parse "P<port>.<pin>" (upper- or lowercase 'p') into port and pin.
  *
- * The pin field is one or two decimal digits (0..31), so wide ports such as
- * the nRF54L's P1 (up to P1.15) are addressable.
+ * The port is one decimal digit; the pin is one or two (0-31).
  *
  * @return 0 on success, -1 on a syntax error
  */

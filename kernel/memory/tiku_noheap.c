@@ -7,9 +7,9 @@
  *
  * tiku_noheap.c - refuse the C library a heap.
  *
- * TikuOS allocates statically or from a tier.  The C library still reaches for
- * malloc from its printf path, and the stub that satisfies it grows from `end`
- * without a bound -- which is where the SRAM tier is carved.
+ * TikuOS allocates statically or from a tier.  The C library calls malloc from
+ * its printf path, and the library's _sbrk grows from `end`, where the SRAM
+ * tier is carved, without a bound.  This file's _sbrk refuses every request.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

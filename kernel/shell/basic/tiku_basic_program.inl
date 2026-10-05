@@ -110,7 +110,8 @@ prog_find_exact_linear(uint16_t lineno)
  * @brief Rebuild basic_line_order[]: active prog[] indices by line number.
  *
  * Collects in slot order, then insertion-sorts: O(N) for a program entered in
- * order, O(N^2) for one entered in reverse, paid once per edit.
+ * order, O(N^2) for one entered in reverse, paid at the first lookup after an
+ * edit.
  */
 static void
 basic_line_index_build(void)

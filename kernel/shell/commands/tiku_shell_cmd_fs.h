@@ -26,8 +26,7 @@ void tiku_shell_cmd_rm(uint8_t argc, const char *argv[]);
 /**
  * @brief "touch" command handler — create an empty file if it does not exist.
  *
- * A no-op on an existing file (the store has no modification time to bump),
- * so it never truncates one.
+ * An existing file is left as it is; the store keeps no modification time.
  */
 void tiku_shell_cmd_touch(uint8_t argc, const char *argv[]);
 
@@ -51,9 +50,9 @@ void tiku_shell_cmd_rmdir(uint8_t argc, const char *argv[]);
 /**
  * @brief "recv" command handler — receive a file from the host.
  *
- * Prints "recv: ready N" ("chunk C" added for a /data file), then reads
- * exactly N raw bytes and writes them to the path, binary-safe.  A /data file
- * streams up to the store's limit with a '.' per chunk; others take one buffer.
+ * Prints "recv: ready N" ("chunk C" for /data), reads N raw bytes and writes
+ * them to the path, binary-safe.  A /data file streams up to the store's
+ * limit, with a '.' after each chunk but the last; others take one buffer.
  */
 void tiku_shell_cmd_recv(uint8_t argc, const char *argv[]);
 
@@ -62,7 +61,7 @@ void tiku_shell_cmd_recv(uint8_t argc, const char *argv[]);
  *
  * `send <path>` prints "send: N", then streams N raw bytes of the file out
  * (binary-safe).  A /data file goes out whole; any other node must render in
- * one transfer buffer (TIKU_TFS_SLOT_DATA bytes) and is refused if it does not.
+ * fewer than TIKU_TFS_SLOT_DATA bytes (the transfer buffer) or is refused.
  */
 void tiku_shell_cmd_send(uint8_t argc, const char *argv[]);
 

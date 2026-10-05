@@ -40,7 +40,8 @@ static uint32_t manifest_sum(const tiku_persist_manifest_t *m)
     return h;
 }
 
-/** @brief A manifest whose every entry lies inside an image of @p len bytes. */
+/** @brief Whether @p m is a valid manifest whose every entry lies inside an
+ *  image of @p len bytes. */
 static int manifest_ok(const tiku_persist_manifest_t *m, size_t len)
 {
     uint16_t i;
@@ -228,8 +229,9 @@ int tiku_persist_move(const tiku_persist_move_env_t *e)
             move_word(e->live + offs[k], 0u);
         }
     }
-    /* A missing manifest can be an interrupted move. No unmatched gate is
-     * evidence of a valid value, even on a first manifest-aware boot. */
+    /* A missing manifest can be an interrupted move, so a gate that holds
+     * its key is no evidence of a valid value: every cell that is not
+     * moving has its gate cleared. */
     for (i = 0; i < cur.count; i++) {
         memcpy(&key, e->live + cur.at[i].gate, sizeof key);
         if (!moving[i] && key == cur.at[i].key) {

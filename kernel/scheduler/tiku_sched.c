@@ -7,9 +7,9 @@
  *
  * tiku_sched.c - Scheduler implementation
  *
- * Central event-driven scheduler. Drains the process event queue,
- * services expired software timers, and enters a low-power idle
- * state when no work is pending.
+ * Central event-driven scheduler.  Drains the process event queue, through
+ * which the timer process also runs, and calls the idle hook when no work
+ * is pending.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -41,11 +41,10 @@ static tiku_sched_idle_hook_t idle_hook;
 static volatile uint16_t idle_count;
 
 /**
- * @brief Whether the registered idle mode is woken by the system tick.
+ * @brief Whether the registered idle mode wakes on the system tick (default 1).
  *
- * Gates idling while software timers are armed but not yet due.  A tick-woken
- * mode is safe to sleep in; a mode whose wake set excludes the tick would sleep
- * past the deadline, so the scheduler stays awake instead.  Defaults to 1.
+ * With 0 the scheduler does not idle while a software timer is armed: a mode
+ * the tick cannot end would sleep past the deadline.
  */
 static uint8_t idle_tick_wakes = 1;
 
@@ -56,21 +55,21 @@ static uint8_t idle_tick_wakes = 1;
 /**
  * @brief Initialize the scheduler and all managed subsystems.
  *
- * Order matters: the process system first, then the hardware timer, then the
- * software timers, whose management process the last step starts.
+ * Initialises the process system, the hardware timer and the software timers,
+ * in that order: tiku_timer_init() starts a process, which needs the process
+ * system in place.
  */
 void tiku_sched_init(void)
 {
     sched_state = TIKU_SCHED_RUNNING;
 
     /*
-     * Idle sleeps by default: with no hook installed an idle scheduler spins
-     * the core at full power.  TIKU_CPU_IDLE_LIGHT is the shallowest sleep
+     * The idle hook defaults to TIKU_CPU_IDLE_LIGHT, the shallowest sleep
      * (LPM0 on MSP430, WFI on the other ports with an idle entry): any
-     * interrupt wakes it and no clock or peripheral state is torn down, so
-     * nothing that works while spinning stops working.  Deeper modes stay
-     * opt-in because they change what remains powered.  "sleep off" restores
-     * the spin.
+     * interrupt wakes it, and peripherals and their clocks keep running.
+     * With no hook the idle loop spins.  Deeper modes, which power parts
+     * down, are set through tiku_power_policy_set(); "sleep off" removes
+     * the hook.
      */
     idle_hook = tiku_cpu_idle_hook(TIKU_CPU_IDLE_LIGHT);
     tiku_sched_set_idle_tick_wakes(
@@ -103,9 +102,9 @@ void tiku_sched_start(struct tiku_process *p, tiku_event_data_t data)
 /**
  * @brief Run one scheduler iteration.
  *
- * Dispatches one event.  Timer polling belongs to the tick and to
- * timer_insert(); polling here would keep a POLL in the queue, so the loop
- * would never idle.
+ * Runs the memory-reclaim poll when TIKU_MEM_RECLAIM_ENABLE, then dispatches
+ * one event.  It queues no timer POLL, since one on every pass keeps the loop
+ * from idling; the tick and timer_insert() poll the timer process.
  *
  * @return 1 if an event was dispatched, 0 if idle
  */
@@ -135,14 +134,15 @@ void tiku_sched_loop(void)
 #endif
 
     /* Enable global interrupts so ISRs (timer tick, UART RX, etc.)
-     * can fire.  The scheduler's idle path uses atomic enter/exit
-     * which preserves GIE state, so once enabled here it stays on. */
+     * can fire.  The scheduler's idle path uses atomic enter/exit, which
+     * restores the interrupt-enable state (GIE, PRIMASK or mstatus.MIE), so
+     * once enabled here it stays on. */
     tiku_cpu_irq_enable();
 
     /* Arm the check-in hang watchdog: from here a tick ISR that calls
-     * tiku_hang_tick() watches for a process that wedges this loop.  (Only
-     * here -- a test harness that never enters this loop leaves the detector
-     * dormant.) */
+     * tiku_hang_tick() watches for a process that wedges this loop.  This is
+     * the only arming call, so code that never enters the loop never trips
+     * it. */
     tiku_hang_arm();
 
     while (sched_state == TIKU_SCHED_RUNNING) {
@@ -159,7 +159,7 @@ void tiku_sched_loop(void)
          *
          * The atomic section ensures that an ISR firing between the
          * check and the idle hook has its event processed on the next
-         * iteration rather than missed during sleep.
+         * iteration, not slept through.
          *
          * An armed (not yet due) timer does not block idle when the
          * registered idle mode is tick-woken: the tick ISR wakes the
@@ -192,14 +192,12 @@ void tiku_sched_loop(void)
             {
                 uint8_t stretched = 0u;
 
-                /* Tickless: with timers armed (none due — has_pending
-                 * said so) and a tick-woken sleep registered, ask the
-                 * arch to stretch the next tick interrupt straight to
-                 * the earliest deadline instead of waking every tick
-                 * to do nothing.  IRQs are masked, so the deadline
-                 * cannot move.  The weak default never stretches, and
-                 * with no timers armed the per-tick cadence is kept
-                 * (it is what paces uptime and the counted-idle tests). */
+                /* Tickless: with timers armed (none due -- has_pending
+                 * said so) and a tick-woken sleep registered, the arch
+                 * may stretch the next tick interrupt to the earliest
+                 * deadline (the weak default never does).  IRQs are
+                 * masked, so no deadline moves meanwhile.  With no timer
+                 * armed the tick keeps its per-tick cadence. */
                 if (idle_tick_wakes &&
 #if TIKU_MEM_RECLAIM_ENABLE
                     !tiku_mem_reclaim_pending() &&

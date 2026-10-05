@@ -17,7 +17,7 @@
 
 #if defined(PLATFORM_MSP430) || defined(PLATFORM_NORDIC)
 /* The banks are TIKU_DURABLE data written in place (MSP430 FRAM, Nordic
- * RRAM).  Never put the two banks in one whole-region flash mirror, which is
+ * RRAM).  The two banks must not share a whole-region flash mirror, which is
  * one failure domain.  The alignment keeps the banks in separate Nordic RRAM
  * write lines. */
 static TIKU_DURABLE uint8_t cfg_banks[2][TIKU_CFG_BANK_BYTES]
@@ -182,23 +182,21 @@ static int cfg_managed_write(uint32_t id, const char *p, size_t n, int *result)
     char old[TIKU_CFG_VALUE];
     size_t length;
     int rc;
-    /* A journal that cannot be read (unenrolled, corrupt, incompatible)
-     * leaves the setting to the plain write: nothing would reconcile over
-     * it, and no node repairs the journal.  A poisoned instance or an
-     * exhausted counter keeps refusing, because its journal is intact and
-     * would restore the old value at the next boot. */
+    /* An unenrolled, corrupt or incompatible journal leaves the setting to
+     * the plain write: no recovery overwrites it.  A journal stopped by an
+     * I/O failure or an exhausted counter keeps refusing: its banks are
+     * intact and would restore the old value at the next boot. */
     if (cfg_applying || cfg_service.status == TIKU_CFG_UNINITIALIZED ||
         cfg_service.status == TIKU_CFG_CORRUPT ||
         cfg_service.status == TIKU_CFG_INCOMPATIBLE) return 0;
-    /* The shell's line ends in a newline; a managed value never does, so
-     * the strip belongs to this caller rather than to the normalizer. */
+    /* The shell's line ends in a newline, which no managed value holds. */
     if (n && p[n - 1] == '\n') n--;
     memset(&q, 0, sizeof q);
     rc = tiku_cfg_get(&cfg_service, id, old, &length, &receipt);
     if (!rc) {
         memcpy(q.incarnation, tiku_cfg_incarnation(&cfg_service), TIKU_CFG_TOKEN);
-        /* Local operations have no retry handle; their durable expected
-         * revision still makes old remote operations conflict correctly. */
+        /* A local write has no retry handle and uses a fixed token; the
+         * revision it creates makes any older remote request conflict. */
         memcpy(q.token, "local-vfs-write", 15);
         q.resource = id; q.expected_revision = receipt.revision;
         q.value = p; q.length = n;

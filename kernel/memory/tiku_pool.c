@@ -28,7 +28,7 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Round a size up to the platform's required alignment
+ * @brief Round a size up to the platform's required alignment.
  *
  * Uses TIKU_MEM_ARCH_ALIGNMENT (provided by the memory HAL) so the
  * same code works across 16-bit, 32-bit, and 64-bit targets.
@@ -39,8 +39,8 @@
 static tiku_mem_arch_size_t align_up(tiku_mem_arch_size_t size)
 {
     const tiku_mem_arch_size_t mask = TIKU_MEM_ARCH_ALIGNMENT - 1U;
-    /* Saturate instead of wrapping to 0 on a near-max request (16-bit on
-     * MSP430), so the caller's capacity check rejects it cleanly. */
+    /* A near-max request (16-bit on MSP430) saturates to the largest aligned
+     * value, which the caller's capacity check rejects. */
     if (size > (tiku_mem_arch_size_t)(~(tiku_mem_arch_size_t)0 - mask)) {
         return (tiku_mem_arch_size_t)(~(tiku_mem_arch_size_t)0 & ~mask);
     }
@@ -67,12 +67,9 @@ static tiku_mem_arch_size_t min_block_size(void)
 }
 
 /*
- * Why pointer arithmetic uses uint8_t *:
- *   Struct padding and pointer size vary across platforms. Casting
- *   the buffer to uint8_t * and indexing by (i * block_size) gives
- *   exact byte-offset arithmetic that works identically on 16-bit
- *   MSP430 and 32/64-bit hosts, with no platform-dependent struct
- *   layout issues.
+ * Block addresses are computed as a uint8_t * plus (i * block_size): exact
+ * byte offsets on 16-bit MSP430 and on 32- and 64-bit hosts, independent of
+ * struct padding and pointer size.
  */
 
 /**
@@ -193,8 +190,8 @@ static tiku_mem_err_t build_freelist(tiku_pool_t *pool)
     uint8_t *block;
 
 #if TIKU_POOL_NVM_BATCH
-    /* NVM-tier pool on program-op NVM: write the freelist a run of blocks
-     * at a time, not once per block (see build_freelist_nvm). */
+    /* NVM-tier pool on program-op NVM: build_freelist_nvm() writes the
+     * freelist a run of blocks per call. */
     if (pool->nvm) {
         err = build_freelist_nvm(pool);
         if (err != TIKU_MEM_OK) {
@@ -350,9 +347,8 @@ tiku_mem_err_t tiku_pool_destroy(tiku_pool_t *pool)
 /**
  * @brief Allocate a block from the pool.
  *
- * Pops the freelist head in O(1), with no search and no fragmentation.  There
- * is no size parameter because every block is the same size and the caller
- * chose it at create time.
+ * Pops the freelist head in O(1).  Every block has the block size the pool
+ * was created with.
  *
  * @param pool   Pool to allocate from (must be active)
  * @return Pointer to the allocated block, or NULL if the pool is empty or
@@ -429,7 +425,7 @@ tiku_mem_err_t tiku_pool_free(tiku_pool_t *pool, void *ptr)
 
 #if TIKU_POOL_DEBUG
     /*
-     * Poison freed block to catch use-after-free during development.
+     * Poison the freed block to catch use-after-free in a debug build.
      * The first sizeof(void *) bytes are used for the freelist pointer,
      * so poison only the remaining bytes. 0xDE is a recognizable
      * pattern in hex dumps ("dead"). Skipped for NVM-tier pools: a direct

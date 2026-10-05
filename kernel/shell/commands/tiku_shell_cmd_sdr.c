@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_sdr.c - "sdr" command: the radio as a receiver.
  *
- * `sdr start` lends the capture bank and brings the radio up; `sdr spec` and
- * `sdr sweep` print the SPEC lines TikuSDR draws at the gain `sdr gain` holds;
- * `sdr stop` gives it all back.  `cap`, `scan` and `hex` look by hand.
+ * `start` reserves the capture bank and powers the radio up; `stop` restores
+ * the default gain hold and frees the bank, leaving the radio up.  `spec` and
+ * `sweep` print TikuSDR's SPEC lines; `cap`, `scan` and `hex` show snapshots.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -49,7 +49,7 @@ static void bar(uint32_t v)
     SHELL_PRINTF("\n");
 }
 
-/** @brief Explain a failed capture's return code. */
+/** @brief Print a failed capture's return code and its likely cause. */
 static void sdr_failed(int rc)
 {
     SHELL_PRINTF("sdr: capture failed (%d): %s\n", rc,
@@ -72,7 +72,8 @@ static void sdr_range(const tiku_drv_sdr_esp_result_t *r, uint32_t *lo,
     }
 }
 
-/** @brief One line: a snapshot's gain, level and its quiet/loud spread. */
+/** @brief One line: a snapshot's gain, level and quiet/loud spread, marked
+ *         "burst" when the loudest slice exceeds three times the quietest. */
 static void sdr_line(uint32_t mhz, const tiku_drv_sdr_esp_result_t *r)
 {
     uint32_t lo, hi;
@@ -175,8 +176,9 @@ static void sdr_scan(void)
 /*---------------------------------------------------------------------------*/
 
 /** @brief "SPEC <MHz> <Hz> <gain> <nfft> <hex bins>[ held]": one bin a
- *         byte, half-decibels, low to high, "held" when the gain was held
- *         through the capture.  The hex is printed 64 digits at a time. */
+ *         byte, half-decibels, low to high, printed 64 hex digits at a
+ *         time; the line ends in " held" while a gain index is held.
+ *  @return 0, or the spectrum call's error after printing "ERR spec" */
 static int sdr_spec_line(uint32_t mhz, uint8_t rate, unsigned nfft)
 {
     static const char hexd[] = "0123456789abcdef";
@@ -205,8 +207,9 @@ static int sdr_spec_line(uint32_t mhz, uint8_t rate, unsigned nfft)
     return 0;
 }
 
-/** @brief Bank lent and radio up, in that order: the radio's heap must not
- *         land on the bank, so a radio already up goes down for it. */
+/** @brief Reserve the capture bank, then power the radio up.  The radio's
+ *         heap must not overlap the bank, so a radio that is up is powered
+ *         down before the bank is reserved. */
 static void sdr_start(void)
 {
     if (!tiku_drv_sdr_esp_reserved()) {
@@ -231,7 +234,8 @@ static void sdr_info(void)
                  tiku_drv_sdr_esp_reserved() ? "yes" : "no");
 }
 
-/** @brief `sdr sweep <lo> <hi> <step> [rate] [nfft]`: a SPEC line a step. */
+/** @brief `sdr sweep <lo> <hi> <step> [rate] [nfft]`: a SPEC line a step, at
+ *         most 65 steps, then "SWEEP <n>". */
 static void sdr_sweep(uint8_t argc, const char *argv[])
 {
     uint32_t lo = (uint32_t)strtoul(argv[2], NULL, 10);
@@ -270,7 +274,8 @@ static void sdr_gain(uint8_t argc, const char *argv[])
 }
 
 #if TIKU_DRV_SDR_ESP_PROBE
-/** @brief `sdr rd <hexaddr> [n]`: read raw words, for probing the unit. */
+/** @brief `sdr rd <hexaddr> [n]`: print n (default 1) 32-bit words read
+ *         from a raw address, four a line. */
 static void sdr_rd(uint8_t argc, const char *argv[])
 {
     uintptr_t a = (uintptr_t)strtoul(argv[2], NULL, 16);
@@ -296,8 +301,10 @@ static void sdr_wr(const char *argv[])
                  (unsigned long)*(volatile uint32_t *)a);
 }
 
-/** @brief The transmit side's lab verbs (TIKU_DRV_SDR_ESP_PROBE=1).
- *         @return 1 when @p argv was one of them */
+/** @brief Run a probe verb (tone, lb, txcal, src, pwr, nco, fsk, hear, rd or
+ *         wr), built with TIKU_DRV_SDR_ESP_PROBE=1.
+ *  @return 1 when @p argv[1] named one and @p argc reached that verb's
+ *          minimum, else 0 */
 static int sdr_probe(uint8_t argc, const char *argv[])
 {
     if (strcmp(argv[1], "tone") == 0 && argc >= 3) {
@@ -346,7 +353,9 @@ static int sdr_probe(uint8_t argc, const char *argv[])
                 (int)strtol(argv[3], NULL, 0)));
         }
     } else if (strcmp(argv[1], "fsk") == 0 && argc >= 7) {
-        /* fsk <MHz> <rate> <stepA> <stepB> <half-cycles>: capture meanwhile */
+        /* fsk <MHz> <rate> <stepA> <stepB> <half-cycles>: one capture while
+         * tone 1's step switches between stepA and stepB every half-cycles
+         * core cycles */
         tiku_drv_sdr_esp_result_t r;
         int rc = tiku_drv_sdr_esp_fsk((uint32_t)strtoul(argv[2], NULL, 10),
             (uint8_t)strtoul(argv[3], NULL, 10), TIKU_DRV_SDR_ESP_WORDS_MAX,
@@ -378,7 +387,7 @@ void tiku_shell_cmd_sdr(uint8_t argc, const char *argv[])
         sdr_help();
 #if TIKU_DRV_SDR_ESP_PROBE
     } else if (sdr_probe(argc, argv)) {
-        /* a lab verb, done */
+        /* a probe verb ran */
 #endif
     } else if (strcmp(argv[1], "scan") == 0) {
         sdr_scan();

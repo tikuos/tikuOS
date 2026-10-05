@@ -35,9 +35,9 @@
 /**
  * @brief Output buffer size, in bytes.
  *
- * The shell loop sends one MSS segment of it per poll, but a command writes
- * all of its output without yielding, so the buffer must hold the largest
- * single command output (`help`); bytes that do not fit are dropped.
+ * A command writes all its output within one poll.  A full buffer sends one
+ * segment to make room, and output is dropped when the TCP TX pool has no
+ * free slot, so the buffer is sized for the largest output (`help`).
  */
 #ifndef TIKU_SHELL_TCP_TX_BUF_SIZE
 #define TIKU_SHELL_TCP_TX_BUF_SIZE  2048
@@ -60,6 +60,9 @@ void tiku_shell_io_tcp_init(void);
 /**
  * @brief Check whether a TCP client is currently connected.
  *
+ * A connection the peer has half-closed (CLOSE_WAIT) is closed and dropped
+ * here, which frees its slot for the next client.
+ *
  * @return Non-zero if a connection is in the ESTABLISHED state.
  */
 uint8_t tiku_shell_io_tcp_is_connected(void);
@@ -67,8 +70,8 @@ uint8_t tiku_shell_io_tcp_is_connected(void);
 /**
  * @brief Send up to one MSS segment of the buffered output.
  *
- * Called when the buffer fills; the shell loop also calls it at the end of
- * each poll, so longer output drains over several polls.
+ * Called when the buffer fills and by the shell loop at the end of each poll,
+ * so longer output drains over several polls.
  */
 void tiku_shell_io_tcp_flush(void);
 

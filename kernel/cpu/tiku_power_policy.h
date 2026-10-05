@@ -23,6 +23,7 @@
 /* RESULT CODES                                                              */
 /*---------------------------------------------------------------------------*/
 
+/** @brief Results of tiku_power_policy_set(). */
 enum {
     TIKU_POWER_OK           =  0, /**< mode installed                        */
     TIKU_POWER_INVALID      = -1, /**< not an idle mode                      */
@@ -59,8 +60,9 @@ int tiku_power_policy_loses_console(tiku_cpu_idle_mode_t mode);
 /**
  * @brief The mode the scheduler enters when idle.
  *
- * Read from the scheduler's hook, so a hook installed by tiku_sched_init() or
- * tiku_sched_set_idle_hook() is reported too.
+ * Derived from the scheduler's idle hook: NULL is off, this module's hook is
+ * the mode last set, a HAL idle entry is its mode, and any other hook is
+ * TIKU_POWER_CUSTOM.
  *
  * @return A tiku_cpu_idle_mode_t value, or TIKU_POWER_CUSTOM
  */

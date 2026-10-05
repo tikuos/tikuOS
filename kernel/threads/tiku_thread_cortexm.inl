@@ -82,7 +82,7 @@ uint32_t tiku_thread_arch_cycles(void)
  *
  * Before threading, MSP serves the kernel and every ISR from the boot stack.
  * Migration hands that region to the kernel thread as PSP and points MSP here.
- * 2 KB covers the lean ISR set at the NVIC preemption levels in use.
+ * It is 2 KB, and the deepest nesting of the ISRs in use must fit in it.
  */
 static uint32_t s_isr_stack[512] __attribute__((aligned(8)));
 
@@ -120,13 +120,12 @@ void tiku_thread_arch_boot(void)
 {
     /* Enable the FPU (CPACR full access to CP10/CP11) so FP-using
      * workers -- and the switcher's S16-S31 save/restore -- are valid.
-     * Idempotent: the Ambiq CRTs already do this at reset; RP2350's does
-     * not, so the threads backend owns it to stay self-contained. */
+     * The Ambiq startup code also sets it at reset; RP2350's does not. */
     SCB_CPACR |= CPACR_FPU_FULL;
     __asm__ volatile ("dsb" ::: "memory");
     __asm__ volatile ("isb");
 
-    /* FP lazy stacking (reset default; assert it anyway). */
+    /* Automatic, lazy FP context saving: the reset default, set again. */
     SCB_FPCCR |= FPCCR_ASPEN | FPCCR_LSPEN;
 
     /* PendSV at the lowest priority: switches only in thread mode. */

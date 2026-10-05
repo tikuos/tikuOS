@@ -27,7 +27,7 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * The shell's current working directory (SRAM, not persistent).
+ * @brief The shell's current working directory.
  *
  * Always absolute and beginning with '/', held without a trailing slash except
  * for root itself, and reset to root on every boot.
@@ -97,8 +97,8 @@ go_up(char *path)
  * @brief Append one path component, inserting a '/' separator.
  *
  * Adds a '/' unless @p path is still at root, then copies up to @p complen
- * characters and NUL-terminates.  Strictly bounded by @p pathsz: anything that
- * would not fit is dropped silently, without signalling truncation.
+ * characters and NUL-terminates.  Writing stops at @p pathsz - 1 characters;
+ * the rest is dropped and nothing reports it.
  *
  * @param path     Destination path, modified in place
  * @param pathsz   Capacity of @p path in bytes, including the NUL
@@ -171,9 +171,8 @@ tiku_shell_cwd_set(const char *path)
  * otherwise, then walks it component by component: runs of '/' are skipped,
  * "." is ignored, ".." pops one (clamped at root) and anything else appends.
  *
- * @note Purely lexical -- the VFS is never consulted, so this neither verifies
- *       existence nor resolves links.  Writes are bounded by @p outsz and an
- *       over-long path truncates silently; @p out is always a non-empty
+ * @note The VFS is not consulted: the result may name nothing.  Writes stay
+ *       within @p outsz and an over-long path is cut; @p out is a non-empty
  *       absolute path when @p outsz is at least 2.  A 1-byte @p out gets an
  *       empty string, and a 0-byte one is not written.
  * @param input  User-supplied path, absolute or relative to the cwd

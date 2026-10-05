@@ -7,9 +7,9 @@
  *
  * tiku_blob.c - large objects as chunked files in the /data store.
  *
- * See tiku_blob.h for the layout and the crash discipline.  Everything here
- * is stock TFS calls plus name arithmetic; there is no NVM access and no
- * platform knowledge in this file.
+ * Builds the chunk and manifest names and stores each one through the TFS
+ * API; the file has no direct NVM access and no platform code.  tiku_blob.h
+ * describes the layout and the write order.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -45,10 +45,8 @@ typedef struct {
 /**
  * @brief Build "<base>.mnf" (idx < 0) or "<base>.NNN" into @p out.
  *
- * Hand-rolled rather than snprintf: it runs per chunk, and three digits do
- * not need the newlib-nano formatter.
- *
- * @return 0, or -1 if @p base does not fit TIKU_BLOB_NAME_MAX.
+ * @return 0, or -1 if @p base is NULL, empty or longer than
+ *         TIKU_BLOB_NAME_MAX.
  */
 static int
 blob_name(char out[TIKU_TFS_NAME_MAX], const char *base, int idx)
@@ -101,7 +99,7 @@ blob_tfs_err(int rc)
     return TIKU_BLOB_ERR_IO;
 }
 
-/** @brief Read and validate the manifest. */
+/** @brief Read and validate the manifest; TIKU_BLOB_OK or a blob error. */
 static int
 blob_read_mnf(tiku_tfs_t *fs, const char *name, blob_mnf_t *m)
 {
@@ -122,12 +120,9 @@ blob_read_mnf(tiku_tfs_t *fs, const char *name, blob_mnf_t *m)
         return TIKU_BLOB_ERR_CRC;            /* present but not a blob     */
     }
     /*
-     * chunks must be exactly what total and chunk imply.  Callers iterate on
-     * chunks while sizing each copy from total, so an inflated count walks the
-     * destination past `total`: with total=100, chunk=4096, chunks=3, the
-     * second iteration computes `total - off` = 100 - 4096, which underflows
-     * size_t, clamps to one chunk, and writes 4096 bytes at dst+4096, past a
-     * buffer the cap check sized against total.
+     * chunks must equal what total and chunk imply.  Callers iterate on chunks
+     * and size each copy as total - off, which underflows for an inflated
+     * count and writes whole chunks past a buffer sized for total.
      */
     if (m->chunks != (uint32_t)((m->total + m->chunk - 1u) / m->chunk)) {
         return TIKU_BLOB_ERR_CRC;            /* inconsistent manifest      */
@@ -161,23 +156,19 @@ tiku_blob_store(tiku_tfs_t *fs, const char *name, const void *src, size_t len)
     }
 
     /* The old manifest goes first: from here until the new one is written
-     * the blob does not exist, so a cut cannot leave a manifest standing
-     * over chunks it does not describe.  A missing manifest is the
-     * first-store case; any other refusal stops the store with the old blob
-     * whole. */
+     * the blob does not exist, and no manifest stands over chunks it does
+     * not describe.  A missing manifest is a first store; any other refusal
+     * returns with the old blob whole. */
     rc = tiku_tfs_delete(fs, nm);
     if (rc != TFS_OK && rc != TFS_ERR_NOTFOUND) {
         return blob_tfs_err(rc);
     }
 
     /*
-     * Reclaim any chunk beyond what the new blob needs, before writing it.
-     *
-     * Storing a smaller blob over a larger one strands the surplus otherwise:
-     * the write loop only touches 0..chunks-1, and tiku_blob_delete() walks
-     * the current manifest's count, so `name.7` from a previous 8-chunk blob
-     * becomes a live file no API can reach, one leaked slot per lost chunk.
-     * The same sweep collects the tail of a store that was cut partway.
+     * Delete every chunk at or above the new count before writing.  The write
+     * loop touches only 0..chunks-1 and tiku_blob_delete() walks the
+     * manifest's count, so this sweep frees the surplus of a larger previous
+     * blob and the tail of a store that was cut partway.
      *
      * Chunk indices are written densely from 0 and deleted from the top down,
      * so a cut never leaves a gap: the first index that is not present is the
@@ -251,7 +242,7 @@ tiku_blob_load(tiku_tfs_t *fs, const char *name,
         return rc;
     }
     if (out_len != NULL) {
-        *out_len = (size_t)m.total;          /* size is useful even if big */
+        *out_len = (size_t)m.total;          /* set even when over cap     */
     }
     if ((size_t)m.total > cap) {
         return TIKU_BLOB_ERR_SPACE;

@@ -7,9 +7,9 @@
  *
  * tiku_basic_ext_kits.inl - bundled native BASIC extensions.
  *
- * Useful words that are not interpreter builtins, registered through the same
- * public API any service uses.  Adding a word is a handler plus one register
- * call, with no edit to the interpreter.
+ * GCD, ISQRT, BITCNT, HEXPR, REV$ and ROMAN$, registered through the public
+ * registry API (tiku_basic_ext.h) as any service registers its words.  A word
+ * is a handler plus one register call.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -80,8 +80,7 @@ bext_bitcnt(const long *args, int argc, long *out)
  * @brief HEXPR n[, width]: print n as upper-case hex, with no newline; width
  *        (1..8) pads with leading zeros.
  *
- * A statement word, so it exercises the statement hook and the parse, print
- * and error services.
+ * A statement word, built on the parse, print and error services.
  */
 static void
 bext_hexpr(const char **p)
@@ -185,7 +184,7 @@ bext_roman(const char **p, char *out, size_t cap)
 /**
  * @brief Register the bundled words; idempotent.
  *
- * Failures are ignored: a full table means fewer bundled words, not a fault.
+ * A registration that fails, as on a full table, is skipped.
  *
  * @note Called once, guarded, at the first BASIC session.
  */

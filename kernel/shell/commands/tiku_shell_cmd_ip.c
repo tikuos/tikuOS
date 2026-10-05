@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_ip.c - "ip" command: print the device's IPv4 address.
  *
- * Reads the address from the IPv4 layer and prints it as dotted-quad, with
- * the DHCP lease when there is one.  It is reachable at once on WiFi, or once
- * SLIP carries the wire.
+ * Prints the IPv4 layer's address as a dotted quad, then the DHCP lease when
+ * there is one, then whether a host can reach the address: on WiFi always,
+ * over SLIP only while SLIP is on.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,7 +27,7 @@
 #include <tikukits/net/ipv4/tiku_kits_net_dhcp.h>  /* the lease */
 #endif
 
-/** @brief "label a.b.c.d" for one address of the lease. */
+/** @brief Print @p label, then @p a as a.b.c.d and a newline. */
 static void
 ip_put(const char *label, const uint8_t a[4])
 {
@@ -42,9 +42,6 @@ tiku_shell_cmd_ip(uint8_t argc, const char *argv[])
     (void)argc;
     (void)argv;
 
-    /* Print the address and any DHCP lease, then whether the host can reach
-     * it: at once on WiFi, over SLIP only once SLIP is on (matching the
-     * host-side SLIP indicator). */
     SHELL_PRINTF("IPv4: %u.%u.%u.%u\n", a[0], a[1], a[2], a[3]);
 #if defined(TIKU_KITS_NET_DHCP_ENABLE) && TIKU_KITS_NET_DHCP_ENABLE
     {

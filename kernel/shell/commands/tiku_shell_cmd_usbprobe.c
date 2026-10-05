@@ -7,9 +7,8 @@
  *
  * tiku_shell_cmd_usbprobe.c - "usbprobe" command (nRF54LM20 USB high speed).
  *
- * Powers the block and decodes what the DWC2 core reports about itself, so
- * the device driver above it is written against the silicon's own answers
- * rather than an assumed configuration.
+ * Powers the USB block and decodes the DWC2 core's hardware configuration,
+ * device status and enumeration trace.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -52,7 +51,8 @@ static const char *speed_str(uint32_t dsts)
     }
 }
 
-/** @brief Decode PHY.CLOCK.FSEL: the reference the PHY PLL was told of. */
+/** @brief Decode PHY.CLOCK.FSEL: the reference frequency the PHY PLL is set
+ *         for. */
 static const char *fsel_str(uint32_t clk)
 {
     switch (clk & 0x7u) {
@@ -71,7 +71,7 @@ static const char *fsel_str(uint32_t clk)
 /**
  * @brief Print one bring-up stage before it acts.
  *
- * The core stalls the bus rather than faulting, so the last line out names
+ * A hung core stalls the bus without a fault, so the last line printed names
  * the step that did not return.
  */
 static void usbprobe_note(const char *stage)
@@ -152,7 +152,7 @@ tiku_shell_cmd_usbprobe(uint8_t argc, const char *argv[])
     if (strcmp(argv[1], "up") == 0) {
         int rc;
 
-        usbprobe_regs();          /* the safe half, before the core read */
+        usbprobe_regs();          /* state before power-up */
         rc = tiku_nordic_usbhs_up(usbprobe_note);
 
         SHELL_PRINTF("%s\n", (rc == 0) ? "PHY + core up, core out of reset"

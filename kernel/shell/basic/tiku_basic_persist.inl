@@ -41,10 +41,9 @@ static void process_line(const char *raw);
 
 #if BASIC_NVM_ON_REGION
 /*
- * A flat name, not "basic/prog": /data has a static node named "basic" (the
- * program bridge in tiku_vfs_tree_data.c, which reads through this file), and
- * a "basic/" prefix would make `ls /data` list a "basic/" folder beside it
- * while `ls /data/basic` resolves to the node and fails.
+ * The name must not start with "basic/": /data has a static node named
+ * "basic" (the program bridge in tiku_vfs_tree_data.c, which reads through
+ * this file), and `ls /data/basic` resolves to that node, not to a folder.
  */
 #define BASIC_PROG_FILE  "prog.bas"
 
@@ -60,8 +59,8 @@ basic_prog_fs(void)
 /**
  * @brief Begin replacing the saved program, reserving @p max bytes.
  *
- * @p max is what this save writes, measured first, so a small SAVE needs only
- * that much contiguous room in the store.  An abandoned writer is released.
+ * @p max is the size of this save, measured by the caller; the store needs
+ * only that much contiguous room.  A writer left open is released first.
  *
  * @return 0, or -1 with no store mounted or no room
  */
@@ -236,16 +235,15 @@ basic_prog_fetch(char *buf, size_t max, size_t *out_len)
 /*---------------------------------------------------------------------------*/
 
 /*
- * Serialization scratch.  On region parts it is a bounded chunk, not a
- * program image: LOAD reads the saved text in place in the memory-mapped
- * region, and SAVE serializes into the chunk and appends it to the file
- * whenever it cannot hold another maximum-length line.  4 KB is one RP2350
- * flash sector, the granule that part's backend erases and reprograms per
- * write, so a smaller chunk would multiply sector operations.  The size also
- * bounds the largest file IMPORT and the named SAVE/LOAD handle.
+ * Serialization scratch.  On region parts it is a 4 KB chunk: LOAD parses
+ * the saved text in place in the memory-mapped region, and SAVE serializes
+ * into the chunk and appends it to the file whenever it cannot hold another
+ * maximum-length line.  4 KB is one RP2350 flash sector, the unit that
+ * part's backend erases and reprograms per write.  The size also bounds the
+ * largest file IMPORT and the named SAVE/LOAD handle.
  *
- * MSP430 and host keep a whole-program buffer: their saved program lives in
- * the tiku_persist store, which has no in-place view to parse.
+ * MSP430 and host hold a whole program here: their saved program lives in
+ * the tiku_persist store, which offers no in-place view.
  */
 #if BASIC_NVM_ON_REGION
 #define BASIC_SCRATCH_BYTES  4096u
@@ -257,9 +255,9 @@ _Static_assert(BASIC_SCRATCH_BYTES >= (unsigned)TIKU_BASIC_LINE_MAX + 16u,
 static BASIC_SCRATCH char basic_persist_scratch[BASIC_SCRATCH_BYTES];
 
 #if BASIC_NVM_ON_REGION
-/* One saved line at a time, for LOAD and named LOAD.  Not the scratch above:
- * process_line() is still reading the line when it can reach a command that
- * uses the scratch (IMPORT). */
+/* One saved line at a time, for LOAD and named LOAD.  It is separate from
+ * the scratch: process_line() can reach IMPORT, which overwrites the scratch,
+ * while it still reads the line. */
 static char basic_load_line[TIKU_BASIC_LINE_MAX + 16];
 #endif
 
@@ -269,8 +267,8 @@ static char basic_load_line[TIKU_BASIC_LINE_MAX + 16];
  *
  * With @p emit the chunk goes to the open SAVE whenever it could not hold
  * another maximum-length line; without, the bytes are only counted.
- * @return 0, -1 on a write or format failure, -2 when the program would pass
- *         TIKU_BASIC_SAVE_BUF_BYTES.  @p total_out gets the bytes serialized.
+ * @return 0, -1 on a write or format failure, -2 when the program would
+ *         exceed TIKU_BASIC_SAVE_BUF_BYTES.  @p total_out gets the byte count.
  */
 static int
 basic_save_pass(int emit, size_t *total_out)
@@ -358,8 +356,9 @@ basic_save_to_persist(void)
         return -1;
     }
     if (rc != 0 || basic_prog_commit() != 0) {
-        /* tiku_tfs_commit() leaves the writer active on its error returns, so
-         * the reservation needs releasing here too. */
+        /* basic_prog_commit() and the failed pass above have already
+         * released the writer; tiku_tfs_abort() on a released writer does
+         * nothing. */
         basic_prog_discard();
         basic_report(TIKU_BASIC_ERR_IO, "save failed");
         return -1;
@@ -435,15 +434,15 @@ basic_load_from_persist(void)
         return -1;
     }
 
-    /* Wipe the in-memory program and variables first, so the saved version
-     * is what the user gets: not merged onto stale lines, and not tripping
-     * "array already DIMmed" against a prior session's arrays. */
+    /* Clear the in-memory program and variables first: the saved lines must
+     * not merge onto stale ones, and an array left by an earlier RUN would
+     * fail a DIM of the same name. */
     prog_clear();
     basic_clear_vars();
 
     /* Walk the stored text a line at a time.  i == len feeds a synthetic
-     * terminator so a final line without a newline is still dispatched; a
-     * trailing newline just yields an empty line, which is skipped. */
+     * terminator, which dispatches a final line without a newline; a
+     * trailing newline yields an empty line, which is skipped. */
     for (i = 0; i <= len; i++) {
         char c = (i < len) ? text[i] : '\n';
 
@@ -484,15 +483,14 @@ basic_load_from_persist(void)
     }
     tmp[n_read] = '\0';
 
-    /* Wipe the in-memory program and variables first, so the saved version
-     * is what the user gets: not merged onto stale lines, and not tripping
-     * "array already DIMmed" against a prior session's arrays. */
+    /* Clear the in-memory program and variables first: the saved lines must
+     * not merge onto stale ones, and an array left by an earlier RUN would
+     * fail a DIM of the same name. */
     prog_clear();
     basic_clear_vars();
 
-    /* Walk the buffer one line at a time, dispatching through
-     * process_line.  Each line is a numbered statement, so each
-     * call just stores it. */
+    /* Walk the buffer one line at a time through process_line(), which
+     * stores each numbered line. */
     line_start = tmp;
     for (p = tmp; *p != '\0'; p++) {
         if (*p == '\n' || *p == '\r') {

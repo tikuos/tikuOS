@@ -24,13 +24,13 @@
 #include <arch/ambiq/tiku_nor_arch.h>
 #include <kernel/cpu/tiku_hang.h>
 
-/** @brief NOR bring-up step tracer -- a wedged step names itself. */
+/** @brief Print one NOR bring-up step; the last one printed names a hang. */
 static void nor_trace(const char *step)
 {
     SHELL_PRINTF("  nor step: %s\n", step);
 }
 
-/** @brief Shared error-name table for the NOR verbs. */
+/** @brief Name of a tiku_nor_err_t code, or "?" for an unknown one. */
 static const char *nor_errname(tiku_nor_err_t rc)
 {
     static const char *const en[] = { "ok", "POWER", "CLOCK", "TIMEOUT",
@@ -44,8 +44,9 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
      *
      *   power nor id [octal]  serial bring-up + identity; "octal" also
      *                         switches to octal DDR and re-reads it
-     *   power nor fault       the same with D0 stolen; the read must
-     *                         report an error
+     *   power nor fault       the same, with the D0 pad set to GPIO for
+     *                         the read, which is expected to report an
+     *                         error
      *   power nor gate        erase, program and verify the scratch
      *                         sector, leaving a fixed stamp there
      *   power nor verify      re-read the stamp without writing, after
@@ -55,7 +56,9 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
      *   power nor erases      erases spent this boot
      *   power nor xip         read one word through the XIP aperture
      *   power nor bench [octal] [xip] [sector]
-     *                         norbench, optionally in octal DDR
+     *                         tiku_nor_bench_run(), optionally in octal
+     *                         DDR; `xip` adds the XIP leg and `sector`
+     *                         the 128 KB sector-erase leg
      *   power nor tascan      serial dummy-count sweep against the stamp
      *   power nor hears       whether the part parses octal commands
      *   power nor arraycmp [addr]
@@ -112,10 +115,9 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "tascan")) {
-        /* Sweep the serial fast-read dummy count against the stamp `gate`
-         * programs.  Erased content is a weak reference -- a misframed read of
-         * all-FF is still all-FF -- so the reference here is the 0xA5^i
-         * pattern. */
+        /* Sweep the serial fast-read dummy count against the 0xA5^i stamp
+         * that `gate` programs.  Erased content cannot be the reference: a
+         * misframed read of all-FF is still all-FF. */
         static uint8_t want[32];
         uint32_t i8, mask;
         unsigned t8;
@@ -165,11 +167,10 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "arraycmp")) {
-        /* An array read in octal must agree with the same address read in
-         * serial.  Identity is a register read, and a part that strobes DQS
-         * for the array need not strobe it for registers -- so an octal
-         * identity that reads zero does not by itself condemn the array
-         * path. */
+        /* Compare an octal array read with a serial read of the same
+         * address.  Identity is a register read, and the part may strobe DQS
+         * for array reads but not for register reads, so this verb tests
+         * the array path directly. */
         static uint8_t ser[64], oct[64];
         uint32_t addr = 0u, i7;
         int same = 1, ser_blank = 1;
@@ -242,9 +243,9 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
         mask = tiku_nor_scan_rxdqs(1);
         SHELL_PRINTF("nor rxdqs scan @%lu Hz: dqs-on %08lx",
                      tiku_nor_clock_hz(), (unsigned long)mask);
-        {   /* A part that does not strobe DQS for register reads cannot be
-             * captured at any delay; latching on the controller clock is the
-             * distinguishing test. */
+        {   /* With DQS on, no delay setting captures the identity of a part
+             * that does not strobe DQS for register reads; the dqs-off sweep
+             * latches the data on the controller clock instead. */
             uint32_t nodqs = tiku_nor_scan_rxdqs(0);
             SHELL_PRINTF("  dqs-off %08lx\n", (unsigned long)nodqs);
             mask |= nodqs;
@@ -301,14 +302,13 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "lson")) {
-        /* Enable the flash's load switch, then ask the device who it is
-         * over bit-bang (no controller involved).
+        /* Enable the flash's load switch, then read the device ID by
+         * bit-bang with the controller off the pads.
          *
-         * The switch is an NCP451FCT2G with a 100 kohm pull-down on its
-         * enable, so the flash is unpowered by default and a bit-bang read
-         * returns all ff.  Driving the pad high powers the device, and the
-         * part is an inrush-limited switch designed for that.  This verb
-         * never drives the pad low. */
+         * The switch is an NCP451FCT2G, an inrush-limited part with a
+         * 100 kohm pull-down on its enable: the flash is unpowered until the
+         * pad is driven high, and a bit-bang read of it returns all ff.
+         * This verb never drives the pad low. */
         static uint8_t idb[8];
         unsigned k8;
         tiku_nor_deinit();
@@ -415,18 +415,16 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
         SHELL_PRINTF("  after erase: %s (erased NOR must read all ff)\n",
                      ok6 ? "all ff" : "NOT ERASED");
         if (!ok6) {
-            /* Stop here.  Programming on top of an unerased sector can still
-             * verify -- NOR only clears bits, so writing bytes that need no
-             * 0->1 transition succeeds -- and the run would report bit-exact
-             * while the erase did nothing. */
+            /* Programming only clears bits, so a program over an unerased
+             * sector can still read back bit-exact; the gate stops when the
+             * erase left any byte other than ff. */
             SHELL_PRINTF("nor gate: ABORT -- erase did not clear the sector,"
                          " so program+verify would prove nothing\n");
             return;
         }
         for (i6 = 0u; i6 < sizeof wr; i6++) {
-            /* Fixed, so `power nor verify` can check it after a power cycle
-             * without knowing this run's history. A no-op erase cannot fake a
-             * pass here because the all-ff check above aborts first. */
+            /* A fixed pattern: `power nor verify` checks the same bytes
+             * after a power cycle. */
             wr[i6] = (uint8_t)(0xA5u ^ i6);
         }
         rc = tiku_nor_program(TIKU_NOR_SCRATCH_ADDR, wr, sizeof wr);

@@ -7,8 +7,7 @@
  *
  * tiku_shell_cmd_clear.c - "clear" command implementation.
  *
- * Writes ESC[2J then ESC[H.  Every common terminal recognises both, and a
- * non-ANSI viewer sees the raw bytes harmlessly.
+ * Writes ESC[2J (erase the screen) then ESC[H (cursor to the top-left).
  *
  * SPDX-License-Identifier: Apache-2.0
  */

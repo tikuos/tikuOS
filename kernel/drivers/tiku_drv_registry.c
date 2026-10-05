@@ -270,7 +270,7 @@ void tiku_drv_init_all(void)
     }
 
     if (tiku_drv_table_count == 0U) {
-        /* The report is present; there are no devices to initialize. */
+        /* /sys/drivers is published; there is no driver to initialize. */
         return;
     }
 

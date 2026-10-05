@@ -42,12 +42,12 @@ typedef struct {
 /* ARENA-BACKED STATE                                                        */
 /*---------------------------------------------------------------------------*/
 
-/* The interpreter's working set lives in a kernel arena rather than BSS:
- * created from the AUTO tier on the first `basic` session and reset on each
- * later one, so every session starts fresh, and the tier's bytes stay free for
- * other features until BASIC runs.  basic_alloc_state() (tiku_basic_arena.inl)
- * binds the arena pointers below; basic_scope[], the SUB and label
- * registries and the builtin table are static. */
+/* The interpreter's working set lives in a kernel arena, created from the
+ * AUTO tier at the first `basic` session and reset at each later one; until
+ * the first session the tier's bytes are free for other users.
+ * basic_alloc_state() (tiku_basic_arena.inl) binds the pointers below; the
+ * arrays declared with a size (basic_scope[], the SUB and label registries,
+ * the builtin table) are static. */
 static tiku_arena_t  basic_arena;
 static int           basic_arena_ready;
 /* Arena offset just past the fixed working set.  Only DIMmed element storage
@@ -56,19 +56,17 @@ static int           basic_arena_ready;
 static tiku_mem_arch_size_t basic_arena_mark;
 static basic_line_t *prog;
 
-/* Line-number index: prog[] indices sorted by line number, so prog_find_exact
- * and prog_next_index binary-search instead of scanning the whole table on
- * every executed line.  prog[] itself stays unsorted; an edit invalidates the
- * index and the next lookup rebuilds it. */
+/* Line-number index: prog[] indices sorted by line number, which
+ * prog_find_exact() and prog_next_index() binary-search.  prog[] itself is
+ * unsorted; an edit invalidates the index and the next lookup rebuilds it. */
 static uint16_t     *basic_line_order;    /* basic_line_count valid entries */
 static uint16_t      basic_line_count;    /* number of active lines         */
 static int           basic_line_index_ok; /* 1 = index matches prog[]       */
 
-/* SUB and label registry: prog[] indices and name offsets, built in one walk
- * on first lookup and invalidated with the line index on any edit
- * (PROG_INDEX_INVALIDATE).  CALL and labelled GOTO/GOSUB then compare against
- * a handful of entries instead of scanning the line table per reference; on
- * table overflow the lookups fall back to a linear scan. */
+/* SUB and label registries: prog[] indices and name offsets, built in one
+ * walk at the first lookup and invalidated with the line index on any edit
+ * (PROG_INDEX_INVALIDATE).  CALL and labelled GOTO/GOSUB search them; when a
+ * registry overflows, its lookups scan the line table. */
 #ifndef BASIC_SYMREG_MAX
 #define BASIC_SYMREG_MAX 32     /**< entries per registry */
 #endif
@@ -85,8 +83,7 @@ static uint8_t        basic_sub_reg_ovf;
 static int            basic_symreg_ok;
 
 /* Most-recently-used named-variable slot per table (0 = numeric,
- * 1 = string); -1 = none.  The common hot loop reuses one named variable,
- * so this one-entry memo removes the linear rescan per reference. */
+ * 1 = string), or -1; a lookup checks it before scanning the name table. */
 static int8_t         basic_named_mru[2];
 
 static long         *basic_vars;
@@ -181,17 +178,16 @@ static basic_frame_t basic_frames[TIKU_BASIC_CALL_DEPTH];
 static uint8_t       basic_call_sp;
 
 /* SUB return value: a SUB sets it with the `RESULT expr` statement and the
- * caller reads it as the bare `RESULT` numeric function after CALL, a scoped
- * return that does not leak through a global.  Reset each RUN. */
+ * caller reads it as the bare `RESULT` numeric function after CALL.  Reset
+ * each RUN. */
 static long          basic_sub_result;
 #endif
 
 #if TIKU_BASIC_EXT_MAX > 0
-/* Native builtin registry (tiku_basic_ext.h), kept outside the arena and the
- * checkpoint so registrations outlive sessions: it is firmware configuration,
- * not program state.  Names are uppercase and never in the token table, so
- * stored (crunched) lines reach them through match_kw's raw-text path at the
- * dispatch fallthroughs. */
+/* Native builtin registry (tiku_basic_ext.h).  It lives outside the arena
+ * and the checkpoint, so registrations outlive a session.  Names are
+ * uppercase and absent from the token table: stored (crunched) lines reach
+ * them through match_kw()'s raw-text path at the dispatch fallthroughs. */
 /** One registered native word. */
 typedef struct {
     char    name[TIKU_BASIC_EXT_NAME_MAX];   /**< "" = free slot */
@@ -223,8 +219,8 @@ static basic_array_t *basic_arrays;       /* numeric: A..Z */
 static basic_array_t *basic_str_arrays;   /* string : A$..Z$ */
 #endif
 
-/* Forward decl so parse_strprim (defined above the implementation
- * of parse_array_index) can call it. */
+/* Forward declaration: parse_strprim(), defined before parse_array_index(),
+ * calls it. */
 static long parse_array_index(const char **p,
                               basic_array_t *slot, char letter);
 #endif
@@ -248,9 +244,8 @@ static uint8_t       basic_persist_ready;
 /* INTERPRETER STATUS FLAGS                                                  */
 /*---------------------------------------------------------------------------*/
 
-/* PRNG for RND(). Seeded lazily on first call from
- * tiku_clock_time(). Linear-congruential -- cheap on MSP430 and
- * has good enough properties for casual BASIC games / test data. */
+/* RND() generator state (tiku_basic_prng.inl); basic_prng_seeded is 0 until
+ * the first RND call seeds it. */
 static uint32_t      basic_prng_state;
 static uint8_t       basic_prng_seeded;
 
@@ -260,21 +255,19 @@ static int          basic_pc_set;      /* 1 if exec_stmt explicitly set PC */
 static int          basic_error;
 static int          basic_quit;        /* 1 when BYE is typed */
 
-/* Shell-mode state (tiku_basic_mode.inl).  BASIC is a non-blocking MODE of the
- * shell process rather than a blocking takeover: basic_mode_on is 1 while the
- * shell is in BASIC mode, basic_mode_interactive distinguishes the REPL
- * (`basic`, shows a prompt) from a headless run (`basic run`, no prompt).
- * Declared here (early) so process_line's RUN handler can test basic_mode_on;
- * the mode functions themselves live in tiku_basic_mode.inl. */
+/* Shell-mode state (tiku_basic_mode.inl): basic_mode_on is 1 while the shell
+ * is in BASIC mode; basic_mode_interactive is 1 for the REPL (`basic`, with a
+ * prompt) and 0 for a headless run (`basic run`).  Declared here because
+ * process_line()'s RUN handler, earlier than the mode code, tests
+ * basic_mode_on. */
 static uint8_t      basic_mode_on;
 static uint8_t      basic_mode_interactive;
 
 /* Checkpoint arming (tiku_basic_ckpt.inl).  1 while PERSIST is on: the run
- * loop checkpoints the execution state at yield boundaries so RUN RESUME can
- * continue mid-loop across a reset or power cut.  Declared here, with the
- * other run-scope flags, so the dispatcher, the run loop and the mode driver
- * all see it.  A per-boot RAM flag: clear at power-up, then re-armed by RUN
- * RESUME (which restores it from the checkpoint) or a fresh PERSIST ON. */
+ * loop checkpoints the execution state at yield boundaries, and RUN RESUME
+ * continues from the checkpoint after a reset or power cut.  The dispatcher,
+ * the run loop and the mode driver read it.  A RAM flag, 0 at power-up: RUN
+ * RESUME restores it from the checkpoint, and PERSIST ON sets it. */
 static uint8_t      basic_ckpt_armed;
 
 /* AUTO line-numbering at the REPL: when active, the REPL prompt
@@ -290,18 +283,18 @@ static int          basic_auto_active;
  * keystrokes) and DELAY/SLEEP park instead of spinning. */
 static uint8_t           basic_run_shell_mode;
 
-/* Yielding wait (DELAY / SLEEP in shell mode).  A blocking spin would starve
- * the shell event loop -- rules, watch and BASIC's own event-armed ON CHANGE
- * all stall -- so exec_delay/exec_sleep record a deadline here and park the
- * step machine: basic_run_step returns RUNNING without executing until the
- * deadline passes, then resumes the interrupted line at basic_wait_off.  As
- * with the blocking wait, the line's remaining statements run after the pause
- * and reactive polls stay suppressed during it; meanwhile queued events
- * dispatch, and pending ON CHANGE marks fire at the first statement boundary
+/* Yielding wait (DELAY / SLEEP in shell mode).  exec_delay() and exec_sleep()
+ * record a deadline here and park the step machine: basic_run_step() returns
+ * RUNNING without executing until the deadline passes, then resumes the
+ * interrupted line at basic_wait_off.  A spinning wait in shell mode would
+ * stall the shell event loop: rules, watch and BASIC's event-armed ON CHANGE.
+ * As with the blocking wait, the line's remaining statements run after the
+ * pause and reactive polls stay suppressed during it; queued events dispatch
+ * meanwhile, and pending ON CHANGE marks fire at the first statement boundary
  * after it.  basic_wait_sleep_s chunks long SLEEPs below the tick counter's
  * wrap.  Only the main line walker yields (basic_stmt_depth == 1): DELAY
- * inside an IF-THEN scratch or an EVERY body blocks, since their transient
- * buffers cannot be resumed across ticks. */
+ * inside an IF-THEN scratch or an EVERY body blocks, because those transient
+ * buffers do not survive across ticks. */
 static uint8_t           basic_wait_pending;
 static tiku_clock_time_t basic_wait_start;
 static tiku_clock_time_t basic_wait_ticks;
@@ -311,11 +304,11 @@ static long              basic_wait_sleep_s; /* SLEEP: remaining seconds   */
 static uint8_t           basic_stmt_depth;   /* exec_stmts nesting         */
 static uint8_t           basic_in_reactive;  /* inside basic_poll_reactive */
 
-/* ON ERROR GOTO N: when an error fires during RUN, jump to N
- * instead of aborting. 0 = handler disabled (default behaviour).
- * `basic_err_pc` records the line that errored, so RESUME and
- * RESUME NEXT know where to continue from; it is 0 again once RESUME
- * leaves the handler, and an error while it is set is fatal. */
+/* ON ERROR GOTO N: basic_err_handler is N, where an error during RUN jumps;
+ * 0 disables the handler, and an error then stops the program.
+ * basic_err_pc holds the line that errored, where RESUME and RESUME NEXT
+ * continue; RESUME sets it back to 0, and an error while it is non-zero is
+ * fatal. */
 static uint16_t     basic_err_handler;
 static uint16_t     basic_err_pc;
 
@@ -334,12 +327,11 @@ static uint16_t     basic_erl;
 /* CENTRALIZED ERROR THROW                                                   */
 /*---------------------------------------------------------------------------*/
 
-/* Every interpreter error goes through basic_throw() / basic_throwf(): they
- * set basic_error and basic_errcat, then emit the message through a swappable
- * sink.  The default sink is the shell console (red "? msg"); an embedder
- * installs its own with tiku_basic_set_error_sink() to capture errors into a
- * buffer and run BASIC headless, with no shell or UART.  The category is
- * passed at the throw call, so ERR and ERL categories stay consistent. */
+/* Every interpreter error goes through basic_throw() or basic_throwf(): they
+ * set basic_error and basic_errcat, then pass the message to the error sink.
+ * The default sink prints a red "? msg" on the shell console;
+ * tiku_basic_set_error_sink() installs another, for a build with no shell or
+ * UART. */
 
 /* Sink (tiku_basic_error_sink_t, declared in tiku_basic.h) receives the
  * category + the bare message (no color, no "? " prefix, no newline).
@@ -376,8 +368,8 @@ basic_throw(int cat, const char *msg)
 /**
  * @brief Raise a runtime error with a printf-style message.
  *
- * For the sites that splice in a name, path or number; formats into a
- * transient buffer so a headless sink still sees rendered text.
+ * Formats into a 96-byte stack buffer, truncating a longer message, and
+ * raises it through basic_throw().
  */
 #if defined(__GNUC__)
 __attribute__((format(printf, 2, 3)))
@@ -396,9 +388,8 @@ basic_throwf(int cat, const char *fmt, ...)
 /**
  * @brief Report through the error sink without raising a runtime error.
  *
- * For REPL and command-level notices (bad line number, save failed, no
- * program) that must still honor a headless sink, so that basic_emit_error
- * stays the only console error writer.
+ * Carries REPL and command-level notices: a bad line number, a failed save,
+ * no program.
  */
 static void
 basic_report(int cat, const char *msg)
@@ -406,10 +397,10 @@ basic_report(int cat, const char *msg)
     basic_emit_error(cat, msg);
 }
 
+/** @brief basic_report() with a printf-style message (96-byte buffer). */
 #if defined(__GNUC__)
 __attribute__((format(printf, 2, 3)))
 #endif
-/** @brief basic_report() with a printf-style message. */
 static void
 basic_reportf(int cat, const char *fmt, ...)
 {
@@ -421,9 +412,8 @@ basic_reportf(int cat, const char *fmt, ...)
     basic_emit_error(cat, buf);
 }
 
-/* EVERY ms : stmt -- recurring scheduled statement, polled by the RUN loop
- * between program lines.  The whole table resets at every RUN start, so a
- * fresh program does not inherit stale handlers. */
+/* EVERY ms : stmt -- a recurring statement, polled by the RUN loop between
+ * program lines.  Every RUN starts with an empty table. */
 #ifndef TIKU_BASIC_EVERY_MAX
 #define TIKU_BASIC_EVERY_MAX        4   /**< active EVERY registrations */
 #endif
@@ -434,22 +424,21 @@ basic_reportf(int cat, const char *fmt, ...)
 typedef struct {
     long          interval_ms;               /**< period, as written */
     unsigned long interval_ticks;            /**< period in clock ticks */
-    unsigned long start;                     /**< basic_ticks() at last firing */
+    unsigned long start;                     /**< basic_ticks() at last fire */
     char  stmt[TIKU_BASIC_EVERY_STMT_LEN];   /**< statement text */
     uint8_t active;                          /**< 1 = registered */
 } basic_every_t;
 static basic_every_t *basic_everys;
 
-/* Clock ticks counted from short differences of tiku_clock_time(), so an
- * EVERY period runs on across the tick counter's wrap (every 512 s with
- * MSP430's 16-bit tick at 128 Hz) and needs no ticks * 1000 product, which
- * overflows a 32-bit long after 4.66 h.  The count is right while it is read
- * at least once per wrap: the RUN loop reads it between lines, and SLEEP
- * between its 10 s chunks. */
+/* A tick count accumulated from short differences of tiku_clock_time(), so
+ * an EVERY period continues across the tick counter's wrap (every 512 s with
+ * MSP430's 16-bit tick at 128 Hz).  The count is correct while it is read at
+ * least once per wrap: the RUN loop reads it between lines, and SLEEP between
+ * its 10 s chunks. */
 static unsigned long     basic_ticks_count;
 static tiku_clock_time_t basic_ticks_seen;
 
-/** @brief Advance the tick count by the ticks since the last call; return it. */
+/** @brief Add the ticks since the last call to the count; return it. */
 static unsigned long
 basic_ticks(void)
 {
@@ -461,7 +450,8 @@ basic_ticks(void)
 }
 
 /**
- * @brief @p ms in clock ticks, without the overflow of ms * TIKU_CLOCK_SECOND.
+ * @brief Convert @p ms to clock ticks; whole seconds and the remainder scale
+ *        separately, so no product overflows.
  *
  * @param up  Non-zero rounds a part tick up, 0 rounds it down
  */
@@ -473,16 +463,17 @@ basic_ms_to_ticks(unsigned long ms, int up)
             (up ? 999u : 0u)) / 1000u;
 }
 
-/* ON CHANGE "/path" GO[SUB] line -- reactive VFS-watch handler.
- * The RUN loop polls each registration between program lines:
- * VFSREAD the path, compare to last value, fire handler on change. */
+/* ON CHANGE "/path" GOTO|GOSUB line: a handler that fires when a VFS node's
+ * value changes.  Between program lines the RUN loop re-reads each polled or
+ * event-marked registration and fires the handler when the value differs
+ * from last_value. */
 #ifndef TIKU_BASIC_ONCHG_MAX
 #define TIKU_BASIC_ONCHG_MAX        4   /**< ON CHANGE registrations */
 #endif
 
-/** ON CHANGE on writable nodes is event-driven through tiku_vfs_watch rather
- *  than polled every tick: exact, and cheaper.  It needs the kernel VFS watch
- *  API and the shell's event queue: on for real targets, off on the host. */
+/** Event-driven ON CHANGE: in shell mode a registration on a writable node
+ *  subscribes through tiku_vfs_watch() and is re-read only when an event
+ *  marks it.  On by default only for MSP430, RP2350, Ambiq and Nordic. */
 #ifndef TIKU_BASIC_ONCHG_EVENT
 #  if TIKU_BASIC_ONCHG_MAX > 0 && (defined(PLATFORM_MSP430) ||                 \
        defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) ||                  \
@@ -511,9 +502,8 @@ typedef struct {
 } basic_onchg_t;
 static basic_onchg_t *basic_onchgs;
 
-/* TRACE ON/OFF -- when set, RUN echoes each line before executing it.
- * Persists across BASIC sessions: it is a debug aid the user turns off
- * when done. */
+/* TRACE ON/OFF -- when set, RUN prints each line before executing it.  The
+ * flag holds until TRACE OFF, across RUNs and across BASIC sessions. */
 static int          basic_trace;
 
 /* READ / DATA / RESTORE state. The DATA pointer is (line-index,

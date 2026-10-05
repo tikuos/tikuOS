@@ -17,11 +17,11 @@
 #include <stdint.h>
 
 /**
- * @brief "rftest" command handler — bench RF test transmissions.
+ * @brief "rftest" command handler: bench RF test transmissions.
  *
- * Sub-commands: cw (unmodulated carrier), mod (modulated at the given PHY),
- * sweep, off and status.  @p mhz is 2360..2500, @p dbm a silicon-legal step
- * (-46..+8, default 0), @p phy one of 1m / 2m / s8 / s2.
+ * Sub-commands: cw <mhz> [dbm] [phy] (unmodulated carrier), mod (the same,
+ * modulated), sweep <lo> <hi> [dbm], off and status.  mhz is 2360..2500, dbm
+ * a TX power step the silicon supports (-46..+8, default 0), phy 1m|2m|s8|s2.
  *
  * @note The carrier keeps transmitting after the command returns and must be
  *       stopped with "rftest off" before any beacon, scan or BLE work.

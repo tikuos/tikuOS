@@ -21,9 +21,9 @@
 /**
  * @brief "wifi" command handler — drive the Wi-Fi radio.
  *
- * Sub-commands cover power (on/off), status, scanning (scan/list), the
- * WPA2-PSK and WPA3-SAE joins, disconnect and forget, and `up` to bring the
- * IP stack up over WiFi via DHCP.  No argument prints the usage summary.
+ * Sub-commands: on, off, status, scan, list, connect (WPA2-PSK), connect3
+ * (WPA3-SAE), disconnect, forget, help and, with TIKU_KITS_NET_WIFI_ENABLE,
+ * up (IP over WiFi via DHCP).  No argument prints the usage summary.
  *
  * @param argc  Argument count
  * @param argv  Argument vector; argv[1] selects the sub-command, argv[2]

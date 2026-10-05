@@ -45,25 +45,26 @@ uint8_t tiku_led_count(void);
 
 /**
  * @brief Initialize LED hardware for the given index.
- * @param idx Zero-based LED index (0 .. TIKU_BOARD_LED_COUNT-1).
+ * @param idx Zero-based LED index (0 .. TIKU_BOARD_LED_COUNT-1); an index
+ *            with no LED does nothing.
  */
 void tiku_led_init(uint8_t idx);
 
 /**
  * @brief Turn on the LED at the given index.
- * @param idx Zero-based LED index.
+ * @param idx Zero-based LED index; an index with no LED does nothing.
  */
 void tiku_led_on(uint8_t idx);
 
 /**
  * @brief Turn off the LED at the given index.
- * @param idx Zero-based LED index.
+ * @param idx Zero-based LED index; an index with no LED does nothing.
  */
 void tiku_led_off(uint8_t idx);
 
 /**
  * @brief Toggle the LED at the given index.
- * @param idx Zero-based LED index.
+ * @param idx Zero-based LED index; an index with no LED does nothing.
  */
 void tiku_led_toggle(uint8_t idx);
 

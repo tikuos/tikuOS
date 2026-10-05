@@ -69,27 +69,29 @@
  * what TIKU_TFS_MAX_SLOTS can address at a 4 KB slot. */
 #define TIKU_NVM_REGION_BYTES  (8192u * 1024u)
 #elif defined(PLATFORM_ESP32C61)
-/* Not linker-carved either: a span of the external flash, following
- * TIKU_FLASH_REGION_BYTES in arch/esp32c61/tiku_flash_arch.h. */
+/* Not linker-carved: the region is a span of the external flash, so this
+ * follows TIKU_FLASH_REGION_BYTES in arch/esp32c61/tiku_flash_arch.h. */
 #define TIKU_NVM_REGION_BYTES  (5120u * 1024u)
 #else
 #define TIKU_NVM_REGION_BYTES  0u
 #endif
 
+/*
+ * Every target carves a region except MSP430, whose FRAM is unified with the
+ * code estate, and host builds, which have no NVM; a new port gets 1.
+ * Consumers also call tiku_nvm_backend_get() at run time: with no backend the
+ * NVM tier is absent and /data does not mount.
+ */
 /**
  * @brief 1 on parts with a carved NVM region, 0 otherwise.
  *
- * Defined on every target once this header is included.  Test this, not
- * TIKU_NVM_REGION_BYTES, which is 0 on a port its table does not list.
+ * Defined on every target once this header is included.  TIKU_NVM_REGION_BYTES
+ * is 0 on a port its table does not list, so it does not say whether a region
+ * exists.
  *
  * @note An undefined name reads as 0 in #if, so a unit that could miss the
  *       include checks #ifndef first (as tiku_basic_config.h does).
  */
-/* The list names the exceptions: MSP430's FRAM is unified with the code
- * estate and host builds have no NVM, while every other target carves a
- * region, so a new port is included by default.  Consumers also check
- * tiku_nvm_backend_get() at run time, so a port without a backend yet gets an
- * error rather than silently using RAM. */
 #if defined(PLATFORM_MSP430) || defined(TIKU_TEST_HOST)
 #define TIKU_NVM_HAS_REGION  0
 #else
@@ -117,8 +119,8 @@
 /**
  * @brief Return the board's carved NVM region backend, or NULL if none.
  *
- * The returned backend is owned by the region layer (do not free).  Reads use
- * be->base directly; writes go through be->write inside an NVM unlock window.
+ * The backend is a static object of the arch layer.  Reads use be->base
+ * directly; writes go through be->write inside an NVM unlock window.
  *
  * @return Pointer to the region backend, or NULL on parts without one.
  */

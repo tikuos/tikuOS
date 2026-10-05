@@ -16,7 +16,16 @@
 
 #include <stdint.h>
 
-/** @brief fat mount | ls [path] | hash <path> | runs <path> | stage <path> */
+/**
+ * @brief "fat" command: read the FAT32 volume on the eMMC.
+ *
+ * Subcommands: mount, ls [path], hash <path>, runs <path> and, with
+ * TIKU_DRV_PSRAM_ENABLE, stage <path>.  All but mount need `fat mount` first.
+ *
+ * @param argc  Argument count
+ * @param argv  Argument vector
+ * @note Defined only when TIKU_SHELL_CMD_FAT is set (eMMC builds).
+ */
 void tiku_shell_cmd_fat(uint8_t argc, const char *argv[]);
 
 
@@ -31,6 +40,9 @@ int tiku_shell_fat_locate(const char *path, uint32_t *lba0, uint32_t *size,
 
 /**
  * @brief Stage the first @p bytes of a file to the PSRAM tier base.
+ *
+ * Uses the `fat stage` pipeline, rounded up to whole sectors, and stops once
+ * the prefix is covered.  The volume must be mounted.
  *
  * @note Built only with TIKU_DRV_PSRAM_ENABLE.
  * @return 0 when the staged prefix reads back intact, else -1

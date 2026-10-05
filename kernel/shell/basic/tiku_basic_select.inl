@@ -8,8 +8,8 @@
  * tiku_basic_select.inl - SELECT CASE, CASE and END SELECT helpers.
  *
  * Evaluates the controlling expression once, scans forward for the first
- * matching arm and jumps past it; reaching another CASE during normal flow
- * means the arm finished.  Nesting works through depth-aware scanning.
+ * matching arm and continues at the line after its header; reaching another
+ * CASE in normal flow means the arm finished.  The scans track nesting depth.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -207,11 +207,9 @@ exec_select_case(const char **p)
 }
 
 /**
- * @brief CASE encountered as a statement during normal flow.
+ * @brief CASE reached in normal flow: the previous arm finished.
  *
- * Means the previous arm has just finished and control is about to
- * start the next arm by accident; jump past the matching END
- * SELECT so only the dispatched arm runs.
+ * Jumps past the matching END SELECT, so only the dispatched arm runs.
  */
 static void
 exec_case(const char **p)

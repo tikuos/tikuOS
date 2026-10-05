@@ -5,10 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mpu_hal.h - Platform-routing header for MPU (Memory Protection Unit)
+ * tiku_mpu_hal.h - per-port MPU functions and their platform routing.
  *
- * Routes to the correct architecture-specific MPU header based on the
- * selected platform and declares the functions each port implements.
+ * Includes the active platform's tiku_mpu_arch.h and declares the MPU
+ * functions every port implements, on MSP430's model of three NVM segments
+ * with a segment-access-mode (SAM) register.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -43,32 +44,34 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Read the current segment-access-mode register.
+ * @brief Read the segment access word, in the layout of MSP430's MPUSAM.
  *
- * Returns the raw per-segment permission bits, for diagnostics and testing;
- * the kernel should use the higher-level arch functions instead.
+ * MSP430 parts with an MPU return MPUSAM itself and parts without one return
+ * 0; every other port returns a word it keeps in software.
  *
- * @return Current permission register value
+ * @return Current segment access word
  */
 uint16_t tiku_mpu_arch_get_sam(void);
 
 /**
- * @brief Write a new value to the segment-access-mode register.
+ * @brief Set the segment access word, in the layout of MSP430's MPUSAM.
  *
- * Handles whatever password or unlock sequence the hardware needs, writes the
- * bits and re-enables the MPU.  Used internally by the arch layer.
+ * MSP430 parts with an MPU write MPUSAM between MPUCTL0 password writes and
+ * leave the MPU enabled.  The other ports keep the word in software; RP2350
+ * also makes its .uninit region writable exactly while bit 9 is set.
  *
- * @param sam  New permission register value
+ * @param sam  New segment access word
  */
 void tiku_mpu_arch_set_sam(uint16_t sam);
 
 /**
- * @brief Read the current MPU control register
+ * @brief Read the MPU control word, in the layout of MSP430's MPUCTL0
  *
- * Returns the raw value of the MPU control register (MPUCTL0 on MSP430), from
- * which the caller can tell whether the MPU is enabled.
+ * MSP430 parts with an MPU return MPUCTL0 itself; STM32N6 and MSP430 parts
+ * without one return 0, and every other port returns a word it keeps in
+ * software.  Bit 0, the enable bit, is set while the MPU is on.
  *
- * @return Current control register value
+ * @return Current control word
  */
 uint16_t tiku_mpu_arch_get_ctl(void);
 
@@ -77,18 +80,17 @@ uint16_t tiku_mpu_arch_get_ctl(void);
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Disable interrupts (platform-specific)
+ * @brief Mask interrupts for a scoped NVM write.
  *
- * Called by the kernel MPU layer to enter a critical section before
- * unlocking NVM for a scoped write.
+ * tiku_mpu_scoped_write() calls it before unlocking NVM.
  */
 void tiku_mpu_arch_disable_irq(void);
 
 /**
- * @brief Enable interrupts (platform-specific)
+ * @brief Unmask interrupts after a scoped NVM write.
  *
- * Called by the kernel MPU layer to exit the critical section after
- * a scoped write relocks NVM.
+ * tiku_mpu_scoped_write() calls it after relocking NVM.  Where it acts
+ * (MSP430, RP2350, Ambiq) it enables interrupts unconditionally.
  */
 void tiku_mpu_arch_enable_irq(void);
 
@@ -97,12 +99,14 @@ void tiku_mpu_arch_enable_irq(void);
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Configure MPU segment boundaries
+ * @brief Set up the port's memory protection
  *
- * Sets the hardware boundary registers to partition NVM into segments.
+ * MSP430 parts with an MPU write the segment boundaries (MPUSEGB1/2) and
+ * enable the MPU; RP2350, Ambiq, Nordic and RA8P1 program their MPU regions,
+ * ESP32-C61 locks a PMP entry over the first 4 KB, and STM32N6 does nothing.
  *
- * @note Call before enabling MPU protection, so the permission settings map
- *       to meaningful address ranges.
+ * @note Call before tiku_mpu_arch_set_default_protection(): on MSP430 the
+ *       permission bits apply to the segments it sets.
  */
 void tiku_mpu_arch_init_segments(void);
 
@@ -110,8 +114,8 @@ void tiku_mpu_arch_init_segments(void);
  * @brief Set default NVM protection on all segments
  *
  * Applies the port default, TIKU_MPU_DEFAULT_SAM: every segment read+execute,
- * except on MSP430 parts with HIFRAM, where that segment stays writable.
- * The specific register encoding is handled entirely by the arch layer.
+ * except on MSP430 parts with HIFRAM, where segment 3 (HIFRAM) is also
+ * writable.  The register encoding is the arch layer's.
  */
 void tiku_mpu_arch_set_default_protection(void);
 
@@ -131,7 +135,7 @@ void tiku_mpu_arch_module_window_exec(int enable);
  * The seg and perm values correspond to the platform-independent
  * tiku_mpu_seg_t and tiku_mpu_perm_t enums (passed as uint8_t).
  *
- * @param seg    Segment number (0-2)
+ * @param seg    Segment index 0-2 (TIKU_MPU_SEG1..TIKU_MPU_SEG3)
  * @param perm   Permission flags (TIKU_MPU_READ/WRITE/EXEC or combinations)
  */
 void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm);
@@ -139,11 +143,10 @@ void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm);
 /**
  * @brief Unlock NVM for writing on all segments
  *
- * Adds write permission to every segment. Returns an opaque saved state
- * that must be passed to tiku_mpu_arch_lock_nvm() to restore the
- * original protection.
+ * Adds write permission to every segment.
  *
- * @return Previous protection state (opaque to the kernel)
+ * @return Previous protection state, opaque to the kernel
+ * @note Pass the result to tiku_mpu_arch_lock_nvm() to restore the protection.
  */
 uint16_t tiku_mpu_arch_unlock_nvm(void);
 
@@ -155,30 +158,31 @@ uint16_t tiku_mpu_arch_unlock_nvm(void);
 void tiku_mpu_arch_lock_nvm(uint16_t saved_state);
 
 /**
- * @brief Read violation flags from the MPU
+ * @brief Read the latched MPU violation flags
  *
- * Returns segment violation flags. Bit 0 = segment 1 violation,
- * bit 1 = segment 2, bit 2 = segment 3. A set bit means a write
- * was attempted while that segment lacked write permission.
+ * MSP430 returns the MPUCTL1 flags its SYSNMI handler latched, bit n - 1 for
+ * segment n; RP2350 and Ambiq the MMFSR bits their MemManage handler ORs in;
+ * RA8P1 0x0002 after a MemManage access violation in its fault record.
  *
- * @return Violation flags (bits [2:0] meaningful)
+ * @return Violation flags in the port's encoding; 0 on the other ports
  */
 uint16_t tiku_mpu_arch_get_violation_flags(void);
 
 /**
  * @brief Clear all MPU violation flags
  *
- * Resets all segment violation flags so the next violation can be
- * detected cleanly.
+ * Zeroes what tiku_mpu_arch_get_violation_flags() returns.  MSP430 also
+ * clears MPUCTL1's flags and leaves the violation NMI on; RA8P1 clears the
+ * fault record its flags come from.
  */
 void tiku_mpu_arch_clear_violation_flags(void);
 
 /**
- * @brief Enable NMI on MPU violation (instead of device reset)
+ * @brief Make an MPU violation raise an NMI on MSP430
  *
- * On platforms where the default MPU violation response is a reset,
- * this function switches to a non-maskable interrupt instead, allowing
- * software to detect and handle violations without losing state.
+ * MSP430 parts with an MPU set MPUSEGIE, so an access the MPU blocks raises
+ * SYSNMI, whose handler latches the violated segment.  RP2350, Ambiq and
+ * RA8P1 set bit 4 of their control word; the other ports do nothing.
  */
 void tiku_mpu_arch_enable_violation_nmi(void);
 

@@ -43,7 +43,7 @@
         }                                                                    \
     } while (0)
 
-/** @brief A service result as the VFS error it corresponds to. */
+/** @brief Map a layout-service result to a TIKU_VFS_* status. */
 static int
 layout_vfs_err(int rc)
 {
@@ -268,7 +268,8 @@ layout_cancel_write(const char *buf, size_t len)
     return layout_vfs_err(tiku_layout_cancel_env(tiku_layout_env(), op));
 }
 
-/** @brief resume: the interrupted operation's id; reboot before using /data. */
+/** @brief resume: the interrupted operation's id.  On success the store
+ *         stays held until a reboot. */
 static int
 layout_resume_write(const char *buf, size_t len)
 {

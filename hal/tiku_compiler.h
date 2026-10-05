@@ -40,7 +40,7 @@
 
 #elif defined(__GNUC__)
 /* Other GCC targets: an ISR is a plain C function.  A Cortex-M port's
- * startup code (arch/<platform>/tiku_crt_early.c) places its address in the
+ * startup code (arch/<platform>/tiku_crt_early*.c) places its address in the
  * vector table; ESP32-C61 reaches its handlers through the interrupt
  * dispatcher in tiku_irq_arch.c.  The vector argument is unused; it keeps the
  * call sites the same as on MSP430. */

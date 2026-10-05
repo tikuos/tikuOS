@@ -8,8 +8,8 @@
  * tiku_bt.h - driver-agnostic Bluetooth Low Energy API.
  *
  * The stack in tikukits/net/bluetooth/ implements HCI, L2CAP, ATT, GATT, GAP
- * and SMP over an abstract transport, so a driver plugs in its own without the
- * stack changing.  Public application API only; internals live beside it.
+ * and SMP over the transport a controller driver registers through
+ * tiku_bt_transport.h.  This header is the application API.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -147,8 +147,8 @@ int tiku_bt_advertise_start(const char *name);
 /**
  * @brief Stop advertising.
  *
- * Issues LE_Set_Advertising_Enable(0).  Safe to call when advertising is
- * already off: a non-zero status from the controller is ignored.
+ * Issues LE_Set_Advertising_Enable(0) and ignores a non-zero controller
+ * status, so a call while advertising is off returns TIKU_DRV_OK.
  *
  * @return TIKU_DRV_OK, TIKU_DRV_ERR_NOT_PRESENT if BT isn't up, or a
  *         transport rc.
@@ -201,7 +201,15 @@ typedef struct {
 int tiku_bt_scan_start(uint8_t active, uint16_t interval_ms,
                              uint16_t window_ms);
 
-/** Stop the LE scan (LE_Set_Scan_Enable(0)). Safe when already off. */
+/**
+ * @brief Stop the LE scan (LE_Set_Scan_Enable(0)).
+ *
+ * The controller's status is not checked, so a call with no scan running
+ * returns TIKU_DRV_OK.
+ *
+ * @return TIKU_DRV_OK, TIKU_DRV_ERR_NOT_PRESENT if BT isn't up, or a
+ *         transport rc.
+ */
 int tiku_bt_scan_stop(void);
 
 /** Return 1 if a scan is currently running, 0 otherwise. */
@@ -220,9 +228,8 @@ uint8_t tiku_bt_scan_count(void);
  * appears at most once; later sightings update RSSI / name in place).
  *
  * @param out  Destination array, sized for @p max entries
- * @param max  Capacity of @p out (TIKU_BT_SCAN_MAX is the
- *             practical maximum; passing more is fine, extra slots
- *             are left untouched)
+ * @param max  Capacity of @p out; slots beyond the cached count are left
+ *             untouched
  * @return Number of entries written (<= count())
  */
 uint8_t tiku_bt_scan_results(tiku_bt_scan_entry_t *out,
@@ -357,9 +364,8 @@ typedef struct {
 /**
  * @brief One GATT service (Primary Service Declaration + N chars)
  *
- * The @p chars array lifetime must extend at least as long as the
- * service stays registered; typically defined `static const` at
- * file scope by the registering module.
+ * @note The @p chars array must outlive the registration; the registering
+ *       module defines it `static const` at file scope.
  */
 typedef struct {
     uint16_t                    uuid;
@@ -428,17 +434,23 @@ int tiku_bt_client_write(uint16_t conn_handle, uint16_t attr_handle,
 /**
  * @brief Send ATT Read By Group Type Request (primary service discovery).
  *
- * Walks handles 0x0001..0xFFFF asking for primary service decls.
- * The response is logged.
+ * One request covering handles 0x0001..0xFFFF for primary service
+ * declarations.  The response is only logged.
+ *
+ * @param conn_handle  Connection handle
+ * @return TIKU_DRV_OK once sent, TIKU_DRV_ERR_NOT_PRESENT if BT isn't up,
+ *         TIKU_DRV_ERR_INVALID for an unknown connection, or a transport rc.
  */
 int tiku_bt_client_discover_services(uint16_t conn_handle);
 
 /**
  * @brief Subscribe to a characteristic via CCCD write.
  *
- * Convenience wrapper: writes 0x0001 (notifications enable) to the
- * given CCCD attribute handle. CCCD handle is typically (value
- * handle + 1) when the char's properties include NOTIFY.
+ * Writes 0x0001 (notifications enable) to the given CCCD attribute handle
+ * through tiku_bt_client_write().  The CCCD handle is typically the value
+ * handle + 1 when the char's properties include NOTIFY.
+ *
+ * @return As tiku_bt_client_write().
  */
 int tiku_bt_client_subscribe(uint16_t conn_handle,
                                    uint16_t cccd_handle);
@@ -464,10 +476,7 @@ int tiku_bt_notify(uint16_t char_uuid, const uint8_t *value,
 /* SMP BONDING STORE                                                         */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Stored bonds.  The record is a fixed 32 bytes, so more slots cost
- *        only their size and need no migration of stored records.
- */
+/** @brief Stored bond slots, each a fixed 32-byte record. */
 #define TIKU_BT_BOND_MAX         1U
 
 /**
@@ -510,9 +519,8 @@ int tiku_bt_bond_save(uint8_t slot,
 /**
  * @brief Load a bond record from the persistent store
  *
- * Returns TIKU_DRV_OK with a zeroed @p out (and magic=0) when the
- * slot is empty, so callers can distinguish "no bond" from a real
- * record by the magic field.
+ * An empty slot gives TIKU_DRV_OK and a zeroed @p out whose magic is 0; a
+ * stored record has magic TIKU_BT_BOND_MAGIC.
  *
  * @param slot  Bond index in [0, TIKU_BT_BOND_MAX)
  * @param out   Destination record (must not be NULL)

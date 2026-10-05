@@ -20,9 +20,9 @@
 #include <interfaces/wireless/tiku_wireless.h>
 
 #if defined(TIKU_KITS_NET_WIFI_ENABLE)
-/* WiFi as the IP link: bring the net stack up over the joined radio (DHCP),
- * instead of SLIP-over-UART.  Needs a Wi-Fi driver and the net kit's WiFi
- * adapter (TIKU_KITS_NET_WIFI_ENABLE=1). */
+/* `wifi up` brings the net stack up over the joined radio with DHCP.  It
+ * needs a Wi-Fi driver and the net kit's WiFi adapter
+ * (TIKU_KITS_NET_WIFI_ENABLE=1). */
 #include <kernel/process/tiku_process.h>
 #include <tikukits/net/wifi/tiku_kits_net_wifi.h>
 #include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>
@@ -148,7 +148,8 @@ static void wifi_status(void)
  * @brief Handle "wifi connect" and "wifi connect3": queue a join.
  *
  * Asked while joined, the radio leaves the current network for the new one.
- * A busy radio is reported apart from a refused profile.
+ * TIKU_DRV_ERR_TIMEOUT, a radio busy with an earlier request, prints a retry
+ * hint; any other refusal prints the causes it can have.
  */
 static void wifi_connect(uint8_t argc, const char *argv[],
                          tiku_wireless_auth_t auth)
@@ -209,9 +210,9 @@ static void wifi_forget(void)
 /**
  * @brief Handle "wifi scan": trigger an active scan for access points.
  *
- * Calls tiku_wireless_scan_start(); cached results are printed as the
- * runner finds APs (see "wifi list"). Reports rejection if the radio is
- * not up and idle.
+ * tiku_wireless_scan_start() returns at once and the scan runs in the
+ * background; `wifi list` prints the results the driver caches.  Reports
+ * rejection if the radio is not up and idle.
  */
 static void wifi_scan(void)
 {
@@ -277,16 +278,14 @@ static void wifi_up(void)
         SHELL_PRINTF("wifi: could not install the WiFi link backend\n");
         return;
     }
-    /* Self-contained: ensure UDP is up (DHCP binds port 68).  Harmless if
-     * the net-test path already did it; lets a lean net build (no NET_TEST)
-     * work. */
+    /* DHCP binds UDP port 68; tiku_kits_net_udp_init() is idempotent. */
     tiku_kits_net_udp_init();
     tiku_kits_net_dhcp_init();
-    /* Kick off the exchange (real station MAC) before starting the poller
-     * process, so the process sees an in-flight DISCOVER and just polls it
-     * rather than self-starting a second exchange with the default MAC.  Order
-     * matters: tiku_process_start() runs the process body synchronously if the
-     * event queue is full, so the exchange must already be armed by then. */
+    /* Start the exchange with the station MAC before the DHCP process:
+     * the process polls a DISCOVER already in flight, and with none it
+     * starts its own exchange with the default MAC.  tiku_process_start()
+     * runs the process body at once when the event queue is full, so the
+     * exchange is armed first. */
     if (tiku_kits_net_dhcp_start(st.mac) != TIKU_KITS_NET_OK) {
         SHELL_PRINTF("wifi: DHCP start failed (radio up? already bound?)\n");
         return;

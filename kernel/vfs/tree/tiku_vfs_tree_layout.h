@@ -9,7 +9,7 @@
  *
  * The memory layout service's knobs, applied map, pending request and boot
  * findings as files, and its stage, cancel, resume and recover operations as
- * writes.
+ * writes.  Not built on MSP430.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

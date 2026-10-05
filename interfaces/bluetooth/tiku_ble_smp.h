@@ -21,7 +21,7 @@
 
 /**
  * @brief AES-CMAC (RFC 4493) over the CRACEN AES-ECB.
- * @return 0 on success.
+ * @return 0 on success, -1 when an AES block operation fails.
  */
 int tiku_ble_smp_aes_cmac(const uint8_t key[16], const uint8_t *msg,
                           size_t len, uint8_t mac[16]);
@@ -30,9 +30,8 @@ int tiku_ble_smp_aes_cmac(const uint8_t key[16], const uint8_t *msg,
  * All f4/f5/f6/g2 inputs and the f4/f5/f6 outputs are in SMP wire order
  * (little-endian), as they appear on the L2CAP channel.  Internally each
  * function byte-swaps to the big-endian order the CMAC core operates on and
- * swaps the result back, so callers never see the endianness flip (Core Spec
- * Vol 3, Part H, 2.2.5-7); the self-test checks them against the spec's
- * sample data.
+ * swaps the result back (Core Spec Vol 3, Part H, 2.2.5-7); the self-test
+ * checks them against the spec's sample data.
  */
 
 /**

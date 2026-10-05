@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_radio154.c - 802.15.4 radio test command.
  *
- * PHY verbs over the arch layer and MAC-min ping/pong over tiku_154, checked
- * between two boards.  The demo frame carries a tag the receiver checks, so a
- * busy 2.4 GHz band cannot pass for the peer.
+ * PHY verbs over the arch layer and MAC-min ping/pong over tiku_154 between
+ * two boards.  `tx` frames start with the tag "TK15", and `rx` counts tagged
+ * frames apart from other 802.15.4 traffic.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -37,7 +37,7 @@
 #define R154_PING_A   0x1111u
 #define R154_PONG_A   0x2222u
 
-/* Payload tag so the peer can tell these frames from ambient 15.4 traffic. */
+/* Payload tag that `rx` matches to tell `tx` frames from other traffic. */
 static const uint8_t tk15_tag[4] = { 'T', 'K', '1', '5' };
 static uint8_t tk15_seq;
 
@@ -293,9 +293,9 @@ void tiku_shell_cmd_radio154(uint8_t argc, const char *argv[])
                      " | ed [ch] | ping|pong|secping|secpong [ch] [n]\n");
         return;
     }
-    /* Every subcommand mode-switches the shared RADIO to 15.4, so claim it
-     * from the radio arbiter; refuse rather than clobber a live
-     * beacon/observer/link. */
+    /* Every subcommand switches the shared RADIO to 802.15.4, so it first
+     * claims the radio from the arbiter.  A live beacon, observer or link
+     * holds the radio, and the command prints its owner and returns. */
     if (tiku_ble_adv_154_claim() != 0) {
         SHELL_PRINTF("radio busy (%s) -- stop it first\n",
                      tiku_ble_adv_owner_str());

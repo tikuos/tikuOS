@@ -7,8 +7,9 @@
  *
  * tiku_link.h - a link: whole messages to and from a peer, on any medium.
  *
- * The seam between a session (a desktop's window session) and the wire it
- * rides.  Each backend delivers a message whole and intact, or not at all.
+ * The interface between a session (a desktop's window session) and the
+ * medium that carries it.  Each backend delivers a message whole and intact,
+ * or not at all.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -25,9 +26,8 @@ typedef struct tiku_link tiku_link_t;
 typedef void (*tiku_link_recv_fn)(void *ctx, uint8_t *msg, size_t len);
 
 /**
- * @brief What a backend supplies.  send takes two parts so a message whose
- *        payload already sits in a caller's buffer needs no second copy;
- *        pump and close may be NULL.
+ * @brief A backend's operations.  send takes a message in two parts, head
+ *        then body, and returns 0 or -1; pump and close may be NULL.
  */
 typedef struct {
     int  (*send)(tiku_link_t *l, const void *head, size_t hlen,
@@ -68,7 +68,10 @@ void tiku_link_pump(tiku_link_t *l);
 /** @brief The capability the link confers on what arrives over it. */
 uint8_t tiku_link_cap(const tiku_link_t *l);
 
-/** @brief Release the medium; the link delivers nothing after this. */
+/**
+ * @brief Release the medium.  A backend's close drops the receiver, so
+ *        nothing is delivered after it; with no close op this does nothing.
+ */
 void tiku_link_close(tiku_link_t *l);
 
 #endif /* TIKU_LINK_H_ */

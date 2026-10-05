@@ -7,8 +7,7 @@
  *
  * tiku_shell_cmd_echo.c - "echo" command implementation.
  *
- * Joins the arguments with single spaces and emits one trailing newline, as
- * Unix echo does.  Writing to a VFS path is `write`.
+ * Prints the arguments joined by single spaces, then one newline.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

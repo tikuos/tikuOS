@@ -57,8 +57,8 @@
 /* Gate word of the byte-writable checkpoint ('BKPT'), distinct from
  * TIKU_PERSIST_MAGIC so it is never taken for a persist-store entry. */
 #define BASIC_CKPT_MAGIC    0x424B5054u
-/** Payload layout version.  A checkpoint of any other version is rejected,
- *  so this changes whenever basic_ckpt_write() changes what it writes. */
+/** Payload layout version.  A checkpoint of any other version is rejected;
+ *  bump it whenever basic_ckpt_write() changes what it writes. */
 #define BASIC_CKPT_VERSION  6u
 #define BASIC_CKPT_HDR      12u           /* [gate][version][len], u32 each */
 #define BASIC_CKPT_RGN_HDR  16u           /* slack in the RP2350 staging
@@ -136,9 +136,10 @@
 
 #if BASIC_NVM_ON_REGION
 /*
- * On region parts the checkpoint is the /data file BASIC_CKPT_FILE, named flat
- * like prog.bas.  A store write is append-only and commits by flipping a
- * directory entry, so the framing is a trailer: [payload][version][len][crc].
+ * On region parts the checkpoint is the /data file BASIC_CKPT_FILE, with no
+ * directory prefix, like prog.bas.  A store write is append-only and commits
+ * by flipping a directory entry, so the framing is a trailer:
+ * [payload][version][len][crc].
  * The commit leaves either the new file whole or the previous one; a version
  * other than BASIC_CKPT_VERSION is rejected, len must agree with the file
  * length, and the CRC guards against bit rot.
@@ -149,8 +150,8 @@
 
 /* Both durable BASIC objects must fit the store together, the checkpoint at
  * twice its span because a replace writes the new run before the directory
- * entry flips.  Necessary, not sufficient: other files share the store and can
- * exhaust it at run time, which is a NOSPACE error, not corruption. */
+ * entry flips.  The assert is a floor: other files share the store, and when
+ * they exhaust it at run time a save fails with NOSPACE. */
 _Static_assert(TIKU_TFS_SPAN_FOR(TIKU_BASIC_SAVE_BUF_BYTES)
                    + 2u * TIKU_TFS_SPAN_FOR(BASIC_CKPT_IMG_MAX)
                    <= TIKU_TFS_MIN_SLOTS,
@@ -169,11 +170,10 @@ basic_ckpt_fs(void)
 
 /*
  * Streaming or staging.  Streaming the payload in bounded chunks keeps one
- * chunk of RAM; staging keeps a whole image.  Where a write lands in place
- * (MRAM, RRAM) the payload streams.  Where a write erases (RP2350 flash erases
- * and reprograms every 4 KB sector a write touches) the image is staged and
- * written in one call: the checkpoint recurs, and chunked appends would erase
- * a sector once per chunk instead of once per checkpoint.
+ * chunk of RAM; staging keeps a whole image.  RP2350 stages the image and
+ * writes it in one call: its flash erases and reprograms every 4 KB sector a
+ * write touches, so each chunked append would cost a sector erase.  Every
+ * other region part streams.
  */
 #if defined(PLATFORM_RP2350)
 #define BASIC_CKPT_STREAMING  0
@@ -398,12 +398,9 @@ ckpt_flush(basic_ckpt_wr_t *w)
  * @brief CRC-32 fingerprint of the in-memory program (each line's number and
  *        stored text, in line order).
  *
- * The checkpoint stores the fingerprint of the program that was running when
- * it was captured, and RESUME rejects it unless the loaded program matches.
- * An empty program gives 0.
- *
- * @note That check is what keeps a basic_pc / GOSUB / FOR stack full of line
- *       numbers from being replayed against a different or edited program.
+ * The checkpoint stores the fingerprint of the program it was captured from,
+ * and RESUME rejects it unless the loaded program matches: the saved PC and
+ * stacks hold line numbers.  An empty program, or no line table, gives 0.
  */
 static uint32_t
 basic_prog_identity(void)
@@ -439,9 +436,9 @@ basic_prog_identity(void)
 /**
  * @brief Serialize the reified execution state into @p w.
  *
- * Order matters only in that it must mirror basic_ckpt_read().  The string
- * block writes heap_pos and the heap prefix before the strvar offsets, so the
- * reader can validate each offset against the restored heap length.
+ * The order must mirror basic_ckpt_read().  The string block writes heap_pos
+ * and the heap prefix before the strvar offsets, so the reader can validate
+ * each offset against the restored heap length.
  */
 static void
 basic_ckpt_write(basic_ckpt_wr_t *w)
@@ -515,8 +512,8 @@ basic_ckpt_write(basic_ckpt_wr_t *w)
     ckpt_w(w, &basic_sub_result, sizeof(basic_sub_result));
 #endif
 #if TIKU_BASIC_DEFN_ENABLE
-    /* DEF FN table: active definitions only (lookup is by name, so restoring
-     * them compacted into slots 0..n-1 is fine). */
+    /* DEF FN table: active definitions only.  Lookup is by name, so the
+     * restore packs them into slots 0..n-1. */
     {
         uint8_t nd = 0, k;
         for (k = 0; k < TIKU_BASIC_DEFN_MAX; k++)
@@ -529,9 +526,9 @@ basic_ckpt_write(basic_ckpt_wr_t *w)
 #endif
 
 #if TIKU_BASIC_EVERY_MAX > 0
-    /* EVERY timer slots.  Only interval + stmt are saved; next_due is
-     * re-armed relative to the current clock on restore (an absolute
-     * deadline is meaningless after the clock resets). */
+    /* EVERY slots: only interval_ms and stmt are saved.  The restore re-arms
+     * start and interval_ticks from the current clock, which restarts at
+     * boot. */
     {
         uint8_t n = 0, k;
         for (k = 0; k < TIKU_BASIC_EVERY_MAX; k++) if (basic_everys[k].active) n++;
@@ -655,7 +652,8 @@ ckpt_refuse(void)
  * compiled limits before use, and the payload must be consumed exactly; a
  * refused restore clears what it wrote (ckpt_refuse()).
  *
- * @return 0 on a clean restore, -1 if the payload is short or inconsistent.
+ * @return 0 when the restore completes, -1 if the payload is short or
+ *         inconsistent.
  */
 static int
 basic_ckpt_read(const uint8_t *payload, size_t len)
@@ -665,10 +663,10 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
     uint8_t  u8, sp;
     uint32_t pid;
 
-    /* Program-identity gate first, before any state is touched: a checkpoint's
-     * PC and GOSUB/FOR line numbers are only meaningful for the exact program
-     * it was captured from.  If the loaded program differs (edited, or a
-     * different SAVE clobbered the store since), reject cleanly: fresh RUN. */
+    /* The program-identity check comes first, before any state is touched:
+     * the checkpoint's PC and GOSUB/FOR line numbers belong to the program it
+     * was captured from.  A different program (edited, or replaced by a later
+     * SAVE) returns -1 with nothing written. */
     ckpt_r(&r, &pid, sizeof(pid));
     if (r.err || pid != basic_prog_identity()) {
         return -1;
@@ -990,9 +988,8 @@ basic_ckpt_save(void)
     tr[1] = (uint32_t)w.pos;
     tr[2] = w.crc ^ 0xFFFFFFFFu;           /* = basic_ckpt_crc32(payload) */
 #else
-    /* Erase-based flash: stage the whole image and hand it over in one
-     * write_chunk, since chunked appends would erase a 4 KB sector once per
-     * chunk. */
+    /* RP2350 flash: stage the whole image and hand it over in one
+     * write_chunk; each chunked append would erase a 4 KB sector. */
     w.base = basic_ckpt_scratch;
     w.pos  = 0;
     w.cap  = sizeof basic_ckpt_scratch;
@@ -1048,14 +1045,14 @@ basic_ckpt_load(void)
     memcpy(&crc,   img + n - 4,  4);
     if (ver != basic_ckpt_format()) return -1;     /* incompatible firmware */
     /* The payload length must agree with the file length: TFS already
-     * guarantees the file is whole, so a mismatch means a foreign file wearing
+     * guarantees the file is whole, so a mismatch is a foreign file under
      * this name, not a torn write. */
     if ((size_t)len32 + BASIC_CKPT_TRAILER != n ||
         len32 > BASIC_CKPT_PAYLOAD_MAX) {
         return -1;
     }
     if (basic_ckpt_crc32(img, (size_t)len32) != crc) {
-        return -1;                                 /* bit rot -> restart */
+        return -1;                                 /* bit rot */
     }
     return basic_ckpt_read(img, (size_t)len32);
 }
@@ -1191,10 +1188,9 @@ basic_ckpt_arm(int on)
 
 #else  /* !TIKU_BASIC_PERSIST_RUN_ENABLE */
 
-/* Stubs for the call sites the run loop, mode driver and REPL reach
- * unconditionally: nothing is saved, and a load finds no checkpoint.  arm() is
- * omitted: it is reached only from exec_persist's enabled branch, which is
- * compiled out on this build, so defining it would trip -Wunused-function. */
+/* PERSIST compiled out: save and load return -1, due returns 0, and
+ * invalidate and mark do nothing.  basic_ckpt_arm() has no stub: its only
+ * caller, exec_persist(), compiles the call out too. */
 static int  basic_ckpt_save(void)       { return -1; }
 static int  basic_ckpt_load(void)       { return -1; }
 static void basic_ckpt_invalidate(void) { }

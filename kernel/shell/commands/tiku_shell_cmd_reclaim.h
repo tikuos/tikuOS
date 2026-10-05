@@ -17,9 +17,9 @@
  * @brief "mem" command handler: `mem reclaim [status | last | pending |
  *        owners | stats | mode [off|reactive] | retry 1:GEN | cancel 1:GEN]`.
  *
- * With no entry it prints the current job.  mode, retry and cancel with a
- * value are refused at once or accepted; an accepted one can complete later,
- * and `status` shows the outcome.
+ * With no entry, or `status`, it prints the current job.  `mode`, `retry`
+ * and `cancel` with a value submit a request, which is refused with a code
+ * or accepted and completed asynchronously; `status` shows the outcome.
  *
  * @note Defined only when TIKU_MEM_RECLAIM_ENABLE is set.
  */

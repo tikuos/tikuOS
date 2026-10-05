@@ -37,8 +37,8 @@ tiku_shell_cmd_cd(uint8_t argc, const char *argv[])
     target = argv[1];
     tiku_shell_cwd_resolve(target, resolved, sizeof(resolved));
 
-    /* Verify the target is a directory -- static, or a virtual sub-folder of a
-     * dynamic store (e.g. /data/logs), which does not resolve to a node. */
+    /* tiku_vfs_is_dir() also accepts a virtual sub-folder of a dynamic store,
+     * such as /data/logs, which has no node of its own. */
     if (!tiku_vfs_is_dir(resolved)) {
         SHELL_PRINTF("cd: no such directory '%s'\n", target);
         return;

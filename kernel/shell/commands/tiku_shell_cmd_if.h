@@ -16,12 +16,14 @@
 #include <stdint.h>
 
 /**
- * @brief "if" command — read a VFS path, compare it to a value,
- *        and dispatch a sub-command on match.
+ * @brief "if" command: run a command when a VFS value passes a comparison.
  *
- * Operators are == and != (string or numeric) and > < >= <= (numeric only).
- * Numeric comparison is tried first, falling back to string compare.  The
- * sub-command runs through the same parser, with recursion bounded.
+ * Usage: if <path> <op> <value> <command...>.  When both values parse as
+ * integers, ==, !=, >, <, >= and <= compare them as numbers; otherwise only
+ * == and != apply, to the strings.  `if` nests at most 4 deep.
+ *
+ * @param argc  Argument count
+ * @param argv  Argument vector
  */
 void tiku_shell_cmd_if(uint8_t argc, const char *argv[]);
 

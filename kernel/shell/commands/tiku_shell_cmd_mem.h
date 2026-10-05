@@ -7,8 +7,7 @@
  *
  * tiku_shell_cmd_mem.h - "peek" and "poke" commands
  *
- * The two handlers share an address parser and a single .c so the
- * code-size cost is paid once.
+ * Both handlers share one address parser in tiku_shell_cmd_mem.c.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,9 +20,9 @@
 /**
  * @brief "peek" command -- read N bytes from a memory address.
  *
- * Address takes decimal or 0x-prefixed hex, count defaults to 1 and caps at
- * 32.  On MSP430 only the low 64 KB is reachable (not HIFRAM); 32-bit ports
- * take any address.  Reads are subject to the active MPU rules.
+ * Usage: peek <addr> [count].  Both take decimal or 0x-prefixed hex; count is
+ * 1-32, default 1.  On MSP430 only the low 64 KB is reachable (not HIFRAM);
+ * 32-bit ports take any address.  Reads are subject to the active MPU rules.
  */
 void tiku_shell_cmd_peek(uint8_t argc, const char *argv[]);
 

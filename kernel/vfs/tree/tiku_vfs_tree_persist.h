@@ -8,8 +8,8 @@
  * tiku_vfs_tree_persist.h - /sys/persist VFS nodes.
  *
  * Observability for the persist-cell layer: cells validated, primed and moved
- * this boot, and the cell manifest.  Same linkage contract as the other
- * subtree modules -- an exported children table and entry count.
+ * this boot, and the cell manifest.  Exports the children table and its entry
+ * count for the /sys assembly.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

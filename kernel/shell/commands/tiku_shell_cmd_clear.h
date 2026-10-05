@@ -16,11 +16,13 @@
 #include <stdint.h>
 
 /**
- * @brief "clear" command -- emit ANSI CSI "2J H" to wipe the terminal and
- *        place the cursor at the top-left.
+ * @brief "clear" command: erase the terminal and home the cursor.
  *
- * A backend with no ANSI-compatible viewer receives the literal escape bytes;
- * the prompt redraws on the next line either way.
+ * Writes ESC[2J then ESC[H; a viewer without ANSI support shows those bytes
+ * as they are.  The arguments are ignored.
+ *
+ * @param argc  Argument count
+ * @param argv  Argument vector
  */
 void tiku_shell_cmd_clear(uint8_t argc, const char *argv[]);
 

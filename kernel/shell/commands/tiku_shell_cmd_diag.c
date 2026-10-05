@@ -51,9 +51,10 @@ static void diag_fault_show(void) {
 }
 
 /**
- * @brief Provoke one fault so the handler and its record can be seen working.
+ * @brief Take one fault of kind @p which; the handler records it and the
+ *        board resets.
  *
- * @param which  "undef", "unalign" or "stack"
+ * @param which  "undef", "unalign" or "stack" (an INVSTATE UsageFault)
  */
 static void diag_fault_force(const char *which) {
     SHELL_PRINTF("  forcing a %s fault; the board resets and `diag fault`"
@@ -93,17 +94,16 @@ static void diag_exti(uint8_t argc, const char *argv[]) {
 
     if (argc >= 3 && strcmp(argv[2], "wait") == 0) {
         SHELL_PRINTF("  press the USER button...\n");
-        return;                     /* the event lands as TIKU_EVENT_GPIO */
+        return;                     /* a press broadcasts TIKU_EVENT_GPIO */
     }
 
-    /* SWIER raises the line exactly as a pad edge does, so this tests the
-     * whole path from line to vector without touching the board. */
+    /* A write to SWIER raises the line as a pad edge does, so the path from
+     * line to vector runs with no button press. */
     uint32_t hits = tiku_stm32n6_exti_hits(DIAG_BTN_PIN);
     TIKU_REG32(STM32N6_EXTI_SWIER1) = (1UL << DIAG_BTN_PIN);
 
-    /* Poll for the handler's own counter rather than re-reading the pending
-     * flag: an interrupt takes a few cycles to be taken, and reading the flag
-     * straight after the trigger reports a miss that never happened. */
+    /* The handler's own counter is polled for up to 100000 spins: the
+     * interrupt is taken a few cycles after the trigger. */
     unsigned long spins = 100000UL;
     while (tiku_stm32n6_exti_hits(DIAG_BTN_PIN) == hits && spins > 0UL) {
         spins--;
@@ -113,19 +113,22 @@ static void diag_exti(uint8_t argc, const char *argv[]) {
                  (unsigned long)tiku_stm32n6_exti_hits(DIAG_BTN_PIN));
 }
 
-/** @brief Show the watchdog, or arm it and stop feeding it. */
+/**
+ * @brief Print the last reset code, or with `bite` arm the watchdog and stop
+ *        feeding it.
+ */
 static void diag_wdt(uint8_t argc, const char *argv[]) {
     if (argc >= 3 && strcmp(argv[2], "bite") == 0) {
-        /* ~1 s at 32 kHz. Nothing kicks it afterwards, so the reset that
-         * follows is the proof; the reset reason then names the watchdog. */
+        /* About 1 s at 32 kHz.  Nothing feeds it, so the board resets, and
+         * the reset reason after the reboot names the watchdog. */
         SHELL_PRINTF("  wdt: arming ~1 s and not feeding it; expect a reset\n");
         tiku_cpu_stm32n6_watchdog_on_arch(TIKU_WDT_SRC_ACLK, 32000U);
         for (;;) {
         }
     }
-    /* Tested through the SYSRSTIV-style code that /sys/boot decodes (0x0016
-     * is a watchdog timeout), not RCC_RSR, which the port may have cleared
-     * when it latched that code. */
+    /* tiku_common_reset_reason() returns the SYSRSTIV-style code that
+     * /sys/boot decodes; 0x0016 is a watchdog timeout.  Its first call
+     * latches the code and clears RCC_RSR. */
     SHELL_PRINTF("  wdt: last reset code 0x%04x%s\n",
                  (unsigned)tiku_common_reset_reason(),
                  (tiku_common_reset_reason() == 0x0016U)
@@ -186,9 +189,9 @@ static void diag_fault_show(void) {
     SHELL_PRINTF("  exc=%lx msp=%lx psp=%lx\n",
                  (unsigned long)f->exc, (unsigned long)f->msp,
                  (unsigned long)f->psp);
-    /* The frame verbatim: when a pop lands on stacked data, the eight
-     * named fields above are the corruption, and only the raw words say
-     * where the real frame sat. */
+    /* The 12 words of the frame area as found.  When the frame is shifted,
+     * the stacked pc, lr and psr printed above are the wrong words; the raw
+     * words show where the real frame sits. */
     SHELL_PRINTF("  frame %lx %lx %lx %lx\n",
                  (unsigned long)f->raw[0], (unsigned long)f->raw[1],
                  (unsigned long)f->raw[2], (unsigned long)f->raw[3]);
@@ -200,7 +203,7 @@ static void diag_fault_show(void) {
                  (unsigned long)f->raw[10], (unsigned long)f->raw[11]);
 }
 
-/** @brief Force one fault, so the handler can be seen working. */
+/** @brief Take one fault of kind @p which; the board resets after it. */
 static void diag_fault_force(const char *which) {
     SHELL_PRINTF("  forcing a %s fault; the board resets and `diag fault`"
                  " then shows it\n", which);
@@ -210,9 +213,9 @@ static void diag_fault_force(const char *which) {
          * with no bus or MPU involved. */
         __asm__ volatile ("udf #0");
     } else if (strcmp(which, "durable") == 0) {
-        /* A store into `.persistent` without the NVM window open: the MPU
-         * maps it read-only, so it takes a DACCVIOL with its address in
-         * MMFAR instead of being dropped. */
+        /* A store into `.persistent` with the NVM window closed: the MPU maps
+         * it read-only, so the store takes a DACCVIOL with its address in
+         * MMFAR. */
         extern uint32_t __persistent_start;
         *(volatile uint32_t *)(uintptr_t)&__persistent_start = 0xDEADBEEFUL;
     } else {
@@ -269,11 +272,11 @@ static void diag_fault_show(void) {
                  (unsigned long)f->sp);
 }
 
-/* Inside the PMP NULL guard; volatile so the compiler sees an address, not a
- * constant it can reason about. */
+/* An address inside the PMP NULL guard.  It is volatile so the compiler emits
+ * the access as written. */
 static volatile uintptr_t diag_unmapped = 0x10UL;
 
-/** @brief Force one exception, so the record can be seen working. */
+/** @brief Take one exception of kind @p which; the board resets after it. */
 static void diag_fault_force(const char *which) {
     SHELL_PRINTF("  forcing a %s fault; the board resets and `diag fault`"
                  " then shows it\n", which);
@@ -290,11 +293,14 @@ static void diag_fault_force(const char *which) {
     SHELL_PRINTF("  (no fault taken -- unexpected)\n");
 }
 
-/** @brief Show the last reset's cause, or arm the watchdog and starve it. */
+/**
+ * @brief Print the last reset's ROM code, or with `bite` arm the watchdog and
+ *        stop feeding it.
+ */
 static void diag_wdt(uint8_t argc, const char *argv[]) {
     if (argc >= 3 && strcmp(argv[2], "bite") == 0) {
-        /* ~1 s, never fed again: the reset that follows is the proof, and
-         * the ROM then names the TIMG0 watchdog as its cause. */
+        /* About 1 s and never fed: the board resets, and the ROM reports the
+         * TIMG0 watchdog as the cause. */
         SHELL_PRINTF("  wdt: arming ~1 s and not feeding it; expect a reset\n");
         tiku_cpu_esp32c61_watchdog_on_arch(TIKU_WDT_SRC_ACLK, 32768U);
         for (;;) {
@@ -306,8 +312,8 @@ static void diag_wdt(uint8_t argc, const char *argv[]) {
                      ? "  (a watchdog)" : "");
 }
 
-/** @brief Show how the last boot began and the PMU's sleep settings; the
- *         sleep itself is `power off`. */
+/** @brief Show how the last boot began and the PMU's sleep settings; deep
+ *         sleep is `power off` and light sleep `power nap`. */
 static void diag_sleep(void) {
     static const struct {
         const char *name;
@@ -338,7 +344,10 @@ static void diag_sleep(void) {
     }
 }
 
-/** @brief Bring the PSRAM up and check every word of it, or attach it. */
+/**
+ * @brief Bring the PSRAM up and check every word of it, or with `attach` hand
+ *        it to the PSRAM tier.
+ */
 static void diag_psram(uint8_t argc, const char *argv[]) {
     volatile uint32_t *w = (volatile uint32_t *)TIKU_ESP32C61_PSRAM_BASE;
     tiku_esp32c61_psram_err_t rc;

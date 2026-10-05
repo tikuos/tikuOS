@@ -7,8 +7,8 @@
  *
  * tiku_shell_cmd_sdram.c - "sdram" command implementation.
  *
- * Bring-up is a verb rather than boot work, so a board that is not using the
- * 64 MB of SDRAM does not pay its refresh current.
+ * Boot does not bring the 64 MB SDRAM up.  `sdram up` attaches it as the
+ * PSRAM tier, `sdram bench` times it, and no argument prints its state.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

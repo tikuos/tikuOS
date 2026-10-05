@@ -86,13 +86,13 @@
  * TIKU_DEVICE_APOLLO510 or _APOLLO510B (Cortex-M55), _APOLLO4L or _APOLLO4P
  * (Cortex-M4F) -- with the matching board define alongside it.  Apollo510 is
  * the default only when no device was selected: the device-select router
- * checks APOLLO510 before APOLLO4L, so an unconditional default here would
- * build the wrong device.
+ * checks APOLLO510 before APOLLO4L, so a defined APOLLO510 wins over any other
+ * device define.
  *
  * Every M4F device must be in the exclusion list, or the fallback would also
  * define APOLLO510 and pull Cortex-M55-only code (e.g. the ARMv8-M MPU diag)
- * into an M4F build, which fails to link.  Apollo510B is not listed: it is the
- * same M55 die and wants the APOLLO510 code paths.
+ * into an M4F build, which fails to link.  Apollo510B is not listed, so its
+ * build defines APOLLO510 too: it is the same M55 die and uses those paths.
  */
 #if !defined(TIKU_DEVICE_APOLLO510) && !defined(TIKU_DEVICE_APOLLO4L) && \
     !defined(TIKU_DEVICE_APOLLO4P)
@@ -124,8 +124,8 @@
  * @brief Clock time type: 16 bits on MSP430, 32 bits elsewhere.
  *
  * 16 bits wraps every 512 s at 128 Hz, past which a single-difference interval
- * is wrong; MSP430 keeps it because every timer compare pays for the width.
- * 32 bits moves the wrap to 388 days.  TIKU_CLOCK_LT / _DIFF follow the type.
+ * is wrong; on the 16-bit MSP430 a wider type costs every timer compare.  32
+ * bits moves the wrap to 388 days.  TIKU_CLOCK_LT / _DIFF follow the type.
  */
 #if defined(PLATFORM_MSP430)
 #define TIKU_CLOCK_CONF_TIME_T unsigned short
@@ -172,10 +172,11 @@
 #define MAIN_CPU_FREQ 240
 #endif
 #elif defined(PLATFORM_STM32N6)
-/* Boot rate, applied by tiku_cpu_freq_init(): 150 MHz is what the boot ROM
- * hands over, so booting here changes nothing but puts the clock tree under
- * the kernel's own setup.  `freq <mhz>` moves it up to 800 or down to 10 at
- * runtime; the tick and console run from HSI and do not follow. */
+/* Boot rate, applied by tiku_cpu_freq_init(): 150 MHz is the rate the boot
+ * ROM hands over, so booting at it keeps the rate and puts the clock tree
+ * under the kernel's own setup.  At run time `freq <mhz>` sets 64 (HSI), 800
+ * (overdrive) or an exact divisor of 1200 from 5 to 600; the tick and console
+ * run from HSI and do not follow. */
 #ifndef MAIN_CPU_FREQ
 #define MAIN_CPU_FREQ 150
 #endif
@@ -362,8 +363,9 @@
  * @defgroup TIKU_DEBUG_CONFIG Debug Configuration Flags
  * @brief Per-subsystem debug output switches.
  *
- * Each subsystem has its own <NAME>_PRINTF() macro gated by its own flag.  All
- * are 0 by default; set one to 1 to enable that subsystem's output.
+ * Each flag gates the <NAME>_PRINTF() macro of its subsystem below, and
+ * DEBUG_HTIMER also gates HTIMER_ARCH_PRINTF.  All are 0 by default; set one to
+ * 1 to enable that subsystem's output.
  * @{
  */
 
@@ -411,6 +413,9 @@
 /**
  * @defgroup TIKU_DEBUG_MACROS Debug Output Macros
  * @brief Unified debug output macros for all subsystems
+ *
+ * AES_PRINTF is gated by DEBUG_AES, which this file does not define; it prints
+ * only in a build that passes -DDEBUG_AES=1.
  * @{
  */
 

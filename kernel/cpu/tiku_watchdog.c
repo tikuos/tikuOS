@@ -7,9 +7,8 @@
  *
  * tiku_watchdog.c - Watchdog timer implementation
  *
- * Platform-independent watchdog timer logic. All hardware register
- * access is delegated to the HAL layer so this file contains only
- * platform-independent code.
+ * Keeps the configuration, the armed flag and the kick count; the HAL
+ * (hal/tiku_watchdog_hal.h) programs the hardware.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -67,9 +66,9 @@ void tiku_watchdog_init(void)
     wdt_enabled = 1;
 #else
     if (wdt.mode == TIKU_WDT_MODE_INTERVAL) {
-        /* An unsupported interval request leaves the hardware off rather
-         * than arming a reset watchdog.  tiku_watchdog_config() returns
-         * nothing, so callers check tiku_watchdog_mode_supported() first. */
+        /* Interval mode has no backend on this port: the watchdog is turned
+         * off.  tiku_watchdog_config() reports nothing, and
+         * tiku_watchdog_mode_supported() returns 0 for this mode. */
         tiku_watchdog_arch_off();
         wdt_enabled = 0;
         return;

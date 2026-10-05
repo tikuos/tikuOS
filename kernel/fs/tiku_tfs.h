@@ -7,9 +7,9 @@
  *
  * tiku_tfs.h - Tiku File Store: bounded, power-cut-safe files over NVM.
  *
- * Flat namespace, whole-file I/O, fixed-size slots; a file may span several
- * contiguous slots.  Every commit is a single aligned 32-bit write, so a power
- * cut leaves the previous contents rather than a torn file.
+ * Flat namespace, whole-file replacement, fixed-size slots; a file may span
+ * several contiguous slots.  Every commit is a single aligned 32-bit write,
+ * and a power cut before it leaves the previous contents.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -51,8 +51,9 @@
 /**
  * @brief Floor: slots every board in this class has.
  *
- * Mount refuses an extent too small for it (TFS_ERR_NOSPACE).  A build-time
- * fit check asserts against this, not against the count derived at mount.
+ * Mount refuses an extent too small for it (TFS_ERR_NOSPACE).  Build-time fit
+ * checks assert against this floor, since the count derived at mount is not
+ * known at build time.
  */
 #  if defined(AM_PART_APOLLO510) || defined(PLATFORM_RP2350) || \
       defined(PLATFORM_STM32N6) || defined(PLATFORM_ESP32C61)
@@ -63,7 +64,7 @@
 #  elif defined(PLATFORM_NORDIC)
 #    define TIKU_TFS_MIN_SLOTS  192
 #  elif defined(PLATFORM_RA8P1)
-     /* Under what the RA8P1 carve mounts, with margin. */
+     /* Below the count the RA8P1 carve derives, with margin. */
 #    define TIKU_TFS_MIN_SLOTS  96
 #  else
 #    define TIKU_TFS_MIN_SLOTS  16
@@ -124,9 +125,9 @@
 /**
  * @brief Where the data region starts for a store holding @p n files.
  *
- * The directory sits between the superblock and the data, so this moves with
- * the file count -- which is why the count is recorded in the superblock and a
- * store must never be parsed under a different one.
+ * The directory sits between the superblock and the data, so the data offset
+ * moves with the file count.  The superblock records the count, and mount
+ * refuses a store recorded with another.
  */
 #define TIKU_TFS_DATA_OFF_FOR(n)                                                \
     TIKU_TFS_ALIGN(TIKU_TFS_SB_BYTES + TIKU_TFS_DE_BYTES * (unsigned)(n),       \
@@ -135,9 +136,9 @@
 /**
  * @brief Bytes of NVM a store holding @p n files occupies.
  *
- * The inverse of mount, which derives the largest n that fits an extent.  A
- * caller owning its backing memory (MSP430 FRAM, host harness) starts from n
- * instead; both use the same layout, so a store sized here derives @p n back.
+ * Mount derives the largest n whose extent fits, so a store sized by this
+ * macro derives @p n back.  Callers that own their backing memory (the MSP430
+ * FRAM array, the host harness) size it with this.
  */
 #define TIKU_TFS_EXTENT_FOR_SLOTS(n)                                            \
     (TIKU_TFS_DATA_OFF_FOR(n) + TIKU_TFS_SLOT_BYTES * (unsigned)((n) + 1u))
@@ -150,7 +151,7 @@
 typedef enum {
     TFS_OK            =  0,
     TFS_ERR_INVAL     = -1,  /**< NULL arg / not mounted */
-    TFS_ERR_NOSPACE   = -2,  /**< no free directory slot / data slot */
+    TFS_ERR_NOSPACE   = -2,  /**< no free dirent or run; extent below floor */
     TFS_ERR_TOOBIG    = -3,  /**< past the reservation or over the file limit */
     TFS_ERR_NAMELEN   = -4,  /**< name empty or >= TIKU_TFS_NAME_MAX */
     TFS_ERR_EXISTS    = -5,  /**< file already exists (create) */
@@ -173,7 +174,7 @@ typedef enum {
     TFS_PROBE_UNKNOWN         /**< nonblank bytes with no recognizable store */
 } tfs_probe_kind_t;
 
-/** @brief One probe's findings; every field is read, nothing is written. */
+/** @brief One probe's findings, all read from the medium. */
 typedef struct {
     tfs_probe_kind_t kind;
     uint32_t version;   /**< recorded format version, 0 without a header  */
@@ -215,9 +216,8 @@ typedef struct {
 /**
  * @brief Largest file every board in this class is guaranteed to accept.
  *
- * Derived from the floor, where TIKU_TFS_FILE_MAX comes from the ceiling.  A
- * build-time fit check asserts against this one: the ceiling would pass on a
- * board whose carve cannot hold it.
+ * Derived from the floor.  TIKU_TFS_FILE_MAX comes from the ceiling, which a
+ * board's carve may not reach, so build-time fit checks assert against this.
  */
 #define TIKU_TFS_FILE_MAX_GUARANTEED \
     ((size_t)TIKU_TFS_MIN_SLOTS * TIKU_TFS_SLOT_BYTES - 4u)
@@ -235,8 +235,8 @@ typedef struct {
 /** @brief Mount state of one store: its backend and the derived geometry. */
 typedef struct tiku_tfs {
     tiku_nvm_backend_t *be;
-    /** Set while a streamed write is open: every other write returns
-     *  TFS_ERR_BUSY rather than interleave with it (see tiku_tfs_open_w()). */
+    /** Set while a streamed write is open; every other mutation returns
+     *  TFS_ERR_BUSY until it commits or aborts (see tiku_tfs_open_w()). */
     uint8_t  wr_open;
     /* Derived at mount from be->size. */
     uint16_t nfiles;      /**< directory entries this store holds        */
@@ -302,15 +302,15 @@ size_t tiku_tfs_region_size(void);
 /**
  * @brief Mount the store @p be holds.  Never formats.
  *
- * A missing header is TFS_ERR_NOSTORE and a header for another geometry or
- * version is TFS_ERR_GEOMETRY; tiku_tfs_probe() tells the caller which case
- * it met, and only an explicit tiku_tfs_format() or tiku_tfs_init() writes.
+ * A missing header returns TFS_ERR_NOSTORE, and a header for another geometry
+ * or version TFS_ERR_GEOMETRY; tiku_tfs_probe() classifies the extent.  Only
+ * tiku_tfs_format() and tiku_tfs_init() write a store.
  *
  * @return TFS_OK or a negative tfs_err_t.
  */
 int tiku_tfs_mount(tiku_tfs_t *fs, tiku_nvm_backend_t *be);
 
-/** @brief Wipe and reformat a store bound by a previous mount or init. */
+/** @brief Reformat a store bound by a previous mount or init, emptying it. */
 int tiku_tfs_format(tiku_tfs_t *fs);
 
 /** @brief Bind @p be and format it: the explicit way to create a store. */
@@ -319,20 +319,22 @@ int tiku_tfs_init(tiku_tfs_t *fs, tiku_nvm_backend_t *be);
 /**
  * @brief Classify the store at the start of @p be without writing anything.
  *
- * Reads the header and counts live directory entries, so a store that lost
- * only its header reads as torn and a report can count the files at stake.
+ * Reads the header and counts live directory entries into out->live; live
+ * entries without a header classify as TFS_PROBE_TORN.
  *
  * @return TFS_OK, or TFS_ERR_INVAL for a NULL argument.
  */
 int tiku_tfs_probe(const tiku_nvm_backend_t *be, tiku_tfs_probe_t *out);
 
 /**
- * @brief List every store header in @p region, at @p step granularity.
+ * @brief List every store candidate in @p region, at @p step granularity.
  *
- * Headers only: a candidate is a header at an offset whose remaining extent
- * could hold a store.  Fills at most @p max entries of @p out.
+ * A candidate is an offset whose remaining extent can hold a store and whose
+ * first bytes hold a store header, or its geometry words without the magic
+ * (TFS_PROBE_TORN).  Fills at most @p max entries of @p out.
  *
- * @return The number of candidates found, or TFS_ERR_INVAL.
+ * @return The number of candidates found, which may exceed @p max, or
+ *         TFS_ERR_INVAL.
  */
 int tiku_tfs_locate(const tiku_nvm_backend_t *region, size_t step,
                     tiku_tfs_cand_t *out, int max);
@@ -340,8 +342,9 @@ int tiku_tfs_locate(const tiku_nvm_backend_t *region, size_t step,
 /**
  * @brief Whether a store may be created at @p base_off without asking.
  *
- * True only when the whole region is uniformly 0x00 or 0xFF and the extent
- * at the base can hold a store; missing headers alone are not blank media.
+ * Returns 1 only when every byte of the region is 0x00, or every byte is 0xFF,
+ * and the extent at @p base_off can hold a store; otherwise 0.  @p step is
+ * ignored.
  */
 int tiku_tfs_may_provision(const tiku_nvm_backend_t *region, size_t base_off,
                            size_t step);
@@ -392,7 +395,7 @@ int tiku_tfs_write_chunk(tiku_tfs_wr_t *w, const void *data, size_t len);
  * @brief Publish an open write: length word, then one atomic dirent update.
  *
  * The dirent names only the slots the content reached.  The old run and the
- * reservation's unused tail are reclaimed only after it does.
+ * reservation's unused tail are freed after the dirent update.
  * @return TFS_OK, or a negative error (the write stays open on failure).
  */
 int tiku_tfs_commit(tiku_tfs_wr_t *w);
@@ -425,16 +428,17 @@ int tiku_tfs_list(tiku_tfs_t *fs, tiku_tfs_iter_cb cb, void *ctx);
  *        store as a directory tree (path-as-name).
  *
  * Files in the directory come back by leaf name; deeper paths contribute their
- * first path segment once, suffixed with '/' so folders are distinguishable.
- * @p prefix is "" (store root) or e.g. "logs/".  @return the child count.
+ * first path segment once, with a trailing '/'.  @p prefix is "" (store root)
+ * or a folder such as "logs/".  @return the child count.
  */
 int tiku_tfs_list_dir(tiku_tfs_t *fs, const char *prefix,
                       tiku_tfs_iter_cb cb, void *ctx);
 
-/** @brief Number of free directory slots. */
+/** @brief Number of free directory entries; 0 when not mounted. */
 size_t tiku_tfs_free_files(tiku_tfs_t *fs);
 
-/** @brief Data slots in use, an open write's reservation included. */
+/** @brief Data slots in use, an open write's reservation included; 0 when
+ *         not mounted. */
 size_t tiku_tfs_used_slots(tiku_tfs_t *fs);
 
 #endif /* TIKU_TFS_H_ */

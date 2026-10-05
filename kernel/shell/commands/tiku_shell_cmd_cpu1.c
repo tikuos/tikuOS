@@ -30,14 +30,13 @@
 #include <arch/ra8p1/cpu1/tiku_cpu1_sha256.h>
 #include <tikukits/crypto/p256/tiku_kits_crypto_p256.h>
 
-/** @brief Kernel ticks to milliseconds (128 Hz tick). */
+/** @brief Kernel ticks to ms at a 128 Hz tick; wrong at any other rate. */
 #define CPU1_TICKS_TO_MS(t)  (((t) * 125u) / 16u)
 
 /**
- * @brief Wait for the mailbox reply to a work message, without a deadline
- *        shorter than the work.
+ * @brief Poll for the mailbox reply to a work message for up to @p ms.
  *
- * @param out  Digest destination
+ * @param out  Reply destination
  * @param cap  Its size
  * @param ms   Budget in milliseconds
  * @return Reply length, or 0 when the budget ran out
@@ -66,12 +65,6 @@ static uint32_t cpu1_wait_reply(void *out, uint32_t cap, uint32_t ms)
     return 0u;
 }
 
-/**
- * @brief Handle `cpu1 start|stop|ping|bench|verify|info`.
- *
- * @param argc Argument count
- * @param argv Argument vector
- */
 void tiku_shell_cmd_cpu1(uint8_t argc, const char *argv[])
 {
     if (argc >= 2u && tiku_cmd_streq(argv[1], "start")) {
@@ -115,8 +108,7 @@ void tiku_shell_cmd_cpu1(uint8_t argc, const char *argv[])
                 SHELL_PRINTF("cpu1: send refused (not running?)\n");
                 return;
             }
-            /* Bounded: an unanswered mailbox must report, not hang the
-             * shell that asked. */
+            /* At most 200000 polls; a round with no reply counts as bad. */
             for (spins = 0u; spins < 200000u; spins++) {
                 if (tiku_coproc_poll()) {
                     n = tiku_coproc_reply(back, sizeof(back));
@@ -202,8 +194,8 @@ void tiku_shell_cmd_cpu1(uint8_t argc, const char *argv[])
             }
         }
 
-        /* Parallel: hand CPU1 the job, then do the same work inline while
-         * it runs -- two chains for little more than the slower one. */
+        /* Parallel: CPU1 gets the job, and the M85 runs the same chain
+         * while it works. */
         t0 = tiku_clock_time();
         (void)tiku_coproc_send(job, sizeof(job));
         tiku_cpu1_sha256_chain(&job[8], iters, d_par);
@@ -313,8 +305,7 @@ void tiku_shell_cmd_cpu1(uint8_t argc, const char *argv[])
                      "%lu verifies\n",
                      (unsigned long)ms_par, (unsigned long)rounds);
 
-        /* A verifier that always answered "valid" would score identically
-         * above, so corrupt the signature and require both to reject. */
+        /* One bit of r flipped: both verifiers must reject the signature. */
         job[100] ^= 0x01u;
         in_ok = (tiku_kits_crypto_p256_ecdsa_verify(qx, qy, hsh, 32u,
                                                     &job[100], ss) != 0);
@@ -333,9 +324,9 @@ void tiku_shell_cmd_cpu1(uint8_t argc, const char *argv[])
         uint32_t a = tiku_ra8p1_cpu1_heartbeat();
         uint32_t b;
 
-        /* Two reads with work between them: a non-zero counter shows the
-         * payload ran, and one that moves between the reads shows the core
-         * is still running rather than stopped at a fault. */
+        /* Two heartbeat reads with a delay between them.  A non-zero count
+         * means the payload ran; a count that moved prints "advancing", one
+         * that did not prints "STOPPED". */
         for (b = 0; b < 20000u; b++) {
             __asm__ volatile ("nop");
         }

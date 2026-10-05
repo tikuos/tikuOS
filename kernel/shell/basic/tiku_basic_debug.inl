@@ -24,7 +24,7 @@ static uint16_t basic_debug_breaks[BASIC_DEBUG_BREAKS];
 static char basic_debug_watches[BASIC_DEBUG_WATCHES]
                               [TIKU_BASIC_NAMEDVAR_LEN + 1];
 
-/** @brief Whether a run is parked at a pause, so the tick lets it be. */
+/** @brief 1 while a run is paused; the mode tick takes no checkpoint then. */
 static int
 basic_debug_parked(void)
 {
@@ -232,7 +232,8 @@ bad:
     SHELL_PRINTF("[TDBG ERROR invalid-command-or-limit]\n");
 }
 #else
-/* Debugger compiled out: the hooks are inert and DEBUG reports it. */
+/* Debugger compiled out: the hooks do nothing, before_step and parked return
+ * 0, and DEBUG prints [TDBG ERROR debugger-disabled]. */
 static void basic_debug_reset(void) { }
 static void basic_debug_begin(void) { }
 static void basic_debug_end(void) { }

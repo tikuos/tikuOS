@@ -27,9 +27,9 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * Gate key for the epoch-baseline cell.  An arbitrary non-trivial sentinel: a
- * gate that does not hold it means the baseline is virgin, so reads return 0
- * and init re-primes.  Bump it if the cell's meaning ever changes.
+ * Gate key for the epoch-baseline cell.  A gate that does not hold it marks
+ * the baseline invalid: reads return 0 and init re-primes.  Change the key
+ * when the cell's meaning changes.
  */
 #define TIKU_RTC_MAGIC  0x57414C44UL /* 'WALD': epoch-baseline layout */
 
@@ -54,9 +54,9 @@ TIKU_PERSIST_CELL(rtc_cell, rtc_epoch_base, TIKU_RTC_MAGIC, NULL, 0);
 /**
  * @brief Initialise the soft RTC. Idempotent.
  *
- * A validating gate means the persisted baseline is real and is left alone --
- * the reboot path where the clock is meant to survive.  Otherwise the cell API
- * zeroes the baseline and stamps the gate last, in its own unlock window.
+ * A valid gate leaves the stored baseline as it is; otherwise the cell API
+ * zeroes it and stamps the gate last, in its own unlock window.  Either way
+ * this boot's uptime becomes the pairing baseline.
  */
 void
 tiku_rtc_init(void)
@@ -71,9 +71,8 @@ tiku_rtc_init(void)
 /**
  * @brief Return current wall-clock seconds since the epoch.
  *
- * Reconstructs epoch_base plus the uptime elapsed since the baseline was
- * paired, returning 0 when the clock was never set.  Read-only and lock-free,
- * so the MPU is never unlocked here; this is the hot path behind /sys/time.
+ * Returns epoch_base plus the uptime since the pairing, or 0 when the gate is
+ * invalid or the baseline is 0.  Opens no MPU window.
  *
  * @return Wall-clock seconds, or 0 if the RTC was never set.
  */
@@ -92,8 +91,8 @@ tiku_rtc_get_seconds(void)
  * @brief Set the wall clock to @p epoch_seconds.
  *
  * Stores the epoch and pairs it with the current uptime, so later reads add
- * only what has elapsed since.  The commit stamps value then gate in one
- * window, so the value is valid even on a virgin store.
+ * only what has elapsed since.  The commit stores the value, then the gate,
+ * in one window, so a set also validates a cell that was never primed.
  *
  * @param epoch_seconds  Desired wall-clock time, seconds since epoch.
  * @return 0 when the commit completed, -1 on failure
@@ -122,8 +121,7 @@ void tiku_rtc_set_seconds(uint32_t epoch_seconds)
  * True only when the gate validates and the baseline is non-zero; init primes
  * a never-set baseline to 0.
  *
- * @return Non-zero if the clock has been set at least once since the
- *         chip was first programmed, 0 otherwise.
+ * @return Non-zero after a set to a non-zero time, 0 otherwise.
  */
 int
 tiku_rtc_is_set(void)

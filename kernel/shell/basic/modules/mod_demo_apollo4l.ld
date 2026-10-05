@@ -24,10 +24,9 @@
 MEMORY
 {
     /* MRAM slot: the top 32 KB of the apollo4l/apollo4p code window (cap
-     * 0x78000 less the module reserve).  MRAM is executable but only
-     * bootrom-programmable, so the loader installs through
-     * tiku_nvm_mram_program instead of CPU stores.  Kept in sync with
-     * TIKU_MODULE_CARVE_ADDR. */
+     * 0x78000 less the module reserve).  MRAM is executable, but only the
+     * bootrom programs it, so the loader installs through
+     * tiku_nvm_mram_program().  It must equal TIKU_MODULE_CARVE_ADDR. */
     CARVE (rx) : ORIGIN = 0x70000, LENGTH = 0x8000   /* 32 KB */
 }
 
@@ -50,11 +49,10 @@ SECTIONS
 
     /*
      * Modules get no data RAM: nothing copies a .data initialiser or clears a
-     * .bss, and the service table has no allocator.  A /DISCARD/ entry would
-     * drop these inputs silently and ship a global pointing at nothing, so
-     * they are collected here and required to be empty, which makes writable
-     * state a link error naming the cause.  --gc-sections still drops a
-     * global that nothing references, so only state a handler uses trips it.
+     * .bss, and the service table has no allocator.  The .data and .bss
+     * inputs are collected here and must be empty, so writable state fails
+     * the link with a message naming the cause.  --gc-sections drops an
+     * unreferenced global first, so only state a handler uses fails it.
      */
     .modwritable (NOLOAD) : { *(.bss*) *(.data*) *(COMMON) }
 

@@ -37,7 +37,7 @@ psram_hz_read(char *buf, size_t max)
     return snprintf(buf, max, "%lu\n", tiku_psram_clock_hz());
 }
 
-/** @brief Device size -- a constant of the part, not of its power state. */
+/** @brief Device size in bytes, a constant reported in any power state. */
 static int
 psram_size_read(char *buf, size_t max)
 {
@@ -59,8 +59,8 @@ psram_tap_read(char *buf, size_t max)
  * @brief Write handler for /sys/psram/state: the lifecycle verbs.
  *
  * "up" runs the full bring-up at 192 MHz (identity, scan, XIP, tier attach);
- * "down" refuses while tier allocations are live -- the no-dangling-pointer
- * contract, surfaced as a failed write; "sleep"/"wake" drive half-sleep.
+ * "down" fails while tier allocations are live, since power-down loses the
+ * contents; "sleep"/"wake" drive half-sleep, and "wake" maps XIP again.
  */
 static int
 psram_state_write(const char *buf, size_t len)

@@ -30,7 +30,7 @@
 /** One-time bring-up (on Cortex-M: ISR stack, MSP->PSP migration, PendSV
  *  priority, cycle counter).  Runs in kernel (thread) context. */
 extern void      tiku_thread_arch_boot(void);
-/** Pend the context-switch exception (ISR-safe, idempotent). */
+/** Pend the context-switch exception (callable from an ISR, idempotent). */
 extern void      tiku_thread_arch_pend(void);
 /** Free-running CPU cycle counter (wraps; deltas are what matter). */
 extern uint32_t  tiku_thread_arch_cycles(void);
@@ -80,8 +80,7 @@ static volatile uint16_t s_canary_faults;
  * @brief Is worker @p t eligible for the CPU right now?
  *
  * READY and below its cycle ceiling, budget - 1; a budget of 0 is unlimited.
- * The single enforcement point -- both the switcher's pick loop and
- * tiku_thread_worker_ready() consult it, so the two can never disagree.
+ * The switcher's pick loop and tiku_thread_worker_ready() both use it.
  */
 static int worker_runnable(const tiku_thread_t *t)
 {
@@ -118,9 +117,9 @@ static void wake_due(void)
  * @brief Non-zero in kernel-thread (or pre-thread boot) context, zero in a
  *        worker.
  *
- * The confinement predicate for TIKU_MEM_KERNEL_ONLY: memory mutators refuse
- * worker-context calls rather than race the kernel's lock-free structures.  One
- * aligned volatile read, so it is safe from any context, an ISR included.
+ * TIKU_MEM_KERNEL_ONLY tests it: memory mutators refuse calls from a worker,
+ * since the kernel's structures take no locks.  It only reads two variables,
+ * so any context may call it, an ISR included.
  */
 int tiku_thread_in_kernel(void)
 {
@@ -301,15 +300,14 @@ int tiku_thread_join(tiku_thread_t *t)
     }
     /* Kernel-context wait: repeatedly hand the CPU to the workers.
      * The tick wakes the kernel every tick (tiku_sched_notify()), so
-     * this loop re-checks at tick granularity.  Test/teardown tool —
-     * steady-state code should take a completion event instead. */
+     * this loop re-checks at tick granularity. */
     while (t->state != TIKU_THREAD_DONE) {
         tiku_atomic_enter();
         if (tiku_thread_worker_ready()) {
             tiku_thread_kernel_block();
         }
         tiku_atomic_exit();
-        /* PendSV fires here (if pended); kernel resumes on wake. */
+        /* A pended switch fires here; the kernel resumes on wake. */
     }
     return 0;
 }
@@ -419,10 +417,9 @@ int tiku_thread_await(tiku_thread_t *t, struct tiku_process *p)
 
 /*
  * budget is a 64-bit field the switch reads while picking the next
- * worker; a two-store update could be torn by the switch, so every
- * mutation runs inside the atomic section, which masks the switch
- * exception.  cycles is written only by the switch itself, so the
- * comparisons never race it.
+ * worker, and a two-store update can tear under it, so every update
+ * below runs inside the atomic section, which masks the switch
+ * exception.  Only the switch writes cycles.
  */
 
 void tiku_thread_budget_grant(tiku_thread_t *t, unsigned long long cycles)
@@ -431,9 +428,8 @@ void tiku_thread_budget_grant(tiku_thread_t *t, unsigned long long cycles)
         return;
     }
     tiku_atomic_enter();
-    /* Ceiling = already-consumed + allowance, stored plus one: a never-run
-     * worker (cycles == 0) granted 0 has a ceiling of 0, which would
-     * otherwise read as "unlimited". */
+    /* Stored as consumed + allowance + 1, since 0 means unlimited: a
+     * never-run worker granted 0 gets a budget of 1, which parks it. */
     t->budget = t->cycles + cycles + 1ull;
     tiku_atomic_exit();
 }

@@ -7,9 +7,9 @@
  *
  * tiku_shell_jobs.h - periodic and one-shot scheduled shell commands.
  *
- * A small scheduler driven by a tick from the shell main loop, so it inherits
- * cooperative scheduling and needs no synchronisation.  Jobs live in SRAM and
- * do not survive a reboot.
+ * A small scheduler driven by a tick from the shell main loop, so it runs in
+ * the shell process and needs no synchronisation.  The job table is cleared
+ * at every reset.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -110,14 +110,11 @@ uint8_t tiku_shell_jobs_clear(void);
 const tiku_shell_job_t *tiku_shell_jobs_get(uint8_t id);
 
 /**
- * @brief Convenience: parse interval and command tokens from an argv
- *        coming straight out of a shell command handler, then register
- *        the job.  Prints a one-line diagnostic via SHELL_PRINTF on
- *        any failure.
+ * @brief Schedule a job from the argv of an `every` or `once` handler.
  *
- * Expected layout: argv[0] = command name (e.g. "every"), argv[1] =
- * decimal interval in seconds, argv[2..argc-1] = command tokens to
- * dispatch when the job fires.  Tokens are joined with single spaces.
+ * argv[1] is the interval in decimal seconds and argv[2..argc-1] the command,
+ * joined with single spaces; quotes the parser removed are not restored.  Any
+ * failure prints a one-line message.
  *
  * @return Slot id (>= 0) on success, -1 on error (message printed).
  */

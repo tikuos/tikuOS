@@ -8,8 +8,8 @@
  * tiku_basic_call.inl - function-call dispatch for numeric expressions.
  *
  * Not a standalone unit; included from tiku_basic.c.  Dispatches a keyword
- * lookahead to the matching builtin or a user-defined DEF FN, with helpers that
- * consume the parentheses and the comma-separated arguments.
+ * lookahead to the matching builtin, a DEF FN or a registered extension, with
+ * helpers that consume the parentheses and the comma-separated arguments.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -110,10 +110,10 @@ expr_call(const char **p, long *out_v)
     long a, b;
 
     skip_ws(p);
-    /* A builtin name may also be an already-declared named variable.  In
-     * that case, lack of call syntax means variable access (for example
-     * COUNT after `COUNT = 5`).  An undeclared builtin without parentheses
-     * still enters dispatch so it retains the useful "'(' expected" error. */
+    /* A builtin name may also be a declared named variable: without a '('
+     * it reads the variable (COUNT after `COUNT = 5`).  An undeclared builtin
+     * name without parentheses goes on to dispatch, which raises "'('
+     * expected". */
     skip_ws(&call);
     {
         const char *ident = call;
@@ -189,8 +189,7 @@ expr_call(const char **p, long *out_v)
     if (match_kw(p, "SHR")) {
         if (!parse_call_2arg(p, &a, &b)) return 1;
         if (b < 0 || b >= 32) { *out_v = 0; return 1; }
-        /* Logical shift -- treat the value as unsigned for the shift,
-         * which matches what register / mask code wants. */
+        /* Logical shift: the value shifts as unsigned. */
         *out_v = (long)((unsigned long)a >> b);
         return 1;
     }
@@ -258,8 +257,7 @@ expr_call(const char **p, long *out_v)
      * ERR is the category code (see TIKU_BASIC_ERR_* in the config;
      * GENERAL=1 for anything the throw site could not classify), ERL
      * the line that errored.  Both are 0 until the first error of the
-     * run.  Empty-paren form like the time builtins so the lexer knows
-     * they are functions, not variables.  The typical handler:
+     * run.  A handler:
      *   ON ERROR GOTO 900
      *   ...
      *   900 IF ERR() = 6 THEN PRINT "net down @"; ERL() : RESUME NEXT */
@@ -319,9 +317,8 @@ expr_call(const char **p, long *out_v)
         }
     }
 #endif
-    /* Time builtins.  MILLIS, NOW and SECS take an empty () so the parser
-     * knows they are functions (otherwise MILLIS would parse as a multi-char
-     * identifier with nothing to do). */
+    /* Time builtins: MILLIS(), NOW() and SECS() take an empty argument
+     * list. */
     if (match_kw(p, "MILLIS")) {
         skip_ws(p);
         if (cur_peek(p) != '(') {
@@ -334,10 +331,9 @@ expr_call(const char **p, long *out_v)
         }
         cur_advance(p);
         /* Milliseconds since boot modulo 2^32, so MILLIS() - T holds across
-         * the wrap at 49.7 days; the conversion never forms ticks * 1000,
-         * which overflows a 32-bit long after 4.66 h at 128 Hz.  MSP430's
-         * 16-bit tick wraps it to 0 after 511992 ms at 128 Hz.  Meant for
-         * short timing patterns. */
+         * the 49.7-day wrap.  Whole seconds and the sub-second remainder
+         * convert separately, so no ticks * 1000 product overflows.  MSP430's
+         * 16-bit tick wraps MILLIS() to 0 after 511992 ms at 128 Hz. */
         {
             unsigned long t = (unsigned long)tiku_clock_time();
             unsigned long ms = (t / (unsigned long)TIKU_CLOCK_SECOND) * 1000u +
@@ -349,8 +345,7 @@ expr_call(const char **p, long *out_v)
     }
 #if TIKU_BASIC_RTC_ENABLE
     /* NOW() -- wall-clock seconds since the Unix epoch (0 until the RTC is
-     * set via SETTIME or NTP). 0-arg-with-parens like MILLIS so the lexer
-     * treats it as a function. Fits a signed 32-bit long until 2038. */
+     * set via SETTIME or NTP).  Fits a signed 32-bit long until 2038. */
     if (match_kw(p, "NOW")) {
         skip_ws(p);
         if (cur_peek(p) != '(') {
@@ -369,8 +364,8 @@ expr_call(const char **p, long *out_v)
 #if TIKU_BASIC_FIXED_ENABLE
     if (match_kw(p, "FMUL")) {
         if (!parse_call_2arg(p, &a, &b)) return 1;
-        /* Use long long for the intermediate product so values up
-         * to a few thousand can multiply without 32-bit overflow. */
+        /* The product forms in long long, so a * b does not overflow
+         * before the division. */
         *out_v = (long)(((long long)a * (long long)b) /
                         (long long)TIKU_BASIC_FIXED_SCALE);
         return 1;
@@ -387,11 +382,9 @@ expr_call(const char **p, long *out_v)
     }
     if (match_kw(p, "FPOW")) {
         /* Q.3 fixed-point power: base is Q.3, the exponent is a plain
-         * integer count, and the result is Q.3.  This is the explicit
-         * fixed-point counterpart to the integer `^` operator -- since
-         * the engine cannot tell "2000" from "2.000", the caller states
-         * intent by choosing `^` (integer) or FPOW (Q.3).  A negative
-         * exponent yields 0.
+         * integer count, and the result is Q.3.  A value carries no mark
+         * of being Q.3 ("2000" and "2.000" are equal), so the program picks
+         * `^` for integers or FPOW for Q.3.  A negative exponent yields 0.
          *   FPOW(2.0, 2) = 4.000    FPOW(0.5, 2) = 0.250 */
         long r, n;
         if (!parse_call_2arg(p, &a, &b)) return 1;
@@ -481,8 +474,8 @@ expr_call(const char **p, long *out_v)
 #endif
 #if TIKU_BASIC_NET_ENABLE
     /* NETUP() -- 1 if the IP link is installed (after `wifi up` / a link
-     * backend brought it up), else 0. Parens optional so `IF NETUP THEN`
-     * reads naturally. Guards UDPSEND / MQTTPUB / HTTPGET$. */
+     * backend brought it up), else 0.  The parentheses are optional (`IF
+     * NETUP THEN`).  A program tests it before UDPSEND, MQTTPUB or HTTPGET$. */
     if (match_kw(p, "NETUP")) {
         skip_ws(p);
         if (cur_peek(p) == '(') {
@@ -623,9 +616,9 @@ expr_call(const char **p, long *out_v)
         *out_v = match ? (long)(match - haystack + 1) : 0;
         return 1;
     }
-    /* COUNT(haystack, needle) -- number of non-overlapping occurrences (0 if
-     * the needle is empty or absent): list items, lines (COUNT(s$,CHR$(10))),
-     * delimiters, keyword hits in LLM/API text. */
+    /* COUNT(haystack, needle) -- the number of non-overlapping occurrences,
+     * 0 when the needle is empty or absent; COUNT(s$, CHR$(10)) counts
+     * newlines. */
     if (match_kw(p, "COUNT")) {
         char haystack[TIKU_BASIC_STR_BUF_CAP];
         char needle[TIKU_BASIC_STR_BUF_CAP];
@@ -682,9 +675,9 @@ expr_call(const char **p, long *out_v)
     }
 #endif
 #if TIKU_BASIC_DEFN_ENABLE
-    /* User-defined functions via DEF FN. Match an identifier and
-     * look it up in the table. Built-ins above had first dibs, so a
-     * user can't redefine RND / ABS / etc. */
+    /* DEF FN functions: the identifier is looked up in the DEF FN table.
+     * The builtins above match first, so a DEF FN cannot replace RND, ABS
+     * or another builtin. */
     {
         const char *q = save;
         char        nm[8];
@@ -726,8 +719,8 @@ expr_call(const char **p, long *out_v)
                         basic_throw(TIKU_BASIC_ERR_SYNTAX, "')' expected"); return 1;
                     }
                     cur_advance(p);
-                    /* Bind arguments to their named variables, saving the
-                     * caller's previous values. */
+                    /* Bind each argument to its letter variable, saving
+                     * the caller's value. */
                     for (ai = 0; ai < ac; ai++) {
                         saved[ai]  = basic_vars[basic_defns[i].arg_idx[ai]];
                         basic_vars[basic_defns[i].arg_idx[ai]] = args_v[ai];

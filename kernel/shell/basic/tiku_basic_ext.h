@@ -7,9 +7,9 @@
  *
  * tiku_basic_ext.h - native builtin registry for Tiku BASIC.
  *
- * Lets kernel services register new words at boot without editing the
- * interpreter: statements dispatch after the built-in keyword chain and
- * functions after the built-in function chain, so builtins win.
+ * Kernel services register new words at boot: statements dispatch after the
+ * built-in keyword chain and functions after the built-in function chain, so
+ * a builtin always matches first.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,7 +20,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/** Longest registered name incl. NUL. */
+/** Name buffer size, including the NUL: names are at most 11 characters. */
 #define TIKU_BASIC_EXT_NAME_MAX 12
 
 /**
@@ -104,8 +104,8 @@ int tiku_basic_ext_parse_strexpr(const char **p, char *buf, size_t cap);
 /**
  * @brief Raise an interpreter error.
  *
- * Routes through the error sink (tiku_basic_set_error_sink()), so it works
- * headless.
+ * Routes through the error sink, which tiku_basic_set_error_sink() can
+ * replace.
  *
  * @param cat  Category, TIKU_BASIC_ERR_*
  * @param msg  Bare message text

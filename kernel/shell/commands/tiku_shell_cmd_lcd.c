@@ -231,7 +231,10 @@ do_putf(uint8_t argc, const char *argv[])
     tiku_lcd_put_fixed(v, (uint8_t)dec);
 }
 
-/** @brief `lcd puth <hex> [digits]`: right-aligned hex, full width default. */
+/**
+ * @brief `lcd puth <n> [digits]`: n right-aligned in hex, full width by
+ *        default.  n is read as decimal unless it has a 0x prefix.
+ */
 static void
 do_puth(uint8_t argc, const char *argv[])
 {
@@ -339,10 +342,9 @@ tiku_shell_cmd_lcd(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* Lazy init: if no autostart process (e.g. the LCD demo)
-     * has already initialised the LCD_C peripheral, the panel is
-     * unconfigured and writes to LCDMEM produce nothing visible.
-     * Init on first use so the harness works in shell-only builds. */
+    /* The first lcd command calls tiku_lcd_init(), which also blanks the
+     * panel, even when another process such as the LCD demo has initialised
+     * it.  Without an init, LCDMEM writes show nothing. */
     if (!lcd_inited) {
         tiku_lcd_init();
         lcd_inited = 1;

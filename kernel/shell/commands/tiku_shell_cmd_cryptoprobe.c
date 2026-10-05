@@ -283,7 +283,8 @@ void tiku_shell_cmd_cryptoprobe(uint8_t argc, const char *argv[])
                      (rc == 0 && memcmp(tag_sw, tag_hw, 16u) == 0)
                          ? SH_GREEN "MATCH" SH_RST : SH_RED "diff" SH_RST);
         {
-            /* differential: does hw look like AES-128 over key[0..15]? */
+            /* The same message under software AES-128 with key[0..15]; a
+             * match means the hardware ran a 128-bit key. */
             static uint8_t ct128[80], tag128[16];
             tiku_kits_crypto_gcm_ctx_t g128;
             tiku_kits_crypto_gcm_init(&g128, key);
@@ -336,7 +337,7 @@ void tiku_shell_cmd_cryptoprobe(uint8_t argc, const char *argv[])
             0xb4,0x3a,0x0e,0x89,0x67,0xaa,0x44,0xef,0x6d,0x4c,0x7c,0x44,
             0x00,0xa4,0x91,0x0b,0xe4,0x1e,0xf7,0x13,0x31,0x4e,0xa3,0x06,
             0xe8,0x36,0xb9,0x68,0x94,0x1b,0xe8,0x4f };
-        /* P-384 KAT (matches the kits-crypto-cert vector) */
+        /* P-384 KAT, the vector of TikuBench's kits-crypto-cert suite */
         static const uint8_t p384_qx[48] = {
             0xb0,0x46,0xd1,0xbd,0x27,0x9a,0x56,0xb7,0xcf,0x78,0x7d,0x74,
             0xfa,0xeb,0x00,0x58,0xd3,0xa9,0xe6,0x56,0x67,0x1f,0x65,0x2f,

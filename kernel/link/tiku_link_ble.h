@@ -17,10 +17,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/** @brief Bytes of length in front of every message on the pipe. */
+/** @brief Bytes of length, little-endian, in front of every message on the
+ *         pipe. */
 #define TIKU_LINK_BLE_HEADER 4u
 
-/** @brief Bytes a link holds for the pipe to take later. */
+/** @brief Size of the outbox: bytes a link holds until the pipe takes them. */
 #ifndef TIKU_LINK_BLE_OUTBOX
 #define TIKU_LINK_BLE_OUTBOX 2048u
 #endif
@@ -37,7 +38,7 @@
 #endif
 
 /** @brief How often it is serviced while a central holds it: a pairing
- *         exchange and the pipe's one-fragment mailbox both want an answer
+ *         exchange and the pipe's one-fragment mailbox both need servicing
  *         within a connection interval. */
 #ifndef TIKU_LINK_BLE_LINK_TICKS
 #define TIKU_LINK_BLE_LINK_TICKS 1u
@@ -56,7 +57,7 @@ typedef struct {
     uint32_t drops;     /**< times a subscribed central went away */
     uint32_t oversize;  /**< messages too large for the buffer, skipped */
     uint32_t refused;   /**< sends refused whole: down, too large, no room */
-    uint32_t stalled;   /**< times the pipe would take no more for now */
+    uint32_t stalled;   /**< times the pipe took no more bytes */
 } tiku_link_ble_stats_t;
 
 /** @brief A link over the BLE serial facade; the caller keeps it. */
@@ -76,13 +77,16 @@ typedef struct {
 } tiku_link_ble_t;
 
 /**
- * @brief Start advertising as @p name and open the link over whoever
- *        connects and subscribes.  One link at a time: the radio is one.
- *        The link confers TIKU_VFS_CAP_HW while its central has paired and
- *        runs it encrypted, nothing otherwise; read it with tiku_link_cap().
+ * @brief Advertise as @p name and open the link for the central that connects
+ *        and subscribes.
+ *
+ * One link can be open at a time.  The link confers TIKU_VFS_CAP_HW while its
+ * central is paired and the connection encrypted, and no capability otherwise
+ * (tiku_link_cap()).
  *
  * @param buf  Where a received message is gathered, @p cap bytes.
- * @return the link, or NULL when the facade refuses or one is already open.
+ * @return the link, or NULL when @p l or @p buf is NULL, @p cap is 0, a link
+ *         is already open or the facade refuses to start.
  */
 tiku_link_t *tiku_link_ble_open(tiku_link_ble_t *l, const char *name,
                                 uint8_t *buf, size_t cap);
@@ -96,7 +100,8 @@ const tiku_link_ble_stats_t *tiku_link_ble_stats(const tiku_link_ble_t *l);
 /** @brief Whether the process that services the pipe is running. */
 uint8_t tiku_link_ble_pumping(void);
 
-/** @brief Service the open link once, from whoever's context. */
+/** @brief Service the open link once, in the caller's context; does nothing
+ *         with no link open. */
 void tiku_link_ble_service(void);
 
 #endif /* TIKU_LINK_BLE_H_ */

@@ -8,8 +8,7 @@
  * tiku_shell_cmd_calc.c - "calc" command implementation.
  *
  * Evaluates a space-separated infix expression over integer literals with +, -,
- * *, /, %, min and max.  Arithmetic is 32-bit signed and there is no floating
- * point, since softfloat would dwarf the command on the smallest parts.
+ * *, /, %, min and max.  Arithmetic is 32-bit signed integer only.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -37,8 +36,8 @@ typedef enum {
     CALC_OP_MAX
 } calc_op_t;
 
-/* At most 4 operands and 3 operators; on MSP430 the parser's 8-entry argv
- * ("calc" + 7 tokens) gives the same bound. */
+/* At most 4 operands and 3 operators.  On MSP430 the parser fills at most 8
+ * argv entries ("calc" + 7 tokens) and drops later tokens without an error. */
 #define CALC_MAX_NUMS  4
 #define CALC_MAX_OPS   (CALC_MAX_NUMS - 1)
 

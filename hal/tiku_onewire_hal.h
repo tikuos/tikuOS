@@ -5,10 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_onewire_hal.h - Platform-routing header for 1-Wire bus
+ * tiku_onewire_hal.h - platform routing for the 1-Wire bus driver.
  *
- * Routes to the correct architecture-specific 1-Wire header based on the
- * selected platform.
+ * Includes arch/<platform>/tiku_onewire_arch.h for the PLATFORM_* macro the
+ * build defines. Code outside arch/ includes the 1-Wire arch header only
+ * through this file.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -96,11 +96,9 @@
 #endif
 
 /*
- * The arena must fit its tier pool, and the asserts below check it at build
- * time.  basic_alloc_state() requests BASIC_ARENA_BYTES in one contiguous
- * reservation, so it may not exceed the pool's guaranteed size; a short pool
- * is a build error here instead of "out of memory" when `basic` starts on the
- * board.
+ * basic_alloc_state() requests BASIC_ARENA_BYTES in one contiguous
+ * reservation, which must not exceed its tier pool's guaranteed size; the
+ * asserts below fail the build when it does.
  *
  * The checks set a capacity floor, not the space free at run time: other
  * allocations share the same backing.  The request keeps AUTO's HIFRAM/SRAM
@@ -139,12 +137,12 @@ _Static_assert(BASIC_ARENA_BYTES <= TIKU_TIER_SRAM_MIN,
  * @brief Reset the BASIC variable namespace to its just-entered state.
  *
  * Clears every user-visible binding -- scalars, strings and their heap, arrays,
- * DEF FN -- and rewinds the arena to basic_arena_mark so DIMmed element storage
- * is reclaimed.  The program line table is left alone.
+ * DEF FN, CONST flags -- and rewinds the arena to basic_arena_mark, freeing
+ * DIMmed element storage.  The program line table is left alone.
  *
- * @note Shared by basic_alloc_state(), NEW, RUN and LOAD so all four agree on
- *       what "fresh variables" means, and so re-DIMming across runs does not
- *       trip "array already DIMmed".
+ * @note Called by basic_alloc_state(), NEW, RUN, LOAD and the checkpoint
+ *       restore; without it a second RUN of a program that DIMs A fails
+ *       with "array A already DIMmed".
  */
 static void
 basic_clear_vars(void)
@@ -237,9 +235,9 @@ basic_alloc_state(void)
         basic_arena_ready = 1;
     }
 
-    /* Attach the arena to the owning (shell) process so ps and
-     * /proc/<pid>/sram_used report BASIC's real footprint -- measured
-     * from the bump pointer, not self-declared.  Idempotent. */
+    /* Attach the arena to the owning (shell) process: ps and
+     * /proc/<pid>/sram_used report its bump-pointer usage.  Attaching again
+     * is a no-op. */
     {
         struct tiku_process *self = TIKU_THIS();
 #if BASIC_RECLAIM_ENABLE
@@ -344,13 +342,14 @@ basic_alloc_state(void)
      * rewind to the mark just captured is a no-op here). */
     for (i = 0; i < TIKU_BASIC_PROGRAM_LINES; i++) prog[i].number = 0;
 #if BASIC_RECLAIM_ENABLE
-    /* Eligibility may be inspected at the prompt, before the first RUN. */
+    /* The reclaim eligibility check reads these tables, possibly at the
+     * prompt before the first RUN. */
     for (i = 0; i < TIKU_BASIC_EVERY_MAX; i++)
         memset(&basic_everys[i], 0, sizeof basic_everys[i]);
     for (i = 0; i < TIKU_BASIC_ONCHG_MAX; i++)
         memset(&basic_onchgs[i], 0, sizeof basic_onchgs[i]);
 #endif
-    basic_line_index_ok = 0;                  /* line index not built yet */
+    basic_line_index_ok = 0;                  /* line index needs a build */
     basic_symreg_ok     = 0;                  /* nor the SUB/label registry */
     basic_clear_vars();
     return 0;

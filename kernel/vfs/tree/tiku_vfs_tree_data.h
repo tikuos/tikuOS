@@ -7,9 +7,9 @@
  *
  * tiku_vfs_tree_data.h - /data VFS nodes (user data and persisted state).
  *
- * Holds user-facing persisted content, as opposed to /sys system state and /dev
- * hardware. Both the store and its VFS presentation are available without a
- * shell; the optional BASIC child is controlled by the BASIC build flags.
+ * The Tiku File Store as the /data dynamic directory, and its usage under
+ * /sys/fs/data.  Both are built with or without the shell; the /data/basic
+ * child needs the BASIC build flags.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -57,7 +57,7 @@ typedef struct {
     const char *backing;     /**< TIKU_DEVICE_NVM_LABEL, e.g. "FRAM" */
     /* Carved-region accounting.  region_bytes and tier_bytes are zero where
      * the store has its own backing array (MSP430, host). */
-    uint32_t    region_bytes;  /**< region the linker actually carved   */
+    uint32_t    region_bytes;  /**< region the linker carved            */
     uint32_t    tier_bytes;    /**< NVM tier extent (region front)      */
     uint32_t    fs_bytes;      /**< file-store extent                   */
     uint32_t    idle_bytes;    /**< region - (tier + fs); always 0      */
@@ -77,9 +77,8 @@ void tiku_vfs_tree_data_extents(tiku_data_df_t *out);
 /**
  * @brief The mounted /data store itself (mounts on first use).
  *
- * The VFS nodes above are one view of the store; callers needing whole objects
- * rather than path reads -- tiku_blob, for weights, firmware and module images
- * -- work against the store directly.
+ * tiku_blob works on the store directly, to keep whole objects such as
+ * weights, firmware and module images.
  *
  * @note The store and its VFS presentation are independent of the shell.
  * @return The mounted store, or NULL when none is available (region absent or
@@ -93,15 +92,20 @@ tiku_tfs_t *tiku_vfs_tree_data_store_if_mounted(void);
 /**
  * @brief Why /data is not mounted, in words, or NULL when it is.
  *
- * Tries the mount first if nothing has; a refusal stays until mkfs, a layout
- * resume or a reboot, so the answer does not change under a reader's feet.
+ * Tries the mount first if nothing has.  A refusal and its reason stay until
+ * mkfs, a layout resume, tiku_vfs_tree_data_retry() or a reboot.
  */
 const char *tiku_vfs_tree_data_why(void);
 
 /** @brief Probe the /data extent without mounting.  @return 0 or -1. */
 int tiku_vfs_tree_data_probe(tiku_tfs_probe_t *out);
 
-/** @brief 1 when the whole medium behind /data is blank, else 0. */
+/**
+ * @brief 1 when /data may be created without erase consent, else 0.
+ *
+ * On MSP430 and host that is a wholly blank backing array; on a carved region
+ * it is always 0.
+ */
 int tiku_vfs_tree_data_untouched(void);
 
 /** @brief Forget a refusal so the next access to /data mounts again. */

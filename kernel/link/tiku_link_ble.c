@@ -8,8 +8,8 @@
  * tiku_link_ble.c - the link over the BLE serial facade.
  *
  * The pipe delivers bytes whole and in order once a central is subscribed,
- * so a message is its 32-bit length and its bytes; what the pipe will not
- * take now waits in an outbox, and a process services it while a link is open.
+ * so a message is its 32-bit length and its bytes.  What the pipe will not
+ * take at once waits in an outbox, serviced by a process while a link is open.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -72,7 +72,7 @@ absorb(tiku_link_ble_t *l, const uint8_t *p, size_t len)
                     l->skip = l->need;
                     l->head_len = 0u;
                 } else if (l->need == 0u) {
-                    l->head_len = 0u;       /* an empty message is nothing */
+                    l->head_len = 0u;       /* nothing to deliver */
                 }
             }
             continue;
@@ -160,9 +160,9 @@ service(tiku_link_ble_t *l)
 {
     uint8_t up = (tiku_ble_serial_ready() != 0) ? 1u : 0u;
 
-    /* What the link confers follows the pipe's standing: a central that has
-     * paired and runs the link encrypted may actuate hardware, a stranger
-     * may not, whatever address it shows. */
+    /* The capability follows the connection's security: TIKU_VFS_CAP_HW for
+     * a paired central on an encrypted connection, none otherwise, whatever
+     * address the central shows. */
     l->link.cap = (tiku_ble_serial_secured() != 0) ? TIKU_VFS_CAP_HW
                                                    : TIKU_VFS_CAP_NONE;
 
@@ -172,7 +172,7 @@ service(tiku_link_ble_t *l)
     } else if (!up && l->state == TIKU_LINK_BLE_UP) {
         l->state = TIKU_LINK_BLE_DOWN;
         l->stats.drops++;
-        l->out_len = 0u;                    /* nothing waits for a peer gone */
+        l->out_len = 0u;                    /* drop what waited for it */
         rewind_stream(l);
     }
     if (!up) {
@@ -212,7 +212,8 @@ TIKU_PROCESS_THREAD(tiku_link_ble_process, ev, data)
         TIKU_PROCESS_WAIT_EVENT();
         tiku_link_ble_service();
         if (ev == TIKU_EVENT_TIMER) {
-            /* From now, at the pace the pipe's standing asks for. */
+            /* Re-armed from now: TIKU_LINK_BLE_LINK_TICKS while a central
+             * is connected, else TIKU_LINK_BLE_POLL_TICKS. */
             tiku_timer_set_event(&poll_timer,
                                  tiku_ble_serial_connected()
                                      ? TIKU_LINK_BLE_LINK_TICKS
@@ -246,7 +247,7 @@ ble_close(tiku_link_t *link)
         active = (tiku_link_ble_t *)0;
         tiku_ble_serial_stop();
         if (tiku_process_is_running(&tiku_link_ble_process)) {
-            tiku_process_poll(&tiku_link_ble_process);   /* it looks, ends */
+            tiku_process_poll(&tiku_link_ble_process);   /* wakes it to end */
         }
     }
     l->state = TIKU_LINK_BLE_DOWN;

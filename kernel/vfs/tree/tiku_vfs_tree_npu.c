@@ -62,7 +62,7 @@ static int npu_runs_read(char *buf, size_t max)
  * @brief Write handler for /sys/npu/model.
  *
  * A name loads that model from the store; an empty write powers and releases
- * the accelerator (tiku_npu_start()) so the other nodes have it to describe.
+ * the accelerator (tiku_npu_start()).
  */
 static int npu_model_write(const char *buf, size_t len)
 {

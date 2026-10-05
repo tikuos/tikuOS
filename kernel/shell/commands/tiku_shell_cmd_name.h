@@ -16,11 +16,11 @@
 #include <stdint.h>
 
 /**
- * @brief "name" command handler — read or set the persistent
- *        device name.
+ * @brief "name" command handler: read or set the persistent device name.
  *
- * A thin wrapper over /sys/device/name: no argument prints the current name,
- * an argument sets it (held in durable memory, survives reboot, max 31 chars).
+ * Wraps /sys/device/name.  With no argument it prints the name; with one it
+ * stores argv[1] in durable memory.  A name over 31 characters is cut to 31,
+ * or refused when a configuration journal (TIKU_VFS_CONFIG_ENABLE) is in use.
  */
 void tiku_shell_cmd_name(uint8_t argc, const char *argv[]);
 

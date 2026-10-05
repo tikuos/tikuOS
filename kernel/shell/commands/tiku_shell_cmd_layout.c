@@ -7,8 +7,9 @@
  *
  * tiku_shell_cmd_layout.c - "layout" command implementation.
  *
- * A thin front on the layout service: it builds the request text the service
- * parses and turns each refusal into a sentence with a value that would pass.
+ * Front end of the layout service: it builds the request text the service
+ * parses and prints each refusal as a sentence, with the nearest allowed
+ * value for a range or step error.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -33,7 +34,10 @@
 /* HELPERS                                                                   */
 /*---------------------------------------------------------------------------*/
 
-/** @brief The name of knob @p id on this board, or "?". */
+/**
+ * @brief Fill @p k with knob @p id and return its name; "?" with @p k zeroed
+ *        when this board has no such knob.
+ */
 static const char *
 layout_knob_name(uint8_t id, tiku_layout_knob_t *k)
 {
@@ -55,7 +59,7 @@ layout_have_record(void)
     return tiku_layout_have_record();
 }
 
-/** @brief Append @p s to @p out, keeping room for the terminator. */
+/** @brief Append @p s and a space to @p out; -1 if the NUL would not fit. */
 static int
 layout_cat(char *out, size_t cap, size_t *at, const char *s)
 {

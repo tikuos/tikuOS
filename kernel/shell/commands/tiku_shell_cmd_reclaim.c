@@ -7,8 +7,9 @@
  *
  * tiku_shell_cmd_reclaim.c - "mem reclaim": backing reconstruction controls.
  *
- * Prints the reclaim job, last result, pending requests, owners and stats, and
- * sets the mode or retries or cancels a request; it never forces a stop.
+ * Prints the reclaim job, last result, pending requests, owners and stats,
+ * and submits mode, retry and cancel requests, which the reclaim job
+ * completes asynchronously.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,7 +19,7 @@
 #include <string.h>
 
 #if TIKU_MEM_RECLAIM_ENABLE
-/* Shared kernel command scratch, not a process stack or a reclaimable arena. */
+/* Report buffer: static, outside every process stack and reclaimable arena. */
 static char report[2048];
 void tiku_shell_cmd_reclaim(uint8_t argc, const char *argv[])
 {

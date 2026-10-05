@@ -5,9 +5,9 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_console.c - "console" command: the line's channels and
- * counters, as one line per channel, one of the decoder's totals and one
- * of the link's.
+ * tiku_shell_cmd_console.c - "console" command: the console's channels and
+ * counters, as one line per channel, one line of decoder totals and one of
+ * link counters.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,9 +17,9 @@
 #include <kernel/console/tiku_console.h>
 #include <kernel/link/tiku_link_console.h>
 
-/* An echo link on a spare channel, armed on demand: it sends every message
- * it receives straight back, so a host can prove the link end to end over
- * the port without a desktop.  Off by default; it costs a channel slot. */
+/* The echo link on channel 0xF2, closed at boot and opened by `console echo
+ * on`: it sends every message it receives back.  While open it holds one of
+ * the console's channel slots. */
 #define ECHO_MARKER 0xF2u
 static tiku_link_console_t echo_state;
 static tiku_link_t *echo_link;
@@ -33,7 +33,7 @@ echo_recv(void *ctx, uint8_t *msg, size_t len)
     (void)tiku_link_send(echo_link, msg, len);
 }
 
-/** @brief Arm or disarm the echo link.  @return the new state. */
+/** @brief Open (@p on) or close the echo link; 1 if it is open after. */
 static uint8_t
 echo(uint8_t on)
 {

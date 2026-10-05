@@ -16,10 +16,11 @@
 #include <stdint.h>
 
 /**
- * @brief "cd" command — change working directory.
+ * @brief "cd" command: change the working directory.
  *
- * Usage: cd [path]
- * No argument goes to "/". Supports ".." and relative paths.
+ * Usage: cd [path].  With no path the directory becomes "/".  A relative path
+ * and ".." resolve against the current directory; a path that is not a
+ * directory prints an error and leaves the directory unchanged.
  */
 void tiku_shell_cmd_cd(uint8_t argc, const char *argv[]);
 

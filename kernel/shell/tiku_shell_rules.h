@@ -8,8 +8,8 @@
  * tiku_shell_rules.h - reactive rule engine for the shell.
  *
  * A rule is "if VFS_path OP value then run COMMAND", evaluated on each write
- * to a writable node and on the shell tick otherwise.  A comparison fires on a
- * false-to-true transition, `changed` on any change.  Storage is SRAM-only.
+ * to a watched writable node and on the shell tick otherwise.  A comparison
+ * fires on a false-to-true transition, `changed` on any change.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -29,17 +29,17 @@
 #define TIKU_SHELL_RULES_MAX           4
 #endif
 
-/** Maximum VFS path length stored per rule (covers e.g. /sys/watchdog/mode). */
+/** Size of a rule's path buffer, NUL included (fits /sys/watchdog/mode). */
 #ifndef TIKU_SHELL_RULES_PATH_MAX
 #define TIKU_SHELL_RULES_PATH_MAX      24
 #endif
 
-/** Maximum right-hand-side comparison value length. */
+/** Size of a rule's value buffer, NUL included; a reading is cut to fit. */
 #ifndef TIKU_SHELL_RULES_VALUE_MAX
 #define TIKU_SHELL_RULES_VALUE_MAX     12
 #endif
 
-/** Maximum action command length. */
+/** Size of a rule's action buffer, NUL included. */
 #ifndef TIKU_SHELL_RULES_ACTION_MAX
 #define TIKU_SHELL_RULES_ACTION_MAX    40
 #endif
@@ -93,20 +93,25 @@ typedef struct {
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Initialise the rule engine.  Called once at shell startup.
+ * @brief Initialise the rule engine; drops every VFS watch the shell process
+ *        holds.
+ * @note The shell calls it once at startup.
  */
 void tiku_shell_rules_init(void);
 
 /**
  * @brief Register a rule in the first free slot.
  *
+ * @note Re-arms every rule: drops each VFS watch the shell process holds,
+ *       the `watch` command's and BASIC's included, and watches the rules'
+ *       writable nodes again.
  * @param path    VFS path the rule reads (must fit PATH_MAX-1).
  * @param op      Comparison operator.
  * @param value   Right-hand side (must fit VALUE_MAX-1).
  * @param action  Command line dispatched each time the rule fires
  *                (must fit ACTION_MAX-1).
- * @return Slot id (>= 0) on success, -1 if the table is full or a
- *         field overflows its buffer.
+ * @return Slot id (>= 0) on success, -1 if a pointer is NULL, the table
+ *         is full or a field overflows its buffer.
  */
 int8_t tiku_shell_rules_add(const char *path,
                              tiku_shell_rule_op_t op,
@@ -114,13 +119,14 @@ int8_t tiku_shell_rules_add(const char *path,
                              const char *action);
 
 /**
- * @brief Free a rule slot by id.
+ * @brief Free a rule slot by id, then re-arm as tiku_shell_rules_add() does.
  * @return 0 on success, -1 if id is out of range or already free.
  */
 int8_t tiku_shell_rules_del(uint8_t id);
 
 /**
- * @brief Free every active rule slot.
+ * @brief Free every active rule slot and drop every VFS watch the shell
+ *        process holds.
  *
  * @return Number of slots that were active and have been freed.
  */
@@ -138,7 +144,7 @@ const tiku_shell_rule_t *tiku_shell_rules_get(uint8_t id);
 const char *tiku_shell_rules_op_name(tiku_shell_rule_op_t op);
 
 /**
- * @brief Convenience for the `on` command: parse argv, validate, register.
+ * @brief Register a rule from the argv of the `on` command.
  *
  * Comparison grammar: argv[1] path, argv[2] op, argv[3] value, argv[4..]
  * action.  Change grammar: argv[1] "changed", argv[2] path, argv[3..] action.
@@ -149,27 +155,23 @@ const char *tiku_shell_rules_op_name(tiku_shell_rule_op_t op);
 int8_t tiku_shell_rules_add_argv(uint8_t argc, const char *argv[]);
 
 /**
- * @brief Periodic dispatcher; called from the shell main loop.
+ * @brief Evaluate every active rule that is not event-armed.
  *
- * Walks every active rule on the POLL path -- sensor-side rules whose nodes
- * change without writes, plus rules whose path did not resolve at arm time.
- * Rules on writable nodes are event-armed and skipped here.
+ * These are rules on nodes without a write handler, rules whose path did not
+ * resolve and rules whose watch was refused.  Evaluation is the event path's:
+ * a comparison fires on a false-to-true edge, and a failed read is no match.
  *
- * @note Semantics match the event path exactly: read, evaluate, dispatch on a
- *       false->true edge.  A failed read is treated as non-matching, and
- *       transitions back to non-match are silent.
+ * @note The shell main loop calls it on each poll.
  */
 void tiku_shell_rules_tick(void);
 
 /**
- * @brief Event-path evaluator; called from the shell protothread on
- *        TIKU_EVENT_VFS.
+ * @brief Evaluate every active rule whose cached node is @p node_ptr, as the
+ *        poll tick would.
  *
- * Evaluates the active rules whose cached node is the event's node, with the
- * poll tick's semantics.  A write reaches its rules within one event dispatch,
- * and rules on written nodes cost nothing between events.
- *
- * @param node_ptr  The changed node, as delivered in the event data
+ * @note The shell process calls it on each TIKU_EVENT_VFS.
+ * @param node_ptr  The changed node, as delivered in the event data; NULL
+ *                  does nothing
  */
 void tiku_shell_rules_on_vfs(const void *node_ptr);
 

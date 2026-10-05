@@ -7,9 +7,8 @@
  *
  * tiku_shell_cmd_init.c - "init" command implementation
  *
- * Shell interface to the init table in the NVM config region.  Allows
- * listing, adding, removing, enabling/disabling, and re-running boot
- * entries without recompiling.
+ * Lists, adds, removes, enables, disables and runs the boot entries of the
+ * init table in the NVM config region.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,7 +26,7 @@
 /* INTERNAL HELPERS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/** Simple string compare (avoids pulling in full strcmp on small targets) */
+/** @brief 1 if strings @p a and @p b are equal, else 0. */
 static uint8_t
 cmd_streq(const char *a, const char *b)
 {
@@ -42,8 +41,9 @@ cmd_streq(const char *a, const char *b)
 }
 
 /**
- * Return 1 if the init table holds an entry named @p name, comparing the
- * first TIKU_INIT_NAME_SIZE-1 characters as the table does.
+ * @brief 1 if the init table holds an entry named @p name, else 0.
+ *
+ * Compares the first TIKU_INIT_NAME_SIZE-1 characters, as the table does.
  */
 static uint8_t
 cmd_init_has(const char *name)
@@ -60,7 +60,7 @@ cmd_init_has(const char *name)
     return 0;
 }
 
-/** Parse a decimal uint8 from string, return 0 on success */
+/** @brief Parse decimal @p s (0-255) into *out; 0 on success, else 1. */
 static uint8_t
 cmd_parse_u8(const char *s, uint8_t *out)
 {
@@ -83,10 +83,10 @@ cmd_parse_u8(const char *s, uint8_t *out)
 }
 
 /**
- * @brief Concatenate argv[first..argc-1] into buf with spaces.
+ * @brief Join argv[first..argc-1] into @p buf with single spaces.
  *
- * The init command syntax is: init add <seq> <name> <cmd tokens...>
- * The command tokens must be reassembled back into a single string.
+ * Text past @p bufsz - 1 bytes is dropped without an error; @p buf is always
+ * NUL-terminated.
  */
 static void
 cmd_join_args(char *buf, uint8_t bufsz,

@@ -21,8 +21,8 @@
  *        `on changed <path> <command...>`.
  *
  * The command runs when the comparison (> < >= <= == !=) turns from false to
- * true, or when the reading changes.  Rules on writable nodes are checked on
- * each write; the others are polled every shell tick.
+ * true, or when the reading changes.  Each shell tick polls the rules, except
+ * one on a writable node the shell watches, which is checked on each write.
  */
 void tiku_shell_cmd_on(uint8_t argc, const char *argv[]);
 

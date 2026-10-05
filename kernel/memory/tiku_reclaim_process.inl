@@ -7,9 +7,9 @@
  *
  * tiku_reclaim_process.inl - process owners of the coordinator.
  *
- * Included once by tiku_reclaim.c.  Actions live in the coordinator, not in
- * event payloads; the exit and start hooks run synchronously, so a dropped
- * EXITED or INIT event cannot hand an obligation to the wrong instance.
+ * Included once by tiku_reclaim.c.  Actions live in the coordinator and are
+ * fetched with tiku_mem_owner_process_action(); the exit and start hooks run
+ * synchronously, so a dropped EXITED or INIT event cannot misdirect one.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

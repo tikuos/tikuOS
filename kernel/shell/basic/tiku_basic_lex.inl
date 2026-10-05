@@ -133,9 +133,8 @@ parse_unum(const char **p, long *out)
     const char *q;
     skip_ws(p);
 
-    /* C-style hex 0x.. and binary 0b.. prefixes. The leading '0' lets
-     * is_digit() recognise the literal as numeric, so process_line's
-     * line-number heuristic correctly stores `0x10 PRINT 1` as line 16. */
+    /* C-style hex 0x.. and binary 0b.. prefixes.  The leading '0' passes
+     * is_digit(), so process_line() stores `0x10 PRINT 1` as line 16. */
     if (cur_peek(p) == '0' &&
         (cur_peek_at(p, 1) == 'x' || cur_peek_at(p, 1) == 'X')) {
         q = cur_mark(p) + 2;
@@ -264,8 +263,7 @@ basic_named_lookup(const char *name, int is_string)
 #else
     tbl = basic_namedvar_names;
 #endif
-    /* A hot loop re-references one named variable per statement, so check
-     * the most recent hit before rescanning the table. */
+    /* Check the most recent hit before scanning the table. */
     i = basic_named_mru[t];
     if (i >= 0 && tbl[i][0] != '\0' && strcmp(tbl[i], name) == 0) {
         return 26 + i;
@@ -290,9 +288,8 @@ basic_named_lookup(const char *name, int is_string)
 /**
  * @brief Parse a numeric variable name (single or multi-letter).
  *
- * A trailing `$` is rejected here because the caller wanted a
- * numeric variable.  Use parse_var_full() when the type sigil is
- * to be detected dynamically.
+ * A name followed by `$` is a string variable and is rejected;
+ * parse_var_full() accepts both kinds.
  *
  * @return 1 with the slot index in @p idx, or 0 with the cursor restored.
  */

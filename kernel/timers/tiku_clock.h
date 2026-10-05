@@ -30,28 +30,27 @@
  * @typedef tiku_clock_time_t
  * @brief System clock time type
  *
- * Override by defining TIKU_CLOCK_CONF_TIME_T before including this header.
+ * 16 bits on MSP430 and unsigned long elsewhere; defining
+ * TIKU_CLOCK_CONF_TIME_T before including this header overrides it.
  */
 #ifdef TIKU_CLOCK_CONF_TIME_T
 typedef TIKU_CLOCK_CONF_TIME_T tiku_clock_time_t;
 #elif defined(PLATFORM_MSP430)
 typedef unsigned short tiku_clock_time_t;
 #else
-/* The same width tiku.h configures, decided here too because this header
- * is reachable without it: an include guard locks the first typedef in, so
- * a translation unit that reaches this file first would otherwise size
- * every struct tiku_timer it declares 4 bytes short of the one the timer
- * subsystem writes -- and the timer's own stores then land past the end of
- * the caller's object. */
+/* These defaults must match the width tiku.h configures.  A translation unit
+ * can reach this header before tiku.h, and the include guard keeps the first
+ * typedef: a narrower one makes its struct tiku_timer 4 bytes shorter than the
+ * timer subsystem's, and the timer's stores overrun the caller's object. */
 typedef unsigned long tiku_clock_time_t;
 #endif
 
 /**
  * @brief Longest interval the clock type can measure: half its range.
  *
- * The counter wraps; the arithmetic below is safe only for intervals shorter
- * than this (256 s at 16 bits and 128 Hz).  Measure longer spans as a sum of
- * short differences, each in the counter's own width, or use a cycle counter.
+ * The counter wraps; the arithmetic below is correct only for intervals
+ * shorter than this (256 s at 16 bits and 128 Hz).  A longer span is a sum of
+ * short differences, each in the counter's own width.
  */
 #define TIKU_CLOCK_MAX_INTERVAL \
     ((tiku_clock_time_t)(((tiku_clock_time_t)~(tiku_clock_time_t)0) / 2u))
@@ -77,14 +76,16 @@ typedef unsigned long tiku_clock_time_t;
 
 /**
  * @def TIKU_CLOCK_LT(a, b)
- * @brief Wraparound-safe less-than comparison
+ * @brief Non-zero when @p a is before @p b, across a counter wrap, for
+ *        points less than TIKU_CLOCK_MAX_INTERVAL apart.
  */
 #define TIKU_CLOCK_LT(a, b) \
     ((tiku_clock_time_t)((a) - (b)) > TIKU_CLOCK_MAX_INTERVAL)
 
 /**
  * @def TIKU_CLOCK_DIFF(a, b)
- * @brief Wraparound-safe difference (a - b)
+ * @brief Signed difference a - b as a long, across a counter wrap, for points
+ *        less than TIKU_CLOCK_MAX_INTERVAL apart.
  */
 #define TIKU_CLOCK_DIFF(a, b)                                                 \
     (TIKU_CLOCK_LT((a), (b)) ? -(long)(tiku_clock_time_t)((b) - (a))          \
@@ -92,7 +93,10 @@ typedef unsigned long tiku_clock_time_t;
 
 /**
  * @def TIKU_CLOCK_MS_TO_TICKS(ms)
- * @brief Convert milliseconds to clock ticks
+ * @brief Convert milliseconds to clock ticks, rounding down.
+ *
+ * The product (ms) * TIKU_CLOCK_SECOND is computed in the type of @p ms: on
+ * MSP430 an int argument above 255 overflows, so pass an unsigned long.
  */
 #define TIKU_CLOCK_MS_TO_TICKS(ms) \
     ((tiku_clock_time_t)(((ms) * TIKU_CLOCK_SECOND) / 1000))
@@ -150,12 +154,13 @@ unsigned char tiku_clock_fault(void);
 /**
  * @brief Stretch the next tick interrupt up to @p ticks_ahead away.
  *
- * Called with interrupts masked before a tick-woken idle while timers are armed
- * but none due: the arch may program its compare straight to the next deadline
- * and accounts true elapsed ticks on wake, so the kernel clock stays exact.
+ * The scheduler calls it before a tick-woken idle while timers are armed but
+ * none due.  The arch may program its compare straight to the next deadline,
+ * and counts the elapsed ticks on wake, so the kernel clock stays exact.
  *
  * @param ticks_ahead Ticks until the next software-timer deadline (>1)
  * @return Non-zero if the stretch was armed, 0 if unsupported
+ * @note Call with interrupts masked.
  */
 int tiku_clock_tickless_begin(tiku_clock_time_t ticks_ahead);
 
@@ -172,8 +177,7 @@ void tiku_clock_tickless_end(void);
  * @brief Does this build have a tickless-idle backend?
  *
  * @return Non-zero when tiku_clock_tickless_begin() can stretch (weak
- *         default 0).  Tests use this to pick between the per-tick
- *         and tickless wake-count expectations.
+ *         default 0)
  */
 int tiku_clock_tickless_available(void);
 

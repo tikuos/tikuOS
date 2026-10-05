@@ -20,7 +20,7 @@
  *
  * Usage: kill <pid>
  * The PID is the one "ps" shows; the process stays registered, and `resume`
- * restarts it.
+ * continues it where it last yielded.
  *
  * @param argc  Argument count
  * @param argv  Argument vector (argv[1] = PID)

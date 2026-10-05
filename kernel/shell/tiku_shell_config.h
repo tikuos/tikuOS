@@ -79,10 +79,9 @@
 #endif
 #endif
 #ifndef TIKU_SHELL_CMD_NPU
-/* Follows the driver opt-in, not the platform: every RA8P1 carries the
- * Ethos-U55, but its static buffers are the largest .bss on the part and a
- * build that never loads a model should not carry them.  TIKU_HAS_NPU is a -D
- * from the Makefile, so it resolves the same way in every translation unit
+/* On when the build includes the Ethos-U55 driver, which is opt-in on the
+ * RA8P1 because its static buffers are large.  TIKU_HAS_NPU is a -D from the
+ * Makefile, so this resolves the same way in every translation unit
  * regardless of include order. */
 #if (TIKU_HAS_NPU + 0)
 #define TIKU_SHELL_CMD_NPU     1  /**< npu     - the RA8P1 Ethos-U55 */
@@ -167,9 +166,7 @@
 #endif
 #ifndef TIKU_SHELL_CMD_FAT
 /* Auto-on wherever the eMMC driver is built: the card is the only FAT32
- * volume in the system, so the command has nothing to read without it.
- * The parser itself (kernel/fs/tiku_fat.c) is hardware-independent and is
- * regression-tested on a host -- see tools/fat32. */
+ * volume in the system, so the command has nothing to read without it. */
 #if defined(TIKU_DRV_EMMC_ENABLE)
 #define TIKU_SHELL_CMD_FAT 1  /**< fat - read the card's FAT32 volume */
 #else
@@ -296,8 +293,7 @@
 #ifndef TIKU_SHELL_CMD_NAME
 #define TIKU_SHELL_CMD_NAME    1  /**< name    - Read or set device name */
 #endif
-/* `if` is opt-in; `on` (rules) covers most interactive uses.  Enable with
- *   EXTRA_CFLAGS="-DTIKU_SHELL_CMD_IF=1" */
+/* `if` is opt-in: EXTRA_CFLAGS="-DTIKU_SHELL_CMD_IF=1". */
 #ifndef TIKU_SHELL_CMD_IF
 #define TIKU_SHELL_CMD_IF      0  /**< if      - Conditional VFS action */
 #endif
@@ -363,7 +359,7 @@
 #endif
 #endif
 /* dns: resolve a hostname (A record) over SLIP.  Same gating as slip/ping/ip;
- * the DNS stub resolver is already compiled with the net kit. */
+ * the net kit compiles the DNS stub resolver. */
 #ifndef TIKU_SHELL_CMD_DNS
 #if defined(TIKU_KIT_NET_ENABLE) && TIKU_KIT_NET_ENABLE
 #define TIKU_SHELL_CMD_DNS     1  /**< dns     - Resolve a hostname (A) */
@@ -371,10 +367,9 @@
 #define TIKU_SHELL_CMD_DNS     0
 #endif
 #endif
-/* syslog: send a remote log line (UDP 514) over SLIP.  Tracks the net kit,
- * but only in non-MIN builds: the syslog client (tiku_kits_net_syslog.c)
- * ships in the non-MIN ipv4 wildcard, so a MIN build (lean WiFi/SLIP) omits
- * it -- auto-drop the command there to avoid an undefined-reference link. */
+/* syslog: send a remote log line (UDP 514) over SLIP.  On with the net kit
+ * except in a MIN build (TIKU_KIT_NET_MIN), which does not compile the syslog
+ * client (tiku_kits_net_syslog.c): the command would not link there. */
 #ifndef TIKU_SHELL_CMD_SYSLOG
 #if defined(TIKU_KIT_NET_ENABLE) && TIKU_KIT_NET_ENABLE && \
     !(defined(TIKU_KIT_NET_MIN) && TIKU_KIT_NET_MIN)
@@ -383,9 +378,10 @@
 #define TIKU_SHELL_CMD_SYSLOG  0
 #endif
 #endif
-/* mqtt: connect/publish to an MQTT broker over SLIP+TCP.  Opt-in -- it needs
- * the heavier MQTT kit + TCP, so it tracks TIKU_KITS_NET_MQTT_ENABLE rather
- * than auto-on with net.  TikuBench's net-test build turns the kit on. */
+/* mqtt: connect/publish to an MQTT broker over SLIP and TCP.  On when the
+ * MQTT kit is (TIKU_KITS_NET_MQTT_ENABLE).  The Makefile compiles the command
+ * only in TIKU_SHELL_NET_TEST builds and passes -DTIKU_SHELL_CMD_MQTT=0 to
+ * any other build that enables the kit. */
 #ifndef TIKU_SHELL_CMD_MQTT
 #if defined(TIKU_KITS_NET_MQTT_ENABLE) && TIKU_KITS_NET_MQTT_ENABLE
 #define TIKU_SHELL_CMD_MQTT    1  /**< mqtt    - MQTT connect/publish */
@@ -524,8 +520,8 @@
  * tiku_kits_net_ipv4_input(), which dispatches to them.
  *
  * @note No net process is started: the console, pumped by the shell, owns
- *       the wire, and a second reader would conflict.  TikuBench's net suite
- *       enables this on boards without a working APP=net.
+ *       the wire, and a second reader would take its bytes.  The TikuBench
+ *       net suite uses this build.
  */
 #ifndef TIKU_SHELL_NET_TEST
 #define TIKU_SHELL_NET_TEST 0
@@ -555,17 +551,18 @@
  * Keep each rule to the same three-line shape.
  */
 
-/* rftest + bleadv drive the on-die 2.4 GHz RADIO (broadcast BLE). */
+/* rftest drives the on-die 2.4 GHz RADIO. */
 #if TIKU_SHELL_CMD_RFTEST && !(TIKU_HAS_BLE_ADV + 0)
 #undef  TIKU_SHELL_CMD_RFTEST
 #define TIKU_SHELL_CMD_RFTEST 0
 #endif
-/* The probe drives the USB block directly, so it needs a part that has one. */
+/* usbprobe drives the USB high-speed block directly. */
 #if TIKU_SHELL_CMD_USBPROBE && !(TIKU_DEVICE_HAS_USBHS + 0)
 #undef  TIKU_SHELL_CMD_USBPROBE
 #define TIKU_SHELL_CMD_USBPROBE 0
 #endif
 
+/* bleadv drives the on-die 2.4 GHz RADIO (broadcast BLE). */
 #if TIKU_SHELL_CMD_BLEADV && !(TIKU_HAS_BLE_ADV + 0)
 #undef  TIKU_SHELL_CMD_BLEADV
 #define TIKU_SHELL_CMD_BLEADV 0
@@ -600,7 +597,7 @@
 #define TIKU_SHELL_CMD_BLE 0
 #endif
 
-/* layout divides the carved NVM region; MSP430 keeps fixed arrays instead. */
+/* layout divides the carved NVM region, which MSP430 does not have. */
 #if TIKU_SHELL_CMD_LAYOUT && defined(PLATFORM_MSP430)
 #undef  TIKU_SHELL_CMD_LAYOUT
 #define TIKU_SHELL_CMD_LAYOUT 0
@@ -622,6 +619,6 @@
  * TIKU_DEVICE_HAS_AXONS is in the device header, which
  * tiku_shell_cmd_axonsprobe.h includes after this file, so a rule here
  * would clear the flag in that translation unit only.  The Makefile
- * compiles the command only for nrf54lm20b instead. */
+ * compiles the command only for nrf54lm20b. */
 
 #endif /* TIKU_SHELL_CONFIG_H_ */

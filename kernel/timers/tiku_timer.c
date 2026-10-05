@@ -37,17 +37,18 @@ static uint16_t timer_fire_count;
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Check if clock time `now` is past the timer's expiration
+ * @brief Check if clock time `now` is at or past the timer's expiration
  */
 static inline int timer_is_due(struct tiku_timer *t, tiku_clock_time_t now) {
   return (tiku_clock_time_t)(now - t->start) >= t->interval;
 }
 
 /**
- * @brief Is @p t's expiration held back by a reconstruction-gated owner?
+ * @brief Is @p t's expiration held back because the memory-reclaim gate
+ *        refuses its owner a TIMER event?
  *
  * A held expiration stays armed until the gate lifts; it is not pending work,
- * so the idle loop may sleep on it.
+ * so the idle loop may sleep on it.  Always 0 without TIKU_MEM_RECLAIM_ENABLE.
  */
 static int timer_held(const struct tiku_timer *t) {
 #if TIKU_MEM_RECLAIM_ENABLE
@@ -78,9 +79,8 @@ static void timer_remove(struct tiku_timer *t) {
 /**
  * @brief Insert a timer into the active list
  *
- * Removes first if already present (prevents duplicates),
- * then prepends to head. O(n) removal but the list is
- * typically short on embedded systems.
+ * An active timer is removed first, so the list holds it once; then it is
+ * prepended and the timer process polled.
  */
 static void timer_insert(struct tiku_timer *t) {
   if (t->active) {
@@ -128,18 +128,17 @@ TIKU_PROCESS_THREAD(tiku_timer_process, ev, data) {
     }
 
     /*
-     * Scan for expired timers.  The scan restarts after
-     * each dispatch because the callback or event handler
-     * might modify the list (set/stop/reset timers).
+     * Scan for expired timers.  The scan restarts after each
+     * expiry, because a callback may set, stop or reset timers.
      */
   rescan:
     prev = NULL;
     for (t = timer_list; t != NULL; t = t->next) {
       if (timer_is_due(t, tiku_clock_time())) {
 
-        /* Queue pressure must not consume an expiration. Leave the timer
-         * armed and retry on the next poll; never spin on a full queue.
-         * A reconstruction-gated owner keeps its expiration the same way. */
+        /* An event the full queue refuses, or one the reclaim gate holds,
+         * stays armed and is retried on the next poll; this scan moves
+         * past it. */
         if (t->mode == TIKU_TIMER_MODE_EVENT && t->p != NULL &&
             (timer_held(t) || !tiku_process_post(t->p, TIKU_EVENT_TIMER, t))) {
           prev = t;
@@ -184,9 +183,9 @@ void tiku_timer_init(void) {
   TIMER_PRINTF("Init complete\n");
 }
 
-/* Called synchronously during exit, before supervision can reuse the owner.
- * A queued EXITED notification may be delayed or dropped and carries no owner
- * generation, so it cannot safely perform this cleanup. */
+/* tiku_process_exit() calls this inside its atomic section, before
+ * supervision can start the owner again.  The EXITED broadcast can be
+ * dropped or arrive after a restart, so it cancels nothing. */
 void tiku_timer_cancel_process(const struct tiku_process *owner) {
   struct tiku_timer **pp = &timer_list;
   while (*pp != NULL) {
@@ -281,11 +280,9 @@ tiku_clock_time_t tiku_timer_expiration_time(struct tiku_timer *t) {
 /*---------------------------------------------------------------------------*/
 
 /*
- * Only while a timer exists.  The tick asks on every interrupt, and a
- * poll with nothing to expire is a queue entry for nothing, one per tick
- * and always coalesced in the queue -- a queue that is never empty, and
- * a wake the idle loop pays each tick.  A timer inserted after this read
- * polls from timer_insert().
+ * Polls only while a timer exists.  The tick calls this on every interrupt;
+ * with no timers it queues nothing, so the queue can stay empty and the idle
+ * loop asleep.  A timer inserted after the check polls from timer_insert().
  */
 void tiku_timer_request_poll(void) {
   if (timer_list != NULL) {

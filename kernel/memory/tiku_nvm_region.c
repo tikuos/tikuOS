@@ -7,9 +7,9 @@
  *
  * tiku_nvm_region.c - weak default for the carved NVM region accessor.
  *
- * Boards with a carved region provide a strong tiku_nvm_backend_get() in their
- * arch backend.  This weak default returns NULL so the accessor still links
- * where there is no region, giving "no region" instead of an undefined symbol.
+ * This weak tiku_nvm_backend_get() returns NULL, which callers take as no
+ * carved region.  A board with a region overrides it with a strong definition
+ * in its arch backend.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

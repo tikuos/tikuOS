@@ -22,15 +22,19 @@
  * (resolved first), then prints the UTC time and sets the RTC.  Non-blocking:
  * the reply is awaited across shell ticks.
  *
- * @note Turns SLIP on (tiku_shell_cmd_slip_enable()) so the reply reaches the
- *       IP stack.
+ * @note Turns SLIP on (tiku_shell_cmd_slip_enable()) and leaves it on.
  */
 void tiku_shell_cmd_ntp(uint8_t argc, const char *argv[]);
 
-/** @brief True while an NTP query is in flight (awaiting reply/timeout). */
+/** @brief 1 while a DNS lookup or SNTP query is in progress, else 0. */
 uint8_t tiku_shell_cmd_ntp_active(void);
 
-/** @brief Per-tick driver: polls for the reply, prints it, or times out. */
+/**
+ * @brief Per-tick driver: polls for the reply, prints it, or times out.
+ *
+ * @note The shell loop calls it every tick while a query is active; it polls
+ *       the DNS and NTP clients once per second.
+ */
 void tiku_shell_cmd_ntp_tick(void);
 
 #endif /* TIKU_SHELL_CMD_NTP_H_ */

@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_fs.c - /data commands: rm, touch, mkdir, rmdir, recv, send
  *
- * Thin wrappers over the VFS, where the file store is the dynamic directory
- * /data.  "write" creates and overwrites; these add removal, no-truncate
- * creation, folders and binary transfer.
+ * File commands over the VFS, whose dynamic directory /data is the file
+ * store: removal, creation without truncation, folders, and binary transfer
+ * to and from the host.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -115,8 +115,8 @@ tiku_shell_cmd_rmdir(uint8_t argc, const char *argv[])
     tiku_shell_cwd_resolve(argv[1], resolved, sizeof(resolved));
 
     /* Re-append the '/' the resolver strips, so unlink targets the "<path>/"
-     * marker (mkdir's empty-folder entry).  A folder kept alive by files inside
-     * it stays until those are deleted -- this only clears the empty marker. */
+     * marker (mkdir's empty-folder entry).  A folder that still holds files
+     * stays listed until they are deleted; this removes only the marker. */
     n = strlen(resolved);
     while (n > 1u && resolved[n - 1] == '/') {
         resolved[--n] = '\0';
@@ -138,9 +138,9 @@ tiku_shell_cmd_rmdir(uint8_t argc, const char *argv[])
 /*---------------------------------------------------------------------------*/
 
 /*
- * Length-prefixed raw bytes over the console: binary-safe with no escaping,
- * so multi-line and arbitrary files round-trip where the single-line `write`
- * cannot.  The host (tikuConsole/tikufs.py) speaks the same handshake.
+ * Length-prefixed raw bytes over the console, with no escaping, so any byte
+ * sequence, newlines included, round-trips.  The host side of the handshake
+ * is tikuConsole/tikufs.py.
  *
  * A /data file streams: recv writes it through the store's writer and send
  * reads it in place, so it may be any size the store holds while RAM stays at
@@ -222,13 +222,11 @@ tiku_shell_cmd_recv(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* Drain the command line's leftover terminator before announcing
+    /* Drain the CR or LF left over from the command line before announcing
      * readiness.  The line editor stops at the first CR or LF, so a host that
-     * ends the command with CRLF leaves the other half in the RX buffer, and
-     * the raw loop below would take it as payload byte 0: the file shifts by
-     * one, the real last byte reaches the prompt as a stray command, and the
-     * transfer still reports success.  The host waits for the ready line, so
-     * nothing buffered now is payload; only CR and LF are consumed. */
+     * ends the command with CRLF leaves an LF in the RX buffer, which the raw
+     * loop below would store as payload byte 0.  The first byte that is not
+     * CR or LF ends the drain and is kept as payload. */
     while (tiku_shell_io_rx_ready()) {
         int c = tiku_shell_io_getc();
         if (c != '\r' && c != '\n') {
@@ -245,9 +243,9 @@ tiku_shell_cmd_recv(uint8_t argc, const char *argv[])
      * A streamed transfer also advertises the chunk size, for flow control:
      * while the board writes a full buffer to NVM it is not draining the
      * UART, and the console has no hardware flow control.  After each chunk
-     * reaches NVM the board emits one '.', and the host waits for it before
-     * sending the next chunk, so the flush time does not matter at any size.
-     * The '.' tokens appear only when streaming, after the "ready" line. */
+     * reaches NVM the board emits one '.', and the host sends the next chunk
+     * only after it.  The '.' tokens appear only when streaming, and none
+     * follows the last chunk. */
     if (streaming) {
         SHELL_PRINTF("recv: ready %u chunk %u\n", (unsigned)n,
                      (unsigned)sizeof(fs_xfer_buf));
@@ -255,11 +253,9 @@ tiku_shell_cmd_recv(uint8_t argc, const char *argv[])
         SHELL_PRINTF("recv: ready %u\n", (unsigned)n);
     }
     while (got < n) {
-        /* This loop does not return to the scheduler, so nothing else kicks
-         * the watchdog while it runs, and a streamed /data transfer lasts as
-         * long as the host takes.  Kick on every pass, receiving or idle, so
-         * a slow host stalls the transfer (the idle counter below catches
-         * that) rather than resetting the board. */
+        /* The loop does not return to the scheduler, and a streamed transfer
+         * lasts as long as the host takes, so it kicks the watchdog on every
+         * pass; a stalled host ends in the idle timeout below. */
         tiku_watchdog_kick();
         if (tiku_shell_io_rx_ready()) {
             int c = tiku_shell_io_getc();
@@ -292,7 +288,9 @@ tiku_shell_cmd_recv(uint8_t argc, const char *argv[])
                     }
                 }
             }
-        } else if (++idle > 50000000ul) {        /* host stalled (~seconds) */
+        } else if (++idle > 50000000ul) {
+            /* The host stalled.  idle counts polls since the last byte, so the
+             * time this limit allows depends on the core clock. */
             if (streaming) {
                 tiku_tfs_abort(&wr);            /* previous file survives */
             }

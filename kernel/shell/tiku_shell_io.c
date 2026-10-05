@@ -38,9 +38,8 @@ void
 tiku_shell_io_set_backend(const tiku_shell_io_t *backend)
 {
     active_io = backend;
-    /* The active channel defines the ambient trust for VFS writes: a local
-     * console is CAP_ALL, a remote backend is restricted.  Clearing the
-     * backend (NULL) falls back to full authority (kernel/init path). */
+    /* VFS writes take the active backend's capability mask; with no
+     * backend (the kernel and init paths) they get TIKU_VFS_CAP_ALL. */
     tiku_vfs_caller_cap_set(backend != (void *)0
                                 ? (tiku_vfs_cap_t)backend->cap
                                 : TIKU_VFS_CAP_ALL);

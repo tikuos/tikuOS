@@ -9,7 +9,7 @@
  *
  * Two backends behind one API: every port but RP2350 drives each bit edge
  * from an htimer compare-match ISR, and RP2350 shifts bits from a PIO state
- * machine with no per-bit CPU work at all.
+ * machine with no per-bit CPU work.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,10 +24,9 @@
 #include <stddef.h>
 
 /*
- * The htimer + GPIO software backend is the default: it toggles the pin from
- * an htimer ISR using only the generic tiku_gpio / tiku_htimer APIs, so it
- * works anywhere both exist.  A platform is excepted only when it has a
- * dedicated engine to use instead -- RP2350's PIO today.
+ * The software backend toggles the pin from an htimer ISR through the generic
+ * tiku_gpio and tiku_htimer APIs.  Every port but RP2350 uses it; RP2350 uses
+ * its PIO backend.
  */
 #if !defined(TIKU_BITBANG_SOFT) && !defined(PLATFORM_RP2350)
 #define TIKU_BITBANG_SOFT 1
@@ -203,9 +202,8 @@ static int bb_rp2350_tx(const tiku_bitbang_t *cfg) {
     if (cfg->bit_count == 0U || cfg->bit_count > 32U) {
         return TIKU_BITBANG_ERR_INVALID;
     }
-    /* bit_time_ticks is microseconds in the htimer "high accuracy"
-     * preset, and the PIO arch takes microseconds too.  Reject a zero
-     * period. */
+    /* The PIO arch takes the period in microseconds, one RP2350 htimer
+     * tick each.  A zero period is refused. */
     if (cfg->bit_time_ticks == 0U) {
         return TIKU_BITBANG_ERR_TIMING;
     }

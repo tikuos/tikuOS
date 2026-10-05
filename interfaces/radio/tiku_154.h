@@ -7,9 +7,9 @@
  *
  * tiku_154.h - IEEE 802.15.4 MAC-min facade.
  *
- * Ties the PHY to the frame layer: addressed data frames with 16-bit PAN/short
- * addressing, receive filtering, unslotted CSMA-CA on the hardware CCA and
- * auto-ACK on the T_IFS turnaround.  Shell and stacks use this, not registers.
+ * Ties the PHY to the frame layer for the shell and the stacks: addressed data
+ * frames with 16-bit PAN/short addressing, receive filtering, unslotted
+ * CSMA-CA on the hardware CCA and auto-ACK on the T_IFS turnaround.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -30,12 +30,12 @@ typedef struct {
     int8_t   rssi;          /**< RSSI in dBm                              */
 } tiku_154_rx_t;
 
-/** @brief 1 if this build has the 15.4 MAC (nRF54L on-die RADIO). */
+/** @brief Returns 1; the MAC is built only for the nRF54L on-die RADIO. */
 int tiku_154_available(void);
 
 /**
- * @brief Configure the MAC: PAN id, local short address, and channel (11..26).
- * Idempotent; call again to re-address or retune.
+ * @brief Configure the MAC: PAN id, local short address, and channel (11..26,
+ *        clamped).  Idempotent; call again to re-address or retune.
  */
 void tiku_154_init(uint16_t pan, uint16_t short_addr, uint8_t channel);
 
@@ -64,16 +64,18 @@ void tiku_154_set_secure(int on);
 /**
  * @brief Send a data frame to @p dst (TIKU_154_ADDR_BCAST for all).
  * @param ack  request an ACK and wait/retry for it.
- * @return 0 sent (ACK seen if requested), -1 bad length, -2 channel busy
- *         after CSMA backoff, -3 no ACK after retries.
+ * @return 0 sent (ACK seen if requested), -1 bad length or failed
+ *         encryption, -2 channel busy after CSMA backoff, -3 no ACK after
+ *         retries.
  */
 int tiku_154_send(uint16_t dst, const uint8_t *payload, uint8_t len,
                   uint8_t ack);
 
 /**
  * @brief Receive one data frame addressed to this node or broadcast, up to
- *        @p timeout_ms.  Frames for other addresses, and secured frames that
- *        fail to decrypt or verify, are skipped within the window.  An
+ *        @p timeout_ms.  Frames for other addresses or PANs are skipped within
+ *        the window, and so are secured frames that arrive with no key set,
+ *        fail to decrypt or verify, or repeat an old counter.  An
  *        ack-requesting frame is ACKed before this returns.
  * @return payload length; 0 also when the window closes with nothing
  *         delivered.

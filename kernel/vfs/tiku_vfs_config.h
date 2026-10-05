@@ -9,7 +9,6 @@
  *
  * Opt-in recoverable settings (TIKU_VFS_CONFIG=1): each change is stored with
  * a revision and a client token, applied, and applied again after a reset.
- * It is not a general transaction API.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -55,7 +54,7 @@
  *   TIKU_CFG_APPLIED        applied
  *   TIKU_CFG_RESTART        takes effect after a restart
  *   TIKU_CFG_BLOCKED        the reconcile hook refused it, or the stored value
- *                           no longer normalizes
+ *                           fails to normalize
  */
 /** @brief Journal status codes. */
 enum {
@@ -156,8 +155,8 @@ int tiku_cfg_open(tiku_cfg_t *, const tiku_cfg_io_t *,
 /**
  * @brief Enroll blank storage under a new incarnation.
  *
- * Repeating the call with the same incarnation returns TIKU_CFG_OK.  It is
- * not a factory reset: storage that is not blank is never formatted.
+ * Repeating the call with the same incarnation returns TIKU_CFG_OK.  Storage
+ * that is not blank is never formatted.
  *
  * @param c            Journal opened on blank storage
  * @param incarnation  A fresh random 128-bit value, not a boot count or UID
@@ -189,7 +188,7 @@ int tiku_cfg_submit(tiku_cfg_t *, const tiku_cfg_request_t *, uint8_t caller_cap
  * @brief Find the receipt of a request without executing it.
  *
  * Matches incarnation, resource, expected revision, token and normalized
- * value.  A request no longer in the history returns TIKU_CFG_STALE and is
+ * value.  A request evicted from the history returns TIKU_CFG_STALE and is
  * never executed again.
  *
  * @return TIKU_CFG_OK with the receipt's duplicate set; TIKU_CFG_STALE;
@@ -234,7 +233,7 @@ int tiku_cfg_history(tiku_cfg_t *, unsigned index, tiku_cfg_request_t *,
 const uint8_t *tiku_cfg_incarnation(const tiku_cfg_t *);
 /** @brief Name of a resource state; an unknown state is "blocked". */
 const char *tiku_cfg_state_name(unsigned state);
-/** @brief Standard CRC-32 (zlib); seals each bank and the text requests. */
+/** @brief Standard CRC-32 (zlib); seals each bank and each text request. */
 uint32_t tiku_cfg_crc32(const uint8_t *, size_t);
 
 #endif

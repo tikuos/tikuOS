@@ -9,7 +9,7 @@
  *
  * Drives the http kit's certificate engine (TLS 1.3, falling back to 1.2) over
  * the TCP stack.  The send and receive callbacks pump the radio drain and TCP
- * timers while they wait, so the console and the RX path stay alive.
+ * timers while they wait, so the console and the receive path keep running.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -32,7 +32,7 @@ static char basic_http_hdrs[TIKU_BASIC_HTTP_HDRS_MAX];
  * (host + path + HTTPHEADER block + content-type) plus a fixed allowance (128)
  * for the method, the HTTP/Host/Connection/Content-* tokens, the decimal
  * Content-Length and the CRLFs.  Raising a cap in tiku_basic_config.h without
- * growing REQ_MAX breaks the build here instead of overflowing req[]. */
+ * growing REQ_MAX fails this assert. */
 _Static_assert(TIKU_BASIC_HTTP_HOST_MAX + TIKU_BASIC_HTTP_PATH_MAX +
                TIKU_BASIC_HTTP_HDRS_MAX + TIKU_BASIC_HTTP_CTYPE_MAX + 128u
                <= TIKU_BASIC_HTTP_REQ_MAX,
@@ -126,8 +126,8 @@ static void drbg_reseed(void)
     uint8_t seed[DRBG_SEED_BYTES];
     size_t  i;
     if (tiku_trng_arch_read_bytes(seed, sizeof seed) != TIKU_TRNG_OK) {
-        /* On a TRNG fault, mix in the clock so a fixed state is not reused,
-         * rather than hanging. */
+        /* On a TRNG fault, mix the clock into the seed so the state still
+         * changes. */
         for (i = 0; i < sizeof seed; i++)
             seed[i] ^= (uint8_t)(tiku_clock_time() >> ((i & 3u) * 8u));
     }
@@ -161,7 +161,7 @@ static void basic_https_rng_prepare(void)
 static void basic_https_rng(uint8_t *b, size_t n)
 {
     size_t off = 0u;
-    if (!drbg_ready) basic_https_rng_prepare();   /* defensive */
+    if (!drbg_ready) basic_https_rng_prepare();   /* seeds on a first call */
     while (off < n) {
         size_t take = (n - off < 32u) ? (n - off) : 32u;
         drbg_hmac(drbg_K, drbg_V, 32u, drbg_V);   /* V = HMAC(K, V) */
@@ -336,13 +336,12 @@ basic_tls_stage_str(int s)
 /*
  * Heavy-crypto offload onto a worker thread.
  *
- * The handshake's public-key operations (ECDHE, CertVerify, chain verify)
- * otherwise run inline on the shell thread, and while each runs nothing pumps
- * the net (the peer can reset the connection) and no kernel timer or rule is
- * serviced.  With worker threads available io.offload runs each of them on
- * one dedicated worker while the drive loop keeps the net pumped and
- * dispatches the other processes.  With threads off, or the knob cleared,
- * io.offload stays NULL and the handshake runs inline.
+ * With worker threads available, io.offload runs the handshake's public-key
+ * operations (ECDHE, CertVerify, chain verify) on one dedicated worker while
+ * the drive loop pumps the net and dispatches the other processes.  With
+ * threads off, or TIKU_BASIC_HTTPS_OFFLOAD 0, io.offload is NULL and they run
+ * inline on the shell thread: nothing pumps the net meanwhile, so the peer
+ * can reset the connection, and no kernel timer or rule runs.
  */
 #ifndef TIKU_BASIC_HTTPS_OFFLOAD
 #  if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
@@ -397,7 +396,7 @@ static int basic_https_offload(int (*fn)(void *), void *arg)
     }
     basic_crypto_fn  = fn;
     basic_crypto_arg = arg;
-    basic_crypto_rc  = -1;           /* a failure until the worker stores fn's */
+    basic_crypto_rc  = -1;           /* failure until the worker stores fn's */
     basic_crypto_busy = 1;
 
     if (tiku_thread_start(&basic_crypto_worker,
@@ -416,7 +415,7 @@ static int basic_https_offload(int (*fn)(void *), void *arg)
             tiku_thread_kernel_block();               /* CPU -> the crypto */
         }
         tiku_atomic_exit();
-        if (BASIC_HTTPS_EXPIRED(dl)) {                /* never wedge */
+        if (BASIC_HTTPS_EXPIRED(dl)) {                /* give up at deadline */
             break;
         }
     }
@@ -490,10 +489,9 @@ basic_https_get(const char *method, const char *host, const char *path,
 
     basic_http_status = 0;
 
-    /* Trust is checked before DNS and TCP.  The roots live in /data and can
-     * be missing; a board without them says so in one line instead of after a
-     * DNS lookup and a connect.  Naming the store also keeps it from looking
-     * like a network fault, where every host fails to verify. */
+    /* The trust store is checked before DNS and TCP: the roots live in /data
+     * and can be missing, and a missing store is reported by name, with the
+     * provisioning hint, before any network traffic. */
     if (basic_https_roots_get(&roots, &nroots) != 0) {
         basic_report(TIKU_BASIC_ERR_IO,
                      "HTTPGET: no trust store -- provision /data/"
@@ -510,15 +508,14 @@ basic_https_get(const char *method, const char *host, const char *path,
         return -1;
     }
 #endif
-    /* Advance the source port every call so a redirect refetch to the same
-     * server IP (e.g. host -> www.host sharing one Cloudflare anycast IP)
-     * doesn't reuse the just-closed connection's 4-tuple (TIME_WAIT) and get
-     * its SYN dropped. */
+    /* A new source port on every call gives a redirect refetch to the same
+     * server IP a fresh 4-tuple: the closed connection's 4-tuple can still be
+     * in TIME_WAIT, and a SYN that reuses it is dropped. */
     src_seq = (src_seq >= 60000u) ? 49152u : (uint16_t)(src_seq + 2);
 
-    /* Initialise the TCP table: on a lean WiFi build nothing else does (the
-     * NET_TEST init + SLIP net process are absent), so tcp_connect() would
-     * otherwise allocate from an uninitialised table (as in MQTTPUB). */
+    /* Set up the TCP table the connect below allocates from; the call is
+     * idempotent.  A lean WiFi build has no TIKU_SHELL_NET_TEST setup to make
+     * it first. */
     tiku_kits_net_tcp_init();
 
     /* resolve host (literal dotted-quad accepted directly) */
@@ -592,13 +589,9 @@ basic_https_get(const char *method, const char *host, const char *path,
      * is consumed on a 1.3 failure), sends the request + body, and streams the
      * response into out[] through basic_https_sink.
      *
-     * now_unix gates cert validity: set only after an explicit SETTIME/NTP
-     * (tiku_rtc_is_set), else 0 to skip the date window -- signature + trust
-     * anchor + hostname stay enforced.  Gate on is_set(), not a bare
-     * get_seconds(): once tiku_rtc_init() has stamped the soft-RTC gate (any
-     * prior boot; on Ambiq it survives in MRAM across reflashes), get_seconds()
-     * returns a small non-zero boot-uptime value that would make every live
-     * cert "not yet valid" (stage -11) for every site.
+     * now_unix gates cert validity: the wall-clock time once SETTIME or NTP
+     * has set the RTC (tiku_rtc_is_set()), else 0, which skips the date
+     * window -- signature, trust anchor and hostname stay enforced.
      *
      * The WDT is not paused: basic_tls13_dbg kicks it per handshake step, so a
      * slow handshake survives while a hang still trips the WDT. */
@@ -615,9 +608,9 @@ basic_https_get(const char *method, const char *host, const char *path,
         tiku_kits_net_http_tls_t    tconf;
         int8_t erc;
 
-        /* Re-map rather than reuse the pointers taken at entry: a re-provision
-         * between then and now would have invalidated them (tiku_tfs_map's
-         * pointer dies on the next write to that name). */
+        /* Map the roots again: a re-provision since the check at entry
+         * invalidates the earlier pointers (a tiku_tfs_map() pointer dies on
+         * the next write to that name). */
         if (basic_https_roots_get(&roots, &nroots) != 0) {
             basic_report(TIKU_BASIC_ERR_IO, "HTTPGET: trust store vanished");
             return -1;

@@ -32,13 +32,15 @@
  *
  * Stores mode, clock source, interval and startup behaviour, then programs
  * the watchdog with them.  On a port without interval support, interval mode
- * leaves the watchdog off; check tiku_watchdog_mode_supported() first.
+ * turns the watchdog off.
  *
  * @param mode          Watchdog or interval timer mode
  * @param clk           Clock source selection
  * @param interval      Timeout interval
  * @param start_held    If non-zero, start in held (paused) state
- * @param kick_on_start If non-zero, kick the timer on start
+ * @param kick_on_start If non-zero, kick the timer on start; used only where
+ *                      TIKU_WATCHDOG_INTERVAL_SUPPORTED is 1 (MSP430)
+ * @note The call reports nothing: check tiku_watchdog_mode_supported() first.
  */
 void tiku_watchdog_config(tiku_wdt_mode_t mode, tiku_wdt_clk_t clk,
                          tiku_wdt_interval_t interval, int start_held,
@@ -84,7 +86,10 @@ int tiku_watchdog_get_start_held(void);
 /** @brief Return whether the stored configuration kicks when initialized. */
 int tiku_watchdog_get_kick_on_start(void);
 
-/** @brief Return non-zero when @p mode has a real backend on this build. */
+/**
+ * @brief Return non-zero when this build can run @p mode: watchdog mode
+ *        always, interval mode only with TIKU_WATCHDOG_INTERVAL_SUPPORTED.
+ */
 int tiku_watchdog_mode_supported(tiku_wdt_mode_t mode);
 
 /** @brief Disable the watchdog timer entirely */
@@ -107,9 +112,9 @@ void tiku_watchdog_on(void);
 int tiku_watchdog_is_on(void);
 
 /**
- * @brief Return the number of successful kicks since boot.
+ * @brief Return the number of tiku_watchdog_kick() calls since boot.
  *
- * Incremented inside tiku_watchdog_kick(). Wraps at 2^32.
+ * Wraps at 2^32.
  */
 uint32_t tiku_watchdog_kicks(void);
 

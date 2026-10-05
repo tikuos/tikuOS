@@ -16,11 +16,12 @@
 #include <stdint.h>
 
 /**
- * @brief Handle `power nor ...`.  argv[1] is already known to be "nor".
+ * @brief Handle the `power nor ...` verbs.
  *
- * Compiled only when TIKU_DRV_NOR_ENABLE is set; tiku_shell_cmd_power.c
- * guards the call with the same flag, so there is no runtime "not available"
- * stub.
+ * Defined only when TIKU_DRV_NOR_ENABLE is set.
+ *
+ * @note tiku_shell_cmd_power() calls it under the same flag, after matching
+ *       argv[1] to "nor".
  */
 void tiku_shell_cmd_nor(uint8_t argc, const char *argv[]);
 

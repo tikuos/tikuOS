@@ -28,7 +28,10 @@
 #endif
 #include <kernel/cpu/tiku_hang.h>
 
-/** @brief Init step tracer: prints each step, so a wedged init names it. */
+/**
+ * @brief Print the name of each init step as it starts, so the last line
+ *        printed before a hang names the step that hung.
+ */
 static void emmc_trace(const char *step)
 {
     SHELL_PRINTF("  emmc: %s\n", step);
@@ -39,9 +42,9 @@ void tiku_shell_cmd_emmc(uint8_t argc, const char *argv[])
     /* Verbs for the board's eMMC (U11):
      *
      *   power emmc id     init, then upgrade to an 8-bit high-speed bus
-     *   power emmc slow   init only (1-bit, 400 kHz), for comparison
+     *   power emmc slow   init only, left at 1 bit and 400 kHz
      *   power emmc hs200  switch to HS200; a failed switch falls back to HS 48
-     *   power emmc regs   host registers (safe while powered down)
+     *   power emmc regs   host registers (works while SDIO0 is down)
      *   power emmc gate   write and read back one scratch-region block
      *   power emmc bench  sequential, random-block and init-cost bench
      *   power emmc diag   read-path diagnostic
@@ -60,11 +63,11 @@ void tiku_shell_cmd_emmc(uint8_t argc, const char *argv[])
     tiku_emmc_err_t rc;
 
 #if (TIKU_DRV_USB_ENABLE + 0)
-    /* While the host has the card mounted over MSC, its filesystem driver
-     * caches blocks and assumes it is the only writer, so board-side access
-     * is refused.  Reads are refused too: the host's dirty blocks may not
-     * have reached the card, so a read could return stale data.  Only regs,
-     * which reads host registers and not the card, is allowed. */
+    /* While USB exports the card as an MSC disk (tiku_usb_msc_owns_emmc()),
+     * mounted by a host or not, every verb but regs is refused.  A host's
+     * filesystem driver caches blocks and assumes it is the only writer, and
+     * blocks it has not written back make a board-side read return stale
+     * data.  regs reads host registers, not the card. */
     if (tiku_usb_msc_owns_emmc() &&
         !(argc >= 3 && tiku_cmd_streq(argv[2], "regs"))) {
         SHELL_PRINTF("emmc: refused -- the USB host owns the card"
@@ -94,8 +97,6 @@ void tiku_shell_cmd_emmc(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 3 && (tiku_cmd_streq(argv[2], "sleep") || tiku_cmd_streq(argv[2], "wake"))) {
-        /* Both print how long they took, for comparing a wake with a
-         * full init. */
         const int to_sleep = tiku_cmd_streq(argv[2], "sleep");
         rc = to_sleep ? tiku_emmc_sleep() : tiku_emmc_wake();
         /* Only a success prints a duration; a call that finds the card
@@ -132,9 +133,9 @@ void tiku_shell_cmd_emmc(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "gate")) {
-        /* Write a pattern to one block of the scratch region and read it
-         * back bit-exact; the card's own contents are never touched.  A
-         * write below the scratch region must then be refused. */
+        /* Writes a pattern to one block of the scratch region and reads it
+         * back.  Then it writes LBA 0, which the driver must refuse; if the
+         * scratch guard fails, that write replaces the card's first block. */
         static uint8_t wr[512], rd[512];
         uint32_t lba, i, errs = 0u;
         rc = tiku_emmc_read_id(&id);
@@ -178,9 +179,8 @@ void tiku_shell_cmd_emmc(uint8_t argc, const char *argv[])
         return;
     }
     {
-        /* "slow" brings the card up at 1-bit, 400 kHz, for comparing the
-         * bench with the default bus; "id" or no verb runs the default
-         * init. */
+        /* "slow" brings the card up at 1 bit, 400 kHz; "id" or no verb runs
+         * the default init. */
         const int slow = (argc >= 3 && tiku_cmd_streq(argv[2], "slow"));
         uint32_t ladder_us, total_us;
 

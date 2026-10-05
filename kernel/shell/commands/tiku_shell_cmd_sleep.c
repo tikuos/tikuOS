@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_sleep.c - "sleep" command implementation.
  *
- * Sets the idle mode the scheduler enters when no events are pending, through
- * /sys/power/policy so the link's capability applies and watchers hear it.
- * Modes are abstract; the CPU HAL resolves each to the platform's own entry.
+ * Sets the idle mode the scheduler enters when no events are pending by
+ * writing /sys/power/policy; tiku_vfs_write() checks the caller's capability
+ * and notifies watchers.  The CPU HAL maps each mode to the platform's entry.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -124,7 +124,8 @@ tiku_shell_cmd_sleep(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* The node checks the link's capability and tells watchers. */
+    /* tiku_vfs_write() refuses a caller without TIKU_VFS_CAP_SYS and notifies
+     * the node's watchers on success. */
     len = append(req, 0, token);
     if (ack) {
         len = append(req, len, " allow-console-loss");

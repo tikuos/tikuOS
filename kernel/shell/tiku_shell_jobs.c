@@ -9,7 +9,7 @@
  *
  * A static slot table re-dispatches stored command lines through the parser
  * when their deadline passes; each firing re-arms or frees its slot before
- * dispatch, so a command that edits the table cannot double-fire.
+ * dispatch, so a command that edits the table finds the slot updated.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -28,10 +28,10 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * Fixed-size table of scheduled jobs (SRAM, not persistent).
+ * @brief Fixed-size table of scheduled jobs, indexed by slot id.
  *
- * Indexed by slot id.  A slot is free exactly when .type is
- * TIKU_SHELL_JOB_FREE (== 0), so the BSS zero-fill frees them all at boot.
+ * A slot is free when .type is TIKU_SHELL_JOB_FREE (0), so the .bss clear at
+ * boot frees every slot.
  */
 static tiku_shell_job_t job_table[TIKU_SHELL_JOBS_MAX];
 
@@ -135,8 +135,8 @@ tiku_shell_jobs_add(tiku_shell_job_type_t type, uint16_t interval_sec,
 /**
  * @brief Free a single job slot by id.
  *
- * Marks the slot free by setting .type back to TIKU_SHELL_JOB_FREE;
- * the command body is left in place but is no longer reachable.
+ * Marks the slot free by setting .type back to TIKU_SHELL_JOB_FREE; the
+ * command body stays in the slot, unreachable.
  *
  * @param id  Slot id (0..TIKU_SHELL_JOBS_MAX-1)
  * @return 0 on success; -1 if @p id is out of range or already free.
@@ -160,7 +160,7 @@ tiku_shell_jobs_del(uint8_t id)
  * Marks all non-free slots as TIKU_SHELL_JOB_FREE, cancelling every
  * pending and recurring job at once.
  *
- * @return Number of slots that were active and have now been freed.
+ * @return Number of slots that were active and have been freed.
  */
 uint8_t
 tiku_shell_jobs_clear(void)
@@ -184,8 +184,8 @@ tiku_shell_jobs_clear(void)
  * (parsed with a uint16_t overflow guard, minimum 1) and argv[2..] are joined
  * with single spaces into one command line, then handed to jobs_add().
  *
- * @note An over-long command is rejected, not silently cut.  Any failure prints
- *       a single-line diagnostic; success is silent, and `jobs` confirms it.
+ * @note A command longer than TIKU_SHELL_JOBS_CMD_MAX - 1 fails with "command
+ *       too long".  Any failure prints one line; success prints nothing.
  */
 int8_t
 tiku_shell_jobs_schedule_argv(tiku_shell_job_type_t type, uint8_t argc,
@@ -256,7 +256,7 @@ tiku_shell_jobs_schedule_argv(tiku_shell_job_type_t type, uint8_t argc,
                      name, (unsigned)TIKU_SHELL_JOBS_MAX);
         return -1;
     }
-    /* Success is silent: the user can run `jobs` to see the new entry. */
+    /* Success prints nothing; `jobs` lists the new entry. */
     return id;
 }
 
@@ -286,19 +286,18 @@ tiku_shell_jobs_get(uint8_t id)
 /*
  * Periodic dispatcher; called from the shell main loop.
  *
- * Snapshots the current second once, then walks every slot.  For each active
- * slot whose deadline has passed it:
- *   1. copies the command line into a local writable buffer, since the parser
- *      tokenises in place and must not tokenise the slot directly;
+ * Reads the current second once, then for each active slot whose deadline
+ * has passed:
+ *   1. copies the command to a stack buffer, since the parser writes NULs
+ *      into the line it runs and the slot keeps its command;
  *   2. re-arms an EVERY job (next_fire_sec = now + interval) or frees a ONCE
- *      job -- before dispatch, so a command that edits the table sees a
- *      coherent state and this slot cannot double-fire in the same pass;
- *   3. dispatches the copy via tiku_shell_parser_execute().
+ *      job, before dispatch, so a command that edits the table finds this
+ *      slot already updated;
+ *   3. runs the copy through tiku_shell_parser_execute().
  *
- * A missed deadline collapses to a single catch-up fire: re-arming from now
- * rather than from the old deadline means a stalled tick loop does not replay
- * every interval it slept through.  Dispatch is synchronous, so a long-running
- * scheduled command stalls the rest of this pass and the prompt.
+ * An EVERY job re-arms from now, so a job that missed several deadlines fires
+ * once.  Dispatch is synchronous: a long command delays the rest of the pass
+ * and the prompt.
  */
 void
 tiku_shell_jobs_tick(void)

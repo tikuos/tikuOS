@@ -7,9 +7,9 @@
  *
  * tiku_vfs_tree_inittab.h - /sys/init VFS nodes (init-table mirror).
  *
- * Named after the classic Unix file rather than "init", which would collide
- * with the root assembly entry point.  The declarations are unconditional, so
- * referencing the table with TIKU_INIT_ENABLE=0 fails at link time.
+ * Named inittab to keep its symbols apart from tiku_vfs_tree_init(), the root
+ * assembly.  The declarations are unconditional, so referencing the table with
+ * TIKU_INIT_ENABLE=0 fails at link time.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

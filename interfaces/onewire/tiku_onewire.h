@@ -9,6 +9,7 @@
  *
  * A portable 1-Wire master API for devices such as the DS18B20.  All operations
  * block, and the bus is bit-banged on a GPIO pin named by the board header.
+ * The functions are defined only on a board with TIKU_BOARD_OW_AVAILABLE.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

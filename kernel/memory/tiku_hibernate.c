@@ -8,7 +8,7 @@
  * tiku_hibernate.c - hibernate/resume orchestration for the memory subsystem.
  *
  * Flushes every write-back cache, persists a hibernate marker (boot count and
- * timestamp), and reloads cached regions on warm resume.  The marker is what
+ * timestamp), and reloads cached regions on warm resume.  The marker
  * distinguishes a cold boot from a return out of deep sleep.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -29,7 +29,8 @@
 /*
  * The hibernate marker (magic, monotonic boot count, the caller's timestamp
  * and a CRC) is kept in the caller's NVM buffer through a module-private
- * persist store, initialized on the first call to hibernate or resume.
+ * persist store, initialized on the first call to hibernate or resume.  The
+ * store's control block, which holds the marker's length, is in SRAM.
  */
 
 static tiku_persist_store_t hibernate_store;
@@ -40,10 +41,10 @@ static uint8_t              hibernate_initialized;
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Initialize the hibernate persist store if not already done
+ * @brief Initialize the hibernate persist store if not already done.
  *
- * Initializes the store and registers the marker key. Safe to call
- * multiple times — subsequent calls are no-ops.
+ * Zeroes and initializes the store and registers the marker key; later calls
+ * in the same boot return TIKU_MEM_OK at once.
  *
  * @param fram_buf   NVM buffer for the marker (caller-provided)
  * @return TIKU_MEM_OK on success, or an error code

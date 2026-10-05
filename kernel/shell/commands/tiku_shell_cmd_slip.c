@@ -7,22 +7,22 @@
  *
  * tiku_shell_cmd_slip.c - "slip" command: toggle SLIP/IP on the console line.
  *
- * Registers the IPv4 channel on the console: a frame whose first byte carries
- * the IPv4 version nibble reaches the IP stack whole, while keystrokes still
- * reach the line editor, so the device is interactive and an IP node at once.
+ * Registers the IPv4 channel on the console: a frame whose first byte has the
+ * IPv4 version nibble (0x4N) goes whole to the IP stack, and text between
+ * frames still reaches the shell's line editor.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "tiku_shell_cmd_slip.h"
 #include <kernel/shell/tiku_shell.h>                 /* SHELL_PRINTF */
-#include <tikukits/net/tiku_kits_net.h>              /* TIKU_KITS_NET_IP_ADDR */
+#include <tikukits/net/tiku_kits_net.h>              /* TIKU_KITS_NET_MTU */
 #include <tikukits/net/slip/tiku_kits_net_slip.h>    /* slip_init, slip_link */
-#include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>    /* set_link, set_addr */
+#include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>    /* get/set_link, input */
 #include <kernel/console/tiku_console.h>
 
 static uint8_t slip_on;       /* the console's IPv4 channel is registered */
-static uint8_t link_ready;    /* SLIP link registered with the IP layer once */
+static uint8_t link_ready;    /* 1 after the first enable: an IP link is set */
 static uint8_t slip_frame_buf[TIKU_KITS_NET_MTU];
 
 /** @brief One IP packet from the console's channel, into the stack. */
@@ -43,14 +43,10 @@ void
 tiku_shell_cmd_slip_enable(void)
 {
     if (!link_ready) {
-        /* Only claim the IP link for SLIP when nothing else already owns it.
-         * On a WiFi board, `wifi up` installs the WiFi link backend and a
-         * DHCP-acquired address first; forcing SLIP here would drop the radio
-         * link -- breaking net client commands (ping/ntp/dns) that call this
-         * to ensure the RX path is live.  Over WiFi those commands need
-         * nothing here: the link is up and RX is pushed from the radio
-         * callback.  With no link set (the usual SLIP-over-UART build) SLIP
-         * is installed. */
+        /* Install SLIP as the IP link only when no link is set.  On a WiFi
+         * board `wifi up` installs the WiFi link first, and it must stay:
+         * ping, ntp and dns call this function there too, and their
+         * replies arrive from the radio callback. */
         if (tiku_kits_net_ipv4_get_link() == (const tiku_kits_net_link_t *)0) {
             tiku_kits_net_slip_init();
             tiku_kits_net_ipv4_set_link(&tiku_kits_net_slip_link);

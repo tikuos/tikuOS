@@ -92,8 +92,7 @@ timer_count_read(char *buf, size_t max)
  * @brief Read handler for /sys/timer/fired.
  *
  * Renders the total number of timer expirations dispatched since
- * boot as a decimal line.  A diff between two reads gives the
- * timer event rate without instrumenting the driver.
+ * boot as a decimal line.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -145,8 +144,7 @@ timer_next_read(char *buf, size_t max)
  * @brief Read handler for /sys/clock/ticks.
  *
  * Renders the raw system tick counter: 16 bits on MSP430, wrapping every
- * 512 s at the default 128 Hz, and 32 bits elsewhere.  Useful for short
- * intervals and for checking the tick is alive; /sys/uptime gives uptime.
+ * 512 s at the default 128 Hz, and 32 bits elsewhere.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -168,7 +166,7 @@ clock_ticks_read(char *buf, size_t max)
  *
  * Renders the hardware timer's free-running counter (Timer A1 on MSP430).
  * Resolution follows the active preset in tiku_htimer_config.h, ~1 us in the
- * high-accuracy default; two successive reads show the counter advancing.
+ * high-accuracy default.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -185,8 +183,7 @@ htimer_now_read(char *buf, size_t max)
  * @brief Read handler for /sys/htimer/scheduled.
  *
  * Renders "1\n" when a one-shot hardware timer callback is armed
- * and "0\n" otherwise.  Only one htimer can be pending at a time,
- * so this is the full hardware-timer occupancy picture.
+ * and "0\n" otherwise.  Only one htimer can be pending at a time.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes

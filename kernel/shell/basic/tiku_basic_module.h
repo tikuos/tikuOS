@@ -88,9 +88,9 @@
 #elif defined(PLATFORM_NORDIC)
 #define TIKU_MODULE_CARVE_ADDR  0x58000u
 #else
-/* Not defaulted: a part without its own branch must not inherit another
- * part's slot address.  A build with the loader stops here until the port
- * chooses one (its code cap less 32 KB). */
+/* No default: a part without its own branch must not inherit another part's
+ * slot address, so a build with the loader stops here.  A port defines its
+ * slot as its code cap less 32 KB. */
 #if defined(TIKU_BASIC_MODULE_ENABLE) && TIKU_BASIC_MODULE_ENABLE
 #error "no Tier-3 module slot defined for this platform"
 #endif
@@ -207,7 +207,7 @@ int tiku_basic_module_load(void);
  * Parts with a RAM window first copy the image from TIKU_MODULE_FILE into it;
  * activate never seeds the file from the embedded copy.
  *
- * @note Safe to call at every boot: without a valid module it returns -1.
+ * @note May be called at every boot: with no valid module it returns -1.
  * @return 0 activated, -1 no valid module or the feature off.
  */
 int tiku_basic_module_activate(void);

@@ -265,10 +265,8 @@ exec_stmt(const char **p)
     }
 
     if (match_kw(p, "REM") || cur_peek(p) == '\'') {
-        /* Comment: drop the rest of the line, including any colons.
-         * Both the BASIC `REM` keyword and the Apple/GW-BASIC `'`
-         * shorthand are accepted. Without this, "REM hi : PRINT"
-         * would execute the PRINT. */
+        /* Comment (REM or the ' shorthand): drop the rest of the line,
+         * colons included, so "REM hi : PRINT" runs no PRINT. */
         while (cur_peek(p)) cur_advance(p);
         return;
     }
@@ -282,9 +280,8 @@ exec_stmt(const char **p)
     }
     if (match_kw(p, "?"))      { exec_print(p);  return; }   /* alias */
 #if TIKU_BASIC_STRVARS_ENABLE
-    /* MID$ / LEFT$ / RIGHT$ as LHS: detect the keyword followed by
-     * `(` to disambiguate from a numeric expression that just
-     * happens to start with a similar token. */
+    /* MID$ / LEFT$ / RIGHT$ as an assignment target: the keyword followed
+     * by `(`. */
     {
         const char *save = cur_mark(p);
         char        kind = 0;
@@ -297,9 +294,7 @@ exec_stmt(const char **p)
                 exec_strslice_assign(p, kind);
                 return;
             }
-            /* Wasn't a slice-assign; rewind so something else can
-             * try (e.g. it's actually an expression starting with
-             * MID$, though there's no such legal statement form). */
+            /* Not a slice assignment: rewind for the chain below. */
             cur_rewind(p, save);
         }
     }
@@ -446,10 +441,8 @@ exec_stmt(const char **p)
     }
 #endif
 
-    /* Implicit LET: "A = expr" or "A$ = expr$" or "A(i) = expr".
-     * The save / restore dance backs out cleanly when the
-     * cursor sits on a single letter that isn't actually being
-     * assigned (e.g. a stray `A` line that's just a syntax error). */
+    /* Implicit LET: "A = expr", "A$ = expr$" or "A(i) = expr".  A name not
+     * followed by '=' rewinds to `save` and raises "syntax". */
     {
         const char *save = cur_mark(p);
         char  c = to_upper(cur_peek(p));

@@ -45,7 +45,7 @@ int tiku_ble_bond_store(const uint8_t addr[6], uint8_t addr_type,
 
 /**
  * @brief Look up a bond by address.
- * @param ltk  out: the stored LTK when found (may be NULL to just test).
+ * @param ltk  out: the stored LTK when found; NULL tests for a bond only.
  * @return 1 if bonded (ltk filled), 0 if not.
  */
 int tiku_ble_bond_find(const uint8_t addr[6], uint8_t addr_type,

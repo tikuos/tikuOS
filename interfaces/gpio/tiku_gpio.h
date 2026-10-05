@@ -7,9 +7,8 @@
  *
  * tiku_gpio.h - platform-agnostic raw GPIO interface.
  *
- * A stable port/pin-indexed API for kernel code needing direct pin control,
- * with no dependency on the per-board LED indirection.  Header-only: every call
- * is a static inline resolving to the arch driver.
+ * A port/pin-indexed API for kernel code that drives pins directly.
+ * Header-only: every call is a static inline resolving to the arch driver.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -69,9 +68,7 @@ static inline int tiku_gpio_dir_in(uint8_t port, uint8_t pin)
 }
 
 /**
- * @brief Drive a pin high.
- *
- * Side effect: sets pin direction to output if not already.
+ * @brief Drive a pin high, making it an output if it is not one.
  */
 static inline int tiku_gpio_set(uint8_t port, uint8_t pin)
 {
@@ -79,7 +76,7 @@ static inline int tiku_gpio_set(uint8_t port, uint8_t pin)
 }
 
 /**
- * @brief Drive a pin low.
+ * @brief Drive a pin low, making it an output if it is not one.
  */
 static inline int tiku_gpio_clear(uint8_t port, uint8_t pin)
 {
@@ -97,8 +94,8 @@ static inline int tiku_gpio_toggle(uint8_t port, uint8_t pin)
 /**
  * @brief Drive a pin to the given value (0 or 1).
  *
- * Equivalent to tiku_gpio_set/clear but selectable at runtime.
- * This is the hot-path call used by tiku_bitbang.
+ * Equivalent to tiku_gpio_set/clear, selectable at runtime, and likewise
+ * makes the pin an output.  tiku_bitbang drives its pins through this call.
  */
 static inline int tiku_gpio_write(uint8_t port, uint8_t pin, uint8_t val)
 {

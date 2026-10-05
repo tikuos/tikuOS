@@ -26,20 +26,16 @@
 #include <arch/ra8p1/tiku_store_arch.h>
 
 /*
- * The MSC pump is registered with the shell, not with the scheduler's idle
- * hook.  A SCSI command can take milliseconds of process context and the
- * shell already owns a place for work of that shape; the idle hook runs when
- * the system has decided to do nothing, which is the wrong moment to start
- * a transfer the host is waiting on.  EP0 needs none of this -- it is on the
- * interrupt, so enumeration completes whether or not the shell is busy.
+ * The MSC pump runs as a shell pump, in process context: a SCSI command can
+ * take milliseconds.  EP0 is served from the interrupt, so enumeration
+ * completes while the shell is busy.
  */
 
 /**
- * @brief One turn of the disk and of any import running behind it.
+ * @brief Serve pending SCSI work, then advance a running store import by one
+ *        erase sector.
  *
- * Both live on the same pump so an import advances between commands rather
- * than instead of them: the store steps one erase sector, the transport
- * refuses host writes meanwhile, and the disk never leaves the bus.
+ * Host writes are refused while an import runs; the disk stays attached.
  */
 static void usbhs_pump(void)
 {
@@ -136,8 +132,8 @@ void tiku_shell_cmd_store(uint8_t argc, const char *argv[])
                      (unsigned long)tiku_ra8p1_store_commit_lba());
         return;
     }
-    /* The CRC is re-derived from the medium here, so this line is a check on
-     * the stored bytes rather than a repeat of the header beside them. */
+    /* tiku_ra8p1_store_verify() recomputes the CRC over the stored bytes
+     * and compares it with the header's. */
     SHELL_PRINTF("store: \"%s\", %lu bytes, crc %s\n", name,
                  (unsigned long)len,
                  tiku_ra8p1_store_verify() ? "ok" : "MISMATCH");

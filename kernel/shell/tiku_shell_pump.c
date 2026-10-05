@@ -7,9 +7,9 @@
  *
  * tiku_shell_pump.c - shared busy-wait service step.
  *
- * Implements the step described in the header: drain on every call, pace the
- * TCP timer, and poll for Ctrl-C, through the console decoder on a SLIP build.
- * Each step's comment states the failure it prevents.
+ * tiku_shell_pump_net(): kicks the watchdog, polls the WiFi radio, paces the
+ * TCP timer and reads Ctrl-C from the console, for a command that busy-waits
+ * inside one dispatch of the shell process.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,13 +23,10 @@
 #include <kernel/timers/tiku_clock.h>       /* pacing                      */
 #include <kernel/cpu/tiku_watchdog.h>       /* tiku_watchdog_kick          */
 
-/* PUMP_HAS_TCP is 1 when tcp.c is linked into this image, mirroring the
- * Makefile: the full-net profile wildcard-compiles tcp.c (whose own
- * gate then takes the tiku_kits_net.h default of enabled), while the
- * lean MIN profile compiles it only when TIKU_KITS_NET_TCP_ENABLE=1
- * is passed on the command line (the MQTT/HTTP opt-ins do that).
- * Testing the header default here would produce an undefined
- * reference on a MIN build without TCP. */
+/* PUMP_HAS_TCP is 1 when this image links tiku_kits_net_tcp.c, as the
+ * Makefile decides: a full-net build compiles every ipv4 source, and a MIN
+ * build compiles tcp.c only with -DTIKU_KITS_NET_TCP_ENABLE=1 (the MQTT,
+ * HTTP and IP-link opt-ins). */
 #if defined(TIKU_KIT_NET_ENABLE)
 #  if defined(TIKU_KIT_NET_MIN)
 #    if defined(TIKU_KITS_NET_TCP_ENABLE) && (TIKU_KITS_NET_TCP_ENABLE + 0)
@@ -63,18 +60,18 @@ int tiku_shell_pump_net(void (*periodic)(void))
     tiku_watchdog_kick();
 
 #if defined(PUMP_HAS_WIFI)
-    /* Drive the WiFi RX every call: the radio's runner is starved while the
-     * caller busy-waits (on the ESP32-C61 the radio's own task too), so
-     * without this inbound segments (SYN-ACK, CONNACK, data) never reach
-     * the TCP stack -- connects would always time out. */
+    /* Poll the WiFi receive path on every call: the radio's driver process
+     * (and on the ESP32-C61 its task) does not run while the caller
+     * busy-waits, and inbound segments (SYN-ACK, CONNACK, data) reach the
+     * TCP stack only through this poll. */
     (void)tiku_wireless_rx_poll();
 #endif
 
 #if PUMP_HAS_TCP
     {
-        /* Pace tcp_periodic (+ the protocol hook) to ~8 Hz: it
-         * advances connect/retransmit timeouts per call, so a tight
-         * loop calling it every iteration would blow through them. */
+        /* tcp_periodic() advances the connect and retransmit timeouts
+         * one step per call, so it and the protocol hook run at most 8
+         * times a second. */
         static tiku_clock_time_t last;
         tiku_clock_time_t now = tiku_clock_time();
         if ((tiku_clock_time_t)(now - last) >=
@@ -90,12 +87,9 @@ int tiku_shell_pump_net(void (*periodic)(void))
     (void)periodic;
 #endif
 
-    /* Ctrl-C break, read through the console decoder: the console line
-     * carries frames for every registered channel (the IP link, a window
-     * session) beside the text, and the decoder hands each frame to its
-     * channel and returns only text.  The raw getc would read a payload
-     * byte 0x03 as Ctrl-C -- aborting the operation with an uncategorised
-     * error -- and would take bytes meant for a channel. */
+    /* tiku_shell_net_getc() hands every frame on the console line to its
+     * channel and returns only text, so a 0x03 inside a frame is not read
+     * as Ctrl-C. */
     if (tiku_shell_net_getc() == PUMP_CTRL_C) {
         return 1;
     }

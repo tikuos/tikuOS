@@ -7,8 +7,8 @@
  *
  * tiku_vfs_tree_coproc.c - /sys/coproc, over interfaces/coproc alone.
  *
- * Portable by construction: every handler goes through tiku_coproc_*, so the
- * tree reads the same on any platform that carries a backend.
+ * Every handler goes through the tiku_coproc_* interface, so the tree is the
+ * same on every platform with a coproc backend (TIKU_HAS_COPROC).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -76,8 +76,8 @@ static int coproc_run_write(const char *buf, size_t len)
 /**
  * @brief Read handler for /sys/coproc/echo: "<reply_seq> <last reply>".
  *
- * A write sends bytes over the mailbox; the seq advances once a reply has
- * crossed back, so the cross-core path ran.
+ * A write sends bytes over the mailbox; reply_seq advances when a reply comes
+ * back from the other core.
  */
 static int coproc_echo_read(char *buf, size_t max)
 {
@@ -102,8 +102,9 @@ const tiku_vfs_node_t tiku_vfs_tree_coproc_children[] = {
     { "state",     TIKU_VFS_FILE, coproc_state_read,     NULL, NULL, 0 },
     { "heartbeat", TIKU_VFS_FILE, coproc_heartbeat_read, NULL, NULL, 0 },
     { "image",     TIKU_VFS_FILE, coproc_image_read,     NULL, NULL, 0 },
-    /* Launch is a one-way door on every backend, so run needs CAP_SYS, as
-     * the watchdog controls do. */
+    /* A start cannot always be undone: stop is cooperative, and the first
+     * start of a oneshot backend may constrain other subsystems until
+     * power-off.  run needs CAP_SYS. */
     { "run",       TIKU_VFS_FILE, coproc_run_read,  coproc_run_write,
       NULL, 0, NULL, NULL, TIKU_VFS_CAP_SYS },
     { "echo",      TIKU_VFS_FILE, coproc_echo_read, coproc_echo_write,

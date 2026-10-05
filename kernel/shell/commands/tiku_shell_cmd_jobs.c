@@ -26,7 +26,7 @@
 /* OUTPUT CONSTANTS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/** Width of the "type intervals" field (chosen to fit "every 65535s"). */
+/** Width of the "<type> <sec>s" field: "every 65535s" and one space. */
 #define JOBS_HEAD_WIDTH   13
 
 /** Width of the command field; longer commands are truncated with "...". */
@@ -76,11 +76,9 @@ jobs_fmt_head(char *out, uint8_t width, tiku_shell_job_type_t type,
 }
 
 /**
- * @brief Copy @p src into @p dst with right-truncation to "..." when needed.
+ * @brief Copy @p src into @p dst, at most @p dstsz - 1 chars plus the NUL.
  *
- * Resulting string is at most @p dstsz - 1 chars (excluding NUL).
- * Padding to @p dstsz - 1 columns is left to the printf format spec
- * via "%-Ns".
+ * A longer @p src is cut to end in "...".  The result is not padded.
  */
 static void
 jobs_truncate_cmd(const char *src, char *dst, uint8_t dstsz)

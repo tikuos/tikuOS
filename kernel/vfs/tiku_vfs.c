@@ -23,7 +23,7 @@
 #include <kernel/process/tiku_process.h>
 #include <hal/tiku_cpu.h>
 #include <stdio.h>
-#include <string.h>   /* memcpy/memset for the dynamic-directory helpers */
+#include <string.h>   /* memcpy, memset, strcmp, strlen */
 
 /*---------------------------------------------------------------------------*/
 /* PRIVATE STATE                                                             */
@@ -77,11 +77,11 @@ static const tiku_vfs_node_t *vfs_child(const tiku_vfs_node_t *dir,
 }
 
 /**
- * @brief One watch subscription: which node rings which process.
+ * @brief One watch subscription: each notify of @ref node posts
+ *        TIKU_EVENT_VFS to @ref proc.
  *
- * A slot is free when @ref node is NULL.  Slots live in SRAM —
- * subscriptions are per-boot state, re-established by their owners
- * at init (the rules engine re-arms after every rule mutation).
+ * A slot is free when @ref node is NULL.  Slots live in SRAM, so a
+ * subscription lasts one boot and its owner subscribes again at init.
  */
 typedef struct {
     const tiku_vfs_node_t *node;   /**< watched node (NULL = free) */
@@ -285,7 +285,7 @@ int tiku_vfs_mount(const char *parent, const tiku_vfs_node_t *node)
 }
 
 /*---------------------------------------------------------------------------*/
-/* DYNAMIC DIRECTORY SUPPORT — runtime children (e.g. the /data file store)  */
+/* DYNAMIC DIRECTORY SUPPORT                                                 */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -397,14 +397,14 @@ static int vfs_dyn_unlink(const char *path)
 }
 
 /**
- * @brief Flag-only read handler for a listed dynamic file; never called.
+ * @brief Read handler of a listed dynamic file; returns -1.
  *
- * A dynamic child is read and written through its directory's dyn ops, so
- * the node a list callback gets has no handler of its own.  This pair marks
- * it read+write so `ls` renders "rw"; resolve() never returns such a node.
+ * A dynamic child is read and written through its directory's dyn ops.  This
+ * pair only marks the listed node read+write, so `ls` renders "rw";
+ * tiku_vfs_resolve() never returns such a node.
  */
 static int vfs_dyn_file_rd(char *b, size_t m)        { (void)b; (void)m; return -1; }
-/** @brief Flag-only write handler; the counterpart of vfs_dyn_file_rd(). */
+/** @brief Write handler of a listed dynamic file; returns -1. */
 static int vfs_dyn_file_wr(const char *b, size_t l)  { (void)b; (void)l; return -1; }
 
 /** @brief The list callback and context vfs_dyn_list_thunk() forwards to. */
@@ -447,9 +447,9 @@ static void vfs_dyn_list_thunk(const char *name, void *vad)
 
 static uint8_t vfs_cap_permitted(tiku_vfs_cap_t req);
 
-/* Delete a file (or other dynamic child) at @p path.  Removing needs FS, as
- * creating does; static nodes have no unlink and return -1.  The write
- * path's notify contract applies here too. */
+/* Delete a dynamic child at @p path; needs TIKU_VFS_CAP_FS, as creating one
+ * does.  A path with no dynamic directory returns -1.  On success the
+ * directory is notified. */
 int tiku_vfs_unlink(const char *path)
 {
     if (!vfs_cap_permitted(TIKU_VFS_CAP_FS)) {
@@ -481,8 +481,8 @@ static int vfs_read_dispatch(const tiku_vfs_node_t *node, char *buf,
 
 #if TIKU_VFS_CACHE_ENABLE
     /* Nodes with a freshness window and a read without side effects go
-     * through the read-coalescing cache: a fresh hit skips the handler
-     * entirely; a miss samples the handler and stores the rendering. */
+     * through the read-coalescing cache: a fresh hit skips the handler; a
+     * miss runs the handler and stores the rendering. */
     if (node->desc != NULL && node->desc->fresh_ticks > 0u &&
         (node->desc->flags & (TIKU_VFS_DF_READ_EFFECT |
                               TIKU_VFS_DF_READ_CONSUMES)) == 0u) {
@@ -604,8 +604,8 @@ int tiku_vfs_read_total(const char *path, char *buf, size_t max,
 /**
  * @brief Name what reading a node does, from its descriptor alone.
  *
- * Read flags win over freshness and cost; a freshness value outside
- * tiku_vfs_fresh_t is "unknown" rather than a guess.
+ * Read flags take precedence over freshness and cost; a freshness value
+ * outside tiku_vfs_fresh_t gives "unknown".
  */
 const char *tiku_vfs_read_policy(const tiku_vfs_node_t *node)
 {
@@ -656,13 +656,12 @@ int tiku_vfs_read_passive(const char *path, char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* TYPED ACCESS — descriptor-driven, machine-facing reads                    */
+/* TYPED ACCESS                                                              */
 /*---------------------------------------------------------------------------*/
 /*
- * The typed layer leaves the text handlers' contract alone: a typed read
- * either calls the descriptor's native producer or renders the text handler
- * once and decodes the digits.  Decoding is hand-rolled rather than strtol(),
- * so it parses the same under every libc and locale.
+ * A typed read calls the descriptor's native producer, or renders the text
+ * handler once and decodes the leading number.  The decoder calls no libc
+ * parser, so it parses the same under every libc and locale.
  */
 
 /* Short tokens for tiku_vfs_desc_str(); indexed by the matching enum. */
@@ -794,9 +793,9 @@ static int vfs_decode_text(const char *s, const tiku_vfs_desc_t *d,
 /**
  * @brief Read a held node as a decoded typed value.
  *
- * Native producer wins; otherwise render the text handler into a
- * small scratch buffer and decode.  @p out is always zeroed first so
- * a failed read leaves a clean NONE value rather than stale bytes.
+ * Calls the native producer when there is one; otherwise renders the text
+ * handler into a small scratch buffer and decodes it.  @p out is zeroed
+ * first, so a failed read leaves vtype NONE.
  */
 int tiku_vfs_read_val_node(const tiku_vfs_node_t *node, tiku_vfs_val_t *out)
 {
@@ -947,9 +946,8 @@ static uint8_t vfs_cap_permitted(tiku_vfs_cap_t req)
 /**
  * @brief Resolve a path and invoke the file's write handler.
  *
- * A successful write rings the node's watchers via tiku_vfs_notify(), so
- * every shell, BASIC and network write is observable without the writer
- * knowing watchers exist.  A failed write does not notify.
+ * A successful write calls tiku_vfs_notify() on the node, or on a dynamic
+ * child's directory; a failed write notifies nothing.
  *
  * @return TIKU_VFS_OK; TIKU_VFS_EINVAL, TIKU_VFS_ENOENT, TIKU_VFS_EACCES or
  *         TIKU_VFS_EPERM; or the handler's or the dynamic directory's
@@ -1031,9 +1029,8 @@ int tiku_vfs_list(const char *path, tiku_vfs_list_fn callback, void *ctx)
     unsigned i;
     const tiku_vfs_node_t *child;
 
-    /* A NULL callback is tolerated, like every other pointer argument here:
-     * "does this path exist and is it a directory" is a legitimate query with
-     * nothing to enumerate into. */
+    /* With a NULL callback the call only reports whether @p path lists as a
+     * directory: 0 or -1. */
     if (callback == NULL) {
         node = tiku_vfs_resolve(path);
         if (node != NULL) {
@@ -1132,7 +1129,7 @@ int tiku_vfs_is_dir(const char *path)
 }
 
 /*---------------------------------------------------------------------------*/
-/* WATCH — change notification on nodes                                      */
+/* WATCH                                                                     */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -1218,9 +1215,8 @@ int8_t tiku_vfs_unwatch(const char *path, struct tiku_process *p)
 /**
  * @brief Remove every subscription held by @p p.
  *
- * The re-arm primitive: a consumer drops all its watches and re-subscribes
- * from current state instead of tracking which slot belonged to which
- * interest.
+ * A consumer re-arms by calling this and then subscribing again to every
+ * node it still wants.
  *
  * @param p  The subscribed process
  */
@@ -1248,9 +1244,8 @@ void tiku_vfs_unwatch_all(struct tiku_process *p)
 
 /*
  * A fixed ring in SRAM.  When it is full the oldest record is dropped and
- * the drop counter rises; a reader that sees a non-zero drop count re-reads
- * instead of trusting the records it drained.  GPIO ISRs push through
- * tiku_vfs_notify(), so every update of the ring runs with interrupts masked.
+ * vfs_ev_dropped counts it.  GPIO ISRs push through tiku_vfs_notify(), so
+ * every update of the ring runs with interrupts masked.
  */
 static tiku_vfs_change_t vfs_events[TIKU_VFS_EVENTS_MAX];
 static uint8_t  vfs_ev_head;      /* next write slot                       */
@@ -1260,9 +1255,8 @@ static uint16_t vfs_ev_dropped;
 
 uint32_t tiku_vfs_node_id(const tiku_vfs_node_t *node)
 {
-    /* A static node's address is its identity: static nodes are never moved
-     * or freed, so it is stable for the boot and equal however the node was
-     * reached.  Handed out as a token, not as something to dereference. */
+    /* The token is the node's address, which static and mounted nodes keep
+     * for the boot.  It is for comparison only, never dereferenced. */
     return (uint32_t)(uintptr_t)node;
 }
 
@@ -1273,8 +1267,7 @@ static void vfs_events_push(const tiku_vfs_node_t *node, uint8_t op)
 
     tiku_atomic_enter();
     if (vfs_ev_count >= TIKU_VFS_EVENTS_MAX) {
-        /* Drop the oldest and say so, rather than the newest in silence:
-         * the recent records are the ones a reader can still act on. */
+        /* Full: drop the oldest record and count the drop. */
         vfs_ev_dropped++;
         vfs_ev_count--;
     }
@@ -1344,11 +1337,12 @@ void tiku_vfs_notify_op(const tiku_vfs_node_t *node, tiku_vfs_op_t op)
 }
 
 /**
- * @brief Ring the watchers of @p node and record a TIKU_VFS_OP_CHANGED event.
+ * @brief Record a TIKU_VFS_OP_CHANGED event for @p node and post to its
+ *        watchers.
  *
- * Posts TIKU_EVENT_VFS (data = the node pointer) to every subscriber; ISR-safe,
- * uncoalesced, so duplicate events degrade to harmless re-reads.  Called by
- * tiku_vfs_write() on success and by drivers whose values change without one.
+ * Posts one TIKU_EVENT_VFS (data = the node pointer) to every subscriber;
+ * ISR-safe.  Called by tiku_vfs_write() on success and by drivers whose values
+ * change without a write.
  *
  * @param node  The node that changed
  */
@@ -1358,16 +1352,13 @@ void tiku_vfs_notify(const tiku_vfs_node_t *node)
 }
 
 /*---------------------------------------------------------------------------*/
-/* INTROSPECTION — the namespace observes itself                             */
+/* INTROSPECTION                                                             */
 /*---------------------------------------------------------------------------*/
 /*
- * Read-only views over the two pieces of private VFS state — the
- * watch table and the tree with its mounts — so a /sys node can render them
- * (see kernel/vfs/tree/tiku_vfs_tree_watch.c).  All run in process
- * context on a cold path (a human cats a file); none lock, matching
- * the notify-scan reasoning: the cooperative scheduler gives a
- * handler a yield-free run, and tree-node pointers are stable for
- * the life of the system, so a snapshot cannot tear under it.
+ * Read-only views of the watch table and of the tree with its mounts, which
+ * the /sys/watch and /sys/vfs nodes render.  They run in process context and
+ * take no lock: only process context changes the watch table, a handler runs
+ * without yielding, and tree nodes keep their addresses for the boot.
  */
 
 /**
@@ -1391,9 +1382,8 @@ uint8_t tiku_vfs_watch_used(void)
 /**
  * @brief Fetch the contents of one watch slot.
  *
- * Lets an observability node show who watches what without exposing the table
- * type.  The node pointer is stable; the process pointer is valid for the
- * caller's yield-free run.
+ * The node pointer is stable for the boot; the process pointer is valid until
+ * the caller yields.
  *
  * @param i     Slot index in [0, TIKU_VFS_WATCH_MAX)
  * @param node  Out: the watched node (may be NULL to ignore)
@@ -1467,15 +1457,14 @@ static int path_find(const tiku_vfs_node_t *dir,
 /**
  * @brief Reverse-resolve a node pointer to its absolute path.
  *
- * The tree has no parent links, so this DFS-searches from the root for the
- * node's address and builds the path on the way down.  O(tree size): for cold
- * observability reads such as /sys/watch, not a hot path.
+ * Nodes have no parent links, so this searches depth-first from the root for
+ * the node's address and builds the path on the way down: O(tree size).
  *
  * @param node  Node to name (must be in the tree)
  * @param buf   Output buffer (>= TIKU_VFS_PATH_MAX recommended)
  * @param max   Buffer capacity
- * @return Path length, or -1 if not found / bad args.  The root
- *         resolves to "/".
+ * @return Path length, or -1 if not found or on bad args; a length >= @p max
+ *         means the path was cut.  The root resolves to "/".
  */
 int tiku_vfs_path_of(const tiku_vfs_node_t *node, char *buf, size_t max)
 {
@@ -1545,20 +1534,17 @@ uint8_t tiku_vfs_depth(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* MANIFEST — one-read, machine-readable dump of the namespace              */
+/* MANIFEST                                                                  */
 /*---------------------------------------------------------------------------*/
 /*
- * Render every node, boot mounts included, as one tab-separated line so an
- * external agent can learn the device's capabilities in a single read instead
- * of walking it with ls/cat.  Six columns: path type perms meta cap id
- * (type = d|f; perms = rw|r-|-w|--; meta is "-" for an untyped node, else the
- * packed descriptor "vtype,unit,fresh,cost[,lo..hi];read=policy", followed by
- * ";secret" for a secret node; cap is the capability a writer must hold --
- * "-" (open), "hw", "sys", "fs", "net", or "cap" for a combination; id is
- * tiku_vfs_node_id()).  Dynamic directories (/data) are listed but their
- * runtime children are not walked -- those are data, not capability metadata
- * (use `ls` for them).  Only node metadata is touched, so a manifest read
- * calls no handler and never samples a live sensor.
+ * One tab-separated line per node, boot mounts included, in six columns:
+ * path type perms meta cap id.  type is d or f; perms is rw, r-, -w or --;
+ * meta is "-" for an untyped node, else "vtype,unit,fresh,cost[,lo..hi]"
+ * then ";read=<policy>", and ";secret" for a secret node; cap is the
+ * capability a writer must hold: "-" (open), "hw", "sys", "fs", "net", or
+ * "cap" for a combination; id is tiku_vfs_node_id().  A dynamic directory is
+ * listed but its runtime children are not.  Only node metadata is read: a
+ * manifest calls no handler.
  */
 /** @brief Output buffer and running length of a manifest render. */
 typedef struct {
@@ -1598,8 +1584,7 @@ static void manifest_line(vfs_manifest_sink_t *s, const char *path,
     char  *dst  = s->out + ((s->off < s->max) ? s->off : s->max);
     int    m;
 
-    /* Pack the descriptor into one field so untyped nodes (the majority) cost
-     * a single "-" instead of five columns. */
+    /* The descriptor is one comma-separated field; "-" when untyped. */
     if (d == NULL) {
         meta[0] = '-';
         meta[1] = '\0';
@@ -1626,8 +1611,7 @@ static void manifest_line(vfs_manifest_sink_t *s, const char *path,
                        (d->flags & TIKU_VFS_DF_SECRET) ? ";secret" : "");
     }
 
-    /* The id is the token /sys/vfs/events reports, so a reader can map a
-     * change record back to its path. */
+    /* The id is the token /sys/vfs/events reports for the same node. */
     m = snprintf(dst, room, "%s\t%c\t%s\t%s\t%s\t%08lx\n",
                  path, (n->type == TIKU_VFS_DIR) ? 'd' : 'f', perm, meta,
                  vfs_cap_name(n->req_cap),

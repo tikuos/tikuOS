@@ -21,16 +21,18 @@
  * @brief Bring the panel up and paint a colour (red by default), draw the
  *        name "TikuOS" (`text`) or a circle (`circle`).
  *
+ * An unknown argument prints the accepted words and draws nothing.
+ *
  * @param argc  Argument count
  * @param argv  Arguments; argv[1] is a colour name, `text` or `circle`
  */
 void tiku_shell_cmd_panel(uint8_t argc, const char *argv[]);
 
 /**
- * @brief The one screen this command owns, brought up on first use.
+ * @brief The panel's screen, initialised on first use.
  *
- * Other commands that draw -- the camera, for one -- share the panel and its
- * framebuffer through this instead of claiming a second buffer of their own.
+ * Commands that draw, such as the camera, share this screen and its
+ * framebuffer.
  *
  * @return The initialised screen, or NULL when it cannot come up
  */

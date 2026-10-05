@@ -28,7 +28,7 @@ struct tiku_nvm_backend;
  *
  * @note The caller holds the platform's NVM write window
  *       (tiku_mpu_unlock_nvm()/lock_nvm()) where the region needs one; a
- *       backend may rely on it rather than open the window itself.
+ *       backend may rely on the window being open.
  * @return 0 on success, negative on failure.
  */
 typedef int (*tiku_nvm_write_fn)(struct tiku_nvm_backend *be,
@@ -37,8 +37,8 @@ typedef int (*tiku_nvm_write_fn)(struct tiku_nvm_backend *be,
 /**
  * @brief Erase @p len bytes at @p off (block-granular).
  *
- * NULL when write() needs no separate erase: byte-writable media, and flash
- * backends that erase inside write().
+ * A backend leaves erase NULL when write() needs no separate erase: on
+ * byte-writable media, and on flash backends that erase inside write().
  *
  * @return 0 on success, negative on failure.
  */

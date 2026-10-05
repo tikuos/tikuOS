@@ -25,7 +25,7 @@ MEMORY
 {
     /* RRAM slot at the top of the 384 KB Nordic code window, at the same
      * address on nRF54L15 and nRF54LM20, so one image serves both (SRAM is
-     * execute-never there).  Kept in sync with TIKU_MODULE_CARVE_ADDR. */
+     * execute-never there).  It must equal TIKU_MODULE_CARVE_ADDR. */
     CARVE (rx) : ORIGIN = 0x58000, LENGTH = 0x8000   /* 32 KB */
 }
 
@@ -48,11 +48,10 @@ SECTIONS
 
     /*
      * Modules get no data RAM: nothing copies a .data initialiser or clears a
-     * .bss, and the service table has no allocator.  A /DISCARD/ entry would
-     * drop these inputs silently and ship a global pointing at nothing, so
-     * they are collected here and required to be empty, which makes writable
-     * state a link error naming the cause.  --gc-sections still drops a
-     * global that nothing references, so only state a handler uses trips it.
+     * .bss, and the service table has no allocator.  The .data and .bss
+     * inputs are collected here and must be empty, so writable state fails
+     * the link with a message naming the cause.  --gc-sections drops an
+     * unreferenced global first, so only state a handler uses fails it.
      */
     .modwritable (NOLOAD) : { *(.bss*) *(.data*) *(COMMON) }
 

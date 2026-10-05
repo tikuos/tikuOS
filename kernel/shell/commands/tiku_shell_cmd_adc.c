@@ -7,9 +7,8 @@
  *
  * tiku_shell_cmd_adc.c - "adc" command implementation
  *
- * Reads analog channels through the platform-independent ADC HAL.
- * Initialises the ADC for each read, reads the requested channel,
- * then closes it to save power.
+ * Reads one channel through the platform-independent ADC HAL.  The ADC is
+ * opened for each read and closed after it, so it is off between commands.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -26,7 +25,7 @@
 /* HELPERS                                                                   */
 /*---------------------------------------------------------------------------*/
 
-/** Simple string compare */
+/** @brief 1 if strings @p a and @p b are equal, else 0. */
 static uint8_t
 streq(const char *a, const char *b)
 {
@@ -40,7 +39,7 @@ streq(const char *a, const char *b)
     return (*a == *b);
 }
 
-/** Parse decimal uint8 from string */
+/** @brief Parse decimal @p s (0-255) into *out; 0 on success, else -1. */
 static int8_t
 parse_u8(const char *s, uint8_t *out)
 {
@@ -62,7 +61,7 @@ parse_u8(const char *s, uint8_t *out)
     return 0;
 }
 
-/** Parse reference name to constant */
+/** @brief Map a reference name to TIKU_ADC_REF_*; 0 on success, else -1. */
 static int8_t
 parse_ref(const char *s, uint8_t *out)
 {
@@ -100,7 +99,6 @@ tiku_shell_cmd_adc(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* Parse channel */
     if (streq(argv[1], "temp")) {
         channel = TIKU_ADC_CH_TEMP;
         ch_label = "temp";
@@ -115,7 +113,6 @@ tiku_shell_cmd_adc(uint8_t argc, const char *argv[])
         ch_label = argv[1];
     }
 
-    /* Parse optional reference */
     if (argc >= 3) {
         if (parse_ref(argv[2], &ref) < 0) {
             SHELL_PRINTF("Error: ref must be avcc, 1v2, 2v0, or 2v5\n");
@@ -132,7 +129,7 @@ tiku_shell_cmd_adc(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* Configure channel pin (no-op for internal channels) */
+    /* Validate the channel and set up its pin where the port needs one */
     rc = tiku_adc_channel_init(channel);
     if (rc != TIKU_ADC_OK) {
         SHELL_PRINTF("Error: channel %s init failed (%d)\n",

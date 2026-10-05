@@ -30,8 +30,8 @@
 /**
  * @brief PSRAM bring-up step tracer.
  *
- * Prints each step before it runs, so if a register write stalls the bus the
- * last line on the wire names the step that wedged.
+ * Prints each step before it runs; when a register write stalls the bus, the
+ * last line printed names that step.
  */
 static void psram_trace(const char *step)
 {
@@ -45,7 +45,7 @@ void tiku_shell_cmd_psram(uint8_t argc, const char *argv[])
      *   power psram id [mhz]   power MSPI0, reset the device, read its
      *                          mode registers and check identity
      *   power psram fault      the same read with D0 taken from the
-     *                          controller; it must report an error
+     *                          controller; it is expected to fail
      *   power psram up [mhz]   full bring-up and TIKU_MEM_PSRAM tier attach
      *   power psram down [force]
      *                          release it; refused while the tier has live
@@ -66,14 +66,15 @@ void tiku_shell_cmd_psram(uint8_t argc, const char *argv[])
      *   power psram scan | scan2 | txtest | arb [mhz] | bb | cmd | regs
      *                          bus, capture and register diagnostics
      *   power psram off        release the controller domain
-     * Any trailing "nodqs" turns the strobe off.
+     * A trailing "nodqs" turns the strobe off for the identity read, `scan`
+     * and `cmd`; the other verbs ignore it.
      *
-     * Identity before anything else, at the lowest clock, because a
-     * mis-timed octal bus answers with numbers that look real. */
+     * The default verb reads identity at the lowest clock: a mis-timed
+     * octal bus returns values that look real. */
     unsigned clk = TIKU_PSRAM_CLK_48MHZ;
     int want_fault = (argc >= 3 && tiku_cmd_streq(argv[2], "fault"));
     int nodqs = 0;
-    {   /* any trailing "nodqs" word switches the strobe off */
+    {
         int k;
         for (k = 2; k < argc; k++) {
             if (tiku_cmd_streq(argv[k], "nodqs")) { nodqs = 1; }
@@ -164,7 +165,7 @@ void tiku_shell_cmd_psram(uint8_t argc, const char *argv[])
             (void)tiku_mem_workspace_close(&ar);
             return;
         }
-        {   /* hold half sleep long enough to mean something */
+        {   /* hold half sleep for 1.5 s */
             uint32_t ms3;
             for (ms3 = 0u; ms3 < 1500u; ms3++) {
                 tiku_cpu_ambiq_delay_us(1000u);
@@ -307,9 +308,10 @@ void tiku_shell_cmd_psram(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "retain")) {
-        /* power psram retain [ms] -- write a pattern, wait (500 ms by
-         * default) while the device's own refresh holds it, verify
-         * bit-exact.  Catches silent decay after burst or pause tuning. */
+        /* power psram retain [ms] -- write a 64 KB pattern, wait (500 ms
+         * by default) with only the device's own refresh holding it, and
+         * verify it bit-exact.  Decay after a `dbb` or `dtl` change shows
+         * as errors. */
         static uint8_t wr2[1024];
         uint32_t ms2 = 500u, off2, i2, errs2 = 0u;
         if (argc >= 4) {
@@ -351,9 +353,9 @@ void tiku_shell_cmd_psram(uint8_t argc, const char *argv[])
     }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "dbb") && argc >= 4) {
         /* power psram dbb <code> -- DMA boundary: 6=1K 7=2K 8=4K 9=8K
-         * 10=16K.  Longer bursts amortize the fixed per-row cost; the risk
-         * is CE-low time against the die's refresh (tCEM), so run `retain`
-         * after each setting. */
+         * 10=16K.  Longer bursts spread the fixed per-row cost over more
+         * bytes but hold CE low longer against the die's refresh limit
+         * (tCEM); run `retain` after each setting. */
         unsigned n5 = 0u; const char *q5 = argv[3];
         while (*q5 >= '0' && *q5 <= '9') { n5 = n5*10u + (unsigned)(*q5++ - '0'); }
         MSPI0->DEV0BOUNDARY_b.DMABOUND0 = n5;
@@ -363,8 +365,8 @@ void tiku_shell_cmd_psram(uint8_t argc, const char *argv[])
     }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "dtl") && argc >= 4) {
         /* power psram dtl <n> -- set DMATIMELIMIT at run time.  Run `mem`
-         * and `retain` after any change before trusting a bandwidth
-         * figure. */
+         * and `retain` after a change; a bandwidth figure is valid only
+         * once both pass. */
         unsigned n4 = 0u; const char *q4 = argv[3];
         while (*q4 >= '0' && *q4 <= '9') { n4 = n4*10u + (unsigned)(*q4++ - '0'); }
         MSPI0->DEV0BOUNDARY_b.DMATIMELIMIT0 = n4;
@@ -374,7 +376,8 @@ void tiku_shell_cmd_psram(uint8_t argc, const char *argv[])
     }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "bench")) {
         /* power psram bench -- DWT-timed bandwidth through each path.
-         * Work is the denominator: bytes moved + checksum per leg. */
+         * Each leg prints the bytes moved, the time, the rate and a
+         * bit-exact or FAIL verdict. */
         extern void tiku_psram_bench_run(void);
         tiku_psram_bench_run();
         return;
@@ -416,9 +419,9 @@ void tiku_shell_cmd_psram(uint8_t argc, const char *argv[])
     if (argc >= 3 && tiku_cmd_streq(argv[2], "txtest")) {
         /* Check that controller TX reaches the device: bit-bang-read MR0,
          * write MR0 through the controller (drive-strength bit flipped),
-         * then bit-bang-read it again.  A change shows controller TX works
-         * with no dependence on controller RX; no change means controller
-         * TX does not reach the part. */
+         * then bit-bang-read it again.  MR0 reading back as written shows
+         * controller TX works with no dependence on controller RX; an
+         * unchanged MR0 means controller TX does not reach the part. */
         static uint8_t before[16], after[16];
         unsigned k; uint8_t b0 = 0u, a0 = 0u;
         uint32_t wr;
@@ -456,9 +459,9 @@ void tiku_shell_cmd_psram(uint8_t argc, const char *argv[])
     if (argc >= 3 && tiku_cmd_streq(argv[2], "arb")) {
         /* Write a distinctive 64 B pattern at 0x4000 through the
          * controller, then bit-bang-read 0x3800 / 0x4000 / 0x4800 and print
-         * the streams.  Where the pattern lands shows whether the
-         * controller's write path offsets the address: at 0x4000 it does
-         * not, at 0x4800 or 0x3800 it is shifted by 0x800. */
+         * the streams.  The address where the pattern reads back shows
+         * whether the controller's write path offsets the address: at
+         * 0x4000 it does not, at 0x4800 or 0x3800 it is shifted by 0x800. */
         static uint8_t pat[64]; static uint8_t ed[48];
         uint32_t i; unsigned k2;
         static const uint32_t probe[3] = { 0x3800u, 0x4000u, 0x4800u };
@@ -613,8 +616,8 @@ void tiku_shell_cmd_psram(uint8_t argc, const char *argv[])
         if (want_fault) {
             tiku_psram_fault_inject(0);
         }
-        /* Raw bytes are printed before the verdict: the caller needs the
-         * numbers to tell a dead bus from a wrong part. */
+        /* The raw mode-register bytes print before the verdict; they tell
+         * a bus with no device answering (all 00 or ff) from a wrong part. */
         SHELL_PRINTF("  MR0 %02x MR1 %02x MR2 %02x MR3 %02x MR4 %02x MR8 %02x\n",
                      id.mr0, id.mr1, id.mr2, id.mr3, id.mr4, id.mr8);
         SHELL_PRINTF("  vendor %02x (0d=AP) density %x (6=512Mb) gen %u die %s\n",

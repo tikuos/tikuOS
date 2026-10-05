@@ -8,8 +8,8 @@
  * tiku_shell_cmd_toggle.c - "toggle" command implementation
  *
  * Writes "t" (toggle) to a writable VFS node, then reads back and
- * prints the new state.  Generic — works with any node that
- * interprets 't' as a binary flip (LEDs, GPIOs, flags, etc.).
+ * prints the new state.  The LED nodes and the pin files under
+ * /dev/gpio take 't' as a flip.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -52,31 +52,26 @@
  */
 
 /*
- * Byte offsets of each field within the config region.  These must stay
- * consistent with the layout above: init_read_magic(), init_read_count() and
- * init_entry_ptr() index the region through exactly these constants.
+ * Byte offsets of each field within the config region, matching the layout
+ * above; init_read_magic(), init_read_count() and init_entry_ptr() index the
+ * region through them.
  */
 #define OFF_MAGIC    0
 #define OFF_COUNT    2
 #define OFF_ENTRIES  4
 
 /*
- * Total bytes the layout consumes: the 4-byte header plus the entry array.  A
- * live sizeof() expression rather than a computed literal, so it tracks any
- * change to the entry count or struct and feeds the static assert below.
+ * Bytes the layout needs: the 4-byte header plus the entry array, computed
+ * from sizeof() so it follows the entry count and struct.  The static assert
+ * below checks it.
  */
 #define TIKU_INIT_REGION_BYTES_NEEDED \
     (OFF_ENTRIES + (TIKU_INIT_MAX_ENTRIES * sizeof(tiku_init_entry_t)))
 
 /*
- * Compile-time guard: the device's CONFIG region must be at least as
- * large as the init table needs.
- *
- * tiku_init_load() disables the table at run time when the region is
- * smaller than TIKU_INIT_REGION_BYTES_NEEDED; the assert makes that a
- * build error instead.  It applies only where the device defines
- * TIKU_DEVICE_FRAM_CONFIG_SIZE, so ports that size the CONFIG region
- * another way still compile.
+ * The device's CONFIG region must hold the init table.  Where the device
+ * defines TIKU_DEVICE_FRAM_CONFIG_SIZE a smaller region fails the build;
+ * elsewhere tiku_init_load() disables the table at run time.
  */
 #if defined(TIKU_DEVICE_FRAM_CONFIG_SIZE)
 _Static_assert(TIKU_DEVICE_FRAM_CONFIG_SIZE >= TIKU_INIT_REGION_BYTES_NEEDED,
@@ -91,10 +86,9 @@ _Static_assert(TIKU_DEVICE_FRAM_CONFIG_SIZE >= TIKU_INIT_REGION_BYTES_NEEDED,
 /*---------------------------------------------------------------------------*/
 
 /*
- * Cached base address of the NVM config region, resolved once by
- * tiku_init_load() and reused as the anchor for every OFF_* offset.  NULL until
- * that succeeds, and every public function guards on it, so an early call is a
- * no-op rather than a NULL dereference.
+ * Base address of the NVM config region, the anchor for every OFF_* offset.
+ * NULL until tiku_init_load() succeeds; while it is NULL every public function
+ * returns its failure value without touching NVM.
  */
 static uint8_t *cfg_base;
 
@@ -134,7 +128,7 @@ init_read_count(void)
  * @brief Return a pointer to the idx-th init entry in NVM.
  *
  * Calculates the byte offset into the config region for entry @p idx.
- * The caller is responsible for bounds-checking idx < count.
+ * The caller keeps @p idx below TIKU_INIT_MAX_ENTRIES.
  *
  * @param idx  Zero-based entry index.
  * @return     Pointer to the entry (inside the NVM config region).
@@ -146,7 +140,12 @@ init_entry_ptr(uint8_t idx)
            (uint16_t)idx * sizeof(tiku_init_entry_t));
 }
 
-/** @brief Whether the stored table is well formed; checked before any use. */
+/**
+ * @brief Whether the stored table is well formed; checked before any use.
+ *
+ * Requires the magic, a count within TIKU_INIT_MAX_ENTRIES, and in every
+ * entry an enabled flag of 0 or 1 and NUL-terminated strings.
+ */
 static uint8_t
 init_table_valid(void)
 {
@@ -171,10 +170,8 @@ init_table_valid(void)
 }
 
 /**
- * @brief Write @p len bytes to NVM.
- *
- * Thin wrapper around tiku_mem_arch_nvm_write() with casts for
- * convenience.
+ * @brief Write @p len bytes to NVM: tiku_mem_arch_nvm_write() with the
+ *        pointer casts.
  *
  * @note The caller holds the MPU unlocked.
  *
@@ -189,8 +186,9 @@ init_table_valid(void)
 /**
  * @brief Clear the magic before an edit that rewrites a live entry.
  *
- * Replace, remove and the first-boot prime call this first, so a power loss
- * empties the table instead of leaving a torn or duplicated command to run.
+ * Replace, remove and the first-boot prime call this first: a power loss
+ * before init_commit() leaves the magic clear, and the next boot primes the
+ * table empty.
  *
  * @return 0 once the cleared magic reads back, -1 otherwise
  */
@@ -256,9 +254,7 @@ init_name_match(const char *a, const char *b)
 /**
  * @brief Find the index of an init entry by name.
  *
- * Performs a linear scan of all populated entries.  The scan is
- * bounded by TIKU_INIT_MAX_ENTRIES (typically 8), so the cost is
- * negligible.
+ * Linear scan of the populated entries, compared with init_name_match().
  *
  * @param name  Entry name to search for (NUL-terminated).
  * @return      Index (0 .. count-1) on match, or -1 if not found.
@@ -355,7 +351,7 @@ tiku_init_load(void)
  * non-empty command from an SRAM copy: the parser tokenises in place and must
  * not write into the read-only NVM image.  No NVM writes happen here.
  *
- * @return Number of entries actually executed (enabled, non-empty).
+ * @return Number of entries executed (enabled, non-empty).
  */
 uint8_t
 tiku_init_run_all(void)
@@ -419,8 +415,8 @@ tiku_init_run_all(void)
  * @brief Add or replace an init entry.
  *
  * A new name is written into the slot past the count and the count is bumped
- * after it, so a power loss leaves the old table.  An existing name is
- * rewritten in place between init_invalidate() and init_commit().
+ * after it, so a power loss before the bump leaves the old table.  An existing
+ * name is rewritten in place between init_invalidate() and init_commit().
  *
  * @param seq   Boot sequence number; lower runs earlier.
  * @param name  Entry name, truncated to TIKU_INIT_NAME_SIZE-1 chars.
@@ -474,8 +470,8 @@ tiku_init_add(uint8_t seq, const char *name, const char *cmd)
  * @brief Remove an init entry by name.
  *
  * Moves the last entry into the freed slot, zeroes the tail slot and
- * decrements the count, between init_invalidate() and init_commit().  Order in
- * NVM is irrelevant because run_all() re-sorts by seq every boot.
+ * decrements the count, between init_invalidate() and init_commit().  The
+ * move changes the run order only of entries that share a seq.
  *
  * @param name  Name of the entry to remove (NUL-terminated).
  * @return 0 on success; -1 if the table is unusable, @p name is NULL, no
@@ -511,7 +507,7 @@ tiku_init_remove(const char *name)
                        sizeof(tiku_init_entry_t));
     }
 
-    /* Zero the now-unused last slot */
+    /* Zero the last slot, unused after the move */
     {
         uint8_t zbuf[sizeof(tiku_init_entry_t)];
         memset(zbuf, 0, sizeof(zbuf));
@@ -527,7 +523,7 @@ tiku_init_remove(const char *name)
 /**
  * @brief Enable or disable an init entry by name.
  *
- * Writes just the entry's enabled byte, leaving seq, name and cmd untouched.  A
+ * Writes only the entry's enabled byte, leaving seq, name and cmd untouched.  A
  * disabled entry stays in the table and in the count but is skipped by
  * tiku_init_run_all().
  *
@@ -563,7 +559,7 @@ tiku_init_enable(const char *name, uint8_t en)
  * @brief Return the number of entries currently in the table.
  *
  * Counts both enabled and disabled entries (the on-NVM count byte
- * tracks populated slots, not just active ones).  Read-only, no MPU
+ * tracks populated slots, not only active ones).  Read-only, no MPU
  * interaction.
  *
  * @return Entry count, or 0 if the table is unusable.

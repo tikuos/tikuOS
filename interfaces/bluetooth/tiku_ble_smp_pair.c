@@ -114,8 +114,8 @@ static void outq_push(const uint8_t *pdu, uint8_t len)
 static void fail(uint8_t reason)
 {
     uint8_t p[2];
-    /* Success is terminal: once DONE, a corrupted/duplicate late PDU (which
-     * re-runs a handler for retransmit) must never undo an established LTK. */
+    /* DONE is terminal: a corrupted or duplicate late PDU, which re-runs a
+     * handler for a retransmit, leaves an established LTK in place. */
     if (sc.state == TIKU_BLE_SMP_STATE_DONE) {
         return;
     }
@@ -361,7 +361,7 @@ static void feed_responder(uint8_t op, const uint8_t *pdu, uint16_t len)
     case SMP_PAIRING_RANDOM:
         if (len < 17u) { return; }
         memcpy(sc.na, &pdu[1], 16);
-        if (sc.numcmp) { compute_compare(); }     /* both nonces known now    */
+        if (sc.numcmp) { compute_compare(); }     /* both nonces in hand      */
         derive_keys();
         build_random(sc.nb);                      /* send Nb                  */
         break;
@@ -414,12 +414,11 @@ int tiku_ble_smp_pair_feed(const uint8_t *pdu, uint16_t len)
         sc.state = TIKU_BLE_SMP_STATE_FAILED;
         return 1;
     }
-    /* Accept PDUs while pairing, and -- for the tail's sake -- a duplicate of
-     * the last opcode even after DONE, so a peer that lost the final reply can
-     * re-request it (the same handler re-runs, and it is deterministic).
-     * Clearing the queue first keeps the regenerated PDUs correctly ordered.
-     * With no full LL ACK on the link, this re-send is what delivers the last
-     * DHKey Check. */
+    /* PDUs are accepted while pairing, and after DONE a duplicate of the last
+     * opcode is accepted too: a peer that lost the final reply sends again,
+     * and the same deterministic handler regenerates it.  The queue is
+     * cleared first so the regenerated PDUs keep their order.  The link has
+     * no full LL ACK, so this is how a lost final DHKey Check is re-sent. */
     if (sc.state != TIKU_BLE_SMP_STATE_PAIRING &&
         !(sc.state == TIKU_BLE_SMP_STATE_DONE && op == sc.last_rx_op)) {
         return 0;

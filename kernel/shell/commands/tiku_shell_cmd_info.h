@@ -16,7 +16,13 @@
 #include <stdint.h>
 
 /**
- * @brief "info" command handler — print system overview.
+ * @brief "info" command: print a short system summary.
+ *
+ * Device name, CPU clock in MHz, uptime, tick rate and current tick, event
+ * queue use and the number of registered processes.  Arguments are ignored.
+ *
+ * @param argc  Argument count
+ * @param argv  Argument vector
  */
 void tiku_shell_cmd_info(uint8_t argc, const char *argv[]);
 

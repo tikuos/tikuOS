@@ -7,7 +7,7 @@
  *
  * tiku_link_console.c - the console backend of the link: one CRC-guarded
  * frame per message on a marked channel, a peer's paced stream answered
- * with ACKs from inside the console's pump.
+ * with ACKs as the console decodes it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_tree.c - "tree" command implementation.
  *
- * Walks a VFS subtree depth-first with a depth budget, so a malformed or
- * unusually deep tree cannot exhaust the stack.  It recurses on the in-memory
- * node pointers rather than re-resolving paths, which keeps each frame small.
+ * Walks a VFS subtree depth-first to at most TIKU_SHELL_TREE_MAX_DEPTH levels,
+ * which bounds the stack.  It recurses on node pointers, so a frame holds no
+ * path buffer.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -32,11 +32,8 @@ static void
 tree_print_indent(uint8_t depth, uint8_t is_last_chain)
 {
     uint8_t i;
-    /* Leading vertical guides for ancestor levels.  Without per-level
-     * "last child" tracking it cannot draw the full guide-set
-     * faithfully; using a uniform "|  " for ancestors and the proper
-     * connector for the current level keeps the output unambiguous
-     * while costing one byte of stack instead of one bit per level. */
+    /* Every ancestor level prints "|  ", including one whose last child
+     * is already drawn; is_last_chain is unused. */
     (void)is_last_chain;
     for (i = 0; i < depth; i++) {
         SHELL_PRINTF("|  ");

@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_npu.h - /sys/npu, the accelerator as named paths.
+ * tiku_vfs_tree_npu.h - /sys/npu VFS nodes.
  *
  * Linkage contract for the NPU subtree: the children table and its entry
  * count, consumed by the /sys assembly.

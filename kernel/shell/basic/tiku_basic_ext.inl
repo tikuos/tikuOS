@@ -8,7 +8,7 @@
  * tiku_basic_ext.inl - native builtin registry implementation.
  *
  * Included from tiku_basic.c after the expression parser, whose entry points
- * the service shims wrap.  The table lives in the state piece and the
+ * the service shims wrap.  The table lives in tiku_basic_state.inl; the
  * dispatch hooks sit at each chain's fallthrough.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -16,9 +16,9 @@
 
 #if TIKU_BASIC_EXT_MAX > 0
 
-/* Builtins the chains match by spelling (match_kw) rather than by keyword
- * token, whichever of them this build compiles in.  A test in TikuBench
- * checks this list against the match_kw names in the sources. */
+/* Builtins the chains match by spelling (match_kw()) and not by keyword
+ * token, listed whether or not this build compiles them in.  A TikuBench
+ * test checks this list against the match_kw() names in the sources. */
 static const char *const basic_ext_builtin_names[] = {
     "APPEND", "ATAN", "AUTO", "BASE64$", "BETWEEN$", "BLEADV", "BLEAVAIL",
     "BLEBEACON", "BLEGET$", "BLEOBSERVE", "BLEOFF", "BLESCAN$", "BLESEEN",
@@ -35,8 +35,8 @@ static const char *const basic_ext_builtin_names[] = {
 /**
  * @brief Validate a registration name.
  *
- * Upper-case identifier, fits the slot, no builtin's name: builtins win, so a
- * colliding name is refused here rather than silently shadowed.
+ * An upper-case identifier that fits the slot and is no builtin's name: a
+ * builtin matches first, so a colliding name could never dispatch.
  *
  * @return 1 if @p name may be registered, else 0.
  */
@@ -136,7 +136,7 @@ tiku_basic_register_strfn(const char *name, tiku_basic_ext_strfn fn)
 #endif
 }
 
-#else  /* registry compiled out: registration is a clean no-op failure */
+#else  /* registry compiled out: every registration returns -1 */
 
 int
 tiku_basic_register_stmt(const char *name, tiku_basic_ext_stmt_fn fn)

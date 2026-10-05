@@ -16,11 +16,12 @@
 #include <stdint.h>
 
 /**
- * @brief "echo" command -- print arguments space-separated, then newline.
+ * @brief "echo" command: print the arguments joined by single spaces.
  *
- * Matches the Unix convention: arguments joined with single spaces and a
- * trailing newline, or a blank line with no arguments.  Writing to a VFS path
- * is `write`, not this.
+ * One newline follows; with no arguments the command prints an empty line.
+ *
+ * @param argc  Argument count
+ * @param argv  Argument vector
  */
 void tiku_shell_cmd_echo(uint8_t argc, const char *argv[]);
 

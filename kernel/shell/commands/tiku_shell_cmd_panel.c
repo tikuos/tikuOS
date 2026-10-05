@@ -7,8 +7,8 @@
  *
  * tiku_shell_cmd_panel.c - "panel" command: drive the parallel RGB display.
  *
- * Everything here goes through interfaces/display, so the command exercises
- * the same path a portable caller would rather than the RA8P1 registers.
+ * All drawing goes through interfaces/display, the API a portable caller
+ * uses; this file touches no RA8P1 register.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -36,9 +36,8 @@ static const struct { const char *name; uint32_t argb; } panel_colours[] = {
 };
 
 /*
- * An 8x8 cell per glyph, one bit per pixel, high bit leftmost.  Only the
- * letters this command draws are carried; a full font belongs in a kit, not
- * in a shell command.
+ * An 8x8 cell per glyph, one bit per pixel, high bit leftmost.
+ * panel_glyphs[i] draws panel_text[i]; no other letters are carried.
  */
 static const char panel_text[] = "TikuOS";
 static const uint8_t panel_glyphs[6][8] = {
@@ -51,9 +50,9 @@ static const uint8_t panel_glyphs[6][8] = {
 };
 
 /**
- * @brief Claim a framebuffer from the peripheral-accessible primary SRAM span.
+ * @brief Claim the framebuffer from SRAM span 0; later calls return it again.
  *
- * @return Base address, or NULL when the SRAM tier has no room
+ * @return Base address, or NULL when the span has no room
  */
 static void *
 panel_claim(void)
@@ -141,8 +140,8 @@ panel_draw_name(uint16_t scale, uint32_t colour)
                     col++;
                     continue;
                 }
-                /* One rectangle per horizontal run, not per bit: the engine
-                 * is quick but each render still costs a register setup. */
+                /* Each fill costs a register setup, so a horizontal run of
+                 * set bits is drawn as one rectangle. */
                 run = 0u;
                 while ((col + run) < cell &&
                        (bits & (0x80u >> (col + run))) != 0u) {

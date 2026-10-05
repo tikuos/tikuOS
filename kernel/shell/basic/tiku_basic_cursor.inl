@@ -7,38 +7,33 @@
  *
  * tiku_basic_cursor.inl - the parse-cursor vocabulary.
  *
- * The interpreter threads one cursor through the lexer, the expression parser
- * and every statement handler.  These inline helpers name the raw pointer
- * operations, so call sites read as peek, advance and match.
+ * Inline helpers for the one cursor that the lexer, the expression parser and
+ * every statement handler share: peek, consume, match and probe.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 /*
- * Invariants the vocabulary relies on:
+ * Invariants of the vocabulary:
  *
- *  - The buffer behind the cursor is NUL-terminated.  Bounded
- *    lookahead (cur_peek_at) is therefore safe without a length:
- *    once a NUL is seen, no helper reads past it, and every parser
- *    loop terminates on '\0'.
- *  - Crunched program lines store keyword bytes >=
- *    BASIC_TOK_BASE in the same buffer.  Read those through
- *    cur_peekb(), which yields the byte as uint8_t -- plain
+ *  - The buffer behind the cursor is NUL-terminated and every parser loop
+ *    stops at '\0'.  The helpers take no length, so a lookahead must not
+ *    pass the NUL.
+ *  - Crunched program lines hold keyword bytes >= BASIC_TOK_BASE in the
+ *    same buffer.  Read those through cur_peekb(), which returns uint8_t:
  *    cur_peek() returns char, whose sign for bytes >= 0x80 is
  *    implementation-defined.
- *  - Whitespace is never skipped implicitly.  cur_match() consumes
- *    exactly one character and skips nothing; where a grammar rule
- *    tolerates blanks, the call site says so with skip_ws().
- *    (Several rules are whitespace-sensitive: the `$` sigil must
- *    touch its identifier, string literals take every byte.)
+ *  - No helper skips whitespace: cur_match() consumes one character, and a
+ *    grammar rule that allows blanks calls skip_ws().  Some rules are
+ *    whitespace-sensitive: the `$` sigil touches its identifier, and a
+ *    string literal takes every byte.
  *
- * Two cursor modes, one representation:
+ * Two cursor modes share one representation:
  *
- *  - Committed: helpers taking `const char **p` advance the shared
- *    cursor; the caller (and its caller) see the consumption.
- *  - Probe: cur_mark() copies the position, the probe scans or
- *    parses ahead, then either falls through (commit) or calls
- *    cur_rewind() to un-consume everything since the mark.  A probe
- *    that cannot fail needs no mark.
+ *  - Committed: a helper taking `const char **p` advances the cursor that
+ *    every caller up the chain shares.
+ *  - Probe: cur_mark() copies the position, the probe scans or parses
+ *    ahead, then either keeps the new position or calls cur_rewind() to
+ *    return to the mark.  A probe that cannot fail needs no mark.
  */
 
 /*---------------------------------------------------------------------------*/
@@ -53,7 +48,7 @@ cur_peek(const char **p)
 }
 
 /** @brief Character @p n positions ahead; does not consume.
- *  Safe for any @p n that cannot skip past the terminating NUL. */
+ *  @note Every byte before offset @p n must be known non-NUL. */
 static inline char
 cur_peek_at(const char **p, int n)
 {
@@ -72,8 +67,7 @@ cur_peekb(const char **p)
 /* CONSUME -- step the cursor forward                                        */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Consume one character.  Returns nothing; cur_take() returns
- *  the consumed character. */
+/** @brief Consume one character. */
 static inline void
 cur_advance(const char **p)
 {
@@ -125,10 +119,8 @@ cur_rewind(const char **p, const char *m)
     *p = m;
 }
 
-/** @brief Move the cursor to @p pos (probe succeeded / jump to an
- *  already-derived position).  Same mechanics as cur_rewind -- the
- *  two names keep commit-forward and backtrack distinguishable at
- *  the call site. */
+/** @brief Move the cursor to @p pos, a position a probe or scan derived;
+ *  cur_rewind() is the same store, named for a backtrack. */
 static inline void
 cur_set(const char **p, const char *pos)
 {

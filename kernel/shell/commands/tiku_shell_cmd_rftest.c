@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_rftest.c - "rftest" command: RF test carrier.
  *
- * Drives the bench signals a radio bring-up needs: an unmodulated tone and a
- * modulated carrier.  The carrier outlives the command and holds the radio
- * until stopped, as a spectrum-analyser session needs; status reports it.
+ * Starts an unmodulated or modulated carrier on the nRF54L RADIO, or sweeps
+ * one across a band.  A started carrier keeps transmitting and holds the
+ * radio until `rftest off`; `rftest status` reports it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,9 +20,8 @@
 #include <kernel/shell/tiku_shell_config.h>   /* resolved command flag  */
 #include <kernel/shell/tiku_shell_io.h>
 
-/* The config header resolves this flag against TIKU_HAS_BLE_ADV, so a
- * build without the radio compiles this file to nothing -- no stub, no
- * table entry, no help line. */
+/* The config header forces this flag to 0 without TIKU_HAS_BLE_ADV, and
+ * this file then compiles to nothing. */
 #if TIKU_SHELL_CMD_RFTEST
 
 #include <arch/nordic/tiku_radio_arch.h>
@@ -30,7 +29,7 @@
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/cpu/tiku_watchdog.h>
 
-/* Band limits enforced by the arch layer; repeated here for messages. */
+/* Band limits; the arch layer enforces the same range. */
 #define RFT_MHZ_MIN   2360u
 #define RFT_MHZ_MAX   2500u
 
@@ -53,7 +52,7 @@ static long rft_atoi(const char *s)
     return (*s == '\0') ? v : -1;
 }
 
-/** @brief Signed variant so a negative dBm step parses; @p dflt on error. */
+/** @brief Parse an optionally negative decimal; @p dflt on NULL or error. */
 static long rft_atoi_signed(const char *s, long dflt)
 {
     if (s == (const char *)0) {
@@ -119,12 +118,7 @@ static void rft_usage(void)
                  RFT_MHZ_MIN, RFT_MHZ_MAX);
 }
 
-/**
- * @brief Name the RADIO.STATE codes that matter on a bench.
- *
- * Read straight from the peripheral, so a session can tell "the driver thinks
- * it is on" from "the hardware is ramped up and radiating".
- */
+/** @brief Name a RADIO.STATE value, or "?" for one not listed. */
 static const char *rft_state_name(uint32_t st)
 {
     switch (st) {
@@ -140,7 +134,7 @@ static const char *rft_state_name(uint32_t st)
     }
 }
 
-/** @brief Print whether a carrier is on air, and RADIO.STATE. */
+/** @brief Print whether a carrier is on air, and RADIO.STATE as read. */
 static void rft_status(void)
 {
     uint32_t st = tiku_radio_arch_state();
@@ -190,10 +184,10 @@ static void rft_start(const char *mhz_s, const char *dbm_s,
 }
 
 /**
- * @brief Step a carrier across [lo, hi] a MHz at a time.
+ * @brief Step an unmodulated 1M-PHY carrier across [lo, hi] a MHz at a time.
  *
- * Dwells briefly on each step so a spectrum analyser in max-hold paints the
- * whole span.  Blocking: it is a bench sweep, not a background service.
+ * Dwells about 20 ms on each step, then stops the carrier; the call blocks
+ * until the sweep ends.
  */
 static void rft_sweep(const char *lo_s, const char *hi_s, const char *dbm_s)
 {

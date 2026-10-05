@@ -7,9 +7,8 @@
  *
  * tiku_shell_cmd_rules.c - "rules" command implementation.
  *
- * Lists active rules and frees a slot by id.  The condition field is padded to
- * a fixed width so the arrow column stays stable for short rules and extends
- * for long ones.
+ * Lists active rules and frees a slot by id.  The condition column is padded
+ * to 25 characters; a longer condition pushes the arrow right.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -53,9 +52,8 @@ rules_list(void)
         /* Two display layouts:
          *   - Comparison rules: "on PATH OP VALUE"
          *   - CHANGED rules:    "on changed PATH"  (value[] holds the
-         *                       last seen reading, not a user-visible
-         *                       constant, so it is omitted from the
-         *                       summary)
+         *                       last reading seen, which is not
+         *                       printed)
          */
         pos = 0;
         cond[pos++] = 'o';
@@ -103,7 +101,8 @@ rules_list(void)
 }
 
 /**
- * @brief Parse a small unsigned decimal id.
+ * @brief Parse @p s as a 16-bit unsigned decimal into @p out; 1 on success,
+ *        0 for an empty, non-digit or out-of-range string.
  */
 static uint8_t
 rules_parse_id(const char *s, uint16_t *out)

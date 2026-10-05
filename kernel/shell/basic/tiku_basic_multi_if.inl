@@ -9,7 +9,7 @@
  *
  * Holds the depth-aware scanners that find a block's ELSEIF, ELSE and END IF,
  * the line detectors they use, and the ELSEIF / ELSE / END IF statements met
- * by fall-through.  exec_if itself lives in dispatch.
+ * by fall-through.  exec_if() lives in tiku_basic_dispatch.inl.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -35,7 +35,7 @@
  *
  * The forward scans are depth-aware: a nested multi-line IF raises the depth
  * and its END IF lowers it, so an inner ELSE is never taken for an outer one.
- * No runtime frame stack is needed.
+ * The scans keep no runtime frame stack.
  */
 
 /**
@@ -323,7 +323,7 @@ exec_else_kw(const char **p)
     {
         int next = prog_next_index((uint16_t)(prog[idx].number + 1));
         if (next < 0) {
-            /* END IF was the last line -- end the run cleanly. */
+            /* END IF was the last line: the run ends. */
             basic_running = 0;
             basic_pc = 0;
             while (cur_peek(p)) cur_advance(p);
@@ -335,7 +335,7 @@ exec_else_kw(const char **p)
     while (cur_peek(p)) cur_advance(p);
 }
 
-/** @brief END IF / ENDIF in normal flow: a marker, so nothing to do. */
+/** @brief END IF / ENDIF in normal flow: the rest of the line is skipped. */
 static void
 exec_endif(const char **p)
 {

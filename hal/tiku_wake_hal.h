@@ -7,9 +7,9 @@
  *
  * tiku_wake_hal.h - platform-agnostic wake-source query interface.
  *
- * Reports which interrupt families are armed and would therefore wake the CPU
- * from a low-power state, for the `wake` command and /sys/power/wake.  The arch
- * backend maps each role-named flag to whatever IE registers cover it.
+ * Reports which interrupt families are armed, and so can wake the CPU from a
+ * low-power state, for the `wake` command and /sys/power/wake.  Each port maps
+ * a flag to the interrupt-enable registers behind it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -43,9 +43,8 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * Maximum GPIO ports the wake snapshot reports per-port enable
- * masks for. Sized for MSP430's P1..P4. Other platforms can leave
- * the unused entries zero.
+ * Number of GPIO ports whose per-pin enable masks the snapshot carries:
+ * MSP430's P1..P4.  An entry a port does not fill stays zero.
  */
 #define TIKU_WAKE_MAX_GPIO_PORTS 4
 

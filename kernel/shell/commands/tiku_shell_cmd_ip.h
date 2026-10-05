@@ -18,9 +18,9 @@
 /**
  * @brief "ip" command: print the device's IPv4 address.
  *
- * Prints the current IPv4 address from the TikuKits net stack (the
- * TIKU_KITS_NET_IP_ADDR default, or whatever DHCP assigned).  The address is
- * reachable at once on WiFi, or once SLIP is on.
+ * Prints the address the net stack holds (TIKU_KITS_NET_IP_ADDR, or the one
+ * DHCP assigned), the DHCP lease when there is one, and whether a host can
+ * reach the address: on WiFi always, over SLIP only while SLIP is on.
  *
  * @param argc  Argument count (including the command name)
  * @param argv  Argument strings (argv[0] is the command name)

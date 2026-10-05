@@ -7,9 +7,9 @@
  *
  * tiku_vfs_tree.c - system VFS tree root assembly.
  *
- * Builds the production root from the per-subtree modules in tree/.  The inner
- * tree is const data, and this top level is assembled at run time because /proc
- * builds its arrays dynamically; drivers mount their nodes after it.
+ * Builds the root from the per-subtree modules in tree/.  The subtrees are
+ * const data; this top level is assembled at run time because /proc builds its
+ * arrays at run time.  Drivers mount their nodes after it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -49,14 +49,15 @@
  * │            from tree/tiku_vfs_tree_sensor.c); drivers mount their
  * │            nodes under dev/<class>/
  * ├── proc/  — kernel/process/tiku_proc_vfs.c
- * └── data/  — tree/tiku_vfs_tree_data.c (also available without a shell)
+ * ├── data/  — tree/tiku_vfs_tree_data.c, in every build
+ * └── gui/   — the applications overlay, when TIKU_APPL_GUI is set
  */
 
 /*
- * Mutable root children: sys + dev + proc + data (+ optionally gui).  Sized
- * for the maximum set; vfs_root.child_count records how many are populated.
- * TIKU_DURABLE, which on MSP430 is FRAM and spares SRAM; written only inside
- * the init-time MPU unlock window below.
+ * Mutable root children: sys + dev + proc + data (+ gui with TIKU_APPL_GUI).
+ * Sized for the largest set; vfs_root.child_count records how many are
+ * filled.  Durable memory, written only inside the MPU unlock window of
+ * tiku_vfs_tree_init().
  */
 static TIKU_DURABLE tiku_vfs_node_t root_children[ROOT_SLOTS];
 
@@ -103,8 +104,8 @@ tiku_vfs_tree_init(void)
     root_children[2] = *tiku_proc_vfs_get();
     n_root = 3;
 
-    /* /data: the dynamic file store (plus /data/basic when BASIC is built).
-     * Device-management transports do not require a command shell. */
+    /* /data: the dynamic file store (plus /data/basic when BASIC is built),
+     * attached with or without the shell. */
     root_children[3] = *tiku_vfs_tree_data_get();
     n_root = 4;
 #if TIKU_APPL_GUI

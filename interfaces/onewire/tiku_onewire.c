@@ -7,8 +7,8 @@
  *
  * tiku_onewire.c - Platform-independent 1-Wire bus implementation
  *
- * Delegates to the architecture-specific 1-Wire driver via the
- * HAL routing header.
+ * Claims the bus pin through tiku_gpio_claim() and delegates to the
+ * architecture-specific 1-Wire driver via the HAL routing header.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

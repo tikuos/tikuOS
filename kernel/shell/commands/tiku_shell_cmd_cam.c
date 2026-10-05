@@ -7,8 +7,8 @@
  *
  * tiku_shell_cmd_cam.c - "cam" command: capture a frame and show it.
  *
- * The whole camera path in one command: sensor over SCCB, MIPI CSI-2 into
- * the VIN, a QVGA RGB565 frame in memory, and that frame pixel-doubled onto
+ * Runs the camera path once: the OV5640 set up over SCCB, MIPI CSI-2 into the
+ * VIN, a QVGA RGB565 frame in the SRAM tier, and that frame pixel-doubled onto
  * the panel the "panel" command owns.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -91,7 +91,8 @@ cam_show(tiku_display_t *d, const uint16_t *src)
             out1[x * 2U + 1U] = px;
         }
     }
-    /* The controller scans memory; the CPU's rows have to reach it. */
+    /* The display controller reads the frame buffer from memory, so the rows
+     * written here are cleaned out of the D-cache. */
     tiku_ra8p1_dcache_clean(rows, (uint32_t)TIKU_CAM_QVGA_H * 2U * d->stride);
 }
 #endif /* TIKU_HAS_DISPLAY */
@@ -140,8 +141,9 @@ tiku_shell_cmd_cam(uint8_t argc, const char *argv[])
         SHELL_PRINTF("cam: sensor setup failed (%d)\r\n", rc);
         return;
     }
-    /* Hold the sensor's output while the receive side comes up, so the
-     * first frame the VIN sees is a whole one. */
+    /* The sensor is stopped and in software power-down (0x3008 = 0x42) while
+     * the receive side comes up, so the first frame the VIN sees is whole.
+     * 0x3008 = 0x02 below wakes it. */
     (void)tiku_camera_arch_stream(0);
     (void)tiku_camera_arch_write_reg(0x3008U, 0x42U);
 

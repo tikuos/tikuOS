@@ -7,9 +7,9 @@
  *
  * tiku_basic_mathx.inl - extended fixed-point math for the full BASIC profile.
  *
- * LOG, EXP, POW and ATAN in Q.3 fixed point, in the style of the
- * bit-iterative SQR and the LUT trig.  Intermediates are 64-bit and results
- * are coarse to about three decimals, which is what the representation allows.
+ * LOG, EXP, POW and ATAN in Q.3 fixed point, beside the bit-iterative SQR
+ * and the LUT trig.  Intermediates are 64-bit; results have the Q.3
+ * resolution of three decimals.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

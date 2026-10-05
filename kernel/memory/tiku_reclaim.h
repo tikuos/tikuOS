@@ -69,9 +69,9 @@ typedef enum {
 /**
  * @brief An owner's answer to a phase.
  *
- * DONE: finished.  WAIT: not yet; asked again at a later poll.  BUSY refuses
- * PREPARE and FAULT fails it, either abandoning the job; in ABORT or RESTORE
- * both stop the job until tiku_mem_reclaim_retry().
+ * DONE: finished.  WAIT: still working; asked again at a later poll.  BUSY
+ * refuses PREPARE and FAULT fails it, either abandoning the job; in ABORT or
+ * RESTORE both stop the job until tiku_mem_reclaim_retry().
  */
 typedef enum {
     TIKU_MEM_OWNER_DONE, TIKU_MEM_OWNER_WAIT,
@@ -147,7 +147,8 @@ typedef struct {
     tiku_mem_placement_mode_t placement;
     tiku_mem_tier_t tier;           /**< for TIER and SPAN placement */
     uint8_t span_index;             /**< for SPAN placement */
-    tiku_mem_arch_size_t size, count; /**< arena: count 0; pool: block size */
+    /** Arena: size in bytes, count 0.  Pool: block size and block count. */
+    tiku_mem_arch_size_t size, count;
     tiku_mem_request_t options;     /**< alignment, flags, class and owner */
     tiku_mem_owner_t requester;     /**< requesting owner, never stopped */
 } tiku_mem_reclaim_request_t;
@@ -341,7 +342,7 @@ tiku_mem_err_t tiku_mem_reclaim_claim_pool(tiku_mem_ticket_t, tiku_pool_t *);
  */
 tiku_mem_err_t tiku_mem_reclaim_cancel(tiku_mem_ticket_t);
 /**
- * @brief Free a final ticket's slot now instead of at its deadline.
+ * @brief Free a final ticket's slot at once; otherwise its deadline frees it.
  * @return TIKU_MEM_OK; TIKU_MEM_ERR_INVALID for a stale or foreign ticket;
  *         TIKU_MEM_ERR_BUSY while it is not final
  */

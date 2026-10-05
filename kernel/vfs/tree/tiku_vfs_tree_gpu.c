@@ -8,8 +8,8 @@
  * tiku_vfs_tree_gpu.c - /sys/gpu VFS nodes (Apollo510 2.5D GPU).
  *
  * Read-only views of the GPU driver: power state, silicon id, status register
- * and serviced interrupt count.  Registers are read only while the domain is
- * powered, so a read with the GPU off reports "off" instead of faulting.
+ * and serviced interrupt count.  A register read with the GPU domain off
+ * would fault, so the register nodes report "off" while it is unpowered.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

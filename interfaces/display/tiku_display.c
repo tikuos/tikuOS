@@ -7,9 +7,9 @@
  *
  * tiku_display.c - damage tracking over whichever screen backend is built.
  *
- * Clipping and the damage rectangle are the same arithmetic on every part, so
- * they live here: rectangles reach the backend clipped, while circles and
- * rounded rectangles arrive as given for the backend to clip.
+ * Clipping and the damage rectangle are computed here for every backend:
+ * rectangles reach the backend clipped, while circles and rounded rectangles
+ * arrive as given for the backend to clip.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

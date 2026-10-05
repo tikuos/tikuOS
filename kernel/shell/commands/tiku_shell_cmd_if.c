@@ -20,12 +20,13 @@
 #include <kernel/vfs/tiku_vfs.h>
 #include <string.h>
 
-#define IF_VALUE_MAX 32     /* longest VFS read or rhs literal */
+#define IF_VALUE_MAX 32     /* VFS read buffer, NUL included */
 #define IF_INNER_MAX 80     /* longest reconstructed sub-command */
 #define IF_DEPTH_MAX 4      /* nested-if recursion guard */
 
-/* Bounds nested 'if' calls so a runaway rule (e.g. an 'if' that
- * dispatches another 'if') cannot exhaust the stack (small on MSP430). */
+/* Depth of nested `if` calls.  An `if` whose command is another `if`
+ * recurses; IF_DEPTH_MAX caps the depth so the recursion fits the stack,
+ * which is smallest on MSP430. */
 static uint8_t if_depth;
 
 /**
@@ -65,7 +66,7 @@ parse_long(const char *s, long *out)
     return 0;
 }
 
-/** @brief Strip trailing newlines/CR; VFS reads typically include one. */
+/** @brief Strip trailing '\n' and '\r' from @p s, updating *len. */
 static void
 rstrip(char *s, int *len)
 {
@@ -135,7 +136,7 @@ tiku_shell_cmd_if(uint8_t argc, const char *argv[])
             return;
         }
     } else {
-        /* String mode: only equality operators are meaningful. */
+        /* String mode: only == and != are accepted. */
         int eq = (strcmp(value_buf, argv[3]) == 0);
         if      (op[0] == '=' && op[1] == '=' && op[2] == '\0')
             matched =  eq;
@@ -151,9 +152,9 @@ tiku_shell_cmd_if(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* Rebuild the tail tokens (argv[4..]) into a single line for
-     * the parser. The parser tokenises in place, so it cannot
-     * just reuse the original buffer. */
+    /* Join argv[4..] into one line in this frame's buffer: the parser
+     * tokenises its input in place, and the original line is already split
+     * into tokens. */
     pos = 0;
     for (i = 4; i < argc; i++) {
         arglen = strlen(argv[i]);

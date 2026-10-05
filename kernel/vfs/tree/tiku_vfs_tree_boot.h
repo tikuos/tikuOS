@@ -7,9 +7,9 @@
  *
  * tiku_vfs_tree_boot.h - /sys/boot VFS nodes and boot bookkeeping.
  *
- * Owns the boot-related persistent state: the boot counter, the lifetime-uptime
- * accumulator and the reset-cause snapshot taken at init.  Also exports three
- * top-level /sys read handlers so the /sys assembly can reference them.
+ * Owns the boot counter and the lifetime-uptime accumulator (persist cells)
+ * and the reset-cause snapshot taken at init.  Also exports three top-level
+ * /sys read handlers for the /sys assembly.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -53,9 +53,8 @@ void tiku_vfs_tree_boot_init(void);
 /**
  * @brief Read handler for /sys/boot_count (also /sys/boot/count).
  *
- * Exported because the node appears in the /sys table owned by
- * tiku_vfs_tree_sys.c.  Renders the SRAM copy of the durable boot
- * counter as a decimal line.
+ * Renders the SRAM copy of the durable boot counter as a decimal line.
+ * The /sys table in tiku_vfs_tree_sys.c references it.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -66,9 +65,8 @@ int tiku_vfs_tree_boot_count_read(char *buf, size_t max);
 /**
  * @brief Read handler for /sys/last_reset.
  *
- * Renders the coarse-bucketed reset cause ("watchdog\n", "power\n",
- * "reboot\n" or "other\n") — the script-friendly companion to the
- * detailed /sys/boot/reason.
+ * Renders the reset cause in one of four buckets ("watchdog\n", "power\n",
+ * "reboot\n" or "other\n"); /sys/boot/reason gives the detailed name.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes

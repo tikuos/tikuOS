@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_ntp.c - "ntp" command (async SNTP query).
  *
- * Fetches wall-clock time over the IP link and sets the system RTC, so TLS
- * validity, /sys/time and the BASIC date words get a real clock.  A hostname is
- * resolved first; polling is paced at ~1 Hz as each no-reply poll is a retry.
+ * Fetches wall-clock time over SNTP and sets the RTC, which TLS certificate
+ * checks, /sys/time and the BASIC date functions read.  A hostname is resolved
+ * by DNS first, and the query runs across shell ticks.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -33,17 +33,15 @@
 /* CONFIG + STATE                                                            */
 /*---------------------------------------------------------------------------*/
 
-/* Poll the (poll-based) DNS/NTP clients at the cadence they expect (~1 s).
- * Each no-reply poll() counts as one retry toward their 3-strike timeout, so
- * polling every shell tick would time out in milliseconds. */
+/* The DNS and NTP clients count each no-reply poll() as one retry toward a
+ * 3-retry timeout, so the tick polls them once per second. */
 #define NTP_POLL_EVERY  ((tiku_clock_time_t)TIKU_CLOCK_SECOND)
 
-/* Overall per-phase backstop in case a state machine wedges. */
+/* A phase still running after this long is aborted as a timeout. */
 #define NTP_DEADLINE    ((tiku_clock_time_t)(12u * TIKU_CLOCK_SECOND))
 
-/* Default NTP server for a bare `ntp` (no argument): time.google.com anycast,
- * which answers SNTP directly (no DNS needed).  The SLIP host (.1) answers NTP
- * only under the TikuBench test harness.  Override at build time. */
+/* Server for a bare `ntp`: 216.239.35.0, a time.google.com anycast address.
+ * A build overrides it with -DTIKU_SHELL_NTP_SERVER={a,b,c,d}. */
 #ifndef TIKU_SHELL_NTP_SERVER
 #define TIKU_SHELL_NTP_SERVER  {216, 239, 35, 0}
 #endif
@@ -95,7 +93,8 @@ ntp_parse_ip(const char *s, uint8_t out[4])
     return (*s == '\0') ? 1u : 0u;
 }
 
-/** @brief Begin (or restart) the SNTP query phase against ntp_srv. */
+/** @brief Send an SNTP request to ntp_srv and enter the NTP phase; on a send
+ *         failure, print it and go idle. */
 static void
 ntp_begin_query(void)
 {
@@ -125,16 +124,15 @@ tiku_shell_cmd_ntp_active(void)
 void
 tiku_shell_cmd_ntp(uint8_t argc, const char *argv[])
 {
-    static uint8_t udp_ready;   /* one-shot UDP init for standalone builds */
+    static uint8_t udp_ready;   /* this command has initialised UDP */
 
     if (ntp_phase != NTP_PH_IDLE) {
         SHELL_PRINTF("ntp already running\n");
         return;
     }
 
-    /* Turn SLIP on so the console's IPv4 channel delivers replies; ensure
-     * UDP dispatch is up (the net-test path already inits it; this covers
-     * shell+net). */
+    /* Turn SLIP on so the console's IPv4 channel delivers the reply, and
+     * initialise UDP dispatch on the first call. */
     tiku_shell_cmd_slip_enable();
     if (!udp_ready) {
         tiku_kits_net_udp_init();
@@ -164,8 +162,9 @@ tiku_shell_cmd_ntp(uint8_t argc, const char *argv[])
         return;
     }
 
-    /* No argument: query the default public NTP server.  Override the target
-     * with `ntp <ip|host>`, or query the SLIP host with `ntp 172.16.7.1`. */
+    /* No argument: query TIKU_SHELL_NTP_SERVER.  `ntp <ip|host>` names
+     * another server; `ntp 172.16.7.1` queries the SLIP host, which answers
+     * NTP under the TikuBench harness. */
     {
         static const uint8_t def[4] = TIKU_SHELL_NTP_SERVER;
         ntp_srv[0] = def[0];
@@ -183,7 +182,7 @@ tiku_shell_cmd_ntp_tick(void)
         return;
     }
 
-    /* Per-phase backstop. */
+    /* Abort a phase that has run for NTP_DEADLINE. */
     if ((tiku_clock_time_t)(tiku_clock_time() - ntp_t0) >= NTP_DEADLINE) {
         if (ntp_phase == NTP_PH_DNS) {
             (void)tiku_kits_net_dns_abort();
@@ -236,9 +235,8 @@ tiku_shell_cmd_ntp_tick(void)
 
             if (tiku_kits_time_ntp_get_tm(&tm) == TIKU_KITS_TIME_OK &&
                 tiku_kits_time_ntp_get_time(&ts) == TIKU_KITS_TIME_OK) {
-                /* Set the system wall clock so date-dependent consumers (TLS
-                 * certificate validity, /sys/time, the BASIC functions DATE$
-                 * and NOW()) have a real time without `write /sys/time`. */
+                /* Set the RTC; TLS certificate validity, /sys/time and the
+                 * BASIC functions DATE$ and NOW() read it. */
                 int saved = tiku_rtc_set_seconds_status((uint32_t)ts);
                 SHELL_PRINTF("ntp: %u-%02u-%02u %02u:%02u:%02u",
                              (unsigned)tm.year, (unsigned)tm.month,

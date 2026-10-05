@@ -37,8 +37,8 @@ uint8_t tiku_shell_cmd_slip_active(void);
  * @brief Turn SLIP on (idempotent): install the SLIP link when no other link
  *        is set, and register the console's IPv4 channel.
  *
- * Net commands (ping, ntp, dns, mqtt, syslog) call this so replies reach the
- * IP stack before they send traffic.
+ * Net commands (ping, ntp, dns, mqtt, syslog) call it before they send
+ * traffic.  SLIP stays on afterwards.
  */
 void tiku_shell_cmd_slip_enable(void);
 

@@ -16,11 +16,11 @@
 #include <stdint.h>
 
 /**
- * @brief "every" command — schedule a command to repeat every N seconds.
+ * @brief "every" command: run a command line every N seconds.
  *
- * Usage: every <seconds> <command...>.  The remaining tokens are joined with
- * single spaces into one command line, which first fires at now + seconds and
- * then every @p seconds until the slot is deleted.
+ * Usage: every <seconds> <command...>, seconds 1-65535.  The command tokens
+ * are joined by single spaces; the line first runs N seconds from now and
+ * repeats until `jobs del` frees its slot or the device resets.
  *
  * @param argc  Argument count
  * @param argv  Argument vector

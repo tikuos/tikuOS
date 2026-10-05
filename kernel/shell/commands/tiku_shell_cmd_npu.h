@@ -18,8 +18,11 @@
 #include <kernel/shell/tiku_shell_config.h>
 
 /**
- * @brief Handle `npu [off | bench [rounds] | load <name>]`; with no argument
- *        it releases and reports.
+ * @brief Handle `npu [off | bench [rounds] | load <name>]`.
+ *
+ * `bench` times the model on the NPU and the M85 (20 rounds by default),
+ * `load` loads a model from /data and `off` gates the NPU.  Anything else
+ * brings the NPU up and prints its id, MAC rate, SHRAM size and model.
  *
  * @param argc Argument count
  * @param argv Argument vector
@@ -27,7 +30,11 @@
 void tiku_shell_cmd_npu(uint8_t argc, const char *argv[]);
 
 /**
- * @brief Handle `npu-test [seed] [rounds]`: run the stream and check it.
+ * @brief Handle `npu-test [seed] [rounds]`: check NPU output against the M85.
+ *
+ * Runs the self-test `rounds` times (4 by default) from `seed` (1 by default)
+ * and returns at a failed round; after a full pass it runs the tampered,
+ * no-irq, bad-weight and no-maintenance variants, each expected to fail.
  *
  * @param argc Argument count
  * @param argv Argument vector

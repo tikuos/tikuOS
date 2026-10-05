@@ -9,7 +9,7 @@
  *
  * Writable nodes stream event-driven, read-only nodes re-read on an interval.
  * The command returns immediately and the shell main loop drives the mode
- * through the hooks below, so the loop never blocks.
+ * through the hooks below, each of which does one step and returns.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -50,8 +50,10 @@ uint8_t tiku_shell_cmd_watch_active(void);
  * @brief Per-poll-tick service.
  *
  * Interval mode counts ticks and re-prints each elapsed interval.  Event mode
- * re-subscribes idempotently, self-healing after the rules engine's wholesale
- * tiku_vfs_unwatch_all() re-arm drops the subscription.
+ * re-subscribes on every tick, which restores the subscription after the
+ * rules engine's re-arm calls tiku_vfs_unwatch_all().
+ *
+ * @note The shell loop calls it once per poll tick.
  */
 void tiku_shell_cmd_watch_tick(void);
 

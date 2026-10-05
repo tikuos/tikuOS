@@ -23,10 +23,10 @@
 /**
  * @brief Record a command line into the history ring.
  *
- * Called by the shell main loop after each non-empty line is entered.
- * Duplicate consecutive entries are suppressed.
+ * NULL, an empty line and a line equal to the newest entry are not stored.
  *
- * @param line  Null-terminated command string
+ * @param line  NUL-terminated command string
+ * @note The shell loop calls it for each line entered.
  */
 void tiku_shell_history_record(const char *line);
 

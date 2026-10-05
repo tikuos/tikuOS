@@ -68,7 +68,7 @@
 /** Upper bound on the READY poll, in loop iterations. */
 #define AXONS_READY_SPIN  2000000ul
 
-/** IRQ-storm brake for the probe ISR. */
+/** Interrupt count at which the probe ISR disables IRQ 86. */
 #define AXONS_IRQ_LIMIT   16u
 
 static volatile uint32_t axons_irq_count;
@@ -178,15 +178,16 @@ static void axons_diff(void)
  * into .rodata; `axonsprobe modelstore` runs the same vendor test with the
  * model loaded from /data, so the two results can be compared.
  *
- * The vendor harness state is global, so AxonnnModelPrepare() runs as it does
- * on the baked path, setting the model pointer and the test vectors.  The
- * model pointer is then repointed at a RAM copy of the descriptor whose
- * cmd_buffer_ptr is the relocated command buffer and whose model_const_ptr is
- * the mapped weights.  No vendor source is modified, and the pass or fail
- * verdict is the vendor test's own.
+ * The vendor harness state is global.  axons_model_from_store() calls
+ * AxonnnModelPrepare(), which in a baked build is the vendor's and sets the
+ * model pointer and the test vectors.  axons_model_from_store() then points
+ * the model pointer at a RAM copy of the descriptor whose cmd_buffer_ptr is
+ * the relocated command buffer and whose model_const_ptr is the mapped
+ * weights.  No vendor source is modified, and the pass or fail verdict is the
+ * vendor test's own.
  *
- * Layer models are not run: the packer extracts only the full-model command
- * buffer, so the layer-mode buffers still hold link-time addresses.
+ * Layer models are not run: tools/axonpack.py extracts only the full-model
+ * command buffer, so the layer-mode buffers still hold link-time addresses.
  */
 #if defined(TIKU_AXON_MODEL_FROM_STORE) && TIKU_AXON_MODEL_FROM_STORE
 /* This configuration compiles no model, and so not the vendor test app that
@@ -201,6 +202,7 @@ nrf_axon_nn_compiled_model_layer_s const **the_model_layers_static_info[1]
 uint16_t model_layers_count[1] = { 0 };
 nrf_axon_nn_model_test_info_s the_test_vectors[1];
 
+/** @brief Clear the_test_vectors; the descriptor is set by the caller. */
 int AxonnnModelPrepare(void)
 {
     memset(the_test_vectors, 0, sizeof the_test_vectors);
@@ -212,23 +214,24 @@ extern nrf_axon_nn_model_test_info_s       the_test_vectors[];
 extern int  AxonnnModelPrepare(void);
 #endif
 
-/* The weights stay mapped in RRAM; only the command buffer is built in RAM.
- * Sized for the largest command buffer in the shipped tinyml set (tinyml_vww);
- * a larger one is refused at prepare. */
+/* The weights stay mapped in RRAM; the command buffer is relocated into this
+ * RAM array, and the descriptor and the label table below into their own.
+ * Sized for the largest command buffer in the shipped tinyml set
+ * (tinyml_vww); a larger one is refused at prepare. */
 #ifndef AXONS_STORE_CMD_MAX
 #define AXONS_STORE_CMD_MAX  53248u
 #endif
 static uint8_t axons_store_cmd[AXONS_STORE_CMD_MAX] __attribute__((aligned(8)));
 
-/* The descriptor is built into a real struct, so the compiler supplies the
- * alignment the engine expects. */
+/* The descriptor is a typed struct, so it has the alignment the engine
+ * expects. */
 static nrf_axon_nn_compiled_model_s axons_store_desc;
 
 /* Label pointers and packed output for the loaded model, sized for the
  * largest shipped one; a model needing more of either is refused at load. */
 #define AXONS_STORE_LABEL_MAX  32u
-/* An autoencoder's packed output is a whole reconstructed frame rather than a
- * few class scores; tinyml_ad sets this size. */
+/* An autoencoder's packed output is a whole reconstructed frame; tinyml_ad
+ * sets this size. */
 #define AXONS_STORE_POUT_MAX   4096u
 static const char *axons_store_labels[AXONS_STORE_LABEL_MAX];
 static uint8_t axons_store_pout[AXONS_STORE_POUT_MAX]
@@ -237,9 +240,8 @@ static uint8_t axons_store_pout[AXONS_STORE_POUT_MAX]
 /**
  * @brief Register the firmware addresses a packed model's table may name.
  *
- * Each address is taken in C, never written as a number: a code symbol's
- * address carries the Thumb bit, which a hand-written constant would miss.
- * The packed-output symbol names a buffer this caller lends the model.
+ * Each address is taken in C, so a code symbol's address carries its Thumb
+ * bit.  The packed-output symbol names a buffer this caller lends the model.
  *
  * @return TIKU_MODEL_OK, or the first registration error
  */
@@ -271,14 +273,14 @@ static int axons_store_register_syms(void)
 /* KNOWN-ANSWER VECTORS FROM THE STORE                                       */
 /*---------------------------------------------------------------------------*/
 /*
- * The vendor harness compares each inference with an expected output, and
- * those vectors are C arrays too, so a model-free image has none.  They are
- * packed into a companion .kat file (tools/axonpack.py --kat) and mapped from
- * the store here.
+ * The vendor harness compares each inference with an expected output.  Those
+ * vectors are C arrays compiled in with a baked model, so a model-free image
+ * has none.  They are packed into a companion .kat file (tools/axonpack.py
+ * --kat) and mapped from the store here.
  *
- * The .kat is a separate file, not a section of the .axm: the vectors are the
- * test harness's, and a product provisions the model without them.  Only the
- * full-model vectors are packed, since the store path runs no layer models.
+ * The .kat is a file of its own beside the .axm, so a product can provision
+ * the model without the test harness's vectors.  Only the full-model vectors
+ * are packed, since the store path runs no layer models.
  */
 #define AKT_MAGIC       0x31544B41u    /* 'AKT1' little-endian */
 #define AKT_VERSION     1u
@@ -335,8 +337,8 @@ static int axons_kat_load(tiku_tfs_t *fs, const char *name,
                          name, (unsigned)nvec, (unsigned)AXONS_KAT_MAX);
             return -1;
         }
-        /* Bounds as subtractions, never additions: two file-supplied u32s can
-         * wrap, and a wrapped sum passes a naive comparison. */
+        /* Bounds are checked by subtraction: a sum of two file-supplied u32s
+         * can wrap and pass the comparison. */
         if (in_str == 0u || ex_str == 0u ||
             in_off > (uint32_t)n || ex_off > (uint32_t)n ||
             in_str > ((uint32_t)n - in_off) / nvec ||
@@ -440,7 +442,8 @@ static unsigned axons_store_desc_check(const nrf_axon_nn_compiled_model_s *got,
  * @brief Load model @p name from /data and run the vendor test vectors on it.
  *
  * @param name  Model file (.axm)
- * @param kat   Known-answer file (.kat), or NULL to use the baked vectors
+ * @param kat   Known-answer file (.kat), or NULL for the baked vectors; with
+ *              none baked in, the call prints an error and runs nothing
  */
 static void axons_model_from_store(const char *name, const char *kat)
 {
@@ -471,7 +474,7 @@ static void axons_model_from_store(const char *name, const char *kat)
     /* Alignment is printed for diagnosis only.  The store does not align a
      * file to 16 bytes: a mapped file starts after its slot's 4-byte length
      * word, and slots are TIKU_TFS_SLOT_DATA + 4 bytes apart, so its
-     * alignment depends on the slot it landed in.  The NPU reads these blobs
+     * alignment depends on the slot that holds it.  The NPU reads these blobs
      * from any 4-byte-aligned address. */
     SHELL_PRINTF("modelstore: weights @%p (align %u)  cmd RAM @%p (align %u)\n",
                  (const void *)m.weights,
@@ -480,10 +483,9 @@ static void axons_model_from_store(const char *name, const char *kat)
                  (unsigned)((uintptr_t)axons_store_cmd & 15u));
 
     /* The packed descriptor holds the vendor struct as compiled into the
-     * packer's input.  A different size here means this build's SDK lays it
-     * out differently, the fields would land in the wrong places, and the
-     * model must be repacked.  A layout change that keeps the size is not
-     * caught. */
+     * object tools/axonpack.py packed.  A different size means this build's
+     * SDK lays the struct out differently, and the model must be repacked.  A
+     * layout change that keeps the size is not caught. */
     if (m.desc_len != sizeof axons_store_desc) {
         SHELL_PRINTF("modelstore: descriptor is %u B, this build expects %u -- "
                      "repack against this SDK\n",
@@ -739,8 +741,7 @@ void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
                 /* keep_reservation = false: the reservation taken above holds
                  * the block powered for the whole loop, so the per-op release
                  * never drops the refcount to zero and the engine does not
-                 * power-cycle between ops.  Passing true would leak one
-                 * reference per op. */
+                 * power-cycle between ops. */
                 (void)axon_mar_24_24_32(bx, by, &out, DOT_LEN, 0u,
                                         NRF_AXON_SYNC_MODE_BLOCKING_POLLING,
                                         false);
@@ -757,9 +758,9 @@ void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
         } while ((uint32_t)(NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL - t0)
                  < ms * 1000u);
         nrf_axon_platform_free_reservation_from_user();
-        /* Then close the session: a stray reservation anywhere would keep the
-         * engine powered into the next reading, and close() zeroes the
-         * refcount and disables the block. */
+        /* Then close the session: close() zeroes the refcount and disables
+         * the block, so no reservation left anywhere keeps the engine powered
+         * into the next reading. */
         nrf_axon_platform_close();
         SHELL_PRINTF("%s done: %lu ops, ENABLE=%x\n", argv[1],
                      (unsigned long)ops, (unsigned)AXONS_ENABLE);
@@ -845,8 +846,9 @@ void tiku_shell_cmd_axonsprobe(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 2 && strcmp(argv[1], "modelbaked") == 0) {
-        /* The baked descriptor through the same full-model-only vendor call
-         * as modelstore (no layer models), so the two runs can be compared. */
+        /* Runs the baked descriptor through the full-model-only vendor call
+         * that modelstore uses (no layer models), so the two runs can be
+         * compared. */
         uint32_t t0;
         if (nrf_axon_platform_init() != NRF_AXON_RESULT_SUCCESS) {
             SHELL_PRINTF("modelbaked: axon platform init failed\n");

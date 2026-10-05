@@ -7,7 +7,8 @@
  *
  * tiku_clock.c - System clock implementation
  *
- * Thin wrappers around the architecture-specific clock functions.
+ * Wrappers around the architecture-specific clock functions, plus weak
+ * tickless-idle defaults for a port without that backend.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

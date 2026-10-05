@@ -16,11 +16,11 @@
 #include <stdint.h>
 
 /**
- * @brief "reboot" command handler — trigger a system reset.
+ * @brief "reboot" command handler: reset the system.
  *
  * Usage: reboot [boot]   (boot: RP2350 only, reboot into BOOTSEL)
- * Configures the watchdog timer for a short timeout in watchdog mode,
- * then spins until the hardware resets the system.
+ * Resets through the watchdog's shortest interval; Ambiq first powers down
+ * eMMC and PSRAM, and ESP32-C61 resets through its own restart routine.
  *
  * @param argc  Argument count
  * @param argv  Argument vector; argv[1] may be "boot" on RP2350

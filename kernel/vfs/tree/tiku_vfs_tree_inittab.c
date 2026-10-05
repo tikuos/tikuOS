@@ -7,9 +7,9 @@
  *
  * tiku_vfs_tree_inittab.c - /sys/init VFS nodes (init-table mirror).
  *
- * Mirrors the init table so a VFS client can read entries and toggle `enable`
- * without the shell; add and remove are multi-field operations that do not fit
- * a single-node write, so they have no node.  Compiles away when init is off.
+ * Mirrors the init table: entries are readable and `enable` is writable
+ * without the shell.  Add and remove change several fields at once and have no
+ * node.  Compiles away when init is off.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -34,8 +34,7 @@
  * @brief Read handler for /sys/init/count.
  *
  * Renders the number of populated init-table entries as a decimal
- * line — i.e. how many of the eight slot directories below hold a
- * real entry rather than "(none)" placeholders.
+ * line: the slot directories that hold an entry.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes

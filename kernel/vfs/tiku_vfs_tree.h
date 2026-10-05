@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree.h - system VFS tree (production, not test).
+ * tiku_vfs_tree.h - system VFS tree.
  *
  * Builds and initialises the root tree with /sys, /dev, /proc and /data.  The
  * node handlers live in the per-subtree modules under kernel/vfs/tree/; this is

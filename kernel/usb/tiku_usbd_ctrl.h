@@ -18,25 +18,26 @@
 #include <stddef.h>
 
 /*
- * Here: the decisions a device makes about a control transfer -- which
- * descriptor answers, what a status or feature request means, how a class
- * request is routed -- and the descriptors themselves, built from an
- * identity and endpoint numbers.  Not here: when the address takes effect
- * (before the status stage on a DWC2, after it on MUSB and the RP2350, in
- * hardware on the RA8P1), how a data stage moves, or any register.  A
- * controller drives its own EP0 and asks here what each SETUP packet means.
+ * This module decides what each control request means -- which descriptor
+ * answers, what a status or feature request returns, where a class request
+ * goes -- and builds the descriptors from an identity and endpoint numbers.
+ * Each controller driver runs its own EP0: it moves the data stages, applies
+ * the address at its own time (before the status stage on a DWC2, after it
+ * on MUSB and the RP2350, in hardware on the RA8P1) and calls
+ * tiku_usbd_ctrl_setup() for each SETUP packet.
  */
 
 /*---------------------------------------------------------------------------*/
 /* IDENTITY                                                                  */
 /*---------------------------------------------------------------------------*/
 
-/** @brief pid.codes vendor, and one product per face. */
+/** @brief pid.codes vendor, and one product id per face (console, disk). */
 #define TIKU_USBD_VID           0x1209u
 #define TIKU_USBD_PID_CONSOLE   0x0001u
 #define TIKU_USBD_PID_DISK      0x0002u
 
-/** @brief The faces a device can wear; routes class requests. */
+/** @brief The class a descriptor set presents; selects how class requests
+ *         are decided. */
 #define TIKU_USBD_CLASS_CDC     1u
 #define TIKU_USBD_CLASS_MSC     2u
 
@@ -82,10 +83,11 @@ void tiku_usbd_msc_config(uint8_t *out, uint8_t ep_out, uint8_t ep_in,
                           uint16_t bulk_mps);
 
 /**
- * @brief Rewrite wMaxPacketSize in every BULK endpoint descriptor of a
- *        configuration: 512 once high speed is negotiated, 64 below it.
- *        A host controller sends the speed's size whatever the descriptor
- *        says, and a packet wider than the endpoint is babble never taken.
+ * @brief Set wMaxPacketSize of every bulk endpoint descriptor in @p config.
+ *
+ * The caller passes 512 once high speed is negotiated and 64 below it: the
+ * host sends packets of the speed's size whatever the descriptor says, and a
+ * packet wider than the endpoint is babble that the controller drops.
  */
 void tiku_usbd_desc_set_bulk_mps(uint8_t *config, uint16_t len,
                                  uint16_t mps);
@@ -93,7 +95,8 @@ void tiku_usbd_desc_set_bulk_mps(uint8_t *config, uint16_t len,
 /** @brief The language descriptor (US English), 4 bytes. */
 const uint8_t *tiku_usbd_string_lang(uint16_t *len);
 
-/** @brief An ASCII string as a UTF-16LE string descriptor.  Returns bytes. */
+/** @brief An ASCII string as a UTF-16LE string descriptor, cut to fit
+ *         @p cap.  Returns its length in bytes. */
 uint16_t tiku_usbd_string_ascii(uint8_t *out, size_t cap, const char *s);
 
 /** @brief A hex serial descriptor from @p n id bytes (a FICR, a flash id). */

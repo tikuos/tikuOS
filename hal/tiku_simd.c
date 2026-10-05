@@ -7,9 +7,9 @@
  *
  * tiku_simd.c - portable u8 vector kernels (Helium/MVE + scalar backends).
  *
- * Both backends live in one unit, selected by __ARM_FEATURE_MVE (set by the
- * -mcpu, not a vendor SDK).  The MVE paths use <arm_mve.h> with VCTP tail
- * predication; the scalar paths are the bit-identical reference.
+ * Both backends live in one unit, selected by __ARM_FEATURE_MVE (set by
+ * -mcpu).  The MVE paths use <arm_mve.h> with VCTP tail predication; the
+ * scalar paths are the bit-identical reference.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,11 +17,10 @@
 #include "tiku_simd.h"
 
 /*
- * TIKU_SIMD_MVE follows the target's capability in production builds.  A
- * measurement unit (arch/ambiq/tiku_simd_scalar.c) forces it to 0 and includes
- * this file again under renamed symbols, so a scalar twin of every kernel sits
- * in the same image as the MVE one: compared across two builds, loop alignment
- * skews the result.
+ * TIKU_SIMD_MVE follows the target's capability unless defined first.
+ * arch/ambiq/tiku_simd_scalar.c defines it as 0 and includes this file under
+ * renamed symbols, which puts a scalar twin of every kernel in the same image
+ * as the MVE one.
  */
 #ifndef TIKU_SIMD_MVE
 #if defined(__ARM_FEATURE_MVE) && (__ARM_FEATURE_MVE & 1)

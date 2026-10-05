@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_mrambench.c - "mrambench" command (Ambiq).
  *
- * Times the bootrom MRAM programmer at several spans, and verifies that the
- * flush dirty-check skips idle flushes.  Both bracket the work in the NVM
- * unlock window the programmer requires.
+ * Times the bootrom MRAM programmer at several spans inside an NVM unlock
+ * window, and self-tests the flush dirty-check, which skips the MRAM program
+ * when the mirror already holds .uninit; the self-test flushes by relocking.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,8 +20,8 @@
 #include <arch/ambiq/tiku_mram_bench.h>    /* bench + program-count getter    */
 #include <string.h>                        /* strcmp                          */
 
-/* A scratch word in .uninit (the mirrored region) so `verify` can force a
- * real dirty-check hit without touching any live persist cell. */
+/* Scratch word in .uninit, the region the flush mirrors to MRAM.  `verify`
+ * flips it to make one flush program; no persist cell uses it. */
 static volatile uint32_t __attribute__((section(".uninit"))) s_mram_test_scratch;
 
 /*---------------------------------------------------------------------------*/
@@ -29,11 +29,11 @@ static volatile uint32_t __attribute__((section(".uninit"))) s_mram_test_scratch
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Regression-check that the NVM flush dirty-check works.
+ * @brief Self-test of the NVM flush dirty-check.
  *
- * Runs three flushes -- idle, a real .uninit change, idle again -- and
- * PASSes only if the program count skips both idle flushes and commits
- * exactly once for the change.
+ * After one flush that syncs the mirror, flushes idle, after a .uninit
+ * change, and idle again.  Prints PASS when the program count rises by 0, 1
+ * and 0, else FAIL.
  */
 static void
 mrambench_verify(void)
@@ -46,20 +46,20 @@ mrambench_verify(void)
     saved = tiku_mpu_unlock_nvm();
     tiku_mpu_lock_nvm(saved);
 
-    /* (1) Idle flush: no .uninit change -> the dirty-check must skip. */
+    /* (1) Idle flush, .uninit unchanged: expect no program. */
     c0 = tiku_mem_arch_nvm_program_count();
     saved = tiku_mpu_unlock_nvm();
     tiku_mpu_lock_nvm(saved);
     c1 = tiku_mem_arch_nvm_program_count();
 
-    /* (2) Change .uninit inside the unlock window, flush -> must program
-     * once. */
+    /* (2) Change .uninit inside the unlock window, then flush: expect one
+     * program. */
     saved = tiku_mpu_unlock_nvm();
     s_mram_test_scratch ^= 0xDEADBEEFuL;
     tiku_mpu_lock_nvm(saved);
     c2 = tiku_mem_arch_nvm_program_count();
 
-    /* (3) Idle flush again -> must skip. */
+    /* (3) Idle flush again: expect no program. */
     saved = tiku_mpu_unlock_nvm();
     tiku_mpu_lock_nvm(saved);
     c3 = tiku_mem_arch_nvm_program_count();
@@ -81,10 +81,11 @@ mrambench_verify(void)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Benchmark MRAM program timing and report a cost model.
+ * @brief Time the bootrom MRAM programmer and print a cost model.
  *
- * Times bootrom programming across several block sizes, prints per-run
- * cycles/microseconds, and fits fixed overhead plus per-word cost.
+ * Prints the DWT rate, the best-of-4 cycles and microseconds per span, and a
+ * fit of fixed overhead plus per-word cost.  With no scratch window it prints
+ * an error and returns.
  */
 static void
 mrambench_time(void)

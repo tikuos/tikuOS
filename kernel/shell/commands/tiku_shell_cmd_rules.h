@@ -20,7 +20,7 @@
  *
  * Usage:
  *   rules              List all active rules
- *   rules del <id>     Delete the rule at @p id
+ *   rules del <id>     Delete rule #<id>
  */
 void tiku_shell_cmd_rules(uint8_t argc, const char *argv[]);
 

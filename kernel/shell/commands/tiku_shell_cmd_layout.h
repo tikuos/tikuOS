@@ -18,14 +18,15 @@
 #include <stdint.h>
 
 /**
- * @brief "layout" command handler.
+ * @brief "layout" command handler; with no subcommand it runs show.
  *
  * Subcommands: show, limits, status, plan, stage, cancel, resume, inspect and
  * recover.  A change is staged for the next boot; one that rewrites /data
- * needs --erase.
+ * while it holds files also needs --erase.
  *
  * @param argc Argument count
  * @param argv Argument vector
+ * @note Defined only when TIKU_SHELL_CMD_LAYOUT is set; never on MSP430.
  */
 void tiku_shell_cmd_layout(uint8_t argc, const char *argv[]);
 

@@ -32,7 +32,8 @@
 /**
  * @brief Entry count of /sys/store.
  *
- * Same contract as TIKU_VFS_TREE_USB_NCHILD.
+ * Must equal the number of initialisers in tiku_vfs_tree_store_children; a
+ * _Static_assert beside the table checks it.
  */
 #define TIKU_VFS_TREE_STORE_NCHILD  3
 

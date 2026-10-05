@@ -119,9 +119,8 @@ expr_unary(const char **p)
     skip_ws(p);
     if (cur_peek(p) == '-') { cur_advance(p); return -expr_unary(p); }
     if (cur_peek(p) == '+') { cur_advance(p); return  expr_unary(p); }
-    /* NOT is bitwise complement (matches Microsoft BASIC for an
-     * integer dialect). Bound at unary-precedence so `NOT a + 1`
-     * parses as `(NOT a) + 1`; use parens for `NOT (a + 1)`. */
+    /* NOT is the bitwise complement (NOT 1 is -2, NOT -1 is 0), at unary
+     * precedence: `NOT a + 1` parses as `(NOT a) + 1`. */
     if (match_kw(p, "NOT")) return ~expr_unary(p);
     return expr_pow(p);
 }
@@ -213,8 +212,8 @@ expr_rel(const char **p)
 }
 
 /**
- * @brief Bitwise AND, one level below relational, so
- *        `IF a < 5 AND b > 3 THEN ...` reads conventionally.
+ * @brief Bitwise AND, one level below relational: `IF a < 5 AND b > 3`
+ *        ANDs two 0/1 results.
  */
 static long
 expr_and(const char **p)

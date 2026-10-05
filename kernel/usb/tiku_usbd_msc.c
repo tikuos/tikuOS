@@ -55,11 +55,10 @@ static void put_be32(uint8_t *p, uint32_t v)
 /*---------------------------------------------------------------------------*/
 
 /*
- * Validity is the two tests the specification calls for: 31 bytes and the
- * right signature.  bCBWLUN and bCBWCBLength are surfaced for the caller to
- * judge rather than rejected here, because a wrapper that is valid but not
- * meaningful has a defined answer (stall the pipe) that belongs to the
- * transport, not to this file.
+ * A CBW is valid when it is 31 bytes long and carries the signature, the two
+ * tests the specification calls for.  bCBWLUN and bCBWCBLength are masked to
+ * their field widths and not checked: a valid CBW that is not meaningful is
+ * answered by the transport, which stalls the pipe.
  */
 int tiku_usbd_msc_parse_cbw(const uint8_t *buf, uint16_t n,
                             tiku_usbd_msc_cbw_t *out)
@@ -103,9 +102,8 @@ int tiku_usbd_msc_lba_ok(const tiku_usbd_msc_t *m, uint32_t lba, uint32_t nblk)
 {
     if (m == NULL)          { return 0; }
     if (nblk == 0u)         { return 1; }
-    /* Not (lba + nblk) > blocks: the host controls both values, and an LBA
-     * near 2^32 wraps that sum small.  Bounding lba first makes the
-     * subtraction safe. */
+    /* The host sets lba and nblk, and lba + nblk can wrap past 2^32, so lba
+     * is bounded first and nblk compared with the blocks left after it. */
     if (lba >= m->blocks)   { return 0; }
     return (nblk <= (m->blocks - lba)) ? 1 : 0;
 }
@@ -137,9 +135,9 @@ static void pad16(uint8_t *dst, const char *src)
 }
 
 /*
- * Every command here answers out of memory, so the transport can ship the
- * reply without leaving the context it decoded in.  READ and WRITE are the
- * only opcodes that touch the medium and they are handled by the caller.
+ * small_reply() answers from memory, so the transport sends its reply in the
+ * context that decoded the command.  READ(10) and WRITE(10), the only
+ * commands that touch the medium, are left to the caller.
  */
 
 /**
@@ -182,16 +180,15 @@ static uint16_t small_reply(tiku_usbd_msc_t *m, const uint8_t *cb,
         r[2]  = m->sense_key;
         r[7]  = 10u;              /* additional sense length                */
         r[12] = m->sense_asc;
-        /* Reading the sense clears it: the condition belongs to the command
-         * that caused it, and leaving it latched fails the next one too. */
+        /* Reading the sense clears it, so a later REQUEST SENSE reports
+         * only a later failure. */
         m->sense_key = TIKU_USBD_MSC_SENSE_NONE;
         m->sense_asc = 0u;
         len = 18u;
         break;
 
     case TIKU_USBD_MSC_READ_CAPACITY10:
-        /* The last addressable LBA, not the block count: the count would
-         * give the host one block more than exists. */
+        /* SCSI defines the first field as the last LBA, blocks - 1. */
         put_be32(&r[0], m->blocks - 1u);
         put_be32(&r[4], TIKU_USBD_MSC_BLOCK);
         len = 8u;
@@ -209,8 +206,8 @@ static uint16_t small_reply(tiku_usbd_msc_t *m, const uint8_t *cb,
         break;
 
     default:
-        /* Refused, not ignored.  A command silently treated as success is
-         * how a host comes to believe a write landed. */
+        /* An unknown opcode fails: a pass would tell the host that the
+         * command, a write among them, took effect. */
         tiku_usbd_msc_fail(m, TIKU_USBD_MSC_SENSE_ILLEGAL,
                            TIKU_USBD_MSC_ASC_OPCODE);
         *status = 1u;
@@ -250,9 +247,8 @@ void tiku_usbd_msc_decode(tiku_usbd_msc_t *m, const tiku_usbd_msc_cbw_t *cbw,
         bytes = nblk * TIKU_USBD_MSC_BLOCK;
 
         /*
-         * The range is checked before an LBA is handed out, and a refused
-         * range is not published, so a caller that skips the action check
-         * indexes block 0 rather than past the end of the medium.
+         * A range outside the medium fails before lba and nblk are set, so
+         * a caller that ignores the action reads lba 0 and nblk 0.
          */
         if (!tiku_usbd_msc_lba_ok(m, lba, nblk)) {
             tiku_usbd_msc_fail(m, TIKU_USBD_MSC_SENSE_ILLEGAL,

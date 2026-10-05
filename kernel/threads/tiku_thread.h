@@ -9,7 +9,7 @@
  *
  * Thread 0 is the cooperative kernel; workers are statically declared,
  * preemptible compute threads that run only when it has nothing to dispatch.
- * A worker may compute and post events, and nothing else.
+ * A worker may compute, post events and block on a wait queue.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -51,12 +51,12 @@ typedef enum {
 /**
  * @brief Thread control block.
  *
- * Statically allocated via TIKU_THREAD().  sp holds the saved process stack
- * pointer while the thread is off the CPU; cycles accumulates CPU cycles across
- * every occupancy, and budget is the enforced ceiling plus one (0 = none).
+ * Statically allocated via TIKU_THREAD().  sp holds the saved stack pointer
+ * while the thread is off the CPU; cycles accumulates CPU cycles across every
+ * occupancy, and budget is the enforced ceiling plus one (0 = none).
  */
 typedef struct tiku_thread {
-    uint32_t            *sp;          /**< Saved PSP (off-CPU)            */
+    uint32_t            *sp;          /**< Saved stack pointer (off-CPU)  */
     uint32_t            *stack_base;  /**< Lowest address (canary here)   */
     size_t               stack_size;  /**< Bytes                          */
     void               (*entry)(void *);
@@ -80,9 +80,8 @@ typedef struct tiku_thread {
  * @def TIKU_THREAD(name, stack_bytes)
  * @brief Statically declare a worker thread and its stack.
  *
- * The stack is 8-byte aligned .bss (never .persistent — high-churn
- * buffers do not belong in the NVM-mirrored section).  Start it with
- * tiku_thread_start(&name, entry, arg).
+ * The stack is an 8-byte-aligned .bss array of @p stack_bytes / 4 words.
+ * Start the thread with tiku_thread_start(&name, entry, arg).
  */
 #define TIKU_THREAD(name, stack_bytes)                                       \
     static uint32_t name##_stack[(stack_bytes) / 4u]                         \
@@ -93,7 +92,7 @@ typedef struct tiku_thread {
     }
 
 /*---------------------------------------------------------------------------*/
-/* WORKER API (callable from any thread)                                     */
+/* WORKER API                                                                */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -129,9 +128,9 @@ int tiku_thread_forget(tiku_thread_t *t);
 /**
  * @brief Wait until @p t exits (kernel-thread context).
  *
- * Cooperative: spins yielding the CPU to workers, servicing nothing —
- * intended for tests and teardown, not steady-state code (steady
- * state should get completion via an event post instead).
+ * Loops in the kernel thread, handing the CPU to ready workers, and
+ * dispatches no events meanwhile.  TIKU_WAIT_WORKER() waits for a worker
+ * without stopping the kernel.
  *
  * @return 0 when joined, -1 if @p t was never started
  */
@@ -165,10 +164,13 @@ typedef struct {
  */
 int tiku_thread_wait(tiku_waitq_t *q, unsigned long ticks);
 
-/** @brief Wake one waiter, workers before the kernel; safe from an ISR. */
+/**
+ * @brief Wake one waiter: the lowest worker slot first, then the kernel.
+ *        Callable from an ISR.
+ */
 void tiku_thread_wake_one(tiku_waitq_t *q);
 
-/** @brief Wake every waiter; safe from an ISR. */
+/** @brief Wake every waiter.  Callable from an ISR. */
 void tiku_thread_wake_all(tiku_waitq_t *q);
 
 /*---------------------------------------------------------------------------*/
@@ -184,7 +186,10 @@ unsigned long long tiku_thread_cycles(const tiku_thread_t *t);
 /** @brief Times @p t was scheduled onto the CPU. */
 uint16_t tiku_thread_switches(const tiku_thread_t *t);
 
-/** @brief Non-zero if any worker is READY to run. */
+/**
+ * @brief Non-zero if a worker is READY and within its budget.  First makes
+ *        READY every blocked worker whose wait deadline has passed.
+ */
 int tiku_thread_worker_ready(void);
 
 /** @brief The worker on the CPU, or NULL in the kernel thread (an ISR sees
@@ -212,7 +217,8 @@ uint8_t tiku_thread_count(void);
 /** @brief The i-th registered worker (0..count-1), or NULL. */
 tiku_thread_t *tiku_thread_get(uint8_t i);
 
-/** @brief Current state of @p t (READY / RUNNING / DONE / ...). */
+/** @brief Current state of @p t (READY / RUNNING / DONE / ...); NULL reads
+ *         DONE. */
 tiku_thread_state_t tiku_thread_state(const tiku_thread_t *t);
 
 /** @brief Non-zero once @p t has finished, and for a worker never started. */
@@ -229,8 +235,10 @@ int tiku_thread_await(tiku_thread_t *t, struct tiku_process *p);
  * @brief Park the calling process until worker @p t finishes.
  *
  * Blocks only while @p t is unfinished; the worker's exit polls the process,
- * so it resumes with no other event.  Use inside a TIKU_PROCESS_THREAD -- code
- * running mid C-callstack cannot yield and has to keep driving a pump instead.
+ * so it resumes with no other event.
+ *
+ * @note Only in a TIKU_PROCESS_THREAD body: it expands to PT_WAIT_UNTIL on
+ *       process_pt, which a function called from the body cannot use.
  */
 #define TIKU_WAIT_WORKER(t) \
     PT_WAIT_UNTIL(process_pt, tiku_thread_await((t), TIKU_THIS()))
@@ -251,9 +259,9 @@ void tiku_thread_budget_grant(tiku_thread_t *t, unsigned long long cycles);
 /**
  * @brief Add @p cycles to @p t's ceiling (refill / periodic top-up).
  *
- * Extends the runway; if the worker was exhausted this re-enables it for
- * @p cycles more.  A no-op on an unlimited (budget == 0) worker: grant a
- * budget first to begin enforcing.
+ * Raises the ceiling by @p cycles, which lets an exhausted worker run again
+ * once the ceiling passes the cycles it has used.  Does nothing to an
+ * unlimited worker (budget 0); tiku_thread_budget_grant() starts enforcement.
  */
 void tiku_thread_budget_refill(tiku_thread_t *t, unsigned long long cycles);
 
@@ -273,18 +281,20 @@ int tiku_thread_budget_exhausted(const tiku_thread_t *t);
 /**
  * @brief Kernel thread yields the CPU to the ready workers.
  *
- * Called from the scheduler's idle branch instead of the idle hook: marks
- * thread 0 not-ready, rotates the worker cursor and pends the switch, which
- * fires when the atomic section exits.  It resumes on kernel_wake().
+ * Called with interrupts masked (the scheduler's idle branch, join, the
+ * kernel's wait).  Marks thread 0 not ready, rotates the worker cursor and
+ * pends the switch, which fires when the atomic section exits.
+ *
+ * @note The kernel thread resumes after tiku_thread_kernel_wake().
  */
 void tiku_thread_kernel_block(void);
 
 /**
  * @brief Make the kernel thread runnable again (absolute priority).
  *
- * ISR-safe, and called after every successful post, so any event preempts
- * workers back to the kernel at the next unmasked instant.  A no-op before
- * threading has started.
+ * Callable from an ISR.  Each successful post, each poll and each tick call
+ * it, so any event preempts workers back to the kernel at the next unmasked
+ * instant.  Does nothing before threading has started.
  */
 void tiku_thread_kernel_wake(void);
 

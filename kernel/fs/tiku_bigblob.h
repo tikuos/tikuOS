@@ -29,11 +29,11 @@
 /** @brief Result codes (0 = success, negative = failure). */
 typedef enum {
     TIKU_BIGBLOB_OK        =  0,
-    TIKU_BIGBLOB_ERR_PARAM = -1,  /**< NULL, empty, unaligned or too long   */
+    TIKU_BIGBLOB_ERR_PARAM = -1,  /**< NULL, len 0, unaligned or long name  */
     TIKU_BIGBLOB_ERR_NOENT = -2,  /**< the slot holds no blob               */
     TIKU_BIGBLOB_ERR_SPACE = -3,  /**< the blob does not fit the medium     */
-    TIKU_BIGBLOB_ERR_CRC   = -4,  /**< contents do not match the header     */
-    TIKU_BIGBLOB_ERR_IO    = -5,  /**< the backend refused a write or erase */
+    TIKU_BIGBLOB_ERR_CRC   = -4,  /**< the payload does not match its CRC   */
+    TIKU_BIGBLOB_ERR_IO    = -5,  /**< write/erase refused or readback bad  */
 } tiku_bigblob_err_t;
 
 /** @brief Longest blob name, excluding the terminator. */

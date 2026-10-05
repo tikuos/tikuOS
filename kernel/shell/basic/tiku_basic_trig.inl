@@ -8,8 +8,8 @@
  * tiku_basic_trig.inl - SIN and COS via a 65-entry quarter-circle LUT.
  *
  * Q.3 fixed point in and out: reduce modulo 2*pi, reflect into the first
- * quadrant, then interpolate between samples.  Max error ~5e-4, inside Q.3
- * precision, for 130 bytes of rodata.  TAN is SIN/COS at the call site.
+ * quadrant, then interpolate between samples.  TAN is SIN/COS at the call
+ * site.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,10 +20,8 @@
 /* QUARTER-CIRCLE LUT                                                        */
 /*---------------------------------------------------------------------------*/
 
-/* sin_lut[i] = round(sin(i * pi / 128) * 1000) for i = 0..64.
- * 65 entries covers [0, pi/2]; reflection handles the other
- * quadrants.  Linear interpolation between samples gives ~5e-4 max
- * error, well within Q.3 precision (1e-3).  130 bytes of rodata. */
+/* sin_lut[i] = round(sin(i * pi / 128) * 1000) for i = 0..64: 65 entries
+ * cover [0, pi/2], and reflection handles the other quadrants. */
 static const int16_t basic_sin_lut[65] = {
        0,   25,   49,   74,   98,  122,  147,  171,
      195,  219,  243,  267,  290,  314,  337,  360,
@@ -45,7 +43,7 @@ static const int16_t basic_sin_lut[65] = {
  *
  * Reduces the argument modulo 2*pi, maps it to [0, pi/2] via the usual sign and
  * reflection identities, then linearly interpolates between two adjacent LUT
- * samples.  Negative arguments work naturally: SIN(-PI/2) = -1000.
+ * samples.  A negative argument reduces the same way: SIN(-PI/2) = -1000.
  *
  * @param angle_q3  Angle in radians, scaled by 1000.
  * @return          sin(angle) x 1000 (range -1000..+1000).

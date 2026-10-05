@@ -35,11 +35,12 @@ void tiku_shell_cmd_ping(uint8_t argc, const char *argv[]);
 uint8_t tiku_shell_cmd_ping_active(void);
 
 /**
- * @brief Per-tick service for the ping engine.
+ * @brief Per-tick service for a ping run; does nothing when none is active.
  *
- * Called once per shell poll tick while ping mode is active: matches the
- * reply the ICMP callback recorded, handles per-probe timeouts, and advances
- * to the next probe (or finishes the run).
+ * Prints the reply to the current probe or its timeout, then sends the next
+ * probe, or prints the summary and ends the run.
+ *
+ * @note The shell loop calls it once per poll tick.
  */
 void tiku_shell_cmd_ping_tick(void);
 

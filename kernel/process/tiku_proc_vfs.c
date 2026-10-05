@@ -7,9 +7,9 @@
  *
  * tiku_proc_vfs.c - VFS /proc subtree (process + driver observability).
  *
- * The dynamic sibling of /sys: the process registry, event-queue depth, the
- * catalog of startable processes and, when those drivers are built, live Wi-Fi
- * and Bluetooth status.  Node tables are regenerated on every _get() call.
+ * Shows the process registry, event-queue depth, the catalog of startable
+ * processes and, when built, Wi-Fi, Bluetooth and worker-thread status.
+ * tiku_proc_vfs_get() rebuilds the node tables on every call.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -25,12 +25,10 @@
 #include <stdio.h>
 
 /*
- * The /proc/wifi subtree is only compiled when a wireless driver is
- * present.  The interface header lives in interfaces/wireless/
- * regardless, but the readers below call tiku_wireless_status(),
- * which only links when a driver (the CYW43439, the ESP32-C61's radio)
- * provides the implementation.  PROC_WIFI_ENABLED gates both the readers
- * and the directory entry so a radio-less build carries no dead code.
+ * /proc/wifi is compiled only with a wireless driver (the CYW43439 or the
+ * ESP32-C61 radio): its readers call tiku_wireless_status(), which only a
+ * driver defines.  PROC_WIFI_ENABLED gates the readers and the directory
+ * entry.
  */
 #if (defined(TIKU_DRV_WIFI_CYW43_ENABLE) && TIKU_DRV_WIFI_CYW43_ENABLE) || \
     (defined(TIKU_DRV_WIFI_ESP_ENABLE) && TIKU_DRV_WIFI_ESP_ENABLE)
@@ -41,10 +39,9 @@
 #endif
 
 /*
- * The /proc/bt subtree mirrors /proc/wifi but pulls from the radio under
- * the BLE host stack (the CYW43's BT extension, the ESP32-C61's controller)
- * via the driver-agnostic tiku_bt API, so non-BT builds get no /proc/bt
- * directory at all.
+ * /proc/bt is compiled only with a Bluetooth driver (the CYW43's BT
+ * extension or the ESP32-C61's controller); its readers call the tiku_bt
+ * API.  PROC_BT_ENABLED gates the readers and the directory entry.
  */
 #if (defined(TIKU_DRV_WIFI_CYW43_BT_ENABLE) && TIKU_DRV_WIFI_CYW43_BT_ENABLE) \
     || (defined(TIKU_DRV_BLE_ESP_ENABLE) && TIKU_DRV_BLE_ESP_ENABLE)
@@ -89,13 +86,11 @@
 /*
  * Static storage for the /proc VFS tree, rebuilt from scratch by
  * tiku_proc_vfs_get() on each call so it reflects the registry at that
- * moment.  The tables change at run time, so they cannot be const.
+ * moment.
  *
- * They are TIKU_RETAINED, not TIKU_DURABLE: rebuilt on every call, they
- * gain nothing from power-cycle durability.  On MSP430 the grade is
- * MPU-protected FRAM, which keeps the tables off the small SRAM, so the
- * rebuild writes them inside an MPU unlock window; on every other port it
- * is SRAM.
+ * The tables are TIKU_RETAINED.  On MSP430 that grade is MPU-protected FRAM,
+ * which keeps the tables out of the small SRAM, and the rebuild writes them
+ * inside an MPU unlock window; on every other port it is SRAM.
  *
  * Layout (a fully populated example):
  *   proc_root ("proc", DIR)
@@ -129,9 +124,10 @@ static TIKU_RETAINED tiku_vfs_node_t
     proc_children[TIKU_PROCESS_MAX + PROC_FIXED_KIDS];
 
 /*
- * Directory names for the pid and catalog subdirectories.  String literals
- * only, so this is const and never rewritten; indexed by pid for processes and
- * reused by index for catalog entries.
+ * Directory names "0".."7", indexed by pid for process directories and by
+ * slot for catalog entries.  This table, readers[] and catalog_name_readers[]
+ * are written out for 8 slots, the value of TIKU_PROCESS_MAX and
+ * TIKU_PROCESS_CATALOG_MAX.
  */
 static const char * const pid_names[] = {
     "0", "1", "2", "3", "4", "5", "6", "7"
@@ -149,17 +145,12 @@ static TIKU_RETAINED tiku_vfs_node_t
 /*---------------------------------------------------------------------------*/
 
 /*
- * Each read handler needs to know which pid it serves, but the VFS read
- * signature is int(char *, size_t) with no context pointer.  A macro
- * therefore generates one handler per pid, resolved at build time for
- * zero runtime overhead.
+ * The VFS read signature, int(char *, size_t), carries no context pointer, so
+ * a macro generates one handler per pid.
  *
- * Every generator below but PROC_READ_PID resolves its slot with
- * tiku_process_get(idx), which returns NULL for an empty or invalid slot.
- * Each such handler renders a safe placeholder ("(none)" or "0") on NULL,
- * so a read that races a process exit never dereferences a stale pointer.
- * All output is one line terminated by '\n'.  Handlers only read, so they
- * need no MPU unlock.
+ * Every generator below but PROC_READ_PID looks its slot up with
+ * tiku_process_get(idx) and renders "(none)" or "0" for an empty slot.  Each
+ * handler writes one line ending in '\n' and writes no NVM.
  */
 
 /*
@@ -190,9 +181,9 @@ static TIKU_RETAINED tiku_vfs_node_t
     }
 
 /*
- * Generate proc_read_pid_<idx>(): backs /proc/<idx>/pid.  The one reader that
- * does not consult the registry -- the pid is the slot index baked in at macro
- * expansion, so it is right even for an empty slot.
+ * Generate proc_read_pid_<idx>(): backs /proc/<idx>/pid.  Prints the slot
+ * index fixed at macro expansion, with no registry lookup, so an empty slot
+ * also reads its index.
  */
 #define PROC_READ_PID(idx)                                                  \
     static int proc_read_pid_##idx(char *buf, size_t max)                   \
@@ -247,7 +238,8 @@ static TIKU_RETAINED tiku_vfs_node_t
 
 /*
  * Generate proc_read_wake_<idx>(): backs /proc/<idx>/wake_count.  Renders how
- * many times the scheduler has dispatched this process; "0" for an empty slot.
+ * many times the scheduler has called the thread since its last start, modulo
+ * 65536; "0" for an empty slot.
  */
 #define PROC_READ_WAKE(idx)                                                 \
     static int proc_read_wake_##idx(char *buf, size_t max)                  \
@@ -318,8 +310,7 @@ PROC_READERS(7)
 
 /*
  * Per-pid bundle of read-handler pointers, one field per file under
- * /proc/<pid>/.  build_pid_files() copies these into the node table, which is
- * why the generated handlers are gathered into an indexable struct.
+ * /proc/<pid>/.  build_pid_files() copies them into the node table.
  */
 typedef struct {
     tiku_vfs_read_fn name;
@@ -352,9 +343,9 @@ typedef struct {
 }
 
 /*
- * Per-pid reader lookup table, indexed by pid; const and flash-resident.  The
- * pid-to-handler binding is fixed at build time and only which rows get a
- * directory varies at run time.
+ * Per-pid reader lookup table, indexed by pid, const.  The pid-to-handler
+ * binding is fixed at build time; only which rows get a directory varies at
+ * run time.
  */
 static const proc_readers_t readers[TIKU_PROCESS_MAX] = {
     READERS_ENTRY(0), READERS_ENTRY(1), READERS_ENTRY(2), READERS_ENTRY(3),
@@ -388,8 +379,7 @@ static int proc_read_count(char *buf, size_t max)
 /**
  * @brief Read handler for /proc/queue/length.
  *
- * Renders how many events are pending in the global queue.  A persistently high
- * value against /proc/queue/space points at a process not draining its events.
+ * Renders how many events are pending in the global queue.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -403,9 +393,9 @@ static int proc_read_queue_length(char *buf, size_t max)
 /**
  * @brief Read handler for /proc/queue/space.
  *
- * Renders the number of free slots remaining in the global event
- * queue as a decimal line.  "0\n" means the queue is full and the
- * next tiku_process_post() will be dropped.
+ * Renders the number of free slots in the global event queue as a decimal
+ * line.  User-range posts are refused once it reads TIKU_QUEUE_RESERVE or
+ * less, and every post at 0.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -419,9 +409,8 @@ static int proc_read_queue_space(char *buf, size_t max)
 /**
  * @brief Read handler for /proc/queue/dropped.
  *
- * The lifetime count of events refused because the queue or the user budget was
- * full.  A growing value is the tell for overflow bugs that are otherwise
- * silent, since a failed post returns 0 and most callers ignore it.
+ * Renders tiku_process_queue_dropped(): posts and polls refused since boot
+ * because the queue, or the share open to user events, was full.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -433,10 +422,10 @@ static int proc_read_queue_dropped(char *buf, size_t max)
 }
 
 /**
- * /proc/queue directory table — event-queue depth views.
+ * /proc/queue directory table: event-queue depth views.
  *
- * const, flash-resident, referenced from proc_children[] as the
- * "queue" directory's children in tiku_proc_vfs_get().
+ * tiku_proc_vfs_get() attaches it as the "queue" directory's children with a
+ * literal count of 3, which must match the entries here.
  */
 static const tiku_vfs_node_t proc_queue_children[] = {
     { "length",  TIKU_VFS_FILE, proc_read_queue_length,  NULL, NULL, 0 },
@@ -448,13 +437,10 @@ static const tiku_vfs_node_t proc_queue_children[] = {
 /* /proc/wifi READERS                                                        */
 /*---------------------------------------------------------------------------*/
 /*
- * Each reader below snapshots tiku_wireless_status() on demand and
- * projects a single field into text.  The status call copies the
- * driver's cached state, so reading several wifi files back-to-back
- * is fine — there is no shared cached snapshot.
- * When the radio is down (status returns non-zero) or not joined,
- * every reader emits a benign placeholder ("down", "0" or an empty
- * line) so callers never have to special-case the offline state.
+ * Each reader below calls tiku_wireless_status(), which copies the driver's
+ * cached state, and prints one field of it.  When the call fails (radio
+ * down) a reader prints "down", "0" or an empty line; ssid and rssi do the
+ * same while the link is not joined.
  */
 #if PROC_WIFI_ENABLED
 
@@ -508,9 +494,9 @@ static int proc_wifi_read_link(char *buf, size_t max)
 /**
  * @brief Read handler for /proc/wifi/ssid.
  *
- * Only produced while joined with a non-zero length, since a stored SSID means
- * nothing otherwise.  The on-air SSID is not NUL-terminated and may hold
- * arbitrary bytes, so it is copied bounded with non-printables replaced.
+ * Prints the joined SSID, or an empty line unless joined with a non-zero
+ * length.  The SSID is not NUL-terminated and may hold any byte: at most 32
+ * are copied, and each non-printable byte prints as '.'.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -540,8 +526,8 @@ static int proc_wifi_read_ssid(char *buf, size_t max)
  * @brief Read handler for /proc/wifi/rssi.
  *
  * The joined AP's signal strength in dBm.  Reads 0 when the status call fails
- * or the link is not joined, RSSI being polled only while associated -- 0 is
- * also the not-yet-polled sentinel.
+ * or the link is not joined; the driver polls RSSI only while associated,
+ * and 0 also means it has not polled since joining.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -580,9 +566,9 @@ static int proc_wifi_read_last_scan_ms(char *buf, size_t max)
 /**
  * @brief Read handler for /proc/wifi/last_join_ms.
  *
- * Renders the duration of the last completed join attempt in
- * milliseconds, mirroring last_scan_ms but using last_join_ticks.
- * "0\n" when the status call fails or no join has completed yet.
+ * Renders the duration of the last completed join attempt in milliseconds,
+ * converted from last_join_ticks.  "0\n" when the status call fails or
+ * before the first join completes.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -598,9 +584,8 @@ static int proc_wifi_read_last_join_ms(char *buf, size_t max)
 }
 
 /*
- * /proc/wifi directory table: live, read-only radio status views.  const and
- * flash-resident, built only with the driver, and attached in _get() where its
- * entry count is derived with sizeof.
+ * /proc/wifi directory table: read-only radio status views, built only with
+ * the driver and attached in _get(), which counts its entries with sizeof.
  */
 static const tiku_vfs_node_t proc_wifi_children[] = {
     { "mac",          TIKU_VFS_FILE, proc_wifi_read_mac,          NULL, NULL, 0 },
@@ -642,8 +627,8 @@ static int proc_bt_read_bd_addr(char *buf, size_t max)
  * @brief Read handler for /proc/bt/ready.
  *
  * Renders "1\n" once BT bring-up has completed and the stack is ready
- * for HCI traffic (tiku_bt_is_ready()), "0\n" before that.  The
- * bd_addr/version nodes only return real data once this reads "1".
+ * for HCI traffic (tiku_bt_is_ready()), "0\n" before that.  bd_addr and
+ * version print "?" until bring-up has cached their values.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -741,9 +726,8 @@ static int proc_bt_read_version(char *buf, size_t max)
 }
 
 /*
- * /proc/bt directory table: live, read-only Bluetooth status views.  const and
- * flash-resident, built only with the driver, and attached in _get() where its
- * entry count is derived with sizeof.
+ * /proc/bt directory table: read-only Bluetooth status views, built only with
+ * the driver and attached in _get(), which counts its entries with sizeof.
  */
 static const tiku_vfs_node_t proc_bt_children[] = {
     { "bd_addr",     TIKU_VFS_FILE, proc_bt_read_bd_addr,     NULL, NULL, 0 },
@@ -800,9 +784,8 @@ PROC_READ_CATALOG_NAME(6)
 PROC_READ_CATALOG_NAME(7)
 
 /*
- * Catalog-name reader lookup table, indexed by catalog slot; const and
- * flash-resident.  _get() reads it to wire the name file inside each catalog
- * entry directory.
+ * Catalog-name reader lookup table, indexed by catalog slot.  _get() reads it
+ * to wire the name file inside each catalog entry directory.
  */
 static const tiku_vfs_read_fn catalog_name_readers[PROC_CATALOG_VFS_MAX] = {
     proc_read_catname_0, proc_read_catname_1,
@@ -812,9 +795,8 @@ static const tiku_vfs_read_fn catalog_name_readers[PROC_CATALOG_VFS_MAX] = {
 };
 
 /*
- * Backing nodes for each catalog entry's file children.  The inner dimension is
- * 1 because an entry currently exposes only its name.  RETAINED grade, written
- * inside the _get() unlock window.
+ * Backing nodes for each catalog entry's file children: one file, its name.
+ * RETAINED grade, written inside the _get() unlock window.
  */
 static TIKU_RETAINED tiku_vfs_node_t
     catalog_entry_files[PROC_CATALOG_VFS_MAX][1];

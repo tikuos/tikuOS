@@ -7,9 +7,9 @@
  *
  * tiku_ble_serial.h - driver-agnostic "serial port over BLE" facade.
  *
- * Advertise as a connectable peripheral exposing a byte pipe (the Nordic UART
- * Service layout), report when a central subscribes, and push or pull bytes:
- * the wireless twin of a UART, with no HCI, L2CAP or ATT in the caller's view.
+ * Advertises as a connectable peripheral with a byte pipe (the Nordic UART
+ * Service layout), reports when a central subscribes, and sends and receives
+ * bytes.  Callers see no HCI, L2CAP or ATT.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -26,9 +26,9 @@ extern "C" {
 /**
  * @brief 1 when a BLE-serial backend is compiled in, 0 otherwise.
  *
- * The build sets TIKU_HAS_BLE for the EM9305.  The driver tests keep this right
- * for a caller that includes the header without the Makefile's -D (e.g. a unit
- * build), and select Nordic's FLPR controller, which has no TIKU_HAS_BLE.
+ * The build sets TIKU_HAS_BLE for the EM9305.  Without that -D (e.g. a unit
+ * build) TIKU_DRV_BLE_EM9305_ENABLE also gives 1, and the TIKU_FLPR_ENABLE
+ * check selects Nordic's FLPR controller.
  */
 #if (defined(TIKU_HAS_BLE) && (TIKU_HAS_BLE + 0)) ||                          \
     (defined(TIKU_DRV_BLE_EM9305_ENABLE) && (TIKU_DRV_BLE_EM9305_ENABLE + 0)) \
@@ -65,8 +65,8 @@ int tiku_ble_serial_start(const char *name);
 void tiku_ble_serial_stop(void);
 
 /**
- * @brief 1 when a central is connected and subscribed to notifications, i.e.
- *        it is safe to send.  Pumps the stack as a side effect, so a poll loop
+ * @brief 1 when a central is connected and subscribed to notifications, so
+ *        send() reaches it.  Pumps the stack as a side effect, so a poll loop
  *        on this keeps the link serviced.
  *
  * The EM9305 backend also waits 5/8 s after a fresh subscribe, since

@@ -55,7 +55,7 @@ typedef enum {
 typedef enum {
     TIKU_LAYOUT_PHASE_NONE         = 0,
     TIKU_LAYOUT_PHASE_REWRITING    = 1, /**< authorisation used, not finished */
-    TIKU_LAYOUT_PHASE_PROVISIONING = 2  /**< owned blank region, no store yet */
+    TIKU_LAYOUT_PHASE_PROVISIONING = 2  /**< owned blank region with no store */
 } tiku_layout_phase_t;
 
 /** @brief Results and receipts.  Receipts are stored, so never renumbered. */
@@ -204,8 +204,8 @@ typedef struct {
     tiku_nvm_backend_t region;  /**< base and size; write is not used     */
     int  (*write)(void *ctx, size_t off, const void *src, size_t len);
     void  *write_ctx;
-    uint32_t default_tier;
-    uint32_t step;
+    uint32_t default_tier;      /**< NVM tier bytes with no record      */
+    uint32_t step;              /**< knob step and store locate step    */
     int (*random)(void *ctx, uint8_t *out, size_t len); /**< new identities */
     void *random_ctx;
     /** The durable image as last persisted, searched only when the record in

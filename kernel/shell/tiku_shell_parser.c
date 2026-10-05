@@ -38,9 +38,8 @@ static const tiku_shell_cmd_t *cmd_table = (void *)0;
 /**
  * @brief Maximum nesting depth for alias-of-alias expansion.
  *
- * Bounds the mutual recursion between dispatch_alias_body() and execute_one().
- * Realistic compositions chain one or two further aliases; deeper nests are
- * rejected cleanly rather than growing the C stack unbounded.
+ * Bounds the mutual recursion between dispatch_alias_body() and execute_one(),
+ * each level of which holds a body copy and an argv array on the stack.
  */
 #define ALIAS_DEPTH_MAX 4
 
@@ -79,18 +78,13 @@ cli_strcmp(const char *a, const char *b)
 static void execute_one(char *line);
 
 /**
- * @brief Expand and dispatch an alias body, one ';'-piece at a time.
+ * @brief Run an alias body, one ';'-separated piece at a time.
  *
- * Copies the body out of the durable alias table into a mutable stack buffer,
- * splits it on ';' and feeds each non-empty piece back through execute_one().
- * A piece may name another alias, which is why alias_depth guards recursion.
+ * Copies the body to a stack buffer, splits the copy on ';' and passes each
+ * non-empty piece, leading spaces skipped, to execute_one().  At
+ * ALIAS_DEPTH_MAX nested aliases it prints an error and runs nothing.
  *
- * @note Splitting is destructive on the local copy only -- each ';' becomes a
- *       NUL and leading spaces are skipped -- so the caller's string is never
- *       modified.  Exceeding ALIAS_DEPTH_MAX refuses with a message and
- *       executes nothing.
- * @param body  NUL-terminated alias body (caller retains ownership;
- *              not modified).
+ * @param body  NUL-terminated alias body; not modified
  */
 static void
 dispatch_alias_body(const char *body)
@@ -123,7 +117,7 @@ dispatch_alias_body(const char *body)
                 break;
             }
         }
-        /* Skip leading whitespace on each piece */
+        /* Skip leading spaces on each piece */
         while (*p == ' ') {
             p++;
         }

@@ -8,8 +8,8 @@
  * tiku_mpu.c - MPU write-protection wrappers (platform-independent).
  *
  * Orchestration only; every register access goes through tiku_mpu_arch_*.  The
- * default is read+execute with no write, so code explicitly unlocks NVM, writes
- * and relocks -- see tiku_mpu_unlock_nvm() for what an unbracketed store does.
+ * default is read+execute with no write, so code unlocks NVM, writes and
+ * relocks; the fault-behaviour comment below lists what a stray store does.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -25,21 +25,21 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Initialize MPU — configure boundaries and default protection
+ * @brief Initialize the MPU: the port's setup, then default protection.
  *
- * First sets up the segment boundaries so the MPU knows which
- * address ranges belong to each segment, then sets the default
- * protection policy (read+execute, no write on all segments).
+ * First the port's setup, tiku_mpu_arch_init_segments(), then the default
+ * policy, TIKU_MPU_DEFAULT_SAM: read and execute without write on every
+ * segment but segment 3 of MSP430 parts with HIFRAM.
  */
 void tiku_mpu_init(void)
 {
     tiku_mpu_arch_init_segments();
     tiku_mpu_arch_set_default_protection();
 #if defined(TIKU_MPU_NMI_ON_VIOLATION) && TIKU_MPU_NMI_ON_VIOLATION
-    /* A debug build (EXTRA_CFLAGS="-DTIKU_MPU_NMI_ON_VIOLATION=1") makes an
-     * MSP430 store outside the NVM window raise the SYSNMI violation handler
-     * instead of being dropped unreported (see the fault-behaviour contract
-     * below). */
+    /* With TIKU_MPU_NMI_ON_VIOLATION=1 (a debug build, set through
+     * EXTRA_CFLAGS) an MSP430 store outside the NVM window raises the SYSNMI
+     * violation handler; without it the store is dropped unreported (see the
+     * fault-behaviour comment below). */
     tiku_mpu_enable_violation_nmi();
 #endif
 }
@@ -55,7 +55,7 @@ void tiku_mpu_module_window_exec(int enable)
 }
 
 /**
- * @brief Set permissions on one segment
+ * @brief Set permissions on one segment.
  *
  * Delegates to the arch layer which handles the platform-specific
  * register encoding for setting per-segment permissions.
@@ -85,7 +85,7 @@ void tiku_mpu_set_permissions(tiku_mpu_seg_t seg, tiku_mpu_perm_t perm)
  */
 
 /**
- * @brief Unlock NVM for writing -- adds write permission to all segments.
+ * @brief Unlock NVM for writing: adds write permission to all segments.
  *
  * @return Previous protection state for later restoration.
  */
@@ -115,7 +115,7 @@ tiku_mem_err_t tiku_mpu_lock_nvm_status(uint16_t saved_state)
 }
 
 /**
- * @brief Execute a function with NVM unlocked and interrupts disabled
+ * @brief Execute a function with NVM unlocked and interrupts disabled.
  *
  * While NVM is unlocked an ISR could write it too, so interrupts stay masked
  * for the whole window and only @p fn can write NVM.
@@ -123,7 +123,8 @@ tiku_mem_err_t tiku_mpu_lock_nvm_status(uint16_t saved_state)
  * @param fn   Write function, called once inside the window
  * @param ctx  Passed to @p fn
  * @note Keep @p fn short: interrupts stay masked while it runs.  Split a long
- *       write into several scoped writes.
+ *       write into several scoped writes.  Interrupts are enabled on return,
+ *       whatever their state on entry.
  */
 void tiku_mpu_scoped_write(tiku_mpu_write_fn fn, void *ctx)
 {
@@ -161,8 +162,8 @@ void tiku_mpu_enable_violation_nmi(void)
  * the flags in software; this hands them to the VFS, shell and tests.  Ports
  * that latch nothing return 0.
  *
- * @return Bitmask of violated segments (platform-specific encoding).
- *         Zero means no violations have been recorded since last clear.
+ * @return Violation flags in the port's encoding, one bit per segment on
+ *         MSP430; zero when none has been recorded since the last clear.
  * @see tiku_mpu_clear_violation_flags()
  */
 uint16_t tiku_mpu_get_violation_flags(void)
@@ -171,7 +172,7 @@ uint16_t tiku_mpu_get_violation_flags(void)
 }
 
 /**
- * @brief Clear both the software latch and hardware violation flags.
+ * @brief Clear the recorded violation flags.
  *
  * Resets the latched violation record so that subsequent calls
  * to tiku_mpu_get_violation_flags() return zero until a new violation

@@ -33,17 +33,15 @@ read_line(char *buf, uint16_t cap)
     while (1) {
         int ch;
 #if TIKU_SHELL_CMD_SLIP
-        /* SLIP-aware read: route any frame bytes still trickling in from a
-         * prior BROWSE / HTTPGET$ TCP teardown into the IP stack instead of
-         * letting them land in the line editor as garbage and wedge the
-         * console; take only genuine keystrokes. */
+        /* tiku_shell_net_getc() hands frame bytes still arriving from an
+         * earlier BROWSE or HTTPGET$ connection to their channel and returns
+         * only keystrokes; it also kicks the watchdog. */
         ch = tiku_shell_net_getc();
         if (ch < 0) continue;
 #else
-        /* Non-SLIP builds have no net_getc to feed the check-in hang
-         * detector, so kick it here: a quiet INPUT wait is liveness, not a
-         * wedge.  Without this an idle INPUT warm-resets at
-         * TIKU_HANG_THRESHOLD_TICKS (~8 s at 128 Hz). */
+        /* The kick feeds the check-in hang detector, which otherwise
+         * warm-resets an idle INPUT after TIKU_HANG_THRESHOLD_TICKS (8 s at
+         * 128 Hz). */
         tiku_watchdog_kick();
         if (!tiku_shell_io_rx_ready()) continue;
         ch = tiku_shell_io_getc();

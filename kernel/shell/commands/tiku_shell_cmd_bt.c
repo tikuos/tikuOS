@@ -7,7 +7,8 @@
  *
  * tiku_shell_cmd_bt.c - "bt" command implementation.
  *
- * Glue to the public Bluetooth API; no driver state lives in shell code.
+ * Calls the public Bluetooth API (tiku_bt.h); an ESP32-C61 build also calls
+ * the BLE driver for status and power.  The command keeps no driver state.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -239,8 +240,7 @@ static void bt_scan(uint8_t argc, const char *argv[])
                      rc, tiku_bt_scan_count());
         return;
     }
-    /* Defaults: active scan, 100 ms interval, 50 ms on-window
-     * (50% duty). Roughly matches nRF Connect's default. */
+    /* Active scan, 100 ms interval, 50 ms window (50% duty). */
     rc = tiku_bt_scan_start(1U, 100U, 50U);
     if (rc == 0) {
         SHELL_PRINTF("bt: scan started (active, 100/50 ms)\n");
@@ -318,7 +318,10 @@ static void bt_connections(void)
 
 /* ---- GATT client helpers ------------------------------------------------- */
 
-/** Parse "aa:bb:cc:dd:ee:ff" into 6 MSB-first bytes. Returns 0 on success. */
+/**
+ * @brief Parse "aa:bb:cc:dd:ee:ff" into 6 MSB-first bytes.
+ * @return 0 on success, -1 on a malformed address
+ */
 static int parse_mac(const char *s, uint8_t out[6])
 {
     uint8_t i;
@@ -343,7 +346,10 @@ static int parse_mac(const char *s, uint8_t out[6])
     return 0;
 }
 
-/** Parse a 0xNNNN or decimal NNN into uint16_t. Returns 0 on success. */
+/**
+ * @brief Parse 0x-prefixed hex or decimal @p s, at most 0xFFFF, into *out.
+ * @return 0 on success, else -1
+ */
 static int parse_u16(const char *s, uint16_t *out)
 {
     uint32_t v = 0UL;
@@ -364,7 +370,7 @@ static int parse_u16(const char *s, uint16_t *out)
     return 0;
 }
 
-/** Look up connection #N (1-based). Returns the handle or 0xFFFF on miss. */
+/** @brief Handle of connection @p slot_1based (1-based), or 0xFFFF. */
 static uint16_t conn_handle_for_slot(uint8_t slot_1based)
 {
     tiku_bt_connection_t conns[TIKU_BT_CONN_MAX];
@@ -373,8 +379,13 @@ static uint16_t conn_handle_for_slot(uint8_t slot_1based)
     return conns[slot_1based - 1U].handle;
 }
 
-/** Pick the conn handle for an optional shell arg "N" (1-based) or
- *  default to first active link. Prints + returns 0xFFFF on error. */
+/**
+ * @brief Handle of the 1-based link slot in argv[@p pos], or of the first
+ *        link when that argument is absent.
+ *
+ * @return The handle, or 0xFFFF when there is no such link; an unparsable
+ *         slot also prints a message
+ */
 static uint16_t pick_conn_handle(uint8_t argc, const char *argv[], uint8_t pos)
 {
     if (argc <= pos) {
@@ -405,8 +416,8 @@ static void bt_connect_cmd(uint8_t argc, const char *argv[])
     }
     /* If it looks like a MAC, parse direct; else treat as scan slot. */
     if (parse_mac(argv[2], addr) == 0) {
-        /* Default to random addr type unless the user explicitly
-         * appends ' public'. Most modern BLE devices use random. */
+        /* A BD_ADDR is taken as a random address unless "public" follows
+         * it. */
         addr_type = 1U;
         if (argc >= 4U && str_eq(argv[3], "public")) addr_type = 0U;
     } else {

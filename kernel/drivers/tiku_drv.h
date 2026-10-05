@@ -76,8 +76,8 @@ typedef struct tiku_drv {
     /** Called once at boot from tiku_drv_init_all(). Required. */
     int (*init)(void);
 
-    /** Optional teardown. NULL if the driver has nothing to undo
-     *  (e.g. compute-only drivers that just register VFS nodes). */
+    /** Optional teardown, NULL when the driver has nothing to undo.  The
+     *  registry does not call it. */
     int (*deinit)(void);
 
     /** Optional VFS node array, mounted at /dev/<class>/<vfs_mount>/.  NULL

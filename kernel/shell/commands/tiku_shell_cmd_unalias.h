@@ -16,9 +16,10 @@
 #include <stdint.h>
 
 /**
- * @brief "unalias" command — remove a shell alias.
+ * @brief "unalias" command: `unalias <name>` removes a shell alias.
  *
- * The slot is freed in durable memory, so later boots do not see the alias.
+ * The slot is freed in durable memory, so the alias stays gone after a
+ * reboot.
  */
 void tiku_shell_cmd_unalias(uint8_t argc, const char *argv[]);
 

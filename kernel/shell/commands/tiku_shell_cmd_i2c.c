@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_i2c.c - "i2c" command implementation.
  *
- * Surfaces the I2C bus driver for sensor bring-up: scan, read and write.
- * Addresses parse as decimal or 0x hex, so a datasheet value works either
- * way, and the bus initialises lazily on first use.
+ * Scan, read and write on the I2C bus.  Addresses, counts and bytes parse as
+ * decimal or 0x-prefixed hex, and every subcommand first initialises the bus
+ * at standard speed (100 kHz).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,9 +18,8 @@
 #include <kernel/shell/tiku_shell.h>
 #include <interfaces/bus/tiku_i2c_bus.h>
 
-/* Cap the read and write buffers so the stack frame stays small; a full
- * read line (3 chars per byte + newline = 49 chars at 16) fits an
- * 80-column terminal. */
+/* Largest read or write in bytes; both buffers are on the stack.  A read of
+ * 16 bytes prints as one 49-character line. */
 #ifndef TIKU_SHELL_I2C_MAX_BYTES
 #define TIKU_SHELL_I2C_MAX_BYTES 16
 #endif
@@ -30,7 +29,7 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Compare two NUL-terminated strings.
+ * @brief 1 if NUL-terminated strings @p a and @p b are equal, else 0.
  */
 static uint8_t
 i2c_streq(const char *a, const char *b)
@@ -93,8 +92,8 @@ i2c_parse_u8(const char *s, uint8_t *out)
 }
 
 /**
- * @brief Idempotent lazy init at standard speed.  Returns 0 on
- *        success, -1 on failure (with a diagnostic already printed).
+ * @brief Initialise the bus at standard speed, reprogramming it on every
+ *        call.  Returns 0, or -1 after printing a diagnostic.
  */
 static int
 i2c_ensure_init(void)
@@ -113,12 +112,10 @@ i2c_ensure_init(void)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Probe the standard 7-bit address range with tiku_i2c_probe();
- *        print the list of responders.
+ * @brief Probe 0x08..0x77 with tiku_i2c_probe() and print each address that
+ *        answers.
  *
- * Uses the dedicated address-probe primitive (an address-only ACK check),
- * not a zero-length write, which the bus layer rejects (write requires
- * len >= 1).  Addresses 0x00..0x07 and 0x78..0x7F are reserved and skipped.
+ * Addresses 0x00..0x07 and 0x78..0x7F are reserved and skipped.
  */
 static void
 i2c_scan(void)

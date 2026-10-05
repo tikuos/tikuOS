@@ -73,8 +73,6 @@ uint8_t tiku_common_clz(uint16_t val);
 /**
  * @brief Return the minimum of two integers.
  *
- * Each argument is evaluated once.
- *
  * @param a  First value.
  * @param b  Second value.
  * @return   The smaller of @p a and @p b.
@@ -108,7 +106,8 @@ static inline int tiku_common_max(int a, int b)
  * @param hi   Upper bound (inclusive).
  * @return     Clamped value in [lo, hi].
  *
- * @pre lo <= hi (behaviour is undefined if lo > hi).
+ * @pre lo <= hi.  With lo > hi the result is @p lo when val < lo and @p hi
+ *      otherwise.
  */
 static inline int tiku_common_clamp(int val, int lo, int hi)
 {
@@ -120,8 +119,8 @@ static inline int tiku_common_clamp(int val, int lo, int hi)
 /**
  * @brief Byte-swap a 16-bit value (big-endian <-> little-endian).
  *
- * Converts between host order and network order for the protocol stacks.  A
- * double swap is the identity.
+ * Swaps the two bytes unconditionally; on a little-endian port this converts
+ * between host and network order.
  *
  * @param val  16-bit value to swap.
  * @return     Byte-swapped value.
@@ -138,12 +137,12 @@ static inline uint16_t tiku_common_bswap16(uint16_t val)
 /**
  * @brief Read the MCU's unique device ID.
  *
- * Copies up to @p len bytes of the hardware unique ID into @p buf.
- * The actual content is platform-specific (die record, serial number, etc.).
+ * Copies up to @p len bytes of the hardware unique ID into @p buf; its
+ * content and length are per port.
  *
- * @param buf  Destination buffer
- * @param len  Buffer size (max useful bytes is platform-dependent)
- * @return Number of bytes written
+ * @param buf  Destination buffer; NULL copies nothing
+ * @param len  Buffer size
+ * @return Number of bytes written; 0 for a NULL @p buf and on STM32N6
  */
 uint8_t tiku_common_unique_id(uint8_t *buf, uint8_t len);
 
@@ -152,6 +151,8 @@ uint8_t tiku_common_unique_id(uint8_t *buf, uint8_t len);
  *
  * MSP430 returns SYSRSTIV itself; every other port maps its reset flags onto
  * those codes, which /sys/boot decodes.
+ *
+ * @return SYSRSTIV-style code (always even)
  */
 uint16_t tiku_common_reset_reason(void);
 
@@ -161,8 +162,8 @@ uint16_t tiku_common_reset_reason(void);
 
 /**
  * @name LED forwards
- * tiku_common_ledN_*() calls tiku_led_*(N - 1) from interfaces/led/tiku_led.h;
- * new code calls those directly.
+ * tiku_common_ledN_*() expands to tiku_led_*(N - 1) from
+ * interfaces/led/tiku_led.h.
  * @{
  */
 #define tiku_common_led1_init()     tiku_led_init(0)

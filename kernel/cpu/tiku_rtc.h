@@ -8,8 +8,8 @@
  * tiku_rtc.h - wall-clock RTC API.
  *
  * A soft RTC over tiku_clock_seconds() plus a durable epoch baseline, so the
- * last set time survives a reset and a power cycle (the host build excepted).
- * One-second resolution; backs /sys/time.
+ * last set time survives a reset and a power cycle, except in the host test
+ * build.  One-second resolution; backs /sys/time.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -38,8 +38,8 @@ void tiku_rtc_init(void);
  * @brief Return current wall-clock seconds since the Unix epoch
  *        (or whatever epoch the caller last set).
  *
- * Equivalent to `epoch_base + (uptime - uptime_base)`. Returns 0 if
- * the RTC has never been set since first power-on.
+ * Equivalent to `epoch_base + (uptime - uptime_base)`.  Returns 0 while the
+ * gate is invalid or the baseline is 0, as before the first set.
  */
 uint32_t tiku_rtc_get_seconds(void);
 
@@ -59,8 +59,8 @@ void tiku_rtc_set_seconds(uint32_t epoch_seconds);
 int tiku_rtc_set_seconds_status(uint32_t epoch_seconds);
 
 /**
- * @brief True iff the RTC has been set at least once since the
- *        chip was first programmed.
+ * @brief True when the gate is valid and the baseline is non-zero, as after
+ *        any set to a non-zero time.
  */
 int tiku_rtc_is_set(void);
 
@@ -68,9 +68,8 @@ int tiku_rtc_is_set(void);
 /**
  * @brief Test-only hook: capture the wall clock and its persist gate.
  *
- * Lets the suite save state it is about to perturb.  @p epoch receives the
- * reconstructed clock, @p gate the raw magic word; either may be NULL.
- * Read-only, so no NVM write and no unlock.
+ * @p epoch receives the reconstructed clock and @p gate the raw gate word;
+ * either may be NULL.  Writes nothing to NVM.
  *
  * @param epoch  Out: current wall-clock seconds (NULL to skip)
  * @param gate   Out: raw persist-cell gate word (NULL to skip)

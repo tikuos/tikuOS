@@ -21,18 +21,18 @@
 /** Ctrl+C / ETX. */
 #define REPEAT_CANCEL    0x03
 
-/** Bound the loop count so a typo cannot lock the shell forever. */
+/** Largest <count> accepted; a larger one is refused. */
 #ifndef TIKU_SHELL_REPEAT_MAX_COUNT
 #define TIKU_SHELL_REPEAT_MAX_COUNT  1000U
 #endif
 
-/** Bound nested `repeat` so a runaway recipe cannot blow the
- *  small MSP430 stack via two ~80-byte buffers per frame. */
+/** Deepest `repeat` nesting accepted; each level holds two
+ *  TIKU_SHELL_REPEAT_CMD_MAX-byte buffers on the stack. */
 #ifndef TIKU_SHELL_REPEAT_DEPTH_MAX
 #define TIKU_SHELL_REPEAT_DEPTH_MAX  2
 #endif
 
-/** Single-frame budget for the joined command line. */
+/** Size of the joined command-line buffer, NUL included. */
 #ifndef TIKU_SHELL_REPEAT_CMD_MAX
 #define TIKU_SHELL_REPEAT_CMD_MAX    80
 #endif
@@ -40,7 +40,8 @@
 static uint8_t repeat_depth;
 
 /**
- * @brief Strict unsigned-decimal parse with cap at MAX_COUNT.
+ * @brief Parse @p s as a decimal of at most TIKU_SHELL_REPEAT_MAX_COUNT into
+ *        @p out; 1 on success, 0 for an empty, non-digit or larger value.
  */
 static uint8_t
 repeat_parse_count(const char *s, uint16_t *out)
@@ -127,7 +128,8 @@ tiku_shell_cmd_repeat(uint8_t argc, const char *argv[])
 
     repeat_depth++;
     for (i = 0; i < count; i++) {
-        /* Cancellation check before each iteration */
+        /* Before each pass, read one pending byte: Ctrl+C stops the run,
+         * and any other byte is discarded. */
         if (tiku_shell_io_rx_ready()) {
             int ch = tiku_shell_io_getc();
             if (ch == REPEAT_CANCEL) {

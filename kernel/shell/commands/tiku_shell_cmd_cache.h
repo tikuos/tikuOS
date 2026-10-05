@@ -24,6 +24,7 @@
  *
  * @param argc  Argument count
  * @param argv  "on", "off", "bench", "dma", or nothing for the state
+ * @note Defined only when PLATFORM_STM32N6 is set.
  */
 void tiku_shell_cmd_cache(uint8_t argc, const char *argv[]);
 

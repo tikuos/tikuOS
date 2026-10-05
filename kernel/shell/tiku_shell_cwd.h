@@ -15,7 +15,7 @@
 
 #include <stdint.h>
 
-/** Maximum path length for the working directory */
+/** Size of the working-directory buffer, NUL included */
 #define TIKU_SHELL_CWD_SIZE  48
 
 /**
@@ -25,7 +25,8 @@
 const char *tiku_shell_cwd_get(void);
 
 /**
- * @brief Set the current working directory.
+ * @brief Set the current working directory; NULL or a relative path is
+ *        ignored, and a longer path is cut to TIKU_SHELL_CWD_SIZE - 1.
  * @param path  Absolute path (must start with '/')
  */
 void tiku_shell_cwd_set(const char *path);
@@ -35,7 +36,7 @@ void tiku_shell_cwd_set(const char *path);
  *
  * Lexical only: an absolute path starts from '/', a relative one from the
  * cwd; ".." moves up one component (clamped at root), and "." and repeated
- * slashes are dropped.
+ * slashes are dropped.  A result longer than @p outsz - 1 is cut.
  *
  * @param input  User-supplied path (absolute or relative)
  * @param out    Output buffer for the resolved absolute path

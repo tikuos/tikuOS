@@ -8,8 +8,8 @@
  * tiku_shell_rules.c - reactive rule engine.
  *
  * A rule is a VFS path, an operator, a right-hand side and an action line.  A
- * comparison fires only on a false-to-true transition, which keeps the common
- * "on COND set-state" pattern idempotent; it is numeric where it can be.
+ * comparison fires on a false-to-true transition, so its action runs once per
+ * crossing, and compares as integers when both sides parse as integers.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -30,10 +30,10 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Fixed-size table of rule slots -- the whole state of the engine.
+ * @brief Fixed-size table of rule slots, the whole state of the engine.
  *
- * SRAM-only, so rules are lost across reset.  Lives in BSS, so every slot
- * starts zeroed and reads as TIKU_SHELL_RULE_FREE (== 0) with no init pass.
+ * Cleared at boot with .bss: rules are lost at reset, and every slot starts
+ * as TIKU_SHELL_RULE_FREE (0).
  */
 static tiku_shell_rule_t rule_table[TIKU_SHELL_RULES_MAX];
 
@@ -51,14 +51,12 @@ extern struct tiku_process tiku_shell_process;
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Strict signed-decimal parse with overflow guard.
+ * @brief Parse a signed decimal integer that fills the whole string.
  *
- * An optional sign then one or more digits, and nothing else -- no whitespace
- * skip, no trailing-garbage tolerance, no partial parse.  That strictness is
- * what lets the evaluator decide cleanly whether a reading is numeric.
+ * Accepts an optional sign and one or more digits, and nothing else: no
+ * spaces, no trailing text.  A value past LONG_MAX fails.  @p out is written
+ * only on success.
  *
- * @note Overflow is caught before it happens, so a value too large for a long
- *       is rejected rather than wrapping.  @p out is written only on success.
  * @param s    NUL-terminated candidate string (caller guarantees non-NULL)
  * @param out  Receives the parsed value on success; untouched on failure
  * @return 1 on success, 0 on parse error or overflow.
@@ -95,14 +93,11 @@ rules_parse_long(const char *s, long *out)
 }
 
 /**
- * @brief Copy a NUL-terminated string into a fixed field with a cap.
+ * @brief Copy a NUL-terminated string into a fixed-size field.
  *
- * Writes at most @p cap-1 characters plus the NUL, so @p dst is always
- * terminated on success.  Loads the path, value and action fields of a slot
- * while enforcing the per-field maxima.
+ * Writes at most @p cap - 1 characters and a NUL.  A source that does not fit
+ * returns 0 and leaves @p dst unterminated.
  *
- * @note Failure (a source longer than the field) returns 0 without guaranteeing
- *       termination; this is what surfaces as "path/value too long".
  * @param dst  Destination field
  * @param cap  Capacity of @p dst in bytes, including the NUL slot
  * @param src  NUL-terminated source string
@@ -130,10 +125,9 @@ rules_copy_field(char *dst, uint8_t cap, const char *src)
  * @brief Parse a comparison operator token.
  *
  * Maps the six textual operators (">", "<", ">=", "<=", "==", "!=") to the
- * matching tiku_shell_rule_op_t.  @p out is written only on a match.
+ * matching tiku_shell_rule_op_t; @p out is written only on a match.
+ * tiku_shell_rules_add_argv() handles "changed" before calling this.
  *
- * @note OP_CHANGED is not parsed here: "changed" uses a different grammar and
- *       is detected before this helper is reached.
  * @param s    Operator token (caller guarantees non-NULL)
  * @param out  Receives the matching operator enum on success
  * @return 1 on success, 0 if @p s is not one of the six known tokens.
@@ -153,13 +147,10 @@ rules_parse_op(const char *s, tiku_shell_rule_op_t *out)
 /**
  * @brief Evaluate the relation @p lhs OP @p rhs.
  *
- * Both sides go through rules_parse_long() first.  Ordering operators are
- * strictly numeric and false unless both sides parse; equality compares
- * numerically when both parse and falls back to strcmp otherwise.
+ * Ordering operators compare integers and are false unless both sides parse;
+ * == and != compare integers when both parse and text otherwise.  OP_CHANGED
+ * and an unknown operator return 0.
  *
- * @note That dual mode is what makes "/sys/power/policy == deep" compare
- *       text while "/dev/adc/temp > 40" compares magnitude.  OP_CHANGED and
- *       any unknown enum yield 0 defensively.
  * @param lhs  Left-hand value (the stripped VFS reading)
  * @param op   Comparison operator
  * @param rhs  Right-hand value (the rule's stored value field)
@@ -193,8 +184,7 @@ rules_evaluate(const char *lhs, tiku_shell_rule_op_t op, const char *rhs)
         }
         return (strcmp(lhs, rhs) != 0) ? 1 : 0;
     case TIKU_SHELL_RULE_OP_CHANGED:
-        /* OP_CHANGED is handled in the tick before reaching this
-         * helper; if it ever does, treat as "no match" defensively. */
+        /* rules_eval_one() handles OP_CHANGED before calling this. */
         return 0;
     }
     return 0;
@@ -217,8 +207,8 @@ rules_rearm(void)
     uint8_t i;
 
     /* The cached node decides an active rule's path:
-     *   - a node with a write handler is event-armed: watched, and evaluated
-     *     by tiku_shell_rules_on_vfs() rather than the poll tick.  When the
+     *   - a node with a write handler is event-armed: watched, evaluated by
+     *     tiku_shell_rules_on_vfs() and skipped by the poll tick.  When the
      *     watch table is full the watch is refused, and the rule stays on
      *     the poll tick;
      *   - a node without one is sensor-side and stays on the poll tick,
@@ -261,13 +251,10 @@ tiku_shell_rules_init(void)
 /**
  * @brief Register a rule in the first free slot.
  *
- * Claims the lowest-index free slot and copies the path, value and action into
- * its fixed fields, failing if any overflows.  The state field is written
- * last, so a field that does not fit leaves the slot free.
+ * Fills the lowest free slot and sets its state last, so a field that does
+ * not fit leaves the slot free.  A comparison already true fires on its first
+ * evaluation; a CHANGED rule's first evaluation records a baseline.
  *
- * @note last_match is zeroed so the rule starts un-edged: a comparison already
- *       true on the first tick still fires once, and a CHANGED rule baselines
- *       without firing.
  * @param path    VFS path the rule reads (must fit PATH_MAX-1)
  * @param op      Comparison operator (or OP_CHANGED)
  * @param value   Right-hand side, or "" for OP_CHANGED (must fit VALUE_MAX-1)
@@ -412,13 +399,10 @@ tiku_shell_rules_op_name(tiku_shell_rule_op_t op)
 /**
  * @brief Join argv tokens [start..argc-1] with single spaces into @p out.
  *
- * Reassembles the action portion of an "on" line for storage and later
- * re-tokenising.  One space between tokens, never leading or trailing, so
- * "led on 0" round-trips intact.
+ * Quotes the parser removed are not restored, so a quoted token holding
+ * spaces runs as several tokens.  A result that does not fit returns 0
+ * without writing past @p outsz.
  *
- * @note Any run of whitespace the user typed collapses to a single space, which
- *       is harmless for dispatch.  The bound is checked before every byte, so
- *       @p out is never overrun and is always terminated on success.
  * @param argc   Argument count from the parser
  * @param argv   Argument vector from the parser
  * @param start  Index of the first action token to include
@@ -456,13 +440,10 @@ rules_join_action(uint8_t argc, const char *argv[], uint8_t start,
 /**
  * @brief Parse, validate, and register a rule from "on" command argv.
  *
- * The full front end for "on": accepts "on <path> <op> <value> <command...>"
- * (at least 5 arguments) and "on changed <path> <command...>", joins the
- * trailing tokens into an action and hands it to tiku_shell_rules_add().
+ * Accepts "on <path> <op> <value> <command...>" and "on changed <path>
+ * <command...>", whose value starts empty and later holds the last reading.
+ * Every failure prints one line and returns -1; success prints nothing.
  *
- * @note In the change grammar the stored value starts empty, because the tick
- *       repurposes that field to hold the last-seen reading.  Every failure
- *       prints a targeted line and returns -1; success is silent.
  * @param argc  Argument count as produced by the shell parser
  * @param argv  Argument vector; argv[0] is the "on" command name
  * @return Slot id (>= 0) on success, -1 on any error (message printed).
@@ -485,8 +466,8 @@ tiku_shell_rules_add_argv(uint8_t argc, const char *argv[])
     }
 
     /* Disambiguate the two grammars.  "on changed PATH ACTION..." sets
-     * op = OP_CHANGED, path = argv[2], no RHS value (the value field
-     * is repurposed by the tick to hold the last seen reading). */
+     * op = OP_CHANGED, path = argv[2] and no RHS value; the value field
+     * holds the last reading. */
     if (strcmp(argv[1], "changed") == 0) {
         if (argc < 4) {
             SHELL_PRINTF("Usage: on changed <path> <command...>\n");
@@ -494,7 +475,7 @@ tiku_shell_rules_add_argv(uint8_t argc, const char *argv[])
         }
         op           = TIKU_SHELL_RULE_OP_CHANGED;
         path         = argv[2];
-        value        = "";              /* baseline filled on first tick */
+        value        = "";              /* first evaluation stores it */
         action_start = 3;
     } else {
         if (argc < 5) {
@@ -529,11 +510,10 @@ tiku_shell_rules_add_argv(uint8_t argc, const char *argv[])
 }
 
 /**
- * @brief Copy r->action into actionbuf so the parser can tokenise in place.
+ * @brief Copy r->action into actionbuf, which the parser may then tokenise.
  *
- * tiku_shell_parser_execute() tokenises destructively, so a rule's action must
- * never be passed to it directly -- that would corrupt the stored rule.  The
- * copy stops at the source NUL and force-terminates the destination.
+ * tiku_shell_parser_execute() writes NULs into the line it runs; given
+ * r->action itself, it would cut the stored action at its first space.
  *
  * @param actionbuf  Destination scratch buffer (ACTION_MAX bytes)
  * @param r          Rule whose action is to be copied
@@ -552,45 +532,29 @@ rules_copy_action(char *actionbuf, const tiku_shell_rule_t *r)
 }
 
 /*
- * Trigger paths: poll tick vs. watch event.
+ * A rule is evaluated on one of two paths, both through rules_eval_one():
  *
- * Two ways a rule gets evaluated, sharing one evaluator (rules_eval_one) so the
- * semantics are identical:
+ *   - poll (tiku_shell_rules_tick(), each shell poll): rules on nodes without
+ *     a write handler, whose values change without tiku_vfs_write(); rules
+ *     whose path did not resolve, retried each pass; and rules whose watch
+ *     the full watch table refused.
  *
- *   - POLL (tiku_shell_rules_tick, once per shell tick): sensor-side rules --
- *     nodes without a write handler, whose values change in the world rather
- *     than through tiku_vfs_write() -- plus rules whose path did not resolve at
- *     arm time, retried each pass, and rules whose watch the full table
- *     refused.  Event-armed rules are skipped, so they cost nothing per tick,
- *     side-effectful reads such as ADC conversions included.
+ *   - event (tiku_shell_rules_on_vfs(), on TIKU_EVENT_VFS): rules on a
+ *     writable node the shell process watches.  Every successful write posts
+ *     the event, so a value written and changed back between polls is seen.
  *
- *   - EVENT (tiku_shell_rules_on_vfs, on TIKU_EVENT_VFS): rules whose node is
- *     writable and watched.  Every successful write posts the event and the
- *     matching rules evaluate at once, so write-to-reaction latency is one
- *     dispatch rather than up to a full poll period, and a value that pulses
- *     between ticks is still seen.
- *
- * Evaluation (both paths): read the path into a stack buffer, strip the
- * trailing '\n'/'\r'/' ' run, and on a read failure clear last_match so the
- * rule re-baselines when the path returns.  OP_CHANGED baselines on first
- * evaluation then fires on any difference; comparison ops fire only on a
- * false->true edge.  A firing rule dispatches its action synchronously through
- * a scratch copy, exactly as if typed at the prompt.
- *
- * Loop note: an action that writes its own watched node re-enters through a
- * fresh event rather than waiting a tick.  Edge semantics still bound it, but
- * an action that alternates its own trigger value oscillates at event speed.
+ * An action that writes its own rule's node is evaluated again on the next
+ * event dispatch: a `changed` rule whose action changes the value fires on
+ * every dispatch until the rule is deleted.
  */
 /**
- * @brief Evaluate one rule.
+ * @brief Evaluate one active rule and run its action if it fires.
  *
- * Shared by the poll tick and the event path so both have byte-identical
- * semantics: read the path, strip the trailing newline run, baseline-or-compare
- * for CHANGED, edge-detect for comparison ops, dispatch through a scratch copy.
+ * Reads the node, cut to VALUE_MAX - 1 bytes, and strips trailing newlines and
+ * spaces; a failed read clears last_match.  A CHANGED rule fires when the
+ * reading differs from the stored one, a comparison on a false-to-true edge.
  *
- * @note readbuf and actionbuf (VALUE_MAX + ACTION_MAX bytes) live on this
- *       function's stack frame for the duration of the call.
- * @param r  An ACTIVE rule slot
+ * @param r  An active rule slot
  */
 static void
 rules_eval_one(tiku_shell_rule_t *r)
@@ -601,11 +565,9 @@ rules_eval_one(tiku_shell_rule_t *r)
     int n;
     uint8_t fire;
 
-    /* By-node read whenever the path resolved at arm time — every
-     * event-armed rule, and every resolvable sensor rule — which
-     * skips the tree walk on the reactive hot path.  r->node == NULL
-     * means the path did not resolve at arm: fall back to a by-path
-     * read so the resolution is retried for paths that appear later. */
+    /* A rule whose path resolved at arm time reads its cached node, with no
+     * tree walk.  r->node == NULL means it did not resolve: the read goes by
+     * path, which resolves it again on every pass. */
     if (r->node != NULL) {
         n = tiku_vfs_read_node(r->node, readbuf, sizeof(readbuf) - 1);
     } else {
@@ -629,11 +591,10 @@ rules_eval_one(tiku_shell_rule_t *r)
     }
 
     if (r->op == TIKU_SHELL_RULE_OP_CHANGED) {
-        /* CHANGED: value[] holds the last-seen reading.  First
-         * evaluation after add (or after a read failure) just
-         * baselines without firing; subsequent evaluations fire
-         * whenever the reading differs from the stored baseline,
-         * then update the baseline. */
+        /* CHANGED: value[] holds the last-seen reading.  The first
+         * evaluation after an add or a failed read stores the reading
+         * without firing; a later one that differs stores the new
+         * reading and then runs the action. */
         if (r->last_match == 0) {
             for (k = 0; k < TIKU_SHELL_RULES_VALUE_MAX - 1; k++) {
                 r->value[k] = readbuf[k];
@@ -686,7 +647,7 @@ tiku_shell_rules_tick(void)
         }
 
         /* Event-armed rules (writable node, watched) are evaluated
-         * by tiku_shell_rules_on_vfs() the moment a write lands;
+         * by tiku_shell_rules_on_vfs() on the event each write posts;
          * the poll path carries every other rule. */
         if (r->armed) {
             continue;

@@ -7,9 +7,9 @@
  *
  * tiku_coproc.h - portable control of a second compute engine.
  *
- * Launch a payload, tell whether it is executing, and exchange one bounded
- * message at a time.  What the payload does with that message is the
- * backend's business, and nothing here exposes the memory the cores share.
+ * Launches a payload, reports whether it is executing, and exchanges one
+ * bounded message at a time.  The backend defines what the payload does with
+ * a message; nothing here exposes the memory the cores share.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,10 +20,9 @@
 #include <stdint.h>
 
 /*
- * Presence and capacity arrive as -D globals from the Makefile beside the
- * backend, never from a board or device header -- those are include-order
- * dependent.  Each backend asserts the published cap against its own mailbox
- * constant, so the two cannot drift apart.
+ * Presence and capacity come as -D globals from the Makefile beside the
+ * backend; from a board or device header they would depend on include order.
+ * Each backend asserts the published cap against its own mailbox constant.
  */
 #ifndef TIKU_HAS_COPROC
 /** @brief 1 when the build has a coprocessor backend, else 0. */
@@ -34,14 +33,14 @@
 #define TIKU_COPROC_MSG_CAP     0u
 #endif
 
-/* Outcomes; a caller that only tests != OK still behaves. */
+/* Outcomes; every error is negative. */
 #define TIKU_COPROC_OK           0  /**< success                            */
 #define TIKU_COPROC_ERR_STATE   -1  /**< nothing running to talk to        */
 #define TIKU_COPROC_ERR_IMAGE   -2  /**< payload absent or too big         */
 #define TIKU_COPROC_ERR_LEN     -3  /**< message empty or over the cap     */
 #define TIKU_COPROC_ERR_TIMEOUT -4  /**< the payload never acknowledged    */
 
-/** @brief What this core can see of the engine.  Cheap; never blocks. */
+/** @brief The engine's state as this core sees it. */
 typedef enum {
     TIKU_COPROC_ABSENT = 0,     /**< no second engine in this build       */
     TIKU_COPROC_STOPPED,        /**< never launched, or payload parked    */
@@ -54,9 +53,9 @@ typedef enum {
 /**
  * @brief The launch cannot be undone; the engine stays powered until reset.
  *
- * On the present backends one core cannot be returned to power gating and
- * the other resumes at its current PC rather than its entry point.  A caller
- * that needs the pre-launch machine back must reset the board.
+ * Neither the RA8P1 CPU1 nor the nRF54L FLPR returns to power gating, and
+ * the FLPR resumes at its current PC, not its entry point.  A caller that
+ * needs the pre-launch machine back resets the board.
  */
 #define TIKU_COPROC_F_ONESHOT   (1u << 0)
 
@@ -66,16 +65,15 @@ typedef enum {
 /** @brief Backend properties; 0 when no coprocessor is present. */
 uint32_t tiku_coproc_flags(void);
 
-/** @brief Current state, without disturbing the payload. */
+/** @brief Current state, without disturbing the payload; never blocks. */
 tiku_coproc_state_t tiku_coproc_state(void);
 
 /**
  * @brief Launch the payload, or resume one already launched.
  *
  * @note Not symmetric with stop().  Under TIKU_COPROC_F_ONESHOT the first
- *       call is a one-way door and may leave other subsystems constrained
- *       for the rest of the power-on; those subsystems, not this one,
- *       report the refusal.
+ *       call cannot be undone, and other subsystems may refuse work for the
+ *       rest of the power-on; they, not this call, report the refusal.
  * @return TIKU_COPROC_OK, ERR_IMAGE, or ERR_STATE
  */
 int tiku_coproc_start(void);
@@ -90,11 +88,10 @@ int tiku_coproc_start(void);
 int tiku_coproc_stop(void);
 
 /**
- * @brief Is the payload executing now, as opposed to having once run?
+ * @brief Report whether the payload is executing now.
  *
- * @note Blocks for a short bounded interval: a counter that is merely
- *       non-zero proves the payload started, and only a moving one proves
- *       it has not since wedged.  Not for a hot loop, not for an ISR.
+ * @note Blocks for a short bounded interval while it watches the heartbeat
+ *       advance.  Not for a hot loop or an ISR.
  * @return Non-zero when the magic is published and the heartbeat advances
  */
 int tiku_coproc_alive(void);
@@ -103,8 +100,8 @@ int tiku_coproc_alive(void);
  * @brief The payload's forever-counter.
  *
  * @note May perform cache maintenance; not ISR-safe.  Meaningful only as a
- *       difference between two reads -- the rate is the payload's business,
- *       and a backend may freeze it during a long sub-command.
+ *       difference between two reads: the payload sets the rate, and a
+ *       backend may freeze it during a long sub-command.
  * @return A value that advances while the payload runs
  */
 uint32_t tiku_coproc_heartbeat(void);
@@ -119,8 +116,8 @@ uint32_t tiku_coproc_image_size(void);
 /**
  * @brief Hand one message to the payload, replacing any unread predecessor.
  *
- * Single slot per direction: flow control is the protocol's job, and the
- * echo-shaped protocols in this tree are lock-step by construction.
+ * One slot per direction and no flow control: each protocol in this tree
+ * sends one message and waits for its reply before the next.
  *
  * @param data Bytes to send
  * @param len  How many, 1..TIKU_COPROC_MSG_CAP

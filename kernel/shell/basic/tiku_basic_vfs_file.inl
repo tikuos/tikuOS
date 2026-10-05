@@ -18,17 +18,6 @@
 /* /data/basic VFS HANDLERS                                                  */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Read handler for the /data/basic VFS node.
- *
- * Copies the saved program into the caller's buffer (basic_prog_fetch).
- *
- * @param buf  Destination buffer.
- * @param max  Capacity of @p buf in bytes.
- *
- * @return Number of bytes written (0 on no saved program), -1 on
- *         error.
- */
 int
 tiku_basic_vfs_read(char *buf, unsigned int max)
 {
@@ -39,29 +28,18 @@ tiku_basic_vfs_read(char *buf, unsigned int max)
     }
     /* Same default slot as SAVE/LOAD: prog.bas, or the MSP430/host store. */
     if (basic_prog_fetch(buf, (size_t)max, &n_read) != 0) {
-        buf[0] = '\0';      /* no saved program */
+        buf[0] = '\0';      /* none saved, or it does not fit max */
         return 0;
     }
     return (int)n_read;
 }
 
-/**
- * @brief Write handler for the /data/basic VFS node.
- *
- * Stores the text through basic_prog_store(), verbatim: the writer must send
- * text LOAD can parse, numbered lines separated by '\n'.
- *
- * @param buf  Source buffer.
- * @param len  Number of bytes to write.
- *
- * @return 0 on success, -1 on error.
- */
 int
 tiku_basic_vfs_write(const char *buf, unsigned int len)
 {
     if (buf == NULL || len > TIKU_BASIC_SAVE_BUF_BYTES) {
         return -1;
     }
-    /* Same default slot as SAVE/LOAD: prog.bas, or the MSP430/host store. */
+    /* Stored verbatim, in the slot SAVE and LOAD use. */
     return basic_prog_store(buf, (size_t)len);
 }
