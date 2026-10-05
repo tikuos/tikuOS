@@ -102,12 +102,12 @@ static void bb_isr(struct tiku_htimer *t, void *ptr) {
 
 /**
  * @brief Drive the pin to its idle level and schedule the first edge one bit
- *        period out.
+ *        period out, or twice the htimer guard time if that is later.
  * @return TIKU_BITBANG_OK or a negative error code
  */
 static int bb_soft_tx(const tiku_bitbang_t *cfg) {
     int rc;
-    tiku_htimer_clock_t now;
+    tiku_htimer_clock_t now, lead;
 
     bb.bit_idx = 0;
 
@@ -116,8 +116,16 @@ static int bb_soft_tx(const tiku_bitbang_t *cfg) {
     }
     tiku_gpio_write(cfg->port, cfg->pin, cfg->idle_level);
 
+    /* The first edge is set from thread context through the guard check,
+     * which reads the counter again: a lead of two guard times leaves one
+     * for the counter to move before that read.  The ISR sets the later
+     * edges a period apart. */
+    lead = cfg->bit_time_ticks;
+    if (lead < 2u * TIKU_HTIMER_GUARD_TIME) {
+        lead = (tiku_htimer_clock_t)(2u * TIKU_HTIMER_GUARD_TIME);
+    }
     now = TIKU_HTIMER_NOW();
-    bb.next_edge = (tiku_htimer_clock_t)(now + cfg->bit_time_ticks);
+    bb.next_edge = (tiku_htimer_clock_t)(now + lead);
 
     rc = tiku_htimer_set(&bb_htimer, bb.next_edge, bb_isr, NULL);
     if (rc != TIKU_HTIMER_OK) {

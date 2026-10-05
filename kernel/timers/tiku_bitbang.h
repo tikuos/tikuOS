@@ -81,9 +81,9 @@ typedef struct {
  * @param cfg Caller-owned config; copied internally
  * @return TIKU_BITBANG_OK or a negative error code
  *
- * Configures the pin and schedules the first edge; the ISR produces the rest.
- * Periods shorter than the htimer guard time are accepted -- the engine
- * bypasses the guard when rescheduling, but the first edge still uses it.
+ * Configures the pin and schedules the first edge, at least twice the htimer
+ * guard time out; the ISR schedules the rest without the guard, so a period
+ * shorter than the guard time is accepted.
  *
  * @note On RP2350 bit_count is 1..32 per call; a longer burst takes several
  *       calls.

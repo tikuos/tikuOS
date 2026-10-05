@@ -68,8 +68,8 @@ int tiku_htimer_set(struct tiku_htimer *ht, tiku_htimer_clock_t time,
   /* Guard: reject if too close to now (or wrapped past half-range) */
   now = TIKU_HTIMER_NOW();
   {
-    signed short diff = TIKU_HTIMER_CLOCK_DIFF(time, now);
-    if (diff < (signed short)TIKU_HTIMER_GUARD_TIME) {
+    long diff = TIKU_HTIMER_CLOCK_DIFF(time, now);
+    if (diff < (long)TIKU_HTIMER_GUARD_TIME) {
       HTIMER_PRINTF("htimer: ERR_TIME (time=%u now=%u diff=%d)\n", time, now,
                     (int)diff);
       return TIKU_HTIMER_ERR_TIME;

@@ -27,8 +27,8 @@
  * @typedef tiku_htimer_clock_t
  * @brief Hardware timer tick type
  *
- * unsigned short on every port; TIKU_HTIMER_CLOCK_DIFF and the guard check
- * in tiku_htimer_set() assume 16 bits.
+ * unsigned short on every port.  A port that widens it, to 32 bits at most,
+ * also defines TIKU_HTIMER_CLOCK_DIFF to return a signed difference as wide.
  */
 #ifndef TIKU_HTIMER_CLOCK_T_DEFINED
 typedef unsigned short tiku_htimer_clock_t;

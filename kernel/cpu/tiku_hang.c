@@ -33,7 +33,8 @@ struct tiku_hang_rec {
 /*
  * Cross-reset record in the warm grade (TIKU_RETAINED), which survives the
  * warm reset a hang triggers.  It is SRAM on every port but MSP430, where it
- * is MPU-protected FRAM (see tiku_hang_record()).
+ * is MPU-protected FRAM, so every store to it sits in a tiku_mpu_unlock_nvm()
+ * window.
  */
 static TIKU_RETAINED struct tiku_hang_rec tiku_hang_warm;
 
@@ -123,11 +124,15 @@ void tiku_hang_tick(void)
 void tiku_hang_boot_init(void)
 {
     if (tiku_hang_warm.magic == TIKU_HANG_MAGIC) {
+        uint16_t mpu_state;
+
         tiku_hang_boot = tiku_hang_warm;      /* capture for this boot */
+        mpu_state = tiku_mpu_unlock_nvm();
+        tiku_hang_warm.magic = 0u;            /* one-shot: next boot is clean */
+        tiku_mpu_lock_nvm(mpu_state);
     } else {
         tiku_hang_boot.magic = 0u;
     }
-    tiku_hang_warm.magic = 0u;                /* one-shot: next boot is clean */
 }
 
 /**
@@ -153,8 +158,12 @@ const char *tiku_hang_last_name(void)
 
 void tiku_hang_clear(void)
 {
+    uint16_t mpu_state;
+
     tiku_hang_boot.magic = 0u;
+    mpu_state = tiku_mpu_unlock_nvm();
     tiku_hang_warm.magic = 0u;
+    tiku_mpu_lock_nvm(mpu_state);
 }
 
 uint8_t tiku_hang_is_culprit(const struct tiku_process *p)
