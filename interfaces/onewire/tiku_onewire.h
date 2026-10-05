@@ -31,6 +31,7 @@
 #define TIKU_OW_OK                  0   /**< Operation succeeded */
 #define TIKU_OW_ERR_NO_DEVICE     (-1)  /**< No presence pulse detected */
 #define TIKU_OW_ERR_PARAM         (-2)  /**< Invalid parameter */
+#define TIKU_OW_ERR_BUSY          (-3)  /**< Bus pin owned by another user */
 /** @} */
 
 /** @defgroup TIKU_OW_ROM 1-Wire ROM Commands
@@ -49,16 +50,25 @@
  * @brief Initialize the 1-Wire bus.
  *
  * Configures the GPIO pin defined in the board header for 1-Wire
- * communication (open-drain with external pull-up).
+ * communication (open-drain with external pull-up).  The pin is claimed
+ * for the bus; a call while the bus is open does nothing.
  *
- * @return TIKU_OW_OK on success
+ * @return TIKU_OW_OK on success; TIKU_OW_ERR_BUSY if another user owns
+ *         the pin; otherwise the architecture's error
  */
 int tiku_onewire_init(void);
 
 /**
+ * @brief Report whether the bus is open.
+ *
+ * @return 1 after a successful tiku_onewire_init() and until close, else 0
+ */
+uint8_t tiku_onewire_is_open(void);
+
+/**
  * @brief Shut down the 1-Wire bus.
  *
- * Releases the GPIO pin.
+ * Releases the GPIO pin; does nothing when the bus is not open.
  */
 void tiku_onewire_close(void);
 

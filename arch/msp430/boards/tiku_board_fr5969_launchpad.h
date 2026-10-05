@@ -170,6 +170,8 @@
  * P1.2 is also ADC channel A2, so a design using both must move one of them.
  */
 #define TIKU_BOARD_OW_AVAILABLE     1
+#define TIKU_BOARD_OW_PORT          1
+#define TIKU_BOARD_OW_PIN           2
 #define TIKU_BOARD_OW_DIR           P1DIR
 #define TIKU_BOARD_OW_OUT           P1OUT
 #define TIKU_BOARD_OW_IN            P1IN

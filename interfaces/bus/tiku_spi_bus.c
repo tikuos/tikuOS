@@ -18,6 +18,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_spi_bus.h"
+#include <stddef.h>
 #include "tiku.h"
 #include <hal/tiku_spi_hal.h>
 
@@ -58,6 +59,8 @@ tiku_spi_init(const tiku_spi_config_t *config)
         if (rc == TIKU_SPI_OK) {
             spi_active_cfg = *config;
             spi_configured = 1;
+        } else {
+            spi_configured = 0;   /* state after a failed init is unknown */
         }
         return rc;
     }
@@ -67,6 +70,7 @@ void
 tiku_spi_close(void)
 {
     tiku_spi_arch_close();
+    spi_configured = 0;
 }
 
 uint8_t

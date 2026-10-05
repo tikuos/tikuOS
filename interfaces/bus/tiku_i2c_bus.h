@@ -68,6 +68,13 @@ typedef struct tiku_i2c_config {
 int tiku_i2c_init(const tiku_i2c_config_t *config);
 
 /**
+ * @brief Get the active I2C configuration, without bus traffic.
+ * @return Pointer to the settings of the last successful init, or NULL
+ *         while the bus is closed, after a failed init, or without I2C
+ */
+const tiku_i2c_config_t *tiku_i2c_get_config(void);
+
+/**
  * @brief Shut down the I2C bus.
  *
  * Places the peripheral in reset and releases the I/O pins.
