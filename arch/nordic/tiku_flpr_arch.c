@@ -577,7 +577,7 @@ int tiku_flpr_arch_conn_capture(const uint8_t *adv, uint32_t adv_len,
     }
 
     if (TIKU_FLPR_SHARED->conn_state != 1u) {
-        flpr_radio_ns(0);                      /* gave up: reclaim secure    */
+        tiku_flpr_arch_conn_stop();            /* stop, reclaim secure       */
         return -2;
     }
     /* Connected: the FLPR holds the link and still drives the non-secure
@@ -777,19 +777,21 @@ uint32_t tiku_flpr_arch_conn_anchor(uint32_t *gap_off_it, uint32_t *rxon_it)
                           : 100u;
 }
 
-/* Ask the FLPR to leave its hold loop, wait for it, then make the RADIO
- * secure again.  When conn_state is not 1 only the security flip runs: an
- * FLPR still advertising (conn_state 0) is not told to stop. */
+/* Ask the FLPR to stop advertising or leave its hold loop, wait for it,
+ * then make the RADIO secure again.  The stop is sent while conn_state is 1,
+ * or 0 on a running FLPR; otherwise only the security flip runs. */
 void tiku_flpr_arch_conn_stop(void)
 {
-    uint32_t spin;
+    uint32_t spin, st;
 
-    if (TIKU_FLPR_SHARED->conn_state == 1u) {
+    st = TIKU_FLPR_SHARED->conn_state;
+    if (st == 1u || (st == 0u && tiku_flpr_arch_running())) {
         TIKU_FLPR_SHARED->cmd = TIKU_FLPR_CMD_CONN_STOP;
         __asm__ volatile ("dsb 0xF" ::: "memory");
         for (spin = 0u; spin < 400000000u; spin++) {
-            if (TIKU_FLPR_SHARED->conn_state != 1u) {
-                break;                          /* left the hold loop        */
+            st = TIKU_FLPR_SHARED->conn_state;
+            if (st != 0u && st != 1u) {
+                break;                          /* off the radio             */
             }
             if ((spin & 0xFFFFFu) == 0u) {
                 tiku_watchdog_kick();

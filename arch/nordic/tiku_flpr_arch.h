@@ -175,8 +175,8 @@ typedef struct {
  * @brief Advertise connectably from the FLPR and capture the CONNECT_IND.
  *
  * Blocks until a central connects, the FLPR gives up, or the M33's spin
- * bound runs out.  On -2 the radio is secure again; on 0 the FLPR holds the
- * link and the radio stays non-secure until tiku_flpr_arch_conn_stop().
+ * bound runs out.  On -2 the FLPR is stopped and the radio secure again; on
+ * 0 the FLPR holds the link, non-secure, until tiku_flpr_arch_conn_stop().
  *
  * @note Same handoff as the beacon: tiku_radio_arch_init has run and the
  *       CONSTLAT hold is taken.
@@ -273,11 +273,12 @@ void tiku_flpr_arch_conn_phy_diag(uint32_t *mode, uint32_t *addr,
 uint32_t tiku_flpr_arch_conn_updates(uint32_t *chan_map, uint32_t *conn_upd);
 
 /**
- * @brief End the FLPR's held link and make the RADIO secure again.
+ * @brief Stop the FLPR's advertising or end its held link, then make the
+ *        RADIO secure again.
  *
- * @note Sends TIKU_FLPR_CMD_CONN_STOP only while conn_state is 1; an FLPR
- *       still advertising (conn_state 0) is not stopped, and only the radio
- *       is made secure.
+ * @note While conn_state is 1, or 0 on a running FLPR, sends
+ *       TIKU_FLPR_CMD_CONN_STOP and waits, bounded, for conn_state 2 or 3.
+ *       Otherwise only the radio is made secure.
  */
 void tiku_flpr_arch_conn_stop(void);
 

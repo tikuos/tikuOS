@@ -261,7 +261,6 @@ int tiku_pio_arch_bitbang_tx(uint8_t  gpio_pin,
     uint32_t shiftctrl;
     uint32_t pinctrl;
     uint16_t set_x;
-    uint32_t shifted_data;
 
     if (!g_pio_initialised) {
         return TIKU_PIO_ERR_NOT_READY;
@@ -330,15 +329,10 @@ int tiku_pio_arch_bitbang_tx(uint8_t  gpio_pin,
     set_x = pio_instr_set_x((uint8_t)(bit_count - 1U));
     pio_sm_exec(BITBANG_SM, set_x);
 
-    /* 7. Push the data word.  MSB-first, the SM shifts from bit 31 of
-     * OSR, so the first bit on the wire is bit 31 of data.  The program's
-     * PULL copies the word into OSR. */
-    if (msb_first) {
-        shifted_data = data << (32U - bit_count);
-    } else {
-        shifted_data = data;
-    }
-    PIO0(RP2350_PIO_TXF(BITBANG_SM)) = shifted_data;
+    /* 7. Push the data word unchanged.  MSB-first, the SM shifts from bit
+     * 31 of OSR and MSB-first data already starts there; LSB-first, it
+     * shifts from bit 0.  The program's PULL copies the word into OSR. */
+    PIO0(RP2350_PIO_TXF(BITBANG_SM)) = data;
 
     /* 8. Clear stale PIO IRQ flags, route SM IRQ flag 0 to PIO0_IRQ_0,
      * and clear-pend and re-enable that NVIC line, whatever state it was

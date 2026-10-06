@@ -173,21 +173,30 @@ static int rp2350_clock_switch(void) {
 }
 
 /**
- * @brief Fall back to 12 MHz XOSC when PLL bring-up fails.
+ * @brief Fall back to a 12 MHz clock when PLL bring-up fails.
  *
- * Runs CLK_SYS from CLK_REF and CLK_PERI straight from XOSC, so the UART baud
- * divisor holds whatever state the CLK_SYS mux is in.  Called only when the
- * XOSC start, the PLL init or the clock switch fails.
+ * Runs CLK_SYS from CLK_REF, and CLK_PERI from a stable XOSC or else from
+ * CLK_SYS.  Called only when the XOSC start, the PLL init or the clock
+ * switch fails.
+ *
+ * @param xosc_ok  Non-zero when the XOSC reported STABLE
  */
-static void rp2350_clock_fallback_xosc(void) {
+static void rp2350_clock_fallback_xosc(int xosc_ok) {
     /* CLK_SYS = CLK_REF: the XOSC once rp2350_clock_switch() has moved
      * CLK_REF there, else still the ROSC the boot ROM left. */
     _RP2350_REG(RP2350_CLK_SYS_CTRL) = RP2350_CLK_SYS_SRC_REF;
     _RP2350_REG(RP2350_CLK_SYS_DIV)  = 0x00010000U;
 
-    /* CLK_PERI from XOSC directly, independent of the CLK_SYS mux. */
-    _RP2350_REG(RP2350_CLK_PERI_CTRL) =
-        RP2350_CLK_PERI_AUXSRC_XOSC | RP2350_CLK_PERI_ENABLE;
+    /* CLK_PERI from XOSC directly, independent of the CLK_SYS mux.  An XOSC
+     * that never became stable gives no clock, so CLK_PERI then follows
+     * CLK_SYS on the ROSC. */
+    if (xosc_ok) {
+        _RP2350_REG(RP2350_CLK_PERI_CTRL) =
+            RP2350_CLK_PERI_AUXSRC_XOSC | RP2350_CLK_PERI_ENABLE;
+    } else {
+        _RP2350_REG(RP2350_CLK_PERI_CTRL) =
+            RP2350_CLK_PERI_AUXSRC_CLK_SYS | RP2350_CLK_PERI_ENABLE;
+    }
 }
 
 /**
@@ -242,7 +251,7 @@ static void rp2350_setup_1us_tick(void) {
  *
  * Takes CLK_SYS to 150 MHz via XOSC -> PLL_SYS, releases the kernel
  * peripherals from reset, starts the 1 us TIMER0 tick and caches the clock
- * rates.  A step that times out leaves CLK_PERI on XOSC at 12 MHz.
+ * rates.  A step that times out runs rp2350_clock_fallback_xosc().
  *
  * @note Call it once at boot, before any peripheral driver starts.
  */
@@ -250,7 +259,7 @@ void tiku_cpu_boot_rp2350_init(void) {
     /* XOSC runs before the PLL starts, the PLL locks before CLK_SYS
      * switches, and CLK_SYS runs before the peripherals leave reset.
      * A timeout at any step sends the boot to the 12 MHz fallback, with
-     * CLK_PERI on XOSC for the UART.
+     * CLK_PERI on XOSC for the UART when the XOSC is stable.
      *
      * The boot ROM hands over with CLK_REF and CLK_SYS on the ROSC
      * (about 12 MHz), so the spin loops run on a working clock. */
@@ -263,7 +272,7 @@ void tiku_cpu_boot_rp2350_init(void) {
         g_clk_peri_hz = 150000000UL;
         g_clock_fault = 0U;
     } else {
-        rp2350_clock_fallback_xosc();
+        rp2350_clock_fallback_xosc(xosc_ok);
         g_clk_sys_hz  = 12000000UL;
         g_clk_peri_hz = 12000000UL;
         g_clock_fault = 1U;

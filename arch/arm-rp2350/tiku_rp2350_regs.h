@@ -302,11 +302,13 @@
 #define RP2350_IO_FUNC_NULL         31
 
 /* PROC0 IRQ enable / status arrays. Each register covers 8 pins
- * (4 bits per pin: LEVEL_LOW / LEVEL_HIGH / EDGE_LOW / EDGE_HIGH). */
+ * (4 bits per pin: LEVEL_LOW / LEVEL_HIGH / EDGE_LOW / EDGE_HIGH).  Each
+ * array is six words and the next follows it (pico-sdk rp2350
+ * regs/io_bank0.h: IO_BANK0_PROC0_INTE0_OFFSET = 0x248). */
 #define RP2350_IO_BANK0_INTR(i)         (RP2350_IO_BANK0_BASE + 0x230U + ((i) * 4U))
-#define RP2350_IO_BANK0_PROC0_INTE(i)   (RP2350_IO_BANK0_BASE + 0x270U + ((i) * 4U))
-#define RP2350_IO_BANK0_PROC0_INTF(i)   (RP2350_IO_BANK0_BASE + 0x2B0U + ((i) * 4U))
-#define RP2350_IO_BANK0_PROC0_INTS(i)   (RP2350_IO_BANK0_BASE + 0x2F0U + ((i) * 4U))
+#define RP2350_IO_BANK0_PROC0_INTE(i)   (RP2350_IO_BANK0_BASE + 0x248U + ((i) * 4U))
+#define RP2350_IO_BANK0_PROC0_INTF(i)   (RP2350_IO_BANK0_BASE + 0x260U + ((i) * 4U))
+#define RP2350_IO_BANK0_PROC0_INTS(i)   (RP2350_IO_BANK0_BASE + 0x278U + ((i) * 4U))
 
 #define RP2350_IO_INT_LEVEL_LOW     0x1U
 #define RP2350_IO_INT_LEVEL_HIGH    0x2U
