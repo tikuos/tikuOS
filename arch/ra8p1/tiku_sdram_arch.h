@@ -43,6 +43,15 @@ int tiku_ra8p1_sdram_init(void);
 int tiku_ra8p1_sdram_ready(void);
 
 /**
+ * @brief Set the refresh interval for the BCLK in force now.
+ *
+ * Called after a change of clock rung.  Does nothing before
+ * tiku_ra8p1_sdram_init() has succeeded.  The access timings stay as init
+ * set them.
+ */
+void tiku_ra8p1_sdram_retune(void);
+
+/**
  * @brief Bring the array up and hand it to the tier allocator.
  *
  * Attaches the window as TIKU_MEM_PSRAM, the tier for a large external
@@ -56,7 +65,10 @@ int tiku_ra8p1_sdram_attach(void);
 /**
  * @brief Time sequential, strided and memcpy legs and print each by name.
  *
- * @note Overwrites the first 1 MB of the window, tier allocations included.
+ * Refused while the PSRAM tier holds any allocation.
+ *
+ * @note Overwrites the first 1 MB of the window, which is also the start of
+ *       the USB staging disk.
  */
 void tiku_ra8p1_sdram_bench_run(void);
 

@@ -20,6 +20,7 @@
 #include "tiku_cpu_common.h"
 #include <kernel/usb/tiku_usbd_msc.h>
 #include "tiku_store_arch.h"
+#include "tiku_sdram_arch.h"
 
 /*
  * High speed runs the PHY's own PLL from the EXTAL pin at 12, 20, 24 or
@@ -312,6 +313,9 @@ static uint8_t  ep0_buf[80];
 /* Recovery counters, raised from EP0: the class reset arrives on the
  * control pipe. */
 static uint32_t n_msc_reset, n_csw_fail, n_ep_halt, n_ep_unhalt;
+/* Set while a failed command's status wrapper waits to be sent; a class
+ * reset, a SET_CONFIGURATION and tiku_ra8p1_usbhs_down() drop it. */
+static volatile uint8_t msc_csw_owed;
 static volatile uint32_t n_irq, n_dvst;
 static uint8_t  last_ops[4];
 static uint8_t  last_op_i;
@@ -635,6 +639,7 @@ static void ep0_on_setup(uint16_t sts)
             pipe_config(MSC_PIPE_OUT, 2U, 0, MSC_BUFNMB_OUT);
             pipe_pid(MSC_PIPE_OUT, RA8P1_PIPECTR_PID_BUF);
         }
+        msc_csw_owed = 0U;
         ep0_ack();
         break;
 
@@ -704,6 +709,7 @@ static void ep0_on_setup(uint16_t sts)
             pipe_config(MSC_PIPE_IN, 1U, 1, MSC_BUFNMB_IN);
             pipe_config(MSC_PIPE_OUT, 2U, 0, MSC_BUFNMB_OUT);
             pipe_pid(MSC_PIPE_OUT, RA8P1_PIPECTR_PID_BUF);
+            msc_csw_owed = 0U;
             n_msc_reset++;
             ep0_ack();
         } else {
@@ -824,6 +830,7 @@ static tiku_usbd_msc_t msc_medium = {
     (uint32_t)(MSC_DISK_BYTES / TIKU_USBD_MSC_BLOCK), "SDRAM Stage", 0U, 0U
 };
 static uint8_t  msc_reply[TIKU_USBD_MSC_REPLY_MAX];
+static uint8_t  msc_csw_held[TIKU_USBD_MSC_CSW_LEN];
 static uint32_t n_cbw, n_rd, n_wr, n_bad;
 static uint32_t n_pkt_out, n_stall_out, n_refused;
 static uint32_t last_wr_lba, last_wr_blocks;
@@ -1028,6 +1035,24 @@ static int pipe_write(const uint8_t *src, uint32_t len)
     return 1;
 }
 
+/**
+ * @brief End the command @p cbw names as failed: halt its data pipe and
+ *        hold a failed status wrapper for tiku_ra8p1_usbhs_msc_poll().
+ */
+static void msc_fail_cmd(const tiku_usbd_msc_cbw_t *cbw)
+{
+    /* The halted pipe is the one of the data phase the host expects, IN for
+     * a read and OUT for a write.  The wrapper counts none of the data as
+     * transferred, and goes out once the IN pipe is not halted: the host
+     * clears a halt before it reads the wrapper. */
+    if (cbw->host_len != 0U) {
+        pipe_pid(cbw->dir_in ? MSC_PIPE_IN : MSC_PIPE_OUT,
+                 RA8P1_PIPECTR_PID_STALL);
+    }
+    tiku_usbd_msc_build_csw(msc_csw_held, cbw->tag, cbw->host_len, 1U);
+    msc_csw_owed = 1U;
+}
+
 /** @brief Stream a READ(10) out of the staging disk. */
 static int msc_send_blocks(uint32_t lba, uint32_t bytes)
 {
@@ -1079,7 +1104,22 @@ void tiku_ra8p1_usbhs_msc_poll(void)
     uint32_t n;
     int ok = 1;
 
-    if (!usbhs_up || usbhs_config == 0U || !pipe_out_ready()) {
+    if (!usbhs_up || usbhs_config == 0U) {
+        return;
+    }
+    /* A held status wrapper goes out before any new command is taken; the
+     * host sends no command until it has read it. */
+    if (msc_csw_owed) {
+        if ((TIKU_REG16(RA8P1_USBHS_PIPECTR(MSC_PIPE_IN)) &
+             RA8P1_PIPECTR_PID_MASK) != RA8P1_PIPECTR_PID_STALL) {
+            msc_csw_owed = 0U;
+            if (!pipe_write(msc_csw_held, TIKU_USBD_MSC_CSW_LEN)) {
+                n_csw_fail++;
+            }
+        }
+        return;
+    }
+    if (!pipe_out_ready()) {
         return;
     }
 
@@ -1108,6 +1148,19 @@ void tiku_ra8p1_usbhs_msc_poll(void)
     /* SCSI decoding is the kernel's shared mass-storage decoder. */
     tiku_usbd_msc_decode(&msc_medium, &cbw, msc_reply, &cmd);
 
+    /* The staging disk is the SDRAM window, and SDRAM access stays disabled
+     * until tiku_ra8p1_sdram_init() succeeds: a READ or WRITE before then
+     * fails as not ready. */
+    if ((cmd.action == TIKU_USBD_MSC_ACT_READ ||
+         cmd.action == TIKU_USBD_MSC_ACT_WRITE) &&
+        !tiku_ra8p1_sdram_ready()) {
+        tiku_usbd_msc_fail(&msc_medium, TIKU_USBD_MSC_SENSE_NOTREADY,
+                           TIKU_USBD_MSC_ASC_NOT_READY);
+        n_refused++;
+        msc_fail_cmd(&cbw);
+        return;
+    }
+
     switch (cmd.action) {
     case TIKU_USBD_MSC_ACT_READ:
         n_rd++;
@@ -1119,10 +1172,10 @@ void tiku_ra8p1_usbhs_msc_poll(void)
         /* Recorded for tiku_ra8p1_usbhs_msc_last_write(). */
         last_wr_lba    = cmd.lba;
         last_wr_blocks = cmd.nblk;
-        /* A write to the commit LBA starts an import, which runs from
-         * tiku_ra8p1_store_step(); the CSW for this write is still owed to
-         * the host. */
-        if (cmd.lba == tiku_ra8p1_store_commit_lba()) {
+        /* A complete write to the commit LBA starts an import, which runs
+         * from tiku_ra8p1_store_step(); the CSW for this write is still owed
+         * to the host. */
+        if (ok && cmd.lba == tiku_ra8p1_store_commit_lba()) {
             (void)tiku_ra8p1_store_begin(cmd.lba, cmd.nblk);
         }
         break;
@@ -1134,12 +1187,13 @@ void tiku_ra8p1_usbhs_msc_poll(void)
     }
     if (!ok) {
         /*
-         * A data phase that did not complete leaves the host waiting for
-         * bytes.  The IN pipe is halted, the transport's defined answer, so
-         * the host stops waiting and starts recovery.
+         * A data phase that did not complete: its pipe is halted, the
+         * transport's defined answer, so the host stops moving data and
+         * starts recovery, and the command is reported failed.
          */
         n_bad++;
-        pipe_pid(MSC_PIPE_IN, RA8P1_PIPECTR_PID_STALL);
+        msc_fail_cmd(&cbw);
+        return;
     }
 
     tiku_usbd_msc_build_csw(csw, cbw.tag, cmd.residue, cmd.status);
@@ -1193,6 +1247,10 @@ uint32_t tiku_ra8p1_usbhs_msc_hash(uint32_t nblocks)
     const uint8_t *p = (const uint8_t *)MSC_DISK_BASE;
     uint32_t h = 2166136261u, i, n;
 
+    if (!tiku_ra8p1_sdram_ready()) {
+        return 0U;
+    }
+
     if (nblocks == 0U || nblocks > msc_medium.blocks) {
         nblocks = msc_medium.blocks;
     }
@@ -1234,6 +1292,7 @@ void tiku_ra8p1_usbhs_down(void)
     __asm__ volatile ("dsb" ::: "memory");
     usbhs_up = 0U;
     usbhs_config = 0U;
+    msc_csw_owed = 0U;
 }
 
 tiku_ra8p1_usbhs_speed_t tiku_ra8p1_usbhs_speed(void)

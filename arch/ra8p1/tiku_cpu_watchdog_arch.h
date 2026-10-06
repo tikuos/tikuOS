@@ -43,8 +43,8 @@ typedef uint16_t tiku_wdt_interval_t;
  * @brief Record that the caller wants the watchdog off.
  *
  * @note Once refreshed the IWDT cannot be stopped or reconfigured until a
- *       reset.  This feeds the counter once and then ignores kicks, so
- *       unless the caller arms it again the part resets one interval later.
+ *       reset.  This feeds the counter once; until the watchdog is armed
+ *       again, every system tick feeds it too.
  */
 void tiku_cpu_ra8p1_watchdog_off_arch(void);
 
@@ -73,9 +73,16 @@ void tiku_cpu_ra8p1_watchdog_pause_arch(void);
  */
 void tiku_cpu_ra8p1_watchdog_resume_arch(int kick_on_resume);
 
-/** @brief Reload the watchdog counter; ignored after
- *         tiku_cpu_ra8p1_watchdog_off_arch(). */
+/** @brief Reload the watchdog counter; ignored until the watchdog has been
+ *         armed. */
 void tiku_cpu_ra8p1_watchdog_kick_arch(void);
+
+/**
+ * @brief Feed the IWDT from the system tick while the watchdog is off.
+ *
+ * Does nothing while it is on or before it was first armed.
+ */
+void tiku_cpu_ra8p1_watchdog_tick_arch(void);
 
 /**
  * @brief Report the period the IWDT is actually counting, in milliseconds.

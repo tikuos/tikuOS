@@ -66,8 +66,8 @@ static void wdt_refresh(void)
 void tiku_cpu_ra8p1_watchdog_off_arch(void)
 {
     /* Only a reset stops the IWDT (UM 29).  Feed it once and record the
-     * request: kicks are then ignored, and the part resets one period later
-     * unless the watchdog is armed again. */
+     * request; from here the system tick feeds it as well, through
+     * tiku_cpu_ra8p1_watchdog_tick_arch(). */
     if (wdt_state.armed) {
         wdt_refresh();
     }
@@ -137,7 +137,14 @@ void tiku_cpu_ra8p1_watchdog_resume_arch(int kick_on_resume)
 
 void tiku_cpu_ra8p1_watchdog_kick_arch(void)
 {
-    if (wdt_state.armed && wdt_state.running) {
+    if (wdt_state.armed) {
+        wdt_refresh();
+    }
+}
+
+void tiku_cpu_ra8p1_watchdog_tick_arch(void)
+{
+    if (wdt_state.armed && !wdt_state.running) {
         wdt_refresh();
     }
 }

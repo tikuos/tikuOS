@@ -204,7 +204,8 @@ int tiku_ra8p1_xflash_program(uint32_t addr, const void *src, uint8_t len);
 int tiku_ra8p1_xflash_write(uint32_t addr, const void *src, uint32_t len);
 
 /**
- * @brief The external flash as an NVM backend, or NULL if the map failed.
+ * @brief The external flash as an NVM backend, or NULL if octal entry or
+ *        the map failed.
  *
  * Reads are pointer dereferences into the mapped window; writes and erases
  * go through this driver.  Octal mode is entered first.  tiku_tfs_mount()

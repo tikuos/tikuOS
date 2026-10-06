@@ -19,6 +19,7 @@
 
 #ifndef TIKU_MINIMAL
 #include <kernel/scheduler/tiku_sched.h>
+#include "tiku_cpu_watchdog_arch.h"
 #endif
 
 /** @brief Monotonic tick counter, advanced by the SysTick exception. */
@@ -181,7 +182,8 @@ void tiku_clock_arch_delay(unsigned int i)
 }
 
 /**
- * @brief SysTick exception: advance the tick and wake the scheduler.
+ * @brief SysTick exception: advance the tick, feed an IWDT the caller has
+ *        turned off, and wake the scheduler.
  *
  * Expired timers dispatch only after tiku_sched_notify().
  */
@@ -189,6 +191,7 @@ void tiku_ra8p1_systick_handler(void)
 {
     clock_ticks++;
 #ifndef TIKU_MINIMAL
+    tiku_cpu_ra8p1_watchdog_tick_arch();
     tiku_sched_notify();
 #endif
 }

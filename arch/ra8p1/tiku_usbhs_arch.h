@@ -110,7 +110,9 @@ unsigned tiku_ra8p1_usbhs_ep0_trace(unsigned i, uint16_t *out9);
 /**
  * @brief Service one mass-storage command, if the host has sent one.
  *
- * Runs the whole command, data phase and status included, before returning.
+ * Runs the whole command before returning, except that a failed command's
+ * status goes out from a later call once the host has cleared any IN halt.
+ * READ(10) and WRITE(10) fail while tiku_ra8p1_sdram_ready() is 0.
  *
  * @note Call from a regular pump: the host sends no new command until this
  *       one is answered.
@@ -155,7 +157,8 @@ void tiku_ra8p1_usbhs_msc_stats(uint32_t *cbw, uint32_t *rd, uint32_t *wr,
  * @brief FNV-1a over the first @p nblocks of the staging disk (0 = all).
  *
  * @param nblocks blocks to hash
- * @return the hash, to be compared against one computed on the host
+ * @return the hash, to be compared against one computed on the host, or 0
+ *         while the SDRAM is down
  */
 uint32_t tiku_ra8p1_usbhs_msc_hash(uint32_t nblocks);
 

@@ -8,8 +8,8 @@
  * tiku_sdram_arch.c - EK-RA8P1 external SDRAM bring-up.
  *
  * Timings are the IS42S32160F-6 datasheet's nanosecond figures, converted to
- * cycles of the bus clock in force at init; a later BCLK change leaves them
- * as they were set.
+ * cycles of the bus clock in force at init; a rung change converts the
+ * refresh interval again.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -69,6 +69,19 @@ static uint32_t ns_to_cycles(uint32_t ns, uint32_t hz)
     return (uint32_t)((num + 999999999ULL) / 1000000000ULL);
 }
 
+/**
+ * @brief SDRFCR word for a refresh every 7812 ns at @p hz.
+ *
+ * 8192 rows every 64 ms is one refresh every 7812.5 ns; the interval is
+ * taken as 7812 ns.  REFW is 8 cycles.
+ */
+static uint16_t sdram_rfcr(uint32_t hz)
+{
+    uint32_t refi = ns_to_cycles(7812UL, hz);
+
+    return (uint16_t)(((refi - 1UL) & 0x0FFFUL) | (7U << 12));
+}
+
 /** @brief Point every SDRAM pin at the external-bus peripheral function. */
 static void sdram_pins_init(void)
 {
@@ -97,7 +110,7 @@ static void sdram_pins_init(void)
 int tiku_ra8p1_sdram_init(void)
 {
     uint32_t hz = (uint32_t)tiku_cpu_ra8p1_bclk_get_hz();
-    uint32_t cl, trcd, trp, tras, twr, refi;
+    uint32_t cl, trcd, trp, tras, twr;
     uint32_t spins;
 
     if (sdram_ready) {
@@ -114,10 +127,6 @@ int tiku_ra8p1_sdram_init(void)
     trp  = ns_to_cycles(18UL, hz);      /* PRE to ACT             */
     tras = ns_to_cycles(42UL, hz);      /* ACT to PRE, minimum    */
     twr  = ns_to_cycles(12UL, hz);      /* tDPL, data to precharge */
-
-    /* 8192 rows every 64 ms: one refresh every 7812 ns, rounded down from
-     * 7812.5. */
-    refi = ns_to_cycles(7812UL, hz);
 
     sdram_pins_init();
 
@@ -200,8 +209,7 @@ int tiku_ra8p1_sdram_init(void)
     }
 
     /* Auto-refresh, then open the window. */
-    TIKU_REG16(RA8P1_SDRFCR) = (uint16_t)(((refi - 1UL) & 0x0FFFUL) |
-                                          (7U << 12));   /* REFW = 8 cycles */
+    TIKU_REG16(RA8P1_SDRFCR) = sdram_rfcr(hz);
     TIKU_REG8(RA8P1_SDRFEN) = (uint8_t)RA8P1_SDRFEN_RFEN;
 
     TIKU_REG8(RA8P1_SDCCR) = (uint8_t)(RA8P1_SDCCR_BSIZE_32 |
@@ -215,6 +223,23 @@ int tiku_ra8p1_sdram_init(void)
 int tiku_ra8p1_sdram_ready(void)
 {
     return sdram_ready != 0U;
+}
+
+void tiku_ra8p1_sdram_retune(void)
+{
+    uint32_t hz = (uint32_t)tiku_cpu_ra8p1_bclk_get_hz();
+
+    if (!sdram_ready || hz == 0UL) {
+        return;
+    }
+    /* The access timings stay as init set them: their cycle counts are the
+     * same at the 120 and 125 MHz BCLK of the clock rungs.  SDRFCR is
+     * written with auto-refresh stopped, then refresh restarts at the new
+     * interval. */
+    TIKU_REG8(RA8P1_SDRFEN) = 0U;
+    TIKU_REG16(RA8P1_SDRFCR) = sdram_rfcr(hz);
+    TIKU_REG8(RA8P1_SDRFEN) = (uint8_t)RA8P1_SDRFEN_RFEN;
+    __asm__ volatile ("dsb" ::: "memory");
 }
 
 int tiku_ra8p1_sdram_attach(void)
@@ -266,9 +291,18 @@ void tiku_ra8p1_sdram_bench_run(void)
     uint32_t words = SD_BENCH_BYTES / 4UL;
     uint32_t cpu_hz = (uint32_t)tiku_cpu_ra8p1_clock_get_hz();
     uint32_t t0, i, sum;
+    tiku_mem_stats_t st;
 
     if (!sdram_ready) {
         SHELL_PRINTF("sdram: not up\n");
+        return;
+    }
+    /* The legs write the first SD_BENCH_BYTES of the window, which the
+     * PSRAM tier allocates from as well. */
+    if (tiku_tier_stats(TIKU_MEM_PSRAM, &st) == TIKU_MEM_OK &&
+        st.used_bytes != 0U) {
+        SHELL_PRINTF("sdram: the tier holds %lu bytes -- bench refused\n",
+                     (unsigned long)st.used_bytes);
         return;
     }
 

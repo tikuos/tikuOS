@@ -19,6 +19,7 @@
 #include "tiku_uart_arch.h"
 #include "tiku_ra8p1_regs.h"
 #include "tiku_xflash_arch.h"
+#include "tiku_sdram_arch.h"
 #include "tiku_cache_arch.h"
 #include "tiku_cpu_common.h"
 
@@ -577,7 +578,8 @@ void tiku_cpu_freq_ra8p1_init(unsigned int mhz)
      * A failed pll_up() leaves the tree parked on MOCO with every consumer
      * still tuned for the old rate.  The established rung is entered again;
      * if that also fails, or there is none, the tree stays on MOCO and the
-     * delay loop, tick, htimer and console are retuned to it.
+     * delay loop, tick, htimer, SDRAM refresh and console are retuned to
+     * it.
      *
      * Interrupts stay masked throughout: an exception mid-change would run
      * on a half-reprogrammed tree (parked clock, caches off for the VDD
@@ -595,6 +597,7 @@ void tiku_cpu_freq_ra8p1_init(unsigned int mhz)
                 tiku_cpu_ra8p1_spin_invalidate();
                 (void)tiku_ra8p1_clock_arch_retune(tiku_cpu_ra8p1_iclk_get_hz());
                 tiku_ra8p1_htimer_arch_retune();
+                tiku_ra8p1_sdram_retune();
                 tiku_uart_init();
             }
             if (primask == 0UL) {
@@ -612,6 +615,7 @@ void tiku_cpu_freq_ra8p1_init(unsigned int mhz)
         STEP(12);
         (void)tiku_ra8p1_clock_arch_retune(tiku_cpu_ra8p1_iclk_get_hz());
         tiku_ra8p1_htimer_arch_retune();
+        tiku_ra8p1_sdram_retune();
         STEP(13);
         tiku_uart_init();
         STEP(14);

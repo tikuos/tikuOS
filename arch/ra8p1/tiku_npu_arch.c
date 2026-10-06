@@ -392,6 +392,29 @@ int tiku_ra8p1_npu_load(const char *name)
     if (g.arena > sizeof npu_arena) {
         return TIKU_RA8P1_NPU_ERR_ARENA;
     }
+    /* Runs, self-tests and the bench address the input and output at their
+     * offsets in the arena, and the self-test writes the M85's reference
+     * output to npu_expect and compares the output against it.  Both tensors
+     * must lie inside the model's arena, and the reference output and the
+     * output must fit npu_expect.  The identity reference copies the whole
+     * input; the max-pool one reads two input rows and columns per output
+     * one. */
+    {
+        uint64_t in_n  = (uint64_t)g.ifm_dim * g.ifm_dim * g.channels;
+        uint64_t out_n = (uint64_t)g.ofm_dim * g.ofm_dim * g.channels;
+
+        if (g.channels == 0U ||
+            g.ifm_off > g.arena || in_n > g.arena - g.ifm_off ||
+            g.ofm_off > g.arena || out_n > g.arena - g.ofm_off ||
+            out_n > sizeof npu_expect) {
+            return TIKU_RA8P1_NPU_ERR_IMAGE;
+        }
+        if (g.kind == TIKU_RA8P1_NPU_KIND_IDENTITY
+                ? in_n > sizeof npu_expect
+                : 2UL * g.ofm_dim > g.ifm_dim) {
+            return TIKU_RA8P1_NPU_ERR_IMAGE;
+        }
+    }
     if (g.cms_len > sizeof npu_cms || g.wts_len > sizeof npu_wts ||
         m.len < NPU_ETH_HDR + g.cms_len + g.wts_len) {
         return TIKU_RA8P1_NPU_ERR_IMAGE;

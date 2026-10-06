@@ -862,9 +862,12 @@ tiku_nvm_backend_t *tiku_ra8p1_xflash_backend(void)
      * Octal is entered first so every access through the backend uses one
      * protocol: DOPI moves bytes pair-swapped relative to SPI, and data
      * written in one protocol reads back scrambled in the other, where a
-     * stored object's header magic fails to match.
+     * stored object's header magic fails to match.  With octal not entered
+     * there is no backend.
      */
-    (void)tiku_ra8p1_xflash_opi_enter();     /* idempotent once entered */
+    if (tiku_ra8p1_xflash_opi_enter() != TIKU_RA8P1_XFLASH_OK) {
+        return NULL;
+    }
 
     /* Reads through this backend are pointer dereferences into the mapped
      * window, so the map has to be open before anyone holds the pointer. */

@@ -159,7 +159,11 @@ typedef struct {
  *
  * @param name  File in /data, packed by tools/npu/velapack.py
  * @return TIKU_RA8P1_NPU_OK, ERR_ARENA when the arena exceeds
- *         TIKU_NPU_ARENA_MAX, or ERR_IMAGE when the file is absent or unusable
+ *         TIKU_NPU_ARENA_MAX, or ERR_IMAGE when the file is absent or
+ *         unusable: no channels, an input or output outside the model's
+ *         arena, an output (for an identity model, an input too) larger
+ *         than TIKU_NPU_ARENA_MAX / 4 bytes, or a max-pool output side
+ *         larger than half its input side
  */
 int tiku_ra8p1_npu_load(const char *name);
 
