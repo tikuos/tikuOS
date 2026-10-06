@@ -288,15 +288,17 @@ void tiku_process_init(void)
 /**
  * @brief Start a process.
  *
- * Does nothing while @p p is running.  Otherwise re-inits the protothread,
- * moves to a new generation and links @p p at the list head in an atomic
- * section; a full queue delivers INIT by a direct call instead.
+ * Does nothing while @p p is running.  Otherwise, in an atomic section,
+ * re-inits the protothread, moves to a new generation and links @p p at the
+ * list head unless it is listed; a full queue gets INIT by a direct call.
  *
  * @param p    Process to start
  * @param data Data passed with the INIT event
  */
 void tiku_process_start(struct tiku_process *p, tiku_event_data_t data)
 {
+    struct tiku_process *q;
+
     if (p->is_running) {
         return;
     }
@@ -312,8 +314,14 @@ void tiku_process_start(struct tiku_process *p, tiku_event_data_t data)
         p->generation = 1u;
     }
 
-    p->next = tiku_process_list_head;
-    tiku_process_list_head = p;
+    q = tiku_process_list_head;
+    while (q != NULL && q != p) {
+        q = q->next;
+    }
+    if (q == NULL) {
+        p->next = tiku_process_list_head;
+        tiku_process_list_head = p;
+    }
     p->is_running = 1;
     p->state = TIKU_PROCESS_STATE_READY;
     p->start_time = tiku_clock_time();
@@ -1227,8 +1235,8 @@ struct tiku_process *tiku_process_get(int8_t pid)
  *
  * @param pid  Process identifier
  * @return 0 on success, -1 if the pid does not resolve to a process
- * @note Bring it back with tiku_process_resume(): tiku_process_start() links
- *       the still-listed process a second time.
+ * @note tiku_process_resume() continues it where it yielded;
+ *       tiku_process_start() restarts it from the top.
  */
 int8_t tiku_process_stop(int8_t pid)
 {

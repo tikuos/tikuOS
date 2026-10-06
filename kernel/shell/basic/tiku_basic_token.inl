@@ -266,8 +266,8 @@ basic_crunch(char *dst, size_t cap, const char *src)
 /**
  * @brief Expand token bytes back to canonical keyword text.
  *
- * Inverse of basic_crunch up to keyword case (quote-aware; REM / DATA raw
- * tails copied verbatim).
+ * Inverse of basic_crunch up to keyword case (quote-aware; REM, DATA and
+ * ' raw tails copied verbatim).
  *
  * @return Number of bytes written (excluding the NUL), or -1 if @p cap was
  *         too small for the full expansion (dst still NUL-terminated).
@@ -277,7 +277,7 @@ basic_detok(char *dst, size_t cap, const char *src)
 {
     size_t o      = 0;
     int    in_str = 0;
-    int    raw    = 0;                       /* 1 after REM / DATA */
+    int    raw    = 0;                       /* 1 after REM, DATA or ' */
 
     while (*src != '\0') {
         uint8_t b = (uint8_t)*src;
@@ -301,6 +301,7 @@ basic_detok(char *dst, size_t cap, const char *src)
             continue;
         }
         if (!raw && b == '"') in_str = !in_str;
+        if (!in_str && b == '\'') raw = 1;
         dst[o++] = (char)b;
         src++;
     }
@@ -334,6 +335,7 @@ basic_detok_print(const char *src)
             continue;
         }
         if (!raw && b == '"') in_str = !in_str;
+        if (!in_str && b == '\'') raw = 1;
         SHELL_PRINTF("%c", (char)b);
         src++;
     }

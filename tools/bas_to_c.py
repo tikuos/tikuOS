@@ -41,8 +41,9 @@ def escape_for_c_string(s: str) -> str:
     """Escape a single line for inclusion in a C string literal.
 
     Backslash, double quote and tab get their C escapes and any other control
-    character below 0x20 becomes \\xNN; every other character, UTF-8
-    included, passes through unchanged.
+    character below 0x20 becomes a three-digit octal escape \\NNN, which ends
+    after its third digit whatever character follows; every other character,
+    UTF-8 included, passes through unchanged.
     """
     out = []
     for ch in s:
@@ -53,7 +54,7 @@ def escape_for_c_string(s: str) -> str:
         elif ch == "\t":
             out.append("\\t")
         elif ord(ch) < 0x20:
-            out.append(f"\\x{ord(ch):02x}")
+            out.append(f"\\{ord(ch):03o}")
         else:
             out.append(ch)
     return "".join(out)

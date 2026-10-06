@@ -496,9 +496,8 @@ void tiku_process_init(void);
  *
  * @param p    Process to start
  * @param data Data passed with the INIT event
- * @note A process stopped by tiku_process_stop() is still on the list, and
- *       starting it links it a second time; tiku_process_resume() is the
- *       call that brings it back.
+ * @note A process stopped by tiku_process_stop() is still on the list and
+ *       is not linked again; starting it runs its body from the top.
  */
 void tiku_process_start(struct tiku_process *p,
                         tiku_event_data_t data);

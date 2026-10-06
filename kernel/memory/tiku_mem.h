@@ -823,9 +823,9 @@ tiku_mem_err_t tiku_persist_init(tiku_persist_store_t *store);
 /**
  * @brief Register an NVM buffer under a key.
  *
- * An existing key keeps its length and write count and takes the new pointer
- * and capacity; the value bytes are not copied, so they carry over only when
- * the buffer keeps its address.  A new key takes the first empty slot.
+ * An existing key takes the new pointer and capacity and keeps its write
+ * count, and keeps its length unless the capacity is smaller, which drops the
+ * value; no bytes are copied.  A new key takes the first empty slot.
  *
  * @param store     Store to register into
  * @param key       Null-terminated key string
