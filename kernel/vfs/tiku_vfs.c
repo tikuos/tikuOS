@@ -1551,6 +1551,8 @@ typedef struct {
     char  *out;   /**< output buffer                              */
     size_t max;   /**< capacity of @ref out                       */
     size_t off;   /**< running length; may exceed max (truncated) */
+    unsigned long skip;  /**< lines left out before the first written */
+    unsigned long line;  /**< lines rendered so far, written or not   */
 } vfs_manifest_sink_t;
 
 /**
@@ -1584,6 +1586,9 @@ static void manifest_line(vfs_manifest_sink_t *s, const char *path,
     char  *dst  = s->out + ((s->off < s->max) ? s->off : s->max);
     int    m;
 
+    if (s->line++ < s->skip) {
+        return;
+    }
     /* The descriptor is one comma-separated field; "-" when untyped. */
     if (d == NULL) {
         meta[0] = '-';
@@ -1651,7 +1656,7 @@ static void manifest_rec(vfs_manifest_sink_t *s, const tiku_vfs_node_t *node,
     }
 }
 
-int tiku_vfs_manifest(char *buf, size_t max)
+int tiku_vfs_manifest_from(char *buf, size_t max, unsigned long first)
 {
     vfs_manifest_sink_t s;
     char path[TIKU_VFS_PATH_MAX];
@@ -1660,6 +1665,8 @@ int tiku_vfs_manifest(char *buf, size_t max)
     s.out = buf;
     s.max = max;
     s.off = 0;
+    s.skip = first;
+    s.line = 0;
     if (buf != NULL && max > 0u) {
         buf[0] = '\0';
     }
@@ -1667,15 +1674,62 @@ int tiku_vfs_manifest(char *buf, size_t max)
         return 0;
     }
 
-    /* Self-describing header row. */
-    m = snprintf(buf, max,
-                 "# path\ttype\tperms\tmeta(vtype,unit,fresh,cost[,lo..hi])"
-                 "\tcap\tid\n");
-    if (m > 0) {
-        s.off += (size_t)m;
+    /* Self-describing header row: line 0. */
+    if (s.line++ >= s.skip) {
+        m = snprintf(buf, max,
+                     "# path\ttype\tperms\tmeta(vtype,unit,fresh,cost[,lo..hi])"
+                     "\tcap\tid\n");
+        if (m > 0) {
+            s.off += (size_t)m;
+        }
     }
 
     path[0] = '\0';
     manifest_rec(&s, vfs_root, path, sizeof path, 0u);
     return (int)s.off;
+}
+
+int tiku_vfs_manifest(char *buf, size_t max)
+{
+    return tiku_vfs_manifest_from(buf, max, 0ul);
+}
+
+int tiku_vfs_read_lines(const char *path, unsigned long first, char *buf,
+                        size_t max)
+{
+    size_t total;
+    int n = vfs_read_path(path, buf, max, &total);
+    char *p, *end;
+
+    if (n < 0 || max == 0u) {
+        return n;
+    }
+    if (total >= max && path != NULL &&
+        strcmp(path, "/sys/vfs/manifest") == 0) {
+        /* Rendered again from the line asked for, so every line of a
+         * manifest longer than the buffer is reached by some page. */
+        n = tiku_vfs_manifest_from(buf, max, first);
+        first = 0ul;
+    }
+    if (n > (int)max - 1) {
+        n = (int)max - 1;
+    }
+    buf[n] = '\0';
+    end = buf + n;
+    if ((size_t)n == max - 1u) {
+        /* A render cut mid-line ends at its last whole line: a reader
+         * counting lines would otherwise skip the cut one's whole copy. */
+        while (end > buf && end[-1] != '\n') {
+            end--;
+        }
+        *end = '\0';
+    }
+    for (p = buf; first > 0ul && p < end; first--) {
+        char *nl = memchr(p, '\n', (size_t)(end - p));
+
+        p = (nl != NULL) ? nl + 1 : end;
+    }
+    n = (int)(end - p);
+    memmove(buf, p, (size_t)n + 1u);
+    return n;
 }

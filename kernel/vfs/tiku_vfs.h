@@ -837,4 +837,22 @@ uint8_t tiku_vfs_depth(void);
  */
 int tiku_vfs_manifest(char *buf, size_t max);
 
+/**
+ * @brief tiku_vfs_manifest() from line @p first on; the header row is
+ *        line 0.
+ * @return The length of the lines rendered, snprintf-style.
+ */
+int tiku_vfs_manifest_from(char *buf, size_t max, unsigned long first);
+
+/**
+ * @brief Read node @p path from line @p first on, as whole lines.
+ *
+ * The manifest is rendered from that line when it is longer than @p max,
+ * so a reader paging by line reaches all of it; any other node gives the
+ * lines it has within @p max.
+ * @return Bytes placed in @p buf, NUL-terminated, or a negative status.
+ */
+int tiku_vfs_read_lines(const char *path, unsigned long first, char *buf,
+                        size_t max);
+
 #endif /* TIKU_VFS_H_ */

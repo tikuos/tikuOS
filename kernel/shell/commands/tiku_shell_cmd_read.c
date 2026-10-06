@@ -99,7 +99,14 @@ tiku_shell_cmd_read(uint8_t argc, const char *argv[])
 
     tiku_shell_cwd_resolve(argv[1], resolved, sizeof(resolved));
 
-    n = tiku_vfs_read(resolved, buf, sizeof(buf) - 1);
+    /* A page starts at its line in the VFS, which renders the manifest
+     * from there; the whole of a node this buffer cannot hold is reached
+     * that way, a page at a time. */
+    n = (argc >= 3)
+        ? tiku_vfs_read_lines(resolved,
+                              strtoul(argv[2], (char **)0, 10),
+                              buf, sizeof(buf) - 1)
+        : tiku_vfs_read(resolved, buf, sizeof(buf) - 1);
     if (n < 0) {
         /* Host tooling matches "cannot read"; the status name after it
          * tells ENOENT from EACCES. */
@@ -115,14 +122,13 @@ tiku_shell_cmd_read(uint8_t argc, const char *argv[])
     }
     buf[n] = '\0';
     if (argc >= 3) {
-        /* A page: whole lines from the given one, within the byte budget
+        /* A page: whole lines from the one asked, within the byte budget
          * (the whole buffer without one).  A reader walks a node with a
          * rising line number and stops at an empty page. */
-        unsigned long line  = strtoul(argv[2], (char **)0, 10);
         unsigned long bytes = (argc >= 4) ? strtoul(argv[3], (char **)0, 10)
                                           : (unsigned long)sizeof(buf);
 
-        out = read_page(buf, n, line, bytes);
+        out = read_page(buf, n, 0ul, bytes);
         n = (int)strlen(out);
     }
     SHELL_PRINTF("%s", out);
