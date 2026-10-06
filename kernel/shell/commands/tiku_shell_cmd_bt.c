@@ -16,6 +16,7 @@
 #include "tiku_shell_cmd_bt.h"
 #include <kernel/shell/tiku_shell.h>
 #include <interfaces/bluetooth/tiku_bt.h>
+#include <tikukits/crypto/sha256/tiku_kits_crypto_sha256.h>  /* key print */
 #if TIKU_DRV_BLE_ESP_ENABLE
 #include <drivers/wifi/esp/tiku_drv_ble_esp.h>
 #endif
@@ -560,13 +561,15 @@ static void bt_disconnect(uint8_t argc, const char *argv[])
 
 /**
  * @brief Handle "bt bonds": list the stored LE Secure Connections bonds.
+ *
+ * The Key column is the first 4 bytes of SHA-256 of the bond's LTK; the LTK
+ * itself is not printed.
  */
 static void bt_bonds(void)
 {
     uint8_t slot;
     uint8_t shown = 0U;
-    SHELL_PRINTF(" ##  Peer               Type    LTK"
-                 "                              Flags\n");
+    SHELL_PRINTF(" ##  Peer              Type    Key       Flags\n");
     for (slot = 0U; slot < TIKU_BT_BOND_MAX; ++slot) {
         tiku_bt_bond_record_t rec;
         int rc = tiku_bt_bond_load(slot, &rec);
@@ -583,8 +586,10 @@ static void bt_bonds(void)
         }
         SHELL_PRINTF(" %s  ", bt_addr_type_name(rec.peer_addr_type));
         {
+            uint8_t digest[TIKU_KITS_CRYPTO_SHA256_DIGEST_SIZE];
             uint8_t k;
-            for (k = 0U; k < 16U; ++k) put_hex2(rec.ltk[k]);
+            tiku_kits_crypto_sha256_hash(rec.ltk, sizeof(rec.ltk), digest);
+            for (k = 0U; k < 4U; ++k) put_hex2(digest[k]);
         }
         SHELL_PRINTF("  0x");
         put_hex4((uint16_t)((rec.flags >> 16) & 0xFFFFU));

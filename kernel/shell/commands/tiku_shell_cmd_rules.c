@@ -117,7 +117,9 @@ rules_parse_id(const char *s, uint16_t *out)
         if (s[i] < '0' || s[i] > '9') {
             return 0;
         }
-        if (val > (uint16_t)(65535U / 10U)) {
+        if (val > (uint16_t)(65535U / 10U) ||
+            (val == (uint16_t)(65535U / 10U) &&
+             (uint16_t)(s[i] - '0') > (uint16_t)(65535U % 10U))) {
             return 0;
         }
         val = (uint16_t)(val * 10U + (uint16_t)(s[i] - '0'));

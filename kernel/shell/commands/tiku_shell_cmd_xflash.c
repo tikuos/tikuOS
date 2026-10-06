@@ -169,16 +169,25 @@ static int xflash_getc_timeout(void)
  * polled, with only its receive FIFO to hold bytes, and a page program
  * outlasts the 87 us one byte takes at 115200 baud.
  *
- * @param addr  Byte offset into the device
+ * @param addr  Byte offset into the device; one that is not a multiple of
+ *              TIKU_XSPI_SECTOR_SIZE is refused
  * @param len   Image length in bytes
+ * @note Every sector the image reaches is erased whole, so the bytes after
+ *       the image in its last sector read 0xFF.
  */
 static void xflash_write(uint32_t addr, uint32_t len)
 {
     uint8_t *buf = (uint8_t *)(((uintptr_t)&_end + 31u) & ~(uintptr_t)31u);
     uintptr_t top = (uintptr_t)&__stack - XFLASH_STACK_RESERVE;
 
-    if (len == 0u || addr + len > TIKU_XSPI_SIZE_BYTES) {
+    if (len == 0u || addr >= TIKU_XSPI_SIZE_BYTES ||
+        len > TIKU_XSPI_SIZE_BYTES - addr) {
         SHELL_PRINTF("xflash: bad range\n");
+        return;
+    }
+    if ((addr & (TIKU_XSPI_SECTOR_SIZE - 1u)) != 0u) {
+        SHELL_PRINTF("xflash: address must be a multiple of %x\n",
+                     (unsigned)TIKU_XSPI_SECTOR_SIZE);
         return;
     }
     if ((uintptr_t)buf + len > top) {
@@ -239,6 +248,37 @@ static void xflash_write(uint32_t addr, uint32_t len)
                  (back == sum) ? "(matches)" : "(MISMATCH)");
 }
 
+/**
+ * @brief Parse hex @p s, with or without a 0x or 0X prefix, into *out.
+ *
+ * @return 1 on success, 0 for no digits, a character that is not a hex digit,
+ *         or a value above 0xFFFFFFFF
+ */
+static int xflash_parse_hex(const char *s, uint32_t *out)
+{
+    uint32_t v = 0u;
+
+    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+        s += 2;
+    }
+    if (*s == '\0') {
+        return 0;
+    }
+    for (; *s != '\0'; s++) {
+        uint32_t d;
+        if (*s >= '0' && *s <= '9')      { d = (uint32_t)(*s - '0'); }
+        else if (*s >= 'a' && *s <= 'f') { d = (uint32_t)(*s - 'a' + 10); }
+        else if (*s >= 'A' && *s <= 'F') { d = (uint32_t)(*s - 'A' + 10); }
+        else { return 0; }
+        if (v > 0x0FFFFFFFUL) {
+            return 0;
+        }
+        v = (v << 4) | d;
+    }
+    *out = v;
+    return 1;
+}
+
 void tiku_shell_cmd_xflash(uint8_t argc, const char *argv[])
 {
     if (!tiku_xspi_ready()) {
@@ -279,15 +319,9 @@ void tiku_shell_cmd_xflash(uint8_t argc, const char *argv[])
     }
     if (strcmp(argv[1], "write") == 0 && argc >= 4) {
         uint32_t a = 0u, l = 0u;
-        for (const char *q = argv[2]; *q; q++) {
-            uint32_t d = (*q <= '9') ? (uint32_t)(*q - '0')
-                                     : (uint32_t)((*q | 32) - 'a' + 10);
-            a = (a << 4) | d;
-        }
-        for (const char *q = argv[3]; *q; q++) {
-            uint32_t d = (*q <= '9') ? (uint32_t)(*q - '0')
-                                     : (uint32_t)((*q | 32) - 'a' + 10);
-            l = (l << 4) | d;
+        if (!xflash_parse_hex(argv[2], &a) || !xflash_parse_hex(argv[3], &l)) {
+            SHELL_PRINTF("xflash: address and length must be hex\n");
+            return;
         }
         xflash_write(a, l);
         return;

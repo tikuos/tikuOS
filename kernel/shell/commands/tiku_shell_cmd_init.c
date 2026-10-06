@@ -85,10 +85,11 @@ cmd_parse_u8(const char *s, uint8_t *out)
 /**
  * @brief Join argv[first..argc-1] into @p buf with single spaces.
  *
- * Text past @p bufsz - 1 bytes is dropped without an error; @p buf is always
- * NUL-terminated.
+ * Text past @p bufsz - 1 bytes is dropped; @p buf is always NUL-terminated.
+ *
+ * @return 0 when the whole text fits, 1 when text was dropped
  */
-static void
+static uint8_t
 cmd_join_args(char *buf, uint8_t bufsz,
               uint8_t argc, const char *argv[], uint8_t first)
 {
@@ -97,15 +98,22 @@ cmd_join_args(char *buf, uint8_t bufsz,
 
     memset(buf, 0, bufsz);
 
-    for (i = first; i < argc && pos < bufsz - 1; i++) {
+    for (i = first; i < argc; i++) {
         const char *p = argv[i];
-        if (i > first && pos < bufsz - 1) {
+        if (i > first) {
+            if (pos >= bufsz - 1) {
+                return 1;
+            }
             buf[pos++] = ' ';
         }
-        while (*p && pos < bufsz - 1) {
+        while (*p) {
+            if (pos >= bufsz - 1) {
+                return 1;
+            }
             buf[pos++] = *p++;
         }
     }
+    return 0;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -168,7 +176,11 @@ cmd_init_add(uint8_t argc, const char *argv[])
         return;
     }
 
-    cmd_join_args(cmd_buf, sizeof(cmd_buf), argc, argv, 4);
+    if (cmd_join_args(cmd_buf, sizeof(cmd_buf), argc, argv, 4)) {
+        SHELL_PRINTF("Error: command longer than %u characters\n",
+                     (unsigned)(TIKU_INIT_CMD_SIZE - 1));
+        return;
+    }
 
     if (tiku_init_add(seq, argv[3], cmd_buf) < 0) {
         if (!cmd_init_has(argv[3]) &&

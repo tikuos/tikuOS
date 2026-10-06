@@ -144,9 +144,10 @@ tiku_shell_cmd_rmdir(uint8_t argc, const char *argv[])
  *
  * A /data file streams: recv writes it through the store's writer and send
  * reads it in place, so it may be any size the store holds while RAM stays at
- * one buffer.  Every other node (under /dev and /sys) is written or read as
- * one whole value of at most one buffer.  The shell is single-threaded, so
- * the buffer is shared.
+ * one buffer.  Every other node (under /dev and /sys, and a static node
+ * under /data such as /data/basic) is written or read as one whole value of
+ * at most one buffer.  The shell is single-threaded, so the buffer is
+ * shared.
  */
 
 static uint8_t fs_xfer_buf[TIKU_TFS_SLOT_DATA];
@@ -154,7 +155,8 @@ static uint8_t fs_xfer_buf[TIKU_TFS_SLOT_DATA];
 /**
  * @brief The store file name after a resolved path's "/data/" prefix.
  *
- * Only these paths stream; every other node goes through the one buffer.
+ * Only these paths stream, and only when no static node resolves them; every
+ * other node goes through the one buffer.
  *
  * @return The name, or NULL when the path is not a file under /data/
  */
@@ -199,10 +201,11 @@ tiku_shell_cmd_recv(uint8_t argc, const char *argv[])
     }
     tiku_shell_cwd_resolve(argv[1], resolved, sizeof(resolved));
 
-    /* A /data target streams; anything else is a whole-value node and stays
-     * bounded by the one buffer. */
+    /* A /data file streams into the store.  A static node (/data/basic)
+     * resolves first, as in the VFS; it and every other node take one whole
+     * value bounded by the one buffer. */
     dname = fs_data_name(resolved);
-    if (dname != NULL) {
+    if (dname != NULL && tiku_vfs_resolve(resolved) == NULL) {
         fs = tiku_vfs_tree_data_store();
     }
     if (fs != NULL) {

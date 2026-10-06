@@ -2460,8 +2460,11 @@ endif
 ifneq ($(filter 1,$(TIKU_DRV_WIFI_CYW43_ENABLE) $(TIKU_DRV_WIFI_ESP_ENABLE)),)
 SRCS += kernel/shell/commands/tiku_shell_cmd_wifi.c
 endif
+# bt bonds prints a SHA-256 fingerprint of each key; SRCS is de-duplicated, so
+# a build that also lists the kit's SHA-256 compiles it once.
 ifneq ($(filter 1,$(TIKU_DRV_WIFI_CYW43_BT_ENABLE) $(TIKU_DRV_BLE_ESP_ENABLE)),)
 SRCS += kernel/shell/commands/tiku_shell_cmd_bt.c
+SRCS += tikukits/crypto/sha256/tiku_kits_crypto_sha256.c
 endif
 ifeq ($(TIKU_DRV_SDR_ESP_ENABLE),1)
 SRCS += kernel/shell/commands/tiku_shell_cmd_sdr.c
