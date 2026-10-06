@@ -8,7 +8,8 @@
  * tiku_cpu_watchdog_arch.c - STM32N6 independent watchdog (IWDG).
  *
  * Counts off the LSI, independent of the system clock.  Once started, only a
- * reset stops it, so off and pause feed the counter and record the request.
+ * reset stops it, so off and pause feed the counter, and after off both the
+ * kicks and every system tick feed it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,9 +23,12 @@
 /** @brief Slowest prescaler code; the divider it selects is 4 << code. */
 #define IWDG_PR_MAX     6U
 
-/** @brief Last requested state; running gates every feed. */
+/** @brief Driver state.  running is set by the first start and, like the
+ *         counter, stays set until a reset; it gates every feed.  off is set
+ *         between off and the next start, and lets the tick feed. */
 static struct {
     uint8_t             running;
+    uint8_t             off;
     uint8_t             paused;
     tiku_wdt_clk_t      src;
     tiku_wdt_interval_t interval;
@@ -42,12 +46,12 @@ static void wdt_sync(void) {
 }
 
 void tiku_cpu_stm32n6_watchdog_off_arch(void) {
-    /* Only a reset stops the IWDG, so off feeds it once more and records
-     * that the caller wanted it off. */
+    /* Only a reset stops the IWDG, so off feeds it once more and leaves
+     * running set: kicks and system ticks after off feed the counter. */
     if (wdt_state.running) {
         TIKU_REG32(STM32N6_IWDG_KR) = STM32N6_IWDG_KR_FEED;
     }
-    wdt_state.running = 0U;
+    wdt_state.off     = 1U;
     wdt_state.paused  = 0U;
 }
 
@@ -83,6 +87,7 @@ void tiku_cpu_stm32n6_watchdog_on_arch(tiku_wdt_clk_t src,
     wdt_state.src      = src;
     wdt_state.interval = interval;
     wdt_state.running  = 1U;
+    wdt_state.off      = 0U;
     wdt_state.paused   = 0U;
 }
 
@@ -104,6 +109,12 @@ void tiku_cpu_stm32n6_watchdog_resume_arch(int kick_on_resume) {
 
 void tiku_cpu_stm32n6_watchdog_kick_arch(void) {
     if (wdt_state.running) {
+        TIKU_REG32(STM32N6_IWDG_KR) = STM32N6_IWDG_KR_FEED;
+    }
+}
+
+void tiku_cpu_stm32n6_watchdog_tick_arch(void) {
+    if (wdt_state.running && wdt_state.off) {
         TIKU_REG32(STM32N6_IWDG_KR) = STM32N6_IWDG_KR_FEED;
     }
 }

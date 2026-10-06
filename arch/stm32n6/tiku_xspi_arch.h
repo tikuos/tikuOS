@@ -105,7 +105,8 @@ tiku_xspi_err_t tiku_xspi_read(uint32_t addr, void *buf, uint32_t len);
  * @brief Erase the 4 KB sector containing @p addr.
  *
  * @param addr  Any byte in the sector
- * @return TIKU_XSPI_OK, or an error
+ * @return TIKU_XSPI_OK, TIKU_XSPI_ERR_PROGRAM when the device reports the
+ *         erase failed or the sector protected, or another error
  * @note Erase is the wear-limited operation; a sector tolerates a finite count.
  */
 tiku_xspi_err_t tiku_xspi_erase_sector(uint32_t addr);
@@ -116,7 +117,8 @@ tiku_xspi_err_t tiku_xspi_erase_sector(uint32_t addr);
  * @param addr  Byte offset into the device
  * @param buf   Source
  * @param len   Byte count
- * @return TIKU_XSPI_OK, or an error
+ * @return TIKU_XSPI_OK, TIKU_XSPI_ERR_PROGRAM when the device reports a
+ *         page program failed or the page protected, or another error
  * @note Programming only clears bits; the target must be erased first.
  */
 tiku_xspi_err_t tiku_xspi_program(uint32_t addr, const void *buf, uint32_t len);

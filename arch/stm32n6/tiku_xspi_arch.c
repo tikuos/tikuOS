@@ -31,6 +31,7 @@
  * only the first 16 MB of the part. */
 #define CMD_READ_ID         0x9FU
 #define CMD_READ_STATUS     0x05U
+#define CMD_READ_SECURITY   0x2BU
 #define CMD_WRITE_ENABLE    0x06U
 #define CMD_READ_4B         0x13U
 #define CMD_PAGE_PROGRAM_4B 0x12U
@@ -38,6 +39,11 @@
 
 #define STATUS_WIP          0x01U   /* write in progress */
 #define STATUS_WEL          0x02U   /* write enable latch */
+
+/* Security register flags for the last program or erase: set when it failed
+ * or its target was protected, cleared by the next one that succeeds. */
+#define SCUR_P_FAIL         0x20U
+#define SCUR_E_FAIL         0x40U
 
 /* Polls before a wait returns TIKU_XSPI_ERR_TIMEOUT. */
 #define XSPI_SPINS          2000000UL
@@ -163,6 +169,22 @@ static tiku_xspi_err_t xspi_wait_idle(unsigned long spins) {
         }
     }
     return TIKU_XSPI_ERR_TIMEOUT;
+}
+
+/**
+ * @brief Read the device's verdict on the erase or program just finished.
+ *
+ * @param fail  SCUR_E_FAIL after an erase, SCUR_P_FAIL after a program
+ * @return TIKU_XSPI_OK, a transfer error, or TIKU_XSPI_ERR_PROGRAM when the
+ *         security register has @p fail set
+ */
+static tiku_xspi_err_t xspi_check_fail(uint8_t fail) {
+    uint8_t scur = 0U;
+    tiku_xspi_err_t rc = xspi_xfer(CMD_READ_SECURITY, 0U, 0, &scur, 1U, 0);
+    if (rc != TIKU_XSPI_OK) {
+        return rc;
+    }
+    return (scur & fail) ? TIKU_XSPI_ERR_PROGRAM : TIKU_XSPI_OK;
 }
 
 /**
@@ -301,6 +323,9 @@ tiku_xspi_err_t tiku_xspi_erase_sector(uint32_t addr) {
         return rc;
     }
     rc = xspi_wait_idle(XSPI_ERASE_SPINS);
+    if (rc == TIKU_XSPI_OK) {
+        rc = xspi_check_fail(SCUR_E_FAIL);
+    }
 
     /* The D-cache can hold the old sector through the memory-mapped alias,
      * and a reader would see pre-erase bytes and a stale CRC. */
@@ -342,6 +367,10 @@ tiku_xspi_err_t tiku_xspi_program(uint32_t addr, const void *buf, uint32_t len) 
             return rc;
         }
         rc = xspi_wait_idle(XSPI_ERASE_SPINS);
+        if (rc != TIKU_XSPI_OK) {
+            return rc;
+        }
+        rc = xspi_check_fail(SCUR_P_FAIL);
         if (rc != TIKU_XSPI_OK) {
             return rc;
         }

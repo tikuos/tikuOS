@@ -37,7 +37,7 @@ uint32_t tiku_stm32n6_exti_hits(uint8_t line) {
 }
 
 int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin, tiku_gpio_edge_t edge) {
-    if (pin > 15U || port > 15U) {
+    if (pin > 15U) {
         return TIKU_GPIO_IRQ_ERR_INVALID;
     }
     if (edge != TIKU_GPIO_EDGE_RISING && edge != TIKU_GPIO_EDGE_FALLING &&
@@ -45,15 +45,16 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin, tiku_gpio_edge_t edge) 
         return TIKU_GPIO_IRQ_ERR_INVALID;
     }
 
-    tiku_stm32n6_gpio_clock_enable(port);
+    /* The line watches the pad, so the pin becomes an input.  PUPDR is left
+     * as it is, and the board's resistors set the idle level.  The GPIO
+     * driver refuses a port with no register block (I..M, or above Q) before
+     * writing anything. */
+    if (tiku_gpio_arch_set_input(port, pin) != 0) {
+        return TIKU_GPIO_IRQ_ERR_INVALID;
+    }
+
     TIKU_REG32(STM32N6_RCC_APB4HENR) |= STM32N6_RCC_APB4HENR_SYSCFGEN;
     (void)TIKU_REG32(STM32N6_RCC_APB4HENR);
-
-    /* The line watches the pad, so the pin becomes an input.  PUPDR is left
-     * as it is, and the board's resistors set the idle level. */
-    uint32_t moder = TIKU_REG32(STM32N6_GPIO_MODER(port));
-    moder &= ~(3UL << (pin * 2U));
-    TIKU_REG32(STM32N6_GPIO_MODER(port)) = moder;
 
     /* Four lines per EXTICR word, one byte each. */
     uint32_t cr_idx  = (uint32_t)pin / 4U;

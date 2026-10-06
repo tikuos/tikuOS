@@ -14,6 +14,7 @@
  */
 
 #include "tiku_timer_arch.h"
+#include "tiku_cpu_watchdog_arch.h"
 #include "tiku_stm32n6_regs.h"
 #include <kernel/scheduler/tiku_sched.h>
 
@@ -100,8 +101,8 @@ void tiku_clock_arch_init(void) {
 }
 
 /**
- * @brief LPTIM1 interrupt: dispatch the htimer compare, then advance the tick
- *        and second counters on autoreload.
+ * @brief LPTIM1 interrupt: dispatch the htimer compare, then on autoreload
+ *        advance the tick and second counters and feed a watchdog turned off.
  *
  * Replaces the weak alias in tiku_crt_early.c.
  */
@@ -123,6 +124,8 @@ void tiku_stm32n6_lptim1_isr(void) {
             g_subsec = 0U;
             g_seconds++;
         }
+        tiku_cpu_stm32n6_watchdog_tick_arch();
+
         /* A new counter period opened, so an alarm that was too far out to
          * program may now fit. */
         tiku_stm32n6_htimer_on_tick();

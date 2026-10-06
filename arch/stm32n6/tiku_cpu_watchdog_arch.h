@@ -40,10 +40,11 @@ typedef enum {
 typedef uint16_t tiku_wdt_interval_t;
 
 /**
- * @brief Record the watchdog as off and feed it one last time.
+ * @brief Feed the watchdog and hand its feeding to the system tick until the
+ *        next start; the IWDG cannot be turned off.
  *
- * @note The IWDG keeps counting; only a reset stops it.  A caller that stops
- *       kicking after this is still reset once the interval expires.
+ * @note The IWDG keeps counting; only a reset stops it.  Kicks after this
+ *       still feed it, and so does every tick while the tick interrupt runs.
  */
 void tiku_cpu_stm32n6_watchdog_off_arch(void);
 
@@ -75,5 +76,14 @@ void tiku_cpu_stm32n6_watchdog_resume_arch(int kick_on_resume);
 
 /** @brief Reload the watchdog counter. */
 void tiku_cpu_stm32n6_watchdog_kick_arch(void);
+
+/**
+ * @brief Reload the counter if the watchdog is turned off.
+ *
+ * Writes nothing while the watchdog is on or before its first start.
+ *
+ * @note Called by the LPTIM1 interrupt on every system tick.
+ */
+void tiku_cpu_stm32n6_watchdog_tick_arch(void);
 
 #endif /* TIKU_STM32N6_CPU_WATCHDOG_ARCH_H_ */

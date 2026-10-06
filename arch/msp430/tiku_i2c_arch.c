@@ -37,8 +37,9 @@
 /**
  * @brief Wait for a flag in UCB0IFG with timeout and NACK detection.
  *
- * A NACK sends STOP and returns TIKU_I2C_ERR_NACK; a timeout requests STOP
- * and returns TIKU_I2C_ERR_TIMEOUT.
+ * A NACK sends STOP, waits up to I2C_TIMEOUT polls for it to complete and
+ * returns TIKU_I2C_ERR_NACK; a timeout requests STOP and returns
+ * TIKU_I2C_ERR_TIMEOUT.
  *
  * @param flag  The interrupt flag bit to wait for (e.g. UCTXIFG0)
  * @return TIKU_I2C_OK if flag was set, negative error code otherwise
@@ -52,7 +53,8 @@ i2c_wait_flag(uint16_t flag)
         if (UCB0IFG & UCNACKIFG) {
             UCB0IFG &= ~UCNACKIFG;
             UCB0CTLW0 |= UCTXSTP;
-            while (UCB0CTLW0 & UCTXSTP) {
+            timeout = I2C_TIMEOUT;
+            while ((UCB0CTLW0 & UCTXSTP) && --timeout != 0) {
                 /* wait for STOP to complete */
             }
             return TIKU_I2C_ERR_NACK;
