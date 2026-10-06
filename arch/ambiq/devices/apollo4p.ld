@@ -235,6 +235,12 @@ SECTIONS
     ASSERT(_end <= __tiku_stack_guard_start,
            "ERROR: TCM exhausted -- need 32K stack plus 4K guard")
 
+    /* The MRAM image (code, rodata and the .data load copy) must end below
+     * __tiku_code_limit: the end of the code window, less the module slot in
+     * builds with the loader. */
+    ASSERT(__data_load + (__data_end - __data_start) <= __tiku_code_limit,
+           "ERROR: MRAM image overruns the code window (or its module reserve)")
+
     /* The mirror holds the 16-byte V2 header and the whole .uninit image. */
     ASSERT((__uninit_end - __uninit_start) <= (__tiku_nvm_mram_size - 16),
            "ERROR: .uninit too large for the 16 KB NVM mirror page")

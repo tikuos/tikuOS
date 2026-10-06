@@ -198,7 +198,8 @@ typedef enum {
     TIKU_EMMC_ERR_CMD,      /**< host or card error, or a data mismatch     */
     TIKU_EMMC_ERR_ID,       /**< decoded capacity is 0 or above 32 GB       */
     TIKU_EMMC_ERR_ARG,      /**< bad argument, incl. a forbidden CMD6 index */
-    TIKU_EMMC_ERR_STATE,    /**< asleep, busy, or bus width not adopted     */
+    TIKU_EMMC_ERR_STATE,    /**< asleep, busy, or a bus width or timing
+                                 switch not adopted                        */
     TIKU_EMMC_ERR_NOMEM,    /**< the SRAM tier could not lend the buffer    */
 } tiku_emmc_err_t;
 

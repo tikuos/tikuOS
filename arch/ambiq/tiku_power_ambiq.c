@@ -138,7 +138,8 @@ void tiku_ambiq_cache_geometry(uint32_t *i_bytes, uint32_t *d_bytes,
 
 unsigned long tiku_ambiq_cpu_hz_measure(void)
 {
-    uint32_t t0, dt, c0, c1;
+    uint32_t t0, dt, c0, c1, now, last;
+    uint32_t freeze = 0u;
     uint32_t target = TIKU_AMBIQ_STIMER_HZ / 64u;    /* ~16 ms             */
 
     /* TRCENA and the cycle counter are turned on and left on. */
@@ -157,8 +158,18 @@ unsigned long tiku_ambiq_cpu_hz_measure(void)
         c0 = TIKU_DWT_CYCCNT;
         t0 = tiku_ambiq_stimer_now();
     }
+    /* Returns 0 if the STIMER reads the same for 2000000 polls in a row:
+     * a stopped STIMER never ends the window. */
+    last = t0;
     do {
-        dt = tiku_ambiq_stimer_now() - t0;
+        now = tiku_ambiq_stimer_now();
+        if (now != last) {
+            last = now;
+            freeze = 0u;
+        } else if (++freeze > 2000000u) {
+            return 0ul;
+        }
+        dt = now - t0;
     } while (dt < target);
     c1 = TIKU_DWT_CYCCNT;
     if (dt == 0u) {

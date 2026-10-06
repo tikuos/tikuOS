@@ -608,7 +608,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         unsigned long hz = tiku_ambiq_cpu_hz_measure();
         SHELL_PRINTF("core measured %lu Hz (DWT cycle counter timed against "
                      "the always-on STIMER)%s\n", hz,
-                     hz ? "" : " -- REFUSED: DWT unavailable or wrapped");
+                     hz ? "" : " -- REFUSED: DWT or STIMER not counting");
         return;
     }
     if (tiku_cmd_streq(argv[1], "cache") && argc >= 3) {

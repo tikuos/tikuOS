@@ -373,15 +373,17 @@ static uint32_t stimer_lfrc_calibrate(void) {
  * running) around the sleep window and back afterwards.
  *
  * @note The new source must be seen counting, or the STIMER is set back to the
- *       crystal and the call fails.  Elapsed ticks are accounted at the old
- *       rate first, then the tick is re-anchored and re-armed at the new one.
- *       Fails while a stretch is open: reclock first, then stretch.
+ *       source it ran on before the call and the call fails.  Elapsed ticks
+ *       are accounted at the old rate first, then the tick is re-anchored and
+ *       re-armed at the new one.  Fails while a stretch is open: reclock
+ *       first, then stretch.
  * @param use_lfrc  non-zero: XTAL -> LFRC (rate measured); zero: back to XTAL
  * @return the new timebase rate in Hz; 0 while a stretch is open (nothing
- *         changes) or when the new source does not count (back on XTAL)
+ *         changes) or when the new source does not count (back on the old
+ *         source, at the old rate)
  */
 uint32_t tiku_ambiq_stimer_reclock(int use_lfrc) {
-    uint32_t primask, hz;
+    uint32_t primask, hz, old_clksel;
     uint32_t clksel = use_lfrc ? 6u /* LFRC_NOMINAL */
                                : STIMER_CLKSEL_XTAL_32KHZ;
 
@@ -397,10 +399,11 @@ uint32_t tiku_ambiq_stimer_reclock(int use_lfrc) {
     if (!use_lfrc) {
         stimer_xtal_enable();              /* re-assert the SWE override  */
     }
+    old_clksel = STIMER->STCFG & 0xFu;
     STIMER->STCFG = (STIMER->STCFG & ~0xFu) | clksel;
 
     if (!stimer_verify_counting()) {
-        STIMER->STCFG = (STIMER->STCFG & ~0xFu) | STIMER_CLKSEL_XTAL_32KHZ;
+        STIMER->STCFG = (STIMER->STCFG & ~0xFu) | old_clksel;
         (void)stimer_verify_counting();
         if ((primask & 1u) == 0u) {
             __asm__ volatile ("cpsie i" ::: "memory");

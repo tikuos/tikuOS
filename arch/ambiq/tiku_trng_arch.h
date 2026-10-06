@@ -27,8 +27,8 @@
 #define TIKU_TRNG_ERR_NOT_READY -3  /**< not returned: reads call init      */
 
 /**
- * @brief One-time init: power up the CRYPTO (CryptoCell-312) domain.
- *        Idempotent; auto-called on the first read.
+ * @brief Power up the CRYPTO (CryptoCell-312) domain if it is off.
+ *        Idempotent; the reads call it before each collection.
  */
 void tiku_trng_arch_init(void);
 

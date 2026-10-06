@@ -67,9 +67,9 @@ void tiku_ambiq_cache_geometry(uint32_t *i_bytes, uint32_t *d_bytes,
  *
  * Leaves DEMCR.TRCENA and the cycle counter on.
  *
- * @note Spins until the window elapses, with no bound: a stopped STIMER
- *       hangs the call.
- * @return Core clock in Hz, or 0 if CYCCNT does not advance
+ * @note Spins until the window elapses, or until the STIMER reads the same
+ *       for 2000000 polls in a row.
+ * @return Core clock in Hz, or 0 if CYCCNT or the STIMER does not advance
  */
 unsigned long tiku_ambiq_cpu_hz_measure(void);
 

@@ -1099,16 +1099,25 @@ tiku_emmc_err_t tiku_emmc_init_at(unsigned width, uint32_t hz)
         }
         /* Re-reading EXT_CSD is a data transfer at the new width and clock,
          * so a bus that cannot carry data fails here, and a card that
-         * declined the switch shows its old width in its own register. */
+         * declined a switch shows its old width or timing in its own
+         * register.  emmc_set_high_speed() writes HS_TIMING = 1 when
+         * DEVICE_TYPE offers a high-speed mode, and nothing otherwise. */
         if (rc == TIKU_EMMC_OK) {
             trace("verify-extcsd");
             rc = emmc_read_ext_csd(s_ext);
         }
         if (rc == TIKU_EMMC_OK) {
             uint8_t want_w = (width == 8u) ? 2u : (width == 4u ? 1u : 0u);
+            int want_hs = (s_devtype &
+                           (DEVTYPE_HS_52MHZ | DEVTYPE_HS_26MHZ)) != 0u;
             s_id.ext_bus_width = s_ext[EXT_CSD_BUS_WIDTH];
             s_id.ext_hs_timing = s_ext[EXT_CSD_HS_TIMING];
             if (s_id.ext_bus_width != want_w) { rc = TIKU_EMMC_ERR_STATE; }
+            /* HS_TIMING[3:0] is the timing interface; [7:4] the driver
+             * strength, which the switch leaves at 0. */
+            if (want_hs && (s_id.ext_hs_timing & 0x0Fu) != 1u) {
+                rc = TIKU_EMMC_ERR_STATE;
+            }
         }
         if (rc != TIKU_EMMC_OK) {
             /* Return the failure, but leave the card working at the

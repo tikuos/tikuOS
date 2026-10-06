@@ -1634,6 +1634,17 @@ tiku_mem_err_t tiku_tier_attach_psram(void *base, tiku_mem_arch_size_t size);
 tiku_mem_err_t tiku_tier_detach_psram(int force);
 
 /**
+ * @brief Refuse (non-zero) or allow (0) new reservations in the PSRAM tier;
+ *        the PSRAM driver refuses them while the device is in half sleep.
+ *
+ * Live reservations are left in place; their memory must not be touched
+ * until the driver allows new ones again.  Detach and reset allow them.
+ *
+ * @return TIKU_MEM_OK, or TIKU_MEM_ERR_INVALID outside kernel context
+ */
+tiku_mem_err_t tiku_tier_suspend_psram(int suspended);
+
+/**
  * @brief Reset every tier pool to empty (destructive rewind).
  *
  * Re-wires each tier and zeroes its counters, bypassing the idempotent guard

@@ -9,7 +9,7 @@
  *
  * A ring oscillator is sampled until 192 whitened bits fill the EHR.  A failed
  * health test re-arms and retries; a source that never fills returns
- * TIKU_TRNG_ERR_TIMEOUT.  The CRYPTO domain is powered once, on the first read.
+ * TIKU_TRNG_ERR_TIMEOUT.  A collection powers the CRYPTO domain if it is off.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,7 +17,7 @@
 #include "tiku_trng_arch.h"
 #include <kernel/cpu/tiku_watchdog.h>   /* liveness kick during the gather */
 
-#if defined(TIKU_DEVICE_APOLLO510)
+#if defined(TIKU_DEVICE_APOLLO510) || defined(TIKU_DEVICE_APOLLO510B)
 #include "apollo510.h"
 #else
 #include "apollo4l.h"          /* apollo4l / apollo4p: register-compatible */
@@ -57,21 +57,20 @@
 
 static uint32_t trng_cache[TRNG_CACHE_WORDS]; /**< drained EHR words      */
 static uint8_t  trng_have;                    /**< words left in cache    */
-static uint8_t  trng_ready;                   /**< init() completed       */
 
 void tiku_trng_arch_init(void)
 {
     volatile uint32_t spin = 0;
-    if (trng_ready) {
-        return;
+
+    /* Bring the CryptoCell power domain up when it is off and wait for it to
+     * settle. */
+    if (PWRCTRL->DEVPWREN_b.PWRENCRYPTO == 0u ||
+        PWRCTRL->DEVPWRSTATUS_b.PWRSTCRYPTO == 0u) {
+        PWRCTRL->DEVPWREN_b.PWRENCRYPTO = 1u;
+        while (PWRCTRL->DEVPWRSTATUS_b.PWRSTCRYPTO == 0u &&
+               ++spin < TRNG_SPIN_LIMIT) {
+        }
     }
-    /* Bring the CryptoCell power domain up and wait for it to settle. */
-    PWRCTRL->DEVPWREN_b.PWRENCRYPTO = 1u;
-    while (PWRCTRL->DEVPWRSTATUS_b.PWRSTCRYPTO == 0u &&
-           ++spin < TRNG_SPIN_LIMIT) {
-    }
-    trng_have  = 0u;
-    trng_ready = 1u;
 }
 
 /** @brief Fill the cache with one 192-bit EHR block; OK or ERR_TIMEOUT. */
@@ -128,11 +127,11 @@ int tiku_trng_arch_read_u32(uint32_t *out)
     if (out == (uint32_t *)0) {
         return TIKU_TRNG_ERR_INVALID;
     }
-    if (!trng_ready) {
-        tiku_trng_arch_init();
-    }
     if (trng_have == 0u) {
-        int rc = trng_collect();
+        int rc;
+
+        tiku_trng_arch_init();
+        rc = trng_collect();
         if (rc != TIKU_TRNG_OK) {
             return rc;
         }

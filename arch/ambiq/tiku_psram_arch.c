@@ -732,6 +732,7 @@ tiku_psram_err_t tiku_psram_mem_read(uint32_t addr, void *buf, uint32_t n)
 {
     uint8_t *dst = (uint8_t *)buf;
     if (!s_up) { return TIKU_PSRAM_ERR_POWER; }
+    if (s_asleep) { return TIKU_PSRAM_ERR_ARG; }
     while (n != 0u) {
         uint32_t chunk = (n > PSRAM_CHUNK) ? PSRAM_CHUNK : n;
         uint32_t words[PSRAM_CHUNK / 4u];
@@ -755,6 +756,7 @@ tiku_psram_err_t tiku_psram_mem_write(uint32_t addr, const void *buf, uint32_t n
 {
     const uint8_t *src = (const uint8_t *)buf;
     if (!s_up) { return TIKU_PSRAM_ERR_POWER; }
+    if (s_asleep) { return TIKU_PSRAM_ERR_ARG; }
     while (n != 0u) {
         uint32_t chunk = (n > PSRAM_CHUNK) ? PSRAM_CHUNK : n;
         uint32_t words[PSRAM_CHUNK / 4u];
@@ -806,8 +808,32 @@ static tiku_psram_err_t psram_program_latency(unsigned clk)
     s_turnaround = (uint8_t)(L->rlc * 2u);
     s_writelat   = (uint8_t)(L->wlc * 2u);
 
-    /* The new codes are not read back here; tiku_psram_up() reads the
-     * identity again at the new clock. */
+    /* tiku_psram_set_speed() reads the new codes back at the new clock,
+     * where the controller counts match them. */
+    return TIKU_PSRAM_OK;
+}
+
+/**
+ * @brief Read MR0 and MR4 back and compare their latency codes with clock
+ *        row @p clk.
+ *
+ * @note Run once the controller counts match row @p clk.
+ * @return TIKU_PSRAM_OK, the failing read's error, or ERR_ID when either
+ *         code differs
+ */
+static tiku_psram_err_t psram_check_latency(unsigned clk)
+{
+    const psram_lat_t *L = &s_lat[clk];
+    uint32_t v;
+    tiku_psram_err_t rc;
+
+    rc = tiku_psram_reg_read(0u, &v);
+    if (rc != TIKU_PSRAM_OK) { return rc; }
+    if (((v >> 2) & 0x7u) != L->rlc_code) { return TIKU_PSRAM_ERR_ID; }
+
+    rc = tiku_psram_reg_read(4u, &v);
+    if (rc != TIKU_PSRAM_OK) { return rc; }
+    if (((v >> 5) & 0x7u) != L->wlc_code) { return TIKU_PSRAM_ERR_ID; }
     return TIKU_PSRAM_OK;
 }
 
@@ -835,7 +861,7 @@ tiku_psram_err_t tiku_psram_set_speed(unsigned clk)
     if (rc != TIKU_PSRAM_OK) { return rc; }
     tiku_cpu_ambiq_delay_us(10u);
     s_clk_idx = (uint8_t)clk;
-    return TIKU_PSRAM_OK;
+    return psram_check_latency(clk);
 }
 
 /**
@@ -911,6 +937,7 @@ uint32_t tiku_psram_timing_scan(uint32_t *pass_mask, unsigned *center)
 tiku_psram_err_t tiku_psram_xip_enable(int enable)
 {
     if (!s_up) { return TIKU_PSRAM_ERR_POWER; }
+    if (enable && s_asleep) { return TIKU_PSRAM_ERR_ARG; }
     if (enable) {
         /* Aperture at 0x60000000, 64 MB (SIZE0 = 10).  BASE0 holds bits
          * 28:16 of the offset within the region: 0 for the region start. */
@@ -948,6 +975,7 @@ tiku_psram_err_t tiku_psram_dma_start(uint32_t dev_addr, void *sram,
                                       uint32_t n, int to_device)
 {
     if (!s_up)              { return TIKU_PSRAM_ERR_POWER; }
+    if (s_asleep)           { return TIKU_PSRAM_ERR_ARG; }
     if (s_dma_busy)         { return TIKU_PSRAM_ERR_ARG; }
     if (MSPI0->DEV0XIP_b.XIPEN0 != 0u) { return TIKU_PSRAM_ERR_ARG; }
     if (n == 0u || (n & 3u) != 0u || ((uint32_t)(uintptr_t)sram & 3u) != 0u) {
@@ -1002,6 +1030,7 @@ tiku_psram_err_t tiku_psram_dma(uint32_t dev_addr, void *sram, uint32_t n,
     uint32_t spins = 500000u;   /* x20 us = 10 s ceiling */
 
     if (!s_up)              { return TIKU_PSRAM_ERR_POWER; }
+    if (s_asleep)           { return TIKU_PSRAM_ERR_ARG; }
     if (MSPI0->DEV0XIP_b.XIPEN0 != 0u) { return TIKU_PSRAM_ERR_ARG; }
     if (n == 0u || (n & 3u) != 0u || ((uint32_t)(uintptr_t)sram & 3u) != 0u) {
         return TIKU_PSRAM_ERR_ARG;
@@ -1077,6 +1106,7 @@ tiku_psram_err_t tiku_psram_cq_xfer(uint32_t dev_addr, void *sram,
     uint8_t *sp = (uint8_t *)sram;
 
     if (!s_up)                          { return TIKU_PSRAM_ERR_POWER; }
+    if (s_asleep)                       { return TIKU_PSRAM_ERR_ARG; }
     if (MSPI0->DEV0XIP_b.XIPEN0 != 0u)  { return TIKU_PSRAM_ERR_ARG; }
     if (seg_bytes == 0u || (total % seg_bytes) != 0u ||
         (seg_bytes & 3u) != 0u)         { return TIKU_PSRAM_ERR_ARG; }
@@ -1150,7 +1180,10 @@ tiku_psram_err_t tiku_psram_cq_xfer(uint32_t dev_addr, void *sram,
  *
  *   down    domain off, tier detached, contents lost
  *   asleep  half sleep: the die keeps its contents on self-refresh at
- *           microamp-class current; tier stays attached, every access refused
+ *           microamp-class current; XIP unmapped; PIO array access, DMA, the
+ *           command queue and the XIP map refuse; the tier stays attached
+ *           but refuses new allocations, and existing ones must not be
+ *           touched until wake
  *   up      mapped at 0x60000000, tier attached, full speed
  *
  * Half sleep takes 155 us to enter and to leave (the vendor's
@@ -1172,6 +1205,7 @@ tiku_psram_err_t tiku_psram_halfsleep(void)
     if (rc != TIKU_PSRAM_OK) { return rc; }
     tiku_cpu_ambiq_delay_us(PSRAM_THS_US);
     s_asleep = 1u;
+    (void)tiku_tier_suspend_psram(1);      /* no new tier reservations      */
     return TIKU_PSRAM_OK;
 }
 
@@ -1187,6 +1221,7 @@ tiku_psram_err_t tiku_psram_wake(void)
     (void)psram_pio(0x0000u, 0u, &dummy, 2u, 0);
     tiku_cpu_ambiq_delay_us(PSRAM_THS_US);
     s_asleep = 0u;
+    (void)tiku_tier_suspend_psram(0);
     /* The wake succeeds only if the identity reads back. */
     rc = tiku_psram_read_id((tiku_psram_id_t *)0);
     return rc;

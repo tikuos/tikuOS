@@ -143,6 +143,10 @@ typedef struct {
  */
 static tier_pool_state_t tier_state[TIKU_MEM_TIER_COUNT];
 
+/** @brief Non-zero while the PSRAM device sleeps: no new reservation is
+ *  placed in the PSRAM span (tiku_tier_suspend_psram()). */
+static uint8_t psram_suspended;
+
 #if defined(TIKU_TIER_SRAM_EXTRA)
 /* One additional, disjoint SRAM span. No overhead on single-span targets. */
 static tier_pool_state_t sram_extra;
@@ -449,6 +453,14 @@ tiku_mem_err_t tiku_tier_detach_psram(int force)
     tier_state[TIKU_MEM_PSRAM].buf         = NULL;
     tier_state[TIKU_MEM_PSRAM].capacity    = 0;
     tier_state[TIKU_MEM_PSRAM].used      = 0;
+    psram_suspended = 0;
+    return TIKU_MEM_OK;
+}
+
+tiku_mem_err_t tiku_tier_suspend_psram(int suspended)
+{
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
+    psram_suspended = (uint8_t)(suspended != 0);
     return TIKU_MEM_OK;
 }
 
@@ -473,6 +485,7 @@ static void tier_wire_all(void)
     tier_state[TIKU_MEM_PSRAM].buf         = NULL;
     tier_state[TIKU_MEM_PSRAM].capacity    = 0;
     tier_state[TIKU_MEM_PSRAM].used      = 0;
+    psram_suspended = 0;
 
     tier_state[TIKU_MEM_SRAM].buf         = TIER_SRAM_BUF;
     tier_state[TIKU_MEM_SRAM].capacity    = TIER_SRAM_CAP;
@@ -736,6 +749,7 @@ static int work_fit(tiku_mem_tier_t tier, int index,
 #if TIKU_MEM_RECLAIM_ENABLE
         if (span->fenced) continue;
 #endif
+        if (tier == TIKU_MEM_PSRAM && psram_suspended) continue;
         if ((index >= 0 && i != index) || (found && room >= best_room)) continue;
         if (span_fit(span, size, alignment, cls, &candidate)) {
             *out = candidate;

@@ -157,9 +157,11 @@ typedef enum {
     TIKU_PSRAM_ERR_CLOCK,     /**< IO clock select/enable did not stick     */
     TIKU_PSRAM_ERR_TIMEOUT,   /**< a transfer did not complete or reported
                                    an error; no passing tap in a scan       */
-    TIKU_PSRAM_ERR_ID,        /**< device answered, with the wrong identity */
+    TIKU_PSRAM_ERR_ID,        /**< device answered, with the wrong identity
+                                   or latency codes                         */
     TIKU_PSRAM_ERR_ARG,       /**< bad argument, or refused in this state:
-                                   XIP on, DMA armed, live allocations      */
+                                   XIP on, DMA armed, live allocations,
+                                   half sleep                               */
 } tiku_psram_err_t;
 
 /** @brief Identity read out of the device's mode registers. */
@@ -303,7 +305,9 @@ tiku_psram_err_t tiku_psram_mem_write(uint32_t addr, const void *buf,
  * @brief Move to clock row @p clk: program device MR0/MR4 latencies to match,
  *        then reconfigure the controller -- no device reset in between.
  *
- * Runs tiku_psram_init() at 48 MHz first if the driver is not up.
+ * Runs tiku_psram_init() at 48 MHz first if the driver is not up.  At the
+ * new clock it reads MR0 and MR4 back and returns ERR_ID when either latency
+ * code differs from the row's.
  */
 tiku_psram_err_t tiku_psram_set_speed(unsigned clk);
 
@@ -390,7 +394,10 @@ tiku_psram_err_t tiku_psram_down(int force);
 
 /**
  * @brief Half sleep: contents retained on self-refresh at uA-class device
- *        current; XIP is unmapped and every access path refuses until wake.
+ *        current.  XIP is unmapped, and PIO array access, DMA, the command
+ *        queue and the XIP map refuse (ERR_ARG) until wake.  The PSRAM tier
+ *        refuses new allocations; existing ones must not be touched until
+ *        wake.
  */
 tiku_psram_err_t tiku_psram_halfsleep(void);
 
