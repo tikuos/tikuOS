@@ -145,7 +145,8 @@ tiku_cpu_full_init(unsigned int cpu_freq)
     current_boot_stage = TIKU_BOOT_STAGE_COMPLETE;
 
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
-    defined(PLATFORM_NORDIC) || defined(PLATFORM_ESP32C61)
+    defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
+    defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C61)
     /* The Cortex-M reset handlers mask interrupts (cpsid i in
      * tiku_crt_early.c), so no ISR runs against half-built kernel state.
      * Everything an ISR touches exists once tiku_sched_init() has built the

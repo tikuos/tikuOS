@@ -34,8 +34,8 @@
  * name, and the regions not named here (FRAM, INFOMEM, vectors) stay as the
  * toolchain ships them.  The Makefile passes
  * -Tarch/msp430/devices/msp430fr5994_8k_ram.ld when MCU=msp430fr5994 and
- * LEA_ENABLE=0, and refuses LEA_ENABLE=1: a LEA layout needs its own script
- * that keeps the HIFRAM reservations below.
+ * LEA_ENABLE=0, and refuses every other value: a LEA layout needs its own
+ * script that keeps the HIFRAM reservations below.
  */
 
 INCLUDE msp430fr5994.ld

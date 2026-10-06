@@ -970,13 +970,15 @@ endif
 # LEASTACK (312 B), leaving 4 KB for .bss and the stack.  TikuOS does not use
 # the LEA: with LEA_ENABLE=0 (the default) the build links with
 # arch/msp430/devices/msp430fr5994_8k_ram.ld, which gives all 8 KB to RAM.
-# LEA_ENABLE=1 is refused; it needs a LEA-aware linker script that keeps the
-# same FRAM reservations.
+# Any other value is refused; LEA_ENABLE=1 needs a LEA-aware linker script
+# that keeps the same FRAM reservations.
 # ---------------------------------------------------------------------------
 LEA_ENABLE ?= 0
 ifeq ($(MCU),msp430fr5994)
 ifeq ($(LEA_ENABLE),1)
 $(error LEA_ENABLE=1 on FR5994 needs a LEA-aware custom linker script preserving the pinned NVM region, module slot and high-BSS bounds)
+else ifneq ($(LEA_ENABLE),0)
+$(error LEA_ENABLE='$(LEA_ENABLE)' on FR5994: the only supported value is 0)
 endif
 endif
 
@@ -3834,9 +3836,9 @@ endif
 # ---------------------------------------------------------------------------
 
 # Nordic flashing tool: NRFUTIL is nrfutil from PATH, else temp/nrfutil in
-# this tree (temp/ is not tracked).  NRF_SN selects one J-Link probe by
-# serial number on a multi-DK rig; TikuBench passes NRF_SN=<serial> per
-# board.
+# this tree (temp/ is not tracked).  JLINK_SN or NRF_SN (JLINK_SN first)
+# selects one J-Link probe by serial number on a multi-DK rig; TikuBench
+# passes NRF_SN=<serial> per board.
 #
 # nrfutil finds its `device` subcommand under $NRFUTIL_HOME (default
 # $HOME/.nrfutil).  Under sudo HOME is /root, which has no plugins, and the
@@ -3848,7 +3850,8 @@ endif
 NRFUTIL ?= $(shell command -v nrfutil 2>/dev/null || echo $(CURDIR)/temp/nrfutil)
 NRFUTIL_ENV = $(if $(and $(SUDO_USER),$(filter 0,$(shell id -u))),NRFUTIL_HOME=$(shell getent passwd $(SUDO_USER) | cut -d: -f6)/.nrfutil,)
 NRF_SN  ?=
-NRF_SN_ARG = $(if $(strip $(NRF_SN)),--serial-number $(strip $(NRF_SN)),)
+_NRF_SN    := $(strip $(if $(strip $(JLINK_SN)),$(JLINK_SN),$(NRF_SN)))
+NRF_SN_ARG := $(if $(_NRF_SN),--serial-number $(_NRF_SN),)
 
 ifeq ($(TIKU_PLATFORM),rp2350)
 
@@ -3980,7 +3983,6 @@ JLINK_DEVICE_NORDIC ?= nRF54L15_M33
 endif
 JLINK_FLASH_SCRIPT   = $(BUILD_DIR)/flash.jlink
 JLINK_ERASE_SCRIPT   = $(BUILD_DIR)/erase.jlink
-_NRF_SN          := $(strip $(if $(strip $(JLINK_SN)),$(JLINK_SN),$(NRF_SN)))
 NRF_JLINK_SN_ARG := $(if $(_NRF_SN),-SelectEmuBySN $(_NRF_SN),)
 NRF_FLASH ?= auto
 ifeq ($(NRF_FLASH),auto)
@@ -4181,7 +4183,7 @@ BAUD ?= $(if $(UART_BAUD),$(UART_BAUD),115200)
 endif
 
 # Serial port search, first match wins:
-#   1. /dev/ttyUSB* or /dev/tty.usbserial*: an external FTDI or CP2102
+#   1. /dev/ttyUSB* or macOS /dev/cu.usbserial*: an external FTDI or CP2102
 #      adapter, which SLIP networking uses;
 #   2. /dev/ttyACM* with a TI USB vendor ID (0451 or 2047): the eZ-FET
 #      backchannel, which resets the target each time the port is opened;
@@ -4190,7 +4192,7 @@ endif
 # Each glob is tested with [ -e ]: an unmatched glob stays literal and
 # fails the test, on Linux and macOS alike.
 PORT ?= $(shell \
-	for p in /dev/ttyUSB* /dev/tty.usbserial*; do \
+	for p in /dev/ttyUSB* /dev/cu.usbserial*; do \
 		[ -e "$$p" ] && { echo "$$p"; exit 0; }; \
 	done; \
 	for dev in /dev/ttyACM*; do \

@@ -90,8 +90,8 @@
  * The FR5994 has 8 KB of SRAM.  The toolchain's stock linker script splits it
  * into RAM (4 KB), LEARAM (~3.7 KB) and LEASTACK (312 B).  The Makefile links
  * msp430fr5994_8k_ram.ld, which merges the three into one 8 KB RAM region,
- * and defines TIKU_FR5994_LEA_DISABLED; it refuses LEA_ENABLE=1.  A build
- * outside the Makefile keeps the stock 4 KB RAM region.
+ * and defines TIKU_FR5994_LEA_DISABLED; it refuses LEA_ENABLE other than 0.
+ * A build outside the Makefile keeps the stock 4 KB RAM region.
  */
 #ifdef TIKU_FR5994_LEA_DISABLED
 #define TIKU_DEVICE_RAM_SIZE        (8 * 1024UL)    /**< 8 KB merged RAM */
