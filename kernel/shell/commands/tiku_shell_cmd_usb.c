@@ -155,8 +155,9 @@ void tiku_shell_cmd_usb(uint8_t argc, const char *argv[])
                          tiku_usb_msc_adma_on() ? "on" : "off",
                          (unsigned long)x, (unsigned long)e);
         }
-        SHELL_PRINTF("usb hash (%lu blocks): %08lx\n",
-                     (unsigned long)(nb ? nb : blocks),
+        nb = tiku_usb_msc_hash_blocks(nb);
+        SHELL_PRINTF("usb RAM-disk hash (%lu blocks): %08lx\n",
+                     (unsigned long)nb,
                      (unsigned long)tiku_usb_msc_hash(nb));
         return;
     }

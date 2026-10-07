@@ -642,6 +642,10 @@ ckpt_refuse(void)
     basic_err_handler = 0;
     basic_err_pc      = 0;
     basic_ckpt_armed  = 0;
+    basic_pc = basic_pc_set = basic_trace = 0;
+    basic_err = basic_erl = 0;
+    basic_prng_state = 0;
+    basic_prng_seeded = 0;
     return -1;
 }
 
@@ -758,6 +762,13 @@ basic_ckpt_read(const uint8_t *payload, size_t len)
     ckpt_r(&r, &sp, 1);
     if (sp > TIKU_BASIC_SCOPE_MAX) return ckpt_refuse();
     basic_scope_sp = sp;
+    for (i = 0; i < basic_call_sp; i++) {
+        if (basic_frames[i].scope_base > basic_scope_sp ||
+            (i && basic_frames[i].scope_base <
+                  basic_frames[i - 1u].scope_base)) {
+            return ckpt_refuse();
+        }
+    }
     for (i = 0; i < sp; i++) {
         basic_scope_t *s = &basic_scope[i];
         uint16_t soff;

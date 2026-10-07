@@ -128,10 +128,9 @@ tiku_shell_cmd_repeat(uint8_t argc, const char *argv[])
 
     repeat_depth++;
     for (i = 0; i < count; i++) {
-        /* Before each pass, read one pending byte: Ctrl+C stops the run,
-         * and any other byte is discarded. */
-        if (tiku_shell_io_rx_ready()) {
-            int ch = tiku_shell_io_getc();
+        /* Poll decoded shell input between passes. */
+        {
+            int ch = tiku_shell_net_getc();
             if (ch == REPEAT_CANCEL) {
                 SHELL_PRINTF("^C\n");
                 repeat_depth--;

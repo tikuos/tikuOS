@@ -64,7 +64,11 @@ tiku_shell_cmd_trng(uint8_t argc, const char *argv[])
         const char *p = argv[1];
         n = 0;
         while (*p >= '0' && *p <= '9') {
-            n = n * 10 + (*p++ - '0');
+            if (n < (int)sizeof buf) {
+                n = n * 10 + (*p - '0');
+                if (n > (int)sizeof buf) n = sizeof buf;
+            }
+            p++;
         }
         if (n <= 0) {
             n = 16;

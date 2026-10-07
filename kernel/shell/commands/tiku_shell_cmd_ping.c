@@ -82,14 +82,17 @@ ping_parse_ip(const char *s, uint8_t out[4])
 }
 
 /**
- * @brief Parse the leading decimal digits of @p s; overflow is not detected.
+ * @brief Parse a decimal count in 1..65535; return 0 for invalid input.
  */
 static uint16_t
 ping_parse_u16(const char *s)
 {
     uint16_t v = 0;
 
-    while (*s >= '0' && *s <= '9') {
+    if (*s == '\0') return 0;
+    while (*s) {
+        if (*s < '0' || *s > '9' ||
+            v > (UINT16_MAX - (unsigned)(*s - '0')) / 10u) return 0;
         v = (uint16_t)(v * 10u + (uint16_t)(*s - '0'));
         s++;
     }
@@ -160,7 +163,8 @@ tiku_shell_cmd_ping(uint8_t argc, const char *argv[])
 
     ping_count = (argc >= 3) ? ping_parse_u16(argv[2]) : PING_DEFAULT_COUNT;
     if (ping_count == 0u) {
-        ping_count = 1u;
+        SHELL_PRINTF("ping: invalid count (1..65535)\n");
+        return;
     }
 
     /* Turn SLIP on so the console's IPv4 channel delivers the replies, and

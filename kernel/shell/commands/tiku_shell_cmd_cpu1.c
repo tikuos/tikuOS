@@ -30,8 +30,8 @@
 #include <arch/ra8p1/cpu1/tiku_cpu1_sha256.h>
 #include <tikukits/crypto/p256/tiku_kits_crypto_p256.h>
 
-/** @brief Kernel ticks to ms at a 128 Hz tick; wrong at any other rate. */
-#define CPU1_TICKS_TO_MS(t)  (((t) * 125u) / 16u)
+/** @brief Kernel ticks to milliseconds at the configured tick rate. */
+#define CPU1_TICKS_TO_MS(t) (((uint64_t)(t) * 1000u) / TIKU_CLOCK_SECOND)
 
 /**
  * @brief Poll for the mailbox reply to a work message for up to @p ms.
@@ -79,7 +79,10 @@ void tiku_shell_cmd_cpu1(uint8_t argc, const char *argv[])
     }
 
     if (argc >= 2u && tiku_cmd_streq(argv[1], "stop")) {
-        tiku_ra8p1_cpu1_stop();
+        if (tiku_ra8p1_cpu1_stop() != TIKU_RA8P1_CPU1_OK) {
+            SHELL_PRINTF("cpu1: halt acknowledgement timed out\n");
+            return;
+        }
         SHELL_PRINTF("cpu1: halted\n");
         return;
     }
@@ -215,8 +218,8 @@ void tiku_shell_cmd_cpu1(uint8_t argc, const char *argv[])
                      "M85's chain rode along for %lu ms extra\n",
                      (unsigned long)ms_par,
                      (unsigned long)(ms_in + ms_off),
-                     (unsigned long)(ms_par - (ms_off > ms_in ? ms_off
-                                                             : ms_in)));
+                     (unsigned long)((ms_par > ms_off && ms_par > ms_in)
+                         ? ms_par - (ms_off > ms_in ? ms_off : ms_in) : 0u));
         return;
     }
 

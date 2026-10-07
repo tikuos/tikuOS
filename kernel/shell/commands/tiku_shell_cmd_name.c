@@ -41,10 +41,18 @@ tiku_shell_cmd_name(uint8_t argc, const char *argv[])
     }
 
     if (tiku_vfs_write(DEVICE_NAME_PATH, argv[1],
-                       (uint8_t)strlen(argv[1])) < 0) {
+                       strlen(argv[1])) < 0) {
         SHELL_PRINTF("name: invalid value\n");
         return;
     }
 
-    SHELL_PRINTF("name set to '%s'\n", argv[1]);
+    n = tiku_vfs_read(DEVICE_NAME_PATH, buf, sizeof(buf));
+    if (n < 0) {
+        SHELL_PRINTF("name: written, but readback failed\n");
+        return;
+    }
+    if (n >= (int)sizeof(buf)) n = sizeof(buf) - 1;
+    while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) n--;
+    buf[n] = '\0';
+    SHELL_PRINTF("name set to '%s'\n", buf);
 }

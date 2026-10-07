@@ -718,8 +718,12 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                          argv[1]);
             return;
         }
+        if (spin && flags != 0u) {
+            SHELL_PRINTF("power spin: sleep flags are not supported\n");
+            return;
+        }
         /* The line names every flag set. */
-        SHELL_PRINTF("%s %lu ms flags%s%s%s%s -- starting\n", argv[1],
+        SHELL_PRINTF("%s %lu ms flags%s%s%s%s%s -- starting\n", argv[1],
                      (unsigned long)ms,
                      (flags & TIKU_AMBIQ_SLEEP_STOP_UART) ? " uart" : "",
                      (flags & TIKU_AMBIQ_SLEEP_STOP_TICK) ? " tick" : "",
@@ -810,8 +814,8 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                 /* This verb refuses CLP=OFF, which lets the core itself
                  * power off at a low-power entry. */
                 if (nv == 3u) {
-                    SHELL_PRINTF("cpdlp: refusing CLP=OFF (deep-sleep path, "
-                                 "not this verb's job)\n");
+                    SHELL_PRINTF("cpdlp: refusing CLP=OFF; CPU power-off is "
+                                 "unsupported\n");
                     return;
                 }
                 v = (v & ~(3u << 0)) | (nv << 0);
@@ -994,6 +998,10 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
             if (k == TIKU_GPU_W_KIND_COUNT || side == 0u || ms == 0u) {
                 SHELL_PRINTF("Usage: power gpu work <fill|copy|multiply|scale|"
                              "lut|reduce> <side> <ms> [async]\n");
+                return;
+            }
+            if (async && k != TIKU_GPU_W_FILL) {
+                SHELL_PRINTF("gpu work: async is supported only for fill\n");
                 return;
             }
             if (async) {

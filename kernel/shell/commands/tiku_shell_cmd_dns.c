@@ -134,6 +134,7 @@ void
 tiku_shell_cmd_dns_tick(void)
 {
     tiku_kits_net_dns_state_t st;
+    int rc;
 
     if (!dns_on) {
         return;
@@ -151,7 +152,7 @@ tiku_shell_cmd_dns_tick(void)
     }
     dns_last_poll = tiku_clock_time();
 
-    (void)tiku_kits_net_dns_poll();
+    rc = tiku_kits_net_dns_poll();
     st = tiku_kits_net_dns_get_state();
 
     if (st == TIKU_KITS_NET_DNS_STATE_DONE) {
@@ -166,7 +167,8 @@ tiku_shell_cmd_dns_tick(void)
         }
         dns_on = 0;
     } else if (st == TIKU_KITS_NET_DNS_STATE_ERROR) {
-        SHELL_PRINTF("dns: not found\n");
+        SHELL_PRINTF("dns: %s\n", rc == TIKU_KITS_NET_ERR_TIMEOUT
+                     ? "timeout" : "not found");
         dns_on = 0;
     }
 }

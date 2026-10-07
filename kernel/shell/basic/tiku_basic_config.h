@@ -180,10 +180,10 @@
  *  registers from BASIC) and the host harness (a simulated map), off on
  *  other targets.  Set 0 where unrestricted memory writes are not wanted. */
 #ifndef TIKU_BASIC_PEEK_POKE_ENABLE
-#ifdef PLATFORM_MSP430
+#if defined(PLATFORM_MSP430) || defined(TIKU_TEST_HOST)
 #define TIKU_BASIC_PEEK_POKE_ENABLE 1
 #else
-#define TIKU_BASIC_PEEK_POKE_ENABLE 1   /* host harness exercises this too */
+#define TIKU_BASIC_PEEK_POKE_ENABLE 0
 #endif
 #endif
 

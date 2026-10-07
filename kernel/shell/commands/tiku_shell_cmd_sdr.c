@@ -322,8 +322,12 @@ static int sdr_probe(uint8_t argc, const char *argv[])
         } else {
             sdr_help();
         }
-    } else if (strcmp(argv[1], "lb") == 0 && argc >= 3) {
+    } else if (strcmp(argv[1], "lb") == 0) {
         /* lb off | lb <a> <b> <c> */
+        if (argc < 3 || (strcmp(argv[2], "off") != 0 && argc < 5)) {
+            SHELL_PRINTF("usage: sdr lb off | lb <a> <b> <c>\n");
+            return 1;
+        }
         if (strcmp(argv[2], "off") == 0) {
             tiku_drv_sdr_esp_loopback(0, 0U, 0U, 0U);
         } else if (argc >= 5) {
@@ -343,8 +347,12 @@ static int sdr_probe(uint8_t argc, const char *argv[])
         SHELL_PRINTF("sdr: power %d\n", tiku_drv_sdr_esp_power_db(
             (int)strtol(argv[2], NULL, 0), (unsigned)strtoul(argv[3], NULL, 0),
             argc >= 5 ? (unsigned)strtoul(argv[4], NULL, 0) : 0U));
-    } else if (strcmp(argv[1], "nco") == 0 && argc >= 3) {
+    } else if (strcmp(argv[1], "nco") == 0) {
         /* nco off | nco <step> <gain> */
+        if (argc < 3 || (strcmp(argv[2], "off") != 0 && argc < 4)) {
+            SHELL_PRINTF("usage: sdr nco off | nco <step> <gain>\n");
+            return 1;
+        }
         if (strcmp(argv[2], "off") == 0) {
             SHELL_PRINTF("sdr: nco off (%d)\n", tiku_drv_sdr_esp_nco(0, 0U, 0));
         } else if (argc >= 4) {

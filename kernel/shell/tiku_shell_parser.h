@@ -45,6 +45,7 @@ void tiku_shell_parser_init(const tiku_shell_cmd_t *commands);
  * prints an error if neither matches.
  *
  * @param line  Mutable, NUL-terminated input string
+ * @note A line exceeding TIKU_SHELL_MAX_ARGS is rejected without dispatch.
  */
 void tiku_shell_parser_execute(char *line);
 

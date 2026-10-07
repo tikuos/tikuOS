@@ -21,6 +21,7 @@
 #include "tiku_shell_cmd_kill.h"
 #include <kernel/shell/tiku_shell.h>    /* SHELL_PRINTF via tiku_shell_io.h */
 #include <kernel/process/tiku_process.h>
+#include <stddef.h>
 
 /*---------------------------------------------------------------------------*/
 /* COMMAND IMPLEMENTATION                                                    */
@@ -31,7 +32,7 @@ tiku_shell_cmd_kill(uint8_t argc, const char *argv[])
 {
     struct tiku_process *p;
     int8_t pid;
-    uint8_t idx;
+    size_t idx;
 
     if (argc < 2) {
         SHELL_PRINTF("Usage: kill <pid>\n");
@@ -41,8 +42,16 @@ tiku_shell_cmd_kill(uint8_t argc, const char *argv[])
 
     /* Parse the PID: decimal digits only. */
     pid = 0;
+    if (argv[1][0] == '\0') {
+        SHELL_PRINTF("Error: invalid PID '%s'\n", argv[1]);
+        return;
+    }
     for (idx = 0; argv[1][idx] != '\0'; idx++) {
         if (argv[1][idx] < '0' || argv[1][idx] > '9') {
+            SHELL_PRINTF("Error: invalid PID '%s'\n", argv[1]);
+            return;
+        }
+        if (pid > (INT8_MAX - (argv[1][idx] - '0')) / 10) {
             SHELL_PRINTF("Error: invalid PID '%s'\n", argv[1]);
             return;
         }

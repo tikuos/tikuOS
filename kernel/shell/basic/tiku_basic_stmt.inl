@@ -1693,14 +1693,17 @@ basic_onchg_check(basic_onchg_t *o)
     if (v == o->last_value) {
         return 0;
     }
-    o->last_value = v;
     if (o->is_gosub) {
         if (gosub_sp >= TIKU_BASIC_GOSUB_DEPTH) {
-            return 0;                  /* stack full: this change is lost */
+#if TIKU_BASIC_ONCHG_EVENT
+            o->pending = 1;
+#endif
+            return 0;
         }
         /* The RUN loop polls after moving basic_pc to the line due next. */
         gosub_stack[gosub_sp++] = basic_pc;
     }
+    o->last_value = v;
     basic_pc     = o->handler_line;
     basic_pc_set = 1;
     return 1;

@@ -36,7 +36,7 @@ basic_adc_ensure(uint8_t ch)
     if (!basic_adc_ready) {
         tiku_adc_config_t cfg;
         cfg.resolution = TIKU_ADC_RES_12BIT;
-        cfg.reference  = TIKU_ADC_REF_AVCC;
+        cfg.reference  = TIKU_ADC_REF_DEFAULT;
         if (tiku_adc_init(&cfg) != TIKU_ADC_OK) {
             return -1;
         }
@@ -56,10 +56,8 @@ basic_adc_ensure(uint8_t ch)
 
 #if TIKU_BASIC_I2C_ENABLE
 
-static uint8_t basic_i2c_ready;
-
 /**
- * @brief Lazily initialise the I2C HAL at standard speed (100 kHz).
+ * @brief Initialise a closed I2C bus at standard speed (100 kHz).
  *
  * Programs that need Fast Mode can configure the bus from the C
  * side before invoking BASIC.
@@ -69,13 +67,12 @@ static uint8_t basic_i2c_ready;
 static int
 basic_i2c_ensure(void)
 {
-    if (!basic_i2c_ready) {
+    if (tiku_i2c_get_config() == NULL) {
         tiku_i2c_config_t cfg;
         cfg.speed = TIKU_I2C_SPEED_STANDARD;
         if (tiku_i2c_init(&cfg) != TIKU_I2C_OK) {
             return -1;
         }
-        basic_i2c_ready = 1;
     }
     return 0;
 }

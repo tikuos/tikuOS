@@ -678,3 +678,15 @@ tiku_shell_rules_on_vfs(const void *node_ptr)
         rules_eval_one(r);
     }
 }
+
+uint8_t
+tiku_shell_rules_watches(const tiku_vfs_node_t *node)
+{
+    uint8_t i;
+    for (i = 0; i < TIKU_SHELL_RULES_MAX; i++) {
+        const tiku_shell_rule_t *r = &rule_table[i];
+        if (r->state == TIKU_SHELL_RULE_ACTIVE && r->armed &&
+            r->node == node) return 1;
+    }
+    return 0;
+}

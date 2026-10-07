@@ -8,8 +8,7 @@
  * tiku_basic_prng.inl - linear-congruential RND() generator.
  *
  * Seeded at the first call from the kernel tick and the boot count.  Each
- * call steps the LCG and draws from the high 16 bits of the state, the
- * best-distributed bits of an LCG.
+ * call steps the LCG and scales its 32-bit state to the requested range.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -43,5 +42,5 @@ basic_rnd(long n)
     if (n <= 0) {
         return 0;
     }
-    return (long)((basic_prng_state >> 16) % (uint32_t)n);
+    return (long)(((uint64_t)basic_prng_state * (uint32_t)n) >> 32);
 }

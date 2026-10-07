@@ -231,17 +231,36 @@ do_putf(uint8_t argc, const char *argv[])
     tiku_lcd_put_fixed(v, (uint8_t)dec);
 }
 
-/**
- * @brief `lcd puth <n> [digits]`: n right-aligned in hex, full width by
- *        default.  n is read as decimal unless it has a 0x prefix.
- */
+/** @brief Parse a hexadecimal uint32_t, with an optional 0x prefix. */
+static uint8_t
+parse_hex(const char *s, uint32_t *out)
+{
+    uint32_t v = 0;
+    if (s == NULL || *s == '\0') return 0;
+    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) s += 2;
+    if (*s == '\0') return 0;
+    while (*s) {
+        unsigned digit;
+        if (*s >= '0' && *s <= '9') digit = *s - '0';
+        else if (*s >= 'a' && *s <= 'f') digit = *s - 'a' + 10;
+        else if (*s >= 'A' && *s <= 'F') digit = *s - 'A' + 10;
+        else return 0;
+        if (v > (UINT32_MAX - digit) / 16u) return 0;
+        v = v * 16u + digit;
+        s++;
+    }
+    *out = v;
+    return 1;
+}
+
+/** @brief `lcd puth <hex> [digits]`: hexadecimal value, decimal digit count. */
 static void
 do_puth(uint8_t argc, const char *argv[])
 {
     uint32_t v;
     uint32_t digits = (uint32_t)tiku_lcd_num_chars();
 
-    if (argc < 3 || !parse_uint(argv[2], &v)) {
+    if (argc < 3 || !parse_hex(argv[2], &v)) {
         SHELL_PRINTF("Usage: lcd puth <hex> [digits]\n");
         return;
     }

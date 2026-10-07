@@ -68,6 +68,7 @@ static const char *fsel_str(uint32_t clk)
 /* REPORTS                                                                   */
 /*---------------------------------------------------------------------------*/
 
+#if !(TIKU_USBHS_MSC + 0)
 /**
  * @brief Print one bring-up stage before it acts.
  *
@@ -78,6 +79,7 @@ static void usbprobe_note(const char *stage)
 {
     SHELL_PRINTF("  .. %s\n", stage);
 }
+#endif
 
 /** @brief Print wrapper, PHY, clock, VBUS and, if powered, core registers. */
 static void usbprobe_regs(void)
@@ -135,14 +137,22 @@ void
 tiku_shell_cmd_usbprobe(uint8_t argc, const char *argv[])
 {
     if (argc < 2) {
+#if (TIKU_USBHS_MSC + 0)
+        SHELL_PRINTF("usage: usbprobe regs (MSC build)\n");
+#else
         SHELL_PRINTF("usage: usbprobe regs|vbus|up|down|live [n]"
-                     "|dev|enum|try <en> <first> [fsel]\n");
+                     "|dev|enum|log|try <en> <first> [fsel]\n");
+#endif
         return;
     }
     if (strcmp(argv[1], "regs") == 0) {
         usbprobe_regs();
         return;
     }
+#if (TIKU_USBHS_MSC + 0)
+    /* Mass storage owns the USB device: the probe only reads registers. */
+    SHELL_PRINTF("usbprobe: MSC owns USB; use usbmsc stats or usbmsc down\n");
+#else
     if (strcmp(argv[1], "vbus") == 0) {
         (void)tiku_nordic_usbhs_vbus_start();
         SHELL_PRINTF("VREGUSB started; plug the nRF USB port and read"
@@ -262,5 +272,6 @@ tiku_shell_cmd_usbprobe(uint8_t argc, const char *argv[])
         return;
     }
     SHELL_PRINTF("usage: usbprobe regs|vbus|up|down|live [n]"
-                 "|try <en> <first> [fsel]\n");
+                 "|dev|enum|log|try <en> <first> [fsel]\n");
+#endif
 }

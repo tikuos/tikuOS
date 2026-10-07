@@ -1063,7 +1063,10 @@ static void bt_probe(void)
         }
         SHELL_PRINTF("\n");
     }
-    SHELL_PRINTF("%s\n", (rc == TIKU_EM9305_OK)
+    /* OK only when every line above passed: the SPI status, a Command
+     * Complete, and a zero HCI status. */
+    SHELL_PRINTF("%s\n", (rc == TIKU_EM9305_OK && p.sts1 == 0xC0U &&
+                            p.cc_seen && p.hci_status == 0U)
                  ? "bt: first contact OK"
                  : "bt: first contact incomplete -- see above");
 }

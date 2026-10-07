@@ -240,9 +240,8 @@ telnet_recv_cb(struct tiku_kits_net_tcp_conn *c, uint16_t available)
 /**
  * @brief TCP connection-event callback (tiku_kits_net_tcp_event_cb_t).
  *
- * CONNECTED records the connection and clears the session state; CLOSED or
- * ABORTED of that connection drops it and its buffered output.  Other events
- * are ignored.
+ * CONNECTED accepts one client and aborts additional clients. CLOSED or
+ * ABORTED of the active connection drops it and its buffered output.
  *
  * @param c      Connection the event pertains to
  * @param event  One of TIKU_KITS_NET_TCP_EVT_*
@@ -251,6 +250,10 @@ static void
 telnet_event_cb(struct tiku_kits_net_tcp_conn *c, uint8_t event)
 {
     if (event == TIKU_KITS_NET_TCP_EVT_CONNECTED) {
+        if (telnet_conn != NULL) {
+            if (telnet_conn != c) tiku_kits_net_tcp_abort(c);
+            return;
+        }
         telnet_conn = c;
         last_was_cr = 0;
         tx_pos = 0;

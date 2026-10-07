@@ -255,7 +255,8 @@ process_line(const char *raw)
     "              CHR$ STR$ HEX$ BIN$\n" \
     "              WORD$ REPLACE$ LINE$ BETWEEN$ TRIM$\n" \
     "              INSTR COUNT UPPER$ LOWER$\n" \
-    "              comparisons (= <> < > <= >=) in IF only\n"
+    "              comparisons (= <> < > <= >=) in IF ELSEIF WHILE\n" \
+    "              UNTIL conditions and inside ( )\n"
 #else
 #define BASIC_HELP_STR_LINE ""
 #endif

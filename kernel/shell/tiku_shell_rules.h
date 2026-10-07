@@ -175,4 +175,7 @@ void tiku_shell_rules_tick(void);
  */
 void tiku_shell_rules_on_vfs(const void *node_ptr);
 
+/** @brief Return 1 if an active rule needs this node's watch subscription. */
+uint8_t tiku_shell_rules_watches(const tiku_vfs_node_t *node);
+
 #endif /* TIKU_SHELL_RULES_H_ */

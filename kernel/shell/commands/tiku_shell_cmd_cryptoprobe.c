@@ -408,7 +408,8 @@ void tiku_shell_cmd_cryptoprobe(uint8_t argc, const char *argv[])
         return;
     }
 
-    SHELL_PRINTF("usage: cryptoprobe hwcfg|sha|sweep|gcm|pk|bench|mode|counters|dbg\n");
+    SHELL_PRINTF("usage: cryptoprobe hwcfg|sha|sweep|gcm|ecb|ccm|bypass|"
+                 "direct|pk|bench|mode|counters|dbg\n");
 }
 
 #endif /* TIKU_SHELL_CMD_CRYPTOPROBE */

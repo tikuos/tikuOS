@@ -128,8 +128,8 @@ tiku_shell_cmd_peek(uint8_t argc, const char *argv[])
         count = 0x10000UL - (uint32_t)addr;
     }
 #else
-    if ((uint32_t)addr + count < (uint32_t)addr) {
-        count = 0xFFFFFFFFUL - (uint32_t)addr;
+    if (count - 1u > UINT32_MAX - (uint32_t)addr) {
+        count = UINT32_MAX - (uint32_t)addr + 1u;
     }
 #endif
 

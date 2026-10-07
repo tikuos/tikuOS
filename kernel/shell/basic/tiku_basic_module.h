@@ -92,7 +92,7 @@
  * slot address, so a build with the loader stops here.  A port defines its
  * slot as its code cap less 32 KB. */
 #if defined(TIKU_BASIC_MODULE_ENABLE) && TIKU_BASIC_MODULE_ENABLE
-#error "no Tier-3 module slot defined for this platform"
+#error "no module slot defined for this platform"
 #endif
 #endif
 /** Bytes in the NVM slot, or in the RAM window where the module is copied. */

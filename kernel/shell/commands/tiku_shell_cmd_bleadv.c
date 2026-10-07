@@ -52,6 +52,9 @@ static int bleadv_parse_addr(const char *s, uint8_t out[6])
 {
     int i, hi, lo;
     for (i = 5; i >= 0; i--) {
+        if (s[0] == '\0' || s[1] == '\0') {
+            return 0;
+        }
         hi = (int)*s++;
         lo = (int)*s++;
         hi = (hi >= '0' && hi <= '9') ? hi - '0'
@@ -613,7 +616,7 @@ static void bleadv_central(unsigned secs, uint8_t updates)
                            : 0ul);
     SHELL_PRINTF("  peripheral T_IFS=%lu us (spec 150)\n",
                  (unsigned long)tiku_radio_arch_dbg_cen_tifs);
-    SHELL_PRINTF("  LL ctrl: tx=%lu rx=%lu peer_version=%u (L4)\n",
+    SHELL_PRINTF("  LL ctrl: tx=%lu rx=%lu peer_version=%u\n",
                  (unsigned long)st.ctrl_tx, (unsigned long)st.ctrl_rx,
                  (unsigned)st.peer_vers);
     {
@@ -621,17 +624,17 @@ static void bleadv_central(unsigned secs, uint8_t updates)
         bleadv_fmt_hex(rb, &st.att_readback, 1, 0);
         if (st.att_step >= 8u && st.att_ok) {
             SHELL_PRINTF(SH_GREEN "  NUS: MTU/discover/CCCD/write->notify"
-                         " loopback OK, echo[0]=0x%s (L5/L6)\n" SH_RST, rb);
+                         " loopback OK, echo[0]=0x%s\n" SH_RST, rb);
         } else {
-            SHELL_PRINTF("  NUS: incomplete (step=%u/8 echo[0]=0x%s) (L5)\n",
+            SHELL_PRINTF("  NUS: incomplete (step=%u/8 echo[0]=0x%s)\n",
                          (unsigned)st.att_step, rb);
         }
         SHELL_PRINTF("  GATT discovery: %s (handles RX/TX/CCCD matched)"
-                     " (L6)\n", st.att_disc ? "OK" : "not matched");
+                     "\n", st.att_disc ? "OK" : "not matched");
     }
     if (st.att_lread || st.att_lwrite) {
         SHELL_PRINTF("  GATT long ops: read-blob=%s prep/exec-write=%s"
-                     " (table-driven DB, Phase D)\n",
+                     " (GATT database)\n",
                      st.att_lread ? "OK" : "FAIL",
                      st.att_lwrite ? "OK" : "FAIL");
     }
@@ -870,13 +873,13 @@ static void bleadv_conn(unsigned secs)
                  (unsigned)st.winoff);
     SHELL_PRINTF("  first_anchor_delta=%ld us (actual - predicted)\n",
                  (long)st.first_delta);
-    SHELL_PRINTF("  LL ctrl: tx=%lu rx=%lu peer_version=%u (L4)\n",
+    SHELL_PRINTF("  LL ctrl: tx=%lu rx=%lu peer_version=%u\n",
                  (unsigned long)st.ctrl_tx, (unsigned long)st.ctrl_rx,
                  (unsigned)st.peer_vers);
     if (st.att_readback != 0u) {
         char wv[3];
         bleadv_fmt_hex(wv, &st.att_readback, 1, 0);
-        SHELL_PRINTF("  NUS server: last RX write[0]=0x%s at handle 0x0012 (L5)"
+        SHELL_PRINTF("  NUS server: last RX write[0]=0x%s at handle 0x0012"
                      "\n", wv);
     }
     {
@@ -927,7 +930,7 @@ static void bleadv_flprrx(void)
      * scrubs the shared page and boots the core; a later call restarts a
      * faulted core or resumes a parked one. */
     if (tiku_flpr_arch_start() != 0 || !tiku_flpr_arch_running()) {
-        SHELL_PRINTF("FLPR not running (build with TIKU_FLPR_ENABLE=1)\n");
+        SHELL_PRINTF("FLPR failed to start or resume\n");
         return;
     }
     SHELL_PRINTF("FLPR RX probe: listening on ch37 ~4-5 s -- transmit adv on"
@@ -949,7 +952,7 @@ static void bleadv_flprrx(void)
         SHELL_PRINTF("  first CRC-ok pkt: %s (S0 LEN S1 ...)\n", hx);
     }
     if (crcok != 0u) {
-        SHELL_PRINTF(SH_GREEN "  FLPR RADIO RX WORKS (L6 F-L6.1 step 0)\n"
+        SHELL_PRINTF(SH_GREEN "  FLPR RADIO RX WORKS\n"
                      SH_RST);
     } else if (addr_evts != 0u) {
         SHELL_PRINTF("  AA matched but 0 CRC-ok (whitening/format?)\n");
@@ -978,7 +981,7 @@ static void bleadv_flpradv(void)
         return;
     }
     if (tiku_flpr_arch_start() != 0 || !tiku_flpr_arch_running()) {
-        SHELL_PRINTF("FLPR not running (build with TIKU_FLPR_ENABLE=1)\n");
+        SHELL_PRINTF("FLPR failed to start or resume\n");
         return;
     }
     tiku_common_unique_id(addr, 6u);
@@ -1019,7 +1022,7 @@ static void bleadv_flpradv(void)
         bleadv_fmt_hex(aa, aab, 4, 0);
         bleadv_fmt_hex(ci, cib, 3, 0);
         SHELL_PRINTF(SH_GREEN "  FLPR captured CONNECT_IND: AA=%s CRCInit=%s"
-                     " interval=%u hop=%u timeout=%u (L6 F-L6.1 step 1a)\n"
+                     " interval=%u hop=%u timeout=%u\n"
                      SH_RST, aa, ci, (unsigned)info.interval,
                      (unsigned)info.hop, (unsigned)info.timeout);
     }
@@ -1044,7 +1047,7 @@ static void bleadv_flpradv(void)
     }
     tiku_flpr_arch_conn_stop();
     tiku_radio_arch_constlat_hold(0);
-    SHELL_PRINTF("  stopped (FLPR serviced %lu events, L6 F-L6.1 step 1b)\n",
+    SHELL_PRINTF("  stopped (FLPR serviced %lu events)\n",
                  (unsigned long)tiku_flpr_arch_conn_events());
 }
 
@@ -1139,7 +1142,7 @@ static void bleadv_flprnus(uint8_t req_cpu)
         return;
     }
     if (tiku_flpr_arch_start() != 0 || !tiku_flpr_arch_running()) {
-        SHELL_PRINTF("FLPR not running (build with TIKU_FLPR_ENABLE=1)\n");
+        SHELL_PRINTF("FLPR failed to start or resume\n");
         return;
     }
     tiku_common_unique_id(addr, 6u);
@@ -1257,7 +1260,7 @@ static void bleadv_flprnus(uint8_t req_cpu)
                          (unsigned long)cu);
             if (req_cpu) {
                 if (cu != 0u) {
-                    SHELL_PRINTF(SH_GREEN "  Phase C OK: peripheral-requested"
+                    SHELL_PRINTF(SH_GREEN "  Connection update OK: peripheral-requested"
                                  " reparametrise -- central obliged, FLPR"
                                  " followed the LL update\n" SH_RST);
                 } else {
@@ -1265,19 +1268,19 @@ static void bleadv_flprnus(uint8_t req_cpu)
                                  " declined, or no LL update seen)\n");
                 }
             } else if (cm != 0u && cu != 0u) {
-                SHELL_PRINTF(SH_GREEN "  Phase A OK: link survived a"
+                SHELL_PRINTF(SH_GREEN "  Link update OK: link survived a"
                              " mid-connection channel-map + interval change"
                              "\n" SH_RST);
             } else {
                 SHELL_PRINTF("  LL updates: incomplete (central sent none, or"
-                             " the peer is pre-Phase-A)\n");
+                             " the peer lacks update support)\n");
             }
         }
         tiku_flpr_arch_conn_stop();
         tiku_radio_arch_constlat_hold(0);
         if (total != 0u) {
             SHELL_PRINTF(SH_GREEN "  NUS pipe OK: %lu bytes RX'd + echoed"
-                         " through the FLPR (L6 F-L6.2)\n" SH_RST,
+                         " through the FLPR\n" SH_RST,
                          (unsigned long)total);
         } else {
             SHELL_PRINTF("  no NUS bytes received (client didn't write?)\n");
@@ -1352,7 +1355,7 @@ static void bleadv_flprpair(uint8_t bond_mode, uint8_t numcmp)
         return;
     }
     if (tiku_flpr_arch_start() != 0 || !tiku_flpr_arch_running()) {
-        SHELL_PRINTF("FLPR not running (build with TIKU_FLPR_ENABLE=1)\n");
+        SHELL_PRINTF("FLPR failed to start or resume\n");
         return;
     }
     tiku_common_unique_id(addr, 6u);

@@ -203,14 +203,17 @@ tiku_shell_cmd_history(uint8_t argc, const char *argv[])
 
     /* Optional argument: limit to last N */
     if (argc >= 2) {
-        uint8_t val = 0;
-        uint8_t j;
+        unsigned val = 0;
+        size_t j;
         for (j = 0; argv[1][j] != '\0'; j++) {
             if (argv[1][j] < '0' || argv[1][j] > '9') {
                 SHELL_PRINTF("Usage: history [N]\n");
                 return;
             }
-            val = val * 10 + (argv[1][j] - '0');
+            if (val < hist.count) {
+                val = val * 10u + (unsigned)(argv[1][j] - '0');
+                if (val > hist.count) val = hist.count;
+            }
         }
         if (val < n) {
             n = val;

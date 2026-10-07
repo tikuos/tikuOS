@@ -35,6 +35,8 @@ event_name(tiku_event_t ev)
     case TIKU_EVENT_EXITED:     return "EXITED";
     case TIKU_EVENT_FORCE_EXIT: return "FORCE_EXIT";
     case TIKU_EVENT_TIMER:      return "TIMER";
+    case TIKU_EVENT_GPIO:       return "GPIO";
+    case TIKU_EVENT_VFS:        return "VFS";
     default:
         if (ev >= TIKU_EVENT_USER) {
             return "USER";

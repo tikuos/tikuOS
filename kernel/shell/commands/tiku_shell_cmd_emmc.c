@@ -71,7 +71,7 @@ void tiku_shell_cmd_emmc(uint8_t argc, const char *argv[])
     if (tiku_usb_msc_owns_emmc() &&
         !(argc >= 3 && tiku_cmd_streq(argv[2], "regs"))) {
         SHELL_PRINTF("emmc: refused -- the USB host owns the card"
-                     " (MSC is mounted).  `power usb off` first.\n");
+                     " (MSC export active).  `power usb off` first.\n");
         return;
     }
 #endif
@@ -85,7 +85,7 @@ void tiku_shell_cmd_emmc(uint8_t argc, const char *argv[])
     if (argc >= 3 && tiku_cmd_streq(argv[2], "hs200")) {
         tiku_emmc_err_t rc = tiku_emmc_hs200();
         SHELL_PRINTF("emmc hs200: %s\n",
-                     (rc == TIKU_EMMC_OK) ? "ok" : "failed (still usable at HS 48)");
+                     en[rc]);
         return;
     }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "bench")) {
@@ -133,9 +133,8 @@ void tiku_shell_cmd_emmc(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "gate")) {
-        /* Writes a pattern to one block of the scratch region and reads it
-         * back.  Then it writes LBA 0, which the driver must refuse; if the
-         * scratch guard fails, that write replaces the card's first block. */
+        /* Write and verify one scratch block. Check the LBA 0 write policy
+         * separately without issuing any card I/O. */
         static uint8_t wr[512], rd[512];
         uint32_t lba, i, errs = 0u;
         rc = tiku_emmc_read_id(&id);
@@ -172,8 +171,8 @@ void tiku_shell_cmd_emmc(uint8_t argc, const char *argv[])
         SHELL_PRINTF("emmc gate: LBA %lu, 512 B: %lu errors -- %s\n",
                      (unsigned long)lba, (unsigned long)errs,
                      errs ? "MISMATCH" : "bit-exact");
-        SHELL_PRINTF("  negative: write below scratch must refuse: %s\n",
-                     (tiku_emmc_write_blocks(0u, 1u, wr, 0)
+        SHELL_PRINTF("  negative: write guard (no I/O) below scratch: %s\n",
+                     (tiku_emmc_write_check(0u, 1u, 0)
                       == TIKU_EMMC_ERR_ARG) ? "REFUSED (correct)"
                                             : "ALLOWED -- BUG");
         return;
@@ -199,10 +198,11 @@ void tiku_shell_cmd_emmc(uint8_t argc, const char *argv[])
         tiku_emmc_set_trace((void (*)(const char *))0);
         if (rc != TIKU_EMMC_OK) {
             uint32_t e = tiku_emmc_last_error();
-            /* Print whatever identity was collected before the failure:
-             * it shows how far through init the card answered. */
-            (void)tiku_emmc_read_id(&id);
-            if (id.mfr_id != 0u) {
+            /* The identity prints only when tiku_emmc_read_id() returns
+             * it: a failure in the bus upgrade leaves the identified card
+             * up at the identification setting, while an earlier failure
+             * marks the card down and leaves id unwritten. */
+            if (tiku_emmc_read_id(&id) == TIKU_EMMC_OK && id.mfr_id != 0u) {
                 SHELL_PRINTF("  (partial) mfr %02x product '%s' serial"
                              " %08lx  made %u/%u\n", id.mfr_id,
                              id.product, (unsigned long)id.serial,

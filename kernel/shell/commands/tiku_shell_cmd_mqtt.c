@@ -109,17 +109,20 @@ mqtt_parse_ip(const char *s, uint8_t out[4])
 /**
  * @brief Parse a decimal string into a uint16_t.
  *
- * Consumes leading decimal digits and stops at the first non-digit.
+ * Requires a nonempty string of decimal digits within the 16-bit range.
  *
  * @param s  Decimal digit string.
- * @return   Parsed value (0 if no digits; wraps silently on overflow).
+ * @return Parsed value, or 0 for invalid input.
  */
 static uint16_t
 mqtt_parse_u16(const char *s)
 {
     uint16_t v = 0;
 
-    while (*s >= '0' && *s <= '9') {
+    if (*s == '\0') return 0;
+    while (*s) {
+        if (*s < '0' || *s > '9' ||
+            v > (UINT16_MAX - (unsigned)(*s - '0')) / 10u) return 0;
         v = (uint16_t)(v * 10u + (uint16_t)(*s - '0'));
         s++;
     }
@@ -203,6 +206,10 @@ tiku_shell_cmd_mqtt(uint8_t argc, const char *argv[])
         }
     }
 
+    if (port == 0) {
+        SHELL_PRINTF("mqtt: invalid port (1..65535)\n");
+        return;
+    }
     tiku_shell_cmd_slip_enable();
     tiku_kits_net_mqtt_init();
     tiku_kits_net_mqtt_set_server(broker, port);

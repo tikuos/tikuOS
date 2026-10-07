@@ -21,6 +21,7 @@
 #include "tiku_shell_cmd_watch.h"
 #include <kernel/shell/tiku_shell.h>      /* SHELL_PRINTF, POLL_TICKS */
 #include <kernel/shell/tiku_shell_cwd.h>  /* tiku_shell_cwd_resolve */
+#include <kernel/shell/tiku_shell_rules.h>
 #include <kernel/vfs/tiku_vfs.h>          /* watch/notify primitive */
 
 /*---------------------------------------------------------------------------*/
@@ -192,7 +193,7 @@ tiku_shell_cmd_watch_on_vfs(const void *node_ptr)
 }
 
 /**
- * @brief Stop the active watch and release its subscription.
+ * @brief Stop the active watch; release its subscription unless a rule uses it.
  *
  * Does nothing when no watch is active.  Called from the shell's
  * Ctrl+C routing, from read failures, and when a new `watch`
@@ -204,7 +205,7 @@ tiku_shell_cmd_watch_cancel(void)
     if (!watch_active) {
         return;
     }
-    if (watch_event_mode) {
+    if (watch_event_mode && !tiku_shell_rules_watches(watch_node)) {
         (void)tiku_vfs_unwatch(watch_path, &tiku_shell_process);
     }
     watch_active     = 0;

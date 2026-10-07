@@ -87,7 +87,7 @@ void
 tiku_shell_cmd_adc(uint8_t argc, const char *argv[])
 {
     uint8_t channel;
-    uint8_t ref = TIKU_ADC_REF_AVCC;
+    uint8_t ref = TIKU_ADC_REF_DEFAULT;
     uint16_t value;
     int rc;
     tiku_adc_config_t cfg;

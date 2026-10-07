@@ -62,7 +62,7 @@ freq_cmd_probe(void)
 
     maj = (unsigned)((p.chiprev >> 4) & 0xFu);   /* 1='A' 2='B' */
     min = (unsigned)(p.chiprev & 0xFu);          /* 1=rev0 2=rev1 3=rev2 */
-    SHELL_PRINTF("Apollo510 HP identity probe (read-only):\n");
+    SHELL_PRINTF("Apollo510 HP identity probe (clock settings unchanged):\n");
     SHELL_PRINTF("  CHIPREV     0x%08lx  rev %c%u\n",
                  (unsigned long)p.chiprev,
                  (maj == 2u) ? 'B' : ((maj == 1u) ? 'A' : '?'),
@@ -305,8 +305,12 @@ tiku_shell_cmd_freq(uint8_t argc, const char *argv[])
         SHELL_PRINTF("Usage: freq [<mhz>|probe]\n");
 #if defined(PLATFORM_STM32N6)
         SHELL_PRINTF("  no arg: show the core clock; probe: the clock tree;\n");
-        SHELL_PRINTF("  <mhz>: 64 (HSI), any exact divisor of 1200 up to 600, "
-                     "or 800 (overdrive).\n");
+        SHELL_PRINTF("  <mhz>: 100, 120, 150, 200, 240, 300, 400 or 600, "
+                     "divided from the 1200 MHz PLL1,\n");
+        SHELL_PRINTF("  which stays locked while the XSPI flash is up; with "
+                     "the flash down: 64 (HSI),\n");
+        SHELL_PRINTF("  any exact divisor of 1200 up to 600, or 800 "
+                     "(overdrive).\n");
 #elif defined(PLATFORM_RA8P1)
         SHELL_PRINTF("  no arg: show the core clock;\n");
         SHELL_PRINTF("  <mhz>: 240 (boot default), 480 or 1000.\n");

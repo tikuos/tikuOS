@@ -153,9 +153,7 @@ execute_one(char *line)
         return;
     }
 
-    /* Runs of spaces separate tokens; a "..." or '...' span is one token
-     * with its quotes stripped.  Text past TIKU_SHELL_MAX_ARGS tokens is
-     * not parsed. */
+    /* Runs of spaces separate tokens; a quoted span is one token. */
     while (*p && argc < TIKU_SHELL_MAX_ARGS) {
         while (*p == ' ') {
             p++;
@@ -183,6 +181,12 @@ execute_one(char *line)
         }
     }
 
+    while (*p == ' ') p++;
+    if (*p != '\0') {
+        SHELL_PRINTF("shell: too many arguments (maximum %u)\n",
+                     (unsigned)TIKU_SHELL_MAX_ARGS);
+        return;
+    }
     if (argc == 0) {
         return;
     }

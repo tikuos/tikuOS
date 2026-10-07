@@ -69,6 +69,14 @@ extern char __tiku_stack_bottom __attribute__((weak));
 extern char __tiku_stack_guard_start __attribute__((weak));
 
 /* --- NVM boundaries --- */
+extern char __data_load __attribute__((weak));
+extern char __data_start __attribute__((weak));
+extern char __data_end __attribute__((weak));
+#if defined(PLATFORM_ESP32C61)
+extern char __tiku_xip_start;
+extern char __tiku_xip_end;
+extern char __tiku_flash_payload_bytes;
+#endif
 extern char _etext;         /* past last byte of .text         */
 
 /*
@@ -154,6 +162,22 @@ stack_used(void)
 #endif
 }
 
+/** @brief Count the linked NVM prefix, including the initialized-data copy. */
+static unsigned long free_nvm_prefix(uintptr_t text, uintptr_t load,
+                                     uintptr_t bytes)
+{
+    uintptr_t start = TIKU_DEVICE_FRAM_START;
+    uintptr_t end = text;
+    if (load >= start && load <= TIKU_DEVICE_FRAM_END &&
+        bytes <= (unsigned long)TIKU_DEVICE_FRAM_END + 1UL - load &&
+        load + bytes > end) {
+        end = load + bytes;
+    }
+    return end > start && end <= (unsigned long)TIKU_DEVICE_FRAM_END + 1UL ?
+        (unsigned long)(end - start) + TIKU_FREE_IVT_BYTES :
+        TIKU_FREE_IVT_BYTES;
+}
+
 /*---------------------------------------------------------------------------*/
 /* PUBLIC HANDLER                                                            */
 /*---------------------------------------------------------------------------*/
@@ -188,26 +212,16 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
                             - TIKU_DEVICE_FRAM_START);
     sram_static = (unsigned long)((uintptr_t)&_end - (uintptr_t)&__datastart);
 
-    /*
-     * NVM in use is _etext - FRAM_START.  On MSP430 _etext ends every section
-     * the linker fills upward from FRAM_START, in either memory model: the
-     * small-model layout is
-     *   [ rodata . persistent . data-init . text ] _etext . slack . IVT
-     * and the large model (-mcode-region=either) also places .lower.text
-     * below _start.  On RP2350, Ambiq, nRF54L and RA8P1 the .data load image
-     * follows _etext, and on all but RA8P1 .rodata does too, so the count
-     * leaves those sections out.
-     */
-    {
-        unsigned long text_end = (unsigned long)(uintptr_t)&_etext;
-        /* An _etext outside the NVM window, as in an image linked into SRAM,
-         * leaves only the IVT counted as in use. */
-        fram_used = (text_end > TIKU_DEVICE_FRAM_START &&
-                     text_end <= TIKU_DEVICE_FRAM_END)
-                    ? (unsigned long)(text_end + TIKU_FREE_IVT_BYTES
-                                 - TIKU_DEVICE_FRAM_START)
-                    : TIKU_FREE_IVT_BYTES;
-    }
+    fram_used = free_nvm_prefix((uintptr_t)&_etext,
+        (uintptr_t)&__data_load,
+        (uintptr_t)&__data_end >= (uintptr_t)&__data_start ?
+        (uintptr_t)&__data_end - (uintptr_t)&__data_start : 0u);
+#if defined(PLATFORM_ESP32C61)
+    /* ROM-loaded payload and XIP sections; image headers are not counted. */
+    fram_used = (unsigned long)(uintptr_t)&__tiku_flash_payload_bytes +
+                (unsigned long)((uintptr_t)&__tiku_xip_end -
+                                (uintptr_t)&__tiku_xip_start);
+#endif
 
     /* ---- Compile-time (fixed at link) ---- */
     SHELL_PRINTF(SH_YELLOW "--- Compile-time ---" SH_RST "\n");

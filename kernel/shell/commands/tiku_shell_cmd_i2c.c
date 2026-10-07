@@ -92,14 +92,16 @@ i2c_parse_u8(const char *s, uint8_t *out)
 }
 
 /**
- * @brief Initialise the bus at standard speed, reprogramming it on every
- *        call.  Returns 0, or -1 after printing a diagnostic.
+ * @brief Keep an active bus's settings, or initialise a closed bus at 100 kHz.
+ * @return 0 on success, or -1 after printing a diagnostic.
  */
 static int
 i2c_ensure_init(void)
 {
     tiku_i2c_config_t cfg = { .speed = TIKU_I2C_SPEED_STANDARD };
-    int rc = tiku_i2c_init(&cfg);
+    int rc;
+    if (tiku_i2c_get_config() != NULL) return 0;
+    rc = tiku_i2c_init(&cfg);
     if (rc != TIKU_I2C_OK) {
         SHELL_PRINTF("i2c: init failed (%d)\n", rc);
         return -1;

@@ -874,6 +874,9 @@ shell_history_arrow(uint8_t up)
     int8_t      age;
     const char *line;
 
+    if (!up && cli.hist_age < 0) {
+        return;
+    }
     if (up) {
         age = (cli.hist_age < 0) ? 0 : (int8_t)(cli.hist_age + 1);
     } else {
@@ -917,12 +920,12 @@ shell_history_arrow(uint8_t up)
 #include "tiku_shell_cwd.h"
 #endif
 
-/** @brief Length of a NUL-terminated string shorter than 256 bytes. */
+/** @brief String length capped at the completion index limit of 255. */
 static uint8_t
 tab_strlen(const char *s)
 {
     uint8_t n = 0;
-    while (s[n] != '\0') {
+    while (n < UINT8_MAX && s[n] != '\0') {
         n++;
     }
     return n;

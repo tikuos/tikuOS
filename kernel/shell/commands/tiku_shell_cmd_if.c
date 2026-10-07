@@ -17,8 +17,10 @@
 #include "tiku_shell_cmd_if.h"
 #include <kernel/shell/tiku_shell.h>
 #include <kernel/shell/tiku_shell_parser.h>
+#include <kernel/shell/tiku_shell_cwd.h>
 #include <kernel/vfs/tiku_vfs.h>
 #include <string.h>
+#include <limits.h>
 
 #define IF_VALUE_MAX 32     /* VFS read buffer, NUL included */
 #define IF_INNER_MAX 80     /* longest reconstructed sub-command */
@@ -35,13 +37,13 @@ static uint8_t if_depth;
  * Accepts a leading '-' or '+' and decimal digits only.
  *
  * @return 0 on success with *out set, -1 on an empty string, a lone sign or
- *         a non-digit
+ *         a non-digit or an out-of-range value
  */
 static int
 parse_long(const char *s, long *out)
 {
     long sign = 1;
-    long val  = 0;
+    unsigned long val = 0, limit = LONG_MAX;
     int  digits = 0;
 
     if (s == NULL || *s == '\0') {
@@ -49,12 +51,16 @@ parse_long(const char *s, long *out)
     }
     if (*s == '-') { sign = -1; s++; }
     else if (*s == '+') { s++; }
+    if (sign < 0) limit++;
 
     while (*s) {
         if (*s < '0' || *s > '9') {
             return -1;
         }
-        val = val * 10 + (long)(*s - '0');
+        if (val > (limit - (unsigned)(*s - '0')) / 10u) {
+            return -1;
+        }
+        val = val * 10u + (unsigned)(*s - '0');
         digits++;
         s++;
     }
@@ -62,7 +68,7 @@ parse_long(const char *s, long *out)
         return -1;
     }
 
-    *out = sign * val;
+    *out = sign < 0 ? (val == limit ? LONG_MIN : -(long)val) : (long)val;
     return 0;
 }
 
@@ -80,6 +86,7 @@ tiku_shell_cmd_if(uint8_t argc, const char *argv[])
 {
     char        value_buf[IF_VALUE_MAX];
     char        inner[IF_INNER_MAX];
+    char        path[IF_INNER_MAX];
     int         n;
     long        lhs, rhs;
     int         lhs_num, rhs_num;
@@ -100,7 +107,8 @@ tiku_shell_cmd_if(uint8_t argc, const char *argv[])
         return;
     }
 
-    n = tiku_vfs_read(argv[1], value_buf, sizeof(value_buf) - 1);
+    tiku_shell_cwd_resolve(argv[1], path, sizeof(path));
+    n = tiku_vfs_read(path, value_buf, sizeof(value_buf) - 1);
     if (n < 0) {
         SHELL_PRINTF("if: cannot read '%s'\n", argv[1]);
         return;

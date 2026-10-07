@@ -54,7 +54,7 @@ static void diag_fault_show(void) {
  * @brief Take one fault of kind @p which; the handler records it and the
  *        board resets.
  *
- * @param which  "undef", "unalign" or "stack" (an INVSTATE UsageFault)
+ * @param which  "undef", "unalign" or "stack" (PSPLIM overflow).
  */
 static void diag_fault_force(const char *which) {
     SHELL_PRINTF("  forcing a %s fault; the board resets and `diag fault`"
@@ -70,10 +70,20 @@ static void diag_fault_force(const char *which) {
         volatile uint32_t *p = (volatile uint32_t *)(uintptr_t)0x34181001UL;
         (void)*p;
     } else if (strcmp(which, "stack") == 0) {
-        /* A branch to an even address clears EPSR.T and takes an INVSTATE
-         * UsageFault. */
-        void (*bad)(void) = (void (*)(void))0x34180400UL;
-        bad();
+        static uint32_t fault_stack[64] __attribute__((aligned(8)));
+        uintptr_t top = (uintptr_t)(fault_stack + 64);
+        /* Handler mode uses MSP; the failing push uses a separate PSP. */
+        __asm__ volatile (
+            "msr psp, %0\n\t"
+            "msr psplim, %0\n\t"
+            "mrs r1, control\n\t"
+            "orr r1, r1, #2\n\t"
+            "msr control, r1\n\t"
+            "isb\n\t"
+            "push {r0}\n\t"
+            "b ."
+            :: "r"(top) : "r1", "memory");
+        __builtin_unreachable();
     } else {
         SHELL_PRINTF("  kinds: undef | unalign | stack\n");
         return;

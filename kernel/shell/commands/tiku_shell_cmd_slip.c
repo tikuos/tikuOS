@@ -55,9 +55,8 @@ tiku_shell_cmd_slip_enable(void)
         }
         link_ready = 1;
     }
-    (void)tiku_console_add_channel(0x40u, 0xF0u, 1u, slip_frame, (void *)0,
-                                   slip_frame_buf, sizeof slip_frame_buf);
-    slip_on = 1;
+    slip_on = tiku_console_add_channel(0x40u, 0xF0u, 1u, slip_frame,
+                (void *)0, slip_frame_buf, sizeof slip_frame_buf) >= 0;
 }
 
 void
@@ -75,6 +74,10 @@ tiku_shell_cmd_slip(uint8_t argc, const char *argv[])
 
     if (want) {
         tiku_shell_cmd_slip_enable();
+        if (!slip_on) {
+            SHELL_PRINTF("SLIP: console channel table is full\n");
+            return;
+        }
         SHELL_PRINTF("SLIP on. The console line carries SLIP/IP and text;"
                      " drive it with the slmux host tool ('ping <ip>' works"
                      " too).\n");

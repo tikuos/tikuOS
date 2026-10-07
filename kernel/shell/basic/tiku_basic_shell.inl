@@ -59,7 +59,6 @@ basic_session_begin(void)
     loop_sp         = 0;
     basic_running   = 0;
     basic_error     = 0;
-    basic_trace     = 0;
     basic_data_idx  = -1;
     basic_data_off  = 0;
     return 0;

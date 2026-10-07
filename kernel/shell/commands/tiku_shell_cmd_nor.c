@@ -213,7 +213,7 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
             ? "MATCH -- octal array reads work; identity is the wrong probe"
             : "DIFFER -- sweeping the array turnaround against serial");
         if (!same) {
-            uint32_t tmask = tiku_nor_scan_turnaround(addr, ser, sizeof ser);
+            uint32_t tmask = tiku_nor_scan_turnaround(addr, ser, 32u);
             unsigned t7;
             SHELL_PRINTF("  turnaround sweep: %08lx",
                          (unsigned long)tmask);
@@ -344,10 +344,8 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 4 && tiku_cmd_streq(argv[2], "ls") && tiku_cmd_streq(argv[3], "really")) {
-        SHELL_PRINTF("nor ls: refused -- driving GP208 wedged the board\n"
-                     "  (SWD dead at every speed/reset type; needed a\n"
-                     "   physical power cycle).  Polarity and load are\n"
-                     "   unestablished; confirm on a scope first.\n");
+        SHELL_PRINTF("nor ls: refused; GP208 polarity and load are "
+                     "unverified\n");
         return;
     }
     if (argc >= 3 && tiku_cmd_streq(argv[2], "erases")) {
@@ -409,6 +407,10 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
             return;
         }
         rc = tiku_nor_read(TIKU_NOR_SCRATCH_ADDR, rd, sizeof rd);
+        if (rc != TIKU_NOR_OK) {
+            SHELL_PRINTF("nor gate: read after erase %s\n", nor_errname(rc));
+            return;
+        }
         for (i6 = 0u; i6 < sizeof rd; i6++) {
             if (rd[i6] != 0xFFu) { ok6 = 0; }
         }
@@ -433,6 +435,10 @@ void tiku_shell_cmd_nor(uint8_t argc, const char *argv[])
             return;
         }
         rc = tiku_nor_read(TIKU_NOR_SCRATCH_ADDR, rd, sizeof rd);
+        if (rc != TIKU_NOR_OK) {
+            SHELL_PRINTF("nor gate: read after program %s\n", nor_errname(rc));
+            return;
+        }
         ok6 = 1;
         for (i6 = 0u; i6 < sizeof rd; i6++) {
             if (rd[i6] != wr[i6]) { ok6 = 0; }
