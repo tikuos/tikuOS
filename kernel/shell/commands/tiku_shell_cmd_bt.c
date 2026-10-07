@@ -34,6 +34,7 @@
 #include <kernel/vfs/tiku_vfs.h>             /* TIKU_VFS_CAP_NONE */
 #include <kernel/timers/tiku_clock.h>        /* the heartbeat */
 #include <hal/tiku_cpu.h>                    /* tiku_cpu_idle_hook */
+#include <kernel/cpu/tiku_watchdog.h>        /* the loop's check-in */
 #if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
 #include <kernel/process/tiku_process.h>     /* the others' events */
 #include <kernel/threads/tiku_thread.h>      /* the CPU to the workers */
@@ -900,6 +901,9 @@ static void bt_uart(uint8_t argc, const char *argv[])
 
     beat = (tiku_clock_time_t)(tiku_clock_time() + TIKU_CLOCK_SECOND);
     for (;;) {
+        /* An unbounded wait inside one shell dispatch: it checks in each
+         * pass, or a quiet link would be taken for a hung shell. */
+        tiku_watchdog_kick();
         /* ready() pumps the stack, and turns true once a subscriber has
          * settled (notifications sent sooner are discarded). */
         uint8_t ready = (uint8_t)(tiku_ble_serial_ready() != 0);
