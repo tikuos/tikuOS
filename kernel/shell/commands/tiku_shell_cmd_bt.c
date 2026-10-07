@@ -212,7 +212,9 @@ static void bt_status(void)
                 if (k > 0U) tiku_shell_io_putc(':');
                 put_hex2(mac[k]);
             }
-            tiku_shell_io_putc('\n');
+            /* A controller with no public address: the host's own. */
+            SHELL_PRINTF("%s\n", (tiku_bt_addr_type() == 1U)
+                                      ? " (random static)" : "");
         } else {
             SHELL_PRINTF("BD_ADDR:  not cached\n");
         }

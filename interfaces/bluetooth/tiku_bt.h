@@ -111,6 +111,13 @@ typedef struct {
 int tiku_bt_addr(uint8_t out[6]);
 
 /**
+ * @brief The type of tiku_bt_addr()'s address: 0 the controller's public
+ *        BD_ADDR, 1 a random static address the host set, for a controller
+ *        that has no public one.
+ */
+uint8_t tiku_bt_addr_type(void);
+
+/**
  * @brief Read back the controller's HCI/LMP version info cached at bring-up.
  *
  * @return TIKU_DRV_OK on success, TIKU_DRV_ERR_NOT_PRESENT until bring-up

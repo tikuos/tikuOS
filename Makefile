@@ -3388,13 +3388,34 @@ TIKU_DRV_WIFI_CYW43_ENABLE=1 too, or drop TIKU_DRV_WIFI_CYW43_BT_ENABLE.)
 endif
 endif
 
+# TIKU_DRV_BLE_FLPR_ENABLE=1 makes the nRF54L's FLPR the stack's controller:
+# the coprocessor runs the link layer and tiku_flpr_hci.c answers HCI for it
+# on the M33.  It has no LE crypto commands, so pairing's AES and P-256 run
+# in software, and beacons stay with the broadcast facade on the M33's own
+# radio, so the stack's broadcast backend is left out.
+ifeq ($(TIKU_DRV_BLE_FLPR_ENABLE),1)
+ifneq ($(TIKU_FLPR_ENABLE),1)
+$(error TIKU_DRV_BLE_FLPR_ENABLE=1 needs TIKU_FLPR_ENABLE=1: the FLPR \
+coprocessor is the controller)
+endif
+ifneq ($(HAS_TIKUKITS),1)
+$(error TIKU_DRV_BLE_FLPR_ENABLE=1 needs tikukits/: the BLE host stack \
+over the radio is tikukits/net/bluetooth)
+endif
+TIKU_BT_SW_CRYPTO ?= 1
+TIKU_BT_ADV ?= 0
+CFLAGS += -DTIKU_DRV_BLE_FLPR_ENABLE=1
+endif
+
 # TIKU_BT_HOST: the build has a controller for the stack.  TIKU_BT_ON_DEMAND:
 # `bt on` powers it (the chip is not up at boot).  Code tests these, not the
 # chip.
 TIKU_BT_HOST := $(if $(filter 1,$(TIKU_DRV_WIFI_CYW43_BT_ENABLE) \
-                  $(TIKU_DRV_BLE_ESP_ENABLE) $(TIKU_DRV_BLE_EM9305_ENABLE)),1,0)
+                  $(TIKU_DRV_BLE_ESP_ENABLE) $(TIKU_DRV_BLE_EM9305_ENABLE) \
+                  $(TIKU_DRV_BLE_FLPR_ENABLE)),1,0)
 TIKU_BT_ON_DEMAND := $(if $(filter 1,$(TIKU_DRV_BLE_ESP_ENABLE) \
-                       $(TIKU_DRV_BLE_EM9305_ENABLE)),1,0)
+                       $(TIKU_DRV_BLE_EM9305_ENABLE) \
+                       $(TIKU_DRV_BLE_FLPR_ENABLE)),1,0)
 # Pairing's AES and P-256 in software, for a controller without the LE crypto
 # commands; the CYW43439, the ESP32-C61 and the EM9305 all answer them, so it
 # is off unless a build asks for it.
@@ -3404,6 +3425,10 @@ ifneq ($(MINIMAL),1)
 # The EM9305's SPI-HCI transport, over the IOM SPI master.
 ifeq ($(TIKU_DRV_BLE_EM9305_ENABLE),1)
 SRCS += arch/ambiq/tiku_em9305.c
+endif
+# The FLPR's HCI, over its mailbox.
+ifeq ($(TIKU_DRV_BLE_FLPR_ENABLE),1)
+SRCS += arch/nordic/tiku_flpr_hci.c
 endif
 # TIKU_LINK_BLE_ENABLE=1 compiles the BLE link: a board's window session over
 # the BLE serial facade, the Nordic UART Service byte pipe.  Only the
