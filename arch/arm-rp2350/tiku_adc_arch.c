@@ -15,6 +15,7 @@
  */
 
 #include "tiku_adc_arch.h"
+#include "tiku_cpu_common.h"
 #include "tiku_rp2350_regs.h"
 #include <stdint.h>
 
@@ -195,6 +196,10 @@ int tiku_adc_arch_read(uint8_t channel, uint16_t *value) {
     cs |= ((uint32_t)ainsel << RP2350_ADC_CS_AINSEL_SHIFT) &
           RP2350_ADC_CS_AINSEL_MASK;
     _RP2350_REG(RP2350_ADC_CS) = cs;
+
+    if (ainsel == RP2350_ADC_CHANNEL_TEMP) {
+        tiku_cpu_rp2350_delay_us(100u);
+    }
 
     /* Trigger one conversion. START_ONCE is one-shot -- the bit reads
      * back as 0 once accepted; the conversion runs asynchronously. */

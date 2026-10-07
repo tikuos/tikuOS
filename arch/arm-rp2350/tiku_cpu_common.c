@@ -73,41 +73,43 @@ void tiku_cpu_rp2350_delay_ms(unsigned int ms) {
 /* UNIQUE ID                                                                 */
 /*---------------------------------------------------------------------------*/
 
-/* Linker symbols whose addresses tiku_cpu_rp2350_unique_id() mixes. */
-extern char __sram_start;
-extern char __flash_start;
-extern char __vectors_start;
+/** @brief Read the chip identifier words through the secure boot-ROM API. */
+static int rp2350_chip_id(uint32_t words[4])
+{
+    typedef void *(*lookup_fn)(uint32_t, uint32_t);
+    typedef int (*info_fn)(uint32_t *, uint32_t, uint32_t);
+    uint32_t lookup_address;
+    lookup_fn lookup;
+    /* The ROM table starts below the compiler's valid C object range. */
+    __asm__ volatile ("ldrh %0, [%1]" : "=r" (lookup_address)
+                      : "r" ((uintptr_t)0x16u) : "memory");
+    lookup = (lookup_fn)(uintptr_t)lookup_address;
+    info_fn info;
+    if (!lookup) {
+        return -1;
+    }
+    info = (info_fn)lookup(0x5347u, 0x0004u);
+    if (!info) {
+        return -1;
+    }
+    return info(words, 4u, 1u);
+}
 
 /**
- * @brief Fill @p buf with a stable 8-byte pseudo-unique device identifier.
- *
- * Synthesised by XOR-mixing a magic constant with the low bits of three
- * linker-symbol addresses: deterministic across reboots of the same image,
- * and meant to differ between builds.
- *
- * @note This port does not read the flash chip's 8-byte UID, which needs XIP
- *       disabled and a 0x4B QSPI command.
- * @param buf  Output buffer; must be non-NULL and at least @p len bytes
- * @param len  Number of ID bytes to write (clamped to 8)
- * @return Number of bytes written (0 if buf is NULL or len is 0)
+ * @brief Copy up to eight bytes of the silicon's chip identifier.
+ * @return Bytes copied, or zero if the ROM does not supply CHIP_INFO.
  */
-uint8_t tiku_cpu_rp2350_unique_id(uint8_t *buf, uint8_t len) {
-    if (buf == NULL || len == 0U) {
-        return 0U;
+uint8_t tiku_cpu_rp2350_unique_id(uint8_t *buf, uint8_t len)
+{
+    uint32_t words[4];
+    uint8_t i, n = len > 8u ? 8u : len;
+
+    if (buf == NULL || n == 0u ||
+        rp2350_chip_id(words) != 4 || !(words[0] & 1u)) {
+        return 0u;
     }
-    static const uint8_t magic[8] = {
-        'r', 'p', '2', '3', '5', '0', 'O', 'S'
-    };
-    uint8_t n = (len > 8U) ? 8U : len;
-    uint8_t i;
-    /* XOR the magic with low bits of the linker-symbol addresses, meant
-     * to make different builds produce different IDs. */
-    uintptr_t a = (uintptr_t)&__sram_start;
-    uintptr_t b = (uintptr_t)&__flash_start;
-    uintptr_t c = (uintptr_t)&__vectors_start;
-    for (i = 0; i < n; i++) {
-        uint8_t mix = (uint8_t)((a >> (i * 4)) ^ (b >> i) ^ (c >> (i * 2)));
-        buf[i] = magic[i] ^ mix;
+    for (i = 0u; i < n; i++) {
+        buf[i] = (uint8_t)(words[2u + i / 4u] >> ((i % 4u) * 8u));
     }
     return n;
 }

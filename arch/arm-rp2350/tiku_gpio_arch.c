@@ -167,8 +167,7 @@ int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin) {
  * @brief HAL: write a logic level to a (port, pin), claiming it as an
  *        output first if necessary.
  *
- * Calls tiku_rp2350_gpio_init_output() on every write, which drives the pin
- * low, then drives the pin to the requested level.
+ * Sets the output latch before routing and enabling the SIO driver.
  *
  * @param port  GPIO port number (1-based, 1..4).
  * @param pin   Bit position within the port (0..7).
@@ -180,8 +179,12 @@ int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val) {
     if (gp < 0) {
         return -1;
     }
-    tiku_rp2350_gpio_init_output((uint8_t)gp);
     tiku_rp2350_gpio_set((uint8_t)gp, val);
+    _RP2350_REG(RP2350_PADS_BANK0_GPIO((uint8_t)gp)) =
+        RP2350_PADS_IE | RP2350_PADS_DRIVE_4MA;
+    _RP2350_REG(RP2350_IO_BANK0_GPIO_CTRL((uint8_t)gp)) =
+        RP2350_IO_FUNC_SIO;
+    _RP2350_REG(RP2350_SIO_GPIO_OE_SET) = (1U << gp);
     return 0;
 }
 

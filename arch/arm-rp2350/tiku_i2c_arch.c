@@ -111,6 +111,13 @@ static int check_abort(void) {
     return TIKU_I2C_ERR_NACK;
 }
 
+/** @brief A failed wait is a timeout unless the controller latched a NACK. */
+static int wait_error(void)
+{
+    int rc = check_abort();
+    return rc == TIKU_I2C_OK ? TIKU_I2C_ERR_TIMEOUT : rc;
+}
+
 /**
  * @brief Set the I2C target (slave) address in IC_TAR.
  *
@@ -201,8 +208,9 @@ int tiku_i2c_arch_init(const tiku_i2c_config_t *config) {
     _RP2350_REG(I2C_REG(RP2350_I2C_IC_FS_SCL_HCNT)) = (uint32_t)(fs_h - 8UL);
     _RP2350_REG(I2C_REG(RP2350_I2C_IC_FS_SCL_LCNT)) = (uint32_t)(fs_l - 1UL);
 
-    /* SDA hold: 1 us after SCL falls, at either speed. */
-    _RP2350_REG(I2C_REG(RP2350_I2C_IC_SDA_HOLD)) = (uint32_t)cyc_per_us;
+    /* SDA hold: 300 ns, within the fast-mode data-valid limit. */
+    _RP2350_REG(I2C_REG(RP2350_I2C_IC_SDA_HOLD)) =
+        (uint32_t)(((uint64_t)peri_hz * 3U + 9999999U) / 10000000U);
 
     /* Fast-mode spike filter: 1 clk_peri cycle. */
     _RP2350_REG(I2C_REG(RP2350_I2C_IC_FS_SPKLEN)) = 1U;
@@ -255,7 +263,7 @@ int tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len) {
     uint16_t i;
     for (i = 0U; i < len; i++) {
         if (wait_status(RP2350_I2C_STATUS_TFNF) < 0) {
-            return check_abort();
+            return wait_error();
         }
         uint32_t cmd = (uint32_t)buf[i];
         if (i == (uint16_t)(len - 1U)) {
@@ -265,8 +273,8 @@ int tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len) {
     }
 
     /* Wait for the controller to drain the TX FIFO and idle. */
-    if (wait_status(RP2350_I2C_STATUS_TFE) < 0)            { return check_abort(); }
-    if (wait_status_clear(RP2350_I2C_STATUS_ACTIVITY) < 0) { return check_abort(); }
+    if (wait_status(RP2350_I2C_STATUS_TFE) < 0)            { return wait_error(); }
+    if (wait_status_clear(RP2350_I2C_STATUS_ACTIVITY) < 0) { return wait_error(); }
     return check_abort();
 }
 
@@ -299,7 +307,7 @@ int tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len) {
     /* Issue a read-cmd into the TX FIFO for each byte wanted back. */
     for (i = 0U; i < len; i++) {
         if (wait_status(RP2350_I2C_STATUS_TFNF) < 0) {
-            return check_abort();
+            return wait_error();
         }
         uint32_t cmd = RP2350_I2C_DATA_CMD_READ;
         if (i == (uint16_t)(len - 1U)) {
@@ -311,7 +319,7 @@ int tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len) {
     /* Pull the bytes out of the RX FIFO as they arrive. */
     for (i = 0U; i < len; i++) {
         if (wait_status(RP2350_I2C_STATUS_RFNE) < 0) {
-            return check_abort();
+            return wait_error();
         }
         buf[i] = (uint8_t)(_RP2350_REG(I2C_REG(RP2350_I2C_IC_DATA_CMD))
                            & 0xFFU);
@@ -379,7 +387,7 @@ int tiku_i2c_arch_write_read(uint8_t addr,
     uint16_t i;
     for (i = 0U; i < tx_len; i++) {
         if (wait_status(RP2350_I2C_STATUS_TFNF) < 0) {
-            return check_abort();
+            return wait_error();
         }
         _RP2350_REG(I2C_REG(RP2350_I2C_IC_DATA_CMD)) = (uint32_t)tx_buf[i];
     }
@@ -388,7 +396,7 @@ int tiku_i2c_arch_write_read(uint8_t addr,
      * issues a Sr + read-address. Last sets STOP. */
     for (i = 0U; i < rx_len; i++) {
         if (wait_status(RP2350_I2C_STATUS_TFNF) < 0) {
-            return check_abort();
+            return wait_error();
         }
         uint32_t cmd = RP2350_I2C_DATA_CMD_READ;
         if (i == 0U) {
@@ -403,7 +411,7 @@ int tiku_i2c_arch_write_read(uint8_t addr,
     /* Drain RX FIFO. */
     for (i = 0U; i < rx_len; i++) {
         if (wait_status(RP2350_I2C_STATUS_RFNE) < 0) {
-            return check_abort();
+            return wait_error();
         }
         rx_buf[i] = (uint8_t)(_RP2350_REG(I2C_REG(RP2350_I2C_IC_DATA_CMD))
                               & 0xFFU);

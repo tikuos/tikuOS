@@ -26,7 +26,7 @@
 #define TIKU_PIO_OK              0  /**< Operation succeeded */
 #define TIKU_PIO_ERR_BUSY       -1  /**< A transmission is in progress */
 #define TIKU_PIO_ERR_INVALID    -2  /**< Pin > 47, bit_count outside 1-32,
-                                         or bit_period_us 0 */
+                                         or period outside divider range */
 #define TIKU_PIO_ERR_NOT_READY  -3  /**< Driver not initialised, or abort
                                          with no transmission running */
 
@@ -71,7 +71,8 @@ void tiku_pio_arch_init(void);
  * @param bit_count    Number of bits to shift out (1..32)
  * @param msb_first    1 = bit 31 of data shifts out first;
  *                     0 = bit 0 first
- * @param bit_period_us  Bit period in microseconds (>= 1)
+ * @param bit_period_us  Bit period in microseconds (>= 1); must fit the
+ *                       16.8-bit divider at the current system clock
  * @param on_done      Completion callback; may be NULL
  * @param ctx          Opaque pointer passed to on_done
  *

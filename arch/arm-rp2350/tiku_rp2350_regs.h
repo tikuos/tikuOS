@@ -193,14 +193,14 @@
 #define RP2350_CLK_GPOUT_AUXSRC_GPIN0    (1U << 5)
 #define RP2350_CLK_GPOUT_AUXSRC_GPIN1    (2U << 5)
 #define RP2350_CLK_GPOUT_AUXSRC_PLL_USB  (3U << 5)
-#define RP2350_CLK_GPOUT_AUXSRC_ROSC     (4U << 5)
-#define RP2350_CLK_GPOUT_AUXSRC_XOSC     (5U << 5)
-#define RP2350_CLK_GPOUT_AUXSRC_CLK_SYS  (6U << 5)
-#define RP2350_CLK_GPOUT_AUXSRC_CLK_USB  (7U << 5)
-#define RP2350_CLK_GPOUT_AUXSRC_CLK_ADC  (8U << 5)
-#define RP2350_CLK_GPOUT_AUXSRC_CLK_REF  (9U << 5)
-#define RP2350_CLK_GPOUT_AUXSRC_CLK_PERI (10U << 5)
-#define RP2350_CLK_GPOUT_AUXSRC_CLK_HSTX (11U << 5)
+#define RP2350_CLK_GPOUT_AUXSRC_ROSC     (5U << 5)
+#define RP2350_CLK_GPOUT_AUXSRC_XOSC     (6U << 5)
+#define RP2350_CLK_GPOUT_AUXSRC_CLK_SYS  (8U << 5)
+#define RP2350_CLK_GPOUT_AUXSRC_CLK_USB  (9U << 5)
+#define RP2350_CLK_GPOUT_AUXSRC_CLK_ADC  (10U << 5)
+#define RP2350_CLK_GPOUT_AUXSRC_CLK_REF  (11U << 5)
+#define RP2350_CLK_GPOUT_AUXSRC_CLK_PERI (12U << 5)
+#define RP2350_CLK_GPOUT_AUXSRC_CLK_HSTX (13U << 5)
 #define RP2350_CLK_GPOUT_DC50            (1U << 12)  /* duty-cycle correction */
 #define RP2350_CLK_GPOUT_KILL            (1U << 10)
 #define RP2350_CLK_GPOUT_ENABLE          (1U << 11)
@@ -210,7 +210,8 @@
 #define RP2350_CLK_REF_SRC_AUX          (1U)
 #define RP2350_CLK_REF_SRC_XOSC         (2U)
 #define RP2350_CLK_REF_AUXSRC_PLL_USB   (0U << 5)
-#define RP2350_CLK_REF_AUXSRC_ROSC      (1U << 5)
+#define RP2350_CLK_REF_AUXSRC_GPIN0     (1U << 5)
+#define RP2350_CLK_REF_AUXSRC_GPIN1     (2U << 5)
 
 /* CLK_PERI_CTRL fields */
 #define RP2350_CLK_PERI_ENABLE          (1U << 11)
@@ -621,11 +622,11 @@
 #define RP2350_WD_REASON            (RP2350_WATCHDOG_BASE + 0x08U)
 #define RP2350_WD_SCRATCH0          (RP2350_WATCHDOG_BASE + 0x0CU)
 /* watchdog tick on the TICKS block */
-#define RP2350_WD_TICK              (RP2350_TICKS_BASE   + 0x18U)
+#define RP2350_WD_TICK              (RP2350_TICKS_BASE   + 0x30U)
 
 #define RP2350_WD_CTRL_TIME_MASK    (0xFFFFFFU)
-#define RP2350_WD_CTRL_PAUSE_DBG1   (1U << 25)
-#define RP2350_WD_CTRL_PAUSE_DBG0   (1U << 26)
+#define RP2350_WD_CTRL_PAUSE_DBG1   (1U << 26)
+#define RP2350_WD_CTRL_PAUSE_DBG0   (1U << 25)
 #define RP2350_WD_CTRL_PAUSE_JTAG   (1U << 24)
 #define RP2350_WD_CTRL_ENABLE       (1U << 30)
 #define RP2350_WD_CTRL_TRIGGER      (1U << 31)
@@ -828,7 +829,8 @@
  * @return Slice index (0..11).
  */
 static inline uint8_t rp2350_pwm_pin_to_slice(uint8_t gpio) {
-    return (uint8_t)((gpio / 2U) % RP2350_PWM_NUM_SLICES);
+    return (uint8_t)(gpio < 32U ? (gpio / 2U) % 8U
+                                : 8U + (gpio / 2U) % 4U);
 }
 
 /**
@@ -861,6 +863,7 @@ static inline uint8_t rp2350_pwm_pin_to_channel(uint8_t gpio) {
 #define RP2350_DMA_CHAN_CTRL_TRIG(c)    (RP2350_DMA_CHAN(c) + 0x0CU)
 
 #define RP2350_DMA_INTR    (RP2350_DMA_BASE + 0x400U)  /* raw */
+#define RP2350_DMA_CHAN_ABORT (RP2350_DMA_BASE + 0x464U)
 #define RP2350_DMA_INTE0   (RP2350_DMA_BASE + 0x404U)  /* enable for IRQ0 */
 #define RP2350_DMA_INTF0   (RP2350_DMA_BASE + 0x408U)
 #define RP2350_DMA_INTS0   (RP2350_DMA_BASE + 0x40CU)  /* status after enable */
@@ -885,9 +888,9 @@ static inline uint8_t rp2350_pwm_pin_to_channel(uint8_t gpio) {
 #define RP2350_DMA_CTRL_IRQ_QUIET       (1U << 23)
 #define RP2350_DMA_CTRL_BSWAP           (1U << 24)
 #define RP2350_DMA_CTRL_SNIFF_EN        (1U << 25)
-#define RP2350_DMA_CTRL_WRITE_ERROR     (1U << 28)
-#define RP2350_DMA_CTRL_READ_ERROR      (1U << 29)
-#define RP2350_DMA_CTRL_BUSY            (1U << 30)   /* RO */
+#define RP2350_DMA_CTRL_WRITE_ERROR     (1U << 29)
+#define RP2350_DMA_CTRL_READ_ERROR      (1U << 30)
+#define RP2350_DMA_CTRL_BUSY            (1U << 26)   /* RO */
 #define RP2350_DMA_CTRL_AHB_ERR         (1U << 31)   /* RO */
 
 /*---------------------------------------------------------------------------*/
@@ -916,6 +919,7 @@ static inline uint8_t rp2350_pwm_pin_to_channel(uint8_t gpio) {
 #define RP2350_PIO_SM_SHIFTCTRL(sm)  (0x0D0U + 0x18U * (sm))
 #define RP2350_PIO_SM_ADDR(sm)       (0x0D4U + 0x18U * (sm))   /* RO */
 #define RP2350_PIO_SM_INSTR(sm)      (0x0D8U + 0x18U * (sm))   /* write: exec */
+#define RP2350_PIO_GPIOBASE          0x168U
 #define RP2350_PIO_SM_PINCTRL(sm)    (0x0DCU + 0x18U * (sm))
 
 /* PIO interrupt subsystem (two outputs per block, IRQ0 and IRQ1).
@@ -972,7 +976,7 @@ static inline uint8_t rp2350_pwm_pin_to_channel(uint8_t gpio) {
 #define RP2350_IRQ_DMA_IRQ_1        11
 #define RP2350_IRQ_DMA_IRQ_2        12
 #define RP2350_IRQ_DMA_IRQ_3        13
-#define RP2350_IRQ_PWM_IRQ_WRAP_0   14
+#define RP2350_IRQ_PWM_IRQ_WRAP_0   8
 #define RP2350_IRQ_PIO0_0           15
 #define RP2350_IRQ_PIO0_1           16
 #define RP2350_IRQ_PIO1_0           17
@@ -982,6 +986,9 @@ static inline uint8_t rp2350_pwm_pin_to_channel(uint8_t gpio) {
 #define RP2350_IRQ_IO_BANK0         21
 #define RP2350_IRQ_UART0            33
 #define RP2350_IRQ_UART1            34
+#define RP2350_IRQ_ADC_FIFO         35
+#define RP2350_IRQ_I2C0             36
+#define RP2350_IRQ_I2C1             37
 
 /**
  * @brief Enable an IRQ in the Cortex-M33 NVIC.

@@ -57,6 +57,8 @@ static struct {
     volatile uint16_t overrun_count; /**< Total overruns (HW + SW). */
 } rx;
 
+static uint8_t uart_ready;
+
 /*---------------------------------------------------------------------------*/
 /* HELPERS                                                                   */
 /*---------------------------------------------------------------------------*/
@@ -79,6 +81,35 @@ static inline uint32_t uart_read(uint32_t off) {
  */
 static inline void uart_write(uint32_t off, uint32_t val) {
     _RP2350_REG(RP2350_UART0_BASE + off) = val;
+}
+
+void tiku_rp2350_uart_drain(void)
+{
+    uint32_t spin = 1000000U;
+
+    if (!uart_ready) {
+        return;
+    }
+    while ((uart_read(RP2350_UART_FR) & RP2350_UART_FR_BUSY) && spin--) {
+    }
+}
+
+void tiku_rp2350_uart_reclock(void)
+{
+    uint32_t control, format, divisor;
+
+    if (!uart_ready) {
+        return;
+    }
+    divisor = (uint32_t)((tiku_cpu_rp2350_smclk_get_hz() * 4UL) /
+                         TIKU_BOARD_UART_BAUD);
+    control = uart_read(RP2350_UART_CR);
+    format = uart_read(RP2350_UART_LCR_H);
+    uart_write(RP2350_UART_CR, 0U);
+    uart_write(RP2350_UART_IBRD, divisor >> 6);
+    uart_write(RP2350_UART_FBRD, divisor & 0x3FU);
+    uart_write(RP2350_UART_LCR_H, format);
+    uart_write(RP2350_UART_CR, control);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -117,6 +148,7 @@ static void uart_pins_init(void) {
  * FIFO and the ring buffer, then enables the UART and its NVIC line.
  */
 void tiku_uart_init(void) {
+    uart_ready = 1U;
     /* PL011 baud divisor formula:
      *   bauddiv  = CLK_PERI / (16 * baud)            (fractional)
      *   IBRD     = floor(bauddiv)                    (16-bit)

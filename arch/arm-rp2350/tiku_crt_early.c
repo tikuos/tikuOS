@@ -88,7 +88,7 @@ void tiku_rp2350_dma_irq0_handler(void)  __attribute__((weak, alias("rp2350_defa
 /* RESET HANDLER                                                             */
 /*---------------------------------------------------------------------------*/
 
-void tiku_rp2350_reset_handler(void) __attribute__((naked, section(".text"), used));
+void tiku_rp2350_reset_handler(void) __attribute__((section(".text"), used));
 
 /**
  * @brief RP2350 reset handler: C runtime init and entry to main().

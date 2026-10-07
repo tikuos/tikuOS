@@ -119,9 +119,7 @@ static uint8_t            g_pio_idle_level; /**< unused */
 /**
  * @brief Disable a PIO state machine and restart its internal state.
  *
- * tiku_pio_arch_bitbang_tx() calls it before each transmission, which needs
- * the SM to start at address 0.  The restart does not move the program
- * counter: after a completed transmission the SM is still on the jmp-to-self.
+ * Clears internal state, then forces a JMP to the program's first slot.
  *
  * @param sm  State machine index (0-3).
  */
@@ -134,6 +132,8 @@ static void pio_sm_disable_restart(uint8_t sm) {
      * CLKDIV_RESTART restarts the clock divider. */
     PIO0(RP2350_PIO_CTRL) |= RP2350_PIO_CTRL_SM_RESTART(sm)
                           |  RP2350_PIO_CTRL_CLKDIV_RESTART(sm);
+    PIO0(RP2350_PIO_SM_INSTR(sm)) = BITBANG_PROG_BASE;
+    __asm__ volatile ("dsb" ::: "memory");
 }
 
 /**
@@ -175,21 +175,23 @@ static void pio_sm_exec(uint8_t sm, uint16_t instr) {
 /**
  * @brief Convert a microseconds-per-bit period to the SM_CLKDIV register value.
  *
- * divider = bit_period_us * clk_sys_hz / 1e6, formatted as the 16.8 fixed point
- * SM_CLKDIV expects ([31:16] integer, [15:8] fractional).  At clk_sys = 150 MHz
- * and bit_period_us = 200 that is 30000 -> 0x7530_0000.
+ * OUT and JMP take two SM clocks per bit. The divider is halved before
+ * encoding into the 16.8 field; zero reports an unrepresentable period.
  *
  * @param bit_period_us  Desired bit period in microseconds.
- * @return               SM_CLKDIV register value in 16.8 fixed-point format.
+ * @return SM_CLKDIV value, or zero when the period exceeds the field.
  */
 static uint32_t bitperiod_us_to_clkdiv(uint16_t bit_period_us) {
     extern unsigned long tiku_cpu_rp2350_clock_get_hz(void);
     uint64_t clk_sys_hz = (uint64_t)tiku_cpu_rp2350_clock_get_hz();
-    uint64_t div_x256 = ((uint64_t)bit_period_us * clk_sys_hz * 256ULL)
+    uint64_t div_x256 = ((uint64_t)bit_period_us * clk_sys_hz * 128ULL)
                         / 1000000ULL;
-    /* div_x256 is the divider with 8 fraction bits; the shift by 8 moves
-     * the integer part to [31:16] and the fraction to [15:8].  An integer
-     * part above 0xFFFF does not fit and the 32-bit cast drops it. */
+    if (div_x256 > 0xFFFFFFULL) {
+        return 0U;
+    }
+    if (div_x256 < 256ULL) {
+        div_x256 = 256ULL;
+    }
     return (uint32_t)(div_x256 << 8);
 }
 
@@ -261,6 +263,9 @@ int tiku_pio_arch_bitbang_tx(uint8_t  gpio_pin,
     uint32_t shiftctrl;
     uint32_t pinctrl;
     uint16_t set_x;
+    uint32_t clkdiv;
+    uint32_t gpio_base = gpio_pin >= 32U ? 16U : 0U;
+    uint32_t sm_pin = gpio_pin - gpio_base;
 
     if (!g_pio_initialised) {
         return TIKU_PIO_ERR_NOT_READY;
@@ -268,7 +273,12 @@ int tiku_pio_arch_bitbang_tx(uint8_t  gpio_pin,
     if (g_pio_busy) {
         return TIKU_PIO_ERR_BUSY;
     }
-    if (bit_count == 0U || bit_count > 32U || bit_period_us == 0U) {
+    if (gpio_pin > 47U || bit_count == 0U || bit_count > 32U ||
+        bit_period_us == 0U) {
+        return TIKU_PIO_ERR_INVALID;
+    }
+    clkdiv = bitperiod_us_to_clkdiv(bit_period_us);
+    if (clkdiv == 0U) {
         return TIKU_PIO_ERR_INVALID;
     }
 
@@ -288,15 +298,7 @@ int tiku_pio_arch_bitbang_tx(uint8_t  gpio_pin,
     pio_sm_disable_restart(BITBANG_SM);
     pio_sm_drain_tx_fifo(BITBANG_SM);
 
-    /* 3. Configure clock divider for the requested bit period. Each
-     * `out pins, 1` instruction takes 1 SM clock; `jmp x--` takes 1
-     * more, so the actual loop period is 2 SM clocks per bit. Halve
-     * the divider so the wall-clock bit period matches. */
-    uint32_t clkdiv = bitperiod_us_to_clkdiv(bit_period_us) / 2U;
-    if (clkdiv < 0x00010000U) {
-        /* Less than divisor 1.0 -- saturate at minimum (clk_sys). */
-        clkdiv = 0x00010000U;
-    }
+    /* 3. The checked divider accounts for both instructions per bit. */
     PIO0(RP2350_PIO_SM_CLKDIV(BITBANG_SM)) = clkdiv;
 
     /* 4. Configure shift direction. Pull threshold = 32 so each pull
@@ -313,19 +315,19 @@ int tiku_pio_arch_bitbang_tx(uint8_t  gpio_pin,
 
     /* 5. Configure pin assignment: SET base + OUT base both point at
      * the target pin so `set pindirs, 1` can drive it. */
-    pinctrl = ((uint32_t)gpio_pin
+    PIO0(RP2350_PIO_GPIOBASE) = gpio_base;
+    pinctrl = (sm_pin
                   << RP2350_PIO_PINCTRL_OUT_BASE_SHIFT) |
-              ((uint32_t)gpio_pin
+              (sm_pin
                   << RP2350_PIO_PINCTRL_SET_BASE_SHIFT) |
               (1U << RP2350_PIO_PINCTRL_OUT_COUNT_SHIFT) |
               (1U << RP2350_PIO_PINCTRL_SET_COUNT_SHIFT);
     PIO0(RP2350_PIO_SM_PINCTRL(BITBANG_SM)) = pinctrl;
 
-    /* 6. Preload X with bit_count - 1 through SMx_INSTR.  The forced
-     * instruction runs before the program's first fetch, so X is set
-     * before the JMP x-- loop.  SMx_INSTR holds one instruction and a
-     * second write replaces one that has not run, so this is the only forced
-     * instruction; set pindirs and pull are in the program (slots 0, 1). */
+    /* 6. The restart JMP has completed: an instruction written to SMx_INSTR
+     * executes in the cycle the write lands, ignoring the clock divider,
+     * and a JMP cannot stall, so the X preload written to the same register
+     * runs after it. */
     set_x = pio_instr_set_x((uint8_t)(bit_count - 1U));
     pio_sm_exec(BITBANG_SM, set_x);
 

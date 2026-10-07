@@ -175,13 +175,14 @@ void tiku_rp2350_gpio_toggle(uint8_t pin);
 #define TIKU_BOARD_OW_AVAILABLE     1
 
 /**
- * @brief 1-Wire data pin assignment (GP15).
+ * @brief 1-Wire data pin assignment (GP22).
  *
- * GP15 is clear of UART0 GP0/1, I2C0 GP4/5, SPI0 GP16-19, ADC GP26-29 and the
- * CYW43 pins, but it is also an LED pin: LED1 in CYW43 builds, LED2 otherwise.
+ * GP22 is clear of the default UART, I2C, SPI, ADC, CYW43 and LED pins.
  * The data line needs an external 4.7 kohm pull-up to 3V3.
  */
-#define TIKU_BOARD_OW_PIN           15U
+#ifndef TIKU_BOARD_OW_PIN
+#define TIKU_BOARD_OW_PIN           22U
+#endif
 
 /**
  * @brief I2C0 pin assignment (GP4=SDA, GP5=SCL).

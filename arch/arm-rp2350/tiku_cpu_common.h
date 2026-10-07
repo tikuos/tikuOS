@@ -40,13 +40,12 @@ void tiku_cpu_rp2350_delay_us(unsigned int us);
 /**
  * @brief Read the on-chip unique device identifier.
  *
- * The value is synthesised from a magic constant and the addresses of three
- * linker symbols, stable across reboots of one image; the flash chip's
- * 64-bit UID is not read.
+ * Reads the RP2350 per-die chip identifier through the boot ROM.
+ * The eight bytes are stable across firmware updates.
  *
  * @param buf  Destination buffer (caller-provided).
  * @param len  Number of bytes to copy; more than 8 is clamped to 8.
- * @return Number of bytes written to buf, 0 for a NULL buf or a zero len.
+ * @return Bytes copied; 0 for invalid arguments or an unavailable ROM ID.
  */
 uint8_t  tiku_cpu_rp2350_unique_id(uint8_t *buf, uint8_t len);
 

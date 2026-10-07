@@ -131,7 +131,7 @@ unsigned short tiku_clock_arch_fine(void) {
     if (rvr == 0U) {
         return 0;
     }
-    uint32_t fine = ((rvr - cvr) * 0xFFFFU) / rvr;
+    uint32_t fine = (uint32_t)(((uint64_t)(rvr - cvr) * 0xFFFFU) / rvr);
     return (unsigned short)fine;
 }
 

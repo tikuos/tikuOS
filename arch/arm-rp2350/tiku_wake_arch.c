@@ -46,7 +46,9 @@ void tiku_wake_arch_query(tiku_wake_sources_t *out) {
     if (iser & (1U << RP2350_IRQ_TIMER0_0)) {
         out->sources |= TIKU_WAKE_HTIMER;
     }
-    if (iser & (1U << RP2350_IRQ_UART0)) {
+    uint32_t uart_iser = _RP2350_REG(RP2350_NVIC_ISER0 +
+                                     (RP2350_IRQ_UART0 / 32U) * 4U);
+    if (uart_iser & (1U << (RP2350_IRQ_UART0 & 31U))) {
         out->sources |= TIKU_WAKE_UART_RX;
     }
     if (iser & (1U << RP2350_IRQ_IO_BANK0)) {

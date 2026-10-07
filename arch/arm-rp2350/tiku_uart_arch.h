@@ -28,6 +28,12 @@
  */
 void     tiku_uart_init(void);
 
+/** @brief Bounded drain before changing the peripheral clock. */
+void tiku_rp2350_uart_drain(void);
+
+/** @brief Recompute baud divisors without clearing queued receive data. */
+void tiku_rp2350_uart_reclock(void);
+
 /**
  * @brief Transmit one character, blocking until the TX FIFO has space.
  *

@@ -40,6 +40,8 @@ static uint8_t            g_dma_initialised;
  *        tiku_dma_arch_abort() clear it, so it is volatile.
  */
 static volatile uint8_t   g_dma_busy;
+static uint8_t            g_dma_aborting;
+static uint32_t           g_dma_abort_enable;
 /** @brief Completion callback of the transfer in flight, or NULL. */
 static tiku_dma_done_cb_t g_dma_done_cb;
 /** @brief Context pointer passed to g_dma_done_cb. */
@@ -166,31 +168,43 @@ int tiku_dma_arch_busy(void) {
 }
 
 /**
- * @brief Abort an in-flight DMA transfer and reset driver state
+ * @brief Abort channel 0; retain busy state if the hardware times out.
  *
- * Writes 0 to CTRL_TRIG, which clears EN, acknowledges any latched IRQ in
- * INTS0, and resets the busy flag and callback pointers.  The callback is not
- * called, and the destination holds a partial copy.
- *
- * @return TIKU_DMA_OK if the transfer was successfully aborted;
- *         TIKU_DMA_ERR_NOT_READY if no transfer was in flight
+ * The callback is cancelled. The destination may contain a partial copy.
  */
 int tiku_dma_arch_abort(void) {
+    uint32_t bit = 1U << DMA_CHAN_MEMCPY;
+    uint32_t enabled, guard = 1000000U;
+
     if (!g_dma_busy) {
         return TIKU_DMA_ERR_NOT_READY;
     }
-
-    /* A CTRL_TRIG write with EN clear stops the channel and starts
-     * nothing. */
-    _RP2350_REG(RP2350_DMA_CHAN_CTRL_TRIG(DMA_CHAN_MEMCPY)) = 0U;
-
-    /* Acknowledge any latched IRQ before wiping the callback. */
-    _RP2350_REG(RP2350_DMA_INTS0) = (1U << DMA_CHAN_MEMCPY);
-
-    g_dma_busy     = 0U;
-    g_dma_done_cb  = NULL;
+    enabled = _RP2350_REG(RP2350_DMA_INTE0);
+    if (!g_dma_aborting) {
+        g_dma_abort_enable = enabled & bit;
+        g_dma_aborting = 1U;
+    }
+    _RP2350_REG(RP2350_DMA_INTE0) = enabled & ~bit;
+    g_dma_done_cb = NULL;
     g_dma_done_ctx = NULL;
 
+    /* RP2350-E5 requires clearing EN before asserting ABORT. */
+    _RP2350_REG(RP2350_DMA_CHAN_CTRL_TRIG(DMA_CHAN_MEMCPY)) &=
+        ~RP2350_DMA_CTRL_EN;
+    _RP2350_REG(RP2350_DMA_CHAN_ABORT) = bit;
+    while ((_RP2350_REG(RP2350_DMA_CHAN_ABORT) & bit) ||
+           (_RP2350_REG(RP2350_DMA_CHAN_CTRL_TRIG(DMA_CHAN_MEMCPY)) &
+            RP2350_DMA_CTRL_BUSY)) {
+        if (--guard == 0U) {
+            /* Keep IRQ0 masked and the backing buffers owned until retry. */
+            return TIKU_DMA_ERR_BUSY;
+        }
+    }
+    _RP2350_REG(RP2350_DMA_INTS0) = bit;
+    g_dma_busy = 0U;
+    _RP2350_REG(RP2350_DMA_INTE0) =
+        (_RP2350_REG(RP2350_DMA_INTE0) & ~bit) | g_dma_abort_enable;
+    g_dma_aborting = 0U;
     return TIKU_DMA_OK;
 }
 
@@ -202,6 +216,9 @@ int tiku_dma_arch_abort(void) {
  * the callback can start the next memcpy.
  */
 void tiku_rp2350_dma_irq0_handler(void) {
+    if ((_RP2350_REG(RP2350_DMA_INTS0) & (1U << DMA_CHAN_MEMCPY)) == 0U) {
+        return;
+    }
     /* W1C the channel's IRQ flag in INTS0 (the post-enable status
      * register; writing 1 clears the corresponding IRQ source). */
     _RP2350_REG(RP2350_DMA_INTS0) = (1U << DMA_CHAN_MEMCPY);

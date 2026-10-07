@@ -16,6 +16,7 @@
 
 #include "tiku_cpu_freq_boot_arch.h"
 #include "tiku_rp2350_regs.h"
+#include "tiku_uart_arch.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -182,8 +183,12 @@ static int rp2350_clock_switch(void) {
  * @param xosc_ok  Non-zero when the XOSC reported STABLE
  */
 static void rp2350_clock_fallback_xosc(int xosc_ok) {
-    /* CLK_SYS = CLK_REF: the XOSC once rp2350_clock_switch() has moved
-     * CLK_REF there, else still the ROSC the boot ROM left. */
+    if (xosc_ok) {
+        _RP2350_REG(RP2350_CLK_REF_CTRL) = RP2350_CLK_REF_SRC_XOSC;
+        (void)rp2350_spin_until(
+            (volatile uint32_t *)RP2350_CLK_REF_SELECTED, 0x4U);
+    }
+    /* CLK_SYS follows the selected reference. */
     _RP2350_REG(RP2350_CLK_SYS_CTRL) = RP2350_CLK_SYS_SRC_REF;
     _RP2350_REG(RP2350_CLK_SYS_DIV)  = 0x00010000U;
 
@@ -453,6 +458,8 @@ void tiku_cpu_freq_rp2350_init(unsigned int target_mhz) {
         return;
     }
 
+    tiku_rp2350_uart_drain();
+
     if (p->fbdiv == 0U) {
         /* Bypass PLL: clk_sys = clk_ref = XOSC = 12 MHz. */
         rp2350_park_clk_sys_on_ref();
@@ -467,6 +474,8 @@ void tiku_cpu_freq_rp2350_init(unsigned int target_mhz) {
 
         g_clk_sys_hz  = 12000000UL;
         g_clk_peri_hz = 12000000UL;
+        g_clock_fault = 0U;
+        tiku_rp2350_uart_reclock();
         return;
     }
 
@@ -481,22 +490,28 @@ void tiku_cpu_freq_rp2350_init(unsigned int target_mhz) {
         g_clk_sys_hz  = 12000000UL;
         g_clk_peri_hz = 12000000UL;
         g_clock_fault = 1U;
+        tiku_rp2350_uart_reclock();
         return;
     }
 
     if (!rp2350_clk_sys_back_on_pll()) {
+        rp2350_park_clk_sys_on_ref();
+        _RP2350_REG(RP2350_CLK_PERI_CTRL) =
+            RP2350_CLK_PERI_AUXSRC_XOSC | RP2350_CLK_PERI_ENABLE;
         g_clk_sys_hz  = 12000000UL;
         g_clk_peri_hz = 12000000UL;
         g_clock_fault = 1U;
+        tiku_rp2350_uart_reclock();
         return;
     }
 
-    /* The caches assume CLK_PERI runs from CLK_SYS, as the boot init sets
-     * it, so both take the new rate; the UART and I2C divisors and the
-     * clock-rate VFS reads use them. */
+    /* CLK_PERI follows the retuned system clock. */
+    _RP2350_REG(RP2350_CLK_PERI_CTRL) =
+        RP2350_CLK_PERI_AUXSRC_CLK_SYS | RP2350_CLK_PERI_ENABLE;
     g_clk_sys_hz  = (unsigned long)target_mhz * 1000000UL;
     g_clk_peri_hz = (unsigned long)target_mhz * 1000000UL;
     g_clock_fault = 0U;
+    tiku_rp2350_uart_reclock();
 }
 
 /**

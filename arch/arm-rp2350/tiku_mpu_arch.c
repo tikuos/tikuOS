@@ -45,7 +45,6 @@ extern uint32_t __flash_end;
 
 /** @brief Software MPUCTL0: the password, enable and SEGIE bits. */
 static uint16_t stub_mpuctl0;
-static uint16_t stub_mpuctl1;     /* violation flags */
 static uint16_t stub_mpusam = TIKU_MPU_DEFAULT_SAM;
 static uint16_t stub_mpusegb1;
 static uint16_t stub_mpusegb2;
@@ -61,8 +60,8 @@ static uint16_t stub_mpusegb2;
  * state, and tiku_mpu_arch_init_segments() zeroes the struct when it is
  * missing. */
 
-/** @brief Magic sentinel for cold-boot detection in .mpu_diag ('MPUP'). */
-#define TIKU_MPU_DIAG_MAGIC  0x4D505550U   /* 'M''P''U''P' */
+/** @brief Magic sentinel for cold-boot detection in .mpu_diag . */
+#define TIKU_MPU_DIAG_MAGIC  0x4D505551U
 
 /** @brief Persistent MPU diagnostic state that survives warm reset.
  *
@@ -95,6 +94,7 @@ struct tiku_mpu_diag {
      *  before issuing AIRCR, to tell HFNMIENA=0 (store dropped) from
      *  HFNMIENA=1 (lockup).  Only tiku_mpu_arch_test_hfnmi_arm() sets it. */
     uint32_t handler_misbehave;
+    uint32_t violation_flags;  /**< MMFSR flags retained across warm reset. */
 };
 
 /** @brief Bit assignments for mpu_diag.test_done_mask.
@@ -415,10 +415,14 @@ void tiku_mpu_arch_init_segments(void) {
      * and write the magic.  A warm reset keeps the magic and the counters,
      * so the boot after a fault reads what the handler recorded. */
     if (mpu_diag.magic != TIKU_MPU_DIAG_MAGIC) {
+        mpu_diag.violation_flags = 0U;
         mpu_diag.magic             = TIKU_MPU_DIAG_MAGIC;
         mpu_diag.violation_count   = 0U;
         mpu_diag.last_fault_addr   = 0U;
         mpu_diag.last_fault_mmfsr  = 0U;
+        mpu_diag.last_fault_cfsr   = 0U;
+        mpu_diag.last_fault_hfsr   = 0U;
+        mpu_diag.last_fault_ipsr   = 0U;
         mpu_diag.expect_fault      = 0U;
         mpu_diag.test_done_mask    = 0U;
         mpu_diag.hfnmi_phase       = 0U;
@@ -585,14 +589,15 @@ void tiku_mpu_arch_test_arm_fault(void) {
 /**
  * @brief Clear the violation counter and the main fault diagnostic fields.
  *
- *  Zeroes violation_count, last_fault_addr, last_fault_mmfsr and
- *  expect_fault, so a test run starts without counts from earlier boots.
- *  last_fault_cfsr, last_fault_hfsr and last_fault_ipsr keep their values.
+ * Zeroes the count, address, status snapshots and expected-fault marker.
  */
 void tiku_mpu_arch_test_clear_violation(void) {
     mpu_diag.violation_count  = 0U;
     mpu_diag.last_fault_addr  = 0U;
     mpu_diag.last_fault_mmfsr = 0U;
+    mpu_diag.last_fault_cfsr  = 0U;
+    mpu_diag.last_fault_hfsr  = 0U;
+    mpu_diag.last_fault_ipsr  = 0U;
     mpu_diag.expect_fault     = 0U;
 }
 
@@ -731,14 +736,14 @@ void tiku_mpu_arch_lock_nvm(uint16_t saved_state) {
  * @return 16-bit violation flag word (MPUCTL1 mirror).
  */
 uint16_t tiku_mpu_arch_get_violation_flags(void) {
-    return stub_mpuctl1;
+    return mpu_diag.violation_flags;
 }
 
 /**
  * @brief Clear the software-bookkept violation flag register to zero.
  */
 void tiku_mpu_arch_clear_violation_flags(void) {
-    stub_mpuctl1 = 0U;
+    mpu_diag.violation_flags = 0U;
 }
 
 /**
@@ -769,7 +774,7 @@ void tiku_rp2350_mem_fault_handler(void) {
     /* Every access in this handler is one the regions allow:
      *   _RP2350_REG(SCB_*)  SCS 0xE000E000+  -- PRIVDEFENA RW
      *   mpu_diag.*          .mpu_diag SRAM   -- Region 2 RW + XN
-     *   stub_mpuctl1        .bss SRAM        -- Region 2 RW + XN
+     *   mpu_diag.violation_flags  .mpu_diag SRAM -- Region 2 RW + XN
      *   instruction fetch   .text flash      -- Region 1 RX
      * The MPU checks this handler, so a refused access here, such as a
      * .uninit write outside the unlock window, escalates to HardFault. */
@@ -790,7 +795,7 @@ void tiku_rp2350_mem_fault_handler(void) {
      * MMFSR cause bits into the MPUCTL1 mirror, and move an armed
      * expect_fault to 2, which the next boot reads. */
     mpu_diag.violation_count++;
-    stub_mpuctl1 |= (uint16_t)mmfsr;
+    mpu_diag.violation_flags |= (uint16_t)mmfsr;
     if (mpu_diag.expect_fault == 1U) {
         mpu_diag.expect_fault = 2U;   /* observed */
     }

@@ -55,7 +55,7 @@ static uint32_t pwm_compute_div(uint32_t freq_hz) {
         /* Below 1.0: use 1.0, the highest wrap rate, clk_sys / (TOP + 1). */
         div_x16 = 16ULL;
     }
-    if (div_x16 > 0xFFFFULL) {
+    if (div_x16 > 0x0FFFULL) {
         /* Too large for the DIV field: freq_hz is too low for TOP 0xFFFF. */
         return 0U;
     }

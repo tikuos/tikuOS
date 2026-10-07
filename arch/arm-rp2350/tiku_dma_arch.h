@@ -81,12 +81,12 @@ int tiku_dma_arch_busy(void);
 /**
  * @brief Abort an in-progress channel 0 transfer.
  *
- * Clears the channel's EN bit, acknowledges its pending interrupt and clears
- * the busy flag and callback.  The callback is not called, and the
- * destination holds a partial copy.
+ * Cancels the callback and waits for hardware abort. A timeout keeps the
+ * channel busy and IRQ masked: keep the buffers alive and retry abort.
+ * The destination may contain a partial copy.
  *
  * @return TIKU_DMA_OK, or TIKU_DMA_ERR_NOT_READY when no transfer is in
- *         flight.
+ *         flight, or TIKU_DMA_ERR_BUSY if the abort timed out.
  */
 int tiku_dma_arch_abort(void);
 

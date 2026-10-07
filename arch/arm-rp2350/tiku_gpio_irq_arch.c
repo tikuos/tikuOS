@@ -102,7 +102,7 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
     uint32_t mask  = (uint32_t)bits << shift;
 
     /* Clear any pending edge from before arming. */
-    _RP2350_REG_SET(RP2350_IO_BANK0_INTR(word), mask);
+    _RP2350_REG(RP2350_IO_BANK0_INTR(word)) = mask;
 
     /* Unmask the edge in PROC0_INTE. */
     _RP2350_REG_SET(RP2350_IO_BANK0_PROC0_INTE(word), mask);
@@ -137,7 +137,7 @@ int tiku_gpio_irq_arch_disable(uint8_t port, uint8_t pin) {
 
     _RP2350_REG_CLR(RP2350_IO_BANK0_PROC0_INTE(word), mask);
     /* Clear any pending. */
-    _RP2350_REG_SET(RP2350_IO_BANK0_INTR(word), mask);
+    _RP2350_REG(RP2350_IO_BANK0_INTR(word)) = mask;
     return TIKU_GPIO_IRQ_OK;
 }
 
@@ -182,8 +182,7 @@ void tiku_rp2350_io_bank0_isr(void) {
 
             /* Clear the latched edge by writing the same nibble to
              * INTR. */
-            _RP2350_REG_SET(RP2350_IO_BANK0_INTR(word),
-                            (uint32_t)bits << (nibble * 4U));
+            _RP2350_REG(RP2350_IO_BANK0_INTR(word)) = (uint32_t)bits << (nibble * 4U);
         }
     }
 }
