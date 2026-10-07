@@ -131,8 +131,9 @@ typedef struct {
      * below) and bumps enc_req_seq; the M33 returns SKDs and IVs at the
      * same enc_rsp_seq (the FLPR sends LL_ENC_RSP), then the session key
      * and IV, or a reason to refuse, at that enc_key_seq.  The FLPR runs
-     * the start and sets enc_on once both ways encrypt; all as on air,
-     * least octet first, but for enc_sk (most significant first). */
+     * the start and counts in enc_on each one that ends with both ways
+     * encrypting, a key refresh another; all as on air, least octet first,
+     * but for enc_sk (most significant first). */
     volatile uint32_t enc_req_seq;      /* FLPR: LL_ENC_REQ seen (params set) */
     volatile uint32_t enc_rsp_seq;      /* M33: SKDs and IVs ready            */
     volatile uint8_t  enc_skdm[8];      /* FLPR->M33: the central's SKD       */
@@ -141,7 +142,7 @@ typedef struct {
     volatile uint8_t  enc_ivs[4];       /* M33->FLPR: the local IV            */
     volatile uint8_t  enc_sk[16];       /* M33: session key                   */
     volatile uint8_t  enc_iv[8];        /* M33: IV = IVm || IVs               */
-    volatile uint32_t enc_on;           /* FLPR: 1 once encryption is active  */
+    volatile uint32_t enc_on;           /* FLPR: starts this link, 0 = none   */
 
     /* After answering LL_LENGTH_REQ the FLPR publishes the effective max LL
      * payload, min(peer MaxRxOctets, TIKU_FLPR_DLE_MAX_OCTETS) and at least

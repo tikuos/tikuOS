@@ -35,6 +35,7 @@
 #define HCI_EVT                 0x04u
 #define EVT_DISCONN_COMPLETE    0x05u
 #define EVT_ENC_CHANGE          0x08u
+#define EVT_KEY_REFRESH         0x30u
 #define EVT_CMD_COMPLETE        0x0Eu
 #define EVT_CMD_STATUS          0x0Fu
 #define EVT_NUM_COMPLETED       0x13u
@@ -89,7 +90,7 @@ static uint8_t  s_rsp_len;
 static uint8_t  s_adv_on;               /* the host has advertising on    */
 static uint8_t  s_claimed;              /* the FLPR holds the radio       */
 static uint8_t  s_linked;               /* LE Connection Complete sent    */
-static uint8_t  s_enc_told;             /* Encryption Change sent         */
+static uint32_t s_enc_seen;             /* the FLPR's encryption starts   */
 static uint8_t  s_scanning;             /* the observer runs for the host */
 static uint8_t  s_scan_sent;            /* its table's entries reported   */
 static uint16_t s_scan_named;           /* ... with their names, by index */
@@ -327,7 +328,7 @@ scan_enable(uint8_t on)
 /**
  * @brief Follow the link's encryption start: the central's LL_ENC_REQ is
  *        an LTK request to the host, and both ways encrypting Encryption
- *        Change.
+ *        Change, or Key Refresh Complete for each start after the first.
  */
 static void
 enc_follow(void)
@@ -352,16 +353,16 @@ enc_follow(void)
         e[15] = (uint8_t)(ediv >> 8);
         rxq_push(e, 16u);
     }
-    if (!s_enc_told && tiku_flpr_arch_enc_on()) {
-        s_enc_told = 1u;
+    if (tiku_flpr_arch_enc_on() > s_enc_seen) {
         e[0] = HCI_EVT;
-        e[1] = EVT_ENC_CHANGE;
-        e[2] = 4u;
+        e[1] = (s_enc_seen == 0u) ? EVT_ENC_CHANGE : EVT_KEY_REFRESH;
         e[3] = ST_OK;
         e[4] = (uint8_t)(HCI_HANDLE & 0xFFu);
         e[5] = (uint8_t)(HCI_HANDLE >> 8);
         e[6] = 0x01u;                           /* AES-CCM on */
-        rxq_push(e, 7u);
+        e[2] = (s_enc_seen == 0u) ? 4u : 3u;
+        rxq_push(e, (uint8_t)(3u + e[2]));
+        s_enc_seen = tiku_flpr_arch_enc_on();
     }
 }
 
@@ -440,7 +441,7 @@ link_follow(void)
     st = tiku_flpr_arch_conn_state();
     if (st == 1u && !s_linked) {
         s_linked = 1u;
-        s_enc_told = 0u;
+        s_enc_seen = 0u;
         s_adv_on = 0u;                        /* a connection ends ADV_IND */
         link_up_event();
     } else if (st == 2u || st == 3u) {

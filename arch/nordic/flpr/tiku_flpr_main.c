@@ -344,7 +344,10 @@ static uint16_t fll_phy_instant;       /* connEventCount to switch at        */
 #define FLL_ENC_RSP     4u      /* the central's LL_START_ENC_RSP heard  */
 #define FLL_ENC_DONE    5u      /* the reply queued, encrypted           */
 #define FLL_ENC_ON      6u      /* both ways, acknowledged               */
+#define FLL_ENC_PAUSING 7u      /* LL_PAUSE_ENC_REQ heard: reply due     */
+#define FLL_ENC_PAUSED  8u      /* the reply sent: plaintext both ways   */
 static uint8_t  fll_enc;                /* FLL_ENC_*                        */
+static uint8_t  fll_enc_refresh;        /* paused for a new key: data waits */
 static uint8_t  fll_rx_enc, fll_tx_enc; /* decrypting RX, encrypting TX     */
 static uint32_t fll_rx_ctr, fll_tx_ctr; /* packetCounter each way           */
 static uint32_t fll_enc_seq;            /* the enc_req_seq posted           */
@@ -585,6 +588,14 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
         if (fll_enc == FLL_ENC_START) {
             fll_enc = FLL_ENC_RSP;              /* the reply goes encrypted  */
         }
+    } else if (op == 0x0Au) {                   /* LL_PAUSE_ENC_REQ: a key   */
+        if (fll_enc == FLL_ENC_ON) {            /* refresh, then a restart   */
+            fll_enc = FLL_ENC_PAUSING;
+        }
+    } else if (op == 0x0Bu) {                   /* LL_PAUSE_ENC_RSP          */
+        if (fll_enc == FLL_ENC_PAUSED) {
+            fll_enc = FLL_ENC_OFF;              /* the LL_ENC_REQ comes next */
+        }
     } else if (op == 0x14u) {                   /* LL_LENGTH_REQ (DLE)      */
         /* Reply with the local maximum and publish the effective TX size,
          * min(peer MaxRxOctets, TIKU_FLPR_DLE_MAX_OCTETS) and at least 27,
@@ -732,6 +743,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     fll_term_sent = 0u;
     fll_reason = 0x16u;                          /* ended here, unless ...    */
     fll_enc = FLL_ENC_OFF;                       /* every link starts clear   */
+    fll_enc_refresh = 0u;
     fll_rx_enc = 0u;
     fll_tx_enc = 0u;
     fll_rx_ctr = 0u;
@@ -839,19 +851,30 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
                     }
                     fll_queue_ctrl(0x05u, (const uint8_t *)0, 0u);
                     fll_rx_enc = 1u;                 /* LL_START_ENC_REQ    */
-                    fll_enc = FLL_ENC_START;
+                    fll_rx_ctr = 0u;                 /* a session counts    */
+                    fll_enc = FLL_ENC_START;         /* from 0 each way     */
                 }
             } else if (fll_enc == FLL_ENC_RSP) {
                 fll_tx_enc = 1u;
+                fll_tx_ctr = 0u;
                 fll_queue_ctrl(0x06u, (const uint8_t *)0, 0u);
                 fll_enc = FLL_ENC_DONE;
+            } else if (fll_enc == FLL_ENC_PAUSING) {
+                /* LL_PAUSE_ENC_RSP goes encrypted, and the link is
+                 * plaintext after it until the restart. */
+                fll_queue_ctrl(0x0Bu, (const uint8_t *)0, 0u);
+                fll_rx_enc = 0u;
+                fll_tx_enc = 0u;
+                fll_enc_refresh = 1u;
+                fll_enc = FLL_ENC_PAUSED;
             }
         }
         /* The host's next L2CAP fragment, when the pending slot is free
          * (at most 32 bytes, with its a2f_llid); a2f_ack frees the slot.
          * The encryption start holds data back until it ends. */
         if (fll_tx_len == 0u && sh->a2f_seq != fll_a2f_seen &&
-            (fll_enc == FLL_ENC_OFF || fll_enc == FLL_ENC_ON)) {
+            ((fll_enc == FLL_ENC_OFF && !fll_enc_refresh) ||
+             fll_enc == FLL_ENC_ON)) {
             uint8_t n = (uint8_t)sh->a2f_len, fr[32];
             fll_a2f_seen = sh->a2f_seq;
             if (n > sizeof(fr)) {
@@ -971,7 +994,8 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
                 }
                 if (fll_enc == FLL_ENC_DONE) {
                     fll_enc = FLL_ENC_ON;        /* the START_ENC_RSP landed */
-                    sh->enc_on = 1u;
+                    fll_enc_refresh = 0u;
+                    sh->enc_on = sh->enc_on + 1u;   /* a start, or a refresh */
                 }
             }
             conn_txb[0] = (uint8_t)((conn_txb[0] & 0x03u) |

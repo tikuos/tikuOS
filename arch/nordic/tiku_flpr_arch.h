@@ -292,8 +292,9 @@ int tiku_flpr_arch_enc_request(uint8_t rand[8], uint16_t *ediv);
  */
 void tiku_flpr_arch_enc_key(const uint8_t ltk[16]);
 
-/** @brief 1 once the held link encrypts both ways. */
-int tiku_flpr_arch_enc_on(void);
+/** @brief The encryption starts the held link has finished, both ways
+ *         encrypting: 0 none yet, one more for each key refresh. */
+uint32_t tiku_flpr_arch_enc_on(void);
 
 /**
  * @brief Both steps at once for a caller that holds the key: a new

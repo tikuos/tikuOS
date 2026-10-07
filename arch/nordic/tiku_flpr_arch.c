@@ -729,9 +729,9 @@ void tiku_flpr_arch_enc_key(const uint8_t ltk[16])
     sh->enc_key_seq = flpr_enc_serviced;         /* START_ENC_REQ, or REJECT */
 }
 
-int tiku_flpr_arch_enc_on(void)
+uint32_t tiku_flpr_arch_enc_on(void)
 {
-    return (TIKU_FLPR_SHARED->enc_on != 0u) ? 1 : 0;
+    return TIKU_FLPR_SHARED->enc_on;
 }
 
 int tiku_flpr_arch_enc_service(const uint8_t ltk[16])
