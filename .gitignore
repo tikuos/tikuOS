@@ -39,6 +39,8 @@ lnk_*.cmd
 *.swo
 *~
 .DS_Store
+# Debug symbols macOS writes beside a host binary built with -g in one step
+*.dSYM/
 Thumbs.db
 
 # Backup files / scratch notes
