@@ -1235,17 +1235,17 @@ static void bleadv_flprnus(uint8_t req_cpu)
             }
         }
         {
-            uint32_t gap = 0u, rx = 0u;
-            uint32_t duty = tiku_flpr_arch_conn_anchor(&gap, &rx);
-            if (gap != 0u) {
-                SHELL_PRINTF("  anchored-RX: RADIO off %lu of %lu loop-iters"
-                             " per interval (~%lu%% RX duty, closed-loop)\n",
-                             (unsigned long)gap,
-                             (unsigned long)(gap + rx),
-                             (unsigned long)duty);
-            } else {
-                SHELL_PRINTF("  anchored-RX: continuous (not yet converged)\n");
-            }
+            tiku_flpr_conn_timing_t ct;
+            tiku_flpr_arch_conn_timing(&ct);
+            SHELL_PRINTF("  timing: interval=%u winoffset=%u winsize=%u "
+                         "first-catch=%lu misses=%lu late-opens=%lu "
+                         "late-replies=%lu widening=%luus\n",
+                         (unsigned)ct.interval, (unsigned)ct.winoffset,
+                         (unsigned)ct.winsize, (unsigned long)ct.first,
+                         (unsigned long)ct.misses,
+                         (unsigned long)ct.late_opens,
+                         (unsigned long)ct.late_tx,
+                         (unsigned long)ct.widen_us);
         }
         {
             uint32_t cm = 0u, cu = 0u;

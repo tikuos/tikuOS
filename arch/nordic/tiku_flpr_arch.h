@@ -201,6 +201,21 @@ int tiku_flpr_arch_conn_capture(const uint8_t *adv, uint32_t adv_len,
                                 const uint8_t *addr,
                                 tiku_flpr_conn_info_t *out);
 
+/** @brief Connection-event telemetry: see tiku_flpr_arch_conn_timing(). */
+typedef struct {
+    uint32_t misses;        /**< event windows that closed empty    */
+    uint32_t late_opens;    /**< windows opened past their start    */
+    uint32_t late_tx;       /**< replies whose TXEN never fired     */
+    uint32_t first;         /**< connEventCount of the first catch  */
+    uint32_t widen_us;      /**< the last window's widening, us     */
+    uint16_t interval;      /**< connInterval, 1.25 ms units        */
+    uint16_t winoffset;     /**< CONNECT_IND transmit window offset */
+    uint8_t  winsize;       /**< and its size, 1.25 ms units        */
+} tiku_flpr_conn_timing_t;
+
+/** @brief The held link's event telemetry and its CONNECT_IND window. */
+void tiku_flpr_arch_conn_timing(tiku_flpr_conn_timing_t *out);
+
 /** @brief 1 while the FLPR is holding a live connection. */
 int tiku_flpr_arch_conn_active(void);
 
@@ -287,18 +302,6 @@ uint32_t tiku_flpr_arch_conn_updates(uint32_t *chan_map, uint32_t *conn_upd);
  *       Otherwise only the radio is made secure.
  */
 void tiku_flpr_arch_conn_stop(void);
-
-/**
- * @brief Anchored-RX telemetry: RADIO-off and RX-wait loop iterations of
- *        the closed-loop idle (see tiku_flpr_main.c).
- * @param gap_off_it  out: RADIO-off loop iterations per interval (0 while
- *                    not anchored).
- * @param rxon_it     out: measured RX-wait loop iterations.
- * @return RX-on duty as a percentage of the interval (off+on), or 100 while
- *         continuous.  Both values are FLPR loop iterations, a ratio and
- *         not a wall-clock time.
- */
-uint32_t tiku_flpr_arch_conn_anchor(uint32_t *gap_off_it, uint32_t *rxon_it);
 
 /**
  * @brief Start advertising and holding a link on the FLPR without blocking.

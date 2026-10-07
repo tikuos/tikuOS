@@ -161,8 +161,9 @@ typedef struct {
     volatile uint32_t conn_phy_addr;   /* FLPR: post-switch ADDRESS events    */
     volatile uint32_t conn_phy_crcok;  /* FLPR: post-switch CRCOK events      */
     volatile uint32_t conn_sub;        /* unused, 0; the host tracks the CCCD */
-    volatile uint32_t conn_gap;        /* anchored RX: idle iterations        */
-    volatile uint32_t conn_rxon;       /* anchored RX: last RX-wait iters     */
+    volatile uint32_t conn_widen_us;   /* last event window's widening, us    */
+    volatile uint32_t conn_late;       /* windows opened after their nominal  */
+                                       /* start (the FLPR was busy)           */
     volatile uint32_t conn_cm;         /* LL_CHANNEL_MAP_UPDATE_INDs applied  */
     volatile uint32_t conn_cu;         /* LL_CONNECTION_UPDATE_INDs applied   */
     volatile uint32_t a2f_ack;         /* last a2f L2CAP fragment the         */
@@ -195,6 +196,13 @@ typedef struct {
     volatile uint32_t adv_rxother;     /* other CRC-good PDUs in the window   */
     volatile uint32_t adv_tifs;        /* last reply's ADDRESS, TIMER10 ticks */
                                        /* since the request's end             */
+
+    /* Connection-event telemetry: windows that closed with no packet,
+     * replies whose TXEN never fired (armed past their moment), and the
+     * connEventCount of the first packet caught (0xFFFF until then). */
+    volatile uint32_t conn_misses;
+    volatile uint32_t conn_tx_late;
+    volatile uint32_t conn_first;
 } tiku_flpr_shared_t;
 
 /**

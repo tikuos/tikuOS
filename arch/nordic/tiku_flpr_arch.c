@@ -789,25 +789,19 @@ uint32_t tiku_flpr_arch_conn_updates(uint32_t *chan_map, uint32_t *conn_upd)
     return cm + cu;
 }
 
-/* Anchored-RX telemetry: RADIO-off + RX-wait loop iterations, duty %. */
-uint32_t tiku_flpr_arch_conn_anchor(uint32_t *gap_off_it, uint32_t *rxon_it)
+/* Connection-event telemetry from the FLPR, and the CONNECT_IND's window. */
+void tiku_flpr_arch_conn_timing(tiku_flpr_conn_timing_t *out)
 {
-    uint32_t gap  = TIKU_FLPR_SHARED->conn_gap;
-    uint32_t rxon = TIKU_FLPR_SHARED->conn_rxon;
-    uint32_t period;
+    const tiku_flpr_shared_t *sh = TIKU_FLPR_SHARED;
 
-    if (gap_off_it != 0) {
-        *gap_off_it = gap;
-    }
-    if (rxon_it != 0) {
-        *rxon_it = rxon;
-    }
-    if (gap == 0u) {
-        return 100u;                             /* continuous RX             */
-    }
-    period = gap + rxon;
-    return (period != 0u) ? (uint32_t)(((uint64_t)rxon * 100u) / period)
-                          : 100u;
+    out->misses     = sh->conn_misses;
+    out->late_opens = sh->conn_late;
+    out->late_tx    = sh->conn_tx_late;
+    out->first      = sh->conn_first;
+    out->widen_us   = sh->conn_widen_us;
+    out->interval   = sh->conn_interval;
+    out->winoffset  = sh->conn_winoffset;
+    out->winsize    = sh->conn_winsize;
 }
 
 /* Ask the FLPR to stop advertising or leave its hold loop, wait for it,
