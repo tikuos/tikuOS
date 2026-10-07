@@ -206,7 +206,8 @@ int tiku_bt_is_advertising(void);
 /* GAP SCANNING                                                              */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Scan-cache entries; a device first heard once it is full is lost. */
+/** @brief Scan-cache entries; when full, a louder new device replaces the
+ *         weakest. */
 #define TIKU_BT_SCAN_MAX         16U
 
 /**
@@ -281,8 +282,9 @@ uint8_t tiku_bt_scan_count(void);
 /**
  * @brief Copy the cached scan results into @p out.
  *
- * Entries are stable across the lifetime of the scan (each BD_ADDR
- * appears at most once; later sightings update RSSI / name in place).
+ * Each BD_ADDR appears at most once, later sightings updating its RSSI
+ * and name in place; once the cache is full, a device heard louder than
+ * the weakest entry takes that entry's place.
  *
  * @param out  Destination array, sized for @p max entries
  * @param max  Capacity of @p out; slots beyond the cached count are left
