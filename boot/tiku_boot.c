@@ -231,7 +231,7 @@ tiku_boot_init_memory(void)
 
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
     defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
-    defined(PLATFORM_ESP32C61)
+    defined(PLATFORM_ESP32C61) || defined(PLATFORM_RA8P1)
     /* Every port with a carved NVM region wires the tier allocator here,
      * before any consumer allocates: tiku_tier_init() runs the layout
      * service, which fixes the NVM tier's extent for this boot.  The call is

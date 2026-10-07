@@ -240,11 +240,10 @@ struct tiku_timer *tiku_timer_get(uint8_t idx);
 
 /**
  * @brief Get next expiration time across all timers
- * @return Nearest expiration time, or 0 if none pending
+ * @return Current time if any timer is due, the nearest future expiration,
+ *         or 0 if none are pending.
  *
- * Timers are ranked by expiration minus now in the clock's width, so an
- * overdue timer's distance wraps and ranks after every future one.  The
- * tickless idle uses it to choose how far to stretch the tick.
+ * The tickless idle uses the remaining interval to choose its wake time.
  */
 tiku_clock_time_t tiku_timer_next_expiration(void);
 

@@ -40,6 +40,13 @@
 #define TIKU_ADC_REF_1V2            1   /**< Internal 1.2V reference */
 #define TIKU_ADC_REF_2V0            2   /**< Internal 2.0V reference */
 #define TIKU_ADC_REF_2V5            3   /**< Internal 2.5V reference */
+
+/** @brief Default supported reference for ordinary ADC callers. */
+#if defined(PLATFORM_AMBIQ)
+#define TIKU_ADC_REF_DEFAULT TIKU_ADC_REF_1V2
+#else
+#define TIKU_ADC_REF_DEFAULT TIKU_ADC_REF_AVCC
+#endif
 /** @} */
 
 /** @defgroup TIKU_ADC_STATUS ADC Status Codes

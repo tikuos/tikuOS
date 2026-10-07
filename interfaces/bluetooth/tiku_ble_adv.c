@@ -49,6 +49,18 @@ static uint32_t adv_burst_count;
 static uint8_t  radio_inited;
 static uint8_t  adv_offloaded;      /* beacon runs on the FLPR             */
 
+#if (TIKU_FLPR_ENABLE + 0)
+/** @brief Stop offload and preserve its final burst count before rearming. */
+static void adv_offload_stop(void)
+{
+    if (adv_offloaded) {
+        tiku_flpr_arch_beacon_stop();
+        adv_burst_count += tiku_flpr_arch_beacon_bursts();
+        adv_offloaded = 0u;
+    }
+}
+#endif
+
 /* Last-scan summary for /sys/radio observability. */
 static uint8_t               scan_last_count;
 static tiku_ble_adv_report_t scan_last_best;
@@ -270,6 +282,7 @@ int tiku_ble_adv_beacon_data(const char *name, uint16_t interval_ms,
      * UARTE21 to the FLPR (NonSecure) and passes it the PDU.  A live
      * observer keeps the beacon on the M33: the hand-off would take the
      * radio from the M33 RX engine. */
+    adv_offload_stop();
     if (!obs_active && tiku_flpr_arch_alive() &&
         tiku_flpr_arch_beacon(adv_pdu, adv_pdu_len, interval_ms) == 0) {
         /* Stop the M33 timer at the hand-off: its next burst would touch
@@ -280,14 +293,6 @@ int tiku_ble_adv_beacon_data(const char *name, uint16_t interval_ms,
         adv_on = 1u;
         radio_owner = TIKU_BLE_ADV_OWNER_BEACON_FLPR;
         return 0;
-    }
-    /* A retune that falls back to the M33 path while offloaded (the
-     * coprocessor died or refused) reclaims the peripherals for the secure
-     * alias first: tiku_flpr_arch_beacon_stop() returns RADIO and UARTE21
-     * even if the FLPR does not answer. */
-    if (adv_offloaded) {
-        tiku_flpr_arch_beacon_stop();
-        adv_offloaded = 0u;
     }
 #endif
 
@@ -310,8 +315,7 @@ void tiku_ble_adv_stop(void)
             (uint8_t)(radio_owner == TIKU_BLE_ADV_OWNER_BEACON_OBSERVE);
 #if (TIKU_FLPR_ENABLE + 0)
         if (adv_offloaded) {
-            tiku_flpr_arch_beacon_stop();
-            adv_offloaded = 0u;
+            adv_offload_stop();
         }
 #endif
         tiku_timer_stop(&adv_timer);
@@ -369,11 +373,15 @@ int tiku_ble_adv_set_txpower(int8_t dbm)
         uint8_t d[TIKU_BLE_ADV_DATA_CAP];
         uint8_t dl;
 
-        tiku_flpr_arch_beacon_stop();
+        adv_offload_stop();
         if (tiku_radio_arch_set_txpower(dbm) != 0) {
             /* Invalid step: restore the offloaded beacon unchanged. */
-            (void)tiku_flpr_arch_beacon(adv_pdu, adv_pdu_len,
-                                        adv_interval_ms);
+            if (tiku_flpr_arch_beacon(adv_pdu, adv_pdu_len,
+                                       adv_interval_ms) == 0) {
+                adv_offloaded = 1u;
+            } else {
+                tiku_ble_adv_stop();
+            }
             return -1;
         }
         memcpy(nm, adv_name, sizeof(nm));

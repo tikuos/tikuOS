@@ -162,7 +162,7 @@ void tiku_mpu_arch_lock_nvm(uint16_t saved_state);
  *
  * MSP430 returns the MPUCTL1 flags its SYSNMI handler latched, bit n - 1 for
  * segment n; RP2350 and Ambiq the MMFSR bits their MemManage handler ORs in;
- * RA8P1 0x0002 after a MemManage access violation in its fault record.
+ * RA8P1 0x0001 after a MemManage access violation in its fault record.
  *
  * @return Violation flags in the port's encoding; 0 on the other ports
  */

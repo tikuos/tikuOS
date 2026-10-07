@@ -388,9 +388,9 @@ tiku_mem_err_t tiku_region_init(const tiku_mem_region_t *table,
  * @return 1 if the range is fully contained in a matching region,
  *         0 otherwise
  */
-tiku_mem_err_t tiku_region_contains(const uint8_t *ptr,
-                                     tiku_mem_arch_size_t size,
-                                     tiku_mem_region_type_t expected_type);
+int tiku_region_contains(const uint8_t *ptr,
+                         tiku_mem_arch_size_t size,
+                         tiku_mem_region_type_t expected_type);
 
 /**
  * @brief Claim a memory range for a subsystem
@@ -1303,12 +1303,12 @@ tiku_mem_err_t tiku_mpu_lock_nvm_status(uint16_t saved_state);
  * @brief Execute a function with NVM unlocked, interrupts disabled.
  *
  * Disables interrupts, unlocks NVM, calls fn(ctx), relocks NVM,
- * and re-enables interrupts.
+ * and restores the interrupt state present at entry.
  *
  * @param fn   Function to call while NVM is writable
  * @param ctx  Opaque context pointer passed to fn
  * @note Keep @p fn short: interrupts stay masked while it runs.  Interrupts
- *       are enabled on return, whatever their state on entry.
+ *       return to the state present at entry.
  */
 void tiku_mpu_scoped_write(tiku_mpu_write_fn fn, void *ctx);
 
@@ -2211,8 +2211,8 @@ tiku_mem_err_t tiku_mem_resume(uint8_t *fram_buf,
 /**
  * @brief Reset the hibernate subsystem to uninitialised state.
  *
- * The init flag lives in SRAM and stays set for the rest of the boot, so a
- * suite expecting boot_count to start at 1 needs this between groups.
+ * Clears SRAM registration only. A valid NVM marker remains readable,
+ * and its boot count continues on the next hibernate.
  *
  * @note Test use only.
  */

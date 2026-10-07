@@ -19,6 +19,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_mem.h"
+#include "hal/tiku_cpu.h"
 
 /*---------------------------------------------------------------------------*/
 /* MPU FUNCTIONS                                                             */
@@ -123,20 +124,20 @@ tiku_mem_err_t tiku_mpu_lock_nvm_status(uint16_t saved_state)
  * @param fn   Write function, called once inside the window
  * @param ctx  Passed to @p fn
  * @note Keep @p fn short: interrupts stay masked while it runs.  Split a long
- *       write into several scoped writes.  Interrupts are enabled on return,
- *       whatever their state on entry.
+ *       write into several scoped writes. The entry interrupt state is
+ *       restored on return.
  */
 void tiku_mpu_scoped_write(tiku_mpu_write_fn fn, void *ctx)
 {
     uint16_t saved;
 
-    tiku_mpu_arch_disable_irq();
+    tiku_atomic_enter();
     saved = tiku_mpu_unlock_nvm();
 
     fn(ctx);
 
     tiku_mpu_lock_nvm(saved);
-    tiku_mpu_arch_enable_irq();
+    tiku_atomic_exit();
 }
 
 /*---------------------------------------------------------------------------*/

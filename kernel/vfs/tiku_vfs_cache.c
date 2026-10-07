@@ -93,10 +93,11 @@ int tiku_vfs_cache_get(const tiku_vfs_node_t *node, char *buf, size_t max)
         if (cache[i].node == node) {
             if (slot_fresh(&cache[i])) {
                 size_t len = cache[i].len;
-                if (len > max) {
-                    len = max;
+                if (max > 0) {
+                    if (len >= max) len = max - 1;
+                    memcpy(buf, cache[i].text, len);
+                    buf[len] = '\0';
                 }
-                memcpy(buf, cache[i].text, len);
                 ret = (int)cache[i].len;   /* snprintf-style length */
             } else {
                 cache[i].node = NULL;      /* drop the expired entry */

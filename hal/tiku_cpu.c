@@ -597,7 +597,10 @@ unsigned int tiku_cpu_idle_mode_wakes(tiku_cpu_idle_mode_t mode) {
 }
 
 const char *tiku_cpu_idle_mode_name(tiku_cpu_idle_mode_t mode) {
-#if defined(PLATFORM_MSP430)
+#if defined(PLATFORM_STM32N6)
+    (void)mode;
+    return "off";
+#elif defined(PLATFORM_MSP430)
     switch (mode) {
         case TIKU_CPU_IDLE_LIGHT:   return "LPM0";
         case TIKU_CPU_IDLE_DEEP:    return "LPM3";
@@ -657,7 +660,21 @@ const char *tiku_cpu_idle_mode_desc(tiku_cpu_idle_mode_t mode) {
         case TIKU_CPU_IDLE_LIGHT:
         case TIKU_CPU_IDLE_DEEP:
         case TIKU_CPU_IDLE_DEEPEST:
+#if defined(TIKU_DEVICE_APOLLO4L) || defined(TIKU_DEVICE_APOLLO4P)
+            return "WFI (Cortex-M4F wait-for-interrupt)";
+#else
             return "WFI (Cortex-M55 wait-for-interrupt)";
+#endif
+        case TIKU_CPU_IDLE_OFF:
+        default:
+            return "off (busy-wait)";
+    }
+#elif defined(PLATFORM_RA8P1)
+    switch (mode) {
+        case TIKU_CPU_IDLE_LIGHT:
+        case TIKU_CPU_IDLE_DEEP:
+        case TIKU_CPU_IDLE_DEEPEST:
+            return "WFI (Cortex-M85 wait-for-interrupt)";
         case TIKU_CPU_IDLE_OFF:
         default:
             return "off (busy-wait)";

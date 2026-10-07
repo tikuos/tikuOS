@@ -54,7 +54,8 @@
  * An expired entry found on the way is dropped.
  *
  * @param node  The node being read
- * @param buf   Output buffer; a hit copies up to @p max bytes and no NUL
+ * @param buf   Output buffer; a hit copies at most @p max - 1 bytes and
+ *              writes a NUL after them when @p max is not 0
  * @param max   Buffer capacity
  * @return Bytes (snprintf-style length) on a hit, or -1 on miss/expired.
  * @note @p node must have a descriptor with fresh_ticks > 0; the VFS read

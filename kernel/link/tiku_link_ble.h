@@ -14,6 +14,7 @@
 #define TIKU_LINK_BLE_H_
 
 #include "tiku_link.h"
+#include <kernel/timers/tiku_clock.h>
 #include <stddef.h>
 #include <stdint.h>
 

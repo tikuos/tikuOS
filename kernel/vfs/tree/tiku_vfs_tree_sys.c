@@ -19,6 +19,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_vfs_tree_sys.h"
+#include <errno.h>
 #if defined(PLATFORM_NORDIC)
 #include <arch/nordic/tiku_crypto_arch.h>   /* /sys/crypto mode + counters */
 #endif
@@ -1860,9 +1861,18 @@ flpr_spin_read(char *buf, size_t max)
 static int
 flpr_spin_write(const char *buf, size_t len)
 {
-    long iters = 0;
-    (void)len;
-    iters = strtol(buf, (char **)0, 0);
+    char tmp[24], *end;
+    long iters;
+    if (buf == NULL || len == 0 || len >= sizeof tmp) return TIKU_VFS_EINVAL;
+    memcpy(tmp, buf, len);
+    tmp[len] = '\0';
+    errno = 0;
+    iters = strtol(tmp, &end, 0);
+    if (end == tmp) return TIKU_VFS_EINVAL;
+    while (end < tmp + len && (*end == ' ' || *end == '\t' ||
+           *end == '\n' || *end == '\r')) end++;
+    if (errno == ERANGE || end == tmp || end != tmp + len ||
+        iters < 0 || (unsigned long)iters > UINT32_MAX) return TIKU_VFS_EINVAL;
     if (iters == 0) {                  /* 0 = cancel a running load          */
         tiku_flpr_arch_spin_abort();
         return 0;
@@ -1894,9 +1904,18 @@ flpr_spinbench_read(char *buf, size_t max)
 static int
 flpr_spinbench_write(const char *buf, size_t len)
 {
-    long iters = 0;
-    (void)len;
-    iters = strtol(buf, (char **)0, 0);
+    char tmp[24], *end;
+    long iters;
+    if (buf == NULL || len == 0 || len >= sizeof tmp) return TIKU_VFS_EINVAL;
+    memcpy(tmp, buf, len);
+    tmp[len] = '\0';
+    errno = 0;
+    iters = strtol(tmp, &end, 0);
+    if (end == tmp) return TIKU_VFS_EINVAL;
+    while (end < tmp + len && (*end == ' ' || *end == '\t' ||
+           *end == '\n' || *end == '\r')) end++;
+    if (errno == ERANGE || end == tmp || end != tmp + len ||
+        (unsigned long)iters > UINT32_MAX) return TIKU_VFS_EINVAL;
     if (iters <= 0) {
         return TIKU_VFS_EINVAL;
     }

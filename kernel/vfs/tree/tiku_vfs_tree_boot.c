@@ -378,9 +378,11 @@ boot_clock_fault_read(char *buf, size_t max)
 /*---------------------------------------------------------------------------*/
 /*
  *   violations — MPU segment violation flags, as a hex bitmask.  RA8P1
- *                reports them from its fault record, which survives the
- *                reset a violation causes; on the other ports they clear
- *                at every boot.
+ *                reports them from its fault record and RP2350 and Ambiq
+ *                from the NOLOAD .mpu_diag region, both of which survive
+ *                the reset a violation causes and not a power-off;
+ *                MSP430 latches them in SRAM for the current boot; the
+ *                other ports report 0.
  *   count      — violations counted across fault-triggered resets, kept in
  *                the NOLOAD .mpu_diag region on RP2350 and Ambiq; 0 on the
  *                other ports.  Decimal.

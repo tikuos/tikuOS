@@ -92,7 +92,9 @@ int tiku_coproc_stop(void);
  *
  * @note Blocks for a short bounded interval while it watches the heartbeat
  *       advance.  Not for a hot loop or an ISR.
- * @return Non-zero when the magic is published and the heartbeat advances
+ * @return Non-zero when the magic is published and the heartbeat advances,
+ *         or the backend reports a sub-command during which it freezes the
+ *         heartbeat (the Nordic beacon and connection jobs)
  */
 int tiku_coproc_alive(void);
 

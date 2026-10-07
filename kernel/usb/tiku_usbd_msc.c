@@ -188,6 +188,12 @@ static uint16_t small_reply(tiku_usbd_msc_t *m, const uint8_t *cb,
         break;
 
     case TIKU_USBD_MSC_READ_CAPACITY10:
+        if (m->blocks == 0) {
+            tiku_usbd_msc_fail(m, TIKU_USBD_MSC_SENSE_NOTREADY,
+                               TIKU_USBD_MSC_ASC_NOT_READY);
+            *status = 1u;
+            return 0;
+        }
         /* SCSI defines the first field as the last LBA, blocks - 1. */
         put_be32(&r[0], m->blocks - 1u);
         put_be32(&r[4], TIKU_USBD_MSC_BLOCK);

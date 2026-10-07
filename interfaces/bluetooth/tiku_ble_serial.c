@@ -588,7 +588,10 @@ tiku_ble_serial_recv(uint8_t *buf, uint16_t cap)
     for (i = 0u; i < nn; i++) {
         buf[i] = s_rx[i];
     }
-    s_rx_len = 0u;
+    for (i = nn; i < s_rx_len; i++) {
+        s_rx[i - nn] = s_rx[i];
+    }
+    s_rx_len -= nn;
     return (int)nn;
 }
 

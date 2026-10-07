@@ -95,11 +95,11 @@ typedef unsigned long tiku_clock_time_t;
  * @def TIKU_CLOCK_MS_TO_TICKS(ms)
  * @brief Convert milliseconds to clock ticks, rounding down.
  *
- * The product (ms) * TIKU_CLOCK_SECOND is computed in the type of @p ms: on
- * MSP430 an int argument above 255 overflows, so pass an unsigned long.
+ * Multiplication uses unsigned 32-bit arithmetic, including on 16-bit CPUs.
+ * The product must fit in uint32_t.
  */
 #define TIKU_CLOCK_MS_TO_TICKS(ms) \
-    ((tiku_clock_time_t)(((ms) * TIKU_CLOCK_SECOND) / 1000))
+    ((tiku_clock_time_t)(((uint32_t)(ms) * TIKU_CLOCK_SECOND) / 1000u))
 
 /*---------------------------------------------------------------------------*/
 /* CORE API                                                                  */

@@ -148,7 +148,7 @@ static int bb_soft_abort(void) {
 /* RP2350 BACKEND -- PIO state machine                                       */
 /*===========================================================================*/
 
-#if defined(PLATFORM_RP2350)
+#if defined(PLATFORM_RP2350) && !defined(TIKU_BITBANG_SOFT)
 
 /**
  * @brief Pack data[] into a word in the order the PIO program shifts.

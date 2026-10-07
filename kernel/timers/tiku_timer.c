@@ -353,15 +353,19 @@ tiku_clock_time_t tiku_timer_next_expiration(void) {
   }
 
   now = tiku_clock_time();
-  nearest = timer_list->start + timer_list->interval;
-  dist = nearest - now;
+  nearest = now;
+  dist = 0;
 
-  for (t = timer_list->next; t != NULL; t = t->next) {
-    tiku_clock_time_t exp = t->start + t->interval;
-    tiku_clock_time_t d = exp - now;
-    if (d < dist) {
+  for (t = timer_list; t != NULL; t = t->next) {
+    tiku_clock_time_t elapsed = (tiku_clock_time_t)(now - t->start);
+    tiku_clock_time_t d;
+    if (elapsed >= t->interval) {
+      return now;
+    }
+    d = t->interval - elapsed;
+    if (t == timer_list || d < dist) {
       dist = d;
-      nearest = exp;
+      nearest = now + d;
     }
   }
 

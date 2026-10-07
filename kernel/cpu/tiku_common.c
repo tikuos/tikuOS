@@ -141,8 +141,8 @@ uint8_t tiku_common_clz(uint16_t val)
  * @param buf  Destination buffer; NULL copies nothing.
  * @param len  Maximum number of bytes to copy.
  * @return     Number of bytes actually written (0 if buf is NULL).
- * @note RP2350 builds its id from linker addresses, so every board running
- *       the same image reports the same id.
+ * @note RP2350 reads up to 8 bytes of the boot ROM's CHIP_INFO record and
+ *       writes nothing when the ROM does not supply it.
  * @see tiku_common_reset_reason()
  */
 uint8_t tiku_common_unique_id(uint8_t *buf, uint8_t len)

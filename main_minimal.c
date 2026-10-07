@@ -23,10 +23,11 @@
 #include "arch/ambiq/tiku_uart_arch.h"
 #include "arch/ambiq/tiku_gpio_arch.h"
 
-/* EVB LED0, active-low: Apollo510 pad 165, Apollo4 Lite pad 12.  The loop
- * toggles it once per heartbeat line. */
-#if defined(TIKU_DEVICE_APOLLO4L)
+/* EVB LED0, active-low; toggled once per heartbeat line. */
+#if defined(TIKU_DEVICE_APOLLO4L) || defined(TIKU_DEVICE_APOLLO4P)
 #define TIKU_MIN_LED_PAD   12u
+#elif defined(TIKU_DEVICE_APOLLO510B)
+#define TIKU_MIN_LED_PAD   11u
 #else
 #define TIKU_MIN_LED_PAD   165u
 #endif
@@ -46,6 +47,10 @@ int main(void)
     tiku_cpu_ambiq_delay_ms(100);
 #if defined(TIKU_DEVICE_APOLLO4L)
     tiku_uart_puts("\n\n--- TikuOS minimal smoke test (Apollo4 Lite EVB) ---\n");
+#elif defined(TIKU_DEVICE_APOLLO4P)
+    tiku_uart_puts("\n\n--- TikuOS minimal smoke test (Apollo4 Plus EVB) ---\n");
+#elif defined(TIKU_DEVICE_APOLLO510B)
+    tiku_uart_puts("\n\n--- TikuOS minimal smoke test (Apollo510 Blue EVB) ---\n");
 #else
     tiku_uart_puts("\n\n--- TikuOS minimal smoke test (Apollo510 EVB) ---\n");
 #endif
@@ -166,7 +171,9 @@ static void rram_test_run(void)
     *(volatile uint32_t *)(RRAM_TEST_ADDR + 16u) = 0xDEADBEEFu;
     while (NRF_RRAMC_S->READY == 0u)     { }
     NRF_RRAMC_S->CONFIG = cfg0;
-    tiku_uart_printf("PASS (read 0x%x)\n",
+    tiku_uart_printf("%s (read 0x%x)\n",
+                     *(volatile uint32_t *)(RRAM_TEST_ADDR + 16u)
+                         == 0xDEADBEEFu ? "PASS" : "MISMATCH",
                      (unsigned int)*(volatile uint32_t *)(RRAM_TEST_ADDR + 16u));
 
     /* T4: store, then close WEN with no READY wait and no commit, as
@@ -354,6 +361,15 @@ int main(void)
 #include "arch/ra8p1/tiku_ra8p1_regs.h"
 #include "hal/tiku_crit_hal.h"
 
+/* Sample at least once per 32-bit DWT wrap (17.9 s at 240 MHz). */
+static __attribute__((unused)) uint64_t minimal_elapsed_cycles(uint32_t now, uint32_t *last,
+                                       uint64_t *elapsed)
+{
+    *elapsed += (uint32_t)(now - *last);
+    *last = now;
+    return *elapsed;
+}
+
 /* EK-RA8P1 LED1, the blue one at P600. */
 #define TIKU_MIN_LED_PORT   TIKU_BOARD_LED1_PORT
 #define TIKU_MIN_LED_PIN    TIKU_BOARD_LED1_PIN
@@ -446,6 +462,7 @@ int main(void)
     }
 
     tiku_cpu_freq_ra8p1_init(240U);
+    tiku_ra8p1_cache_disable();
     tiku_uart_printf("pll: core %u Hz, sciclk %u Hz, tick reload %u\n",
                      (unsigned int)tiku_cpu_ra8p1_clock_get_hz(),
                      (unsigned int)tiku_cpu_ra8p1_sciclk_get_hz(),
@@ -835,6 +852,7 @@ int main(void)
         }
     }
 
+ #if (TIKU_DRV_USBHS_ENABLE + 0)
     /*
      * USB-HS bring-up.  On a host attach the hardware performs the bus reset
      * and the chirp handshake, and DVSTCTR0.RHST reports the negotiated
@@ -877,11 +895,13 @@ int main(void)
                 volatile uint32_t *cyc = (volatile uint32_t *)0xE0001004UL;
                 const uint32_t limit = 240000000u / 4u;   /* 250 ms   */
                 uint32_t t0 = *cyc, mark = *cyc;
+                uint64_t elapsed = 0u;
 
                 TIKU_REG32(0xE000EDFCUL) |= (1UL << 24);
                 TIKU_REG32(0xE0001000UL) |= 1UL;
 
-                while ((*cyc - t0) < (20u * 240000000u)) {
+                while (minimal_elapsed_cycles(*cyc, &t0, &elapsed) <
+                       (20ULL * 240000000u)) {
                     unsigned dv, sp, ln;
                     uint32_t nsu, nst;
                     uint16_t lr;
@@ -1018,6 +1038,7 @@ int main(void)
         volatile uint32_t *cyc = (volatile uint32_t *)0xE0001004UL;
         uint32_t mark = *cyc;
         uint32_t t0 = *cyc;
+        uint64_t elapsed = 0u;
         uint32_t last_wr = 0xFFFFFFFFu;
         unsigned last_import_busy = 0u;
         static const char *const sname_done[7] = {
@@ -1037,7 +1058,8 @@ int main(void)
              * meanwhile shows EP0 runs on the interrupt.  The wait then stops,
              * since it also slows the MSC pump, which runs in this loop.
              */
-            if ((*cyc - t0) < (30u * 240000000u)) {
+            if (minimal_elapsed_cycles(*cyc, &t0, &elapsed) <
+                (30ULL * 240000000u)) {
                 tiku_cpu_ra8p1_delay_us(10000u);
             }
             tiku_ra8p1_usbhs_msc_poll();
@@ -1094,7 +1116,7 @@ int main(void)
         }
     }
 
-    /* Not reached: the serve loop above does not exit. */
+ #endif /* TIKU_DRV_USBHS_ENABLE */
     tiku_uart_printf("cache: state=%u (bit0 I, bit1 D)\n",
                      (unsigned int)tiku_ra8p1_cache_state());
 

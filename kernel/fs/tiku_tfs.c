@@ -1196,12 +1196,12 @@ int tiku_tfs_list_dir(tiku_tfs_t *fs, const char *prefix,
                     break;
                 }
             }
-            if (!dup && cb) {
+            if (!dup) {
                 char fbuf[TIKU_TFS_NAME_MAX + 1];
                 if (seglen < sizeof fbuf) {
                     memcpy(fbuf, rest, seglen);          /* "<segment>/" */
                     fbuf[seglen] = '\0';
-                    cb(fbuf, 0, ctx);
+                    if (cb) cb(fbuf, 0, ctx);
                     n++;
                 }
             }

@@ -182,9 +182,9 @@ tiku_mem_err_t tiku_region_init(const tiku_mem_region_t *table,
  * @param expected_type  Required region type
  * @return 1 if contained, 0 otherwise
  */
-tiku_mem_err_t tiku_region_contains(const uint8_t *ptr,
-                                     tiku_mem_arch_size_t size,
-                                     tiku_mem_region_type_t expected_type)
+int tiku_region_contains(const uint8_t *ptr,
+                         tiku_mem_arch_size_t size,
+                         tiku_mem_region_type_t expected_type)
 {
     tiku_mem_arch_size_t i;
     uintptr_t range_start;

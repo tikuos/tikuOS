@@ -85,7 +85,8 @@ int main(void) {
    * (tiku_ambiq_power_autorun) and never reaches the scheduler. */
   {
     extern void tiku_ambiq_power_autorun(void);
-    MAIN_PRINTF("POWER AUTORUN: spin3s / idle10s / deepsleep45s, forever.\n");
+    MAIN_PRINTF("POWER AUTORUN: spin3s / idle8s / deep30s / "
+                "spin2s / deep20s, repeat.\n");
     MAIN_PRINTF("Unplug J16 (J-Link) and power via the Apollo5 USB connector\n");
     MAIN_PRINTF("for the real deep-sleep measurement; reconnect J16 to flash.\n");
     tiku_ambiq_power_autorun();

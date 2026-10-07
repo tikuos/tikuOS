@@ -239,11 +239,6 @@ uint8_t tiku_ble_adv_last_scan_count(void);
 /** @brief Strongest device from the most recent scan or observer (or NULL). */
 const tiku_ble_adv_report_t *tiku_ble_adv_last_scan_best(void);
 
-#ifdef __cplusplus
-}
-#endif
-
-
 /**
  * @brief Counts since boot of where scan reports went: dropped for a context
  *        with no table, for a PDU kind or length this does not read, by the
@@ -251,5 +246,9 @@ const tiku_ble_adv_report_t *tiku_ble_adv_last_scan_best(void);
  */
 void tiku_ble_adv_scan_drops(uint32_t *ctx_bad, uint32_t *kind,
                              uint32_t *named, uint32_t *kept);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* TIKU_BLE_ADV_H_ */

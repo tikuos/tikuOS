@@ -53,7 +53,8 @@ static tiku_mem_err_t hibernate_ensure_init(uint8_t *fram_buf)
 {
     tiku_mem_err_t err;
 
-    if (hibernate_initialized) {
+    if (hibernate_initialized &&
+        hibernate_store.entries[0].fram_ptr == fram_buf) {
         return TIKU_MEM_OK;
     }
 
@@ -71,6 +72,8 @@ static tiku_mem_err_t hibernate_ensure_init(uint8_t *fram_buf)
         return err;
     }
 
+    /* The fixed-size marker carries its own magic and payload CRC. */
+    hibernate_store.entries[0].value_len = sizeof(tiku_hibernate_marker_t);
     hibernate_initialized = 1;
     return TIKU_MEM_OK;
 }
@@ -82,9 +85,8 @@ static tiku_mem_err_t hibernate_ensure_init(uint8_t *fram_buf)
 /**
  * @brief Reset the hibernate subsystem to uninitialised state.
  *
- * hibernate_initialized lives in SRAM, so within one boot it stays set
- * across calls; independent test groups that each expect boot_count to start
- * at 1 need this between them.
+ * Clears the SRAM registration to model an SRAM-losing restart.
+ * A valid NVM marker still supplies the previous boot count.
  *
  * @note Test use only.  Clears the SRAM persist store; NVM is untouched.
  */

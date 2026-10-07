@@ -100,6 +100,17 @@ void tiku_lc_persist_init(void)
     /* tiku_persist_init() keeps the entries with a valid magic, which a
      * previous boot left, and clears the others. */
     mpu_state = tiku_mpu_unlock_nvm();
+    for (i = 0; i < TIKU_PERSIST_MAX_ENTRIES; i++) {
+        tiku_persist_entry_t *e = &lc_persist_store.entries[i];
+        uintptr_t ptr = (uintptr_t)e->fram_ptr;
+        uintptr_t base = (uintptr_t)lc_nvm_pool;
+        if (e->valid &&
+            (ptr < base || ptr - base > sizeof(lc_nvm_pool) - sizeof(lc_t) ||
+             (ptr - base) % sizeof(lc_t) != 0 ||
+             e->capacity != sizeof(lc_t) || e->value_len > sizeof(lc_t))) {
+            e->valid = 0;
+        }
+    }
     tiku_persist_init(&lc_persist_store);
     tiku_mpu_lock_nvm(mpu_state);
 
@@ -145,15 +156,13 @@ int tiku_lc_persist_register(const char *key)
         return -1;
     }
 
-    /* A key with an entry, from this boot or recovered at init, keeps it:
-     * its fram_ptr is already in lc_nvm_pool below lc_nvm_next_slot, and
-     * its write_count is kept.  Any read result but NOT_FOUND counts as an
-     * entry, including a value too wide for the 1-byte probe. */
-    if (tiku_persist_read(&lc_persist_store, key,
-                          &probe, sizeof(probe), &probe_len)
-        != TIKU_MEM_ERR_NOT_FOUND) {
+    /* A successful read or a value larger than the probe denotes an entry. */
+    err = tiku_persist_read(&lc_persist_store, key,
+                            &probe, sizeof(probe), &probe_len);
+    if (err == TIKU_MEM_OK || err == TIKU_MEM_ERR_NOMEM) {
         return 0;
     }
+    if (err != TIKU_MEM_ERR_NOT_FOUND) return -3;
 
     if (lc_nvm_next_slot >= TIKU_LC_PERSIST_MAX_SLOTS) {
         return -2;

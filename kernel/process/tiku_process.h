@@ -820,10 +820,14 @@ uint8_t tiku_process_is_running(struct tiku_process *p);
  * @param name  Identifier prefix (used for buffer, channel, helpers)
  * @param type  Message type (e.g., struct sensor_msg)
  * @param depth Maximum number of buffered messages
- * @note The channel keeps sizeof(type) and @p depth in 8 bits each: a larger
- *       value is truncated without a diagnostic.
+ * @note Message size and depth must each be in 1..255; invalid declarations
+ *       fail to compile.
  */
 #define TIKU_CHANNEL_DECLARE(name, type, depth)                             \
+    typedef char name##_size_check[                                       \
+        (sizeof(type) > 0 && sizeof(type) <= UINT8_MAX) ? 1 : -1];           \
+    typedef char name##_depth_check[                                      \
+        ((depth) > 0 && (depth) <= UINT8_MAX) ? 1 : -1];                     \
     static type name##_buf[depth];                                          \
     static struct tiku_channel name;                                        \
     static inline void name##_init(void) {                                  \
