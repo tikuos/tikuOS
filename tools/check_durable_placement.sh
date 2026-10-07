@@ -45,7 +45,7 @@ viol=$(grep -rnE 'section\("\.(persistent|retained|uninit)' \
 
 if [ -n "$viol" ]; then
     echo "check_durable_placement: raw .persistent/.retained/.uninit placement outside"
-    echo "the grade macros (use TIKU_DURABLE / TIKU_PERSIST_WARM /"
+    echo "the grade macros (use TIKU_DURABLE / TIKU_RETAINED /"
     echo "TIKU_FRAM_SPILL from kernel/memory/tiku_mem.h.  NOTE .uninit is NOT"
     echo "a portable spelling of the WARM grade -- it is inside the mirrored"
     echo "durable window on rp2350/ambiq and absent entirely on MSP430):"

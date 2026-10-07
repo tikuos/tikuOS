@@ -28,6 +28,12 @@ MCU = msp430fr5994          # the target of a bare `make`
 endif
 MCU := $(shell echo $(MCU) | tr '[:upper:]' '[:lower:]')
 
+ifeq ($(TIKU_DRV_BLE_EM9305_ENABLE),1)
+ifneq ($(MCU),apollo510b)
+$(error TIKU_DRV_BLE_EM9305_ENABLE=1 requires MCU=apollo510b; currently MCU=$(MCU))
+endif
+endif
+
 # TIKU_PLATFORM: the port an MCU belongs to, which selects the toolchain,
 # flags and sources below.  An MCU not named here is taken as msp430.
 ifeq ($(MCU),rp2350)
@@ -413,10 +419,8 @@ ifeq ($(TIKU_DRV_WIFI_CYW43_ENABLE),1)
 # The CYW43439 firmware is linked into .rodata with .incbin (firmware.S), so
 # it is charged against the code window; the warning below says so on every
 # such build.  Do not raise the code window to make room for firmware.
-$(warning TIKU_DRV_WIFI_CYW43_ENABLE=1: the CYW43439 firmware is compiled into \
-.rodata and charged against the code window (~233 KB of it). This links at 384 \
-KB but is NOT the shipping shape -- P3a moves the firmware to /data. Do NOT \
-raise the window to make room for a blob.)
+$(warning CYW43439 firmware occupies about 233 KB of the code window; \
+ensure the complete firmware fits the configured code capacity.)
 ifneq ($(TIKU_PLATFORM),rp2350)
 $(error TIKU_DRV_WIFI_CYW43_ENABLE=1 requires MCU=rp2350 \
 (currently MCU=$(MCU)). The CYW43439 driver depends on \
@@ -1243,13 +1247,12 @@ CFLAGS += -Wno-missing-field-initializers
 # compiles to empty stubs.
 ifeq ($(TIKU_THREADS_ENABLE),1)
 ifeq ($(TIKU_PLATFORM),msp430)
-$(error TIKU_THREADS_ENABLE=1 requires a Cortex-M part; MSP430 \
-stays cooperative -- 2 KB of SRAM has no room for per-thread stacks)
+$(error TIKU_THREADS_ENABLE=1 is not supported on MSP430; use a supported ARM or RISC-V MCU)
 endif
 ifeq ($(filter apollo510 apollo510b apollo4l apollo4p rp2350 nrf54l15 nrf54lm20a nrf54lm20b ra8p1 esp32c61,$(MCU)),)
 $(error TIKU_THREADS_ENABLE=1 needs a supported part -- \
 apollo510/apollo510b (M55), apollo4l/apollo4p (M4F), rp2350 or \
-nrf54l15/nrf54lm20a (M33), ra8p1 (M85), esp32c61 (RISC-V); $(MCU) has no \
+nrf54l15/nrf54lm20a/nrf54lm20b (M33), ra8p1 (M85), esp32c61 (RISC-V); $(MCU) has no \
 thread backend. The Cortex-M switcher is generic asm \
 (kernel/threads/tiku_thread_cortexm.inl); \
 adding a part = a two-line shim that names its PendSV vector symbol (plus a \
@@ -1275,13 +1278,11 @@ CFLAGS += -DHAS_APPS=1
 endif
 ifeq ($(HAS_TESTS),1)
 CFLAGS += -DHAS_TESTS=1
-# Ambiq test builds keep -Wimplicit-function-declaration a warning: some
+# Test builds keep -Wimplicit-function-declaration a warning: some
 # TikuBench category dispatchers (e.g. tier) call void(void) test functions
 # whose prototype header sits behind another TEST_* gate, and GCC 14 and
 # newer make an implicit declaration an error.
-ifeq ($(TIKU_PLATFORM),ambiq)
 CFLAGS += -Wno-error=implicit-function-declaration
-endif
 endif
 # Board capabilities -> -DTIKU_BOARD_HAS_*.  Must come after the per-platform
 # `CFLAGS = ...` assignments above, which would drop them.
@@ -1508,7 +1509,7 @@ MINIMAL ?= 0
 
 ifeq ($(MINIMAL),1)
 ifeq ($(filter $(TIKU_PLATFORM),rp2350 ambiq nordic stm32n6 ra8p1 esp32c61),)
-$(error MINIMAL=1 is only supported on MCU=rp2350, MCU=apollo510, MCU=nrf54l15, MCU=nrf54lm20a, MCU=stm32n6, MCU=ra8p1, or MCU=esp32c61)
+$(error MINIMAL=1 supports rp2350, apollo510, apollo510b, apollo4l, apollo4p, nrf54l15, nrf54lm20a, nrf54lm20b, stm32n6, ra8p1 and esp32c61)
 endif
 
 # The minimal entry point and the arch files it needs.
@@ -1816,8 +1817,14 @@ SRCS += arch/ambiq/tiku_htimer_arch.c
 # TIKU_AMBIQ_POWER_PROBE is a -D capability macro, so the shell command gates
 # on it whatever the include order (kernel/shell/tiku_shell_config.h).
 # TIKU_AMBIQ_POWER_PROBE=0 leaves the instruments out, with the read-target
-# arrays they place in the code window.
+# arrays they place in the code window.  The Apollo510B carries the EM9305
+# Bluetooth host, and its image has no room for the arrays beside it, so
+# the probe is off there unless asked for.
+ifeq ($(MCU),apollo510b)
+TIKU_AMBIQ_POWER_PROBE ?= 0
+else
 TIKU_AMBIQ_POWER_PROBE ?= 1
+endif
 ifeq ($(TIKU_AMBIQ_POWER_PROBE),1)
 SRCS += arch/ambiq/tiku_power_ambiq.c
 CFLAGS += -DTIKU_AMBIQ_POWER_PROBE=1
@@ -1872,12 +1879,6 @@ SRCS += arch/ambiq/tiku_psram_arch.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_psram.c   # /sys/psram lifecycle nodes
 CFLAGS += -DTIKU_DRV_PSRAM_ENABLE=1
 endif
-# Overlay sources, appended after the platform blocks have assigned SRCS and
-# CFLAGS, so the overlay's additions survive.  Empty unless a feature was
-# opted in (see the overlay include above).  Only Apollo510 and 510B builds
-# reach these lines.
-SRCS   += $(EXP_SRCS)
-CFLAGS += $(EXP_CFLAGS)
 
 ifeq ($(TIKU_DRV_GPU_ENABLE),1)
 SRCS += arch/ambiq/tiku_gpu_arch.c
@@ -2428,7 +2429,8 @@ TIKU_KIT_TIME_ENABLE := 1
 endif
 # dns command (A-record lookup): on by default with net.  It and the ntp
 # command call the DNS stub resolver, which the full net kit compiles with
-# ipv4/; a TIKU_KIT_NET_MIN build has it only with TIKU_KITS_NET_DNS_ENABLE=1.
+# ipv4/ and a TIKU_KIT_NET_MIN build compiles whenever the shell is on (the
+# net-kit block below).
 ifeq (,$(findstring TIKU_SHELL_CMD_DNS=0,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_dns.c
 endif
@@ -2639,10 +2641,12 @@ endif
 ifneq (,$(findstring TIKU_SHELL_CMD_USBPROBE=1,$(EXTRA_CFLAGS)))
 ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_usbprobe.c
+ifneq ($(TIKU_USBHS_MSC),1)
 ifeq ($(filter usb both,$(TIKU_CONSOLE)),)
 SRCS += arch/nordic/tiku_usbhs_arch.c
 SRCS += arch/nordic/tiku_usbhs_dev.c
 SRCS += kernel/usb/tiku_usbd_ctrl.c
+endif
 endif
 else
 $(warning usbprobe: the USB block exists only on nrf54lm20a/b -- skipped)
@@ -2723,18 +2727,15 @@ else ifneq ($(strip $(TIKU_AXON_MODEL)),)
 # AXON_OVERSIZE_MODELS lists the models whose arrays do not fit the window:
 # for those the warning says the link fails and points to
 # TIKU_AXON_MODEL_FROM_STORE=1; for the others it says the build links.
-AXON_OVERSIZE_MODELS := tinyml_vww
+AXON_OVERSIZE_MODELS := tinyml_vww tinyml_ic tinyml_ad
 ifneq (,$(filter $(TIKU_AXON_MODEL),$(AXON_OVERSIZE_MODELS)))
-$(warning TIKU_AXON_MODEL=$(TIKU_AXON_MODEL): this model's weights + KAT \
-vectors in .rodata exceed the 384 KB code window, so the link WILL fail. \
-Build TIKU_AXON_MODEL_FROM_STORE=1 instead and provision the model to /data. \
-Do NOT raise the window -- weights are DATA, and sizing the OS's memory \
-contract around a vendor test harness is the design P3/P4 undid.)
+$(warning TIKU_AXON_MODEL=$(TIKU_AXON_MODEL) exceeds the default 384 KB \
+code window. Use TIKU_AXON_MODEL_FROM_STORE=1 for device firmware. \
+The axonpack self-test uses a packing-only reference ELF with a larger \
+code window; that ELF must not be flashed.)
 else
-$(warning TIKU_AXON_MODEL=$(TIKU_AXON_MODEL): links today, but the weights are \
-still compiled into .rodata and charged against the code window. This build is \
-a development convenience and the reference the store path is checked against; \
-TIKU_AXON_MODEL_FROM_STORE=1 is the shipping shape.)
+$(warning TIKU_AXON_MODEL=$(TIKU_AXON_MODEL) embeds weights in the code \
+window. Use TIKU_AXON_MODEL_FROM_STORE=1 to load weights from /data.)
 endif
 SRCS += $(AXON_SDK)/drivers/axon/nrf_axon_nn_infer.c
 SRCS += $(AXON_SDK)/drivers/axon/nrf_axon_nn_infer_test.c
@@ -2984,7 +2985,7 @@ ifeq ($(APP),net)
 # build with an error, except for `make clean`, which compiles nothing.
 ifeq ($(strip $(TIKU_APP_DIR)),)
 ifeq ($(filter clean,$(MAKECMDGOALS)),)
-$(error APP=net needs TIKU_APP_DIR=<dir containing net/tiku_app_net.c>; the app firmware lives in the TikuBench harness now, not core tikuOS)
+$(error APP=net needs TIKU_APP_DIR=<dir containing net/tiku_app_net.c>; use the net application from TikuBench)
 endif
 endif
 CFLAGS += -DTIKU_APP_NET=1
@@ -3031,7 +3032,7 @@ ifeq ($(TIKU_TURBO_BENCH),1)
 # The benchmark firmware source lives in the TikuBench harness (TIKU_APP_DIR).
 ifeq ($(strip $(TIKU_APP_DIR)),)
 ifeq ($(filter clean,$(MAKECMDGOALS)),)
-$(error TIKU_TURBO_BENCH=1 needs TIKU_APP_DIR=<dir containing turbo_bench/turbo_bench.c>; the benchmark firmware lives in the TikuBench harness now)
+$(error TIKU_TURBO_BENCH=1 needs TIKU_APP_DIR=<dir containing turbo_bench/turbo_bench.c>; use the turbo_bench application from TikuBench)
 endif
 endif
 CFLAGS += -DTIKU_TURBO_BENCH=1
@@ -3095,16 +3096,17 @@ SRCS   += tikukits/net/ipv4/tiku_kits_net_udp.c
 ifeq ($(TIKU_KITS_NET_DHCP_ENABLE),1)
 SRCS   += tikukits/net/ipv4/tiku_kits_net_dhcp.c
 endif
-# TIKU_KITS_NET_DNS_ENABLE=1 adds the DNS stub resolver, which the ntp and
-# dns shell commands call; the full set compiles it with the rest of ipv4/.
-ifeq ($(TIKU_KITS_NET_DNS_ENABLE),1)
+# Shell DNS and NTP commands require the resolver in a minimal network build.
+ifneq ($(filter 1,$(TIKU_KITS_NET_DNS_ENABLE) $(TIKU_SHELL_ENABLE)),)
+CFLAGS += -DTIKU_KITS_NET_DNS_ENABLE=1
 SRCS   += tikukits/net/ipv4/tiku_kits_net_dns.c
 endif
 # TIKU_KITS_NET_MQTT_ENABLE=1 or TIKU_KITS_NET_HTTP_ENABLE=1 adds TCP, the
 # transport both use (for example BASIC MQTTPUB or HTTPGET$ on a lean Wi-Fi
 # profile), and each adds its own kit below.  The http kit runs over TLS
 # only, so it needs TIKU_KIT_CRYPTO_ENABLE=1 HAS_TLS=1 as well.
-ifneq ($(filter 1,$(TIKU_KITS_NET_MQTT_ENABLE) $(TIKU_KITS_NET_HTTP_ENABLE)),)
+ifneq ($(filter 1,$(TIKU_KITS_NET_MQTT_ENABLE) $(TIKU_KITS_NET_HTTP_ENABLE) \
+                 $(TIKU_SHELL_NET_TEST)),)
 CFLAGS += -DTIKU_KITS_NET_TCP_ENABLE=1
 SRCS   += tikukits/net/ipv4/tiku_kits_net_tcp.c
 endif
@@ -3116,12 +3118,14 @@ ifeq ($(filter 1,$(TIKU_KITS_NET_MQTT_ENABLE) $(TIKU_KITS_NET_HTTP_ENABLE) \
                  $(TIKU_KITS_NET_LINK_IP_ENABLE) $(TIKU_SHELL_NET_TEST)),)
 CFLAGS += -DTIKU_KITS_NET_TCP_ENABLE=0
 endif
-ifeq ($(TIKU_KITS_NET_MQTT_ENABLE),1)
+ifneq ($(filter 1,$(TIKU_KITS_NET_MQTT_ENABLE) $(TIKU_SHELL_NET_TEST)),)
 CFLAGS += -DTIKU_KITS_NET_MQTT_ENABLE=1
 # tiku_shell_config.h turns the mqtt shell command on with the kit flag, but
 # only the TIKU_SHELL_NET_TEST block compiles tiku_shell_cmd_mqtt.c, so
 # TIKU_SHELL_CMD_MQTT=0 keeps the command out of the table and the link.
+ifneq ($(TIKU_SHELL_NET_TEST),1)
 CFLAGS += -DTIKU_SHELL_CMD_MQTT=0
+endif
 SRCS   += tikukits/net/mqtt/tiku_kits_net_mqtt.c
 endif
 ifeq ($(TIKU_KITS_NET_HTTP_ENABLE),1)
@@ -3142,7 +3146,9 @@ CFLAGS += -DTIKU_KITS_NET_MQTT_ENABLE=1
 # only the TIKU_SHELL_NET_TEST block compiles tiku_shell_cmd_mqtt.c, so
 # TIKU_SHELL_CMD_MQTT=0 keeps the command out of the table and the link.  The
 # BASIC MQTT words need only the kit flag.
+ifneq ($(TIKU_SHELL_NET_TEST),1)
 CFLAGS += -DTIKU_SHELL_CMD_MQTT=0
+endif
 endif
 ifeq ($(TIKU_KITS_NET_HTTP_ENABLE),1)
 CFLAGS += -DTIKU_KITS_NET_HTTP_ENABLE=1
@@ -3466,6 +3472,9 @@ endif # MINIMAL
 # Apps overlay sources (APPL_SRCS and APPL_CFLAGS from
 # applications/applications.mk), appended after every platform block, so
 # they build on every platform.
+# Feature overlays are platform-independent, like application overlays.
+SRCS   += $(EXP_SRCS)
+CFLAGS += $(EXP_CFLAGS)
 SRCS   += $(APPL_SRCS)
 CFLAGS += $(APPL_CFLAGS)
 # $(sort) also removes duplicates.  Some files are added by two blocks
@@ -3992,8 +4001,7 @@ flash: all
 	     grep -iE 'Verification failed|Failed to prepare|Could not connect|Failed to halt|Error while programming' $(BUILD_DIR)/flash.log | head -4; \
 	     echo "*** 'Failed to halt' -- J-Link could not stop the running"; \
 	     echo "*** firmware.  Power cycle and flash before bringing"; \
-	     echo "*** PSRAM or a model up; that is the only reliable order"; \
-	     echo "*** found so far.  The part is probably wedged now."; \
+	     echo "*** PSRAM or a model up, then retry programming."; \
 	     exit 1; \
 	 fi; \
 	 if ! grep -qE 'Flash download: (Total|Program)' $(BUILD_DIR)/flash.log; then \
@@ -4108,12 +4116,13 @@ else ifeq ($(TIKU_PLATFORM),stm32n6)
 # Load over the ROM's DFU interface, which needs development boot (BOOT1 in
 # position 2-3) and both USB-C ports connected.  -g starts the image, the
 # ROM's DFU interface goes away, and the programmer reports a reconnect
-# timeout.  The leading `-` makes make ignore the programmer's exit status,
-# so a failed write also reports success.
+# timeout. The write must succeed before a separate start request is sent.
 flash: all
 	@test -x "$(STM32N6_PROG)" || { $(call STM32N6_NEED_CUBE,flash); }
-	-@$(STM32N6_PROG) -c port=usb1 -w $(TARGET_SIGNED) $(STM32N6_PART) \
-	    -g $(STM32N6_PART)
+	@$(STM32N6_PROG) -c port=usb1 -w $(TARGET_SIGNED) $(STM32N6_PART)
+	@$(STM32N6_PROG) -c port=usb1 -g $(STM32N6_PART) || { \
+	    echo "Image written; start was not confirmed (DFU may have disconnected)."; \
+	    echo "Check the device console before testing the firmware."; }
 
 run: flash
 
@@ -4169,8 +4178,9 @@ debug: all
 	@echo "  $(JLINK_GDB) -device $(JLINK_DEVICE_RA8P1) -if $(JLINK_IF) -speed $(JLINK_SPEED)"
 
 erase:
-	@echo "ra8p1: nothing to erase -- the image lives in SRAM, so a power"
-	@echo "  cycle already clears it and the factory MRAM image boots."
+	@echo "ra8p1: erase is not implemented; the firmware remains in MRAM."
+	@echo "Use a supported MRAM programmer to erase the device."
+	@false
 
 else ifeq ($(TIKU_PLATFORM),esp32c61)
 
@@ -4273,11 +4283,8 @@ monitor:
 		echo "  Or point it at a specific port: make monitor PORT=/dev/ttyACM0"; \
 		exit 1; \
 	fi; \
-	echo "Baud $(BAUD), from MCU=$(MCU) -- monitor needs MCU= like every"; \
-	echo "  other target, and forgetting it is silent: a bare \`make\` picks"; \
-	echo "  msp430fr5994 (9600) and a 115200 board then prints mojibake that"; \
-	echo "  reads like broken hardware.  Garbled? \`make monitor MCU=<yours>\`"; \
-	echo "  or override BAUD= directly."; \
+	echo "Baud $(BAUD) for MCU=$(MCU). Set MCU= to match the board"; \
+	echo "  or set BAUD= explicitly if the output is garbled."; \
 	if command -v picocom >/dev/null 2>&1; then \
 		echo "Connecting to $(PORT) at $(BAUD) baud  (Ctrl-A Ctrl-X to exit)"; \
 		picocom -b $(BAUD) $(PORT); \

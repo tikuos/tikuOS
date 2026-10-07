@@ -255,15 +255,11 @@ INL_HEADER = """/*
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_basic_https_roots.inl - generated trust store
- *                              (RSA-2048/4096 + P-256 + P-384 roots)
- *
- * NOT a standalone translation unit.  Included from tiku_basic_https.inl.
- *
+ * roots_generated.inl - generated RSA and elliptic-curve trust store
+ * Include this array from a translation unit that needs embedded roots.
  * Source: Mozilla CA bundle (curl.se/ca/cacert.pem), filtered to the
- * algorithms the tiku verify kit supports.  Regenerate via gen_roots.c.
- * Do not edit by hand.
- *
+ * algorithms the tiku verify kit supports.
+ * Regenerate: python3 tools/gen_roots.py --to-inl roots.bin -o roots_generated.inl
  * SPDX-License-Identifier: Apache-2.0
  */
 """

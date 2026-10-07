@@ -27,11 +27,15 @@ OUT=temp/axm
 mkdir -p "$OUT"
 fail=0
 
+# Packing references include weights and test vectors, not just firmware.
+# This layout is not flashed; device firmware keeps its normal code limit.
+cap_flags=-Wl,--defsym=__tiku_code_cap_override=0x100000
 for m in $MODELS; do
     printf '\n======== %s\n' "$m"
     rm -f main.elf
     if ! make MCU=nrf54lm20b TIKU_AXON_ENABLE=1 TIKU_AXON_MODEL="$m" \
-              EXTRA_CFLAGS=-DTIKU_SHELL_CMD_AXONSPROBE=1 -j8 >/dev/null 2>&1; then
+              EXTRA_CFLAGS=-DTIKU_SHELL_CMD_AXONSPROBE=1 \
+              EXTRA_LDFLAGS="$cap_flags" -j8 >/dev/null 2>&1; then
         echo "  BUILD FAILED"; fail=$((fail + 1)); continue
     fi
     if python3 tools/axonpack.py --obj "$OBJ" --model "$m" \
