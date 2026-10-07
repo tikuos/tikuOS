@@ -216,6 +216,30 @@ typedef struct {
 /** @brief The held link's event telemetry and its CONNECT_IND window. */
 void tiku_flpr_arch_conn_timing(tiku_flpr_conn_timing_t *out);
 
+/** @brief The held link's parameters, from its CONNECT_IND. */
+typedef struct {
+    uint16_t interval;      /**< connInterval, 1.25 ms units        */
+    uint16_t latency;       /**< peripheral latency, in events      */
+    uint16_t timeout;       /**< supervision timeout, 10 ms units   */
+    uint8_t  sca;           /**< the central's SCA field, 0..7      */
+} tiku_flpr_conn_params_t;
+
+/** @brief Fill @p out with the held link's parameters. */
+void tiku_flpr_arch_conn_params(tiku_flpr_conn_params_t *out);
+
+/**
+ * @brief Why the last link ended, as an HCI reason: 0x3E never established,
+ *        0x08 supervision timeout, 0x16 ended here, else the code the
+ *        central's LL_TERMINATE_IND carried; 0 while none has ended.
+ */
+uint8_t tiku_flpr_arch_conn_reason(void);
+
+/**
+ * @brief Ask the FLPR to end the held link: an LL_TERMINATE_IND carrying
+ *        @p reason, the link ending once the central acknowledges it.
+ */
+void tiku_flpr_arch_conn_terminate(uint8_t reason);
+
 /** @brief 1 while the FLPR is holding a live connection. */
 int tiku_flpr_arch_conn_active(void);
 

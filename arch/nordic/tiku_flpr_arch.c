@@ -789,6 +789,27 @@ uint32_t tiku_flpr_arch_conn_updates(uint32_t *chan_map, uint32_t *conn_upd)
     return cm + cu;
 }
 
+/* The held link's parameters, as its CONNECT_IND set them. */
+void tiku_flpr_arch_conn_params(tiku_flpr_conn_params_t *out)
+{
+    const tiku_flpr_shared_t *sh = TIKU_FLPR_SHARED;
+
+    out->interval = sh->conn_interval;
+    out->latency  = sh->conn_latency;
+    out->timeout  = sh->conn_timeout;
+    out->sca      = sh->conn_sca;
+}
+
+uint8_t tiku_flpr_arch_conn_reason(void)
+{
+    return TIKU_FLPR_SHARED->conn_reason;
+}
+
+void tiku_flpr_arch_conn_terminate(uint8_t reason)
+{
+    TIKU_FLPR_SHARED->conn_term = (reason != 0u) ? reason : 0x13u;
+}
+
 /* Connection-event telemetry from the FLPR, and the CONNECT_IND's window. */
 void tiku_flpr_arch_conn_timing(tiku_flpr_conn_timing_t *out)
 {
@@ -853,6 +874,8 @@ int tiku_flpr_arch_conn_start(const uint8_t *adv, uint32_t adv_len,
         return -1;
     }
     TIKU_FLPR_SHARED->conn_state = 0u;
+    TIKU_FLPR_SHARED->conn_term = 0u;
+    TIKU_FLPR_SHARED->conn_reason = 0u;
     /* A fragment the last link left untaken is dropped: the slot starts
      * free. */
     flpr_nus_rx_seen = TIKU_FLPR_SHARED->f2a_seq;

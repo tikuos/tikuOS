@@ -324,6 +324,8 @@ static uint16_t fll_cu_timeout;         /* new supervision, 10 ms            */
 static uint16_t fll_cu_winoffset;       /* its transmit window, 1.25 ms      */
 static uint8_t  fll_cu_winsize;
 static uint8_t  fll_terminate;          /* LL_TERMINATE_IND: end after reply */
+static uint8_t  fll_reason;             /* why the link ends, an HCI reason  */
+static uint8_t  fll_term_sent;          /* the host's queued: end when acked */
 /* PHY update: the new PHY (RADIO MODE, PCNF0) applies at its Instant. */
 static uint8_t  fll_phy_pending;       /* LL_PHY_UPDATE_IND armed            */
 static uint8_t  fll_phy_new;           /* target: 0 1M, 1 2M, 2 Coded S8     */
@@ -411,6 +413,7 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
         }
     } else if (op == 0x02u) {                   /* LL_TERMINATE_IND         */
         fll_terminate = 1u;                     /* ack it, then end         */
+        fll_reason = (buf[1] >= 2u) ? buf[4] : 0x13u;   /* its ErrorCode    */
     } else if (op == 0x12u) {                   /* LL_PING_REQ -> RSP       */
         fll_queue_ctrl(0x13u, (const uint8_t *)0, 0u);
     } else if (op == 0x08u) {                   /* FEATURE_REQ -> RSP (none)*/
@@ -587,6 +590,8 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     sh->a2f_ack  = sh->a2f_seq;                  /* TX slot free              */
     fll_cm_pending = 0u; fll_cu_pending = 0u;    /* no update armed           */
     fll_terminate = 0u;
+    fll_term_sent = 0u;
+    fll_reason = 0x16u;                          /* ended here, unless ...    */
     sh->enc_on = 0u;
     sh->dle_max = 0u;                            /* 0 = 27 octets, pre-DLE    */
     fll_phy_pending = 0u;                        /* 1M until an update        */
@@ -650,6 +655,13 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
             sh->conn_phy_mode = r->MODE;         /* MODE read back            */
         }
 
+        /* The host asked for the link to end: an LL_TERMINATE_IND with its
+         * code once the pending slot is free; the central's ack ends it. */
+        if (sh->conn_term != 0u && !fll_term_sent && fll_tx_len == 0u) {
+            uint8_t code = (uint8_t)sh->conn_term;
+            fll_queue_ctrl(0x02u, &code, 1u);
+            fll_term_sent = 1u;
+        }
         /* The host's next L2CAP fragment, when the pending slot is free
          * (at most 32 bytes, with its a2f_llid); a2f_ack frees the slot. */
         if (fll_tx_len == 0u && sh->a2f_seq != fll_a2f_seen) {
@@ -722,9 +734,11 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
             cec++;
             if (!established) {
                 if (cec >= 6u) {
+                    fll_reason = 0x3Eu;
                     break;                       /* never established        */
                 }
             } else if ((int32_t)(nominal - last) > (int32_t)to) {
+                fll_reason = 0x08u;
                 break;                           /* supervision timeout      */
             }
             continue;
@@ -765,6 +779,9 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
                 send_pend = 0u;
                 conn_txb[1] = 0u;
                 conn_txb[0] = 0x01u;
+                if (fll_term_sent) {
+                    fll_terminate = 1u;          /* the TERMINATE_IND landed */
+                }
             }
             conn_txb[0] = (uint8_t)((conn_txb[0] & 0x03u) |
                                     (fll_nesn << 2) | (fll_sn << 3));
@@ -807,6 +824,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
             break;
         }
         if (established && (int32_t)(nominal - last) > (int32_t)to) {
+            fll_reason = 0x08u;
             break;                               /* only bad CRCs: timeout   */
         }
     }
@@ -823,6 +841,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     r->BASE0   = 0x89BED600u;                    /* access addr 0x8E89BED6   */
     r->PREFIX0 = 0x0000008Eu;
     r->CRCINIT = 0x00555555u;                    /* advertising CRC init     */
+    sh->conn_reason = fll_reason;
     sh->conn_state = 3u;                         /* link ended               */
 }
 
@@ -1086,8 +1105,11 @@ static void flpr_conn_adv(tiku_flpr_shared_t *sh)
                                                 ((uint16_t)conn_rx[24] << 8));
                 sh->conn_interval = (uint16_t)(conn_rx[25] |
                                                ((uint16_t)conn_rx[26] << 8));
+                sh->conn_latency = (uint16_t)(conn_rx[27] |
+                                              ((uint16_t)conn_rx[28] << 8));
                 sh->conn_timeout = (uint16_t)(conn_rx[29] |
                                               ((uint16_t)conn_rx[30] << 8));
+                sh->conn_sca = (uint8_t)((conn_rx[36] >> 5) & 0x07u);
                 for (i = 0u; i < 5u; i++) {
                     sh->conn_chm[i] = conn_rx[31u + i];
                 }

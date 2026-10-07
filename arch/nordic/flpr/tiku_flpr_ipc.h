@@ -208,6 +208,17 @@ typedef struct {
      * Until it is taken, the controller leaves the next L2CAP data PDU
      * unacknowledged, and the central sends it again. */
     volatile uint32_t f2a_ack;
+
+    /* The CONNECT_IND's peripheral latency and the central's clock accuracy
+     * (its SCA field, 0..7), and why the last link ended, as an HCI reason:
+     * 0x3E never established, 0x08 supervision timeout, 0x16 ended here,
+     * else the code the central's LL_TERMINATE_IND carried. */
+    volatile uint16_t conn_latency;
+    volatile uint8_t  conn_sca;
+    volatile uint8_t  conn_reason;
+    /* M33 -> FLPR: nonzero asks for the link to end with this code in an
+     * LL_TERMINATE_IND; it ends once the central acknowledges it. */
+    volatile uint32_t conn_term;
 } tiku_flpr_shared_t;
 
 /**
