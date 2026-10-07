@@ -1543,6 +1543,7 @@ static uint8_t  cen_test_smp;
 static uint8_t  cen_smp_started;
 static uint8_t  cen_smp_ready;      /* keypair generated, Pairing Req staged */
 static uint8_t  cen_smp_a[6], cen_smp_b[6];
+static uint8_t  cen_smp_btype;      /* the peer's address type (its TxAdd)   */
 /* Bonding: when armed, on connect the central looks the peer's AdvA up in
  * the durable bond store.  A bonded peer skips SMP and encrypts with the
  * stored LTK; an unbonded one pairs, and the LTK is stored for the next
@@ -2140,7 +2141,7 @@ static void cen_kick_app(void)
     }
     if (cen_test_smp) {
         if (cen_bond_mode &&
-            tiku_ble_bond_find(cen_smp_b, 1u, cen_bond_ltk)) {
+            tiku_ble_bond_find(cen_smp_b, cen_smp_btype, cen_bond_ltk)) {
             /* Known peer: skip pairing, go straight to LL encryption with
              * the stored LTK (the encryption block below fires on
              * cen_bonded without waiting for an SMP DONE). */
@@ -2150,7 +2151,8 @@ static void cen_kick_app(void)
         }
         if (!cen_smp_ready) {           /* no keypair: generate it here   */
             (void)tiku_ble_smp_pair_start(TIKU_BLE_SMP_ROLE_INITIATOR,
-                                          cen_smp_a, 1u, cen_smp_b, 1u);
+                                          cen_smp_a, 1u, cen_smp_b,
+                                          cen_smp_btype);
             cen_smp_ready = 1u;
         }
         cen_smp_started = 1u;
@@ -2923,8 +2925,9 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
     conn_timer_start();
 
     /* Pre-build the CONNECT_IND (all but AdvA): [S0][LEN][S1][InitA][AdvA]
-     * [LLData].  S0=0xC5 (CONNECT_IND, TxAdd+RxAdd random). */
-    cind[0] = 0xC5u;
+     * [LLData].  S0=0x45 (CONNECT_IND, TxAdd random); RxAdd, bit 7, is set
+     * from the advertiser's TxAdd once its ADV_IND is in. */
+    cind[0] = 0x45u;
     cind[1] = 34u;
     cind[2] = my_addr[0];                         /* erratum-49 S1 = pay0  */
     memcpy(&cind[3], my_addr, 6u);                /* InitA                 */
@@ -3004,6 +3007,10 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
                  : (cen_rxb[14] == 'T' && cen_rxb[15] == 'I' &&
                     cen_rxb[16] == 'K' && cen_rxb[17] == 'U'));
         if (RADIO->EVENTS_CRCOK != 0u && peer_ok) {
+            /* RxAdd names AdvA's type, a public one too: a peripheral
+             * ignores a CONNECT_IND whose RxAdd is not its own type. */
+            cen_smp_btype = (uint8_t)((cen_rxb[0] >> 6) & 1u);
+            cind[0] = (uint8_t)(0x45u | (cen_smp_btype << 7));
             memcpy(&cind[9], &cen_rxb[3], 6u);     /* AdvA from the ADV_IND */
             memcpy(cen_smp_a, my_addr, 6u);        /* SMP: A = InitA (local) */
             memcpy(cen_smp_b, &cind[9], 6u);       /*      B = AdvA (peer)   */
@@ -3217,7 +3224,8 @@ int tiku_radio_arch_central(const uint8_t *my_addr, uint32_t max_secs,
             if (cen_bond_mode && !cen_bonded && !cen_bond_stored) {
                 uint8_t ltk[16];
                 if (tiku_ble_smp_pair_ltk(ltk) == 0) {
-                    (void)tiku_ble_bond_store(cen_smp_b, 1u, ltk);
+                    (void)tiku_ble_bond_store(cen_smp_b, cen_smp_btype,
+                                              ltk);
                 }
                 cen_bond_stored = 1u;
             }
