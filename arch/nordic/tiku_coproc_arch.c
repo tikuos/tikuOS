@@ -70,18 +70,41 @@ int tiku_coproc_stop(void)
 {
     tiku_flpr_arch_stop();
 
-    /* The contract infers the park from heartbeat stasis: a core that is
-     * still alive after the park request is reported as ERR_TIMEOUT.
-     * tiku_flpr_arch_alive() tests only the magic word, which a parked
-     * payload keeps, so a successful park also returns ERR_TIMEOUT here. */
-    return tiku_flpr_arch_alive() ? TIKU_COPROC_ERR_TIMEOUT : TIKU_COPROC_OK;
+    /* Running clears only after the payload acknowledges the park. */
+    return tiku_flpr_arch_running() ? TIKU_COPROC_ERR_TIMEOUT : TIKU_COPROC_OK;
 }
+
+/**
+ * @brief Polls of a still heartbeat before the payload reads not alive.
+ *
+ * The mailbox loop advances the heartbeat once per pass (an echo-pump poll
+ * and 8000 pace iterations), a SPIN load spin_passes once per 4096
+ * iterations; this many polls take tenths of a second, hundreds of passes.
+ */
+#define COPROC_ALIVE_READS      2000000U
 
 int tiku_coproc_alive(void)
 {
-    /* The contract asks for a published magic and an advancing heartbeat;
-     * this tests the magic only, so a parked or wedged payload reads 1. */
-    return tiku_flpr_arch_alive();
+    uint32_t first, first_spin;
+
+    /* Parked, never launched or faulted: not executing. */
+    if (!tiku_flpr_arch_running() || !tiku_flpr_arch_alive()) {
+        return 0;
+    }
+    /* A beacon or connection job holds the heartbeat still for longer than
+     * any poll here; the job itself is the evidence of execution. */
+    if (tiku_flpr_arch_busy()) {
+        return 1;
+    }
+    first = tiku_flpr_arch_heartbeat();
+    first_spin = tiku_flpr_arch_spin_passes();
+    for (uint32_t spin = 0U; spin < COPROC_ALIVE_READS; spin++) {
+        if (tiku_flpr_arch_heartbeat() != first ||
+            tiku_flpr_arch_spin_passes() != first_spin) {
+            return tiku_flpr_arch_running() && tiku_flpr_arch_alive();
+        }
+    }
+    return 0;
 }
 
 uint32_t tiku_coproc_heartbeat(void)

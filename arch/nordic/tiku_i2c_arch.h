@@ -47,7 +47,8 @@ void tiku_i2c_arch_close(void);
  *
  * One EasyDMA transaction closed by the LASTTX->STOP short.
  *
- * @note @p buf must be in RAM: TWIM EasyDMA cannot fetch from RRAM.
+ * @note Non-RAM writes of at most 256 bytes use RAM staging. Larger
+ *       non-RAM writes return TIKU_I2C_ERR_PARAM; RAM buffers use DMA directly.
  * @param addr  7-bit slave address (unshifted)
  * @param buf   Data to transmit
  * @param len   Number of bytes; 0 returns TIKU_I2C_OK immediately

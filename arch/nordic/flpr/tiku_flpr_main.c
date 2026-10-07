@@ -316,11 +316,6 @@ static uint8_t  fll_cu_pending;         /* connection update armed           */
 static uint16_t fll_cu_instant;
 static uint16_t fll_cu_interval;        /* new interval, 1.25 ms (telemetry) */
 static uint16_t fll_cu_timeout;         /* new supervision, 10 ms (telemetry)*/
-/* LL encryption startup: on LL_ENC_REQ hand SKDm and IVm to the M33, which
- * owns the AES, then send LL_ENC_RSP once it returns SKDs and IVs. */
-static uint8_t  fll_enc_pending;       /* LL_ENC_REQ seen, awaiting M33 SKDs */
-static uint8_t  fll_enc_done;          /* LL_ENC_RSP sent (dedup)            */
-static uint32_t fll_enc_seq;           /* enc_req_seq value published        */
 /* PHY update: the new PHY (RADIO MODE, PCNF0) applies at its Instant. */
 static uint8_t  fll_phy_pending;       /* LL_PHY_UPDATE_IND armed            */
 static uint8_t  fll_phy_new;           /* target: 0 1M, 1 2M, 2 Coded S8     */
@@ -434,31 +429,8 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
             fll_cu_pending  = 1u;
         }
     } else if (op == 0x03u) {                   /* LL_ENC_REQ               */
-        /* CtrData: Rand[8] EDIV[2] SKDm[8] IVm[4] -> payload buf[4..25].
-         * The FLPR has no AES; hand SKDm/IVm to the M33 (it derives the session
-         * key), then send LL_ENC_RSP once it returns SKDs/IVs. */
-        if (fll_enc_done) {                     /* dup (central lost RSP):  */
-            uint8_t rsp[12], i;                 /* re-send the same SKDs/IVs */
-            for (i = 0u; i < 8u; i++) {
-                rsp[i] = sh->enc_skds[i];
-            }
-            for (i = 0u; i < 4u; i++) {
-                rsp[8u + i] = sh->enc_ivs[i];
-            }
-            fll_queue_ctrl(0x04u, rsp, 12u);
-        } else if (buf[1] >= 23u && !fll_enc_pending) {
-            uint8_t i;
-            for (i = 0u; i < 8u; i++) {
-                sh->enc_skdm[i] = buf[14u + i];
-            }
-            for (i = 0u; i < 4u; i++) {
-                sh->enc_ivm[i] = buf[22u + i];
-            }
-            fll_enc_seq = sh->enc_req_seq + 1u;
-            sh->enc_req_seq = fll_enc_seq;      /* hand off to the M33       */
-            flpr_doorbell_to_app();
-            fll_enc_pending = 1u;
-        }
+        uint8_t reject[2] = { 0x03u, 0x1au };
+        fll_queue_ctrl(0x11u, reject, sizeof(reject));
     } else if (op == 0x14u) {                   /* LL_LENGTH_REQ (DLE)      */
         /* Reply with the local maximum and publish the effective TX size,
          * min(peer MaxRxOctets, TIKU_FLPR_DLE_MAX_OCTETS) and at least 27,
@@ -556,7 +528,6 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     fll_a2f_seen = sh->a2f_seq;
     sh->a2f_ack  = sh->a2f_seq;                  /* TX slot free              */
     fll_cm_pending = 0u; fll_cu_pending = 0u;    /* no update armed           */
-    fll_enc_pending = 0u; fll_enc_done = 0u;     /* no LL_ENC_REQ seen        */
     sh->enc_on = 0u;
     sh->dle_max = 0u;                            /* 0 = 27 octets, pre-DLE    */
     fll_phy_pending = 0u;                        /* 1M until an update        */
@@ -628,23 +599,6 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
             sh->conn_phy = fll_phy_new;
             sh->conn_phy_evt = sh->conn_events;  /* events at the switch      */
             sh->conn_phy_mode = r->MODE;         /* MODE read back            */
-        }
-
-        /* The M33 has returned SKDs and IVs: send LL_ENC_RSP.  Nothing
-         * after it starts encryption on this side (no LL_START_ENC_REQ, no
-         * CCM00 setup). */
-        if (fll_enc_pending && sh->enc_rsp_seq == fll_enc_seq &&
-            fll_tx_len == 0u) {
-            uint8_t rsp[12], i;
-            for (i = 0u; i < 8u; i++) {
-                rsp[i] = sh->enc_skds[i];
-            }
-            for (i = 0u; i < 4u; i++) {
-                rsp[8u + i] = sh->enc_ivs[i];
-            }
-            fll_queue_ctrl(0x04u, rsp, 12u);        /* LL_ENC_RSP            */
-            fll_enc_pending = 0u;
-            fll_enc_done = 1u;                      /* dedup repeat ENC_REQs */
         }
 
         k = flpr_csa1_next(&last_un, hop, chmap);
@@ -841,13 +795,11 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     sh->conn_state = 3u;                         /* link ended               */
 }
 
-/* Busy-loop iterations idled between advertising events
- * (FLPR_ADV_GAP_ITERS), and the span of the pseudo-random advDelay added to
- * them (FLPR_ADV_DELAY_ITERS).  The spec floors the advertising interval at
- * 20 ms, and a host scanner given back-to-back events reports the device
- * only occasionally. */
-#define FLPR_ADV_GAP_ITERS    840000u
-#define FLPR_ADV_DELAY_ITERS  210000u
+/** @brief Advertising gap at 2 MHz: 20 ms plus a 0..10 ms delay. */
+static uint32_t flpr_adv_gap_ticks(uint32_t random)
+{
+    return 40000u + ((random >> 8) % 20001u);
+}
 
 /* TIMER10 times the SCAN_RSP.  Every PHYEND clears the timer over DPPI, and
  * COMPARE[0] fires the RADIO's TXEN FLPR_ADV_TXEN_TICKS ticks (2 MHz) after
@@ -1139,12 +1091,17 @@ static void flpr_conn_adv(tiku_flpr_shared_t *sh)
             if (chan == 0u) {
                 uint32_t d;
                 lcg = lcg * 1103515245u + 12345u;
-                d = FLPR_ADV_GAP_ITERS + ((lcg >> 8) % FLPR_ADV_DELAY_ITERS);
-                for (spin = 0u; spin < d; spin++) {
-                    if (r->EVENTS_DISABLED == 0xFFFFFFFFu) {
-                        break;                   /* never true: keep the read */
+                NRF_TIMER_Type *t = NRF_TIMER10_NS;
+                uint32_t start;
+                d = flpr_adv_gap_ticks(lcg);
+                t->TASKS_CAPTURE[1] = 1u;
+                start = t->CC[1];
+                do {
+                    if (sh->cmd != 0u) {
+                        break;
                     }
-                }
+                    t->TASKS_CAPTURE[1] = 1u;
+                } while ((uint32_t)(t->CC[1] - start) < d);
             }
         }
         if (sh->cmd != 0u) {                     /* honour STOP / new cmd    */
@@ -1246,6 +1203,8 @@ void tiku_flpr_main(void)
      * again would fault the payload again. */
     uint32_t last_seq = sh->a2f_seq;
 
+    beacon_on = 0u;
+
     /* Enable the VPR's RT-peripheral interface (keyed VPRNORDICCTRL CSR,
      * 0x7C0: NORDICKEY=0x507D<<16 | ENABLERTPERIPH).  Until this runs, the
      * VEVIF half of VPR00 (tasks, events, INTEN; offsets below 0x800) reads
@@ -1314,9 +1273,7 @@ void tiku_flpr_main(void)
             for (i = 0u; i < n; i++) {
                 beacon_pdu[i] = b->pdu[i];
             }
-            /* interval_ms -> pace iterations at 128000 cycles per ms, a
-             * 128 MHz core; at 64 MHz the interval comes out doubled. */
-            beacon_pace_iters = b->interval_ms * (128000u / FLPR_PACE_DIV);
+            beacon_pace_iters = b->pace_iters;
             sh->beacon_bursts = 0u;
             beacon_on = 1u;
             sh->cmd = 0u;
@@ -1340,16 +1297,17 @@ void tiku_flpr_main(void)
             sh->cmd = 0u;
         }
         if (beacon_on) {
-            volatile uint32_t w;
+            uint32_t remaining = beacon_pace_iters;
             flpr_beacon_burst();
             sh->beacon_bursts = sh->beacon_bursts + 1u;
             sh->heartbeat = sh->heartbeat + 1u;
-            /* Interval pacing in slices of 12800 iterations (1 ms at
-             * 128 MHz), so a STOP or PARK command is seen within a slice. */
-            for (w = 0u; w < beacon_pace_iters; w += 12800u) {
+            /* Check for STOP or PARK after at most 12800 iterations. */
+            while (remaining != 0u) {
                 volatile uint32_t s;
-                for (s = 0u; s < 12800u; s++) {
+                uint32_t slice = remaining < 12800u ? remaining : 12800u;
+                for (s = 0u; s < slice; s++) {
                 }
+                remaining -= slice;
                 if (sh->cmd != 0u) {
                     break;
                 }

@@ -143,8 +143,8 @@ uint8_t tiku_nordic_usbhs_dev_started(void);
 typedef void (*tiku_nordic_usbhs_cdc_rx_fn)(const uint8_t *data, uint32_t len);
 /** @brief The last packet given to _cdc_send() has left; from the interrupt. */
 typedef void (*tiku_nordic_usbhs_cdc_done_fn)(void);
-/** @brief Non-zero if the sink can take another whole OUT packet now. */
-typedef uint8_t (*tiku_nordic_usbhs_cdc_ready_fn)(void);
+/** @brief Room for one packet plus pending bytes not delivered to on_rx. */
+typedef uint8_t (*tiku_nordic_usbhs_cdc_ready_fn)(uint32_t pending);
 
 /** @brief Register the class layer's callbacks; any may be NULL. */
 void tiku_nordic_usbhs_dev_cdc_bind(tiku_nordic_usbhs_cdc_rx_fn on_rx,

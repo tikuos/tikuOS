@@ -9,11 +9,12 @@
  *
  * Blocking polled master on the DMA.TX/DMA.RX EasyDMA model: SHORTS wire the
  * STOP, so EVENTS_STOPPED ends a transfer that succeeded or was NACKed.
- * Caller buffers go to EasyDMA as given, so they must be in RAM.
+ * RAM buffers go to EasyDMA directly; short RRAM writes use a RAM buffer.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <stddef.h>
 #include <arch/nordic/tiku_i2c_arch.h>
 #include <arch/nordic/tiku_device_select.h>  /* board pins, MDK TWIM/GPIO */
 
@@ -154,6 +155,35 @@ static void twim_cfg_pin(uint8_t port, uint8_t pin)
 /* Core transfer engine                                                      */
 /*---------------------------------------------------------------------------*/
 
+/** @brief RAM staging capacity for a non-RAM transmit buffer. */
+static uint8_t twim_txbuf[256] __attribute__((aligned(4)));
+
+/** @brief Whether the whole range is inside the DMA RAM window. */
+static int twim_addr_is_ram(const void *ptr, uint16_t len)
+{
+    uintptr_t p = (uintptr_t)ptr;
+    uintptr_t base = TIKU_DEVICE_RAM_START;
+    return p >= base && p - base <= TIKU_DEVICE_RAM_SIZE &&
+           len <= TIKU_DEVICE_RAM_SIZE - (p - base);
+}
+
+/** @brief Stage a short non-RAM write, or reject an oversized one. */
+static int twim_prepare_tx(const uint8_t **ptr, uint16_t len)
+{
+    uint16_t i;
+    if (len == 0u || twim_addr_is_ram(*ptr, len)) {
+        return TIKU_I2C_OK;
+    }
+    if (*ptr == NULL || len > sizeof(twim_txbuf)) {
+        return TIKU_I2C_ERR_PARAM;
+    }
+    for (i = 0; i < len; i++) {
+        twim_txbuf[i] = (*ptr)[i];
+    }
+    *ptr = twim_txbuf;
+    return TIKU_I2C_OK;
+}
+
 /**
  * @brief Run one blocking TWIM transaction (write, read, or write-then-read).
  *
@@ -180,6 +210,10 @@ static int twim_run(uint8_t addr, uint32_t shorts,
     uint32_t spin;
     uint32_t err;
 
+    if (twim_prepare_tx(&tx, txlen) != TIKU_I2C_OK ||
+        (rxlen && !twim_addr_is_ram(rx, rxlen))) {
+        return TIKU_I2C_ERR_PARAM;
+    }
     TIKU_TWIM->ADDRESS = (uint32_t)(addr & 0x7Fu);
     TIKU_TWIM->SHORTS  = shorts;
 

@@ -265,11 +265,9 @@ uint32_t tiku_nordic_mem_probe(unsigned kind, uint32_t ms)
     const uint32_t hot_mask  = TIKU_MEM_HOT_WORDS - 1u;
     const uint32_t cold_mask = TIKU_MEM_COLD_WORDS - 1u;
 
-    /* Seed the SRAM buffer with a pattern so SRAM traversals give a non-zero
-     * checksum; the RRAM arrays are zero-filled, so the RRAM kinds sum to 0.
-     * The pattern's word 0 is 0, so the buffer is reseeded before every probe
-     * until an SRAM_W probe stores a non-zero word there. */
-    if (tiku_mem_sram[0] == 0u) {
+    /* Seed the SRAM buffer before timing so checksums do not depend on
+     * a previous write probe. The RRAM arrays are zero-filled constants. */
+    {
         uint32_t j;
         for (j = 0u; j < TIKU_MEM_COLD_WORDS; j++) {
             tiku_mem_sram[j] = j * 2654435761u;
@@ -295,8 +293,7 @@ uint32_t tiku_nordic_mem_probe(unsigned kind, uint32_t ms)
             TIKU_MEM_PASS_READ(tiku_mem_sram, cold_mask, 1u);
             break;
         case TIKU_MEM_KIND_SRAM_W:
-            /* Setting bit 0 of acc (0 on entry) makes every stored word
-             * non-zero, including word 0, which stops the reseeding above. */
+            /* Store a nonzero value across the timed write passes. */
             acc |= 1u;
             TIKU_MEM_PASS_WRITE(tiku_mem_sram, cold_mask, 1u);
             break;
@@ -390,10 +387,7 @@ static uint32_t power_probe(uint32_t ms, unsigned flags, int spin)
         NRF_TIMER20_S->TASKS_STOP = 1u;
     }
     if ((flags & TIKU_SLEEP_DEEP) != 0u) {
-        /* Sub-power mode: force Low-power in case anything earlier in the
-         * boot latched Constant Latency (the reset default is Low-power, but
-         * radio bursts and the Axon shim both touch CONSTLAT). */
-        NRF_POWER_S->TASKS_LOWPWR = 1u;
+        /* Keep any Constant Latency hold owned by the radio or NPU. */
         /* With SLEEPDEEP clear, WFI keeps the core's own HCLK request
          * standing, and HFCLK cannot stop whatever else is released. */
         TIKU_SCB->SCR |= (1UL << 2);

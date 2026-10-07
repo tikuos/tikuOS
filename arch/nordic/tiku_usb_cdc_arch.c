@@ -90,11 +90,12 @@ static void on_tx_done(void)
 
 /** @brief Room in the receive ring for a whole OUT packet; the device layer
  *         asks before it re-arms, and without room the endpoint NAKs. */
-static uint8_t out_ready(void)
+static uint8_t out_ready(uint32_t pending)
 {
     uint16_t used = (uint16_t)((rx_head - rx_tail) & (RX_RING - 1u));
 
-    return (uint8_t)((RX_RING - 1u - used) >= tiku_nordic_usbhs_dev_cdc_mps());
+    return (uint8_t)((RX_RING - 1u - used) >=
+                     pending + tiku_nordic_usbhs_dev_cdc_mps());
 }
 
 /** @brief Bulk OUT data: append it to the receive ring; on a full ring,

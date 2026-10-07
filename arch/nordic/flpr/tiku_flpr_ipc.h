@@ -288,7 +288,7 @@ typedef struct {
 
 /** @brief TIKU_FLPR_CMD_BEACON parameters. */
 typedef struct {
-    uint32_t interval_ms;
+    uint32_t pace_iters;            /* cycles divided by 10 per interval */
     uint32_t pdu_len;
     uint8_t  pdu[48];               /* [S0][LEN][S1][payload...] layout     */
 } tiku_flpr_beacon_t;

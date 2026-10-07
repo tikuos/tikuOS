@@ -50,6 +50,12 @@ int tiku_flpr_arch_alive(void);
 /** @brief Current heartbeat counter from the shared page. */
 uint32_t tiku_flpr_arch_heartbeat(void);
 
+/**
+ * @brief 1 while the firmware holds a job that stops or slows its heartbeat:
+ *        beacon mode, or a connection advertise or hold.
+ */
+int tiku_flpr_arch_busy(void);
+
 /** @brief Embedded image size in bytes (0 if the build carries none). */
 uint32_t tiku_flpr_arch_image_size(void);
 

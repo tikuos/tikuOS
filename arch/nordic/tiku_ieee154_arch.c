@@ -223,6 +223,9 @@ int tiku_ieee154_arch_ed(uint8_t channel, int8_t *dbm)
     }
     if (RADIO->EVENTS_EDEND != 0u) {
         lvl = (int)(RADIO->EDSAMPLE & 0xFFu);
+    } else {
+        RADIO->SHORTS = 0u;
+        RADIO->TASKS_DISABLE = 1u;
     }
     for (spin = 0u; spin < 200000u; spin++) {   /* let EDEND_DISABLE settle   */
         if (RADIO->EVENTS_DISABLED != 0u) {
@@ -308,7 +311,11 @@ int tiku_ieee154_arch_rx_ack(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
         uint16_t dadr = (uint16_t)(rx_frame[6] | ((uint16_t)rx_frame[7] << 8));
         uint8_t  crcok = (RADIO->CRCSTATUS == RADIO_CRCSTATUS_CRCSTATUS_CRCOk);
         uint8_t  forus = (uint8_t)((dpan == my_pan) && (dadr == my_addr));
-        if (crcok && ftyp == 1u && areq && forus) {
+        /* Legacy short destinations include PAN, address and sequence. */
+        if (rx_frame[0] >= 9u && rx_frame[0] <= 127u &&
+            (fcf & 0x0C00u) == 0x0800u &&
+            (fcf & 0x3000u) <= 0x1000u && (fcf & 0x0100u) == 0u &&
+            crcok && ftyp == 1u && areq && forus) {
             ack_tmpl[3] = rx_frame[3];           /* echo the seq              */
             RADIO->PACKETPTR = (uint32_t)ack_tmpl;
             RADIO->EVENTS_PHYEND = 0u;

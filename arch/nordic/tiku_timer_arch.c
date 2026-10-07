@@ -271,7 +271,7 @@ int tiku_clock_tickless_available(void)
 #define TIKU_TIMER_INTERVAL      (TIKU_TIMER_HZ / TIKU_CLOCK_ARCH_SECOND)
 #define TIMER_MODE_TIMER         0UL
 #define TIMER_BITMODE_32BIT      3UL
-#define TIMER_PRESCALER_16MHZ    0UL
+#define TIMER_PRESCALER_16MHZ    1UL  /* TIMER10 PCLK is 32 MHz. */
 #define TIMER_SHORTS_C0_CLEAR    (1UL << 0)
 #define TIMER_INTENSET_COMPARE0  (1UL << 16)
 

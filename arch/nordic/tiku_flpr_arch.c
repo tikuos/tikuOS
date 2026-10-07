@@ -66,6 +66,14 @@ static void flpr_carve_nonsecure(void)
  * under a parked core runs garbage. */
 static uint8_t flpr_booted;
 
+/* Long jobs handed to the firmware that stop its heartbeat: beacon mode
+ * (set by tiku_flpr_arch_beacon(), cleared by _beacon_stop()) and a
+ * connection advertise or hold (set by _conn_capture() and _conn_start(),
+ * cleared by _conn_stop()).  Both clear on a fault restart, which runs the
+ * firmware's main() again. */
+static uint8_t flpr_beacon_posted;
+static uint8_t flpr_conn_posted;
+
 int tiku_flpr_arch_start(void)
 {
     uint32_t size = FLPR_IMAGE_SIZE;
@@ -81,6 +89,8 @@ int tiku_flpr_arch_start(void)
         if (TIKU_FLPR_SHARED->magic == TIKU_FLPR_MAGIC_FAULT) {
             uint32_t spin;
 
+            flpr_beacon_posted = 0u;
+            flpr_conn_posted = 0u;
             TIKU_FLPR_SHARED->cmd = TIKU_FLPR_CMD_RESTART;
             __asm__ volatile ("dsb 0xF" ::: "memory");
             for (spin = 0u; spin < 2000000u; spin++) {
@@ -168,6 +178,20 @@ int tiku_flpr_arch_alive(void)
 uint32_t tiku_flpr_arch_heartbeat(void)
 {
     return TIKU_FLPR_SHARED->heartbeat;
+}
+
+int tiku_flpr_arch_busy(void)
+{
+    uint32_t st = TIKU_FLPR_SHARED->conn_state;
+
+    /* Beacon mode advances the heartbeat once per burst interval, which
+     * tiku_flpr_arch_beacon() bounds only by overflow; a connection
+     * advertise (up to 4000 channel attempts) and the hold that follows a
+     * CONNECT_IND (conn_state 1, until the link ends) do not advance it. */
+    if (flpr_beacon_posted) {
+        return 1;
+    }
+    return (flpr_conn_posted && (st == 0u || st == 1u)) ? 1 : 0;
 }
 
 uint32_t tiku_flpr_arch_image_size(void)
@@ -422,7 +446,9 @@ int tiku_flpr_arch_beacon(const uint8_t *pdu, uint32_t len,
     uint32_t i;
 
     if (!tiku_flpr_arch_running() || len > sizeof(b->pdu) ||
-        interval_ms == 0u) {
+        interval_ms == 0u ||
+        interval_ms > UINT32_MAX /
+                      (uint32_t)(tiku_nordic_cpu_hz_now() / 10000UL)) {
         return -1;
     }
     flpr_radio_ns(1);
@@ -430,9 +456,11 @@ int tiku_flpr_arch_beacon(const uint8_t *pdu, uint32_t len,
         b->pdu[i] = pdu[i];
     }
     b->pdu_len = len;
-    b->interval_ms = interval_ms;
+    b->pace_iters = interval_ms *
+                    (uint32_t)(tiku_nordic_cpu_hz_now() / 10000UL);
     __asm__ volatile ("dsb 0xF" ::: "memory");
     TIKU_FLPR_SHARED->cmd = TIKU_FLPR_CMD_BEACON;
+    flpr_beacon_posted = 1u;
     return 0;
 }
 
@@ -449,11 +477,15 @@ void tiku_flpr_arch_beacon_stop(void)
         }
     }
     TIKU_FLPR_SHARED->rsp = 0u;
+    flpr_beacon_posted = 0u;
     flpr_radio_ns(0);
 }
 
 uint32_t tiku_flpr_arch_beacon_bursts(void)
 {
+    if (TIKU_FLPR_SHARED->cmd == TIKU_FLPR_CMD_BEACON) {
+        return 0u;  /* The new command has not reset its counter yet. */
+    }
     return TIKU_FLPR_SHARED->beacon_bursts;
 }
 
@@ -563,6 +595,7 @@ int tiku_flpr_arch_conn_capture(const uint8_t *adv, uint32_t adv_len,
     flpr_conn_set_scanrsp(in, rsp, rsp_len);
     __asm__ volatile ("dsb 0xF" ::: "memory");
     TIKU_FLPR_SHARED->cmd = TIKU_FLPR_CMD_CONN_ADV;
+    flpr_conn_posted = 1u;
 
     /* Block until the FLPR connects (1) or gives up (2), or the spin bound
      * runs out; the watchdog is kicked meanwhile. */
@@ -798,6 +831,7 @@ void tiku_flpr_arch_conn_stop(void)
             }
         }
     }
+    flpr_conn_posted = 0u;
     flpr_radio_ns(0);                          /* reclaim secure alias       */
 }
 
@@ -831,6 +865,7 @@ int tiku_flpr_arch_conn_start(const uint8_t *adv, uint32_t adv_len,
     flpr_conn_set_scanrsp(in, rsp, rsp_len);
     __asm__ volatile ("dsb 0xF" ::: "memory");
     TIKU_FLPR_SHARED->cmd = TIKU_FLPR_CMD_CONN_ADV;
+    flpr_conn_posted = 1u;
     return 0;
 }
 

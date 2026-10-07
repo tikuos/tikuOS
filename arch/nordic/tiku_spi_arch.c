@@ -32,7 +32,7 @@
  *     the low-power domain with only a handful of P0 pins),
  *   - errata 54L-55/69 do not apply to the nRF54L15, only to the LM20,
  *     LS05, LV10 and LC10 variants (per the MDK errata header); this driver
- *     applies no workaround for them.
+ *     applies their transfer workaround on the LM20.
  * The SERIAL21 interrupt is unused; completion is polled on EVENTS_END.
  * The secure alias (_S, 0x500C7000) matches the rest of this port.
  */
@@ -41,11 +41,14 @@
 #endif
 
 /*
- * SCK / MOSI(SDO) / MISO(SDI) pins as (port, pin).  These are free P1 pins
- * on the nRF54L15-DK (P1.04/05 = console UART, P1.08/09/13 = buttons,
- * P1.10/14 = LEDs), reachable by the peripheral-domain SERIAL21.  They are
- * defaults, not checked against the DK's header routing; a board header
- * overrides them.  SCK and MOSI share P1.11/P1.12 with the I2C defaults.
+ * SCK / MOSI(SDO) / MISO(SDI) pins as (port, pin), reachable by the
+ * peripheral-domain SERIAL21.  SCK and MOSI sit on P1.02/P1.03, the NFC1/NFC2
+ * pads: on the nRF54L15-DK every other P1 pin is taken (P1.00/01 = LFXO
+ * crystal, P1.04..07 = console UART with its RTS/CTS, P1.08/09/13 = buttons,
+ * P1.10/14 = LEDs, P1.11/12 = default I2C, P1.15 = MISO).  The pads reset to
+ * NFC mode (NFCT.PADCONFIG); tiku_spi_arch_init() switches them to GPIO.
+ * They are defaults, not checked against the DK's header routing; a board
+ * header overrides them.
  * There is no chip select here: the device driver drives CS on a free GPIO
  * around each transaction.
  */
@@ -53,13 +56,13 @@
 #define TIKU_BOARD_SPI0_SCK_PORT    1u
 #endif
 #ifndef TIKU_BOARD_SPI0_SCK_PIN
-#define TIKU_BOARD_SPI0_SCK_PIN     11u
+#define TIKU_BOARD_SPI0_SCK_PIN     2u
 #endif
 #ifndef TIKU_BOARD_SPI0_MOSI_PORT
 #define TIKU_BOARD_SPI0_MOSI_PORT   1u
 #endif
 #ifndef TIKU_BOARD_SPI0_MOSI_PIN
-#define TIKU_BOARD_SPI0_MOSI_PIN    12u
+#define TIKU_BOARD_SPI0_MOSI_PIN    3u
 #endif
 #ifndef TIKU_BOARD_SPI0_MISO_PORT
 #define TIKU_BOARD_SPI0_MISO_PORT   1u
@@ -70,6 +73,21 @@
 
 /** @brief Selected SPIM instance. */
 #define TIKU_SPIM                   TIKU_BOARD_SPI0_SPIM
+
+/** @brief NFCT register block whose PADCONFIG selects NFC or GPIO pads. */
+#ifndef TIKU_SPI_NFCT
+#define TIKU_SPI_NFCT               NRF_NFCT_S
+#endif
+
+/* The NFC1/NFC2 pads, P1.02 and P1.03 on the nRF54L15 and nRF54LM20. */
+#define TIKU_SPI_NFC_PORT           1u
+#define TIKU_SPI_NFC1_PIN           2u
+#define TIKU_SPI_NFC2_PIN           3u
+
+/** @brief Non-zero when (port, pin) is an NFC pad. */
+#define TIKU_SPI_PIN_IS_NFC(port, pin) \
+    ((port) == TIKU_SPI_NFC_PORT && \
+     ((pin) == TIKU_SPI_NFC1_PIN || (pin) == TIKU_SPI_NFC2_PIN))
 
 /*---------------------------------------------------------------------------*/
 /* REGISTER FIELD CONSTANTS (MDK nrf54l15_types.h)                           */
@@ -106,6 +124,10 @@
  * slowest SCK (~127 kHz); 2 M polls take about 60 ms at 128 MHz.
  */
 #define TIKU_SPIM_SPIN_LIMIT        2000000UL
+
+/** @brief Poll bound for EVENTS_STOPPED after TASKS_STOP on a timed-out
+ *         burst, before the SPIM is disabled. */
+#define TIKU_SPIM_STOP_LIMIT        100000UL
 
 /**
  * @brief Transmit bounce-chunk size (bytes).
@@ -151,11 +173,46 @@ static int spim_addr_is_ram(const void *p)
 }
 
 /**
+ * @brief Switch the NFC pads to GPIO when an SPI pin is one of them.
+ *
+ * NFCT.PADCONFIG resets to 1 (NFC antenna pins) on every reset; writing 0
+ * makes both pads plain GPIO.  Nothing in the port uses the NFCT.
+ */
+static void spim_nfc_pads_to_gpio(void)
+{
+    if (TIKU_SPI_PIN_IS_NFC(TIKU_BOARD_SPI0_SCK_PORT,
+                            TIKU_BOARD_SPI0_SCK_PIN) ||
+        TIKU_SPI_PIN_IS_NFC(TIKU_BOARD_SPI0_MOSI_PORT,
+                            TIKU_BOARD_SPI0_MOSI_PIN) ||
+        TIKU_SPI_PIN_IS_NFC(TIKU_BOARD_SPI0_MISO_PORT,
+                            TIKU_BOARD_SPI0_MISO_PIN)) {
+        TIKU_SPI_NFCT->PADCONFIG = 0UL;
+    }
+}
+
+/** @brief Apply the LM20 SPIM 55/69 transfer workaround. */
+static void spim_errata(int active)
+{
+#if defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
+    *(volatile uint32_t *)((uint8_t *)TIKU_SPIM + 0xc80u) =
+        active ? 0x82u : 0u;
+#else
+    (void)active;
+#endif
+}
+
+/**
  * @brief Run one blocking SPIM DMA burst and wait for completion.
  *
  * Points EasyDMA at the given RAM buffers, triggers TASKS_START and spins on
  * EVENTS_END with a bounded poll.  Both pointers must reference on-chip RAM.
  *
+ * @note On the LM20 the errata 55/69 register is set before TASKS_START and
+ *       cleared after EVENTS_END and after a timeout.
+ * @note A timed-out burst is stopped with TASKS_STOP, EVENTS_STOPPED is
+ *       polled with a bounded wait so EasyDMA is not cut mid-transfer, and
+ *       the SPIM is then disabled; transfers are refused until
+ *       tiku_spi_arch_init() runs again.
  * @note When @p txlen < @p rxlen the over-read character (ORC, 0xFF at init) is
  *       clocked out for the remaining receive bytes; when @p rxlen is 0 the
  *       received bytes are not written to RAM.
@@ -170,9 +227,11 @@ static int spim_run(uint32_t txp, uint32_t txlen,
 {
     uint32_t spin;
 
-    /* Clear the completion event and read it back so the clear has landed
-     * before the next transfer is armed (write-buffer flush). */
+    /* Clear the completion and stopped events and read one back so the
+     * clears have landed before the next transfer is armed (write-buffer
+     * flush). */
     TIKU_SPIM->EVENTS_END = 0UL;
+    TIKU_SPIM->EVENTS_STOPPED = 0UL;
     (void)TIKU_SPIM->EVENTS_END;
 
     TIKU_SPIM->DMA.TX.PTR    = txp;
@@ -180,15 +239,26 @@ static int spim_run(uint32_t txp, uint32_t txlen,
     TIKU_SPIM->DMA.RX.PTR    = rxp;
     TIKU_SPIM->DMA.RX.MAXCNT = rxlen;
 
+    spim_errata(1);
     TIKU_SPIM->TASKS_START = 1UL;
 
     for (spin = 0UL; spin < TIKU_SPIM_SPIN_LIMIT; spin++) {
         if (TIKU_SPIM->EVENTS_END != 0UL) {
             TIKU_SPIM->EVENTS_END = 0UL;
             (void)TIKU_SPIM->EVENTS_END;
+            spim_errata(0);
             return 0;
         }
     }
+    TIKU_SPIM->TASKS_STOP = 1UL;
+    for (spin = 0UL; spin < TIKU_SPIM_STOP_LIMIT; spin++) {
+        if (TIKU_SPIM->EVENTS_STOPPED != 0UL) {
+            break;
+        }
+    }
+    TIKU_SPIM->ENABLE = TIKU_SPIM_ENABLE_DISABLED;
+    spim_initialised = 0u;
+    spim_errata(0);
     return -1;
 }
 
@@ -199,9 +269,9 @@ static int spim_run(uint32_t txp, uint32_t txlen,
 /**
  * @brief Initialise the SPIM master with the given configuration.
  *
- * Parks the SCK/MOSI/MISO pads at defined idle levels, routes them via PSEL,
- * programs CONFIG (bit order plus CPOL/CPHA), PRESCALER (SCK = 16 MHz /
- * DIVISOR) and the over-read character, then enables the peripheral.
+ * Switches an NFC pad among the SPI pins to GPIO, parks the pads at idle
+ * levels, routes them via PSEL, programs CONFIG (order, CPOL/CPHA),
+ * PRESCALER (SCK = 16 MHz / DIVISOR) and the ORC, then enables the SPIM.
  *
  * @note TIKU_SPI_LSB_FIRST is supported, through CONFIG.ORDER.
  * @param config  Bus parameters (mode, bit order, prescaler/divisor).
@@ -219,6 +289,8 @@ int tiku_spi_arch_init(const tiku_spi_config_t *config)
     if (config->mode > TIKU_SPI_MODE_3) {
         return TIKU_SPI_ERR_PARAM;
     }
+
+    spim_nfc_pads_to_gpio();
 
     /* Park the pads before handing them to the SPIM so the bus idles in a
      * defined state.  SCK idle level follows CPOL (modes 2/3 idle high). */

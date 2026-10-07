@@ -9,7 +9,7 @@
  *
  * Masks interrupt sources at the NVIC while keeping the lines named in
  * preserve_mask alive, so a preserved htimer keeps firing through a window.
- * The snapshot covers nine ISER words, external IRQs 0..287.
+ * The snapshot covers IRQs 0..287 on nRF54L15 and 0..319 on nRF54LM20.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,9 +19,12 @@
 #include <arch/nordic/tiku_nordic_core.h>
 #include <stdint.h>
 
-/** @brief NVIC ISER/ICER words covering external IRQs 0..287: all of the
- *         nRF54L15's, but not the nRF54LM20's 288..289 (VREGUSB is 289). */
+/** @brief NVIC words covering the selected device's external IRQs. */
+#if defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
+#define TIKU_NORDIC_NVIC_WORDS  10u
+#else
 #define TIKU_NORDIC_NVIC_WORDS  9u
+#endif
 
 /** @brief ISER snapshot taken at mask time, restored on unmask. */
 static uint32_t tiku_nordic_crit_iser[TIKU_NORDIC_NVIC_WORDS];

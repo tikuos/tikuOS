@@ -434,18 +434,18 @@ void tiku_nordic_usbhs_dev_irq(void)
                 uint32_t got = s_bulk_mps - left;
                 uint8_t  done = s_out_cur;
 
-                if (got > 0u && s_on_rx != (tiku_nordic_usbhs_cdc_rx_fn)0) {
-                    s_on_rx(out_pkt[done], got);
-                }
                 /* Re-arm on the other buffer while the sink can take a
                  * packet; else leave it un-armed so the endpoint NAKs and
                  * the host holds its data -- flow control, not a drop. */
                 if (s_out_ready == (tiku_nordic_usbhs_cdc_ready_fn)0 ||
-                    s_out_ready() != 0u) {
+                    s_out_ready(got) != 0u) {
                     s_out_cur ^= 1u;
                     cdc_out_arm();
                 } else {
                     s_out_paused = 1u;
+                }
+                if (got > 0u && s_on_rx != (tiku_nordic_usbhs_cdc_rx_fn)0) {
+                    s_on_rx(out_pkt[done], got);
                 }
             }
         }
@@ -677,7 +677,7 @@ void tiku_nordic_usbhs_dev_cdc_out_resume(void)
     tiku_nordic_disable_irq();
     if (s_out_paused != 0u &&
         (s_out_ready == (tiku_nordic_usbhs_cdc_ready_fn)0 ||
-         s_out_ready() != 0u)) {
+         s_out_ready(0u) != 0u)) {
         s_out_paused = 0u;
         s_out_cur ^= 1u;
         cdc_out_arm();
@@ -721,4 +721,3 @@ uint32_t tiku_nordic_usbhs_dev_cdc_mps(void)
 {
     return s_bulk_mps;
 }
-

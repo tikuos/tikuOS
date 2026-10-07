@@ -1124,11 +1124,13 @@ int tiku_radio_arch_connadv_probe(const uint8_t *addr, const uint8_t *ad,
     uint8_t chan = 0u;
     int got = 0;
 
-    /* ADV_IND + SCAN_RSP share the body; only the header type differs. */
+    /* ADV_IND + SCAN_RSP carry separate AD fields. */
     (void)tiku_radio_arch_adv_build(adv, addr, ad, ad_len);
     adv[0] = (uint8_t)(0x40u | tiku_radio_arch_connadv_pdu_type);
-    (void)tiku_radio_arch_adv_build(rsp, addr, ad, ad_len);
-    rsp[0] = 0x44u;                            /* SCAN_RSP, TxAdd=1        */
+    {
+        uint8_t sd[3] = { 2u, 0x0Au, (uint8_t)tiku_radio_arch_txpower() };
+        (void)tiku_radio_arch_scanrsp_build(rsp, addr, sd, sizeof(sd));
+    }
 
     tiku_radio_arch_dbg_connadv_tx = 0u;
     tiku_radio_arch_dbg_connadv_scanreq = 0u;
@@ -1583,8 +1585,9 @@ static uint16_t cen_cpu_interval;
 
 /* ATT over L2CAP: a minimal NUS (Nordic UART Service) data path.
  *   peripheral = server: NUS RX (write target) and NUS TX behind a CCCD;
- *                with notifications on, a write to NUS RX (up to 20 bytes
- *                kept) is echoed as a TX notification.
+ *                with notifications on, a write to NUS RX (up to 61 bytes
+ *                kept, the ATT MTU of 64 less the 3-byte header) is echoed
+ *                as a TX notification.
  *   central    = client: MTU -> GATT discovery -> enable CCCD -> write
  *                NUS_TEST_MSG to NUS RX -> await the echoed notification
  *                -> long read and long write tests.
@@ -1603,10 +1606,10 @@ static const uint8_t NUS_TEST_MSG[40] = {
 };
 #define NUS_TEST_LEN  ((uint8_t)sizeof(NUS_TEST_MSG))
 
-static uint8_t  nus_rx[20];         /* server: last bytes written to RX     */
+static uint8_t  nus_rx[61];         /* server: last bytes written to RX     */
 static uint8_t  nus_rx_len;
 static uint8_t  nus_cccd;           /* server: TX notifications enabled bit */
-static uint8_t  nus_notify[20];     /* server: pending notification payload */
+static uint8_t  nus_notify[61];     /* server: pending notification payload */
 static uint8_t  nus_notify_len;     /* server: >0 = queue a TX notification */
 /* Client steps: 1 MTU, 2 discover services, 3 discover characteristics,
  * 4 discover the CCCD, 5 CCCD write, 6 RX write, 7 await the notification,
@@ -1856,12 +1859,13 @@ static void ll_on_acked(void)
 {
     if (ll_tx_len != 0u) {
         uint8_t was_l2 = (uint8_t)(ll_tx_llid == 2u || ll_tx_llid == 1u);
+        uint8_t acked_len = ll_tx_len;
         ll_ctrl_tx++;
         ll_tx_len = 0u;
         if (was_l2 && cen_sdu_len != 0u) {
             uint16_t n = (uint16_t)(cen_sdu_len - cen_sdu_off);
-            if (n > L2_FRAG_MAX) {
-                n = L2_FRAG_MAX;
+            if (n > acked_len) {
+                n = acked_len;
             }
             cen_sdu_off += n;
             if (cen_sdu_off < cen_sdu_len) {
@@ -2082,7 +2086,7 @@ static void att_handle(const uint8_t *att, uint8_t alen)
     } else {
         /* Server: MTU; CCCD and RX writes; an RX write queues a notify. */
         if (op == 0x02u) {                          /* Exchange MTU Req    */
-            uint8_t m[3] = { 0x03u, 23u, 0u };      /* MTU Rsp, 23         */
+            uint8_t m[3] = { 0x03u, 64u, 0u };      /* MTU Rsp, 64         */
             att_queue(m, 3u);
         } else if (op == 0x12u && alen >= 4u) {     /* Write Request       */
             uint16_t h = (uint16_t)(att[1] | ((uint16_t)att[2] << 8));

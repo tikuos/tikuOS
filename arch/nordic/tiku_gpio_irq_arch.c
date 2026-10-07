@@ -73,7 +73,11 @@ static gpiote_ctx_t *ctx_for_port(uint8_t port)
     if (port == 0u) {
         return &s_gpiote30;
     }
-    if (port == 1u || port == 2u || port == 3u) {
+    if (port == 1u || port == 2u
+#if defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
+        || port == 3u
+#endif
+    ) {
         return &s_gpiote20;
     }
     return (gpiote_ctx_t *)0;
@@ -146,7 +150,7 @@ static int alloc_channel(gpiote_ctx_t *c)
  *
  * @note Subsequent matching edges broadcast TIKU_EVENT_GPIO with data =
  *       TIKU_GPIO_IRQ_PACK(port, pin).
- * @param port  Virtual port number (1=P0, 2=P1, 3=P2).
+ * @param port  Virtual port number (1=P0 through 4=P3 on nRF54LM20).
  * @param pin   Pin index within the port (0..31).
  * @param edge  Edge polarity to arm.
  * @return TIKU_GPIO_IRQ_OK, TIKU_GPIO_IRQ_ERR_INVALID for a bad
@@ -162,9 +166,8 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
     int           ch;
 
     /* Ports are 1-based virtual, as in tiku_gpio_arch.c; translate to the
-     * physical (0-based) port here.  Virtual port 4 (P3 on the nRF54LM20)
-     * fails this range check, although ctx_for_port() maps P3. */
-    if (port < 1u || port > 3u) {
+     * physical (0-based) port here. ctx_for_port() validates availability. */
+    if (port < 1u || port > 4u) {
         return TIKU_GPIO_IRQ_ERR_INVALID;
     }
     phys = (uint8_t)(port - 1u);
@@ -214,7 +217,7 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
  *
  * @note The pin's direction and pull are left as-is, so the app can still read
  *       the line afterwards.
- * @param port  Virtual port number (1=P0, 2=P1, 3=P2).
+ * @param port  Virtual port number (1=P0 through 4=P3 on nRF54LM20).
  * @param pin   Pin index within the port.
  * @return TIKU_GPIO_IRQ_OK, or TIKU_GPIO_IRQ_ERR_INVALID for a bad port.
  */
@@ -224,7 +227,7 @@ int tiku_gpio_irq_arch_disable(uint8_t port, uint8_t pin)
     uint8_t       phys;
     int           ch;
 
-    if (port < 1u || port > 3u) {
+    if (port < 1u || port > 4u) {
         return TIKU_GPIO_IRQ_ERR_INVALID;
     }
     phys = (uint8_t)(port - 1u);

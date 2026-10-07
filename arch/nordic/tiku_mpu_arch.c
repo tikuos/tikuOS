@@ -16,6 +16,7 @@
 
 #include <hal/tiku_mpu_hal.h>
 #include <arch/nordic/tiku_mpu_arch.h>
+#include <hal/tiku_cpu.h>
 #include <arch/nordic/tiku_nordic_mdk.h>
 #if defined(TIKU_FLPR_ENABLE) && TIKU_FLPR_ENABLE
 #include <arch/nordic/flpr/tiku_flpr_ipc.h>   /* TIKU_FLPR_RAM_BASE / _SIZE */
@@ -110,8 +111,12 @@ uint16_t tiku_mpu_arch_get_ctl(void)
     return stub_mpuctl0;
 }
 
-void tiku_mpu_arch_disable_irq(void) { /* empty: IRQs stay enabled */ }
-void tiku_mpu_arch_enable_irq(void)  { /* empty */ }
+void tiku_mpu_arch_disable_irq(void) {
+    tiku_cpu_irq_disable();
+}
+void tiku_mpu_arch_enable_irq(void) {
+    tiku_cpu_irq_enable();
+}
 
 /*---------------------------------------------------------------------------*/
 /* ARMv8-M MPU REGIONS: SRAM W^X AND STACK GUARD                             */

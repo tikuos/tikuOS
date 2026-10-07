@@ -82,7 +82,7 @@ __tiku_layout_top          = ORIGIN(RRAM) + LENGTH(RRAM);
 /* -Wl,--defsym=__tiku_code_cap_override=<cap> replaces the 384 KB cap for a
  * reference link only: tools/axonpack.py checks its packed output against a
  * linked image of the same model, and tinyml_vww links only with a larger
- * window (0xC0000).  Such an image is not flashed. */
+ * window (0x100000). Such an image is not flashed. */
 __tiku_layout_code_cap     = DEFINED(__tiku_code_cap_override)
                              ? __tiku_code_cap_override
                              : 0x60000;                     /* 384 KB code */
