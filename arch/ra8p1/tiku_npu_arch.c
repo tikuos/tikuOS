@@ -156,6 +156,24 @@ static int npu_reset_and_configure(void)
     return TIKU_RA8P1_NPU_OK;
 }
 
+static void npu_power_down(void)
+{
+    npu_ready = 0U;
+
+    TIKU_REG32(RA8P1_NVIC_ICER(RA8P1_ICU_SLOT_NPU / 32U)) =
+        (1UL << (RA8P1_ICU_SLOT_NPU % 32U));
+
+    TIKU_REG32(RA8P1_MSTPCRA) |= RA8P1_MSTPA_NPU;
+    (void)TIKU_REG32(RA8P1_MSTPCRA);
+    tiku_cpu_ra8p1_delay_us(30U);
+
+    if (npu_wait_idle()) {
+        npu_protect(1);
+        TIKU_REG8(RA8P1_PDCTRNPU) = (uint8_t)RA8P1_PDCTRNPU_PDDE;
+        npu_protect(0);
+    }
+}
+
 int tiku_ra8p1_npu_init(void)
 {
     if (npu_ready != 0U) {
@@ -182,6 +200,7 @@ int tiku_ra8p1_npu_init(void)
 
     if (!npu_wait((uint8_t)(RA8P1_PDCTRNPU_PDCSF | RA8P1_PDCTRNPU_PDPGSF),
                   0U)) {
+        npu_power_down();
         return TIKU_RA8P1_NPU_ERR_POWER;
     }
 
@@ -193,10 +212,12 @@ int tiku_ra8p1_npu_init(void)
     tiku_cpu_ra8p1_delay_us(30U);
 
     if (TIKU_REG32(RA8P1_NPU_ID) != RA8P1_NPU_ID_EXPECT) {
+        npu_power_down();
         return TIKU_RA8P1_NPU_ERR_ID;
     }
 
     if (npu_reset_and_configure() != TIKU_RA8P1_NPU_OK) {
+        npu_power_down();
         return TIKU_RA8P1_NPU_ERR_POWER;
     }
 
@@ -207,22 +228,8 @@ int tiku_ra8p1_npu_init(void)
 
 void tiku_ra8p1_npu_stop(void)
 {
-    if (npu_ready == 0U) {
-        return;
-    }
-    npu_ready = 0U;
-
-    TIKU_REG32(RA8P1_NVIC_ICER(RA8P1_ICU_SLOT_NPU / 32U)) =
-        (1UL << (RA8P1_ICU_SLOT_NPU % 32U));
-
-    TIKU_REG32(RA8P1_MSTPCRA) |= RA8P1_MSTPA_NPU;
-    (void)TIKU_REG32(RA8P1_MSTPCRA);
-    tiku_cpu_ra8p1_delay_us(30U);
-
-    if (npu_wait_idle()) {
-        npu_protect(1);
-        TIKU_REG8(RA8P1_PDCTRNPU) = (uint8_t)RA8P1_PDCTRNPU_PDDE;
-        npu_protect(0);
+    if (npu_ready != 0U) {
+        npu_power_down();
     }
 }
 
@@ -530,10 +537,17 @@ static int npu_run(uint32_t *status_out)
         uint32_t budget = (uint32_t)(tiku_cpu_ra8p1_clock_get_hz() / 20UL);
 
         while (npu_done == 0u) {
+            uint32_t irq;
             if ((npu_cycles() - t0) > budget) {
                 break;
             }
-            __asm__ volatile ("wfi");
+            __asm__ volatile ("mrs %0, primask" : "=r" (irq));
+            __asm__ volatile ("cpsid i" ::: "memory");
+            if (npu_done == 0u) {
+                __asm__ volatile ("dsb" ::: "memory");
+                __asm__ volatile ("wfi");
+            }
+            __asm__ volatile ("msr primask, %0" :: "r" (irq) : "memory");
         }
     }
     sta = TIKU_REG32(RA8P1_NPU_STATUS);
@@ -587,7 +601,8 @@ static int npu_selftest_run(uint32_t seed, uint32_t *status_out,
 #if (TIKU_NPU_EMBED_MODEL + 0)
     /* The built-in stream was compiled for CONFIG TIKU_NPU_MP_CFG_EXPECT.
      * A store model's CONFIG is checked against the silicon at load. */
-    if (TIKU_REG32(RA8P1_NPU_CONFIG) != TIKU_NPU_MP_CFG_EXPECT) {
+    if (!npu_model_from_store &&
+        TIKU_REG32(RA8P1_NPU_CONFIG) != TIKU_NPU_MP_CFG_EXPECT) {
         return TIKU_RA8P1_NPU_ERR_ID;
     }
 #endif
@@ -726,7 +741,8 @@ int tiku_ra8p1_npu_bench(uint32_t rounds, uint32_t *npu_us, uint32_t *cpu_us)
     }
     ifm = (int8_t *)&npu_arena[npu_model.ifm_off];
     {
-        uint32_t n = (uint32_t)npu_model.ifm_dim * npu_model.ifm_dim;
+        uint32_t n = (uint32_t)npu_model.ifm_dim * npu_model.ifm_dim *
+                     npu_model.channels;
 
     for (i = 0U; i < n; i++) {
         ifm[i] = (int8_t)((i * 37U) % 251U) - 125;

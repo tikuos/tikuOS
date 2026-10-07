@@ -34,9 +34,8 @@ static struct {
 /**
  * @brief Disable NVIC interrupts, keeping the requested sources enabled.
  *
- * Only TIKU_CRIT_PRESERVE_HTIMER is mapped (the GPT compare slot).  Other
- * flags keep nothing: TIKU_CRIT_PRESERVE_UART still masks the console's
- * interrupt-driven RX.  DSB+ISB make the disable take effect before return.
+ * HTIMER keeps the GPT compare slot; UART keeps receive and error slots.
+ * DSB+ISB make the disable take effect before return.
  *
  * @param preserve_mask  OR of TIKU_CRIT_PRESERVE_* flags
  */
@@ -47,6 +46,13 @@ void tiku_crit_arch_mask_irqs(uint8_t preserve_mask)
     if (preserve_mask & TIKU_CRIT_PRESERVE_HTIMER) {
         keep[RA8P1_ICU_SLOT_HTIMER / 32U] |=
             (1UL << (RA8P1_ICU_SLOT_HTIMER % 32U));
+    }
+
+    if (preserve_mask & TIKU_CRIT_PRESERVE_UART) {
+        keep[RA8P1_ICU_SLOT_UART_RXI / 32U] |=
+            1UL << (RA8P1_ICU_SLOT_UART_RXI % 32U);
+        keep[RA8P1_ICU_SLOT_UART_ERI / 32U] |=
+            1UL << (RA8P1_ICU_SLOT_UART_ERI % 32U);
     }
 
     for (unsigned i = 0; i < CRIT_NVIC_WORDS; i++) {

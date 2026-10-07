@@ -72,12 +72,8 @@ int tiku_coproc_start(void)
 
 int tiku_coproc_stop(void)
 {
-    tiku_ra8p1_cpu1_stop();
-
-    /* tiku_ra8p1_cpu1_stop() infers the park from a heartbeat that stops; a
-     * heartbeat still moving afterwards is reported as
-     * TIKU_COPROC_ERR_TIMEOUT. */
-    return tiku_ra8p1_cpu1_alive() ? TIKU_COPROC_ERR_TIMEOUT : TIKU_COPROC_OK;
+    return tiku_ra8p1_cpu1_stop() == TIKU_RA8P1_CPU1_OK
+           ? TIKU_COPROC_OK : TIKU_COPROC_ERR_TIMEOUT;
 }
 
 int tiku_coproc_alive(void)

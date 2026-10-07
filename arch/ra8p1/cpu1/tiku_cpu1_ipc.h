@@ -53,9 +53,9 @@
 /*
  * Work message, exactly TIKU_CPU1_MSG_CAP bytes: 'HSH!', iterations (LE u32)
  * and a 40-byte seed.  The reply is the 32-byte chained digest, or the seed
- * as received when iterations is 0.  The heartbeat stops and WDT1 goes
- * unrefreshed while the chain runs; TIKU_CPU1_WORK_MAX_ITERS caps its length,
- * and tiku_ra8p1_cpu1_alive() reports a stopped heartbeat as a dead payload.
+ * as received when iterations is 0. The chain refreshes WDT1 and advances
+ * the heartbeat between batches. A halt request cancels the pending reply;
+ * TIKU_CPU1_WORK_MAX_ITERS caps the chain length.
  */
 #define TIKU_CPU1_WORK_MAGIC0   'H'
 #define TIKU_CPU1_WORK_MAGIC1   'S'
@@ -104,7 +104,8 @@ typedef struct {
     volatile uint32_t c2a_seq;      /**< set to the a2c_seq being answered */
     volatile uint32_t c2a_len;      /**< bytes valid in c2a_buf           */
     volatile uint8_t  c2a_buf[TIKU_CPU1_MSG_CAP];
-    volatile uint8_t  c2a_pad[16];
+    volatile uint32_t parked;       /**< halt acknowledged by the payload */
+    volatile uint8_t  c2a_pad[12];
 } tiku_cpu1_shared_t;
 
 /** @brief Byte offset of the half CPU1 writes, for the M85's invalidates. */

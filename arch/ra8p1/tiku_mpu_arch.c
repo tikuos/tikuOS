@@ -14,6 +14,7 @@
  */
 
 #include "tiku_mpu_arch.h"
+#include <hal/tiku_cpu.h>
 #include "tiku_ra8p1_regs.h"
 #include "tiku_cache_arch.h"
 #include "tiku_mram_arch.h"
@@ -209,12 +210,12 @@ uint16_t tiku_mpu_arch_get_ctl(void)
     return mpu_ctl;
 }
 
-void tiku_mpu_arch_disable_irq(void)
-{
+void tiku_mpu_arch_disable_irq(void) {
+    tiku_cpu_irq_disable();
 }
 
-void tiku_mpu_arch_enable_irq(void)
-{
+void tiku_mpu_arch_enable_irq(void) {
+    tiku_cpu_irq_enable();
 }
 
 void tiku_mpu_arch_set_default_protection(void)
@@ -279,7 +280,7 @@ uint16_t tiku_mpu_arch_get_violation_flags(void)
     if (f->magic == TIKU_RA8P1_FAULT_MAGIC &&
         f->kind == (uint32_t)TIKU_RA8P1_FAULT_MEM &&
         (f->cfsr & (RA8P1_CFSR_DACCVIOL | RA8P1_CFSR_IACCVIOL))) {
-        return (uint16_t)(mpu_violations | 0x0002U);   /* SEG1, MSP430 mirror */
+        return (uint16_t)(mpu_violations | 0x0001U);   /* SEG1 */
     }
     return mpu_violations;
 }

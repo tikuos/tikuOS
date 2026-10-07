@@ -564,6 +564,40 @@ static void ep0_get_descriptor(uint8_t type, uint8_t idx, uint16_t wlen)
     }
 }
 
+/** @brief Reply with the status of the requested device, interface or pipe. */
+static void ep0_get_status(uint8_t type, uint16_t idx, uint16_t val,
+                           uint16_t len)
+{
+    uint16_t status = 0U;
+
+    if (val != 0U || len != 2U) {
+        ep0_stall();
+        return;
+    }
+    if (type == 0x80U && idx == 0U) {
+        status = 1U;  /* Self-powered, no remote wakeup. */
+    } else if (type == 0x81U && idx == 0U && usbhs_config != 0U) {
+        status = 0U;
+    } else if (type == 0x82U) {
+        if (idx == 0U || idx == 0x80U) {
+            status = TIKU_REG16(RA8P1_USBHS_DCPCTR);
+        } else if (usbhs_config != 0U && (idx == 0x81U || idx == 0x02U)) {
+            unsigned pipe = (idx == 0x81U) ? MSC_PIPE_IN : MSC_PIPE_OUT;
+            status = TIKU_REG16(RA8P1_USBHS_PIPECTR(pipe));
+        } else {
+            ep0_stall();
+            return;
+        }
+        status = (status & RA8P1_PIPECTR_PID_STALL) ? 1U : 0U;
+    } else {
+        ep0_stall();
+        return;
+    }
+    ep0_buf[0] = (uint8_t)status;
+    ep0_buf[1] = 0U;
+    ep0_send(ep0_buf, 2U, len);
+}
+
 /** @brief Decode and answer the request a control-stage interrupt raised. */
 static void ep0_on_setup(uint16_t sts)
 {
@@ -649,11 +683,7 @@ static void ep0_on_setup(uint16_t sts)
         break;
 
     case USBD_REQ_GET_STATUS:
-        /* Device status, self-powered with no remote wakeup; the same two
-         * bytes go to every recipient. */
-        ep0_buf[0] = 0x01U;
-        ep0_buf[1] = 0x00U;
-        ep0_send(ep0_buf, 2U, len);
+        ep0_get_status(type, idx, val, len);
         break;
 
     case USBD_REQ_GET_INTERFACE:

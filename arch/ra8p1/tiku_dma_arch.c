@@ -57,7 +57,16 @@ int tiku_dma_arch_busy(void)
     if (!dma_ready) {
         return 0;
     }
-    return (TIKU_REG8(RA8P1_DMAC_DMCNT(DMA_CH)) & RA8P1_DMCNT_DTE) ? 1 : 0;
+    if (TIKU_REG8(RA8P1_DMAC_DMCNT(DMA_CH)) & RA8P1_DMCNT_DTE) {
+        return 1;
+    }
+    if (dma_cb == NULL && dma_dst != NULL && dma_bytes != 0U) {
+        __asm__ volatile ("dsb" ::: "memory");
+        tiku_ra8p1_dcache_invalidate(dma_dst, dma_bytes);
+        dma_dst = NULL;
+        dma_bytes = 0U;
+    }
+    return 0;
 }
 
 int tiku_dma_arch_memcpy(void *dst, const void *src, size_t word_cnt,
@@ -141,7 +150,13 @@ int tiku_dma_arch_abort(void)
     TIKU_REG8(RA8P1_DMAC_DMCNT(DMA_CH)) = 0U;
     TIKU_REG8(RA8P1_DMAC_DMREQ(DMA_CH)) = 0U;
     TIKU_REG8(RA8P1_DMAC_DMINT(DMA_CH)) = 0U;
-    dma_cb = NULL;
+    /* The destination bookkeeping goes with the callback: a later busy()
+     * or memcpy() must not invalidate the aborted buffer over CPU writes
+     * made after the abort. */
+    dma_cb    = NULL;
+    dma_ctx   = NULL;
+    dma_dst   = NULL;
+    dma_bytes = 0U;
     __asm__ volatile ("dsb" ::: "memory");
     return TIKU_DMA_OK;
 }
@@ -168,6 +183,8 @@ void tiku_ra8p1_dmac0_handler(void)
     if (dma_dst != NULL && dma_bytes != 0U) {
         tiku_ra8p1_dcache_invalidate(dma_dst, dma_bytes);
     }
+    dma_dst = NULL;
+    dma_bytes = 0U;
 
     dma_cb = NULL;
     if (cb != NULL) {

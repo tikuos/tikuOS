@@ -71,5 +71,5 @@ ASSERT(__fault_end <= BASE + 0x1900,
 
 /* The reset code finds the base by clearing the low 7 bits of its PC, which
  * is exact only while that code sits inside the first 128 bytes. */
-ASSERT(ADDR(.text) + 0x40 <= BASE + 0x80,
+ASSERT(cpu1_base_pc + 4 < BASE + 0x80,
        "cpu1: reset code leaves the window its base derivation needs")

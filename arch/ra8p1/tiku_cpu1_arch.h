@@ -39,13 +39,16 @@
 int tiku_ra8p1_cpu1_start(void);
 
 /**
- * @brief Ask the payload to halt, and wait, bounded, until its heartbeat
- *        stops.
+ * @brief Ask the payload to halt and wait for its parked acknowledgement.
+ * @return TIKU_RA8P1_CPU1_OK, or _ERR_DEAD if no acknowledgement arrives.
  *
  * @note Cooperative: CPUWAIT is sampled only as the core leaves reset, so a
  *       running core cannot be stalled from outside.
  */
-void tiku_ra8p1_cpu1_stop(void);
+int tiku_ra8p1_cpu1_stop(void);
+
+/** @brief Validate the retained fault counters at boot. */
+void tiku_ra8p1_cpu1_diag_init(void);
 
 /**
  * @brief Is CPU1 out of power gating?

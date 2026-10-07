@@ -71,8 +71,8 @@ int tiku_npu_info(tiku_npu_info_t *out)
     out->macs      = tiku_ra8p1_npu_macs();
     out->shram_kb  = tiku_ra8p1_npu_shram_kb();
     out->arena     = m->arena;
-    out->in_bytes  = (uint32_t)m->ifm_dim * m->ifm_dim;
-    out->out_bytes = (uint32_t)m->ofm_dim * m->ofm_dim;
+    out->in_bytes  = (uint32_t)m->ifm_dim * m->ifm_dim * m->channels;
+    out->out_bytes = (uint32_t)m->ofm_dim * m->ofm_dim * m->channels;
     return TIKU_NPU_OK;
 }
 
@@ -81,7 +81,7 @@ void *tiku_npu_input(uint32_t *len)
     const tiku_ra8p1_npu_model_t *m = tiku_ra8p1_npu_model();
 
     if (len != 0) {
-        *len = (uint32_t)m->ifm_dim * m->ifm_dim;
+        *len = (uint32_t)m->ifm_dim * m->ifm_dim * m->channels;
     }
     return tiku_ra8p1_npu_ifm();
 }
@@ -91,7 +91,7 @@ const void *tiku_npu_output(uint32_t *len)
     const tiku_ra8p1_npu_model_t *m = tiku_ra8p1_npu_model();
 
     if (len != 0) {
-        *len = (uint32_t)m->ofm_dim * m->ofm_dim;
+        *len = (uint32_t)m->ofm_dim * m->ofm_dim * m->channels;
     }
     return tiku_ra8p1_npu_ofm();
 }

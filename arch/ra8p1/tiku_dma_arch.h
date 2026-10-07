@@ -56,7 +56,12 @@ int tiku_dma_arch_memcpy(void *dst, const void *src, size_t word_cnt,
 /** @brief Non-zero while channel 0 has a transfer in flight. */
 int tiku_dma_arch_busy(void);
 
-/** @brief Stop channel 0 and drop any pending callback. */
+/**
+ * @brief Stop channel 0 and drop any pending callback.
+ *
+ * The destination is not invalidated: the words the DMAC had written are
+ * undefined, and no later busy() or memcpy() invalidates the buffer.
+ */
 int tiku_dma_arch_abort(void);
 
 /** @brief Channel-0 transfer-end ISR; installed on the ICU slot. */

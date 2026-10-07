@@ -178,10 +178,10 @@ SECTIONS
 
     /* The statics must end at least 36 KB (0x9000) below the stack top.  The
      * MPU's stack reserve is the top 32 KB (MPU_STACK_RESERVED_BYTES in
-     * tiku_mpu_arch.c, its 4 KB guard included); statics inside it would put
-     * the guard region over .uninit. */
+     * tiku_mpu_arch.c, its 4 KB guard included). The extra 4 KB is an
+     * allocator margin below that reserve, not a second guard. */
     ASSERT((__stack - _end) >= 0x9000,
-           "ERROR: RA8P1 SRAM exhausted -- need >= 36 KB (32K stack reserve + 4K MPU guard) below the stack")
+           "ERROR: RA8P1 SRAM exhausted: need 32K stack reserve + 4K allocator margin")
 
     /* -------- Persist partition (MRAM, byte-writable in place) ------- */
     /* NOLOAD: not in the programmed image, so a reflash leaves it alone, and

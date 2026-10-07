@@ -90,7 +90,7 @@ void     tiku_mpu_arch_lock_nvm(uint16_t saved_state);
 /**
  * @brief Violation flags, from the fault record.
  *
- * @return 0x0002 (SEG1) when the last fault record is a MemManage access
+ * @return 0x0001 (SEG1) when the last fault record is a MemManage access
  *         violation, else 0
  */
 uint16_t tiku_mpu_arch_get_violation_flags(void);

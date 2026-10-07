@@ -7,9 +7,9 @@
  *
  * tiku_htimer_arch.c - RA8P1 high-resolution timer on GPT0.
  *
- * GPT0 runs as a 32-bit free-running counter on PCLKD.  Its compare-A event
- * reaches the NVIC through the ICU, so an alarm runs from the compare
- * interrupt when due.
+ * GPT0 counts PCLKD cycles in saw-tooth mode with a period of ht_per_us x
+ * 65536 counts, one wrap of the 16-bit microsecond clock.  Its compare-A
+ * event reaches the NVIC through the ICU and runs the alarm when due.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -37,6 +37,7 @@ static uint32_t ht_per_us = 1U;
 
 /** @brief Whether an alarm is outstanding. */
 static volatile uint8_t ht_armed;
+static uint8_t ht_initialized;
 
 
 /**
@@ -62,7 +63,24 @@ void tiku_ra8p1_htimer_arch_retune(void)
 {
     unsigned long pclkd = tiku_cpu_ra8p1_pclkd_get_hz();
 
-    ht_per_us = (pclkd >= 1000000UL) ? (uint32_t)(pclkd / 1000000UL) : 1U;
+    uint32_t scale = pclkd >= 1000000UL ?
+                     (uint32_t)(pclkd / 1000000UL) : 1U;
+    if (ht_initialized) {
+        uint32_t control = TIKU_REG32(RA8P1_GPT_GTCR(HT_GPT));
+        uint32_t count, compare;
+        TIKU_REG32(RA8P1_GPT_GTCR(HT_GPT)) =
+            control & ~RA8P1_GPT_GTCR_CST;
+        count = TIKU_REG32(RA8P1_GPT_GTCNT(HT_GPT)) / ht_per_us;
+        compare = TIKU_REG32(RA8P1_GPT_GTCCRA(HT_GPT)) / ht_per_us;
+        TIKU_REG32(RA8P1_GPT_GTPR(HT_GPT)) = scale * 65536UL - 1UL;
+        TIKU_REG32(RA8P1_GPT_GTCNT(HT_GPT)) = (count & 65535UL) * scale;
+        TIKU_REG32(RA8P1_GPT_GTCCRA(HT_GPT)) =
+            (compare & 65535UL) * scale;
+        ht_per_us = scale;
+        TIKU_REG32(RA8P1_GPT_GTCR(HT_GPT)) = control;
+    } else {
+        ht_per_us = scale;
+    }
 }
 
 void tiku_htimer_arch_init(void)
@@ -80,7 +98,7 @@ void tiku_htimer_arch_init(void)
     (void)TIKU_REG32(RA8P1_MSTPCRE);
 
     TIKU_REG32(RA8P1_GPT_GTCR(HT_GPT))  = 0UL;           /* stop to program */
-    TIKU_REG32(RA8P1_GPT_GTPR(HT_GPT))  = 0xFFFFFFFFUL;  /* free-run whole  */
+    TIKU_REG32(RA8P1_GPT_GTPR(HT_GPT)) = ht_per_us * 65536UL - 1UL;
     TIKU_REG32(RA8P1_GPT_GTCNT(HT_GPT)) = 0UL;
     TIKU_REG32(RA8P1_GPT_GTST(HT_GPT))  = 0UL;
 
@@ -93,6 +111,7 @@ void tiku_htimer_arch_init(void)
 
     TIKU_REG32(RA8P1_GPT_GTCR(HT_GPT)) = RA8P1_GPT_GTCR_MD_SAW |
                                          RA8P1_GPT_GTCR_CST;
+    ht_initialized = 1u;
 }
 
 tiku_htimer_clock_t tiku_htimer_arch_now(void)
@@ -105,7 +124,7 @@ void tiku_htimer_arch_schedule(tiku_htimer_clock_t t)
 {
     uint32_t now = TIKU_REG32(RA8P1_GPT_GTCNT(HT_GPT));
     /* The kernel's clock is 16-bit microseconds; recover the signed delta and
-     * project it onto the 32-bit counter. */
+     * project it onto the counter, modulo its period. */
     int16_t delta_us = (int16_t)((uint16_t)t -
                                  (uint16_t)(now / ht_per_us));
     int32_t counts = (int32_t)delta_us * (int32_t)ht_per_us;
@@ -118,7 +137,8 @@ void tiku_htimer_arch_schedule(tiku_htimer_clock_t t)
     }
 
     TIKU_REG32(RA8P1_GPT_GTST(HT_GPT)) = 0UL;
-    TIKU_REG32(RA8P1_GPT_GTCCRA(HT_GPT)) = now + (uint32_t)counts;
+    TIKU_REG32(RA8P1_GPT_GTCCRA(HT_GPT)) =
+        (now + (uint32_t)counts) % (ht_per_us * 65536UL);
     ht_armed = 1U;
 
     icu_ack(HT_SLOT);

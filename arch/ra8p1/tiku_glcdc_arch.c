@@ -18,6 +18,7 @@
 
 #include "tiku_ra8p1_regs.h"
 #include "tiku_cpu_common.h"
+#include "tiku_cpu_freq_boot_arch.h"
 #include "tiku_gpio_arch.h"
 
 /** @brief LCDCLK in the MOCO mode: 8 MHz, undivided. */
@@ -164,7 +165,24 @@ glcdc_pin_to_glcdc(uint32_t port, uint32_t pin)
 uint32_t
 tiku_glcdc_arch_pixel_hz(void)
 {
-    return GLCDC_PIXEL_HZ;
+    uint32_t panel = TIKU_REG32(RA8P1_GLCDC_SYS_PANELCLK);
+    uint32_t divisor = panel & 0x3FU;
+    uint32_t hz;
+    uint8_t source = TIKU_REG8(RA8P1_LCDCKCR) & 7U;
+    uint8_t shift = TIKU_REG8(RA8P1_LCDCKDIVCR) & 7U;
+
+    if (!(panel & RA8P1_GLCDC_PANELCLK_EN) ||
+        !(panel & RA8P1_GLCDC_PANELCLK_LCDCLK) || divisor == 0U) {
+        return 0U;
+    }
+    if (source == RA8P1_LCDCKCR_SEL_MOCO) {
+        hz = GLCDC_PIXEL_HZ;
+    } else if (source == RA8P1_LCDCKCR_SEL_PLL1P) {
+        hz = (uint32_t)tiku_cpu_ra8p1_clock_get_hz();
+    } else {
+        return 0U;
+    }
+    return (hz >> shift) / divisor;
 }
 
 int

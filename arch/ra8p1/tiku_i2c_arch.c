@@ -352,7 +352,14 @@ i2c_receive(uint8_t *buf, uint16_t len)
 
     for (i = 0U; i < len; i++) {
         if (!i2c_wait(RA8P1_IIC_SR2_RDRF)) {
+            TIKU_REG8(RA8P1_IIC_MR3(I2C_CH)) &=
+                (uint8_t)~(RA8P1_IIC_MR3_WAIT | RA8P1_IIC_MR3_ACKBT);
             i2c_stop();
+            i2c_reset();
+            if (!i2c_sda_high()) {
+                i2c_bus_recover();
+                i2c_reset();
+            }
             return TIKU_I2C_ERR_TIMEOUT;
         }
         /* Arm the NACK after reading the second-to-last byte, so it applies

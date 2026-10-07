@@ -16,6 +16,7 @@
 #include "tiku_ra8p1_regs.h"
 #include "tiku_sdram_arch.h"
 #include "tiku_xflash_arch.h"
+#include "tiku_cpu_freq_boot_arch.h"
 #include <kernel/fs/tiku_bigblob.h>
 #include <kernel/fs/tiku_nvm_backend.h>
 
@@ -30,9 +31,6 @@
 /* The blob sits 4 MB into the flash; the first 4 MB hold the board's
  * factory content. */
 #define STORE_SLOT_OFF     0x00400000UL
-
-/** @brief Cycles per millisecond at the core clock, taken as 240 MHz. */
-#define STORE_CYC_PER_MS   240000UL
 
 #define STORE_DWT_CYCCNT   0xE0001004UL
 #define STORE_DWT_CTRL     0xE0001000UL
@@ -238,7 +236,9 @@ int tiku_ra8p1_store_restore(uint32_t *out_ms, uint32_t *out_len, char *name)
     __asm__ volatile ("dsb" ::: "memory");
 
     if (out_ms != NULL) {
-        *out_ms = (TIKU_REG32(STORE_DWT_CYCCNT) - t0) / STORE_CYC_PER_MS;
+        uint32_t hz = (uint32_t)tiku_cpu_ra8p1_clock_get_hz();
+        uint32_t elapsed = TIKU_REG32(STORE_DWT_CYCCNT) - t0;
+        *out_ms = hz ? (uint32_t)(((uint64_t)elapsed * 1000U) / hz) : 0U;
     }
     if (out_len != NULL) {
         *out_len = len;

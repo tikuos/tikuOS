@@ -349,6 +349,7 @@ static int pll_up(const ra8p1_opoint_t *op)
                                          RA8P1_SCICKSEL_MOCO);
     TIKU_REG8(RA8P1_SCICKCR) = (uint8_t)RA8P1_SCICKSEL_MOCO;
     while ((TIKU_REG8(RA8P1_SCICKCR) & RA8P1_SCICKCR_SRDY) != 0U) { }
+    sci_hz_now = TIKU_RA8P1_MOCO_HZ;
     STEP(4);
 
     /*
@@ -640,6 +641,10 @@ int tiku_cpu_ra8p1_clock_has_fault(void)
 
 void tiku_cpu_boot_ra8p1_init(void)
 {
+#if (TIKU_DRV_CPU1_ENABLE + 0)
+    extern void tiku_ra8p1_cpu1_diag_init(void);
+    tiku_ra8p1_cpu1_diag_init();
+#endif
     /* Empty: tiku_cpu_freq_ra8p1_init() raises the tree. */
 }
 

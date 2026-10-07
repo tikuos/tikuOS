@@ -49,8 +49,8 @@ static uint32_t cpu1_a2c_seq;
 /** @brief Whether a payload is counting, which no register reports. */
 static uint8_t cpu1_running;
 
-/** @brief Set once the retained counters below have been zeroed this boot. */
-static uint8_t cpu1_nmi_seeded;
+/** @brief Validity gate for the retained diagnostic counters. */
+static TIKU_RETAINED uint32_t cpu1_diag_magic;
 
 /*
  * NMIs taken by the M85, counted by tiku_ra8p1_nmi_handler() below.  A CPU1
@@ -287,26 +287,32 @@ int tiku_ra8p1_cpu1_alive(void)
     return (tiku_ra8p1_cpu1_heartbeat() != a) ? 1 : 0;
 }
 
-void tiku_ra8p1_cpu1_stop(void)
+int tiku_ra8p1_cpu1_stop(void)
 {
-    uint32_t last, i, settle;
+    uint32_t i;
 
-    cpu1_set_halt(1UL);
-
-    /* Wait, bounded, for two equal heartbeat reads: the payload stopped
-     * counting.  A long job also stops the heartbeat, so this can return
-     * while the job still runs. */
-    last = tiku_ra8p1_cpu1_heartbeat();
-    for (settle = 0U; settle < 100U; settle++) {
-        for (i = 0U; i < 20000U; i++) {
-            __asm__ volatile ("nop");
-        }
-        if (tiku_ra8p1_cpu1_heartbeat() == last) {
-            break;
-        }
-        last = tiku_ra8p1_cpu1_heartbeat();
+    if (!tiku_ra8p1_cpu1_active()) {
+        cpu1_running = 0U;
+        return TIKU_RA8P1_CPU1_OK;
     }
-    cpu1_running = 0U;
+    cpu1_set_halt(1UL);
+    for (i = 0U; i < 2000000U; i++) {
+        cpu1_pull();
+        if (CPU1_SH->parked) {
+            cpu1_running = 0U;
+            return TIKU_RA8P1_CPU1_OK;
+        }
+    }
+    return TIKU_RA8P1_CPU1_ERR_DEAD;
+}
+
+void tiku_ra8p1_cpu1_diag_init(void)
+{
+    if (cpu1_diag_magic != 0x43314447UL) {
+        tiku_ra8p1_cpu1_nmi_count = 0U;
+        tiku_ra8p1_cpu1_fault_count = 0U;
+        cpu1_diag_magic = 0x43314447UL;
+    }
 }
 
 int tiku_ra8p1_cpu1_start(void)
@@ -316,12 +322,7 @@ int tiku_ra8p1_cpu1_start(void)
     unsigned long spins;
     uint32_t i;
 
-    if (!cpu1_nmi_seeded) {
-        /* Retained SRAM is not zeroed at a cold boot. */
-        tiku_ra8p1_cpu1_nmi_count = 0U;
-        tiku_ra8p1_cpu1_fault_count = 0U;
-        cpu1_nmi_seeded = 1U;
-    }
+    tiku_ra8p1_cpu1_diag_init();
 
     /*
      * An active core cannot be launched again: ACTREQ acts only while ACT is

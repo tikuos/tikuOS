@@ -40,8 +40,8 @@
 #define CPU1_ICU1_NMISR     0x4000C120UL   /* bit1 WDTST                      */
 #define CPU1_WDT_NMI_BIT    (1UL << 1)
 /* WDTCR: TOPS 16384 cycles of PCLKB / 8192, no window: about 2.1 s at PCLKB
- * 62.5 MHz, longer at a lower PCLKB.  Nothing refreshes WDT1 inside
- * cpu1_serve(), so a job longer than this ends as TIKU_CPU1_MAGIC_HANG. */
+ * 62.5 MHz, longer at a lower PCLKB. Hash batches and the parked loop
+ * refresh WDT1; a stalled computation raises TIKU_CPU1_MAGIC_HANG. */
 #define CPU1_WDT1_CR_VALUE  ((0x3U << 0) | (0x8U << 4) | (0x3U << 8) | (0x3U << 12))
 
 /**
@@ -310,7 +310,19 @@ static void cpu1_serve(volatile tiku_cpu1_shared_t *sh, uint32_t seq)
             cpu1_ring();
             return;
         }
-        tiku_cpu1_sha256_chain(seed, iters, digest);
+        while (iters != 0U) {
+            uint32_t batch = iters > 64U ? 64U : iters;
+            if (sh->halt) {
+                return;
+            }
+            tiku_cpu1_sha256_chain(seed, batch, digest);
+            for (i = 0U; i < 32U; i++) {
+                seed[i] = digest[i];
+            }
+            iters -= batch;
+            cpu1_wdt_kick();
+            sh->heartbeat++;
+        }
         for (i = 0U; i < 32U; i++) {
             sh->c2a_buf[i] = digest[i];
         }
@@ -367,14 +379,15 @@ void cpu1_reset(void)
     volatile tiku_cpu1_shared_t *sh;
     uint32_t pc;
     uint32_t base;
-    uint32_t beats = 0U;
     uint32_t served;
 
     /*
      * The image base is the PC with its low 7 bits cleared, exact while this
      * code sits in the first 128 bytes; tiku_cpu1.ld pins the entry at 0x40.
      */
-    __asm__ volatile ("mov %0, pc" : "=r" (pc));
+    __asm__ volatile (".global cpu1_base_pc\n"
+                      "cpu1_base_pc:\n"
+                      "mov %0, pc" : "=r" (pc));
     base = pc & ~CPU1_BASE_MASK;
     sh = (volatile tiku_cpu1_shared_t *)(base + TIKU_CPU1_SHARED_OFF);
 
@@ -384,6 +397,8 @@ void cpu1_reset(void)
      * served: after a fault restart it is the message that caused the fault. */
     served = sh->a2c_seq;
 
+    sh->parked = 0U;
+    sh->heartbeat = 0U;
     sh->magic = TIKU_CPU1_MAGIC;
 
     /* Order the magic before the first heartbeat: the M85 reads a moving
@@ -396,10 +411,14 @@ void cpu1_reset(void)
         uint32_t seq;
 
         /* The halt protocol: spin while halt is set, re-reading it every
-         * pass.  beats and served survive the halt, so a resumed payload
-         * continues where it stopped. */
+         * pass. The acknowledgement is published after the job returns. */
         while (sh->halt != 0U) {
+            sh->parked = 1U;
+            __asm__ volatile ("dmb" ::: "memory");
+            cpu1_wdt_kick();
         }
+        sh->parked = 0U;
+        __asm__ volatile ("dmb" ::: "memory");
 
         seq = sh->a2c_seq;
         if (seq != served) {
@@ -408,7 +427,6 @@ void cpu1_reset(void)
         }
 
         cpu1_wdt_kick();
-        beats++;
-        sh->heartbeat = beats;
+        sh->heartbeat++;
     }
 }

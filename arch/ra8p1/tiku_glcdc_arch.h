@@ -73,8 +73,7 @@ int tiku_glcdc_arch_vpos_take(void);
  */
 int tiku_glcdc_arch_underflow(void);
 
-/** @brief LCDCLK in Hz as tiku_glcdc_arch_start() sets it: 8 MHz, MOCO.
- *         After tiku_glcdc_arch_panel_start() LCDCLK is PLL1P / 4. */
+/** @brief Panel dot clock in Hz, including both dividers; 0 when disabled. */
 uint32_t tiku_glcdc_arch_pixel_hz(void);
 
 /**
