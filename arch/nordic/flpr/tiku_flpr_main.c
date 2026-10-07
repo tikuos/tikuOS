@@ -332,6 +332,117 @@ static uint8_t  fll_phy_new;           /* target: 0 1M, 1 2M, 2 Coded S8     */
 static uint16_t fll_phy_instant;       /* connEventCount to switch at        */
 
 /** @brief Queue one PDU with @p llid unless a PDU is already pending. */
+/* LL encryption, the peripheral's side.  The central's LL_ENC_REQ goes to
+ * the M33, which owns the TRNG and the host's LTK: it returns SKDs and IVs
+ * for the LL_ENC_RSP, then the session key or a refusal.  CCM00 encrypts a
+ * PDU once, as it is queued (a resend keeps its ciphertext: the MIC leaves
+ * NESN and SN out), and decrypts a new one once the reply is out. */
+#define FLL_ENC_OFF     0u      /* plaintext                             */
+#define FLL_ENC_SKD     1u      /* LL_ENC_REQ posted: SKDs and IVs due   */
+#define FLL_ENC_KEY     2u      /* LL_ENC_RSP queued: the key is due     */
+#define FLL_ENC_START   3u      /* LL_START_ENC_REQ queued: RX decrypts  */
+#define FLL_ENC_RSP     4u      /* the central's LL_START_ENC_RSP heard  */
+#define FLL_ENC_DONE    5u      /* the reply queued, encrypted           */
+#define FLL_ENC_ON      6u      /* both ways, acknowledged               */
+static uint8_t  fll_enc;                /* FLL_ENC_*                        */
+static uint8_t  fll_rx_enc, fll_tx_enc; /* decrypting RX, encrypting TX     */
+static uint32_t fll_rx_ctr, fll_tx_ctr; /* packetCounter each way           */
+static uint32_t fll_enc_seq;            /* the enc_req_seq posted           */
+static uint8_t  fll_sk[16];             /* session key, MSB first           */
+static uint8_t  fll_iv[8];              /* IVm || IVs, as sent              */
+
+/* CCM00's job lists and their typed fields, one crypt at a time. */
+static uint32_t ccm_in[10]  __attribute__((aligned(4)));
+static uint32_t ccm_out[10] __attribute__((aligned(4)));
+static uint16_t ccm_alen_i  __attribute__((aligned(4)));
+static uint16_t ccm_mlen_i  __attribute__((aligned(4)));
+static uint16_t ccm_alen_o  __attribute__((aligned(4)));
+static uint16_t ccm_mlen_o  __attribute__((aligned(4)));
+static uint8_t  ccm_aad_i   __attribute__((aligned(4)));
+static uint8_t  ccm_aad_o   __attribute__((aligned(4)));
+static uint8_t  ccm_buf[TIKU_FLPR_DLE_BUF_SIZE] __attribute__((aligned(4)));
+
+/** @brief Load @p n bytes of @p src, reversed and zero-padded, into the
+ *         four words of a CCM00 key or nonce register. */
+static void ccm_load(volatile uint32_t *val, const uint8_t *src, uint8_t n)
+{
+    uint8_t img[16], i;
+    for (i = 0u; i < 16u; i++) {
+        img[i] = (i < n) ? src[n - 1u - i] : 0u;
+    }
+    for (i = 0u; i < 4u; i++) {
+        val[i] = (uint32_t)img[4u * i] | ((uint32_t)img[4u * i + 1u] << 8) |
+                 ((uint32_t)img[4u * i + 2u] << 16) |
+                 ((uint32_t)img[4u * i + 3u] << 24);
+    }
+}
+
+/**
+ * @brief One CCM00 crypt of an LL payload, in place at @p p: @p len bytes
+ *        to ciphertext and MIC, or @p len bytes and their MIC back to text,
+ *        under the session key and the nonce of @p ctr and @p dir.
+ * @return 1, or 0 for a MIC that fails or an engine that does not finish
+ */
+static uint8_t flpr_ccm(uint8_t decrypt, uint8_t dir, uint32_t ctr,
+                        uint8_t aad, uint8_t *p, uint8_t len)
+{
+    NRF_CCM_Type *c = NRF_CCM00_NS;
+    uint8_t  nonce[13], i, ok, olen;
+    uint32_t spin;
+
+    nonce[0] = (uint8_t)ctr;
+    nonce[1] = (uint8_t)(ctr >> 8);
+    nonce[2] = (uint8_t)(ctr >> 16);
+    nonce[3] = (uint8_t)(ctr >> 24);
+    nonce[4] = (uint8_t)(dir ? 0x80u : 0x00u);  /* 1: central to us */
+    for (i = 0u; i < 8u; i++) {
+        nonce[5u + i] = fll_iv[i];
+    }
+    c->ENABLE = 2u;
+    c->MODE = (decrypt ? 2u : 0u) | (3u << 16) | (1u << 24); /* BLE, 1M, M4 */
+    c->ADATAMASK = 0xE3u;                       /* NESN, SN, MD masked */
+    ccm_load(c->KEY.VALUE, fll_sk, 16u);
+    ccm_load(c->NONCE.VALUE, nonce, 13u);
+    ccm_alen_i = 1u;
+    ccm_aad_i = aad;
+    ccm_mlen_i = (uint16_t)(decrypt ? len + 4u : len);
+    olen = (uint8_t)(decrypt ? len : len + 4u);
+    ccm_in[0] = (uint32_t)&ccm_alen_i;   ccm_in[1] = 2u | (11u << 24);
+    ccm_in[2] = (uint32_t)&ccm_mlen_i;   ccm_in[3] = 2u | (12u << 24);
+    ccm_in[4] = (uint32_t)&ccm_aad_i;    ccm_in[5] = 1u | (13u << 24);
+    ccm_in[6] = (uint32_t)p;             ccm_in[7] = ccm_mlen_i | (14u << 24);
+    ccm_in[8] = 0u;                      ccm_in[9] = 0u;
+    ccm_out[0] = (uint32_t)&ccm_alen_o;  ccm_out[1] = 2u | (11u << 24);
+    ccm_out[2] = (uint32_t)&ccm_mlen_o;  ccm_out[3] = 2u | (12u << 24);
+    ccm_out[4] = (uint32_t)&ccm_aad_o;   ccm_out[5] = 1u | (13u << 24);
+    ccm_out[6] = (uint32_t)ccm_buf;      ccm_out[7] = olen | (14u << 24);
+    ccm_out[8] = 0u;                     ccm_out[9] = 0u;
+    c->IN.PTR = (uint32_t)ccm_in;
+    c->OUT.PTR = (uint32_t)ccm_out;
+    c->EVENTS_END = 0u;
+    c->EVENTS_ERROR = 0u;
+    __asm__ volatile ("fence iorw, iorw" ::: "memory");
+    c->TASKS_START = 1u;
+    for (spin = 0u; spin < 200000u; spin++) {
+        if (c->EVENTS_END != 0u || c->EVENTS_ERROR != 0u) {
+            break;
+        }
+    }
+    __asm__ volatile ("fence iorw, iorw" ::: "memory");
+    ok = (uint8_t)(c->EVENTS_END != 0u && c->EVENTS_ERROR == 0u &&
+                   (!decrypt || (c->MACSTATUS & 1u) != 0u));
+    if (c->EVENTS_END == 0u) {
+        c->TASKS_STOP = 1u;
+    }
+    c->ENABLE = 0u;
+    if (ok) {
+        for (i = 0u; i < olen; i++) {
+            p[i] = ccm_buf[i];
+        }
+    }
+    return ok;
+}
+
 static void fll_queue_raw(uint8_t llid, const uint8_t *p, uint8_t plen)
 {
     uint8_t i;
@@ -343,6 +454,15 @@ static void fll_queue_raw(uint8_t llid, const uint8_t *p, uint8_t plen)
     fll_tx[2] = p[0];                   /* S1 = payload[0] (erratum-49)     */
     for (i = 0u; i < plen; i++) {
         fll_tx[3u + i] = p[i];
+    }
+    if (fll_tx_enc) {                   /* the session's next count, MIC on */
+        if (!flpr_ccm(0u, 0u, fll_tx_ctr, llid, &fll_tx[3], plen)) {
+            return;                     /* the engine failed: nothing sent  */
+        }
+        plen = (uint8_t)(plen + 4u);
+        fll_tx[1] = plen;
+        fll_tx[2] = fll_tx[3];
+        fll_tx_ctr++;
     }
     fll_tx_len = plen;
 }
@@ -444,8 +564,27 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
             fll_cu_pending  = 1u;
         }
     } else if (op == 0x03u) {                   /* LL_ENC_REQ               */
-        uint8_t reject[2] = { 0x03u, 0x1au };
-        fll_queue_ctrl(0x11u, reject, sizeof(reject));
+        /* CtrData Rand[8] EDIV[2] SKDm[8] IVm[4] at buf[4..25], posted for
+         * the M33; data waits until the procedure ends. */
+        if (fll_enc == FLL_ENC_OFF && buf[1] >= 23u) {
+            uint8_t i;
+            for (i = 0u; i < 8u; i++) {
+                sh->enc_rand[i] = buf[4u + i];
+                sh->enc_skdm[i] = buf[14u + i];
+            }
+            sh->enc_ediv = (uint16_t)(buf[12] | ((uint16_t)buf[13] << 8));
+            for (i = 0u; i < 4u; i++) {
+                sh->enc_ivm[i] = buf[22u + i];
+            }
+            fll_enc_seq = sh->enc_req_seq + 1u;
+            sh->enc_req_seq = fll_enc_seq;
+            fll_enc = FLL_ENC_SKD;
+            flpr_doorbell_to_app();
+        }
+    } else if (op == 0x06u) {                   /* LL_START_ENC_RSP          */
+        if (fll_enc == FLL_ENC_START) {
+            fll_enc = FLL_ENC_RSP;              /* the reply goes encrypted  */
+        }
     } else if (op == 0x14u) {                   /* LL_LENGTH_REQ (DLE)      */
         /* Reply with the local maximum and publish the effective TX size,
          * min(peer MaxRxOctets, TIKU_FLPR_DLE_MAX_OCTETS) and at least 27,
@@ -592,6 +731,11 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     fll_terminate = 0u;
     fll_term_sent = 0u;
     fll_reason = 0x16u;                          /* ended here, unless ...    */
+    fll_enc = FLL_ENC_OFF;                       /* every link starts clear   */
+    fll_rx_enc = 0u;
+    fll_tx_enc = 0u;
+    fll_rx_ctr = 0u;
+    fll_tx_ctr = 0u;
     sh->enc_on = 0u;
     sh->dle_max = 0u;                            /* 0 = 27 octets, pre-DLE    */
     fll_phy_pending = 0u;                        /* 1M until an update        */
@@ -662,9 +806,52 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
             fll_queue_ctrl(0x02u, &code, 1u);
             fll_term_sent = 1u;
         }
+        /* The encryption start, a step whenever the pending slot is free:
+         * LL_ENC_RSP once the M33 has SKDs and IVs, then LL_START_ENC_REQ
+         * with the key (RX decrypting from here) or a refusal, and the
+         * peripheral's LL_START_ENC_RSP, encrypted, once the central's is
+         * in. */
+        if (fll_tx_len == 0u) {
+            if (fll_enc == FLL_ENC_SKD && sh->enc_rsp_seq == fll_enc_seq) {
+                uint8_t rsp[12];
+                for (i = 0u; i < 8u; i++) {
+                    rsp[i] = sh->enc_skds[i];
+                }
+                for (i = 0u; i < 4u; i++) {
+                    rsp[8u + i] = sh->enc_ivs[i];
+                }
+                fll_queue_ctrl(0x04u, rsp, 12u);     /* LL_ENC_RSP          */
+                fll_enc = FLL_ENC_KEY;
+            } else if (fll_enc == FLL_ENC_KEY &&
+                       sh->enc_key_seq == fll_enc_seq) {
+                if (sh->enc_key_status != 0u) {
+                    uint8_t rej[2];
+                    rej[0] = 0x03u;
+                    rej[1] = sh->enc_key_status;
+                    fll_queue_ctrl(0x11u, rej, 2u);  /* LL_REJECT_EXT_IND   */
+                    fll_enc = FLL_ENC_OFF;
+                } else {
+                    for (i = 0u; i < 16u; i++) {
+                        fll_sk[i] = sh->enc_sk[i];
+                    }
+                    for (i = 0u; i < 8u; i++) {
+                        fll_iv[i] = sh->enc_iv[i];
+                    }
+                    fll_queue_ctrl(0x05u, (const uint8_t *)0, 0u);
+                    fll_rx_enc = 1u;                 /* LL_START_ENC_REQ    */
+                    fll_enc = FLL_ENC_START;
+                }
+            } else if (fll_enc == FLL_ENC_RSP) {
+                fll_tx_enc = 1u;
+                fll_queue_ctrl(0x06u, (const uint8_t *)0, 0u);
+                fll_enc = FLL_ENC_DONE;
+            }
+        }
         /* The host's next L2CAP fragment, when the pending slot is free
-         * (at most 32 bytes, with its a2f_llid); a2f_ack frees the slot. */
-        if (fll_tx_len == 0u && sh->a2f_seq != fll_a2f_seen) {
+         * (at most 32 bytes, with its a2f_llid); a2f_ack frees the slot.
+         * The encryption start holds data back until it ends. */
+        if (fll_tx_len == 0u && sh->a2f_seq != fll_a2f_seen &&
+            (fll_enc == FLL_ENC_OFF || fll_enc == FLL_ENC_ON)) {
             uint8_t n = (uint8_t)sh->a2f_len, fr[32];
             fll_a2f_seen = sh->a2f_seq;
             if (n > sizeof(fr)) {
@@ -782,6 +969,10 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
                 if (fll_term_sent) {
                     fll_terminate = 1u;          /* the TERMINATE_IND landed */
                 }
+                if (fll_enc == FLL_ENC_DONE) {
+                    fll_enc = FLL_ENC_ON;        /* the START_ENC_RSP landed */
+                    sh->enc_on = 1u;
+                }
             }
             conn_txb[0] = (uint8_t)((conn_txb[0] & 0x03u) |
                                     (fll_nesn << 2) | (fll_sn << 3));
@@ -815,6 +1006,16 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
         /* The received payload, now that the reply is out: LL control is
          * answered at the next event, L2CAP goes to the M33 host. */
         if (newdata) {
+            if (fll_rx_enc) {                    /* decrypted, or the end   */
+                uint8_t n = conn_datrx[1];
+                if (n < 5u || !flpr_ccm(1u, 1u, fll_rx_ctr, conn_datrx[0],
+                                        &conn_datrx[3], (uint8_t)(n - 4u))) {
+                    fll_reason = 0x3Du;          /* MIC failure             */
+                    break;
+                }
+                conn_datrx[1] = (uint8_t)(n - 4u);
+                fll_rx_ctr++;
+            }
             fll_handle_rx(conn_datrx, sh);
         }
         sh->conn_events = ++event;
@@ -842,6 +1043,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     r->PREFIX0 = 0x0000008Eu;
     r->CRCINIT = 0x00555555u;                    /* advertising CRC init     */
     sh->conn_reason = fll_reason;
+    sh->enc_on = 0u;                             /* none for the next link   */
     sh->conn_state = 3u;                         /* link ended               */
 }
 

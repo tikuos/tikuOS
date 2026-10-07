@@ -126,21 +126,21 @@ typedef struct {
     volatile uint8_t  conn_adva[6];     /* advertiser (local) address   = B  */
     volatile uint8_t  conn_addr_types;  /* bit0 InitA, bit1 AdvA (1=random)  */
 
-    /* LL encryption startup.  The FLPR has no AES, so the M33 derives the
-     * session key (SK = e(LTK, SKD) on CRACEN).  On LL_ENC_REQ the FLPR
-     * publishes the central's SKDm and IVm and bumps enc_req_seq; the M33
-     * fills enc_skds, enc_ivs, enc_sk and enc_iv and bumps enc_rsp_seq; the
-     * FLPR then sends LL_ENC_RSP(SKDs, IVs).  The FLPR goes no further: it
-     * sends no LL_START_ENC_REQ, never reads enc_sk or enc_iv, and never
-     * sets enc_on to 1. */
+    /* LL encryption startup, the peripheral's side.  On LL_ENC_REQ the
+     * FLPR posts the central's Rand, EDIV, SKDm and IVm (enc_rand, enc_ediv
+     * below) and bumps enc_req_seq; the M33 returns SKDs and IVs at the
+     * same enc_rsp_seq (the FLPR sends LL_ENC_RSP), then the session key
+     * and IV, or a reason to refuse, at that enc_key_seq.  The FLPR runs
+     * the start and sets enc_on once both ways encrypt; all as on air,
+     * least octet first, but for enc_sk (most significant first). */
     volatile uint32_t enc_req_seq;      /* FLPR: LL_ENC_REQ seen (params set) */
-    volatile uint32_t enc_rsp_seq;      /* M33: SKDs/IVs/sk/iv ready          */
-    volatile uint8_t  enc_skdm[8];      /* FLPR->M33: central's SKD (LSO)     */
-    volatile uint8_t  enc_ivm[4];       /* FLPR->M33: central's IV (LSO)      */
-    volatile uint8_t  enc_skds[8];      /* M33->FLPR: local SKD (MSO)         */
-    volatile uint8_t  enc_ivs[4];       /* M33->FLPR: local IV (MSO)          */
+    volatile uint32_t enc_rsp_seq;      /* M33: SKDs and IVs ready            */
+    volatile uint8_t  enc_skdm[8];      /* FLPR->M33: the central's SKD       */
+    volatile uint8_t  enc_ivm[4];       /* FLPR->M33: the central's IV        */
+    volatile uint8_t  enc_skds[8];      /* M33->FLPR: the local SKD           */
+    volatile uint8_t  enc_ivs[4];       /* M33->FLPR: the local IV            */
     volatile uint8_t  enc_sk[16];       /* M33: session key                   */
-    volatile uint8_t  enc_iv[8];        /* M33: IV = IVm||IVs                 */
+    volatile uint8_t  enc_iv[8];        /* M33: IV = IVm || IVs               */
     volatile uint32_t enc_on;           /* FLPR: 1 once encryption is active  */
 
     /* After answering LL_LENGTH_REQ the FLPR publishes the effective max LL
@@ -219,6 +219,15 @@ typedef struct {
     /* M33 -> FLPR: nonzero asks for the link to end with this code in an
      * LL_TERMINATE_IND; it ends once the central acknowledges it. */
     volatile uint32_t conn_term;
+
+    /* The rest of LL_ENC_REQ for the host's LTK request, and the M33's
+     * answer to it: enc_key_status 0 with the key in enc_sk and enc_iv, or
+     * the reason LL_REJECT_EXT_IND carries, at enc_key_seq. */
+    volatile uint8_t  enc_rand[8];      /* FLPR->M33: Rand                    */
+    volatile uint16_t enc_ediv;         /* FLPR->M33: EDIV                    */
+    volatile uint8_t  enc_key_status;   /* M33->FLPR: 0 key given, else why   */
+    volatile uint8_t  enc_pad;
+    volatile uint32_t enc_key_seq;      /* M33: the key, or the refusal       */
 } tiku_flpr_shared_t;
 
 /**

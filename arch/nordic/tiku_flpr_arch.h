@@ -279,14 +279,26 @@ uint32_t tiku_flpr_arch_conn_events(void);
 uint8_t tiku_flpr_arch_conn_addrs(uint8_t inita[6], uint8_t adva[6]);
 
 /**
- * @brief Service an LL_ENC_REQ forwarded by the FLPR.
- *
- * When the FLPR has published a new LL_ENC_REQ (SKDm, IVm), generates SKDs
- * and IVs, derives SK = e(LTK, SKDm||SKDs) and IV = IVm||IVs (the FLPR has
- * no AES), publishes them, and releases the FLPR to send LL_ENC_RSP.
- *
- * @param ltk the pairing Long Term Key.
- * @return 1 on the call that services a request (SK now readable), else 0.
+ * @brief A new LL_ENC_REQ from the central: answered at once with SKDs and
+ *        IVs (the FLPR sends LL_ENC_RSP); @p rand and @p ediv get what the
+ *        host looks its key up by.  @return 1 for a new request, else 0.
+ */
+int tiku_flpr_arch_enc_request(uint8_t rand[8], uint16_t *ediv);
+
+/**
+ * @brief The host's answer to the request: @p ltk (least octet first, as
+ *        HCI carries it) becomes the session key and the FLPR starts
+ *        encryption; NULL has it refused with PIN or Key Missing.
+ */
+void tiku_flpr_arch_enc_key(const uint8_t ltk[16]);
+
+/** @brief 1 once the held link encrypts both ways. */
+int tiku_flpr_arch_enc_on(void);
+
+/**
+ * @brief Both steps at once for a caller that holds the key: a new
+ *        request answered with @p ltk.
+ * @return 1 on the call that serviced a request (SK now readable), else 0.
  */
 int tiku_flpr_arch_enc_service(const uint8_t ltk[16]);
 

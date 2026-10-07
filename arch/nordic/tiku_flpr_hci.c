@@ -25,21 +25,23 @@
 #include <string.h>
 
 /* The controller has no public address (the host sets a random static
- * one), the peripheral role only, and no LL encryption: the FLPR refuses
- * LL_ENC_REQ.  Beacons stay with the broadcast facade on the M33's radio,
- * and a scan is that facade's observer. */
+ * one) and the peripheral role only; the FLPR runs LL encryption's start
+ * with the host's LTK.  Beacons stay with the broadcast facade on the M33's
+ * radio, and a scan is that facade's observer. */
 
 /* HCI packet types, and the events this controller raises. */
 #define HCI_CMD                 0x01u
 #define HCI_ACL                 0x02u
 #define HCI_EVT                 0x04u
 #define EVT_DISCONN_COMPLETE    0x05u
+#define EVT_ENC_CHANGE          0x08u
 #define EVT_CMD_COMPLETE        0x0Eu
 #define EVT_CMD_STATUS          0x0Fu
 #define EVT_NUM_COMPLETED       0x13u
 #define EVT_LE_META             0x3Eu
 #define LE_CONN_COMPLETE        0x01u
 #define LE_ADV_REPORT           0x02u
+#define LE_LTK_REQUEST          0x05u
 
 /* HCI status codes the commands answer with. */
 #define ST_OK                   0x00u
@@ -87,6 +89,7 @@ static uint8_t  s_rsp_len;
 static uint8_t  s_adv_on;               /* the host has advertising on    */
 static uint8_t  s_claimed;              /* the FLPR holds the radio       */
 static uint8_t  s_linked;               /* LE Connection Complete sent    */
+static uint8_t  s_enc_told;             /* Encryption Change sent         */
 static uint8_t  s_scanning;             /* the observer runs for the host */
 static uint8_t  s_scan_sent;            /* its table's entries reported   */
 static uint16_t s_scan_named;           /* ... with their names, by index */
@@ -321,6 +324,47 @@ scan_enable(uint8_t on)
     return ST_OK;
 }
 
+/**
+ * @brief Follow the link's encryption start: the central's LL_ENC_REQ is
+ *        an LTK request to the host, and both ways encrypting Encryption
+ *        Change.
+ */
+static void
+enc_follow(void)
+{
+    uint8_t  e[16], rand[8], i;
+    uint16_t ediv;
+
+    if (!s_linked) {
+        return;
+    }
+    if (tiku_flpr_arch_enc_request(rand, &ediv)) {
+        e[0] = HCI_EVT;
+        e[1] = EVT_LE_META;
+        e[2] = 13u;
+        e[3] = LE_LTK_REQUEST;
+        e[4] = (uint8_t)(HCI_HANDLE & 0xFFu);
+        e[5] = (uint8_t)(HCI_HANDLE >> 8);
+        for (i = 0u; i < 8u; i++) {
+            e[6u + i] = rand[i];
+        }
+        e[14] = (uint8_t)(ediv & 0xFFu);
+        e[15] = (uint8_t)(ediv >> 8);
+        rxq_push(e, 16u);
+    }
+    if (!s_enc_told && tiku_flpr_arch_enc_on()) {
+        s_enc_told = 1u;
+        e[0] = HCI_EVT;
+        e[1] = EVT_ENC_CHANGE;
+        e[2] = 4u;
+        e[3] = ST_OK;
+        e[4] = (uint8_t)(HCI_HANDLE & 0xFFu);
+        e[5] = (uint8_t)(HCI_HANDLE >> 8);
+        e[6] = 0x01u;                           /* AES-CCM on */
+        rxq_push(e, 7u);
+    }
+}
+
 /*---------------------------------------------------------------------------*/
 /* THE FLPR'S JOB                                                            */
 /*---------------------------------------------------------------------------*/
@@ -396,6 +440,7 @@ link_follow(void)
     st = tiku_flpr_arch_conn_state();
     if (st == 1u && !s_linked) {
         s_linked = 1u;
+        s_enc_told = 0u;
         s_adv_on = 0u;                        /* a connection ends ADV_IND */
         link_up_event();
     } else if (st == 2u || st == 3u) {
@@ -592,6 +637,18 @@ command(uint16_t op, const uint8_t *p, uint8_t n)
     case 0x200Au:                             /* LE Set Advertising Enable */
         cmd_done(op, (n >= 1u) ? adv_enable(p[0]) : ST_INVALID_PARAMS);
         return;
+    case 0x201Au:                             /* LE LTK Request Reply */
+    case 0x201Bu:                             /* ... Negative Reply */
+        if (n < 2u || !s_linked || (op == 0x201Au && n < 18u)) {
+            cmd_done(op, s_linked ? ST_INVALID_PARAMS : ST_UNKNOWN_CONN);
+            return;
+        }
+        tiku_flpr_arch_enc_key((op == 0x201Au) ? &p[2] : (const uint8_t *)0);
+        r[0] = ST_OK;
+        r[1] = p[0];
+        r[2] = p[1];
+        cmd_complete(op, r, 3u);
+        return;
     case 0x0406u:                             /* Disconnect */
         if (n < 3u || !s_linked ||
             (uint16_t)(p[0] | ((uint16_t)(p[1] & 0x0Fu) << 8)) !=
@@ -679,6 +736,7 @@ hci_recv(uint8_t *out, uint16_t out_max)
         return 0;
     }
     link_follow();
+    enc_follow();
     acl_drain();
     scan_follow();
     if (s_rxq_count > 0u) {

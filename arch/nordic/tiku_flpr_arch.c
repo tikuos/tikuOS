@@ -419,6 +419,7 @@ static void flpr_radio_ns(int on)
      * channel left secure never meets a non-secure publisher. */
     uint32_t ch;
     if (on) {
+        NRF_SPU00_S->PERIPH[6].PERM  &= ~((1u << 4) | (1u << 5));  /* CCM00 */
         NRF_SPU10_S->PERIPH[10].PERM &= ~((1u << 4) | (1u << 5));
         NRF_SPU10_S->PERIPH[5].PERM  &= ~((1u << 4) | (1u << 5));
         NRF_SPU10_S->PERIPH[2].PERM  &= ~((1u << 4) | (1u << 5));
@@ -434,6 +435,7 @@ static void flpr_radio_ns(int on)
         NRF_SPU10_S->PERIPH[5].PERM  |= (1u << 4) | (1u << 5);
         NRF_SPU10_S->PERIPH[2].PERM  |= (1u << 4) | (1u << 5);
         NRF_SPU20_S->PERIPH[7].PERM  |= (1u << 4) | (1u << 5);
+        NRF_SPU00_S->PERIPH[6].PERM  |= (1u << 4) | (1u << 5);
     }
     __asm__ volatile ("dsb 0xF" ::: "memory");
 }
@@ -667,36 +669,80 @@ static uint32_t flpr_enc_serviced;
 /* Service an LL_ENC_REQ the FLPR forwarded: generate SKDs and IVs, derive
  * SK = e(LTK, SKDm||SKDs) and IV = IVm||IVs, publish them, and release the
  * FLPR to send LL_ENC_RSP.  Returns 1 on the call that services a request. */
-int tiku_flpr_arch_enc_service(const uint8_t ltk[16])
+int tiku_flpr_arch_enc_request(uint8_t rand[8], uint16_t *ediv)
 {
     tiku_flpr_shared_t *sh = TIKU_FLPR_SHARED;
-    uint8_t  skd[16], sk[16], ivs[4];
     uint32_t req = sh->enc_req_seq;
+    uint8_t  skds[8], ivs[4];
     int i;
 
-    if (req == flpr_enc_serviced || req == 0u || ltk == (const uint8_t *)0) {
+    if (req == flpr_enc_serviced || req == 0u) {
         return 0;                                /* no new request           */
     }
-    for (i = 0; i < 8; i++) {                    /* SKD = SKDm || SKDs        */
-        skd[i] = sh->enc_skdm[i];
-    }
+    flpr_enc_serviced = req;
     tiku_trng_arch_init();
-    (void)tiku_trng_arch_read_bytes(&skd[8], 8); /* local SKDs (MSO half)     */
-    (void)tiku_trng_arch_read_bytes(ivs, 4);     /* local IVs                 */
-    (void)tiku_crypto_arch_aes_ecb(0, ltk, 16u, skd, sk);   /* SK = e(LTK,SKD)*/
+    (void)tiku_trng_arch_read_bytes(skds, 8);
+    (void)tiku_trng_arch_read_bytes(ivs, 4);
     for (i = 0; i < 8; i++) {
-        sh->enc_skds[i] = skd[8 + i];
-    }
-    for (i = 0; i < 16; i++) {
-        sh->enc_sk[i] = sk[i];
+        sh->enc_skds[i] = skds[i];
+        rand[i] = sh->enc_rand[i];
     }
     for (i = 0; i < 4; i++) {
         sh->enc_ivs[i] = ivs[i];
-        sh->enc_iv[i] = sh->enc_ivm[i];
-        sh->enc_iv[4 + i] = ivs[i];
     }
-    sh->enc_rsp_seq = req;                        /* release LL_ENC_RSP */
-    flpr_enc_serviced = req;
+    *ediv = sh->enc_ediv;
+    __asm__ volatile ("dmb 0xF" ::: "memory");
+    sh->enc_rsp_seq = req;                       /* LL_ENC_RSP goes out      */
+    return 1;
+}
+
+void tiku_flpr_arch_enc_key(const uint8_t ltk[16])
+{
+    tiku_flpr_shared_t *sh = TIKU_FLPR_SHARED;
+    uint8_t key[16], skd[16], sk[16];
+    int i;
+
+    if (ltk == (const uint8_t *)0) {
+        sh->enc_key_status = 0x06u;              /* PIN or Key Missing       */
+    } else {
+        /* SK = e(LTK, SKD), SKD = SKDs || SKDm: AES takes both most
+         * significant octet first, and the LTK comes least first, as HCI
+         * carries it, the halves as they went on air. */
+        for (i = 0; i < 16; i++) {
+            key[i] = ltk[15 - i];
+        }
+        for (i = 0; i < 8; i++) {
+            skd[i] = sh->enc_skds[7 - i];
+            skd[8 + i] = sh->enc_skdm[7 - i];
+        }
+        (void)tiku_crypto_arch_aes_ecb(0, key, 16u, skd, sk);
+        for (i = 0; i < 16; i++) {
+            sh->enc_sk[i] = sk[i];
+        }
+        for (i = 0; i < 4; i++) {
+            sh->enc_iv[i] = sh->enc_ivm[i];
+            sh->enc_iv[4 + i] = sh->enc_ivs[i];
+        }
+        sh->enc_key_status = 0u;
+    }
+    __asm__ volatile ("dmb 0xF" ::: "memory");
+    sh->enc_key_seq = flpr_enc_serviced;         /* START_ENC_REQ, or REJECT */
+}
+
+int tiku_flpr_arch_enc_on(void)
+{
+    return (TIKU_FLPR_SHARED->enc_on != 0u) ? 1 : 0;
+}
+
+int tiku_flpr_arch_enc_service(const uint8_t ltk[16])
+{
+    uint8_t  rand[8];
+    uint16_t ediv;
+
+    if (ltk == (const uint8_t *)0 || !tiku_flpr_arch_enc_request(rand, &ediv)) {
+        return 0;                                /* no new request           */
+    }
+    tiku_flpr_arch_enc_key(ltk);
     return 1;
 }
 
@@ -876,6 +922,7 @@ int tiku_flpr_arch_conn_start(const uint8_t *adv, uint32_t adv_len,
     TIKU_FLPR_SHARED->conn_state = 0u;
     TIKU_FLPR_SHARED->conn_term = 0u;
     TIKU_FLPR_SHARED->conn_reason = 0u;
+    TIKU_FLPR_SHARED->enc_on = 0u;
     /* A fragment the last link left untaken is dropped: the slot starts
      * free. */
     flpr_nus_rx_seen = TIKU_FLPR_SHARED->f2a_seq;
