@@ -7,9 +7,9 @@
  *
  * tiku_shell_cmd_bt.h - "bt" shell command (the BLE host stack)
  *
- * Built with a radio under the host stack: the CYW43439's BT extension
- * (TIKU_DRV_WIFI_CYW43_BT_ENABLE) or the ESP32-C61's controller
- * (TIKU_DRV_BLE_ESP_ENABLE), the same gate as its tiku_shell.c table entry.
+ * Built with a radio under the host stack (TIKU_BT_HOST: the CYW43439's BT
+ * extension, the ESP32-C61's controller or the EM9305), the same gate as its
+ * tiku_shell.c table entry.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,8 +24,8 @@ extern "C" {
 #endif
 
 /**
- * @brief "bt" command handler — drive the BLE host stack (CYW43439 BT or
- *        the ESP32-C61 controller).
+ * @brief "bt" command handler — drive the BLE host stack over whichever
+ *        controller the build has.
  *
  * Sub-commands cover status, advertising, scanning and the cached results,
  * links (connect/disconnect/connections), GATT (discover/read/subscribe),

@@ -546,7 +546,7 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
     {"wifi",    "WiFi: on/off/scan/connect/status", tiku_shell_cmd_wifi},
 #endif
 #if TIKU_SHELL_CMD_BT
-    {"bt",      "CYW43 BT: status",             tiku_shell_cmd_bt},
+    {"bt",      "Bluetooth: on/status/adv/scan/connect", tiku_shell_cmd_bt},
 #endif
 #if TIKU_SHELL_CMD_SDR
     {"sdr",     "Radio receiver: I/Q snapshots", tiku_shell_cmd_sdr},

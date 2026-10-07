@@ -39,12 +39,12 @@
 #endif
 
 /*
- * /proc/bt is compiled only with a Bluetooth driver (the CYW43's BT
- * extension or the ESP32-C61's controller); its readers call the tiku_bt
- * API.  PROC_BT_ENABLED gates the readers and the directory entry.
+ * /proc/bt is compiled only with the BLE host stack (TIKU_BT_HOST: the
+ * CYW43's BT extension, the ESP32-C61's controller or the EM9305); its
+ * readers call the tiku_bt API.  PROC_BT_ENABLED gates the readers and the
+ * directory entry.
  */
-#if (defined(TIKU_DRV_WIFI_CYW43_BT_ENABLE) && TIKU_DRV_WIFI_CYW43_BT_ENABLE) \
-    || (defined(TIKU_DRV_BLE_ESP_ENABLE) && TIKU_DRV_BLE_ESP_ENABLE)
+#if (TIKU_BT_HOST + 0)
 #define PROC_BT_ENABLED 1
 #include <interfaces/bluetooth/tiku_bt.h>
 #else

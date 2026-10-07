@@ -81,6 +81,22 @@ int tiku_bt_register_transport(const tiku_bt_transport_t *t);
  */
 const tiku_bt_transport_t *tiku_bt_get_transport(void);
 
+/**
+ * @brief The switch of a controller powered on demand (TIKU_BT_ON_DEMAND),
+ *        which its driver provides and tiku_bt_power() calls.
+ *
+ * On powers the controller, registers the transport and runs tiku_bt_init();
+ * off calls tiku_bt_shutdown() and then powers it down.
+ * @return 0, or a TIKU_DRV_ERR_* saying why the radio is not up
+ */
+int tiku_bt_controller_power(uint8_t on);
+
+/**
+ * @brief Quiesce the stack before its controller goes down: an HCI Reset ends
+ *        the links, advertising and scans, and the stack forgets them.
+ */
+void tiku_bt_shutdown(void);
+
 #ifdef __cplusplus
 }
 #endif

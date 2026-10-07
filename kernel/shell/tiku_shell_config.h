@@ -195,12 +195,10 @@
 #endif
 #endif
 #ifndef TIKU_SHELL_CMD_BT
-/* Auto-on with a radio under the BLE host stack (the CYW43's BT extension,
- * the ESP32-C61's controller); otherwise off. */
-#if (defined(TIKU_DRV_WIFI_CYW43_BT_ENABLE) && \
-     (TIKU_DRV_WIFI_CYW43_BT_ENABLE == 1)) || \
-    (defined(TIKU_DRV_BLE_ESP_ENABLE) && (TIKU_DRV_BLE_ESP_ENABLE == 1))
-#define TIKU_SHELL_CMD_BT      1  /**< bt      - BLE host radio status */
+/* Auto-on with a radio under the BLE host stack (TIKU_BT_HOST: the CYW43's
+ * BT extension, the ESP32-C61's controller, the EM9305); otherwise off. */
+#if (TIKU_BT_HOST + 0)
+#define TIKU_SHELL_CMD_BT      1  /**< bt      - the BLE radio and its stack */
 #else
 #define TIKU_SHELL_CMD_BT      0
 #endif
@@ -580,15 +578,14 @@
 #define TIKU_SHELL_CMD_CRYPTOPROBE 0
 #endif
 
-/* wifi drives a Wi-Fi driver, bt the BLE host stack's radio (CYW43439,
- * ESP32-C61); ble drives the EM9305. */
+/* wifi drives a Wi-Fi driver, bt the BLE host stack over any controller;
+ * ble probes the EM9305 directly. */
 #if TIKU_SHELL_CMD_WIFI && !(TIKU_DRV_WIFI_CYW43_ENABLE + 0) && \
     !(TIKU_DRV_WIFI_ESP_ENABLE + 0)
 #undef  TIKU_SHELL_CMD_WIFI
 #define TIKU_SHELL_CMD_WIFI 0
 #endif
-#if TIKU_SHELL_CMD_BT && !(TIKU_DRV_WIFI_CYW43_BT_ENABLE + 0) && \
-    !(TIKU_DRV_BLE_ESP_ENABLE + 0)
+#if TIKU_SHELL_CMD_BT && !(TIKU_BT_HOST + 0)
 #undef  TIKU_SHELL_CMD_BT
 #define TIKU_SHELL_CMD_BT 0
 #endif

@@ -24,7 +24,11 @@
 #endif
 #if (TIKU_HAS_BLE_ADV + 0)
 #include <interfaces/bluetooth/tiku_ble_adv.h>  /* /sys/radio beacon + scan */
+#if (TIKU_BT_HOST + 0)
+#include <interfaces/bluetooth/tiku_bt.h>       /* /sys/radio/backend      */
+#else
 #include <arch/nordic/tiku_radio_arch.h>        /* /sys/radio/mode (live)   */
+#endif
 #endif
 #if (TIKU_HAS_COPROC + 0)
 #include "tiku_vfs_tree_coproc.h"
@@ -1468,7 +1472,12 @@ radio_txpower_write(const char *buf, size_t len)
 static int
 radio_mode_read(char *buf, size_t max)
 {
+#if (TIKU_BT_HOST + 0)
+    /* An HCI controller's legacy advertising and scans run on 1M. */
+    return snprintf(buf, max, "ble-1m\n");
+#else
     return snprintf(buf, max, "%s\n", tiku_radio_arch_mode_str());
+#endif
 }
 
 /*
@@ -1478,21 +1487,30 @@ radio_mode_read(char *buf, size_t max)
  * from the capability flags; `state` (above) is the arbiter owner.
  */
 
-/** @brief Read handler for /sys/radio/backend: nordic-m33 or nordic-flpr. */
+/** @brief Read handler for /sys/radio/backend: nordic-m33 or nordic-flpr,
+ *         or an HCI controller's "hci" and its firmware name. */
 static int
 radio_backend_read(char *buf, size_t max)
 {
+#if (TIKU_BT_HOST + 0)
+    return snprintf(buf, max, "hci %s\n", tiku_bt_fw_version());
+#else
     tiku_ble_adv_owner_t o = tiku_ble_adv_owner();
     const char *b = (o == TIKU_BLE_ADV_OWNER_BEACON_FLPR ||
                      o == TIKU_BLE_ADV_OWNER_CONN)
                     ? "nordic-flpr" : "nordic-m33";
     return snprintf(buf, max, "%s\n", b);
+#endif
 }
 
 /** @brief Read handler for /sys/radio/caps: what this build's radio can do. */
 static int
 radio_caps_read(char *buf, size_t max)
 {
+#if (TIKU_BT_HOST + 0)
+    /* An HCI controller under the host stack: links, pairing included. */
+    return snprintf(buf, max, "adv scan observe conn\n");
+#else
     return snprintf(buf, max, "adv scan observe 2m coded"
 #if (TIKU_FLPR_ENABLE + 0)
                     " conn"
@@ -1501,6 +1519,7 @@ radio_caps_read(char *buf, size_t max)
                     " ieee802154 aes-ccm"
 #endif
                     "\n");
+#endif
 }
 
 static const tiku_vfs_node_t sys_radio_children[] = {

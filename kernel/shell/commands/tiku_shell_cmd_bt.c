@@ -7,8 +7,9 @@
  *
  * tiku_shell_cmd_bt.c - "bt" command implementation.
  *
- * Calls the public Bluetooth API (tiku_bt.h); an ESP32-C61 build also calls
- * the BLE driver for status and power.  The command keeps no driver state.
+ * Calls the public Bluetooth API (tiku_bt.h), whatever controller is under
+ * it; an ESP32-C61 build also shows its driver's heap in the status.  The
+ * command keeps no driver state.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -58,7 +59,7 @@ static void put_hex4(uint16_t w)
  */
 static void bt_help(void)
 {
-#if TIKU_DRV_BLE_ESP_ENABLE
+#if (TIKU_BT_ON_DEMAND + 0)
     SHELL_PRINTF("bt on | off             Power the BLE controller up / down\n");
 #endif
     SHELL_PRINTF("bt status               The radio: address + version\n");
@@ -72,7 +73,9 @@ static void bt_help(void)
     SHELL_PRINTF("bt connect <slot|addr>  Initiate central-role connection\n");
     SHELL_PRINTF("bt discover [N]         Service discovery on link N\n");
     SHELL_PRINTF("bt read <handle> [N]    ATT Read on link N\n");
+    SHELL_PRINTF("bt write <h> <text> [N] ATT Write of text on link N\n");
     SHELL_PRINTF("bt subscribe <h> [N]    Write 0x0001 to CCCD on link N\n");
+    SHELL_PRINTF("bt pair [N]             Pair + bond on link N (LE Secure Conn)\n");
     SHELL_PRINTF("bt bonds                List stored LE-SC bonds (LTK slots)\n");
     SHELL_PRINTF("bt unpair [N]           Clear bond slot N (default 0)\n");
     SHELL_PRINTF("bt help                 this help\n");
@@ -153,7 +156,11 @@ static void bt_status(void)
     }
 #endif
     if (tiku_bt_is_ready() == 0) {
+#if (TIKU_BT_ON_DEMAND + 0)
+        SHELL_PRINTF("BT: off (bt on brings it up)\n");
+#else
         SHELL_PRINTF("BT: not ready (bring-up failed or not built in)\n");
+#endif
         return;
     }
 
@@ -193,6 +200,8 @@ static void bt_status(void)
                 SHELL_PRINTF(" (Cypress/Infineon)");
             else if (v.manufacturer == 0x02E5U)
                 SHELL_PRINTF(" (Espressif)");
+            else if (v.manufacturer == 0x005AU)
+                SHELL_PRINTF(" (EM Microelectronic)");
             tiku_shell_io_putc('\n');
         }
         SHELL_PRINTF("BTFW:     %s\n", tiku_bt_fw_version());
@@ -453,6 +462,24 @@ static void bt_connect_cmd(uint8_t argc, const char *argv[])
 }
 
 /**
+ * @brief Handle "bt pair [N]": pair and bond on link N (default: first).
+ */
+static void bt_pair_cmd(uint8_t argc, const char *argv[])
+{
+    uint16_t h = pick_conn_handle(argc, argv, 2U);
+    int rc;
+    if (h == 0xFFFFU) {
+        SHELL_PRINTF("bt: no connection (run 'bt connect ...' first)\n");
+        return;
+    }
+    rc = tiku_bt_pair(h);
+    SHELL_PRINTF(rc == 0 ? "bt: pairing on handle 0x%04x (watch for "
+                           "'link encrypted')\n"
+                         : "bt: pairing on handle 0x%04x FAILED rc=%d\n",
+                 h, rc);
+}
+
+/**
  * @brief Handle "bt discover [N]": start service discovery on link N.
  */
 static void bt_discover_cmd(uint8_t argc, const char *argv[])
@@ -491,6 +518,44 @@ static void bt_read_cmd(uint8_t argc, const char *argv[])
     }
     rc = tiku_bt_client_read(conn_handle, attr_handle);
     SHELL_PRINTF("bt: read requested (rc=%d)\n", rc);
+}
+
+/**
+ * @brief Handle "bt write <handle> <text> [N]": ATT Write of @p text's
+ *        bytes to an attribute on link N; \r, \n and \\ in the text are
+ *        a CR, an LF and a backslash.
+ */
+static void bt_write_cmd(uint8_t argc, const char *argv[])
+{
+    uint8_t     buf[64];
+    const char *t;
+    uint16_t    attr_handle;
+    uint16_t    conn_handle;
+    uint16_t    len = 0U;
+    int         rc;
+    if (argc < 4U) {
+        SHELL_PRINTF("usage: bt write <handle> <text> [N]\n");
+        return;
+    }
+    if (parse_u16(argv[2], &attr_handle) != 0) {
+        SHELL_PRINTF("bt: bad handle '%s'\n", argv[2]);
+        return;
+    }
+    conn_handle = pick_conn_handle(argc, argv, 4U);
+    if (conn_handle == 0xFFFFU) {
+        SHELL_PRINTF("bt: no connection\n");
+        return;
+    }
+    for (t = argv[3]; *t != '\0' && len < sizeof buf; ++t) {
+        char c = *t;
+        if (c == '\\' && t[1] != '\0') {
+            ++t;
+            c = (*t == 'r') ? '\r' : (*t == 'n') ? '\n' : *t;
+        }
+        buf[len++] = (uint8_t)c;
+    }
+    rc = tiku_bt_client_write(conn_handle, attr_handle, buf, len);
+    SHELL_PRINTF("bt: write of %u B requested (rc=%d)\n", len, rc);
 }
 
 /**
@@ -672,9 +737,9 @@ void tiku_shell_cmd_bt(uint8_t argc, const char *argv[])
         bt_help();
         return;
     }
-#if TIKU_DRV_BLE_ESP_ENABLE
+#if (TIKU_BT_ON_DEMAND + 0)
     if (str_eq(argv[1], "on") || str_eq(argv[1], "off")) {
-        int rc = tiku_drv_ble_esp_power(str_eq(argv[1], "on") ? 1U : 0U);
+        int rc = tiku_bt_power(str_eq(argv[1], "on") ? 1U : 0U);
 
         SHELL_PRINTF(rc == 0 ? "BT: %s\n" : "BT: %s failed (%d)\n",
                      argv[1], rc);
@@ -717,8 +782,16 @@ void tiku_shell_cmd_bt(uint8_t argc, const char *argv[])
         bt_read_cmd(argc, argv);
         return;
     }
+    if (str_eq(argv[1], "write")) {
+        bt_write_cmd(argc, argv);
+        return;
+    }
     if (str_eq(argv[1], "subscribe") || str_eq(argv[1], "sub")) {
         bt_subscribe_cmd(argc, argv);
+        return;
+    }
+    if (str_eq(argv[1], "pair")) {
+        bt_pair_cmd(argc, argv);
         return;
     }
     if (str_eq(argv[1], "bonds")) {

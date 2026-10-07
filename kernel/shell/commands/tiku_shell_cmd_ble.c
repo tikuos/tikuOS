@@ -7,6 +7,9 @@
  *
  * tiku_shell_cmd_ble.c - "ble" command: EM9305 probe, beacon and BLE shell.
  *
+ * The shell over BLE rides the BLE serial facade; the probe, beacon and EN
+ * strap work the die directly, so they wait while bt holds the radio.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -19,8 +22,9 @@
 #include <kernel/shell/tiku_shell_cwd.h>     /* tiku_shell_cwd_get (prompt) */
 #include <kernel/timers/tiku_clock.h>        /* tiku_clock_time (heartbeat) */
 #include <hal/tiku_cpu.h>                    /* tiku_cpu_idle_hook */
+#include <interfaces/bluetooth/tiku_ble_serial.h> /* the NUS byte pipe */
+#include <interfaces/bluetooth/tiku_bt.h>    /* who holds the radio */
 #include <arch/ambiq/tiku_em9305.h>
-#include <arch/ambiq/tiku_ble_uart.h>
 #include <arch/ambiq/tiku_gpio_arch.h>       /* EN strap (ble en) */
 #include <arch/ambiq/tiku_device_select.h>   /* TIKU_BOARD_EM9305_EN_PIN */
 #include <string.h>
@@ -28,61 +32,63 @@
 /** Ctrl+C / ETX -- stops an interactive BLE session. */
 #define BLE_CANCEL 0x03
 
-/* Shell io-backend routing console traffic over the BLE UART service:
+/* Shell output gathers here between flushes; input is read a write at a
+ * time.  Both ride the BLE serial facade (the Nordic UART Service). */
+static uint8_t  s_out[244];
+static uint16_t s_out_len;
+static uint8_t  s_in[64];
+static uint8_t  s_in_len;
+static uint8_t  s_in_pos;
+
+/** @brief Hand the buffered output to the pipe; a dead link drops it. */
+static void ble_io_flush(void) {
+    if (s_out_len > 0u) {
+        (void)tiku_ble_serial_send(s_out, s_out_len);
+        s_out_len = 0u;
+    }
+}
+
+static void ble_io_putc(char c) {
+    if (s_out_len >= (uint16_t)sizeof(s_out)) {
+        ble_io_flush();
+    }
+    s_out[s_out_len++] = (uint8_t)c;
+}
+
+static uint8_t ble_io_rx_ready(void) {
+    if (s_in_pos < s_in_len) {
+        return 1u;
+    }
+    {
+        int n = tiku_ble_serial_recv(s_in, (uint16_t)sizeof(s_in));
+        s_in_len = (uint8_t)((n > 0) ? n : 0);
+        s_in_pos = 0u;
+    }
+    return (uint8_t)(s_in_len > 0u);
+}
+
+static int ble_io_getc(void) {
+    if (!ble_io_rx_ready()) {
+        return -1;
+    }
+    return (int)s_in[s_in_pos++];
+}
+
+/* Shell io-backend routing console traffic over the BLE serial pipe:
  * output -> TX notifications, input <- RX writes. \n expands to \r\n for the
  * phone's terminal view; no local echo (the phone shows what it sent). */
 static const tiku_shell_io_t s_ble_io = {
-    tiku_ble_uart_putc,        /* putc     */
-    tiku_ble_uart_rx_ready,    /* rx_ready */
-    tiku_ble_uart_getc,        /* getc     */
-    TIKU_SHELL_IO_CRLF,       /* flags    */
+    ble_io_putc,               /* putc     */
+    ble_io_rx_ready,           /* rx_ready */
+    ble_io_getc,               /* getc     */
+    TIKU_SHELL_IO_CRLF,        /* flags    */
     TIKU_VFS_CAP_NONE          /* remote channel: restricted, like TCP */
 };
 
 /**
- * @brief Push buffered shell output to the phone as TX notifications.
- *
- * flush() sends only with a free controller credit, so this pumps the stack
- * (acks return credits) until the buffer is empty; one second without
- * progress (link lost, subscriber gone) abandons the rest.
- */
-static void ble_uart_drain_tx(void) {
-    uint16_t prev = tiku_ble_uart_tx_pending();
-    tiku_clock_time_t deadline =
-        (tiku_clock_time_t)(tiku_clock_time() + TIKU_CLOCK_SECOND);
-
-    while (tiku_ble_uart_tx_pending() > 0u) {
-        uint16_t now;
-        (void)tiku_ble_uart_poll();     /* services completed-packet acks */
-        tiku_ble_uart_flush();
-        now = tiku_ble_uart_tx_pending();
-        if (now < prev) {               /* progress: reset the stall clock */
-            prev = now;
-            deadline = (tiku_clock_time_t)(tiku_clock_time() +
-                                           TIKU_CLOCK_SECOND);
-        } else if (!TIKU_CLOCK_LT(tiku_clock_time(), deadline)) {
-            break;                      /* one second without progress */
-        }
-    }
-
-    /* Let the tail packets finish transmitting (bounded). If a packet never
-     * acks (the controller dropped it), reclaim its credit so a drop cannot
-     * permanently shrink the TX budget. */
-    deadline = (tiku_clock_time_t)(tiku_clock_time() + TIKU_CLOCK_SECOND);
-    while (tiku_ble_uart_tx_inflight() > 0 &&
-           TIKU_CLOCK_LT(tiku_clock_time(), deadline)) {
-        (void)tiku_ble_uart_poll();
-    }
-    if (tiku_ble_uart_tx_inflight() > 0) {
-        tiku_ble_uart_tx_credit_reset();
-    }
-}
-
-/**
  * @brief Route shell output to BLE, print @p emit and/or execute @p line.
  *
- * Prints the prompt, then restores the UART backend and flushes the
- * notifications.
+ * Prints the prompt, then restores the UART backend and sends the output.
  */
 static void ble_uart_to_ble(const tiku_shell_io_t *uart_be,
                             const char *emit, char *line) {
@@ -95,7 +101,7 @@ static void ble_uart_to_ble(const tiku_shell_io_t *uart_be,
     }
     tiku_shell_io_printf("tikuOS:%s> ", tiku_shell_cwd_get());
     tiku_shell_io_set_backend(uart_be);
-    ble_uart_drain_tx();
+    ble_io_flush();
 }
 
 /**
@@ -111,28 +117,17 @@ static void ble_cmd_uart(uint8_t argc, const char *argv[]) {
     static char line[128];
     uint16_t lpos = 0u;
     uint8_t  greeted = 0u;
-    uint8_t  sub_armed = 0u;
-    tiku_clock_time_t beat, greet_at = 0;
+    uint8_t  linked = 0u;
+    tiku_clock_time_t beat;
     /* Deep idle between passes: the EM9305 keeps the link on its own (its link
      * layer and the 32 kHz clock the Apollo exports on pad 138), so the pump
      * sleeps the core and polls each tick. */
     tiku_cpu_idle_enter_t idle = tiku_cpu_idle_hook(TIKU_CPU_IDLE_DEEP);
-    int rc;
 
-    rc = tiku_ble_uart_start(name);
-    if (rc != TIKU_EM9305_OK) {
-        static const char *const names[5] = {
-            "Reset", "EvtMask", "AdvParams", "AdvData", "AdvEnable"
-        };
-        int8_t  srcs[5];
-        uint8_t ssts[5];
-        uint8_t n = tiku_ble_uart_start_steps(srcs, ssts, 5u);
-        uint8_t i;
-        SHELL_PRINTF("ble uart: start FAILED (rc=%d)\n", rc);
-        for (i = 0u; i < n; i++) {
-            SHELL_PRINTF("  step %u %-9s: rc=%d status=0x%02x\n",
-                         (unsigned)i, names[i], (int)srcs[i], (unsigned)ssts[i]);
-        }
+    s_out_len = 0u;
+    s_in_len = s_in_pos = 0u;
+    if (tiku_ble_serial_start(name) != 0) {
+        SHELL_PRINTF("ble uart: start FAILED (bt status shows the radio)\n");
         return;
     }
     SHELL_PRINTF("ble: advertising as \"%s\" (connectable)\n", name);
@@ -141,42 +136,30 @@ static void ble_cmd_uart(uint8_t argc, const char *argv[]) {
 
     beat = (tiku_clock_time_t)(tiku_clock_time() + TIKU_CLOCK_SECOND);
     for (;;) {
-        int ev = tiku_ble_uart_poll();
+        /* ready() pumps the stack, and turns true once a subscriber has
+         * settled (notifications sent sooner are discarded). */
+        uint8_t ready = (uint8_t)(tiku_ble_serial_ready() != 0);
+        uint8_t now_linked = (uint8_t)(tiku_ble_serial_connected() != 0);
 
-        if (ev == TIKU_BLE_EVT_CONNECTED) {
-            SHELL_PRINTF("\nble: CONNECTED\n");
+        if (now_linked != linked) {
+            SHELL_PRINTF(now_linked ? "\nble: CONNECTED\n"
+                                    : "\nble: DISCONNECTED -- "
+                                      "re-advertising\n");
+            linked = now_linked;
             greeted = 0u;
-            sub_armed = 0u;
-            lpos = 0u;
-        } else if (ev == TIKU_BLE_EVT_DISCONNECTED) {
-            SHELL_PRINTF("\nble: DISCONNECTED -- re-advertising\n");
-            greeted = 0u;
-            sub_armed = 0u;
             lpos = 0u;
         }
-
-        /* Greet once the peer subscribes to TX notifications -- but ~0.6 s
-         * later: notifications sent while the central is still arming its
-         * subscription (and settling the fresh link) are silently discarded. */
-        if (!greeted && tiku_ble_uart_connected() &&
-            tiku_ble_uart_notify_enabled()) {
-            if (!sub_armed) {
-                sub_armed = 1u;
-                greet_at = (tiku_clock_time_t)(tiku_clock_time() +
-                                               (TIKU_CLOCK_SECOND * 5u) / 8u);
-            } else if (TIKU_CLOCK_LT(greet_at, tiku_clock_time())) {
-                ble_uart_to_ble(uart_be,
-                                "\r\ntikuOS wireless shell -- type 'help'\r\n",
-                                0);
-                greeted = 1u;
-                SHELL_PRINTF("ble: wireless shell active "
-                             "(subscriber attached)\n");
-            }
+        if (!greeted && ready) {
+            ble_uart_to_ble(uart_be,
+                            "\r\ntikuOS wireless shell -- type 'help'\r\n",
+                            0);
+            greeted = 1u;
+            SHELL_PRINTF("ble: wireless shell active (subscriber attached)\n");
         }
 
         /* Feed RX into the line buffer; execute on newline. */
-        while (tiku_ble_uart_rx_ready()) {
-            int c = tiku_ble_uart_getc();
+        while (ble_io_rx_ready()) {
+            int c = ble_io_getc();
             if (c < 0) {
                 break;
             }
@@ -204,23 +187,22 @@ static void ble_cmd_uart(uint8_t argc, const char *argv[]) {
 
         /* Heartbeat dot once a second while idle-advertising. */
         if (TIKU_CLOCK_LT(beat, tiku_clock_time())) {
-            if (!tiku_ble_uart_connected()) {
+            if (!linked) {
                 SHELL_PRINTF(".");
             }
             beat = (tiku_clock_time_t)(tiku_clock_time() + TIKU_CLOCK_SECOND);
         }
 
-        /* Nothing happened this pass: sleep the core until the next interrupt
-         * (the STIMER tick or UART RX), which adds at most one tick of RX
+        /* Nothing waiting: sleep the core until the next interrupt (the
+         * STIMER tick or UART RX), which adds at most one tick of RX
          * latency. */
-        if (idle != (tiku_cpu_idle_enter_t)0 && ev == TIKU_BLE_EVT_NONE &&
-            !tiku_ble_uart_rx_ready() && tiku_ble_uart_tx_pending() == 0u) {
+        if (idle != (tiku_cpu_idle_enter_t)0 && !ble_io_rx_ready()) {
             idle();
         }
     }
 
     tiku_shell_io_set_backend(uart_be);   /* restore the console */
-    tiku_ble_uart_stop();
+    tiku_ble_serial_stop();
     SHELL_PRINTF("\nble: session stopped.\n");
 }
 
@@ -235,6 +217,19 @@ void tiku_shell_cmd_ble(uint8_t argc, const char *argv[]) {
     int rc;
     uint16_t i;
 
+    /* "ble uart [name]" -- connectable serial-over-GATT session. */
+    if (argc >= 2u && strcmp(argv[1], "uart") == 0) {
+        ble_cmd_uart(argc, argv);
+        return;
+    }
+
+    /* The rest work the die directly, resetting it or holding it off: not
+     * under the host stack, whose links and adverts that would cut. */
+    if (tiku_bt_is_ready()) {
+        SHELL_PRINTF("ble: the radio is in use by bt (bt off first)\n");
+        return;
+    }
+
     /* "ble en 0|1" -- drive the EM9305 EN strap alone.  Low holds the radio
      * off; high lets it boot its ROM and idle, so the rail difference between
      * the two is the radio's idle draw. */
@@ -244,12 +239,6 @@ void tiku_shell_cmd_ble(uint8_t argc, const char *argv[]) {
         tiku_ambiq_gpio_set(TIKU_BOARD_EM9305_EN_PIN, v);
         SHELL_PRINTF("ble: EN (pad %u) -> %u\n",
                      (unsigned)TIKU_BOARD_EM9305_EN_PIN, (unsigned)v);
-        return;
-    }
-
-    /* "ble uart [name]" -- connectable serial-over-GATT session. */
-    if (argc >= 2u && strcmp(argv[1], "uart") == 0) {
-        ble_cmd_uart(argc, argv);
         return;
     }
 

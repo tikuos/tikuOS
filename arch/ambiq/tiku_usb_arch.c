@@ -1722,7 +1722,11 @@ tiku_usb_err_t tiku_usb_up_full(tiku_usb_speed_t want, tiku_usb_class_t cls,
 #else
         if (!s_em9305_up) {
 #if (TIKU_DRV_BLE_EM9305_ENABLE + 0)
-            if (tiku_em9305_reset() != 0) { return TIKU_USB_ERR_CLOCK; }
+            /* Taken, not reset: a die the BLE stack already runs keeps its
+             * links, and `bt off` leaves it powered for this clock. */
+            if (tiku_em9305_acquire(TIKU_EM9305_USER_USB) != 0) {
+                return TIKU_USB_ERR_CLOCK;
+            }
             s_em9305_up = 1u;
 #else
             /* Without the EM9305 driver the clock source cannot start, so

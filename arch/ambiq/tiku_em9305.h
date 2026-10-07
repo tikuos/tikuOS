@@ -7,9 +7,9 @@
  *
  * tiku_em9305.h - EM9305 BLE controller SPI-HCI transport.
  *
- * Resets the Apollo510B's EM9305 radio and exchanges raw HCI packets over its
- * framed SPI protocol; also a self-test probe and a beacon.  tiku_ble_uart.c
- * builds the HCI host and GATT server on this.
+ * Resets the Apollo510B's EM9305 radio and moves raw HCI packets over its
+ * framed SPI, for the BLE host stack and a self-test probe and beacon; the
+ * USB PHY shares the die for its 12 MHz clock.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -49,6 +49,23 @@ typedef struct {
     uint8_t  evt[16];         /**< raw bytes of the reply read                */
     uint16_t evt_len;         /**< number of valid bytes in evt[]             */
 } tiku_em9305_probe_t;
+
+/** @brief Users of the die: the BLE host stack and the USB high-speed PHY. */
+#define TIKU_EM9305_USER_BLE   0x01u
+#define TIKU_EM9305_USER_USB   0x02u
+
+/**
+ * @brief Take the die for @p user (a TIKU_EM9305_USER_* bit): the first user
+ *        resets it, a later one finds it running.
+ * @return TIKU_EM9305_OK, or the tiku_em9305_reset() error
+ */
+int tiku_em9305_acquire(uint8_t user);
+
+/**
+ * @brief Give the die back for @p user; once no user holds it, EN goes low
+ *        and the die stays in reset, its clock output stopped.
+ */
+void tiku_em9305_release(uint8_t user);
 
 /**
  * @brief Set up the radio's pads (first call only) and IOM6 SPI, pulse EN,

@@ -26,12 +26,12 @@ extern "C" {
 /**
  * @brief 1 when a BLE-serial backend is compiled in, 0 otherwise.
  *
- * The build sets TIKU_HAS_BLE for the EM9305.  Without that -D (e.g. a unit
- * build) TIKU_DRV_BLE_EM9305_ENABLE also gives 1, and the TIKU_FLPR_ENABLE
- * check selects Nordic's FLPR controller.
+ * The build sets TIKU_HAS_BLE with the host stack (TIKU_BT_HOST), which also
+ * gives 1 alone (a unit build); the TIKU_FLPR_ENABLE check selects Nordic's
+ * FLPR controller.
  */
 #if (defined(TIKU_HAS_BLE) && (TIKU_HAS_BLE + 0)) ||                          \
-    (defined(TIKU_DRV_BLE_EM9305_ENABLE) && (TIKU_DRV_BLE_EM9305_ENABLE + 0)) \
+    (defined(TIKU_BT_HOST) && (TIKU_BT_HOST + 0))                             \
     || (defined(TIKU_FLPR_ENABLE) && (TIKU_FLPR_ENABLE + 0) &&                \
         defined(TIKU_HAS_BLE_ADV) && (TIKU_HAS_BLE_ADV + 0))
 /* Nordic: the FLPR (VPR RISC-V coprocessor) is the on-die BLE controller; the
@@ -69,7 +69,7 @@ void tiku_ble_serial_stop(void);
  *        send() reaches it.  Pumps the stack as a side effect, so a poll loop
  *        on this keeps the link serviced.
  *
- * The EM9305 backend also waits 5/8 s after a fresh subscribe, since
+ * The host-stack backend also waits 5/8 s after a fresh subscribe, since
  * notifications sent while the central is still arming are dropped.  The
  * Nordic backend re-advertises a dropped link from here.
  */
@@ -80,8 +80,8 @@ int tiku_ble_serial_ready(void);
  *        and the link runs encrypted under that key; 0 otherwise, including
  *        while it is still being agreed.
  *
- * The Nordic backend pairs and bonds the central itself, so a central seen
- * before skips pairing; the EM9305 backend does no pairing and returns 0.
+ * Both backends pair and bond the central, so a central seen before skips
+ * pairing.
  *
  * @note Base trust in what crosses the link on this, not on the peer address.
  */
@@ -91,8 +91,7 @@ int tiku_ble_serial_secured(void);
 int tiku_ble_serial_connected(void);
 
 /** @brief Where the connection's security stands: 0 none, 1 pairing,
- *         2 key agreed or recalled, 3 encrypted under it (always 0 on the
- *         EM9305 backend). */
+ *         2 key agreed or recalled, 3 encrypted under it. */
 int tiku_ble_serial_secure_state(void);
 
 /**
@@ -107,12 +106,13 @@ void tiku_ble_serial_service(void);
 /**
  * @brief Send @p len bytes to the connected central.
  *
- * EM9305: queues every byte and drains under controller flow control, giving
- * up on the rest after a 1 s stall.  Nordic: one notification of at most
- * MTU - 3 bytes, refused while unsubscribed or while TX is busy.
+ * Host stack: notifications under the controller's flow control until all
+ * is sent, giving up on the rest after a 1 s stall.  Nordic: one notification
+ * of at most MTU - 3 bytes, refused while unsubscribed or while TX is busy.
  *
- * @return Bytes accepted (EM9305: @p len; Nordic: up to MTU - 3, or 0 when
- *         unsubscribed or busy), or -1 if not connected or @p data is NULL.
+ * @return Bytes accepted (host stack: @p len unless the link stalls; Nordic:
+ *         up to MTU - 3), 0 when unsubscribed or busy, or -1 if not connected
+ *         or @p data is NULL.
  */
 int tiku_ble_serial_send(const uint8_t *data, uint16_t len);
 

@@ -76,6 +76,14 @@ int tiku_bt_recv(uint8_t *out, uint16_t out_max);
 int tiku_bt_is_ready(void);
 
 /**
+ * @brief Switch the radio under the stack on (it comes up with the stack over
+ *        it) or off (its links, advertising and scans end first).
+ * @return TIKU_DRV_OK; TIKU_DRV_ERR_NOT_PRESENT for a radio with no switch
+ *         (the CYW43439 is up from boot); or the driver's error
+ */
+int tiku_bt_power(uint8_t on);
+
+/**
  * @brief Information returned by HCI Read_Local_Version_Information.
  *
  * Cached by tiku_bt_init() and read with tiku_bt_local_version().  The fields
@@ -155,6 +163,42 @@ int tiku_bt_advertise_start(const char *name);
  */
 int tiku_bt_advertise_stop(void);
 
+/**
+ * @brief Advertise as tiku_bt_advertise_start() does, with @p uuid128 in the
+ *        scan response (a Complete List of 128-bit Service UUIDs), so a
+ *        central filtering by that service finds the device.
+ *
+ * @param uuid128  The service's UUID, 16 bytes little-endian; NULL leaves the
+ *                 scan response empty
+ * @return As tiku_bt_advertise_start().
+ */
+int tiku_bt_advertise_service(const char *name, const uint8_t *uuid128);
+
+/**
+ * @brief Broadcast @p name as a non-connectable beacon (ADV_NONCONN_IND,
+ *        100-150 ms): no central can connect while it runs.
+ * @return As tiku_bt_advertise_start().
+ */
+int tiku_bt_advertise_beacon(const char *name);
+
+/**
+ * @brief Advertise @p ad as it is (31 bytes of AD structures at most) as
+ *        @p adv_type (0x00 ADV_IND ... 0x03 ADV_NONCONN_IND) every
+ *        @p interval_ms; no name record is added and none re-advertises it
+ *        after a link drops.
+ * @return As tiku_bt_advertise_start().
+ */
+int tiku_bt_advertise_raw(uint8_t adv_type, uint16_t interval_ms,
+                          const uint8_t *ad, uint8_t ad_len);
+
+/**
+ * @brief Read the controller's advertising TX power in dBm (it is fixed over
+ *        HCI).
+ * @return TIKU_DRV_OK, TIKU_DRV_ERR_NOT_PRESENT if BT isn't up, or an error
+ *         when the controller does not answer.
+ */
+int tiku_bt_adv_tx_power(int8_t *dbm);
+
 /** Return 1 if advertising is currently enabled, 0 otherwise. */
 int tiku_bt_is_advertising(void);
 
@@ -164,6 +208,19 @@ int tiku_bt_is_advertising(void);
 
 /** @brief Scan-cache entries; a device first heard once it is full is lost. */
 #define TIKU_BT_SCAN_MAX         16U
+
+/**
+ * @brief Called with every advertising report while a scan runs: the HCI
+ *        event type (0 ADV_IND, 1 ADV_DIRECT_IND, 2 ADV_SCAN_IND,
+ *        3 ADV_NONCONN_IND, 4 SCAN_RSP), the address and its type, the AD
+ *        data and the RSSI.  @p addr is in on-air (little-endian) order.
+ */
+typedef void (*tiku_bt_adv_hook_t)(uint8_t evt_type, uint8_t addr_type,
+                                   const uint8_t addr[6], const uint8_t *ad,
+                                   uint8_t ad_len, int8_t rssi);
+
+/** @brief Install the advertising-report hook (NULL removes it). */
+void tiku_bt_set_adv_hook(tiku_bt_adv_hook_t fn);
 
 /** Max bytes of local name kept per scan entry (not NUL-terminated). */
 #define TIKU_BT_SCAN_NAME_MAX    24U
@@ -297,6 +354,20 @@ uint8_t tiku_bt_connections(tiku_bt_connection_t *out,
  */
 int tiku_bt_disconnect(uint16_t handle);
 
+/**
+ * @brief Pair on a link with LE Secure Connections (Just Works) and bond.
+ *
+ * As the central this end pairs, the new key replacing a stored bond; as the
+ * peripheral it asks the central to (Security Request).  Encryption follows
+ * (tiku_bt_security() reaches 3), and the bond survives a reboot.
+ *
+ * @param handle  The link's connection handle, or 0xFFFF for the first
+ * @return TIKU_DRV_OK once started, TIKU_DRV_ERR_NOT_PRESENT if BT isn't up
+ *         or no link is active, TIKU_DRV_ERR_INVALID for an unknown handle
+ *         or a pairing that could not start
+ */
+int tiku_bt_pair(uint16_t handle);
+
 /*---------------------------------------------------------------------------*/
 /* GATT SERVER AND NOTIFICATIONS                                             */
 /*---------------------------------------------------------------------------*/
@@ -347,9 +418,9 @@ typedef int (*tiku_bt_char_write_t)(void *user, const uint8_t *data,
 /**
  * @brief One characteristic in a GATT service.
  *
- * A characteristic must supply either a static value or an on_read callback,
- * and the callback wins when both are set.  NOTIFY and INDICATE properties
- * auto-allocate a CCCD descriptor after the value handle.
+ * A static value or an on_read callback (which wins) supplies the value;
+ * NOTIFY and INDICATE add a CCCD after it.  A 128-bit UUID (uuid128, 16 bytes
+ * little-endian) replaces the 16-bit one when set.
  */
 typedef struct {
     uint16_t                    uuid;
@@ -359,10 +430,14 @@ typedef struct {
     tiku_bt_char_read_t   on_read;
     tiku_bt_char_write_t  on_write;
     void                       *user;
+    const uint8_t              *uuid128;
 } tiku_bt_char_t;
 
 /**
  * @brief One GATT service (Primary Service Declaration + N chars)
+ *
+ * A 128-bit UUID (uuid128, 16 bytes little-endian) replaces the 16-bit one
+ * when set.
  *
  * @note The @p chars array must outlive the registration; the registering
  *       module defines it `static const` at file scope.
@@ -371,6 +446,7 @@ typedef struct {
     uint16_t                    uuid;
     const tiku_bt_char_t *chars;
     uint8_t                     char_count;
+    const uint8_t              *uuid128;
 } tiku_bt_service_t;
 
 /**
@@ -464,13 +540,44 @@ int tiku_bt_client_subscribe(uint16_t conn_handle,
  *
  * @param char_uuid  16-bit UUID of the characteristic
  * @param value      Bytes to put in the notification PDU
- * @param len        Length of @p value (must fit in the default MTU - 3)
- * @return TIKU_DRV_OK on send (or no-subscriber no-op),
- *         TIKU_DRV_ERR_INVALID if BT isn't up or for a NULL value, an
- *         unknown UUID or an oversize value.
+ * @param len        Length of @p value, at most the link's ATT MTU - 3
+ * @return As tiku_bt_notify_char().
  */
 int tiku_bt_notify(uint16_t char_uuid, const uint8_t *value,
                          uint16_t len);
+
+/** @brief A notification the controller has no buffer for now; retry once
+ *         tiku_bt_poll() has taken its completed packets. */
+#define TIKU_BT_ERR_BUSY         (-6)
+
+/**
+ * @brief Push a Handle Value Notification for characteristic @p c (as
+ *        registered, so one with a 128-bit UUID too).
+ *
+ * @return TIKU_DRV_OK on send (or with nobody subscribed),
+ *         TIKU_BT_ERR_BUSY while the controller's ACL buffers are full,
+ *         TIKU_DRV_ERR_INVALID if BT isn't up, for a NULL value, a
+ *         characteristic not registered or a value longer than the link's
+ *         ATT MTU - 3.
+ */
+int tiku_bt_notify_char(const tiku_bt_char_t *c, const uint8_t *value,
+                        uint16_t len);
+
+/** @brief 1 when a client has notifications on for @p c, else 0. */
+int tiku_bt_subscribed(const tiku_bt_char_t *c);
+
+/**
+ * @brief The largest notification value one packet carries on the first
+ *        link: its ATT MTU less 3, within one link-layer payload.  0 with no
+ *        link.
+ */
+uint16_t tiku_bt_notify_max(void);
+
+/**
+ * @brief Where the first link's security stands: 0 none (or no link),
+ *        1 pairing, 2 key agreed, 3 encrypted.
+ */
+int tiku_bt_security(void);
 
 /*---------------------------------------------------------------------------*/
 /* SMP BONDING STORE                                                         */

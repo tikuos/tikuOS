@@ -21,6 +21,8 @@
 #include "tiku.h"                            /* board pin macros              */
 #include "apollo510.h"                       /* GPIO PADKEY, PINCFG */
 #include <interfaces/bus/tiku_spi_bus.h>
+#include <interfaces/bluetooth/tiku_bt.h>
+#include <interfaces/bluetooth/tiku_bt_transport.h>
 #include <arch/ambiq/tiku_gpio_arch.h>
 #include <string.h>
 
@@ -262,7 +264,8 @@ int tiku_em9305_recv(uint8_t *buf, uint16_t cap, uint16_t *out_len,
      * a byte stream: one frame may carry part of an HCI packet (large packets
      * span frames) or several small packets back to back, such as coalesced
      * Number-Of-Completed-Packets events.  A caller that needs packet
-     * boundaries reassembles across calls, as tiku_ble_uart.c does.
+     * boundaries reassembles across calls, as the host stack's transport
+     * below does.
      */
     n = (uint16_t)(sts2 < cap ? sts2 : cap);
     rc = tiku_spi_read(buf, n);
@@ -452,6 +455,195 @@ int tiku_em9305_beacon_stop(void) {
     uint8_t en = 0x00u;
     uint8_t st = 0u;
     return tiku_em9305_hci_cmd(HCI_OP_LE_SET_ADV_ENABLE, &en, 1u, &st);
+}
+
+/*---------------------------------------------------------------------------*/
+/* DIE OWNERSHIP                                                             */
+/*---------------------------------------------------------------------------*/
+
+static uint8_t s_users;         /* TIKU_EM9305_USER_* bits holding the die */
+
+int tiku_em9305_acquire(uint8_t user) {
+    if (s_users == 0u) {
+        int rc = tiku_em9305_reset();
+        if (rc != TIKU_EM9305_OK) {
+            return rc;
+        }
+    }
+    s_users = (uint8_t)(s_users | user);
+    return TIKU_EM9305_OK;
+}
+
+void tiku_em9305_release(uint8_t user) {
+    s_users = (uint8_t)(s_users & (uint8_t)~user);
+    if (s_users == 0u && s_pins_done) {
+        tiku_ambiq_gpio_set(TIKU_BOARD_EM9305_EN_PIN, 0);
+    }
+}
+
+/*---------------------------------------------------------------------------*/
+/* HCI TRANSPORT FOR THE HOST STACK                                          */
+/*---------------------------------------------------------------------------*/
+
+/* The radio's side of SPI is a byte stream: a frame holds part of a packet
+ * or several, so frames gather here until a whole packet is in.  A frame is
+ * read only while a whole one fits (STS2 counts at most 255 bytes), so the
+ * stream holds a partial packet of up to 258 bytes and one frame more. */
+#define EM_FRAME_MAX    255u
+#define EM_STREAM_MAX   560u
+
+static uint8_t  s_hci_up;                   /* the host stack owns HCI    */
+static uint8_t  s_stream[EM_STREAM_MAX];
+static uint16_t s_stream_len;
+
+/**
+ * @brief Append the frames the radio has pending (RDY high) to the stream.
+ *
+ * Non-blocking.  Runs before every send as well as every receive: a write
+ * the host starts while a frame waits collides with it and is lost.
+ */
+static void em_slurp(void) {
+    uint8_t guard;
+
+    for (guard = 0u; guard < 16u; guard++) {
+        uint16_t l = 0u;
+
+        if ((uint16_t)(EM_STREAM_MAX - s_stream_len) < EM_FRAME_MAX ||
+            tiku_em9305_recv(s_stream + s_stream_len, EM_FRAME_MAX, &l, 0u)
+            != TIKU_EM9305_OK) {
+            return;
+        }
+        s_stream_len = (uint16_t)(s_stream_len + l);
+    }
+}
+
+/**
+ * @brief The length of the packet at the front of the stream, 0 while part
+ *        of it is still in the radio.
+ *
+ * A byte that cannot start an event (0x04) or an ACL packet (0x02) is
+ * dropped, as is an ACL header longer than the stream holds: the stream
+ * resyncs on the next packet.
+ */
+static uint16_t em_front_len(void) {
+    for (;;) {
+        uint16_t need = 0u;
+
+        if (s_stream_len == 0u) {
+            return 0u;
+        }
+        if (s_stream[0] == 0x04u) {
+            if (s_stream_len < 3u) {
+                return 0u;
+            }
+            need = (uint16_t)(3u + s_stream[2]);
+        } else if (s_stream[0] == 0x02u) {
+            if (s_stream_len < 5u) {
+                return 0u;
+            }
+            need = (uint16_t)(5u + (s_stream[3] |
+                                    ((uint16_t)s_stream[4] << 8)));
+        }
+        if (need != 0u && need <= (uint16_t)(EM_STREAM_MAX - EM_FRAME_MAX)) {
+            return (s_stream_len >= need) ? need : 0u;
+        }
+        s_stream_len--;
+        memmove(s_stream, s_stream + 1, s_stream_len);
+    }
+}
+
+/** @brief tiku_bt_transport_t send: one whole HCI packet, framed. */
+static int em_bt_send(const uint8_t *pkt, uint16_t len) {
+    if (!s_hci_up) {
+        return TIKU_DRV_ERR_NOT_PRESENT;
+    }
+    if (pkt == NULL || len < 2u) {
+        return TIKU_DRV_ERR_INVALID;
+    }
+    em_slurp();
+    return (tiku_em9305_send(pkt, len) == TIKU_EM9305_OK) ? TIKU_DRV_OK
+                                                          : TIKU_DRV_ERR_IO;
+}
+
+/**
+ * @brief tiku_bt_transport_t recv: the next whole packet, or 0.  A packet
+ *        larger than @p out_max stays for a caller with room for it.
+ */
+static int em_bt_recv(uint8_t *out, uint16_t out_max) {
+    uint16_t n;
+
+    if (out == NULL || out_max < 2u) {
+        return TIKU_DRV_ERR_INVALID;
+    }
+    if (!s_hci_up) {
+        return 0;
+    }
+    em_slurp();
+    n = em_front_len();
+    if (n == 0u) {
+        return 0;
+    }
+    if (n > out_max) {
+        return TIKU_DRV_ERR_INVALID;
+    }
+    memcpy(out, s_stream, n);
+    s_stream_len = (uint16_t)(s_stream_len - n);
+    memmove(s_stream, s_stream + n, s_stream_len);
+    return (int)n;
+}
+
+static int em_bt_ready(void) {
+    return s_hci_up;
+}
+
+/** @brief The stack waits for a reply: until RDY rises or @p ms pass. */
+static void em_bt_wait(uint16_t ms) {
+    (void)wait_rdy_high(ms);
+}
+
+static const char *em_bt_version(void) {
+    return "EM9305";
+}
+
+static const tiku_bt_transport_t em_bt_transport = {
+    .send     = em_bt_send,
+    .recv     = em_bt_recv,
+    .is_ready = em_bt_ready,
+    .wait     = em_bt_wait,
+    .version  = em_bt_version,
+};
+
+int tiku_bt_controller_power(uint8_t on) {
+    uint8_t addr[6];
+    int rc;
+
+    if (!on) {
+        if (s_hci_up) {
+            tiku_bt_shutdown();
+            s_hci_up = 0u;
+            s_stream_len = 0u;
+            tiku_em9305_release(TIKU_EM9305_USER_BLE);
+        }
+        return TIKU_DRV_OK;
+    }
+    if (s_hci_up) {
+        return TIKU_DRV_OK;
+    }
+    if (tiku_em9305_acquire(TIKU_EM9305_USER_BLE) != TIKU_EM9305_OK) {
+        return TIKU_DRV_ERR_NOT_PRESENT;    /* RDY never rose: no radio */
+    }
+    s_stream_len = 0u;
+    s_hci_up = 1u;
+    (void)tiku_bt_register_transport(&em_bt_transport);
+    rc = tiku_bt_init();
+    /* A radio that answered no identity query is not up: say so. */
+    if (rc == TIKU_DRV_OK && tiku_bt_addr(addr) != TIKU_DRV_OK) {
+        rc = TIKU_DRV_ERR_TIMEOUT;
+    }
+    if (rc != TIKU_DRV_OK) {
+        (void)tiku_bt_controller_power(0u);
+    }
+    return rc;
 }
 
 #endif /* TIKU_DRV_BLE_EM9305_ENABLE */

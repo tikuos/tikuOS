@@ -180,11 +180,11 @@ BOARD_PLATFORM_esp32c61_devkitc  := esp32c61
 
 # Both Apollo510 EVBs carry the U11 eMMC (8 GB), the U14 PSRAM (64 MB) and
 # switched USB rails; the U12 octal NOR is fitted on the green EVB only.  The
-# USB high-speed PHY reference comes from the EM9305 die's 12 MHz EXTREFCLK
-# on the Blue board (USBHS_CLK_EM9305) and from the board's own crystal on
-# the green one (USBHS_CLK_XTAL).
+# Blue board's package adds the EM9305 BLE radio die (EM9305), whose 12 MHz
+# EXTREFCLK is also its USB high-speed PHY reference (USBHS_CLK_EM9305); the
+# green board takes that reference from its own crystal (USBHS_CLK_XTAL).
 BOARD_CAPS_apollo510_evb       := EMMC PSRAM NOR USB_RAILS USBHS_CLK_XTAL
-BOARD_CAPS_apollo510b_evb      := EMMC PSRAM USB_RAILS USBHS_CLK_EM9305
+BOARD_CAPS_apollo510b_evb      := EMMC PSRAM USB_RAILS USBHS_CLK_EM9305 EM9305
 BOARD_CAPS_pico2w              := CYW43
 
 # No driver on these boards is gated on a capability.  Every board declares
@@ -394,6 +394,15 @@ $(error TIKU_DRV_PSRAM_ENABLE=1 requires a board with PSRAM fitted \
 Apollo510 EVBs, reached over MSPI0; without it the tier has no backing store. \
 Build with BOARD=apollo510_evb or BOARD=apollo510b_evb, or drop \
 TIKU_DRV_PSRAM_ENABLE.)
+endif
+endif
+
+ifeq ($(TIKU_DRV_BLE_EM9305_ENABLE),1)
+ifeq ($(call board_has,EM9305),)
+$(error TIKU_DRV_BLE_EM9305_ENABLE=1 requires a board with the EM9305 radio \
+(currently BOARD=$(BOARD), MCU=$(MCU)). The die sits in the AP510NFB \
+package of the Apollo510B (Blue) EVB, on IOM6 SPI. Build with \
+BOARD=apollo510b_evb, or drop TIKU_DRV_BLE_EM9305_ENABLE.)
 endif
 endif
 
@@ -717,6 +726,34 @@ endif
 HAS_TIKUKITS     ?= $(if $(wildcard $(PROJ_DIR)/tikukits),1,0)
 HAS_DRIVERS      ?= $(if $(wildcard $(PROJ_DIR)/drivers),1,0)
 HAS_PRESENTATION ?= $(if $(wildcard $(PROJ_DIR)/presentation/Makefile),1,0)
+
+# Bluetooth.  tikuOS's BLE host stack (tikukits/net/bluetooth) runs over the
+# build's HCI controller: the CYW43439's BTSDIO, up with the Wi-Fi at boot,
+# or the ESP32-C61's controller or the EM9305 die, which `bt on` powers on
+# demand.  A board with the EM9305 gets its driver by default, as a declared
+# part does, wherever the kits are present.
+ifneq ($(MINIMAL),1)
+ifneq ($(call board_has,EM9305),)
+ifeq ($(HAS_TIKUKITS),1)
+TIKU_DRV_BLE_EM9305_ENABLE ?= 1
+endif
+endif
+endif
+ifeq ($(TIKU_DRV_BLE_EM9305_ENABLE),1)
+ifneq ($(HAS_TIKUKITS),1)
+$(error TIKU_DRV_BLE_EM9305_ENABLE=1 needs tikukits/: the BLE host stack \
+over the radio is tikukits/net/bluetooth. Check the kits out, or drop \
+TIKU_DRV_BLE_EM9305_ENABLE)
+endif
+endif
+TIKU_BT_HOST := $(if $(filter 1,$(TIKU_DRV_WIFI_CYW43_BT_ENABLE) \
+                  $(TIKU_DRV_BLE_ESP_ENABLE) $(TIKU_DRV_BLE_EM9305_ENABLE)),1,0)
+TIKU_BT_ON_DEMAND := $(if $(filter 1,$(TIKU_DRV_BLE_ESP_ENABLE) \
+                       $(TIKU_DRV_BLE_EM9305_ENABLE)),1,0)
+# Pairing's AES and P-256 in software, for a controller without the LE crypto
+# commands; the CYW43439, the ESP32-C61 and the EM9305 all answer them, so it
+# is off unless a build asks for it.
+TIKU_BT_SW_CRYPTO ?= 0
 
 # ---------------------------------------------------------------------------
 # Per-kit enable flags
@@ -1092,21 +1129,14 @@ endif
 ifeq ($(BOARD),apollo510b_evb)
 CFLAGS += -DTIKU_CONSOLE_UART1
 endif
-# EM9305 BLE radio on IOM6 SPI (apollo510b only, opt-in).  It defines
-# TIKU_SPI_IOM_ENABLE, which builds tiku_spi_arch.c as the IOM SPI master
-# driver in place of its stub.  The EM9305 SPI-HCI transport and the `ble`
-# shell command (a first-contact probe) are added in the source blocks below,
-# after SRCS is assigned.  The pinout is in the apollo510b board header, so
-# any other Ambiq MCU is refused.
+# EM9305 BLE radio on IOM6 SPI (the Blue EVB, on by default there).  It
+# defines TIKU_SPI_IOM_ENABLE, which builds tiku_spi_arch.c as the IOM SPI
+# master driver in place of its stub.  The EM9305 SPI-HCI transport and the
+# `ble` shell command (a first-contact probe) are added in the source blocks
+# below, after SRCS is assigned.  The capability refusals near the top have
+# already checked the board.
 ifeq ($(TIKU_DRV_BLE_EM9305_ENABLE),1)
-ifneq ($(MCU),apollo510b)
-$(error TIKU_DRV_BLE_EM9305_ENABLE=1 requires MCU=apollo510b (the only board \
-with the EM9305 radio); currently MCU=$(MCU))
-endif
 CFLAGS += -DTIKU_DRV_BLE_EM9305_ENABLE=1 -DTIKU_SPI_IOM_ENABLE=1
-# TIKU_HAS_BLE is the generic BLE capability: the BLE serial facade and the
-# BASIC BLE words test it, not the radio chip.
-CFLAGS += -DTIKU_HAS_BLE=1
 endif
 CFLAGS += -I$(PROJ_DIR)
 # CMSIS register headers, vendored in arch/ambiq/cmsis/: apollo510.h and
@@ -1755,12 +1785,9 @@ ifeq ($(TIKU_FLPR_ENABLE),1)
 SRCS += arch/nordic/tiku_flpr_arch.c
 CFLAGS += -DTIKU_FLPR_ENABLE=1
 # The FLPR firmware is the on-die BLE controller; the BLE serial facade backs
-# the BASIC BLE words over its mailbox.  Skipped when
-# TIKU_DRV_BLE_EM9305_ENABLE=1, the flag under which the Ambiq source block
-# adds the same file.
-ifneq ($(TIKU_DRV_BLE_EM9305_ENABLE),1)
+# the BASIC BLE words over its mailbox.  SRCS is de-duplicated, so the host
+# stack's block adding the same file is harmless.
 SRCS += interfaces/bluetooth/tiku_ble_serial.c
-endif
 # The ATT/GATT host for the FLPR controller runs on the M33; the FLPR
 # forwards L2CAP frames over the mailbox.
 SRCS += interfaces/bluetooth/tiku_ble_host.c
@@ -1801,14 +1828,10 @@ SRCS += arch/ambiq/tiku_i2c_arch.c
 SRCS += arch/ambiq/tiku_onewire_arch.c
 SRCS += arch/ambiq/tiku_wake_arch.c
 SRCS += arch/ambiq/tiku_spi_arch.c
-# EM9305 BLE radio transport over the IOM SPI master above (apollo510b only);
-# tiku_ble_uart.c runs the connectable GATT/NUS host stack on that transport.
+# EM9305 BLE radio over the IOM SPI master above (apollo510b): its SPI-HCI
+# transport carries the host stack (tikukits/net/bluetooth).
 ifeq ($(TIKU_DRV_BLE_EM9305_ENABLE),1)
 SRCS += arch/ambiq/tiku_em9305.c
-SRCS += arch/ambiq/tiku_ble_uart.c
-# The BLE serial facade over the host stack; it backs the BASIC BLE words and
-# any app.
-SRCS += interfaces/bluetooth/tiku_ble_serial.c
 endif
 SRCS += arch/ambiq/tiku_lcd_arch.c
 # CryptoCell-312 TRNG (shared across apollo4l/4p/510) -- backs the cert-TLS
@@ -2372,10 +2395,11 @@ SRCS += kernel/link/tiku_link_console.c
 # TIKU_LINK_BLE_ENABLE=1 compiles the BLE link: a board's window session over
 # the BLE serial facade, the Nordic UART Service byte pipe.  Only the
 # applications overlay registers it (TIKU_APPL_GUI_BLE).  The facade needs a
-# radio, TIKU_FLPR_ENABLE=1 on Nordic or TIKU_DRV_BLE_EM9305_ENABLE=1 on
-# apollo510b; without one the build stops with an error.
+# radio: the host stack's (TIKU_BT_HOST, the EM9305 by default on the
+# Apollo510B) or TIKU_FLPR_ENABLE=1 on Nordic; without one the build stops
+# with an error.
 ifeq ($(TIKU_LINK_BLE_ENABLE),1)
-ifeq ($(filter 1,$(TIKU_FLPR_ENABLE) $(TIKU_DRV_BLE_EM9305_ENABLE)),)
+ifeq ($(filter 1,$(TIKU_FLPR_ENABLE) $(TIKU_BT_HOST)),)
 $(error TIKU_LINK_BLE_ENABLE=1 needs the BLE serial facade under it; on \
 nordic add TIKU_FLPR_ENABLE=1)
 endif
@@ -2462,9 +2486,11 @@ endif
 ifneq ($(filter 1,$(TIKU_DRV_WIFI_CYW43_ENABLE) $(TIKU_DRV_WIFI_ESP_ENABLE)),)
 SRCS += kernel/shell/commands/tiku_shell_cmd_wifi.c
 endif
-# bt bonds prints a SHA-256 fingerprint of each key; SRCS is de-duplicated, so
-# a build that also lists the kit's SHA-256 compiles it once.
-ifneq ($(filter 1,$(TIKU_DRV_WIFI_CYW43_BT_ENABLE) $(TIKU_DRV_BLE_ESP_ENABLE)),)
+# The bt command drives the BLE host stack, so it builds with any controller
+# under it (TIKU_BT_HOST, above).  bt bonds prints a SHA-256 fingerprint of
+# each key; SRCS is de-duplicated, so a build that also lists the kit's
+# SHA-256 compiles it once.
+ifeq ($(TIKU_BT_HOST),1)
 SRCS += kernel/shell/commands/tiku_shell_cmd_bt.c
 SRCS += tikukits/crypto/sha256/tiku_kits_crypto_sha256.c
 endif
@@ -3240,11 +3266,32 @@ TIKU_KIT_NET_ENABLE=1)
 endif
 endif
 
-# Bluetooth Low Energy protocol stack: driver-agnostic. Pulled in
-# whenever a driver gives it a transport: the CYW43439's BTSDIO
-# (TIKU_DRV_WIFI_CYW43_BT_ENABLE) or the ESP32-C61 controller's in-memory
-# HCI (TIKU_DRV_BLE_ESP_ENABLE).
-ifneq ($(filter 1,$(TIKU_DRV_WIFI_CYW43_BT_ENABLE) $(TIKU_DRV_BLE_ESP_ENABLE)),)
+# Bluetooth Low Energy protocol stack: driver-agnostic.  Pulled in whenever a
+# driver gives it a transport (TIKU_BT_HOST, set beside HAS_TIKUKITS).  Code
+# tests TIKU_BT_HOST for the stack and TIKU_BT_ON_DEMAND for a controller
+# that `bt on` powers, not the chip.
+ifeq ($(TIKU_BT_HOST),1)
+CFLAGS += -DTIKU_BT_HOST=1
+ifeq ($(TIKU_BT_ON_DEMAND),1)
+CFLAGS += -DTIKU_BT_ON_DEMAND=1
+endif
+ifeq ($(TIKU_BT_SW_CRYPTO),1)
+CFLAGS += -DTIKU_BT_SW_CRYPTO=1
+endif
+# TIKU_HAS_BLE is the generic connectable-BLE capability: the BLE serial
+# facade over the stack (the Nordic UART Service byte pipe) and the BASIC BLE
+# words test it, not the radio chip.
+CFLAGS += -DTIKU_HAS_BLE=1
+SRCS += interfaces/bluetooth/tiku_ble_serial.c
+# TIKU_HAS_BLE_ADV is the broadcast one: the beacon, scans and the observer of
+# the tiku_ble_adv facade, its backend over the stack here, behind /sys/radio
+# and BLEBEACON/BLESCAN$.  On for the radios powered on demand; the Pico 2 W's
+# image, which carries the CYW43439 firmware, has no room (TIKU_BT_ADV=1).
+TIKU_BT_ADV ?= $(TIKU_BT_ON_DEMAND)
+ifeq ($(TIKU_BT_ADV),1)
+CFLAGS += -DTIKU_HAS_BLE_ADV=1
+SRCS += interfaces/bluetooth/tiku_ble_adv_hci.c
+endif
 include $(wildcard $(PROJ_DIR)/tikukits/net/bluetooth/build.mk)
 endif
 
