@@ -110,17 +110,16 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Default bit-bang pad for the tiku_bitbang demo: port 2 pin 5.
+ * @brief Default bit-bang output: LED0 on pad 11 (port 2, pin 3).
  *
- * The (port, pin) GPIO API maps to pad (port - 1) * 8 + pin, so this is pad
- * 13, which is also the eMMC RSTn on this board (TIKU_BOARD_EMMC_PAD_RST).
- * Override either value from the build.
+ * This shares the LED, not the eMMC reset or console signals.
+ * Override either value for an external output.
  */
 #ifndef TIKU_BOARD_BSCAT_PORT
 #define TIKU_BOARD_BSCAT_PORT       2U   /**< Port 2 -> pad base 8. */
 #endif
 #ifndef TIKU_BOARD_BSCAT_PIN
-#define TIKU_BOARD_BSCAT_PIN        5U   /**< pin 5 -> pad 13. */
+#define TIKU_BOARD_BSCAT_PIN        3U   /**< pin 3 -> pad 11. */
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -134,8 +133,8 @@
  * reads the 1-Wire, I2C0 or SPI0 pad macros; the radio's SPI pads are
  * TIKU_BOARD_SPI_* below.
  */
-/** @brief ADC gate: defined, so the ADC API builds; the value is not read. */
-#define TIKU_BOARD_ADC_AVAILABLE    0
+/** @brief ADC driver is available. */
+#define TIKU_BOARD_ADC_AVAILABLE    1
 /** @brief I2C gate: defined, so the I2C bus API builds on the stub driver. */
 #define TIKU_BOARD_I2C_BRW_100K     1
 /** @brief No 1-Wire bus: /dev/sensors carries no ds18b20 node. */
@@ -190,7 +189,7 @@
 /** @brief Pad that exports the 32 kHz sleep clock to the EM9305. */
 #define TIKU_BOARD_EM9305_CLK32K_PIN 138U
 /** @brief FUNCSEL that puts pad 138 on the 32 kHz clock output. */
-#define TIKU_BOARD_EM9305_CLK32K_FUNCSEL 3U
+#define TIKU_BOARD_EM9305_CLK32K_FUNCSEL 1U
 
 /*---------------------------------------------------------------------------*/
 /* EMMC (U11) ON SDIO0                                                       */

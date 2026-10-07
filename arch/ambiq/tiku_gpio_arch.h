@@ -90,9 +90,8 @@ void tiku_ambiq_gpio_init_output(uint32_t pad);
  * @brief Write @p cfg to a pad's PINCFG register under the PADKEY lock.
  *
  * For drivers that give pads to a peripheral (MSPI, SDIO): the caller
- * composes the whole PINCFG value.  A pad number of 224 or more is ignored.
- *
- * @note Defined for the Apollo510 only; the Apollo4 Lite file lacks it.
+ * composes the whole PINCFG value. Out-of-range pad numbers are ignored:
+ * 224 or more on Apollo510, 128 or more on Apollo4.
  */
 void tiku_ambiq_gpio_pad_config(uint32_t pad, uint32_t cfg);
 

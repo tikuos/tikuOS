@@ -45,6 +45,13 @@ static inline void pad_config(uint32_t pad, uint32_t cfg) {
     GPIO->PADKEY = 0u;
 }
 
+/** @brief Write a pad configuration; ignore indices outside PINCFG0..127. */
+void tiku_ambiq_gpio_pad_config(uint32_t pad, uint32_t cfg) {
+    if (pad < TIKU_AMBIQ_GPIO_NUM_PADS) {
+        pad_config(pad, cfg);
+    }
+}
+
 /*---------------------------------------------------------------------------*/
 /* RAW-PAD HELPERS                                                           */
 /*---------------------------------------------------------------------------*/

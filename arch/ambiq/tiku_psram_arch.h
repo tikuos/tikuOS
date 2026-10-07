@@ -186,9 +186,9 @@ typedef struct {
 /**
  * @brief Power MSPI0, configure it for octal DDR, reset the device.
  *
- * Performs table-1 steps 1-18 at @p clk.  Every wait is spin-bounded.  An
- * IO clock that does not start powers the domain off again; a failed power-up
- * or device reset leaves the domain enabled and the driver down.
+ * Every wait is bounded. Failure stops the clock and powers the domain off;
+ * a failed device reset also releases the pads. After a PIO timeout, call
+ * deinit/init before retrying; detach allocator users before power-down.
  *
  * @param clk  TIKU_PSRAM_CLK_* -- use 48 MHz for bring-up
  * @return TIKU_PSRAM_OK, or the error of the step that failed
@@ -337,8 +337,8 @@ int tiku_psram_xip_enabled(void);
 /**
  * @brief Arm a transfer and return; collect it with tiku_psram_dma_wait().
  *
- * Takes the arguments of tiku_psram_dma() and also refuses (ERR_ARG) while
- * a transfer is armed.
+ * Takes the arguments of tiku_psram_dma(). Returns TIKU_PSRAM_ERR_ARG while
+ * another split transfer is armed.
  */
 tiku_psram_err_t tiku_psram_dma_start(uint32_t dev_addr, void *sram,
                                       uint32_t n, int to_device);
@@ -350,6 +350,7 @@ tiku_psram_err_t tiku_psram_dma_wait(void);
 /**
  * @brief Blocking DMA between SRAM and the device (word-aligned, n%4==0).
  *        Cache coherency is the caller's job.  XIP must be off.
+ * @note Returns TIKU_PSRAM_ERR_ARG while a split transfer is armed.
  */
 tiku_psram_err_t tiku_psram_dma(uint32_t dev_addr, void *sram, uint32_t n,
                                 int to_device);

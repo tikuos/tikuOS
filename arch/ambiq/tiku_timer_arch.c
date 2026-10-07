@@ -18,6 +18,7 @@
 #include "tiku_timer_arch.h"
 #include "tiku_cpu_common.h"   /* tiku_cpu_ambiq_delay_us() */
 #include "kernel/scheduler/tiku_sched.h"
+#include "kernel/cpu/tiku_hang.h"
 
 /**
  * @defgroup SYST Cortex-M SysTick registers (System Control Space)
@@ -94,6 +95,7 @@ void tiku_ambiq_tick_advance_n(unsigned long n) {
         s_seconds += s_subsec / TIKU_CLOCK_ARCH_SECOND;
         s_subsec   = s_subsec % TIKU_CLOCK_ARCH_SECOND;
     }
+    tiku_hang_tick();
     tiku_sched_notify();
 }
 

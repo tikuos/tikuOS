@@ -25,7 +25,7 @@
  *
  * The requested timeout is (isel / 32768) s, at most 2 s for a 16-bit isel,
  * realised on the finest LFRC tap that holds it in at most 255 counts.
- * Requests below one 128 Hz tick (~7.8 ms) round up to one tick.
+ * Requests round up to one nominal LFRC/8 tick (~8.9 ms).
  *
  * @param isel    Interval selector (clock divider on a 32768 Hz basis).
  * @param clksel  Out: WDT_CFG_CLKSEL field value (1, 2 or 3).
@@ -33,32 +33,11 @@
  */
 static void tiku_ambiq_wdt_map(tiku_wdt_interval_t isel,
                                uint32_t *clksel, uint32_t *resval) {
-    uint32_t target_ms = ((uint32_t)isel * 1000u) / 32768u;
-    uint32_t ticks;
-
-    if (target_ms == 0u) {
-        target_ms = 1u;
-    }
-
-    /* CLKSEL values 1/2/3 are written as numbers: the CMSIS names differ
-     * between parts (here WDT_CFG_CLKSEL_LFRC_DIV8/_DIV64/_DIV1K; Apollo4
-     * _128HZ/_16HZ/_1HZ).  The mapping treats them as 128/16/1 Hz taps. */
-    if (target_ms <= 1992u) {          /* 128 Hz: up to 255 * 7.8125 ms */
-        *clksel = 1u;
-        ticks   = (target_ms * 128u + 500u) / 1000u;
-    } else if (target_ms <= 15937u) {  /* 16 Hz: up to 255 * 62.5 ms    */
-        *clksel = 2u;
-        ticks   = (target_ms * 16u + 500u) / 1000u;
-    } else {                           /* 1 Hz: coarsest, up to 255 s    */
-        *clksel = 3u;
-        ticks   = (target_ms + 500u) / 1000u;
-    }
-
+    /* LFRC is nominally 900 Hz; CLKSEL 1 divides it by eight. */
+    uint32_t ticks = ((uint32_t)isel * 900u + 262143u) / 262144u;
+    *clksel = 1u;
     if (ticks == 0u) {
         ticks = 1u;
-    }
-    if (ticks > 255u) {
-        ticks = 255u;
     }
     *resval = ticks;
 }
@@ -130,4 +109,10 @@ void tiku_cpu_ambiq_watchdog_resume_arch(int kick_on_resume) {
  */
 void tiku_cpu_ambiq_watchdog_kick_arch(void) {
     WDT->RSTRT = TIKU_AMBIQ_WDT_KICK_KEY;
+}
+
+/** @brief Reset after the check-in watchdog has saved its hang record. */
+void tiku_hang_arch_reset(void)
+{
+    NVIC_SystemReset();
 }

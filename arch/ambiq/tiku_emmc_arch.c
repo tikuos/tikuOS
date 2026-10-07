@@ -355,6 +355,7 @@ static tiku_emmc_err_t emmc_cmd_x(uint8_t idx, uint32_t arg, unsigned resp_type,
     const uint32_t inhibit = SDIO0_PRESENT_CMDINHCMD_Msk |
                              (data ? SDIO0_PRESENT_CMDINHDAT_Msk : 0u);
 
+    s_last_err = 0u;
     for (spins = 0u; spins < EMMC_CMD_SPINS; spins++) {
         if ((SDIO0->PRESENT & inhibit) == 0u) { break; }
         poll_backoff(spins);
@@ -558,15 +559,14 @@ static tiku_emmc_err_t emmc_power_on(void)
      *                                     the host's system and card clocks
      *
      * The vendor HAL does (2) with am_hal_clkmgr_clock_request(HFRC) and (3)
-     * in am_hal_sdhc_power_control().  tiku_emmc_deinit() does not undo (2)
-     * or (3). */
+     * in am_hal_sdhc_power_control().  Deinit releases both clock requests. */
     PWRCTRL->DEVPWREN |= PWRCTRL_DEVPWREN_PWRENSDIO0_Msk;
     __DSB();
     while (((PWRCTRL->DEVPWRSTATUS & PWRCTRL_DEVPWRSTATUS_PWRSTSDIO0_Msk) == 0u)
            && --spins != 0u) { }
     if (spins == 0u) { return TIKU_EMMC_ERR_POWER; }
 
-    CLKGEN->MISC |= CLKGEN_MISC_FRCHFRC_Msk;
+    tiku_ambiq_clock_force(TIKU_AMBIQ_CLOCK_EMMC, CLKGEN_MISC_FRCHFRC_Msk);
     __DSB();
 
     MCUCTRL->SDIO0CTRL |= (MCUCTRL_SDIO0CTRL_SDIO0SYSCLKEN_Msk |
@@ -902,15 +902,22 @@ tiku_emmc_err_t tiku_emmc_hs200(void)
 fallback:
     emmc_set_taps(0u, 0u, 0);
     SDIO0->AUTO_b.UHSMODESEL = 0u;
-    (void)emmc_switch(EXT_CSD_HS_TIMING, 1u);
-    (void)emmc_set_clock(48000000u);
     emmc_recover_lines();
-    {   /* read the pattern back to check the fallback */
-        tiku_emmc_err_t v = tiku_emmc_read_blocks(lba, 1u, rd);
-        SHELL_PRINTF("  hs200: failed, back at HS 48 (%s)\n",
-                     (v == TIKU_EMMC_OK && memcmp(pat, rd, 512u) == 0)
-                     ? "verified" : "AND THE FALLBACK READ FAILED");
+    rc = emmc_set_clock(400000u);
+    if (rc == TIKU_EMMC_OK) { rc = emmc_set_bus_width(8u); }
+    if (rc == TIKU_EMMC_OK) { rc = emmc_set_high_speed(48000000u); }
+    if (rc == TIKU_EMMC_OK) {
+        rc = tiku_emmc_read_blocks(lba, 1u, rd);
+        if (rc == TIKU_EMMC_OK && memcmp(pat, rd, 512u) != 0) {
+            rc = TIKU_EMMC_ERR_CMD;
+        }
     }
+    if (rc != TIKU_EMMC_OK) {
+        tiku_emmc_deinit();
+        SHELL_PRINTF("  hs200: fallback failed; card shut down, reinitialize\n");
+        return rc;
+    }
+    SHELL_PRINTF("  hs200: fallback to 8-bit high-speed verified\n");
     return TIKU_EMMC_ERR_CLOCK;
 }
 
@@ -1032,16 +1039,16 @@ tiku_emmc_err_t tiku_emmc_init_at(unsigned width, uint32_t hz)
             cid[i * 4 + 3] = (uint8_t)(resp[3 - i]);
         }
         s_id.mfr_id  = cid[1];
-        s_id.oem_id  = (uint16_t)cid[2];
-        for (i = 0; i < 6; i++) { s_id.product[i] = (char)cid[3 + i]; }
+        s_id.oem_id  = (uint16_t)cid[3];
+        for (i = 0; i < 6; i++) { s_id.product[i] = (char)cid[4 + i]; }
         s_id.product[6] = '\0';
-        s_id.rev     = cid[9];
-        s_id.serial  = ((uint32_t)cid[10] << 24) | ((uint32_t)cid[11] << 16) |
-                       ((uint32_t)cid[12] << 8)  |  (uint32_t)cid[13];
+        s_id.rev     = cid[10];
+        s_id.serial  = ((uint32_t)cid[11] << 24) | ((uint32_t)cid[12] << 16) |
+                       ((uint32_t)cid[13] << 8)  |  (uint32_t)cid[14];
         /* The year's base depends on EXT_CSD_REV, read later, so the raw
          * nibble is kept here and resolved once EXT_CSD is read. */
-        s_id.mfg_month = (uint8_t)(cid[14] & 0x0Fu);
-        s_id.mfg_year  = (uint16_t)((cid[14] >> 4) & 0x0Fu);   /* raw */
+        s_id.mfg_month = (uint8_t)((cid[15] >> 4) & 0x0Fu);
+        s_id.mfg_year  = (uint16_t)(cid[15] & 0x0Fu);
     }
 
     trace("cmd3-rca");
@@ -1078,10 +1085,14 @@ tiku_emmc_err_t tiku_emmc_init_at(unsigned width, uint32_t hz)
         s_devtype        = s_ext[EXT_CSD_DEVICE_TYPE];
         s_sa_timeout     = s_ext[EXT_CSD_S_A_TIMEOUT];
     }
-    /* Resolve the manufacture year now that EXT_CSD_REV is known: the MMC
-     * spec moved the epoch from 1997 to 2013 at EXT_CSD_REV >= 4. */
-    s_id.mfg_year = (uint16_t)((s_id.ext_csd_rev >= 4u ? 2013u : 1997u)
-                               + s_id.mfg_year);
+    /* Resolve the manufacture year using the revision's 16-year window. */
+    s_id.mfg_year = (uint16_t)(1997u + s_id.mfg_year);
+    if (s_id.ext_csd_rev >= 5u && s_id.mfg_year < 2010u) {
+        s_id.mfg_year += 16u;
+    }
+    if (s_id.ext_csd_rev >= 9u && s_id.mfg_year < 2023u) {
+        s_id.mfg_year += 16u;
+    }
 
     /* Transfer-ready.  The steps above are what the MMC spec requires; the
      * steps below only add speed.  s_ladder_us times the required part
@@ -1272,6 +1283,10 @@ void tiku_emmc_deinit(void)
     }
     PWRCTRL->DEVPWREN &= ~PWRCTRL_DEVPWREN_PWRENSDIO0_Msk;
     __DSB();
+    MCUCTRL->SDIO0CTRL &= ~(MCUCTRL_SDIO0CTRL_SDIO0SYSCLKEN_Msk |
+                            MCUCTRL_SDIO0CTRL_SDIO0XINCLKEN_Msk);
+    __DSB();
+    tiku_ambiq_clock_force(TIKU_AMBIQ_CLOCK_EMMC, 0u);
     s_up = 0u; s_clock_hz = 0u; s_asleep = 0u;
 }
 
@@ -1453,15 +1468,14 @@ tiku_emmc_err_t tiku_emmc_read_blocks(uint32_t lba, uint32_t n_blk, void *buf)
     return emmc_xfer(lba, n_blk, (uint8_t *)buf, 0);
 }
 
-tiku_emmc_err_t tiku_emmc_write_blocks(uint32_t lba, uint32_t n_blk,
-                                       const void *buf, int force)
+tiku_emmc_err_t tiku_emmc_write_check(uint32_t lba, uint32_t n_blk,
+                                      int force)
 {
-    tiku_emmc_err_t rc;
-
     if (!s_up)       { return TIKU_EMMC_ERR_POWER; }
     if (s_asleep)    { return TIKU_EMMC_ERR_STATE; }
     if (n_blk == 0u) { return TIKU_EMMC_ERR_ARG; }
-    if (s_sec_count && (lba + n_blk) > s_sec_count) {
+    if (s_sec_count && (n_blk > s_sec_count ||
+                        lba > s_sec_count - n_blk)) {
         return TIKU_EMMC_ERR_ARG;
     }
     /* Writes below the scratch region need @p force: the card holds data
@@ -1469,6 +1483,17 @@ tiku_emmc_err_t tiku_emmc_write_blocks(uint32_t lba, uint32_t n_blk,
     if (!force && lba < tiku_emmc_scratch_lba()) {
         return TIKU_EMMC_ERR_ARG;
     }
+
+    return TIKU_EMMC_OK;
+}
+
+tiku_emmc_err_t tiku_emmc_write_blocks(uint32_t lba, uint32_t n_blk,
+                                       const void *buf, int force)
+{
+    tiku_emmc_err_t rc;
+
+    rc = tiku_emmc_write_check(lba, n_blk, force);
+    if (rc != TIKU_EMMC_OK) { return rc; }
 
     /* The cast drops const because the shared transfer path is one function
      * for both directions; the write leg never writes through it. */
@@ -1862,7 +1887,6 @@ static int      s_stg_xip;
 
 tiku_emmc_err_t tiku_emmc_stage_open(void)
 {
-    s_stg_xip = 0;
     if (!bench_workspace_open()) { return TIKU_EMMC_ERR_NOMEM; }
     cyc_enable();
     s_stg_off = 0u;

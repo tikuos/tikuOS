@@ -94,8 +94,8 @@
  * drivers touch no hardware, and their init calls return -1.  No Ambiq code
  * reads the 1-Wire, I2C0 or SPI0 pad macros.
  */
-/** @brief ADC gate: defined, so the ADC API builds; the value is not read. */
-#define TIKU_BOARD_ADC_AVAILABLE    0
+/** @brief ADC driver is available. */
+#define TIKU_BOARD_ADC_AVAILABLE    1
 /** @brief I2C gate: defined, so the I2C bus API builds on the stub driver. */
 #define TIKU_BOARD_I2C_BRW_100K     1
 /** @brief No 1-Wire bus: /dev/sensors carries no ds18b20 node. */

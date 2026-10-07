@@ -15,6 +15,9 @@
  */
 
 #include "tiku_em9305.h"
+#if (TIKU_DRV_USB_ENABLE + 0)
+#include "tiku_usb_arch.h"
+#endif
 
 #if defined(TIKU_DRV_BLE_EM9305_ENABLE)
 
@@ -24,6 +27,7 @@
 #include <interfaces/bluetooth/tiku_bt.h>
 #include <interfaces/bluetooth/tiku_bt_transport.h>
 #include <arch/ambiq/tiku_gpio_arch.h>
+#include <arch/ambiq/tiku_cpu_common.h>
 #include <string.h>
 
 /*---------------------------------------------------------------------------*/
@@ -67,15 +71,9 @@ static inline void cs_release(void)  { tiku_ambiq_gpio_set(TIKU_BOARD_EM9305_CS_
 /** @brief Non-zero while the radio drives RDY high. */
 static inline int  rdy_high(void)    { return tiku_gpio_arch_read(EM_RDY_PORT, EM_RDY_PIN) == 1; }
 
-/**
- * @brief Uncalibrated busy delay of @p us * 20 volatile decrements.
- *
- * Sized for the 96 MHz core, and shorter at higher clocks.  It spaces the
- * reset pulse and the frame retries, and times the RDY waits.
- */
+/** @brief Delay using the current core clock. */
 static void busy_us(uint32_t us) {
-    volatile uint32_t n = us * 20u;
-    while (n) { n--; }
+    tiku_cpu_ambiq_delay_us(us);
 }
 
 /** @brief Write a pad's FUNCSEL (for the 32 kHz clock export). */
@@ -181,6 +179,11 @@ int tiku_em9305_reset(void) {
     tiku_spi_config_t cfg;
     uint32_t g;
 
+#if (TIKU_DRV_USB_ENABLE + 0)
+    if (tiku_usb_uses_em9305_clock()) {
+        return TIKU_EM9305_ERR_NOTREADY;
+    }
+#endif
     cfg.mode      = TIKU_SPI_MODE_0;
     cfg.bit_order = TIKU_SPI_MSB_FIRST;
     cfg.prescaler = 1u;                    /* non-zero for the bus check; the

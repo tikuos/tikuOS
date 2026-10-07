@@ -297,11 +297,16 @@ tiku_emmc_err_t tiku_emmc_read_start(uint32_t lba, uint32_t n_blk, void *buf);
  *
  * Writes a pattern block at the scratch region, reads it at each of 32 RX
  * taps and keeps the centre of the widest passing run.  A failure from the
- * HS200 switch on returns the card to high speed at 48 MHz.
+ * HS200 switch on falls back to 8-bit high speed at 48 MHz.
  *
- * @return TIKU_EMMC_OK; TIKU_EMMC_ERR_CLOCK after that fallback; before the
- *         switch, TIKU_EMMC_ERR_POWER, TIKU_EMMC_ERR_STATE (asleep), or the
- *         pattern write's error (TIKU_EMMC_ERR_CMD if it reads back wrong)
+ * @return TIKU_EMMC_OK; TIKU_EMMC_ERR_CLOCK when the fallback (400 kHz,
+ *         then 8-bit, then high-speed timing and clock, then the pattern
+ *         read back) passed; when a fallback step fails, that step's error
+ *         (TIKU_EMMC_ERR_CLOCK, TIKU_EMMC_ERR_CMD or TIKU_EMMC_ERR_TIMEOUT;
+ *         TIKU_EMMC_ERR_CMD for a wrong pattern) with the card
+ *         deinitialised; before the switch, TIKU_EMMC_ERR_POWER,
+ *         TIKU_EMMC_ERR_STATE (asleep), or the pattern write's error
+ *         (TIKU_EMMC_ERR_CMD if it reads back wrong)
  * @note Expects the 8-bit high-speed setting tiku_emmc_init() leaves.
  */
 tiku_emmc_err_t tiku_emmc_hs200(void);
@@ -312,6 +317,10 @@ tiku_emmc_err_t tiku_emmc_hs200(void);
  * Returns TIKU_EMMC_OK at once when no read is outstanding.
  */
 tiku_emmc_err_t tiku_emmc_read_wait(void);
+
+/** @brief Check write bounds, power and scratch policy without card I/O. */
+tiku_emmc_err_t tiku_emmc_write_check(uint32_t lba, uint32_t n_blk,
+                                      int force);
 
 /**
  * @brief Write @p n_blk 512-byte blocks starting at @p lba.

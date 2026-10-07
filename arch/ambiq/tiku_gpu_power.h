@@ -47,7 +47,7 @@
  *
  * Timed by the STIMER, which runs through WFI, with a hang-detector check-in
  * per pass.  A GPU error ends the run early, and the counters and checksum
- * cover the passes done; a failed blocking pass clears tiku_gpu_power_exact().
+ * cover completed passes. Transfer errors or pixel mismatches clear exact.
  *
  * @param kind   TIKU_GPU_W_*
  * @param side   surface side in pixels, clamped to 8..TIKU_GPU_SURF_MAX_SIDE
@@ -89,7 +89,7 @@ uint32_t tiku_gpu_power_cpu_ops(void);
 uint32_t tiku_gpu_power_wakes(void);
 /** @brief Sum of the destination's first, middle and last words. */
 uint32_t tiku_gpu_power_checksum(void);
-/** @brief Non-zero if the last probe's result matched its expected value. */
+/** @brief Non-zero when the final pixels (or reduction mean) match. */
 int      tiku_gpu_power_exact(void);
 
 /** @brief Address of the probe's destination surface, in SSRAM. */

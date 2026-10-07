@@ -192,11 +192,10 @@ tiku_nor_err_t tiku_nor_init_serial(unsigned clk);
 tiku_nor_err_t tiku_nor_enter_octal(unsigned clk);
 
 /**
- * @brief Enter octal and stay there even if an identity read fails.
+ * @brief Switch the device and controller from serial to octal DDR.
  *
- * For diagnostics that examine the octal configuration.  On
- * TIKU_NOR_ERR_ID from tiku_nor_enter_octal() it configures the controller
- * for octal anyway and returns TIKU_NOR_OK.
+ * Calls tiku_nor_enter_octal() and returns its result.  The shell's NOR
+ * commands enter octal through this name.
  */
 tiku_nor_err_t tiku_nor_enter_octal_raw(unsigned clk);
 
@@ -305,8 +304,8 @@ uint32_t tiku_nor_erase_count(void);
  * @brief Run norbench: erase, program, PIO, random, DMA and XIP reads.
  *
  * Each leg is DWT-timed and checked against its pattern, and prints bit-exact
- * or FAIL.  Works in the scratch sector, spending one sector erase and one
- * subsector erase per run.
+ * or FAIL. Uses eight 4 KB subsector erases for preparation and one for the
+ * erase test. The sector option replaces preparation with one 128 KB erase.
  *
  * @note Requires the NOR to be up; run `power nor` first.
  */
@@ -316,9 +315,9 @@ void tiku_nor_bench_run(void);
 void tiku_nor_bench_set_xip(int on);
 
 /**
- * @brief Include the 128 KB sector-erase leg; spends a second erase cycle.
+ * @brief Prepare with a 128 KB sector erase instead of eight 4 KB erases.
  *
- * tiku_nor_bench_run() does not read this flag: every run erases the sector.
+ * Off by default; the extra 96 KB is outside the tested span.
  */
 void tiku_nor_bench_set_sector(int on);
 

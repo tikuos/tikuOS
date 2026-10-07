@@ -14,9 +14,12 @@
  */
 
 #include "tiku_adc_arch.h"
+#include "tiku_cpu_common.h"
 #include "apollo510.h"      /* CMSIS register defs (ADC/PWRCTRL/CLKGEN) */
 
-/* Force HFRC on so the ADC clock runs; tiku_adc_arch_close() leaves it on. */
-#define TIKU_ADC_ARCH_CLK_ENABLE()   (CLKGEN->MISC_b.FRCHFRC = 1u)
+#define TIKU_ADC_ARCH_CLK_ENABLE() \
+    tiku_ambiq_clock_force(TIKU_AMBIQ_CLOCK_ADC, CLKGEN_MISC_FRCHFRC_Msk)
+#define TIKU_ADC_ARCH_CLK_DISABLE() \
+    tiku_ambiq_clock_force(TIKU_AMBIQ_CLOCK_ADC, 0u)
 
 #include "tiku_adc_ambiq.inl"

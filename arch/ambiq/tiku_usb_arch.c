@@ -178,6 +178,13 @@ _REFCLK. The 12 MHz reference has to arrive on some pad -- name it."
 #define DESC_STRING     3u
 #define DESC_INTERFACE  4u
 #define DESC_ENDPOINT   5u
+#define DESC_QUALIFIER  6u
+#define DESC_OTHERSPEED 7u
+
+static uint8_t s_desc_qualifier[10] = {
+    10, DESC_QUALIFIER, 0x00, 0x02,
+    0x02, 0x00, 0x00, TIKU_USB_EP0_MAXPACKET, 1, 0
+};
 
 static uint8_t s_desc_device[18] = {
     18, DESC_DEVICE,
@@ -561,13 +568,32 @@ static void ep0_get_descriptor(uint8_t type, uint8_t idx, uint16_t wLength)
         }
         ep0_reply(s_desc_device, sizeof s_desc_device, wLength);
         return;
+    case DESC_QUALIFIER:
+        /* A bring-up at full speed clears HSEnab, so the device is
+         * full-speed only and USB 2.0 9.6.2 has it stall the qualifier and
+         * the other-speed configuration. */
+        if (s_want != TIKU_USB_SPEED_HIGH) {
+            break;
+        }
+        s_desc_qualifier[4] = (s_class == TIKU_USB_CLASS_MSC) ? 0u : 2u;
+        ep0_reply(s_desc_qualifier, sizeof s_desc_qualifier, wLength);
+        return;
+    case DESC_OTHERSPEED:
+        if (s_want != TIKU_USB_SPEED_HIGH) {
+            break;
+        }
+        /* fall through */
     case DESC_CONFIG:
         /* Patch the bulk max-packet to the speed the chirp settled on.  The
          * host asks for the configuration after the bus reset, when the
          * speed is known. */
         {
-            uint8_t lo = (uint8_t)(s_bulk_mps & 0xFFu);
-            uint8_t hi = (uint8_t)(s_bulk_mps >> 8);
+            uint16_t mps = (type == DESC_OTHERSPEED)
+                         ? ((s_bulk_mps == 512u) ? 64u : 512u) : s_bulk_mps;
+            uint8_t lo = (uint8_t)(mps & 0xFFu);
+            uint8_t hi = (uint8_t)(mps >> 8);
+            s_desc_config_msc[1] = type;
+            s_desc_config[1] = type;
             if (s_class == TIKU_USB_CLASS_MSC) {
                 s_desc_config_msc[MSC_OFF_OUT_MPS]      = lo;
                 s_desc_config_msc[MSC_OFF_OUT_MPS + 1u] = hi;
@@ -594,9 +620,7 @@ static void ep0_get_descriptor(uint8_t type, uint8_t idx, uint16_t wLength)
         }
         break;
     default:
-        /* DEVICE_QUALIFIER (6) and OTHER_SPEED (7), which Linux asks a 2.00
-         * device for, are stalled at both speeds: the answer USB 2.0
-         * requires of a full-speed-only device. */
+        /* Unsupported descriptor type. */
         break;
     }
     ep0_stall();
@@ -1570,7 +1594,10 @@ void tiku_ambiq_usb_isr(void)
 
     s_n_irq++;
 
-    if (intrusb & INTRUSB_RESET)   { bus_reset(); }
+    if (intrusb & INTRUSB_RESET) {
+        bus_reset();
+        intrusb &= (uint8_t)~INTRUSB_SUSPEND;
+    }
     if (intrusb & INTRUSB_RESUME)  { s_n_resume++; }
     if (intrusb & INTRUSB_SUSPEND) { s_n_suspend++; }
 
@@ -1699,7 +1726,7 @@ tiku_usb_err_t tiku_usb_up_full(tiku_usb_speed_t want, tiku_usb_class_t cls,
     tiku_cpu_ambiq_delay_us(1000u);
 
     /* 9. PHY reference clock; the two speeds take different sources. */
-    CLKGEN->MISC |= CLKGEN_MISC_FRCHFRC_Msk;
+    tiku_ambiq_clock_force(TIKU_AMBIQ_CLOCK_USB, CLKGEN_MISC_FRCHFRC_Msk);
     __DSB();
     if (hs) {
         /*
@@ -1812,6 +1839,15 @@ tiku_usb_err_t tiku_usb_attach(int on)
     return TIKU_USB_OK;
 }
 
+int tiku_usb_uses_em9305_clock(void)
+{
+#if (TIKU_BOARD_HAS_USBHS_CLK_XTAL + 0)
+    return 0;
+#else
+    return s_up && s_want == TIKU_USB_SPEED_HIGH;
+#endif
+}
+
 void tiku_usb_down(void)
 {
     /* Stop being pumped before tearing anything down, so the shell cannot
@@ -1830,6 +1866,7 @@ void tiku_usb_down(void)
     PWRCTRL->DEVPWREN &= ~(PWRCTRL_DEVPWREN_PWRENUSB_Msk |
                            PWRCTRL_DEVPWREN_PWRENUSBPHY_Msk);
     __DSB();
+    tiku_ambiq_clock_force(TIKU_AMBIQ_CLOCK_USB, 0u);
     s_up = 0u; s_attached = 0u; s_speed = TIKU_USB_SPEED_NONE;
 }
 
@@ -1997,18 +2034,26 @@ void tiku_usb_msc_stats(uint32_t *cbw, uint32_t *rd, uint32_t *wr,
 uint32_t tiku_usb_msc_selftest(void)
 {
     uint32_t bad = 0u;
+    tiku_usbd_msc_t disk = s_msc;
+    disk.blocks = MSC_DISK_BLOCKS;
     /* must be accepted */
-    if (!tiku_usbd_msc_lba_ok(&s_msc, 0u, 1u))                        { bad |= 1u << 0; }
-    if (!tiku_usbd_msc_lba_ok(&s_msc, MSC_DISK_BLOCKS - 1u, 1u))      { bad |= 1u << 1; }
-    if (!tiku_usbd_msc_lba_ok(&s_msc, 0u, MSC_DISK_BLOCKS))           { bad |= 1u << 2; }
+    if (!tiku_usbd_msc_lba_ok(&disk, 0u, 1u))                        { bad |= 1u << 0; }
+    if (!tiku_usbd_msc_lba_ok(&disk, MSC_DISK_BLOCKS - 1u, 1u))      { bad |= 1u << 1; }
+    if (!tiku_usbd_msc_lba_ok(&disk, 0u, MSC_DISK_BLOCKS))           { bad |= 1u << 2; }
     /* must be refused */
-    if (tiku_usbd_msc_lba_ok(&s_msc, MSC_DISK_BLOCKS, 1u))            { bad |= 1u << 3; }
-    if (tiku_usbd_msc_lba_ok(&s_msc, MSC_DISK_BLOCKS - 1u, 2u))       { bad |= 1u << 4; }
-    if (tiku_usbd_msc_lba_ok(&s_msc, 0u, MSC_DISK_BLOCKS + 1u))       { bad |= 1u << 5; }
+    if (tiku_usbd_msc_lba_ok(&disk, MSC_DISK_BLOCKS, 1u))            { bad |= 1u << 3; }
+    if (tiku_usbd_msc_lba_ok(&disk, MSC_DISK_BLOCKS - 1u, 2u))       { bad |= 1u << 4; }
+    if (tiku_usbd_msc_lba_ok(&disk, 0u, MSC_DISK_BLOCKS + 1u))       { bad |= 1u << 5; }
     /* the overflow pair: lba + nblk wraps to 0 */
-    if (tiku_usbd_msc_lba_ok(&s_msc, 0xFFFFFF00u, 0x100u))            { bad |= 1u << 6; }
-    if (tiku_usbd_msc_lba_ok(&s_msc, 0x80000000u, 0x80000000u))       { bad |= 1u << 7; }
+    if (tiku_usbd_msc_lba_ok(&disk, 0xFFFFFF00u, 0x100u))            { bad |= 1u << 6; }
+    if (tiku_usbd_msc_lba_ok(&disk, 0x80000000u, 0x80000000u))       { bad |= 1u << 7; }
     return bad;
+}
+
+uint32_t tiku_usb_msc_hash_blocks(uint32_t nblocks)
+{
+    return (nblocks == 0u || nblocks > MSC_DISK_BLOCKS)
+         ? MSC_DISK_BLOCKS : nblocks;
 }
 
 /** @brief FNV-1a over the first @p nblocks of the RAM disk (0 or too many =
@@ -2016,9 +2061,7 @@ uint32_t tiku_usb_msc_selftest(void)
 uint32_t tiku_usb_msc_hash(uint32_t nblocks)
 {
     uint32_t h = 2166136261u, i, n;
-    if (nblocks == 0u || nblocks > MSC_DISK_BLOCKS) {
-        nblocks = MSC_DISK_BLOCKS;
-    }
+    nblocks = tiku_usb_msc_hash_blocks(nblocks);
     n = nblocks * MSC_BLOCK_SIZE;
     for (i = 0u; i < n; i++) { h = (h ^ s_disk[i]) * 16777619u; }
     return h;

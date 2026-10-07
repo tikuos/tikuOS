@@ -249,7 +249,10 @@ static int hp_trims_load(void) {
             PWRCTRL->DEVPWREN_b.PWRENOTP = 1u;
             spin = 100000u;
             while (PWRCTRL->DEVPWRSTATUS_b.PWRSTOTP == 0u) {
-                if (spin-- == 0u) { return -1; }
+                if (spin-- == 0u) {
+                    PWRCTRL->DEVPWREN_b.PWRENOTP = 0u;
+                    return -1;
+                }
             }
         }
     }

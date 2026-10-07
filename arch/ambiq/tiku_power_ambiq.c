@@ -45,22 +45,18 @@ uint32_t tiku_ambiq_stimer_now(void)
     return (v0 == v1) ? v0 : v2;
 }
 
-/* STIMER rate the probes time with: 32768 Hz on the crystal, or 900 Hz once
- * tiku_ambiq_power_autorun() has moved the STIMER to LFRC_NOMINAL, because
- * debugger-free deep sleep stops the crystal and the STIMER with it.  The LFRC
- * is uncalibrated, so windows timed on it are approximate.  Only the autorun
- * changes this value; tiku_ambiq_stimer_reclock() does not. */
-static uint32_t tiku_ambiq_stimer_hz = 32768u;
-#define TIKU_AMBIQ_STIMER_HZ tiku_ambiq_stimer_hz
+/* The timer driver owns the rate, including LFRC calibration. */
+#define TIKU_AMBIQ_STIMER_HZ tiku_ambiq_stimer_rate_hz()
 
 uint32_t tiku_ambiq_stimer_us(uint32_t counts)
 {
+    uint32_t hz = tiku_ambiq_stimer_rate_hz();
     /* On the crystal 1e6/32768 == 15625/512 exactly; on the LFRC the result
      * is only as accurate as the nominal rate. */
-    if (tiku_ambiq_stimer_hz == 32768u) {
+    if (hz == 32768u) {
         return (uint32_t)(((uint64_t)counts * 15625u) >> 9);
     }
-    return (uint32_t)(((uint64_t)counts * 1000000u) / tiku_ambiq_stimer_hz);
+    return hz ? (uint32_t)(((uint64_t)counts * 1000000u) / hz) : 0u;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -227,14 +223,19 @@ static uint32_t ambiq_probe(uint32_t ms, unsigned flags, int spin)
     uint32_t hz_used = TIKU_AMBIQ_STIMER_HZ;
     uint32_t lfrc_hz = 0u;
     uint32_t elp_saved = 0u;
+    uint32_t uart_was_on = 0u;
     uint32_t target;
 
     if (!spin && (flags & TIKU_AMBIQ_SLEEP_STOP_UART) != 0u) {
-        /* Wait 4 ms for the caller's last console output to drain, then
-         * power the UART1 domain off: an enabled UART holds a standing HFRC
-         * request, which keeps HFRC running in deep sleep. */
+        /* Drain output before releasing the console's HFRC request. */
         tiku_cpu_ambiq_delay_us(4000u);
+#if defined(TIKU_CONSOLE_UART1)
+        uart_was_on = PWRCTRL->DEVPWREN_b.PWRENUART1;
         PWRCTRL->DEVPWREN_b.PWRENUART1 = 0u;
+#else
+        uart_was_on = PWRCTRL->DEVPWREN_b.PWRENUART0;
+        PWRCTRL->DEVPWREN_b.PWRENUART0 = 0u;
+#endif
     }
     if (!spin && (flags & TIKU_AMBIQ_SLEEP_LFRC) != 0u) {
         /* The reclock comes before the tick stretch, which it refuses while
@@ -323,12 +324,16 @@ static uint32_t ambiq_probe(uint32_t ms, unsigned flags, int spin)
         (void)tiku_ambiq_stimer_reclock(0);    /* back to the crystal */
     }
     if (!spin && (flags & TIKU_AMBIQ_SLEEP_STOP_UART) != 0u) {
-        PWRCTRL->DEVPWREN_b.PWRENUART1 = 1u;
-        {
+#if defined(TIKU_CONSOLE_UART1)
+        PWRCTRL->DEVPWREN_b.PWRENUART1 = uart_was_on;
+#else
+        PWRCTRL->DEVPWREN_b.PWRENUART0 = uart_was_on;
+#endif
+        if (uart_was_on) {
             uint32_t spin_ack = 200000u;
             while (spin_ack-- != 0u) { __asm__ volatile ("nop"); }
+            tiku_uart_init();
         }
-        tiku_uart_init();          /* full re-init of the UART configuration */
     }
     /* dt is in counts of whichever timebase timed the window. */
     return (hz_used == 32768u)
@@ -415,6 +420,9 @@ uint32_t tiku_ambiq_mem_cold_bytes(void)
         }                                                                     \
     } while (0)
 
+/** @brief Nonzero after the SRAM benchmark buffer has been seeded. */
+static uint8_t s_sram_seeded;
+
 uint32_t tiku_ambiq_mem_probe(unsigned kind, uint32_t ms)
 {
     uint32_t t0, dt, acc = 0u, idx = 0u;
@@ -425,11 +433,12 @@ uint32_t tiku_ambiq_mem_probe(unsigned kind, uint32_t ms)
     /* Seed s_sram so the SRAM kinds produce a non-zero checksum.  The MRAM
      * arrays are zero-filled constants: their loads happen, but their
      * checksum is always 0. */
-    if (s_sram[0] == 0u) {
+    if (s_sram_seeded == 0u) {
         uint32_t j;
         for (j = 0u; j < TIKU_AMBIQ_MEM_COLD_WORDS; j++) {
             s_sram[j] = j * 2654435761u;
         }
+        s_sram_seeded = 1u;
     }
     s_acc = 0u;
     s_sum = 0u;
@@ -518,20 +527,8 @@ void tiku_ambiq_power_autorun(void)
     (*(volatile uint32_t *)0xE000EDFCUL) &= ~(1UL << 24);
     (void)tiku_ambiq_spin_probe(2000u);          /* marker B: past step 2 */
 
-    /* Step 3: the 32 kHz crystal stops in deep sleep, so the STIMER moves to
-     * LFRC_NOMINAL and stays there only if the counter is seen to advance;
-     * otherwise it returns to the crystal. */
-    STIMER->STCFG = (STIMER->STCFG & ~0xFu) | 6u;   /* LFRC_NOMINAL */
-    {
-        uint32_t c0 = tiku_ambiq_stimer_now();
-        uint32_t spin = 3000000u;
-        while (tiku_ambiq_stimer_now() == c0 && spin-- != 0u) { }
-        if (tiku_ambiq_stimer_now() != c0) {
-            tiku_ambiq_stimer_hz = 900u;
-        } else {
-            STIMER->STCFG = (STIMER->STCFG & ~0xFu) | 3u;  /* XTAL fallback */
-        }
-    }
+    /* Reclock the counter and both timer clients together. */
+    (void)tiku_ambiq_stimer_reclock(1);
     (void)tiku_ambiq_spin_probe(2000u);          /* marker C: past step 3 */
 
     for (;;) {
@@ -541,11 +538,7 @@ void tiku_ambiq_power_autorun(void)
                                      TIKU_AMBIQ_SLEEP_DEEP
                                      | TIKU_AMBIQ_SLEEP_STOP_UART);
         (void)tiku_ambiq_spin_probe(2000u);
-        /* The tick stretch is armed in counts of the crystal tick period,
-         * which step 3 leaves unchanged: its 20 s of crystal counts last
-         * about 12 minutes on the 900 Hz LFRC, and on the crystal fallback,
-         * which debugger-free deep sleep stops, the compare never fires.
-         * The board stays in deep sleep with no wakes for that time. */
+        /* Tickless sleep uses the timer driver's current LFRC rate. */
         (void)tiku_ambiq_sleep_probe(20000u,
                                      TIKU_AMBIQ_SLEEP_DEEP
                                      | TIKU_AMBIQ_SLEEP_STOP_UART
@@ -559,9 +552,7 @@ void tiku_ambiq_power_autorun(void)
 
 int tiku_ambiq_debugger_attached(void)
 {
-    /* Bit 0 of MCUCTRL.DEBUGGER is the SWD lockout; clear means the debug
-     * interface is enabled. */
-    return ((MCUCTRL->DEBUGGER & 1u) == 0u) ? 1 : 0;
+    return (DCB->DHCSR & DCB_DHCSR_C_DEBUGEN_Msk) != 0u;
 }
 
 #endif /* PLATFORM_AMBIQ && TIKU_AMBIQ_POWER_PROBE */

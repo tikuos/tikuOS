@@ -623,6 +623,7 @@ gpu_dst_setup(const tiku_gpu_surface_t *dst)
     GPU->CLIPMAX     = ((uint32_t)dst->h << 16) | ((uint32_t)dst->w & 0xFFFFu);
     GPU->RASTCTRL    = GPU_RASTCTRL_MMUL_BYPASS;
     GPU->DRAWCODEPTR = GPU_CODEPTR_FILL;
+    gpu_reg_write(GPU_REG_ROPBLEND_MODE, GPU_ROPBLEND_SRC);
 }
 
 tiku_gpu_err_t
@@ -925,6 +926,11 @@ tiku_gpu_cl_fill(tiku_gpu_cl_t *cl, const tiku_gpu_surface_t *dst, uint32_t colo
 {
     uint32_t res = (uint32_t)dst->w | ((uint32_t)dst->h << 16);
 
+    if (cl->n_words > cl->cap_words ||
+        cl->cap_words - cl->n_words < 24u) {
+        return TIKU_GPU_ERR_TIMEOUT;
+    }
+
     /* The fill's register program as CL pairs, with the surface's own format
      * and clip; DRAWCMD carries HOLD so the completion tail waits for it. */
     cl_add(cl, GPU_OFF_TEX0BASE,   (uint32_t)(uintptr_t)dst->base);
@@ -943,12 +949,17 @@ tiku_gpu_cl_fill(tiku_gpu_cl_t *cl, const tiku_gpu_surface_t *dst, uint32_t colo
 
     cl->flush_base = dst->base;
     cl->flush_span = (uint32_t)dst->stride * (uint32_t)dst->h;
-    return (cl->n_words <= cl->cap_words) ? TIKU_GPU_OK : TIKU_GPU_ERR_TIMEOUT;
+    return TIKU_GPU_OK;
 }
 
 tiku_gpu_err_t
 tiku_gpu_submit(tiku_gpu_cl_t *cl)
 {
+    if (cl->n_words > cl->cap_words ||
+        cl->cap_words - cl->n_words < 4u) {
+        return TIKU_GPU_ERR_TIMEOUT;
+    }
+
     /* Destination cache maintenance, as the synchronous path does it. */
     if (cl->flush_span != 0u) {
         tiku_cpu_dcache_clean(cl->flush_base, cl->flush_span);
@@ -1137,7 +1148,7 @@ tiku_gpu_lut_apply(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *inde
     __DSB();
     GPU->DRAWCMD = GPU_DRAWCMD_RECT;
     err = tiku_gpu_wait_idle();
-    if (err != TIKU_GPU_OK) { return err; }
+    if (err != TIKU_GPU_OK) { goto restore; }
 
     gpu_imem_load(0u, 0x080C108Bu, 0x00002000u);
     gpu_imem_load(1u, 0x0000110Bu, 0x00000000u);
@@ -1150,8 +1161,22 @@ tiku_gpu_lut_apply(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *inde
     GPU->DRAWCMD = GPU_DRAWCMD_RECT;
 
     err = tiku_gpu_wait_idle();
+restore:
     s_last_status = GPU->STATUS;
     tiku_cpu_dcache_invalidate(dst->base, dspan);
+    {
+        tiku_gpu_perf_t perf = (tiku_gpu_perf_t)
+            PWRCTRL->GFXPERFREQ_b.GFXPERFREQ;
+        uint32_t irq_count = s_irq_count;
+        tiku_gpu_err_t reset_err;
+        /* LUT leaves pipeline state that requires a domain power cycle. */
+        tiku_gpu_deinit();
+        reset_err = tiku_gpu_init(perf);
+        s_irq_count = irq_count;
+        if (err == TIKU_GPU_OK) {
+            err = reset_err;
+        }
+    }
     return err;
 }
 

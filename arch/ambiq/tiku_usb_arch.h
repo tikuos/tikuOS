@@ -446,6 +446,9 @@ void tiku_usb_msc_stats(uint32_t *cbw, uint32_t *rd, uint32_t *wr,
  */
 uint32_t tiku_usb_msc_hash(uint32_t nblocks);
 
+/** @brief Actual RAM-disk block count used by tiku_usb_msc_hash(). */
+uint32_t tiku_usb_msc_hash_blocks(uint32_t nblocks);
+
 /**
  * @brief Exercise the LBA bounds check on ranges it must accept and refuse.
  * @return 0 if all cases behaved, else a bitmask with bit n set for each
@@ -519,5 +522,8 @@ void tiku_usb_counters(tiku_usb_counters_t *out);
  * read-to-clear, and a read here takes events from the ISR.
  */
 void tiku_usb_regs(uint32_t *out, unsigned n);
+
+/** @brief Non-zero while USB depends on the EM9305 reference clock. */
+int tiku_usb_uses_em9305_clock(void);
 
 #endif /* TIKU_USB_ARCH_H_ */

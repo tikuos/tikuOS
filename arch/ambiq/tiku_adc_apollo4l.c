@@ -18,5 +18,6 @@
 
 /* The ADC clock needs no enable on Apollo4. */
 #define TIKU_ADC_ARCH_CLK_ENABLE()   do { } while (0)
+#define TIKU_ADC_ARCH_CLK_DISABLE()  do { } while (0)
 
 #include "tiku_adc_ambiq.inl"

@@ -9,7 +9,7 @@
  *
  * Snapshots the NVIC enable state and clears every IRQ outside the families
  * named in preserve_mask, restoring the snapshot on exit.  The kernel tick
- * (STIMER compare B, IRQ 33) is among the IRQs cleared.
+ * (STIMER compare B, IRQ 33) is kept by TIKU_CRIT_PRESERVE_TICK.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -26,8 +26,7 @@
 #define NVIC_WORDS 3
 
 /*
- * The IRQs that TIKU_CRIT_PRESERVE_HTIMER, _UART and _GPIO keep enabled; the
- * other preserve flags keep nothing on this port.
+ * IRQs retained by the htimer, console and GPIO preserve flags.
  */
 #define AMBIQ_IRQ_UART2         17   /**< UART2 (not UART0, IRQ 15)    */
 #define AMBIQ_IRQ_STIMER_CMPR0  32   /**< STIMER Compare0 (htimer src) */
@@ -48,8 +47,8 @@ static inline void keep_set(uint32_t *keep, unsigned irq) {
  * Snapshots ISER into s_save[], builds a keep-mask from the
  * TIKU_CRIT_PRESERVE_* flags, then clears every IRQ not kept via ICER.
  *
- * @note The kernel tick, IRQ 33, is cleared, and tiku_clock_time() catches up
- *       when the window ends.
+ * @note TIKU_CRIT_PRESERVE_TICK keeps IRQ 33 enabled; without it,
+ *       tiku_clock_time() catches up when the window ends.
  * @param preserve_mask  Bitmask of TIKU_CRIT_PRESERVE_* flags
  */
 void tiku_crit_arch_mask_irqs(uint8_t preserve_mask) {
@@ -61,11 +60,18 @@ void tiku_crit_arch_mask_irqs(uint8_t preserve_mask) {
         s_save[i] = NVIC_ISER[i];
     }
 
+    if (preserve_mask & TIKU_CRIT_PRESERVE_TICK) {
+        keep_set(keep, 33u);
+    }
     if (preserve_mask & TIKU_CRIT_PRESERVE_HTIMER) {
         keep_set(keep, AMBIQ_IRQ_STIMER_CMPR0);
     }
     if (preserve_mask & TIKU_CRIT_PRESERVE_UART) {
+#if defined(TIKU_CONSOLE_UART0)
+        keep_set(keep, 15u);
+#else
         keep_set(keep, AMBIQ_IRQ_UART2);
+#endif
     }
     if (preserve_mask & TIKU_CRIT_PRESERVE_GPIO) {
         for (g = AMBIQ_IRQ_GPIO0_FIRST; g <= AMBIQ_IRQ_GPIO0_LAST; g++) {

@@ -8,8 +8,8 @@
  * tiku_adc_arch.h - Ambiq SAR-ADC driver interface.
  *
  * Polled single conversions on the Apollo4 and Apollo510 SAR-ADC
- * (tiku_adc_ambiq.inl).  Every conversion is 12-bit against the internal
- * reference, whatever the configuration asks for.
+ * (tiku_adc_ambiq.inl). Results use the requested 8/10/12-bit range and
+ * the fixed internal reference (1.19 V nominal, TIKU_ADC_REF_1V2).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,17 +22,17 @@
 /**
  * @brief Power the ADC and set it up for software-triggered conversions.
  *
- * Ignores @p config: resolution is 12 bits and the reference is internal.
+ * Accepts 8/10/12-bit resolution and TIKU_ADC_REF_1V2 only.
  *
- * @param config  ADC configuration (unused).
- * @return 0 on success, -1 if the ADC power domain does not come up.
+ * @param config  Required resolution and reference.
+ * @return 0, TIKU_ADC_ERR_PARAM, or -1 on a power timeout.
  */
 int  tiku_adc_arch_init(const tiku_adc_config_t *config);
 
 /**
  * @brief Disable the ADC and remove its power.
  *
- * On the Apollo510 the HFRC force set by init stays on.
+ * Releases the Apollo510 ADC clock request.
  */
 void tiku_adc_arch_close(void);
 
@@ -43,7 +43,7 @@ void tiku_adc_arch_close(void);
  * 30 and 31 are the temperature and battery channels.
  *
  * @param channel  Channel number.
- * @return 0 for a valid channel, -1 otherwise.
+ * @return TIKU_ADC_OK for a valid channel, TIKU_ADC_ERR_PARAM otherwise.
  */
 int  tiku_adc_arch_channel_init(uint8_t channel);
 
@@ -51,9 +51,9 @@ int  tiku_adc_arch_channel_init(uint8_t channel);
  * @brief Run one blocking conversion on a channel.
  *
  * @param channel  Channel number (0-7, 30 or 31).
- * @param value    Receives the 12-bit result, or 0 on any failure.
- * @return 0 on success; -1 if the ADC is not initialised, the channel is
- *         invalid or the conversion times out.
+ * @param value    Receives an 8/10/12-bit result, or 0 on failure.
+ * @return TIKU_ADC_OK, TIKU_ADC_ERR_PARAM for an invalid channel or an
+ *         uninitialised ADC, or TIKU_ADC_ERR_TIMEOUT for a conversion timeout.
  */
 int  tiku_adc_arch_read(uint8_t channel, uint16_t *value);
 

@@ -204,6 +204,7 @@ static struct {
     uint32_t spins_left;
 } s_dbg;
 
+static uint8_t s_pio_failed; /**< PIO timeout; cleared by power-down. */
 static uint8_t  s_up;        /**< 1 once init() completed                    */
 static uint8_t  s_clk_idx;   /**< index into s_clk of the live setting       */
 static uint8_t  s_faulted;   /**< 1 while fault injection is active           */
@@ -256,6 +257,10 @@ static tiku_psram_err_t psram_pio2(uint16_t instr, uint32_t addr,
 {
     uint32_t ctrl = 0u;
 
+    if (s_pio_failed) {
+        return TIKU_PSRAM_ERR_TIMEOUT;
+    }
+
     /* A PIO command issued while the XIP aperture is enabled deadlocks the
      * controller's APB interface: the peripheral stays unreadable until a
      * power cycle. */
@@ -295,11 +300,8 @@ static tiku_psram_err_t psram_pio2(uint16_t instr, uint32_t addr,
         if (wlat) { ctrl |= MSPI0_CTRL_ENWLAT_Msk; }
     }
 
-    /* FIFORESET is not pulsed here: pulsed before a command it hangs even
-     * the write path, because the transfer state machine does not survive
-     * it.  No drain runs after completion either: a read takes its words as
-     * they arrive, below, and words a timed-out read leaves in the RX FIFO
-     * stay there. */
+    /* FIFORESET can hang the transfer state machine. A timeout instead
+     * blocks further PIO commands until deinit/init powers it down again. */
     MSPI0->INTCLR = 0xFFFFFFFFu;
     MSPI0->CTRL   = ctrl;
     s_dbg.ctrl_after_start = MSPI0->CTRL;
@@ -316,6 +318,7 @@ static tiku_psram_err_t psram_pio2(uint16_t instr, uint32_t addr,
                 s_dbg.ctrl_settled = MSPI0->CTRL;
                 s_dbg.intstat      = MSPI0->INTSTAT;
                 s_dbg.spins_left   = 0u;
+                s_pio_failed = 1u;
                 return TIKU_PSRAM_ERR_TIMEOUT;
             }
             w = MSPI0->RXFIFO;
@@ -340,6 +343,7 @@ static tiku_psram_err_t psram_pio2(uint16_t instr, uint32_t addr,
             spins = PSRAM_PIO_SPINS;
             while (MSPI0->TXENTRIES >= PSRAM_FIFO_WORDS && --spins != 0u) { }
             if (spins == 0u) {
+                s_pio_failed = 1u;
                 return TIKU_PSRAM_ERR_TIMEOUT;
             }
         }
@@ -354,6 +358,7 @@ static tiku_psram_err_t psram_pio2(uint16_t instr, uint32_t addr,
     s_dbg.spins_left = spins;
     s_dbg.intstat    = MSPI0->INTSTAT;
     if (spins == 0u) {
+        s_pio_failed = 1u;
         return TIKU_PSRAM_ERR_TIMEOUT;
     }
     return TIKU_PSRAM_OK;
@@ -397,14 +402,9 @@ static tiku_psram_err_t psram_ioclk_on(uint8_t sel)
         __DSB();
     }
 
-    /* Force on the oscillator this source comes from.  It is left on here;
-     * releasing it belongs with powering the controller domain down. */
-    if (sel == IOCLK_SEL_HFRC2_250MHZ) {
-        CLKGEN->MISC |= CLKGEN_MISC_FRCHFRC2_Msk;
-    } else {
-        CLKGEN->MISC |= CLKGEN_MISC_FRCHFRC_Msk;
-    }
-    __DSB();
+    /* Keep both sources running while changing the selector. */
+    tiku_ambiq_clock_force(TIKU_AMBIQ_CLOCK_PSRAM,
+        CLKGEN_MISC_FRCHFRC_Msk | CLKGEN_MISC_FRCHFRC2_Msk);
 
     v = CLKGEN->MSPIIOCLKCTRL;
 
@@ -415,6 +415,10 @@ static tiku_psram_err_t psram_ioclk_on(uint8_t sel)
     CLKGEN->MSPIIOCLKCTRL = v | CLKGEN_MSPIIOCLKCTRL_MSPI0IOCLKEN_Msk;
     __DSB();
     tiku_cpu_ambiq_delay_us(10u);      /* vendor's settle after the enable */
+
+    tiku_ambiq_clock_force(TIKU_AMBIQ_CLOCK_PSRAM,
+        sel == IOCLK_SEL_HFRC2_250MHZ ? CLKGEN_MISC_FRCHFRC2_Msk :
+                                      CLKGEN_MISC_FRCHFRC_Msk);
 
     /* The enable must read back set. */
     if ((CLKGEN->MSPIIOCLKCTRL & CLKGEN_MSPIIOCLKCTRL_MSPI0IOCLKEN_Msk) == 0u) {
@@ -544,6 +548,17 @@ static void psram_pads_config(void)
     tiku_ambiq_gpio_pad_config(PSRAM_PAD_CE, PAD_CFG_MSPI_CE);
 }
 
+/** @brief Release the controller pads as high-impedance GPIOs. */
+static void psram_pads_release(void)
+{
+    uint32_t pad;
+
+    for (pad = PSRAM_PAD_D0; pad <= PSRAM_PAD_DQS; pad++) {
+        tiku_ambiq_gpio_pad_config(pad, 3u | PAD_INPEN);
+    }
+    tiku_ambiq_gpio_pad_config(PSRAM_PAD_CE, 3u | PAD_INPEN);
+}
+
 tiku_psram_err_t tiku_psram_init(unsigned clk)
 {
     tiku_psram_err_t rc;
@@ -562,13 +577,13 @@ tiku_psram_err_t tiku_psram_init(unsigned clk)
 
     rc = psram_power_on();
     if (rc != TIKU_PSRAM_OK) {
+        tiku_psram_deinit();
         return rc;
     }
     trace("ioclk");
     rc = psram_ioclk_on(s_clk[clk].ioclk_sel);
     if (rc != TIKU_PSRAM_OK) {
-        /* Power the domain back off when its clock does not start. */
-        PWRCTRL->DEVPWREN &= ~PWRCTRL_DEVPWREN_PWRENMSPI0_Msk;
+        tiku_psram_deinit();
         return rc;
     }
 
@@ -584,7 +599,8 @@ tiku_psram_err_t tiku_psram_init(unsigned clk)
     trace("device-reset");
     rc = tiku_psram_device_reset();     /* step 18                           */
     if (rc != TIKU_PSRAM_OK) {
-        s_up = 0u;
+        psram_pads_release();
+        tiku_psram_deinit();
         return rc;
     }
     return TIKU_PSRAM_OK;
@@ -592,10 +608,20 @@ tiku_psram_err_t tiku_psram_init(unsigned clk)
 
 void tiku_psram_deinit(void)
 {
+    uint32_t spins = PSRAM_PIO_SPINS;
+
     CLKGEN->MSPIIOCLKCTRL &= ~CLKGEN_MSPIIOCLKCTRL_MSPI0IOCLKEN_Msk;
     PWRCTRL->DEVPWREN &= ~PWRCTRL_DEVPWREN_PWRENMSPI0_Msk;
     __DSB();
     s_up = 0u;
+    while ((PWRCTRL->DEVPWRSTATUS &
+            PWRCTRL_DEVPWRSTATUS_PWRSTMSPI0_Msk) != 0u) {
+        if (--spins == 0u) {
+            return;  /* Do not clear quarantine without a power-down. */
+        }
+    }
+    s_pio_failed = 0u;
+    tiku_ambiq_clock_force(TIKU_AMBIQ_CLOCK_PSRAM, 0u);
 }
 
 int tiku_psram_powered(void)
@@ -903,9 +929,11 @@ static int psram_scan_cell(unsigned rxdqs, uint32_t bytes)
 uint32_t tiku_psram_timing_scan(uint32_t *pass_mask, unsigned *center)
 {
     uint32_t mask = 0u;
+    unsigned saved_tap;
     unsigned tap, best_len = 0u, best_start = 0u, run = 0u, run_start = 0u;
 
     if (!s_up) { return 0u; }
+    saved_tap = MSPI0->DEV0DDR_b.RXDQSDELAY0;
     for (tap = 0u; tap < 32u; tap++) {
         if (psram_scan_cell(tap, 2048u)) {
             mask |= (1u << tap);
@@ -923,8 +951,10 @@ uint32_t tiku_psram_timing_scan(uint32_t *pass_mask, unsigned *center)
         __DSB();
         s_tap = (uint8_t)c;
         if (center) { *center = c; }
-    } else if (center) {
-        *center = 0u;
+    } else {
+        MSPI0->DEV0DDR_b.RXDQSDELAY0 = saved_tap;
+        __DSB();
+        if (center) { *center = 0u; }
     }
     if (pass_mask) { *pass_mask = mask; }
     return best_len;
@@ -1029,6 +1059,7 @@ tiku_psram_err_t tiku_psram_dma(uint32_t dev_addr, void *sram, uint32_t n,
 {
     uint32_t spins = 500000u;   /* x20 us = 10 s ceiling */
 
+    if (s_dma_busy)         { return TIKU_PSRAM_ERR_ARG; }
     if (!s_up)              { return TIKU_PSRAM_ERR_POWER; }
     if (s_asleep)           { return TIKU_PSRAM_ERR_ARG; }
     if (MSPI0->DEV0XIP_b.XIPEN0 != 0u) { return TIKU_PSRAM_ERR_ARG; }
@@ -1253,11 +1284,23 @@ tiku_psram_err_t tiku_psram_up(unsigned clk, int scan)
     }
     rc = tiku_psram_xip_enable(1);
     if (rc != TIKU_PSRAM_OK) { return rc; }
-    if (tiku_tier_attach_psram((void *)TIKU_PSRAM_XIP_BASE,
-                               (tiku_mem_arch_size_t)TIKU_PSRAM_SIZE_BYTES)
-            != TIKU_MEM_OK) {
-        /* Ignored: on a re-up the tier is already attached.  Any other
-         * attach failure is ignored as well. */
+    {
+        tiku_mem_err_t status = tiku_tier_attach_psram(
+            (void *)TIKU_PSRAM_XIP_BASE,
+            (tiku_mem_arch_size_t)TIKU_PSRAM_SIZE_BYTES);
+        if (status != TIKU_MEM_OK) {
+            const uint8_t *base;
+            tiku_mem_stats_t stats;
+
+            /* Re-up accepts only an existing, identical attachment. */
+            if (status != TIKU_MEM_ERR_INVALID ||
+                tiku_tier_span_stats(TIKU_MEM_PSRAM, 0, &base, &stats)
+                    != TIKU_MEM_OK ||
+                base != (const uint8_t *)TIKU_PSRAM_XIP_BASE ||
+                stats.total_bytes != TIKU_PSRAM_SIZE_BYTES) {
+                return TIKU_PSRAM_ERR_ARG;
+            }
+        }
     }
     return TIKU_PSRAM_OK;
 }
@@ -1279,9 +1322,8 @@ tiku_psram_err_t tiku_psram_down(int force)
 
 /*
  * Each leg is timed on DWT CYCCNT and prints bytes moved, time, MB/s and a
- * verdict.  dma-rd*, cq-rd16k and xip-read compare a checksum and the cq-wr
- * legs fail on a transfer error; xip-write, dma-write and random512 always
- * print bit-exact.
+ * verdict. Sequential writes are read back outside the timed interval.
+ * Read checks cover the stated tiles; random512 is timing-only.
  *
  *   xip-write   CPU streaming stores through the aperture
  *   dma-rd16k   device -> SRAM DMA in 16 KB and 64 KB transfers
@@ -1319,12 +1361,12 @@ static void bench_report(const char *leg, uint32_t bytes, uint32_t cyc,
     unsigned long hz = tiku_cpu_ambiq_clock_get_hz();
     /* kbps is thousands of bytes per second, printed as MB/s to 3 places. */
     unsigned long kbps = (unsigned long)(((uint64_t)bytes * hz) /
-                                         ((uint64_t)cyc * 1000u));
+                                         ((uint64_t)(cyc ? cyc : 1u) * 1000u));
     SHELL_PRINTF("  %-9s %7lu KB  %8lu us  %6lu.%03lu MB/s  %s\n", leg,
                  (unsigned long)(bytes / 1024u),
-                 (unsigned long)(((uint64_t)cyc * 1000000u) / hz),
+                 (unsigned long)(((uint64_t)cyc * 1000000u) / (hz ? hz : 1u)),
                  kbps / 1000u, kbps % 1000u,
-                 exact ? "bit-exact" : "FAIL");
+                 exact < 0 ? "unchecked" : exact ? "bit-exact" : "FAIL");
 }
 
 /** @brief Pattern byte for device address @p a, shared by every leg. */
@@ -1365,8 +1407,12 @@ void tiku_psram_bench_run(void)
     tiku_cpu_dcache_clean((const void *)ap, BENCH_SPAN);
     t1 = *cyccnt;
     tiku_hang_checkin();
-    /* The dma-rd legs check the last tile of what this leg wrote. */
-    bench_report("xip-write", BENCH_SPAN, t1 - t0, 1);
+    tiku_cpu_dcache_invalidate((const void *)ap, BENCH_SPAN);
+    exact = 1;
+    for (i = 0u; i < BENCH_SPAN; ++i) {
+        if (ap[i] != bench_pat(i)) { exact = 0; break; }
+    }
+    bench_report("xip-write", BENCH_SPAN, t1 - t0, exact);
 
     /* ---- leg 2: DMA READ back (device -> SRAM) -------------------------- */
     /* Only the DMA is timed.  Each tile overwrites the buffer, so the
@@ -1411,7 +1457,22 @@ void tiku_psram_bench_run(void)
         tiku_hang_checkin();
     }
     t1 = *cyccnt;
-    bench_report("dma-write", BENCH_SPAN, t1 - t0, 1);
+    exact = off == BENCH_SPAN;
+    if (exact) {
+        if (tiku_psram_xip_enable(1) != TIKU_PSRAM_OK) {
+            exact = 0;
+        } else {
+            tiku_cpu_dcache_invalidate((const void *)ap, BENCH_SPAN);
+            for (i = 0u; i < BENCH_SPAN; ++i) {
+                if (ap[i] != (uint8_t)~bench_pat(i % 16384u)) {
+                    exact = 0;
+                    break;
+                }
+            }
+            (void)tiku_psram_xip_enable(0);
+        }
+    }
+    bench_report("dma-write", off, t1 - t0, exact);
 
     /* ---- leg 3b: CQ chained transfers ---------------------------------- */
     /* The write legs lay the same inverted pattern as leg 3, so leg 4's
@@ -1504,7 +1565,7 @@ void tiku_psram_bench_run(void)
             tiku_hang_checkin();
         }
         t1 = *cyccnt;
-        bench_report("random512", n_reads * 512u, t1 - t0, 1);
+        bench_report("random512", n_reads * 512u, t1 - t0, -1);
         SHELL_PRINTF("  (random leg: %lu reads of 512 B across the full"
                      " 64 MB; latency %lu us/read)\n",
                      (unsigned long)n_reads,

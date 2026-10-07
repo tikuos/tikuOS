@@ -41,14 +41,15 @@
 
 /** @brief Non-zero between tiku_adc_arch_init() and tiku_adc_arch_close(). */
 static int s_inited;
+static uint8_t adc_result_shift;
 
-/** @brief Map a channel to its SL0CFG.CHSEL0 code; -1 for an invalid one. */
+/** @brief Map a channel to CHSEL0; return TIKU_ADC_ERR_PARAM if invalid. */
 static int ambiq_adc_chsel(uint8_t channel, uint8_t *chsel)
 {
     if (channel == ADC_TIKU_CH_TEMP)         *chsel = AMBIQ_ADC_CHSEL_TEMP;
     else if (channel == ADC_TIKU_CH_BATTERY) *chsel = AMBIQ_ADC_CHSEL_BATT;
     else if (channel <= AMBIQ_ADC_CH_EXT_MAX) *chsel = channel;
-    else                                     return -1;
+    else                                     return TIKU_ADC_ERR_PARAM;
     return 0;
 }
 
@@ -56,7 +57,11 @@ int tiku_adc_arch_init(const tiku_adc_config_t *config)
 {
     uint32_t spin;
 
-    (void)config;   /* fixed: 12-bit, internal reference */
+    if (config == NULL || config->resolution > TIKU_ADC_RES_12BIT ||
+        config->reference != TIKU_ADC_REF_1V2) {
+        return TIKU_ADC_ERR_PARAM;
+    }
+    adc_result_shift = (uint8_t)(4u - 2u * config->resolution);
 
     /* Part-specific clock hook (Apollo510 forces HFRC on). */
     TIKU_ADC_ARCH_CLK_ENABLE();
@@ -66,6 +71,9 @@ int tiku_adc_arch_init(const tiku_adc_config_t *config)
     spin = AMBIQ_ADC_PWR_SPIN;
     while (PWRCTRL->DEVPWRSTATUS_b.PWRSTADC == 0u) {
         if (spin-- == 0u) {
+            PWRCTRL->DEVPWREN_b.PWRENADC = 0u;
+            TIKU_ADC_ARCH_CLK_DISABLE();
+            s_inited = 0;
             return -1;
         }
     }
@@ -85,6 +93,7 @@ void tiku_adc_arch_close(void)
 {
     ADC->CFG_b.ADCEN = 0u;
     PWRCTRL->DEVPWREN_b.PWRENADC = 0u;
+    TIKU_ADC_ARCH_CLK_DISABLE();
     s_inited = 0;
 }
 
@@ -106,11 +115,8 @@ int tiku_adc_arch_read(uint8_t channel, uint16_t *value)
     if (value != NULL) {
         *value = 0;
     }
-    if (!s_inited) {
-        return -1;
-    }
-    if (ambiq_adc_chsel(channel, &chsel) != 0) {
-        return -1;
+    if (!s_inited || ambiq_adc_chsel(channel, &chsel) != 0) {
+        return TIKU_ADC_ERR_PARAM;
     }
 
     /* Program slot 0 for this channel with the ADC disabled, since CFG and
@@ -141,7 +147,8 @@ int tiku_adc_arch_read(uint8_t channel, uint16_t *value)
     fifo = ADC->FIFOPR;
     if (value != NULL) {
         *value = (uint16_t)
-            (((fifo & ADC_FIFOPR_DATA_Msk) >> ADC_FIFOPR_DATA_Pos) >> 8) & 0x0FFFu;
+            (((((fifo & ADC_FIFOPR_DATA_Msk) >> ADC_FIFOPR_DATA_Pos) >> 8)
+              & 0x0FFFu) >> adc_result_shift);
     }
     return 0;
 }

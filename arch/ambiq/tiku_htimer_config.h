@@ -22,17 +22,14 @@
  * @brief Hardware timer tick rate in ticks per second.
  *
  * The STIMER count rate, so that intervals in TIKU_HTIMER_SECOND units are
- * real time.  It is 16384 (~61 us per tick), half the tap's documented
- * 32768 Hz.
+ * real time at the default 32768 Hz crystal clock.
  */
-#define TIKU_HTIMER_ARCH_SECOND  16384UL
+#define TIKU_HTIMER_ARCH_SECOND  32768UL
 
 /**
  * @brief Minimum scheduling lead, in htimer ticks.
  *
- * Two ticks: a target of now + 1 races the STIMER compare-write latency.  It
- * replaces the generic default, TIKU_HTIMER_ARCH_SECOND >> 14, which is 1 at
- * 16384 Hz.
+ * A target of now + 1 races the STIMER compare-write latency.
  */
 #define TIKU_HTIMER_CONF_GUARD_TIME  2
 

@@ -74,7 +74,6 @@ uint32_t tiku_stack_arch_bottom(void)
 /*---------------------------------------------------------------------------*/
 
 static uint16_t stub_mpuctl0;
-static uint16_t stub_mpuctl1;     /* MMFSR bits from the MemManage handler */
 static uint16_t stub_mpusam = TIKU_MPU_DEFAULT_SAM;
 static uint16_t stub_mpusegb1;
 static uint16_t stub_mpusegb2;
@@ -83,7 +82,7 @@ static uint16_t stub_mpusegb2;
 /* PERSISTENT DIAGNOSTIC STATE                                               */
 /*---------------------------------------------------------------------------*/
 
-#define TIKU_MPU_DIAG_MAGIC  0x4D505550U   /* 'MPUP' */
+#define TIKU_MPU_DIAG_MAGIC  0x4D505551U
 
 /** @brief Fault record in the NOLOAD .mpu_diag section; survives warm reset. */
 struct tiku_mpu_diag {
@@ -96,6 +95,7 @@ struct tiku_mpu_diag {
     uint32_t expect_fault;
     uint32_t last_fault_pc;    /* stacked PC at the last fault (0 if unknown) */
     uint32_t last_fault_lr;    /* stacked LR at the last fault (0 if unknown) */
+    uint32_t violation_flags;  /**< MMFSR flags retained across warm reset. */
 };
 
 __attribute__((section(".mpu_diag")))
@@ -155,6 +155,7 @@ void tiku_mpu_arch_init_segments(void) {
     uint32_t r;
 
     if (mpu_diag.magic != TIKU_MPU_DIAG_MAGIC) {
+        mpu_diag.violation_flags = 0U;
         mpu_diag.magic            = TIKU_MPU_DIAG_MAGIC;
         mpu_diag.violation_count  = 0U;
         mpu_diag.last_fault_addr  = 0U;
@@ -276,8 +277,8 @@ uint8_t tiku_mpu_arch_nvm_region_ro(void) {
     return (ap == ARM_MPU_AP_FULL) ? 0u : 1u;
 }
 
-uint16_t tiku_mpu_arch_get_violation_flags(void)   { return stub_mpuctl1; }
-void     tiku_mpu_arch_clear_violation_flags(void) { stub_mpuctl1 = 0U; }
+uint16_t tiku_mpu_arch_get_violation_flags(void)   { return mpu_diag.violation_flags; }
+void     tiku_mpu_arch_clear_violation_flags(void) { mpu_diag.violation_flags = 0U; }
 
 void tiku_mpu_arch_enable_violation_nmi(void) {
     SCB->SHCSR |= SCB_SHCSR_MEMFAULTENA_Msk;
@@ -409,7 +410,7 @@ static void ambiq_mem_fault_body(const uint32_t *frame) {
     if (mmfsr & TIKU_MMFSR_MMARVALID) {
         mpu_diag.last_fault_addr = SCB->MMFAR;
     }
-    stub_mpuctl1 |= (uint16_t)mmfsr;
+    mpu_diag.violation_flags |= (uint16_t)mmfsr;
     if (mpu_diag.expect_fault == 1U) {
         mpu_diag.expect_fault = 2U;     /* observed */
     }
@@ -477,4 +478,10 @@ void tiku_ambiq_hard_fault_handler(void) {
         "mrsne r0, psp                \n\t"
         "b     ambiq_hard_fault_body  \n\t"
     );
+}
+
+/** @brief Apollo4 modules execute in place from read-only MRAM. */
+void tiku_mpu_arch_module_window_exec(int enable)
+{
+    (void)enable;
 }

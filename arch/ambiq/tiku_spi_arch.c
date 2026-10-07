@@ -72,13 +72,14 @@ static void spi_pad_funcsel(uint32_t pad, uint32_t funcsel) {
 }
 
 /** @brief Spin until the IOM is idle (IDLEST set, CMDACT clear), bounded. */
-static void spi_wait_idle(void) {
+static int spi_wait_idle(void) {
     uint32_t guard = 0;
     while (((SPI_IOM->STATUS &
              (IOM0_STATUS_IDLEST_Msk | IOM0_STATUS_CMDACT_Msk)) !=
             IOM0_STATUS_IDLEST_Msk) && (++guard < SPI_POLL_LIMIT)) {
         /* wait */
     }
+    return (guard < SPI_POLL_LIMIT) ? 0 : -1;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -105,7 +106,10 @@ static int spi_xfer_chunk(const uint8_t *tx, uint8_t *rx, uint16_t len) {
         memset(s_txw, 0xFF, ((len + 3u) & ~3u));
     }
 
-    spi_wait_idle();
+    if (spi_wait_idle() != 0) {
+        tiku_spi_arch_close();
+        return -1;
+    }
     SPI_IOM->INTCLR = 0xFFFFFFFFu;
     SPI_IOM->OFFSETHI = 0u;
 
@@ -146,9 +150,16 @@ static int spi_xfer_chunk(const uint8_t *tx, uint8_t *rx, uint16_t len) {
                 rxbytes = (rxbytes >= 4u) ? (rxbytes - 4u) : 0u;
             }
         }
+        if (txbytes != 0u || rxbytes != 0u) {
+            tiku_spi_arch_close();
+            return -1;
+        }
     }
 
-    spi_wait_idle();
+    if (spi_wait_idle() != 0) {
+        tiku_spi_arch_close();
+        return -1;
+    }
 
     if (rx) {
         memcpy(rx, s_rxw, len);
@@ -201,8 +212,11 @@ int tiku_spi_arch_init(const tiku_spi_config_t *config) {
     SPI_IOM->INTEN = 0u;
     SPI_IOM->DMACFG_b.DMAEN = 0u;
 
-    spi_wait_idle();
     s_inited = 1u;
+    if (spi_wait_idle() != 0) {
+        tiku_spi_arch_close();
+        return -1;
+    }
     return 0;
 }
 

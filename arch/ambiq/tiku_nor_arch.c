@@ -280,7 +280,9 @@ static tiku_nor_err_t nor_ioclk_on(uint8_t sel)
         uint32_t misc = CLKGEN->MISC;
         misc |= 0x00FBBFC0u;
         misc &= ~(1u << 14);
-        CLKGEN->MISC = misc | CLKGEN_MISC_FRCHFRC_Msk;
+        CLKGEN->MISC = misc;
+        tiku_ambiq_clock_force(TIKU_AMBIQ_CLOCK_NOR,
+                               CLKGEN_MISC_FRCHFRC_Msk);
         __DSB();
     }
 
@@ -419,6 +421,7 @@ void tiku_nor_deinit(void)
     PWRCTRL->DEVPWREN &= ~PWRCTRL_DEVPWREN_PWRENMSPI1_Msk;
     __DSB();
     s_up = 0u; s_octal = 0u;
+    tiku_ambiq_clock_force(TIKU_AMBIQ_CLOCK_NOR, 0u);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -523,13 +526,12 @@ tiku_nor_err_t tiku_nor_dma_read(uint32_t addr, void *sram, uint32_t n)
 /*
  * DWT-timed like psrambench.  Every leg reports the bytes it moved and whether
  * they matched the pattern: bit-exact or FAIL.  Everything runs inside the
- * scratch sector, and a run spends the two erases it announces.
+ * scratch sector, and reports the number of erase commands.
  */
 
 extern unsigned long tiku_cpu_ambiq_clock_get_hz(void);
 
-/* A 32 KB span keeps fixed setup cost a small share of each timed leg.  The
- * prepare step erases the whole 128 KB scratch sector and times it. */
+/* A 32 KB test span; preparation erases eight 4 KB subsectors by default. */
 #define NORB_SPAN   32768u
 #define NORB_BUF    32768u
 static uint8_t s_norb_buf[NORB_BUF] __attribute__((aligned(32)));
@@ -615,6 +617,7 @@ void tiku_nor_bench_run(void)
     uint32_t demcr0, ctl0, t0, cyc;
     uint32_t base = TIKU_NOR_SCRATCH_ADDR;
     uint32_t i, off;
+    uint32_t erases_before = s_erases;
     int exact;
 
     if (!s_up) {
@@ -628,12 +631,14 @@ void tiku_nor_bench_run(void)
 
     (void)norb_cyc_begin(&demcr0, &ctl0);
 
-    /* Prepare: erase the scratch sector and program the pattern, timing
-     * both as the erase and program legs. */
+    /* Prepare: erase only the test span unless a full sector was requested. */
     t0 = norb_cyc_now();
-    if (tiku_nor_erase(base, 0, 0) != TIKU_NOR_OK) {
-        SHELL_PRINTF("  sector-erase  FAILED\n");
-        return;
+    for (off = 0u; off < NORB_SPAN;
+         off += s_sector_leg ? NORB_SPAN : 4096u) {
+        if (tiku_nor_erase(base + off, !s_sector_leg, 0) != TIKU_NOR_OK) {
+            SHELL_PRINTF("  prepare erase FAILED\n");
+            return;
+        }
     }
     cyc = norb_cyc_now() - t0;
     exact = 1;
@@ -643,7 +648,8 @@ void tiku_nor_bench_run(void)
     for (i = 0u; i < NORB_SPAN; i++) {
         if (s_norb_buf[i] != 0xFFu) { exact = 0; }
     }
-    norb_report_op("sector-eras", 1u, cyc, exact);
+    norb_report_op(s_sector_leg ? "sector-eras" : "subsec-prep",
+                   s_sector_leg ? 1u : NORB_SPAN / 4096u, cyc, exact);
 
     for (i = 0u; i < NORB_SPAN; i++) {
         s_norb_buf[i] = norb_pat(base + i);
@@ -740,7 +746,8 @@ void tiku_nor_bench_run(void)
     }
     norb_report_op("subsec-eras", 1u, cyc, exact);
 
-    SHELL_PRINTF("  erases spent this run: 2 (total %lu)\n",
+    SHELL_PRINTF("  erase commands this run: %lu (total %lu)\n",
+                 (unsigned long)(s_erases - erases_before),
                  (unsigned long)s_erases);
 
     {   /* restore the DWT state saved at the start */
@@ -794,6 +801,7 @@ int tiku_nor_octal_hears(void)
      * executed the octal reset, so it does parse octal commands. */
     s_octal = 0u;
     nor_controller_config(&s_clk[0], 0);
+    s_clk_idx = 0u;
     if (nor_ioclk_on(s_clk[0].ioclk_sel) != TIKU_NOR_OK) { return -1; }
     return (tiku_nor_read_id(&id) == TIKU_NOR_OK) ? 1 : 0;
 }
@@ -1000,9 +1008,7 @@ tiku_nor_err_t tiku_nor_enter_octal(unsigned clk)
     rc = TIKU_NOR_OK;
     if (rc != TIKU_NOR_OK) {
         /* Roll back to serial so a caller that cannot talk octal is left
-         * where it can.  Not reached while rc is set to OK above.
-         * Diagnostics that examine the octal state use
-         * tiku_nor_enter_octal_raw(). */
+         * where it can.  Not reached while rc is set to OK above. */
         s_octal = 0u;
         nor_controller_config(&s_clk[TIKU_NOR_CLK_24MHZ], 0);
         s_clk_idx = (uint8_t)TIKU_NOR_CLK_24MHZ;
@@ -1013,23 +1019,7 @@ tiku_nor_err_t tiku_nor_enter_octal(unsigned clk)
 
 tiku_nor_err_t tiku_nor_enter_octal_raw(unsigned clk)
 {
-    tiku_nor_err_t rc = tiku_nor_enter_octal(clk);
-
-    if (rc == TIKU_NOR_ERR_ID) {
-        /* Meant for an octal entry whose closing octal identity read failed:
-         * put the controller back into octal.  tiku_nor_enter_octal()
-         * returns TIKU_NOR_ERR_ID only from its serial identity check, before
-         * the device has switched, so this sets the controller to octal while
-         * the device is still serial. */
-        s_octal = 1u;
-        nor_controller_config(&s_clk[clk], 1);
-        s_clk_idx = (uint8_t)clk;
-        if (nor_ioclk_on(s_clk[clk].ioclk_sel) != TIKU_NOR_OK) {
-            return TIKU_NOR_ERR_CLOCK;
-        }
-        return TIKU_NOR_OK;
-    }
-    return rc;
+    return tiku_nor_enter_octal(clk);
 }
 
 /*---------------------------------------------------------------------------*/

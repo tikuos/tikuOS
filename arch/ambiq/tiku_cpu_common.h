@@ -61,4 +61,23 @@ uint8_t  tiku_cpu_ambiq_unique_id(uint8_t *buf, uint8_t len);
  */
 uint16_t tiku_cpu_ambiq_reset_reason(void);
 
+
+/** @brief Apollo510 peripheral owners of forced HFRC/HFRC2 clocks. */
+typedef enum {
+    TIKU_AMBIQ_CLOCK_PSRAM,
+    TIKU_AMBIQ_CLOCK_NOR,
+    TIKU_AMBIQ_CLOCK_USB,
+    TIKU_AMBIQ_CLOCK_ADC,
+    TIKU_AMBIQ_CLOCK_EMMC,
+    TIKU_AMBIQ_CLOCK_USERS
+} tiku_ambiq_clock_owner_t;
+
+/**
+ * @brief Replace an Apollo510 driver's HFRC/HFRC2 force mask.
+ * Preserves other owners and force bits present before the first request.
+ * @param owner Peripheral owner.
+ * @param mask CLKGEN_MISC_FRCHFRC_Msk and/or FRCHFRC2_Msk; zero releases.
+ */
+void tiku_ambiq_clock_force(tiku_ambiq_clock_owner_t owner, uint32_t mask);
+
 #endif /* TIKU_AMBIQ_CPU_COMMON_H_ */

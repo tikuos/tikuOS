@@ -345,10 +345,10 @@ tiku_gpu_err_t tiku_gpu_cl_fill(tiku_gpu_cl_t *cl,
  *
  * Appends a completion tail (stamp CLID, raise IRQ 28), cleans the list and
  * destination from the D-cache, and kicks the command-list processor
- * (CMDLISTADDR + CMDLISTSIZE).  Returns TIKU_GPU_OK.
+ * (CMDLISTADDR + CMDLISTSIZE).
  *
- * @note A buffer without 4 free words drops the tail; tiku_gpu_wait() then
- *       returns TIKU_GPU_ERR_TIMEOUT.
+ * @return TIKU_GPU_OK, or TIKU_GPU_ERR_TIMEOUT if fewer than 4 words remain.
+ * @note A capacity failure leaves the list and the GPU unchanged.
  */
 tiku_gpu_err_t tiku_gpu_submit(tiku_gpu_cl_t *cl);
 
@@ -428,9 +428,8 @@ tiku_gpu_err_t tiku_gpu_scale_const(const tiku_gpu_surface_t *dst,
  * index's size.  The hardware reads the palette nibble-swapped, so a shadow
  * copy reorders it; the draw runs twice, as the first after init missamples.
  *
- * @warning After this call, a blocking fill can return TIKU_GPU_OK and leave
- *          its destination unchanged, and async command lists do not complete.
- *          Call tiku_gpu_deinit() and tiku_gpu_init() before further GPU work.
+ * @note Power-cycles and reinitializes the GPU at its current performance
+ *       setting after the draw. The call includes this recovery cost.
  */
 tiku_gpu_err_t tiku_gpu_lut_apply(const tiku_gpu_surface_t *dst,
                                   const tiku_gpu_surface_t *index,

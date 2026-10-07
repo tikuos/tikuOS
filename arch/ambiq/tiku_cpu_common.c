@@ -14,6 +14,7 @@
  */
 
 #include <stdint.h>
+#include "hal/tiku_cpu.h"
 #include "tiku.h"              /* platform configuration */
 #include "tiku_cpu_common.h"
 #include "tiku_cpu_freq_boot_arch.h"  /* tiku_cpu_ambiq_clock_get_hz */
@@ -146,4 +147,32 @@ uint16_t tiku_cpu_ambiq_reset_reason(void) {
         return 0x0000u;                 /*                 -> "power"     */
     }
     return 0u;                          /* nothing latched -> power-on    */
+}
+
+static uint32_t clock_users[TIKU_AMBIQ_CLOCK_USERS];
+static uint32_t clock_baseline;
+static uint8_t clock_seeded;
+
+void tiku_ambiq_clock_force(tiku_ambiq_clock_owner_t owner, uint32_t mask)
+{
+    const uint32_t bits = CLKGEN_MISC_FRCHFRC_Msk |
+                          CLKGEN_MISC_FRCHFRC2_Msk;
+    uint32_t force;
+
+    if ((unsigned)owner >= TIKU_AMBIQ_CLOCK_USERS) {
+        return;
+    }
+    tiku_atomic_enter();
+    if (!clock_seeded) {
+        clock_baseline = CLKGEN->MISC & bits;
+        clock_seeded = 1u;
+    }
+    clock_users[owner] = mask & bits;
+    force = clock_baseline;
+    for (unsigned i = 0; i < TIKU_AMBIQ_CLOCK_USERS; ++i) {
+        force |= clock_users[i];
+    }
+    CLKGEN->MISC = (CLKGEN->MISC & ~bits) | force;
+    __DSB();
+    tiku_atomic_exit();
 }

@@ -75,8 +75,6 @@ extern uint32_t __flash_end;      /* MRAM code window end, below the mirror */
  */
 static uint16_t stub_mpuctl0;
 
-/** @brief Software mirror of MPUCTL1: MMFSR bits from the MemManage handler */
-static uint16_t stub_mpuctl1;     /* violation flags */
 
 /** @brief Software mirror of the MSP430 MPUSAM (segment access map) register */
 static uint16_t stub_mpusam = TIKU_MPU_DEFAULT_SAM;
@@ -91,8 +89,8 @@ static uint16_t stub_mpusegb2;
 /* PERSISTENT DIAGNOSTIC STATE                                               */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Magic value marking a valid mpu_diag block ('MPUP' little-endian) */
-#define TIKU_MPU_DIAG_MAGIC  0x4D505550U   /* 'MPUP' */
+/** @brief Magic value marking a valid mpu_diag block  */
+#define TIKU_MPU_DIAG_MAGIC  0x4D505551U
 
 /**
  * @brief Warm-reset-durable MPU diagnostic record
@@ -111,6 +109,7 @@ struct tiku_mpu_diag {
     uint32_t expect_fault;     /**< test scaffold: 1 armed, 2/3 observed    */
     uint32_t last_fault_pc;    /**< stacked PC at the last fault, or 0      */
     uint32_t last_fault_lr;    /**< stacked LR at the last fault, or 0      */
+    uint32_t violation_flags;  /**< MMFSR flags retained across warm reset. */
 };
 
 /** @brief Warm-durable diagnostic block instance in .mpu_diag */
@@ -282,6 +281,7 @@ void tiku_mpu_arch_init_segments(void) {
     /* Cold-boot detect: zero + magic on first power-up; keep counters across
      * a warm (post-fault) reset so the violation survives to be read. */
     if (mpu_diag.magic != TIKU_MPU_DIAG_MAGIC) {
+        mpu_diag.violation_flags = 0U;
         mpu_diag.magic            = TIKU_MPU_DIAG_MAGIC;
         mpu_diag.violation_count  = 0U;
         mpu_diag.last_fault_addr  = 0U;
@@ -476,16 +476,16 @@ uint8_t tiku_mpu_arch_nvm_region_ro(void) {
 }
 
 /**
- * @brief Return the current software violation flags (stub_mpuctl1)
+ * @brief Return the current software violation flags (mpu_diag.violation_flags)
  *
  * @return MMFSR bits ORed in by the MemManage handler
  */
-uint16_t tiku_mpu_arch_get_violation_flags(void)   { return stub_mpuctl1; }
+uint16_t tiku_mpu_arch_get_violation_flags(void)   { return mpu_diag.violation_flags; }
 
 /**
  * @brief Clear all software violation flags
  */
-void     tiku_mpu_arch_clear_violation_flags(void) { stub_mpuctl1 = 0U; }
+void     tiku_mpu_arch_clear_violation_flags(void) { mpu_diag.violation_flags = 0U; }
 
 /**
  * @brief Enable MemManage and set the MSP430 SEGIE bit in stub_mpuctl0
@@ -669,7 +669,7 @@ static void ambiq_mem_fault_body(const uint32_t *frame) {
     if (mmfsr & TIKU_MMFSR_MMARVALID) {
         mpu_diag.last_fault_addr = SCB->MMFAR;
     }
-    stub_mpuctl1 |= (uint16_t)mmfsr;
+    mpu_diag.violation_flags |= (uint16_t)mmfsr;
     if (mpu_diag.expect_fault == 1U) {
         mpu_diag.expect_fault = 2U;     /* observed */
     }

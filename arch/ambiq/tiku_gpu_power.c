@@ -41,6 +41,7 @@ static uint32_t s_cl[512]        __attribute__((section(".ssram"), aligned(32)))
 
 static uint32_t s_ops, s_bytes, s_cpu_ops, s_wakes, s_sum;
 static int      s_exact;
+static uint32_t s_reduce_mean;
 
 const void *tiku_gpu_power_dst(void) { return s_dst; }
 const void *tiku_gpu_power_src(void) { return s_src; }
@@ -87,6 +88,54 @@ static uint32_t probe_sum(const void *base, uint32_t bytes)
     return w[0] + w[n / 2u] + w[n - 1u];
 }
 
+/** @brief Compare the final pixels with the selected workload's reference. */
+static int probe_exact(unsigned kind, uint32_t side, uint32_t passes)
+{
+    const uint32_t *dst = (const uint32_t *)s_dst;
+    const uint32_t *src = (const uint32_t *)s_src;
+    if (passes == 0u) {
+        return 0;
+    }
+    tiku_cpu_dcache_invalidate(s_dst, side * side * 4u);
+    if (kind == TIKU_GPU_W_REDUCE) {
+        return s_reduce_mean == 0xFF404040u && dst[0] == s_reduce_mean;
+    }
+    for (uint32_t k = 0; k < side * side; ++k) {
+        uint32_t expected = 0u;
+        if (kind == TIKU_GPU_W_FILL) {
+            expected = 0xFF000000u | ((passes - 1u) & 0xFFFFFFu);
+        } else if (kind == TIKU_GPU_W_COPY) {
+            expected = src[k];
+        } else if (kind == TIKU_GPU_W_LUT) {
+            expected = s_pal[s_src[k]];
+        } else {
+            for (unsigned shift = 0; shift < 32u; shift += 8u) {
+                uint32_t value = (src[k] >> shift) & 255u;
+                uint32_t channel;
+                if (kind == TIKU_GPU_W_SCALE) {
+                    channel = shift == 24u ? 255u :
+                              value * 128u / 255u + 16u;
+                    if (channel > 255u) { channel = 255u; }
+                } else if (kind == TIKU_GPU_W_MULTIPLY) {
+                    channel = shift == 24u ? 255u : 128u;
+                    for (uint32_t n = 0; n < passes; ++n) {
+                        uint32_t next = value * channel / 255u;
+                        if (next == channel) { break; }
+                        channel = next;
+                    }
+                } else {
+                    return 0;
+                }
+                expected |= channel << shift;
+            }
+        }
+        if (dst[k] != expected) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /*---------------------------------------------------------------------------*/
 /* GPU WORKLOADS                                                             */
 /*---------------------------------------------------------------------------*/
@@ -95,7 +144,7 @@ static uint32_t probe_sum(const void *base, uint32_t bytes)
 static tiku_gpu_err_t run_one(unsigned kind, const tiku_gpu_surface_t *dst,
                               const tiku_gpu_surface_t *src, uint32_t i)
 {
-    uint32_t mean;
+    tiku_gpu_err_t rc;
 
     switch (kind) {
     case TIKU_GPU_W_FILL:
@@ -117,8 +166,10 @@ static tiku_gpu_err_t run_one(unsigned kind, const tiku_gpu_surface_t *dst,
     case TIKU_GPU_W_REDUCE:
         /* reduce_mean overwrites its surface, so each pass refills it first;
          * the refill is inside the timed window and in bytes_of(). */
-        (void)tiku_gpu_fill(dst->base, dst->w, dst->h, dst->stride, 0xFF404040u);
-        return tiku_gpu_reduce_mean(dst, &mean);
+        rc = tiku_gpu_fill(dst->base, dst->w, dst->h, dst->stride,
+                           0xFF404040u);
+        if (rc != TIKU_GPU_OK) { return rc; }
+        return tiku_gpu_reduce_mean(dst, &s_reduce_mean);
     default:
         return TIKU_GPU_ERR_PARAM;
     }
@@ -160,7 +211,11 @@ tiku_gpu_power_probe(unsigned kind, uint32_t side, uint32_t ms, int async)
     {
         uint32_t n = (side * side * 4u) / 4u, k;
         uint32_t *w = (uint32_t *)s_src;
-        for (k = 0u; k < n; k++) { w[k] = 0xFF204060u + k; }
+        for (k = 0u; k < n; k++) {
+            w[k] = 0xFF204060u + k;
+            ((uint32_t *)s_dst)[k] = 0xFF808080u;
+        }
+        tiku_cpu_dcache_clean(s_dst, side * side * 4u);
         for (k = 0u; k < 256u; k++) { s_pal[k] = 0xFF000000u | (k * 0x010101u); }
         tiku_cpu_dcache_clean(s_src, side * side * 4u);
         tiku_cpu_dcache_clean(s_pal, sizeof s_pal);
@@ -192,9 +247,9 @@ tiku_gpu_power_probe(unsigned kind, uint32_t side, uint32_t ms, int async)
                     break;
                 }
             }
-            if (k == 0u) { break; }
-            if (tiku_gpu_submit(&cl) != TIKU_GPU_OK) { break; }
-            if (tiku_gpu_wait(&cl) != TIKU_GPU_OK)   { break; }
+            if (k == 0u) { s_exact = 0; break; }
+            if (tiku_gpu_submit(&cl) != TIKU_GPU_OK) { s_exact = 0; break; }
+            if (tiku_gpu_wait(&cl) != TIKU_GPU_OK)   { s_exact = 0; break; }
             i += k;
             tiku_hang_checkin();
             dt = tiku_ambiq_stimer_now() - t0;
@@ -218,6 +273,7 @@ tiku_gpu_power_probe(unsigned kind, uint32_t side, uint32_t ms, int async)
     if (async && kind == TIKU_GPU_W_FILL) {
         s_wakes = tiku_gpu_irq_count() - irq_at_entry;
     }
+    s_exact = s_exact && probe_exact(kind, side, i);
     s_sum   = probe_sum(s_dst, side * side * 4u);
     return tiku_ambiq_stimer_us(dt);
 }
@@ -258,6 +314,9 @@ tiku_gpu_power_cpu_probe(unsigned kind, uint32_t side, uint32_t ms)
     dt = tiku_ambiq_stimer_now() - t0;
     s_ops   = i;
     s_bytes = i * per_pass;
+    tiku_cpu_dcache_clean(s_dst, side * side * 4u);
+    s_exact = probe_exact(kind == TIKU_GPU_CPU_FILL ? TIKU_GPU_W_FILL :
+                          TIKU_GPU_W_COPY, side, i);
     s_sum   = probe_sum(s_dst, side * side * 4u);
     return tiku_ambiq_stimer_us(dt);
 }
@@ -291,12 +350,12 @@ tiku_gpu_power_contend_probe(uint32_t side, uint32_t ms)
         uint32_t k;
         tiku_gpu_cl_init(&cl, s_cl, (uint32_t)(sizeof s_cl / 4u));
         if (tiku_gpu_cl_fill(&cl, &dst, 0xFF000000u | (i & 0xFFFFFFu))
-                != TIKU_GPU_OK) { break; }
-        if (tiku_gpu_submit(&cl) != TIKU_GPU_OK) { break; }
+                != TIKU_GPU_OK) { s_exact = 0; break; }
+        if (tiku_gpu_submit(&cl) != TIKU_GPU_OK) { s_exact = 0; break; }
         /* CPU work while the GPU renders. */
         for (k = 0u; k < half; k++) { cpu[k] = cpu[k] + 1u; }
         c++;
-        if (tiku_gpu_wait(&cl) != TIKU_GPU_OK) { break; }
+        if (tiku_gpu_wait(&cl) != TIKU_GPU_OK) { s_exact = 0; break; }
         i++;
         tiku_hang_checkin();
         dt = tiku_ambiq_stimer_now() - t0;
@@ -306,6 +365,7 @@ tiku_gpu_power_contend_probe(uint32_t side, uint32_t ms)
     s_ops     = i;
     s_bytes   = i * bytes_of(TIKU_GPU_W_FILL, side);
     s_cpu_ops = c;
+    s_exact = s_exact && probe_exact(TIKU_GPU_W_FILL, side, i);
     s_sum     = probe_sum(s_dst, side * side * 4u);
     return tiku_ambiq_stimer_us(dt);
 }

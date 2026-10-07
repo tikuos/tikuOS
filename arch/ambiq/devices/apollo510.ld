@@ -84,15 +84,15 @@ __ssram_bank_end = ORIGIN(SSRAM) + LENGTH(SSRAM);
 SECTIONS
 {
     /* -------- 1. Vector table (at user-MRAM origin 0x410000) ---------- */
-    /* 16 + 135 entries take 604 bytes, so VTOR needs 1024-byte alignment;
-     * the 0x410000 origin satisfies it, though ALIGN(512) alone would not.
-     * The reset handler also writes VTOR. */
-    .vectors ORIGIN(MRAM) : ALIGN(512)
+    /* 16 + 135 entries take 604 bytes; VTOR needs 1024-byte alignment. */
+    .vectors ORIGIN(MRAM) : ALIGN(1024)
     {
         __vectors_start = .;
         KEEP(*(.vectors))
         __vectors_end = .;
     } > MRAM
+
+    ASSERT((__vectors_start & 1023) == 0, "VTOR requires 1024-byte alignment")
 
     /* __Vectors is the CMSIS name for the vector table, which this port
      * defines as tiku_ambiq_vectors. */

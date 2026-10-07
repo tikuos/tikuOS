@@ -9,7 +9,7 @@
  *
  * Snapshots the NVIC enable state and clears every IRQ outside the families
  * named in preserve_mask, restoring the snapshot on exit.  The kernel tick
- * (STIMER compare B, IRQ 33) is among the IRQs cleared.
+ * (STIMER compare B, IRQ 33) is kept by TIKU_CRIT_PRESERVE_TICK.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -34,8 +34,7 @@
 
 /**
  * @defgroup AMBIQ_IRQ Apollo510 IRQ numbers
- * @brief The IRQs that TIKU_CRIT_PRESERVE_HTIMER, _UART and _GPIO keep
- *        enabled; the other preserve flags keep nothing on this port.
+ * @brief IRQs retained by the htimer, console and GPIO preserve flags.
  * @{
  */
 #define AMBIQ_IRQ_UART0         15   /**< UART0 (not UART1, IRQ 16)    */
@@ -64,9 +63,8 @@ static inline void keep_set(uint32_t *keep, unsigned irq) {
  * @p preserve_mask, then clears every IRQ outside it via ICER.  A DSB+ISB fence
  * makes the new mask visible before the caller's protected code runs.
  *
- * @note SysTick is a core exception, not an NVIC line, so it is never masked;
- *       the kernel tick, IRQ 33, is, and tiku_clock_time() catches up when
- *       the window ends.
+ * @note SysTick is outside the NVIC. TIKU_CRIT_PRESERVE_TICK keeps the
+ *       STIMER kernel tick enabled; without it, time catches up on exit.
  * @param preserve_mask  Bitmask of TIKU_CRIT_PRESERVE_* flags naming
  *                       IRQ families that must remain enabled
  */
@@ -79,11 +77,18 @@ void tiku_crit_arch_mask_irqs(uint8_t preserve_mask) {
         s_save[i] = NVIC_ISER[i];
     }
 
+    if (preserve_mask & TIKU_CRIT_PRESERVE_TICK) {
+        keep_set(keep, 33u);
+    }
     if (preserve_mask & TIKU_CRIT_PRESERVE_HTIMER) {
         keep_set(keep, AMBIQ_IRQ_STIMER_CMPR0);
     }
     if (preserve_mask & TIKU_CRIT_PRESERVE_UART) {
+#if defined(TIKU_CONSOLE_UART1)
+        keep_set(keep, 16u);
+#else
         keep_set(keep, AMBIQ_IRQ_UART0);
+#endif
     }
     if (preserve_mask & TIKU_CRIT_PRESERVE_GPIO) {
         for (g = AMBIQ_IRQ_GPIO0_FIRST; g <= AMBIQ_IRQ_GPIO0_LAST; g++) {

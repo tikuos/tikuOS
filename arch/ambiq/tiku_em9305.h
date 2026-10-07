@@ -70,8 +70,10 @@ void tiku_em9305_release(uint8_t user);
 /**
  * @brief Set up the radio's pads (first call only) and IOM6 SPI, pulse EN,
  *        and wait for RDY to fall and rise again.
- * @return TIKU_EM9305_OK, or TIKU_EM9305_ERR_RESET if SPI init fails or RDY
- *         never rises.
+ * @return TIKU_EM9305_OK; TIKU_EM9305_ERR_NOTREADY, with the pads and EN
+ *         untouched, while USB depends on the EM9305 reference clock
+ *         (tiku_usb_uses_em9305_clock()); TIKU_EM9305_ERR_RESET if SPI init
+ *         fails or RDY never rises.
  */
 int tiku_em9305_reset(void);
 
