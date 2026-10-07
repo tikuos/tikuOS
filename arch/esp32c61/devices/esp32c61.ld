@@ -48,6 +48,8 @@ SECTIONS
      * TIKU_PSRAM_LDS), generated into the build directory; first, so their
      * patterns claim their sections. */
     INCLUDE tiku_xip.ld
+    .xip.end : { __tiku_xip_end = .; } > XIP
+    __tiku_xip_start = ORIGIN(XIP);
 
     .text :
     {
@@ -97,6 +99,9 @@ SECTIONS
     /* The ROM loads the image whole, so .data's load and run addresses
      * agree and the startup copy is skipped. */
     __data_load = LOADADDR(.data);
+    /* Flash payload loaded into SRAM by the ROM; excludes image headers. */
+    __tiku_flash_payload_bytes = SIZEOF(.text) + SIZEOF(.rodata) +
+                                 SIZEOF(.data);
     __datastart = __data_start;
 
     .bss (NOLOAD) :

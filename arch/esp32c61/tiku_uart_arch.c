@@ -7,8 +7,8 @@
  *
  * tiku_uart_arch.c - ESP32-C61 console on UART0, interrupt-fed receive.
  *
- * The ROM leaves UART0 at 115200 from the crystal, so the console uses it as
- * found; an interrupt moves received bytes from the FIFO into a ring.
+ * UART0 uses the configured console baud from the 40 MHz crystal.
+ * An interrupt moves received bytes from the FIFO into a ring.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,6 +18,13 @@
 #include "tiku_uart_arch.h"
 #include "tiku_irq_arch.h"
 #include "tiku_esp32c61_regs.h"
+
+#ifndef TIKU_BOARD_UART_BAUD
+#define TIKU_BOARD_UART_BAUD 115200UL
+#endif
+#if TIKU_BOARD_UART_BAUD < 40UL || TIKU_BOARD_UART_BAUD > 40000000UL
+#error "UART baud must be between 40 and 40000000"
+#endif
 
 #define UART_BASE               ESP32C61_UART0_BASE
 
@@ -81,6 +88,20 @@ static void uart_isr(void) {
         ESP32C61_UART_INT_RXFULL | ESP32C61_UART_INT_RXTOUT;
 }
 
+/** @brief Program UART0's crystal source and integer/fractional baud divider. */
+static void uart_set_baud(uint32_t baud)
+{
+    uint32_t pre = (uint32_t)((40000000ULL + 4095ULL * baud - 1ULL) /
+                              (4095ULL * baud));
+    uint32_t div = (uint32_t)((40000000ULL * 16ULL +
+                              (uint64_t)baud * pre / 2ULL) /
+                              ((uint64_t)baud * pre));
+    TIKU_REG32(ESP32C61_PCR_UART0_SCLK) =
+        (1UL << 22) | ((pre - 1UL) << 12);
+    TIKU_REG32(ESP32C61_UART_CLKDIV(UART_BASE)) =
+        (div >> 4) | ((div & 15UL) << 20);
+}
+
 void tiku_uart_init(void) {
     uint32_t s = tiku_esp32c61_mie_off();
     uint32_t v;
@@ -93,6 +114,7 @@ void tiku_uart_init(void) {
     rx.head = 0U;
     rx.tail = 0U;
     rx.overruns = 0U;
+    uart_set_baud(TIKU_BOARD_UART_BAUD);
 
     v = TIKU_REG32(ESP32C61_UART_CONF1(UART_BASE)) & ~ESP32C61_UART_RXFULL_MSK;
     TIKU_REG32(ESP32C61_UART_CONF1(UART_BASE)) = v | RX_FULL_LEVEL;

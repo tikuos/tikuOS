@@ -77,48 +77,13 @@ void tiku_htimer_arch_init(void)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Configure the ACLK source for Timer A1 (device-specific).
+ * @brief Preserve the shared ACLK source selected by the system clock.
  *
- * Does nothing unless TIKU_HTIMER_CLOCK_SOURCE is ACLK.  ACLK then runs
- * from VLOCLK on CS_A parts and from REFOCLK on the FR2433, whatever
- * TIKU_ACLK_CONFIG_SOURCE asks for.
+ * This compatibility hook performs no register writes.
  */
 void tiku_htimer_arch_configure_aclk(void)
 {
-#if TIKU_HTIMER_CLOCK_SOURCE == TIKU_HTIMER_SOURCE_ACLK
-
-    HTIMER_ARCH_PRINTF("Configuring ACLK clock source\n");
-
-#if TIKU_DEVICE_CS_HAS_KEY
-    CSCTL0_H = CSKEY_H;
-#endif
-
-#if defined(TIKU_DEVICE_CS_TYPE_FR2X33)
-    /* FR2433: ACLK source is in CSCTL4 (SELA bit) */
-    #if TIKU_ACLK_CONFIG_SOURCE == TIKU_ACLK_SOURCE_VLOCLK
-        /* FR2433 ACLK has no VLO selection; REFOCLK instead */
-        CSCTL4 = (CSCTL4 & ~SELA__REFOCLK) | SELA__REFOCLK;
-        HTIMER_ARCH_PRINTF("ACLK source: REFOCLK (FR2433 fallback)\n");
-    #else
-        CSCTL4 = (CSCTL4 & ~SELA__REFOCLK) | SELA__REFOCLK;
-        HTIMER_ARCH_PRINTF("ACLK source: REFOCLK (default)\n");
-    #endif
-#else
-    /* FR5969/FR5994/FR6989: ACLK source is in CSCTL2 */
-    #if TIKU_ACLK_CONFIG_SOURCE == TIKU_ACLK_SOURCE_VLOCLK
-        CSCTL2 = (CSCTL2 & ~SELA_7) | SELA__VLOCLK;
-        HTIMER_ARCH_PRINTF("ACLK source: VLOCLK (~10kHz)\n");
-    #else
-        CSCTL2 = (CSCTL2 & ~SELA_7) | SELA__VLOCLK;
-        HTIMER_ARCH_PRINTF("ACLK source: VLOCLK (default)\n");
-    #endif
-#endif
-
-#if TIKU_DEVICE_CS_HAS_KEY
-    CSCTL0_H = 0;
-#endif
-
-#endif /* TIKU_HTIMER_CLOCK_SOURCE == TIKU_HTIMER_SOURCE_ACLK */
+    /* ACLK is shared with Timer A0 and configured by tiku_clock_arch_init. */
 }
 
 /*---------------------------------------------------------------------------*/
@@ -267,12 +232,15 @@ void tiku_htimer_arch_print_config(void)
 
 /*---------------------------------------------------------------------------*/
 
-/** @brief Reset the Timer A1 counter to zero (TACLR); GIE is set on return. */
+/** @brief Reset Timer A1 to zero (TACLR), preserving the caller's GIE. */
 void tiku_htimer_arch_reset_counter(void)
 {
+    uint16_t gie = __get_SR_register() & GIE;
     __disable_interrupt();
     TA1CTL |= TACLR;
-    __enable_interrupt();
+    if (gie != 0u) {
+        __enable_interrupt();
+    }
     HTIMER_ARCH_PRINTF("Timer counter reset to 0\n");
 }
 

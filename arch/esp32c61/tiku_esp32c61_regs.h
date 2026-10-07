@@ -223,6 +223,8 @@ typedef struct {
 /*---------------------------------------------------------------------------*/
 
 #define ESP32C61_PCR_BASE           0x60096000UL
+#define ESP32C61_PCR_UART0_SCLK    (ESP32C61_PCR_BASE + 0x04UL)
+#define ESP32C61_UART_CLKDIV(b)    ((b) + 0x14UL)
 #define ESP32C61_PCR_SYSCLK_CONF    (ESP32C61_PCR_BASE + 0xE8UL)
 #define ESP32C61_PCR_SOC_CLK_POS    16U
 #define ESP32C61_PCR_SOC_CLK_MSK    (3UL << 16)

@@ -202,8 +202,8 @@ TIKU_ISR(SYSNMI_VECTOR, tiku_mpu_sysnmi_isr)
 /* NO-OP STUBS FOR DEVICES WITHOUT MPU                                       */
 /*---------------------------------------------------------------------------*/
 
-/* Without an MPU every call does nothing and every getter returns 0; the
- * interrupt wrappers still mask and unmask. */
+/* Without an MPU, FR2433 write windows use SYSCFG0.PFWP. Other devices
+ * leave protection unchanged; interrupt wrappers still mask and unmask. */
 void     tiku_mpu_arch_init_segments(void)           { }
 uint16_t tiku_mpu_arch_get_sam(void)                 { return 0; }
 void     tiku_mpu_arch_set_sam(uint16_t sam)          { (void)sam; }
@@ -213,8 +213,24 @@ void     tiku_mpu_arch_enable_irq(void)              { __enable_interrupt(); }
 void     tiku_mpu_arch_set_default_protection(void)  { }
 void     tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm)
                                                       { (void)seg; (void)perm; }
-uint16_t tiku_mpu_arch_unlock_nvm(void)              { return 0; }
-void     tiku_mpu_arch_lock_nvm(uint16_t s)           { (void)s; }
+uint16_t tiku_mpu_arch_unlock_nvm(void)
+{
+#if defined(TIKU_DEVICE_MSP430FR2433)
+    uint16_t saved = SYSCFG0 & 0x00ffu;
+    SYSCFG0 = FRWPPW | (saved & ~PFWP);
+    return saved;
+#else
+    return 0;
+#endif
+}
+void tiku_mpu_arch_lock_nvm(uint16_t saved)
+{
+#if defined(TIKU_DEVICE_MSP430FR2433)
+    SYSCFG0 = FRWPPW | (saved & 0x00ffu);
+#else
+    (void)saved;
+#endif
+}
 uint16_t tiku_mpu_arch_get_violation_flags(void)     { return 0; }
 void     tiku_mpu_arch_clear_violation_flags(void)   { }
 void     tiku_mpu_arch_enable_violation_nmi(void)    { }

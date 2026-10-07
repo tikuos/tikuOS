@@ -27,16 +27,16 @@
  * @{
  */
 #ifndef WDTIS__64
-#define WDTIS__64       (0x0000)  /**< WDT - Timer Interval Select: /64 */
+#define WDTIS__64       (0x0007)  /**< WDT - Timer Interval Select: /64 */
 #endif
 #ifndef WDTIS__512
-#define WDTIS__512      (0x0001)  /**< WDT - Timer Interval Select: /512 */
+#define WDTIS__512      (0x0006)  /**< WDT - Timer Interval Select: /512 */
 #endif
 #ifndef WDTIS__8192
-#define WDTIS__8192     (0x0002)  /**< WDT - Timer Interval Select: /8192 */
+#define WDTIS__8192     (0x0005)  /**< WDT - Timer Interval Select: /8192 */
 #endif
 #ifndef WDTIS__32768
-#define WDTIS__32768    (0x0003)  /**< WDT - Timer Interval Select: /32768 */
+#define WDTIS__32768    (0x0004)  /**< WDT - Timer Interval Select: /32768 */
 #endif
 /** @} */
 

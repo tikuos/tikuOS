@@ -16,6 +16,7 @@
 #include <stddef.h>
 
 #include "tiku_cpu_freq_boot_arch.h"
+#include "tiku_xspi_arch.h"
 #include "tiku_gpio_arch.h"
 #include "tiku_timer_arch.h"
 #include "tiku_stm32n6_regs.h"
@@ -235,6 +236,9 @@ static void clk_select_source(uint32_t src, int with_sys) {
  * @param div  Division factor, 1 to 256
  */
 static void clk_set_ic(unsigned ic, unsigned div) {
+    if (ic == 0U || ic > 20U || div == 0U || div > 256U) {
+        return;
+    }
     uint32_t cfg = TIKU_REG32(STM32N6_RCC_ICCFGR(ic));
     cfg &= ~(STM32N6_IC_INT_MSK | STM32N6_IC_SEL_MSK);
     cfg |= (STM32N6_IC_SEL_PLL1 << STM32N6_IC_SEL_POS);
@@ -271,7 +275,7 @@ int tiku_cpu_freq_stm32n6_supported(unsigned int mhz) {
     if (mhz == PLL_OVERDRIVE_MHZ) {
         return 1;
     }
-    return (mhz != 0U && mhz <= 600U &&
+    return (mhz >= 5U && mhz <= 600U &&
             (PLL_VCO_NOMINAL_MHZ % mhz) == 0U) ? 1 : 0;
 }
 
@@ -280,6 +284,11 @@ void tiku_cpu_freq_stm32n6_init(unsigned int mhz) {
         return;
     }
 
+    if (tiku_xspi_ready()) {
+        /* Keep PLL1 and the buses running while external flash is in use. */
+        tiku_cpu_stm32n6_boot_divide((unsigned long)mhz * 1000000UL);
+        return;
+    }
     /* HSI backs every transition, so it must be up before anything moves. */
     TIKU_REG32(STM32N6_RCC_CR) |= STM32N6_RCC_CR_HSION;
     if (!clk_wait_set(STM32N6_RCC_SR, STM32N6_RCC_SR_HSIRDY)) {

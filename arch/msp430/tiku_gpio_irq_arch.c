@@ -9,7 +9,7 @@
  *
  * Each port has one vector for its eight pins: the ISR reads PxIV, which
  * returns the highest-priority pending pin and clears its flag, and posts one
- * event per pin.  Ports 1-4 are served, each where PORTn_VECTOR is defined.
+ * event per pin.  Ports 1-8 are served, each where PORTn_VECTOR is defined.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -39,7 +39,7 @@ typedef struct {
 } gpio_irq_port_t;
 
 /* Highest port number with interrupt support here. */
-#define GPIO_IRQ_MAX_PORT 4
+#define GPIO_IRQ_MAX_PORT 8
 
 /*
  * Each entry is gated on PORTn_VECTOR, the macro the ISRs below also use.
@@ -69,6 +69,18 @@ static const gpio_irq_port_t gpio_irq_ports[GPIO_IRQ_MAX_PORT + 1] = {
     [4] = { &P4IE, &P4IES, &P4IFG, &P4IV },
 #else
     [4] = { 0, 0, 0, 0 },
+#endif
+#if defined(PORT5_VECTOR)
+    [5] = { &P5IE, &P5IES, &P5IFG, &P5IV },
+#endif
+#if defined(PORT6_VECTOR)
+    [6] = { &P6IE, &P6IES, &P6IFG, &P6IV },
+#endif
+#if defined(PORT7_VECTOR)
+    [7] = { &P7IE, &P7IES, &P7IFG, &P7IV },
+#endif
+#if defined(PORT8_VECTOR)
+    [8] = { &P8IE, &P8IES, &P8IFG, &P8IV },
 #endif
 };
 
@@ -218,5 +230,33 @@ TIKU_ISR(PORT3_VECTOR, tiku_gpio_irq_port3_isr)
 TIKU_ISR(PORT4_VECTOR, tiku_gpio_irq_port4_isr)
 {
     gpio_irq_dispatch(4);
+}
+#endif
+
+#if defined(PORT5_VECTOR)
+TIKU_ISR(PORT5_VECTOR, tiku_gpio_irq_port5_isr)
+{
+    gpio_irq_dispatch(5);
+}
+#endif
+
+#if defined(PORT6_VECTOR)
+TIKU_ISR(PORT6_VECTOR, tiku_gpio_irq_port6_isr)
+{
+    gpio_irq_dispatch(6);
+}
+#endif
+
+#if defined(PORT7_VECTOR)
+TIKU_ISR(PORT7_VECTOR, tiku_gpio_irq_port7_isr)
+{
+    gpio_irq_dispatch(7);
+}
+#endif
+
+#if defined(PORT8_VECTOR)
+TIKU_ISR(PORT8_VECTOR, tiku_gpio_irq_port8_isr)
+{
+    gpio_irq_dispatch(8);
 }
 #endif

@@ -23,7 +23,10 @@
 #define TIKU_MEM_ARCH_ALIGNMENT  4U
 
 /** @brief Size type for arch memory calls. */
+#ifndef TIKU_MEM_ARCH_SIZE_T_DEFINED
+#define TIKU_MEM_ARCH_SIZE_T_DEFINED
 typedef uint32_t tiku_mem_arch_size_t;
+#endif
 
 /**
  * @brief Restore the durable region from the NOR mirror.

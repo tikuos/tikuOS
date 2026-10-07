@@ -16,6 +16,7 @@
 
 #include <hal/tiku_mpu_hal.h>
 #include "tiku_mpu_arch.h"
+#include <hal/tiku_cpu.h>
 #include "tiku_esp32c61_regs.h"
 #include "tiku_psram_arch.h"
 
@@ -49,9 +50,11 @@ uint16_t tiku_mpu_arch_get_ctl(void) {
 }
 
 void tiku_mpu_arch_disable_irq(void) {
+    tiku_cpu_irq_disable();
 }
 
 void tiku_mpu_arch_enable_irq(void) {
+    tiku_cpu_irq_enable();
 }
 
 /**

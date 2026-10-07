@@ -14,6 +14,7 @@
  */
 
 #include "tiku_mpu_arch.h"
+#include <hal/tiku_cpu.h>
 
 /* Segment access mask for get_sam and set_sam; no MPU register holds it. */
 static uint16_t mpu_sam = TIKU_MPU_DEFAULT_SAM;
@@ -32,9 +33,11 @@ uint16_t tiku_mpu_arch_get_ctl(void) {
 }
 
 void tiku_mpu_arch_disable_irq(void) {
+    tiku_cpu_irq_disable();
 }
 
 void tiku_mpu_arch_enable_irq(void) {
+    tiku_cpu_irq_enable();
 }
 
 void tiku_mpu_arch_init_segments(void) {

@@ -53,7 +53,8 @@ typedef enum {
     TIKU_ACLK_VLO = 0,    /**< Internal VLO (~10kHz, varies 4-20kHz) */
     TIKU_ACLK_REFO,       /**< Internal REFO (32.768kHz) */
     TIKU_ACLK_LFXT,       /**< External crystal on XT1 */
-    TIKU_ACLK_DCO         /**< DCO (same as MCLK) */
+    TIKU_ACLK_DCO,        /**< Unsupported ACLK sources use an internal clock */
+    TIKU_ACLK_LFMODCLK    /**< Internal MODCLK / 128 on CS_A parts */
 } tiku_aclk_source_t;
 
 /**
@@ -218,8 +219,8 @@ typedef enum {
 #define MSP430_XT1HFFREQ_3   (0x000C)    /**< XT1 HF freq range: 8-24MHz */
 #endif
 
-#ifndef MSP430_SELA__REFOCLK
-#define MSP430_SELA__REFOCLK (0x0200)   /**< ACLK source select: REFOCLK */
+#ifndef MSP430_SELA__LFMODCLK
+#define MSP430_SELA__LFMODCLK (0x0200)  /**< ACLK source select: MODCLK / 128 */
 #endif
 
 #ifndef MSP430_SELA__VLOCLK
@@ -230,9 +231,6 @@ typedef enum {
 #define MSP430_SELA__XT1CLK  (0x0000)   /**< ACLK source select: XT1CLK */
 #endif
 
-#ifndef MSP430_SELA__DCOCLK
-#define MSP430_SELA__DCOCLK  (0x0300)   /**< ACLK source select: DCOCLK */
-#endif
 
 #ifndef MSP430_SELS__DCOCLK
 #define MSP430_SELS__DCOCLK  (0x0030)   /**< SMCLK source select: DCOCLK */
@@ -477,7 +475,7 @@ const char* tiku_cpu_freq_to_mhz_str(unsigned int freq_enum);
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Declared only: this port has no definition, so a call fails to link.
+ * @brief Initialize boot clocks through tiku_cpu_boot_msp430_init().
  */
 void tiku_cpu_boot_msp430_setup(void);
 

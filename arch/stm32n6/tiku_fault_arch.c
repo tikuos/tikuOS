@@ -40,8 +40,10 @@ const tiku_stm32n6_fault_record_t *tiku_stm32n6_fault_last(void) {
 }
 
 void tiku_stm32n6_fault_clear(void) {
+    uint16_t saved = tiku_mpu_unlock_nvm();
     fault_rec.magic = 0UL;
     fault_rec.count = 0UL;
+    tiku_mpu_lock_nvm(saved);
 }
 
 const char *tiku_stm32n6_fault_kind_name(uint32_t kind) {

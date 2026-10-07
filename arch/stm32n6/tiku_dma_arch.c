@@ -104,10 +104,10 @@ int tiku_dma_arch_memcpy(void *dst, const void *src, size_t len,
     TIKU_REG32(STM32N6_GPDMA_DAR(DMA_CH)) = (uint32_t)(uintptr_t)dst;
     TIKU_REG32(STM32N6_GPDMA_LLR(DMA_CH)) = 0UL;
 
-    /* Clean the source so the controller reads what the core wrote, and
-     * invalidate the destination so no dirty line is evicted over the
-     * transfer later. */
+    /* Preserve dirty neighbours in partial destination cache lines before
+     * invalidation. The caller must leave these lines alone until completion. */
     tiku_stm32n6_dcache_clean(src, len);
+    tiku_stm32n6_dcache_clean(dst, len);
     tiku_stm32n6_dcache_invalidate(dst, len);
 
     __asm__ volatile ("dsb" ::: "memory");

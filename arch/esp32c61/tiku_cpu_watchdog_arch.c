@@ -58,8 +58,8 @@ void tiku_cpu_esp32c61_watchdog_on_arch(tiku_wdt_clk_t src,
                                 32767UL) / 32768UL);
 
     (void)src;
-    if (hold == 0UL) {
-        hold = 1UL;
+    if (hold < 2UL) {
+        hold = 2UL;
     }
     TIKU_REG32(ESP32C61_PCR_TG0_CONF) |= ESP32C61_PCR_TG0_CLK_EN;
     TIKU_REG32(ESP32C61_PCR_TG0_WDT_CLK) =

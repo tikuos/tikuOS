@@ -71,6 +71,18 @@ static struct {
 #if defined(OFS_P4IE)
     uint8_t  p4_ie;
 #endif
+#if defined(OFS_P5IE)
+    uint8_t p5_ie;
+#endif
+#if defined(OFS_P6IE)
+    uint8_t p6_ie;
+#endif
+#if defined(OFS_P7IE)
+    uint8_t p7_ie;
+#endif
+#if defined(OFS_P8IE)
+    uint8_t p8_ie;
+#endif
 } crit_ie_saved;
 
 /*---------------------------------------------------------------------------*/
@@ -81,7 +93,7 @@ static struct {
  * Clears the enable bit of every interrupt source preserve_mask does not
  * name, saving each register first.  GIE stays set, so a preserved ISR
  * (typically the bit clock) keeps firing.  Each register is touched at
- * most once, and only the GPIO ports 1-4 are masked.
+ * most once, and GPIO ports with interrupt registers are masked.
  */
 void
 tiku_crit_arch_mask_irqs(uint8_t preserve_mask)
@@ -162,7 +174,31 @@ tiku_crit_arch_mask_irqs(uint8_t preserve_mask)
 #if defined(OFS_P4IE)
     crit_ie_saved.p4_ie = P4IE;
 #endif
+#if defined(OFS_P5IE)
+    crit_ie_saved.p5_ie = P5IE;
+#endif
+#if defined(OFS_P6IE)
+    crit_ie_saved.p6_ie = P6IE;
+#endif
+#if defined(OFS_P7IE)
+    crit_ie_saved.p7_ie = P7IE;
+#endif
+#if defined(OFS_P8IE)
+    crit_ie_saved.p8_ie = P8IE;
+#endif
     if (!(preserve_mask & TIKU_CRIT_PRESERVE_GPIO)) {
+#if defined(OFS_P8IE)
+        P8IE = 0;
+#endif
+#if defined(OFS_P7IE)
+        P7IE = 0;
+#endif
+#if defined(OFS_P6IE)
+        P6IE = 0;
+#endif
+#if defined(OFS_P5IE)
+        P5IE = 0;
+#endif
 #if defined(OFS_P1IE)
         P1IE = 0;
 #endif
@@ -227,5 +263,17 @@ tiku_crit_arch_unmask_irqs(void)
 #endif
 #if defined(OFS_P4IE)
     P4IE = crit_ie_saved.p4_ie;
+#endif
+#if defined(OFS_P5IE)
+    P5IE = crit_ie_saved.p5_ie;
+#endif
+#if defined(OFS_P6IE)
+    P6IE = crit_ie_saved.p6_ie;
+#endif
+#if defined(OFS_P7IE)
+    P7IE = crit_ie_saved.p7_ie;
+#endif
+#if defined(OFS_P8IE)
+    P8IE = crit_ie_saved.p8_ie;
 #endif
 }

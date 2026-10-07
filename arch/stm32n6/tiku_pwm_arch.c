@@ -48,13 +48,20 @@ static unsigned pwm_channel_of(uint8_t pin) {
 /**
  * @brief Clock reaching the timer, in Hz.
  *
- * TIM1 is on APB2, which this port runs undivided from AHB: the timer clock
- * is PLL1 / IC2 / the AHB prescaler.  0 when the tree reads back unusable.
+ * TIM1 is on APB2, which this port runs undivided from AHB. The source
+ * follows SYSSWS; an unsupported source or invalid divider returns zero.
  */
 static unsigned long pwm_tim_clock_hz(void) {
     tiku_stm32n6_clock_t c;
     tiku_cpu_stm32n6_clock_probe(&c);
-    if (c.pll1_hz == 0UL || c.ic2_div == 0U || c.ahb_div == 0UL) {
+    if (c.ahb_div == 0UL) {
+        return 0UL;
+    }
+    if (c.sys_src == STM32N6_CLKSRC_HSI) {
+        return tiku_cpu_stm32n6_smclk_get_hz() / c.ahb_div;
+    }
+    if (c.sys_src != STM32N6_CLKSRC_IC ||
+        c.pll1_hz == 0UL || c.ic2_div == 0U) {
         return 0UL;
     }
     return (c.pll1_hz / c.ic2_div) / c.ahb_div;
@@ -113,7 +120,9 @@ int tiku_pwm_arch_init(uint8_t gpio_pin, uint32_t freq_hz, uint16_t duty_u16) {
     TIKU_REG32(ccmr_reg) = ccmr;
 
     pwm_duty[ch - 1U] = duty_u16;
-    pwm_write_duty(ch, duty_u16);
+    for (unsigned i = 0U; i < PWM_CHANS; i++) {
+        pwm_write_duty(i + 1U, pwm_duty[i]);
+    }
 
     TIKU_REG32(STM32N6_TIM_CCER(TIM)) |= (1UL << ((ch - 1U) * 4U));
     TIKU_REG32(STM32N6_TIM_CR1(TIM))  |= STM32N6_TIM_CR1_ARPE;

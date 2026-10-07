@@ -123,11 +123,10 @@ tiku_clock_arch_counter_t tiku_clock_arch_counter(void);
  * @brief Convert milliseconds to clock ticks
  * @param ms Milliseconds
  * @return Number of clock ticks
- * @note The product with TIKU_CLOCK_ARCH_SECOND has the type of @p ms; a
- *       16-bit int overflows above 255 ms.
+ * @note The multiplication uses an unsigned long intermediate.
  */
 #define TIKU_CLOCK_ARCH_MS_TO_TICKS(ms) \
-    ((tiku_clock_arch_time_t)(((ms) * TIKU_CLOCK_ARCH_SECOND) / 1000))
+    ((tiku_clock_arch_time_t)(((unsigned long)(ms) * TIKU_CLOCK_ARCH_SECOND) / 1000UL))
 
 /**
  * @brief Convert clock ticks to milliseconds

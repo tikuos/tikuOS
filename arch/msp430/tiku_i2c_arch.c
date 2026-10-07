@@ -212,7 +212,7 @@ tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len)
          * while the byte is being received, so only one byte is clocked.
          */
         timeout = I2C_TIMEOUT;
-        while (UCB0CTLW0 & UCTXSTT) {
+        while ((UCB0CTLW0 & UCTXSTT) && !(UCB0IFG & UCNACKIFG)) {
             if (--timeout == 0) {
                 UCB0CTLW0 |= UCTXSTP;
                 return TIKU_I2C_ERR_TIMEOUT;
@@ -266,18 +266,24 @@ tiku_i2c_arch_probe(uint8_t addr)
     /* Transmitter mode, generate START + address (no data follows) */
     UCB0CTLW0 |= UCTR | UCTXSTT;
 
-    /* Address phase: UCTXIFG0 means the slave ACKed; the helper turns a
-     * missing device (UCNACKIFG) into STOP + TIKU_I2C_ERR_NACK. */
-    rc = i2c_wait_flag(UCTXIFG0);
-    if (rc != TIKU_I2C_OK) {
-        return rc;
+    {
+        uint16_t timeout = I2C_TIMEOUT;
+        while ((UCB0CTLW0 & UCTXSTT) && !(UCB0IFG & UCNACKIFG)) {
+            if (--timeout == 0u) {
+                UCB0CTLW0 |= UCTXSTP;
+                return TIKU_I2C_ERR_TIMEOUT;
+            }
+        }
     }
-
-    /* ACKed — device present.  Release the bus without sending data. */
+    rc = (UCB0IFG & UCNACKIFG) ? TIKU_I2C_ERR_NACK : TIKU_I2C_OK;
     UCB0CTLW0 |= UCTXSTP;
-    (void)i2c_wait_stop();
-
-    return TIKU_I2C_OK;
+    if (i2c_wait_stop() != TIKU_I2C_OK) {
+        return rc == TIKU_I2C_ERR_NACK ? rc : TIKU_I2C_ERR_TIMEOUT;
+    }
+    if (UCB0IFG & UCNACKIFG) {
+        rc = TIKU_I2C_ERR_NACK;
+    }
+    return rc;
 }
 
 /**

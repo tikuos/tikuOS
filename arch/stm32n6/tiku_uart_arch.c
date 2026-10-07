@@ -57,16 +57,16 @@ void tiku_uart_init(void) {
     tiku_stm32n6_gpio_init_alt(STM32N6_GPIO_PORT_E, STM32N6_USART1_RX_PIN,
                                STM32N6_USART1_AF);
 
+    TIKU_REG32(STM32N6_RCC_APB2ENR) |= STM32N6_RCC_APB2ENR_USART1;
+    (void)TIKU_REG32(STM32N6_RCC_APB2ENR);
+    TIKU_REG32(STM32N6_USART_CR1(UART_BASE)) = 0UL;
+
     /* Kernel clock select must be set while the peripheral is disabled. */
     uint32_t ccipr = TIKU_REG32(STM32N6_RCC_CCIPR13);
     ccipr &= ~STM32N6_CCIPR13_USART1SEL_MSK;
     ccipr |= STM32N6_CCIPR13_USART1SEL_HSI;
     TIKU_REG32(STM32N6_RCC_CCIPR13) = ccipr;
 
-    TIKU_REG32(STM32N6_RCC_APB2ENR) |= STM32N6_RCC_APB2ENR_USART1;
-    (void)TIKU_REG32(STM32N6_RCC_APB2ENR);
-
-    TIKU_REG32(STM32N6_USART_CR1(UART_BASE)) = 0UL;    /* disable first */
     TIKU_REG32(STM32N6_USART_CR2(UART_BASE)) = 0UL;    /* 1 stop bit */
     TIKU_REG32(STM32N6_USART_CR3(UART_BASE)) = 0UL;    /* no flow control */
     TIKU_REG32(STM32N6_USART_PRESC(UART_BASE)) = 0UL;  /* no kernel prescaler */

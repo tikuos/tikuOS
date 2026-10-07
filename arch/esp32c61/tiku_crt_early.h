@@ -64,4 +64,7 @@ int tiku_esp32c61_in_isr(void);
 void tiku_esp32c61_fault(uint32_t *frame, uint32_t cause)
     __attribute__((noreturn));
 
+/** @brief Initialize a worker's newlib state; call before its first switch. */
+void tiku_esp32c61_reent_init(uint8_t slot);
+
 #endif /* TIKU_ESP32C61_CRT_EARLY_H_ */

@@ -110,7 +110,7 @@ void tiku_cpu_stm32n6_clock_probe(tiku_stm32n6_clock_t *out);
 /**
  * @brief Set the core frequency.
  *
- * Accepts 64 (the core on HSI directly), any exact divisor of 1200 up to 600,
+ * Accepts 64 (the core on HSI directly), exact divisors of 1200 from 5 to 600,
  * and 800, which also raises the core rail through the board's SMPS.
  *
  * @param mhz  Requested core frequency in MHz

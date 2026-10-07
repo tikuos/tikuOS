@@ -15,6 +15,10 @@
 
 #include <stdint.h>
 #include <reent.h>
+#include <string.h>
+#if (TIKU_THREADS_ENABLE + 0)
+#include <kernel/threads/tiku_thread.h>
+#endif
 #include "tiku_esp32c61_regs.h"
 #include "tiku_crt_early.h"
 
@@ -72,12 +76,41 @@ void tiku_esp32c61_c_start(void) {
     }
 }
 
+#if (TIKU_THREADS_ENABLE + 0)
+static struct _reent worker_reent[TIKU_THREADS_MAX];
+static struct _reent irq_reent;
+static struct _reent *kernel_reent;
+static uint8_t worker_reent_ready[TIKU_THREADS_MAX];
+
+/** @brief Reset a worker slot's C-library state before starting that worker. */
+void tiku_esp32c61_reent_init(uint8_t slot)
+{
+    if (slot >= TIKU_THREADS_MAX) { return; }
+    if (kernel_reent == NULL) {
+        kernel_reent = _impure_ptr;
+        _REENT_INIT_PTR(&irq_reent);
+    }
+    if (worker_reent_ready[slot]) {
+        _reclaim_reent(&worker_reent[slot]);
+    }
+    _REENT_INIT_PTR(&worker_reent[slot]);
+    worker_reent_ready[slot] = 1u;
+}
+
+/** @brief Select the C-library state of the thread about to resume. */
+static struct _reent *reent_current(void)
+{
+    tiku_thread_t *thread = tiku_thread_self();
+    return thread != NULL && thread->slot < TIKU_THREADS_MAX ?
+        &worker_reent[thread->slot] : kernel_reent;
+}
+#endif
+
 /**
  * @brief The C library's reentrancy state, for errno and stdio.
  *
- * Espressif's newlib asks for the running thread's state; this port returns
- * the one static _impure_ptr to every caller, worker threads included.
- * libnosys's version of this function faults.
+ * Trap entry selects interrupt state; trap exit selects the kernel or
+ * worker state. Both dynamic-reentrancy and _impure_ptr callers use it.
  */
 struct _reent *__getreent(void) {
     return _impure_ptr;
@@ -227,6 +260,14 @@ uint32_t *tiku_esp32c61_trap(uint32_t *frame) {
     uint32_t cause = frame[TIKU_ESP32C61_F_MCAUSE];
 
     if (cause & 0x80000000UL) {
+#if (TIKU_THREADS_ENABLE + 0)
+        if (kernel_reent != NULL) {
+            _impure_ptr = &irq_reent;
+            frame = tiku_esp32c61_irq_dispatch(cause & 0xFFFUL, frame);
+            _impure_ptr = reent_current();
+            return frame;
+        }
+#endif
         return tiku_esp32c61_irq_dispatch(cause & 0xFFFUL, frame);
     }
     trap_puts("\r\n[TM:FAULT] ");

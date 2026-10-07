@@ -18,6 +18,12 @@
 #include "tiku_stm32n6_regs.h"
 #include <kernel/scheduler/tiku_sched.h>
 
+/** @brief No alternate tick clock is selected by this port. */
+unsigned char tiku_clock_arch_fault(void)
+{
+    return 0;
+}
+
 #define LPTIM   STM32N6_LPTIM1_BASE
 
 /* Owned by tiku_htimer_arch.c, which shares LPTIM1 and this interrupt. */

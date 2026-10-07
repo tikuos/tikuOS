@@ -17,14 +17,13 @@
 
 #include "tiku_xspi_arch.h"
 #include "tiku_cache_arch.h"
+#include "tiku_cpu_freq_boot_arch.h"
 #include "tiku_gpio_arch.h"
 #include "tiku_stm32n6_regs.h"
 
-/* IC3 carries the XSPI kernel clock.  With PLL1 at 1200 MHz a divider of 24
- * gives the 50 MHz ST uses without the VDDIO3_HSLV fuse; ST's 200 MHz
- * setting needs that fuse. */
+/* IC3 divides the live PLL1 rate to at most 50 MHz.  Higher rates require
+ * the VDDIO3_HSLV fuse. */
 #define XSPI_IC_INDEX       3U
-#define XSPI_IC_DIVIDER     24U
 #define XSPI_CLOCK_HZ       50000000UL
 
 /* Standard SPI-mode opcodes with 32-bit addressing; the 3-byte forms reach
@@ -207,11 +206,24 @@ static tiku_xspi_err_t xspi_write_enable(void) {
 }
 
 tiku_xspi_err_t tiku_xspi_init(void) {
+    tiku_stm32n6_clock_t clocks;
+    uint32_t divider;
+    if (xspi_ready) {
+        return TIKU_XSPI_OK;
+    }
+    tiku_cpu_stm32n6_clock_probe(&clocks);
+    if (!clocks.pll1_ready || clocks.pll1_hz == 0UL) {
+        return TIKU_XSPI_ERR_STATE;
+    }
+    divider = 1UL + (clocks.pll1_hz - 1UL) / XSPI_CLOCK_HZ;
+    if (divider > 256UL) {
+        return TIKU_XSPI_ERR_STATE;
+    }
     /* Kernel clock first: IC3 from PLL1, then the controller and its pins. */
     uint32_t ic = TIKU_REG32(STM32N6_RCC_ICCFGR(XSPI_IC_INDEX));
     ic &= ~(STM32N6_IC_INT_MSK | STM32N6_IC_SEL_MSK);
     ic |= (STM32N6_IC_SEL_PLL1 << STM32N6_IC_SEL_POS);
-    ic |= ((XSPI_IC_DIVIDER - 1UL) << STM32N6_IC_INT_POS);
+    ic |= ((divider - 1UL) << STM32N6_IC_INT_POS);
     TIKU_REG32(STM32N6_RCC_ICCFGR(XSPI_IC_INDEX)) = ic;
     TIKU_REG32(STM32N6_RCC_DIVENR) |= (1UL << (XSPI_IC_INDEX - 1U));
 
@@ -439,7 +451,12 @@ tiku_xspi_err_t tiku_xspi_mmap_disable(void) {
 }
 
 unsigned long tiku_xspi_clock_hz(void) {
-    return xspi_ready ? XSPI_CLOCK_HZ : 0UL;
+    tiku_stm32n6_clock_t clocks;
+    uint32_t ic = TIKU_REG32(STM32N6_RCC_ICCFGR(XSPI_IC_INDEX));
+    tiku_cpu_stm32n6_clock_probe(&clocks);
+    return xspi_ready && clocks.pll1_ready ?
+        clocks.pll1_hz / (((ic & STM32N6_IC_INT_MSK) >>
+                           STM32N6_IC_INT_POS) + 1UL) : 0UL;
 }
 
 int tiku_xspi_ready(void) {

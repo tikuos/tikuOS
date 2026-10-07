@@ -33,11 +33,9 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Configure ACLK source if using ACLK for timer
+ * @brief Compatibility hook; preserves the shared system-clock ACLK.
  *
- * Changes ACLK for every ACLK user, the system tick included.
- *
- * @note Call before tiku_htimer_arch_init() when the timer runs from ACLK.
+ * Performs no register writes.
  */
 void tiku_htimer_arch_configure_aclk(void);
 

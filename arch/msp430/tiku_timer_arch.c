@@ -18,6 +18,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_timer_arch.h"
+#include "tiku_cpu_freq_boot_arch.h"
 #include <tiku.h>
 #include <hal/tiku_clock_hal.h>
 #include <kernel/timers/tiku_crit.h>
@@ -124,6 +125,7 @@ static void tiku_configure_aclk_source(void)
             CLOCK_PRINTF("XT1 fault timeout, falling back to VLO\n");
             CSCTL4 |= LFXTOFF;
             CSCTL2 = SELA__VLOCLK | SELS__DCOCLK | SELM__DCOCLK;
+            g_aclk_hz = VLO_FREQ_NOMINAL_HZ;
             TIKU_CS_LOCK();
             tiku_arch_clock_fault = TIKU_CLOCK_ARCH_FAULT_LFXT_VLO;
             return;
@@ -133,6 +135,7 @@ static void tiku_configure_aclk_source(void)
     CSCTL4 = (CSCTL4 & ~LFXTDRIVE_3) | LFXTDRIVE_0; /* Low drive once stable */
 
     CSCTL2 = SELA__LFXTCLK | SELS__DCOCLK | SELM__DCOCLK;
+    g_aclk_hz = XT1_FREQ_32KHZ;
 
     TIKU_CS_LOCK();
 
@@ -144,6 +147,7 @@ static void tiku_configure_aclk_source(void)
     TIKU_CS_UNLOCK();
 
     CSCTL4 = SELA__REFOCLK | SELMS__DCOCLKDIV;
+    g_aclk_hz = REFO_FREQ_HZ;
 
     TIKU_CS_LOCK();
 

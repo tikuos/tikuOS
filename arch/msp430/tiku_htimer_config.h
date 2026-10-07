@@ -97,21 +97,29 @@
 #define TIKU_ACLK_CONFIG_SOURCE      TIKU_ACLK_SOURCE_VLOCLK  /* Not used */
 
 #elif defined(TIKU_HTIMER_CONFIG_LOW_POWER)
-/* Low power mode: ACLK from VLO @ ~10 kHz */
+/* Low power mode: the system timer's 32.768 kHz ACLK. */
 #define TIKU_HTIMER_CLOCK_SOURCE     TIKU_HTIMER_SOURCE_ACLK
 #define TIKU_HTIMER_DIVIDER          TIKU_HTIMER_DIV_1
 #define TIKU_HTIMER_EX_DIVIDER       TIKU_HTIMER_EXDIV_1
-#define TIKU_HTIMER_BASE_FREQ        10000UL  /* ~10 kHz VLO (nominal) */
-#define TIKU_ACLK_CONFIG_SOURCE      TIKU_ACLK_SOURCE_VLOCLK
+#define TIKU_HTIMER_BASE_FREQ        32768UL
+#if defined(TIKU_DEVICE_MSP430FR2433)
+#define TIKU_ACLK_CONFIG_SOURCE      TIKU_ACLK_SOURCE_REFOCLK
+#else
+#define TIKU_ACLK_CONFIG_SOURCE      TIKU_ACLK_SOURCE_XT1CLK
+#endif
 
 #elif defined(TIKU_HTIMER_CONFIG_ULTRA_LOW_POWER)
-/* Ultra-low power: ACLK from VLO @ ~10 kHz, which varies from 4 to 20 kHz */
+/* Ultra-low power: shared ACLK divided by eight. */
 #define TIKU_HTIMER_CLOCK_SOURCE     TIKU_HTIMER_SOURCE_ACLK
-#define TIKU_HTIMER_DIVIDER          TIKU_HTIMER_DIV_1
+#define TIKU_HTIMER_DIVIDER          TIKU_HTIMER_DIV_8
 #define TIKU_HTIMER_EX_DIVIDER       TIKU_HTIMER_EXDIV_1
-#define TIKU_HTIMER_BASE_FREQ        10000UL  /* ~10 kHz VLO (nominal) */
-#define TIKU_ACLK_CONFIG_SOURCE      TIKU_ACLK_SOURCE_VLOCLK
-#warning "VLO frequency varies widely (4-20kHz). Timing will be inaccurate!"
+#define TIKU_HTIMER_BASE_FREQ        32768UL
+#if defined(TIKU_DEVICE_MSP430FR2433)
+#define TIKU_ACLK_CONFIG_SOURCE      TIKU_ACLK_SOURCE_REFOCLK
+#else
+#define TIKU_ACLK_CONFIG_SOURCE      TIKU_ACLK_SOURCE_XT1CLK
+#endif
+
 
 #elif defined(TIKU_HTIMER_CONFIG_CUSTOM)
 /* Custom configuration: the build defines the values below */

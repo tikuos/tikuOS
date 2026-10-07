@@ -22,6 +22,7 @@
 
 
 #include <hal/tiku_wake_hal.h>
+#include <tiku.h>
 #include <msp430.h>
 #include <string.h>
 
@@ -40,12 +41,18 @@ tiku_wake_arch_query(tiku_wake_sources_t *out)
     }
 
     /* Hardware timer (Timer A1) */
-    if ((TA1CTL & MC__UP) != 0) {
+    if ((TA1CTL & MC_3) != 0) {
         out->sources |= TIKU_WAKE_HTIMER;
     }
 
-    /* UART RX (eUSCI_A0) */
-#if defined(OFS_UCA0IE) && defined(UCRXIE)
+    /* UART RX on the board's console module. */
+#if (TIKU_BOARD_UART_MODULE + 0) == 1
+#if defined(OFS_UCA1IE) && defined(UCRXIE)
+    if ((UCA1IE & UCRXIE) != 0) {
+        out->sources |= TIKU_WAKE_UART_RX;
+    }
+#endif
+#elif defined(OFS_UCA0IE) && defined(UCRXIE)
     if ((UCA0IE & UCRXIE) != 0) {
         out->sources |= TIKU_WAKE_UART_RX;
     }

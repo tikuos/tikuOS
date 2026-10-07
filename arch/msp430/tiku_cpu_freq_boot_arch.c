@@ -371,6 +371,13 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
                                          tiku_clk_div_t sfreq_div,
                                          tiku_aclk_source_t aclk_source)
  {
+#if defined(TIKU_DEVICE_CS_TYPE_FR2X33)
+     aclk_source = TIKU_ACLK_REFO;
+#else
+     if (aclk_source == TIKU_ACLK_REFO || aclk_source == TIKU_ACLK_DCO) {
+         aclk_source = TIKU_ACLK_LFMODCLK;
+     }
+#endif
      /* Validate input parameters */
      if (freq < CPU_FREQ_MIN_MHZ || freq > CPU_FREQ_8MHZ) {
          freq = CPU_FREQ_8MHZ;  /* Default/clamp to 8MHz */
@@ -400,8 +407,8 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
      /*
       * FR2433 CS: the FLL locks DCOCLKDIV to 32768 * (FLLN + 1) Hz from REFO
       * within the DCO range DCORSEL selects; SLAU445 gives the ranges
-      * 0..7 = 1, 2, 4, 8, 12, 16, 20 and 24 MHz.  Each case below uses
-      * DCORSEL_n with n one less than its frequency code.  SCG0 holds the
+      * 0..7 = 1, 2, 4, 8, 12, 16, 20 and 24 MHz. Each target uses the
+      * nearest supported range at or above its nominal rate. SCG0 holds the
       * FLL off while CSCTL1 and CSCTL2 change.
       */
      __bis_SR_register(SCG0);  /* Disable FLL */
@@ -415,7 +422,7 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
             clk.freq = TIKU_CLK_FREQ_1MHZ;
             break;
         case TIKU_CLK_FREQ_2_677MHZ:
-            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_1;
+            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_2;
             CSCTL2 = FLLD_0 + 81;   /* 32768*(81+1) = 2,686,976 Hz */
             clk.freq = TIKU_CLK_FREQ_2_677MHZ;
             break;
@@ -425,27 +432,27 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
             clk.freq = TIKU_CLK_FREQ_3_5MHZ;
             break;
         case TIKU_CLK_FREQ_4MHZ:
-            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_3;
+            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_2;
             CSCTL2 = FLLD_0 + 121;  /* 32768*(121+1) = 3,997,696 Hz */
             clk.freq = TIKU_CLK_FREQ_4MHZ;
             break;
         case TIKU_CLK_FREQ_5_33MHZ:
-            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_4;
+            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_3;
             CSCTL2 = FLLD_0 + 162;  /* 32768*(162+1) = 5,341,184 Hz */
             clk.freq = TIKU_CLK_FREQ_5_33MHZ;
             break;
         case TIKU_CLK_FREQ_7MHZ:
-            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_5;
+            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_3;
             CSCTL2 = FLLD_0 + 213;  /* 32768*(213+1) = 7,012,352 Hz */
             clk.freq = TIKU_CLK_FREQ_7MHZ;
             break;
         case TIKU_CLK_FREQ_8MHZ:
-            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_6;
+            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_3;
             CSCTL2 = FLLD_0 + 243;  /* 32768*(243+1) = 7,995,392 Hz */
             clk.freq = TIKU_CLK_FREQ_8MHZ;
             break;
         default:
-            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_6;
+            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_3;
             CSCTL2 = FLLD_0 + 243;
             clk.freq = TIKU_CLK_FREQ_8MHZ;
             break;
@@ -574,14 +581,11 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
             case TIKU_ACLK_VLO:
                 sela = MSP430_SELA__VLOCLK;
                 break;
-            case TIKU_ACLK_REFO:
-                sela = MSP430_SELA__REFOCLK;
+            case TIKU_ACLK_LFMODCLK:
+                sela = MSP430_SELA__LFMODCLK;
                 break;
             case TIKU_ACLK_LFXT:
                 sela = MSP430_SELA__XT1CLK;
-                break;
-            case TIKU_ACLK_DCO:
-                sela = MSP430_SELA__DCOCLK;
                 break;
             default:
                 sela = MSP430_SELA__VLOCLK;
@@ -636,10 +640,12 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
      switch(aclk_source) {
          case TIKU_ACLK_VLO:  g_aclk_hz = VLO_FREQ_NOMINAL_HZ; break;
          case TIKU_ACLK_REFO: g_aclk_hz = REFO_FREQ_HZ; break;
+         case TIKU_ACLK_LFMODCLK: g_aclk_hz = 39062UL; break;
          case TIKU_ACLK_LFXT: g_aclk_hz = XT1_FREQ_32KHZ; g_xt1_hz = XT1_FREQ_32KHZ; break;
          case TIKU_ACLK_DCO:  g_aclk_hz = g_mclk_hz; break;
          default:             g_aclk_hz = VLO_FREQ_NOMINAL_HZ; break;
      }
+     clk.aclk_src = aclk_source;
      g_clock_initialized = true;
 
      /* Clear any oscillator fault flags before locking */
@@ -729,7 +735,7 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
         if (++count > CLOCK_FAULT_TIMEOUT) {
 
             /* Give up: LFXT off, CS locked. */
-             CSCTL4 |= LFXTOFF;
+             tiku_cpu_msp430_lfxt_disable();
 
              TIKU_CS_LOCK();
              CPU_FREQ_PRINTF("LFXT fault detected\n");
@@ -874,6 +880,7 @@ tiku_clock_result_t tiku_cpu_msp430_hfxt_init(bool bypass, unsigned long freq_hz
   */
  void tiku_cpu_msp430_clock_clear_faults(void)
  {
+     unsigned int attempts = 1000U;
      CPU_FREQ_PRINTF("Clearing oscillator fault flags\n");
 
      TIKU_CS_UNLOCK();
@@ -891,11 +898,11 @@ tiku_clock_result_t tiku_cpu_msp430_hfxt_init(bool bypass, unsigned long freq_hz
          SFRIFG1 &= ~OFIFG;                      /* summary fault */
 
          CPU_FREQ_PRINTF("Clearing fault flags (SFRIFG1=0x%x)\n", SFRIFG1);
-     } while (SFRIFG1 & OFIFG);                      /* while it re-asserts */
+     } while ((SFRIFG1 & OFIFG) && --attempts != 0U);
 
      TIKU_CS_LOCK();
 
-     CPU_FREQ_PRINTF("Fault clearing completed, CS registers locked\n");
+     CPU_FREQ_PRINTF("Fault clear finished (SFRIFG1=0x%x)\n", SFRIFG1);
  }
 
  /**
@@ -921,7 +928,7 @@ tiku_clock_result_t tiku_cpu_msp430_hfxt_init(bool bypass, unsigned long freq_hz
 #if TIKU_DEVICE_HAS_LFXT
 /**
  * @brief Disables the LFXT (XT1 @ 32.768 kHz) oscillator.
- *        If ACLK is using LFXT, re-route it to REFO first.
+ *        If ACLK uses LFXT, select LFMODCLK before disabling the crystal.
  */
 void tiku_cpu_msp430_lfxt_disable(void)
 {
@@ -929,6 +936,11 @@ void tiku_cpu_msp430_lfxt_disable(void)
 
     CPU_FREQ_PRINTF("Disabling LFXT\n");
 
+    if ((CSCTL2 & SELA_7) == MSP430_SELA__XT1CLK) {
+        CSCTL2 = (CSCTL2 & ~SELA_7) | MSP430_SELA__LFMODCLK;
+        clk.aclk_src = TIKU_ACLK_LFMODCLK;
+        g_aclk_hz = 39062UL;
+    }
     CSCTL4 |= LFXTOFF;
 
     /* Clear any fault flags left set. */
@@ -1024,7 +1036,7 @@ static void cpu_freq_msp430_init(unsigned int freq_mhz, unsigned int sfreq_div, 
 
         CPU_FREQ_PRINTF("Initializing Microcontroller without LFXT crystal. Sfreq divider: %d\n", sfreq_div);
 
-        /* REFO as the ACLK source. */
+        /* REFO on FR2433; LFMODCLK on CS_A parts. */
         tiku_cpu_msp430_clock_set_advanced(freq_mhz, sfreq_div, TIKU_ACLK_REFO);
 
     }
@@ -1063,7 +1075,20 @@ tiku_clk_div_t tiku_cpu_msp430_clock_get_sfreq_div(void)
  */
 tiku_aclk_source_t tiku_cpu_msp430_clock_get_aclk_source(void)
 {
-    return clk.aclk_src;
+#if defined(TIKU_DEVICE_CS_TYPE_FR2X33)
+    return (CSCTL4 & SELA__REFOCLK) ? TIKU_ACLK_REFO : TIKU_ACLK_LFXT;
+#else
+    switch (CSCTL2 & SELA_7) {
+    case MSP430_SELA__XT1CLK: return TIKU_ACLK_LFXT;
+    case MSP430_SELA__LFMODCLK: return TIKU_ACLK_LFMODCLK;
+    default: return TIKU_ACLK_VLO;
+    }
+#endif
+}
+
+void tiku_cpu_boot_msp430_setup(void)
+{
+    tiku_cpu_boot_msp430_init();
 }
 
 /**
@@ -1104,11 +1129,15 @@ unsigned long tiku_cpu_msp430_clock_get_hz(void)
 
 unsigned long tiku_cpu_msp430_aclk_get_hz(void)
 {
-    return g_aclk_hz;
+    switch (tiku_cpu_msp430_clock_get_aclk_source()) {
+    case TIKU_ACLK_REFO: return REFO_FREQ_HZ;
+    case TIKU_ACLK_LFXT: return XT1_FREQ_32KHZ;
+    case TIKU_ACLK_LFMODCLK: return 39062UL;
+    default: return VLO_FREQ_NOMINAL_HZ;
+    }
 }
 
 unsigned long tiku_cpu_msp430_smclk_get_hz(void)
 {
     return g_smclk_hz;
 }
-
