@@ -836,6 +836,11 @@ void tiku_flpr_arch_conn_stop(void)
 /* Non-blocking advertise and hold: flip the radio non-secure, hand over the
  * ADV PDU and return.  The FLPR advertises, then holds the link on its own;
  * poll conn_active() for the link. */
+/* During a connection the mailbox carries L2CAP fragments: conn_recv pops
+ * one the controller forwarded, conn_send hands one of the host's back for
+ * TX. */
+static uint32_t flpr_nus_rx_seen;
+
 int tiku_flpr_arch_conn_start(const uint8_t *adv, uint32_t adv_len,
                               const uint8_t *rsp, uint32_t rsp_len,
                               const uint8_t *addr)
@@ -848,6 +853,10 @@ int tiku_flpr_arch_conn_start(const uint8_t *adv, uint32_t adv_len,
         return -1;
     }
     TIKU_FLPR_SHARED->conn_state = 0u;
+    /* A fragment the last link left untaken is dropped: the slot starts
+     * free. */
+    flpr_nus_rx_seen = TIKU_FLPR_SHARED->f2a_seq;
+    TIKU_FLPR_SHARED->f2a_ack = flpr_nus_rx_seen;
     flpr_radio_ns(1);
     in->adv_len = adv_len;
     for (i = 0u; i < 6u; i++) {
@@ -869,11 +878,6 @@ int tiku_flpr_arch_conn_subscribed(void)
 {
     return (TIKU_FLPR_SHARED->conn_sub != 0u) ? 1 : 0;
 }
-
-/* During a connection the mailbox carries L2CAP fragments: conn_recv pops
- * one the controller forwarded, conn_send hands one of the host's back for
- * TX. */
-static uint32_t flpr_nus_rx_seen;
 
 /* Peek: is a received L2CAP frame waiting (no consume)? */
 int tiku_flpr_arch_conn_rx_ready(void)
@@ -901,6 +905,9 @@ int tiku_flpr_arch_conn_recv(uint8_t *buf, uint32_t cap, uint8_t *llid)
     if (llid != (uint8_t *)0) {
         *llid = (uint8_t)TIKU_FLPR_SHARED->f2a_llid;
     }
+    /* Taken: the controller may hand on the next fragment. */
+    __asm__ volatile ("dmb 0xF" ::: "memory");
+    TIKU_FLPR_SHARED->f2a_ack = seq;
     return (int)n;
 }
 

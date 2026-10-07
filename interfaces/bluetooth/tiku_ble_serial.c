@@ -496,6 +496,9 @@ tiku_ble_serial_service(void)
         return;
     }
     serial_drain_tx();                           /* flush pending TX first    */
+    if (s_rx_len != 0u) {
+        return;          /* a write unread: the next waits in the controller */
+    }
     n = tiku_flpr_arch_conn_recv(frame, sizeof(frame), &llid_in);
     if (n <= 0) {
         return;
@@ -559,8 +562,8 @@ tiku_ble_serial_send(const uint8_t *data, uint16_t len)
                  ? (TIKU_BLE_HOST_MTU - 3u) : len);
 }
 
-/* service() overwrites s_rx, so rx_ready() and recv() pump only once the
- * bytes waiting there have been read. */
+/* service() takes no frame while s_rx holds a write, so rx_ready() and
+ * recv() pump only once the bytes waiting there have been read. */
 int
 tiku_ble_serial_rx_ready(void)
 {

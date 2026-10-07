@@ -274,14 +274,16 @@ static uint8_t flpr_csa1_next(uint8_t *last_unmapped, uint8_t hop,
  * @return Bit 1 (ACKED) and bit 0 (NEWDATA: a new packet with a payload).
  */
 static uint8_t flpr_ll_ack(uint8_t *sn, uint8_t *nesn, uint8_t rx_sn,
-                           uint8_t rx_nesn, uint8_t has_payload)
+                           uint8_t rx_nesn, uint8_t has_payload,
+                           uint8_t room)
 {
     uint8_t r = 0u;
     if ((rx_nesn & 1u) != *sn) {
         *sn ^= 1u;
         r |= 2u;                                /* ACKED                    */
     }
-    if ((rx_sn & 1u) == *nesn) {
+    if ((rx_sn & 1u) == *nesn && room) {        /* no room: NESN stays, so  */
+                                                /* the peer sends it again  */
         *nesn ^= 1u;
         if (has_payload) {
             r |= 1u;                            /* NEWDATA                  */
@@ -745,10 +747,15 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
         send_pend = (uint8_t)(fll_tx_len != 0u); /* the pre-built carries it */
         if (r->EVENTS_CRCOK != 0u) {
             uint8_t h = conn_datrx[0];
+            /* An L2CAP fragment needs the f2a slot, which holds one until
+             * the M33 takes it. */
+            uint8_t room = (uint8_t)(conn_datrx[1] == 0u ||
+                                     (h & 0x03u) == 0x03u ||
+                                     sh->f2a_ack == sh->f2a_seq);
             uint8_t rc = flpr_ll_ack(&fll_sn, &fll_nesn,
                                      (uint8_t)((h >> 3) & 1u),
                                      (uint8_t)((h >> 2) & 1u),
-                                     (uint8_t)(conn_datrx[1] != 0u));
+                                     (uint8_t)(conn_datrx[1] != 0u), room);
             if ((rc & 2u) && fll_tx_sent) {
                 /* The pending PDU landed (an ack of an empty PDU sent
                  * before it was queued leaves it pending): this reply is

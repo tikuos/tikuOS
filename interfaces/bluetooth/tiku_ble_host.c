@@ -399,6 +399,17 @@ static void host_execute_write(const uint8_t *att)
     host_reply(&rsp, 1u);
 }
 
+/** @brief Whether @p op asks for a response: not a command (bit 6), and not
+ *         a response (the odd opcodes up to 0x21), a notification (0x1B,
+ *         0x23) or a confirmation (0x1E), which a server leaves unanswered. */
+static uint8_t host_is_request(uint8_t op)
+{
+    if ((op & 0x40u) != 0u || op == 0x1Eu || op == 0x23u) {
+        return 0u;
+    }
+    return (uint8_t)(((op & 1u) == 0u || op > 0x21u) ? 1u : 0u);
+}
+
 /** @brief ATT dispatch on a whole, recombined L2CAP PDU (CID 0x0004). */
 static void host_att(const uint8_t *l2cap, uint16_t len)
 {
@@ -435,7 +446,10 @@ static void host_att(const uint8_t *l2cap, uint16_t len)
         host_prepare_write(att, alen);
     } else if (op == 0x18u && alen >= 2u) {      /* Execute Write Request     */
         host_execute_write(att);
-    } else {
+    } else if (op == 0x1Du) {                    /* Indication: confirmed     */
+        uint8_t c = 0x1Eu;
+        host_reply(&c, 1u);
+    } else if (host_is_request(op)) {
         host_error(op, 0u, 0x06u);               /* Request Not Supported     */
     }
 }

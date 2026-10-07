@@ -175,8 +175,8 @@ typedef struct {
     /* L2CAP transport: while a connection is held the mailbox carries L2CAP
      * fragments ([{len}{CID}payload...] split across data PDUs), not NUS
      * bytes.  RX: each received L2CAP data PDU goes to f2a with f2a_llid
-     * (2 start, 1 continuation), doorbelled, for the M33 host to recombine
-     * and run ATT/GATT.  TX: the host's fragments arrive on a2f with
+     * (2 start, 1 continuation), doorbelled, paced by f2a_ack, for the M33
+     * host to recombine and run ATT/GATT.  TX: the host's fragments arrive on a2f with
      * a2f_llid, paced by a2f_ack; the controller wraps each in a data PDU
      * with that LLID.  The FLPR never parses ATT. */
 
@@ -203,6 +203,11 @@ typedef struct {
     volatile uint32_t conn_misses;
     volatile uint32_t conn_tx_late;
     volatile uint32_t conn_first;
+
+    /* The last f2a fragment the M33 took (== f2a_seq: the slot is free).
+     * Until it is taken, the controller leaves the next L2CAP data PDU
+     * unacknowledged, and the central sends it again. */
+    volatile uint32_t f2a_ack;
 } tiku_flpr_shared_t;
 
 /**
