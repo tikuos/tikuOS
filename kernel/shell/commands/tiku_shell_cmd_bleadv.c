@@ -1651,21 +1651,24 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
         return;
     }
     if (strcmp(argv[1], "ackfsm") == 0) {
-        /* Scripted peer sequence with a retransmission at step 2, and the
-         * expected (new, acked, sn, nesn) after each RX. */
+        /* Scripted peer sequence with a retransmission at step 2 and an
+         * empty PDU at step 4, and the expected (new, acked, sn, nesn)
+         * after each RX: an empty new packet advances NESN, delivering
+         * nothing. */
         static const struct {
-            uint8_t rx_sn, rx_nesn, newd, ackd, sn, nesn;
-        } seq[4] = {
-            { 0, 0, 1, 0, 0, 1 },   /* first packet: new, no ack yet     */
-            { 1, 1, 1, 1, 1, 0 },   /* peer acks + sends new data        */
-            { 1, 1, 0, 0, 1, 0 },   /* peer re-sends: not new, not acked */
-            { 0, 0, 1, 1, 0, 1 },   /* peer acks + sends new data again  */
+            uint8_t rx_sn, rx_nesn, pay, newd, ackd, sn, nesn;
+        } seq[5] = {
+            { 0, 0, 1, 1, 0, 0, 1 },   /* first packet: new, no ack yet  */
+            { 1, 1, 1, 1, 1, 1, 0 },   /* peer acks + sends new data     */
+            { 1, 1, 1, 0, 0, 1, 0 },   /* peer re-sends: not new         */
+            { 0, 0, 1, 1, 1, 0, 1 },   /* peer acks + sends new data     */
+            { 1, 1, 0, 0, 1, 1, 0 },   /* empty, new: acked, NESN moves  */
         };
         tiku_radio_ll_ack_t a = { 0u, 0u };
         int i, fails = 0;
-        for (i = 0; i < 4; i++) {
+        for (i = 0; i < 5; i++) {
             uint8_t r = tiku_radio_ll_ack(&a, seq[i].rx_sn, seq[i].rx_nesn,
-                                          1u);  /* scripted seq = data PDUs */
+                                          seq[i].pay);
             uint8_t nd = (r & TIKU_RADIO_LL_NEWDATA) ? 1u : 0u;
             uint8_t ak = (r & TIKU_RADIO_LL_ACKED) ? 1u : 0u;
             if (nd != seq[i].newd || ak != seq[i].ackd ||
@@ -1676,8 +1679,8 @@ void tiku_shell_cmd_bleadv(uint8_t argc, const char *argv[])
             }
         }
         if (!fails) {
-            SHELL_PRINTF(SH_GREEN "ackfsm: 4/4 incl. retransmission"
-                         " (SN/NESN correct)\n" SH_RST);
+            SHELL_PRINTF(SH_GREEN "ackfsm: 5/5 incl. retransmission"
+                         " and an empty PDU (SN/NESN correct)\n" SH_RST);
         }
         return;
     }

@@ -1399,14 +1399,15 @@ uint8_t tiku_radio_ll_csa1_next(uint8_t last_unmapped, uint8_t hop,
  * On a CRC-valid Data PDU (rx_sn, rx_nesn, has_payload):
  *   - rx_nesn != local sn: the peer acked the local PDU; flip sn and load
  *     the next one.  Equal: a NAK; retransmit the same PDU.
- *   - rx_sn == local nesn and the PDU carries payload: new data; deliver
- *     and flip nesn.  Otherwise it is a resend or an empty keepalive and is
- *     discarded; its ack half still applies.
+ *   - rx_sn == local nesn: a new packet; flip nesn, and deliver it when it
+ *     carries payload.  Otherwise it is a resend and is discarded; its ack
+ *     half still applies.
  * The two flips are independent: one PDU can ack and carry new data.  NESN
- * advances only for payload-bearing PDUs.  Advanced by empty keepalives, it
- * would pass the peer's SN, and the peer would read it as an ack of data
- * never received and drop that payload.  Notifications, which no reply
- * confirms, are retransmitted until this ack arrives.
+ * advances for every new packet, an empty one included, as the spec has
+ * it; a peer whose empty PDU goes unacked resends it and never sends its
+ * data.  An ack then covers an empty PDU as often as a pending one, so the
+ * pending slot clears only when the PDU acked was it (ll_tx_sent).
+ * Notifications, which no reply confirms, are retransmitted until acked.
  */
 
 uint8_t tiku_radio_ll_ack(tiku_radio_ll_ack_t *a, uint8_t rx_sn,
@@ -1418,9 +1419,11 @@ uint8_t tiku_radio_ll_ack(tiku_radio_ll_ack_t *a, uint8_t rx_sn,
         a->sn ^= 1u;
         r |= TIKU_RADIO_LL_ACKED;
     }
-    if (has_payload && (rx_sn & 1u) == a->nesn) {  /* new data             */
+    if ((rx_sn & 1u) == a->nesn) {             /* a new packet             */
         a->nesn ^= 1u;
-        r |= TIKU_RADIO_LL_NEWDATA;
+        if (has_payload) {
+            r |= TIKU_RADIO_LL_NEWDATA;
+        }
     }
     return r;
 }
@@ -1518,6 +1521,7 @@ static void radio_cfg_data(uint32_t aa, uint32_t crcinit, uint8_t k)
 static uint8_t  ll_tx[TIKU_FLPR_DLE_BUF_SIZE]; /* [hdr][len][S1][payload] */
 static uint8_t  ll_tx_len;          /* payload len; 0 = none               */
 static uint8_t  ll_tx_llid;         /* 2 = L2CAP data, 3 = LL control      */
+static uint8_t  ll_tx_sent;         /* the last PDU sent was the pending one */
 static uint8_t  ll_peer_vers;       /* peer VersNr (0 = none heard)        */
 static uint8_t  ll_sent_vers;       /* VERSION_IND has been queued         */
 static uint8_t  ll_want_term;       /* peer sent TERMINATE_IND             */
@@ -1640,6 +1644,7 @@ static uint8_t  att_lwrite_ok;      /* scratch long write matched (readback) */
 static void ll_reset(void)
 {
     ll_tx_len = 0u; ll_tx_llid = 0u; ll_peer_vers = 0u; ll_sent_vers = 0u;
+    ll_tx_sent = 0u;
     ll_want_term = 0u; ll_ctrl_tx = 0u; ll_ctrl_rx = 0u;
     nus_rx_len = 0u; nus_cccd = 0u; nus_notify_len = 0u;
     att_step = 0u; att_ok = 0u; att_readback = 0u;
@@ -1838,6 +1843,7 @@ static void ll_queue_version(void)
  */
 static uint8_t ll_build_tx(uint8_t *out, const tiku_radio_ll_ack_t *ack)
 {
+    ll_tx_sent = (uint8_t)(ll_tx_len != 0u);   /* what the next ack covers */
     if (ll_tx_len != 0u) {
         memcpy(out, ll_tx, (size_t)(3u + ll_tx_len));
         out[0] = (uint8_t)((ll_tx_llid & 0x03u) |
@@ -2369,7 +2375,7 @@ static int conn_event(uint32_t aa, uint32_t crcinit, uint8_t k,
         uint8_t r = tiku_radio_ll_ack(ack, (uint8_t)((h >> 3) & 1u),
                                       (uint8_t)((h >> 2) & 1u),
                                       (uint8_t)(rxb[1] != 0u));
-        if (r & TIKU_RADIO_LL_ACKED) {
+        if ((r & TIKU_RADIO_LL_ACKED) && ll_tx_sent) {
             ll_on_acked();                        /* the last PDU landed   */
         }
         if (r & TIKU_RADIO_LL_NEWDATA) {
@@ -2880,7 +2886,7 @@ static int cen_event(uint32_t aa, uint32_t crcinit, uint8_t k,
         uint8_t r = tiku_radio_ll_ack(ack, (uint8_t)((h >> 3) & 1u),
                                       (uint8_t)((h >> 2) & 1u),
                                       (uint8_t)(cen_rxb[1] != 0u));
-        if (r & TIKU_RADIO_LL_ACKED) {
+        if ((r & TIKU_RADIO_LL_ACKED) && ll_tx_sent) {
             ll_on_acked();
         }
         if (r & TIKU_RADIO_LL_NEWDATA) {
