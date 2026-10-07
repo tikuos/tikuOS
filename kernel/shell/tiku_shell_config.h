@@ -173,17 +173,6 @@
 #define TIKU_SHELL_CMD_FAT 0
 #endif
 #endif
-#ifndef TIKU_SHELL_CMD_BLE
-/* Auto-on for the EM9305 BLE build (apollo510b); the "ble" command probes
- * the EM9305, advertises a beacon and runs a shell session over BLE UART.
- * The .c + the driver are only compiled when TIKU_DRV_BLE_EM9305_ENABLE is
- * set (Makefile-gated). */
-#if defined(TIKU_DRV_BLE_EM9305_ENABLE)
-#define TIKU_SHELL_CMD_BLE 1  /**< ble - EM9305 probe, beacon, BLE shell */
-#else
-#define TIKU_SHELL_CMD_BLE 0
-#endif
-#endif
 #ifndef TIKU_SHELL_CMD_WIFI
 /* Auto-on when a Wi-Fi driver (CYW43 or ESP32-C61) is enabled; otherwise
  * off. Override with -DTIKU_SHELL_CMD_WIFI=0 to drop the command. */
@@ -588,10 +577,6 @@
 #if TIKU_SHELL_CMD_BT && !(TIKU_BT_HOST + 0)
 #undef  TIKU_SHELL_CMD_BT
 #define TIKU_SHELL_CMD_BT 0
-#endif
-#if TIKU_SHELL_CMD_BLE && !(TIKU_DRV_BLE_EM9305_ENABLE + 0)
-#undef  TIKU_SHELL_CMD_BLE
-#define TIKU_SHELL_CMD_BLE 0
 #endif
 
 /* layout divides the carved NVM region, which MSP430 does not have. */

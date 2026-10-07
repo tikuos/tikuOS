@@ -8,8 +8,8 @@
  * tiku_shell_cmd_bt.c - "bt" command implementation.
  *
  * Calls the public Bluetooth API (tiku_bt.h), whatever controller is under
- * it; an ESP32-C61 build also shows its driver's heap in the status.  The
- * command keeps no driver state.
+ * it, and its facades: the shell over the serial pipe and the beacon.  An
+ * ESP32-C61 build also shows its driver's heap; an EM9305 build has a probe.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,9 +17,30 @@
 #include "tiku_shell_cmd_bt.h"
 #include <kernel/shell/tiku_shell.h>
 #include <interfaces/bluetooth/tiku_bt.h>
+#include <interfaces/bluetooth/tiku_ble_serial.h>  /* bt uart: the NUS pipe */
+#include <interfaces/bluetooth/tiku_ble_adv.h>     /* bt beacon            */
 #include <tikukits/crypto/sha256/tiku_kits_crypto_sha256.h>  /* key print */
 #if TIKU_DRV_BLE_ESP_ENABLE
 #include <drivers/wifi/esp/tiku_drv_ble_esp.h>
+#endif
+
+/* `bt uart` where the build links the serial facade for it (TIKU_BT_UART). */
+#define BT_UART (TIKU_BLE_SERIAL_PRESENT && (TIKU_BT_UART + 0))
+
+#if BT_UART
+#include <kernel/shell/tiku_shell_io.h>      /* backend swap, rx_ready/getc */
+#include <kernel/shell/tiku_shell_parser.h>  /* tiku_shell_parser_execute */
+#include <kernel/shell/tiku_shell_cwd.h>     /* the prompt's directory */
+#include <kernel/vfs/tiku_vfs.h>             /* TIKU_VFS_CAP_NONE */
+#include <kernel/timers/tiku_clock.h>        /* the heartbeat */
+#include <hal/tiku_cpu.h>                    /* tiku_cpu_idle_hook */
+#if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
+#include <kernel/process/tiku_process.h>     /* the others' events */
+#include <kernel/threads/tiku_thread.h>      /* the CPU to the workers */
+#endif
+#endif
+#if TIKU_DRV_BLE_EM9305_ENABLE
+#include <arch/ambiq/tiku_em9305.h>          /* bt probe */
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -65,7 +86,8 @@ static void bt_help(void)
     SHELL_PRINTF("bt status               The radio: address + version\n");
     SHELL_PRINTF("bt advertise <name>     Start GAP advertising with local name\n");
     SHELL_PRINTF("bt advertise stop       Stop GAP advertising\n");
-    SHELL_PRINTF("bt scan                 Start LE scan (clears cache)\n");
+    SHELL_PRINTF("bt scan [prefix]        Start LE scan (clears cache; only "
+                 "names starting prefix)\n");
     SHELL_PRINTF("bt scan stop            Stop LE scan\n");
     SHELL_PRINTF("bt list                 Print cached scan results\n");
     SHELL_PRINTF("bt connections          List active LE links\n");
@@ -77,7 +99,20 @@ static void bt_help(void)
     SHELL_PRINTF("bt subscribe <h> [N]    Write 0x0001 to CCCD on link N\n");
     SHELL_PRINTF("bt pair [N]             Pair + bond on link N (LE Secure Conn)\n");
     SHELL_PRINTF("bt bonds                List stored LE-SC bonds (LTK slots)\n");
-    SHELL_PRINTF("bt unpair [N]           Clear bond slot N (default 0)\n");
+    SHELL_PRINTF("bt unpair <N>|all       Clear bond slot N, or every slot\n");
+#if BT_UART
+    SHELL_PRINTF("bt uart [name]          The shell over BLE (Nordic UART "
+                 "Service) until Ctrl-C\n");
+#endif
+#if TIKU_BLE_ADV_PRESENT
+    SHELL_PRINTF("bt beacon <name> [ms]   Non-connectable beacon (every ms, "
+                 "default 1000)\n");
+    SHELL_PRINTF("bt beacon off           Stop the beacon\n");
+#endif
+#if TIKU_DRV_BLE_EM9305_ENABLE
+    SHELL_PRINTF("bt probe                EM9305 first contact: SPI and HCI "
+                 "Reset (radio off)\n");
+#endif
     SHELL_PRINTF("bt help                 this help\n");
 }
 
@@ -239,7 +274,8 @@ static void bt_advertise(uint8_t argc, const char *argv[])
 }
 
 /**
- * @brief Handle "bt scan" (start an active scan) and "bt scan stop".
+ * @brief Handle "bt scan [prefix]" (start an active scan, caching only the
+ *        names that start with @p prefix) and "bt scan stop".
  */
 static void bt_scan(uint8_t argc, const char *argv[])
 {
@@ -250,12 +286,16 @@ static void bt_scan(uint8_t argc, const char *argv[])
                      rc, tiku_bt_scan_count());
         return;
     }
+    tiku_bt_scan_filter(argc >= 3U ? argv[2] : (const char *)0);
     /* Active scan, 100 ms interval, 50 ms window (50% duty). */
     rc = tiku_bt_scan_start(1U, 100U, 50U);
-    if (rc == 0) {
-        SHELL_PRINTF("bt: scan started (active, 100/50 ms)\n");
-    } else {
+    if (rc != 0) {
         SHELL_PRINTF("bt: scan start FAILED rc=%d\n", rc);
+    } else if (argc >= 3U) {
+        SHELL_PRINTF("bt: scan started (active, 100/50 ms, names starting "
+                     "\"%s\")\n", argv[2]);
+    } else {
+        SHELL_PRINTF("bt: scan started (active, 100/50 ms)\n");
     }
 }
 
@@ -667,21 +707,32 @@ static void bt_bonds(void)
 }
 
 /**
- * @brief Handle "bt unpair [N]": clear bond slot N (default 0).
+ * @brief Handle "bt unpair <N>|all": clear bond slot N, or every slot.
  */
 static void bt_unpair_cmd(uint8_t argc, const char *argv[])
 {
-    uint8_t slot = 0U;
-    int     rc;
-    if (argc >= 3U) {
-        uint16_t v;
-        if (parse_u16(argv[2], &v) != 0 || v >= TIKU_BT_BOND_MAX) {
-            SHELL_PRINTF("bt: bad slot '%s' (range 0..%u)\n",
-                         argv[2], (unsigned)TIKU_BT_BOND_MAX - 1U);
-            return;
-        }
-        slot = (uint8_t)v;
+    uint16_t v;
+    uint8_t  slot;
+    int      rc = 0;
+    if (argc < 3U) {
+        SHELL_PRINTF("usage: bt unpair <N>|all   (N = slot from 'bt bonds')\n");
+        return;
     }
+    if (str_eq(argv[2], "all")) {
+        for (slot = 0U; slot < TIKU_BT_BOND_MAX; ++slot) {
+            if (tiku_bt_bond_clear(slot) != 0) rc = -1;
+        }
+        SHELL_PRINTF(rc == 0 ? "bt: all %u bond slots cleared\n"
+                             : "bt: unpair FAILED (of %u slots)\n",
+                     (unsigned)TIKU_BT_BOND_MAX);
+        return;
+    }
+    if (parse_u16(argv[2], &v) != 0 || v >= TIKU_BT_BOND_MAX) {
+        SHELL_PRINTF("bt: bad slot '%s' (range 0..%u, or all)\n",
+                     argv[2], (unsigned)TIKU_BT_BOND_MAX - 1U);
+        return;
+    }
+    slot = (uint8_t)v;
     rc = tiku_bt_bond_clear(slot);
     if (rc == 0) {
         SHELL_PRINTF("bt: bond slot %u cleared\n", slot);
@@ -728,6 +779,295 @@ static void bt_list(void)
         tiku_shell_io_putc('\n');
     }
 }
+
+#if BT_UART
+/*---------------------------------------------------------------------------*/
+/* bt uart: the shell over the serial facade                                 */
+/*---------------------------------------------------------------------------*/
+
+/** Ctrl+C / ETX -- stops the session from the local console. */
+#define BT_UART_CANCEL 0x03
+
+/* Shell output gathers here between flushes; input is read a write at a
+ * time.  Both ride the BLE serial facade (the Nordic UART Service). */
+static uint8_t  s_out[244];
+static uint16_t s_out_len;
+static uint8_t  s_in[64];
+static uint8_t  s_in_len;
+static uint8_t  s_in_pos;
+
+/** @brief Hand the buffered output to the pipe; a dead link drops it. */
+static void bt_uart_flush(void)
+{
+    if (s_out_len > 0U) {
+        (void)tiku_ble_serial_send(s_out, s_out_len);
+        s_out_len = 0U;
+    }
+}
+
+static void bt_uart_putc(char c)
+{
+    if (s_out_len >= (uint16_t)sizeof(s_out)) {
+        bt_uart_flush();
+    }
+    s_out[s_out_len++] = (uint8_t)c;
+}
+
+static uint8_t bt_uart_rx_ready(void)
+{
+    if (s_in_pos < s_in_len) {
+        return 1U;
+    }
+    {
+        int n = tiku_ble_serial_recv(s_in, (uint16_t)sizeof(s_in));
+        s_in_len = (uint8_t)((n > 0) ? n : 0);
+        s_in_pos = 0U;
+    }
+    return (uint8_t)(s_in_len > 0U);
+}
+
+static int bt_uart_getc(void)
+{
+    if (!bt_uart_rx_ready()) {
+        return -1;
+    }
+    return (int)s_in[s_in_pos++];
+}
+
+/* The shell's io backend over the pipe: output to TX notifications, input
+ * from RX writes, \n sent as \r\n, no local echo (the central shows what
+ * it sent), and a remote channel's restricted capability, as over TCP. */
+static const tiku_shell_io_t s_bt_uart_io = {
+    bt_uart_putc,              /* putc     */
+    bt_uart_rx_ready,          /* rx_ready */
+    bt_uart_getc,              /* getc     */
+    TIKU_SHELL_IO_CRLF,        /* flags    */
+    TIKU_VFS_CAP_NONE          /* remote channel: restricted, like TCP */
+};
+
+/**
+ * @brief Over the pipe, print @p emit and/or run @p line, then the prompt;
+ *        the console backend comes back before the output goes.
+ */
+static void bt_uart_run(const tiku_shell_io_t *console, const char *emit,
+                        char *line)
+{
+    tiku_shell_io_set_backend(&s_bt_uart_io);
+    if (emit != (const char *)0) {
+        tiku_shell_io_puts(emit);
+    }
+    if (line != (char *)0 && line[0] != '\0') {
+        tiku_shell_parser_execute(line);
+    }
+    tiku_shell_io_printf("tikuOS:%s> ", tiku_shell_cwd_get());
+    tiku_shell_io_set_backend(console);
+    bt_uart_flush();
+}
+
+/**
+ * @brief "bt uart [name]": the shell over BLE until Ctrl-C on the console.
+ *
+ * Advertises connectably; once a central subscribes to TX, its RX writes
+ * are shell input and the output comes back as TX notifications.
+ */
+static void bt_uart(uint8_t argc, const char *argv[])
+{
+    const char *name = (argc >= 3U) ? argv[2] : "tikuOS";
+    const tiku_shell_io_t *console = tiku_shell_io_get_backend();
+    static char line[128];
+    uint16_t lpos = 0U;
+    uint8_t  greeted = 0U;
+    uint8_t  linked = 0U;
+    tiku_clock_time_t beat;
+    /* WFI between passes: light idle, as a controller on this core (the
+     * ESP32-C61's) needs it awake; an off-chip one keeps the link alone. */
+    tiku_cpu_idle_enter_t idle = tiku_cpu_idle_hook(TIKU_CPU_IDLE_LIGHT);
+#if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
+    struct tiku_process *owner = tiku_current_process;
+#endif
+
+    s_out_len = 0U;
+    s_in_len = s_in_pos = 0U;
+    if (tiku_ble_serial_start(name) != 0) {
+        SHELL_PRINTF("bt uart: start FAILED (bt status shows the radio)\n");
+        return;
+    }
+    SHELL_PRINTF("bt: advertising as \"%s\" (connectable)\n", name);
+    SHELL_PRINTF("    connect in nRF Connect, open its UART view, then type "
+                 "commands.\n    Ctrl-C here stops the wireless shell.\n");
+
+    beat = (tiku_clock_time_t)(tiku_clock_time() + TIKU_CLOCK_SECOND);
+    for (;;) {
+        /* ready() pumps the stack, and turns true once a subscriber has
+         * settled (notifications sent sooner are discarded). */
+        uint8_t ready = (uint8_t)(tiku_ble_serial_ready() != 0);
+        uint8_t now_linked = (uint8_t)(tiku_ble_serial_connected() != 0);
+
+        if (now_linked != linked) {
+            SHELL_PRINTF(now_linked ? "\nbt: CONNECTED\n"
+                                    : "\nbt: DISCONNECTED -- "
+                                      "re-advertising\n");
+            linked = now_linked;
+            greeted = 0U;
+            lpos = 0U;
+        }
+        if (!greeted && ready) {
+            bt_uart_run(console,
+                        "\r\ntikuOS wireless shell -- type 'help'\r\n", 0);
+            greeted = 1U;
+            SHELL_PRINTF("bt: wireless shell active (subscriber attached)\n");
+        }
+
+        /* Feed RX into the line buffer; run it at a newline. */
+        while (bt_uart_rx_ready()) {
+            int c = bt_uart_getc();
+            if (c < 0) {
+                break;
+            }
+            if (c == '\r' || c == '\n') {
+                line[lpos] = '\0';
+                lpos = 0U;
+                bt_uart_run(console, 0, line);
+            } else if (c == 0x08 || c == 0x7F) {          /* backspace */
+                if (lpos > 0U) {
+                    lpos--;
+                }
+            } else if (lpos < (uint16_t)(sizeof(line) - 1U)) {
+                line[lpos++] = (char)c;
+            }
+        }
+
+        /* Ctrl-C on the console stops the session (read the console's own
+         * backend: the active one is the pipe while a line runs). */
+        if (console && console->rx_ready && console->getc &&
+            console->rx_ready()) {
+            if (console->getc() == BT_UART_CANCEL) {
+                break;
+            }
+        }
+
+        /* A dot a second while waiting for a central. */
+        if (TIKU_CLOCK_LT(beat, tiku_clock_time())) {
+            if (!linked) {
+                SHELL_PRINTF(".");
+            }
+            beat = (tiku_clock_time_t)(tiku_clock_time() + TIKU_CLOCK_SECOND);
+        }
+
+#if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
+        /* The session holds the kernel thread inside one dispatch: the
+         * other processes run their events here, and while none can, the
+         * workers (the ESP32-C61's controller tasks among them) get the CPU
+         * until the next tick or event. */
+        while (tiku_process_run_except(owner)) { }
+        tiku_current_process = owner;
+        tiku_atomic_enter();
+        if (!tiku_process_queue_dispatchable_except(owner) &&
+            tiku_thread_worker_ready()) {
+            tiku_thread_kernel_block();
+            tiku_atomic_exit();
+            continue;
+        }
+        tiku_atomic_exit();
+#endif
+        /* Nothing waiting: sleep until the next interrupt (the tick or the
+         * console), at most one tick of RX latency. */
+        if (idle != (tiku_cpu_idle_enter_t)0 && !bt_uart_rx_ready()) {
+            idle();
+        }
+    }
+
+    tiku_shell_io_set_backend(console);
+    tiku_ble_serial_stop();
+    SHELL_PRINTF("\nbt: session stopped.\n");
+}
+#endif /* BT_UART */
+
+#if TIKU_BLE_ADV_PRESENT
+/**
+ * @brief Handle "bt beacon <name> [ms]" and "bt beacon off": the broadcast
+ *        facade's non-connectable beacon, as /sys/radio/beacon drives it.
+ */
+static void bt_beacon(uint8_t argc, const char *argv[])
+{
+    uint16_t ms = 0U;
+    if (argc < 3U) {
+        SHELL_PRINTF("usage: bt beacon <name> [ms]  |  bt beacon off\n");
+        return;
+    }
+    if (str_eq(argv[2], "off") || str_eq(argv[2], "stop")) {
+        tiku_ble_adv_stop();
+        SHELL_PRINTF("bt: beacon off\n");
+        return;
+    }
+    if (argc >= 4U && parse_u16(argv[3], &ms) != 0) {
+        SHELL_PRINTF("bt: bad interval '%s' (ms)\n", argv[3]);
+        return;
+    }
+    if (tiku_ble_adv_beacon(argv[2], ms) != 0) {
+        SHELL_PRINTF("bt: beacon FAILED (the radio busy or off?)\n");
+        return;
+    }
+    SHELL_PRINTF("bt: beacon \"%s\" every %u ms\n", argv[2],
+                 (unsigned)tiku_ble_adv_interval_ms());
+}
+#endif /* TIKU_BLE_ADV_PRESENT */
+
+#if TIKU_DRV_BLE_EM9305_ENABLE
+/**
+ * @brief Handle "bt probe": the EM9305's first contact, SPI and HCI Reset.
+ *
+ * It resets the die, so it waits while the stack holds the radio.  It
+ * passes when STS1 reads 0xC0 and HCI Reset completes with status 0.
+ */
+static void bt_probe(void)
+{
+    tiku_em9305_probe_t p;
+    int      rc;
+    uint16_t i;
+
+    if (tiku_bt_is_ready()) {
+        SHELL_PRINTF("bt: the radio is up (bt off first)\n");
+        return;
+    }
+    SHELL_PRINTF("EM9305 first-contact probe (IOM6 SPI @16MHz)...\n");
+    rc = tiku_em9305_probe(&p);
+    SHELL_PRINTF("  reset:  spi_init=%s RDY[init=%u low=%u high=%u final=%u]\n",
+                 p.spi_rc ? "FAIL" : "ok",
+                 (unsigned)p.rdy_initial, (unsigned)p.saw_low,
+                 (unsigned)p.saw_high, (unsigned)p.rdy_final);
+    if (p.reset_rc != TIKU_EM9305_OK) {
+        SHELL_PRINTF("  reset:  FAIL (rc=%d) -- radio never signalled ready\n",
+                     p.reset_rc);
+        return;
+    }
+    SHELL_PRINTF("  reset:  ok (RDY handshake completed)\n");
+    SHELL_PRINTF("  SPI:    STS1=0x%02x STS2=0x%02x  [%s]\n",
+                 (unsigned)p.sts1, (unsigned)p.sts2,
+                 (p.sts1 == 0xC0U) ? "PASS: SPI talks to the radio"
+                                   : "FAIL: no 0xC0 ready status");
+    SHELL_PRINTF("  boot:   active-state event %s\n",
+                 p.active_evt ? "seen (04 FF 01 01)" : "NOT seen");
+    if (p.cc_seen) {
+        SHELL_PRINTF("  HCI:    Reset -> Command Complete, status=0x%02x  "
+                     "[%s]\n", (unsigned)p.hci_status,
+                     (p.hci_status == 0U) ? "PASS" : "returned error");
+    } else {
+        SHELL_PRINTF("  HCI:    Reset send_rc=%d recv_rc=%d -- no Command "
+                     "Complete  [FAIL]\n", (int)p.send_rc, (int)p.recv_rc);
+    }
+    if (p.evt_len) {
+        SHELL_PRINTF("  event: ");
+        for (i = 0U; i < p.evt_len; i++) {
+            SHELL_PRINTF(" %02x", (unsigned)p.evt[i]);
+        }
+        SHELL_PRINTF("\n");
+    }
+    SHELL_PRINTF("%s\n", (rc == TIKU_EM9305_OK)
+                 ? "bt: first contact OK"
+                 : "bt: first contact incomplete -- see above");
+}
+#endif /* TIKU_DRV_BLE_EM9305_ENABLE */
 
 /*---------------------------------------------------------------------------*/
 
@@ -802,5 +1142,23 @@ void tiku_shell_cmd_bt(uint8_t argc, const char *argv[])
         bt_unpair_cmd(argc, argv);
         return;
     }
+#if BT_UART
+    if (str_eq(argv[1], "uart")) {
+        bt_uart(argc, argv);
+        return;
+    }
+#endif
+#if TIKU_BLE_ADV_PRESENT
+    if (str_eq(argv[1], "beacon")) {
+        bt_beacon(argc, argv);
+        return;
+    }
+#endif
+#if TIKU_DRV_BLE_EM9305_ENABLE
+    if (str_eq(argv[1], "probe")) {
+        bt_probe();
+        return;
+    }
+#endif
     SHELL_PRINTF("bt: unknown subcommand '%s' (try 'bt help')\n", argv[1]);
 }

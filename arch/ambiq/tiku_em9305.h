@@ -8,8 +8,8 @@
  * tiku_em9305.h - EM9305 BLE controller SPI-HCI transport.
  *
  * Resets the Apollo510B's EM9305 radio and moves raw HCI packets over its
- * framed SPI, for the BLE host stack and a self-test probe and beacon; the
- * USB PHY shares the die for its 12 MHz clock.
+ * framed SPI, for the BLE host stack and a self-test probe (`bt probe`);
+ * the USB PHY shares the die for its 12 MHz clock.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -110,56 +110,5 @@ int tiku_em9305_recv(uint8_t *buf, uint16_t cap, uint16_t *out_len,
  *         error if the reset failed, else TIKU_EM9305_ERR_TIMEOUT.
  */
 int tiku_em9305_probe(tiku_em9305_probe_t *out);
-
-/**
- * @brief Send one HCI command and read back its Command Complete.
- *
- * Builds {0x01, opcode_lo, opcode_hi, plen, params...}, sends it and reads one
- * frame, which must hold this opcode's Command Complete.
- *
- * @param opcode  16-bit HCI opcode (e.g. 0x0C03 = Reset).
- * @param params  Command parameter bytes (may be NULL if @p plen == 0).
- * @param plen    Number of parameter bytes.
- * @param status  Receives the Command Complete status byte (0 = success),
- *                or 0xFF when the reply is something else.
- * @return TIKU_EM9305_OK if the matching Command Complete came back;
- *         TIKU_EM9305_ERR_PARAM if @p plen > 32, TIKU_EM9305_ERR_TIMEOUT if
- *         the send or read fails, TIKU_EM9305_ERR_NOTREADY otherwise.
- */
-int tiku_em9305_hci_cmd(uint16_t opcode, const uint8_t *params, uint8_t plen,
-                        uint8_t *status);
-
-/** @brief Per-step status snapshot from tiku_em9305_beacon(). */
-typedef struct {
-    int     init_rc;      /**< tiku_em9305_reset() result                 */
-    uint8_t st_reset;     /**< HCI Reset status                            */
-    uint8_t st_params;    /**< LE Set Advertising Parameters status        */
-    uint8_t st_data;      /**< LE Set Advertising Data status              */
-    uint8_t st_enable;    /**< LE Set Advertising Enable status            */
-    uint8_t ok;           /**< 1 if every step succeeded (advertising on)  */
-} tiku_em9305_beacon_t;
-
-/**
- * @brief Reset the radio and start LE advertising as a named beacon.
- *
- * Resets, then Set Advertising Parameters (non-connectable, 100 ms) + Data
- * (Flags + Complete Local Name = @p name) + Enable.  The controller then
- * advertises on its own until tiku_em9305_beacon_stop().
- *
- * @param name  Advertised complete local name, at most 26 bytes used
- *              (NULL -> "tiku").
- * @param out   Per-step status (may be NULL).
- * @return TIKU_EM9305_OK if advertising was enabled with all statuses 0;
- *         the reset error, TIKU_EM9305_ERR_TIMEOUT if a command got no
- *         Command Complete, or TIKU_EM9305_ERR_NOTREADY for a non-zero status.
- */
-int tiku_em9305_beacon(const char *name, tiku_em9305_beacon_t *out);
-
-/**
- * @brief Stop LE advertising (LE Set Advertising Enable = 0).
- * @return The tiku_em9305_hci_cmd() result; the command's status is not
- *         checked.
- */
-int tiku_em9305_beacon_stop(void);
 
 #endif /* TIKU_EM9305_H_ */

@@ -39,19 +39,6 @@
 #endif
 
 /*
- * /proc/bt is compiled only with the BLE host stack (TIKU_BT_HOST: the
- * CYW43's BT extension, the ESP32-C61's controller or the EM9305); its
- * readers call the tiku_bt API.  PROC_BT_ENABLED gates the readers and the
- * directory entry.
- */
-#if (TIKU_BT_HOST + 0)
-#define PROC_BT_ENABLED 1
-#include <interfaces/bluetooth/tiku_bt.h>
-#else
-#define PROC_BT_ENABLED 0
-#endif
-
-/*
  * The /proc/threads summary is present only when worker threads are compiled
  * in; it renders one line per worker slot (state, cycles, switches).
  */
@@ -98,7 +85,6 @@
  *     |-- "queue"   (DIR)   ->  proc_queue_children[]
  *     |-- "catalog" (DIR)   ->  catalog_children[]
  *     |-- "wifi"    (DIR)   ->  proc_wifi_children[]   (wireless driver)
- *     |-- "bt"      (DIR)   ->  proc_bt_children[]     (BT driver)
  *     |-- "threads" (FILE)                             (worker threads)
  *     |-- "0"       (DIR)   ->  pid_files[0][0..8]
  *     '-- ...               one per registered process
@@ -113,7 +99,7 @@ static TIKU_RETAINED tiku_vfs_node_t
 
 /* count + queue + catalog, plus one slot per compiled-in optional subtree. */
 #define PROC_FIXED_KIDS \
-    (3 + PROC_WIFI_ENABLED + PROC_BT_ENABLED + PROC_THREADS_ENABLED)
+    (3 + PROC_WIFI_ENABLED + PROC_THREADS_ENABLED)
 
 /*
  * Child-node table for the top-level /proc directory: the fixed entries, then
@@ -598,149 +584,6 @@ static const tiku_vfs_node_t proc_wifi_children[] = {
 #endif /* PROC_WIFI_ENABLED */
 
 /*---------------------------------------------------------------------------*/
-/* /proc/bt READERS                                                          */
-/*---------------------------------------------------------------------------*/
-
-#if PROC_BT_ENABLED
-
-/**
- * @brief Read handler for /proc/bt/bd_addr.
- *
- * The controller's Bluetooth address as lowercase colon-separated hex.  The
- * bytes come back in display order, so the printed order matches what vendors
- * quote.  Reads "?" when the subsystem is not up.
- *
- * @param buf  Output buffer for the rendered text
- * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
- */
-static int proc_bt_read_bd_addr(char *buf, size_t max)
-{
-    uint8_t mac[6];
-    if (tiku_bt_addr(mac) != 0) return snprintf(buf, max, "?\n");
-    return snprintf(buf, max,
-                    "%02x:%02x:%02x:%02x:%02x:%02x\n",
-                    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-}
-
-/**
- * @brief Read handler for /proc/bt/ready.
- *
- * Renders "1\n" once BT bring-up has completed and the stack is ready
- * for HCI traffic (tiku_bt_is_ready()), "0\n" before that.  bd_addr and
- * version print "?" until bring-up has cached their values.
- *
- * @param buf  Output buffer for the rendered text
- * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
- */
-static int proc_bt_read_ready(char *buf, size_t max)
-{
-    return snprintf(buf, max, "%u\n",
-                    tiku_bt_is_ready() ? 1U : 0U);
-}
-
-/**
- * @brief Read handler for /proc/bt/advertising.
- *
- * Renders "1\n" while LE advertising is enabled, "0\n" otherwise
- * (tiku_bt_is_advertising()).
- *
- * @param buf  Output buffer for the rendered text
- * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
- */
-static int proc_bt_read_advertising(char *buf, size_t max)
-{
-    return snprintf(buf, max, "%u\n",
-                    tiku_bt_is_advertising() ? 1U : 0U);
-}
-
-/**
- * @brief Read handler for /proc/bt/scanning.
- *
- * Renders "1\n" while an LE scan is running, "0\n" otherwise
- * (tiku_bt_is_scanning()).
- *
- * @param buf  Output buffer for the rendered text
- * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
- */
-static int proc_bt_read_scanning(char *buf, size_t max)
-{
-    return snprintf(buf, max, "%u\n",
-                    tiku_bt_is_scanning() ? 1U : 0U);
-}
-
-/**
- * @brief Read handler for /proc/bt/scan_count.
- *
- * Renders the number of distinct devices currently in the scan-results
- * cache as a decimal line (tiku_bt_scan_count(); each BD_ADDR appears
- * at most once).  Cleared whenever a new scan starts.
- *
- * @param buf  Output buffer for the rendered text
- * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
- */
-static int proc_bt_read_scan_count(char *buf, size_t max)
-{
-    return snprintf(buf, max, "%u\n",
-                    (unsigned)tiku_bt_scan_count());
-}
-
-/**
- * @brief Read handler for /proc/bt/connections.
- *
- * Renders the number of active LE links as a decimal line
- * (tiku_bt_connection_count(); 0..TIKU_BT_CONN_MAX).
- *
- * @param buf  Output buffer for the rendered text
- * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
- */
-static int proc_bt_read_connections(char *buf, size_t max)
-{
-    return snprintf(buf, max, "%u\n",
-                    (unsigned)tiku_bt_connection_count());
-}
-
-/**
- * @brief Read handler for /proc/bt/version.
- *
- * The controller version cached at bring-up -- HCI, LMP and manufacturer id
- * from Read_Local_Version_Information.  Reads "?" when the subsystem is not up.
- *
- * @param buf  Output buffer for the rendered text
- * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
- */
-static int proc_bt_read_version(char *buf, size_t max)
-{
-    tiku_bt_version_t v;
-    if (tiku_bt_local_version(&v) != 0) {
-        return snprintf(buf, max, "?\n");
-    }
-    return snprintf(buf, max, "HCI=%u LMP=%u mfr=0x%04x\n",
-                    v.hci_version, v.lmp_version, v.manufacturer);
-}
-
-/*
- * /proc/bt directory table: read-only Bluetooth status views, built only with
- * the driver and attached in _get(), which counts its entries with sizeof.
- */
-static const tiku_vfs_node_t proc_bt_children[] = {
-    { "bd_addr",     TIKU_VFS_FILE, proc_bt_read_bd_addr,     NULL, NULL, 0 },
-    { "ready",       TIKU_VFS_FILE, proc_bt_read_ready,       NULL, NULL, 0 },
-    { "advertising", TIKU_VFS_FILE, proc_bt_read_advertising, NULL, NULL, 0 },
-    { "scanning",    TIKU_VFS_FILE, proc_bt_read_scanning,    NULL, NULL, 0 },
-    { "scan_count",  TIKU_VFS_FILE, proc_bt_read_scan_count,  NULL, NULL, 0 },
-    { "connections", TIKU_VFS_FILE, proc_bt_read_connections, NULL, NULL, 0 },
-    { "version",     TIKU_VFS_FILE, proc_bt_read_version,     NULL, NULL, 0 },
-};
-#endif /* PROC_BT_ENABLED */
-
-/*---------------------------------------------------------------------------*/
 /* /proc/catalog READERS                                                     */
 /*---------------------------------------------------------------------------*/
 
@@ -949,16 +792,6 @@ const tiku_vfs_node_t *tiku_proc_vfs_get(void)
     proc_children[child_idx++] = (tiku_vfs_node_t){
         "wifi", TIKU_VFS_DIR, NULL, NULL, proc_wifi_children,
         sizeof(proc_wifi_children) / sizeof(proc_wifi_children[0])
-    };
-#endif
-
-#if PROC_BT_ENABLED
-    /* /proc/bt/{bd_addr,ready,advertising,scanning,scan_count,
-     *           connections,version}. Each read calls a getter on
-     * the BT driver and renders one field. */
-    proc_children[child_idx++] = (tiku_vfs_node_t){
-        "bt", TIKU_VFS_DIR, NULL, NULL, proc_bt_children,
-        sizeof(proc_bt_children) / sizeof(proc_bt_children[0])
     };
 #endif
 

@@ -116,9 +116,6 @@
 #if TIKU_SHELL_CMD_MRAMBENCH
 #include "commands/tiku_shell_cmd_mrambench.h"
 #endif
-#if TIKU_SHELL_CMD_BLE
-#include "commands/tiku_shell_cmd_ble.h"
-#endif
 #if TIKU_SHELL_CMD_HISTORY
 #include "commands/tiku_shell_cmd_history.h"
 #endif
@@ -533,9 +530,6 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_MRAMBENCH
     {"mrambench","Time the MRAM programmer",   tiku_shell_cmd_mrambench},
-#endif
-#if TIKU_SHELL_CMD_BLE
-    {"ble",     "EM9305 BLE radio: probe | beacon [name] | stop", tiku_shell_cmd_ble},
 #endif
 #if TIKU_SHELL_CMD_HISTORY && defined(PLATFORM_MSP430)
     {"history", "Last N commands from " TIKU_DEVICE_NVM_LABEL, tiku_shell_cmd_history},

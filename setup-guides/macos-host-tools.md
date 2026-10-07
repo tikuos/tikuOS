@@ -133,12 +133,13 @@ make -C tikuConsole/mac           # builds BOTH: tikuconsole (GUI) + slmux (CLI)
 
 ### C.3 — Bluetooth (BLE) console — nothing to install
 
-Boards with a BLE radio (Apollo510 Blue) expose the shell over Bluetooth. The
-macOS build talks to them via CoreBluetooth (built into macOS). Smoke-test it:
+Boards with a BLE radio under the host stack (Apollo510 Blue, ESP32-C61,
+Pico 2 W) expose the shell over Bluetooth. The macOS build talks to them via
+CoreBluetooth (built into macOS). Smoke-test it:
 
 ```bash
 make -C tikuConsole/mac ble_test
-./tikuConsole/mac/ble_test tikuOS     # with `ble uart` running on the board
+./tikuConsole/mac/ble_test tikuOS     # with `bt uart` running on the board
 ```
 
 ---

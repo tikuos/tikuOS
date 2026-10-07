@@ -2472,12 +2472,6 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_trng.c
 ifeq ($(TIKU_PLATFORM),ambiq)
 SRCS += kernel/shell/commands/tiku_shell_cmd_mrambench.c
 endif
-# The ble command (EM9305 probe, beacon and a shell over BLE) is compiled
-# only with the EM9305 driver (apollo510b).  The driver and its -D flags are
-# set in the BLE block next to the Ambiq part selectors.
-ifeq ($(TIKU_DRV_BLE_EM9305_ENABLE),1)
-SRCS += kernel/shell/commands/tiku_shell_cmd_ble.c
-endif
 ifeq (,$(findstring TIKU_SHELL_CMD_HISTORY=0,$(EXTRA_CFLAGS)))
 SRCS += kernel/shell/commands/tiku_shell_cmd_history.c
 endif
@@ -3291,6 +3285,13 @@ TIKU_BT_ADV ?= $(TIKU_BT_ON_DEMAND)
 ifeq ($(TIKU_BT_ADV),1)
 CFLAGS += -DTIKU_HAS_BLE_ADV=1
 SRCS += interfaces/bluetooth/tiku_ble_adv_hci.c
+endif
+# `bt uart`, the shell over the serial facade, links the facade in: on for
+# the same radios; the Pico 2 W's image has no room for it either
+# (TIKU_BT_UART=1).
+TIKU_BT_UART ?= $(TIKU_BT_ON_DEMAND)
+ifeq ($(TIKU_BT_UART),1)
+CFLAGS += -DTIKU_BT_UART=1
 endif
 include $(wildcard $(PROJ_DIR)/tikukits/net/bluetooth/build.mk)
 endif

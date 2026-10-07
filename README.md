@@ -172,6 +172,38 @@ tikuOS> ping tiku-os.org
 
 ---
 
+## :signal_strength: Bluetooth
+
+One BLE host stack runs over whichever HCI controller a board has: the
+**CYW43439** on the Pico 2 W, the **ESP32-C61**'s own controller and the
+Apollo510 Blue's **EM9305**. The last two power up on demand (`bt on`).
+
+- **Central and peripheral** — advertise, scan (with a name filter), connect,
+  and read, write and subscribe over GATT, with 128-bit UUIDs and an MTU up
+  to 247.
+- **Security** — LE Secure Connections pairing in both roles, using the
+  controller's AES and P-256, with bonds kept in durable memory (four slots).
+  It is proven against macOS as well as board to board.
+- **Facades** — the shell and any byte stream over the Nordic UART Service
+  (`bt uart`, BASIC `BLEADV`), and a beacon and scanner for
+  broadcast (`bt beacon`, `/sys/radio`, BASIC `BLEBEACON`/`BLESCAN$`).
+
+```
+tikuOS> bt on
+tikuOS> bt scan TIKU                      # cache only names starting TIKU
+tikuOS> bt connect d8:f7:60:a9:bb:a9 public
+tikuOS> bt bonds
+tikuOS> bt uart tikuOS                    # the shell over BLE, until Ctrl-C
+tikuOS> read /sys/bt/state
+```
+
+`/sys/bt` holds the radio's address, state, power, scan count, links, bonds
+and version. `bt help` lists every subcommand the build has. The nRF54L
+boards' on-die radio keeps its own link layer (the `bleadv` command) for
+now.
+
+---
+
 ## :abc: Tiku BASIC
 
 A complete on-device BASIC interpreter — write a program over the shell, `RUN`

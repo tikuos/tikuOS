@@ -24,11 +24,12 @@
 #endif
 #if (TIKU_HAS_BLE_ADV + 0)
 #include <interfaces/bluetooth/tiku_ble_adv.h>  /* /sys/radio beacon + scan */
-#if (TIKU_BT_HOST + 0)
-#include <interfaces/bluetooth/tiku_bt.h>       /* /sys/radio/backend      */
-#else
+#if !(TIKU_BT_HOST + 0)
 #include <arch/nordic/tiku_radio_arch.h>        /* /sys/radio/mode (live)   */
 #endif
+#endif
+#if (TIKU_BT_HOST + 0)
+#include <interfaces/bluetooth/tiku_bt.h>  /* /sys/bt, /sys/radio/backend */
 #endif
 #if (TIKU_HAS_COPROC + 0)
 #include "tiku_vfs_tree_coproc.h"
@@ -1536,6 +1537,174 @@ static const tiku_vfs_node_t sys_radio_children[] = {
 };
 #endif /* TIKU_HAS_BLE_ADV */
 
+#if (TIKU_BT_HOST + 0)
+/*---------------------------------------------------------------------------*/
+/* /sys/bt — the BLE host stack: address, state, power, links, bonds        */
+/*---------------------------------------------------------------------------*/
+
+/** @brief Append "aa:bb:cc:dd:ee:ff" (MSB first) at @p buf + @p n. */
+static size_t
+bt_put_addr(char *buf, size_t max, size_t n, const uint8_t a[6])
+{
+    if (n < max) {
+        int w = snprintf(buf + n, max - n,
+                         "%02x:%02x:%02x:%02x:%02x:%02x",
+                         a[0], a[1], a[2], a[3], a[4], a[5]);
+        n += (w > 0) ? (size_t)w : 0u;
+    }
+    return (n < max) ? n : max - 1u;
+}
+
+/** @brief Read handler for /sys/bt/addr: the controller's BD_ADDR, or off. */
+static int
+bt_addr_read(char *buf, size_t max)
+{
+    uint8_t a[6];
+    size_t  n;
+    if (!tiku_bt_is_ready() || tiku_bt_addr(a) != 0) {
+        return snprintf(buf, max, "off\n");
+    }
+    n = bt_put_addr(buf, max, 0u, a);
+    return (int)n + snprintf(buf + n, max - n, "\n");
+}
+
+/** @brief Read handler for /sys/bt/state: off, or on and what is running
+ *         (advertising, scanning, linked). */
+static int
+bt_state_read(char *buf, size_t max)
+{
+    tiku_bt_connection_t c[TIKU_BT_CONN_MAX];
+    if (!tiku_bt_is_ready()) {
+        return snprintf(buf, max, "off\n");
+    }
+    return snprintf(buf, max, "on%s%s%s\n",
+                    tiku_bt_is_advertising() ? " advertising" : "",
+                    tiku_bt_is_scanning() ? " scanning" : "",
+                    tiku_bt_connections(c, TIKU_BT_CONN_MAX) ? " linked" : "");
+}
+
+/** @brief Read handler for /sys/bt/power: on or off. */
+static int
+bt_power_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "%s\n", tiku_bt_is_ready() ? "on" : "off");
+}
+
+#if (TIKU_BT_ON_DEMAND + 0)
+/** @brief Write handler for /sys/bt/power: on (or 1) brings the controller
+ *         up, off (or 0) takes it down, as `bt on` / `bt off` do. */
+static int
+bt_power_write(const char *buf, size_t len)
+{
+    while (len > 0u && (buf[len - 1u] == '\n' || buf[len - 1u] == '\r')) {
+        --len;
+    }
+    if ((len == 2u && buf[0] == 'o' && buf[1] == 'n')
+        || (len == 1u && buf[0] == '1')) {
+        return (tiku_bt_power(1u) == 0) ? 0 : TIKU_VFS_EINVAL;
+    }
+    if ((len == 3u && buf[0] == 'o' && buf[1] == 'f' && buf[2] == 'f')
+        || (len == 1u && buf[0] == '0')) {
+        return (tiku_bt_power(0u) == 0) ? 0 : TIKU_VFS_EINVAL;
+    }
+    return TIKU_VFS_EINVAL;
+}
+#endif
+
+/** @brief Read handler for /sys/bt/scan: devices=N, the scan cache's count. */
+static int
+bt_scan_read(char *buf, size_t max)
+{
+    return snprintf(buf, max, "devices=%u\n",
+                    tiku_bt_is_ready() ? (unsigned)tiku_bt_scan_count() : 0u);
+}
+
+/** @brief Read handler for /sys/bt/version: the controller's HCI and LMP
+ *         versions and manufacturer id, or off. */
+static int
+bt_version_read(char *buf, size_t max)
+{
+    tiku_bt_version_t v;
+    if (!tiku_bt_is_ready() || tiku_bt_local_version(&v) != 0) {
+        return snprintf(buf, max, "off\n");
+    }
+    return snprintf(buf, max, "HCI=%u LMP=%u mfr=0x%04x\n",
+                    v.hci_version, v.lmp_version, v.manufacturer);
+}
+
+/** @brief Read handler for /sys/bt/connections: links=N, then each link's
+ *         peer, address type, this end's role and handle. */
+static int
+bt_connections_read(char *buf, size_t max)
+{
+    tiku_bt_connection_t c[TIKU_BT_CONN_MAX];
+    uint8_t n = tiku_bt_is_ready() ? tiku_bt_connections(c, TIKU_BT_CONN_MAX)
+                                   : 0u;
+    uint8_t i;
+    size_t  at = (size_t)snprintf(buf, max, "links=%u\n", (unsigned)n);
+    for (i = 0u; i < n && at < max; ++i) {
+        at = bt_put_addr(buf, max, at, c[i].peer_addr);
+        if (at < max) {
+            int w = snprintf(buf + at, max - at, " %s %s handle=0x%04x\n",
+                             c[i].peer_addr_type ? "random" : "public",
+                             c[i].role == 1u ? "peripheral" : "central",
+                             (unsigned)c[i].handle);
+            at += (w > 0) ? (size_t)w : 0u;
+        }
+    }
+    return (int)((at < max) ? at : max - 1u);
+}
+
+/** @brief Read handler for /sys/bt/bonds: bonds=N, then each stored bond's
+ *         slot, peer and address type (no key material). */
+static int
+bt_bonds_read(char *buf, size_t max)
+{
+    tiku_bt_bond_record_t r;
+    uint8_t slot;
+    uint8_t n = 0u;
+    size_t  at;
+    for (slot = 0u; slot < TIKU_BT_BOND_MAX; ++slot) {
+        if (tiku_bt_bond_load(slot, &r) == 0
+            && r.magic == TIKU_BT_BOND_MAGIC) {
+            ++n;
+        }
+    }
+    at = (size_t)snprintf(buf, max, "bonds=%u\n", (unsigned)n);
+    for (slot = 0u; slot < TIKU_BT_BOND_MAX && at < max; ++slot) {
+        if (tiku_bt_bond_load(slot, &r) != 0
+            || r.magic != TIKU_BT_BOND_MAGIC) {
+            continue;
+        }
+        {
+            int w = snprintf(buf + at, max - at, "%u ", (unsigned)slot);
+            at += (w > 0) ? (size_t)w : 0u;
+        }
+        at = bt_put_addr(buf, max, at, r.peer_addr);
+        if (at < max) {
+            int w = snprintf(buf + at, max - at, " %s\n",
+                             r.peer_addr_type ? "random" : "public");
+            at += (w > 0) ? (size_t)w : 0u;
+        }
+    }
+    return (int)((at < max) ? at : max - 1u);
+}
+
+static const tiku_vfs_node_t sys_bt_children[] = {
+    { "addr",        TIKU_VFS_FILE, bt_addr_read,        NULL, NULL, 0 },
+    { "state",       TIKU_VFS_FILE, bt_state_read,       NULL, NULL, 0 },
+#if (TIKU_BT_ON_DEMAND + 0)
+    { "power",       TIKU_VFS_FILE, bt_power_read, bt_power_write, NULL, 0 },
+#else
+    { "power",       TIKU_VFS_FILE, bt_power_read,       NULL, NULL, 0 },
+#endif
+    { "scan",        TIKU_VFS_FILE, bt_scan_read,        NULL, NULL, 0 },
+    { "connections", TIKU_VFS_FILE, bt_connections_read, NULL, NULL, 0 },
+    { "bonds",       TIKU_VFS_FILE, bt_bonds_read,       NULL, NULL, 0 },
+    { "version",     TIKU_VFS_FILE, bt_version_read,     NULL, NULL, 0 },
+};
+#endif /* TIKU_BT_HOST */
+
 #if (TIKU_FLPR_ENABLE + 0)
 /*---------------------------------------------------------------------------*/
 /* /sys/flpr — the VPR RISC-V coprocessor                                    */
@@ -1845,6 +2014,9 @@ static const tiku_vfs_node_t sys_children[] = {
 #endif
 #if (TIKU_HAS_BLE_ADV + 0)
     { "radio",    TIKU_VFS_DIR,  NULL, NULL, sys_radio_children,  8 },
+#endif
+#if (TIKU_BT_HOST + 0)
+    { "bt",       TIKU_VFS_DIR,  NULL, NULL, sys_bt_children,     7 },
 #endif
 #if (TIKU_FLPR_ENABLE + 0)
     { "flpr",     TIKU_VFS_DIR,  NULL, NULL, sys_flpr_children,   8 },

@@ -280,6 +280,15 @@ void tiku_bt_scan_clear(void);
 uint8_t tiku_bt_scan_count(void);
 
 /**
+ * @brief Cache only devices whose advertised name starts with @p prefix,
+ *        from the next report on; NULL or "" caches every device.
+ *
+ * The filter stays until it is changed: `bt scan [prefix]` sets it at
+ * each scan.  The advertising-report hook still sees every report.
+ */
+void tiku_bt_scan_filter(const char *prefix);
+
+/**
  * @brief Copy the cached scan results into @p out.
  *
  * Each BD_ADDR appears at most once, later sightings updating its RSSI
@@ -585,8 +594,12 @@ int tiku_bt_security(void);
 /* SMP BONDING STORE                                                         */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Stored bond slots, each a fixed 32-byte record. */
-#define TIKU_BT_BOND_MAX         1U
+/** @brief Stored bond slots, each a fixed 32-byte record in durable memory.
+ *         A peer keeps its slot when it pairs again; a new peer takes an
+ *         empty slot, or once every slot is full, the slots in turn. */
+#ifndef TIKU_BT_BOND_MAX
+#define TIKU_BT_BOND_MAX         4U
+#endif
 
 /**
  * @brief Magic at the head of each bond record ("BOND" read most-significant
