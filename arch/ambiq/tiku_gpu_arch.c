@@ -1148,7 +1148,7 @@ tiku_gpu_lut_apply(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *inde
     __DSB();
     GPU->DRAWCMD = GPU_DRAWCMD_RECT;
     err = tiku_gpu_wait_idle();
-    if (err != TIKU_GPU_OK) { goto restore; }
+    if (err != TIKU_GPU_OK) { goto done; }
 
     gpu_imem_load(0u, 0x080C108Bu, 0x00002000u);
     gpu_imem_load(1u, 0x0000110Bu, 0x00000000u);
@@ -1161,22 +1161,12 @@ tiku_gpu_lut_apply(const tiku_gpu_surface_t *dst, const tiku_gpu_surface_t *inde
     GPU->DRAWCMD = GPU_DRAWCMD_RECT;
 
     err = tiku_gpu_wait_idle();
-restore:
+done:
+    /* No domain power cycle here: the next operation programs its own
+     * shader, matrix and ROP, and a power-off right after STATUS idle cut
+     * the LUT's last writes (they land in the completion tail). */
     s_last_status = GPU->STATUS;
     tiku_cpu_dcache_invalidate(dst->base, dspan);
-    {
-        tiku_gpu_perf_t perf = (tiku_gpu_perf_t)
-            PWRCTRL->GFXPERFREQ_b.GFXPERFREQ;
-        uint32_t irq_count = s_irq_count;
-        tiku_gpu_err_t reset_err;
-        /* LUT leaves pipeline state that requires a domain power cycle. */
-        tiku_gpu_deinit();
-        reset_err = tiku_gpu_init(perf);
-        s_irq_count = irq_count;
-        if (err == TIKU_GPU_OK) {
-            err = reset_err;
-        }
-    }
     return err;
 }
 
