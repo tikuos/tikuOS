@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_inittab.c - /sys/init VFS nodes (init-table mirror).
+ * tiku_init_vfs.c - /sys/init VFS nodes (init-table mirror).
  *
  * Mirrors the init table: entries are readable and `enable` is writable
  * without the shell.  Add and remove change several fields at once and have no
@@ -18,7 +18,7 @@
 /* INCLUDES                                                                  */
 /*---------------------------------------------------------------------------*/
 
-#include "tiku_vfs_tree_inittab.h"
+#include "tiku_init_vfs.h"
 #include "tiku.h"
 
 #if TIKU_INIT_ENABLE
@@ -124,11 +124,9 @@ INIT_VFS_FUNCS(7);
 /*
  * /sys/init directory table: the count file plus one directory per slot.  Slot
  * directories exist even when empty (their files render placeholders) so the
- * tree shape does not depend on how full the init table is.  Exported so
- * tiku_vfs_tree_sys.c can attach it; count travels as
- * TIKU_VFS_TREE_INITTAB_NCHILD (asserted below).
+ * tree shape does not depend on how full the init table is.
  */
-const tiku_vfs_node_t tiku_vfs_tree_inittab_children[] = {
+static const tiku_vfs_node_t tiku_init_vfs_children[] = {
     { "count", TIKU_VFS_FILE, init_count_read, NULL,  NULL, 0 },
     { "0", TIKU_VFS_DIR, NULL, NULL, init_0_children, 4 },
     { "1", TIKU_VFS_DIR, NULL, NULL, init_1_children, 4 },
@@ -140,9 +138,19 @@ const tiku_vfs_node_t tiku_vfs_tree_inittab_children[] = {
     { "7", TIKU_VFS_DIR, NULL, NULL, init_7_children, 4 },
 };
 
-_Static_assert(sizeof(tiku_vfs_tree_inittab_children) /
-               sizeof(tiku_vfs_tree_inittab_children[0])
-               == TIKU_VFS_TREE_INITTAB_NCHILD,
-               "TIKU_VFS_TREE_INITTAB_NCHILD out of sync");
+_Static_assert(sizeof(tiku_init_vfs_children) /
+               sizeof(tiku_init_vfs_children[0])
+               == 9,
+               "/sys/init needs count plus eight slots");
 
+static const tiku_vfs_node_t init_node = {
+    "init", TIKU_VFS_DIR, NULL, NULL, tiku_init_vfs_children,
+    sizeof tiku_init_vfs_children / sizeof tiku_init_vfs_children[0]
+};
+
+/** @brief Return the init table view without loading or running commands. */
+const tiku_vfs_node_t *tiku_init_vfs_get(void)
+{
+    return &init_node;
+}
 #endif /* TIKU_INIT_ENABLE */

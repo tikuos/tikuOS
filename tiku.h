@@ -304,7 +304,7 @@
 
 #ifndef TIKU_SHELL_ENABLE
 /**
- * @brief 1 to build the shell (make TIKU_SHELL_ENABLE=1).  It is a kernel
+ * @brief 1 to build the shell (make TIKU_SHELL_ENABLE=1).  It is an optional
  *        service, so it coexists with tests, examples or an app.
  */
 #define TIKU_SHELL_ENABLE 0

@@ -33,6 +33,7 @@
     *tikukits/net/tls/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
     *tikukits/net/wifi/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
     *tikukits/net/bluetooth/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+    *shell/tiku_shell_vfs.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
     *kernel/vfs/tree/tiku_vfs_tree_sys.o(.text .text.* .rodata .rodata.*
                                          .srodata .srodata.*)
     *kernel/vfs/tree/tiku_vfs_tree_boot.o(.text .text.* .rodata .rodata.*

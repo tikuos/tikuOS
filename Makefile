@@ -2329,6 +2329,7 @@ CFLAGS += -DTIKU_VFS_CONFIG_ENABLE=1 -DTIKU_SHELL_LINE_SIZE=256
 SRCS += kernel/vfs/tiku_vfs_config.c
 endif
 SRCS += kernel/vfs/tiku_vfs_cache.c
+SRCS += boot/tiku_boot_vfs.c
 SRCS += kernel/vfs/tiku_vfs_tree.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_sys.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_boot.c
@@ -2344,7 +2345,9 @@ SRCS += kernel/vfs/tree/tiku_vfs_tree_watch.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_dev.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_gpio.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_sensor.c
-SRCS += kernel/vfs/tree/tiku_vfs_tree_inittab.c
+SRCS += services/init/tiku_init_vfs.c
+SRCS += shell/tiku_shell_vfs.c
+SRCS += basic/tiku_basic_vfs.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_data.c
 
 # Tiku File Store: the store behind /data (tiku_vfs_tree_data.c) and the NVM

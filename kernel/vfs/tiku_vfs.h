@@ -340,10 +340,11 @@ void tiku_vfs_init(const tiku_vfs_node_t *root);
  * @brief Most subtrees tiku_vfs_mount() can attach.
  *
  * The default fits the driver registry: /sys/drivers, one /dev/<class>
- * directory for each of the eight driver classes, and eight drivers.
+ * directory for each of the eight driver classes, and eight drivers,
+ * plus four optional providers selected by boot.
  */
 #ifndef TIKU_VFS_MOUNT_MAX
-#define TIKU_VFS_MOUNT_MAX 17
+#define TIKU_VFS_MOUNT_MAX 21
 #endif
 
 /**
@@ -363,6 +364,13 @@ void tiku_vfs_init(const tiku_vfs_node_t *root);
  *       tiku_vfs_list() callback.
  */
 int tiku_vfs_mount(const char *parent, const tiku_vfs_node_t *node);
+
+/**
+ * @brief Check node names, types, child tables, depth and path lengths.
+ * @param parent_len Parent path length; zero for children of the root.
+ * @return OK or EINVAL, without calling handlers or inspecting live mounts.
+ */
+int tiku_vfs_validate_node(const tiku_vfs_node_t *node, size_t parent_len);
 
 /**
  * @brief Name what reading a node does, without calling its handler.

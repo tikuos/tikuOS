@@ -191,17 +191,18 @@ const tiku_vfs_node_t *tiku_vfs_resolve(const char *path)
 /**
  * @brief Check a subtree before it is mounted.
  *
- * Rejects empty or path-unsafe names, duplicate siblings, files with
- * children, paths too long to resolve and nodes already in the tree; the
- * VFS_MOUNT_DEPTH_MAX bound also ends a cycle within the subtree.
+ * Rejects malformed names and child tables, excess depth and long paths.
+ * With attached set, also rejects nodes already in the namespace.
+ * The depth bound ends cycles within the subtree.
  *
  * @param node     Subtree root to check
  * @param depth    Levels below the mounted root
  * @param pathlen  Length of the parent's path
+ * @param attached Also check whether nodes are already published
  * @return 1 if the subtree may be mounted, 0 otherwise
  */
 static int mount_valid(const tiku_vfs_node_t *node, unsigned depth,
-                       size_t pathlen)
+                       size_t pathlen, int attached)
 {
     unsigned i;
     unsigned j;
@@ -220,7 +221,7 @@ static int mount_valid(const tiku_vfs_node_t *node, unsigned depth,
     }
     if (strcmp(node->name, ".") == 0 || strcmp(node->name, "..") == 0 ||
         pathlen + 1u + strlen(node->name) >= TIKU_VFS_PATH_MAX ||
-        tiku_vfs_path_of(node, existing, sizeof existing) >= 0) {
+        (attached && tiku_vfs_path_of(node, existing, sizeof existing) >= 0)) {
         return 0;
     }
     if (node->type == TIKU_VFS_FILE) {
@@ -234,7 +235,7 @@ static int mount_valid(const tiku_vfs_node_t *node, unsigned depth,
         const tiku_vfs_node_t *c = &node->children[i];
 
         if (!mount_valid(c, depth + 1u,
-                         pathlen + 1u + strlen(node->name))) {
+                         pathlen + 1u + strlen(node->name), attached)) {
             return 0;
         }
         for (j = 0; j < i; j++) {
@@ -244,6 +245,14 @@ static int mount_valid(const tiku_vfs_node_t *node, unsigned depth,
         }
     }
     return 1;
+}
+
+/** @brief Validate a detached subtree without reading or publishing nodes. */
+int tiku_vfs_validate_node(const tiku_vfs_node_t *node, size_t parent_len)
+{
+    return parent_len < TIKU_VFS_PATH_MAX &&
+        mount_valid(node, 0u, parent_len, 0)
+        ? TIKU_VFS_OK : TIKU_VFS_EINVAL;
 }
 
 /**
@@ -267,7 +276,7 @@ int tiku_vfs_mount(const char *parent, const tiku_vfs_node_t *node)
     }
     len = tiku_vfs_path_of(dir, path, sizeof path);
     if (len < 0 ||
-        !mount_valid(node, 0u, (dir == vfs_root) ? 0u : (size_t)len)) {
+        !mount_valid(node, 0u, (dir == vfs_root) ? 0u : (size_t)len, 1)) {
         return TIKU_VFS_EINVAL;
     }
     for (i = 0; (c = vfs_child(dir, i)) != NULL; i++) {

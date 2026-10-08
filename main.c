@@ -28,7 +28,7 @@
 #include "examples/kits/example_kits_runner.h"
 #endif
 
-#include "kernel/vfs/tiku_vfs_tree.h"
+#include "boot/tiku_boot_vfs.h"
 
 #if TIKU_SHELL_ENABLE
 #include "shell/tiku_shell.h"
@@ -128,7 +128,11 @@ int main(void) {
 
   /* Initialize the VFS tree.  /proc is assembled here, once: a process
    * registered after this point has no /proc/<pid> directory. */
-  tiku_vfs_tree_init();
+  ret = tiku_boot_vfs_init();
+  if (ret != 0) {
+    MAIN_PRINTF("ERROR: VFS assembly failed (%d)\n", ret);
+    while (1) { /* halt */ }
+  }
 
   /* Hand off to the driver registry. With HAS_DRIVERS=0 the table
    * is empty and this is a no-op; with a populated drivers/ tree

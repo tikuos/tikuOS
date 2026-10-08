@@ -452,9 +452,6 @@ tiku_vfs_tree_data_format(void)
 /*---------------------------------------------------------------------------*/
 /* Available with or without a command shell. */
 
-#if TIKU_SHELL_ENABLE && TIKU_SHELL_CMD_BASIC
-#include "basic/tiku_basic.h"
-#endif
 
 /*---------------------------------------------------------------------------*/
 /* DYNAMIC-DIRECTORY OPS — bridge /data to the file store                     */
@@ -609,61 +606,14 @@ static const tiku_vfs_dynops_t data_dynops = {
 };
 
 /*---------------------------------------------------------------------------*/
-/* /data/basic — the saved BASIC program (only when BASIC is built)          */
+/* /data root — optional static children are supplied by boot              */
 /*---------------------------------------------------------------------------*/
-
-#if TIKU_SHELL_ENABLE && TIKU_SHELL_CMD_BASIC
-
-/**
- * @brief Read handler for /data/basic, the saved BASIC program.
- *
- * Renders the BASIC interpreter's saved program as text.
- *
- * @param buf  Output buffer
- * @param max  Capacity of @p buf
- * @return Bytes written (see tiku_basic_vfs_read)
- */
-static int
-data_basic_read(char *buf, size_t max)
-{
-    return tiku_basic_vfs_read(buf, (unsigned int)max);
-}
-
-/**
- * @brief Write handler for /data/basic, the saved BASIC program.
- *
- * Saves @p len bytes of numbered program text as the BASIC program.
- *
- * @param buf  Program text
- * @param len  Number of bytes
- * @return 0 on success, negative on error (see tiku_basic_vfs_write)
- */
-static int
-data_basic_write(const char *buf, size_t len)
-{
-    return tiku_basic_vfs_write(buf, (unsigned int)len);
-}
-
-static const tiku_vfs_node_t data_children[] = {
-    { "basic", TIKU_VFS_FILE, data_basic_read, data_basic_write, NULL, 0,
-      NULL, NULL, TIKU_VFS_CAP_FS },
-};
-
-static const tiku_vfs_node_t data_node = {
-    "data", TIKU_VFS_DIR, NULL, NULL,
-    data_children, (uint8_t)(sizeof(data_children) / sizeof(data_children[0])),
-    NULL, &data_dynops
-};
-
-#else  /* no BASIC: /data holds only the dynamic file store */
 
 static const tiku_vfs_node_t data_node = {
     "data", TIKU_VFS_DIR, NULL, NULL,
     NULL, 0,
     NULL, &data_dynops
 };
-
-#endif
 
 /*---------------------------------------------------------------------------*/
 /* df SUPPORT — file-store usage stats                                       */
