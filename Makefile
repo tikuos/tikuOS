@@ -2521,7 +2521,7 @@ LDFLAGS += -Wl,--defsym=__tiku_module_reserve=0x8000
 endif
 MOD_CFLAGS     = $(MOD_CPU_FLAGS) -Os -ffreestanding \
                  -fno-builtin -fno-jump-tables -DTIKU_MODULE_BUILD=1 \
-                 -I basic
+                 -I . -I basic
 # Modules link with -nostdlib.  MSP430 sets MOD_LDFLAGS empty above and keeps
 # the toolchain's libraries, so the hardware-multiply helper library
 # (libmul_f5) resolves; the link rule's -nostartfiles still leaves out crt0.
@@ -3862,6 +3862,7 @@ endif
 # reads the image through those symbols.
 ifeq ($(TIKU_BASIC_MODULE_ENABLE),1)
 $(MOD_BUILD)/mod_demo.elf: basic/modules/mod_demo.c \
+                        hal/tiku_module_layout.h \
                            $(MOD_LDS)
 	@mkdir -p $(dir $@)
 	$(CC) $(MOD_CFLAGS) $(MOD_LDFLAGS) -T $(MOD_LDS) \

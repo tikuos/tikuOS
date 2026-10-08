@@ -17,7 +17,7 @@
 #include "tiku_mpu_arch.h"
 #include "apollo510.h"            /* CMSIS: MPU/SCB/NVIC + mpu_armv8.h */
 #include <hal/tiku_cpu.h>         /* tiku_cpu_irq_disable/enable */
-#include <basic/tiku_basic_module.h>  /* TIKU_MODULE_EXEC_* */
+#include <hal/tiku_module_layout.h>  /* TIKU_MODULE_EXEC_* */
 #include <stdint.h>
 
 /*
@@ -327,7 +327,7 @@ void tiku_mpu_arch_init_segments(void) {
                    AMBIQ_SSRAM_BASE + AMBIQ_SSRAM_SIZE - 1U,
                    0U, 1U);                                     /* region 6 */
         /* Region 7 covers wherever a loadable BASIC module executes, which
-         * differs by part -- see basic/tiku_basic_module.h.
+         * differs by part -- see hal/tiku_module_layout.h.
          *
          * XIP parts: the MRAM slot directly above the code window, RO +
          * executable permanently: the module runs in place and the CPU never
@@ -345,7 +345,7 @@ void tiku_mpu_arch_init_segments(void) {
                    0U /* RW */, 1U /* XN */);                   /* region 7 */
 #else
         /* The slot address and size come from the same constants the loader
-         * installs with and the module links against (tiku_basic_module.h),
+         * installs with and the module links against (hal/tiku_module_layout.h),
          * so the region cannot drift from them; the loader checks that pair
          * against the linker's __tiku_code_limit before any install. */
         mpu_region(MPU_REGION_MODULE,
