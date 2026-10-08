@@ -6,7 +6,7 @@
 #
 # Authors: Ambuj Varshney <ambuj@tiku-os.org>
 #
-# commit-msg - hold the message to the shape in commentstyle.md.
+# commit-msg - hold the message to the shape in commit-style.md.
 #
 # SPDX-License-Identifier: Apache-2.0
 

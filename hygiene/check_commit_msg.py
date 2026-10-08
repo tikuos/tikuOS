@@ -6,7 +6,7 @@
 #
 # Authors: Ambuj Varshney <ambuj@tiku-os.org>
 #
-# check_commit_msg.py - hold commit messages to the shape in commentstyle.md.
+# check_commit_msg.py - hold commit messages to the shape in commit-style.md.
 #
 # Subject is `Area: what now works`; the body is bullet points, at most five.
 # Runs from the commit-msg hook, so a message that drifts is refused at the
@@ -187,13 +187,13 @@ def main(argv):
 
     if not bad:
         return 0
-    sys.stderr.write("\ncommit message does not match commentstyle.md:\n")
+    sys.stderr.write("\ncommit message does not match commit-style.md:\n")
     for b in bad:
         sys.stderr.write(f"  - {b}\n")
     sys.stderr.write("\n  Area: what now works\n\n"
                      "  - bullet, at most five, one line each\n"
                      "  - say how it was checked\n\n"
-                     "See commentstyle.md. To bypass once: git commit "
+                     "See commit-style.md. To bypass once: git commit "
                      "--no-verify\n\n")
     return 1
 

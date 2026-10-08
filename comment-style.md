@@ -151,6 +151,9 @@ decoration: cut it and check nothing was lost.
 
 ## Before every commit: read, don't grep
 
+The commit message has its own guide, `hygiene/commit-style.md`, and a
+hook that checks its shape; this section is about the comments in the diff.
+
 `make lint` is the mechanical half, and text that breaks every rule above can
 pass it. It cannot see a comment that is false about the code beside it, the
 register of the prose, or a comment that was true when written and made false

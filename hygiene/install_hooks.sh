@@ -33,5 +33,5 @@ for repo in "$root" "$root"/TikuBench "$root"/tikukits "$root"/applications \
 done
 
 echo
-echo "commit messages are now checked against hygiene/commentstyle.md"
+echo "commit messages are now checked against hygiene/commit-style.md"
 echo "bypass a single commit with: git commit --no-verify"

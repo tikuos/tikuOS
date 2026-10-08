@@ -76,7 +76,7 @@ per-platform semantics and the NVM region layout.
   (`Shell`, `VFS`, `BASIC`, `Nordic Port`, `TikuBench`, `Docs` ...), at most
   72 characters; body at most three `- ` bullets in plain English: what
   changed, why, how it was checked.  No milestone markers, no metaphor, no
-  tool or assistant trailers.  `hygiene/commentstyle.md` has the examples;
+  tool or assistant trailers.  `hygiene/commit-style.md` has the examples;
   `sh hygiene/install_hooks.sh` (once per clone) installs the `commit-msg`
   hook in every nested repository, and it refuses a message or an author
   that does not fit.  Do not use `--no-verify`.
