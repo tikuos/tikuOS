@@ -522,8 +522,10 @@ DEBUGGER  = tilib
 PICOTOOL ?= $(shell command -v picotool 2>/dev/null || echo picotool)
 
 # SEGGER J-Link settings for the Ambiq, Nordic and RA8P1 rules: SWD at 4 MHz.
-# Any of these can be overridden on the make command line.
-JLINK           ?= JLinkExe
+# Any of these can be overridden on the make command line.  -nogui 1 keeps
+# JLinkExe off the screen: with two probes and no JLINK_SN it then fails
+# instead of asking someone at the desk to pick one.
+JLINK           ?= JLinkExe -nogui 1
 JLINK_GDB       ?= JLinkGDBServer
 JLINK_IF        ?= SWD
 JLINK_SPEED     ?= 4000
@@ -1683,24 +1685,17 @@ SRCS += arch/nordic/tiku_onewire_arch.c
 SRCS += arch/nordic/tiku_trng_arch.c
 SRCS += arch/nordic/tiku_crypto_arch.c
 SRCS += arch/nordic/tiku_radio_arch.c
-SRCS += arch/nordic/tiku_ble_ccm_arch.c
 SRCS += arch/nordic/tiku_fault_arch.c
 # The on-die 2.4 GHz RADIO backs the generic broadcast-BLE capability: the
 # tiku_ble_adv facade, the BASIC BLEBEACON/BLESCAN$ words and /sys/radio test
-# TIKU_HAS_BLE_ADV, not the chip.  TIKU_CAP_BLE_ADV lets the bleadv and
-# rftest shell commands build further down when they are requested.
+# TIKU_HAS_BLE_ADV, not the chip.  TIKU_CAP_BLE_ADV lets the rftest shell
+# command build further down when it is requested.
 SRCS += interfaces/bluetooth/tiku_ble_adv.c
 CFLAGS += -DTIKU_HAS_BLE_ADV=1
 TIKU_CAP_BLE_ADV := 1
-# LE Secure Connections (SMP) pairing, crypto and state machine.  Both roles
-# use it, the FLPR-backed peripheral (responder) and the RADIO-driven central
-# test peer (initiator), so it builds with the broadcast capability, outside
-# the FLPR block.  AES-CMAC and f4/f5/f6 run on the CRACEN AES-ECB; P-256
-# ECDH comes from tikukits/crypto/p256.  --gc-sections drops the code from a
-# build that does not pair.
-SRCS += interfaces/bluetooth/tiku_ble_smp.c
-SRCS += interfaces/bluetooth/tiku_ble_smp_pair.c
-SRCS += interfaces/bluetooth/tiku_ble_bond.c
+# P-256 ECDH from tikukits/crypto/p256, for the cryptoprobe command and the
+# stack's software pairing; --gc-sections drops it from a build without
+# either.
 SRCS += $(wildcard tikukits/crypto/p256/*.c)
 # IEEE 802.15.4 on the same on-die RADIO: the PHY (tiku_ieee154_arch.c), the
 # frame layer and the MAC (tiku_154.c).  Code tests the TIKU_HAS_154
@@ -1725,13 +1720,8 @@ ifeq ($(TIKU_FLPR_ENABLE),1)
 # TIKU_FLPR_ENABLE.
 SRCS += arch/nordic/tiku_flpr_arch.c
 CFLAGS += -DTIKU_FLPR_ENABLE=1
-# The FLPR firmware is the on-die BLE controller; the BLE serial facade backs
-# the BASIC BLE words over its mailbox.  SRCS is de-duplicated, so the host
-# stack's block adding the same file is harmless.
-SRCS += interfaces/bluetooth/tiku_ble_serial.c
-# The ATT/GATT host for the FLPR controller runs on the M33; the FLPR
-# forwards L2CAP frames over the mailbox.
-SRCS += interfaces/bluetooth/tiku_ble_host.c
+# The FLPR firmware is the on-die BLE controller, under the host stack
+# (TIKU_DRV_BLE_FLPR_ENABLE, in the Bluetooth section below).
 # The coprocessor interface (interfaces/coproc) backed by the FLPR, and
 # /sys/coproc.  TIKU_COPROC_MSG_CAP must equal the FLPR mailbox's message
 # cap; a _Static_assert in tiku_coproc_arch.c checks it.
@@ -2758,18 +2748,11 @@ else
 CFLAGS += -DNRF_AXON_INTERLAYER_BUFFER_SIZE=0 -DNRF_AXON_PSUM_BUFFER_SIZE=0
 endif
 endif
-# Radio test commands (bleadv, radio154, rftest), requested with
+# Radio test commands (radio154, rftest), requested with
 # -DTIKU_SHELL_CMD_<NAME>=1 in EXTRA_CFLAGS, compile only where the platform
 # sets the radio capability (TIKU_CAP_BLE_ADV, TIKU_CAP_154).  Elsewhere a
 # warning names the missing radio, and tiku_shell_config.h drops the command
 # from the table.
-ifneq (,$(findstring TIKU_SHELL_CMD_BLEADV=1,$(EXTRA_CFLAGS)))
-ifeq ($(TIKU_CAP_BLE_ADV),1)
-SRCS += kernel/shell/commands/tiku_shell_cmd_bleadv.c
-else
-$(warning bleadv: no broadcast-BLE radio on $(MCU) -- command skipped)
-endif
-endif
 ifneq (,$(findstring TIKU_SHELL_CMD_RADIO154=1,$(EXTRA_CFLAGS)))
 ifeq ($(TIKU_CAP_154),1)
 SRCS += kernel/shell/commands/tiku_shell_cmd_radio154.c
@@ -3342,7 +3325,8 @@ endif # MINIMAL=1 / else
 # ESP32-C61's controller or the EM9305 die, which `bt on` powers on demand.
 # The controllers' own sources come from their drivers; this section holds
 # the rest.  The Nordic parts' in-house link layer, its facades and the
-# bleadv command stay in the Nordic blocks until that radio speaks HCI.
+# rftest radio lab command stay in the Nordic blocks: they drive the RADIO
+# on the M33, beside the FLPR's link layer.
 # ---------------------------------------------------------------------------
 
 # The EM9305 sits in the Apollo510B (Blue) EVB's package, on IOM6 SPI: a
@@ -3436,14 +3420,14 @@ SRCS += arch/nordic/tiku_flpr_hci.c
 endif
 # TIKU_LINK_BLE_ENABLE=1 compiles the BLE link: a board's window session over
 # the BLE serial facade, the Nordic UART Service byte pipe.  Only the
-# applications overlay registers it (TIKU_APPL_GUI_BLE).  The facade needs a
-# radio: the host stack's (TIKU_BT_HOST, the EM9305 by default on the
-# Apollo510B) or TIKU_FLPR_ENABLE=1 on Nordic; without one the build stops
-# with an error.
+# applications overlay registers it (TIKU_APPL_GUI_BLE).  The facade needs
+# the host stack's radio (TIKU_BT_HOST: the EM9305 by default on the
+# Apollo510B, the FLPR with TIKU_FLPR_ENABLE=1 on Nordic); without one the
+# build stops with an error.
 ifeq ($(TIKU_LINK_BLE_ENABLE),1)
-ifeq ($(filter 1,$(TIKU_FLPR_ENABLE) $(TIKU_BT_HOST)),)
-$(error TIKU_LINK_BLE_ENABLE=1 needs the BLE serial facade under it; on \
-nordic add TIKU_FLPR_ENABLE=1)
+ifneq ($(TIKU_BT_HOST),1)
+$(error TIKU_LINK_BLE_ENABLE=1 needs the BLE serial facade under it: a \
+controller for the host stack; on nordic add TIKU_FLPR_ENABLE=1)
 endif
 CFLAGS += -DTIKU_LINK_BLE_ENABLE=1
 SRCS   += kernel/link/tiku_link_ble.c
@@ -3507,8 +3491,8 @@ CFLAGS += $(EXP_CFLAGS)
 SRCS   += $(APPL_SRCS)
 CFLAGS += $(APPL_CFLAGS)
 # $(sort) also removes duplicates.  Some files are added by two blocks
-# (tikukits/crypto/p256 by the Nordic BLE-SMP block for LE Secure
-# Connections and by the crypto kit; tiku_i2c_arch.c twice on RA8P1), and an
+# (tikukits/crypto/p256 by the Nordic block for the stack's software
+# pairing and by the crypto kit; tiku_i2c_arch.c twice on RA8P1), and an
 # object twice in the link fails with "multiple definition".  The order of
 # explicit objects does not change the link: the libraries come after every
 # object, and the linker scripts place every section by pattern.

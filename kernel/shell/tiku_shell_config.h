@@ -224,9 +224,6 @@
 #ifndef TIKU_SHELL_CMD_CRYPTOPROBE
 #define TIKU_SHELL_CMD_CRYPTOPROBE 0 /**< cryptoprobe - CRACEN probe */
 #endif
-#ifndef TIKU_SHELL_CMD_BLEADV
-#define TIKU_SHELL_CMD_BLEADV 0 /**< bleadv - nRF54L BLE beacon */
-#endif
 #ifndef TIKU_SHELL_CMD_RADIO154
 #define TIKU_SHELL_CMD_RADIO154 0 /**< radio154 - 802.15.4 PHY test */
 #endif
@@ -547,12 +544,6 @@
 #if TIKU_SHELL_CMD_USBPROBE && !(TIKU_DEVICE_HAS_USBHS + 0)
 #undef  TIKU_SHELL_CMD_USBPROBE
 #define TIKU_SHELL_CMD_USBPROBE 0
-#endif
-
-/* bleadv drives the on-die 2.4 GHz RADIO (broadcast BLE). */
-#if TIKU_SHELL_CMD_BLEADV && !(TIKU_HAS_BLE_ADV + 0)
-#undef  TIKU_SHELL_CMD_BLEADV
-#define TIKU_SHELL_CMD_BLEADV 0
 #endif
 
 /* radio154 drives the 802.15.4 PHY. */

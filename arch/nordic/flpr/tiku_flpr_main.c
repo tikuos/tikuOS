@@ -297,7 +297,7 @@ static uint8_t flpr_ll_ack(uint8_t *sn, uint8_t *nesn, uint8_t rx_sn,
  * retransmitted through SN/NESN until acked.  A received L2CAP data PDU is
  * forwarded unchanged to the M33 host over f2a; the host's fragments come
  * back over a2f and are queued as data PDUs.  ATT/GATT runs on the M33
- * (tiku_ble_host). */
+ * (tiku_bt, through the HCI shim). */
 static uint8_t  fll_tx[TIKU_FLPR_DLE_BUF_SIZE]; /* [hdr][len][S1][pay]     */
 static uint8_t  fll_tx_len;             /* payload len; 0 = none            */
 static uint8_t  fll_tx_sent;            /* the last packet sent carried it  */
@@ -1083,7 +1083,7 @@ static uint32_t flpr_adv_gap_ticks(uint32_t random)
  * advertiser answers.  The RADIO's TIFS does not govern the PHYEND_DISABLE +
  * DISABLED_TXEN chain on this part: that chain replies at the TX ramp's
  * pace, well before the 150 +/- 2 us a scanner listens at.  200 ticks is the
- * value a second radio scanning this one (`bleadv scanreq`) measures as
+ * value a second radio scanning this one (`rftest scanreq`) measures as
  * 150 us; this advertiser's own capture of its reply (adv_tifs) reads about
  * 40 ticks more, since its receive and transmit events fire at different
  * points in a packet. */

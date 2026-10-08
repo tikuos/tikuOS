@@ -185,9 +185,6 @@
 #if TIKU_SHELL_CMD_USBPROBE
 #include "commands/tiku_shell_cmd_usbprobe.h"
 #endif
-#if TIKU_SHELL_CMD_BLEADV
-#include "commands/tiku_shell_cmd_bleadv.h"
-#endif
 #if TIKU_SHELL_CMD_RADIO154
 #include "commands/tiku_shell_cmd_radio154.h"
 #endif
@@ -663,9 +660,6 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_USBMSC
     {"usbmsc",  "USB mass storage disk",       tiku_shell_cmd_usbmsc},
-#endif
-#if TIKU_SHELL_CMD_BLEADV
-    {"bleadv",  "BLE beacon (nRF54L)",        tiku_shell_cmd_bleadv},
 #endif
 #if TIKU_SHELL_CMD_RADIO154
     {"radio154","802.15.4 PHY (nRF54L)",      tiku_shell_cmd_radio154},

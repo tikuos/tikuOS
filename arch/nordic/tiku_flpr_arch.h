@@ -348,7 +348,7 @@ int tiku_flpr_arch_conn_start(const uint8_t *adv, uint32_t adv_len,
                               const uint8_t *rsp, uint32_t rsp_len,
                               const uint8_t *addr);
 
-/** @brief Always 0: the controller never sets conn_sub; tiku_ble_host
+/** @brief Always 0: the controller never sets conn_sub; the host stack
  *         tracks the NUS CCCD. */
 int tiku_flpr_arch_conn_subscribed(void);
 

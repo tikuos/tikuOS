@@ -198,9 +198,10 @@ tikuOS> read /sys/bt/state
 ```
 
 `/sys/bt` holds the radio's address, state, power, scan count, links, bonds
-and version. `bt help` lists every subcommand the build has. The nRF54L
-boards' on-die radio keeps its own link layer (the `bleadv` command) for
-now.
+and version. `bt help` lists every subcommand the build has. On the nRF54L
+boards the controller is tikuOS's own link layer on the FLPR coprocessor
+(`TIKU_FLPR_ENABLE=1`); the radio lab verbs (PHY probes, extended
+advertising, the scan-request timer) are the opt-in `rftest` command.
 
 ---
 

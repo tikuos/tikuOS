@@ -942,8 +942,8 @@ int tiku_flpr_arch_conn_start(const uint8_t *adv, uint32_t adv_len,
     return 0;
 }
 
-/* Always 0: the controller leaves conn_sub at 0; tiku_ble_host tracks the
- * NUS CCCD. */
+/* Always 0: the controller leaves conn_sub at 0; the host stack tracks
+ * the NUS CCCD. */
 int tiku_flpr_arch_conn_subscribed(void)
 {
     return (TIKU_FLPR_SHARED->conn_sub != 0u) ? 1 : 0;
