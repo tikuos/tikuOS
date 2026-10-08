@@ -125,11 +125,9 @@ commit.  To start:
 ```bash
 git clone --recurse-submodules https://github.com/tikuos/tikuOS.git
 cd tikuOS
+sh hygiene/install_hooks.sh     # commit-message and author checks, per repository
 claude                          # or: codex
 ```
-
-A local commit-msg hook (not part of the clone) may enforce the commit
-contract in `AGENTS.md`; the contract applies either way.
 
 Ask for a capability, not a step: "add X, prove it with TikuBench on the
 nRF54L15, show me the commit message".  The agent builds, runs the proof,

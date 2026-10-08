@@ -76,8 +76,10 @@ per-platform semantics and the NVM region layout.
   (`Shell`, `VFS`, `BASIC`, `Nordic Port`, `TikuBench`, `Docs` ...), at most
   72 characters; body at most three `- ` bullets in plain English: what
   changed, why, how it was checked.  No milestone markers, no metaphor, no
-  tool or assistant trailers.  A local `commit-msg` hook may refuse a
-  message or an author that does not fit; do not use `--no-verify`.
+  tool or assistant trailers.  `hygiene/commentstyle.md` has the examples;
+  `sh hygiene/install_hooks.sh` (once per clone) installs the `commit-msg`
+  hook in every nested repository, and it refuses a message or an author
+  that does not fit.  Do not use `--no-verify`.
 - Commit as the repository's configured identity with plain `git commit`;
   no `-c user.email=` override.
 - Before `git commit`, present the subject, author and body and wait for
