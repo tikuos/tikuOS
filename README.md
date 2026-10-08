@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="#quick-start"><img src="https://img.shields.io/badge/build-make-blue?style=flat-square" alt="Build"></a>
-  <a href="#supported-boards"><img src="https://img.shields.io/badge/MCU-MSP430%20%7C%20Apollo%20%7C%20RP2350%20%7C%20nRF54L%20%7C%20RA8P1-red?style=flat-square" alt="MCU"></a>
+  <a href="#supported-boards"><img src="https://img.shields.io/badge/MCU-MSP430%20%7C%20Apollo%20%7C%20RP2350%20%7C%20nRF54L%20%7C%20RA8P1%20%7C%20ESP32--C61-red?style=flat-square" alt="MCU"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square" alt="License"></a>
   <a href="#interactive-shell"><img src="https://img.shields.io/badge/shell-58%20commands-orange?style=flat-square" alt="Shell"></a>
   <a href="#networking"><img src="https://img.shields.io/badge/net-Wi--Fi%20%7C%20TLS%20%7C%20MQTT-brightgreen?style=flat-square" alt="Networking"></a>
@@ -42,13 +42,15 @@
 | | nRF54LM20-DK · 128 MHz + Axon NPU | 512 KB | 2 MB RRAM | :green_circle: |
 | **Renesas RA8**<br><sub>32-bit · Cortex-M85</sub> | EK-RA8P1 · M85 240/480/1000 MHz + Ethos-U55 | 1664 KB | 1 MB MRAM | :green_circle: |
 | **STMicro STM32N6**<br><sub>32-bit · Cortex-M55</sub> | Nucleo-144 N657X0-Q · up to 600 MHz | 3840 KB | 64 MB NOR | :yellow_circle: |
+| **Espressif ESP32-C61**<br><sub>32-bit · RISC-V @ 160 MHz</sub> | ESP32-C61-DevKitC · Wi-Fi 6 + BLE 5 | 320 KB + 2 MB PSRAM | 8 MB flash | :green_circle: |
 
 :green_circle: verified by the TikuBench matrix &nbsp;·&nbsp;
 :yellow_circle: brought up, not yet in that matrix
 
 The RA8P1 also carries 64 MB of SDRAM and 64 MB of Octo-SPI NOR, both driven
 by the port; the STM32N6 has no internal NVM, so its durable store is the
-external NOR.
+external NOR.  The ESP32-C61 runs the shell, BASIC and crypto code from flash
+(XIP) and keeps its TLS buffers and the BASIC arena in the in-package PSRAM.
 
 ---
 
@@ -102,11 +104,15 @@ make flash MCU=ra8p1 TIKU_SHELL_ENABLE=1       # boots at 240 MHz; `freq 1000`
 
 # --- ST Nucleo-N657X0-Q (arm-none-eabi-gcc + STM32CubeProgrammer) -----------
 make flash MCU=stm32n6 TIKU_SHELL_ENABLE=1
+
+# --- Espressif ESP32-C61-DevKitC (riscv32 newlib gcc + esptool) -------------
+make flash MCU=esp32c61 TIKU_SHELL_ENABLE=1   # Wi-Fi/BLE: sh drivers/wifi/esp/fetch.sh first
 ```
 
 The kernel, shell, VFS, BASIC, and networking are architecture-neutral — the
-same source tree targets all six families, from a 16-bit MSP430 at 8 KB of RAM
-to a 1 GHz Cortex-M85, through a device/board header abstraction.
+same source tree targets all seven families, from a 16-bit MSP430 at 8 KB of RAM
+to a 1 GHz Cortex-M85 and a RISC-V ESP32-C61, through a device/board header
+abstraction.
 
 ---
 
@@ -164,9 +170,12 @@ tikuOS> help
 TikuOS 0.05 speaks IP. The stack is event-driven and statically allocated,
 sized for these parts, and reachable from the shell, from BASIC, and from C.
 
-- **Link / transport** — IPv4, TCP, UDP, ARP, SLIP over the console UART, and a
+- **Link / transport** — IPv4, TCP, UDP, ARP, SLIP over the console UART, a
   clean-room Wi-Fi driver for the **CYW43439** (Pico 2 W): gSPI, WHD/SDPCM,
-  firmware upload, scan/join, proven over the air.
+  firmware upload, scan/join, proven over the air; and the **ESP32-C61**'s own
+  radio through an OS shim over Espressif's radio libraries, with a clean-room
+  WPA2 supplicant, DHCP, DNS and ping over the air, and Wi-Fi and BLE on at
+  once through the coexistence arbiter.
 - **Security** — **TLS 1.3 and 1.2** with RSA, P-256 and P-384 ECDHE, and
   AES-256-GCM; PSK *and* X.509 certificate-chain verification against a
   built-in CA trust store.
@@ -183,7 +192,8 @@ tikuOS> ping tiku-os.org
 
 > The IP stack, Wi-Fi driver, TLS engine, and MQTT client live in the companion
 > **tikukits** library (`TIKU_KIT_NET_ENABLE=1`); the shell and BASIC commands
-> that drive them ship in the core kernel.
+> that drive them ship in the core kernel.  On the ESP32-C61 the same radio
+> also serves as a receiver of raw I/Q snapshots (`sdr`).
 
 ---
 
@@ -339,13 +349,14 @@ tikuOS> changed /dev/gpio/1/3      # block until P1.3 changes
 
 | Flag | Effect |
 |------|--------|
-| `MCU=…` | Target: `msp430fr5994`, `msp430fr6989`, `apollo510`, `apollo4l`, `apollo4p`, `apollo510b`, `rp2350`, `nrf54l15`, `nrf54lm20a`, `nrf54lm20b`, `ra8p1`, `stm32n6` |
+| `MCU=…` | Target: `msp430fr5994`, `msp430fr6989`, `apollo510`, `apollo4l`, `apollo4p`, `apollo510b`, `rp2350`, `nrf54l15`, `nrf54lm20a`, `nrf54lm20b`, `ra8p1`, `stm32n6`, `esp32c61` |
 | `TIKU_SHELL_ENABLE=1` | Interactive shell (UART / USB-CDC / Telnet) |
 | `TIKU_SHELL_BASIC_ENABLE=1` | Tiku BASIC interpreter (needs `MEMORY_MODEL=large`) |
 | `TIKU_INIT_ENABLE=1` | FRAM/NVM-backed boot sequence (implies shell) |
 | `TIKU_KIT_NET_ENABLE=1` | IP / Wi-Fi / TLS / MQTT (companion tikukits) |
 | `MEMORY_MODEL=large` | 20-bit pointers + HIFRAM placement (MSP430 large working sets) |
 | `UART_BAUD=…` | UART baud (default 9600 on MSP430, 115200 on Cortex-M) |
+| `TIKU_ESP32C61_XIP_CODE=1`<br>`TIKU_ESP32C61_PSRAM_DATA=1` | ESP32-C61: shell, BASIC and crypto code run from flash; TLS buffers and the BASIC arena sit in PSRAM |
 
 ---
 
