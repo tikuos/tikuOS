@@ -3562,6 +3562,7 @@ TARGET = main.elf
 # tools/check_comment_style.py --strict (comment-style.md) over the tracked
 # tree.  Every check runs, and the target fails if any one fails.
 lint:
+	python3 tools/check_kernel_dependencies.py
 	@rc=0; \
 	 ./tools/check_durable_placement.sh || rc=1; \
 	 if command -v cc >/dev/null 2>&1; then \

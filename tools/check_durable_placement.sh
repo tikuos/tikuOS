@@ -14,7 +14,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# Scope: kernel/, interfaces/, drivers/, boot/, hal/ and apps/.  arch/ is not
+# Scope: kernel/, interfaces/, drivers/, boot/, hal/, apps/, services/, shell/ and basic/.  arch/ is not
 # scanned: its linker scripts and memory and MPU ports implement the grades.
 # tikukits/ and TikuBench/ are separate repositories.
 #
@@ -40,7 +40,7 @@ ALLOW='^(kernel/memory/tiku_mem\.h|shell/commands/tiku_shell_cmd_mrambench\.c):'
 
 viol=$(grep -rnE 'section\("\.(persistent|retained|uninit)' \
         --include='*.c' --include='*.h' --include='*.inl' \
-        kernel interfaces drivers boot hal apps 2>/dev/null \
+        kernel interfaces drivers boot hal apps services shell basic 2>/dev/null \
        | grep -Ev "$ALLOW")
 
 if [ -n "$viol" ]; then

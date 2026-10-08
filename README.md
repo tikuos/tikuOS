@@ -110,6 +110,21 @@ to a 1 GHz Cortex-M85, through a device/board header abstraction.
 
 ---
 
+## Source layout
+
+| Directory | Responsibility |
+| --- | --- |
+| `kernel/` | CPU policy, memory, processes, scheduling, timers, VFS, TFS, threads and the driver registry |
+| `services/` | Console framing, links, USB device services and startup commands |
+| `shell/` | Interactive shell and command handlers |
+| `basic/` | BASIC interpreter and native modules |
+| `boot/` | Hardware startup and selection of optional VFS providers |
+| `hal/`, `interfaces/`, `arch/` | Hardware contracts and platform implementations |
+
+This separates source ownership, not firmware binaries. Optional services use
+kernel APIs; boot supplies their VFS nodes to the core tree. `make lint` checks
+that core files do not include or call those optional owners.
+
 ## :computer: Interactive Shell
 
 A full interactive shell over UART, USB-CDC, or Telnet. Manage processes, drive
@@ -198,10 +213,9 @@ tikuOS> read /sys/bt/state
 ```
 
 `/sys/bt` holds the radio's address, state, power, scan count, links, bonds
-and version. `bt help` lists every subcommand the build has. On the nRF54L
-boards the controller is tikuOS's own link layer on the FLPR coprocessor
-(`TIKU_FLPR_ENABLE=1`); the radio lab verbs (PHY probes, extended
-advertising, the scan-request timer) are the opt-in `rftest` command.
+and version. `bt help` lists every subcommand the build has. The nRF54L
+boards' on-die radio keeps its own link layer (the `bleadv` command) for
+now.
 
 ---
 
