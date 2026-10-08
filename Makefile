@@ -3392,7 +3392,11 @@ endif
 # the coprocessor runs the link layer and tiku_flpr_hci.c answers HCI for it
 # on the M33.  It has no LE crypto commands, so pairing's AES and P-256 run
 # in software, and beacons stay with the broadcast facade on the M33's own
-# radio, so the stack's broadcast backend is left out.
+# radio, so the stack's broadcast backend is left out.  On by default
+# wherever the FLPR runs and the kit is there: an nRF54L with its
+# coprocessor is a BLE host.
+TIKU_DRV_BLE_FLPR_ENABLE ?= $(if $(and $(filter 1,$(TIKU_FLPR_ENABLE)),\
+                                        $(filter 1,$(HAS_TIKUKITS))),1,0)
 ifeq ($(TIKU_DRV_BLE_FLPR_ENABLE),1)
 ifneq ($(TIKU_FLPR_ENABLE),1)
 $(error TIKU_DRV_BLE_FLPR_ENABLE=1 needs TIKU_FLPR_ENABLE=1: the FLPR \

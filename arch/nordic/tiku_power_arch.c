@@ -27,6 +27,7 @@
 #include <arch/nordic/tiku_device_select.h>
 #include <arch/nordic/tiku_timer_arch.h> /* tick rate, before clock.h         */
 #include <kernel/cpu/tiku_hang.h>        /* check-in during a blocking probe */
+#include <kernel/memory/tiku_mem.h>      /* the mem probe's SRAM set, lent    */
 #include <kernel/timers/tiku_clock.h>   /* tickless stretch for the tick flag */
 
 /*---------------------------------------------------------------------------*/
@@ -212,7 +213,6 @@ uint32_t tiku_nordic_cache_workload(uint32_t *out_us)
 
 static const uint32_t tiku_mem_rram_hot[TIKU_MEM_HOT_WORDS]   = { 0 };
 static const uint32_t tiku_mem_rram_cold[TIKU_MEM_COLD_WORDS] = { 0 };
-static uint32_t       tiku_mem_sram[TIKU_MEM_COLD_WORDS];
 volatile uint32_t     tiku_mem_sink;
 
 static uint32_t tiku_mem_accesses;
@@ -264,7 +264,20 @@ uint32_t tiku_nordic_mem_probe(unsigned kind, uint32_t ms)
     uint32_t acc = 0u, idx = 0u;
     const uint32_t hot_mask  = TIKU_MEM_HOT_WORDS - 1u;
     const uint32_t cold_mask = TIKU_MEM_COLD_WORDS - 1u;
+    tiku_arena_t sram_arena;
+    uint32_t *tiku_mem_sram;
 
+    /* The 64 KB SRAM set is borrowed from the SRAM tier for the run: as a
+     * static it was the largest object in the image, a quarter of the
+     * nRF54L15's SRAM held for a bench probe.  The tier is free at the
+     * prompt; a probe that finds it taken reports 0 us. */
+    if (tiku_tier_arena_create(&sram_arena, TIKU_MEM_SRAM,
+                               TIKU_MEM_COLD_WORDS * 4u, 0u) != TIKU_MEM_OK) {
+        tiku_mem_accesses = 0u;
+        tiku_mem_checksum = 0u;
+        return 0u;
+    }
+    tiku_mem_sram = (uint32_t *)sram_arena.buf;
     /* Seed the SRAM buffer before timing so checksums do not depend on
      * a previous write probe. The RRAM arrays are zero-filled constants. */
     {
@@ -316,6 +329,7 @@ uint32_t tiku_nordic_mem_probe(unsigned kind, uint32_t ms)
         now = NRF_GRTC_S->SYSCOUNTER[0].SYSCOUNTERL;
     } while ((uint32_t)(now - t0) < ms * 1000u);
     tiku_mem_sink = acc;          /* consume, so no read can be elided */
+    (void)tiku_arena_destroy(&sram_arena);
     return (uint32_t)(now - t0);
 }
 

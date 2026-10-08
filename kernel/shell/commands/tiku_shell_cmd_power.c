@@ -232,6 +232,11 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                      (unsigned long)ms);
         us = tiku_nordic_mem_probe(kind, ms);
         n = tiku_nordic_mem_access_count();
+        if (us == 0u) {
+            SHELL_PRINTF("mem: the SRAM tier has no 64 KB to lend the "
+                         "probe (free what holds it, then retry)\n");
+            return;
+        }
         SHELL_PRINTF("mem done %lu us acc %lu kacc/s %lu sum %lx\n",
                      (unsigned long)us, (unsigned long)n,
                      (unsigned long)(us ? (uint32_t)(((uint64_t)n * 1000u) / us)
