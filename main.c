@@ -31,7 +31,7 @@
 #include "kernel/vfs/tiku_vfs_tree.h"
 
 #if TIKU_SHELL_ENABLE
-#include "kernel/shell/tiku_shell.h"
+#include "shell/tiku_shell.h"
 #endif
 
 #if TIKU_INIT_ENABLE

@@ -27,7 +27,7 @@
 #include <kernel/memory/tiku_mem.h>      /* operation-scoped bounce workspace */
 #include <string.h>
 
-#include <kernel/shell/tiku_shell_io.h>  /* SHELL_PRINTF for the bench */
+#include <shell/tiku_shell_io.h>  /* SHELL_PRINTF for the bench */
 
 /*---------------------------------------------------------------------------*/
 /* PADS                                                                      */

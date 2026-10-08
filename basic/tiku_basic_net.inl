@@ -350,7 +350,7 @@ static void basic_mqtt_msg_cb(const char *t, uint16_t tl, const uint8_t *d,
  * @brief One pump step for the MQTT words.
  *
  * The shared shell pump (watchdog, WiFi drain, paced tcp_periodic, SLIP-aware
- * Ctrl-C; kernel/shell/tiku_shell_pump.c) with MQTT housekeeping at the paced
+ * Ctrl-C; shell/tiku_shell_pump.c) with MQTT housekeeping at the paced
  * service point, after TCP, so MQTT sees the connection events TCP produced.
  *
  * @return 1 on Ctrl-C, else 0.

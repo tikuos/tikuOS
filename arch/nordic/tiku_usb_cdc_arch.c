@@ -22,7 +22,7 @@
 #include "tiku_usbhs_arch.h"
 
 #include <arch/nordic/tiku_nordic_core.h>
-#include <kernel/shell/tiku_shell_io.h>
+#include <shell/tiku_shell_io.h>
 #include <kernel/vfs/tiku_vfs.h>
 
 /*---------------------------------------------------------------------------*/

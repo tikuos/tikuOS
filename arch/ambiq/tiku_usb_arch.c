@@ -23,8 +23,8 @@
 #include "tiku_gpio_arch.h"
 #include "tiku_cpu_common.h"
 #include "apollo510.h"
-#include <kernel/shell/tiku_shell_io.h>   /* the console backend, below     */
-#include <kernel/shell/tiku_shell.h>      /* tiku_shell_add_pump()          */
+#include <shell/tiku_shell_io.h>   /* the console backend, below     */
+#include <shell/tiku_shell.h>      /* tiku_shell_add_pump()          */
 #include <kernel/vfs/tiku_vfs.h>          /* TIKU_VFS_CAP_ALL               */
 #include <kernel/cpu/tiku_hang.h>         /* check-in in blocking loops     */
 #include "hal/tiku_cpu.h"                 /* dcache maintenance for ADMA    */

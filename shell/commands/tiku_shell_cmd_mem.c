@@ -1,0 +1,194 @@
+/*
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_shell_cmd_mem.c - "peek" and "poke" implementation.
+ *
+ * Parses an address and dereferences it directly.  The MPU is left as it is,
+ * so a store to a protected region is dropped or faults as it does from any
+ * other code.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include "tiku_shell_cmd_mem.h"
+#include <shell/tiku_shell.h>
+
+/** Most bytes one peek reads; they print on one line. */
+#define MEM_PEEK_MAX     32
+
+/*---------------------------------------------------------------------------*/
+/* SHARED HELPERS                                                            */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Parse an unsigned 32-bit value (decimal or 0x-prefixed hex).
+ *
+ * @return 1 on success with @p out written; 0 on parse error,
+ *         empty string, or value > 0xFFFFFFFF.
+ */
+static uint8_t
+mem_parse_u32(const char *s, uint32_t *out)
+{
+    uint32_t val = 0;
+    uint8_t  hex = 0;
+
+    if (s == (const char *)0 || *s == '\0') {
+        return 0;
+    }
+    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+        hex = 1;
+        s += 2;
+        if (*s == '\0') {
+            return 0;
+        }
+    }
+    while (*s != '\0') {
+        uint32_t digit;
+        if (*s >= '0' && *s <= '9') {
+            digit = (uint32_t)(*s - '0');
+        } else if (hex && *s >= 'a' && *s <= 'f') {
+            digit = (uint32_t)(*s - 'a' + 10);
+        } else if (hex && *s >= 'A' && *s <= 'F') {
+            digit = (uint32_t)(*s - 'A' + 10);
+        } else {
+            return 0;
+        }
+        if (val > (UINT32_MAX - digit) / (hex ? 16U : 10U)) {
+            return 0;
+        }
+        val = val * (hex ? 16U : 10U) + digit;
+        s++;
+    }
+    *out = val;
+    return 1;
+}
+
+/**
+ * @brief Address parse, sized for the platform's pointers.
+ *
+ * On MSP430 addresses above 0xFFFF are rejected: reaching HIFRAM needs
+ * __data20 accesses this command does not make.  Every 32-bit port takes the
+ * full 32-bit range.
+ *
+ * @return 1 on success, 0 on parse error or out-of-range.
+ */
+static uint8_t
+mem_parse_addr(const char *s, uintptr_t *out)
+{
+    uint32_t v;
+    if (!mem_parse_u32(s, &v)) {
+        return 0;
+    }
+#if defined(PLATFORM_MSP430)
+    if (v > 0xFFFFu) {
+        return 0;
+    }
+#endif
+    *out = (uintptr_t)v;
+    return 1;
+}
+
+/*---------------------------------------------------------------------------*/
+/* PEEK                                                                      */
+/*---------------------------------------------------------------------------*/
+
+void
+tiku_shell_cmd_peek(uint8_t argc, const char *argv[])
+{
+    uintptr_t addr;
+    uint32_t count = 1;
+    uint16_t i;
+    volatile const uint8_t *p;
+
+    if (argc < 2 || argc > 3) {
+        SHELL_PRINTF("Usage: peek <addr> [count]  (count 1..%u)\n",
+                     (unsigned)MEM_PEEK_MAX);
+        return;
+    }
+    if (!mem_parse_addr(argv[1], &addr)) {
+        SHELL_PRINTF("peek: bad address '%s'\n", argv[1]);
+        return;
+    }
+    if (argc == 3) {
+        if (!mem_parse_u32(argv[2], &count) ||
+            count == 0 || count > MEM_PEEK_MAX) {
+            SHELL_PRINTF("peek: bad count '%s' (1..%u)\n",
+                         argv[2], (unsigned)MEM_PEEK_MAX);
+            return;
+        }
+    }
+    /* A peek that would run past the top of the address space is cut short
+     * there. */
+#if defined(PLATFORM_MSP430)
+    if ((uint32_t)addr + count > 0x10000UL) {
+        count = 0x10000UL - (uint32_t)addr;
+    }
+#else
+    if (count - 1u > UINT32_MAX - (uint32_t)addr) {
+        count = UINT32_MAX - (uint32_t)addr + 1u;
+    }
+#endif
+
+    p = (volatile const uint8_t *)addr;
+#if defined(PLATFORM_MSP430)
+    SHELL_PRINTF("%04x:", (unsigned)addr);
+#else
+    SHELL_PRINTF("%08lx:", (unsigned long)addr);
+#endif
+    for (i = 0; i < count; i++) {
+        SHELL_PRINTF(" %02x", (unsigned)p[i]);
+    }
+    SHELL_PRINTF("\n");
+}
+
+/*---------------------------------------------------------------------------*/
+/* POKE                                                                      */
+/*---------------------------------------------------------------------------*/
+
+void
+tiku_shell_cmd_poke(uint8_t argc, const char *argv[])
+{
+    uintptr_t addr;
+    uint32_t val;
+    volatile uint8_t *p;
+    uint8_t  before;
+    uint8_t  after;
+
+    if (argc != 3) {
+        SHELL_PRINTF("Usage: poke <addr> <byte>\n");
+        return;
+    }
+    if (!mem_parse_addr(argv[1], &addr)) {
+        SHELL_PRINTF("poke: bad address '%s'\n", argv[1]);
+        return;
+    }
+    if (!mem_parse_u32(argv[2], &val) || val > 0xFFu) {
+        SHELL_PRINTF("poke: bad byte '%s' (0..0xFF)\n", argv[2]);
+        return;
+    }
+
+    /* The byte is read back after the store and both values print.  A store
+     * that did not take, such as one to MSP430 FRAM behind the MPU's
+     * read-only mask, reads back the old value. */
+    p      = (volatile uint8_t *)addr;
+    before = *p;
+    *p     = (uint8_t)val;
+    after  = *p;
+
+#if defined(PLATFORM_MSP430)
+    SHELL_PRINTF("%04x: %02x -> %02x\n",
+                 (unsigned)addr, (unsigned)before, (unsigned)after);
+#else
+    SHELL_PRINTF("%08lx: %02x -> %02x\n",
+                 (unsigned long)addr, (unsigned)before, (unsigned)after);
+#endif
+    if (after != (uint8_t)val) {
+        SHELL_PRINTF("poke: write rejected "
+                     "(MPU/peripheral?), value remained %02x\n",
+                     (unsigned)after);
+    }
+}

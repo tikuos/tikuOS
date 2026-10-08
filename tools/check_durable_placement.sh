@@ -36,7 +36,7 @@
 set -u
 cd "$(dirname "$0")/.." || exit 2
 
-ALLOW='^(kernel/memory/tiku_mem\.h|kernel/shell/commands/tiku_shell_cmd_mrambench\.c):'
+ALLOW='^(kernel/memory/tiku_mem\.h|shell/commands/tiku_shell_cmd_mrambench\.c):'
 
 viol=$(grep -rnE 'section\("\.(persistent|retained|uninit)' \
         --include='*.c' --include='*.h' --include='*.inl' \

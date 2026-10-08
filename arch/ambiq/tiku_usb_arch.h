@@ -18,7 +18,7 @@
 #define TIKU_USB_ARCH_H_
 
 #include <stdint.h>
-#include <kernel/shell/tiku_shell_io.h>   /* tiku_shell_io_t, the CDC backend */
+#include <shell/tiku_shell_io.h>   /* tiku_shell_io_t, the CDC backend */
 /* The rail pads below come from the board header, which this include pulls in
  * itself, so a file can include this header before tiku.h; without the board
  * macros the build stops at the #error below. */

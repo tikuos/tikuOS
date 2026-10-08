@@ -22,8 +22,8 @@
 #include "tiku.h"
 #include <kernel/memory/tiku_nvm_map.h>
 #include <kernel/memory/tiku_mem.h>
-#include <kernel/shell/tiku_shell_parser.h>
-#include <kernel/shell/tiku_shell.h>
+#include <shell/tiku_shell_parser.h>
+#include <shell/tiku_shell.h>
 #include <string.h>
 
 /*---------------------------------------------------------------------------*/

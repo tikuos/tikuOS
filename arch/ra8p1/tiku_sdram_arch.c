@@ -21,7 +21,7 @@
 
 #include <string.h>
 #include <kernel/memory/tiku_mem.h>
-#include <kernel/shell/tiku_shell_io.h>
+#include <shell/tiku_shell_io.h>
 
 /*
  * EK-RA8P1 wiring (board manual Table 30), 57 signals, all at PSEL = BUS.

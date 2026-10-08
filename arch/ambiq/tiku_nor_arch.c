@@ -23,7 +23,7 @@
 #include "tiku_cpu_common.h"     /* tiku_cpu_ambiq_delay_us()               */
 #include "apollo510.h"           /* CMSIS register map -- defs only         */
 #include <kernel/cpu/tiku_hang.h>   /* check-ins during long waits          */
-#include <kernel/shell/tiku_shell_io.h>  /* norbench reports via SHELL_PRINTF */
+#include <shell/tiku_shell_io.h>  /* norbench reports via SHELL_PRINTF */
 #include "hal/tiku_cpu.h"        /* dcache clean/invalidate around DMA      */
 
 /*---------------------------------------------------------------------------*/

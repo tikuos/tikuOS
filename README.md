@@ -140,7 +140,7 @@ tikuOS> help
 
 > :bulb: The same shell and VFS are byte-identical on every port. Opt-in extras
 > (off by default, enabled via `EXTRA_CFLAGS`): `if`, `delay`, `repeat`,
-> `peek`, `poke`, `i2c`. See `kernel/shell/tiku_shell_config.h`.
+> `peek`, `poke`, `i2c`. See `shell/tiku_shell_config.h`.
 
 ---
 

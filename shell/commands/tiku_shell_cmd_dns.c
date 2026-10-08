@@ -1,0 +1,174 @@
+/*
+ * Tiku Operating System v0.06
+ * Simple. Ubiquitous. Intelligence, Everywhere.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_shell_cmd_dns.c - "dns" command (async A-record lookup).
+ *
+ * Sends an A-record query through the stub resolver over the current IPv4
+ * link, turning SLIP on when there is none.  The command returns at once and
+ * the shell loop polls for the reply, one poll per second.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*---------------------------------------------------------------------------*/
+/* INCLUDES                                                                  */
+/*---------------------------------------------------------------------------*/
+
+#include "tiku_shell_cmd_dns.h"
+#include "tiku_shell_cmd_slip.h"                  /* slip_enable */
+#include <shell/tiku_shell.h>              /* SHELL_PRINTF */
+#include <kernel/timers/tiku_clock.h>             /* tiku_clock_time */
+#include <tikukits/net/ipv4/tiku_kits_net_udp.h>  /* udp_init */
+#include <tikukits/net/ipv4/tiku_kits_net_dns.h>  /* DNS stub resolver */
+
+/*---------------------------------------------------------------------------*/
+/* CONFIG + STATE                                                            */
+/*---------------------------------------------------------------------------*/
+
+/* The resolver counts each poll() without a reply as one retry and gives up
+ * after TIKU_KITS_NET_DNS_MAX_RETRIES of them, so polls are a second apart. */
+#define DNS_POLL_EVERY  ((tiku_clock_time_t)TIKU_CLOCK_SECOND)
+
+/* The command gives up 8 s after the query, whatever the resolver's state. */
+#define DNS_DEADLINE    ((tiku_clock_time_t)(8u * TIKU_CLOCK_SECOND))
+
+static uint8_t           dns_on;
+static tiku_clock_time_t dns_t0;
+static tiku_clock_time_t dns_last_poll;
+
+/*---------------------------------------------------------------------------*/
+/* HELPERS                                                                   */
+/*---------------------------------------------------------------------------*/
+
+/** @brief Parse a dotted-quad IPv4 address; 1 on success, 0 if malformed. */
+static uint8_t
+dns_parse_ip(const char *s, uint8_t out[4])
+{
+    uint8_t i;
+
+    for (i = 0; i < 4u; i++) {
+        uint16_t v = 0;
+        uint8_t  digits = 0;
+
+        while (*s >= '0' && *s <= '9') {
+            v = (uint16_t)(v * 10u + (uint16_t)(*s - '0'));
+            if (v > 255u) {
+                return 0;
+            }
+            s++;
+            digits++;
+        }
+        if (digits == 0u) {
+            return 0;
+        }
+        out[i] = (uint8_t)v;
+        if (i < 3u) {
+            if (*s != '.') {
+                return 0;
+            }
+            s++;
+        }
+    }
+    return (*s == '\0') ? 1u : 0u;
+}
+
+/*---------------------------------------------------------------------------*/
+/* COMMAND + TICK                                                            */
+/*---------------------------------------------------------------------------*/
+
+uint8_t
+tiku_shell_cmd_dns_active(void)
+{
+    return dns_on;
+}
+
+void
+tiku_shell_cmd_dns(uint8_t argc, const char *argv[])
+{
+    static uint8_t udp_ready;
+    uint8_t server[4];
+
+    /* Default resolver: the configured override, else the DHCP lease's
+     * (option 6) when bound, else 8.8.8.8.  A [resolver-ip] argument
+     * replaces it below. */
+    tiku_kits_net_dns_default_server(server);
+
+    if (dns_on) {
+        SHELL_PRINTF("dns already running\n");
+        return;
+    }
+    if (argc < 2) {
+        SHELL_PRINTF("usage: dns <hostname> [resolver-ip]\n");
+        return;
+    }
+    if (argc >= 3 && !dns_parse_ip(argv[2], server)) {
+        SHELL_PRINTF("usage: dns <hostname> [resolver-ip]\n");
+        return;
+    }
+
+    tiku_shell_cmd_slip_enable();
+    if (!udp_ready) {
+        tiku_kits_net_udp_init();
+        udp_ready = 1;
+    }
+
+    tiku_kits_net_dns_init();
+    tiku_kits_net_dns_set_server(server);
+    if (tiku_kits_net_dns_resolve(argv[1]) != TIKU_KITS_NET_OK) {
+        SHELL_PRINTF("dns: bad query\n");
+        return;
+    }
+
+    dns_on        = 1;
+    dns_t0        = tiku_clock_time();
+    dns_last_poll = dns_t0;
+    SHELL_PRINTF("resolving %s via %u.%u.%u.%u ...\n", argv[1],
+                 server[0], server[1], server[2], server[3]);
+}
+
+void
+tiku_shell_cmd_dns_tick(void)
+{
+    tiku_kits_net_dns_state_t st;
+    int rc;
+
+    if (!dns_on) {
+        return;
+    }
+
+    if ((tiku_clock_time_t)(tiku_clock_time() - dns_t0) >= DNS_DEADLINE) {
+        (void)tiku_kits_net_dns_abort();
+        SHELL_PRINTF("dns: timeout\n");
+        dns_on = 0;
+        return;
+    }
+
+    if ((tiku_clock_time_t)(tiku_clock_time() - dns_last_poll) < DNS_POLL_EVERY) {
+        return;
+    }
+    dns_last_poll = tiku_clock_time();
+
+    rc = tiku_kits_net_dns_poll();
+    st = tiku_kits_net_dns_get_state();
+
+    if (st == TIKU_KITS_NET_DNS_STATE_DONE) {
+        uint8_t a[4];
+
+        if (tiku_kits_net_dns_get_addr(a) == TIKU_KITS_NET_OK) {
+            SHELL_PRINTF("%u.%u.%u.%u  (ttl %lus)\n",
+                         a[0], a[1], a[2], a[3],
+                         (unsigned long)tiku_kits_net_dns_get_ttl());
+        } else {
+            SHELL_PRINTF("dns: no address\n");
+        }
+        dns_on = 0;
+    } else if (st == TIKU_KITS_NET_DNS_STATE_ERROR) {
+        SHELL_PRINTF("dns: %s\n", rc == TIKU_KITS_NET_ERR_TIMEOUT
+                     ? "timeout" : "not found");
+        dns_on = 0;
+    }
+}

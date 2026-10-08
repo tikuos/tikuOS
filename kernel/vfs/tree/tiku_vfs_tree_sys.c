@@ -68,8 +68,8 @@
 #include "tiku_vfs_tree_watch.h"
 #include "tiku_vfs_tree_inittab.h"
 #if TIKU_SHELL_ENABLE
-#include <kernel/shell/tiku_shell_rules.h>   /* /sys/rules observability   */
-#include <kernel/shell/tiku_shell_jobs.h>    /* /sys/jobs observability    */
+#include <shell/tiku_shell_rules.h>   /* /sys/rules observability   */
+#include <shell/tiku_shell_jobs.h>    /* /sys/jobs observability    */
 #endif
 #include "tiku.h"
 #include <kernel/timers/tiku_clock.h>

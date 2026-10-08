@@ -23,7 +23,7 @@
 #include "tiku_cpu_common.h"     /* tiku_cpu_ambiq_delay_us()                */
 #include "hal/tiku_cpu.h"        /* D-cache clean and invalidate             */
 #include <kernel/cpu/tiku_hang.h>   /* check-in from the bench loops         */
-#include <kernel/shell/tiku_shell_io.h> /* bench reports via SHELL_PRINTF    */
+#include <shell/tiku_shell_io.h> /* bench reports via SHELL_PRINTF    */
 #include <kernel/memory/tiku_mem.h>    /* the TIKU_MEM_PSRAM tier attach     */
 #include "apollo510.h"           /* CMSIS register map -- register defs only */
 

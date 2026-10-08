@@ -18,7 +18,7 @@
 #define TIKU_USB_CDC_ARCH_H_
 
 #include <stdint.h>
-#include <kernel/shell/tiku_shell_io.h>
+#include <shell/tiku_shell_io.h>
 
 /*---------------------------------------------------------------------------*/
 /* LIFECYCLE / SERVICE                                                       */

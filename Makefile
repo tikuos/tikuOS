@@ -1805,7 +1805,7 @@ SRCS += arch/ambiq/tiku_htimer_arch.c
 # arch/nordic/tiku_power_arch.c), Apollo510 only: they use the M55's L1
 # caches and the apollo510.h register map, which Apollo4 lacks.
 # TIKU_AMBIQ_POWER_PROBE is a -D capability macro, so the shell command gates
-# on it whatever the include order (kernel/shell/tiku_shell_config.h).
+# on it whatever the include order (shell/tiku_shell_config.h).
 # TIKU_AMBIQ_POWER_PROBE=0 leaves the instruments out, with the read-target
 # arrays they place in the code window.  The Apollo510B carries the EM9305
 # Bluetooth host, and its image has no room for the arrays beside it, so
@@ -1837,7 +1837,7 @@ SRCS += arch/ambiq/tiku_nvm_region_apollo510.c
 SRCS += arch/ambiq/tiku_gpio_arch.c
 # Board-fitted parts.  Each driver below defines its TIKU_DRV_*_ENABLE as a
 # -D capability macro, so its shell command and VFS nodes gate on it whatever
-# the include order (kernel/shell/tiku_shell_config.h).  The capability
+# the include order (shell/tiku_shell_config.h).  The capability
 # refusals near the top have already checked the board.
 #
 # USB device controller, with the mass-storage class and /sys/usb.
@@ -1853,7 +1853,7 @@ ifeq ($(TIKU_DRV_EMMC_ENABLE),1)
 SRCS += arch/ambiq/tiku_emmc_arch.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_emmc.c    # /sys/emmc lifecycle nodes
 SRCS += kernel/fs/tiku_fat.c                    # FAT32 reader (host-tested)
-SRCS += kernel/shell/commands/tiku_shell_cmd_fat.c
+SRCS += shell/commands/tiku_shell_cmd_fat.c
 CFLAGS += -DTIKU_DRV_EMMC_ENABLE=1
 endif
 # External octal NOR flash on MSPI1 (EVB U12, 8 MB), fitted on the green
@@ -1934,9 +1934,9 @@ ifeq ($(TIKU_N6_OTP_TOOL),1)
 SRCS += arch/stm32n6/tiku_otp_tool.c
 CFLAGS += -DTIKU_N6_OTP_TOOL=1
 endif
-SRCS += kernel/shell/commands/tiku_shell_cmd_xflash.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_cache.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_diag.c
+SRCS += shell/commands/tiku_shell_cmd_xflash.c
+SRCS += shell/commands/tiku_shell_cmd_cache.c
+SRCS += shell/commands/tiku_shell_cmd_diag.c
 # Stubs: this port has no ADC, I2C, SPI or 1-Wire driver.  What each
 # tiku_<bus>_arch_* call does:
 #   adc      init, channel_init and read return TIKU_ADC_ERR_PARAM; read
@@ -1994,7 +1994,7 @@ SRCS += arch/ra8p1/tiku_camera_arch.c
 SRCS += arch/ra8p1/tiku_vin_arch.c
 CFLAGS += -DTIKU_HAS_CAM=1
 ifeq ($(TIKU_SHELL_ENABLE),1)
-SRCS += kernel/shell/commands/tiku_shell_cmd_cam.c
+SRCS += shell/commands/tiku_shell_cmd_cam.c
 endif
 endif
 
@@ -2017,7 +2017,7 @@ SRCS += interfaces/display/tiku_display.c
 CFLAGS += -DTIKU_HAS_DISPLAY=1
 endif
 ifeq ($(TIKU_SHELL_ENABLE),1)
-SRCS += kernel/shell/commands/tiku_shell_cmd_panel.c
+SRCS += shell/commands/tiku_shell_cmd_panel.c
 endif
 endif
 
@@ -2032,7 +2032,7 @@ SRCS += kernel/vfs/tree/tiku_vfs_tree_npu.c      # /sys/npu
 # Presence is a -D global so every translation unit resolves it identically.
 CFLAGS += -DTIKU_HAS_NPU=1
 ifeq ($(TIKU_SHELL_ENABLE),1)
-SRCS += kernel/shell/commands/tiku_shell_cmd_npu.c
+SRCS += shell/commands/tiku_shell_cmd_npu.c
 endif
 endif
 ifeq ($(TIKU_DRV_USBHS_ENABLE),1)
@@ -2041,12 +2041,12 @@ SRCS += arch/ra8p1/tiku_store_arch.c            # staged-over-USB model store
 SRCS += services/usb/tiku_usbd_msc.c              # BOT + SCSI (host-tested)
 SRCS += kernel/fs/tiku_bigblob.c                # model-sized objects on flash
 SRCS += kernel/vfs/tree/tiku_vfs_tree_usb.c     # /sys/usb + /sys/store
-SRCS += kernel/shell/commands/tiku_shell_cmd_usbhs.c
+SRCS += shell/commands/tiku_shell_cmd_usbhs.c
 CFLAGS += -DTIKU_DRV_USBHS_ENABLE=1
 endif
 ifeq ($(TIKU_DRV_CPU1_ENABLE),1)
 SRCS += arch/ra8p1/tiku_cpu1_arch.c              # Cortex-M33 lifecycle
-SRCS += kernel/shell/commands/tiku_shell_cmd_cpu1.c
+SRCS += shell/commands/tiku_shell_cmd_cpu1.c
 SRCS += arch/ra8p1/tiku_coproc_arch.c            # interfaces/coproc backend
 SRCS += kernel/vfs/tree/tiku_vfs_tree_coproc.c   # /sys/coproc
 SRCS += arch/ra8p1/cpu1/tiku_cpu1_sha256.c       # A/B kernel, M85 side
@@ -2088,8 +2088,8 @@ SRCS += arch/ra8p1/tiku_i2c_arch.c
 SRCS += arch/ra8p1/tiku_spi_arch.c
 SRCS += arch/ra8p1/tiku_onewire_arch.c
 ifeq ($(TIKU_SHELL_ENABLE),1)
-SRCS += kernel/shell/commands/tiku_shell_cmd_diag.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_sdram.c
+SRCS += shell/commands/tiku_shell_cmd_diag.c
+SRCS += shell/commands/tiku_shell_cmd_sdram.c
 endif
 
 else ifeq ($(TIKU_PLATFORM),esp32c61)
@@ -2152,7 +2152,7 @@ SRCS += kernel/threads/tiku_thread.c
 SRCS += arch/esp32c61/tiku_thread_arch.c
 endif
 ifeq ($(TIKU_SHELL_ENABLE),1)
-SRCS += kernel/shell/commands/tiku_shell_cmd_diag.c
+SRCS += shell/commands/tiku_shell_cmd_diag.c
 endif
 
 else
@@ -2365,56 +2365,56 @@ CFLAGS += -DTIKU_SHELL_ENABLE=1
 ifeq ($(TIKU_SHELL_COLOR),1)
 CFLAGS += -DTIKU_SHELL_COLOR=1
 endif
-SRCS += kernel/shell/tiku_shell_io.c
-SRCS += kernel/shell/tiku_shell_parser.c
-SRCS += kernel/shell/tiku_shell.c
-SRCS += kernel/shell/tiku_shell_pump.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_ps.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_info.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_console.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_timer.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_kill.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_resume.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_queue.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_reboot.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_trng.c
+SRCS += shell/tiku_shell_io.c
+SRCS += shell/tiku_shell_parser.c
+SRCS += shell/tiku_shell.c
+SRCS += shell/tiku_shell_pump.c
+SRCS += shell/commands/tiku_shell_cmd_ps.c
+SRCS += shell/commands/tiku_shell_cmd_info.c
+SRCS += shell/commands/tiku_shell_cmd_console.c
+SRCS += shell/commands/tiku_shell_cmd_timer.c
+SRCS += shell/commands/tiku_shell_cmd_kill.c
+SRCS += shell/commands/tiku_shell_cmd_resume.c
+SRCS += shell/commands/tiku_shell_cmd_queue.c
+SRCS += shell/commands/tiku_shell_cmd_reboot.c
+SRCS += shell/commands/tiku_shell_cmd_trng.c
 # The mrambench command times the Ambiq boot-ROM MRAM programmer and is
 # compiled on Ambiq only; tiku_shell_config.h drops its table entry
 # elsewhere.
 ifeq ($(TIKU_PLATFORM),ambiq)
-SRCS += kernel/shell/commands/tiku_shell_cmd_mrambench.c
+SRCS += shell/commands/tiku_shell_cmd_mrambench.c
 endif
 ifeq (,$(findstring TIKU_SHELL_CMD_HISTORY=0,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_history.c
+SRCS += shell/commands/tiku_shell_cmd_history.c
 endif
 # The wifi command is compiled only with a Wi-Fi driver (CYW43439 or the
 # ESP32-C61's own); tiku_shell_config.h drops its table entry otherwise.
 ifneq ($(filter 1,$(TIKU_DRV_WIFI_CYW43_ENABLE) $(TIKU_DRV_WIFI_ESP_ENABLE)),)
-SRCS += kernel/shell/commands/tiku_shell_cmd_wifi.c
+SRCS += shell/commands/tiku_shell_cmd_wifi.c
 endif
 ifeq ($(TIKU_DRV_SDR_ESP_ENABLE),1)
-SRCS += kernel/shell/commands/tiku_shell_cmd_sdr.c
+SRCS += shell/commands/tiku_shell_cmd_sdr.c
 endif
-SRCS += kernel/shell/commands/tiku_shell_cmd_ls.c
-SRCS += kernel/shell/tiku_shell_cwd.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_cd.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_toggle.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_start.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_write.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_read.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_fs.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_watch.c
+SRCS += shell/commands/tiku_shell_cmd_ls.c
+SRCS += shell/tiku_shell_cwd.c
+SRCS += shell/commands/tiku_shell_cmd_cd.c
+SRCS += shell/commands/tiku_shell_cmd_toggle.c
+SRCS += shell/commands/tiku_shell_cmd_start.c
+SRCS += shell/commands/tiku_shell_cmd_write.c
+SRCS += shell/commands/tiku_shell_cmd_read.c
+SRCS += shell/commands/tiku_shell_cmd_fs.c
+SRCS += shell/commands/tiku_shell_cmd_watch.c
 # The slip, ping and ip commands are compiled only with the net kit.  The
 # shell stays interactive until `slip` starts the net process and SLIP/IP.
 ifeq ($(TIKU_KIT_NET_ENABLE),1)
-SRCS += kernel/shell/commands/tiku_shell_cmd_slip.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_ping.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_ip.c
+SRCS += shell/commands/tiku_shell_cmd_slip.c
+SRCS += shell/commands/tiku_shell_cmd_ping.c
+SRCS += shell/commands/tiku_shell_cmd_ip.c
 # ntp command (SNTP client): on by default with net.  It needs the time kit,
 # so it sets TIKU_KIT_TIME_ENABLE (see the time-kit block below).
 # EXTRA_CFLAGS="-DTIKU_SHELL_CMD_NTP=0" leaves out both.
 ifeq (,$(findstring TIKU_SHELL_CMD_NTP=0,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_ntp.c
+SRCS += shell/commands/tiku_shell_cmd_ntp.c
 TIKU_KIT_TIME_ENABLE := 1
 endif
 # dns command (A-record lookup): on by default with net.  It and the ntp
@@ -2422,23 +2422,23 @@ endif
 # ipv4/ and a TIKU_KIT_NET_MIN build compiles whenever the shell is on (the
 # net-kit block below).
 ifeq (,$(findstring TIKU_SHELL_CMD_DNS=0,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_dns.c
+SRCS += shell/commands/tiku_shell_cmd_dns.c
 endif
 # syslog command (RFC 3164 remote log): on by default with net.  The full
 # net kit compiles the syslog client with ipv4/; in a TIKU_KIT_NET_MIN build
 # tiku_shell_config.h drops the command.
 ifeq (,$(findstring TIKU_SHELL_CMD_SYSLOG=0,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_syslog.c
+SRCS += shell/commands/tiku_shell_cmd_syslog.c
 endif
 endif
 ifeq (,$(findstring TIKU_SHELL_CMD_CALC=0,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_calc.c
+SRCS += shell/commands/tiku_shell_cmd_calc.c
 endif
 ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
 CFLAGS += -DTIKU_SHELL_CMD_BASIC=1
 SRCS += basic/tiku_basic.c
 SRCS += basic/tiku_basic_module.c   # module loader (self-gates)
-SRCS += kernel/shell/commands/tiku_shell_cmd_basic.c
+SRCS += shell/commands/tiku_shell_cmd_basic.c
 endif
 
 # Loadable native module: basic/modules/mod_demo.c is compiled
@@ -2542,66 +2542,66 @@ TIKU_BASIC_EMBEDDED_C := $(BUILD_DIR)/embedded_bas.c
 TIKU_BASIC_EMBEDDED_O := $(BUILD_DIR)/embedded_bas.o
 CFLAGS += -DTIKU_BASIC_EMBEDDED=1
 endif
-SRCS += kernel/shell/tiku_shell_jobs.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_every.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_once.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_jobs.c
-SRCS += kernel/shell/tiku_shell_rules.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_on.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_rules.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_changed.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_gpio.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_adc.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_free.c
+SRCS += shell/tiku_shell_jobs.c
+SRCS += shell/commands/tiku_shell_cmd_every.c
+SRCS += shell/commands/tiku_shell_cmd_once.c
+SRCS += shell/commands/tiku_shell_cmd_jobs.c
+SRCS += shell/tiku_shell_rules.c
+SRCS += shell/commands/tiku_shell_cmd_on.c
+SRCS += shell/commands/tiku_shell_cmd_rules.c
+SRCS += shell/commands/tiku_shell_cmd_changed.c
+SRCS += shell/commands/tiku_shell_cmd_gpio.c
+SRCS += shell/commands/tiku_shell_cmd_adc.c
+SRCS += shell/commands/tiku_shell_cmd_free.c
 ifeq (,$(findstring TIKU_SHELL_CMD_DF=0,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_df.c
+SRCS += shell/commands/tiku_shell_cmd_df.c
 endif
-SRCS += kernel/shell/commands/tiku_shell_cmd_layout.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_sleep.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_wake.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_freq.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_power.c
+SRCS += shell/commands/tiku_shell_cmd_layout.c
+SRCS += shell/commands/tiku_shell_cmd_sleep.c
+SRCS += shell/commands/tiku_shell_cmd_wake.c
+SRCS += shell/commands/tiku_shell_cmd_freq.c
+SRCS += shell/commands/tiku_shell_cmd_power.c
 # The emmc, psram, usb and nor commands compile to empty translation units
 # unless their driver flag is set (TIKU_DRV_EMMC_ENABLE,
 # TIKU_DRV_PSRAM_ENABLE, TIKU_DRV_USB_ENABLE, TIKU_DRV_NOR_ENABLE), so they
 # are listed unconditionally.
-SRCS += kernel/shell/commands/tiku_shell_cmd_emmc.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_psram.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_usb.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_nor.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_name.c
+SRCS += shell/commands/tiku_shell_cmd_emmc.c
+SRCS += shell/commands/tiku_shell_cmd_psram.c
+SRCS += shell/commands/tiku_shell_cmd_usb.c
+SRCS += shell/commands/tiku_shell_cmd_nor.c
+SRCS += shell/commands/tiku_shell_cmd_name.c
 ifeq (,$(findstring TIKU_SHELL_CMD_IF=0,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_if.c
+SRCS += shell/commands/tiku_shell_cmd_if.c
 endif
-SRCS += kernel/shell/commands/tiku_shell_cmd_irq.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_tree.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_clear.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_echo.c
+SRCS += shell/commands/tiku_shell_cmd_irq.c
+SRCS += shell/commands/tiku_shell_cmd_tree.c
+SRCS += shell/commands/tiku_shell_cmd_clear.c
+SRCS += shell/commands/tiku_shell_cmd_echo.c
 ifeq ($(TIKU_MEM_RECLAIM_ENABLE),1)
-SRCS += kernel/shell/commands/tiku_shell_cmd_reclaim.c
+SRCS += shell/commands/tiku_shell_cmd_reclaim.c
 endif
-SRCS += kernel/shell/commands/tiku_shell_cmd_lcd.c
-SRCS += kernel/shell/tiku_shell_alias.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_alias.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_unalias.c
+SRCS += shell/commands/tiku_shell_cmd_lcd.c
+SRCS += shell/tiku_shell_alias.c
+SRCS += shell/commands/tiku_shell_cmd_alias.c
+SRCS += shell/commands/tiku_shell_cmd_unalias.c
 ifneq (,$(findstring TIKU_SHELL_CMD_I2C=1,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_i2c.c
+SRCS += shell/commands/tiku_shell_cmd_i2c.c
 endif
 ifneq (,$(findstring TIKU_SHELL_CMD_DELAY=1,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_delay.c
+SRCS += shell/commands/tiku_shell_cmd_delay.c
 endif
 ifneq (,$(findstring TIKU_SHELL_CMD_REPEAT=1,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_repeat.c
+SRCS += shell/commands/tiku_shell_cmd_repeat.c
 endif
 ifneq (,$(findstring TIKU_SHELL_CMD_PEEK=1,$(EXTRA_CFLAGS))$(findstring TIKU_SHELL_CMD_POKE=1,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_mem.c
+SRCS += shell/commands/tiku_shell_cmd_mem.c
 endif
 ifneq (,$(findstring TIKU_SHELL_CMD_NVMPROBE=1,$(EXTRA_CFLAGS)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_nvmprobe.c
+SRCS += shell/commands/tiku_shell_cmd_nvmprobe.c
 endif
 ifneq (,$(findstring TIKU_SHELL_CMD_CRYPTOPROBE=1,$(EXTRA_CFLAGS)))
 ifeq ($(TIKU_CRACEN_PK_ENABLE),1)
-SRCS += kernel/shell/commands/tiku_shell_cmd_cryptoprobe.c
+SRCS += shell/commands/tiku_shell_cmd_cryptoprobe.c
 else
 $(warning cryptoprobe: needs TIKU_CRACEN_PK_ENABLE=1 (CRACEN PK) -- skipped)
 endif
@@ -2620,7 +2620,7 @@ SRCS   += arch/nordic/tiku_usbhs_arch.c
 SRCS   += arch/nordic/tiku_usbhs_msc.c
 SRCS   += services/usb/tiku_usbd_msc.c
 SRCS   += services/usb/tiku_usbd_ctrl.c
-SRCS   += kernel/shell/commands/tiku_shell_cmd_usbmsc.c
+SRCS   += shell/commands/tiku_shell_cmd_usbmsc.c
 CFLAGS += -DTIKU_USBHS_MSC=1
 endif
 
@@ -2630,7 +2630,7 @@ endif
 # compiles it.
 ifneq (,$(findstring TIKU_SHELL_CMD_USBPROBE=1,$(EXTRA_CFLAGS)))
 ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
-SRCS += kernel/shell/commands/tiku_shell_cmd_usbprobe.c
+SRCS += shell/commands/tiku_shell_cmd_usbprobe.c
 ifneq ($(TIKU_USBHS_MSC),1)
 ifeq ($(filter usb both,$(TIKU_CONSOLE)),)
 SRCS += arch/nordic/tiku_usbhs_arch.c
@@ -2645,7 +2645,7 @@ endif
 
 ifneq (,$(findstring TIKU_SHELL_CMD_AXONSPROBE=1,$(EXTRA_CFLAGS)))
 ifeq ($(MCU),nrf54lm20b)
-SRCS += kernel/shell/commands/tiku_shell_cmd_axonsprobe.c
+SRCS += shell/commands/tiku_shell_cmd_axonsprobe.c
 else
 $(warning axonsprobe: the Axon NPU exists only on nrf54lm20b -- skipped)
 endif
@@ -2755,14 +2755,14 @@ endif
 # from the table.
 ifneq (,$(findstring TIKU_SHELL_CMD_RADIO154=1,$(EXTRA_CFLAGS)))
 ifeq ($(TIKU_CAP_154),1)
-SRCS += kernel/shell/commands/tiku_shell_cmd_radio154.c
+SRCS += shell/commands/tiku_shell_cmd_radio154.c
 else
 $(warning radio154: no 802.15.4 PHY on $(MCU) -- command skipped)
 endif
 endif
 ifneq (,$(findstring TIKU_SHELL_CMD_RFTEST=1,$(EXTRA_CFLAGS)))
 ifeq ($(TIKU_CAP_BLE_ADV),1)
-SRCS += kernel/shell/commands/tiku_shell_cmd_rftest.c
+SRCS += shell/commands/tiku_shell_cmd_rftest.c
 else
 $(warning rftest: no test-capable 2.4 GHz radio on $(MCU) -- command skipped)
 endif
@@ -2781,7 +2781,7 @@ ifeq ($(TIKU_INIT_ENABLE),1)
 CFLAGS += -DTIKU_INIT_ENABLE=1
 SRCS += kernel/memory/tiku_nvm_map.c
 SRCS += services/init/tiku_init.c
-SRCS += kernel/shell/commands/tiku_shell_cmd_init.c
+SRCS += shell/commands/tiku_shell_cmd_init.c
 endif
 
 # ---------------------------------------------------------------------------
@@ -2959,7 +2959,7 @@ endif # HAS_EXAMPLES
 # ---------------------------------------------------------------------------
 ifeq ($(APP),cli)
 CFLAGS += -DTIKU_APP_CLI=1
-# The shell comes from kernel/shell/; APP=cli forces TIKU_SHELL_ENABLE=1.
+# The shell comes from shell/; APP=cli forces TIKU_SHELL_ENABLE=1.
 endif
 
 ifeq ($(APP),net)
@@ -2989,8 +2989,8 @@ CFLAGS += -DTIKU_KITS_NET_MQTT_ENABLE=1
 CFLAGS += -DTIKU_SHELL_TCP_ENABLE=1
 SRCS   += $(wildcard tikukits/net/coap/*.c)
 CFLAGS += -DTIKU_KITS_NET_COAP=1
-SRCS += kernel/shell/commands/tiku_shell_cmd_mqtt.c
-SRCS += kernel/shell/tiku_shell_io_tcp.c
+SRCS += shell/commands/tiku_shell_cmd_mqtt.c
+SRCS += shell/tiku_shell_io_tcp.c
 endif
 
 # prop/Makefile.inc, when present, adds local sources and build rules.  git
@@ -3438,7 +3438,7 @@ endif
 # once.
 ifeq ($(TIKU_SHELL_ENABLE),1)
 ifeq ($(TIKU_BT_HOST),1)
-SRCS += kernel/shell/commands/tiku_shell_cmd_bt.c
+SRCS += shell/commands/tiku_shell_cmd_bt.c
 SRCS += tikukits/crypto/sha256/tiku_kits_crypto_sha256.c
 endif
 endif

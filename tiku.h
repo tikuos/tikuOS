@@ -311,7 +311,7 @@
 #endif
 
 #if TIKU_SHELL_ENABLE
-#include <kernel/shell/tiku_shell_config.h>
+#include <shell/tiku_shell_config.h>
 #endif
 
 /*---------------------------------------------------------------------------*/

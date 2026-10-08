@@ -20,7 +20,7 @@
 
 #include "tiku_basic.h"
 #include "tiku_basic_ext.h"           /* native builtin registry */
-#include <kernel/shell/tiku_shell.h>  /* device NVM label, before the config */
+#include <shell/tiku_shell.h>  /* device NVM label, before the config */
 #include "tiku_basic_config.h"
 #include <kernel/memory/tiku_mem.h>
 #include <kernel/memory/tiku_reclaim.h>
@@ -73,7 +73,7 @@
 #include <tikukits/net/ipv4/tiku_kits_net_udp.h>   /* UDPSEND */
 #include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>  /* IPADDR$ / NETUP */
 #include <kernel/cpu/tiku_watchdog.h>              /* WDT kick (delay/wait) */
-#include <kernel/shell/tiku_shell_pump.h>          /* shared busy-wait pump */
+#include <shell/tiku_shell_pump.h>          /* shared busy-wait pump */
 #if (TIKU_KITS_NET_MQTT_ENABLE + 0)
 #include <tikukits/net/ipv4/tiku_kits_net_tcp.h>   /* tcp_init (MQTT words) */
 #include <tikukits/net/mqtt/tiku_kits_net_mqtt.h>  /* MQTTPUB */

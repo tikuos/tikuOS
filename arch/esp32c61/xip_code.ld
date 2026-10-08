@@ -24,7 +24,7 @@
 {
     __tiku_xip_code_start = .;
     *basic/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
-    *kernel/shell/commands/*.o(.text .text.* .rodata .rodata.*
+    *shell/commands/*.o(.text .text.* .rodata .rodata.*
                                .srodata .srodata.*)
     *tikukits/crypto/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
     *tikukits/net/ipv4/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
