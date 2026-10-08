@@ -23,7 +23,7 @@
 
 #if TIKU_INIT_ENABLE
 
-#include <kernel/init/tiku_init.h>
+#include <services/init/tiku_init.h>
 #include <stdio.h>
 
 /*---------------------------------------------------------------------------*/

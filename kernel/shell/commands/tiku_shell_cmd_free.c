@@ -29,7 +29,7 @@
 #include <kernel/memory/tiku_nvm_map.h>
 
 #if TIKU_INIT_ENABLE
-#include <kernel/init/tiku_init.h>
+#include <services/init/tiku_init.h>
 #endif
 
 /*---------------------------------------------------------------------------*/

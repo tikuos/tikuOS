@@ -8,7 +8,7 @@
  * ref_original.h - interface to the reference mass-storage SCSI logic.
  *
  * Declares the ref_-prefixed copy in ref_original.c that msc_diff_test runs
- * beside kernel/usb/tiku_usbd_msc.c.
+ * beside services/usb/tiku_usbd_msc.c.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

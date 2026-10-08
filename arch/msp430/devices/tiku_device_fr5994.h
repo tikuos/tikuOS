@@ -108,7 +108,7 @@
  * @brief Bytes of the config region, which holds the init table.
  *
  * kernel/memory/tiku_nvm_map.c declares the region at this size and the
- * linker places it; kernel/init/tiku_init.c asserts the init table fits.
+ * linker places it; services/init/tiku_init.c asserts the init table fits.
  */
 #define TIKU_DEVICE_FRAM_CONFIG_SIZE      1024U   /* Init table */
 

@@ -19,7 +19,7 @@
 #include <tikukits/net/tiku_kits_net.h>              /* TIKU_KITS_NET_MTU */
 #include <tikukits/net/slip/tiku_kits_net_slip.h>    /* slip_init, slip_link */
 #include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>    /* get/set_link, input */
-#include <kernel/console/tiku_console.h>
+#include <services/console/tiku_console.h>
 
 static uint8_t slip_on;       /* the console's IPv4 channel is registered */
 static uint8_t link_ready;    /* 1 after the first enable: an IP link is set */

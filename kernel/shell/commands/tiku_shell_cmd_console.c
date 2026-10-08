@@ -14,8 +14,8 @@
 
 #include "tiku_shell_cmd_console.h"
 #include <kernel/shell/tiku_shell.h>
-#include <kernel/console/tiku_console.h>
-#include <kernel/link/tiku_link_console.h>
+#include <services/console/tiku_console.h>
+#include <services/link/tiku_link_console.h>
 
 /* The echo link on channel 0xF2, closed at boot and opened by `console echo
  * on`: it sends every message it receives back.  While open it holds one of

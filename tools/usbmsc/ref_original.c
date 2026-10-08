@@ -9,7 +9,7 @@
  *
  * A frozen copy of the SCSI decisions and CSW layout of the Apollo510 USB
  * driver, with a ref_ prefix: the reference msc_diff_test compares
- * kernel/usb/tiku_usbd_msc.c against.
+ * services/usb/tiku_usbd_msc.c against.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

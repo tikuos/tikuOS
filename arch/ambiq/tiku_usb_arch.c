@@ -19,7 +19,7 @@
 #if defined(PLATFORM_AMBIQ) && (TIKU_DRV_USB_ENABLE + 0)
 
 #include "tiku_usb_arch.h"
-#include <kernel/usb/tiku_usbd_msc.h>
+#include <services/usb/tiku_usbd_msc.h>
 #include "tiku_gpio_arch.h"
 #include "tiku_cpu_common.h"
 #include "apollo510.h"
@@ -290,7 +290,7 @@ static const uint8_t s_str_serial[] = { 18, DESC_STRING,
 
 /*
  * The wire format (wrappers, SCSI replies, the sense latch, the range check)
- * lives in kernel/usb/tiku_usbd_msc.c, which host tests exercise.  This file
+ * lives in services/usb/tiku_usbd_msc.c, which host tests exercise.  This file
  * moves the bytes through the MUSB FIFOs.
  */
 #define CBW_LEN   TIKU_USBD_MSC_CBW_LEN
@@ -990,7 +990,7 @@ static void cdc_rx_resume(void)
 
 /*
  * The endianness helpers, the range check and the SCSI replies live in
- * kernel/usb/tiku_usbd_msc.c.  Below is the transport: FIFOs, packets and
+ * services/usb/tiku_usbd_msc.c.  Below is the transport: FIFOs, packets and
  * the BOT state machine.
  */
 

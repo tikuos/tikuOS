@@ -13,7 +13,7 @@
  */
 
 #include "tiku_link_console.h"
-#include <kernel/console/tiku_console.h>
+#include <services/console/tiku_console.h>
 #include <kernel/vfs/tiku_vfs.h>          /* TIKU_VFS_CAP_ALL */
 
 #define CRC_INIT 0xFFFFu

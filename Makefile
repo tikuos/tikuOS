@@ -1569,7 +1569,7 @@ SRCS += arch/ra8p1/tiku_npu_arch.c
 ifeq ($(TIKU_DRV_USBHS_ENABLE),1)
 SRCS += arch/ra8p1/tiku_usbhs_arch.c
 SRCS += arch/ra8p1/tiku_store_arch.c
-SRCS += kernel/usb/tiku_usbd_msc.c
+SRCS += services/usb/tiku_usbd_msc.c
 SRCS += kernel/fs/tiku_bigblob.c
 CFLAGS += -DTIKU_DRV_USBHS_ENABLE=1
 endif
@@ -1656,7 +1656,7 @@ ifneq ($(filter usb both,$(TIKU_CONSOLE)),)
 SRCS   += arch/nordic/tiku_usbhs_arch.c
 SRCS   += arch/nordic/tiku_usbhs_dev.c
 SRCS   += arch/nordic/tiku_usb_cdc_arch.c
-SRCS   += kernel/usb/tiku_usbd_ctrl.c
+SRCS   += services/usb/tiku_usbd_ctrl.c
 CFLAGS += -DTIKU_CONSOLE_USB=1
 ifeq ($(TIKU_CONSOLE),both)
 CFLAGS += -DTIKU_CONSOLE_BOTH=1
@@ -1843,7 +1843,7 @@ SRCS += arch/ambiq/tiku_gpio_arch.c
 # USB device controller, with the mass-storage class and /sys/usb.
 ifeq ($(TIKU_DRV_USB_ENABLE),1)
 SRCS += arch/ambiq/tiku_usb_arch.c
-SRCS += kernel/usb/tiku_usbd_msc.c              # BOT + SCSI (host-tested)
+SRCS += services/usb/tiku_usbd_msc.c              # BOT + SCSI (host-tested)
 SRCS += kernel/vfs/tree/tiku_vfs_tree_usb.c     # /sys/usb (no /sys/store here)
 CFLAGS += -DTIKU_DRV_USB_ENABLE=1
 endif
@@ -2038,7 +2038,7 @@ endif
 ifeq ($(TIKU_DRV_USBHS_ENABLE),1)
 SRCS += arch/ra8p1/tiku_usbhs_arch.c
 SRCS += arch/ra8p1/tiku_store_arch.c            # staged-over-USB model store
-SRCS += kernel/usb/tiku_usbd_msc.c              # BOT + SCSI (host-tested)
+SRCS += services/usb/tiku_usbd_msc.c              # BOT + SCSI (host-tested)
 SRCS += kernel/fs/tiku_bigblob.c                # model-sized objects on flash
 SRCS += kernel/vfs/tree/tiku_vfs_tree_usb.c     # /sys/usb + /sys/store
 SRCS += kernel/shell/commands/tiku_shell_cmd_usbhs.c
@@ -2312,12 +2312,12 @@ SRCS += kernel/process/tiku_lc_persist.c
 SRCS += kernel/scheduler/tiku_sched.c
 # The console line: one SLIP decoder dispatching whole frames by channel
 # (the IP stack, a desktop's window session) beside the shell's text.
-SRCS += kernel/console/tiku_console.c
+SRCS += services/console/tiku_console.c
 # The link: whole messages over any medium.  tiku_link_console.c is its
 # console backend, on one marked console channel.  A build with no link user
 # references neither file, and --gc-sections drops both.
-SRCS += kernel/link/tiku_link.c
-SRCS += kernel/link/tiku_link_console.c
+SRCS += services/link/tiku_link.c
+SRCS += services/link/tiku_link_console.c
 SRCS += kernel/vfs/tiku_vfs.c
 # TIKU_VFS_CONFIG=1 compiles the two-bank configuration journal behind
 # /sys/config and sets the shell line to 256 bytes.  The banks are durable
@@ -2618,8 +2618,8 @@ $(error TIKU_USBHS_MSC=1 and TIKU_CONSOLE=$(TIKU_CONSOLE) both claim the USB dev
 endif
 SRCS   += arch/nordic/tiku_usbhs_arch.c
 SRCS   += arch/nordic/tiku_usbhs_msc.c
-SRCS   += kernel/usb/tiku_usbd_msc.c
-SRCS   += kernel/usb/tiku_usbd_ctrl.c
+SRCS   += services/usb/tiku_usbd_msc.c
+SRCS   += services/usb/tiku_usbd_ctrl.c
 SRCS   += kernel/shell/commands/tiku_shell_cmd_usbmsc.c
 CFLAGS += -DTIKU_USBHS_MSC=1
 endif
@@ -2635,7 +2635,7 @@ ifneq ($(TIKU_USBHS_MSC),1)
 ifeq ($(filter usb both,$(TIKU_CONSOLE)),)
 SRCS += arch/nordic/tiku_usbhs_arch.c
 SRCS += arch/nordic/tiku_usbhs_dev.c
-SRCS += kernel/usb/tiku_usbd_ctrl.c
+SRCS += services/usb/tiku_usbd_ctrl.c
 endif
 endif
 else
@@ -2780,7 +2780,7 @@ endif
 ifeq ($(TIKU_INIT_ENABLE),1)
 CFLAGS += -DTIKU_INIT_ENABLE=1
 SRCS += kernel/memory/tiku_nvm_map.c
-SRCS += kernel/init/tiku_init.c
+SRCS += services/init/tiku_init.c
 SRCS += kernel/shell/commands/tiku_shell_cmd_init.c
 endif
 
@@ -3430,7 +3430,7 @@ $(error TIKU_LINK_BLE_ENABLE=1 needs the BLE serial facade under it: a \
 controller for the host stack; on nordic add TIKU_FLPR_ENABLE=1)
 endif
 CFLAGS += -DTIKU_LINK_BLE_ENABLE=1
-SRCS   += kernel/link/tiku_link_ble.c
+SRCS   += services/link/tiku_link_ble.c
 endif
 # The bt command drives the stack, so it builds with any controller under
 # it.  bt bonds prints a SHA-256 fingerprint of each key; SRCS is

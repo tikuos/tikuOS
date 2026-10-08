@@ -7,7 +7,7 @@
  *
  * ctrl_host_test.c - host test of the USB device control core.
  *
- * Checks kernel/usb/tiku_usbd_ctrl.c's descriptor builders against reference
+ * Checks services/usb/tiku_usbd_ctrl.c's descriptor builders against reference
  * bytes and its request decisions against every request the console and disk
  * answer or refuse.  Built by tools/usbmsc/Makefile; exits 1 on a failure.
  *
@@ -21,7 +21,7 @@
 
 #include <stdio.h>
 #include <string.h>
-#include "kernel/usb/tiku_usbd_ctrl.h"
+#include "services/usb/tiku_usbd_ctrl.h"
 
 static int g_pass, g_fail;
 

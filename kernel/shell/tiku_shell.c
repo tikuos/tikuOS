@@ -20,7 +20,7 @@
 
 #include "tiku_shell.h"
 #if TIKU_INIT_ENABLE
-#include <kernel/init/tiku_init.h>
+#include <services/init/tiku_init.h>
 #endif
 #if (TIKU_DRV_USB_ENABLE + 0)
 #endif
@@ -31,7 +31,7 @@
 #include <kernel/timers/tiku_htimer.h>   /* htimer self-test command */
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/cpu/tiku_watchdog.h>    /* tiku_watchdog_kick() */
-#include <kernel/console/tiku_console.h> /* tiku_console_getc(), _pump() */
+#include <services/console/tiku_console.h> /* tiku_console_getc(), _pump() */
 #if TIKU_SHELL_CMD_JOBS
 #include "tiku_shell_jobs.h"
 #endif

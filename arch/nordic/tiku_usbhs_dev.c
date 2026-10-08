@@ -8,7 +8,7 @@
  * tiku_usbhs_dev.c - nRF54LM20 USB device mode on the DWC2 core.
  *
  * Device configuration, the FIFO layout within the core's GHWCFG3 depth, EP0
- * control transfers (answered by kernel/usb) and the CDC bulk endpoints.  The
+ * control transfers (answered by services/usb) and the CDC bulk endpoints.  The
  * core moves packets by internal DMA, so every buffer here is word-aligned.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -23,7 +23,7 @@
 #include <arch/nordic/tiku_device_select.h>
 #include <arch/nordic/tiku_nordic_core.h>
 #include <kernel/cpu/tiku_common.h>
-#include <kernel/usb/tiku_usbd_ctrl.h>
+#include <services/usb/tiku_usbd_ctrl.h>
 
 #include <string.h>
 
@@ -114,7 +114,7 @@ static uint32_t s_bulk_mps = USB_BULK_MPS;
 /* DESCRIPTORS                                                               */
 /*---------------------------------------------------------------------------*/
 
-/* Built at device start by the shared core (kernel/usb) from the identity
+/* Built at device start by the shared core (services/usb) from the identity
  * and the endpoint numbers.  The configuration lives in RAM because its bulk
  * packet size follows the negotiated speed. */
 static uint8_t dev_desc[TIKU_USBD_DEVICE_LEN];
@@ -314,7 +314,7 @@ static void cdc_endpoints_open(void)
 
 /**
  * @brief Answer the SETUP in setup_buf through the shared control core
- *        (kernel/usb), applying its effects first; a request it does not
+ *        (services/usb), applying its effects first; a request it does not
  *        answer is stalled.
  */
 static void ep0_setup(void)

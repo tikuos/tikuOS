@@ -36,7 +36,7 @@
 
 #if TIKU_INIT_ENABLE
 #include "kernel/memory/tiku_nvm_map.h"
-#include "kernel/init/tiku_init.h"
+#include "services/init/tiku_init.h"
 #endif
 
 #ifdef TIKU_BASIC_EMBEDDED

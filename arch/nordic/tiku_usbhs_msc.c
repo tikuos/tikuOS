@@ -9,7 +9,7 @@
  *
  * One SCSI disk, a 64 KB RAM disk, on the DWC2 core instead of the CDC
  * console (both define the device ISR).  The Bulk-Only wire format and the
- * SCSI replies come from kernel/usb.
+ * SCSI replies come from services/usb.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,8 +22,8 @@
 
 #include <arch/nordic/tiku_nordic_core.h>
 #include <kernel/cpu/tiku_common.h>
-#include <kernel/usb/tiku_usbd_msc.h>
-#include <kernel/usb/tiku_usbd_ctrl.h>
+#include <services/usb/tiku_usbd_msc.h>
+#include <services/usb/tiku_usbd_ctrl.h>
 
 #include <string.h>
 
@@ -91,7 +91,7 @@
 /*---------------------------------------------------------------------------*/
 
 /* The medium the host reads and writes: a RAM disk, so its contents do not
- * survive a reset.  Every block passes through kernel/usb's
+ * survive a reset.  Every block passes through services/usb's
  * controller-independent MSC core. */
 #define MSC_DISK_BLOCKS  128u                       /* 64 KB                */
 #define MSC_DISK_BYTES   (MSC_DISK_BLOCKS * TIKU_USBD_MSC_BLOCK)
@@ -314,7 +314,7 @@ static void msc_endpoints_open(void)
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Answer the SETUP in setup_buf through kernel/usb, applying its
+ * @brief Answer the SETUP in setup_buf through services/usb, applying its
  *        effects first; a request it does not answer is stalled.
  */
 static void ep0_setup(void)

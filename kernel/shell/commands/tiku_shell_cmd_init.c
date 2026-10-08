@@ -19,7 +19,7 @@
 
 #include "tiku_shell_cmd_init.h"
 #include <kernel/shell/tiku_shell.h>        /* SHELL_PRINTF */
-#include <kernel/init/tiku_init.h>
+#include <services/init/tiku_init.h>
 #include <string.h>
 
 /*---------------------------------------------------------------------------*/

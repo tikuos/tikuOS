@@ -18,7 +18,7 @@
 #include "tiku_usbhs_arch.h"
 #include "tiku_ra8p1_regs.h"
 #include "tiku_cpu_common.h"
-#include <kernel/usb/tiku_usbd_msc.h>
+#include <services/usb/tiku_usbd_msc.h>
 #include "tiku_store_arch.h"
 #include "tiku_sdram_arch.h"
 

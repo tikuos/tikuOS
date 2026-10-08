@@ -7,7 +7,7 @@
  *
  * msc_diff_test.c - compare tiku_usbd_msc.c with its reference copy.
  *
- * Runs kernel/usb/tiku_usbd_msc.c and ref_original.c over the same commands
+ * Runs services/usb/tiku_usbd_msc.c and ref_original.c over the same commands
  * and reports every field on which they disagree; exits 1 on any difference.
  * Built by tools/usbmsc/Makefile; make lint runs it.
  *
@@ -24,7 +24,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "kernel/usb/tiku_usbd_msc.h"
+#include "services/usb/tiku_usbd_msc.h"
 #include "ref_original.h"
 
 static unsigned long g_cases;

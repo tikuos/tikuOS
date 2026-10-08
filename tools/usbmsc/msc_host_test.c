@@ -7,7 +7,7 @@
  *
  * msc_host_test.c - host test of the USB mass-storage wire format.
  *
- * Checks each field kernel/usb/tiku_usbd_msc.c emits against the offset the
+ * Checks each field services/usb/tiku_usbd_msc.c emits against the offset the
  * BOT and SCSI specifications give, and each guard against an input it must
  * refuse.  Built by tools/usbmsc/Makefile; exits 1 on a failed check.
  *
@@ -17,7 +17,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "kernel/usb/tiku_usbd_msc.h"
+#include "services/usb/tiku_usbd_msc.h"
 
 static int g_pass, g_fail;
 
