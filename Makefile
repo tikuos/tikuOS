@@ -998,7 +998,7 @@ CFLAGS += -ffunction-sections -fdata-sections -fno-common
 # TLS and CYW43 buffers, which are statics, are placed first.
 # TIKU_TIER_SRAM_MIN is the guaranteed minimum: it must cover
 # BASIC_ARENA_BYTES at the configured TIKU_BASIC_PROGRAM_LINES (512 here),
-# which kernel/shell/basic/tiku_basic_arena.inl asserts at build time.
+# which basic/tiku_basic_arena.inl asserts at build time.
 TIKU_TIER_SRAM_MIN ?= 262144
 CFLAGS += -DTIKU_TIER_SRAM_MIN=$(TIKU_TIER_SRAM_MIN)
 CFLAGS += -DTIKU_TIER_SRAM_DERIVED=1
@@ -1110,7 +1110,7 @@ CFLAGS += -ffunction-sections -fdata-sections -fno-common
 # SRAM (AUTO) tier, carved by the linker: on the LM20 the rest of RAM2 after
 # the AXON statics, on the L15 the primary bank between .bss and the stack
 # guard.  TIKU_TIER_SRAM_MIN is the guaranteed minimum.  It must cover
-# BASIC_ARENA_BYTES (kernel/shell/basic/tiku_basic_arena.inl), which grows by
+# BASIC_ARENA_BYTES (basic/tiku_basic_arena.inl), which grows by
 # 148 bytes per program line; the LM20 has 1400 lines, the L15 256.  The
 # floor does not change with TIKU_THREADS_ENABLE: thread stacks and TLS state
 # are .bss and stack, not tier allocations.
@@ -2436,12 +2436,12 @@ SRCS += kernel/shell/commands/tiku_shell_cmd_calc.c
 endif
 ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
 CFLAGS += -DTIKU_SHELL_CMD_BASIC=1
-SRCS += kernel/shell/basic/tiku_basic.c
-SRCS += kernel/shell/basic/tiku_basic_module.c   # module loader (self-gates)
+SRCS += basic/tiku_basic.c
+SRCS += basic/tiku_basic_module.c   # module loader (self-gates)
 SRCS += kernel/shell/commands/tiku_shell_cmd_basic.c
 endif
 
-# Loadable native module: kernel/shell/basic/modules/mod_demo.c is compiled
+# Loadable native module: basic/modules/mod_demo.c is compiled
 # and linked on its own at the module slot's address, flattened to a binary
 # and embedded in the firmware.  tiku_basic_module.c installs a module from
 # its /data file, and writes that file from the embedded image when it is
@@ -2473,31 +2473,31 @@ MOD_WRAP_ARCH  = arm
 MOD_EMBED      = objcopy
 ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
 MOD_CPU_FLAGS  = -mcpu=cortex-m33 -mthumb -mfloat-abi=soft
-MOD_LDS        = kernel/shell/basic/modules/mod_demo.ld
+MOD_LDS        = basic/modules/mod_demo.ld
 else ifeq ($(MCU),nrf54l15)
 # Same slot VMA as the LM20 (shared 384 KB Nordic code window), so the LM20
 # module script serves both parts and a module image is family-portable.
 MOD_CPU_FLAGS  = -mcpu=cortex-m33 -mthumb -mfloat-abi=soft -DTIKU_DEVICE_NRF54L15
-MOD_LDS        = kernel/shell/basic/modules/mod_demo.ld
+MOD_LDS        = basic/modules/mod_demo.ld
 else ifeq ($(MCU),rp2350)
 MOD_CPU_FLAGS  = -mcpu=cortex-m33 -mthumb -mfloat-abi=soft -DPLATFORM_RP2350
-MOD_LDS        = kernel/shell/basic/modules/mod_demo_rp2350.ld
+MOD_LDS        = basic/modules/mod_demo_rp2350.ld
 else ifneq (,$(filter apollo510 apollo510b,$(MCU)))
 MOD_CPU_FLAGS  = -mcpu=cortex-m55 -mthumb -mfloat-abi=soft -DAM_PART_APOLLO510
-MOD_LDS        = kernel/shell/basic/modules/mod_demo_apollo510.ld
+MOD_LDS        = basic/modules/mod_demo_apollo510.ld
 else ifneq (,$(filter apollo4l apollo4p,$(MCU)))
 MOD_CPU_FLAGS  = -mcpu=cortex-m4 -mthumb -mfloat-abi=soft -DAM_PART_APOLLO4L
-MOD_LDS        = kernel/shell/basic/modules/mod_demo_apollo4l.ld
+MOD_LDS        = basic/modules/mod_demo_apollo4l.ld
 else ifeq ($(MCU),msp430fr5994)
 # MSP430 module: same compiler/memory-model as the firmware (-mlarge, CALLA
 # calling convention through the syscall table); no Thumb, no ARM wrap.
 MOD_CPU_FLAGS  = -mmcu=msp430fr5994 -mlarge
-MOD_LDS        = kernel/shell/basic/modules/mod_demo_msp430fr5994.ld
+MOD_LDS        = basic/modules/mod_demo_msp430fr5994.ld
 MOD_LDFLAGS    =
 MOD_EMBED      = carray
 else ifeq ($(MCU),msp430fr6989)
 MOD_CPU_FLAGS  = -mmcu=msp430fr6989 -mlarge
-MOD_LDS        = kernel/shell/basic/modules/mod_demo_msp430fr6989.ld
+MOD_LDS        = basic/modules/mod_demo_msp430fr6989.ld
 MOD_LDFLAGS    =
 MOD_EMBED      = carray
 else ifeq ($(MCU),esp32c61)
@@ -2505,7 +2505,7 @@ else ifeq ($(MCU),esp32c61)
 # use the firmware's gp, so every global it touches is addressed in full.
 MOD_CPU_FLAGS  = -march=rv32imac_zicsr_zifencei -mabi=ilp32 \
                  -msmall-data-limit=0 -DPLATFORM_ESP32C61
-MOD_LDS        = kernel/shell/basic/modules/mod_demo_esp32c61.ld
+MOD_LDS        = basic/modules/mod_demo_esp32c61.ld
 MOD_EMBED      = carray
 else
 $(error TIKU_BASIC_MODULE_ENABLE=1: no module slot for MCU=$(MCU) \
@@ -2521,7 +2521,7 @@ LDFLAGS += -Wl,--defsym=__tiku_module_reserve=0x8000
 endif
 MOD_CFLAGS     = $(MOD_CPU_FLAGS) -Os -ffreestanding \
                  -fno-builtin -fno-jump-tables -DTIKU_MODULE_BUILD=1 \
-                 -I kernel/shell/basic
+                 -I basic
 # Modules link with -nostdlib.  MSP430 sets MOD_LDFLAGS empty above and keeps
 # the toolchain's libraries, so the hardware-multiply helper library
 # (libmul_f5) resolves; the link rule's -nostartfiles still leaves out crt0.
@@ -3861,7 +3861,7 @@ endif
 # MOD_EMBED=carray by tools/mod_embed.py as a C array.  tiku_basic_module.c
 # reads the image through those symbols.
 ifeq ($(TIKU_BASIC_MODULE_ENABLE),1)
-$(MOD_BUILD)/mod_demo.elf: kernel/shell/basic/modules/mod_demo.c \
+$(MOD_BUILD)/mod_demo.elf: basic/modules/mod_demo.c \
                            $(MOD_LDS)
 	@mkdir -p $(dir $@)
 	$(CC) $(MOD_CFLAGS) $(MOD_LDFLAGS) -T $(MOD_LDS) \

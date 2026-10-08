@@ -7,7 +7,7 @@
  *
  * tiku_shell_cmd_basic.c - "basic" command: REPL, run/resume, /data files.
  *
- * Dispatches to the interpreter under kernel/shell/basic/ (tiku_basic.h) and
+ * Dispatches to the interpreter under basic/ (tiku_basic.h) and
  * moves program text between the interpreter's store and /data files.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -18,7 +18,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_shell_cmd_basic.h"
-#include <kernel/shell/basic/tiku_basic.h>
+#include <basic/tiku_basic.h>
 #include <kernel/shell/tiku_shell.h>
 #include <kernel/shell/tiku_shell_cwd.h>
 #include <kernel/vfs/tiku_vfs.h>

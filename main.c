@@ -40,7 +40,7 @@
 #endif
 
 #ifdef TIKU_BASIC_EMBEDDED
-#include "kernel/shell/basic/tiku_basic.h"
+#include "basic/tiku_basic.h"
 extern const char tiku_basic_embedded_src[];
 #endif
 

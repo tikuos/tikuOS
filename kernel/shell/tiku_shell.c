@@ -221,7 +221,7 @@
 #endif
 #if TIKU_SHELL_CMD_BASIC
 #include "commands/tiku_shell_cmd_basic.h"
-#include <kernel/shell/basic/tiku_basic.h>   /* non-blocking BASIC mode hooks */
+#include <basic/tiku_basic.h>   /* non-blocking BASIC mode hooks */
 #endif
 #if TIKU_SHELL_CMD_JOBS
 #include "commands/tiku_shell_cmd_every.h"

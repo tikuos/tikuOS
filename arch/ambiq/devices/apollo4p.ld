@@ -58,7 +58,7 @@ __flash_end   = ORIGIN(MRAM) + LENGTH(MRAM);
  * region keeps its size.  The region's tenants are placed from its end, so
  * a change to its size moves every durable tenant and loses the data on the
  * device.  0x70000 must equal TIKU_MODULE_CARVE_ADDR and the CARVE origin in
- * kernel/shell/basic/modules/mod_demo_apollo4l.ld. */
+ * basic/modules/mod_demo_apollo4l.ld. */
 /* NVM layout inputs; arch/common/tiku_nvm_layout.ld derives the rest. */
 __tiku_layout_top          = 0x00200000;
 __tiku_layout_code_cap     = ORIGIN(MRAM) + LENGTH(MRAM);  /* end of code */

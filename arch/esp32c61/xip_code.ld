@@ -23,7 +23,7 @@
 .xip.code :
 {
     __tiku_xip_code_start = .;
-    *kernel/shell/basic/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+    *basic/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
     *kernel/shell/commands/*.o(.text .text.* .rodata .rodata.*
                                .srodata .srodata.*)
     *tikukits/crypto/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)

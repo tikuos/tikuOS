@@ -108,7 +108,7 @@ __tiku_nvm_rram_end   = __tiku_layout_top;
  * window up to the persist partition and is written in place behind the WEN
  * gate, with no erase.  __tiku_nvmfs_size is an absolute symbol whose
  * address is the size. */
-/* Loadable native module slot (kernel/shell/basic/tiku_basic_module.h): the
+/* Loadable native module slot (basic/tiku_basic_module.h): the
  * top 32 KB of the code window, byte-writable and executable RRAM, reserved
  * only in builds with the loader (--defsym=__tiku_module_reserve).  The order
  * is code | module | NVM region | persist.  The loader writes the image in

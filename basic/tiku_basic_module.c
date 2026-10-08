@@ -14,7 +14,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <kernel/shell/basic/tiku_basic_module.h>
+#include <basic/tiku_basic_module.h>
 
 #if TIKU_BASIC_MODULE_ENABLE
 

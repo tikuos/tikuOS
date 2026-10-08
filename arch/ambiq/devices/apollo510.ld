@@ -51,7 +51,7 @@ __flash_end   = ORIGIN(MRAM) + LENGTH(MRAM);
 /* No module slot: the Makefile passes no __tiku_module_reserve for this
  * part.  The BASIC module loader copies a module image from /data into an
  * ITCM window and runs it there (tiku_basic_module.h,
- * kernel/shell/basic/modules/mod_demo_apollo510.ld). */
+ * basic/modules/mod_demo_apollo510.ld). */
 /* NVM layout inputs; arch/common/tiku_nvm_layout.ld derives the rest. */
 __tiku_layout_top          = 0x00800000;
 __tiku_layout_code_cap     = ORIGIN(MRAM) + LENGTH(MRAM);  /* end of code */

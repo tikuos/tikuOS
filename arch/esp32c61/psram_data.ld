@@ -24,7 +24,7 @@
     __tiku_psram_data_start = .;
     *tikukits/net/tls/*.o(.bss .bss.* COMMON)
     *tikukits/crypto/*.o(.bss .bss.* COMMON)
-    *kernel/shell/basic/*.o(.bss.basic_browse_buf .bss.basic_persist_scratch
+    *basic/*.o(.bss.basic_browse_buf .bss.basic_persist_scratch
                             .bss.basic_file_scratch .bss.basic_https_roots)
     . = ALIGN(16);
     __tiku_psram_data_end = .;

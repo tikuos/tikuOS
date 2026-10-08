@@ -42,7 +42,7 @@
  * The module slot is the top of the code window, [code_cap - 32 KB,
  * code_cap), and exists only in builds that compile the loader; without it
  * the reserve is 0 and no other address changes.  The C-side slot addresses
- * in kernel/shell/basic/tiku_basic_module.h must equal code_cap - 32 KB on
+ * in basic/tiku_basic_module.h must equal code_cap - 32 KB on
  * each platform.
  */
 

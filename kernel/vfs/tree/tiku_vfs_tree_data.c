@@ -453,7 +453,7 @@ tiku_vfs_tree_data_format(void)
 /* Available with or without a command shell. */
 
 #if TIKU_SHELL_ENABLE && TIKU_SHELL_CMD_BASIC
-#include "kernel/shell/basic/tiku_basic.h"
+#include "basic/tiku_basic.h"
 #endif
 
 /*---------------------------------------------------------------------------*/

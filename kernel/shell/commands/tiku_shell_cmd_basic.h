@@ -8,7 +8,7 @@
  * tiku_shell_cmd_basic.h - "basic" command.
  *
  * The handler the shell command table calls for `basic`; the interpreter
- * lives under kernel/shell/basic/ (tiku_basic.h).
+ * lives under basic/ (tiku_basic.h).
  *
  * SPDX-License-Identifier: Apache-2.0
  */

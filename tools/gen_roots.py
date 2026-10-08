@@ -10,7 +10,7 @@ Authors: Ambuj Varshney <ambuj@tiku-os.org>
 
 Packs CA roots from a Mozilla PEM bundle (--from-pem) or a generated C array
 (--from-inl), checks a packed file (--verify) and turns one back into that C
-array (--to-inl).  kernel/shell/basic/tiku_basic_https_roots.inl reads it.
+array (--to-inl).  basic/tiku_basic_https_roots.inl reads it.
 
 SPDX-License-Identifier: Apache-2.0
 
