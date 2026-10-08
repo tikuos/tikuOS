@@ -138,7 +138,11 @@ static void adv_radio_init_once(void)
  */
 static void adv_random_addr(uint8_t addr[6])
 {
+    /* The same random static address as the host stack's (tiku_bt), so a
+     * scanner sees the board's beacon and its connectable advert as one
+     * device: the unique id, its first octet flipped, the top bits set. */
     tiku_common_unique_id(addr, 6u);
+    addr[0] ^= 0x5Au;
     addr[5] |= 0xC0u;
 }
 

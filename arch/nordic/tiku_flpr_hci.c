@@ -21,13 +21,14 @@
 #include <interfaces/bluetooth/tiku_bt_transport.h>
 #include <interfaces/bluetooth/tiku_ble_adv.h>   /* the radio's owner     */
 #include <kernel/timers/tiku_clock.h>            /* the scan's roll       */
+#include <arch/nordic/tiku_trng_arch.h>          /* a link's AA, CRC init */
 
 #include <string.h>
 
 /* The controller has no public address (the host sets a random static
- * one) and the peripheral role only; the FLPR runs LL encryption's start
- * with the host's LTK.  Beacons stay with the broadcast facade on the M33's
- * radio, and a scan is that facade's observer. */
+ * one); the FLPR holds one link in either role and runs LL encryption's
+ * start with the host's LTK.  Beacons stay with the broadcast facade on
+ * the M33's radio, and a scan is that facade's observer. */
 
 /* HCI packet types, and the events this controller raises. */
 #define HCI_CMD                 0x01u
@@ -52,6 +53,15 @@
 #define ST_UNSUPPORTED          0x11u
 #define ST_INVALID_PARAMS       0x12u
 #define ST_UNSPECIFIED          0x1Fu
+#define ST_NOT_ESTABLISHED      0x3Eu
+
+/* The CONNECT_IND this central sends: the window's size and offset, the
+ * hop, this clock's accuracy band (31..50 ppm) and how long it looks. */
+#define INIT_WINSIZE            3u              /* 3.75 ms */
+#define INIT_WINOFFSET          1u              /* 1.25 ms */
+#define INIT_HOP                7u
+#define INIT_SCA                5u
+#define INIT_MS                 10000u
 
 /* The one link's handle, and the host's ACL buffers: a data PDU's 27
  * octets each, held here until the mailbox takes them. */
@@ -90,6 +100,7 @@ static uint8_t  s_rsp_len;
 static uint8_t  s_adv_on;               /* the host has advertising on    */
 static uint8_t  s_claimed;              /* the FLPR holds the radio       */
 static uint8_t  s_linked;               /* LE Connection Complete sent    */
+static uint8_t  s_initiating;           /* LE Create Connection in flight */
 static uint32_t s_enc_seen;             /* the FLPR's encryption starts   */
 static uint8_t  s_scanning;             /* the observer runs for the host */
 static uint8_t  s_scan_sent;            /* its table's entries reported   */
@@ -177,12 +188,14 @@ acl_completed(uint8_t n)
     rxq_push(e, 8u);
 }
 
-/** @brief LE Connection Complete for the central the FLPR now holds. */
+/** @brief LE Connection Complete for the link the FLPR now holds: the
+ *         peer is the central's InitA or the peripheral's AdvA by role. */
 static void
 link_up_event(void)
 {
     tiku_flpr_conn_params_t cp;
     uint8_t e[22], inita[6], adva[6], types, i;
+    uint8_t central = (uint8_t)(tiku_flpr_arch_conn_role() != 0u);
 
     types = tiku_flpr_arch_conn_addrs(inita, adva);
     tiku_flpr_arch_conn_params(&cp);
@@ -193,10 +206,10 @@ link_up_event(void)
     e[4] = ST_OK;
     e[5] = (uint8_t)(HCI_HANDLE & 0xFFu);
     e[6] = (uint8_t)(HCI_HANDLE >> 8);
-    e[7] = 0x01u;                           /* role: peripheral */
-    e[8] = (uint8_t)(types & 1u);           /* the central's address type */
+    e[7] = central ? 0x00u : 0x01u;         /* role */
+    e[8] = central ? (uint8_t)((types >> 1) & 1u) : (uint8_t)(types & 1u);
     for (i = 0u; i < 6u; i++) {
-        e[9u + i] = inita[i];
+        e[9u + i] = central ? adva[i] : inita[i];
     }
     e[15] = (uint8_t)(cp.interval & 0xFFu);
     e[16] = (uint8_t)(cp.interval >> 8);
@@ -205,6 +218,22 @@ link_up_event(void)
     e[19] = (uint8_t)(cp.timeout & 0xFFu);
     e[20] = (uint8_t)(cp.timeout >> 8);
     e[21] = cp.sca;
+    rxq_push(e, 22u);
+}
+
+/** @brief LE Connection Complete with @p status and no link: the peer was
+ *         not found, or the host cancelled. */
+static void
+link_failed_event(uint8_t status)
+{
+    uint8_t e[22];
+
+    memset(e, 0, sizeof e);
+    e[0] = HCI_EVT;
+    e[1] = EVT_LE_META;
+    e[2] = 19u;
+    e[3] = LE_CONN_COMPLETE;
+    e[4] = status;
     rxq_push(e, 22u);
 }
 
@@ -339,6 +368,17 @@ enc_follow(void)
     if (!s_linked) {
         return;
     }
+    (void)tiku_flpr_arch_enc_central_service();  /* the central's key */
+    if ((i = (uint8_t)tiku_flpr_arch_enc_fail()) != 0u) {
+        e[0] = HCI_EVT;                     /* the peripheral refused */
+        e[1] = EVT_ENC_CHANGE;
+        e[2] = 4u;
+        e[3] = i;
+        e[4] = (uint8_t)(HCI_HANDLE & 0xFFu);
+        e[5] = (uint8_t)(HCI_HANDLE >> 8);
+        e[6] = 0x00u;
+        rxq_push(e, 7u);
+    }
     if (tiku_flpr_arch_enc_request(rand, &ediv)) {
         e[0] = HCI_EVT;
         e[1] = EVT_LE_META;
@@ -417,6 +457,103 @@ adv_start(void)
     return ST_OK;
 }
 
+/**
+ * @brief An access address by the Core's rules (Vol 6 Part B 2.1.2): not
+ *        the advertising one, no four equal octets, no run over six bits,
+ *        at most 24 transitions, at least two in the top six bits.
+ */
+static uint32_t
+init_access_address(void)
+{
+    uint8_t tries;
+
+    for (tries = 0u; tries < 24u; tries++) {
+        uint8_t  b[4], i, run = 1u, maxrun = 1u, trans = 0u, top = 0u;
+        uint32_t aa;
+
+        (void)tiku_trng_arch_read_bytes(b, 4);
+        aa = (uint32_t)b[0] | ((uint32_t)b[1] << 8) |
+             ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
+        if (aa == 0x8E89BED6ul ||
+            (b[0] == b[1] && b[1] == b[2] && b[2] == b[3])) {
+            continue;
+        }
+        for (i = 1u; i < 32u; i++) {
+            if (((aa >> i) & 1u) == ((aa >> (i - 1u)) & 1u)) {
+                run++;
+                if (run > maxrun) {
+                    maxrun = run;
+                }
+            } else {
+                run = 1u;
+                trans++;
+                if (i >= 27u) {
+                    top++;
+                }
+            }
+        }
+        if (maxrun <= 6u && trans <= 24u && top >= 2u) {
+            return aa;
+        }
+    }
+    return 0x71764129ul;                      /* a legal one, failing that */
+}
+
+/**
+ * @brief LE Create Connection: hand the FLPR the peer and the CONNECT_IND
+ *        to send it, from the host's random address.
+ * @return ST_OK, or the HCI status saying why it did not start
+ */
+static uint8_t
+init_start(const uint8_t *p)
+{
+    tiku_flpr_init_t in;
+    uint8_t b[3];
+
+    if (s_linked || s_initiating) {
+        return ST_DISALLOWED;                 /* one link at a time */
+    }
+    if (!s_own_type && (p[12] & 1u) == 0u) {
+        return ST_UNSUPPORTED;                /* random address only */
+    }
+    (void)scan_enable(0u);                    /* the radio is the FLPR's */
+    if (tiku_ble_adv_conn_claim() != 0) {
+        return ST_DISALLOWED;
+    }
+    s_claimed = 1u;
+    memset(&in, 0, sizeof in);
+    memcpy(in.peer, &p[6], 6u);
+    in.peer_type = (uint8_t)(p[5] & 1u);
+    in.own_type = 1u;
+    memcpy(in.own, s_addr, 6u);
+    tiku_trng_arch_init();
+    in.aa = init_access_address();
+    (void)tiku_trng_arch_read_bytes(b, 3);
+    in.crcinit = (uint32_t)b[0] | ((uint32_t)b[1] << 8) |
+                 ((uint32_t)b[2] << 16);
+    in.winsize = INIT_WINSIZE;
+    in.winoffset = INIT_WINOFFSET;
+    in.interval = (uint16_t)(p[13] | ((uint16_t)p[14] << 8));
+    in.latency = (uint16_t)(p[17] | ((uint16_t)p[18] << 8));
+    in.timeout = (uint16_t)(p[19] | ((uint16_t)p[20] << 8));
+    memset(in.chm, 0xFF, 4u);
+    in.chm[4] = 0x1Fu;
+    in.hop = INIT_HOP;
+    in.sca = INIT_SCA;
+    in.ms = INIT_MS;
+    tiku_radio_arch_init();                   /* static link config */
+    NRF_RADIO_S->TIFS = 150u;
+    tiku_radio_arch_constlat_hold(1);
+    if (tiku_flpr_arch_conn_init(&in) != 0) {
+        tiku_radio_arch_constlat_hold(0);
+        tiku_ble_adv_conn_release();
+        s_claimed = 0u;
+        return ST_UNSPECIFIED;
+    }
+    s_initiating = 1u;
+    return ST_OK;
+}
+
 /** @brief The rest of the host's ACL, dropped with the link it was for. */
 static void
 txq_clear(void)
@@ -442,13 +579,20 @@ link_follow(void)
     if (st == 1u && !s_linked) {
         s_linked = 1u;
         s_enc_seen = 0u;
-        s_adv_on = 0u;                        /* a connection ends ADV_IND */
+        if (s_initiating) {
+            s_initiating = 0u;
+        } else {
+            s_adv_on = 0u;                    /* a connection ends ADV_IND */
+        }
         link_up_event();
     } else if (st == 2u || st == 3u) {
         if (s_linked) {
             s_linked = 0u;
             txq_clear();
             link_down_event(tiku_flpr_arch_conn_reason());
+        } else if (s_initiating) {
+            s_initiating = 0u;                /* the peer was not heard */
+            link_failed_event(ST_NOT_ESTABLISHED);
         }
         radio_release();
         if (s_adv_on) {
@@ -545,6 +689,7 @@ command(uint16_t op, const uint8_t *p, uint8_t n)
     case 0x0C03u:                             /* Reset */
         s_adv_on = 0u;
         s_linked = 0u;
+        s_initiating = 0u;
         txq_clear();
         radio_release();
         (void)scan_enable(0u);
@@ -637,6 +782,38 @@ command(uint16_t op, const uint8_t *p, uint8_t n)
         return;
     case 0x200Au:                             /* LE Set Advertising Enable */
         cmd_done(op, (n >= 1u) ? adv_enable(p[0]) : ST_INVALID_PARAMS);
+        return;
+    case 0x200Du:                             /* LE Create Connection */
+        if (n < 25u) {
+            cmd_status(op, ST_INVALID_PARAMS);
+            return;
+        }
+        cmd_status(op, init_start(p));
+        return;
+    case 0x200Eu:                             /* LE Create Connection Cancel */
+        if (!s_initiating) {
+            cmd_done(op, ST_DISALLOWED);
+            return;
+        }
+        s_initiating = 0u;
+        radio_release();
+        cmd_done(op, ST_OK);
+        link_failed_event(ST_UNKNOWN_CONN);
+        return;
+    case 0x2019u:                             /* LE Enable Encryption */
+        if (n < 28u || !s_linked ||
+            (uint16_t)(p[0] | ((uint16_t)(p[1] & 0x0Fu) << 8)) !=
+                HCI_HANDLE) {
+            cmd_status(op, s_linked ? ST_INVALID_PARAMS : ST_UNKNOWN_CONN);
+            return;
+        }
+        if (tiku_flpr_arch_enc_start(&p[2],
+                                     (uint16_t)(p[10] | ((uint16_t)p[11] << 8)),
+                                     &p[12]) != 0) {
+            cmd_status(op, ST_DISALLOWED);    /* the peripheral's side */
+            return;
+        }
+        cmd_status(op, ST_OK);
         return;
     case 0x201Au:                             /* LE LTK Request Reply */
     case 0x201Bu:                             /* ... Negative Reply */
@@ -799,6 +976,7 @@ tiku_bt_controller_power(uint8_t on)
             (void)scan_enable(0u);
             s_adv_on = 0u;
             s_linked = 0u;
+            s_initiating = 0u;
             txq_clear();
             radio_release();
             s_rxq_count = 0u;

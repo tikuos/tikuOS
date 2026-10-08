@@ -353,6 +353,18 @@ static uint32_t fll_rx_ctr, fll_tx_ctr; /* packetCounter each way           */
 static uint32_t fll_enc_seq;            /* the enc_req_seq posted           */
 static uint8_t  fll_sk[16];             /* session key, MSB first           */
 static uint8_t  fll_iv[8];              /* IVm || IVs, as sent              */
+/* The role this link is held in: the central transmits first at each
+ * anchor and keeps the clock, and encrypts central-to-peripheral (the
+ * nonce's direction bit set) where the peripheral decrypts it. */
+static uint8_t  fll_central;            /* 1: this side is the central      */
+/* The central's encryption start, on from FLL_ENC_OFF: LL_ENC_REQ sent,
+ * the key due, LL_START_ENC_REQ due, LL_START_ENC_RSP sent. */
+#define FLL_CENC_RSP    9u      /* LL_ENC_REQ sent: SKDs and IVs due     */
+#define FLL_CENC_KEY    10u     /* SKDs posted: the key is due           */
+#define FLL_CENC_START  11u     /* key in: LL_START_ENC_REQ due          */
+#define FLL_CENC_REQ_IN 12u     /* both in: LL_START_ENC_RSP to send     */
+#define FLL_CENC_SENT   13u     /* LL_START_ENC_RSP sent: the peer's due */
+static uint8_t  fll_cenc_req;           /* START_ENC_REQ came before the key */
 
 /* CCM00's job lists and their typed fields, one crypt at a time. */
 static uint32_t ccm_in[10]  __attribute__((aligned(4)));
@@ -397,7 +409,7 @@ static uint8_t flpr_ccm(uint8_t decrypt, uint8_t dir, uint32_t ctr,
     nonce[1] = (uint8_t)(ctr >> 8);
     nonce[2] = (uint8_t)(ctr >> 16);
     nonce[3] = (uint8_t)(ctr >> 24);
-    nonce[4] = (uint8_t)(dir ? 0x80u : 0x00u);  /* 1: central to us */
+    nonce[4] = (uint8_t)(dir ? 0x80u : 0x00u);  /* 1: central to peripheral */
     for (i = 0u; i < 8u; i++) {
         nonce[5u + i] = fll_iv[i];
     }
@@ -459,7 +471,7 @@ static void fll_queue_raw(uint8_t llid, const uint8_t *p, uint8_t plen)
         fll_tx[3u + i] = p[i];
     }
     if (fll_tx_enc) {                   /* the session's next count, MIC on */
-        if (!flpr_ccm(0u, 0u, fll_tx_ctr, llid, &fll_tx[3], plen)) {
+        if (!flpr_ccm(0u, fll_central, fll_tx_ctr, llid, &fll_tx[3], plen)) {
             return;                     /* the engine failed: nothing sent  */
         }
         plen = (uint8_t)(plen + 4u);
@@ -470,10 +482,11 @@ static void fll_queue_raw(uint8_t llid, const uint8_t *p, uint8_t plen)
     fll_tx_len = plen;
 }
 
-/** @brief Queue an LL control PDU: opcode @p op and @p dl bytes of data. */
+/** @brief Queue an LL control PDU: opcode @p op and @p dl bytes of data,
+ *         LL_ENC_REQ's 22 the most. */
 static void fll_queue_ctrl(uint8_t op, const uint8_t *d, uint8_t dl)
 {
-    uint8_t p[16], i;
+    uint8_t p[24], i;
     p[0] = op;
     for (i = 0u; i < dl; i++) {
         p[1u + i] = d[i];
@@ -498,6 +511,61 @@ static uint8_t fll_build_tx(uint8_t *out)
     out[1] = 0u;
     out[2] = out[0];
     return 3u;
+}
+
+/**
+ * @brief The central's side of LL control: the peripheral's requests are
+ *        answered or refused, and the encryption start it drives moves on
+ *        the peripheral's replies.
+ */
+static void fll_handle_rx_central(const uint8_t *buf, tiku_flpr_shared_t *sh,
+                                  uint8_t op)
+{
+    uint8_t i;
+
+    if (op == 0x04u) {                          /* LL_ENC_RSP: SKDs, IVs    */
+        if (fll_enc == FLL_CENC_RSP && buf[1] >= 13u) {
+            for (i = 0u; i < 8u; i++) {
+                sh->enc_skds[i] = buf[4u + i];
+            }
+            for (i = 0u; i < 4u; i++) {
+                sh->enc_ivs[i] = buf[12u + i];
+            }
+            fll_enc = FLL_CENC_KEY;
+            sh->enc_rsp_seq = fll_enc_seq;      /* the M33 derives the key */
+            flpr_doorbell_to_app();
+        }
+    } else if (op == 0x05u) {                   /* LL_START_ENC_REQ         */
+        /* The reply goes from the event loop once the pending slot is
+         * free: queued here it would be lost behind a pending PDU, and that
+         * plaintext PDU would meet a peer now decrypting everything. */
+        if (fll_enc == FLL_CENC_START) {
+            fll_enc = FLL_CENC_REQ_IN;
+        } else if (fll_enc == FLL_CENC_KEY) {
+            fll_cenc_req = 1u;                  /* ahead of the key         */
+        }
+    } else if (op == 0x06u) {                   /* LL_START_ENC_RSP: on     */
+        if (fll_enc == FLL_CENC_SENT) {
+            fll_enc = FLL_ENC_ON;
+            sh->enc_on = sh->enc_on + 1u;
+            flpr_doorbell_to_app();
+        }
+    } else if (op == 0x0Du || op == 0x11u) {    /* LL_REJECT(_EXT)_IND      */
+        if (fll_enc == FLL_CENC_RSP) {          /* the peripheral has no key */
+            sh->enc_fail = (op == 0x0Du) ? buf[4] : buf[5];
+            fll_enc = FLL_ENC_OFF;
+            flpr_doorbell_to_app();
+        }
+    } else if (op == 0x16u) {                   /* LL_PHY_REQ: no change    */
+        static const uint8_t same[4] = { 0u, 0u, 0u, 0u };
+        fll_queue_ctrl(0x18u, same, 4u);        /* LL_PHY_UPDATE_IND        */
+    } else if (op == 0x0Fu) {                   /* LL_CONNECTION_PARAM_REQ  */
+        static const uint8_t rej[2] = { 0x0Fu, 0x1Au };
+        fll_queue_ctrl(0x11u, rej, 2u);         /* kept as they are         */
+    } else if (op != 0x09u && op != 0x13u && op != 0x07u &&
+               op != 0x15u && op != 0x17u) {
+        fll_queue_ctrl(0x07u, &op, 1u);         /* LL_UNKNOWN_RSP           */
+    }
 }
 
 /**
@@ -528,6 +596,9 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
         return;
     }
     op = buf[3];
+    sh->ll_trace[sh->ll_trace_n & 15u] =
+        (uint8_t)(op | (fll_rx_enc ? 0x80u : 0x00u));
+    sh->ll_trace_n = sh->ll_trace_n + 1u;
     if (op == 0x0Cu) {                          /* VERSION_IND -> reply     */
         if (!fll_sent_vers) {
             static const uint8_t v[5] = { 0x0Cu, 0x59u, 0x00u, 0x01u, 0x00u };
@@ -539,9 +610,11 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
         fll_reason = (buf[1] >= 2u) ? buf[4] : 0x13u;   /* its ErrorCode    */
     } else if (op == 0x12u) {                   /* LL_PING_REQ -> RSP       */
         fll_queue_ctrl(0x13u, (const uint8_t *)0, 0u);
-    } else if (op == 0x08u) {                   /* FEATURE_REQ -> RSP (none)*/
+    } else if (op == 0x08u || op == 0x0Eu) {    /* FEATURE_REQ -> RSP (none)*/
         static const uint8_t none[8] = { 0u };
         fll_queue_ctrl(0x09u, none, 8u);
+    } else if (fll_central) {
+        fll_handle_rx_central(buf, sh, op);
     } else if (op == 0x01u) {                   /* LL_CHANNEL_MAP_UPDATE_IND*/
         /* CtrData (payload[1..]): ChM[5], Instant[2].  payload[n]=buf[3+n].
          * No control response -- an IND is applied at its Instant, not
@@ -658,6 +731,7 @@ static uint8_t conn_datrx[TIKU_FLPR_DLE_BUF_SIZE] __attribute__((aligned(4)));
 #define CONN_RX_LATE_US   60u      /* RX stays open past the latest start   */
 #define CONN_SCA_LOCAL    50u      /* this side's clock accuracy, in ppm    */
 #define CONN_REPLY_TICKS  200u     /* PHYEND to TXEN: 150 us on air         */
+#define CONN_TX_RAMP_TICKS 100u    /* TXEN to the first bit on air          */
 
 /* The central's sleep-clock accuracy from the CONNECT_IND (SCA bits 7:5 of
  * the hop byte), the upper bound of its band in ppm. */
@@ -733,6 +807,19 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     for (i = 0u; i < 5u; i++) {
         chmap[i] = sh->conn_chm[i];
     }
+    fll_central = (uint8_t)(sh->conn_role != 0u);
+    fll_cenc_req = 0u;
+    /* The handshake's replies start afresh: both roles count their own
+     * starts, and one role's reply left behind would answer the other's
+     * next start with stale SKDs and a stale key. */
+    sh->enc_rsp_seq = 0u;
+    sh->enc_key_seq = 0u;
+    sh->ll_trace_magic = 0x4C4C5452u;
+    for (i = 0u; i < 16u; i++) {
+        sh->ll_trace[i] = 0xFFu;
+    }
+    sh->ll_trace_n = 0u;
+    sh->mic_info = 0u;
     /* Reset the LL / L2CAP-transport state for this connection. */
     fll_tx_len = 0u; fll_tx_llid = 0u; fll_sent_vers = 0u; fll_tx_sent = 0u;
     fll_sn = 0u; fll_nesn = 0u;
@@ -849,8 +936,10 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
                     for (i = 0u; i < 8u; i++) {
                         fll_iv[i] = sh->enc_iv[i];
                     }
+                    /* LL_START_ENC_REQ; RX decrypts from the packet after
+                     * the one it goes out in (below): the central's packet
+                     * in that event is still plaintext. */
                     fll_queue_ctrl(0x05u, (const uint8_t *)0, 0u);
-                    fll_rx_enc = 1u;                 /* LL_START_ENC_REQ    */
                     fll_rx_ctr = 0u;                 /* a session counts    */
                     fll_enc = FLL_ENC_START;         /* from 0 each way     */
                 }
@@ -867,6 +956,42 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
                 fll_tx_enc = 0u;
                 fll_enc_refresh = 1u;
                 fll_enc = FLL_ENC_PAUSED;
+            } else if (fll_central && fll_enc == FLL_ENC_OFF &&
+                       sh->enc_start_seq != fll_enc_seq) {
+                /* The host's LE Enable Encryption: LL_ENC_REQ with its
+                 * Rand, EDIV, SKDm and IVm; data waits for the outcome. */
+                uint8_t req[22];
+                for (i = 0u; i < 8u; i++) {
+                    req[i] = sh->enc_rand[i];
+                    req[10u + i] = sh->enc_skdm[i];
+                }
+                req[8] = (uint8_t)sh->enc_ediv;
+                req[9] = (uint8_t)(sh->enc_ediv >> 8);
+                for (i = 0u; i < 4u; i++) {
+                    req[18u + i] = sh->enc_ivm[i];
+                }
+                fll_enc_seq = sh->enc_start_seq;
+                fll_queue_ctrl(0x03u, req, 22u);
+                fll_enc = FLL_CENC_RSP;
+            } else if (fll_enc == FLL_CENC_KEY &&
+                       sh->enc_key_seq == fll_enc_seq) {
+                for (i = 0u; i < 16u; i++) {
+                    fll_sk[i] = sh->enc_sk[i];
+                }
+                for (i = 0u; i < 8u; i++) {
+                    fll_iv[i] = sh->enc_iv[i];
+                }
+                fll_enc = fll_cenc_req ? FLL_CENC_REQ_IN : FLL_CENC_START;
+                fll_cenc_req = 0u;
+            } else if (fll_enc == FLL_CENC_REQ_IN) {
+                /* LL_START_ENC_RSP, the first packet encrypted; the peer's
+                 * answer is encrypted too. */
+                fll_tx_enc = 1u;
+                fll_tx_ctr = 0u;
+                fll_rx_enc = 1u;
+                fll_rx_ctr = 0u;
+                fll_queue_ctrl(0x06u, (const uint8_t *)0, 0u);
+                fll_enc = FLL_CENC_SENT;
             }
         }
         /* The host's next L2CAP fragment, when the pending slot is free
@@ -894,6 +1019,133 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
          * the central's packet only its header changes, within the 140 us
          * before the radio reads it. */
         (void)fll_build_tx(conn_txb);
+
+        if (fll_central) {
+            /* The central's event: its packet goes at the anchor, timed by
+             * COMPARE[0] through DPPI, and the peripheral's answer is
+             * listened for from the packet's end. */
+            uint8_t got_rx = 0u;
+            t->CC[0] = nominal - CONN_TX_RAMP_TICKS;
+            t->EVENTS_COMPARE[0] = 0u;
+            r->SHORTS = (1u << 0) | (1u << 19);  /* READY_START, PHYEND_DIS. */
+            r->PACKETPTR = (uint32_t)conn_txb;
+            r->EVENTS_READY    = 0u;
+            r->EVENTS_PHYEND   = 0u;
+            r->EVENTS_DISABLED = 0u;
+            (void)r->EVENTS_DISABLED;
+            now = t10_now();
+            if ((int32_t)(t->CC[0] - now) > 0) {
+                d->CHENSET = (1u << FLPR_DPPI_CH_TXEN);
+                for (;;) {
+                    now = t10_now();
+                    if (r->EVENTS_READY != 0u ||
+                        (int32_t)(now - nominal) > 0 ||
+                        sh->cmd == TIKU_FLPR_CMD_CONN_STOP) {
+                        break;
+                    }
+                }
+                d->CHENCLR = (1u << FLPR_DPPI_CH_TXEN);
+            } else {
+                sh->conn_late = sh->conn_late + 1u;   /* behind: go now    */
+            }
+            if (r->EVENTS_READY == 0u) {
+                r->TASKS_TXEN = 1u;
+                (void)conn_wait(&r->EVENTS_READY, 20000u);
+            }
+            if (sh->cmd == TIKU_FLPR_CMD_CONN_STOP) {
+                r->TASKS_DISABLE = 1u;
+                (void)conn_wait(&r->EVENTS_DISABLED, 8000u);
+                break;
+            }
+            (void)conn_wait(&r->EVENTS_DISABLED,
+                            (sh->conn_phy == 2u) ? 400000u : 40000u);
+            fll_tx_sent = (uint8_t)(fll_tx_len != 0u);
+            t_end = t->CC[3];                        /* this packet's end */
+            /* The answer: RX at once, its ADDRESS due T_IFS plus the
+             * preamble and access address after the packet's end. */
+            r->PACKETPTR = (uint32_t)conn_datrx;
+            r->EVENTS_ADDRESS  = 0u;
+            r->EVENTS_PHYEND   = 0u;
+            r->EVENTS_DISABLED = 0u;
+            r->EVENTS_CRCOK    = 0u;
+            r->EVENTS_CRCERROR = 0u;
+            (void)r->EVENTS_DISABLED;
+            r->TASKS_RXEN = 1u;
+            close = t_end + (150u + conn_aa_us(sh->conn_phy) +
+                             CONN_RX_LATE_US) * T10_PER_US;
+            while ((int32_t)(t10_now() - close) < 0) {
+                if (r->EVENTS_ADDRESS != 0u) {
+                    got_rx = 1u;
+                    break;
+                }
+            }
+            if (got_rx) {
+                (void)conn_wait(&r->EVENTS_PHYEND,
+                                (sh->conn_phy == 2u) ? 400000u : 40000u);
+            }
+            r->TASKS_DISABLE = 1u;
+            (void)conn_wait(&r->EVENTS_DISABLED, 8000u);
+            r->EVENTS_DISABLED = 0u;
+            __asm__ volatile ("fence iorw, iorw" ::: "memory");
+            newdata = 0u;
+            if (got_rx && r->EVENTS_CRCOK != 0u) {
+                uint8_t h = conn_datrx[0];
+                uint8_t room = (uint8_t)(conn_datrx[1] == 0u ||
+                                         (h & 0x03u) == 0x03u ||
+                                         sh->f2a_ack == sh->f2a_seq);
+                uint8_t rc = flpr_ll_ack(&fll_sn, &fll_nesn,
+                                         (uint8_t)((h >> 3) & 1u),
+                                         (uint8_t)((h >> 2) & 1u),
+                                         (uint8_t)(conn_datrx[1] != 0u), room);
+                if ((rc & 2u) && fll_tx_sent) {
+                    fll_tx_len = 0u;             /* the pending PDU landed */
+                    fll_tx_sent = 0u;
+                    if (fll_term_sent) {
+                        fll_terminate = 1u;
+                    }
+                }
+                newdata = (uint8_t)(rc & 1u);
+                last = nominal;                  /* the anchor it answered */
+                if (!established) {
+                    sh->conn_first = cec;
+                }
+                established = 1u;
+            } else {
+                sh->conn_misses = sh->conn_misses + 1u;
+            }
+            if (newdata) {
+                if (fll_rx_enc) {
+                    uint8_t n = conn_datrx[1];
+                    if (n < 5u || !flpr_ccm(1u, 0u, fll_rx_ctr, conn_datrx[0],
+                                            &conn_datrx[3],
+                                            (uint8_t)(n - 4u))) {
+                        sh->mic_info = (uint32_t)conn_datrx[0] |
+                                       ((uint32_t)n << 8) | (fll_rx_ctr << 16);
+                        fll_reason = 0x3Du;      /* MIC failure            */
+                        break;
+                    }
+                    conn_datrx[1] = (uint8_t)(n - 4u);
+                    fll_rx_ctr++;
+                }
+                fll_handle_rx(conn_datrx, sh);
+            }
+            sh->conn_events = ++event;
+            nominal += ci;
+            cec++;
+            if (fll_terminate || sh->cmd == TIKU_FLPR_CMD_CONN_STOP) {
+                break;
+            }
+            if (!established) {
+                if (cec >= 6u) {
+                    fll_reason = 0x3Eu;          /* never established      */
+                    break;
+                }
+            } else if ((int32_t)(nominal - last) > (int32_t)to) {
+                fll_reason = 0x08u;              /* supervision timeout    */
+                break;
+            }
+            continue;
+        }
 
         /* The window: the nominal start widened by the drift since the
          * last packet caught, early by the RX ramp, and open past the
@@ -1024,6 +1276,9 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
             sh->conn_tx_late = sh->conn_tx_late + 1u;
         } else {
             fll_tx_sent = send_pend;             /* what the peer acks next  */
+            if (send_pend && fll_enc == FLL_ENC_START) {
+                fll_rx_enc = 1u;                 /* START_ENC_REQ is out     */
+            }
         }
         (void)conn_wait(&r->EVENTS_DISABLED, 40000u);
         d->CHENCLR = (1u << FLPR_DPPI_CH_TXEN);
@@ -1032,8 +1287,11 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
         if (newdata) {
             if (fll_rx_enc) {                    /* decrypted, or the end   */
                 uint8_t n = conn_datrx[1];
-                if (n < 5u || !flpr_ccm(1u, 1u, fll_rx_ctr, conn_datrx[0],
-                                        &conn_datrx[3], (uint8_t)(n - 4u))) {
+                if (n < 5u || !flpr_ccm(1u, (uint8_t)!fll_central, fll_rx_ctr,
+                                        conn_datrx[0], &conn_datrx[3],
+                                        (uint8_t)(n - 4u))) {
+                    sh->mic_info = (uint32_t)conn_datrx[0] |
+                                   ((uint32_t)n << 8) | (fll_rx_ctr << 16);
                     fll_reason = 0x3Du;          /* MIC failure             */
                     break;
                 }
@@ -1201,6 +1459,7 @@ static void flpr_conn_adv(tiku_flpr_shared_t *sh)
         addr[i] = in->addr[i];
     }
     sh->conn_state = 0u;
+    sh->conn_role = 0u;                          /* the peripheral's side     */
     sh->conn_events = 0u;
     sh->conn_cm = 0u;                            /* LL update counts          */
     sh->conn_cu = 0u;
@@ -1209,6 +1468,8 @@ static void flpr_conn_adv(tiku_flpr_shared_t *sh)
     sh->adv_scanrsp = 0u;
     sh->adv_rxother = 0u;
     sh->adv_tifs = 0u;
+    sh->adv_crcbad = 0u;
+    sh->adv_connother = 0u;
     flpr_hfclk_kick();
     flpr_conn_adv_timing(r, (in->txen_ticks != 0u) ? in->txen_ticks
                                                    : FLPR_ADV_TXEN_TICKS);
@@ -1352,6 +1613,8 @@ static void flpr_conn_adv(tiku_flpr_shared_t *sh)
                     (uint8_t)(((conn_rx[0] & 0x40u) ? 0x01u : 0x00u) |
                               ((conn_rx[0] & 0x80u) ? 0x02u : 0x00u));
                 connected = 1u;
+            } else {
+                sh->adv_connother++;            /* another advertiser's     */
             }
         } else {
             for (spin = 0u; spin < 8000u; spin++) {
@@ -1361,6 +1624,8 @@ static void flpr_conn_adv(tiku_flpr_shared_t *sh)
             }
             if (r->EVENTS_CRCOK != 0u) {
                 sh->adv_rxother++;              /* someone else's traffic   */
+            } else {
+                sh->adv_crcbad++;               /* a packet that failed CRC */
             }
         }
         if (!connected) {
@@ -1399,6 +1664,195 @@ static void flpr_conn_adv(tiku_flpr_shared_t *sh)
         sh->conn_state = 2u;                     /* gave up advertising      */
     }
     flpr_conn_adv_timing(r, 0u);                 /* nothing may fire TXEN    */
+}
+
+/* The initiator's clock: mcycle at the VPR's 128 MHz, for its listening
+ * windows (TIMER10 is cleared by every PHYEND while the request's timing is
+ * wired). */
+#define FLPR_CYC_PER_MS      128000u
+#define FLPR_INIT_CHAN_CYC   (10u * FLPR_CYC_PER_MS)   /* a channel's turn */
+
+/** @brief mcycle now. */
+static inline uint32_t flpr_cycles(void)
+{
+    uint32_t c;
+    __asm__ volatile ("csrr %0, mcycle" : "=r"(c));
+    return c;
+}
+
+/**
+ * @brief Connect to the peer the tiku_flpr_init_t in a2f_buf names: listen
+ *        for its ADV_IND on 37, 38 and 39, answer with the CONNECT_IND at
+ *        T_IFS, and hold the link as its central.
+ *
+ * conn_state goes 1 on the CONNECT_IND, 2 when the peer was not heard
+ * within its ms or a new command came.
+ */
+static void flpr_conn_init(tiku_flpr_shared_t *sh)
+{
+    NRF_RADIO_Type *r = NRF_RADIO_NS;
+    NRF_DPPIC_Type *d = NRF_DPPIC10_NS;
+    const volatile tiku_flpr_init_t *in =
+        (const volatile tiku_flpr_init_t *)sh->a2f_buf;
+    uint8_t  peer[6], own[6], chm[5];
+    uint8_t  peer_type = in->peer_type, own_type = in->own_type;
+    uint8_t  winsize = in->winsize, hop = in->hop, sca = in->sca;
+    uint32_t aa = in->aa, crcinit = in->crcinit;
+    uint16_t winoffset = in->winoffset, interval = in->interval;
+    uint16_t latency = in->latency, timeout = in->timeout;
+    uint32_t i, spin, t0 = flpr_cycles(), span = (uint32_t)in->ms;
+    uint8_t  chan = 0u, connected = 0u;
+    uint8_t *c = conn_adv;
+
+    span *= FLPR_CYC_PER_MS;
+    for (i = 0u; i < 6u; i++) {
+        peer[i] = in->peer[i];
+        own[i] = in->own[i];
+    }
+    for (i = 0u; i < 5u; i++) {
+        chm[i] = in->chm[i];
+    }
+    /* The CONNECT_IND: InitA, AdvA, then the LLData; RxAdd follows the
+     * peer's own TxAdd once its advert is in. */
+    c[0] = (uint8_t)(0x05u | (own_type ? 0x40u : 0x00u) |
+                     (peer_type ? 0x80u : 0x00u));
+    c[1] = 34u;
+    c[2] = own[0];                               /* S1 slot (erratum 49)     */
+    for (i = 0u; i < 6u; i++) {
+        c[3u + i] = own[i];
+        c[9u + i] = peer[i];
+    }
+    c[15] = (uint8_t)aa;        c[16] = (uint8_t)(aa >> 8);
+    c[17] = (uint8_t)(aa >> 16); c[18] = (uint8_t)(aa >> 24);
+    c[19] = (uint8_t)crcinit;   c[20] = (uint8_t)(crcinit >> 8);
+    c[21] = (uint8_t)(crcinit >> 16);
+    c[22] = winsize;
+    c[23] = (uint8_t)winoffset; c[24] = (uint8_t)(winoffset >> 8);
+    c[25] = (uint8_t)interval;  c[26] = (uint8_t)(interval >> 8);
+    c[27] = (uint8_t)latency;   c[28] = (uint8_t)(latency >> 8);
+    c[29] = (uint8_t)timeout;   c[30] = (uint8_t)(timeout >> 8);
+    for (i = 0u; i < 5u; i++) {
+        c[31u + i] = chm[i];
+    }
+    c[36] = (uint8_t)((hop & 0x1Fu) | ((sca & 0x07u) << 5));
+
+    sh->conn_state = 0u;
+    sh->conn_role = 1u;
+    sh->conn_events = 0u;
+    sh->conn_cm = 0u;
+    sh->conn_cu = 0u;
+    sh->adv_tx = 0u;
+    sh->adv_scanreq = 0u;
+    sh->adv_scanrsp = 0u;
+    sh->adv_rxother = 0u;
+    flpr_hfclk_kick();
+    flpr_conn_adv_timing(r, FLPR_ADV_TXEN_TICKS);
+
+    while (!connected && (uint32_t)(flpr_cycles() - t0) < span &&
+           sh->cmd == 0u) {
+        uint32_t cw = flpr_cycles();
+        flpr_hfclk_kick();
+        r->FREQUENCY = beacon_freq[chan];
+        r->DATAWHITE = 0x00890000u | (0x40u | beacon_widx[chan]);
+        /* A channel's turn: receive until the peer's ADV_IND, or the
+         * turn ends. */
+        while (!connected && (uint32_t)(flpr_cycles() - cw) < FLPR_INIT_CHAN_CYC
+               && sh->cmd == 0u) {
+            r->SHORTS = (1u << 0) | (1u << 19);  /* READY_START, PHYEND_DIS. */
+            r->PACKETPTR = (uint32_t)conn_rx;
+            r->EVENTS_PHYEND   = 0u;
+            r->EVENTS_DISABLED = 0u;
+            r->EVENTS_CRCOK    = 0u;
+            NRF_TIMER10_NS->EVENTS_COMPARE[0] = 0u;
+            (void)r->EVENTS_DISABLED;
+            r->TASKS_RXEN = 1u;
+            while (r->EVENTS_PHYEND == 0u &&
+                   (uint32_t)(flpr_cycles() - cw) < FLPR_INIT_CHAN_CYC &&
+                   sh->cmd == 0u) {
+            }
+            if (r->EVENTS_PHYEND == 0u) {
+                r->TASKS_DISABLE = 1u;           /* the turn is over        */
+                (void)conn_wait(&r->EVENTS_DISABLED, 8000u);
+                break;
+            }
+            /* A packet ended: within T_IFS, is it the peer's ADV_IND?  The
+             * DMA writes behind the compiler, hence the fence. */
+            (void)conn_wait(&r->EVENTS_DISABLED, 8000u);
+            __asm__ volatile ("fence iorw, iorw" ::: "memory");
+            if (r->EVENTS_CRCOK != 0u && (conn_rx[0] & 0x0Fu) == 0x00u &&
+                conn_rx[1] >= 6u && conn_rx[1] <= 37u) {
+                uint8_t match = 1u;
+                for (i = 0u; i < 6u; i++) {
+                    if (conn_rx[3u + i] != peer[i]) {
+                        match = 0u;
+                        break;
+                    }
+                }
+                if (match) {
+                    /* RxAdd names the peer's type as it advertises it; the
+                     * CONNECT_IND goes at COMPARE[0], T_IFS after the
+                     * advert's end. */
+                    peer_type = (uint8_t)((conn_rx[0] >> 6) & 1u);
+                    c[0] = (uint8_t)(0x05u | (own_type ? 0x40u : 0x00u) |
+                                     (peer_type ? 0x80u : 0x00u));
+                    r->PACKETPTR = (uint32_t)conn_adv;
+                    r->EVENTS_READY = 0u;
+                    r->EVENTS_DISABLED = 0u;
+                    (void)r->EVENTS_DISABLED;
+                    d->CHENSET = (1u << FLPR_DPPI_CH_TXEN);
+                    for (spin = 0u; spin < 20000u; spin++) {
+                        if (r->EVENTS_READY != 0u) {
+                            break;
+                        }
+                    }
+                    d->CHENCLR = (1u << FLPR_DPPI_CH_TXEN);
+                    if (r->EVENTS_READY != 0u &&
+                        conn_wait(&r->EVENTS_DISABLED, 40000u)) {
+                        connected = 1u;          /* its PHYEND reset TIMER10 */
+                    } else {
+                        r->TASKS_DISABLE = 1u;   /* TXEN never came          */
+                        (void)conn_wait(&r->EVENTS_DISABLED, 8000u);
+                    }
+                }
+            }
+            if (!connected && r->EVENTS_CRCOK != 0u) {
+                sh->adv_rxother++;               /* someone else's advert    */
+            }
+        }
+        chan = (uint8_t)((chan + 1u) % 3u);
+    }
+    if (connected) {
+        /* As after a captured CONNECT_IND: TIMER10 counts from this one's
+         * end, PHYEND captures into CC[3], and COMPARE[0] fires TXEN only
+         * when an event arms it. */
+        d->CHENCLR = (1u << FLPR_DPPI_CH_TXEN);
+        NRF_TIMER10_NS->SUBSCRIBE_CLEAR      = 0u;
+        NRF_TIMER10_NS->SUBSCRIBE_CAPTURE[3] = FLPR_DPPI_CH_PHYEND | (1u << 31);
+        sh->conn_aa = aa;
+        sh->conn_crcinit = crcinit;
+        sh->conn_winsize = winsize;
+        sh->conn_winoffset = winoffset;
+        sh->conn_interval = interval;
+        sh->conn_latency = latency;
+        sh->conn_timeout = timeout;
+        sh->conn_hop = hop;
+        sh->conn_sca = sca;
+        for (i = 0u; i < 5u; i++) {
+            sh->conn_chm[i] = chm[i];
+        }
+        for (i = 0u; i < 6u; i++) {
+            sh->conn_inita[i] = own[i];
+            sh->conn_adva[i]  = peer[i];
+        }
+        sh->conn_addr_types = (uint8_t)((own_type ? 0x01u : 0x00u) |
+                                        (peer_type ? 0x02u : 0x00u));
+        fll_sca_ppm = fll_sca_table[sca & 0x07u];
+        sh->conn_state = 1u;
+        flpr_conn_hold(sh);
+    } else {
+        sh->conn_state = 2u;                     /* the peer was not heard   */
+    }
+    flpr_conn_adv_timing(r, 0u);
 }
 
 void tiku_flpr_main(void);
@@ -1575,6 +2029,10 @@ void tiku_flpr_main(void)
         if (sh->cmd == TIKU_FLPR_CMD_CONN_ADV) {
             sh->cmd = 0u;
             flpr_conn_adv(sh);                   /* blocking, bounded        */
+        }
+        if (sh->cmd == TIKU_FLPR_CMD_CONN_INIT) {
+            sh->cmd = 0u;
+            flpr_conn_init(sh);                  /* blocking, bounded        */
         }
         if (sh->cmd == TIKU_FLPR_CMD_CONN_STOP) {
             sh->conn_state = 2u;

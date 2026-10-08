@@ -696,37 +696,111 @@ int tiku_flpr_arch_enc_request(uint8_t rand[8], uint16_t *ediv)
     return 1;
 }
 
-void tiku_flpr_arch_enc_key(const uint8_t ltk[16])
+/* SK = e(LTK, SKD), SKD = SKDs || SKDm: AES takes both most significant
+ * octet first, and the LTK comes least first, as HCI carries it, the halves
+ * as they went on air.  IV = IVm || IVs.  Both roles derive it the same
+ * way, from the SKDs and SKDm the shared page holds. */
+static void flpr_enc_derive(const uint8_t ltk[16])
 {
     tiku_flpr_shared_t *sh = TIKU_FLPR_SHARED;
     uint8_t key[16], skd[16], sk[16];
     int i;
 
+    for (i = 0; i < 16; i++) {
+        key[i] = ltk[15 - i];
+    }
+    for (i = 0; i < 8; i++) {
+        skd[i] = sh->enc_skds[7 - i];
+        skd[8 + i] = sh->enc_skdm[7 - i];
+    }
+    (void)tiku_crypto_arch_aes_ecb(0, key, 16u, skd, sk);
+    for (i = 0; i < 16; i++) {
+        sh->enc_sk[i] = sk[i];
+    }
+    for (i = 0; i < 4; i++) {
+        sh->enc_iv[i] = sh->enc_ivm[i];
+        sh->enc_iv[4 + i] = sh->enc_ivs[i];
+    }
+    sh->enc_key_status = 0u;
+}
+
+void tiku_flpr_arch_enc_key(const uint8_t ltk[16])
+{
+    tiku_flpr_shared_t *sh = TIKU_FLPR_SHARED;
+
     if (ltk == (const uint8_t *)0) {
         sh->enc_key_status = 0x06u;              /* PIN or Key Missing       */
     } else {
-        /* SK = e(LTK, SKD), SKD = SKDs || SKDm: AES takes both most
-         * significant octet first, and the LTK comes least first, as HCI
-         * carries it, the halves as they went on air. */
-        for (i = 0; i < 16; i++) {
-            key[i] = ltk[15 - i];
-        }
-        for (i = 0; i < 8; i++) {
-            skd[i] = sh->enc_skds[7 - i];
-            skd[8 + i] = sh->enc_skdm[7 - i];
-        }
-        (void)tiku_crypto_arch_aes_ecb(0, key, 16u, skd, sk);
-        for (i = 0; i < 16; i++) {
-            sh->enc_sk[i] = sk[i];
-        }
-        for (i = 0; i < 4; i++) {
-            sh->enc_iv[i] = sh->enc_ivm[i];
-            sh->enc_iv[4 + i] = sh->enc_ivs[i];
-        }
-        sh->enc_key_status = 0u;
+        flpr_enc_derive(ltk);
     }
     __asm__ volatile ("dmb 0xF" ::: "memory");
     sh->enc_key_seq = flpr_enc_serviced;         /* START_ENC_REQ, or REJECT */
+}
+
+/* The central's start: the LTK waits here for the peripheral's SKDs. */
+static uint8_t  flpr_cen_ltk[16];
+static uint32_t flpr_cen_seq;                    /* the start posted         */
+static uint32_t flpr_cen_keyed;                  /* ... whose key went out   */
+
+int tiku_flpr_arch_enc_start(const uint8_t rand[8], uint16_t ediv,
+                             const uint8_t ltk[16])
+{
+    tiku_flpr_shared_t *sh = TIKU_FLPR_SHARED;
+    uint8_t skdm[8], ivm[4];
+    int i;
+
+    if (!tiku_flpr_arch_conn_active() || sh->conn_role == 0u ||
+        ltk == (const uint8_t *)0) {
+        return -1;
+    }
+    tiku_trng_arch_init();
+    (void)tiku_trng_arch_read_bytes(skdm, 8);
+    (void)tiku_trng_arch_read_bytes(ivm, 4);
+    for (i = 0; i < 8; i++) {
+        sh->enc_rand[i] = rand[i];
+        sh->enc_skdm[i] = skdm[i];
+    }
+    for (i = 0; i < 4; i++) {
+        sh->enc_ivm[i] = ivm[i];
+    }
+    sh->enc_ediv = ediv;
+    sh->enc_fail = 0u;
+    memcpy(flpr_cen_ltk, ltk, 16u);
+    flpr_cen_seq = sh->enc_start_seq + 1u;
+    __asm__ volatile ("dmb 0xF" ::: "memory");
+    sh->enc_start_seq = flpr_cen_seq;            /* LL_ENC_REQ goes out      */
+    return 0;
+}
+
+int tiku_flpr_arch_enc_central_service(void)
+{
+    tiku_flpr_shared_t *sh = TIKU_FLPR_SHARED;
+
+    if (sh->conn_role == 0u || flpr_cen_seq == 0u ||
+        sh->enc_rsp_seq != flpr_cen_seq || flpr_cen_keyed == flpr_cen_seq) {
+        return 0;                                /* no SKDs for this start   */
+    }
+    flpr_cen_keyed = flpr_cen_seq;
+    flpr_enc_derive(flpr_cen_ltk);
+    __asm__ volatile ("dmb 0xF" ::: "memory");
+    sh->enc_key_seq = flpr_cen_seq;              /* the FLPR takes the key   */
+    return 1;
+}
+
+uint32_t tiku_flpr_arch_enc_fail(void)
+{
+    tiku_flpr_shared_t *sh = TIKU_FLPR_SHARED;
+    uint32_t code = sh->enc_fail;
+
+    if (code != 0u) {
+        sh->enc_fail = 0u;
+    }
+    return code;
+}
+
+uint32_t tiku_flpr_arch_conn_role(void)
+{
+    return TIKU_FLPR_SHARED->conn_role;
 }
 
 uint32_t tiku_flpr_arch_enc_on(void)
@@ -938,6 +1012,34 @@ int tiku_flpr_arch_conn_start(const uint8_t *adv, uint32_t adv_len,
     flpr_conn_set_scanrsp(in, rsp, rsp_len);
     __asm__ volatile ("dsb 0xF" ::: "memory");
     TIKU_FLPR_SHARED->cmd = TIKU_FLPR_CMD_CONN_ADV;
+    flpr_conn_posted = 1u;
+    return 0;
+}
+
+int tiku_flpr_arch_conn_init(const tiku_flpr_init_t *init)
+{
+    volatile tiku_flpr_init_t *in =
+        (volatile tiku_flpr_init_t *)TIKU_FLPR_SHARED->a2f_buf;
+    const uint8_t *src = (const uint8_t *)init;
+    volatile uint8_t *dst = (volatile uint8_t *)in;
+    uint32_t i;
+
+    if (!tiku_flpr_arch_running() || init == (const tiku_flpr_init_t *)0) {
+        return -1;
+    }
+    TIKU_FLPR_SHARED->conn_state = 0u;
+    TIKU_FLPR_SHARED->conn_term = 0u;
+    TIKU_FLPR_SHARED->conn_reason = 0u;
+    TIKU_FLPR_SHARED->enc_on = 0u;
+    TIKU_FLPR_SHARED->enc_fail = 0u;
+    flpr_nus_rx_seen = TIKU_FLPR_SHARED->f2a_seq;
+    TIKU_FLPR_SHARED->f2a_ack = flpr_nus_rx_seen;
+    flpr_radio_ns(1);
+    for (i = 0u; i < sizeof *init; i++) {
+        dst[i] = src[i];
+    }
+    __asm__ volatile ("dsb 0xF" ::: "memory");
+    TIKU_FLPR_SHARED->cmd = TIKU_FLPR_CMD_CONN_INIT;
     flpr_conn_posted = 1u;
     return 0;
 }

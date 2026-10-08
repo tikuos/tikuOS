@@ -18,6 +18,7 @@
 #define TIKU_NORDIC_FLPR_ARCH_H_
 
 #include <stdint.h>
+#include <arch/nordic/flpr/tiku_flpr_ipc.h>   /* tiku_flpr_init_t */
 
 /**
  * @brief Start the coprocessor: load the image the first time, then resume
@@ -347,6 +348,36 @@ void tiku_flpr_arch_conn_stop(void);
 int tiku_flpr_arch_conn_start(const uint8_t *adv, uint32_t adv_len,
                               const uint8_t *rsp, uint32_t rsp_len,
                               const uint8_t *addr);
+
+/**
+ * @brief Connect to a peer as the central: the FLPR listens for its
+ *        ADV_IND, answers with the CONNECT_IND @p init describes and holds
+ *        the link.  Non-blocking; conn_state() says how it went.
+ * @return 0, or -1 with the FLPR not running
+ */
+int tiku_flpr_arch_conn_init(const tiku_flpr_init_t *init);
+
+/** @brief The role the FLPR holds its link in: 0 peripheral, 1 central. */
+uint32_t tiku_flpr_arch_conn_role(void);
+
+/**
+ * @brief As the central, start encryption with @p ltk: the FLPR sends
+ *        LL_ENC_REQ with @p rand, @p ediv and fresh SKDm and IVm.
+ * @return 0, or -1 with no link held as the central
+ */
+int tiku_flpr_arch_enc_start(const uint8_t rand[8], uint16_t ediv,
+                             const uint8_t ltk[16]);
+
+/**
+ * @brief The central's key: once the FLPR has the peripheral's SKDs, derive
+ *        the session key from the LTK of enc_start() and hand it over.
+ * @return 1 on the call that does, 0 otherwise
+ */
+int tiku_flpr_arch_enc_central_service(void);
+
+/** @brief The peripheral's refusal of the central's LL_ENC_REQ, as its
+ *         error code, once; 0 when there was none. */
+uint32_t tiku_flpr_arch_enc_fail(void);
 
 /** @brief Always 0: the controller never sets conn_sub; the host stack
  *         tracks the NUS CCCD. */

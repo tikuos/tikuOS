@@ -229,6 +229,27 @@ typedef struct {
     volatile uint8_t  enc_key_status;   /* M33->FLPR: 0 key given, else why   */
     volatile uint8_t  enc_pad;
     volatile uint32_t enc_key_seq;      /* M33: the key, or the refusal       */
+    /* The role the link is held in, and the central's encryption start.
+     * The M33 puts Rand, EDIV, SKDm and IVm in enc_rand, enc_ediv, enc_skdm
+     * and enc_ivm and bumps enc_start_seq; the FLPR sends LL_ENC_REQ, puts
+     * the peripheral's SKDs and IVs in enc_skds and enc_ivs at enc_rsp_seq,
+     * takes the key at enc_key_seq as the other role does, and counts the
+     * start in enc_on once both ways encrypt.  The peripheral's refusal, an
+     * LL_REJECT_IND's code, lands in enc_fail. */
+    volatile uint32_t conn_role;        /* FLPR: 0 peripheral, 1 central      */
+    volatile uint32_t enc_start_seq;    /* M33: LL_ENC_REQ wanted             */
+    volatile uint32_t enc_fail;         /* FLPR->M33: refused, with the code  */
+    /* A trace of the link: the last 16 LL control opcodes received (0xFF
+     * empty), with 0x80 set on one that came encrypted, and the header,
+     * length and counter of a packet whose MIC failed. */
+    volatile uint32_t ll_trace_magic;   /* 'LLTR' */
+    volatile uint8_t  ll_trace[16];
+    volatile uint32_t ll_trace_n;
+    volatile uint32_t mic_info;         /* hdr | len << 8 | ctr << 16         */
+    /* Advertising RX windows that ended on a bad CRC, and CONNECT_INDs for
+     * another advertiser. */
+    volatile uint32_t adv_crcbad;
+    volatile uint32_t adv_connother;
 } tiku_flpr_shared_t;
 
 /**
@@ -248,6 +269,29 @@ typedef struct {
                                         /* end to the reply's TXEN; 0 =     */
                                         /* the controller's own figure      */
 } tiku_flpr_conn_t;
+
+/* TIKU_FLPR_CMD_CONN_INIT's argument in a2f_buf: the peer to connect to,
+ * this side's address, and the CONNECT_IND's LLData, all as they go on air
+ * (least octet first).  The FLPR listens on the three advertising channels
+ * for the peer's ADV_IND for up to ms, answers it with the CONNECT_IND at
+ * T_IFS, and then holds the link as its central. */
+typedef struct {
+    uint8_t  peer[6];                   /* AdvA to connect to               */
+    uint8_t  peer_type;                 /* 1 random: the CONNECT_IND's RxAdd */
+    uint8_t  own_type;                  /* 1 random: its TxAdd              */
+    uint8_t  own[6];                    /* InitA                            */
+    uint8_t  winsize;                   /* transmitWindowSize, 1.25 ms      */
+    uint8_t  hop;                       /* hopIncrement, 5..16              */
+    uint32_t aa;                        /* access address                   */
+    uint32_t crcinit;                   /* CRC init, 24 bits                */
+    uint16_t winoffset;                 /* transmitWindowOffset, 1.25 ms    */
+    uint16_t interval;                  /* connInterval, 1.25 ms            */
+    uint16_t latency;                   /* peripheral latency               */
+    uint16_t timeout;                   /* supervision timeout, 10 ms       */
+    uint8_t  chm[5];                    /* channel map, 37 bits             */
+    uint8_t  sca;                       /* this clock's accuracy, 0..7      */
+    uint16_t ms;                        /* how long to look for the peer    */
+} tiku_flpr_init_t;
 
 /*
  * Command words (cmd) and their responses (rsp).  Clearing CPURUN does not
@@ -308,6 +352,7 @@ typedef struct {
  * Valid only while magic reads TIKU_FLPR_MAGIC_FAULT; .bss is not re-zeroed.
  */
 #define TIKU_FLPR_CMD_RESTART    10u
+#define TIKU_FLPR_CMD_CONN_INIT  11u
 /** @brief Response words the firmware writes to rsp. */
 #define TIKU_FLPR_RSP_PARKED  1u
 #define TIKU_FLPR_RSP_PULSE_DONE 2u
