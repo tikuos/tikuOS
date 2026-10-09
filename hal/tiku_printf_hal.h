@@ -122,6 +122,11 @@
 /* FALLBACK: NO PLATFORM, NO OUTPUT                                          */
 /*---------------------------------------------------------------------------*/
 
+#elif defined(PLATFORM_ESP32C5)
+#include <arch/esp32c5/tiku_debug_arch.h>
+#include <arch/esp32c5/tiku_uart_arch.h>
+#define TIKU_PRINTF(...) tiku_debug_arch_printf(__VA_ARGS__)
+
 #elif !defined(TIKU_PRINTF)
 #define TIKU_PRINTF(...)
 #endif

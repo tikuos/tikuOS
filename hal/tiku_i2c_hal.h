@@ -31,6 +31,8 @@
 #include <arch/ra8p1/tiku_i2c_arch.h>
 #elif defined(PLATFORM_ESP32C61)
 #include <arch/esp32c61/tiku_i2c_arch.h>
+#elif defined(PLATFORM_ESP32C5)
+#include <arch/esp32c5/tiku_i2c_arch.h>
 #endif
 
 #endif /* TIKU_I2C_HAL_H_ */

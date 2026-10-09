@@ -24,7 +24,11 @@
  * Must equal the number of initialisers in tiku_vfs_tree_psram_children
  * (a _Static_assert in the .c catches a forgotten update).
  */
+#if defined(PLATFORM_ESP32C5)
+#define TIKU_VFS_TREE_PSRAM_NCHILD  5
+#else
 #define TIKU_VFS_TREE_PSRAM_NCHILD  4
+#endif
 
 /** @brief /sys/psram children: state, hz, size, tap. */
 extern const tiku_vfs_node_t tiku_vfs_tree_psram_children[];

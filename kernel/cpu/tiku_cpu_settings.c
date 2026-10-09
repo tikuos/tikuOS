@@ -27,6 +27,8 @@ extern tiku_nvm_restore_t tiku_mem_arch_nvm_restore_status(void);
 #include <arch/stm32n6/tiku_xspi_arch.h>
 #elif defined(PLATFORM_ESP32C61)
 #include <arch/esp32c61/tiku_flash_arch.h>
+#elif defined(PLATFORM_ESP32C5)
+#include <arch/esp32c5/tiku_flash_arch.h>
 #endif
 #if defined(PLATFORM_RA8P1)
 extern uint32_t tiku_mem_arch_nvm_program_count(void);
@@ -51,7 +53,8 @@ static int ready, restored;
 static int committed(void)
 {
 #if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
-    defined(PLATFORM_STM32N6) || defined(PLATFORM_ESP32C61)
+    defined(PLATFORM_STM32N6) || defined(PLATFORM_ESP32C61) || \
+    defined(PLATFORM_ESP32C5)
     extern unsigned char __uninit_start;
     const uint32_t *header;
     const unsigned char *image;
@@ -67,7 +70,7 @@ static int committed(void)
     extern uint32_t __tiku_nvm_mram_start[], __tiku_nvm_mram_size;
     header = __tiku_nvm_mram_start;
     capacity = (uintptr_t)&__tiku_nvm_mram_size;
-#elif defined(PLATFORM_ESP32C61)
+#elif defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5)
     /* Two slots take turns; the image is the newer valid one. */
     image = tiku_mem_arch_durable(&len);
     if (image == NULL) return 0;
@@ -161,7 +164,8 @@ void tiku_cpu_settings_boot(void)
     boot_default = as_choice(tiku_cpu_mclk_hz());
     restored = 1;
 #if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
-    defined(PLATFORM_STM32N6) || defined(PLATFORM_ESP32C61)
+    defined(PLATFORM_STM32N6) || defined(PLATFORM_ESP32C61) || \
+    defined(PLATFORM_ESP32C5)
     /* A bad mirror may leave old NOLOAD SRAM intact after a warm reset, so
      * the setting counts as restored only when the mirror restore succeeded
      * and the durable image matches the working copy. */

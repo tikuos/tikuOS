@@ -53,12 +53,20 @@ $(eval $(call tiku_option,TIKU_INIT_ENABLE,bool,System,all,\
 $(eval $(call tiku_option,TIKU_THREADS_ENABLE,bool,System,arm,\
   Preemptive worker threads))
 $(eval $(call tiku_option,TIKU_SHELL_COLOR,bool,System,all,Colour in the shell))
+$(eval $(call tiku_option,TIKU_ESP32C5_XIP_CODE,bool,System,plat:esp32c5,\
+  Run BASIC and shell commands from paired flash code to free internal SRAM))
 
 # --- Console -----------------------------------------------------------------
 $(eval $(call tiku_option,UART_BAUD,int,Console,all,\
   Console baud rate (empty: the board default)))
 $(eval $(call tiku_option,TIKU_CONSOLE,enum:uart+usb,Console,\
   mcu:rp2350+nrf54lm20a+nrf54lm20b,Console on the UART or on native USB))
+ifeq ($(TIKU_PLATFORM),esp32c5)
+opt_kind_TIKU_CONSOLE := enum:usb
+opt_where_TIKU_CONSOLE := plat:esp32c5
+opt_help_TIKU_CONSOLE := Native USB Serial/JTAG console
+opt_where_UART_BAUD := plat:esp32c61
+endif
 $(eval $(call tiku_option,MEMORY_MODEL,enum:small+large,Console,plat:msp430,\
   MSP430 memory model (large puts code and data in upper FRAM)))
 
@@ -131,6 +139,12 @@ $(eval $(call tiku_option,TIKU_KITS_NET_DNS_ENABLE,bool,Networking,all,\
   DNS resolver))
 $(eval $(call tiku_option,TIKU_KITS_NET_DHCP_ENABLE,bool,Networking,all,\
   DHCP client))
+
+ifeq ($(TIKU_PLATFORM),esp32c5)
+C5_UNAVAILABLE_OPTIONS := $(filter-out TIKU_SHELL_ENABLE TIKU_SHELL_BASIC_ENABLE \
+    TIKU_THREADS_ENABLE,$(filter TIKU_%_ENABLE,$(TIKU_OPTIONS)))
+$(foreach o,$(C5_UNAVAILABLE_OPTIONS),$(eval opt_where_$(o) := unavailable))
+endif
 
 # The boards this platform builds for, the one this build targets first.
 opt_boards = $(BOARD) $(filter-out $(BOARD),$(foreach b,$(KNOWN_BOARDS), \

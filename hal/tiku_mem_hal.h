@@ -38,7 +38,7 @@ static inline int tiku_mem_arch_in_exception(void)
     return ipsr != 0u;
 }
 #define TIKU_MEM_ARCH_IN_EXCEPTION() tiku_mem_arch_in_exception()
-#elif defined(PLATFORM_ESP32C61)
+#elif defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5)
 /**
  * @brief Non-zero in an interrupt handler: mintstatus holds the CLIC level
  *        being served in its top byte, and zero outside every handler.
@@ -74,6 +74,8 @@ static inline int tiku_mem_arch_in_exception(void)
 #include "arch/ra8p1/tiku_mem_arch.h"
 #elif defined(PLATFORM_ESP32C61)
 #include "arch/esp32c61/tiku_mem_arch.h"
+#elif defined(PLATFORM_ESP32C5)
+#include "arch/esp32c5/tiku_mem_arch.h"
 #endif
 
 /*---------------------------------------------------------------------------*/

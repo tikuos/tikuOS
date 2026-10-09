@@ -65,7 +65,7 @@ static void wifi_help(void)
 {
     SHELL_PRINTF("wifi on | off            Power the radio up or down\n");
     SHELL_PRINTF("wifi status              Driver state + MAC + link\n");
-    SHELL_PRINTF("wifi scan                Trigger active scan\n");
+    SHELL_PRINTF("wifi scan                Scan for nearby networks\n");
     SHELL_PRINTF("wifi list                Show cached scan results\n");
     SHELL_PRINTF("wifi connect SSID PSK    Join WPA2-PSK network "
                  "(PSK \"\": an open one)\n");

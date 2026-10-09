@@ -48,7 +48,7 @@
  * build a plain `.bss` array (volatile). */
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
     defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
-    defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C61)
+    defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5)
 
 /*
  * Capacity is derived from the extent at mount: the largest file count that

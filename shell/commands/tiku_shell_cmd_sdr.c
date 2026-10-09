@@ -8,8 +8,8 @@
  * tiku_shell_cmd_sdr.c - "sdr" command: the radio as a receiver.
  *
  * `start` reserves the capture bank and powers the radio up; `stop` restores
- * the default gain hold and frees the bank, leaving the radio up.  `spec` and
- * `sweep` print TikuSDR's SPEC lines; `cap`, `scan` and `hex` show snapshots.
+ * the default gain hold and frees the bank. C5 also powers its exclusive
+ * PHY off; C61 leaves Wi-Fi up. `spec` and `sweep` print TikuSDR's SPEC lines.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,17 +21,67 @@
 #include <shell/tiku_shell.h>
 #include <interfaces/wireless/tiku_wireless.h>
 #include <drivers/wifi/esp/tiku_drv_sdr_esp.h>
+#if defined(PLATFORM_ESP32C5)
+#include <drivers/wifi/esp/c5/sdr_c5.h>
+#endif
 
 /** @brief Print the usage. */
 static void sdr_help(void)
 {
-    SHELL_PRINTF("usage: sdr start | stop | info | spec <MHz> [rate] [nfft]"
+    SHELL_PRINTF("usage: sdr start | stop | info | bands | spec <MHz> [rate] [nfft]"
                  " | sweep <lo> <hi> <step> [rate] [nfft]\n"
                  "       sdr gain [auto | <index>] | reserve | release |"
                  " cap <MHz> [rate 0-5] [words] [reps] | scan |"
                  " hex <offset> <count>\n"
                  "  rate: 0 80, 1 40, 2 20, 3 10, 4 8, 5 4 MS/s; words up to"
                  " %lu\n", (unsigned long)TIKU_DRV_SDR_ESP_WORDS_MAX);
+}
+
+/** @brief Parse decimal digits within an inclusive bound; refuse signs and overflow. */
+static int decimal(const char *text, uint32_t maximum, uint32_t *value)
+{
+    uint32_t n = 0;
+    if (!text || !*text) { return 0; }
+    do {
+        unsigned digit = (unsigned)(*text++ - '0');
+        if (digit > 9 || digit > maximum || n > (maximum - digit) / 10) { return 0; }
+        n = n * 10 + digit;
+    } while (*text);
+    *value = n;
+    return 1;
+}
+
+/** @brief Validate numeric command arguments before narrowing their types. */
+static int arguments(uint8_t argc, const char *argv[])
+{
+    uint32_t bounds[5] = {UINT32_MAX, 5, 256, 64, 256}, values[5];
+    unsigned minimum = 2, maximum = 2, i;
+    const char *verb = argv[1];
+    if (!strcmp(verb, "gain")) {
+        if (argc == 2 || (argc == 3 && !strcmp(argv[2], "auto"))) { return 1; }
+        minimum = maximum = 3;
+        bounds[0] = 255;
+    } else if (!strcmp(verb, "cap")) {
+        minimum = 3; maximum = 6; bounds[2] = TIKU_DRV_SDR_ESP_WORDS_MAX;
+    } else if (!strcmp(verb, "spec")) {
+        minimum = 3; maximum = 5;
+    } else if (!strcmp(verb, "sweep")) {
+        minimum = 5; maximum = 7;
+        bounds[1] = bounds[2] = UINT32_MAX; bounds[3] = 5;
+    } else if (!strcmp(verb, "hex")) {
+        minimum = maximum = 4;
+        bounds[0] = TIKU_DRV_SDR_ESP_WORDS_MAX - 1;
+        bounds[1] = TIKU_DRV_SDR_ESP_WORDS_MAX;
+    }
+    if (argc < minimum || argc > maximum) { return 0; }
+    for (i = 2; i < argc; i++) {
+        if (!decimal(argv[i], bounds[i - 2], &values[i - 2])) { return 0; }
+    }
+    if (!strcmp(verb, "cap") && ((argc >= 5 && !values[2]) ||
+                                  (argc >= 6 && !values[3]))) { return 0; }
+    if (!strcmp(verb, "hex") && (!values[1] ||
+        values[1] > TIKU_DRV_SDR_ESP_WORDS_MAX - values[0])) { return 0; }
+    return 1;
 }
 
 /** @brief Bar of @p v on a log scale: one mark per factor of two. */
@@ -53,10 +103,9 @@ static void bar(uint32_t v)
 static void sdr_failed(int rc)
 {
     SHELL_PRINTF("sdr: capture failed (%d): %s\n", rc,
-                 rc == -1 ? "reserve the bank and bring wifi up first, "
-                            "or the arguments are out of range"
+                 rc == -1 ? "run sdr start; check arguments and radio ownership"
                  : rc == -2 ? "the dump unit never reported done"
-                            : "the dump unit wrote nothing");
+                            : "incomplete/constant samples or damaged guard");
 }
 
 /** @brief The quietest and loudest slices of @p r. */
@@ -147,7 +196,8 @@ static void sdr_hex(const char *argv[])
         SHELL_PRINTF("sdr: no bank reserved\n");
         return;
     }
-    for (j = 0U; j < n && off + j < TIKU_DRV_SDR_ESP_WORDS_MAX; j++) {
+    if (off >= TIKU_DRV_SDR_ESP_WORDS_MAX) { SHELL_PRINTF("ERR hex range\n"); return; }
+    for (j = 0U; j < n && j < TIKU_DRV_SDR_ESP_WORDS_MAX - off; j++) {
         SHELL_PRINTF("%lx%s", (unsigned long)w[off + j],
                      (j % 8U == 7U) ? "\n" : " ");
     }
@@ -212,6 +262,15 @@ static int sdr_spec_line(uint32_t mhz, uint8_t rate, unsigned nfft)
  *         down before the bank is reserved. */
 static void sdr_start(void)
 {
+#if defined(PLATFORM_ESP32C5)
+    int reserved = tiku_drv_sdr_esp_reserved();
+    if (tiku_drv_sdr_esp_reserve() != 0) { SHELL_PRINTF("ERR start bank\n"); return; }
+    if (tiku_sdr_c5_power(1) != 0) {
+        if (!reserved) { tiku_drv_sdr_esp_release(); }
+        SHELL_PRINTF("ERR start radio (busy or unavailable)\n");
+        return;
+    }
+#else
     if (!tiku_drv_sdr_esp_reserved()) {
         (void)tiku_wireless_power(0U);
         if (tiku_drv_sdr_esp_reserve() != 0) {
@@ -223,6 +282,7 @@ static void sdr_start(void)
         SHELL_PRINTF("ERR start radio\n");
         return;
     }
+#endif
     SHELL_PRINTF("SDR ready\n");
 }
 
@@ -230,7 +290,11 @@ static void sdr_start(void)
 static void sdr_info(void)
 {
     SHELL_PRINTF("SDR bank %s rates 80 40 20 10 8 4 nfft 64 128 256 "
+#if defined(PLATFORM_ESP32C5)
+                 "tune 2400 2500\n",
+#else
                  "tune 2200 2700\n",
+#endif
                  tiku_drv_sdr_esp_reserved() ? "yes" : "no");
 }
 
@@ -249,11 +313,12 @@ static void sdr_sweep(uint8_t argc, const char *argv[])
         SHELL_PRINTF("ERR sweep range\n");
         return;
     }
-    for (mhz = lo; mhz <= hi; mhz += step) {
+    for (mhz = lo; ; mhz += step) {
         if (sdr_spec_line(mhz, rate, nfft) != 0) {
             return;
         }
         n++;
+        if (hi - mhz < step) { break; }
     }
     SHELL_PRINTF("SWEEP %lu\n", (unsigned long)n);
 }
@@ -397,6 +462,8 @@ void tiku_shell_cmd_sdr(uint8_t argc, const char *argv[])
     } else if (sdr_probe(argc, argv)) {
         /* a probe verb ran */
 #endif
+    } else if (!arguments(argc, argv)) {
+        SHELL_PRINTF("ERR arguments\n");
     } else if (strcmp(argv[1], "scan") == 0) {
         sdr_scan();
     } else if (strcmp(argv[1], "start") == 0) {
@@ -404,9 +471,15 @@ void tiku_shell_cmd_sdr(uint8_t argc, const char *argv[])
     } else if (strcmp(argv[1], "stop") == 0) {
         tiku_drv_sdr_esp_hold(TIKU_DRV_SDR_ESP_HOLD);
         tiku_drv_sdr_esp_release();
-        SHELL_PRINTF("SDR stopped\n");
+        SHELL_PRINTF(tiku_drv_sdr_esp_reserved() ? "ERR stop busy\n" : "SDR stopped\n");
     } else if (strcmp(argv[1], "info") == 0) {
         sdr_info();
+    } else if (strcmp(argv[1], "bands") == 0) {
+#if defined(PLATFORM_ESP32C5)
+        SHELL_PRINTF("SDR bands 2400 2500 4900 5900 bank_bytes 131072\n");
+#else
+        SHELL_PRINTF("SDR bands 2200 2700 bank_bytes 65536\n");
+#endif
     } else if (strcmp(argv[1], "gain") == 0) {
         sdr_gain(argc, argv);
     } else if (strcmp(argv[1], "spec") == 0 && argc >= 3) {
@@ -420,7 +493,7 @@ void tiku_shell_cmd_sdr(uint8_t argc, const char *argv[])
                                                      : "sdr: no bank\n");
     } else if (strcmp(argv[1], "release") == 0) {
         tiku_drv_sdr_esp_release();
-        SHELL_PRINTF("sdr: bank released\n");
+        SHELL_PRINTF(tiku_drv_sdr_esp_reserved() ? "ERR release busy\n" : "sdr: bank released\n");
     } else if (strcmp(argv[1], "cap") == 0 && argc >= 3) {
         sdr_cap(argc, argv);
     } else if (strcmp(argv[1], "hex") == 0 && argc >= 4) {

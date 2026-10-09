@@ -48,6 +48,9 @@
 /* GPIO0..GPIO29 in banks of eight, numbered as on the RP2350. */
 #define TIKU_GPIO_PORTS(X) X(1, 8) X(2, 8) X(3, 8) X(4, 6)
 
+#elif defined(PLATFORM_ESP32C5)
+#define TIKU_GPIO_PORTS(X) X(1, 8) X(2, 8) X(3, 8) X(4, 5)
+
 #elif defined(PLATFORM_AMBIQ)
 /* Pads in banks of eight, pad = (port - 1) * 8 + pin: pads 0..127 on the
  * Apollo4 register map, pads 0..223 on the Apollo510. */

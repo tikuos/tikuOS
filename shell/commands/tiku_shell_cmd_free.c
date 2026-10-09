@@ -77,6 +77,9 @@ extern char __tiku_xip_start;
 extern char __tiku_xip_end;
 extern char __tiku_flash_payload_bytes;
 #endif
+#if defined(PLATFORM_ESP32C5)
+extern char __tiku_flash_payload_bytes;
+#endif
 extern char _etext;         /* past last byte of .text         */
 
 /*
@@ -148,7 +151,7 @@ stack_used(void)
         return (used > 0xFFFFU) ? 0xFFFFU : (uint16_t)used;
     }
     return 0;
-#elif defined(PLATFORM_ESP32C61)
+#elif defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5)
     uintptr_t sp;
     uintptr_t top = (uintptr_t)&__stack;
     __asm__ volatile ("mv %0, sp" : "=r"(sp));
@@ -221,13 +224,19 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
     fram_used = (unsigned long)(uintptr_t)&__tiku_flash_payload_bytes +
                 (unsigned long)((uintptr_t)&__tiku_xip_end -
                                 (uintptr_t)&__tiku_xip_start);
+#elif defined(PLATFORM_ESP32C5)
+    fram_used = (unsigned long)(uintptr_t)&__tiku_flash_payload_bytes;
 #endif
 
     /* ---- Compile-time (fixed at link) ---- */
     SHELL_PRINTF(SH_YELLOW "--- Compile-time ---" SH_RST "\n");
     SHELL_PRINTF(SH_BOLD "SRAM" SH_RST "  %5lu total\n",
                  (unsigned long)sram_total);
+#if defined(PLATFORM_ESP32C5)
+    SHELL_PRINTF("  image+static %5lu\n", (unsigned long)sram_static);
+#else
     SHELL_PRINTF("  .data+.bss  %5lu\n", (unsigned long)sram_static);
+#endif
 #if defined(TIKU_TIER_SRAM_DERIVED)
     {
         uintptr_t bank_lo = (uintptr_t)&__datastart;

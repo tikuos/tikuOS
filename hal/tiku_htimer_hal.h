@@ -30,6 +30,8 @@
 #include "arch/ra8p1/tiku_htimer_config.h"
 #elif defined(PLATFORM_ESP32C61)
 #include "arch/esp32c61/tiku_htimer_config.h"
+#elif defined(PLATFORM_ESP32C5)
+#include "arch/esp32c5/tiku_timer_arch.h"
 #endif
 
 /*---------------------------------------------------------------------------*/

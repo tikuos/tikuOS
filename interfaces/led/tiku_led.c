@@ -123,8 +123,10 @@ tiku_led_toggle(uint8_t idx)
 void
 tiku_led_init_all(void)
 {
+#if TIKU_BOARD_LED_COUNT > 0
     uint8_t i;
     for (i = 0; i < TIKU_BOARD_LED_COUNT; i++) {
         tiku_led_init(i);
     }
+#endif
 }

@@ -151,6 +151,15 @@ board_owner(uint8_t port, uint8_t pin)
         IS_BANKED_PIN(port, pin, TIKU_BOARD_UART0_RX_GPIO)) {
         return "console";
     }
+#elif defined(PLATFORM_ESP32C5)
+#if !defined(TIKU_CONSOLE_JTAG)
+    if (IS_BANKED_PIN(port, pin, TIKU_BOARD_UART_TX_PIN) ||
+        IS_BANKED_PIN(port, pin, TIKU_BOARD_UART_RX_PIN)) { return "console"; }
+#endif
+    if (IS_BANKED_PIN(port, pin, TIKU_BOARD_USB_DM_PIN) ||
+        IS_BANKED_PIN(port, pin, TIKU_BOARD_USB_DP_PIN)) { return "console"; }
+    if (port >= 1 && port <= 4 && pin < 8 &&
+        (TIKU_BOARD_GPIO_RESERVED & (1UL << ((port - 1u) * 8u + pin)))) { return "peripheral"; }
 #elif defined(PLATFORM_STM32N6)
     if (port == TIKU_BOARD_UART_PORT &&
         (pin == TIKU_BOARD_UART_TX_PIN || pin == TIKU_BOARD_UART_RX_PIN)) {

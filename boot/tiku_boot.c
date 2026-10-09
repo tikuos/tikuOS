@@ -25,6 +25,9 @@
 #include <arch/esp32c61/tiku_flash_arch.h>
 #include <arch/esp32c61/tiku_psram_arch.h>
 #include <arch/esp32c61/tiku_xip_arch.h>
+#elif defined(PLATFORM_ESP32C5)
+#include <arch/esp32c5/tiku_flash_arch.h>
+#include <services/console/tiku_usb_serial_jtag.h>
 #endif
 #include <kernel/cpu/tiku_stack.h>   /* stack-paint for /sys/mem/stack_free */
 #include "kernel/cpu/tiku_common.h"
@@ -146,7 +149,7 @@ tiku_cpu_full_init(unsigned int cpu_freq)
 
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
     defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
-    defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C61)
+    defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5)
     /* The Cortex-M reset handlers mask interrupts (cpsid i in
      * tiku_crt_early.c), so no ISR runs against half-built kernel state.
      * Everything an ISR touches exists once tiku_sched_init() has built the
@@ -224,6 +227,8 @@ tiku_boot_init_memory(void)
     /* The flash starts first: tiku_mem_init() restores the durable mirror
      * from it. */
     (void)tiku_flash_init();
+#elif defined(PLATFORM_ESP32C5)
+    if (tiku_flash_init() != TIKU_FLASH_OK) { return TIKU_BOOT_ERROR; }
 #endif
 
     /* Initialize memory subsystem (arch-specific setup + module state) */
@@ -231,7 +236,7 @@ tiku_boot_init_memory(void)
 
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
     defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
-    defined(PLATFORM_ESP32C61) || defined(PLATFORM_RA8P1)
+    defined(PLATFORM_ESP32C61) || defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C5)
     /* Every port with a carved NVM region wires the tier allocator here,
      * before any consumer allocates: tiku_tier_init() runs the layout
      * service, which fixes the NVM tier's extent for this boot.  The call is
@@ -252,7 +257,14 @@ tiku_boot_init_peripherals(void)
 {
     /* The UART starts first, so a UART console carries the output of the
      * rest of boot.  The GPIO unlock in tiku_boot_init_cpu() has run. */
+#if defined(TIKU_CONSOLE_JTAG)
+    tiku_usb_serial_jtag_init();
+#else
     tiku_uart_init();
+#if defined(PLATFORM_ESP32C5)
+    if (!tiku_c5_uart_ready()) { return TIKU_BOOT_ERROR; }
+#endif
+#endif
 
 #if defined(PLATFORM_STM32N6) && defined(TIKU_N6_SRAM_PROBE)
     /* The probe prints as it walks the SRAM banks, so it runs after the

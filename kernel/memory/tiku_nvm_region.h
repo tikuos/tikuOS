@@ -72,6 +72,8 @@
 /* Not linker-carved: the region is a span of the external flash, so this
  * follows TIKU_FLASH_REGION_BYTES in arch/esp32c61/tiku_flash_arch.h. */
 #define TIKU_NVM_REGION_BYTES  (5120u * 1024u)
+#elif defined(PLATFORM_ESP32C5)
+#define TIKU_NVM_REGION_BYTES  (2012u * 1024u)
 #else
 #define TIKU_NVM_REGION_BYTES  0u
 #endif

@@ -19,6 +19,9 @@
 
 #include "tiku_shell_io.h"
 #include "tiku.h"
+#if defined(TIKU_CONSOLE_JTAG)
+#include <services/console/tiku_usb_serial_jtag.h>
+#endif
 #include "kernel/vfs/tiku_vfs.h"    /* caller-capability sync on backend swap */
 #include <stdarg.h>
 #include <stdint.h>                 /* uintptr_t for %p */
@@ -338,9 +341,15 @@ tiku_shell_io_has_crlf(void)
  * Echo and CRLF are both enabled for interactive terminal use.
  */
 const tiku_shell_io_t tiku_shell_io_uart = {
+#if defined(TIKU_CONSOLE_JTAG)
+    tiku_serial_jtag_putc,
+    tiku_serial_jtag_rx_ready,
+    tiku_usb_serial_jtag_getc,
+#else
     tiku_uart_putc,                         /* putc */
     tiku_uart_rx_ready,                     /* rx_ready */
     tiku_uart_getc,                         /* getc */
+#endif
     TIKU_SHELL_IO_CRLF | TIKU_SHELL_IO_ECHO,   /* flags */
     TIKU_VFS_CAP_ALL                        /* local console: all authority */
 };

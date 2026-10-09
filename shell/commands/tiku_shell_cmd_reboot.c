@@ -27,6 +27,9 @@ extern void tiku_cpu_rp2350_reboot_to_bootsel(void);
 #if defined(PLATFORM_ESP32C61)
 #include <arch/esp32c61/tiku_cpu_common.h>
 #endif
+#if defined(PLATFORM_ESP32C5)
+#include <arch/esp32c5/tiku_cpu_common.h>
+#endif
 #if defined(PLATFORM_AMBIQ)
 #include <arch/ambiq/tiku_cpu_freq_boot_arch.h>
 #if (TIKU_DRV_EMMC_ENABLE + 0)
@@ -86,6 +89,9 @@ tiku_shell_cmd_reboot(uint8_t argc, const char *argv[])
      * call stops the cache and resets from code in SRAM, since this command
      * may run from flash; it does not return. */
     tiku_cpu_esp32c61_restart(1);
+#endif
+#if defined(PLATFORM_ESP32C5)
+    tiku_cpu_c5_restart();
 #endif
 
     /*

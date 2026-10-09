@@ -16,6 +16,9 @@
 
 #include "tiku_console.h"
 #include "tiku.h"
+#if defined(TIKU_CONSOLE_JTAG)
+#include "tiku_usb_serial_jtag.h"
+#endif
 
 #if defined(TIKU_CONSOLE_USB)
 #if defined(PLATFORM_NORDIC)
@@ -49,7 +52,11 @@ typedef struct {
 /* The wire follows the console: the USB CDC port on a USB-only console
  * (TIKU_CONSOLE=usb on RP2350 or nRF54LM20), and the UART everywhere else,
  * TIKU_CONSOLE=both included. */
-#if defined(TIKU_CONSOLE_USB) && !defined(TIKU_CONSOLE_BOTH)
+#if defined(TIKU_CONSOLE_JTAG)
+static const tiku_console_wire_t boot_wire = {
+    tiku_serial_jtag_putc, tiku_serial_jtag_rx_ready, tiku_usb_serial_jtag_getc, 1u
+};
+#elif defined(TIKU_CONSOLE_USB) && !defined(TIKU_CONSOLE_BOTH)
 static const tiku_console_wire_t boot_wire = {
     tiku_usb_cdc_putc, tiku_usb_cdc_rx_ready, tiku_usb_cdc_getc, 1u
 };

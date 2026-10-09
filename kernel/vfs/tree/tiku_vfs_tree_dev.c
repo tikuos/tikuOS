@@ -106,8 +106,12 @@ LED_VFS_FUNCS(3)
 static int
 uart_overruns_read(char *buf, size_t max)
 {
+#if defined(TIKU_CONSOLE_JTAG)
+    return snprintf(buf, max, "%lu\n", (unsigned long)tiku_debug_arch_dropped());
+#else
     return snprintf(buf, max, "%u\n",
                     (unsigned)tiku_uart_overrun_count());
+#endif
 }
 
 #if defined(PLATFORM_NORDIC)
@@ -138,8 +142,12 @@ uart_recoveries_read(char *buf, size_t max)
 static int
 uart_baud_read(char *buf, size_t max)
 {
+#if defined(TIKU_CONSOLE_JTAG)
+    return snprintf(buf, max, "usb-serial-jtag\n");
+#else
     return snprintf(buf, max, "%lu\n",
                     (unsigned long)TIKU_BOARD_UART_BAUD);
+#endif
 }
 
 /*---------------------------------------------------------------------------*/
@@ -157,6 +165,7 @@ uart_baud_read(char *buf, size_t max)
  * @param max  Capacity of @p buf in bytes
  * @return Bytes written, or -1 on error
  */
+#if !defined(PLATFORM_ESP32C5)
 static int
 spi_config_read(char *buf, size_t max)
 {
@@ -263,6 +272,7 @@ i2c_scan_read(char *buf, size_t max)
 
     return pos;
 }
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* /dev/console — system console (UART)                                      */
@@ -283,8 +293,13 @@ static int
 console_read(char *buf, size_t max)
 {
     size_t n = 0;
+#if defined(TIKU_CONSOLE_JTAG)
+    while (n < max && tiku_debug_arch_rx_ready()) {
+        int c = tiku_debug_arch_getc();
+#else
     while (n < max && tiku_uart_rx_ready()) {
         int c = tiku_uart_getc();
+#endif
         if (c < 0) {
             break;
         }
@@ -309,7 +324,11 @@ console_write(const char *buf, size_t len)
 {
     size_t i;
     for (i = 0; i < len; i++) {
+#if defined(TIKU_CONSOLE_JTAG)
+        tiku_debug_arch_putc(buf[i]);
+#else
         tiku_uart_putc(buf[i]);
+#endif
     }
     return 0;
 }
@@ -383,9 +402,11 @@ devzero_read(char *buf, size_t max)
 /* Type descriptors for the typed /dev nodes below.  A bus scan
  * addresses every device on the bus and a console read takes input, so
  * neither is a passive read. */
+#if !defined(PLATFORM_ESP32C5)
 static const tiku_vfs_desc_t desc_scan = TIKU_VFS_DESC_FLAGS(
     TIKU_VFS_T_STR, TIKU_VFS_U_NONE, TIKU_VFS_FRESH_LIVE, TIKU_VFS_E_BUS,
     TIKU_VFS_DF_READ_EFFECT);
+#endif
 static const tiku_vfs_desc_t desc_console = TIKU_VFS_DESC_FLAGS(
     TIKU_VFS_T_STR, TIKU_VFS_U_NONE, TIKU_VFS_FRESH_LIVE, TIKU_VFS_E_CHEAP,
     TIKU_VFS_DF_READ_CONSUMES);
@@ -397,6 +418,7 @@ static const tiku_vfs_desc_t desc_uart_count = TIKU_VFS_DESC(
  * both carry a read-coalescing window: repeated reads inside the window
  * share one conversion.  Temperature drifts slowly -> ~100 ms; supply
  * voltage slower still -> ~1 s. */
+#if !defined(PLATFORM_ESP32C5)
 static const tiku_vfs_desc_t desc_adc_temp =
     TIKU_VFS_DESC_RF(TIKU_VFS_T_U32, TIKU_VFS_U_ADC_RAW,
                      TIKU_VFS_FRESH_LIVE, TIKU_VFS_E_PERIPH, 0, 4095,
@@ -405,6 +427,7 @@ static const tiku_vfs_desc_t desc_adc_batt =
     TIKU_VFS_DESC_RF(TIKU_VFS_T_U32, TIKU_VFS_U_ADC_RAW,
                      TIKU_VFS_FRESH_LIVE, TIKU_VFS_E_PERIPH, 0, 4095,
                      TIKU_CLOCK_SECOND);
+#endif
 #if TIKU_BOARD_LED_COUNT >= 1
 static const tiku_vfs_desc_t desc_led =
     TIKU_VFS_DESC(TIKU_VFS_T_BOOL, TIKU_VFS_U_BOOL,
@@ -413,6 +436,10 @@ static const tiku_vfs_desc_t desc_led =
 
 /** /dev/uart directory table — RX health + configured baud */
 static const tiku_vfs_node_t dev_uart_children[] = {
+#if defined(TIKU_CONSOLE_JTAG)
+    { "tx_dropped", TIKU_VFS_FILE, uart_overruns_read, NULL, NULL, 0, &desc_uart_count },
+    { "transport", TIKU_VFS_FILE, uart_baud_read, NULL, NULL, 0, &desc_bus_config },
+#else
     { "overruns", TIKU_VFS_FILE, uart_overruns_read, NULL, NULL, 0,
       &desc_uart_count },
     { "baud",     TIKU_VFS_FILE, uart_baud_read,     NULL, NULL, 0,
@@ -421,11 +448,13 @@ static const tiku_vfs_node_t dev_uart_children[] = {
     { "recoveries", TIKU_VFS_FILE, uart_recoveries_read, NULL, NULL, 0,
       &desc_uart_count },
 #endif
+#endif
 };
 #define DEV_UART_NCHILD \
     (sizeof dev_uart_children / sizeof dev_uart_children[0])
 
 /** /dev/adc directory table — raw conversions, no calibration */
+#if !defined(PLATFORM_ESP32C5)
 static const tiku_vfs_node_t dev_adc_children[] = {
     { "temp",    TIKU_VFS_FILE, adc_temp_read,    NULL, NULL, 0, &desc_adc_temp },
     { "battery", TIKU_VFS_FILE, adc_battery_read, NULL, NULL, 0, &desc_adc_batt },
@@ -441,6 +470,7 @@ static const tiku_vfs_node_t dev_spi_children[] = {
     { "config", TIKU_VFS_FILE, spi_config_read, NULL, NULL, 0,
       &desc_bus_config },
 };
+#endif
 
 /*
  * The /dev directory table -- every hardware-facing node.  LED entries are
@@ -474,11 +504,17 @@ static const tiku_vfs_node_t dev_children[] = {
       tiku_vfs_tree_gpio_dir_children, TIKU_VFS_TREE_GPIO_NPORTS },
     { "gpio_owner", TIKU_VFS_DIR, NULL, NULL,
       tiku_vfs_tree_gpio_owner_children, TIKU_VFS_TREE_GPIO_NPORTS },
+#if defined(TIKU_CONSOLE_JTAG)
+    { "usb_serial_jtag", TIKU_VFS_DIR, NULL, NULL, dev_uart_children,
+#else
     { "uart",     TIKU_VFS_DIR,  NULL, NULL, dev_uart_children,
+#endif
       DEV_UART_NCHILD },
+#if !defined(PLATFORM_ESP32C5)
     { "adc",      TIKU_VFS_DIR,  NULL, NULL, dev_adc_children, 2 },
     { "i2c",      TIKU_VFS_DIR,  NULL, NULL, dev_i2c_children, 1 },
     { "spi",      TIKU_VFS_DIR,  NULL, NULL, dev_spi_children, 1 },
+#endif
 };
 
 /**

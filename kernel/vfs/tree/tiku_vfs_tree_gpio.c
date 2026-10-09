@@ -240,7 +240,8 @@ static int gpio_pin_file_write(const char *buf, size_t len);
 /*---------------------------------------------------------------------------*/
 
 /** @brief Expand X(port, pin) for pins 0..5 of port @p p. */
-#define PINS_6(X, p)  X(p, 0) X(p, 1) X(p, 2) X(p, 3) X(p, 4) X(p, 5)
+#define PINS_5(X, p)  X(p, 0) X(p, 1) X(p, 2) X(p, 3) X(p, 4)
+#define PINS_6(X, p)  PINS_5(X, p) X(p, 5)
 
 /** @brief Expand X(port, pin) for pins 0..7 of port @p p. */
 #define PINS_8(X, p)  PINS_6(X, p) X(p, 6) X(p, 7)

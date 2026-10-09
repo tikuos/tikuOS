@@ -36,7 +36,7 @@
 #if !defined(PLATFORM_MSP430) && !defined(PLATFORM_RP2350) && \
     !defined(PLATFORM_AMBIQ) && !defined(PLATFORM_NORDIC) && \
     !defined(PLATFORM_STM32N6) && !defined(PLATFORM_RA8P1) && \
-    !defined(PLATFORM_ESP32C61)
+    !defined(PLATFORM_ESP32C61) && !defined(PLATFORM_ESP32C5)
 #define PLATFORM_MSP430 1
 #endif
 
@@ -180,6 +180,10 @@
 #ifndef MAIN_CPU_FREQ
 #define MAIN_CPU_FREQ 150
 #endif
+#elif defined(PLATFORM_ESP32C5)
+#ifndef MAIN_CPU_FREQ
+#define MAIN_CPU_FREQ 240
+#endif
 #elif defined(PLATFORM_ESP32C61)
 /* Boot rate, applied by tiku_cpu_freq_init(): 160 MHz is the PLL rate the
  * ROM already runs at.  The tick and the console run from the crystal and
@@ -197,7 +201,7 @@
  */
 #if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || \
     defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
-    defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C61)
+    defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5)
 #define TIKU_MAIN_CPU_HZ  ((unsigned long)MAIN_CPU_FREQ * 1000000UL)
 #elif MAIN_CPU_FREQ == 1
 #define TIKU_MAIN_CPU_HZ  1000000UL
@@ -241,6 +245,8 @@
 #include <arch/ra8p1/tiku_device_select.h>
 #elif defined(PLATFORM_ESP32C61)
 #include <arch/esp32c61/tiku_device_select.h>
+#elif defined(PLATFORM_ESP32C5)
+#include <arch/esp32c5/tiku_device_select.h>
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -289,6 +295,8 @@
 #include <arch/ra8p1/tiku_timer_arch.h>
 #elif defined(PLATFORM_ESP32C61)
 #include <arch/esp32c61/tiku_timer_arch.h>
+#elif defined(PLATFORM_ESP32C5)
+#include <arch/esp32c5/tiku_timer_arch.h>
 #endif
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/timers/tiku_htimer.h>
