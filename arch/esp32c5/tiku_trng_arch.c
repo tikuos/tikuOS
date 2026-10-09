@@ -1,7 +1,8 @@
 /*
  * Tiku Operating System v0.06
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_trng_arch.c - bounded C5 internal-SAR entropy acquisition.
+ * tiku_trng_arch.c - bounded C5 internal-SAR entropy acquisition, and the
+ * RF-fed RNG register while the PHY owns the analog bus.
  * Register sequence: ESP-IDF 4d59230 bootloader_random_esp32c5.c,
  * C5 adc_ll.h, rng_ll.h and regi2c_impl.c (Apache-2.0).
  * SPDX-FileCopyrightText: 2024-2026 Espressif Systems (Shanghai) CO LTD
@@ -83,6 +84,21 @@ int tiku_trng_arch_read_bytes(uint8_t *out, size_t length)
     if (!length) { return TIKU_TRNG_OK; }
     for (offset = 0; offset < length; offset++) { out[offset] = 0; }
     state = TIKU_C5_IRQ_SAVE();
+    /* With the PHY owning the analog bus the RNG is fed by RF noise, as in
+     * the reference's esp_random path: read it one word per microsecond and
+     * leave the SAR alone. */
+    if (tiku_c5_analog_owner() == TIKU_C5_ANALOG_PHY) {
+        for (offset = 0; offset < length; offset++) {
+            if (!(offset & 3u)) {
+                TIKU_C5_ENTROPY_DELAY(1);
+                word = TIKU_C5_REG_READ(C5_RNG_DATA);
+            }
+            out[offset] = (uint8_t)word;
+            word >>= 8;
+        }
+        TIKU_C5_IRQ_RESTORE(state);
+        return TIKU_TRNG_OK;
+    }
     /* Active ADC conversion, temperature sensing or RNG sampling is owned
      * elsewhere. Acquisition must not reset or reconfigure that owner. */
     if (tiku_c5_analog_owner() != TIKU_C5_ANALOG_NONE ||
