@@ -152,3 +152,15 @@ void tiku_cpu_c5_restart(void)
     (void)tiku_c5_rom_cache_suspend();
     tiku_c5_rom_reset();
 }
+
+#if !TIKU_THREADS_ENABLE
+#include <reent.h>
+/**
+ * @brief The C library's reentrancy state, for errno and stdio.
+ *
+ * Espressif's newlib resolves every errno and stdio access through this
+ * call.  With workers the thread backend defines it; without them the
+ * kernel state is the only one.
+ */
+struct _reent *__getreent(void) { return _impure_ptr; }
+#endif

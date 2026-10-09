@@ -91,8 +91,13 @@ def require_idle_usb_port(port, ports):
         raise ValueError("port is not a native Espressif USB Serial/JTAG device")
     if not shutil.which("fuser"):
         raise ValueError("fuser is required to check existing port owners")
+    # Linux fuser returns 1 and prints nothing for an idle file; macOS fuser
+    # returns 0 and echoes "<path>:" on stdout.  Both print owner PIDs after
+    # that, so once the echoed path is removed any remaining text is an owner
+    # or an error message.
     owners = subprocess.run(["fuser", resolved], capture_output=True, text=True)
-    if owners.returncode != 1 or owners.stdout.strip() or owners.stderr.strip():
+    report = (owners.stdout + owners.stderr).replace(resolved + ":", "")
+    if owners.returncode > 1 or report.strip():
         raise ValueError("port is busy or its ownership could not be checked")
 
 
