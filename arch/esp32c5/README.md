@@ -144,14 +144,19 @@ reboot
 cat /sys/cpu/freq
 ```
 
-Saving does not change the running clock. The C5 changes only the CPU divider
-on its existing 240 MHz PLL source; AHB stays at 40 MHz. Before the first
-switch above 80 MHz the clock code sets the eFuse-calibrated core voltage, as
-the ESP-IDF bootloader does (the PVT-tracked voltage is not implemented); 240
-MHz is refused if that setting fails, and `diag voltage` shows it. Unsupported
-clock trees are refused. The update has bounded waits, readback checks and
-rollback; ROM delay calibration follows the selected CPU rate. A failed
-durable save is reported. Device Preferences uses these same VFS controls.
+Saving does not change the running clock. After a cold boot the ROM leaves the
+CPU on the 48 MHz crystal with the PLL off; the first clock change powers the
+480 MHz PLL, calibrates it from the crystal and moves the CPU onto its 240 MHz
+output with AHB at 40 MHz, as ESP-IDF's bootloader does. Later changes set
+only the CPU divider. Before the first switch above 80 MHz the clock code sets
+the eFuse-calibrated core voltage (the PVT-tracked voltage is not
+implemented); 240 MHz is refused if that setting fails, and `diag voltage`
+shows it. A PLL that does not calibrate leaves the CPU on the crystal, where
+`/sys/cpu/freq_change_mode` reads `fixed` and the radios refuse to start;
+`diag clock` shows the PLL result and the clock registers. Unsupported clock
+trees are refused. The update has bounded waits, readback checks and rollback;
+ROM delay calibration follows the selected CPU rate. A failed durable save is
+reported. Device Preferences uses these same VFS controls.
 
 ## I2C master
 

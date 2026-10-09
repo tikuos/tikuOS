@@ -16,6 +16,7 @@
 #include "tiku_shell_cmd_diag.h"
 #include <shell/tiku_shell.h>
 #include <string.h>
+#include <stdlib.h>
 
 #if defined(PLATFORM_STM32N6)
 
@@ -436,6 +437,7 @@ void tiku_shell_cmd_diag(uint8_t argc, const char *argv[]) {
 #if defined(PLATFORM_ESP32C5)
 #include <arch/esp32c5/tiku_fault_arch.h>
 #include <arch/esp32c5/tiku_pmu_arch.h>
+#include <arch/esp32c5/tiku_clock_arch.h>
 #include <arch/esp32c5/tiku_esp32c5_regs.h>
 
 /** @brief Report the retained fault record, or say there is none. */
@@ -499,7 +501,41 @@ void tiku_shell_cmd_diag(uint8_t argc, const char *argv[])
                      (unsigned long)(TIKU_C5_REG_READ(0x600B0028u) >> 27));
         return;
     }
-    SHELL_PRINTF("Usage: diag fault [illegal|load|store] | clear | voltage\n");
+    if (argc >= 2 && strcmp(argv[1], "clock") == 0) {
+        /* PCR SYSCLK/CPU/AHB, PMU immediate clock power, analog CONF0. */
+        SHELL_PRINTF("  pll result %d  sysclk %08lx cpu %08lx ahb %08lx\n"
+                     "  ckpower %08lx conf0 %08lx lpcon %08lx fault %d\n",
+                     tiku_c5_pll_result(),
+                     (unsigned long)TIKU_C5_REG_READ(0x60096110u),
+                     (unsigned long)TIKU_C5_REG_READ(0x60096118u),
+                     (unsigned long)TIKU_C5_REG_READ(0x6009611Cu),
+                     (unsigned long)TIKU_C5_REG_READ(0x600B00CCu),
+                     (unsigned long)TIKU_C5_REG_READ(0x600AF818u),
+                     (unsigned long)TIKU_C5_REG_READ(0x600AF018u),
+                     tiku_c5_clock_fault());
+        return;
+    }
+    if (argc >= 3 && strcmp(argv[1], "peek") == 0) {
+        /* Up to 64 words from a 4-byte-aligned address, four a line. */
+        uintptr_t a = (uintptr_t)strtoul(argv[2], NULL, 16);
+        uint32_t n = argc >= 4 ? (uint32_t)strtoul(argv[3], NULL, 10) : 1U, j;
+        if (a & 3u || n == 0 || n > 64u) {
+            SHELL_PRINTF("  peek: aligned address, 1..64 words\n");
+            return;
+        }
+        for (j = 0; j < n; j++) {
+            if (j % 4u == 0u) {
+                SHELL_PRINTF("%s  %08lx:", j ? "\n" : "",
+                             (unsigned long)(a + 4u * j));
+            }
+            SHELL_PRINTF(" %08lx",
+                         (unsigned long)TIKU_C5_REG_READ(a + 4u * j));
+        }
+        SHELL_PRINTF("\n");
+        return;
+    }
+    SHELL_PRINTF("Usage: diag fault [illegal|load|store] | clear | voltage"
+                 " | clock | peek <hex> [words]\n");
     diag_fault_show();
 }
 #endif /* PLATFORM_ESP32C5 */

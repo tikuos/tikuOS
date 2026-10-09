@@ -3,8 +3,9 @@
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  * tiku_clock_arch.c - C5 CPU dividers with a constant 40 MHz AHB clock.
  * Register fields and divider constraints follow ESP-IDF 4d59230,
- * esp32c5 clk_tree_ll.h and rtc_clk.c. The PLL source stays unchanged; the
- * calibrated core voltage is applied before the first divider change.
+ * esp32c5 clk_tree_ll.h and rtc_clk.c. A CPU left on the crystal by the
+ * ROM is moved onto the calibrated PLL first; the calibrated core voltage
+ * is applied before the first change above 80 MHz.
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <hal/tiku_cpu.h>
@@ -25,28 +26,90 @@
 
 static int clock_fault;
 
+#define C5_SOURCE_MASK      (3u << 16)
+#define C5_SOURCE_PLL240    (3u << 16)
+
 /** @brief Require PLL240, AHB /6 and a supported CPU divider with no pending update. */
 static int clock_tree_ready(void)
 {
     unsigned divider = (TIKU_C5_REG_READ(C5_PCR_CPU) & 255u) + 1u;
-    return ((TIKU_C5_REG_READ(C5_PCR_SYSCLK) >> 16) & 3u) == 3u &&
+    return (TIKU_C5_REG_READ(C5_PCR_SYSCLK) & C5_SOURCE_MASK) ==
+               C5_SOURCE_PLL240 &&
            (TIKU_C5_REG_READ(C5_PCR_AHB) & 255u) == 5u &&
            !(TIKU_C5_REG_READ(C5_PCR_UPDATE) & 1u) &&
            (divider == 1u || divider == 3u || divider == 6u);
 }
 
-/** @brief Latch a divider and wait a bounded number of reads for completion. */
-static int apply_divider(uint32_t value)
+/** @brief The tree the ROM leaves after a cold boot: CPU and AHB on the
+ *         crystal, nothing pending. */
+static int clock_tree_on_crystal(void)
+{
+    return (TIKU_C5_REG_READ(C5_PCR_SYSCLK) & C5_SOURCE_MASK) == 0 &&
+           !(TIKU_C5_REG_READ(C5_PCR_UPDATE) & 1u);
+}
+
+/** @brief Wait a bounded number of reads for a latched update to complete. */
+static int update_done(void)
 {
     unsigned i;
-    TIKU_C5_REG_WRITE(C5_PCR_CPU, value);
     TIKU_C5_REG_WRITE(C5_PCR_UPDATE, TIKU_C5_REG_READ(C5_PCR_UPDATE) | 1u);
     for (i = 0; i < C5_CLOCK_SPINS; i++) {
         if (!(TIKU_C5_REG_READ(C5_PCR_UPDATE) & 1u)) {
-            return TIKU_C5_REG_READ(C5_PCR_CPU) == value ? 0 : -1;
+            return 0;
         }
     }
     return -1;
+}
+
+/** @brief Latch a divider and wait a bounded number of reads for completion. */
+static int apply_divider(uint32_t value)
+{
+    TIKU_C5_REG_WRITE(C5_PCR_CPU, value);
+    if (update_done() != 0) {
+        return -1;
+    }
+    return TIKU_C5_REG_READ(C5_PCR_CPU) == value ? 0 : -1;
+}
+
+/**
+ * @brief Latch a CPU divider, AHB divider and source together, as
+ *        rtc_clk_cpu_freq_to_pll_240_mhz and rtc_clk_cpu_freq_to_xtal do.
+ */
+static int apply_tree(uint32_t cpu, uint32_t ahb, uint32_t source)
+{
+    TIKU_C5_REG_WRITE(C5_PCR_CPU, cpu);
+    TIKU_C5_REG_WRITE(C5_PCR_AHB, ahb);
+    TIKU_C5_REG_WRITE(C5_PCR_SYSCLK,
+        (TIKU_C5_REG_READ(C5_PCR_SYSCLK) & ~C5_SOURCE_MASK) | source);
+    if (update_done() != 0) {
+        return -1;
+    }
+    return TIKU_C5_REG_READ(C5_PCR_CPU) == cpu &&
+           TIKU_C5_REG_READ(C5_PCR_AHB) == ahb &&
+           (TIKU_C5_REG_READ(C5_PCR_SYSCLK) & C5_SOURCE_MASK) == source
+           ? 0 : -1;
+}
+
+/**
+ * @brief Move a CPU on the crystal onto the calibrated PLL at @p mhz with
+ *        AHB at 40 MHz; a failed latch returns the tree to the crystal.
+ */
+static int leave_crystal(unsigned mhz)
+{
+    uint32_t cpu = TIKU_C5_REG_READ(C5_PCR_CPU);
+    uint32_t ahb = TIKU_C5_REG_READ(C5_PCR_AHB);
+    if (tiku_c5_pll_ready() != 0) {
+        return -1;
+    }
+    if (apply_tree((cpu & ~255u) | (240u / mhz - 1u), (ahb & ~255u) | 5u,
+                   C5_SOURCE_PLL240) != 0) {
+        clock_fault = 1;
+        if (apply_tree(cpu, ahb, 0) != 0) {
+            tiku_c5_fatal("clock rollback failed");
+        }
+        return -1;
+    }
+    return 0;
 }
 
 int tiku_c5_clock_set(unsigned long hz)
@@ -57,13 +120,19 @@ int tiku_c5_clock_set(unsigned long hz)
     /* 240 MHz needs the calibrated regulator setting; without it only the
      * slower dividers are applied. */
     if (tiku_c5_core_voltage_ready() != 0 && hz > 80000000UL) { return -1; }
+    mhz = (unsigned)(hz / 1000000UL);
     state = TIKU_C5_IRQ_SAVE();
-    if (!clock_tree_ready() || tiku_c5_analog_owner() == TIKU_C5_ANALOG_PHY) {
+    if (tiku_c5_analog_owner() == TIKU_C5_ANALOG_PHY) {
         TIKU_C5_IRQ_RESTORE(state);
         return -1;
     }
+    if (!clock_tree_ready()) {
+        int result = clock_tree_on_crystal() ? leave_crystal(mhz) : -1;
+        if (result == 0) { tiku_c5_rom_cpu_frequency_set(mhz); }
+        TIKU_C5_IRQ_RESTORE(state);
+        return result;
+    }
     previous = TIKU_C5_REG_READ(C5_PCR_CPU);
-    mhz = (unsigned)(hz / 1000000UL);
     desired = (previous & ~255u) | (240u / mhz - 1u);
     if (desired != previous && apply_divider(desired) != 0) {
         clock_fault = 1;

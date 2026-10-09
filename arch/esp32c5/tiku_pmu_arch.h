@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_pmu_arch.h - C5 digital core voltage for the CPU clock.
+ * tiku_pmu_arch.h - C5 core voltage and PLL, set before the CPU clock.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -32,5 +32,19 @@ int tiku_c5_core_voltage_ready(void);
 
 /** @brief The HP active regulator setting applied, or 0 before success. */
 uint32_t tiku_c5_core_voltage_dbias(void);
+
+/**
+ * @brief Power the 480 MHz PLL up and calibrate it from the crystal, as
+ *        ESP-IDF's bootloader does; the first call does the work.
+ *
+ * @return 0 when the PLL is calibrated, -1 when the crystal is not 48 or
+ *         40 MHz, the analog bus stays busy or calibration does not finish
+ *         (the PLL is then powered down again).
+ * @note   Masks interrupts for the analog-bus transfers.
+ */
+int tiku_c5_pll_ready(void);
+
+/** @brief 1 before tiku_c5_pll_ready() ran, then its result. */
+int tiku_c5_pll_result(void);
 
 #endif /* TIKU_ESP32C5_PMU_ARCH_H_ */
