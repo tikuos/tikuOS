@@ -43,7 +43,8 @@
  *              (STM32N6, ESP32-C61).  At 256-byte lines and 16 entries the
  *              ring is 4 KB, the whole of RP2350's TIKU_DURABLE budget.
  *
- * At either grade a wrong magic word makes hist_ensure_init() clear the ring.
+ * At either grade a wrong magic word, or a head or count outside the ring,
+ * makes hist_ensure_init() clear the ring.
  */
 #ifdef PLATFORM_MSP430
 #define HIST_PERSISTENT TIKU_DURABLE
@@ -59,7 +60,7 @@ typedef struct {
 /**
  * Ring control block, placed by HIST_PERSISTENT.  It has no initializer: off
  * MSP430 the section is NOLOAD, and hist_ensure_init() primes the ring when
- * the magic word is wrong.
+ * the magic word is wrong or the head or count is out of range.
  */
 static HIST_PERSISTENT struct {
     uint16_t                magic;
@@ -95,7 +96,9 @@ hist_ensure_init(void)
 {
     uint16_t saved;
 
-    if (hist.magic == TIKU_SHELL_HISTORY_MAGIC) {
+    if (hist.magic == TIKU_SHELL_HISTORY_MAGIC &&
+        hist.head < TIKU_SHELL_HISTORY_DEPTH &&
+        hist.count <= TIKU_SHELL_HISTORY_DEPTH) {
         return;
     }
 
