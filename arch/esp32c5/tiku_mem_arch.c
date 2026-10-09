@@ -122,14 +122,21 @@ void tiku_mem_arch_nvm_read(uint8_t *destination, const uint8_t *source,
     while (length--) { *destination++ = *source++; }
 }
 
+/**
+ * @brief Store into the SRAM working copy, durable or retained alike.
+ *
+ * The flash commit at tiku_mpu_lock_nvm() mirrors only .uninit; a write to
+ * .retained data (the shell history ring) or to any other RAM stays in SRAM.
+ */
 void tiku_mem_arch_nvm_write(uint8_t *destination, const uint8_t *source,
                             tiku_mem_arch_size_t length)
 {
-    uintptr_t start = (uintptr_t)TIKU_C5_DURABLE_START;
-    uintptr_t end = (uintptr_t)TIKU_C5_DURABLE_END;
-    uintptr_t address = (uintptr_t)destination;
-    if (source == NULL || address < start || address > end || length > end - address) { return; }
-    while (length--) { *destination++ = *source++; }
+    if (destination == NULL || source == NULL) {
+        return;
+    }
+    while (length--) {
+        *destination++ = *source++;
+    }
 }
 
 /** @brief Write one alternate slot, publishing its magic after its payload and metadata. */

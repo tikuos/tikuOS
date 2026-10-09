@@ -39,7 +39,39 @@ static uint8_t attached, changing;
 static const uint16_t spi1_offsets[] = {4, 8, 0x14, 0x18, 0x1c, 0x20,
                                        0x24, 0x28, 0x34, 0x58, 0x5c};
 static const uint16_t spi0_offsets[] = {0x40, 0x48, 0x4c, 0x50, 0x174, 0x1a0};
+/* MSPI pads the PSRAM needs on top of the flash: CS1, WP and HD. */
+static const uint8_t pads[3] = {15, 18, 20};
 static uint32_t saved_spi0[6], saved_mux[3], saved_pma, saved_address;
+
+/* Cache sync unit (ESP-IDF 4d59230 C5 cache_reg.h). */
+#define CACHE_SYNC_CTRL 0x600C8094u
+#define CACHE_SYNC_MAP  0x600C8098u
+#define CACHE_SYNC_ADDR 0x600C809Cu
+#define CACHE_SYNC_SIZE 0x600C80A0u
+#define CACHE_SYNC_WRITEBACK_INVALIDATE (1u << 3)
+#define CACHE_SYNC_DONE (1u << 4)
+
+/**
+ * @brief Write back and invalidate a 32-byte-aligned span of the cache.
+ *
+ * The C5 ROM's Cache_WriteBack_Invalidate_Addr issues the sync once, which
+ * can lose lines; this issues it twice, as ESP-IDF's
+ * esp_rom_cache_writeback_esp32c5_esp32c61_esp32h4.c patch does.
+ */
+static int cache_writeback_invalidate(uint32_t address, uint32_t length)
+{
+    unsigned pass;
+
+    TIKU_C5_REG_WRITE(CACHE_SYNC_MAP, 1u << 4);
+    TIKU_C5_REG_WRITE(CACHE_SYNC_ADDR, address);
+    TIKU_C5_REG_WRITE(CACHE_SYNC_SIZE, length);
+    for (pass = 0; pass < 2; pass++) {
+        TIKU_C5_REG_WRITE(CACHE_SYNC_CTRL, CACHE_SYNC_WRITEBACK_INVALIDATE);
+        while (!(TIKU_C5_REG_READ(CACHE_SYNC_CTRL) & CACHE_SYNC_DONE)) {
+        }
+    }
+    return 0;
+}
 
 /** @brief Serialize kernel foreground lifecycle calls with interrupts held off. */
 static int enter(uint32_t *state)
@@ -127,9 +159,7 @@ static void restore(void)
     for (i = 0; i < 11; i++) { TIKU_C5_REG_WRITE(SPI1 + spi1_offsets[i], spi1[i]); }
     TIKU_C5_PSRAM_PMA_WRITE(saved_pma, saved_address);
     for (i = 0; i < 6; i++) { TIKU_C5_REG_WRITE(SPI0 + spi0_offsets[i], saved_spi0[i]); }
-    TIKU_C5_REG_WRITE(MUX(15), saved_mux[0]);
-    TIKU_C5_REG_WRITE(MUX(18), saved_mux[1]);
-    TIKU_C5_REG_WRITE(MUX(19), saved_mux[2]);
+    for (i = 0; i < 3; i++) { TIKU_C5_REG_WRITE(MUX(pads[i]), saved_mux[i]); }
     tiku_c5_rom_cache_resume(autoload);
 }
 
@@ -143,7 +173,9 @@ static int verify(uint32_t bytes)
             TIKU_C5_PSRAM_WORD(offset) = (0xa5b6c789u ^ offset) ^ (pass ? UINT32_MAX : 0);
         }
         TIKU_C5_PSRAM_WORD(bytes - 4u) = 0x13ace579u ^ pass;
-        if (tiku_c5_rom_cache_writeback_invalidate(TIKU_C5_PSRAM_BASE, bytes) != 0) { return -1; }
+        if (cache_writeback_invalidate(TIKU_C5_PSRAM_BASE, bytes) != 0) {
+            return -1;
+        }
         for (offset = 0; offset < bytes; offset += 65536u) {
             if (TIKU_C5_PSRAM_WORD(offset) != ((0xa5b6c789u ^ offset) ^ (pass ? UINT32_MAX : 0))) {
                 return -1;
@@ -193,12 +225,11 @@ int tiku_c5_psram_init(void)
     if (i != 256) { return leave(state, TIKU_C5_PSRAM_CONFIG); }
     for (i = 0; i < 11; i++) { saved_spi1[i] = TIKU_C5_REG_READ(SPI1 + spi1_offsets[i]); }
     for (i = 0; i < 6; i++) { saved_spi0[i] = TIKU_C5_REG_READ(SPI0 + spi0_offsets[i]); }
-    saved_mux[0] = TIKU_C5_REG_READ(MUX(15));
-    saved_mux[1] = TIKU_C5_REG_READ(MUX(18));
-    saved_mux[2] = TIKU_C5_REG_READ(MUX(19));
+    for (i = 0; i < 3; i++) { saved_mux[i] = TIKU_C5_REG_READ(MUX(pads[i])); }
     autoload = tiku_c5_rom_cache_suspend();
     for (i = 0; i < 3; i++) {
-        TIKU_C5_REG_WRITE(MUX(i == 0 ? 15 : i + 17), (saved_mux[i] & ~(7u << 12)) | (1u << 9));
+        TIKU_C5_REG_WRITE(MUX(pads[i]),
+                          (saved_mux[i] & ~(7u << 12)) | (1u << 9));
     }
     TIKU_C5_REG_WRITE(SPI1 + 0x14, 0x30103u);
     command(0xf5, 1, 0, NULL);
@@ -291,7 +322,8 @@ int tiku_c5_psram_sync(const void *address, uint32_t length)
         TIKU_C5_IRQ_RESTORE(state);
         return TIKU_C5_PSRAM_CONFIG;
     }
-    result = tiku_c5_rom_cache_writeback_invalidate((uint32_t)a & ~31u, ((a & 31u) + length + 31u) & ~31u);
+    result = cache_writeback_invalidate((uint32_t)a & ~31u,
+                                        ((a & 31u) + length + 31u) & ~31u);
     TIKU_C5_IRQ_RESTORE(state);
     return result ? TIKU_C5_PSRAM_IO : 0;
 }

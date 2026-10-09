@@ -19,6 +19,7 @@ CHIP_ID = 23
 RAM_START = 0x40800000
 RAM_LIMIT = 0x4080F000
 MIN_REVISION = 100
+MAX_REVISION = 199
 MIN_ROM_ECO = 2
 
 
@@ -36,8 +37,8 @@ def validate_image(data, profile="diagnostic"):
     minimum, maximum = struct.unpack_from("<HH", data, 15)
     if chip != CHIP_ID:
         raise ValueError("image chip must be ESP32-C5 (23)")
-    if minimum < MIN_REVISION or maximum < minimum:
-        raise ValueError("image revision range must exclude pre-v1.0 silicon")
+    if minimum < MIN_REVISION or maximum < minimum or maximum > MAX_REVISION:
+        raise ValueError("image revision range must lie within v1.0 to v1.99")
     if data[23] != 1:
         raise ValueError("RAM image requires an appended SHA-256 digest")
     offset, checksum, ranges = 24, 0xEF, []

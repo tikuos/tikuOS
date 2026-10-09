@@ -3,7 +3,8 @@
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  * tiku_clock_arch.c - C5 CPU dividers with a constant 40 MHz AHB clock.
  * Register fields and divider constraints follow ESP-IDF 4d59230,
- * esp32c5 clk_tree_ll.h and rtc_clk.c. PLL source and voltage stay unchanged.
+ * esp32c5 clk_tree_ll.h and rtc_clk.c. The PLL source stays unchanged; the
+ * calibrated core voltage is applied before the first divider change.
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <hal/tiku_cpu.h>
@@ -14,6 +15,7 @@
 #include "tiku_irq_arch.h"
 #include "tiku_timer_arch.h"
 #include "tiku_analog_arch.h"
+#include "tiku_pmu_arch.h"
 
 #define C5_PCR_SYSCLK       0x60096110UL
 #define C5_PCR_CPU          0x60096118UL
@@ -52,6 +54,9 @@ int tiku_c5_clock_set(unsigned long hz)
     uint32_t state, previous, desired;
     unsigned mhz;
     if (hz != 40000000UL && hz != 80000000UL && hz != 240000000UL) { return -1; }
+    /* 240 MHz needs the calibrated regulator setting; without it only the
+     * slower dividers are applied. */
+    if (tiku_c5_core_voltage_ready() != 0 && hz > 80000000UL) { return -1; }
     state = TIKU_C5_IRQ_SAVE();
     if (!clock_tree_ready() || tiku_c5_analog_owner() == TIKU_C5_ANALOG_PHY) {
         TIKU_C5_IRQ_RESTORE(state);

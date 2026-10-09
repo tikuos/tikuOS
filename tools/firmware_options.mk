@@ -65,7 +65,8 @@ ifeq ($(TIKU_PLATFORM),esp32c5)
 opt_kind_TIKU_CONSOLE := enum:usb
 opt_where_TIKU_CONSOLE := plat:esp32c5
 opt_help_TIKU_CONSOLE := Native USB Serial/JTAG console
-opt_where_UART_BAUD := plat:esp32c61
+# The C5 options offer only the USB console, where a baud rate has no effect.
+opt_where_UART_BAUD := unavailable
 endif
 $(eval $(call tiku_option,MEMORY_MODEL,enum:small+large,Console,plat:msp430,\
   MSP430 memory model (large puts code and data in upper FRAM)))

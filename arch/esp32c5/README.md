@@ -145,10 +145,13 @@ cat /sys/cpu/freq
 ```
 
 Saving does not change the running clock. The C5 changes only the CPU divider
-on its existing 240 MHz PLL source; AHB stays at 40 MHz. Unsupported clock
-trees are refused. The update has bounded waits, readback checks and rollback;
-ROM delay calibration follows the selected CPU rate. A failed durable save is
-reported. Device Preferences uses these same VFS controls.
+on its existing 240 MHz PLL source; AHB stays at 40 MHz. Before the first
+switch above 80 MHz the clock code sets the eFuse-calibrated core voltage, as
+the ESP-IDF bootloader does (the PVT-tracked voltage is not implemented); 240
+MHz is refused if that setting fails, and `diag voltage` shows it. Unsupported
+clock trees are refused. The update has bounded waits, readback checks and
+rollback; ROM delay calibration follows the selected CPU rate. A failed
+durable save is reported. Device Preferences uses these same VFS controls.
 
 ## I2C master
 
@@ -220,7 +223,8 @@ no parity and one stop bit. `UART_BAUD=...` accepts 300 through 3000000.
 Do not connect RS-232 voltage levels to these pins.
 
 UART0 uses the board's 48 MHz crystal, independent of the selected CPU
-divider. Receive interrupts copy the 128-byte FIFO into a 1024-byte ring
+divider. The boot halts with a message on a part with any other crystal.
+Receive interrupts copy the 128-byte FIFO into a 1024-byte ring
 with 1023 usable positions. When the ring fills, earlier bytes are retained
 and new bytes are dropped and counted. FIFO-overflow events also increment
 the saturating overrun counter. The receive functions can drain the FIFO

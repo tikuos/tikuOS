@@ -26,7 +26,6 @@ uint32_t tiku_c5_rom_cache_suspend(void);
 void tiku_c5_rom_cache_resume(uint32_t autoload);
 void tiku_c5_rom_cache_enable(uint32_t autoload);
 int tiku_c5_rom_cache_invalidate(uint32_t address, uint32_t length);
-int tiku_c5_rom_cache_writeback_invalidate(uint32_t address, uint32_t length);
 unsigned int tiku_c5_rom_cpu_frequency(void);
 void tiku_c5_rom_cpu_frequency_set(unsigned int mhz);
 void tiku_c5_rom_reset(void) __attribute__((noreturn));

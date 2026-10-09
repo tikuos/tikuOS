@@ -189,7 +189,9 @@ def main():
         sram, raw = root / "sram.elf", root / "boot.bin"
         subprocess.run([args.objcopy, "-R", ".xip", str(args.elf), str(sram)], check=True)
         subprocess.run([args.esptool, "--chip", "esp32c5", "elf2image", "--flash-mode", "dio",
-                        "--flash-size", "4MB", "--min-rev-full", "100", "-o", str(raw), str(sram)], check=True)
+                        "--flash-size", "4MB", "--min-rev-full", "100",
+                        "--max-rev-full", "199", "-o", str(raw), str(sram)],
+                       check=True)
         boot, xip = pack_pair(raw.read_bytes(), xip)
         offset = descriptor_offset(boot)
         (root / "header.bin").write_bytes(boot[offset:offset + HEADER_SIZE])

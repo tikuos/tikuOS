@@ -44,6 +44,11 @@ void tiku_cpu_boot_init(void)
         TIKU_C5_REG_READ(TIKU_C5_ROM_ECO) < TIKU_ESP32C5_MIN_ROM_ECO) {
         tiku_c5_fatal("unsupported ROM identity");
     }
+    /* The UART, I2C and watchdog divisors assume a 48 MHz crystal; PCR
+     * SYSCLK_CONF bits 30:24 hold the crystal frequency in MHz. */
+    if (((TIKU_C5_REG_READ(0x60096110u) >> 24) & 127u) != 48u) {
+        tiku_c5_fatal("crystal is not 48 MHz");
+    }
     tiku_c5_irq_init();
 #if TIKU_ESP32C5_XIP_CODE
     if (tiku_flash_init() != TIKU_FLASH_OK) { tiku_c5_fatal("flash mapping failed"); }

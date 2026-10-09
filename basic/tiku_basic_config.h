@@ -128,6 +128,10 @@
      /* The /data store bounds RA8P1: prog.bas and prog.ckpt both come out of
       * it, and 512 lines keep one program to a small share of it. */
 #    define TIKU_BASIC_PROGRAM_LINES 512
+#  elif defined(PLATFORM_ESP32C5)
+     /* The C5's arena shares the SRAM tier with the 48 KB Wi-Fi heap: 100
+      * lines keep both inside the Wi-Fi/BASIC profile's tier. */
+#    define TIKU_BASIC_PROGRAM_LINES 100
 #  elif defined(TIKU_BASIC_TIER_HUGE)
 #    define TIKU_BASIC_PROGRAM_LINES 1700
 #  elif defined(TIKU_BASIC_TIER_BIG)

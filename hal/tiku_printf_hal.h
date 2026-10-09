@@ -119,13 +119,18 @@
 #define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
 
 /*---------------------------------------------------------------------------*/
-/* FALLBACK: NO PLATFORM, NO OUTPUT                                          */
+/* ESP32-C5                                                                  */
 /*---------------------------------------------------------------------------*/
 
 #elif defined(PLATFORM_ESP32C5)
+/* Console over the native USB Serial/JTAG port, or UART0 when built so. */
 #include <arch/esp32c5/tiku_debug_arch.h>
 #include <arch/esp32c5/tiku_uart_arch.h>
 #define TIKU_PRINTF(...) tiku_debug_arch_printf(__VA_ARGS__)
+
+/*---------------------------------------------------------------------------*/
+/* FALLBACK: NO PLATFORM, NO OUTPUT                                          */
+/*---------------------------------------------------------------------------*/
 
 #elif !defined(TIKU_PRINTF)
 #define TIKU_PRINTF(...)

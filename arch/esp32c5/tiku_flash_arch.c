@@ -92,9 +92,13 @@ tiku_flash_err_t tiku_flash_init(void)
     if (ready) { return TIKU_FLASH_OK; }
     if (acquire(&state) != 0) { return TIKU_FLASH_ERR_BUSY; }
     tiku_c5_rom_flash_attach(0, 0);
+    /* The ROM's chip record keeps the manufacturer in bits 23:16 and the
+     * capacity in bits 7:0, the reverse of the RDID byte order. */
     if (read_identity() != 0 ||
         ((jedec >> 16) & 255u) != 22u ||
-        tiku_c5_rom_flash_config(jedec, TIKU_FLASH_SIZE_BYTES, 65536,
+        tiku_c5_rom_flash_config(((jedec & 255u) << 16) | (jedec & 0xFF00u) |
+                                 ((jedec >> 16) & 255u),
+                                 TIKU_FLASH_SIZE_BYTES, 65536,
                                 TIKU_FLASH_SECTOR_SIZE, TIKU_FLASH_PAGE_SIZE,
                                 0xFFFF) != 0) {
         release(state);
@@ -109,8 +113,16 @@ tiku_flash_err_t tiku_flash_init(void)
                                         TIKU_FLASH_SIZE_BYTES) == 0 &&
             tiku_c5_rom_flash_read(0, &word, 4) == 0 &&
             word == *(volatile const uint32_t *)TIKU_FLASH_MMAP_BASE) {
-            ready = 1;
-            result = TIKU_FLASH_OK;
+            /* The image replaces the second-stage bootloader that clears the
+             * status register's protection bits, so clear them once here;
+             * the ROM helper rewrites the status register on every call. */
+            uint32_t autoload = tiku_c5_rom_cache_suspend();
+            int unlocked = tiku_c5_rom_flash_unlock();
+            tiku_c5_rom_cache_resume(autoload);
+            if (unlocked == 0) {
+                ready = 1;
+                result = TIKU_FLASH_OK;
+            }
         }
     }
     release(state);
@@ -150,8 +162,7 @@ tiku_flash_err_t tiku_flash_erase_sector(uint32_t offset)
         !valid_range(offset, TIKU_FLASH_SECTOR_SIZE)) { return TIKU_FLASH_ERR_PARAM; }
     if (acquire(&state) != 0) { return TIKU_FLASH_ERR_BUSY; }
     autoload = tiku_c5_rom_cache_suspend();
-    result = tiku_c5_rom_flash_unlock();
-    if (result == 0) { result = tiku_c5_rom_flash_erase(offset / TIKU_FLASH_SECTOR_SIZE); }
+    result = tiku_c5_rom_flash_erase(offset / TIKU_FLASH_SECTOR_SIZE);
     tiku_c5_rom_cache_resume(autoload);
     if (tiku_c5_rom_cache_invalidate(TIKU_FLASH_MMAP_BASE + offset,
                                     TIKU_FLASH_SECTOR_SIZE) != 0) { result = -1; }
@@ -194,8 +205,7 @@ tiku_flash_err_t tiku_flash_program(uint32_t offset, const void *data, uint32_t 
         }
         if (result != 0) { break; }
         autoload = tiku_c5_rom_cache_suspend();
-        result = tiku_c5_rom_flash_unlock();
-        if (result == 0) { result = tiku_c5_rom_flash_write(start, stage, (int32_t)words); }
+        result = tiku_c5_rom_flash_write(start, stage, (int32_t)words);
         tiku_c5_rom_cache_resume(autoload);
         /* Cache operations require whole 32-byte cache lines. */
         if (tiku_c5_rom_cache_invalidate(TIKU_FLASH_MMAP_BASE + (start & ~31u),

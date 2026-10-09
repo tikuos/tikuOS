@@ -17,7 +17,6 @@ tiku_c5_rom_flash_command = 0x40000174;
 tiku_c5_rom_flash_attach = 0x400001f0;
 tiku_c5_rom_cache_boot = 0x40000644;
 tiku_c5_rom_cache_invalidate = 0x40000650;
-tiku_c5_rom_cache_writeback_invalidate = 0x4000065c;
 tiku_c5_rom_cache_enable = 0x400006b0;
 tiku_c5_rom_cache_suspend = 0x400006b4;
 tiku_c5_rom_cache_resume = 0x400006b8;

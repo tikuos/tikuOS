@@ -24,7 +24,8 @@ typedef enum {
 } tiku_c5_psram_err_t;
 
 /** @brief Identify, map and verify PSRAM; kernel foreground only, after flash init.
- * @note GPIO15/18/19 use native MSPI routing. No PSRAM encryption or DMA support.
+ * @note GPIO15/18/20 (CS1, WP, HD) use native MSPI routing.  No PSRAM
+ *       encryption or DMA support.
  *       A zero package code returns ABSENT unless TIKU_C5_PSRAM_EXTERNAL=1.
  */
 int tiku_c5_psram_init(void);
