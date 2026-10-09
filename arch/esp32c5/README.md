@@ -310,6 +310,11 @@ physical power-cut durability.
 GPIO ownership protects USB, memory, LED and documented strap pads, direct
 peripheral mux functions and active matrix input/output routes. GPIO IRQs
 return failure. Pin loopbacks and external bus fixtures are unqualified.
+
+The board's addressable RGB LED (GPIO27, GRB order) is the kernel's three
+LEDs: `/dev/led0`, `led1` and `led2` switch its red, green and blue channels
+at 16 of 255. Each change sends a 24-bit frame timed from the CPU cycle
+counter with interrupts masked for about 30 us.
 Idle uses WFI with the USB PHY powered; there is no deep-sleep profile.
 
 The USB console sends a delayed zero-length packet when a full 64-byte

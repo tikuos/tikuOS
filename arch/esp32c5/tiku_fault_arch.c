@@ -1,13 +1,43 @@
 /*
  * Tiku Operating System v0.06
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_fault_arch.c - C5 terminal exception and boot-failure reporting.
+ * tiku_fault_arch.c - C5 exception record and reset, and fatal-error halts.
  * Fault handling does not write flash or return to the faulting instruction.
  * SPDX-License-Identifier: Apache-2.0
  */
+#include "tiku_fault_arch.h"
 #include "tiku_timer_arch.h"
 #include "tiku_irq_arch.h"
+#include "tiku_cpu_common.h"
+#include <kernel/memory/tiku_mem.h>
 #include <services/console/tiku_usb_serial_jtag.h>
+
+/* Retained SRAM keeps the record across the reset that follows the fault. */
+static TIKU_RETAINED tiku_c5_fault_record_t fault_rec;
+
+const tiku_c5_fault_record_t *tiku_c5_fault_last(void) { return &fault_rec; }
+
+void tiku_c5_fault_clear(void)
+{
+    fault_rec.magic = 0;
+    fault_rec.count = 0;
+}
+
+const char *tiku_c5_fault_kind_name(uint32_t code)
+{
+    switch (code) {
+    case 0:  return "fetch-misaligned";
+    case 1:  return "fetch-fault";
+    case 2:  return "illegal";
+    case 3:  return "breakpoint";
+    case 4:  return "load-misaligned";
+    case 5:  return "load-fault";
+    case 6:  return "store-misaligned";
+    case 7:  return "store-fault";
+    case 11: return "ecall";
+    default: return "exception";
+    }
+}
 
 /** @brief Write terminal fault bytes without libc or the interrupted TX queue. */
 static void fault_text(const char *text)
@@ -47,7 +77,7 @@ void tiku_c5_fatal(const char *reason)
     fault_text("\r\n");
     halt();
 }
-/** @brief Report the machine exception registers before a terminal halt. */
+/** @brief Report and record the machine exception registers, then reset. */
 void tiku_esp32c5_diagnostic_fault(uint32_t cause, uint32_t pc, uint32_t value)
 {
     (void)TIKU_C5_IRQ_SAVE();
@@ -55,5 +85,13 @@ void tiku_esp32c5_diagnostic_fault(uint32_t cause, uint32_t pc, uint32_t value)
     fault_text(" pc="); fault_hex(pc);
     fault_text(" value="); fault_hex(value);
     fault_text("\r\n");
-    halt();
+    if (fault_rec.magic != TIKU_C5_FAULT_MAGIC) {
+        fault_rec.magic = TIKU_C5_FAULT_MAGIC;
+        fault_rec.count = 0;
+    }
+    fault_rec.count++;
+    fault_rec.mcause = cause;
+    fault_rec.mtval = value;
+    fault_rec.pc = pc;
+    tiku_cpu_c5_restart();
 }

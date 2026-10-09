@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_diag.c - "diag" command (STM32N6, RA8P1, ESP32-C61).
+ * tiku_shell_cmd_diag.c - "diag" command (STM32N6, RA8P1, ESP32-C61, C5).
  *
  * Forces and reports faults, and where the port has them exercises the EXTI
  * lines, the watchdog, the sleep settings and the PSRAM.
@@ -432,3 +432,74 @@ void tiku_shell_cmd_diag(uint8_t argc, const char *argv[]) {
     diag_fault_show();
 }
 #endif /* PLATFORM_ESP32C61 */
+
+#if defined(PLATFORM_ESP32C5)
+#include <arch/esp32c5/tiku_fault_arch.h>
+#include <arch/esp32c5/tiku_pmu_arch.h>
+#include <arch/esp32c5/tiku_esp32c5_regs.h>
+
+/** @brief Report the retained fault record, or say there is none. */
+static void diag_fault_show(void)
+{
+    const tiku_c5_fault_record_t *f = tiku_c5_fault_last();
+
+    if (f->magic != TIKU_C5_FAULT_MAGIC) {
+        SHELL_PRINTF("  no fault recorded\n");
+        return;
+    }
+    SHELL_PRINTF("  last %s (#%lu)\n",
+                 tiku_c5_fault_kind_name(f->mcause & 0xFFFUL),
+                 (unsigned long)f->count);
+    SHELL_PRINTF("    mcause %08lx  mtval %08lx  pc %08lx\n",
+                 (unsigned long)f->mcause, (unsigned long)f->mtval,
+                 (unsigned long)f->pc);
+}
+
+/* An address inside the PMP NULL guard (0..0xfff).  It is volatile so the
+ * compiler emits the access as written. */
+static volatile uintptr_t diag_unmapped = 0x10UL;
+
+/** @brief Take one exception of kind @p which; the board resets after it. */
+static void diag_fault_force(const char *which)
+{
+    SHELL_PRINTF("  forcing a %s fault; the board resets and `diag fault`"
+                 " then shows it\n", which);
+    if (strcmp(which, "illegal") == 0) {
+        __asm__ volatile ("unimp");
+    } else if (strcmp(which, "load") == 0) {
+        (void)*(volatile uint32_t *)diag_unmapped;
+    } else if (strcmp(which, "store") == 0) {
+        *(volatile uint32_t *)diag_unmapped = 0UL;
+    } else {
+        SHELL_PRINTF("  kinds: illegal | load | store\n");
+        return;
+    }
+    SHELL_PRINTF("  (no fault taken -- unexpected)\n");
+}
+
+void tiku_shell_cmd_diag(uint8_t argc, const char *argv[])
+{
+    if (argc >= 2 && strcmp(argv[1], "fault") == 0) {
+        if (argc >= 3) {
+            diag_fault_force(argv[2]);
+        } else {
+            diag_fault_show();
+        }
+        return;
+    }
+    if (argc >= 2 && strcmp(argv[1], "clear") == 0) {
+        tiku_c5_fault_clear();
+        SHELL_PRINTF("  fault record cleared\n");
+        return;
+    }
+    if (argc >= 2 && strcmp(argv[1], "voltage") == 0) {
+        /* The HP active regulator's DBIAS field, bits 31:27 of 0x600B0028. */
+        SHELL_PRINTF("  core dbias %lu (register %lu)\n",
+                     (unsigned long)tiku_c5_core_voltage_dbias(),
+                     (unsigned long)(TIKU_C5_REG_READ(0x600B0028u) >> 27));
+        return;
+    }
+    SHELL_PRINTF("Usage: diag fault [illegal|load|store] | clear | voltage\n");
+    diag_fault_show();
+}
+#endif /* PLATFORM_ESP32C5 */

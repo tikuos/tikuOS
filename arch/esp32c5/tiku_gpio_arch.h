@@ -21,4 +21,13 @@ int8_t tiku_gpio_arch_read(uint8_t port, uint8_t pin);
 int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin);
 /** @brief Return 1 for a reserved/routed pad, 0 for GPIO, or -1 for invalid pins. */
 int tiku_gpio_arch_is_peripheral(uint8_t port, uint8_t pin);
+/** @brief Make the board's RGB LED pad a low GPIO output. */
+void tiku_c5_led_init(void);
+/**
+ * @brief Switch one colour of the board's WS2812-class RGB LED.
+ * @param channel  0 red, 1 green, 2 blue
+ * @param on       1 on, 0 off, -1 toggle; a lit channel shows 16 of 255
+ * @note Masks interrupts for the 24-bit frame, about 30 us.
+ */
+void tiku_c5_led_set(uint8_t channel, int on);
 #endif

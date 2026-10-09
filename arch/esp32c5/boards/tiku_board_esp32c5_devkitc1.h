@@ -16,6 +16,24 @@
 #define TIKU_BOARD_UART_BAUD          115200u
 #endif
 #define TIKU_BOARD_RGB_LED_PIN        27u
+
+#include <arch/esp32c5/tiku_gpio_arch.h>
+
+/* The kernel's three LEDs are the RGB LED's red, green and blue channels
+ * (tiku_c5_led_set() channels 0, 1 and 2), each switched alone. */
+#define TIKU_BOARD_LED_COUNT          3
+#define TIKU_BOARD_LED1_INIT()        tiku_c5_led_init()
+#define TIKU_BOARD_LED1_ON()          tiku_c5_led_set(0u, 1)
+#define TIKU_BOARD_LED1_OFF()         tiku_c5_led_set(0u, 0)
+#define TIKU_BOARD_LED1_TOGGLE()      tiku_c5_led_set(0u, -1)
+#define TIKU_BOARD_LED2_INIT()        tiku_c5_led_init()
+#define TIKU_BOARD_LED2_ON()          tiku_c5_led_set(1u, 1)
+#define TIKU_BOARD_LED2_OFF()         tiku_c5_led_set(1u, 0)
+#define TIKU_BOARD_LED2_TOGGLE()      tiku_c5_led_set(1u, -1)
+#define TIKU_BOARD_LED3_INIT()        tiku_c5_led_init()
+#define TIKU_BOARD_LED3_ON()          tiku_c5_led_set(2u, 1)
+#define TIKU_BOARD_LED3_OFF()         tiku_c5_led_set(2u, 0)
+#define TIKU_BOARD_LED3_TOGGLE()      tiku_c5_led_set(2u, -1)
 /* I2C is routed only by an explicit tiku_i2c_init() call. External pull-ups
  * to 3.3 V are required; the internal pulls are not enabled by the driver. */
 #ifndef TIKU_BOARD_I2C_SDA_PIN

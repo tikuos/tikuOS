@@ -9,6 +9,7 @@
 #include "tiku_irq_arch.h"
 #include "tiku_esp32c5_regs.h"
 #include <hal/tiku_gpio_irq_hal.h>
+#include <hal/tiku_cpu.h>
 #define GPIO_OUT 0x60091004u
 #define GPIO_ENABLE 0x60091034u
 #define GPIO_INPUT 0x60091064u
@@ -124,6 +125,72 @@ int8_t tiku_gpio_arch_toggle(uint8_t port, uint8_t pin)
     result = tiku_gpio_arch_write(port, pin, !(TIKU_C5_REG_READ(GPIO_OUT) & (1u << n)));
     TIKU_C5_IRQ_RESTORE(state);
     return result;
+}
+
+void tiku_c5_led_init(void)
+{
+    unsigned n = TIKU_BOARD_RGB_LED_PIN;
+    uint32_t state = TIKU_C5_IRQ_SAVE();
+    TIKU_C5_REG_WRITE(GPIO_OUT + 8u, 1u << n);
+    route_gpio(n);
+    TIKU_C5_REG_WRITE(GPIO_ENABLE + 4u, 1u << n);
+    TIKU_C5_IRQ_RESTORE(state);
+}
+
+/** @brief Read the wrapping CPU cycle counter that times the LED frame. */
+#ifndef TIKU_C5_LED_CYCLES
+static uint32_t led_cycles(void)
+{
+    uint32_t value;
+    __asm__ volatile ("csrr %0, mcycle" : "=r"(value));
+    return value;
+}
+#define TIKU_C5_LED_CYCLES() led_cycles()
+#endif
+
+/**
+ * @brief Send one GRB frame to the WS2812-class LED: each bit is a 1.25 us
+ *        period, high for 0.35 us (0) or 0.75 us (1), timed in CPU cycles.
+ */
+static void led_frame(uint8_t r, uint8_t g, uint8_t b)
+{
+    uint32_t hz = (uint32_t)tiku_cpu_mclk_hz();
+    uint32_t t0h = hz / 2857143u, t1h = hz / 1333333u, period = hz / 800000u;
+    uint32_t grb = ((uint32_t)g << 16) | ((uint32_t)r << 8) | b;
+    uint32_t mask = 1u << TIKU_BOARD_RGB_LED_PIN, state, start;
+    int i;
+
+    state = TIKU_C5_IRQ_SAVE();
+    for (i = 23; i >= 0; i--) {
+        uint32_t high = ((grb >> i) & 1u) ? t1h : t0h;
+        start = TIKU_C5_LED_CYCLES();
+        TIKU_C5_REG_WRITE(GPIO_OUT + 4u, mask);
+        while ((uint32_t)(TIKU_C5_LED_CYCLES() - start) < high) {
+        }
+        TIKU_C5_REG_WRITE(GPIO_OUT + 8u, mask);
+        while ((uint32_t)(TIKU_C5_LED_CYCLES() - start) < period) {
+        }
+    }
+    TIKU_C5_IRQ_RESTORE(state);
+}
+
+void tiku_c5_led_set(uint8_t channel, int on)
+{
+    static uint8_t lit;                 /* one bit per colour */
+    uint8_t bit = (uint8_t)(1u << channel);
+
+    if (channel > 2u) {
+        return;
+    }
+    if (on < 0) {
+        lit ^= bit;
+    } else if (on) {
+        lit |= bit;
+    } else {
+        lit &= (uint8_t)~bit;
+    }
+    led_frame((lit & 1u) ? 16u : 0u, (lit & 2u) ? 16u : 0u,
+              (lit & 4u) ? 16u : 0u);
 }
 
 int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin, tiku_gpio_edge_t edge)

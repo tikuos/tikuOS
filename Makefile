@@ -2204,6 +2204,9 @@ SRCS += kernel/vfs/tree/tiku_vfs_tree_psram_c5.c
 SRCS += arch/esp32c5/tiku_flash_arch.c arch/esp32c5/tiku_mem_arch.c
 SRCS += arch/esp32c5/tiku_region_arch.c arch/esp32c5/tiku_nvm_region_arch.c
 SRCS += arch/esp32c5/tiku_mpu_arch.c arch/esp32c5/tiku_fault_arch.c
+ifeq ($(TIKU_SHELL_ENABLE),1)
+SRCS += shell/commands/tiku_shell_cmd_diag.c
+endif
 ifeq ($(TIKU_THREADS_ENABLE),1)
 SRCS += kernel/threads/tiku_thread.c arch/esp32c5/tiku_thread_arch.c
 endif
