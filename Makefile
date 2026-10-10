@@ -4433,10 +4433,13 @@ erase:
 
 else ifeq ($(TIKU_PLATFORM),esp32c5)
 
+# The post-flash shell probe runs only for a shell image on the USB console
+# without tests: a test image prints its markers first, and the probe would
+# consume them before the bench reads them.
 flash: all
 	@test "$(MINIMAL)" != 1 || { echo "C5 diagnostics are RAM-only; flash a kernel build instead"; exit 1; }
 	@test -n "$(ESP_PORT)" || { echo "Name the C5 USB port with ESP_PORT=/dev/serial/by-id/..."; exit 1; }
-	$(ESP_PYTHON) tools/esp32c5_flash.py --port "$(ESP_PORT)" $(if $(and $(filter 1,$(TIKU_SHELL_ENABLE)),$(filter usb,$(TIKU_CONSOLE))),,--no-monitor) $(if $(filter 1,$(TIKU_ESP32C5_XIP_CODE)),--xip $(TARGET_XIP)) $(TARGET_BIN)
+	$(ESP_PYTHON) tools/esp32c5_flash.py --port "$(ESP_PORT)" $(if $(and $(filter 1,$(TIKU_SHELL_ENABLE)),$(filter usb,$(TIKU_CONSOLE)),$(filter 0,$(HAS_TESTS))),,--no-monitor) $(if $(filter 1,$(TIKU_ESP32C5_XIP_CODE)),--xip $(TARGET_XIP)) $(TARGET_BIN)
 
 erase:
 	@echo "C5: whole-chip erasure is refused; flashing preserves /data and the durable mirror"
