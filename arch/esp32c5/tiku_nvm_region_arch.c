@@ -23,12 +23,15 @@ static int region_write(tiku_nvm_backend_t *backend, size_t offset,
         length > backend->size - offset) {
         return -1;
     }
+    /* Interrupts run between the sector operations; each erase and program
+     * masks them itself for the time the cache is suspended. */
     state = TIKU_C5_IRQ_SAVE();
     if (writing) {
         TIKU_C5_IRQ_RESTORE(state);
         return -1;
     }
     writing = 1;
+    TIKU_C5_IRQ_RESTORE(state);
     while (length) {
         size_t start = offset & ~(size_t)(TIKU_FLASH_SECTOR_SIZE - 1u);
         size_t within = offset - start, n = TIKU_FLASH_SECTOR_SIZE - within, i;
@@ -64,7 +67,6 @@ static int region_write(tiku_nvm_backend_t *backend, size_t offset,
         length -= n;
     }
     writing = 0;
-    TIKU_C5_IRQ_RESTORE(state);
     return result;
 }
 

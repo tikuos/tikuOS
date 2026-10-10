@@ -219,12 +219,17 @@ int tiku_mem_arch_nvm_flush_status(void)
     if (!tiku_flash_ready() || size > IMAGE_MAX) {
         return -1;
     }
+    /* Interrupts run between the sector operations; each erase and program
+     * masks them itself.  A durable write during the commit changes the
+     * image after its CRC was taken: the commit's readback then fails and
+     * the next lock commits again. */
     state = TIKU_C5_IRQ_SAVE();
     if (flushing) {
         TIKU_C5_IRQ_RESTORE(state);
         return -1;
     }
     flushing = 1;
+    TIKU_C5_IRQ_RESTORE(state);
     image = tiku_mem_arch_durable(&stored);
     crc = tiku_nvm_crc32(TIKU_C5_DURABLE_START, size);
     if (image != NULL && stored == size &&
@@ -234,7 +239,6 @@ int tiku_mem_arch_nvm_flush_status(void)
         result = commit_image(size, crc);
     }
     flushing = 0;
-    TIKU_C5_IRQ_RESTORE(state);
     return result;
 }
 
