@@ -20,10 +20,11 @@
     *libcore.a:*(.text .text.* .rodata .rodata.* .srodata .srodata.* .rodata_wlog*)
     *libble_app.a:*(.text .text.* .rodata .rodata.* .srodata .srodata.* .iram1 .iram1.* .adv_fast_execute_code_iram1 .adv_fast_execute_code_iram1.* .iram_sleep .iram_sleep.* .iram_btslp .iram_btslp.* .iram_sleep_adv .iram_sleep_adv.* .iram_sleep_conn .iram_sleep_conn.* .iram_single_sleep .iram_single_sleep.*)
     *libbtbb.a:*(.text .text.* .rodata .rodata.* .srodata .srodata.* .iram1 .iram1.*)
+    *libcoexist.a:*(.text .text.* .rodata .rodata.* .srodata .srodata.* .iram1 .iram1.*)
     @TIKU_C5_OBJECT_ROOT@/tikukits/net/bluetooth/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
     @TIKU_C5_OBJECT_ROOT@/tikukits/crypto/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
     . = ALIGN(4);
     __tiku_c5_xip_end = .;
 } > XIP
 __tiku_c5_xip_bytes = SIZEOF(.xip);
-/DISCARD/ : { *libphy.a:*(.eh_frame .eh_frame.*) *libble_app.a:*(.eh_frame .eh_frame.*) *libbtbb.a:*(.eh_frame .eh_frame.*) }
+/DISCARD/ : { *libphy.a:*(.eh_frame .eh_frame.*) *libble_app.a:*(.eh_frame .eh_frame.*) *libbtbb.a:*(.eh_frame .eh_frame.*) *libcoexist.a:*(.eh_frame .eh_frame.*) }

@@ -25,6 +25,7 @@ SECTIONS
         KEEP(*(.text.entry))
         *(.text .text.* .iram1 .iram1.*)
         *(.high_perf_code_iram1 .high_perf_code_iram1.*)
+        *(.coexiram .coexiram.*)
         . = ALIGN(4);
     } > SRAM
     .rodata : ALIGN(4) {
