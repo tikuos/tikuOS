@@ -12,20 +12,31 @@
 extern uint8_t __uninit_start[], __uninit_end[], __stack_bottom[];
 static tiku_mem_region_t regions[3];
 
-uint32_t tiku_stack_arch_bottom(void) { return (uint32_t)(uintptr_t)__stack_bottom; }
-const struct tiku_mem_region *tiku_region_arch_get_table(tiku_mem_arch_size_t *count)
+uint32_t tiku_stack_arch_bottom(void)
+{
+    return (uint32_t)(uintptr_t)__stack_bottom;
+}
+const struct tiku_mem_region *
+tiku_region_arch_get_table(tiku_mem_arch_size_t *count)
 {
     uintptr_t start = (uintptr_t)__uninit_start, end = (uintptr_t)__uninit_end;
     unsigned n = 0;
-    regions[n++] = (tiku_mem_region_t){(const uint8_t *)TIKU_DEVICE_RAM_START,
-        (tiku_mem_arch_size_t)(start - TIKU_DEVICE_RAM_START), TIKU_MEM_REGION_SRAM};
+    regions[n++] = (tiku_mem_region_t){
+        (const uint8_t *)TIKU_DEVICE_RAM_START,
+        (tiku_mem_arch_size_t)(start - TIKU_DEVICE_RAM_START),
+        TIKU_MEM_REGION_SRAM};
     if (end > start) {
         regions[n++] = (tiku_mem_region_t){__uninit_start,
-            (tiku_mem_arch_size_t)(end - start), TIKU_MEM_REGION_NVM};
+                                           (tiku_mem_arch_size_t)(end - start),
+                                           TIKU_MEM_REGION_NVM};
     }
-    regions[n++] = (tiku_mem_region_t){__uninit_end,
-        (tiku_mem_arch_size_t)(TIKU_DEVICE_RAM_START + TIKU_DEVICE_IMAGE_WINDOW_SIZE - end),
+    regions[n++] = (tiku_mem_region_t){
+        __uninit_end,
+        (tiku_mem_arch_size_t)(TIKU_DEVICE_RAM_START +
+                               TIKU_DEVICE_IMAGE_WINDOW_SIZE - end),
         TIKU_MEM_REGION_SRAM};
-    if (count != NULL) { *count = n; }
+    if (count != NULL) {
+        *count = n;
+    }
     return regions;
 }

@@ -11,8 +11,11 @@
 
 #define TIKU_C5_XIP_HEADER_BYTES 64u
 
-/** @brief Compare paired metadata and check payload bounds and CRC; return nonzero on success. */
-int tiku_c5_xip_validate(const uint32_t *expected, const uint8_t *mapped, size_t capacity);
-/** @brief Halt before application initialization if the flash companion does not match. */
+/** @brief Compare paired metadata and check payload bounds and CRC; return
+ * nonzero on success. */
+int tiku_c5_xip_validate(const uint32_t *expected, const uint8_t *mapped,
+                         size_t capacity);
+/** @brief Halt before application initialization if the flash companion does
+ * not match. */
 void tiku_c5_xip_require(void);
 #endif

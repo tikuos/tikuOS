@@ -80,7 +80,7 @@ int tiku_c5_irq_attach(unsigned line, unsigned source, unsigned priority,
 int tiku_c5_irq_owned(unsigned line, unsigned source, tiku_c5_isr_t handler)
 {
     return line < TIKU_C5_IRQ_LINES && handler != NULL &&
-        sources[line] == source && handlers[line] == handler;
+           sources[line] == source && handlers[line] == handler;
 }
 
 int tiku_c5_irq_enable(unsigned line, int enabled)
@@ -114,7 +114,10 @@ void tiku_c5_irq_detach(unsigned line)
     }
     handlers[line] = NULL;
     sources[line] = TIKU_C5_IRQ_SOURCES;
-    if (line == switch_line) { frame_switch = NULL; switch_line = TIKU_C5_IRQ_LINES; }
+    if (line == switch_line) {
+        frame_switch = NULL;
+        switch_line = TIKU_C5_IRQ_LINES;
+    }
     TIKU_C5_IRQ_RESTORE(state);
 }
 
@@ -135,7 +138,10 @@ void tiku_c5_irq_dispatch(uint32_t id)
     in_isr = previous;
 }
 
-int tiku_c5_in_isr(void) { return in_isr; }
+int tiku_c5_in_isr(void)
+{
+    return in_isr;
+}
 
 uint32_t tiku_c5_irq_unclaimed(void)
 {
@@ -143,9 +149,12 @@ uint32_t tiku_c5_irq_unclaimed(void)
 }
 
 /** @brief Reserve the ordinary handler slot for a frame-switching interrupt. */
-static void switch_claim(void) { }
+static void switch_claim(void)
+{
+}
 
-int tiku_c5_irq_attach_switch(unsigned line, unsigned source, tiku_c5_switch_t handler)
+int tiku_c5_irq_attach_switch(unsigned line, unsigned source,
+                              tiku_c5_switch_t handler)
 {
     uint32_t state = TIKU_C5_IRQ_SAVE();
     int result = -1;

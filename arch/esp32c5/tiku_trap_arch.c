@@ -11,10 +11,11 @@
 #endif
 
 extern void tiku_esp32c5_diagnostic_fault(uint32_t cause, uint32_t pc,
-                                         uint32_t value)
+                                          uint32_t value)
     __attribute__((noreturn));
 
-/** @brief Dispatch a CLIC interrupt; exceptions terminate in the fault handler. */
+/** @brief Dispatch a CLIC interrupt; exceptions terminate in the fault handler.
+ */
 uint32_t *tiku_c5_trap_dispatch(uint32_t *frame)
 {
     uint32_t cause = frame[TIKU_C5_FRAME_CAUSE / 4];
@@ -29,8 +30,9 @@ uint32_t *tiku_c5_trap_dispatch(uint32_t *frame)
 #endif
     } else {
         uint32_t value;
-        __asm__ volatile ("csrr %0, mtval" : "=r"(value));
-        tiku_esp32c5_diagnostic_fault(cause, frame[TIKU_C5_FRAME_PC / 4], value);
+        __asm__ volatile("csrr %0, mtval" : "=r"(value));
+        tiku_esp32c5_diagnostic_fault(cause, frame[TIKU_C5_FRAME_PC / 4],
+                                      value);
     }
     return frame;
 }

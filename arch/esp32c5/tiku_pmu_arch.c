@@ -20,24 +20,24 @@
 #include "tiku_cpu_common.h"
 
 /* eFuse words: wafer and block versions, then the regulator calibration. */
-#define C5_EFUSE_SYS2       0x600B484Cu
-#define C5_EFUSE_SYS3       0x600B4850u
+#define C5_EFUSE_SYS2 0x600B484Cu
+#define C5_EFUSE_SYS3 0x600B4850u
 
 /* PMU regulator registers; the DBIAS field is bits 31:27 in each. */
-#define C5_PMU_HP_ACTIVE    0x600B0028u
-#define C5_PMU_HP_MODEM     0x600B005Cu
-#define C5_PMU_HP_SLEEP_LP  0x600B009Cu
-#define C5_PMU_DBIAS_SHIFT  27u
-#define C5_PMU_DBIAS_SEL    (1u << 14)
+#define C5_PMU_HP_ACTIVE   0x600B0028u
+#define C5_PMU_HP_MODEM    0x600B005Cu
+#define C5_PMU_HP_SLEEP_LP 0x600B009Cu
+#define C5_PMU_DBIAS_SHIFT 27u
+#define C5_PMU_DBIAS_SEL   (1u << 14)
 
 /* Analog I2C master (modem LP control clock, block select, transfer). */
-#define C5_ANA_CLOCK        0x600AF018u
-#define C5_ANA_MST          0x600AF800u
-#define C5_ANA_CONF1        (C5_ANA_MST + 0x1Cu)
-#define C5_ANA_CONF2        (C5_ANA_MST + 0x20u)
-#define C5_ANA_BUSY         (1u << 25)
-#define C5_ANA_WRITE        (1u << 24)
-#define C5_ANA_SPINS        200000u
+#define C5_ANA_CLOCK 0x600AF018u
+#define C5_ANA_MST   0x600AF800u
+#define C5_ANA_CONF1 (C5_ANA_MST + 0x1Cu)
+#define C5_ANA_CONF2 (C5_ANA_MST + 0x20u)
+#define C5_ANA_BUSY  (1u << 25)
+#define C5_ANA_WRITE (1u << 24)
+#define C5_ANA_SPINS 200000u
 
 /* PMU immediate HP clock power: the PLL with its analog interface, and the
  * PLL's clock gate.  Analog master CONF0 holds the PLL calibration control
@@ -57,13 +57,13 @@
  * active-state ICG code, the modem APB, analog master and LP APB gate maps
  * keyed by that code, the triggers that apply them, and the analog master's
  * power bits in PMU immediate clock power. */
-#define C5_PMU_ACTIVE_ICG   (0x600B0000u + 0x0Cu)
-#define C5_ICG_CODE_ACTIVE  2u
-#define C5_SYSCON_POWER_ST  0x600A9C0Cu
-#define C5_LPCON_POWER_ST   0x600AF020u
-#define C5_PMU_ICG_UPDATE   (0x600B0000u + 0xDCu)
-#define C5_PMU_ICG_SWITCH   (0x600B0000u + 0xD0u)
-#define C5_ANA_POWER_ON     ((1u << 28) | (1u << 29))
+#define C5_PMU_ACTIVE_ICG  (0x600B0000u + 0x0Cu)
+#define C5_ICG_CODE_ACTIVE 2u
+#define C5_SYSCON_POWER_ST 0x600A9C0Cu
+#define C5_LPCON_POWER_ST  0x600AF020u
+#define C5_PMU_ICG_UPDATE  (0x600B0000u + 0xDCu)
+#define C5_PMU_ICG_SWITCH  (0x600B0000u + 0xD0u)
+#define C5_ANA_POWER_ON    ((1u << 28) | (1u << 29))
 
 /* A block on the analog bus: its address, the CONF2 bit that selects its
  * control register, and the CONF1 mask regi2c_impl.c writes before a
@@ -75,13 +75,12 @@ typedef struct {
 } analog_block_t;
 
 /* The digital regulator and the PLL. */
-static const analog_block_t dig_reg = { 0x6Du, 1u << 12,
-                                        0xFFFFFFu & ~(1u << 10) };
-static const analog_block_t bbpll = { 0x66u, 1u << 9,
-                                      0xFFFFFFu & ~(1u << 7) };
+static const analog_block_t dig_reg = {0x6Du, 1u << 12,
+                                       0xFFFFFFu & ~(1u << 10)};
+static const analog_block_t bbpll = {0x66u, 1u << 9, 0xFFFFFFu & ~(1u << 7)};
 
-static int8_t voltage_result = 1;   /* 1 = not attempted yet */
-static int8_t pll_result = 1;       /* 1 = not attempted yet */
+static int8_t voltage_result = 1; /* 1 = not attempted yet */
+static int8_t pll_result = 1;     /* 1 = not attempted yet */
 static uint32_t applied_dbias;
 
 /** @brief Wait a bounded number of reads for the analog bus to go idle. */
@@ -105,19 +104,19 @@ static int analog_idle(uint32_t control)
 static void analog_bus_open(void)
 {
     TIKU_C5_REG_WRITE(C5_PMU_ACTIVE_ICG,
-        (TIKU_C5_REG_READ(C5_PMU_ACTIVE_ICG) & ~(3u << 30)) |
-        (C5_ICG_CODE_ACTIVE << 30));
+                      (TIKU_C5_REG_READ(C5_PMU_ACTIVE_ICG) & ~(3u << 30)) |
+                          (C5_ICG_CODE_ACTIVE << 30));
     TIKU_C5_REG_WRITE(C5_SYSCON_POWER_ST,
-        TIKU_C5_REG_READ(C5_SYSCON_POWER_ST) |
-        (1u << (28u + C5_ICG_CODE_ACTIVE)));
+                      TIKU_C5_REG_READ(C5_SYSCON_POWER_ST) |
+                          (1u << (28u + C5_ICG_CODE_ACTIVE)));
     TIKU_C5_REG_WRITE(C5_LPCON_POWER_ST,
-        TIKU_C5_REG_READ(C5_LPCON_POWER_ST) |
-        (1u << (24u + C5_ICG_CODE_ACTIVE)) |
-        (1u << (28u + C5_ICG_CODE_ACTIVE)));
+                      TIKU_C5_REG_READ(C5_LPCON_POWER_ST) |
+                          (1u << (24u + C5_ICG_CODE_ACTIVE)) |
+                          (1u << (28u + C5_ICG_CODE_ACTIVE)));
     TIKU_C5_REG_WRITE(C5_PMU_ICG_UPDATE, 1u << 31);
     TIKU_C5_REG_WRITE(C5_PMU_ICG_SWITCH, 1u << 28);
     TIKU_C5_REG_WRITE(C5_PMU_IMM_CK_POWER,
-        TIKU_C5_REG_READ(C5_PMU_IMM_CK_POWER) | C5_ANA_POWER_ON);
+                      TIKU_C5_REG_READ(C5_PMU_IMM_CK_POWER) | C5_ANA_POWER_ON);
 }
 
 /**
@@ -129,7 +128,7 @@ static int analog_field(const analog_block_t *b, uint8_t reg, unsigned msb,
                         unsigned lsb, unsigned value)
 {
     uint32_t control = C5_ANA_MST +
-        ((TIKU_C5_REG_READ(C5_ANA_CONF2) & b->select) ? 0u : 4u);
+                       ((TIKU_C5_REG_READ(C5_ANA_CONF2) & b->select) ? 0u : 4u);
     uint32_t word = b->address | ((uint32_t)reg << 8);
     uint32_t mask = ((2u << (msb - lsb)) - 1u) << lsb;
     uint32_t data;
@@ -180,9 +179,9 @@ static uint32_t calibrated(unsigned shift)
 /** @brief Replace the DBIAS field of regulator register @p address. */
 static void set_dbias(uint32_t address, uint32_t dbias)
 {
-    TIKU_C5_REG_WRITE(address,
-        (TIKU_C5_REG_READ(address) & ~(31u << C5_PMU_DBIAS_SHIFT)) |
-        (dbias << C5_PMU_DBIAS_SHIFT));
+    TIKU_C5_REG_WRITE(
+        address, (TIKU_C5_REG_READ(address) & ~(31u << C5_PMU_DBIAS_SHIFT)) |
+                     (dbias << C5_PMU_DBIAS_SHIFT));
 }
 
 int tiku_c5_core_voltage_ready(void)
@@ -235,12 +234,14 @@ static int pll_configure(unsigned xtal)
     unsigned dr = xtal == 48u ? 1u : 0u;
 
     return analog_field(&bbpll, 2u, 7u, 0u, (5u << 4) | 1u) != 0 ||
-           analog_field(&bbpll, 3u, 7u, 0u, feedback) != 0 ||
-           analog_field(&bbpll, 5u, 2u, 0u, dr) != 0 ||
-           analog_field(&bbpll, 5u, 6u, 4u, dr) != 0 ||
-           analog_field(&bbpll, 6u, 7u, 6u, 1u) != 0 ||
-           analog_field(&bbpll, 6u, 5u, 4u, 3u) != 0 ||
-           analog_field(&bbpll, 9u, 1u, 0u, 3u) != 0 ? -1 : 0;
+                   analog_field(&bbpll, 3u, 7u, 0u, feedback) != 0 ||
+                   analog_field(&bbpll, 5u, 2u, 0u, dr) != 0 ||
+                   analog_field(&bbpll, 5u, 6u, 4u, dr) != 0 ||
+                   analog_field(&bbpll, 6u, 7u, 6u, 1u) != 0 ||
+                   analog_field(&bbpll, 6u, 5u, 4u, 3u) != 0 ||
+                   analog_field(&bbpll, 9u, 1u, 0u, 3u) != 0
+               ? -1
+               : 0;
 }
 
 int tiku_c5_pll_ready(void)
@@ -266,8 +267,9 @@ int tiku_c5_pll_ready(void)
     clock = TIKU_C5_REG_READ(C5_ANA_CLOCK);
     TIKU_C5_REG_WRITE(C5_ANA_CLOCK, clock | 4u);
     /* Calibration runs while STOP_LOW is set and ends with STOP_HIGH. */
-    TIKU_C5_REG_WRITE(C5_ANA_CONF0, (TIKU_C5_REG_READ(C5_ANA_CONF0) &
-                                     ~C5_PLL_STOP_HIGH) | C5_PLL_STOP_LOW);
+    TIKU_C5_REG_WRITE(C5_ANA_CONF0,
+                      (TIKU_C5_REG_READ(C5_ANA_CONF0) & ~C5_PLL_STOP_HIGH) |
+                          C5_PLL_STOP_LOW);
     failed = pll_configure(xtal);
     for (n = 0; !failed && n < C5_ANA_SPINS; n++) {
         if (TIKU_C5_REG_READ(C5_ANA_CONF0) & C5_PLL_CAL_DONE) {
@@ -280,8 +282,9 @@ int tiku_c5_pll_ready(void)
     if (!failed) {
         tiku_cpu_c5_delay_us(10);
     }
-    TIKU_C5_REG_WRITE(C5_ANA_CONF0, (TIKU_C5_REG_READ(C5_ANA_CONF0) &
-                                     ~C5_PLL_STOP_LOW) | C5_PLL_STOP_HIGH);
+    TIKU_C5_REG_WRITE(C5_ANA_CONF0,
+                      (TIKU_C5_REG_READ(C5_ANA_CONF0) & ~C5_PLL_STOP_LOW) |
+                          C5_PLL_STOP_HIGH);
     TIKU_C5_REG_WRITE(C5_ANA_CLOCK, clock);
     if (failed) {
         power = TIKU_C5_REG_READ(C5_PMU_IMM_CK_POWER);

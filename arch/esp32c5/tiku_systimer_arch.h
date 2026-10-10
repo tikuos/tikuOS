@@ -8,14 +8,15 @@
 #define TIKU_ESP32C5_SYSTIMER_ARCH_H_
 #include <stdint.h>
 
-#define TIKU_C5_TICK_HZ 128u
+#define TIKU_C5_TICK_HZ     128u
 #define TIKU_C5_TICK_COUNTS (16000000u / TIKU_C5_TICK_HZ)
 
 /** @brief Initialize SYSTIMER and claim CLIC line 0; return -1 on failure.
  * @note Call after irq_init, before enabling machine interrupts.
  */
 int tiku_c5_systimer_init(void);
-/** @brief Read the 52-bit counter; leave *value unchanged on NULL or timeout. */
+/** @brief Read the 52-bit counter; leave *value unchanged on NULL or timeout.
+ */
 int tiku_c5_systimer_read(uint64_t *value);
 /** @brief Stop the tick alarm and release its interrupt line. */
 void tiku_c5_systimer_stop(void);
@@ -25,7 +26,8 @@ uint32_t tiku_c5_systimer_ticks(void);
 uint32_t tiku_c5_systimer_interrupts(void);
 /** @brief Return timer read failures since initialization. */
 uint32_t tiku_c5_systimer_errors(void);
-/** @brief Tick ISR notification; the kernel overrides the empty weak definition. */
+/** @brief Tick ISR notification; the kernel overrides the empty weak
+ * definition. */
 void tiku_c5_tick_notify(void);
 
 #endif

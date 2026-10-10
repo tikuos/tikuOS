@@ -15,7 +15,10 @@
 /* Retained SRAM keeps the record across the reset that follows the fault. */
 static TIKU_RETAINED tiku_c5_fault_record_t fault_rec;
 
-const tiku_c5_fault_record_t *tiku_c5_fault_last(void) { return &fault_rec; }
+const tiku_c5_fault_record_t *tiku_c5_fault_last(void)
+{
+    return &fault_rec;
+}
 
 void tiku_c5_fault_clear(void)
 {
@@ -26,20 +29,31 @@ void tiku_c5_fault_clear(void)
 const char *tiku_c5_fault_kind_name(uint32_t code)
 {
     switch (code) {
-    case 0:  return "fetch-misaligned";
-    case 1:  return "fetch-fault";
-    case 2:  return "illegal";
-    case 3:  return "breakpoint";
-    case 4:  return "load-misaligned";
-    case 5:  return "load-fault";
-    case 6:  return "store-misaligned";
-    case 7:  return "store-fault";
-    case 11: return "ecall";
-    default: return "exception";
+    case 0:
+        return "fetch-misaligned";
+    case 1:
+        return "fetch-fault";
+    case 2:
+        return "illegal";
+    case 3:
+        return "breakpoint";
+    case 4:
+        return "load-misaligned";
+    case 5:
+        return "load-fault";
+    case 6:
+        return "store-misaligned";
+    case 7:
+        return "store-fault";
+    case 11:
+        return "ecall";
+    default:
+        return "exception";
     }
 }
 
-/** @brief Write terminal fault bytes without libc or the interrupted TX queue. */
+/** @brief Write terminal fault bytes without libc or the interrupted TX queue.
+ */
 static void fault_text(const char *text)
 {
     unsigned tries = 0;
@@ -51,13 +65,16 @@ static void fault_text(const char *text)
     }
 }
 
-/** @brief Print a register value without allocating C-library formatting state. */
+/** @brief Print a register value without allocating C-library formatting state.
+ */
 static void fault_hex(uint32_t value)
 {
     static const char digits[] = "0123456789abcdef";
     char text[9];
     unsigned i;
-    for (i = 0; i < 8; i++) { text[i] = digits[(value >> (28u - i * 4u)) & 15u]; }
+    for (i = 0; i < 8; i++) {
+        text[i] = digits[(value >> (28u - i * 4u)) & 15u];
+    }
     text[8] = 0;
     fault_text(text);
 }
@@ -67,7 +84,9 @@ static void halt(void) __attribute__((noreturn));
 static void halt(void)
 {
     (void)TIKU_C5_IRQ_SAVE();
-    for (;;) { __asm__ volatile ("wfi"); }
+    for (;;) {
+        __asm__ volatile("wfi");
+    }
 }
 void tiku_c5_fatal(const char *reason)
 {
@@ -81,9 +100,12 @@ void tiku_c5_fatal(const char *reason)
 void tiku_esp32c5_diagnostic_fault(uint32_t cause, uint32_t pc, uint32_t value)
 {
     (void)TIKU_C5_IRQ_SAVE();
-    fault_text("\r\nTRAP cause="); fault_hex(cause);
-    fault_text(" pc="); fault_hex(pc);
-    fault_text(" value="); fault_hex(value);
+    fault_text("\r\nTRAP cause=");
+    fault_hex(cause);
+    fault_text(" pc=");
+    fault_hex(pc);
+    fault_text(" value=");
+    fault_hex(value);
     fault_text("\r\n");
     if (fault_rec.magic != TIKU_C5_FAULT_MAGIC) {
         fault_rec.magic = TIKU_C5_FAULT_MAGIC;

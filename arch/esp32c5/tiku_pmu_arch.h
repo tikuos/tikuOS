@@ -16,7 +16,7 @@
 #include <stdint.h>
 
 /** Regulator setting when eFuse holds no calibration (ESP-IDF default). */
-#define TIKU_C5_PMU_DBIAS_DEFAULT   28u
+#define TIKU_C5_PMU_DBIAS_DEFAULT 28u
 
 /**
  * @brief Hand the digital regulators to the PMU at the calibrated voltage.

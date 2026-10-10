@@ -8,7 +8,7 @@
 #define TIKU_ESP32C5_TRNG_ARCH_H_
 #include <stddef.h>
 #include <stdint.h>
-#define TIKU_TRNG_OK             0
+#define TIKU_TRNG_OK            0
 #define TIKU_TRNG_ERR_INVALID   -1
 #define TIKU_TRNG_ERR_TIMEOUT   -2
 #define TIKU_TRNG_ERR_NOT_READY -3
@@ -17,9 +17,10 @@ void tiku_trng_arch_init(void);
 /** @brief Read a word with SAR entropy; return a negative error on failure. */
 int tiku_trng_arch_read_u32(uint32_t *out);
 /**
- * @brief Fill up to 256 bytes using internal SAR entropy, then restore hardware.
- * Requires foreground context; active ADC or PHY ownership refuses the read.
- * Errors clear output. The function does not use radio-supplied entropy.
+ * @brief Fill up to 256 bytes using internal SAR entropy, then restore
+ * hardware. Requires foreground context; active ADC or PHY ownership refuses
+ * the read. Errors clear output. The function does not use radio-supplied
+ * entropy.
  */
 int tiku_trng_arch_read_bytes(uint8_t *out, size_t length);
 #endif

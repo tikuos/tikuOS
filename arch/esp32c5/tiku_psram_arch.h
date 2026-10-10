@@ -23,15 +23,18 @@ typedef enum {
     TIKU_C5_PSRAM_CONFIG = -7
 } tiku_c5_psram_err_t;
 
-/** @brief Identify, map and verify PSRAM; kernel foreground only, after flash init.
+/** @brief Identify, map and verify PSRAM; kernel foreground only, after flash
+ * init.
  * @note GPIO15/18/20 (CS1, WP, HD) use native MSPI routing.  No PSRAM
  *       encryption or DMA support.
  *       A zero package code returns ABSENT unless TIKU_C5_PSRAM_EXTERNAL=1.
  */
 int tiku_c5_psram_init(void);
-/** @brief Initialize and attach verified capacity to the external memory tier. */
+/** @brief Initialize and attach verified capacity to the external memory tier.
+ */
 int tiku_c5_psram_attach(void);
-/** @brief Detach without forcing live allocations, then unmap and restore controller state. */
+/** @brief Detach without forcing live allocations, then unmap and restore
+ * controller state. */
 int tiku_c5_psram_down(void);
 /** @brief Verified mapped bytes, zero before successful initialization. */
 uint32_t tiku_c5_psram_size(void);

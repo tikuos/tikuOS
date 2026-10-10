@@ -17,7 +17,9 @@ static volatile uint32_t interrupts;
 static volatile uint32_t errors;
 static uint8_t attached;
 
-__attribute__((weak)) void tiku_c5_tick_notify(void) { }
+__attribute__((weak)) void tiku_c5_tick_notify(void)
+{
+}
 
 int tiku_c5_systimer_read(uint64_t *value)
 {
@@ -53,11 +55,11 @@ static void tick_arm(uint64_t deadline)
                       (uint32_t)(deadline >> 32) & 0xFFFFFu);
     TIKU_C5_REG_WRITE(TIKU_C5_SYSTIMER_TARGET_LO(0), (uint32_t)deadline);
     TIKU_C5_REG_WRITE(TIKU_C5_SYSTIMER_TARGET_LOAD(0), 1u);
-    TIKU_C5_REG_WRITE(TIKU_C5_SYSTIMER_CONF,
-                      conf | TIKU_C5_SYSTIMER_TARGET(0));
+    TIKU_C5_REG_WRITE(TIKU_C5_SYSTIMER_CONF, conf | TIKU_C5_SYSTIMER_TARGET(0));
 }
 
-/** @brief Count elapsed ticks in constant time and rearm at the next boundary. */
+/** @brief Count elapsed ticks in constant time and rearm at the next boundary.
+ */
 static void tick_interrupt(void)
 {
     uint64_t now, elapsed, due;
@@ -85,12 +87,13 @@ int tiku_c5_systimer_init(void)
     uint64_t now;
 
     state = TIKU_C5_IRQ_SAVE();
-    if (attached && !tiku_c5_irq_owned(0, TIKU_C5_SYSTIMER_IRQ0, tick_interrupt)) {
+    if (attached &&
+        !tiku_c5_irq_owned(0, TIKU_C5_SYSTIMER_IRQ0, tick_interrupt)) {
         TIKU_C5_IRQ_RESTORE(state);
         return -1;
     }
-    if (!attached && tiku_c5_irq_attach(0, TIKU_C5_SYSTIMER_IRQ0, 1,
-                                       tick_interrupt) != 0) {
+    if (!attached &&
+        tiku_c5_irq_attach(0, TIKU_C5_SYSTIMER_IRQ0, 1, tick_interrupt) != 0) {
         TIKU_C5_IRQ_RESTORE(state);
         return -1;
     }
@@ -128,7 +131,7 @@ void tiku_c5_systimer_stop(void)
                           TIKU_C5_REG_READ(TIKU_C5_SYSTIMER_INT_ENA) & ~1u);
         TIKU_C5_REG_WRITE(TIKU_C5_SYSTIMER_CONF,
                           TIKU_C5_REG_READ(TIKU_C5_SYSTIMER_CONF) &
-                          ~TIKU_C5_SYSTIMER_TARGET(0));
+                              ~TIKU_C5_SYSTIMER_TARGET(0));
         TIKU_C5_REG_WRITE(TIKU_C5_SYSTIMER_INT_CLR, 1u);
         tiku_c5_irq_detach(0);
         attached = 0;

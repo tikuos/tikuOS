@@ -11,17 +11,19 @@
 
 void tiku_c5_rom_flash_attach(uint32_t pins, int legacy);
 int tiku_c5_rom_flash_config(uint32_t id, uint32_t size, uint32_t block,
-                            uint32_t sector, uint32_t page, uint32_t status_mask);
+                             uint32_t sector, uint32_t page,
+                             uint32_t status_mask);
 int tiku_c5_rom_flash_command(uint32_t *result, uint8_t command);
 int tiku_c5_rom_flash_unlock(void);
 int tiku_c5_rom_flash_read(uint32_t offset, uint32_t *data, int32_t length);
-int tiku_c5_rom_flash_write(uint32_t offset, const uint32_t *data, int32_t length);
+int tiku_c5_rom_flash_write(uint32_t offset, const uint32_t *data,
+                            int32_t length);
 int tiku_c5_rom_flash_erase(uint32_t sector);
 void tiku_c5_rom_cache_boot(void);
 void tiku_c5_rom_mmu_init(void);
 int tiku_c5_rom_mmu_set(uint32_t encrypted, uint32_t external_ram,
-                       uint32_t virtual_address, uint32_t physical_address,
-                       uint32_t page_kib, uint32_t pages, uint32_t fixed);
+                        uint32_t virtual_address, uint32_t physical_address,
+                        uint32_t page_kib, uint32_t pages, uint32_t fixed);
 uint32_t tiku_c5_rom_cache_suspend(void);
 void tiku_c5_rom_cache_resume(uint32_t autoload);
 void tiku_c5_rom_cache_enable(uint32_t autoload);

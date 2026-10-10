@@ -9,15 +9,15 @@
 
 #include <stdint.h>
 
-#define TIKU_C5_FAULT_MAGIC 0x546B464Cu    /* "TkFL" */
+#define TIKU_C5_FAULT_MAGIC 0x546B464Cu /* "TkFL" */
 
 /** @brief The last exception, kept in retained SRAM. */
 typedef struct {
-    uint32_t magic;     /**< TIKU_C5_FAULT_MAGIC when the rest is valid    */
-    uint32_t count;     /**< exceptions recorded since the last clear      */
-    uint32_t mcause;    /**< exception code in the low bits                */
-    uint32_t mtval;     /**< faulting address or instruction, by cause     */
-    uint32_t pc;        /**< mepc: the instruction that faulted            */
+    uint32_t magic;  /**< TIKU_C5_FAULT_MAGIC when the rest is valid    */
+    uint32_t count;  /**< exceptions recorded since the last clear      */
+    uint32_t mcause; /**< exception code in the low bits                */
+    uint32_t mtval;  /**< faulting address or instruction, by cause     */
+    uint32_t pc;     /**< mepc: the instruction that faulted            */
 } tiku_c5_fault_record_t;
 
 /** @brief The record; check its magic before trusting the rest. */

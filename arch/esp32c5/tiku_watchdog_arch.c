@@ -43,7 +43,9 @@ void tiku_watchdog_arch_on(tiku_wdt_clk_t src, tiku_wdt_interval_t interval)
     uint32_t hold = ((uint32_t)interval * 2000u + 32767u) / 32768u;
     (void)src;
     TIKU_C5_REG_WRITE(0x60096054u, (TIKU_C5_REG_READ(0x60096054u) | 1u) & ~2u);
-    TIKU_C5_REG_WRITE(0x6009605Cu, (TIKU_C5_REG_READ(0x6009605Cu) & ~(3u << 20)) | (1u << 22));
+    TIKU_C5_REG_WRITE(0x6009605Cu,
+                      (TIKU_C5_REG_READ(0x6009605Cu) & ~(3u << 20)) |
+                          (1u << 22));
     configure(0);
     TIKU_C5_REG_WRITE(TIKU_C5_TG0_WDT_PROTECT, TIKU_C5_WDT_KEY);
     TIKU_C5_REG_WRITE(0x6000804Cu, (24000u << 16) | 1u);
@@ -58,14 +60,19 @@ void tiku_watchdog_arch_on(tiku_wdt_clk_t src, tiku_wdt_interval_t interval)
 void tiku_watchdog_arch_pause(void)
 {
     uint32_t state = TIKU_C5_IRQ_SAVE();
-    if (running && !paused) { configure(0); paused = 1; }
+    if (running && !paused) {
+        configure(0);
+        paused = 1;
+    }
     TIKU_C5_IRQ_RESTORE(state);
 }
 void tiku_watchdog_arch_resume(int kick)
 {
     uint32_t state = TIKU_C5_IRQ_SAVE();
     if (running && paused) {
-        if (kick) { tiku_watchdog_arch_kick(); }
+        if (kick) {
+            tiku_watchdog_arch_kick();
+        }
         configure((1u << 31) | (3u << 29));
         paused = 0;
     }

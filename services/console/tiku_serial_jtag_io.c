@@ -22,7 +22,7 @@ static uint8_t stalled;
 static uint32_t cycles(void)
 {
     uint32_t value;
-    __asm__ volatile ("csrr %0, mcycle" : "=r"(value));
+    __asm__ volatile("csrr %0, mcycle" : "=r"(value));
     return value;
 }
 #define TIKU_C5_CONSOLE_CYCLES() cycles()
@@ -30,14 +30,23 @@ static uint32_t cycles(void)
 void tiku_serial_jtag_poll(void)
 {
     size_t contiguous, accepted;
-    if (count == 0) { tiku_usb_serial_jtag_poll(); return; }
+    if (count == 0) {
+        tiku_usb_serial_jtag_poll();
+        return;
+    }
     contiguous = sizeof(output) - head;
-    if (contiguous > count) { contiguous = count; }
+    if (contiguous > count) {
+        contiguous = count;
+    }
     accepted = tiku_usb_serial_jtag_write(output + head, contiguous);
     head = (head + accepted) % sizeof(output);
     count -= accepted;
-    if (accepted) { stalled = 0; }
-    if (count == 0) { tiku_usb_serial_jtag_poll(); }
+    if (accepted) {
+        stalled = 0;
+    }
+    if (count == 0) {
+        tiku_usb_serial_jtag_poll();
+    }
 }
 void tiku_serial_jtag_putc(char byte)
 {
@@ -46,24 +55,49 @@ void tiku_serial_jtag_putc(char byte)
         do {
             tiku_serial_jtag_poll();
         } while (!stalled && count == sizeof(output) &&
-                 (uint32_t)(TIKU_C5_CONSOLE_CYCLES() - start) < tiku_c5_rom_cpu_frequency() * 20000u);
-        if (count == sizeof(output)) { dropped++; stalled = 1; return; }
+                 (uint32_t)(TIKU_C5_CONSOLE_CYCLES() - start) <
+                     tiku_c5_rom_cpu_frequency() * 20000u);
+        if (count == sizeof(output)) {
+            dropped++;
+            stalled = 1;
+            return;
+        }
     }
     output[(head + count) % sizeof(output)] = (uint8_t)byte;
     count++;
-    if (byte == '\n' || count >= 64) { tiku_serial_jtag_poll(); }
+    if (byte == '\n' || count >= 64) {
+        tiku_serial_jtag_poll();
+    }
 }
 uint8_t tiku_serial_jtag_rx_ready(void)
 {
     tiku_serial_jtag_poll();
     return (TIKU_C5_REG_READ(TIKU_C5_USB_EP1_CONF) & TIKU_C5_USB_RX_AVAIL) != 0;
 }
-uint32_t tiku_serial_jtag_dropped(void) { return dropped; }
-void tiku_debug_arch_putc(char byte) { tiku_serial_jtag_putc(byte); }
-int tiku_debug_arch_getc(void) { return tiku_usb_serial_jtag_getc(); }
-uint8_t tiku_debug_arch_rx_ready(void) { return tiku_serial_jtag_rx_ready(); }
-uint32_t tiku_debug_arch_dropped(void) { return dropped; }
-void tiku_debug_arch_poll(void) { tiku_serial_jtag_poll(); }
+uint32_t tiku_serial_jtag_dropped(void)
+{
+    return dropped;
+}
+void tiku_debug_arch_putc(char byte)
+{
+    tiku_serial_jtag_putc(byte);
+}
+int tiku_debug_arch_getc(void)
+{
+    return tiku_usb_serial_jtag_getc();
+}
+uint8_t tiku_debug_arch_rx_ready(void)
+{
+    return tiku_serial_jtag_rx_ready();
+}
+uint32_t tiku_debug_arch_dropped(void)
+{
+    return dropped;
+}
+void tiku_debug_arch_poll(void)
+{
+    tiku_serial_jtag_poll();
+}
 void tiku_debug_arch_printf(const char *format, ...)
 {
     char text[512];
@@ -74,12 +108,15 @@ void tiku_debug_arch_printf(const char *format, ...)
     (void)vsnprintf(text, sizeof(text), format, args);
     va_end(args);
     for (i = 0; text[i]; i++) {
-        if (text[i] == '\n') { tiku_serial_jtag_putc('\r'); }
+        if (text[i] == '\n') {
+            tiku_serial_jtag_putc('\r');
+        }
         tiku_serial_jtag_putc(text[i]);
     }
     start = TIKU_C5_CONSOLE_CYCLES();
     do {
         tiku_serial_jtag_poll();
     } while (count && !stalled &&
-             (uint32_t)(TIKU_C5_CONSOLE_CYCLES() - start) < tiku_c5_rom_cpu_frequency() * 20000u);
+             (uint32_t)(TIKU_C5_CONSOLE_CYCLES() - start) <
+                 tiku_c5_rom_cpu_frequency() * 20000u);
 }

@@ -8,15 +8,13 @@
 #define TIKU_ESP32C5_ANALOG_ARCH_H_
 #include <stdint.h>
 
-enum {
-    TIKU_C5_ANALOG_NONE,
-    TIKU_C5_ANALOG_ENTROPY,
-    TIKU_C5_ANALOG_PHY
-};
+enum { TIKU_C5_ANALOG_NONE, TIKU_C5_ANALOG_ENTROPY, TIKU_C5_ANALOG_PHY };
 
-/** @brief Claim the analog subsystem for a named owner; return -1 if busy or invalid. */
+/** @brief Claim the analog subsystem for a named owner; return -1 if busy or
+ * invalid. */
 int tiku_c5_analog_acquire(unsigned owner);
-/** @brief Release a matching claim; return -1 without changing another owner's claim. */
+/** @brief Release a matching claim; return -1 without changing another owner's
+ * claim. */
 int tiku_c5_analog_release(unsigned owner);
 /** @brief Return the owner, or TIKU_C5_ANALOG_NONE when unclaimed. */
 unsigned tiku_c5_analog_owner(void);

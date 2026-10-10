@@ -11,7 +11,8 @@ typedef enum { TIKU_WDT_MODE_WATCHDOG, TIKU_WDT_MODE_INTERVAL } tiku_wdt_mode_t;
 typedef enum { TIKU_WDT_SRC_SMCLK, TIKU_WDT_SRC_ACLK } tiku_wdt_clk_t;
 typedef uint16_t tiku_wdt_interval_t;
 #define TIKU_WATCHDOG_INTERVAL_SUPPORTED 0
-/** @brief Set stage 0 to reset after interval/32768 seconds; src selects no clock change. */
+/** @brief Set stage 0 to reset after interval/32768 seconds; src selects no
+ * clock change. */
 void tiku_watchdog_arch_on(tiku_wdt_clk_t src, tiku_wdt_interval_t interval);
 /** @brief Disable boot watchdogs and clear the runtime watchdog state. */
 void tiku_watchdog_arch_off(void);

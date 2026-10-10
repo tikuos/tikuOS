@@ -18,18 +18,19 @@
 #include "tiku_analog_arch.h"
 #include "tiku_pmu_arch.h"
 
-#define C5_PCR_SYSCLK       0x60096110UL
-#define C5_PCR_CPU          0x60096118UL
-#define C5_PCR_AHB          0x6009611CUL
-#define C5_PCR_UPDATE       0x60096144UL
-#define C5_CLOCK_SPINS      4096u
+#define C5_PCR_SYSCLK  0x60096110UL
+#define C5_PCR_CPU     0x60096118UL
+#define C5_PCR_AHB     0x6009611CUL
+#define C5_PCR_UPDATE  0x60096144UL
+#define C5_CLOCK_SPINS 4096u
 
 static int clock_fault;
 
-#define C5_SOURCE_MASK      (3u << 16)
-#define C5_SOURCE_PLL240    (3u << 16)
+#define C5_SOURCE_MASK   (3u << 16)
+#define C5_SOURCE_PLL240 (3u << 16)
 
-/** @brief Require PLL240, AHB /6 and a supported CPU divider with no pending update. */
+/** @brief Require PLL240, AHB /6 and a supported CPU divider with no pending
+ * update. */
 static int clock_tree_ready(void)
 {
     unsigned divider = (TIKU_C5_REG_READ(C5_PCR_CPU) & 255u) + 1u;
@@ -80,14 +81,16 @@ static int apply_tree(uint32_t cpu, uint32_t ahb, uint32_t source)
     TIKU_C5_REG_WRITE(C5_PCR_CPU, cpu);
     TIKU_C5_REG_WRITE(C5_PCR_AHB, ahb);
     TIKU_C5_REG_WRITE(C5_PCR_SYSCLK,
-        (TIKU_C5_REG_READ(C5_PCR_SYSCLK) & ~C5_SOURCE_MASK) | source);
+                      (TIKU_C5_REG_READ(C5_PCR_SYSCLK) & ~C5_SOURCE_MASK) |
+                          source);
     if (update_done() != 0) {
         return -1;
     }
     return TIKU_C5_REG_READ(C5_PCR_CPU) == cpu &&
-           TIKU_C5_REG_READ(C5_PCR_AHB) == ahb &&
-           (TIKU_C5_REG_READ(C5_PCR_SYSCLK) & C5_SOURCE_MASK) == source
-           ? 0 : -1;
+                   TIKU_C5_REG_READ(C5_PCR_AHB) == ahb &&
+                   (TIKU_C5_REG_READ(C5_PCR_SYSCLK) & C5_SOURCE_MASK) == source
+               ? 0
+               : -1;
 }
 
 /**
@@ -116,10 +119,14 @@ int tiku_c5_clock_set(unsigned long hz)
 {
     uint32_t state, previous, desired;
     unsigned mhz;
-    if (hz != 40000000UL && hz != 80000000UL && hz != 240000000UL) { return -1; }
+    if (hz != 40000000UL && hz != 80000000UL && hz != 240000000UL) {
+        return -1;
+    }
     /* 240 MHz needs the calibrated regulator setting; without it only the
      * slower dividers are applied. */
-    if (tiku_c5_core_voltage_ready() != 0 && hz > 80000000UL) { return -1; }
+    if (tiku_c5_core_voltage_ready() != 0 && hz > 80000000UL) {
+        return -1;
+    }
     mhz = (unsigned)(hz / 1000000UL);
     state = TIKU_C5_IRQ_SAVE();
     if (tiku_c5_analog_owner() == TIKU_C5_ANALOG_PHY) {
@@ -128,7 +135,9 @@ int tiku_c5_clock_set(unsigned long hz)
     }
     if (!clock_tree_ready()) {
         int result = clock_tree_on_crystal() ? leave_crystal(mhz) : -1;
-        if (result == 0) { tiku_c5_rom_cpu_frequency_set(mhz); }
+        if (result == 0) {
+            tiku_c5_rom_cpu_frequency_set(mhz);
+        }
         TIKU_C5_IRQ_RESTORE(state);
         return result;
     }
@@ -136,7 +145,9 @@ int tiku_c5_clock_set(unsigned long hz)
     desired = (previous & ~255u) | (240u / mhz - 1u);
     if (desired != previous && apply_divider(desired) != 0) {
         clock_fault = 1;
-        if (apply_divider(previous) != 0) { tiku_c5_fatal("clock rollback failed"); }
+        if (apply_divider(previous) != 0) {
+            tiku_c5_fatal("clock rollback failed");
+        }
         tiku_c5_rom_cpu_frequency_set(240u / ((previous & 255u) + 1u));
         TIKU_C5_IRQ_RESTORE(state);
         return -1;
@@ -146,7 +157,10 @@ int tiku_c5_clock_set(unsigned long hz)
     return 0;
 }
 
-int tiku_c5_clock_fault(void) { return clock_fault; }
+int tiku_c5_clock_fault(void)
+{
+    return clock_fault;
+}
 void tiku_cpu_freq_init(unsigned int mhz)
 {
     if (mhz == 40u || mhz == 80u || mhz == 240u) {
@@ -159,11 +173,25 @@ const char *tiku_cpu_freq_change_mode(void)
 }
 unsigned long tiku_cpu_freq_available(unsigned int index)
 {
-    static const unsigned long rates[] = { 40000000UL, 80000000UL, 240000000UL };
-    if (!clock_tree_ready()) { return index ? 0 : tiku_cpu_mclk_hz(); }
+    static const unsigned long rates[] = {40000000UL, 80000000UL, 240000000UL};
+    if (!clock_tree_ready()) {
+        return index ? 0 : tiku_cpu_mclk_hz();
+    }
     return index < sizeof rates / sizeof rates[0] ? rates[index] : 0;
 }
-unsigned long tiku_cpu_freq_target_hz(void) { return tiku_cpu_settings_target(); }
-int tiku_cpu_freq_target_set(unsigned long hz) { return tiku_cpu_settings_save(hz); }
-void tiku_cpu_freq_boot_apply(void) { tiku_cpu_settings_boot(); }
-void tiku_cpu_freq_boot_set(unsigned long hz) { (void)tiku_c5_clock_set(hz); }
+unsigned long tiku_cpu_freq_target_hz(void)
+{
+    return tiku_cpu_settings_target();
+}
+int tiku_cpu_freq_target_set(unsigned long hz)
+{
+    return tiku_cpu_settings_save(hz);
+}
+void tiku_cpu_freq_boot_apply(void)
+{
+    tiku_cpu_settings_boot();
+}
+void tiku_cpu_freq_boot_set(unsigned long hz)
+{
+    (void)tiku_c5_clock_set(hz);
+}

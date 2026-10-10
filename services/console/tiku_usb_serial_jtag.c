@@ -39,7 +39,8 @@ size_t tiku_usb_serial_jtag_write(const uint8_t *data, size_t length)
         TIKU_C5_REG_WRITE(TIKU_C5_USB_EP1, data[sent++]);
     }
     if (sent != 0) {
-        /* A full packet auto-flushes; USB requires a later short packet or ZLP. */
+        /* A full packet auto-flushes; USB requires a later short packet or ZLP.
+         */
         needs_zlp = (sent == TIKU_C5_USB_PACKET_SIZE);
         TIKU_C5_REG_WRITE(TIKU_C5_USB_EP1_CONF, TIKU_C5_USB_WR_DONE);
     }

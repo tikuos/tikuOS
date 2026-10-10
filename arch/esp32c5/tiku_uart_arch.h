@@ -16,8 +16,8 @@
 typedef struct {
     uint32_t interrupts;
     uint32_t tx_dropped;
-    uint16_t overruns;       /**< FIFO overflow events plus full-ring byte drops. */
-    uint16_t rx_errors;      /**< Latched framing/parity error events. */
+    uint16_t overruns;  /**< FIFO overflow events plus full-ring byte drops. */
+    uint16_t rx_errors; /**< Latched framing/parity error events. */
 } tiku_c5_uart_stats_t;
 
 /**
@@ -26,22 +26,28 @@ typedef struct {
  * console build, whose board reserves GPIO11/12. Reinitialization discards RX.
  */
 int tiku_c5_uart_start(uint32_t baud, int loopback);
-/** @brief Disable owned interrupts and restore changed pin routing; discard queued data. */
+/** @brief Disable owned interrupts and restore changed pin routing; discard
+ * queued data. */
 void tiku_c5_uart_stop(void);
 /** @brief Return nonzero after successful initialization. */
 int tiku_c5_uart_ready(void);
-/** @brief Initialize the board's UART console, or leave it unavailable on error. */
+/** @brief Initialize the board's UART console, or leave it unavailable on
+ * error. */
 void tiku_uart_init(void);
-/** @brief Send a byte with a bounded FIFO wait; count bytes rejected or timed out. */
+/** @brief Send a byte with a bounded FIFO wait; count bytes rejected or timed
+ * out. */
 void tiku_uart_putc(char byte);
-/** @brief Return nonzero if a byte is buffered; polling also drains the hardware FIFO. */
+/** @brief Return nonzero if a byte is buffered; polling also drains the
+ * hardware FIFO. */
 uint8_t tiku_uart_rx_ready(void);
 /** @brief Read a buffered byte, or -1 if uninitialized or empty. */
 int tiku_uart_getc(void);
-/** @brief Return the saturating count of FIFO overflow events and ring byte drops. */
+/** @brief Return the saturating count of FIFO overflow events and ring byte
+ * drops. */
 uint16_t tiku_uart_overrun_count(void);
 /** @brief Clear the overrun counter with interrupts masked. */
 void tiku_uart_overrun_reset(void);
-/** @brief Snapshot counters without consuming pending hardware receive events. */
+/** @brief Snapshot counters without consuming pending hardware receive events.
+ */
 void tiku_c5_uart_stats(tiku_c5_uart_stats_t *out);
 #endif
