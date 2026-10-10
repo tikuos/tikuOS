@@ -434,6 +434,21 @@ console helper keeps both asserted on open; the ROM-loader phase changes
 them explicitly to request a reset. Software reopen checks do not establish
 behavior during a physical cable removal or a power-state transition.
 
+The native console loads the USB Serial/JTAG IN endpoint only while the
+host is sending start-of-frame tokens: the unit's frame counter must have
+moved within the last two clock ticks (16 ms); otherwise the bytes are
+dropped and reported as sent. Console init reads the counter until it moves
+or a bounded number of reads (a few milliseconds) has passed, so a link that
+is live loses no first line. Bytes loaded while no host collects them stay
+in the endpoint, which never reports free again, so every later write is
+lost although the shell keeps running and receiving. That is the state an
+RTC-watchdog reset (`esptool --after watchdog-reset`, or the watchdog
+itself) left the board in: the unit re-enumerates and the kernel's boot
+output preceded the host's enumeration. An EN-pin or software reset keeps
+the link, so nothing is dropped there. A boot after an RTC-watchdog reset
+reports `/sys/boot/reason` as `none` (the ROM reports a power-on) and
+`.retained` does not survive it.
+
 ## Offline checks
 
 ```sh
