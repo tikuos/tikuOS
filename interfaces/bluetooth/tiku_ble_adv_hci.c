@@ -121,10 +121,11 @@ void tiku_ble_adv_conn_release(void)
 {
 }
 
-/* No 802.15.4 on an HCI controller. */
+/* The 15.4 MAC beside an HCI controller (the ESP32-C5) runs under the
+ * chip's arbiter: nothing to claim, the owner stays what BLE does. */
 int tiku_ble_adv_154_claim(void)
 {
-    return -1;
+    return 0;
 }
 
 void tiku_ble_adv_154_release(void)
