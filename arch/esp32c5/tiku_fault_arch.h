@@ -1,7 +1,7 @@
 /*
  * Tiku Operating System v0.06
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_fault_arch.h - C5 exception record kept across the reset it causes.
+ * tiku_fault_arch.h - C5 fault record kept across the reset it causes.
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_FAULT_ARCH_H_
@@ -9,15 +9,21 @@
 
 #include <stdint.h>
 
-#define TIKU_C5_FAULT_MAGIC 0x546B464Cu /* "TkFL" */
+#define TIKU_C5_FAULT_MAGIC 0x546B4632u /* "TkF2" */
 
-/** @brief The last exception, kept in retained SRAM. */
+/* Resets taken for faults in a row before the next fault halts instead. */
+#define TIKU_C5_FAULT_RESETS 3u
+
+/** @brief The last exception or fatal error, kept in retained SRAM. */
 typedef struct {
     uint32_t magic;  /**< TIKU_C5_FAULT_MAGIC when the rest is valid    */
-    uint32_t count;  /**< exceptions recorded since the last clear      */
-    uint32_t mcause; /**< exception code in the low bits                */
+    uint32_t count;  /**< faults recorded since the last clear          */
+    uint32_t resets; /**< faults in a row with under 2 s of uptime each  */
+    uint32_t fatal;  /**< 1 when the last fault was tiku_c5_fatal()     */
+    uint32_t mcause; /**< exception code in the low bits; 0 for a fatal */
     uint32_t mtval;  /**< faulting address or instruction, by cause     */
     uint32_t pc;     /**< mepc: the instruction that faulted            */
+    char reason[32]; /**< the fatal error's text, NUL-terminated        */
 } tiku_c5_fault_record_t;
 
 /** @brief The record; check its magic before trusting the rest. */

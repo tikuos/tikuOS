@@ -316,6 +316,13 @@ GPIO ownership protects USB, memory, LED and documented strap pads, direct
 peripheral mux functions and active matrix input/output routes. GPIO IRQs
 return failure. Pin loopbacks and external bus fixtures are unqualified.
 
+An exception is printed on the console, recorded in retained SRAM and resets
+the board; `tiku_c5_fatal()` (an unrecoverable peripheral failure) does the
+same with its reason text. `diag fault` shows the record. After three such
+resets without two seconds of uptime between them the next fault halts
+instead, so a fault on every boot does not loop; `diag fault fatal` exercises
+the path.
+
 The board's addressable RGB LED (GPIO27, GRB order) is the kernel's three
 LEDs: `/dev/led0`, `led1` and `led2` switch its red, green and blue channels
 at 16 of 255. Each change sends a 24-bit frame timed from the CPU cycle

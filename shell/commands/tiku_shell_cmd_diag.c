@@ -436,6 +436,7 @@ void tiku_shell_cmd_diag(uint8_t argc, const char *argv[]) {
 
 #if defined(PLATFORM_ESP32C5)
 #include <arch/esp32c5/tiku_fault_arch.h>
+#include <arch/esp32c5/tiku_timer_arch.h>
 #include <arch/esp32c5/tiku_pmu_arch.h>
 #include <arch/esp32c5/tiku_clock_arch.h>
 #include <arch/esp32c5/tiku_esp32c5_regs.h>
@@ -449,9 +450,15 @@ static void diag_fault_show(void)
         SHELL_PRINTF("  no fault recorded\n");
         return;
     }
-    SHELL_PRINTF("  last %s (#%lu)\n",
+    if (f->fatal) {
+        SHELL_PRINTF("  last fatal: %s (#%lu, %lu resets in a row)\n",
+                     f->reason, (unsigned long)f->count,
+                     (unsigned long)f->resets);
+        return;
+    }
+    SHELL_PRINTF("  last %s (#%lu, %lu resets in a row)\n",
                  tiku_c5_fault_kind_name(f->mcause & 0xFFFUL),
-                 (unsigned long)f->count);
+                 (unsigned long)f->count, (unsigned long)f->resets);
     SHELL_PRINTF("    mcause %08lx  mtval %08lx  pc %08lx\n",
                  (unsigned long)f->mcause, (unsigned long)f->mtval,
                  (unsigned long)f->pc);
@@ -466,14 +473,16 @@ static void diag_fault_force(const char *which)
 {
     SHELL_PRINTF("  forcing a %s fault; the board resets and `diag fault`"
                  " then shows it\n", which);
-    if (strcmp(which, "illegal") == 0) {
+    if (strcmp(which, "fatal") == 0) {
+        tiku_c5_fatal("diag fault fatal");
+    } else if (strcmp(which, "illegal") == 0) {
         __asm__ volatile ("unimp");
     } else if (strcmp(which, "load") == 0) {
         (void)*(volatile uint32_t *)diag_unmapped;
     } else if (strcmp(which, "store") == 0) {
         *(volatile uint32_t *)diag_unmapped = 0UL;
     } else {
-        SHELL_PRINTF("  kinds: illegal | load | store\n");
+        SHELL_PRINTF("  kinds: illegal | load | store | fatal\n");
         return;
     }
     SHELL_PRINTF("  (no fault taken -- unexpected)\n");
@@ -534,8 +543,8 @@ void tiku_shell_cmd_diag(uint8_t argc, const char *argv[])
         SHELL_PRINTF("\n");
         return;
     }
-    SHELL_PRINTF("Usage: diag fault [illegal|load|store] | clear | voltage"
-                 " | clock | peek <hex> [words]\n");
+    SHELL_PRINTF("Usage: diag fault [illegal|load|store|fatal] | clear"
+                 " | voltage | clock | peek <hex> [words]\n");
     diag_fault_show();
 }
 #endif /* PLATFORM_ESP32C5 */
