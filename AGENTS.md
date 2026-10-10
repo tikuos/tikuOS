@@ -19,7 +19,9 @@ works; read it before changing files there.
   (`tiku_boot_vfs_init()`); providers hand their nodes to the core tree.
 - `hal/`, `interfaces/`, `arch/<family>/`: hardware contracts and ports.
   Eight arch files still include shell I/O headers (listed in
-  `shell/AGENTS.md`); do not add a ninth.
+  `shell/AGENTS.md`); do not add a ninth.  `interfaces/radio/` reaches the
+  radio through `hal/tiku_ieee154_hal.h` only; `make lint` refuses an
+  `arch/` include there.
 - Feature work the mainline must not carry lives in an overlay repository
   cloned into the tree (`experiment/`, gitignored) and hooks in through
   `-include experiment/experiment.mk` and `TIKU_EXP_*` macros only.  With

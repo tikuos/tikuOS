@@ -16,11 +16,8 @@
 
 #include <interfaces/radio/tiku_154.h>
 #include <interfaces/radio/tiku_154_frame.h>
-#include <arch/nordic/tiku_ieee154_arch.h>
-#include <arch/nordic/tiku_radio_arch.h>       /* constlat hold (erratum 20)  */
-#include <arch/nordic/tiku_crypto_arch.h>      /* AES-CCM* link security      */
-#include <arch/nordic/tiku_timer_arch.h>       /* tick rate, before clock.h */
-#include <kernel/timers/tiku_clock.h>
+#include <hal/tiku_ieee154_hal.h>              /* PHY, hold, AES-CCM*        */
+#include "tiku.h"                              /* the platform's tick, clock */
 #include <kernel/memory/tiku_mem.h>            /* durable frame-counter cell  */
 #include <string.h>
 
@@ -165,7 +162,7 @@ static uint8_t  mac_seq;
 
 int tiku_154_available(void)
 {
-    return 1;
+    return tiku_ieee154_arch_available();
 }
 
 /** @brief Clamp @p ch to TIKU_154_CHAN_MIN..TIKU_154_CHAN_MAX. */
@@ -177,12 +174,12 @@ static uint8_t clamp_chan(uint8_t ch)
     return (ch > TIKU_154_CHAN_MAX) ? TIKU_154_CHAN_MAX : ch;
 }
 
-void tiku_154_init(uint16_t pan, uint16_t short_addr, uint8_t channel)
+int tiku_154_init(uint16_t pan, uint16_t short_addr, uint8_t channel)
 {
     mac_pan  = pan;
     mac_addr = short_addr;
     mac_chan = clamp_chan(channel);
-    tiku_ieee154_arch_mode_154(mac_chan);
+    return tiku_ieee154_arch_mode_154(mac_chan);
 }
 
 void tiku_154_set_channel(uint8_t channel)
@@ -304,11 +301,11 @@ static uint16_t mac_build_secured(uint8_t *frame, uint16_t dst,
     frame[hlen + 4u] = (uint8_t)(ctr >> 24);
 
     mac_nonce(nonce, mac_addr, ctr);
-    if (tiku_crypto_arch_aes_ccm_star(0, mac_key, 16u, nonce,
-                                      frame, (size_t)(hlen + MAC_ASH_LEN),
-                                      payload, len, MAC_MIC_LEN,
-                                      &frame[hlen + MAC_ASH_LEN],
-                                      &frame[hlen + MAC_ASH_LEN + len]) != 0) {
+    if (tiku_ieee154_arch_ccm_star(0, mac_key, nonce,
+                                   frame, (size_t)(hlen + MAC_ASH_LEN),
+                                   payload, len, MAC_MIC_LEN,
+                                   &frame[hlen + MAC_ASH_LEN],
+                                   &frame[hlen + MAC_ASH_LEN + len]) != 0) {
         return 0u;
     }
     return (uint16_t)(hlen + MAC_ASH_LEN + len + MAC_MIC_LEN);
@@ -329,7 +326,7 @@ int tiku_154_send(uint16_t dst, const uint8_t *payload, uint8_t len,
         return -1;
     }
     seq = frame[2];                              /* FCF is 2 B, seq follows   */
-    tiku_radio_arch_constlat_hold(1);            /* erratum 20 before TXEN    */
+    tiku_ieee154_arch_hold(1);                   /* held across the burst     */
     for (attempt = 0u; attempt <= MAC_MAX_RETRIES; attempt++) {
         uint8_t bo;
         /* Unslotted CSMA-CA: CCA, backoff-and-retry while busy. */
@@ -338,7 +335,7 @@ int tiku_154_send(uint16_t dst, const uint8_t *payload, uint8_t len,
                 break;                           /* channel idle: send        */
             }
             if (bo >= MAC_MAX_CSMA) {
-                tiku_radio_arch_constlat_hold(0);
+                tiku_ieee154_arch_hold(0);
                 return -2;                       /* stayed busy               */
             }
             mac_backoff(bo);
@@ -354,7 +351,7 @@ int tiku_154_send(uint16_t dst, const uint8_t *payload, uint8_t len,
         }
         /* no ACK within the window: retransmit */
     }
-    tiku_radio_arch_constlat_hold(0);
+    tiku_ieee154_arch_hold(0);
     return rc;
 }
 
@@ -368,7 +365,7 @@ int tiku_154_recv(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
                             1000u);
     int ret = 0;
 
-    tiku_radio_arch_constlat_hold(1);
+    tiku_ieee154_arch_hold(1);
     for (;;) {
         tiku_clock_time_t el = (tiku_clock_time_t)(tiku_clock_time() - start);
         uint32_t left;
@@ -426,8 +423,8 @@ int tiku_154_recv(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
                 ctlen = (uint16_t)((uint16_t)n - need);
                 mac_nonce(nonce, (uint16_t)(h.src_addr[0] |
                           ((uint16_t)h.src_addr[1] << 8)), rctr);
-                if (tiku_crypto_arch_aes_ccm_star(
-                        1, mac_key, 16u, nonce, frame,
+                if (tiku_ieee154_arch_ccm_star(
+                        1, mac_key, nonce, frame,
                         (size_t)(hlen + MAC_ASH_LEN),
                         &frame[hlen + MAC_ASH_LEN], ctlen, MAC_MIC_LEN,
                         pt, rmic) != 0) {
@@ -465,6 +462,6 @@ int tiku_154_recv(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
         }
         break;
     }
-    tiku_radio_arch_constlat_hold(0);
+    tiku_ieee154_arch_hold(0);
     return ret;
 }

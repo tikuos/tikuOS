@@ -30,14 +30,15 @@ typedef struct {
     int8_t   rssi;          /**< RSSI in dBm                              */
 } tiku_154_rx_t;
 
-/** @brief Returns 1; the MAC is built only for the nRF54L on-die RADIO. */
+/** @brief Returns 1 when the build has an 802.15.4 PHY under the MAC. */
 int tiku_154_available(void);
 
 /**
  * @brief Configure the MAC: PAN id, local short address, and channel (11..26,
- *        clamped).  Idempotent; call again to re-address or retune.
+ *        clamped), and take the radio.  Call again to re-address or retune.
+ * @return 0, or -1 when the radio cannot be taken
  */
-void tiku_154_init(uint16_t pan, uint16_t short_addr, uint8_t channel);
+int tiku_154_init(uint16_t pan, uint16_t short_addr, uint8_t channel);
 
 /** @brief Retune while keeping PAN/address. */
 void tiku_154_set_channel(uint8_t channel);

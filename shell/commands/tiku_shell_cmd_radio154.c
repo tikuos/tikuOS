@@ -24,13 +24,13 @@
  * without the 802.15.4 PHY compiles this file to nothing. */
 #if TIKU_SHELL_CMD_RADIO154
 
-#include <arch/nordic/tiku_ieee154_arch.h>
-#include <arch/nordic/tiku_radio_arch.h>       /* constlat hold around bursts */
-#include <arch/nordic/tiku_timer_arch.h>       /* TIKU_CLOCK_ARCH_SECOND */
-#include <kernel/timers/tiku_clock.h>
+#include "tiku.h"                              /* the platform's tick, clock */
+#include <hal/tiku_ieee154_hal.h>
 #include <kernel/cpu/tiku_watchdog.h>
 #include <interfaces/radio/tiku_154.h>         /* MAC-min: ping/pong */
+#if (TIKU_HAS_BLE_ADV + 0)
 #include <interfaces/bluetooth/tiku_ble_adv.h> /* radio arbiter */
+#endif
 
 /* Demo MAC addresses for ping/pong (one PAN, two nodes). */
 #define R154_PAN      0xABCDu
@@ -96,11 +96,14 @@ static void r154_tx(uint8_t argc, const char *argv[])
     memcpy(&frame[n], text, tlen);
     n = (uint8_t)(n + tlen);
 
-    tiku_ieee154_arch_mode_154(ch);
-    tiku_radio_arch_constlat_hold(1);           /* erratum 20 before TXEN     */
+    if (tiku_ieee154_arch_mode_154(ch) != 0) {
+        SHELL_PRINTF("154 TX: the radio cannot be taken\n");
+        return;
+    }
+    tiku_ieee154_arch_hold(1);
     rc = tiku_ieee154_arch_tx(frame, n);
-    tiku_radio_arch_constlat_hold(0);
-    tiku_ieee154_arch_mode_ble();               /* hand the RADIO back to BLE */
+    tiku_ieee154_arch_hold(0);
+    tiku_ieee154_arch_leave();               /* hand the RADIO back to BLE */
 
     if (rc == 0) {
         SHELL_PRINTF("154 TX ch%u %u B ok (seq=%u '%s')\n",
@@ -126,8 +129,11 @@ static void r154_rx(uint8_t argc, const char *argv[])
     }
     SHELL_PRINTF("154 RX ch%u listening ~%ld s (tag TK15)...\n",
                  (unsigned)ch, secs);
-    tiku_ieee154_arch_mode_154(ch);
-    tiku_radio_arch_constlat_hold(1);
+    if (tiku_ieee154_arch_mode_154(ch) != 0) {
+        SHELL_PRINTF("154 RX: the radio cannot be taken\n");
+        return;
+    }
+    tiku_ieee154_arch_hold(1);
     start = tiku_clock_time();
     while ((tiku_clock_time_t)(tiku_clock_time() - start) <
            (tiku_clock_time_t)((uint32_t)TIKU_CLOCK_SECOND * (uint32_t)secs)) {
@@ -148,8 +154,8 @@ static void r154_rx(uint8_t argc, const char *argv[])
             badcrc++;
         }
     }
-    tiku_radio_arch_constlat_hold(0);
-    tiku_ieee154_arch_mode_ble();
+    tiku_ieee154_arch_hold(0);
+    tiku_ieee154_arch_leave();
     SHELL_PRINTF("154 RX done: %lu frames (%lu ours, %lu bad-FCS)\n",
                  (unsigned long)heard, (unsigned long)ours,
                  (unsigned long)badcrc);
@@ -162,16 +168,16 @@ static void r154_ed(uint8_t argc, const char *argv[])
         uint8_t ch = r154_channel(argv[2], 15u);
         int8_t dbm = 0;
         int lvl;
-        tiku_radio_arch_constlat_hold(1);
+        tiku_ieee154_arch_hold(1);
         lvl = tiku_ieee154_arch_ed(ch, &dbm);
-        tiku_radio_arch_constlat_hold(0);
-        tiku_ieee154_arch_mode_ble();
+        tiku_ieee154_arch_hold(0);
+        tiku_ieee154_arch_leave();
         SHELL_PRINTF("154 ED ch%u: level=%d (~%d dBm)\n",
                      (unsigned)ch, lvl, (int)dbm);
         return;
     }
     SHELL_PRINTF("154 ED scan ch11..26:\n");
-    tiku_radio_arch_constlat_hold(1);
+    tiku_ieee154_arch_hold(1);
     {
         uint8_t ch;
         for (ch = TIKU_154_CHAN_MIN; ch <= TIKU_154_CHAN_MAX; ch++) {
@@ -182,8 +188,8 @@ static void r154_ed(uint8_t argc, const char *argv[])
                          (unsigned)ch, lvl, (int)dbm);
         }
     }
-    tiku_radio_arch_constlat_hold(0);
-    tiku_ieee154_arch_mode_ble();
+    tiku_ieee154_arch_hold(0);
+    tiku_ieee154_arch_leave();
 }
 
 /* Shared AES-128 link key for the secured ping/pong demo. */
@@ -208,7 +214,10 @@ static void r154_ping(uint8_t argc, const char *argv[], uint8_t secure)
     if (n <= 0 || n > 5000) {
         n = 100;
     }
-    tiku_154_init(R154_PAN, R154_PING_A, ch);
+    if (tiku_154_init(R154_PAN, R154_PING_A, ch) != 0) {
+        SHELL_PRINTF("154 PING: the radio cannot be taken\n");
+        return;
+    }
     tiku_154_set_key(secure ? r154_key : (const uint8_t *)0);
     tiku_154_set_secure(secure);
     ctr0 = tiku_154_tx_counter();
@@ -230,7 +239,7 @@ static void r154_ping(uint8_t argc, const char *argv[], uint8_t secure)
         }
     }
     tiku_154_set_secure(0);
-    tiku_ieee154_arch_mode_ble();
+    tiku_ieee154_arch_leave();
     SHELL_PRINTF("154 %s done: %lu/%ld ACKed (%lu%%)\n",
                  secure ? "SECPING" : "PING", (unsigned long)ok, n,
                  (unsigned long)((ok * 100u) / (uint32_t)n));
@@ -254,7 +263,10 @@ static void r154_pong(uint8_t argc, const char *argv[], uint8_t secure)
     if (secs <= 0 || secs > 120) {
         secs = 15;
     }
-    tiku_154_init(R154_PAN, R154_PONG_A, ch);
+    if (tiku_154_init(R154_PAN, R154_PONG_A, ch) != 0) {
+        SHELL_PRINTF("154 PONG: the radio cannot be taken\n");
+        return;
+    }
     tiku_154_set_key(secure ? r154_key : (const uint8_t *)0);
     SHELL_PRINTF("154 %s ch%u 0x%04X auto-ACK ~%ld s...\n",
                  secure ? "SECPONG" : "PONG", (unsigned)ch,
@@ -272,7 +284,7 @@ static void r154_pong(uint8_t argc, const char *argv[], uint8_t secure)
         }
     }
     tiku_154_set_key((const uint8_t *)0);
-    tiku_ieee154_arch_mode_ble();
+    tiku_ieee154_arch_leave();
     SHELL_PRINTF("154 %s done: %lu frames (%lu auto-ACKed)\n",
                  secure ? "SECPONG" : "PONG",
                  (unsigned long)recvd, (unsigned long)acked);
@@ -293,14 +305,16 @@ void tiku_shell_cmd_radio154(uint8_t argc, const char *argv[])
                      " | ed [ch] | ping|pong|secping|secpong [ch] [n]\n");
         return;
     }
-    /* Every subcommand switches the shared RADIO to 802.15.4, so it first
-     * claims the radio from the arbiter.  A live beacon, observer or link
-     * holds the radio, and the command prints its owner and returns. */
+#if (TIKU_HAS_BLE_ADV + 0)
+    /* Where BLE shares the radio, every subcommand first claims it from the
+     * arbiter.  A live beacon, observer or link holds the radio, and the
+     * command prints its owner and returns. */
     if (tiku_ble_adv_154_claim() != 0) {
         SHELL_PRINTF("radio busy (%s) -- stop it first\n",
                      tiku_ble_adv_owner_str());
         return;
     }
+#endif
     if (strcmp(argv[1], "tx") == 0) {
         r154_tx(argc, argv);
     } else if (strcmp(argv[1], "rx") == 0) {
@@ -319,7 +333,9 @@ void tiku_shell_cmd_radio154(uint8_t argc, const char *argv[])
         SHELL_PRINTF("radio154: unknown '%s'"
                      " (tx|rx|ed|ping|pong|secping|secpong)\n", argv[1]);
     }
+#if (TIKU_HAS_BLE_ADV + 0)
     tiku_ble_adv_154_release();
+#endif
 }
 
 #endif /* TIKU_SHELL_CMD_RADIO154 */

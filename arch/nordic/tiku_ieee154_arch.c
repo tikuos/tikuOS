@@ -14,8 +14,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <arch/nordic/tiku_ieee154_arch.h>
+#include <hal/tiku_ieee154_hal.h>
 #include <arch/nordic/tiku_radio_arch.h>    /* HFXO, TX power, BLE restore */
+#include <arch/nordic/tiku_crypto_arch.h>   /* AES-CCM* over the BA411E    */
 #include <arch/nordic/tiku_device_select.h> /* MDK register types + RADIO */
 #include <arch/nordic/tiku_timer_arch.h>    /* tick rate, before clock.h */
 #include <kernel/timers/tiku_clock.h>       /* RX wall-clock timeout */
@@ -77,14 +78,31 @@ static void radio_154_linkcfg(uint8_t channel)
     RADIO->SHORTS = 0u;
 }
 
-void tiku_ieee154_arch_mode_154(uint8_t channel)
+/* The RADIO is shared with BLE: 15.4 mode replaces the BLE link config, and
+ * the caller's radio claim (tiku_ble_adv_154_claim) keeps BLE off it. */
+int tiku_ieee154_arch_mode_154(uint8_t channel)
 {
     radio_154_linkcfg(channel);
+    return 0;
 }
 
-void tiku_ieee154_arch_mode_ble(void)
+void tiku_ieee154_arch_leave(void)
 {
     tiku_radio_arch_init();                     /* restore BLE link config    */
+}
+
+void tiku_ieee154_arch_hold(int on)
+{
+    tiku_radio_arch_constlat_hold(on);          /* erratum 20 around TXEN     */
+}
+
+int tiku_ieee154_arch_ccm_star(int decrypt, const uint8_t key[16],
+                               const uint8_t nonce[13], const uint8_t *aad,
+                               size_t aad_len, const uint8_t *m, size_t m_len,
+                               uint8_t mic_len, uint8_t *out, uint8_t *mic)
+{
+    return tiku_crypto_arch_aes_ccm_star(decrypt, key, 16u, nonce, aad,
+                                         aad_len, m, m_len, mic_len, out, mic);
 }
 
 void tiku_ieee154_arch_set_channel(uint8_t channel)
