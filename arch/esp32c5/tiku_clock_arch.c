@@ -137,6 +137,9 @@ int tiku_c5_clock_set(unsigned long hz)
         int result = clock_tree_on_crystal() ? leave_crystal(mhz) : -1;
         if (result == 0) {
             tiku_c5_rom_cpu_frequency_set(mhz);
+            /* On the PLL the regulator follows the PVT monitor, as ESP-IDF
+             * arranges at its first switch to the PLL. */
+            (void)tiku_c5_pvt_ready();
         }
         TIKU_C5_IRQ_RESTORE(state);
         return result;
@@ -153,6 +156,9 @@ int tiku_c5_clock_set(unsigned long hz)
         return -1;
     }
     tiku_c5_rom_cpu_frequency_set(mhz);
+    /* A tree inherited from before a software reset is on the PLL with the
+     * monitor reset: hand the regulator over here too. */
+    (void)tiku_c5_pvt_ready();
     TIKU_C5_IRQ_RESTORE(state);
     return 0;
 }

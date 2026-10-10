@@ -504,10 +504,16 @@ void tiku_shell_cmd_diag(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 2 && strcmp(argv[1], "voltage") == 0) {
-        /* The HP active regulator's DBIAS field, bits 31:27 of 0x600B0028. */
-        SHELL_PRINTF("  core dbias %lu (register %lu)\n",
+        /* The HP active regulator's DBIAS field (bits 31:27 of 0x600B0028)
+         * and, under PVT tracking, the HP and LP values it follows (bits
+         * 13:9 and 8:4). */
+        static const char *const pvt[] = {"tracking", "off", "unsupported"};
+        uint32_t reg = TIKU_C5_REG_READ(0x600B0028u);
+        SHELL_PRINTF("  core dbias %lu (register %lu) pvt %s: hp %lu lp %lu\n",
                      (unsigned long)tiku_c5_core_voltage_dbias(),
-                     (unsigned long)(TIKU_C5_REG_READ(0x600B0028u) >> 27));
+                     (unsigned long)(reg >> 27), pvt[tiku_c5_pvt_result()],
+                     (unsigned long)((reg >> 9) & 31u),
+                     (unsigned long)((reg >> 4) & 31u));
         return;
     }
     if (argc >= 2 && strcmp(argv[1], "clock") == 0) {

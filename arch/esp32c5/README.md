@@ -149,14 +149,17 @@ CPU on the 48 MHz crystal with the PLL off; the first clock change powers the
 480 MHz PLL, calibrates it from the crystal and moves the CPU onto its 240 MHz
 output with AHB at 40 MHz, as ESP-IDF's bootloader does. Later changes set
 only the CPU divider. Before the first switch above 80 MHz the clock code sets
-the eFuse-calibrated core voltage (the PVT-tracked voltage is not
-implemented); 240 MHz is refused if that setting fails, and `diag voltage`
-shows it. A PLL that does not calibrate leaves the CPU on the crystal, where
-`/sys/cpu/freq_change_mode` reads `fixed` and the radios refuse to start;
-`diag clock` shows the PLL result and the clock registers. Unsupported clock
-trees are refused. The update has bounded waits, readback checks and rollback;
-ROM delay calibration follows the selected CPU rate. A failed durable save is
-reported. Device Preferences uses these same VFS controls.
+the eFuse-calibrated core voltage, as the ESP-IDF bootloader does; 240 MHz is
+refused if that setting fails. Once the CPU runs from the PLL the regulator is
+handed to the PVT monitor, which tracks the voltage with temperature and load
+as ESP-IDF's application start does; `diag voltage` shows the static setting,
+the PVT result and the tracked values. A PLL that does not calibrate leaves
+the CPU on the crystal, where `/sys/cpu/freq_change_mode` reads `fixed` and
+the radios refuse to start; `diag clock` shows the PLL result and the clock
+registers. Unsupported clock trees are refused. The update has bounded waits,
+readback checks and rollback; ROM delay calibration follows the selected CPU
+rate. A failed durable save is reported. Device Preferences uses these same
+VFS controls.
 
 ## I2C master
 

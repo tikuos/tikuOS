@@ -47,4 +47,17 @@ int tiku_c5_pll_ready(void);
 /** @brief 1 before tiku_c5_pll_ready() ran, then its result. */
 int tiku_c5_pll_result(void);
 
+/**
+ * @brief Hand the regulator to the PVT monitor, which tracks the core
+ *        voltage with process, temperature and load, as ESP-IDF does once
+ *        the CPU runs from the PLL; the first call does the work.
+ *
+ * @return 0 when tracking runs, 2 when the eFuse block carries no PVT
+ *         calibration and the static setting stays.
+ */
+int tiku_c5_pvt_ready(void);
+
+/** @brief 1 before tiku_c5_pvt_ready() ran, then its result. */
+int tiku_c5_pvt_result(void);
+
 #endif /* TIKU_ESP32C5_PMU_ARCH_H_ */

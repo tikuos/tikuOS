@@ -7,9 +7,9 @@
  *
  * tiku_pmu_arch.c - C5 core voltage and PLL, set before the CPU clock.
  *
- * The image replaces ESP-IDF's second-stage bootloader, which sets the
- * eFuse-calibrated regulator level and brings the 480 MHz PLL up before
- * raising the CPU clock (rtc_clk_init.c and rtc_clk.c at ESP-IDF 4d59230).
+ * Replaces ESP-IDF's bootloader (eFuse-calibrated regulator level, 480 MHz
+ * PLL before the CPU clock rises) and the application start's hand-over of
+ * the regulator to the PVT monitor (rtc_clk_init.c, pmu_pvt.c, 4d59230).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -300,4 +300,125 @@ int tiku_c5_pll_ready(void)
 int tiku_c5_pll_result(void)
 {
     return pll_result;
+}
+
+/* The PVT monitor (ESP-IDF pmu_pvt.c and rtc.h): its clocks in PCR, its
+ * dbias command, channel and timer registers, the monitor cell the
+ * regulator follows, and the charge pump; the eFuse LP-to-HP gap word. */
+#define C5_PCR_PVT_CONF     0x600960B8u
+#define C5_PCR_PVT_FUNC     0x600960BCu
+#define C5_PVT_BASE         0x60019000u
+#define C5_PVT_PUMP_BITMAP  (C5_PVT_BASE + 0x14u)
+#define C5_PVT_PUMP_DRV     (C5_PVT_BASE + 0x28u)
+#define C5_PVT_PUMP_CHANNEL (C5_PVT_BASE + 0x2Cu)
+#define C5_PVT_CLK_CFG      (C5_PVT_BASE + 0x30u)
+#define C5_PVT_CHANNEL_SEL  (C5_PVT_BASE + 0x34u)
+#define C5_PVT_CHANNEL_CFG  (C5_PVT_BASE + 0x3Cu)
+#define C5_PVT_CMD          (C5_PVT_BASE + 0x50u)
+#define C5_PVT_TIMER        (C5_PVT_BASE + 0x64u)
+#define C5_PVT_CELL_CONF    (C5_PVT_BASE + 0xD8u)
+#define C5_PMU_DBIAS_INIT   (1u << 3)
+#define C5_EFUSE_SYS4       0x600B4854u
+
+static int8_t pvt_result = 1;       /* 1 = not attempted yet */
+
+/** @brief Replace the field @p mask of register @p address with @p value. */
+static void pvt_field(uint32_t address, uint32_t mask, uint32_t value)
+{
+    TIKU_C5_REG_WRITE(address, (TIKU_C5_REG_READ(address) & ~mask) |
+                                   (value & mask));
+}
+
+/**
+ * @brief The LP-to-HP regulator offset for the PVT commands from the eFuse
+ *        gap (sign in bit 4, magnitude below), as pmu_pvt.c derives it.
+ */
+static uint32_t pvt_gap(void)
+{
+    uint32_t word = (TIKU_C5_REG_READ(C5_EFUSE_SYS4) >> 1) & 31u;
+    int gap = (word & 16u) ? -(int)(word & 15u) : (int)(word & 15u);
+
+    gap -= 8;
+    if (gap < 0) {
+        gap = gap >= -15 ? 16 - gap : 31;
+    }
+    return (uint32_t)gap;
+}
+
+/* The hand-over runs once the CPU is on the PLL and touches no clock, so an
+ * XIP image keeps its code out of SRAM. */
+#if TIKU_ESP32C5_XIP_CODE
+#define PVT_CODE __attribute__((section(".xip.roots")))
+#else
+#define PVT_CODE
+#endif
+
+PVT_CODE int tiku_c5_pvt_ready(void)
+{
+    uint32_t sys2 = TIKU_C5_REG_READ(C5_EFUSE_SYS2);
+    uint32_t block = ((sys2 >> 11) & 3u) * 100u + ((sys2 >> 8) & 7u);
+    uint32_t state, gap, i;
+
+    if (pvt_result != 1) {
+        return pvt_result;
+    }
+    if (block < 2u) {
+        pvt_result = 2;
+        return 2;
+    }
+    state = TIKU_C5_IRQ_SAVE();
+    /* Monitor clocks: reset pulse, then the monitor and function clocks. */
+    pvt_field(C5_PCR_PVT_CONF, 1u << 1, 1u << 1);
+    pvt_field(C5_PCR_PVT_CONF, 1u << 1, 0);
+    pvt_field(C5_PCR_PVT_CONF, 1u << 0, 1u << 0);
+    pvt_field(C5_PCR_PVT_FUNC, 1u << 22, 1u << 22);
+    pvt_field(C5_PVT_TIMER, 1u << 31, 0);
+    tiku_cpu_c5_delay_us(1);
+    /* Monitor cells 33 and 37, their filters, the three dbias commands and
+     * the regulation period (rtc.h's PVT_* values). */
+    pvt_field(C5_PVT_CHANNEL_SEL, (127u << 25) | (127u << 18),
+              (33u << 25) | (37u << 18));
+    pvt_field(C5_PVT_CHANNEL_CFG, 0x1FFFFu, 0x11FFFu);
+    pvt_field(C5_PVT_CHANNEL_CFG + 4u, 0x1FFFFu, 0x17FFFu);
+    pvt_field(C5_PVT_CHANNEL_CFG + 8u, 0x1FFFFu, 0x10000u);
+    pvt_field(C5_PVT_CMD, 0x7FFu, 0x24u);
+    pvt_field(C5_PVT_CMD + 4u, 0x7FFu, 0x5u);
+    pvt_field(C5_PVT_CMD + 8u, 0x7FFu, 0x427u);
+    pvt_field(C5_PVT_TIMER, 0xFFFFu << 15, 0xFFFFu << 15);
+    pvt_field(C5_PCR_PVT_FUNC, 15u, 1u);
+    pvt_field(C5_PCR_PVT_FUNC, 1u << 20, 1u << 20);
+    /* Delay limits of monitor cell site 2 (too high, too low, pump). */
+    pvt_field(C5_PVT_CELL_CONF, 255u << 2, 157u << 2);
+    pvt_field(C5_PVT_CELL_CONF + 4u, 255u << 2, 147u << 2);
+    pvt_field(C5_PVT_CELL_CONF + 8u, 255u << 2, 139u << 2);
+    gap = pvt_gap();
+    for (i = 0; i < 3u; i++) {
+        pvt_field(C5_PVT_CMD + 4u * i, (1u << 16) | (15u << 11),
+                  ((gap >> 4) << 16) | ((gap & 15u) << 11));
+    }
+    /* The charge pump: channel code 1, monitor cell 22, drive 0. */
+    pvt_field(C5_PVT_PUMP_CHANNEL, 31u << 27, 1u << 27);
+    TIKU_C5_REG_WRITE(C5_PVT_PUMP_BITMAP, 1u << 22);
+    pvt_field(C5_PVT_PUMP_DRV, 15u << 27, 0);
+    /* Tracking starts from the static setting, then the regulator follows
+     * the monitor instead of the PMU field. */
+    pvt_field(C5_PMU_HP_ACTIVE, C5_PMU_DBIAS_INIT, C5_PMU_DBIAS_INIT);
+    pvt_field(C5_PCR_PVT_FUNC, 1u << 22, 1u << 22);
+    pvt_field(C5_PCR_PVT_CONF, 1u << 0, 1u << 0);
+    pvt_field(C5_PVT_CLK_CFG, 1u << 8, 1u << 8);
+    pvt_field(C5_PVT_CELL_CONF, 1u << 0, 1u << 0);
+    tiku_cpu_c5_delay_us(10);
+    pvt_field(C5_PMU_HP_ACTIVE, C5_PMU_DBIAS_SEL, 0);
+    pvt_field(C5_PMU_HP_ACTIVE, C5_PMU_DBIAS_INIT, 0);
+    pvt_field(C5_PVT_TIMER, 1u << 31, 1u << 31);
+    tiku_cpu_c5_delay_us(50);
+    pvt_field(C5_PVT_PUMP_DRV, 1u << 9, 1u << 9);
+    pvt_result = 0;
+    TIKU_C5_IRQ_RESTORE(state);
+    return 0;
+}
+
+int tiku_c5_pvt_result(void)
+{
+    return pvt_result;
 }
