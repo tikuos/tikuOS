@@ -971,6 +971,9 @@ MEMORY_MODEL ?= $(if $(filter 1,$(DEVICE_HAS_HIFRAM)),large,small)
 else
 MEMORY_MODEL ?= small
 endif
+# MSP430 builds compile and link with link-time optimisation by default; the
+# MSP430 flags below read it.
+MSP430_LTO ?= 1
 
 # ---------------------------------------------------------------------------
 # MSP430 build guards
@@ -1342,6 +1345,11 @@ CFLAGS += -I$(MSP430_SUPPORT_DIR)
 endif
 CFLAGS += -I$(PROJ_DIR)
 CFLAGS += -ffunction-sections -fdata-sections
+# Link-time optimisation: the FR6989 shell build and the FR5994 shell+BASIC
+# build fit their FRAM only with it.  MSP430_LTO=0 links without it.
+ifeq ($(MSP430_LTO),1)
+CFLAGS += -flto
+endif
 
 endif
 
@@ -1565,6 +1573,9 @@ ifneq ($(MSP430_SUPPORT_DIR),)
 LDFLAGS += -L$(MSP430_SUPPORT_DIR)
 endif
 LDFLAGS += -Wl,--gc-sections
+ifeq ($(MSP430_LTO),1)
+LDFLAGS += -flto -Os
+endif
 # Link map in build/<mcu>/main.map, as on the ARM ports.
 LDFLAGS += -Wl,-Map=$(BUILD_DIR)/main.map
 # --- msp430-elf ld DWARF workaround -------------------------------------

@@ -38,6 +38,26 @@
  * string in EXTRA_CFLAGS to add or leave out some commands' .c files.  A
  * disabled command loses its table row, and the linker drops its
  * unreferenced code. */
+/* The FR6989 holds the shell in its 128 KB of FRAM only without these
+ * five; each can still be built in from EXTRA_CFLAGS. */
+#if defined(TIKU_DEVICE_MSP430FR6989)
+#ifndef TIKU_SHELL_CMD_CALC
+#define TIKU_SHELL_CMD_CALC    0
+#endif
+#ifndef TIKU_SHELL_CMD_QUEUE
+#define TIKU_SHELL_CMD_QUEUE   0
+#endif
+#ifndef TIKU_SHELL_CMD_IRQ
+#define TIKU_SHELL_CMD_IRQ     0
+#endif
+#ifndef TIKU_SHELL_CMD_WAKE
+#define TIKU_SHELL_CMD_WAKE    0
+#endif
+#ifndef TIKU_SHELL_CMD_RESUME
+#define TIKU_SHELL_CMD_RESUME  0
+#endif
+#endif
+
 #ifndef TIKU_SHELL_CMD_HELP
 #define TIKU_SHELL_CMD_HELP    1  /**< help    - List available commands */
 #endif
