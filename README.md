@@ -75,6 +75,11 @@ ok> 30 NEXT I
 ok> RUN
 ```
 
+For those who prefer to write C themselves, the TikuOS API is easy to
+learn, and the kits (networking, TLS, MQTT, sensors, maths) provide the
+functionality for designing complex systems that interact with the
+physical world. The example below demonstrates a minimal TikuOS program.
+
 ## 💡 Minimal example
 
 A process that blinks LED 0 once a second, in C:
