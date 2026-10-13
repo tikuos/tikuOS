@@ -1,6 +1,6 @@
 /*
  * Tiku Operating System v0.06
- * Simple. Ubiquitous. Intelligence, Everywhere.
+ * Simple. Persistent. Intelligent.
  * http://tiku-os.org
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
@@ -23,7 +23,7 @@
 /** @brief Kernel version string. */
 #define TIKU_VERSION        "0.06"
 /** @brief Project tagline. */
-#define TIKU_TAGLINE        "Simple. Ubiquitous. Intelligence, Everywhere."
+#define TIKU_TAGLINE        "Simple. Persistent. Intelligent."
 
 /*---------------------------------------------------------------------------*/
 /* PLATFORM CONFIGURATION                                                   */

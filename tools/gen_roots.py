@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Tiku Operating System v0.06
-Simple. Ubiquitous. Intelligence, Everywhere.
+Simple. Persistent. Intelligent.
 http://tiku-os.org
 
 gen_roots.py - build the HTTPS trust store file, /data/roots.bin.
@@ -250,7 +250,7 @@ def verify(der, entries):
 
 INL_HEADER = """/*
  * Tiku Operating System v0.06
- * Simple. Ubiquitous. Intelligence, Everywhere.
+ * Simple. Persistent. Intelligent.
  * http://tiku-os.org
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>

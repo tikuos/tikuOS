@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Tiku Operating System v0.06
-Simple. Ubiquitous. Intelligence, Everywhere.
+Simple. Persistent. Intelligent.
 http://tiku-os.org
 
 Authors: Ambuj Varshney <ambuj@tiku-os.org>
