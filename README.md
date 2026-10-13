@@ -1,15 +1,5 @@
 # TikuOS
-
-TikuOS is an operating system for microwatt computers: devices that run for
-years on a coin cell or indefinitely on harvested energy.  It is built for
-sub-milliwatt communication, including backscatter and tunnel-diode
-transceivers, with IP networking and on-device intelligence as parts of the
-operating system rather than add-ons.  Event-driven protothreads, static
-allocation, no heap; one source tree for 16-bit MSP430, Cortex-M and RISC-V.
-
-Most changes to this tree are made by coding agents working with a
-person.  [Working on TikuOS](#working-on-tikuos) says how to start one and
-what an agent reads first.
+TikuOS is an operating system for ubiquitous computers, built first for microwatt computers that run for years on a coin cell or indefinitely on harvested energy. We designed it from scratch to interact with the physical world, to work alongside AI agents that both use and program it, and to sustain operation over the long term. Sub-milliwatt wireless communication, IP networking, and on-device intelligence are part of the operating system itself.
 
 ## Supported boards
 
