@@ -52,7 +52,7 @@
 #if (TIKU_DRV_GPU_ENABLE + 0)
 #include "tiku_vfs_tree_gpu.h"       /* /sys/gpu -- Apollo510 GPU status     */
 #endif
-#if (TIKU_DRV_PSRAM_ENABLE + 0) || defined(PLATFORM_ESP32C5)
+#if (TIKU_DRV_PSRAM_ENABLE + 0) || defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32P4)
 #include "tiku_vfs_tree_psram.h"
 #endif
 #if (TIKU_DRV_NOR_ENABLE + 0)
@@ -440,7 +440,7 @@ mem_free_read(char *buf, size_t max)
     __asm__ volatile ("mov %0, sp" : "=r"(sp));
     return snprintf(buf, max, "%lu\n",
                     sp > bottom ? (unsigned long)(sp - bottom) : 0UL);
-#elif defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5)
+#elif defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32P4)
     /* The tier span ends where the stack's reserve begins, so the headroom
      * is SP down to that edge, not down to _end. */
     uintptr_t sp;
@@ -776,7 +776,7 @@ static int cpu_mode_read(char *buf, size_t max)
 #if defined(PLATFORM_NORDIC) || defined(PLATFORM_RP2350) || \
     defined(PLATFORM_AMBIQ) || defined(PLATFORM_MSP430) || \
     defined(PLATFORM_STM32N6) || defined(PLATFORM_RA8P1) || \
-    defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5)
+    defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32P4)
 /**
  * @brief Save a strictly parsed Hz target; never retune a running CPU.
  *
@@ -897,6 +897,33 @@ map_line(char *buf, size_t max, size_t *at, const char *fmt,
 static int
 sram_map_read(char *buf, size_t max)
 {
+#if defined(PLATFORM_ESP32P4)
+    size_t at = 0;
+    tiku_mem_stats_t stats;
+    const uint8_t *base;
+    unsigned long assigned = (uintptr_t)&_end - (uintptr_t)&__datastart;
+    unsigned long bottom = (uintptr_t)&__tiku_stack_bottom;
+    unsigned long guard = (uintptr_t)&__tiku_stack_guard_start;
+    unsigned long stack = (uintptr_t)&__stack - bottom;
+    uint8_t span;
+    if (!max) return 0;
+    buf[0] = '\0';
+    /* These working ranges exclude ROM workspace and L2 cache SRAM. */
+    map_line(buf, max, &at, "bank\t%lu\n", TIKU_DEVICE_RAM_USABLE, 0, 0);
+    map_line(buf, max, &at, "static\t%lu\n", assigned, 0, 0);
+    for (span = 0; tiku_tier_span_stats(TIKU_MEM_SRAM, span, &base, &stats)
+                   == TIKU_MEM_OK; span++) {
+        map_line(buf, max, &at, "tier\t%lu\t%lu\t%lu\n",
+                 stats.total_bytes, stats.used_bytes, 1);
+        assigned += stats.total_bytes;
+    }
+    assigned += stack + bottom - guard;
+    map_line(buf, max, &at, "guard\t%lu\n", bottom - guard, 0, 0);
+    map_line(buf, max, &at, "unassigned\t%lu\n",
+             assigned < TIKU_DEVICE_RAM_USABLE ? TIKU_DEVICE_RAM_USABLE - assigned : 0, 0, 0);
+    map_line(buf, max, &at, "stack\t%lu\t%lu\n", stack, tiku_stack_free(), 0);
+    return (int)at;
+#else
     size_t at = 0u;
     unsigned long lo = (unsigned long)(uintptr_t)&__sram_start;
     unsigned long hi = (unsigned long)(uintptr_t)&__sram_end;
@@ -955,6 +982,7 @@ sram_map_read(char *buf, size_t max)
              (unsigned long)TIKU_DEVICE_RAM2_SIZE, 0UL, 0UL);
 #endif
     return (int)at;
+#endif
 }
 
 /**
@@ -1016,7 +1044,7 @@ nvm_map_read(char *buf, size_t max)
                                 image <= (unsigned long)TIKU_DEVICE_FRAM_END)
                                ? image - (unsigned long)TIKU_DEVICE_FRAM_START
                                : 0UL;
-#if defined(PLATFORM_ESP32C5)
+#if defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32P4)
         extern char __tiku_flash_payload_bytes;
         in_use = (unsigned long)(uintptr_t)&__tiku_flash_payload_bytes;
 #endif
@@ -1052,11 +1080,19 @@ nvm_map_read(char *buf, size_t max)
                  (unsigned long)(uintptr_t)&__tiku_layout_persist_size,
                  0UL, 0UL);
     }
-#if defined(PLATFORM_ESP32C5)
+#if defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32P4)
     {
         extern char __tiku_layout_scratch_size;
         map_line(buf, max, &at, "scratch\t%lu\n",
                  (unsigned long)(uintptr_t)&__tiku_layout_scratch_size, 0UL, 0UL);
+    }
+#endif
+#if defined(PLATFORM_ESP32P4)
+    {
+        extern char __tiku_layout_reserved_tail_size;
+        map_line(buf, max, &at, "reserved\t%lu\n",
+                 (unsigned long)(uintptr_t)&__tiku_layout_reserved_tail_size,
+                 0UL, 0UL);
     }
 #endif
     return (int)at;
@@ -1880,7 +1916,7 @@ static const tiku_vfs_node_t sys_children[] = {
     { "gpu",      TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_gpu_children,      TIKU_VFS_TREE_GPU_NCHILD },
 #endif
-#if (TIKU_DRV_PSRAM_ENABLE + 0) || defined(PLATFORM_ESP32C5)
+#if (TIKU_DRV_PSRAM_ENABLE + 0) || defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32P4)
     { "psram",    TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_psram_children,    TIKU_VFS_TREE_PSRAM_NCHILD },
 #endif

@@ -31,6 +31,8 @@
 #include <arch/esp32c61/tiku_gpio_arch.h>
 #elif defined(PLATFORM_ESP32C5)
 #include <arch/esp32c5/tiku_gpio_arch.h>
+#elif defined(PLATFORM_ESP32P4)
+#include <arch/esp32p4/tiku_gpio_arch.h>
 #else
 #include <arch/msp430/tiku_gpio_arch.h>
 #endif

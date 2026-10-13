@@ -25,6 +25,10 @@
 #include <arch/esp32c61/tiku_flash_arch.h>
 #include <arch/esp32c61/tiku_psram_arch.h>
 #include <arch/esp32c61/tiku_xip_arch.h>
+#elif defined(PLATFORM_ESP32P4)
+#include <arch/esp32p4/tiku_nvm_arch.h>
+#include <arch/esp32p4/tiku_psram_arch.h>
+#include <services/console/tiku_usb_serial_jtag.h>
 #elif defined(PLATFORM_ESP32C5)
 #include <arch/esp32c5/tiku_flash_arch.h>
 #include <services/console/tiku_usb_serial_jtag.h>
@@ -149,7 +153,7 @@ tiku_cpu_full_init(unsigned int cpu_freq)
 
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
     defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
-    defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5)
+    defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32P4)
     /* The Cortex-M reset handlers mask interrupts (cpsid i in
      * tiku_crt_early.c), so no ISR runs against half-built kernel state.
      * Everything an ISR touches exists once tiku_sched_init() has built the
@@ -229,6 +233,9 @@ tiku_boot_init_memory(void)
     (void)tiku_flash_init();
 #elif defined(PLATFORM_ESP32C5)
     if (tiku_flash_init() != TIKU_FLASH_OK) { return TIKU_BOOT_ERROR; }
+#elif defined(PLATFORM_ESP32P4)
+    /* A corrupt mirror keeps commits disabled; do not replace it at boot. */
+    (void)tiku_p4_nvm_init();
 #endif
 
     /* Initialize memory subsystem (arch-specific setup + module state) */
@@ -236,13 +243,20 @@ tiku_boot_init_memory(void)
 
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
     defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
-    defined(PLATFORM_ESP32C61) || defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C5)
+    defined(PLATFORM_ESP32C61) || defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32P4)
     /* Every port with a carved NVM region wires the tier allocator here,
      * before any consumer allocates: tiku_tier_init() runs the layout
      * service, which fixes the NVM tier's extent for this boot.  The call is
      * idempotent, so a later one (BASIC, free) does nothing.  MSP430 wires
      * its tier on the first tiku_tier_init() call. */
     (void)tiku_tier_init();
+#endif
+
+#if defined(PLATFORM_ESP32P4)
+    if (tiku_p4_psram_init() != 0 ||
+        tiku_tier_attach_psram((void *)(uintptr_t)TIKU_P4_PSRAM_BASE,
+                              tiku_p4_psram_size()) != TIKU_MEM_OK)
+        return TIKU_BOOT_ERROR;
 #endif
 
     return TIKU_BOOT_SUCCESS;

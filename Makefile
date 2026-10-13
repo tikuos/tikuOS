@@ -28,6 +28,11 @@ MCU = msp430fr5994          # the target of a bare `make`
 endif
 MCU := $(shell echo $(MCU) | tr '[:upper:]' '[:lower:]')
 
+P4_DIAGNOSTIC_BUILD := $(if $(filter esp32p4,$(MCU)),$(if $(filter firmware,$(P4_PROFILE)),,1))
+ifeq ($(P4_DIAGNOSTIC_BUILD),1)
+include arch/esp32p4/port.mk
+else
+
 ifeq ($(TIKU_DRV_BLE_EM9305_ENABLE),1)
 ifneq ($(MCU),apollo510b)
 $(error TIKU_DRV_BLE_EM9305_ENABLE=1 requires MCU=apollo510b; currently MCU=$(MCU))
@@ -69,6 +74,25 @@ else ifeq ($(MCU),esp32c61)
 # from flash into SRAM and runs it there; code runs from flash only where a
 # build places it in the XIP window.
 TIKU_PLATFORM := esp32c61
+else ifeq ($(MCU),esp32p4)
+TIKU_PLATFORM := esp32p4
+ifneq ($(filter-out 0,$(MINIMAL) $(P4_FLASH_WRITE_TEST) $(P4_XIP_TEST) $(P4_PSRAM_TEST) $(P4_STORAGE_TEST)),)
+$(error P4 firmware cannot be combined with diagnostic profile selectors)
+endif
+TIKU_THREADS_ENABLE ?= 1
+TIKU_SHELL_BASIC_ENABLE ?= 1
+P4_REQUESTED_FEATURES := $(strip $(foreach v,$(filter TIKU_%_ENABLE,$(.VARIABLES)),\
+    $(if $(filter 1,$($(v))),$(v))))
+P4_REQUESTED_FEATURES := $(filter-out TIKU_SHELL_ENABLE TIKU_THREADS_ENABLE TIKU_SHELL_BASIC_ENABLE,$(P4_REQUESTED_FEATURES))
+ifneq ($(P4_REQUESTED_FEATURES),)
+$(error ESP32-P4 firmware does not include optional features: $(P4_REQUESTED_FEATURES))
+endif
+ifneq ($(strip $(APP) $(BASIC_PROGRAM)),)
+$(error ESP32-P4 firmware does not include APP or BASIC_PROGRAM payloads)
+endif
+ifneq ($(filter 1,$(HAS_TESTS) $(TEST_ENABLE)),)
+$(error P4 firmware uses the installed-image Bench suite; kernel diagnostics use P4_PROFILE=kernel-test)
+endif
 else ifeq ($(MCU),esp32c5)
 TIKU_PLATFORM := esp32c5
 C5_REQUESTED_FEATURES := $(strip $(foreach v,$(filter TIKU_%_ENABLE,$(.VARIABLES)),\
@@ -95,7 +119,12 @@ endif
 # (hal/tiku_printf_hal.h), the shell I/O backend, the console and boot read
 # those macros.
 # ---------------------------------------------------------------------------
-ifeq ($(MCU),esp32c5)
+ifeq ($(MCU),esp32p4)
+TIKU_CONSOLE ?= usb
+ifneq ($(TIKU_CONSOLE),usb)
+$(error ESP32-P4 firmware requires TIKU_CONSOLE=usb)
+endif
+else ifeq ($(MCU),esp32c5)
 TIKU_CONSOLE ?= usb
 ifeq ($(filter usb uart,$(TIKU_CONSOLE)),)
 $(error The ESP32-C5 port supports TIKU_CONSOLE=usb or uart)
@@ -112,7 +141,7 @@ ifeq ($(filter uart usb both,$(TIKU_CONSOLE)),)
 $(error TIKU_CONSOLE must be uart, usb, or both (got '$(TIKU_CONSOLE)'))
 endif
 ifneq ($(filter usb both,$(TIKU_CONSOLE)),)
-ifeq ($(filter rp2350 nrf54lm20a nrf54lm20b esp32c5,$(MCU)),)
+ifeq ($(filter rp2350 nrf54lm20a nrf54lm20b esp32c5 esp32p4,$(MCU)),)
 $(error TIKU_CONSOLE=$(TIKU_CONSOLE) (USB CDC console) is supported on rp2350 \
 and nrf54lm20a/b, or the esp32c5 diagnostic; this build is $(MCU). Use TIKU_CONSOLE=uart)
 endif
@@ -154,6 +183,7 @@ DEFAULT_BOARD_stm32n6       := nucleo_n657x0q
 DEFAULT_BOARD_ra8p1         := ek_ra8p1
 DEFAULT_BOARD_esp32c61      := esp32c61_devkitc
 DEFAULT_BOARD_esp32c5       := esp32c5_devkitc1
+DEFAULT_BOARD_esp32p4       := olimex_esp32p4_pc
 
 # BOARD -> the macro that selects its header, and the platform it belongs to.
 # A new board goes in KNOWN_BOARDS, gets a row in each table here and in
@@ -161,7 +191,7 @@ DEFAULT_BOARD_esp32c5       := esp32c5_devkitc1
 KNOWN_BOARDS := fr2433_launchpad fr5969_launchpad fr5994_launchpad \
                 fr6989_launchpad pico2 pico2w apollo4l_evb apollo4p_evb \
                 apollo510_evb apollo510b_evb nrf54l15_dk nrf54lm20_dk \
-                nucleo_n657x0q ek_ra8p1 esp32c61_devkitc esp32c5_devkitc1 tiku_bare
+                nucleo_n657x0q ek_ra8p1 esp32c61_devkitc esp32c5_devkitc1 olimex_esp32p4_pc tiku_bare
 
 BOARD_DEFINE_fr2433_launchpad  := TIKU_BOARD_FR2433_LAUNCHPAD
 BOARD_DEFINE_fr5969_launchpad  := TIKU_BOARD_FR5969_LAUNCHPAD
@@ -182,6 +212,7 @@ BOARD_DEFINE_nucleo_n657x0q    := TIKU_BOARD_NUCLEO_N657X0Q
 BOARD_DEFINE_ek_ra8p1          := TIKU_BOARD_EK_RA8P1
 BOARD_DEFINE_esp32c61_devkitc  := TIKU_BOARD_ESP32C61_DEVKITC
 BOARD_DEFINE_esp32c5_devkitc1  := TIKU_BOARD_ESP32C5_DEVKITC1
+BOARD_DEFINE_olimex_esp32p4_pc := TIKU_BOARD_OLIMEX_ESP32P4_PC
 
 BOARD_PLATFORM_fr2433_launchpad  := msp430
 BOARD_PLATFORM_fr5969_launchpad  := msp430
@@ -200,6 +231,7 @@ BOARD_PLATFORM_nucleo_n657x0q    := stm32n6
 BOARD_PLATFORM_ek_ra8p1          := ra8p1
 BOARD_PLATFORM_esp32c61_devkitc  := esp32c61
 BOARD_PLATFORM_esp32c5_devkitc1  := esp32c5
+BOARD_PLATFORM_olimex_esp32p4_pc := esp32p4
 
 # ---------------------------------------------------------------------------
 # Board capabilities: the parts fitted on the PCB
@@ -245,6 +277,7 @@ BOARD_CAPS_ek_ra8p1            := USBHS
 # board header; no driver on the board is gated on a cap.
 BOARD_CAPS_esp32c61_devkitc    :=
 BOARD_CAPS_esp32c5_devkitc1    :=
+BOARD_CAPS_olimex_esp32p4_pc   :=
 # tiku_bare declares no parts, so the eMMC, PSRAM, NOR and USB gates below
 # refuse it.
 BOARD_CAPS_tiku_bare           :=
@@ -497,7 +530,7 @@ SIZE    = $(TOOLCHAIN_DIR)/bin/$(TOOLCHAIN_PREFIX)size
 GDB     = $(TOOLCHAIN_DIR)/bin/$(TOOLCHAIN_PREFIX)gdb
 MSP430_SUPPORT_DIR :=
 
-else ifneq (,$(filter esp32c61 esp32c5,$(TIKU_PLATFORM)))
+else ifneq (,$(filter esp32c61 esp32c5 esp32p4,$(TIKU_PLATFORM)))
 
 # A RISC-V newlib GCC for the rv32imac multilib; the kernel needs
 # only newlib's libc, libm and libgcc.  TOOLCHAIN_PREFIX is the first of
@@ -604,6 +637,9 @@ endif
 # ---------------------------------------------------------------------------
 PROJ_DIR  = $(CURDIR)
 BUILD_DIR = build/$(MCU)
+ifeq ($(TIKU_PLATFORM),esp32p4)
+BUILD_DIR = build/esp32p4/firmware
+endif
 
 # ---------------------------------------------------------------------------
 # Flag-change guard
@@ -630,7 +666,7 @@ _FLAG_GUARD := $(shell mkdir -p $(BUILD_DIR); \
     if ! cmp -s $(BUILD_DIR)/.buildflags.new $(BUILD_FLAGS_STAMP) 2>/dev/null; \
     then \
         find $(BUILD_DIR) -name '*.o' -delete 2>/dev/null; \
-        if [ "$(TIKU_PLATFORM)" != esp32c5 ]; then rm -f main.elf main.hex; fi; \
+        if [ "$(TIKU_PLATFORM)" != esp32c5 ] && [ "$(TIKU_PLATFORM)" != esp32p4 ]; then rm -f main.elf main.hex; fi; \
         mv $(BUILD_DIR)/.buildflags.new $(BUILD_FLAGS_STAMP); \
         echo wiped; \
     else rm -f $(BUILD_DIR)/.buildflags.new; fi)
@@ -643,7 +679,7 @@ endif
 # main.elf and main.hex are deleted.  Without this, the previous MCU's
 # main.elf can be newer than every object of the new one: make skips the
 # link, and that image is what gets sized and flashed.
-ifneq ($(TIKU_PLATFORM),esp32c5)
+ifeq ($(filter esp32c5 esp32p4,$(TIKU_PLATFORM)),)
 _ELF_MCU_GUARD := $(shell \
     if [ -f main.elf ] && [ "`cat .main-elf-mcu 2>/dev/null`" != "$(MCU)" ]; \
     then rm -f main.elf main.hex; echo relink; fi; \
@@ -1263,6 +1299,18 @@ CFLAGS += -DTIKU_SHELL_CMD_GPIO=0 -DTIKU_SHELL_CMD_ADC=0 -DTIKU_SHELL_CMD_IRQ=0
 CFLAGS += -DTIKU_BASIC_ADC_ENABLE=0 -DTIKU_BASIC_I2C_ENABLE=0
 endif
 
+else ifeq ($(TIKU_PLATFORM),esp32p4)
+
+ESP32P4_ARCH := -march=rv32imac_zicsr_zifencei -mabi=ilp32
+TIKU_TIER_SRAM_MIN ?= 262144
+CFLAGS = $(ESP32P4_ARCH) -Os -g -Wall -Wextra -Werror -ffreestanding
+CFLAGS += --specs=nano.specs -fno-builtin -ffunction-sections -fdata-sections
+CFLAGS += -DPLATFORM_ESP32P4=1 -D$(DEVICE_DEFINE)=1 -D$(TIKU_BOARD_DEFINE)=1
+CFLAGS += -DTIKU_P4_FIRMWARE=1 -DTIKU_CONSOLE_JTAG=1 -I$(PROJ_DIR)
+CFLAGS += -DTIKU_TIER_SRAM_DERIVED=1 -DTIKU_TIER_SRAM_MIN=$(TIKU_TIER_SRAM_MIN)
+CFLAGS += -DTIKU_SHELL_CMD_GPIO=0 -DTIKU_SHELL_CMD_ADC=0 -DTIKU_SHELL_CMD_IRQ=0
+CFLAGS += -DTIKU_BASIC_ADC_ENABLE=0 -DTIKU_BASIC_I2C_ENABLE=0
+
 else
 
 CFLAGS  = -mmcu=$(MCU) -Os -Wall -Wextra
@@ -1315,7 +1363,7 @@ ifeq ($(TIKU_THREADS_ENABLE),1)
 ifeq ($(TIKU_PLATFORM),msp430)
 $(error TIKU_THREADS_ENABLE=1 is not supported on MSP430; use a supported ARM or RISC-V MCU)
 endif
-ifeq ($(filter apollo510 apollo510b apollo4l apollo4p rp2350 nrf54l15 nrf54lm20a nrf54lm20b ra8p1 esp32c61 esp32c5,$(MCU)),)
+ifeq ($(filter apollo510 apollo510b apollo4l apollo4p rp2350 nrf54l15 nrf54lm20a nrf54lm20b ra8p1 esp32c61 esp32c5 esp32p4,$(MCU)),)
 $(error TIKU_THREADS_ENABLE=1 needs a supported part -- \
 apollo510/apollo510b (M55), apollo4l/apollo4p (M4F), rp2350 or \
 nrf54l15/nrf54lm20a/nrf54lm20b (M33), ra8p1 (M85), esp32c61 (RISC-V); $(MCU) has no \
@@ -1497,6 +1545,14 @@ LDFLAGS += -L$(BUILD_DIR)
 LDLIBS = -Wl,--start-group -lm -lc -lgcc -Wl,--end-group
 endif
 LDFLAGS += -Wl,-Map=$(BUILD_DIR)/main.map
+
+else ifeq ($(TIKU_PLATFORM),esp32p4)
+
+LDFLAGS = $(ESP32P4_ARCH) -nostdlib -nostartfiles --specs=nano.specs
+LDFLAGS += --specs=nosys.specs -Wl,--gc-sections,--no-warn-rwx-segments
+LDFLAGS += -Tarch/esp32p4/devices/esp32p4_firmware.ld
+LDFLAGS += -Wl,-u,tiku_autostart_processes,-Map=$(BUILD_DIR)/main.map
+LDLIBS = -Wl,--start-group -lm -lc -lgcc -Wl,--end-group
 
 else
 
@@ -2182,6 +2238,10 @@ SRCS += shell/commands/tiku_shell_cmd_diag.c
 SRCS += shell/commands/tiku_shell_cmd_sdram.c
 endif
 
+else ifeq ($(TIKU_PLATFORM),esp32p4)
+
+include arch/esp32p4/firmware.mk
+
 else ifeq ($(TIKU_PLATFORM),esp32c5)
 
 ASM_SRCS += arch/esp32c5/tiku_crt_early.S
@@ -2303,8 +2363,8 @@ SRCS += arch/msp430/tiku_nvm_region_msp430.c
 
 endif
 SRCS += boot/tiku_boot.c
-ifeq ($(TIKU_PLATFORM),esp32c5)
-# The C5 CPU HAL is implemented by its arch file.
+ifneq ($(filter esp32c5 esp32p4,$(TIKU_PLATFORM)),)
+# These ports implement the CPU HAL in their arch files.
 else
 SRCS += hal/tiku_cpu.c
 endif
@@ -3633,6 +3693,10 @@ SRCS := $(filter-out interfaces/bus/tiku_spi_bus.c \
                     interfaces/adc/tiku_adc.c interfaces/onewire/tiku_onewire.c,$(SRCS))
 endif
 SRCS := $(sort $(SRCS))
+ifeq ($(TIKU_PLATFORM),esp32p4)
+SRCS := $(filter-out interfaces/bus/tiku_spi_bus.c interfaces/bus/tiku_i2c_bus.c \
+    interfaces/adc/tiku_adc.c interfaces/onewire/tiku_onewire.c,$(SRCS))
+endif
 ASM_SRCS := $(sort $(ASM_SRCS))
 
 OBJS = $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS)) \
@@ -3680,7 +3744,7 @@ OBJS += $(TIKU_BUILD_ID_O)
 # ---------------------------------------------------------------------------
 # Output
 # ---------------------------------------------------------------------------
-ifeq ($(TIKU_PLATFORM),esp32c5)
+ifneq ($(filter esp32c5 esp32p4,$(TIKU_PLATFORM)),)
 ifeq ($(MINIMAL),1)
 TARGET = $(BUILD_DIR)/diagnostic.elf
 else
@@ -3752,6 +3816,10 @@ else ifeq ($(TIKU_PLATFORM),esp32c61)
 # bare binary; esptool writes it from the ELF.
 TARGET_BIN = main.bin
 all: $(TARGET) $(TARGET_BIN) size
+else ifeq ($(TIKU_PLATFORM),esp32p4)
+TARGET_BIN = $(BUILD_DIR)/main.bin
+TARGET_XIP = $(BUILD_DIR)/xip.bin
+all: $(TARGET_BIN) $(TARGET_XIP) $(BUILD_DIR)/main.paired.elf size
 else ifeq ($(TIKU_PLATFORM),esp32c5)
 TARGET_BIN = $(TARGET:.elf=.bin)
 all: $(TARGET) $(TARGET_BIN) size
@@ -3764,7 +3832,7 @@ endif
 # platform of the last build and is a prerequisite of main.elf: a build for
 # another platform rewrites it, and its newer timestamp forces a relink.
 PLATFORM_STAMP = build/.platform-stamp
-ifeq ($(TIKU_PLATFORM),esp32c5)
+ifneq ($(filter esp32c5 esp32p4,$(TIKU_PLATFORM)),)
 PLATFORM_STAMP = $(BUILD_DIR)/.platform-stamp
 endif
 
@@ -3932,6 +4000,15 @@ $(TARGET_BIN): $(TARGET)
 	        --flash-size 8MB -o $@ $< > /dev/null && \
 	    echo "  [image] $< -> $@"; \
 	fi
+endif
+
+ifeq ($(TIKU_PLATFORM),esp32p4)
+ESPTOOL ?= esptool
+ESP_PYTHON ?= python3
+$(TARGET_BIN) $(TARGET_XIP) $(BUILD_DIR)/main.paired.elf &: $(TARGET) \
+    tools/esp32p4_xip.py tools/esp32p4_ram.py tools/esp32p4_layout.py arch/esp32p4/flash_layout.def
+	$(ESP_PYTHON) tools/esp32p4_xip.py --firmware --elf $(TARGET) \
+	    --boot $(TARGET_BIN) --xip $(TARGET_XIP) --objcopy $(OBJCOPY) --esptool $(ESPTOOL)
 endif
 
 # C5 images have a validated SRAM boot part and an optional paired XIP part.
@@ -4431,6 +4508,19 @@ erase:
 	@echo "esp32c61: not erased -- write-flash replaces the boot image, and"
 	@echo "  erasing /data or the durable mirror is not a build step."
 
+else ifeq ($(TIKU_PLATFORM),esp32p4)
+
+flash: all
+	@echo "P4 firmware requires the backup-checked tools/esp32p4_firmware.py installer."
+	@echo "See arch/esp32p4/README.md; ordinary flash never replaces an unknown layout."
+	@false
+
+erase:
+	@echo "P4: whole-chip erasure is refused; preserve the original firmware backup."
+	@false
+
+run: flash
+
 else ifeq ($(TIKU_PLATFORM),esp32c5)
 
 # The post-flash shell probe runs only for a shell image on the USB console
@@ -4530,3 +4620,4 @@ monitor:
 # default above is set.
 # ---------------------------------------------------------------------------
 include tools/firmware_options.mk
+endif # MCU=esp32p4 has its own native diagnostic build.

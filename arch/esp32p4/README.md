@@ -1,0 +1,762 @@
+# ESP32-P4 native firmware and qualification profiles
+
+## Normal firmware
+
+`P4_PROFILE=firmware` builds native CPU0 TikuOS with the shell, VFS, BASIC,
+integer workers, flash-backed `/data`, durable mirrors, clock preferences,
+paired flash execution and automatic attachment of the fitted 32 MiB PSRAM.
+It supports the Olimex ESP32-P4-PC with silicon v1.3 and ROM ECO2. CPU1 and
+the LP core remain parked. No FreeRTOS or ESP-IDF runtime is linked.
+
+```sh
+make MCU=esp32p4 P4_PROFILE=firmware \
+    TOOLCHAIN_DIR=/path/to/riscv-toolchain \
+    TOOLCHAIN_PREFIX=riscv-none-elf- \
+    ESPTOOL=/path/to/venv/bin/esptool
+```
+
+Artifacts are `build/esp32p4/firmware/main.bin`, `main.paired.elf` and
+`xip.bin`. The unpaired `main.elf` is for symbols and debugging. The loader
+requires the paired ELF. Shell and BASIC code and constants execute from
+flash; the kernel, cache/flash controller operations and their dependencies
+execute from internal SRAM. The profile uses a 16 KiB foreground stack and
+a separate 2 KiB interrupt stack. Software guards do not provide an MPU.
+
+### Install and recover
+
+Ordinary `make flash` and `make erase` refuse this profile. Installation
+changes the original application's layout and can enable storage writes
+at boot; it requires the storage-aware installer, not the diagnostic loader.
+Keep an immutable full 16 MiB original backup and a non-writing kernel-test
+image with its ELF. The first install requires the flash to match that backup
+and the entire native storage reservation to be erased and outside original
+partitions. An unknown existing store is not reformatted.
+
+```sh
+python tools/esp32p4_firmware.py \
+    --image build/esp32p4/firmware/main.bin \
+    --elf build/esp32p4/firmware/main.paired.elf \
+    --xip build/esp32p4/firmware/xip.bin --check-only
+
+python tools/esp32p4_firmware.py \
+    --image build/esp32p4/firmware/main.bin \
+    --elf build/esp32p4/firmware/main.paired.elf \
+    --xip build/esp32p4/firmware/xip.bin \
+    --first-install --backup /path/to/original-16MiB.bin \
+    --recovery-image build/esp32p4/kernel-test/diagnostic.bin \
+    --recovery-elf build/esp32p4/kernel-test/diagnostic.elf \
+    --port /dev/serial/by-id/USB_DEVICE --serial EXACT_USB_SERIAL \
+    --log /path/to/new-install.log
+```
+
+Build the recovery pair with `P4_PROFILE=kernel-test`, using the same
+toolchain options. All hardware tools require pyserial and esptool 5.1.0.
+
+The installer verifies the companion before the boot image, checks the
+whole-chip result, and requires a shell prompt. Failed first installs attempt
+restoration of changed code/storage sectors and load the recovery diagnostic.
+`--restore-original` replaces `--first-install` to request that restoration
+explicitly; it removes native files and settings, restoring the original
+16 MiB contents, then RAM-loads the diagnostic. A change outside the declared
+code/storage reservations stops restoration. Preserve the backup and log.
+
+If BOOT was sampled low, normal flash startup is refused before any write.
+An explicit `--ram-run` alongside `--first-install` installs the pair and
+starts it through the ROM RAM loader. It is not evidence of flash boot.
+With the matching pair already installed, `--resume` replaces
+`--first-install` and verifies the code before resetting/RAM-loading it;
+the loader makes no flash writes. Firmware itself can update boot counters
+and other durable state. This path preserves existing `/data` for warm-reset
+tests. It is not an updater for a different firmware pair.
+
+### Memory and configuration
+
+| Resource | Firmware use |
+| --- | --- |
+| HP SRAM, 768 KiB physical | 572,368 bytes after excluding ROM workspace and the 128 KiB L2 cache |
+| `0x4ff00000`–`0x4ff2bbd0` | Internal code/statics, durable SRAM mirror, separate retained data; remaining tail is allocator span 1 |
+| `0x4ff40000`–`0x4ff9bfc0` | Allocator span 0: 376,768 bytes |
+| `0x4ff9bfc0`–`0x4ffa0000` | 64-byte guard and 16 KiB foreground stack |
+| PSRAM at `0x48000000` | 32 MiB mapped, 80 MHz, volatile; external requests can allocate it |
+| Flash `0x000000`–`0x400000` | Reserved boot/code area, including the paired XIP window at offset `0x100000` |
+| Flash `0x400000`–`0xff0000` | 12,517,376-byte configurable NVM region; default tier 32 KiB, remainder `/data` |
+| Flash `0xff0000`–`0xff8000` | Two 16 KiB durable slots, each with a 16-byte header |
+| Flash `0xff8000`–`0xff9000` | Diagnostic scratch sector; unavailable to normal firmware writes |
+| Flash `0xff9000`–`0x1000000` | Reserved 28 KiB tail |
+
+The default file extent derives 3,024 slots, including one spare, with
+4,092 payload bytes per single-slot file. Directory metadata consumes space
+inside the file extent; `df` reports it separately from user content. The
+build can address up to 4,096 slots. Internal statics vary with build options.
+Use `/sys/mem/sram_map`, `nvm_map` and `tiers` for the running build.
+
+`/sys/psram/{state,size,hz,stage}` reports the native driver's status. Default
+working-memory requests stay internal; explicitly allow or require external
+memory to use PSRAM. Flash programming closes external access with dirty
+PSRAM writeback and flash-cache invalidation. DMA consumers are not qualified.
+
+`/sys/cpu/freq_available` advertises 40, 90, 180 and 360 MHz in Hz. Writing
+`/sys/cpu/freq_target` saves a next-boot preference; it does not change the
+live rate. `freq <MHz>` is the explicit live-rate command. Invalid rates are
+refused without halting. The crystal-derived timer and USB remain independent
+of the requested CPU divider. Layout ownership uses the internal SAR entropy
+source and leaves the store held if identity provisioning cannot succeed.
+
+The common `/sys/mem/layout` controls manage the NVM-region split and SRAM
+reservation constraints. They do not move the linked code, stack, ROM holes,
+cache partition or PSRAM mapping. No layout test automatically erases files.
+The region's sector updates are not whole-filesystem power-loss transactions;
+the two-slot durable mirror has its own CRC and publication protocol.
+
+### Desktop and Bench
+
+Connect the running device through TikuDesktop's Devices menu using its
+explicit USB port. Tracker and VFS Inspector use the normal paged manifest;
+Device Preferences discovers the clock choices. BASIC is available through
+the existing desktop device session. The dedicated `esp32p4-usb` Bench
+profile offers installed-firmware checks, not C5/C61 radio or general-kernel
+categories. Both frontends pass the selected port and disallow ordinary
+firmware flashing for this board.
+
+```sh
+cd TikuBench
+python -m tikubench run p4-firmware --board esp32p4 --console usb \
+    --port /dev/serial/by-id/USB_DEVICE --skip-build
+```
+
+The suite checks memory accounting, PSRAM attachment, invalid clock requests,
+file read/write and BASIC run/SAVE. It claims absent temporary names and
+refuses to overwrite an existing `prog.bas`; cleanup failure fails the run.
+Select `--only memory,clock` when a user BASIC program must remain loaded.
+No test in this suite reboots or changes the saved clock. Host coverage also
+checks the P4 geometry, high-numbered file slots and allocator bitmap limits.
+
+### Qualification limits
+
+Normal firmware, files, BASIC, PSRAM attachment, clock persistence through
+ROM reset/reload and the desktop backend have hardware checks. The separate
+kernel diagnostic covers scheduler/workers and allocator lifecycle. These
+results do not establish the full-firmware physical cold-start or brownout
+behavior. Physical BOOT release/power cycling requires local access.
+
+All 55 GPIO inputs can be observed through read-only nodes; direction/output
+changes and GPIO IRQs are refused because board routes are not qualified.
+Ethernet, microSD, USB host, HDMI, audio and camera drivers are not provided
+by this profile. Their wiring and attached accessories require confirmation
+before external pins or power rails are driven. Wi-Fi/BLE are not integrated
+P4 capabilities. CPU1 jobs, FPU/vector contexts and low-power modes are not
+enabled. Do not interpret this as complete board-peripheral support.
+
+## Storage-free diagnostic
+
+`MCU=esp32p4 MINIMAL=1 BOARD=olimex_esp32p4_pc` builds a storage-free
+native diagnostic for the Olimex ESP32-P4-PC. It supports silicon revision
+1.3 and ROM ECO2. These are separate version numbers. Other revisions are
+refused by the loading tool.
+
+The diagnostic provides native CPU0
+startup, a USB Serial/JTAG console, CLIC interrupts, a 128 Hz tick, one-shot
+alarms, native regulator/CPLL setup, watchdog checks, SRAM checks,
+exception reporting and opt-in read-only flash diagnostics. It does not run FreeRTOS or link SDK
+runtime objects. Kernel, shell, BASIC, XIP, persistent storage, PSRAM,
+CPU1 workers and board peripherals are not available in this profile.
+Unsupported feature selections fail rather than selecting a C5/C61 port.
+
+## Build
+
+Use a RISC-V bare-metal GCC toolchain that supports `rv32imac_zicsr_zifencei`
+with the `ilp32` ABI, and esptool 5.1.0. Python and pyserial are also needed
+for loading. No ESP-IDF installation is required.
+
+```sh
+make MCU=esp32p4 MINIMAL=1 \
+    TOOLCHAIN_DIR=/path/to/riscv-toolchain \
+    TOOLCHAIN_PREFIX=riscv-none-elf- \
+    ESPTOOL=/path/to/venv/bin/esptool
+```
+
+Outputs are isolated under `build/esp32p4/diagnostic/`. `BUILD_DIR` can select
+a different directory. A P4 build does not delete or replace another
+platform's `main.elf` or build outputs.
+
+The build checks the image and its matching ELF. Checks cover chip and
+revision, load ranges, overlap, stack exclusion, entry point, checksum,
+SHA-256, ELF ABI, instruction-set attributes, and matching section contents.
+Floating-point ABI objects and extra instruction-set extensions are refused.
+This is corruption and configuration checking, not authenticated boot.
+
+## Run without changing flash
+
+Choose the exact P4 port and its USB serial number. The tool checks the
+serial number before resetting the board; choosing another Espressif port
+with a different serial fails before that port is opened. It also refuses
+a busy port, a non-native USB interface, a loader stub, incompatible silicon
+or ROM, and an unexpected security configuration.
+
+```sh
+make ram-load MCU=esp32p4 MINIMAL=1 \
+    TOOLCHAIN_DIR=/path/to/riscv-toolchain \
+    ESPTOOL=/path/to/venv/bin/esptool PYTHON=/path/to/venv/bin/python \
+    PORT=/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_SERIAL-if00 \
+    P4_SERIAL=SERIAL P4_MONITOR_ARGS='--log /path/to/new-capture.log'
+```
+
+An existing log is not overwritten. The tool loads the diagnostic through
+ROM, requests identity, ping, interrupt-mask, register-preservation, clock,
+alarm and watchdog checks, then repeats them across two console reopen cycles. Missing markers,
+timer errors, unclaimed interrupts, counter restarts, faults, and stalled
+ticks fail the run. Console open keeps DTR and RTS asserted.
+
+The loader and the diagnostic issue no flash erase or program commands.
+The diagnostic does not mount or provision a file store. Resetting the
+board discards the RAM diagnostic. A normal power cycle without BOOT held
+starts the installed firmware; a reset can retain forced download mode.
+`make flash` and `make erase` are refused for this profile.
+
+For a cold-start check, disconnect all P4 power sources, reconnect USB while
+holding BOOT, then release BOOT before running the loader. Booting the
+original firmware first is not a native cold-start test: its PLL, regulator,
+cache and PSRAM initialization can affect a subsequent software-reset run.
+Neither console reopen nor an RTS reset proves a power-cycle result. Pass
+`--no-reset` through `P4_MONITOR_ARGS` for the first download after reconnecting
+in ROM mode. This option makes one connection attempt and does not fall back
+to a reset. The capture records the pre-download clock registers and image hash;
+it cannot establish that physical power was removed.
+
+Add `--fault-check --watchdog-check` for destructive **RAM execution** tests:
+the first injects five exceptions, verifies their retained records across ROM
+resets and RAM reloads, then clears the test record. It logs any previous
+record before clearing it at the start. The second enables
+a watchdog timeout after setting the reversible forced-ROM-download bit.
+It reconnects without reset, requires hardware reset cause 7, then reloads
+the RAM diagnostic. Neither test programs flash or eFuses. Keep other host
+applications away from this board's port throughout the run.
+
+### Read-only flash qualification
+
+The kernel-test profile also supports SPI0 memory-mapped reads. Add
+`--mmap-check` alongside `--flash-check /path/to/16MiB-backup.bin` in
+`P4_MONITOR_ARGS`. This maps the fitted flash at `0x40000000`, checks the
+same complete scan and clock-dependent reads, then removes the mappings.
+The command is `M` for a manual device-side run. The MMU excludes pages
+outside the fitted 16 MiB. Mapping changes require SRAM execution, parked
+secondary cores, and no concurrent flash writes. This read test does not
+establish execution from flash or cache-off writes.
+
+Both RAM profiles accept `F` to identify and scan the board's 16 MiB EF:4018
+flash. Use the guarded loader for an independently checked result:
+
+```sh
+make ram-load MCU=esp32p4 P4_PROFILE=kernel-test \
+    TOOLCHAIN_DIR=/path/to/riscv-toolchain \
+    ESPTOOL=/path/to/venv/bin/esptool PYTHON=/path/to/venv/bin/python \
+    PORT=/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_SERIAL-if00 \
+    P4_SERIAL=SERIAL \
+    P4_MONITOR_ARGS='--flash-check /path/to/flash-backup.bin --log /path/to/new-flash.log'
+```
+
+The backup must contain exactly 16 MiB, starting at flash offset zero. It is
+read and hashed before USB is opened. The loader first compares a full-chip
+ROM MD5 against the backup, with the ROM geometry explicitly set to 16 MiB.
+The native test then emits CRC-32 for each ordered 256 KiB block and the
+complete chip. The loader compares these against the backup, including a
+1 KiB read crossing offset `0x40000` at 40/90/180/360 MHz CPU clocks.
+The test checks unaligned reads, end-of-chip bounds, destination guards,
+unchanged status registers and advancing timer interrupts. It restores the
+CPU to 360 MHz. The loader repeats the ordinary profile checks, resets into
+ROM, checks the full-chip digest again, then reloads and retests the RAM image.
+Hashes detect read errors and changes; they do not authenticate firmware.
+
+The native driver attaches pads through the pinned ECO2 ROM function. It
+selects XTAL as the flash clock source and configures a 10 MHz SPI1 clock.
+Data transfers use single-line `0x03` reads with 24-bit addresses and at most
+64 bytes per transaction; identity/status use `0x9f`, `0x05` and `0x35`.
+There is no write-enable, unlock, erase, program, mount or format operation.
+The driver does not map flash or depend on the ROM's default flash capacity.
+
+Caller requirements are in `tiku_flash_arch.h`: CPU0/internal SRAM, parked
+secondary cores, exclusive MSPI ownership, and no XIP or mapped external-memory
+users. A busy owner or ISR caller is refused. Each transaction masks IRQs;
+the original IRQ state is restored between chunks. A timeout disables further
+access until reset, and a failed multi-chunk read may leave a completed prefix
+in the destination. Successful transactions restore the SPI1 configuration
+and FIFO contents. Clock setup remains selected for subsequent reads.
+
+This qualifies reads against the chip's existing contents, not writable
+storage, flash boot or XIP. Erased regions contain identical bytes and cannot
+provide arbitrary-pattern address-alias tests without writing flash. A
+physical cold run of this combined artifact is a separate requirement.
+
+## Startup and memory
+
+The diagnostic uses the first 64 KiB of HP SRAM, starting at `0x4ff00000`.
+The upper 4 KiB is its foreground stack; separate 2 KiB interrupt and fault
+stacks are included in BSS. A 64-byte fault record occupies LP SRAM at
+`0x5010fa40`–`0x5010fa80`, below the ROM's LP stack/data reservation.
+Link assertions refuse overlap, durable objects, and other retained objects.
+ROM workspace, the upper SRAM bank, L2 cache, TCM and LP SRAM are not used
+for application allocations. External flash and PSRAM are not mapped by
+this diagnostic.
+
+CPU0 masks interrupts, establishes its stack, global pointer and fixed trap
+scratch area, installs a non-vectored CLIC trap handler, and clears BSS.
+Startup disables inherited
+boot watchdogs and holds CPU1 and the LP core in reset with their clocks
+disabled. Floating-point and vector state are disabled; interrupt frames
+contain the integer registers and machine return state.
+
+The CPU first selects the board's 40 MHz crystal and verifies the clock
+dividers. Native regulator initialization reads the calibrated HP/LP bias
+values from eFuse, applies the documented defaults where needed, and preserves
+a higher DCDC calibration value. It waits for regulator settling before
+disabling the HP LDO. The CPLL is then configured for 360 MHz with bounded
+analog-bus and calibration waits. Initialization failures are reported, not
+treated as successful operation at a lower clock.
+
+The `f` check exercises 40, 90, 180, 360, 180, 90, 40 and 360 MHz. CPU cycles
+are measured against the independent 16 MHz SYSTIMER at each rate, along with
+live IRQ register preservation and one-shot alarms. Divider programming happens
+on XTAL; CPLL is selected after completion and register readback. MEM/SYS
+remain at or below 180 MHz and APB at or below 90 MHz. These live changes are
+for the SRAM diagnostic, **not an advertised kernel/VFS capability** with
+active peripheral transfers. MPLL, cache and PSRAM initialization remain separate.
+
+Comparator 1 supplies the `a` one-shot check. The driver cancels before
+callback delivery, supports callback rearming, clamps expired deadlines,
+and leaves replacement IRQ owners untouched. MWDT0 uses the 40 MHz crystal,
+independent of the CPU root, with a 2 kHz prescaled counter. The `w` check
+feeds it beyond its configured timeout, pauses beyond that timeout, resumes,
+then disables it. Actual expiry is tested separately by `--watchdog-check`.
+
+SYSTIMER uses comparator 0 and CPU0 interrupt-matrix source 53. The pre-v3
+CLIC's priority-width field is bits 4:1, and its threshold is memory-mapped;
+neither is copied from the C5 register layout. Dispatch is non-nested.
+Delayed ticks are recovered arithmetically, including 52-bit counter wrap.
+Source ownership conflicts and timer snapshot timeouts return errors.
+
+The console accepts `i` for identity, `p` for ping, `c` for interrupt-mask
+checks and `r` for register-preservation checks.
+
+### Fault diagnostics
+
+Both RAM profiles accept these explicit diagnostic commands:
+
+| Command | Action |
+|---|---|
+| `d` | Read the last validated fault record, or report `P4FAULT NONE` |
+| `D` | Clear that record and report `P4FAULT NONE` |
+| `t` | Execute a breakpoint |
+| `x` | Execute an illegal instruction |
+| `v` | Attempt a load from unmapped address zero |
+| `b` | Set SP to `0x10`, then execute a breakpoint |
+| `n` | Execute a breakpoint inside the one-shot alarm interrupt handler |
+
+The five injection commands stop execution; load the RAM image again to
+resume. `n` takes over the diagnostic alarm, so it must not be used during
+an application session. `--fault-check` runs each injection and repeats the
+normal profile checks after each reload. It compares all 64 bytes through
+the ROM reader before download and checks the reported record after startup.
+This includes sequence numbers and CRC, not just a matching fault banner.
+
+Trap entry saves three scratch registers and the interrupted SP in fixed
+internal SRAM before using a stack. It checks alignment and room for the
+integer frame in the linked BSS/foreground-stack ranges. Exceptions use a
+dedicated fault stack, including exceptions raised inside an interrupt
+handler. A further exception in the fault handler parks CPU0 without trying
+to report recursively. These range checks are not per-worker bounds checks
+or hardware memory protection.
+
+The record contains version, sequence, cause, PC, trap value, interrupted SP,
+machine status, hart, raw reset-reason register, return address, context flags,
+and CRC-32. `reset` describes the reset preceding the fault, not a reset
+caused by the fault. Bit 0 of `flags` denotes an invalid SP; bit 1 denotes
+an exception during interrupt dispatch. The handler does not read the faulting
+address or walk the interrupted stack. It commits the record before bounded
+USB output and does not use libc, the scheduler or console queues.
+
+Retention is qualified for the tested native USB-to-ROM reset and RAM reload
+on v1.3/ECO2. Ordinary HP SRAM did not retain the record through that path;
+the dedicated LP SRAM reservation did. Startup neither clears it nor exposes
+LP SRAM to the allocator. The LP core remains parked. This is not a claim
+of retention across power loss, brownout, deep sleep, or execution of another
+firmware image. The placement follows the pinned SDK's
+[LP ROM reservation](https://github.com/espressif/esp-idf/blob/4d59230ddff16327812782151ef0afef202dc6d7/components/esp_system/ld/esp32p4/memory.ld.in).
+
+## CPU0 kernel tests
+
+### Experimental paired flash qualification
+
+`P4_PROFILE=kernel-test P4_XIP_TEST=1` builds a separate qualification image
+under `build/esp32p4/kernel-test-xip/`. It keeps kernel and interrupt code in
+SRAM and places a small instruction/constant probe in flash. The packer
+produces `diagnostic.bin`, `xip.bin`, and `diagnostic.paired.elf`. A 64-byte
+descriptor binds the SRAM program to its companion by build identity and
+payload CRC. The host validator also checks a SHA-256 identity derived from
+both images. This detects accidental corruption and mismatched builds; it
+does not provide secure boot or authenticate firmware.
+
+The normal RAM loader refuses this profile. Flash qualification uses an
+explicit tool, not `make flash`:
+
+```sh
+python tools/esp32p4_flash.py \
+    --image build/esp32p4/kernel-test-xip/diagnostic.bin \
+    --elf build/esp32p4/kernel-test-xip/diagnostic.paired.elf \
+    --xip build/esp32p4/kernel-test-xip/xip.bin --check-only
+```
+
+To run on hardware, replace `--check-only` with `--first-install
+--restore-after --backup /path/to/full-backup.bin --log /path/to/new.log`
+and specify the P4's `--port` and `--serial`. The tool requires esptool 5.1.0
+and checks security, revision and flash identity before any write. It prints
+the exact boot and companion sector extents. The complete existing flash
+must match the backup. It writes the companion before the boot image, verifies
+both, and checks that every other byte remains unchanged.
+
+The qualification requires ROM flash boot, two kernel runs, and command `X`
+for instruction/constant fetch at four CPU rates with live interrupts.
+`--restore-after` restores the affected original sectors and verifies the
+whole chip before returning to the RAM kernel. A failed qualification also
+attempts restoration. `--restore-original` with the same image pair and backup
+retries recovery; it refuses unrelated flash changes. Keep the backup even
+after a successful test. The non-XIP kernel image uses the same tool without
+`--xip` and with its ordinary ELF.
+
+Native flash startup and the four-rate XIP probe have passed on the connected
+v1.3/ECO2 board. This qualifies the probe, not placement of the complete
+kernel in flash or writes while executing XIP. The installer refuses to write
+when BOOT was sampled low: an ordinary USB core reset does not resample that
+state. Release BOOT and power-cycle before retrying. Keep physical cold-start
+results separate from software-reset qualification.
+Persistent mirrors, TFS, PSRAM and peripheral support are not enabled by
+this build. `make flash` and whole-chip erase remain refused.
+
+### Native 32 MiB PSRAM qualification
+
+`P4_PROFILE=kernel-test P4_PSRAM_TEST=1` builds an independent SRAM-only
+image under `build/esp32p4/kernel-test-psram/`. The driver initializes MPLL,
+the dedicated pads and SPI2/SPI3 controllers for an 80 MHz x16 interface.
+It requires the fitted AP 32 MiB part, checks mode-register readback and direct
+transfers, and maps exactly 512 64-KiB pages. Initialization checks the mapped
+low byte lanes against the direct-controller pattern before publishing capacity.
+SPI3's 8-bit transfers and SPI2's x16 mapping have different byte packing.
+The full-memory test below exercises both mapped byte lanes.
+
+No SDK runtime or PSRAM-backed stack is used. The caller must execute from
+internal SRAM with the other cores parked, no mapped external-memory users,
+and no DMA. The initial connection check modifies 64 low-lane bytes within
+the first 128 bytes. A failed initialization leaves capacity unpublished and
+requires a reset before retrying. MMU setup failures clear the page table and
+reenable the cache; a failed MPLL setup does not access the unclocked SPI bus.
+
+```sh
+make ram-load MCU=esp32p4 P4_PROFILE=kernel-test P4_PSRAM_TEST=1 \
+    TOOLCHAIN_DIR=/path/to/riscv-toolchain \
+    ESPTOOL=/path/to/venv/bin/esptool PYTHON=/path/to/venv/bin/python \
+    PORT=/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_SERIAL-if00 \
+    P4_SERIAL=SERIAL \
+    P4_MONITOR_ARGS='--psram-check --log /path/to/new-psram.log'
+```
+
+The explicit `P` command destroys unallocated PSRAM contents. It refuses a
+currently attached external tier. Use the guarded loader, which requires a
+matching PSRAM-test image before opening the port. The test covers:
+
+- Four complete 32 MiB write/read patterns, at 40/90/180/360 MHz CPU rates,
+  with advancing timer interrupts. Writing the complete range before reading
+  exceeds the cache capacity and checks for address aliasing.
+- Byte and halfword updates across cache lines, 64 KiB pages, the 16 MiB
+  midpoint and the last bytes, followed by cache-evicting reads.
+- Explicit and external-allowed allocation, exclusion from default placement,
+  arena/pool release, live-user detach refusal and complete capacity recovery.
+- Three whole-device arena reservations and attach/detach cycles; forced
+  detachment invalidates old arena/pool handles, including after reattachment.
+
+The test leaves the external tier detached, restores the CPU to 360 MHz, and
+runs the ordinary kernel suite again. Physical PSRAM mapping remains enabled.
+The host requires the complete ordered transcript and a sequential kernel run
+number; a reset cannot substitute for successful cleanup.
+
+For flash-boot qualification, pass this profile's image and ELF to
+`tools/esp32p4_flash.py` with `--psram-check`, `--first-install`,
+`--restore-after` and the same backup/identity arguments described above.
+It runs the destructive PSRAM test after native boot, restores the original
+flash sectors, verifies the whole-chip backup and reloads the RAM kernel.
+Do not combine this profile with the scratch writer or XIP probe. These
+tests do not qualify flash writes with live PSRAM, DMA, PSRAM power-down,
+the complete firmware profile, or physical cold-start behavior.
+
+### RAM kernel profile
+
+`P4_PROFILE=kernel-test` selects a separate storage-free image that links the
+portable process, scheduler, timer, critical-window and worker implementations.
+CPU0 runs at 360 MHz; CPU1 and the LP core remain parked. Do not pass `MINIMAL`
+or enable ordinary firmware features with this profile.
+The toolchain must provide newlib headers and `libc`/`libnosys` for `ilp32`.
+
+```sh
+make ram-load MCU=esp32p4 P4_PROFILE=kernel-test \
+    TOOLCHAIN_DIR=/path/to/riscv-toolchain \
+    ESPTOOL=/path/to/venv/bin/esptool PYTHON=/path/to/venv/bin/python \
+    PORT=/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_SERIAL-if00 \
+    P4_SERIAL=SERIAL \
+    P4_MONITOR_ARGS='--log /path/to/new-kernel-capture.log'
+```
+
+The image and ELF are under `build/esp32p4/kernel-test/`. This profile uses
+the two SRAM ranges below; the diagnostic retains its 64 KiB limit. The
+loader checks each profile's boundaries, plus revision, ABI and USB identity.
+Nothing is installed in flash. Newlib heap growth is refused;
+libc file-descriptor I/O is unavailable. Linker warnings about unsupported
+newlib system calls do not indicate a filesystem implementation.
+
+The test programs are `TikuBench/tests/esp32p4/test_kernel.c` and
+`test_memory.c`. Command `k` runs 84 assertions covering process events and coalesced polls, software and hardware
+timer cancellation, nested atomic sections, critical IRQ masks, worker
+start/join/reuse, register preservation, preemption, kernel priority, cycle
+budgets, queue waits/timeouts, stack canaries, WFI wakeup and errno isolation
+between the kernel, workers and interrupts. FP and vector state are disabled.
+Memory checks cover both SRAM spans, full-range address-dependent patterns,
+alignment, arenas, pools, workspace aliases, non-LIFO release, coalescing,
+stale handles, metadata exhaustion, software stack guards, secure wiping and
+allocator refusal in interrupt and worker contexts. Reconstruction tests on
+each span inject an owner restore failure, verify that reservations remain
+unavailable, retry recovery, and require all capacity to be returned.
+
+The loader requests a fresh run after each console reopen, rejects missing or
+misordered assertions, failed summaries, traps and stalled counters, and checks
+that the run number advances without a reboot. `--fault-check` also works
+with this profile; `--watchdog-check` requires the diagnostic profile.
+A physical cold run requires power removal and `--no-reset`, as
+for the diagnostic.
+
+This profile does not provide persistence, PSRAM, shell, BASIC, the general
+TikuBench firmware runner or board peripherals. Its test adapter reports no
+storage layout; it cannot provision `/data`. NVM and PSRAM reservations fail,
+NVM commit reports an error, and durable-image access returns no image.
+
+### Kernel SRAM layout
+
+| Range | Use |
+|---|---|
+| `0x4ff00000` to linked BSS end | Code, constants, data and BSS, including allocator metadata, worker, ISR and fault stacks |
+| Linked BSS end to `0x4ff2bbd0` | Extra SRAM allocation span (span 1) |
+| `0x4ff2bbd0`–`0x4ff40000` | Excluded ROM/boot workspace |
+| `0x4ff40000`–`0x4ff9efc0` | Primary SRAM allocation span (span 0) |
+| `0x4ff9efc0`–`0x4ff9f000` | 64-byte foreground stack guard |
+| `0x4ff9f000`–`0x4ffa0000` | 4 KiB foreground stack |
+| `0x4ffa0000`–`0x4ffc0000` | Reserved 128 KiB L2 cache |
+| `0x5010fa40`–`0x5010fa80` | 64-byte retained fault record, excluded from the allocator |
+
+Ranges exclude their upper endpoint. TCM, LP SRAM, external-memory aliases
+and the ROM workspace are not allocator capacity. A single allocation must
+fit one span. The extra span follows actual linked sections, not a fixed
+growth allowance. Linking requires at least 16 KiB there and 64 KiB in the
+primary span. The build prints the current byte budget. The loader also
+checks allocator symbols against BSS and the explicit stack sections.
+
+Before using the high-SRAM stack, startup runs on the low-SRAM ISR stack,
+parks the other cores, and calls the ECO2 ROM cache-mode and invalidation
+functions. It selects 128 KiB L2 with 64-byte lines and checks the registers.
+Reset defaults do not establish that geometry. A failed setup parks CPU0;
+the host receives no passing test transcript. No SDK runtime is linked.
+
+Both foreground and ISR stacks have 64-byte software sentinels. These detect
+corruption when checked; they do not prevent an access. Hardware MPU/PMP
+protection is not enabled by this RAM profile and its control query returns
+zero. There is no claim of process isolation; retained records preserve
+diagnostics, not application state.
+
+## Scratch-sector write qualification
+
+`P4_FLASH_WRITE_TEST=1` adds erase/program tests to the kernel RAM profile.
+It builds in `build/esp32p4/kernel-test-write/` and uses the separate
+`tools/esp32p4_flash_test.py` loader. Ordinary RAM profiles contain no write
+commands, and the ordinary loader rejects the write-test image.
+
+**This test changes flash**, but only the 4 KiB sector at physical offsets
+`0xff8000` through `0xff8fff`. It requires a complete 16 MiB backup with that
+sector erased and the original vendor partition table at `0x10000`. The
+table checksum and partition bounds must be valid; no partition may overlap
+scratch. It does not install firmware, mount a filesystem, clear protection
+bits, or change eFuses.
+
+```sh
+make ram-load MCU=esp32p4 P4_PROFILE=kernel-test P4_FLASH_WRITE_TEST=1 \
+    TOOLCHAIN_DIR=/path/to/riscv-toolchain \
+    ESPTOOL=/path/to/venv/bin/esptool PYTHON=/path/to/venv/bin/python \
+    PORT=/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_SERIAL-if00 \
+    P4_SERIAL=SERIAL \
+    P4_MONITOR_ARGS='--backup /path/to/flash-backup.bin --log /path/to/new-write.log'
+```
+
+Before writing, the tool requires the device's whole-chip ROM digest to
+match the backup. The native driver bounds every write to scratch, checks
+WEL/WIP, splits transfers at page boundaries, and verifies readback. A request
+with any 0-to-1 bit transition is refused before programming any of its bytes.
+Sources must be internal SRAM; a sector-sized internal buffer stages each
+request. The SRAM MSPI guard masks IRQs and branch prediction, writes dirty
+L1 data back twice using the ECO2 cache-maintenance sequence, suspends L2,
+and closes the SPI0 cache path. IRQs remain masked from write-enable through
+flash-busy completion. Before returning, the guard invalidates the changed
+flash lines, resumes L2 without discarding dirty PSRAM data, and restores
+the caller's AXI, prediction and interrupt state. Interrupts can run between
+program chunks, once flash is readable again.
+
+Controller waits, cache synchronization polls and flash-busy polling have
+fixed limits. L2 suspend/resume use the silicon's ROM functions. A mutation
+that leaves flash state uncertain, or a failed cache synchronization, traps
+in SRAM with IRQs masked. This avoids returning to unreadable or stale flash
+code; reset/reload is required. No status-unlock or automatic flash-reset
+command is issued.
+
+The test covers invalid ranges, unaligned sources, page crossings, illegal
+bit transitions, and full-sector patterns at 40/90/180/360 MHz. The write
+profile also maps flash and initializes the fitted PSRAM. Before each erase
+and program test, it dirties three 8 KiB PSRAM ranges: the start, across
+16 MiB, and the last 8 KiB. It primes the scratch flash cache, then checks
+that PSRAM retains its data and that mapped flash agrees with SPI1 readback.
+The host requires one `P4MSPI` initialization record and both checks at each
+CPU rate. This test refuses to overwrite PSRAM attached to the allocator.
+
+It leaves a known pattern, resets into ROM, and checks that the whole chip
+matches the backup with just that sector changed. A RAM reload verifies the retained
+pattern. The tool then checks bytes outside scratch, erases scratch, and
+requires the original whole-chip digest. Kernel checks run around these
+operations. This establishes the tested software-reset path, not power-loss
+atomicity or physical cold-start behavior.
+
+If a test fails after writes begin, the tool attempts scratch restoration
+once. If interrupted or restoration fails, keep the backup and rerun with
+`--restore-scratch` added to the same arguments and a new log. Restoration
+refuses if bytes outside scratch no longer match the backup. An interrupted
+erase/program can leave scratch incomplete. Do not use these commands with
+valuable data in that sector.
+
+The loaded test is idle until it receives a complete framed command:
+`!P4:WRITE:FF8000!`, `!P4:VERIFY:FF8000!`, or `!P4:RESTORE:FF8000!`, followed
+by a newline. Use the guarded host tool; typing a command directly bypasses
+its backup checks. The build/capability marker prevents profile mistakes;
+it is not authentication. After qualification, load the ordinary kernel
+profile without `P4_FLASH_WRITE_TEST=1` to remove these commands from RAM.
+
+These operations are qualified for SRAM execution with CPU1/LP parked,
+mapped flash data, dirty PSRAM and no DMA. The caller, its constants, stack
+and write buffers remain in internal SRAM. These tests do not execute XIP
+instructions around writes, qualify DMA/cache coherency, or enable arbitrary
+flash-region writes, durable mirrors or TFS.
+
+## Persistent-storage qualification
+
+`P4_PROFILE=kernel-test P4_STORAGE_TEST=1` builds a separate SRAM-only image
+under `build/esp32p4/kernel-test-storage/`. It cannot be combined with the
+scratch, PSRAM or XIP profiles. This diagnostic does not provision storage
+or mount the normal firmware's file store.
+
+The native region backend provides mapped reads and sector-preserving writes
+within `[0x400000,0xff0000)`. It stages each affected 4 KiB sector in SRAM,
+erases only when a bit must change from 0 to 1, and preserves neighboring
+bytes on a successful update. Identical writes do not program flash. Sources
+overlapping an affected sector, ISR calls, reentrant writes and invalid
+ranges are refused. **A power cut during a region update can damage that
+sector.** This backend does not make a multi-sector update atomic.
+
+Durable objects use an SRAM working copy and two 16 KiB flash slots at
+`0xff0000` and `0xff4000`. Each slot has a 16-byte header and a maximum
+16,368-byte payload; the linker enforces that limit. Initialization is
+explicit, after flash mapping is ready, and does not write flash. It restores
+the newest valid CRC-checked image. A smaller saved image leaves the remaining
+working bytes zero; a larger image is refused, not truncated. If neither slot
+is valid, both must be completely erased before commits are enabled. Nonblank
+corrupt storage is held without formatting.
+
+A commit snapshots the working copy with interrupts masked, writes the
+alternate slot, publishes its magic last, and checks the resulting image
+before reporting success. The previous selected slot remains intact. An
+unchanged snapshot skips the write. `tiku_mpu_lock_nvm_status()` propagates
+commit failure. P4 has no hardware write protection for this SRAM copy;
+applications must follow the unlock/write/lock contract themselves.
+
+Use the guarded loader with an existing full-chip backup and a new log:
+
+```sh
+make ram-load MCU=esp32p4 P4_PROFILE=kernel-test P4_STORAGE_TEST=1 \
+    TOOLCHAIN_DIR=/path/to/riscv-toolchain \
+    ESPTOOL=/path/to/venv/bin/esptool PYTHON=/path/to/venv/bin/python \
+    PORT=/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_SERIAL-if00 \
+    P4_SERIAL=SERIAL \
+    P4_MONITOR_ARGS='--backup /path/to/flash-before.bin --log /path/to/new-storage.log'
+```
+
+`tools/esp32p4_storage_test.py` requires the whole writable reservation to be
+erased in the backup, excluded by its valid vendor partition table, and
+identical to the live chip before testing. The ordinary RAM loader and flash
+installer refuse this image. Its marker identifies the profile; it does not
+authenticate commands.
+
+The native test modifies only two region sectors `[0x400000,0x402000)` and
+the two mirror slots `[0xff0000,0xff8000)`. It tests bounds, cross-sector
+updates, preserved neighboring bytes, two 5,000-byte snapshots, unchanged
+commit suppression and an alternate payload without a published header.
+The host checks the exact whole-chip result through ROM, reloads to test
+recovery, and restores the ten test sectors. Restoration first checks all
+other bytes, then requires the original whole-chip digest. An interrupted
+test can be restored with `--restore-storage` and a new log. If bytes outside
+the test extents changed, restoration is refused.
+
+Complete framed commands are `!P4:STORE:400000!`, `!P4:RETAIN:400000!` and
+`!P4:CLEAR:400000!`, each followed by a newline. Direct commands bypass the
+host backup checks. Load the ordinary kernel image after qualification to
+remove the writable commands from RAM.
+
+This profile qualifies the backend and mirror with SRAM execution and
+software resets. It does not publish an NVM allocator tier, mount TFS,
+implement layout provisioning, or qualify physical power cuts. Normal
+startup, shell/VFS/BASIC storage integration, XIP callers during writes,
+DMA and simultaneous storage/PSRAM qualification require separate work.
+
+## Host tests
+
+```sh
+make -C TikuBench/tests/host/kernel esp32p4-boot
+make -C TikuBench/tests/host/kernel esp32p4-boot \
+    EXTRA_CFLAGS='-fsanitize=undefined -fno-sanitize-recover=all'
+```
+
+These tests run without opening any board. Register models compile the
+production C sources, test error paths and deliberately mutated variants.
+Fault models reject corrupt records, interrupted commits, sequence errors,
+unbounded USB waits and missing final USB packets. ELF fixtures require the
+exact non-loadable LP record reservation and reject incoming bytes there.
+The shared USB FIFO and host console helpers also retain C5 regression
+coverage. P4 is not advertised as a qualified kernel-runner board by these
+diagnostic tests.
+
+Scratch models compile the production write driver and command parser.
+They cover protection, write-enable failure, partial readback, frozen time,
+stuck hardware, page boundaries, source staging, IRQ state and reentry.
+Host checks reject malformed backups, overlapping partitions, incomplete
+test records and restoration when bytes outside scratch have changed.
+Cache-exclusion models check L1 writeback order, flash-only invalidation,
+line rounding, nested/ISR refusal, prior AXI/prediction/IRQ state, and
+fail-closed behavior for stalled cache/SPI0 or uncertain flash state. A data
+model checks the coexistence diagnostic detects PSRAM corruption and stale
+flash contents at its tested boundaries.
+
+Storage models simulate each byte-cut position in a 5,000-byte mirror update,
+require the previous or complete new image after reboot, and cover sequence
+wrap, corrupt/unpublished slots, changed image sizes, unchanged commits,
+reentry, ISR refusal and erase/program/readback failures. Region tests cover
+cross-sector preservation, source aliasing, read/write failures and range
+limits. Host loader tests reject occupied storage and unsafe restoration.
+
+## Register references
+
+Register definitions follow Espressif ESP-IDF revision
+`4d59230ddff16327812782151ef0afef202dc6d7`, specifically
+`components/soc/esp32p4/register/hw_ver1/soc/`, the P4 CLIC definitions,
+and the P4 clock and SYSTIMER HALs. No SDK library is linked.
+
+- [P4 revision 1.3 datasheet](https://documentation.espressif.com/esp32-p4-chip-revision-v1.3_datasheet_en.html)
+- [ROM serial protocol](https://docs.espressif.com/projects/esptool/en/latest/esp32p4/advanced-topics/serial-protocol.html)
+- [Olimex board design](https://github.com/OLIMEX/ESP32-P4-PC)

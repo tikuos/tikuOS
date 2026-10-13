@@ -322,6 +322,10 @@ tiku_shell_cmd_freq(uint8_t argc, const char *argv[])
 #else
         SHELL_PRINTF("  <mhz>: 10, 20 or 40 (crystal), 80 or 160 (PLL).\n");
 #endif
+#elif defined(PLATFORM_ESP32P4)
+        SHELL_PRINTF("  no arg: show the core clock; <mhz>: 40, 90, 180 or 360.\n");
+#elif defined(PLATFORM_ESP32C5)
+        SHELL_PRINTF("  no arg: show the core clock; <mhz>: 40, 80 or 240.\n");
 #elif defined(PLATFORM_MSP430)
         SHELL_PRINTF("  no arg: show the core clock; <mhz>: 8, 4, 2 or 1 "
                      "(MCLK divided from the 8 MHz DCO).\n");

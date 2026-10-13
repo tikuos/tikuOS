@@ -50,6 +50,8 @@
 
 #elif defined(PLATFORM_ESP32C5)
 #define TIKU_GPIO_PORTS(X) X(1, 8) X(2, 8) X(3, 8) X(4, 5)
+#elif defined(PLATFORM_ESP32P4)
+#define TIKU_GPIO_PORTS(X) X(1, 8) X(2, 8) X(3, 8) X(4, 8) X(5, 8) X(6, 8) X(7, 7)
 
 #elif defined(PLATFORM_AMBIQ)
 /* Pads in banks of eight, pad = (port - 1) * 8 + pin: pads 0..127 on the

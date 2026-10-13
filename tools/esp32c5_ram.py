@@ -15,6 +15,8 @@ import subprocess
 import sys
 import time
 
+from esp_usb_console import require_idle_usb_port, usb_console
+
 CHIP_ID = 23
 RAM_START = 0x40800000
 RAM_LIMIT = 0x4080F000
@@ -83,24 +85,6 @@ def validate_identity(chip, eco, revision, image):
         raise ValueError("connected silicon revision is outside the image range")
 
 
-def require_idle_usb_port(port, ports):
-    """Require a named, idle native Espressif USB port before opening it."""
-    resolved = os.path.realpath(port)
-    if not any(os.path.realpath(item.device) == resolved and
-               (item.vid, item.pid) == (0x303A, 0x1001) for item in ports):
-        raise ValueError("port is not a native Espressif USB Serial/JTAG device")
-    if not shutil.which("fuser"):
-        raise ValueError("fuser is required to check existing port owners")
-    # Linux fuser returns 1 and prints nothing for an idle file; macOS fuser
-    # returns 0 and echoes "<path>:" on stdout.  Both print owner PIDs after
-    # that, so once the echoed path is removed any remaining text is an owner
-    # or an error message.
-    owners = subprocess.run(["fuser", resolved], capture_output=True, text=True)
-    report = (owners.stdout + owners.stderr).replace(resolved + ":", "")
-    if owners.returncode > 1 or report.strip():
-        raise ValueError("port is busy or its ownership could not be checked")
-
-
 def validate_capture(captured):
     """Require RAM, nested masking, USB and advancing interrupt-driven ticks."""
     heartbeats = [int(value, 16) for value in
@@ -129,20 +113,6 @@ def timer_counters(captured):
         rb"ticks=0x([0-9a-f]{8}) interrupts=0x([0-9a-f]{8}) "
         rb"timer_errors=0x([0-9a-f]{8}) unclaimed=0x([0-9a-f]{8})\r?\n",
         captured)]
-
-
-def usb_console(serial, port):
-    """Construct a closed console with both control lines asserted on open.
-
-    On native USB, deasserting DTR while RTS is asserted resets the C5.
-    The ROM loader changes these lines explicitly when a reset is requested.
-    """
-    wire = serial.Serial(port=None, baudrate=115200, timeout=0.1,
-                         write_timeout=1, exclusive=True)
-    wire.dtr = True
-    wire.rts = True
-    wire.port = port
-    return wire
 
 
 def capture_console(wire, seconds, log_file):

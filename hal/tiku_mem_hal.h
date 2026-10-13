@@ -24,9 +24,9 @@
  * @def TIKU_MEM_ARCH_IN_EXCEPTION()
  * @brief Non-zero while an interrupt or exception handler runs.
  *
- * TIKU_MEM_EXCEPTION_GUARD reads it so memory mutators refuse handler context.
- * Cortex-M reads IPSR and ESP32-C61 the CLIC level; MSP430 and host builds
- * report 0.  A host test may define the macro first to supply its own check.
+ * Cortex-M reads IPSR, C61/C5 read the CLIC level, and P4 reads its IRQ
+ * dispatch state. MSP430 and host builds report 0.
+ * @note A host test may define the macro first to supply its own check.
  */
 #ifndef TIKU_MEM_ARCH_IN_EXCEPTION
 #if defined(__arm__) || defined(__thumb__)
@@ -38,6 +38,9 @@ static inline int tiku_mem_arch_in_exception(void)
     return ipsr != 0u;
 }
 #define TIKU_MEM_ARCH_IN_EXCEPTION() tiku_mem_arch_in_exception()
+#elif defined(PLATFORM_ESP32P4)
+#include "arch/esp32p4/tiku_irq_arch.h"
+#define TIKU_MEM_ARCH_IN_EXCEPTION() tiku_p4_in_isr()
 #elif defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5)
 /**
  * @brief Non-zero in an interrupt handler: mintstatus holds the CLIC level
@@ -76,6 +79,8 @@ static inline int tiku_mem_arch_in_exception(void)
 #include "arch/esp32c61/tiku_mem_arch.h"
 #elif defined(PLATFORM_ESP32C5)
 #include "arch/esp32c5/tiku_mem_arch.h"
+#elif defined(PLATFORM_ESP32P4)
+#include "arch/esp32p4/tiku_mem_arch.h"
 #endif
 
 /*---------------------------------------------------------------------------*/

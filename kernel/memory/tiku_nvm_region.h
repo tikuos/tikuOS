@@ -74,6 +74,8 @@
 #define TIKU_NVM_REGION_BYTES  (5120u * 1024u)
 #elif defined(PLATFORM_ESP32C5)
 #define TIKU_NVM_REGION_BYTES  (2012u * 1024u)
+#elif defined(PLATFORM_ESP32P4)
+#define TIKU_NVM_REGION_BYTES  (12224u * 1024u)
 #else
 #define TIKU_NVM_REGION_BYTES  0u
 #endif

@@ -147,6 +147,7 @@ gpio_pin_read(uint8_t port, uint8_t pin, char *buf, size_t max)
  * @param len  Input length in bytes
  * @return The requested action, or GPIO_ACT_NONE for anything else
  */
+#if !defined(PLATFORM_ESP32P4)
 static gpio_action_t
 gpio_parse_action(const char *buf, size_t len)
 {
@@ -216,6 +217,7 @@ gpio_pin_write(uint8_t port, uint8_t pin, const char *buf, size_t len)
     }
     return (rc == TIKU_GPIO_OK) ? TIKU_VFS_OK : TIKU_VFS_ENOTSUP;
 }
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* PER-PORT WRAPPERS                                                         */
@@ -233,7 +235,12 @@ gpio_pin_write(uint8_t port, uint8_t pin, const char *buf, size_t len)
 TIKU_GPIO_PORTS(PORT_WRAPPERS)
 
 static int gpio_pin_file_read(char *buf, size_t max);
+#if !defined(PLATFORM_ESP32P4)
 static int gpio_pin_file_write(const char *buf, size_t len);
+#define GPIO_PIN_WRITE gpio_pin_file_write
+#else
+#define GPIO_PIN_WRITE NULL
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* NODE TABLES                                                               */
@@ -242,6 +249,7 @@ static int gpio_pin_file_write(const char *buf, size_t len);
 /** @brief Expand X(port, pin) for pins 0..5 of port @p p. */
 #define PINS_5(X, p)  X(p, 0) X(p, 1) X(p, 2) X(p, 3) X(p, 4)
 #define PINS_6(X, p)  PINS_5(X, p) X(p, 5)
+#define PINS_7(X, p)  PINS_6(X, p) X(p, 6)
 
 /** @brief Expand X(port, pin) for pins 0..7 of port @p p. */
 #define PINS_8(X, p)  PINS_6(X, p) X(p, 6) X(p, 7)
@@ -265,7 +273,7 @@ static const tiku_vfs_desc_t desc_text = TIKU_VFS_DESC(
 
 /** @brief One pin file; actuating a pin needs TIKU_VFS_CAP_HW. */
 #define PIN_NODE(p, b)                                                      \
-    { #b, TIKU_VFS_FILE, gpio_pin_file_read, gpio_pin_file_write, NULL, 0,  \
+    { #b, TIKU_VFS_FILE, gpio_pin_file_read, GPIO_PIN_WRITE, NULL, 0,      \
       &desc_gpio, NULL, TIKU_VFS_CAP_HW },
 
 /** @brief One port's pin table. */
@@ -355,6 +363,7 @@ gpio_pin_file_read(char *buf, size_t max)
 }
 
 /** @brief Write handler shared by every /dev/gpio pin file. */
+#if !defined(PLATFORM_ESP32P4)
 static int
 gpio_pin_file_write(const char *buf, size_t len)
 {
@@ -365,6 +374,7 @@ gpio_pin_file_write(const char *buf, size_t len)
     }
     return gpio_pin_write(port, pin, buf, len);
 }
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* DRIVER NOTIFY — post TIKU_EVENT_VFS to /dev/gpio watchers on an edge      */

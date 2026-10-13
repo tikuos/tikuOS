@@ -1,13 +1,17 @@
 /*
  * Tiku Operating System v0.06
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_usb_serial_jtag.c - bounded FIFO access for the C5 native console.
+ * tiku_usb_serial_jtag.c - bounded FIFO access for the C5/P4 native console.
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_usb_serial_jtag.h"
-#include <arch/esp32c5/tiku_esp32c5_regs.h>
-#include <arch/esp32c5/tiku_timer_arch.h>
+#include <hal/tiku_usb_serial_jtag_hal.h>
 #include <kernel/timers/tiku_clock.h>
+#if defined(PLATFORM_ESP32P4)
+#include <arch/esp32p4/tiku_timer_arch.h>
+#else
+#include <arch/esp32c5/tiku_timer_arch.h>
+#endif
 
 /* Bytes loaded into the IN endpoint while no host collects them stay there:
  * the endpoint never reports free again and every later write is lost.  The
@@ -19,12 +23,12 @@
  * finished.  The clock stands still until tiku_clock_init(); a counter that
  * moved while it stood still counts as moved now; the diagnostic image has
  * no clock at all and treats every moment that way. */
-#define TIKU_C5_USB_LINK_HORIZON TIKU_CLOCK_MS_TO_TICKS(16)
+#define TIKU_JTAG_LINK_HORIZON TIKU_CLOCK_MS_TO_TICKS(16)
 /* Reads of the frame counter at init before a link that has not moved it is
  * taken as dead: on a live link the counter moves within a millisecond and
  * the first byte is loaded; bounded by reads, each an APB access, so that
  * no clock is needed before the kernel's runs. */
-#define TIKU_C5_USB_LINK_PROBE 50000u
+#define TIKU_JTAG_LINK_PROBE 50000u
 
 static uint8_t needs_zlp;
 static uint32_t frame_last;
@@ -39,7 +43,7 @@ static uint8_t frame_seen;
 
 static int link_live(void)
 {
-    uint32_t frame = TIKU_C5_REG_READ(TIKU_C5_USB_FRAM_NUM);
+    uint32_t frame = TIKU_JTAG_READ(TIKU_JTAG_FRAM_NUM);
     tiku_clock_time_t now = link_now();
 
     if (frame != frame_last) {
@@ -48,7 +52,7 @@ static int link_live(void)
         frame_seen = 1;
     }
     return frame_seen &&
-           (tiku_clock_time_t)(now - frame_moved) <= TIKU_C5_USB_LINK_HORIZON;
+           (tiku_clock_time_t)(now - frame_moved) <= TIKU_JTAG_LINK_HORIZON;
 }
 
 void tiku_usb_serial_jtag_init(void)
@@ -56,21 +60,21 @@ void tiku_usb_serial_jtag_init(void)
     uint32_t probe;
 
     needs_zlp = 0;
-    frame_last = TIKU_C5_REG_READ(TIKU_C5_USB_FRAM_NUM);
+    frame_last = TIKU_JTAG_READ(TIKU_JTAG_FRAM_NUM);
     frame_seen = 0;
-    for (probe = 0; probe < TIKU_C5_USB_LINK_PROBE; probe++) {
+    for (probe = 0; probe < TIKU_JTAG_LINK_PROBE; probe++) {
         if (link_live()) {
             break;
         }
     }
-    TIKU_C5_REG_WRITE(TIKU_C5_USB_INT_ENA, 0u);
+    TIKU_JTAG_WRITE(TIKU_JTAG_INT_ENA, 0u);
 }
 
 void tiku_usb_serial_jtag_poll(void)
 {
     if (needs_zlp &&
-        (TIKU_C5_REG_READ(TIKU_C5_USB_EP1_CONF) & TIKU_C5_USB_TX_FREE)) {
-        TIKU_C5_REG_WRITE(TIKU_C5_USB_EP1_CONF, TIKU_C5_USB_WR_DONE);
+        (TIKU_JTAG_READ(TIKU_JTAG_EP1_CONF) & TIKU_JTAG_TX_FREE)) {
+        TIKU_JTAG_WRITE(TIKU_JTAG_EP1_CONF, TIKU_JTAG_WR_DONE);
         needs_zlp = 0;
     }
 }
@@ -82,29 +86,29 @@ size_t tiku_usb_serial_jtag_write(const uint8_t *data, size_t length)
     if (data == NULL) {
         return 0;
     }
-    if (length > TIKU_C5_USB_PACKET_SIZE) {
-        length = TIKU_C5_USB_PACKET_SIZE;
+    if (length > TIKU_JTAG_PACKET_SIZE) {
+        length = TIKU_JTAG_PACKET_SIZE;
     }
     if (length != 0 && !link_live()) {
         return length;
     }
     while (sent < length &&
-           (TIKU_C5_REG_READ(TIKU_C5_USB_EP1_CONF) & TIKU_C5_USB_TX_FREE)) {
-        TIKU_C5_REG_WRITE(TIKU_C5_USB_EP1, data[sent++]);
+           (TIKU_JTAG_READ(TIKU_JTAG_EP1_CONF) & TIKU_JTAG_TX_FREE)) {
+        TIKU_JTAG_WRITE(TIKU_JTAG_EP1, data[sent++]);
     }
     if (sent != 0) {
         /* A full packet auto-flushes; USB requires a later short packet or ZLP.
          */
-        needs_zlp = (sent == TIKU_C5_USB_PACKET_SIZE);
-        TIKU_C5_REG_WRITE(TIKU_C5_USB_EP1_CONF, TIKU_C5_USB_WR_DONE);
+        needs_zlp = (sent == TIKU_JTAG_PACKET_SIZE);
+        TIKU_JTAG_WRITE(TIKU_JTAG_EP1_CONF, TIKU_JTAG_WR_DONE);
     }
     return sent;
 }
 
 int tiku_usb_serial_jtag_getc(void)
 {
-    if (!(TIKU_C5_REG_READ(TIKU_C5_USB_EP1_CONF) & TIKU_C5_USB_RX_AVAIL)) {
+    if (!(TIKU_JTAG_READ(TIKU_JTAG_EP1_CONF) & TIKU_JTAG_RX_AVAIL)) {
         return -1;
     }
-    return (int)(TIKU_C5_REG_READ(TIKU_C5_USB_EP1) & 0xFFu);
+    return (int)(TIKU_JTAG_READ(TIKU_JTAG_EP1) & 0xFFu);
 }

@@ -6,9 +6,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_usb_serial_jtag.h"
+#if defined(PLATFORM_ESP32P4)
+#include <arch/esp32p4/tiku_debug_arch.h>
+#include <arch/esp32p4/tiku_esp32p4_regs.h>
+#include <hal/tiku_cpu.h>
+#define console_mhz() (tiku_cpu_mclk_hz() / 1000000u)
+#define console_rx_ready() \
+    ((TIKU_P4_REG_READ(TIKU_P4_USB_EP1_CONF) & TIKU_P4_USB_RX_AVAIL) != 0)
+#else
 #include <arch/esp32c5/tiku_debug_arch.h>
 #include <arch/esp32c5/tiku_esp32c5_regs.h>
 #include <arch/esp32c5/tiku_rom_arch.h>
+#define console_mhz() tiku_c5_rom_cpu_frequency()
+#define console_rx_ready() \
+    ((TIKU_C5_REG_READ(TIKU_C5_USB_EP1_CONF) & TIKU_C5_USB_RX_AVAIL) != 0)
+#endif
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -56,7 +68,7 @@ void tiku_serial_jtag_putc(char byte)
             tiku_serial_jtag_poll();
         } while (!stalled && count == sizeof(output) &&
                  (uint32_t)(TIKU_C5_CONSOLE_CYCLES() - start) <
-                     tiku_c5_rom_cpu_frequency() * 20000u);
+                     console_mhz() * 20000u);
         if (count == sizeof(output)) {
             dropped++;
             stalled = 1;
@@ -72,7 +84,7 @@ void tiku_serial_jtag_putc(char byte)
 uint8_t tiku_serial_jtag_rx_ready(void)
 {
     tiku_serial_jtag_poll();
-    return (TIKU_C5_REG_READ(TIKU_C5_USB_EP1_CONF) & TIKU_C5_USB_RX_AVAIL) != 0;
+    return console_rx_ready();
 }
 uint32_t tiku_serial_jtag_dropped(void)
 {
@@ -118,5 +130,5 @@ void tiku_debug_arch_printf(const char *format, ...)
         tiku_serial_jtag_poll();
     } while (count && !stalled &&
              (uint32_t)(TIKU_C5_CONSOLE_CYCLES() - start) <
-                 tiku_c5_rom_cpu_frequency() * 20000u);
+                 console_mhz() * 20000u);
 }

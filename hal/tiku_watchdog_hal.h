@@ -33,6 +33,8 @@
 #include "arch/esp32c61/tiku_cpu_watchdog_arch.h"
 #elif defined(PLATFORM_ESP32C5)
 #include "arch/esp32c5/tiku_watchdog_arch.h"
+#elif defined(PLATFORM_ESP32P4)
+#include "arch/esp32p4/tiku_watchdog_arch.h"
 #endif
 
 /*---------------------------------------------------------------------------*/

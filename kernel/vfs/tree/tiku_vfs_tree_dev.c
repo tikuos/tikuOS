@@ -165,7 +165,7 @@ uart_baud_read(char *buf, size_t max)
  * @param max  Capacity of @p buf in bytes
  * @return Bytes written, or -1 on error
  */
-#if !defined(PLATFORM_ESP32C5)
+#if !defined(PLATFORM_ESP32C5) && !defined(PLATFORM_ESP32P4)
 static int
 spi_config_read(char *buf, size_t max)
 {
@@ -402,7 +402,7 @@ devzero_read(char *buf, size_t max)
 /* Type descriptors for the typed /dev nodes below.  A bus scan
  * addresses every device on the bus and a console read takes input, so
  * neither is a passive read. */
-#if !defined(PLATFORM_ESP32C5)
+#if !defined(PLATFORM_ESP32C5) && !defined(PLATFORM_ESP32P4)
 static const tiku_vfs_desc_t desc_scan = TIKU_VFS_DESC_FLAGS(
     TIKU_VFS_T_STR, TIKU_VFS_U_NONE, TIKU_VFS_FRESH_LIVE, TIKU_VFS_E_BUS,
     TIKU_VFS_DF_READ_EFFECT);
@@ -418,7 +418,7 @@ static const tiku_vfs_desc_t desc_uart_count = TIKU_VFS_DESC(
  * both carry a read-coalescing window: repeated reads inside the window
  * share one conversion.  Temperature drifts slowly -> ~100 ms; supply
  * voltage slower still -> ~1 s. */
-#if !defined(PLATFORM_ESP32C5)
+#if !defined(PLATFORM_ESP32C5) && !defined(PLATFORM_ESP32P4)
 static const tiku_vfs_desc_t desc_adc_temp =
     TIKU_VFS_DESC_RF(TIKU_VFS_T_U32, TIKU_VFS_U_ADC_RAW,
                      TIKU_VFS_FRESH_LIVE, TIKU_VFS_E_PERIPH, 0, 4095,
@@ -454,7 +454,7 @@ static const tiku_vfs_node_t dev_uart_children[] = {
     (sizeof dev_uart_children / sizeof dev_uart_children[0])
 
 /** /dev/adc directory table — raw conversions, no calibration */
-#if !defined(PLATFORM_ESP32C5)
+#if !defined(PLATFORM_ESP32C5) && !defined(PLATFORM_ESP32P4)
 static const tiku_vfs_node_t dev_adc_children[] = {
     { "temp",    TIKU_VFS_FILE, adc_temp_read,    NULL, NULL, 0, &desc_adc_temp },
     { "battery", TIKU_VFS_FILE, adc_battery_read, NULL, NULL, 0, &desc_adc_batt },
@@ -510,7 +510,7 @@ static const tiku_vfs_node_t dev_children[] = {
     { "uart",     TIKU_VFS_DIR,  NULL, NULL, dev_uart_children,
 #endif
       DEV_UART_NCHILD },
-#if !defined(PLATFORM_ESP32C5)
+#if !defined(PLATFORM_ESP32C5) && !defined(PLATFORM_ESP32P4)
     { "adc",      TIKU_VFS_DIR,  NULL, NULL, dev_adc_children, 2 },
     { "i2c",      TIKU_VFS_DIR,  NULL, NULL, dev_i2c_children, 1 },
     { "spi",      TIKU_VFS_DIR,  NULL, NULL, dev_spi_children, 1 },

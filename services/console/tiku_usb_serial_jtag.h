@@ -1,7 +1,7 @@
 /*
  * Tiku Operating System v0.06
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_usb_serial_jtag.h - polled ESP32-C5 USB Serial/JTAG byte transport.
+ * tiku_usb_serial_jtag.h - polled ESP32-C5/P4 USB Serial/JTAG byte transport.
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_USB_SERIAL_JTAG_H_

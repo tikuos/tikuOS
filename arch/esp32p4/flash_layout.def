@@ -1,0 +1,14 @@
+/*
+ * Tiku Operating System v0.06
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ * flash_layout.def - P4 physical flash ranges, excluding each upper endpoint.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+TIKU_P4_FLASH_RANGE(RESERVED, 0x000000, 0x002000)
+TIKU_P4_FLASH_RANGE(BOOT, 0x002000, 0x100000)
+TIKU_P4_FLASH_RANGE(XIP, 0x100000, 0x400000)
+TIKU_P4_FLASH_RANGE(REGION, 0x400000, 0xff0000)
+TIKU_P4_FLASH_RANGE(MIRROR_A, 0xff0000, 0xff4000)
+TIKU_P4_FLASH_RANGE(MIRROR_B, 0xff4000, 0xff8000)
+TIKU_P4_FLASH_RANGE(SCRATCH, 0xff8000, 0xff9000)
+TIKU_P4_FLASH_RANGE(TAIL, 0xff9000, 0x1000000)

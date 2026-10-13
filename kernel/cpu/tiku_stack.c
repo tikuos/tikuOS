@@ -36,7 +36,8 @@ static uintptr_t stack_sp(void)
     uint16_t sp;
     __asm__ volatile ("mov r1, %0" : "=r"(sp));
     return (uintptr_t)sp;
-#elif defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5)
+#elif defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5) || \
+      defined(PLATFORM_ESP32P4)
     uintptr_t sp;
     __asm__ volatile ("mv %0, sp" : "=r"(sp));
     return sp;

@@ -1,0 +1,93 @@
+/*
+ * Tiku Operating System v0.06
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ * esp32p4_firmware.ld - CPU0 firmware with paired flash application code.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+ENTRY(tiku_esp32p4_reset_handler)
+MEMORY {
+    XIP (rx) : ORIGIN = 0x40100000, LENGTH = 3M
+    LOW (rwx) : ORIGIN = 0x4ff00000, LENGTH = 0x2bbd0
+    FAULT (rw) : ORIGIN = 0x5010fa40, LENGTH = 64
+    HIGH (rw) : ORIGIN = 0x4ff40000, LENGTH = 384K
+}
+SECTIONS {
+    .xip : {
+        . += 64;
+        */basic/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        */shell/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        . = ALIGN(4);
+    } > XIP
+    .text : ALIGN(64) {
+        KEEP(*(.text.entry))
+        *(.text .text.*)
+        . = ALIGN(4);
+    } > LOW
+    .rodata : ALIGN(4) {
+        KEEP(*(.p4.firmware))
+        *(.rodata .rodata.* .srodata .srodata.*)
+        . = ALIGN(4);
+        __tiku_cells_start = .;
+        KEEP(*(.tiku_cells))
+        __tiku_cells_end = .;
+        . = ALIGN(4);
+    } > LOW
+    _etext = .;
+    .p4.expected : ALIGN(4) { KEEP(*(.p4.expected)) } > LOW
+    .data : ALIGN(4) {
+        *(.data .data.*)
+        __global_pointer$ = . + 0x800;
+        *(.sdata .sdata.*)
+        . = ALIGN(4);
+    } > LOW
+    __datastart = ORIGIN(LOW);
+    .bss (NOLOAD) : ALIGN(16) {
+        __bss_start = .;
+        *(.bss .bss.* .sbss .sbss.* COMMON)
+        . = ALIGN(16);
+        __uninit_start = .;
+        KEEP(*(.persistent.layout))
+        KEEP(*(.persistent .persistent.*))
+        __uninit_end = .;
+        . = ALIGN(16);
+        __bss_end = .;
+    } > LOW
+    .fault_record (NOLOAD) : { KEEP(*tiku_fault_arch.o(.retained)) } > FAULT
+    .retained (NOLOAD) : ALIGN(16) {
+        __retained_start = .;
+        *(.retained .retained.*)
+        . = ALIGN(16);
+        __retained_end = .;
+    } > LOW
+    _end = .;
+    __tiku_stack_bottom = __stack_bottom;
+    __tiku_stack_guard_start = __stack_guard;
+    __tiku_layout_code_cap = 0x40400000;
+    __tiku_code_limit = __tiku_layout_code_cap;
+    __tiku_layout_persist_size = 32K;
+    __tiku_layout_scratch_size = 4K;
+    __tiku_layout_reserved_tail_size = 28K;
+    __tiku_flash_payload_bytes = SIZEOF(.text) + SIZEOF(.rodata) + SIZEOF(.data)
+                                + SIZEOF(.p4.expected) + SIZEOF(.xip);
+    __tier_sram_extra_start = __retained_end;
+    __tier_sram_extra_end = ORIGIN(LOW) + LENGTH(LOW);
+    __stack = ORIGIN(HIGH) + LENGTH(HIGH);
+    __stack_bottom = __stack - 16K;
+    .stack_guard (__stack_bottom - 64) (NOLOAD) : {
+        __stack_guard = .;
+        . += 64;
+    } > HIGH
+    .stack __stack_bottom (NOLOAD) : { . += 16K; } > HIGH
+    __tiku_tier_span_start = ORIGIN(HIGH);
+    __tiku_tier_span_limit = __stack_guard;
+    __tiku_tier_reserve_default = 0;
+    __tiku_tier_floor_default = 256K;
+    INCLUDE arch/common/tiku_sram_layout.ld
+    ASSERT(__tier_sram_extra_start <= __tier_sram_extra_end,
+           "P4 low SRAM statics overlap ROM workspace")
+    ASSERT(SIZEOF(.fault_record) == 64, "P4 fault record must be 64 bytes")
+    ASSERT(__uninit_start == tiku_layout_pin, "P4 layout record must open mirror")
+    ASSERT(__uninit_end - __uninit_start <= 16K - 16,
+           "P4 durable image exceeds mirror payload")
+    /DISCARD/ : { *(.comment .note .note.*) }
+}

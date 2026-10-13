@@ -151,6 +151,9 @@ board_owner(uint8_t port, uint8_t pin)
         IS_BANKED_PIN(port, pin, TIKU_BOARD_UART0_RX_GPIO)) {
         return "console";
     }
+#elif defined(PLATFORM_ESP32P4)
+    /* PCB revision has not been selected; no pin may be claimed or driven. */
+    return "peripheral";
 #elif defined(PLATFORM_ESP32C5)
 #if !defined(TIKU_CONSOLE_JTAG)
     if (IS_BANKED_PIN(port, pin, TIKU_BOARD_UART_TX_PIN) ||

@@ -122,6 +122,9 @@
 /* ESP32-C5                                                                  */
 /*---------------------------------------------------------------------------*/
 
+#elif defined(PLATFORM_ESP32P4)
+#include <arch/esp32p4/tiku_debug_arch.h>
+#define TIKU_PRINTF(...) tiku_debug_arch_printf(__VA_ARGS__)
 #elif defined(PLATFORM_ESP32C5)
 /* Console over the native USB Serial/JTAG port, or UART0 when built so. */
 #include <arch/esp32c5/tiku_debug_arch.h>
