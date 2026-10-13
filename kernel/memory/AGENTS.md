@@ -3,7 +3,7 @@
 All data is statically allocated; there is no heap.  Memory is tiered:
 one API places an allocation in SRAM, HIFRAM (MSP430) or NVM by policy,
 with a bump allocator per tier.  `tiku_tier_init()` is idempotent;
-`tiku_tier_reset()` gives a clean slate.
+`tiku_tier_reset()` empties every tier.
 
 ## Durable placement
 

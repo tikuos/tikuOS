@@ -3779,9 +3779,10 @@ endif
 # make lint runs tools/check_durable_placement.sh (no raw .persistent or
 # .uninit section attribute outside the placement macros of
 # kernel/memory/tiku_mem.h); with a host C compiler, the tools/usbmsc checks
-# and the cpu_clock and cpu_settings host tests; and
+# and the cpu_clock and cpu_settings host tests;
 # tools/check_comment_style.py --strict (comment-style.md) over the tracked
-# tree.  Every check runs, and the target fails if any one fails.
+# tree; and tools/check_prose_style.py (prose-style.md) over the tracked
+# Markdown.  Every check runs, and the target fails if any one fails.
 lint:
 	python3 tools/check_kernel_dependencies.py
 	@rc=0; \
@@ -3801,6 +3802,7 @@ lint:
 	   echo "usb host checks: SKIPPED -- no host C compiler"; \
 	 fi; \
 	 ./tools/check_comment_style.py --strict || rc=1; \
+	 ./tools/check_prose_style.py || rc=1; \
 	 exit $$rc
 
 # What `all` builds besides main.elf: main.bin and main.uf2 on RP2350,

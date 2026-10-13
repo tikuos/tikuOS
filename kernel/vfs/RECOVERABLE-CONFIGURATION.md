@@ -44,8 +44,8 @@ It does not erase, migrate, or silently reformat damaged/incompatible data.
 An interrupted initial enrollment may require deliberate service recovery;
 there is no automatic repair or factory-reset endpoint in this first version.
 The banks live in `.persistent`, which a flasher does not clear, so a board
-that has run earlier firmware usually holds unrelated bytes where they now
-sit. Those banks are not virgin, `/sys/config/status` reports `fault`, and
+that has run earlier firmware holds whatever bytes that firmware left where
+the banks now sit. Those banks are not virgin, `/sys/config/status` reports `fault`, and
 enrollment is refused: the engine never reformats data it cannot read. Erase
 the durable region before enabling recovery on a board that has been used.
 

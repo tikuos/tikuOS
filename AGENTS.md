@@ -61,6 +61,12 @@ a design the code does not use, no narration of the debugging path, no
 "for now", no metaphor.  Check every "every", "all", "only" and "never"
 against the code.  `make lint` enforces the mechanical rules only.
 
+`prose-style.md` is the contract for Markdown: `README.md`, every
+`AGENTS.md`, the port READMEs and the contracts.  Prose states what the
+system is and does, in the project's voice, with every command, path and
+claim checked against the code; its Banned table lists the words of
+reassurance, praise and hedging it leaves out.  `make lint` matches them.
+
 ## Durable data
 
 Never write a raw `__attribute__((section(".persistent")))` outside

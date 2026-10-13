@@ -119,12 +119,11 @@ Open-licensed, small, render well on EPD:
 
 ## gen_roots.py -- HTTPS trust store (`/data/roots.bin`)
 
-The 120-root Mozilla CA trust store used to be `.rodata`: 8,252 lines of
-generated C, 128,820 bytes of DER, compiled into every cert-TLS image.  That
-was 127.7 KB of a 256 KB code window, and it made trust changeable only by
-reflashing -- the wrong lifecycle for something that expires and gets revoked.
-Roots are now a store file, packed by this tool and provisioned over the
-console.
+The 120-root Mozilla CA trust store is a store file, `/data/roots.bin`,
+packed by this tool and provisioned over the console, not code compiled into
+the cert-TLS image: as DER it is 128,820 bytes, half of a 256 KB code window,
+and roots expire and are revoked on their own cadence, so a board takes a
+new file instead of a reflash.
 
 **The trust store is no longer in the repository.**  Certificates are
 third-party data with their own release cadence, so the tree keeps the *packer*

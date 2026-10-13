@@ -52,7 +52,7 @@ commit before making it.
 
 Every part of the operating system and the hardware is represented as a
 file under a path such as `/sys`, `/dev`, `/proc` or `/data`, and can be
-read and changed with simple shell commands, so agents and people interact
+read and changed with shell commands, so agents and people interact
 with a board the same way:
 
 ```
@@ -75,8 +75,8 @@ ok> 30 NEXT I
 ok> RUN
 ```
 
-For those who prefer to write C themselves, the TikuOS API is easy to
-learn, and the kits (networking, TLS, MQTT, sensors, maths) provide the
+For those who prefer to write C themselves, the TikuOS API is one header,
+`tiku.h`, and the kits (networking, TLS, MQTT, sensors, maths) provide the
 functionality for designing complex systems that interact with the
 physical world. The example below demonstrates a minimal TikuOS program.
 

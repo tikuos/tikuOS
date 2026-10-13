@@ -356,7 +356,7 @@ resume. `n` takes over the diagnostic alarm, so it must not be used during
 an application session. `--fault-check` runs each injection and repeats the
 normal profile checks after each reload. It compares all 64 bytes through
 the ROM reader before download and checks the reported record after startup.
-This includes sequence numbers and CRC, not just a matching fault banner.
+This includes sequence numbers and CRC, not only a matching fault banner.
 
 Trap entry saves three scratch registers and the interrupted SP in fixed
 internal SRAM before using a stack. It checks alignment and room for the

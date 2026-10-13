@@ -6,14 +6,15 @@ pure-software libraries, drivers touch silicon.
 
 ## Goals
 
-- Keep core kernel small and Apache-2.0 clean. Drivers (which may
+- The core kernel carries no driver code and nothing but Apache-2.0
+  sources. Drivers (which may
   carry vendor firmware blobs or non-permissive licences) live in a
   separate, optional sibling repo `drivers/`.
 - Each driver self-describes via a single descriptor struct so the
   kernel can iterate registered drivers without knowing their
   specifics.
-- Each driver opts in via a single make flag; the kernel builds
-  cleanly with the whole `drivers/` repo absent.
+- Each driver opts in via a single make flag; the kernel builds, with an
+  empty driver table, when the whole `drivers/` repo is absent.
 - VFS contributions (e.g. `/dev/wifi/wifi0/rssi`) are declared in
   the descriptor so a driver gains observability for free.
 
