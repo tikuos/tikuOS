@@ -44,7 +44,9 @@ commit before making it.
 | **Raspberry Pi**<br><sub>32-bit · RP2350 · Cortex-M33 @ 150 MHz</sub> | Pico 2 / Pico 2 W | 520 KB | 4 MB flash |
 | **Renesas RA8**<br><sub>32-bit · Cortex-M85</sub> | EK-RA8P1 · M85 240/480/1000 MHz + Ethos-U55 | 1664 KB | 1 MB MRAM |
 | **STMicro STM32N6**<br><sub>32-bit · Cortex-M55</sub> | Nucleo-144 N657X0-Q · up to 600 MHz | 3840 KB | 64 MB NOR |
-| **Espressif ESP32-C61**<br><sub>32-bit · RISC-V @ 160 MHz</sub> | ESP32-C61-DevKitC · Wi-Fi 6 + BLE 5 | 320 KB + 2 MB PSRAM | 8 MB flash |
+| **Espressif**<br><sub>32-bit · RISC-V</sub> | ESP32-C61-DevKitC · 160 MHz · Wi-Fi 6 + BLE 5 | 320 KB + 2 MB PSRAM | 8 MB flash |
+| | ESP32-C5-DevKitC-1 · 240 MHz · dual-band Wi-Fi 6 + BLE 5 + 802.15.4 | 384 KB | 4 MB flash |
+| | Olimex ESP32-P4-PC · 360 MHz | 768 KB + 32 MB PSRAM | 16 MB flash |
 
 ## 📄 License
 
