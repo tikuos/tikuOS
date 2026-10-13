@@ -48,17 +48,12 @@ commit before making it.
 | | ESP32-C5-DevKitC-1 · 240 MHz · dual-band Wi-Fi 6 + BLE 5 + 802.15.4 | 384 KB | 4 MB flash |
 | | Olimex ESP32-P4-PC · 360 MHz | 768 KB + 32 MB PSRAM | 16 MB flash |
 
-## 🐚 Shell and BASIC
+## 🐚 Interacting with TikuOS boards
 
-Build with the shell, and Tiku BASIC on top of it:
-
-```bash
-make flash MCU=nrf54l15 TIKU_SHELL_ENABLE=1 TIKU_SHELL_BASIC_ENABLE=1
-# on MSP430, BASIC fits the FR5994 but not the FR6989
-```
-
-Every peripheral, process and setting is a path under `/sys`, `/dev`,
-`/proc` and `/data`, read and written with the same commands:
+Every part of the operating system and the hardware is represented as a
+file under a path such as `/sys`, `/dev`, `/proc` or `/data`, and can be
+read and changed with simple shell commands, so agents and people interact
+with a board the same way:
 
 ```
 tikuOS:/> ls /sys
@@ -67,7 +62,9 @@ tikuOS:/> write /dev/led0 1
 tikuOS:/> every 1 toggle /dev/led0
 ```
 
-`basic` opens the interpreter; programs save to `/data` and survive a
+TikuOS also has a BASIC interpreter. With agents writing the C, it is the
+simplest way for a person to program a device by hand, a few lines at the
+board rather than a C program. Programs save to `/data` and survive a
 power cut:
 
 ```
@@ -80,7 +77,7 @@ ok> RUN
 
 ## 💡 Minimal example
 
-A process that blinks LED 0 once a second:
+A process that blinks LED 0 once a second, in C:
 
 ```c
 #include "tiku.h"
@@ -101,6 +98,15 @@ TIKU_PROCESS_THREAD(blink_process, ev, data)
     TIKU_PROCESS_END();
 }
 TIKU_AUTOSTART_PROCESSES(&blink_process);
+```
+
+The same blink in BASIC, typed at the board:
+
+```
+ok> 10 LED 0, 2
+ok> 20 DELAY 1000
+ok> 30 GOTO 10
+ok> RUN
 ```
 
 ## 📄 License
