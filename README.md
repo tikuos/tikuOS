@@ -100,13 +100,13 @@ TIKU_PROCESS_THREAD(blink_process, ev, data)
 TIKU_AUTOSTART_PROCESSES(&blink_process);
 ```
 
-The same blink in BASIC, typed at the board:
+The same blink in BASIC, typed at the board or kept as a `.bas` file in
+`/data` and run with `basic run /data/blink.bas`:
 
 ```
-ok> 10 LED 0, 2
-ok> 20 DELAY 1000
-ok> 30 GOTO 10
-ok> RUN
+10 LED 0, 2
+20 DELAY 1000
+30 GOTO 10
 ```
 
 ## 📄 License
