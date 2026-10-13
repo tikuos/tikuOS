@@ -48,6 +48,61 @@ commit before making it.
 | | ESP32-C5-DevKitC-1 · 240 MHz · dual-band Wi-Fi 6 + BLE 5 + 802.15.4 | 384 KB | 4 MB flash |
 | | Olimex ESP32-P4-PC · 360 MHz | 768 KB + 32 MB PSRAM | 16 MB flash |
 
+## 🐚 Shell and BASIC
+
+Build with the shell, and Tiku BASIC on top of it:
+
+```bash
+make flash MCU=nrf54l15 TIKU_SHELL_ENABLE=1 TIKU_SHELL_BASIC_ENABLE=1
+# on MSP430, BASIC fits the FR5994 but not the FR6989
+```
+
+Every peripheral, process and setting is a path under `/sys`, `/dev`,
+`/proc` and `/data`, read and written with the same commands:
+
+```
+tikuOS:/> ls /sys
+tikuOS:/> read /sys/cpu/freq
+tikuOS:/> write /dev/led0 1
+tikuOS:/> every 1 toggle /dev/led0
+```
+
+`basic` opens the interpreter; programs save to `/data` and survive a
+power cut:
+
+```
+tikuOS:/> basic
+ok> 10 FOR I = 1 TO 3
+ok> 20 PRINT "hello "; I
+ok> 30 NEXT I
+ok> RUN
+```
+
+## 💡 Minimal example
+
+A process that blinks LED 0 once a second:
+
+```c
+#include "tiku.h"
+
+TIKU_PROCESS(blink_process, "Blink");
+static struct tiku_timer timer;
+
+TIKU_PROCESS_THREAD(blink_process, ev, data)
+{
+    TIKU_PROCESS_BEGIN();
+    tiku_led_init(0);
+    tiku_timer_set_event(&timer, TIKU_CLOCK_SECOND);
+    while (1) {
+        TIKU_PROCESS_WAIT_EVENT_UNTIL(ev == TIKU_EVENT_TIMER);
+        tiku_led_toggle(0);
+        tiku_timer_reset(&timer);
+    }
+    TIKU_PROCESS_END();
+}
+TIKU_AUTOSTART_PROCESSES(&blink_process);
+```
+
 ## 📄 License
 
 Apache License 2.0; see [LICENSE](LICENSE).
