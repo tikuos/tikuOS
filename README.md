@@ -1,5 +1,5 @@
 # TikuOS
-TikuOS is an operating system for ubiquitous computers, designed around the microwatt computer that runs for years on a coin cell or indefinitely on harvested energy. We designed it from scratch to interact with the physical world, work alongside AI agents that both use and program it, and sustain long-term operation. The software and networking stack supports sub-milliwatt wireless communication, IP networking, and on-device intelligence, and even runs on feeble energy harvested from the environment for devices with tiny or no batteries.
+TikuOS is an operating system for ubiquitous computers, designed around the microwatt computer that runs for years on a coin cell or indefinitely on harvested energy. We designed it from scratch to interact with the physical world, work alongside AI agents that both use and program it, and sustain long-term operation. The software stack supports sub-milliwatt wireless communication, IP networking, and on-device intelligence, and even runs on feeble energy harvested from the environment for devices with tiny or no batteries.
 
 ## 🚀 Getting started
 
