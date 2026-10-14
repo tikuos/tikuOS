@@ -18,8 +18,8 @@
 /* INCLUDES                                                                  */
 /*---------------------------------------------------------------------------*/
 
+#include "tiku.h"        /* the device header, before the map's fallbacks */
 #include "tiku_nvm_map.h"
-#include "tiku.h"
 #include "tiku_mem.h"    /* TIKU_DURABLE, tiku_region_claim */
 
 /*---------------------------------------------------------------------------*/
