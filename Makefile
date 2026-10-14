@@ -98,7 +98,7 @@ TIKU_PLATFORM := esp32c5
 C5_REQUESTED_FEATURES := $(strip $(foreach v,$(filter TIKU_%_ENABLE,$(.VARIABLES)),\
     $(if $(filter 1,$($(v))),$(v))))
 ifneq ($(MINIMAL),1)
-C5_REQUESTED_FEATURES := $(filter-out TIKU_SHELL_ENABLE TIKU_THREADS_ENABLE TIKU_SHELL_BASIC_ENABLE TIKU_DRV_PHY_C5_ENABLE TIKU_DRV_WIFI_ESP_ENABLE TIKU_DRV_BLE_ESP_ENABLE TIKU_DRV_SDR_ESP_ENABLE TIKU_DRV_154_C5_ENABLE,$(C5_REQUESTED_FEATURES))
+C5_REQUESTED_FEATURES := $(filter-out TIKU_SHELL_ENABLE TIKU_THREADS_ENABLE TIKU_SHELL_BASIC_ENABLE TIKU_DRV_PHY_C5_ENABLE TIKU_DRV_WIFI_ESP_ENABLE TIKU_DRV_BLE_ESP_ENABLE TIKU_DRV_SDR_ESP_ENABLE TIKU_DRV_154_C5_ENABLE TIKU_KIT_CRYPTO_ENABLE TIKU_MEM_RECLAIM_ENABLE,$(C5_REQUESTED_FEATURES))
 endif
 ifneq ($(C5_REQUESTED_FEATURES),)
 $(error ESP32-C5 profile does not include optional features: $(C5_REQUESTED_FEATURES))
@@ -3772,9 +3772,11 @@ endif
 .SUFFIXES:
 .PHONY: all clean flash run debug erase size monitor deploy docs docs-clean uf2 lint
 
-# Unselected firmware tests retain helpers whose feature-gated callers are absent.
+# Unselected firmware tests retain helpers and locals whose feature-gated
+# users are absent; the C5 alone builds with -Werror.
 ifeq ($(TIKU_PLATFORM),esp32c5)
-$(BUILD_DIR)/TikuBench/tests/%.o: CFLAGS += -Wno-error=unused-function -Wno-error=unused-parameter
+$(BUILD_DIR)/TikuBench/tests/%.o: CFLAGS += -Wno-error=unused-function -Wno-error=unused-parameter \
+    -Wno-error=unused-variable -Wno-error=unused-but-set-variable
 endif
 
 # make lint runs tools/check_durable_placement.sh (no raw .persistent or
