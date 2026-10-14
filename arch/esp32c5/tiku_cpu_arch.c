@@ -17,6 +17,7 @@
 #include "tiku_timer_arch.h"
 #include "tiku_debug_arch.h"
 #include "tiku_clock_arch.h"
+#include "tiku_sleep_arch.h"
 #include "tiku_mpu_arch.h"
 #if TIKU_ESP32C5_XIP_CODE
 #include "tiku_flash_arch.h"
@@ -65,6 +66,7 @@ void tiku_cpu_boot_init(void)
         tiku_c5_fatal("crystal is not 48 MHz");
     }
     tiku_c5_irq_init();
+    tiku_c5_sleep_boot();
 #if TIKU_ESP32C5_XIP_CODE
     if (tiku_flash_init() != TIKU_FLASH_OK) {
         tiku_c5_fatal("flash mapping failed");
@@ -112,8 +114,17 @@ static void idle(void)
 }
 tiku_cpu_idle_enter_t tiku_cpu_idle_hook(tiku_cpu_idle_mode_t mode)
 {
-    return mode >= TIKU_CPU_IDLE_LIGHT && mode <= TIKU_CPU_IDLE_DEEPEST ? idle
-                                                                        : NULL;
+    switch (mode) {
+    case TIKU_CPU_IDLE_LIGHT:
+        return idle;
+    case TIKU_CPU_IDLE_DEEP:
+    case TIKU_CPU_IDLE_DEEPEST:
+        /* PMU light sleep until the next timer deadline. */
+        return tiku_c5_light_idle;
+    case TIKU_CPU_IDLE_OFF:
+    default:
+        return NULL;
+    }
 }
 int tiku_cpu_idle_mode_wakes_on_tick(tiku_cpu_idle_mode_t mode)
 {
@@ -122,18 +133,41 @@ int tiku_cpu_idle_mode_wakes_on_tick(tiku_cpu_idle_mode_t mode)
 }
 unsigned int tiku_cpu_idle_mode_wakes(tiku_cpu_idle_mode_t mode)
 {
-    (void)mode;
-    return TIKU_WAKE_SYSTICK | TIKU_WAKE_HTIMER | TIKU_WAKE_UART_RX;
+    /* Console input survives light sleep: UART0 ends it on a byte, and the
+     * USB console's controller stays clocked, so the host's bytes wait in its
+     * FIFO for the next timer wake. */
+    if (mode == TIKU_CPU_IDLE_DEEP || mode == TIKU_CPU_IDLE_DEEPEST) {
+        return TIKU_WAKE_SYSTICK | TIKU_WAKE_HTIMER | TIKU_WAKE_UART_RX;
+    }
+    return TIKU_WAKE_SYSTICK | TIKU_WAKE_HTIMER | TIKU_WAKE_UART_RX |
+           TIKU_WAKE_WDT | TIKU_WAKE_GPIO;
 }
 const char *tiku_cpu_idle_mode_name(tiku_cpu_idle_mode_t mode)
 {
-    return tiku_cpu_idle_hook(mode) ? "WFI" : "off";
+    switch (mode) {
+    case TIKU_CPU_IDLE_LIGHT:
+        return "WFI";
+    case TIKU_CPU_IDLE_DEEP:
+    case TIKU_CPU_IDLE_DEEPEST:
+        return "light sleep";
+    case TIKU_CPU_IDLE_OFF:
+    default:
+        return "off";
+    }
 }
 const char *tiku_cpu_idle_mode_desc(tiku_cpu_idle_mode_t mode)
 {
-    return tiku_cpu_idle_hook(mode)
-               ? "WFI (USB powered; timer or enabled UART wake)"
-               : "off (busy-wait)";
+    switch (mode) {
+    case TIKU_CPU_IDLE_LIGHT:
+        return "WFI (USB powered; any enabled interrupt wakes)";
+    case TIKU_CPU_IDLE_DEEP:
+    case TIKU_CPU_IDLE_DEEPEST:
+        return "light sleep to the next timer (PLL off unless USB or a radio "
+               "needs it)";
+    case TIKU_CPU_IDLE_OFF:
+    default:
+        return "off (busy-wait)";
+    }
 }
 
 /** @brief Read the low 32 bits of the CPU cycle counter. */

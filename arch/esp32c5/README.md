@@ -12,7 +12,8 @@ transfers still require hardware qualification. An optional C5 PHY driver
 supports calibration and RF lifecycle diagnostics. Cached PSRAM and an opt-in
 native Wi-Fi, BLE and receive-only SDR adapters are implemented; their
 qualification limits are described below and in the C5 driver README.
-SPI, ADC, 1-Wire and deep sleep are not supported. Requests for unsupported optional
+Deep and light sleep, and GPIO edge interrupts, are described below.
+SPI, ADC and 1-Wire are not supported. Requests for unsupported optional
 features fail at build selection; a C61 platform macro is not a substitute.
 
 ## Package memory and radio diagnostics
@@ -54,7 +55,7 @@ PHY ownership prevents SAR entropy acquisition and live CPU-clock changes.
 The optional native Wi-Fi adapter uses this PHY plus the shared TikuOS worker,
 timer, heap and WPA2 adapters. See the C5 component README for its build and
 scan qualification command. BLE and SDR have separate opt-in build profiles.
-Simultaneous Wi-Fi/BLE operation is refused; SDR requires exclusive PHY
+Wi-Fi and BLE run together under the coexistence arbiter; SDR requires exclusive PHY
 ownership and a free 128 KiB SRAM capture bank. TikuBench exposes `bt` and
 `sdr` suites for C5 in both its CLI and GUI. See the component README for
 build commands, receiver limits and the distinction between controller
@@ -339,7 +340,33 @@ The board's addressable RGB LED (GPIO27, GRB order) is the kernel's three
 LEDs: `/dev/led0`, `led1` and `led2` switch its red, green and blue channels
 at 16 of 255. Each change sends a 24-bit frame timed from the CPU cycle
 counter with interrupts masked for about 30 us.
-Idle uses WFI with the USB PHY powered; there is no deep-sleep profile.
+
+## Sleep
+
+`power off [ms]` is deep sleep: the HP domain, SRAM and the flash's supply
+power down, the LP timer runs on, and the wake is a reset; durable state is
+checkpointed to the flash mirror first. `power why` prints the reset code,
+the wake cause and the LP timer's measured rate (about 146 kHz). A sleep
+that never takes the core, or a timed one whose wake never comes, resets a
+second late through the LP watchdog, and `power why` says so. The USB
+console drops while the chip sleeps and enumerates again on the wake.
+Open: deep sleep passed twice on 2026-10-13, then from that afternoon
+failed on every first sleep, the same with the code that had passed: the
+PMU takes the core at the request and the chip never wakes, USB stays
+enumerated, esptool cannot reset it and the LP watchdog does not fire. Only
+RST recovers it. Do not run `power off` unattended until this is resolved.
+
+`power nap <ms> [pin]` is light sleep: the core stalls and the CPU leaves
+the PLL; SRAM, SYSTIMER and the tick carry across, and a timed nap returns
+within half a millisecond of its length. With `pin` it also ends on the BOOT
+button (GPIO28) held low. On the USB console the controller keeps its clocks
+and the PLL its 48 MHz through the nap, so the host's link survives; ESP-IDF
+does not offer this on the C5. Naps are refused while a radio holds the PHY.
+`sleep deep` makes light sleep the idle mode: the kernel sleeps until each
+timer deadline, about 92 % of the time at the 128 Hz tick, and console input
+waits in the USB FIFO for the next wake. `sleep light` returns to WFI, the
+default. PMU values follow ESP-IDF 4d59230 `pmu_param.h` and `pmu_sleep.c`,
+with the fused deep-sleep regulator trims. Current has not been measured.
 
 The USB console sends a delayed zero-length packet when a full 64-byte
 packet ends a transfer. The hardware auto-flushes a full FIFO, but the host
@@ -516,6 +543,5 @@ Register and ROM bindings follow ESP-IDF commit
 Interrupts resume the selected kernel or worker frame. Exceptions report
 their cause directly through the USB FIFO and halt; they do not provide
 kernel fault recovery. The remaining full-port work includes external
-memory, SPI/ADC/1-Wire, deep sleep, radios, SDR and general Bench/desktop
-profiles. Hardware qualification and outstanding fixtures are recorded in
+memory, SPI/ADC/1-Wire and general Bench/desktop profiles. Hardware qualification and outstanding fixtures are recorded in
 `kintsugi/esp32c5-port-plan-v2.md` in workspaces that contain that local plan.

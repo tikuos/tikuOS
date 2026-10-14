@@ -167,6 +167,38 @@ int tiku_c5_clock_fault(void)
 {
     return clock_fault;
 }
+
+uint32_t tiku_c5_clock_park(void)
+{
+    uint32_t cpu = TIKU_C5_REG_READ(C5_PCR_CPU) & 255u;
+    uint32_t ahb = TIKU_C5_REG_READ(C5_PCR_AHB) & 255u;
+    uint32_t source = TIKU_C5_REG_READ(C5_PCR_SYSCLK) & C5_SOURCE_MASK;
+    unsigned xtal = (TIKU_C5_REG_READ(C5_PCR_SYSCLK) >> 24) & 127u;
+
+    /* rtc_clk_cpu_freq_to_xtal: both dividers 1, the crystal as source. */
+    if (apply_tree(TIKU_C5_REG_READ(C5_PCR_CPU) & ~255u,
+                   TIKU_C5_REG_READ(C5_PCR_AHB) & ~255u, 0) != 0) {
+        tiku_c5_fatal("clock park failed");
+    }
+    tiku_c5_rom_cpu_frequency_set(xtal);
+    return cpu | (ahb << 8) | source;
+}
+
+void tiku_c5_clock_unpark(uint32_t saved)
+{
+    uint32_t source = saved & C5_SOURCE_MASK;
+    uint32_t cpu = saved & 255u, ahb = (saved >> 8) & 255u;
+    unsigned xtal = (TIKU_C5_REG_READ(C5_PCR_SYSCLK) >> 24) & 127u;
+
+    if (apply_tree((TIKU_C5_REG_READ(C5_PCR_CPU) & ~255u) | cpu,
+                   (TIKU_C5_REG_READ(C5_PCR_AHB) & ~255u) | ahb,
+                   source) != 0) {
+        tiku_c5_fatal("clock unpark failed");
+    }
+    tiku_c5_rom_cpu_frequency_set(source == C5_SOURCE_PLL240
+                                      ? 240u / (cpu + 1u)
+                                      : xtal / (cpu + 1u));
+}
 void tiku_cpu_freq_init(unsigned int mhz)
 {
     if (mhz == 40u || mhz == 80u || mhz == 240u) {

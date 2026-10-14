@@ -2261,6 +2261,7 @@ SRCS += arch/esp32c5/tiku_irq_arch.c arch/esp32c5/tiku_systimer_arch.c
 SRCS += arch/esp32c5/tiku_timer_arch.c arch/esp32c5/tiku_cpu_arch.c
 SRCS += arch/esp32c5/tiku_clock_arch.c
 SRCS += arch/esp32c5/tiku_pmu_arch.c
+SRCS += arch/esp32c5/tiku_sleep_arch.c
 ifeq ($(TIKU_ESP32C5_XIP_CODE),1)
 SRCS += arch/esp32c5/tiku_xip_arch.c
 endif

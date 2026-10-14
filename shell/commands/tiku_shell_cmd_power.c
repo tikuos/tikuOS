@@ -47,6 +47,12 @@
 #endif
 #include "apollo510.h"                /* PWRCTRL, CLKGEN, STIMER, PWRMODCTL */
 #endif
+#if defined(PLATFORM_ESP32C5)
+#include <arch/esp32c5/tiku_sleep_arch.h>
+#include <arch/esp32c5/tiku_cpu_common.h>
+#include <arch/esp32c5/tiku_rom_arch.h>
+#include <arch/esp32c5/tiku_systimer_arch.h>
+#endif
 #if defined(PLATFORM_ESP32C61)
 #include <arch/esp32c61/tiku_sleep_arch.h>
 #include <arch/esp32c61/tiku_cpu_common.h>
@@ -456,6 +462,76 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                          (unsigned long)ms);
         }
         tiku_esp32c61_deep_sleep((uint64_t)ms * 1000ULL);
+    }
+    SHELL_PRINTF("Usage: power [why | off [ms] | nap <ms> [pin]]\n");
+    return;
+#endif
+
+#if defined(PLATFORM_ESP32C5)
+    /* As on the C61: `off` is deep sleep, whose wake is a reset with SRAM
+     * lost and durable state checkpointed first; `why` prints what ended the
+     * last one; `nap` is light sleep, which keeps all state and returns,
+     * early with `pin` on the BOOT button (GPIO28) held low. */
+    if (tiku_cmd_streq(argv[1], "nap") && argc >= 3) {
+        uint32_t ms = tiku_cmd_parse_u32(argv[2]);
+        unsigned flags = (argc >= 4 && tiku_cmd_streq(argv[3], "pin")) ?
+                         TIKU_C5_NAP_PIN : 0U;
+        uint64_t t0 = 0, t1 = 0;
+        uint32_t w;
+
+        (void)tiku_c5_systimer_read(&t0);
+        w = tiku_c5_light_sleep((uint64_t)ms * 1000ULL, flags);
+        (void)tiku_c5_systimer_read(&t1);
+        SHELL_PRINTF("nap: %lu us,%s%s%s%s\n", (unsigned long)((t1 - t0) / 16ULL),
+                     w ? " woke by" : " refused: a wake was waiting",
+                     (w & TIKU_C5_WAKE_TIMER) ? " timer" : "",
+                     (w & TIKU_C5_WAKE_UART0) ? " uart0" : "",
+                     (w & TIKU_C5_WAKE_GPIO)  ? " gpio"  : "");
+        return;
+    }
+    if (tiku_cmd_streq(argv[1], "why")) {
+        uint32_t w = tiku_c5_wake_cause();
+
+        SHELL_PRINTF("reset: rom code %lu%s%s\n",
+                     (unsigned long)tiku_c5_rom_reset_reason(0),
+                     tiku_c5_sleep_missed()
+                         ? " (a deep sleep that failed, reset late)" : "",
+                     tiku_c5_rom_reset_reason(0) == 16u
+                         ? " (LP watchdog chip reset: a deep sleep that never"
+                           " woke, or esptool's watchdog reset)" : "");
+        SHELL_PRINTF("wake: %s%s%s%s%s\n", w ? "" : "none (not a sleep wake)",
+                     (w & TIKU_C5_WAKE_TIMER) ? " timer" : "",
+                     (w & TIKU_C5_WAKE_EXT1)  ? " ext1"  : "",
+                     (w & TIKU_C5_WAKE_GPIO)  ? " gpio"  : "",
+                     (w & TIKU_C5_WAKE_UART0) ? " uart0" : "");
+        {
+            uint64_t now = tiku_c5_lp_ticks(), boot = tiku_c5_boot_lp_ticks();
+
+            SHELL_PRINTF("lp timer: %lu Hz, now %lu:%08lx, boot %lu:%08lx\n",
+                         (unsigned long)tiku_c5_lp_hz(),
+                         (unsigned long)(now >> 32), (unsigned long)now,
+                         (unsigned long)(boot >> 32), (unsigned long)boot);
+        }
+        {
+            uint32_t n;
+            uint64_t us;
+
+            tiku_c5_light_stats(&n, &us);
+            SHELL_PRINTF("light sleeps: %lu, %lu ms asleep\n",
+                         (unsigned long)n, (unsigned long)(us / 1000ULL));
+        }
+        return;
+    }
+    if (tiku_cmd_streq(argv[1], "off")) {
+        uint32_t ms = (argc >= 3) ? tiku_cmd_parse_u32(argv[2]) : 0u;
+
+        if (ms == 0u) {
+            SHELL_PRINTF("deep sleep -- wake by RESET only\n");
+        } else {
+            SHELL_PRINTF("deep sleep for %lu ms -- the wake is a reset\n",
+                         (unsigned long)ms);
+        }
+        tiku_c5_deep_sleep((uint64_t)ms * 1000ULL);
     }
     SHELL_PRINTF("Usage: power [why | off [ms] | nap <ms> [pin]]\n");
     return;

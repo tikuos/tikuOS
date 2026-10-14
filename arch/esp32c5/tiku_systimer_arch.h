@@ -21,6 +21,9 @@ int tiku_c5_systimer_read(uint64_t *value);
 /** @brief Stop the tick alarm and release its interrupt line. */
 void tiku_c5_systimer_stop(void);
 /** @brief Return elapsed 128 Hz ticks, modulo 2^32, including delayed ticks. */
+/** @brief The nearest armed SYSTIMER alarm after @p now, @p now when one
+ *         has fired and not been taken, or ~0 when none is armed. */
+uint64_t tiku_c5_alarm_due(uint64_t now);
 uint32_t tiku_c5_systimer_ticks(void);
 /** @brief Return serviced tick interrupts, modulo 2^32. */
 uint32_t tiku_c5_systimer_interrupts(void);

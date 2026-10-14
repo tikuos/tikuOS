@@ -139,6 +139,33 @@ void tiku_c5_systimer_stop(void)
     TIKU_C5_IRQ_RESTORE(state);
 }
 
+uint64_t tiku_c5_alarm_due(uint64_t now)
+{
+    uint32_t conf = TIKU_C5_REG_READ(TIKU_C5_SYSTIMER_CONF);
+    uint32_t ena = TIKU_C5_REG_READ(TIKU_C5_SYSTIMER_INT_ENA);
+    uint32_t raw = TIKU_C5_REG_READ(TIKU_C5_SYSTIMER_INT_RAW);
+    uint64_t due = ~0ULL, at;
+    unsigned n;
+
+    /* Alarm 0 is the tick, alarm 1 the hardware timer. */
+    for (n = 0; n < 2u; n++) {
+        if (!(conf & TIKU_C5_SYSTIMER_TARGET(n)) || !(ena & (1u << n))) {
+            continue;
+        }
+        if (raw & (1u << n)) {
+            return now; /* fired, not yet taken */
+        }
+        at = ((uint64_t)(TIKU_C5_REG_READ(TIKU_C5_SYSTIMER_TARGET_HI(n)) &
+                         0xFFFFFu)
+              << 32) |
+             TIKU_C5_REG_READ(TIKU_C5_SYSTIMER_TARGET_LO(n));
+        if (at > now && at < due) { /* a past one-shot is spent */
+            due = at;
+        }
+    }
+    return due;
+}
+
 uint32_t tiku_c5_systimer_ticks(void)
 {
     return ticks;
