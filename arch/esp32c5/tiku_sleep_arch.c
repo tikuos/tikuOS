@@ -33,6 +33,7 @@
 
 /* Blocks (reg_base.h). */
 #define PMU         0x600B0000UL
+#define LP_CLKRST   0x600B0400UL
 #define LP_TIMER    0x600B0C00UL
 #define LP_AON      0x600B1000UL
 #define LP_WDT      0x600B1C00UL
@@ -171,6 +172,10 @@
 #define PIN_WAKEUP         (1UL << 10)
 
 #define LP_AON_STORE(n)    (LP_AON + 4UL * (n))
+
+/* LP_CLKRST_LP_CLK_CONF: the LP fast clock, which clocks the PMU. */
+#define LP_CLK_CONF        (LP_CLKRST + 0x000UL)
+#define LP_FAST_SEL_MSK    (3UL << 2)          /* 0 RC_FAST, 1 XTAL/2 */
 #define RC_FAST_HZ         17500000UL  /* the PMU's work clock, nominal */
 #define RESET_DEEPSLEEP    5U          /* ROM reset code of a deep wake */
 #define SLEEP_MISSED       0x534C5021UL    /* "SLP!" in LP AON store 0 */
@@ -605,6 +610,12 @@ void tiku_c5_sleep_boot(void)
     uint32_t code = tiku_c5_rom_reset_reason(0);
 
     boot_lp = tiku_c5_lp_ticks();
+
+    /* The LP fast clock from RC_FAST, as ESP-IDF sets it at boot.  Its
+     * reset source is the crystal, which deep sleep powers down: the PMU
+     * then stops mid-transition, so neither the wake nor the LP watchdog
+     * comes. */
+    REG(LP_CLK_CONF) &= ~LP_FAST_SEL_MSK;
 
     /* The store outlives a successful sleep too, so it is read and cleared
      * on every boot, or a later reset would be taken for a missed sleep. */

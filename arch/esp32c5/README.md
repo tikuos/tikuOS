@@ -350,11 +350,10 @@ the wake cause and the LP timer's measured rate (about 146 kHz). A sleep
 that never takes the core, or a timed one whose wake never comes, resets a
 second late through the LP watchdog, and `power why` says so. The USB
 console drops while the chip sleeps and enumerates again on the wake.
-Open: deep sleep passed twice on 2026-10-13, then from that afternoon
-failed on every first sleep, the same with the code that had passed: the
-PMU takes the core at the request and the chip never wakes, USB stays
-enumerated, esptool cannot reset it and the LP watchdog does not fire. Only
-RST recovers it. Do not run `power off` unattended until this is resolved.
+Boot moves the LP fast clock, which clocks the PMU, onto RC_FAST; its reset
+source is the crystal, which deep sleep powers down, and on it the PMU
+stops partway into the sleep with neither the wake nor the LP watchdog to
+follow.
 
 `power nap <ms> [pin]` is light sleep: the core stalls and the CPU leaves
 the PLL; SRAM, SYSTIMER and the tick carry across, and a timed nap returns
