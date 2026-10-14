@@ -16,11 +16,14 @@
 #define TIKU_C5_ROM_ECO         0x40000014UL
 #define TIKU_C5_USB_EP1         0x6000F000UL
 #define TIKU_C5_USB_EP1_CONF    0x6000F004UL
+#define TIKU_C5_USB_INT_RAW     0x6000F008UL
 #define TIKU_C5_USB_INT_ENA     0x6000F010UL
+#define TIKU_C5_USB_INT_CLR     0x6000F014UL
 #define TIKU_C5_USB_FRAM_NUM    0x6000F024UL
 #define TIKU_C5_USB_WR_DONE     (1UL << 0)
 #define TIKU_C5_USB_TX_FREE     (1UL << 1)
 #define TIKU_C5_USB_RX_AVAIL    (1UL << 2)
+#define TIKU_C5_USB_DTR_CHG     (1UL << 13)  /* in INT_RAW */
 #define TIKU_C5_USB_PACKET_SIZE 64u
 
 /* C5 timer_group_reg.h, lp_wdt_reg.h and lpwdt_ll.h at the same IDF pin. */

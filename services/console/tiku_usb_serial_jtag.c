@@ -12,6 +12,10 @@
 #else
 #include <arch/esp32c5/tiku_timer_arch.h>
 #endif
+#if defined(PLATFORM_ESP32C5) && !(TIKU_MINIMAL + 0)
+#include <arch/esp32c5/tiku_rom_arch.h>
+#include <arch/esp32c5/tiku_cpu_common.h>
+#endif
 
 /* Bytes loaded into the IN endpoint while no host collects them stay there:
  * the endpoint never reports free again and every later write is lost.  The
@@ -30,6 +34,13 @@
  * no clock is needed before the kernel's runs. */
 #define TIKU_JTAG_LINK_PROBE 50000u
 
+/* A C5 test build may set TIKU_C5_USB_WAKE_WAIT_MS: after a deep-sleep wake,
+ * whose power-down took the USB unit with it, init then waits up to that
+ * long for the host to open the port again (its DTR changes) before the first
+ * byte, so a test's second boot is heard.  Without it a deep-sleep wake boots
+ * at once, as a node with no host attached must. */
+#define TIKU_C5_RESET_DEEPSLEEP 5u
+
 static uint8_t needs_zlp;
 static uint32_t frame_last;
 static tiku_clock_time_t frame_moved;
@@ -46,10 +57,15 @@ static int link_live(void)
     uint32_t frame = TIKU_JTAG_READ(TIKU_JTAG_FRAM_NUM);
     tiku_clock_time_t now = link_now();
 
-    if (frame != frame_last) {
+    /* A kernel clock set back (clock init restarts the tick count) counts
+     * as moved now, or the difference below would read as a dead link and
+     * a poll would discard the whole output ring. */
+    if (frame != frame_last || (long)(now - frame_moved) < 0) {
+        if (frame != frame_last) {
+            frame_seen = 1;
+        }
         frame_last = frame;
         frame_moved = now;
-        frame_seen = 1;
     }
     return frame_seen &&
            (tiku_clock_time_t)(now - frame_moved) <= TIKU_JTAG_LINK_HORIZON;
@@ -60,6 +76,20 @@ void tiku_usb_serial_jtag_init(void)
     uint32_t probe;
 
     needs_zlp = 0;
+#if defined(PLATFORM_ESP32C5) && !(TIKU_MINIMAL + 0) && \
+    (TIKU_C5_USB_WAKE_WAIT_MS + 0)
+    if (tiku_c5_rom_reset_reason(0) == TIKU_C5_RESET_DEEPSLEEP) {
+        unsigned ms;
+
+        for (ms = 0; ms < TIKU_C5_USB_WAKE_WAIT_MS &&
+                     !(TIKU_C5_REG_READ(TIKU_C5_USB_INT_RAW) &
+                       TIKU_C5_USB_DTR_CHG);
+             ms++) {
+            tiku_cpu_c5_delay_us(1000u);
+        }
+        TIKU_C5_REG_WRITE(TIKU_C5_USB_INT_CLR, TIKU_C5_USB_DTR_CHG);
+    }
+#endif
     frame_last = TIKU_JTAG_READ(TIKU_JTAG_FRAM_NUM);
     frame_seen = 0;
     for (probe = 0; probe < TIKU_JTAG_LINK_PROBE; probe++) {

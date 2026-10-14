@@ -37,5 +37,7 @@ void tiku_serial_jtag_putc(char byte);
 uint8_t tiku_serial_jtag_rx_ready(void);
 /** @brief Return console bytes dropped because the host did not accept output. */
 uint32_t tiku_serial_jtag_dropped(void);
+/** @brief Bytes queued for the host and not yet in the USB FIFO. */
+size_t tiku_serial_jtag_pending(void);
 
 #endif

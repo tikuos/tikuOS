@@ -86,6 +86,10 @@ uint8_t tiku_serial_jtag_rx_ready(void)
     tiku_serial_jtag_poll();
     return console_rx_ready();
 }
+size_t tiku_serial_jtag_pending(void)
+{
+    return count;
+}
 uint32_t tiku_serial_jtag_dropped(void)
 {
     return dropped;
