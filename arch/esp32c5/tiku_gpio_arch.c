@@ -3,6 +3,7 @@
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  * tiku_gpio_arch.c - C5 GPIO matrix and IO mux, ESP-IDF 4d59230 register map.
  * USB, memory, strapping and RGB-LED pads cannot be remuxed through this API.
+ * Every free pin can raise an edge interrupt, broadcast as TIKU_EVENT_GPIO.
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_gpio_arch.h"
@@ -10,6 +11,7 @@
 #include "tiku_esp32c5_regs.h"
 #include <hal/tiku_gpio_irq_hal.h>
 #include <hal/tiku_cpu.h>
+#include <kernel/process/tiku_process.h>
 #define GPIO_OUT        0x60091004u
 #define GPIO_ENABLE     0x60091034u
 #define GPIO_INPUT      0x60091064u
@@ -213,16 +215,105 @@ void tiku_c5_led_set(uint8_t channel, int on)
               (lit & 4u) ? 16u : 0u);
 }
 
+/* Pin edge interrupts: each pin picks its edge in its own PIN register
+ * (gpio_reg.h) and all of them share matrix source 31 on one CLIC line. */
+#define GPIO_STATUS_W1TC 0x6009107Cu
+#define GPIO_PCPU_INT    0x600910A4u
+#define GPIO_PIN_REG(n)  (0x600910D4u + 4u * (n))
+#define PIN_TYPE_POS     7u /* 1 rising, 2 falling, 3 either edge */
+#define PIN_TYPE_MSK     (7u << PIN_TYPE_POS)
+#define PIN_ENA_MSK      (0x1Fu << 13)
+#define PIN_ENA_PCPU     (1u << 13)
+#define GPIO_IRQ_LINE    12u
+#define GPIO_IRQ_SOURCE  31u
+
+static volatile uint32_t gpio_armed;
+
+/** @brief Every armed pin that fired: clear, then broadcast one event each. */
+static void gpio_isr(void)
+{
+    uint32_t fired = TIKU_C5_REG_READ(GPIO_PCPU_INT) & gpio_armed;
+
+    /* Cleared before the posts: an edge during them sets the bit again and
+     * raises the interrupt again. */
+    TIKU_C5_REG_WRITE(GPIO_STATUS_W1TC, fired);
+    while (fired != 0u) {
+        unsigned n = (unsigned)__builtin_ctz(fired);
+
+        fired &= fired - 1u;
+        tiku_process_post(TIKU_PROCESS_BROADCAST, TIKU_EVENT_GPIO,
+                          (tiku_event_data_t)TIKU_GPIO_IRQ_PACK(n / 8u + 1u,
+                                                                n % 8u));
+    }
+}
+
+uint32_t tiku_c5_gpio_irq_armed(void)
+{
+    return gpio_armed;
+}
+
 int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin, tiku_gpio_edge_t edge)
 {
-    (void)port;
-    (void)pin;
-    (void)edge;
-    return -1;
+    int n = number(port, pin);
+    uint32_t type, reg, state;
+
+    if (n < 0) {
+        return TIKU_GPIO_IRQ_ERR_INVALID;
+    }
+    switch (edge) {
+    case TIKU_GPIO_EDGE_RISING:
+        type = 1u;
+        break;
+    case TIKU_GPIO_EDGE_FALLING:
+        type = 2u;
+        break;
+    case TIKU_GPIO_EDGE_BOTH:
+        type = 3u;
+        break;
+    default:
+        return TIKU_GPIO_IRQ_ERR_INVALID;
+    }
+    /* The edge detector watches the pad: the pin must be a free input. */
+    if (tiku_gpio_arch_set_input(port, pin) != 0) {
+        return TIKU_GPIO_IRQ_ERR_UNSUP;
+    }
+    state = TIKU_C5_IRQ_SAVE();
+    if (!tiku_c5_irq_owned(GPIO_IRQ_LINE, GPIO_IRQ_SOURCE, gpio_isr)) {
+        if (tiku_c5_irq_attach(GPIO_IRQ_LINE, GPIO_IRQ_SOURCE, 1u, gpio_isr) !=
+            0) {
+            TIKU_C5_IRQ_RESTORE(state);
+            return TIKU_GPIO_IRQ_ERR_UNSUP;
+        }
+        (void)tiku_c5_irq_enable(GPIO_IRQ_LINE, 1);
+    }
+    reg = TIKU_C5_REG_READ(GPIO_PIN_REG(n)) & ~(PIN_TYPE_MSK | PIN_ENA_MSK);
+    TIKU_C5_REG_WRITE(GPIO_PIN_REG(n), reg | (type << PIN_TYPE_POS));
+    /* An edge latched while the pin was being configured is not delivered. */
+    TIKU_C5_REG_WRITE(GPIO_STATUS_W1TC, 1u << n);
+    gpio_armed |= 1u << n;
+    TIKU_C5_REG_WRITE(GPIO_PIN_REG(n),
+                      reg | (type << PIN_TYPE_POS) | PIN_ENA_PCPU);
+    TIKU_C5_IRQ_RESTORE(state);
+    return TIKU_GPIO_IRQ_OK;
 }
+
 int tiku_gpio_irq_arch_disable(uint8_t port, uint8_t pin)
 {
-    (void)port;
-    (void)pin;
-    return -1;
+    int n = number(port, pin);
+    uint32_t state;
+
+    if (n < 0) {
+        return TIKU_GPIO_IRQ_ERR_INVALID;
+    }
+    state = TIKU_C5_IRQ_SAVE();
+    TIKU_C5_REG_WRITE(GPIO_PIN_REG(n), TIKU_C5_REG_READ(GPIO_PIN_REG(n)) &
+                                           ~(PIN_TYPE_MSK | PIN_ENA_MSK));
+    TIKU_C5_REG_WRITE(GPIO_STATUS_W1TC, 1u << n);
+    gpio_armed &= ~(1u << n);
+    if (gpio_armed == 0u &&
+        tiku_c5_irq_owned(GPIO_IRQ_LINE, GPIO_IRQ_SOURCE, gpio_isr)) {
+        tiku_c5_irq_detach(GPIO_IRQ_LINE);
+    }
+    TIKU_C5_IRQ_RESTORE(state);
+    return TIKU_GPIO_IRQ_OK;
 }

@@ -316,8 +316,12 @@ that SRAM outside a window. Reboot-survival checks do not establish
 physical power-cut durability.
 
 GPIO ownership protects USB, memory, LED and documented strap pads, direct
-peripheral mux functions and active matrix input/output routes. GPIO IRQs
-return failure. Pin loopbacks and external bus fixtures are unqualified.
+peripheral mux functions and active matrix input/output routes. Every free
+pin can raise a rising, falling or either-edge interrupt; all share matrix
+source 31 on CLIC line 12, and each edge broadcasts `TIKU_EVENT_GPIO`.
+GPIO2 to GPIO5 start as JTAG pads and are refused until remuxed. The
+`gpio-irq` category drives an armed pad as an output and checks each edge
+reaches a process. External bus fixtures are unqualified.
 
 An exception is printed on the console, recorded in retained SRAM and resets
 the board; `tiku_c5_fatal()` (an unrecoverable peripheral failure) does the

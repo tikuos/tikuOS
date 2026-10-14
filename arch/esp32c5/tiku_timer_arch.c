@@ -8,6 +8,7 @@
 #include "tiku_timer_arch.h"
 #include "tiku_systimer_arch.h"
 #include "tiku_irq_arch.h"
+#include "tiku_gpio_arch.h"
 #include "tiku_esp32c5_regs.h"
 #include <kernel/timers/tiku_htimer.h>
 #include <kernel/timers/tiku_timer.h>
@@ -176,6 +177,7 @@ void tiku_crit_arch_unmask_irqs(void)
 
 void tiku_wake_arch_query(tiku_wake_sources_t *out)
 {
+    uint32_t armed;
     unsigned i;
     if (out == NULL) {
         return;
@@ -199,5 +201,13 @@ void tiku_wake_arch_query(tiku_wake_sources_t *out)
         (TIKU_C5_REG_READ(TIKU_C5_UART0_INT_ENABLE) &
          TIKU_C5_UART0_RX_INTERRUPTS)) {
         out->sources |= TIKU_WAKE_UART_RX;
+    }
+    /* Armed pin edges, a byte of pins for each one-based eight-pin port. */
+    armed = tiku_c5_gpio_irq_armed();
+    for (i = 0; i < TIKU_WAKE_MAX_GPIO_PORTS; i++) {
+        out->gpio_ie[i] = (uint8_t)(armed >> (8u * i));
+    }
+    if (armed != 0u) {
+        out->sources |= TIKU_WAKE_GPIO;
     }
 }

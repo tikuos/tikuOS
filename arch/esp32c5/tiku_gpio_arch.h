@@ -23,6 +23,8 @@ int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin);
 /** @brief Return 1 for a reserved/routed pad, 0 for GPIO, or -1 for invalid
  * pins. */
 int tiku_gpio_arch_is_peripheral(uint8_t port, uint8_t pin);
+/** @brief The GPIO numbers with an edge interrupt armed, one bit each. */
+uint32_t tiku_c5_gpio_irq_armed(void);
 /** @brief Make the board's RGB LED pad a low GPIO output. */
 void tiku_c5_led_init(void);
 /**
