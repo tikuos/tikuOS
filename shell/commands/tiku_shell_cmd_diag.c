@@ -481,8 +481,14 @@ static void diag_fault_force(const char *which)
         (void)*(volatile uint32_t *)diag_unmapped;
     } else if (strcmp(which, "store") == 0) {
         *(volatile uint32_t *)diag_unmapped = 0UL;
+    } else if (strcmp(which, "durable") == 0) {
+        /* The durable span's first word, outside a write window: the PMA
+         * guard faults the store before it changes anything. */
+        extern char __uninit_start[];
+        volatile uint32_t *word = (volatile uint32_t *)__uninit_start;
+        *word = *word;
     } else {
-        SHELL_PRINTF("  kinds: illegal | load | store | fatal\n");
+        SHELL_PRINTF("  kinds: illegal | load | store | durable | fatal\n");
         return;
     }
     SHELL_PRINTF("  (no fault taken -- unexpected)\n");
@@ -530,6 +536,24 @@ void tiku_shell_cmd_diag(uint8_t argc, const char *argv[])
                      tiku_c5_clock_fault());
         return;
     }
+    if (argc >= 2 && strcmp(argv[1], "pma") == 0) {
+        /* The 16 PMA entries: configuration word, and the address word as
+         * a byte address (shifted left by 2). */
+#define DIAG_PMA(i)                                                          \
+    do {                                                                     \
+        uint32_t c, a;                                                       \
+        __asm__ volatile("csrr %0, %1" : "=r"(c) : "i"(0xBC0 + (i)));        \
+        __asm__ volatile("csrr %0, %1" : "=r"(a) : "i"(0xBD0 + (i)));        \
+        SHELL_PRINTF("  pma%-2u cfg %08lx addr %08lx\n", (unsigned)(i),      \
+                     (unsigned long)c, (unsigned long)(a << 2));             \
+    } while (0)
+        DIAG_PMA(0); DIAG_PMA(1); DIAG_PMA(2); DIAG_PMA(3);
+        DIAG_PMA(4); DIAG_PMA(5); DIAG_PMA(6); DIAG_PMA(7);
+        DIAG_PMA(8); DIAG_PMA(9); DIAG_PMA(10); DIAG_PMA(11);
+        DIAG_PMA(12); DIAG_PMA(13); DIAG_PMA(14); DIAG_PMA(15);
+#undef DIAG_PMA
+        return;
+    }
     if (argc >= 3 && strcmp(argv[1], "peek") == 0) {
         /* Up to 64 words from a 4-byte-aligned address, four a line. */
         uintptr_t a = (uintptr_t)strtoul(argv[2], NULL, 16);
@@ -549,8 +573,8 @@ void tiku_shell_cmd_diag(uint8_t argc, const char *argv[])
         SHELL_PRINTF("\n");
         return;
     }
-    SHELL_PRINTF("Usage: diag fault [illegal|load|store|fatal] | clear"
-                 " | voltage | clock | peek <hex> [words]\n");
+    SHELL_PRINTF("Usage: diag fault [illegal|load|store|durable|fatal] | clear"
+                 " | voltage | clock | pma | peek <hex> [words]\n");
     diag_fault_show();
 }
 #endif /* PLATFORM_ESP32C5 */

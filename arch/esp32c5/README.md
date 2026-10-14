@@ -310,10 +310,15 @@ requires a blank region and uses the C5 SAR entropy configuration. The
 entropy driver refuses an active ADC, restores its saved configuration,
 and bounds hardware waits. Radio-enabled entropy operation is unqualified.
 
-The PMP null-address guard does not implement SRAM write protection.
-Durable write windows control commit ordering; software can still write
-that SRAM outside a window. Reboot-survival checks do not establish
-physical power-cut durability.
+Durable SRAM is write-protected outside a write window, as on the
+Cortex-M ports. PMA entries 10 and 11 cover the span the linker gives
+`.persistent` and `.uninit` read-only; `tiku_mpu_unlock_nvm()` adds write
+permission and `lock_nvm()` takes it away, so an unbracketed store takes a
+store access fault, recorded like any other (`diag fault durable` forces
+one). PMA boundaries fall on 128-byte granules, so the linker aligns both
+ends of the span to 128 bytes. The entries survive a reset of the HP system,
+and boot clears them before the working copy is restored into the span.
+Reboot-survival checks do not establish physical power-cut durability.
 
 GPIO ownership protects USB, memory, LED and documented strap pads, direct
 peripheral mux functions and active matrix input/output routes. Every free

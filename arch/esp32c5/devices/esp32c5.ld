@@ -57,11 +57,13 @@ SECTIONS
         . = ALIGN(4);
         __bss_end = .;
     } > SRAM
-    .uninit (NOLOAD) : ALIGN(32) {
+    /* 128-byte bounds: the PMA granule, so the write guard over this span
+     * (tiku_mpu_arch.c) covers nothing either side of it. */
+    .uninit (NOLOAD) : ALIGN(128) {
         __uninit_start = .;
         KEEP(*(.persistent.layout))
         *(.persistent .persistent.* .uninit .uninit.*)
-        . = ALIGN(4);
+        . = ALIGN(128);
         __uninit_end = .;
     } > SRAM
     .retained (NOLOAD) : ALIGN(4) {

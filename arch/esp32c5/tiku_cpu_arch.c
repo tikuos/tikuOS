@@ -17,6 +17,7 @@
 #include "tiku_timer_arch.h"
 #include "tiku_debug_arch.h"
 #include "tiku_clock_arch.h"
+#include "tiku_mpu_arch.h"
 #if TIKU_ESP32C5_XIP_CODE
 #include "tiku_flash_arch.h"
 #include "tiku_xip_arch.h"
@@ -51,6 +52,8 @@ void tiku_cpu_irq_disable(void)
 }
 void tiku_cpu_boot_init(void)
 {
+    /* The durable span's write guard survives a reset of the HP system. */
+    tiku_c5_durable_guard_off();
     tiku_esp32c5_boot_watchdogs_disable();
     if (TIKU_C5_REG_READ(TIKU_C5_ROM_CHIP_ID) != TIKU_ESP32C5_IMAGE_CHIP_ID ||
         TIKU_C5_REG_READ(TIKU_C5_ROM_ECO) < TIKU_ESP32C5_MIN_ROM_ECO) {

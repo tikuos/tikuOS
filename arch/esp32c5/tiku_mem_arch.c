@@ -8,6 +8,7 @@
 #include "tiku_mem_arch.h"
 #include "tiku_flash_arch.h"
 #include "tiku_irq_arch.h"
+#include "tiku_mpu_arch.h"
 #include <kernel/memory/tiku_nvm_mirror.h>
 
 #ifndef TIKU_C5_DURABLE_START
@@ -71,6 +72,9 @@ void tiku_mem_arch_init(void)
     const uint8_t *image;
     uint32_t state = TIKU_C5_IRQ_SAVE();
 
+    /* The restore below writes the span; a re-run of the memory init finds
+     * the guard armed by the last one. */
+    tiku_c5_durable_guard_off();
     searched = flushing = 0;
     commits = 0;
     search();
