@@ -467,12 +467,23 @@ typedef struct {
     const uint8_t              *uuid128;
 } tiku_bt_service_t;
 
+/** @brief Service Changed in both roles: the server's characteristic and
+ *         indication, the client's confirmation.  Off on the RP2350, whose
+ *         Pico 2 W BT image has no room for it. */
+#ifndef TIKU_BT_SERVICE_CHANGED
+#if defined(PLATFORM_RP2350)
+#define TIKU_BT_SERVICE_CHANGED 0
+#else
+#define TIKU_BT_SERVICE_CHANGED 1
+#endif
+#endif
+
 /**
  * @brief Register a GATT service.
  *
- * Called once per service, typically from a process init.  Its attributes are
- * appended to the table and later registrations get higher handles; the next
- * ATT request sees them, and no Service Changed indication is sent.
+ * Its attributes go after those already registered.  A peer that enabled
+ * Service Changed hears of it now, or, bonded and away, when it next encrypts
+ * the link (TIKU_BT_SERVICE_CHANGED, off on the RP2350).
  *
  * @return TIKU_DRV_OK on success, TIKU_DRV_ERR_INVALID if @p svc is NULL,
  *         has more than TIKU_BT_CHAR_MAX characteristics, or the registry
@@ -617,9 +628,9 @@ int tiku_bt_security(void);
 /**
  * @brief One stored LE bond (LTK and peer identity).
  *
- * A 32-byte fixed-width record holding the peer identity and its LTK.  `magic`
- * marks a populated slot and `peer_addr` is MSB-first, matching scan and
- * connection.
+ * `magic` marks a populated slot; `peer_addr` is MSB-first.  `flags` holds the
+ * pairing's AuthReq in bits 7:0, Service Changed enabled in bit 8, and a
+ * digest of the attribute layout the peer last saw in bits 31:16.
  */
 typedef struct {
     uint32_t magic;

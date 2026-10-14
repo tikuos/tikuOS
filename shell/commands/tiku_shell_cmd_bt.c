@@ -97,7 +97,11 @@ static void bt_help(void)
     SHELL_PRINTF("bt discover [N]         Service discovery on link N\n");
     SHELL_PRINTF("bt read <handle> [N]    ATT Read on link N\n");
     SHELL_PRINTF("bt write <h> <text> [N] ATT Write of text on link N\n");
+#if (TIKU_BT_SERVICE_CHANGED + 0)
+    SHELL_PRINTF("bt subscribe|indicate <h> [N]  CCCD 0x0001|0x0002, link N\n");
+#else
     SHELL_PRINTF("bt subscribe <h> [N]    Write 0x0001 to CCCD on link N\n");
+#endif
     SHELL_PRINTF("bt pair [N]             Pair + bond on link N (LE Secure Conn)\n");
     SHELL_PRINTF("bt bonds                List stored LE-SC bonds (LTK slots)\n");
     SHELL_PRINTF("bt unpair <N>|all       Clear bond slot N, or every slot\n");
@@ -602,10 +606,14 @@ static void bt_write_cmd(uint8_t argc, const char *argv[])
 }
 
 /**
- * @brief Handle "bt subscribe <cccd> [N]": enable notifications on link N.
+ * @brief Handle "bt subscribe <cccd> [N]" (notifications) and "bt indicate
+ *        <cccd> [N]" (indications) on link N.
  */
 static void bt_subscribe_cmd(uint8_t argc, const char *argv[])
 {
+#if (TIKU_BT_SERVICE_CHANGED + 0)
+    static const uint8_t indicate[2] = { 0x02U, 0x00U };
+#endif
     uint16_t cccd_handle;
     uint16_t conn_handle;
     int      rc;
@@ -622,7 +630,14 @@ static void bt_subscribe_cmd(uint8_t argc, const char *argv[])
         SHELL_PRINTF("bt: no connection\n");
         return;
     }
-    rc = tiku_bt_client_subscribe(conn_handle, cccd_handle);
+#if (TIKU_BT_SERVICE_CHANGED + 0)
+    if (str_eq(argv[1], "indicate")) {
+        rc = tiku_bt_client_write(conn_handle, cccd_handle, indicate, 2U);
+    } else
+#endif
+    {
+        rc = tiku_bt_client_subscribe(conn_handle, cccd_handle);
+    }
     SHELL_PRINTF("bt: subscribe requested (rc=%d)\n", rc);
 }
 
@@ -1135,7 +1150,11 @@ void tiku_shell_cmd_bt(uint8_t argc, const char *argv[])
         bt_write_cmd(argc, argv);
         return;
     }
-    if (str_eq(argv[1], "subscribe") || str_eq(argv[1], "sub")) {
+    if (str_eq(argv[1], "subscribe") || str_eq(argv[1], "sub")
+#if (TIKU_BT_SERVICE_CHANGED + 0)
+        || str_eq(argv[1], "indicate")
+#endif
+    ) {
         bt_subscribe_cmd(argc, argv);
         return;
     }
