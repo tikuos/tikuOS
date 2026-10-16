@@ -1,8 +1,11 @@
 /*
  * Tiku Operating System v0.06
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * xip_code.ld - C5 application code and constants mapped from flash.
- * Kernel and architecture code stay in SRAM. Vendor .iram1 stays in SRAM.
+ * xip_code.ld - C5 application code and constants mapped from flash: BASIC,
+ * the shell, the radio drivers and libraries, the Bluetooth and crypto kits,
+ * and the /sys and /sys/boot nodes.  Kernel and architecture code stay in
+ * SRAM, as do the BLE controller's high-performance and the arbiter's
+ * .coexiram routines (esp32c5.ld).
  * SPDX-License-Identifier: Apache-2.0
  */
 .xip : ALIGN(32) {
@@ -23,6 +26,8 @@
     *libcoexist.a:*(.text .text.* .rodata .rodata.* .srodata .srodata.* .iram1 .iram1.*)
     @TIKU_C5_OBJECT_ROOT@/tikukits/net/bluetooth/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
     @TIKU_C5_OBJECT_ROOT@/tikukits/crypto/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+    @TIKU_C5_OBJECT_ROOT@/kernel/vfs/tree/tiku_vfs_tree_sys.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+    @TIKU_C5_OBJECT_ROOT@/kernel/vfs/tree/tiku_vfs_tree_boot.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
     . = ALIGN(4);
     __tiku_c5_xip_end = .;
 } > XIP
