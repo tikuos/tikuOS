@@ -11,6 +11,7 @@
 #include "tiku_cpu_common.h"
 #include "tiku_rom_arch.h"
 #include "tiku_boot_arch.h"
+#include "tiku_i2c_arch.h"
 #include "tiku_irq_arch.h"
 #include "tiku_esp32c5_regs.h"
 #include "tiku_systimer_arch.h"
@@ -53,8 +54,10 @@ void tiku_cpu_irq_disable(void)
 }
 void tiku_cpu_boot_init(void)
 {
-    /* The durable span's write guard survives a reset of the HP system. */
+    /* The durable span's write guard survives a reset of the HP system, as
+     * does I2C0's function clock. */
     tiku_c5_durable_guard_off();
+    tiku_c5_i2c_boot();
     tiku_esp32c5_boot_watchdogs_disable();
     if (TIKU_C5_REG_READ(TIKU_C5_ROM_CHIP_ID) != TIKU_ESP32C5_IMAGE_CHIP_ID ||
         TIKU_C5_REG_READ(TIKU_C5_ROM_ECO) < TIKU_ESP32C5_MIN_ROM_ECO) {

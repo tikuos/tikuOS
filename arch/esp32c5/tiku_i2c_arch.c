@@ -135,6 +135,15 @@ static int run_batch(unsigned terminal, int stop)
     return TIKU_I2C_ERR_TIMEOUT;
 }
 
+void tiku_c5_i2c_boot(void)
+{
+    /* The function clock survives a reset of the HP system, and init reads a
+     * running clock as another owner's. */
+    TIKU_C5_REG_WRITE(I2C_PCR, 3u);
+    TIKU_C5_REG_WRITE(I2C_CLOCK, TIKU_C5_REG_READ(I2C_CLOCK) & ~(1u << 22));
+    TIKU_C5_REG_WRITE(I2C_PCR, 1u);
+}
+
 void tiku_i2c_arch_close(void)
 {
     unsigned n;

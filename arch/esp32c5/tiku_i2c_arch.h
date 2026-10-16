@@ -16,6 +16,9 @@
  * bus intact.
  */
 int tiku_i2c_arch_init(const tiku_i2c_config_t *config);
+/** @brief Reset I2C0 and stop its function clock; boot calls it before any
+ * driver runs. */
+void tiku_c5_i2c_boot(void);
 /** @brief Stop the controller, restore pin routing and release both claims.
  * @note Scheduler context only; requires no active transfer.
  */

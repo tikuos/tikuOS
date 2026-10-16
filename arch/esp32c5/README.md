@@ -170,6 +170,9 @@ The default SDA/SCL pins are GPIO8/GPIO9. Neither is configured at boot:
 mux, matrix routing, open-drain setting and output-enable state. Both pins
 need external pull-ups to 3.3 V and a common ground with the sensor.
 USB, memory, strapping, console and already-owned pins cannot be claimed.
+I2C0's function clock survives a reset of the HP system, such as the one
+that follows an install, so boot resets I2C0 and stops it; init refuses a
+running clock as another owner's.
 Board builds can override `TIKU_BOARD_I2C_SDA_PIN` and
 `TIKU_BOARD_I2C_SCL_PIN`; these are physical GPIO numbers, not virtual ports.
 
