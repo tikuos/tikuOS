@@ -128,8 +128,9 @@ tiku_shell_cmd_irq(uint8_t argc, const char *argv[])
         SHELL_PRINTF("Enabled: P%u.%u %s edge -> event\n",
                      (unsigned)port, (unsigned)pin, argv[2]);
     } else if (rc == TIKU_GPIO_IRQ_ERR_UNSUP) {
-        SHELL_PRINTF("irq: port P%u has no IRQ on this device\n",
-                     (unsigned)port);
+        /* Its port has no edge hardware, or the pin is reserved or taken. */
+        SHELL_PRINTF("irq: P%u.%u cannot raise an IRQ on this device\n",
+                     (unsigned)port, (unsigned)pin);
     } else {
         SHELL_PRINTF("irq: enable failed (%d)\n", rc);
     }

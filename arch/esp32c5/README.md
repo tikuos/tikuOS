@@ -2,7 +2,7 @@
 
 The C5 target runs the kernel, VFS, shell, file store and optional worker
 threads over its native USB Serial/JTAG port. A lean BASIC interpreter is
-available with `TIKU_SHELL_BASIC_ENABLE=1`; its I2C words are disabled.
+available with `TIKU_SHELL_BASIC_ENABLE=1`.
 The default profile runs code and working data from HP SRAM. Optional XIP
 places BASIC and shell commands in flash. CPU rates of 40, 80 and 240 MHz
 can be saved through VFS and applied on reboot. UART0 is an optional console;
@@ -219,7 +219,8 @@ model tests successful transfers, repeated STARTs, FIFO boundaries,
 arbitration, NACK, partial progress, late inter-batch faults and failure
 recovery, including rejected implementation mutations. These checks do not
 qualify a sensor exchange, external pull-ups, physical clock accuracy or
-multi-master operation. BASIC's I2C words remain disabled in this profile.
+multi-master operation. BASIC's `I2CREAD` and `I2CWRITE` use this bus;
+with no device and no pull-ups on the bench, `I2CREAD` ends in an I2C error.
 For manual C/shell qualification, the existing shell command can be built
 with `EXTRA_CFLAGS='-DTIKU_SHELL_CMD_I2C=1'`.
 
@@ -409,9 +410,11 @@ GPIO ownership protects USB, memory, LED and documented strap pads, direct
 peripheral mux functions and active matrix input/output routes. Every free
 pin can raise a rising, falling or either-edge interrupt; all share matrix
 source 31 on CLIC line 12, and each edge broadcasts `TIKU_EVENT_GPIO`.
-GPIO2 to GPIO5 start as JTAG pads and are refused until remuxed. The
-`gpio-irq` category drives an armed pad as an output and checks each edge
-reaches a process. External bus fixtures are unqualified.
+GPIO2 to GPIO5 start as JTAG pads and are refused until remuxed. The shell's
+`gpio <port> <pin>` and `irq P<port>.<pin>` commands reach any free pin; the
+C5 numbers its pins eight to a port from port 1, so GPIO6 is `gpio 1 6` and
+`P1.6`. The `gpio-irq` category drives an armed pad as an output and checks
+each edge reaches a process. External bus fixtures are unqualified.
 
 An exception is printed on the console, recorded in retained SRAM and resets
 the board; `tiku_c5_fatal()` (an unrecoverable peripheral failure) does the
