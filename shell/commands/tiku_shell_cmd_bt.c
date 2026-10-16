@@ -103,6 +103,23 @@ static void bt_help(void)
     SHELL_PRINTF("bt subscribe <h> [N]    Write 0x0001 to CCCD on link N\n");
 #endif
     SHELL_PRINTF("bt pair [N]             Pair + bond on link N (LE Secure Conn)\n");
+#if (TIKU_BT_PASSKEY + 0)
+    SHELL_PRINTF("bt io [none|display|yesno|keyboard|kbdisplay]  Pairing's IO "
+                 "capability\n");
+    SHELL_PRINTF("bt auth                 What a pairing waits on\n");
+    SHELL_PRINTF("bt passkey <number>     Type the passkey the peer shows\n");
+    SHELL_PRINTF("bt confirm yes|no       Answer the numeric comparison\n");
+#endif
+#if (TIKU_BT_LINK_UPDATE + 0)
+    SHELL_PRINTF("bt phy 1m|2m [N]        Ask for link N's PHY\n");
+    SHELL_PRINTF("bt dle <27..251> [N]    Ask for link N's packet length\n");
+    SHELL_PRINTF("bt bench [KB]           Time KB of notifications to the "
+                 "subscriber\n");
+#endif
+#if (TIKU_BT_PRIVACY + 0)
+    SHELL_PRINTF("bt privacy [on [s]|off] Private addresses, a new one every "
+                 "s seconds\n");
+#endif
     SHELL_PRINTF("bt bonds                List stored LE-SC bonds (LTK slots)\n");
     SHELL_PRINTF("bt unpair <N>|all       Clear bond slot N, or every slot\n");
 #if BT_UART
@@ -166,6 +183,43 @@ static void put_name(const char *s, uint8_t n)
         else                       tiku_shell_io_putc('.');
     }
 }
+
+#if (TIKU_BT_PASSKEY + 0)
+/* The IO capabilities by their TIKU_BT_IO_* value. */
+static const char *const bt_io_names[] = {
+    "display", "yesno", "keyboard", "none", "kbdisplay"
+};
+#endif
+
+#if (TIKU_BT_PRIVACY + 0)
+/**
+ * @brief Print @p head and whether private addresses are on: how often a
+ *        new one comes and the one on air now.
+ */
+static void bt_privacy_line(const char *head)
+{
+    uint16_t secs = 0U;
+    uint8_t  rpa[6];
+    uint8_t  k;
+    uint8_t  any = 0U;
+
+    if (!tiku_bt_privacy(&secs, rpa)) {
+        SHELL_PRINTF("%soff (the identity address on air)\n", head);
+        return;
+    }
+    SHELL_PRINTF("%son, a new private address every %u s", head,
+                 (unsigned)secs);
+    for (k = 0U; k < 6U; ++k) any = (uint8_t)(any | rpa[k]);
+    if (any) {
+        SHELL_PRINTF(", now ");
+        for (k = 0U; k < 6U; ++k) {
+            if (k > 0U) tiku_shell_io_putc(':');
+            put_hex2(rpa[k]);
+        }
+    }
+    tiku_shell_io_putc('\n');
+}
+#endif
 
 /**
  * @brief Handle "bt status": print what the radio under the stack reports.
@@ -252,6 +306,12 @@ static void bt_status(void)
         SHELL_PRINTF("Scan:     %s (%u devices)\n",
                      tiku_bt_is_scanning() ? "yes" : "no",
                      tiku_bt_scan_count());
+#if (TIKU_BT_PRIVACY + 0)
+        bt_privacy_line("Privacy:  ");
+#endif
+#if (TIKU_BT_PASSKEY + 0)
+        SHELL_PRINTF("IO:       %s\n", bt_io_names[tiku_bt_io_capability()]);
+#endif
     }
 }
 
@@ -370,6 +430,16 @@ static void bt_connections(void)
         SHELL_PRINTF("  %lu.%lu ms\n",
                      (unsigned long)(interval_us / 1000UL),
                      (unsigned long)((interval_us % 1000UL) / 100UL));
+#if (TIKU_BT_LINK_UPDATE + 0)
+        {
+            static const char *const phy[] = { "?", "1M", "2M", "Coded" };
+            SHELL_PRINTF("     PHY %s/%s  packets %u/%u B  MTU %u\n",
+                         phy[conns[i].tx_phy & 3U], phy[conns[i].rx_phy & 3U],
+                         (unsigned)conns[i].tx_octets,
+                         (unsigned)conns[i].rx_octets,
+                         (unsigned)conns[i].att_mtu);
+        }
+#endif
     }
 }
 
@@ -1093,6 +1163,234 @@ static void bt_probe(void)
 }
 #endif /* TIKU_DRV_BLE_EM9305_ENABLE */
 
+#if (TIKU_BT_LINK_UPDATE + 0)
+/**
+ * @brief Handle "bt phy 1m|2m [N]": ask for link N's PHY both ways.
+ */
+static void bt_phy_cmd(uint8_t argc, const char *argv[])
+{
+    uint16_t h;
+    int      rc;
+
+    if (argc < 3U || (!str_eq(argv[2], "1m") && !str_eq(argv[2], "2m"))) {
+        SHELL_PRINTF("usage: bt phy 1m|2m [N]\n");
+        return;
+    }
+    h = pick_conn_handle(argc, argv, 3U);
+    if (h == 0xFFFFU) {
+        SHELL_PRINTF("bt: no connection\n");
+        return;
+    }
+    rc = tiku_bt_set_phy(h, str_eq(argv[2], "2m") ? TIKU_BT_PHY_2M
+                                                  : TIKU_BT_PHY_1M);
+    SHELL_PRINTF(rc == 0 ? "bt: PHY %s asked for on handle 0x%04x\n"
+                         : "bt: PHY %s on handle 0x%04x FAILED rc=%d\n",
+                 argv[2], h, rc);
+}
+
+/**
+ * @brief Handle "bt dle <27..251> [N]": ask for link N's link-layer packet
+ *        length.
+ */
+static void bt_dle_cmd(uint8_t argc, const char *argv[])
+{
+    uint16_t octets;
+    uint16_t h;
+    int      rc;
+
+    if (argc < 3U || parse_u16(argv[2], &octets) != 0) {
+        SHELL_PRINTF("usage: bt dle <27..251> [N]\n");
+        return;
+    }
+    h = pick_conn_handle(argc, argv, 3U);
+    if (h == 0xFFFFU) {
+        SHELL_PRINTF("bt: no connection\n");
+        return;
+    }
+    rc = tiku_bt_set_data_length(h, octets);
+    SHELL_PRINTF(rc == 0 ? "bt: %u-byte packets asked for on handle 0x%04x\n"
+                         : "bt: %u-byte packets on handle 0x%04x FAILED "
+                           "rc=%d\n", (unsigned)octets, h, rc);
+}
+
+/**
+ * @brief Handle "bt bench [KB]": time KB (16 by default) of notifications
+ *        to the client subscribed to the uptime characteristic.
+ */
+static void bt_bench_cmd(uint8_t argc, const char *argv[])
+{
+    uint16_t kb = 16U;
+    uint32_t bytes;
+    uint32_t ms = 0UL;
+    int      rc;
+
+    if (argc >= 3U && (parse_u16(argv[2], &kb) != 0 || kb == 0U
+                       || kb > 1024U)) {
+        SHELL_PRINTF("usage: bt bench [KB, 1..1024]\n");
+        return;
+    }
+    bytes = (uint32_t)kb * 1024UL;
+    rc = tiku_bt_bench(bytes, &ms);
+    if (rc == TIKU_DRV_ERR_NOT_PRESENT) {
+        SHELL_PRINTF("bt: bench needs a link whose client subscribed to the "
+                     "uptime characteristic\n");
+        return;
+    }
+    if (rc != 0) {
+        SHELL_PRINTF("bt: bench stopped: the link took nothing for 2 s\n");
+        return;
+    }
+    SHELL_PRINTF("bt: bench %lu B in %lu ms: %lu B/s (%u B a "
+                 "notification)\n", (unsigned long)bytes, (unsigned long)ms,
+                 (unsigned long)(ms ? (bytes * 1000UL) / ms : 0UL),
+                 (unsigned)tiku_bt_notify_max());
+}
+#endif
+
+#if (TIKU_BT_PASSKEY + 0)
+/**
+ * @brief Print @p v as six digits, zero-padded.
+ */
+static void put_six(uint32_t v)
+{
+    char    d[7];
+    uint8_t k;
+
+    for (k = 6U; k > 0U; --k) {
+        d[k - 1U] = (char)('0' + (char)(v % 10UL));
+        v /= 10UL;
+    }
+    d[6] = '\0';
+    SHELL_PRINTF("%s", d);
+}
+
+/**
+ * @brief Handle "bt io [none|display|yesno|keyboard|kbdisplay]": show or set
+ *        the IO capability pairing uses.
+ */
+static void bt_io_cmd(uint8_t argc, const char *argv[])
+{
+    uint8_t i;
+
+    if (argc >= 3U) {
+        for (i = 0U; i < 5U && !str_eq(argv[2], bt_io_names[i]); ++i) {
+        }
+        if (i == 5U) {
+            SHELL_PRINTF("usage: bt io [none|display|yesno|keyboard|"
+                         "kbdisplay]\n");
+            return;
+        }
+        (void)tiku_bt_set_io_capability(i);
+    }
+    i = tiku_bt_io_capability();
+    SHELL_PRINTF("bt: IO capability %s (%s)\n", bt_io_names[i],
+                 (i == TIKU_BT_IO_NONE) ? "pairs by Just Works"
+                                        : "passkey or numeric comparison "
+                                          "where the peer can");
+}
+
+/**
+ * @brief Handle "bt auth": what the pairing under way waits on.
+ */
+static void bt_auth_cmd(void)
+{
+    uint32_t n = 0UL;
+
+    switch (tiku_bt_auth_pending(&n)) {
+    case TIKU_BT_AUTH_DISPLAY:
+        SHELL_PRINTF("bt: passkey ");
+        put_six(n);
+        SHELL_PRINTF(": type it on the peer\n");
+        break;
+    case TIKU_BT_AUTH_ENTER:
+        SHELL_PRINTF("bt: type the passkey the peer shows: bt passkey "
+                     "<number>\n");
+        break;
+    case TIKU_BT_AUTH_CONFIRM:
+        SHELL_PRINTF("bt: does the peer show ");
+        put_six(n);
+        SHELL_PRINTF("? bt confirm yes|no\n");
+        break;
+    default:
+        SHELL_PRINTF("bt: no pairing waits\n");
+        break;
+    }
+}
+
+/**
+ * @brief Handle "bt passkey <number>": the passkey the peer shows.
+ */
+static void bt_passkey_cmd(uint8_t argc, const char *argv[])
+{
+    uint32_t    v = 0UL;
+    const char *p;
+    int         rc;
+
+    if (argc < 3U || argv[2][0] == '\0') {
+        SHELL_PRINTF("usage: bt passkey <0..999999>\n");
+        return;
+    }
+    for (p = argv[2]; *p != '\0'; ++p) {
+        if (*p < '0' || *p > '9' || v > 99999UL) {
+            SHELL_PRINTF("usage: bt passkey <0..999999>\n");
+            return;
+        }
+        v = v * 10UL + (uint32_t)(*p - '0');
+    }
+    rc = tiku_bt_auth_passkey(v);
+    SHELL_PRINTF(rc == 0 ? "bt: passkey given\n"
+                         : "bt: no passkey is asked for\n");
+}
+
+/**
+ * @brief Handle "bt confirm yes|no": answer the numeric comparison, or with
+ *        no, refuse a passkey pairing under way.
+ */
+static void bt_confirm_cmd(uint8_t argc, const char *argv[])
+{
+    int rc;
+
+    if (argc < 3U || (!str_eq(argv[2], "yes") && !str_eq(argv[2], "no"))) {
+        SHELL_PRINTF("usage: bt confirm yes|no\n");
+        return;
+    }
+    rc = tiku_bt_auth_confirm(str_eq(argv[2], "yes") ? 1U : 0U);
+    SHELL_PRINTF(rc == 0 ? "bt: answered %s\n"
+                         : "bt: nothing to answer %s to\n", argv[2]);
+}
+#endif
+
+#if (TIKU_BT_PRIVACY + 0)
+/**
+ * @brief Handle "bt privacy [on [seconds]|off]": show or switch private
+ *        addresses.
+ */
+static void bt_privacy_cmd(uint8_t argc, const char *argv[])
+{
+    uint16_t secs = 0U;
+    int      rc;
+
+    if (argc >= 3U) {
+        if ((!str_eq(argv[2], "on") && !str_eq(argv[2], "off"))
+            || (argc >= 4U && parse_u16(argv[3], &secs) != 0)) {
+            SHELL_PRINTF("usage: bt privacy [on [10..3600 s]|off]\n");
+            return;
+        }
+        rc = tiku_bt_set_privacy(str_eq(argv[2], "on") ? 1U : 0U, secs);
+        if (rc == TIKU_DRV_ERR_INVALID) {
+            SHELL_PRINTF("bt: privacy: 10..3600 seconds\n");
+            return;
+        }
+        if (rc != 0) {
+            SHELL_PRINTF("bt: privacy FAILED: the radio is off, or takes no "
+                         "private address\n");
+            return;
+        }
+    }
+    bt_privacy_line("bt: privacy ");
+}
+#endif
+
 /*---------------------------------------------------------------------------*/
 
 void tiku_shell_cmd_bt(uint8_t argc, const char *argv[])
@@ -1170,6 +1468,44 @@ void tiku_shell_cmd_bt(uint8_t argc, const char *argv[])
         bt_unpair_cmd(argc, argv);
         return;
     }
+#if (TIKU_BT_PASSKEY + 0)
+    if (str_eq(argv[1], "io")) {
+        bt_io_cmd(argc, argv);
+        return;
+    }
+    if (str_eq(argv[1], "auth")) {
+        bt_auth_cmd();
+        return;
+    }
+    if (str_eq(argv[1], "passkey")) {
+        bt_passkey_cmd(argc, argv);
+        return;
+    }
+    if (str_eq(argv[1], "confirm")) {
+        bt_confirm_cmd(argc, argv);
+        return;
+    }
+#endif
+#if (TIKU_BT_LINK_UPDATE + 0)
+    if (str_eq(argv[1], "phy")) {
+        bt_phy_cmd(argc, argv);
+        return;
+    }
+    if (str_eq(argv[1], "dle")) {
+        bt_dle_cmd(argc, argv);
+        return;
+    }
+    if (str_eq(argv[1], "bench")) {
+        bt_bench_cmd(argc, argv);
+        return;
+    }
+#endif
+#if (TIKU_BT_PRIVACY + 0)
+    if (str_eq(argv[1], "privacy")) {
+        bt_privacy_cmd(argc, argv);
+        return;
+    }
+#endif
 #if BT_UART
     if (str_eq(argv[1], "uart")) {
         bt_uart(argc, argv);

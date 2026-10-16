@@ -326,21 +326,72 @@ void tiku_bt_poll(void);
 /** @brief Simultaneous LE connections; the host-side state is sized for one. */
 #define TIKU_BT_CONN_MAX         1U
 
+/* The switches below are on except on the RP2350, whose Pico 2 W BT image
+ * has no room left under its code cap. */
+
+/** @brief A central's LE Create Connection sent again (twice at most) when
+ *         its link ends before the first packet (status 0x3E). */
+#ifndef TIKU_BT_CONNECT_RETRY
+#if defined(PLATFORM_RP2350)
+#define TIKU_BT_CONNECT_RETRY 0
+#else
+#define TIKU_BT_CONNECT_RETRY 1
+#endif
+#endif
+
+/** @brief Each new link asks for 251-byte link-layer packets and the 2M PHY
+ *         where the controller supports them, and a central asks for a
+ *         247-byte ATT MTU; tiku_bt_set_phy() and tiku_bt_set_data_length()
+ *         change a link's later. */
+#ifndef TIKU_BT_LINK_UPDATE
+#if defined(PLATFORM_RP2350)
+#define TIKU_BT_LINK_UPDATE 0
+#else
+#define TIKU_BT_LINK_UPDATE 1
+#endif
+#endif
+
+/** @brief Pairing by passkey entry and numeric comparison, by the IO
+ *         capability tiku_bt_set_io_capability() gives this end. */
+#ifndef TIKU_BT_PASSKEY
+#if defined(PLATFORM_RP2350)
+#define TIKU_BT_PASSKEY 0
+#else
+#define TIKU_BT_PASSKEY 1
+#endif
+#endif
+
+/** @brief A durable identity resolving key: resolvable private addresses
+ *         on air (tiku_bt_set_privacy()), and bonded peers recognised
+ *         through the keys they distribute. */
+#ifndef TIKU_BT_PRIVACY
+#if defined(PLATFORM_RP2350)
+#define TIKU_BT_PRIVACY 0
+#else
+#define TIKU_BT_PRIVACY 1
+#endif
+#endif
+
 /**
- * @brief One active LE connection.
+ * @brief One active LE connection, from LE Connection Complete until
+ *        Disconnection Complete.
  *
- * Populated from LE Connection Complete and torn down on Disconnection
- * Complete.  @p handle is the chip-assigned id used in every subsequent ACL
- * packet; @p peer_addr is MSB-first display order, matching the scan entry.
+ * Addresses are MSB-first display order, matching the scan entry.
  */
 typedef struct {
-    uint16_t handle;
-    uint8_t  peer_addr[6];
+    uint16_t handle;             /**< the controller's id in each ACL packet */
+    uint8_t  peer_addr[6];       /**< the address the peer uses on air       */
     uint8_t  peer_addr_type;
-    uint8_t  role;
+    uint8_t  role;               /**< 0 central, 1 peripheral                */
     uint16_t conn_interval_units;
     uint16_t conn_latency;
     uint16_t supv_timeout_units;
+    uint16_t att_mtu;            /**< 23 until an MTU exchange raises it     */
+    uint16_t tx_octets;          /**< link-layer payload per packet sent     */
+    uint16_t rx_octets;          /**< ... and received (0 without
+                                      TIKU_BT_LINK_UPDATE)                   */
+    uint8_t  tx_phy;             /**< 1 1M, 2 2M, 3 Coded (0 without it)    */
+    uint8_t  rx_phy;
 } tiku_bt_connection_t;
 
 /** Number of currently active LE connections (0..TIKU_BT_CONN_MAX). */
@@ -373,11 +424,11 @@ uint8_t tiku_bt_connections(tiku_bt_connection_t *out,
 int tiku_bt_disconnect(uint16_t handle);
 
 /**
- * @brief Pair on a link with LE Secure Connections (Just Works) and bond.
+ * @brief Pair on a link with LE Secure Connections and bond.
  *
- * As the central this end pairs, the new key replacing a stored bond; as the
- * peripheral it asks the central to (Security Request).  Encryption follows
- * (tiku_bt_security() reaches 3), and the bond survives a reboot.
+ * The central pairs, its new key replacing a stored bond; the peripheral asks
+ * it to.  Encryption follows (tiku_bt_security() reaches 3); the bond is
+ * durable.  Just Works unless the IO capabilities allow more (TIKU_BT_PASSKEY).
  *
  * @param handle  The link's connection handle, or 0xFFFF for the first
  * @return TIKU_DRV_OK once started, TIKU_DRV_ERR_NOT_PRESENT if BT isn't up
@@ -385,6 +436,115 @@ int tiku_bt_disconnect(uint16_t handle);
  *         or a pairing that could not start
  */
 int tiku_bt_pair(uint16_t handle);
+
+#if (TIKU_BT_LINK_UPDATE + 0)
+/** @brief tiku_bt_set_phy() values, and tiku_bt_connection_t's PHYs. */
+#define TIKU_BT_PHY_1M           1U
+#define TIKU_BT_PHY_2M           2U
+
+/**
+ * @brief Ask the controller to move a link to @p phy both ways; the LE PHY
+ *        Update Complete event updates tiku_bt_connections().
+ * @param handle  The link's connection handle, or 0xFFFF for the first
+ * @return TIKU_DRV_OK once the controller takes the request,
+ *         TIKU_DRV_ERR_NOT_PRESENT if BT isn't up, no link is active or the
+ *         controller lacks the 2M PHY, TIKU_DRV_ERR_INVALID for an unknown
+ *         handle, another @p phy or a refused request
+ */
+int tiku_bt_set_phy(uint16_t handle, uint8_t phy);
+
+/**
+ * @brief Ask the controller to send @p octets (27..251) of link-layer
+ *        payload per packet on a link; the LE Data Length Change event
+ *        updates tiku_bt_connections().
+ * @return As tiku_bt_set_phy(); TIKU_DRV_ERR_NOT_PRESENT also for a
+ *         controller without the data length extension
+ */
+int tiku_bt_set_data_length(uint16_t handle, uint16_t octets);
+
+/**
+ * @brief Send @p bytes of notifications of the built-in uptime
+ *        characteristic, each as long as one link-layer packet carries, to
+ *        the client subscribed to it, as fast as the link takes them.
+ * @param ms  Receives the time the sends took, in milliseconds
+ * @return TIKU_DRV_OK, TIKU_DRV_ERR_NOT_PRESENT with no link or no
+ *         subscriber, or TIKU_DRV_ERR_IO when the link stops taking packets
+ */
+int tiku_bt_bench(uint32_t bytes, uint32_t *ms);
+#endif
+
+#if (TIKU_BT_PASSKEY + 0)
+/* IO capabilities (Core Spec Vol 3 Part H 2.3.2); this end starts with
+ * TIKU_BT_IO_NONE, which pairs by Just Works. */
+#define TIKU_BT_IO_DISPLAY_ONLY      0U
+#define TIKU_BT_IO_DISPLAY_YESNO     1U
+#define TIKU_BT_IO_KEYBOARD_ONLY     2U
+#define TIKU_BT_IO_NONE              3U
+#define TIKU_BT_IO_KEYBOARD_DISPLAY  4U
+
+/**
+ * @brief Set the IO capability this end pairs with.  Any but
+ *        TIKU_BT_IO_NONE also asks for MITM protection.
+ * @return TIKU_DRV_OK, or TIKU_DRV_ERR_INVALID for a value above 4
+ */
+int tiku_bt_set_io_capability(uint8_t io);
+
+/** @brief The IO capability this end pairs with. */
+uint8_t tiku_bt_io_capability(void);
+
+/* What a pairing waits on this end's user for (tiku_bt_auth_pending()). */
+#define TIKU_BT_AUTH_NONE        0U  /**< nothing                          */
+#define TIKU_BT_AUTH_DISPLAY     1U  /**< show the passkey; the peer's user
+                                          types it                         */
+#define TIKU_BT_AUTH_ENTER       2U  /**< type the passkey the peer shows:
+                                          tiku_bt_auth_passkey()           */
+#define TIKU_BT_AUTH_CONFIRM     3U  /**< both ends show the number: answer
+                                          with tiku_bt_auth_confirm()       */
+
+/**
+ * @brief What the pairing under way waits on this end's user for.
+ * @param number  Receives the passkey to show or the number to compare
+ *                (0..999999); may be NULL
+ * @return A TIKU_BT_AUTH_* value
+ */
+uint8_t tiku_bt_auth_pending(uint32_t *number);
+
+/**
+ * @brief Give the passkey the peer shows (TIKU_BT_AUTH_ENTER).
+ * @return TIKU_DRV_OK, or TIKU_DRV_ERR_INVALID when no passkey is asked for
+ *         or @p passkey is above 999999
+ */
+int tiku_bt_auth_passkey(uint32_t passkey);
+
+/**
+ * @brief Answer the numeric comparison: 1 when both ends show the same
+ *        number.  0 also refuses a passkey entry or display under way.
+ * @return TIKU_DRV_OK, or TIKU_DRV_ERR_INVALID when nothing is asked
+ */
+int tiku_bt_auth_confirm(uint8_t yes);
+#endif
+
+#if (TIKU_BT_PRIVACY + 0)
+/**
+ * @brief Advertise, scan and connect from a resolvable private address made
+ *        from this end's IRK, a new one every @p seconds (10..3600; 0 keeps
+ *        the last, 900 at first), or (@p on 0) from the identity address.
+ *        Kept across reboots.  A running advert starts again at once.
+ * @return TIKU_DRV_OK; TIKU_DRV_ERR_NOT_PRESENT if BT isn't up, no IRK
+ *         could be made, or the controller refuses a private address;
+ *         TIKU_DRV_ERR_INVALID for @p seconds out of range
+ */
+int tiku_bt_set_privacy(uint8_t on, uint16_t seconds);
+
+/**
+ * @brief Whether private addresses are on.
+ * @param seconds  Receives the time between private addresses; may be NULL
+ * @param addr     Receives the private address on air (MSB-first), zeros
+ *                 when none is; may be NULL
+ * @return 1 on, 0 off
+ */
+int tiku_bt_privacy(uint16_t *seconds, uint8_t addr[6]);
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* GATT SERVER AND NOTIFICATIONS                                             */
@@ -612,7 +772,7 @@ int tiku_bt_security(void);
 /* SMP BONDING STORE                                                         */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Stored bond slots, each a fixed 32-byte record in durable memory.
+/** @brief Stored bond slots, each a fixed 48-byte record in durable memory.
  *         A peer keeps its slot when it pairs again; a new peer takes an
  *         empty slot, or once every slot is full, the slots in turn. */
 #ifndef TIKU_BT_BOND_MAX
@@ -620,17 +780,23 @@ int tiku_bt_security(void);
 #endif
 
 /**
- * @brief Magic at the head of each bond record ("BOND" read most-significant
- *        byte first), telling a populated slot from uninitialised NVM.
+ * @brief Magic at the head of each bond record ("BND2" read most-significant
+ *        byte first), telling a populated slot from uninitialised NVM and
+ *        from the 32-byte records of earlier builds.
  */
-#define TIKU_BT_BOND_MAGIC       0x424F4E44UL
+#define TIKU_BT_BOND_MAGIC       0x424E4432UL
+
+/** @brief Bond flag: @p irk holds the peer's identity resolving key and
+ *         @p peer_addr its identity address. */
+#define TIKU_BT_BOND_F_IRK       (1UL << 9)
 
 /**
- * @brief One stored LE bond (LTK and peer identity).
+ * @brief One stored LE bond: its LTK, and the identity address (MSB-first)
+ *        and IRK the peer distributed, else the address it paired from.
  *
- * `magic` marks a populated slot; `peer_addr` is MSB-first.  `flags` holds the
- * pairing's AuthReq in bits 7:0, Service Changed enabled in bit 8, and a
- * digest of the attribute layout the peer last saw in bits 31:16.
+ * `flags` holds the AuthReq in bits 7:0 (MITM after a passkey or numeric
+ * comparison), Service Changed on in bit 8, TIKU_BT_BOND_F_IRK, and a digest
+ * of the attribute layout the peer last saw in bits 31:16.
  */
 typedef struct {
     uint32_t magic;
@@ -639,6 +805,7 @@ typedef struct {
     uint8_t  _pad;
     uint8_t  ltk[16];
     uint32_t flags;
+    uint8_t  irk[16];
 } tiku_bt_bond_record_t;
 
 /**
