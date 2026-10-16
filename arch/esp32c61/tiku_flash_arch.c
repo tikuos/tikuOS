@@ -65,6 +65,14 @@ tiku_flash_err_t tiku_flash_init(void) {
     }
     (void)ESP32C61_ROM_FLASH_USER_CMD(&flash_id, CMD_READ_ID);
 
+    /* After the attach, SPI0 refills the cache with single-bit 0x03 reads
+     * at a quarter of the MSPI core clock, so code in flash runs at that
+     * rate.  Dual-I/O reads at the core clock: the crystal's 40 MHz. */
+    if (ESP32C61_ROM_FLASH_READMODE(ESP32C61_ROM_READ_DIO) != ROM_OK ||
+        ESP32C61_ROM_FLASH_CLOCK(1U, 0U) != ROM_OK) {
+        return TIKU_FLASH_ERR_IO;
+    }
+
     /* The whole part, one-to-one, in 64 KB pages.  ROM_MMU_INIT clears every
      * MMU entry, so this runs before the PSRAM is mapped. */
     ESP32C61_ROM_MMU_INIT();

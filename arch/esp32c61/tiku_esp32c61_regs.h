@@ -97,6 +97,11 @@ typedef int (*esp32c61_rom_mmu_set_t)(uint32_t sensitive, uint32_t ext_ram,
 #define ESP32C61_ROM_FLASH_WRITE    ((esp32c61_rom_flash_write_t)0x4000015CUL)
 #define ESP32C61_ROM_FLASH_READ     ((esp32c61_rom_flash_read_t)0x40000160UL)
 #define ESP32C61_ROM_FLASH_USER_CMD ((int (*)(uint32_t *, uint8_t))0x40000174UL)
+/* The read command SPI0 and SPI1 use (2: dual I/O, 0xBB), and a controller's
+ * clock divider from the MSPI core clock (spi 0: SPI0, the cache's). */
+#define ESP32C61_ROM_FLASH_READMODE ((int (*)(uint32_t))0x4000018CUL)
+#define ESP32C61_ROM_FLASH_CLOCK    ((int (*)(uint8_t, uint8_t))0x40000188UL)
+#define ESP32C61_ROM_READ_DIO       2UL
 
 /* The cache in front of the flash and the MMU that maps it. */
 #define ESP32C61_ROM_MMU_INIT       ((void (*)(void))0x400006B4UL)
