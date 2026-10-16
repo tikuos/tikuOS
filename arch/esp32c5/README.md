@@ -274,9 +274,10 @@ The SAR's initial code for the attenuation comes from eFuse block 2, plus
 binary search for the code at which internal ground reads zero; on the bench
 board the two agree within 2. With the SAR free, a conversion takes it,
 powers it, converts and restores every register it changed. While Wi-Fi, BLE or 802.15.4 is up the radio holds the SAR, keeping
-it powered and clocked; a conversion then borrows it and changes only the
-initial code, the reference and the one-shot controls, as ESP-IDF's one-shot
-read does, and restores them. While the entropy source holds the SAR a read
+it powered; a conversion then borrows it and changes only the controller's
+clock gates (BLE stops its function clock), the initial code, the reference
+and the one-shot controls, as ESP-IDF's one-shot read does, and restores
+them. While the entropy source holds the SAR a read
 returns `TIMEOUT`. The shell's `adc` command and BASIC's `ADC()` use it.
 
 The `adc-c5` category compares the eFuse codes with measured ones, converts

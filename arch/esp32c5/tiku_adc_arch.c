@@ -117,8 +117,8 @@ static void end(unsigned regs_saved)
  * @brief Take the SAR, or borrow it from the radio, for one-shot conversions.
  *
  * A free SAR is clocked from the crystal / 16 with its analog bus and front
- * end woken; the radio's is left as the radio set it.  Both save the analog
- * registers and set the reference.
+ * end woken; the radio's keeps its power and divider.  Both save the analog
+ * registers, clock the controller and set the reference.
  * @return 0, or -1 with nothing changed if the SAR is held elsewhere
  */
 static int begin(void)
@@ -134,9 +134,13 @@ static int begin(void)
     for (i = 0; i < sizeof(saved) / sizeof(saved[0]); i++) {
         saved[i] = TIKU_C5_REG_READ(saved_regs[i]);
     }
-    /* Beside the radio a conversion changes only the initial code, the
-     * reference and the one-shot controls, as ESP-IDF's one-shot read does. */
-    if (!shared) {
+    /* Beside the radio a conversion changes only the controller's clock gates
+     * (BLE stops its function clock), the initial code, the reference and the
+     * one-shot controls, as ESP-IDF's one-shot read does. */
+    if (shared) {
+        field(PCR_SAR_CONF, 4u, 4u);
+        field(PCR_SAR_CLKM, 1u << 22, 1u << 22);
+    } else {
         field(PCR_SAR_CONF, 4u, 4u);
         field(PCR_SAR_CLKM, 0x7FFFFFu, (1u << 22) | (15u << 12));
         field(PCR_SAR_DIV, 255u << 8, 1u << 8);
