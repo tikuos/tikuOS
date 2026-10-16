@@ -115,6 +115,14 @@ tiku_flash_err_t tiku_flash_init(void)
         release(state);
         return TIKU_FLASH_ERR_IO;
     }
+    /* After the attach, SPI0 refills the cache with single-bit 0x03 reads
+     * at a quarter of the MSPI core clock, so code in flash runs at that
+     * rate.  Dual-I/O reads (mode 2, 0xBB) at the core clock: the crystal. */
+    if (tiku_c5_rom_flash_read_mode(2) != 0 ||
+        tiku_c5_rom_flash_clock(1, 0) != 0) {
+        release(state);
+        return TIKU_FLASH_ERR_IO;
+    }
     tiku_c5_rom_cache_boot();
     tiku_c5_rom_mmu_init();
     if (tiku_c5_rom_mmu_set(0, 0, TIKU_FLASH_MMAP_BASE, 0, 64,

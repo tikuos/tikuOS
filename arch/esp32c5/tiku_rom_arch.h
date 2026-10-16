@@ -14,6 +14,8 @@ int tiku_c5_rom_flash_config(uint32_t id, uint32_t size, uint32_t block,
                              uint32_t sector, uint32_t page,
                              uint32_t status_mask);
 int tiku_c5_rom_flash_command(uint32_t *result, uint8_t command);
+int tiku_c5_rom_flash_clock(uint8_t divider, uint8_t spi);
+int tiku_c5_rom_flash_read_mode(uint32_t mode);
 int tiku_c5_rom_flash_unlock(void);
 int tiku_c5_rom_flash_read(uint32_t offset, uint32_t *data, int32_t length);
 int tiku_c5_rom_flash_write(uint32_t offset, const uint32_t *data,
