@@ -19,9 +19,7 @@
 #define C5_SAR_CLOCK  0x6009608Cu
 #define C5_SAR_DIV    0x60096148u
 #define C5_ANA_CLOCK  0x600AF018u
-#define C5_ANA        0x600AF800u
-#define C5_ANA_SELECT (C5_ANA + 0x1Cu)
-#define C5_ANA_MUX    (C5_ANA + 0x20u)
+#define C5_ANA_SELECT 0x600AF81Cu
 #define C5_SAR_POWER  0x600B0158u
 #define C5_RNG_CLOCK  0x600B2800u
 #define C5_RNG_RESET  0x600B2804u
@@ -42,41 +40,6 @@ static const uint8_t analog_regs[] = {0, 1, 3, 4, 7, 8};
 static void field(uint32_t address, uint32_t mask, uint32_t value)
 {
     TIKU_C5_REG_WRITE(address, (TIKU_C5_REG_READ(address) & ~mask) | value);
-}
-
-/** @brief Wait a bounded number of reads for the analog bus to become idle. */
-static int analog_idle(uint32_t address)
-{
-    unsigned n;
-    for (n = 0; n < C5_TRNG_SPINS; n++) {
-        if (!(TIKU_C5_REG_READ(address) & (1u << 25))) {
-            return 0;
-        }
-    }
-    return -1;
-}
-
-/** @brief Transfer one internal SAR register; refuse a stalled analog bus. */
-static int analog_transfer(uint8_t reg, uint8_t *value, int write)
-{
-    uint32_t address = C5_ANA +
-                       ((TIKU_C5_REG_READ(C5_ANA_MUX) & (1u << 11)) ? 0u : 4u);
-    uint32_t command = 0x69u | ((uint32_t)reg << 8);
-    if (analog_idle(address)) {
-        return -1;
-    }
-    TIKU_C5_REG_WRITE(C5_ANA_SELECT, 0xFFFFFFu & ~(1u << 9));
-    if (write) {
-        command |= (1u << 24) | ((uint32_t)*value << 16);
-    }
-    TIKU_C5_REG_WRITE(address, command);
-    if (analog_idle(address)) {
-        return -1;
-    }
-    if (!write) {
-        *value = (uint8_t)(TIKU_C5_REG_READ(address) >> 16);
-    }
-    return 0;
 }
 
 void tiku_trng_arch_init(void)
@@ -139,7 +102,7 @@ int tiku_trng_arch_read_bytes(uint8_t *out, size_t length)
     field(C5_SAR_POWER, (1u << 26) | (1u << 27), (1u << 26) | (1u << 27));
     field(C5_ANA_CLOCK, 4u, 4u);
     for (i = 0; i < sizeof(analog); i++) {
-        if (analog_transfer(analog_regs[i], &analog[i], 0)) {
+        if (tiku_c5_analog_sar_reg(analog_regs[i], &analog[i], 0)) {
             goto cleanup;
         }
     }
@@ -162,7 +125,7 @@ int tiku_trng_arch_read_bytes(uint8_t *out, size_t length)
             break;
         }
         changed = (uint8_t)(i + 1);
-        if (analog_transfer(analog_regs[i], &value, 1)) {
+        if (tiku_c5_analog_sar_reg(analog_regs[i], &value, 1)) {
             goto cleanup;
         }
     }
@@ -200,7 +163,7 @@ cleanup:
     field(C5_SAR + 4, 1u << 24, 0);
     while (changed) {
         --changed;
-        if (analog_transfer(analog_regs[changed], &analog[changed], 1)) {
+        if (tiku_c5_analog_sar_reg(analog_regs[changed], &analog[changed], 1)) {
             status = TIKU_TRNG_ERR_NOT_READY;
         }
     }

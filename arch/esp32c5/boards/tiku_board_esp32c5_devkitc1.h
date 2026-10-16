@@ -44,6 +44,26 @@
 #endif
 /* The portable bus uses this macro as its board capability test. */
 #define TIKU_BOARD_I2C_BRW_100K 480u
+/* GP-SPI2 through the GPIO matrix; chip select is the caller's GPIO. */
+#ifndef TIKU_BOARD_SPI_SCK_PIN
+#define TIKU_BOARD_SPI_SCK_PIN 10u
+#endif
+#ifndef TIKU_BOARD_SPI_MOSI_PIN
+#define TIKU_BOARD_SPI_MOSI_PIN 23u
+#endif
+#ifndef TIKU_BOARD_SPI_MISO_PIN
+#define TIKU_BOARD_SPI_MISO_PIN 24u
+#endif
+/* SAR ADC1 channels 0..5 on GPIO1..6; GPIO2..5 are straps and JTAG, so
+ * channels 1..4 open only once their pad is a GPIO. */
+#define TIKU_BOARD_ADC_AVAILABLE 1
+/* 1-Wire, open drain; devices need an external 4.7 kOhm pull-up.  GPIO6 is
+ * ADC channel 5's pad too; GPIO0 and GPIO1, the 32 kHz crystal's pads, do
+ * not hold the internal pull-up on this board. */
+#define TIKU_BOARD_OW_AVAILABLE 1
+#ifndef TIKU_BOARD_OW_PIN
+#define TIKU_BOARD_OW_PIN 6u
+#endif
 /* The C5 IO-mux reference lists straps on 2/3/7/25..28. GPIO27 also drives
  * the addressable LED; 13/14 carry USB and 15..22 carry flash/PSRAM. */
 #define TIKU_BOARD_GPIO_RESERVED                                               \

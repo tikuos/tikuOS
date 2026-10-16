@@ -165,7 +165,7 @@ uart_baud_read(char *buf, size_t max)
  * @param max  Capacity of @p buf in bytes
  * @return Bytes written, or -1 on error
  */
-#if !defined(PLATFORM_ESP32C5) && !defined(PLATFORM_ESP32P4)
+#if !defined(PLATFORM_ESP32P4)
 static int
 spi_config_read(char *buf, size_t max)
 {
@@ -230,6 +230,7 @@ adc_battery_read(char *buf, size_t max)
     }
     return snprintf(buf, max, "%u\n", (unsigned)val);
 }
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* /dev/i2c/scan                                                             */
@@ -246,6 +247,7 @@ adc_battery_read(char *buf, size_t max)
  * @param max  Capacity of @p buf in bytes
  * @return Bytes written
  */
+#if !defined(PLATFORM_ESP32C5) && !defined(PLATFORM_ESP32P4)
 static int
 i2c_scan_read(char *buf, size_t max)
 {
@@ -418,7 +420,7 @@ static const tiku_vfs_desc_t desc_uart_count = TIKU_VFS_DESC(
  * both carry a read-coalescing window: repeated reads inside the window
  * share one conversion.  Temperature drifts slowly -> ~100 ms; supply
  * voltage slower still -> ~1 s. */
-#if !defined(PLATFORM_ESP32C5) && !defined(PLATFORM_ESP32P4)
+#if !defined(PLATFORM_ESP32P4)
 static const tiku_vfs_desc_t desc_adc_temp =
     TIKU_VFS_DESC_RF(TIKU_VFS_T_U32, TIKU_VFS_U_ADC_RAW,
                      TIKU_VFS_FRESH_LIVE, TIKU_VFS_E_PERIPH, 0, 4095,
@@ -454,18 +456,22 @@ static const tiku_vfs_node_t dev_uart_children[] = {
     (sizeof dev_uart_children / sizeof dev_uart_children[0])
 
 /** /dev/adc directory table — raw conversions, no calibration */
-#if !defined(PLATFORM_ESP32C5) && !defined(PLATFORM_ESP32P4)
+#if !defined(PLATFORM_ESP32P4)
 static const tiku_vfs_node_t dev_adc_children[] = {
     { "temp",    TIKU_VFS_FILE, adc_temp_read,    NULL, NULL, 0, &desc_adc_temp },
     { "battery", TIKU_VFS_FILE, adc_battery_read, NULL, NULL, 0, &desc_adc_batt },
 };
+#endif
 
 /** /dev/i2c directory table — the live bus scanner */
+#if !defined(PLATFORM_ESP32C5) && !defined(PLATFORM_ESP32P4)
 static const tiku_vfs_node_t dev_i2c_children[] = {
     { "scan", TIKU_VFS_FILE, i2c_scan_read, NULL, NULL, 0, &desc_scan },
 };
+#endif
 
 /** /dev/spi directory table — read-only configuration view */
+#if !defined(PLATFORM_ESP32P4)
 static const tiku_vfs_node_t dev_spi_children[] = {
     { "config", TIKU_VFS_FILE, spi_config_read, NULL, NULL, 0,
       &desc_bus_config },
@@ -510,10 +516,12 @@ static const tiku_vfs_node_t dev_children[] = {
     { "uart",     TIKU_VFS_DIR,  NULL, NULL, dev_uart_children,
 #endif
       DEV_UART_NCHILD },
-#if !defined(PLATFORM_ESP32C5) && !defined(PLATFORM_ESP32P4)
+#if !defined(PLATFORM_ESP32P4)
     { "adc",      TIKU_VFS_DIR,  NULL, NULL, dev_adc_children, 2 },
-    { "i2c",      TIKU_VFS_DIR,  NULL, NULL, dev_i2c_children, 1 },
     { "spi",      TIKU_VFS_DIR,  NULL, NULL, dev_spi_children, 1 },
+#endif
+#if !defined(PLATFORM_ESP32C5) && !defined(PLATFORM_ESP32P4)
+    { "i2c",      TIKU_VFS_DIR,  NULL, NULL, dev_i2c_children, 1 },
 #endif
 };
 

@@ -2,7 +2,7 @@
 
 The C5 target runs the kernel, VFS, shell, file store and optional worker
 threads over its native USB Serial/JTAG port. A lean BASIC interpreter is
-available with `TIKU_SHELL_BASIC_ENABLE=1`; ADC and I2C words are disabled.
+available with `TIKU_SHELL_BASIC_ENABLE=1`; its I2C words are disabled.
 The default profile runs code and working data from HP SRAM. Optional XIP
 places BASIC and shell commands in flash. CPU rates of 40, 80 and 240 MHz
 can be saved through VFS and applied on reboot. UART0 is an optional console;
@@ -12,8 +12,8 @@ transfers still require hardware qualification. An optional C5 PHY driver
 supports calibration and RF lifecycle diagnostics. Cached PSRAM and an opt-in
 native Wi-Fi, BLE and receive-only SDR adapters are implemented; their
 qualification limits are described below and in the C5 driver README.
-Deep and light sleep, and GPIO edge interrupts, are described below.
-SPI, ADC and 1-Wire are not supported. Requests for unsupported optional
+Deep and light sleep, GPIO edge interrupts, an SPI master, the SAR ADC and
+a 1-Wire master are described below. Requests for unsupported optional
 features fail at build selection; a C61 platform macro is not a substitute.
 
 ## Package memory and radio diagnostics
@@ -222,6 +222,74 @@ with `EXTRA_CFLAGS='-DTIKU_SHELL_CMD_I2C=1'`.
 
 Register/timing definitions follow the pinned C5
 [I2C HAL reference](https://github.com/espressif/esp-idf/blob/4d59230ddff16327812782151ef0afef202dc6d7/components/esp_hal_i2c/esp32c5/include/hal/i2c_ll.h).
+
+## SPI master
+
+The C bus API drives GP-SPI2 as a master on SCK GPIO10, MOSI GPIO23 and MISO
+GPIO24 through the GPIO matrix; board builds override
+`TIKU_BOARD_SPI_SCK_PIN`, `TIKU_BOARD_SPI_MOSI_PIN` and
+`TIKU_BOARD_SPI_MISO_PIN`. Chip select is the caller's GPIO.
+`tiku_spi_init()` claims the three pins and `tiku_spi_close()` restores their
+mux, routing and output enables and the controller's clock and reset. SCK is
+the crystal divided by the prescaler, clamped to 2..1024 and rounded up to
+the nearest divider the controller has, a product (pre + 1)(n + 1) with pre
+0..15 and n 1..63; the fastest is half the crystal, 24 MHz on the
+DevKitC-1. All four modes and both bit orders
+are supported. Bytes move through the controller's 64-byte buffer, polled;
+a batch that does not end within 50 ms returns `TIMEOUT`. The SPI contract
+has no busy code, so an owned pin, or the controller's signals routed to
+other pads, makes `tiku_spi_init()` return `PARAM`.
+
+The `spi-c5` TikuBench category routes the MISO input to the MOSI pad inside
+the chip and checks all four modes and both bit orders, SCK's idle level,
+200-byte exchanges across batch boundaries, the dividers for prescalers 1, 8
+and 1000, and 4096-byte write times at 40, 80 and 240 MHz CPU clocks, which
+add about 33 us per batch at 40 MHz to the bit time. A slave device and its
+chip select need a fixture.
+
+## ADC
+
+`tiku_adc_*` converts ADC1 channels 0..5 (GPIO1..6), one conversion per
+read, 12-bit, shifted down for 10- or 8-bit resolution. The reference picks
+the attenuation: AVCC and 2V5 12 dB, 2V0 6 dB, 1V2 2.5 dB; the datasheet has
+the input ranges. On the DevKitC-1 a pad driven to the 3.3 V supply reads
+about 3240 at 12 dB. GPIO2..5 are straps and JTAG pads at reset, so channels
+1..4 open only once their pad is a GPIO. There is no temperature or supply
+channel: channels 30 and 31 return `PARAM`, and `/dev/adc/temp` and
+`/dev/adc/battery` read `err`. Readings are raw counts.
+
+The SAR's initial code for the attenuation comes from eFuse block 2, plus
+1600 as ESP-IDF reads it, or on a chip without that calibration from a
+binary search for the code at which internal ground reads zero; on the bench
+board the two agree within 2. Each conversion takes the SAR from the entropy
+source and the radio, powers it, converts and restores every register it
+changed; while either holds the SAR a read returns `TIMEOUT`. The radio
+holds it while Wi-Fi, BLE or 802.15.4 is up, so conversions run with the
+radios down. The shell's `adc` command and BASIC's
+`ADC()` use it.
+
+The `adc-c5` category compares the eFuse codes with measured ones, converts
+channel 5's pad while its own GPIO drives it high or low and while both
+internal pulls hold it, checks the 10- and 8-bit scaling, and checks that a
+conversion restores the SAR's clocks, power and registers and gives the SAR
+back to the entropy source. Voltages between the rails need a fixture.
+
+## 1-Wire
+
+The 1-Wire master drives GPIO6 open drain (`TIKU_BOARD_OW_PIN`) with the pad's
+pull-up on, so an unwired bus idles high; devices need an external 4.7 kOhm
+pull-up. GPIO6 is also ADC channel 5's pad; GPIO0 and GPIO1, the 32 kHz
+crystal's pads, do not hold the internal pull-up on this board. A reset holds
+the bus low for 480 us and samples for presence 70 us after the release;
+write and read slots last 70 us, and a read samples 15 us into its slot.
+Slots are timed in CPU cycles. Interrupts are masked for each slot and from
+the release to the presence sample, not for the reset pulse. The DS18B20 kit
+is outside the C5 profile.
+
+The `onewire-c5` category times the reset and the slots at 40, 80 and
+240 MHz, sees each pull-down through the pin's falling-edge latch, checks
+that an empty bus reports no device and reads 0xFF, and checks pin
+restoration. A device's presence pulse and data need a fixture.
 
 ## UART console and internal loopback
 

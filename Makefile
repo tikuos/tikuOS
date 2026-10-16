@@ -1298,8 +1298,8 @@ CFLAGS += -DTIKU_CONSOLE_JTAG=1
 endif
 TIKU_TIER_SRAM_MIN ?= 32768
 CFLAGS += -DTIKU_TIER_SRAM_MIN=$(TIKU_TIER_SRAM_MIN)
-CFLAGS += -DTIKU_SHELL_CMD_GPIO=0 -DTIKU_SHELL_CMD_ADC=0 -DTIKU_SHELL_CMD_IRQ=0
-CFLAGS += -DTIKU_BASIC_ADC_ENABLE=0 -DTIKU_BASIC_I2C_ENABLE=0
+CFLAGS += -DTIKU_SHELL_CMD_GPIO=0 -DTIKU_SHELL_CMD_IRQ=0
+CFLAGS += -DTIKU_BASIC_I2C_ENABLE=0
 endif
 
 else ifeq ($(TIKU_PLATFORM),esp32p4)
@@ -2271,6 +2271,9 @@ SRCS += arch/esp32c5/tiku_analog_arch.c
 SRCS += arch/esp32c5/tiku_uart_arch.c
 SRCS += arch/esp32c5/tiku_gpio_arch.c
 SRCS += arch/esp32c5/tiku_i2c_arch.c
+SRCS += arch/esp32c5/tiku_spi_arch.c
+SRCS += arch/esp32c5/tiku_onewire_arch.c
+SRCS += arch/esp32c5/tiku_adc_arch.c
 SRCS += arch/esp32c5/tiku_psram_arch.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_psram_c5.c
 SRCS += arch/esp32c5/tiku_flash_arch.c arch/esp32c5/tiku_mem_arch.c
@@ -3700,10 +3703,6 @@ CFLAGS += $(APPL_CFLAGS)
 # object twice in the link fails with "multiple definition".  The order of
 # explicit objects does not change the link: the libraries come after every
 # object, and the linker scripts place every section by pattern.
-ifeq ($(TIKU_PLATFORM),esp32c5)
-SRCS := $(filter-out interfaces/bus/tiku_spi_bus.c \
-                    interfaces/adc/tiku_adc.c interfaces/onewire/tiku_onewire.c,$(SRCS))
-endif
 SRCS := $(sort $(SRCS))
 ifeq ($(TIKU_PLATFORM),esp32p4)
 SRCS := $(filter-out interfaces/bus/tiku_spi_bus.c interfaces/bus/tiku_i2c_bus.c \
