@@ -27,9 +27,7 @@
 #include <interfaces/led/tiku_led.h>
 #include <interfaces/adc/tiku_adc.h>
 #include <interfaces/bus/tiku_i2c_bus.h>
-#if TIKU_SPI_ENABLE
 #include <interfaces/bus/tiku_spi_bus.h>
-#endif
 #include <stdio.h>
 
 /*---------------------------------------------------------------------------*/
@@ -158,8 +156,7 @@ uart_baud_read(char *buf, size_t max)
  * @brief Read handler for /dev/spi/config.
  *
  * Renders the active configuration as "mode=0 order=msb pre=8\n", or "off\n"
- * when the driver is compiled in but unconfigured, or "n/a\n" in a
- * TIKU_SPI_ENABLE=0 build.  Read-only: bus setup belongs to the owning driver.
+ * while the bus is closed.  Read-only: bus setup belongs to the owning driver.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
@@ -169,7 +166,6 @@ uart_baud_read(char *buf, size_t max)
 static int
 spi_config_read(char *buf, size_t max)
 {
-#if TIKU_SPI_ENABLE
     const tiku_spi_config_t *cfg = tiku_spi_get_config();
     if (cfg == NULL) {
         return snprintf(buf, max, "off\n");
@@ -178,9 +174,6 @@ spi_config_read(char *buf, size_t max)
                     (unsigned)cfg->mode,
                     cfg->bit_order == 0 ? "msb" : "lsb",
                     (unsigned)cfg->prescaler);
-#else
-    return snprintf(buf, max, "n/a\n");
-#endif
 }
 
 /*---------------------------------------------------------------------------*/
