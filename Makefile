@@ -2338,7 +2338,12 @@ SRCS += arch/esp32c61/tiku_xip_arch.c
 # from flash through the XIP window (xip_code.ld).
 # TIKU_ESP32C61_PSRAM_DATA=1 puts the TLS and crypto .bss and BASIC's large
 # buffers in PSRAM (psram_data.ld).  Both free SRAM for large profiles such
-# as HTTPS, and both are off unless set.
+# as HTTPS, and both are off unless set, but for XIP in a BLE build: the
+# controller's 40 KB heap comes from the SRAM tier, which the host's code
+# would leave short of it.
+ifeq ($(TIKU_DRV_BLE_ESP_ENABLE),1)
+TIKU_ESP32C61_XIP_CODE ?= 1
+endif
 ifeq ($(TIKU_ESP32C61_XIP_CODE),1)
 TIKU_XIP_LDS += arch/esp32c61/xip_code.ld
 endif
