@@ -286,6 +286,8 @@ the C5 ROM workspace. A 16 KiB main stack ends at that bound and a 2 KiB
 ISR stack belongs to BSS. The common SRAM linker fragment exposes the
 remaining contiguous space to the allocator, with a 32 KiB minimum.
 LP SRAM is not allocated. `.retained` is separate from the durable mirror.
+The compiler's runtime routines (64-bit shifts and division, bit counts,
+soft floating point) are called in ROM and take no SRAM.
 
 Offsets below are relative to the start of the identified 4 MiB flash:
 
