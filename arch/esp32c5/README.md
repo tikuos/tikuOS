@@ -257,25 +257,36 @@ read, 12-bit, shifted down for 10- or 8-bit resolution. The reference picks
 the attenuation: AVCC and 2V5 12 dB, 2V0 6 dB, 1V2 2.5 dB; the datasheet has
 the input ranges. On the DevKitC-1 a pad driven to the 3.3 V supply reads
 about 3240 at 12 dB. GPIO2..5 are straps and JTAG pads at reset, so channels
-1..4 open only once their pad is a GPIO. There is no temperature or supply
-channel: channels 30 and 31 return `PARAM`, and `/dev/adc/temp` and
-`/dev/adc/battery` read `err`. Readings are raw counts.
+1..4 open only once their pad is a GPIO. Readings are raw counts.
+
+Channel 30 (`adc temp`, and `/dev/adc/temp` once the ADC is open) reads the
+temperature sensor: its 8-bit code on the middle range's scale, not scaled
+by the resolution, so degrees C = 0.4386 x code - 20.52, less the chip's
+correction in eFuse block 2; `tiku_c5_adc_celsius()` applies both, and the
+bench board idles at about 25 C. A powered-down sensor is powered in its middle range and read
+after 300 us. The radio keeps the sensor on in a range of its choosing, and
+the code is moved onto the middle range's scale. There is no supply
+channel: channel 31 returns `PARAM` and `/dev/adc/battery` reads `err`.
 
 The SAR's initial code for the attenuation comes from eFuse block 2, plus
 1600 as ESP-IDF reads it, or on a chip without that calibration from a
 binary search for the code at which internal ground reads zero; on the bench
-board the two agree within 2. Each conversion takes the SAR from the entropy
-source and the radio, powers it, converts and restores every register it
-changed; while either holds the SAR a read returns `TIMEOUT`. The radio
-holds it while Wi-Fi, BLE or 802.15.4 is up, so conversions run with the
-radios down. The shell's `adc` command and BASIC's
-`ADC()` use it.
+board the two agree within 2. With the SAR free, a conversion takes it,
+powers it, converts and restores every register it changed. While Wi-Fi, BLE or 802.15.4 is up the radio holds the SAR, keeping
+it powered and clocked; a conversion then borrows it and changes only the
+initial code, the reference and the one-shot controls, as ESP-IDF's one-shot
+read does, and restores them. While the entropy source holds the SAR a read
+returns `TIMEOUT`. The shell's `adc` command and BASIC's `ADC()` use it.
 
 The `adc-c5` category compares the eFuse codes with measured ones, converts
 channel 5's pad while its own GPIO drives it high or low and while both
-internal pulls hold it, checks the 10- and 8-bit scaling, and checks that a
+internal pulls hold it, checks the 10- and 8-bit scaling, reads the
+temperature sensor and checks it is powered down again, and checks that a
 conversion restores the SAR's clocks, power and registers and gives the SAR
-back to the entropy source. Voltages between the rails need a fixture.
+back to the entropy source. The `phy-c5` diagnostic repeats the pad and
+sensor readings with the PHY up, checks they match the PHY-down readings,
+and checks the PHY's power, clocks and sensor settings are left as it set
+them. Voltages between the rails need a fixture.
 
 ## 1-Wire
 

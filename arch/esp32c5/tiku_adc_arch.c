@@ -1,12 +1,12 @@
 /*
  * Tiku Operating System v0.06
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_adc_arch.c - C5 SAR ADC1 one-shot conversions.  Each conversion
- * powers the SAR, takes it from the entropy source and the radio, and puts
- * every register it touched back.
+ * tiku_adc_arch.c - C5 SAR ADC1 one-shot conversions and the temperature
+ * sensor.  A conversion powers the SAR, or borrows it from a running radio,
+ * and puts every register it touched back.
  * Register sequence: ESP-IDF 4d59230 adc_ll.h, adc_oneshot_hal.c,
- * adc_hal_common.c, sar_periph_ctrl.c, regi2c_saradc.h and the C5 eFuse
- * table.
+ * adc_hal_common.c, sar_periph_ctrl.c, temperature_sensor_ll.h,
+ * temperature_sensor_hal.c, regi2c_saradc.h and the C5 eFuse table.
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stddef.h>
@@ -28,6 +28,7 @@
 #define PCR_SAR_CONF    0x60096088u
 #define PCR_SAR_CLKM    0x6009608Cu
 #define PCR_SAR_DIV     0x60096148u
+#define PCR_TSENS       0x60096090u
 #define FE_CLOCK        0x600A9C14u
 #define ANA_CLOCK       0x600AF018u
 #define ANA_SELECT      0x600AF81Cu
@@ -42,6 +43,10 @@
 #define ADC1_DONE       (1u << 31)
 #define SAR_FORCE_ON    ((1u << 6) | (3u << 27))
 #define FE_CLOCKS       ((1u << 13) | (1u << 15))
+#define TSENS_PU        (1u << 22)
+#define TSENS_CLOCK     ((1u << 22) | (1u << 20))
+#define TSENS_SETTLE_US 300u
+#define TSENS_MIDDLE    15u
 #define WAIT_US         1000u
 #define CAL_TIMES       10u
 #define PIN_MUX(n)      (0x60090000u + 4u * (n))
@@ -50,14 +55,25 @@
 
 /* Registers a conversion changes, restored in reverse order after it. */
 static const uint32_t saved_regs[] = {
-    PCR_SAR_CONF, PCR_SAR_CLKM, PCR_SAR_DIV, RF_PWC,  ANA_CLOCK,
-    FE_CLOCK,     ANA_SELECT,   SAR_CTRL,    SAR_ONETIME};
-/* SAR analog registers: initial code low and high, reference, ground. */
-static const uint8_t analog_regs[] = {0u, 1u, 2u, 8u};
+    PCR_SAR_CONF, PCR_SAR_CLKM, PCR_SAR_DIV, RF_PWC,  ANA_CLOCK,   FE_CLOCK,
+    ANA_SELECT,   PCR_TSENS,    SAR_TSENS,   SAR_CTRL, SAR_ONETIME};
+/* SAR analog registers: initial code low and high, reference, the
+ * temperature sensor's range, ground. */
+static const uint8_t analog_regs[] = {0u, 1u, 2u, 6u, 8u};
+
+/* The temperature sensor's ranges (its range register value and offset),
+ * from temperature_sensor_periph.c; the middle one is offset 0. */
+static const struct {
+    uint8_t reg;
+    int8_t offset;
+} ranges[] = {{5u, -2}, {7u, -1}, {15u, 0}, {11u, 1}, {10u, 2}};
 
 static uint32_t saved[sizeof(saved_regs) / sizeof(saved_regs[0])];
 static uint8_t analog[sizeof(analog_regs)];
 static uint8_t opened, shift, atten, code_efuse;
+/* 1 while a conversion borrows the SAR from the radio, which keeps it
+ * powered and clocked. */
+static uint8_t shared;
 static uint16_t code;
 
 /** @brief Change a register field without modifying neighboring fields. */
@@ -67,11 +83,11 @@ static void field(uint32_t address, uint32_t mask, uint32_t value)
 }
 
 /** @brief Whether an ADC conversion, the temperature sensor or the RNG's
- *  sampling is running on the SAR. */
+ *  sampling is running on the SAR; the radio keeps the sensor powered. */
 static int sar_busy(void)
 {
     return (TIKU_C5_REG_READ(SAR_CTRL) & 2u) ||
-           (TIKU_C5_REG_READ(SAR_TSENS) & (1u << 22)) ||
+           (!shared && (TIKU_C5_REG_READ(SAR_TSENS) & TSENS_PU)) ||
            (TIKU_C5_REG_READ(SAR_CTRL2) & (1u << 24)) ||
            (TIKU_C5_REG_READ(SAR_ONETIME) & ONETIME_START) ||
            (TIKU_C5_REG_READ(RNG_CFG) & 1u) ||
@@ -92,36 +108,44 @@ static void end(unsigned regs_saved)
     for (i = sizeof(saved) / sizeof(saved[0]); i > 0; i--) {
         TIKU_C5_REG_WRITE(saved_regs[i - 1], saved[i - 1]);
     }
-    (void)tiku_c5_analog_release(TIKU_C5_ANALOG_ADC);
+    if (!shared) {
+        (void)tiku_c5_analog_release(TIKU_C5_ANALOG_ADC);
+    }
 }
 
 /**
- * @brief Take the SAR and power it for one-shot conversions.
+ * @brief Take the SAR, or borrow it from the radio, for one-shot conversions.
  *
- * Clocks the controller from the crystal / 16, wakes the analog register
- * bus and the front end, saves the analog registers and sets the reference.
+ * A free SAR is clocked from the crystal / 16 with its analog bus and front
+ * end woken; the radio's is left as the radio set it.  Both save the analog
+ * registers and set the reference.
  * @return 0, or -1 with nothing changed if the SAR is held elsewhere
  */
 static int begin(void)
 {
-    unsigned i;
+    unsigned i, owner = tiku_c5_analog_owner();
     uint8_t dref;
 
-    if (tiku_c5_analog_owner() != TIKU_C5_ANALOG_NONE || sar_busy() ||
-        tiku_c5_analog_acquire(TIKU_C5_ANALOG_ADC) != 0) {
+    shared = owner == TIKU_C5_ANALOG_PHY;
+    if ((owner != TIKU_C5_ANALOG_NONE && !shared) || sar_busy() ||
+        (!shared && tiku_c5_analog_acquire(TIKU_C5_ANALOG_ADC) != 0)) {
         return -1;
     }
     for (i = 0; i < sizeof(saved) / sizeof(saved[0]); i++) {
         saved[i] = TIKU_C5_REG_READ(saved_regs[i]);
     }
-    field(PCR_SAR_CONF, 4u, 4u);
-    field(PCR_SAR_CLKM, 0x7FFFFFu, (1u << 22) | (15u << 12));
-    field(PCR_SAR_DIV, 255u << 8, 1u << 8);
-    field(RF_PWC, 1u << 26, 0);
-    tiku_cpu_c5_delay_us(1);
-    field(RF_PWC, 3u << 26, 3u << 26);
-    field(ANA_CLOCK, 4u, 4u);
-    field(FE_CLOCK, FE_CLOCKS, FE_CLOCKS);
+    /* Beside the radio a conversion changes only the initial code, the
+     * reference and the one-shot controls, as ESP-IDF's one-shot read does. */
+    if (!shared) {
+        field(PCR_SAR_CONF, 4u, 4u);
+        field(PCR_SAR_CLKM, 0x7FFFFFu, (1u << 22) | (15u << 12));
+        field(PCR_SAR_DIV, 255u << 8, 1u << 8);
+        field(RF_PWC, 1u << 26, 0);
+        tiku_cpu_c5_delay_us(1);
+        field(RF_PWC, 3u << 26, 3u << 26);
+        field(ANA_CLOCK, 4u, 4u);
+        field(FE_CLOCK, FE_CLOCKS, FE_CLOCKS);
+    }
     for (i = 0; i < sizeof(analog); i++) {
         if (tiku_c5_analog_sar_reg(analog_regs[i], &analog[i], 0) != 0) {
             end(0);
@@ -178,7 +202,7 @@ static int search_code(uint8_t att, uint16_t *out)
 {
     uint32_t select = ((uint32_t)att << 23) | ONETIME_NONE | ONETIME_SAR1;
     uint32_t list[CAL_TIMES], sum = 0, lo_all, hi_all, raw;
-    uint8_t gnd = (uint8_t)(analog[3] | 2u);
+    uint8_t gnd = (uint8_t)(analog[4] | 2u);
     unsigned rep, i;
 
     if (tiku_c5_analog_sar_reg(8u, &gnd, 1) != 0) {
@@ -215,6 +239,42 @@ static int search_code(uint8_t att, uint16_t *out)
     sum -= lo_all + hi_all;
     *out = (uint16_t)(sum / (CAL_TIMES - 2u) +
                       (sum % (CAL_TIMES - 2u) < 4u ? 0u : 1u));
+    return 0;
+}
+
+/**
+ * @brief Read the temperature sensor on the middle range's scale.
+ *
+ * Runs inside begin()/end().  A powered-down sensor is powered in its middle
+ * range; one the radio keeps on is read in its range and moved onto the
+ * middle range's scale, 63.57 codes per range step (the HAL's factors).
+ */
+static int read_temp(uint32_t *out)
+{
+    uint8_t reg = (uint8_t)((analog[3] & 0xF0u) | TSENS_MIDDLE);
+    int offset = 0, value;
+    unsigned i;
+
+    if (TIKU_C5_REG_READ(SAR_TSENS) & TSENS_PU) {
+        for (i = 0; i < sizeof(ranges) / sizeof(ranges[0]); i++) {
+            if ((analog[3] & 0x0Fu) == ranges[i].reg) {
+                break;
+            }
+        }
+        if (i == sizeof(ranges) / sizeof(ranges[0])) {
+            return -1;
+        }
+        offset = ranges[i].offset;
+    } else {
+        field(PCR_TSENS, TSENS_CLOCK, TSENS_CLOCK);
+        if (tiku_c5_analog_sar_reg(6u, &reg, 1) != 0) {
+            return -1;
+        }
+        field(SAR_TSENS, TSENS_PU, TSENS_PU);
+        tiku_cpu_c5_delay_us(TSENS_SETTLE_US);
+    }
+    value = (int)(TIKU_C5_REG_READ(SAR_TSENS) & 255u) * 4386 - offset * 278800;
+    *out = value > 0 ? (uint32_t)((value + 2193) / 4386) : 0u;
     return 0;
 }
 
@@ -296,6 +356,9 @@ int tiku_adc_arch_channel_init(uint8_t channel)
     unsigned pad = channel + 1u;
     uint32_t state;
 
+    if (channel == TIKU_ADC_CH_TEMP) {
+        return TIKU_ADC_OK;
+    }
     if (channel > 5u || tiku_gpio_owner(pad / 8u + 1u, pad % 8u) != NULL) {
         return TIKU_ADC_ERR_PARAM;
     }
@@ -313,7 +376,8 @@ int tiku_adc_arch_read(uint8_t channel, uint16_t *value)
     uint32_t state, raw = 0;
     int rc = TIKU_ADC_OK;
 
-    if (!opened || channel > 5u || value == NULL) {
+    if (!opened || (channel > 5u && channel != TIKU_ADC_CH_TEMP) ||
+        value == NULL) {
         return TIKU_ADC_ERR_PARAM;
     }
     state = TIKU_C5_IRQ_SAVE();
@@ -321,17 +385,31 @@ int tiku_adc_arch_read(uint8_t channel, uint16_t *value)
         TIKU_C5_IRQ_RESTORE(state);
         return TIKU_ADC_ERR_TIMEOUT;
     }
-    if (set_code(code) != 0 ||
-        convert(((uint32_t)atten << 23) | ((uint32_t)channel << 25) |
-                    ONETIME_SAR1, &raw) != 0) {
+    if (channel == TIKU_ADC_CH_TEMP) {
+        if (read_temp(&raw) != 0) {
+            rc = TIKU_ADC_ERR_TIMEOUT;
+        }
+    } else if (set_code(code) != 0 ||
+               convert(((uint32_t)atten << 23) | ((uint32_t)channel << 25) |
+                           ONETIME_SAR1, &raw) != 0) {
         rc = TIKU_ADC_ERR_TIMEOUT;
+    } else {
+        raw >>= shift;
     }
     end(sizeof(analog));
     TIKU_C5_IRQ_RESTORE(state);
     if (rc == TIKU_ADC_OK) {
-        *value = (uint16_t)(raw >> shift);
+        *value = (uint16_t)raw;
     }
     return rc;
+}
+
+int tiku_c5_adc_celsius(uint16_t value)
+{
+    uint32_t cal = TIKU_C5_REG_READ(EFUSE_BLK2(4)) & 511u;
+    int tenths = (cal & 256u) ? -(int)(cal & 255u) : (int)(cal & 255u);
+
+    return ((int)value * 4386 - 205200 - tenths * 1000) / 10000;
 }
 
 uint16_t tiku_c5_adc_init_code(int *from_efuse)
