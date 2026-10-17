@@ -8,8 +8,8 @@
  * tiku_shell_cmd_sdr.c - "sdr" command: the radio as a receiver.
  *
  * `start` reserves the capture bank and powers the radio up; `stop` restores
- * the default gain hold and frees the bank. C5 also powers its exclusive
- * PHY off; C61 leaves Wi-Fi up. `spec` and `sweep` print TikuSDR's SPEC lines.
+ * the default gain hold and frees the bank. C5 powers its PHY off; C61 TX
+ * builds stop Wi-Fi before releasing RX. `spec` and `sweep` print SPEC lines.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,6 +22,9 @@
 #include <shell/tiku_shell.h>
 #include <interfaces/wireless/tiku_wireless.h>
 #include <drivers/wifi/esp/tiku_drv_sdr_esp.h>
+#if (TIKU_DRV_SDR_ESP_TX_ENABLE + 0)
+#include <drivers/wifi/esp/tiku_drv_sdr_tx_esp.h>
+#endif
 #if defined(PLATFORM_ESP32C5)
 #include <drivers/wifi/esp/c5/sdr_c5.h>
 #endif
@@ -291,6 +294,21 @@ static void sdr_start(void)
     SHELL_PRINTF("SDR ready\n");
 }
 
+/** @brief Release the RX bank; C61 TX builds first stop Wi-Fi. */
+static void sdr_stop(void)
+{
+    tiku_drv_sdr_esp_hold(TIKU_DRV_SDR_ESP_HOLD);
+#if defined(PLATFORM_ESP32C61) && (TIKU_DRV_SDR_ESP_TX_ENABLE + 0)
+    if (tiku_drv_sdr_esp_reserved() && !tiku_drv_sdr_tx_esp_held() &&
+        tiku_wireless_power(0U) != 0) {
+        SHELL_PRINTF("ERR stop radio\n");
+        return;
+    }
+#endif
+    tiku_drv_sdr_esp_release();
+    SHELL_PRINTF(tiku_drv_sdr_esp_reserved() ? "ERR stop busy\n" : "SDR stopped\n");
+}
+
 /** @brief One machine line: bank state, rates, FFT sizes, tuning range. */
 static void sdr_info(void)
 {
@@ -478,9 +496,7 @@ void tiku_shell_cmd_sdr(uint8_t argc, const char *argv[])
     } else if (strcmp(argv[1], "start") == 0) {
         sdr_start();
     } else if (strcmp(argv[1], "stop") == 0) {
-        tiku_drv_sdr_esp_hold(TIKU_DRV_SDR_ESP_HOLD);
-        tiku_drv_sdr_esp_release();
-        SHELL_PRINTF(tiku_drv_sdr_esp_reserved() ? "ERR stop busy\n" : "SDR stopped\n");
+        sdr_stop();
     } else if (strcmp(argv[1], "info") == 0) {
         sdr_info();
     } else if (strcmp(argv[1], "bands") == 0) {
