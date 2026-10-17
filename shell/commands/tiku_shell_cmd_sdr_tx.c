@@ -64,9 +64,18 @@ void tiku_shell_cmd_sdr_tx(uint8_t argc, const char *argv[])
 {
     if (argc == 3 && !strcmp(argv[2], "info")) {
 #if (TIKU_DRV_SDR_ESP_TX_ENABLE + 0)
+        const tiku_sdr_tx_band_t *bands;
+        unsigned count = tiku_drv_sdr_tx_esp_bands(&bands), n;
         SHELL_PRINTF("TXCAP 1 %lu %u %u %u 2412 2462 5 %u\n",
                      (unsigned long)TIKU_SDR_TX_HZ, TIKU_SDR_TX_WORDS_MAX,
                      TIKU_SDR_TX_ALIGN, TIKU_SDR_TX_MS_MAX, TIKU_SDR_TX_CHUNK);
+        SHELL_PRINTF("TXBANDS 1 %u", count);
+        for (n = 0; n < count; n++) {
+            SHELL_PRINTF(" %lu %lu %lu", (unsigned long)bands[n].low_mhz,
+                         (unsigned long)bands[n].high_mhz,
+                         (unsigned long)bands[n].step_mhz);
+        }
+        SHELL_PRINTF("\n");
 #else
         SHELL_PRINTF("TXCAP 0\n");
 #endif
@@ -95,7 +104,7 @@ void tiku_shell_cmd_sdr_tx(uint8_t argc, const char *argv[])
                    decimal(argv[4], 128, &b)) {
             rc = tiku_drv_sdr_tx_esp_tone(argv[3][0] == '-' ? -(int)a : (int)a, b);
         } else if (argc == 5 && !strcmp(argv[2], "send") &&
-                   decimal(argv[3], 2462, &a) && decimal(argv[4], TIKU_SDR_TX_MS_MAX, &b)) {
+                   decimal(argv[3], UINT32_MAX, &a) && decimal(argv[4], TIKU_SDR_TX_MS_MAX, &b)) {
             tiku_sdr_tx_result_t result;
             uint32_t context[3] = {a, 0, b};
             tiku_drv_sdr_tx_esp_status(&context[1], NULL);

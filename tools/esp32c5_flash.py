@@ -32,8 +32,8 @@ def validate_flash_target(esp, meta):
         raise ValueError("secure boot/encryption or unexpected chip identity: refusing flash")
     esp.flash_spi_attach(0)
     identity = esp.flash_id()
-    if identity in (0, 0xFFFFFF) or identity >> 16 != 22:
-        raise ValueError("C5 flash layout requires a 4 MiB flash")
+    if identity in (0, 0xFFFFFF) or identity >> 16 not in (22, 23):
+        raise ValueError("C5 flash layout requires a 4 or 8 MiB flash")
 
 
 def install(esp, data, commands, xip=None):

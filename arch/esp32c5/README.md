@@ -10,7 +10,7 @@ its internal loopback is tested, but an external adapter is not qualified.
 An I2C0 backend is available through the C bus API; its external-device
 transfers still require hardware qualification. An optional C5 PHY driver
 supports calibration and RF lifecycle diagnostics. Cached PSRAM and an opt-in
-native Wi-Fi, BLE and receive-only SDR adapters are implemented; their
+native Wi-Fi, BLE and SDR RX/TX adapters are implemented; their
 qualification limits are described below and in the C5 driver README.
 Deep and light sleep, GPIO edge interrupts, an SPI master, the SAR ADC and
 a 1-Wire master are described below. Requests for unsupported optional
@@ -89,11 +89,15 @@ After backing up the board, choose either a RAM run or installation:
 Both loaders reset the selected board. The RAM loader does not issue flash
 writes, but the loaded kernel can provision a blank store and update
 persist cells. A RAM kernel is therefore **not** a read-only storage test.
-The flash installer checks chip, revision, security state and 4 MiB flash
+The flash installer checks chip, revision, security state and 4 or 8 MiB flash
 geometry, writes only the boot-image extent at `0x2000`, verifies it, and
 requests reset. It does not erase the storage partitions. Use
 `--no-monitor` for a firmware image without a shell; that checks programming,
 not firmware execution. Whole-chip `make erase` is refused.
+
+On an 8 MiB flash device the port maps and allocates the first 4 MiB, using
+the same code, XIP, store and durable-mirror offsets as the 4 MiB profile.
+The upper 4 MiB is outside the TikuOS memory tiers and installer write ranges.
 
 ## Execute application code from flash
 

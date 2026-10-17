@@ -107,7 +107,8 @@ tiku_flash_err_t tiku_flash_init(void)
     tiku_c5_rom_flash_attach(0, 0);
     /* The ROM's chip record keeps the manufacturer in bits 23:16 and the
      * capacity in bits 7:0, the reverse of the RDID byte order. */
-    if (read_identity() != 0 || ((jedec >> 16) & 255u) != 22u ||
+    if (read_identity() != 0 ||
+        (((jedec >> 16) & 255u) != 22u && ((jedec >> 16) & 255u) != 23u) ||
         tiku_c5_rom_flash_config(
             ((jedec & 255u) << 16) | (jedec & 0xFF00u) | ((jedec >> 16) & 255u),
             TIKU_FLASH_SIZE_BYTES, 65536, TIKU_FLASH_SECTOR_SIZE,
