@@ -83,6 +83,10 @@ $(eval $(call tiku_option,TIKU_DRV_WIFI_CYW43_ENABLE,bool,Parts,cap:CYW43,\
   CYW43439 WiFi))
 $(eval $(call tiku_option,TIKU_DRV_BLE_EM9305_ENABLE,bool,Parts,mcu:apollo510b,\
   EM9305 Bluetooth LE radio))
+$(eval $(call tiku_option,TIKU_DRV_SDR_ESP_ENABLE,bool,Parts,mcu:esp32c5+esp32c61,\
+  IQ snapshot receiver (C5 needs XIP; C61 needs its Wi-Fi driver)))
+$(eval $(call tiku_option,TIKU_DRV_SDR_ESP_TX_ENABLE,bool,Parts,mcu:esp32c5,\
+  Preloaded IQ transmission at 80 MS/s (needs the SDR receiver profile)))
 
 # --- Accelerators and display ------------------------------------------------
 $(eval $(call tiku_option,TIKU_DRV_GPU_ENABLE,bool,Accelerators,\

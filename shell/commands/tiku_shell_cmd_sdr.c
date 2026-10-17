@@ -18,6 +18,7 @@
 #include <string.h>
 
 #include "tiku_shell_cmd_sdr.h"
+#include "tiku_shell_cmd_sdr_tx.h"
 #include <shell/tiku_shell.h>
 #include <interfaces/wireless/tiku_wireless.h>
 #include <drivers/wifi/esp/tiku_drv_sdr_esp.h>
@@ -35,6 +36,10 @@ static void sdr_help(void)
                  " hex <offset> <count>\n"
                  "  rate: 0 80, 1 40, 2 20, 3 10, 4 8, 5 4 MS/s; words up to"
                  " %lu\n", (unsigned long)TIKU_DRV_SDR_ESP_WORDS_MAX);
+    SHELL_PRINTF("       sdr tx info | status | clear | begin <words> |"
+                 " put <offset> <IQ10 hex>...\n"
+                 "       sdr tx tone <cycles -128..128> <amplitude 1..128> |"
+                 " send <MHz> <ms>\n");
 }
 
 /** @brief Parse decimal digits within an inclusive bound; refuse signs and overflow. */
@@ -456,6 +461,10 @@ static int sdr_probe(uint8_t argc, const char *argv[])
 
 void tiku_shell_cmd_sdr(uint8_t argc, const char *argv[])
 {
+    if (argc >= 2 && !strcmp(argv[1], "tx")) {
+        tiku_shell_cmd_sdr_tx(argc, argv);
+        return;
+    }
     if (argc < 2) {
         sdr_help();
 #if TIKU_DRV_SDR_ESP_PROBE
