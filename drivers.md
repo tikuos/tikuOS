@@ -384,6 +384,7 @@ the node tables small on parts with hundreds of pins.
 | MSP430 | Device-declared P1–P9, with only available ports included; J is numeric port 255. Eight register bits per port. |
 | nRF54L15 | Virtual ports 1–3 mean physical P0–P2; 32 bits per port. |
 | nRF54LM20A/B | As above, plus virtual port 4 for P3. |
+| nRF54LV10A | Virtual ports 1–2 mean physical P0–P1; 32 bits per port. |
 | Apollo4 Lite/Plus | Virtual ports 1–16, eight pads each. Pad = `(port - 1) * 8 + pin`. |
 | Apollo510/510B | Virtual ports 1–28, eight pads each, using the same mapping. |
 | RP2350 | Virtual ports 1–4 map GP0–GP29. Port 4 ends at pin 5; QSPI pins are not exposed. |
