@@ -56,11 +56,12 @@ MEMORY
      * access from 0xFD000 up faults.  The MDK's memory header lists
      * 0x1FD000, which the part does not have. */
     RRAM (rx)  : ORIGIN = 0x00000000, LENGTH = 0xFD000
-    /* App SRAM is 175 KB of the 192 KB part.  Above it: 16 KB
-     * (0x2002BC00..0x2002FBFF) for the FLPR coprocessor carve, then 1 KB
-     * (0x2002FC00..0x2002FFFF) that holds the span MPC00 overrides cover
-     * from 0x2002FEE0.  Every build reserves both. */
-    SRAM (rwx) : ORIGIN = 0x20000000, LENGTH = 0x2BC00
+    /* App SRAM is 172 KB of the 192 KB part.  Above it: 16 KB
+     * (0x2002B000..0x2002EFFF) for the FLPR coprocessor carve, 4 KB-aligned
+     * for its MPC00 override, then 4 KB (0x2002F000..0x2002FFFF) that holds
+     * the span MPC00 overrides cover from 0x2002FEE0.  Every build reserves
+     * both.  The carve must match TIKU_FLPR_RAM_* in tiku_flpr_ipc.h. */
+    SRAM (rwx) : ORIGIN = 0x20000000, LENGTH = 0x2B000
 }
 
 /* Region bounds: __flash_* is the RRAM, __sram_* the app SRAM. */

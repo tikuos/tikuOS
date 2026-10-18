@@ -85,7 +85,8 @@ uint32_t tiku_flpr_arch_reply(void *out, uint32_t cap);
  * @param measured  Out: transitions observed by this core's sampler.
  * @param ms        Out: wall-clock milliseconds the pattern took (pace
  *                  calibration: expected = period_us * edges / 2000).
- * @return 0 done, -1 bad args / not running, -2 firmware never finished.
+ * @return 0 done, -1 bad args / not running / no pulse engine (the
+ *         nRF54LV10A, which has no P2), -2 firmware never finished.
  */
 int tiku_flpr_arch_pulse(uint32_t period_us, uint32_t edges,
                          uint32_t *measured, uint32_t *ms);

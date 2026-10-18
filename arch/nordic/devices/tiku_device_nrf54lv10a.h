@@ -106,14 +106,14 @@
 #define TIKU_DEVICE_RAM_SIZE        (192UL * 1024UL)
 
 /**
- * @brief App-usable SRAM: the part less its top 17 KB, the 16 KB FLPR (VPR
- *        RISC-V) coprocessor carve at 0x2002BC00 and the 1 KB at 0x2002FC00
+ * @brief App-usable SRAM: the part less its top 20 KB, the 16 KB FLPR (VPR
+ *        RISC-V) coprocessor carve at 0x2002B000 and the 4 KB at 0x2002F000
  *        holding the MPC-covered span.
  *
  * Every build reserves both, and memory reports use this figure.  It must
  * equal LENGTH(SRAM) in nrf54lv10a.ld.
  */
-#define TIKU_DEVICE_RAM_USABLE      (175UL * 1024UL)
+#define TIKU_DEVICE_RAM_USABLE      (172UL * 1024UL)
 #define TIKU_DEVICE_RAM_START       0x20000000UL
 
 /**

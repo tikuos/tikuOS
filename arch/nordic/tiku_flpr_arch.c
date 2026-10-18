@@ -282,6 +282,11 @@ int tiku_flpr_arch_pulse(uint32_t period_us, uint32_t edges,
 {
     volatile tiku_flpr_pulse_t *req =
         (volatile tiku_flpr_pulse_t *)TIKU_FLPR_SHARED->a2f_buf;
+#if defined(TIKU_DEVICE_NRF54LV10A)
+    /* No pulse engine: VIO bit 7 is P2.07, and this part has no P2. */
+    (void)req; (void)period_us; (void)edges; (void)measured; (void)ms;
+    return -1;
+#else
     uint32_t mask = 1u << TIKU_FLPR_VIO_BIT;
     uint32_t count = 0u, prev, cur, spin;
     tiku_clock_time_t t0 = tiku_clock_time();
@@ -333,6 +338,7 @@ int tiku_flpr_arch_pulse(uint32_t period_us, uint32_t edges,
               * 1000u / (uint32_t)TIKU_CLOCK_SECOND;
     }
     return (spin < 20000000u) ? 0 : -2;       /* -2: firmware never DONE  */
+#endif /* TIKU_DEVICE_NRF54LV10A */
 }
 
 /*---------------------------------------------------------------------------*/
@@ -399,12 +405,21 @@ int tiku_flpr_arch_spin_timed(uint32_t iters, uint32_t *passes, uint32_t *us)
 /* Beacon offload                                                            */
 /*---------------------------------------------------------------------------*/
 
+/* CCM00's SPU00 slot: bits 17:12 of its address on the nRF54LV10A (10, for
+ * 0x5004A000).  The nRF54L15 and nRF54LM20A/B builds use 6, the nRF54L15's
+ * slot; the LM20's CCM00 is at 0x5004A000, slot 10. */
+#if defined(TIKU_DEVICE_NRF54LV10A)
+#define FLPR_SPU00_CCM00  ((NRF_CCM00_S_BASE >> 12) & 0x3Fu)
+#else
+#define FLPR_SPU00_CCM00  6u
+#endif
+
 /**
  * @brief Make the radio peripherals non-secure for the FLPR (@p on), or
  *        secure again.
  *
- * Covers RADIO, TIMER10 and DPPIC10 (SPU10 slots 10, 5, 2), UARTE21 (SPU20
- * slot 7) and DPPI channels 3..5.
+ * Covers CCM00 (SPU00 slot FLPR_SPU00_CCM00), RADIO, TIMER10 and DPPIC10
+ * (SPU10 slots 10, 5, 2), UARTE21 (SPU20 slot 7) and DPPI channels 3..5.
  *
  * @note The M33 programs the radio link config before the flip and leaves
  *       these peripherals alone until the flip back.
@@ -419,7 +434,7 @@ static void flpr_radio_ns(int on)
      * channel left secure never meets a non-secure publisher. */
     uint32_t ch;
     if (on) {
-        NRF_SPU00_S->PERIPH[6].PERM  &= ~((1u << 4) | (1u << 5));  /* CCM00 */
+        NRF_SPU00_S->PERIPH[FLPR_SPU00_CCM00].PERM &= ~((1u << 4) | (1u << 5));
         NRF_SPU10_S->PERIPH[10].PERM &= ~((1u << 4) | (1u << 5));
         NRF_SPU10_S->PERIPH[5].PERM  &= ~((1u << 4) | (1u << 5));
         NRF_SPU10_S->PERIPH[2].PERM  &= ~((1u << 4) | (1u << 5));
@@ -435,7 +450,7 @@ static void flpr_radio_ns(int on)
         NRF_SPU10_S->PERIPH[5].PERM  |= (1u << 4) | (1u << 5);
         NRF_SPU10_S->PERIPH[2].PERM  |= (1u << 4) | (1u << 5);
         NRF_SPU20_S->PERIPH[7].PERM  |= (1u << 4) | (1u << 5);
-        NRF_SPU00_S->PERIPH[6].PERM  |= (1u << 4) | (1u << 5);
+        NRF_SPU00_S->PERIPH[FLPR_SPU00_CCM00].PERM |= (1u << 4) | (1u << 5);
     }
     __asm__ volatile ("dsb 0xF" ::: "memory");
 }

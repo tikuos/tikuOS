@@ -1203,7 +1203,7 @@ ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
 ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
 TIKU_TIER_SRAM_MIN ?= 253952
 else ifeq ($(MCU),nrf54lv10a)
-# LV10A: 80 KB, in the 175 KB of app SRAM below the FLPR carve.
+# LV10A: 80 KB, in the 172 KB of app SRAM below the FLPR carve.
 TIKU_TIER_SRAM_MIN ?= 81920
 else
 # L15: 92 KB.  The primary bank also holds the reservation table
@@ -1885,20 +1885,14 @@ TIKU_CAP_154 := 1
 # gitignored temp/toolchains/ (RISCV_PREFIX), embeds the flat binary in this
 # image, and compiles the loader (tiku_flpr_arch.c) and /sys/flpr.
 ifeq ($(TIKU_FLPR_ENABLE),1)
-# The nRF54LV10A's SRAM ends at 0x20030000.  nrf54lv10a.ld reserves 16 KB at
-# 0x2002BC00 for the FLPR, but tiku_flpr_ipc.h and tiku_flpr.ld place the
-# FLPR image at 0x2003C000.
-ifeq ($(MCU),nrf54lv10a)
-$(error TIKU_FLPR_ENABLE=1 is not supported on MCU=nrf54lv10a: the FLPR \
-image and IPC page are placed at 0x2003C000, above this part's SRAM)
-endif
-# The nRF54L15 and nRF54LM20A/B have the same VPR00 (FLPR) core: base
-# 0x5004C000, IRQ 76, MPC00 at 0x50041000, the same SPU10/SPU20 slots.  Its
-# memory is the top 16 KB of the lower SRAM bank (0x2003C000-0x2003FFFF) on
-# every nordic part, so tiku_flpr_ipc.h and tiku_flpr.ld serve all three; the
-# LM20's RAM2 tier is outside it.  Each part's app linker script reserves
-# those 16 KB in every build, so the layout does not change with
-# TIKU_FLPR_ENABLE.
+# Every nordic part has the same VPR00 (FLPR) core: base 0x5004C000, IRQ 76,
+# MPC00 at 0x50041000, the same SPU10/SPU20 slots.  Its memory is a 16 KB
+# SRAM carve: the top of the lower bank (0x2003C000-0x2003FFFF) on the
+# nRF54L15 and nRF54LM20A/B, whose RAM2 tier is outside it, and
+# 0x2002B000-0x2002EFFF on the nRF54LV10A, whose SRAM ends at 0x20030000.
+# tiku_flpr_ipc.h picks the base by device; FLPR_LDFLAGS hands the same base
+# to tiku_flpr.ld.  Each part's app linker script reserves the carve in
+# every build, so the layout does not change with TIKU_FLPR_ENABLE.
 SRCS += arch/nordic/tiku_flpr_arch.c
 CFLAGS += -DTIKU_FLPR_ENABLE=1
 # The FLPR firmware is the on-die BLE controller, under the host stack
@@ -1917,6 +1911,13 @@ FLPR_BUILD    = $(BUILD_DIR)/flpr
 FLPR_CFLAGS   = -march=rv32emc_zicsr -mabi=ilp32e -Os -Wall -Wextra \
                 -ffreestanding -nostdlib -nostartfiles \
                 -ffunction-sections -fdata-sections -I$(PROJ_DIR) -MMD -MP
+# The device define selects the firmware's register map and the carve base
+# in tiku_flpr_ipc.h.
+FLPR_CFLAGS  += -D$(DEVICE_DEFINE)=1
+FLPR_LDFLAGS  =
+ifeq ($(MCU),nrf54lv10a)
+FLPR_LDFLAGS += -Wl,--defsym=__tiku_flpr_base_override=0x2002B000
+endif
 FLPR_OBJS     = $(FLPR_BUILD)/tiku_flpr_crt0.o $(FLPR_BUILD)/tiku_flpr_main.o
 TIKU_FLPR_IMG_O = $(FLPR_BUILD)/tiku_flpr_img.o
 ifeq ($(wildcard $(RISCV_CC)),)
@@ -4128,7 +4129,7 @@ $(FLPR_BUILD)/%.o: arch/nordic/flpr/%.c
 	$(RISCV_CC) $(FLPR_CFLAGS) -c -o $@ $<
 
 $(FLPR_BUILD)/tiku_flpr.elf: $(FLPR_OBJS) arch/nordic/flpr/tiku_flpr.ld
-	$(RISCV_CC) $(FLPR_CFLAGS) -T arch/nordic/flpr/tiku_flpr.ld \
+	$(RISCV_CC) $(FLPR_CFLAGS) $(FLPR_LDFLAGS) -T arch/nordic/flpr/tiku_flpr.ld \
 	    -Wl,--gc-sections -o $@ $(FLPR_OBJS)
 
 $(FLPR_BUILD)/tiku_flpr.bin: $(FLPR_BUILD)/tiku_flpr.elf

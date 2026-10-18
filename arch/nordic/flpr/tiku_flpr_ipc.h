@@ -14,10 +14,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 /*
- * Carve layout (the app linker scripts and tiku_flpr.ld match it):
- *   0x2003C000  FLPR .text/.rodata/.data/.bss   (image, loader-placed)
- *   ...         FLPR stack (grows down from the shared page)
- *   0x2003FC00  tiku_flpr_shared_t              (this header)
+ * Carve layout (the app linker scripts and tiku_flpr.ld match it), at
+ * 0x2003C000 on the nRF54L15 and nRF54LM20A/B, 0x2002B000 on the nRF54LV10A:
+ *   base           FLPR .text/.rodata/.data/.bss   (image, loader-placed)
+ *   ...            FLPR stack (grows down from the shared page)
+ *   base + 0x3C00  tiku_flpr_shared_t              (this header)
  *
  * SRAM is uncached for both masters.  A sender writes the payload, then a
  * barrier, then the sequence word or flag; every field is volatile.
@@ -30,9 +31,14 @@
 #include <stdint.h>
 
 /* Carve geometry used by the loader.  The MEMORY regions in the app-core
- * scripts (nrf54l15.ld, nrf54lm20a.ld) and tiku_flpr.ld repeat these values
- * and must match. */
+ * scripts (nrf54l15.ld, nrf54lm20a.ld, nrf54lv10a.ld) and the base the
+ * Makefile hands tiku_flpr.ld repeat these values and must match.  The base
+ * is 4 KB-aligned: MPC00 overrides it at 4 KB granularity. */
+#if defined(TIKU_DEVICE_NRF54LV10A)
+#define TIKU_FLPR_RAM_BASE   0x2002B000u
+#else
 #define TIKU_FLPR_RAM_BASE   0x2003C000u
+#endif
 #define TIKU_FLPR_RAM_SIZE   0x4000u                     /* 16 KB carve    */
 #define TIKU_FLPR_SHARED_ADDR (TIKU_FLPR_RAM_BASE + TIKU_FLPR_RAM_SIZE \
                                - 0x400u)                 /* top 1 KB       */
@@ -372,7 +378,8 @@ typedef struct {
     uint8_t  pdu[48];               /* [S0][LEN][S1][payload...] layout     */
 } tiku_flpr_beacon_t;
 
-/** @brief The pulse engine's VIO bit: VIO bit 7 == P2.07 == DK LED3. */
+/** @brief The pulse engine's VIO bit: VIO bit 7 == P2.07 == DK LED3 on the
+ *         nRF54L15-DK.  The nRF54LV10A has no P2 and no pulse engine. */
 #define TIKU_FLPR_VIO_BIT     7u
 
 /** @brief The shared page. */

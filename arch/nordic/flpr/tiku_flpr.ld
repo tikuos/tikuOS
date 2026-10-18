@@ -18,19 +18,21 @@
  * The top 1 KB of the carve is the shared IPC page (tiku_flpr_ipc.h) and the
  * stack grows down from just below it.  The geometry must match
  * TIKU_FLPR_RAM_* in tiku_flpr_ipc.h and the SRAM LENGTH in the app-core
- * scripts (nrf54l15.ld, nrf54lm20a.ld).
+ * scripts (nrf54l15.ld, nrf54lm20a.ld, nrf54lv10a.ld).  The carve is at
+ * 0x2003C000 unless the Makefile passes __tiku_flpr_base_override (0x2002B000
+ * on the nRF54LV10A).
  */
 
-MEMORY
-{
-    /* 16 KB carve minus the 1 KB shared page at the top. */
-    FLPR_RAM (rwx) : ORIGIN = 0x2003C000, LENGTH = 0x3C00
-}
+__tiku_flpr_base = DEFINED(__tiku_flpr_base_override)
+                   ? __tiku_flpr_base_override : 0x2003C000;
 
 ENTRY(_start)
 
 SECTIONS
 {
+    /* 16 KB carve minus the 1 KB shared page at the top. */
+    . = __tiku_flpr_base;
+
     .text :
     {
         KEEP(*(.init))              /* _start must sit at the carve base   */
@@ -38,7 +40,7 @@ SECTIONS
         *(.rodata*)
         *(.srodata*)
         . = ALIGN(4);
-    } > FLPR_RAM
+    }
 
     .data : ALIGN(4)
     {
@@ -46,7 +48,7 @@ SECTIONS
         *(.sdata*)
         *(.data*)
         . = ALIGN(4);
-    } > FLPR_RAM
+    }
 
     .bss : ALIGN(4)
     {
@@ -56,11 +58,11 @@ SECTIONS
         *(COMMON)
         . = ALIGN(4);
         __bss_end = .;
-    } > FLPR_RAM
+    }
 
     /* Stack: everything left in the carve, top-anchored just under the
-     * shared page, which lies outside this region's LENGTH. */
-    __stack_top = ORIGIN(FLPR_RAM) + LENGTH(FLPR_RAM);
+     * shared page. */
+    __stack_top = __tiku_flpr_base + 0x3C00;
 
     ASSERT(__bss_end <= __stack_top - 0x400,
            "FLPR image + 1 KB stack floor overflows the carve")

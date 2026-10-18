@@ -96,7 +96,7 @@ $(eval $(call tiku_option,TIKU_DRV_DC_ENABLE,bool,Accelerators,\
 $(eval $(call tiku_option,TIKU_AXON_ENABLE,bool,Accelerators,mcu:nrf54lm20b,\
   Axon NPU (needs the Nordic Axon checkout)))
 $(eval $(call tiku_option,TIKU_FLPR_ENABLE,bool,Accelerators,\
-  mcu:nrf54l15+nrf54lm20a+nrf54lm20b,FLPR RISC-V coprocessor (needs a RISC-V \
+  mcu:nrf54l15+nrf54lm20a+nrf54lm20b+nrf54lv10a,FLPR RISC-V coprocessor (needs a RISC-V \
   toolchain)))
 $(eval $(call tiku_option,TIKU_CRACEN_PK_ENABLE,bool,Accelerators,plat:nordic,\
   CRACEN public-key hardware))
