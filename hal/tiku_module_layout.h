@@ -1,5 +1,12 @@
 /*
- * TikuOS native-module storage and execution windows.
+ * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_module_layout.h - Native-module storage and execution windows
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_MODULE_LAYOUT_H_

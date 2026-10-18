@@ -1,4 +1,15 @@
 #!/usr/bin/env python3
+#
+# Tiku Operating System v0.06
+# Simple. Persistent. Intelligent.
+# http://tiku-os.org
+#
+# Authors: Ambuj Varshney <ambuj@tiku-os.org>
+#
+# check_kernel_dependencies.py - refuse optional-service includes and calls
+# from the core kernel, and platform includes from the portable radio layer.
+#
+# SPDX-License-Identifier: Apache-2.0
 """Reject optional-service includes and calls from the core kernel, and
 platform includes from the portable radio layer."""
 import argparse

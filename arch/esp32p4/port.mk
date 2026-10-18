@@ -1,3 +1,9 @@
+# port.mk -- the ESP32-P4 RAM profiles and the rules that build them.
+#
+# Authors: Ambuj Varshney <ambuj@tiku-os.org>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # Native ESP32-P4 RAM profiles; scratch writes require explicit qualification.
 TIKU_PLATFORM := esp32p4
 BOARD ?= olimex_esp32p4_pc

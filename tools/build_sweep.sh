@@ -9,8 +9,8 @@
 # build_sweep.sh - build each MCU in TARGETS, then run make lint.
 #
 # Prints every target's text, data and bss sizes, or the first error lines of
-# a failed build, and exits 1 when any build or the lint fails.  STM32N6,
-# RA8P1, ESP32-C61 and the Apollo510B are not in TARGETS.
+# a failed build, and exits 1 when any build or the lint fails.  The ESP32-P4
+# is not in TARGETS: its build needs a P4_PROFILE.
 #
 # SPDX-License-Identifier: Apache-2.0
 
@@ -47,7 +47,12 @@ nrf54lv10a|$SHELL_FLAGS
 apollo4l|$SHELL_FLAGS
 apollo4p|$SHELL_FLAGS
 apollo510|$SHELL_FLAGS
+apollo510b|$SHELL_FLAGS
 rp2350|$SHELL_FLAGS
+stm32n6|$SHELL_FLAGS
+ra8p1|$SHELL_FLAGS
+esp32c61|$SHELL_FLAGS
+esp32c5|$SHELL_FLAGS
 msp430fr5994|$SHELL_FLAGS
 msp430fr6989|TIKU_SHELL_ENABLE=1
 "
@@ -69,9 +74,9 @@ printf '%s\n' "$TARGETS" | while IFS= read -r entry; do
     flags=$(printf '%s' "$entry" | cut -d'|' -f2-)
     [ -n "$mcu" ] || continue
 
-    rm -f main.elf                       # never measure a stale ELF
+    rm -f main.elf "build/$mcu/main.elf"  # never measure a stale ELF
     log=$(make MCU="$mcu" $flags $JOBS 2>&1)
-    if [ ! -f main.elf ]; then
+    if [ ! -f main.elf ] && [ ! -f "build/$mcu/main.elf" ]; then
         printf '%-14s %-6s %9s %7s %9s  %s\n' "$mcu" FAIL - - - "$flags"
         printf '%s\n' "$log" | grep -E 'error:|Error [0-9]|overflowed|ERROR' \
             | head -4 | sed 's/^/      /'

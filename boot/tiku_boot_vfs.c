@@ -1,4 +1,14 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_boot_vfs.c - Firmware namespace assembly at boot
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #include "tiku.h"
 #include "tiku_boot_vfs.h"
 #include <kernel/vfs/tiku_vfs_tree.h>

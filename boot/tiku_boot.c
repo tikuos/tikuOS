@@ -89,11 +89,11 @@ static int tiku_boot_init_services(void);
 /*
  * @brief Run the boot sequence: CPU, memory, peripherals, then services.
  */
-int 
+int
 tiku_cpu_full_init(unsigned int cpu_freq)
 {
     int result;
-    
+
     current_boot_stage = TIKU_BOOT_STAGE_INIT;
 
     boot_complete = 0;
@@ -175,7 +175,7 @@ tiku_cpu_full_init(unsigned int cpu_freq)
 /**
  * @brief Stage the boot sequence has reached.
  */
-tiku_boot_stage_e 
+tiku_boot_stage_e
 tiku_boot_get_stage(void)
 {
     return current_boot_stage;
@@ -184,7 +184,7 @@ tiku_boot_get_stage(void)
 /**
  * @brief Whether tiku_cpu_full_init() has run every stage.
  */
-int 
+int
 tiku_boot_is_complete(void)
 {
     return boot_complete;

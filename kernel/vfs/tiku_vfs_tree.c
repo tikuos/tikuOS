@@ -1,5 +1,12 @@
 /*
- * TikuOS system VFS tree assembly.
+ * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_vfs_tree.c - System VFS tree assembly
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_vfs_tree.h"

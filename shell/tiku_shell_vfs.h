@@ -1,4 +1,14 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_shell_vfs.h - Read-only VFS views of shell rules and jobs
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #ifndef TIKU_SHELL_VFS_H_
 #define TIKU_SHELL_VFS_H_
 

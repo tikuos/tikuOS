@@ -1,4 +1,14 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_basic_vfs.h - Saved-program node for the static children of /data
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #ifndef TIKU_BASIC_VFS_H_
 #define TIKU_BASIC_VFS_H_
 

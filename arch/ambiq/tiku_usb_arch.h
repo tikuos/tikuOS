@@ -22,7 +22,7 @@
 /* The rail pads below come from the board header, which this include pulls in
  * itself, so a file can include this header before tiku.h; without the board
  * macros the build stops at the #error below. */
-#include "tiku_device_select.h" 
+#include "tiku_device_select.h"
 
 /*---------------------------------------------------------------------------*/
 /* TABLE 0 -- BOARD: WHICH SOCKET, WHICH RAILS, AND WHICH BOARD              */

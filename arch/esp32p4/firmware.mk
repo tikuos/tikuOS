@@ -1,3 +1,9 @@
+# firmware.mk -- the source lists of the native ESP32-P4 CPU0 firmware.
+#
+# Authors: Ambuj Varshney <ambuj@tiku-os.org>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # Native CPU0 firmware uses the portable core, shell and BASIC source lists.
 ASM_SRCS += arch/esp32p4/tiku_crt_early.S
 SRCS += $(addprefix arch/esp32p4/,tiku_boot_arch.c tiku_trap_arch.c \
