@@ -35,9 +35,10 @@ typedef void (*nordic_isr_t)(void);
 
 /* External IRQ count differs per device (highest MDK IRQn + 1):
  *   nRF54L15   : IRQs 0..271 (max = GPIOTE30_1 269)  -> 272 external
+ *   nRF54LV10A : IRQs 0..271 (max = CLOCK_POWER 270) -> 272 external
  *   nRF54LM20A : IRQs 0..289 (max = VREGUSB 289)     -> 290 external
  * 16 system exceptions + N external + the initial SP form the table.  The
- * named handlers below sit at identical IRQn indices on both parts (the IRQ
+ * named handlers below sit at identical IRQn indices on every part (the IRQ
  * enum values match); only the array length and the trailing default-fill
  * range change. */
 #if defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
@@ -133,7 +134,8 @@ static void tiku_nordic_apply_trims(void)
 
 /* FICR silicon-identification words that gate revision-specific errata
  * (nRF54L errata sheet 4503_401 + the MDK's nrf54l_erratas.h convention):
- * 0x00FFC340 = part marker (0x1C on nRF54L15, 0x29 on nRF54LM20A),
+ * 0x00FFC340 = part marker (0x1C on nRF54L15, 0x29 on nRF54LM20A, 0x27 on
+ * nRF54LV10A),
  * 0x00FFC344 = revision code (0x01/0x02 on nRF54L15), 0x00FFC334 = trim
  * version (extra gate on erratum 32). */
 #define NORDIC_FICR_PART  (*(volatile uint32_t *)0x00FFC340ul)
@@ -145,12 +147,12 @@ static void tiku_nordic_apply_trims(void)
  *
  * Register writes from the nRF54L errata sheet and nrfx system_nrf54l.c, in
  * the MDK's order around the trim loop.  Erratum 37 applies to the nRF54L15
- * (part 0x1C) and nRF54LM20A (0x29) alike.
+ * (part 0x1C), nRF54LM20A (0x29) and nRF54LV10A (0x27) alike.
  */
 static void tiku_nordic_sysinit_errata_early(void)
 {
-    /* Erratum 37 (nRF54L15 + nRF54LM20A): current can stay high after pin
-     * reset or power cycle unless this TAD register is set. */
+    /* Erratum 37 (nRF54L15, nRF54LM20A, nRF54LV10A): current can stay high
+     * after pin reset or power cycle unless this TAD register is set. */
     *(volatile uint32_t *)(NRF_TAD_S_BASE + 0x40Cul) = 1ul;
 }
 
@@ -241,9 +243,9 @@ static void tiku_nordic_sysinit_errata(void)
     *(volatile uint32_t *)0x50120624ul = (20ul | (1ul << 5));
     *(volatile uint32_t *)0x5012063Cul &= ~(1ul << 19);
 #else
-    /* nRF54LM20A: errata 31/32/40 and the ES-PDK regulator prime do not
-     * apply to part 0x29 (see nrf54l_erratas.h); only erratum 37 (applied
-     * above) and the FICR trims do. */
+    /* nRF54LM20A/B and nRF54LV10A: errata 31/32/40 and the ES-PDK regulator
+     * prime do not apply to parts 0x29 and 0x27 (see nrf54l_erratas.h);
+     * only erratum 37 (applied above) and the FICR trims do. */
     (void)NORDIC_FICR_PART; (void)NORDIC_FICR_REV; (void)NORDIC_FICR_TRIMV;
 #endif
 }
@@ -343,9 +345,9 @@ void tiku_nordic_reset_handler(void)
 /**
  * @brief Cortex-M33 vector table for the nRF54L parts.
  *
- * Placed in .vectors at the RRAM base.  Index 0 is the initial SP, 1..15 the
- * ARMv8-M system exceptions, 16.. the external IRQs (272 on nRF54L15, 290 on
- * nRF54LM20A); unused external slots hold nordic_default_handler.
+ * In .vectors at the RRAM base: index 0 the initial SP, 1..15 the ARMv8-M
+ * exceptions, 16.. the NORDIC_NUM_EXT_IRQS external IRQs (count per device
+ * above); unused external slots hold nordic_default_handler.
  */
 const nordic_isr_t tiku_nordic_vectors[16 + NORDIC_NUM_EXT_IRQS]
 __attribute__((section(".vectors"), used)) = {
@@ -395,8 +397,9 @@ __attribute__((section(".vectors"), used)) = {
     [16 + 219 ... 16 + 225] = nordic_default_handler,
     [16 + 227 ... 16 + 259] = nordic_default_handler,
     [16 + 261 ... 16 + 267] = nordic_default_handler,
-    /* Upper bound tracks the device IRQ count (271 on nRF54L15, 289 on the
-     * nRF54LM20A) so every remaining external slot is filled. */
+    /* Upper bound tracks the device IRQ count (271 on nRF54L15 and
+     * nRF54LV10A, 289 on the nRF54LM20A) so every remaining external slot
+     * is filled. */
 #if defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
     [16 + 289] = tiku_nordic_vregusb_isr,      /* VREGUSB_IRQn    = 289       */
     [16 + 269 ... 16 + 288] = nordic_default_handler,

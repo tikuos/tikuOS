@@ -48,6 +48,7 @@
  *   rp2350     0x400000 - 0x060000 - 0x01000 = 0x39F000  3708 KB
  *   lm20       0x1FD000 - 0x060000 - 0x04000 = 0x199000  1636 KB
  *   l15        0x17D000 - 0x060000 - 0x04000 = 0x119000  1124 KB
+ *   lv10a      0x0FD000 - 0x060000 - 0x04000 = 0x099000   612 KB
  *   ra8p1      0x100000 - 0x060000 - 0x04000 = 0x09C000   624 KB
  */
 /** @brief Expected carved-region size (documentation); 0 where not listed. */
@@ -59,6 +60,8 @@
 #define TIKU_NVM_REGION_BYTES  (3708u * 1024u)
 #elif defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
 #define TIKU_NVM_REGION_BYTES  (1636u * 1024u)
+#elif defined(TIKU_DEVICE_NRF54LV10A)
+#define TIKU_NVM_REGION_BYTES  (612u * 1024u)
 #elif defined(PLATFORM_NORDIC)
 #define TIKU_NVM_REGION_BYTES  (1124u * 1024u)
 #elif defined(PLATFORM_RA8P1)

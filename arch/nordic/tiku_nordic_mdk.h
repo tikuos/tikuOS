@@ -22,8 +22,10 @@
 #include <arch/nordic/mdk/nrf54lm20a.h>
 #elif defined(TIKU_DEVICE_NRF54LM20B)
 #include <arch/nordic/mdk/nrf54lm20b.h>
+#elif defined(TIKU_DEVICE_NRF54LV10A)
+#include <arch/nordic/mdk/nrf54lv10a.h>
 #else
-#error "No TikuOS Nordic device selected. Define TIKU_DEVICE_NRF54L15, TIKU_DEVICE_NRF54LM20A or TIKU_DEVICE_NRF54LM20B."
+#error "No TikuOS Nordic device selected. Define TIKU_DEVICE_NRF54L15, TIKU_DEVICE_NRF54LM20A, TIKU_DEVICE_NRF54LM20B or TIKU_DEVICE_NRF54LV10A."
 #endif
 
 #endif /* TIKU_NORDIC_MDK_H_ */

@@ -124,6 +124,11 @@
       * scales with PROGRAM_LINES, so RAM2 is the bound: each line takes 148
       * arena bytes on top of the fixed working set. */
 #    define TIKU_BASIC_PROGRAM_LINES 1400
+#  elif defined(TIKU_DEVICE_NRF54LV10A)
+     /* The LV10A has 175 KB of app SRAM, 65 KB less than the L15: 192 lines
+      * keep the arena inside the 80 KB tier floor (Makefile) with room
+      * beside it for process memory. */
+#    define TIKU_BASIC_PROGRAM_LINES 192
 #  elif defined(PLATFORM_RA8P1)
      /* The /data store bounds RA8P1: prog.bas and prog.ckpt both come out of
       * it, and 512 lines keep one program to a small share of it. */

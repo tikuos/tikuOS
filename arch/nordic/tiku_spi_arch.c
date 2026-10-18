@@ -32,7 +32,7 @@
  *     the low-power domain with only a handful of P0 pins),
  *   - errata 54L-55/69 do not apply to the nRF54L15, only to the LM20,
  *     LS05, LV10 and LC10 variants (per the MDK errata header); this driver
- *     applies their transfer workaround on the LM20.
+ *     applies their transfer workaround on the LM20 and the LV10A.
  * The SERIAL21 interrupt is unused; completion is polled on EVENTS_END.
  * The secure alias (_S, 0x500C7000) matches the rest of this port.
  */
@@ -45,8 +45,9 @@
  * peripheral-domain SERIAL21.  SCK and MOSI sit on P1.02/P1.03, the NFC1/NFC2
  * pads: on the nRF54L15-DK every other P1 pin is taken (P1.00/01 = LFXO
  * crystal, P1.04..07 = console UART with its RTS/CTS, P1.08/09/13 = buttons,
- * P1.10/14 = LEDs, P1.11/12 = default I2C, P1.15 = MISO).  The pads reset to
- * NFC mode (NFCT.PADCONFIG); tiku_spi_arch_init() switches them to GPIO.
+ * P1.10/14 = LEDs, P1.11/12 = default I2C, P1.15 = MISO).  On parts with an
+ * NFCT the pads reset to NFC mode (NFCT.PADCONFIG); tiku_spi_arch_init()
+ * switches them to GPIO.
  * They are defaults, not checked against the DK's header routing; a board
  * header overrides them.
  * There is no chip select here: the device driver drives CS on a free GPIO
@@ -74,12 +75,15 @@
 /** @brief Selected SPIM instance. */
 #define TIKU_SPIM                   TIKU_BOARD_SPI0_SPIM
 
+/* The NFC1/NFC2 pads, P1.02 and P1.03 on the nRF54L15 and nRF54LM20.  The
+ * nRF54LV10A has no NFCT; there P1.02 and P1.03 are plain GPIO. */
+#if !defined(TIKU_DEVICE_NRF54LV10A)
+
 /** @brief NFCT register block whose PADCONFIG selects NFC or GPIO pads. */
 #ifndef TIKU_SPI_NFCT
 #define TIKU_SPI_NFCT               NRF_NFCT_S
 #endif
 
-/* The NFC1/NFC2 pads, P1.02 and P1.03 on the nRF54L15 and nRF54LM20. */
 #define TIKU_SPI_NFC_PORT           1u
 #define TIKU_SPI_NFC1_PIN           2u
 #define TIKU_SPI_NFC2_PIN           3u
@@ -88,6 +92,8 @@
 #define TIKU_SPI_PIN_IS_NFC(port, pin) \
     ((port) == TIKU_SPI_NFC_PORT && \
      ((pin) == TIKU_SPI_NFC1_PIN || (pin) == TIKU_SPI_NFC2_PIN))
+
+#endif /* !TIKU_DEVICE_NRF54LV10A */
 
 /*---------------------------------------------------------------------------*/
 /* REGISTER FIELD CONSTANTS (MDK nrf54l15_types.h)                           */
@@ -176,10 +182,12 @@ static int spim_addr_is_ram(const void *p)
  * @brief Switch the NFC pads to GPIO when an SPI pin is one of them.
  *
  * NFCT.PADCONFIG resets to 1 (NFC antenna pins) on every reset; writing 0
- * makes both pads plain GPIO.  Nothing in the port uses the NFCT.
+ * makes both pads plain GPIO.  Nothing in the port uses the NFCT.  On the
+ * nRF54LV10A, which has no NFCT, the function does nothing.
  */
 static void spim_nfc_pads_to_gpio(void)
 {
+#if !defined(TIKU_DEVICE_NRF54LV10A)
     if (TIKU_SPI_PIN_IS_NFC(TIKU_BOARD_SPI0_SCK_PORT,
                             TIKU_BOARD_SPI0_SCK_PIN) ||
         TIKU_SPI_PIN_IS_NFC(TIKU_BOARD_SPI0_MOSI_PORT,
@@ -188,12 +196,14 @@ static void spim_nfc_pads_to_gpio(void)
                             TIKU_BOARD_SPI0_MISO_PIN)) {
         TIKU_SPI_NFCT->PADCONFIG = 0UL;
     }
+#endif
 }
 
-/** @brief Apply the LM20 SPIM 55/69 transfer workaround. */
+/** @brief Apply the LM20 and LV10A SPIM 55/69 transfer workaround. */
 static void spim_errata(int active)
 {
-#if defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
+#if defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B) || \
+    defined(TIKU_DEVICE_NRF54LV10A)
     *(volatile uint32_t *)((uint8_t *)TIKU_SPIM + 0xc80u) =
         active ? 0x82u : 0u;
 #else
@@ -207,8 +217,8 @@ static void spim_errata(int active)
  * Points EasyDMA at the given RAM buffers, triggers TASKS_START and spins on
  * EVENTS_END with a bounded poll.  Both pointers must reference on-chip RAM.
  *
- * @note On the LM20 the errata 55/69 register is set before TASKS_START and
- *       cleared after EVENTS_END and after a timeout.
+ * @note On the LM20 and the LV10A the errata 55/69 register is set before
+ *       TASKS_START and cleared after EVENTS_END and after a timeout.
  * @note A timed-out burst is stopped with TASKS_STOP, EVENTS_STOPPED is
  *       polled with a bounded wait so EasyDMA is not cut mid-transfer, and
  *       the SPIM is then disabled; transfers are refused until

@@ -33,11 +33,14 @@
  * 16 and 32 do).
  */
 #if defined(PLATFORM_NORDIC)
-/* Virtual ports 1..3 are P0..P2; port 4 is P3 on parts that have it. */
+/* Virtual ports 1 and 2 are P0 and P1; port 3 is P2 and port 4 is P3 on
+ * parts that have them. */
 #if TIKU_DEVICE_HAS_PORT4
 #define TIKU_GPIO_PORTS(X) X(1, 32) X(2, 32) X(3, 32) X(4, 32)
-#else
+#elif TIKU_DEVICE_HAS_PORT3
 #define TIKU_GPIO_PORTS(X) X(1, 32) X(2, 32) X(3, 32)
+#else
+#define TIKU_GPIO_PORTS(X) X(1, 32) X(2, 32)
 #endif
 
 #elif defined(PLATFORM_RP2350)

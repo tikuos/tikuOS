@@ -27,6 +27,8 @@
  * because TikuOS runs All-Secure.  Each SERIAL2x base is one of UARTE, SPIM
  * or TWIM at a time; SERIAL20 is the nRF54L15-DK console (UARTE20) and
  * SERIAL21 the SPI driver (SPIM21).  PERI-domain instances route to P1 pins.
+ * A board header can name another instance: the nRF54LV10A has no SERIAL22,
+ * and its DK header sets TWIM20.
  */
 #ifndef TIKU_BOARD_I2C_TWIM
 #define TIKU_BOARD_I2C_TWIM         NRF_TWIM22_S
@@ -129,7 +131,7 @@ static uint8_t twim_probe_byte;
  * @note The TWIM drives the pin through its PSEL connection; PIN_CNF supplies
  *       the electrical characteristics.  External 4.7 kohm pull-ups are
  *       recommended, the internal one being weak.
- * @param port  Physical port (0 = P0, 1 = P1, 2 = P2).
+ * @param port  Physical port (0 = P0, 1 = P1, 2 = P2 on devices that have it).
  * @param pin   Pin number within the port (0..31).
  */
 static void twim_cfg_pin(uint8_t port, uint8_t pin)
@@ -139,7 +141,9 @@ static void twim_cfg_pin(uint8_t port, uint8_t pin)
     switch (port) {
     case 0u:  g = NRF_P0_S; break;
     case 1u:  g = NRF_P1_S; break;
+#if TIKU_DEVICE_HAS_PORT3
     case 2u:  g = NRF_P2_S; break;
+#endif
     default:  return;
     }
 

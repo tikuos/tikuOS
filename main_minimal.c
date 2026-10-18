@@ -82,7 +82,7 @@ int main(void)
 #include "arch/nordic/tiku_gpio_arch.h"
 /* The board header, through the device/board router, supplies the LED macros
  * and TIKU_BOARD_NAME: the nRF54L15-DK LEDs are active-low, the nRF54LM20-DK's
- * active-high, on different pins. */
+ * and nRF54LV10-DK's active-high, on different pins. */
 #include "arch/nordic/tiku_device_select.h"
 
 /* LED signals, independent of the console UART:
@@ -103,20 +103,28 @@ volatile uint32_t g_nordic_loop_count;
  * gate open; a store with WEN closed faults the bus.  Each test prints its
  * result and the value read back:
  *   T1  word store bracketed by the full nrfx READY/READYNEXT handshake
- *   T2  8 back-to-back byte stores into the 32-entry write buffer, then
- *       TASKS_COMMITWRITEBUF and a READY wait
+ *   T2  8 back-to-back byte stores into the write buffer (32 entries, 16 on
+ *       the nRF54LV10A), then TASKS_COMMITWRITEBUF and a READY wait
  *   T3  WEN set, immediate store, no waits
  *   T4  store, close WEN with no wait or commit, read back with WEN closed
  * The scratch target, 0x17B000, is inside the persist partition on the
- * nRF54L15 and inside the NVM region on the nRF54LM20, so the probe
- * overwrites durable words a kernel image keeps there.
+ * nRF54L15 and inside the NVM region on the nRF54LM20; on the nRF54LV10A it
+ * is 0xFB000, inside the persist partition.  The probe overwrites durable
+ * words a kernel image keeps there.
  */
 #include "arch/nordic/tiku_nordic_mdk.h"   /* per-device MDK router */
 
+#if defined(TIKU_DEVICE_NRF54LV10A)
+#define RRAM_TEST_ADDR   0x000FB000UL      /* LV10A: persist partition */
+#define RRAMC_BUF        (16UL << 8)       /* WRITEBUFSIZE = 16, the maximum */
+#define RRAMC_BUF_WORDS  "16"
+#else
 #define RRAM_TEST_ADDR   0x0017B000UL      /* L15: persist partition;
                                             * LM20: NVM region */
+#define RRAMC_BUF        (32UL << 8)               /* WRITEBUFSIZE = 32 */
+#define RRAMC_BUF_WORDS  "32"
+#endif
 #define RRAMC_WEN        (1UL << 0)
-#define RRAMC_BUF32      (32UL << 8)               /* WRITEBUFSIZE = 32 */
 
 /** @brief Run RRAM write tests T1 to T4 and print each result. */
 static void rram_test_run(void)
@@ -143,8 +151,9 @@ static void rram_test_run(void)
                      (unsigned int)*w);
 
     /* T2: buffered back-to-back byte stores + explicit commit. */
-    tiku_uart_puts("T2: 8 byte stores via 32-word buffer + commit... ");
-    NRF_RRAMC_S->CONFIG = cfg0 | RRAMC_WEN | RRAMC_BUF32;
+    tiku_uart_puts("T2: 8 byte stores via " RRAMC_BUF_WORDS
+                   "-word buffer + commit... ");
+    NRF_RRAMC_S->CONFIG = cfg0 | RRAMC_WEN | RRAMC_BUF;
     __asm__ volatile ("dsb 0xF" ::: "memory");
     while (NRF_RRAMC_S->READY == 0u)     { }
     while (NRF_RRAMC_S->READYNEXT == 0u) { }

@@ -303,12 +303,20 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
                      (unsigned long)NRF_GRTC_S->MODE);
         SHELL_PRINTF("wdt30: run=%lu\n",
                      (unsigned long)NRF_WDT30_S->RUNSTATUS);
+#if defined(NRF_SPIM00_S)
         SHELL_PRINTF("en:    console-uarte=%lu saadc=%lu spim00=%lu"
                      " cracen=%lx\n",
                      (unsigned long)TIKU_BOARD_CONSOLE_UARTE->ENABLE,
                      (unsigned long)NRF_SAADC_S->ENABLE,
                      (unsigned long)NRF_SPIM00_S->ENABLE,
                      (unsigned long)NRF_CRACEN_S->ENABLE);
+#else
+        /* No SERIAL00 on this part (the nRF54LV10A). */
+        SHELL_PRINTF("en:    console-uarte=%lu saadc=%lu cracen=%lx\n",
+                     (unsigned long)TIKU_BOARD_CONSOLE_UARTE->ENABLE,
+                     (unsigned long)NRF_SAADC_S->ENABLE,
+                     (unsigned long)NRF_CRACEN_S->ENABLE);
+#endif
         SHELL_PRINTF("irq:   gpiote20.inten=%lx gpiote30.inten=%lx\n",
                      (unsigned long)NRF_GPIOTE20_S->INTENSET0,
                      (unsigned long)NRF_GPIOTE30_S->INTENSET0);

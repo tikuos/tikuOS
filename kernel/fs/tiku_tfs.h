@@ -65,6 +65,9 @@
 #  elif defined(PLATFORM_AMBIQ) || defined(TIKU_DEVICE_NRF54LM20A) || \
         defined(TIKU_DEVICE_NRF54LM20B)
 #    define TIKU_TFS_MIN_SLOTS  256
+#  elif defined(TIKU_DEVICE_NRF54LV10A)
+     /* Below the count the nRF54LV10A carve derives, with margin. */
+#    define TIKU_TFS_MIN_SLOTS  96
 #  elif defined(PLATFORM_NORDIC)
 #    define TIKU_TFS_MIN_SLOTS  192
 #  elif defined(PLATFORM_RA8P1)

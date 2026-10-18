@@ -63,7 +63,8 @@ static gpiote_ctx_t s_gpiote30 = { NRF_GPIOTE30_S, 268, { 0 } }; /* P0    */
  * @brief Select the GPIOTE instance that services a given physical port.
  *
  * P0 is in the LP / always-on domain (GPIOTE30); P1/P2/P3 are in the main
- * peripheral domain (GPIOTE20).  P3 exists only on the nRF54LM20A/B.
+ * peripheral domain (GPIOTE20).  P3 exists only on the nRF54LM20A/B, and the
+ * nRF54LV10A has no P2.
  *
  * @param port  Physical port number (0/1/2/3 == P0/P1/P2/P3).
  * @return Pointer to the owning instance context, or NULL for an unknown port.
@@ -73,7 +74,10 @@ static gpiote_ctx_t *ctx_for_port(uint8_t port)
     if (port == 0u) {
         return &s_gpiote30;
     }
-    if (port == 1u || port == 2u
+    if (port == 1u
+#if !defined(TIKU_DEVICE_NRF54LV10A)
+        || port == 2u
+#endif
 #if defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
         || port == 3u
 #endif
