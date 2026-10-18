@@ -45,13 +45,18 @@ static inline int tiku_mem_arch_in_exception(void)
 /**
  * @brief Non-zero in an interrupt handler: mintstatus holds the CLIC level
  *        being served in its top byte, and zero outside every handler.
+ *        Compiled for a host, where the CSR does not exist, it returns 0.
  */
 static inline int tiku_mem_arch_in_exception(void)
 {
+#if defined(__riscv)
     uint32_t st;
 
     __asm__ volatile ("csrr %0, 0xFB1" : "=r" (st));
     return (st >> 24) != 0u;
+#else
+    return 0;
+#endif
 }
 #define TIKU_MEM_ARCH_IN_EXCEPTION() tiku_mem_arch_in_exception()
 #else
