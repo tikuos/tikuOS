@@ -98,10 +98,16 @@ static uint32_t grtc_account(void)
     return n;
 }
 
-/** @brief Arm CC0 at the next (immediate) tick boundary after the anchor. */
+/**
+ * @brief Arm CC0 at the next (immediate) tick boundary after the anchor.
+ *
+ * The half-count boundary is rounded up to whole counts: rounded down, the
+ * compare fires half a count early, grtc_account() can credit no tick, and
+ * the ISR re-arms a compare already in the past, which fires again.
+ */
 static void grtc_rearm_immediate(void)
 {
-    uint64_t next = (s_anchor_half + TIKU_GRTC_STEP_HALF) >> 1;   /* counts */
+    uint64_t next = (s_anchor_half + TIKU_GRTC_STEP_HALF + 1u) >> 1; /* counts */
 
     TIKU_GRTC->CC[TIKU_GRTC_TICK_CC].CCL  = (uint32_t)next;
     TIKU_GRTC->CC[TIKU_GRTC_TICK_CC].CCH  = (uint32_t)(next >> 32);
@@ -216,7 +222,7 @@ int tiku_clock_tickless_begin(tiku_clock_time_t ticks_ahead)
 {
     uint64_t target_half = s_anchor_half +
                            (uint64_t)ticks_ahead * TIKU_GRTC_STEP_HALF;
-    uint64_t target      = target_half >> 1;
+    uint64_t target      = (target_half + 1u) >> 1;  /* rounded up, as above */
 
     TIKU_GRTC->CC[TIKU_GRTC_TICK_CC].CCL  = (uint32_t)target;
     TIKU_GRTC->CC[TIKU_GRTC_TICK_CC].CCH  = (uint32_t)(target >> 32);
