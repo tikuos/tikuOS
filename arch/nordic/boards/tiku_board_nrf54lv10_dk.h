@@ -153,11 +153,10 @@
 
 /*
  * The interface layers (interfaces/adc, interfaces/bus, interfaces/onewire)
- * are compiled for this board.  I2C (TWIM) and SPI (SPIM) drive the
- * hardware; the ADC backend (tiku_adc_nrf54lv10a.c) and
- * tiku_onewire_arch.c are stubs whose calls fail.
+ * are compiled for this board.  ADC (SAADC), I2C (TWIM) and SPI (SPIM) have
+ * drivers; tiku_onewire_arch.c is a stub whose calls fail.
  */
-#define TIKU_BOARD_ADC_AVAILABLE    0   /* no SAADC driver on this part */
+#define TIKU_BOARD_ADC_AVAILABLE    1
 #define TIKU_BOARD_I2C_BRW_100K     1   /* compiles the tiku_i2c_bus.c API */
 #define TIKU_BOARD_OW_AVAILABLE     1
 

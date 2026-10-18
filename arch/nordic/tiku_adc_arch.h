@@ -28,7 +28,8 @@
  *
  * @note The reference selector has no nRF54L equivalent -- the hardware uses a
  *       fixed internal 0.9 V band-gap with gain 1/4, i.e. a 0..3.6 V
- *       single-ended full scale -- and is accepted but ignored.
+ *       single-ended full scale (0..1.3 V on the nRF54LV10A, which has no
+ *       gain stage) -- and is accepted but ignored.
  * @param config  Pointer to ADC configuration; must be non-NULL
  * @return TIKU_ADC_OK on success, TIKU_ADC_ERR_PARAM for a NULL config or
  *         an unrecognised resolution
@@ -50,10 +51,12 @@ void tiku_adc_arch_close(void);
  * high-impedance analog setting, so this only rejects inputs that do not exist.
  *
  * @param channel  Channel ID: 0..7 = AIN0..AIN7 (all on port P1: pins
- *                 4/5/6/7/11/12/13/14), 31 (TIKU_ADC_CH_BATTERY) = the
- *                 internal VDD rail.  TIKU_ADC_CH_TEMP (30) is not an
- *                 SAADC input on the nRF54L (die temperature is a
- *                 separate TEMP peripheral) and is rejected.
+ *                 4/5/6/7/11/12/13/14, or 0/1/2/3/7/10/11/12 on the
+ *                 nRF54LV10A), 31 (TIKU_ADC_CH_BATTERY) = the internal VDD
+ *                 rail (VDDL * 8/15 on the nRF54LV10A).  TIKU_ADC_CH_TEMP
+ *                 (30) is not an SAADC input on the nRF54L (die
+ *                 temperature is a separate TEMP peripheral) and is
+ *                 rejected.
  * @return TIKU_ADC_OK for a supported channel, TIKU_ADC_ERR_PARAM
  *         otherwise
  */

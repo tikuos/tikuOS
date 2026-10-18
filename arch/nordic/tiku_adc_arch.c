@@ -7,9 +7,9 @@
  *
  * tiku_adc_arch.c - nRF54L SAADC one-shot single-ended driver.
  *
- * Every conversion returns through EasyDMA into a static word-aligned RAM
- * buffer, so the sequence is START/STARTED, then SAMPLE/END.  The reference is
- * the 0.9 V band-gap at 1/4 gain; TIKU_ADC_CH_TEMP is not a SAADC input.
+ * Each conversion returns through EasyDMA into a static RAM buffer (START/
+ * STARTED, then SAMPLE/END) against the 0.9 V band-gap at 1/4 gain, or 1.3 V
+ * with no gain on the nRF54LV10A.  TIKU_ADC_CH_TEMP is not a SAADC input.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -36,6 +36,20 @@
 #define TIKU_SAADC_TACQ         79UL
 #define TIKU_SAADC_TCONV        7UL
 
+#if defined(TIKU_DEVICE_NRF54LV10A)
+/**
+ * @brief CH[0].CONFIG for a single-ended read on the nRF54LV10A.
+ *
+ * Internal 1.3 V reference and no gain stage -> 1.3 V full scale, normal
+ * single-ended mode, with the times above.  A 12-bit reading is
+ * V / 1.3 V * 4096 counts.
+ */
+#define TIKU_SAADC_CH_CONFIG                                                  \
+    ((SAADC_CH_CONFIG_REFSEL_Internal << SAADC_CH_CONFIG_REFSEL_Pos)         \
+     | (TIKU_SAADC_TACQ               << SAADC_CH_CONFIG_TACQ_Pos)           \
+     | (TIKU_SAADC_TCONV              << SAADC_CH_CONFIG_TCONV_Pos)          \
+     | (SAADC_CH_CONFIG_MODE_SE       << SAADC_CH_CONFIG_MODE_Pos))
+#else
 /**
  * @brief CH[0].CONFIG for a single-ended read.
  *
@@ -49,11 +63,24 @@
      | (TIKU_SAADC_TACQ               << SAADC_CH_CONFIG_TACQ_Pos)           \
      | (TIKU_SAADC_TCONV              << SAADC_CH_CONFIG_TCONV_Pos)          \
      | (SAADC_CH_CONFIG_MODE_SE       << SAADC_CH_CONFIG_MODE_Pos))
+#endif
+
+/**
+ * @brief PSELP INTERNAL code for channel 31 (TIKU_ADC_CH_BATTERY).
+ *
+ * The VDD rail; the nRF54LV10A offers VDDL instead, divided by 15/8 before
+ * the converter.
+ */
+#if defined(TIKU_DEVICE_NRF54LV10A)
+#define TIKU_SAADC_INTERNAL_VDD SAADC_CH_PSELP_INTERNAL_VddL
+#else
+#define TIKU_SAADC_INTERNAL_VDD SAADC_CH_PSELP_INTERNAL_Vdd
+#endif
 
 /** @brief Bounded spin so a wedged conversion surfaces as ERR_TIMEOUT. */
 #define TIKU_SAADC_SPIN_MAX     100000UL
 
-/** @brief Physical GPIO port carrying every nRF54L15 analog input (P1). */
+/** @brief Physical GPIO port carrying every analog input (P1). */
 #define TIKU_SAADC_AIN_PORT     1UL
 
 /** @brief EasyDMA MAXCNT for one 16-bit sample (byte count on nRF54L). */
@@ -66,13 +93,26 @@
 /**
  * @brief EasyDMA result buffer (one signed 16-bit sample).
  *
- * Must live in RAM and be word-aligned for the SAADC EasyDMA engine.
+ * Must live in RAM and be word-aligned for the SAADC EasyDMA engine.  The
+ * nRF54LV10A's RESULT.PTR keeps address bits 17:0 over a fixed 0x20000000,
+ * which spans all of its SRAM; its MDK masks 16 bits.
  */
 static volatile int16_t tiku_saadc_result __attribute__((aligned(4)));
 
 /** @brief Non-zero once tiku_adc_arch_init() has enabled the SAADC. */
 static uint8_t tiku_saadc_ready;
 
+#if defined(TIKU_DEVICE_NRF54LV10A)
+/**
+ * @brief GPIO pin index (on P1) for analog inputs AIN0..AIN7.
+ *
+ * The nRF54LV10A's assignment (nrfx v4.3.2 SAADC_EXTERNAL_AIN_PSELS); on the
+ * nRF54LV10-DK, AIN5 (P1.10) also drives LED2.
+ */
+static const uint8_t tiku_saadc_ain_pin[8] = {
+    0u, 1u, 2u, 3u, 7u, 10u, 11u, 12u
+};
+#else
 /**
  * @brief GPIO pin index (on P1) for analog inputs AIN0..AIN7.
  *
@@ -82,6 +122,7 @@ static uint8_t tiku_saadc_ready;
 static const uint8_t tiku_saadc_ain_pin[8] = {
     4u, 5u, 6u, 7u, 11u, 12u, 13u, 14u
 };
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* Helpers                                                                   */
@@ -108,7 +149,7 @@ static uint32_t tiku_saadc_pselp(uint8_t channel)
                     << SAADC_CH_PSELP_CONNECT_Pos);
     }
     if (channel == TIKU_ADC_CH_BATTERY) {
-        return (SAADC_CH_PSELP_INTERNAL_Vdd << SAADC_CH_PSELP_INTERNAL_Pos)
+        return (TIKU_SAADC_INTERNAL_VDD << SAADC_CH_PSELP_INTERNAL_Pos)
              | (SAADC_CH_PSELP_CONNECT_Internal
                     << SAADC_CH_PSELP_CONNECT_Pos);
     }
@@ -145,7 +186,7 @@ static int tiku_saadc_wait(volatile uint32_t *event)
  * open.  Offset auto-calibration is not run.
  *
  * @note The reference selector has no nRF54L equivalent (fixed internal
- *       0.9 V band-gap) and is accepted but ignored.
+ *       0.9 V band-gap, 1.3 V on the nRF54LV10A) and is accepted but ignored.
  * @param config  ADC configuration; must be non-NULL with a known resolution.
  * @return TIKU_ADC_OK on success, TIKU_ADC_ERR_PARAM for a NULL config or an
  *         unrecognised resolution.
@@ -166,9 +207,10 @@ int tiku_adc_arch_init(const tiku_adc_config_t *config)
         return TIKU_ADC_ERR_PARAM;
     }
 
-    /* nRF54L has only the internal 0.9 V band-gap or an external reference
-     * pin; the interface's AVCC/1V2/2V0/2V5 selectors have no equivalent, so
-     * the request is accepted and the fixed 0.9 V reference is used. */
+    /* nRF54L has only the internal reference (0.9 V; 1.3 V on the nRF54LV10A)
+     * or an external reference pin; the interface's AVCC/1V2/2V0/2V5
+     * selectors have no equivalent, so the request is accepted and the
+     * internal reference is used. */
     (void)config->reference;
 
     TIKU_SAADC->RESOLUTION = res;

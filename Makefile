@@ -1846,13 +1846,7 @@ SRCS += arch/nordic/tiku_nvm_region_nordic.c
 SRCS += arch/nordic/tiku_cpu_watchdog_arch.c
 SRCS += arch/nordic/tiku_htimer_arch.c
 SRCS += arch/nordic/tiku_gpio_irq_arch.c
-ifeq ($(MCU),nrf54lv10a)
-# The nRF54LV10A's SAADC has four channels and no per-channel gain, unlike
-# the SAADC tiku_adc_arch.c drives; its ADC backend is a stub.
-SRCS += arch/nordic/tiku_adc_nrf54lv10a.c
-else
 SRCS += arch/nordic/tiku_adc_arch.c
-endif
 SRCS += arch/nordic/tiku_i2c_arch.c
 SRCS += arch/nordic/tiku_spi_arch.c
 SRCS += arch/nordic/tiku_onewire_arch.c
