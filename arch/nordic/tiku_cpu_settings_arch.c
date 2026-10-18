@@ -24,6 +24,26 @@
 #error "TIKU_NORDIC_CPU_MHZ must be 64 or 128"
 #endif
 
+#if defined(TIKU_MINIMAL)
+
+/* A MINIMAL=1 image links no persist store: every boot applies the build
+ * default, and a save is refused. */
+
+/** @brief The build default; nothing is saved in a MINIMAL=1 image. */
+unsigned long tiku_cpu_nordic_target_hz(void)
+{
+    return TIKU_NORDIC_CPU_MHZ * 1000000UL;
+}
+
+/** @brief Refused in a MINIMAL=1 image: returns -1. */
+int tiku_cpu_nordic_target_set(unsigned long hz)
+{
+    (void)hz;
+    return -1;
+}
+
+#else
+
 /* RRAM is directly readable before clock/peripheral bring-up, but this cell
  * is never primed or written in early boot.  Missing or invalid state uses
  * the build default.  An interrupted aligned word store leaves one of the
@@ -50,3 +70,5 @@ int tiku_cpu_nordic_target_set(unsigned long hz)
     return tiku_persist_cell_valid(&cpu_target_cell) && cpu_target_hz == hz
                ? 0 : -1;
 }
+
+#endif /* TIKU_MINIMAL */
