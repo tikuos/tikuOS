@@ -22,7 +22,8 @@
  * @brief Initialize the console transport (wire UART).
  *
  * Brings up the board's COM UART (see the board header for pads and FUNCSEL)
- * for 8N1 at TIKU_BOARD_UART_BAUD, with interrupt-driven RX.
+ * for 8N1 at TIKU_BOARD_UART_BAUD, with interrupt-driven RX.  Empties the RX
+ * ring and zeroes the overrun count.
  *
  * @note Called during boot before any printf output, and again after the
  *       UART's power domain has been off.
@@ -52,8 +53,9 @@ void     tiku_uart_puts(const char *s);
 /**
  * @brief Fault-safe putc: like tiku_uart_putc() but with a bounded wait.
  *
- * For use from fault handlers only. Drops the character instead of
- * spinning forever when the transmitter has stopped draining.
+ * For use from fault handlers only.  Drops the character after 1000000 polls
+ * find the TX FIFO still full, instead of spinning forever when the
+ * transmitter has stopped draining.
  *
  * @param c  Character to transmit.
  */
@@ -62,8 +64,8 @@ void     tiku_uart_fault_putc(char c);
 /**
  * @brief Wait (bounded) until the TX FIFO is empty and the line is idle.
  *
- * For use from fault handlers before a reset, so queued diagnostic
- * output is not destroyed by the reset.
+ * For use from fault handlers before a reset, so queued diagnostic output is
+ * not destroyed by the reset.  Gives up after 4000000 polls.
  */
 void     tiku_uart_fault_drain(void);
 
@@ -74,6 +76,8 @@ void     tiku_uart_fault_drain(void);
  * a small built-in formatter: %c, %s, %d, %u, %x (with an optional l), %% and
  * zero or space padding to a width.  LF goes out as CR+LF.
  *
+ * @note No floating point, %p or %n: any other conversion prints '%' and its
+ *       letter.  A NULL @p fmt prints nothing; a NULL %s prints "(null)".
  * @param fmt  printf-style format string.
  * @param ...  Variadic arguments matching the format specifiers.
  */
@@ -82,13 +86,13 @@ void     tiku_uart_printf(const char *fmt, ...);
 /**
  * @brief Check whether a received byte is waiting in the RX buffer.
  *
- * @return Non-zero if at least one byte is available to read,
- *         0 if the RX buffer is empty.
+ * @return 1 if at least one byte is available to read, 0 if the RX buffer is
+ *         empty.
  */
 uint8_t  tiku_uart_rx_ready(void);
 
 /**
- * @brief Read one byte from the console RX buffer.
+ * @brief Read one byte from the console RX buffer; does not block.
  *
  * @return The received byte as an unsigned value (0..255), or -1 if
  *         no byte is available.
@@ -96,7 +100,8 @@ uint8_t  tiku_uart_rx_ready(void);
 int      tiku_uart_getc(void);
 
 /**
- * @brief Return the count of RX overrun events since the last reset.
+ * @brief Return the count of RX overrun events since tiku_uart_init() or
+ *        tiku_uart_overrun_reset().
  *
  * Counts hardware RX FIFO overruns and bytes dropped because the RX ring
  * buffer was full.
@@ -112,8 +117,9 @@ void     tiku_uart_overrun_reset(void);
 /**
  * @brief Inject a byte into the RX buffer (test use only).
  *
- * Simulates a received byte without requiring real hardware input.
- * Available only when HAS_TESTS is defined.
+ * Simulates a received byte without requiring real hardware input.  A full
+ * ring drops the byte without counting an overrun.  Available only when
+ * HAS_TESTS is defined.
  *
  * @param byte  Byte value to inject into the RX buffer.
  */

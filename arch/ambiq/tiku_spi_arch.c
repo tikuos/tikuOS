@@ -280,13 +280,6 @@ int tiku_spi_arch_write_read(const uint8_t *tx_buf, uint8_t *rx_buf,
 
 #else  /* !TIKU_SPI_IOM_ENABLE: stub, no SPI device wired */
 
-/**
- * @brief Initialize the SPI controller (stub)
- *
- * The IOM master is built only with TIKU_SPI_IOM_ENABLE (the EM9305 BLE
- * build).  Here init and the buffer calls return -1, close does nothing and a
- * byte transfer returns 0xFF.
- */
 int tiku_spi_arch_init(const tiku_spi_config_t *config) {
     (void)config;
     return -1;

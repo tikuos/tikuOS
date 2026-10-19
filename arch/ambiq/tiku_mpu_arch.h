@@ -7,9 +7,9 @@
  *
  * tiku_mpu_arch.h - Ambiq MPU driver interface.
  *
- * Apollo510 (ARMv8-M MPU) and Apollo4 Lite (PMSAv7) program a W^X layout with
- * a stack-overflow guard; .uninit is read-only outside NVM unlock windows.  The
- * SAM and MPUCTL values are MSP430-style software copies for portable tests.
+ * Apollo510 (ARMv8-M MPU) and Apollo4 Lite and Plus (PMSAv7) program a W^X
+ * layout with a stack-overflow guard; .uninit is read-only outside NVM unlock
+ * windows.  SAM and MPUCTL0 are MSP430-style copies kept for portable tests.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -63,8 +63,8 @@ uint16_t tiku_mpu_arch_get_ctl(void);
 /**
  * @brief Disable all interrupts (PRIMASK).
  *
- * tiku_mpu_scoped_write() calls it around an NVM write window, so no ISR
- * writes NVM while the window is open.
+ * A plain mask with no nesting count: tiku_mpu_arch_enable_irq() unmasks
+ * whatever the state was before.
  */
 void     tiku_mpu_arch_disable_irq(void);
 
@@ -79,8 +79,12 @@ void     tiku_mpu_arch_enable_irq(void);
  * @brief Program all MPU regions for the part's memory map.
  *
  * Code RX, .uninit RO + XN, other data RW + XN, and a 4 KB guard below the
- * stack (region tables in the .c files); enables the MPU and MemManage.
- * tiku_mpu_init() calls it at boot and on each later tiku_mem_init().
+ * stack (region tables in the .c files); enables the MPU with PRIVDEFENA and
+ * MemManage at priority 0.  A cold boot zeroes the .mpu_diag fault record.
+ *
+ * @note tiku_mpu_init() calls it at boot and on each later tiku_mem_init();
+ *       a warm reset keeps the fault record.  HFNMIENA stays off, except on
+ *       an Apollo510 build with TIKU_MPU_HFNMI_ENFORCE=1.
  */
 void     tiku_mpu_arch_init_segments(void);
 
@@ -94,10 +98,12 @@ void     tiku_mpu_arch_set_default_protection(void);
 /**
  * @brief Set the access permissions for one SAM segment.
  *
- * Bookkeeping only: updates the 3-bit field of @p seg in the SAM copy.
+ * Bookkeeping only: updates the 3-bit field of @p seg in the SAM copy
+ * through tiku_mpu_arch_set_sam().
  *
  * @param seg   Segment index (0-based; 4 bits per segment in the SAM).
- * @param perm  Permission flags (combination of TIKU_MPU_* values).
+ * @param perm  Permission flags (combination of TIKU_MPU_* values); bits
+ *              above bit 2 are ignored.
  */
 void     tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm);
 
@@ -114,8 +120,9 @@ uint16_t tiku_mpu_arch_unlock_nvm(void);
 /**
  * @brief Restore MPU NVM protection to the saved state.
  *
- * The .uninit region returns to RO unless @p saved_state has write bits set,
- * which is the case for a lock nested inside an outer window.
+ * Writes @p saved_state back through tiku_mpu_arch_set_sam().  The .uninit
+ * region returns to RO unless @p saved_state has write bits set, which is the
+ * case for a lock nested inside an outer window.  Commits nothing to MRAM.
  *
  * @param saved_state  Value returned by a prior tiku_mpu_arch_unlock_nvm().
  */
@@ -124,9 +131,9 @@ void     tiku_mpu_arch_lock_nvm(uint16_t saved_state);
 /**
  * @brief Read MPU violation (fault) flags.
  *
- * Returns the MMFSR bits the MemManage handler ORs into a .bss copy.  The
- * handler then resets the part, which zeroes the copy, so a caller reads 0;
- * tiku_mpu_get_violation_count() counts faults across the reset.
+ * Returns the MMFSR bits the MemManage handler ORs into the .mpu_diag record
+ * before it resets the part.  The record survives a warm reset, so the flags
+ * of earlier faults read back until a clear or a cold boot.
  *
  * @return MMFSR bits ORed together (bit 0 IACCVIOL, bit 1 DACCVIOL, ...).
  */
@@ -135,7 +142,7 @@ uint16_t tiku_mpu_arch_get_violation_flags(void);
 /**
  * @brief Clear all MPU violation flags.
  *
- * Resets the fault-flag snapshot to zero.
+ * Zeroes the flags in the .mpu_diag record.
  */
 void     tiku_mpu_arch_clear_violation_flags(void);
 

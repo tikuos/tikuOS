@@ -88,10 +88,6 @@ static void tiku_ambiq_boot_tidy(void) {
 #endif
 }
 
-/**
- * @brief Boot-time CPU setup: caches and prefetch, the boot tidy, then the
- *        core clock from the perf-mode status.
- */
 void tiku_cpu_boot_ambiq_init(void) {
     tiku_ambiq_soc_init();          /* caches + prefetch */
     tiku_ambiq_boot_tidy();         /* release the SBL's unused blocks */
@@ -530,17 +526,6 @@ static void hp_exit(void) {
     hp_irq_restore(pm);
 }
 
-/**
- * @brief Select the CPU perf mode: LP (96 MHz) or HP (~250 MHz, HFRC2).
- *
- * A request above 96 MHz runs the HP bring-up: INFO1 trim load, buck enable,
- * temperature-bucket pin, VDDF raise, perf switch.  A lower request leaves
- * HP, frequency before voltage, or else enables the buck (TIKU_AMBIQ_LP_BUCK).
- *
- * @note A refused step leaves the core in LP at LP voltages; s_core_hz shows
- *       the result.  The kernel tick runs from STIMER, so it does not change.
- * @param cpu_freq  Requested core frequency in MHz.
- */
 void tiku_cpu_freq_ambiq_init(unsigned int cpu_freq) {
     uint32_t spin;
 
@@ -587,12 +572,6 @@ void tiku_cpu_freq_ambiq_init(unsigned int cpu_freq) {
     s_core_hz = tiku_ambiq_core_hz();
 }
 
-/**
- * @brief Enter CPU idle using the WFI (Wait For Interrupt) instruction
- *
- * Suspends the core until the next interrupt fires. Used by the kernel
- * scheduler when no process is ready to run.
- */
 void tiku_cpu_boot_ambiq_power_wfi_enter(void) {
     __asm__ volatile ("wfi");
 }
@@ -601,14 +580,6 @@ void tiku_cpu_boot_ambiq_power_wfi_enter(void) {
 /* HP-TURBO IDENTITY PROBE (`freq probe`)                                    */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Measure the core clock against the 32.768 kHz STIMER.
- *
- * Counts SysTick decrements (wrap-aware) over 4096 STIMER ticks, 125 ms.
- * SysTick runs at the core clock (CLKSOURCE = processor).
- *
- * @return Measured core clock in Hz, or 0 if SysTick is not configured
- */
 unsigned long tiku_cpu_freq_ambiq_measured_hz(void) {
     volatile uint32_t *cvr = (volatile uint32_t *)0xE000E018UL; /* SYST_CVR  */
     volatile uint32_t *rvr = (volatile uint32_t *)0xE000E014UL; /* SYST_RVR  */
@@ -620,6 +591,7 @@ unsigned long tiku_cpu_freq_ambiq_measured_hz(void) {
         return 0u;                       /* SysTick not configured */
     }
 
+    /* 4096 counts of the 32.768 kHz STIMER are 125 ms. */
     st0  = STIMER->STTMR;
     last = *cvr & 0x00FFFFFFu;
     while ((uint32_t)(STIMER->STTMR - st0) < 4096u) {
@@ -631,17 +603,6 @@ unsigned long tiku_cpu_freq_ambiq_measured_hz(void) {
     return (unsigned long)((count * 32768u) / 4096u);
 }
 
-/**
- * @brief Enable the SIMO buck without changing the perf mode.
- *
- * Called by tiku_cpu_freq_ambiq_init() at 96 MHz with TIKU_AMBIQ_LP_BUCK set,
- * and by the `power buck` command.
- *
- * @note Loads the factory trims first (the buck sequence needs them); the
- *       frequency is untouched.
- * @return 0 when the buck reports ACT, negative if trims are unusable or it
- *         never reached ACT.
- */
 int tiku_cpu_freq_ambiq_simobuck_enable(void) {
     if (PWRCTRL->VRSTATUS_b.SIMOBUCKST == PWRCTRL_VRSTATUS_SIMOBUCKST_ACT) {
         return 0;                                  /* idempotent */
@@ -736,49 +697,14 @@ void tiku_cpu_freq_ambiq_hp_probe(tiku_ambiq_hp_probe_t *out) {
     }
 }
 
-/**
- * @brief Return the main CPU core clock frequency
- *
- * @return Core frequency in Hz as read after the last perf-mode change
- *         (96 MHz LP or 250 MHz HP)
- */
 unsigned long tiku_cpu_ambiq_clock_get_hz(void) { return s_core_hz; }
 
-/**
- * @brief Return the SMCLK-equivalent sub-module clock frequency
- *
- * On Apollo510 there is no dedicated SMCLK; this returns the same value
- * as the core clock for callers that query the peripheral reference.
- *
- * @return Core frequency in Hz
- */
 unsigned long tiku_cpu_ambiq_smclk_get_hz(void) { return s_core_hz; }
 
-/**
- * @brief Return the ACLK-equivalent auxiliary/low-frequency clock
- *
- * The 32.768 kHz crystal that clocks the STIMER counter.
- *
- * @return 32768 Hz
- */
 unsigned long tiku_cpu_ambiq_aclk_get_hz(void)  { return 32768UL; }
 
-/**
- * @brief Report whether the main clock has a fault
- *
- * This port does no oscillator-fault detection.
- *
- * @return 0 (no fault)
- */
 int           tiku_cpu_ambiq_clock_has_fault(void) { return 0; }
 
-/**
- * @brief Apollo510 (M55) data-cache maintenance, for tiku_cpu_dcache_*().
- *
- * The M55's L1 caches are enabled in soc_init, so MRAM programming needs the
- * by-address SCB ops: clean the staging buffer before the boot ROM reads it,
- * invalidate the programmed range after.
- */
 void tiku_cpu_ambiq_dcache_clean(const void *addr, unsigned long len) {
     SCB_CleanDCache_by_Addr((void *)(uintptr_t)addr, (int32_t)len);
 }
@@ -787,17 +713,10 @@ void tiku_cpu_ambiq_dcache_invalidate(const void *addr, unsigned long len) {
     SCB_InvalidateDCache_by_Addr((void *)(uintptr_t)addr, (int32_t)len);
 }
 
-/**
- * @brief Apollo510 (M55) full instruction-cache invalidate.
- *
- * Needed after code is written behind the CPU, as the BASIC module loader
- * does, and before it runs.  The leading DSB/ISB orders the writes; the
- * trailing pair discards instructions already prefetched.
- */
 void tiku_cpu_ambiq_icache_invalidate(void) {
-    __DSB();
+    __DSB();                /* the leading pair completes the code writes */
     __ISB();
     SCB->ICIALLU = 0UL;
-    __DSB();
+    __DSB();                /* the trailing pair drops prefetched code */
     __ISB();
 }

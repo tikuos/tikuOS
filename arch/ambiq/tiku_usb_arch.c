@@ -1444,12 +1444,6 @@ static void msc_emmc_write(uint32_t lba, uint32_t bytes, uint32_t host_len)
     msc_csw_poll(0u, host_len - bytes);
 }
 
-/**
- * @brief Process-context pump: serve SCSI commands until the host goes quiet.
- *
- * Runs from the shell's pump list.  Returns at once unless MSC is up over the
- * eMMC.
- */
 void tiku_usb_msc_poll(void)
 {
     /*
@@ -1638,13 +1632,6 @@ tiku_usb_err_t tiku_usb_up_as(tiku_usb_speed_t want, tiku_usb_class_t cls)
     return tiku_usb_up_full(want, cls, 0);
 }
 
-/**
- * @brief Bring up, choosing the MSC backing store as well.
- *
- * In eMMC mode the host is told the card is SCRATCH_BLOCKS shorter than it is,
- * so the scratch region is outside the medium as far as the host can tell and
- * no partition table or format it writes can reach it.
- */
 tiku_usb_err_t tiku_usb_up_full(tiku_usb_speed_t want, tiku_usb_class_t cls,
                                 int use_emmc)
 {
@@ -1877,18 +1864,13 @@ void tiku_usb_down(void)
  * The CDC console as a tiku_shell_io_t backend.
  */
 
-/**
- * @brief Queue one byte for the host.
- *
- * Gated on DTR, so output to a port nobody has opened neither blocks nor
- * fills the ring.  With the terminal open, a full ring is waited on for up to
- * ~2 s, then the byte is dropped and counted for `power usb state`.
- */
 void tiku_usb_cdc_putc(char c)
 {
     uint16_t next;
     uint32_t guard = 0u;
 
+    /* Gated on DTR: output to a port nobody has opened neither blocks nor
+     * fills the ring. */
     if (!s_configured || !s_dtr) { return; }
 
     next = (uint16_t)((s_tx_head + 1u) % CDC_TX_RING);
@@ -1944,13 +1926,6 @@ int tiku_usb_cdc_ready(void)
     return (s_configured && s_dtr) ? 1 : 0;
 }
 
-/**
- * @brief Drain the CDC receive pipe until @p ms pass with no data, counting
- *        bytes and interpreting none of them.
- *
- * Uses the ring and flow-control path the shell uses, so the bytes the host
- * sent must equal the count returned.
- */
 uint32_t tiku_usb_cdc_sink(uint32_t ms)
 {
     uint32_t got = 0u, idle = 0u;
@@ -2022,15 +1997,6 @@ void tiku_usb_msc_stats(uint32_t *cbw, uint32_t *rd, uint32_t *wr,
     if (blocks) { *blocks = s_msc.blocks; }
 }
 
-/**
- * @brief Exercise the LBA bounds check on cases it must accept and refuse.
- *
- * The refused cases include two lba + nblk sums that wrap past 2^32; the
- * check guards the memory after the RAM disk.
- *
- * @return 0 if every case behaved; otherwise a bitmask with bit n set for
- *         each case n that did not.
- */
 uint32_t tiku_usb_msc_selftest(void)
 {
     uint32_t bad = 0u;
@@ -2044,7 +2010,8 @@ uint32_t tiku_usb_msc_selftest(void)
     if (tiku_usbd_msc_lba_ok(&disk, MSC_DISK_BLOCKS, 1u))            { bad |= 1u << 3; }
     if (tiku_usbd_msc_lba_ok(&disk, MSC_DISK_BLOCKS - 1u, 2u))       { bad |= 1u << 4; }
     if (tiku_usbd_msc_lba_ok(&disk, 0u, MSC_DISK_BLOCKS + 1u))       { bad |= 1u << 5; }
-    /* the overflow pair: lba + nblk wraps to 0 */
+    /* the overflow pair: lba + nblk wraps to 0; the check guards the memory
+     * after the RAM disk */
     if (tiku_usbd_msc_lba_ok(&disk, 0xFFFFFF00u, 0x100u))            { bad |= 1u << 6; }
     if (tiku_usbd_msc_lba_ok(&disk, 0x80000000u, 0x80000000u))       { bad |= 1u << 7; }
     return bad;
@@ -2056,8 +2023,6 @@ uint32_t tiku_usb_msc_hash_blocks(uint32_t nblocks)
          ? MSC_DISK_BLOCKS : nblocks;
 }
 
-/** @brief FNV-1a over the first @p nblocks of the RAM disk (0 or too many =
- *         all). */
 uint32_t tiku_usb_msc_hash(uint32_t nblocks)
 {
     uint32_t h = 2166136261u, i, n;

@@ -2100,13 +2100,6 @@ void tiku_emmc_stage_run(uint32_t mb, uint32_t src_lba)
 /* DIAGNOSTICS                                                               */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Read known blocks back with each combination of block count (1 or 4)
- *        and buffer (SSRAM, DTCM, unaligned), to tell which one breaks a read.
- *
- * Four blocks are written first by single-block writes; each case prints its
- * time, whether the data matched, and where it first differs.
- */
 void tiku_emmc_diag_run(void)
 {
     static uint8_t ref[TIKU_EMMC_BLOCK_SIZE * 4u] __attribute__((aligned(32)));

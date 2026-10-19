@@ -58,41 +58,25 @@ static void tiku_ambiq_soc_init(void) {
     CPU->CACHECTRL_b.INVALIDATE = 1u;
 }
 
-/**
- * @brief Apollo4 data-cache maintenance, for tiku_cpu_dcache_*().
- *
- * Clean does nothing: the CACHECTRL D-cache holds only read-only MRAM data.
- * Invalidate drops the whole cache, as CACHECTRL has no by-range operation.
- *
- * @note The barrier pair lets the invalidate take effect before the next
- *       fetch or load.
- */
 void tiku_cpu_ambiq_dcache_clean(const void *addr, unsigned long len) {
     (void)addr; (void)len;   /* nothing dirty to write back */
 }
 
 void tiku_cpu_ambiq_dcache_invalidate(const void *addr, unsigned long len) {
-    (void)addr; (void)len;
+    (void)addr; (void)len;   /* CACHECTRL has no by-range operation */
     CPU->CACHECTRL_b.INVALIDATE = 1u;
+    /* The barriers complete the invalidate before the next load or fetch. */
     __DSB();
     __ISB();
 }
 
-/**
- * @brief Apollo4 I-cache invalidate, for tiku_cpu_icache_invalidate().
- *
- * The CACHECTRL cache serves instruction fetches too, so this is the same
- * whole-cache invalidate as the data side.
- */
 void tiku_cpu_ambiq_icache_invalidate(void) {
+    /* One cache serves fetches and loads: this drops the data side too. */
     CPU->CACHECTRL_b.INVALIDATE = 1u;
     __DSB();
     __ISB();
 }
 
-/**
- * @brief Boot-time CPU setup: enable the cache, then read the core clock.
- */
 void tiku_cpu_boot_ambiq_init(void) {
     tiku_ambiq_soc_init();
     s_core_hz = tiku_ambiq_core_hz();
@@ -176,16 +160,6 @@ static int tiku_ambiq_simobuck_enable(void) {
     return 0;
 }
 
-/**
- * @brief Select the CPU perf mode: LP (96 MHz) or HP (192 MHz).
- *
- * A request above 96 MHz asks for HP, after bringing up the SIMO buck; any
- * other asks for LP.  The switch is the PWRCTRL request and an ACK poll.
- *
- * @note The tick runs from STIMER and busy delays read the core clock at
- *       entry, so a mode change does not disturb timekeeping.
- * @param cpu_freq  Requested core frequency in MHz.
- */
 void tiku_cpu_freq_ambiq_init(unsigned int cpu_freq) {
     unsigned int want = (cpu_freq > 96u)
         ? PWRCTRL_MCUPERFREQ_MCUPERFREQ_HP
@@ -213,19 +187,14 @@ void tiku_cpu_freq_ambiq_init(unsigned int cpu_freq) {
     s_core_hz = tiku_ambiq_core_hz();
 }
 
-/** @brief Enter CPU idle using WFI (used by the scheduler when idle). */
 void tiku_cpu_boot_ambiq_power_wfi_enter(void) {
     __asm__ volatile ("wfi");
 }
 
-/** @brief Return the main CPU core clock frequency in Hz. */
 unsigned long tiku_cpu_ambiq_clock_get_hz(void) { return s_core_hz; }
 
-/** @brief Return the SMCLK-equivalent clock: the core clock on this port. */
 unsigned long tiku_cpu_ambiq_smclk_get_hz(void) { return s_core_hz; }
 
-/** @brief Return the ACLK-equivalent low-frequency clock (32.768 kHz). */
 unsigned long tiku_cpu_ambiq_aclk_get_hz(void)  { return 32768UL; }
 
-/** @brief Report whether the main clock has a fault (always 0). */
 int           tiku_cpu_ambiq_clock_has_fault(void) { return 0; }

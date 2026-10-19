@@ -401,13 +401,15 @@ tiku_usb_err_t tiku_usb_up_as(tiku_usb_speed_t want, tiku_usb_class_t cls);
 /**
  * @brief Bring up choosing the MSC backing store too.
  *
- * With @p use_emmc the host is shown the card minus its top
+ * With @p use_emmc and MSC the host is shown the card minus its top
  * TIKU_EMMC_SCRATCH_BLOCKS, so no host format or partition table can reach
- * the scratch region.
+ * the scratch region.  CDC ignores @p use_emmc.
  *
- * @return TIKU_USB_OK; ERR_STATE if the card is not identified; ERR_ARG for
- *         a bad speed or class, or eMMC in a build without the eMMC driver;
- *         ERR_POWER or ERR_CLOCK from the bring-up
+ * @return TIKU_USB_OK, at once and with the class unchanged if USB is
+ *         already up; ERR_STATE if the card is not identified or is no larger
+ *         than the scratch region; ERR_ARG for a bad speed or class, or eMMC
+ *         in a build without the eMMC driver; ERR_POWER or ERR_CLOCK from the
+ *         bring-up
  */
 tiku_usb_err_t tiku_usb_up_full(tiku_usb_speed_t want, tiku_usb_class_t cls,
                                 int use_emmc);
@@ -417,7 +419,9 @@ tiku_usb_err_t tiku_usb_up_full(tiku_usb_speed_t want, tiku_usb_class_t cls,
  *
  * Serves SCSI commands until the host goes quiet, at most 256 per call,
  * waiting up to ~2 ms for each next command.  tiku_usb_up_full() registers it
- * as a shell pump; it returns at once unless MSC is up over the eMMC.
+ * as a shell pump.
+ *
+ * @note Returns at once unless MSC is up over the eMMC and configured.
  */
 void tiku_usb_msc_poll(void);
 
@@ -451,6 +455,10 @@ uint32_t tiku_usb_msc_hash_blocks(uint32_t nblocks);
 
 /**
  * @brief Exercise the LBA bounds check on ranges it must accept and refuse.
+ *
+ * Cases 0-2 must be accepted and 3-7 refused; cases 6 and 7 are lba + nblk
+ * sums that wrap past 2^32.  The disk checked has the RAM disk's size.
+ *
  * @return 0 if all cases behaved, else a bitmask with bit n set for each
  *         case n that did not.
  */
@@ -493,7 +501,12 @@ uint8_t tiku_usb_config(void);
  */
 extern const tiku_shell_io_t tiku_shell_io_usbcdc;
 
-/** @brief Queue one byte to the host (no-op unless configured and DTR set). */
+/**
+ * @brief Queue one byte to the host (no-op unless configured and DTR set).
+ *
+ * A full ring is waited on for up to about 2 s; then the byte is dropped and
+ * counted in the @p drop count of tiku_usb_cdc_stats().
+ */
 void tiku_usb_cdc_putc(char c);
 
 /** @brief 1 when the host has configured the device and set DTR. */
@@ -502,8 +515,9 @@ int tiku_usb_cdc_ready(void);
 /**
  * @brief Drain the receive pipe for @p ms of idle, counting bytes only.
  *
- * Measures the transport without involving the shell parser: bytes sent by
- * the host must equal the count returned.  Returns after @p ms with no data.
+ * Takes bytes through the ring and flow control the shell uses, without the
+ * shell parser: bytes sent by the host must equal the count returned.
+ * Blocks until @p ms milliseconds pass with no data.
  */
 uint32_t tiku_usb_cdc_sink(uint32_t ms);
 

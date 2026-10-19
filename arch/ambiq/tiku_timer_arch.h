@@ -168,11 +168,13 @@ int                    tiku_clock_arch_fine_max(void);
  * Debugger-free deep sleep stops the crystal and the STIMER with it, leaving
  * a tickless stretch with no alarm; the LFRC keeps running.
  *
- * @note Refuses while a tickless stretch is open.  Ticks elapsed so far are
- *       credited at the old rate, then the tick is re-armed at the new one.
+ * @note Refuses while a tickless stretch is open: reclock before a stretch.
+ *       Ticks elapsed so far are credited at the old rate, then the tick is
+ *       re-armed at the new one.
  * @param use_lfrc  non-zero: to LFRC (rate measured against DWT); 0: to XTAL
  * @return The new rate in Hz; 0 if a stretch is open (timebase unchanged) or
- *         the new source did not count (timebase back on XTAL)
+ *         the new source did not count (timebase back on the source and rate
+ *         it had before the call)
  */
 uint32_t tiku_ambiq_stimer_reclock(int use_lfrc);
 

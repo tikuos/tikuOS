@@ -62,27 +62,10 @@ static void tiku_ambiq_wdt_map(tiku_wdt_interval_t isel,
     *resval = ticks;
 }
 
-/**
- * @brief Disable the watchdog timer.
- *
- * Clears WDTEN and RESEN: the counter stops and cannot reset the chip.
- */
 void tiku_cpu_ambiq_watchdog_off_arch(void) {
     WDT->CFG &= ~(WDT_CFG_WDTEN_Msk | WDT_CFG_RESEN_Msk);
 }
 
-/**
- * @brief Enable and configure the watchdog timer.
- *
- * Programs the LFRC clock tap and reset compare from @p isel, enables the reset
- * path (both WDT.RESEN and RSTGEN.WDREN), and starts the counter from zero.
- * The interrupt stays off: INTVAL is parked at 0xFF and INTEN clear.
- *
- * @note The WDT lock register is not written, so pause, off and a later
- *       reconfiguration can still write CFG.
- * @param src   Clock source (ignored; the WDT runs from the LFRC).
- * @param isel  Timeout interval selector.
- */
 void tiku_cpu_ambiq_watchdog_on_arch(tiku_wdt_clk_t src,
                                      tiku_wdt_interval_t isel) {
     uint32_t clksel, resval;
@@ -103,20 +86,10 @@ void tiku_cpu_ambiq_watchdog_on_arch(tiku_wdt_clk_t src,
     WDT->RSTRT = TIKU_AMBIQ_WDT_KICK_KEY;   /* start counting from zero */
 }
 
-/**
- * @brief Pause the watchdog counter.
- *
- * Clears WDTEN and keeps CLKSEL/RESVAL, so resume needs no reprogramming.
- */
 void tiku_cpu_ambiq_watchdog_pause_arch(void) {
     WDT->CFG &= ~WDT_CFG_WDTEN_Msk;
 }
 
-/**
- * @brief Resume the watchdog counter after a pause.
- *
- * @param kick_on_resume  Non-zero to restart the counter from zero first.
- */
 void tiku_cpu_ambiq_watchdog_resume_arch(int kick_on_resume) {
     if (kick_on_resume) {
         WDT->RSTRT = TIKU_AMBIQ_WDT_KICK_KEY;
@@ -124,9 +97,6 @@ void tiku_cpu_ambiq_watchdog_resume_arch(int kick_on_resume) {
     WDT->CFG |= WDT_CFG_WDTEN_Msk;
 }
 
-/**
- * @brief Service (kick) the watchdog to prevent a timeout reset.
- */
 void tiku_cpu_ambiq_watchdog_kick_arch(void) {
     WDT->RSTRT = TIKU_AMBIQ_WDT_KICK_KEY;
 }

@@ -78,16 +78,6 @@ static void pad_config(uint32_t pad, uint32_t cfg) {
 /* PUBLIC API                                                                */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Enable an edge-triggered interrupt on (port, pin).
- *
- * Configures the pad as a GPIO input with the requested edge in IRPTEN,
- * clears any stale latch, unmasks the pad in GPIO->MCUN0INT0EN, and enables
- * GPIO0_001F_IRQn in the NVIC.
- *
- * @return TIKU_GPIO_IRQ_OK, TIKU_GPIO_IRQ_ERR_INVALID for a bad pad or edge,
- *         or TIKU_GPIO_IRQ_ERR_UNSUP for a pad above 31
- */
 int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
                               tiku_gpio_edge_t edge) {
     uint32_t pad, intdir;
@@ -103,7 +93,7 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
         return TIKU_GPIO_IRQ_ERR_INVALID;
     }
 
-    /* Input + edge select. */
+    /* GPIO input with no pull, the edge selected in IRPTEN. */
     pad_config(pad, TIKU_GPIO_FNCSEL_GPIO | TIKU_GPIO_INPEN |
                     (intdir << TIKU_GPIO_INTDIR_POS));
 
@@ -116,21 +106,17 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
     return TIKU_GPIO_IRQ_OK;
 }
 
-/**
- * @brief Mask the interrupt for (port, pin) and clear any pending latch.
- *
- * The pad is left a plain GPIO input (IRPTEN cleared) so the line can still
- * be read; the NVIC vector stays enabled for any other armed pads.  A pad
- * above 31 returns TIKU_GPIO_IRQ_ERR_INVALID.
- */
 int tiku_gpio_irq_arch_disable(uint8_t port, uint8_t pin) {
     uint32_t pad;
 
+    /* A pad above 31 returns ERR_INVALID here, not ERR_UNSUP. */
     if (pad_of(port, pin, &pad) || pad > TIKU_GPIO_IRQ_MAX_PAD) {
         return TIKU_GPIO_IRQ_ERR_INVALID;
     }
     GPIO->MCUN0INT0EN &= ~(1u << pad);
     GPIO->MCUN0INT0CLR = (1u << pad);
+    /* The rewrite leaves a GPIO input with no pull, so the line can still be
+     * read.  GPIO0_001F stays enabled in the NVIC for other armed pads. */
     pad_config(pad, TIKU_GPIO_FNCSEL_GPIO | TIKU_GPIO_INPEN);  /* IRPTEN 0 */
     return TIKU_GPIO_IRQ_OK;
 }

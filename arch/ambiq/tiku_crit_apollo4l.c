@@ -41,26 +41,19 @@ static inline void keep_set(uint32_t *keep, unsigned irq) {
     keep[irq >> 5] |= (1u << (irq & 31u));
 }
 
-/**
- * @brief Disable NVIC IRQs, preserving those named in preserve_mask.
- *
- * Snapshots ISER into s_save[], builds a keep-mask from the
- * TIKU_CRIT_PRESERVE_* flags, then clears every IRQ not kept via ICER.
- *
- * @note TIKU_CRIT_PRESERVE_TICK keeps IRQ 33 enabled; without it,
- *       tiku_clock_time() catches up when the window ends.
- * @param preserve_mask  Bitmask of TIKU_CRIT_PRESERVE_* flags
- */
 void tiku_crit_arch_mask_irqs(uint8_t preserve_mask) {
     uint32_t keep[NVIC_WORDS] = { 0, 0, 0 };
     int i;
     unsigned g;
 
+    /* Only NVIC lines are masked; SysTick is outside the NVIC. */
     for (i = 0; i < NVIC_WORDS; i++) {
         s_save[i] = NVIC_ISER[i];
     }
 
     if (preserve_mask & TIKU_CRIT_PRESERVE_TICK) {
+        /* IRQ 33 is STIMER compare B, the kernel tick.  A masked tick
+         * pends, and tiku_clock_time() catches up when the window ends. */
         keep_set(keep, 33u);
     }
     if (preserve_mask & TIKU_CRIT_PRESERVE_HTIMER) {
@@ -82,13 +75,15 @@ void tiku_crit_arch_mask_irqs(uint8_t preserve_mask) {
     for (i = 0; i < NVIC_WORDS; i++) {
         NVIC_ICER[i] = s_save[i] & ~keep[i];
     }
+    /* The new mask takes effect before the caller's protected code runs. */
     __asm__ volatile ("dsb");
     __asm__ volatile ("isb");
 }
 
-/** @brief Restore the NVIC IRQ enables saved by tiku_crit_arch_mask_irqs(). */
 void tiku_crit_arch_unmask_irqs(void) {
     int i;
+    /* ISER writes set bits only: an IRQ enabled inside the window stays
+     * enabled. */
     for (i = 0; i < NVIC_WORDS; i++) {
         NVIC_ISER[i] = s_save[i];
     }

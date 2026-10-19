@@ -69,9 +69,12 @@ void tiku_cpu_ambiq_watchdog_off_arch(void);
 /**
  * @brief Start the watchdog with a timeout of isel / 32768 s (at most 2 s).
  *
- * Arms the reset path (WDT.RESEN and RSTGEN.WDREN) and starts counting from
- * zero.  The timeout is at least one 128 Hz LFRC tick (~7.8 ms).
+ * Arms the reset path (WDT.RESEN and RSTGEN.WDREN), does not enable the WDT
+ * interrupt, and starts counting from zero.  The timeout is at least one LFRC
+ * tick: 128 Hz (~7.8 ms) on Apollo4, LFRC/8 (~8.9 ms) on Apollo510.
  *
+ * @note The WDT lock register is not written: pause, off and a later call
+ *       can still rewrite the configuration.
  * @param src   Clock source (ignored; the WDT runs from the LFRC).
  * @param isel  Timeout interval selector (divider on 32768 Hz).
  */

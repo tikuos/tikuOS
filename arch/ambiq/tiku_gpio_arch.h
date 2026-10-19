@@ -23,11 +23,12 @@
  * @brief Configure a GPIO pin as a push-pull output.
  *
  * Part of the shared (port, pin) API used by the VFS /dev/gpio nodes.
- * Maps port N, pin P to pad (N-1)*8 + P.
+ * Maps port N, pin P to pad (N-1)*8 + P; port 0, a pin above 7 or a pad past
+ * the part's last (223 on Apollo510, 127 on Apollo4) is invalid.
  *
  * @param port  Virtual port number (1-based, matching /dev/gpio/N).
  * @param pin   Pin index within the port (0..7).
- * @return 0 on success, negative error code if the port/pin is invalid.
+ * @return 0 on success, -1 if the port/pin is invalid.
  */
 int8_t tiku_gpio_arch_set_output(uint8_t port, uint8_t pin);
 
@@ -36,7 +37,7 @@ int8_t tiku_gpio_arch_set_output(uint8_t port, uint8_t pin);
  *
  * @param port  Virtual port number (1-based).
  * @param pin   Pin index within the port (0..7).
- * @return 0 on success, negative error code if the port/pin is invalid.
+ * @return 0 on success, -1 if the port/pin is invalid.
  */
 int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin);
 
@@ -46,7 +47,7 @@ int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin);
  * @param port  Virtual port number (1-based).
  * @param pin   Pin index within the port (0..7).
  * @param val   Output level: 0 = low, non-zero = high.
- * @return 0 on success, negative error code if the port/pin is invalid.
+ * @return 0 on success, -1 if the port/pin is invalid.
  */
 int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val);
 
@@ -55,7 +56,7 @@ int8_t tiku_gpio_arch_write(uint8_t port, uint8_t pin, uint8_t val);
  *
  * @param port  Virtual port number (1-based).
  * @param pin   Pin index within the port (0..7).
- * @return 0 on success, negative error code if the port/pin is invalid.
+ * @return 0 on success, -1 if the port/pin is invalid.
  */
 int8_t tiku_gpio_arch_toggle(uint8_t port, uint8_t pin);
 
@@ -64,7 +65,7 @@ int8_t tiku_gpio_arch_toggle(uint8_t port, uint8_t pin);
  *
  * @param port  Virtual port number (1-based).
  * @param pin   Pin index within the port (0..7).
- * @return 0 or 1 reflecting the pad level, negative error code on error.
+ * @return 0 or 1 reflecting the pad level, -1 if the port/pin is invalid.
  */
 int8_t tiku_gpio_arch_read(uint8_t port, uint8_t pin);
 
@@ -73,7 +74,8 @@ int8_t tiku_gpio_arch_read(uint8_t port, uint8_t pin);
  *
  * @param port  Virtual port number (1-based).
  * @param pin   Pin index within the port (0..7).
- * @return 1 if the pin is an output, 0 if input, negative on error.
+ * @return 1 if the pad's OUTCFG enables an output (push-pull, open-drain or
+ *         tristate), 0 if it is disabled, -1 if the port/pin is invalid.
  */
 int8_t tiku_gpio_arch_get_dir(uint8_t port, uint8_t pin);
 
@@ -98,7 +100,9 @@ void tiku_ambiq_gpio_pad_config(uint32_t pad, uint32_t cfg);
 /**
  * @brief Drive a pad to a logic level through the WTS / WTC registers.
  *
- * @param pad    GPIO pad number.
+ * The set and clear registers change only this pad, so the write is atomic.
+ *
+ * @param pad    GPIO pad number; not range-checked.
  * @param value  Output level: 0 = low, non-zero = high.
  */
 void tiku_ambiq_gpio_set(uint32_t pad, uint8_t value);
@@ -106,7 +110,7 @@ void tiku_ambiq_gpio_set(uint32_t pad, uint8_t value);
 /**
  * @brief Invert a pad's output level by read-modify-write of its WT bank.
  *
- * @param pad  GPIO pad number.
+ * @param pad  GPIO pad number; not range-checked.
  * @note Not atomic: a write to the same 32-pad bank between the read and the
  *       write is lost.
  */

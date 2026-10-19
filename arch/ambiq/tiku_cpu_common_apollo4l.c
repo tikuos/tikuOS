@@ -26,15 +26,6 @@
 /** Mask for the 24 valid counter bits */
 #define SYST_MASK 0x00FFFFFFu
 
-/**
- * @brief Spin-delay for a given number of microseconds.
- *
- * Counts SysTick cycles at the core clock read at entry (96 or 192 MHz), so a
- * delay after a perf-mode switch uses the new rate.  Before SysTick is
- * configured it spins an uncalibrated NOP loop.
- *
- * @param us  Delay in microseconds
- */
 void tiku_cpu_ambiq_delay_us(unsigned int us) {
     uint32_t reload = (SYST_RVR & SYST_MASK) + 1u;
     uint32_t per_us = (uint32_t)(tiku_cpu_ambiq_clock_get_hz() / 1000000UL);
@@ -67,20 +58,12 @@ void tiku_cpu_ambiq_delay_us(unsigned int us) {
     }
 }
 
-/** @brief Spin-delay: tiku_cpu_ambiq_delay_us(1000), @p ms times. */
 void tiku_cpu_ambiq_delay_ms(unsigned int ms) {
     while (ms--) {
         tiku_cpu_ambiq_delay_us(1000u);
     }
 }
 
-/**
- * @brief Read the device unique ID from MCUCTRL CHIPID0/CHIPID1 (8 bytes).
- *
- * @param buf  Destination buffer for the unique ID
- * @param len  Number of bytes to fill
- * @return Number of bytes written (<= 8), or 0 if buf is NULL or len is 0
- */
 uint8_t tiku_cpu_ambiq_unique_id(uint8_t *buf, uint8_t len) {
     uint32_t id[2];
     uint8_t i, n;
@@ -96,15 +79,6 @@ uint8_t tiku_cpu_ambiq_unique_id(uint8_t *buf, uint8_t len) {
     return n;
 }
 
-/**
- * @brief Return the encoded reason for the last system reset.
- *
- * Maps the reset generator's status latch (RSTGEN->STAT) to the
- * MSP430-SYSRSTIV-style code the /sys reset nodes decode.  Several causes can
- * latch at once; the most specific is reported.  STAT is not cleared.
- *
- * @return SYSRSTIV-style reset-reason code (0 = power-on)
- */
 uint16_t tiku_cpu_ambiq_reset_reason(void) {
     uint32_t s = RSTGEN->STAT;
 

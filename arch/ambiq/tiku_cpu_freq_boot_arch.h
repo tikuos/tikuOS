@@ -22,8 +22,9 @@
 /**
  * @brief One-time CPU bring-up: enable the caches and read the core clock.
  *
- * On Apollo510 it also enables the prefetch unit and powers down the
- * CryptoCell, OTP reader and trace unit.  The clock tree is left as booted.
+ * On Apollo510 it also enables the prefetch unit and, unless
+ * TIKU_AMBIQ_BOOT_TIDY is 0, powers down the CryptoCell, OTP reader and trace
+ * unit.  The clock tree is left as booted.
  *
  * @note Called once, early in boot, before other subsystems start.
  */
@@ -32,10 +33,16 @@ void tiku_cpu_boot_ambiq_init(void);
 /**
  * @brief Select the core's perf mode from a requested frequency.
  *
- * Above 96 MHz asks for high-performance mode (250 MHz on Apollo510, 192 MHz
- * on Apollo4), anything else for low-power mode (96 MHz).  A refused request
- * leaves the core in LP; tiku_cpu_ambiq_clock_get_hz() reports the result.
+ * Above 96 MHz enables the SIMO buck, then asks for high-performance mode
+ * (250 MHz on Apollo510, 192 MHz on Apollo4); anything else asks for
+ * low-power mode (96 MHz).
  *
+ * @note A refused HP request leaves the core in LP, and
+ *       tiku_cpu_ambiq_clock_get_hz() reports the mode reached.  The buck
+ *       stays on after a return to LP; on Apollo510 an LP request enables it
+ *       too while TIKU_AMBIQ_LP_BUCK is 1, the default.
+ * @note The kernel tick runs from STIMER and busy delays read the core clock
+ *       at entry, so a mode change does not disturb timekeeping.
  * @param cpu_freq  Requested core frequency in MHz (MAIN_CPU_FREQ at boot).
  */
 void tiku_cpu_freq_ambiq_init(unsigned int cpu_freq);
@@ -53,7 +60,8 @@ void tiku_cpu_boot_ambiq_power_wfi_enter(void);
  * Read from the perf-mode status after the last mode change.  Busy delays
  * scale by it and /sys/cpu/freq reports it.
  *
- * @return Core clock frequency in Hz.
+ * @return Core clock frequency in Hz: 96 MHz in LP; in HP 250 MHz on
+ *         Apollo510, 192 MHz on Apollo4.
  */
 unsigned long tiku_cpu_ambiq_clock_get_hz(void);
 
@@ -84,6 +92,9 @@ int           tiku_cpu_ambiq_clock_has_fault(void);
  *
  * Apollo510 cleans the range by address.  On Apollo4 it does nothing: the
  * CACHECTRL cache holds only MRAM data the CPU reads.
+ *
+ * @note Call it after the CPU writes the range, before something other than
+ *       the CPU (the boot ROM's MRAM programmer, the GPU, DMA) reads it.
  */
 void          tiku_cpu_ambiq_dcache_clean(const void *addr, unsigned long len);
 
@@ -105,7 +116,10 @@ void          tiku_cpu_ambiq_dcache_invalidate(const void *addr, unsigned long l
  * @brief Invalidate the instruction cache (whole cache).
  *
  * Apollo510 writes ICIALLU with barriers on both sides; Apollo4 invalidates
- * its unified CACHECTRL cache.  Needed after code is written behind the CPU.
+ * its unified CACHECTRL cache.
+ *
+ * @note Call it after code is written behind the CPU (the BASIC module loader
+ *       does), before that code runs.
  */
 void          tiku_cpu_ambiq_icache_invalidate(void);
 

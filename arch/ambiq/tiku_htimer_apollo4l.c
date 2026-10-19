@@ -112,38 +112,25 @@ static void stimer_arm(volatile uint32_t *scmpr, uint32_t delta) {
     }
 }
 
-/**
- * @brief Initialize the STIMER and enable the compare-0 interrupt (IRQ 32).
- *
- * Powers the crystal, free-runs the STIMER from it with both compares enabled,
- * clears any stale flag and enables IRQ 32.  COMPAREA stays masked at STMINTEN
- * until a compare is scheduled.
- *
- * @note COMPAREBEN is kept set so this init, which runs after
- *       tiku_clock_arch_init(), keeps the periodic tick that function armed.
- */
 void tiku_htimer_arch_init(void) {
+    /* The STIMER runs from the 32.768 kHz crystal.  COMPAREBEN stays set:
+     * tiku_clock_arch_init() runs first and armed the kernel tick on
+     * compare B. */
     stimer_xtal_enable();
 
     STIMER->STCFG     = STIMER_CLKSEL_XTAL_32KHZ |
                         STIMER_COMPAREAEN | STIMER_COMPAREBEN;
+    /* COMPAREA stays masked in STMINTEN until a schedule, so a stale SCMPR0
+     * match cannot fire first. */
     STIMER->STMINTCLR = STIMER_INT_COMPAREA;
     s_last_cmpr = stimer_counter();
 
     NVIC_ISER[AMBIQ_IRQ_STIMER_CMPR0 >> 5] = (1u << (AMBIQ_IRQ_STIMER_CMPR0 & 31u));
 }
 
-/**
- * @brief Schedule an STIMER compare-A interrupt at the given 16-bit tick.
- *
- * Converts the absolute target into the DELTA the hardware requires, adjusting
- * for write/interrupt latency and elapsed time, all inside a PRIMASK section.
- * STMINTEN is OR-ed, not overwritten, so the tick's COMPAREB enable survives.
- *
- * @param t  Target 16-bit STIMER tick (absolute, wrapping)
- */
 void tiku_htimer_arch_schedule(tiku_htimer_clock_t t) {
     uint32_t snap0 = stimer_counter();
+    /* A target behind the counter wraps to up to 65535 counts (2 s) ahead. */
     uint32_t delta = (uint32_t)(uint16_t)((uint16_t)t - (uint16_t)snap0);
     uint32_t primask, cur, guard, adj;
 
@@ -154,6 +141,7 @@ void tiku_htimer_arch_schedule(tiku_htimer_clock_t t) {
     __asm__ volatile ("mrs %0, primask" : "=r" (primask));
     __asm__ volatile ("cpsid i" ::: "memory");
 
+    /* Space this compare write from the previous one, as stimer_arm() does. */
     guard = 1000000u;
     do {
         cur = stimer_counter();
@@ -162,11 +150,14 @@ void tiku_htimer_arch_schedule(tiku_htimer_clock_t t) {
         }
     } while (--guard);
 
+    /* 3 counts cover the 2-count COMPARE write latency and the 1-count
+     * interrupt delay; cur - snap0 is the time spent since the snapshot. */
     adj   = 3u + (cur - snap0);
     delta = (delta > adj) ? (delta - adj) : 1u;
 
     STIMER->SCMPR0    = delta;          /* DELTA; hardware adds the counter */
     s_last_cmpr       = stimer_counter();
+    /* OR-ed, so the kernel tick's COMPAREB enable stays set. */
     STIMER->STMINTEN |= STIMER_INT_COMPAREA;
 
     if ((primask & 1u) == 0u) {
@@ -174,8 +165,8 @@ void tiku_htimer_arch_schedule(tiku_htimer_clock_t t) {
     }
 }
 
-/** @brief Current 16-bit STIMER tick: the low 16 bits of the counter. */
 tiku_htimer_clock_t tiku_htimer_arch_now(void) {
+    /* The low 16 bits of the voted 32-bit counter, one count per 1/32768 s. */
     return (tiku_htimer_clock_t)(stimer_counter() & 0xFFFFu);
 }
 
@@ -268,21 +259,13 @@ void tiku_ambiq_stimer_cmpr1_isr(void) {
 /* TICKLESS IDLE                                                             */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Stretch compare-B straight to the next software-timer deadline.
- *
- * Strong override; called by the scheduler with interrupts masked, timers
- * armed, none due.  Re-targets SCMPR1 to the boundary @p ticks_ahead after the
- * anchor, so the WFI sleeps through every skipped tick.
- *
- * @note Credits no ticks: a credit posts the timer poll after the scheduler
- *       checked has_pending, and the WFI then sleeps on queued work.  A
- *       boundary already passed pends its IRQ, and tiku_clock_tickless_end()
- *       credits it.
- * @param ticks_ahead Ticks to the earliest deadline (> 1)
- * @return 1 (stretch armed)
- */
 int tiku_clock_tickless_begin(tiku_clock_time_t ticks_ahead) {
+    /* The stretch always arms: this port does not check that the counter
+     * moves.  The target is the boundary ticks_ahead periods after the
+     * anchor.  No ticks are credited here: a credit posts the timer poll
+     * after the scheduler checked has_pending, and the WFI then sleeps on
+     * queued work.  A boundary already passed pends its compare-B interrupt,
+     * and tiku_clock_tickless_end() credits it. */
     uint32_t into  = stimer_counter() - s_tick_anchor;
     uint32_t span  = (uint32_t)ticks_ahead * s_tick_period;
     uint32_t delta = (span > into) ? (span - into) : 1u;
@@ -292,14 +275,9 @@ int tiku_clock_tickless_begin(tiku_clock_time_t ticks_ahead) {
     return 1;
 }
 
-/**
- * @brief Close the stretch window after the idle hook returns.
- *
- * Runs with interrupts still masked.  If the stretched compare already fired,
- * its ISR resynced the clock and restored the cadence.  On an early wake by any
- * other interrupt, credit the elapsed whole ticks and re-arm the cadence.
- */
 void tiku_clock_tickless_end(void) {
+    /* s_stretched is clear when the stretched compare fired: its ISR has
+     * credited the ticks and re-armed the cadence. */
     if (!s_stretched) {
         return;
     }
@@ -308,7 +286,6 @@ void tiku_clock_tickless_end(void) {
     stimer_tick_rearm_boundary();
 }
 
-/** @brief Strong override: this file provides a tickless backend; returns 1. */
 int tiku_clock_tickless_available(void) {
     return 1;
 }

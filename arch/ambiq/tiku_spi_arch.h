@@ -8,7 +8,8 @@
  * tiku_spi_arch.h - Ambiq SPI master interface.
  *
  * The IOM6 master is built with TIKU_SPI_IOM_ENABLE (the EM9305 BLE build).
- * Without it, init and the buffer calls return -1 and a byte transfer 0xFF.
+ * Without it, init and the buffer calls return -1, a byte transfer returns
+ * 0xFF and close does nothing.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -25,7 +26,8 @@
  * bit_order and prescaler fields are ignored: MSB first at 16 MHz.
  *
  * @param config  Pointer to the SPI configuration structure.
- * @return 0 on success, -1 if @p config is NULL or the master is not built.
+ * @return 0 on success; -1 if @p config is NULL, the master is not built, or
+ *         the IOM never goes idle (the master is then powered down).
  */
 int     tiku_spi_arch_init(const tiku_spi_config_t *config);
 

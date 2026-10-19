@@ -78,28 +78,14 @@ static int mram_program_span(uintptr_t dst_addr, const uint32_t *src16,
     return rc;
 }
 
-/**
- * @brief Program an arbitrary MRAM span via the bootrom (absolute address)
- *
- * The chunked read-modify-program loop shared by the carved-region write path
- * and the BASIC module loader: 16-byte-aligned windows staged through
- * nvmr_stage (TCM, uncached), sub-16-byte edges merged with existing MRAM.
- *
- * @note Ends with a whole-cache CACHECTRL flush so same-session reads and
- *       instruction fetches see fresh bytes; the unified Apollo4 cache serves
- *       both.  Refuses anything below user MRAM (the boot/info area occupies
- *       the low 96 KB) or past the 2 MB MRAM end.
- * @param dst  Absolute destination address in MRAM
- * @param src  Source bytes (staged; may live in MRAM itself)
- * @param len  Number of bytes to program
- * @return 0 on success, -1 on bounds violation or bootrom failure
- */
 int tiku_nvm_mram_program(uintptr_t dst, const void *src, size_t len)
 {
     const uint8_t *s = (const uint8_t *)src;
     uintptr_t span, aligned_start, aligned_end;
 
-    if (dst < 0x00018000UL ||           /* boot/info low 96 KB: never */
+    /* The boot/info area occupies the low 96 KB; MRAM ends at 0x200000
+     * (2 MB). */
+    if (dst < 0x00018000UL ||
         dst > 0x00200000UL || len > 0x00200000UL - dst) {
         return -1;
     }
@@ -138,7 +124,8 @@ int tiku_nvm_mram_program(uintptr_t dst, const void *src, size_t len)
 
     /* Drop stale cached copies of the programmed range.  The Apollo4
      * CACHECTRL has no by-range operation: the arguments are ignored and
-     * the whole cache is invalidated. */
+     * the whole cache is invalidated.  The cache is unified, so instruction
+     * fetches see the new bytes too. */
     tiku_cpu_dcache_invalidate((const void *)dst, len);
     return 0;
 }

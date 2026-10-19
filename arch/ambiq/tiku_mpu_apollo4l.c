@@ -144,16 +144,12 @@ static void mpu_set_nvm_ap(uint32_t ro) {
     __DSB();
     __ISB();
 }
-/**
- * @brief Initialize the PMSAv7 MPU (coarse W^X) and enable it.
- *
- * Cold boot zeroes and stamps .mpu_diag; a warm reset keeps the counters.
- * Programs regions 0-3 as in the map above, clears slots 4-7, enables the MPU
- * with PRIVDEFENA, and puts MemManage at priority 0.
- */
+
 void tiku_mpu_arch_init_segments(void) {
     uint32_t r;
 
+    /* Cold boot (magic absent) zeroes and stamps .mpu_diag; a warm reset
+     * keeps the counters. */
     if (mpu_diag.magic != TIKU_MPU_DIAG_MAGIC) {
         mpu_diag.violation_flags = 0U;
         mpu_diag.magic            = TIKU_MPU_DIAG_MAGIC;
@@ -235,12 +231,6 @@ void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm) {
     tiku_mpu_arch_set_sam(sam);
 }
 
-/**
- * @brief Unlock NVM for writing.
- *
- * ORs the write bits into the SAM and makes region 3 (.uninit) RW for the
- * window; the generic tiku_mpu_lock_nvm() closing it drives the MRAM flush.
- */
 uint16_t tiku_mpu_arch_unlock_nvm(void) {
     uint16_t saved = stub_mpusam;
     stub_mpusam = (uint16_t)(saved | 0x0222U);

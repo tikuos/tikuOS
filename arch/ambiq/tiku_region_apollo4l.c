@@ -29,18 +29,9 @@ static tiku_mem_region_t       s_regions[6];
 /** @brief Number of valid entries in s_regions; 0 until first call. */
 static tiku_mem_arch_size_t    s_region_count;
 
-/**
- * @brief Return the Apollo4 Lite physical memory-region table.
- *
- * Includes TCM statics, the durable overlay, free TCM below the guard,
- * shared SRAM (1 MiB Lite / 2 MiB Plus), MRAM and peripherals.
- * Bank and allocator boundaries come from the linker.
- *
- * @param count  Output: number of entries (may be NULL)
- * @return Pointer to the static region table (never NULL)
- */
 const struct tiku_mem_region *
 tiku_region_arch_get_table(tiku_mem_arch_size_t *count) {
+    /* Builds the table on the first call; count may be NULL on this port. */
     if (s_region_count == 0) {
         uintptr_t ram_start    = (uintptr_t)TIKU_DEVICE_RAM_START;
         uintptr_t uninit_start = (uintptr_t)&__uninit_start;
@@ -75,7 +66,8 @@ tiku_region_arch_get_table(tiku_mem_arch_size_t *count) {
             idx++;
         }
 
-        /* Shared SRAM: the linker gives the bank for Lite and Plus. */
+        /* Shared SRAM: the linker gives the bank, 1 MB on the Lite and
+         * 2 MB on the Plus. */
         s_regions[idx].base = &__ssram_bank_start;
         s_regions[idx].size = (uintptr_t)&__ssram_bank_end -
                              (uintptr_t)&__ssram_bank_start;

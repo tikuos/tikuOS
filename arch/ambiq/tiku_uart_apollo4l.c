@@ -107,13 +107,6 @@ static void uart_pad_cfg(uint32_t pad, uint32_t cfg) {
 /* Public API                                                                */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialize the console UART for 8N1 operation with RX interrupts.
- *
- * Powers the UART domain, routes the board's pads, selects the 24 MHz HFRC
- * clock tap, programs the baud divisors and line control, and enables the RX
- * interrupts, the UART, its transmitter and receiver.
- */
 void tiku_uart_init(void) {
     /* 1. Power up the console UART peripheral domain. */
 #if defined(TIKU_CONSOLE_UART0)
@@ -173,7 +166,6 @@ void tiku_uart_init(void) {
     NVIC_ISER[AMBIQ_IRQ_UART2 >> 5] = (1u << (AMBIQ_IRQ_UART2 & 31u));
 }
 
-/** @brief Transmit one character, blocking until the TX FIFO has room. */
 void tiku_uart_putc(char c) {
     while (TIKU_UART->FR_b.TXFF) {
         /* spin while the TX FIFO is full */
@@ -201,15 +193,6 @@ void tiku_uart_putc(char c) {
  *  baud; the cap bounds the pre-reset delay if TX stops mid-drain. */
 #define UART_FAULT_DRAIN_MAX  4000000u
 
-/**
- * @brief Fault-safe putc: transmit one character with a bounded wait
- *
- * Identical to tiku_uart_putc() except the TX-FIFO-full spin is capped at
- * UART_FAULT_SPIN_MAX polls; if no slot frees by then, the character is
- * dropped and the call returns.
- *
- * @param c  Character to send
- */
 void tiku_uart_fault_putc(char c) {
     uint32_t spins = 0u;
     while (TIKU_UART->FR & UART0_FR_TXFF_Msk) {
@@ -220,13 +203,6 @@ void tiku_uart_fault_putc(char c) {
     TIKU_UART->DR = (uint32_t)(uint8_t)c;
 }
 
-/**
- * @brief Fault-safe drain: wait (bounded) until the TX path is idle
- *
- * Blocks until the TX FIFO is empty and the shifter has sent the final stop
- * bit, so a reset issued afterwards cannot destroy queued output; returns
- * after UART_FAULT_DRAIN_MAX polls if the transmitter has stopped.
- */
 void tiku_uart_fault_drain(void) {
     uint32_t spins = 0u;
     while (!(TIKU_UART->FR & UART0_FR_TXFE_Msk) ||
@@ -237,7 +213,6 @@ void tiku_uart_fault_drain(void) {
     }
 }
 
-/** @brief Transmit a null-terminated string (LF -> CR+LF). */
 void tiku_uart_puts(const char *s) {
     if (s == NULL) {
         return;
@@ -250,12 +225,10 @@ void tiku_uart_puts(const char *s) {
     }
 }
 
-/** @brief Test whether received data is waiting in the ring buffer. */
 uint8_t tiku_uart_rx_ready(void) {
     return (rx.head != rx.tail) ? 1U : 0U;
 }
 
-/** @brief Read one character from the RX ring (non-blocking; -1 if empty). */
 int tiku_uart_getc(void) {
     if (rx.head == rx.tail) {
         return -1;
@@ -265,14 +238,11 @@ int tiku_uart_getc(void) {
     return (int)c;
 }
 
-/** @brief RX overrun count: FIFO overruns plus bytes the full ring dropped. */
 uint16_t tiku_uart_overrun_count(void) { return rx.overrun_count; }
 
-/** @brief Clear the RX overrun counter. */
 void     tiku_uart_overrun_reset(void) { rx.overrun_count = 0U; }
 
 #ifdef HAS_TESTS
-/** @brief Inject a byte into the RX ring buffer (test-only). */
 void tiku_uart_test_inject(uint8_t byte) {
     uint16_t next = (uint16_t)((rx.head + 1U) & TIKU_UART_RXBUF_MASK);
     if (next != rx.tail) {
@@ -353,15 +323,6 @@ static void uart_print_int(long v, unsigned width, char pad) {
     uart_print_uint((unsigned long)v, 10U, width, pad);
 }
 
-/**
- * @brief Lightweight printf over the console UART.
- *
- * Supports %c, %s, %d, %ld, %u, %lu, %x, %lx and %%, with optional zero or
- * space padding to a width.  LF goes out as CR+LF.
- *
- * @param fmt  printf-style format string
- * @param ...  Format arguments
- */
 void tiku_uart_printf(const char *fmt, ...) {
     if (fmt == NULL) {
         return;

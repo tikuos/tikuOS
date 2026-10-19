@@ -1023,12 +1023,6 @@ tiku_psram_err_t tiku_psram_dma_start(uint32_t dev_addr, void *sram,
     return TIKU_PSRAM_OK;
 }
 
-/**
- * @brief Collect a transfer armed by tiku_psram_dma_start().
- *
- * Spins without a backoff, for up to 40000000 polls.  A DMA error returns
- * TIKU_PSRAM_ERR_TIMEOUT.
- */
 tiku_psram_err_t tiku_psram_dma_wait(void)
 {
     uint32_t spins = 40000000u;

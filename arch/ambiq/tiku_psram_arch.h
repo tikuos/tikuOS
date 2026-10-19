@@ -343,8 +343,15 @@ int tiku_psram_xip_enabled(void);
 tiku_psram_err_t tiku_psram_dma_start(uint32_t dev_addr, void *sram,
                                       uint32_t n, int to_device);
 
-/** @brief Wait for the transfer armed by tiku_psram_dma_start(); returns
- *         TIKU_PSRAM_OK at once if none is armed. */
+/**
+ * @brief Wait for the transfer armed by tiku_psram_dma_start().
+ *
+ * Busy-polls for up to 40000000 polls, then disarms the transfer whatever
+ * the outcome.
+ *
+ * @return TIKU_PSRAM_OK on completion or at once when none is armed;
+ *         TIKU_PSRAM_ERR_TIMEOUT on a DMA error or when the polls run out.
+ */
 tiku_psram_err_t tiku_psram_dma_wait(void);
 
 /**

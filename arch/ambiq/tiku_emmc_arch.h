@@ -456,7 +456,12 @@ tiku_emmc_err_t tiku_emmc_stage_close(uint32_t total_bytes, uint32_t *src,
  * @brief Read the scratch region six ways and print each result.
  *
  * Writes four pattern blocks one at a time, then reads 1 and 4 blocks into
- * SSRAM, DTCM and an unaligned (PIO) buffer, printing the first bad byte.
+ * SSRAM, DTCM and an unaligned (PIO) buffer, printing each read's status,
+ * time and first bad byte.
+ *
+ * @note Prints why and returns early when the driver is not up, the scratch
+ *       region is unknown, a setup write fails or SRAM tier span 0 cannot
+ *       lend the bounce buffer, which is returned after the run.
  */
 void tiku_emmc_diag_run(void);
 

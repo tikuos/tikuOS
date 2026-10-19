@@ -7,7 +7,7 @@
  *
  * tiku_mem_arch.h - Ambiq memory architecture interface.
  *
- * Shared by the Apollo510 (tiku_mem_arch.c) and Apollo4 Lite
+ * Shared by the Apollo510 (tiku_mem_arch.c) and Apollo4 Lite and Plus
  * (tiku_mem_apollo4l.c) backends: durable state in .uninit, mirrored to MRAM.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -97,6 +97,7 @@ void tiku_mem_arch_nvm_flush(void);
  * Composes the mirror header and image and programs the page through the
  * bootrom, unless the mirror already holds the same image.
  *
+ * @note Masks interrupts across the bootrom call.
  * @return 0 on success or when nothing changed, -1 when .uninit is larger
  *         than the page or the bootrom reports a failure
  */
@@ -106,15 +107,18 @@ int tiku_mem_arch_nvm_flush_status(void);
  * @brief Program an arbitrary MRAM span via the on-chip bootrom.
  *
  * Read-modify-programs 16-byte-aligned chunks through a staging buffer, so a
- * sub-16-byte edge keeps the MRAM bytes beside it, then drops cached copies.
- * Defined in tiku_nvm_region_apollo510.c and tiku_nvm_region_apollo4l.c.
+ * sub-16-byte edge keeps the MRAM bytes beside it, then drops cached copies:
+ * D-cache lines on Apollo510, the whole cache (instructions too) on Apollo4.
  *
- * @note Spans below user MRAM (0x00410000 on Apollo510, 0x00018000 on Apollo4
- *       Lite) or past the end of MRAM are refused.
+ * @note Defined in tiku_nvm_region_apollo510.c and tiku_nvm_region_apollo4l.c.
+ * @note Masks interrupts across each bootrom call.  Spans below user MRAM
+ *       (0x00410000 on Apollo510, 0x00018000 on Apollo4) or past the end of
+ *       MRAM (0x00800000 on Apollo510, 0x00200000 on Apollo4) are refused.
  * @param dst  Absolute destination address in MRAM.
  * @param src  Source bytes (any address space; staged first).
  * @param len  Number of bytes to program.
- * @return 0 on success, -1 on bounds violation or bootrom failure.
+ * @return 0 on success or for an in-bounds @p len of 0, -1 on bounds
+ *         violation or bootrom failure.
  */
 int tiku_nvm_mram_program(uintptr_t dst, const void *src, size_t len);
 

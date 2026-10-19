@@ -66,26 +66,14 @@ static int mram_program_span(uintptr_t dst_addr, const uint32_t *src16,
     return rc;
 }
 
-/**
- * @brief Program an arbitrary MRAM span via the bootrom (absolute address)
- *
- * Copies each 16-byte-aligned chunk of up to 256 bytes into the SSRAM staging
- * window, overlays the new bytes on the existing MRAM contents and programs
- * the chunk.  The carved-region write path calls it.
- *
- * @note Refuses anything below user MRAM (the SBL and its vectors live at
- *       0x400000..0x410000) or past the 4 MB MRAM end.
- * @param dst  Absolute destination address in MRAM
- * @param src  Source bytes (staged; may live in MRAM itself)
- * @param len  Number of bytes to program
- * @return 0 on success, -1 on bounds violation or bootrom failure
- */
 int tiku_nvm_mram_program(uintptr_t dst, const void *src, size_t len)
 {
     const uint8_t *s = (const uint8_t *)src;
     uintptr_t span, aligned_start, aligned_end;
 
-    if (dst < 0x00410000UL ||               /* SBL + vector area: never */
+    /* The SBL and its vectors occupy 0x400000..0x410000; MRAM ends at
+     * 0x800000 (4 MB). */
+    if (dst < 0x00410000UL ||
         dst > 0x00800000UL || len > 0x00800000UL - dst) {
         return -1;
     }
@@ -103,6 +91,7 @@ int tiku_nvm_mram_program(uintptr_t dst, const void *src, size_t len)
         if (chunk > NVMR_STAGE_BYTES) {
             chunk = NVMR_STAGE_BYTES;
         }
+        /* Stage the existing MRAM bytes, then overlay the new ones. */
         memcpy(nvmr_stage, (const void *)span, chunk);
 
         ov_start = (dst > span) ? dst : span;

@@ -7,8 +7,8 @@
  *
  * tiku_i2c_arch.h - Ambiq I2C driver interface (stub)
  *
- * This port has no I2C driver: every call that returns a status returns -1
- * (TIKU_I2C_ERR_NACK) and no call touches the hardware.
+ * This port has no I2C driver: every call that returns a status returns
+ * TIKU_I2C_ERR_PARAM and no call touches the hardware.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,7 +24,7 @@
  * This port has no I2C driver: the call touches no hardware.
  *
  * @param config  Pointer to the I2C configuration structure.
- * @return -1 (TIKU_I2C_ERR_NACK).
+ * @return TIKU_I2C_ERR_PARAM.
  */
 int  tiku_i2c_arch_init(const tiku_i2c_config_t *config);
 
@@ -41,7 +41,7 @@ void tiku_i2c_arch_close(void);
  * @param addr  7-bit I2C target address (unshifted).
  * @param buf   Data buffer to transmit.
  * @param len   Number of bytes to write.
- * @return -1 (TIKU_I2C_ERR_NACK).
+ * @return TIKU_I2C_ERR_PARAM.
  */
 int  tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len);
 
@@ -54,7 +54,7 @@ int  tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len);
  * @param addr  7-bit I2C target address (unshifted).
  * @param buf   Destination buffer for received bytes.
  * @param len   Number of bytes to read.
- * @return -1 (TIKU_I2C_ERR_NACK).
+ * @return TIKU_I2C_ERR_PARAM.
  */
 int  tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len);
 
@@ -63,10 +63,10 @@ int  tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len);
  *
  * `i2c scan` calls it for each address, since the bus layer rejects a
  * zero-length write.  This port has no I2C driver: every address returns
- * -1, so a scan finds no device.
+ * TIKU_I2C_ERR_PARAM, so a scan finds no device.
  *
  * @param addr  7-bit slave address (unshifted).
- * @return -1 (TIKU_I2C_ERR_NACK).
+ * @return TIKU_I2C_ERR_PARAM.
  */
 int  tiku_i2c_arch_probe(uint8_t addr);
 
@@ -81,7 +81,7 @@ int  tiku_i2c_arch_probe(uint8_t addr);
  * @param tx_len  Number of bytes to write.
  * @param rx_buf  Destination buffer for the read phase.
  * @param rx_len  Number of bytes to read.
- * @return -1 (TIKU_I2C_ERR_NACK).
+ * @return TIKU_I2C_ERR_PARAM.
  */
 int  tiku_i2c_arch_write_read(uint8_t addr,
                               const uint8_t *tx_buf, uint16_t tx_len,

@@ -225,58 +225,24 @@ uint32_t tiku_stack_arch_bottom(void) {
 /* SAM AND CTL BOOKKEEPING                                                   */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Return the current software SAM (segment access map) value
- *
- * @return Current stub_mpusam value
- */
 uint16_t tiku_mpu_arch_get_sam(void) { return stub_mpusam; }
 
-/**
- * @brief Update the software SAM and mirror the MSP430 MPUCTL0 write sequence
- *
- * Bookkeeping kept for test parity: no MPU region changes here.  Region 0
- * (.uninit) follows unlock_nvm()/lock_nvm(), region 7 (module) follows
- * tiku_mpu_arch_module_window_exec(), and regions 1-6 are fixed at init.
- *
- * @param sam  New SAM value to store
- */
 void tiku_mpu_arch_set_sam(uint16_t sam) {
     stub_mpuctl0 = 0xA500U;             /* mirror MSP430 password write */
     stub_mpusam  = sam;
     stub_mpuctl0 = 0xA500U | 0x0001U;   /* password | enable */
-    /* Bookkeeping only: the code and data regions keep their init setting
-     * whatever the SAM bits say (flash can't take stores, SRAM stays XN). */
+    /* Bookkeeping only: region 0 (.uninit) follows unlock_nvm()/lock_nvm(),
+     * region 7 (module) follows tiku_mpu_arch_module_window_exec(), and
+     * regions 1-6 keep their init setting whatever the SAM bits say (flash
+     * can't take stores, SRAM stays XN). */
 }
 
-/**
- * @brief Return the current software MPUCTL0 value
- *
- * @return Current stub_mpuctl0 value
- */
 uint16_t tiku_mpu_arch_get_ctl(void) { return stub_mpuctl0; }
 
-/**
- * @brief Disable all interrupts (PRIMASK wrapper)
- */
 void tiku_mpu_arch_disable_irq(void) { tiku_cpu_irq_disable(); }
 
-/**
- * @brief Enable all interrupts (PRIMASK wrapper)
- */
 void tiku_mpu_arch_enable_irq(void)  { tiku_cpu_irq_enable(); }
 
-/**
- * @brief Initialize all eight ARMv8-M MPU regions and enable the MPU
- *
- * Cold boot (magic absent) zeroes the .mpu_diag block and stamps the magic; a
- * warm reset preserves the violation counters.  Then programs MAIR0[0] with
- * Normal WB/WA, the eight regions in the table above, and MemManage at 0.
- *
- * @note PRIVDEFENA is on, so peripherals and the SCS keep default privileged
- *       access without using region slots.  HFNMIENA is off unless
- *       TIKU_MPU_HFNMI_ENFORCE=1.
- */
 void tiku_mpu_arch_init_segments(void) {
     /* Cold-boot detect: zero + magic on first power-up; keep counters across
      * a warm (post-fault) reset so the violation survives to be read. */
@@ -376,26 +342,10 @@ void tiku_mpu_arch_init_segments(void) {
     __ISB();
 }
 
-/**
- * @brief Restore the SAM to the default (read+exec, no write) policy
- *
- * Delegates to tiku_mpu_arch_set_sam() with TIKU_MPU_DEFAULT_SAM: bookkeeping
- * only (see tiku_mpu_arch_set_sam()).
- */
 void tiku_mpu_arch_set_default_protection(void) {
     tiku_mpu_arch_set_sam(TIKU_MPU_DEFAULT_SAM);
 }
 
-/**
- * @brief Set the permission bits for one software SAM segment
- *
- * Updates the 3-bit permission field for segment @p seg in stub_mpusam
- * (each segment occupies 4 bits; bits [2:0] of the field are the
- * permission flags).  Bookkeeping only.
- *
- * @param seg   Segment index (0-based)
- * @param perm  New 3-bit permission value (TIKU_MPU_READ/WRITE/EXEC)
- */
 void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm) {
     uint16_t shift = (uint16_t)seg * 4U;
     uint16_t mask  = (uint16_t)0x07U << shift;
@@ -404,15 +354,6 @@ void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm) {
     tiku_mpu_arch_set_sam(sam);
 }
 
-/**
- * @brief Unlock NVM for writing
- *
- * Makes region 0 (.uninit) RW for the window and ORs the W bits into the SAM,
- * as the MSP430 path does.  The generic tiku_mpu_lock_nvm() that closes the
- * window drives tiku_mem_arch_nvm_flush_status().
- *
- * @return Saved SAM value to pass to tiku_mpu_arch_lock_nvm()
- */
 uint16_t tiku_mpu_arch_unlock_nvm(void) {
     /* Open the window: SAM bookkeeping for MSP430 parity, and region 0
      * (.uninit) goes RW for the duration.  The matching generic
@@ -424,16 +365,8 @@ uint16_t tiku_mpu_arch_unlock_nvm(void) {
     return saved;
 }
 
-/**
- * @brief Restore the SAM after an NVM write window
- *
- * Delegates to tiku_mpu_arch_set_sam() with the value from
- * tiku_mpu_arch_unlock_nvm() and re-arms region 0 RO unless that value has
- * write bits.  tiku_mpu_lock_nvm_status() commits to MRAM before calling it.
- *
- * @param saved_state  Value returned by a prior tiku_mpu_arch_unlock_nvm()
- */
 void tiku_mpu_arch_lock_nvm(uint16_t saved_state) {
+    /* tiku_mpu_lock_nvm_status() commits to MRAM before it calls this. */
     tiku_mpu_arch_set_sam(saved_state);
     /* Nest-safe: restore the AP the saved state implies.  An inner
      * lock inside a still-open outer window restores "unlocked" SAM
@@ -475,26 +408,13 @@ uint8_t tiku_mpu_arch_nvm_region_ro(void) {
     return ((MPU->RBAR & (2U << 1)) != 0U) ? 1u : 0u;
 }
 
-/**
- * @brief Return the current software violation flags (mpu_diag.violation_flags)
- *
- * @return MMFSR bits ORed in by the MemManage handler
- */
 uint16_t tiku_mpu_arch_get_violation_flags(void)   { return mpu_diag.violation_flags; }
 
-/**
- * @brief Clear all software violation flags
- */
 void     tiku_mpu_arch_clear_violation_flags(void) { mpu_diag.violation_flags = 0U; }
 
-/**
- * @brief Enable MemManage and set the MSP430 SEGIE bit in stub_mpuctl0
- *
- * Ensures SCB->SHCSR has MEMFAULTENA set, so an MPU fault enters
- * tiku_ambiq_mem_fault_handler instead of escalating to HardFault.  That
- * handler records the fault and resets.
- */
 void tiku_mpu_arch_enable_violation_nmi(void) {
+    /* An MPU fault then enters tiku_ambiq_mem_fault_handler instead of
+     * escalating to HardFault. */
     SCB->SHCSR |= SCB_SHCSR_MEMFAULTENA_Msk;
     __DSB();
     __ISB();

@@ -54,18 +54,13 @@ static volatile unsigned long  s_seconds = 0;
 /** @brief Sub-second tick accumulator; wraps at TIKU_CLOCK_ARCH_SECOND. */
 static volatile unsigned int   s_subsec  = 0;
 
-/**
- * @brief Initialize the system tick.
- *
- * Leaves SysTick free-running (ENABLE | CLKSOURCE, no TICKINT) for the
- * SYST_CVR busy-delay, then starts the STIMER periodic tick at
- * TIKU_CLOCK_ARCH_SECOND Hz.  The STIMER keeps counting through WFI.
- */
 void tiku_clock_arch_init(void) {
     SYST_RVR = (uint32_t)(TIKU_CLOCK_ARCH_INTERVAL - 1u);
     SYST_CVR = 0u;
     SYST_CSR = SYST_CSR_CLKSOURCE | SYST_CSR_ENABLE; /* free-run, no IRQ */
 
+    /* The crystal's start is not checked, so tiku_clock_arch_fault() always
+     * reports TIKU_CLOCK_ARCH_FAULT_NONE. */
     tiku_ambiq_stimer_tick_start((uint32_t)(STIMER_XTAL_HZ / TIKU_CLOCK_ARCH_SECOND));
 }
 
@@ -110,38 +105,14 @@ void tiku_ambiq_systick_handler(void) {
     tiku_ambiq_tick_advance();
 }
 
-/**
- * @brief Return the current tick count
- *
- * @return Monotonically increasing tick counter value
- */
 tiku_clock_arch_time_t tiku_clock_arch_time(void) {
     return (tiku_clock_arch_time_t)s_ticks;
 }
 
-/**
- * @brief Return the elapsed whole-second counter
- *
- * @return The value tiku_clock_arch_set_seconds() last loaded (0 from boot)
- *         plus the whole seconds counted since
- */
 unsigned long tiku_clock_arch_seconds(void)        { return s_seconds; }
 
-/**
- * @brief Set the whole-second counter (RTC epoch synchronisation)
- *
- * @param sec  New seconds value to load
- */
 void          tiku_clock_arch_set_seconds(unsigned long sec) { s_seconds = sec; }
 
-/**
- * @brief Spin-wait for a number of system ticks
- *
- * Busy-loops until s_ticks has advanced by at least t ticks. Uses
- * signed subtraction for correct wraparound handling.
- *
- * @param t  Number of ticks to wait
- */
 void tiku_clock_arch_wait(tiku_clock_arch_time_t t) {
     tiku_clock_arch_time_t target = (tiku_clock_arch_time_t)s_ticks + t;
     while ((long)(target - (tiku_clock_arch_time_t)s_ticks) > 0) {
@@ -149,36 +120,12 @@ void tiku_clock_arch_wait(tiku_clock_arch_time_t t) {
     }
 }
 
-/**
- * @brief Busy-delay for a given number of microseconds
- *
- * Delegates to tiku_cpu_ambiq_delay_us(), which counts SysTick cycles at the
- * live core clock.
- *
- * @param us  Delay duration in microseconds
- */
 void tiku_clock_arch_delay(unsigned int us) {
     tiku_cpu_ambiq_delay_us(us);
 }
 
-/**
- * @brief Return the sub-tick fine counter; this port has none
- *
- * @return 0 always
- */
 unsigned short tiku_clock_arch_fine(void)     { return 0; }
 
-/**
- * @brief Return the maximum value of the fine counter
- *
- * @return 1 always, a non-zero divisor for callers that normalise the fine
- *         counter
- */
 int            tiku_clock_arch_fine_max(void) { return 1; }
 
-/**
- * @brief Report whether the last tick had a clock fault
- *
- * @return 0 always: this port does not detect clock faults
- */
 unsigned char  tiku_clock_arch_fault(void)    { return 0; }

@@ -31,8 +31,9 @@ void     tiku_cpu_ambiq_delay_ms(unsigned int ms);
 /**
  * @brief Busy-wait for at least the given number of microseconds.
  *
- * Counts SysTick cycles at the core clock read at entry.  Before SysTick is
- * configured it spins an uncalibrated NOP loop instead.
+ * Counts SysTick cycles at the core clock read at entry, so a delay after a
+ * perf-mode switch uses the new rate.  Before SysTick is configured it spins
+ * an uncalibrated NOP loop instead.
  *
  * @param us  Delay duration in microseconds.
  */
@@ -41,8 +42,8 @@ void     tiku_cpu_ambiq_delay_us(unsigned int us);
 /**
  * @brief Fill a buffer with the chip's unique ID.
  *
- * Copies up to 8 bytes of MCUCTRL CHIPID0/CHIPID1, little-endian, into
- * @p buf.
+ * Copies the first min(@p len, 8) bytes of the per-die ID in MCUCTRL
+ * CHIPID0/CHIPID1, little-endian with CHIPID0 first, into @p buf.
  *
  * @param buf  Destination buffer for the UID bytes.
  * @param len  Maximum number of bytes to write.

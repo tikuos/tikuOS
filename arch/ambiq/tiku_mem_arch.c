@@ -94,16 +94,6 @@ static size_t uninit_bytes(void) {
     return (size_t)((uintptr_t)&__uninit_end - (uintptr_t)&__uninit_start);
 }
 
-/**
- * @brief Restore .uninit state from the MRAM mirror on boot
- *
- * Copies the mirror's .uninit image back into RAM when tiku_nvm_mirror_image()
- * accepts it, or a legacy V1 image.  With no image that checks out, .uninit is
- * zeroed and each cell primes its default.
- *
- * @note At first boot the cache is empty or off, so the MRAM read reflects
- *       current MRAM contents.
- */
 void tiku_mem_arch_init(void) {
     /* Restore .uninit from the MRAM mirror.  On a fresh boot the cache is
      * empty (or off) here, so reading the page sees current MRAM contents.
@@ -166,16 +156,6 @@ uint8_t *tiku_mem_arch_durable_live(size_t *len)
     return (uint8_t *)&__uninit_start;
 }
 
-/**
- * @brief Zero-fill a buffer using a volatile pointer to defeat optimization
- *
- * Uses a volatile write loop so the compiler cannot elide the stores when
- * the buffer is not subsequently read (e.g. after zeroing a credential
- * buffer before releasing it).
- *
- * @param buf  Buffer to wipe
- * @param len  Number of bytes to zero
- */
 void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len) {
     volatile uint8_t *p = buf;
     while (len--) {
@@ -183,32 +163,11 @@ void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len) {
     }
 }
 
-/**
- * @brief Copy bytes from the .uninit NVM region into an SRAM buffer
- *
- * The .uninit working copy is memory-mapped SRAM (DTCM), so this is a plain
- * memcpy with no wait states.
- *
- * @param dst  Destination SRAM buffer
- * @param src  Source address inside the .uninit region
- * @param len  Number of bytes to copy
- */
 void tiku_mem_arch_nvm_read(uint8_t *dst, const uint8_t *src,
                             tiku_mem_arch_size_t len) {
-    memcpy(dst, src, len);   /* .uninit working copy is memory-mapped SRAM */
+    memcpy(dst, src, len);   /* .uninit working copy is DTCM, no wait states */
 }
 
-/**
- * @brief Write bytes into the .uninit SRAM working copy
- *
- * Stores into the in-RAM working copy only.  The durable MRAM commit happens
- * when the matching tiku_mpu_lock_nvm() calls tiku_mem_arch_nvm_flush_status(),
- * so direct stores into .persistent inside a window are captured too.
- *
- * @param dst  Destination address inside the .uninit region
- * @param src  Source SRAM buffer
- * @param len  Number of bytes to copy
- */
 void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
                              tiku_mem_arch_size_t len) {
     /* SRAM working copy; the MRAM commit happens at the matching
@@ -319,7 +278,6 @@ int tiku_mem_arch_nvm_flush_status(void) {
     return rc == 0 ? 0 : -1;
 }
 
-/** @brief tiku_mem_arch_nvm_flush_status() with the result discarded. */
 void tiku_mem_arch_nvm_flush(void)
 {
     (void)tiku_mem_arch_nvm_flush_status();

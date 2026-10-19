@@ -88,13 +88,6 @@ static size_t uninit_bytes(void) {
     return (size_t)((uintptr_t)&__uninit_end - (uintptr_t)&__uninit_start);
 }
 
-/**
- * @brief Restore .uninit state from the MRAM mirror on boot
- *
- * Copies the mirror's .uninit image back into RAM when tiku_nvm_mirror_image()
- * accepts it, or a legacy V1 image.  With no image that checks out, .uninit is
- * zeroed and each cell primes its default.
- */
 void tiku_mem_arch_init(void) {
     const uint32_t *mirror = (const uint32_t *)__tiku_nvm_mram_start;
     const uint8_t *img;
@@ -153,7 +146,6 @@ uint8_t *tiku_mem_arch_durable_live(size_t *len)
     return (uint8_t *)&__uninit_start;
 }
 
-/** @brief Zero-fill a buffer via a volatile pointer (defeats optimization). */
 void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len) {
     volatile uint8_t *p = buf;
     while (len--) {
@@ -161,29 +153,16 @@ void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len) {
     }
 }
 
-/** @brief Copy from the .uninit working copy (memory-mapped SRAM). */
 void tiku_mem_arch_nvm_read(uint8_t *dst, const uint8_t *src,
                             tiku_mem_arch_size_t len) {
     memcpy(dst, src, len);
 }
 
-/** @brief Write into the .uninit SRAM working copy (committed at nvm_flush). */
 void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
                              tiku_mem_arch_size_t len) {
     memcpy(dst, src, len);
 }
 
-/**
- * @brief Commit .uninit to the reserved MRAM page for power-cycle durability
- *
- * Composes the mirror header and the .uninit image in the TCM staging buffer,
- * padded to 16 bytes, and programs the page via nv_program_main2 (destination
- * as a word offset from 0x0) unless the mirror already holds the same image.
- *
- * @note Interrupts are masked across the program call: the helper runs from
- *       ROM, and an ISR fetched from MRAM mid-program could fault.  The M4
- *       has no L1 D-cache.
- */
 int tiku_mem_arch_nvm_flush_status(void) {
     size_t   n = uninit_bytes();
     size_t   snap_bytes, prog_bytes;
@@ -244,7 +223,8 @@ int tiku_mem_arch_nvm_flush_status(void) {
     dst_word_off =
         ((uint32_t)(uintptr_t)__tiku_nvm_mram_start - AMBIQ_MRAM_BASE) >> 2;
 
-    /* Interrupts masked: an ISR fetch could fault mid-program. */
+    /* Interrupts masked: the helper runs from ROM, and an ISR fetched from
+     * MRAM mid-program could fault. */
     __asm__ volatile ("mrs %0, primask" : "=r"(primask));
     __asm__ volatile ("cpsid i" ::: "memory");
     if (changed) {
@@ -266,7 +246,6 @@ int tiku_mem_arch_nvm_flush_status(void) {
     return rc == 0 ? 0 : -1;
 }
 
-/** @brief tiku_mem_arch_nvm_flush_status() with the result discarded. */
 void tiku_mem_arch_nvm_flush(void)
 {
     (void)tiku_mem_arch_nvm_flush_status();

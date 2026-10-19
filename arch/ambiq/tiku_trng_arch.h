@@ -29,6 +29,9 @@
 /**
  * @brief Power up the CRYPTO (CryptoCell-312) domain if it is off.
  *        Idempotent; the reads call it before each collection.
+ *
+ * Waits a bounded number of polls for the domain to report power and
+ * returns without a status if it never does.
  */
 void tiku_trng_arch_init(void);
 
