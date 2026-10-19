@@ -25,7 +25,7 @@
 #include <string.h>
 
 /*---------------------------------------------------------------------------*/
-/* /sys/power/mode, policy, available                                        */
+/* POWER POLICY                                                              */
 /*---------------------------------------------------------------------------*/
 
 /** Longest policy name, "deepest", plus its terminator. */
@@ -43,7 +43,7 @@ static const char ack_word[] = "allow-console-loss";
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 power_mode_read(char *buf, size_t max)
@@ -57,7 +57,7 @@ power_mode_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 power_policy_read(char *buf, size_t max)
@@ -71,7 +71,7 @@ power_policy_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 power_available_read(char *buf, size_t max)
@@ -148,7 +148,7 @@ power_policy_write(const char *buf, size_t len)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/power/wake                                                           */
+/* WAKE SOURCES                                                              */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -160,7 +160,7 @@ power_policy_write(const char *buf, size_t len)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 power_wake_read(char *buf, size_t max)

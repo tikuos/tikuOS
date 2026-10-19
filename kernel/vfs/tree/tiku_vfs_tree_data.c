@@ -21,13 +21,6 @@
 #include "tiku_vfs_tree_data.h"
 #include "tiku.h"
 
-/*
- * The backing memory, the backend, the mount, the /data namespace and
- * /sys/fs/data are compiled with or without a shell: loadable modules, radio
- * firmware and device-management transports use the store in builds that
- * have none.
- */
-
 #include <string.h>
 #include <stdio.h>
 
@@ -38,14 +31,14 @@
 #include <kernel/memory/tiku_nvm_map.h>  /* TIKU_DEVICE_NVM_LABEL fallback */
 
 /*---------------------------------------------------------------------------*/
-/* NVM-BACKED FILE STORE FOR /data                                           */
+/* FILE STORE BACKING                                                        */
 /*---------------------------------------------------------------------------*/
 
-/* The store's NVM home.  Region-backed parts (Ambiq, RP2350, nRF54L,
- * STM32N6, RA8P1, ESP32-C61) use the file-store extent of the carved NVM
- * region, read in place and written through tiku_tier_nvm_write() -- no SRAM
- * array.  MSP430 uses a `.persistent` FRAM array, written in place; the host
- * build a plain `.bss` array (volatile). */
+/* The store's NVM home.  The region-backed ports the #if below names use
+ * the file-store extent of the carved NVM region, read in place and written
+ * through tiku_tier_nvm_write() -- no SRAM array.  MSP430 uses a
+ * `.persistent` FRAM array, written in place; the host build a plain `.bss`
+ * array (volatile). */
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
     defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
     defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32P4)
@@ -74,7 +67,8 @@ data_be_write(tiku_nvm_backend_t *be, size_t off, const void *src, size_t len)
  *
  * @param region Out: the whole region, for the provisioning check.
  * @param base   Out: the store's offset inside it.
- * @return 1 when a region large enough exists, else 0.
+ * @return 1 when the region extends past tiku_layout_base(), else 0; the
+ *         mount checks the store's floor.
  */
 static int
 data_bind(tiku_nvm_backend_t *region, size_t *base)
@@ -217,7 +211,8 @@ static tiku_nvm_backend_t  data_be;
  * @param off  Byte offset within the backing store
  * @param src  Source bytes to program
  * @param len  Number of bytes to write
- * @return Zero on completion, negative on an invalid range or flush failure
+ * @return 0 on completion, -1 on an invalid range or when the NVM cannot be
+ *         locked again
  */
 static int
 data_be_write(tiku_nvm_backend_t *be, size_t off, const void *src, size_t len)
@@ -302,8 +297,9 @@ data_adopt(size_t base)
 
 /* The mount formats only where data_may_create() allows it: never on a
  * carved region, and on MSP430 and host only an array that is blank end to
- * end.  Otherwise /data stays absent, and tiku_vfs_tree_data_why() gives the
- * reason, until mkfs formats on request. */
+ * end.  Otherwise the store is absent, refused or held, as
+ * tiku_vfs_tree_data_why() reports, and no access mounts it again until mkfs,
+ * a layout resume, tiku_vfs_tree_data_retry() or a reboot. */
 enum { DATA_UNTRIED = 0, DATA_READY, DATA_ABSENT, DATA_REFUSED, DATA_HELD };
 static uint8_t          data_state;
 static tiku_tfs_probe_t data_probe;
@@ -448,13 +444,7 @@ tiku_vfs_tree_data_format(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* VFS PRESENTATION                                                          */
-/*---------------------------------------------------------------------------*/
-/* Available with or without a command shell. */
-
-
-/*---------------------------------------------------------------------------*/
-/* DYNAMIC-DIRECTORY OPS — bridge /data to the file store                     */
+/* DYNAMIC DIRECTORY OPS                                                     */
 /*---------------------------------------------------------------------------*/
 
 /** @brief The VFS list callback and context data_list_thunk() forwards to. */
@@ -606,9 +596,10 @@ static const tiku_vfs_dynops_t data_dynops = {
 };
 
 /*---------------------------------------------------------------------------*/
-/* /data root — optional static children are supplied by boot              */
+/* DATA DIRECTORY                                                            */
 /*---------------------------------------------------------------------------*/
 
+/* tiku_vfs_tree_init() adds the static children the boot config supplies. */
 static const tiku_vfs_node_t data_node = {
     "data", TIKU_VFS_DIR, NULL, NULL,
     NULL, 0,
@@ -616,7 +607,7 @@ static const tiku_vfs_node_t data_node = {
 };
 
 /*---------------------------------------------------------------------------*/
-/* df SUPPORT — file-store usage stats                                       */
+/* DF SUPPORT                                                                */
 /*---------------------------------------------------------------------------*/
 
 typedef struct { uint16_t files; uint32_t bytes; } data_df_acc_t;
@@ -682,7 +673,7 @@ int tiku_vfs_tree_data_df(tiku_data_df_t *out)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/fs/data — usage that never mounts or provisions the store            */
+/* FILE STORE USAGE                                                          */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -759,7 +750,7 @@ const tiku_vfs_node_t tiku_vfs_tree_fs_children[TIKU_VFS_TREE_FS_NCHILD] = {
 };
 
 /*---------------------------------------------------------------------------*/
-/* PUBLIC                                                                     */
+/* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
 const tiku_vfs_node_t *

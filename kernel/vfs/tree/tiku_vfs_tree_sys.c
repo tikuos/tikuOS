@@ -8,8 +8,8 @@
  * tiku_vfs_tree_sys.c - /sys subtree (files and assembly).
  *
  * Owns the /sys content too small for its own module -- version, uptime,
- * time, device identity, memory, CPU, rules, crypto, radio and FLPR nodes --
- * and assembles /sys from the sibling modules' exported tables.
+ * time, device identity, memory, CPU, scheduler, crypto, radio, Bluetooth,
+ * FLPR and config nodes -- and assembles /sys from the sibling modules.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -89,7 +89,7 @@ static int cfg_managed_write(uint32_t, const char *, size_t, int *);
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* /sys/uptime                                                               */
+/* UPTIME                                                                    */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -101,7 +101,7 @@ static int cfg_managed_write(uint32_t, const char *, size_t, int *);
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 uptime_read(char *buf, size_t max)
@@ -110,7 +110,7 @@ uptime_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/time — wall-clock seconds since epoch                                */
+/* WALL CLOCK                                                                */
 /*---------------------------------------------------------------------------*/
 
 /*
@@ -129,7 +129,7 @@ uptime_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 time_read(char *buf, size_t max)
@@ -178,7 +178,7 @@ time_write(const char *buf, size_t len)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/mem/sram, /sys/mem/nvm                                               */
+/* MEMORY SIZES                                                              */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -190,7 +190,7 @@ time_write(const char *buf, size_t len)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 sram_read(char *buf, size_t max)
@@ -207,7 +207,7 @@ sram_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 mem_kind_read(char *buf, size_t max)
@@ -223,7 +223,7 @@ mem_kind_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 nvm_read(char *buf, size_t max)
@@ -241,15 +241,15 @@ nvm_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 nvmfree_read(char *buf, size_t max)
 {
     tiku_mem_stats_t st;
-    /* The tier is unwired until the first tiku_tier_init() call, which boot
-     * makes on every port but MSP430 and RA8P1; the call is idempotent, so
-     * stats succeed here before anything has allocated. */
+    /* Boot wires the tier with tiku_tier_init() on every port with a carved
+     * NVM region; on MSP430 the first call wires it.  The call is
+     * idempotent, so the stats succeed before anything has allocated. */
     (void)tiku_tier_init();
     if (tiku_tier_stats(TIKU_MEM_NVM, &st) != TIKU_MEM_OK) {
         return snprintf(buf, max, "0\n");
@@ -259,7 +259,7 @@ nvmfree_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/mem/tiers, /sys/mem/reservations, /sys/mem/failed                    */
+/* MEMORY TIERS                                                              */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -283,10 +283,10 @@ mem_tiers_read(char *buf, size_t max)
     uint8_t i;
     int n;
 
-    /* The tier is unwired until the first tiku_tier_init() call, which boot
-     * makes on every port but MSP430 and RA8P1; the call is idempotent, so
-     * stats succeed here before anything has allocated, and an unused tier
-     * is listed too. */
+    /* Boot wires the tier with tiku_tier_init() on every port with a carved
+     * NVM region; on MSP430 the first call wires it.  The call is
+     * idempotent, so the stats succeed before anything has allocated, and an
+     * unused tier is listed too. */
     (void)tiku_tier_init();
 
     for (i = 0; i < (uint8_t)(sizeof(tiers) / sizeof(tiers[0])); i++) {
@@ -382,7 +382,7 @@ mem_failed_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/mem/free — live stack headroom                                        */
+/* STACK HEADROOM                                                            */
 /*---------------------------------------------------------------------------*/
 
 /** Linker symbols bounding the gap the stack grows into: _end is
@@ -393,13 +393,13 @@ extern char __stack;
 /**
  * @brief Read handler for /sys/mem/free.
  *
- * Reports live SP headroom above static data, including this handler's frames.
- * Nordic, Ambiq, RA8P1 and ESP32-C61 measure to their explicit stack floor,
- * leaving out allocator space; zero once the stack has reached that bound.
+ * Reports live SP headroom, including this handler's frames, down to the
+ * bound the #if chain below picks per port: _end, or a stack floor that
+ * leaves out allocator space.  Zero once SP reaches it, and on the host.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 mem_free_read(char *buf, size_t max)
@@ -449,14 +449,13 @@ mem_free_read(char *buf, size_t max)
     return snprintf(buf, max, "%lu\n",
                     sp > bottom ? (unsigned long)(sp - bottom) : 0UL);
 #else
-    /* Host fallback: report 0. */
     (void)max;
     return snprintf(buf, max, "0\n");
 #endif
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/mem/used — sum of per-process SRAM allocation                        */
+/* PROCESS MEMORY                                                            */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -468,7 +467,7 @@ mem_free_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 mem_used_read(char *buf, size_t max)
@@ -485,7 +484,7 @@ mem_used_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/sched/idle                                                           */
+/* SCHEDULER                                                                 */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -496,7 +495,7 @@ mem_used_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 sched_idle_read(char *buf, size_t max)
@@ -505,19 +504,18 @@ sched_idle_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/version                                                              */
+/* VERSION                                                                   */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Read handler for /sys/version.
  *
- * Renders the TIKU_VERSION string from tiku.h ("0.06\n").  Also
- * exposed as /sys/device/version for clients that read the whole
- * device directory in one sweep.
+ * Renders the TIKU_VERSION string from tiku.h ("0.06\n"), which
+ * /sys/device/version also renders.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 version_read(char *buf, size_t max)
@@ -526,7 +524,7 @@ version_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/device/{name,id,mcu,version}                                         */
+/* DEVICE IDENTITY                                                           */
 /*---------------------------------------------------------------------------*/
 
 /*
@@ -560,7 +558,7 @@ TIKU_PERSIST_CELL(device_name_cell, device_name_persist,
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 device_name_read(char *buf, size_t max)
@@ -620,7 +618,7 @@ device_name_write(const char *buf, size_t len)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 device_id_read(char *buf, size_t max)
@@ -640,7 +638,8 @@ device_id_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style), or -1 when the hex
+ *         digits do not fit in @p max
  */
 static int
 device_uid_read(char *buf, size_t max)
@@ -670,7 +669,7 @@ device_uid_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 device_mcu_read(char *buf, size_t max)
@@ -681,12 +680,11 @@ device_mcu_read(char *buf, size_t max)
 /**
  * @brief Read handler for /sys/device/version.
  *
- * Same payload as /sys/version, so /sys/device holds the whole identity:
- * name, id, mcu and version.
+ * Same payload as /sys/version.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 device_version_read(char *buf, size_t max)
@@ -722,7 +720,7 @@ device_board_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/cpu/freq                                                             */
+/* CPU CLOCK                                                                 */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -733,7 +731,7 @@ device_board_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 cpu_freq_read(char *buf, size_t max)
@@ -853,11 +851,11 @@ static int stack_free_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/mem/sram_map, /sys/mem/nvm_map -- each memory by estate               */
+/* MEMORY MAPS                                                               */
 /*---------------------------------------------------------------------------*/
 
-/* Weak: where the linker does not carve an estate, its symbol is at address
- * 0 and the maps leave that estate out. */
+/* Weak: where the linker does not carve an area, its symbol is at address 0
+ * and the maps leave that area out. */
 extern char _etext __attribute__((weak));
 extern char __datastart __attribute__((weak));
 extern char __sram_start __attribute__((weak));
@@ -888,7 +886,7 @@ map_line(char *buf, size_t max, size_t *at, const char *fmt,
 }
 
 /**
- * @brief Read handler for /sys/mem/sram_map: the RAM by estate.
+ * @brief Read handler for /sys/mem/sram_map: the RAM by area.
  *
  * The primary bank, what the image's statics take of it, the pool the
  * stack grows in with its lowest headroom since boot, and the tier arena
@@ -1010,12 +1008,11 @@ nvm_store_map(char *buf, size_t max, size_t *at, unsigned long size)
 }
 
 /**
- * @brief Read handler for /sys/mem/nvm_map: the non-volatile memory by
- *        estate, in the order they lie: code | module | region | persist.
+ * @brief Read handler for /sys/mem/nvm_map: the non-volatile memory by area.
  *
- * The region is the tier at its front and the file store behind it, as
- * df reports them; a part without the carve symbols omits the code, module
- * and persist lines.
+ * Lines kind, total, code, module, tier, store, persist, then a port's own
+ * (scratch, reserved).  Tier and store are the region as df reports it; a
+ * part without the carve symbols omits code, module and persist.
  */
 static int
 nvm_map_read(char *buf, size_t max)
@@ -1164,7 +1161,7 @@ static const tiku_vfs_node_t sys_device_children[] = {
 
 #if defined(PLATFORM_NORDIC)
 /*---------------------------------------------------------------------------*/
-/* /sys/crypto — CRACEN offload runtime switch + path counters               */
+/* CRYPTO                                                                    */
 /*---------------------------------------------------------------------------*/
 /*
  * Runtime control of the hardware-crypto backend: `mode` selects auto
@@ -1235,7 +1232,7 @@ static const tiku_vfs_node_t sys_crypto_children[] = {
 
 #if (TIKU_HAS_BLE_ADV + 0)
 /*---------------------------------------------------------------------------*/
-/* /sys/radio — BLE broadcaster/observer control + observability             */
+/* RADIO                                                                     */
 /*---------------------------------------------------------------------------*/
 /*
  * Control over the tiku_ble_adv facade: `beacon` starts the beacon with
@@ -1416,10 +1413,10 @@ radio_mode_read(char *buf, size_t max)
 }
 
 /*
- * One /sys/radio surface over the two nordic BLE implementations, the M33
- * broadcast path and the FLPR connection controller.  `backend` names which
- * is driving the radio now; `caps` lists what this build's radio can do,
- * from the capability flags; `state` (above) is the arbiter owner.
+ * `backend` names what drives the radio now: with TIKU_BT_HOST the HCI
+ * controller, otherwise the Nordic M33 broadcast path or the FLPR connection
+ * controller.  `caps` lists what this build's radio can do, from the
+ * capability flags; `state` (above) is the arbiter owner.
  */
 
 /** @brief Read handler for /sys/radio/backend: nordic-m33 or nordic-flpr,
@@ -1473,7 +1470,7 @@ static const tiku_vfs_node_t sys_radio_children[] = {
 
 #if (TIKU_BT_HOST + 0)
 /*---------------------------------------------------------------------------*/
-/* /sys/bt — the BLE host stack: address, state, power, links, bonds        */
+/* BLUETOOTH                                                                 */
 /*---------------------------------------------------------------------------*/
 
 /** @brief Append "aa:bb:cc:dd:ee:ff" (MSB first) at @p buf + @p n. */
@@ -1566,8 +1563,12 @@ bt_version_read(char *buf, size_t max)
                     v.hci_version, v.lmp_version, v.manufacturer);
 }
 
-/** @brief Read handler for /sys/bt/connections: links=N, then each link's
- *         peer, address type, this end's role and handle. */
+/**
+ * @brief Read handler for /sys/bt/connections: links=N, then each link's
+ *        peer, address type, this end's role and handle.
+ * @return The length of the text kept in @p buf, at most @p max - 1, not
+ *         its full length
+ */
 static int
 bt_connections_read(char *buf, size_t max)
 {
@@ -1589,8 +1590,12 @@ bt_connections_read(char *buf, size_t max)
     return (int)((at < max) ? at : max - 1u);
 }
 
-/** @brief Read handler for /sys/bt/bonds: bonds=N, then each stored bond's
- *         slot, peer and address type (no key material). */
+/**
+ * @brief Read handler for /sys/bt/bonds: bonds=N, then each stored bond's
+ *        slot, peer and address type (no key material).
+ * @return The length of the text kept in @p buf, at most @p max - 1, not
+ *         its full length
+ */
 static int
 bt_bonds_read(char *buf, size_t max)
 {
@@ -1641,7 +1646,7 @@ static const tiku_vfs_node_t sys_bt_children[] = {
 
 #if (TIKU_FLPR_ENABLE + 0)
 /*---------------------------------------------------------------------------*/
-/* /sys/flpr — the VPR RISC-V coprocessor                                    */
+/* FLPR                                                                      */
 /*---------------------------------------------------------------------------*/
 /*
  * Control and liveness for the FLPR: `run` starts (loads the embedded image
@@ -1882,12 +1887,12 @@ static const tiku_vfs_desc_t desc_lifetime = TIKU_VFS_DESC_FLAGS(
     TIKU_VFS_DF_READ_EFFECT);
 
 /*
- * The /sys directory table -- the master list of everything under /sys.  Three
- * kinds of entry: files handled in this module; files whose handlers the boot
- * module exports (boot_count, last_reset and cold_boots); and directories,
- * either the local tables above or a sibling module's exported children +
- * NCHILD pair.  To add a node, implement the handler and append the entry,
- * keeping any NCHILD beside its pointer.
+ * The static /sys directory table; boot mounts (drivers, rules, jobs, init)
+ * list after it.  Three kinds of entry: files handled in this module; files
+ * whose handlers the boot module exports (boot_count, last_reset and
+ * cold_boots); and directories, either the local tables above or a sibling
+ * module's exported children + NCHILD pair.  To add a node, implement the
+ * handler and append the entry, keeping any NCHILD beside its pointer.
  */
 static const tiku_vfs_node_t sys_children[] = {
     { "version",    TIKU_VFS_FILE, version_read,    NULL, NULL, 0 },
@@ -1992,28 +1997,12 @@ static const tiku_vfs_node_t sys_node = {
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Get the fully-formed /sys directory node.
- *
- * See the header for the copy-by-value contract with the root
- * assembly.
- *
- * @return Pointer to the static /sys directory node
- */
 const tiku_vfs_node_t *
 tiku_vfs_tree_sys_get(void)
 {
     return &sys_node;
 }
 
-/**
- * @brief Initialise /sys state: RTC epoch, device name, configuration
- *        journal and the radio scan hook.
- *
- * Validates the RTC epoch offset (tiku_rtc_init() checks its own cell) and
- * the device-name cell, primed to "tiku" on blank memory; with the journal
- * built, opens it and applies its stored settings.
- */
 void
 tiku_vfs_tree_sys_init(void)
 {

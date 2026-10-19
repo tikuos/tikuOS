@@ -87,9 +87,9 @@ static int permitted(const tiku_cfg_t *c, unsigned i, uint8_t cap)
 /**
  * @brief Seal @p next, write it to the inactive bank and switch to it.
  *
- * Clears the gate, writes the body, sets the gate and reads it all back, so
- * the active bank stays intact.  An I/O failure sets TIKU_CFG_IO until
- * re-open, since the gate may be stored even when its write reports failure.
+ * Writes only the inactive bank (active ^ 1): clears its gate, writes the
+ * body, sets the gate and reads it all back.  An I/O failure sets TIKU_CFG_IO
+ * until re-open, since the gate may be stored when its write reports failure.
  *
  * @return 0, TIKU_CFG_EXHAUSTED when the generation would wrap, or TIKU_CFG_IO
  */

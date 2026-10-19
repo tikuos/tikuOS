@@ -7,6 +7,10 @@
  *
  * tiku_vfs_tree.c - System VFS tree assembly
  *
+ * Builds the root directory from /sys, /dev, /proc and /data, checks the
+ * optional providers a boot config names, and mounts them.  A refused config,
+ * a failed mount or a failed NVM relock leaves no root published.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_vfs_tree.h"

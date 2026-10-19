@@ -101,8 +101,9 @@ token(const char *buf, size_t len, const char *expected)
 /**
  * @brief Map a tiku_wireless_* result to a VFS status.
  *
- * A bad argument is EINVAL, a busy radio (TIKU_DRV_ERR_TIMEOUT) is EBUSY, a
- * call the radio does not support is ENOTSUP, and any other failure is EIO.
+ * A bad argument is EINVAL, a busy radio (TIKU_DRV_ERR_TIMEOUT) is EBUSY, an
+ * absent radio (TIKU_DRV_ERR_NOT_PRESENT) is ENOTSUP, and any other failure
+ * is EIO.
  */
 static int
 wifi_result(int rc)
@@ -400,7 +401,8 @@ profile_ssid_read(unsigned i, char *buf, size_t max)
 }
 
 /**
- * @brief profiles/N/ssid: stage an SSID of 1..32 printable bytes.
+ * @brief profiles/N/ssid: stage an SSID of 1..32 bytes, none of them a
+ *        control byte (below 32, or 127).
  *
  * A different SSID clears the staged password; the same one keeps it.
  */
@@ -589,7 +591,7 @@ _Static_assert(sizeof(profile_dirs) / sizeof(profile_dirs[0]) ==
                WIFI_PROFILE_COUNT, "one directory per staging profile");
 
 /*---------------------------------------------------------------------------*/
-/* /sys/net/wifi                                                             */
+/* NODE TABLE                                                                */
 /*---------------------------------------------------------------------------*/
 
 const tiku_vfs_node_t tiku_vfs_tree_wifi_children[] = {

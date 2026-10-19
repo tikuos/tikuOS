@@ -6,17 +6,25 @@ production tree is one module per subtree under `tree/`:
 
 ```
 tiku_vfs_tree.c               root assembly (/sys /dev /proc /data) and init
-tree/tiku_vfs_tree_sys.c      /sys files, device/ mem/ cpu/ sched/
-tree/tiku_vfs_tree_boot.c     /sys/boot: boot_count, last_reset, cold_boots
-                              (the FRAM boot counter, the SYSRSTIV capture)
+tree/tiku_vfs_tree_sys.c      /sys files, device/ mem/ cpu/ sched/, and
+                              crypto/ radio/ bt/ flpr/ config/ where built
+tree/tiku_vfs_tree_boot.c     /sys/boot (reason count stage rstiv hang clock/
+                              mpu/) and the /sys files boot_count, last_reset,
+                              cold_boots (lifetime uptime in seconds)
 tree/tiku_vfs_tree_timer.c    /sys/timer, /sys/clock, /sys/htimer
 tree/tiku_vfs_tree_watchdog.c /sys/watchdog
 tree/tiku_vfs_tree_power.c    /sys/power
-tree/tiku_vfs_tree_persist.c  /sys/persist (persist-cell counts)
+tree/tiku_vfs_tree_persist.c  /sys/persist (cells primed moved manifest)
+tree/tiku_vfs_tree_watch.c    /sys/watch (slots), /sys/vfs (manifest, events)
 tree/tiku_vfs_tree_dev.c      /dev leds, console, null, zero, buses
-tree/tiku_vfs_tree_gpio.c     /dev/gpio, /dev/gpio_dir (macro-generated pins)
-tree/tiku_vfs_tree_data.c     /data (the dynamic store, with or without BASIC)
+tree/tiku_vfs_tree_gpio.c     /dev/gpio, /dev/gpio_dir, /dev/gpio_owner
+                              (macro-generated pins)
+tree/tiku_vfs_tree_data.c     /data (the file store) and /sys/fs/data
 ```
+
+The other modules under `tree/` serve /sys/mem/layout, /sys/net,
+/sys/net/wifi, /sys/usb, /sys/store, /sys/psram, /sys/gpu, /sys/flash,
+/sys/emmc, /sys/npu, /sys/coproc and /dev/sensors where the build has them.
 
 `/proc` is `kernel/process/tiku_proc_vfs.c`.
 
@@ -67,13 +75,14 @@ the process; a driver whose value changes without a write calls
 `tiku_vfs_notify(node)` (ISR-safe).  `unwatch` and `unwatch_all` release;
 subscribing is idempotent; the table is `TIKU_VFS_WATCH_MAX` (8) SRAM slots,
 per boot.  An event means "touched, re-read for the value": no coalescing,
-and a same-value write rings.  The shell's rules and `watch` command sit on
-this primitive (`shell/AGENTS.md`).
+and a write of an unchanged value still posts one.  The shell's rules and
+`watch` command sit on this primitive (`shell/AGENTS.md`).
 
 ## Manifest and ids
 
-`/sys/vfs/manifest` lists every node as `path type perms meta cap id`
-(`manifest_rev` 4); the id is `tiku_vfs_node_id()`, stable across boots.
+`/sys/vfs/manifest` lists every node, boot mounts included and a dynamic
+directory's files left out, as `path type perms meta cap id` (`manifest_rev`
+4); the id is `tiku_vfs_node_id()`, the node's address, stable for the boot.
 The manifest pages from any line (`read /sys/vfs/manifest <line> <bytes>`)
 because a link reply is bounded.
 
@@ -87,9 +96,11 @@ NVM (data first, gate last).  Updates go through `tiku_persist_cell_write()`
 / `_write_u32()` (gate already valid) or `_commit()` (value then gate,
 self-validating); the cell API owns every MPU unlock window.  Pick a fresh
 magic key per cell and bump it when the cell's meaning changes.
-`/sys/persist/{cells,primed}` report how many cells exist and how many were
-primed this boot; primed != 0 on an established device means a layout
-change or NVM corruption.
+`/sys/persist/cells` and `primed` report how many cells were validated and
+how many primed this boot; primed != 0 on an established device means a
+layout change or NVM corruption.  `moved` reports the cells this boot moved
+to an updated image's places, and `manifest` where this image keeps each
+cell.
 
 ## Proof
 

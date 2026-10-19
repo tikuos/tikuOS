@@ -20,7 +20,7 @@
 #include <stdio.h>
 
 /*---------------------------------------------------------------------------*/
-/* /sys/gpu/power                                                            */
+/* GPU POWER                                                                 */
 /*---------------------------------------------------------------------------*/
 
 /** @brief "on" while the GFX power domain is up, else "off" (reads PWRCTRL). */
@@ -31,7 +31,7 @@ gpu_power_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/gpu/id                                                               */
+/* GPU ID                                                                    */
 /*---------------------------------------------------------------------------*/
 
 /** @brief Fixed GPU id (IDREG) in hex, or "off" when the domain is down. */
@@ -45,7 +45,7 @@ gpu_id_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/gpu/status                                                           */
+/* GPU STATUS                                                                */
 /*---------------------------------------------------------------------------*/
 
 /** @brief STATUS in hex and a busy/idle word, or "off" when unpowered. */
@@ -63,7 +63,7 @@ gpu_status_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/gpu/irqs                                                             */
+/* GPU INTERRUPTS                                                            */
 /*---------------------------------------------------------------------------*/
 
 /** @brief Number of GPU completion interrupts serviced since init. */

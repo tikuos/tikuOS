@@ -26,7 +26,7 @@
 #include <stdio.h>
 
 /*---------------------------------------------------------------------------*/
-/* /sys/timer/list/<n> — per-timer detail                                    */
+/* TIMER DETAIL                                                              */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -39,7 +39,7 @@
  * @param idx  Timer slot index (0..3)
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 timer_detail_read(uint8_t idx, char *buf, size_t max)
@@ -69,7 +69,7 @@ timer_detail_read(uint8_t idx, char *buf, size_t max)
 TIMER_DETAIL(0) TIMER_DETAIL(1) TIMER_DETAIL(2) TIMER_DETAIL(3)
 
 /*---------------------------------------------------------------------------*/
-/* /sys/timer/count, /sys/timer/next                                         */
+/* TIMER COUNTS                                                              */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -80,7 +80,7 @@ TIMER_DETAIL(0) TIMER_DETAIL(1) TIMER_DETAIL(2) TIMER_DETAIL(3)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 timer_count_read(char *buf, size_t max)
@@ -96,7 +96,7 @@ timer_count_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 timer_fired_read(char *buf, size_t max)
@@ -113,7 +113,7 @@ timer_fired_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 timer_next_read(char *buf, size_t max)
@@ -137,7 +137,7 @@ timer_next_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/clock/ticks                                                          */
+/* CLOCK TICKS                                                               */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -148,7 +148,7 @@ timer_next_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 clock_ticks_read(char *buf, size_t max)
@@ -158,19 +158,19 @@ clock_ticks_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/htimer/now, /sys/htimer/scheduled                                    */
+/* HARDWARE TIMER                                                            */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Read handler for /sys/htimer/now.
  *
  * Renders the hardware timer's free-running counter (Timer A1 on MSP430).
- * Resolution follows the active preset in tiku_htimer_config.h, ~1 us in the
- * high-accuracy default.
+ * Resolution follows the active preset in tiku_htimer_config.h, about 1 us
+ * in the high-accuracy default.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 htimer_now_read(char *buf, size_t max)
@@ -187,7 +187,7 @@ htimer_now_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 htimer_scheduled_read(char *buf, size_t max)

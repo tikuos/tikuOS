@@ -29,7 +29,7 @@
 #include <stdio.h>
 
 /*---------------------------------------------------------------------------*/
-/* /sys/boot/reason — decoded reset cause                                    */
+/* BOOT REASON                                                               */
 /*---------------------------------------------------------------------------*/
 
 /*
@@ -91,7 +91,7 @@ reset_cause_str(uint16_t iv)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 boot_reason_read(char *buf, size_t max)
@@ -125,17 +125,6 @@ TIKU_PERSIST_CELL(boot_count_cell, boot_count_persist,
  *  handler. */
 static uint32_t boot_count_value;
 
-/**
- * @brief Read handler for /sys/boot_count and /sys/boot/count.
- *
- * Renders the boot counter as a decimal line ("17\n" = seventeenth
- * boot since the durable memory was first initialised).  Serves the
- * SRAM copy — see boot_count_value above.
- *
- * @param buf  Output buffer for the rendered text
- * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
- */
 int
 tiku_vfs_tree_boot_count_read(char *buf, size_t max)
 {
@@ -143,7 +132,7 @@ tiku_vfs_tree_boot_count_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/last_reset — coarse-bucketed reset cause                              */
+/* LAST RESET                                                                */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -161,16 +150,12 @@ static const char *
 last_reset_str(uint16_t iv)
 {
     switch (iv) {
-    /* Watchdog: counter overflow or password violation */
     case 0x0016: case 0x0018:
         return "watchdog";
-    /* Power: brownout, SVS, PMM violation, FRAM power violation */
     case 0x0002: case 0x000E: case 0x0020: case 0x001A:
         return "power";
-    /* Reboot: software BOR, software POR, or the RST pin */
     case 0x0004: case 0x0006: case 0x0014:
         return "reboot";
-    /* Cold start (no reset cause) reported as power-on */
     case 0x0000:
         return "power";
     default:
@@ -178,17 +163,6 @@ last_reset_str(uint16_t iv)
     }
 }
 
-/**
- * @brief Read handler for /sys/last_reset.
- *
- * Renders the bucketed cause ("watchdog\n", "power\n", "reboot\n"
- * or "other\n") from the same reset-cause snapshot as
- * /sys/boot/reason.
- *
- * @param buf  Output buffer for the rendered text
- * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
- */
 int
 tiku_vfs_tree_boot_last_reset_read(char *buf, size_t max)
 {
@@ -196,13 +170,13 @@ tiku_vfs_tree_boot_last_reset_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/cold_boots — lifetime uptime accumulator                             */
+/* LIFETIME UPTIME                                                           */
 /*---------------------------------------------------------------------------*/
 
 /*
  * Durable sum of uptime across every boot since the cell was first primed.
- * Each read of /sys/cold_boots saves it, so a power loss loses only the time
- * since the last read.
+ * /sys/cold_boots renders it, despite its name, and each read saves it, so a
+ * power loss loses only the time since the last read.
  *
  * Lifetime = lifetime_at_boot (snapshotted at init) + current uptime in
  * seconds.
@@ -227,17 +201,6 @@ TIKU_PERSIST_CELL(lifetime_cell, lifetime_seconds_persist,
  */
 static uint32_t lifetime_at_boot;
 
-/**
- * @brief Read handler for /sys/cold_boots.
- *
- * Renders the lifetime uptime in seconds and saves it to the lifetime cell.
- * On MSP430 the save clears and re-sets the cell's gate around two word
- * stores, so a power cut inside it re-primes the lifetime to 0.
- *
- * @param buf  Output buffer for the rendered text
- * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or TIKU_VFS_EIO when the cell cannot be saved
- */
 int
 tiku_vfs_tree_boot_cold_boots_read(char *buf, size_t max)
 {
@@ -256,7 +219,7 @@ tiku_vfs_tree_boot_cold_boots_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/boot/stage                                                           */
+/* BOOT STAGE                                                                */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -268,7 +231,7 @@ tiku_vfs_tree_boot_cold_boots_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 boot_stage_read(char *buf, size_t max)
@@ -283,7 +246,7 @@ boot_stage_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/boot/rstiv — raw reset-cause code (hex)                              */
+/* RESET CODE                                                                */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -294,7 +257,7 @@ boot_stage_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 boot_rstiv_read(char *buf, size_t max)
@@ -303,7 +266,7 @@ boot_rstiv_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/boot/clock/ — clock frequencies                                      */
+/* CLOCK RATES                                                               */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -315,7 +278,7 @@ boot_rstiv_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 boot_clock_mclk_read(char *buf, size_t max)
@@ -331,7 +294,7 @@ boot_clock_mclk_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 boot_clock_smclk_read(char *buf, size_t max)
@@ -348,7 +311,7 @@ boot_clock_smclk_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 boot_clock_aclk_read(char *buf, size_t max)
@@ -364,7 +327,7 @@ boot_clock_aclk_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 boot_clock_fault_read(char *buf, size_t max)
@@ -374,7 +337,7 @@ boot_clock_fault_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/boot/mpu/{violations,count,last_addr}                                */
+/* MPU DIAGNOSTICS                                                           */
 /*---------------------------------------------------------------------------*/
 /*
  *   violations — MPU segment violation flags, as a hex bitmask.  RA8P1
@@ -398,7 +361,7 @@ boot_clock_fault_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 boot_mpu_violations_read(char *buf, size_t max)
@@ -416,7 +379,7 @@ boot_mpu_violations_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 boot_mpu_count_read(char *buf, size_t max)
@@ -434,7 +397,7 @@ boot_mpu_count_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 boot_mpu_last_addr_read(char *buf, size_t max)
@@ -509,16 +472,6 @@ _Static_assert(sizeof(tiku_vfs_tree_boot_children) /
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Capture the reset cause and bump the durable boot counter.
- *
- * Latches the reset cause (tiku_common_reset_reason()) and the hang culprit,
- * validates both persist cells -- blank or corrupt ones are primed to 0 with
- * the gate stamped last -- then bumps the counter and snapshots the lifetime.
- *
- * @note Runs first in tiku_vfs_tree_init(): on MSP430 a SYSRSTIV read is
- *       destructive.
- */
 void
 tiku_vfs_tree_boot_init(void)
 {
@@ -527,10 +480,9 @@ tiku_vfs_tree_boot_init(void)
      * /sys/boot/reason and /sys/last_reset render. */
     boot_reset_cause = tiku_common_reset_reason();
 
-    /* Capture the check-in watchdog's culprit (if the last reset was a
-     * detected hang) into this boot's view and clear the cross-reset record.
-     * One-shot: the culprit is quarantined for the recovery boot only, and
-     * /sys/boot/hang reports it for the life of this boot. */
+    /* Copy the check-in watchdog's culprit record, set when the last reset
+     * was a detected hang, into this boot's view and clear the cross-reset
+     * record, so /sys/boot/hang reports it for this boot only. */
     tiku_hang_boot_init();
 
     /* Validate or prime the cells, then bump the boot counter; the

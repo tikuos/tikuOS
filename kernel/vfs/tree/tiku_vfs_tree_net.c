@@ -32,7 +32,7 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* /sys/net/enabled                                                          */
+/* NETWORK STATE                                                             */
 /*---------------------------------------------------------------------------*/
 
 static const tiku_vfs_desc_t net_bool = TIKU_VFS_DESC(
@@ -121,7 +121,7 @@ parse_address(const char *buf, size_t len, uint8_t addr[4])
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/net/ipv4                                                             */
+/* IPV4                                                                      */
 /*---------------------------------------------------------------------------*/
 
 /** @brief /sys/net/ipv4/address: the source address. */
@@ -206,7 +206,7 @@ static const tiku_vfs_node_t ipv4_children[] = {
 #if TIKU_VFS_NET_DNS
 
 /*---------------------------------------------------------------------------*/
-/* /sys/net/dns                                                              */
+/* DNS                                                                       */
 /*---------------------------------------------------------------------------*/
 
 /** @brief /sys/net/dns/state: idle, sent, done or error. */
@@ -311,7 +311,7 @@ static const tiku_vfs_node_t dns_children[] = {
 #if TIKU_VFS_NET_DHCP
 
 /*---------------------------------------------------------------------------*/
-/* /sys/net/dhcp                                                             */
+/* DHCP                                                                      */
 /*---------------------------------------------------------------------------*/
 
 static const tiku_vfs_desc_t net_seconds = TIKU_VFS_DESC(
@@ -383,7 +383,7 @@ static const tiku_vfs_node_t dhcp_children[] = {
 #endif /* TIKU_VFS_NET_DHCP */
 
 /*---------------------------------------------------------------------------*/
-/* /sys/net                                                                  */
+/* NODE TABLE                                                                */
 /*---------------------------------------------------------------------------*/
 
 const tiku_vfs_node_t tiku_vfs_tree_net_children[] = {

@@ -31,7 +31,12 @@
 /* HELPERS                                                                   */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Append formatted text at @p *at, never past @p max. */
+/**
+ * @brief Append formatted text at @p *at, never past @p max.
+ *
+ * A cut line advances @p *at only to @p max - 1, so the readers below return
+ * the length kept in the buffer, not the full length.
+ */
 #define LAYOUT_PUT(buf, max, at, ...)                                        \
     do {                                                                     \
         if (*(at) < (max)) {                                                 \
@@ -106,7 +111,11 @@ layout_op(const char *buf, size_t len, uint32_t *op)
 /* READS                                                                     */
 /*---------------------------------------------------------------------------*/
 
-/** @brief caps: one knob a line: effect, floor, ceiling, step, default. */
+/**
+ * @brief caps: one knob a line: effect, floor, ceiling, step, default.
+ * @return The length kept in @p buf, at most @p max - 1 (LAYOUT_PUT), not
+ *         the full length
+ */
 static int
 layout_caps_read(char *buf, size_t max)
 {
@@ -132,7 +141,12 @@ layout_caps_read(char *buf, size_t max)
     return (int)at;
 }
 
-/** @brief current: generation, revision and the applied value of each knob. */
+/**
+ * @brief current: generation, revision, identity and the applied value of
+ *        each knob.
+ * @return The length kept in @p buf, at most @p max - 1 (LAYOUT_PUT), not
+ *         the full length
+ */
 static int
 layout_current_read(char *buf, size_t max)
 {
@@ -164,7 +178,11 @@ layout_current_read(char *buf, size_t max)
     return (int)at;
 }
 
-/** @brief pending: the staged request, or "none". */
+/**
+ * @brief pending: the staged request, or "none".
+ * @return The length kept in @p buf, at most @p max - 1 (LAYOUT_PUT), not
+ *         the full length
+ */
 static int
 layout_pending_read(char *buf, size_t max)
 {
@@ -197,7 +215,11 @@ layout_pending_read(char *buf, size_t max)
     return (int)at;
 }
 
-/** @brief status: the store's state, the phase and the last outcome. */
+/**
+ * @brief status: the store's state, the phase and the last outcome.
+ * @return The length kept in @p buf, at most @p max - 1 (LAYOUT_PUT), not
+ *         the full length
+ */
 static int
 layout_status_read(char *buf, size_t max)
 {

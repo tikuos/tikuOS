@@ -215,8 +215,8 @@ int tiku_cfg_get(tiku_cfg_t *, uint32_t resource, char value[TIKU_CFG_VALUE],
  * Calls each resource's reconcile hook and commits only when a state
  * changed; the boot path runs it after tiku_cfg_open().
  *
- * @return TIKU_CFG_OK, the open status, TIKU_CFG_BUSY, TIKU_CFG_EXHAUSTED or
- *         TIKU_CFG_IO
+ * @return TIKU_CFG_OK, TIKU_CFG_INVALID for a NULL journal, the open status,
+ *         TIKU_CFG_BUSY, TIKU_CFG_EXHAUSTED or TIKU_CFG_IO
  */
 int tiku_cfg_recover(tiku_cfg_t *);
 /**
@@ -236,4 +236,4 @@ const char *tiku_cfg_state_name(unsigned state);
 /** @brief Standard CRC-32 (zlib); seals each bank and each text request. */
 uint32_t tiku_cfg_crc32(const uint8_t *, size_t);
 
-#endif
+#endif /* TIKU_VFS_CONFIG_H_ */

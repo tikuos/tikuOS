@@ -22,8 +22,8 @@
 /**
  * @brief 1 when a Wi-Fi radio driver is built, else 0.
  *
- * The subtree uses only the tiku_wireless_* interface, so either radio
- * (the CYW43439 or the ESP32-C61's own) provides it.
+ * The subtree uses only the tiku_wireless_* interface, so either driver the
+ * #if names (TIKU_DRV_WIFI_CYW43_ENABLE, TIKU_DRV_WIFI_ESP_ENABLE) serves it.
  */
 #if (TIKU_DRV_WIFI_CYW43_ENABLE + 0) || (TIKU_DRV_WIFI_ESP_ENABLE + 0)
 #define TIKU_VFS_NET_WIFI 1

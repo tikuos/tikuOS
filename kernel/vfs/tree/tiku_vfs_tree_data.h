@@ -8,8 +8,8 @@
  * tiku_vfs_tree_data.h - /data VFS nodes (user data and persisted state).
  *
  * The Tiku File Store as the /data dynamic directory, and its usage under
- * /sys/fs/data.  Both are built with or without the shell; the /data/basic
- * child needs the BASIC build flags.
+ * /sys/fs/data, built with or without the shell.  Static /data children, such
+ * as /data/basic, come from the boot config (boot/tiku_boot_vfs.c).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,9 +24,9 @@
 /**
  * @brief Get the fully-formed /data directory node.
  *
- * Returns a static, fully-initialised DIR node named "data"; the root assembly
- * copies it by value into the mutable root-children array. Available without
- * a shell; the optional /data/basic child still requires BASIC and the shell.
+ * Returns a static DIR node named "data" with no static children; the root
+ * assembly copies it by value into the mutable root-children array and adds
+ * the children of its tiku_vfs_tree_config_t.
  *
  * @return Pointer to the static /data directory node
  */

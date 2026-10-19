@@ -124,7 +124,8 @@ gpio_owners_read(uint8_t port, char *buf, size_t max)
  * @param pin   Pin within the port
  * @param buf   Output buffer for the rendered text
  * @param max   Capacity of @p buf in bytes
- * @return Bytes written, or TIKU_VFS_ENOTSUP when the driver rejects the pin
+ * @return The full length of the text (snprintf-style), or
+ *         TIKU_VFS_ENOTSUP when the driver rejects the pin
  */
 static int
 gpio_pin_read(uint8_t port, uint8_t pin, char *buf, size_t max)
@@ -246,9 +247,11 @@ static int gpio_pin_file_write(const char *buf, size_t len);
 /* NODE TABLES                                                               */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Expand X(port, pin) for pins 0..5 of port @p p. */
+/** @brief Expand X(port, pin) for pins 0..4 of port @p p. */
 #define PINS_5(X, p)  X(p, 0) X(p, 1) X(p, 2) X(p, 3) X(p, 4)
+/** @brief Expand X(port, pin) for pins 0..5 of port @p p. */
 #define PINS_6(X, p)  PINS_5(X, p) X(p, 5)
+/** @brief Expand X(port, pin) for pins 0..6 of port @p p. */
 #define PINS_7(X, p)  PINS_6(X, p) X(p, 6)
 
 /** @brief Expand X(port, pin) for pins 0..7 of port @p p. */
@@ -377,7 +380,7 @@ gpio_pin_file_write(const char *buf, size_t len)
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* DRIVER NOTIFY — post TIKU_EVENT_VFS to /dev/gpio watchers on an edge      */
+/* DRIVER NOTIFY                                                             */
 /*---------------------------------------------------------------------------*/
 
 void

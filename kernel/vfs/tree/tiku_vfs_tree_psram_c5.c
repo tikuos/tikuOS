@@ -1,8 +1,17 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_vfs_tree_psram_c5.c - passive C5 PSRAM status and explicit tier
- * lifecycle. SPDX-License-Identifier: Apache-2.0
+ *
+ * tiku_vfs_tree_psram_c5.c - /sys/psram VFS nodes (ESP32-C5 PSRAM).
+ *
+ * Passive status of the PSRAM (state, verified size, SPI identity, package
+ * code, last lifecycle result) and its explicit tier lifecycle: writing "up"
+ * or "down" to state attaches it to the tier or takes it down.
+ *
+ * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_vfs_tree_psram.h"
 #include <arch/esp32c5/tiku_psram_arch.h>
@@ -10,8 +19,10 @@
 #include <stdio.h>
 #include <string.h>
 
-/** @brief Report attachment, verified mapping, absence or the last failed
- * operation. */
+/**
+ * @brief Report attachment, verified mapping, absence or the last failed
+ *        operation.
+ */
 static int state_read(char *out, size_t size)
 {
     const char *state = tiku_c5_psram_attached() ? "up"
@@ -22,8 +33,10 @@ static int state_read(char *out, size_t size)
                                                  : "down";
     return snprintf(out, size, "%s\n", state);
 }
-/** @brief Accept up or down with optional trailing whitespace; refuse live
- * allocations. */
+/**
+ * @brief Accept up or down with optional trailing whitespace; refuse live
+ *        allocations.
+ */
 static int state_write(const char *text, size_t size)
 {
     int rc;
@@ -60,7 +73,9 @@ static int id_read(char *out, size_t size)
 {
     return snprintf(out, size, "%06lx\n", (unsigned long)tiku_c5_psram_id());
 }
-/** @brief Read the package's raw PSRAM code without claiming external capacity.
+/**
+ * @brief Read the package's raw PSRAM code without claiming external
+ *        capacity.
  */
 static int package_read(char *out, size_t size)
 {

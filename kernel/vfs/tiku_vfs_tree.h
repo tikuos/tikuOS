@@ -19,21 +19,27 @@
 
 #include "tiku_vfs.h"
 
+/** @brief Most subtrees a tree config mounts under "/" or "/sys". */
 #define TIKU_VFS_BOOT_NODES_MAX 4u
+/** @brief Most static children a tree config places under /data. */
 #define TIKU_VFS_DATA_CHILDREN_MAX 1u
 
 /** @brief Optional subtree attached under "/" or "/sys" at boot. */
 typedef struct {
-    const char *parent;
-    const tiku_vfs_node_t *node;
+    const char *parent;            /**< "/" or "/sys"                      */
+    const tiku_vfs_node_t *node;   /**< subtree root, its name free there  */
 } tiku_vfs_boot_node_t;
 
-/** @brief Provider nodes and child tables must outlive the published tree. */
+/**
+ * @brief The optional providers tiku_vfs_tree_init() adds to the core tree.
+ * @note Provider nodes and child tables must outlive the published tree.
+ */
 typedef struct {
-    const tiku_vfs_node_t *data_children;
-    uint8_t data_child_count;
-    const tiku_vfs_boot_node_t *nodes;
-    uint8_t node_count;
+    const tiku_vfs_node_t *data_children;  /**< static /data children,
+                                                listed before its files  */
+    uint8_t data_child_count;              /**< entries in data_children */
+    const tiku_vfs_boot_node_t *nodes;     /**< subtrees to mount        */
+    uint8_t node_count;                    /**< entries in nodes         */
 } tiku_vfs_tree_config_t;
 
 /**

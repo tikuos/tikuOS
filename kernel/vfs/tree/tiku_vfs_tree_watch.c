@@ -25,7 +25,7 @@
 #include <stdio.h>
 
 /*---------------------------------------------------------------------------*/
-/* /sys/watch/used, /sys/watch/free                                          */
+/* WATCH SLOT COUNTS                                                         */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -37,7 +37,7 @@
  *
  * @param buf  Output buffer
  * @param max  Buffer capacity
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 watch_used_read(char *buf, size_t max)
@@ -54,7 +54,7 @@ watch_used_read(char *buf, size_t max)
  *
  * @param buf  Output buffer
  * @param max  Buffer capacity
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 watch_free_read(char *buf, size_t max)
@@ -64,7 +64,7 @@ watch_free_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/watch/<i> — one node per watch slot                                  */
+/* WATCH SLOTS                                                               */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -77,7 +77,7 @@ watch_free_read(char *buf, size_t max)
  * @param i    Watch slot index
  * @param buf  Output buffer
  * @param max  Buffer capacity
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 watch_slot_read(uint8_t i, char *buf, size_t max)
@@ -121,7 +121,7 @@ _Static_assert(TIKU_VFS_WATCH_MAX == 8,
                "if TIKU_VFS_WATCH_MAX changes");
 
 /*---------------------------------------------------------------------------*/
-/* /sys/vfs/nodes, /sys/vfs/depth                                            */
+/* TREE STATISTICS                                                           */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -132,7 +132,7 @@ _Static_assert(TIKU_VFS_WATCH_MAX == 8,
  *
  * @param buf  Output buffer
  * @param max  Buffer capacity
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 vfs_nodes_read(char *buf, size_t max)
@@ -148,7 +148,7 @@ vfs_nodes_read(char *buf, size_t max)
  *
  * @param buf  Output buffer
  * @param max  Buffer capacity
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 vfs_depth_read(char *buf, size_t max)
@@ -173,7 +173,7 @@ vfs_manifest_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/vfs/cache/{used,hits,misses} — freshness-cache observability         */
+/* READ CACHE                                                                */
 /*---------------------------------------------------------------------------*/
 /*
  * Counters of the read-coalescing cache (kernel/vfs/tiku_vfs_cache.c).  A hit
@@ -196,7 +196,7 @@ vfs_cache_used_read(char *buf, size_t max)
  *
  * @param buf  Output buffer
  * @param max  Capacity of @p buf
- * @return Bytes written (snprintf-style)
+ * @return The full length of the text (snprintf-style)
  */
 static int
 vfs_cache_hits_read(char *buf, size_t max)
@@ -214,7 +214,7 @@ vfs_cache_hits_read(char *buf, size_t max)
  *
  * @param buf  Output buffer
  * @param max  Capacity of @p buf
- * @return Bytes written (snprintf-style)
+ * @return The full length of the text (snprintf-style)
  */
 static int
 vfs_cache_misses_read(char *buf, size_t max)
@@ -225,7 +225,7 @@ vfs_cache_misses_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/vfs/events — what changed, drained by reading                        */
+/* CHANGE RECORDS                                                            */
 /*---------------------------------------------------------------------------*/
 /*
  * The change ring rendered as text; reading the node drains the ring.  One
@@ -333,7 +333,7 @@ static const tiku_vfs_desc_t desc_events = TIKU_VFS_DESC_FLAGS(
  *
  * @param buf  Output buffer
  * @param max  Capacity of @p buf
- * @return Bytes written (snprintf-style)
+ * @return The full length of the text (snprintf-style)
  */
 static int vfs_manifest_rev_read(char *buf, size_t max)
 {

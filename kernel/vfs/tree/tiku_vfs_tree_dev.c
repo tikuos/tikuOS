@@ -7,9 +7,9 @@
  *
  * tiku_vfs_tree_dev.c - /dev subtree (files and assembly).
  *
- * Hardware-facing nodes: board LEDs, console, null, zero, and the small static
- * subtrees for uart, adc, i2c and spi.  LED nodes keep an SRAM shadow because
- * an output pin cannot be read back uniformly; the rest query their drivers.
+ * The static /dev nodes: board LEDs, console, null, zero, and the small
+ * subtrees for the console port, adc, i2c and spi.  LED nodes keep an SRAM
+ * shadow because an output pin cannot be read back uniformly.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -31,7 +31,7 @@
 #include <stdio.h>
 
 /*---------------------------------------------------------------------------*/
-/* LED STATE TRACKING (indexed by TIKU_BOARD_LED_COUNT)                      */
+/* LED STATE                                                                 */
 /*---------------------------------------------------------------------------*/
 
 #if TIKU_BOARD_LED_COUNT > 0
@@ -88,18 +88,20 @@ LED_VFS_FUNCS(3)
 #endif /* TIKU_BOARD_LED_COUNT > 0 */
 
 /*---------------------------------------------------------------------------*/
-/* /dev/uart/overruns                                                        */
+/* CONSOLE PORT                                                              */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Read handler for /dev/uart/overruns.
+ * @brief Read handler for /dev/uart/overruns, served as
+ *        /dev/usb_serial_jtag/tx_dropped on a TIKU_CONSOLE_JTAG build.
  *
- * Renders the count of RX bytes dropped because the ring buffer was full.  A
- * rising count means the consumer drains slower than the line delivers.
+ * Renders the RX bytes the UART dropped on a full ring buffer, a count that
+ * rises when the consumer drains slower than the line delivers, or on a
+ * TIKU_CONSOLE_JTAG build the console bytes the transmit transport rejected.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 uart_overruns_read(char *buf, size_t max)
@@ -128,14 +130,16 @@ uart_recoveries_read(char *buf, size_t max)
 #endif
 
 /**
- * @brief Read handler for /dev/uart/baud.
+ * @brief Read handler for /dev/uart/baud, served as
+ *        /dev/usb_serial_jtag/transport on a TIKU_CONSOLE_JTAG build.
  *
- * Renders the board header's configured baud rate as a decimal line ("9600\n"
- * on MSP430 boards, "115200\n" on RP2350), a build-time constant.
+ * Renders the board header's configured baud rate, TIKU_BOARD_UART_BAUD, as
+ * a decimal line ("9600\n" on MSP430 boards, "115200\n" on RP2350), or
+ * "usb-serial-jtag\n" on a TIKU_CONSOLE_JTAG build.
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 uart_baud_read(char *buf, size_t max)
@@ -149,7 +153,7 @@ uart_baud_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /dev/spi/config                                                           */
+/* SPI CONFIGURATION                                                         */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -160,7 +164,7 @@ uart_baud_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 #if !defined(PLATFORM_ESP32P4)
 static int
@@ -177,7 +181,7 @@ spi_config_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /dev/adc/temp, /dev/adc/battery                                           */
+/* ADC                                                                       */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -189,7 +193,7 @@ spi_config_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 adc_temp_read(char *buf, size_t max)
@@ -211,7 +215,7 @@ adc_temp_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 adc_battery_read(char *buf, size_t max)
@@ -226,19 +230,20 @@ adc_battery_read(char *buf, size_t max)
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* /dev/i2c/scan                                                             */
+/* I2C SCAN                                                                  */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Read handler for /dev/i2c/scan; each read probes the bus.
  *
- * Reading probes 7-bit addresses 0x08..0x77 with a zero-length write and
- * renders the responders as "0x18 0x48\n", or "none\n".  Each read costs 112
- * bus transactions.
+ * Probes 7-bit addresses 0x08..0x77 with a zero-length write, up to 112 bus
+ * transactions, stopping once @p buf has under 7 bytes left; renders the
+ * responders as "0x18 0x48\n", or "none\n".
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written
+ * @return The length of the text kept in @p buf, not its full length: a scan
+ *         cut short by a small @p buf reports only the addresses it reached
  */
 #if !defined(PLATFORM_ESP32C5) && !defined(PLATFORM_ESP32P4)
 static int
@@ -270,15 +275,15 @@ i2c_scan_read(char *buf, size_t max)
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* /dev/console — system console (UART)                                      */
+/* CONSOLE                                                                   */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Read handler for /dev/console — drain pending UART RX.
+ * @brief Read handler for /dev/console: drain pending console input.
  *
- * Non-blocking: copies only the bytes already waiting and returns their count,
- * 0 when idle.  Raw bytes with no newline appended.
- * The shell consumes the same UART, so reading it mid-session steals bytes.
+ * Non-blocking: copies the raw bytes already waiting on the UART, or on the
+ * USB-serial-JTAG on a TIKU_CONSOLE_JTAG build, and returns their count.  The
+ * shell reads the same input, so a read during a session takes its bytes.
  *
  * @param buf  Output buffer for the drained bytes
  * @param max  Capacity of @p buf in bytes
@@ -304,11 +309,11 @@ console_read(char *buf, size_t max)
 }
 
 /**
- * @brief Write handler for /dev/console — send bytes to the UART.
+ * @brief Write handler for /dev/console: send bytes to the console.
  *
- * Pushes the payload through tiku_uart_putc() byte by byte,
- * blocking on TX-ready for each.  No CRLF translation — callers
- * that want "\r\n" line endings must send them.
+ * Sends the payload byte by byte through tiku_uart_putc(), or
+ * tiku_debug_arch_putc() on a TIKU_CONSOLE_JTAG build, with no CRLF
+ * translation: a caller that wants "\r\n" line endings sends them.
  *
  * @param buf  Bytes to transmit
  * @param len  Number of bytes to transmit
@@ -329,7 +334,7 @@ console_write(const char *buf, size_t len)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /dev/null — data sink                                                     */
+/* NULL DEVICE                                                               */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -367,7 +372,7 @@ devnull_write(const char *buf, size_t len)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /dev/zero — zero source                                                   */
+/* ZERO DEVICE                                                               */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -409,10 +414,10 @@ static const tiku_vfs_desc_t desc_bus_config = TIKU_VFS_DESC(
     TIKU_VFS_T_STR, TIKU_VFS_U_NONE, TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
 static const tiku_vfs_desc_t desc_uart_count = TIKU_VFS_DESC(
     TIKU_VFS_T_U32, TIKU_VFS_U_COUNT, TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
-/* 12-bit raw conversions, sampled live (each read wakes the ADC), so
- * both carry a read-coalescing window: repeated reads inside the window
- * share one conversion.  Temperature drifts slowly -> ~100 ms; supply
- * voltage slower still -> ~1 s. */
+/* 12-bit raw conversions, sampled live (each read wakes the ADC), so both
+ * carry a read-coalescing window in which repeated reads share one
+ * conversion: TIKU_CLOCK_SECOND / 10 for temperature, TIKU_CLOCK_SECOND for
+ * the supply voltage. */
 #if !defined(PLATFORM_ESP32P4)
 static const tiku_vfs_desc_t desc_adc_temp =
     TIKU_VFS_DESC_RF(TIKU_VFS_T_U32, TIKU_VFS_U_ADC_RAW,
@@ -429,7 +434,10 @@ static const tiku_vfs_desc_t desc_led =
                   TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
 #endif
 
-/** /dev/uart directory table — RX health + configured baud */
+/**
+ * /dev/uart directory table, /dev/usb_serial_jtag on a TIKU_CONSOLE_JTAG
+ * build: the console's drop count and its baud rate or transport.
+ */
 static const tiku_vfs_node_t dev_uart_children[] = {
 #if defined(TIKU_CONSOLE_JTAG)
     { "tx_dropped", TIKU_VFS_FILE, uart_overruns_read, NULL, NULL, 0, &desc_uart_count },
@@ -472,11 +480,12 @@ static const tiku_vfs_node_t dev_spi_children[] = {
 #endif
 
 /*
- * The /dev directory table -- every hardware-facing node.  LED entries are
- * gated one by one on TIKU_BOARD_LED_COUNT so a one-LED board exposes exactly
- * /dev/led0; the gpio subtrees come from tiku_vfs_tree_gpio.c and sensors/
- * from tiku_vfs_tree_sensor.c.  To add a node, implement the handler above
- * and append the entry here.
+ * The static /dev directory table; the driver registry mounts its
+ * /dev/<class> directories after these.  LED entries are gated one by one on
+ * TIKU_BOARD_LED_COUNT so a one-LED board exposes exactly /dev/led0; the gpio
+ * subtrees come from tiku_vfs_tree_gpio.c and sensors/ from
+ * tiku_vfs_tree_sensor.c.  To add a node, implement the handler above and
+ * append the entry here.
  */
 static const tiku_vfs_node_t dev_children[] = {
     { "sensors", TIKU_VFS_DIR, NULL, NULL,
@@ -531,26 +540,12 @@ static const tiku_vfs_node_t dev_node = {
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Get the fully-formed /dev directory node.
- *
- * See the header for the copy-by-value contract with the root
- * assembly.
- *
- * @return Pointer to the static /dev directory node
- */
 const tiku_vfs_node_t *
 tiku_vfs_tree_dev_get(void)
 {
     return &dev_node;
 }
 
-/**
- * @brief Initialise /dev hardware state.
- *
- * Configures every board LED pin (direction and initial level) and zeroes the
- * led_state shadow so reads and hardware agree from the first access.
- */
 void
 tiku_vfs_tree_dev_init(void)
 {

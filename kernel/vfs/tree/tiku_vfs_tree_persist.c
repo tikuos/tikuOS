@@ -24,7 +24,7 @@
 #include <stdio.h>
 
 /*---------------------------------------------------------------------------*/
-/* /sys/persist/cells, primed, moved, manifest                               */
+/* PERSIST CELLS                                                             */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -36,7 +36,7 @@
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 persist_cells_read(char *buf, size_t max)
@@ -53,7 +53,7 @@ persist_cells_read(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 persist_primed_read(char *buf, size_t max)
@@ -81,6 +81,9 @@ persist_moved_read(char *buf, size_t max)
  * One line per cell: its key in hex, the gate's and the value's offsets into
  * the durable image, and the value's size; "none" where the image keeps no
  * record.  A tool compares it with a new image's before flashing.
+ *
+ * @return The length of the whole lines kept in @p buf, not the full
+ *         length: the lines that do not fit are left out
  */
 static int
 persist_manifest_read(char *buf, size_t max)

@@ -34,7 +34,7 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* /dev/sensors/enabled                                                      */
+/* SENSOR STATE                                                              */
 /*---------------------------------------------------------------------------*/
 
 static const tiku_vfs_desc_t cached_text = TIKU_VFS_DESC(
@@ -239,7 +239,7 @@ static const tiku_vfs_node_t adt_nodes[] = { SENSOR_NODES(adt7410) };
 #if TIKU_VFS_SENSOR_OW
 
 /*---------------------------------------------------------------------------*/
-/* /dev/sensors/ds18b20                                                      */
+/* DS18B20                                                                   */
 /*---------------------------------------------------------------------------*/
 
 /* 750 ms, the 12-bit conversion time, in whole ticks plus one: the first
@@ -427,7 +427,7 @@ static const tiku_vfs_node_t ds_nodes[] = {
 #endif /* TIKU_VFS_SENSOR_I2C */
 
 /*---------------------------------------------------------------------------*/
-/* /dev/sensors                                                              */
+/* NODE TABLE                                                                */
 /*---------------------------------------------------------------------------*/
 
 const tiku_vfs_node_t tiku_vfs_tree_sensor_children[] = {

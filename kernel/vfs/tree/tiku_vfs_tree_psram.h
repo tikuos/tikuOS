@@ -5,10 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_vfs_tree_psram.h - /sys/psram VFS nodes (Apollo510 external PSRAM)
+ * tiku_vfs_tree_psram.h - /sys/psram VFS nodes.
  *
  * Linkage contract for the PSRAM subtree: the children table and its entry
- * count, consumed by the /sys assembly.
+ * count, consumed by the /sys assembly.  One port file defines the table:
+ * tiku_vfs_tree_psram.c (Apollo510), _psram_c5.c or _psram_p4.c.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -30,7 +31,11 @@
 #define TIKU_VFS_TREE_PSRAM_NCHILD  4
 #endif
 
-/** @brief /sys/psram children: state, hz, size, tap. */
+/**
+ * @brief /sys/psram children: state, hz, size, tap on Apollo510; state,
+ *        size, id, package_code, result on ESP32-C5; state, size, hz, stage
+ *        on ESP32-P4.
+ */
 extern const tiku_vfs_node_t tiku_vfs_tree_psram_children[];
 
 #endif /* TIKU_VFS_TREE_PSRAM_H_ */

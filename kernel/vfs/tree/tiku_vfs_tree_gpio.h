@@ -55,10 +55,10 @@ extern const tiku_vfs_node_t tiku_vfs_tree_gpio_dir_children[];
 extern const tiku_vfs_node_t tiku_vfs_tree_gpio_owner_children[];
 
 /**
- * @brief Ring /dev/gpio/<port>/<pin> watchers after a hardware edge.
+ * @brief Notify the watchers of /dev/gpio/<port>/<pin> after a hardware edge.
  *
- * The GPIO edge-interrupt to VFS-watch bridge: the port ISR calls this for the
- * pin that fired, so a rule or `watch` on it reacts to the physical edge.
+ * The port ISR calls this for the pin that fired, so a rule or `watch` on the
+ * pin file reacts to the physical edge (tiku_vfs_notify()).
  *
  * @param port  Port number; MSP430 port J is 255
  * @param pin   Pin within the port

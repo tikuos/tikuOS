@@ -24,18 +24,18 @@
 #include <stdio.h>
 
 /*---------------------------------------------------------------------------*/
-/* /sys/watchdog/mode                                                        */
+/* WATCHDOG MODE                                                             */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Read handler for /sys/watchdog/mode.
  *
  * Renders the operating mode as a word ("watchdog\n" or "interval\n") from
- * tiku_watchdog_mode_str(), the string the shell `info` command prints.
+ * tiku_watchdog_mode_str().
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 watchdog_mode_read(char *buf, size_t max)
@@ -98,7 +98,7 @@ watchdog_mode_write(const char *buf, size_t len)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/watchdog/clock                                                       */
+/* WATCHDOG CLOCK                                                            */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -110,7 +110,7 @@ watchdog_mode_write(const char *buf, size_t len)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 watchdog_clock_read(char *buf, size_t max)
@@ -148,7 +148,7 @@ watchdog_clock_write(const char *buf, size_t len)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/watchdog/interval                                                    */
+/* WATCHDOG INTERVAL                                                         */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -160,7 +160,7 @@ watchdog_clock_write(const char *buf, size_t len)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 watchdog_interval_read(char *buf, size_t max)
@@ -225,7 +225,7 @@ watchdog_interval_write(const char *buf, size_t len)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/watchdog/kick                                                        */
+/* WATCHDOG KICK                                                             */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -248,7 +248,7 @@ watchdog_kick_write(const char *buf, size_t len)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/watchdog/enabled, /sys/watchdog/kicks                                */
+/* WATCHDOG STATE                                                            */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -259,7 +259,7 @@ watchdog_kick_write(const char *buf, size_t len)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 watchdog_enabled_read(char *buf, size_t max)
@@ -299,7 +299,7 @@ watchdog_enabled_write(const char *buf, size_t len)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int
 watchdog_kicks_read(char *buf, size_t max)

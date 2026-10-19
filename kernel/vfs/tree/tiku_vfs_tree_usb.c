@@ -29,7 +29,7 @@
 #include <stdio.h>
 
 /*---------------------------------------------------------------------------*/
-/* /sys/usb                                                                  */
+/* USB DEVICE                                                                */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -38,7 +38,7 @@
  *
  * @param buf Output buffer
  * @param max Capacity of @p buf
- * @return Bytes written, or -1
+ * @return The full length of the text (snprintf-style)
  */
 static int usb_state_read(char *buf, size_t max)
 {
@@ -54,8 +54,8 @@ static int usb_state_read(char *buf, size_t max)
     d = (unsigned)tiku_ra8p1_usbhs_devstate();
     return snprintf(buf, max, "%s\n", name[d < 5u ? d : 4u]);
 #else
-    /* The Ambiq stack keeps no device-state enum; the same ladder is
-     * derived from what the host has been given so far. */
+    /* The Ambiq stack keeps no device-state enum, so the state comes from
+     * the power, attach, configuration and address the driver reports. */
     if (!tiku_usb_powered()) {
         return snprintf(buf, max, "down\n");
     }
@@ -77,7 +77,7 @@ static int usb_state_read(char *buf, size_t max)
  *
  * @param buf Output buffer
  * @param max Capacity of @p buf
- * @return Bytes written, or -1
+ * @return The full length of the text (snprintf-style)
  */
 static int usb_speed_read(char *buf, size_t max)
 {
@@ -96,7 +96,7 @@ static int usb_speed_read(char *buf, size_t max)
  *
  * @param buf Output buffer
  * @param max Capacity of @p buf
- * @return Bytes written, or -1
+ * @return The full length of the text (snprintf-style)
  */
 static int usb_addr_read(char *buf, size_t max)
 {
@@ -113,7 +113,7 @@ static int usb_addr_read(char *buf, size_t max)
  *
  * @param buf Output buffer
  * @param max Capacity of @p buf
- * @return Bytes written, or -1
+ * @return The full length of the text (snprintf-style)
  */
 static int usb_config_read(char *buf, size_t max)
 {
@@ -125,18 +125,16 @@ static int usb_config_read(char *buf, size_t max)
 #endif
 }
 
-/*
- * EP0 has no polling path, so enumeration runs only from the interrupt: a
- * configured device always has a non-zero interrupt count.
- */
-
 /**
  * @brief Read handler for /sys/usb/irq: interrupts taken, then device-state
  *        transitions (RA8P1) or SETUP packets decoded (Ambiq).
  *
+ * EP0 has no polling path, so enumeration runs only from the interrupt: a
+ * configured device always has a non-zero interrupt count.
+ *
  * @param buf Output buffer
  * @param max Capacity of @p buf
- * @return Bytes written, or -1
+ * @return The full length of the text (snprintf-style)
  */
 static int usb_irq_read(char *buf, size_t max)
 {
@@ -162,7 +160,7 @@ static int usb_irq_read(char *buf, size_t max)
  *
  * @param buf Output buffer
  * @param max Capacity of @p buf
- * @return Bytes written, or -1
+ * @return The full length of the text (snprintf-style)
  */
 static int usb_cbw_read(char *buf, size_t max)
 {
@@ -175,7 +173,7 @@ static int usb_cbw_read(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /sys/store                                                                */
+/* MODEL STORE                                                               */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -183,7 +181,7 @@ static int usb_cbw_read(char *buf, size_t max)
  *
  * @param buf Output buffer
  * @param max Capacity of @p buf
- * @return Bytes written, or -1
+ * @return The full length of the text (snprintf-style)
  */
 static int store_name_read(char *buf, size_t max)
 {
@@ -201,7 +199,7 @@ static int store_name_read(char *buf, size_t max)
  *
  * @param buf Output buffer
  * @param max Capacity of @p buf
- * @return Bytes written, or -1
+ * @return The full length of the text (snprintf-style)
  */
 static int store_bytes_read(char *buf, size_t max)
 {
@@ -212,17 +210,15 @@ static int store_bytes_read(char *buf, size_t max)
     return snprintf(buf, max, "%lu\n", (unsigned long)len);
 }
 
-/*
- * `present` recomputes the CRC over the whole blob on the medium; name and
- * bytes read only the header.
- */
-
 /**
- * @brief Read handler for /sys/store/present.
+ * @brief Read handler for /sys/store/present: "ok" or "no".
+ *
+ * Recomputes the CRC over the whole blob on the medium; name and bytes read
+ * only the header.
  *
  * @param buf Output buffer
  * @param max Capacity of @p buf
- * @return Bytes written, or -1
+ * @return The full length of the text (snprintf-style)
  */
 static int store_present_read(char *buf, size_t max)
 {

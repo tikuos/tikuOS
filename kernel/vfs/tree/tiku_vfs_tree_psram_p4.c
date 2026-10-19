@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_vfs_tree_psram_p4.c - Passive status of boot-attached P4 PSRAM.
+ *
+ * tiku_vfs_tree_psram_p4.c - /sys/psram VFS nodes (ESP32-P4 PSRAM).
+ *
+ * Passive status of the PSRAM that boot attaches to the tier: state, verified
+ * size, interface clock and the last completed initialization stage.  No
+ * node is writable, and no read initializes the device.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_vfs_tree_psram.h"

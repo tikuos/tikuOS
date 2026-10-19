@@ -36,8 +36,12 @@ const tiku_vfs_node_t *tiku_vfs_tree_sys_get(void);
  *        journal and the radio scan hook.
  *
  * Validates the RTC epoch offset via tiku_rtc_init() and validates or primes
- * the device-name cell to its "tiku" default, each under its own magic gate;
- * with TIKU_VFS_CONFIG_ENABLE, also opens the journal and applies its settings.
+ * the device-name cell to "tiku".  With TIKU_VFS_CONFIG_ENABLE it also opens
+ * the configuration journal and applies its settings, where the port has one.
+ *
+ * @note The ports with journal banks are the #if in
+ *       tiku_vfs_config_service.inl (MSP430, Nordic); elsewhere that step
+ *       does nothing.
  */
 void tiku_vfs_tree_sys_init(void);
 

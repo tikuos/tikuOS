@@ -8,8 +8,8 @@
  * tiku_vfs_cache.h - freshness cache (read coalescing) for the VFS.
  *
  * Remembers the rendered text of nodes that declare a freshness window, so
- * repeated reads inside it cost one handler call.  tiku_vfs_notify()
- * invalidates an entry, so a write never leaves a stale value.
+ * repeated reads inside it cost one handler call.  tiku_vfs_notify(), which
+ * every successful write calls, drops only the notified node's entry.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
