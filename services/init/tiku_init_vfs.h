@@ -14,7 +14,12 @@
 
 #include <kernel/vfs/tiku_vfs.h>
 
-/** @brief Init table subtree; getting it neither loads nor runs commands. */
+/**
+ * @brief Return the init directory node, for mounting under /sys.
+ *
+ * Getting it neither loads the table nor runs commands.  Defined only when
+ * TIKU_INIT_ENABLE is set.
+ */
 const tiku_vfs_node_t *tiku_init_vfs_get(void);
 
 #endif

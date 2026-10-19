@@ -14,7 +14,13 @@
 
 #include <kernel/vfs/tiku_vfs.h>
 
-/** @brief Saved-program node for the static children of /data. */
+/**
+ * @brief Return /data/basic, the saved BASIC program, as a static node.
+ *
+ * Returns a one-entry array for the static children of /data; the program's
+ * storage is read only when the node is read.  Defined only when
+ * TIKU_SHELL_ENABLE and TIKU_SHELL_CMD_BASIC are set.
+ */
 const tiku_vfs_node_t *tiku_basic_vfs_get(void);
 
 #endif

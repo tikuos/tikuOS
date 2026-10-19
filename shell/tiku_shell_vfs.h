@@ -14,7 +14,13 @@
 
 #include <kernel/vfs/tiku_vfs.h>
 
-/** @brief Read-only views of shell rules and jobs; getters start no work. */
+/**
+ * @brief Return the read-only rules and jobs directories, each with count and
+ *        list files, for mounting under /sys.
+ *
+ * Getting one changes neither table and starts no work.  Defined only when
+ * TIKU_SHELL_ENABLE is set.
+ */
 const tiku_vfs_node_t *tiku_shell_vfs_rules(void);
 const tiku_vfs_node_t *tiku_shell_vfs_jobs(void);
 

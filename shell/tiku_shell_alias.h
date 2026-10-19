@@ -57,8 +57,11 @@ void tiku_shell_alias_init(void);
 /**
  * @brief Define an alias, or replace the body of an existing one.
  *
- * A new name takes the first free slot.
+ * A new name takes the first free slot.  A call that returns an error writes
+ * nothing.
  *
+ * @param name  Alias name, 1..TIKU_SHELL_ALIAS_NAME_MAX chars
+ * @param body  Expansion text, at most TIKU_SHELL_ALIAS_BODY_MAX chars
  * @return TIKU_SHELL_ALIAS_OK; TIKU_SHELL_ALIAS_ERR_INVALID for a NULL or
  *         empty name or a NULL body; TIKU_SHELL_ALIAS_ERR_TOOBIG for a name or
  *         body over its limit; TIKU_SHELL_ALIAS_ERR_FULL with no free slot.
@@ -77,9 +80,9 @@ int tiku_shell_alias_clear(const char *name);
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Look up an alias body by name.
- * @return Pointer to the body in the durable table, or NULL if not
- *         defined. Caller must not modify the returned string.
+ * @brief Look up an alias body by name; the match is exact and case-sensitive.
+ * @return Pointer to the body in the durable table, or NULL if @p name is NULL
+ *         or not defined. Caller must not modify the returned string.
  */
 const char *tiku_shell_alias_lookup(const char *name);
 
@@ -95,7 +98,7 @@ const char *tiku_shell_alias_lookup(const char *name);
 int tiku_shell_alias_get(uint8_t idx, const char **name,
                          const char **body);
 
-/** @brief Number of currently-defined aliases. */
+/** @brief Number of currently-defined aliases, 0..TIKU_SHELL_ALIAS_MAX. */
 uint8_t tiku_shell_alias_count(void);
 
 #endif /* TIKU_SHELL_ALIAS_H_ */

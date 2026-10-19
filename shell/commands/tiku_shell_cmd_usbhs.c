@@ -43,12 +43,6 @@ static void usbhs_pump(void)
     (void)tiku_ra8p1_store_step(NULL);
 }
 
-/**
- * @brief Handle `usb up|down|info`.
- *
- * @param argc Argument count
- * @param argv Argument vector
- */
 void tiku_shell_cmd_usb(uint8_t argc, const char *argv[])
 {
     static const char *const dev[5] = {
@@ -107,12 +101,6 @@ void tiku_shell_cmd_usb(uint8_t argc, const char *argv[])
     SHELL_PRINTF("usage: usb up|down|info\n");
 }
 
-/**
- * @brief Handle `store info`.
- *
- * @param argc Argument count
- * @param argv Argument vector
- */
 void tiku_shell_cmd_store(uint8_t argc, const char *argv[])
 {
     char name[TIKU_STORE_NAME_MAX + 1u];

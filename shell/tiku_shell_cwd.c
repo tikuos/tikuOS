@@ -127,32 +127,12 @@ append_component(char *path, uint8_t pathsz,
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Return the shell's current working directory.
- *
- * A pointer to the internal buffer, always an absolute NUL-terminated path.
- * The caller must not modify or free it, and the contents may change on the
- * next tiku_shell_cwd_set().
- *
- * @return Pointer to the cwd string (never NULL).
- */
 const char *
 tiku_shell_cwd_get(void)
 {
     return cwd;
 }
 
-/**
- * @brief Replace the current working directory.
- *
- * Stores @p path as the new cwd, truncating to TIKU_SHELL_CWD_SIZE - 1 and
- * stripping any trailing slash.  A NULL pointer or a path not starting with
- * '/' is ignored.
- *
- * @note Existence and type validation belong to the caller -- `cd` resolves
- *       through the VFS before calling this.
- * @param path  Absolute path to adopt (must start with '/')
- */
 void
 tiku_shell_cwd_set(const char *path)
 {
@@ -164,21 +144,6 @@ tiku_shell_cwd_set(const char *path)
     strip_trailing_slash(cwd);
 }
 
-/**
- * @brief Resolve a user-supplied path to a clean absolute path.
- *
- * Builds the result from root when @p input is absolute and from the cwd
- * otherwise, then walks it component by component: runs of '/' are skipped,
- * "." is ignored, ".." pops one (clamped at root) and anything else appends.
- *
- * @note The VFS is not consulted: the result may name nothing.  Writes stay
- *       within @p outsz and an over-long path is cut; @p out is a non-empty
- *       absolute path when @p outsz is at least 2.  A 1-byte @p out gets an
- *       empty string, and a 0-byte one is not written.
- * @param input  User-supplied path, absolute or relative to the cwd
- * @param out    Output buffer receiving the resolved absolute path
- * @param outsz  Capacity of @p out in bytes, including the NUL
- */
 void
 tiku_shell_cwd_resolve(const char *input, char *out, uint8_t outsz)
 {

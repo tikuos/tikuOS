@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_usb_serial_jtag.h - polled ESP32-C5/P4 USB Serial/JTAG byte transport.
+ *
+ * Declares the FIFO transport (tiku_usb_serial_jtag_*) and the buffered
+ * console built on it (tiku_serial_jtag_*, in tiku_serial_jtag_io.c).
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_USB_SERIAL_JTAG_H_
@@ -16,7 +24,8 @@ void tiku_usb_serial_jtag_init(void);
 /**
  * @brief Submit up to 64 bytes, returning the accepted count without waiting.
  * @note Serialize callers; retry the unaccepted suffix after zero/partial writes.
- * @return Zero for a full FIFO, NULL data or zero length. Does not promise delivery.
+ * @return Bytes accepted; zero for a full FIFO, NULL data or zero length.  With
+ *         no host collecting, the count asked for (at most 64), bytes dropped.
  */
 size_t tiku_usb_serial_jtag_write(const uint8_t *data, size_t length);
 

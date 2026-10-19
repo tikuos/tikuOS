@@ -311,15 +311,6 @@ init_first_boot(void)
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Resolve the config region and validate (or prime) the table.
- *
- * Caches the region base and primes an empty table when the stored one is
- * blank or fails the checks.  A missing or undersized region, or a prime whose
- * flush fails, leaves the base NULL and disables every other entry point.
- *
- * @note Call once at boot, after the NVM map and before run_all().
- */
 void
 tiku_init_load(void)
 {
@@ -344,15 +335,6 @@ tiku_init_load(void)
     }
 }
 
-/**
- * @brief Execute every enabled entry, ordered by sequence number.
- *
- * Insertion-sorts an index array by seq, then dispatches each enabled,
- * non-empty command from an SRAM copy: the parser tokenises in place and must
- * not write into the read-only NVM image.  No NVM writes happen here.
- *
- * @return Number of entries executed (enabled, non-empty).
- */
 uint8_t
 tiku_init_run_all(void)
 {
@@ -399,7 +381,8 @@ tiku_init_run_all(void)
             continue;
         }
 
-        /* Copy to SRAM scratch — parser modifies the buffer in-place */
+        /* The parser tokenises in place: it must not write into the NVM
+         * image, so it runs on an SRAM copy. */
         memset(scratch, 0, sizeof(scratch));
         strncpy(scratch, e->cmd, TIKU_INIT_CMD_SIZE - 1);
 
@@ -411,19 +394,6 @@ tiku_init_run_all(void)
     return executed;
 }
 
-/**
- * @brief Add or replace an init entry.
- *
- * A new name is written into the slot past the count and the count is bumped
- * after it, so a power loss before the bump leaves the old table.  An existing
- * name is rewritten in place between init_invalidate() and init_commit().
- *
- * @param seq   Boot sequence number; lower runs earlier.
- * @param name  Entry name, truncated to TIKU_INIT_NAME_SIZE-1 chars.
- * @param cmd   Shell command, truncated to TIKU_INIT_CMD_SIZE-1 chars.
- * @return 0 on success (added or replaced); -1 if the table is unusable, an
- *         argument is NULL, the table is full on add, or the flush fails.
- */
 int8_t
 tiku_init_add(uint8_t seq, const char *name, const char *cmd)
 {
@@ -459,6 +429,8 @@ tiku_init_add(uint8_t seq, const char *name, const char *cmd)
         return -1;
     }
 
+    /* The count is bumped after the entry is written: a power loss before
+     * the bump leaves the old table. */
     saved = tiku_mpu_unlock_nvm();
     INIT_NVM_WRITE(init_entry_ptr(count), &entry, sizeof(entry));
     count++;
@@ -466,17 +438,6 @@ tiku_init_add(uint8_t seq, const char *name, const char *cmd)
     return init_lock(saved);
 }
 
-/**
- * @brief Remove an init entry by name.
- *
- * Moves the last entry into the freed slot, zeroes the tail slot and
- * decrements the count, between init_invalidate() and init_commit().  The
- * move changes the run order only of entries that share a seq.
- *
- * @param name  Name of the entry to remove (NUL-terminated).
- * @return 0 on success; -1 if the table is unusable, @p name is NULL, no
- *         entry matches, or the flush fails.
- */
 int8_t
 tiku_init_remove(const char *name)
 {
@@ -520,18 +481,6 @@ tiku_init_remove(const char *name)
     return init_commit(saved);
 }
 
-/**
- * @brief Enable or disable an init entry by name.
- *
- * Writes only the entry's enabled byte, leaving seq, name and cmd untouched.  A
- * disabled entry stays in the table and in the count but is skipped by
- * tiku_init_run_all().
- *
- * @param name  Name of the entry to toggle (NUL-terminated).
- * @param en    Non-zero to enable, zero to disable.
- * @return 0 on success; -1 if the table is unusable, @p name is NULL, no
- *         entry matches, or the flush fails.
- */
 int8_t
 tiku_init_enable(const char *name, uint8_t en)
 {
@@ -555,15 +504,6 @@ tiku_init_enable(const char *name, uint8_t en)
     return init_lock(saved);
 }
 
-/**
- * @brief Return the number of entries currently in the table.
- *
- * Counts both enabled and disabled entries (the on-NVM count byte
- * tracks populated slots, not only active ones).  Read-only, no MPU
- * interaction.
- *
- * @return Entry count, or 0 if the table is unusable.
- */
 uint8_t
 tiku_init_count(void)
 {
@@ -573,17 +513,6 @@ tiku_init_count(void)
     return init_read_count();
 }
 
-/**
- * @brief Get a read-only pointer to the idx-th entry.
- *
- * Bounds-checks against the live count and returns a pointer straight into NVM,
- * with no copy.  Callers may read but must not write through it; use add,
- * remove or enable to mutate.
- *
- * @param idx  Zero-based index, valid range 0 .. tiku_init_count()-1.
- * @return Pointer to the entry, or NULL if the table is unusable or
- *         @p idx is out of range.
- */
 const tiku_init_entry_t *
 tiku_init_get(uint8_t idx)
 {

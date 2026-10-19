@@ -148,7 +148,6 @@ static const tiku_vfs_node_t init_node = {
     sizeof tiku_init_vfs_children / sizeof tiku_init_vfs_children[0]
 };
 
-/** @brief Return the init table view without loading or running commands. */
 const tiku_vfs_node_t *tiku_init_vfs_get(void)
 {
     return &init_node;

@@ -64,70 +64,87 @@ typedef struct {
 /**
  * @brief Load and validate the init table from NVM.
  *
- * A blank table, or one that fails the checks, is primed empty; a missing or
- * undersized region disables the table.
+ * A blank table, or one that fails the checks, is primed empty.  A missing or
+ * undersized region, or a prime that fails, disables the table: every other
+ * function then returns its failure value.
  *
- * @note Call once during boot, after the NVM region map is initialised.  A
- *       power loss during an add or an enable leaves the old table or the new
- *       one; during a replace or a remove it can leave the table empty, never
- *       torn.
+ * @note Call once during boot, after the NVM region map is initialised and
+ *       before tiku_init_run_all().  A power loss during an add or an enable
+ *       leaves the old table or the new one; during a replace or a remove it
+ *       can leave the table empty, never torn.
  */
 void tiku_init_load(void);
 
 /**
- * @brief Execute all enabled entries in sequence-number order.
+ * @brief Execute every enabled, non-empty entry in sequence-number order.
  *
- * Each entry's cmd is copied to a stack buffer and passed to
- * tiku_shell_parser_execute().
+ * Each entry's cmd is copied to a stack buffer, printed on an "[init]" line
+ * and passed to tiku_shell_parser_execute().  Does not write the table
+ * itself; a command it runs can.
  *
  * @note The shell process calls it in its first pass, once the parser has its
  *       command table.
- * @return Number of entries executed
+ * @return Number of entries executed; 0 if the table is unusable or empty
  */
 uint8_t tiku_init_run_all(void);
 
 /**
- * @brief Add or replace an init entry.
+ * @brief Add or replace an init entry; the stored entry is enabled.
  *
- * If an entry with the same name exists, it is replaced.
- * Otherwise a free slot is used.
+ * An entry with the same name is replaced, a disabled one included; otherwise
+ * the entry takes the next free slot.
  *
  * @param seq   Boot sequence number (lower = earlier)
- * @param name  Entry name (max TIKU_INIT_NAME_SIZE-1 chars)
- * @param cmd   Shell command string (max TIKU_INIT_CMD_SIZE-1 chars)
- * @return 0 on success, -1 if the table is full or unusable or the write fails
+ * @param name  Entry name, truncated to TIKU_INIT_NAME_SIZE-1 chars
+ * @param cmd   Shell command string, truncated to TIKU_INIT_CMD_SIZE-1 chars
+ * @return 0 on success (added or replaced); -1 if the table is unusable, an
+ *         argument is NULL, the table is full on add, or the write fails
  */
 int8_t tiku_init_add(uint8_t seq, const char *name, const char *cmd);
 
 /**
  * @brief Remove an entry by name.
  *
+ * The last entry moves into the freed slot and takes its tiku_init_get()
+ * index; the run order changes only among entries that share a seq.
+ *
  * @param name  Entry name to remove
- * @return 0 on success, -1 if not found, the table is unusable or the write
- *         fails
+ * @return 0 on success; -1 if @p name is NULL or not found, the table is
+ *         unusable or the write fails
  */
 int8_t tiku_init_remove(const char *name);
 
 /**
  * @brief Enable or disable an entry by name.
  *
+ * Writes only the enabled flag.  A disabled entry stays in the table and in
+ * tiku_init_count() but tiku_init_run_all() skips it.
+ *
  * @param name  Entry name
- * @param en    1 = enable, 0 = disable
- * @return 0 on success, -1 if not found, the table is unusable or the write
- *         fails
+ * @param en    Non-zero = enable, 0 = disable
+ * @return 0 on success; -1 if @p name is NULL or not found, the table is
+ *         unusable or the write fails
  */
 int8_t tiku_init_enable(const char *name, uint8_t en);
 
 /**
  * @brief Return the number of entries in the table (active + disabled).
+ *
+ * @return Entry count, or 0 if the table is unusable
  */
 uint8_t tiku_init_count(void);
 
 /**
  * @brief Get a read-only pointer to an entry by index.
  *
+ * The pointer is into the NVM table, not a copy: a later add, remove or
+ * enable changes what it points to.
+ *
  * @param idx  Index (0 .. tiku_init_count()-1)
- * @return Pointer to entry, or NULL if idx is out of range
+ * @return Pointer to entry, or NULL if the table is unusable or idx is out of
+ *         range
+ * @note Do not write through it; change the table with tiku_init_add(),
+ *       tiku_init_remove() or tiku_init_enable().
  */
 const tiku_init_entry_t *tiku_init_get(uint8_t idx);
 

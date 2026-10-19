@@ -74,35 +74,11 @@ job_copy_cmd(char *dst, uint8_t cap, const char *src)
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialise the jobs subsystem.
- *
- * A no-op: job_table lives in BSS, which the C runtime zeros before main(),
- * and TIKU_SHELL_JOB_FREE is 0, so every slot starts free.
- *
- * @note Call once at shell startup.
- */
 void
 tiku_shell_jobs_init(void)
 {
 }
 
-/**
- * @brief Register a new job in the first free slot.
- *
- * Claims the lowest-index free slot, copies @p cmd into it, and arms the first
- * fire at now + @p interval_sec for both EVERY and ONCE.  The .type field is
- * written last, so a command that does not fit leaves the slot free.
- *
- * @param type          TIKU_SHELL_JOB_EVERY or TIKU_SHELL_JOB_ONCE;
- *                      any other value is rejected
- * @param interval_sec  Seconds between fires (EVERY) or delay before
- *                      the single fire (ONCE); must be >= 1
- * @param cmd           NUL-terminated command line, copied into the
- *                      slot (must fit TIKU_SHELL_JOBS_CMD_MAX)
- * @return Slot id (0..TIKU_SHELL_JOBS_MAX-1) on success; -1 on bad
- *         arguments, a command too long for the slot, or a full table.
- */
 int8_t
 tiku_shell_jobs_add(tiku_shell_job_type_t type, uint16_t interval_sec,
                      const char *cmd)
@@ -132,15 +108,6 @@ tiku_shell_jobs_add(tiku_shell_job_type_t type, uint16_t interval_sec,
     return -1;
 }
 
-/**
- * @brief Free a single job slot by id.
- *
- * Marks the slot free by setting .type back to TIKU_SHELL_JOB_FREE; the
- * command body stays in the slot, unreachable.
- *
- * @param id  Slot id (0..TIKU_SHELL_JOBS_MAX-1)
- * @return 0 on success; -1 if @p id is out of range or already free.
- */
 int8_t
 tiku_shell_jobs_del(uint8_t id)
 {
@@ -154,14 +121,6 @@ tiku_shell_jobs_del(uint8_t id)
     return 0;
 }
 
-/**
- * @brief Free every active job slot in one pass.
- *
- * Marks all non-free slots as TIKU_SHELL_JOB_FREE, cancelling every
- * pending and recurring job at once.
- *
- * @return Number of slots that were active and have been freed.
- */
 uint8_t
 tiku_shell_jobs_clear(void)
 {
@@ -177,16 +136,6 @@ tiku_shell_jobs_clear(void)
     return n;
 }
 
-/**
- * @brief Parse an interval + command out of a shell argv and schedule.
- *
- * The wrapper for `every` and `once`: argv[1] is a decimal interval in seconds
- * (parsed with a uint16_t overflow guard, minimum 1) and argv[2..] are joined
- * with single spaces into one command line, then handed to jobs_add().
- *
- * @note A command longer than TIKU_SHELL_JOBS_CMD_MAX - 1 fails with "command
- *       too long".  Any failure prints one line; success prints nothing.
- */
 int8_t
 tiku_shell_jobs_schedule_argv(tiku_shell_job_type_t type, uint8_t argc,
                                const char *argv[])
@@ -260,17 +209,6 @@ tiku_shell_jobs_schedule_argv(tiku_shell_job_type_t type, uint8_t argc,
     return id;
 }
 
-/**
- * @brief Read-only inspection of a job slot (for the `jobs` listing).
- *
- * Returns a pointer into job_table so the caller can render the job's type,
- * interval, deadline and command without copying.  Valid only until the slot
- * is freed or overwritten, and never to be modified through.
- *
- * @param id  Slot id (0..TIKU_SHELL_JOBS_MAX-1)
- * @return Pointer to the job, or NULL if @p id is out of range or the
- *         slot is free.
- */
 const tiku_shell_job_t *
 tiku_shell_jobs_get(uint8_t id)
 {

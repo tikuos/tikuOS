@@ -30,7 +30,8 @@
 /**
  * @brief Register the command table used for dispatch.
  *
- * The table must be NULL-terminated (last entry has name == NULL).
+ * The table must be NULL-terminated (last entry has name == NULL).  It is not
+ * copied: the array must stay valid for the life of the program.
  *
  * @note Call once, before tiku_shell_parser_execute().
  * @param commands  Pointer to a static, NULL-terminated command array
@@ -40,12 +41,14 @@ void tiku_shell_parser_init(const tiku_shell_cmd_t *commands);
 /**
  * @brief Parse and execute a complete input line.
  *
- * Tokenises the line in place (NULs at token ends; a quoted span is one
- * token), looks up argv[0] in the command table and then the alias table, and
- * prints an error if neither matches.
+ * Tokenises the line in place (a quoted span is one token), looks up argv[0]
+ * in the command table and then the alias table, and prints an error if
+ * neither matches.  ';' does not split the line; it splits only alias bodies.
  *
- * @param line  Mutable, NUL-terminated input string
+ * @param line  Mutable, NUL-terminated input string; NULs are written at token
+ *              ends
  * @note A line exceeding TIKU_SHELL_MAX_ARGS is rejected without dispatch.
+ *       Does nothing before tiku_shell_parser_init().
  */
 void tiku_shell_parser_execute(char *line);
 

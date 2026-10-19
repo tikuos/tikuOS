@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_uart_c5_io.c - C5 debug-output HAL routed to the UART0 console.
+ *
+ * The C5 build compiles it in place of tiku_serial_jtag_io.c when TIKU_CONSOLE
+ * is not usb.  Polling does nothing; the dropped count is the UART driver's.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <arch/esp32c5/tiku_debug_arch.h>

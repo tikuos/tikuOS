@@ -1,8 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_serial_jtag_io.c - C5 buffered shell and debug output over native USB.
- * Foreground-only output drops bytes after a 20 ms host-backpressure timeout.
+ *
+ * tiku_serial_jtag_io.c - C5/P4 buffered console output over native USB.
+ *
+ * Queues shell and debug-HAL output in a 1 KB ring drained into the USB
+ * Serial/JTAG FIFO; foreground only.  A full ring waits 20 ms for the host,
+ * then drops bytes without waiting until the host takes output again.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_usb_serial_jtag.h"

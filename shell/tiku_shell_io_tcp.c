@@ -65,13 +65,6 @@ static uint8_t last_was_cr;
 /* TX BUFFER / FLUSH                                                         */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Send at most one MSS-sized segment of the buffered output.
- *
- * Each send blocks for a SLIP transmit.  A sent chunk is removed from the
- * front of the buffer; a send the stack refuses (TX pool full) leaves the
- * buffer as it was.  Does nothing with no client or an empty buffer.
- */
 void
 tiku_shell_io_tcp_flush(void)
 {
@@ -274,39 +267,17 @@ telnet_event_cb(struct tiku_kits_net_tcp_conn *c, uint8_t event)
 /* PUBLIC API                                                                */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Start the telnet listener and reset backend state.
- *
- * Clears the connection handle and per-session buffers, then opens a passive
- * listener on TIKU_SHELL_TCP_PORT wiring telnet_recv_cb / telnet_event_cb as
- * the callbacks accepted connections inherit.
- *
- * @note Call once, from the shell process's setup pass.  The listener stays
- *       active for the process lifetime, so the next SYN after a disconnect
- *       is accepted without a re-listen.
- */
 void
 tiku_shell_io_tcp_init(void)
 {
     telnet_conn = (void *)0;
     tx_pos = 0;
     last_was_cr = 0;
+    /* Accepted connections inherit these two callbacks. */
     tiku_kits_net_tcp_listen(TIKU_SHELL_TCP_PORT,
                              telnet_recv_cb, telnet_event_cb);
 }
 
-/**
- * @brief Report whether a usable telnet client is connected.
- *
- * Polled by the shell each cycle to decide whether to keep the TCP backend
- * installed or fall back to the local console (none in a TCP-only shell).
- * Returns 1 only when the connection is ESTABLISHED.
- *
- * @note Also where a peer's half-close is finalised: a connection in CLOSE_WAIT
- *       is closed here, the handle dropped and the TX buffer cleared, freeing
- *       the slot for the next client.
- * @return 1 if a client is ESTABLISHED, 0 otherwise.
- */
 uint8_t
 tiku_shell_io_tcp_is_connected(void)
 {

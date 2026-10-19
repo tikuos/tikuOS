@@ -97,7 +97,8 @@ void tiku_shell_io_puts(const char *s);
  * @brief Lightweight formatted output through the active backend.
  *
  * Supports %d %u %x %X %p %s %c %% with the '-' and '0' flags, a width and
- * 'l'.  Converts \n to \r\n when TIKU_SHELL_IO_CRLF is set.
+ * 'l'.  Converts \n to \r\n when TIKU_SHELL_IO_CRLF is set.  Uses no heap; a
+ * NULL %s prints nothing.
  */
 void tiku_shell_io_printf(const char *fmt, ...);
 
@@ -108,7 +109,8 @@ void tiku_shell_io_printf(const char *fmt, ...);
 /**
  * @brief Check whether the active backend has data ready.
  *
- * @return Non-zero if tiku_shell_io_getc() will return a byte.
+ * @return Non-zero if tiku_shell_io_getc() will return a byte; 0 with no
+ *         backend or one without rx_ready.
  */
 uint8_t tiku_shell_io_rx_ready(void);
 
@@ -117,7 +119,8 @@ uint8_t tiku_shell_io_rx_ready(void);
  *
  * @note On a console backend this is the raw wire, frame bytes included; a
  *       builtin reading keystrokes uses tiku_shell_net_getc().
- * @return 0-255 on success, -1 if nothing available.
+ * @return 0-255 on success; -1 if nothing is available, with no backend, or
+ *         with a backend that has no getc.
  */
 int tiku_shell_io_getc(void);
 

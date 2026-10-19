@@ -106,31 +106,12 @@ find_free_slot(void)
 /* PUBLIC API                                                                */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Validate the table's gate; prime every slot empty when it fails.
- *
- * A gate holding ALIAS_MAGIC leaves the table as it is.
- */
 void
 tiku_shell_alias_init(void)
 {
     (void)tiku_persist_cell_init(&alias_cell);
 }
 
-/**
- * @brief Define a new alias or overwrite an existing one.
- *
- * An existing @p name reuses its slot; otherwise the first free slot is
- * claimed.  Name and body are copied into the durable table inside one NVM
- * unlock bracket, and a call that returns an error writes nothing.
- *
- * @param name  Alias name (non-empty, <= TIKU_SHELL_ALIAS_NAME_MAX)
- * @param body  Expansion text (<= TIKU_SHELL_ALIAS_BODY_MAX)
- * @return TIKU_SHELL_ALIAS_OK on success;
- *         TIKU_SHELL_ALIAS_ERR_INVALID for a NULL/empty name or NULL
- *         body; TIKU_SHELL_ALIAS_ERR_TOOBIG if either string exceeds
- *         its limit; TIKU_SHELL_ALIAS_ERR_FULL if no slot is available.
- */
 int
 tiku_shell_alias_set(const char *name, const char *body)
 {
@@ -170,18 +151,6 @@ tiku_shell_alias_set(const char *name, const char *body)
     return TIKU_SHELL_ALIAS_OK;
 }
 
-/**
- * @brief Remove an alias by name.
- *
- * Locates the slot via find_slot() and frees it by emptying both its
- * name and body, under a tiku_mpu_unlock_nvm()/lock_nvm() bracket so
- * the removal persists.
- *
- * @param name  Alias name to remove
- * @return TIKU_SHELL_ALIAS_OK on success;
- *         TIKU_SHELL_ALIAS_ERR_INVALID if @p name is NULL;
- *         TIKU_SHELL_ALIAS_ERR_NOTFOUND if no such alias exists.
- */
 int
 tiku_shell_alias_clear(const char *name)
 {
@@ -204,16 +173,6 @@ tiku_shell_alias_clear(const char *name)
     return TIKU_SHELL_ALIAS_OK;
 }
 
-/**
- * @brief Look up an alias body by name (the parser's hot path).
- *
- * Read-only: returns a pointer to the body in the durable table, so no MPU
- * unlock is needed.  A NULL @p name is treated as "not found".
- *
- * @param name  Alias name to resolve
- * @return Pointer to the body string, or NULL if @p name is NULL or
- *         undefined.  The caller must not modify the returned string.
- */
 const char *
 tiku_shell_alias_lookup(const char *name)
 {
@@ -221,19 +180,6 @@ tiku_shell_alias_lookup(const char *name)
     return (slot < 0) ? (const char *)0 : alias_table[slot].body;
 }
 
-/**
- * @brief Fetch the name and body of the alias at a given slot index.
- *
- * The enumeration helper for listing aliases: a populated slot sets the two
- * outputs to the strings in the durable table and returns 1.  Read-only, no MPU
- * unlock, and addressed by raw index so the caller must skip empty slots.
- *
- * @param idx   Slot index in [0, TIKU_SHELL_ALIAS_MAX)
- * @param name  Out: receives the name pointer (may be NULL to skip)
- * @param body  Out: receives the body pointer (may be NULL to skip)
- * @return 1 if the slot is populated; 0 if @p idx is out of range or
- *         the slot is empty.  Caller must not modify the strings.
- */
 int
 tiku_shell_alias_get(uint8_t idx, const char **name, const char **body)
 {
@@ -252,13 +198,6 @@ tiku_shell_alias_get(uint8_t idx, const char **name, const char **body)
     return 1;
 }
 
-/**
- * @brief Count the currently-defined aliases.
- *
- * Linear scan counting occupied slots (name[0] != '\0').  Read-only.
- *
- * @return Number of defined aliases, 0..TIKU_SHELL_ALIAS_MAX.
- */
 uint8_t
 tiku_shell_alias_count(void)
 {

@@ -102,12 +102,15 @@ void tiku_shell_rules_init(void);
 /**
  * @brief Register a rule in the first free slot.
  *
- * @note Re-arms every rule: drops each VFS watch the shell process holds,
- *       the `watch` command's and BASIC's included, and watches the rules'
- *       writable nodes again.
+ * A comparison that already holds fires on its first evaluation; an
+ * OP_CHANGED rule's first evaluation records a baseline without firing.
+ *
+ * @note On success, re-arms every rule: drops each VFS watch the shell process
+ *       holds, the `watch` command's and BASIC's included, and watches the
+ *       rules' writable nodes again.
  * @param path    VFS path the rule reads (must fit PATH_MAX-1).
- * @param op      Comparison operator.
- * @param value   Right-hand side (must fit VALUE_MAX-1).
+ * @param op      Comparison operator, or TIKU_SHELL_RULE_OP_CHANGED.
+ * @param value   Right-hand side, "" for OP_CHANGED (must fit VALUE_MAX-1).
  * @param action  Command line dispatched each time the rule fires
  *                (must fit ACTION_MAX-1).
  * @return Slot id (>= 0) on success, -1 if a pointer is NULL, the table
@@ -135,20 +138,24 @@ uint8_t tiku_shell_rules_clear(void);
 /**
  * @brief Read-only inspection of a rule slot.
  * @return Pointer to the rule, or NULL if the slot is free or invalid.
+ * @note The pointer is into the live rule table: do not keep it across a
+ *       delete or clear that can free the slot.
  */
 const tiku_shell_rule_t *tiku_shell_rules_get(uint8_t id);
 
 /**
  * @brief Convert an operator enum to its printable token (">", "==", etc.).
+ * @return A static string, never NULL: "changed" for OP_CHANGED, "?" for a
+ *         value outside the enum.
  */
 const char *tiku_shell_rules_op_name(tiku_shell_rule_op_t op);
 
 /**
  * @brief Register a rule from the argv of the `on` command.
  *
- * Comparison grammar: argv[1] path, argv[2] op, argv[3] value, argv[4..]
- * action.  Change grammar: argv[1] "changed", argv[2] path, argv[3..] action.
- * Action tokens join with single spaces; errors print via SHELL_PRINTF.
+ * Comparison: argv[1] path, argv[2] op, argv[3] value, argv[4..] action.
+ * Change: argv[1] "changed", argv[2] path, argv[3..] action.  Action tokens
+ * join with single spaces; an error prints a message, success prints nothing.
  *
  * @return Slot id (>= 0) on success, -1 on error (message printed).
  */

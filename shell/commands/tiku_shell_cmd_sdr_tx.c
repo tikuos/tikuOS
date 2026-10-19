@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_shell_cmd_sdr_tx.c - TX capability, sequential IQ upload and bursts.
+ *
+ * Handles `sdr tx info|status|begin|put|tone|send|clear` over the ESP SDR
+ * transmit driver.  A build without TIKU_DRV_SDR_ESP_TX_ENABLE answers `info`
+ * with TXCAP 0 and every other verb with ERR TX unsupported.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_shell_cmd_sdr_tx.h"

@@ -235,34 +235,12 @@ rules_rearm(void)
     }
 }
 
-/**
- * @brief Initialise the rule engine.
- *
- * rule_table starts empty in BSS (TIKU_SHELL_RULE_FREE is 0).  The re-arm
- * drops every watch the shell process holds, so from here on the node caches
- * and watch subscriptions match the table.
- */
 void
 tiku_shell_rules_init(void)
 {
     rules_rearm();
 }
 
-/**
- * @brief Register a rule in the first free slot.
- *
- * Fills the lowest free slot and sets its state last, so a field that does
- * not fit leaves the slot free.  A comparison already true fires on its first
- * evaluation; a CHANGED rule's first evaluation records a baseline.
- *
- * @param path    VFS path the rule reads (must fit PATH_MAX-1)
- * @param op      Comparison operator (or OP_CHANGED)
- * @param value   Right-hand side, or "" for OP_CHANGED (must fit VALUE_MAX-1)
- * @param action  Command line dispatched each time the rule fires
- *                (must fit ACTION_MAX-1)
- * @return Slot id (>= 0) on success, -1 if a pointer is NULL, the table
- *         is full, or a field overflows its buffer.
- */
 int8_t
 tiku_shell_rules_add(const char *path, tiku_shell_rule_op_t op,
                       const char *value, const char *action)
@@ -300,16 +278,6 @@ tiku_shell_rules_add(const char *path, tiku_shell_rule_op_t op,
     return -1;
 }
 
-/**
- * @brief Free a rule slot by id.
- *
- * Sets the slot's state to TIKU_SHELL_RULE_FREE so the next add can reuse it,
- * then re-arms the watches for the remaining rules.  The string fields are not
- * wiped: they are dead once free and overwritten on the next add.
- *
- * @param id  Slot id previously returned by add
- * @return 0 on success, -1 if @p id is out of range or already free.
- */
 int8_t
 tiku_shell_rules_del(uint8_t id)
 {
@@ -324,14 +292,6 @@ tiku_shell_rules_del(uint8_t id)
     return 0;
 }
 
-/**
- * @brief Free every active rule slot.
- *
- * Walks the table and flips each non-free slot back to TIKU_SHELL_RULE_FREE,
- * then re-arms, which releases every watch the shell process holds.
- *
- * @return Number of slots that were active and have been freed.
- */
 uint8_t
 tiku_shell_rules_clear(void)
 {
@@ -348,17 +308,6 @@ tiku_shell_rules_clear(void)
     return n;
 }
 
-/**
- * @brief Read-only inspection of a rule slot.
- *
- * Returns a const pointer into rule_table so the "rules" command can render the
- * path, operator, value and action.  It aliases live engine storage, so callers
- * must not retain it across a delete or clear that could free the slot.
- *
- * @param id  Slot id to inspect
- * @return Pointer to the rule, or NULL if the slot is free or @p id is
- *         out of range.
- */
 const tiku_shell_rule_t *
 tiku_shell_rules_get(uint8_t id)
 {
@@ -371,16 +320,6 @@ tiku_shell_rules_get(uint8_t id)
     return &rule_table[id];
 }
 
-/**
- * @brief Convert an operator enum to its printable token.
- *
- * The inverse of rules_parse_op(), extended to cover OP_CHANGED; anything
- * outside the known enumerators renders as "?".  The returned pointer is a
- * string literal with static lifetime.
- *
- * @param op  Operator enum to name
- * @return Static printable token; never NULL.
- */
 const char *
 tiku_shell_rules_op_name(tiku_shell_rule_op_t op)
 {
@@ -437,17 +376,6 @@ rules_join_action(uint8_t argc, const char *argv[], uint8_t start,
     return 1;
 }
 
-/**
- * @brief Parse, validate, and register a rule from "on" command argv.
- *
- * Accepts "on <path> <op> <value> <command...>" and "on changed <path>
- * <command...>", whose value starts empty and later holds the last reading.
- * Every failure prints one line and returns -1; success prints nothing.
- *
- * @param argc  Argument count as produced by the shell parser
- * @param argv  Argument vector; argv[0] is the "on" command name
- * @return Slot id (>= 0) on success, -1 on any error (message printed).
- */
 int8_t
 tiku_shell_rules_add_argv(uint8_t argc, const char *argv[])
 {

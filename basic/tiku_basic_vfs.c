@@ -50,8 +50,6 @@ static const tiku_vfs_node_t basic_children[] = {
       NULL, NULL, TIKU_VFS_CAP_FS },
 };
 
-
-/** @brief Return the saved-program node without reading its storage. */
 const tiku_vfs_node_t *tiku_basic_vfs_get(void)
 {
     return basic_children;

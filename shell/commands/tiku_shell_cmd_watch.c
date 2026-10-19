@@ -128,28 +128,12 @@ watch_print_value(void)
 /* MODE HOOKS                                                                */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Whether a watch is currently streaming.
- *
- * The shell's input path consults this to route keystrokes: while
- * active, Ctrl+C cancels the watch and everything else is
- * discarded.
- *
- * @return Non-zero while a watch is active
- */
 uint8_t
 tiku_shell_cmd_watch_active(void)
 {
     return watch_active;
 }
 
-/**
- * @brief Per-tick service; called once per shell poll tick.
- *
- * Interval mode counts ticks and re-prints on each elapsed interval.  Event
- * mode re-subscribes on every tick, which restores the subscription after
- * the rules engine's tiku_vfs_unwatch_all().
- */
 void
 tiku_shell_cmd_watch_tick(void)
 {
@@ -172,14 +156,6 @@ tiku_shell_cmd_watch_tick(void)
     }
 }
 
-/**
- * @brief Event-mode dispatch; called on TIKU_EVENT_VFS.
- *
- * Prints the current value when the event's node is the watched
- * one.  Several queued events print the live value once each.
- *
- * @param node_ptr  The changed node, as delivered in the event data
- */
 void
 tiku_shell_cmd_watch_on_vfs(const void *node_ptr)
 {
@@ -192,13 +168,6 @@ tiku_shell_cmd_watch_on_vfs(const void *node_ptr)
     (void)watch_print_value();
 }
 
-/**
- * @brief Stop the active watch; release its subscription unless a rule uses it.
- *
- * Does nothing when no watch is active.  Called from the shell's
- * Ctrl+C routing, from read failures, and when a new `watch`
- * replaces a running one.
- */
 void
 tiku_shell_cmd_watch_cancel(void)
 {
@@ -216,16 +185,6 @@ tiku_shell_cmd_watch_cancel(void)
 /* PUBLIC HANDLER                                                            */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief `watch <path> [interval]` — start a live view.
- *
- * Resolves the path and arms the mode, then prints the current value once:
- * event mode for writable nodes, which ignores the interval argument, and
- * interval mode otherwise, every 1 s by default.
- *
- * @note Returns immediately; while values stream, Ctrl+C stops the watch and
- *       other keys are discarded.  A second `watch` replaces the running one.
- */
 void
 tiku_shell_cmd_watch(uint8_t argc, const char *argv[])
 {

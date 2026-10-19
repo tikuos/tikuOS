@@ -120,7 +120,8 @@ extern struct tiku_process tiku_shell_process;
  * @brief Register the shell process with the scheduler.
  *
  * A TCP-only shell also registers the net process; a TIKU_SHELL_NET_TEST
- * build also starts UDP and TCP and registers the CoAP server.
+ * build also starts UDP, and TCP and the CoAP server where their kits are
+ * enabled.
  *
  * @note Call once from main(), before the scheduler loop starts.
  */

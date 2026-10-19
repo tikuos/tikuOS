@@ -132,7 +132,6 @@ static const tiku_vfs_node_t jobs_node = {
     "jobs", TIKU_VFS_DIR, NULL, NULL, sys_jobs_children, 2
 };
 
-/** @brief Return the rules subtree without changing the rule table. */
 const tiku_vfs_node_t *tiku_shell_vfs_rules(void)
 {
     return &rules_node;

@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_usb_serial_jtag.c - bounded FIFO access for the C5/P4 native console.
+ *
+ * Polls the USB Serial/JTAG endpoint FIFOs with the unit's interrupts off.  A
+ * write loads the IN endpoint only while the host's frame counter moves; with
+ * no host collecting, it reports its bytes as sent and discards them.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_usb_serial_jtag.h"

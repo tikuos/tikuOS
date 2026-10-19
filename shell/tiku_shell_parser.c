@@ -217,31 +217,12 @@ execute_one(char *line)
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Register the command table used for all subsequent dispatch.
- *
- * Stores @p commands in the module-scope pointer without copying, so the array
- * must stay valid for the life of the program.  Call once before any
- * tiku_shell_parser_execute(); until then execute_one() finds NULL and returns.
- *
- * @param commands  Pointer to a static, NULL-terminated command array.
- */
 void
 tiku_shell_parser_init(const tiku_shell_cmd_t *commands)
 {
     cmd_table = commands;
 }
 
-/**
- * @brief Parse and execute one complete input line.
- *
- * The shell's entry point for an assembled line: execute_one() tokenises it
- * in place and dispatches it.  A ';' on the line is not a separator; only an
- * alias body is split on ';'.
- *
- * @param line  Mutable, NUL-terminated input string; clobbered by
- *              in-place tokenisation.
- */
 void
 tiku_shell_parser_execute(char *line)
 {

@@ -79,7 +79,8 @@ void tiku_shell_jobs_init(void);
  * recurring and one-shot jobs.
  *
  * @param type          TIKU_SHELL_JOB_EVERY or TIKU_SHELL_JOB_ONCE
- * @param interval_sec  Seconds between fires (must be >= 1)
+ * @param interval_sec  Seconds between fires (EVERY) or before the single
+ *                      fire (ONCE); must be >= 1
  * @param cmd           NUL-terminated command line, copied into the slot
  * @return Slot id (0..TIKU_SHELL_JOBS_MAX-1) on success; -1 on a bad
  *         argument, a command too long for the slot, or a full table.
@@ -106,17 +107,20 @@ uint8_t tiku_shell_jobs_clear(void);
 /**
  * @brief Read-only inspection of a job slot.
  * @return Pointer to the job, or NULL if the slot is free or invalid.
+ * @note The pointer is into the job table: what it points to changes when the
+ *       slot is freed or reused.
  */
 const tiku_shell_job_t *tiku_shell_jobs_get(uint8_t id);
 
 /**
  * @brief Schedule a job from the argv of an `every` or `once` handler.
  *
- * argv[1] is the interval in decimal seconds and argv[2..argc-1] the command,
- * joined with single spaces; quotes the parser removed are not restored.  Any
- * failure prints a one-line message.
+ * argv[1] is the interval, 1..65535 decimal seconds, and argv[2..argc-1] the
+ * command, joined with single spaces; quotes the parser removed are not
+ * restored.  Any failure prints a one-line message; success prints nothing.
  *
- * @return Slot id (>= 0) on success, -1 on error (message printed).
+ * @return Slot id (>= 0) on success; -1 on a usage error, a bad interval, a
+ *         command over TIKU_SHELL_JOBS_CMD_MAX - 1 chars or a full table.
  */
 int8_t tiku_shell_jobs_schedule_argv(tiku_shell_job_type_t type,
                                       uint8_t argc,

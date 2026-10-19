@@ -36,7 +36,6 @@ static const tiku_shell_io_t *active_io = (void *)0;
 /* LIFECYCLE                                                                 */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Register the active I/O backend (UART, TCP, etc.). */
 void
 tiku_shell_io_set_backend(const tiku_shell_io_t *backend)
 {
@@ -48,7 +47,6 @@ tiku_shell_io_set_backend(const tiku_shell_io_t *backend)
                                 : TIKU_VFS_CAP_ALL);
 }
 
-/** @brief Return the currently active I/O backend, or NULL. */
 const tiku_shell_io_t *
 tiku_shell_io_get_backend(void)
 {
@@ -59,13 +57,6 @@ tiku_shell_io_get_backend(void)
 /* OUTPUT — putc (CRLF-aware when the backend requests it)                   */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Write one character through the active backend.
- *
- * When the backend sets TIKU_SHELL_IO_CRLF a bare '\n' expands to "\r\n" so
- * serial terminals return to column 0; every other byte passes through.  This
- * is the single output primitive -- puts() and the printf helpers route here.
- */
 void
 tiku_shell_io_putc(char c)
 {
@@ -91,7 +82,6 @@ io_emit(char c)
     tiku_shell_io_putc(c);
 }
 
-/** @brief Write a string with optional CRLF expansion on '\\n'. */
 void
 tiku_shell_io_puts(const char *s)
 {
@@ -163,13 +153,6 @@ io_emit_num(unsigned long uval, int base, int upper, int width,
     }
 }
 
-/**
- * @brief Lightweight printf through the active backend.
- *
- * Supports %d, %u, %x, %X, %p, %s, %c and %% with the '-' and '0' flags, a
- * field width and the 'l' modifier, so %04X, %-8s and %3u all work.  CRLF
- * expansion applies if the backend flag is set; no heap, stack formatting only.
- */
 void
 tiku_shell_io_printf(const char *fmt, ...)
 {
@@ -293,7 +276,6 @@ tiku_shell_io_printf(const char *fmt, ...)
 /* INPUT                                                                     */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Return non-zero if at least one byte is available for reading. */
 uint8_t
 tiku_shell_io_rx_ready(void)
 {
@@ -303,7 +285,6 @@ tiku_shell_io_rx_ready(void)
     return 0;
 }
 
-/** @brief Read one character from the backend, or -1 if none available. */
 int
 tiku_shell_io_getc(void)
 {
@@ -317,14 +298,12 @@ tiku_shell_io_getc(void)
 /* FLAG QUERIES                                                              */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Return non-zero if the active backend echoes typed characters. */
 uint8_t
 tiku_shell_io_has_echo(void)
 {
     return active_io ? (active_io->flags & TIKU_SHELL_IO_ECHO) : 0;
 }
 
-/** @brief Return non-zero if the active backend converts \\n to \\r\\n. */
 uint8_t
 tiku_shell_io_has_crlf(void)
 {

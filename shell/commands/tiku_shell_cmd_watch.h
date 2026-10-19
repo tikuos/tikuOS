@@ -22,8 +22,8 @@
 /**
  * @brief "watch" command — live view of a VFS node until Ctrl+C.
  *
- * Mode comes from the node: a writable node subscribes via tiku_vfs_watch()
- * and prints on every accepted write, a read-only sensor node re-reads every
+ * A writable node subscribes via tiku_vfs_watch() and prints on every
+ * accepted write, ignoring the interval; a read-only node re-reads every
  * interval seconds (1..255, default 1).  A second `watch` replaces the first.
  *
  * @note Prints the current value once immediately and returns; values then
@@ -60,6 +60,10 @@ void tiku_shell_cmd_watch_tick(void);
 /**
  * @brief Event-mode dispatch; call on TIKU_EVENT_VFS.
  *
+ * Prints the node's current value when an event-mode watch is running on
+ * @p node_ptr, and does nothing otherwise; each queued event prints the value
+ * the node holds at dispatch.
+ *
  * @param node_ptr  The changed node from the event's data payload
  */
 void tiku_shell_cmd_watch_on_vfs(const void *node_ptr);
@@ -67,9 +71,9 @@ void tiku_shell_cmd_watch_on_vfs(const void *node_ptr);
 /**
  * @brief Stop the active watch (no-op when idle).
  *
- * Releases the event-mode subscription.  Called by the shell's
- * Ctrl+C routing; also used internally on read failure and when a
- * new watch replaces a running one.
+ * Releases the event-mode subscription unless a rule watches the same node.
+ * Called by the shell's Ctrl+C routing; also used internally on read failure
+ * and when a new watch replaces a running one.
  */
 void tiku_shell_cmd_watch_cancel(void);
 

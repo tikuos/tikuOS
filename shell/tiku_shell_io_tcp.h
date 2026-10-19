@@ -61,7 +61,7 @@ void tiku_shell_io_tcp_init(void);
  * @brief Check whether a TCP client is currently connected.
  *
  * A connection the peer has half-closed (CLOSE_WAIT) is closed and dropped
- * here, which frees its slot for the next client.
+ * here with its buffered output, which frees its slot for the next client.
  *
  * @return Non-zero if a connection is in the ESTABLISHED state.
  */
@@ -70,8 +70,12 @@ uint8_t tiku_shell_io_tcp_is_connected(void);
 /**
  * @brief Send up to one MSS segment of the buffered output.
  *
- * Called when the buffer fills and by the shell loop at the end of each poll,
- * so longer output drains over several polls.
+ * Blocks for the SLIP transmit.  A send the TCP stack refuses, as on a full TX
+ * pool, keeps the buffer for the next call; with no client or no buffered
+ * output it does nothing.
+ *
+ * @note Called when the buffer fills and by the shell loop at the end of each
+ *       poll, so longer output drains over several polls.
  */
 void tiku_shell_io_tcp_flush(void);
 

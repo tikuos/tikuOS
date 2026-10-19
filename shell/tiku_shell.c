@@ -768,15 +768,6 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Return a pointer to the shell command table.
- *
- * The table is a NULL-terminated array of tiku_shell_cmd_t entries.
- * Entries with handler == NULL are category headers used by the
- * "help" command for grouping.
- *
- * @return Pointer to the first element of the static command table.
- */
 const tiku_shell_cmd_t *
 tiku_shell_get_commands(void)
 {
@@ -1622,14 +1613,6 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
 /* SHELL INIT                                                                */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialise and start the shell kernel service.
- *
- * Registers the shell process, plus the net process for a TCP-only shell, or
- * the net-test servers under TIKU_SHELL_NET_TEST.
- *
- * @note Call once from main(), before the scheduler loop starts.
- */
 void tiku_shell_init(void)
 {
     tiku_process_register("Shell", &tiku_shell_process);
