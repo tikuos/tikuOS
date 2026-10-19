@@ -79,6 +79,17 @@ typedef unsigned int tiku_clock_arch_counter_t;
 void                   tiku_clock_arch_init(void);
 
 /**
+ * @brief Reprogram the SysTick reload from the current clk_sys rate.
+ *
+ * SysTick counts clk_sys cycles, so tiku_cpu_freq_rp2350_init() calls this
+ * after every change of clk_sys.  The tick in progress restarts at the new
+ * rate, so a change delays the next tick by at most one period.
+ *
+ * @note Does nothing before tiku_clock_arch_init() has enabled SysTick.
+ */
+void                   tiku_rp2350_systick_reclock(void);
+
+/**
  * @brief Return the current tick counter value.
  *
  * Incremented by the SysTick ISR.  Wraparound-safe with the TIKU_CLOCK

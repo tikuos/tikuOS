@@ -31,6 +31,23 @@ static volatile tiku_clock_arch_time_t g_ticks    = 0UL;
 static volatile unsigned long          g_seconds  = 0UL;
 
 /*---------------------------------------------------------------------------*/
+/* HELPERS                                                                   */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief SysTick reload for the current clk_sys: cycles per tick - 1,
+ *        clamped to the 24-bit reload register.
+ */
+static uint32_t systick_reload(void) {
+    uint32_t reload = tiku_cpu_rp2350_clock_get_hz() /
+                      TIKU_CLOCK_ARCH_SECOND - 1U;
+    if (reload > 0x00FFFFFFU) {
+        reload = 0x00FFFFFFU;
+    }
+    return reload;
+}
+
+/*---------------------------------------------------------------------------*/
 /* HAL                                                                       */
 /*---------------------------------------------------------------------------*/
 
@@ -40,19 +57,23 @@ void tiku_clock_arch_init(void) {
     g_ticks   = 0UL;
     g_seconds = 0UL;
 
-    /* SysTick reload value: CPU clock cycles per tick - 1. */
-    uint32_t reload = tiku_cpu_rp2350_clock_get_hz() /
-                      TIKU_CLOCK_ARCH_SECOND - 1U;
-    /* Clamp to the 24-bit reload register width. */
-    if (reload > 0x00FFFFFFU) {
-        reload = 0x00FFFFFFU;
-    }
-    _RP2350_REG(RP2350_SYST_RVR) = reload;
+    _RP2350_REG(RP2350_SYST_RVR) = systick_reload();
     _RP2350_REG(RP2350_SYST_CVR) = 0U;     /* clear current */
     _RP2350_REG(RP2350_SYST_CSR) =
         RP2350_SYST_CSR_ENABLE
         | RP2350_SYST_CSR_TICKINT
         | RP2350_SYST_CSR_CLKSRC_CPU;
+}
+
+void tiku_rp2350_systick_reclock(void) {
+    /* Before tiku_clock_arch_init() SysTick is off, and init programs it. */
+    if ((_RP2350_REG(RP2350_SYST_CSR) & RP2350_SYST_CSR_ENABLE) == 0U) {
+        return;
+    }
+    _RP2350_REG(RP2350_SYST_RVR) = systick_reload();
+    /* A write to CVR clears it, so the next period starts with the new
+     * reload; the tick in progress loses the part already counted. */
+    _RP2350_REG(RP2350_SYST_CVR) = 0U;
 }
 
 tiku_clock_arch_time_t tiku_clock_arch_time(void) {

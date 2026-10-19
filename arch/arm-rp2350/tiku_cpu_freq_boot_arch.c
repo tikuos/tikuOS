@@ -17,6 +17,7 @@
 #include "tiku_cpu_freq_boot_arch.h"
 #include "tiku_rp2350_regs.h"
 #include "tiku_uart_arch.h"
+#include "tiku_timer_arch.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -52,14 +53,14 @@ static volatile uint8_t       g_clock_fault = 0U;
  * Polls @p reg until any bit of @p mask is set, for at most
  * RP2350_SPIN_TIMEOUT iterations.
  *
- * @param reg   Volatile register address to poll
+ * @param reg   Register address to poll, read through _RP2350_REG()
  * @param mask  Bit mask to test
  * @return 1 when the mask matches, 0 on timeout
  */
-static int rp2350_spin_until(volatile uint32_t *reg, uint32_t mask) {
+static int rp2350_spin_until(uintptr_t reg, uint32_t mask) {
     uint32_t i = RP2350_SPIN_TIMEOUT;
     while (i--) {
-        if ((*reg) & mask) {
+        if (_RP2350_REG(reg) & mask) {
             return 1;
         }
     }
@@ -81,8 +82,7 @@ static int rp2350_xosc_init(void) {
     _RP2350_REG(RP2350_XOSC_CTRL) =
         RP2350_XOSC_CTRL_ENABLE | RP2350_XOSC_CTRL_FREQ_1_15;
 
-    return rp2350_spin_until((volatile uint32_t *)RP2350_XOSC_STATUS,
-                             RP2350_XOSC_STATUS_STABLE);
+    return rp2350_spin_until(RP2350_XOSC_STATUS, RP2350_XOSC_STATUS_STABLE);
 }
 
 /**
@@ -108,9 +108,8 @@ static int rp2350_pll_sys_init(void) {
     _RP2350_REG_CLR(RP2350_PLL_SYS_BASE + RP2350_PLL_PWR,
                     RP2350_PLL_PWR_PD | RP2350_PLL_PWR_VCOPD);
 
-    if (!rp2350_spin_until(
-            (volatile uint32_t *)(RP2350_PLL_SYS_BASE + RP2350_PLL_CS),
-            RP2350_PLL_CS_LOCK)) {
+    if (!rp2350_spin_until(RP2350_PLL_SYS_BASE + RP2350_PLL_CS,
+                           RP2350_PLL_CS_LOCK)) {
         return 0;
     }
 
@@ -137,8 +136,7 @@ static int rp2350_pll_sys_init(void) {
 static int rp2350_clock_switch(void) {
     /* CLK_REF -> XOSC (so the rest of the system has a known reference). */
     _RP2350_REG(RP2350_CLK_REF_CTRL) = RP2350_CLK_REF_SRC_XOSC;
-    if (!rp2350_spin_until((volatile uint32_t *)RP2350_CLK_REF_SELECTED,
-                           0x4U)) {
+    if (!rp2350_spin_until(RP2350_CLK_REF_SELECTED, 0x4U)) {
         return 0;
     }
 
@@ -148,8 +146,7 @@ static int rp2350_clock_switch(void) {
      *   3. SRC = AUX
      */
     _RP2350_REG(RP2350_CLK_SYS_CTRL) = RP2350_CLK_SYS_SRC_REF;
-    if (!rp2350_spin_until((volatile uint32_t *)RP2350_CLK_SYS_SELECTED,
-                           0x1U)) {
+    if (!rp2350_spin_until(RP2350_CLK_SYS_SELECTED, 0x1U)) {
         return 0;
     }
 
@@ -159,8 +156,7 @@ static int rp2350_clock_switch(void) {
     _RP2350_REG(RP2350_CLK_SYS_CTRL) =
         RP2350_CLK_SYS_SRC_AUX | RP2350_CLK_SYS_AUXSRC_PLL_SYS;
 
-    if (!rp2350_spin_until((volatile uint32_t *)RP2350_CLK_SYS_SELECTED,
-                           0x2U)) {
+    if (!rp2350_spin_until(RP2350_CLK_SYS_SELECTED, 0x2U)) {
         return 0;
     }
 
@@ -185,8 +181,7 @@ static int rp2350_clock_switch(void) {
 static void rp2350_clock_fallback_xosc(int xosc_ok) {
     if (xosc_ok) {
         _RP2350_REG(RP2350_CLK_REF_CTRL) = RP2350_CLK_REF_SRC_XOSC;
-        (void)rp2350_spin_until(
-            (volatile uint32_t *)RP2350_CLK_REF_SELECTED, 0x4U);
+        (void)rp2350_spin_until(RP2350_CLK_REF_SELECTED, 0x4U);
     }
     /* CLK_SYS follows the selected reference. */
     _RP2350_REG(RP2350_CLK_SYS_CTRL) = RP2350_CLK_SYS_SRC_REF;
@@ -235,13 +230,11 @@ static void rp2350_setup_1us_tick(void) {
 
     _RP2350_REG(RP2350_TICKS_TIMER0_CYCLES) = cycles;
     _RP2350_REG(RP2350_TICKS_TIMER0_CTRL)   = RP2350_TICK_ENABLE;
-    (void)rp2350_spin_until((volatile uint32_t *)RP2350_TICKS_TIMER0_CTRL,
-                            RP2350_TICK_RUNNING);
+    (void)rp2350_spin_until(RP2350_TICKS_TIMER0_CTRL, RP2350_TICK_RUNNING);
 
     _RP2350_REG(RP2350_TICKS_WATCHDOG_CYCLES) = cycles;
     _RP2350_REG(RP2350_TICKS_WATCHDOG_CTRL)   = RP2350_TICK_ENABLE;
-    (void)rp2350_spin_until((volatile uint32_t *)RP2350_TICKS_WATCHDOG_CTRL,
-                            RP2350_TICK_RUNNING);
+    (void)rp2350_spin_until(RP2350_TICKS_WATCHDOG_CTRL, RP2350_TICK_RUNNING);
 
     /* Clear PAUSE so TIMER0 counts. */
     _RP2350_REG(RP2350_TIMER0_PAUSE) = 0U;
@@ -352,8 +345,7 @@ rp2350_lookup_freq(unsigned int target_mhz) {
  */
 static void rp2350_park_clk_sys_on_ref(void) {
     _RP2350_REG(RP2350_CLK_SYS_CTRL) = RP2350_CLK_SYS_SRC_REF;
-    (void)rp2350_spin_until((volatile uint32_t *)RP2350_CLK_SYS_SELECTED,
-                            0x1U);
+    (void)rp2350_spin_until(RP2350_CLK_SYS_SELECTED, 0x1U);
 }
 
 /**
@@ -385,9 +377,8 @@ static int rp2350_pll_sys_retune(uint16_t fbdiv,
     _RP2350_REG_CLR(RP2350_PLL_SYS_BASE + RP2350_PLL_PWR,
                     RP2350_PLL_PWR_PD | RP2350_PLL_PWR_VCOPD);
 
-    if (!rp2350_spin_until(
-            (volatile uint32_t *)(RP2350_PLL_SYS_BASE + RP2350_PLL_CS),
-            RP2350_PLL_CS_LOCK)) {
+    if (!rp2350_spin_until(RP2350_PLL_SYS_BASE + RP2350_PLL_CS,
+                           RP2350_PLL_CS_LOCK)) {
         return 0;
     }
 
@@ -415,8 +406,7 @@ static int rp2350_clk_sys_back_on_pll(void) {
         RP2350_CLK_SYS_SRC_REF | RP2350_CLK_SYS_AUXSRC_PLL_SYS;
     _RP2350_REG(RP2350_CLK_SYS_CTRL) =
         RP2350_CLK_SYS_SRC_AUX | RP2350_CLK_SYS_AUXSRC_PLL_SYS;
-    return rp2350_spin_until(
-        (volatile uint32_t *)RP2350_CLK_SYS_SELECTED, 0x2U);
+    return rp2350_spin_until(RP2350_CLK_SYS_SELECTED, 0x2U);
 }
 
 void tiku_cpu_freq_rp2350_init(unsigned int target_mhz) {
@@ -454,6 +444,7 @@ void tiku_cpu_freq_rp2350_init(unsigned int target_mhz) {
         g_clk_peri_hz = 12000000UL;
         g_clock_fault = 0U;
         tiku_rp2350_uart_reclock();
+        tiku_rp2350_systick_reclock();
         return;
     }
 
@@ -469,6 +460,7 @@ void tiku_cpu_freq_rp2350_init(unsigned int target_mhz) {
         g_clk_peri_hz = 12000000UL;
         g_clock_fault = 1U;
         tiku_rp2350_uart_reclock();
+        tiku_rp2350_systick_reclock();
         return;
     }
 
@@ -480,6 +472,7 @@ void tiku_cpu_freq_rp2350_init(unsigned int target_mhz) {
         g_clk_peri_hz = 12000000UL;
         g_clock_fault = 1U;
         tiku_rp2350_uart_reclock();
+        tiku_rp2350_systick_reclock();
         return;
     }
 
@@ -490,6 +483,7 @@ void tiku_cpu_freq_rp2350_init(unsigned int target_mhz) {
     g_clk_peri_hz = (unsigned long)target_mhz * 1000000UL;
     g_clock_fault = 0U;
     tiku_rp2350_uart_reclock();
+    tiku_rp2350_systick_reclock();
 }
 
 void tiku_cpu_boot_rp2350_power_wfi_enter(void) {
