@@ -46,12 +46,6 @@ static const tiku_mem_region_t msp430_region_table[] = {
 /* HAL FUNCTION                                                              */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Return the MSP430 memory region table
- *
- * @param count  Output: number of entries in the table
- * @return Pointer to the static region descriptor array
- */
 const struct tiku_mem_region *tiku_region_arch_get_table(
     tiku_mem_arch_size_t *count)
 {

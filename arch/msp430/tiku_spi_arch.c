@@ -120,12 +120,6 @@ spi_xfer_byte(uint8_t tx)
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialize the SPI eUSCI module for 3-pin master operation.
- *
- * Clock source is SMCLK. The prescaler divides SMCLK to produce
- * the SPI clock (e.g. 8 MHz / 8 = 1 MHz).
- */
 int
 tiku_spi_arch_init(const tiku_spi_config_t *config)
 {
@@ -160,9 +154,6 @@ tiku_spi_arch_init(const tiku_spi_config_t *config)
     return TIKU_SPI_OK;
 }
 
-/**
- * @brief Place the SPI eUSCI module in software reset (SPI disabled).
- */
 void
 tiku_spi_arch_close(void)
 {
@@ -170,18 +161,12 @@ tiku_spi_arch_close(void)
     SPI_PRINTF("close\n");
 }
 
-/**
- * @brief Single-byte full-duplex transfer.
- */
 uint8_t
 tiku_spi_arch_transfer(uint8_t tx_byte)
 {
     return spi_xfer_byte(tx_byte);
 }
 
-/**
- * @brief Transmit bytes, discarding received data.
- */
 int
 tiku_spi_arch_write(const uint8_t *buf, uint16_t len)
 {
@@ -209,9 +194,6 @@ tiku_spi_arch_write(const uint8_t *buf, uint16_t len)
     return TIKU_SPI_OK;
 }
 
-/**
- * @brief Receive bytes, sending 0xFF as dummy data.
- */
 int
 tiku_spi_arch_read(uint8_t *buf, uint16_t len)
 {
@@ -239,9 +221,6 @@ tiku_spi_arch_read(uint8_t *buf, uint16_t len)
     return TIKU_SPI_OK;
 }
 
-/**
- * @brief Full-duplex bulk transfer.
- */
 int
 tiku_spi_arch_write_read(const uint8_t *tx_buf, uint8_t *rx_buf,
                           uint16_t len)

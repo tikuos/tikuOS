@@ -18,9 +18,9 @@
 #include "tiku_stm32n6_regs.h"
 #include <kernel/scheduler/tiku_sched.h>
 
-/** @brief No alternate tick clock is selected by this port. */
 unsigned char tiku_clock_arch_fault(void)
 {
+    /* The tick has no fallback clock on this port, so no fault is set. */
     return 0;
 }
 

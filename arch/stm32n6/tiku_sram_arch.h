@@ -61,8 +61,8 @@ uint32_t tiku_stm32n6_sram_enabled_mask(void);
  * @brief Walk every bank writing and re-reading a unique word per 64 KB.
  *
  * Destructive.  Each page's result character is drained before the next
- * access, so a page that hangs or faults the bus is the first one with no
- * character.
+ * access, so a page that hangs or faults the bus is the first with none.
+ * A second pass re-reads every page and prints 'A' where the pattern is lost.
  */
 void tiku_stm32n6_sram_probe(void);
 #endif

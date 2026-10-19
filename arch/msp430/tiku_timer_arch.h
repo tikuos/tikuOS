@@ -92,11 +92,16 @@ void tiku_clock_arch_set_seconds(unsigned long sec);
 /**
  * @brief Busy-wait for @p t clock ticks
  * @param t Number of ticks to wait
+ * @note The tick advances in the Timer A0 interrupt: with interrupts
+ *       disabled a wait of one tick or more never returns.
  */
 void tiku_clock_arch_wait(tiku_clock_arch_time_t t);
 
 /**
  * @brief CPU delay loop
+ *
+ * A unit's length depends on MCLK and on the code emitted for the loop.
+ *
  * @param i Delay units, each four NOPs plus the loop overhead
  */
 void tiku_clock_arch_delay(unsigned int i);

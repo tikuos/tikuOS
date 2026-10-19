@@ -24,13 +24,6 @@
 /* MPU SEGMENT BOUNDARY SETUP                                                */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Set up the three MPU segment boundaries from device macros.
- *
- * Writes MPUSEGB1 and MPUSEGB2 (boundary addresses right-shifted by 4) to
- * divide the FRAM address space into three protection segments, and
- * enables the MPU.  SAM permissions apply to the segments set here.
- */
 void tiku_mpu_arch_init_segments(void)
 {
     MPUCTL0  = MPUPW;                                  /* Unlock config */
@@ -43,7 +36,6 @@ void tiku_mpu_arch_init_segments(void)
 /* MPU REGISTER ACCESS                                                       */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Read the current MPU Segment Access Management register. */
 uint16_t tiku_mpu_arch_get_sam(void)
 {
     return MPUSAM;
@@ -63,19 +55,16 @@ void tiku_mpu_arch_set_sam(uint16_t sam)
     MPUCTL0 = MPUPW | MPUENA | flags;     /* Re-enable + preserved flags */
 }
 
-/** @brief Read the raw MPUCTL0 register value. */
 uint16_t tiku_mpu_arch_get_ctl(void)
 {
     return MPUCTL0;
 }
 
-/** @brief Disable global interrupts (wrapper around __disable_interrupt). */
 void tiku_mpu_arch_disable_irq(void)
 {
     __disable_interrupt();
 }
 
-/** @brief Enable global interrupts (wrapper around __enable_interrupt). */
 void tiku_mpu_arch_enable_irq(void)
 {
     __enable_interrupt();
@@ -90,28 +79,15 @@ void tiku_mpu_arch_enable_irq(void)
  * and do the SAM bit arithmetic for the kernel.
  */
 
-/**
- * @brief Set default NVM protection.
- *
- * Without HIFRAM every segment is R+X, since all three hold persistent data,
- * vectors and code.  With HIFRAM, segment 3 holds kernel mutable state and
- * is R+W+X: a store there without W is dropped and boot fails.
- */
 void tiku_mpu_arch_set_default_protection(void)
 {
+    /* Without HIFRAM all three segments hold persistent data, vectors and
+     * code, and none is writable.  With HIFRAM, segment 3 holds kernel
+     * mutable state and is writable: a store there without W is dropped and
+     * boot fails. */
     tiku_mpu_arch_set_sam(TIKU_MPU_DEFAULT_SAM);
 }
 
-/**
- * @brief Set permissions on a single MPU segment.
- *
- * Each segment owns a nybble of the access-mask register, whose low three bits
- * are read, write and execute.  Clears the old bits and sets the new ones,
- * leaving other segments untouched.
- *
- * @param seg    Segment number (0-2)
- * @param perm   Permission flags (TIKU_MPU_READ/WRITE/EXEC or combinations)
- */
 void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm)
 {
     uint16_t shift = (uint16_t)seg * 4U;
@@ -122,14 +98,6 @@ void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm)
     tiku_mpu_arch_set_sam(sam);
 }
 
-/**
- * @brief Unlock NVM for writing on all segments
- *
- * ORs the write bit (bit 1) into each segment's nybble:
- *   0x0222 = write bit set for all 3 segments.
- *
- * @return Previous SAM value (opaque to the kernel, used by lock_nvm)
- */
 uint16_t tiku_mpu_arch_unlock_nvm(void)
 {
     uint16_t saved = tiku_mpu_arch_get_sam();
@@ -139,11 +107,6 @@ uint16_t tiku_mpu_arch_unlock_nvm(void)
     return saved;
 }
 
-/**
- * @brief Restore NVM protection to a previously saved state
- *
- * @param saved_state  Value returned by a prior tiku_mpu_arch_unlock_nvm()
- */
 void tiku_mpu_arch_lock_nvm(uint16_t saved_state)
 {
     tiku_mpu_arch_set_sam(saved_state);
@@ -159,13 +122,11 @@ void tiku_mpu_arch_lock_nvm(uint16_t saved_state)
  */
 static volatile uint16_t latched_violation_flags;
 
-/** @brief Return the software-latched MPU violation flags. */
 uint16_t tiku_mpu_arch_get_violation_flags(void)
 {
     return latched_violation_flags;
 }
 
-/** @brief Clear both the software latch and hardware MPUCTL1 flags. */
 void tiku_mpu_arch_clear_violation_flags(void)
 {
     latched_violation_flags = 0;
@@ -174,7 +135,6 @@ void tiku_mpu_arch_clear_violation_flags(void)
     MPUCTL0 = MPUPW | MPUENA | MPUSEGIE;   /* Re-enable MPU + NMI */
 }
 
-/** @brief Enable the MPU violation NMI (MPUSEGIE bit). */
 void tiku_mpu_arch_enable_violation_nmi(void)
 {
     MPUCTL0 = MPUPW | MPUENA | MPUSEGIE;

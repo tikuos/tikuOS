@@ -41,13 +41,13 @@ void tiku_htimer_arch_configure_aclk(void);
 
 /**
  * @brief Check if timer interrupt is pending
- * @return Non-zero if interrupt flag is set
+ * @return 1 while the Timer A1 CCR0 interrupt flag (CCIFG) is set, else 0
  */
 int tiku_htimer_arch_interrupt_pending(void);
 
 /**
  * @brief Get timer configuration register value
- * @return Timer control register (for debugging)
+ * @return The raw TA1CTL value (for debugging)
  */
 unsigned int tiku_htimer_arch_get_timer_config(void);
 
@@ -62,7 +62,8 @@ void tiku_htimer_arch_print_config(void);
 /**
  * @brief Reset timer counter to zero
  *
- * Returns with interrupts enabled, whatever their state before.
+ * Sets TACLR on Timer A1 with interrupts masked; the caller's GIE state is
+ * restored on return.
  *
  * @warning Pending htimer deadlines are absolute counter values, so after
  *          the reset they fire late.

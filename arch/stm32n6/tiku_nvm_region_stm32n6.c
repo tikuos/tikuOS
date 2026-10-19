@@ -150,16 +150,10 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
 /** @brief The region descriptor, filled by tiku_nvm_backend_get(). */
 static tiku_nvm_backend_t g_region;
 
-/**
- * @brief Return the NOR-backed region.
- *
- * The base is the region's memory-mapped address; callers read it by
- * dereferencing.
- *
- * @return The region, or NULL when the XSPI is not ready or its window
- *         cannot open
- */
 const tiku_nvm_backend_t *tiku_nvm_backend_get(void) {
+    /* The region is external NOR: base is its address in the XSPI
+     * memory-mapped window.  NULL when the XSPI is not ready or the window
+     * cannot open. */
     if (!tiku_xspi_ready()) {
         NVMR_DBG("nvmr: xspi not ready\n");
         return NULL;

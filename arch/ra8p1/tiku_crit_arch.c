@@ -31,18 +31,12 @@ static struct {
     uint32_t iser[CRIT_NVIC_WORDS];
 } crit_state;
 
-/**
- * @brief Disable NVIC interrupts, keeping the requested sources enabled.
- *
- * HTIMER keeps the GPT compare slot; UART keeps receive and error slots.
- * DSB+ISB make the disable take effect before return.
- *
- * @param preserve_mask  OR of TIKU_CRIT_PRESERVE_* flags
- */
 void tiku_crit_arch_mask_irqs(uint8_t preserve_mask)
 {
     uint32_t keep[CRIT_NVIC_WORDS] = {0};
 
+    /* Masks NVIC lines.  HTIMER keeps the GPT compare slot; UART keeps the
+     * receive and error slots. */
     if (preserve_mask & TIKU_CRIT_PRESERVE_HTIMER) {
         keep[RA8P1_ICU_SLOT_HTIMER / 32U] |=
             (1UL << (RA8P1_ICU_SLOT_HTIMER % 32U));
@@ -64,14 +58,14 @@ void tiku_crit_arch_mask_irqs(uint8_t preserve_mask)
             TIKU_REG32(RA8P1_NVIC_ICER(i)) = to_mask;
         }
     }
+    /* DSB+ISB: the disable takes effect before return. */
     __asm__ volatile ("dsb\n\tisb" ::: "memory");
 }
 
-/**
- * @brief Restore the NVIC enable state saved by tiku_crit_arch_mask_irqs().
- */
 void tiku_crit_arch_unmask_irqs(void)
 {
+    /* ISER sets bits only: the saved lines are enabled again, and a line
+     * enabled inside the section stays enabled. */
     for (unsigned i = 0; i < CRIT_NVIC_WORDS; i++) {
         TIKU_REG32(RA8P1_NVIC_ISER(i)) = crit_state.iser[i];
     }

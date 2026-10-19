@@ -29,11 +29,6 @@ static uint32_t nvic_line_armed(uint32_t irqn)
     return TIKU_REG32(RA8P1_NVIC_ISER(irqn >> 5)) & (1UL << (irqn & 0x1FU));
 }
 
-/**
- * @brief Report which sources could wake the part.
- *
- * @param out  Receives the source set; untouched when NULL
- */
 void tiku_wake_arch_query(tiku_wake_sources_t *out) {
     uint32_t csr;
     unsigned i;

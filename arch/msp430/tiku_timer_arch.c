@@ -240,16 +240,12 @@ void tiku_clock_arch_init(void)
 
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Get current clock time in ticks
- *
- * Reads the tick count twice until both reads agree, so a tick that lands
- * mid-read cannot tear the 32-bit value.
- */
 tiku_clock_arch_time_t tiku_clock_arch_time(void)
 {
     tiku_clock_arch_time_t t1, t2;
 
+    /* A tick that lands between the two 16-bit halves of a read tears the
+     * 32-bit count; reads repeat until two agree. */
     do {
         t1 = tiku_arch_count;
         t2 = tiku_arch_count;
@@ -260,9 +256,6 @@ tiku_clock_arch_time_t tiku_clock_arch_time(void)
 
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Get current time in seconds
- */
 unsigned long tiku_clock_arch_seconds(void)
 {
     unsigned long t1, t2;
@@ -277,9 +270,6 @@ unsigned long tiku_clock_arch_seconds(void)
 
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Set the system time
- */
 void tiku_clock_arch_set(tiku_clock_arch_time_t clock,
                          tiku_clock_arch_time_t fclock)
 {
@@ -296,9 +286,6 @@ void tiku_clock_arch_set(tiku_clock_arch_time_t clock,
 
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Set the seconds counter
- */
 void tiku_clock_arch_set_seconds(unsigned long sec)
 {
     unsigned int state;
@@ -313,11 +300,6 @@ void tiku_clock_arch_set_seconds(unsigned long sec)
 
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Delay for specified clock ticks
- *
- * Busy-waits for the specified number of system ticks.
- */
 void tiku_clock_arch_wait(tiku_clock_arch_time_t t)
 {
     tiku_clock_arch_time_t start;
@@ -328,12 +310,6 @@ void tiku_clock_arch_wait(tiku_clock_arch_time_t t)
 
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief CPU delay loop
- *
- * Each unit is four NOPs plus the loop overhead, so its length depends on
- * MCLK and on the code the compiler emits for the loop.
- */
 void tiku_clock_arch_delay(unsigned int i)
 {
     while(i--) {
@@ -346,12 +322,6 @@ void tiku_clock_arch_delay(unsigned int i)
 
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Get fine-grained clock value
- *
- * Returns the Timer A0 count since the last tick (TA0R minus its value at
- * that tick).
- */
 unsigned short tiku_clock_arch_fine(void)
 {
     unsigned short t;
@@ -363,9 +333,6 @@ unsigned short tiku_clock_arch_fine(void)
 
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Get maximum fine clock value
- */
 int tiku_clock_arch_fine_max(void)
 {
     return TIKU_CLOCK_ARCH_INTERVAL;
@@ -373,9 +340,6 @@ int tiku_clock_arch_fine_max(void)
 
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Get raw timer counter value
- */
 tiku_clock_arch_counter_t tiku_clock_arch_counter(void)
 {
     return tiku_arch_read_tar();
@@ -383,15 +347,11 @@ tiku_clock_arch_counter_t tiku_clock_arch_counter(void)
 
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Return the active clock-source fault code.
- *
- * Set when XT1 fails to start and ACLK is rerouted to VLOCLK, after which the
- * tick runs about three times slower than TIKU_CLOCK_SECOND implies.  Cleared
- * on each clock init.
- */
 unsigned char tiku_clock_arch_fault(void)
 {
+    /* TIKU_CLOCK_ARCH_FAULT_LFXT_VLO: LFXT did not start and ACLK runs from
+     * VLOCLK, so the tick runs about three times slower than
+     * TIKU_CLOCK_SECOND implies. */
     return tiku_arch_clock_fault;
 }
 

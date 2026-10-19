@@ -32,17 +32,9 @@ extern uint32_t __tier_sram_end;    /* top of the linker-carved tier span  */
 static tiku_mem_region_t stm32n6_region_table[3];
 static tiku_mem_arch_size_t stm32n6_region_count;
 
-/**
- * @brief Report the memory map, building it once on first use.
- *
- * The durable cells are tagged NVM so the persist API accepts them; they are
- * SRAM, carried across resets by the NOR mirror.
- *
- * @param count  Receives the number of valid entries
- * @return The region table
- */
 const struct tiku_mem_region *tiku_region_arch_get_table(
     tiku_mem_arch_size_t *count) {
+    /* The table is built on the first call. */
     if (stm32n6_region_count == 0U) {
         uintptr_t uninit_start = (uintptr_t)&__uninit_start;
         uintptr_t uninit_end   = (uintptr_t)&__uninit_end;
@@ -73,6 +65,8 @@ const struct tiku_mem_region *tiku_region_arch_get_table(
             idx++;
         }
 
+        /* The durable cells are tagged NVM so the persist API accepts them;
+         * they are SRAM, carried across resets by the NOR mirror. */
         if (uninit_end > uninit_start) {
             stm32n6_region_table[idx].base = (const uint8_t *)uninit_start;
             stm32n6_region_table[idx].size =

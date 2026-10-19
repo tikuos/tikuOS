@@ -124,12 +124,6 @@ int tiku_dma_arch_abort(void) {
     return TIKU_DMA_OK;
 }
 
-/**
- * @brief HPDMA1 channel-0 interrupt: retire the transfer and call back.
- *
- * The callback runs last so a handler that starts another copy sees the
- * channel already idle.
- */
 void tiku_stm32n6_gpdma_ch0_isr(void) {
     uint32_t sr = TIKU_REG32(STM32N6_GPDMA_SR(DMA_CH));
 

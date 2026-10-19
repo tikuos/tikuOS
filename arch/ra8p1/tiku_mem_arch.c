@@ -94,7 +94,6 @@ int tiku_mem_arch_nvm_flush_status(void)
     return -1;
 }
 
-/** @brief tiku_mem_arch_nvm_flush_status() with the result discarded. */
 void tiku_mem_arch_nvm_flush(void)
 {
     (void)tiku_mem_arch_nvm_flush_status();

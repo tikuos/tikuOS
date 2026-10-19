@@ -30,8 +30,8 @@
  * @brief Architecture-specific SPI initialization.
  *
  * Configures the board's eUSCI module for 3-pin SPI master mode with the
- * clock polarity, phase, bit order, and prescaler specified in @p config.
- * Sets up SCLK/SIMO/SOMI pins via board macros.
+ * polarity, phase and bit order in @p config; the SPI clock is SMCLK
+ * divided by config->prescaler.  Sets up SCLK/SIMO/SOMI via board macros.
  *
  * @param config  Pointer to SPI configuration
  * @return TIKU_SPI_OK

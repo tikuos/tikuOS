@@ -91,12 +91,6 @@ i2c_wait_stop(void)
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialize eUSCI_B0 for I2C master operation.
- *
- * Clocked from SMCLK, with the prescaler taken from the board's macro for
- * the requested speed: 100 kHz standard or 400 kHz fast.
- */
 int
 tiku_i2c_arch_init(const tiku_i2c_config_t *config)
 {
@@ -128,9 +122,6 @@ tiku_i2c_arch_init(const tiku_i2c_config_t *config)
     return TIKU_I2C_OK;
 }
 
-/**
- * @brief Place eUSCI_B0 in software reset (I2C disabled).
- */
 void
 tiku_i2c_arch_close(void)
 {
@@ -138,11 +129,6 @@ tiku_i2c_arch_close(void)
     I2C_PRINTF("close\n");
 }
 
-/**
- * @brief Transmit bytes to a slave device.
- *
- * Sequence: START → addr+W → data[0..len-1] → STOP
- */
 int
 tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len)
 {
@@ -181,14 +167,6 @@ tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len)
     return i2c_wait_stop();
 }
 
-/**
- * @brief Receive bytes from a slave device.
- *
- * Sequence: START → addr+R → data[0..len-1] → NACK → STOP
- *
- * For a single-byte read, STOP is set as soon as the address phase ends
- * (UCTXSTT clears), while that byte is being received.
- */
 int
 tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len)
 {
@@ -246,12 +224,6 @@ tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len)
     return i2c_wait_stop();
 }
 
-/**
- * @brief Probe a slave address (presence check, no data transferred).
- *
- * START, address with the write bit, ACK check, STOP; no data byte is sent.
- * A NACK sends STOP and returns TIKU_I2C_ERR_NACK.
- */
 int
 tiku_i2c_arch_probe(uint8_t addr)
 {
@@ -286,14 +258,6 @@ tiku_i2c_arch_probe(uint8_t addr)
     return rc;
 }
 
-/**
- * @brief Combined write-then-read with repeated START.
- *
- * Sequence: START → addr+W → tx_data → rSTART → addr+R → rx_data → STOP
- *
- * This is the standard register-read pattern used by most I2C sensors
- * and peripherals: write the register address, then read back data.
- */
 int
 tiku_i2c_arch_write_read(uint8_t addr,
                           const uint8_t *tx_buf, uint16_t tx_len,

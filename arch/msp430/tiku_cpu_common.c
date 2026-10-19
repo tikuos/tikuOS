@@ -60,18 +60,6 @@ static unsigned long delay_hz(void)
 /* PUBLIC FUNCTIONS                                                         */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Delay for a specified number of milliseconds
- * @param ms Number of milliseconds to delay
- *
- * Busy-waits in NOP loops scaled from the MCLK rate.  The delay is
- * approximate and depends on compiler optimization settings.
- *
- * @note This is a blocking delay function
- * @warning Not suitable for precise timing requirements
- * @warning Accuracy varies with CPU frequency and optimization level
- */
-
 void tiku_cpu_msp430_delay_ms(unsigned int ms)
 {
     unsigned int i, j;
@@ -89,10 +77,6 @@ void tiku_cpu_msp430_delay_ms(unsigned int ms)
     }
 }
 
-/**
- * @brief Delay for a specified number of microseconds
- * @param us Number of microseconds to delay
- */
 void tiku_cpu_msp430_delay_us(unsigned int us)
 {
     unsigned int i;

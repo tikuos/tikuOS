@@ -61,12 +61,6 @@ static const tiku_mem_region_t ra8p1_region_table[] = {
 #define RA8P1_REGION_COUNT \
     (sizeof(ra8p1_region_table) / sizeof(ra8p1_region_table[0]))
 
-/**
- * @brief Report the memory map.
- *
- * @param count  Receives the number of valid entries
- * @return The region table
- */
 const struct tiku_mem_region *tiku_region_arch_get_table(
     tiku_mem_arch_size_t *count)
 {

@@ -138,6 +138,9 @@ int tiku_ra8p1_xflash_in_opi(void);
  * The protocol-select bits in CR2 are volatile, so the device answers
  * single-bit SPI after the pulse.  The controller's protocol is left as it
  * was; tiku_ra8p1_xflash_opi_exit() returns both to single-bit mode.
+ *
+ * @note Busy-waits about 1.1 ms: OM_RESET is low for 100 us, then the
+ *       device has 1 ms to come out of reset.
  */
 void tiku_ra8p1_xflash_reset(void);
 

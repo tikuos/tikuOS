@@ -124,8 +124,6 @@ int tiku_ra8p1_xflash_in_opi(void)
     return (int)xf_opi;
 }
 
-/** @brief Drive OM_RESET low for 100 us, then high, and wait 1 ms; LIOCTL's
- *         other bits are kept. */
 void tiku_ra8p1_xflash_reset(void)
 {
     TIKU_REG32(RA8P1_OSPI_LIOCTL(XF_UNIT)) &= ~RA8P1_OSPI_LIOCTL_RSTCS0;

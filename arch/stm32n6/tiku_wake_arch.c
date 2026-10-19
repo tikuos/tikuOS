@@ -17,13 +17,8 @@
 
 #include <hal/tiku_wake_hal.h>
 
-/**
- * @brief Report which sources could wake the part.
- *
- * @param out  Receives an empty set: sources 0 and every gpio_ie mask 0;
- *             NULL is ignored
- */
 void tiku_wake_arch_query(tiku_wake_sources_t *out) {
+    /* This port reports no wake source: *out is an empty set. */
     if (out == NULL) {
         return;
     }

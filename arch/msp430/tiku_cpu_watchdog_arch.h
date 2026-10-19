@@ -77,6 +77,9 @@ typedef uint16_t tiku_wdt_interval_t;
  * The write clears the rest of the control byte (mode, clock, interval), so
  * resume alone does not bring the configuration back; _on_arch or
  * _config_arch does.
+ *
+ * @note The WDT runs from reset: boot code that neither stops nor kicks it
+ *       within the reset-default interval is reset in a loop.
  */
 void tiku_cpu_msp430_watchdog_off_arch(void);
 
@@ -110,6 +113,9 @@ void tiku_cpu_msp430_watchdog_resume_arch(int kick_on_resume);
  * Sets WDTCNTCL and keeps the rest of the control byte, WDTHOLD included, so
  * a paused watchdog stays paused.  In watchdog mode a kick before expiry
  * prevents the reset; in interval mode it postpones WDTIFG.
+ *
+ * @note The read-modify-write runs with interrupts disabled, then GIE is
+ *       restored to its previous state.
  */
 void tiku_cpu_msp430_watchdog_kick_arch(void);
 

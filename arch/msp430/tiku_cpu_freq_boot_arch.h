@@ -398,7 +398,8 @@ tiku_clock_result_t tiku_cpu_msp430_lfxt_init(bool bypass);
 /**
  * @brief Turn the LFXT oscillator off and clear its fault flags.
  *
- * Does nothing on devices without LFXT.
+ * An ACLK running from LFXT moves to LFMODCLK first and g_aclk_hz becomes
+ * 39062.  Does nothing on devices without LFXT.
  */
 void tiku_cpu_msp430_lfxt_disable(void);
 
@@ -415,8 +416,8 @@ bool tiku_cpu_msp430_clock_has_fault(void);
 /**
  * @brief Clear the device's oscillator fault flags and OFIFG.
  *
- * @note Repeats until OFIFG stays clear, with no bound: a fault that keeps
- *       re-asserting holds the caller here.
+ * Repeats until OFIFG stays clear or 1000 attempts have run; a fault that
+ * keeps re-asserting leaves OFIFG set on return.
  */
 void tiku_cpu_msp430_clock_clear_faults(void);
 
@@ -439,7 +440,8 @@ unsigned long tiku_cpu_msp430_clock_get_hz(void);
 
 /**
  * @brief Gets the current Auxiliary Clock (ACLK) frequency in Hz
- * @return ACLK frequency in Hz (g_aclk_hz)
+ * @return The nominal rate of the source CS selects for ACLK: 32768 for LFXT
+ *         or REFO, 39062 for LFMODCLK, 10000 for VLO.
  */
 unsigned long tiku_cpu_msp430_aclk_get_hz(void);
 
@@ -498,16 +500,22 @@ void tiku_cpu_boot_msp430_pins_init_low(void);
 
 /**
  * @brief Enter LPM0 with interrupts enabled (GIE is set).
+ *
+ * The CPU and MCLK stop; SMCLK and ACLK keep running.
  */
 void tiku_cpu_boot_msp430_power_lpm0_enter(void);
 
 /**
  * @brief Enter LPM3 with interrupts enabled (GIE is set).
+ *
+ * The CPU, MCLK, SMCLK and the DCO stop; ACLK keeps running.
  */
 void tiku_cpu_boot_msp430_power_lpm3_enter(void);
 
 /**
  * @brief Enter LPM4 with interrupts enabled (GIE is set).
+ *
+ * The CPU and every clock stop.
  */
 void tiku_cpu_boot_msp430_power_lpm4_enter(void);
 

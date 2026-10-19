@@ -114,13 +114,6 @@ TIKU_ISR(TIKU_UART_VECTOR, tiku_uart_isr)
 /* INIT                                                                      */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialize the kernel UART at TIKU_BOARD_UART_BAUD, 8N1.
- *
- * Drives the eUSCI instance the board header selects, and enables the RX
- * interrupt so incoming bytes land in a software ring whatever the application
- * is doing.
- */
 void
 tiku_uart_init(void)
 {
@@ -154,9 +147,6 @@ tiku_uart_init(void)
     TIKU_UART_IE |= UCRXIE;
 }
 
-/**
- * @brief Blocking transmit of one character via the selected eUSCI.
- */
 void
 tiku_uart_putc(char c)
 {
@@ -166,9 +156,6 @@ tiku_uart_putc(char c)
     TIKU_UART_TXBUF = (unsigned char)c;
 }
 
-/**
- * @brief Transmit a null-terminated string, converting \n to \r\n.
- */
 void
 tiku_uart_puts(const char *s)
 {
@@ -212,12 +199,6 @@ uart_pad(char c, int count)
     }
 }
 
-/**
- * @brief Lightweight printf replacement.
- *
- * Supports: %s, %d, %u, %x, %l (as %ld/%lu/%lx), %c, %%.
- * Also supports optional field width (e.g. %4d, %6ld).
- */
 void
 tiku_uart_printf(const char *fmt, ...)
 {
@@ -321,18 +302,12 @@ tiku_uart_printf(const char *fmt, ...)
     va_end(ap);
 }
 
-/**
- * @brief Check whether the software RX ring buffer has data.
- */
 uint8_t
 tiku_uart_rx_ready(void)
 {
     return (rx.head != rx.tail) ? 1 : 0;
 }
 
-/**
- * @brief Non-blocking read of one byte from the RX ring buffer.
- */
 int
 tiku_uart_getc(void)
 {
@@ -344,18 +319,12 @@ tiku_uart_getc(void)
     return (int)c;
 }
 
-/**
- * @brief Return the number of hardware overruns detected since init.
- */
 uint16_t
 tiku_uart_overrun_count(void)
 {
     return rx.overrun_count;
 }
 
-/**
- * @brief Zero the overrun counter atomically against the RX ISR.
- */
 void
 tiku_uart_overrun_reset(void)
 {

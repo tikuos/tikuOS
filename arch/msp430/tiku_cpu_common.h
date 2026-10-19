@@ -69,6 +69,10 @@
 
 /**
  * @brief Busy-wait about @p ms milliseconds.
+ *
+ * Spins in NOP loops scaled from the MCLK rate (8 MHz before clock setup);
+ * loop overhead and the optimisation level make the delay approximate.
+ *
  * @param ms Number of milliseconds to delay
  */
 void tiku_cpu_msp430_delay_ms(unsigned int ms);

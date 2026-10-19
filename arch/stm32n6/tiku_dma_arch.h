@@ -55,7 +55,12 @@ int tiku_dma_arch_busy(void);
  */
 int tiku_dma_arch_abort(void);
 
-/** @brief HPDMA1 channel-0 interrupt entry, installed in the vector table. */
+/**
+ * @brief HPDMA1 channel-0 interrupt entry, installed in the vector table.
+ *
+ * Retires the transfer, then calls the callback last: the channel is idle
+ * by then, so a callback can start another copy.
+ */
 void tiku_stm32n6_gpdma_ch0_isr(void);
 
 #endif /* TIKU_STM32N6_DMA_ARCH_H_ */

@@ -90,8 +90,8 @@ uint16_t tiku_uart_overrun_count(void);
 /**
  * @brief Zero the overrun counter without re-initialising the UART.
  *
- * Lets a test count overruns from a point of its choosing, such as after
- * its drain loop has swallowed echoed bytes.
+ * Lets a test count overruns from a point of its choosing.  UCRXIE is
+ * cleared for the store, so the RX ISR cannot interleave, and set after.
  */
 void tiku_uart_overrun_reset(void);
 

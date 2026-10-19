@@ -63,12 +63,6 @@ ow_read(void)
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialise the 1-Wire GPIO pin.
- *
- * Configures the pin as input (pull-up drives the line high),
- * clears the output latch, and ensures GPIO mode (SEL0=SEL1=0).
- */
 int
 tiku_onewire_arch_init(void)
 {
@@ -83,7 +77,6 @@ tiku_onewire_arch_init(void)
     return TIKU_OW_OK;
 }
 
-/** @brief Release the 1-Wire pin: an input, held high by the pull-up. */
 void
 tiku_onewire_arch_close(void)
 {
@@ -91,13 +84,6 @@ tiku_onewire_arch_close(void)
     TIKU_BOARD_OW_DIR &= ~TIKU_BOARD_OW_BIT;
 }
 
-/**
- * @brief 1-Wire reset: 480 us low pulse, then listen for presence.
- *
- * Drives low 480 us and releases.  15 us later the line must read high (the
- * pull-up works), and at about 70 us a present slave holds it low.  The
- * remaining 410 us completes the reset window.
- */
 int
 tiku_onewire_arch_reset(void)
 {
@@ -136,13 +122,6 @@ tiku_onewire_arch_reset(void)
     return presence ? TIKU_OW_ERR_NO_DEVICE : TIKU_OW_OK;
 }
 
-/**
- * @brief Write a single bit.
- *
- * A write-1 drives low 2 us then releases for 62; a write-0 drives low 60 then
- * releases for 4.  The slave samples around 30 us in, and the short
- * write-1 pulse has released the line by then.
- */
 void
 tiku_onewire_arch_write_bit(uint8_t bit)
 {
@@ -166,13 +145,6 @@ tiku_onewire_arch_write_bit(uint8_t bit)
     __bis_SR_register(sr);
 }
 
-/**
- * @brief Read a single bit.
- *
- * Drive low 2 us, release, wait 10, sample, idle 50: the master samples
- * within 15 us of the falling edge.  The 10 us also covers the input
- * synchroniser, which can lag a direction change by two MCLK cycles.
- */
 uint8_t
 tiku_onewire_arch_read_bit(void)
 {
@@ -198,9 +170,6 @@ tiku_onewire_arch_read_bit(void)
     return bit;
 }
 
-/**
- * @brief Write a byte (LSB first).
- */
 void
 tiku_onewire_arch_write_byte(uint8_t byte)
 {
@@ -212,9 +181,6 @@ tiku_onewire_arch_write_byte(uint8_t byte)
     }
 }
 
-/**
- * @brief Read a byte (LSB first).
- */
 uint8_t
 tiku_onewire_arch_read_byte(void)
 {

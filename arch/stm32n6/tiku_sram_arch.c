@@ -110,12 +110,6 @@ static void probe_drain(void) {
     }
 }
 
-/**
- * @brief Write, read back and re-check a unique word per 64 KB page.
- *
- * The second pass is what catches a bank that aliases another: a mirrored page
- * loses its own pattern when the page it shadows is written later.
- */
 void tiku_stm32n6_sram_probe(void) {
     tiku_uart_printf("sram: MEMENR %08lx MEMRSTR %08lx AHB2ENR %08lx\n",
                      (unsigned long)TIKU_REG32(RCC_MEMENR),
@@ -149,6 +143,8 @@ void tiku_stm32n6_sram_probe(void) {
         tiku_uart_puts("\n");
     }
 
+    /* This pass catches a bank that aliases another: a mirrored page loses
+     * its own pattern when the page it shadows is written later. */
     for (unsigned r = 0U; r < (sizeof(probe_ranges) / sizeof(probe_ranges[0]));
          r++) {
         tiku_uart_printf("sram: %s alias-recheck  r ", probe_ranges[r].tag);
