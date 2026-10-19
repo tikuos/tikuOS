@@ -8,9 +8,9 @@
 #
 # check_comment_style.py - check source comments against comment-style.md.
 #
-# Reports headers over HEADER_MAX lines, doc comments over PROSE_MAX prose
-# lines, banned words, and a second doc block on a function a header documents
-# (ONCE_ROOTS); --strict adds emphasis capitals, plan labels, arguing words.
+# Reports headers over HEADER_MAX lines or without the comment-style.md lines,
+# doc comments over PROSE_MAX prose lines, banned words, and a second doc block
+# on a function a header documents; --strict adds emphasis capitals and more.
 #
 # SPDX-License-Identifier: Apache-2.0
 
@@ -51,8 +51,15 @@ BLOCK_TAG = re.compile(r'^\s*\*\s*@(?:brief|param|return|returns|retval|note|'
                        r'typedef|defgroup|addtogroup|ingroup|file|struct|union|'
                        r'enum|fn|var|name|section|subsection|page|\{|\})(?![A-Za-z])')
 
-# --strict adds these checks; make lint runs it over kernel/, hal/,
-# interfaces/, tiku.h and main.c.
+# The lines every header of this tree carries, in this order (comment-style.md,
+# "File header").  A run with --root checks another tree, whose header is its
+# own, and skips this.
+HEADER_LINES = [re.compile(r'^\W*' + p, re.M) for p in (
+    r'Tiku Operating System v\d', r'Simple\. Persistent\. Intelligent\.$',
+    r'http://tiku-os\.org$', r'Authors: ', r'SPDX-License-Identifier: \S+$')]
+HEADER_SHAPE = True
+
+# --strict adds these checks; make lint runs it over the whole tracked tree.
 STRICT = False
 EMPHASIS = re.compile(
     r'(?<![A-Za-z0-9_])(?:NOT|ONLY|MUST|NEVER|ALWAYS|ONE|ONCE|BOTH|EVERY|ALL|'
@@ -69,10 +76,15 @@ STRICT_BANNED = [
 DOC = re.compile(r'/\*\*.*?\*/', re.S)
 HDR = re.compile(r'/\*.*?\*/', re.S)
 
-# A function a header declares is documented there; a doc block at its
-# definition under ONCE_ROOTS is reported.  SIGNATURE matches the declaration
-# or definition that follows a doc block and captures its name and its end.
-ONCE_ROOTS = ("kernel/", "boot/", "tiku.h", "main.c")
+# A function a header declares is documented there.  A doc block on its
+# definition under ONCE_ROOTS is reported when the defining file includes that
+# header, directly or through other headers; a header in another arch/<family>
+# does not count, since the build takes one port's branch of an #if.
+# SIGNATURE matches the declaration or definition that follows a doc block and
+# captures its name and its end.
+ONCE_ROOTS = ("kernel/", "boot/", "tiku.h", "main.c", "main_minimal.c",
+              "arch/", "hal/", "interfaces/", "shell/", "services/", "basic/")
+INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*([<"])([^>"]+)[>"]', re.M)
 SIGNATURE = re.compile(r'\s*(static\s+)?(?:inline\s+)?[A-Za-z_][\w\s*]*?'
                        r'\b([A-Za-z_]\w*)\s*\([^;{]*\)\s*([;{])')
 CONTROL = {"if", "for", "while", "switch", "return", "sizeof"}
@@ -195,10 +207,29 @@ def prose_lines(block):
     return count
 
 
+def header_shaped(text):
+    """True when the first lines hold HEADER_LINES in order.
+
+    A Python file may carry its header in the module docstring.
+    """
+    head = '\n'.join(text.split('\n')[:25])
+    at = 0
+    for line in HEADER_LINES:
+        m = line.search(head, at)
+        if not m:
+            return False
+        at = m.end()
+    return True
+
+
 def check(path):
     """Report every style violation in one file."""
     text = open(os.path.join(ROOT, path), errors='replace').read()
     out = []
+
+    if HEADER_SHAPE and not header_shaped(text):
+        out.append(f"{path}:1: header lacks the comment-style.md lines "
+                   "(title, tagline, URL, Authors, SPDX on its own line)")
 
     if path.endswith(HASH_EXT):
         n, _ = hash_header(text)
@@ -320,6 +351,8 @@ def documented_functions(paths):
             continue
         text = open(os.path.join(ROOT, path), errors='replace').read()
         for m in DOC.finditer(text):
+            if m.group(0).startswith('/**<'):
+                continue        # a trailing member comment documents its line
             sig = SIGNATURE.match(text, m.end())
             if not sig or sig.group(1) or sig.group(2) in CONTROL:
                 continue
@@ -330,19 +363,69 @@ def documented_functions(paths):
                 yield path, line, sig.group(2), 'defined'
 
 
+def included(path, tracked, cache):
+    """Tracked files path includes, directly or through other headers.
+
+    A quoted name is looked up beside the including file, then at the root;
+    an angled name at the root, the one include directory the build adds.
+    """
+    seen = set()
+    stack = [path]
+    while stack:
+        cur = stack.pop()
+        if cur not in cache:
+            try:
+                text = open(os.path.join(ROOT, cur), errors='replace').read()
+            except OSError:
+                text = ''
+            found = []
+            for quote, name in INCLUDE.findall(text):
+                places = [os.path.join(os.path.dirname(cur), name)] \
+                    if quote == '"' else []
+                for place in places + [name]:
+                    place = os.path.normpath(place)
+                    if place in tracked:
+                        found.append(place)
+                        break
+            cache[cur] = found
+        for h in cache[cur]:
+            if h not in seen:
+                seen.add(h)
+                stack.append(h)
+    return seen
+
+
+def arch_family(path):
+    """The port directory under arch/ a path is in, or None."""
+    parts = path.split('/')
+    if parts[0] == 'arch' and len(parts) > 2 and parts[1] != 'common':
+        return parts[1]
+    return None
+
+
 def documented_twice(all_paths, checked):
-    """Report a doc block on a definition whose header declaration has one."""
+    """Report a doc block on a definition whose included header has one."""
+    tracked = set(all_paths)
     declared = {}
     for path, _, name, kind in documented_functions(
             p for p in all_paths if p.endswith('.h') and p.startswith(ONCE_ROOTS)):
         if kind == 'declared':
-            declared.setdefault(name, path)
+            declared.setdefault(name, []).append(path)
     out = []
+    cache = {}
     for path, line, name, kind in documented_functions(
             p for p in checked if p.startswith(ONCE_ROOTS)):
-        if kind == 'defined' and name in declared:
+        if kind != 'defined' or name not in declared:
+            continue
+        family = arch_family(path)
+        seen = included(path, tracked, cache)
+        headers = [h for h in declared[name] if h in seen and
+                   arch_family(h) in (None, family)]
+        if headers:
+            here = os.path.dirname(path)
+            headers.sort(key=lambda h: os.path.dirname(h) != here)
             out.append(f"{path}:{line}: {name}() is documented where "
-                       f"{declared[name]} declares it; delete this block")
+                       f"{headers[0]} declares it; delete this block")
     return out
 
 
@@ -370,10 +453,11 @@ def main():
     argv = sys.argv[1:]
     # --prose= and --header= set another tree's ceilings: the applications
     # repository runs 6 lines of prose and a 20-line header.
-    global HEADER_MAX, PROSE_MAX, STRICT
+    global HEADER_MAX, PROSE_MAX, STRICT, HEADER_SHAPE
     while argv and argv[0].startswith("--"):
         if argv[0].startswith("--root="):
             ROOT = os.path.abspath(argv[0].split("=", 1)[1])
+            HEADER_SHAPE = False
         elif argv[0].startswith("--prose="):
             PROSE_MAX = int(argv[0].split("=", 1)[1])
         elif argv[0].startswith("--header="):

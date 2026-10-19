@@ -71,17 +71,20 @@ lines.
 
 `.py` and `.sh` files use the same shape with `#`, after any `#!` line. An
 `.inl` fragment, which a `.c` file includes, carries the same header as a
-`.c` file, naming the fragment and what it holds. A file has one header.
+`.c` file, naming the fragment and what it holds. A file derived from
+third-party code keeps its `SPDX-FileCopyrightText` lines directly above the
+`SPDX-License-Identifier` line. A file has one header.
 
 ## Doc comments
 
-Functions, types and macros other files use carry a Doxygen comment where
-they are declared; a static function carries one at its definition. A
-function is documented once: in `kernel/`, `boot/`, `tiku.h` and `main.c`,
-`make lint` reports a doc comment on the definition of a function whose
-declaration in a header there already has one. At most 3 lines of prose;
-`@brief`, `@param`, `@return`, `@note` and their continuation lines do not
-count.
+Functions, types and macros other files use carry a Doxygen comment where they
+are declared; a static function carries one at its definition. A function is
+documented once: outside `tools/`, `make lint` reports a doc comment on the
+definition of a function whose declaration, in a header the defining file
+includes, already has one. A port's definition of a function a `hal/` or
+`kernel/` header documents states what only that port does in its body. At most
+3 lines of prose; `@brief`, `@param`, `@return`, `@note` and their continuation
+lines do not count.
 
 ```c
 /**
@@ -176,17 +179,18 @@ changed comment against this page and against the code it sits on:
 ## Checking
 
 `make lint` runs the comment checker, `tools/check_comment_style.py`, over the
-tracked tree: the header and doc-comment caps, and the Banned vocabulary it
-can match. `--strict` adds single capitalised words used for emphasis, plan
-labels and the arguing words above, and counts an `@p` line and text on the
-`/**` line as prose. A word the code uses as a name (a BASIC keyword, the last
-part of a constant such as `TIKU_RESTART_NEVER`, a call such as `NOW()`) is
-not emphasis. `make lint` runs `--strict` over the whole tracked tree. A file
-git does not yet track is out of scope, so lint after staging. The vendor trees
-(`arch/*/cmsis`, `arch/*/mdk`) and the nested repositories (`drivers/`,
-`TikuBench/`, `tikukits/`) are skipped; a nested repository lints itself from
-its own root. The checker does not read the Makefile or `*.mk` files: read
-their comments against this page.
+tracked tree: the header and doc-comment caps, the header's title, tagline,
+URL, Authors and SPDX lines, a function documented twice, and the Banned
+vocabulary it can match. `--strict` adds single capitalised words used for
+emphasis, plan labels and the arguing words above, and counts an `@p` line and
+text on the `/**` line as prose. A word the code uses as a name (a BASIC
+keyword, the last part of a constant such as `TIKU_RESTART_NEVER`, a call such
+as `NOW()`) is not emphasis. `make lint` runs `--strict` over the whole tracked
+tree. A file git does not yet track is out of scope, so lint after staging. The
+vendor trees (`arch/*/cmsis`, `arch/*/mdk`) and the nested repositories
+(`drivers/`, `TikuBench/`, `tikukits/`) are skipped; a nested repository lints
+itself from its own root, without the header-lines rule. The checker does not
+read the Makefile or `*.mk` files: read their comments against this page.
 
 The desktop and its applications (the `applications` repository) follow this
 page with denser ceilings: a file header of at most 20 lines and a doc comment
