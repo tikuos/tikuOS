@@ -8,8 +8,8 @@
  * tiku_proc_vfs.c - VFS /proc subtree (process + driver observability).
  *
  * Shows the process registry, event-queue depth, the catalog of startable
- * processes and, when built, Wi-Fi, Bluetooth and worker-thread status.
- * tiku_proc_vfs_get() rebuilds the node tables on every call.
+ * processes and, when built, Wi-Fi and worker-thread status.  Each
+ * tiku_proc_vfs_get() call rebuilds the node tables.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -25,10 +25,10 @@
 #include <stdio.h>
 
 /*
- * /proc/wifi is compiled only with a wireless driver (the CYW43439 or the
- * ESP32-C61 radio): its readers call tiku_wireless_status(), which only a
- * driver defines.  PROC_WIFI_ENABLED gates the readers and the directory
- * entry.
+ * /proc/wifi is compiled only with a wireless driver
+ * (TIKU_DRV_WIFI_CYW43_ENABLE or TIKU_DRV_WIFI_ESP_ENABLE): its readers call
+ * tiku_wireless_status(), which only a driver defines.  PROC_WIFI_ENABLED
+ * gates the readers and the directory entry.
  */
 #if (defined(TIKU_DRV_WIFI_CYW43_ENABLE) && TIKU_DRV_WIFI_CYW43_ENABLE) || \
     (defined(TIKU_DRV_WIFI_ESP_ENABLE) && TIKU_DRV_WIFI_ESP_ENABLE)
@@ -191,11 +191,10 @@ static TIKU_RETAINED tiku_vfs_node_t
                         (unsigned long)tiku_process_sram_used(p));          \
     }
 
-/**
- * Generate proc_read_fram_<idx>(): backs /proc/<idx>/fram_used.
- *
- * Renders tiku_process_fram_used(): the declared bytes plus an attached
- * non-SRAM arena's usage; "0" when the slot is empty.
+/*
+ * Generate proc_read_fram_<idx>(): backs /proc/<idx>/fram_used.  Renders
+ * tiku_process_fram_used(): the declared bytes plus an attached non-SRAM
+ * arena's usage; "0" for an empty slot.
  */
 #define PROC_READ_FRAM(idx)                                                 \
     static int proc_read_fram_##idx(char *buf, size_t max)                  \
@@ -310,11 +309,10 @@ typedef struct {
     tiku_vfs_read_fn restart;
 } proc_readers_t;
 
-/**
- * Build a proc_readers_t initialiser wiring slot idx's handlers.
- *
- * Pairs each struct field with the matching proc_read_*_idx function
- * emitted by PROC_READERS(idx), and populates readers[] below.
+/*
+ * Build a proc_readers_t initialiser wiring slot idx's handlers: each field
+ * gets the matching proc_read_*_idx function PROC_READERS(idx) emitted.
+ * readers[] below is built from it.
  */
 #define READERS_ENTRY(idx)  {                                               \
     proc_read_name_##idx,                                                   \
@@ -339,7 +337,7 @@ static const proc_readers_t readers[TIKU_PROCESS_MAX] = {
 };
 
 /*---------------------------------------------------------------------------*/
-/* /proc/count READER                                                        */
+/* COUNT READER                                                              */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -351,7 +349,7 @@ static const proc_readers_t readers[TIKU_PROCESS_MAX] = {
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int proc_read_count(char *buf, size_t max)
 {
@@ -359,7 +357,7 @@ static int proc_read_count(char *buf, size_t max)
 }
 
 /*---------------------------------------------------------------------------*/
-/* /proc/queue READERS                                                       */
+/* QUEUE READERS                                                             */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -369,7 +367,7 @@ static int proc_read_count(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int proc_read_queue_length(char *buf, size_t max)
 {
@@ -385,7 +383,7 @@ static int proc_read_queue_length(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int proc_read_queue_space(char *buf, size_t max)
 {
@@ -400,18 +398,17 @@ static int proc_read_queue_space(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int proc_read_queue_dropped(char *buf, size_t max)
 {
     return snprintf(buf, max, "%u\n", tiku_process_queue_dropped());
 }
 
-/**
- * /proc/queue directory table: event-queue depth views.
- *
- * tiku_proc_vfs_get() attaches it as the "queue" directory's children with a
- * literal count of 3, which must match the entries here.
+/*
+ * /proc/queue directory table: event-queue depth views.  tiku_proc_vfs_get()
+ * attaches it as the "queue" directory's children with a literal count of 3,
+ * which must match the entries here.
  */
 static const tiku_vfs_node_t proc_queue_children[] = {
     { "length",  TIKU_VFS_FILE, proc_read_queue_length,  NULL, NULL, 0 },
@@ -420,7 +417,7 @@ static const tiku_vfs_node_t proc_queue_children[] = {
 };
 
 /*---------------------------------------------------------------------------*/
-/* /proc/wifi READERS                                                        */
+/* WIFI READERS                                                              */
 /*---------------------------------------------------------------------------*/
 /*
  * Each reader below calls tiku_wireless_status(), which copies the driver's
@@ -439,7 +436,7 @@ static const tiku_vfs_node_t proc_queue_children[] = {
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int proc_wifi_read_mac(char *buf, size_t max)
 {
@@ -459,7 +456,7 @@ static int proc_wifi_read_mac(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int proc_wifi_read_link(char *buf, size_t max)
 {
@@ -486,7 +483,7 @@ static int proc_wifi_read_link(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int proc_wifi_read_ssid(char *buf, size_t max)
 {
@@ -517,7 +514,7 @@ static int proc_wifi_read_ssid(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int proc_wifi_read_rssi(char *buf, size_t max)
 {
@@ -538,7 +535,7 @@ static int proc_wifi_read_rssi(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int proc_wifi_read_last_scan_ms(char *buf, size_t max)
 {
@@ -558,7 +555,7 @@ static int proc_wifi_read_last_scan_ms(char *buf, size_t max)
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int proc_wifi_read_last_join_ms(char *buf, size_t max)
 {
@@ -584,7 +581,7 @@ static const tiku_vfs_node_t proc_wifi_children[] = {
 #endif /* PROC_WIFI_ENABLED */
 
 /*---------------------------------------------------------------------------*/
-/* /proc/catalog READERS                                                     */
+/* CATALOG READERS                                                           */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -596,7 +593,7 @@ static const tiku_vfs_node_t proc_wifi_children[] = {
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return Bytes written, or -1 on error
+ * @return The full length of the text (snprintf-style)
  */
 static int proc_read_catalog_count(char *buf, size_t max)
 {
@@ -733,15 +730,6 @@ static void build_pid_files(uint8_t idx)
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Build and return the live /proc directory node.
- *
- * Rebuilds the whole subtree on every call, so it mirrors registry, catalog and
- * driver state at that instant.  On MSP430 the node tables are MPU-protected
- * FRAM, so the rebuild runs inside one unlock bracket.
- *
- * @return Pointer to the freshly rebuilt "proc" VFS directory node
- */
 const tiku_vfs_node_t *tiku_proc_vfs_get(void)
 {
     uint8_t i;
@@ -822,15 +810,6 @@ const tiku_vfs_node_t *tiku_proc_vfs_get(void)
     return &proc_root;
 }
 
-/**
- * @brief Return the current number of children under /proc.
- *
- * The /proc directory contains fixed nodes (count, queue, catalog,
- * plus wifi, bt and threads when built) plus one subdirectory per
- * registered process.
- *
- * @return Total child count (PROC_FIXED_KIDS + registered processes).
- */
 uint8_t tiku_proc_vfs_child_count(void)
 {
     return PROC_FIXED_KIDS + tiku_process_count();

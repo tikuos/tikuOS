@@ -108,7 +108,8 @@ typedef unsigned long tiku_clock_time_t;
 /**
  * @brief Initialize the system clock
  *
- * Delegates to tiku_clock_arch_init().
+ * Delegates to tiku_clock_arch_init(), which starts the periodic tick at
+ * TIKU_CLOCK_SECOND Hz.
  *
  * @note Call once during system boot.
  */
@@ -116,25 +117,35 @@ void tiku_clock_init(void);
 
 /**
  * @brief Get current clock time in ticks
- * @return Current tick count
+ *
+ * The arch tick ISR advances the count, and a tickless wake adds the ticks it
+ * slept through.
+ *
+ * @return Current tick count; it wraps at the maximum of tiku_clock_time_t
  */
 tiku_clock_time_t tiku_clock_time(void);
 
 /**
  * @brief Get current time in seconds
- * @return Seconds since system start
+ * @return Seconds since system start, from the arch's own count; most ports
+ *         keep it apart from the tick count, so it does not wrap with it
  */
 unsigned long tiku_clock_seconds(void);
 
 /**
  * @brief Busy-wait for specified clock ticks
+ *
+ * Spins for at least @p t ticks.
+ *
  * @param t Number of ticks to wait
  */
 void tiku_clock_wait(tiku_clock_time_t t);
 
 /**
  * @brief CPU delay in microsecond-scale units
- * @param dt Delay units (platform-specific calibration)
+ * @param dt Delay units: microseconds on most ports; on MSP430 and RA8P1 a
+ *           NOP-loop count whose length depends on the CPU clock.  ISR
+ *           jitter adds to any of them.
  */
 void tiku_clock_delay_usec(unsigned int dt);
 
@@ -148,8 +159,14 @@ void tiku_clock_delay_usec(unsigned int dt);
 unsigned char tiku_clock_fault(void);
 
 /*---------------------------------------------------------------------------*/
-/* TICKLESS IDLE (optional per-arch backend)                                 */
+/* TICKLESS IDLE                                                             */
 /*---------------------------------------------------------------------------*/
+
+/*
+ * A port with an always-on free-running time base overrides all three
+ * functions; tiku_clock.c's weak defaults never stretch, so the scheduler
+ * keeps its per-tick wake-ups.
+ */
 
 /**
  * @brief Stretch the next tick interrupt up to @p ticks_ahead away.

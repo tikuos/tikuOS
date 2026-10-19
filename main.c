@@ -51,25 +51,22 @@ extern const char tiku_basic_embedded_src[];
 /**
  * @brief Main application entry point
  *
- * Boots the system, starts the shell and loads the init entries when they are
- * built, builds the VFS tree, starts the drivers, runs the test suite when
- * TEST_ENABLE is set, then enters the scheduler loop.
+ * Turns the watchdog off and boots; then, each where built, the power autorun
+ * or turbo benchmark (neither returns), shell, embedded BASIC and init load;
+ * then the VFS tree, the drivers, tests or kit examples, and the scheduler.
  *
  * @return 0, reached only after tiku_sched_stop() ends the scheduler loop
  */
 int main(void) {
   int ret;
 
-  /* Step 1: Disable watchdog immediately (before any other init) */
+  /* The watchdog goes off before any other init: on MSP430 it runs from
+   * reset. */
   tiku_watchdog_off();
 
-  /* Step 2: Full system boot sequence (boot/tiku_boot.c)
-   *   - CPU bring-up and frequency configuration
-   *   - Memory init, then the saved CPU rate
-   *   - UART init (enables printf under GCC; no-op under CCS)
-   *   - Clock initialization
-   *   - Process subsystem, hardware timer, software timers (via scheduler)
-   */
+  /* The boot sequence (boot/tiku_boot.c): CPU and its rate; memory, then
+   * the saved CPU rate; the console and the system clock; then the
+   * scheduler, which starts processes and both timer services. */
   ret = tiku_cpu_full_init(MAIN_CPU_FREQ);
   if (ret != TIKU_BOOT_SUCCESS) {
     MAIN_PRINTF("ERROR: Boot failed at stage %d\n", ret);
@@ -94,9 +91,10 @@ int main(void) {
 #endif
 
 #if TIKU_TURBO_BENCH
-  /* Frequency-scaling benchmark firmware: run heavy TikuKits workloads at
-   * 96 MHz (LP) and 192 MHz (HP), emit serial markers for host-side timing,
-   * then halt (never reaches the shell/scheduler). */
+  /* Frequency-scaling benchmark firmware (TikuBench turbo_bench.c): runs
+   * TikuKits workloads after tiku_cpu_freq_init(96) and again after
+   * tiku_cpu_freq_init(192), which on Ambiq select low-power mode and turbo,
+   * prints serial markers the host times, then halts here. */
   {
     extern void turbo_bench_run(void);
     turbo_bench_run();
@@ -117,26 +115,23 @@ int main(void) {
 #endif
 
 #if TIKU_INIT_ENABLE
-  /* Load only; the shell process runs the entries on its first schedule
-   * (tiku_shell.c).  The parser's command table and the console backend are
-   * set up at process start, so an entry dispatched from here hits a NULL
-   * table and does nothing.  From the shell the entries also run after the
-   * driver registry and the VFS tree, as typed commands do. */
+  /* Loads the init entries without running them.  The shell process runs
+   * them in its first pass (tiku_shell.c), once its command table and
+   * console backend exist and after the VFS tree and the drivers below. */
   tiku_nvm_map_init();
   tiku_init_load();
 #endif
 
-  /* Initialize the VFS tree.  /proc is assembled here, once: a process
-   * registered after this point has no /proc/<pid> directory. */
+  /* /proc is assembled here, once: a process registered after this point
+   * has no /proc/<pid> directory. */
   ret = tiku_boot_vfs_init();
   if (ret != 0) {
     MAIN_PRINTF("ERROR: VFS assembly failed (%d)\n", ret);
     while (1) { /* halt */ }
   }
 
-  /* Hand off to the driver registry. With HAS_DRIVERS=0 the table
-   * is empty and this is a no-op; with a populated drivers/ tree
-   * each enabled driver's init() runs here. See drivers.md. */
+  /* Publishes /sys/drivers and runs init() of each driver in the table;
+   * with HAS_DRIVERS=0 the table is empty.  See drivers.md. */
   {
     extern void tiku_drv_init_all(void);
     tiku_drv_init_all();
@@ -154,7 +149,7 @@ int main(void) {
   MAIN_PRINTF("App mode active\n");
 #endif
 
-  /* Step 3: Enter the scheduler loop (dispatches events, runs protothreads) */
+  /* The scheduler loop dispatches events and runs the processes. */
   MAIN_PRINTF("Entering scheduler\n");
   tiku_sched_loop();
 

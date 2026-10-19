@@ -104,7 +104,7 @@ struct pt {
  * Declares PT_YIELD_FLAG, opens a block and resumes at the saved
  * continuation.  Code above it runs on every call.
  *
- * @note PT_BEGIN is the first statement of the protothread body.
+ * @note Place it above every other PT_* macro of the body.
  */
 #define PT_BEGIN(pt) {             \
   char PT_YIELD_FLAG = 1;          \

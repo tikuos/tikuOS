@@ -42,8 +42,9 @@
  * @typedef tiku_sched_idle_hook_t
  * @brief Optional hook called when the scheduler has no pending work.
  *
- * Called whenever there are no events and no timers due, typically to enter a
- * low-power mode.  It returns, and the scheduler re-checks for work.
+ * Called when no event is queued, no timer is due and no worker thread is
+ * ready; after tiku_sched_set_idle_tick_wakes(0), also no timer may be armed
+ * nor reclaim work pending.  It returns, and the scheduler re-checks for work.
  *
  * @note The scheduler calls it inside an atomic section, interrupts masked.
  */
@@ -77,10 +78,11 @@ void tiku_sched_start(struct tiku_process *p, tiku_event_data_t data);
 /**
  * @brief Run one scheduler iteration
  *
- * Dispatches one event from the process event queue.  Returns whether
- * any work was done.
+ * Runs the memory-reclaim poll when TIKU_MEM_RECLAIM_ENABLE, then dispatches
+ * one event from the process event queue (tiku_process_run()).
  *
- * @return 1 if an event was dispatched, 0 if idle
+ * @return 1 if an event was dequeued, a stale one dropped included, 0 if the
+ *         queue was empty
  */
 uint8_t tiku_sched_run_once(void);
 
@@ -88,8 +90,8 @@ uint8_t tiku_sched_run_once(void);
  * @brief Run the main scheduler loop until tiku_sched_stop().
  *
  * Starts the autostart processes (with TIKU_AUTOSTART_ENABLE), enables
- * interrupts and arms the hang detector, then dispatches events, calling the
- * idle hook when nothing is pending.
+ * interrupts and arms the hang detector, then dispatches events; when none is
+ * pending it hands the CPU to a ready worker thread or calls the idle hook.
  */
 void tiku_sched_loop(void);
 
@@ -107,17 +109,20 @@ void tiku_sched_stop(void);
  * Non-zero when the event queue is non-empty or a software timer is due.  A
  * timer armed for a future deadline is not pending work: the tick ISR wakes the
  * CPU when it arrives.
+ *
+ * @return 1 when there is work, 0 otherwise
  */
 uint8_t tiku_sched_has_pending(void);
 
 /**
  * @brief Register an idle hook
  *
- * The idle hook is called whenever the scheduler has drained the
- * event queue and no timers are immediately due. Typical usage is
- * to enter a platform-specific low-power mode.
+ * The scheduler calls it when it idles, as tiku_sched_idle_hook_t states;
+ * typically it enters a platform-specific low-power mode.
  *
  * @param hook Function to call when idle (NULL to clear)
+ * @note tiku_sched_init() replaces a hook set before it with the port's
+ *       TIKU_CPU_IDLE_LIGHT entry.
  */
 void tiku_sched_set_idle_hook(tiku_sched_idle_hook_t hook);
 

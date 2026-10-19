@@ -183,9 +183,6 @@ void tiku_timer_init(void) {
   TIMER_PRINTF("Init complete\n");
 }
 
-/* tiku_process_exit() calls this inside its atomic section, before
- * supervision can start the owner again.  The EXITED broadcast can be
- * dropped or arrive after a restart, so it cancels nothing. */
 void tiku_timer_cancel_process(const struct tiku_process *owner) {
   struct tiku_timer **pp = &timer_list;
   while (*pp != NULL) {

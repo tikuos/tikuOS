@@ -58,8 +58,8 @@ struct event_item {
 /*
  * The event queue ring: a fixed-size circular buffer written by post and poll,
  * possibly from an ISR, and drained one entry per run.  The slots are not
- * volatile because every access sits in an atomic section; only the head and
- * length indices are.
+ * volatile because every access sits in an atomic section; the head and
+ * length indices and the drop count are.
  */
 static struct event_item queue[TIKU_QUEUE_SIZE];
 
@@ -252,13 +252,6 @@ static void call_process(struct tiku_process *p, tiku_event_t ev,
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialize the process scheduler
- *
- * Resets the process list and event queue to their initial state.
- *
- * @note Call before interrupts are enabled.
- */
 void tiku_process_init(void)
 {
     uint8_t i;
@@ -285,16 +278,6 @@ void tiku_process_init(void)
     PROCESS_PRINTF("Init complete\n");
 }
 
-/**
- * @brief Start a process.
- *
- * Does nothing while @p p is running.  Otherwise, in an atomic section,
- * re-inits the protothread, moves to a new generation and links @p p at the
- * list head unless it is listed; a full queue gets INIT by a direct call.
- *
- * @param p    Process to start
- * @param data Data passed with the INIT event
- */
 void tiku_process_start(struct tiku_process *p, tiku_event_data_t data)
 {
     struct tiku_process *q;
@@ -357,15 +340,6 @@ static void supervisor_on_exit(struct tiku_process *p);
 #define TIKU_SUPERVISOR_WINDOW_TICKS  (5u * TIKU_CLOCK_SECOND)
 #endif
 
-/**
- * @brief Exit a process.
- *
- * Does nothing while @p p is not running.  Otherwise clears the running flag,
- * unlinks it and drops its queued events, timers and VFS watches in one atomic
- * section, then broadcasts EXITED and lets supervision restart it.
- *
- * @param p Process to exit
- */
 void tiku_process_exit(struct tiku_process *p)
 {
     struct tiku_process *q;
@@ -422,7 +396,7 @@ void tiku_process_exit(struct tiku_process *p)
 }
 
 /*---------------------------------------------------------------------------*/
-/* SUPERVISION                                                                */
+/* SUPERVISION                                                               */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -511,19 +485,6 @@ uint16_t tiku_process_restarts(const struct tiku_process *p)
     return (p != NULL) ? p->restart_total : 0u;
 }
 
-/**
- * @brief Post an event to a process.
- *
- * Appends to the ring tail inside an atomic section, so an ISR may call it;
- * run() delivers the event later, from process context.  A post refused for
- * lack of space counts in q_dropped.
- *
- * @param p    Target process (or TIKU_PROCESS_BROADCAST)
- * @param ev   Event identifier
- * @param data Event data
- * @return 1 if event posted, 0 if queue full or the memory-reclaim gate
- *         refuses the event for the target
- */
 uint8_t tiku_process_post(struct tiku_process *p, tiku_event_t ev,
                           tiku_event_data_t data)
 {
@@ -585,7 +546,7 @@ int tiku_process_reclaim_quiet(const struct tiku_process *p)
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* TYPED EVENT PAYLOADS                                                       */
+/* TYPED EVENT PAYLOADS                                                      */
 /*---------------------------------------------------------------------------*/
 
 tiku_event_payload_kind_t tiku_event_payload_kind(tiku_event_t ev)
@@ -627,13 +588,6 @@ struct tiku_timer *tiku_event_timer(tiku_event_t ev, tiku_event_data_t data)
                : NULL;
 }
 
-/**
- * @brief Extract the packed 32-bit integer payload carried by an event.
- *
- * @param ev    Event identifier.
- * @param data  Raw event payload word.
- * @return The u32 value, or 0 if @p ev does not carry a U32 payload.
- */
 uint32_t tiku_event_u32(tiku_event_t ev, tiku_event_data_t data)
 {
     return (tiku_event_payload_kind(ev) == TIKU_EVENT_PAYLOAD_U32)
@@ -641,13 +595,6 @@ uint32_t tiku_event_u32(tiku_event_t ev, tiku_event_data_t data)
                : 0u;
 }
 
-/**
- * @brief Extract the opaque application pointer carried by an event.
- *
- * @param ev    Event identifier.
- * @param data  Raw event payload word.
- * @return The pointer, or NULL if @p ev does not carry a PTR payload.
- */
 void *tiku_event_ptr(tiku_event_t ev, tiku_event_data_t data)
 {
     return (tiku_event_payload_kind(ev) == TIKU_EVENT_PAYLOAD_PTR) ? data : NULL;
@@ -667,15 +614,6 @@ uint8_t tiku_process_post_node(struct tiku_process *dest, tiku_event_t ev,
     return tiku_process_post(dest, ev, (tiku_event_data_t)(uintptr_t)node);
 }
 
-/**
- * @brief Run the process scheduler.
- *
- * Dequeues and dispatches one event; a stale unicast is dropped.  Only the
- * dequeue is atomic: the thread runs with the caller's interrupt state.  A
- * broadcast reads each next pointer before the call, which may unlink.
- *
- * @return 1 if an event was dequeued, 0 if the queue was empty
- */
 uint8_t tiku_process_run(void)
 {
     tiku_event_t ev;
@@ -706,6 +644,7 @@ uint8_t tiku_process_run(void)
     if (receiver == TIKU_PROCESS_BROADCAST) {
         struct tiku_process *p, *next;
         for (p = tiku_process_list_head; p != NULL; p = next) {
+            /* Read before the call, which may unlink p. */
             next = p->next;
             call_process(p, ev, data);
         }
@@ -718,18 +657,6 @@ uint8_t tiku_process_run(void)
 
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Dispatch one queued event, but never re-enter @p skip.
- *
- * For a long synchronous operation running inside @p skip's own dispatch: it
- * may pump the other processes so timers and rules keep firing, but must not
- * re-enter a protothread whose saved state points at its last yield.
- *
- * @param skip Process not to dispatch (typically TIKU_THIS()); NULL is a
- *             plain run
- * @return 1 if an event was dispatched or discarded, 0 if no eligible work
- *         exists
- */
 uint8_t tiku_process_run_except(const struct tiku_process *skip)
 {
     struct event_item item;
@@ -795,15 +722,6 @@ uint8_t tiku_process_queue_dispatchable_except(const struct tiku_process *skip)
     return ret;
 }
 
-/**
- * @brief Request a process to be polled.
- *
- * Enqueues a POLL unless one for @p p is already queued, so the queue holds
- * at most one POLL per target.  The scan and the enqueue share one atomic
- * section.
- *
- * @param p Process to poll
- */
 void tiku_process_poll(struct tiku_process *p)
 {
     uint8_t i;
@@ -926,15 +844,6 @@ static void call_process(struct tiku_process *p, tiku_event_t ev,
 
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Start all processes in a NULL-terminated array
- *
- * Calls tiku_process_start() with NULL data on each process but this boot's
- * hang culprit.  tiku_sched_loop() passes the TIKU_AUTOSTART_PROCESSES()
- * list.
- *
- * @param processes NULL-terminated array of process pointers
- */
 void tiku_autostart_start(struct tiku_process * const processes[])
 {
     int i;
@@ -957,11 +866,6 @@ void tiku_autostart_start(struct tiku_process * const processes[])
 /* QUEUE QUERY FUNCTIONS                                                     */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Return the number of free slots in the event queue
- *
- * @return Number of free slots
- */
 uint8_t tiku_process_queue_space(void)
 {
     uint8_t ret;
@@ -973,11 +877,6 @@ uint8_t tiku_process_queue_space(void)
     return ret;
 }
 
-/**
- * @brief Check if the event queue is full
- *
- * @return 1 if full, 0 otherwise
- */
 uint8_t tiku_process_queue_full(void)
 {
     uint8_t ret;
@@ -989,11 +888,6 @@ uint8_t tiku_process_queue_full(void)
     return ret;
 }
 
-/**
- * @brief Check if the event queue is empty
- *
- * @return 1 if empty, 0 otherwise
- */
 uint8_t tiku_process_queue_empty(void)
 {
     uint8_t ret;
@@ -1005,11 +899,6 @@ uint8_t tiku_process_queue_empty(void)
     return ret;
 }
 
-/**
- * @brief Return the number of pending events in the queue
- *
- * @return Number of queued events
- */
 uint8_t tiku_process_queue_length(void)
 {
     uint8_t ret;
@@ -1021,12 +910,6 @@ uint8_t tiku_process_queue_length(void)
     return ret;
 }
 
-/**
- * @brief Return the lifetime dropped-event count
- *
- * @return Events refused since boot because the queue (or the
- *         user-event budget) was full; wraps at 65535
- */
 uint16_t tiku_process_queue_dropped(void)
 {
     uint16_t ret;
@@ -1038,18 +921,6 @@ uint16_t tiku_process_queue_dropped(void)
     return ret;
 }
 
-/**
- * @brief Peek at an event in the queue without removing it.
- *
- * Reads the event and/or target process at position @p index in the
- * pending event queue.  Index 0 is the head (next to be dispatched).
- * The queue itself is not modified.
- *
- * @param index   Zero-based position in the queue (0 .. queue_length-1).
- * @param ev      Output: event value at that position (may be NULL).
- * @param target  Output: target process pointer (may be NULL).
- * @return 0 on success, -1 if @p index is out of range.
- */
 int8_t tiku_process_queue_peek(uint8_t index, tiku_event_t *ev,
                                struct tiku_process **target)
 {
@@ -1074,12 +945,6 @@ int8_t tiku_process_queue_peek(uint8_t index, tiku_event_t *ev,
     return 0;
 }
 
-/**
- * @brief Check if a process is running
- *
- * @param p Process to check
- * @return 1 if running, 0 otherwise
- */
 uint8_t tiku_process_is_running(struct tiku_process *p)
 {
     return p->is_running;
@@ -1102,15 +967,6 @@ static const char * const state_names[] = {
     "stopped"
 };
 
-/**
- * @brief Convert a process state enum to a printable string.
- *
- * A value above TIKU_PROCESS_STATE_STOPPED returns "unknown".  The pointer
- * is to static storage.
- *
- * @param state  Process state value
- * @return Static lowercase name, or "unknown" if out of range
- */
 const char *tiku_process_state_str(tiku_process_state_t state)
 {
     if (state > TIKU_PROCESS_STATE_STOPPED) {
@@ -1119,19 +975,6 @@ const char *tiku_process_state_str(tiku_process_state_t state)
     return state_names[state];
 }
 
-/**
- * @brief Register a process in the pid registry and start it.
- *
- * A process already registered returns its pid at once, not started again.
- * Otherwise it claims the first free slot, whose index becomes the pid, and
- * starts the process if it is not running.
- *
- * @param name  Human-readable name (NULL keeps the struct's name)
- * @param p     Process to register (NULL is rejected)
- * @return pid (0..TIKU_PROCESS_MAX-1) on success, -1 if @p p is NULL
- *         or the registry is full
- * @note Process context only; the list edit it triggers does its own locking.
- */
 int8_t tiku_process_register(const char *name, struct tiku_process *p)
 {
     uint8_t i;
@@ -1208,16 +1051,6 @@ uint32_t tiku_process_fram_used(const struct tiku_process *p)
     return (uint32_t)p->fram_used + process_measured(p, 0);
 }
 
-/**
- * @brief Look up a registered process by pid
- *
- * Returns the slot contents after a bounds check; a never-used pid reads
- * NULL.
- *
- * @param pid  Process identifier (0..TIKU_PROCESS_MAX-1)
- * @return Pointer to the process, or NULL if pid is out of range or
- *         the slot is empty
- */
 struct tiku_process *tiku_process_get(int8_t pid)
 {
     if (pid < 0 || pid >= TIKU_PROCESS_MAX) {
@@ -1226,18 +1059,6 @@ struct tiku_process *tiku_process_get(int8_t pid)
     return registry[pid];
 }
 
-/**
- * @brief Stop a registered process by pid.
- *
- * Marks it STOPPED and clears the running flag.  It stays on the list, keeps
- * its queued events, timers and watches, and broadcasts nothing; dispatch
- * drops what reaches it until resume().
- *
- * @param pid  Process identifier
- * @return 0 on success, -1 if the pid does not resolve to a process
- * @note tiku_process_resume() continues it where it yielded;
- *       tiku_process_start() restarts it from the top.
- */
 int8_t tiku_process_stop(int8_t pid)
 {
     struct tiku_process *p;
@@ -1255,16 +1076,6 @@ int8_t tiku_process_stop(int8_t pid)
     return 0;
 }
 
-/**
- * @brief Resume a previously stopped process by pid.
- *
- * STOPPED comes from stop() or exit(), so the node may still be listed; this
- * re-links only if absent, avoiding a cycle.  A process that ended itself
- * restarts from the top on the CONTINUE; any other resumes where it yielded.
- *
- * @param pid  Process identifier
- * @return 0 on success, -1 if the pid is unknown or not STOPPED
- */
 int8_t tiku_process_resume(int8_t pid)
 {
     struct tiku_process *p;
@@ -1286,7 +1097,8 @@ int8_t tiku_process_resume(int8_t pid)
         }
     }
 
-    /* Re-add to list if it was removed (e.g., by tiku_process_exit) */
+    /* tiku_process_stop() leaves the process listed and tiku_process_exit()
+     * unlinks it; linking a listed process again would make a cycle. */
     if (!in_list) {
         p->next = tiku_process_list_head;
         tiku_process_list_head = p;
@@ -1302,14 +1114,6 @@ int8_t tiku_process_resume(int8_t pid)
     return 0;
 }
 
-/**
- * @brief Count the occupied registry slots.
- *
- * The number of registered processes, STOPPED ones included since they keep
- * their slot -- so it can exceed the number currently on the active list.
- *
- * @return Number of registered processes (0..TIKU_PROCESS_MAX)
- */
 uint8_t tiku_process_count(void)
 {
     uint8_t i;
@@ -1365,17 +1169,6 @@ name_match(const char *a, const char *b)
     return (*a == *b);
 }
 
-/**
- * @brief Add (or update) a catalog entry mapping a name to a process.
- *
- * Advertises the process without starting it; an entry with the same name is
- * updated in place.  The name pointer is stored, not copied, and must stay
- * valid for the life of the program.
- *
- * @param name  Human-readable name (e.g. "net", "mqtt"); NULL rejected
- * @param proc  Process struct to advertise; NULL rejected
- * @return 0 on success or update, -1 on NULL argument or full catalog
- */
 int8_t
 tiku_process_catalog_add(const char *name, struct tiku_process *proc)
 {
@@ -1403,15 +1196,6 @@ tiku_process_catalog_add(const char *name, struct tiku_process *proc)
     return 0;
 }
 
-/**
- * @brief Look up a catalog entry by name.
- *
- * A linear scan of the catalog on exact equality; find_by_name() searches the
- * pid registry instead.
- *
- * @param name  Process name to search for (NULL yields NULL)
- * @return Pointer to the advertised process, or NULL if not catalogued
- */
 struct tiku_process *
 tiku_process_catalog_find(const char *name)
 {
@@ -1429,27 +1213,12 @@ tiku_process_catalog_find(const char *name)
     return NULL;
 }
 
-/**
- * @brief Return the number of catalog entries
- *
- * @return Current value of catalog_count (0..TIKU_PROCESS_CATALOG_MAX)
- */
 uint8_t
 tiku_process_catalog_count(void)
 {
     return catalog_count;
 }
 
-/**
- * @brief Fetch a catalog entry by index.
- *
- * A bounds-checked accessor for iterating the catalog.  The pointer aliases the
- * internal table and stays valid while the catalog is unmodified; callers must
- * not write through it.
- *
- * @param idx  Index in [0, tiku_process_catalog_count())
- * @return Pointer to the entry, or NULL if @p idx is out of range
- */
 const tiku_process_catalog_entry_t *
 tiku_process_catalog_get(uint8_t idx)
 {
@@ -1459,16 +1228,6 @@ tiku_process_catalog_get(uint8_t idx)
     return &catalog[idx];
 }
 
-/**
- * @brief Find a registered process by name.
- *
- * A linear scan of the pid registry on exact equality, STOPPED entries
- * included; nameless entries are skipped.  A process started without
- * tiku_process_register() is not found.
- *
- * @param name  Process name to search for (NULL yields NULL)
- * @return Pointer to the registered process, or NULL if none matches
- */
 struct tiku_process *
 tiku_process_find_by_name(const char *name)
 {
@@ -1491,14 +1250,6 @@ tiku_process_find_by_name(const char *name)
 /* CHANNEL FUNCTIONS                                                         */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialize a channel
- *
- * @param ch       Channel to initialize
- * @param buf      Pointer to caller-provided storage
- * @param msg_size Size of each message in bytes
- * @param capacity Maximum number of messages
- */
 void tiku_channel_init(struct tiku_channel *ch, void *buf,
                        uint8_t msg_size, uint8_t capacity)
 {
@@ -1509,15 +1260,6 @@ void tiku_channel_init(struct tiku_channel *ch, void *buf,
     ch->count    = 0;
 }
 
-/**
- * @brief Put a message into a channel
- *
- * Callable from an ISR: the copy runs in an atomic section.
- *
- * @param ch  Channel to put message into
- * @param msg Pointer to message data (msg_size bytes copied)
- * @return 1 if message stored, 0 if channel is full
- */
 uint8_t tiku_channel_put(struct tiku_channel *ch, const void *msg)
 {
     uint8_t tail;
@@ -1537,15 +1279,6 @@ uint8_t tiku_channel_put(struct tiku_channel *ch, const void *msg)
     return 1;
 }
 
-/**
- * @brief Get a message from a channel
- *
- * Callable from an ISR: the copy runs in an atomic section.
- *
- * @param ch  Channel to read from
- * @param out Pointer to destination buffer (msg_size bytes copied)
- * @return 1 if a message was retrieved, 0 if channel is empty
- */
 uint8_t tiku_channel_get(struct tiku_channel *ch, void *out)
 {
     tiku_atomic_enter();
@@ -1563,12 +1296,6 @@ uint8_t tiku_channel_get(struct tiku_channel *ch, void *out)
     return 1;
 }
 
-/**
- * @brief Check if a channel is empty
- *
- * @param ch Channel to check
- * @return 1 if empty, 0 otherwise
- */
 uint8_t tiku_channel_is_empty(struct tiku_channel *ch)
 {
     uint8_t ret;
@@ -1580,12 +1307,6 @@ uint8_t tiku_channel_is_empty(struct tiku_channel *ch)
     return ret;
 }
 
-/**
- * @brief Return the number of free slots in a channel
- *
- * @param ch Channel to check
- * @return Number of free message slots
- */
 uint8_t tiku_channel_free(struct tiku_channel *ch)
 {
     uint8_t ret;

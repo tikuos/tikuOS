@@ -8,8 +8,8 @@
  * tiku_proc_vfs.h - VFS /proc subtree registration.
  *
  * /proc shows the process registry, the event queue, the process catalog and
- * optional radio and worker-thread status.  The VFS root assembly calls
- * tiku_proc_vfs_get() for the top-level directory.
+ * optional Wi-Fi and worker-thread status.  tiku_vfs_tree_init() copies the
+ * node tiku_proc_vfs_get() returns into the root.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,23 +20,26 @@
 #include <kernel/vfs/tiku_vfs.h>
 
 /**
- * @brief Get the /proc VFS directory node.
+ * @brief Build the /proc VFS directory node from the registry and catalog.
  *
- * Rebuilt from scratch on each call, so it reflects the current registry,
- * catalog and driver state.  The node and its children are static storage,
- * so the next call rebuilds what this one returned in place.
+ * Each call rebuilds the node and its children in place, in static storage.
+ * tiku_vfs_tree_init() copies the node, so the mounted /proc has a directory
+ * for each process registered at tree assembly and for no later one.
  *
  * @return Pointer to the "proc" VFS directory node
+ * @note Opens its own NVM unlock window (the tables are MPU-protected FRAM on
+ *       MSP430) and restores the previous protection state.
  */
 const tiku_vfs_node_t *tiku_proc_vfs_get(void);
 
 /**
- * @brief Get the number of child nodes under /proc.
+ * @brief Number of children a rebuild of /proc would give it now.
  *
- * The count /proc would have right now: the fixed entries plus one directory
- * per registered process, computed from the registry without a rebuild.
+ * Computed from the registry without a rebuild; the mounted /proc keeps the
+ * count of tree assembly.
  *
- * @return child_count of the /proc directory node
+ * @return The fixed entries (count, queue, catalog, and wifi and threads when
+ *         built) plus one per registered process
  */
 uint8_t tiku_proc_vfs_child_count(void);
 

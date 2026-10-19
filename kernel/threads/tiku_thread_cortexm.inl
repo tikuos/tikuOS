@@ -22,8 +22,10 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* REGISTERS (architectural -- same on M4F / M33 / M55 / M85)                */
+/* REGISTERS                                                                 */
 /*---------------------------------------------------------------------------*/
+
+/* Architectural addresses, the same on M4F, M33, M55 and M85. */
 
 #define SCB_ICSR    (*(volatile uint32_t *)0xE000ED04UL)
 #define ICSR_PENDSVSET      (1UL << 28)
@@ -40,7 +42,7 @@
 #define FPCCR_LSPEN         (1UL << 30)
 
 /*---------------------------------------------------------------------------*/
-/* CYCLE SOURCE (default: DWT CYCCNT)                                        */
+/* CYCLE SOURCE                                                              */
 /*---------------------------------------------------------------------------*/
 /*
  * Per-thread accounting needs a free-running CPU-speed counter.  DWT
@@ -87,8 +89,10 @@ uint32_t tiku_thread_arch_cycles(void)
 static uint32_t s_isr_stack[512] __attribute__((aligned(8)));
 
 /*---------------------------------------------------------------------------*/
-/* BACKEND API (see externs in kernel/threads/tiku_thread.c)                 */
+/* BACKEND API                                                               */
 /*---------------------------------------------------------------------------*/
+
+/* The functions kernel/threads/tiku_thread.c declares extern. */
 
 /**
  * @brief Migrate the calling (kernel) context from MSP to PSP in place.
@@ -180,10 +184,11 @@ uint32_t *tiku_thread_arch_frame_init(uint32_t *stack_top,
 }
 
 /*---------------------------------------------------------------------------*/
-/* PENDSV -- THE SWITCH                                                      */
+/* CONTEXT SWITCH                                                            */
 /*---------------------------------------------------------------------------*/
 
-/** Policy hop: kernel/threads/tiku_thread.c picks the next context. */
+/** Defined in kernel/threads/tiku_thread.c: parks the outgoing context and
+ *  returns the sp of the one to run next. */
 extern uint32_t *tiku_thread_switch(uint32_t *old_sp);
 
 /**

@@ -23,7 +23,7 @@
 #include "tiku.h"
 
 /*---------------------------------------------------------------------------*/
-/* CONSTANTS AND MACROS                                                     */
+/* CONSTANTS AND MACROS                                                      */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -34,12 +34,13 @@
 
 /**
  * @def TIKU_BOOT_ERROR
- * @brief Failure code for a boot stage; no stage in tiku_boot.c returns it
+ * @brief Return value of a boot stage that failed, and of the sequence it
+ *        stopped
  */
 #define TIKU_BOOT_ERROR     -1
 
 /*---------------------------------------------------------------------------*/
-/* TYPE DEFINITIONS                                                         */
+/* TYPE DEFINITIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -56,24 +57,29 @@ typedef enum {
 } tiku_boot_stage_e;
 
 /*---------------------------------------------------------------------------*/
-/* FUNCTION PROTOTYPES                                                      */
+/* FUNCTION PROTOTYPES                                                       */
 /*---------------------------------------------------------------------------*/
 
 
 /**
  * @brief Run the boot sequence: CPU, memory, peripherals, then services.
  *
- * Ambiq, RP2350, Nordic and ESP32-C61 builds return with interrupts
- * unmasked; on the other ports tiku_sched_loop() unmasks them.
+ * Stops at the first stage that fails.  Every port but MSP430 (the #if
+ * before boot_complete is set) returns with interrupts unmasked; on MSP430
+ * tiku_sched_loop() unmasks them.
  *
- * @param cpu_freq Target CPU frequency in MHz
- * @return TIKU_BOOT_SUCCESS, the only value any stage returns
+ * @param cpu_freq Boot CPU rate (MAIN_CPU_FREQ): MHz, or on MSP430 an index
+ *                 into the DCO presets
+ * @return TIKU_BOOT_SUCCESS, or TIKU_BOOT_ERROR when the memory or peripheral
+ *         stage finds that a flash, PSRAM or console the port needs did not
+ *         start
  */
 int tiku_cpu_full_init(unsigned int cpu_freq);
 
 /**
  * @brief Stage the boot sequence has reached; /sys/boot reports it.
- * @return The stage, TIKU_BOOT_STAGE_COMPLETE once the sequence has run
+ * @return The stage: the one that failed when the sequence stopped,
+ *         TIKU_BOOT_STAGE_COMPLETE once every stage has run
  */
 tiku_boot_stage_e tiku_boot_get_stage(void);
 

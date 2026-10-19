@@ -81,13 +81,6 @@ static uint8_t           lc_nvm_next_slot;
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialize the LC persistent store
- *
- * Scans the durable store for magic-validated entries that
- * survived a power cycle.  Invalid entries are cleared.
- * Later calls do nothing.
- */
 void tiku_lc_persist_init(void)
 {
     uint16_t mpu_state;
@@ -134,16 +127,6 @@ void tiku_lc_persist_init(void)
     lc_persist_initialized = 1;
 }
 
-/**
- * @brief Register a persistent LC slot under a key.
- *
- * Claims the next chunk of the pool and registers it.  An existing key, from
- * this boot or recovered at init, is left as it is, slot and value.
- *
- * @param key  Null-terminated key (at most TIKU_PERSIST_MAX_KEY_LEN - 1 chars)
- * @return 0 on success, -1 if store not initialized,
- *         -2 if pool exhausted, -3 on persist error
- */
 int tiku_lc_persist_register(const char *key)
 {
     tiku_mem_err_t err;
@@ -184,17 +167,6 @@ int tiku_lc_persist_register(const char *key)
     return 0;
 }
 
-/**
- * @brief Save an lc_t value to NVM.
- *
- * Writes the continuation line, updating both the data slot and the durable
- * entry metadata, inside an MPU unlock window of its own: LC_SET_PERSISTENT
- * calls it with NVM locked.
- *
- * @param key  Key previously registered with tiku_lc_persist_register
- * @param val  The lc_t value (line number) to persist
- * @return 0 on success, negative on error
- */
 int tiku_lc_persist_save(const char *key, lc_t val)
 {
     uint16_t mpu_state;
@@ -209,18 +181,6 @@ int tiku_lc_persist_save(const char *key, lc_t val)
     return (int)err;
 }
 
-/**
- * @brief Load an lc_t value from NVM.
- *
- * Returns -1 when the key is unknown or holds no value (first boot, after a
- * clear) or holds 0 (after a reset); LC_RESUME_PERSISTENT then starts at
- * case 0.  Opens no MPU window.
- *
- * @param key  Key previously registered with tiku_lc_persist_register
- * @param val  Output: the stored lc_t value, 0 after a reset; unchanged when
- *             the key is unknown or holds no value
- * @return 0 on success, -1 if not found or empty
- */
 int tiku_lc_persist_load(const char *key, lc_t *val)
 {
     uint8_t buf[sizeof(lc_t)];
@@ -243,16 +203,6 @@ int tiku_lc_persist_load(const char *key, lc_t *val)
     return 0;
 }
 
-/**
- * @brief Clear the NVM entry for a key
- *
- * Deletes the key's entry, inside an MPU unlock window of its own, since the
- * entry metadata is write-protected durable memory.  The pool slot is not
- * freed: lc_nvm_next_slot only grows for the rest of the boot.
- *
- * @param key  Key to clear
- * @return 0 on success, negative on error
- */
 int tiku_lc_persist_clear(const char *key)
 {
     uint16_t mpu_state;
@@ -265,15 +215,6 @@ int tiku_lc_persist_clear(const char *key)
     return rc;
 }
 
-/**
- * @brief Reset the NVM value to 0 without deleting the entry.
- *
- * A load then reports the key as not set, and the key stays registered, so
- * later saves succeed.  Opens its own MPU unlock window.
- *
- * @param key  Key to reset
- * @return 0 on success, negative on error
- */
 int tiku_lc_persist_reset(const char *key)
 {
     lc_t zero = 0;

@@ -52,13 +52,6 @@ static uint8_t idle_tick_wakes = 1;
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialize the scheduler and all managed subsystems.
- *
- * Initialises the process system, the hardware timer and the software timers,
- * in that order: tiku_timer_init() starts a process, which needs the process
- * system in place.
- */
 void tiku_sched_init(void)
 {
     sched_state = TIKU_SCHED_RUNNING;
@@ -75,6 +68,7 @@ void tiku_sched_init(void)
     tiku_sched_set_idle_tick_wakes(
         (uint8_t)tiku_cpu_idle_mode_wakes_on_tick(TIKU_CPU_IDLE_LIGHT));
 
+    /* The process system comes first: tiku_timer_init() starts a process. */
     SCHED_PRINTF("Init: process subsystem\n");
     tiku_process_init();
     SCHED_PRINTF("Init: hardware timer\n");
@@ -86,11 +80,6 @@ void tiku_sched_init(void)
 
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Start a process through the scheduler.
- *
- * Wrapper around tiku_process_start() that adds debug tracing.
- */
 void tiku_sched_start(struct tiku_process *p, tiku_event_data_t data)
 {
     SCHED_PRINTF("Started: %s\n", p->name);
@@ -99,15 +88,6 @@ void tiku_sched_start(struct tiku_process *p, tiku_event_data_t data)
 
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Run one scheduler iteration.
- *
- * Runs the memory-reclaim poll when TIKU_MEM_RECLAIM_ENABLE, then dispatches
- * one event.  It queues no timer POLL, since one on every pass keeps the loop
- * from idling; the tick and timer_insert() poll the timer process.
- *
- * @return 1 if an event was dispatched, 0 if idle
- */
 uint8_t tiku_sched_run_once(void)
 {
 #if TIKU_MEM_RECLAIM_ENABLE
@@ -118,13 +98,6 @@ uint8_t tiku_sched_run_once(void)
 
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Main scheduler loop.
- *
- * Drain every pending event, then idle until an interrupt wakes the CPU.  The
- * idle hook runs inside an atomic section so no interrupt is lost between the
- * "is there work?" check and the low-power entry, which the HAL makes atomic.
- */
 void tiku_sched_loop(void)
 {
     SCHED_PRINTF("Entering scheduler loop\n");
@@ -241,7 +214,6 @@ void tiku_sched_loop(void)
 
 /*---------------------------------------------------------------------------*/
 
-/** @brief Signal the scheduler to stop its main loop. */
 void tiku_sched_stop(void)
 {
     SCHED_PRINTF("Stopped\n");
@@ -250,13 +222,6 @@ void tiku_sched_stop(void)
 
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Check if the scheduler has dispatchable work right now.
- *
- * Non-zero when the event queue is non-empty or a software timer is due.  A
- * timer merely armed for a future deadline is not pending work -- the tick ISR
- * posts its poll when the deadline arrives.
- */
 uint8_t tiku_sched_has_pending(void)
 {
     if (!tiku_process_queue_empty()) {
@@ -272,19 +237,16 @@ uint8_t tiku_sched_has_pending(void)
 
 /*---------------------------------------------------------------------------*/
 
-/** @brief Register a callback invoked when the scheduler is idle. */
 void tiku_sched_set_idle_hook(tiku_sched_idle_hook_t hook)
 {
     idle_hook = hook;
 }
 
-/** @brief Get the idle hook the scheduler calls. */
 tiku_sched_idle_hook_t tiku_sched_get_idle_hook(void)
 {
     return idle_hook;
 }
 
-/** @brief Declare whether the registered idle mode wakes on the tick. */
 void tiku_sched_set_idle_tick_wakes(uint8_t wakes)
 {
     idle_tick_wakes = wakes ? 1u : 0u;
@@ -292,24 +254,16 @@ void tiku_sched_set_idle_tick_wakes(uint8_t wakes)
 
 /*---------------------------------------------------------------------------*/
 
-/** @brief Return the number of idle entries since boot. */
 uint16_t tiku_sched_idle_count(void)
 {
     return idle_count;
 }
 
-/**
- * @brief The tick: wake the timer process if a timer exists, and give
- *        the kernel thread its turn.
- *
- * With workers, the tick is preemption: a spinning worker is displaced
- * only because the kernel thread is woken here, whether or not a timer
- * exists.
- */
 void tiku_sched_notify(void)
 {
     tiku_timer_request_poll();
 #if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
+    /* A spinning worker is displaced only by this wake, timer or no timer. */
     tiku_thread_kernel_wake();
 #endif
 }

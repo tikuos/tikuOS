@@ -7,9 +7,9 @@
  *
  * tiku_htimer.h - Hardware timer abstraction interface
  *
- * ISR-driven, single-shot hardware timer: 1 MHz on most ports, 16384 Hz on
- * Ambiq, MCLK / 8 on MSP430 by default.  Only one htimer can be active at a
- * time; callbacks run in interrupt context and may reschedule.
+ * ISR-driven, single-shot hardware timer at TIKU_HTIMER_SECOND ticks per
+ * second, which each port sets (1 MHz on most).  Only one htimer can be active
+ * at a time; callbacks run in interrupt context and may reschedule.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -122,9 +122,11 @@ int tiku_htimer_set(struct tiku_htimer *ht, tiku_htimer_clock_t time,
 /**
  * @brief Schedule a single-shot hardware timer without the guard-time check.
  *
- * For back-to-back rescheduling from inside a callback, with a margin the
- * caller has checked itself.
+ * Takes tiku_htimer_set()'s arguments.  For back-to-back rescheduling from
+ * inside a callback, with a margin the caller has checked itself.
  *
+ * @return TIKU_HTIMER_OK, or TIKU_HTIMER_ERR_INVALID for a NULL @p ht or
+ *         @p func
  * @note ISR context only (inside an htimer callback); elsewhere a missed
  *       compare drops the timer silently.
  */
@@ -133,6 +135,9 @@ int tiku_htimer_set_no_guard(struct tiku_htimer *ht, tiku_htimer_clock_t time,
 
 /**
  * @brief Cancel the pending hardware timer
+ *
+ * The compare interrupt stays armed; when it fires, no callback runs.
+ *
  * @return TIKU_HTIMER_OK if cancelled, TIKU_HTIMER_ERR_NONE if nothing pending
  */
 int tiku_htimer_cancel(void);
@@ -146,17 +151,19 @@ int tiku_htimer_is_scheduled(void);
 /**
  * @brief Run the pending callback (called from platform ISR only)
  *
- * The platform timer interrupt handler calls this when the
- * compare-match fires.  The callback may reschedule with
- * tiku_htimer_set(), which programs the next interrupt.
+ * The platform timer interrupt handler calls this when the compare-match
+ * fires; with nothing pending it returns.  The pending timer is cleared before
+ * its callback runs, so the callback may reschedule with tiku_htimer_set().
  *
  * @warning Only call from the hardware timer ISR.
  */
 void tiku_htimer_run_next(void);
 
 /*---------------------------------------------------------------------------*/
-/* PLATFORM INTERFACE (implemented per-architecture)                         */
+/* PLATFORM INTERFACE                                                        */
 /*---------------------------------------------------------------------------*/
+
+/* Each port implements these. */
 
 /** Initialize platform timer hardware */
 void tiku_htimer_arch_init(void);

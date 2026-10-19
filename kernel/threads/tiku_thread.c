@@ -31,8 +31,10 @@
 #include <kernel/process/tiku_process.h>  /* an exit polls its waiter */
 
 /*---------------------------------------------------------------------------*/
-/* ARCH BACKEND INTERFACE (arch/<family>/tiku_thread_arch.c)                 */
+/* ARCH BACKEND INTERFACE                                                    */
 /*---------------------------------------------------------------------------*/
+
+/* Each port defines these in its arch/<family>/tiku_thread_arch.c. */
 
 /** One-time bring-up (on Cortex-M: ISR stack, MSP->PSP migration, PendSV
  *  priority, cycle counter).  Runs in kernel (thread) context. */
@@ -120,14 +122,6 @@ static void wake_due(void)
 /* THE SWITCH                                                                */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Non-zero in kernel-thread (or pre-thread boot) context, zero in a
- *        worker.
- *
- * TIKU_MEM_KERNEL_ONLY tests it: memory mutators refuse calls from a worker,
- * since the kernel's structures take no locks.  It only reads two variables,
- * so any context may call it, an ISR included.
- */
 int tiku_thread_in_kernel(void)
 {
     return !s_started || s_current == (tiku_thread_t *)0;
@@ -142,8 +136,9 @@ int tiku_thread_in_kernel(void)
  *
  * @param old_sp  Stack pointer of the context being switched out.
  * @return The stack pointer of the context to switch in.
- * @note Called only from the arch switch exception (PendSV, or the ESP32-C61
- *       software interrupt), which runs at the lowest priority.
+ * @note Called only from the switch exception tiku_thread_arch_pend() pends:
+ *       PendSV, at the lowest priority, on Cortex-M; a software interrupt on
+ *       the RISC-V ports.
  */
 uint32_t *tiku_thread_switch(uint32_t *old_sp)
 {
@@ -426,7 +421,7 @@ int tiku_thread_await(tiku_thread_t *t, struct tiku_process *p)
 }
 
 /*---------------------------------------------------------------------------*/
-/* ENERGY BUDGET                                                             */
+/* CYCLE BUDGET                                                              */
 /*---------------------------------------------------------------------------*/
 
 /*
@@ -516,7 +511,7 @@ int tiku_thread_wait(tiku_waitq_t *q, unsigned long ticks)
     q->waiters |= bit;
     if (self != (tiku_thread_t *)0) {
         /* Off the CPU until a wake clears the bit, or the switcher sees the
-         * deadline; the switch fires as the atomic section opens. */
+         * deadline; the pended switch fires at tiku_atomic_exit() below. */
         self->timed = (uint8_t)(ticks != 0u);
         self->wake_at = until;
         self->state = TIKU_THREAD_BLOCKED;

@@ -166,9 +166,9 @@ typedef uint16_t lc_t;
 /**
  * @brief Initialize the persistent local-continuation store.
  *
- * Recovers entries that survived a power cycle by validating their magic, and
- * restores the pool's next-free index from them so a fresh registration cannot
- * collide with a recovered slot.
+ * Keeps the entries that survived a power cycle with a valid magic and a slot
+ * in the pool, clears the rest, and restores the pool's next-free index from
+ * them so a fresh registration cannot collide with a recovered slot.
  *
  * @note Call at boot, before register/save/load; later calls do nothing.
  */
@@ -192,8 +192,9 @@ int tiku_lc_persist_register(const char *key);
 /**
  * @brief Save a continuation value to NVM under @p key
  *
- * Writes @p val into the NVM slot bound to @p key, inside an MPU unlock
- * window of its own.
+ * Writes @p val into the NVM slot bound to @p key and updates the entry's
+ * durable metadata, inside an MPU unlock window of its own, so a caller with
+ * NVM locked (LC_SET_PERSISTENT) may call it.
  *
  * @param key Null-terminated key previously registered
  * @param val Continuation value to persist (typically a line number)
@@ -210,8 +211,7 @@ int tiku_lc_persist_save(const char *key, lc_t val);
  * @param key Null-terminated key previously registered
  * @param val Output: the stored value; unchanged when the key is unknown
  *            or holds no value, 0 when the checkpoint was reset
- * @return 0 on success,
- *         negative if the key is unknown or its stored value is zero
+ * @return 0 on success, -1 if the key is unknown or holds no value or zero
  */
 int tiku_lc_persist_load(const char *key, lc_t *val);
 

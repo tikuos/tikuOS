@@ -56,15 +56,15 @@
 
 
 /*---------------------------------------------------------------------------*/
-/* PRIVATE CONSTANTS                                                        */
+/* PRIVATE CONSTANTS                                                         */
 /*---------------------------------------------------------------------------*/
 
-/* Boot timeout in milliseconds.  No code reads it. */
+/* No code reads this constant; the boot sequence has no timeout. */
 #define TIKU_BOOT_TIMEOUT_MS    5000
 
 
 /*---------------------------------------------------------------------------*/
-/* PRIVATE VARIABLES                                                        */
+/* PRIVATE VARIABLES                                                         */
 /*---------------------------------------------------------------------------*/
 
 /** Current boot stage */
@@ -74,7 +74,7 @@ static tiku_boot_stage_e current_boot_stage = TIKU_BOOT_STAGE_INIT;
 static volatile int boot_complete = 0;
 
 /*---------------------------------------------------------------------------*/
-/* PRIVATE FUNCTION PROTOTYPES                                              */
+/* PRIVATE FUNCTION PROTOTYPES                                               */
 /*---------------------------------------------------------------------------*/
 
 static int tiku_boot_init_cpu(unsigned int cpu_freq);
@@ -83,12 +83,9 @@ static int tiku_boot_init_peripherals(void);
 static int tiku_boot_init_services(void);
 
 /*---------------------------------------------------------------------------*/
-/* PUBLIC FUNCTIONS                                                         */
+/* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/*
- * @brief Run the boot sequence: CPU, memory, peripherals, then services.
- */
 int
 tiku_cpu_full_init(unsigned int cpu_freq)
 {
@@ -154,15 +151,16 @@ tiku_cpu_full_init(unsigned int cpu_freq)
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
     defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
     defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32P4)
-    /* The Cortex-M reset handlers mask interrupts (cpsid i in
-     * tiku_crt_early.c), so no ISR runs against half-built kernel state.
-     * Everything an ISR touches exists once tiku_sched_init() has built the
-     * process queue, and interrupts are unmasked here for work that runs
-     * before or instead of the scheduler: TEST_ENABLE, TIKU_TURBO_BENCH, the
-     * power autorun, embedded BASIC.  With interrupts masked the tick does
-     * not advance, and WFI wakes on a pending IRQ without running its ISR.
-     * tiku_sched_loop() unmasks again; the call is idempotent.  On MSP430
-     * GIE stays clear until tiku_sched_loop() sets it. */
+    /* Interrupts stay masked from reset to here (cpsid i in each Cortex-M
+     * tiku_crt_early.c, mstatus.MIE clear on the RISC-V ports), so no ISR
+     * runs against half-built kernel state.  Everything an ISR touches exists
+     * once tiku_sched_init() has built the process queue, and interrupts are
+     * unmasked here for work that runs before or instead of the scheduler:
+     * TEST_ENABLE, TIKU_TURBO_BENCH, the power autorun, embedded BASIC.  With
+     * interrupts masked the tick does not advance, and WFI wakes on a pending
+     * IRQ without running its ISR.  tiku_sched_loop() unmasks again; the call
+     * is idempotent.  On MSP430 GIE stays clear until tiku_sched_loop() sets
+     * it. */
     tiku_cpu_irq_enable();
 #endif
 
@@ -172,18 +170,12 @@ tiku_cpu_full_init(unsigned int cpu_freq)
     return TIKU_BOOT_SUCCESS;
 }
 
-/**
- * @brief Stage the boot sequence has reached.
- */
 tiku_boot_stage_e
 tiku_boot_get_stage(void)
 {
     return current_boot_stage;
 }
 
-/**
- * @brief Whether tiku_cpu_full_init() has run every stage.
- */
 int
 tiku_boot_is_complete(void)
 {
@@ -191,12 +183,12 @@ tiku_boot_is_complete(void)
 }
 
 /*---------------------------------------------------------------------------*/
-/* PRIVATE FUNCTIONS                                                        */
+/* PRIVATE FUNCTIONS                                                         */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Arch CPU boot, then the CPU clock at @p cpu_freq.
- * @param cpu_freq Target CPU frequency in MHz
+ * @param cpu_freq Boot CPU rate: MHz, or on MSP430 a DCO preset index
  * @return TIKU_BOOT_SUCCESS
  */
 static int
@@ -205,9 +197,8 @@ tiku_boot_init_cpu(unsigned int cpu_freq)
     tiku_cpu_boot_init();
     tiku_cpu_freq_init(cpu_freq);
 
-    /* MSP430FR parts hold every GPIO locked after reset until LOCKLPM5 is
-     * cleared.  tiku_cpu_boot_init() has cleared it already, so this second
-     * clear has no effect. */
+    /* tiku_cpu_boot_init() has cleared LOCKLPM5 already, so this write has
+     * no effect. */
 #if defined(PLATFORM_MSP430)
     PM5CTL0 &= ~LOCKLPM5;
 #endif
@@ -217,7 +208,8 @@ tiku_boot_init_cpu(unsigned int cpu_freq)
 
 /**
  * @brief Durable-memory backends, tiku_mem_init(), then the tier allocator.
- * @return TIKU_BOOT_SUCCESS
+ * @return TIKU_BOOT_SUCCESS, or TIKU_BOOT_ERROR when the ESP32-C5 flash, or
+ *         the ESP32-P4 PSRAM or its tier attach, fails
  */
 static int
 tiku_boot_init_memory(void)
@@ -264,13 +256,15 @@ tiku_boot_init_memory(void)
 
 /**
  * @brief Console, per-port boot checks, then the system clock.
- * @return TIKU_BOOT_SUCCESS
+ * @return TIKU_BOOT_SUCCESS, or TIKU_BOOT_ERROR when the ESP32-C5 UART
+ *         console is not ready
  */
 static int
 tiku_boot_init_peripherals(void)
 {
-    /* The UART starts first, so a UART console carries the output of the
-     * rest of boot.  The GPIO unlock in tiku_boot_init_cpu() has run. */
+    /* The console starts first, so it carries the output of the rest of
+     * boot.  On MSP430 tiku_cpu_boot_init() has already cleared LOCKLPM5,
+     * which unlocks the pins. */
 #if defined(TIKU_CONSOLE_JTAG)
     tiku_usb_serial_jtag_init();
 #else
@@ -297,8 +291,10 @@ tiku_boot_init_peripherals(void)
 #endif
 
 #if defined(TIKU_CONSOLE_USB)
-    /* Native USB CDC-ACM console (TIKU_CONSOLE=usb or both).  It is polled,
-     * from the scheduler's idle hook and from its own putc and getc. */
+    /* Native USB CDC-ACM console (TIKU_CONSOLE=usb or both), polled by the
+     * console pump and the shell, and on RP2350 by its own putc and getc.
+     * tiku_sched_init() in the services stage replaces the idle hook set
+     * here. */
     tiku_usb_cdc_init();
     tiku_sched_set_idle_hook(tiku_usb_cdc_poll);
 #endif

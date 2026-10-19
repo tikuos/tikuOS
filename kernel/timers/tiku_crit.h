@@ -7,9 +7,9 @@
  *
  * tiku_crit.h - critical execution window.
  *
- * A critical-execution window in two flavours: tiku_crit_begin_defer() only
- * defers software-timer dispatch, and tiku_crit_begin() also clears every
- * peripheral IE outside preserve_mask.  tiku_crit_end() closes either.
+ * Two flavours of critical-execution window: tiku_crit_begin_defer() only
+ * defers software-timer dispatch; tiku_crit_begin() also masks the port's
+ * interrupt families outside preserve_mask.  tiku_crit_end() closes either.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -91,7 +91,7 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* INTERNAL STATE (read-only outside this module)                            */
+/* INTERNAL STATE                                                            */
 /*---------------------------------------------------------------------------*/
 
 /**

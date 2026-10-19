@@ -5,7 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_boot_vfs.c - Firmware namespace assembly at boot
+ * tiku_boot_vfs.c - firmware namespace assembly.
+ *
+ * tiku_boot_vfs_init() assembles the VFS tree at boot from the core subtrees
+ * and the providers the build includes; tiku_boot_vfs_restore() assembles it
+ * again after a diagnostic has replaced the root, and remounts the drivers.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,7 +31,11 @@
 #include "tiku_draw.h"
 #endif
 
-/** @brief Select providers without loading files or executing shell commands. */
+/**
+ * @brief Build the tree from the core subtrees and the providers the build
+ *        includes: shell rules and jobs, init, BASIC's /data child, GUI.
+ * @return tiku_vfs_tree_init()'s status
+ */
 static int assemble(void)
 {
     tiku_vfs_boot_node_t nodes[TIKU_VFS_BOOT_NODES_MAX];

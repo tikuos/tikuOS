@@ -26,7 +26,7 @@
 #define TIKU_TAGLINE        "Simple. Persistent. Intelligent."
 
 /*---------------------------------------------------------------------------*/
-/* PLATFORM CONFIGURATION                                                   */
+/* PLATFORM CONFIGURATION                                                    */
 /*---------------------------------------------------------------------------*/
 
 /*
@@ -85,10 +85,10 @@
 /*
  * Ambiq silicon.  The Makefile passes the device define derived from MCU --
  * TIKU_DEVICE_APOLLO510 or _APOLLO510B (Cortex-M55), _APOLLO4L or _APOLLO4P
- * (Cortex-M4F) -- with the matching board define alongside it.  Apollo510 is
- * the default only when no device was selected: the device-select router
- * checks APOLLO510 before APOLLO4L, so a defined APOLLO510 wins over any other
- * device define.
+ * (Cortex-M4F) -- with the matching board define alongside it.  With none of
+ * APOLLO510, APOLLO4L or APOLLO4P defined, this block defines APOLLO510.  The
+ * device-select router tests APOLLO510B, APOLLO4P, APOLLO510, then APOLLO4L,
+ * and includes the header of the first one defined.
  *
  * Every M4F device must be in the exclusion list, or the fallback would also
  * define APOLLO510 and pull Cortex-M55-only code (e.g. the ARMv8-M MPU diag)
@@ -231,7 +231,7 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* SYSTEM INCLUDES                                                          */
+/* SYSTEM INCLUDES                                                           */
 /*---------------------------------------------------------------------------*/
 
 #include <stddef.h>   /* NULL */
@@ -269,7 +269,7 @@
 #include <hal/tiku_printf_hal.h>
 
 /*---------------------------------------------------------------------------*/
-/* TEST CONFIGURATION                                                       */
+/* TEST CONFIGURATION                                                        */
 /*---------------------------------------------------------------------------*/
 /* Included early so that feature-gate macros (e.g. TIKU_LC_PERSISTENT) are
  * visible to the kernel headers below. */
@@ -282,7 +282,7 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* TIKU OS INCLUDES                                                         */
+/* TIKU OS INCLUDES                                                          */
 /*---------------------------------------------------------------------------*/
 #include <hal/tiku_cpu.h>
 #include <kernel/cpu/tiku_common.h>
@@ -322,8 +322,8 @@
 
 #ifndef TIKU_SHELL_ENABLE
 /**
- * @brief 1 to build the shell (make TIKU_SHELL_ENABLE=1).  It is an optional
- *        service, so it coexists with tests, examples or an app.
+ * @brief 1 to build the shell (make TIKU_SHELL_ENABLE=1).  It builds alongside
+ *        tests, examples or an app.
  */
 #define TIKU_SHELL_ENABLE 0
 #endif
@@ -345,7 +345,7 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* EXAMPLE CONFIGURATION                                                    */
+/* EXAMPLE CONFIGURATION                                                     */
 /*---------------------------------------------------------------------------*/
 
 #if defined(HAS_EXAMPLES)
@@ -356,7 +356,7 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* APP CONFIGURATION                                                        */
+/* APP CONFIGURATION                                                         */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -374,16 +374,16 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* DEBUG CONFIGURATION                                                      */
+/* DEBUG CONFIGURATION                                                       */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @defgroup TIKU_DEBUG_CONFIG Debug Configuration Flags
  * @brief Per-subsystem debug output switches.
  *
- * Each flag gates the <NAME>_PRINTF() macro of its subsystem below, and
- * DEBUG_HTIMER also gates HTIMER_ARCH_PRINTF.  All are 0 by default; set one to
- * 1 to enable that subsystem's output.
+ * Each flag gates one <NAME>_PRINTF() macro below (DEBUG_TESTS gates
+ * TEST_PRINTF), and DEBUG_HTIMER also gates HTIMER_ARCH_PRINTF.  All are 0 by
+ * default; set one to 1 to enable that output.
  * @{
  */
 
@@ -425,12 +425,12 @@
 /** @} */ /* End of TIKU_DEBUG_CONFIG group */
 
 /*---------------------------------------------------------------------------*/
-/* DEBUG MACROS                                                             */
+/* DEBUG MACROS                                                              */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @defgroup TIKU_DEBUG_MACROS Debug Output Macros
- * @brief Unified debug output macros for all subsystems
+ * @brief Debug output macros, each gated by one DEBUG_* flag
  *
  * AES_PRINTF is gated by DEBUG_AES, which this file does not define; it prints
  * only in a build that passes -DDEBUG_AES=1.
@@ -518,7 +518,7 @@
 /** @} */ /* End of TIKU_DEBUG_MACROS group */
 
 /*---------------------------------------------------------------------------*/
-/* ADDITIONAL SYSTEM CONFIGURATION                                          */
+/* ADDITIONAL SYSTEM CONFIGURATION                                           */
 /*---------------------------------------------------------------------------*/
 
 /** Enable autostart process functionality */

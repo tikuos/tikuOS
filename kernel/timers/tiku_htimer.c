@@ -33,12 +33,6 @@ static struct tiku_htimer *pending = NULL;
 /* PUBLIC API                                                                */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialize the hardware timer subsystem.
- *
- * Clears any pending htimer and delegates to the arch-level init
- * which configures the Timer A1 peripheral on MSP430.
- */
 void tiku_htimer_init(void) {
   pending = NULL;
   tiku_htimer_arch_init();
@@ -47,13 +41,6 @@ void tiku_htimer_init(void) {
 
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Schedule a single-shot hardware timer callback.
- *
- * Validates that the target is beyond the guard time, so it cannot race the
- * hardware counter.  Only one htimer is pending at a time and a new one
- * replaces the previous; the callback runs in ISR context.
- */
 int tiku_htimer_set(struct tiku_htimer *ht, tiku_htimer_clock_t time,
                     tiku_htimer_callback_t func, void *ptr) {
   tiku_htimer_clock_t now;
@@ -89,12 +76,6 @@ int tiku_htimer_set(struct tiku_htimer *ht, tiku_htimer_clock_t time,
 
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Schedule without the guard-time gate.
- *
- * tiku_htimer_set() without the guard check: the caller keeps @p time ahead
- * of the counter.
- */
 int tiku_htimer_set_no_guard(struct tiku_htimer *ht, tiku_htimer_clock_t time,
                              tiku_htimer_callback_t func, void *ptr) {
   if (ht == NULL || func == NULL) {
@@ -113,12 +94,6 @@ int tiku_htimer_set_no_guard(struct tiku_htimer *ht, tiku_htimer_clock_t time,
 
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Cancel the pending hardware timer.
- *
- * Clears the pending pointer and leaves the compare interrupt armed; when it
- * fires, run_next() finds nothing pending and returns.
- */
 int tiku_htimer_cancel(void) {
   if (pending == NULL) {
     return TIKU_HTIMER_ERR_NONE;
@@ -132,18 +107,10 @@ int tiku_htimer_cancel(void) {
 
 /*---------------------------------------------------------------------------*/
 
-/** @brief Return non-zero if a hardware timer is pending. */
 int tiku_htimer_is_scheduled(void) { return (pending != NULL); }
 
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Execute the pending htimer callback (called from ISR).
- *
- * Grabs and clears the pending pointer before invoking the
- * callback, so the callback is free to reschedule via
- * tiku_htimer_set() without a double-fire.
- */
 void tiku_htimer_run_next(void) {
   struct tiku_htimer *t;
 

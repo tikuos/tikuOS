@@ -29,8 +29,12 @@
 #define TIKU_THREADS_MAX        4
 #endif
 
-/** @brief Minimum worker stack size in bytes (hardware+software frame
- *  plus headroom; the FPU frame alone is 200 bytes on the M55). */
+/**
+ * @brief Minimum worker stack size in bytes: the switch frame plus headroom.
+ *
+ * On Cortex-M a switch with live FP state saves 51 words (204 bytes): the
+ * 26-word extended hardware frame, then r4-r11, EXC_RETURN and S16-S31.
+ */
 #define TIKU_THREAD_STACK_MIN   512u
 
 /*---------------------------------------------------------------------------*/
@@ -137,7 +141,7 @@ int tiku_thread_forget(tiku_thread_t *t);
 int tiku_thread_join(tiku_thread_t *t);
 
 /*---------------------------------------------------------------------------*/
-/* WAIT QUEUES (any thread, the kernel's included; wake from anywhere)       */
+/* WAIT QUEUES                                                               */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -244,7 +248,7 @@ int tiku_thread_await(tiku_thread_t *t, struct tiku_process *p);
     PT_WAIT_UNTIL(process_pt, tiku_thread_await((t), TIKU_THIS()))
 
 /*---------------------------------------------------------------------------*/
-/* ENERGY BUDGET (cycle-quota enforcement)                                   */
+/* CYCLE BUDGET                                                              */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -275,7 +279,7 @@ unsigned long long tiku_thread_budget_remaining(const tiku_thread_t *t);
 int tiku_thread_budget_exhausted(const tiku_thread_t *t);
 
 /*---------------------------------------------------------------------------*/
-/* KERNEL-INTERNAL (scheduler / event-queue hooks)                           */
+/* KERNEL HOOKS                                                              */
 /*---------------------------------------------------------------------------*/
 
 /**
