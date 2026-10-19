@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_nvm_region_arch.c - P4 sector-preserving mapped NVM region writes.
+ *
+ * The NVM region backend is the REGION flash range, read through the
+ * mapping at 0x40400000 and written sector by sector; a 4 KiB sector is
+ * erased only when a bit must go from 0 to 1.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <kernel/memory/tiku_nvm_region.h>

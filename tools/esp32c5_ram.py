@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
+#
 # Tiku Operating System v0.06
+# Simple. Persistent. Intelligent.
+# http://tiku-os.org
+#
 # Authors: Ambuj Varshney <ambuj@tiku-os.org>
+#
 # esp32c5_ram.py - validate and RAM-load C5 diagnostics or kernel images.
+#
+# Checks the image header, segments, checksum and SHA-256; with --port it
+# then loads the image into SRAM through the ROM and checks console and
+# tick progress.  It writes no flash.
+#
 # SPDX-License-Identifier: Apache-2.0
 
 import argparse

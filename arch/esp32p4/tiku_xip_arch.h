@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_xip_arch.h - Paired SRAM/flash executable integrity contract.
+ *
+ * Code linked to the XIP window may run only after tiku_p4_xip_init()
+ * returns zero.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32P4_XIP_ARCH_H_

@@ -1,8 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_trng_arch.c - Native P4 ECO2 SAR noise source and bounded RNG reads.
+ *
+ * Each read samples an internal SAR channel, then restores its registers.
  * Sequence: ESP-IDF 4d59230 bootloader_random_esp32p4.c and adc_ll.h.
+ *
  * SPDX-FileCopyrightText: 2023-2026 Espressif Systems (Shanghai) CO LTD
  * SPDX-License-Identifier: Apache-2.0
  */

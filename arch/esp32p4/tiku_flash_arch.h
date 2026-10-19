@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_flash_arch.h - P4 SRAM-based flash reads and bounded test writes.
+ *
+ * tiku_flash_arch.h - P4 SRAM-based flash reads and bounded writes.
+ *
+ * Offsets are physical within the 16 MiB flash; flash_layout.def names the
+ * ranges.  Erase and program exist only in the scratch-write,
+ * storage-test and firmware builds, each limited to its reservation.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32P4_FLASH_ARCH_H_

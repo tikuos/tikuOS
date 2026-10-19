@@ -1,8 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_mpu_arch.c - RAM profile without hardware memory protection.
+ *
+ * tiku_mpu_arch.c - P4 build without hardware memory protection.
+ *
  * Permission requests do not change access; control and SAM report zero.
+ * NVM unlock and lock change nothing, and the violation flags read zero.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <hal/tiku_mpu_hal.h>

@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_watchdog_arch.h - P4 crystal-clocked timer-group watchdog.
+ *
+ * Intervals count 1/32768 s units and the clock-source argument changes
+ * nothing; interval (timer) mode is unsupported.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32P4_WATCHDOG_ARCH_H_

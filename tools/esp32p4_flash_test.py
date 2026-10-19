@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
+#
 # Tiku Operating System v0.06
+# Simple. Persistent. Intelligent.
+# http://tiku-os.org
+#
 # Authors: Ambuj Varshney <ambuj@tiku-os.org>
+#
 # esp32p4_flash_test.py - Guarded, backed-up P4 scratch-sector qualification.
+#
+# RAM-loads the scratch-write image to program the sector at 0xff8000,
+# checks the whole chip against the backup plus that pattern across a
+# reset, then erases the scratch sector again.
+#
 # SPDX-License-Identifier: Apache-2.0
 
 import argparse

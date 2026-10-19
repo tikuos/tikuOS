@@ -1,6 +1,16 @@
+#
 # Tiku Operating System v0.06
+# Simple. Persistent. Intelligent.
+# http://tiku-os.org
+#
 # Authors: Ambuj Varshney <ambuj@tiku-os.org>
+#
 # esp_usb_console.py - Exclusive native Espressif USB console ownership.
+#
+# Checks that a port is an idle Espressif USB Serial/JTAG device (303a:1001)
+# and builds an exclusive 115200-baud console that opens with DTR and RTS
+# asserted.
+#
 # SPDX-License-Identifier: Apache-2.0
 
 import os

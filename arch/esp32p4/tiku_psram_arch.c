@@ -1,8 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_psram_arch.c - AP x16 PSRAM at 80 MHz on P4 silicon v1.3.
+ *
+ * Starts the MPLL, pads and device, then maps 32 MiB at 0x48000000.
  * Register sequence: ESP-IDF 4d59230ddff16327812782151ef0afef202dc6d7.
+ *
  * SPDX-FileCopyrightText: 2023-2026 Espressif Systems (Shanghai) CO LTD
  * SPDX-License-Identifier: Apache-2.0
  */

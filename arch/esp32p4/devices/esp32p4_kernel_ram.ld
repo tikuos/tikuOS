@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * esp32p4_kernel_ram.ld - CPU0 RAM kernel with two disjoint SRAM spans.
+ *
+ * The kernel links to low HP SRAM; the space above .bss and high SRAM below
+ * the 4 KiB stack are the two allocator spans, and only .p4.xip sections go
+ * to flash.  Durable objects link only when __p4_storage_enabled is defined.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 ENTRY(tiku_esp32p4_reset_handler)

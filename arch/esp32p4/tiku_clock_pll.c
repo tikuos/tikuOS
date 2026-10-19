@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_clock_pll.c - P4 v1.3 SRAM-only CPU frequency selection.
+ *
+ * Starts the CPLL through the PMU and switches the CPU among 40, 90, 180
+ * and 360 MHz.  Each change returns to the crystal first and loads dividers
+ * that hold memory at 180 MHz or below and APB at 90 MHz or below.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_clock_arch.h"

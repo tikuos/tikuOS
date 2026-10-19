@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * esp32p4_firmware.ld - CPU0 firmware with paired flash application code.
+ *
+ * Shell and BASIC code and constants link to flash at 0x40100000 after a
+ * 64-byte header; the rest links to low HP SRAM, with the durable image at
+ * the end of .bss.  High SRAM holds the tier span and the 16 KiB stack.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 ENTRY(tiku_esp32p4_reset_handler)

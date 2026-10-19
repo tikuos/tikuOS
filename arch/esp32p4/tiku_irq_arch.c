@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_irq_arch.c - P4 interrupt matrix and machine-mode CLIC lines.
+ *
+ * Line n is CLIC ID n + 16, level-triggered at priority 1..7, with one
+ * matrix source routed to it.  An interrupt with no handler is counted and
+ * its line disabled; one line may carry a frame-switching handler.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stddef.h>

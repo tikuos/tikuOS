@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_boot_arch.c - P4 watchdog handoff using peripheral registers.
+ *
+ * Clears the enable and flash-boot bits of the TG0, TG1 and LP watchdogs
+ * under their write keys, sets the super watchdog to feed itself, and holds
+ * CPU1 and the LP core in reset with their clocks gated.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_boot_arch.h"

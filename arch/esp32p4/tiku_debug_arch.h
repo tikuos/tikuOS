@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_debug_arch.h - P4 HAL debug-output contract.
+ *
+ * hal/tiku_printf_hal.h routes debug output to these calls;
+ * services/console/tiku_serial_jtag_io.c implements them over the USB
+ * Serial/JTAG peripheral.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32P4_DEBUG_ARCH_H_

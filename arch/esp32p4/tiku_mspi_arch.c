@@ -1,8 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_mspi_arch.c - SRAM-only flash transactions preserving PSRAM cache data.
+ *
+ * Begin masks interrupts, writes back dirty L1 lines and closes SPI0 cache
+ * access; end invalidates the changed flash range and reopens it.
  * Cache sequence: ESP-IDF 4d59230ddff16327812782151ef0afef202dc6d7.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_mspi_arch.h"

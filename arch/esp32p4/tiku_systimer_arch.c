@@ -1,8 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_systimer_arch.c - P4 crystal-derived counter and tick alarm.
+ *
  * The board's 40 MHz crystal supplies the fixed divide-by-2.5 timebase.
+ * Comparator 0 on interrupt line 0 raises the 128 Hz tick; the ISR counts
+ * ticks it missed before it rearms.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stddef.h>

@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_nvm_arch.h - P4 explicit durable-mirror initialization and status.
+ *
+ * tiku_p4_nvm_init() restores the SRAM durable image from the flash
+ * mirrors once the flash mapping is up; the restore status and commit
+ * count it leaves are read here.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_P4_NVM_ARCH_H_

@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_mspi_arch.h - CPU0 cache exclusion for native flash mutations.
+ *
+ * Each SPI1 program or erase runs between tiku_p4_mspi_flash_begin() and
+ * tiku_p4_mspi_flash_end(), from internal SRAM, while the cache cannot
+ * reach flash or PSRAM.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_P4_MSPI_ARCH_H_

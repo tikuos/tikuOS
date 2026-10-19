@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_nvm_arch.c - P4 alternating flash mirrors for SRAM durable objects.
+ *
+ * Boot restores the durable image from the valid 16 KiB mirror with the
+ * newer generation, or starts it zeroed when both mirrors are blank.  A
+ * flush writes a changed image to the other mirror, header word 0 last.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <hal/tiku_mem_hal.h>

@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_trap_arch.c - P4 interrupt dispatch and terminal exception reporting.
+ *
+ * tiku_trap_arch.c - P4 interrupt dispatch from the trap entry.
+ *
+ * tiku_p4_trap_dispatch() takes the frame tiku_crt_early.S saved for an
+ * interrupt and returns the frame to resume, which a worker switch may
+ * replace.  Exceptions go to tiku_p4_fault_capture() instead.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stdint.h>

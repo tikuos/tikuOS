@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_clock_arch.c - P4 CPU and bus startup on the 40 MHz crystal.
+ *
+ * Moves the CPU root to the crystal before clearing the CPU, memory, system
+ * and APB dividers, then waits a bounded time for the divider update.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_clock_arch.h"

@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
+#
 # Tiku Operating System v0.06
+# Simple. Persistent. Intelligent.
+# http://tiku-os.org
+#
 # Authors: Ambuj Varshney <ambuj@tiku-os.org>
-# esp32p4_xip.py - pack and validate paired P4 SRAM boot and flash code images.
+#
+# esp32p4_xip.py - pack and check paired P4 SRAM boot and flash code images.
+#
+# Splits the ELF into an SRAM boot image and the .xip payload for flash
+# offset 0x100000, binds them with a 64-byte descriptor in each and checks
+# the SRAM layout before writing the .paired.elf.
+#
 # SPDX-License-Identifier: Apache-2.0
 
 import argparse

@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_crt_early.S - P4 RAM entry and non-nested machine trap frame.
+ *
+ * CPU0 zeroes .bss and, outside the diagnostic, parks the other cores and
+ * sets the L2 layout before main; other harts wait in WFI.  The trap entry
+ * checks the interrupted SP, then dispatches interrupts or records faults.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_irq_arch.h"

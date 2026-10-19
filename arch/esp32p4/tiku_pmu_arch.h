@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_pmu_arch.h - P4 v1.3 calibrated power and 360 MHz CPLL startup.
+ *
+ * Both PLL calls run with the CPU on the 40 MHz crystal and leave it there;
+ * the 320 MHz MPLL clocks the 80 MHz PSRAM bus.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32P4_PMU_ARCH_H_

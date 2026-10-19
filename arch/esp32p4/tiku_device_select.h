@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_device_select.h - P4 CPU0 RAM-test profile selection.
+ *
+ * tiku_device_select.h - P4 CPU0 kernel-test and firmware profile selection.
+ *
+ * Refuses a build without the Olimex ESP32-P4-PC board, one of those
+ * profiles and MAIN_CPU_FREQ 360.  The FRAM constants describe the 16 MiB
+ * flash at 0x40000000; images map at 0x40100000.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32P4_DEVICE_SELECT_H_

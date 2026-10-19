@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_timer_arch.c - CPU0 kernel clock, hardware timer and IRQ masks.
+ *
+ * The kernel clock counts the 128 Hz tick and the htimer runs at 1 MHz on
+ * comparator 1; a failed counter read halts.  Critical sections mask lines
+ * 0..31 except the tick or htimer line the caller preserves.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_timer_arch.h"

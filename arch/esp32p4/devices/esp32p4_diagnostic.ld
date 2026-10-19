@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * esp32p4_diagnostic.ld - Storage-free native diagnostic in low HP SRAM.
+ *
+ * The whole image links into 64 KiB of HP SRAM at 0x4ff00000 with a 4 KiB
+ * stack at its top; the 64-byte fault record sits below the LP ROM data at
+ * 0x5010fa80.  Any other .persistent or .retained section fails the link.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 ENTRY(tiku_esp32p4_reset_handler)

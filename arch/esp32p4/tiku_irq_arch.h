@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_irq_arch.h - P4 machine interrupt state and non-nested CLIC dispatch.
+ *
+ * CPU0 lines 0..31 each take one interrupt-matrix source and one handler.
+ * The TIKU_P4_FRAME_* offsets give the trap frame tiku_crt_early.S builds.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32P4_IRQ_ARCH_H_

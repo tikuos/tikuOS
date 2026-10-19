@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
+#
 # Tiku Operating System v0.06
+# Simple. Persistent. Intelligent.
+# http://tiku-os.org
+#
 # Authors: Ambuj Varshney <ambuj@tiku-os.org>
+#
 # esp32c5_flash.py - guarded C5 boot-image installation without storage erasure.
+#
+# Checks the ROM, chip identity, security state and flash size, writes and
+# verifies the XIP companion if given and the boot image at 0x2000, then
+# resets.  Requires esptool 5.1.0 and an explicit --port.
+#
 # SPDX-License-Identifier: Apache-2.0
 
 import argparse

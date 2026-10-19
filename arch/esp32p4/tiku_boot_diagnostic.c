@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_boot_diagnostic.c - Storage-free P4 SRAM, CLIC and USB checks.
+ *
+ * Checks the ROM identity, .data, .bss and an SRAM pattern, starts the
+ * crystal, CPLL and tick, then runs one-letter commands from the USB
+ * Serial/JTAG console: clock, IRQ, alarm, watchdog, fault and flash checks.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stddef.h>

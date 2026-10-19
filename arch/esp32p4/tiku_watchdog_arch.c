@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_watchdog_arch.c - P4 MWDT0 system reset on the 40 MHz crystal.
+ *
+ * Timer group 0's watchdog counts 0.5 ms steps (40 MHz / 20000) and resets
+ * the system when its hold time passes without a feed.  Each MWDT0
+ * register write sits inside the write-protection key.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_watchdog_arch.h"

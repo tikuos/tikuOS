@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_alarm_arch.h - P4 one-shot alarm on SYSTIMER comparator 1.
+ *
+ * Deadlines are absolute 52-bit SYSTIMER counts at 16 MHz.  One callback
+ * owns the comparator and interrupt line 1 from tiku_p4_alarm_init() until
+ * tiku_p4_alarm_stop().
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32P4_ALARM_ARCH_H_

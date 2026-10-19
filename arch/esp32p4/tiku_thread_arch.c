@@ -1,8 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_thread_arch.c - CPU0 software-interrupt switching and newlib state.
+ *
+ * Worker switches run from a software interrupt routed to line 2; each
+ * worker and the interrupt path has its own newlib struct _reent.
  * Register map: ESP-IDF 4d59230, P4 hw_ver1 HP_SYSTEM and interrupt_core0.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_thread_arch.h"

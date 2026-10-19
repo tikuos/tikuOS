@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_systimer_arch.h - P4 16 MHz timebase and 128 Hz tick interrupts.
+ *
+ * Counter values are 52-bit SYSTIMER counts at 16 MHz and the tick,
+ * interrupt and error counts wrap at 2^32.  The tick ISR calls
+ * tiku_p4_tick_notify() after it rearms.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32P4_SYSTIMER_ARCH_H_

@@ -1,8 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_region_arch.c - P4 CPU0 internal SRAM classification.
- * ROM workspace, cache, TCM and LP SRAM are absent from this registry.
+ *
+ * Lists the low and high internal SRAM spans as SRAM regions and reports
+ * the foreground stack bottom.  ROM workspace, cache, TCM and LP SRAM are
+ * absent from this registry.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <kernel/memory/tiku_mem.h>

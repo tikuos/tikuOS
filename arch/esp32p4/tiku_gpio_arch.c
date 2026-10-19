@@ -1,8 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_gpio_arch.c - P4 pad observation without changing unverified wiring.
+ *
+ * Ports 1..7, pins 0..7 map onto GPIO0..54 for level and output-enable
+ * reads; output, input, write, toggle and pin interrupts are refused.
  * Register offsets: ESP-IDF 4d59230, ESP32-P4 hw_ver1.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_gpio_arch.h"

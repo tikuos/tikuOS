@@ -1,8 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_mem_arch.c - P4 SRAM initialization, wiping and stack sentinels.
- * Durable-image operations are supplied by the storage qualification profile.
+ *
+ * Fills the 64-byte foreground and ISR stack guards with 0xa5 and checks
+ * them.  Outside the storage-test and firmware builds the NVM and durable
+ * calls are empty stubs; tiku_nvm_arch.c supplies them in those builds.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <hal/tiku_mem_hal.h>

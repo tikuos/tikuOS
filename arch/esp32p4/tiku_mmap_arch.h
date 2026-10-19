@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_mmap_arch.h - P4 read-only flash mapping with checked physical bounds.
+ *
+ * Once tiku_p4_mmap_init() succeeds, flash offset N reads at
+ * TIKU_P4_FLASH_VIRTUAL + N; reads are bounded by the 16 MiB flash size.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_P4_MMAP_ARCH_H_

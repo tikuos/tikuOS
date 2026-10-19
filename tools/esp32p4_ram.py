@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
+#
 # Tiku Operating System v0.06
+# Simple. Persistent. Intelligent.
+# http://tiku-os.org
+#
 # Authors: Ambuj Varshney <ambuj@tiku-os.org>
+#
 # esp32p4_ram.py - Guarded storage-free native P4 diagnostic loading.
+#
+# Validates a diagnostic or kernel-test image and its ELF before opening
+# USB, RAM-loads it through the ROM and checks the console output, with
+# optional fault, watchdog, flash and PSRAM checks; it programs no flash.
+#
 # SPDX-License-Identifier: Apache-2.0
 
 import argparse

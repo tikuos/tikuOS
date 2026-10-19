@@ -1,8 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_irq_probe.S - Register preservation check across live P4 interrupts.
- * a0 is the cycle duration; the result is zero on success or one on mismatch.
+ *
+ * tiku_p4_irq_probe() loads known values into the integer registers but sp
+ * and t0-t2, spins while interrupts arrive, then compares them.  a0 is the
+ * cycle duration; the result is zero on success or one on mismatch.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
     .section .text.tiku_p4_irq_probe,"ax",@progbits

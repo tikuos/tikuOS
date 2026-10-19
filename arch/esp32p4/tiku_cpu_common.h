@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_cpu_common.h - P4 delays, factory identity and reset operations.
+ *
+ * hal/tiku_common_hal.h maps the common delay, unique-ID and reset-cause
+ * calls onto these; tiku_cpu_firmware.c implements them.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_P4_CPU_COMMON_H_

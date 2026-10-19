@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_xip_arch.c - Validate paired SRAM metadata before flash execution.
+ *
+ * The SRAM image carries the expected 64-byte header of the flash code at
+ * flash offset 0x100000; tiku_p4_xip_init() maps flash and requires an
+ * exact header match and payload CRC.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_xip_arch.h"

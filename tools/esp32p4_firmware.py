@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
+#
 # Tiku Operating System v0.06
+# Simple. Persistent. Intelligent.
+# http://tiku-os.org
+#
 # Authors: Ambuj Varshney <ambuj@tiku-os.org>
+#
 # esp32p4_firmware.py - Backup-checked native firmware installation on one P4.
+#
+# Validates the boot, XIP and ELF files, requires the flash to match a full
+# backup, installs the code pair and waits for the shell prompt; a failure
+# restores the changed sectors and RAM-loads a non-writing recovery image.
+#
 # SPDX-License-Identifier: Apache-2.0
 import argparse
 import hashlib

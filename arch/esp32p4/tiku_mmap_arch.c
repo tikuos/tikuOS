@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_mmap_arch.c - P4 SPI0 read mapping; ECO2 cache control and MMU readback.
+ *
+ * Maps the 16 MiB flash at 0x40000000 as 256 64 KiB MMU pages, reading back
+ * all 1024 entries, and invalidates the cache over the window.  A failed
+ * map or unmap leaves both calls refusing until reset.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stddef.h>

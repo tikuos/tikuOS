@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
+#
 # Tiku Operating System v0.06
+# Simple. Persistent. Intelligent.
+# http://tiku-os.org
+#
 # Authors: Ambuj Varshney <ambuj@tiku-os.org>
-# esp32p4_storage_test.py - Backed-up P4 region and durable-mirror qualification.
+#
+# esp32p4_storage_test.py - Backed-up P4 NVM region and mirror qualification.
+#
+# RAM-loads the storage-test image to write 8 KiB of the NVM region and
+# both mirror slots, checks the whole chip and the retained data across a
+# reset, then erases the ten test sectors again.
+#
 # SPDX-License-Identifier: Apache-2.0
 
 import argparse

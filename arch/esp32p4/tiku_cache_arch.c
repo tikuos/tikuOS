@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_cache_arch.c - Fixed L2 geometry through the P4 ECO2 ROM API.
+ *
+ * tiku_p4_cache_boot_init() has the ECO2 ROM set a 128 KiB L2 with 64-byte
+ * lines, invalidates the cache and checks the geometry registers; it keeps
+ * the L2 size register value it replaced.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_cache_arch.h"

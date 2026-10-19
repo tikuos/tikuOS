@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_fault_arch.h - CPU0 retained exception record and bounded reporting.
+ *
+ * tiku_crt_early.S passes the TIKU_P4_FAULT_* flags to
+ * tiku_p4_fault_capture(); tiku_p4_fault_last() reads the record back
+ * after a warm reset.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32P4_FAULT_ARCH_H_

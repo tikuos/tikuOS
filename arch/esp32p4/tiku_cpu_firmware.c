@@ -1,8 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_cpu_firmware.c - P4 CPU0 boot, frequency preferences and identity.
+ *
+ * Boots CPU0 (watchdogs, ROM check, IRQs, clocks, TRNG, flash, XIP code),
+ * applies the saved CPU rate at boot and syncs PSRAM data cache lines.
  * ROM and eFuse addresses: ESP-IDF 4d59230, ESP32-P4 hw_ver1/ECO2.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stddef.h>

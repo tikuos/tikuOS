@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
+#
 # Tiku Operating System v0.06
+# Simple. Persistent. Intelligent.
+# http://tiku-os.org
+#
 # Authors: Ambuj Varshney <ambuj@tiku-os.org>
-# esp32c5_xip.py - pack and validate paired C5 SRAM boot and flash code images.
+#
+# esp32c5_xip.py - pack and check paired C5 SRAM boot and flash code images.
+#
+# Splits the ELF into an SRAM boot image and the .xip payload for flash
+# offset 0x100000, binds them with a 64-byte descriptor in each and checks
+# that boot-critical symbols sit in internal SRAM.
+#
 # SPDX-License-Identifier: Apache-2.0
 
 import argparse

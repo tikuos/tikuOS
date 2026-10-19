@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_gpio_arch.h - Read-only P4 GPIO until the board revision is selected.
+ *
+ * tiku_gpio_arch.h - Read-only P4 GPIO; board pin ownership is unverified.
+ *
+ * GPIO0..54 appear as seven virtual eight-pin ports numbered 1..7.  Level
+ * and direction reads work; every call that would change a pad returns -1.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_P4_GPIO_ARCH_H_

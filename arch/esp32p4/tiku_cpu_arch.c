@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_cpu_arch.c - CPU0 atomic sections and shallow idle for P4 RAM tests.
+ *
+ * tiku_cpu_arch.c - CPU0 atomic sections and shallow idle on the P4.
+ *
+ * Atomic sections nest, restore the outermost entry's interrupt state and
+ * halt on an unbalanced exit.  The light to deepest idle modes execute WFI,
+ * which the tick or htimer ends, and leave the USB PHY powered.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stddef.h>

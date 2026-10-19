@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_alarm_arch.c - P4 owned one-shot alarm, cancel and callback rearm.
+ *
+ * Drives SYSTIMER comparator 1 through CPU0 interrupt line 1 (source 54).
+ * The ISR disarms the comparator before it calls the callback, so the
+ * callback can schedule the next deadline.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stddef.h>

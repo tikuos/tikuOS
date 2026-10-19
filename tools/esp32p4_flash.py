@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
+#
 # Tiku Operating System v0.06
+# Simple. Persistent. Intelligent.
+# http://tiku-os.org
+#
 # Authors: Ambuj Varshney <ambuj@tiku-os.org>
+#
 # esp32p4_flash.py - Backup-checked native P4 boot installation and restoration.
+#
+# Writes a storage-free kernel-test image (and its XIP companion) to the
+# boot sectors once the flash matches a full 16 MiB backup, then checks the
+# flash boot; a failure restores the changed sectors from the backup.
+#
 # SPDX-License-Identifier: Apache-2.0
 import argparse
 import hashlib

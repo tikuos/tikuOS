@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_fault_arch.c - Retained CPU0 faults with queue-independent USB output.
+ *
+ * tiku_p4_fault_capture() stores a CRC-checked 64-byte record in retained
+ * LP SRAM, writes it straight to the USB Serial/JTAG FIFO and halts.  The
+ * record survives a warm reset; its sequence number counts captures.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_fault_arch.h"

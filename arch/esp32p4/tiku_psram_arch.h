@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_psram_arch.h - Boot-only P4 AP x16 PSRAM initialization.
+ *
+ * The fitted 32 MiB PSRAM maps at TIKU_P4_PSRAM_BASE once
+ * tiku_p4_psram_init() succeeds; after a failed attempt it refuses until
+ * reset.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_P4_PSRAM_ARCH_H_

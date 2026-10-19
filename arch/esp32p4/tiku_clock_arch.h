@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_clock_arch.h - P4 SRAM diagnostic clock control.
+ *
+ * tiku_clock_arch.h - P4 CPU clock control from internal SRAM.
+ *
+ * The CPU runs from the 40 MHz crystal or from the 360 MHz CPLL at 90, 180
+ * or 360 MHz; a PLL rate needs tiku_p4_clock_pll_init() first.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32P4_CLOCK_ARCH_H_

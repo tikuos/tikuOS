@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_timer_arch.h - P4 kernel timebase configuration.
+ *
+ * The kernel clock ticks at 128 Hz and the htimer at 1 MHz; millisecond to
+ * tick conversion rounds up.  Also declares tiku_p4_fatal().
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32P4_TIMER_ARCH_H_

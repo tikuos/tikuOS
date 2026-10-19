@@ -1,8 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_pmu_arch.c - Calibrated P4 v1.3 regulator and CPLL initialization.
+ *
+ * tiku_pmu_arch.c - Calibrated P4 v1.3 regulators, CPLL and MPLL startup.
+ *
+ * CPLL startup first sets the eFuse-calibrated HP and LP regulators.
  * Sequence and settings derived from ESP-IDF 4d59230d rtc_clk_init/clk_tree_ll.
+ *
  * SPDX-FileCopyrightText: 2023-2026 Espressif Systems (Shanghai) CO LTD
  * SPDX-License-Identifier: Apache-2.0
  */

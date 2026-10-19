@@ -1,8 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_esp32p4_regs.h - ESP32-P4 v1.3 native diagnostic registers.
+ *
+ * tiku_esp32p4_regs.h - ESP32-P4 v1.3 native register addresses.
+ *
+ * ROM identity, L2 cache, USB Serial/JTAG, watchdog, clock, PMU, eFuse,
+ * interrupt matrix, CLIC and SYSTIMER registers used by this port.
  * Addresses: ESP-IDF 4d59230ddff16327812782151ef0afef202dc6d7 hw_ver1.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32P4_REGS_H_

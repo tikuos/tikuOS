@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_fault_probe.c - Explicit exception injection for the P4 RAM profiles.
+ *
+ * tiku_p4_fault_command() raises a breakpoint, illegal instruction, load
+ * fault, bad-SP trap or in-interrupt breakpoint on request, and prints or
+ * clears the retained fault record.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_fault_arch.h"

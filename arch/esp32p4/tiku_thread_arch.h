@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_thread_arch.h - P4 integer worker frames and newlib state.
+ *
+ * Worker frames use the trap frame layout of tiku_irq_arch.h and hold no
+ * floating-point state.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32P4_THREAD_ARCH_H_

@@ -1,8 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_flash_arch.c - P4 SPI1 reads and opt-in, bounded program/erase.
- * Register and ECO2 ROM addresses: ESP-IDF 4d59230ddff16327812782151ef0afef202dc6d7.
+ *
+ * SPI1 user commands move 64-byte chunks with interrupts masked per chunk;
+ * a controller or WIP timeout disables the driver until reset.
+ * Registers and ECO2 ROM: ESP-IDF 4d59230ddff16327812782151ef0afef202dc6d7.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stddef.h>

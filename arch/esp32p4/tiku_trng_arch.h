@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_trng_arch.h - P4 ECO2 RNG with internal SAR entropy.
+ *
+ * The RNG mixes noise from an internal SAR ADC channel; no board pin is
+ * routed or sampled.  Calls return TIKU_TRNG_OK or a TIKU_TRNG_ERR_* code.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_P4_TRNG_ARCH_H_

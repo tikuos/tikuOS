@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
+#
 # Tiku Operating System v0.06
+# Simple. Persistent. Intelligent.
+# http://tiku-os.org
+#
 # Authors: Ambuj Varshney <ambuj@tiku-os.org>
+#
 # esp32p4_layout.py - Read the P4's shared physical flash range definitions.
+#
+# Parses arch/esp32p4/flash_layout.def into LAYOUT, name -> (start, end)
+# with end exclusive.  Import fails unless the ranges tile 16 MiB in the
+# fixed order.
+#
 # SPDX-License-Identifier: Apache-2.0
 from pathlib import Path
 import re

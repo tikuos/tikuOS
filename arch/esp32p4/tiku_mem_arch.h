@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_mem_arch.h - Internal SRAM geometry and software stack guards.
+ *
+ * Low SRAM ends at the ROM workspace and high SRAM at the 128 KiB L2
+ * cache; the SRAM tier takes its main and spare spans from the linker
+ * script.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32P4_MEM_ARCH_H_
