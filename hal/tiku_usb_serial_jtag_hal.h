@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_usb_serial_jtag_hal.h - Native USB Serial/JTAG FIFO register selection.
+ *
+ * Maps the TIKU_JTAG_* register and bit names onto the ESP32-P4 or ESP32-C5
+ * register set; any other platform fails the build.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_USB_SERIAL_JTAG_HAL_H_

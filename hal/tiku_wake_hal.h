@@ -69,7 +69,7 @@ typedef struct {
  *
  * Returns immediately, with no side effect on the hardware.
  *
- * @param out  Destination snapshot. Cleared then populated.
+ * @param out  Destination snapshot. Cleared then populated; NULL is ignored.
  * @note Reads volatile peripheral state: call from non-ISR context for a
  *       coherent snapshot.
  */

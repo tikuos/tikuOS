@@ -176,7 +176,8 @@ unsigned char tiku_clock_fault(void);
  * and counts the elapsed ticks on wake, so the kernel clock stays exact.
  *
  * @param ticks_ahead Ticks until the next software-timer deadline (>1)
- * @return Non-zero if the stretch was armed, 0 if unsupported
+ * @return Non-zero if the stretch was armed; 0 if it was not (no backend,
+ *         or the port could not arm it), and the per-tick cadence continues
  * @note Call with interrupts masked.
  */
 int tiku_clock_tickless_begin(tiku_clock_time_t ticks_ahead);

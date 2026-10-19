@@ -168,7 +168,15 @@ void tiku_htimer_run_next(void);
 /** Initialize platform timer hardware */
 void tiku_htimer_arch_init(void);
 
-/** Program hardware compare register for next interrupt */
+/**
+ * @brief Program the hardware compare register for the next interrupt.
+ *
+ * @param t  Absolute counter value the compare fires at; tiku_htimer_set()
+ *           checks it is at least TIKU_HTIMER_GUARD_TIME ahead, and
+ *           tiku_htimer_set_no_guard() passes it unchecked.
+ * @note A @p t already past fires when the counter next reaches it, after
+ *       the counter wraps.
+ */
 void tiku_htimer_arch_schedule(tiku_htimer_clock_t t);
 
 /** Read current hardware timer counter */

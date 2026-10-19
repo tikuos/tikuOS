@@ -59,8 +59,8 @@ uint16_t tiku_mpu_arch_get_sam(void);
  * @brief Set the segment access word, in the layout of MSP430's MPUSAM.
  *
  * MSP430 parts with an MPU write MPUSAM between MPUCTL0 password writes and
- * leave the MPU enabled.  The other ports keep the word in software; RP2350
- * also makes its .uninit region writable exactly while bit 9 is set.
+ * leave the MPU on; other ports keep it in software.  RP2350 opens .uninit
+ * while bit 9 is set, ESP32-C5 its durable span while a write bit (0x0222) is.
  *
  * @param sam  New segment access word
  */
@@ -82,17 +82,18 @@ uint16_t tiku_mpu_arch_get_ctl(void);
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Mask interrupts for a scoped NVM write.
+ * @brief Mask interrupts, on the ports where it acts.
  *
- * tiku_mpu_scoped_write() calls it before unlocking NVM.
+ * No kernel path calls it: tiku_mpu_scoped_write() masks interrupts through
+ * tiku_atomic_enter().
  */
 void tiku_mpu_arch_disable_irq(void);
 
 /**
- * @brief Unmask interrupts after a scoped NVM write.
+ * @brief Unmask interrupts, unconditionally, on the ports where it acts.
  *
- * tiku_mpu_scoped_write() calls it after relocking NVM.  Where it acts
- * (MSP430, RP2350, Ambiq) it enables interrupts unconditionally.
+ * No kernel path calls it: tiku_mpu_scoped_write() restores interrupts
+ * through tiku_atomic_exit().
  */
 void tiku_mpu_arch_enable_irq(void);
 
@@ -103,12 +104,14 @@ void tiku_mpu_arch_enable_irq(void);
 /**
  * @brief Set up the port's memory protection
  *
- * MSP430 parts with an MPU write the segment boundaries (MPUSEGB1/2) and
- * enable the MPU; RP2350, Ambiq, Nordic and RA8P1 program their MPU regions,
- * ESP32-C61 locks a PMP entry over the first 4 KB, and STM32N6 does nothing.
+ * MSP430 parts with an MPU set MPUSEGB1/2 and enable it; RP2350, Ambiq,
+ * Nordic and RA8P1 program MPU regions; the ESP32-C61 and C5 lock a PMP
+ * entry over the first 4 KB; STM32N6 and the P4 do nothing.
  *
- * @note Call before tiku_mpu_arch_set_default_protection(): on MSP430 the
- *       permission bits apply to the segments it sets.
+ * @note Call after tiku_mem_arch_init(), which restores a mirrored span
+ *       before it is write-protected, and before
+ *       tiku_mpu_arch_set_default_protection(): on MSP430 the permission
+ *       bits apply to the segments it sets.
  */
 void tiku_mpu_arch_init_segments(void);
 

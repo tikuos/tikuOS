@@ -26,9 +26,9 @@
 /**
  * @brief Snapshot and clear every peripheral IE family not in @p preserve_mask.
  *
- * The port saves the prior state for tiku_crit_arch_unmask_irqs() to restore
- * bit for bit, and leaves global interrupts enabled, so the ISRs of preserved
- * sources keep running.
+ * The port saves the prior state for tiku_crit_arch_unmask_irqs(), and
+ * leaves global interrupts enabled, so the ISRs of preserved sources keep
+ * running.
  *
  * @param preserve_mask  Bitwise OR of TIKU_CRIT_PRESERVE_* flags
  *                       (see kernel/timers/tiku_crit.h).
@@ -38,6 +38,9 @@ void tiku_crit_arch_mask_irqs(uint8_t preserve_mask);
 /**
  * @brief Restore the IE state captured by the most recent
  *        tiku_crit_arch_mask_irqs() call.
+ *
+ * A port that restores through the NVIC ISER, which can only set bits,
+ * leaves a line enabled inside the window enabled.
  *
  * @note Call only after a matching tiku_crit_arch_mask_irqs(), one unmask per
  *       mask; without one the result is undefined.

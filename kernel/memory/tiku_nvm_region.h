@@ -129,7 +129,8 @@
  * The backend is a static object of the arch layer.  Reads use be->base
  * directly; writes go through be->write inside an NVM unlock window.
  *
- * @return Pointer to the region backend, or NULL on parts without one.
+ * @return Pointer to the region backend; NULL on parts without one, and
+ *         while the external flash that holds the region is not ready.
  */
 const tiku_nvm_backend_t *tiku_nvm_backend_get(void);
 
