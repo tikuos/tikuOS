@@ -9,12 +9,13 @@
  *
  * The kernel's htimer clock is 16 bits wide, so a target is extended to 32
  * bits against the current counter.  The alarm disarms itself when it fires
- * and the ISR masks it, so each schedule fires once.
+ * and the ISR masks it, so each schedule fires once, a late target at once.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <kernel/timers/tiku_htimer.h>
+#include <hal/tiku_cpu.h>
 #include "tiku_rp2350_regs.h"
 #include <stdint.h>
 
@@ -49,20 +50,39 @@ htimer_t tiku_htimer_arch_now(void) {
 }
 
 void tiku_htimer_arch_schedule(htimer_t t) {
+    uint32_t now32;
+    int16_t  delta16;
+    uint32_t target;
+
+    /* Masked from the counter read to the late-target check, so the ISR, and
+     * a callback that schedules again, cannot run in between. */
+    tiku_atomic_enter();
+
     /* Compose absolute 32-bit target from the kernel's 16-bit time
      * by adding the signed 16-bit delta to the current 32-bit reading. */
-    uint32_t now32   = _RP2350_REG(RP2350_TIMER0_TIMERAWL);
-    int16_t  delta16 = (int16_t)((uint16_t)t - (uint16_t)now32);
-    uint32_t target  = now32 + (int32_t)delta16;
+    now32   = _RP2350_REG(RP2350_TIMER0_TIMERAWL);
+    delta16 = (int16_t)((uint16_t)t - (uint16_t)now32);
+    target  = now32 + (int32_t)delta16;
 
     /* The Pico SDK's arming order: clear any latched IRQ, write ALARM0,
      * which arms the alarm, then unmask it in INTE.  A new ALARM0 value
      * replaces an armed one, so no disarm comes first. */
     _RP2350_REG(RP2350_TIMER0_INTR) = 0x1U;            /* W1C */
-    /* ALARM0 fires when TIMERAWL equals it: a target already past fires
-     * only when the 32-bit count wraps, about 71.6 minutes later. */
     _RP2350_REG(RP2350_TIMER0_ALARM0) = target;        /* arms */
     _RP2350_REG_SET(RP2350_TIMER0_INTE, 0x1U);         /* unmask */
+
+    /* ALARM0 fires when TIMERAWL equals it, so an alarm still armed once the
+     * count has reached its target would wait for the 32-bit wrap, about
+     * 71.6 minutes.  It is disarmed and its IRQ pended instead, and the ISR
+     * runs as soon as interrupts are unmasked. */
+    if ((int32_t)(_RP2350_REG(RP2350_TIMER0_TIMERAWL) - target) >= 0 &&
+        (_RP2350_REG(RP2350_TIMER0_ARMED) & 0x1U) != 0U) {
+        _RP2350_REG(RP2350_TIMER0_ARMED) = 0x1U;       /* W1C: disarm */
+        _RP2350_REG(RP2350_NVIC_ISPR0 + (RP2350_IRQ_TIMER0_0 / 32U) * 4U) =
+            1U << (RP2350_IRQ_TIMER0_0 & 31U);
+    }
+
+    tiku_atomic_exit();
 }
 
 /*---------------------------------------------------------------------------*/
