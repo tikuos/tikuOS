@@ -7,8 +7,11 @@
 # Native ESP32-P4 RAM profiles; scratch writes require explicit qualification.
 TIKU_PLATFORM := esp32p4
 BOARD ?= olimex_esp32p4_pc
-ifneq ($(BOARD),olimex_esp32p4_pc)
-$(error The P4 RAM profiles require BOARD=olimex_esp32p4_pc)
+P4_BOARD_DEFINE_olimex_esp32p4_pc := TIKU_BOARD_OLIMEX_ESP32P4_PC
+P4_BOARD_DEFINE_firebeetle2_esp32p4 := TIKU_BOARD_FIREBEETLE2_ESP32P4
+P4_BOARD_DEFINE := $(P4_BOARD_DEFINE_$(BOARD))
+ifeq ($(P4_BOARD_DEFINE),)
+$(error The P4 RAM profiles require BOARD=olimex_esp32p4_pc or firebeetle2_esp32p4)
 endif
 P4_PROFILE ?= diagnostic
 ifeq ($(P4_PROFILE),diagnostic)
@@ -91,7 +94,7 @@ P4_ARCH := -march=rv32imac_zicsr_zifencei -mabi=ilp32
 P4_FLAGS := $(P4_ARCH) -Os -g -Wall -Wextra -Werror -ffreestanding \
     -fno-builtin -ffunction-sections -fdata-sections -I. \
     -DPLATFORM_ESP32P4=1 \
-    -DTIKU_BOARD_OLIMEX_ESP32P4_PC=1
+    -D$(P4_BOARD_DEFINE)=1
 P4_SRCS := arch/esp32p4/tiku_boot_diagnostic.c \
     arch/esp32p4/tiku_boot_arch.c arch/esp32p4/tiku_irq_arch.c \
     arch/esp32p4/tiku_trap_arch.c arch/esp32p4/tiku_systimer_arch.c \

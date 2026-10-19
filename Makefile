@@ -196,7 +196,8 @@ DEFAULT_BOARD_esp32p4       := olimex_esp32p4_pc
 KNOWN_BOARDS := fr2433_launchpad fr5969_launchpad fr5994_launchpad \
                 fr6989_launchpad pico2 pico2w apollo4l_evb apollo4p_evb \
                 apollo510_evb apollo510b_evb nrf54l15_dk nrf54lm20_dk \
-                nrf54lv10_dk nucleo_n657x0q ek_ra8p1 esp32c61_devkitc esp32c5_devkitc1 olimex_esp32p4_pc tiku_bare
+                nrf54lv10_dk nucleo_n657x0q ek_ra8p1 esp32c61_devkitc esp32c5_devkitc1 olimex_esp32p4_pc \
+                firebeetle2_esp32p4 tiku_bare
 
 BOARD_DEFINE_fr2433_launchpad  := TIKU_BOARD_FR2433_LAUNCHPAD
 BOARD_DEFINE_fr5969_launchpad  := TIKU_BOARD_FR5969_LAUNCHPAD
@@ -219,6 +220,7 @@ BOARD_DEFINE_ek_ra8p1          := TIKU_BOARD_EK_RA8P1
 BOARD_DEFINE_esp32c61_devkitc  := TIKU_BOARD_ESP32C61_DEVKITC
 BOARD_DEFINE_esp32c5_devkitc1  := TIKU_BOARD_ESP32C5_DEVKITC1
 BOARD_DEFINE_olimex_esp32p4_pc := TIKU_BOARD_OLIMEX_ESP32P4_PC
+BOARD_DEFINE_firebeetle2_esp32p4 := TIKU_BOARD_FIREBEETLE2_ESP32P4
 
 BOARD_PLATFORM_fr2433_launchpad  := msp430
 BOARD_PLATFORM_fr5969_launchpad  := msp430
@@ -239,6 +241,7 @@ BOARD_PLATFORM_ek_ra8p1          := ra8p1
 BOARD_PLATFORM_esp32c61_devkitc  := esp32c61
 BOARD_PLATFORM_esp32c5_devkitc1  := esp32c5
 BOARD_PLATFORM_olimex_esp32p4_pc := esp32p4
+BOARD_PLATFORM_firebeetle2_esp32p4 := esp32p4
 
 # ---------------------------------------------------------------------------
 # Board capabilities: the parts fitted on the PCB
@@ -286,6 +289,7 @@ BOARD_CAPS_ek_ra8p1            := USBHS
 BOARD_CAPS_esp32c61_devkitc    :=
 BOARD_CAPS_esp32c5_devkitc1    :=
 BOARD_CAPS_olimex_esp32p4_pc   :=
+BOARD_CAPS_firebeetle2_esp32p4 :=
 # tiku_bare declares no parts, so the eMMC, PSRAM, NOR and USB gates below
 # refuse it.
 BOARD_CAPS_tiku_bare           :=
@@ -4554,6 +4558,21 @@ erase:
 
 else ifeq ($(TIKU_PLATFORM),esp32p4)
 
+ifeq ($(BOARD),firebeetle2_esp32p4)
+# The FireBeetle 2 keeps no original image: flash writes and verifies the code
+# pair and boots it to the shell without writing storage; erase clears the
+# whole chip, once, before the first install over the vendor firmware.
+flash: all
+	@test -n "$(ESP_PORT)" || { echo "Name the P4 USB port with ESP_PORT=/dev/..."; exit 1; }
+	$(ESP_PYTHON) tools/esp32p4_board_flash.py --port "$(ESP_PORT)" \
+	    $(if $(P4_SERIAL),--serial "$(P4_SERIAL)") --image $(TARGET_BIN) \
+	    --elf $(BUILD_DIR)/main.paired.elf --xip $(TARGET_XIP)
+
+erase:
+	@test -n "$(ESP_PORT)" || { echo "Name the P4 USB port with ESP_PORT=/dev/..."; exit 1; }
+	$(ESP_PYTHON) tools/esp32p4_board_flash.py --port "$(ESP_PORT)" \
+	    $(if $(P4_SERIAL),--serial "$(P4_SERIAL)") --erase-chip
+else
 flash: all
 	@echo "P4 firmware requires the backup-checked tools/esp32p4_firmware.py installer."
 	@echo "See arch/esp32p4/README.md; ordinary flash never replaces an unknown layout."
@@ -4562,6 +4581,7 @@ flash: all
 erase:
 	@echo "P4: whole-chip erasure is refused; preserve the original firmware backup."
 	@false
+endif
 
 run: flash
 

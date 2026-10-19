@@ -66,9 +66,12 @@ def require_flash_boot(esp):
         raise ValueError("BOOT was sampled low; power-cycle with BOOT released before installation")
 
 
-def boot_flash(esp):
-    """Clear the volatile download request and reset with both USB lines released."""
-    require_flash_boot(esp)
+def boot_flash(esp, require_strap=True):
+    """Clear the volatile download request and reset with both USB lines released;
+    require_strap=False skips the BOOT check, for the FireBeetle 2, whose ROM
+    loader latches the strap of its USB download entry (0x4) instead."""
+    if require_strap:
+        require_flash_boot(esp)
     address = 0x50110008
     value = esp.read_reg(address) & ~4
     esp.write_reg(address, value)

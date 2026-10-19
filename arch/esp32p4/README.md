@@ -5,8 +5,10 @@
 `P4_PROFILE=firmware` builds native CPU0 TikuOS with the shell, VFS, BASIC,
 integer workers, flash-backed `/data`, durable mirrors, clock preferences,
 paired flash execution and automatic attachment of the fitted 32 MiB PSRAM.
-It supports the Olimex ESP32-P4-PC with silicon v1.3 and ROM ECO2. CPU1 and
-the LP core remain parked. No FreeRTOS or ESP-IDF runtime is linked.
+It supports the Olimex ESP32-P4-PC and the DFRobot FireBeetle 2 ESP32-P4
+(`BOARD=firebeetle2_esp32p4`, below), both with silicon v1.3 and ROM ECO2.
+CPU1 and the LP core remain parked. No FreeRTOS or ESP-IDF runtime is
+linked.
 
 ```sh
 make MCU=esp32p4 P4_PROFILE=firmware \
@@ -24,7 +26,8 @@ a separate 2 KiB interrupt stack. Software guards do not provide an MPU.
 
 ### Install and recover
 
-Ordinary `make flash` and `make erase` refuse this profile. Installation
+On the Olimex, ordinary `make flash` and `make erase` refuse this profile.
+Installation
 changes the original application's layout and can enable storage writes
 at boot; it requires the storage-aware installer, not the diagnostic loader.
 Keep an immutable full 16 MiB original backup and a non-writing kernel-test
@@ -68,6 +71,36 @@ With the matching pair already installed, `--resume` replaces
 the loader makes no flash writes. Firmware itself can update boot counters
 and other durable state. This path preserves existing `/data` for warm-reset
 tests. It is not an updater for a different firmware pair.
+
+### FireBeetle 2 ESP32-P4
+
+`BOARD=firebeetle2_esp32p4` builds the same firmware for the DFRobot
+FireBeetle 2 ESP32-P4 (DFR1237): v1.3/ECO2 silicon, the EF:4018 16 MiB
+flash and 32 MiB PSRAM, as on the Olimex. No original image is kept on this
+board, so `make flash` installs it without a backup. The first install over
+the vendor firmware needs one whole-chip erase:
+
+```sh
+make erase MCU=esp32p4 P4_PROFILE=firmware BOARD=firebeetle2_esp32p4 \
+    ESP_PORT=/dev/cu.usbmodemN
+make flash MCU=esp32p4 P4_PROFILE=firmware BOARD=firebeetle2_esp32p4 \
+    ESP_PORT=/dev/cu.usbmodemN
+```
+
+`tools/esp32p4_board_flash.py` runs the ROM, silicon, security and flash
+checks of the installer, refuses an image built for another board and a
+flash that still holds an ESP-IDF partition table, then writes and verifies
+the code pair, boots it from flash and waits for the shell prompt. It writes
+no storage, so `/data` survives a reinstall; `make erase` clears it. The
+ROM loader on this board reports the strap of its USB download entry (0x4)
+rather than the BOOT pin, so the shell prompt, not the strap, shows that the
+board booted from flash. TikuBench builds and flashes it:
+
+```sh
+cd TikuBench
+python -m tikubench run p4-firmware --board firebeetle2_p4 \
+    --port /dev/cu.usbmodemN --flash
+```
 
 ### Memory and configuration
 
@@ -760,3 +793,4 @@ and the P4 clock and SYSTIMER HALs. No SDK library is linked.
 - [P4 revision 1.3 datasheet](https://documentation.espressif.com/esp32-p4-chip-revision-v1.3_datasheet_en.html)
 - [ROM serial protocol](https://docs.espressif.com/projects/esptool/en/latest/esp32p4/advanced-topics/serial-protocol.html)
 - [Olimex board design](https://github.com/OLIMEX/ESP32-P4-PC)
+- [DFRobot FireBeetle 2 ESP32-P4 (DFR1237)](https://wiki.dfrobot.com/dfr1237/)

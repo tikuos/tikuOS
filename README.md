@@ -48,6 +48,7 @@ commit before making it.
 | **Espressif**<br><sub>32-bit · RISC-V</sub> | ESP32-C61-DevKitC · 160 MHz · Wi-Fi 6 + BLE 5 | 320 KB + 2 MB PSRAM | 8 MB flash |
 | | ESP32-C5-DevKitC-1 · 240 MHz · dual-band Wi-Fi 6 + BLE 5 + 802.15.4 | 384 KB | 4 MB flash |
 | | Olimex ESP32-P4-PC · 360 MHz | 768 KB + 32 MB PSRAM | 16 MB flash |
+| | DFRobot FireBeetle 2 ESP32-P4 · 360 MHz | 768 KB + 32 MB PSRAM | 16 MB flash |
 
 ## 🐚 Interacting with TikuOS boards
 
