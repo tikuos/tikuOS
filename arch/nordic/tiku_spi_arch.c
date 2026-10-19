@@ -32,7 +32,9 @@
  *     the low-power domain with only a handful of P0 pins),
  *   - errata 54L-55/69 do not apply to the nRF54L15, only to the LM20,
  *     LS05, LV10 and LC10 variants (per the MDK errata header); this driver
- *     applies their transfer workaround on the LM20 and the LV10A.
+ *     applies their transfer workaround on the LM20 and the LV10A,
+ *   - erratum 54L-8 (a wrong first MOSI bit with CPHA=0 and a DIVISOR
+ *     above 2) applies to every part here but LM20B revision 0.
  * The SERIAL21 interrupt is unused; completion is polled on EVENTS_END.
  * The secure alias (_S, 0x500C7000) matches the rest of this port.
  */
@@ -157,6 +159,9 @@ static uint8_t spim_rx1 __attribute__((aligned(4)));
 /** @brief Non-zero once tiku_spi_arch_init() has succeeded. */
 static uint8_t spim_initialised;
 
+/** @brief Non-zero when the configured mode and DIVISOR need erratum 8. */
+static uint8_t spim_errata8;
+
 /*---------------------------------------------------------------------------*/
 /* HELPERS                                                                   */
 /*---------------------------------------------------------------------------*/
@@ -199,16 +204,36 @@ static void spim_nfc_pads_to_gpio(void)
 #endif
 }
 
-/** @brief Apply the LM20 and LV10A SPIM 55/69 transfer workaround. */
+/**
+ * @brief Report whether erratum 8 applies to this part.
+ *
+ * Every revision of the nRF54L15, LM20A and LV10A; the LM20B from revision
+ * 1 (FICR revision word 0x00FFC344, as nrfx reads it).
+ */
+static int spim_errata8_part(void)
+{
+#if defined(TIKU_DEVICE_NRF54LM20B)
+    return *(volatile uint32_t *)0x00FFC344ul != 0u;
+#else
+    return 1;
+#endif
+}
+
+/**
+ * @brief Apply the SPIM transfer workarounds: 55/69 on the LM20 and LV10A,
+ *        and erratum 8 when tiku_spi_arch_init() chose it.
+ */
 static void spim_errata(int active)
 {
 #if defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B) || \
     defined(TIKU_DEVICE_NRF54LV10A)
     *(volatile uint32_t *)((uint8_t *)TIKU_SPIM + 0xc80u) =
         active ? 0x82u : 0u;
-#else
-    (void)active;
 #endif
+    if (spim_errata8 != 0u) {
+        *(volatile uint32_t *)((uint8_t *)TIKU_SPIM + 0xc84u) =
+            active ? 0x82u : 0u;
+    }
 }
 
 /**
@@ -217,7 +242,7 @@ static void spim_errata(int active)
  * Points EasyDMA at the given RAM buffers, triggers TASKS_START and spins on
  * EVENTS_END with a bounded poll.  Both pointers must reference on-chip RAM.
  *
- * @note On the LM20 and the LV10A the errata 55/69 register is set before
+ * @note The errata 55/69 and 8 registers (spim_errata()) are set before
  *       TASKS_START and cleared after EVENTS_END and after a timeout.
  * @note A timed-out burst is stopped with TASKS_STOP, EVENTS_STOPPED is
  *       polled with a bounded wait so EasyDMA is not cut mid-transfer, and
@@ -348,6 +373,16 @@ int tiku_spi_arch_init(const tiku_spi_config_t *config)
     }
     div &= ~1UL;
     TIKU_SPIM->PRESCALER = div;
+
+    /* Erratum 8: with CPHA=0 and a DIVISOR above 2, CSNDUR must be at least
+     * DIVISOR/2 + 1 and each transfer runs with 0x82 at +0xC84.  Otherwise
+     * CSNDUR goes back to its reset value. */
+    spim_errata8 = 0u;
+    TIKU_SPIM->IFTIMING.CSNDUR = SPIM_IFTIMING_CSNDUR_ResetValue;
+    if (div > 2UL && (config->mode & 0x1u) == 0u && spim_errata8_part()) {
+        TIKU_SPIM->IFTIMING.CSNDUR = (div / 2UL) + 1UL;
+        spim_errata8 = 1u;
+    }
 
     /* Byte clocked out while receiving (read filler / over-read char). */
     TIKU_SPIM->ORC = TIKU_SPIM_ORC_IDLE;
