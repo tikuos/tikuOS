@@ -327,25 +327,23 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         return;
     }
     if (tiku_cmd_streq(argv[1], "why")) {
-        /* Decode RESETREAS, the causes of the last reset, including a
-         * wake from System OFF.  `why clear` writes the bits back to clear
-         * them. */
-        uint32_t r = *(volatile uint32_t *)0x5010E600UL;
-        SHELL_PRINTF("RESETREAS %x:%s%s%s%s%s%s%s%s%s%s\n", (unsigned)r,
-                     (r & (1u << 0))  ? " pin"      : "",
-                     (r & (1u << 1))  ? " dog0"     : "",
-                     (r & (1u << 3))  ? " ctrlsoft" : "",
-                     (r & (1u << 4))  ? " ctrlhard" : "",
-                     (r & (1u << 6))  ? " sreq"     : "",
-                     (r & (1u << 8))  ? " OFF-wake" : "",
-                     (r & (1u << 10)) ? " DIF(debugger)" : "",
-                     (r & (1u << 11)) ? " GRTC"     : "",
-                     (r & (1u << 12)) ? " nfc"      : "",
-                     (r & (1u << 14)) ? " vbus"     : "");
-        if (argc >= 3 && tiku_cmd_streq(argv[2], "clear")) {
-            *(volatile uint32_t *)0x5010E600UL = r;   /* W1C */
-            SHELL_PRINTF("cleared\n");
+        /* Decode RESETREAS as this boot found it (boot clears the
+         * register): the causes of the last reset, including a wake from
+         * System OFF or Hibernate.  A bit a part does not have reads 0. */
+        static const char *const why[16] = {
+            "pin", "dog0", "dog1", "ctrlsoft", "ctrlhard", "ctrlpin",
+            "sreq", "lockup", "OFF-wake", "LPCOMP-wake", "DIF(debugger)",
+            "GRTC", "nfc", "tamper", "vbus", "HIBERNATE-wake"
+        };
+        uint32_t r = tiku_cpu_nordic_resetreas();
+        unsigned b;
+        SHELL_PRINTF("RESETREAS %x:", (unsigned)r);
+        for (b = 0u; b < 16u; b++) {
+            if (r & (1u << b)) {
+                SHELL_PRINTF(" %s", why[b]);
+            }
         }
+        SHELL_PRINTF("\n");
         return;
     }
     if (tiku_cmd_streq(argv[1], "off")) {
@@ -421,7 +419,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         return;
     }
     SHELL_PRINTF("Usage: power [stat | idle|spin <ms> [flags] | mem <kind> <ms>"
-                 " | lfclk [lfrc|synth] | floor | why [clear] | off | bench"
+                 " | lfclk [lfrc|synth] | floor | why | off | bench"
                  " | clock | probe | clear | cache on|off | dcdc on|off]\n");
     return;
 #endif

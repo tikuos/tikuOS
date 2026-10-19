@@ -114,6 +114,9 @@ uint8_t tiku_cpu_nordic_unique_id(uint8_t *buf, uint8_t len)
 #define TIKU_RESETREAS_SREQ     (1UL << 6)
 #define TIKU_RESETREAS_OFF      (1UL << 8)
 
+/** @brief RESETREAS as the first decode read it, before clearing it. */
+static uint32_t tiku_nordic_resetreas_boot;
+
 uint16_t tiku_cpu_nordic_reset_reason(void)
 {
     static uint16_t captured;
@@ -126,6 +129,7 @@ uint16_t tiku_cpu_nordic_reset_reason(void)
 
     /* RESETREAS is write-1-to-clear and accumulates across resets; clearing
      * the bits read here leaves the next boot only its own cause. */
+    tiku_nordic_resetreas_boot = r;
     TIKU_NORDIC_RESETREAS = r;
 
     /* Map to the MSP430 SYSRSTIV-style codes the kernel uses. */
@@ -142,4 +146,10 @@ uint16_t tiku_cpu_nordic_reset_reason(void)
     }
     captured_valid = 1u;
     return captured;
+}
+
+uint32_t tiku_cpu_nordic_resetreas(void)
+{
+    (void)tiku_cpu_nordic_reset_reason();
+    return tiku_nordic_resetreas_boot;
 }

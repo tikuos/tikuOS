@@ -53,4 +53,10 @@ uint8_t tiku_cpu_nordic_unique_id(uint8_t *buf, uint8_t len);
  */
 uint16_t tiku_cpu_nordic_reset_reason(void);
 
+/**
+ * @brief RESETREAS as this boot found it, before the decode above cleared it
+ *        (the decode runs on the first call to either function).
+ */
+uint32_t tiku_cpu_nordic_resetreas(void);
+
 #endif /* TIKU_NORDIC_CPU_COMMON_H_ */
