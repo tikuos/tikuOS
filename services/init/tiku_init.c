@@ -92,6 +92,12 @@ _Static_assert(TIKU_DEVICE_FRAM_CONFIG_SIZE >= TIKU_INIT_REGION_BYTES_NEEDED,
  */
 static uint8_t *cfg_base;
 
+/*
+ * Non-zero while tiku_init_run_all() runs; a command it runs that starts
+ * another run (`init run`) gets 0 instead of running the table again.
+ */
+static uint8_t run_active;
+
 /*---------------------------------------------------------------------------*/
 /* INTERNAL HELPERS                                                          */
 /*---------------------------------------------------------------------------*/
@@ -342,10 +348,12 @@ tiku_init_run_all(void)
     uint8_t executed = 0;
     uint8_t i;
     uint8_t j;
+    int8_t idx;
     uint8_t order[TIKU_INIT_MAX_ENTRIES];
+    char names[TIKU_INIT_MAX_ENTRIES][TIKU_INIT_NAME_SIZE];
     char scratch[TIKU_INIT_CMD_SIZE];
 
-    if (!init_table_valid()) {
+    if (run_active || !init_table_valid()) {
         return 0;
     }
 
@@ -370,10 +378,25 @@ tiku_init_run_all(void)
         order[j] = key;
     }
 
-    /* Execute each enabled entry via the shell parser */
+    /* A command can edit the table, and a remove moves the last entry into
+     * the freed slot, so the run keeps names, not slots: each entry is found
+     * again before its turn, and one added during the run is not listed. */
     for (i = 0; i < count; i++) {
-        const tiku_init_entry_t *e = init_entry_ptr(order[i]);
+        memcpy(names[i], init_entry_ptr(order[i])->name, TIKU_INIT_NAME_SIZE);
+    }
 
+    run_active = 1;
+    for (i = 0; i < count; i++) {
+        const tiku_init_entry_t *e;
+
+        if (!init_table_valid()) {
+            break;
+        }
+        idx = init_find(names[i]);
+        if (idx < 0) {
+            continue;
+        }
+        e = init_entry_ptr((uint8_t)idx);
         if (!e->enabled) {
             continue;
         }
@@ -390,6 +413,7 @@ tiku_init_run_all(void)
         tiku_shell_parser_execute(scratch);
         executed++;
     }
+    run_active = 0;
 
     return executed;
 }

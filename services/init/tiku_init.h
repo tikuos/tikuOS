@@ -82,9 +82,14 @@ void tiku_init_load(void);
  * and passed to tiku_shell_parser_execute().  Does not write the table
  * itself; a command it runs can.
  *
+ * @note The entries present at the call run at most once each, in the order
+ *       they had then: one a command removes or disables before its turn is
+ *       skipped, one it adds waits for the next run, and a run a command
+ *       starts returns 0.
  * @note The shell process calls it in its first pass, once the parser has its
  *       command table.
- * @return Number of entries executed; 0 if the table is unusable or empty
+ * @return Number of entries executed; 0 if the table is unusable or empty,
+ *         or a run is in progress
  */
 uint8_t tiku_init_run_all(void);
 
