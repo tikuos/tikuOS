@@ -479,8 +479,16 @@ static void fll_queue_raw(uint8_t llid, const uint8_t *p, uint8_t plen)
     fll_tx_len = plen;
 }
 
+/* Control PDUs that found a PDU in flight wait here in order and go out
+ * before the host's next fragment.  A central does not repeat a procedure:
+ * an unanswered one ends the link at its 40 s response timeout. */
+#define FLL_CW_SLOTS 3u
+static uint8_t fll_cw[FLL_CW_SLOTS][24];
+static uint8_t fll_cw_len[FLL_CW_SLOTS];
+static uint8_t fll_cw_head, fll_cw_n;
+
 /** @brief Queue an LL control PDU: opcode @p op and @p dl bytes of data,
- *         LL_ENC_REQ's 22 the most. */
+ *         LL_ENC_REQ's 22 the most, for a caller that found the slot free. */
 static void fll_queue_ctrl(uint8_t op, const uint8_t *d, uint8_t dl)
 {
     uint8_t p[24], i;
@@ -489,6 +497,26 @@ static void fll_queue_ctrl(uint8_t op, const uint8_t *d, uint8_t dl)
         p[1u + i] = d[i];
     }
     fll_queue_raw(3u, p, (uint8_t)(1u + dl));
+}
+
+/** @brief Answer a received control PDU: queued now when the slot is free
+ *         and nothing waits, else after the PDUs ahead of it. */
+static void fll_reply_ctrl(uint8_t op, const uint8_t *d, uint8_t dl)
+{
+    uint8_t i, s;
+    if (fll_tx_len == 0u && fll_cw_n == 0u) {
+        fll_queue_ctrl(op, d, dl);
+        return;
+    }
+    if (fll_cw_n < FLL_CW_SLOTS) {
+        s = (uint8_t)((fll_cw_head + fll_cw_n) % FLL_CW_SLOTS);
+        fll_cw[s][0] = op;
+        for (i = 0u; i < dl; i++) {
+            fll_cw[s][1u + i] = d[i];
+        }
+        fll_cw_len[s] = (uint8_t)(1u + dl);
+        fll_cw_n++;
+    }
 }
 
 /** @brief Build the outgoing PDU (pending, else empty) with current SN/NESN. */
@@ -555,13 +583,13 @@ static void fll_handle_rx_central(const uint8_t *buf, tiku_flpr_shared_t *sh,
         }
     } else if (op == 0x16u) {                   /* LL_PHY_REQ: no change    */
         static const uint8_t same[4] = { 0u, 0u, 0u, 0u };
-        fll_queue_ctrl(0x18u, same, 4u);        /* LL_PHY_UPDATE_IND        */
+        fll_reply_ctrl(0x18u, same, 4u);        /* LL_PHY_UPDATE_IND        */
     } else if (op == 0x0Fu) {                   /* LL_CONNECTION_PARAM_REQ  */
         static const uint8_t rej[2] = { 0x0Fu, 0x1Au };
-        fll_queue_ctrl(0x11u, rej, 2u);         /* kept as they are         */
+        fll_reply_ctrl(0x11u, rej, 2u);         /* kept as they are         */
     } else if (op != 0x09u && op != 0x13u && op != 0x07u &&
                op != 0x15u && op != 0x17u) {
-        fll_queue_ctrl(0x07u, &op, 1u);         /* LL_UNKNOWN_RSP           */
+        fll_reply_ctrl(0x07u, &op, 1u);         /* LL_UNKNOWN_RSP           */
     }
 }
 
@@ -599,14 +627,14 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
     if (op == 0x0Cu) {                          /* VERSION_IND -> reply     */
         if (!fll_sent_vers) {
             static const uint8_t v[5] = { 0x0Cu, 0x59u, 0x00u, 0x01u, 0x00u };
-            fll_queue_ctrl(0x0Cu, v, 5u);
+            fll_reply_ctrl(0x0Cu, v, 5u);
             fll_sent_vers = 1u;
         }
     } else if (op == 0x02u) {                   /* LL_TERMINATE_IND         */
         fll_terminate = 1u;                     /* ack it, then end         */
         fll_reason = (buf[1] >= 2u) ? buf[4] : 0x13u;   /* its ErrorCode    */
     } else if (op == 0x12u) {                   /* LL_PING_REQ -> RSP       */
-        fll_queue_ctrl(0x13u, (const uint8_t *)0, 0u);
+        fll_reply_ctrl(0x13u, (const uint8_t *)0, 0u);
     } else if (op == 0x08u || op == 0x0Eu) {    /* FEATURE_REQ -> RSP       */
         /* Octet 0 of FeatureSet is the AND of both sides' features; this LL
          * offers bit 0, LE Encryption, alone.  A central that reads it clear
@@ -615,7 +643,7 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
         if (buf[1] >= 9u) {
             feat[0] = (uint8_t)(buf[4] & 0x01u);
         }
-        fll_queue_ctrl(0x09u, feat, 8u);
+        fll_reply_ctrl(0x09u, feat, 8u);
     } else if (fll_central) {
         fll_handle_rx_central(buf, sh, op);
     } else if (op == 0x01u) {                   /* LL_CHANNEL_MAP_UPDATE_IND*/
@@ -688,13 +716,13 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
             rsp[4] = (uint8_t)TIKU_FLPR_DLE_MAX_OCTETS; rsp[5] = 0u;
             rsp[6] = (uint8_t)TIKU_FLPR_DLE_MAX_TIME;
             rsp[7] = (uint8_t)(TIKU_FLPR_DLE_MAX_TIME >> 8);
-            fll_queue_ctrl(0x15u, rsp, 8u);     /* LL_LENGTH_RSP            */
+            fll_reply_ctrl(0x15u, rsp, 8u);     /* LL_LENGTH_RSP            */
             if (eff < 27u) { eff = 27u; }
             sh->dle_max = eff;                  /* publish to the M33 host  */
         }
     } else if (op == 0x16u) {                   /* LL_PHY_REQ (PHY update)  */
         static const uint8_t rsp[2] = { 0x07u, 0x07u };  /* 1M + 2M + Coded */
-        fll_queue_ctrl(0x17u, rsp, 2u);         /* LL_PHY_RSP              */
+        fll_reply_ctrl(0x17u, rsp, 2u);         /* LL_PHY_RSP              */
     } else if (op == 0x18u) {                   /* LL_PHY_UPDATE_IND        */
         /* CtrData: PHY_C_TO_P[1] PHY_P_TO_C[1] Instant[2] at buf[4..7].
          * Symmetric switch: the RX (C->P) and TX (P->C) take the same PHY;
@@ -707,7 +735,7 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
         }
     } else if (op != 0x09u && op != 0x13u && op != 0x07u &&
                op != 0x15u && op != 0x17u) {
-        fll_queue_ctrl(0x07u, &op, 1u);         /* LL_UNKNOWN_RSP           */
+        fll_reply_ctrl(0x07u, &op, 1u);         /* LL_UNKNOWN_RSP           */
     }
 }
 
@@ -825,6 +853,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     sh->mic_info = 0u;
     /* Reset the LL / L2CAP-transport state for this connection. */
     fll_tx_len = 0u; fll_tx_llid = 0u; fll_sent_vers = 0u; fll_tx_sent = 0u;
+    fll_cw_head = 0u; fll_cw_n = 0u;             /* no control PDU waiting    */
     fll_sn = 0u; fll_nesn = 0u;
     fll_a2f_seen = sh->a2f_seq;
     sh->a2f_ack  = sh->a2f_seq;                  /* TX slot free              */
@@ -901,6 +930,15 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
             sh->conn_phy_mode = r->MODE;         /* MODE read back            */
         }
 
+        /* A control PDU that waited goes out first, when the slot is free
+         * and no encryption start is under way (the gate host data uses). */
+        if (fll_tx_len == 0u && fll_cw_n != 0u &&
+            ((fll_enc == FLL_ENC_OFF && !fll_enc_refresh) ||
+             fll_enc == FLL_ENC_ON)) {
+            fll_queue_raw(3u, fll_cw[fll_cw_head], fll_cw_len[fll_cw_head]);
+            fll_cw_head = (uint8_t)((fll_cw_head + 1u) % FLL_CW_SLOTS);
+            fll_cw_n--;
+        }
         /* The host asked for the link to end: an LL_TERMINATE_IND with its
          * code once the pending slot is free; the central's ack ends it. */
         if (sh->conn_term != 0u && !fll_term_sent && fll_tx_len == 0u) {
