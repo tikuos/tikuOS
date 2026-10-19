@@ -16,7 +16,7 @@ tree/tiku_vfs_tree_watchdog.c /sys/watchdog
 tree/tiku_vfs_tree_power.c    /sys/power
 tree/tiku_vfs_tree_persist.c  /sys/persist (cells primed moved manifest)
 tree/tiku_vfs_tree_watch.c    /sys/watch (slots), /sys/vfs (manifest, events)
-tree/tiku_vfs_tree_dev.c      /dev leds, console, null, zero, buses
+tree/tiku_vfs_tree_dev.c      /dev leds, buttons, console, null, zero, buses
 tree/tiku_vfs_tree_gpio.c     /dev/gpio, /dev/gpio_dir, /dev/gpio_owner
                               (macro-generated pins)
 tree/tiku_vfs_tree_data.c     /data (the file store) and /sys/fs/data

@@ -97,6 +97,8 @@
  * BTN4 is on P0, in the LP domain, so its edge interrupts come through
  * GPIOTE30 (tiku_gpio_irq_arch.c).
  */
+/** @brief Buttons /dev/btn0..3 expose, BTN1..BTN4 in order. */
+#define TIKU_BOARD_BTN_COUNT        4
 #define TIKU_BOARD_BTN1_INIT()      tiku_nordic_gpio_init_input_pullup(1u, 26u)
 #define TIKU_BOARD_BTN1_PRESSED()   (tiku_nordic_gpio_read(1u, 26u) == 0u)
 #define TIKU_BOARD_BTN2_INIT()      tiku_nordic_gpio_init_input_pullup(1u, 9u)

@@ -7,9 +7,9 @@
  *
  * tiku_vfs_tree_dev.c - /dev subtree (files and assembly).
  *
- * The static /dev nodes: board LEDs, console, null, zero, and the small
- * subtrees for the console port, adc, i2c and spi.  LED nodes keep an SRAM
- * shadow because an output pin cannot be read back uniformly.
+ * The static /dev nodes: board LEDs and buttons, console, null, zero, and the
+ * small subtrees for the console port, adc, i2c and spi.  LED nodes keep an
+ * SRAM shadow because an output pin cannot be read back uniformly.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -25,6 +25,7 @@
 #include <kernel/cpu/tiku_common.h>
 #include <kernel/timers/tiku_clock.h>   /* TIKU_CLOCK_SECOND */
 #include <interfaces/led/tiku_led.h>
+#include <interfaces/button/tiku_button.h>
 #include <interfaces/adc/tiku_adc.h>
 #include <interfaces/bus/tiku_i2c_bus.h>
 #include <interfaces/bus/tiku_spi_bus.h>
@@ -86,6 +87,35 @@ LED_VFS_FUNCS(2)
 LED_VFS_FUNCS(3)
 #endif
 #endif /* TIKU_BOARD_LED_COUNT > 0 */
+
+/*---------------------------------------------------------------------------*/
+/* BUTTONS                                                                   */
+/*---------------------------------------------------------------------------*/
+
+#if TIKU_BOARD_BTN_COUNT > 0
+
+/**
+ * @brief Generate the read handler for button index N: "1\n" while the
+ *        button is held down, "0\n" otherwise, sampled at each read.
+ */
+#define BTN_VFS_READ(N)                                                       \
+static int                                                                    \
+btn##N##_read(char *buf, size_t max)                                          \
+{                                                                             \
+    return snprintf(buf, max, "%u\n", (unsigned)tiku_button_pressed(N));     \
+}
+
+BTN_VFS_READ(0)
+#if TIKU_BOARD_BTN_COUNT >= 2
+BTN_VFS_READ(1)
+#endif
+#if TIKU_BOARD_BTN_COUNT >= 3
+BTN_VFS_READ(2)
+#endif
+#if TIKU_BOARD_BTN_COUNT >= 4
+BTN_VFS_READ(3)
+#endif
+#endif /* TIKU_BOARD_BTN_COUNT > 0 */
 
 /*---------------------------------------------------------------------------*/
 /* CONSOLE PORT                                                              */
@@ -433,6 +463,11 @@ static const tiku_vfs_desc_t desc_led =
     TIKU_VFS_DESC(TIKU_VFS_T_BOOL, TIKU_VFS_U_BOOL,
                   TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
 #endif
+#if TIKU_BOARD_BTN_COUNT >= 1
+static const tiku_vfs_desc_t desc_btn =
+    TIKU_VFS_DESC(TIKU_VFS_T_BOOL, TIKU_VFS_U_BOOL,
+                  TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE);
+#endif
 
 /**
  * /dev/uart directory table, /dev/usb_serial_jtag on a TIKU_CONSOLE_JTAG
@@ -482,10 +517,10 @@ static const tiku_vfs_node_t dev_spi_children[] = {
 /*
  * The static /dev directory table; the driver registry mounts its
  * /dev/<class> directories after these.  LED entries are gated one by one on
- * TIKU_BOARD_LED_COUNT so a one-LED board exposes exactly /dev/led0; the gpio
- * subtrees come from tiku_vfs_tree_gpio.c and sensors/ from
- * tiku_vfs_tree_sensor.c.  To add a node, implement the handler above and
- * append the entry here.
+ * TIKU_BOARD_LED_COUNT so a one-LED board exposes exactly /dev/led0, and
+ * button entries the same way on TIKU_BOARD_BTN_COUNT; the gpio subtrees come
+ * from tiku_vfs_tree_gpio.c and sensors/ from tiku_vfs_tree_sensor.c.  To add
+ * a node, implement the handler above and append the entry here.
  */
 static const tiku_vfs_node_t dev_children[] = {
     { "sensors", TIKU_VFS_DIR, NULL, NULL,
@@ -501,6 +536,18 @@ static const tiku_vfs_node_t dev_children[] = {
 #endif
 #if TIKU_BOARD_LED_COUNT >= 4
     { "led3",     TIKU_VFS_FILE, led3_read, led3_write, NULL, 0, &desc_led, NULL, TIKU_VFS_CAP_HW },
+#endif
+#if TIKU_BOARD_BTN_COUNT >= 1
+    { "btn0",     TIKU_VFS_FILE, btn0_read, NULL, NULL, 0, &desc_btn },
+#endif
+#if TIKU_BOARD_BTN_COUNT >= 2
+    { "btn1",     TIKU_VFS_FILE, btn1_read, NULL, NULL, 0, &desc_btn },
+#endif
+#if TIKU_BOARD_BTN_COUNT >= 3
+    { "btn2",     TIKU_VFS_FILE, btn2_read, NULL, NULL, 0, &desc_btn },
+#endif
+#if TIKU_BOARD_BTN_COUNT >= 4
+    { "btn3",     TIKU_VFS_FILE, btn3_read, NULL, NULL, 0, &desc_btn },
 #endif
     { "console",  TIKU_VFS_FILE, console_read, console_write, NULL, 0,
       &desc_console },
@@ -550,6 +597,9 @@ void
 tiku_vfs_tree_dev_init(void)
 {
     tiku_led_init_all();
+#if TIKU_BOARD_BTN_COUNT > 0
+    tiku_button_init_all();
+#endif
 
 #if TIKU_BOARD_LED_COUNT > 0
     {
