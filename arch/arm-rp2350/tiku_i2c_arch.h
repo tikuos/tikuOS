@@ -22,13 +22,15 @@
 /**
  * @brief Initialize the DW_apb_i2c controller with the given config.
  *
- * Takes the I2C block out of reset, configures SCL high/low counts from
+ * Takes I2C0 out of reset, routes the board's SDA and SCL pins (GP4 and GP5
+ * by default) to it with no internal pulls, sets the SCL high/low counts from
  * clk_peri for the requested speed, and enables the controller.
  *
  * @note Call it before any transfer function; transfers return
  *       TIKU_I2C_ERR_PARAM until it has run.
- * @param config  Bus configuration (the speed).
- * @return 0 on success, TIKU_I2C_ERR_PARAM for a NULL @p config.
+ * @param config  Bus configuration: TIKU_I2C_SPEED_FAST, or any other speed
+ *                for standard mode.
+ * @return TIKU_I2C_OK, or TIKU_I2C_ERR_PARAM for a NULL @p config.
  */
 int  tiku_i2c_arch_init(const tiku_i2c_config_t *config);
 
@@ -49,8 +51,10 @@ void tiku_i2c_arch_close(void);
  *
  * @param addr  7-bit target address (unshifted).
  * @param buf   Byte array to transmit.
- * @param len   Number of bytes to send.
- * @return 0 on success, negative errno-style code on NACK or timeout.
+ * @param len   Number of bytes to send; 0 sends nothing.
+ * @return TIKU_I2C_OK (also for @p len 0), TIKU_I2C_ERR_PARAM before init or
+ *         for a NULL @p buf with @p len above 0, TIKU_I2C_ERR_NACK on a NACK,
+ *         or TIKU_I2C_ERR_TIMEOUT on a bus stall.
  */
 int  tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len);
 
@@ -62,8 +66,10 @@ int  tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len);
  *
  * @param addr  7-bit target address (unshifted).
  * @param buf   Destination buffer for received bytes.
- * @param len   Number of bytes to read.
- * @return 0 on success, negative errno-style code on NACK or timeout.
+ * @param len   Number of bytes to read; 0 reads nothing.
+ * @return TIKU_I2C_OK (also for @p len 0), TIKU_I2C_ERR_PARAM before init or
+ *         for a NULL @p buf, TIKU_I2C_ERR_NACK on a NACK, or
+ *         TIKU_I2C_ERR_TIMEOUT on a bus stall.
  */
 int  tiku_i2c_arch_read (uint8_t addr, uint8_t *buf, uint16_t len);
 
@@ -75,23 +81,26 @@ int  tiku_i2c_arch_read (uint8_t addr, uint8_t *buf, uint16_t len);
  * discarded; `i2c scan` calls it for each address.
  *
  * @param addr  7-bit slave address (unshifted).
- * @return 0 (TIKU_I2C_OK) if acknowledged, negative errno-style code if not.
+ * @return TIKU_I2C_OK if acknowledged, TIKU_I2C_ERR_NACK if not,
+ *         TIKU_I2C_ERR_PARAM before init, or TIKU_I2C_ERR_TIMEOUT on a stall.
  */
 int  tiku_i2c_arch_probe(uint8_t addr);
 
 /**
  * @brief Perform a combined write-then-read transaction (repeated START).
  *
- * Writes @p tx_len bytes, issues a repeated START without releasing the
- * bus, then reads @p rx_len bytes.  Used for register-addressed sensors
- * (write register address, read back value).
+ * Writes @p tx_len bytes, issues a repeated START without releasing the bus,
+ * then reads @p rx_len bytes, as a register-addressed sensor needs.  A zero
+ * length makes it a plain read or write; both zero sends nothing.
  *
  * @param addr    7-bit target address (unshifted).
  * @param tx_buf  Bytes to transmit in the write phase.
- * @param tx_len  Number of bytes to write.
+ * @param tx_len  Number of bytes to write; may be 0.
  * @param rx_buf  Destination buffer for the read phase.
- * @param rx_len  Number of bytes to read.
- * @return 0 on success, negative errno-style code on failure.
+ * @param rx_len  Number of bytes to read; may be 0.
+ * @return TIKU_I2C_OK, TIKU_I2C_ERR_PARAM before init or for a NULL buffer
+ *         with a non-zero length, TIKU_I2C_ERR_NACK on a NACK, or
+ *         TIKU_I2C_ERR_TIMEOUT on a bus stall.
  */
 int  tiku_i2c_arch_write_read(uint8_t addr,
                               const uint8_t *tx_buf, uint16_t tx_len,

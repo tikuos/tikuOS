@@ -69,8 +69,9 @@ typedef uint16_t tiku_wdt_interval_t;
 /**
  * @brief Disable the watchdog timer.
  *
- * Writes 0 to WD_CTRL, which stops the countdown and clears the pause bits.
- * Repeated calls have no further effect.
+ * Writes 0 to WD_CTRL, which stops the countdown and clears the pause bits;
+ * repeated calls have no further effect.  The armed timeout is kept for
+ * tiku_cpu_rp2350_watchdog_resume_arch(), which leaves the pause bits clear.
  *
  * @note Callable from any context.
  */
@@ -79,12 +80,13 @@ void tiku_cpu_rp2350_watchdog_off_arch(void);
 /**
  * @brief Enable and configure the watchdog timer.
  *
- * Loads the microsecond timeout derived from @p isel, enables the watchdog and
- * reloads the count.  @p src is ignored: the watchdog always counts the 1 us
- * tick.
+ * Loads the timeout derived from @p isel, enables the watchdog and reloads
+ * the count; the count pauses while a debugger halts a core or JTAG is active.
+ * @p src is ignored: the watchdog always counts the 1 us tick.
  *
  * @param src   Clock source (ignored on RP2350).
- * @param isel  Interval divider value — maps to microsecond timeout.
+ * @param isel  Interval divider: the timeout is isel * 1 000 000 / 32768 us,
+ *              and 0 gives 1 ms.
  */
 void tiku_cpu_rp2350_watchdog_on_arch(tiku_wdt_clk_t src,
                                       tiku_wdt_interval_t isel);

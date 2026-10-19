@@ -140,13 +140,6 @@ static void uart_pins_init(void) {
 /* PUBLIC API                                                                */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialize UART0 at TIKU_BOARD_UART_BAUD, 8N1.
- *
- * Sets the baud divisors from the live clk_peri, muxes GP0/GP1, enables the
- * FIFOs with the RX interrupt at 1/8 full and on RX timeout, empties the RX
- * FIFO and the ring buffer, then enables the UART and its NVIC line.
- */
 void tiku_uart_init(void) {
     uart_ready = 1U;
     /* PL011 baud divisor formula:
@@ -204,14 +197,6 @@ void tiku_uart_init(void) {
     rp2350_nvic_enable(RP2350_IRQ_UART0);
 }
 
-/**
- * @brief Transmit one character over UART0 (blocking).
- *
- * Spins until the TX FIFO has room, then writes @p c to the data
- * register.
- *
- * @param c  Character to transmit.
- */
 void tiku_uart_putc(char c) {
     while (uart_read(RP2350_UART_FR) & RP2350_UART_FR_TXFF) {
         /* spin while TX FIFO full */
@@ -219,14 +204,6 @@ void tiku_uart_putc(char c) {
     uart_write(RP2350_UART_DR, (uint32_t)(uint8_t)c);
 }
 
-/**
- * @brief Transmit a null-terminated string over UART0.
- *
- * Converts bare '\n' to '\r\n' for terminal compatibility.  Returns
- * immediately if @p s is NULL.
- *
- * @param s  Null-terminated string to transmit.
- */
 void tiku_uart_puts(const char *s) {
     if (s == NULL) {
         return;
@@ -239,20 +216,10 @@ void tiku_uart_puts(const char *s) {
     }
 }
 
-/**
- * @brief Report whether a received byte is available in the ring buffer.
- *
- * @return 1 if at least one byte is pending, 0 otherwise.
- */
 uint8_t tiku_uart_rx_ready(void) {
     return (rx.head != rx.tail) ? 1U : 0U;
 }
 
-/**
- * @brief Consume one byte from the RX ring buffer.
- *
- * @return The received byte, 0 to 255, or -1 if the buffer is empty.
- */
 int tiku_uart_getc(void) {
     if (rx.head == rx.tail) {
         return -1;
@@ -262,38 +229,15 @@ int tiku_uart_getc(void) {
     return (int)c;
 }
 
-/**
- * @brief Return the cumulative overrun count since the last reset.
- *
- * Counts both hardware overruns (PL011 OE bit in DR) and software
- * overruns (ring buffer full when the ISR tries to enqueue a byte).
- *
- * @return Total overrun count; it wraps at 65536.
- */
 uint16_t tiku_uart_overrun_count(void) {
     return rx.overrun_count;
 }
 
-/**
- * @brief Reset the overrun counter to zero.
- *
- * A single 16-bit store, which the ISR's increment cannot split, so it runs
- * with interrupts enabled.
- */
 void tiku_uart_overrun_reset(void) {
     rx.overrun_count = 0U;
 }
 
 #ifdef HAS_TESTS
-/**
- * @brief Inject a byte into the RX ring buffer (test only).
- *
- * Drops the byte, counting nothing, if the ring buffer is full.  Built only
- * when HAS_TESTS is defined; tests use it to feed the RX path without the
- * UART.
- *
- * @param byte  Byte to inject.
- */
 void tiku_uart_test_inject(uint8_t byte) {
     uint16_t next = (rx.head + 1U) & TIKU_UART_RXBUF_MASK;
     if (next != rx.tail) {
@@ -397,16 +341,6 @@ static void uart_print_int(long v, unsigned width, char pad) {
     uart_print_uint((unsigned long)v, 10U, width, pad);
 }
 
-/**
- * @brief Lightweight printf over UART0.
- *
- * Supports %s, %c, %d, %u, %x, %ld, %lu, %lx, %% and an optional decimal width
- * prefix with '0' or ' ' padding; %s pads with spaces.  Converts '\n' in the
- * format to "\r\n" and prints an unknown conversion as written.
- *
- * @param fmt  printf-style format string (must be non-NULL).
- * @param ...  Arguments matching the format specifiers.
- */
 void tiku_uart_printf(const char *fmt, ...) {
     if (fmt == NULL) {
         return;

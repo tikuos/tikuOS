@@ -26,10 +26,6 @@ typedef tiku_htimer_clock_t htimer_t;
  *         it to tell whether the ISR runs at all. */
 volatile uint32_t tiku_htimer_arch_isr_count;
 
-/** @brief Initialise the RP2350 TIMER0 alarm-0 hardware for single-shot
- *         use.  Disarms any pre-existing alarm, masks the interrupt,
- *         clears any latched IRQ, and enables the NVIC line so that
- *         subsequent tiku_htimer_arch_schedule() calls can fire. */
 void tiku_htimer_arch_init(void) {
     /* Disarm any pre-existing ALARM0: ARMED bit 0 is write-1-to-disarm. */
     _RP2350_REG(RP2350_TIMER0_ARMED) = 0x1U;
@@ -46,18 +42,12 @@ void tiku_htimer_arch_init(void) {
     rp2350_nvic_enable(RP2350_IRQ_TIMER0_0);
 }
 
-/** @brief Read the current 16-bit hardware-timer value from TIMER0
- *         TIMERAWL (lower 32 bits of the 64-bit free-running counter).
- * @return Current 16-bit timer tick (wraps every ~65.5 ms at 1 MHz). */
 htimer_t tiku_htimer_arch_now(void) {
+    /* The low 16 bits of TIMER0's 1 MHz count: one tick is 1 us, and the
+     * value wraps every 65.536 ms. */
     return (htimer_t)_RP2350_REG(RP2350_TIMER0_TIMERAWL);
 }
 
-/** @brief Arm TIMER0 alarm-0 to fire at the 16-bit absolute tick @p t.
- *         The 16-bit target is sign-extended against the live 32-bit
- *         counter to form the full absolute compare value, then the IRQ
- *         is unmasked.  Any previously latched alarm IRQ is cleared first.
- * @param  t  Target 16-bit tick value (kernel htimer_clock_t domain). */
 void tiku_htimer_arch_schedule(htimer_t t) {
     /* Compose absolute 32-bit target from the kernel's 16-bit time
      * by adding the signed 16-bit delta to the current 32-bit reading. */
@@ -69,6 +59,8 @@ void tiku_htimer_arch_schedule(htimer_t t) {
      * which arms the alarm, then unmask it in INTE.  A new ALARM0 value
      * replaces an armed one, so no disarm comes first. */
     _RP2350_REG(RP2350_TIMER0_INTR) = 0x1U;            /* W1C */
+    /* ALARM0 fires when TIMERAWL equals it: a target already past fires
+     * only when the 32-bit count wraps, about 71.6 minutes later. */
     _RP2350_REG(RP2350_TIMER0_ALARM0) = target;        /* arms */
     _RP2350_REG_SET(RP2350_TIMER0_INTE, 0x1U);         /* unmask */
 }

@@ -28,15 +28,16 @@
  * @brief Configure a PWM channel on @p gpio_pin at @p freq_hz and
  *        @p duty_u16 (0..65535) and start it.
  *
- * Takes the slice and channel from rp2350_pwm_pin_to_slice() and
- * rp2350_pwm_pin_to_channel().  TOP = 65535 gives 16-bit duty resolution, and
- * DIV is set from the live clk_sys so the wrap frequency matches @p freq_hz.
+ * The slice comes from rp2350_pwm_pin_to_slice(); TOP = 65535 gives 16-bit
+ * duty resolution, and DIV is set from the live clk_sys for @p freq_hz.  The
+ * slice's other channel keeps its compare value but runs at the new rate.
  *
  * @param gpio_pin   GPIO 0..47
  * @param freq_hz    Wrap frequency in Hz (~10 Hz to clk_sys/65536); a higher
  *                   frequency runs at clk_sys/65536
  * @param duty_u16   Compare value, 0 = always low, 65535 = ~100 % high
- * @return TIKU_PWM_OK, TIKU_PWM_ERR_INVALID, TIKU_PWM_ERR_FREQ
+ * @return TIKU_PWM_OK, TIKU_PWM_ERR_INVALID for @p gpio_pin above 47 or
+ *         @p freq_hz 0, or TIKU_PWM_ERR_FREQ for a frequency too low for DIV
  */
 int tiku_pwm_arch_init(uint8_t  gpio_pin,
                        uint32_t freq_hz,
@@ -58,7 +59,8 @@ int tiku_pwm_arch_set_duty(uint8_t gpio_pin, uint16_t duty_u16);
  * @brief Disable the PWM channel for @p gpio_pin.
  *
  * Sets the channel's compare value to 0, stops the slice if the other
- * channel's is 0 too, and returns the pin to SIO.
+ * channel's is 0 too, and returns the pin to SIO, which drives it with the
+ * output level and direction SIO holds for that pin.
  *
  * @param gpio_pin  GPIO pin to disable (0..47).
  * @return TIKU_PWM_OK or TIKU_PWM_ERR_INVALID.

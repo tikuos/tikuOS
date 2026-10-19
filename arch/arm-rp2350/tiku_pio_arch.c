@@ -199,12 +199,6 @@ static uint32_t bitperiod_us_to_clkdiv(uint16_t bit_period_us) {
 /* HAL                                                                       */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialise the PIO0 bit-bang driver.
- *
- * Brings PIO0 out of reset, loads the program into instruction memory slots
- * 0-5 and enables NVIC IRQ 15 (PIO0_IRQ_0).  A second call returns at once.
- */
 void tiku_pio_arch_init(void) {
     uint8_t i;
 
@@ -231,28 +225,6 @@ void tiku_pio_arch_init(void) {
     g_pio_initialised = 1U;
 }
 
-/**
- * @brief Start a non-blocking PIO bit-bang transmission on a GPIO pin.
- *
- * Configures SM0 on PIO0 for the requested pin, bit order and bit period, then
- * starts it.  When the program reaches `irq nowait 0` the ISR clears the busy
- * flag and calls @p on_done in interrupt context.
- *
- * @note One transmission at a time.  Poll with tiku_pio_arch_bitbang_busy()
- *       or cancel with tiku_pio_arch_bitbang_abort().
- * @param gpio_pin      GPIO pin number to drive (0-based, RP2350 bank 0).
- * @param data          Data word: MSB-first data starts at bit 31, LSB-first
- *                      data at bit 0.
- * @param bit_count     Number of bits to transmit (1-32).
- * @param msb_first     Non-zero for MSB-first shift order; 0 for LSB-first.
- * @param bit_period_us Desired bit period in microseconds (must be > 0).
- * @param on_done       Completion callback invoked from ISR context, or NULL.
- * @param ctx           Opaque pointer forwarded to @p on_done.
- * @return              TIKU_PIO_OK on success; TIKU_PIO_ERR_NOT_READY if the
- *                      driver is uninitialised; TIKU_PIO_ERR_BUSY if a
- *                      transmission is already in progress;
- *                      TIKU_PIO_ERR_INVALID for out-of-range parameters.
- */
 int tiku_pio_arch_bitbang_tx(uint8_t  gpio_pin,
                              uint32_t data,
                              uint8_t  bit_count,
@@ -355,24 +327,10 @@ int tiku_pio_arch_bitbang_tx(uint8_t  gpio_pin,
     return TIKU_PIO_OK;
 }
 
-/**
- * @brief Query whether a PIO bit-bang transmission is in progress.
- *
- * @return  Non-zero if a transmission is in progress; 0 if idle.
- */
 int tiku_pio_arch_bitbang_busy(void) {
     return g_pio_busy != 0U;
 }
 
-/**
- * @brief Abort an in-progress PIO bit-bang transmission immediately.
- *
- * Disables the PIO IRQ source, stops and drains SM0, and clears the busy
- * flag.  The registered completion callback is not called.
- *
- * @return  TIKU_PIO_OK on success; TIKU_PIO_ERR_NOT_READY if no
- *          transmission was in progress.
- */
 int tiku_pio_arch_bitbang_abort(void) {
     if (!g_pio_busy) {
         return TIKU_PIO_ERR_NOT_READY;
@@ -395,13 +353,6 @@ int tiku_pio_arch_bitbang_abort(void) {
     return TIKU_PIO_OK;
 }
 
-/**
- * @brief ISR for NVIC IRQ 15 (PIO0_IRQ_0): bit-bang transmission complete.
- *
- * Clears the SM0 IRQ flag, disables the PIO IRQ source, stops SM0, clears the
- * busy state and calls the completion callback.  The callback runs with the
- * driver idle, so it may start the next transmission.
- */
 void tiku_rp2350_pio0_irq0_handler(void) {
     /* Clear the SM0 IRQ flag (W1C). */
     PIO0(RP2350_PIO_IRQ) = 0x01U;

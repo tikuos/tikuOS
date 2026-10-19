@@ -7,8 +7,8 @@
  *
  * tiku_cpu_common.c - RP2350 common helpers.
  *
- * Busy-wait delays on TIMER0, the synthesised unique ID, the reset cause from
- * WD_REASON and the reboot into USB BOOTSEL.
+ * Busy-wait delays on TIMER0, the chip ID from the boot ROM, the reset cause
+ * from WD_REASON and the reboot into USB BOOTSEL.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -35,14 +35,6 @@ static inline uint32_t rp2350_us_now(void) {
     return _RP2350_REG(RP2350_TIMER0_TIMERAWL);
 }
 
-/**
- * @brief Busy-wait for at least @p us microseconds.
- *
- * Spins on TIMER0's 1 us free-running counter. Handles timer wrap
- * via unsigned subtraction. Returns immediately for a zero argument.
- *
- * @param us  Delay duration in microseconds
- */
 void tiku_cpu_rp2350_delay_us(unsigned int us) {
     if (us == 0U) {
         return;
@@ -53,15 +45,8 @@ void tiku_cpu_rp2350_delay_us(unsigned int us) {
     }
 }
 
-/**
- * @brief Busy-wait for at least @p ms milliseconds.
- *
- * Calls tiku_cpu_rp2350_delay_us() in chunks of at most 1000 ms, so the
- * microsecond count of a chunk never overflows an unsigned int.
- *
- * @param ms  Delay duration in milliseconds
- */
 void tiku_cpu_rp2350_delay_ms(unsigned int ms) {
+    /* Chunks of at most 1000 ms keep chunk * 1000 within an unsigned int. */
     while (ms > 0U) {
         unsigned int chunk = (ms > 1000U) ? 1000U : ms;
         tiku_cpu_rp2350_delay_us(chunk * 1000U);
@@ -95,10 +80,6 @@ static int rp2350_chip_id(uint32_t words[4])
     return info(words, 4u, 1u);
 }
 
-/**
- * @brief Copy up to eight bytes of the silicon's chip identifier.
- * @return Bytes copied, or zero if the ROM does not supply CHIP_INFO.
- */
 uint8_t tiku_cpu_rp2350_unique_id(uint8_t *buf, uint8_t len)
 {
     uint32_t words[4];
@@ -118,14 +99,6 @@ uint8_t tiku_cpu_rp2350_unique_id(uint8_t *buf, uint8_t len)
 /* RESET REASON                                                              */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Return the reset reason as an MSP430 SYSRSTIV-style code.
- *
- * Maps WD_REASON onto the codes /sys/boot decodes: a watchdog timeout, a
- * forced watchdog reset, or neither.
- *
- * @return 0x0016 after a timeout, 0x0006 after a forced reset, else 0
- */
 uint16_t tiku_cpu_rp2350_reset_reason(void) {
     uint32_t r = _RP2350_REG(RP2350_WD_REASON);
 

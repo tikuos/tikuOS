@@ -91,20 +91,6 @@ static void pwm_pin_route_to_slice(uint8_t gpio) {
 /* HAL                                                                       */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialise a PWM output on the given GPIO pin.
- *
- * Takes the PWM block out of reset if needed, computes the divider for
- * @p freq_hz, programs TOP/DIV/CC, resets the counter and enables the slice.
- * The slice's other channel keeps its compare value but shares TOP and DIV.
- *
- * @param gpio_pin  GPIO pin to configure as a PWM output (0-47).
- * @param freq_hz   Desired PWM wrap frequency in Hz; must be non-zero.
- * @param duty_u16  Initial duty cycle as a 16-bit fraction of TOP
- *                  (0 = 0 %, 0xFFFF = ~100 %).
- * @return TIKU_PWM_OK on success, TIKU_PWM_ERR_INVALID if gpio_pin > 47 or
- *         freq_hz is zero, or TIKU_PWM_ERR_FREQ if the frequency is too low.
- */
 int tiku_pwm_arch_init(uint8_t  gpio_pin,
                        uint32_t freq_hz,
                        uint16_t duty_u16) {
@@ -155,18 +141,6 @@ int tiku_pwm_arch_init(uint8_t  gpio_pin,
     return TIKU_PWM_OK;
 }
 
-/**
- * @brief Update the duty cycle of a running PWM channel.
- *
- * Performs a read-modify-write on the shared CC register so the other
- * channel in the same slice is not disturbed.  The change takes effect
- * at the next counter wrap.
- *
- * @param gpio_pin  GPIO pin identifying the PWM channel to update.
- * @param duty_u16  New duty cycle as a 16-bit fraction of TOP
- *                  (0 = 0 %, 0xFFFF = ~100 %).
- * @return TIKU_PWM_OK, or TIKU_PWM_ERR_INVALID if gpio_pin > 47.
- */
 int tiku_pwm_arch_set_duty(uint8_t gpio_pin, uint16_t duty_u16) {
     if (gpio_pin > 47U) {
         return TIKU_PWM_ERR_INVALID;
@@ -184,16 +158,6 @@ int tiku_pwm_arch_set_duty(uint8_t gpio_pin, uint16_t duty_u16) {
     return TIKU_PWM_OK;
 }
 
-/**
- * @brief Stop PWM output on a pin and return it to SIO control.
- *
- * Sets the channel's compare value to 0 and disables the slice once both
- * compare values are 0.  The pin returns to SIO, which drives it with the
- * output level and direction SIO holds for that pin.
- *
- * @param gpio_pin  GPIO pin identifying the PWM channel to close.
- * @return TIKU_PWM_OK, or TIKU_PWM_ERR_INVALID if gpio_pin > 47.
- */
 int tiku_pwm_arch_close(uint8_t gpio_pin) {
     if (gpio_pin > 47U) {
         return TIKU_PWM_ERR_INVALID;
@@ -223,15 +187,6 @@ int tiku_pwm_arch_close(uint8_t gpio_pin) {
     return TIKU_PWM_OK;
 }
 
-/**
- * @brief Read the current compare value for a PWM channel.
- *
- * Extracts the correct 16-bit half of the shared CC register based on
- * whether the pin maps to channel A (bits 15:0) or B (bits 31:16).
- *
- * @param gpio_pin  GPIO pin identifying the PWM channel to query.
- * @return Current duty-cycle compare value (0 - 0xFFFF); 0 if gpio_pin > 47.
- */
 uint16_t tiku_pwm_arch_get_duty(uint8_t gpio_pin) {
     if (gpio_pin > 47U) {
         return 0U;
@@ -245,13 +200,6 @@ uint16_t tiku_pwm_arch_get_duty(uint8_t gpio_pin) {
     return (uint16_t)((cc >> 16) & 0xFFFFU);
 }
 
-/**
- * @brief Read the TOP (wrap) register for the slice owning a pin.
- *
- * @param gpio_pin  GPIO pin identifying the PWM slice to query.
- * @return Current TOP value (PWM_TOP_DEFAULT, 0xFFFF, after init); 0 if
- *         gpio_pin > 47.
- */
 uint16_t tiku_pwm_arch_get_top(uint8_t gpio_pin) {
     if (gpio_pin > 47U) {
         return 0U;
@@ -260,12 +208,6 @@ uint16_t tiku_pwm_arch_get_top(uint8_t gpio_pin) {
     return (uint16_t)(_RP2350_REG(RP2350_PWM_SLICE_TOP(slice)) & 0xFFFFU);
 }
 
-/**
- * @brief Report whether the PWM slice for a pin is currently running.
- *
- * @param gpio_pin  GPIO pin identifying the PWM slice to check.
- * @return 1 if the slice CSR EN bit is set, 0 otherwise or if gpio_pin > 47.
- */
 int tiku_pwm_arch_is_enabled(uint8_t gpio_pin) {
     if (gpio_pin > 47U) {
         return 0;

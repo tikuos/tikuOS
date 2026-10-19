@@ -34,13 +34,6 @@ static volatile unsigned long          g_seconds  = 0UL;
 /* HAL                                                                       */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialize the RP2350 SysTick for the kernel clock.
- *
- * Resets g_ticks and g_seconds, then programs SysTick with a reload of
- * clk_sys / TIKU_CLOCK_ARCH_SECOND - 1, from the live clk_sys and clamped to
- * 24 bits, and enables it with the CPU clock source and TICKINT asserted.
- */
 void tiku_clock_arch_init(void) {
     /* g_ticks and g_seconds are software counters that SysTick does not
      * reset, so every init restarts the elapsed time here. */
@@ -62,42 +55,18 @@ void tiku_clock_arch_init(void) {
         | RP2350_SYST_CSR_CLKSRC_CPU;
 }
 
-/**
- * @brief Return the current tick count.
- *
- * @return Monotonic tick counter value (wraps at tiku_clock_arch_time_t max).
- */
 tiku_clock_arch_time_t tiku_clock_arch_time(void) {
     return g_ticks;
 }
 
-/**
- * @brief Return the elapsed seconds since the last tiku_clock_arch_init().
- *
- * @return Seconds counter derived from the tick interrupt, offset by any
- *         tiku_clock_arch_set_seconds() call.
- */
 unsigned long tiku_clock_arch_seconds(void) {
     return g_seconds;
 }
 
-/**
- * @brief Set the seconds counter (e.g. on RTC synchronization).
- *
- * @param sec  New seconds value to store in g_seconds.
- */
 void tiku_clock_arch_set_seconds(unsigned long sec) {
     g_seconds = sec;
 }
 
-/**
- * @brief Spin-wait for @p t ticks.
- *
- * Busy-loops until g_ticks has advanced by @p t ticks from the moment of the
- * call.  The CPU does not sleep meanwhile.
- *
- * @param t  Number of ticks to wait.
- */
 void tiku_clock_arch_wait(tiku_clock_arch_time_t t) {
     tiku_clock_arch_time_t target = g_ticks + t;
     while ((tiku_clock_arch_time_t)(target - g_ticks) > 0UL) {
@@ -105,24 +74,10 @@ void tiku_clock_arch_wait(tiku_clock_arch_time_t t) {
     }
 }
 
-/**
- * @brief Busy-delay for @p us microseconds on the 1 us TIMER0 counter.
- *
- * @param us  Delay duration in microseconds.
- */
 void tiku_clock_arch_delay(unsigned int us) {
     tiku_cpu_rp2350_delay_us(us);
 }
 
-/**
- * @brief Return the sub-tick position within the current SysTick period.
- *
- * SysTick CVR counts down from RVR.  The fractional position is
- * expressed as a 16-bit value scaled over [0, 0xFFFF] so 0 = start
- * of tick and 0xFFFF = end.
- *
- * @return Sub-tick value in [0, 0xFFFF], or 0 if RVR is 0.
- */
 unsigned short tiku_clock_arch_fine(void) {
     /* SysTick CVR counts down from RVR. Express the position within
      * the current tick as a 16-bit value. */
@@ -135,25 +90,15 @@ unsigned short tiku_clock_arch_fine(void) {
     return (unsigned short)fine;
 }
 
-/**
- * @brief Return the maximum value returned by tiku_clock_arch_fine().
- *
- * @return 0xFFFF on this port (16-bit sub-tick scale).
- */
 int tiku_clock_arch_fine_max(void) {
     return 0xFFFF;
 }
 
-/**
- * @brief Report whether the tick source has a fault.
- *
- * The SysTick reload is computed from the live clk_sys, so a clk_sys fallback
- * leaves the tick rate correct.  tiku_cpu_rp2350_clock_has_fault() reports
- * clk_sys faults.
- *
- * @return 0 (TIKU_CLOCK_ARCH_FAULT_NONE) always.
- */
 unsigned char tiku_clock_arch_fault(void) {
+    /* The tick runs from clk_sys at the rate tiku_clock_arch_init() reads, so
+     * a clk_sys fallback at boot leaves the tick rate correct and this port
+     * has no tick fault.  tiku_cpu_rp2350_clock_has_fault() reports clk_sys
+     * faults. */
     return 0;
 }
 

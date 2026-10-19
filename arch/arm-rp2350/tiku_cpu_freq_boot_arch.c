@@ -251,15 +251,6 @@ static void rp2350_setup_1us_tick(void) {
 /* PUBLIC HAL ENTRY POINTS                                                   */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Perform RP2350 hardware bring-up: XOSC, PLL_SYS, clocks, peripherals.
- *
- * Takes CLK_SYS to 150 MHz via XOSC -> PLL_SYS, releases the kernel
- * peripherals from reset, starts the 1 us TIMER0 tick and caches the clock
- * rates.  A step that times out runs rp2350_clock_fallback_xosc().
- *
- * @note Call it once at boot, before any peripheral driver starts.
- */
 void tiku_cpu_boot_rp2350_init(void) {
     /* XOSC runs before the PLL starts, the PLL locks before CLK_SYS
      * switches, and CLK_SYS runs before the peripherals leave reset.
@@ -428,19 +419,6 @@ static int rp2350_clk_sys_back_on_pll(void) {
         (volatile uint32_t *)RP2350_CLK_SYS_SELECTED, 0x2U);
 }
 
-/**
- * @brief Scale CLK_SYS to @p target_mhz at runtime.
- *
- * Looks the frequency up in rp2350_freq_table, parks CLK_SYS on XOSC,
- * reprograms PLL_SYS (or bypasses it for 12 MHz), then switches back and
- * updates the cached rates, clearing g_clock_fault.
- *
- * @note A failed retune leaves the system on XOSC at 12 MHz with
- *       g_clock_fault set; an unsupported target sets g_clock_fault and
- *       leaves the clock as it was.  150 MHz is the maximum.
- * @param target_mhz  Desired CLK_SYS frequency in MHz (12, 48, 100, 125,
- *                    133, or 150)
- */
 void tiku_cpu_freq_rp2350_init(unsigned int target_mhz) {
     const struct rp2350_pll_params *p = rp2350_lookup_freq(target_mhz);
 
@@ -514,62 +492,22 @@ void tiku_cpu_freq_rp2350_init(unsigned int target_mhz) {
     tiku_rp2350_uart_reclock();
 }
 
-/**
- * @brief Enter low-power sleep via WFI (Wait For Interrupt).
- *
- * Issues a single Cortex-M33 WFI instruction. The CPU resumes
- * on the next unmasked interrupt. Used by the TikuOS idle path.
- */
 void tiku_cpu_boot_rp2350_power_wfi_enter(void) {
     __asm__ volatile ("wfi" ::: "memory");
 }
 
-/**
- * @brief Return the current CLK_SYS frequency in Hz.
- *
- * Returns the cached value set by the most recent clock init or retune:
- * 150 000 000 after boot, 12 000 000 after the boot fallback.
- *
- * @return CLK_SYS frequency in Hz
- */
 unsigned long tiku_cpu_rp2350_clock_get_hz(void) {
     return g_clk_sys_hz;
 }
 
-/**
- * @brief Return the current CLK_PERI (peripheral clock) frequency in Hz.
- *
- * The cache always holds the CLK_SYS rate; both are set together.  The HAL
- * reports it as SMCLK, and the UART and I2C drivers compute their divisors
- * from it.
- *
- * @return CLK_PERI frequency in Hz
- */
 unsigned long tiku_cpu_rp2350_smclk_get_hz(void) {
     return g_clk_peri_hz;
 }
 
-/**
- * @brief Return the ACLK-equivalent frequency in Hz.
- *
- * This port runs no low-frequency auxiliary clock, so the clock HAL's ACLK
- * query gets 0.
- *
- * @return 0 (no ACLK on RP2350)
- */
 unsigned long tiku_cpu_rp2350_aclk_get_hz(void) {
     return 0UL;
 }
 
-/**
- * @brief Report whether the last clock init or retune encountered a fault.
- *
- * Set when an unsupported frequency was requested, or when any PLL or
- * mux step timed out and the system fell back to XOSC. Cleared on
- * a successful init or retune.
- *
- * @return 1 if a clock fault is recorded, 0 otherwise
- */
 int tiku_cpu_rp2350_clock_has_fault(void) {
     return g_clock_fault ? 1 : 0;
 }

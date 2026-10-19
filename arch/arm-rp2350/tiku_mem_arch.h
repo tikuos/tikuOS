@@ -43,8 +43,10 @@ typedef uint32_t tiku_mem_arch_size_t;
  * @brief Initialize the RP2350 memory subsystem.
  *
  * Resolves the boot-ROM flash helpers and restores the durable .uninit
- * region from its flash mirror when the mirror's image checks out; with no
- * such image .uninit is zeroed.  tiku_mem_init() calls it at boot.
+ * region from its flash mirror when the image's CRC checks out, or from a V1
+ * mirror, which has no CRC; otherwise .uninit is zeroed.
+ *
+ * @note tiku_mem_init() calls it at boot.
  */
 void tiku_mem_arch_init(void);
 
@@ -78,7 +80,8 @@ void tiku_mem_arch_nvm_read(uint8_t *dst, const uint8_t *src,
  * @brief Copy bytes into the durable SRAM working copy.
  *
  * Writes @p len bytes into the .uninit SRAM region at @p dst; flash changes
- * only at the next tiku_mem_arch_nvm_flush_status().
+ * only at the next tiku_mem_arch_nvm_flush_status(), which tiku_mpu_lock_nvm()
+ * runs at the end of the unlock window.
  *
  * @note The caller must hold an MPU unlock window; this function does not
  *       manage the MPU itself.
@@ -100,10 +103,13 @@ void tiku_mem_arch_nvm_flush(void);
  * @brief Commit the .uninit region to its flash mirror and report the result.
  *
  * Writes the region, behind a 16-byte CRC header, to the mirror sectors so it
- * survives a power cycle; an unchanged image writes nothing.
+ * survives a power cycle; an unchanged image writes nothing.  Interrupts stay
+ * masked while each sector is erased and programmed.
  *
  * @note tiku_mpu_lock_nvm() calls it at the end of every unlock window.
- * @return 0 when the mirror holds .uninit, -1 when the commit failed.
+ * @return 0 when the mirror holds .uninit; -1 for a layout that does not fit,
+ *         missing boot-ROM helpers or a sector that does not verify, which
+ *         can leave a partial mirror that fails its check at boot.
  */
 int tiku_mem_arch_nvm_flush_status(void);
 

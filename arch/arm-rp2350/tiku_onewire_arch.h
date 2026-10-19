@@ -22,8 +22,9 @@
 /**
  * @brief Configure the 1-Wire GPIO pin and release the bus.
  *
- * Puts TIKU_BOARD_OW_PIN on SIO with its input buffer on and no internal
- * pulls; an external pull-up holds the bus high.
+ * Puts TIKU_BOARD_OW_PIN (GP15 by default) on SIO with its input buffer on
+ * and no internal pulls, and leaves it released; an external pull-up holds
+ * the bus high.
  *
  * @return TIKU_OW_OK.
  */
@@ -37,10 +38,11 @@ void    tiku_onewire_arch_close(void);
 /**
  * @brief Issue a 1-Wire reset pulse and detect device presence.
  *
- * Drives the bus low for 480 us, releases it and samples it 70 us later for
- * a device's presence pulse.
+ * Drives the bus low for 480 us, releases it, samples it 70 us later for a
+ * device's presence pulse, then waits out the rest of a 480 us recovery.
  *
- * @note Masks IRQs for about 960 us and enables them on return.
+ * @note Masks IRQs for about 960 us and enables them on return, whatever
+ *       their state on entry.
  * @return TIKU_OW_OK if a device answered, TIKU_OW_ERR_NO_DEVICE if the bus
  *         stayed high.
  */
@@ -52,8 +54,9 @@ int     tiku_onewire_arch_reset(void);
  * Drives a 70 us write-1 or write-0 slot, timed by busy-waits on the 1 us
  * TIMER0 counter.
  *
- * @note Masks IRQs for the slot and enables them on return.
- * @param bit  Value to write (0 or non-zero).
+ * @note Masks IRQs for the slot and enables them on return, whatever their
+ *       state on entry.
+ * @param bit  Value to write; only bit 0 is used.
  */
 void    tiku_onewire_arch_write_bit(uint8_t bit);
 
@@ -63,7 +66,8 @@ void    tiku_onewire_arch_write_bit(uint8_t bit);
  * Drives the bus low for 6 us, releases it and samples it 15 us after the
  * slot starts.
  *
- * @note Masks IRQs for the 70 us slot and enables them on return.
+ * @note Masks IRQs for the 70 us slot and enables them on return, whatever
+ *       their state on entry.
  * @return Sampled bit value (0 or 1).
  */
 uint8_t tiku_onewire_arch_read_bit(void);

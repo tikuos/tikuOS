@@ -133,18 +133,6 @@ static void set_target(uint8_t addr) {
     _RP2350_REG(I2C_REG(RP2350_I2C_IC_ENABLE)) = 1U;
 }
 
-/**
- * @brief Initialise the RP2350 I2C0 peripheral.
- *
- * Brings I2C0 out of reset, configures the GPIO pins for I2C function, programs
- * IC_CON for master mode and the requested speed, computes SCL high/low counts
- * from the cached clk_peri rate, and enables the controller.
- *
- * @param config  Pointer to a tiku_i2c_config_t describing the desired
- *                bus speed (TIKU_I2C_SPEED_STANDARD or _FAST).
- * @return        TIKU_I2C_OK on success, TIKU_I2C_ERR_PARAM if config
- *                is NULL.
- */
 int tiku_i2c_arch_init(const tiku_i2c_config_t *config) {
     if (config == (const tiku_i2c_config_t *)0) {
         return TIKU_I2C_ERR_PARAM;
@@ -221,32 +209,11 @@ int tiku_i2c_arch_init(const tiku_i2c_config_t *config) {
     return TIKU_I2C_OK;
 }
 
-/**
- * @brief Disable the I2C0 peripheral and mark it as uninitialised.
- *
- *        Clears IC_ENABLE and resets i2c_initialised so subsequent API
- *        calls return TIKU_I2C_ERR_PARAM until re-initialised.
- */
 void tiku_i2c_arch_close(void) {
     _RP2350_REG(I2C_REG(RP2350_I2C_IC_ENABLE)) = 0U;
     i2c_initialised = 0U;
 }
 
-/**
- * @brief Write bytes to an I2C slave device.
- *
- *        Sets the target address, drains any stale abort state, pushes
- *        each byte into the TX FIFO (with STOP on the last byte), then
- *        waits for the FIFO to drain and the bus to go idle.
- *
- * @param addr  7-bit slave address.
- * @param buf   Pointer to the byte array to transmit.
- * @param len   Number of bytes to write; 0 returns TIKU_I2C_OK immediately.
- * @return      TIKU_I2C_OK on success, TIKU_I2C_ERR_PARAM if the driver
- *              is uninitialised or buf is NULL with len > 0,
- *              TIKU_I2C_ERR_NACK on slave NACK, TIKU_I2C_ERR_TIMEOUT on
- *              bus stall.
- */
 int tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len) {
     if (i2c_initialised == 0U || (buf == (const uint8_t *)0 && len > 0U)) {
         return TIKU_I2C_ERR_PARAM;
@@ -278,20 +245,6 @@ int tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len) {
     return check_abort();
 }
 
-/**
- * @brief Read bytes from an I2C slave device.
- *
- *        Sets the target address, issues one READ command per byte into
- *        the TX FIFO (with STOP on the last), then drains the RX FIFO
- *        into buf as bytes arrive.
- *
- * @param addr  7-bit slave address.
- * @param buf   Pointer to the buffer that receives the read bytes.
- * @param len   Number of bytes to read; 0 returns TIKU_I2C_OK immediately.
- * @return      TIKU_I2C_OK on success, TIKU_I2C_ERR_PARAM if the driver
- *              is uninitialised or buf is NULL, TIKU_I2C_ERR_NACK on
- *              slave NACK, TIKU_I2C_ERR_TIMEOUT on bus stall.
- */
 int tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len) {
     if (i2c_initialised == 0U || buf == (uint8_t *)0) {
         return TIKU_I2C_ERR_PARAM;
@@ -327,40 +280,11 @@ int tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len) {
     return check_abort();
 }
 
-/**
- * @brief Probe a slave address (presence check for a bus scan).
- *
- * The DW_apb_i2c clocks out the address only alongside a queued data or read
- * command, so it cannot issue a zero-byte transaction: a probe is a single
- * 1-byte read, and the byte read back is discarded.
- *
- * @param addr  7-bit slave address.
- * @return      TIKU_I2C_OK if the device acknowledged, TIKU_I2C_ERR_NACK if
- *              not (TX_ABRT with ABRT_7B_ADDR_NOACK), or TIKU_I2C_ERR_PARAM /
- *              TIKU_I2C_ERR_TIMEOUT.
- */
 int tiku_i2c_arch_probe(uint8_t addr) {
     uint8_t dummy;
     return tiku_i2c_arch_read(addr, &dummy, 1);
 }
 
-/**
- * @brief Perform a combined I2C write followed by a repeated-start read.
- *
- * Transmits @p tx_len bytes, issues a repeated START, then reads @p rx_len
- * bytes in a single bus transaction.  A zero length degrades the call to a pure
- * write or pure read, delegating to the matching single-direction entry point.
- *
- * @param addr    7-bit slave address.
- * @param tx_buf  Pointer to bytes to write in the first phase.
- * @param tx_len  Number of bytes to write; may be 0.
- * @param rx_buf  Pointer to the buffer that receives the read bytes.
- * @param rx_len  Number of bytes to read; may be 0.
- * @return        TIKU_I2C_OK on success, TIKU_I2C_ERR_PARAM if the
- *                driver is uninitialised or a non-zero length has a NULL
- *                buffer, TIKU_I2C_ERR_NACK on slave NACK,
- *                TIKU_I2C_ERR_TIMEOUT on bus stall.
- */
 int tiku_i2c_arch_write_read(uint8_t addr,
                              const uint8_t *tx_buf, uint16_t tx_len,
                              uint8_t *rx_buf,       uint16_t rx_len) {

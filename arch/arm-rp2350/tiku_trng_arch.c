@@ -108,12 +108,6 @@ trng_refill(void)
     return TIKU_TRNG_OK;
 }
 
-/**
- * @brief Initialize the RP2350 TRNG peripheral.
- *
- * Brings the TRNG out of reset and marks the cache empty; the first read
- * fills it.  A second call returns at once.
- */
 void
 tiku_trng_arch_init(void)
 {
@@ -128,17 +122,6 @@ tiku_trng_arch_init(void)
     trng_initialised  = 1;
 }
 
-/**
- * @brief Read one 32-bit random word from the TRNG.
- *
- * Returns the next word from the EHR cache, triggering a hardware
- * refill (trng_refill()) when the cache is exhausted.  Calls
- * tiku_trng_arch_init() lazily if not already initialized.
- *
- * @param out  Destination for the random word (must be non-NULL).
- * @return TIKU_TRNG_OK on success, TIKU_TRNG_ERR_INVALID if out is
- *         NULL, or a trng_refill() error code on hardware failure.
- */
 int
 tiku_trng_arch_read_u32(uint32_t *out)
 {
@@ -161,18 +144,6 @@ tiku_trng_arch_read_u32(uint32_t *out)
     return TIKU_TRNG_OK;
 }
 
-/**
- * @brief Fill a byte buffer with random data from the TRNG.
- *
- * Consumes the EHR cache word by word, extracting bytes little-endian; a
- * partial final word is used up to the requested length and then discarded.
- * Calls tiku_trng_arch_init() lazily if needed.
- *
- * @param buf  Destination buffer (must be non-NULL).
- * @param len  Number of random bytes to produce.
- * @return TIKU_TRNG_OK on success, TIKU_TRNG_ERR_INVALID if buf is NULL or
- *         len is 0, or a tiku_trng_arch_read_u32() error code on failure.
- */
 int
 tiku_trng_arch_read_bytes(uint8_t *buf, size_t len)
 {

@@ -311,13 +311,6 @@ void tiku_rp2350_flash_program(uint32_t flash_offset,
 /* HAL                                                                       */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialise the RP2350 memory architecture and restore durable state.
- *
- * Resolves boot-ROM flash function pointers, then copies the mirror back into
- * the SRAM .uninit region when its image checks out, so durable state
- * survives a power cycle.  With no such image .uninit is zeroed.
- */
 void tiku_mem_arch_init(void) {
     const uint32_t *flash = (const uint32_t *)__tiku_nvm_flash_start;
     size_t uninit_size =
@@ -366,15 +359,6 @@ void tiku_mem_arch_init(void) {
     }
 }
 
-/**
- * @brief Securely zero a memory buffer through a volatile pointer.
- *
- * Uses a volatile store loop to prevent the compiler from optimising
- * away the zeroing, which is required when clearing key material.
- *
- * @param buf  Pointer to the buffer to wipe.
- * @param len  Number of bytes to zero.
- */
 void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len) {
     volatile uint8_t *p = (volatile uint8_t *)buf;
     tiku_mem_arch_size_t i;
@@ -383,17 +367,6 @@ void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len) {
     }
 }
 
-/**
- * @brief Read bytes from the NVM-backed SRAM working copy.
- *
- * The .uninit SRAM region is the live working copy of durable state; flash
- * holds the copy from the last flush.  This function is a plain byte-copy
- * from the SRAM copy.
- *
- * @param dst  Destination buffer.
- * @param src  Source address within the .uninit region.
- * @param len  Number of bytes to copy.
- */
 void tiku_mem_arch_nvm_read(uint8_t *dst, const uint8_t *src,
                              tiku_mem_arch_size_t len) {
     tiku_mem_arch_size_t i;
@@ -402,17 +375,6 @@ void tiku_mem_arch_nvm_read(uint8_t *dst, const uint8_t *src,
     }
 }
 
-/**
- * @brief Stage bytes into the SRAM working copy for deferred flash commit.
- *
- * Copies into the .uninit SRAM region only; the flush at the matching MPU
- * relock commits the mirror, once per unlock window however many writes the
- * window held.
- *
- * @param dst  Destination address within the .uninit region.
- * @param src  Source buffer.
- * @param len  Number of bytes to copy.
- */
 void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
                               tiku_mem_arch_size_t len) {
     /* SRAM only.  The flash commit runs at the tiku_mpu_lock_nvm() relock,
@@ -424,17 +386,6 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
     }
 }
 
-/**
- * @brief Flush the SRAM .uninit region to the flash mirror sector.
- *
- * Stages the 16-byte header (magic, CRC, length) and the region in
- * g_flush_buf, then erases and programs the mirror sectors; an unchanged
- * image writes nothing.
- *
- * @return 0 when the mirror holds .uninit, -1 for a layout that does not fit,
- *         missing boot-ROM helpers or a sector that does not verify, which
- *         can leave a partial mirror.
- */
 int tiku_mem_arch_nvm_flush_status(void) {
     /* Every store to .persistent / .uninit reaches flash through this
      * flush.  The mirror is __tiku_nvm_flash_size bytes, a whole number of
@@ -505,7 +456,6 @@ int tiku_mem_arch_nvm_flush_status(void) {
     return 0;
 }
 
-/** @brief tiku_mem_arch_nvm_flush_status() with the result discarded. */
 void tiku_mem_arch_nvm_flush(void)
 {
     (void)tiku_mem_arch_nvm_flush_status();

@@ -26,9 +26,9 @@
 /**
  * @brief Bring up the clocks and release the kernel's peripherals from reset.
  *
- * Starts the XOSC, locks PLL_SYS and runs CLK_SYS and CLK_PERI at 150 MHz,
- * releases IO_BANK0, PADS_BANK0, UART0, TIMER0 and TIMER1 from reset and
- * starts the 1 us tick.  A step that times out leaves CLK_PERI on XOSC.
+ * Runs CLK_SYS and CLK_PERI at 150 MHz from XOSC through PLL_SYS, releases
+ * IO_BANK0, PADS_BANK0, UART0, TIMER0 and TIMER1 from reset and starts the
+ * 1 us tick.  A timeout leaves both clocks near 12 MHz and sets the fault flag.
  *
  * @note Call it once at boot, before any peripheral driver starts.
  */
@@ -38,9 +38,12 @@ void tiku_cpu_boot_rp2350_init(void);
  * @brief Retune CLK_SYS to one of the supported frequencies.
  *
  * Supports 12, 48, 100, 125, 133 and 150 MHz; 12 MHz runs CLK_SYS from XOSC
- * with PLL_SYS off.  An unsupported target sets the clock-fault flag and
- * leaves the clock as it was.
+ * with PLL_SYS off.  CLK_PERI follows CLK_SYS, and the UART is drained first
+ * and reclocked after.  Success clears the clock-fault flag.
  *
+ * @note An unsupported target sets the clock-fault flag and leaves the clock
+ *       as it was; a PLL or mux timeout sets it and leaves CLK_SYS and
+ *       CLK_PERI on XOSC at 12 MHz.
  * @param target_mhz  Requested CLK_SYS frequency in MHz.
  */
 void tiku_cpu_freq_rp2350_init(unsigned int target_mhz);
@@ -60,6 +63,9 @@ void tiku_cpu_boot_rp2350_power_wfi_enter(void);
 /**
  * @brief Return the current CLK_SYS (CPU) frequency in Hz.
  *
+ * Returns the rate cached by the last clock init or retune: 150 MHz after
+ * boot, 12 MHz after the boot fallback, 0 before boot init.
+ *
  * @return CLK_SYS frequency in Hz (typically 150 000 000).
  */
 unsigned long tiku_cpu_rp2350_clock_get_hz(void);
@@ -68,7 +74,7 @@ unsigned long tiku_cpu_rp2350_clock_get_hz(void);
  * @brief Return the current CLK_PERI frequency in Hz.
  *
  * CLK_PERI clocks the UART, SPI, I2C and other peripheral blocks.  The
- * cached rate always equals CLK_SYS.
+ * cached rate always equals CLK_SYS.  The HAL reports it as SMCLK.
  *
  * @return CLK_PERI frequency in Hz.
  */

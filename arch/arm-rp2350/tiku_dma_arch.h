@@ -47,6 +47,8 @@ typedef void (*tiku_dma_done_cb_t)(void *ctx);
  *
  * Takes the DMA block out of reset and enables DMA_IRQ_0 in the NVIC.  A
  * second call returns at once.
+ *
+ * @note Call it before tiku_dma_arch_memcpy().
  */
 void tiku_dma_arch_init(void);
 
@@ -63,7 +65,9 @@ void tiku_dma_arch_init(void);
  * @param on_done   Completion callback invoked from ISR, or NULL.
  * @param ctx       Opaque pointer forwarded to @p on_done.
  * @return TIKU_DMA_OK, TIKU_DMA_ERR_NOT_READY before init,
- *         TIKU_DMA_ERR_BUSY during a transfer, or TIKU_DMA_ERR_INVALID.
+ *         TIKU_DMA_ERR_BUSY during a transfer, or TIKU_DMA_ERR_INVALID for a
+ *         NULL or unaligned pointer, a count out of range or overlapping
+ *         buffers.
  */
 int tiku_dma_arch_memcpy(void       *dst,
                           const void *src,
@@ -74,6 +78,7 @@ int tiku_dma_arch_memcpy(void       *dst,
 /**
  * @brief Return non-zero while a channel 0 transfer is in progress.
  *
+ * @note Callable from thread and interrupt context.
  * @return Non-zero if busy, 0 if the channel is idle.
  */
 int tiku_dma_arch_busy(void);

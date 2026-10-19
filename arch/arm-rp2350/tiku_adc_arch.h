@@ -35,9 +35,9 @@ int  tiku_adc_arch_init(const tiku_adc_config_t *config);
 /**
  * @brief Disable the ADC.
  *
- * Clears CS, stopping conversions and powering down the temperature sensor.
- * tiku_adc_arch_read() returns TIKU_ADC_ERR_PARAM until the next
- * tiku_adc_arch_init().  clk_adc stays on.
+ * Clears CS, stopping conversions and powering down the temperature sensor;
+ * the ADC stays out of reset and clk_adc stays on.  tiku_adc_arch_read()
+ * returns TIKU_ADC_ERR_PARAM until the next tiku_adc_arch_init().
  */
 void tiku_adc_arch_close(void);
 
@@ -57,7 +57,8 @@ int  tiku_adc_arch_channel_init(uint8_t channel);
  * @brief Perform a one-shot ADC conversion on the given channel.
  *
  * Selects the channel, starts the SAR conversion and polls READY, then
- * stores the 12-bit result shifted down to the configured resolution.
+ * stores the 12-bit result shifted down to the configured resolution.  The
+ * temperature channel powers the sensor and waits 100 us before converting.
  *
  * @param channel  0..3 = GP26..GP29, 30 = temperature, 31 = battery (GP29).
  * @param value    Output: the sample (caller-provided).

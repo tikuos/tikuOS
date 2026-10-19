@@ -21,8 +21,9 @@
 /**
  * @brief Initialize UART0 (PL011) at the board-defined baud rate.
  *
- * Sets the integer and fractional baud divisors from clk_peri, enables 8N1
- * with FIFOs, and enables the RX interrupt that fills the ring buffer.
+ * Sets the baud divisors from clk_peri, muxes GP0 (TX) and GP1 (RX), enables
+ * 8N1 with FIFOs and the RX interrupt that fills the ring buffer, and empties
+ * the RX FIFO, the ring buffer and the overrun count.
  *
  * @note UART0 must already be out of reset; the boot clock setup releases it.
  */
@@ -51,11 +52,11 @@ void     tiku_uart_puts(const char *s);
 /**
  * @brief Formatted output over UART0.
  *
- * Lightweight printf without heap allocation.  Supports %c, %s, %d, %u, %x,
- * %ld, %lu, %lx and %%, with a decimal width padded by '0' or spaces; no
- * floating point.
+ * Heap-free printf: %c, %s, %d, %u, %x, %ld, %lu, %lx and %%, with a decimal
+ * width padded by '0' or spaces (%s by spaces only); no floating point.  A
+ * '\n' in @p fmt goes out as "\r\n"; an unknown conversion prints as written.
  *
- * @param fmt  Format string.
+ * @param fmt  Format string; NULL prints nothing.
  * @param ...  Format arguments.
  */
 void     tiku_uart_printf(const char *fmt, ...);
@@ -86,6 +87,9 @@ uint16_t tiku_uart_overrun_count(void);
 
 /**
  * @brief Reset the RX overrun counter to zero.
+ *
+ * A single 16-bit store, which the ISR's increment cannot split, so it needs
+ * no interrupt masking.
  */
 void     tiku_uart_overrun_reset(void);
 
@@ -93,8 +97,8 @@ void     tiku_uart_overrun_reset(void);
 /**
  * @brief Inject a byte directly into the RX ring (test-only).
  *
- * Adds a received byte without the hardware FIFO; a full ring drops it.
- * Built only when HAS_TESTS is defined.
+ * Adds a received byte without the hardware FIFO; a full ring drops it
+ * without counting an overrun.  Built only when HAS_TESTS is defined.
  *
  * @param byte  Byte to inject.
  */

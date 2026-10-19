@@ -358,22 +358,8 @@ static void mpu_program_seg2_sram_top(void) {
 /* HAL IMPLEMENTATION                                                        */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Return the current software-bookkept SAM register value.
- *
- * @return 16-bit SAM word (SEG1/SEG2/SEG3 R/W/X bit fields).
- */
 uint16_t tiku_mpu_arch_get_sam(void)   { return stub_mpusam; }
 
-/**
- * @brief Write the SAM register and update hardware MPU protection.
- *
- *  Stores @p sam in the software register file, with the MSP430 model's
- *  MPUCTL0 password write.  Only the SEG3 W bit (bit 9) reaches the
- *  hardware, as region 0's AP; the SEG1 and SEG2 bits are stored only.
- *
- * @param sam  16-bit SAM value to apply.
- */
 void     tiku_mpu_arch_set_sam(uint16_t sam) {
     stub_mpuctl0 = 0xA500U;             /* MPUCTL0 password write */
     stub_mpusam  = sam;
@@ -386,30 +372,12 @@ void     tiku_mpu_arch_set_sam(uint16_t sam) {
     mpu_set_nvm_ap(ap);
 }
 
-/**
- * @brief Return the software-bookkept MPUCTL0 control register value.
- *
- * @return 16-bit MPUCTL0 mirror (password | enable | SEGIE bits).
- */
 uint16_t tiku_mpu_arch_get_ctl(void)   { return stub_mpuctl0; }
 
-/**
- * @brief Disable all interrupts (PRIMASK on Cortex-M33).
- */
 void tiku_mpu_arch_disable_irq(void) { tiku_cpu_irq_disable(); }
 
-/**
- * @brief Re-enable all interrupts (clear PRIMASK on Cortex-M33).
- */
 void tiku_mpu_arch_enable_irq(void)  { tiku_cpu_irq_enable(); }
 
-/**
- * @brief Initialize all six MPU regions and enable the ARMv8-M MPU.
- *
- *  Detects cold boot via the mpu_diag magic sentinel and zeroes the diagnostic
- *  struct, programs the six non-overlapping W^X regions (NVM, text, SRAM-lo,
- *  SRAM-mid, stack guard, SRAM-top), then enables the MPU and MemManage.
- */
 void tiku_mpu_arch_init_segments(void) {
     /* No magic: the .mpu_diag bytes are power-up SRAM, so zero the struct
      * and write the magic.  A warm reset keeps the magic and the counters,
@@ -661,33 +629,14 @@ void tiku_mpu_arch_test_hfnmi_clear(void) {
     mpu_diag.handler_misbehave = 0U;
 }
 
-/**
- * @brief Restore the default W^X protection policy for all segments.
- *
- *  Equivalent to calling tiku_mpu_arch_set_sam(TIKU_MPU_DEFAULT_SAM).
- */
 void tiku_mpu_arch_set_default_protection(void) {
     tiku_mpu_arch_set_sam(TIKU_MPU_DEFAULT_SAM);
 }
 
-/*
- * Only SEG3's W bit reaches the hardware.  SEG1 and SEG2 keep their fixed
- * permissions, flash RX and SRAM RW+XN, and a call naming them changes only
- * the SAM bookkeeping.  XIP flash takes no stores, and an executable writable
- * SRAM region would let a stack overflow run injected code.
- */
-
-/**
- * @brief Set the permission bits for one segment in the SAM register.
- *
- *  Updates the three-bit field for the given segment index inside the
- *  16-bit SAM word and calls tiku_mpu_arch_set_sam() to propagate the
- *  change to both the software mirror and (for SEG3) the hardware MPU.
- *
- * @param seg   Segment index (0 = SEG1, 1 = SEG2, 2 = SEG3).
- * @param perm  Three-bit permission value (R=bit0, W=bit1, X=bit2).
- */
 void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm) {
+    /* Only SEG3's W bit reaches the hardware, through tiku_mpu_arch_set_sam().
+     * Flash stays RX and SRAM RW+XN: XIP flash takes no stores, and writable
+     * executable SRAM would let a stack overflow run injected code. */
     uint16_t shift = (uint16_t)seg * 4U;
     uint16_t mask  = (uint16_t)0x07U << shift;
     uint16_t sam   = stub_mpusam;
@@ -697,14 +646,6 @@ void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm) {
     tiku_mpu_arch_set_sam(sam);
 }
 
-/**
- * @brief Open an NVM write window by making the .uninit region writable.
- *
- *  Saves the current SAM word, sets the W bit of all three segments in it
- *  (0x0222) and makes region 0 (.uninit / SEG3) RW.
- *
- * @return Previous SAM value to pass back to tiku_mpu_arch_lock_nvm().
- */
 uint16_t tiku_mpu_arch_unlock_nvm(void) {
     uint16_t saved = stub_mpusam;
     stub_mpusam = (uint16_t)(saved | 0x0222U);
@@ -712,47 +653,20 @@ uint16_t tiku_mpu_arch_unlock_nvm(void) {
     return saved;
 }
 
-/**
- * @brief Close the NVM write window and restore previous protection.
- *
- *  Restores the SAM word saved by tiku_mpu_arch_unlock_nvm() and
- *  reprograms the hardware MPU for Region 0 to the AP implied by the
- *  restored SEG3 W bit.
- *
- * @param saved_state  Value previously returned by tiku_mpu_arch_unlock_nvm().
- */
 void tiku_mpu_arch_lock_nvm(uint16_t saved_state) {
     /* Restore the SAM word the caller stashed, and program the
      * hardware NVM region to whatever AP that implies for SEG3. */
     tiku_mpu_arch_set_sam(saved_state);
 }
 
-/**
- * @brief Return the software-bookkept MPUCTL1 violation flag register.
- *
- *  Bits mirror the MMFSR cause bits ORed in by the MemManage handler on
- *  each fault.
- *
- * @return 16-bit violation flag word (MPUCTL1 mirror).
- */
 uint16_t tiku_mpu_arch_get_violation_flags(void) {
     return mpu_diag.violation_flags;
 }
 
-/**
- * @brief Clear the software-bookkept violation flag register to zero.
- */
 void tiku_mpu_arch_clear_violation_flags(void) {
     mpu_diag.violation_flags = 0U;
 }
 
-/**
- * @brief Enable the MemManage exception so MPU faults do not escalate.
- *
- *  On Cortex-M33 this sets SCB_SHCSR.MEMFAULTENA.  Without this, an MPU
- *  fault from Thread mode escalates to HardFault.  Also mirrors the
- *  MSP430 MPU_SEGIE bit in stub_mpuctl0.
- */
 void tiku_mpu_arch_enable_violation_nmi(void) {
     _RP2350_REG(RP2350_SCB_SHCSR) |= RP2350_SCB_SHCSR_MEMFAULTENA;
     mpu_dsb_isb();

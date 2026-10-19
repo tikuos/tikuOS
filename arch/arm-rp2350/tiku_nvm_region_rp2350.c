@@ -102,15 +102,11 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
 
 static tiku_nvm_backend_t g_region;
 
-/**
- * @brief Return the carved flash NVM region backend, or NULL if none.
- *
- * Overrides the weak NULL-returning default in kernel/memory.  Fills the
- * backend from the linker symbols on every call; the size is the address of
- * the absolute symbol __tiku_nvmfs_size, and a size of 0 returns NULL.
- */
 const tiku_nvm_backend_t *tiku_nvm_backend_get(void)
 {
+    /* Overrides the weak NULL default in kernel/memory with the linker-carved
+     * QSPI span, filled in on every call; a build that carves 0 bytes gets
+     * NULL. */
     g_region.base  = &__tiku_nvmfs_base;
     g_region.size  = (size_t)(uintptr_t)&__tiku_nvmfs_size;
     g_region.write = region_write;

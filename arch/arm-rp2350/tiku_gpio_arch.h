@@ -46,8 +46,9 @@ int8_t tiku_gpio_arch_set_input(uint8_t port, uint8_t pin);
 /**
  * @brief Write a logic level to a virtual-port pin, making it an output.
  *
- * Configures the pin as an output, which drives it low, then sets the level
- * with SIO GPIO_OUT_SET / GPIO_OUT_CLR.
+ * Sets the level with SIO GPIO_OUT_SET / GPIO_OUT_CLR, then routes the pin to
+ * SIO with a 4 mA pad and enables the output, so the pin goes straight to
+ * @p val.
  *
  * @param port  Virtual port number (1..4).
  * @param pin   Pin within the port (0..7).

@@ -111,19 +111,6 @@ static void compute_clk(uint16_t prescaler, uint8_t *cpsr_out,
     *scr_out  = 255U;
 }
 
-/**
- * @brief Initialize SPI0 with the given configuration.
- *
- * Brings SPI0 out of reset, muxes the SCK/MOSI/MISO pads to the SPI function,
- * programs the clock divider (CPSR + SCR) and CR0 (8-bit Motorola, mode bits),
- * then enables the controller.
- *
- * @note The PL022 has no LSB-first mode, so LSB-first bit order returns
- *       TIKU_SPI_ERR_PARAM.
- * @param config  SPI bus parameters (mode, prescaler, bit_order).
- * @return TIKU_SPI_OK on success, TIKU_SPI_ERR_PARAM on NULL config,
- *         unsupported mode, or LSB-first bit order.
- */
 int tiku_spi_arch_init(const tiku_spi_config_t *config) {
     if (config == (const tiku_spi_config_t *)0) {
         return TIKU_SPI_ERR_PARAM;
@@ -180,13 +167,6 @@ int tiku_spi_arch_init(const tiku_spi_config_t *config) {
     return TIKU_SPI_OK;
 }
 
-/**
- * @brief Disable the SPI0 controller.
- *
- * Waits for any in-flight transfer to drain (BSY clear) before
- * clearing SSPCR1.SSE, so a byte in flight is not cut short.  Until the
- * next init, transfers return 0xFF or TIKU_SPI_ERR_PARAM.
- */
 void tiku_spi_arch_close(void) {
     /* Let a byte in flight finish before disabling. */
     (void)wait_status_clear(RP2350_SPI_SR_BSY);
@@ -194,16 +174,6 @@ void tiku_spi_arch_close(void) {
     spi_initialised = 0U;
 }
 
-/**
- * @brief Perform a full-duplex single-byte SPI transfer.
- *
- * Writes @p tx_byte into the TX FIFO and returns the byte shifted in on MISO
- * during the same clocks.  The PL022 always shifts in both directions; there is
- * no write-only or read-only path at the hardware level.
- *
- * @param tx_byte  Byte to transmit.
- * @return Received byte, or 0xFF on timeout or if SPI0 is not initialised.
- */
 uint8_t tiku_spi_arch_transfer(uint8_t tx_byte) {
     if (spi_initialised == 0U) {
         return 0xFFU;
@@ -221,18 +191,6 @@ uint8_t tiku_spi_arch_transfer(uint8_t tx_byte) {
     return (uint8_t)(_RP2350_REG(SPI_REG(RP2350_SPI_SSPDR)) & 0xFFU);
 }
 
-/**
- * @brief Write a buffer over SPI, discarding received bytes.
- *
- * Sends each byte in @p buf and reads and discards the byte received for
- * it, so the RX FIFO cannot overrun.
- *
- * @param buf  Source buffer (may be NULL only when len == 0).
- * @param len  Number of bytes to transmit.
- * @return TIKU_SPI_OK on success, TIKU_SPI_ERR_PARAM if buf is NULL
- *         with a non-zero length or SPI is not initialized,
- *         TIKU_SPI_ERR_TIMEOUT on FIFO stall.
- */
 int tiku_spi_arch_write(const uint8_t *buf, uint16_t len) {
     if (spi_initialised == 0U || (buf == (const uint8_t *)0 && len > 0U)) {
         return TIKU_SPI_ERR_PARAM;
@@ -252,18 +210,6 @@ int tiku_spi_arch_write(const uint8_t *buf, uint16_t len) {
     return TIKU_SPI_OK;
 }
 
-/**
- * @brief Read a buffer over SPI, transmitting 0xFF filler bytes.
- *
- * Sends 0xFF for each byte position so the slave receives clock
- * cycles and returns data, which is captured into @p buf.
- *
- * @param buf  Destination buffer (may be NULL only when len == 0).
- * @param len  Number of bytes to receive.
- * @return TIKU_SPI_OK on success, TIKU_SPI_ERR_PARAM if buf is NULL
- *         with a non-zero length or SPI is not initialized,
- *         TIKU_SPI_ERR_TIMEOUT on FIFO stall.
- */
 int tiku_spi_arch_read(uint8_t *buf, uint16_t len) {
     if (spi_initialised == 0U || (buf == (uint8_t *)0 && len > 0U)) {
         return TIKU_SPI_ERR_PARAM;
@@ -283,19 +229,6 @@ int tiku_spi_arch_read(uint8_t *buf, uint16_t len) {
     return TIKU_SPI_OK;
 }
 
-/**
- * @brief Full-duplex SPI transfer over two equal-length buffers.
- *
- * Simultaneously transmits from @p tx_buf and receives into @p rx_buf
- * for @p len bytes.  Both pointers must be non-NULL when len > 0.
- *
- * @param tx_buf  Source buffer for transmitted data.
- * @param rx_buf  Destination buffer for received data.
- * @param len     Number of bytes to exchange.
- * @return TIKU_SPI_OK on success, TIKU_SPI_ERR_PARAM if SPI is not
- *         initialized or either buffer is NULL with len > 0,
- *         TIKU_SPI_ERR_TIMEOUT on FIFO stall.
- */
 int tiku_spi_arch_write_read(const uint8_t *tx_buf, uint8_t *rx_buf,
                              uint16_t len) {
     if (spi_initialised == 0U) {

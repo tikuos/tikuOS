@@ -59,7 +59,7 @@ typedef unsigned int tiku_clock_arch_counter_t;
  * @brief CPU cycles per tick at the configured MAIN_CPU_FREQ.
  *
  * TIKU_MAIN_CPU_HZ / TIKU_CLOCK_ARCH_SECOND.  tiku_clock_arch_init() programs
- * SysTick from the measured clk_sys, not from this macro.
+ * SysTick from the cached clk_sys rate, not from this macro.
  */
 #define TIKU_CLOCK_ARCH_INTERVAL  (TIKU_MAIN_CPU_HZ / TIKU_CLOCK_ARCH_SECOND)
 
@@ -71,7 +71,8 @@ typedef unsigned int tiku_clock_arch_counter_t;
  * @brief Configure SysTick for TIKU_CLOCK_ARCH_SECOND Hz and enable it.
  *
  * Uses the processor clock (CSR.CLKSRC = 1) and zeroes the tick and seconds
- * counters.
+ * counters.  The reload, clk_sys / TIKU_CLOCK_ARCH_SECOND - 1, uses the
+ * clk_sys rate at the call and is clamped to 24 bits.
  *
  * @note Called by tiku_clock_init() during boot.
  */
@@ -108,6 +109,8 @@ void                   tiku_clock_arch_set_seconds(unsigned long sec);
  * Spins until the tick counter has advanced by @p t from its value at the
  * call; works across a counter wrap.
  *
+ * @note The SysTick interrupt advances the counter: with IRQs masked the wait
+ *       does not end.
  * @param t  Number of ticks to wait (a delta).
  */
 void                   tiku_clock_arch_wait(tiku_clock_arch_time_t t);
@@ -128,7 +131,8 @@ void                   tiku_clock_arch_delay(unsigned int us);
  * Scales the SysTick count (RVR - CVR) to 0..0xFFFF across the tick period:
  * 0 at the start of a tick, rising toward 0xFFFF at its end.
  *
- * @return Sub-tick position (0..tiku_clock_arch_fine_max()).
+ * @return Sub-tick position (0..tiku_clock_arch_fine_max()), or 0 while the
+ *         SysTick reload is 0.
  */
 unsigned short         tiku_clock_arch_fine(void);
 

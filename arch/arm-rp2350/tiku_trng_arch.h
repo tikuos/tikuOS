@@ -48,7 +48,8 @@ int tiku_trng_arch_read_u32(uint32_t *out);
  * @brief Fill a byte buffer with `len` random bytes.
  *
  * Takes words from tiku_trng_arch_read_u32() and stores their bytes, low
- * byte first.  On an error it stops; the bytes already stored stay.
+ * byte first; the unused bytes of the last word are discarded.  On an error
+ * it stops; the bytes already stored stay.
  *
  * @param buf  Destination buffer.
  * @param len  Number of bytes to write.

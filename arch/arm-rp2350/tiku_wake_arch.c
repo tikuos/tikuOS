@@ -17,19 +17,9 @@
 #include "tiku_rp2350_regs.h"
 #include <string.h>
 
-/**
- * @brief Query the currently armed wake sources on RP2350.
- *
- * Maps SysTick TICKINT -> SYSTICK and the NVIC enables of TIMER0_0 -> HTIMER,
- * UART0 -> UART_RX and IO_BANK0 -> GPIO; gpio_ie[] gets one bit per pin for
- * GPIO 0-31, 8 pins per byte, from PROC0_INTE.
- *
- * @note TIKU_WAKE_WDT is never set: the RP2350 watchdog resets the chip and
- *       raises no interrupt.
- * @param out  Destination for wake source bitmap (must be non-NULL).
- *             If NULL the function returns immediately.
- */
 void tiku_wake_arch_query(tiku_wake_sources_t *out) {
+    /* A NULL out returns at once.  TIKU_WAKE_WDT is never set: the RP2350
+     * watchdog resets the chip and raises no interrupt. */
     if (out == NULL) {
         return;
     }

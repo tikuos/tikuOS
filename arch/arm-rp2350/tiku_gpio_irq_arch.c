@@ -67,21 +67,6 @@ static int8_t gp_index(uint8_t port, uint8_t pin) {
     return (int8_t)idx;
 }
 
-/**
- * @brief Enable a GPIO edge interrupt for the given (port, pin, edge).
- *
- * Translates the virtual pair to a GP index, configures the matching nibble in
- * IO_BANK0 PROC0_INTE, clears any stale pending edge in INTR and unmasks
- * IO_BANK0 in the NVIC.  The pin is reconfigured as an SIO input with pull-up.
- *
- * @param port  Virtual port number (1–4).
- * @param pin   Pin index within the port (0–7).
- * @param edge  Edge polarity to arm (@c TIKU_GPIO_EDGE_RISING,
- *              @c TIKU_GPIO_EDGE_FALLING, or @c TIKU_GPIO_EDGE_BOTH).
- * @return      @c TIKU_GPIO_IRQ_OK on success, or
- *              @c TIKU_GPIO_IRQ_ERR_INVALID when the arguments are
- *              out of range or @p edge is unrecognised.
- */
 int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
                               tiku_gpio_edge_t edge) {
     int8_t gp = gp_index(port, pin);
@@ -114,18 +99,6 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
     return TIKU_GPIO_IRQ_OK;
 }
 
-/**
- * @brief Disable the GPIO edge interrupt for the given (port, pin).
- *
- * Clears all four edge/level bits for the pin's nibble in IO_BANK0 PROC0_INTE,
- * then clears any latched pending edge in INTR.  The IO_BANK0 NVIC line, which
- * every pin of the bank shares, stays enabled.
- *
- * @param port  Virtual port number (1–4).
- * @param pin   Pin index within the port (0–7).
- * @return      @c TIKU_GPIO_IRQ_OK on success, or
- *              @c TIKU_GPIO_IRQ_ERR_INVALID when (port, pin) is out of range.
- */
 int tiku_gpio_irq_arch_disable(uint8_t port, uint8_t pin) {
     int8_t gp = gp_index(port, pin);
     if (gp < 0) {
@@ -136,7 +109,8 @@ int tiku_gpio_irq_arch_disable(uint8_t port, uint8_t pin) {
     uint32_t mask  = 0xFU << shift;   /* clear all four edge/level bits */
 
     _RP2350_REG_CLR(RP2350_IO_BANK0_PROC0_INTE(word), mask);
-    /* Clear any pending. */
+    /* Clear any pending.  The IO_BANK0 NVIC line, which every pin of the
+     * bank shares, stays enabled. */
     _RP2350_REG(RP2350_IO_BANK0_INTR(word)) = mask;
     return TIKU_GPIO_IRQ_OK;
 }

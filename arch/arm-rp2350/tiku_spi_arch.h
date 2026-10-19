@@ -22,11 +22,13 @@
 /**
  * @brief Initialize SPI0 (PL022) from the given configuration.
  *
- * Takes SPI0 out of reset, muxes the board's SCK/MOSI/MISO pins, sets SSPCPSR
- * and SSPCR0.SCR from the prescaler and CPOL/CPHA from the mode, then enables
- * the controller.
+ * Takes SPI0 out of reset, muxes the board's SCK/MOSI/MISO pins (GP18, GP19,
+ * GP16 by default), sets SSPCPSR and SSPCR0.SCR from the prescaler and
+ * CPOL/CPHA from the mode, then enables the controller.
  *
- * @param config  Bus configuration (mode, bit order, prescaler).
+ * @note The caller drives chip select.
+ * @param config  Bus configuration (mode, bit order, prescaler); the divider
+ *                rounds down, so SCLK is at or above clk_peri / prescaler.
  * @return TIKU_SPI_OK, or TIKU_SPI_ERR_PARAM for a NULL config, a mode above
  *         3 or LSB-first bit order.
  */
@@ -35,7 +37,8 @@ int     tiku_spi_arch_init(const tiku_spi_config_t *config);
 /**
  * @brief Wait for the bus to go idle, then disable SPI0.
  *
- * The pins stay on the SPI function.
+ * The pins stay on the SPI function.  Until the next tiku_spi_arch_init(),
+ * transfers return 0xFF or TIKU_SPI_ERR_PARAM.
  */
 void    tiku_spi_arch_close(void);
 
@@ -55,28 +58,32 @@ uint8_t tiku_spi_arch_transfer(uint8_t tx_byte);
 /**
  * @brief Transmit @p len bytes, discarding received data.
  *
- * @param buf  Source byte array.
+ * @param buf  Source byte array; may be NULL only when @p len is 0.
  * @param len  Number of bytes to send.
- * @return TIKU_SPI_OK, TIKU_SPI_ERR_PARAM or TIKU_SPI_ERR_TIMEOUT.
+ * @return TIKU_SPI_OK, TIKU_SPI_ERR_PARAM before init or for a NULL @p buf,
+ *         or TIKU_SPI_ERR_TIMEOUT on a FIFO stall.
  */
 int     tiku_spi_arch_write(const uint8_t *buf, uint16_t len);
 
 /**
  * @brief Receive @p len bytes, sending 0xFF as dummy TX data.
  *
- * @param buf  Destination buffer for received bytes.
+ * @param buf  Destination buffer; may be NULL only when @p len is 0.
  * @param len  Number of bytes to receive.
- * @return TIKU_SPI_OK, TIKU_SPI_ERR_PARAM or TIKU_SPI_ERR_TIMEOUT.
+ * @return TIKU_SPI_OK, TIKU_SPI_ERR_PARAM before init or for a NULL @p buf,
+ *         or TIKU_SPI_ERR_TIMEOUT on a FIFO stall.
  */
 int     tiku_spi_arch_read (uint8_t *buf, uint16_t len);
 
 /**
  * @brief Transmit and receive @p len bytes simultaneously.
  *
- * @param tx_buf  Source data to transmit.
- * @param rx_buf  Destination for simultaneously received data.
+ * @param tx_buf  Source data to transmit; may be NULL only when @p len is 0.
+ * @param rx_buf  Destination for received data; may be NULL only when @p len
+ *                is 0.
  * @param len     Number of bytes to transfer.
- * @return TIKU_SPI_OK, TIKU_SPI_ERR_PARAM or TIKU_SPI_ERR_TIMEOUT.
+ * @return TIKU_SPI_OK, TIKU_SPI_ERR_PARAM before init or for a NULL buffer,
+ *         or TIKU_SPI_ERR_TIMEOUT on a FIFO stall.
  */
 int     tiku_spi_arch_write_read(const uint8_t *tx_buf, uint8_t *rx_buf,
                                  uint16_t len);

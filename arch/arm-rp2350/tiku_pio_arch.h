@@ -38,7 +38,8 @@
  * @brief Completion callback, called in PIO0_IRQ_0 ISR context.
  *
  * Called once the state machine has shifted out the final bit and executed
- * its `irq nowait 0` instruction.
+ * its `irq nowait 0` instruction.  The driver is idle when it runs, so it may
+ * start the next transmission.
  *
  * @note Keep it short: it runs inside the ISR.
  * @param ctx  The ctx given to tiku_pio_arch_bitbang_tx().
@@ -64,20 +65,23 @@ void tiku_pio_arch_init(void);
  * takes @p bit_period_us, loads the data word and bit count, and enables the
  * SM.  Returns immediately; @p on_done fires from the PIO0 IRQ.
  *
+ * @note One transmission at a time: poll tiku_pio_arch_bitbang_busy() or
+ *       cancel with tiku_pio_arch_bitbang_abort().
  * @param gpio_pin     GPIO number (0..47) to drive
  * @param data         Up to 32 bits in the kernel bit-bang packing:
  *                     MSB-first data starts at bit 31, LSB-first data
  *                     at bit 0
  * @param bit_count    Number of bits to shift out (1..32)
- * @param msb_first    1 = bit 31 of data shifts out first;
+ * @param msb_first    Non-zero = bit 31 of data shifts out first;
  *                     0 = bit 0 first
  * @param bit_period_us  Bit period in microseconds (>= 1); must fit the
  *                       16.8-bit divider at the current system clock
  * @param on_done      Completion callback; may be NULL
  * @param ctx          Opaque pointer passed to on_done
  *
- * @return TIKU_PIO_OK, TIKU_PIO_ERR_BUSY, TIKU_PIO_ERR_INVALID,
- *         or TIKU_PIO_ERR_NOT_READY
+ * @return TIKU_PIO_OK, TIKU_PIO_ERR_NOT_READY before init,
+ *         TIKU_PIO_ERR_BUSY during a transmission, or TIKU_PIO_ERR_INVALID
+ *         for an argument out of range
  */
 int tiku_pio_arch_bitbang_tx(uint8_t  gpio_pin,
                              uint32_t data,
