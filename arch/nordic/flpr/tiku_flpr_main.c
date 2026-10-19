@@ -15,16 +15,11 @@
  */
 
 #include <arch/nordic/flpr/tiku_flpr_ipc.h>
-/* Plain-C register structs: the same MDK headers the M33 uses compile
- * unchanged for RISC-V.  This core is a non-secure bus master, so all access
- * is via the _NS aliases, and reaches only peripherals the app core made
- * non-secure first (SPU).  The nRF54LM20A/B build uses the nRF54L15 map,
- * which places CCM00 at 0x40046000; the LM20's CCM00 is at 0x4004A000. */
-#if defined(TIKU_DEVICE_NRF54LV10A)
-#include <arch/nordic/mdk/nrf54lv10a.h>
-#else
-#include <arch/nordic/mdk/nrf54l15.h>
-#endif
+/* Plain-C register structs: each part's own MDK map, through the router the
+ * M33 uses, compiles unchanged for RISC-V.  This core is a non-secure bus
+ * master, so all access is via the _NS aliases, and reaches only peripherals
+ * the app core made non-secure first (SPU). */
+#include <arch/nordic/tiku_nordic_mdk.h>
 
 /* Outward doorbell: bus writes to EVENTS_TRIGGERED[n] are ignored; the VPR
  * raises the events through its VEVIF CSR (VPRCSR_NORDIC_EVENTS = 0x7E2,

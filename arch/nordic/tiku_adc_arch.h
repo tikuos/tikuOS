@@ -51,7 +51,8 @@ void tiku_adc_arch_close(void);
  * high-impedance analog setting, so this only rejects inputs that do not exist.
  *
  * @param channel  Channel ID: 0..7 = AIN0..AIN7 (all on port P1: pins
- *                 4/5/6/7/11/12/13/14, or 0/1/2/3/7/10/11/12 on the
+ *                 4/5/6/7/11/12/13/14, 0/31/30/29/6/5/4/3 on the
+ *                 nRF54LM20A/B, or 0/1/2/3/7/10/11/12 on the
  *                 nRF54LV10A), 31 (TIKU_ADC_CH_BATTERY) = the internal VDD
  *                 rail (VDDL * 8/15 on the nRF54LV10A).  TIKU_ADC_CH_TEMP
  *                 (30) is not an SAADC input on the nRF54L (die

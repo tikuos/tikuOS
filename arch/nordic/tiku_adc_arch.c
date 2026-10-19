@@ -112,12 +112,21 @@ static uint8_t tiku_saadc_ready;
 static const uint8_t tiku_saadc_ain_pin[8] = {
     0u, 1u, 2u, 3u, 7u, 10u, 11u, 12u
 };
+#elif defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
+/**
+ * @brief GPIO pin index (on P1) for analog inputs AIN0..AIN7.
+ *
+ * The nRF54LM20A/B assignment (nrfx v4.3.2 SAADC_EXTERNAL_AIN_PSELS).
+ */
+static const uint8_t tiku_saadc_ain_pin[8] = {
+    0u, 31u, 30u, 29u, 6u, 5u, 4u, 3u
+};
 #else
 /**
  * @brief GPIO pin index (on P1) for analog inputs AIN0..AIN7.
  *
  * nRF54L15 product-specification pin assignment; all analog inputs are on
- * physical port P1, and the nRF54LM20A samples the same pins.
+ * physical port P1.
  */
 static const uint8_t tiku_saadc_ain_pin[8] = {
     4u, 5u, 6u, 7u, 11u, 12u, 13u, 14u

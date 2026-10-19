@@ -405,14 +405,9 @@ int tiku_flpr_arch_spin_timed(uint32_t iters, uint32_t *passes, uint32_t *us)
 /* Beacon offload                                                            */
 /*---------------------------------------------------------------------------*/
 
-/* CCM00's SPU00 slot: bits 17:12 of its address on the nRF54LV10A (10, for
- * 0x5004A000).  The nRF54L15 and nRF54LM20A/B builds use 6, the nRF54L15's
- * slot; the LM20's CCM00 is at 0x5004A000, slot 10. */
-#if defined(TIKU_DEVICE_NRF54LV10A)
+/* CCM00's SPU00 slot: bits 17:12 of its address, 6 on the nRF54L15
+ * (0x50046000) and 10 on the nRF54LM20A/B and nRF54LV10A (0x5004A000). */
 #define FLPR_SPU00_CCM00  ((NRF_CCM00_S_BASE >> 12) & 0x3Fu)
-#else
-#define FLPR_SPU00_CCM00  6u
-#endif
 
 /**
  * @brief Make the radio peripherals non-secure for the FLPR (@p on), or
