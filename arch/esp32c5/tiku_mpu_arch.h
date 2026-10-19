@@ -1,6 +1,10 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_mpu_arch.h - ESP32-C5 memory-protection contract.
  *
  * The segment access mask keeps the MSP430 MPU's layout, which the portable

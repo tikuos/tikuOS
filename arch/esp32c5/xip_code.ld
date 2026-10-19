@@ -1,11 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * xip_code.ld - C5 application code and constants mapped from flash: BASIC,
- * the shell, the radio drivers and libraries, the Bluetooth and crypto kits,
- * and the /sys and /sys/boot nodes.  Kernel and architecture code stay in
- * SRAM, as do the BLE controller's high-performance and the arbiter's
- * .coexiram routines (esp32c5.ld).
+ *
+ * xip_code.ld - C5 application code and constants mapped from flash.
+ *
+ * BASIC, the shell, the radio drivers and libraries, the Bluetooth and crypto
+ * kits, and the /sys and /sys/boot nodes.  The rest stays in SRAM, the BLE
+ * controller's .high_perf_code_iram1 and the arbiter's .coexiram included.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 .xip : ALIGN(32) {

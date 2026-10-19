@@ -1,8 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_thread_arch.c - C5 software-interrupt worker switching and newlib state.
- * C5 interrupt source 23 and INTPRI+0x90 follow ESP-IDF 4d59230.
+ *
+ * C5 interrupt source 23 and INTPRI+0x90 follow ESP-IDF 4d59230.  The switch
+ * runs on CLIC line 2; each worker has its own newlib _reent, and interrupt
+ * handlers share another.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_thread_arch.h"

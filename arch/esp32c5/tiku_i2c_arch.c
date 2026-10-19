@@ -1,8 +1,14 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_i2c_arch.c - C5 I2C0 master, bounded FIFO batches and pin restoration.
+ *
  * Register fields follow ESP-IDF 4d59230 i2c_reg.h, pcr_reg.h and i2c_ll.h.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stddef.h>

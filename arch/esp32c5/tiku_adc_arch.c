@@ -1,12 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_adc_arch.c - C5 SAR ADC1 one-shot conversions and the temperature
- * sensor.  A conversion powers the SAR, or borrows it from a running radio,
- * and puts every register it touched back.
+ *
+ * tiku_adc_arch.c - C5 SAR ADC1 one-shot conversions, the temperature sensor.
+ *
  * Register sequence: ESP-IDF 4d59230 adc_ll.h, adc_oneshot_hal.c,
  * adc_hal_common.c, sar_periph_ctrl.c, temperature_sensor_ll.h,
  * temperature_sensor_hal.c, regi2c_saradc.h and the C5 eFuse table.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stddef.h>

@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_irq_arch.c - C5 interrupt matrix and machine-mode CLIC lines.
+ *
+ * Peripheral sources route through the matrix to CLIC lines 0..31 (interrupt
+ * IDs 16..47), one handler per line and one line per source.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stddef.h>

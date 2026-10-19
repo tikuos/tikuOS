@@ -1,8 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_psram_arch.c - C5 quad PSRAM identification, mapping and tier lifecycle.
- * Register fields follow ESP-IDF 4d59230 C5 spi_mem_c_reg.h and spi1_mem_reg.h.
+ *
+ * Register fields follow ESP-IDF 4d59230 C5 spi_mem_c_reg.h and
+ * spi1_mem_reg.h.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_psram_arch.h"

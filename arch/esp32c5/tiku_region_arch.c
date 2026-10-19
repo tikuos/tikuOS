@@ -1,8 +1,14 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_region_arch.c - C5 application SRAM classification and stack boundary.
+ *
  * Durable SRAM is classified separately for the persist-cell API.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <kernel/memory/tiku_mem.h>

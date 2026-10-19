@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_fault_arch.h - C5 fault record kept across the reset it causes.
+ *
+ * The trap handler and tiku_c5_fatal() fill it in retained SRAM before the
+ * reset.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_FAULT_ARCH_H_

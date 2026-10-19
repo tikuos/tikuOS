@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_spi_arch.h - C5 GP-SPI2 blocking master on board-selected GPIOs.
+ *
+ * SCK, MOSI and MISO are the board's TIKU_BOARD_SPI_*_PIN through the GPIO
+ * matrix; chip select is the caller's GPIO.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_SPI_ARCH_H_

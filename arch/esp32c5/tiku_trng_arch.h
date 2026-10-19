@@ -1,7 +1,14 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_trng_arch.h - C5 RNG with the internal SAR entropy source.
+ *
+ * A read is at most 256 bytes and runs with interrupts masked.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_TRNG_ARCH_H_
@@ -17,10 +24,12 @@ void tiku_trng_arch_init(void);
 /** @brief Read a word with SAR entropy; return a negative error on failure. */
 int tiku_trng_arch_read_u32(uint32_t *out);
 /**
- * @brief Fill up to 256 bytes using internal SAR entropy, then restore
- * hardware. Requires foreground context; active ADC or PHY ownership refuses
- * the read. Errors clear output. The function does not use radio-supplied
- * entropy.
+ * @brief Fill up to 256 bytes of entropy, then restore hardware.
+ *
+ * While the PHY owns the analog bus the RNG is RF-fed and is read as it is;
+ * otherwise internal SAR noise feeds it, and an active ADC or other analog
+ * owner refuses the read with TIKU_TRNG_ERR_NOT_READY. Errors clear output.
+ * @note Requires foreground context.
  */
 int tiku_trng_arch_read_bytes(uint8_t *out, size_t length);
 #endif

@@ -1,8 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_fault_arch.c - C5 exception and fatal-error record, reset and halt.
- * Fault handling does not write flash or return to the faulting instruction.
+ *
+ * Fault handling does not write flash or return to the faulting instruction:
+ * it resets, or halts once TIKU_C5_FAULT_RESETS fault resets in a row have
+ * each come within 2 s of boot.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_fault_arch.h"

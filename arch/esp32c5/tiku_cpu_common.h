@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_cpu_common.h - C5 CPU delays, factory identity and reset status.
+ *
+ * Delays count CPU cycles at the rate the ROM reports; the reset reason is
+ * translated to the SYSRSTIV codes the kernel uses on every port.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_CPU_COMMON_H_

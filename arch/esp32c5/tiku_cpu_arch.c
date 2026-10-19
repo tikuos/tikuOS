@@ -1,8 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_cpu_arch.c - C5 CPU HAL, interrupt state, identity and shallow idle.
- * HP SRAM is uncached; mapped PSRAM has an explicit synchronization API.
+ *
+ * Boot stops with tiku_c5_fatal() unless the ROM is a C5 of ECO 2 or later on
+ * a 48 MHz crystal.  HP SRAM is uncached, so the data-cache calls do nothing;
+ * mapped PSRAM has an explicit synchronization API.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stddef.h>

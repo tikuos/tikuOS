@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_irq_arch.h - C5 machine interrupt state and non-nested CLIC dispatch.
+ *
+ * TIKU_C5_FRAME_* give the trap frame's layout; tiku_crt_early.S includes
+ * this file for them.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_IRQ_ARCH_H_

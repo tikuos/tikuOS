@@ -1,9 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_systimer_arch.c - C5 crystal-derived counter and tick alarm.
+ *
  * The crystal selection sets the fractional divider: 40 and 48 MHz crystals
  * both produce 16 MHz, as specified by the C5 esp_hw_support systimer port.
+ * A late tick interrupt counts every tick it missed.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stddef.h>

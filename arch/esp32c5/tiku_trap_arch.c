@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_trap_arch.c - C5 interrupt dispatch and terminal exception reporting.
+ *
+ * tiku_crt_early.S passes the saved frame: an interrupt goes to its CLIC
+ * line's handler, an exception to tiku_esp32c5_diagnostic_fault(), which does
+ * not return.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stdint.h>

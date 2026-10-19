@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_onewire_arch.h - C5 1-Wire master, open drain on TIKU_BOARD_OW_PIN.
+ *
+ * Slots are timed in CPU cycles; a bus with devices needs an external
+ * 4.7 kOhm pull-up.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_ONEWIRE_ARCH_H_

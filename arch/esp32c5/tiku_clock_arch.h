@@ -1,7 +1,14 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_clock_arch.h - C5 CPU divider control, and the crystal for a sleep.
+ *
+ * The CPU runs at 40, 80 or 240 MHz from the 240 MHz PLL.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_CLOCK_ARCH_H_

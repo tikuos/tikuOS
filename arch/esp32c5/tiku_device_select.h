@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_device_select.h - require the ESP32-C5 device and board selection.
+ *
+ * Stops the build unless PLATFORM_ESP32C5, TIKU_DEVICE_ESP32C5 and
+ * TIKU_BOARD_ESP32C5_DEVKITC1 are defined and no ESP32-C61 macro is, then
+ * includes the device and board headers.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_DEVICE_SELECT_H_

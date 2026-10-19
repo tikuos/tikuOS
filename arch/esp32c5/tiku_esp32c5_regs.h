@@ -1,9 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_esp32c5_regs.h - C5 ROM identity and USB Serial/JTAG registers.
- * Values follow ESP-IDF 4d59230ddff16327812782151ef0afef202dc6d7,
- * esp32c5.rom.version.ld, reg_base.h and usb_serial_jtag_reg.h.
+ *
+ * tiku_esp32c5_regs.h - C5 register addresses and register access macros.
+ *
+ * ROM identity, USB Serial/JTAG, watchdogs, CLIC and SYSTIMER.  Values follow
+ * ESP-IDF 4d59230ddff16327812782151ef0afef202dc6d7, esp32c5.rom.version.ld,
+ * reg_base.h and usb_serial_jtag_reg.h.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_REGS_H_

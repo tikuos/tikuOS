@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_systimer_arch.h - C5 16 MHz timebase and 128 Hz tick interrupts.
+ *
+ * Alarm 0 raises the tick on CLIC line 0; alarm 1 belongs to the kernel
+ * hardware timer (tiku_timer_arch.c).
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_SYSTIMER_ARCH_H_
@@ -20,10 +28,10 @@ int tiku_c5_systimer_init(void);
 int tiku_c5_systimer_read(uint64_t *value);
 /** @brief Stop the tick alarm and release its interrupt line. */
 void tiku_c5_systimer_stop(void);
-/** @brief Return elapsed 128 Hz ticks, modulo 2^32, including delayed ticks. */
 /** @brief The nearest armed SYSTIMER alarm after @p now, @p now when one
  *         has fired and not been taken, or ~0 when none is armed. */
 uint64_t tiku_c5_alarm_due(uint64_t now);
+/** @brief Return elapsed 128 Hz ticks, modulo 2^32, including delayed ticks. */
 uint32_t tiku_c5_systimer_ticks(void);
 /** @brief Return serviced tick interrupts, modulo 2^32. */
 uint32_t tiku_c5_systimer_interrupts(void);

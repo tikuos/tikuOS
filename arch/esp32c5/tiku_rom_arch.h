@@ -1,8 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_rom_arch.h - ESP32-C5 ECO 2 ROM entry points and call signatures.
- * ESP-IDF 4d59230 esp32c5.rom.ld, esp_rom_spiflash.h and C5 rom/cache.h.
+ *
+ * Signatures follow ESP-IDF 4d59230 esp32c5.rom.ld, esp_rom_spiflash.h and
+ * C5 rom/cache.h; esp32c5_rom.ld binds the addresses.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_ROM_ARCH_H_

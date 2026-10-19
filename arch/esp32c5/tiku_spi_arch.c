@@ -1,8 +1,14 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_spi_arch.c - C5 GP-SPI2 master, polled 64-byte batches, pin restore.
+ *
  * Register fields follow ESP-IDF 4d59230 spi_reg.h, pcr_reg.h and spi_ll.h.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stddef.h>

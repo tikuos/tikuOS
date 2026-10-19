@@ -1,8 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_nvm_region_arch.c - C5 sector-preserving writes to the carved flash
- * region. A power cut during erase/rewrite can lose the affected 4 KiB sector.
+ *
+ * tiku_nvm_region_arch.c - C5 sector-preserving writes to the flash NVM region.
+ *
+ * A write that only clears bits programs in place; one that sets a bit
+ * erases its 4 KiB sector and rewrites it from SRAM, and a power cut between
+ * the two loses that sector.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <kernel/memory/tiku_nvm_region.h>

@@ -1,8 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_analog_arch.h - exclusive C5 SAR ownership (entropy, ADC, radio) and
- * the SAR's internal analog registers.
+ *
+ * tiku_analog_arch.h - exclusive C5 SAR ownership and its analog registers.
+ *
+ * One owner at a time among the entropy source, the ADC and the radio front
+ * end.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_ANALOG_ARCH_H_

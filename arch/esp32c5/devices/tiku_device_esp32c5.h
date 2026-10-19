@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_device_esp32c5.h - ESP32-C5 silicon and ROM identity.
+ *
+ * Memory map, crystal and CPU limits, and the image chip ID and minimum ROM
+ * ECO that boot checks.  The FRAM macros name the 4 MiB memory-mapped flash.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_DEVICE_ESP32C5_H_

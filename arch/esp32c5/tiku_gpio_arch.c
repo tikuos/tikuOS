@@ -1,9 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_gpio_arch.c - C5 GPIO matrix and IO mux, ESP-IDF 4d59230 register map.
+ *
  * USB, memory, strapping and RGB-LED pads cannot be remuxed through this API.
  * Every free pin can raise an edge interrupt, broadcast as TIKU_EVENT_GPIO.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_gpio_arch.h"

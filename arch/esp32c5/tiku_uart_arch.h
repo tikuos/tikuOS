@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_uart_arch.h - C5 UART0, 8N1, crystal clock and interrupt-fed receive.
+ *
+ * Received bytes go to a ring of TIKU_UART_RXBUF_SIZE bytes, a power of two
+ * (1024 by default).
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_UART_ARCH_H_

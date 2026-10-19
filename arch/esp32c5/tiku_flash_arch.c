@@ -1,9 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_flash_arch.c - C5 ROM flash access with SRAM staging and cache
- * exclusion. Call from SRAM; interrupts remain masked during each ROM
- * operation. SPDX-License-Identifier: Apache-2.0
+ *
+ * tiku_flash_arch.c - C5 ROM flash access, SRAM staging and cache exclusion.
+ *
+ * Call from SRAM: erase and program suspend the cache and keep interrupts
+ * masked for each ROM operation, then verify the result by readback.
+ *
+ * SPDX-License-Identifier: Apache-2.0
  */
 #include <stddef.h>
 #include "tiku_flash_arch.h"

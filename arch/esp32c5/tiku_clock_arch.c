@@ -1,11 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_clock_arch.c - C5 CPU dividers with a constant 40 MHz AHB clock.
- * Register fields and divider constraints follow ESP-IDF 4d59230,
- * esp32c5 clk_tree_ll.h and rtc_clk.c. A CPU left on the crystal by the
- * ROM is moved onto the calibrated PLL first; the calibrated core voltage
- * is applied before the first change above 80 MHz.
+ *
+ * tiku_clock_arch.c - C5 CPU dividers on the PLL, with a 40 MHz AHB clock.
+ *
+ * Register fields and divider constraints follow ESP-IDF 4d59230, C5
+ * clk_tree_ll.h and rtc_clk.c.  A CPU the ROM left on the crystal moves to the
+ * calibrated PLL first; 240 MHz needs the calibrated core voltage.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <hal/tiku_cpu.h>

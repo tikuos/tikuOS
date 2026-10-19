@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_board_esp32c5_devkitc1.h - DevKitC-1 console and RGB LED pins.
+ *
+ * tiku_board_esp32c5_devkitc1.h - DevKitC-1 console, RGB LED and bus pins.
+ *
+ * The RGB LED's red, green and blue channels are the kernel's three LEDs.
+ * Bus pins can be overridden at build time; TIKU_BOARD_GPIO_RESERVED holds
+ * the strap, USB, flash/PSRAM and LED pads the GPIO API refuses.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_BOARD_ESP32C5_DEVKITC1_H_

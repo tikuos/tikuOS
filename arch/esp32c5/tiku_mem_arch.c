@@ -1,8 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_mem_arch.c - C5 durable SRAM mirrored to two CRC-checked flash slots.
- * The older slot is replaced; the latest committed slot remains readable.
+ *
+ * The older slot is replaced, its magic written last; the latest committed
+ * slot remains readable.  Boot restores the newest valid slot.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_mem_arch.h"
@@ -165,12 +172,6 @@ void tiku_mem_arch_nvm_read(uint8_t *destination, const uint8_t *source,
     }
 }
 
-/**
- * @brief Store into the SRAM working copy, durable or retained alike.
- *
- * The flash commit at tiku_mpu_lock_nvm() mirrors only .uninit; a write to
- * .retained data (the shell history ring) or to any other RAM stays in SRAM.
- */
 void tiku_mem_arch_nvm_write(uint8_t *destination, const uint8_t *source,
                              tiku_mem_arch_size_t length)
 {

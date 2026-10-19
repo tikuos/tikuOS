@@ -1,8 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_adc_arch.h - C5 SAR ADC1 one-shot conversions on GPIO1..6, and the
- * temperature sensor on channel 30.
+ *
+ * tiku_adc_arch.h - C5 SAR ADC1 one-shot conversions, the temperature sensor.
+ *
+ * Channels 0..5 are GPIO1..6; channel 30 is the temperature sensor.  The SAR
+ * is shared with the entropy source and the radio (tiku_analog_arch.h).
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_ADC_ARCH_H_

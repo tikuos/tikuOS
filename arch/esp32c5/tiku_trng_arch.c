@@ -1,10 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_trng_arch.c - bounded C5 internal-SAR entropy acquisition, and the
- * RF-fed RNG register while the PHY owns the analog bus.
+ *
+ * tiku_trng_arch.c - C5 internal-SAR entropy, or the RF-fed RNG under the PHY.
+ *
  * Register sequence: ESP-IDF 4d59230 bootloader_random_esp32c5.c,
  * C5 adc_ll.h, rng_ll.h and regi2c_impl.c (Apache-2.0).
+ *
  * SPDX-FileCopyrightText: 2024-2026 Espressif Systems (Shanghai) CO LTD
  * SPDX-License-Identifier: Apache-2.0
  */

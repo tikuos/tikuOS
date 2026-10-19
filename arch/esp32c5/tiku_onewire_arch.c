@@ -1,8 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_onewire_arch.c - C5 1-Wire master: open-drain GPIO, slots timed in
- * CPU cycles, interrupts masked where a late edge would corrupt a slot.
+ *
+ * tiku_onewire_arch.c - C5 1-Wire master on an open-drain GPIO.
+ *
+ * Slots are timed in CPU cycles, with interrupts masked where a late edge
+ * would corrupt a slot.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_onewire_arch.h"

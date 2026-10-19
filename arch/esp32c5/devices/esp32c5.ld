@@ -1,8 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * esp32c5.ld - C5 SRAM image, durable working copy, retained state and allocator.
- * The application limit follows ESP-IDF 4d59230 ld.hp_mem_defs (ROM exclusion).
+ *
+ * esp32c5.ld - C5 SRAM image, durable working copy, retained state, allocator.
+ *
+ * The application limit follows ESP-IDF 4d59230 ld.hp_mem_defs (ROM
+ * exclusion).  The build writes tiku_c5_xip.ld: xip_code.ld's flash-mapped
+ * code, or nothing in an SRAM-only build.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 ENTRY(tiku_esp32c5_reset_handler)

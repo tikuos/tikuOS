@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_crt_early.S - C5 RAM entry and non-nested machine trap frame.
+ *
+ * The entry sets gp, sp and the CLIC-mode mtvec, zeroes .bss and jumps to
+ * main() (the diagnostic in a MINIMAL build).  The trap runs
+ * tiku_c5_trap_dispatch() on a 2 KiB stack and resumes the frame it returns.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_irq_arch.h"

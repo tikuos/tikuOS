@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_mem_arch.h - C5 durable SRAM and alternating flash mirror slots.
+ *
+ * The working copy is the linker's .uninit span; tiku_mpu_lock_nvm() commits
+ * a changed copy to the older of two flash slots.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_MEM_ARCH_H_
@@ -23,7 +31,12 @@ void tiku_mem_arch_secure_wipe(uint8_t *data, tiku_mem_arch_size_t length);
 /** @brief Copy bytes from NVM; NULL arguments are ignored. */
 void tiku_mem_arch_nvm_read(uint8_t *destination, const uint8_t *source,
                             tiku_mem_arch_size_t length);
-/** @brief Copy into the durable SRAM span; an out-of-span write is ignored. */
+/**
+ * @brief Copy bytes to SRAM, durable span or not; NULL arguments are ignored.
+ *
+ * tiku_mpu_lock_nvm() commits only the durable span (.persistent and .uninit)
+ * to flash; a write to .retained data or to other RAM stays in SRAM.
+ */
 void tiku_mem_arch_nvm_write(uint8_t *destination, const uint8_t *source,
                              tiku_mem_arch_size_t length);
 /** @brief Commit the working copy; return -1 on flash, integrity or size

@@ -1,7 +1,14 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_watchdog_arch.h - C5 timer-group watchdog on the 48 MHz crystal.
+ *
+ * Stage 0 resets the system; interval mode is not supported.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_WATCHDOG_ARCH_H_

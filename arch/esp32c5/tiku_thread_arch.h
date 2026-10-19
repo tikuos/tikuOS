@@ -1,7 +1,14 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_thread_arch.h - C5 worker context and C-library state.
+ *
+ * A worker frame has the trap frame layout of tiku_irq_arch.h.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_THREAD_ARCH_H_

@@ -1,9 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_timer_arch.c - C5 system clock, one-shot timer and critical-window
- * masks. SYSTIMER alarm 0 drives ticks, alarm 1 drives the kernel hardware
- * timer. SPDX-License-Identifier: Apache-2.0
+ *
+ * tiku_timer_arch.c - C5 system clock, one-shot timer, critical-window masks.
+ *
+ * SYSTIMER alarm 0 drives the 128 Hz tick and alarm 1 the 1 MHz kernel
+ * hardware timer.
+ *
+ * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_timer_arch.h"
 #include "tiku_systimer_arch.h"

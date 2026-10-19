@@ -1,7 +1,14 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_timer_arch.h - C5 kernel tick and hardware-timer configuration.
+ *
+ * 128 ticks per second and a 1 MHz hardware timer, both from SYSTIMER.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_TIMER_ARCH_H_

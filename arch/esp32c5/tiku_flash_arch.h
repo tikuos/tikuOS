@@ -1,7 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_flash_arch.h - C5 flash mapping and protected storage geometry.
+ *
+ * A 4 MiB flash mapped at 0x42000000.  Erase and program refuse the boot
+ * image and XIP code in the first 2 MiB; above them sit the NVM region, a
+ * scratch sector and the two durable mirror slots.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_FLASH_ARCH_H_

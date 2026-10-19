@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_xip_arch.h - C5 paired boot/XIP image integrity contract.
+ *
+ * The SRAM image carries a 64-byte descriptor of the flash code it was
+ * linked with; boot refuses to run beside any other.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_XIP_ARCH_H_

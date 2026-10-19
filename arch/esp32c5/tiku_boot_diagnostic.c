@@ -1,8 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_boot_diagnostic.c - RAM boot, C storage and USB console diagnostic.
- * SYSTIMER interrupts run beside the polled USB console.
+ *
+ * The MINIMAL build runs it instead of main().  SYSTIMER interrupts run
+ * beside the polled USB console, which takes one-letter test commands.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stddef.h>

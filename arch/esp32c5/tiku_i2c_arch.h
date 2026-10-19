@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_i2c_arch.h - C5 I2C0 blocking master on board-selected GPIOs.
+ *
+ * SDA and SCL are TIKU_BOARD_I2C_SDA_PIN and TIKU_BOARD_I2C_SCL_PIN, claimed
+ * while the bus is open; the bus needs external pull-ups.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_I2C_ARCH_H_

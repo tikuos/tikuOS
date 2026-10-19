@@ -1,8 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_xip_arch.c - C5 pre-execution companion identity and payload check.
- * The packer fills the SRAM descriptor and matching flash header after linking.
+ *
+ * The packer (tools/esp32c5_xip.py) fills the SRAM descriptor and the
+ * matching flash header after linking.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_xip_arch.h"

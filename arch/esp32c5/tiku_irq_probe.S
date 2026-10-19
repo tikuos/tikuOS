@@ -1,8 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_irq_probe.S - Register preservation check across live C5 interrupts.
- * a0 is the cycle duration; the result is zero on success or one on mismatch.
+ *
+ * tiku_irq_probe.S - register preservation check across live C5 interrupts.
+ *
+ * Loads known values into the registers, spins for a0 mcycle cycles while
+ * interrupts arrive, and returns 0 when every value survived, 1 otherwise.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
     .section .text.tiku_c5_irq_probe,"ax",@progbits

@@ -1,9 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_uart_arch.c - C5 UART0 with bounded register synchronization and RX
- * drain. Register fields follow ESP-IDF 4d59230 uart_reg.h, pcr_reg.h and
- * uart_ll.h. SPDX-License-Identifier: Apache-2.0
+ *
+ * tiku_uart_arch.c - C5 UART0, bounded register synchronization and RX drain.
+ *
+ * Register fields follow ESP-IDF 4d59230 uart_reg.h, pcr_reg.h and
+ * uart_ll.h.
+ *
+ * SPDX-License-Identifier: Apache-2.0
  */
 #include <stddef.h>
 #include "tiku_uart_arch.h"

@@ -1,9 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * esp32c5_diagnostic.ld - RAM-loader diagnostic within the first 64 KiB.
- * The top 4 KiB holds its stack. HP SRAM above this window, including
- * ROM workspace, and LP SRAM are untouched.
+ *
+ * Links the MINIMAL build (tiku_boot_diagnostic.c).  The top 4 KiB holds its
+ * stack.  HP SRAM above this window, including ROM workspace, and LP SRAM
+ * are untouched.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 ENTRY(tiku_esp32c5_reset_handler)

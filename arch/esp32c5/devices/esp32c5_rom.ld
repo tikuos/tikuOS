@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * esp32c5_rom.ld - ESP32-C5 ECO 2 bindings from ESP-IDF 4d59230.
+ *
+ * esp32c5_rom.ld - ESP32-C5 ECO 2 ROM bindings from ESP-IDF 4d59230.
+ *
+ * Addresses of the ROM's flash, cache, MMU, clock and reset entry points
+ * (declared in tiku_rom_arch.h) and of the compiler's runtime routines.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 tiku_c5_rom_reset_reason = 0x40000018;

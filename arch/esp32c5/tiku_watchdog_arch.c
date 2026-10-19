@@ -1,8 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_watchdog_arch.c - C5 crystal-clocked MWDT0 system-reset stage.
+ *
  * Register definitions: ESP-IDF 4d59230 C5 timer_group_reg.h and pcr_reg.h.
+ * MWDT0 counts at 2 kHz, the 48 MHz crystal divided by 24000.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_watchdog_arch.h"

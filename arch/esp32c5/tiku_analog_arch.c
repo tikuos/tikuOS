@@ -1,8 +1,16 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
- * tiku_analog_arch.c - serialize the C5 SAR's users (entropy, the ADC and the
- * radio front end) and reach the SAR's internal analog registers.
+ *
+ * tiku_analog_arch.c - C5 SAR ownership and its internal analog registers.
+ *
+ * Serializes the SAR's users: entropy, the ADC and the radio front end.  The
+ * radio's claim is refused while a conversion, the temperature sensor or the
+ * RNG's sampling is running.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_analog_arch.h"

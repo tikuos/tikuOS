@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_gpio_arch.h - C5 GPIO bank interface with protected board pins.
+ *
+ * Pins are GPIO0..28, addressed as one-based ports of eight; the board's
+ * reserved pads are refused.  Also drives the board's RGB LED.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_GPIO_ARCH_H_

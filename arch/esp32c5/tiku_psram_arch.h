@@ -1,7 +1,15 @@
 /*
  * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
  * tiku_psram_arch.h - C5 native-CS1 quad PSRAM, CPU-only cached allocation.
+ *
+ * Mapped through the cache at 0x42800000; on attach the verified capacity
+ * joins the external memory tier.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32C5_PSRAM_ARCH_H_
