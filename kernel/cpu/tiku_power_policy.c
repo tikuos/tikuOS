@@ -56,8 +56,8 @@ wake_armed(tiku_cpu_idle_mode_t mode)
 /**
  * @brief The scheduler's idle hook while a policy mode is set.
  *
- * Light sleep wakes on every source, so it stands in when the last source
- * the chosen mode wakes on has been disarmed since it was chosen.
+ * Enters the chosen mode, or light sleep, which every source wakes, when no
+ * source that wakes the chosen mode is still armed.
  */
 static void
 policy_idle(void)

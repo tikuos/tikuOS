@@ -26,23 +26,38 @@
 #include <interfaces/led/tiku_led.h>
 
 /*---------------------------------------------------------------------------*/
-/* FUNCTION PROTOTYPES — DELAY                                               */
+/* DELAY                                                                     */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Delay for specified number of milliseconds
- * @param ms Number of milliseconds to delay
+ *
+ * A busy-wait in the port's HAL, whose accuracy is the port's: a hardware
+ * counter on some ports, a calibrated spin loop on others.  For intervals
+ * under a millisecond, use tiku_common_delay_us().
+ *
+ * @param ms Number of milliseconds to delay; 0 returns at once
+ * @note Blocks the caller: no other process runs.  The interrupt mask is left
+ *       as it is, so enabled ISRs still run.  A wait that lets other
+ *       processes run uses a software timer (tiku_timer_set_event()).
  */
 void tiku_common_delay_ms(unsigned int ms);
 
 /**
  * @brief Delay for specified number of microseconds
- * @param us Number of microseconds to delay (at most 65535 on MSP430)
+ *
+ * A busy-wait in the port's HAL, for bit-banged protocols and short hardware
+ * settling times.
+ *
+ * @param us Number of microseconds to delay (at most 65535 on MSP430); 0
+ *           returns at once
+ * @note Blocks the caller as tiku_common_delay_ms() does: no other process
+ *       runs, and the interrupt mask is left as it is.
  */
 void tiku_common_delay_us(unsigned int us);
 
 /*---------------------------------------------------------------------------*/
-/* FUNCTION PROTOTYPES — BIT MANIPULATION                                    */
+/* BIT MANIPULATION                                                          */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -61,13 +76,17 @@ uint8_t tiku_common_ctz(uint16_t val);
 
 /**
  * @brief Count leading zeros in a 16-bit value.
+ *
+ * A four-step binary search, so the cost does not depend on @p val.  For a
+ * non-zero @p val, 15 minus the result is the index of the highest set bit.
+ *
  * @param val Value to inspect (0 returns 16)
  * @return Number of leading zero bits (0..16)
  */
 uint8_t tiku_common_clz(uint16_t val);
 
 /*---------------------------------------------------------------------------*/
-/* INLINE UTILITIES — BYTE / WORD                                            */
+/* BYTE AND WORD HELPERS                                                     */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -131,18 +150,20 @@ static inline uint16_t tiku_common_bswap16(uint16_t val)
 }
 
 /*---------------------------------------------------------------------------*/
-/* FUNCTION PROTOTYPES — PLATFORM IDENTITY                                   */
+/* PLATFORM IDENTITY                                                         */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Read the MCU's unique device ID.
  *
  * Copies up to @p len bytes of the hardware unique ID into @p buf; its
- * content and length are per port.
+ * content and length are per port, such as a die record, a FICR register or
+ * an eFuse MAC address.
  *
  * @param buf  Destination buffer; NULL copies nothing
  * @param len  Buffer size
- * @return Number of bytes written; 0 for a NULL @p buf and on STM32N6
+ * @return Number of bytes written; 0 for a NULL @p buf, on STM32N6, and on
+ *         RP2350 when the boot ROM does not supply its CHIP_INFO record
  */
 uint8_t tiku_common_unique_id(uint8_t *buf, uint8_t len);
 
@@ -150,7 +171,8 @@ uint8_t tiku_common_unique_id(uint8_t *buf, uint8_t len);
  * @brief Cause of the last reset, as an MSP430 SYSRSTIV code.
  *
  * MSP430 returns SYSRSTIV itself; every other port maps its reset flags onto
- * those codes, which /sys/boot decodes.
+ * those codes, which /sys/boot decodes.  Every call in one boot returns the
+ * same code: a port whose cause register clears keeps its first reading.
  *
  * @return SYSRSTIV-style code (always even)
  */

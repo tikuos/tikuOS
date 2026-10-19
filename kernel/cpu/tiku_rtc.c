@@ -51,13 +51,6 @@ TIKU_PERSIST_CELL(rtc_cell, rtc_epoch_base, TIKU_RTC_MAGIC, NULL, 0);
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialise the soft RTC. Idempotent.
- *
- * A valid gate leaves the stored baseline as it is; otherwise the cell API
- * zeroes it and stamps the gate last, in its own unlock window.  Either way
- * this boot's uptime becomes the pairing baseline.
- */
 void
 tiku_rtc_init(void)
 {
@@ -68,14 +61,6 @@ tiku_rtc_init(void)
     }
 }
 
-/**
- * @brief Return current wall-clock seconds since the epoch.
- *
- * Returns epoch_base plus the uptime since the pairing, or 0 when the gate is
- * invalid or the baseline is 0.  Opens no MPU window.
- *
- * @return Wall-clock seconds, or 0 if the RTC was never set.
- */
 uint32_t
 tiku_rtc_get_seconds(void)
 {
@@ -87,16 +72,6 @@ tiku_rtc_get_seconds(void)
     return rtc_epoch_base + (now - rtc_uptime_base);
 }
 
-/**
- * @brief Set the wall clock to @p epoch_seconds.
- *
- * Stores the epoch and pairs it with the current uptime, so later reads add
- * only what has elapsed since.  The commit stores the value, then the gate,
- * in one window, so a set also validates a cell that was never primed.
- *
- * @param epoch_seconds  Desired wall-clock time, seconds since epoch.
- * @return 0 when the commit completed, -1 on failure
- */
 int
 tiku_rtc_set_seconds_status(uint32_t epoch_seconds)
 {
@@ -109,20 +84,11 @@ tiku_rtc_set_seconds_status(uint32_t epoch_seconds)
     return status == TIKU_MEM_OK ? 0 : -1;
 }
 
-/** @brief tiku_rtc_set_seconds_status() without the status. */
 void tiku_rtc_set_seconds(uint32_t epoch_seconds)
 {
     (void)tiku_rtc_set_seconds_status(epoch_seconds);
 }
 
-/**
- * @brief Report whether the wall clock holds a real, set value.
- *
- * True only when the gate validates and the baseline is non-zero; init primes
- * a never-set baseline to 0.
- *
- * @return Non-zero after a set to a non-zero time, 0 otherwise.
- */
 int
 tiku_rtc_is_set(void)
 {

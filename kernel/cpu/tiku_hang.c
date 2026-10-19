@@ -106,7 +106,7 @@ void tiku_hang_tick(void)
 {
     int8_t pid;
 
-    /* Dormant until the scheduler loop arms it (tiku_hang_arm()). */
+    /* tiku_sched_loop() sets this through tiku_hang_arm(). */
     if (!tiku_hang_armed) {
         return;
     }
@@ -189,7 +189,7 @@ uint8_t tiku_hang_is_culprit(const struct tiku_process *p)
 }
 
 /*---------------------------------------------------------------------------*/
-/* ARCH RESET (weak default)                                                 */
+/* ARCH RESET                                                                */
 /*---------------------------------------------------------------------------*/
 
 TIKU_WEAK void tiku_hang_arch_reset(void)

@@ -7,8 +7,9 @@
  *
  * tiku_fat.c - read-only FAT32 reader.
  *
- * No hardware headers: tools/fat32 builds this file on a Linux host and
- * regression-tests it against loopback images written by mkfs.vfat.
+ * No hardware headers: tools/fat32 builds this file on the host and tests it
+ * against image files that mkfs.vfat formats and mtools fills, read with
+ * fopen().
  *
  * SPDX-License-Identifier: Apache-2.0
  */

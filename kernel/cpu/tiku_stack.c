@@ -7,8 +7,9 @@
  *
  * tiku_stack.c - stack high-water measurement by painting.
  *
- * Every read and write here stays inside [tiku_stack_arch_bottom(), SP), the
- * stack region the port declares, above the heap and the MPU guard.
+ * tiku_stack_paint() and tiku_stack_free() read and write only inside
+ * [tiku_stack_arch_bottom(), SP), the stack region the port declares; the
+ * test hooks take their range from the caller.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -59,7 +60,7 @@ static void stack_paint_between(uintptr_t bottom, uintptr_t sp, uint32_t margin)
     uint32_t *lo, *hi;
 
     if (bottom == 0u || sp <= bottom + margin) {
-        return;   /* unwired arch, or no room to paint */
+        return;   /* no stack bottom, or no room to paint */
     }
 
     lo = (uint32_t *)((bottom + 3u) & ~(uintptr_t)3u);

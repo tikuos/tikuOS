@@ -43,9 +43,9 @@ void tiku_stack_paint(void);
 /**
  * @brief Worst-case stack headroom seen since tiku_stack_paint(), in bytes.
  *
- * The intact sentinel cushion above the arch stack bottom -- the closest the
- * stack has ever come to the guard, and monotonically non-increasing.  0 when
- * the feature is dormant or the whole stack has been used.
+ * Counts the bytes of sentinel still intact above tiku_stack_arch_bottom():
+ * the least headroom the stack has had, which never grows between paints.  0
+ * when the port declares no stack bottom or the whole stack has been used.
  */
 uint32_t tiku_stack_free(void);
 
@@ -64,7 +64,7 @@ uint32_t tiku_stack_free(void);
 void tiku_stack_test_paint(uintptr_t bottom, uintptr_t sp, uint32_t margin);
 
 /**
- * @brief Test-only hook: measure the intact cushion in an explicit range.
+ * @brief Test-only hook: measure the intact sentinel in an explicit range.
  *
  * The same scanner on caller-supplied bounds: counts intact sentinel words
  * upward from @p bottom and stops at the first overwritten one -- the deepest

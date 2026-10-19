@@ -21,9 +21,9 @@
 #include <kernel/fs/tiku_nvm_backend.h>
 
 /*
- * A slot is one header erase block (magic, length, CRC, name) followed by the
- * payload.  There is no directory, free list or in-place update; many small
- * files belong in TFS or tiku_blob.
+ * A slot is one header erase block (magic, length, CRC, a reserved word, name)
+ * followed by the payload.  There is no directory, free list or in-place
+ * update; many small files belong in TFS or tiku_blob.
  */
 
 /** @brief Result codes (0 = success, negative = failure). */

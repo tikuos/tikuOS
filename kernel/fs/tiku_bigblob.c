@@ -7,6 +7,10 @@
  *
  * tiku_bigblob.c - one very large object per slot, on erase-block media.
  *
+ * A write erases the slot's header block first and writes it last, its magic
+ * word after the rest, so the slot reads as empty until the magic lands and a
+ * power cut during the payload leaves no blob.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -15,12 +19,7 @@
 #include <kernel/fs/tiku_bigblob.h>
 #include <kernel/memory/tiku_nvm_mirror.h>
 
-/*
- * The header is erased first and written last, its magic word after the rest.
- * Until the magic lands the slot reads as empty, so a power cut during the
- * payload write leaves no blob; the CRC beside the magic lets a reader check
- * the payload.
- */
+/* Header magic; the CRC beside it lets a reader check the payload. */
 #define BIGBLOB_MAGIC   0x424C4232UL      /* "BLB2" */
 
 /** @brief A slot's header as stored at the start of its first block. */
@@ -159,8 +158,7 @@ int tiku_bigblob_step(tiku_bigblob_wr_t *w, uint32_t *done)
             return TIKU_BIGBLOB_ERR_IO;
         }
         /* The source's CRC is accumulated per chunk, so the publish step
-         * reads only the medium.  One pass over a model-sized payload is the
-         * most a step can take within the hang detector's limit. */
+         * reads only the medium. */
         w->crc = tiku_nvm_crc32_update(w->crc, &w->src[w->done], n);
         w->done += n;
         if (done != NULL) {
@@ -192,12 +190,11 @@ int tiku_bigblob_write(tiku_nvm_backend_t *be, uint32_t slot_off,
     if (rc != TIKU_BIGBLOB_OK) return rc;
     payload = slot_off + TIKU_BIGBLOB_HDR_BYTES;
 
-    /* 1. Unpublish.  From here until publish() the slot reads as empty. */
+    /* Unpublish: from here until publish() the slot reads as empty. */
     if (be->erase(be, slot_off, TIKU_BIGBLOB_HDR_BYTES) != 0) {
         return TIKU_BIGBLOB_ERR_IO;
     }
 
-    /* 2. Erase and write the payload. */
     if (be->erase(be, payload, len) != 0) {
         return TIKU_BIGBLOB_ERR_IO;
     }

@@ -27,7 +27,8 @@ extern "C" {
  * @brief Initialise the RTC layer. Idempotent.
  *
  * Validates the persist-cell gate and zeroes the baseline when the gate is
- * not valid (first boot, or virgin NVM).
+ * not valid (first boot, or virgin NVM).  Either way this boot's uptime
+ * becomes the pairing baseline; a later call, or one after a set, is a no-op.
  *
  * @note Call once during boot, before tiku_rtc_get_seconds() or
  *       tiku_rtc_set_seconds().
@@ -38,8 +39,10 @@ void tiku_rtc_init(void);
  * @brief Return current wall-clock seconds since the Unix epoch
  *        (or whatever epoch the caller last set).
  *
- * Equivalent to `epoch_base + (uptime - uptime_base)`.  Returns 0 while the
- * gate is invalid or the baseline is 0, as before the first set.
+ * Equivalent to `epoch_base + (uptime - uptime_base)`.  Opens no MPU window.
+ *
+ * @return Wall-clock seconds; 0 while the gate is invalid or the baseline is
+ *         0, as before the first set
  */
 uint32_t tiku_rtc_get_seconds(void);
 
@@ -48,12 +51,18 @@ uint32_t tiku_rtc_get_seconds(void);
  *
  * Stores the epoch baseline in durable memory and pairs it with the current
  * boot's uptime.  The persist-cell commit opens the MPU window around the
- * write.
+ * write.  It is tiku_rtc_set_seconds_status() with the status discarded.
  */
 void tiku_rtc_set_seconds(uint32_t epoch_seconds);
 
 /**
  * @brief Set the wall clock, reporting whether the baseline was saved.
+ *
+ * Pairs the stored epoch with the current uptime, so later reads add only
+ * the time elapsed since.  The commit stores the value, then the gate, so a
+ * set also validates a cell that tiku_rtc_init() never primed.
+ *
+ * @param epoch_seconds  Wall-clock time, seconds since the epoch
  * @return 0 when the persist-cell commit completed, -1 on failure
  */
 int tiku_rtc_set_seconds_status(uint32_t epoch_seconds);
@@ -61,6 +70,8 @@ int tiku_rtc_set_seconds_status(uint32_t epoch_seconds);
 /**
  * @brief True when the gate is valid and the baseline is non-zero, as after
  *        any set to a non-zero time.
+ *
+ * @return Non-zero after a set to a non-zero time, 0 otherwise
  */
 int tiku_rtc_is_set(void);
 

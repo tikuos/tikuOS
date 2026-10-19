@@ -369,7 +369,8 @@ int tiku_model_open(tiku_tfs_t *fs, const char *name, tiku_model_t *out)
      *
      * The magic is tested from four bytes on: a file with the magic must be a
      * valid RELOC model, and a truncated one returns TIKU_MODEL_ERR_FORMAT.  A
-     * file under four bytes is RAW.
+     * non-empty file under four bytes is RAW; an empty file is
+     * TIKU_MODEL_ERR_FORMAT.
      */
     if (n >= 4u && model_rd32(out->base + AXM_W_MAGIC * 4u) == AXM_MAGIC) {
         return model_open_reloc(out);

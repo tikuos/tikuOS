@@ -161,9 +161,9 @@ typedef struct {
 /**
  * @brief Open a model by file name and validate it end to end.
  *
- * For RELOC, checks every header field, section bound and CRC, and that each
- * site is a 4-byte aligned word inside the section it names (commands,
- * descriptor or labels) and names an entry of the symbol table.
+ * For RELOC, checks the version, every section bound, the label count and the
+ * CRCs, and that each site is an aligned word inside the section it names and
+ * names an entry of the symbol table.  packed_out_len is taken unchecked.
  *
  * @param fs    Mounted store (tiku_vfs_tree_data_store()).
  * @param name  File name, e.g. "vww.axm".

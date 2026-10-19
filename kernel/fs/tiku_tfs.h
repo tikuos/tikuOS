@@ -51,11 +51,11 @@
 
 #ifndef TIKU_TFS_MIN_SLOTS
 /**
- * @brief Floor: slots every board in this class has.
+ * @brief Floor: the file count every board in this class derives at mount.
  *
- * Mount refuses an extent too small for it (TFS_ERR_NOSPACE).  Build-time fit
- * checks assert against this floor, since the count derived at mount is not
- * known at build time.
+ * It counts files; the store has one data slot more.  Mount refuses an extent
+ * too small for it (TFS_ERR_NOSPACE); build-time fit checks assert against
+ * it, since the count derived at mount is not known at build time.
  */
 #  if defined(AM_PART_APOLLO510) || defined(PLATFORM_RP2350) || \
       defined(PLATFORM_STM32N6) || defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32P4)
@@ -225,6 +225,7 @@ typedef struct {
  *
  * Derived from the floor.  TIKU_TFS_FILE_MAX comes from the ceiling, which a
  * board's carve may not reach, so build-time fit checks assert against this.
+ * On MSP430, which keeps one slot per file, the limit is TIKU_TFS_SLOT_DATA.
  */
 #define TIKU_TFS_FILE_MAX_GUARANTEED \
     ((size_t)TIKU_TFS_MIN_SLOTS * TIKU_TFS_SLOT_BYTES - 4u)
@@ -242,8 +243,9 @@ typedef struct {
 /** @brief Mount state of one store: its backend and the derived geometry. */
 typedef struct tiku_tfs {
     tiku_nvm_backend_t *be;
-    /** Set while a streamed write is open; every other mutation returns
-     *  TFS_ERR_BUSY until it commits or aborts (see tiku_tfs_open_w()). */
+    /** Set while a streamed write is open (see tiku_tfs_open_w()).  Create,
+     *  write, open_w, delete, format and hold return TFS_ERR_BUSY until it
+     *  commits or aborts; tiku_tfs_mount() and tiku_tfs_init() clear it. */
     uint8_t  wr_open;
     /* Derived at mount from be->size. */
     uint16_t nfiles;      /**< directory entries this store holds        */
@@ -362,7 +364,18 @@ const char *tiku_tfs_probe_name(tfs_probe_kind_t kind);
 /** @brief Create an empty file. TFS_ERR_EXISTS if it already exists. */
 int tiku_tfs_create(tiku_tfs_t *fs, const char *name);
 
-/** @brief Create-or-overwrite @p name with @p len bytes (atomic overwrite). */
+/**
+ * @brief Create-or-overwrite @p name with @p len bytes (atomic overwrite).
+ *
+ * Runs as a one-chunk stream (tiku_tfs_open_w()).  A power cut before the
+ * commit word lands (the run word of an existing file, the gate of a new one)
+ * leaves the old content; after it, the old run is freed.
+ *
+ * @param data  Source bytes; may be NULL only when @p len is 0
+ * @param len   At most TIKU_TFS_FILE_MAX; one slot on MSP430
+ * @return TFS_OK, or a negative tfs_err_t; TFS_ERR_BUSY while a stream or a
+ *         lease is open
+ */
 int tiku_tfs_write(tiku_tfs_t *fs, const char *name,
                    const void *data, size_t len);
 
@@ -410,11 +423,31 @@ int tiku_tfs_commit(tiku_tfs_wr_t *w);
 /** @brief Discard an open write; the file keeps its previous content. */
 void tiku_tfs_abort(tiku_tfs_wr_t *w);
 
-/** @brief Copy a file into @p buf; @p out_len gets its true length. */
+/**
+ * @brief Copy a file into @p buf; @p out_len gets its true length.
+ *
+ * Copies at most @p max bytes; *out_len is larger than @p max when the copy
+ * was truncated.
+ *
+ * @param buf      Destination; may be NULL only when @p max is 0
+ * @param out_len  Receives the stored length, or NULL
+ * @return TFS_OK, or a negative tfs_err_t (TFS_ERR_CORRUPT for an
+ *         inconsistent run)
+ */
 int tiku_tfs_read(tiku_tfs_t *fs, const char *name,
                   void *buf, size_t max, size_t *out_len);
 
-/** @brief Zero-copy read: point @p p into the NVM region (read-only). */
+/**
+ * @brief Zero-copy read: point @p p into the NVM region (read-only).
+ *
+ * The content is contiguous across the file's run, so @p p covers all of it.
+ *
+ * @param p    Receives a pointer to the content bytes
+ * @param len  Receives the content length
+ * @return TFS_OK, or a negative tfs_err_t; on an error neither output is set
+ * @note The pointer is valid until the file is overwritten or deleted or the
+ *       store is formatted; a lease (tiku_tfs_hold()) blocks all three.
+ */
 int tiku_tfs_map(tiku_tfs_t *fs, const char *name,
                  const void **p, size_t *len);
 
@@ -434,9 +467,13 @@ int tiku_tfs_list(tiku_tfs_t *fs, tiku_tfs_iter_cb cb, void *ctx);
  * @brief Enumerate the immediate children under @p prefix, presenting the flat
  *        store as a directory tree (path-as-name).
  *
- * Files in the directory come back by leaf name; deeper paths contribute their
- * first path segment once, with a trailing '/'.  @p prefix is "" (store root)
- * or a folder such as "logs/".  @return the child count.
+ * Files in the directory come back by leaf name; a deeper path contributes its
+ * first segment once, with a trailing '/' and length 0.  The marker entry
+ * named @p prefix itself (mkdir's "<dir>/") is skipped.
+ *
+ * @param prefix  "" for the store root, or a folder such as "logs/"
+ * @return The child count, or TFS_ERR_INVAL when @p fs is NULL or unmounted
+ *         or @p prefix is NULL
  */
 int tiku_tfs_list_dir(tiku_tfs_t *fs, const char *prefix,
                       tiku_tfs_iter_cb cb, void *ctx);

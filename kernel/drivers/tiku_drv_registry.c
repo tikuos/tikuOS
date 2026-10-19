@@ -41,7 +41,7 @@
 /* PRIVATE STATE                                                             */
 /*---------------------------------------------------------------------------*/
 
-/** Set once tiku_drv_init_all() has walked the table. */
+/** Set when tiku_drv_init_all() first runs, before it walks the table. */
 static uint8_t registry_initialised;
 
 /** Per-boot outcome of one table slot, and the directory its nodes use. */
@@ -85,7 +85,7 @@ _Static_assert(sizeof(drv_state_names) / sizeof(drv_state_names[0])
                "drv_state_names out of step with tiku_drv_state_t");
 
 /*---------------------------------------------------------------------------*/
-/* /sys/drivers                                                              */
+/* DRIVER STATUS FILES                                                       */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -214,15 +214,6 @@ static int driver_mount(uint8_t index, const tiku_drv_t *d)
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Report one table slot's initialization outcome.
- *
- * @param index     Table slot
- * @param init_rc   Receives the init() result, or NULL
- * @param mount_rc  Receives the mount result, or NULL
- * @return The slot's state; TIKU_DRV_INVALID past the table end and
- *         TIKU_DRV_CAPACITY past TIKU_DRV_REGISTRY_MAX
- */
 tiku_drv_state_t tiku_drv_status(uint8_t index, int *init_rc, int *mount_rc)
 {
     if (init_rc != NULL) {
@@ -246,17 +237,6 @@ tiku_drv_state_t tiku_drv_status(uint8_t index, int *init_rc, int *mount_rc)
     return driver_status[index].state;
 }
 
-/**
- * @brief Walk the driver table and initialise every registered driver.
- *
- * Publishes /sys/drivers, then calls each valid descriptor's init() in table
- * order and mounts a ready driver's nodes under /dev.  A failed init or mount
- * is logged and recorded for tiku_drv_status(), and boot goes on.
- *
- * @note Called once at boot from main.c, after tiku_vfs_tree_init(); a repeat
- *       call does nothing.  No NVM writes or MPU interaction: side effects are
- *       each driver's init(), the VFS mounts and the boot log.
- */
 void tiku_drv_init_all(void)
 {
     uint8_t i;
@@ -270,7 +250,7 @@ void tiku_drv_init_all(void)
     }
 
     if (tiku_drv_table_count == 0U) {
-        /* /sys/drivers is published; there is no driver to initialize. */
+        /* The table is empty: nothing to initialize or mount. */
         return;
     }
 
@@ -314,13 +294,6 @@ void tiku_drv_init_all(void)
     }
 }
 
-/**
- * @brief Publish /sys/drivers and every ready driver's nodes again.
- *
- * tiku_vfs_init() clears the mount table, so a caller that registers the
- * root again after boot calls this to restore the registry's mounts.  Nodes
- * still in the tree are left alone, and no driver is initialized again.
- */
 void tiku_drv_remount_all(void)
 {
     char probe[2];   /* path_of() only reports whether a node is attached */
@@ -341,17 +314,6 @@ void tiku_drv_remount_all(void)
     }
 }
 
-/**
- * @brief Look up a driver descriptor by name.
- *
- * Linear strcmp() scan of the table, skipping NULL slots and nameless
- * descriptors.  Returns the descriptor whatever its init outcome, which
- * tiku_drv_status() reports.
- *
- * @param name  Driver name to match (NUL-terminated); NULL yields NULL.
- * @return Pointer to the matching const descriptor, or NULL if no
- *         entry matches (including the NULL-name input case).
- */
 const tiku_drv_t *tiku_drv_find(const char *name)
 {
     uint8_t i;

@@ -52,11 +52,6 @@ static volatile uint32_t wdt_kick_count;
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialize the watchdog timer with current configuration
- *
- * Delegates to the HAL to program the watchdog hardware.
- */
 void tiku_watchdog_init(void)
 {
     WDT_PRINTF("Init\n");
@@ -81,18 +76,6 @@ void tiku_watchdog_init(void)
 #endif
 }
 
-/**
- * @brief Configure the watchdog timer with custom parameters
- *
- * Stores the new configuration and re-initializes the hardware
- * via the HAL.
- *
- * @param mode          Watchdog or interval timer mode
- * @param clk           Clock source selection
- * @param interval      Timeout interval
- * @param start_held    If non-zero, start in held (paused) state
- * @param kick_on_start If non-zero, kick the timer on start
- */
 void tiku_watchdog_config(tiku_wdt_mode_t mode, tiku_wdt_clk_t clk,
                           tiku_wdt_interval_t interval, int start_held,
                           int kick_on_start)
@@ -108,9 +91,6 @@ void tiku_watchdog_config(tiku_wdt_mode_t mode, tiku_wdt_clk_t clk,
 
 }
 
-/**
- * @brief Kick (reset) the watchdog timer to prevent timeout
- */
 void tiku_watchdog_kick(void)
 {
     tiku_watchdog_arch_kick();
@@ -122,58 +102,37 @@ void tiku_watchdog_kick(void)
     tiku_hang_checkin();
 }
 
-/**
- * @brief Pause the watchdog timer
- */
 void tiku_watchdog_pause(void)
 {
     tiku_watchdog_arch_pause();
 }
 
-/**
- * @brief Resume the watchdog timer
- */
 void tiku_watchdog_resume(void)
 {
     tiku_watchdog_arch_resume(0);
 }
 
-/**
- * @brief Resume the watchdog timer with an immediate kick
- */
 void tiku_watchdog_resume_with_kick(void)
 {
     tiku_watchdog_arch_resume(1);
 }
 
-/**
- * @brief Return a human-readable string for the current watchdog mode
- */
 const char *tiku_watchdog_mode_str(void)
 {
     return (wdt.mode == TIKU_WDT_MODE_WATCHDOG)
                ? "watchdog" : "interval";
 }
 
-/**
- * @brief Return the current watchdog mode
- */
 tiku_wdt_mode_t tiku_watchdog_get_mode(void)
 {
     return wdt.mode;
 }
 
-/**
- * @brief Return the current clock source
- */
 tiku_wdt_clk_t tiku_watchdog_get_clk(void)
 {
     return wdt.clk;
 }
 
-/**
- * @brief Return the current interval divider
- */
 tiku_wdt_interval_t tiku_watchdog_get_interval(void)
 {
     return wdt.interval;
@@ -198,9 +157,6 @@ int tiku_watchdog_mode_supported(tiku_wdt_mode_t mode)
            TIKU_WATCHDOG_INTERVAL_SUPPORTED;
 }
 
-/**
- * @brief Disable the watchdog timer entirely
- */
 void tiku_watchdog_off(void)
 {
     WDT_PRINTF("Disabled\n");
@@ -208,9 +164,6 @@ void tiku_watchdog_off(void)
     wdt_enabled = 0;
 }
 
-/**
- * @brief Re-enable the watchdog with the most recent configuration.
- */
 void tiku_watchdog_on(void)
 {
     if (wdt_enabled) {

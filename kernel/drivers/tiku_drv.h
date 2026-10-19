@@ -89,9 +89,8 @@ typedef struct tiku_drv {
      *  regardless of vfs_nodes pointer. */
     uint8_t vfs_node_count;
 
-    /** Mount-point name under /dev/<class>/. Typically "<class>0"
-     *  for the first instance — "wifi0", "temp0", "lora0".
-     *  Ignored when vfs_node_count == 0. */
+    /** Mount-point name under /dev/<class>/, such as "wifi0" for the first
+     *  Wi-Fi driver.  Ignored when vfs_node_count == 0. */
     const char *vfs_mount;
 } tiku_drv_t;
 

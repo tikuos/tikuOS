@@ -66,13 +66,15 @@ typedef enum {
 tiku_drv_state_t tiku_drv_status(uint8_t index, int *init_rc, int *mount_rc);
 
 /**
- * @brief Walk the driver table and call each driver's init().
+ * @brief Publish /sys/drivers, then walk the driver table calling init().
  *
- * A failed init is logged and boot goes on with the drivers that came up.
- * Each descriptor is initialised at most once per boot; a repeat call does
- * nothing.
+ * Calls init() in table order for each valid descriptor in the first
+ * TIKU_DRV_REGISTRY_MAX slots and mounts a ready driver's nodes under /dev.
+ * A failed init or mount is logged and recorded for tiku_drv_status().
  *
- * @note Called once at boot from main.c, after tiku_vfs_tree_init().
+ * @note Called once at boot from main.c, after tiku_vfs_tree_init(); a repeat
+ *       call does nothing.  No NVM writes or MPU interaction: side effects are
+ *       each driver's init(), the VFS mounts and the boot log.
  */
 void tiku_drv_init_all(void);
 
@@ -90,6 +92,9 @@ void tiku_drv_remount_all(void);
  *
  * Returns the descriptor whatever its init outcome, which tiku_drv_status()
  * reports.  With a duplicate name, the first descriptor in the table wins.
+ *
+ * @param name  Driver name, NUL-terminated
+ * @return The descriptor, or NULL when none matches or @p name is NULL
  */
 const tiku_drv_t *tiku_drv_find(const char *name);
 

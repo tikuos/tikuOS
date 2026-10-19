@@ -8,8 +8,8 @@
  * tiku_hang.h - check-in watchdog: live-hang detection with named attribution.
  *
  * A tick that sees the heartbeat stall while one process holds the CPU records
- * that process and resets; autostart skips it on the next boot.  Only the
- * nRF54L and Apollo4l tick ISRs call tiku_hang_tick().
+ * that process and resets; autostart skips it on the next boot.  Detection
+ * runs only on a port whose tick ISR calls tiku_hang_tick() (Nordic, Ambiq).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -28,6 +28,8 @@ struct tiku_process;
  * such as an inline RSA certificate-chain verify.  The default, 1024 ticks, is
  * 8 s at the default 128 Hz tick; a build may override it.
  *
+ * @note An override is at most 65535: the stall counter is a uint16_t, and
+ *       65536 casts to 0, which trips on the first stalled tick.
  * @note An unbounded wait (a REPL prompt, DELAY, INPUT) checks in through
  *       tiku_hang_checkin() or tiku_watchdog_kick(); no threshold covers it.
  */
@@ -36,7 +38,7 @@ struct tiku_process;
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* DETECTION (run-time)                                                      */
+/* DETECTION                                                                 */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -84,15 +86,15 @@ int8_t tiku_hang_detect_step(void);
 void tiku_hang_record(const struct tiku_process *p);
 
 /*---------------------------------------------------------------------------*/
-/* RECOVERY (boot-time)                                                      */
+/* RECOVERY                                                                  */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Capture the pre-reset culprit for this boot, then clear the
  *        cross-reset record.
  *
- * The record is one-shot: it is read into this boot's view and wiped, so one
- * hang quarantines the culprit for the recovery boot only.
+ * The record is one-shot: it is read into this boot's view and wiped, so
+ * autostart skips the culprit on the recovery boot only.
  *
  * @note Call once, early in boot, before autostart.
  */
@@ -113,7 +115,7 @@ void tiku_hang_clear(void);
 /**
  * @brief Reset the chip.
  *
- * The nRF54L and Apollo4l ports define it.  The weak default spins forever,
+ * The Nordic and Ambiq ports define it.  The weak default spins forever,
  * which a running hardware watchdog then ends with a reset.
  */
 void tiku_hang_arch_reset(void);

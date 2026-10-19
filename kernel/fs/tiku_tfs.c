@@ -7,9 +7,9 @@
  *
  * tiku_tfs.c - Tiku File Store implementation.  See tiku_tfs.h for the model.
  *
- * On-NVM layout is [superblock | directory | data slots].  The slot count is
- * derived at mount from the extent the backend reports and recorded in the
- * superblock, so a store is never parsed under another geometry.
+ * On-NVM layout is [superblock | directory | data slots].  The file count is
+ * derived from the extent the backend reports and recorded in the superblock,
+ * so a store is never parsed under another geometry.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -111,10 +111,10 @@ int tiku_tfs_release(tiku_tfs_hold_t *hold)
 #define TFS_SB_BYTES    TIKU_TFS_SB_BYTES                   /* magic+geometry */
 #define TFS_DE_BYTES    TFS_ALIGN4(8u + TIKU_TFS_NAME_MAX)  /* gate+run+name  */
 #define TFS_DIR_OFF     TFS_SB_BYTES
-/* The directory length and the data base follow the file count derived at
- * mount (fs->nfiles, fs->data_off). */
 /* Slot size and data base are aligned to the erase granule (TIKU_TFS_SECT) in
- * tiku_tfs.h, so each slot owns whole erase sectors. */
+ * tiku_tfs.h, so each slot owns whole erase sectors.  The directory length
+ * and the data base follow the file count derived at mount (fs->nfiles,
+ * fs->data_off). */
 #define TFS_SLOT_BYTES  TIKU_TFS_SLOT_BYTES
 /* Smallest extent this build will mount: the floor's worth of store. */
 #define TFS_MIN_REGION  TIKU_TFS_EXTENT_FOR_SLOTS(TIKU_TFS_MIN_SLOTS)
@@ -196,7 +196,7 @@ static const char *de_name(tiku_tfs_t *fs, unsigned i)
     return (const char *)(fs->be->base + dirent_off(i) + TFS_DE_NAME);
 }
 /**
- * @brief Length field of data slot @p s (out-of-range index clamps to 0).
+ * @brief Length field of data slot @p s; 0 for an index past the data region.
  */
 static uint32_t sl_len(tiku_tfs_t *fs, unsigned s)
 {
@@ -522,9 +522,9 @@ int tiku_tfs_format(tiku_tfs_t *fs)
     if (wr32(fs, TFS_SB_MAGIC_W * 4u, 0u)) {
         return TFS_ERR_IO;
     }
-    /* Free every directory entry before stamping the superblock, so a valid
-     * magic always implies a clean directory (a torn format reads as no
-     * store). */
+    /* Free every directory entry before stamping the superblock, so a
+     * formatted store starts with an empty directory and a torn format reads
+     * as no store. */
     for (i = 0; i < fs->nfiles; i++) {
         if (wr32(fs, dirent_off(i) + TFS_DE_GATE, 0u)) {
             return TFS_ERR_IO;
@@ -838,7 +838,7 @@ int tiku_tfs_open_w(tiku_tfs_t *fs, tiku_tfs_wr_t *w,
     /*
      * One writer at a time.  A streamed write spans many calls with yields
      * between them, and two interleaved writers would stage into each other's
-     * run or race the dirent flip, so every other writer gets TFS_ERR_BUSY at
+     * run or race the dirent flip, so a second writer gets TFS_ERR_BUSY at
      * once; the check never blocks.  read, map and stat ignore the interlock;
      * tiku_tfs_hold() returns TFS_ERR_BUSY until the stream commits or aborts.
      */
@@ -962,19 +962,6 @@ void tiku_tfs_abort(tiku_tfs_wr_t *w)
     }
 }
 
-/**
- * @brief Write a file's content atomically, creating it if absent.
- *
- * A one-chunk stream.  A power cut before the commit word lands (the run
- * word of an existing file, the gate of a new one) leaves the old content;
- * after it, the old run is reclaimed.
- *
- * @param fs    Mounted file store.
- * @param name  File to write (created on first write).
- * @param data  Source bytes; may be NULL only when @p len is 0.
- * @param len   Byte count, at most TIKU_TFS_FILE_MAX (one slot on MSP430).
- * @return      TFS_OK, or a negative TFS_ERR_* code.
- */
 int tiku_tfs_write(tiku_tfs_t *fs, const char *name, const void *data, size_t len)
 {
     tiku_tfs_wr_t w;
@@ -997,19 +984,6 @@ int tiku_tfs_write(tiku_tfs_t *fs, const char *name, const void *data, size_t le
     return rc;
 }
 
-/**
- * @brief Copy a file's content into a caller-supplied buffer.
- *
- * Copies at most @p max bytes.  *out_len gets the stored length, which is
- * larger than @p max when the copy was truncated.
- *
- * @param fs       Mounted file store.
- * @param name     File to read.
- * @param buf      Destination buffer; may be NULL only when @p max is 0.
- * @param max      Capacity of @p buf in bytes.
- * @param out_len  If non-NULL, receives the file's full stored length.
- * @return         TFS_OK, or a negative TFS_ERR_* code.
- */
 int tiku_tfs_read(tiku_tfs_t *fs, const char *name, void *buf, size_t max, size_t *out_len)
 {
     int i;
@@ -1041,18 +1015,6 @@ int tiku_tfs_read(tiku_tfs_t *fs, const char *name, void *buf, size_t max, size_
     return TFS_OK;
 }
 
-/**
- * @brief Zero-copy view of a file's content within the NVM region.
- *
- * Returns a pointer directly into the backing store (no copy).
- *
- * @note The pointer is valid until the file is overwritten or deleted.
- * @param fs    Mounted file store.
- * @param name  File to map.
- * @param p     Receives a pointer to the content bytes in the region.
- * @param len   Receives the content length in bytes.
- * @return      TFS_OK, or a negative TFS_ERR_* code.
- */
 int tiku_tfs_map(tiku_tfs_t *fs, const char *name, const void **p, size_t *len)
 {
     int i;
@@ -1089,8 +1051,8 @@ int tiku_tfs_delete(tiku_tfs_t *fs, const char *name)
     if (fs == NULL || !fs->mounted || name == NULL) {
         return TFS_ERR_INVAL;
     }
-    /* Like every other mutation, delete returns TFS_ERR_BUSY while a stream
-     * or a lease is open. */
+    /* Like create, open_w and format, delete returns TFS_ERR_BUSY while a
+     * stream or a lease is open; mount and init clear the stream interlock. */
     if (fs->wr_open || tfs_held(fs)) {
         return TFS_ERR_BUSY;
     }
@@ -1144,12 +1106,6 @@ int tiku_tfs_list(tiku_tfs_t *fs, tiku_tfs_iter_cb cb, void *ctx)
     return n;
 }
 
-/* List the immediate children under @p prefix, presenting the flat store as a
- * tree (path-as-name): a file directly in the directory is reported by its leaf
- * name; a deeper path contributes its first segment once, with a trailing '/'.
- * prefix is "" for the store root or "logs/" for a sub-folder.  The empty
- * marker entry "<dir>/" (mkdir) is skipped here and reports the folder one
- * level up. */
 int tiku_tfs_list_dir(tiku_tfs_t *fs, const char *prefix,
                       tiku_tfs_iter_cb cb, void *ctx)
 {
