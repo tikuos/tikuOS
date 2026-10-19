@@ -221,7 +221,6 @@ trng_request(uint8_t *buf, size_t len)
     return TIKU_TRNG_OK;
 }
 
-/** @brief Mark the driver initialised; each read powers the RNG itself. */
 void
 tiku_trng_arch_init(void)
 {
@@ -231,18 +230,6 @@ tiku_trng_arch_init(void)
     trng_initialised = 1;
 }
 
-/**
- * @brief Fill a byte buffer with hardware random data.
- *
- * Enables the CRACEN RNG module, drives the polled entropy path to produce
- * @p len conditioned bytes, then disables the module.  On a hardware stall
- * @p buf may be partly written.
- *
- * @param buf  Destination buffer (must not be NULL).
- * @param len  Number of random bytes requested.
- * @return TIKU_TRNG_OK on success, TIKU_TRNG_ERR_INVALID if @p buf is
- *         NULL, or TIKU_TRNG_ERR_TIMEOUT if the RNG did not deliver.
- */
 int
 tiku_trng_arch_read_bytes(uint8_t *buf, size_t len)
 {
@@ -266,13 +253,6 @@ tiku_trng_arch_read_bytes(uint8_t *buf, size_t len)
     return rc;
 }
 
-/**
- * @brief Fetch a 32-bit random word, packed little-endian from four bytes.
- *
- * @param out  Where to store the word (must not be NULL).
- * @return TIKU_TRNG_OK, TIKU_TRNG_ERR_INVALID if @p out is NULL, or
- *         TIKU_TRNG_ERR_TIMEOUT; *out is untouched on error.
- */
 int
 tiku_trng_arch_read_u32(uint32_t *out)
 {

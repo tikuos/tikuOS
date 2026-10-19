@@ -67,12 +67,12 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
                              tiku_mem_arch_size_t len);
 
 /**
- * @brief Commit the durable region to the flash mirror, discarding the
- *        result.
+ * @brief Commit the durable region to the flash mirror:
+ *        tiku_mem_arch_nvm_flush_status() with the result discarded.
  *
- * @note Failure is silent: a flash that is not ready, a failed erase or a
- *       failed program leaves the mirror stale, and the only signal is that
- *       tiku_mem_arch_nvm_program_count() did not advance.
+ * @note Failure is silent: a flash that is not ready, a region larger than a
+ *       slot, or a failed erase or program leaves the mirror stale, and
+ *       tiku_mem_arch_nvm_program_count() does not advance.
  */
 void tiku_mem_arch_nvm_flush(void);
 

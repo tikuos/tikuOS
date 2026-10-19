@@ -105,7 +105,11 @@ uint32_t tiku_nordic_cache_workload(uint32_t *out_us);
  * @brief Run memory workload @p kind for @p ms; return elapsed microseconds.
  *
  * An unknown @p kind runs the NOP loop.  Timed on the GRTC; the access count
- * and checksum are read back separately.
+ * and checksum are read back separately.  Every kind borrows a 64 KB set
+ * from the SRAM tier for the run.
+ *
+ * @return Elapsed microseconds, or 0, with the count and checksum zeroed,
+ *         when the SRAM tier cannot lend the set
  */
 uint32_t tiku_nordic_mem_probe(unsigned kind, uint32_t ms);
 

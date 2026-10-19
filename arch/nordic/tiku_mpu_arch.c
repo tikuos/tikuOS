@@ -55,30 +55,22 @@ static void rramc_wen_set(uint32_t open)
                                : (cfg & ~TIKU_RRAMC_WEN);
 }
 
-/**
- * @brief Open an NVM write window: set the SAM write bits and RRAMC WEN.
- *
- * Returns the prior SAM word.  lock_nvm() with it restores the shadow and the
- * gate, so an unlock/lock pair inside an open window leaves WEN set.
- */
 uint16_t tiku_mpu_arch_unlock_nvm(void)
 {
     uint16_t saved = stub_mpusam;
 
+    /* Sets the SAM write bits and opens the RRAMC WEN gate.  The prior word
+     * restores both in tiku_mpu_arch_lock_nvm(), so an unlock/lock pair
+     * inside an open window leaves WEN set. */
     stub_mpusam = (uint16_t)(saved | TIKU_MPU_SAM_WRITE_BITS);
     rramc_wen_set(1UL);
     return saved;
 }
 
-/**
- * @brief Restore the SAM shadow, and clear WEN unless @p saved_state has
- *        write bits.
- *
- * @param saved_state  Value returned by the matching unlock_nvm().
- */
 void tiku_mpu_arch_lock_nvm(uint16_t saved_state)
 {
     tiku_mpu_arch_set_sam(saved_state);
+    /* WEN closes unless saved_state came from inside an open window. */
     rramc_wen_set(((saved_state & TIKU_MPU_SAM_WRITE_BITS) == 0u) ? 0UL : 1UL);
 }
 
@@ -86,26 +78,19 @@ void tiku_mpu_arch_lock_nvm(uint16_t saved_state)
 /* MSP430-MODELLED MPU ENTRY POINTS (SOFTWARE SHADOW)                        */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Return the current software SAM value. */
 uint16_t tiku_mpu_arch_get_sam(void)
 {
     return stub_mpusam;
 }
 
-/**
- * @brief Update the software SAM, following the MSP430 MPUCTL0 sequence.
- *
- * Bookkeeping only: the RRAMC gate is driven by unlock/lock_nvm.  The MPUCTL0
- * shadow takes the password write (0xA500), then password | enable.
- */
 void tiku_mpu_arch_set_sam(uint16_t sam)
 {
+    /* Bookkeeping only: this call leaves the RRAMC gate as it is. */
     stub_mpuctl0 = 0xA500U;             /* mirror MSP430 password write */
     stub_mpusam  = sam;
     stub_mpuctl0 = 0xA500U | 0x0001U;   /* password | enable            */
 }
 
-/** @brief Return the current software MPUCTL0 value. */
 uint16_t tiku_mpu_arch_get_ctl(void)
 {
     return stub_mpuctl0;
@@ -230,31 +215,26 @@ static void nrf_mpu_program_regions(void)
     nrf_mpu_dsb_isb();
 }
 
-/**
- * @brief Initialise the MPU: default SAM shadow, WEN closed, and the
- *        ARMv8-M W^X + stack-guard regions (see the block comment above).
- */
 void tiku_mpu_arch_init_segments(void)
 {
+    /* The RRAMC write gate starts closed; the regions are the SRAM W^X and
+     * stack-guard set described above. */
     tiku_mpu_arch_set_sam(TIKU_MPU_DEFAULT_SAM);
     rramc_wen_set(0UL);
     nrf_mpu_program_regions();
 }
 
-/** @brief Restore the default (read+exec, no write) SAM policy. */
 void tiku_mpu_arch_set_default_protection(void)
 {
+    /* The software mask only; the RRAMC gate is unchanged. */
     tiku_mpu_arch_set_sam(TIKU_MPU_DEFAULT_SAM);
 }
 
-/**
- * @brief Set the 3-bit permission field for one software SAM segment.
- *
- * Each segment occupies 4 bits of the SAM word; bits [2:0] of the field are
- * the TIKU_MPU_READ/WRITE/EXEC flags.  The RRAMC gate is not changed.
- */
 void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm)
 {
+    /* The software mask only: each segment has 4 bits of it, the
+     * TIKU_MPU_READ/WRITE/EXEC flags in bits [2:0].  The RRAMC gate is
+     * unchanged. */
     uint16_t shift = (uint16_t)(seg * 4U);
     uint16_t mask  = (uint16_t)(0x07U << shift);
     uint16_t sam   = (uint16_t)((stub_mpusam & ~mask) |
@@ -263,11 +243,6 @@ void tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm)
     tiku_mpu_arch_set_sam(sam);
 }
 
-/**
- * @brief Return 0: this port latches no violation flag.
- *
- * A store through the closed WEN gate raises a precise bus fault instead.
- */
 uint16_t tiku_mpu_arch_get_violation_flags(void)  { return 0u; }
 void     tiku_mpu_arch_clear_violation_flags(void) { /* nothing latched */ }
 void     tiku_mpu_arch_enable_violation_nmi(void)  { /* no violation NMI  */ }
@@ -282,8 +257,8 @@ uint32_t tiku_stack_arch_bottom(void)
     return (uint32_t)(uintptr_t)&__tiku_stack_bottom;
 }
 
-/** @brief No-op: there is no RAM execution window; a module runs in RRAM. */
 void tiku_mpu_arch_module_window_exec(int enable)
 {
+    /* No RAM execution window: a module runs in RRAM. */
     (void)enable;
 }

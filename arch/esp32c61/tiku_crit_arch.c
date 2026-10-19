@@ -22,16 +22,11 @@
 /** @brief The lines enabled when the window opened. */
 static uint32_t crit_saved;
 
-/**
- * @brief Disable every line but the preserved ones.
- *
- * @param preserve_mask  OR of TIKU_CRIT_PRESERVE_* flags
- * @note The tick, the htimer, pin edges and the console each have a line,
- *       so each flag keeps only its own.
- */
 void tiku_crit_arch_mask_irqs(uint8_t preserve_mask) {
     uint32_t keep = 0UL;
 
+    /* Each flag keeps one CLIC line: the tick, the htimer, pin edges or
+     * UART0; every other enabled line is disabled. */
     if (preserve_mask & TIKU_CRIT_PRESERVE_TICK) {
         keep |= 1UL << TIKU_ESP32C61_LINE_TICK;
     }
@@ -48,9 +43,6 @@ void tiku_crit_arch_mask_irqs(uint8_t preserve_mask) {
     tiku_esp32c61_irq_set_enabled(crit_saved & keep);
 }
 
-/**
- * @brief Restore the lines saved by tiku_crit_arch_mask_irqs().
- */
 void tiku_crit_arch_unmask_irqs(void) {
     tiku_esp32c61_irq_set_enabled(crit_saved);
 }

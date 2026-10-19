@@ -301,18 +301,6 @@ static int spim_run(uint32_t txp, uint32_t txlen,
 /* PUBLIC API                                                                */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialise the SPIM master with the given configuration.
- *
- * Switches an NFC pad among the SPI pins to GPIO, parks the pads at idle
- * levels, routes them via PSEL, programs CONFIG (order, CPOL/CPHA),
- * PRESCALER (SCK = 16 MHz / DIVISOR) and the ORC, then enables the SPIM.
- *
- * @note TIKU_SPI_LSB_FIRST is supported, through CONFIG.ORDER.
- * @param config  Bus parameters (mode, bit order, prescaler/divisor).
- * @return TIKU_SPI_OK on success, TIKU_SPI_ERR_PARAM on NULL config or an
- *         out-of-range mode.
- */
 int tiku_spi_arch_init(const tiku_spi_config_t *config)
 {
     uint32_t cfg;
@@ -393,13 +381,6 @@ int tiku_spi_arch_init(const tiku_spi_config_t *config)
     return TIKU_SPI_OK;
 }
 
-/**
- * @brief Disable the SPIM controller and release its pins.
- *
- * Disables the peripheral and disconnects the PSEL routing so the pads
- * revert to GPIO control.  Subsequent transfer calls return the idle/error
- * results until a fresh init.
- */
 void tiku_spi_arch_close(void)
 {
     TIKU_SPIM->ENABLE = TIKU_SPIM_ENABLE_DISABLED;
@@ -409,16 +390,6 @@ void tiku_spi_arch_close(void)
     spim_initialised = 0u;
 }
 
-/**
- * @brief Full-duplex single-byte transfer.
- *
- * Clocks out @p tx_byte from the RAM bounce buffer and returns the byte
- * shifted in on MISO during the same clocks.
- *
- * @param tx_byte  Byte to transmit.
- * @return Received byte, or 0xFF if not initialised or on a poll timeout
- *         (the level of an idle, pulled-up MISO).
- */
 uint8_t tiku_spi_arch_transfer(uint8_t tx_byte)
 {
     if (spim_initialised == 0u) {
@@ -433,19 +404,6 @@ uint8_t tiku_spi_arch_transfer(uint8_t tx_byte)
     return spim_rx1;
 }
 
-/**
- * @brief Write a buffer over SPI, discarding received bytes.
- *
- * Stages @p buf through the static RAM bounce buffer in chunks (so the
- * source may live in RRAM/flash or RAM) and clocks each chunk out with the
- * receive length set to 0.
- *
- * @param buf  Source bytes (may be NULL only when @p len == 0).
- * @param len  Number of bytes to transmit.
- * @return TIKU_SPI_OK on success, TIKU_SPI_ERR_PARAM if not initialised or
- *         @p buf is NULL with a non-zero length, TIKU_SPI_ERR_TIMEOUT on a
- *         poll timeout.
- */
 int tiku_spi_arch_write(const uint8_t *buf, uint16_t len)
 {
     uint32_t off;
@@ -462,9 +420,10 @@ int tiku_spi_arch_write(const uint8_t *buf, uint16_t len)
         if (n > TIKU_SPIM_CHUNK) {
             n = TIKU_SPIM_CHUNK;
         }
+        /* The RAM bounce buffer stages each chunk, so the source may be in
+         * RRAM.  RX length 0: nothing is written back; the RX pointer only
+         * needs to be a valid RAM address. */
         memcpy(spim_txbuf, &buf[off], n);
-        /* RX length 0: nothing written back; the RX pointer just needs to
-         * be a valid RAM address. */
         if (spim_run((uint32_t)spim_txbuf, n,
                      (uint32_t)spim_txbuf, 0UL) < 0) {
             return TIKU_SPI_ERR_TIMEOUT;
@@ -473,19 +432,6 @@ int tiku_spi_arch_write(const uint8_t *buf, uint16_t len)
     return TIKU_SPI_OK;
 }
 
-/**
- * @brief Read a buffer over SPI, clocking out the 0xFF over-read char.
- *
- * Receives directly into the caller's buffer in bounded chunks with the
- * transmit length set to 0; the SPIM shifts out ORC (0xFF) for each
- * received byte.  The destination must be on-chip RAM.
- *
- * @param buf  Destination buffer (may be NULL only when @p len == 0).
- * @param len  Number of bytes to receive.
- * @return TIKU_SPI_OK on success, TIKU_SPI_ERR_PARAM if not initialised,
- *         @p buf is NULL with a non-zero length, or the destination is not
- *         DMA-reachable RAM, TIKU_SPI_ERR_TIMEOUT on a poll timeout.
- */
 int tiku_spi_arch_read(uint8_t *buf, uint16_t len)
 {
     uint32_t off;
@@ -514,23 +460,6 @@ int tiku_spi_arch_read(uint8_t *buf, uint16_t len)
     return TIKU_SPI_OK;
 }
 
-/**
- * @brief Full-duplex transfer over two equal-length buffers.
- *
- * Transmits from @p tx_buf while receiving into @p rx_buf chunk by chunk: the
- * transmit slice stages through the RAM bounce buffer, so any source region
- * works, and the receive slice lands directly in the caller's buffer.
- *
- * @note The caller holds chip select across the whole call; SCK pauses
- *       briefly between chunks.
- * @param tx_buf  Source bytes (non-NULL when @p len > 0).
- * @param rx_buf  Destination buffer (non-NULL, DMA-reachable RAM, when
- *                @p len > 0).
- * @param len     Number of bytes to exchange.
- * @return TIKU_SPI_OK on success, TIKU_SPI_ERR_PARAM if not initialised,
- *         either buffer is NULL with @p len > 0, or the destination is not
- *         DMA-reachable RAM, TIKU_SPI_ERR_TIMEOUT on a poll timeout.
- */
 int tiku_spi_arch_write_read(const uint8_t *tx_buf, uint8_t *rx_buf,
                              uint16_t len)
 {

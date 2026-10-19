@@ -38,11 +38,23 @@ void tiku_cpu_freq_nordic_init(unsigned int cpu_freq);
 /** @brief Main clock (MCLK) in Hz, read from the live hardware. */
 unsigned long tiku_cpu_nordic_clock_get_hz(void);
 
-/** @brief Read a validated next-boot rate without initializing storage. */
+/**
+ * @brief Read the validated next-boot rate in Hz without initializing
+ *        storage.
+ *
+ * @return The saved 64 or 128 MHz rate, or the build default
+ *         (TIKU_NORDIC_CPU_MHZ) when no valid rate is saved or the image is
+ *         MINIMAL=1
+ * @note Callable before memory, timer and peripheral init.
+ */
 unsigned long tiku_cpu_nordic_target_hz(void);
+
 /**
  * @brief Persist a 64/128 MHz rate in Hz; the running clock is unchanged.
- * @return 0 when saved, -1 for any other rate or a failed write.
+ *
+ * @return 0 when saved, -1 for any other rate, a failed write or a
+ *         MINIMAL=1 image
+ * @note Call from the running kernel, not from early boot.
  */
 int tiku_cpu_nordic_target_set(unsigned long hz);
 

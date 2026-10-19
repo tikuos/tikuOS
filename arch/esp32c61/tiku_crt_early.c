@@ -82,7 +82,6 @@ static struct _reent irq_reent;
 static struct _reent *kernel_reent;
 static uint8_t worker_reent_ready[TIKU_THREADS_MAX];
 
-/** @brief Reset a worker slot's C-library state before starting that worker. */
 void tiku_esp32c61_reent_init(uint8_t slot)
 {
     if (slot >= TIKU_THREADS_MAX) { return; }

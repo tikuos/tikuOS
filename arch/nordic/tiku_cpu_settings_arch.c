@@ -29,13 +29,11 @@
 /* A MINIMAL=1 image links no persist store: every boot applies the build
  * default, and a save is refused. */
 
-/** @brief The build default; nothing is saved in a MINIMAL=1 image. */
 unsigned long tiku_cpu_nordic_target_hz(void)
 {
     return TIKU_NORDIC_CPU_MHZ * 1000000UL;
 }
 
-/** @brief Refused in a MINIMAL=1 image: returns -1. */
 int tiku_cpu_nordic_target_set(unsigned long hz)
 {
     (void)hz;
@@ -51,7 +49,6 @@ int tiku_cpu_nordic_target_set(unsigned long hz)
 static TIKU_DURABLE uint32_t cpu_target_hz;
 TIKU_PERSIST_CELL(cpu_target_cell, cpu_target_hz, 0x43505531UL, NULL, 0);
 
-/** @brief Read only; callable before memory, timer and peripheral init. */
 unsigned long tiku_cpu_nordic_target_hz(void)
 {
     if (tiku_persist_cell_valid(&cpu_target_cell) &&
@@ -61,7 +58,6 @@ unsigned long tiku_cpu_nordic_target_hz(void)
     return TIKU_NORDIC_CPU_MHZ * 1000000UL;
 }
 
-/** @brief Save from the running kernel; clock registers are untouched. */
 int tiku_cpu_nordic_target_set(unsigned long hz)
 {
     uint32_t value = (uint32_t)hz;

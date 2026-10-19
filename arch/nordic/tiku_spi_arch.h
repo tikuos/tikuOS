@@ -24,14 +24,20 @@
  *        16 MHz / divisor.
  *
  * The divisor is config->prescaler, clamped to an even 2..126; 0 or 1
- * selects 16 (1 MHz).
+ * selects 16 (1 MHz).  An NFC pad among the SPI pins becomes plain GPIO.
  *
  * @return TIKU_SPI_OK, or TIKU_SPI_ERR_PARAM on a NULL config or a mode
  *         above 3
+ * @note A transfer that times out disables the SPIM; every later transfer
+ *       fails until this runs again.
  */
 int     tiku_spi_arch_init(const tiku_spi_config_t *config);
 
-/** @brief Disable the SPIM and disconnect its pins. */
+/**
+ * @brief Disable the SPIM and disconnect its pins.
+ *
+ * Later transfers return 0xFF or TIKU_SPI_ERR_PARAM until the next init.
+ */
 void    tiku_spi_arch_close(void);
 
 /**
@@ -45,6 +51,8 @@ uint8_t tiku_spi_arch_transfer(uint8_t tx_byte);
  * @brief Write @p len bytes, discarding the received ones; @p buf may be in
  *        RRAM.
  *
+ * @note The caller holds chip select across the call; SCK pauses between
+ *       64-byte chunks.
  * @return TIKU_SPI_OK, TIKU_SPI_ERR_PARAM if not initialised or @p buf is
  *         NULL with @p len > 0, TIKU_SPI_ERR_TIMEOUT on a poll timeout
  */
@@ -53,18 +61,23 @@ int     tiku_spi_arch_write(const uint8_t *buf, uint16_t len);
 /**
  * @brief Read @p len bytes, clocking out 0xFF.
  *
- * @note @p buf must be in on-chip RAM.
+ * @note @p buf must be in on-chip RAM.  The caller holds chip select across
+ *       the call; SCK pauses between 64-byte chunks.
  * @return TIKU_SPI_OK, TIKU_SPI_ERR_PARAM if not initialised or @p buf is
- *         NULL or not RAM, TIKU_SPI_ERR_TIMEOUT on a poll timeout
+ *         NULL with @p len > 0 or not RAM, TIKU_SPI_ERR_TIMEOUT on a poll
+ *         timeout
  */
 int     tiku_spi_arch_read(uint8_t *buf, uint16_t len);
 
 /**
  * @brief Exchange @p len bytes: send @p tx_buf while receiving into @p rx_buf.
  *
- * @note @p rx_buf must be in on-chip RAM; @p tx_buf may be in RRAM.
+ * @note @p rx_buf must be in on-chip RAM; @p tx_buf may be in RRAM.  The
+ *       caller holds chip select across the call; SCK pauses between 64-byte
+ *       chunks.
  * @return TIKU_SPI_OK, TIKU_SPI_ERR_PARAM if not initialised, a buffer is
- *         NULL or @p rx_buf is not RAM, TIKU_SPI_ERR_TIMEOUT on a timeout
+ *         NULL with @p len > 0 or @p rx_buf is not RAM, TIKU_SPI_ERR_TIMEOUT
+ *         on a timeout
  */
 int     tiku_spi_arch_write_read(const uint8_t *tx_buf, uint8_t *rx_buf,
                                  uint16_t len);

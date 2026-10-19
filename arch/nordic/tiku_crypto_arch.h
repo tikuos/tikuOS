@@ -84,9 +84,16 @@ int tiku_crypto_arch_aes_gcm(int decrypt, uint32_t cfg_extra,
                              const uint8_t *in, size_t in_sz,
                              uint8_t *out, uint8_t tag[16]);
 
-/** @brief AES-GCM staged through SRAM, so the caller's buffers need no
- *         alignment headroom and may live in RRAM.  Up to 4096 bytes of
- *         input and 256 of AAD; larger returns -2. */
+/**
+ * @brief AES-GCM staged through SRAM, so the caller's buffers need no
+ *        alignment headroom and may live in RRAM.
+ *
+ * Arguments are those of tiku_crypto_arch_aes_gcm() without cfg_extra.
+ * @p tag is not staged: the engine writes it directly.
+ *
+ * @return 0 ok, with @p out written; -2 for input over 4096 bytes, AAD over
+ *         64 bytes or a bad key size; -1 on an engine error
+ */
 int tiku_crypto_arch_aes_gcm_kit(int decrypt,
                                  const uint8_t *key, size_t key_sz,
                                  const uint8_t iv[12],
@@ -115,8 +122,16 @@ void tiku_crypto_arch_pk_counters(uint16_t *ops, uint16_t *errs);
 void tiku_crypto_arch_pk_dbg(uint32_t *status, uint32_t *cmd, uint32_t *spin,
                             uint32_t *slotsz);
 
-/** @brief Upload a caller-provided BA414EP microcode image; TikuOS ships
- *         none. */
+/**
+ * @brief Upload a caller-provided BA414EP microcode image; TikuOS ships
+ *        none.
+ *
+ * Clears the latch that makes every verify return -1 once one has found no
+ * microcode.
+ *
+ * @param ucode  Image; NULL loads nothing
+ * @param words  Length in words; 0 or more than 1280 loads nothing
+ */
 void tiku_crypto_arch_pk_load_microcode(const uint32_t *ucode, size_t words);
 
 /** @brief First word of the PK microcode RAM (0 => not loaded). */

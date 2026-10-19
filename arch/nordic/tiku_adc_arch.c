@@ -187,19 +187,6 @@ static int tiku_saadc_wait(volatile uint32_t *event)
 /* Public API                                                                */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialise and enable the SAADC.
- *
- * Decodes the requested resolution into RESOLUTION, then sets ENABLE, the
- * only bring-up step: the SAADC self-clocks, with no clock or power gate to
- * open.  Offset auto-calibration is not run.
- *
- * @note The reference selector has no nRF54L equivalent (fixed internal
- *       0.9 V band-gap, 1.3 V on the nRF54LV10A) and is accepted but ignored.
- * @param config  ADC configuration; must be non-NULL with a known resolution.
- * @return TIKU_ADC_OK on success, TIKU_ADC_ERR_PARAM for a NULL config or an
- *         unrecognised resolution.
- */
 int tiku_adc_arch_init(const tiku_adc_config_t *config)
 {
     uint32_t res;
@@ -230,9 +217,6 @@ int tiku_adc_arch_init(const tiku_adc_config_t *config)
     return TIKU_ADC_OK;
 }
 
-/**
- * @brief Disable the SAADC to save power.
- */
 void tiku_adc_arch_close(void)
 {
     TIKU_SAADC->ENABLE =
@@ -240,16 +224,6 @@ void tiku_adc_arch_close(void)
     tiku_saadc_ready = 0u;
 }
 
-/**
- * @brief Validate that a channel maps to an SAADC input.
- *
- * There is no pin mux to program: the SAADC connects the selected input through
- * its own switch, and a GPIO's reset state (digital input buffer disconnected)
- * is already the correct high-impedance analog configuration.
- *
- * @param channel  Kernel ADC channel ID.
- * @return TIKU_ADC_OK for a supported channel, TIKU_ADC_ERR_PARAM otherwise.
- */
 int tiku_adc_arch_channel_init(uint8_t channel)
 {
     if (tiku_saadc_pselp(channel) == 0u) {
@@ -258,19 +232,6 @@ int tiku_adc_arch_channel_init(uint8_t channel)
     return TIKU_ADC_OK;
 }
 
-/**
- * @brief Perform a one-shot single-ended conversion.
- *
- * Routes the channel onto CH[0], points EasyDMA at the static RAM sample
- * buffer, runs the START/STARTED -> SAMPLE/END handshake, then stops the
- * converter.  Every wait is bounded and @p value is untouched on failure.
- *
- * @param channel  Kernel ADC channel ID (0..7, or 31 for VDD).
- * @param value    Output: raw right-aligned conversion result.
- * @return TIKU_ADC_OK on success, TIKU_ADC_ERR_PARAM for a NULL pointer,
- *         uninitialised SAADC, or unsupported channel, TIKU_ADC_ERR_TIMEOUT if
- *         a conversion event does not assert.
- */
 int tiku_adc_arch_read(uint8_t channel, uint16_t *value)
 {
     uint32_t pselp;

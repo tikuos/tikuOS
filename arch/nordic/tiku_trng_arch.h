@@ -44,6 +44,8 @@ int tiku_trng_arch_read_u32(uint32_t *out);
 /**
  * @brief Fill a byte buffer with @p len hardware random bytes.
  *
+ * Runs tiku_trng_arch_init() first if it has not run.
+ *
  * @param buf  Destination buffer. Must not be NULL.
  * @param len  Number of bytes requested.
  * @return TIKU_TRNG_OK on success, TIKU_TRNG_ERR_INVALID if @p buf is

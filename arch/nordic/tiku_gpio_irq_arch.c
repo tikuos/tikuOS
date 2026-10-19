@@ -145,22 +145,6 @@ static int alloc_channel(gpiote_ctx_t *c)
 /* HAL API                                                                   */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Enable an edge-triggered interrupt on the given (port, pin, edge).
- *
- * Configures the pin as an input with pull-up, allocates or reuses a GPIOTE
- * event channel on the port's owning instance, programs its CONFIG, clears any
- * stale latch, unmasks the channel on IRQ line 0 and enables that line.
- *
- * @note Subsequent matching edges broadcast TIKU_EVENT_GPIO with data =
- *       TIKU_GPIO_IRQ_PACK(port, pin).
- * @param port  Virtual port number (1=P0 through 4=P3 on nRF54LM20).
- * @param pin   Pin index within the port (0..31).
- * @param edge  Edge polarity to arm.
- * @return TIKU_GPIO_IRQ_OK, TIKU_GPIO_IRQ_ERR_INVALID for a bad
- *         port/pin/edge, or TIKU_GPIO_IRQ_ERR_UNSUP if the instance has no
- *         free channel left.
- */
 int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
                               tiku_gpio_edge_t edge)
 {
@@ -169,8 +153,9 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
     uint32_t      pol;
     int           ch;
 
-    /* Ports are 1-based virtual, as in tiku_gpio_arch.c; translate to the
-     * physical (0-based) port here. ctx_for_port() validates availability. */
+    /* Ports are 1-based virtual, as in tiku_gpio_arch.c: 1 = P0 through
+     * 4 = P3 on nRF54LM20.  ctx_for_port() validates availability, and a
+     * bad port, a pin past 31 or an unknown edge returns ERR_INVALID. */
     if (port < 1u || port > 4u) {
         return TIKU_GPIO_IRQ_ERR_INVALID;
     }
@@ -188,7 +173,9 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
     /* Idle-high input so a button (active-low) reads 1 until pressed. */
     tiku_nordic_gpio_init_input_pullup(phys, pin);
 
-    ch = find_channel(c, phys, pin);      /* re-arm in place if already set */
+    /* Each armed pin holds one of the 8 event channels of its port's GPIOTE
+     * instance; a pin already armed is re-armed on its own channel. */
+    ch = find_channel(c, phys, pin);
     if (ch < 0) {
         ch = alloc_channel(c);
         if (ch < 0) {
@@ -212,19 +199,6 @@ int tiku_gpio_irq_arch_enable(uint8_t port, uint8_t pin,
     return TIKU_GPIO_IRQ_OK;
 }
 
-/**
- * @brief Mask a pin's edge interrupt and free its channel.
- *
- * Masks the channel on IRQ line 0, disables the CONFIG (MODE=Disabled), clears
- * any pending latch and releases the channel.  Disabling a pin that was never
- * armed is a successful no-op.
- *
- * @note The pin's direction and pull are left as-is, so the app can still read
- *       the line afterwards.
- * @param port  Virtual port number (1=P0 through 4=P3 on nRF54LM20).
- * @param pin   Pin index within the port.
- * @return TIKU_GPIO_IRQ_OK, or TIKU_GPIO_IRQ_ERR_INVALID for a bad port.
- */
 int tiku_gpio_irq_arch_disable(uint8_t port, uint8_t pin)
 {
     gpiote_ctx_t *c;
@@ -245,6 +219,7 @@ int tiku_gpio_irq_arch_disable(uint8_t port, uint8_t pin)
         return TIKU_GPIO_IRQ_OK;              /* not armed: nothing to do */
     }
 
+    /* Frees the pin's GPIOTE event channel for another pin. */
     c->reg->INTENCLR0     = (1UL << ch);
     c->reg->CONFIG[ch]    = 0UL;              /* MODE = Disabled */
     c->reg->EVENTS_IN[ch] = 0UL;

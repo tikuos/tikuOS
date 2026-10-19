@@ -24,41 +24,57 @@
 /** @brief Segment access mask. @return The current mask */
 uint16_t tiku_mpu_arch_get_sam(void);
 
-/** @brief Set the segment access mask. @param sam  New mask */
+/**
+ * @brief Set the segment access mask; the mask enforces nothing.
+ *
+ * Leaves the MPUCTL0 shadow at password | enable (0xA501), which the
+ * portable MPU tests read back.
+ *
+ * @param sam  New mask
+ */
 void     tiku_mpu_arch_set_sam(uint16_t sam);
 
 /** @brief The MPUCTL0 shadow. @return Password and enable bits */
 uint16_t tiku_mpu_arch_get_ctl(void);
 
-/** @brief Does nothing: this port raises no MPU violation interrupt. */
+/** @brief Mask interrupts; this port raises no MPU violation interrupt. */
 void     tiku_mpu_arch_disable_irq(void);
 
-/** @brief Does nothing: this port raises no MPU violation interrupt. */
+/** @brief Unmask interrupts; this port raises no MPU violation interrupt. */
 void     tiku_mpu_arch_enable_irq(void);
 
-/** @brief Reset the mask to its default and lock the PMP NULL guard. */
+/**
+ * @brief Reset the mask to its default and lock the PMP NULL guard.
+ *
+ * Any access below 4 KB then faults.  The lock holds until reset, so a
+ * second call changes only the mask.
+ */
 void     tiku_mpu_arch_init_segments(void);
 
-/** @brief Apply the default protection policy. */
+/** @brief Reset the mask to TIKU_MPU_DEFAULT_SAM: read and execute, no write. */
 void     tiku_mpu_arch_set_default_protection(void);
 
 /**
- * @brief Set permissions on one segment.
+ * @brief Set permissions on one segment of the mask.
  *
- * @param seg   Segment index
- * @param perm  Permission bits
+ * @param seg   Segment index 0-2; its field is bits [4*seg+2 : 4*seg]
+ * @param perm  TIKU_MPU_READ/WRITE/EXEC flags; higher bits are ignored
  */
 void     tiku_mpu_arch_set_seg_perm(uint8_t seg, uint8_t perm);
 
 /**
- * @brief Make the durable region writable.
+ * @brief Set the write bit of every segment in the mask.
  *
- * @return State to hand back to tiku_mpu_arch_lock_nvm()
+ * @return The prior mask, for tiku_mpu_arch_lock_nvm(); windows nest
  * @note Durable data is SRAM here, so nothing is gated.
  */
 uint16_t tiku_mpu_arch_unlock_nvm(void);
 
-/** @brief Restore protection. @param saved_state  Value from unlock */
+/**
+ * @brief Restore the mask.
+ *
+ * @param saved_state  The value tiku_mpu_arch_unlock_nvm() returned
+ */
 void     tiku_mpu_arch_lock_nvm(uint16_t saved_state);
 
 /** @brief Violation flags; none latch on this port. @return 0 */

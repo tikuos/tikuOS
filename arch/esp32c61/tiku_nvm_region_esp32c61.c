@@ -140,14 +140,10 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
 /** @brief The region descriptor, filled by each tiku_nvm_backend_get(). */
 static tiku_nvm_backend_t g_region;
 
-/**
- * @brief Return the flash-backed region, or NULL while the flash driver is
- *        down.
- *
- * The base is the region's mapped address, so a caller reads it by
- * dereferencing.  After a failed flash init every call returns NULL.
- */
 const tiku_nvm_backend_t *tiku_nvm_backend_get(void) {
+    /* The region is a span of the external flash: NULL while the flash
+     * driver is down, and on every call after a failed flash init.  The
+     * base is the region's address in the flash mapping. */
     if (!tiku_flash_ready()) {
         NVMR_DBG("nvmr: flash not ready\n");
         return NULL;

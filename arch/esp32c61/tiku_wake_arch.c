@@ -22,11 +22,6 @@
 #include "tiku_irq_arch.h"
 #include "tiku_esp32c61_regs.h"
 
-/**
- * @brief Report which sources could wake the part.
- *
- * @param out  Receives the source set, and per port the pins armed for edges
- */
 void tiku_wake_arch_query(tiku_wake_sources_t *out) {
     uint32_t on;
 

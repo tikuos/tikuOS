@@ -207,19 +207,11 @@ unsigned short tiku_clock_arch_fine(void)
  * -DTIKU_NORDIC_NO_TICKLESS leaves the defaults: one wake per tick. */
 #if !defined(TIKU_NORDIC_NO_TICKLESS)
 
-/**
- * @brief Stretch the tick compare to a deadline @p ticks_ahead ticks away;
- *        returns 1.
- *
- * Points CC0 at that boundary past the anchor, so the CPU sleeps through the
- * ticks in between.  g_ticks is not advanced here (the anchor matches it);
- * tiku_clock_tickless_end() credits the elapsed ticks.
- *
- * @note Called with IRQs masked, before an idle sleep, when the earliest
- *       armed timer is more than one tick out.
- */
 int tiku_clock_tickless_begin(tiku_clock_time_t ticks_ahead)
 {
+    /* GRTC CC0 moves to the boundary ticks_ahead ticks past the anchor, and
+     * the call always returns 1.  g_ticks stays at the anchor;
+     * tiku_clock_tickless_end() credits the elapsed ticks. */
     uint64_t target_half = s_anchor_half +
                            (uint64_t)ticks_ahead * TIKU_GRTC_STEP_HALF;
     uint64_t target      = (target_half + 1u) >> 1;  /* rounded up, as above */
@@ -232,15 +224,6 @@ int tiku_clock_tickless_begin(tiku_clock_time_t ticks_ahead)
     return 1;
 }
 
-/**
- * @brief Close a stretch window: credit the elapsed ticks and re-arm CC0 at
- *        the next boundary.
- *
- * The re-arm cancels the far compare, so an early non-tick wake leaves no
- * stale deadline armed.  Does nothing when no window is open.
- *
- * @note Called with IRQs masked.
- */
 void tiku_clock_tickless_end(void)
 {
     uint32_t n;
@@ -251,13 +234,14 @@ void tiku_clock_tickless_end(void)
     s_stretched = 0u;
 
     n = grtc_account();
+    /* Re-arming CC0 at the next boundary cancels the far compare, so an
+     * early non-tick wake leaves no stale deadline armed. */
     grtc_rearm_immediate();
     if (n != 0u) {
         tiku_sched_notify();
     }
 }
 
-/** @brief Return 1: the tickless backend is present. */
 int tiku_clock_tickless_available(void)
 {
     return 1;

@@ -589,12 +589,6 @@ int tiku_crypto_arch_aes_ccm_star(int decrypt, const uint8_t *key,
     return 0;
 }
 
-/**
- * @brief AES-GCM staged through SRAM: the caller's buffers need no alignment
- *        headroom and may live in RRAM.
- *
- * Input up to CM_STAGE_MAX bytes and AAD up to 256; larger returns -2.
- */
 int tiku_crypto_arch_aes_gcm_kit(int decrypt,
                                  const uint8_t *key, size_t key_sz,
                                  const uint8_t iv[12],
@@ -897,18 +891,10 @@ uint32_t tiku_crypto_arch_pk_hwconfig(void)
     return v;
 }
 
-/**
- * @brief Upload a caller-provided BA414EP microcode image to the PK RAM.
- *
- * The PK engine is a microcoded core: its microcode RAM at CRACENCORE+0xC000
- * must be loaded before any command runs.  Copies up to 1280 words of the
- * caller's image and clears the unavailable latch.
- *
- * @note TikuOS ships no microcode image (the BA414EP microcode is
- *       Nordic-proprietary, LicenseRef-Nordic-5-Clause).
- */
 void tiku_crypto_arch_pk_load_microcode(const uint32_t *ucode, size_t words)
 {
+    /* The engine runs no command until its microcode RAM, 1280 words at
+     * CRACENCORE+0xC000, is loaded. */
     volatile uint32_t *uc =
         (volatile uint32_t *)((uint8_t *)NRF_CRACENCORE_S + 0xC000u);
     size_t i;
@@ -924,7 +910,6 @@ void tiku_crypto_arch_pk_load_microcode(const uint32_t *ucode, size_t words)
     s_pk_unavailable = 0;
 }
 
-/** @brief First word of the PK microcode RAM (0 => microcode not loaded). */
 uint32_t tiku_crypto_arch_pk_ucode0(void)
 {
     volatile uint32_t *uc =

@@ -36,16 +36,16 @@ void tiku_mem_arch_init(void)
     NRF_RRAMC_S->CONFIG = cfg;
 }
 
-/** @brief The persist partition: durable variables live there in place. */
 const uint8_t *tiku_mem_arch_durable(size_t *len)
 {
+    /* Durable variables live in place in the RRAM persist partition. */
     *len = (size_t)(__tiku_nvm_rram_end - __tiku_nvm_rram_start);
     return __tiku_nvm_rram_start;
 }
 
-/** @brief The .persistent section, at the start of the persist partition. */
 uint8_t *tiku_mem_arch_durable_live(size_t *len)
 {
+    /* .persistent sits at the start of the persist partition. */
     *len = (size_t)(__persistent_end - __persistent_start);
     return __persistent_start;
 }
@@ -109,7 +109,6 @@ int tiku_mem_arch_nvm_flush_status(void)
     return 0;
 }
 
-/** @brief Call tiku_mem_arch_nvm_flush_status() and discard its result. */
 void tiku_mem_arch_nvm_flush(void)
 {
     (void)tiku_mem_arch_nvm_flush_status();

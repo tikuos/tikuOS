@@ -40,18 +40,10 @@ typedef tiku_htimer_clock_t htimer_t;
 /* API                                                                       */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Bring up TIMER20 as a free-running 1 MHz, 16-bit timebase.
- *
- * Stops the timer, clears all interrupt masks, selects Timer mode / 16-bit
- * width / divide-by-16 prescaler, zeroes the counter, then enables the NVIC
- * line and starts counting.  No compare is armed until schedule() runs.
- *
- * @note Priority 1 puts htimer callbacks ahead of the console (2) and the
- *       kernel tick (3).
- */
 void tiku_htimer_arch_init(void)
 {
+    /* TIMER20 free-runs as a 1 MHz, 16-bit timebase; no compare is armed
+     * until tiku_htimer_arch_schedule() runs. */
     TIKU_HTIMER_TIMER->TASKS_STOP  = 1UL;
     TIKU_HTIMER_TIMER->INTENCLR    = 0xFFFFFFFFUL;
     TIKU_HTIMER_TIMER->MODE        = 0UL;      /* TIMER_MODE_MODE_Timer       */
@@ -61,39 +53,28 @@ void tiku_htimer_arch_init(void)
     TIKU_HTIMER_TIMER->TASKS_CLEAR = 1UL;
 
     tiku_nordic_nvic_clear_pending(TIKU_HTIMER_IRQN);
+    /* Priority 1 runs htimer callbacks ahead of the console (2) and the
+     * kernel tick (3). */
     tiku_nordic_nvic_set_priority(TIKU_HTIMER_IRQN, 1u);
     tiku_nordic_nvic_enable(TIKU_HTIMER_IRQN);
 
     TIKU_HTIMER_TIMER->TASKS_START = 1UL;      /* free-running from here      */
 }
 
-/**
- * @brief Read the current 16-bit hardware-timer tick.
- *
- * Triggers a CAPTURE of the live counter into CC[0] and returns the low
- * 16 bits (the timer is in 16-bit mode, so CC[0] already holds a 0..65535
- * value).  Wraps every ~65.5 ms at 1 MHz.
- *
- * @return Current 16-bit timer tick.
- */
 htimer_t tiku_htimer_arch_now(void)
 {
+    /* The capture into CC[0] holds 0..65535 in 16-bit mode; the count wraps
+     * every 65.536 ms at 1 MHz. */
     TIKU_HTIMER_TIMER->TASKS_CAPTURE[TIKU_HTIMER_CC_NOW] = 1UL;
     return (htimer_t)TIKU_HTIMER_TIMER->CC[TIKU_HTIMER_CC_NOW];
 }
 
-/**
- * @brief Arm a single-shot compare to fire at the 16-bit absolute tick @p t.
- *
- * In 16-bit mode the kernel's absolute deadline maps directly onto CC[1]:
- * COMPARE1 fires once when the counter next equals @p t.  The stale event
- * is cleared before unmasking, so a previous fire does not re-trigger.
- *
- * @note The kernel passes a @p t at least the htimer guard time ahead.
- * @param t  Target 16-bit tick value (kernel htimer_clock_t domain).
- */
 void tiku_htimer_arch_schedule(htimer_t t)
 {
+    /* The absolute 16-bit deadline goes straight into CC[1]: COMPARE1 fires
+     * once, when the counter next equals t, and its ISR masks it again.  The
+     * stale event is cleared before unmasking, so a previous fire does not
+     * re-trigger. */
     TIKU_HTIMER_TIMER->CC[TIKU_HTIMER_CC_FIRE] = (uint32_t)t;
     TIKU_HTIMER_TIMER->EVENTS_COMPARE[TIKU_HTIMER_CC_FIRE] = 0UL;
     (void)TIKU_HTIMER_TIMER->EVENTS_COMPARE[TIKU_HTIMER_CC_FIRE];

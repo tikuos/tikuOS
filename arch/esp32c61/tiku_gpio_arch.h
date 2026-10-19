@@ -44,7 +44,11 @@ void tiku_esp32c61_led_set(uint8_t pin, uint8_t channel, int on);
 
 /* Kernel-facing GPIO contract: 1-based ports of eight pins over the one
  * bank.  Each call returns -1 for a pin the part lacks. */
-/** @brief The GPIO number a kernel (port, pin) names, or -1. */
+/**
+ * @brief The GPIO number a kernel (port, pin) names, or -1.
+ *
+ * Port 1 pin 0 is GPIO0 and port 4 pin 5 is GPIO29, the last the part has.
+ */
 int    tiku_esp32c61_gpio_num(uint8_t port, uint8_t pin);
 
 /** @brief Make the pin a GPIO output, driven low. @return 0, or -1 */

@@ -68,7 +68,7 @@ int  tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len);
  * @param buf   Buffer for received data
  * @param len   Number of bytes; 0 returns TIKU_I2C_OK immediately
  * @return TIKU_I2C_OK on success, TIKU_I2C_ERR_PARAM if uninitialised or
- *         @p buf is NULL, TIKU_I2C_ERR_NACK on slave NACK,
+ *         @p buf is NULL or outside RAM, TIKU_I2C_ERR_NACK on slave NACK,
  *         TIKU_I2C_ERR_TIMEOUT if the bus never reaches STOP
  */
 int  tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len);
@@ -94,13 +94,16 @@ int  tiku_i2c_arch_probe(uint8_t addr);
  * hardware transaction (LASTTX->STARTRX + LASTRX->STOP shorts).  A
  * zero-length side degrades to a plain write or plain read.
  *
+ * @note @p rx_buf must be in RAM; @p tx_buf follows the staging rule of
+ *       tiku_i2c_arch_write().
  * @param addr    7-bit slave address (unshifted)
  * @param tx_buf  Data to transmit (e.g. a register address)
  * @param tx_len  Transmit length; may be 0
  * @param rx_buf  Buffer for received data
  * @param rx_len  Receive length; may be 0
- * @return TIKU_I2C_OK on success, TIKU_I2C_ERR_PARAM if uninitialised or
- *         a non-zero length has a NULL buffer, TIKU_I2C_ERR_NACK on slave
+ * @return TIKU_I2C_OK on success, TIKU_I2C_ERR_PARAM if uninitialised, a
+ *         non-zero length has a NULL buffer, @p rx_buf is outside RAM or a
+ *         non-RAM @p tx_buf exceeds 256 bytes, TIKU_I2C_ERR_NACK on slave
  *         NACK, TIKU_I2C_ERR_TIMEOUT on a wedged bus
  */
 int  tiku_i2c_arch_write_read(uint8_t addr,

@@ -16,42 +16,35 @@
 
 #include <arch/nordic/tiku_onewire_arch.h>
 
-/** @brief Returns -1 (TIKU_OW_ERR_NO_DEVICE). */
 int tiku_onewire_arch_init(void)
 {
     return -1;
 }
 
-/** @brief Does nothing. */
 void tiku_onewire_arch_close(void)
 {
 }
 
-/** @brief Returns -1 (TIKU_OW_ERR_NO_DEVICE). */
 int tiku_onewire_arch_reset(void)
 {
     return -1;
 }
 
-/** @brief Does nothing. */
 void tiku_onewire_arch_write_bit(uint8_t bit)
 {
     (void)bit;
 }
 
-/** @brief Returns 1. */
 uint8_t tiku_onewire_arch_read_bit(void)
 {
     return 1;
 }
 
-/** @brief Does nothing. */
 void tiku_onewire_arch_write_byte(uint8_t byte)
 {
     (void)byte;
 }
 
-/** @brief Returns 0xFF. */
 uint8_t tiku_onewire_arch_read_byte(void)
 {
     return 0xFF;

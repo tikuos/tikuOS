@@ -222,20 +222,14 @@ unsigned char tiku_clock_arch_fault(void) {
 }
 
 #ifndef TIKU_MINIMAL
-/**
- * @brief Move the tick alarm out to the deadline @p ticks_ahead ticks on.
- *
- * g_due is the next boundary, so the deadline is ticks_ahead - 1 boundaries
- * past it; nothing is credited here.
- *
- * @return 1 when the alarm moved, 0 when the tick is stopped or
- *         @p ticks_ahead is under 2
- * @note Call with interrupts masked.
- */
 int tiku_clock_tickless_begin(tiku_clock_time_t ticks_ahead) {
+    /* Returns 0 with the tick stopped or ticks_ahead under 2. */
     if (!g_running || ticks_ahead < 2U) {
         return 0;
     }
+    /* SYSTIMER alarm 0 moves out: g_due is the next boundary, so the
+     * deadline is ticks_ahead - 1 boundaries past it.  Nothing is credited
+     * here; tiku_clock_tickless_end() or the alarm credits the ticks. */
     tiku_esp32c61_alarm_arm(TIKU_ESP32C61_ALARM_TICK,
                             g_due + (uint64_t)(ticks_ahead - 1U) *
                                     TIKU_CLOCK_ARCH_INTERVAL);
@@ -243,12 +237,6 @@ int tiku_clock_tickless_begin(tiku_clock_time_t ticks_ahead) {
     return 1;
 }
 
-/**
- * @brief Credit the ticks a stretch covered and bring the alarm back in.
- *
- * Re-arming at the next boundary cancels a far alarm an early wake left
- * behind.  A failed read credits nothing: the next tick catches up.
- */
 void tiku_clock_tickless_end(void) {
     uint64_t now;
 
@@ -256,10 +244,14 @@ void tiku_clock_tickless_end(void) {
         return;
     }
     g_stretched = 0U;
+    /* A failed SYSTIMER read returns 0 and credits nothing: the next tick
+     * catches up. */
     now = tiku_cpu_esp32c61_systimer();
     if (now != 0ULL && tick_account(now) != 0UL) {
         tiku_sched_notify();
     }
+    /* Re-arming at the next boundary cancels a far alarm an early wake left
+     * behind. */
     tiku_esp32c61_alarm_arm(TIKU_ESP32C61_ALARM_TICK, g_due);
 }
 

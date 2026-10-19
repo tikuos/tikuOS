@@ -109,12 +109,6 @@ void tiku_esp32c61_led_set(uint8_t pin, uint8_t channel, int on) {
 /* KERNEL CONTRACT                                                           */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief The GPIO number a kernel (port, pin) names, or -1.
- *
- * Ports are 1-based banks of eight: port 1 pin 0 is GPIO0 and port 4 pin 5
- * is GPIO29, the last the part has.
- */
 int tiku_esp32c61_gpio_num(uint8_t port, uint8_t pin) {
     unsigned n = (unsigned)(port - 1U) * 8U + pin;
 

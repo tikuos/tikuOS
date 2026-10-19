@@ -280,16 +280,6 @@ static int twim_run(uint8_t addr, uint32_t shorts,
 /* Public API                                                                */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialise the nRF54L TWIM as an I2C master.
- *
- * Parks SDA/SCL as open-drain pull-up pins, routes them to the TWIM via PSEL,
- * selects 100 kHz (Standard) or 400 kHz (Fast), and enables the peripheral.
- * No clock gate needs opening.
- *
- * @param config  Bus configuration (speed).  Must be non-NULL.
- * @return TIKU_I2C_OK on success, TIKU_I2C_ERR_PARAM if @p config is NULL.
- */
 int tiku_i2c_arch_init(const tiku_i2c_config_t *config)
 {
     if (config == (const tiku_i2c_config_t *)0) {
@@ -319,12 +309,6 @@ int tiku_i2c_arch_init(const tiku_i2c_config_t *config)
     return TIKU_I2C_OK;
 }
 
-/**
- * @brief Disable the TWIM and release its pins.
- *
- * Clears ENABLE, disconnects the PSEL routing so SDA/SCL fall back to plain
- * GPIO, and marks the driver uninitialised.
- */
 void tiku_i2c_arch_close(void)
 {
     TIKU_TWIM->ENABLE   = TIKU_TWIM_ENABLE_OFF;
@@ -333,16 +317,6 @@ void tiku_i2c_arch_close(void)
     i2c_initialised = 0u;
 }
 
-/**
- * @brief Write bytes to an I2C slave (START, addr+W, data, STOP).
- *
- * @param addr  7-bit slave address.
- * @param buf   Bytes to transmit.
- * @param len   Number of bytes; 0 returns TIKU_I2C_OK immediately.
- * @return TIKU_I2C_OK on success, TIKU_I2C_ERR_PARAM if uninitialised or
- *         @p buf is NULL with len > 0, TIKU_I2C_ERR_NACK on slave NACK,
- *         TIKU_I2C_ERR_TIMEOUT on a wedged bus.
- */
 int tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len)
 {
     uint32_t err;
@@ -366,16 +340,6 @@ int tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len)
     return TIKU_I2C_OK;
 }
 
-/**
- * @brief Read bytes from an I2C slave (START, addr+R, data, NACK, STOP).
- *
- * @param addr  7-bit slave address.
- * @param buf   Destination buffer.
- * @param len   Number of bytes; 0 returns TIKU_I2C_OK immediately.
- * @return TIKU_I2C_OK on success, TIKU_I2C_ERR_PARAM if uninitialised or
- *         @p buf is NULL, TIKU_I2C_ERR_NACK on slave NACK,
- *         TIKU_I2C_ERR_TIMEOUT on a wedged bus.
- */
 int tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len)
 {
     uint32_t err;
@@ -399,18 +363,6 @@ int tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len)
     return TIKU_I2C_OK;
 }
 
-/**
- * @brief Probe an address for a bus scan (presence check).
- *
- * The nRF TWIM will not clock the address for a zero-length transfer, so the
- * probe is a real 1-byte write and presence is decided solely by the address
- * ACK.  A data NACK still proves the device is present.
- *
- * @param addr  7-bit slave address.
- * @return TIKU_I2C_OK if the device acknowledged its address,
- *         TIKU_I2C_ERR_NACK if not, TIKU_I2C_ERR_PARAM if uninitialised,
- *         TIKU_I2C_ERR_TIMEOUT on a wedged bus.
- */
 int tiku_i2c_arch_probe(uint8_t addr)
 {
     uint32_t err;
@@ -432,22 +384,6 @@ int tiku_i2c_arch_probe(uint8_t addr)
     return TIKU_I2C_OK;
 }
 
-/**
- * @brief Combined write-then-read with a repeated START.
- *
- * Performs START, addr+W, @p tx_buf, repeated START, addr+R, @p rx_buf, STOP
- * as a single hardware transaction (LASTTX->STARTRX + LASTRX->STOP shorts).
- * A zero-length side degrades to a pure write or pure read.
- *
- * @param addr    7-bit slave address.
- * @param tx_buf  Write-phase bytes (e.g. a register address).
- * @param tx_len  Write length; may be 0.
- * @param rx_buf  Read-phase destination.
- * @param rx_len  Read length; may be 0.
- * @return TIKU_I2C_OK on success, TIKU_I2C_ERR_PARAM if uninitialised or a
- *         non-zero length has a NULL buffer, TIKU_I2C_ERR_NACK on slave NACK,
- *         TIKU_I2C_ERR_TIMEOUT on a wedged bus.
- */
 int tiku_i2c_arch_write_read(uint8_t addr,
                              const uint8_t *tx_buf, uint16_t tx_len,
                              uint8_t *rx_buf, uint16_t rx_len)

@@ -253,11 +253,6 @@ uint32_t tiku_nordic_mem_checksum(void)     { return tiku_mem_checksum; }
         }                                                                     \
     } while (0)
 
-/**
- * @brief Run one memory workload for @p ms and report elapsed microseconds.
- *
- * The access count and checksum are read back separately.
- */
 uint32_t tiku_nordic_mem_probe(unsigned kind, uint32_t ms)
 {
     uint32_t t0, now;

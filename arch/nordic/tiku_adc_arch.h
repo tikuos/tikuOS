@@ -39,7 +39,8 @@ int  tiku_adc_arch_init(const tiku_adc_config_t *config);
 /**
  * @brief Architecture-specific ADC shutdown.
  *
- * Clears SAADC ENABLE to drop the converter's current draw.
+ * Clears SAADC ENABLE to drop the converter's current draw.  A later
+ * tiku_adc_arch_read() returns TIKU_ADC_ERR_PARAM until the next init.
  */
 void tiku_adc_arch_close(void);
 
@@ -73,6 +74,7 @@ int  tiku_adc_arch_channel_init(uint8_t channel);
  * @note Every wait is bounded: a conversion that never completes returns
  *       TIKU_ADC_ERR_TIMEOUT.  @p value is untouched on failure, and a
  *       negative sample (single-ended offset on a grounded input) clamps to 0.
+ *       Every read that starts the converter stops it before returning.
  * @param channel  Channel ID (0..7, or 31 for VDD)
  * @param value    Output: raw right-aligned result (0..255 / 0..1023 /
  *                 0..4095 per the configured resolution)

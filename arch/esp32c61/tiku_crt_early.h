@@ -64,7 +64,16 @@ int tiku_esp32c61_in_isr(void);
 void tiku_esp32c61_fault(uint32_t *frame, uint32_t cause)
     __attribute__((noreturn));
 
-/** @brief Initialize a worker's newlib state; call before its first switch. */
+/**
+ * @brief Initialize a worker slot's newlib state; call before the worker's
+ *        first switch.
+ *
+ * Reclaims the state a previous worker in the slot left.  The first call
+ * records the running state as the kernel's; from then on trap entry and
+ * exit switch between interrupt, kernel and worker state.
+ *
+ * @param slot  Thread slot; a slot at or past TIKU_THREADS_MAX is ignored
+ */
 void tiku_esp32c61_reent_init(uint8_t slot);
 
 #endif /* TIKU_ESP32C61_CRT_EARLY_H_ */
