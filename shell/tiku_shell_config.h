@@ -573,7 +573,7 @@
 #endif
 
 /* cryptoprobe drives the CRACEN CryptoMaster. */
-#if TIKU_SHELL_CMD_CRYPTOPROBE && !(TIKU_CRACEN_PK_ENABLE + 0)
+#if TIKU_SHELL_CMD_CRYPTOPROBE && !defined(PLATFORM_NORDIC)
 #undef  TIKU_SHELL_CMD_CRYPTOPROBE
 #define TIKU_SHELL_CMD_CRYPTOPROBE 0
 #endif

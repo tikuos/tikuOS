@@ -2833,10 +2833,10 @@ ifneq (,$(findstring TIKU_SHELL_CMD_NVMPROBE=1,$(EXTRA_CFLAGS)))
 SRCS += shell/commands/tiku_shell_cmd_nvmprobe.c
 endif
 ifneq (,$(findstring TIKU_SHELL_CMD_CRYPTOPROBE=1,$(EXTRA_CFLAGS)))
-ifeq ($(TIKU_CRACEN_PK_ENABLE),1)
+ifeq ($(TIKU_PLATFORM),nordic)
 SRCS += shell/commands/tiku_shell_cmd_cryptoprobe.c
 else
-$(warning cryptoprobe: needs TIKU_CRACEN_PK_ENABLE=1 (CRACEN PK) -- skipped)
+$(warning cryptoprobe: needs a Nordic part (CRACEN) -- skipped)
 endif
 endif
 # TIKU_USBHS_MSC=1: USB mass storage on the nRF54LM20A/B DWC2 core.  It
