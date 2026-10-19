@@ -607,9 +607,15 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
         fll_reason = (buf[1] >= 2u) ? buf[4] : 0x13u;   /* its ErrorCode    */
     } else if (op == 0x12u) {                   /* LL_PING_REQ -> RSP       */
         fll_queue_ctrl(0x13u, (const uint8_t *)0, 0u);
-    } else if (op == 0x08u || op == 0x0Eu) {    /* FEATURE_REQ -> RSP (none)*/
-        static const uint8_t none[8] = { 0u };
-        fll_queue_ctrl(0x09u, none, 8u);
+    } else if (op == 0x08u || op == 0x0Eu) {    /* FEATURE_REQ -> RSP       */
+        /* Octet 0 of FeatureSet is the AND of both sides' features; this LL
+         * offers bit 0, LE Encryption, alone.  A central that reads it clear
+         * does not start encryption on the link. */
+        uint8_t feat[8] = { 0u };
+        if (buf[1] >= 9u) {
+            feat[0] = (uint8_t)(buf[4] & 0x01u);
+        }
+        fll_queue_ctrl(0x09u, feat, 8u);
     } else if (fll_central) {
         fll_handle_rx_central(buf, sh, op);
     } else if (op == 0x01u) {                   /* LL_CHANNEL_MAP_UPDATE_IND*/
