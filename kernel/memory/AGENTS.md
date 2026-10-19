@@ -7,29 +7,33 @@ with a bump allocator per tier.  `tiku_tier_init()` is idempotent;
 
 ## Durable placement
 
-Never write a raw `__attribute__((section(".persistent")))` outside this
-directory: per-file copies are how state has ended up silently volatile on
-some platforms.  `tiku_mem.h` owns the grades:
+Never write a raw `__attribute__((section(".persistent")))`: per-file
+copies are how state has ended up silently volatile on some platforms.
+`tiku_mem.h` owns the grades:
 
-- `TIKU_DURABLE`: survives a power cycle on every platform (FRAM/RRAM in
-  place; SRAM with an NVM mirror on RP2350 and Ambiq).  Budgeted: it must
-  fit the smallest target's link-asserted window (RP2350: 4 KB in all) or
-  be platform-gated.
+- `TIKU_DURABLE`: survives a power cycle on every platform (in place on
+  MSP430 FRAM, nRF54L RRAM and RA8P1 MRAM; SRAM with an NVM mirror on Ambiq,
+  RP2350, STM32N6 and the ESP32s).  Budgeted: it must fit the smallest
+  target's link-asserted window (RP2350: 4 KB in all) or be platform-gated.
 - `TIKU_RETAINED`: survives a warm reset; a power cycle may lose it.  For
   cross-reset diagnostics and tables rebuilt often (`.retained` SRAM on
   every port but MSP430, where it is FRAM behind the MPU window).
 - `TIKU_FRAM_SPILL`: MSP430-only capacity spill for big session buffers
   (TLS, TCP, MQTT working state); not a durability claim, empty elsewhere.
-- Bulk durable data goes through the carved NVM region: the NVM tier,
-  `/data`, or a reserved-tail slot via `tiku_tier_nvm_write()`.
+- Bulk durable data goes through the carved NVM region: `/data`, or the
+  NVM tier, whose memory is written with `tiku_tier_nvm_write()`.
 
 Small durable scalars use `TIKU_PERSIST_CELL` and the cell API
 (`kernel/vfs/AGENTS.md`, "Persistent nodes").  Writes to `TIKU_DURABLE`
 data sit inside `tiku_mpu_unlock_nvm()`/`tiku_mpu_lock_nvm()`; an
-unbracketed write is silently dropped on MSP430, a bus fault on nRF54L and
-a MemManage reset on RP2350 and Ambiq.  `tools/check_durable_placement.sh`
-(`make lint`) rejects raw section attributes in `kernel/`, `interfaces/`,
-`drivers/`, `boot/`, `hal/`, `apps/`, `services/`, `shell/` and `basic/`.
+unbracketed write is silently dropped on MSP430, a bus fault on nRF54L, a
+MemManage reset on RP2350, Ambiq and RA8P1 and a store access fault on the
+ESP32-C5; STM32N6, ESP32-C61 and ESP32-P4 enforce nothing, and the write
+reaches the mirror only when a later window closes (the table in
+`tiku_mpu.c`).  `tools/check_durable_placement.sh` (`make lint`) rejects raw
+section attributes in `kernel/`, `interfaces/`, `drivers/`, `boot/`, `hal/`,
+`apps/`, `services/`, `shell/` and `basic/`, except in `tiku_mem.h` and the
+`mrambench` command; it does not scan `arch/`.
 
 Ambiq's `.persistent` is physically SRAM mirrored to MRAM by a flush; it is
 not a place for high-churn buffers.  RP2350 allocations that fall to the

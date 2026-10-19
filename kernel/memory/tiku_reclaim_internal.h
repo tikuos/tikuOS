@@ -79,8 +79,8 @@ int tiku_reclaim_credit(tiku_mem_backing_t *);
 /**
  * @brief Set or clear a span's fence.
  *
- * A fenced span takes no new reservation and releases none, so the plan for
- * it holds still.
+ * A fenced span takes no new reservation and releases none, so its
+ * reservations stay where the plan found them.
  *
  * @return 1, or 0 for a span that does not exist or is not initialized
  */

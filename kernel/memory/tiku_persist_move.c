@@ -290,16 +290,10 @@ const tiku_persist_manifest_t *tiku_persist_manifest(void)
 extern const tiku_persist_cell_t *const __tiku_cells_start[];
 extern const tiku_persist_cell_t *const __tiku_cells_end[];
 
-/* Where this image keeps its cells; rewritten only when that changes. */
+/* Where this image keeps its cells; rewritten when that changes, and at
+ * each boot while the layout record is not yet pinned. */
 static TIKU_DURABLE tiku_persist_manifest_t cell_manifest;
 
-/**
- * @brief Run the cell move, carrying the layout record across it.
- *
- * The layout record captured from the old image (or its absence) is
- * restored inside the move's write window, and is not published when the
- * move fails.
- */
 int tiku_persist_move_boot_env(tiku_persist_move_env_t *e)
 {
     tiku_layout_record_t record;

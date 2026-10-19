@@ -55,15 +55,6 @@ static const tiku_nvm_region_t regions[] = {
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialise the NVM region map.
- *
- * Claims each active region in the region registry, so another subsystem's
- * later overlapping claim is refused.  A failed claim is not fatal: the region
- * still serves tiku_nvm_region_get(), only without that guard.
- *
- * @note Call once at boot.
- */
 void
 tiku_nvm_map_init(void)
 {
@@ -78,19 +69,6 @@ tiku_nvm_map_init(void)
     }
 }
 
-/**
- * @brief Look up an NVM region by its stable identifier.
- *
- * Scans the static region table for an active entry matching @p id.
- * Returns a read-only pointer to the region descriptor, which
- * includes the base address and size.
- *
- * @param id  Region identifier (e.g. TIKU_NVM_REGION_CONFIG).
- * @return    Pointer to the region descriptor, or NULL if @p id is
- *            not found or the region is inactive.
- *
- * @see tiku_nvm_region_count()
- */
 const tiku_nvm_region_t *
 tiku_nvm_region_get(tiku_nvm_region_id_t id)
 {
@@ -105,16 +83,6 @@ tiku_nvm_region_get(tiku_nvm_region_id_t id)
     return (const tiku_nvm_region_t *)0;
 }
 
-/**
- * @brief Return the number of active NVM regions.
- *
- * Counts only regions whose TIKU_NVM_REGION_ACTIVE flag is set; the reserved
- * APP ids have no entry and do not count.
- *
- * @return Number of active regions.
- *
- * @see tiku_nvm_region_get()
- */
 uint8_t
 tiku_nvm_region_count(void)
 {

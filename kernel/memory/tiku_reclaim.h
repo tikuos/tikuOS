@@ -303,9 +303,9 @@ tiku_mem_err_t tiku_mem_owner_process_ack(tiku_mem_owner_t,
 /**
  * @brief Submit a request for backing, reconstructing other owners if needed.
  *
- * With no job running and no ticket waiting, a request that fits is READY at
- * once; otherwise tiku_mem_reclaim_poll() admits it and runs a job when it
- * must.  Claim the result with the claim call for its kind.
+ * With no job running and no other ticket pending, the ticket is admitted
+ * here: READY on a direct fit, FAILED when it cannot be met, or a job starts;
+ * otherwise tiku_mem_reclaim_poll() admits it.  Claim with its kind's call.
  *
  * @return TIKU_MEM_OK; TIKU_MEM_ERR_INVALID or TIKU_MEM_ERR_NOMEM for a bad
  *         request; TIKU_MEM_ERR_BUSY while disabled or polling, when the

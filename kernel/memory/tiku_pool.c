@@ -66,12 +66,6 @@ static tiku_mem_arch_size_t min_block_size(void)
     return align_up(ptr_size);
 }
 
-/*
- * Block addresses are computed as a uint8_t * plus (i * block_size): exact
- * byte offsets on 16-bit MSP430 and on 32- and 64-bit hosts, independent of
- * struct padding and pointer size.
- */
-
 /**
  * @brief Write one freelist next-pointer into a block.
  *
@@ -344,16 +338,6 @@ tiku_mem_err_t tiku_pool_destroy(tiku_pool_t *pool)
     return TIKU_MEM_OK;
 }
 
-/**
- * @brief Allocate a block from the pool.
- *
- * Pops the freelist head in O(1).  Every block has the block size the pool
- * was created with.
- *
- * @param pool   Pool to allocate from (must be active)
- * @return Pointer to the allocated block, or NULL if the pool is empty or
- *         invalid, its last reset failed, or a reclaim job holds its owner
- */
 void *tiku_pool_alloc(tiku_pool_t *pool)
 {
     TIKU_MEM_KERNEL_ONLY(NULL);
@@ -381,20 +365,6 @@ void *tiku_pool_alloc(tiku_pool_t *pool)
     return block;
 }
 
-/**
- * @brief Return a block to the pool.
- *
- * Pushes it back onto the freelist head in O(1).  The pointer is checked
- * against the buffer and a block boundary first: with no MMU a stray free
- * silently corrupts the freelist and later allocations return wild pointers.
- *
- * @param pool   Pool the block belongs to
- * @param ptr    Pointer previously returned by tiku_pool_alloc
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if ptr is outside
- *         the pool, off a block boundary or already free (or the pool is
- *         invalid or failed its last reset), TIKU_MEM_ERR_BUSY while a
- *         reclaim job holds the pool's owner, or the NVM write error
- */
 tiku_mem_err_t tiku_pool_free(tiku_pool_t *pool, void *ptr)
 {
     TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
@@ -408,7 +378,8 @@ tiku_mem_err_t tiku_pool_free(tiku_pool_t *pool, void *ptr)
 
     block = (uint8_t *)ptr;
 
-    /* Validate: ptr must fall within the pool's buffer */
+    /* Without an MMU a stray free would corrupt the freelist, so ptr must
+     * fall within the pool's buffer */
     if ((uintptr_t)block < (uintptr_t)pool->buf ||
         (uintptr_t)block - (uintptr_t)pool->buf >= pool->block_count * pool->block_size) {
         return TIKU_MEM_ERR_INVALID;
@@ -456,17 +427,6 @@ tiku_mem_err_t tiku_pool_free(tiku_pool_t *pool, void *ptr)
     return TIKU_MEM_OK;
 }
 
-/**
- * @brief Fill a stats struct with the pool's current state.
- *
- * Total and used bytes are the block size times the block and used counts, and
- * the peak is reported the same way.
- *
- * @param pool   Pool to query
- * @param stats  Output structure (caller-provided)
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on a NULL argument
- *         or an invalid pool
- */
 tiku_mem_err_t tiku_pool_stats(const tiku_pool_t *pool,
                                 tiku_mem_stats_t *stats)
 {
@@ -483,18 +443,6 @@ tiku_mem_err_t tiku_pool_stats(const tiku_pool_t *pool,
     return TIKU_MEM_OK;
 }
 
-/**
- * @brief Reset the pool, returning all blocks to the freelist.
- *
- * Re-chains every block and zeroes used_count; the peak stays a lifetime
- * figure.  O(n), since each block's next-pointer is rewritten.  After a
- * failed rebuild, alloc and free refuse the pool until a reset succeeds.
- *
- * @param pool   Pool to reset
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID for an invalid pool,
- *         TIKU_MEM_ERR_BUSY while a reclaim job holds the pool's owner, or
- *         the NVM write error
- */
 tiku_mem_err_t tiku_pool_reset(tiku_pool_t *pool)
 {
     tiku_mem_err_t err;

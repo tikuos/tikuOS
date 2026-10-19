@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_nvm_map.h - platform-independent NVM region management.
+ * tiku_nvm_map.h - named NVM regions, tiku_fram_* aliases, report labels.
  *
- * Declares named NVM regions whose sizes come from the per-device header and
- * whose backing arrays the linker places, so no address is hard-coded.
- * Subsystems obtain pointers at run time via tiku_nvm_region_get().
+ * Declares the region ids and tiku_nvm_region_get(), whose backing arrays take
+ * per-device sizes and linker placement, the tiku_fram_* aliases of that API,
+ * and the TIKU_DEVICE_NVM_LABEL and TIKU_DEVICE_RAM_USABLE report fallbacks.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -74,7 +74,8 @@ typedef struct {
  * @brief Claim each active region in the region registry.
  *
  * Another subsystem's later claim over a region is then refused.  A failed
- * claim here is ignored.
+ * claim here is ignored: the region still serves tiku_nvm_region_get(),
+ * without that guard.
  *
  * @note Call once at boot.
  */
@@ -84,7 +85,8 @@ void tiku_nvm_map_init(void);
  * @brief Look up an NVM region by ID.
  *
  * @param id  Region identifier (e.g. TIKU_NVM_REGION_CONFIG).
- * @return    Pointer to descriptor, or NULL if region is not allocated.
+ * @return    Read-only pointer to the descriptor (base and size), or NULL
+ *            when @p id has no active entry.
  */
 const tiku_nvm_region_t *tiku_nvm_region_get(tiku_nvm_region_id_t id);
 

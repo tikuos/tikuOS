@@ -63,13 +63,17 @@ typedef enum {
     TIKU_LAYOUT_OK        =   0,
     TIKU_LAYOUT_E_INVAL   =  -1,    /**< malformed request                    */
     TIKU_LAYOUT_E_KNOB    =  -2,    /**< unknown knob, or absent on this part */
-    TIKU_LAYOUT_E_RANGE   =  -3,    /**< outside the floor or the ceiling     */
+    TIKU_LAYOUT_E_RANGE   =  -3,    /**< outside floor or ceiling, counter
+                                         at its maximum, invalid store base,
+                                         or a NULL argument to recover     */
     TIKU_LAYOUT_E_STEP    =  -4,    /**< not a multiple of the knob's step    */
     TIKU_LAYOUT_E_STALE   =  -5,    /**< expected generation or revision old  */
     TIKU_LAYOUT_E_BUSY    =  -6,    /**< another request or operation is live */
     TIKU_LAYOUT_E_LOSS    =  -7,    /**< files would be lost; name the method */
     TIKU_LAYOUT_E_IO      =  -8,    /**< a record or store write failed       */
-    TIKU_LAYOUT_E_PHASE   = -10,    /**< no such interrupted operation        */
+    TIKU_LAYOUT_E_PHASE   = -10,    /**< no such pending operation to
+                                         cancel or interrupted one to
+                                         resume                            */
     TIKU_LAYOUT_E_REUSED  = -11,    /**< the operation id names other content */
     TIKU_LAYOUT_CANCELLED = -12,    /**< receipt: the request was cancelled   */
     TIKU_LAYOUT_E_RECOVERY = -13,   /**< explicit ownership recovery required */
@@ -188,7 +192,7 @@ typedef struct {
 } tiku_layout_knob_t;
 
 /*---------------------------------------------------------------------------*/
-/* THE ENVIRONMENT: WHERE THE RECORD AND THE REGION LIVE                     */
+/* ENVIRONMENT                                                               */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -216,7 +220,7 @@ typedef struct {
 } tiku_layout_env_t;
 
 /*---------------------------------------------------------------------------*/
-/* SERVICE, ON AN EXPLICIT ENVIRONMENT                                       */
+/* SERVICE ON AN ENVIRONMENT                                                 */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -285,7 +289,7 @@ const char *tiku_layout_store_name(uint8_t store);
 const char *tiku_layout_held_name(uint8_t held);
 
 /*---------------------------------------------------------------------------*/
-/* SERVICE, ON THIS BOARD                                                    */
+/* SERVICE ON THIS BOARD                                                     */
 /*---------------------------------------------------------------------------*/
 
 /** @brief Run the boot decision once; later calls return at once. */
@@ -305,7 +309,16 @@ void tiku_layout_boot(void);
 int tiku_layout_capture_record(const uint8_t *image, size_t len,
                                tiku_layout_record_t *out);
 
-/** @brief Restore a captured record inside the cell mover's write window. */
+/**
+ * @brief Restore a captured record inside the cell mover's write window.
+ *
+ * Stamps the pin, then writes @p record and its gate when the record is
+ * valid, else leaves the gate cleared.  Writes go through the NVM HAL with
+ * no flush; the mover's relock commits them.
+ *
+ * @note The board holds the store until tiku_layout_restore_complete()
+ *       reports a move that succeeded.
+ */
 void tiku_layout_restore_record(void *record);
 
 /** @brief Withhold ownership when the combined restore did not complete. */

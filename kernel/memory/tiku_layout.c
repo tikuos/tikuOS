@@ -252,7 +252,7 @@ commit(const tiku_layout_env_t *e, tiku_layout_record_t *r)
 }
 
 /*---------------------------------------------------------------------------*/
-/* THE STORE, SEEN THROUGH THE REGION                                        */
+/* STORE INSIDE THE REGION                                                   */
 /*---------------------------------------------------------------------------*/
 
 /** @brief A store inside the region: its environment and its offset. */
@@ -1242,7 +1242,6 @@ static tiku_layout_state_t board_state;
 static uint8_t             board_booted;
 static uint8_t             board_restore_failed;
 
-/** @brief Capture ownership or its absence before rewriting the old image. */
 int
 tiku_layout_capture_record(const uint8_t *image, size_t len,
                            tiku_layout_record_t *out)
@@ -1271,7 +1270,6 @@ tiku_layout_capture_record(const uint8_t *image, size_t len,
     return 1;
 }
 
-/** @brief Install the captured decision without flushing the shared image. */
 void
 tiku_layout_restore_record(void *record)
 {
@@ -1294,7 +1292,6 @@ tiku_layout_restore_record(void *record)
     }
 }
 
-/** @brief Do not publish a record whose combined flush failed. */
 void
 tiku_layout_restore_complete(int move_result)
 {
@@ -1333,7 +1330,7 @@ board_random(void *ctx, uint8_t *out, size_t len)
 #else
     (void)out;
     (void)len;
-    return -1;                  /* no clock/time/pseudo-random fallback */
+    return -1;
 #endif
 }
 

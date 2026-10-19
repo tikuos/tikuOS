@@ -565,8 +565,9 @@ static int freeze(void)
     if (!layout_valid() || !snapshot_unchanged()) return 0;
     for (i = 0; i < TIKU_MEM_MAX_OWNERS; i++)
         if ((job.owners & (1u << i)) && !owner_controls_stable(&owners[i].registration)) return 0;
-    /* No admitted ordinary event may be discarded before preparation. Close
-     * the IRQ-post race while checking the queue and publishing the gates. */
+    /* An event already admitted to a selected process owner is not discarded
+     * before PREPARE: the queue check, the credits, the fences and the phase
+     * change run with interrupts masked, so no ISR posts in between. */
     tiku_atomic_enter();
     for (i = 0; i < TIKU_MEM_MAX_OWNERS; i++)
         if ((job.owners & (1u << i)) && owners[i].registration.process &&
@@ -737,8 +738,9 @@ static int candidate(void)
         job.owners |= (uint16_t)(1u << oi);
     }
     if (!job.owners) return 0;
-    /* A pending result owned by one of these components is not part of its
-     * current live manifest. Do not reconstruct it underneath that request. */
+    /* A selected owner with a reservation that is not live (held, or a pool
+     * being built) has a request in progress; the plan fails rather than
+     * reconstruct that owner under it. */
     for (i = 0; i < N; i++) {
         const tiku_reclaim_record_t *r = &job.snapshot[i];
         int oi = owner_index(r->owner);
@@ -947,7 +949,9 @@ tiku_mem_err_t tiku_mem_reclaim_submit(const tiku_mem_reclaim_request_t *request
         t->process = TIKU_THIS();
         if (t->process) t->process_generation = t->process->generation;
         *out = (tiku_mem_ticket_t){generation, (uint16_t)(i + 1)};
-        /* A direct fit becomes READY at once; any other ticket waits for
+        /* With no job running and no earlier ticket pending, admit() decides
+         * now: READY on a direct fit, FAILED when the request cannot be met,
+         * or a job starts.  Otherwise the ticket waits for
          * tiku_mem_reclaim_poll().  The ticket keeps no descriptor address. */
         if (!job.active) {
             unsigned prior;
@@ -1234,7 +1238,8 @@ tiku_mem_err_t tiku_mem_reclaim_write(const char *entry, const char *buf, size_t
         }
         tiku_mem_job_t token = {generation, 1};
         if (!strcmp(entry, "retry")) return tiku_mem_reclaim_retry(token);
-        /* Administrative VFS control, protected by CAP_SYS at the node; the
+        /* The /sys/mem/reclaim/cancel node requires CAP_SYS; the `mem
+         * reclaim cancel` shell command calls this function directly.  The
          * generation in the value must name the running job. */
         if (!job_equal(token)) return TIKU_MEM_ERR_INVALID;
         if (job.fault) return TIKU_MEM_ERR_BUSY;

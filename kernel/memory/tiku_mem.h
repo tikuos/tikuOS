@@ -76,8 +76,12 @@
 /*---------------------------------------------------------------------------*/
 
 /*
- * Code outside kernel/memory/ places data in these sections only through
- * these macros, never with a raw section attribute:
+ * Durable and retained data is placed through these macros.
+ * tools/check_durable_placement.sh (make lint) rejects a raw section
+ * attribute naming `.persistent`, `.retained` or `.uninit` in the .c, .h and
+ * .inl files under kernel/, interfaces/, drivers/, boot/, hal/, apps/,
+ * services/, shell/ and basic/; it allows this header and
+ * shell/commands/tiku_shell_cmd_mrambench.c, and does not scan arch/.
  *
  *   TIKU_DURABLE        survives a power cycle
  *   TIKU_DURABLE_FIRST  the layout record, at one place in every image
@@ -109,9 +113,9 @@
 /**
  * @brief Placement for state that survives a power cycle (`.persistent`).
  *
- * Outside kernel/memory/ this is the only way to place durable data;
- * tools/check_durable_placement.sh rejects a raw section attribute, because a
- * per-file "#ifdef MSP430" copy of one leaves the data volatile elsewhere.
+ * tools/check_durable_placement.sh rejects a raw `.persistent` attribute in
+ * the trees it scans (see DURABILITY GRADES above); a per-file
+ * "#ifdef MSP430" copy of one leaves the data volatile on the other ports.
  *
  * @note Stores go inside a tiku_mpu_unlock_nvm()/lock_nvm() window, or
  *       through the persist-cell API, which opens one itself.
@@ -132,6 +136,8 @@
  *   Apollo510    SRAM mirrored to an MRAM page      16 KB  at relock
  *   STM32N6      SRAM mirrored to XSPI NOR          16 KB  at relock
  *   ESP32-C61    SRAM mirrored to flash             16 KB  at relock
+ *   ESP32-C5     SRAM mirrored to flash             16 KB  at relock
+ *   ESP32-P4     SRAM mirrored to flash             16 KB  at relock
  *   host         ordinary section, never durable
  *
  * A mirror's budget loses 16 bytes to the mirror header; Ambiq 4l/4p is held
@@ -234,9 +240,11 @@ typedef struct {
  * Allocator bookkeeping takes no lock: the cooperative kernel serializes its
  * callers.  A preemptive worker thread (TIKU_THREADS_ENABLE) preempted inside
  * a mutator could hand out memory twice, corrupt a pool freelist or hold the
- * NVM window open, so workers are confined to pure computation: under
- * TIKU_THREADS_ENABLE the memory module's mutators refuse a call from worker
- * context (error or NULL return, violation counted).
+ * NVM window open, so workers are confined to pure computation.  Under
+ * TIKU_THREADS_ENABLE a function that opens with TIKU_MEM_KERNEL_ONLY refuses
+ * a call from worker context (error or NULL return, violation counted).  The
+ * MPU wrappers (tiku_mpu_unlock_nvm(), tiku_mpu_lock_nvm() and the rest of
+ * tiku_mpu.c), tiku_region_init() and tiku_cache_get() carry no such check.
  */
 
 /**
@@ -252,14 +260,21 @@ typedef struct {
 #endif
 
 #if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
-/** @brief Non-zero in kernel context, zero on a worker (tiku_thread.c). */
+/**
+ * @brief Non-zero in kernel context, zero on a worker (tiku_thread.c).
+ *
+ * Boot before the first thread starts counts as kernel context.
+ * TIKU_MEM_KERNEL_ONLY tests it.
+ *
+ * @note It reads two variables, so any context may call it, an ISR included.
+ */
 int tiku_thread_in_kernel(void);
 
 /** @brief Count one mutator call refused by TIKU_MEM_KERNEL_ONLY. */
 void     tiku_mem_guard_note_violation(void);
 
 /**
- * @brief Lifetime count of allocator calls refused by the worker guard.
+ * @brief Count of allocator calls refused by the worker guard since boot.
  *
  * Counts every rejection of a memory mutator entered from a worker thread.
  * Any non-zero value means a worker called a mutator, which returned an error
@@ -355,14 +370,14 @@ typedef struct {
 } tiku_mem_claimed_t;
 
 /*---------------------------------------------------------------------------*/
-/* FUNCTION PROTOTYPES — REGION REGISTRY                                     */
+/* REGION REGISTRY FUNCTIONS                                                 */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Initialize the region registry with a platform-provided table
  *
- * Stores the platform's memory region table and validates that no two
- * regions overlap.
+ * Refuses a table in which two regions overlap; otherwise keeps a pointer to
+ * the table and clears every claim.
  *
  * @param table  Pointer to the platform's region descriptor array (const)
  * @param count  Number of entries in the table
@@ -370,7 +385,7 @@ typedef struct {
  *         count is 0, count exceeds TIKU_REGION_MAX_REGIONS, or any two
  *         regions overlap
  * @note tiku_mem_init() calls it first, before any other memory subsystem
- *       initializes.
+ *       initializes.  The table is not copied and must stay valid.
  */
 tiku_mem_err_t tiku_region_init(const tiku_mem_region_t *table,
                                  tiku_mem_arch_size_t count);
@@ -385,8 +400,9 @@ tiku_mem_err_t tiku_region_init(const tiku_mem_region_t *table,
  * @param ptr            Start of the range to check
  * @param size           Size of the range in bytes
  * @param expected_type  Required region type
- * @return 1 if the range is fully contained in a matching region,
- *         0 otherwise
+ * @return 1 if the range is fully contained in a matching region; 0
+ *         otherwise, and for a NULL @p ptr, a zero @p size or a range whose
+ *         end wraps
  */
 int tiku_region_contains(const uint8_t *ptr,
                          tiku_mem_arch_size_t size,
@@ -396,15 +412,16 @@ int tiku_region_contains(const uint8_t *ptr,
  * @brief Claim a memory range for a subsystem
  *
  * Registers that a subsystem has taken ownership of a range. The range
- * must fall within a declared region and must not overlap with any
- * existing claim.
+ * must fall within a declared region of any type and must not overlap with
+ * any existing claim.
  *
  * @param ptr       Start of the range to claim
  * @param size      Size of the range in bytes
  * @param owner_id  Identifier of the claiming subsystem
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if the range
- *         is not within a declared region or overlaps an existing claim,
- *         TIKU_MEM_ERR_FULL if the claimed table is full
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID for a NULL @p ptr,
+ *         a zero @p size, a range not within a declared region or one that
+ *         overlaps an existing claim, TIKU_MEM_ERR_FULL if the claimed table
+ *         is full
  */
 tiku_mem_err_t tiku_region_claim(const uint8_t *ptr,
                                   tiku_mem_arch_size_t size,
@@ -468,15 +485,15 @@ typedef struct {
 } tiku_arena_t;
 
 /*---------------------------------------------------------------------------*/
-/* FUNCTION PROTOTYPES — ARENA                                               */
+/* ARENA FUNCTIONS                                                           */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Initialize an arena over a caller-provided buffer.
  *
  * The caller provides the buffer (typically a static array) and keeps owning
- * it.  The buffer must lie in one SRAM or NVM region, and is claimed in the
- * region registry under @p id.
+ * it.  The buffer must lie in one SRAM or NVM region, whose tier the arena
+ * takes, and is claimed in the region registry under @p id.
  *
  * @param arena    Arena control block to initialize
  * @param buf      Pointer to the backing buffer
@@ -494,9 +511,9 @@ tiku_mem_err_t tiku_arena_create(tiku_arena_t *arena, uint8_t *buf,
 /**
  * @brief Initialize an arena without region-registry validation.
  *
- * Lightweight variant that skips tiku_region_contains() and
- * tiku_region_claim(). For library code that manages arenas over
- * embedded struct members without depending on the memory subsystem.
+ * Skips tiku_region_contains() and tiku_region_claim(), so it works before
+ * the region registry exists: the arena claims nothing, has id 0 and is
+ * marked SRAM tier whatever the buffer.  For arenas over struct members.
  *
  * @param arena    Arena control block to initialize
  * @param buf      Pointer to the backing buffer
@@ -511,9 +528,9 @@ tiku_mem_err_t tiku_arena_create_raw(tiku_arena_t *arena, uint8_t *buf,
 /**
  * @brief Allocate memory from an arena.
  *
- * Bump-pointer allocation; the pointer is aligned to the platform's word
- * boundary and a request that is not a multiple of it is rounded up.  There is
- * no individual free; tiku_arena_reset() reclaims everything.
+ * Bump-pointer allocation of memory that is not zeroed; the pointer is aligned
+ * to the platform's word boundary and the request is rounded up to it.  There
+ * is no individual free; tiku_arena_reset() reclaims everything.
  *
  * @param arena    Arena to allocate from
  * @param size     Number of bytes requested (must be > 0)
@@ -583,9 +600,9 @@ tiku_mem_err_t tiku_arena_stats(const tiku_arena_t *arena,
 /**
  * @brief Debug poisoning for the pool allocator.
  *
- * When non-zero, a freed block is filled with 0xDE after its freelist pointer,
- * which makes use-after-free visible in a dump and usually turns silent
- * corruption into a crash.  Disable in production to avoid the per-free cost.
+ * When non-zero, tiku_pool_free() fills a freed block of a pool that is not
+ * NVM-backed with 0xDE after its freelist pointer, which makes use-after-free
+ * visible in a dump.  NVM-backed pools are not poisoned.
  */
 #ifndef TIKU_POOL_DEBUG
 #define TIKU_POOL_DEBUG  0
@@ -594,9 +611,9 @@ tiku_mem_err_t tiku_arena_stats(const tiku_arena_t *arena,
 /**
  * @brief Fixed-size block pool allocator control block.
  *
- * Divides a buffer into equal blocks whose free entries chain through an
- * embedded freelist, so there is no per-block metadata: an allocated block is
- * entirely the caller's, and a freed one lends its first word.
+ * Divides a buffer into equal blocks chained through an embedded freelist, so
+ * there is no per-block metadata: an allocated block is entirely the caller's,
+ * and a free one holds the next-block pointer in its first word.
  */
 typedef struct {
     uint8_t              *buf;         /**< Backing buffer */
@@ -617,7 +634,7 @@ typedef struct {
 } tiku_pool_t;
 
 /*---------------------------------------------------------------------------*/
-/* FUNCTION PROTOTYPES — POOL                                                */
+/* POOL FUNCTIONS                                                            */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -683,7 +700,8 @@ tiku_mem_err_t tiku_pool_create_raw(tiku_pool_t *pool, uint8_t *buf,
  * @brief Allocate a block from the pool.
  *
  * Pops the head of the embedded freelist in O(1) and tracks used_count and
- * peak_count.
+ * peak_count.  The block is pool->block_size bytes: the size requested at
+ * creation, rounded up to the alignment and to at least a pointer.
  *
  * @param pool   Pool to allocate from (must be active)
  * @return Pointer to the allocated block, or NULL if the pool is empty or
@@ -700,17 +718,19 @@ void *tiku_pool_alloc(tiku_pool_t *pool);
  *
  * @param pool  Pool the block came from
  * @param ptr   Block to return
- * @return TIKU_MEM_OK; TIKU_MEM_ERR_INVALID for a rejected pointer or an
- *         invalid pool; TIKU_MEM_ERR_BUSY while a reclaim job holds the
- *         pool's owner; or the tiku_tier_nvm_write() error of an NVM pool
+ * @return TIKU_MEM_OK; TIKU_MEM_ERR_INVALID for a NULL, out-of-buffer,
+ *         off-boundary or already free pointer, an invalid pool, a pool with
+ *         no block allocated or one whose last reset failed;
+ *         TIKU_MEM_ERR_BUSY while a reclaim job holds the pool's owner; or
+ *         the tiku_tier_nvm_write() error of an NVM pool
  */
 tiku_mem_err_t tiku_pool_free(tiku_pool_t *pool, void *ptr);
 
 /**
  * @brief Get current statistics for a pool.
  *
- * Fills the caller's snapshot: total and used bytes come from the block size
- * times the block and used counts, and alloc_count is the used count.
+ * Fills the caller's snapshot: total, used and peak bytes are the block size
+ * times the block, used and peak counts, and alloc_count is the used count.
  *
  * @param pool    Pool to query
  * @param stats   Output structure (caller-provided)
@@ -804,14 +824,14 @@ typedef struct {
 } tiku_persist_store_t;
 
 /*---------------------------------------------------------------------------*/
-/* FUNCTION PROTOTYPES — PERSISTENT STORE                                    */
+/* PERSISTENT STORE FUNCTIONS                                                */
 /*---------------------------------------------------------------------------*/
 
 /**
  * @brief Initialize the persistent store, recovering valid entries.
  *
- * Scans all slots: entries with correct magic and valid flag are kept,
- * all others are cleared.
+ * Scans all slots: entries with correct magic and valid flag are kept, all
+ * others are zeroed, so a virgin or reused store becomes empty slots.
  *
  * @param store   Store to initialize
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if store is NULL,
@@ -850,9 +870,11 @@ tiku_mem_err_t tiku_persist_register(tiku_persist_store_t *store,
  * @param key       Key to look up
  * @param buf       Destination SRAM buffer
  * @param buf_size  Size of destination buffer
- * @param out_len   Output: actual length of stored value
- * @return TIKU_MEM_OK, TIKU_MEM_ERR_NOT_FOUND, TIKU_MEM_ERR_NOMEM,
- *         or TIKU_MEM_ERR_INVALID
+ * @param out_len   Output: the stored value's length, set even when @p buf
+ *                  is too small
+ * @return TIKU_MEM_OK, TIKU_MEM_ERR_NOT_FOUND, TIKU_MEM_ERR_NOMEM when
+ *         @p buf is smaller than the value, or TIKU_MEM_ERR_INVALID on a NULL
+ *         argument
  */
 tiku_mem_err_t tiku_persist_read(tiku_persist_store_t *store,
                                   const char *key,
@@ -863,17 +885,17 @@ tiku_mem_err_t tiku_persist_read(tiku_persist_store_t *store,
 /**
  * @brief Write a value from SRAM into the persistent NVM store.
  *
- * Copies through the HAL, updates the length and bumps the write count for
- * wear monitoring.  It opens its own unlock window and nests, so one write
- * needs no bracket while several can still share one.
+ * Copies through the HAL, updates the length and bumps the write count that
+ * tiku_persist_wear_check() reads.  It opens its own unlock window and nests,
+ * so one write needs no bracket while several can still share one.
  *
  * @param store     Store to write into
  * @param key       Key to look up
  * @param data      Source data in SRAM
  * @param data_len  Length of source data
- * @return TIKU_MEM_OK, TIKU_MEM_ERR_NOT_FOUND, TIKU_MEM_ERR_NOMEM,
- *         TIKU_MEM_ERR_INVALID, or TIKU_MEM_ERR_IO when the flush at relock
- *         fails
+ * @return TIKU_MEM_OK, TIKU_MEM_ERR_NOT_FOUND, TIKU_MEM_ERR_NOMEM when
+ *         @p data_len exceeds the registered capacity, TIKU_MEM_ERR_INVALID,
+ *         or TIKU_MEM_ERR_IO when the flush at relock fails
  */
 tiku_mem_err_t tiku_persist_write(tiku_persist_store_t *store,
                                    const char *key,
@@ -917,9 +939,10 @@ int tiku_persist_wear_check(tiku_persist_store_t *store,
 /*
  * The static counterpart to the key-value store above.  A cell is a
  * single value in the `.persistent` section paired with a magic-word
- * gate, declared at compile time and validated once at boot.  Cells hold
- * boot_count, cold_boots, the device name and the RTC epoch, and each
- * follows three rules:
+ * gate, declared at compile time and validated once at boot.  The boot
+ * count, the device name and the RTC epoch are cells, among others; the
+ * layout record and its pin word (tiku_layout.c) are cells declared without
+ * TIKU_PERSIST_CELL.  Each follows three rules:
  *
  *   1. magic gate    — a sentinel beside the data distinguishes real
  *                      persisted state from virgin/corrupted NVM
@@ -935,6 +958,10 @@ int tiku_persist_wear_check(tiku_persist_store_t *store,
  * cell_write() and cell_commit() clear the gate first and stamp it after the
  * value: a cut leaves an invalid gate and the cell re-primes.  A single-word
  * cell_write() leaves the gate alone; cell_commit() stamps it either way.
+ * Values are copied through tiku_mem_arch_nvm_write(), which stores byte by
+ * byte where `.persistent` is written in place, so there a cut can tear even
+ * a single-word cell_write().  The gate stores and the 4-byte path of
+ * tiku_persist_cell_write_u32() are direct uint32_t stores.
  *
  * Reads are plain variable reads: cells are memory-mapped, so a read
  * never opens the MPU window.
@@ -1000,12 +1027,13 @@ typedef struct {
  *
  * A gate already holding the key means the value is real and untouched;
  * otherwise the cell is zero-filled, the default copied in, and the gate
- * stamped last.
+ * stamped last, so a cut before the stamp leaves the cell to prime again.
  *
  * @param c  Cell descriptor
  * @return 1 when the cell was primed this boot (virgin or corrupted
  *         NVM, or a cell the layout move could not carry), 0 when the
- *         persisted value was kept
+ *         persisted value was kept, @p c is NULL or the caller is outside
+ *         kernel context
  * @note Call once at boot per cell, before the first read.
  */
 uint8_t tiku_persist_cell_init(const tiku_persist_cell_t *c);
@@ -1058,8 +1086,11 @@ void tiku_persist_cell_commit(const tiku_persist_cell_t *c,
  * before them and stamped after.
  *
  * @param c  Cell descriptor (size 4; another size takes the first
- *           min(size, 4) bytes of @p v)
+ *           min(size, 4) bytes of @p v through the NVM HAL, gated as
+ *           tiku_persist_cell_write() gates a value of that length)
  * @param v  New value
+ * @note A 4-byte cell is stored through a uint32_t pointer, so its variable
+ *       must be 4-byte aligned; a uint8_t[4] variable may not be.
  */
 void tiku_persist_cell_write_u32(const tiku_persist_cell_t *c,
                                  uint32_t v);
@@ -1077,11 +1108,18 @@ void tiku_persist_cell_write_u32(const tiku_persist_cell_t *c,
 tiku_mem_err_t tiku_persist_cell_write_status(const tiku_persist_cell_t *c,
                                               const void *src, uint16_t len);
 
-/** @brief tiku_persist_cell_commit() that returns its completion status. */
+/**
+ * @brief tiku_persist_cell_commit() that returns its completion status.
+ * @return As tiku_persist_cell_write_status()
+ */
 tiku_mem_err_t tiku_persist_cell_commit_status(const tiku_persist_cell_t *c,
                                                const void *src, uint16_t len);
 
-/** @brief tiku_persist_cell_write_u32() that returns its completion status. */
+/**
+ * @brief tiku_persist_cell_write_u32() that returns its completion status.
+ * @return TIKU_MEM_OK, TIKU_MEM_ERR_INVALID on a NULL @p c or descriptor
+ *         pointer, or TIKU_MEM_ERR_IO when the flush at relock fails
+ */
 tiku_mem_err_t tiku_persist_cell_write_u32_status(const tiku_persist_cell_t *c,
                                                   uint32_t v);
 
@@ -1168,10 +1206,12 @@ int tiku_persist_move(const tiku_persist_move_env_t *e);
  * @brief tiku_persist_move() that also carries the layout record.
  *
  * While the record of who owns /data is not pinned at its fixed place, the
- * move captures it from the old durable image and writes it there.
+ * move captures it from the old durable image and writes it there inside the
+ * move's write window; after a failed move the store is held for this boot.
  *
- * @return As tiku_persist_move()
- * @note Defined only with TIKU_CELL_TABLE.
+ * @return As tiku_persist_move(), or -1 for a NULL @p e
+ * @note Defined only with TIKU_CELL_TABLE.  It sets @p e's preserve fields
+ *       itself and leaves them NULL.
  */
 int tiku_persist_move_boot_env(tiku_persist_move_env_t *e);
 
@@ -1188,7 +1228,7 @@ int tiku_persist_moved(void);
 const tiku_persist_manifest_t *tiku_persist_manifest(void);
 
 /*---------------------------------------------------------------------------*/
-/* MPU (MEMORY PROTECTION UNIT)                                              */
+/* MEMORY PROTECTION UNIT                                                    */
 /*---------------------------------------------------------------------------*/
 
 /*
@@ -1242,9 +1282,9 @@ typedef void (*tiku_mpu_write_fn)(void *ctx);
 /**
  * @brief Initialize the MPU with default NVM protection.
  *
- * Runs the port's protection setup, then the default protection; where the
- * port enforces it, durable memory is writable only inside an unlock window.
- * TIKU_MPU_NMI_ON_VIOLATION builds also arm the violation NMI.
+ * Runs the port's protection setup, then TIKU_MPU_DEFAULT_SAM (read and
+ * execute, no write, on every segment but segment 3 of MSP430 parts with
+ * HIFRAM).  TIKU_MPU_NMI_ON_VIOLATION builds also arm the violation NMI.
  *
  * @note tiku_mem_init() calls it after the platform memory setup, so a
  *       mirrored durable image is restored before protection starts.
@@ -1273,8 +1313,9 @@ void tiku_mpu_set_permissions(tiku_mpu_seg_t seg, tiku_mpu_perm_t perm);
 /**
  * @brief Unlock NVM for writing on all segments.
  *
- * Adds write permission to all segments via the arch layer. Returns
- * an opaque saved state so it can be restored by tiku_mpu_lock_nvm().
+ * Asks the arch layer to add write permission to every segment at once, since
+ * durable data is not confined to one segment.  The saved state goes back to
+ * tiku_mpu_lock_nvm().
  *
  * @return Previous MPU state value
  */
@@ -1283,8 +1324,9 @@ uint16_t tiku_mpu_unlock_nvm(void);
 /**
  * @brief Flush durable writes and restore the saved MPU state.
  *
- * On a mirror port the flush is what commits the window's writes; this form
- * discards its result.
+ * The flush runs before protection is restored and covers HAL writes and
+ * direct stores alike; on a mirror port it is what commits the window's
+ * writes.  This form discards its result.
  *
  * @param saved_state  Value returned by a prior tiku_mpu_unlock_nvm()
  */
@@ -1316,8 +1358,8 @@ void tiku_mpu_scoped_write(tiku_mpu_write_fn fn, void *ctx);
  * @brief Raise an interrupt on an MPU violation where the platform can.
  *
  * On MSP430 the default drops a protected write unreported; this arms the
- * violation NMI so the write is seen without a reset.  Other ports already
- * fault on a violation, or enforce nothing, and are unchanged.
+ * violation NMI, whose handler latches the violated segment.  Other ports
+ * already fault on a violation, or enforce nothing, and are unchanged.
  *
  * @note Call before any intentional violation testing.
  */
@@ -1337,30 +1379,34 @@ uint16_t tiku_mpu_get_violation_flags(void);
 /**
  * @brief Clear all MPU violation flags.
  *
- * MSP430 zeroes its latch and the MPUCTL1 flags and leaves the violation NMI
- * on; RA8P1 clears the fault record its flags come from; RP2350 and Ambiq
- * zero their software flag word.
+ * tiku_mpu_get_violation_flags() then reads 0 until a new violation.  MSP430
+ * zeroes its latch and MPUCTL1 flags and sets MPUSEGIE; RA8P1 clears the
+ * fault record its flags come from; RP2350 and Ambiq zero a flag word.
+ *
+ * @note On a port that latches no flags this does nothing.
  */
 void tiku_mpu_clear_violation_flags(void);
 
 /**
- * @brief Persistent count of MPU violations across warm reset.
+ * @brief Count of MPU violations since the last cold boot.
  *
- * Monotonic since the last cold power-up on platforms that keep a diagnostic
- * section through a fault reset; 0 where there is no persistent state.
+ * On RP2350 and Ambiq, the arch layer's count, kept in a section that
+ * survives the fault reset.  Every other port returns 0, RA8P1 included,
+ * whose fault record (arch/ra8p1/tiku_fault_arch.c) is not read here.
  *
- * @return Total MPU violations observed since the last cold boot.
+ * @return MPU violations since the last cold boot, or 0 on other ports
  */
 uint32_t tiku_mpu_get_violation_count(void);
 
 /**
  * @brief Address that triggered the most recent MPU violation.
  *
- * The fault-address snapshot taken by the fault handler.  It survives a warm
- * reset, so the boot after the fault can report the address.
+ * On RP2350 and Ambiq, the fault address (MMFAR) the fault handler recorded,
+ * which survives the reset so the next boot can report it.  Every other port
+ * returns 0, RA8P1 included.
  *
  * @return Last faulting address, or 0 if no fault has been recorded or the
- *         port keeps no fault record.
+ *         port is not RP2350 or Ambiq.
  */
 uint32_t tiku_mpu_get_last_fault_addr(void);
 
@@ -1740,14 +1786,14 @@ tiku_mem_err_t tiku_tier_pool_create(tiku_pool_t *pool,
 /**
  * @brief Query which memory tier a pointer belongs to.
  *
- * Checks the tier allocator's own backing pools first, then falls
- * back to the region registry.
+ * Checks every initialized span of the tier allocator first, then falls back
+ * to the region registry, whose SRAM and NVM regions map to those tiers.
  *
  * @param ptr       Address to query
  * @param out_tier  Output: memory tier of the containing region
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on a NULL argument,
- *         TIKU_MEM_ERR_NOT_FOUND if the address is not in any known memory
- *         region
+ *         TIKU_MEM_ERR_NOT_FOUND if the address is in no span and in no SRAM
+ *         or NVM region
  */
 tiku_mem_err_t tiku_tier_get(const uint8_t *ptr,
                               tiku_mem_tier_t *out_tier);
@@ -1788,16 +1834,17 @@ tiku_mem_err_t tiku_tier_span_stats(tiku_mem_tier_t tier, uint8_t index,
 /**
  * @brief Write into NVM-tier memory through its backing path.
  *
- * NVM-tier memory reads by plain pointer, but a write inside the carved NVM
- * region goes through the region backend's write operation (on Ambiq the
- * bootrom programs MRAM), while MSP430's FRAM tier array is written in place.
+ * NVM-tier memory reads by plain pointer.  A write inside the range of
+ * tiku_nvm_backend_get() goes through the backend's write operation (on Ambiq
+ * the bootrom programs MRAM); MSP430's FRAM tier array is written in place.
  *
  * @param dst  Destination inside NVM-tier memory.
  * @param src  Source bytes.
  * @param len  Byte count.
  * @return TIKU_MEM_OK; TIKU_MEM_ERR_INVALID on a NULL argument, a range
- *         outside the region or tier, or a board with no NVM tier;
- *         TIKU_MEM_ERR_IO when the backend write or the relock flush fails.
+ *         outside the region or tier, a board with no NVM tier, or a caller
+ *         outside kernel context; TIKU_MEM_ERR_IO when the backend write or
+ *         the relock flush fails.
  * @note Opens and closes the NVM window itself.
  */
 tiku_mem_err_t tiku_tier_nvm_write(void *dst, const void *src,
@@ -1848,7 +1895,7 @@ typedef struct {
 } tiku_cached_region_t;
 
 /*---------------------------------------------------------------------------*/
-/* FUNCTION PROTOTYPES — CACHE                                               */
+/* CACHE FUNCTIONS                                                           */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -1937,8 +1984,8 @@ tiku_mem_err_t tiku_cache_reload(tiku_cached_region_t *region);
 /**
  * @brief Destroy a cached region and remove it from the global table.
  *
- * Does not flush: a caller that wants the changes kept calls
- * tiku_cache_flush() first.
+ * Clears the descriptor, which is then inactive.  Does not flush: a caller
+ * that wants the changes kept calls tiku_cache_flush() first.
  *
  * @param region  Cache descriptor to destroy
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if region
@@ -2017,7 +2064,7 @@ typedef struct {
 } tiku_proc_mem_t;
 
 /*---------------------------------------------------------------------------*/
-/* FUNCTION PROTOTYPES — PROCESS MEMORY CONTEXT                              */
+/* PROCESS MEMORY CONTEXT FUNCTIONS                                          */
 /*---------------------------------------------------------------------------*/
 
 /**
@@ -2113,7 +2160,9 @@ tiku_mem_err_t tiku_proc_mem_attach_hifram(tiku_proc_mem_t *pmem,
  * @param pmem  Active process memory context
  * @param tier  Memory tier (SRAM, NVM, HIFRAM, or AUTO)
  * @param size  Bytes requested (must be > 0)
- * @return Pointer to the allocated memory, or NULL on failure
+ * @return Pointer to the allocated memory, or NULL for a NULL or inactive
+ *         context, a zero size, an unknown tier, HIFRAM with no HIFRAM arena
+ *         attached, or no eligible arena with room
  */
 void *tiku_proc_alloc(tiku_proc_mem_t *pmem,
                        tiku_mem_tier_t tier,
@@ -2140,28 +2189,29 @@ tiku_mem_err_t tiku_proc_mem_attach_cache(tiku_proc_mem_t *pmem,
  * @param pmem   Active process memory context
  * @param tier   Which arena to query (SRAM, NVM or HIFRAM; not AUTO)
  * @param stats  Output statistics
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad args,
- *         TIKU_MEM_ERR_NOT_FOUND for HIFRAM when no arena is attached
+ * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad args, AUTO or
+ *         an unknown tier, TIKU_MEM_ERR_NOT_FOUND for HIFRAM when no arena is
+ *         attached
  */
 tiku_mem_err_t tiku_proc_mem_stats(const tiku_proc_mem_t *pmem,
                                     tiku_mem_tier_t tier,
                                     tiku_mem_stats_t *stats);
 
 /*---------------------------------------------------------------------------*/
-/* HIBERNATE / RESUME                                                        */
+/* HIBERNATE AND RESUME                                                      */
 /*---------------------------------------------------------------------------*/
 
 /*
  * Hibernate/resume orchestration for the memory subsystem.
  *
- * Before entering deep sleep (LPMx.5 on MSP430) all dirty write-back
- * caches must be flushed to NVM and a hibernate marker written so
- * the next boot can distinguish a warm resume from a cold start.
+ * Before deep sleep (LPMx.5 on MSP430) tiku_mem_hibernate(nvm_buf, now)
+ * flushes every dirty write-back cache to NVM and writes a hibernate marker.
+ * On every boot, after tiku_mem_init(), tiku_mem_resume(nvm_buf, &marker)
+ * returns TIKU_MEM_OK, with the cached regions reloaded, when the buffer
+ * holds a valid marker, and TIKU_MEM_ERR_NOT_FOUND when it does not.
  *
- * Usage: call tiku_mem_hibernate(nvm_buf, now) before the sleep.  On every
- * boot, after tiku_mem_init(), tiku_mem_resume(nvm_buf, &marker) returns
- * TIKU_MEM_OK for a warm resume, with the cached regions reloaded, and
- * TIKU_MEM_ERR_NOT_FOUND for a cold boot.
+ * Nothing in this module clears the marker: once written, it reads as a warm
+ * resume on every later boot until something overwrites it.
  */
 
 /** Key used in the persist store for the hibernate marker */
@@ -2188,12 +2238,14 @@ typedef struct {
 /**
  * @brief Prepare the memory subsystem for hibernation.
  *
- * Flushes all dirty write-back caches to NVM and writes a hibernate
- * marker (boot count + timestamp) to the persist store.
+ * Flushes all dirty write-back caches to NVM, then writes a marker holding
+ * the timestamp and a boot count one above a valid previous marker's, or 1.
+ * A failed cache flush skips the marker.
  *
  * @param fram_buf   NVM buffer for the marker (>= sizeof marker)
  * @param timestamp  Caller-supplied timestamp value
- * @return TIKU_MEM_OK on success, or an error code
+ * @return TIKU_MEM_OK on success; TIKU_MEM_ERR_INVALID for a NULL
+ *         @p fram_buf; or the store setup, cache flush or marker write error
  * @note Call before entering any deep sleep that loses SRAM.
  */
 tiku_mem_err_t tiku_mem_hibernate(uint8_t *fram_buf, uint32_t timestamp);
@@ -2201,13 +2253,15 @@ tiku_mem_err_t tiku_mem_hibernate(uint8_t *fram_buf, uint32_t timestamp);
 /**
  * @brief Check for warm resume after hibernation.
  *
- * A valid marker reloads every registered cached region and reports a warm
- * resume; its absence is a cold boot.
+ * A valid marker (magic and CRC) reloads every registered cached region and
+ * reports a warm resume.  The marker is left in place, so each later boot
+ * reports a warm resume too until the buffer is overwritten.
  *
  * @param fram_buf    NVM buffer used for the hibernate marker
  * @param marker_out  Output: hibernate marker (may be NULL)
- * @return TIKU_MEM_OK if warm resume, TIKU_MEM_ERR_NOT_FOUND if cold boot,
- *         or another error code when the store cannot be set up
+ * @return TIKU_MEM_OK for a valid marker, TIKU_MEM_ERR_NOT_FOUND for none
+ *         or a torn one, TIKU_MEM_ERR_INVALID for a NULL @p fram_buf, or the
+ *         error when the store cannot be set up
  * @note Call after tiku_mem_init() on every boot.
  */
 tiku_mem_err_t tiku_mem_resume(uint8_t *fram_buf,
@@ -2224,7 +2278,7 @@ tiku_mem_err_t tiku_mem_resume(uint8_t *fram_buf,
 void tiku_mem_hibernate_reset(void);
 
 /*---------------------------------------------------------------------------*/
-/* FUNCTION PROTOTYPES — MODULE                                              */
+/* MODULE INIT                                                               */
 /*---------------------------------------------------------------------------*/
 
 /**

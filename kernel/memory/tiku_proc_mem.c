@@ -149,20 +149,6 @@ tiku_mem_err_t tiku_proc_mem_create_owned(tiku_proc_mem_t *pmem, uint8_t pid,
 }
 #endif
 
-/**
- * @brief Destroy a process memory context.
- *
- * Flushes and destroys every attached cache first, so dirty cache contents
- * reach NVM, then resets and destroys the SRAM, NVM and HIFRAM arenas,
- * releasing their backing.
- *
- * @param pmem  Context to destroy
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if pmem is NULL
- *         or already inactive, TIKU_MEM_ERR_BUSY while a reclaim job holds
- *         its owner, or the first cache or arena error
- * @note Stop every user of the context's memory first; the memory is not
- *       wiped.
- */
 tiku_mem_err_t tiku_proc_mem_destroy(tiku_proc_mem_t *pmem)
 {
     uint8_t i;
@@ -206,19 +192,6 @@ tiku_mem_err_t tiku_proc_mem_destroy(tiku_proc_mem_t *pmem)
     return TIKU_MEM_OK;
 }
 
-/**
- * @brief Allocate within a process context (bounds-checked).
- *
- * SRAM and NVM go straight to their arena; HIFRAM returns NULL unless a
- * HIFRAM arena is attached.  AUTO uses only arenas backed by SRAM or HIFRAM.
- *
- * @param pmem  Active process memory context
- * @param tier  Memory tier (SRAM, NVM, HIFRAM, or AUTO)
- * @param size  Bytes requested (must be > 0)
- * @return Pointer to the allocated memory, or NULL on failure (NULL
- *         context, inactive context, zero size, unknown tier, missing
- *         HIFRAM arena, or no arena with room)
- */
 void *tiku_proc_alloc(tiku_proc_mem_t *pmem,
                        tiku_mem_tier_t tier,
                        tiku_mem_arch_size_t size)
@@ -282,19 +255,6 @@ void *tiku_proc_alloc(tiku_proc_mem_t *pmem,
     }
 }
 
-/**
- * @brief Attach a HIFRAM arena to an existing process context.
- *
- * A lazy opt-in, separate from create(): a process that never touches HIFRAM
- * does not depend on the tier.  Re-attaching returns TIKU_MEM_ERR_INVALID,
- * since overwriting the arena would strand its backing.
- *
- * @param pmem  Active process memory context
- * @param size  HIFRAM arena capacity in bytes
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad arguments or
- *         when a HIFRAM arena is already attached, or the tier-allocator
- *         error
- */
 tiku_mem_err_t tiku_proc_mem_attach_hifram(tiku_proc_mem_t *pmem,
                                             tiku_mem_arch_size_t size)
 {
@@ -303,6 +263,7 @@ tiku_mem_err_t tiku_proc_mem_attach_hifram(tiku_proc_mem_t *pmem,
         return TIKU_MEM_ERR_INVALID;
     }
 
+    /* A second arena would overwrite the first and strand its backing. */
     if (pmem->hifram_arena.active) {
         return TIKU_MEM_ERR_INVALID;
     }
@@ -319,17 +280,6 @@ tiku_mem_err_t tiku_proc_mem_attach_hifram(tiku_proc_mem_t *pmem,
                                    TIKU_MEM_HIFRAM, size, pmem->pid);
 }
 
-/**
- * @brief Attach a cached region to a process context.
- *
- * Records ownership of an already-created region, so destroying the context
- * flushes and destroys every attached cache.
- *
- * @param pmem    Active process memory context
- * @param region  Cached region to attach (must be active)
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_FULL if at capacity, or
- *         TIKU_MEM_ERR_INVALID on bad arguments or a reclaim-owned context
- */
 tiku_mem_err_t tiku_proc_mem_attach_cache(tiku_proc_mem_t *pmem,
                                            tiku_cached_region_t *region)
 {
@@ -352,20 +302,6 @@ tiku_mem_err_t tiku_proc_mem_attach_cache(tiku_proc_mem_t *pmem,
     return TIKU_MEM_OK;
 }
 
-/**
- * @brief Get statistics for a process arena.
- *
- * Fills total, used, peak and allocation count for one tier's arena.  AUTO
- * returns TIKU_MEM_ERR_INVALID, and a HIFRAM query with no arena attached
- * returns TIKU_MEM_ERR_NOT_FOUND.
- *
- * @param pmem   Active process memory context
- * @param tier   Which arena to query (SRAM, NVM, or HIFRAM; not AUTO)
- * @param stats  Output statistics (must be non-NULL)
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad arguments
- *         or AUTO/unknown tier, TIKU_MEM_ERR_NOT_FOUND if a HIFRAM arena
- *         was requested but none is attached
- */
 tiku_mem_err_t tiku_proc_mem_stats(const tiku_proc_mem_t *pmem,
                                     tiku_mem_tier_t tier,
                                     tiku_mem_stats_t *stats)

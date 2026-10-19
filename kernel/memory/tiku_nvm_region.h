@@ -29,8 +29,8 @@
 #define TIKU_NVM_TIER_BYTES  (32u * 1024u)
 
 /*
- * Expected size of the carved region, per part, as the device scripts carve
- * it through arch/common/tiku_nvm_layout.ld:
+ * Expected size of the carved region, for each part whose device script
+ * carves it through arch/common/tiku_nvm_layout.ld:
  *
  *     region = layout_top - layout_code_cap - layout_persist_size
  *
@@ -50,6 +50,10 @@
  *   l15        0x17D000 - 0x060000 - 0x04000 = 0x119000  1124 KB
  *   lv10a      0x0FD000 - 0x060000 - 0x04000 = 0x099000   612 KB
  *   ra8p1      0x100000 - 0x060000 - 0x04000 = 0x09C000   624 KB
+ *
+ * On STM32N6 and the ESP32 parts the region is a span of external NOR or
+ * flash, not a linker carve; the #if chain below names where each size comes
+ * from.
  */
 /** @brief Expected carved-region size (documentation); 0 where not listed. */
 #if defined(AM_PART_APOLLO510)
@@ -76,26 +80,26 @@
  * follows TIKU_FLASH_REGION_BYTES in arch/esp32c61/tiku_flash_arch.h. */
 #define TIKU_NVM_REGION_BYTES  (5120u * 1024u)
 #elif defined(PLATFORM_ESP32C5)
+/* Not linker-carved: follows TIKU_FLASH_REGION_BYTES in
+ * arch/esp32c5/tiku_flash_arch.h. */
 #define TIKU_NVM_REGION_BYTES  (2012u * 1024u)
 #elif defined(PLATFORM_ESP32P4)
+/* Not linker-carved: follows the REGION range in
+ * arch/esp32p4/flash_layout.def. */
 #define TIKU_NVM_REGION_BYTES  (12224u * 1024u)
 #else
 #define TIKU_NVM_REGION_BYTES  0u
 #endif
 
-/*
- * Every target carves a region except MSP430, whose FRAM is unified with the
- * code estate, and host builds, which have no NVM; a new port gets 1.
- * Consumers also call tiku_nvm_backend_get() at run time: with no backend the
- * NVM tier is absent and /data does not mount.
- */
 /**
- * @brief 1 on parts with a carved NVM region, 0 otherwise.
+ * @brief 1 where the NVM tier and /data use the NVM region, 0 otherwise.
  *
- * Defined on every target once this header is included.  TIKU_NVM_REGION_BYTES
- * is 0 on a port its table does not list, so it does not say whether a region
- * exists.
+ * 0 on MSP430, whose tier and /data keep their own FRAM arrays, and on host
+ * builds; 1 on every other target, a new port included.  TIKU_NVM_REGION_BYTES
+ * is 0 on a port its table does not list, so it cannot stand in for this.
  *
+ * @note Consumers also call tiku_nvm_backend_get() at run time: with no
+ *       backend the NVM tier is absent and /data does not mount.
  * @note An undefined name reads as 0 in #if, so a unit that could miss the
  *       include checks #ifndef first (as tiku_basic_config.h does).
  */
@@ -106,12 +110,8 @@
 #endif
 
 /*
- * Expected file-store extent: the region less the default tier.
- *
- *   apollo510  3632 - 32 = 3600 KB      lm20     1636 - 32 = 1604 KB
- *   apollo4l/p 1552 - 32 = 1520 KB      l15      1124 - 32 = 1092 KB
- *   rp2350     3708 - 32 = 3676 KB      ra8p1     624 - 32 =  592 KB
- *   stm32n6    8192 - 32 = 8160 KB      esp32c61 5120 - 32 = 5088 KB
+ * Expected file-store extent: TIKU_NVM_REGION_BYTES less the default tier,
+ * TIKU_NVM_TIER_BYTES (32 KB).
  *
  * No code reads it: /data takes the carved size less the layout service's
  * tier, and the store derives its slot count from that at mount.

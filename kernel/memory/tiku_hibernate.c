@@ -7,9 +7,9 @@
  *
  * tiku_hibernate.c - hibernate/resume orchestration for the memory subsystem.
  *
- * Flushes every write-back cache, persists a hibernate marker (boot count and
- * timestamp), and reloads cached regions on warm resume.  The marker
- * distinguishes a cold boot from a return out of deep sleep.
+ * Flushes every write-back cache and persists a hibernate marker (boot count
+ * and timestamp); a boot that finds a valid marker reloads the cached regions
+ * as a warm resume.  Nothing clears the marker, so later boots read warm too.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -43,8 +43,9 @@ static uint8_t              hibernate_initialized;
 /**
  * @brief Initialize the hibernate persist store if not already done.
  *
- * Zeroes and initializes the store and registers the marker key; later calls
- * in the same boot return TIKU_MEM_OK at once.
+ * Zeroes and initializes the store and registers the marker key.  A later
+ * call with the same buffer returns TIKU_MEM_OK at once; another buffer
+ * starts over.
  *
  * @param fram_buf   NVM buffer for the marker (caller-provided)
  * @return TIKU_MEM_OK on success, or an error code
@@ -82,32 +83,12 @@ static tiku_mem_err_t hibernate_ensure_init(uint8_t *fram_buf)
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Reset the hibernate subsystem to uninitialised state.
- *
- * Clears the SRAM registration to model an SRAM-losing restart.
- * A valid NVM marker still supplies the previous boot count.
- *
- * @note Test use only.  Clears the SRAM persist store; NVM is untouched.
- */
 void tiku_mem_hibernate_reset(void)
 {
     memset(&hibernate_store, 0, sizeof(hibernate_store));
     hibernate_initialized = 0;
 }
 
-/**
- * @brief Prepare the memory subsystem for hibernation.
- *
- * Flushes every dirty cache, then writes a marker holding the incremented boot
- * count and the caller's timestamp.  A failed cache flush skips the marker.
- *
- * @param fram_buf   NVM buffer for the hibernate marker, at least
- *                   sizeof(tiku_hibernate_marker_t)
- * @param timestamp  Caller-supplied timestamp (RTC ticks, epoch, etc.)
- * @return TIKU_MEM_OK on success, or an error code
- * @note Call immediately before entering a sleep mode that loses SRAM.
- */
 tiku_mem_err_t tiku_mem_hibernate(uint8_t *fram_buf, uint32_t timestamp)
 {
     tiku_hibernate_marker_t marker;
@@ -153,20 +134,6 @@ tiku_mem_err_t tiku_mem_hibernate(uint8_t *fram_buf, uint32_t timestamp)
     return err;
 }
 
-/**
- * @brief Check for a warm resume after hibernation.
- *
- * A valid marker means warm resume: every cached region is reloaded from NVM
- * and the marker is preserved so the boot count stays readable.  No marker
- * means a cold boot.
- *
- * @param fram_buf    NVM buffer that was used for the hibernate marker
- * @param marker_out  Output: hibernate marker (may be NULL if not needed)
- * @return TIKU_MEM_OK if warm resume (valid marker found),
- *         TIKU_MEM_ERR_NOT_FOUND if cold boot (no marker),
- *         or another error code on failure
- * @note Call after tiku_mem_init() on every boot.
- */
 tiku_mem_err_t tiku_mem_resume(uint8_t *fram_buf,
                                 tiku_hibernate_marker_t *marker_out)
 {

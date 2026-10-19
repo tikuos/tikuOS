@@ -7,9 +7,9 @@
  *
  * tiku_nvm_mirror.h - layout and integrity check for the .uninit NVM mirror.
  *
- * On the mirror platforms (Ambiq, RP2350, STM32N6, ESP32-C61) .persistent lives
- * in SRAM and is copied to NVM at relock.  A 16-byte header carries a CRC-32;
- * a torn program fails it and is not restored.
+ * On a mirror port (its arch layer defines tiku_mem_arch_nvm_restore_status())
+ * .persistent lives in SRAM and is copied to NVM at relock.  A 16-byte header
+ * carries a CRC-32; a torn program fails it and is not restored.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -38,7 +38,7 @@
  *   word 1  CRC-32 (reflected, poly 0xEDB88320) over the image bytes
  *   word 2  image length in bytes (the .uninit size at flush time)
  *   word 3  0xFFFFFFFF (reserved; the erased-flash value), or where a port
- *           keeps two mirror slots, the slot's generation (ESP32-C61)
+ *           keeps two mirror slots, the slot's generation
  */
 
 /** Header word indices. */

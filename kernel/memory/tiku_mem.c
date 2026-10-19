@@ -51,19 +51,6 @@ static tiku_mem_arch_size_t align_up(tiku_mem_arch_size_t size)
 /* ARENA FUNCTIONS                                                           */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Initialize an arena without region-registry validation.
- *
- * For library code needing an arena over an embedded struct member before the
- * region registry exists.  The arena is marked SRAM tier and claims nothing in
- * the registry; it otherwise works as one from tiku_arena_create().
- *
- * @param arena    Arena control block to initialize
- * @param buf      Pointer to the backing buffer
- * @param size     Size of the backing buffer in bytes
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad arguments,
- *         TIKU_MEM_ERR_BUSY while @p arena holds a tracked reservation
- */
 tiku_mem_err_t tiku_arena_create_raw(tiku_arena_t *arena, uint8_t *buf,
                                       tiku_mem_arch_size_t size)
 {
@@ -105,22 +92,6 @@ tiku_mem_err_t tiku_arena_create_raw(tiku_arena_t *arena, uint8_t *buf,
     return TIKU_MEM_OK;
 }
 
-/*---------------------------------------------------------------------------*/
-
-/**
- * @brief Initialize an arena over a caller-provided buffer.
- *
- * The buffer must lie inside a registered SRAM or NVM region; the arena takes
- * that region's tier and claims the buffer in the region registry.
- *
- * @param arena    Arena control block to initialize
- * @param buf      Pointer to the backing buffer
- * @param size     Size of the backing buffer in bytes
- * @param id       User-assigned identifier for debugging
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on bad arguments,
- *         TIKU_MEM_ERR_BUSY while @p arena holds a tracked reservation, or
- *         the tiku_region_claim() error
- */
 tiku_mem_err_t tiku_arena_create(tiku_arena_t *arena, uint8_t *buf,
                                  tiku_mem_arch_size_t size, uint8_t id)
 {
@@ -187,17 +158,6 @@ tiku_mem_err_t tiku_mem_workspace_close(tiku_mem_workspace_t *workspace)
     return err == TIKU_MEM_OK ? tiku_arena_destroy(workspace) : err;
 }
 
-/**
- * @brief Allocate memory from an arena (bump-pointer).
- *
- * Advances the offset by the aligned size and tracks the peak for high-water
- * reporting.  The memory is not zeroed.  There is no individual free;
- * tiku_arena_reset() reclaims every allocation at once.
- *
- * @param arena    Arena to allocate from (must be active)
- * @param size     Bytes requested (must be > 0)
- * @return Aligned pointer, or NULL on failure
- */
 void *tiku_arena_alloc(tiku_arena_t *arena, tiku_mem_arch_size_t size)
 {
     TIKU_MEM_KERNEL_ONLY(NULL);
@@ -227,17 +187,6 @@ void *tiku_arena_alloc(tiku_arena_t *arena, tiku_mem_arch_size_t size)
     return ptr;
 }
 
-/**
- * @brief Reset an arena, reclaiming all allocations at once.
- *
- * Sets the offset and the allocation count back to zero.  The buffer is not
- * zeroed; tiku_arena_secure_reset() zeroes it.  The peak high-water mark is
- * kept as a lifetime maximum.
- *
- * @param arena    Arena to reset
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID for an invalid arena,
- *         TIKU_MEM_ERR_BUSY while a reclaim job holds its owner
- */
 tiku_mem_err_t tiku_arena_reset(tiku_arena_t *arena)
 {
     TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
@@ -252,12 +201,6 @@ tiku_mem_err_t tiku_arena_reset(tiku_arena_t *arena)
     return TIKU_MEM_OK;
 }
 
-/**
- * @brief Securely reset an arena, zeroing all memory before reclaiming.
- *
- * Delegates the zeroing to the arch layer, which uses a volatile access so the
- * compiler cannot optimise it away, then resets the arena state.
- */
 tiku_mem_err_t tiku_arena_secure_reset(tiku_arena_t *arena)
 {
     TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
@@ -274,14 +217,6 @@ tiku_mem_err_t tiku_arena_secure_reset(tiku_arena_t *arena)
     return TIKU_MEM_OK;
 }
 
-/**
- * @brief Fill a stats struct with the arena's current state.
- *
- * @param arena    Arena to query
- * @param stats    Output structure
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID for an invalid arena
- *         or a NULL @p stats
- */
 tiku_mem_err_t tiku_arena_stats(const tiku_arena_t *arena,
                                 tiku_mem_stats_t *stats)
 {
@@ -311,30 +246,19 @@ void tiku_mem_guard_note_violation(void)
     mem_guard_violations++;
 }
 
-/**
- * @brief Number of worker-context allocator calls refused since boot.
- *
- * @return The running count of TIKU_MEM_KERNEL_ONLY guard violations.
- */
 uint32_t tiku_mem_guard_violations(void)
 {
     return mem_guard_violations;
 }
 #endif /* TIKU_THREADS_ENABLE */
 
-/**
- * @brief Initialize the memory management module.
- *
- * The region registry goes first, because arena and persist registrations
- * validate their buffers against it.  Then come the platform's memory setup,
- * MPU NVM protection and, with the cell table, the persist-cell move.
- */
 void tiku_mem_init(void)
 {
     tiku_mem_arch_size_t count;
     const tiku_mem_region_t *table;
 
-    /* Region registry must be available before any other subsystem */
+    /* The registry goes first: arena and persist registrations validate their
+     * buffers against it. */
     table = tiku_region_arch_get_table(&count);
     tiku_region_init(table, count);
 

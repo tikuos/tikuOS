@@ -43,11 +43,12 @@
  */
 
 #if defined(TIKU_TIER_SRAM_DERIVED)
-/* Every port but MSP430: the linker carves the span from what the tier's bank
- * has left after the statics (arch/common/tiku_sram_layout.ld).  Ambiq and the
- * nRF54LM20 add a second span of spare RAM (TIKU_TIER_SRAM_EXTRA, below).
- * There is no array, so nothing for the crt to zero; the allocator does not
- * promise zeroed memory. */
+/* The port defines TIKU_TIER_SRAM_DERIVED: the linker carves the span from
+ * what the tier's bank has left after the statics
+ * (arch/common/tiku_sram_layout.ld).  A port that also defines
+ * TIKU_TIER_SRAM_EXTRA adds a second span of spare RAM (below).  There is no
+ * array, so nothing for the crt to zero; the allocator does not promise
+ * zeroed memory. */
 extern uint8_t __tier_sram_start;
 extern uint8_t __tier_sram_end;
 #define TIER_SRAM_BUF  (&__tier_sram_start)
@@ -77,11 +78,12 @@ extern uint8_t __tier_sram_extra_end;
 #endif
 #endif
 
-/* A board with neither MSP430's FRAM nor a carved region has no NVM tier,
- * and a request for one fails at the call site. */
 /**
  * @brief NVM tier backing on MSP430: a durable array, separate from the
- *        pinned region backend.  Other boards use the carved region.
+ *        pinned region backend.
+ *
+ * Other boards take the tier from the carved region; a board with neither
+ * has no NVM tier, and a request for one fails.
  */
 #ifdef PLATFORM_MSP430
 static TIKU_DURABLE uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
@@ -398,7 +400,7 @@ tiku_mem_err_t tiku_tier_span_space(tiku_mem_tier_t tier, uint8_t index,
 }
 
 /*---------------------------------------------------------------------------*/
-/* PSRAM TIER (ATTACHED AT RUN TIME)                                         */
+/* PSRAM TIER                                                                */
 /*---------------------------------------------------------------------------*/
 
 tiku_mem_err_t tiku_tier_attach_psram(void *base, tiku_mem_arch_size_t size)
@@ -570,16 +572,6 @@ static void tier_wire_all(void)
 #endif
 }
 
-/**
- * @brief Initialize the tier allocator's backing spans.
- *
- * Points each tier at its backing span and zeroes its counters.  Idempotent:
- * a later call returns at once, so a boot-time init followed by a lazy caller
- * cannot orphan live allocations.  The NVM backing is not zeroed.
- *
- * @return TIKU_MEM_OK, or TIKU_MEM_ERR_INVALID from a worker thread or
- *         exception context
- */
 tiku_mem_err_t tiku_tier_init(void)
 {
     TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
@@ -592,17 +584,6 @@ tiku_mem_err_t tiku_tier_init(void)
     return TIKU_MEM_OK;
 }
 
-/**
- * @brief Reset every tier pool to empty (destructive rewind).
- *
- * Re-wires each tier and zeroes its counters, bypassing init's idempotent
- * guard and orphaning anything already handed out; for teardown and test
- * isolation.  The NVM backing is not zeroed.
- *
- * @return TIKU_MEM_OK; TIKU_MEM_ERR_BUSY while a reclaim fence, job or ticket
- *         depends on the current tier identities; TIKU_MEM_ERR_INVALID from a
- *         worker thread or exception context
- */
 tiku_mem_err_t tiku_tier_reset(void)
 {
     TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
@@ -1360,19 +1341,6 @@ tiku_mem_err_t tiku_reclaim_context_tag(tiku_proc_mem_t *pmem,
 /* TIER QUERY                                                                */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Query which memory tier a pointer belongs to.
- *
- * Scans the tier backing spans first (on host the static arrays may be absent
- * from the region table), then the region registry, which classifies plain
- * static buffers as SRAM or NVM.  Containment uses uintptr_t.
- *
- * @param ptr       Address to query (must be non-NULL)
- * @param out_tier  Output: tier of the containing pool/region
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID on NULL
- *         arguments, TIKU_MEM_ERR_NOT_FOUND if the address is not in
- *         any tier pool or tier-mappable region
- */
 tiku_mem_err_t tiku_tier_get(const uint8_t *ptr,
                               tiku_mem_tier_t *out_tier)
 {
@@ -1386,7 +1354,8 @@ tiku_mem_err_t tiku_tier_get(const uint8_t *ptr,
     addr = (uintptr_t)ptr;
 
     /* Every span of every concrete tier (SRAM, NVM, HIFRAM, PSRAM); AUTO
-     * has no backing of its own. */
+     * has no backing of its own.  Spans go before the region registry: on
+     * host the static arrays may be absent from the region table. */
     for (i = 0; i < TIKU_MEM_TIER_COUNT; i++) {
         uint8_t si;
         tier_pool_state_t *ts;
@@ -1431,18 +1400,6 @@ tiku_mem_err_t tiku_tier_get(const uint8_t *ptr,
 /* TIER STATS                                                                */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Fill a stats struct with a tier backing pool's current state.
- *
- * Whole-tier occupancy, summed over the tier's spans: capacity, bytes handed
- * out, the lifetime peak and the allocation and failure counts.  AUTO has no
- * pool and is rejected, as is a concrete tier that is not initialised.
- *
- * @param tier   Memory tier to query (SRAM, NVM, HIFRAM or PSRAM; not AUTO)
- * @param stats  Output statistics (must be non-NULL)
- * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID if stats is
- *         NULL, tier is AUTO/out of range, or the tier is uninitialized
- */
 tiku_mem_err_t tiku_tier_stats(tiku_mem_tier_t tier,
                                 tiku_mem_stats_t *stats)
 {
@@ -1508,17 +1465,6 @@ tiku_mem_err_t tiku_tier_span_stats(tiku_mem_tier_t tier, uint8_t index,
 /* NVM-TIER WRITE                                                            */
 /*---------------------------------------------------------------------------*/
 
-/**
- * @brief Write into NVM-tier memory through its backing path.
- *
- * NVM-tier memory reads by plain pointer, but a write inside the carved
- * region goes through the region backend, which programs the medium; MSP430's
- * FRAM array takes a store.  Opens and closes the NVM window itself.
- *
- * @return TIKU_MEM_OK; TIKU_MEM_ERR_INVALID on a NULL or out-of-range write,
- *         or from a worker thread or exception context; TIKU_MEM_ERR_IO when
- *         the backend write or the relock flush fails
- */
 tiku_mem_err_t tiku_tier_nvm_write(void *dst, const void *src,
                                    tiku_mem_arch_size_t len)
 {
