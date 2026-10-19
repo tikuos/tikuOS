@@ -76,9 +76,12 @@ lines.
 ## Doc comments
 
 Functions, types and macros other files use carry a Doxygen comment where
-they are declared; a static function carries one at its definition. At most
-3 lines of prose; `@brief`, `@param`, `@return`, `@note` and their
-continuation lines do not count.
+they are declared; a static function carries one at its definition. A
+function is documented once: in `kernel/`, `boot/`, `tiku.h` and `main.c`,
+`make lint` reports a doc comment on the definition of a function whose
+declaration in a header there already has one. At most 3 lines of prose;
+`@brief`, `@param`, `@return`, `@note` and their continuation lines do not
+count.
 
 ```c
 /**

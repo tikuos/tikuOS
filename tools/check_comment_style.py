@@ -8,9 +8,9 @@
 #
 # check_comment_style.py - check source comments against comment-style.md.
 #
-# Reports file headers over HEADER_MAX lines, doc comments over PROSE_MAX lines
-# of prose and the banned vocabulary; --strict adds emphasis capitals, plan
-# labels and arguing words.  Exits 1 on findings, 2 when no path matched.
+# Reports headers over HEADER_MAX lines, doc comments over PROSE_MAX prose
+# lines, banned words, and a second doc block on a function a header documents
+# (ONCE_ROOTS); --strict adds emphasis capitals, plan labels, arguing words.
 #
 # SPDX-License-Identifier: Apache-2.0
 
@@ -68,6 +68,14 @@ STRICT_BANNED = [
 ]
 DOC = re.compile(r'/\*\*.*?\*/', re.S)
 HDR = re.compile(r'/\*.*?\*/', re.S)
+
+# A function a header declares is documented there; a doc block at its
+# definition under ONCE_ROOTS is reported.  SIGNATURE matches the declaration
+# or definition that follows a doc block and captures its name and its end.
+ONCE_ROOTS = ("kernel/", "boot/", "tiku.h", "main.c")
+SIGNATURE = re.compile(r'\s*(static\s+)?(?:inline\s+)?[A-Za-z_][\w\s*]*?'
+                       r'\b([A-Za-z_]\w*)\s*\([^;{]*\)\s*([;{])')
+CONTROL = {"if", "for", "while", "switch", "return", "sizeof"}
 
 # Banned in every run: plan labels, first person, design-history phrases,
 # capitals used for emphasis, and milestones used as headings.
@@ -301,6 +309,43 @@ def is_name(path, prose, hit):
     return hit.group(0) in names_near(path)
 
 
+def documented_functions(paths):
+    """Yield (path, line, name, kind) for each function a doc block precedes.
+
+    kind is 'declared' for a prototype in a header and 'defined' for a
+    non-static definition; static functions and other items are skipped.
+    """
+    for path in paths:
+        if not path.endswith(C_EXT):
+            continue
+        text = open(os.path.join(ROOT, path), errors='replace').read()
+        for m in DOC.finditer(text):
+            sig = SIGNATURE.match(text, m.end())
+            if not sig or sig.group(1) or sig.group(2) in CONTROL:
+                continue
+            line = text[:m.start()].count('\n') + 1
+            if sig.group(3) == ';' and path.endswith('.h'):
+                yield path, line, sig.group(2), 'declared'
+            elif sig.group(3) == '{':
+                yield path, line, sig.group(2), 'defined'
+
+
+def documented_twice(all_paths, checked):
+    """Report a doc block on a definition whose header declaration has one."""
+    declared = {}
+    for path, _, name, kind in documented_functions(
+            p for p in all_paths if p.endswith('.h') and p.startswith(ONCE_ROOTS)):
+        if kind == 'declared':
+            declared.setdefault(name, path)
+    out = []
+    for path, line, name, kind in documented_functions(
+            p for p in checked if p.startswith(ONCE_ROOTS)):
+        if kind == 'defined' and name in declared:
+            out.append(f"{path}:{line}: {name}() is documented where "
+                       f"{declared[name]} declares it; delete this block")
+    return out
+
+
 def untracked_sources():
     """Source files git does not track: the check skips them, and main()
     prints them as not checked."""
@@ -349,12 +394,13 @@ def main():
                 a = ''
         only.append(a)
     problems = []
-    seen = 0
-    for path in sorted(sources()):
-        if only and not any(path.startswith(p) for p in only):
-            continue
-        seen += 1
+    every = sorted(sources())
+    checked = [p for p in every
+               if not only or any(p.startswith(o) for o in only)]
+    seen = len(checked)
+    for path in checked:
         problems += check(path)
+    problems += documented_twice(every, checked)
     if only and seen == 0:
         print("check_comment_style: no tracked source under " +
               " ".join(argv) + " (paths are taken from " + ROOT + ")")
