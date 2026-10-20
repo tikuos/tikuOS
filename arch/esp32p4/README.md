@@ -141,6 +141,17 @@ bus busy, a STOP releases it. `tiku_i2c_close()` restores the pads and
 leaves I2C0 in reset with its clocks off. BASIC's I2C words use the bus;
 `/dev/i2c` is not listed, as on the C5.
 
+GP-SPI2 drives SCK on GPIO28 and MOSI on GPIO29 and reads MISO on GPIO30,
+header P1 pins 6, 7 and 8, through the GPIO matrix (`tiku_spi_arch.c`);
+chip select is the caller's GPIO. `tiku_spi_init()` claims the three pads,
+refuses the bus while another pad carries its clock or data output, and
+clocks SCK at the 40 MHz crystal divided by the prescaler, clamped to
+2..1024 and rounded up to a divider the controller has. Transfers run in
+polled 64-byte batches; a batch that does not end within 50 ms returns
+`TIKU_SPI_ERR_TIMEOUT`. `tiku_spi_close()` restores the pads, the MISO
+input and the controller's clocks and reset. `/dev/spi/config` shows the
+open configuration.
+
 The SAR ADC converts one channel at a time through the LP ADC's RTC
 controller (`tiku_adc_arch.c`): channels 0-7 are ADC1 on GPIO16-23, 8-13
 ADC2 on GPIO49-54, and channel 30 is the temperature sensor. Header pins

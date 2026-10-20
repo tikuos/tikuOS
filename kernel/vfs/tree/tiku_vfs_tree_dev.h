@@ -26,8 +26,8 @@
 #define TIKU_VFS_DEV_ADC 1
 #endif
 
-/** @brief 1 when this build lists /dev/spi: every port but the P4. */
-#if defined(PLATFORM_ESP32P4)
+/** @brief 1 when this build lists /dev/spi: every board but the Olimex P4. */
+#if defined(PLATFORM_ESP32P4) && !defined(TIKU_BOARD_FIREBEETLE2_ESP32P4)
 #define TIKU_VFS_DEV_SPI 0
 #else
 #define TIKU_VFS_DEV_SPI 1

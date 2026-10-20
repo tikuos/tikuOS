@@ -55,6 +55,17 @@
 /* The portable bus uses this macro as its board capability test: crystal
  * cycles per 100 kHz SCL period. */
 #define TIKU_BOARD_I2C_BRW_100K 400u
+/* GP-SPI2 on header P1 pins 6, 7 and 8 (SCK, MOSI, MISO) through the GPIO
+ * matrix; chip select is the caller's GPIO. */
+#ifndef TIKU_BOARD_SPI_SCK_PIN
+#define TIKU_BOARD_SPI_SCK_PIN 28u
+#endif
+#ifndef TIKU_BOARD_SPI_MOSI_PIN
+#define TIKU_BOARD_SPI_MOSI_PIN 29u
+#endif
+#ifndef TIKU_BOARD_SPI_MISO_PIN
+#define TIKU_BOARD_SPI_MISO_PIN 30u
+#endif
 /* SAR ADC channels 0..7 on GPIO16..23 and 8..13 on GPIO49..54; header pins
  * A0..A3 are channels 4..7 and A4 channel 10.  The C6's pads are refused. */
 #define TIKU_BOARD_ADC_AVAILABLE 1
