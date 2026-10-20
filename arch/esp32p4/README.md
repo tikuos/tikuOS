@@ -131,6 +131,16 @@ both pads. Received bytes reach a 1024-byte ring through interrupt source
 31 on CLIC line 4. In a build with the IP kit (`TIKU_KIT_NET_ENABLE=1`),
 SLIP rides the USB console, so `slip on` and the IP link need no adapter.
 
+I2C0 drives SDA on GPIO7 and SCL on GPIO8, header P1 pins 10 and 9, as
+open-drain pads through the GPIO matrix (`tiku_i2c_arch.c`). The board
+pulls both lines up with 2.2 kOhm and shares them with the CSI and DSI
+connectors. `tiku_i2c_init()` claims both pads and clocks the bus at 100 or
+400 kHz from the crystal. A NACK ends a command batch with an error at
+once, and a held line ends it within 50 ms; after a NACK that leaves the
+bus busy, a STOP releases it. `tiku_i2c_close()` restores the pads and
+leaves I2C0 in reset with its clocks off. BASIC's I2C words use the bus;
+`/dev/i2c` is not listed, as on the C5.
+
 ### Memory and configuration
 
 | Resource | Firmware use |

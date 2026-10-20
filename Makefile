@@ -1329,11 +1329,12 @@ CFLAGS += -DPLATFORM_ESP32P4=1 -D$(DEVICE_DEFINE)=1 -D$(TIKU_BOARD_DEFINE)=1
 CFLAGS += -DTIKU_P4_FIRMWARE=1 -DTIKU_CONSOLE_JTAG=1 -I$(PROJ_DIR)
 CFLAGS += -DTIKU_TIER_SRAM_DERIVED=1 -DTIKU_TIER_SRAM_MIN=$(TIKU_TIER_SRAM_MIN)
 CFLAGS += -DTIKU_SHELL_CMD_ADC=0
-CFLAGS += -DTIKU_BASIC_ADC_ENABLE=0 -DTIKU_BASIC_I2C_ENABLE=0
+CFLAGS += -DTIKU_BASIC_ADC_ENABLE=0
 # The Olimex board header reserves every pad, so its image builds no gpio
-# or irq command.
+# or irq command and no BASIC I2C words.
 ifneq ($(TIKU_BOARD_DEFINE),TIKU_BOARD_FIREBEETLE2_ESP32P4)
 CFLAGS += -DTIKU_SHELL_CMD_GPIO=0 -DTIKU_SHELL_CMD_IRQ=0
+CFLAGS += -DTIKU_BASIC_I2C_ENABLE=0
 endif
 
 else
@@ -3745,8 +3746,15 @@ CFLAGS += $(APPL_CFLAGS)
 # object, and the linker scripts place every section by pattern.
 SRCS := $(sort $(SRCS))
 ifeq ($(TIKU_PLATFORM),esp32p4)
+# The FireBeetle 2 builds the I2C bus over its driver; the Olimex builds
+# none of these buses.
+ifeq ($(TIKU_BOARD_DEFINE),TIKU_BOARD_FIREBEETLE2_ESP32P4)
+SRCS := $(filter-out interfaces/bus/tiku_spi_bus.c \
+    interfaces/adc/tiku_adc.c interfaces/onewire/tiku_onewire.c,$(SRCS))
+else
 SRCS := $(filter-out interfaces/bus/tiku_spi_bus.c interfaces/bus/tiku_i2c_bus.c \
     interfaces/adc/tiku_adc.c interfaces/onewire/tiku_onewire.c,$(SRCS))
+endif
 endif
 ASM_SRCS := $(sort $(ASM_SRCS))
 

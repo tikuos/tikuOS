@@ -23,6 +23,7 @@
 #if (TIKU_SHELL_CMD_LPCORE + 0)
 
 #include <interfaces/coproc/tiku_coproc.h>
+#include <interfaces/gpio/tiku_gpio_owner.h>
 #include <kernel/timers/tiku_clock.h>
 #include <arch/esp32p4/tiku_lpcore_arch.h>
 #include <arch/esp32p4/tiku_sleep_arch.h>
@@ -86,16 +87,45 @@ static void lpcore_led(uint8_t argc, const char *argv[])
 
 static void lpcore_i2c(uint8_t argc, const char *argv[])
 {
+    static const char owner[] = "lpcore";
     uint32_t sda = LPCORE_I2C_SDA, scl = LPCORE_I2C_SCL, a;
     uint8_t found[16];
-    int n;
+    int n, answer;
 
     if (argc >= 4u) {
         sda = tiku_cmd_parse_u32(argv[2]);
         scl = tiku_cmd_parse_u32(argv[3]);
     }
-    if (lpcore_answer(tiku_p4_lpcore_command(TIKU_LPCORE_CMD_I2C_SCAN, sda,
-                                             scl, 0u, 0u)) != 0) {
+    /* The payload drives both pads through the LP IO MUX while it scans:
+     * the scan needs both free of other owners, the I2C driver among them,
+     * and holds them until it ends.  The payload refuses pads above 15. */
+    if (sda < 16u && scl < 16u && sda != scl) {
+        if (tiku_gpio_claim((uint8_t)(sda / 8u + 1u), (uint8_t)(sda % 8u),
+                            owner) != 0) {
+            SHELL_PRINTF("i2c sda %lu: pin held by %s\n", (unsigned long)sda,
+                         tiku_gpio_owner((uint8_t)(sda / 8u + 1u),
+                                         (uint8_t)(sda % 8u)));
+            return;
+        }
+        if (tiku_gpio_claim((uint8_t)(scl / 8u + 1u), (uint8_t)(scl % 8u),
+                            owner) != 0) {
+            SHELL_PRINTF("i2c scl %lu: pin held by %s\n", (unsigned long)scl,
+                         tiku_gpio_owner((uint8_t)(scl / 8u + 1u),
+                                         (uint8_t)(scl % 8u)));
+            (void)tiku_gpio_release((uint8_t)(sda / 8u + 1u),
+                                    (uint8_t)(sda % 8u), owner);
+            return;
+        }
+    }
+    answer = lpcore_answer(tiku_p4_lpcore_command(TIKU_LPCORE_CMD_I2C_SCAN,
+                                                  sda, scl, 0u, 0u));
+    if (sda < 16u && scl < 16u && sda != scl) {
+        (void)tiku_gpio_release((uint8_t)(sda / 8u + 1u), (uint8_t)(sda % 8u),
+                                owner);
+        (void)tiku_gpio_release((uint8_t)(scl / 8u + 1u), (uint8_t)(scl % 8u),
+                                owner);
+    }
+    if (answer != 0) {
         return;
     }
     n = tiku_p4_lpcore_i2c_result(found);

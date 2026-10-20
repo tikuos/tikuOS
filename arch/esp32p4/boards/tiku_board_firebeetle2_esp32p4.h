@@ -44,6 +44,18 @@
 #define TIKU_BOARD_BTN1_INIT()     tiku_p4_button_init()
 #define TIKU_BOARD_BTN1_PRESSED()  tiku_p4_button_pressed()
 
+/* I2C0 on header P1 pins 10/9, pulled up to 3V3 by 2.2 kOhm on the board and
+ * shared with the CSI and DSI connectors. */
+#ifndef TIKU_BOARD_I2C_SDA_PIN
+#define TIKU_BOARD_I2C_SDA_PIN 7u
+#endif
+#ifndef TIKU_BOARD_I2C_SCL_PIN
+#define TIKU_BOARD_I2C_SCL_PIN 8u
+#endif
+/* The portable bus uses this macro as its board capability test: crystal
+ * cycles per 100 kHz SCL period. */
+#define TIKU_BOARD_I2C_BRW_100K 400u
+
 /* 6, 14-19, 54: the ESP32-C6's SDIO link, EN and WAKEUP.  9, 12: the PDM
  * microphone.  24, 25: the console.  39-45: the TF slot and its power switch
  * (GPIO45 low powers the card).  3, 35: the LED and the button. */
