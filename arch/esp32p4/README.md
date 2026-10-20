@@ -20,10 +20,13 @@ make MCU=esp32p4 P4_PROFILE=firmware \
 
 Artifacts are `build/esp32p4/firmware/main.bin`, `main.paired.elf` and
 `xip.bin`. The unpaired `main.elf` is for symbols and debugging. The loader
-requires the paired ELF. Shell and BASIC code and constants execute from
-flash; the kernel, cache/flash controller operations and their dependencies
-execute from internal SRAM. The profile uses a 16 KiB foreground stack and
-a separate 2 KiB interrupt stack. Software guards do not provide an MPU.
+requires the paired ELF. Shell, BASIC, application and kit code, the VFS
+tree's node handlers and tables, and their constants execute from flash. The
+rest of the kernel, cache/flash controller operations and their dependencies
+execute from internal SRAM; a flash operation runs there with interrupts
+masked, so no flash-resident code runs during one. The profile uses a 16 KiB
+foreground stack and a separate 2 KiB interrupt stack. Software guards do not
+provide an MPU.
 
 ### Install and recover
 
