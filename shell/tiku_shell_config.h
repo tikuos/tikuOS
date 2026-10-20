@@ -98,6 +98,15 @@
 #define TIKU_SHELL_CMD_CPU1    0
 #endif
 #endif
+#ifndef TIKU_SHELL_CMD_LPCORE
+/* On where the build carries the ESP32-P4 LP core payload
+ * (TIKU_LPCORE_ENABLE, a -D from the Makefile); off elsewhere. */
+#if (TIKU_LPCORE_ENABLE + 0)
+#define TIKU_SHELL_CMD_LPCORE  1  /**< lpcore  - the ESP32-P4 LP core */
+#else
+#define TIKU_SHELL_CMD_LPCORE  0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_NPU
 /* On when the build includes the Ethos-U55 driver, which is opt-in on the
  * RA8P1 because its static buffers are large.  TIKU_HAS_NPU is a -D from the

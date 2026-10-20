@@ -7,9 +7,9 @@
  *
  * esp32p4_firmware.ld - CPU0 firmware with paired flash application code.
  *
- * Shell, BASIC, application and test code link to flash at 0x40100000; the
- * rest links to low HP SRAM, the durable image at the end of .bss.  High
- * SRAM holds the tier span and the 16 KiB stack.
+ * Shell, BASIC, applications, test code and the LP core image link to flash
+ * at 0x40100000; the rest links to low HP SRAM, the durable image at the end
+ * of .bss.  High SRAM holds the tier span and the 16 KiB stack.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,6 +27,7 @@ SECTIONS {
         */shell/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         */applications/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         */TikuBench/tests/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *(.rodata.tiku_lpcore_image)
         . = ALIGN(4);
     } > XIP
     .text : ALIGN(64) {

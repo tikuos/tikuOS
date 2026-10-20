@@ -7,9 +7,9 @@
  *
  * tiku_boot_arch.c - P4 watchdog handoff using peripheral registers.
  *
- * Clears the enable and flash-boot bits of the TG0, TG1 and LP watchdogs
- * under their write keys, sets the super watchdog to feed itself, and holds
- * CPU1 and the LP core in reset with their clocks gated.
+ * Clears the TG0, TG1 and LP watchdogs' enable and flash-boot bits under
+ * their keys, sets the super watchdog to feed itself, and holds CPU1 (and,
+ * in an image without the LP payload, the LP core) in reset, clock gated.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,10 +22,12 @@ void tiku_esp32p4_boot_park_cores(void)
     TIKU_P4_REG_WRITE(TIKU_P4_HP_RESET0, value | (1u << 8));
     value = TIKU_P4_REG_READ(TIKU_P4_SOC_CLK0);
     TIKU_P4_REG_WRITE(TIKU_P4_SOC_CLK0, value & ~((1u << 4) | (1u << 1)));
+#if !TIKU_LPCORE_ENABLE
     value = TIKU_P4_REG_READ(TIKU_P4_LP_RESET);
     TIKU_P4_REG_WRITE(TIKU_P4_LP_RESET, value | (1u << 31));
     value = TIKU_P4_REG_READ(TIKU_P4_LP_CLK);
     TIKU_P4_REG_WRITE(TIKU_P4_LP_CLK, value & ~(1u << 31));
+#endif
 }
 
 /** @brief Unlock, clear the watchdog enable bits, and restore write protection.

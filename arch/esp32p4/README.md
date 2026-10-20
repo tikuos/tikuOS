@@ -7,7 +7,8 @@ integer workers, flash-backed `/data`, durable mirrors, clock preferences,
 paired flash execution and automatic attachment of the fitted 32 MiB PSRAM.
 It supports the Olimex ESP32-P4-PC and the DFRobot FireBeetle 2 ESP32-P4
 (`BOARD=firebeetle2_esp32p4`, below), both with silicon v1.3 and ROM ECO2.
-CPU1 and the LP core remain parked. No FreeRTOS or ESP-IDF runtime is
+CPU1 remains parked, and so does the LP core unless the build links its
+payload (`TIKU_LPCORE_ENABLE=1`, below). No FreeRTOS or ESP-IDF runtime is
 linked.
 
 ```sh
@@ -164,6 +165,48 @@ Select `--only memory,clock` when a user BASIC program must remain loaded.
 No test in this suite reboots or changes the saved clock. Host coverage also
 checks the P4 geometry, high-numbered file slots and allocator bitmap limits.
 
+### LP core and sleep
+
+`TIKU_LPCORE_ENABLE=1` links a payload for the LP core (RV32IMAC, on the
+RC_FAST oscillator: 18.7 MHz untrimmed on the FireBeetle).
+`arch/esp32p4/lpcore/` builds it with its own linker script for LP SRAM,
+and the firmware carries the binary in the XIP window. The HP core copies it to `0x50108000` the first time it
+starts the core (`write /sys/coproc/run 1`) and releases the core at
+`0x50108080`, past its vector table, without the LP ROM.
+
+| LP SRAM | Use |
+| --- | --- |
+| `0x50108000`–`0x50108080` | Vector table, 32 entries |
+| `0x50108080`–`0x5010e000` | Payload image and its BSS |
+| `0x5010e000`–`0x5010e800` | LP core stack, 2 KiB |
+| `0x5010e800`–`0x5010f800` | Shared page: commands, mailbox, counters |
+| `0x5010fa40`–`0x5010fa80` | HP fault record |
+| `0x5010fa80`–`0x50110000` | LP ROM stack and data, untouched |
+
+The HP core reaches LP SRAM uncached. LP SRAM and the running LP core
+outlive an HP reset and a deep sleep, so a boot that finds the linked
+payload running adopts it instead of loading it again.
+
+`/sys/coproc` drives the core through the portable contract
+(`interfaces/coproc`). `lpcore` shows its registers and fault record and
+runs the payload's commands: `led on|off|blink <passes>` drives the LED on
+LP IO 3, `i2c [sda scl]` scans a bus bit-banged on two LP IOs (7 and 8 by
+default), `clock` rates the LP core's cycle counter and the LP timer against
+the HP clock, and `wake ms <n>` or `wake io <n> 0|1` arms a one-shot wake of
+the HP core.
+
+`power off [ms]` is deep sleep: the HP domain powers down, while the LP
+domain keeps the LP timer, LP SRAM and the LP core running, and the wake is
+a reset that `power why` reports (`timer`, `lp-core`, `lp-trap`). The flash
+keeps its supply on this silicon revision. `power nap <ms>` is light sleep:
+the core stalls on the crystal with every domain, PLL and clock gate on, so
+the USB console, PSRAM, SYSTIMER and the tick run through it, at about 1 ms
+a sleep. A timed sleep of either kind whose wake never comes ends in an LP
+watchdog chip reset a second late.
+
+TikuBench's `coproc` and `lpcore` suites and the `deep-sleep-wake`,
+`light-sleep` and `hibernate` kernel categories run on `firebeetle2_p4`.
+
 ### Qualification limits
 
 Normal firmware, files, BASIC, PSRAM attachment, clock persistence through
@@ -177,8 +220,9 @@ changes and GPIO IRQs are refused because board routes are not qualified.
 Ethernet, microSD, USB host, HDMI, audio and camera drivers are not provided
 by this profile. Their wiring and attached accessories require confirmation
 before external pins or power rails are driven. Wi-Fi/BLE are not integrated
-P4 capabilities. CPU1 jobs, FPU/vector contexts and low-power modes are not
-enabled. Do not interpret this as complete board-peripheral support.
+P4 capabilities. CPU1 jobs and FPU/vector contexts are not enabled, and the
+scheduler's idle modes execute WFI rather than light sleep. Do not interpret
+this as complete board-peripheral support.
 
 ## Storage-free diagnostic
 

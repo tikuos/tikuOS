@@ -53,6 +53,11 @@
 #include <arch/esp32c5/tiku_rom_arch.h>
 #include <arch/esp32c5/tiku_systimer_arch.h>
 #endif
+#if defined(PLATFORM_ESP32P4)
+#include <arch/esp32p4/tiku_sleep_arch.h>
+#include <arch/esp32p4/tiku_cpu_common.h>
+#include <arch/esp32p4/tiku_systimer_arch.h>
+#endif
 #if defined(PLATFORM_ESP32C61)
 #include <arch/esp32c61/tiku_sleep_arch.h>
 #include <arch/esp32c61/tiku_cpu_common.h>
@@ -540,6 +545,70 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
         tiku_c5_deep_sleep((uint64_t)ms * 1000ULL);
     }
     SHELL_PRINTF("Usage: power [why | off [ms] | nap <ms> [pin]]\n");
+    return;
+#endif
+
+#if defined(PLATFORM_ESP32P4)
+    /* Deep sleep powers the HP domain down and keeps the LP domain, so a
+     * running LP core payload runs on and can end the sleep: `off` sleeps
+     * until the LP timer or the LP core wakes the part, and the wake is a
+     * reset with durable state checkpointed first.  `why` prints what ended
+     * the last sleep.  `nap` is light sleep, which keeps all state and
+     * returns, early when the LP core wakes the part. */
+    if (tiku_cmd_streq(argv[1], "nap") && argc >= 3) {
+        uint32_t ms = tiku_cmd_parse_u32(argv[2]);
+        uint64_t t0 = 0, t1 = 0;
+        uint32_t w;
+
+        (void)tiku_p4_systimer_read(&t0);
+        w = tiku_p4_light_sleep((uint64_t)ms * 1000ULL);
+        (void)tiku_p4_systimer_read(&t1);
+        SHELL_PRINTF("nap: %lu us,%s%s%s%s\n", (unsigned long)((t1 - t0) / 16ULL),
+                     w ? " woke by" : " refused: a wake was waiting",
+                     (w & TIKU_P4_WAKE_TIMER)   ? " timer"   : "",
+                     (w & TIKU_P4_WAKE_LP_CORE) ? " lp-core" : "",
+                     (w & TIKU_P4_WAKE_LP_TRAP) ? " lp-trap" : "");
+        return;
+    }
+    if (tiku_cmd_streq(argv[1], "why")) {
+        uint32_t w = tiku_p4_wake_cause();
+        uint64_t now = tiku_p4_lp_ticks(), boot = tiku_p4_boot_lp_ticks();
+
+        SHELL_PRINTF("reset: code 0x%04x, rom code %lu%s\n",
+                     (unsigned)tiku_cpu_p4_reset_reason(),
+                     (unsigned long)tiku_p4_rom_reset_code(),
+                     tiku_p4_sleep_missed()
+                         ? " (a deep sleep that failed, reset late)" : "");
+        SHELL_PRINTF("wake: %s%s%s%s\n", w ? "" : "none (not a sleep wake)",
+                     (w & TIKU_P4_WAKE_TIMER)   ? " timer"   : "",
+                     (w & TIKU_P4_WAKE_LP_CORE) ? " lp-core" : "",
+                     (w & TIKU_P4_WAKE_LP_TRAP) ? " lp-trap" : "");
+        SHELL_PRINTF("lp timer: %lu Hz, now %lu:%08lx, boot %lu:%08lx\n",
+                     (unsigned long)tiku_p4_lp_hz(),
+                     (unsigned long)(now >> 32), (unsigned long)now,
+                     (unsigned long)(boot >> 32), (unsigned long)boot);
+        {
+            uint32_t n;
+            uint64_t us;
+
+            tiku_p4_light_stats(&n, &us);
+            SHELL_PRINTF("light sleeps: %lu, %lu ms asleep\n",
+                         (unsigned long)n, (unsigned long)(us / 1000ULL));
+        }
+        return;
+    }
+    if (tiku_cmd_streq(argv[1], "off")) {
+        uint32_t ms = (argc >= 3) ? tiku_cmd_parse_u32(argv[2]) : 0u;
+
+        if (ms == 0u) {
+            SHELL_PRINTF("deep sleep -- wake by the LP core or RESET\n");
+        } else {
+            SHELL_PRINTF("deep sleep for %lu ms -- the wake is a reset\n",
+                         (unsigned long)ms);
+        }
+        tiku_p4_deep_sleep((uint64_t)ms * 1000ULL);
+    }
+    SHELL_PRINTF("Usage: power [why | off [ms] | nap <ms>]\n");
     return;
 #endif
 

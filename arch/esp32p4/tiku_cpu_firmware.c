@@ -7,8 +7,8 @@
  *
  * tiku_cpu_firmware.c - P4 CPU0 boot, frequency preferences and identity.
  *
- * Boots CPU0 (watchdogs, ROM check, IRQs, clocks, TRNG, flash, XIP code),
- * applies the saved CPU rate at boot and syncs PSRAM data cache lines.
+ * Boots CPU0 (watchdogs, ROM, IRQs, clocks, sleep record, TRNG, flash, XIP,
+ * LP payload), applies the saved CPU rate and syncs PSRAM data cache lines.
  * ROM and eFuse addresses: ESP-IDF 4d59230, ESP32-P4 hw_ver1/ECO2.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -29,6 +29,10 @@
 #include "tiku_esp32p4_regs.h"
 #include "tiku_debug_arch.h"
 #include "tiku_trng_arch.h"
+#include "tiku_sleep_arch.h"
+#if TIKU_LPCORE_ENABLE
+#include "tiku_lpcore_arch.h"
+#endif
 #include <services/console/tiku_usb_serial_jtag.h>
 
 __attribute__((used, section(".p4.firmware")))
@@ -50,9 +54,14 @@ void tiku_cpu_boot_init(void)
     tiku_p4_irq_init();
     if (tiku_p4_clock_pll_init() || tiku_p4_systimer_init())
         tiku_p4_fatal("CPU clock initialization");
+    tiku_p4_sleep_boot();
     tiku_trng_arch_init();
     if (tiku_p4_flash_init() != TIKU_P4_FLASH_OK || tiku_p4_xip_init())
         tiku_p4_fatal("flash executable companion");
+#if TIKU_LPCORE_ENABLE
+    /* The payload's image is compared from the XIP window. */
+    tiku_p4_lpcore_boot();
+#endif
 }
 
 unsigned long tiku_cpu_mclk_hz(void)

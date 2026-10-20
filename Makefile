@@ -3760,6 +3760,12 @@ ifeq ($(TIKU_FLPR_ENABLE),1)
 OBJS += $(TIKU_FLPR_IMG_O)
 endif
 
+ifeq ($(TIKU_LPCORE_ENABLE),1)
+# The embedded P4 LP core payload; its rules sit below `all:`, so `all`
+# stays the default goal.
+OBJS += $(TIKU_LPCORE_IMG_O)
+endif
+
 ifeq ($(TIKU_DRV_CPU1_ENABLE),1)
 # The embedded Cortex-M33 payload; its rules sit below `all:`, so `all`
 # stays the default goal.
@@ -4145,6 +4151,39 @@ $(TIKU_FLPR_IMG_O): $(FLPR_BUILD)/tiku_flpr.bin
 	    tiku_flpr.bin tiku_flpr_img.o
 
 -include $(FLPR_OBJS:.o=.d)
+endif
+
+# ---------------------------------------------------------------------------
+# P4 LP core payload sub-build: compile with this toolchain, link where it
+# runs in LP SRAM (tiku_lpcore.ld), flatten to a binary, then wrap it as an
+# object whose section the firmware script places in the XIP window.  The
+# wrap runs inside the build dir, so the _binary_tiku_lpcore_bin_* names come
+# from the bare file name.
+# ---------------------------------------------------------------------------
+ifeq ($(TIKU_PLATFORM)$(TIKU_LPCORE_ENABLE),esp32p41)
+$(LPCORE_BUILD)/%.o: arch/esp32p4/lpcore/%.S
+	@mkdir -p $(dir $@)
+	$(CC) $(LPCORE_CFLAGS) -c -o $@ $<
+
+$(LPCORE_BUILD)/%.o: arch/esp32p4/lpcore/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(LPCORE_CFLAGS) -c -o $@ $<
+
+$(LPCORE_BUILD)/tiku_lpcore.elf: $(LPCORE_OBJS) arch/esp32p4/lpcore/tiku_lpcore.ld
+	$(CC) $(LPCORE_CFLAGS) -T arch/esp32p4/lpcore/tiku_lpcore.ld \
+	    -Wl,--gc-sections,--no-warn-rwx-segments -o $@ $(LPCORE_OBJS)
+
+$(LPCORE_BUILD)/tiku_lpcore.bin: $(LPCORE_BUILD)/tiku_lpcore.elf
+	$(OBJCOPY) -O binary $< $@
+	@echo "  [lpcore] $$(wc -c < $@ | tr -d ' ') bytes"
+
+$(TIKU_LPCORE_IMG_O): $(LPCORE_BUILD)/tiku_lpcore.bin
+	cd $(LPCORE_BUILD) && $(OBJCOPY) -I binary -O elf32-littleriscv -B riscv \
+	    --rename-section .data=.rodata.tiku_lpcore_image,alloc,load,readonly,data,contents \
+	    --set-section-alignment .rodata.tiku_lpcore_image=4 \
+	    tiku_lpcore.bin tiku_lpcore_img.o
+
+-include $(LPCORE_OBJS:.o=.d)
 endif
 
 # ---------------------------------------------------------------------------

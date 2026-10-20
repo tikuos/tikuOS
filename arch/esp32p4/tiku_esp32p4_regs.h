@@ -55,6 +55,24 @@
 #define TIKU_P4_HP_RESET1  0x500e60c4UL
 #define TIKU_P4_LP_CLK     0x50120000UL
 #define TIKU_P4_LP_RESET   0x50120008UL
+/* LP core control (lpperi_reg.h, lp_system_reg.h, pmu_reg.h at the pin).
+ * TIKU_P4_LP_CLK and TIKU_P4_LP_RESET bit 31 are its clock and reset. */
+#define TIKU_P4_LP_CORE_BIT      (1u << 31)
+#define TIKU_P4_LPPERI_CPU       0x5012000cUL  /* bit 31: debug module off */
+#define TIKU_P4_LP_SYS_BOOT_ADDR 0x50110018UL
+#define TIKU_P4_LP_SYS_DBG_PC    0x50110190UL
+#define TIKU_P4_LP_SYS_EXC_PC    0x50110194UL
+#define TIKU_P4_PMU_HP_INT_RAW   0x50115164UL  /* bit 27: LP core exception */
+#define TIKU_P4_PMU_HP_INT_CLR   0x50115170UL
+#define TIKU_P4_PMU_LP_CPU_PWR0  0x50115184UL  /* 29 stall, 30 reset at sleep */
+#define TIKU_P4_PMU_LP_CPU_PWR2  0x5011518cUL  /* wake sources, 22 = HP core */
+#define TIKU_P4_PMU_HP_LP_COMM   0x5011519cUL  /* 30 LP wakes HP, 31 HP wakes LP */
+#define TIKU_P4_LP_CPU_EXC_INT   (1u << 27)
+#define TIKU_P4_LP_SLP_STALL_EN  (1u << 29)
+#define TIKU_P4_LP_SLP_RESET_EN  (1u << 30)
+#define TIKU_P4_LP_WAKE_BY_HP    (1u << 22)
+#define TIKU_P4_HP_TRIGGER_LP    (1u << 31)
+#define TIKU_P4_LP_GPIO_IN       0x5012A030UL  /* pad levels of LP IO 0..15 */
 #define TIKU_P4_SYSTIMER_CLK 0x500e6098UL
 #define TIKU_P4_ROOT_SELECT 0x50111040UL
 #define TIKU_P4_ROOT_DIV0 0x500e6004UL
