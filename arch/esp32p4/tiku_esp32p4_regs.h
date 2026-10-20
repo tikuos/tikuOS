@@ -116,6 +116,12 @@
 #define TIKU_P4_CLIC_CTRL(id) (0x20801000UL + 4u * (id))
 #define TIKU_P4_CLIC_IE (1u << 8)
 #define TIKU_P4_SYSTIMER_IRQ0 53u
+/* UART0: interrupt source, CPU line and the receive events it raises
+ * (RXFIFO_FULL, PARITY_ERR, FRM_ERR, RXFIFO_OVF, RXFIFO_TOUT). */
+#define TIKU_P4_UART0_IRQ_SOURCE    31u
+#define TIKU_P4_UART0_IRQ_LINE      4u
+#define TIKU_P4_UART0_INT_ENABLE    0x500CA00CUL
+#define TIKU_P4_UART0_RX_INTERRUPTS 0x11Du
 #define TIKU_P4_SYSTIMER_CONF 0x500e2000UL
 #define TIKU_P4_SYSTIMER_OP   0x500e2004UL
 #define TIKU_P4_SYSTIMER_TARGET_HI(n) (0x500e201cUL + 8u * (n))

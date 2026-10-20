@@ -155,5 +155,12 @@ void tiku_wake_arch_query(tiku_wake_sources_t *out)
         (TIKU_P4_REG_READ(TIKU_P4_SYSTIMER_INT_ENA) & 2u) &&
         (TIKU_P4_REG_READ(TIKU_P4_SYSTIMER_CONF) & TIKU_P4_SYSTIMER_TARGET(1)))
         out->sources |= TIKU_WAKE_HTIMER;
+    if ((TIKU_P4_REG_READ(TIKU_P4_CLIC_CTRL(TIKU_P4_UART0_IRQ_LINE + 16u)) &
+         0x100u) &&
+        TIKU_P4_REG_READ(TIKU_P4_IRQ_MAP(TIKU_P4_UART0_IRQ_SOURCE)) ==
+            TIKU_P4_UART0_IRQ_LINE + 16u &&
+        (TIKU_P4_REG_READ(TIKU_P4_UART0_INT_ENABLE) &
+         TIKU_P4_UART0_RX_INTERRUPTS))
+        out->sources |= TIKU_WAKE_UART_RX;
     TIKU_P4_IRQ_RESTORE(state);
 }

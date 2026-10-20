@@ -123,7 +123,9 @@
 /*---------------------------------------------------------------------------*/
 
 #elif defined(PLATFORM_ESP32P4)
+/* Console over the native USB Serial/JTAG port; UART0 is a second port. */
 #include <arch/esp32p4/tiku_debug_arch.h>
+#include <arch/esp32p4/tiku_uart_arch.h>
 #define TIKU_PRINTF(...) tiku_debug_arch_printf(__VA_ARGS__)
 #elif defined(PLATFORM_ESP32C5)
 /* Console over the native USB Serial/JTAG port, or UART0 when built so. */

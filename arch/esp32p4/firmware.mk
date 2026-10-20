@@ -16,6 +16,9 @@ SRCS += $(addprefix arch/esp32p4/,tiku_boot_arch.c tiku_trap_arch.c \
     tiku_sleep_arch.c)
 SRCS += services/console/tiku_usb_serial_jtag.c services/console/tiku_serial_jtag_io.c
 SRCS += arch/esp32p4/tiku_gpio_arch.c
+ifeq ($(TIKU_BOARD_DEFINE),TIKU_BOARD_FIREBEETLE2_ESP32P4)
+SRCS += arch/esp32p4/tiku_uart_arch.c
+endif
 SRCS += arch/esp32p4/tiku_trng_arch.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_psram_p4.c
 ifeq ($(TIKU_THREADS_ENABLE),1)

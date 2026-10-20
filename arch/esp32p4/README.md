@@ -121,6 +121,16 @@ takes JTAG over USB. Every other pad, the header pins among them, accepts
 CLIC line 3), each edge broadcast as `TIKU_EVENT_GPIO`. While the LP core
 drives GPIO3, `/dev/led0` writes do not reach the pad.
 
+UART0 drives GPIO37 (TX) and GPIO38 (RX), header P1 pins 17 and 18, in
+their IO MUX function, 8N1 at 300 to 3000000 baud from the 40 MHz crystal
+(`tiku_uart_arch.c`). Nothing starts it at boot: the console stays on USB.
+`tiku_uart_init()` starts it on the pads at `TIKU_BOARD_UART_BAUD`, and
+`tiku_p4_uart_start()` also offers an internal loopback that leaves GPIO37
+an undriven GPIO; `tiku_p4_uart_stop()` holds UART0 in reset and restores
+both pads. Received bytes reach a 1024-byte ring through interrupt source
+31 on CLIC line 4. In a build with the IP kit (`TIKU_KIT_NET_ENABLE=1`),
+SLIP rides the USB console, so `slip on` and the IP link need no adapter.
+
 ### Memory and configuration
 
 | Resource | Firmware use |
