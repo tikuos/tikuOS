@@ -110,7 +110,7 @@ python -m tikubench run p4-firmware --board firebeetle2_p4 \
 | `0x4ff00000`–`0x4ff2bbd0` | Internal code/statics, durable SRAM mirror, separate retained data; remaining tail is allocator span 1 |
 | `0x4ff40000`–`0x4ff9bfc0` | Allocator span 0: 376,768 bytes |
 | `0x4ff9bfc0`–`0x4ffa0000` | 64-byte guard and 16 KiB foreground stack |
-| PSRAM at `0x48000000` | 32 MiB mapped, 80 MHz, volatile; external requests can allocate it |
+| PSRAM at `0x48000000` | 32 MiB mapped, 80 MHz, volatile; external requests can allocate it; supplied by LDO VO2 at 1.8 V, which the PSRAM start enables |
 | Flash `0x000000`–`0x400000` | Reserved boot/code area, including the paired XIP window at offset `0x100000` |
 | Flash `0x400000`–`0xff0000` | 12,517,376-byte configurable NVM region; default tier 32 KiB, remainder `/data` |
 | Flash `0xff0000`–`0xff8000` | Two 16 KiB durable slots, each with a 16-byte header |

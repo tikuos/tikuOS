@@ -26,4 +26,9 @@ int tiku_p4_pmu_cpll_init(void);
  * @return Zero on success, negative on identity, readback or calibration failure.
  */
 int tiku_p4_pmu_mpll_init(void);
+/** @brief Power the PSRAM's 1.8 V supply, LDO VO2, at its eFuse calibration.
+ * @note Requires CPU0 at 40 MHz; returns after the 200 us settling time.
+ * @return Zero once the LDO reads back enabled at the setting, -2 otherwise.
+ */
+int tiku_p4_pmu_psram_ldo_init(void);
 #endif

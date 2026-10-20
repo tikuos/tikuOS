@@ -85,6 +85,10 @@
 #define TIKU_P4_ANALOG_WRITE (1u << 24)
 #define TIKU_P4_EFUSE_BLOCK_VERSION 0x5012d04cUL
 #define TIKU_P4_EFUSE_BIAS 0x5012d054UL
+#define TIKU_P4_EFUSE_SYS3 0x5012d050UL   /* bits 5:3: LDO VO2 mul */
+/* PMU external LDO VO2, the PSRAM supply (ldo_ll.h unit 1, ext_ldo[3]). */
+#define TIKU_P4_PSRAM_LDO      0x501151d0UL
+#define TIKU_P4_PSRAM_LDO_ANA  0x501151d4UL
 
 #define TIKU_P4_IRQ_LINES 32u
 #define TIKU_P4_IRQ_SOURCES 128u

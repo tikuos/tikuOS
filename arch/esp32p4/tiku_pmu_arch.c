@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_pmu_arch.c - Calibrated P4 v1.3 regulators, CPLL and MPLL startup.
+ * tiku_pmu_arch.c - Calibrated P4 v1.3 regulators, PSRAM LDO, CPLL and MPLL.
  *
  * CPLL startup first sets the eFuse-calibrated HP and LP regulators.
  * Sequence and settings derived from ESP-IDF 4d59230d rtc_clk_init/clk_tree_ll.
@@ -175,6 +175,46 @@ int tiku_p4_pmu_cpll_init(void)
     TIKU_P4_REG_WRITE(TIKU_P4_ANALOG_CLK, clock);
     TIKU_P4_REG_WRITE(TIKU_P4_LP_CLK, gate);
     return result;
+}
+
+/* LDO VO2 fields (pmu_struct.h pmu_ext_ldo, pmu_ext_ldo_ana). */
+#define LDO_FORCE_TIEH_SEL (1u << 7)        /* software owns the setting */
+#define LDO_XPD            (1u << 8)
+#define LDO_TIEH_SEL       (7u << 9)
+#define LDO_TIEH           (1u << 14)       /* 1: rail, 0: Vref x mul */
+#define LDO_MUL_POS        23u
+#define LDO_EN_VDET        (1u << 26)
+#define LDO_EN_CUR_LIM     (1u << 27)
+#define LDO_DREF_POS       28u
+#define LDO_SETTING        ((15u << LDO_DREF_POS) | (7u << LDO_MUL_POS))
+
+int tiku_p4_pmu_psram_ldo_init(void)
+{
+    uint32_t sys2 = TIKU_P4_REG_READ(TIKU_P4_EFUSE_BLOCK_VERSION);
+    uint32_t sys3 = TIKU_P4_REG_READ(TIKU_P4_EFUSE_SYS3);
+    uint32_t version = ((sys2 >> 11) & 3u) * 100u + ((sys2 >> 8) & 7u);
+    /* 1800 mV: the eFuse dref and mul of a calibrated part, else the match
+     * ldo_ll_voltage_to_dref_mul() finds with the default constants. */
+    uint32_t dref = 8u, mul = 4u, setting;
+
+    if (version >= 1u && (sys2 >> 28) != 0u && ((sys3 >> 3) & 7u) != 0u) {
+        dref = sys2 >> 28;
+        mul = (sys3 >> 3) & 7u;
+    }
+    setting = (dref << LDO_DREF_POS) | (mul << LDO_MUL_POS);
+    /* esp_ldo_acquire_channel(): current limit on across the change. */
+    field(TIKU_P4_PSRAM_LDO_ANA, LDO_SETTING | LDO_EN_CUR_LIM,
+          setting | LDO_EN_CUR_LIM);
+    field(TIKU_P4_PSRAM_LDO, LDO_TIEH | LDO_TIEH_SEL | LDO_FORCE_TIEH_SEL,
+          LDO_FORCE_TIEH_SEL);
+    field(TIKU_P4_PSRAM_LDO_ANA, LDO_EN_VDET, LDO_EN_VDET);
+    field(TIKU_P4_PSRAM_LDO, LDO_XPD, LDO_XPD);
+    field(TIKU_P4_PSRAM_LDO_ANA, LDO_EN_CUR_LIM, 0);
+    TIKU_P4_DELAY_XTAL_US(200);
+    if (!(TIKU_P4_REG_READ(TIKU_P4_PSRAM_LDO) & LDO_XPD) ||
+        (TIKU_P4_REG_READ(TIKU_P4_PSRAM_LDO_ANA) & LDO_SETTING) != setting)
+        return -2;
+    return 0;
 }
 
 int tiku_p4_pmu_mpll_init(void)

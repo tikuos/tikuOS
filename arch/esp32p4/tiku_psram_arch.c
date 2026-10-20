@@ -7,7 +7,7 @@
  *
  * tiku_psram_arch.c - AP x16 PSRAM at 80 MHz on P4 silicon v1.3.
  *
- * Starts the MPLL, pads and device, then maps 32 MiB at 0x48000000.
+ * Powers LDO VO2, starts the MPLL, pads and device, maps 32 MiB at 0x48000000.
  * Register sequence: ESP-IDF 4d59230ddff16327812782151ef0afef202dc6d7.
  *
  * SPDX-FileCopyrightText: 2023-2026 Espressif Systems (Shanghai) CO LTD
@@ -196,7 +196,7 @@ int tiku_p4_psram_init(void)
     if (mhz != 40 && mhz != 90 && mhz != 180 && mhz != 360) return -1;
     if (tiku_p4_clock_set_mhz(40)) return -1;
     irq = TIKU_P4_IRQ_SAVE();
-    if (!tiku_p4_pmu_mpll_init()) {
+    if (!tiku_p4_pmu_psram_ldo_init() && !tiku_p4_pmu_mpll_init()) {
         stage = 1;
         if (controller()) {
             stage = 2;
