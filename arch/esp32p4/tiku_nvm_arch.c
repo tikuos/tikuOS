@@ -7,9 +7,9 @@
  *
  * tiku_nvm_arch.c - P4 alternating flash mirrors for SRAM durable objects.
  *
- * Boot restores the durable image from the valid 16 KiB mirror with the
- * newer generation, or starts it zeroed when both mirrors are blank.  A
- * flush writes a changed image to the other mirror, header word 0 last.
+ * Boot restores the newer valid 16 KiB mirror, up to this firmware's size,
+ * or a zeroed image when both mirrors are blank.  A flush writes a changed
+ * image to the other mirror, header word 0 last.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -68,8 +68,10 @@ int tiku_p4_nvm_init(void)
     }
     if (selected >= 0) {
         image = tiku_nvm_mirror_image(header((unsigned)selected), MIRROR_BYTES, &n);
-        /* A larger saved image cannot be silently truncated by this firmware. */
-        if (n > live) { TIKU_P4_IRQ_RESTORE(state); return -1; }
+        /* A saved image longer than this firmware's is restored up to the
+         * live size; tiku_persist_move_boot() moves cells from the whole
+         * saved image by key. */
+        if (n > live) n = live;
         for (i = 0; i < n; i++) __uninit_start[i] = image[i];
         restored = TIKU_NVM_RESTORE_V2_OK;
         active = 1;

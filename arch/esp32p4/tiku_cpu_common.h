@@ -23,6 +23,7 @@ void tiku_cpu_p4_delay_ms(unsigned int ms);
 uint8_t tiku_cpu_p4_unique_id(uint8_t *data, uint8_t length);
 /** @brief Translate the ROM reset cause into the common SYSRSTIV codes. */
 uint16_t tiku_cpu_p4_reset_reason(void);
-/** @brief Reset the SoC from internal SRAM with interrupts disabled. */
+/** @brief Reset the SoC from internal SRAM with interrupts disabled, after
+ *  writing back the L1 data cache so retained data reaches HP SRAM. */
 void tiku_cpu_p4_restart(void) __attribute__((noreturn));
 #endif

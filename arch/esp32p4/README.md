@@ -699,9 +699,12 @@ Durable objects use an SRAM working copy and two 16 KiB flash slots at
 16,368-byte payload; the linker enforces that limit. Initialization is
 explicit, after flash mapping is ready, and does not write flash. It restores
 the newest valid CRC-checked image. A smaller saved image leaves the remaining
-working bytes zero; a larger image is refused, not truncated. If neither slot
-is valid, both must be completely erased before commits are enabled. Nonblank
-corrupt storage is held without formatting.
+working bytes zero; a larger one is restored up to the working size, and
+`tiku_persist_move_boot()` moves persist cells from the whole saved image by
+key. If neither slot is valid, both must be completely erased before commits
+are enabled. Nonblank corrupt storage is held without formatting. The region
+registry lists the working copy as NVM, so `tiku_persist_register()` accepts
+buffers placed with `TIKU_DURABLE`.
 
 A commit snapshots the working copy with interrupts masked, writes the
 alternate slot, publishes its magic last, and checks the resulting image

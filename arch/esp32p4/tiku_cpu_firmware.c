@@ -25,6 +25,7 @@
 #include "tiku_flash_arch.h"
 #include "tiku_xip_arch.h"
 #include "tiku_psram_arch.h"
+#include "tiku_mem_arch.h"
 #include "tiku_esp32p4_regs.h"
 #include "tiku_debug_arch.h"
 #include "tiku_trng_arch.h"
@@ -124,13 +125,6 @@ uint16_t tiku_cpu_p4_reset_reason(void)
     default: return 0;
     }
 }
-void tiku_cpu_p4_restart(void)
-{
-    (void)TIKU_P4_IRQ_SAVE();
-    ((void (*)(void))0x4fc00094u)();
-    for (;;) __asm__ volatile("wfi");
-}
-
 /** @brief Run a bounded cache command, halting rather than returning stale data. */
 static void cache_sync(uint32_t map, uint32_t start, uint32_t size, uint32_t op)
 {
@@ -162,6 +156,15 @@ static void psram_sync(const void *address, unsigned long length, int invalidate
     if (invalidate) cache_sync(0x30u, start, end - start, 1u);
     __asm__ volatile("fence iorw, iorw" ::: "memory");
     TIKU_P4_IRQ_RESTORE(state);
+}
+void tiku_cpu_p4_restart(void)
+{
+    (void)TIKU_P4_IRQ_SAVE();
+    __asm__ volatile("fence iorw, iorw" ::: "memory");
+    cache_sync(0x10u, TIKU_P4_SRAM_LOW_START,
+               TIKU_P4_SRAM_HIGH_END - TIKU_P4_SRAM_LOW_START, 4u);
+    ((void (*)(void))0x4fc00094u)();
+    for (;;) __asm__ volatile("wfi");
 }
 void tiku_cpu_dcache_clean(const void *address, unsigned long length)
 {
