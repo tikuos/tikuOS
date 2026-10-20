@@ -26,6 +26,7 @@
 #include "tiku_systimer_arch.h"
 #include "tiku_debug_arch.h"
 #include "tiku_watchdog_arch.h"
+#include <services/console/tiku_usb_serial_jtag.h>
 #if TIKU_LPCORE_ENABLE
 #include "tiku_lpagent_arch.h"
 #endif
@@ -569,6 +570,31 @@ uint32_t tiku_p4_light_sleep(uint64_t us)
     (void)tiku_p4_clock_set_mhz(mhz);
     TIKU_P4_IRQ_RESTORE(s);
     return cause;
+}
+
+/* Light idle: a deadline nearer than LIGHT_IDLE_MIN_US idles in wfi; a
+ * light sleep is asked to end LIGHT_IDLE_EARLY_US before its deadline, the
+ * time the way out takes, and lasts at most LIGHT_IDLE_MAX_US. */
+#define LIGHT_IDLE_MIN_US   3000ULL
+#define LIGHT_IDLE_EARLY_US 1000ULL
+#define LIGHT_IDLE_MAX_US   1000000ULL
+
+void tiku_p4_light_idle(void)
+{
+    uint64_t now = systimer();
+    uint64_t due = tiku_p4_alarm_due(now), us;
+
+    /* A sleep would hold the console's queued bytes and leave a received
+     * one waiting for the deadline; these, and a deadline nearer than
+     * LIGHT_IDLE_MIN_US, idle in wfi. */
+    if (now == 0ULL || tiku_serial_jtag_rx_ready() ||
+        tiku_serial_jtag_pending() != 0U ||
+        due < now + LIGHT_IDLE_MIN_US * 16ULL) {
+        __asm__ volatile("wfi" ::: "memory");
+        return;
+    }
+    us = (due - now) / 16ULL - LIGHT_IDLE_EARLY_US;
+    (void)tiku_p4_light_sleep(us < LIGHT_IDLE_MAX_US ? us : LIGHT_IDLE_MAX_US);
 }
 
 void tiku_p4_light_stats(uint32_t *count, uint64_t *us)

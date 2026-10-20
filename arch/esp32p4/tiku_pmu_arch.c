@@ -15,6 +15,29 @@
  */
 #include "tiku_pmu_arch.h"
 #include "tiku_esp32p4_regs.h"
+#include "tiku_irq_arch.h"
+
+/* LP_ANALOG_PERI: brownout mode 0 (the level set here, a reset after a
+ * wait) and mode 1 (the fixed analog reset, under eFuse control by
+ * default). */
+#define BOD_MODE0          0x50113000UL
+#define BOD_MODE1          0x50113004UL
+#define BOD_FIB            0x5011301CUL
+#define BOD_FIB_MODE1      (1u << 1)
+#define BOD_MODE1_RESET    (1u << 31)
+#define BOD_CLOSE_FLASH    (1u << 6)
+#define BOD_PD_RF          (1u << 7)
+#define BOD_INTR_WAIT      (0x3FFu << 8)
+#define BOD_RESET_WAIT     (0x3FFu << 18)
+#define BOD_CNT_CLR        (1u << 28)
+#define BOD_ENABLE         (1u << 29)
+#define BOD_RESET_SYSTEM   (1u << 30)
+#define BOD_RESET_ENA      (1u << 31)
+#define BOD_ARMED          (BOD_ENABLE | BOD_RESET_SYSTEM | BOD_RESET_ENA)
+/* The BIAS block on the analog bus: the level in bits 4:2 and 7:5. */
+#define BOD_BLOCK          0x6Au
+#define BOD_LEVEL_REG      9u
+#define BOD_LEVEL_MASK     0xFCu
 
 #ifndef TIKU_P4_DELAY_XTAL_US
 /** @brief Wait at least the requested interval with the CPU at 40 MHz. */
@@ -256,5 +279,80 @@ int tiku_p4_pmu_mpll_init(void)
     TIKU_P4_REG_WRITE(TIKU_P4_ANALOG_CONF2, conf2);
     TIKU_P4_REG_WRITE(TIKU_P4_ANALOG_CLK, clock);
     TIKU_P4_REG_WRITE(TIKU_P4_LP_CLK, gate);
+    return result;
+}
+
+/** @brief Open the analog bus clock; @p saved receives what to restore. */
+static void analog_open(uint32_t saved[4])
+{
+    saved[0] = TIKU_P4_REG_READ(TIKU_P4_LP_CLK);
+    saved[1] = TIKU_P4_REG_READ(TIKU_P4_ANALOG_CONF1);
+    saved[2] = TIKU_P4_REG_READ(TIKU_P4_ANALOG_CONF2);
+    saved[3] = TIKU_P4_REG_READ(TIKU_P4_ANALOG_CLK);
+    TIKU_P4_REG_WRITE(TIKU_P4_LP_CLK, saved[0] | TIKU_P4_ANALOG_ENABLE);
+    TIKU_P4_REG_WRITE(TIKU_P4_ANALOG_CLK, saved[3] | 1u);
+}
+
+/** @brief Put back what analog_open() changed. */
+static void analog_close(const uint32_t saved[4])
+{
+    TIKU_P4_REG_WRITE(TIKU_P4_ANALOG_CONF1, saved[1]);
+    TIKU_P4_REG_WRITE(TIKU_P4_ANALOG_CONF2, saved[2]);
+    TIKU_P4_REG_WRITE(TIKU_P4_ANALOG_CLK, saved[3]);
+    TIKU_P4_REG_WRITE(TIKU_P4_LP_CLK, saved[0]);
+}
+
+/** @brief The level this silicon takes: before revision 1.0 the threshold
+ *         is fixed, and the field is written 0 as ESP-IDF writes it. */
+static uint32_t brownout_level(void)
+{
+    uint32_t sys2 = TIKU_P4_REG_READ(TIKU_P4_EFUSE_BLOCK_VERSION);
+    uint32_t major = (((sys2 >> 23) & 1u) << 2) | ((sys2 >> 4) & 3u);
+    return major >= 1u ? TIKU_P4_BROWNOUT_LEVEL : 0u;
+}
+
+int tiku_p4_brownout_init(void)
+{
+    uint32_t level = brownout_level(), saved[4], state;
+    int result;
+
+    state = TIKU_P4_IRQ_SAVE();
+    /* Mode 1's analog reset outranks mode 0; brownout_hal_config() takes it
+     * from the eFuse and turns it off. */
+    field(BOD_FIB, BOD_FIB_MODE1, 0);
+    field(BOD_MODE1, BOD_MODE1_RESET, 0);
+    field(BOD_MODE0, BOD_INTR_WAIT | BOD_RESET_WAIT | BOD_CLOSE_FLASH |
+                         BOD_PD_RF | BOD_RESET_SYSTEM | BOD_RESET_ENA,
+          (2u << 8) | BOD_RESET_WAIT | BOD_CLOSE_FLASH | BOD_PD_RF |
+              BOD_RESET_SYSTEM | BOD_RESET_ENA);
+    field(BOD_MODE0, BOD_CNT_CLR, BOD_CNT_CLR);
+    field(BOD_MODE0, BOD_CNT_CLR, 0);
+    analog_open(saved);
+    result = analog_field(BOD_BLOCK, BOD_LEVEL_REG, BOD_LEVEL_MASK,
+                          (level << 2) | (level << 5));
+    analog_close(saved);
+    if (result == 0) {
+        field(BOD_MODE0, BOD_ENABLE, BOD_ENABLE);
+    }
+    TIKU_P4_IRQ_RESTORE(state);
+    return result;
+}
+
+int tiku_p4_brownout_armed_level(void)
+{
+    uint32_t saved[4], value = 0, state;
+    int result = -1;
+
+    state = TIKU_P4_IRQ_SAVE();
+    if ((TIKU_P4_REG_READ(BOD_MODE0) & BOD_ARMED) == BOD_ARMED &&
+        !(TIKU_P4_REG_READ(BOD_MODE1) & BOD_MODE1_RESET)) {
+        analog_open(saved);
+        if (analog_read(BOD_BLOCK, BOD_LEVEL_REG, &value) == 0 &&
+            ((value >> 2) & 7u) == ((value >> 5) & 7u)) {
+            result = (int)((value >> 2) & 7u);
+        }
+        analog_close(saved);
+    }
+    TIKU_P4_IRQ_RESTORE(state);
     return result;
 }

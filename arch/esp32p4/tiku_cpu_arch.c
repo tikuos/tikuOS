@@ -19,6 +19,7 @@
 #include "tiku_irq_arch.h"
 #include "tiku_timer_arch.h"
 #include "tiku_systimer_arch.h"
+#include "tiku_sleep_arch.h"
 
 static unsigned nesting;
 static uint32_t outer_state;
@@ -46,8 +47,21 @@ static void idle(void)
 
 tiku_cpu_idle_enter_t tiku_cpu_idle_hook(tiku_cpu_idle_mode_t mode)
 {
-    return mode >= TIKU_CPU_IDLE_LIGHT && mode <= TIKU_CPU_IDLE_DEEPEST
-               ? idle : NULL;
+    switch (mode) {
+    case TIKU_CPU_IDLE_LIGHT:
+        return idle;
+    case TIKU_CPU_IDLE_DEEP:
+    case TIKU_CPU_IDLE_DEEPEST:
+#if defined(TIKU_P4_FIRMWARE)
+        /* PMU light sleep until the next timer deadline. */
+        return tiku_p4_light_idle;
+#else
+        return idle;                    /* the RAM test image has no sleep */
+#endif
+    case TIKU_CPU_IDLE_OFF:
+    default:
+        return NULL;
+    }
 }
 
 int tiku_cpu_idle_mode_wakes_on_tick(tiku_cpu_idle_mode_t mode)
@@ -62,11 +76,21 @@ unsigned int tiku_cpu_idle_mode_wakes(tiku_cpu_idle_mode_t mode)
 
 const char *tiku_cpu_idle_mode_name(tiku_cpu_idle_mode_t mode)
 {
-    return tiku_cpu_idle_hook(mode) ? "WFI" : "off";
+    tiku_cpu_idle_enter_t hook = tiku_cpu_idle_hook(mode);
+
+    if (hook == NULL) {
+        return "off";
+    }
+    return hook == idle ? "WFI" : "light sleep";
 }
 
 const char *tiku_cpu_idle_mode_desc(tiku_cpu_idle_mode_t mode)
 {
-    return tiku_cpu_idle_hook(mode) ? "WFI (timer wake; USB powered)"
-                                  : "off (busy-wait)";
+    tiku_cpu_idle_enter_t hook = tiku_cpu_idle_hook(mode);
+
+    if (hook == NULL) {
+        return "off (busy-wait)";
+    }
+    return hook == idle ? "WFI (timer wake; USB powered)"
+                        : "light sleep to the next timer deadline";
 }

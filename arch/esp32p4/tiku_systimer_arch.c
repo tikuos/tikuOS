@@ -163,3 +163,29 @@ uint32_t tiku_p4_systimer_errors(void)
 {
     return errors;
 }
+
+uint64_t tiku_p4_alarm_due(uint64_t now)
+{
+    uint32_t conf = TIKU_P4_REG_READ(TIKU_P4_SYSTIMER_CONF);
+    uint32_t ena = TIKU_P4_REG_READ(TIKU_P4_SYSTIMER_INT_ENA);
+    uint32_t st = TIKU_P4_REG_READ(TIKU_P4_SYSTIMER_INT_ST);
+    uint64_t due = ~0ULL, at;
+    unsigned n;
+
+    /* Comparator 0 is the tick, comparator 1 the hardware timer. */
+    for (n = 0; n < 2u; n++) {
+        if (!(conf & TIKU_P4_SYSTIMER_TARGET(n)) || !(ena & (1u << n))) {
+            continue;
+        }
+        if (st & (1u << n)) {
+            return now;                 /* fired, not yet taken */
+        }
+        at = ((uint64_t)(TIKU_P4_REG_READ(TIKU_P4_SYSTIMER_TARGET_HI(n)) &
+                         0xFFFFFu) << 32) |
+             TIKU_P4_REG_READ(TIKU_P4_SYSTIMER_TARGET_LO(n));
+        if (at > now && at < due) {     /* a past one-shot is spent */
+            due = at;
+        }
+    }
+    return due;
+}

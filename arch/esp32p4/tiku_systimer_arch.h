@@ -35,6 +35,9 @@ uint32_t tiku_p4_systimer_ticks(void);
 uint32_t tiku_p4_systimer_interrupts(void);
 /** @brief Return timer read failures since initialization. */
 uint32_t tiku_p4_systimer_errors(void);
+/** @brief The nearest armed tick or hardware-timer deadline after @p now,
+ *         @p now when one has fired untaken, or ~0 when none is armed. */
+uint64_t tiku_p4_alarm_due(uint64_t now);
 /** @brief Tick ISR notification; the kernel overrides the empty weak
  * definition. */
 void tiku_p4_tick_notify(void);

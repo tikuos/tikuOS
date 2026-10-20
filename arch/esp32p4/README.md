@@ -310,6 +310,18 @@ the USB console, PSRAM, SYSTIMER and the tick run through it, at about 1 ms
 a sleep. A timed sleep of either kind whose wake never comes ends in an LP
 watchdog chip reset a second late.
 
+The scheduler's DEEP and DEEPEST idle modes (`sleep lpm3`, `sleep lpm4`)
+light-sleep until the next tick or hardware-timer deadline
+(`tiku_p4_light_idle()`), up to about 6.8 ms at the 128 Hz tick; a deadline
+under 3 ms away, or bytes queued on the USB console either way, idles in WFI
+instead. LIGHT (`sleep lpm0`) is WFI, as are all three in the RAM kernel-test
+image, which links no sleep code.
+
+Boot arms the brownout detector (`tiku_p4_brownout_init()`) as ESP-IDF does
+by default: below about 2.6 V its mode 0 powers the flash down and resets the
+whole system, which clears the setting until the next boot; mode 1, the
+fixed analog reset, is turned off.
+
 The LP agent runs up to 8 jobs on the LP core, the HP core awake or asleep.
 `lp add io <n> <op> <value> <ms> <act> [cmd...]` reads LP IO n every ms
 milliseconds, and `lp add timer <ms> <act> [cmd...]` counts runs; a firing
@@ -329,8 +341,9 @@ TikuBench's `coproc` and `lpcore` suites and the `deep-sleep-wake`,
 Normal firmware, files, BASIC, PSRAM attachment, clock persistence through
 ROM reset/reload and the desktop backend have hardware checks. The separate
 kernel diagnostic covers scheduler/workers and allocator lifecycle. These
-results do not establish the full-firmware physical cold-start or brownout
-behavior. Physical BOOT release/power cycling requires local access.
+results do not establish the full-firmware physical cold-start behavior, nor
+a brownout reset: the detector reads back armed, but no supply has been
+lowered to trip it. Physical BOOT release/power cycling requires local access.
 
 On the Olimex all 55 GPIO inputs can be observed through read-only nodes;
 direction/output changes and GPIO IRQs are refused because its board header
@@ -338,9 +351,8 @@ reserves every pad. The FireBeetle 2 drives its free pads (above).
 Ethernet, microSD, USB host, HDMI, audio and camera drivers are not provided
 by this profile. Their wiring and attached accessories require confirmation
 before external pins or power rails are driven. Wi-Fi/BLE are not integrated
-P4 capabilities. CPU1 jobs and FPU/vector contexts are not enabled, and the
-scheduler's idle modes execute WFI rather than light sleep. Do not interpret
-this as complete board-peripheral support.
+P4 capabilities. CPU1 jobs and FPU/vector contexts are not enabled. Do not
+interpret this as complete board-peripheral support.
 
 ## Storage-free diagnostic
 

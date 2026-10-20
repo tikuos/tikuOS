@@ -31,4 +31,18 @@ int tiku_p4_pmu_mpll_init(void);
  * @return Zero once the LDO reads back enabled at the setting, -2 otherwise.
  */
 int tiku_p4_pmu_psram_ldo_init(void);
+/** @brief The brownout level ESP-IDF selects by default: about 2.6 V. */
+#define TIKU_P4_BROWNOUT_LEVEL 7u
+/**
+ * @brief Reset the whole system when the supply falls below about 2.6 V.
+ *
+ * Mode 0 of the detector at TIKU_P4_BROWNOUT_LEVEL resets after its wait,
+ * with the flash cut off first; mode 1, the fixed analog reset, is turned
+ * off as ESP-IDF turns it off.  The setting is lost at that reset.
+ *
+ * @return Zero, or -2 when the analog bus did not take the level
+ */
+int tiku_p4_brownout_init(void);
+/** @brief The level mode 0 resets the system at, or -1 when it does not. */
+int tiku_p4_brownout_armed_level(void);
 #endif

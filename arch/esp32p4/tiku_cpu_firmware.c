@@ -30,6 +30,7 @@
 #include "tiku_debug_arch.h"
 #include "tiku_trng_arch.h"
 #include "tiku_sleep_arch.h"
+#include "tiku_pmu_arch.h"
 #if TIKU_LPCORE_ENABLE
 #include "tiku_lpcore_arch.h"
 #endif
@@ -55,6 +56,8 @@ void tiku_cpu_boot_init(void)
     if (tiku_p4_clock_pll_init() || tiku_p4_systimer_init())
         tiku_p4_fatal("CPU clock initialization");
     tiku_p4_sleep_boot();
+    if (tiku_p4_brownout_init() != 0)
+        tiku_p4_fatal("brownout detector");
     tiku_trng_arch_init();
     if (tiku_p4_flash_init() != TIKU_P4_FLASH_OK || tiku_p4_xip_init())
         tiku_p4_fatal("flash executable companion");

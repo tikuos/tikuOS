@@ -60,6 +60,13 @@ void tiku_p4_deep_sleep(uint64_t us) __attribute__((noreturn));
  */
 uint32_t tiku_p4_light_sleep(uint64_t us);
 
+/**
+ * @brief Idle until the next tick or hardware-timer deadline in light sleep.
+ *
+ * Idles in wfi instead when the deadline is under 3 ms away or the USB
+ * console has bytes queued either way.
+ */
+void tiku_p4_light_idle(void);
 /** @brief Light sleeps that ended on a wake since boot, in @p count, and
  *         the time they lasted in microseconds, in @p us. */
 void tiku_p4_light_stats(uint32_t *count, uint64_t *us);
