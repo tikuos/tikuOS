@@ -208,6 +208,16 @@ above, down to 8 bits at 156.25 kHz, and a new rate or duty applies from its
 next period. A free pad takes a channel through the GPIO matrix, and so
 does the LED on GPIO3 while the LP core does not hold its pad.
 
+`TIKU_USBHS_MSC=1` makes the DWC2 core on the high-speed Type-C a USB
+mass-storage device (`tiku_usbhs_arch.c`, `tiku_usbhs_msc.c`). `usbmsc up`
+brings the UTMI PHY and the core up, takes a 64 KB RAM disk from the SRAM
+tier, lays an empty FAT12 volume, `TIKUOS`, on it and presents it: the host
+enumerates it at 480 Mbps and mounts the volume. The core moves packets by
+DMA past the L1 cache, so each buffer is cleaned or invalidated around it.
+`usbmsc down` detaches and gives the memory back; `usbmsc stats`, `peek
+<lba>` and `regs` print the counters, a block and the PHY and core
+registers. The shell stays on the USB Serial/JTAG Type-C.
+
 ### Memory and configuration
 
 | Resource | Firmware use |

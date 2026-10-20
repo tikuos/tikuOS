@@ -400,6 +400,69 @@ static void test_rw(void)
        "...so no pointer is ever handed out for it");
 }
 
+/*---------------------------------------------------------------------------*/
+/* 9. FAT12 VOLUME                                                           */
+/*---------------------------------------------------------------------------*/
+
+/** @brief Read a little-endian field of @p n bytes. */
+static uint32_t le(const uint8_t *p, unsigned n)
+{
+    uint32_t v = 0u;
+
+    while (n-- > 0u) {
+        v = (v << 8) | p[n];
+    }
+    return v;
+}
+
+/** @brief The boot sector, both FATs and the label of an empty volume; the
+ *         data blocks untouched; sizes FAT12 cannot describe refused. */
+static void test_fat12(void)
+{
+    static uint8_t d[512u * 512u];
+    uint32_t fat;
+
+    printf("\nFAT12 volume\n");
+    memset(d, 0xA5, sizeof d);
+    eq((uint32_t)tiku_usbd_msc_format_fat12(d, 128u, "TIKUOS"), 0u,
+       "128 blocks format");
+    eq(d[0], 0xEBu, "jump instruction");
+    eq(le(&d[11], 2u), 512u, "512-byte sectors");
+    eq(d[13], 1u, "one sector a cluster");
+    eq(le(&d[14], 2u), 1u, "one reserved sector");
+    eq(d[16], 2u, "two FATs");
+    eq(le(&d[17], 2u), 16u, "16 root entries");
+    eq(le(&d[19], 2u), 128u, "total sectors");
+    eq(d[21], 0xF8u, "fixed medium");
+    eq(le(&d[22], 2u), 1u, "one sector a FAT");
+    eq(d[38], 0x29u, "extended boot record");
+    ok(memcmp(&d[43], "TIKUOS     ", 11) == 0, "label in the BPB");
+    ok(memcmp(&d[54], "FAT12   ", 8) == 0, "file system type");
+    ok(d[510] == 0x55u && d[511] == 0xAAu, "boot signature");
+    ok(d[512] == 0xF8u && d[513] == 0xFFu && d[514] == 0xFFu && d[515] == 0u,
+       "first FAT: media byte and end of chain, the rest free");
+    ok(memcmp(&d[512], &d[1024], 512) == 0, "second FAT equals the first");
+    ok(memcmp(&d[1536], "TIKUOS     ", 11) == 0 && d[1536 + 11] == 0x08u,
+       "root directory holds the volume label");
+    ok(d[1536 + 32] == 0u, "and nothing after it");
+    ok(d[2048] == 0xA5u && d[sizeof d - 1u] == 0xA5u,
+       "the data blocks are left as they were");
+
+    memset(d, 0, sizeof d);
+    eq((uint32_t)tiku_usbd_msc_format_fat12(d, 4000u, "BIG"), 0u,
+       "4000 blocks format");
+    fat = le(&d[22], 2u);
+    ok(((4000u - 2u - 2u * fat) * 3u + 1u) / 2u <= fat * 512u &&
+       ((4000u - 2u - 2u * (fat - 1u)) * 3u + 1u) / 2u > (fat - 1u) * 512u,
+       "the smallest FAT that holds every cluster");
+    eq((uint32_t)tiku_usbd_msc_format_fat12(d, 7u, "X"), 0xFFFFFFFFu,
+       "seven blocks are refused");
+    eq((uint32_t)tiku_usbd_msc_format_fat12(d, 4200u, "X"), 0xFFFFFFFFu,
+       "4085 clusters or more are refused");
+    eq((uint32_t)tiku_usbd_msc_format_fat12((uint8_t *)0, 128u, "X"),
+       0xFFFFFFFFu, "no disk is refused");
+}
+
 /** @brief Run every check; exit 1 if any failed. */
 int main(void)
 {
@@ -413,6 +476,7 @@ int main(void)
     test_capacity();
     test_modes();
     test_rw();
+    test_fat12();
 
     printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

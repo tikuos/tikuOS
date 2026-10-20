@@ -2853,18 +2853,28 @@ else
 $(warning cryptoprobe: needs a crypto engine (Nordic, FireBeetle 2 ESP32-P4) -- skipped)
 endif
 endif
-# TIKU_USBHS_MSC=1: USB mass storage on the nRF54LM20A/B DWC2 core.  It
+# TIKU_USBHS_MSC=1: USB mass storage on a DWC2 core: the nRF54LM20A/B's, or
+# the ESP32-P4's on the FireBeetle 2's high-speed Type-C.  On the nRF54LM20 it
 # cannot be built with the USB CDC console (TIKU_CONSOLE=usb or both): each
-# defines the USB device interrupt handler.
+# defines the USB device interrupt handler.  The P4's console is the USB
+# Serial/JTAG, a separate port.
 ifeq ($(TIKU_USBHS_MSC),1)
+ifeq ($(MCU),esp32p4)
+ifneq ($(TIKU_BOARD_DEFINE),TIKU_BOARD_FIREBEETLE2_ESP32P4)
+$(error TIKU_USBHS_MSC=1 on the ESP32-P4 needs BOARD=firebeetle2_esp32p4)
+endif
+SRCS   += arch/esp32p4/tiku_usbhs_arch.c
+SRCS   += arch/esp32p4/tiku_usbhs_msc.c
+else
 ifeq ($(filter nrf54lm20a nrf54lm20b,$(MCU)),)
-$(error TIKU_USBHS_MSC=1 needs MCU=nrf54lm20a or nrf54lm20b)
+$(error TIKU_USBHS_MSC=1 needs MCU=nrf54lm20a, nrf54lm20b or esp32p4)
 endif
 ifneq ($(filter usb both,$(TIKU_CONSOLE)),)
 $(error TIKU_USBHS_MSC=1 and TIKU_CONSOLE=$(TIKU_CONSOLE) both claim the USB device; build mass storage with TIKU_CONSOLE=uart)
 endif
 SRCS   += arch/nordic/tiku_usbhs_arch.c
 SRCS   += arch/nordic/tiku_usbhs_msc.c
+endif
 SRCS   += services/usb/tiku_usbd_msc.c
 SRCS   += services/usb/tiku_usbd_ctrl.c
 SRCS   += shell/commands/tiku_shell_cmd_usbmsc.c

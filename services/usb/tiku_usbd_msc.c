@@ -282,3 +282,81 @@ void tiku_usbd_msc_decode(tiku_usbd_msc_t *m, const tiku_usbd_msc_cbw_t *cbw,
         out->residue = host_len;
     }
 }
+
+/** @brief Store @p v little-endian in @p n bytes at @p p. */
+static void put_le(uint8_t *p, uint32_t v, uint8_t n)
+{
+    uint8_t i;
+
+    for (i = 0u; i < n; i++) {
+        p[i] = (uint8_t)(v >> (8u * i));
+    }
+}
+
+/** @brief Copy @p s into an @p n-byte field, padded with spaces. */
+static void put_text(uint8_t *p, const char *s, uint8_t n)
+{
+    uint8_t i;
+
+    for (i = 0u; i < n; i++) {
+        p[i] = (uint8_t)((s != (const char *)0 && *s != '\0') ? *s++ : ' ');
+    }
+}
+
+int tiku_usbd_msc_format_fat12(uint8_t *disk, uint32_t blocks,
+                               const char *label)
+{
+    uint32_t fat_blocks = 1u, clusters, root, i;
+    uint8_t *b = disk;
+
+    if (disk == (uint8_t *)0 || blocks < 8u || blocks > 0xFFFFu) {
+        return -1;
+    }
+    /* The FAT grows until it holds a 12-bit entry for every cluster plus
+     * the two reserved ones. */
+    for (;;) {
+        clusters = blocks - 1u - 2u * fat_blocks - 1u;
+        if (((clusters + 2u) * 3u + 1u) / 2u <= fat_blocks * TIKU_USBD_MSC_BLOCK) {
+            break;
+        }
+        fat_blocks++;
+    }
+    if (clusters >= 4085u) {
+        return -1;
+    }
+    root = 1u + 2u * fat_blocks;
+    for (i = 0u; i < (root + 1u) * TIKU_USBD_MSC_BLOCK; i++) {
+        b[i] = 0u;
+    }
+    b[0] = 0xEBu;                               /* jump over the BPB */
+    b[1] = 0x3Cu;
+    b[2] = 0x90u;
+    put_text(&b[3], "TIKUOS", 8u);
+    put_le(&b[11], TIKU_USBD_MSC_BLOCK, 2u);    /* bytes per sector */
+    b[13] = 1u;                                 /* sectors per cluster */
+    put_le(&b[14], 1u, 2u);                     /* reserved sectors */
+    b[16] = 2u;                                 /* FATs */
+    put_le(&b[17], 16u, 2u);                    /* root entries: one block */
+    put_le(&b[19], blocks, 2u);
+    b[21] = 0xF8u;                              /* fixed medium */
+    put_le(&b[22], fat_blocks, 2u);
+    put_le(&b[24], 32u, 2u);                    /* sectors per track */
+    put_le(&b[26], 2u, 2u);                     /* heads */
+    b[36] = 0x80u;                              /* drive number */
+    b[38] = 0x29u;                              /* extended boot record */
+    put_le(&b[39], 0x554B4954u, 4u);            /* volume serial */
+    put_text(&b[43], label, 11u);
+    put_text(&b[54], "FAT12", 8u);
+    b[510] = 0x55u;
+    b[511] = 0xAAu;
+    for (i = 0u; i < 2u; i++) {                 /* media byte, end of chain */
+        uint8_t *fat = &b[(1u + i * fat_blocks) * TIKU_USBD_MSC_BLOCK];
+
+        fat[0] = 0xF8u;
+        fat[1] = 0xFFu;
+        fat[2] = 0xFFu;
+    }
+    put_text(&b[root * TIKU_USBD_MSC_BLOCK], label, 11u);
+    b[root * TIKU_USBD_MSC_BLOCK + 11u] = 0x08u; /* volume label entry */
+    return 0;
+}

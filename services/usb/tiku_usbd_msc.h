@@ -159,4 +159,17 @@ void tiku_usbd_msc_fail(tiku_usbd_msc_t *m, uint8_t key, uint8_t asc);
 void tiku_usbd_msc_decode(tiku_usbd_msc_t *m, const tiku_usbd_msc_cbw_t *cbw,
                           uint8_t *reply, tiku_usbd_msc_cmd_t *out);
 
+/**
+ * @brief Lay an empty FAT12 volume over a disk of @p blocks blocks.
+ *
+ * One block a cluster, two FATs, a 16-entry root directory holding the
+ * volume label; the blocks past the root directory are left as they are.
+ *
+ * @param disk   the medium's bytes, @p blocks * TIKU_USBD_MSC_BLOCK long
+ * @param label  up to 11 characters, upper case, padded with spaces
+ * @return 0, or -1 below 8 blocks or with 4085 clusters or more
+ */
+int tiku_usbd_msc_format_fat12(uint8_t *disk, uint32_t blocks,
+                               const char *label);
+
 #endif /* TIKU_USBD_MSC_H_ */
