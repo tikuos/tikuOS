@@ -89,6 +89,15 @@ void tiku_serial_jtag_putc(char byte)
         tiku_serial_jtag_poll();
     }
 }
+void tiku_serial_jtag_flush(void)
+{
+    uint32_t start = TIKU_C5_CONSOLE_CYCLES();
+    do {
+        tiku_serial_jtag_poll();
+    } while (count && !stalled &&
+             (uint32_t)(TIKU_C5_CONSOLE_CYCLES() - start) <
+                 console_mhz() * 20000u);
+}
 uint8_t tiku_serial_jtag_rx_ready(void)
 {
     tiku_serial_jtag_poll();
@@ -127,7 +136,6 @@ void tiku_debug_arch_printf(const char *format, ...)
     char text[512];
     va_list args;
     unsigned i;
-    uint32_t start;
     va_start(args, format);
     (void)vsnprintf(text, sizeof(text), format, args);
     va_end(args);
@@ -137,10 +145,5 @@ void tiku_debug_arch_printf(const char *format, ...)
         }
         tiku_serial_jtag_putc(text[i]);
     }
-    start = TIKU_C5_CONSOLE_CYCLES();
-    do {
-        tiku_serial_jtag_poll();
-    } while (count && !stalled &&
-             (uint32_t)(TIKU_C5_CONSOLE_CYCLES() - start) <
-                 console_mhz() * 20000u);
+    tiku_serial_jtag_flush();
 }

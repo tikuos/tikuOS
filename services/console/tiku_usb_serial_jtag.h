@@ -42,6 +42,9 @@ int tiku_usb_serial_jtag_getc(void);
 void tiku_serial_jtag_poll(void);
 /** @brief Queue a byte with a bounded wait when full; count dropped bytes on timeout. */
 void tiku_serial_jtag_putc(char byte);
+/** @brief Write queued bytes to the USB FIFO until none remain, waiting at most
+ *         20 ms for the host; foreground context only. */
+void tiku_serial_jtag_flush(void);
 /** @brief Flush pending output and test whether the receive FIFO contains a byte. */
 uint8_t tiku_serial_jtag_rx_ready(void);
 /** @brief Return console bytes dropped because the host did not accept output. */
