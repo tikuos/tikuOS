@@ -152,6 +152,16 @@ polled 64-byte batches; a batch that does not end within 50 ms returns
 input and the controller's clocks and reset. `/dev/spi/config` shows the
 open configuration.
 
+The 1-Wire master drives GPIO48, header P1 pin 11, as an open-drain GPIO
+with the pad's pull-up on (`tiku_onewire_arch.c`); a bus with devices
+needs an external 4.7 kOhm pull-up. The 16 MHz SYSTIMER times each slot,
+so the timing does not depend on the CPU clock: a 480 us reset pulse with
+the presence sample 70 us after release, 70 us write slots held low 6 us
+for a 1 and 60 us for a 0, and read slots sampled 15 us after their
+falling edge. Interrupts are masked through each slot and through the
+presence sample. `tiku_onewire_close()` restores the pad and releases its
+claim.
+
 The SAR ADC converts one channel at a time through the LP ADC's RTC
 controller (`tiku_adc_arch.c`): channels 0-7 are ADC1 on GPIO16-23, 8-13
 ADC2 on GPIO49-54, and channel 30 is the temperature sensor. Header pins

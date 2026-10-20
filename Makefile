@@ -3744,12 +3744,10 @@ CFLAGS += $(APPL_CFLAGS)
 # explicit objects does not change the link: the libraries come after every
 # object, and the linker scripts place every section by pattern.
 SRCS := $(sort $(SRCS))
+# The Olimex ESP32-P4 builds none of these buses; the FireBeetle 2 builds
+# each over its driver.
 ifeq ($(TIKU_PLATFORM),esp32p4)
-# The FireBeetle 2 builds the I2C and SPI buses and the ADC over their
-# drivers; the Olimex builds none of these buses.
-ifeq ($(TIKU_BOARD_DEFINE),TIKU_BOARD_FIREBEETLE2_ESP32P4)
-SRCS := $(filter-out interfaces/onewire/tiku_onewire.c,$(SRCS))
-else
+ifneq ($(TIKU_BOARD_DEFINE),TIKU_BOARD_FIREBEETLE2_ESP32P4)
 SRCS := $(filter-out interfaces/bus/tiku_spi_bus.c interfaces/bus/tiku_i2c_bus.c \
     interfaces/adc/tiku_adc.c interfaces/onewire/tiku_onewire.c,$(SRCS))
 endif

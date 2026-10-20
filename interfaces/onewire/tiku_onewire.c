@@ -28,7 +28,8 @@
 /* The bus pin in the port/pin terms tiku_gpio_claim() takes; RP2350 and the
  * ESP32-C5 number their pins flat, eight to a port from port 1. */
 #if TIKU_BOARD_OW_AVAILABLE && defined(TIKU_BOARD_OW_PIN)
-#if defined(PLATFORM_RP2350) || defined(PLATFORM_ESP32C5)
+#if defined(PLATFORM_RP2350) || defined(PLATFORM_ESP32C5) || \
+    defined(PLATFORM_ESP32P4)
 #define OW_PORT ((uint8_t)(TIKU_BOARD_OW_PIN / 8 + 1))
 #define OW_PIN ((uint8_t)(TIKU_BOARD_OW_PIN % 8))
 #elif defined(TIKU_BOARD_OW_PORT)

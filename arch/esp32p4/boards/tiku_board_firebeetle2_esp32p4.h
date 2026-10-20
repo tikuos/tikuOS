@@ -69,6 +69,12 @@
 /* SAR ADC channels 0..7 on GPIO16..23 and 8..13 on GPIO49..54; header pins
  * A0..A3 are channels 4..7 and A4 channel 10.  The C6's pads are refused. */
 #define TIKU_BOARD_ADC_AVAILABLE 1
+/* 1-Wire on header P1 pin 11, open drain; devices need an external 4.7 kOhm
+ * pull-up. */
+#define TIKU_BOARD_OW_AVAILABLE 1
+#ifndef TIKU_BOARD_OW_PIN
+#define TIKU_BOARD_OW_PIN 48u
+#endif
 
 /* 6, 14-19, 54: the ESP32-C6's SDIO link, EN and WAKEUP.  9, 12: the PDM
  * microphone.  24, 25: the console.  39-45: the TF slot and its power switch

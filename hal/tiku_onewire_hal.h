@@ -33,6 +33,8 @@
 #include <arch/esp32c61/tiku_onewire_arch.h>
 #elif defined(PLATFORM_ESP32C5)
 #include <arch/esp32c5/tiku_onewire_arch.h>
+#elif defined(PLATFORM_ESP32P4)
+#include <arch/esp32p4/tiku_onewire_arch.h>
 #endif
 
 #endif /* TIKU_ONEWIRE_HAL_H_ */
