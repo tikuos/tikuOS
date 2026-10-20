@@ -259,7 +259,7 @@
 #define TIKU_SHELL_CMD_NVMPROBE 0 /**< nvmprobe - NVM region diagnostic */
 #endif
 #ifndef TIKU_SHELL_CMD_CRYPTOPROBE
-#define TIKU_SHELL_CMD_CRYPTOPROBE 0 /**< cryptoprobe - CRACEN probe */
+#define TIKU_SHELL_CMD_CRYPTOPROBE 0 /**< cryptoprobe - crypto engine probe */
 #endif
 #ifndef TIKU_SHELL_CMD_RADIO154
 #define TIKU_SHELL_CMD_RADIO154 0 /**< radio154 - 802.15.4 PHY test */
@@ -589,8 +589,10 @@
 #define TIKU_SHELL_CMD_RADIO154 0
 #endif
 
-/* cryptoprobe drives the CRACEN CryptoMaster. */
-#if TIKU_SHELL_CMD_CRYPTOPROBE && !defined(PLATFORM_NORDIC)
+/* cryptoprobe drives a crypto engine: Nordic's CRACEN or the FireBeetle 2
+ * ESP32-P4's SHA and AES (hal/tiku_crypto_hal.h). */
+#if TIKU_SHELL_CMD_CRYPTOPROBE && !defined(PLATFORM_NORDIC) && \
+    !(defined(PLATFORM_ESP32P4) && defined(TIKU_BOARD_FIREBEETLE2_ESP32P4))
 #undef  TIKU_SHELL_CMD_CRYPTOPROBE
 #define TIKU_SHELL_CMD_CRYPTOPROBE 0
 #endif

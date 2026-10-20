@@ -20,9 +20,7 @@
 
 #include "tiku_vfs_tree_sys.h"
 #include <errno.h>
-#if defined(PLATFORM_NORDIC)
-#include <arch/nordic/tiku_crypto_arch.h>   /* /sys/crypto mode + counters */
-#endif
+#include <hal/tiku_crypto_hal.h>   /* /sys/crypto mode + counters */
 #if (TIKU_HAS_BLE_ADV + 0)
 #include <interfaces/bluetooth/tiku_ble_adv.h>  /* /sys/radio beacon + scan */
 #if !(TIKU_BT_HOST + 0)
@@ -1162,7 +1160,7 @@ static const tiku_vfs_node_t sys_device_children[] = {
 
 
 
-#if defined(PLATFORM_NORDIC)
+#if TIKU_CRYPTO_HW
 /*---------------------------------------------------------------------------*/
 /* CRYPTO                                                                    */
 /*---------------------------------------------------------------------------*/
@@ -1231,7 +1229,7 @@ static const tiku_vfs_node_t sys_crypto_children[] = {
     { "ops",  TIKU_VFS_FILE, crypto_ops_read,  NULL,              NULL, 0 },
     { "pk",   TIKU_VFS_FILE, crypto_pk_read,   NULL,              NULL, 0 },
 };
-#endif /* PLATFORM_NORDIC */
+#endif /* TIKU_CRYPTO_HW */
 
 #if (TIKU_HAS_BLE_ADV + 0)
 /*---------------------------------------------------------------------------*/
@@ -1965,7 +1963,7 @@ static const tiku_vfs_node_t sys_children[] = {
     { "vfs",      TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_vfs_children,      TIKU_VFS_TREE_VFS_NCHILD },
     { "sched",    TIKU_VFS_DIR,  NULL, NULL, sys_sched_children, 1 },
-#if defined(PLATFORM_NORDIC)
+#if TIKU_CRYPTO_HW
     { "crypto",   TIKU_VFS_DIR,  NULL, NULL, sys_crypto_children, 3 },
 #endif
 #if (TIKU_HAS_BLE_ADV + 0)

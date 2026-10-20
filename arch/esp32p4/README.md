@@ -178,6 +178,19 @@ code; `tiku_p4_adc_celsius()` applies the eFuse correction. `adc`, BASIC's
 ADC() and `/dev/adc/temp` read through the driver; there is no supply
 channel.
 
+The SHA and AES engines sit behind the crypto kit (`tiku_crypto_arch.c`,
+through `hal/tiku_crypto_hal.h`), as CRACEN does on Nordic.
+`tiku_kits_crypto_sha256_hash()` runs on the SHA engine, eight 64-byte
+blocks per interrupt-masked chunk with the hash state reloaded between
+chunks; the kit's AES-GCM runs its counter blocks on the AES engine in its
+register-fed mode and GHASH in software. `/sys/crypto/mode` selects auto
+(the engine, with the software path on an engine error) or sw, and
+`/sys/crypto/ops` counts the operations each path served. A 4 KB SHA-256
+takes about 415 us on the engine and 980 us in software. The engines' DMA
+modes are not used, nor is the ECDSA engine, which ESP-IDF enables only
+from silicon revision 3.0; the Olimex image builds the kit's software paths
+alone.
+
 ### Memory and configuration
 
 | Resource | Firmware use |

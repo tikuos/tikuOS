@@ -2847,10 +2847,10 @@ ifneq (,$(findstring TIKU_SHELL_CMD_NVMPROBE=1,$(EXTRA_CFLAGS)))
 SRCS += shell/commands/tiku_shell_cmd_nvmprobe.c
 endif
 ifneq (,$(findstring TIKU_SHELL_CMD_CRYPTOPROBE=1,$(EXTRA_CFLAGS)))
-ifeq ($(TIKU_PLATFORM),nordic)
+ifneq (,$(filter nordic,$(TIKU_PLATFORM))$(filter TIKU_BOARD_FIREBEETLE2_ESP32P4,$(TIKU_BOARD_DEFINE)))
 SRCS += shell/commands/tiku_shell_cmd_cryptoprobe.c
 else
-$(warning cryptoprobe: needs a Nordic part (CRACEN) -- skipped)
+$(warning cryptoprobe: needs a crypto engine (Nordic, FireBeetle 2 ESP32-P4) -- skipped)
 endif
 endif
 # TIKU_USBHS_MSC=1: USB mass storage on the nRF54LM20A/B DWC2 core.  It

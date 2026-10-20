@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_cryptoprobe.c - CRACEN CryptoMaster diagnostic probe.
+ * tiku_shell_cmd_cryptoprobe.c - hardware crypto engine probe.
  *
- * Dumps the fused-engine words, hashes with candidate configs to find one that
- * reproduces a known vector, runs AES and PK known-answer tests, and times
- * hardware against software.
+ * Runs SHA-256, AES and GCM known-answer tests through the port's engines and
+ * times hardware against software.  On Nordic it also dumps the CRACEN fused
+ * words, sweeps hash configs and runs the DMA and PK probes.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,9 +20,9 @@
 
 #include <shell/tiku_shell_io.h>
 /* TIKU_CLOCK_ARCH_SECOND, which tiku_clock.h uses but does not define. */
-#include <arch/nordic/tiku_timer_arch.h>
+#include <tiku.h>
 #include <kernel/timers/tiku_clock.h>
-#include <arch/nordic/tiku_crypto_arch.h>
+#include <hal/tiku_crypto_hal.h>
 #include <tikukits/crypto/sha256/tiku_kits_crypto_sha256.h>
 #include <tikukits/crypto/gcm/tiku_kits_crypto_gcm.h>
 #include <tikukits/crypto/p256/tiku_kits_crypto_p256.h>
@@ -46,6 +46,7 @@ static void print_digest(const uint8_t *d, size_t n)
     }
 }
 
+#if defined(PLATFORM_NORDIC)
 /**
  * @brief Hash "abc" with candidate config @p cfg and compare with SHA-256.
  *
@@ -72,9 +73,27 @@ static void probe_one(uint32_t cfg, uint8_t quiet)
         SHELL_PRINTF("... (%lu us)\n", (unsigned long)(t1 - t0));
     }
 }
+#endif /* PLATFORM_NORDIC */
 
 void tiku_shell_cmd_cryptoprobe(uint8_t argc, const char *argv[])
 {
+    /* FIPS 180-4 "abc" through the SHA-256 path the kit uses. */
+    if (argc == 2 && strcmp(argv[1], "sha") == 0) {
+        uint8_t out[32];
+        int rc;
+        memset(out, 0, sizeof out);
+        rc = tiku_crypto_arch_sha256("abc", 3u, out);
+        if (rc == 0 && memcmp(out, sha256_abc, sizeof out) == 0) {
+            SHELL_PRINTF(SH_GREEN "MATCH SHA-256" SH_RST " (\"abc\")\n");
+        } else {
+            SHELL_PRINTF("rc=%d digest=", rc);
+            print_digest(out, sizeof out);
+            SHELL_PRINTF(SH_RED " MISMATCH\n" SH_RST);
+        }
+        return;
+    }
+
+#if defined(PLATFORM_NORDIC)
     if (argc >= 2 && strcmp(argv[1], "hwcfg") == 0) {
         static const char *names[7] = {
             "INCLIPS", "BA411CFG1", "BA411CFG2", "BA413HASH",
@@ -92,6 +111,7 @@ void tiku_shell_cmd_cryptoprobe(uint8_t argc, const char *argv[])
         probe_one((uint32_t)strtoul(argv[2], (char **)0, 16), 0u);
         return;
     }
+#endif /* PLATFORM_NORDIC */
 
     /* FIPS-197 C.1 AES-128 ECB single-block known-answer test. */
     if (argc >= 2 && strcmp(argv[1], "ecb") == 0) {
@@ -116,6 +136,7 @@ void tiku_shell_cmd_cryptoprobe(uint8_t argc, const char *argv[])
         return;
     }
 
+#if defined(PLATFORM_NORDIC)
     /* RFC 3610 packet vector #1: AES-CCM* known-answer (M=8, L=2). */
     if (argc >= 2 && strcmp(argv[1], "ccm") == 0) {
         static const uint8_t key[16] = {
@@ -173,29 +194,34 @@ void tiku_shell_cmd_cryptoprobe(uint8_t argc, const char *argv[])
         SHELL_PRINTF("sweep done (silent = no match)\n");
         return;
     }
+#endif /* PLATFORM_NORDIC */
 
     if (argc >= 2 && strcmp(argv[1], "bench") == 0) {
-        /* Iterate each path over 4 KB and count kernel ticks; the iteration
-         * count divides the coarse tick down to microseconds per op. */
+        /* Each path hashes 4 KB for at least a quarter second of kernel
+         * ticks, at most 4096 times, so the tick count divides down to
+         * microseconds per op at any tick rate. */
         static uint8_t buf[4096];
         uint8_t  hw[32], sw[32];
+        const uint32_t span = TIKU_CLOCK_SECOND / 4u;
         tiku_clock_time_t t0;
-        uint32_t i, n_hw = 512u, n_sw = 16u, thw, tsw;
+        uint32_t i, n_hw = 0, n_sw = 0, thw, tsw;
         int      rc = 0;
         for (i = 0; i < sizeof buf; i++) { buf[i] = (uint8_t)i; }
 
         t0 = tiku_clock_time();
-        for (i = 0; i < n_hw && rc == 0; i++) {
+        do {
             rc = tiku_crypto_arch_sha256(buf, sizeof buf, hw);
-        }
-        thw = (uint32_t)((tiku_clock_time_t)(tiku_clock_time() - t0));
+            n_hw++;
+            thw = (uint32_t)((tiku_clock_time_t)(tiku_clock_time() - t0));
+        } while (rc == 0 && thw < span && n_hw < 4096u);
 
         tiku_crypto_hw_mode_set(TIKU_CRYPTO_HW_MODE_SW);
         t0 = tiku_clock_time();
-        for (i = 0; i < n_sw; i++) {
+        do {
             tiku_kits_crypto_sha256_hash(buf, sizeof buf, sw);
-        }
-        tsw = (uint32_t)((tiku_clock_time_t)(tiku_clock_time() - t0));
+            n_sw++;
+            tsw = (uint32_t)((tiku_clock_time_t)(tiku_clock_time() - t0));
+        } while (tsw < span && n_sw < 4096u);
         tiku_crypto_hw_mode_set(TIKU_CRYPTO_HW_MODE_AUTO);
 
         SHELL_PRINTF("sha256(4KB): hw %lu us/op (%lu ticks/%lu), "
@@ -213,6 +239,7 @@ void tiku_shell_cmd_cryptoprobe(uint8_t argc, const char *argv[])
         return;
     }
 
+#if defined(PLATFORM_NORDIC)
     if (argc >= 2 && strcmp(argv[1], "bypass") == 0) {
         uint8_t out[8];
         int rc;
@@ -238,6 +265,7 @@ void tiku_shell_cmd_cryptoprobe(uint8_t argc, const char *argv[])
                          ? SH_GREEN "MATCH" SH_RST : SH_RED "FAIL" SH_RST);
         return;
     }
+#endif /* PLATFORM_NORDIC */
 
     if (argc >= 3 && strcmp(argv[1], "mode") == 0) {
         tiku_crypto_hw_mode_set(
@@ -259,7 +287,8 @@ void tiku_shell_cmd_cryptoprobe(uint8_t argc, const char *argv[])
     if (argc >= 2 && strcmp(argv[1], "gcm") == 0) {
         /* hw GCM against the software kit, which passes the NIST vectors:
          * AES-256, 12-byte IV, 20-byte AAD, and a 67-byte payload so the
-         * last block is partial. */
+         * last block is partial.  The kit runs in sw mode, or it would take
+         * the hardware path itself. */
         static uint8_t key[32], iv[12], aad[32], pt[80], ct_sw[80], ct_hw[80];
         static uint8_t tag_sw[16], tag_hw[16], back[80];
         tiku_kits_crypto_gcm_ctx_t gctx;
@@ -272,9 +301,11 @@ void tiku_shell_cmd_cryptoprobe(uint8_t argc, const char *argv[])
         for (i = 0; i < sizeof aad; i++) { aad[i] = (uint8_t)(0x30u + i); }
         for (i = 0; i < 67u;        i++) { pt[i]  = (uint8_t)(i ^ 0x5Au); }
 
+        tiku_crypto_hw_mode_set(TIKU_CRYPTO_HW_MODE_SW);
         tiku_kits_crypto_gcm_init256(&gctx, key);
         tiku_kits_crypto_gcm_encrypt(&gctx, iv, aad, 20u, pt, 67u,
                                      ct_sw, tag_sw);
+        tiku_crypto_hw_mode_set(TIKU_CRYPTO_HW_MODE_AUTO);
         rc = tiku_crypto_arch_aes_gcm(0, extra, key, 32u, iv,
                                       aad, 20u, pt, 67u, ct_hw, tag_hw);
         SHELL_PRINTF("gcm enc rc=%d ct %s tag %s\n", rc,
@@ -287,9 +318,11 @@ void tiku_shell_cmd_cryptoprobe(uint8_t argc, const char *argv[])
              * match means the hardware ran a 128-bit key. */
             static uint8_t ct128[80], tag128[16];
             tiku_kits_crypto_gcm_ctx_t g128;
+            tiku_crypto_hw_mode_set(TIKU_CRYPTO_HW_MODE_SW);
             tiku_kits_crypto_gcm_init(&g128, key);
             tiku_kits_crypto_gcm_encrypt(&g128, iv, aad, 20u, pt, 67u,
                                          ct128, tag128);
+            tiku_crypto_hw_mode_set(TIKU_CRYPTO_HW_MODE_AUTO);
             SHELL_PRINTF("  hw-vs-sw128: ct %s tag %s\n",
                          memcmp(ct128, ct_hw, 67u) == 0 ? "MATCH" : "diff",
                          memcmp(tag128, tag_hw, 16u) == 0 ? "MATCH" : "diff");
@@ -399,6 +432,7 @@ void tiku_shell_cmd_cryptoprobe(uint8_t argc, const char *argv[])
     }
 #endif /* TIKU_CRACEN_PK_ENABLE */
 
+#if defined(PLATFORM_NORDIC)
     if (argc >= 2 && strcmp(argv[1], "dbg") == 0) {
         uint32_t ints, st, sv, stage;
         tiku_crypto_arch_dbg(&ints, &st, &sv, &stage);
@@ -410,6 +444,9 @@ void tiku_shell_cmd_cryptoprobe(uint8_t argc, const char *argv[])
 
     SHELL_PRINTF("usage: cryptoprobe hwcfg|sha|sweep|gcm|ecb|ccm|bypass|"
                  "direct|pk|bench|mode|counters|dbg\n");
+#else
+    SHELL_PRINTF("usage: cryptoprobe sha|ecb|gcm|bench|mode|counters\n");
+#endif /* PLATFORM_NORDIC */
 }
 
 #endif /* TIKU_SHELL_CMD_CRYPTOPROBE */

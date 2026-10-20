@@ -662,7 +662,7 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
     {"nvmprobe","Carved NVM region diagnostic", tiku_shell_cmd_nvmprobe},
 #endif
 #if TIKU_SHELL_CMD_CRYPTOPROBE
-    {"cryptoprobe","CRACEN bring-up probe",   tiku_shell_cmd_cryptoprobe},
+    {"cryptoprobe","crypto engine probe",     tiku_shell_cmd_cryptoprobe},
 #endif
 #if TIKU_SHELL_CMD_AXONSPROBE
     {"axonsprobe","Axon NPU bring-up probe",  tiku_shell_cmd_axonsprobe},

@@ -19,7 +19,7 @@ SRCS += arch/esp32p4/tiku_gpio_arch.c
 ifeq ($(TIKU_BOARD_DEFINE),TIKU_BOARD_FIREBEETLE2_ESP32P4)
 SRCS += arch/esp32p4/tiku_uart_arch.c arch/esp32p4/tiku_i2c_arch.c
 SRCS += arch/esp32p4/tiku_adc_arch.c arch/esp32p4/tiku_spi_arch.c
-SRCS += arch/esp32p4/tiku_onewire_arch.c
+SRCS += arch/esp32p4/tiku_onewire_arch.c arch/esp32p4/tiku_crypto_arch.c
 endif
 SRCS += arch/esp32p4/tiku_trng_arch.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_psram_p4.c

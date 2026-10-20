@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_cryptoprobe.h - CRACEN diagnostic probe (opt-in).
+ * tiku_shell_cmd_cryptoprobe.h - crypto engine probe (opt-in).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,11 +18,10 @@
 
 #if TIKU_SHELL_CMD_CRYPTOPROBE
 /**
- * @brief "cryptoprobe" command handler — CRACEN CryptoMaster probe.
+ * @brief "cryptoprobe" command handler — hardware crypto engine probe.
  *
- * Sub-commands cover the fused-engine dump (hwcfg), the SHA config search
- * (sha/sweep), the ecb/ccm/pk known-answer tests, the gcm hardware-vs-software
- * check, a bench, the bypass/direct DMA probes, and mode/counters/dbg.
+ * On every port: sha, ecb, gcm, bench, mode and counters.  On Nordic also
+ * hwcfg, sha <cfg>, sweep, ccm, pk, the bypass/direct DMA probes and dbg.
  *
  * @param argc  Argument count
  * @param argv  Argument vector; argv[1] selects the sub-command, argv[2]
