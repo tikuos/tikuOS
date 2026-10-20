@@ -21,9 +21,9 @@
 #include <kernel/vfs/tiku_vfs.h>
 #include <interfaces/gpio/tiku_gpio_geometry.h>
 
-/** @brief 1 when /dev/gpio pin files take writes: every port but the P4,
- *  whose pins are read-only (arch/esp32p4/tiku_gpio_arch.h). */
-#if defined(PLATFORM_ESP32P4)
+/** @brief 1 when /dev/gpio pin files take writes: every board but one whose
+ *  header defines TIKU_BOARD_GPIO_READONLY. */
+#if defined(TIKU_BOARD_GPIO_READONLY)
 #define TIKU_VFS_GPIO_WRITABLE 0
 #else
 #define TIKU_VFS_GPIO_WRITABLE 1

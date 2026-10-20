@@ -106,6 +106,21 @@ python -m tikubench run p4-firmware --board firebeetle2_p4 \
     --port /dev/cu.usbmodemN --flash
 ```
 
+`boards/tiku_board_firebeetle2_esp32p4.h` records the board's wiring from
+the DFR1172 schematic V1.0. GPIO3 drives the green user LED, high for on
+(`/dev/led0`); GPIO35 is the BOOT button, read low when pressed with the
+pad's pull-up on (`/dev/btn0`). The GPIO API reserves the pads wired to the
+ESP32-C6 (6, 14-19, 54), the PDM microphone (9, 12), the USB console
+(24, 25), the TF slot and its power switch (39-45), the LED and the button.
+It also refuses a pad routed to a peripheral: an IO MUX function other than
+GPIO, UART0 on 37/38 or the SD slot 0 bus on 39-48 in function 0, a matrix
+output or input signal, or LP IO MUX control while the LP core holds the
+pad. GPIO2-5 count as JTAG pads only when eFuse selects pad JTAG; the board
+takes JTAG over USB. Every other pad, the header pins among them, accepts
+`gpio`, `/dev/gpio` writes and `irq` edges on GPIO_INTR0 (matrix source 74,
+CLIC line 3), each edge broadcast as `TIKU_EVENT_GPIO`. While the LP core
+drives GPIO3, `/dev/led0` writes do not reach the pad.
+
 ### Memory and configuration
 
 | Resource | Firmware use |
@@ -230,8 +245,9 @@ kernel diagnostic covers scheduler/workers and allocator lifecycle. These
 results do not establish the full-firmware physical cold-start or brownout
 behavior. Physical BOOT release/power cycling requires local access.
 
-All 55 GPIO inputs can be observed through read-only nodes; direction/output
-changes and GPIO IRQs are refused because board routes are not qualified.
+On the Olimex all 55 GPIO inputs can be observed through read-only nodes;
+direction/output changes and GPIO IRQs are refused because its board header
+reserves every pad. The FireBeetle 2 drives its free pads (above).
 Ethernet, microSD, USB host, HDMI, audio and camera drivers are not provided
 by this profile. Their wiring and attached accessories require confirmation
 before external pins or power rails are driven. Wi-Fi/BLE are not integrated

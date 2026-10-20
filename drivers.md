@@ -389,6 +389,7 @@ the node tables small on parts with hundreds of pins.
 | Apollo510/510B | Virtual ports 1–28, eight pads each, using the same mapping. |
 | RP2350 | Virtual ports 1–4 map GP0–GP29. Port 4 ends at pin 5; QSPI pins are not exposed. |
 | ESP32-C61 | Virtual ports 1–4 map GPIO0–GPIO29 in banks of eight, as on the RP2350. |
+| ESP32-P4 | Virtual ports 1–7 map GPIO0–GPIO54 in banks of eight; port 7 ends at pin 6. |
 | STM32N6 | Numeric 0–7 for A–H and 13–16 for N–Q, 16 register bits per port. I–M do not exist. |
 | RA8P1 | Numeric 0–13 for ports 0–9 and A–D, 16 register bits per port. |
 
@@ -403,6 +404,8 @@ console pins are protected; on MSP430 the active mux identifies them as
 `peripheral`. An RP2350 build with only the USB console leaves GP0 and GP1
 unreserved. A WiFi-enabled Pico 2 W also reserves its internal radio wiring. On
 RA8P1 a pin set as an analog or IRQ input (ASEL, ISEL) reads as `peripheral`.
+On the ESP32-P4 the board header's reserved pads read as `peripheral`, the
+USB console's pads as `console`, and a pad the LP core holds as `peripheral`.
 The 1-Wire interface claims its GPIO on supported MSP430/RP2350 boards and
 releases it on close or failed initialization.
 

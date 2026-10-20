@@ -27,11 +27,6 @@
 #error "The P4 kernel test profile requires 360 MHz"
 #endif
 #define TIKU_DEVICE_NAME "ESP32-P4 rev 1.3"
-#if defined(TIKU_BOARD_FIREBEETLE2_ESP32P4)
-#define TIKU_BOARD_NAME "DFRobot FireBeetle 2 ESP32-P4"
-#else
-#define TIKU_BOARD_NAME "Olimex ESP32-P4-PC"
-#endif
 #define TIKU_DEVICE_RAM_START 0x4ff00000UL
 #define TIKU_DEVICE_RAM_SIZE (768UL * 1024UL)
 #define TIKU_DEVICE_RAM_USABLE (0x2bbd0UL + 384UL * 1024UL)
@@ -47,4 +42,9 @@
 #define TIKU_DEVICE_XOSC_HZ 40000000UL
 #define TIKU_DEVICE_MAX_STABLE_MHZ 360
 #define TIKU_DEVICE_GPIO_COUNT 55
+#if defined(TIKU_BOARD_FIREBEETLE2_ESP32P4)
+#include "boards/tiku_board_firebeetle2_esp32p4.h"
+#else
+#include "boards/tiku_board_olimex_esp32p4_pc.h"
+#endif
 #endif

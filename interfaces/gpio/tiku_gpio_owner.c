@@ -152,8 +152,12 @@ board_owner(uint8_t port, uint8_t pin)
         return "console";
     }
 #elif defined(PLATFORM_ESP32P4)
-    /* PCB revision has not been selected; no pin may be claimed or driven. */
-    return "peripheral";
+#if defined(TIKU_BOARD_USB_DM_PIN)
+    if (IS_BANKED_PIN(port, pin, TIKU_BOARD_USB_DM_PIN) ||
+        IS_BANKED_PIN(port, pin, TIKU_BOARD_USB_DP_PIN)) { return "console"; }
+#endif
+    if (port >= 1 && port <= 7 && pin < 8 &&
+        ((TIKU_BOARD_GPIO_RESERVED >> ((port - 1u) * 8u + pin)) & 1u)) { return "peripheral"; }
 #elif defined(PLATFORM_ESP32C5)
 #if !defined(TIKU_CONSOLE_JTAG)
     if (IS_BANKED_PIN(port, pin, TIKU_BOARD_UART_TX_PIN) ||
