@@ -201,6 +201,13 @@ invalidated again before the callback; `tiku_cpu_dcache_clean()` and
 PSRAM. SRAM to SRAM runs at about 140 MB/s. This revision's AHB DMA reaches
 PSRAM without bursts: about 18 MB/s writing it and 9 MB/s reading it.
 
+The LED PWM controller drives up to eight pins for `tiku_pwm_arch_*()`
+(`tiku_pwm_arch.c`) from four timers on the 40 MHz crystal; pins at one
+frequency share a timer. A timer counts 2^16 steps up to 610 Hz and fewer
+above, down to 8 bits at 156.25 kHz, and a new rate or duty applies from its
+next period. A free pad takes a channel through the GPIO matrix, and so
+does the LED on GPIO3 while the LP core does not hold its pad.
+
 ### Memory and configuration
 
 | Resource | Firmware use |
