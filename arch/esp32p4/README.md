@@ -141,6 +141,22 @@ bus busy, a STOP releases it. `tiku_i2c_close()` restores the pads and
 leaves I2C0 in reset with its clocks off. BASIC's I2C words use the bus;
 `/dev/i2c` is not listed, as on the C5.
 
+The SAR ADC converts one channel at a time through the LP ADC's RTC
+controller (`tiku_adc_arch.c`): channels 0-7 are ADC1 on GPIO16-23, 8-13
+ADC2 on GPIO49-54, and channel 30 is the temperature sensor. Header pins
+A0-A3 are channels 4-7 and A4 is channel 10; the pads wired to the C6
+(channels 0-3 and 13) are refused. The reference selects the attenuation:
+AVCC and 2V5 12 dB, 2V0 6 dB, 1V2 2.5 dB. Each unit's initial code comes
+from eFuse block 2, or is measured against internal ground on a chip
+without calibration. A conversion runs with interrupts masked and restores
+every register it changed; ADC2 also clocks the digital ADC for the
+conversion and leaves it reset and unclocked. While the entropy source
+holds the digital ADC, a read returns `TIKU_ADC_ERR_TIMEOUT`. A temperature
+reading resets and powers the sensor, waits 300 us and returns its 8-bit
+code; `tiku_p4_adc_celsius()` applies the eFuse correction. `adc`, BASIC's
+ADC() and `/dev/adc/temp` read through the driver; there is no supply
+channel.
+
 ### Memory and configuration
 
 | Resource | Firmware use |

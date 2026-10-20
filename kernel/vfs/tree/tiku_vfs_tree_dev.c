@@ -196,7 +196,7 @@ uart_baud_read(char *buf, size_t max)
  * @param max  Capacity of @p buf in bytes
  * @return The full length of the text (snprintf-style)
  */
-#if TIKU_VFS_DEV_ADC_SPI
+#if TIKU_VFS_DEV_SPI
 static int
 spi_config_read(char *buf, size_t max)
 {
@@ -209,11 +209,13 @@ spi_config_read(char *buf, size_t max)
                     cfg->bit_order == 0 ? "msb" : "lsb",
                     (unsigned)cfg->prescaler);
 }
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* ADC                                                                       */
 /*---------------------------------------------------------------------------*/
 
+#if TIKU_VFS_DEV_ADC
 /**
  * @brief Read handler for /dev/adc/temp.
  *
@@ -448,7 +450,7 @@ static const tiku_vfs_desc_t desc_uart_count = TIKU_VFS_DESC(
  * carry a read-coalescing window in which repeated reads share one
  * conversion: TIKU_CLOCK_SECOND / 10 for temperature, TIKU_CLOCK_SECOND for
  * the supply voltage. */
-#if TIKU_VFS_DEV_ADC_SPI
+#if TIKU_VFS_DEV_ADC
 static const tiku_vfs_desc_t desc_adc_temp =
     TIKU_VFS_DESC_RF(TIKU_VFS_T_U32, TIKU_VFS_U_ADC_RAW,
                      TIKU_VFS_FRESH_LIVE, TIKU_VFS_E_PERIPH, 0, 4095,
@@ -492,7 +494,7 @@ static const tiku_vfs_node_t dev_uart_children[] = {
     (sizeof dev_uart_children / sizeof dev_uart_children[0])
 
 /** /dev/adc directory table — raw conversions, no calibration */
-#if TIKU_VFS_DEV_ADC_SPI
+#if TIKU_VFS_DEV_ADC
 static const tiku_vfs_node_t dev_adc_children[] = {
     { "temp",    TIKU_VFS_FILE, adc_temp_read,    NULL, NULL, 0, &desc_adc_temp },
     { "battery", TIKU_VFS_FILE, adc_battery_read, NULL, NULL, 0, &desc_adc_batt },
@@ -507,7 +509,7 @@ static const tiku_vfs_node_t dev_i2c_children[] = {
 #endif
 
 /** /dev/spi directory table — read-only configuration view */
-#if TIKU_VFS_DEV_ADC_SPI
+#if TIKU_VFS_DEV_SPI
 static const tiku_vfs_node_t dev_spi_children[] = {
     { "config", TIKU_VFS_FILE, spi_config_read, NULL, NULL, 0,
       &desc_bus_config },
@@ -565,8 +567,10 @@ static const tiku_vfs_node_t dev_children[] = {
     { "uart",     TIKU_VFS_DIR,  NULL, NULL, dev_uart_children,
 #endif
       DEV_UART_NCHILD },
-#if TIKU_VFS_DEV_ADC_SPI
+#if TIKU_VFS_DEV_ADC
     { "adc",      TIKU_VFS_DIR,  NULL, NULL, dev_adc_children, 2 },
+#endif
+#if TIKU_VFS_DEV_SPI
     { "spi",      TIKU_VFS_DIR,  NULL, NULL, dev_spi_children, 1 },
 #endif
 #if TIKU_VFS_DEV_I2C

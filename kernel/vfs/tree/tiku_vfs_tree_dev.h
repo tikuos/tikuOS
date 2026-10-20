@@ -19,12 +19,18 @@
 
 #include <kernel/vfs/tiku_vfs.h>
 
-/** @brief 1 when this build lists /dev/adc and /dev/spi: every port but the
- *  P4. */
-#if defined(PLATFORM_ESP32P4)
-#define TIKU_VFS_DEV_ADC_SPI 0
+/** @brief 1 when this build lists /dev/adc: every board but the Olimex P4. */
+#if defined(PLATFORM_ESP32P4) && !defined(TIKU_BOARD_FIREBEETLE2_ESP32P4)
+#define TIKU_VFS_DEV_ADC 0
 #else
-#define TIKU_VFS_DEV_ADC_SPI 1
+#define TIKU_VFS_DEV_ADC 1
+#endif
+
+/** @brief 1 when this build lists /dev/spi: every port but the P4. */
+#if defined(PLATFORM_ESP32P4)
+#define TIKU_VFS_DEV_SPI 0
+#else
+#define TIKU_VFS_DEV_SPI 1
 #endif
 
 /** @brief 1 when this build lists /dev/i2c: every port but the C5 and P4. */
