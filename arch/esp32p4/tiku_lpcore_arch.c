@@ -350,3 +350,72 @@ int tiku_p4_lpcore_i2c_result(uint8_t found[16])
     }
     return sh->i2c_scl_stuck ? -1 : (int)sh->i2c_count;
 }
+
+#ifndef TIKU_P4_LPCORE_SAR_WAIT
+/** @brief Polls of the payload's busy flag before the HP goes ahead: well
+ *         past one LP conversion. */
+#define TIKU_P4_LPCORE_SAR_WAIT 20000u
+#endif
+
+void tiku_p4_lpcore_sar_take(void)
+{
+    tiku_lpcore_shared_t *sh = TIKU_LPCORE_SHARED;
+    uint32_t n;
+
+    if (sh->magic != TIKU_LPCORE_MAGIC) {
+        return;
+    }
+    sh->sar_hp_req = 1u;
+    TIKU_P4_FENCE();
+    for (n = 0u; n < TIKU_P4_LPCORE_SAR_WAIT && sh->sar_lp_busy; n++) {
+    }
+}
+
+void tiku_p4_lpcore_sar_give(void)
+{
+    tiku_lpcore_shared_t *sh = TIKU_LPCORE_SHARED;
+
+    if (sh->magic == TIKU_LPCORE_MAGIC) {
+        TIKU_P4_FENCE();
+        sh->sar_hp_req = 0u;
+    }
+}
+
+int tiku_p4_lpcore_sar_keep(const uint32_t *words, unsigned n)
+{
+    tiku_lpcore_shared_t *sh = TIKU_LPCORE_SHARED;
+    unsigned i;
+
+    if (n > TIKU_LPCORE_SAR_WORDS) {
+        return -1;
+    }
+    sh->sar_kept = 0u;
+    TIKU_P4_FENCE();
+    for (i = 0u; i < n; i++) {
+        sh->sar_keep[i] = words[i];
+    }
+    sh->sar_keep_n = n;
+    TIKU_P4_FENCE();
+    sh->sar_kept = TIKU_LPCORE_SAR_KEPT;
+    return 0;
+}
+
+int tiku_p4_lpcore_sar_kept(uint32_t *words, unsigned n)
+{
+    tiku_lpcore_shared_t *sh = TIKU_LPCORE_SHARED;
+    unsigned i;
+
+    if (sh->sar_kept != TIKU_LPCORE_SAR_KEPT || sh->sar_keep_n != n) {
+        return 0;
+    }
+    TIKU_P4_FENCE();
+    for (i = 0u; i < n; i++) {
+        words[i] = sh->sar_keep[i];
+    }
+    return 1;
+}
+
+void tiku_p4_lpcore_sar_forget(void)
+{
+    TIKU_LPCORE_SHARED->sar_kept = 0u;
+}

@@ -327,14 +327,17 @@ static uint32_t sleep_syscntl(int guarded)
  *
  * @param slow_hz  LP slow clock rate
  * @param guarded  Nonzero when the LP watchdog guards the sleep
+ * @param sar      Nonzero when LP jobs convert on the SAR asleep: the HP
+ *                 bias stays on, as with ESP-IDF's ADC monitor mode
  */
-static void pmu_deep_config(uint32_t slow_hz, int guarded)
+static void pmu_deep_config(uint32_t slow_hz, int guarded, int sar)
 {
     pmu_wake_config(slow_hz, 260U);
 
     /* HP asleep: TOP, CNNT and HP memory down with the DCDC switch, the PLLs
      * and the crystal off, no clocks, the core stalled, the system clock
-     * moved to the crystal; the HP regulator off with its bias asleep.  The
+     * moved to the crystal; the HP regulator off, its bias asleep unless
+     * the SAR converts (with it asleep every pad reads full scale).  The
      * flash keeps LDO VO1: one powered down on v1.x silicon is found busy
      * by the ROM after the wake. */
     wr(HP_SLP_DIG_POWER, DCDC_SWITCH_PD | MEM_PD | CNNT_PD | TOP_PD);
@@ -345,7 +348,7 @@ static void pmu_deep_config(uint32_t slow_hz, int guarded)
     wr(HP_SLP_ICG_MODEM, 0UL);
     wr(HP_SLP_SYSCNTL, sleep_syscntl(guarded));
     wr(HP_SLP_SYSCLK, SYSCLK_SLP_SEL | ICG_SLP_SEL);
-    wr(HP_SLP_BIAS, PD_CUR | BIAS_SLEEP);
+    wr(HP_SLP_BIAS, sar ? 0UL : PD_CUR | BIAS_SLEEP);
     wr(HP_SLP_REGULATOR0, HP_SLP_VO1_ON);
     wr(HP_SLP_REGULATOR1, 0UL);
     field(HP_ACT_BIAS, DCM_MODE_MSK, 0UL);
@@ -456,12 +459,14 @@ void tiku_p4_deep_sleep(uint64_t us)
     uint32_t hz = tiku_p4_lp_hz();
     uint32_t wakes = TIKU_P4_WAKE_LP_CORE | TIKU_P4_WAKE_LP_TRAP;
     uint64_t t0;
+    int sar = 0;
 
     /* The checkpoint: HP SRAM is about to lose power, the mirror is not.
      * The LP agent's jobs may wake the part from here on. */
     (void)tiku_mem_arch_nvm_flush_status();
 #if TIKU_LPCORE_ENABLE
     tiku_lpagent_arm();
+    sar = tiku_lpagent_uses_sar();
 #endif
     console_drain(50U);
     (void)TIKU_P4_IRQ_SAVE();
@@ -476,7 +481,7 @@ void tiku_p4_deep_sleep(uint64_t us)
     field(HP_ACT_BIAS, DCM_VSET_MSK, HP_DCM_VSET_TAKEOVER << DCM_VSET_POS);
     t0 = systimer();
 
-    pmu_deep_config(hz, us != 0ULL);
+    pmu_deep_config(hz, us != 0ULL, sar);
     if (us != 0ULL) {
         sleep_safety_net((us * hz) / 1000000ULL + hz);
         wakes |= TIKU_P4_WAKE_TIMER;

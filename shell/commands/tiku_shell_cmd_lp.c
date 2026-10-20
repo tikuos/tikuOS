@@ -30,8 +30,10 @@
 /** @brief How often a rule's LP IO is read, in milliseconds. */
 #define LP_RULE_PERIOD_MS 20u
 
-/** @brief The /dev/gpio path of LP IO n: GPIO port 1, pins 0..15. */
+/** @brief The /dev/gpio path of LP IO n: GPIO port 1, pins 0..15; and the
+ *         /dev/adc path of ADC1 channel n, 0..7. */
 #define LP_RULE_PREFIX "/dev/gpio/1/"
+#define LP_RULE_ADC    "/dev/adc/"
 
 static const char *const op_names[] = {
     "?", "==", "!=", ">", "<", "changed", "rise", "fall", "always"
@@ -40,9 +42,12 @@ static const char *const op_names[] = {
 static void lp_usage(void)
 {
     SHELL_PRINTF("Usage: lp [add io <n> <op> <value> <ms> <act> [cmd...] |"
-                 " add timer <ms> <act> [cmd...] | del <slot> | samples]\n"
-                 "  op: == != > < changed rise fall   act: wake sample"
-                 " wake+sample\n");
+                 " add adc <ch> <op> <value> <ms> <act> [cmd...] |"
+                 " add i2c <addr> <reg> <1|2> <op> <value> <ms> <act>"
+                 " [cmd...] | add timer <ms> <act> [cmd...] | del <slot> |"
+                 " samples]\n"
+                 "  op: == != > < changed rise fall always   act: wake"
+                 " sample wake+sample\n");
 }
 
 /** @brief An operator word; 0 when it is none. */
@@ -71,6 +76,27 @@ static uint8_t lp_parse_action(const char *s)
         return TIKU_LPAGENT_ACT_WAKE | TIKU_LPAGENT_ACT_SAMPLE;
     }
     return 0u;
+}
+
+/** @brief A decimal, or hexadecimal after "0x"; 0 when there are no
+ *         digits. */
+static uint32_t lp_parse_num(const char *s)
+{
+    uint32_t v = 0u;
+
+    if (s[0] != '0' || (s[1] != 'x' && s[1] != 'X')) {
+        return tiku_cmd_parse_u32(s);
+    }
+    for (s += 2; ; s++) {
+        uint32_t d = (*s >= '0' && *s <= '9') ? (uint32_t)(*s - '0')
+                   : (*s >= 'a' && *s <= 'f') ? (uint32_t)(*s - 'a' + 10)
+                   : (*s >= 'A' && *s <= 'F') ? (uint32_t)(*s - 'A' + 10)
+                   : 16u;
+        if (d > 15u) {
+            return v;
+        }
+        v = (v << 4) | d;
+    }
 }
 
 /** @brief A signed decimal; 0 when there are no digits. */
@@ -113,6 +139,8 @@ static void lp_add_report(const tiku_lpagent_spec_t *spec)
     } else {
         SHELL_PRINTF("lp: %s\n", slot == -1 ? "table full"
                                : slot == -3 ? "LP core does not start"
+                               : slot == -4 ? "the HP holds the SAR or the"
+                                              " I2C pins"
                                : "bad job");
     }
 }
@@ -123,14 +151,26 @@ static void lp_add(uint8_t argc, const char *argv[])
     uint8_t cmd_at;
 
     memset(&spec, 0, sizeof(spec));
-    if (argc >= 8u && tiku_cmd_streq(argv[2], "io")) {
-        spec.kind = TIKU_LPAGENT_KIND_IO;
+    if (argc >= 8u && (tiku_cmd_streq(argv[2], "io") ||
+                       tiku_cmd_streq(argv[2], "adc"))) {
+        spec.kind = tiku_cmd_streq(argv[2], "io") ? TIKU_LPAGENT_KIND_IO
+                                                  : TIKU_LPAGENT_KIND_ADC;
         spec.source = (uint8_t)tiku_cmd_parse_u32(argv[3]);
         spec.op = lp_parse_op(argv[4]);
         spec.threshold = lp_parse_i32(argv[5]);
         spec.period_ms = tiku_cmd_parse_u32(argv[6]);
         spec.action = lp_parse_action(argv[7]);
         cmd_at = 8u;
+    } else if (argc >= 10u && tiku_cmd_streq(argv[2], "i2c")) {
+        spec.kind = TIKU_LPAGENT_KIND_I2C;
+        spec.source = (uint8_t)lp_parse_num(argv[3]);
+        spec.arg = (uint16_t)((lp_parse_num(argv[4]) & 0xFFu) |
+                              (tiku_cmd_parse_u32(argv[5]) << 8));
+        spec.op = lp_parse_op(argv[6]);
+        spec.threshold = lp_parse_i32(argv[7]);
+        spec.period_ms = tiku_cmd_parse_u32(argv[8]);
+        spec.action = lp_parse_action(argv[9]);
+        cmd_at = 10u;
     } else if (argc >= 5u && tiku_cmd_streq(argv[2], "timer")) {
         spec.kind = TIKU_LPAGENT_KIND_TIMER;
         spec.op = TIKU_LPAGENT_OP_ALWAYS;
@@ -161,10 +201,17 @@ static void lp_list(void)
             continue;
         }
         used++;
-        if (spec.kind == TIKU_LPAGENT_KIND_IO) {
-            SHELL_PRINTF("  %u: io %u %s %ld every %lu ms",
-                         slot, spec.source, op_names[spec.op],
+        if (spec.kind == TIKU_LPAGENT_KIND_IO ||
+            spec.kind == TIKU_LPAGENT_KIND_ADC) {
+            SHELL_PRINTF("  %u: %s %u %s %ld every %lu ms", slot,
+                         spec.kind == TIKU_LPAGENT_KIND_IO ? "io" : "adc",
+                         spec.source, op_names[spec.op],
                          (long)spec.threshold, (unsigned long)spec.period_ms);
+        } else if (spec.kind == TIKU_LPAGENT_KIND_I2C) {
+            SHELL_PRINTF("  %u: i2c 0x%02x reg 0x%02x x%u %s %ld every %lu ms",
+                         slot, spec.source, spec.arg & 0xFFu, spec.arg >> 8,
+                         op_names[spec.op], (long)spec.threshold,
+                         (unsigned long)spec.period_ms);
         } else {
             SHELL_PRINTF("  %u: timer every %lu ms", slot,
                          (unsigned long)spec.period_ms);
@@ -228,16 +275,24 @@ int tiku_shell_lp_rule(uint8_t argc, const char *argv[])
         return 0;
     }
     memset(&spec, 0, sizeof(spec));
-    pin = argv[1] + (sizeof(LP_RULE_PREFIX) - 1u);
     spec.op = lp_parse_op(argv[2]);
-    if (strncmp(argv[1], LP_RULE_PREFIX, sizeof(LP_RULE_PREFIX) - 1u) != 0 ||
-        *pin < '0' || *pin > '9' || tiku_cmd_parse_u32(pin) > 15u ||
+    if (strncmp(argv[1], LP_RULE_PREFIX, sizeof(LP_RULE_PREFIX) - 1u) == 0) {
+        spec.kind = TIKU_LPAGENT_KIND_IO;
+        pin = argv[1] + (sizeof(LP_RULE_PREFIX) - 1u);
+    } else if (strncmp(argv[1], LP_RULE_ADC, sizeof(LP_RULE_ADC) - 1u) == 0) {
+        spec.kind = TIKU_LPAGENT_KIND_ADC;
+        pin = argv[1] + (sizeof(LP_RULE_ADC) - 1u);
+    } else {
+        pin = "";
+    }
+    if (spec.kind == 0u || *pin < '0' || *pin > '9' ||
+        tiku_cmd_parse_u32(pin) >
+            (spec.kind == TIKU_LPAGENT_KIND_IO ? 15u : 7u) ||
         spec.op == 0u || spec.op > TIKU_LPAGENT_OP_LT) {
-        SHELL_PRINTF("on: a wake rule watches /dev/gpio/1/0..15 with"
-                     " == != > <\n");
+        SHELL_PRINTF("on: a wake rule watches /dev/gpio/1/0..15 or"
+                     " /dev/adc/0..7 with == != > <\n");
         return 1;
     }
-    spec.kind = TIKU_LPAGENT_KIND_IO;
     spec.source = (uint8_t)tiku_cmd_parse_u32(pin);
     spec.threshold = lp_parse_i32(argv[3]);
     spec.period_ms = LP_RULE_PERIOD_MS;

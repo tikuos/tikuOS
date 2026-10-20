@@ -20,6 +20,15 @@
 #include "tiku_cpu_common.h"
 #include "tiku_gpio_arch.h"
 #include <interfaces/gpio/tiku_gpio_owner.h>
+#if TIKU_LPCORE_ENABLE
+#include "tiku_lpcore_arch.h"
+#include "lpcore/tiku_lpcore_ipc.h"
+#define SAR_TAKE() tiku_p4_lpcore_sar_take()
+#define SAR_GIVE() tiku_p4_lpcore_sar_give()
+#else
+#define SAR_TAKE() ((void)0)
+#define SAR_GIVE() ((void)0)
+#endif
 
 /* LP ADC, the RTC controller of both SAR units.  Per unit: the reader (clock
  * divider 7:0, data inversion bit 28 or 29), the one-shot register (result
@@ -80,7 +89,8 @@ static const uint8_t analog_regs[] = {0u, 1u, 2u, 3u, 4u, 5u, 6u, 7u, 9u};
 
 static uint32_t saved[sizeof(saved_regs) / sizeof(saved_regs[0])];
 static uint8_t analog[10];
-static uint8_t opened, shift, atten, code_efuse[2];
+#define SAVED_WORDS (sizeof(saved) / sizeof(saved[0]) + sizeof(analog))
+static uint8_t opened, shift, atten, code_efuse[2], lp_held;
 static uint16_t code[2];
 
 /** @brief Change a register field without modifying neighboring fields. */
@@ -173,7 +183,7 @@ static int begin(void)
 {
     unsigned i;
 
-    if (sar_busy()) {
+    if (lp_held || sar_busy()) {
         return -1;
     }
     for (i = 0; i < EARLY_REGS; i++) {
@@ -488,4 +498,87 @@ uint16_t tiku_p4_adc_init_code(uint8_t unit, int *from_efuse)
         *from_efuse = code_efuse[unit];
     }
     return code[unit];
+}
+
+#if TIKU_LPCORE_ENABLE
+_Static_assert(SAVED_WORDS <= TIKU_LPCORE_SAR_WORDS,
+               "adc: the saved state outgrew the LP SRAM keep");
+
+/** @brief What a release puts back: the state an earlier boot's hold kept in
+ *         LP SRAM, or else this hold's, kept there for a later boot. */
+static void keep_saved(void)
+{
+    uint32_t words[SAVED_WORDS];
+    unsigned i, n = sizeof(saved) / sizeof(saved[0]);
+
+    if (tiku_p4_lpcore_sar_kept(words, SAVED_WORDS)) {
+        for (i = 0u; i < n; i++) {
+            saved[i] = words[i];
+        }
+        for (i = 0u; i < sizeof(analog); i++) {
+            analog[i] = (uint8_t)words[n + i];
+        }
+        return;
+    }
+    for (i = 0u; i < n; i++) {
+        words[i] = saved[i];
+    }
+    for (i = 0u; i < sizeof(analog); i++) {
+        words[n + i] = analog[i];
+    }
+    (void)tiku_p4_lpcore_sar_keep(words, SAVED_WORDS);
+}
+#define KEEP_SAVED()  keep_saved()
+#define KEEP_FORGET() tiku_p4_lpcore_sar_forget()
+#else
+#define KEEP_SAVED()  ((void)0)
+#define KEEP_FORGET() ((void)0)
+#endif
+
+int tiku_p4_adc_lp_hold(void)
+{
+    uint16_t value;
+    uint32_t state;
+    unsigned pad;
+    int rc = -1;
+
+    if (lp_held) {
+        return 0;
+    }
+    SAR_TAKE();
+    if (efuse_code(0u, 3u, &value) == 0 ||
+        tiku_p4_adc_ground_code(0u, 3u, &value) == 0) {
+        state = TIKU_P4_IRQ_SAVE();
+        if (begin() == 0) {
+            if (unit_on(0u, value) == 0) {
+                for (pad = 0u; pad < 8u; pad++) {
+                    field(ATTEN(0), 3u << (2u * pad), 3u << (2u * pad));
+                }
+                lp_held = 1u;
+                rc = 0;
+                KEEP_SAVED();
+            } else {
+                end(ANALOG_REGS);
+            }
+        }
+        TIKU_P4_IRQ_RESTORE(state);
+    }
+    SAR_GIVE();
+    return rc;
+}
+
+void tiku_p4_adc_lp_release(void)
+{
+    uint32_t state;
+
+    if (!lp_held) {
+        return;
+    }
+    SAR_TAKE();
+    state = TIKU_P4_IRQ_SAVE();
+    end(ANALOG_REGS);
+    lp_held = 0u;
+    KEEP_FORGET();
+    TIKU_P4_IRQ_RESTORE(state);
+    SAR_GIVE();
 }

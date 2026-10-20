@@ -22,9 +22,10 @@
 /** @brief A job as the HP core writes and reads it. */
 typedef struct {
     uint8_t  kind;          /* TIKU_LPAGENT_KIND_*, 0 for a free slot     */
-    uint8_t  source;        /* LP IO for KIND_IO                          */
+    uint8_t  source;        /* LP IO, ADC1 pad 0..7 or I2C address        */
     uint8_t  op;            /* TIKU_LPAGENT_OP_*                          */
     uint8_t  action;        /* TIKU_LPAGENT_ACT_* bits                    */
+    uint16_t arg;           /* KIND_I2C: register 7:0, bytes (1, 2) 15:8  */
     uint32_t period_ms;     /* between runs, >= 1                         */
     int32_t  threshold;
     char     cmd[TIKU_LPAGENT_CMD_MAX];  /* run after this job's wake     */
@@ -52,8 +53,13 @@ void tiku_lpagent_boot(void);
 /**
  * @brief Add a job in the first free slot; it runs from the payload's next
  *        pass, and the durable copy is updated.
+ *
+ * The first ADC job takes ADC1 from the HP driver and the first I2C job the
+ * board's I2C pins; the last of each gives them back.
+ *
  * @return The slot, -1 when the table is full, -2 for a bad spec, -3 when
- *         the payload does not run and cannot be started
+ *         the payload does not run and cannot be started, -4 when the HP
+ *         holds the SAR or the I2C pins
  */
 int tiku_lpagent_add(const tiku_lpagent_spec_t *spec);
 
@@ -79,6 +85,9 @@ int tiku_lpagent_sample(uint32_t n, uint32_t *lp_ticks, uint32_t *job,
 
 /** @brief Let job wakes fire: called just before a deep sleep. */
 void tiku_lpagent_arm(void);
+/** @brief 1 when a running job converts on the SAR, whose bias must then
+ *         stay on through a deep sleep; else 0. */
+int tiku_lpagent_uses_sar(void);
 
 /**
  * @brief This boot's job wake.

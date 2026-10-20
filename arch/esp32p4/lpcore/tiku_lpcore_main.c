@@ -15,6 +15,7 @@
  */
 #include "tiku_lpcore_ipc.h"
 #include "tiku_lpagent_jobs.h"
+#include "tiku_lpcore_i2c.h"
 
 void tiku_lpcore_main(void);
 void tiku_lpcore_fault(void);
@@ -50,10 +51,19 @@ void tiku_lpcore_fault(void);
 #define PMU_HP_LP_COMM     0x5011519Cu
 #define LP_TRIGGER_HP      (1u << 30)
 
-/** @brief Bus delay iterations per I2C half bit, and SCL waits before the
- *         line counts as stuck. */
+/** @brief Bus delay iterations per I2C half bit. */
 #define I2C_HALF  40u
-#define I2C_RISE  4000u
+
+/* LP ADC, ADC1's one-shot register (adc_ll.h): result 15:0, done 16, start
+ * 17, start force 18, pad map 30:19, pad force 31.  The HP powers the unit
+ * and sets its code and attenuations while ADC jobs exist. */
+#define ADC1_ONESHOT       0x5012700Cu
+#define ADC_DONE           (1u << 16)
+#define ADC_START          (1u << 17)
+#define ADC_START_FORCE    (1u << 18)
+#define ADC_PAD_POS        19u
+#define ADC_PAD_FORCE      (1u << 31)
+#define ADC_SPINS          20000u
 
 /** @brief LED mode set by TIKU_LPCORE_CMD_LED, and its blink state. */
 static uint32_t led_mode, led_period, led_count;
@@ -108,6 +118,48 @@ uint32_t tiku_lpcore_io_get(uint32_t n)
     return lp_io_get(n);
 }
 
+void tiku_lpcore_io_set(uint32_t n, uint32_t high)
+{
+    lp_io_set(n, high);
+}
+
+void tiku_lpcore_i2c_delay(void)
+{
+    volatile uint32_t i;
+    for (i = 0u; i < I2C_HALF; i++) {
+    }
+}
+
+int32_t tiku_lpcore_adc_get(uint32_t pad)
+{
+    tiku_lpcore_shared_t *sh = TIKU_LPCORE_SHARED;
+    int32_t value = -1;
+    uint32_t i;
+
+    sh->sar_lp_busy = 1u;
+    __asm__ volatile ("fence" ::: "memory");
+    if (sh->sar_hp_req) {
+        sh->sar_lp_busy = 0u;
+        return TIKU_LPAGENT_NO_READING;
+    }
+    REG(ADC1_ONESHOT) = (REG(ADC1_ONESHOT) &
+                         ~((0xFFFu << ADC_PAD_POS) | ADC_START |
+                           ADC_START_FORCE | ADC_PAD_FORCE)) |
+                        (1u << (ADC_PAD_POS + pad)) | ADC_START_FORCE |
+                        ADC_PAD_FORCE;
+    REG(ADC1_ONESHOT) |= ADC_START;
+    for (i = 0u; i < ADC_SPINS; i++) {
+        if (REG(ADC1_ONESHOT) & ADC_DONE) {
+            value = (int32_t)(REG(ADC1_ONESHOT) & 0xFFFu);
+            break;
+        }
+    }
+    REG(ADC1_ONESHOT) &= ~ADC_START;
+    __asm__ volatile ("fence" ::: "memory");
+    sh->sar_lp_busy = 0u;
+    return value;
+}
+
 void tiku_lpcore_wake_hp(void)
 {
     REG(PMU_HP_LP_COMM) = LP_TRIGGER_HP;
@@ -138,71 +190,54 @@ static uint32_t led_command(tiku_lpcore_shared_t *sh)
     return TIKU_LPCORE_RSP_DONE;
 }
 
-/** @brief Spin one I2C half bit. */
-static void i2c_half(void)
-{
-    volatile uint32_t i;
-    for (i = 0u; i < I2C_HALF; i++) {
-    }
-}
+/** @brief LP IO pad settings an I2C transaction changes. */
+typedef struct {
+    uint32_t pad[2], pin[2], sel[2];
+} i2c_pads_t;
 
-/** @brief Release SCL and wait for it to rise; 0 when it never did. */
-static int i2c_scl_release(uint32_t scl)
+/** @brief Take LP IOs @p sda and @p scl as open-drain lines with their
+ *         pull-ups, saving what they were in @p saved. */
+static void i2c_bus_take(uint32_t sda, uint32_t scl, i2c_pads_t *saved)
 {
-    uint32_t i;
-
+    saved->pad[0] = REG(LP_IOMUX_PAD(sda));
+    saved->pad[1] = REG(LP_IOMUX_PAD(scl));
+    saved->pin[0] = REG(LP_GPIO_PIN(sda));
+    saved->pin[1] = REG(LP_GPIO_PIN(scl));
+    saved->sel[0] = REG(LP_GPIO_OUT_SEL(sda));
+    saved->sel[1] = REG(LP_GPIO_OUT_SEL(scl));
+    lp_io_set(sda, 1u);
     lp_io_set(scl, 1u);
-    for (i = 0u; i < I2C_RISE; i++) {
-        if (lp_io_get(scl)) {
-            return 1;
-        }
-    }
-    return 0;
+    lp_io_claim(sda, 1, 1);
+    lp_io_claim(scl, 1, 1);
+    REG(LP_GPIO_EN_W1TS) = (1u << sda) | (1u << scl);
 }
 
-/**
- * @brief Send a START, the address byte for a write to @p addr, read the
- *        acknowledge, then a STOP.
- * @return 1 acknowledged, 0 not, -1 when SCL never rose
- */
-static int i2c_probe(uint32_t sda, uint32_t scl, uint32_t addr)
+/** @brief Give LP IOs @p sda and @p scl back as @p saved holds them. */
+static void i2c_bus_give(uint32_t sda, uint32_t scl, const i2c_pads_t *saved)
 {
-    uint32_t byte = addr << 1, bit;
-    int ack;
+    REG(LP_GPIO_EN_W1TC) = (1u << sda) | (1u << scl);
+    REG(LP_GPIO_OUT_SEL(sda)) = saved->sel[0];
+    REG(LP_GPIO_OUT_SEL(scl)) = saved->sel[1];
+    REG(LP_GPIO_PIN(sda)) = saved->pin[0];
+    REG(LP_GPIO_PIN(scl)) = saved->pin[1];
+    REG(LP_IOMUX_PAD(sda)) = saved->pad[0];
+    REG(LP_IOMUX_PAD(scl)) = saved->pad[1];
+}
 
-    lp_io_set(sda, 1u);
-    if (!i2c_scl_release(scl)) {
+int32_t tiku_lpcore_i2c_get(uint32_t addr, uint32_t arg)
+{
+    uint32_t sda = (arg >> 16) & 15u, scl = (arg >> 24) & 15u;
+    i2c_pads_t saved;
+    int32_t value;
+
+    if (sda == scl || sda == TIKU_LPCORE_LED_IO || scl == TIKU_LPCORE_LED_IO) {
         return -1;
     }
-    i2c_half();
-    lp_io_set(sda, 0u);                  /* START: SDA falls, SCL high */
-    i2c_half();
-    lp_io_set(scl, 0u);
-    for (bit = 0u; bit < 8u; bit++) {
-        lp_io_set(sda, (byte >> (7u - bit)) & 1u);
-        i2c_half();
-        if (!i2c_scl_release(scl)) {
-            return -1;
-        }
-        i2c_half();
-        lp_io_set(scl, 0u);
-    }
-    lp_io_set(sda, 1u);                  /* the device pulls SDA to ack */
-    i2c_half();
-    if (!i2c_scl_release(scl)) {
-        return -1;
-    }
-    i2c_half();
-    ack = lp_io_get(sda) == 0u;
-    lp_io_set(scl, 0u);
-    i2c_half();
-    lp_io_set(sda, 0u);                  /* STOP: SDA rises, SCL high */
-    i2c_half();
-    (void)i2c_scl_release(scl);
-    i2c_half();
-    lp_io_set(sda, 1u);
-    i2c_half();
-    return ack;
+    i2c_bus_take(sda, scl, &saved);
+    value = tiku_lpcore_i2c_read(sda, scl, addr, arg & 0xFFu,
+                                 ((arg >> 8) & 0xFFu) == 2u ? 2u : 1u);
+    i2c_bus_give(sda, scl, &saved);
+    return value;
 }
 
 /**
@@ -212,31 +247,21 @@ static int i2c_probe(uint32_t sda, uint32_t scl, uint32_t addr)
 static uint32_t i2c_scan_command(tiku_lpcore_shared_t *sh)
 {
     uint32_t sda = sh->arg[0], scl = sh->arg[1], addr, i;
-    uint32_t pad_sda, pad_scl, pin_sda, pin_scl, sel_sda, sel_scl;
+    i2c_pads_t saved;
     int r = 0;
 
     if (sda >= TIKU_LPCORE_LP_IO_COUNT || scl >= TIKU_LPCORE_LP_IO_COUNT ||
         sda == scl || sda == TIKU_LPCORE_LED_IO || scl == TIKU_LPCORE_LED_IO) {
         return TIKU_LPCORE_RSP_BAD_ARG;
     }
-    pad_sda = REG(LP_IOMUX_PAD(sda));
-    pad_scl = REG(LP_IOMUX_PAD(scl));
-    pin_sda = REG(LP_GPIO_PIN(sda));
-    pin_scl = REG(LP_GPIO_PIN(scl));
-    sel_sda = REG(LP_GPIO_OUT_SEL(sda));
-    sel_scl = REG(LP_GPIO_OUT_SEL(scl));
     for (i = 0u; i < sizeof(sh->i2c_found); i++) {
         sh->i2c_found[i] = 0u;
     }
     sh->i2c_count = 0u;
     sh->i2c_scl_stuck = 0u;
-    lp_io_set(sda, 1u);
-    lp_io_set(scl, 1u);
-    lp_io_claim(sda, 1, 1);
-    lp_io_claim(scl, 1, 1);
-    REG(LP_GPIO_EN_W1TS) = (1u << sda) | (1u << scl);
+    i2c_bus_take(sda, scl, &saved);
     for (addr = 0x08u; addr <= 0x77u; addr++) {
-        r = i2c_probe(sda, scl, addr);
+        r = tiku_lpcore_i2c_probe(sda, scl, addr);
         if (r < 0) {
             sh->i2c_scl_stuck = 1u;
             break;
@@ -247,13 +272,7 @@ static uint32_t i2c_scan_command(tiku_lpcore_shared_t *sh)
             sh->i2c_count = sh->i2c_count + 1u;
         }
     }
-    REG(LP_GPIO_EN_W1TC) = (1u << sda) | (1u << scl);
-    REG(LP_GPIO_OUT_SEL(sda)) = sel_sda;
-    REG(LP_GPIO_OUT_SEL(scl)) = sel_scl;
-    REG(LP_GPIO_PIN(sda)) = pin_sda;
-    REG(LP_GPIO_PIN(scl)) = pin_scl;
-    REG(LP_IOMUX_PAD(sda)) = pad_sda;
-    REG(LP_IOMUX_PAD(scl)) = pad_scl;
+    i2c_bus_give(sda, scl, &saved);
     return TIKU_LPCORE_RSP_DONE;
 }
 
@@ -362,6 +381,7 @@ void tiku_lpcore_main(void)
     led_release(sh);
     sh->wake_mode = 0u;
     sh->agent_armed = 0u;
+    sh->sar_lp_busy = 0u;
     sh->boots = sh->boots + 1u;
     sh->heartbeat = 0u;
     __asm__ volatile ("fence" ::: "memory");

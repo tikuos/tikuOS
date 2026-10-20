@@ -343,6 +343,22 @@ table, the latest 16 samples and the job that ended this boot's sleep. The
 table has a durable copy in the flash mirror, which a boot that finds LP
 SRAM without the payload loads again.
 
+`lp add adc <ch> <op> <value> <ms> <act> [cmd...]` converts ADC1 channel ch
+(GPIO16 + ch, at 12 dB) on the LP core, and `on /dev/adc/<ch> <op> <value>
+wake <cmd...>` writes the same job with a wake. While an ADC job exists the
+HP's own ADC1 reads are refused, the entropy source and the jobs take turns
+on the SAR through flags in the shared page, and a deep sleep keeps the HP
+analog bias on (with it asleep every pad reads full scale). The HP pads lose
+their IO MUX setting with the TOP domain, so asleep a job reads what drives
+the pad from outside; an unconnected one reads near 0. A boot that adopts the
+jobs takes ADC1 again, and the state from before the first job, kept in LP
+SRAM, comes back when the last one goes.
+`lp add i2c <addr> <reg> <1|2> <op> <value> <ms> <act> [cmd...]` reads a
+register byte, or a big-endian word, from a device on the board's I2C pins
+(GPIO7 and 8), bit-banged on the LP core; a device that does not answer reads
+-1. The pins are the agent's while an I2C job exists: `gpio` and `lpcore i2c`
+refuse them.
+
 TikuBench's `coproc` and `lpcore` suites and the `deep-sleep-wake`,
 `light-sleep` and `hibernate` kernel categories run on `firebeetle2_p4`.
 

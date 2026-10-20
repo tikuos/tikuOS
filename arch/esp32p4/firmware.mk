@@ -45,6 +45,6 @@ LPCORE_CFLAGS = $(ESP32P4_ARCH) -Os -Wall -Wextra -Werror -ffreestanding \
                 -nostdlib -nostartfiles -ffunction-sections -fdata-sections \
                 -MMD -MP
 LPCORE_OBJS = $(LPCORE_BUILD)/tiku_lpcore_crt0.o $(LPCORE_BUILD)/tiku_lpcore_main.o \
-              $(LPCORE_BUILD)/tiku_lpagent_jobs.o
+              $(LPCORE_BUILD)/tiku_lpagent_jobs.o $(LPCORE_BUILD)/tiku_lpcore_i2c.o
 TIKU_LPCORE_IMG_O = $(LPCORE_BUILD)/tiku_lpcore_img.o
 endif

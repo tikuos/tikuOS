@@ -17,6 +17,14 @@
 #include "tiku_esp32p4_regs.h"
 #include "tiku_irq_arch.h"
 #include "tiku_systimer_arch.h"
+#if TIKU_LPCORE_ENABLE
+#include "tiku_lpcore_arch.h"
+#define SAR_TAKE() tiku_p4_lpcore_sar_take()
+#define SAR_GIVE() tiku_p4_lpcore_sar_give()
+#else
+#define SAR_TAKE() ((void)0)
+#define SAR_GIVE() ((void)0)
+#endif
 
 #define ADC_CTRL 0x500de000u
 #define ADC_CTRL2 0x500de004u
@@ -99,6 +107,7 @@ int tiku_trng_arch_read_bytes(uint8_t *out, size_t length)
         TIKU_P4_IRQ_RESTORE(state);
         return TIKU_TRNG_ERR_NOT_READY;
     }
+    SAR_TAKE();                            /* the LP agent's ADC jobs pause */
     for (i = 0; i < 10; i++) saved[i] = TIKU_P4_REG_READ(registers[i]);
     TIKU_P4_REG_WRITE(TIKU_P4_LP_CLK, saved[4] | (1u << 27));
     TIKU_P4_REG_WRITE(SAR_POWER, saved[5] & ~(1u << 26));
@@ -142,6 +151,7 @@ done:
     for (i = 0; i < captured; i++)
         if (analog(analog_regs[i], &bytes[i], 1)) rc = TIKU_TRNG_ERR_TIMEOUT;
     for (i = 10; i > 0; i--) TIKU_P4_REG_WRITE(registers[i - 1], saved[i - 1]);
+    SAR_GIVE();
     if (rc != TIKU_TRNG_OK)
         for (at = 0; at < length; at++) out[at] = 0;
     TIKU_P4_IRQ_RESTORE(state);

@@ -60,6 +60,11 @@
 /** @brief Bytes in each single-slot mailbox, one per direction. */
 #define TIKU_LPCORE_MSG_CAP      240u
 
+/** @brief Written to .sar_kept once .sar_keep holds the HP's SAR state. */
+#define TIKU_LPCORE_SAR_KEPT     0x53415221u                 /* 'SAR!'      */
+/** @brief Words in .sar_keep. */
+#define TIKU_LPCORE_SAR_WORDS    32u
+
 /** @brief Commands in .cmd; the payload clears .cmd when it takes one. */
 #define TIKU_LPCORE_CMD_PARK     1u   /**< spin parked, answer RSP_PARKED     */
 #define TIKU_LPCORE_CMD_RESUME   2u   /**< leave the park                     */
@@ -98,9 +103,19 @@
 /** @brief Bytes of HP command line kept per job, NUL included. */
 #define TIKU_LPAGENT_CMD_MAX     32u
 
-/** @brief Job kinds: what a run reads. */
+/* Job kinds: what a run reads.  ADC: ADC1's code for pad .source (0-7, that
+ * is GPIO16-23), 0..4095, or -1 on a conversion timeout.  I2C: register
+ * .arg 7:0 of the device at address .source on the bus with SDA at .arg
+ * 23:16 and SCL at .arg 31:24, one byte, or a big-endian word when .arg 15:8
+ * is 2; -1 on a NACK or a stuck SCL. */
 #define TIKU_LPAGENT_KIND_IO     1u   /**< level of LP IO .source, 0 or 1 */
 #define TIKU_LPAGENT_KIND_TIMER  2u   /**< the job's run count */
+#define TIKU_LPAGENT_KIND_ADC    3u   /**< ADC1's code for pad .source */
+#define TIKU_LPAGENT_KIND_I2C    4u   /**< a register of device .source */
+
+/** @brief A source's answer when it has no reading this pass: the HP holds
+ *         the SAR.  The job runs again on the next pass. */
+#define TIKU_LPAGENT_NO_READING  (-2147483647 - 1)
 
 /** @brief Job operators.  A comparison fires when it turns true; CHANGE,
  *         RISE and FALL compare with the previous run; ALWAYS fires on
@@ -130,6 +145,7 @@ typedef struct {
     volatile uint8_t  source;       /* LP IO for KIND_IO                    */
     volatile uint8_t  op;
     volatile uint8_t  action;
+    volatile uint32_t arg;          /* KIND_I2C: register, bytes, the pins  */
     volatile uint32_t period;       /* LP timer ticks between runs, >= 1    */
     volatile int32_t  threshold;
     volatile uint32_t next_due;     /* LP timer low word of the next run    */
@@ -200,6 +216,19 @@ typedef struct {
     volatile int32_t  agent_wake_value;
     volatile uint32_t agent_wake_ticks;
     volatile uint32_t sample_count;
+    /* The SAR between the HP (the entropy source, the ADC driver) and the
+     * agent's ADC jobs: each side sets its flag, fences, then reads the
+     * other's.  The HP takes the SAR once sar_lp_busy reads 0; the agent
+     * skips a conversion while sar_hp_req is set. */
+    volatile uint32_t sar_hp_req;
+    volatile uint32_t sar_lp_busy;
+    /* The HP ADC driver's registers from before the agent's ADC jobs took
+     * the SAR, valid while sar_kept reads TIKU_LPCORE_SAR_KEPT: a boot that
+     * takes the jobs over restores them when the last one goes.  The
+     * payload does not touch them. */
+    volatile uint32_t sar_kept;
+    volatile uint32_t sar_keep_n;   /* words of sar_keep in use            */
+    volatile uint32_t sar_keep[TIKU_LPCORE_SAR_WORDS];
     tiku_lpagent_job_t    jobs[TIKU_LPAGENT_JOBS];
     tiku_lpagent_sample_t samples[TIKU_LPAGENT_SAMPLES];
     volatile char         agent_cmd[TIKU_LPAGENT_JOBS][TIKU_LPAGENT_CMD_MAX];

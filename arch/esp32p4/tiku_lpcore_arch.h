@@ -130,4 +130,27 @@ void tiku_p4_lpcore_counters(tiku_p4_lpcore_counters_t *out);
  */
 int tiku_p4_lpcore_i2c_result(uint8_t found[16]);
 
+/**
+ * @brief Take the SAR from the LP agent's ADC jobs before an HP conversion.
+ *
+ * Asks the payload to skip its conversions and waits for one in progress to
+ * end, going ahead after a bounded wait; with no payload published it
+ * returns at once.  Pair with tiku_p4_lpcore_sar_give().
+ */
+void tiku_p4_lpcore_sar_take(void);
+/** @brief Let the LP agent's ADC jobs convert again. */
+void tiku_p4_lpcore_sar_give(void);
+
+/**
+ * @brief Keep @p n words (at most TIKU_LPCORE_SAR_WORDS) of HP SAR state in
+ *        LP SRAM, where an HP reset or a deep sleep leaves them.
+ * @return 0, or -1 when they do not fit
+ */
+int tiku_p4_lpcore_sar_keep(const uint32_t *words, unsigned n);
+/** @brief Copy the kept words into @p words.
+ *  @return 1 when tiku_p4_lpcore_sar_keep() left @p n of them, else 0 */
+int tiku_p4_lpcore_sar_kept(uint32_t *words, unsigned n);
+/** @brief Drop the kept words. */
+void tiku_p4_lpcore_sar_forget(void);
+
 #endif

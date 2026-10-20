@@ -14,11 +14,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <string.h>
+#include <tiku.h>
 #include <kernel/memory/tiku_mem.h>
+#include <interfaces/gpio/tiku_gpio_owner.h>
 
 #include "tiku_lpagent_arch.h"
 #include "tiku_lpcore_arch.h"
 #include "tiku_sleep_arch.h"
+#if defined(TIKU_BOARD_ADC_AVAILABLE)
+#include "tiku_adc_arch.h"
+#endif
 
 #ifndef TIKU_P4_FENCE
 #define TIKU_P4_FENCE() __asm__ volatile("fence iorw, iorw" ::: "memory")
@@ -32,8 +37,11 @@ typedef struct {
 } lpagent_table_t;
 
 static TIKU_DURABLE lpagent_table_t lpagent_table;
-TIKU_PERSIST_CELL(lpagent_cell, lpagent_table, 0x4C504A31UL /* LPJ1 */,
+TIKU_PERSIST_CELL(lpagent_cell, lpagent_table, 0x4C504A32UL /* LPJ2 */,
                   NULL, 0);
+
+/** @brief Owner name of the I2C pins while I2C jobs exist. */
+static const char lpagent_owner[] = "lpagent";
 
 /** @brief This boot's job wake, and whether its command was handed over. */
 static tiku_lpagent_wake_t woke;
@@ -52,6 +60,13 @@ static void load_job(unsigned slot, const tiku_lpagent_spec_t *spec)
     j->source = spec->source;
     j->op = spec->op;
     j->action = spec->action;
+    j->arg = spec->arg;
+#if defined(TIKU_BOARD_I2C_SDA_PIN)
+    if (spec->kind == TIKU_LPAGENT_KIND_I2C) {
+        j->arg = spec->arg | ((uint32_t)TIKU_BOARD_I2C_SDA_PIN << 16) |
+                 ((uint32_t)TIKU_BOARD_I2C_SCL_PIN << 24);
+    }
+#endif
     j->period = ticks == 0ULL ? 1u
               : ticks > 0x7FFFFFFFULL ? 0x7FFFFFFFu : (uint32_t)ticks;
     j->threshold = spec->threshold;
@@ -77,6 +92,72 @@ static void store_job(unsigned slot, const tiku_lpagent_spec_t *spec)
         memset(&next.job[slot], 0, sizeof(next.job[slot]));
     }
     tiku_persist_cell_commit(&lpagent_cell, &next, (uint16_t)sizeof(next));
+}
+
+/** @brief Jobs of @p kind in the durable table. */
+static unsigned kind_count(unsigned kind)
+{
+    unsigned slot, n = 0u;
+
+    for (slot = 0u; slot < TIKU_LPAGENT_JOBS; slot++) {
+        n += lpagent_table.job[slot].kind == kind;
+    }
+    return n;
+}
+
+/** @brief Claim (@p take) or release the board's I2C pins as the agent's.
+ *  @return 0, or -1 when another owner holds one */
+static int i2c_pins(int take)
+{
+#if defined(TIKU_BOARD_I2C_SDA_PIN)
+    static const uint8_t pins[2] = {TIKU_BOARD_I2C_SDA_PIN,
+                                    TIKU_BOARD_I2C_SCL_PIN};
+    unsigned i;
+
+    for (i = 0u; i < 2u; i++) {
+        if (!take) {
+            (void)tiku_gpio_release((uint8_t)(pins[i] / 8u + 1u),
+                                    (uint8_t)(pins[i] % 8u), lpagent_owner);
+        } else if (tiku_gpio_claim((uint8_t)(pins[i] / 8u + 1u),
+                                   (uint8_t)(pins[i] % 8u), lpagent_owner) != 0) {
+            while (i-- > 0u) {
+                (void)tiku_gpio_release((uint8_t)(pins[i] / 8u + 1u),
+                                        (uint8_t)(pins[i] % 8u), lpagent_owner);
+            }
+            return -1;
+        }
+    }
+    return 0;
+#else
+    (void)take;
+    return -1;
+#endif
+}
+
+/** @brief Take from the HP drivers what a job of @p kind reads.
+ *  @return 0, or -1 when they hold it */
+static int resource_take(unsigned kind)
+{
+    if (kind == TIKU_LPAGENT_KIND_ADC) {
+#if defined(TIKU_BOARD_ADC_AVAILABLE)
+        return tiku_p4_adc_lp_hold();
+#else
+        return -1;
+#endif
+    }
+    return kind == TIKU_LPAGENT_KIND_I2C ? i2c_pins(1) : 0;
+}
+
+/** @brief Give back what the jobs of @p kind read. */
+static void resource_give(unsigned kind)
+{
+    if (kind == TIKU_LPAGENT_KIND_ADC) {
+#if defined(TIKU_BOARD_ADC_AVAILABLE)
+        tiku_p4_adc_lp_release();
+#endif
+    } else if (kind == TIKU_LPAGENT_KIND_I2C) {
+        (void)i2c_pins(0);
+    }
 }
 
 void tiku_lpagent_boot(void)
@@ -105,10 +186,24 @@ void tiku_lpagent_boot(void)
     } else if (jobs == 0u || tiku_p4_lpcore_start() != 0) {
         return;
     }
-    /* A durable job the running table lacks (a fresh load) is loaded. */
-    for (slot = 0u; slot < TIKU_LPAGENT_JOBS; slot++) {
-        if (lpagent_table.job[slot].kind != 0u && sh->jobs[slot].kind == 0u) {
-            load_job(slot, &lpagent_table.job[slot]);
+    /* The HP side of ADC and I2C jobs is lost with HP RAM: take it again.
+     * A kind whose resources stay held elsewhere is not run. */
+    {
+        uint8_t held[TIKU_LPAGENT_KIND_I2C + 1u] = {0};
+        unsigned kind;
+
+        for (kind = TIKU_LPAGENT_KIND_ADC; kind <= TIKU_LPAGENT_KIND_I2C;
+             kind++) {
+            held[kind] = kind_count(kind) == 0u || resource_take(kind) == 0;
+        }
+        for (slot = 0u; slot < TIKU_LPAGENT_JOBS; slot++) {
+            kind = lpagent_table.job[slot].kind;
+            if (kind >= TIKU_LPAGENT_KIND_ADC && !held[kind]) {
+                sh->jobs[slot].kind = 0u;
+            } else if (kind != 0u && sh->jobs[slot].kind == 0u) {
+                /* A durable job the running table lacks (a fresh load). */
+                load_job(slot, &lpagent_table.job[slot]);
+            }
         }
     }
 }
@@ -118,10 +213,13 @@ int tiku_lpagent_add(const tiku_lpagent_spec_t *spec)
     unsigned slot;
 
     if (spec == NULL ||
-        (spec->kind != TIKU_LPAGENT_KIND_IO &&
-         spec->kind != TIKU_LPAGENT_KIND_TIMER) ||
+        spec->kind < TIKU_LPAGENT_KIND_IO || spec->kind > TIKU_LPAGENT_KIND_I2C ||
         (spec->kind == TIKU_LPAGENT_KIND_IO &&
          spec->source >= TIKU_LPCORE_LP_IO_COUNT) ||
+        (spec->kind == TIKU_LPAGENT_KIND_ADC && spec->source > 7u) ||
+        (spec->kind == TIKU_LPAGENT_KIND_I2C &&
+         (spec->source < 0x08u || spec->source > 0x77u ||
+          (spec->arg >> 8) < 1u || (spec->arg >> 8) > 2u)) ||
         spec->op < TIKU_LPAGENT_OP_EQ || spec->op > TIKU_LPAGENT_OP_ALWAYS ||
         (spec->action & ~(TIKU_LPAGENT_ACT_WAKE | TIKU_LPAGENT_ACT_SAMPLE)) ||
         spec->period_ms == 0u || spec->period_ms > LPAGENT_PERIOD_MAX_MS ||
@@ -139,6 +237,9 @@ int tiku_lpagent_add(const tiku_lpagent_spec_t *spec)
     if (!tiku_p4_lpcore_running() && tiku_p4_lpcore_start() != 0) {
         return -3;
     }
+    if (kind_count(spec->kind) == 0u && resource_take(spec->kind) != 0) {
+        return -4;
+    }
     load_job(slot, spec);
     store_job(slot, spec);
     return (int)slot;
@@ -146,11 +247,17 @@ int tiku_lpagent_add(const tiku_lpagent_spec_t *spec)
 
 int tiku_lpagent_del(unsigned slot)
 {
+    unsigned kind;
+
     if (slot >= TIKU_LPAGENT_JOBS || lpagent_table.job[slot].kind == 0u) {
         return -1;
     }
+    kind = lpagent_table.job[slot].kind;
     TIKU_LPCORE_SHARED->jobs[slot].kind = 0u;
     store_job(slot, NULL);
+    if (kind_count(kind) == 0u) {
+        resource_give(kind);
+    }
     return 0;
 }
 
@@ -196,6 +303,21 @@ void tiku_lpagent_arm(void)
         TIKU_P4_FENCE();
         TIKU_LPCORE_SHARED->agent_armed = 1u;
     }
+}
+
+int tiku_lpagent_uses_sar(void)
+{
+    unsigned slot;
+
+    if (!tiku_p4_lpcore_launched()) {
+        return 0;
+    }
+    for (slot = 0u; slot < TIKU_LPAGENT_JOBS; slot++) {
+        if (TIKU_LPCORE_SHARED->jobs[slot].kind == TIKU_LPAGENT_KIND_ADC) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 int tiku_lpagent_woken(tiku_lpagent_wake_t *out)

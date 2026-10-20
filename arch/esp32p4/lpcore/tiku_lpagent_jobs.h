@@ -22,6 +22,15 @@
 /** @brief The pad level of LP IO @p n, 0 or 1 (the payload's). */
 uint32_t tiku_lpcore_io_get(uint32_t n);
 
+/** @brief One ADC1 conversion of pad @p pad (the payload's): 0..4095, -1
+ *         on a timeout, TIKU_LPAGENT_NO_READING while the HP holds the SAR. */
+int32_t tiku_lpcore_adc_get(uint32_t pad);
+
+/** @brief Read the register .arg names from the I2C device at @p addr (the
+ *         payload's): one byte or a big-endian word, -1 on a NACK or a
+ *         stuck bus. */
+int32_t tiku_lpcore_i2c_get(uint32_t addr, uint32_t arg);
+
 /** @brief Raise LP_TRIGGER_HP, which wakes a sleeping HP core (the
  *         payload's). */
 void tiku_lpcore_wake_hp(void);
@@ -31,9 +40,9 @@ void tiku_lpcore_wake_hp(void);
  *        source, test it, and on a firing count it, sample it and, while
  *        armed, wake the HP core.
  *
- * A fresh job (.state 0) runs at once; then every .period ticks.  A wake
- * records the job, its value and @p now, clears .agent_armed and counts in
- * .wake_count.
+ * A fresh job (.state 0) runs at once; then every .period ticks; a source
+ * with no reading leaves the job due on the next pass.  A wake records the
+ * job, its value and @p now, clears .agent_armed and counts in .wake_count.
  */
 void tiku_lpagent_run(tiku_lpcore_shared_t *sh, uint32_t now);
 
