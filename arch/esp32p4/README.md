@@ -191,6 +191,16 @@ modes are not used, nor is the ECDSA engine, which ESP-IDF enables only
 from silicon revision 3.0; the Olimex image builds the kit's software paths
 alone.
 
+AHB DMA pair 1 copies memory for `tiku_dma_arch_memcpy()`
+(`tiku_dma_arch.c`): whole words between HP SRAM and PSRAM, up to 16
+descriptors of 4032 bytes a batch, the next batch queued from the
+interrupt that ends the last. Before a copy the caches are written back over
+the source, and written back and invalidated over the destination, which is
+invalidated again before the callback; `tiku_cpu_dcache_clean()` and
+`tiku_cpu_dcache_invalidate()` act on HP SRAM through the L1 as well as on
+PSRAM. SRAM to SRAM runs at about 140 MB/s. This revision's AHB DMA reaches
+PSRAM without bursts: about 18 MB/s writing it and 9 MB/s reading it.
+
 ### Memory and configuration
 
 | Resource | Firmware use |

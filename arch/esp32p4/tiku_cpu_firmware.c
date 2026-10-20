@@ -146,23 +146,30 @@ static void cache_sync(uint32_t map, uint32_t start, uint32_t size, uint32_t op)
         if (TIKU_P4_REG_READ(0x3ff10098u) & 16u) return;
     tiku_p4_fatal("cache synchronization");
 }
-/** @brief Synchronize aligned PSRAM lines without losing adjacent dirty bytes. */
-static void psram_sync(const void *address, unsigned long length, int invalidate)
+/** @brief Synchronize aligned PSRAM or HP SRAM lines without losing adjacent
+ *         dirty bytes; HP SRAM has only the L1 in front of it. */
+static void dcache_sync(const void *address, unsigned long length, int invalidate)
 {
-    uintptr_t start = (uintptr_t)address, end;
+    uintptr_t start = (uintptr_t)address, end, limit;
     uint32_t state;
-    if (!length || start < TIKU_P4_PSRAM_BASE ||
-        start >= TIKU_P4_PSRAM_BASE + TIKU_P4_PSRAM_BYTES) return;
-    if (length > TIKU_P4_PSRAM_BASE + TIKU_P4_PSRAM_BYTES - start)
-        tiku_p4_fatal("cache range");
+    int psram = start >= TIKU_P4_PSRAM_BASE &&
+                start < TIKU_P4_PSRAM_BASE + TIKU_P4_PSRAM_BYTES;
+    if (psram) limit = TIKU_P4_PSRAM_BASE + TIKU_P4_PSRAM_BYTES;
+    else if (start >= TIKU_P4_SRAM_LOW_START && start < TIKU_P4_SRAM_HIGH_END)
+        limit = TIKU_P4_SRAM_HIGH_END;
+    else return;
+    if (!length) return;
+    if (length > limit - start) tiku_p4_fatal("cache range");
     end = (start + length + 63u) & ~63u;
     start &= ~63u;
     state = TIKU_P4_IRQ_SAVE();
     __asm__ volatile("fence iorw, iorw" ::: "memory");
     cache_sync(0x10u, start, end - start, 4u);
-    cache_sync(0x10u, start, end - start, 4u);
-    cache_sync(0x20u, start, end - start, 4u);
-    if (invalidate) cache_sync(0x30u, start, end - start, 1u);
+    if (psram) {
+        cache_sync(0x10u, start, end - start, 4u);
+        cache_sync(0x20u, start, end - start, 4u);
+    }
+    if (invalidate) cache_sync(psram ? 0x30u : 0x10u, start, end - start, 1u);
     __asm__ volatile("fence iorw, iorw" ::: "memory");
     TIKU_P4_IRQ_RESTORE(state);
 }
@@ -177,11 +184,11 @@ void tiku_cpu_p4_restart(void)
 }
 void tiku_cpu_dcache_clean(const void *address, unsigned long length)
 {
-    psram_sync(address, length, 0);
+    dcache_sync(address, length, 0);
 }
 void tiku_cpu_dcache_invalidate(const void *address, unsigned long length)
 {
-    psram_sync(address, length, 1);
+    dcache_sync(address, length, 1);
 }
 void tiku_cpu_icache_invalidate(void)
 {
