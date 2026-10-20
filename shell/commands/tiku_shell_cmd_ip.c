@@ -25,7 +25,6 @@
 #endif
 #if defined(TIKU_KITS_NET_DHCP_ENABLE) && TIKU_KITS_NET_DHCP_ENABLE
 #include <tikukits/net/ipv4/tiku_kits_net_dhcp.h>  /* the lease */
-#endif
 
 /** @brief Print @p label, then @p a as a.b.c.d and a newline. */
 static void
@@ -33,6 +32,7 @@ ip_put(const char *label, const uint8_t a[4])
 {
     SHELL_PRINTF("%s%u.%u.%u.%u\n", label, a[0], a[1], a[2], a[3]);
 }
+#endif
 
 void
 tiku_shell_cmd_ip(uint8_t argc, const char *argv[])

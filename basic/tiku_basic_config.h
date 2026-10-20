@@ -444,6 +444,10 @@
 #    define TIKU_BASIC_STR_BUF_CAP  1024
 #  elif defined(TIKU_BASIC_TIER_FRAM)
 #    define TIKU_BASIC_STR_BUF_CAP  128
+#  elif defined(PLATFORM_ESP32P4)
+/* The P4's 16 KB stack holds 256-byte temporaries: a SHA256$ digest (64 hex
+ * digits) and its BASE64$ (88 characters) fit. */
+#    define TIKU_BASIC_STR_BUF_CAP  256
 #  else
 #    define TIKU_BASIC_STR_BUF_CAP  64
 #  endif

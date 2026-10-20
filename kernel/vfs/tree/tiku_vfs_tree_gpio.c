@@ -148,7 +148,7 @@ gpio_pin_read(uint8_t port, uint8_t pin, char *buf, size_t max)
  * @param len  Input length in bytes
  * @return The requested action, or GPIO_ACT_NONE for anything else
  */
-#if !defined(PLATFORM_ESP32P4)
+#if TIKU_VFS_GPIO_WRITABLE
 static gpio_action_t
 gpio_parse_action(const char *buf, size_t len)
 {
@@ -236,7 +236,7 @@ gpio_pin_write(uint8_t port, uint8_t pin, const char *buf, size_t len)
 TIKU_GPIO_PORTS(PORT_WRAPPERS)
 
 static int gpio_pin_file_read(char *buf, size_t max);
-#if !defined(PLATFORM_ESP32P4)
+#if TIKU_VFS_GPIO_WRITABLE
 static int gpio_pin_file_write(const char *buf, size_t len);
 #define GPIO_PIN_WRITE gpio_pin_file_write
 #else
@@ -366,7 +366,7 @@ gpio_pin_file_read(char *buf, size_t max)
 }
 
 /** @brief Write handler shared by every /dev/gpio pin file. */
-#if !defined(PLATFORM_ESP32P4)
+#if TIKU_VFS_GPIO_WRITABLE
 static int
 gpio_pin_file_write(const char *buf, size_t len)
 {

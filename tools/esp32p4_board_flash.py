@@ -72,6 +72,8 @@ def main():
     parser.add_argument("--log", type=Path)
     parser.add_argument("--erase-chip", action="store_true",
                         help="erase the whole flash instead of installing")
+    parser.add_argument("--no-monitor", action="store_true",
+                        help="boot without requiring a shell (a test image)")
     args = parser.parse_args()
     try:
         import esptool
@@ -105,10 +107,12 @@ def main():
                     print("PASS: P4 checks passed; whole flash erased")
                     return 0
                 install(esp, cmds, boot, xip, log)
-                firmware.capture_prompt(wire, log)
+                if not args.no_monitor:
+                    firmware.capture_prompt(wire, log)
         finally:
             log.close()
-        print("PASS: P4 code pair verified and booted to the shell; storage not written")
+        status = "reset requested" if args.no_monitor else "booted to the shell"
+        print(f"PASS: P4 code pair verified and {status}; storage not written")
         return 0
     except (ImportError, OSError, ValueError, RuntimeError) as error:
         print(f"P4 flash: {error}", file=sys.stderr)

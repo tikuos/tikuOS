@@ -88,14 +88,18 @@ TIKU_SHELL_BASIC_ENABLE ?= 1
 P4_REQUESTED_FEATURES := $(strip $(foreach v,$(filter TIKU_%_ENABLE,$(.VARIABLES)),\
     $(if $(filter 1,$($(v))),$(v))))
 P4_REQUESTED_FEATURES := $(filter-out TIKU_SHELL_ENABLE TIKU_THREADS_ENABLE TIKU_SHELL_BASIC_ENABLE,$(P4_REQUESTED_FEATURES))
-ifneq ($(P4_REQUESTED_FEATURES),)
-$(error ESP32-P4 firmware does not include optional features: $(P4_REQUESTED_FEATURES))
-endif
 ifneq ($(strip $(APP) $(BASIC_PROGRAM)),)
 $(error ESP32-P4 firmware does not include APP or BASIC_PROGRAM payloads)
 endif
+# The Olimex keeps its qualified image: no optional features and no test
+# runner.  The FireBeetle 2 builds both for TikuBench.
+ifneq ($(BOARD)$(board),firebeetle2_esp32p4)
+ifneq ($(P4_REQUESTED_FEATURES),)
+$(error ESP32-P4 firmware does not include optional features: $(P4_REQUESTED_FEATURES))
+endif
 ifneq ($(filter 1,$(HAS_TESTS) $(TEST_ENABLE)),)
 $(error P4 firmware uses the installed-image Bench suite; kernel diagnostics use P4_PROFILE=kernel-test)
+endif
 endif
 else ifeq ($(MCU),esp32c5)
 TIKU_PLATFORM := esp32c5
@@ -3803,8 +3807,8 @@ endif
 .PHONY: all clean flash run debug erase size monitor deploy docs docs-clean uf2 lint
 
 # Unselected firmware tests retain helpers and locals whose feature-gated
-# users are absent; the C5 alone builds with -Werror.
-ifeq ($(TIKU_PLATFORM),esp32c5)
+# users are absent; the C5 and P4 build with -Werror.
+ifneq ($(filter esp32c5 esp32p4,$(TIKU_PLATFORM)),)
 $(BUILD_DIR)/TikuBench/tests/%.o: CFLAGS += -Wno-error=unused-function -Wno-error=unused-parameter \
     -Wno-error=unused-variable -Wno-error=unused-but-set-variable
 endif
@@ -4566,7 +4570,8 @@ flash: all
 	@test -n "$(ESP_PORT)" || { echo "Name the P4 USB port with ESP_PORT=/dev/..."; exit 1; }
 	$(ESP_PYTHON) tools/esp32p4_board_flash.py --port "$(ESP_PORT)" \
 	    $(if $(P4_SERIAL),--serial "$(P4_SERIAL)") --image $(TARGET_BIN) \
-	    --elf $(BUILD_DIR)/main.paired.elf --xip $(TARGET_XIP)
+	    --elf $(BUILD_DIR)/main.paired.elf --xip $(TARGET_XIP) \
+	    $(if $(and $(filter-out 0,$(TIKU_SHELL_ENABLE)),$(filter 0,$(HAS_TESTS))),,--no-monitor)
 
 erase:
 	@test -n "$(ESP_PORT)" || { echo "Name the P4 USB port with ESP_PORT=/dev/..."; exit 1; }

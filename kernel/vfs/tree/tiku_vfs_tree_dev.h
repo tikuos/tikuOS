@@ -19,6 +19,21 @@
 
 #include <kernel/vfs/tiku_vfs.h>
 
+/** @brief 1 when this build lists /dev/adc and /dev/spi: every port but the
+ *  P4. */
+#if defined(PLATFORM_ESP32P4)
+#define TIKU_VFS_DEV_ADC_SPI 0
+#else
+#define TIKU_VFS_DEV_ADC_SPI 1
+#endif
+
+/** @brief 1 when this build lists /dev/i2c: every port but the C5 and P4. */
+#if defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32P4)
+#define TIKU_VFS_DEV_I2C 0
+#else
+#define TIKU_VFS_DEV_I2C 1
+#endif
+
 /**
  * @brief Get the fully-formed /dev directory node.
  *
