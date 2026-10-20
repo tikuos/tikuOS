@@ -26,6 +26,9 @@
 #include "tiku_systimer_arch.h"
 #include "tiku_debug_arch.h"
 #include "tiku_watchdog_arch.h"
+#if TIKU_LPCORE_ENABLE
+#include "tiku_lpagent_arch.h"
+#endif
 
 /* Blocks (reg_base.h). */
 #define LP_SYS      0x50110000UL
@@ -453,8 +456,12 @@ void tiku_p4_deep_sleep(uint64_t us)
     uint32_t wakes = TIKU_P4_WAKE_LP_CORE | TIKU_P4_WAKE_LP_TRAP;
     uint64_t t0;
 
-    /* The checkpoint: HP SRAM is about to lose power, the mirror is not. */
+    /* The checkpoint: HP SRAM is about to lose power, the mirror is not.
+     * The LP agent's jobs may wake the part from here on. */
     (void)tiku_mem_arch_nvm_flush_status();
+#if TIKU_LPCORE_ENABLE
+    tiku_lpagent_arm();
+#endif
     console_drain(50U);
     (void)TIKU_P4_IRQ_SAVE();
 

@@ -5,7 +5,8 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_lpcore_main.c - P4 LP core payload: park, echo, LED, I2C, HP wake.
+ * tiku_lpcore_main.c - P4 LP core payload: park, echo, LED, I2C, HP wake,
+ * and the LP agent's jobs.
  *
  * Serves the shared page in tiku_lpcore_ipc.h by polling.  The HP core starts
  * it again after a fault by resetting the core, so a trap only records.
@@ -13,6 +14,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_lpcore_ipc.h"
+#include "tiku_lpagent_jobs.h"
 
 void tiku_lpcore_main(void);
 void tiku_lpcore_fault(void);
@@ -99,6 +101,16 @@ static void led_release(tiku_lpcore_shared_t *sh)
     REG(LP_GPIO_EN_W1TC) = 1u << TIKU_LPCORE_LED_IO;
     REG(LP_IOMUX_PAD(TIKU_LPCORE_LED_IO)) &= ~PAD_MUX_LP;
     sh->led_level = 0u;
+}
+
+uint32_t tiku_lpcore_io_get(uint32_t n)
+{
+    return lp_io_get(n);
+}
+
+void tiku_lpcore_wake_hp(void)
+{
+    REG(PMU_HP_LP_COMM) = LP_TRIGGER_HP;
 }
 
 /** @brief Set the LED pad to @p level, output enabled. */
@@ -284,7 +296,7 @@ static void wake_check(tiku_lpcore_shared_t *sh)
         sh->wake_mode = 0u;
         sh->wake_lp_ticks = sh->lp_ticks_lo;
         sh->wake_count = sh->wake_count + 1u;
-        REG(PMU_HP_LP_COMM) = LP_TRIGGER_HP;
+        tiku_lpcore_wake_hp();
     }
 }
 
@@ -349,6 +361,7 @@ void tiku_lpcore_main(void)
 
     led_release(sh);
     sh->wake_mode = 0u;
+    sh->agent_armed = 0u;
     sh->boots = sh->boots + 1u;
     sh->heartbeat = 0u;
     __asm__ volatile ("fence" ::: "memory");
@@ -380,6 +393,7 @@ void tiku_lpcore_main(void)
         lpcore_echo(sh, &last_seq);
         publish_counters(sh);
         wake_check(sh);
+        tiku_lpagent_run(sh, sh->lp_ticks_lo);
         sh->heartbeat = sh->heartbeat + 1u;
         for (pace = 0u; pace < LPCORE_PACE; pace++) {
         }

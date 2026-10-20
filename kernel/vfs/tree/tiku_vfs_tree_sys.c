@@ -35,6 +35,9 @@
 #if (TIKU_HAS_COPROC + 0)
 #include "tiku_vfs_tree_coproc.h"
 #endif
+#if (TIKU_LPCORE_ENABLE + 0)
+#include "tiku_vfs_tree_lp.h"
+#endif
 #if (TIKU_HAS_NPU + 0)
 #include "tiku_vfs_tree_npu.h"
 #endif
@@ -1978,6 +1981,10 @@ static const tiku_vfs_node_t sys_children[] = {
     { "coproc",   TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_coproc_children,   TIKU_VFS_TREE_COPROC_NCHILD },
 #endif
+#if (TIKU_LPCORE_ENABLE + 0)
+    { "lp",       TIKU_VFS_DIR,  NULL, NULL,
+      tiku_vfs_tree_lp_children,       TIKU_VFS_TREE_LP_NCHILD },
+#endif
 #if (TIKU_HAS_NPU + 0)
     { "npu",      TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_npu_children,      TIKU_VFS_TREE_NPU_NCHILD },
@@ -2015,6 +2022,10 @@ tiku_vfs_tree_sys_init(void)
     (void)tiku_persist_cell_init(&device_name_cell);
 #if (TIKU_VFS_CONFIG_ENABLE + 0)
     cfg_service_init();
+#endif
+
+#if (TIKU_LPCORE_ENABLE + 0)
+    tiku_vfs_tree_lp_init();
 #endif
 
 #if (TIKU_HAS_BLE_ADV + 0)

@@ -89,6 +89,62 @@
 /** @brief LP IOs are GPIO0..15. */
 #define TIKU_LPCORE_LP_IO_COUNT  16u
 
+/*---------------------------------------------------------------------------*/
+/* LP agent: jobs the payload runs on every pass, the HP awake or asleep      */
+/*---------------------------------------------------------------------------*/
+
+#define TIKU_LPAGENT_JOBS        8u
+#define TIKU_LPAGENT_SAMPLES     64u
+/** @brief Bytes of HP command line kept per job, NUL included. */
+#define TIKU_LPAGENT_CMD_MAX     32u
+
+/** @brief Job kinds: what a run reads. */
+#define TIKU_LPAGENT_KIND_IO     1u   /**< level of LP IO .source, 0 or 1 */
+#define TIKU_LPAGENT_KIND_TIMER  2u   /**< the job's run count */
+
+/** @brief Job operators.  A comparison fires when it turns true; CHANGE,
+ *         RISE and FALL compare with the previous run; ALWAYS fires on
+ *         every run. */
+#define TIKU_LPAGENT_OP_EQ       1u
+#define TIKU_LPAGENT_OP_NE       2u
+#define TIKU_LPAGENT_OP_GT       3u
+#define TIKU_LPAGENT_OP_LT       4u
+#define TIKU_LPAGENT_OP_CHANGE   5u
+#define TIKU_LPAGENT_OP_RISE     6u
+#define TIKU_LPAGENT_OP_FALL     7u
+#define TIKU_LPAGENT_OP_ALWAYS   8u
+
+/** @brief Job actions, a bit set: wake the HP core (only while armed),
+ *         append a sample.  Every firing counts in .hits. */
+#define TIKU_LPAGENT_ACT_WAKE    1u
+#define TIKU_LPAGENT_ACT_SAMPLE  2u
+
+/** @brief Job .state bits, kept by the payload; the HP writes 0. */
+#define TIKU_LPAGENT_SEEDED      1u   /**< .last holds a reading */
+#define TIKU_LPAGENT_MATCHED     2u   /**< the comparison held last run */
+
+/** @brief One job.  The HP clears .kind, writes the rest, then writes
+ *         .kind; the payload skips a job whose .kind is 0. */
+typedef struct {
+    volatile uint8_t  kind;
+    volatile uint8_t  source;       /* LP IO for KIND_IO                    */
+    volatile uint8_t  op;
+    volatile uint8_t  action;
+    volatile uint32_t period;       /* LP timer ticks between runs, >= 1    */
+    volatile int32_t  threshold;
+    volatile uint32_t next_due;     /* LP timer low word of the next run    */
+    volatile int32_t  last;         /* the previous run's value             */
+    volatile uint32_t state;        /* TIKU_LPAGENT_SEEDED, _MATCHED        */
+    volatile uint32_t hits;         /* firings since the job was written    */
+} tiku_lpagent_job_t;
+
+/** @brief One sample: when, which job, what it read. */
+typedef struct {
+    volatile uint32_t lp_ticks;     /* LP timer low word                    */
+    volatile uint32_t job;
+    volatile int32_t  value;
+} tiku_lpagent_sample_t;
+
 /** @brief The shared page at TIKU_LPCORE_SHARED_ADDR. */
 typedef struct {
     volatile uint32_t magic;        /* TIKU_LPCORE_MAGIC once main() runs  */
@@ -133,6 +189,20 @@ typedef struct {
     volatile uint32_t wake_mode;
     volatile uint32_t wake_count;
     volatile uint32_t wake_lp_ticks;
+
+    /* LP agent.  agent_armed is set by the HP before a deep sleep; a job's
+     * wake fires only while it is set, records itself and clears it.  The
+     * ring holds the latest TIKU_LPAGENT_SAMPLES of sample_count samples.
+     * agent_cmd is the HP's: the command line to run after each job's
+     * wake. */
+    volatile uint32_t agent_armed;
+    volatile uint32_t agent_wake_job;    /* job + 1 that woke the HP, or 0  */
+    volatile int32_t  agent_wake_value;
+    volatile uint32_t agent_wake_ticks;
+    volatile uint32_t sample_count;
+    tiku_lpagent_job_t    jobs[TIKU_LPAGENT_JOBS];
+    tiku_lpagent_sample_t samples[TIKU_LPAGENT_SAMPLES];
+    volatile char         agent_cmd[TIKU_LPAGENT_JOBS][TIKU_LPAGENT_CMD_MAX];
 
     /* Fault record, written by the trap handler before it sets the fault
      * magic.  fault_count survives relaunches; the rest describe the most

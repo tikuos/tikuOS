@@ -171,15 +171,16 @@ checks the P4 geometry, high-numbered file slots and allocator bitmap limits.
 RC_FAST oscillator: 18.7 MHz untrimmed on the FireBeetle).
 `arch/esp32p4/lpcore/` builds it with its own linker script for LP SRAM,
 and the firmware carries the binary in the XIP window. The HP core copies it to `0x50108000` the first time it
-starts the core (`write /sys/coproc/run 1`) and releases the core at
-`0x50108080`, past its vector table, without the LP ROM.
+starts the core (`write /sys/coproc/run 1`, `lp add`, or a boot with
+durable LP jobs) and releases the core at `0x50108080`, past its vector
+table, without the LP ROM.
 
 | LP SRAM | Use |
 | --- | --- |
 | `0x50108000`–`0x50108080` | Vector table, 32 entries |
 | `0x50108080`–`0x5010e000` | Payload image and its BSS |
 | `0x5010e000`–`0x5010e800` | LP core stack, 2 KiB |
-| `0x5010e800`–`0x5010f800` | Shared page: commands, mailbox, counters |
+| `0x5010e800`–`0x5010f800` | Shared page: commands, mailbox, counters, LP agent |
 | `0x5010fa40`–`0x5010fa80` | HP fault record |
 | `0x5010fa80`–`0x50110000` | LP ROM stack and data, untouched |
 
@@ -203,6 +204,17 @@ the core stalls on the crystal with every domain, PLL and clock gate on, so
 the USB console, PSRAM, SYSTIMER and the tick run through it, at about 1 ms
 a sleep. A timed sleep of either kind whose wake never comes ends in an LP
 watchdog chip reset a second late.
+
+The LP agent runs up to 8 jobs on the LP core, the HP core awake or asleep.
+`lp add io <n> <op> <value> <ms> <act> [cmd...]` reads LP IO n every ms
+milliseconds, and `lp add timer <ms> <act> [cmd...]` counts runs; a firing
+samples the value (`sample`, listed by `lp samples`) or, during a deep
+sleep, wakes the HP core (`wake`), and the shell runs the job's command
+after that wake. `on /dev/gpio/1/<n> <op> <value> wake <cmd...>` writes the
+same job. `/sys/lp/jobs`, `/sys/lp/samples` and `/sys/lp/wake` list the
+table, the latest 16 samples and the job that ended this boot's sleep. The
+table has a durable copy in the flash mirror, which a boot that finds LP
+SRAM without the payload loads again.
 
 TikuBench's `coproc` and `lpcore` suites and the `deep-sleep-wake`,
 `light-sleep` and `hibernate` kernel categories run on `firebeetle2_p4`.

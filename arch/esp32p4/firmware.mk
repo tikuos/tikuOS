@@ -28,15 +28,17 @@ endif
 # the payload's mailbox cap; tiku_coproc_arch.c asserts it.
 ifeq ($(TIKU_LPCORE_ENABLE),1)
 SRCS += arch/esp32p4/tiku_lpcore_arch.c arch/esp32p4/tiku_coproc_arch.c
-SRCS += kernel/vfs/tree/tiku_vfs_tree_coproc.c
+SRCS += arch/esp32p4/tiku_lpagent_arch.c
+SRCS += kernel/vfs/tree/tiku_vfs_tree_coproc.c kernel/vfs/tree/tiku_vfs_tree_lp.c
 ifeq ($(TIKU_SHELL_ENABLE),1)
-SRCS += shell/commands/tiku_shell_cmd_lpcore.c
+SRCS += shell/commands/tiku_shell_cmd_lpcore.c shell/commands/tiku_shell_cmd_lp.c
 endif
 CFLAGS += -DTIKU_LPCORE_ENABLE=1 -DTIKU_HAS_COPROC=1 -DTIKU_COPROC_MSG_CAP=240u
 LPCORE_BUILD = $(BUILD_DIR)/lpcore
 LPCORE_CFLAGS = $(ESP32P4_ARCH) -Os -Wall -Wextra -Werror -ffreestanding \
                 -nostdlib -nostartfiles -ffunction-sections -fdata-sections \
                 -MMD -MP
-LPCORE_OBJS = $(LPCORE_BUILD)/tiku_lpcore_crt0.o $(LPCORE_BUILD)/tiku_lpcore_main.o
+LPCORE_OBJS = $(LPCORE_BUILD)/tiku_lpcore_crt0.o $(LPCORE_BUILD)/tiku_lpcore_main.o \
+              $(LPCORE_BUILD)/tiku_lpagent_jobs.o
 TIKU_LPCORE_IMG_O = $(LPCORE_BUILD)/tiku_lpcore_img.o
 endif

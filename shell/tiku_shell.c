@@ -94,6 +94,9 @@
 #if TIKU_SHELL_CMD_LPCORE
 #include "commands/tiku_shell_cmd_lpcore.h"
 #endif
+#if TIKU_SHELL_CMD_LP
+#include "commands/tiku_shell_cmd_lp.h"
+#endif
 #if TIKU_SHELL_CMD_NPU
 #include "commands/tiku_shell_cmd_npu.h"
 #endif
@@ -505,6 +508,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_LPCORE
     {"lpcore",  "ESP32-P4 LP core: led|i2c|clock|wake", tiku_shell_cmd_lpcore},
+#endif
+#if TIKU_SHELL_CMD_LP
+    {"lp",      "ESP32-P4 LP agent jobs: add|del|samples", tiku_shell_cmd_lp},
 #endif
 #if TIKU_SHELL_CMD_PANEL
     {"panel",   "parallel RGB display: paint a colour", tiku_shell_cmd_panel},
@@ -1279,6 +1285,11 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
      * before the scheduler starts.  A TCP-only shell has no backend at this
      * point, so their output is dropped. */
     tiku_init_run_all();
+#endif
+#if TIKU_SHELL_CMD_LP
+    /* A job of the LP agent ended this boot's deep sleep: its command runs
+     * here, after the init table, as if typed. */
+    tiku_shell_lp_wake_run();
 #endif
 #if !TIKU_SHELL_TCP_ENABLE || TIKU_SHELL_NET_TEST
     shell_print_prompt();
