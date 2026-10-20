@@ -149,6 +149,10 @@ def split_elf(data):
             raise ValueError("truncated section")
         if label != b".xip":
             continue
+        if length == HEADER_SIZE:
+            raise ValueError("empty XIP section: the firmware profile links the "
+                             "shell, BASIC, tests or applications to flash, and "
+                             "this build has none of them")
         if (found is not None or kind != 1 or flags != 6 or address != XIP_ADDRESS or
                 not HEADER_SIZE < length <= XIP_CAPACITY or length % 4):
             raise ValueError("invalid XIP section")
