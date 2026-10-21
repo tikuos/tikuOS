@@ -222,6 +222,11 @@ The 2D-DMA (`tiku_dma2d_arch.c`) copies a block of 1- to 4-byte pixels
 between pictures in HP SRAM or PSRAM for `tiku_p4_dma2d_copy()`, with the
 caches kept coherent as for the AHB DMA: a 640x480 RGB565 frame from PSRAM
 to PSRAM takes 9.1 ms.
+The PPA (`tiku_ppa_arch.c`) fills, alpha-blends, and scales, turns and
+mirrors ARGB8888, RGB888 and RGB565 pictures through it; a turn is a
+counter-clockwise quarter, a mirror applies to the turned block, and scaling
+is bilinear in sixteenths. A VGA fill takes 2.5 ms, doubling 320x240 to
+640x480 8.8 ms.
 
 ### Memory and configuration
 
