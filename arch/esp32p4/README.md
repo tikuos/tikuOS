@@ -218,6 +218,15 @@ DMA past the L1 cache, so each buffer is cleaned or invalidated around it.
 <lba>` and `regs` print the counters, a block and the PHY and core
 registers. The shell stays on the USB Serial/JTAG Type-C.
 
+The HP cores' single-precision FPU runs every `float` operation: 100k fused
+multiply-adds take 1.9 ms. `tiku_crt_early.S` turns it on at boot and saves
+f0-f31 and `fcsr` in the interrupt frame of a context that wrote them, so
+workers and interrupts each keep their own values and rounding mode; the LP
+core has no FPU and its payload stays integer. The PIE vector extension
+(Espressif's SIMD, CSR 0x7F2, 216 bytes of state) is off: its instructions
+are not in the upstream toolchain this port builds with, and its encodings
+are not published.
+
 The media blocks move pixels through the 2D-DMA (`tiku_dma2d_arch.c`),
 with the caches kept coherent as for the AHB DMA. `tiku_p4_dma2d_copy()`
 copies a block of 1- to 4-byte pixels between pictures in HP SRAM or PSRAM:
@@ -396,7 +405,7 @@ reserves every pad. The FireBeetle 2 drives its free pads (above).
 Ethernet, microSD, USB host, HDMI, audio and camera drivers are not provided
 by this profile. Their wiring and attached accessories require confirmation
 before external pins or power rails are driven. Wi-Fi/BLE are not integrated
-P4 capabilities. CPU1 jobs and FPU/vector contexts are not enabled. Do not
+P4 capabilities. CPU1 jobs and the PIE vector unit are not enabled. Do not
 interpret this as complete board-peripheral support.
 
 ## Storage-free diagnostic
@@ -416,8 +425,10 @@ Unsupported feature selections fail rather than selecting a C5/C61 port.
 
 ## Build
 
-Use a RISC-V bare-metal GCC toolchain that supports `rv32imac_zicsr_zifencei`
-with the `ilp32` ABI, and esptool 5.1.0. Python and pyserial are also needed
+Use a RISC-V bare-metal GCC toolchain that supports `rv32imafc_zicsr_zifencei`
+with the `ilp32f` ABI (the HP cores have a single-precision FPU and every
+profile builds hard-float; the LP core payload builds `rv32imac`/`ilp32`),
+and esptool 5.1.0. Python and pyserial are also needed
 for loading. No ESP-IDF installation is required.
 
 ```sh
@@ -554,8 +565,13 @@ CPU0 masks interrupts, establishes its stack, global pointer and fixed trap
 scratch area, installs a non-vectored CLIC trap handler, and clears BSS.
 Startup disables inherited
 boot watchdogs and holds CPU1 and the LP core in reset with their clocks
-disabled. Floating-point and vector state are disabled; interrupt frames
-contain the integer registers and machine return state.
+disabled. Vector state is disabled; the FPU is on with its state marked
+initial and `fcsr` at 0. The 288-byte interrupt frame holds the integer
+registers and the machine return state, and f0-f31 with `fcsr` behind a flag
+when the interrupted context had written them (`mstatus.FS` dirty); the exit
+restores them before the integer registers, or resets `fcsr` for a context
+that had none, since the interrupt may have changed it. Worker frames start
+with the FPU in the same initial state.
 
 The CPU first selects the board's 40 MHz crystal and verifies the clock
 dividers. Native regulator initialization reads the calibrated HP/LP bias
@@ -744,7 +760,7 @@ the complete firmware profile, or physical cold-start behavior.
 portable process, scheduler, timer, critical-window and worker implementations.
 CPU0 runs at 360 MHz; CPU1 and the LP core remain parked. Do not pass `MINIMAL`
 or enable ordinary firmware features with this profile.
-The toolchain must provide newlib headers and `libc`/`libnosys` for `ilp32`.
+The toolchain must provide newlib headers and `libc`/`libnosys` for `ilp32f`.
 
 ```sh
 make ram-load MCU=esp32p4 P4_PROFILE=kernel-test \
@@ -767,7 +783,9 @@ The test programs are `TikuBench/tests/esp32p4/test_kernel.c` and
 timer cancellation, nested atomic sections, critical IRQ masks, worker
 start/join/reuse, register preservation, preemption, kernel priority, cycle
 budgets, queue waits/timeouts, stack canaries, WFI wakeup and errno isolation
-between the kernel, workers and interrupts. FP and vector state are disabled.
+between the kernel, workers and interrupts. Vector state is disabled; the
+FPU is on, and `fpu-p4` and the threads category check its state across
+interrupts and worker switches.
 Memory checks cover both SRAM spans, full-range address-dependent patterns,
 alignment, arenas, pools, workspace aliases, non-LIFO release, coalescing,
 stale handles, metadata exhaustion, software stack guards, secure wiping and

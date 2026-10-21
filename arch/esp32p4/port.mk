@@ -90,7 +90,7 @@ P4_OBJCOPY := $(P4_TOOL)objcopy
 P4_SIZE := $(P4_TOOL)size
 PYTHON ?= python3
 ESPTOOL ?= esptool
-P4_ARCH := -march=rv32imac_zicsr_zifencei -mabi=ilp32
+# P4_ARCH comes from the Makefile, which sets it before including this file.
 P4_FLAGS := $(P4_ARCH) -Os -g -Wall -Wextra -Werror -ffreestanding \
     -fno-builtin -ffunction-sections -fdata-sections -I. \
     -DPLATFORM_ESP32P4=1 \

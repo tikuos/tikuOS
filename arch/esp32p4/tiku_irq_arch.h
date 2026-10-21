@@ -15,10 +15,15 @@
 #ifndef TIKU_ESP32P4_IRQ_ARCH_H_
 #define TIKU_ESP32P4_IRQ_ARCH_H_
 
-#define TIKU_P4_FRAME_SIZE   144
+#define TIKU_P4_FRAME_SIZE   288
 #define TIKU_P4_FRAME_PC     128
 #define TIKU_P4_FRAME_STATUS 132
 #define TIKU_P4_FRAME_CAUSE  136
+#define TIKU_P4_FRAME_FPU    140    /* 1 when f0-f31 and fcsr follow */
+#define TIKU_P4_FRAME_F0     144
+#define TIKU_P4_FRAME_FCSR   272
+#define TIKU_P4_MSTATUS_FS   0x6000u    /* 1 initial, 2 clean, 3 dirty */
+#define TIKU_P4_MSTATUS_FS_INITIAL 0x2000u
 
 #ifndef __ASSEMBLER__
 #include <stdint.h>

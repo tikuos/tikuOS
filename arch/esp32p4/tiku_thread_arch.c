@@ -73,7 +73,8 @@ uint32_t *tiku_thread_arch_frame_init(uint32_t *top, void (*entry)(void *),
     frame[3] = (uint32_t)(uintptr_t)&__global_pointer$;
     frame[10] = (uint32_t)(uintptr_t)argument;
     frame[TIKU_P4_FRAME_PC / 4] = (uint32_t)(uintptr_t)entry;
-    frame[TIKU_P4_FRAME_STATUS / 4] = (3u << 11) | (1u << 7);
+    frame[TIKU_P4_FRAME_STATUS / 4] = (3u << 11) | (1u << 7) |
+                                      TIKU_P4_MSTATUS_FS_INITIAL;
     frame[TIKU_P4_FRAME_CAUSE / 4] = (1u << 31) | (3u << 28) | (1u << 27);
     return frame;
 }

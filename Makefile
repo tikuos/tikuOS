@@ -28,6 +28,11 @@ MCU = msp430fr5994          # the target of a bare `make`
 endif
 MCU := $(shell echo $(MCU) | tr '[:upper:]' '[:lower:]')
 
+# The ESP32-P4's HP cores have a single-precision FPU and run hard-float
+# code; the LP core payload (arch/esp32p4/lpcore) has no FPU and keeps the
+# integer ABI.  Every P4 profile and arch/esp32p4/port.mk build with these.
+P4_ARCH := -march=rv32imafc_zicsr_zifencei -mabi=ilp32f
+P4_LPCORE_ARCH := -march=rv32imac_zicsr_zifencei -mabi=ilp32
 P4_DIAGNOSTIC_BUILD := $(if $(filter esp32p4,$(MCU)),$(if $(filter firmware,$(P4_PROFILE)),,1))
 ifeq ($(P4_DIAGNOSTIC_BUILD),1)
 include arch/esp32p4/port.mk
@@ -1321,7 +1326,8 @@ endif
 
 else ifeq ($(TIKU_PLATFORM),esp32p4)
 
-ESP32P4_ARCH := -march=rv32imac_zicsr_zifencei -mabi=ilp32
+ESP32P4_ARCH := $(P4_ARCH)
+ESP32P4_LPCORE_ARCH := $(P4_LPCORE_ARCH)
 TIKU_TIER_SRAM_MIN ?= 262144
 CFLAGS = $(ESP32P4_ARCH) -Os -g -Wall -Wextra -Werror -ffreestanding
 CFLAGS += --specs=nano.specs -fno-builtin -ffunction-sections -fdata-sections

@@ -7,9 +7,9 @@
  *
  * tiku_crt_early.S - P4 RAM entry and non-nested machine trap frame.
  *
- * CPU0 zeroes .bss and, outside the diagnostic, parks the other cores and
- * sets the L2 layout before main; other harts wait in WFI.  The trap entry
- * checks the interrupted SP, then dispatches interrupts or records faults.
+ * CPU0 zeroes .bss, parks the other cores outside the diagnostic and runs
+ * main; other harts wait in WFI.  The trap entry checks the interrupted SP,
+ * saves the FPU when the context dirtied it, then dispatches or faults.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -46,8 +46,18 @@ tiku_esp32p4_reset_handler:
     addi t0, t0, 4
     j 1b
 2:
+    /* Vector state off; the FPU on, its registers untouched, rounding to
+     * nearest.  Threads start the same way (tiku_thread_arch_frame_init). */
     li t0, 0x6600
     csrc mstatus, t0
+    li t0, TIKU_P4_MSTATUS_FS_INITIAL
+    csrs mstatus, t0
+    csrw fcsr, zero
+    /* The fcsr write marked the state dirty; back to initial. */
+    li t0, TIKU_P4_MSTATUS_FS
+    csrc mstatus, t0
+    li t0, TIKU_P4_MSTATUS_FS_INITIAL
+    csrs mstatus, t0
 #if defined(TIKU_P4_KERNEL_TEST) || defined(TIKU_P4_FIRMWARE)
     call tiku_esp32p4_boot_park_cores
     call tiku_p4_cache_boot_init
@@ -121,6 +131,21 @@ tiku_esp32p4_diagnostic_trap:
     sw t0, TIKU_P4_FRAME_STATUS(sp)
     csrr t0, mcause
     sw t0, TIKU_P4_FRAME_CAUSE(sp)
+    /* A context that wrote the FPU (FS dirty) keeps its registers and
+     * fcsr in the frame; one that never did skips the 33 stores. */
+    sw zero, TIKU_P4_FRAME_FPU(sp)
+    csrr t0, mstatus
+    li t1, TIKU_P4_MSTATUS_FS
+    and t0, t0, t1
+    bne t0, t1, 4f
+    .irp reg,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31
+    fsw f\reg, (TIKU_P4_FRAME_F0+4*\reg)(sp)
+    .endr
+    csrr t0, fcsr
+    sw t0, TIKU_P4_FRAME_FCSR(sp)
+    li t0, 1
+    sw t0, TIKU_P4_FRAME_FPU(sp)
+4:
     mv a0, sp
     .option push
     .option norelax
@@ -129,6 +154,20 @@ tiku_esp32p4_diagnostic_trap:
     .option pop
     call tiku_p4_trap_dispatch
     mv sp, a0
+    /* A context with no saved FPU state never set fcsr: the interrupt may
+     * have, so it goes back to its reset value.  Either write marks the state
+     * dirty; the mstatus restore below puts the context's own FS back. */
+    lw t0, TIKU_P4_FRAME_FPU(sp)
+    beqz t0, 5f
+    lw t0, TIKU_P4_FRAME_FCSR(sp)
+    csrw fcsr, t0
+    .irp reg,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31
+    flw f\reg, (TIKU_P4_FRAME_F0+4*\reg)(sp)
+    .endr
+    j 6f
+5:
+    csrw fcsr, zero
+6:
     lw t0, TIKU_P4_FRAME_STATUS(sp)
     csrw mstatus, t0
     lw t0, TIKU_P4_FRAME_CAUSE(sp)

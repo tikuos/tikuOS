@@ -107,16 +107,16 @@ def validate_image(data, kernel_test=False):
 
 
 def validate_elf(data, image):
-    """Require RV32 soft-float ELF and matching SRAM sections and entry."""
+    """Require an RV32 single-float ELF and matching SRAM sections and entry."""
     if len(data) < 52 or data[:7] != b"\x7fELF\x01\x01\x01":
         raise ValueError("requires little-endian ELF32")
     kind, machine, version, entry, _, shoff, flags = struct.unpack_from(
         "<HHIIIII", data, 16)
     ehsize, _, _, shsize, shcount, _ = struct.unpack_from("<HHHHHH", data, 40)
-    if (kind != 2 or machine != 243 or version != 1 or flags & ~1 or
-            entry != image["entry"] or ehsize != 52 or shsize != 40 or
-            not shcount or shoff + shsize * shcount > len(data)):
-        raise ValueError("requires matching RV32 ilp32 executable")
+    if (kind != 2 or machine != 243 or version != 1 or flags & ~3 or
+            not flags & 2 or entry != image["entry"] or ehsize != 52 or
+            shsize != 40 or not shcount or shoff + shsize * shcount > len(data)):
+        raise ValueError("requires matching RV32 ilp32f executable")
     entry_executable, attributes, allocated = False, False, []
     fault_section = False
     kernel = image.get("kernel_test", False)
@@ -132,8 +132,9 @@ def validate_elf(data, image):
             raise ValueError("truncated ELF section")
         if kind == 0x70000003:
             isa = re.findall(rb"rv[0-9]+[^\x00]*", data[offset:offset + size])
-            required = {b"rv32i", b"m", b"a", b"c", b"zicsr", b"zifencei"}
-            allowed = required | {b"zmmul", b"zaamo", b"zalrsc", b"zca"}
+            required = {b"rv32i", b"m", b"a", b"f", b"c", b"zicsr", b"zifencei"}
+            allowed = required | {b"zmmul", b"zaamo", b"zalrsc", b"zca",
+                                  b"zcf"}
             parts = isa[0].split(b"_") if len(isa) == 1 else []
             names = {re.sub(rb"[0-9]+p[0-9]+$", b"", p) for p in parts}
             attributes = required <= names <= allowed and all(

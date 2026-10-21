@@ -46,7 +46,7 @@ SRCS += shell/commands/tiku_shell_cmd_lpcore.c shell/commands/tiku_shell_cmd_lp.
 endif
 CFLAGS += -DTIKU_LPCORE_ENABLE=1 -DTIKU_HAS_COPROC=1 -DTIKU_COPROC_MSG_CAP=240u
 LPCORE_BUILD = $(BUILD_DIR)/lpcore
-LPCORE_CFLAGS = $(ESP32P4_ARCH) -Os -Wall -Wextra -Werror -ffreestanding \
+LPCORE_CFLAGS = $(ESP32P4_LPCORE_ARCH) -Os -Wall -Wextra -Werror -ffreestanding \
                 -nostdlib -nostartfiles -ffunction-sections -fdata-sections \
                 -MMD -MP
 LPCORE_OBJS = $(LPCORE_BUILD)/tiku_lpcore_crt0.o $(LPCORE_BUILD)/tiku_lpcore_main.o \
