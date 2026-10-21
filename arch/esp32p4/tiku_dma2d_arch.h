@@ -161,6 +161,33 @@ void tiku_p4_dma2d_in_start(unsigned ch);
  *         _ERR_TIMEOUT
  */
 int tiku_p4_dma2d_in_wait(unsigned ch, uint32_t budget_us);
+/** @brief Completion callback of an asynchronous operation, run from the
+ *         interrupt: @p rc is TIKU_P4_DMA2D_OK or a negative
+ *         TIKU_P4_DMA2D_ERR_*. */
+typedef void (*tiku_p4_dma2d_done_t)(void *ctx, int rc);
+/** @brief Make in channel @p ch's next SUC_EOF or fault call @p done once
+ *         from its interrupt (line 7 + ch, source 104 + ch); _ERR_PARAM for
+ *         a bad channel or no callback, _ERR_FAULT when the line is taken. */
+int tiku_p4_dma2d_in_arm(unsigned ch, tiku_p4_dma2d_done_t done, void *ctx);
+/** @brief Forget in channel @p ch's callback and mask its interrupt. */
+void tiku_p4_dma2d_in_disarm(unsigned ch);
+/** @brief The raw interrupt word in channel @p ch's last completion
+ *         interrupt read, for a caller that tells its bits apart. */
+uint32_t tiku_p4_dma2d_in_last_raw(unsigned ch);
+/** @brief tiku_p4_dma2d_copy() started and left to the engine: @p done runs
+ *         from the completion interrupt with the result; until then the
+ *         core leaves both pictures alone.  No timeout: the engine
+ *         finishes or faults. */
+int tiku_p4_dma2d_copy_async(const tiku_p4_picture_t *dst, uint16_t dx,
+                             uint16_t dy, const tiku_p4_picture_t *src,
+                             uint16_t sx, uint16_t sy, uint16_t w, uint16_t h,
+                             tiku_p4_dma2d_done_t done, void *ctx);
+/** @brief tiku_p4_dma2d_convert() the same way. */
+int tiku_p4_dma2d_convert_async(const tiku_p4_picture_t *dst, uint16_t dx,
+                                uint16_t dy, const tiku_p4_picture_t *src,
+                                uint16_t sx, uint16_t sy, uint16_t w,
+                                uint16_t h, unsigned conv,
+                                tiku_p4_dma2d_done_t done, void *ctx);
 /** @brief Unselect the out channels in mask @p outs and the in channels in
  *         @p ins, stopping them first when @p stop. */
 void tiku_p4_dma2d_close(unsigned outs, unsigned ins, int stop);

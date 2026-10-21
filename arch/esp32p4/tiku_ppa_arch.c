@@ -15,6 +15,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <hal/tiku_cpu.h>
+#include "tiku_irq_arch.h"
 #include "tiku_ppa_arch.h"
 #include "tiku_esp32p4_regs.h"
 
@@ -171,7 +172,7 @@ static void blend_reset(void)
 }
 
 /** @brief Start the blend engine in fill (@p fill 1) or blend mode. */
-static void blend_start(int fill)
+static void blend_start(uint32_t fill)
 {
     ppa_bits(BLEND_TRANS_MODE, BLEND_BYPASS | BLEND_FILL_EN,
              fill ? BLEND_FILL_EN : 0u);
@@ -179,8 +180,140 @@ static void blend_start(int fill)
     ppa_bits(BLEND_TRANS_MODE, BLEND_UPDATE, BLEND_UPDATE);
 }
 
-int tiku_p4_ppa_fill(const tiku_p4_picture_t *out, uint16_t x, uint16_t y,
-                     uint16_t w, uint16_t h, uint32_t argb)
+/** @brief Start the scaler with its configuration @p word. */
+static void srm_start(uint32_t word)
+{
+    TIKU_P4_REG_WRITE(SR_SCAL_ROTATE, word);
+    TIKU_P4_REG_WRITE(SR_SCAL_ROTATE, word | SR_START);
+}
+
+/* The PPA's own interrupt line: the scaler's parameter error, which leaves
+ * the in channel waiting, ends an asynchronous job early. */
+#define PPA_INT_ENA    (PPA_BASE + 0x18u)
+#define PPA_IRQ_LINE   10u
+#define PPA_IRQ_SOURCE 96u
+
+/* The operation in flight: the output block to drop from the cache when
+ * it ends, the out channels to close, whether the scaler ran, the caller
+ * of an asynchronous one. */
+static struct {
+    tiku_p4_picture_t out;
+    uint16_t x, y, w, h;
+    unsigned outs;
+    uint8_t srm;
+    tiku_p4_dma2d_done_t done;
+    void *ctx;
+} ppa_job;
+static uint8_t ppa_irq_attached;
+
+/** @brief End the operation with @p rc: a scaler parameter error turns
+ *         into a fault, the output block is dropped from the cache, the
+ *         channels closed, the engine released. */
+static int ppa_end(int rc)
+{
+    if (ppa_job.srm) {
+        srm_errors = 0u;
+        if (TIKU_P4_REG_READ(PPA_INT_RAW) & SR_PARAM_ERR) {
+            srm_errors = TIKU_P4_REG_READ(SR_PARAM_ERR_ST);
+            rc = TIKU_P4_DMA2D_ERR_FAULT;
+        }
+    }
+    drop_block(&ppa_job.out, ppa_job.x, ppa_job.y, ppa_job.w, ppa_job.h);
+    tiku_p4_dma2d_close(ppa_job.outs, 1u << CH_IN, rc != TIKU_P4_DMA2D_OK);
+    if (ppa_job.srm && rc != TIKU_P4_DMA2D_OK) {
+        ppa_bits(SR_SCAL_ROTATE, SR_RST, SR_RST);
+        ppa_bits(SR_SCAL_ROTATE, SR_RST, 0u);
+    }
+    TIKU_P4_REG_WRITE(PPA_INT_CLR, INT_ALL);
+    tiku_p4_dma2d_unclaim();
+    return rc;
+}
+
+/** @brief An interrupt ended an asynchronous operation: the first of the
+ *         in channel's and the PPA's own wins, the other finds no caller. */
+static void ppa_finish(int rc)
+{
+    tiku_p4_dma2d_done_t done = ppa_job.done;
+
+    if (done == NULL) {
+        return;
+    }
+    ppa_job.done = NULL;
+    tiku_p4_dma2d_in_disarm(CH_IN);
+    TIKU_P4_REG_WRITE(PPA_INT_ENA, 0u);
+    rc = ppa_end(rc);
+    done(ppa_job.ctx, rc);
+}
+
+static void ppa_done(void *ctx, int rc)
+{
+    (void)ctx;
+    ppa_finish(rc);
+}
+
+static void ppa_isr(void)
+{
+    uint32_t raw = TIKU_P4_REG_READ(PPA_INT_RAW);
+
+    TIKU_P4_REG_WRITE(PPA_INT_ENA, 0u);
+    if (raw & SR_PARAM_ERR) {
+        ppa_finish(TIKU_P4_DMA2D_ERR_FAULT);
+    } else {
+        TIKU_P4_REG_WRITE(PPA_INT_CLR, INT_ALL);
+    }
+}
+
+/** @brief Run an operation whose channels are open: @p start fires the
+ *         engine with @p arg; waited for within @p budget_us, or with
+ *         @p done called from the completion interrupt. */
+static int ppa_run(const tiku_p4_picture_t *out, uint16_t x, uint16_t y,
+                   uint16_t w, uint16_t h, unsigned outs, uint8_t srm,
+                   void (*start)(uint32_t), uint32_t arg, uint32_t budget_us,
+                   tiku_p4_dma2d_done_t done, void *ctx)
+{
+    int rc = TIKU_P4_DMA2D_OK;
+
+    ppa_job.out = *out;
+    ppa_job.x = x;
+    ppa_job.y = y;
+    ppa_job.w = w;
+    ppa_job.h = h;
+    ppa_job.outs = outs;
+    ppa_job.srm = srm;
+    ppa_job.done = done;
+    ppa_job.ctx = ctx;
+    if (done != NULL) {
+        if (srm && !ppa_irq_attached) {
+            if (tiku_p4_irq_attach(PPA_IRQ_LINE, PPA_IRQ_SOURCE, 1u,
+                                   ppa_isr) != 0 ||
+                tiku_p4_irq_enable(PPA_IRQ_LINE, 1) != 0) {
+                rc = TIKU_P4_DMA2D_ERR_FAULT;
+            }
+            ppa_irq_attached = rc == TIKU_P4_DMA2D_OK;
+        }
+        if (rc == TIKU_P4_DMA2D_OK) {
+            rc = tiku_p4_dma2d_in_arm(CH_IN, ppa_done, NULL);
+        }
+        if (rc != TIKU_P4_DMA2D_OK) {
+            ppa_job.done = NULL;
+            return ppa_end(rc);
+        }
+        if (srm) {
+            TIKU_P4_REG_WRITE(PPA_INT_CLR, INT_ALL);
+            TIKU_P4_REG_WRITE(PPA_INT_ENA, SR_PARAM_ERR);
+        }
+        start(arg);
+        return TIKU_P4_DMA2D_OK;
+    }
+    start(arg);
+    rc = tiku_p4_dma2d_in_wait(CH_IN, budget_us);
+    return ppa_end(rc);
+}
+
+/** @brief The fill: waited for, or left to @p done. */
+static int fill(const tiku_p4_picture_t *out, uint16_t x, uint16_t y,
+                uint16_t w, uint16_t h, uint32_t argb,
+                tiku_p4_dma2d_done_t done, void *ctx)
 {
     int rc;
 
@@ -201,15 +334,28 @@ int tiku_p4_ppa_fill(const tiku_p4_picture_t *out, uint16_t x, uint16_t y,
         TIKU_P4_REG_WRITE(BLEND_FIX_PIXEL, argb);
         ppa_bits(BLEND_COLOR_MODE, 0xFu << 8, color_mode(out) << 8);
         TIKU_P4_REG_WRITE(BLEND_TX_SIZE, (uint32_t)w | ((uint32_t)h << 14));
-        blend_start(1);
-        rc = tiku_p4_dma2d_in_wait(CH_IN,
-                                   budget_for((uint32_t)w * h, out->bpp));
-        drop_block(out, x, y, w, h);
-        tiku_p4_dma2d_close(0u, 1u << CH_IN, rc != TIKU_P4_DMA2D_OK);
+        return ppa_run(out, x, y, w, h, 0u, 0u, blend_start, 1u,
+                       budget_for((uint32_t)w * h, out->bpp), done, ctx);
     }
     TIKU_P4_REG_WRITE(PPA_INT_CLR, INT_ALL);
     tiku_p4_dma2d_unclaim();
     return rc;
+}
+
+int tiku_p4_ppa_fill(const tiku_p4_picture_t *out, uint16_t x, uint16_t y,
+                     uint16_t w, uint16_t h, uint32_t argb)
+{
+    return fill(out, x, y, w, h, argb, NULL, NULL);
+}
+
+int tiku_p4_ppa_fill_async(const tiku_p4_picture_t *out, uint16_t x,
+                           uint16_t y, uint16_t w, uint16_t h, uint32_t argb,
+                           tiku_p4_dma2d_done_t done, void *ctx)
+{
+    if (done == NULL) {
+        return TIKU_P4_PPA_ERR_PARAM;
+    }
+    return fill(out, x, y, w, h, argb, done, ctx);
 }
 
 /** @brief Input @p in's BLEND_FIX_ALPHA fields from its alpha update: the
@@ -268,13 +414,14 @@ int tiku_p4_ppa_blend(const tiku_p4_picture_t *out, uint16_t ox, uint16_t oy,
                                    bg_alpha, fg_alpha, NULL);
 }
 
-int tiku_p4_ppa_blend_keyed(const tiku_p4_picture_t *out, uint16_t ox,
-                            uint16_t oy, const tiku_p4_picture_t *bg,
-                            uint16_t bx, uint16_t by,
-                            const tiku_p4_picture_t *fg, uint16_t fx,
-                            uint16_t fy, uint16_t w, uint16_t h,
-                            uint16_t bg_alpha, uint16_t fg_alpha,
-                            const tiku_p4_ppa_keys_t *keys)
+/** @brief The blend, keyed when @p keys is set: waited for, or left to
+ *         @p done. */
+static int blend(const tiku_p4_picture_t *out, uint16_t ox, uint16_t oy,
+                 const tiku_p4_picture_t *bg, uint16_t bx, uint16_t by,
+                 const tiku_p4_picture_t *fg, uint16_t fx, uint16_t fy,
+                 uint16_t w, uint16_t h, uint16_t bg_alpha, uint16_t fg_alpha,
+                 const tiku_p4_ppa_keys_t *keys, tiku_p4_dma2d_done_t done,
+                 void *ctx)
 {
     int rc;
 
@@ -327,16 +474,43 @@ int tiku_p4_ppa_blend_keyed(const tiku_p4_picture_t *out, uint16_t ox,
             put_key(CK_FG_LOW, CK_EMPTY_LOW, 0u);
             TIKU_P4_REG_WRITE(CK_DEFAULT, 0u);
         }
-        blend_start(0);
-        rc = tiku_p4_dma2d_in_wait(CH_IN,
-                                   budget_for((uint32_t)w * h, out->bpp));
-        drop_block(out, ox, oy, w, h);
+        return ppa_run(out, ox, oy, w, h, (1u << CH_OUT_A) | (1u << CH_OUT_B),
+                       0u, blend_start, 0u,
+                       budget_for((uint32_t)w * h, out->bpp), done, ctx);
     }
     tiku_p4_dma2d_close((1u << CH_OUT_A) | (1u << CH_OUT_B), 1u << CH_IN,
                         rc != TIKU_P4_DMA2D_OK);
     TIKU_P4_REG_WRITE(PPA_INT_CLR, INT_ALL);
     tiku_p4_dma2d_unclaim();
     return rc;
+}
+
+int tiku_p4_ppa_blend_keyed(const tiku_p4_picture_t *out, uint16_t ox,
+                            uint16_t oy, const tiku_p4_picture_t *bg,
+                            uint16_t bx, uint16_t by,
+                            const tiku_p4_picture_t *fg, uint16_t fx,
+                            uint16_t fy, uint16_t w, uint16_t h,
+                            uint16_t bg_alpha, uint16_t fg_alpha,
+                            const tiku_p4_ppa_keys_t *keys)
+{
+    return blend(out, ox, oy, bg, bx, by, fg, fx, fy, w, h, bg_alpha,
+                 fg_alpha, keys, NULL, NULL);
+}
+
+int tiku_p4_ppa_blend_keyed_async(const tiku_p4_picture_t *out, uint16_t ox,
+                                  uint16_t oy, const tiku_p4_picture_t *bg,
+                                  uint16_t bx, uint16_t by,
+                                  const tiku_p4_picture_t *fg, uint16_t fx,
+                                  uint16_t fy, uint16_t w, uint16_t h,
+                                  uint16_t bg_alpha, uint16_t fg_alpha,
+                                  const tiku_p4_ppa_keys_t *keys,
+                                  tiku_p4_dma2d_done_t done, void *ctx)
+{
+    if (done == NULL) {
+        return TIKU_P4_PPA_ERR_PARAM;
+    }
+    return blend(out, ox, oy, bg, bx, by, fg, fx, fy, w, h, bg_alpha,
+                 fg_alpha, keys, done, ctx);
 }
 
 /** @brief @p n pixels scaled by @p s sixteenths, rounded down. */
@@ -385,10 +559,12 @@ static int srm_bypass(uint32_t w, uint32_t h, uint32_t sx, uint32_t sy,
            w_left * h_left * out_bpp * 8u < 12u * 128u;
 }
 
-int tiku_p4_ppa_srm(const tiku_p4_picture_t *out, uint16_t ox, uint16_t oy,
-                    const tiku_p4_picture_t *in, uint16_t ix, uint16_t iy,
-                    uint16_t w, uint16_t h, uint16_t scale_x, uint16_t scale_y,
-                    unsigned rotate, unsigned mirror)
+/** @brief The scale, turn and mirror: waited for, or left to @p done. */
+static int srm(const tiku_p4_picture_t *out, uint16_t ox, uint16_t oy,
+               const tiku_p4_picture_t *in, uint16_t ix, uint16_t iy,
+               uint16_t w, uint16_t h, uint16_t scale_x, uint16_t scale_y,
+               unsigned rotate, unsigned mirror, tiku_p4_dma2d_done_t done,
+               void *ctx)
 {
     uint16_t ow, oh;
     uint32_t word;
@@ -437,16 +613,9 @@ int tiku_p4_ppa_srm(const tiku_p4_picture_t *out, uint16_t ox, uint16_t oy,
                ((uint32_t)rotate << SR_ROT_POS) |
                ((mirror & TIKU_P4_PPA_MIRROR_X) ? SR_MIRROR_X : 0u) |
                ((mirror & TIKU_P4_PPA_MIRROR_Y) ? SR_MIRROR_Y : 0u);
-        TIKU_P4_REG_WRITE(SR_SCAL_ROTATE, word);
-        TIKU_P4_REG_WRITE(SR_SCAL_ROTATE, word | SR_START);
-        rc = tiku_p4_dma2d_in_wait(CH_IN,
-                                   budget_for((uint32_t)ow * oh, out->bpp));
-        srm_errors = 0u;
-        if (TIKU_P4_REG_READ(PPA_INT_RAW) & SR_PARAM_ERR) {
-            srm_errors = TIKU_P4_REG_READ(SR_PARAM_ERR_ST);
-            rc = TIKU_P4_DMA2D_ERR_FAULT;
-        }
-        drop_block(out, ox, oy, ow, oh);
+        return ppa_run(out, ox, oy, ow, oh, 1u << CH_OUT_A, 1u, srm_start,
+                       word, budget_for((uint32_t)ow * oh, out->bpp), done,
+                       ctx);
     }
     tiku_p4_dma2d_close(1u << CH_OUT_A, 1u << CH_IN, rc != TIKU_P4_DMA2D_OK);
     if (rc != TIKU_P4_DMA2D_OK) {
@@ -456,6 +625,29 @@ int tiku_p4_ppa_srm(const tiku_p4_picture_t *out, uint16_t ox, uint16_t oy,
     TIKU_P4_REG_WRITE(PPA_INT_CLR, INT_ALL);
     tiku_p4_dma2d_unclaim();
     return rc;
+}
+
+int tiku_p4_ppa_srm(const tiku_p4_picture_t *out, uint16_t ox, uint16_t oy,
+                    const tiku_p4_picture_t *in, uint16_t ix, uint16_t iy,
+                    uint16_t w, uint16_t h, uint16_t scale_x, uint16_t scale_y,
+                    unsigned rotate, unsigned mirror)
+{
+    return srm(out, ox, oy, in, ix, iy, w, h, scale_x, scale_y, rotate,
+               mirror, NULL, NULL);
+}
+
+int tiku_p4_ppa_srm_async(const tiku_p4_picture_t *out, uint16_t ox,
+                          uint16_t oy, const tiku_p4_picture_t *in,
+                          uint16_t ix, uint16_t iy, uint16_t w, uint16_t h,
+                          uint16_t scale_x, uint16_t scale_y, unsigned rotate,
+                          unsigned mirror, tiku_p4_dma2d_done_t done,
+                          void *ctx)
+{
+    if (done == NULL) {
+        return TIKU_P4_PPA_ERR_PARAM;
+    }
+    return srm(out, ox, oy, in, ix, iy, w, h, scale_x, scale_y, rotate,
+               mirror, done, ctx);
 }
 
 uint32_t tiku_p4_ppa_srm_errors(void)

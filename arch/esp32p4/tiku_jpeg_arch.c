@@ -19,6 +19,7 @@
 #include "tiku_jpeg_arch.h"
 #include "tiku_esp32p4_regs.h"
 #include "tiku_cpu_common.h"
+#include "tiku_irq_arch.h"
 
 #define JPG_BASE        0x50086000u
 #define JPG_CONFIG      (JPG_BASE + 0x00u)
@@ -198,6 +199,21 @@ static void put_qtable(unsigned t, const uint8_t q[64])
  *        none of @p errors.  @return TIKU_P4_JPEG_OK, _ERR_FAULT with
  *        jpg_errors set, _ERR_ROOM when the output filled, or _ERR_TIMEOUT
  */
+static int jpg_status(uint32_t raw, uint32_t codec)
+{
+    jpg_errors = codec;
+    if (codec) {
+        return TIKU_P4_JPEG_ERR_FAULT;
+    }
+    if (raw & (1u << 10)) {
+        return TIKU_P4_JPEG_ERR_ROOM;
+    }
+    if (raw & 0x7FCu) {
+        return TIKU_P4_JPEG_ERR_FAULT;
+    }
+    return (raw & 2u) ? TIKU_P4_JPEG_OK : TIKU_P4_JPEG_ERR_TIMEOUT;
+}
+
 static int jpg_wait(unsigned ch, uint32_t errors, uint32_t budget_us)
 {
     uint32_t raw = 0u, codec = 0u, n;
@@ -210,17 +226,137 @@ static int jpg_wait(unsigned ch, uint32_t errors, uint32_t budget_us)
         }
         tiku_cpu_p4_delay_us(1u);
     }
-    jpg_errors = codec;
+    return jpg_status(raw, codec);
+}
+
+/* The codec's own interrupt line: an error that leaves the in channel
+ * waiting ends an asynchronous job early. */
+#define JPG_INT_ENA    (JPG_BASE + 0x3Cu)
+#define JPG_IRQ_LINE   9u
+#define JPG_IRQ_SOURCE 95u
+
+/* The job in flight: the channels to close, the codec errors watched,
+ * what to read back when it ends (an encode's scan length into @p len
+ * and its output span; a decode's picture), the caller of an asynchronous
+ * one. */
+static struct {
+    unsigned out_ch, in_ch;
+    uint32_t errors;
+    uint8_t dec;
+    uint8_t *out;
+    uint32_t hdr, room, *len;
+    tiku_p4_picture_t pic;
+    tiku_p4_dma2d_done_t done;
+    void *ctx;
+} jpg_job;
+static uint8_t jpg_irq_attached;
+
+/** @brief End the job with @p rc: an encode's length read back from its
+ *         descriptor and its output dropped from the cache, a decode's
+ *         picture dropped; the channels closed, the engine released. */
+static int jpg_end(int rc)
+{
+    if (!jpg_job.dec) {
+        uint32_t got;
+
+        /* The engine wrote the scan's length back into the descriptor. */
+        tiku_cpu_dcache_invalidate(&desc_rx, sizeof desc_rx);
+        got = (((desc_rx.dw1 >> 14) & 0x3FFFu) << 14) |
+              ((desc_rx.dw0 >> 14) & 0x3FFFu);
+        if (rc == TIKU_P4_JPEG_OK && (got < 2u || got > jpg_job.room)) {
+            rc = TIKU_P4_JPEG_ERR_FAULT;
+        }
+        tiku_cpu_dcache_invalidate(jpg_job.out + jpg_job.hdr, jpg_job.room);
+        if (rc == TIKU_P4_JPEG_OK) {
+            *jpg_job.len = jpg_job.hdr + got;
+        }
+    } else {
+        tiku_cpu_dcache_invalidate(jpg_job.pic.base, (uint32_t)jpg_job.pic.width *
+                                                     jpg_job.pic.height *
+                                                     jpg_job.pic.bpp);
+    }
+    tiku_p4_dma2d_close(1u << jpg_job.out_ch, 1u << jpg_job.in_ch,
+                        rc != TIKU_P4_JPEG_OK);
+    TIKU_P4_REG_WRITE(JPG_INT_CLR, 0xFFFFFFFFu);
+    if (rc == TIKU_P4_JPEG_OK) {
+        jpg_errors = 0u;
+    }
+    tiku_p4_dma2d_unclaim();
+    return rc;
+}
+
+/** @brief An interrupt ended an asynchronous job: the first of the in
+ *         channel's and the codec's wins, the other finds no caller. */
+static void jpg_finish(int rc)
+{
+    tiku_p4_dma2d_done_t done = jpg_job.done;
+
+    if (done == NULL) {
+        return;
+    }
+    jpg_job.done = NULL;
+    tiku_p4_dma2d_in_disarm(jpg_job.in_ch);
+    TIKU_P4_REG_WRITE(JPG_INT_ENA, 0u);
+    rc = jpg_end(rc);
+    done(jpg_job.ctx, rc);
+}
+
+static void jpg_done(void *ctx, int rc)
+{
+    (void)ctx;
+    (void)rc;
+    jpg_finish(jpg_status(tiku_p4_dma2d_in_last_raw(jpg_job.in_ch),
+                          TIKU_P4_REG_READ(JPG_INT_RAW) & jpg_job.errors));
+}
+
+static void jpg_isr(void)
+{
+    uint32_t codec = TIKU_P4_REG_READ(JPG_INT_RAW) & jpg_job.errors;
+
+    TIKU_P4_REG_WRITE(JPG_INT_ENA, 0u);
     if (codec) {
-        return TIKU_P4_JPEG_ERR_FAULT;
+        jpg_finish(jpg_status(0u, codec));
+    } else {
+        TIKU_P4_REG_WRITE(JPG_INT_CLR, 0xFFFFFFFFu);
     }
-    if (raw & (1u << 10)) {
-        return TIKU_P4_JPEG_ERR_ROOM;
+}
+
+/** @brief Run a job whose channels are open and started: the codec is
+ *         fired; waited for within @p budget_us, or with @p done called
+ *         from the completion interrupt. */
+static int jpg_run(unsigned out_ch, unsigned in_ch, uint32_t errors,
+                   uint32_t budget_us, tiku_p4_dma2d_done_t done, void *ctx)
+{
+    int rc = TIKU_P4_JPEG_OK;
+
+    jpg_job.out_ch = out_ch;
+    jpg_job.in_ch = in_ch;
+    jpg_job.errors = errors;
+    jpg_job.done = done;
+    jpg_job.ctx = ctx;
+    if (done != NULL) {
+        if (!jpg_irq_attached) {
+            if (tiku_p4_irq_attach(JPG_IRQ_LINE, JPG_IRQ_SOURCE, 1u,
+                                   jpg_isr) != 0 ||
+                tiku_p4_irq_enable(JPG_IRQ_LINE, 1) != 0) {
+                rc = TIKU_P4_JPEG_ERR_FAULT;
+            }
+            jpg_irq_attached = rc == TIKU_P4_JPEG_OK;
+        }
+        if (rc == TIKU_P4_JPEG_OK) {
+            rc = tiku_p4_dma2d_in_arm(in_ch, jpg_done, NULL);
+        }
+        if (rc != TIKU_P4_JPEG_OK) {
+            jpg_job.done = NULL;
+            return jpg_end(rc);
+        }
+        TIKU_P4_REG_WRITE(JPG_INT_ENA, errors);
+        jpg_bits(JPG_CONFIG, CFG_START, CFG_START);
+        return TIKU_P4_JPEG_OK;
     }
-    if (raw & 0x7FCu) {
-        return TIKU_P4_JPEG_ERR_FAULT;
-    }
-    return (raw & 2u) ? TIKU_P4_JPEG_OK : TIKU_P4_JPEG_ERR_TIMEOUT;
+    jpg_bits(JPG_CONFIG, CFG_START, CFG_START);
+    rc = jpg_wait(in_ch, errors, budget_us);
+    return jpg_end(rc);
 }
 
 /** @brief A 1D descriptor over @p n bytes at @p buf: @p full of them data
@@ -364,13 +500,14 @@ static uint32_t write_header(uint8_t *out, uint16_t w, uint16_t h,
 /** @brief The encoder for source kind @p src (0 RGB888, 1 RGB565, 2 grey,
  *         3 YUV422) at @p sampling. */
 static int encode(const tiku_p4_picture_t *in, unsigned src, unsigned sampling,
-                  unsigned quality, uint8_t *out, uint32_t cap, uint32_t *len)
+                  unsigned quality, uint8_t *out, uint32_t cap, uint32_t *len,
+                  tiku_p4_dma2d_done_t done, void *ctx)
 {
     static const uint8_t mb[3] = {0u, 1u, 2u};
     static const uint8_t space[4] = {0u, 2u, 3u, 1u};
     uint8_t q[2][64];
     unsigned comps, mcu_w, mcu_h, i;
-    uint32_t hdr, room, got;
+    uint32_t hdr, room;
     int rc;
 
     if (in == NULL || out == NULL || len == NULL || !picture_ok(in) ||
@@ -432,20 +569,14 @@ static int encode(const tiku_p4_picture_t *in, unsigned src, unsigned sampling,
     if (rc == TIKU_P4_DMA2D_OK) {
         tiku_p4_dma2d_out_start(CH_ENC_OUT);
         tiku_p4_dma2d_in_start(CH_ENC_IN);
-        jpg_bits(JPG_CONFIG, CFG_START, CFG_START);
-        rc = jpg_wait(CH_ENC_IN, ENC_ERRORS, 50000u +
-                      ((uint32_t)in->width * in->height * in->bpp) / 4u);
-        /* The engine wrote the scan's length back into the descriptor. */
-        tiku_cpu_dcache_invalidate(&desc_rx, sizeof desc_rx);
-        got = (((desc_rx.dw1 >> 14) & 0x3FFFu) << 14) |
-              ((desc_rx.dw0 >> 14) & 0x3FFFu);
-        if (rc == TIKU_P4_JPEG_OK && (got < 2u || got > room)) {
-            rc = TIKU_P4_JPEG_ERR_FAULT;
-        }
-        tiku_cpu_dcache_invalidate(out + hdr, room);
-        if (rc == TIKU_P4_JPEG_OK) {
-            *len = hdr + got;
-        }
+        jpg_job.dec = 0u;
+        jpg_job.out = out;
+        jpg_job.hdr = hdr;
+        jpg_job.room = room;
+        jpg_job.len = len;
+        return jpg_run(CH_ENC_OUT, CH_ENC_IN, ENC_ERRORS, 50000u +
+                       ((uint32_t)in->width * in->height * in->bpp) / 4u,
+                       done, ctx);
     }
     tiku_p4_dma2d_close(1u << CH_ENC_OUT, 1u << CH_ENC_IN,
                         rc != TIKU_P4_JPEG_OK);
@@ -656,7 +787,8 @@ static void put_dht_table(const jpg_hdr_t *x, unsigned k)
 
 /** @brief The decoder; @p own 1 wants the file's own samples. */
 static int decode(const uint8_t *jpg, uint32_t len,
-                  const tiku_p4_picture_t *out, int own)
+                  const tiku_p4_picture_t *out, int own,
+                  tiku_p4_dma2d_done_t done, void *ctx)
 {
     tiku_p4_jpeg_info_t info;
     unsigned s, t, i, kind;
@@ -728,11 +860,11 @@ static int decode(const uint8_t *jpg, uint32_t len,
                               jfif_to_rgb);
         tiku_p4_dma2d_out_start(CH_DEC_OUT);
         tiku_p4_dma2d_in_start(CH_DEC_IN);
-        jpg_bits(JPG_CONFIG, CFG_START, CFG_START);
-        rc = jpg_wait(CH_DEC_IN, DEC_ERRORS, 50000u +
-                      ((uint32_t)out->width * out->height * out->bpp) / 4u);
-        tiku_cpu_dcache_invalidate(out->base, (uint32_t)out->width *
-                                                  out->height * out->bpp);
+        jpg_job.dec = 1u;
+        jpg_job.pic = *out;
+        return jpg_run(CH_DEC_OUT, CH_DEC_IN, DEC_ERRORS, 50000u +
+                       ((uint32_t)out->width * out->height * out->bpp) / 4u,
+                       done, ctx);
     }
     tiku_p4_dma2d_close(1u << CH_DEC_OUT, 1u << CH_DEC_IN,
                         rc != TIKU_P4_JPEG_OK);
@@ -752,7 +884,7 @@ int tiku_p4_jpeg_encode(const tiku_p4_picture_t *in, unsigned sampling,
         return TIKU_P4_JPEG_ERR_PARAM;
     }
     return encode(in, in->bpp == 3u ? 0u : in->bpp == 2u ? 1u : 2u, sampling,
-                  quality, out, cap, len);
+                  quality, out, cap, len, NULL, NULL);
 }
 
 int tiku_p4_jpeg_encode_yuv422(const tiku_p4_picture_t *in, unsigned quality,
@@ -761,22 +893,67 @@ int tiku_p4_jpeg_encode_yuv422(const tiku_p4_picture_t *in, unsigned quality,
     if (in == NULL || in->bpp != 2u) {
         return TIKU_P4_JPEG_ERR_PARAM;
     }
-    return encode(in, SRC_YUV422, TIKU_P4_JPEG_422, quality, out, cap, len);
+    return encode(in, SRC_YUV422, TIKU_P4_JPEG_422, quality, out, cap, len,
+                  NULL, NULL);
 }
 
 int tiku_p4_jpeg_decode(const uint8_t *jpg, uint32_t len,
                         const tiku_p4_picture_t *out)
 {
-    return decode(jpg, len, out, 0);
+    return decode(jpg, len, out, 0, NULL, NULL);
 }
 
 int tiku_p4_jpeg_decode_yuv(const uint8_t *jpg, uint32_t len,
                             const tiku_p4_picture_t *out)
 {
-    return decode(jpg, len, out, 1);
+    return decode(jpg, len, out, 1, NULL, NULL);
 }
 
 uint32_t tiku_p4_jpeg_errors(void)
 {
     return jpg_errors;
+}
+
+int tiku_p4_jpeg_encode_async(const tiku_p4_picture_t *in, unsigned sampling,
+                              unsigned quality, uint8_t *out, uint32_t cap,
+                              uint32_t *len, tiku_p4_dma2d_done_t done,
+                              void *ctx)
+{
+    if (in == NULL || done == NULL) {
+        return TIKU_P4_JPEG_ERR_PARAM;
+    }
+    return encode(in, in->bpp == 3u ? 0u : in->bpp == 2u ? 1u : 2u, sampling,
+                  quality, out, cap, len, done, ctx);
+}
+
+int tiku_p4_jpeg_encode_yuv422_async(const tiku_p4_picture_t *in,
+                                     unsigned quality, uint8_t *out,
+                                     uint32_t cap, uint32_t *len,
+                                     tiku_p4_dma2d_done_t done, void *ctx)
+{
+    if (in == NULL || in->bpp != 2u || done == NULL) {
+        return TIKU_P4_JPEG_ERR_PARAM;
+    }
+    return encode(in, SRC_YUV422, TIKU_P4_JPEG_422, quality, out, cap, len,
+                  done, ctx);
+}
+
+int tiku_p4_jpeg_decode_async(const uint8_t *jpg, uint32_t len,
+                              const tiku_p4_picture_t *out,
+                              tiku_p4_dma2d_done_t done, void *ctx)
+{
+    if (done == NULL) {
+        return TIKU_P4_JPEG_ERR_PARAM;
+    }
+    return decode(jpg, len, out, 0, done, ctx);
+}
+
+int tiku_p4_jpeg_decode_yuv_async(const uint8_t *jpg, uint32_t len,
+                                  const tiku_p4_picture_t *out,
+                                  tiku_p4_dma2d_done_t done, void *ctx)
+{
+    if (done == NULL) {
+        return TIKU_P4_JPEG_ERR_PARAM;
+    }
+    return decode(jpg, len, out, 1, done, ctx);
 }

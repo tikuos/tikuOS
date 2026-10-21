@@ -307,6 +307,78 @@ void tiku_p4_dma2d_in_start(unsigned ch)
     put_bits(RX(ch) + LINK_CONF, IN_START, IN_START);
 }
 
+/* The in channels' completion interrupts: one CLIC line a channel. */
+#define IN_IRQ_LINE(ch)   (7u + (ch))
+#define IN_IRQ_SOURCE(ch) (104u + (ch))         /* DMA2D_IN_CH0, _CH1 */
+
+static tiku_p4_dma2d_done_t in_done[RX_CHANNELS];
+static void *in_ctx[RX_CHANNELS];
+static uint8_t in_attached[RX_CHANNELS];
+static uint32_t in_last_raw[RX_CHANNELS];
+
+/** @brief The result an in channel's raw interrupt word stands for. */
+static int in_status(uint32_t raw)
+{
+    if (raw & IN_FAULTS) {
+        return TIKU_P4_DMA2D_ERR_FAULT;
+    }
+    return (raw & IN_SUC_EOF) ? TIKU_P4_DMA2D_OK : TIKU_P4_DMA2D_ERR_TIMEOUT;
+}
+
+/** @brief In channel @p ch finished or faulted: mask it and call the
+ *         callback once. */
+static void in_isr(unsigned ch)
+{
+    uint32_t raw = TIKU_P4_REG_READ(RX(ch) + INT_RAW);
+    tiku_p4_dma2d_done_t done = in_done[ch];
+
+    TIKU_P4_REG_WRITE(RX(ch) + INT_ENA, 0u);
+    TIKU_P4_REG_WRITE(RX(ch) + INT_CLR, IN_ALL);
+    in_last_raw[ch] = raw;
+    in_done[ch] = NULL;
+    if (done != NULL) {
+        done(in_ctx[ch], in_status(raw));
+    }
+}
+
+uint32_t tiku_p4_dma2d_in_last_raw(unsigned ch)
+{
+    return ch < RX_CHANNELS ? in_last_raw[ch] : 0u;
+}
+
+static void in0_isr(void) { in_isr(0u); }
+static void in1_isr(void) { in_isr(1u); }
+
+int tiku_p4_dma2d_in_arm(unsigned ch, tiku_p4_dma2d_done_t done, void *ctx)
+{
+    static const tiku_p4_isr_t isrs[RX_CHANNELS] = {in0_isr, in1_isr};
+
+    if (ch >= RX_CHANNELS || done == NULL) {
+        return TIKU_P4_DMA2D_ERR_PARAM;
+    }
+    if (!in_attached[ch]) {
+        if (tiku_p4_irq_attach(IN_IRQ_LINE(ch), IN_IRQ_SOURCE(ch), 1u,
+                               isrs[ch]) != 0 ||
+            tiku_p4_irq_enable(IN_IRQ_LINE(ch), 1) != 0) {
+            return TIKU_P4_DMA2D_ERR_FAULT;
+        }
+        in_attached[ch] = 1u;
+    }
+    in_done[ch] = done;
+    in_ctx[ch] = ctx;
+    TIKU_P4_REG_WRITE(RX(ch) + INT_CLR, IN_ALL);
+    TIKU_P4_REG_WRITE(RX(ch) + INT_ENA, IN_SUC_EOF | IN_FAULTS);
+    return TIKU_P4_DMA2D_OK;
+}
+
+void tiku_p4_dma2d_in_disarm(unsigned ch)
+{
+    if (ch < RX_CHANNELS) {
+        TIKU_P4_REG_WRITE(RX(ch) + INT_ENA, 0u);
+        in_done[ch] = NULL;
+    }
+}
+
 int tiku_p4_dma2d_in_wait(unsigned ch, uint32_t budget_us)
 {
     uint32_t raw = 0u, n;
@@ -319,10 +391,7 @@ int tiku_p4_dma2d_in_wait(unsigned ch, uint32_t budget_us)
         tiku_cpu_p4_delay_us(1u);
     }
     TIKU_P4_REG_WRITE(RX(ch) + INT_CLR, IN_ALL);
-    if (raw & IN_FAULTS) {
-        return TIKU_P4_DMA2D_ERR_FAULT;
-    }
-    return (raw & IN_SUC_EOF) ? TIKU_P4_DMA2D_OK : TIKU_P4_DMA2D_ERR_TIMEOUT;
+    return in_status(raw);
 }
 
 void tiku_p4_dma2d_close(unsigned outs, unsigned ins, int stop)
@@ -375,10 +444,46 @@ static void out_convert(unsigned ch, const conv_t *c)
     TIKU_P4_REG_WRITE(TX(ch) + OUT_CSC, c->csc);
 }
 
-/** @brief A copy or a conversion of one block on pair 1, waited for. */
+/* The transfer in flight on pair 1: the destination span to drop from the
+ * cache when it ends, and the asynchronous caller's callback. */
+static struct {
+    uint8_t *d_at;
+    uint32_t d_len;
+    tiku_p4_dma2d_done_t done;
+    void *ctx;
+} d2d_job;
+
+/** @brief End the transfer with @p rc: lines the core may have fetched
+ *         while the engine wrote are dropped, the pair closed, the engine
+ *         released. */
+static void transfer_end(int rc)
+{
+    tiku_cpu_dcache_invalidate(d2d_job.d_at, d2d_job.d_len);
+    tiku_p4_dma2d_close(1u << PAIR, 1u << PAIR, rc != TIKU_P4_DMA2D_OK);
+    if (rc == TIKU_P4_DMA2D_OK) {
+        d2d_done++;
+    } else {
+        d2d_failed++;
+    }
+    tiku_p4_dma2d_unclaim();
+}
+
+/** @brief The in channel's interrupt ended an asynchronous transfer. */
+static void transfer_done(void *ctx, int rc)
+{
+    tiku_p4_dma2d_done_t done = d2d_job.done;
+
+    (void)ctx;
+    transfer_end(rc);
+    done(d2d_job.ctx, rc);
+}
+
+/** @brief A copy or a conversion of one block on pair 1: waited for, or
+ *         with @p done left to the completion interrupt. */
 static int transfer(const tiku_p4_picture_t *dst, uint16_t dx, uint16_t dy,
                     const tiku_p4_picture_t *src, uint16_t sx, uint16_t sy,
-                    uint16_t w, uint16_t h, unsigned conv)
+                    uint16_t w, uint16_t h, unsigned conv,
+                    tiku_p4_dma2d_done_t done, void *ctx)
 {
     const conv_t *c = &conversions[conv];
     uint8_t *s_at, *d_at;
@@ -421,22 +526,27 @@ static int transfer(const tiku_p4_picture_t *dst, uint16_t dx, uint16_t dy,
         rc = tiku_p4_dma2d_in_open(PAIR, PERI_M2M_IN, TIKU_P4_DMA2D_MEM_TRANS |
                                    TIKU_P4_DMA2D_MB_NONE, &rx_desc);
     }
-    if (rc == TIKU_P4_DMA2D_OK) {
-        tiku_p4_dma2d_in_start(PAIR);
-        tiku_p4_dma2d_out_start(PAIR);
-        /* 20 ms, and a microsecond for every 8 bytes on top. */
-        rc = tiku_p4_dma2d_in_wait(PAIR, 20000u +
-                                   ((uint32_t)w * h * src->bpp) / 8u);
-        /* Lines the core may have fetched while the engine wrote. */
-        tiku_cpu_dcache_invalidate(d_at, d_len);
-        tiku_p4_dma2d_close(1u << PAIR, 1u << PAIR, rc != TIKU_P4_DMA2D_OK);
+    if (rc == TIKU_P4_DMA2D_OK && done != NULL) {
+        rc = tiku_p4_dma2d_in_arm(PAIR, transfer_done, NULL);
     }
-    if (rc == TIKU_P4_DMA2D_OK) {
-        d2d_done++;
-    } else {
+    if (rc != TIKU_P4_DMA2D_OK) {
         d2d_failed++;
+        tiku_p4_dma2d_unclaim();
+        return rc;
     }
-    tiku_p4_dma2d_unclaim();
+    d2d_job.d_at = d_at;
+    d2d_job.d_len = d_len;
+    d2d_job.done = done;
+    d2d_job.ctx = ctx;
+    tiku_p4_dma2d_in_start(PAIR);
+    tiku_p4_dma2d_out_start(PAIR);
+    if (done != NULL) {
+        return TIKU_P4_DMA2D_OK;
+    }
+    /* 20 ms, and a microsecond for every 8 bytes on top. */
+    rc = tiku_p4_dma2d_in_wait(PAIR, 20000u +
+                               ((uint32_t)w * h * src->bpp) / 8u);
+    transfer_end(rc);
     return rc;
 }
 
@@ -444,7 +554,20 @@ int tiku_p4_dma2d_copy(const tiku_p4_picture_t *dst, uint16_t dx, uint16_t dy,
                        const tiku_p4_picture_t *src, uint16_t sx, uint16_t sy,
                        uint16_t w, uint16_t h)
 {
-    return transfer(dst, dx, dy, src, sx, sy, w, h, TIKU_P4_DMA2D_CONV_NONE);
+    return transfer(dst, dx, dy, src, sx, sy, w, h, TIKU_P4_DMA2D_CONV_NONE,
+                    NULL, NULL);
+}
+
+int tiku_p4_dma2d_copy_async(const tiku_p4_picture_t *dst, uint16_t dx,
+                             uint16_t dy, const tiku_p4_picture_t *src,
+                             uint16_t sx, uint16_t sy, uint16_t w, uint16_t h,
+                             tiku_p4_dma2d_done_t done, void *ctx)
+{
+    if (done == NULL) {
+        return TIKU_P4_DMA2D_ERR_PARAM;
+    }
+    return transfer(dst, dx, dy, src, sx, sy, w, h, TIKU_P4_DMA2D_CONV_NONE,
+                    done, ctx);
 }
 
 int tiku_p4_dma2d_convert(const tiku_p4_picture_t *dst, uint16_t dx,
@@ -455,7 +578,20 @@ int tiku_p4_dma2d_convert(const tiku_p4_picture_t *dst, uint16_t dx,
     if (conv == TIKU_P4_DMA2D_CONV_NONE || conv > TIKU_P4_DMA2D_CONV_SWAP_RB) {
         return TIKU_P4_DMA2D_ERR_PARAM;
     }
-    return transfer(dst, dx, dy, src, sx, sy, w, h, conv);
+    return transfer(dst, dx, dy, src, sx, sy, w, h, conv, NULL, NULL);
+}
+
+int tiku_p4_dma2d_convert_async(const tiku_p4_picture_t *dst, uint16_t dx,
+                                uint16_t dy, const tiku_p4_picture_t *src,
+                                uint16_t sx, uint16_t sy, uint16_t w,
+                                uint16_t h, unsigned conv,
+                                tiku_p4_dma2d_done_t done, void *ctx)
+{
+    if (conv == TIKU_P4_DMA2D_CONV_NONE || conv > TIKU_P4_DMA2D_CONV_SWAP_RB ||
+        done == NULL) {
+        return TIKU_P4_DMA2D_ERR_PARAM;
+    }
+    return transfer(dst, dx, dy, src, sx, sy, w, h, conv, done, ctx);
 }
 
 void tiku_p4_dma2d_stats(uint32_t *done, uint32_t *failed)

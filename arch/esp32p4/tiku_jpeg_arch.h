@@ -105,4 +105,25 @@ int tiku_p4_jpeg_decode(const uint8_t *jpg, uint32_t len,
  *         TIKU_P4_JPEG_ERR_FAULT, 0 after a success. */
 uint32_t tiku_p4_jpeg_errors(void);
 
+/*
+ * The same operations started and left to the codec: each returns once
+ * the engine runs and calls @p done from the completion interrupt with
+ * the result; until then the core leaves the picture, the file and (for
+ * an encode) @p len alone.  A codec error ends the job through the JPEG
+ * interrupt.
+ */
+int tiku_p4_jpeg_encode_async(const tiku_p4_picture_t *in, unsigned sampling,
+                              unsigned quality, uint8_t *out, uint32_t cap,
+                              uint32_t *len, tiku_p4_dma2d_done_t done,
+                              void *ctx);
+int tiku_p4_jpeg_encode_yuv422_async(const tiku_p4_picture_t *in,
+                                     unsigned quality, uint8_t *out,
+                                     uint32_t cap, uint32_t *len,
+                                     tiku_p4_dma2d_done_t done, void *ctx);
+int tiku_p4_jpeg_decode_async(const uint8_t *jpg, uint32_t len,
+                              const tiku_p4_picture_t *out,
+                              tiku_p4_dma2d_done_t done, void *ctx);
+int tiku_p4_jpeg_decode_yuv_async(const uint8_t *jpg, uint32_t len,
+                                  const tiku_p4_picture_t *out,
+                                  tiku_p4_dma2d_done_t done, void *ctx);
 #endif /* TIKU_ESP32P4_JPEG_ARCH_H_ */

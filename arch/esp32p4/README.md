@@ -258,7 +258,14 @@ intervals and motion JPEG without Huffman tables included, to RGB888,
 RGB565 or grey, or to the file's own full-range samples (V, U, Y, or U, Y,
 V, Y); in channel 0 turns the decoder's YCbCr into RGB with JFIF's
 full-range matrix. A VGA RGB565 frame encodes in 8 ms and
-decodes in 4.5 ms.
+decodes in 4.5 ms. Each of these operations also has an `_async` form that
+returns once the engine runs and calls back from the completion interrupt
+(the 2D-DMA in channels' lines; a PPA parameter error or a JPEG codec error
+ends the job through the block's own line), the engine staying claimed until
+then. `tiku_dwgdma_arch.c` drives the DesignWare AXI DMA behind the MIPI
+bridges and the ISP for contiguous memory-to-memory copies, the beat width
+from the buffers' alignment, waited for or interrupt-completed: a VGA frame
+PSRAM to PSRAM in 9.7 ms.
 `jpeg pattern <w> <h> [rgb888|rgb565|grey] [444|422|420] [quality] [turn
 <n>] [scale <n>]` draws a test card, turned or scaled on the PPA when asked,
 and encodes it; `jpeg dump` prints the file in base64 and `jpeg check`

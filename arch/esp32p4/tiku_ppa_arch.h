@@ -136,4 +136,28 @@ int tiku_p4_ppa_srm(const tiku_p4_picture_t *out, uint16_t ox, uint16_t oy,
  *         tiku_p4_ppa_srm() (SR_PARAM_ERR_ST), 0 after a success. */
 uint32_t tiku_p4_ppa_srm_errors(void);
 
+/*
+ * The same operations started and left to the engine: each returns once
+ * the engine runs and calls @p done from the completion interrupt with
+ * the result; until then the core leaves the pictures alone.  A scaler
+ * parameter error ends the job through the PPA's own interrupt.
+ */
+int tiku_p4_ppa_fill_async(const tiku_p4_picture_t *out, uint16_t x,
+                           uint16_t y, uint16_t w, uint16_t h, uint32_t argb,
+                           tiku_p4_dma2d_done_t done, void *ctx);
+int tiku_p4_ppa_blend_keyed_async(const tiku_p4_picture_t *out, uint16_t ox,
+                                  uint16_t oy, const tiku_p4_picture_t *bg,
+                                  uint16_t bx, uint16_t by,
+                                  const tiku_p4_picture_t *fg, uint16_t fx,
+                                  uint16_t fy, uint16_t w, uint16_t h,
+                                  uint16_t bg_alpha, uint16_t fg_alpha,
+                                  const tiku_p4_ppa_keys_t *keys,
+                                  tiku_p4_dma2d_done_t done, void *ctx);
+int tiku_p4_ppa_srm_async(const tiku_p4_picture_t *out, uint16_t ox,
+                          uint16_t oy, const tiku_p4_picture_t *in,
+                          uint16_t ix, uint16_t iy, uint16_t w, uint16_t h,
+                          uint16_t scale_x, uint16_t scale_y, unsigned rotate,
+                          unsigned mirror, tiku_p4_dma2d_done_t done,
+                          void *ctx);
+
 #endif /* TIKU_ESP32P4_PPA_ARCH_H_ */
