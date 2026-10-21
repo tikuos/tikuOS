@@ -578,3 +578,170 @@ void tiku_shell_cmd_diag(uint8_t argc, const char *argv[])
     diag_fault_show();
 }
 #endif /* PLATFORM_ESP32C5 */
+
+#if defined(PLATFORM_ESP32P4)
+#include <arch/esp32p4/tiku_fault_arch.h>
+#include <arch/esp32p4/tiku_esp32p4_regs.h>
+#include <kernel/memory/tiku_mem.h>
+
+/** @brief Report the retained fault record, or say there is none. */
+static void diag_fault_show(void)
+{
+    tiku_p4_fault_record_t f;
+
+    if (!tiku_p4_fault_last(&f)) {
+        SHELL_PRINTF("  no fault recorded\n");
+        return;
+    }
+    SHELL_PRINTF("  last fault #%lu: cause %08lx pc %08lx value %08lx\n"
+                 "    sp %08lx status %08lx ra %08lx flags %lx\n",
+                 (unsigned long)f.sequence, (unsigned long)f.cause,
+                 (unsigned long)f.pc, (unsigned long)f.value,
+                 (unsigned long)f.sp, (unsigned long)f.status,
+                 (unsigned long)f.ra, (unsigned long)f.flags);
+}
+
+/* An address inside the PMP NULL guard (0..0xfff).  It is volatile so the
+ * compiler emits the access as written. */
+static volatile uintptr_t diag_unmapped = 0x10UL;
+
+/** @brief Take one exception of kind @p which: illegal, load and store halt
+ *         the board with the record; durable is a store into the durable
+ *         span outside a write window, which the port latches. */
+static void diag_fault_force(const char *which)
+{
+    if (strcmp(which, "durable") == 0) {
+        /* Declared as words: a char array would have the compiler split
+         * the store into bytes, four faults instead of one. */
+        extern uint32_t __uninit_start[];
+        volatile uint32_t *word = __uninit_start;
+
+        *word = *word;
+        SHELL_PRINTF("  durable store outside a window: violation flags %04x,"
+                     " count %lu, last %08lx\n",
+                     (unsigned)tiku_mpu_get_violation_flags(),
+                     (unsigned long)tiku_mpu_get_violation_count(),
+                     (unsigned long)tiku_mpu_get_last_fault_addr());
+        return;
+    }
+    SHELL_PRINTF("  forcing a %s fault; the board halts with the record, and"
+                 " `diag fault` after a reset shows it\n", which);
+    if (strcmp(which, "illegal") == 0) {
+        __asm__ volatile("unimp");
+    } else if (strcmp(which, "load") == 0) {
+        (void)*(volatile uint32_t *)diag_unmapped;
+    } else if (strcmp(which, "store") == 0) {
+        *(volatile uint32_t *)diag_unmapped = 0UL;
+    } else {
+        SHELL_PRINTF("  kinds: illegal | load | store | durable\n");
+        return;
+    }
+    SHELL_PRINTF("  (no fault taken)\n");
+}
+
+/** @brief One PMP entry: its configuration byte decoded, and the range a
+ *         TOR or NAPOT entry covers. */
+static void diag_pmp_entry(unsigned i, uint32_t cfg, uint32_t addr,
+                           uint32_t below)
+{
+    static const char *const mode[4] = {"off ", "tor ", "na4 ", "napot"};
+    uint32_t base = addr << 2, top = base + 4u, m = (cfg >> 3) & 3u;
+
+    if (m == 1u) {
+        base = below << 2;
+        top = addr << 2;
+    } else if (m == 3u) {
+        uint32_t ones = 0u;
+
+        while (ones < 32u && (addr >> ones) & 1u) {
+            ones++;
+        }
+        base = (addr & ~((2u << ones) - 1u)) << 2;
+        top = base + (8u << ones);
+    }
+    SHELL_PRINTF("  pmp%-2u %02lx %s%c%c%c%c %08lx-%08lx\n", i,
+                 (unsigned long)cfg, mode[m], cfg & 0x80u ? 'L' : '-',
+                 cfg & 4u ? 'X' : '-', cfg & 2u ? 'W' : '-',
+                 cfg & 1u ? 'R' : '-', (unsigned long)base,
+                 (unsigned long)top);
+}
+
+void tiku_shell_cmd_diag(uint8_t argc, const char *argv[])
+{
+    if (argc >= 2 && strcmp(argv[1], "fault") == 0) {
+        if (argc >= 3) {
+            diag_fault_force(argv[2]);
+        } else {
+            diag_fault_show();
+        }
+        return;
+    }
+    if (argc >= 2 && strcmp(argv[1], "clear") == 0) {
+        tiku_p4_fault_clear();
+        SHELL_PRINTF("  fault record cleared\n");
+        return;
+    }
+    if (argc >= 2 && strcmp(argv[1], "pma") == 0) {
+        /* The 16 PMA entries: configuration word, and the address word as
+         * a byte address (shifted left by 2). */
+#define DIAG_PMA(i)                                                          \
+    do {                                                                     \
+        uint32_t c, a;                                                       \
+        __asm__ volatile("csrr %0, %1" : "=r"(c) : "i"(0xBC0 + (i)));        \
+        __asm__ volatile("csrr %0, %1" : "=r"(a) : "i"(0xBD0 + (i)));        \
+        SHELL_PRINTF("  pma%-2u cfg %08lx addr %08lx\n", (unsigned)(i),      \
+                     (unsigned long)c, (unsigned long)(a << 2));             \
+    } while (0)
+        DIAG_PMA(0); DIAG_PMA(1); DIAG_PMA(2); DIAG_PMA(3);
+        DIAG_PMA(4); DIAG_PMA(5); DIAG_PMA(6); DIAG_PMA(7);
+        DIAG_PMA(8); DIAG_PMA(9); DIAG_PMA(10); DIAG_PMA(11);
+        DIAG_PMA(12); DIAG_PMA(13); DIAG_PMA(14); DIAG_PMA(15);
+#undef DIAG_PMA
+        return;
+    }
+    if (argc >= 2 && strcmp(argv[1], "pmp") == 0) {
+        /* The 16 PMP entries from pmpcfg0-3 and pmpaddr0-15. */
+        uint32_t cfg[4], addr[16], i;
+
+        __asm__ volatile("csrr %0, pmpcfg0" : "=r"(cfg[0]));
+        __asm__ volatile("csrr %0, pmpcfg1" : "=r"(cfg[1]));
+        __asm__ volatile("csrr %0, pmpcfg2" : "=r"(cfg[2]));
+        __asm__ volatile("csrr %0, pmpcfg3" : "=r"(cfg[3]));
+#define DIAG_PMPADDR(i) \
+        __asm__ volatile("csrr %0, %1" : "=r"(addr[i]) : "i"(0x3B0 + (i)))
+        DIAG_PMPADDR(0); DIAG_PMPADDR(1); DIAG_PMPADDR(2); DIAG_PMPADDR(3);
+        DIAG_PMPADDR(4); DIAG_PMPADDR(5); DIAG_PMPADDR(6); DIAG_PMPADDR(7);
+        DIAG_PMPADDR(8); DIAG_PMPADDR(9); DIAG_PMPADDR(10); DIAG_PMPADDR(11);
+        DIAG_PMPADDR(12); DIAG_PMPADDR(13); DIAG_PMPADDR(14); DIAG_PMPADDR(15);
+#undef DIAG_PMPADDR
+        for (i = 0u; i < 16u; i++) {
+            diag_pmp_entry(i, (cfg[i / 4u] >> (8u * (i % 4u))) & 0xFFu,
+                           addr[i], i ? addr[i - 1u] : 0u);
+        }
+        return;
+    }
+    if (argc >= 3 && strcmp(argv[1], "peek") == 0) {
+        /* Up to 64 words from a 4-byte-aligned address, four a line. */
+        uintptr_t a = (uintptr_t)strtoul(argv[2], NULL, 16);
+        uint32_t n = argc >= 4 ? (uint32_t)strtoul(argv[3], NULL, 10) : 1U, j;
+
+        if (a & 3u || n == 0 || n > 64u) {
+            SHELL_PRINTF("  peek: aligned address, 1..64 words\n");
+            return;
+        }
+        for (j = 0; j < n; j++) {
+            if (j % 4u == 0u) {
+                SHELL_PRINTF("%s  %08lx:", j ? "\n" : "",
+                             (unsigned long)(a + 4u * j));
+            }
+            SHELL_PRINTF(" %08lx",
+                         (unsigned long)TIKU_P4_REG_READ(a + 4u * j));
+        }
+        SHELL_PRINTF("\n");
+        return;
+    }
+    SHELL_PRINTF("Usage: diag fault [illegal|load|store|durable] | clear"
+                 " | pma | pmp | peek <hex> [words]\n");
+    diag_fault_show();
+}
+#endif /* PLATFORM_ESP32P4 */

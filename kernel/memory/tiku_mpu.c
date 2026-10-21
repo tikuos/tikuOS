@@ -58,8 +58,11 @@ void tiku_mpu_set_permissions(tiku_mpu_seg_t seg, tiku_mpu_perm_t perm)
  *   RA8P1               in a record that survives the reset it then forces.
  *   ESP32-C5            store access fault (PMA entries 10 and 11 hold the
  *                       durable span read-only); the trap handler records it.
- *   STM32N6, ESP32-C61, nothing is enforced: the store lands in the SRAM
- *   ESP32-P4            working copy and reaches the mirror only when a later
+ *   ESP32-P4            store access fault (PMA entries 0 and 1); the trap
+ *                       entry latches flags, a count and the address, skips
+ *                       the store and resumes.
+ *   STM32N6, ESP32-C61  nothing is enforced: the store lands in the SRAM
+ *                       working copy and reaches the mirror only when a later
  *                       window closes.
  * On MSP430 a store that did not crash may not have landed.  Building with
  * TIKU_MPU_NMI_ON_VIOLATION=1 makes MSP430 report it as well.
@@ -117,7 +120,7 @@ void tiku_mpu_clear_violation_flags(void)
 
 uint32_t tiku_mpu_get_violation_count(void)
 {
-#if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ)
+#if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || defined(PLATFORM_ESP32P4)
     extern uint32_t tiku_mpu_arch_violation_count(void);
     return tiku_mpu_arch_violation_count();
 #else
@@ -127,7 +130,7 @@ uint32_t tiku_mpu_get_violation_count(void)
 
 uint32_t tiku_mpu_get_last_fault_addr(void)
 {
-#if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ)
+#if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ) || defined(PLATFORM_ESP32P4)
     extern uint32_t tiku_mpu_arch_last_fault_addr(void);
     return tiku_mpu_arch_last_fault_addr();
 #else

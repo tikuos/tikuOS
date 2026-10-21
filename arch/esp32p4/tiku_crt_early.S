@@ -185,6 +185,45 @@ tiku_esp32p4_diagnostic_trap:
     li a7, TIKU_P4_FAULT_BAD_SP
     j .Lfault
 .Lexception:
+    /* A store access fault (code 7) inside the durable span is an MPU
+     * violation: latched in tiku_p4_mpu_latch (flags, count, address), the
+     * store skipped by its length, the context resumed.  Only t0-t2 are
+     * free here; the scratch area holds their values. */
+    slli t2, t2, 20
+    srli t2, t2, 20
+    addi t2, t2, -7
+    bnez t2, .Lcapture
+    csrr t2, mtval
+    la t1, tiku_p4_mpu_latch
+    lw t0, 0(t1)
+    bltu t2, t0, .Lcapture
+    lw t0, 4(t1)
+    bgeu t2, t0, .Lcapture
+    sw t2, 16(t1)
+    lw t0, 8(t1)
+    ori t0, t0, 1
+    sw t0, 8(t1)
+    lw t0, 12(t1)
+    addi t0, t0, 1
+    sw t0, 12(t1)
+    csrr t0, mepc
+    lhu t2, 0(t0)
+    andi t2, t2, 3
+    addi t0, t0, 2
+    li t1, 3
+    bne t2, t1, .Lskipped
+    addi t0, t0, 2
+.Lskipped:
+    csrw mepc, t0
+    csrr t0, mscratch
+    lw t1, 4(t0)
+    lw t2, 8(t0)
+    lw sp, 12(t0)
+    lw t0, 0(t0)
+    mret
+.Lcapture:
+    csrr t0, mscratch
+    lw t1, 16(t0)
     li a7, 0
 .Lfault:
     beqz t1, 3f
@@ -224,6 +263,11 @@ tiku_p4_isr_stack_end:
     .global tiku_p4_trap_scratch
 tiku_p4_trap_scratch:
     .skip 32
+    /* Durable-span store faults: span start, end, flags, count, address. */
+    .global tiku_p4_mpu_latch
+tiku_p4_mpu_latch:
+    .skip 20
+    .balign 16
     .global tiku_p4_fault_stack
 tiku_p4_fault_stack:
     .skip 2048

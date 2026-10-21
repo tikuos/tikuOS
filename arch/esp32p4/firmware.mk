@@ -27,6 +27,9 @@ ifeq ($(TIKU_SHELL_ENABLE),1)
 SRCS += shell/commands/tiku_shell_cmd_jpeg.c
 endif
 endif
+ifeq ($(TIKU_SHELL_ENABLE),1)
+SRCS += shell/commands/tiku_shell_cmd_diag.c
+endif
 SRCS += arch/esp32p4/tiku_trng_arch.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_psram_p4.c
 ifeq ($(TIKU_THREADS_ENABLE),1)

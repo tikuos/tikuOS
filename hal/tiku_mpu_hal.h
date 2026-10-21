@@ -39,6 +39,8 @@
 #include "arch/esp32c61/tiku_mpu_arch.h"
 #elif defined(PLATFORM_ESP32C5)
 #include "arch/esp32c5/tiku_mpu_arch.h"
+#elif defined(PLATFORM_ESP32P4)
+#include "arch/esp32p4/tiku_mpu_arch.h"
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -58,9 +60,9 @@ uint16_t tiku_mpu_arch_get_sam(void);
 /**
  * @brief Set the segment access word, in the layout of MSP430's MPUSAM.
  *
- * MSP430 parts with an MPU write MPUSAM between MPUCTL0 password writes and
- * leave the MPU on; other ports keep it in software.  RP2350 opens .uninit
- * while bit 9 is set, ESP32-C5 its durable span while a write bit (0x0222) is.
+ * MSP430 parts with an MPU write MPUSAM between MPUCTL0 password writes;
+ * other ports keep it in software.  RP2350 opens .uninit while bit 9 is
+ * set, the ESP32-C5 and P4 their durable span while a write bit (0x0222) is.
  *
  * @param sam  New segment access word
  */
@@ -105,8 +107,8 @@ void tiku_mpu_arch_enable_irq(void);
  * @brief Set up the port's memory protection
  *
  * MSP430 parts with an MPU set MPUSEGB1/2 and enable it; RP2350, Ambiq,
- * Nordic and RA8P1 program MPU regions; the ESP32-C61 and C5 lock a PMP
- * entry over the first 4 KB; STM32N6 and the P4 do nothing.
+ * Nordic and RA8P1 program MPU regions; the ESP32-C61, C5 and P4 lock a PMP
+ * entry over the first 4 KB (C5 and P4 arm their span); STM32N6 does nothing.
  *
  * @note Call after tiku_mem_arch_init(), which restores a mirrored span
  *       before it is write-protected, and before
@@ -167,7 +169,7 @@ void tiku_mpu_arch_lock_nvm(uint16_t saved_state);
  *
  * MSP430 returns the MPUCTL1 flags its SYSNMI handler latched, bit n - 1 for
  * segment n; RP2350 and Ambiq the MMFSR bits their MemManage handler ORs in;
- * RA8P1 0x0001 after a MemManage access violation in its fault record.
+ * RA8P1 and the ESP32-P4 0x0001 after a violation in their record or latch.
  *
  * @return Violation flags in the port's encoding; 0 on the other ports
  */

@@ -27,10 +27,10 @@ Small durable scalars use `TIKU_PERSIST_CELL` and the cell API
 (`kernel/vfs/AGENTS.md`, "Persistent nodes").  Writes to `TIKU_DURABLE`
 data sit inside `tiku_mpu_unlock_nvm()`/`tiku_mpu_lock_nvm()`; an
 unbracketed write is silently dropped on MSP430, a bus fault on nRF54L, a
-MemManage reset on RP2350, Ambiq and RA8P1 and a store access fault on the
-ESP32-C5; STM32N6, ESP32-C61 and ESP32-P4 enforce nothing, and the write
-reaches the mirror only when a later window closes (the table in
-`tiku_mpu.c`).  `tools/check_durable_placement.sh` (`make lint`) rejects raw
+MemManage reset on RP2350, Ambiq and RA8P1, a store access fault that halts
+on the ESP32-C5 and one the trap entry latches, counts and skips on the
+ESP32-P4; STM32N6 and ESP32-C61 enforce nothing, and the write reaches the
+mirror only when a later window closes (the table in `tiku_mpu.c`).  `tools/check_durable_placement.sh` (`make lint`) rejects raw
 section attributes in `kernel/`, `interfaces/`, `drivers/`, `boot/`, `hal/`,
 `apps/`, `services/`, `shell/` and `basic/`, except in `tiku_mem.h` and the
 `mrambench` command; it does not scan `arch/`.

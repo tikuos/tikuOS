@@ -25,8 +25,16 @@ tree's node handlers and tables, and their constants execute from flash. The
 rest of the kernel, cache/flash controller operations and their dependencies
 execute from internal SRAM; a flash operation runs there with interrupts
 masked, so no flash-resident code runs during one. The profile uses a 16 KiB
-foreground stack and a separate 2 KiB interrupt stack. Software guards do not
-provide an MPU.
+foreground stack and a separate 2 KiB interrupt stack. PMP entry 0, locked at
+boot, faults any access below 4 KB; PMA entries 0 and 1 hold the durable span
+(`.persistent`, the SRAM working copy of the flash mirror) read-only outside a
+`tiku_mpu_unlock_nvm()` window. A store there outside a window is a store
+access fault that the trap entry latches (a flag, a count and the address,
+read through `tiku_mpu_get_violation_flags()`, `_count()` and
+`_last_fault_addr()` or `/sys/boot/mpu/{violations,count,last_addr}`) and
+skips, so the kernel keeps running; every other
+exception halts with the retained fault record. `diag pmp`, `diag pma` and
+`diag fault durable` show the entries and the latch.
 
 ### Install and recover
 
@@ -255,6 +263,11 @@ decodes in 4.5 ms.
 <n>] [scale <n>]` draws a test card, turned or scaled on the PPA when asked,
 and encodes it; `jpeg dump` prints the file in base64 and `jpeg check`
 decodes it back.
+`diag fault` prints the retained fault record and `diag clear` discards it;
+`diag fault illegal|load|store` takes that exception (the board halts with
+the record), `diag fault durable` stores into the durable span outside a
+window and prints the latch; `diag pmp` and `diag pma` list the 16 entries
+of each; `diag peek <hex> [words]` reads memory.
 
 ### Memory and configuration
 
@@ -641,8 +654,9 @@ internal SRAM before using a stack. It checks alignment and room for the
 integer frame in the linked BSS/foreground-stack ranges. Exceptions use a
 dedicated fault stack, including exceptions raised inside an interrupt
 handler. A further exception in the fault handler parks CPU0 without trying
-to report recursively. These range checks are not per-worker bounds checks
-or hardware memory protection.
+to report recursively. These range checks are not per-worker bounds checks;
+the hardware protection is the PMP NULL guard and the durable span's PMA
+entries described above.
 
 The record contains version, sequence, cause, PC, trap value, interrupted SP,
 machine status, hart, raw reset-reason register, return address, context flags,
