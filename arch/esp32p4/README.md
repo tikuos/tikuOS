@@ -261,6 +261,24 @@ each keep their own vector state. On this silicon `esp.vadd.u32` and
 `esp.vadd.s32` saturate; the hardware-loop forms (`esp.lp.*`) are not in
 the macro file.
 
+`tiku_memcpy_arch.S` replaces newlib-nano's `memcpy`, `memset` and
+`memmove`, which move a byte at a time, with the vector unit: 16 bytes a
+load or store once the destination is 16-byte aligned, the shifter
+(`esp.ld.128.usar.ip`, `esp.src.q.qup`) for a source that is not, words
+and bytes around them, and a word path below 32 bytes. A copy with an
+end outside the HP memory window (0x40000000-0x4FFFFFFF: flash, PSRAM,
+ROM, L2 SRAM), such as the LP payload into LP SRAM, takes the word path
+at any length, since the vector unit's 16-byte accesses fault on the
+peripheral bus. A 4 KB SRAM copy
+takes 2.4 µs (3.7 µs from an unaligned source) against 68 µs before, a
+4 KB set 1.2 µs against 45 µs. A copy reads CSR 0x7F2 on entry and writes
+it back unless the context was already dirty, so a context that only
+copies keeps its initial state and its interrupts save nothing; a copy
+from an interrupt leaves the interrupted context's registers to the trap
+frame. Copies within PSRAM run at the PSRAM's rate: a VGA frame takes
+17 ms (36 MB/s; 25 ms before), and the DW-GDMA moves the same frame in
+9.7 ms.
+
 The media blocks move pixels through the 2D-DMA (`tiku_dma2d_arch.c`),
 with the caches kept coherent as for the AHB DMA. `tiku_p4_dma2d_copy()`
 copies a block of 1- to 4-byte pixels between pictures in HP SRAM or PSRAM:
