@@ -49,6 +49,33 @@ int tiku_p4_dma2d_copy(const tiku_p4_picture_t *dst, uint16_t dx, uint16_t dy,
                        const tiku_p4_picture_t *src, uint16_t sx, uint16_t sy,
                        uint16_t w, uint16_t h);
 
+/* Conversions a copy applies on the way: pixel bytes before and after,
+ * and the formats.  RGB888 is B, G, R in memory; YUV444 is Y, U, V; YUV422
+ * is U, Y, V, Y for each pair of pixels.  YUV is BT.601 limited range
+ * (Y 16..235), as the engine's own tables have it. */
+#define TIKU_P4_DMA2D_CONV_NONE          0u
+#define TIKU_P4_DMA2D_CONV_RGB888_RGB565 1u   /**< 3 to 2 bytes, top bits kept */
+#define TIKU_P4_DMA2D_CONV_RGB565_RGB888 2u   /**< 2 to 3: a channel's low bits
+                                               *   repeated below it */
+#define TIKU_P4_DMA2D_CONV_RGB888_YUV444 3u   /**< 3 to 3: V, U, Y in memory */
+#define TIKU_P4_DMA2D_CONV_RGB888_YUV422 4u   /**< 3 to 2: U, Y, V, Y a pair, U
+                                               *   of its first pixel, V of its
+                                               *   second */
+#define TIKU_P4_DMA2D_CONV_YUV444_RGB888 5u   /**< 3 to 3 from V, U, Y */
+#define TIKU_P4_DMA2D_CONV_YUV422_RGB888 6u   /**< 2 to 3 from U, Y, V, Y */
+#define TIKU_P4_DMA2D_CONV_SWAP_RB       7u   /**< 3 to 3: B, G, R to R, G, B */
+
+/**
+ * @brief Copy a block as tiku_p4_dma2d_copy() does, converting each pixel
+ *        by @p conv on the way; the pictures' pixel sizes are the
+ *        conversion's.  A 4:2:2 block starts and ends on an even column.
+ * @return TIKU_P4_DMA2D_OK, or a negative TIKU_P4_DMA2D_ERR_*
+ */
+int tiku_p4_dma2d_convert(const tiku_p4_picture_t *dst, uint16_t dx,
+                          uint16_t dy, const tiku_p4_picture_t *src,
+                          uint16_t sx, uint16_t sy, uint16_t w, uint16_t h,
+                          unsigned conv);
+
 /** @brief Copies finished and copies that failed since boot. */
 void tiku_p4_dma2d_stats(uint32_t *done, uint32_t *failed);
 

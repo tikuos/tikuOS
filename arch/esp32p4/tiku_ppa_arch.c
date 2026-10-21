@@ -19,6 +19,8 @@
 #include "tiku_esp32p4_regs.h"
 
 #define PPA_BASE          0x50087000u
+#define CLUT_CONF         (PPA_BASE + 0x0Cu)
+#define CLUT_RAM(input)   (PPA_BASE + 0x400u + 0x400u * (input))
 #define PPA_INT_RAW       (PPA_BASE + 0x10u)
 #define PPA_INT_CLR       (PPA_BASE + 0x1Cu)
 #define SR_COLOR_MODE     (PPA_BASE + 0x20u)    /* in [3:0], out [7:4] */
@@ -52,6 +54,11 @@
 #define SR_MIRROR_X       (1u << 28)
 #define SR_MIRROR_Y       (1u << 29)
 #define CK_EMPTY_LOW      0xFFFFFFu             /* a key range nothing is in */
+#define CK_REVERSE        (1u << 24)            /* CK_DEFAULT */
+#define CLUT_MEMORY       (1u << 0)             /* CLUT_CONF: write as memory */
+#define CLUT_FORCE_PU     (1u << 6)
+#define CLUT_CLK_ENA      (1u << 7)
+#define MODE_L8           4u                    /* an input of table indices */
 
 /* HP_SYS_CLKRST: the PPA's system clock and its reset. */
 #define CLK_SYS           0x500E6018u           /* SOC_CLK_CTRL1, bit 9 */
@@ -79,7 +86,7 @@ static tiku_p4_dma2d_desc_t desc_a __attribute__((aligned(64)));
 static tiku_p4_dma2d_desc_t desc_b __attribute__((aligned(64)));
 static tiku_p4_dma2d_desc_t desc_out __attribute__((aligned(64)));
 
-static uint8_t ppa_ready;
+static uint8_t ppa_ready, lut_loaded;           /* bit per input */
 static uint32_t srm_errors;
 
 /** @brief Set @p bits of register @p reg to their values in @p value. */
@@ -101,18 +108,18 @@ static void ppa_init(void)
 }
 
 /** @brief The PPA colour mode of a picture: 4 bytes ARGB8888 (0), 3 RGB888
- *         (1), 2 RGB565 (2). */
+ *         (1), 2 RGB565 (2), 1 table indices (4). */
 static uint32_t color_mode(const tiku_p4_picture_t *p)
 {
-    return 4u - p->bpp;
+    return p->bpp == 1u ? MODE_L8 : 4u - p->bpp;
 }
 
 /** @brief Whether @p p is a PPA picture holding the @p w x @p h block at
- *         (@p x, @p y). */
+ *         (@p x, @p y); @p min_bpp 1 admits a picture of indices. */
 static int block_ok(const tiku_p4_picture_t *p, uint16_t x, uint16_t y,
-                    uint16_t w, uint16_t h)
+                    uint16_t w, uint16_t h, uint8_t min_bpp)
 {
-    return tiku_p4_dma2d_picture_ok(p) && p->bpp >= 2u && w != 0u &&
+    return tiku_p4_dma2d_picture_ok(p) && p->bpp >= min_bpp && w != 0u &&
            h != 0u && (uint32_t)x + w <= p->width &&
            (uint32_t)y + h <= p->height;
 }
@@ -177,7 +184,7 @@ int tiku_p4_ppa_fill(const tiku_p4_picture_t *out, uint16_t x, uint16_t y,
 {
     int rc;
 
-    if (!block_ok(out, x, y, w, h)) {
+    if (!block_ok(out, x, y, w, h, 2u)) {
         return TIKU_P4_PPA_ERR_PARAM;
     }
     if (tiku_p4_dma2d_claim() != TIKU_P4_DMA2D_OK) {
@@ -218,17 +225,64 @@ static uint32_t alpha_fields(uint16_t update, unsigned in)
     return (value << (8u * in)) | (mode << (16u + 2u * in));
 }
 
+int tiku_p4_ppa_lut(unsigned input, const uint32_t *table)
+{
+    unsigned i;
+
+    if (input > TIKU_P4_PPA_FG) {
+        return TIKU_P4_PPA_ERR_PARAM;
+    }
+    ppa_init();
+    if (table == NULL) {
+        lut_loaded &= (uint8_t)~(1u << input);
+        if (lut_loaded == 0u) {
+            ppa_bits(CLUT_CONF, CLUT_CLK_ENA | CLUT_FORCE_PU, 0u);
+        }
+        return TIKU_P4_PPA_OK;
+    }
+    ppa_bits(CLUT_CONF, CLUT_CLK_ENA | CLUT_FORCE_PU | CLUT_MEMORY,
+             CLUT_CLK_ENA | CLUT_FORCE_PU | CLUT_MEMORY);
+    for (i = 0u; i < 256u; i++) {
+        TIKU_P4_REG_WRITE(CLUT_RAM(input) + 4u * i, table[i]);
+    }
+    lut_loaded |= (uint8_t)(1u << input);
+    return TIKU_P4_PPA_OK;
+}
+
+/** @brief A key range as the registers take it: @p low and @p high
+ *         0xRRGGBB, which is the registers' R [23:16] G [15:8] B [7:0]; an
+ *         empty range keys nothing. */
+static void put_key(uint32_t low_reg, uint32_t low, uint32_t high)
+{
+    TIKU_P4_REG_WRITE(low_reg, low & 0xFFFFFFu);
+    TIKU_P4_REG_WRITE(low_reg + 4u, high & 0xFFFFFFu);
+}
+
 int tiku_p4_ppa_blend(const tiku_p4_picture_t *out, uint16_t ox, uint16_t oy,
                       const tiku_p4_picture_t *bg, uint16_t bx, uint16_t by,
                       const tiku_p4_picture_t *fg, uint16_t fx, uint16_t fy,
                       uint16_t w, uint16_t h, uint16_t bg_alpha,
                       uint16_t fg_alpha)
 {
+    return tiku_p4_ppa_blend_keyed(out, ox, oy, bg, bx, by, fg, fx, fy, w, h,
+                                   bg_alpha, fg_alpha, NULL);
+}
+
+int tiku_p4_ppa_blend_keyed(const tiku_p4_picture_t *out, uint16_t ox,
+                            uint16_t oy, const tiku_p4_picture_t *bg,
+                            uint16_t bx, uint16_t by,
+                            const tiku_p4_picture_t *fg, uint16_t fx,
+                            uint16_t fy, uint16_t w, uint16_t h,
+                            uint16_t bg_alpha, uint16_t fg_alpha,
+                            const tiku_p4_ppa_keys_t *keys)
+{
     int rc;
 
-    if (!block_ok(out, ox, oy, w, h) || !block_ok(bg, bx, by, w, h) ||
-        !block_ok(fg, fx, fy, w, h) || bg_alpha > 0x300u ||
-        fg_alpha > 0x300u) {
+    if (!block_ok(out, ox, oy, w, h, 2u) || !block_ok(bg, bx, by, w, h, 1u) ||
+        !block_ok(fg, fx, fy, w, h, 1u) || bg_alpha > 0x300u ||
+        fg_alpha > 0x300u ||
+        (bg->bpp == 1u && !(lut_loaded & (1u << TIKU_P4_PPA_BG))) ||
+        (fg->bpp == 1u && !(lut_loaded & (1u << TIKU_P4_PPA_FG)))) {
         return TIKU_P4_PPA_ERR_PARAM;
     }
     if (tiku_p4_dma2d_claim() != TIKU_P4_DMA2D_OK) {
@@ -263,11 +317,16 @@ int tiku_p4_ppa_blend(const tiku_p4_picture_t *out, uint16_t ox, uint16_t oy,
         TIKU_P4_REG_WRITE(BLEND_FIX_ALPHA, alpha_fields(bg_alpha, 0u) |
                                           alpha_fields(fg_alpha, 1u));
         TIKU_P4_REG_WRITE(BLEND_TX_SIZE, (uint32_t)w | ((uint32_t)h << 14));
-        TIKU_P4_REG_WRITE(CK_BG_LOW, CK_EMPTY_LOW);
-        TIKU_P4_REG_WRITE(CK_BG_HIGH, 0u);
-        TIKU_P4_REG_WRITE(CK_FG_LOW, CK_EMPTY_LOW);
-        TIKU_P4_REG_WRITE(CK_FG_HIGH, 0u);
-        TIKU_P4_REG_WRITE(CK_DEFAULT, 0u);
+        if (keys != NULL) {
+            put_key(CK_BG_LOW, keys->bg_low, keys->bg_high);
+            put_key(CK_FG_LOW, keys->fg_low, keys->fg_high);
+            TIKU_P4_REG_WRITE(CK_DEFAULT, (keys->miss & 0xFFFFFFu) |
+                                              (keys->reverse ? CK_REVERSE : 0u));
+        } else {
+            put_key(CK_BG_LOW, CK_EMPTY_LOW, 0u);
+            put_key(CK_FG_LOW, CK_EMPTY_LOW, 0u);
+            TIKU_P4_REG_WRITE(CK_DEFAULT, 0u);
+        }
         blend_start(0);
         rc = tiku_p4_dma2d_in_wait(CH_IN,
                                    budget_for((uint32_t)w * h, out->bpp));
@@ -336,11 +395,11 @@ int tiku_p4_ppa_srm(const tiku_p4_picture_t *out, uint16_t ox, uint16_t oy,
     int rc;
 
     tiku_p4_ppa_srm_size(w, h, scale_x, scale_y, rotate, &ow, &oh);
-    if (!block_ok(in, ix, iy, w, h) || out == NULL || out->base == in->base ||
+    if (!block_ok(in, ix, iy, w, h, 2u) || out == NULL || out->base == in->base ||
         scale_x == 0u || scale_x > 0xFFFu || scale_y == 0u ||
         scale_y > 0xFFFu || rotate > 3u || mirror > 3u || ow == 0u ||
         oh == 0u || ow > SIDE_MAX_SRM || oh > SIDE_MAX_SRM ||
-        !block_ok(out, ox, oy, ow, oh)) {
+        !block_ok(out, ox, oy, ow, oh, 2u)) {
         return TIKU_P4_PPA_ERR_PARAM;
     }
     if (tiku_p4_dma2d_claim() != TIKU_P4_DMA2D_OK) {

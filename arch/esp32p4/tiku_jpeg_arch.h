@@ -49,6 +49,26 @@ int tiku_p4_jpeg_encode(const tiku_p4_picture_t *in, unsigned sampling,
                         unsigned quality, uint8_t *out, uint32_t cap,
                         uint32_t *len);
 
+/**
+ * @brief Encode @p in, a YUV422 picture (U, Y, V, Y for each pair of
+ *        pixels, 2 bytes a pixel, JFIF full range) at 4:2:2, as
+ *        tiku_p4_jpeg_encode() does otherwise.
+ * @return TIKU_P4_JPEG_OK, or a negative TIKU_P4_JPEG_ERR_*
+ */
+int tiku_p4_jpeg_encode_yuv422(const tiku_p4_picture_t *in, unsigned quality,
+                               uint8_t *out, uint32_t cap, uint32_t *len);
+
+/**
+ * @brief Decode a colour file to its own samples, JFIF full range: a 4:4:4
+ *        file into a 3-byte picture (V, U, Y in memory), a 4:2:2 file into
+ *        a 2-byte one (U, Y, V, Y pairs), without the conversion to RGB;
+ *        otherwise as tiku_p4_jpeg_decode().
+ * @return TIKU_P4_JPEG_OK, _ERR_FORMAT for a 4:2:0 or grey file, or a
+ *         negative TIKU_P4_JPEG_ERR_*
+ */
+int tiku_p4_jpeg_decode_yuv(const uint8_t *jpg, uint32_t len,
+                            const tiku_p4_picture_t *out);
+
 /** @brief What a file holds: its size, the size padded to whole MCUs (the
  *         picture tiku_p4_jpeg_decode() writes), its components and its
  *         chroma sampling. */

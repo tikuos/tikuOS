@@ -38,6 +38,7 @@
 #define OUT_CSC         0x48u           /* every out channel */
 #define OUT_PORT_BLK    0x6Cu           /* width [13:0], height [27:14] */
 #define OUT_SCRAMBLE    0x4Cu
+#define OUT_PARAM(n)    (0x50u + 4u * (n))
 #define IN0_CSC         0x4Cu           /* in channel 0 only */
 #define IN0_SCRAMBLE    0x50u
 #define IN0_PARAM(n)    (0x54u + 4u * (n))
@@ -88,11 +89,34 @@
 #define D0_SUC_EOF      TIKU_P4_DMA2D_D0_SUC_EOF
 #define D0_2D           TIKU_P4_DMA2D_D0_2D
 
-/* BT.601 YUV-to-RGB: rows of a [9:0] | b [20:10], then c [9:0] | d [27:10]
- * (dma2d_types.h, the registers' reset values). */
+/* The converters' BT.601 matrices, 256 Q = a x + b y + c z + d a channel:
+ * rows of a [9:0] | b [20:10], then c [9:0] | d [27:10] (dma2d_types.h).
+ * YUV to RGB is the registers' reset value. */
 static const uint32_t bt601[6] = {
     0x0000012Au, 0x0C86D999u, 0x001E712Au, 0x021E4F30u, 0x0008112Au,
     0x0BAD3000u};
+static const uint32_t rgb_to_yuv[6] = {
+    0x00020442u, 0x00400019u, 0x001EDBDAu, 0x02000070u, 0x001E8870u,
+    0x020003EEu};
+
+/* An out channel's conversion: the colour converter word (input select
+ * [5:3], matrix [2], output select [1:0]), the byte order, its matrix, and
+ * the pixel bytes before and after. */
+typedef struct {
+    uint8_t csc, scramble, src_bpp, dst_bpp;
+    const uint32_t *params;
+} conv_t;
+
+static const conv_t conversions[8] = {
+    {0x3Au, 0u, 0u, 0u, NULL},               /* none: any size, unchanged */
+    {0x18u, 0u, 3u, 2u, NULL},               /* RGB888 to RGB565 */
+    {0x02u, 0u, 2u, 3u, NULL},               /* RGB565 to RGB888 */
+    {0x1Eu, 0u, 3u, 3u, rgb_to_yuv},         /* RGB888 to YUV444 */
+    {0x1Du, 0u, 3u, 2u, rgb_to_yuv},         /* RGB888 to YUV422 */
+    {0x1Eu, 0u, 3u, 3u, bt601},              /* YUV444 to RGB888 */
+    {0x0Eu, 0u, 2u, 3u, bt601},              /* YUV422 to RGB888 */
+    {0x1Au, 5u, 3u, 3u, NULL},               /* bytes 0 and 2 swapped */
+};
 
 #if UINTPTR_MAX == 0xFFFFFFFFu
 _Static_assert(sizeof(tiku_p4_dma2d_desc_t) == 24u,
@@ -337,18 +361,43 @@ static void block_span(const tiku_p4_picture_t *p, uint16_t x, uint16_t y,
     *len = last - first;
 }
 
-int tiku_p4_dma2d_copy(const tiku_p4_picture_t *dst, uint16_t dx, uint16_t dy,
-                       const tiku_p4_picture_t *src, uint16_t sx, uint16_t sy,
-                       uint16_t w, uint16_t h)
+/** @brief Set out channel @p ch's converter to @p c. */
+static void out_convert(unsigned ch, const conv_t *c)
 {
+    unsigned i;
+
+    if (c->params != NULL) {
+        for (i = 0u; i < 6u; i++) {
+            TIKU_P4_REG_WRITE(TX(ch) + OUT_PARAM(i), c->params[i]);
+        }
+    }
+    TIKU_P4_REG_WRITE(TX(ch) + OUT_SCRAMBLE, c->scramble);
+    TIKU_P4_REG_WRITE(TX(ch) + OUT_CSC, c->csc);
+}
+
+/** @brief A copy or a conversion of one block on pair 1, waited for. */
+static int transfer(const tiku_p4_picture_t *dst, uint16_t dx, uint16_t dy,
+                    const tiku_p4_picture_t *src, uint16_t sx, uint16_t sy,
+                    uint16_t w, uint16_t h, unsigned conv)
+{
+    const conv_t *c = &conversions[conv];
     uint8_t *s_at, *d_at;
     uint32_t s_len, d_len;
     int rc;
 
     if (!tiku_p4_dma2d_picture_ok(dst) || !tiku_p4_dma2d_picture_ok(src) ||
-        dst->bpp != src->bpp || w == 0u || h == 0u ||
+        w == 0u || h == 0u ||
         (uint32_t)sx + w > src->width || (uint32_t)sy + h > src->height ||
         (uint32_t)dx + w > dst->width || (uint32_t)dy + h > dst->height) {
+        return TIKU_P4_DMA2D_ERR_PARAM;
+    }
+    if (c->src_bpp == 0u ? dst->bpp != src->bpp
+                         : (src->bpp != c->src_bpp || dst->bpp != c->dst_bpp)) {
+        return TIKU_P4_DMA2D_ERR_PARAM;
+    }
+    if ((conv == TIKU_P4_DMA2D_CONV_RGB888_YUV422 ||
+         conv == TIKU_P4_DMA2D_CONV_YUV422_RGB888) &&
+        ((sx | dx | w) & 1u)) {
         return TIKU_P4_DMA2D_ERR_PARAM;
     }
     if (tiku_p4_dma2d_claim() != TIKU_P4_DMA2D_OK) {
@@ -366,6 +415,9 @@ int tiku_p4_dma2d_copy(const tiku_p4_picture_t *dst, uint16_t dx, uint16_t dy,
     rc = tiku_p4_dma2d_out_open(PAIR, PERI_M2M_OUT, TIKU_P4_DMA2D_MB_NONE,
                                 &tx_desc);
     if (rc == TIKU_P4_DMA2D_OK) {
+        if (conv != TIKU_P4_DMA2D_CONV_NONE) {
+            out_convert(PAIR, c);
+        }
         rc = tiku_p4_dma2d_in_open(PAIR, PERI_M2M_IN, TIKU_P4_DMA2D_MEM_TRANS |
                                    TIKU_P4_DMA2D_MB_NONE, &rx_desc);
     }
@@ -386,6 +438,24 @@ int tiku_p4_dma2d_copy(const tiku_p4_picture_t *dst, uint16_t dx, uint16_t dy,
     }
     tiku_p4_dma2d_unclaim();
     return rc;
+}
+
+int tiku_p4_dma2d_copy(const tiku_p4_picture_t *dst, uint16_t dx, uint16_t dy,
+                       const tiku_p4_picture_t *src, uint16_t sx, uint16_t sy,
+                       uint16_t w, uint16_t h)
+{
+    return transfer(dst, dx, dy, src, sx, sy, w, h, TIKU_P4_DMA2D_CONV_NONE);
+}
+
+int tiku_p4_dma2d_convert(const tiku_p4_picture_t *dst, uint16_t dx,
+                          uint16_t dy, const tiku_p4_picture_t *src,
+                          uint16_t sx, uint16_t sy, uint16_t w, uint16_t h,
+                          unsigned conv)
+{
+    if (conv == TIKU_P4_DMA2D_CONV_NONE || conv > TIKU_P4_DMA2D_CONV_SWAP_RB) {
+        return TIKU_P4_DMA2D_ERR_PARAM;
+    }
+    return transfer(dst, dx, dy, src, sx, sy, w, h, conv);
 }
 
 void tiku_p4_dma2d_stats(uint32_t *done, uint32_t *failed)

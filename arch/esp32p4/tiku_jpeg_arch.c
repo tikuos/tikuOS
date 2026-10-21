@@ -143,11 +143,14 @@ static const uint32_t jfif_to_rgb[6] = {
     0x00000100u, 0x0D340167u, 0x001EA100u, 0x02200349u, 0x00071900u,
     0x0C760000u};
 
-/** @brief DMA block widths: encoder by source (RGB888, RGB565, grey) and
- *         sampling; decoder by sampling and output (RGB888, RGB565). */
-static const uint8_t enc_hb[3][3] = {{40, 32, 32}, {64, 64, 48}, {128, 0, 0}};
-static const uint8_t dec_hb[3][2] = {{40, 32}, {32, 64}, {32, 48}};
+/** @brief DMA block widths: encoder by source (RGB888, RGB565, grey,
+ *         YUV422) and sampling; decoder by sampling and output (RGB888,
+ *         RGB565, the file's own samples). */
+static const uint8_t enc_hb[4][3] = {{40, 32, 32}, {64, 64, 48}, {128, 0, 0},
+                                     {0, 64, 0}};
+static const uint8_t dec_hb[3][3] = {{40, 32, 40}, {32, 64, 64}, {32, 48, 48}};
 #define DEC_HB_GRAY 96u
+#define SRC_YUV422  3u                        /* enc_hb row, COLOR_SPACE 1 */
 
 /*---------------------------------------------------------------------------*/
 
@@ -358,13 +361,15 @@ static uint32_t write_header(uint8_t *out, uint16_t w, uint16_t h,
     return (uint32_t)(at - out);
 }
 
-int tiku_p4_jpeg_encode(const tiku_p4_picture_t *in, unsigned sampling,
-                        unsigned quality, uint8_t *out, uint32_t cap,
-                        uint32_t *len)
+/** @brief The encoder for source kind @p src (0 RGB888, 1 RGB565, 2 grey,
+ *         3 YUV422) at @p sampling. */
+static int encode(const tiku_p4_picture_t *in, unsigned src, unsigned sampling,
+                  unsigned quality, uint8_t *out, uint32_t cap, uint32_t *len)
 {
     static const uint8_t mb[3] = {0u, 1u, 2u};
+    static const uint8_t space[4] = {0u, 2u, 3u, 1u};
     uint8_t q[2][64];
-    unsigned comps, src, mcu_w, mcu_h, i;
+    unsigned comps, mcu_w, mcu_h, i;
     uint32_t hdr, room, got;
     int rc;
 
@@ -373,11 +378,10 @@ int tiku_p4_jpeg_encode(const tiku_p4_picture_t *in, unsigned sampling,
         ((uintptr_t)out & (LINE - 1u)) != 0u) {
         return TIKU_P4_JPEG_ERR_PARAM;
     }
-    comps = in->bpp == 1u ? 1u : 3u;
+    comps = src == 2u ? 1u : 3u;
     if (comps == 1u) {
         sampling = TIKU_P4_JPEG_444;
     }
-    src = in->bpp == 3u ? 0u : in->bpp == 2u ? 1u : 2u;
     mcu_w = sampling == TIKU_P4_JPEG_444 ? 8u : 16u;
     mcu_h = sampling == TIKU_P4_JPEG_420 ? 16u : 8u;
     hdr = comps == 3u ? TIKU_P4_JPEG_HEADER_COLOR : TIKU_P4_JPEG_HEADER_GRAY;
@@ -394,7 +398,7 @@ int tiku_p4_jpeg_encode(const tiku_p4_picture_t *in, unsigned sampling,
     jpg_bits(JPG_CONFIG,
              (3u << CFG_SPACE_POS) | (3u << CFG_SAMPLE_POS) | CFG_PIXEL_REV |
                  CFG_TAILER | CFG_FF_CHECK | CFG_QNR_12BIT,
-             ((src == 0u ? 0u : src == 1u ? 2u : 3u) << CFG_SPACE_POS) |
+             ((uint32_t)space[src] << CFG_SPACE_POS) |
                  ((comps == 3u ? sampling : 1u) << CFG_SAMPLE_POS) |
                  CFG_TAILER | CFG_FF_CHECK);
     TIKU_P4_REG_WRITE(JPG_PIC_SIZE, ((uint32_t)in->width << 16) | in->height);
@@ -650,11 +654,12 @@ static void put_dht_table(const jpg_hdr_t *x, unsigned k)
     }
 }
 
-int tiku_p4_jpeg_decode(const uint8_t *jpg, uint32_t len,
-                        const tiku_p4_picture_t *out)
+/** @brief The decoder; @p own 1 wants the file's own samples. */
+static int decode(const uint8_t *jpg, uint32_t len,
+                  const tiku_p4_picture_t *out, int own)
 {
     tiku_p4_jpeg_info_t info;
-    unsigned s, t, i, rgb565;
+    unsigned s, t, i, kind;
     uint32_t feed;
     int rc;
 
@@ -665,8 +670,12 @@ int tiku_p4_jpeg_decode(const uint8_t *jpg, uint32_t len,
     if (rc != TIKU_P4_JPEG_OK) {
         return rc;
     }
+    if (own && (info.components == 1u || info.sampling == TIKU_P4_JPEG_420)) {
+        return TIKU_P4_JPEG_ERR_FORMAT;
+    }
     if (out->width != info.pad_width || out->height != info.pad_height ||
-        (info.components == 1u) != (out->bpp == 1u)) {
+        (info.components == 1u) != (out->bpp == 1u) ||
+        (own && out->bpp != (info.sampling == TIKU_P4_JPEG_444 ? 3u : 2u))) {
         return TIKU_P4_JPEG_ERR_PARAM;
     }
     if (tiku_p4_dma2d_claim() != TIKU_P4_DMA2D_OK) {
@@ -694,11 +703,11 @@ int tiku_p4_jpeg_decode(const uint8_t *jpg, uint32_t len,
     }
 
     s = info.sampling;
-    rgb565 = out->bpp == 2u;
+    kind = own ? 2u : out->bpp == 2u ? 1u : 0u;
     feed = len - hdr_in.sos;
     desc_linear(&desc_tx, jpg + hdr_in.sos, feed, 1);
     desc_blocks(&desc_rx, out,
-                info.components == 1u ? DEC_HB_GRAY : dec_hb[s][rgb565],
+                info.components == 1u ? DEC_HB_GRAY : dec_hb[s][kind],
                 8u * (hdr_in.hv[0] & 15u));
     tiku_cpu_dcache_clean(jpg + hdr_in.sos, feed);
     tiku_cpu_dcache_invalidate(out->base, (uint32_t)out->width * out->height *
@@ -712,10 +721,10 @@ int tiku_p4_jpeg_decode(const uint8_t *jpg, uint32_t len,
                                     << 9), &desc_rx);
     }
     if (rc == TIKU_P4_DMA2D_OK) {
-        tiku_p4_dma2d_in0_csc(info.components == 1u
+        tiku_p4_dma2d_in0_csc(info.components == 1u || own
                                   ? TIKU_P4_DMA2D_CSC_NONE_IN
-                              : rgb565 ? TIKU_P4_DMA2D_CSC_YUV_RGB565
-                                       : TIKU_P4_DMA2D_CSC_YUV_RGB888,
+                              : kind == 1u ? TIKU_P4_DMA2D_CSC_YUV_RGB565
+                                           : TIKU_P4_DMA2D_CSC_YUV_RGB888,
                               jfif_to_rgb);
         tiku_p4_dma2d_out_start(CH_DEC_OUT);
         tiku_p4_dma2d_in_start(CH_DEC_IN);
@@ -733,6 +742,38 @@ int tiku_p4_jpeg_decode(const uint8_t *jpg, uint32_t len,
     }
     tiku_p4_dma2d_unclaim();
     return rc;
+}
+
+int tiku_p4_jpeg_encode(const tiku_p4_picture_t *in, unsigned sampling,
+                        unsigned quality, uint8_t *out, uint32_t cap,
+                        uint32_t *len)
+{
+    if (in == NULL) {
+        return TIKU_P4_JPEG_ERR_PARAM;
+    }
+    return encode(in, in->bpp == 3u ? 0u : in->bpp == 2u ? 1u : 2u, sampling,
+                  quality, out, cap, len);
+}
+
+int tiku_p4_jpeg_encode_yuv422(const tiku_p4_picture_t *in, unsigned quality,
+                               uint8_t *out, uint32_t cap, uint32_t *len)
+{
+    if (in == NULL || in->bpp != 2u) {
+        return TIKU_P4_JPEG_ERR_PARAM;
+    }
+    return encode(in, SRC_YUV422, TIKU_P4_JPEG_422, quality, out, cap, len);
+}
+
+int tiku_p4_jpeg_decode(const uint8_t *jpg, uint32_t len,
+                        const tiku_p4_picture_t *out)
+{
+    return decode(jpg, len, out, 0);
+}
+
+int tiku_p4_jpeg_decode_yuv(const uint8_t *jpg, uint32_t len,
+                            const tiku_p4_picture_t *out)
+{
+    return decode(jpg, len, out, 1);
 }
 
 uint32_t tiku_p4_jpeg_errors(void)

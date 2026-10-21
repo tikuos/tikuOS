@@ -230,17 +230,27 @@ are not published.
 The media blocks move pixels through the 2D-DMA (`tiku_dma2d_arch.c`),
 with the caches kept coherent as for the AHB DMA. `tiku_p4_dma2d_copy()`
 copies a block of 1- to 4-byte pixels between pictures in HP SRAM or PSRAM:
-a 640x480 RGB565 frame from PSRAM to PSRAM takes 9.1 ms. The PPA
+a 640x480 RGB565 frame from PSRAM to PSRAM takes 9.1 ms.
+`tiku_p4_dma2d_convert()` copies with the out channel's colour converter on
+the way: RGB888 to and from RGB565 (widening repeats a channel's low bits),
+RGB888 to and from YUV444 and YUV422 (BT.601 limited range, the engine's own
+matrices; YUV444 is V, U, Y in memory and YUV422 is U, Y, V, Y with U from a
+pair's first pixel and V from its second), and an R/B swap. The PPA
 (`tiku_ppa_arch.c`) fills, alpha-blends, and scales, turns and mirrors
 ARGB8888, RGB888 and RGB565 pictures; a turn is a counter-clockwise quarter,
 a mirror applies to the turned block, and scaling is bilinear in sixteenths.
-A VGA fill takes 2.5 ms, doubling 320x240 to 640x480 8.8 ms. The JPEG codec
-(`tiku_jpeg_arch.c`) encodes RGB888, RGB565 and grey at 4:4:4, 4:2:2 or
-4:2:0 into a JFIF with the standard tables, its headers written in software,
-and decodes baseline files of one or three components, restart intervals
-and motion JPEG without Huffman tables included, to RGB888, RGB565 or grey;
-in channel 0 turns the decoder's YCbCr into RGB with JFIF's full-range
-matrix. A VGA RGB565 frame encodes in 8 ms and decodes in 4.5 ms.
+A blend input may be a 1-byte picture of indices into a 256-entry ARGB8888
+table loaded with `tiku_p4_ppa_lut()`, and `tiku_p4_ppa_blend_keyed()`
+decides each pixel by colour keys first. A VGA fill takes 2.5 ms, doubling
+320x240 to 640x480 8.8 ms. The JPEG codec (`tiku_jpeg_arch.c`) encodes
+RGB888, RGB565 and grey at 4:4:4, 4:2:2 or 4:2:0, and YUV422 (U, Y, V, Y)
+at 4:2:2, into a JFIF with the standard tables, its headers written in
+software, and decodes baseline files of one or three components, restart
+intervals and motion JPEG without Huffman tables included, to RGB888,
+RGB565 or grey, or to the file's own full-range samples (V, U, Y, or U, Y,
+V, Y); in channel 0 turns the decoder's YCbCr into RGB with JFIF's
+full-range matrix. A VGA RGB565 frame encodes in 8 ms and
+decodes in 4.5 ms.
 `jpeg pattern <w> <h> [rgb888|rgb565|grey] [444|422|420] [quality] [turn
 <n>] [scale <n>]` draws a test card, turned or scaled on the PPA when asked,
 and encodes it; `jpeg dump` prints the file in base64 and `jpeg check`

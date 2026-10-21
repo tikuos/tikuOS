@@ -50,13 +50,44 @@
 int tiku_p4_ppa_fill(const tiku_p4_picture_t *out, uint16_t x, uint16_t y,
                      uint16_t w, uint16_t h, uint32_t argb);
 
+/** @brief The blend's inputs with a lookup table: the background, the
+ *         foreground. */
+#define TIKU_P4_PPA_BG 0u
+#define TIKU_P4_PPA_FG 1u
+
+/**
+ * @brief Give blend input @p input a 256-entry table of ARGB8888 colours
+ *        (0xAARRGGBB), or take it away with NULL.
+ *
+ * With a table, a 1-byte-per-pixel picture on that input is a picture of
+ * indices into it.  The tables sit in the PPA and stay until replaced.
+ *
+ * @return TIKU_P4_PPA_OK or TIKU_P4_PPA_ERR_PARAM
+ */
+int tiku_p4_ppa_lut(unsigned input, const uint32_t *table);
+
+/**
+ * @brief Colour keys for tiku_p4_ppa_blend_keyed(): a pixel whose R, G and
+ *        B each lie within its input's range (0xRRGGBB, low to high) is
+ *        keyed.  A keyed foreground gives the background; a keyed
+ *        background gives the background, or the foreground when
+ *        @p reverse; both keyed give @p miss; neither blends.  An empty
+ *        range (low above high) keys nothing.
+ */
+typedef struct {
+    uint32_t fg_low, fg_high;
+    uint32_t bg_low, bg_high;
+    uint32_t miss;
+    unsigned reverse;
+} tiku_p4_ppa_keys_t;
+
 /**
  * @brief Blend the @p w x @p h blocks of @p fg at (@p fx, @p fy) over @p bg
  *        at (@p bx, @p by) into @p out at (@p ox, @p oy).
  *
  * Alphas after @p bg_alpha and @p fg_alpha are applied, normalised to 1:
  * A = Ab + Af - Ab Af and C = (Cb Ab (1 - Af) + Cf Af) / A.  @p out may be
- * one of the inputs.
+ * one of the inputs.  A 1-byte input needs its table (tiku_p4_ppa_lut()).
  *
  * @return TIKU_P4_PPA_OK, or a negative TIKU_P4_PPA_ERR_*
  */
@@ -65,6 +96,16 @@ int tiku_p4_ppa_blend(const tiku_p4_picture_t *out, uint16_t ox, uint16_t oy,
                       const tiku_p4_picture_t *fg, uint16_t fx, uint16_t fy,
                       uint16_t w, uint16_t h, uint16_t bg_alpha,
                       uint16_t fg_alpha);
+
+/** @brief tiku_p4_ppa_blend() with colour keys @p keys deciding each pixel
+ *         first. */
+int tiku_p4_ppa_blend_keyed(const tiku_p4_picture_t *out, uint16_t ox,
+                            uint16_t oy, const tiku_p4_picture_t *bg,
+                            uint16_t bx, uint16_t by,
+                            const tiku_p4_picture_t *fg, uint16_t fx,
+                            uint16_t fy, uint16_t w, uint16_t h,
+                            uint16_t bg_alpha, uint16_t fg_alpha,
+                            const tiku_p4_ppa_keys_t *keys);
 
 /**
  * @brief The block tiku_p4_ppa_srm() writes for a @p w x @p h input: each
