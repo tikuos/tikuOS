@@ -9,12 +9,13 @@
  *
  * CPU0 zeroes .bss, parks the other cores outside the diagnostic and runs
  * main; other harts wait in WFI.  The trap entry checks the interrupted SP,
- * saves the FPU when the context dirtied it, then dispatches or faults.
+ * saves the FPU and PIE state a context dirtied, then dispatches or faults.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_irq_arch.h"
 #include "tiku_fault_arch.h"
+#include "pie/tiku_pie.inc"
 
     .section .text.entry,"ax",@progbits
     .global tiku_esp32p4_reset_handler
@@ -58,6 +59,9 @@ tiku_esp32p4_reset_handler:
     csrc mstatus, t0
     li t0, TIKU_P4_MSTATUS_FS_INITIAL
     csrs mstatus, t0
+    /* The PIE on, its state initial.  Threads start the same way. */
+    li t0, 1
+    csrw TIKU_P4_PIE_STATE_CSR, t0
 #if defined(TIKU_P4_KERNEL_TEST) || defined(TIKU_P4_FIRMWARE)
     call tiku_esp32p4_boot_park_cores
     call tiku_p4_cache_boot_init
@@ -146,6 +150,41 @@ tiku_esp32p4_diagnostic_trap:
     li t0, 1
     sw t0, TIKU_P4_FRAME_FPU(sp)
 4:
+    /* The PIE's state CSR is kept for the write-back; a context that wrote
+     * the vector unit (state dirty) keeps q0-q7, the accumulators, ua_state,
+     * xacc, sar, sar_bytes and fft_bit_width in the frame too.  The 128-bit
+     * stores need a base register from x8-x15 or x24-x31: t3, saved above. */
+    sw zero, TIKU_P4_FRAME_PIE(sp)
+    csrr t0, TIKU_P4_PIE_STATE_CSR
+    sw t0, TIKU_P4_FRAME_PIE_STATE(sp)
+    andi t0, t0, 3
+    addi t0, t0, -3
+    bnez t0, 7f
+    addi t3, sp, TIKU_P4_FRAME_PIE_REGS
+    esp_vst_128_ip q0, t3, 16
+    esp_vst_128_ip q1, t3, 16
+    esp_vst_128_ip q2, t3, 16
+    esp_vst_128_ip q3, t3, 16
+    esp_vst_128_ip q4, t3, 16
+    esp_vst_128_ip q5, t3, 16
+    esp_vst_128_ip q6, t3, 16
+    esp_vst_128_ip q7, t3, 16
+    esp_st_qacc_l_l_128_ip t3, 16
+    esp_st_qacc_l_h_128_ip t3, 16
+    esp_st_qacc_h_l_128_ip t3, 16
+    esp_st_qacc_h_h_128_ip t3, 16
+    esp_st_ua_state_ip t3, 16
+    esp_st_u_xacc_ip t3, 0
+    esp_movx_r_sar_bytes a1
+    slli a2, a1, 4
+    esp_movx_r_fft_bit_width a1
+    or a2, a2, a1
+    sb a2, 5(t3)
+    esp_movx_r_sar a1
+    sb a1, 6(t3)
+    li t0, 1
+    sw t0, TIKU_P4_FRAME_PIE(sp)
+7:
     mv a0, sp
     .option push
     .option norelax
@@ -154,6 +193,35 @@ tiku_esp32p4_diagnostic_trap:
     .option pop
     call tiku_p4_trap_dispatch
     mv sp, a0
+    /* The PIE registers come back for a context that had them saved; its
+     * state CSR comes back for every context, so one that never wrote the
+     * vector unit stays initial and the next entry skips the save. */
+    lw t0, TIKU_P4_FRAME_PIE(sp)
+    beqz t0, 8f
+    addi t3, sp, TIKU_P4_FRAME_PIE_REGS
+    esp_vld_128_ip q0, t3, 16
+    esp_vld_128_ip q1, t3, 16
+    esp_vld_128_ip q2, t3, 16
+    esp_vld_128_ip q3, t3, 16
+    esp_vld_128_ip q4, t3, 16
+    esp_vld_128_ip q5, t3, 16
+    esp_vld_128_ip q6, t3, 16
+    esp_vld_128_ip q7, t3, 16
+    esp_ld_qacc_l_l_128_ip t3, 16
+    esp_ld_qacc_l_h_128_ip t3, 16
+    esp_ld_qacc_h_l_128_ip t3, 16
+    esp_ld_qacc_h_h_128_ip t3, 16
+    esp_ld_ua_state_ip t3, 16
+    esp_ld_xacc_ip t3, 0
+    lbu a1, 5(t3)
+    esp_movx_w_fft_bit_width a1
+    srli a1, a1, 4
+    esp_movx_w_sar_bytes a1
+    lbu a1, 6(t3)
+    esp_movx_w_sar a1
+8:
+    lw t0, TIKU_P4_FRAME_PIE_STATE(sp)
+    csrw TIKU_P4_PIE_STATE_CSR, t0
     /* A context with no saved FPU state never set fcsr: the interrupt may
      * have, so it goes back to its reset value.  Either write marks the state
      * dirty; the mstatus restore below puts the context's own FS back. */

@@ -230,10 +230,36 @@ The HP cores' single-precision FPU runs every `float` operation: 100k fused
 multiply-adds take 1.9 ms. `tiku_crt_early.S` turns it on at boot and saves
 f0-f31 and `fcsr` in the interrupt frame of a context that wrote them, so
 workers and interrupts each keep their own values and rounding mode; the LP
-core has no FPU and its payload stays integer. The PIE vector extension
-(Espressif's SIMD, CSR 0x7F2, 216 bytes of state) is off: its instructions
-are not in the upstream toolchain this port builds with, and its encodings
-are not published.
+core has no FPU and its payload stays integer.
+
+The PIE vector unit (Espressif's SIMD: eight 128-bit registers q0-q7, a
+40-bit accumulator `xacc` and 216 bytes of state behind CSR 0x7F2) is on.
+The upstream assembler does not know its instructions, so
+`arch/esp32p4/pie/tiku_pie.inc` carries each one as a macro
+(`esp_vld_128_ip q0, a0, 16` for `esp.vld.128.ip`) that checks its
+operands and expands to the instruction word. `tools/esp32p4_pie_encode.py`
+generated that file and `tools/esp32p4_pie_table.json` once from
+Espressif's assembler (`riscv32-esp-elf-as-xespv2p1`, the instruction-set
+version the v1.3 silicon executes; the `xespv2p2` words differ), solving
+every operand's bit field from assembled permutations; the host test
+re-encodes the table's oracle samples, so the tree needs that assembler
+only to regenerate the two files:
+
+```bash
+python3 tools/esp32p4_pie_encode.py \
+    --as <riscv32-esp-elf>/bin/riscv32-esp-elf-as-xespv2p1 \
+    --objdump <riscv32-esp-elf>/bin/riscv32-esp-elf-objdump-xespv2p1 \
+    --inventory <esp-idf>/components/esp_gdbstub/test_gdbstub_host/rv_decode/xesppie.S
+```
+
+`tiku_pie_arch.S` runs int16 and int8 dot products, an int32 add and an
+int8 matrix-vector product on the unit: 4096 int16 products take 9 µs
+against 148 µs in C. The trap entry saves q0-q7, the accumulators and the
+shift state behind a flag when the interrupted context had written them
+(CSR 0x7F2 reads dirty), as it does for the FPU, so workers and interrupts
+each keep their own vector state. On this silicon `esp.vadd.u32` and
+`esp.vadd.s32` saturate; the hardware-loop forms (`esp.lp.*`) are not in
+the macro file.
 
 The media blocks move pixels through the 2D-DMA (`tiku_dma2d_arch.c`),
 with the caches kept coherent as for the AHB DMA. `tiku_p4_dma2d_copy()`
@@ -435,7 +461,7 @@ reserves every pad. The FireBeetle 2 drives its free pads (above).
 Ethernet, microSD, USB host, HDMI, audio and camera drivers are not provided
 by this profile. Their wiring and attached accessories require confirmation
 before external pins or power rails are driven. Wi-Fi/BLE are not integrated
-P4 capabilities. CPU1 jobs and the PIE vector unit are not enabled. Do not
+P4 capabilities. CPU1 jobs are not enabled. Do not
 interpret this as complete board-peripheral support.
 
 ## Storage-free diagnostic
@@ -595,13 +621,16 @@ CPU0 masks interrupts, establishes its stack, global pointer and fixed trap
 scratch area, installs a non-vectored CLIC trap handler, and clears BSS.
 Startup disables inherited
 boot watchdogs and holds CPU1 and the LP core in reset with their clocks
-disabled. Vector state is disabled; the FPU is on with its state marked
-initial and `fcsr` at 0. The 288-byte interrupt frame holds the integer
-registers and the machine return state, and f0-f31 with `fcsr` behind a flag
-when the interrupted context had written them (`mstatus.FS` dirty); the exit
-restores them before the integer registers, or resets `fcsr` for a context
-that had none, since the interrupt may have changed it. Worker frames start
-with the FPU in the same initial state.
+disabled. The FPU and the PIE vector unit are on with their state marked
+initial (`mstatus.FS`, CSR 0x7F2) and `fcsr` at 0. The 512-byte interrupt
+frame holds the integer registers and the machine return state, f0-f31 with
+`fcsr` behind one flag when the interrupted context had written them
+(`mstatus.FS` dirty), and q0-q7, the four `qacc` quarters, `ua_state`,
+`xacc`, `sar`, `sar_bytes` and `fft_bit_width` behind another when CSR
+0x7F2 reads dirty; the exit restores them before the integer registers,
+writes CSR 0x7F2 back as it was, and resets `fcsr` for a context that had
+no FPU state, since the interrupt may have changed it. Worker frames start
+with both units in the same initial state.
 
 The CPU first selects the board's 40 MHz crystal and verifies the clock
 dividers. Native regulator initialization reads the calibrated HP/LP bias
@@ -814,9 +843,9 @@ The test programs are `TikuBench/tests/esp32p4/test_kernel.c` and
 timer cancellation, nested atomic sections, critical IRQ masks, worker
 start/join/reuse, register preservation, preemption, kernel priority, cycle
 budgets, queue waits/timeouts, stack canaries, WFI wakeup and errno isolation
-between the kernel, workers and interrupts. Vector state is disabled; the
-FPU is on, and `fpu-p4` and the threads category check its state across
-interrupts and worker switches.
+between the kernel, workers and interrupts. The FPU and the PIE vector
+unit are on; `fpu-p4`, `pie-p4` and the threads category check their state
+across interrupts and worker switches.
 Memory checks cover both SRAM spans, full-range address-dependent patterns,
 alignment, arenas, pools, workspace aliases, non-LIFO release, coalescing,
 stale handles, metadata exhaustion, software stack guards, secure wiping and

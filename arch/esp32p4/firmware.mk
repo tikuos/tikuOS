@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Native CPU0 firmware uses the portable core, shell and BASIC source lists.
-ASM_SRCS += arch/esp32p4/tiku_crt_early.S
+ASM_SRCS += arch/esp32p4/tiku_crt_early.S arch/esp32p4/tiku_pie_arch.S
 SRCS += $(addprefix arch/esp32p4/,tiku_boot_arch.c tiku_trap_arch.c \
     tiku_irq_arch.c tiku_systimer_arch.c tiku_alarm_arch.c tiku_timer_arch.c \
     tiku_cpu_arch.c tiku_cpu_firmware.c tiku_clock_arch.c tiku_clock_pll.c \
