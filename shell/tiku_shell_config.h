@@ -270,6 +270,14 @@
 #ifndef TIKU_SHELL_CMD_AXONSPROBE
 #define TIKU_SHELL_CMD_AXONSPROBE 0 /**< axonsprobe - Axon NPU probe */
 #endif
+#ifndef TIKU_SHELL_CMD_JPEG
+/* The ESP32-P4 media blocks, on the board that builds them. */
+#if defined(TIKU_BOARD_FIREBEETLE2_ESP32P4)
+#define TIKU_SHELL_CMD_JPEG   1  /**< jpeg   - JPEG codec and PPA test card */
+#else
+#define TIKU_SHELL_CMD_JPEG   0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_USBMSC
 #if defined(TIKU_USBHS_MSC)
 #define TIKU_SHELL_CMD_USBMSC 1  /**< usbmsc - present the board as a disk */

@@ -218,15 +218,24 @@ DMA past the L1 cache, so each buffer is cleaned or invalidated around it.
 <lba>` and `regs` print the counters, a block and the PHY and core
 registers. The shell stays on the USB Serial/JTAG Type-C.
 
-The 2D-DMA (`tiku_dma2d_arch.c`) copies a block of 1- to 4-byte pixels
-between pictures in HP SRAM or PSRAM for `tiku_p4_dma2d_copy()`, with the
-caches kept coherent as for the AHB DMA: a 640x480 RGB565 frame from PSRAM
-to PSRAM takes 9.1 ms.
-The PPA (`tiku_ppa_arch.c`) fills, alpha-blends, and scales, turns and
-mirrors ARGB8888, RGB888 and RGB565 pictures through it; a turn is a
-counter-clockwise quarter, a mirror applies to the turned block, and scaling
-is bilinear in sixteenths. A VGA fill takes 2.5 ms, doubling 320x240 to
-640x480 8.8 ms.
+The media blocks move pixels through the 2D-DMA (`tiku_dma2d_arch.c`),
+with the caches kept coherent as for the AHB DMA. `tiku_p4_dma2d_copy()`
+copies a block of 1- to 4-byte pixels between pictures in HP SRAM or PSRAM:
+a 640x480 RGB565 frame from PSRAM to PSRAM takes 9.1 ms. The PPA
+(`tiku_ppa_arch.c`) fills, alpha-blends, and scales, turns and mirrors
+ARGB8888, RGB888 and RGB565 pictures; a turn is a counter-clockwise quarter,
+a mirror applies to the turned block, and scaling is bilinear in sixteenths.
+A VGA fill takes 2.5 ms, doubling 320x240 to 640x480 8.8 ms. The JPEG codec
+(`tiku_jpeg_arch.c`) encodes RGB888, RGB565 and grey at 4:4:4, 4:2:2 or
+4:2:0 into a JFIF with the standard tables, its headers written in software,
+and decodes baseline files of one or three components, restart intervals
+and motion JPEG without Huffman tables included, to RGB888, RGB565 or grey;
+in channel 0 turns the decoder's YCbCr into RGB with JFIF's full-range
+matrix. A VGA RGB565 frame encodes in 8 ms and decodes in 4.5 ms.
+`jpeg pattern <w> <h> [rgb888|rgb565|grey] [444|422|420] [quality] [turn
+<n>] [scale <n>]` draws a test card, turned or scaled on the PPA when asked,
+and encodes it; `jpeg dump` prints the file in base64 and `jpeg check`
+decodes it back.
 
 ### Memory and configuration
 

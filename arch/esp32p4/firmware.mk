@@ -22,6 +22,10 @@ SRCS += arch/esp32p4/tiku_adc_arch.c arch/esp32p4/tiku_spi_arch.c
 SRCS += arch/esp32p4/tiku_onewire_arch.c arch/esp32p4/tiku_crypto_arch.c
 SRCS += arch/esp32p4/tiku_dma_arch.c arch/esp32p4/tiku_pwm_arch.c
 SRCS += arch/esp32p4/tiku_dma2d_arch.c arch/esp32p4/tiku_ppa_arch.c
+SRCS += arch/esp32p4/tiku_jpeg_arch.c
+ifeq ($(TIKU_SHELL_ENABLE),1)
+SRCS += shell/commands/tiku_shell_cmd_jpeg.c
+endif
 endif
 SRCS += arch/esp32p4/tiku_trng_arch.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_psram_p4.c
