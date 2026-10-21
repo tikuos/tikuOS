@@ -218,6 +218,11 @@ DMA past the L1 cache, so each buffer is cleaned or invalidated around it.
 <lba>` and `regs` print the counters, a block and the PHY and core
 registers. The shell stays on the USB Serial/JTAG Type-C.
 
+The 2D-DMA (`tiku_dma2d_arch.c`) copies a block of 1- to 4-byte pixels
+between pictures in HP SRAM or PSRAM for `tiku_p4_dma2d_copy()`, with the
+caches kept coherent as for the AHB DMA: a 640x480 RGB565 frame from PSRAM
+to PSRAM takes 9.1 ms.
+
 ### Memory and configuration
 
 | Resource | Firmware use |
