@@ -25,6 +25,16 @@
 extern uint8_t __tiku_nvmfs_base;   /* region base (memory-mapped MRAM) */
 extern uint8_t __tiku_nvmfs_size;   /* absolute symbol: address = size */
 
+/* The region's bounds, the MRAM a byte address names and the bootrom
+ * programmer; a host model defines these to its own. */
+#ifndef TIKU_NVMFS_BASE
+#define TIKU_NVMFS_BASE         (&__tiku_nvmfs_base)
+#define TIKU_NVMFS_SIZE         ((size_t)(uintptr_t)&__tiku_nvmfs_size)
+#endif
+#ifndef TIKU_AMBIQ_MRAM_PTR
+#define TIKU_AMBIQ_MRAM_PTR(addr) ((const void *)(addr))
+#endif
+
 #define AMBIQ_MRAM_BASE         0x00400000UL  /* AM_HAL_MRAM_ADDR origin */
 #define AMBIQ_MRAM_PROGRAM_KEY  0x12344321UL
 #define AMBIQ_MRAM_OP_PROGRAM   1U
@@ -33,13 +43,18 @@ extern uint8_t __tiku_nvmfs_size;   /* absolute symbol: address = size */
  * the +1 sets the Thumb bit of the entry address. */
 typedef int (*nv_program_main2_t)(uint32_t, uint32_t, uint32_t,
                                   uint32_t, uint32_t);
+#ifndef NV_PROGRAM_MAIN2
 #define NV_PROGRAM_MAIN2  ((nv_program_main2_t)(0x0200ff20UL + 1UL))
+#endif
 
 /* 16-byte-aligned read-modify-program staging window.  It sits in SSRAM,
  * which the M55 caches, so it is cleaned before each program. */
 #define NVMR_STAGE_BYTES  256U
+#ifndef TIKU_AMBIQ_NVMR_SECTION
+#define TIKU_AMBIQ_NVMR_SECTION __attribute__((section(".ssram")))
+#endif
 static uint32_t nvmr_stage[NVMR_STAGE_BYTES / 4U]
-    __attribute__((section(".ssram"), aligned(16)));
+    TIKU_AMBIQ_NVMR_SECTION __attribute__((aligned(16)));
 
 /** @brief Program one staged 16-byte-aligned chunk; returns bootrom status. */
 static int mram_program_span(uintptr_t dst_addr, const uint32_t *src16,
@@ -92,7 +107,7 @@ int tiku_nvm_mram_program(uintptr_t dst, const void *src, size_t len)
             chunk = NVMR_STAGE_BYTES;
         }
         /* Stage the existing MRAM bytes, then overlay the new ones. */
-        memcpy(nvmr_stage, (const void *)span, chunk);
+        memcpy(nvmr_stage, TIKU_AMBIQ_MRAM_PTR(span), chunk);
 
         ov_start = (dst > span) ? dst : span;
         ov_end   = (dst + len < span + chunk) ? (dst + len) : (span + chunk);
@@ -123,8 +138,8 @@ static tiku_nvm_backend_t the_region;
 const tiku_nvm_backend_t *tiku_nvm_backend_get(void)
 {
     if (the_region.write == NULL) {
-        the_region.base  = &__tiku_nvmfs_base;
-        the_region.size  = (size_t)(uintptr_t)&__tiku_nvmfs_size;
+        the_region.base  = TIKU_NVMFS_BASE;
+        the_region.size  = TIKU_NVMFS_SIZE;
         the_region.write = region_write;
         the_region.erase = NULL;
         the_region.ctx   = NULL;

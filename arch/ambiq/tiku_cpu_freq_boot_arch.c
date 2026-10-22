@@ -112,12 +112,18 @@ void tiku_cpu_boot_ambiq_init(void) {
 #define AMBIQ_INFO1_PGM_INFO_O   0x930UL
 #define AMBIQ_INFO1_PWRSTATE_O   0x970UL       /* POWERSTATE0..19 (20 words)  */
 
+/* The INFO1 word at a byte address; a host model defines this to its own
+ * copy. */
+#ifndef TIKU_AMBIQ_INFO1_WORD
+#define TIKU_AMBIQ_INFO1_WORD(addr) (*(volatile const uint32_t *)(addr))
+#endif
+
 /** @brief Read one INFO1 word by OTP offset from the copy @p in_otp names. */
 static uint32_t ambiq_info1_word(uint32_t otp_off, uint8_t in_otp) {
     uint32_t addr = in_otp
         ? (uint32_t)(AMBIQ_INFO1_OTP_BASE + otp_off)
         : (uint32_t)(AMBIQ_INFO1_MRAM_BASE + otp_off + AMBIQ_INFO1_MRAM_SHIFT);
-    return *(volatile const uint32_t *)addr;
+    return TIKU_AMBIQ_INFO1_WORD(addr);
 }
 
 /*---------------------------------------------------------------------------*/

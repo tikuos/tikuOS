@@ -29,6 +29,16 @@
 extern uint8_t __tiku_nvmfs_base;   /* region base (memory-mapped MRAM)      */
 extern uint8_t __tiku_nvmfs_size;   /* absolute symbol: its address is size  */
 
+/* The region's bounds, the MRAM a byte address names and the bootrom
+ * programmer; a host model defines these to its own. */
+#ifndef TIKU_NVMFS_BASE
+#define TIKU_NVMFS_BASE         (&__tiku_nvmfs_base)
+#define TIKU_NVMFS_SIZE         ((size_t)(uintptr_t)&__tiku_nvmfs_size)
+#endif
+#ifndef TIKU_AMBIQ_MRAM_PTR
+#define TIKU_AMBIQ_MRAM_PTR(addr) ((const void *)(addr))
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* BOOTROM MRAM PROGRAMMER (as in tiku_mem_apollo4l.c)                       */
 /*---------------------------------------------------------------------------*/
@@ -41,7 +51,9 @@ extern uint8_t __tiku_nvmfs_size;   /* absolute symbol: its address is size  */
  * value already carries the Thumb bit (bit 0). */
 typedef int (*nv_program_main2_t)(uint32_t, uint32_t, uint32_t,
                                   uint32_t, uint32_t);
+#ifndef NV_PROGRAM_MAIN2
 #define NV_PROGRAM_MAIN2  ((nv_program_main2_t)0x0800006DUL)
+#endif
 
 /* 16-byte-aligned read-modify-program staging window in TCM (.bss). 256 B
  * bounds the per-program size; tiku_nvm_mram_program() chunks larger writes
@@ -106,7 +118,7 @@ int tiku_nvm_mram_program(uintptr_t dst, const void *src, size_t len)
 
         /* Preserve the existing MRAM bytes in this window, then overlay the
          * portion of [dst, dst+len) that falls inside it. */
-        memcpy(nvmr_stage, (const void *)span, chunk);
+        memcpy(nvmr_stage, TIKU_AMBIQ_MRAM_PTR(span), chunk);
 
         ov_start = (dst > span) ? dst : span;
         ov_end   = (dst + len < span + chunk) ? (dst + len) : (span + chunk);
@@ -156,8 +168,8 @@ static tiku_nvm_backend_t the_region;
 const tiku_nvm_backend_t *tiku_nvm_backend_get(void)
 {
     if (the_region.write == NULL) {
-        the_region.base  = &__tiku_nvmfs_base;
-        the_region.size  = (size_t)(uintptr_t)&__tiku_nvmfs_size;
+        the_region.base  = TIKU_NVMFS_BASE;
+        the_region.size  = TIKU_NVMFS_SIZE;
         the_region.write = region_write;
         the_region.erase = NULL;        /* MRAM is byte-addressable, no erase */
         the_region.ctx   = NULL;

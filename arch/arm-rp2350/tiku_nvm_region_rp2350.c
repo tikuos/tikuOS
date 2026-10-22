@@ -33,7 +33,9 @@ extern uint8_t __tiku_nvmfs_size;   /* absolute symbol: address is the size */
 extern int tiku_rp2350_flash_commit_sector_status(uint32_t flash_offset,
                                             const uint8_t *src, size_t len);
 
+#ifndef RP2350_XIP_BASE
 #define RP2350_XIP_BASE   0x10000000UL
+#endif
 #define RP2350_SECTOR     0x1000U      /* 4 KB flash erase granule */
 
 /* One sector of SRAM for read-modify-erase-program staging. */

@@ -853,7 +853,9 @@ void tiku_ra8p1_usbhs_ep0_stats(uint32_t *setup, uint32_t *stall,
  */
 /* The staging disk is the 64 MB SDRAM window, where a model sits before it
  * is written to flash. */
+#ifndef MSC_DISK_BASE
 #define MSC_DISK_BASE   0x68000000UL
+#endif
 #define MSC_DISK_BYTES  (64UL * 1024UL * 1024UL)
 
 static tiku_usbd_msc_t msc_medium = {

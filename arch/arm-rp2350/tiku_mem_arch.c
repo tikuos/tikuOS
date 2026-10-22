@@ -67,6 +67,26 @@ typedef void (*rom_flash_erase_fn_t)(uint32_t flash_offset, size_t count,
 typedef void (*rom_flash_program_fn_t)(uint32_t flash_offset,
                                        const uint8_t *data, size_t count);
 
+/* The boot ROM's table-lookup function, whose 16-bit address sits at ROM
+ * address 0x16; the PRIMASK save and mask around the ROM's flash calls,
+ * which suspend XIP; and the XIP window the result is read back through.
+ * A host model defines these to its own. */
+#ifndef TIKU_RP2350_ROM_LOOKUP
+#define TIKU_RP2350_ROM_LOOKUP() \
+    ((rom_lookup_fn_t)(uintptr_t)*(volatile uint16_t *)(uintptr_t)0x16U)
+#endif
+#ifndef TIKU_RP2350_FLASH_IRQ_SAVE
+#define TIKU_RP2350_FLASH_IRQ_SAVE(state) do {                  \
+        __asm__ volatile ("mrs %0, primask" : "=r"(state));      \
+        __asm__ volatile ("cpsid i" ::: "memory");               \
+    } while (0)
+#define TIKU_RP2350_FLASH_IRQ_RESTORE(state) \
+    __asm__ volatile ("msr primask, %0" : : "r"(state) : "memory")
+#endif
+#ifndef RP2350_XIP_BASE
+#define RP2350_XIP_BASE 0x10000000UL
+#endif
+
 /**
  * @brief Resolved boot-ROM flash function pointers and resolution flag.
  *
@@ -105,15 +125,13 @@ static void *rom_lookup_any(rom_lookup_fn_t lookup, uint32_t code) {
  * lookup function every pointer stays NULL, and flash commits fail.
  */
 static void rom_resolve_once(void) {
-    uint16_t lookup_addr;
     rom_lookup_fn_t lookup;
 
     if (g_rom_resolved) {
         return;
     }
 
-    lookup_addr = *(volatile uint16_t *)(uintptr_t)0x16U;
-    lookup = (rom_lookup_fn_t)(uintptr_t)lookup_addr;
+    lookup = TIKU_RP2350_ROM_LOOKUP();
     if (lookup == NULL) {
         return;     /* pointers stay NULL: flash commits return -1 */
     }
@@ -227,8 +245,7 @@ static int flash_commit_sector(uint32_t flash_offset,
     }
 
     /* Save and mask PRIMASK; restore at the end. */
-    __asm__ volatile ("mrs %0, primask" : "=r"(primask));
-    __asm__ volatile ("cpsid i" ::: "memory");
+    TIKU_RP2350_FLASH_IRQ_SAVE(primask);
 
     g_rom_connect_flash();
     g_rom_flash_exit_xip();
@@ -239,9 +256,9 @@ static int flash_commit_sector(uint32_t flash_offset,
     g_rom_flash_enter_xip();
 
     /* Restore PRIMASK. */
-    __asm__ volatile ("msr primask, %0" : : "r"(primask) : "memory");
+    TIKU_RP2350_FLASH_IRQ_RESTORE(primask);
     /* ROM calls have no result; verify through XIP after cache flush/remap. */
-    return memcmp((const void *)(uintptr_t)(0x10000000UL + flash_offset),
+    return memcmp((const void *)(uintptr_t)(RP2350_XIP_BASE + flash_offset),
                    src, len) == 0 ? 0 : -1;
 }
 
@@ -295,8 +312,7 @@ void tiku_rp2350_flash_program(uint32_t flash_offset,
     if (!rom_flash_ready()) {
         return;
     }
-    __asm__ volatile ("mrs %0, primask" : "=r"(primask));
-    __asm__ volatile ("cpsid i" ::: "memory");
+    TIKU_RP2350_FLASH_IRQ_SAVE(primask);
 
     g_rom_connect_flash();
     g_rom_flash_exit_xip();
@@ -304,7 +320,7 @@ void tiku_rp2350_flash_program(uint32_t flash_offset,
     g_rom_flash_flush_cache();
     g_rom_flash_enter_xip();
 
-    __asm__ volatile ("msr primask, %0" : : "r"(primask) : "memory");
+    TIKU_RP2350_FLASH_IRQ_RESTORE(primask);
 }
 
 /*---------------------------------------------------------------------------*/

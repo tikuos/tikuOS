@@ -58,9 +58,16 @@ typedef struct {
     volatile uint8_t  IPR[496];/**< 0xE000E400 Interrupt priority (byte).   */
 } tiku_nordic_nvic_t;
 
+/* A host model defines these first to reach its own memory. */
+#ifndef TIKU_SCB
 #define TIKU_SCB      ((tiku_nordic_scb_t *)0xE000ED00UL)     /**< SCB      */
+#endif
+#ifndef TIKU_SYSTICK
 #define TIKU_SYSTICK  ((tiku_nordic_systick_t *)0xE000E010UL) /**< SysTick  */
+#endif
+#ifndef TIKU_NVIC
 #define TIKU_NVIC     ((tiku_nordic_nvic_t *)0xE000E100UL)    /**< NVIC     */
+#endif
 
 /** nRF54L implements 3 NVIC priority bits (top bits of the 8-bit field). */
 #define TIKU_NORDIC_NVIC_PRIO_BITS   3u

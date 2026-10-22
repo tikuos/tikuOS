@@ -24,8 +24,11 @@
 #define TIKU_RA8P1_SDRAM_ERR_INIT   -1   /**< a sequencer timed out       */
 #define TIKU_RA8P1_SDRAM_ERR_CLOCK  -2   /**< BCLK out of range, SDCLK off */
 
-/** @brief Base and size of the mapped window. */
+/** @brief Base and size of the mapped window; a host model may define the
+ *         base first. */
+#ifndef TIKU_RA8P1_SDRAM_ADDR
 #define TIKU_RA8P1_SDRAM_ADDR   0x68000000UL
+#endif
 #define TIKU_RA8P1_SDRAM_BYTES  (64UL * 1024UL * 1024UL)
 
 /**

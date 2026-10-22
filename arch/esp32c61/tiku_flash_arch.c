@@ -40,7 +40,7 @@ static uint32_t flash_stage[STAGE_WORDS];
 static uint32_t flash_piece[PIECE_BYTES / 4U];
 
 /** @brief The window address of flash offset @p addr. */
-static uint32_t window(uint32_t addr) {
+static uintptr_t window(uint32_t addr) {
     return TIKU_FLASH_MMAP_BASE + addr;
 }
 

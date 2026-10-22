@@ -265,6 +265,10 @@ int tiku_ra8p1_sdram_attach(void)
 #define SD_DWT_CYCCNT   0xE0001004UL
 #define SD_DWT_CTRL     0xE0001000UL
 #define SD_DEMCR        0xE000EDFCUL
+/* The cycle count; a host model defines a counter of its own. */
+#ifndef SD_CYCLES
+#define SD_CYCLES()     (*(volatile uint32_t *)SD_DWT_CYCCNT)
+#endif
 
 /** @brief Staging buffer for the copy legs; SRAM side of the transfer. */
 static uint32_t sd_bench_src[1024];
@@ -287,7 +291,6 @@ static void sd_report(const char *name, uint32_t bytes, uint32_t cycles,
 void tiku_ra8p1_sdram_bench_run(void)
 {
     volatile uint32_t *sd = (volatile uint32_t *)TIKU_RA8P1_SDRAM_ADDR;
-    volatile uint32_t *cyc = (volatile uint32_t *)SD_DWT_CYCCNT;
     uint32_t words = SD_BENCH_BYTES / 4UL;
     uint32_t cpu_hz = (uint32_t)tiku_cpu_ra8p1_clock_get_hz();
     uint32_t t0, i, sum;
@@ -309,9 +312,9 @@ void tiku_ra8p1_sdram_bench_run(void)
     /* The bench stops unless the DWT cycle counter advances. */
     TIKU_REG32(SD_DEMCR) |= (1UL << 24);            /* TRCENA */
     TIKU_REG32(SD_DWT_CTRL) |= 1UL;                 /* CYCCNTENA */
-    t0 = *cyc;
+    t0 = SD_CYCLES();
     __asm__ volatile ("nop; nop; nop" ::: "memory");
-    if (*cyc == t0) {
+    if (SD_CYCLES() == t0) {
         SHELL_PRINTF("sdram: DWT cycle counter is not running -- refusing"
                      " to report timings\n");
         return;
@@ -322,37 +325,39 @@ void tiku_ra8p1_sdram_bench_run(void)
                  (unsigned long)tiku_cpu_ra8p1_bclk_get_hz(),
                  (unsigned long)cpu_hz);
 
-    t0 = *cyc;
+    t0 = SD_CYCLES();
     for (i = 0; i < words; i++) { sd[i] = i; }
-    sd_report("seq-write-32", SD_BENCH_BYTES, *cyc - t0, cpu_hz);
+    sd_report("seq-write-32", SD_BENCH_BYTES, SD_CYCLES() - t0, cpu_hz);
 
-    t0 = *cyc;
+    t0 = SD_CYCLES();
     sum = 0U;
     for (i = 0; i < words; i++) { sum += sd[i]; }
-    sd_report("seq-read-32", SD_BENCH_BYTES, *cyc - t0, cpu_hz);
+    sd_report("seq-read-32", SD_BENCH_BYTES, SD_CYCLES() - t0, cpu_hz);
 
     /* Strided by a 32-byte cache line: every access touches a new line. */
-    t0 = *cyc;
+    t0 = SD_CYCLES();
     for (i = 0; i < words; i += 8u) { sum += sd[i]; }
-    sd_report("read-stride-32B", SD_BENCH_BYTES / 8UL, *cyc - t0, cpu_hz);
+    sd_report("read-stride-32B", SD_BENCH_BYTES / 8UL, SD_CYCLES() - t0,
+              cpu_hz);
 
     /* 4 KB apart: a new SDRAM row on every access. */
-    t0 = *cyc;
+    t0 = SD_CYCLES();
     for (i = 0; i < words; i += 1024u) { sum += sd[i]; }
-    sd_report("read-stride-4KB", SD_BENCH_BYTES / 1024UL, *cyc - t0, cpu_hz);
+    sd_report("read-stride-4KB", SD_BENCH_BYTES / 1024UL, SD_CYCLES() - t0,
+              cpu_hz);
 
     for (i = 0; i < 1024u; i++) { sd_bench_src[i] = i; }
-    t0 = *cyc;
+    t0 = SD_CYCLES();
     for (i = 0; i < words; i += 1024u) {
         memcpy((void *)&sd[i], sd_bench_src, sizeof(sd_bench_src));
     }
-    sd_report("memcpy-sram->sd", SD_BENCH_BYTES, *cyc - t0, cpu_hz);
+    sd_report("memcpy-sram->sd", SD_BENCH_BYTES, SD_CYCLES() - t0, cpu_hz);
 
-    t0 = *cyc;
+    t0 = SD_CYCLES();
     for (i = 0; i < words; i += 1024u) {
         memcpy(sd_bench_src, (const void *)&sd[i], sizeof(sd_bench_src));
     }
-    sd_report("memcpy-sd->sram", SD_BENCH_BYTES, *cyc - t0, cpu_hz);
+    sd_report("memcpy-sd->sram", SD_BENCH_BYTES, SD_CYCLES() - t0, cpu_hz);
 
     SHELL_PRINTF("  (checksum %lx)\n", (unsigned long)sum);
 }
