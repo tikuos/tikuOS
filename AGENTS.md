@@ -100,6 +100,19 @@ per-platform semantics and the NVM region layout.
 - Never committed: the gitignored local directories (`kintsugi/`,
   `experiment/`, `temp/`, `setup-guides/`), board captures and ledgers.
 
+## Bugs
+
+- A bug found by a test, a model, a review or a board run gets a GitHub
+  issue before it is fixed (`gh issue create`), in the repository that
+  holds the faulty code: what fails, the input that shows it, and where
+  in the code.
+- The fix comes with a test seen failing on the old code.  Once the fix is
+  pushed, close the issue with a comment naming the commits and how they
+  were checked.
+- A finding that the code's documented contract or a build-time check
+  rules out is not a bug; an issue opened for one is closed with that
+  reason.
+
 ## Where to read next
 
 | Working on | Read |
