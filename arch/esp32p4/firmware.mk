@@ -25,6 +25,7 @@ SRCS += arch/esp32p4/tiku_dma_arch.c arch/esp32p4/tiku_pwm_arch.c
 SRCS += arch/esp32p4/tiku_dma2d_arch.c arch/esp32p4/tiku_ppa_arch.c
 SRCS += arch/esp32p4/tiku_jpeg_arch.c arch/esp32p4/tiku_dwgdma_arch.c
 SRCS += arch/esp32p4/tiku_pdm_arch.c
+SRCS += arch/esp32p4/tiku_isp_arch.c
 ifeq ($(TIKU_SHELL_ENABLE),1)
 SRCS += shell/commands/tiku_shell_cmd_jpeg.c shell/commands/tiku_shell_cmd_mic.c
 endif

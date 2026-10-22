@@ -22,8 +22,8 @@ Artifacts are `build/esp32p4/firmware/main.bin`, `main.paired.elf` and
 `xip.bin`. The unpaired `main.elf` is for symbols and debugging. The loader
 requires the paired ELF. Shell, BASIC, application and kit code, the VFS
 tree's node handlers and tables, their constants, and driver functions
-marked `TIKU_P4_XIP_TEXT` (the microphone's, apart from its interrupt
-handler) execute from flash. The
+marked `TIKU_P4_XIP_TEXT` (the microphone's and the ISP's, apart from
+what their interrupt paths call) execute from flash. The
 rest of the kernel, cache/flash controller operations and their dependencies
 execute from internal SRAM; a flash operation runs there with interrupts
 masked, so no flash-resident code runs during one. The profile uses a 16 KiB
@@ -332,7 +332,33 @@ ends the job through the block's own line), the engine staying claimed until
 then. `tiku_dwgdma_arch.c` drives the DesignWare AXI DMA behind the MIPI
 bridges and the ISP for contiguous memory-to-memory copies, the beat width
 from the buffers' alignment, waited for or interrupt-completed: a VGA frame
-PSRAM to PSRAM in 9.7 ms.
+PSRAM to PSRAM in 9.7 ms. Its channels 2 and 3 move blocks between memory
+and the CSI bridge's FIFO under the hardware handshake of the ISP and the
+bridge (`tiku_p4_dwgdma_chan_start()`).
+
+`tiku_isp_arch.c` runs the image signal processor from memory, with no
+camera: `tiku_p4_isp_process()` takes a job with a RAW8, RAW10 or RAW12
+Bayer frame (any of the four orders) in SRAM or PSRAM, pushes it into the
+ISP through DW-GDMA channel 2 (the ISP's DMA input, MIPI data types 0x2A
+to 0x2C), and takes the demosaiced frame back out of the CSI bridge
+through channel 3 as RGB565, RGB888 (B, G, R bytes), YUV422 (U Y V Y) or
+YUV420. The job turns on the blocks it wants with their parameters: the
+bilateral denoiser, the sharpener, a 3 x 3 colour-correction matrix in
+2.10 fixed point, 16-point gamma curves per channel, and contrast,
+saturation, hue and brightness; and asks for the frame's statistics: the
+5 x 5 AE block means and the AWB white-patch count and channel sums over
+a window with luminance and R/G, B/G limits. The ISP's histogram is not
+offered: from memory input on v1.3 silicon its bins read zero in every
+mode, window and clock setting while its frame-done flag rises.
+`tiku_p4_isp_process_async()` returns once both channels run and calls
+back from the DMA interrupt when both have ended. The ISP clocks at 80 MHz
+from PLL240 and takes its input in bursts of four 64-bit words (bursts of
+eight from HP SRAM fill its input FIFO and stall the frame); the output
+comes back in 512-word bursts, the last one short. Both modules are reset
+before every frame, since a frame started on what the previous one left
+stalls. A VGA RAW8 frame to RGB565 takes 10.7 ms. Frames are 8 x 8 to
+1920 x 1280 pixels, widths a multiple of 8 and heights even (fewer than 8
+rows never leave the pipeline), buffers 8-byte aligned.
 `jpeg pattern <w> <h> [rgb888|rgb565|grey] [444|422|420] [quality] [turn
 <n>] [scale <n>]` draws a test card, turned or scaled on the PPA when asked,
 and encodes it; `jpeg dump` prints the file in base64 and `jpeg check`

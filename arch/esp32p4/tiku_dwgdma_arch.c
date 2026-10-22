@@ -7,7 +7,8 @@
  *
  * tiku_dwgdma_arch.c - P4 DW-GDMA memory-to-memory copies: one contiguous
  * block on channel 1, the beat width from the buffers' alignment, waited
- * for or ended by the controller's interrupt (line 11, source 24).
+ * for or ended by the controller's interrupt (line 11, source 24); and
+ * handshaked block transfers on channels 2 and 3 for the ISP.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -49,6 +50,21 @@
 #define CH_INT_ST       (CH + 0x88u)
 #define CH_INT_SIG_ENA  (CH + 0x90u)
 #define CH_INT_CLR      (CH + 0x98u)
+/* Channels 2 and 3, the same layout 0x100 apart. */
+#define CHN(n)          (DMAC_BASE + 0x100u * (n))
+#define CHN_SAR0(n)     (CHN(n) + 0x00u)
+#define CHN_DAR0(n)     (CHN(n) + 0x08u)
+#define CHN_BLOCK_TS0(n) (CHN(n) + 0x10u)
+#define CHN_CTL0(n)     (CHN(n) + 0x18u)
+#define CHN_CTL1(n)     (CHN(n) + 0x1Cu)
+#define CHN_CFG0(n)     (CHN(n) + 0x20u)
+#define CHN_CFG1(n)     (CHN(n) + 0x24u)
+#define CHN_SSTATAR0(n) (CHN(n) + 0x70u)
+#define CHN_INT_ST_ENA(n) (CHN(n) + 0x80u)
+#define CHN_INT_ST(n)   (CHN(n) + 0x88u)
+#define CHN_INT_SIG_ENA(n) (CHN(n) + 0x90u)
+#define CHN_INT_CLR(n)  (CHN(n) + 0x98u)
+#define CHEN_BITS(n)    ((1u << ((n) - 1u)) | (1u << ((n) + 7u)))
 
 /* CTL0: masters 1 (memory) on both sides, addresses incrementing, the
  * beat width at [10:8] and [13:11] (0 = 8 bits .. 2 = 32), bursts of 16
@@ -79,6 +95,11 @@ static struct {
     tiku_p4_dwgdma_done_t done;
     void *ctx;
 } job;
+/* Channels 2 and 3: the callback their interrupt runs, if any. */
+static struct {
+    tiku_p4_dwgdma_chan_cb_t cb;
+    void *ctx;
+} chan[4];
 
 static void put_bits(uint32_t reg, uint32_t bits, uint32_t value)
 {
@@ -152,6 +173,34 @@ static int finish(int rc)
     return rc;
 }
 
+/** @brief Channels 2 and 3 in the interrupt: one with a callback that
+ *         ended or failed has its signal dropped, its status cleared and
+ *         the callback run with the status; a polled one keeps its status
+ *         for its poller. */
+static void chan_isr(void)
+{
+    unsigned n;
+    uint32_t st;
+    tiku_p4_dwgdma_chan_cb_t cb;
+
+    for (n = 2u; n <= 3u; n++) {
+        if (chan[n].cb == NULL) {
+            continue;
+        }
+        st = TIKU_P4_REG_READ(CHN_INT_ST(n));
+        if (!(st & (INT_TFR_DONE | INT_ERRORS))) {
+            continue;
+        }
+        TIKU_P4_REG_WRITE(CHN_INT_SIG_ENA(n), 0u);
+        TIKU_P4_REG_WRITE(CHN_INT_CLR(n), INT_ALL);
+        cb = chan[n].cb;
+        chan[n].cb = NULL;
+        if (cb != NULL) {
+            cb(n, st, chan[n].ctx);
+        }
+    }
+}
+
 /** @brief The controller's interrupt: the channel finished or failed. */
 static void dwgdma_isr(void)
 {
@@ -159,6 +208,7 @@ static void dwgdma_isr(void)
     tiku_p4_dwgdma_done_t done = job.done;
     int rc;
 
+    chan_isr();
     if (!busy || done == NULL) {
         TIKU_P4_REG_WRITE(CH_INT_CLR, INT_ALL);
         return;
@@ -170,6 +220,21 @@ static void dwgdma_isr(void)
     job.done = NULL;
     rc = finish(status(st));
     done(job.ctx, rc);
+}
+
+/** @brief The interrupt line attached once, for the copies' end and the
+ *         channels'. */
+static int attach(void)
+{
+    if (attached) {
+        return 0;
+    }
+    if (tiku_p4_irq_attach(IRQ_LINE, IRQ_SOURCE, 1u, dwgdma_isr) != 0 ||
+        tiku_p4_irq_enable(IRQ_LINE, 1) != 0) {
+        return -1;
+    }
+    attached = 1u;
+    return 0;
 }
 
 /** @brief The copy: waited for, or with @p done left to the interrupt. */
@@ -194,14 +259,10 @@ static int copy(void *dst, const void *src, uint32_t bytes,
     busy = 1u;
     TIKU_P4_IRQ_RESTORE(state);
     dwgdma_init();
-    if (done != NULL && !attached) {
-        if (tiku_p4_irq_attach(IRQ_LINE, IRQ_SOURCE, 1u, dwgdma_isr) != 0 ||
-            tiku_p4_irq_enable(IRQ_LINE, 1) != 0) {
-            busy = 0u;
-            copies_failed++;
-            return TIKU_P4_DWGDMA_ERR_FAULT;
-        }
-        attached = 1u;
+    if (done != NULL && attach() != 0) {
+        busy = 0u;
+        copies_failed++;
+        return TIKU_P4_DWGDMA_ERR_FAULT;
     }
     /* The widest beat the addresses and the length allow: 4, 2 or 1 bytes. */
     width = ((d | s | bytes) & 3u) == 0u ? 2u : ((d | s | bytes) & 1u) == 0u
@@ -260,3 +321,90 @@ void tiku_p4_dwgdma_stats(uint32_t *done, uint32_t *failed)
     *done = copies_done;
     *failed = copies_failed;
 }
+
+int tiku_p4_dwgdma_chan_start(unsigned ch, const struct tiku_p4_dwgdma_block *b,
+                              tiku_p4_dwgdma_chan_cb_t cb, void *ctx)
+{
+    uint32_t ctl0, ctl1, cfg1, src, dst;
+
+    if ((ch != 2u && ch != 3u) || b == NULL || b->beats == 0u ||
+        b->beats > (1u << 22) || b->src_msize > 9u || b->dst_msize > 9u ||
+        b->src_outstanding < 1u || b->src_outstanding > 16u ||
+        b->dst_outstanding < 1u || b->dst_outstanding > 16u ||
+        (b->flow != TIKU_P4_DWGDMA_FLOW_M2P_DST &&
+         b->flow != TIKU_P4_DWGDMA_FLOW_P2M_SRC) ||
+        (b->src != TIKU_P4_DWGDMA_BRIDGE_PTR &&
+         !tiku_p4_dwgdma_reachable(b->src, b->beats * 8u)) ||
+        (b->dst != TIKU_P4_DWGDMA_BRIDGE_PTR &&
+         !tiku_p4_dwgdma_reachable(b->dst, b->beats * 8u))) {
+        return TIKU_P4_DWGDMA_ERR_PARAM;
+    }
+    src = (uint32_t)(uintptr_t)b->src;
+    dst = (uint32_t)(uintptr_t)b->dst;
+    dwgdma_init();
+    if (cb != NULL && attach() != 0) {
+        return TIKU_P4_DWGDMA_ERR_FAULT;
+    }
+    if (TIKU_P4_REG_READ(CHEN0) & (1u << (ch - 1u))) {
+        return TIKU_P4_DWGDMA_ERR_BUSY;
+    }
+    /* CTL0: master 0 for the bridge FIFO, 1 for memory; fixed or
+     * incrementing addresses; 64-bit beats; burst sizes. */
+    ctl0 = (src == TIKU_P4_DWGDMA_BRIDGE_MEM ? 0u : 1u) |
+           ((dst == TIKU_P4_DWGDMA_BRIDGE_MEM ? 0u : 1u) << 2) |
+           ((uint32_t)(b->src_fixed ? 1u : 0u) << 4) |
+           ((uint32_t)(b->dst_fixed ? 1u : 0u) << 6) |
+           (3u << 8) | (3u << 11) |
+           ((uint32_t)b->src_msize << 14) | ((uint32_t)b->dst_msize << 18);
+    ctl1 = b->axi_len ? (1u << 6) | ((uint32_t)b->axi_len << 7) |
+                        (1u << 15) | ((uint32_t)b->axi_len << 16) : 0u;
+    cfg1 = (uint32_t)b->flow |
+           ((uint32_t)(b->src_sw_handshake ? 1u : 0u) << 3) |
+           ((uint32_t)b->src_periph << 7) | ((uint32_t)b->dst_periph << 12) |
+           (1u << 17) |
+           ((uint32_t)(b->src_outstanding - 1u) << 23) |
+           ((uint32_t)(b->dst_outstanding - 1u) << 27);
+    chan[ch].cb = cb;
+    chan[ch].ctx = ctx;
+    TIKU_P4_REG_WRITE(CHN_INT_SIG_ENA(ch), 0u);
+    TIKU_P4_REG_WRITE(CHN_INT_ST_ENA(ch), INT_ALL);
+    TIKU_P4_REG_WRITE(CHN_INT_CLR(ch), INT_ALL);
+    TIKU_P4_REG_WRITE(CHN_SAR0(ch), src);
+    TIKU_P4_REG_WRITE(CHN_DAR0(ch), dst);
+    TIKU_P4_REG_WRITE(CHN_BLOCK_TS0(ch), b->beats - 1u);
+    TIKU_P4_REG_WRITE(CHN_CTL0(ch), ctl0);
+    TIKU_P4_REG_WRITE(CHN_CTL1(ch), ctl1);
+    TIKU_P4_REG_WRITE(CHN_CFG0(ch), 0u);
+    TIKU_P4_REG_WRITE(CHN_CFG1(ch), cfg1);
+    TIKU_P4_REG_WRITE(CHN_SSTATAR0(ch), b->src_status_addr);
+    TIKU_P4_REG_WRITE(CHN_INT_SIG_ENA(ch),
+                      cb != NULL ? INT_TFR_DONE | INT_ERRORS : 0u);
+    TIKU_P4_REG_WRITE(CHEN0, CHEN_BITS(ch));
+    return TIKU_P4_DWGDMA_OK;
+}
+
+uint32_t tiku_p4_dwgdma_chan_status(unsigned ch)
+{
+    if (ch != 2u && ch != 3u) {
+        return 0u;
+    }
+    return TIKU_P4_REG_READ(CHN_INT_ST(ch)) & (INT_TFR_DONE | INT_ERRORS);
+}
+
+void tiku_p4_dwgdma_chan_stop(unsigned ch)
+{
+    uint32_t n;
+
+    if ((ch != 2u && ch != 3u) || !ready) {
+        return;
+    }
+    TIKU_P4_REG_WRITE(CHN_INT_SIG_ENA(ch), 0u);
+    chan[ch].cb = NULL;
+    if (TIKU_P4_REG_READ(CHEN0) & (1u << (ch - 1u))) {
+        TIKU_P4_REG_WRITE(CHEN1, CHEN_BITS(ch));
+        for (n = 0u; n < 1000u && (TIKU_P4_REG_READ(CHEN1) & (1u << (ch - 1u))); n++) {
+        }
+    }
+    TIKU_P4_REG_WRITE(CHN_INT_CLR(ch), INT_ALL);
+}
+
