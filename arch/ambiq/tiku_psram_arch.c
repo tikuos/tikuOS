@@ -1117,8 +1117,11 @@ tiku_psram_err_t tiku_psram_dma(uint32_t dev_addr, void *sram, uint32_t n,
 #define CQ_PAIRS_PER_SEG   8u
 #define CQ_MAX_SEGS        66u
 /* 66 segs * 8 pairs + terminator, 8 B per pair */
+#ifndef TIKU_AMBIQ_CQ_SECTION
+#define TIKU_AMBIQ_CQ_SECTION __attribute__((section(".ssram")))
+#endif
 static uint32_t s_cq[(CQ_MAX_SEGS * CQ_PAIRS_PER_SEG + 1u) * 2u]
-    __attribute__((section(".ssram"), aligned(32)));
+    TIKU_AMBIQ_CQ_SECTION __attribute__((aligned(32)));
 
 #define CQ_PAUSE_IDX_MASK  0x4000u   /* CQFLAGS.CQIDX: pause when no work */
 

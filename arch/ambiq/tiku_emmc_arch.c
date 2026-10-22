@@ -193,19 +193,25 @@ static uint8_t s_ext[TIKU_EMMC_BLOCK_SIZE] __attribute__((aligned(4)));
 /* DWT CYCCNT times the init steps, the data-phase deadlines and the bench. */
 extern unsigned long tiku_cpu_ambiq_clock_get_hz(void);
 
+/* DEMCR and the DWT's control and cycle-count words; a host model defines
+ * these to words of its own. */
+#ifndef TIKU_AMBIQ_DWT_DEMCR
+#define TIKU_AMBIQ_DWT_DEMCR  (*(volatile uint32_t *)0xE000EDFCUL)
+#define TIKU_AMBIQ_DWT_CTRL   (*(volatile uint32_t *)0xE0001000UL)
+#define TIKU_AMBIQ_DWT_CYCCNT (*(volatile uint32_t *)0xE0001004UL)
+#endif
+
 /** @brief Start the DWT cycle counter (TRCENA, CYCCNTENA). */
 static void cyc_enable(void)
 {
-    volatile uint32_t *demcr  = (volatile uint32_t *)0xE000EDFCUL;
-    volatile uint32_t *dwtctl = (volatile uint32_t *)0xE0001000UL;
-    *demcr  |= (1u << 24);      /* TRCENA                                    */
-    *dwtctl |= 1u;              /* CYCCNTENA                                 */
+    TIKU_AMBIQ_DWT_DEMCR |= (1u << 24);     /* TRCENA                      */
+    TIKU_AMBIQ_DWT_CTRL  |= 1u;             /* CYCCNTENA                   */
 }
 
 /** @brief Read the DWT cycle counter. */
 static inline uint32_t cyc_now(void)
 {
-    return *(volatile uint32_t *)0xE0001004UL;
+    return TIKU_AMBIQ_DWT_CYCCNT;
 }
 
 /** @brief Convert cycles to microseconds at the current core clock. */

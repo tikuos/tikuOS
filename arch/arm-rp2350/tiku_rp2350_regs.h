@@ -38,10 +38,13 @@
 #define RP2350_REG_ALIAS_SET      0x2000U
 #define RP2350_REG_ALIAS_CLR      0x3000U
 
+/* A host model defines these four first to reach its own register file. */
+#ifndef _RP2350_REG
 #define _RP2350_REG(addr)         (*(volatile uint32_t *)(addr))
 #define _RP2350_REG_SET(addr, m)  (*(volatile uint32_t *)((addr) + RP2350_REG_ALIAS_SET) = (m))
 #define _RP2350_REG_CLR(addr, m)  (*(volatile uint32_t *)((addr) + RP2350_REG_ALIAS_CLR) = (m))
 #define _RP2350_REG_XOR(addr, m)  (*(volatile uint32_t *)((addr) + RP2350_REG_ALIAS_XOR) = (m))
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* PERIPHERAL BASE ADDRESSES                                                 */
@@ -996,8 +999,7 @@ static inline uint8_t rp2350_pwm_pin_to_channel(uint8_t gpio) {
  * @param irq  IRQ number (RP2350_IRQ_*).
  */
 static inline void rp2350_nvic_enable(uint32_t irq) {
-    *(volatile uint32_t *)(RP2350_NVIC_ISER0 + (irq / 32U) * 4U)
-        = (1U << (irq & 31U));
+    _RP2350_REG(RP2350_NVIC_ISER0 + (irq / 32U) * 4U) = (1U << (irq & 31U));
 }
 
 /**
@@ -1006,8 +1008,7 @@ static inline void rp2350_nvic_enable(uint32_t irq) {
  * @param irq  IRQ number (RP2350_IRQ_*).
  */
 static inline void rp2350_nvic_disable(uint32_t irq) {
-    *(volatile uint32_t *)(RP2350_NVIC_ICER0 + (irq / 32U) * 4U)
-        = (1U << (irq & 31U));
+    _RP2350_REG(RP2350_NVIC_ICER0 + (irq / 32U) * 4U) = (1U << (irq & 31U));
 }
 
 /**
@@ -1016,8 +1017,7 @@ static inline void rp2350_nvic_disable(uint32_t irq) {
  * @param irq  IRQ number (RP2350_IRQ_*).
  */
 static inline void rp2350_nvic_clear_pending(uint32_t irq) {
-    *(volatile uint32_t *)(RP2350_NVIC_ICPR0 + (irq / 32U) * 4U)
-        = (1U << (irq & 31U));
+    _RP2350_REG(RP2350_NVIC_ICPR0 + (irq / 32U) * 4U) = (1U << (irq & 31U));
 }
 
 /*---------------------------------------------------------------------------*/
