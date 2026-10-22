@@ -67,7 +67,8 @@ static tiku_thread_t * volatile s_current;
  *  kernel_wake (any event post).  volatile: ISRs write it. */
 static volatile uint8_t s_kernel_ready = 1;
 
-/** @brief Round-robin cursor into s_threads[]. */
+/** @brief Round-robin cursor: the slot of the worker picked last.  A kernel
+ *  hand-off or a yield moves it one on, so the search starts after it. */
 static uint8_t s_rr;
 
 /** @brief One-time arch bring-up done (first tiku_thread_start). */
@@ -165,14 +166,15 @@ uint32_t *tiku_thread_switch(uint32_t *old_sp)
     wake_due();
 
     /* Pick the incoming context: the next READY, in-budget worker from
-     * the round-robin cursor.  An exhausted worker is skipped here, so it
-     * loses its turn until a refill raises its ceiling above the cycles it
-     * has used. */
+     * the round-robin cursor, which then holds its slot.  An exhausted
+     * worker is skipped here, so it loses its turn until a refill raises
+     * its ceiling above the cycles it has used. */
     if (!s_kernel_ready) {
         for (i = 0; i < TIKU_THREADS_MAX; i++) {
             uint8_t idx = (uint8_t)((s_rr + i) % TIKU_THREADS_MAX);
             if (worker_runnable(s_threads[idx])) {
                 next = s_threads[idx];
+                s_rr = idx;
                 break;
             }
         }
