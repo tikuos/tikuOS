@@ -23,8 +23,8 @@ Artifacts are `build/esp32p4/firmware/main.bin`, `main.paired.elf` and
 requires the paired ELF. Shell, BASIC, application and kit code, the VFS
 tree's node handlers and tables, their constants, and driver functions
 marked `TIKU_P4_XIP_TEXT` (the microphone's, the ISP's, the JPEG
-codec's, the PPA's and the 2D-DMA's, apart from what their interrupt
-paths call) execute from flash. The
+codec's, the PPA's, the 2D-DMA's and the H.264 encoder's, apart from
+what their interrupt paths call) execute from flash. The
 rest of the kernel, cache/flash controller operations and their dependencies
 execute from internal SRAM; a flash operation runs there with interrupts
 masked, so no flash-resident code runs during one. The profile uses a 16 KiB
@@ -360,6 +360,32 @@ before every frame, since a frame started on what the previous one left
 stalls. A VGA RAW8 frame to RGB565 takes 10.7 ms. Frames are 8 x 8 to
 1920 x 1280 pixels, widths a multiple of 8 and heights even (fewer than 8
 rows never leave the pipeline), buffers 8-byte aligned.
+
+`tiku_h264_arch.c` drives the H.264 encoder at 0x50084000 through its own
+DMA at 0x500A7000, the way Espressif's esp_h264 component does in source:
+five out channels carry the frame, the reference strip, the deblocking
+scratch and the frame store's two halves to the core, in channels bring
+the scratch, the store and the stream back, and a block reader (channel 5)
+walks the reference strip. The software side writes the SPS, PPS and
+slice headers (`tiku_h264_stream_arch.c`: baseline profile, CAVLC, one
+reference frame, the frame rate in the VUI), hands the slice header's
+bytes past the last 8-byte boundary to the core's registers, and runs
+the frame-level rate controller when a QP range and a bit rate are given;
+the core signals its reconstruction and macroblock lines through its
+interrupt (line 13, source 126), where an IDR's deblocked frame is moved
+out and the reference reader restarted. Frames are whole macroblocks,
+80 to 1920 x 2032, packed 4:2:0 (a chroma byte then two luma bytes for
+each pair of pixels, U on even rows, V on odd); the encoder needs an SRAM
+work area of `tiku_p4_h264_sram_bytes()` (51.5 KB at VGA) and a frame
+store of `tiku_p4_h264_store_bytes()` (461 KB at VGA) anywhere the DMA
+reaches. `tiku_p4_h264_encode()` returns the frame's bytes and whether it
+is an IDR, `_async` calls back from the interrupt; a stream buffer too
+small fails the frame and makes the next one an IDR. ROI regions and
+motion-vector output stay off.
+`h264 encode <w> <h> <frames> [qp <n> | rate <kbit/s>] [gop <n>]` runs the
+encoder over a moving test pattern into one stream and prints the sizes
+and timing; `h264 dump` prints it in base64 for a host decoder (the
+p4-h264 suite) and `h264 info` the counters.
 `jpeg pattern <w> <h> [rgb888|rgb565|grey] [444|422|420] [quality] [turn
 <n>] [scale <n>]` draws a test card, turned or scaled on the PPA when asked,
 and encodes it; `jpeg dump` prints the file in base64 and `jpeg check`

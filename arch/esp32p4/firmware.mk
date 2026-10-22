@@ -29,6 +29,10 @@ SRCS += arch/esp32p4/tiku_isp_arch.c
 ifeq ($(TIKU_SHELL_ENABLE),1)
 SRCS += shell/commands/tiku_shell_cmd_jpeg.c shell/commands/tiku_shell_cmd_mic.c
 endif
+SRCS += arch/esp32p4/tiku_h264_arch.c arch/esp32p4/tiku_h264_stream_arch.c
+ifeq ($(TIKU_SHELL_ENABLE),1)
+SRCS += shell/commands/tiku_shell_cmd_h264.c
+endif
 endif
 ifeq ($(TIKU_SHELL_ENABLE),1)
 SRCS += shell/commands/tiku_shell_cmd_diag.c

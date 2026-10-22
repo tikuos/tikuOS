@@ -191,6 +191,9 @@
 #if TIKU_SHELL_CMD_MIC
 #include "commands/tiku_shell_cmd_mic.h"
 #endif
+#if TIKU_SHELL_CMD_H264
+#include "commands/tiku_shell_cmd_h264.h"
+#endif
 #if TIKU_SHELL_CMD_USBMSC
 #include "commands/tiku_shell_cmd_usbmsc.h"
 #endif
@@ -681,6 +684,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_MIC
     {"mic",     "PDM microphone capture", tiku_shell_cmd_mic},
+#endif
+#if TIKU_SHELL_CMD_H264
+    {"h264",    "H.264 encoder test stream",   tiku_shell_cmd_h264},
 #endif
 #if TIKU_SHELL_CMD_USBMSC
     {"usbmsc",  "USB mass storage disk",       tiku_shell_cmd_usbmsc},

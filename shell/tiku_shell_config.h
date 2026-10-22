@@ -287,6 +287,13 @@
 #define TIKU_SHELL_CMD_MIC    0
 #endif
 #endif
+#ifndef TIKU_SHELL_CMD_H264
+#if defined(TIKU_BOARD_FIREBEETLE2_ESP32P4)
+#define TIKU_SHELL_CMD_H264   1  /**< h264   - H.264 encoder test stream */
+#else
+#define TIKU_SHELL_CMD_H264   0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_USBMSC
 #if defined(TIKU_USBHS_MSC)
 #define TIKU_SHELL_CMD_USBMSC 1  /**< usbmsc - present the board as a disk */
