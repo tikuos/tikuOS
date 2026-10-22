@@ -729,13 +729,15 @@ void tiku_process_poll(struct tiku_process *p)
 
     tiku_atomic_enter();
 
-    /* Coalesce: drop the request if a POLL for this target is already
-     * queued.  The coalesced return still wakes the kernel thread: the
-     * queued POLL may predate the kernel thread blocking, and with workers
-     * that never yield nothing else would wake it. */
+    /* Coalesce: drop the request if a POLL for this target's current
+     * instance is already queued; one queued before a restart is stale and
+     * dispatch drops it.  The coalesced return still wakes the kernel
+     * thread: the queued POLL may predate the kernel thread blocking, and
+     * with workers that never yield nothing else would wake it. */
     for (i = 0; i < q_len; i++) {
         idx = (q_head + i) % TIKU_QUEUE_SIZE;
-        if (queue[idx].ev == TIKU_EVENT_POLL && queue[idx].p == p) {
+        if (queue[idx].ev == TIKU_EVENT_POLL && queue[idx].p == p &&
+            !event_is_stale(p, queue[idx].generation)) {
             tiku_atomic_exit();
 #if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
             tiku_thread_kernel_wake();
