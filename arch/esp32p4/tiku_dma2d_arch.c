@@ -138,6 +138,7 @@ static void put_bits(uint32_t reg, uint32_t bits, uint32_t value)
 
 /** @brief Clock the engine, pulse its reset, force its register clock on
  *         and empty the AXI FIFOs (dma2d_ll_hw_enable). */
+TIKU_P4_XIP_TEXT
 static void d2d_init(void)
 {
     put_bits(CLK_SYS, CLK_SYS_D2D, CLK_SYS_D2D);
@@ -155,6 +156,7 @@ static void d2d_init(void)
 
 /** @brief Stop channel @p ch (out: @p in 0) and reset it once the engine
  *         says it may.  @return 0, or -1 when it never did */
+TIKU_P4_XIP_TEXT
 static int chan_reset(uint32_t ch, int in)
 {
     uint32_t avail = in ? IN_RESET_AVAIL : OUT_RESET_AVAIL, n;
@@ -175,12 +177,14 @@ static int chan_reset(uint32_t ch, int in)
 }
 
 /** @brief The descriptor pixel code for @p bpp bytes (dma2d_types.h). */
+TIKU_P4_XIP_TEXT
 static uint32_t pixel_code(uint8_t bpp)
 {
     static const uint8_t codes[5] = {0u, 1u, 3u, 4u, 5u};
     return codes[bpp];
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_dma2d_reachable(const void *base, uint32_t n)
 {
     uintptr_t a = (uintptr_t)base;
@@ -193,6 +197,7 @@ int tiku_p4_dma2d_reachable(const void *base, uint32_t n)
              n <= TIKU_P4_PSRAM_BASE + tiku_p4_psram_size() - a));
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_dma2d_picture_ok(const tiku_p4_picture_t *p)
 {
     if (p == NULL || p->bpp < 1u || p->bpp > 4u ||
@@ -204,6 +209,7 @@ int tiku_p4_dma2d_picture_ok(const tiku_p4_picture_t *p)
                                                 p->bpp);
 }
 
+TIKU_P4_XIP_TEXT
 void tiku_p4_dma2d_desc_block(tiku_p4_dma2d_desc_t *d,
                               const tiku_p4_picture_t *p, uint16_t x,
                               uint16_t y, uint16_t w, uint16_t h)
@@ -217,6 +223,7 @@ void tiku_p4_dma2d_desc_block(tiku_p4_dma2d_desc_t *d,
     d->next = NULL;
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_dma2d_claim(void)
 {
     uint32_t state = TIKU_P4_IRQ_SAVE();
@@ -238,6 +245,7 @@ void tiku_p4_dma2d_unclaim(void)
     d2d_busy = 0u;
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_dma2d_out_open(unsigned ch, unsigned peri, uint32_t conf,
                            const tiku_p4_dma2d_desc_t *d)
 {
@@ -255,6 +263,7 @@ int tiku_p4_dma2d_out_open(unsigned ch, unsigned peri, uint32_t conf,
     return TIKU_P4_DMA2D_OK;
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_dma2d_in_open(unsigned ch, unsigned peri, uint32_t conf,
                           const tiku_p4_dma2d_desc_t *d)
 {
@@ -275,11 +284,13 @@ int tiku_p4_dma2d_in_open(unsigned ch, unsigned peri, uint32_t conf,
     return TIKU_P4_DMA2D_OK;
 }
 
+TIKU_P4_XIP_TEXT
 void tiku_p4_dma2d_out_port_block(unsigned ch, uint16_t w, uint16_t h)
 {
     TIKU_P4_REG_WRITE(TX(ch) + OUT_PORT_BLK, (uint32_t)w | ((uint32_t)h << 14));
 }
 
+TIKU_P4_XIP_TEXT
 void tiku_p4_dma2d_in0_csc(uint32_t csc, const uint32_t *params)
 {
     unsigned i;
@@ -292,16 +303,19 @@ void tiku_p4_dma2d_in0_csc(uint32_t csc, const uint32_t *params)
     TIKU_P4_REG_WRITE(RX(0) + IN0_CSC, csc);
 }
 
+TIKU_P4_XIP_TEXT
 uint32_t tiku_p4_dma2d_in_raw(unsigned ch)
 {
     return TIKU_P4_REG_READ(RX(ch) + INT_RAW);
 }
 
+TIKU_P4_XIP_TEXT
 void tiku_p4_dma2d_out_start(unsigned ch)
 {
     put_bits(TX(ch) + LINK_CONF, OUT_START, OUT_START);
 }
 
+TIKU_P4_XIP_TEXT
 void tiku_p4_dma2d_in_start(unsigned ch)
 {
     put_bits(RX(ch) + LINK_CONF, IN_START, IN_START);
@@ -349,6 +363,7 @@ uint32_t tiku_p4_dma2d_in_last_raw(unsigned ch)
 static void in0_isr(void) { in_isr(0u); }
 static void in1_isr(void) { in_isr(1u); }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_dma2d_in_arm(unsigned ch, tiku_p4_dma2d_done_t done, void *ctx)
 {
     static const tiku_p4_isr_t isrs[RX_CHANNELS] = {in0_isr, in1_isr};
@@ -379,6 +394,7 @@ void tiku_p4_dma2d_in_disarm(unsigned ch)
     }
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_dma2d_in_wait(unsigned ch, uint32_t budget_us)
 {
     uint32_t raw = 0u, n;
@@ -419,6 +435,7 @@ void tiku_p4_dma2d_close(unsigned outs, unsigned ins, int stop)
 }
 
 /** @brief The bytes of @p p from the block's first pixel to its last. */
+TIKU_P4_XIP_TEXT
 static void block_span(const tiku_p4_picture_t *p, uint16_t x, uint16_t y,
                        uint16_t w, uint16_t h, uint8_t **start,
                        uint32_t *len)
@@ -431,6 +448,7 @@ static void block_span(const tiku_p4_picture_t *p, uint16_t x, uint16_t y,
 }
 
 /** @brief Set out channel @p ch's converter to @p c. */
+TIKU_P4_XIP_TEXT
 static void out_convert(unsigned ch, const conv_t *c)
 {
     unsigned i;
@@ -480,6 +498,7 @@ static void transfer_done(void *ctx, int rc)
 
 /** @brief A copy or a conversion of one block on pair 1: waited for, or
  *         with @p done left to the completion interrupt. */
+TIKU_P4_XIP_TEXT
 static int transfer(const tiku_p4_picture_t *dst, uint16_t dx, uint16_t dy,
                     const tiku_p4_picture_t *src, uint16_t sx, uint16_t sy,
                     uint16_t w, uint16_t h, unsigned conv,
@@ -550,6 +569,7 @@ static int transfer(const tiku_p4_picture_t *dst, uint16_t dx, uint16_t dy,
     return rc;
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_dma2d_copy(const tiku_p4_picture_t *dst, uint16_t dx, uint16_t dy,
                        const tiku_p4_picture_t *src, uint16_t sx, uint16_t sy,
                        uint16_t w, uint16_t h)
@@ -558,6 +578,7 @@ int tiku_p4_dma2d_copy(const tiku_p4_picture_t *dst, uint16_t dx, uint16_t dy,
                     NULL, NULL);
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_dma2d_copy_async(const tiku_p4_picture_t *dst, uint16_t dx,
                              uint16_t dy, const tiku_p4_picture_t *src,
                              uint16_t sx, uint16_t sy, uint16_t w, uint16_t h,
@@ -570,6 +591,7 @@ int tiku_p4_dma2d_copy_async(const tiku_p4_picture_t *dst, uint16_t dx,
                     done, ctx);
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_dma2d_convert(const tiku_p4_picture_t *dst, uint16_t dx,
                           uint16_t dy, const tiku_p4_picture_t *src,
                           uint16_t sx, uint16_t sy, uint16_t w, uint16_t h,
@@ -581,6 +603,7 @@ int tiku_p4_dma2d_convert(const tiku_p4_picture_t *dst, uint16_t dx,
     return transfer(dst, dx, dy, src, sx, sy, w, h, conv, NULL, NULL);
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_dma2d_convert_async(const tiku_p4_picture_t *dst, uint16_t dx,
                                 uint16_t dy, const tiku_p4_picture_t *src,
                                 uint16_t sx, uint16_t sy, uint16_t w,
@@ -594,6 +617,7 @@ int tiku_p4_dma2d_convert_async(const tiku_p4_picture_t *dst, uint16_t dx,
     return transfer(dst, dx, dy, src, sx, sy, w, h, conv, done, ctx);
 }
 
+TIKU_P4_XIP_TEXT
 void tiku_p4_dma2d_stats(uint32_t *done, uint32_t *failed)
 {
     *done = d2d_done;

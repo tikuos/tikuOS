@@ -156,12 +156,14 @@ static const uint8_t dec_hb[3][3] = {{40, 32, 40}, {32, 64, 64}, {32, 48, 48}};
 /*---------------------------------------------------------------------------*/
 
 /** @brief Set @p bits of register @p reg to their values in @p value. */
+TIKU_P4_XIP_TEXT
 static void jpg_bits(uint32_t reg, uint32_t bits, uint32_t value)
 {
     TIKU_P4_REG_WRITE(reg, (TIKU_P4_REG_READ(reg) & ~bits) | (value & bits));
 }
 
 /** @brief Clock the codec and pulse its reset, the first time only. */
+TIKU_P4_XIP_TEXT
 static void jpg_init(void)
 {
     if (jpg_ready) {
@@ -175,6 +177,7 @@ static void jpg_init(void)
 
 /** @brief Reset the codec's pipeline (its registers stay) and pick the
  *         decoder (@p decode 1) or the encoder. */
+TIKU_P4_XIP_TEXT
 static void jpg_restart(int decode)
 {
     jpg_bits(JPG_CONFIG, CFG_SOFT_RST, CFG_SOFT_RST);
@@ -184,6 +187,7 @@ static void jpg_restart(int decode)
 }
 
 /** @brief Upload 64 coefficients, natural order, as table @p t. */
+TIKU_P4_XIP_TEXT
 static void put_qtable(unsigned t, const uint8_t q[64])
 {
     unsigned i;
@@ -214,6 +218,7 @@ static int jpg_status(uint32_t raw, uint32_t codec)
     return (raw & 2u) ? TIKU_P4_JPEG_OK : TIKU_P4_JPEG_ERR_TIMEOUT;
 }
 
+TIKU_P4_XIP_TEXT
 static int jpg_wait(unsigned ch, uint32_t errors, uint32_t budget_us)
 {
     uint32_t raw = 0u, codec = 0u, n;
@@ -324,6 +329,7 @@ static void jpg_isr(void)
 /** @brief Run a job whose channels are open and started: the codec is
  *         fired; waited for within @p budget_us, or with @p done called
  *         from the completion interrupt. */
+TIKU_P4_XIP_TEXT
 static int jpg_run(unsigned out_ch, unsigned in_ch, uint32_t errors,
                    uint32_t budget_us, tiku_p4_dma2d_done_t done, void *ctx)
 {
@@ -361,6 +367,7 @@ static int jpg_run(unsigned out_ch, unsigned in_ch, uint32_t errors,
 
 /** @brief A 1D descriptor over @p n bytes at @p buf: @p full of them data
  *         (a source), or none (a destination the engine fills). */
+TIKU_P4_XIP_TEXT
 static void desc_linear(tiku_p4_dma2d_desc_t *d, const void *buf, uint32_t n,
                         int full)
 {
@@ -375,6 +382,7 @@ static void desc_linear(tiku_p4_dma2d_desc_t *d, const void *buf, uint32_t n,
 
 /** @brief A descriptor walking all of @p p in @p hb x @p vb blocks; a block
  *         wider than the picture is cut to it (both whole MCUs). */
+TIKU_P4_XIP_TEXT
 static void desc_blocks(tiku_p4_dma2d_desc_t *d, const tiku_p4_picture_t *p,
                         uint32_t hb, uint32_t vb)
 {
@@ -388,6 +396,7 @@ static void desc_blocks(tiku_p4_dma2d_desc_t *d, const tiku_p4_picture_t *p,
 
 /** @brief Whether @p p is a picture the codec reads or writes: reachable,
  *         1 to 3 bytes a pixel, starting a cache line. */
+TIKU_P4_XIP_TEXT
 static int picture_ok(const tiku_p4_picture_t *p)
 {
     return tiku_p4_dma2d_picture_ok(p) && p->bpp <= 3u &&
@@ -399,6 +408,7 @@ static int picture_ok(const tiku_p4_picture_t *p)
 /*---------------------------------------------------------------------------*/
 
 /** @brief Quality @p quality's table from @p base (libjpeg's scaling). */
+TIKU_P4_XIP_TEXT
 static void scale_q(const uint8_t base[64], unsigned quality, uint8_t q[64])
 {
     uint32_t s = quality < 50u ? 5000u / quality : 200u - 2u * quality;
@@ -411,6 +421,7 @@ static void scale_q(const uint8_t base[64], unsigned quality, uint8_t q[64])
 }
 
 /** @brief Append @p n bytes at *@p at. */
+TIKU_P4_XIP_TEXT
 static void put(uint8_t **at, const uint8_t *src, uint32_t n)
 {
     memcpy(*at, src, n);
@@ -418,6 +429,7 @@ static void put(uint8_t **at, const uint8_t *src, uint32_t n)
 }
 
 /** @brief Append a marker and its two-byte length. */
+TIKU_P4_XIP_TEXT
 static void put_marker(uint8_t **at, uint8_t marker, uint32_t len)
 {
     uint8_t m[4] = {0xFFu, marker, (uint8_t)(len >> 8), (uint8_t)len};
@@ -426,6 +438,7 @@ static void put_marker(uint8_t **at, uint8_t marker, uint32_t len)
 
 /** @brief Append a DHT segment: class and id byte @p tc_th, the counts and
  *         the values. */
+TIKU_P4_XIP_TEXT
 static void put_dht(uint8_t **at, uint8_t tc_th, const uint8_t bits[16],
                     const uint8_t *vals, uint32_t n)
 {
@@ -438,6 +451,7 @@ static void put_dht(uint8_t **at, uint8_t tc_th, const uint8_t bits[16],
 /** @brief Write the headers for a @p w x @p h picture of @p comps
  *         components into @p out; tables @p q; the result is
  *         TIKU_P4_JPEG_HEADER_COLOR or _GRAY bytes. */
+TIKU_P4_XIP_TEXT
 static uint32_t write_header(uint8_t *out, uint16_t w, uint16_t h,
                              unsigned comps, unsigned sampling,
                              const uint8_t q[2][64])
@@ -499,6 +513,7 @@ static uint32_t write_header(uint8_t *out, uint16_t w, uint16_t h,
 
 /** @brief The encoder for source kind @p src (0 RGB888, 1 RGB565, 2 grey,
  *         3 YUV422) at @p sampling. */
+TIKU_P4_XIP_TEXT
 static int encode(const tiku_p4_picture_t *in, unsigned src, unsigned sampling,
                   unsigned quality, uint8_t *out, uint32_t cap, uint32_t *len,
                   tiku_p4_dma2d_done_t done, void *ctx)
@@ -609,6 +624,7 @@ typedef struct {
 static jpg_hdr_t hdr_in;
 
 /** @brief Huffman slot for class @p tc (0 DC, 1 AC) and id @p th. */
+TIKU_P4_XIP_TEXT
 static unsigned dht_slot(unsigned tc, unsigned th)
 {
     return th * 2u + tc;            /* DC0, AC0, DC1, AC1 */
@@ -616,6 +632,7 @@ static unsigned dht_slot(unsigned tc, unsigned th)
 
 /** @brief Parse the headers of @p jpg up to SOS into @p x.
  *  @return TIKU_P4_JPEG_OK or _ERR_FORMAT */
+TIKU_P4_XIP_TEXT
 static int parse(const uint8_t *jpg, uint32_t len, jpg_hdr_t *x)
 {
     uint32_t at = 2u, seg, i, k;
@@ -734,6 +751,7 @@ static int parse(const uint8_t *jpg, uint32_t len, jpg_hdr_t *x)
     return TIKU_P4_JPEG_OK;
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_jpeg_info(const uint8_t *jpg, uint32_t len,
                       tiku_p4_jpeg_info_t *info)
 {
@@ -767,6 +785,7 @@ int tiku_p4_jpeg_info(const uint8_t *jpg, uint32_t len,
 /** @brief Upload Huffman slot @p k of @p x: per code length the count of
  *         codes so far and the first code left-aligned to 16 bits (0xFFFF
  *         for none), then 16 (DC) or 256 (AC) values. */
+TIKU_P4_XIP_TEXT
 static void put_dht_table(const jpg_hdr_t *x, unsigned k)
 {
     uint32_t code = 0u, total = 0u, len, i;
@@ -786,6 +805,7 @@ static void put_dht_table(const jpg_hdr_t *x, unsigned k)
 }
 
 /** @brief The decoder; @p own 1 wants the file's own samples. */
+TIKU_P4_XIP_TEXT
 static int decode(const uint8_t *jpg, uint32_t len,
                   const tiku_p4_picture_t *out, int own,
                   tiku_p4_dma2d_done_t done, void *ctx)
@@ -876,6 +896,7 @@ static int decode(const uint8_t *jpg, uint32_t len,
     return rc;
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_jpeg_encode(const tiku_p4_picture_t *in, unsigned sampling,
                         unsigned quality, uint8_t *out, uint32_t cap,
                         uint32_t *len)
@@ -887,6 +908,7 @@ int tiku_p4_jpeg_encode(const tiku_p4_picture_t *in, unsigned sampling,
                   quality, out, cap, len, NULL, NULL);
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_jpeg_encode_yuv422(const tiku_p4_picture_t *in, unsigned quality,
                                uint8_t *out, uint32_t cap, uint32_t *len)
 {
@@ -897,23 +919,27 @@ int tiku_p4_jpeg_encode_yuv422(const tiku_p4_picture_t *in, unsigned quality,
                   NULL, NULL);
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_jpeg_decode(const uint8_t *jpg, uint32_t len,
                         const tiku_p4_picture_t *out)
 {
     return decode(jpg, len, out, 0, NULL, NULL);
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_jpeg_decode_yuv(const uint8_t *jpg, uint32_t len,
                             const tiku_p4_picture_t *out)
 {
     return decode(jpg, len, out, 1, NULL, NULL);
 }
 
+TIKU_P4_XIP_TEXT
 uint32_t tiku_p4_jpeg_errors(void)
 {
     return jpg_errors;
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_jpeg_encode_async(const tiku_p4_picture_t *in, unsigned sampling,
                               unsigned quality, uint8_t *out, uint32_t cap,
                               uint32_t *len, tiku_p4_dma2d_done_t done,
@@ -926,6 +952,7 @@ int tiku_p4_jpeg_encode_async(const tiku_p4_picture_t *in, unsigned sampling,
                   quality, out, cap, len, done, ctx);
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_jpeg_encode_yuv422_async(const tiku_p4_picture_t *in,
                                      unsigned quality, uint8_t *out,
                                      uint32_t cap, uint32_t *len,
@@ -938,6 +965,7 @@ int tiku_p4_jpeg_encode_yuv422_async(const tiku_p4_picture_t *in,
                   done, ctx);
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_jpeg_decode_async(const uint8_t *jpg, uint32_t len,
                               const tiku_p4_picture_t *out,
                               tiku_p4_dma2d_done_t done, void *ctx)
@@ -948,6 +976,7 @@ int tiku_p4_jpeg_decode_async(const uint8_t *jpg, uint32_t len,
     return decode(jpg, len, out, 0, done, ctx);
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_jpeg_decode_yuv_async(const uint8_t *jpg, uint32_t len,
                                   const tiku_p4_picture_t *out,
                                   tiku_p4_dma2d_done_t done, void *ctx)

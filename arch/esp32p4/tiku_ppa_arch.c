@@ -15,6 +15,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <hal/tiku_cpu.h>
+#include "tiku_cpu_common.h"
 #include "tiku_irq_arch.h"
 #include "tiku_ppa_arch.h"
 #include "tiku_esp32p4_regs.h"
@@ -97,6 +98,7 @@ static void ppa_bits(uint32_t reg, uint32_t bits, uint32_t value)
 }
 
 /** @brief Clock the PPA and pulse its reset, the first time only. */
+TIKU_P4_XIP_TEXT
 static void ppa_init(void)
 {
     if (ppa_ready) {
@@ -110,6 +112,7 @@ static void ppa_init(void)
 
 /** @brief The PPA colour mode of a picture: 4 bytes ARGB8888 (0), 3 RGB888
  *         (1), 2 RGB565 (2), 1 table indices (4). */
+TIKU_P4_XIP_TEXT
 static uint32_t color_mode(const tiku_p4_picture_t *p)
 {
     return p->bpp == 1u ? MODE_L8 : 4u - p->bpp;
@@ -117,6 +120,7 @@ static uint32_t color_mode(const tiku_p4_picture_t *p)
 
 /** @brief Whether @p p is a PPA picture holding the @p w x @p h block at
  *         (@p x, @p y); @p min_bpp 1 admits a picture of indices. */
+TIKU_P4_XIP_TEXT
 static int block_ok(const tiku_p4_picture_t *p, uint16_t x, uint16_t y,
                     uint16_t w, uint16_t h, uint8_t min_bpp)
 {
@@ -137,6 +141,7 @@ static void span(const tiku_p4_picture_t *p, uint16_t x, uint16_t y,
 }
 
 /** @brief Write an input block back from the cache for the engine. */
+TIKU_P4_XIP_TEXT
 static void clean_block(const tiku_p4_picture_t *p, uint16_t x, uint16_t y,
                         uint16_t w, uint16_t h)
 {
@@ -159,12 +164,14 @@ static void drop_block(const tiku_p4_picture_t *p, uint16_t x, uint16_t y,
 }
 
 /** @brief Microseconds to wait for @p n output pixels of @p bpp bytes. */
+TIKU_P4_XIP_TEXT
 static uint32_t budget_for(uint32_t n, uint8_t bpp)
 {
     return 20000u + (n * bpp) / 8u;
 }
 
 /** @brief Reset the blend engine, which fill uses too. */
+TIKU_P4_XIP_TEXT
 static void blend_reset(void)
 {
     ppa_bits(BLEND_TRANS_MODE, BLEND_RST, BLEND_RST);
@@ -172,6 +179,7 @@ static void blend_reset(void)
 }
 
 /** @brief Start the blend engine in fill (@p fill 1) or blend mode. */
+TIKU_P4_XIP_TEXT
 static void blend_start(uint32_t fill)
 {
     ppa_bits(BLEND_TRANS_MODE, BLEND_BYPASS | BLEND_FILL_EN,
@@ -181,6 +189,7 @@ static void blend_start(uint32_t fill)
 }
 
 /** @brief Start the scaler with its configuration @p word. */
+TIKU_P4_XIP_TEXT
 static void srm_start(uint32_t word)
 {
     TIKU_P4_REG_WRITE(SR_SCAL_ROTATE, word);
@@ -266,6 +275,7 @@ static void ppa_isr(void)
 /** @brief Run an operation whose channels are open: @p start fires the
  *         engine with @p arg; waited for within @p budget_us, or with
  *         @p done called from the completion interrupt. */
+TIKU_P4_XIP_TEXT
 static int ppa_run(const tiku_p4_picture_t *out, uint16_t x, uint16_t y,
                    uint16_t w, uint16_t h, unsigned outs, uint8_t srm,
                    void (*start)(uint32_t), uint32_t arg, uint32_t budget_us,
@@ -311,6 +321,7 @@ static int ppa_run(const tiku_p4_picture_t *out, uint16_t x, uint16_t y,
 }
 
 /** @brief The fill: waited for, or left to @p done. */
+TIKU_P4_XIP_TEXT
 static int fill(const tiku_p4_picture_t *out, uint16_t x, uint16_t y,
                 uint16_t w, uint16_t h, uint32_t argb,
                 tiku_p4_dma2d_done_t done, void *ctx)
@@ -342,12 +353,14 @@ static int fill(const tiku_p4_picture_t *out, uint16_t x, uint16_t y,
     return rc;
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_ppa_fill(const tiku_p4_picture_t *out, uint16_t x, uint16_t y,
                      uint16_t w, uint16_t h, uint32_t argb)
 {
     return fill(out, x, y, w, h, argb, NULL, NULL);
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_ppa_fill_async(const tiku_p4_picture_t *out, uint16_t x,
                            uint16_t y, uint16_t w, uint16_t h, uint32_t argb,
                            tiku_p4_dma2d_done_t done, void *ctx)
@@ -361,6 +374,7 @@ int tiku_p4_ppa_fill_async(const tiku_p4_picture_t *out, uint16_t x,
 /** @brief Input @p in's BLEND_FIX_ALPHA fields from its alpha update: the
  *         value at [7:0] (background, 0) or [15:8], the mode at [17:16] or
  *         [19:18], the inversion at bit 20 or 21. */
+TIKU_P4_XIP_TEXT
 static uint32_t alpha_fields(uint16_t update, unsigned in)
 {
     uint32_t mode = update >> 8, value = update & 0xFFu;
@@ -371,6 +385,7 @@ static uint32_t alpha_fields(uint16_t update, unsigned in)
     return (value << (8u * in)) | (mode << (16u + 2u * in));
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_ppa_lut(unsigned input, const uint32_t *table)
 {
     unsigned i;
@@ -398,12 +413,14 @@ int tiku_p4_ppa_lut(unsigned input, const uint32_t *table)
 /** @brief A key range as the registers take it: @p low and @p high
  *         0xRRGGBB, which is the registers' R [23:16] G [15:8] B [7:0]; an
  *         empty range keys nothing. */
+TIKU_P4_XIP_TEXT
 static void put_key(uint32_t low_reg, uint32_t low, uint32_t high)
 {
     TIKU_P4_REG_WRITE(low_reg, low & 0xFFFFFFu);
     TIKU_P4_REG_WRITE(low_reg + 4u, high & 0xFFFFFFu);
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_ppa_blend(const tiku_p4_picture_t *out, uint16_t ox, uint16_t oy,
                       const tiku_p4_picture_t *bg, uint16_t bx, uint16_t by,
                       const tiku_p4_picture_t *fg, uint16_t fx, uint16_t fy,
@@ -416,6 +433,7 @@ int tiku_p4_ppa_blend(const tiku_p4_picture_t *out, uint16_t ox, uint16_t oy,
 
 /** @brief The blend, keyed when @p keys is set: waited for, or left to
  *         @p done. */
+TIKU_P4_XIP_TEXT
 static int blend(const tiku_p4_picture_t *out, uint16_t ox, uint16_t oy,
                  const tiku_p4_picture_t *bg, uint16_t bx, uint16_t by,
                  const tiku_p4_picture_t *fg, uint16_t fx, uint16_t fy,
@@ -485,6 +503,7 @@ static int blend(const tiku_p4_picture_t *out, uint16_t ox, uint16_t oy,
     return rc;
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_ppa_blend_keyed(const tiku_p4_picture_t *out, uint16_t ox,
                             uint16_t oy, const tiku_p4_picture_t *bg,
                             uint16_t bx, uint16_t by,
@@ -497,6 +516,7 @@ int tiku_p4_ppa_blend_keyed(const tiku_p4_picture_t *out, uint16_t ox,
                  fg_alpha, keys, NULL, NULL);
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_ppa_blend_keyed_async(const tiku_p4_picture_t *out, uint16_t ox,
                                   uint16_t oy, const tiku_p4_picture_t *bg,
                                   uint16_t bx, uint16_t by,
@@ -514,11 +534,13 @@ int tiku_p4_ppa_blend_keyed_async(const tiku_p4_picture_t *out, uint16_t ox,
 }
 
 /** @brief @p n pixels scaled by @p s sixteenths, rounded down. */
+TIKU_P4_XIP_TEXT
 static uint32_t scaled(uint32_t n, uint32_t s)
 {
     return (s >> 4) * n + ((s & 15u) * n) / 16u;
 }
 
+TIKU_P4_XIP_TEXT
 void tiku_p4_ppa_srm_size(uint16_t w, uint16_t h, uint16_t scale_x,
                           uint16_t scale_y, unsigned rotate, uint16_t *out_w,
                           uint16_t *out_h)
@@ -540,6 +562,7 @@ void tiku_p4_ppa_srm_size(uint16_t w, uint16_t h, uint16_t scale_x,
  *        a last block smaller than the DMA FIFO can leave the frame without
  *        an end, as ppa_srm.c computes it.
  */
+TIKU_P4_XIP_TEXT
 static int srm_bypass(uint32_t w, uint32_t h, uint32_t sx, uint32_t sy,
                       unsigned rotate, uint8_t out_bpp)
 {
@@ -560,6 +583,7 @@ static int srm_bypass(uint32_t w, uint32_t h, uint32_t sx, uint32_t sy,
 }
 
 /** @brief The scale, turn and mirror: waited for, or left to @p done. */
+TIKU_P4_XIP_TEXT
 static int srm(const tiku_p4_picture_t *out, uint16_t ox, uint16_t oy,
                const tiku_p4_picture_t *in, uint16_t ix, uint16_t iy,
                uint16_t w, uint16_t h, uint16_t scale_x, uint16_t scale_y,
@@ -627,6 +651,7 @@ static int srm(const tiku_p4_picture_t *out, uint16_t ox, uint16_t oy,
     return rc;
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_ppa_srm(const tiku_p4_picture_t *out, uint16_t ox, uint16_t oy,
                     const tiku_p4_picture_t *in, uint16_t ix, uint16_t iy,
                     uint16_t w, uint16_t h, uint16_t scale_x, uint16_t scale_y,
@@ -636,6 +661,7 @@ int tiku_p4_ppa_srm(const tiku_p4_picture_t *out, uint16_t ox, uint16_t oy,
                mirror, NULL, NULL);
 }
 
+TIKU_P4_XIP_TEXT
 int tiku_p4_ppa_srm_async(const tiku_p4_picture_t *out, uint16_t ox,
                           uint16_t oy, const tiku_p4_picture_t *in,
                           uint16_t ix, uint16_t iy, uint16_t w, uint16_t h,
@@ -650,6 +676,7 @@ int tiku_p4_ppa_srm_async(const tiku_p4_picture_t *out, uint16_t ox,
                mirror, done, ctx);
 }
 
+TIKU_P4_XIP_TEXT
 uint32_t tiku_p4_ppa_srm_errors(void)
 {
     return srm_errors;

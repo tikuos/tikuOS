@@ -22,8 +22,9 @@ Artifacts are `build/esp32p4/firmware/main.bin`, `main.paired.elf` and
 `xip.bin`. The unpaired `main.elf` is for symbols and debugging. The loader
 requires the paired ELF. Shell, BASIC, application and kit code, the VFS
 tree's node handlers and tables, their constants, and driver functions
-marked `TIKU_P4_XIP_TEXT` (the microphone's and the ISP's, apart from
-what their interrupt paths call) execute from flash. The
+marked `TIKU_P4_XIP_TEXT` (the microphone's, the ISP's, the JPEG
+codec's, the PPA's and the 2D-DMA's, apart from what their interrupt
+paths call) execute from flash. The
 rest of the kernel, cache/flash controller operations and their dependencies
 execute from internal SRAM; a flash operation runs there with interrupts
 masked, so no flash-resident code runs during one. The profile uses a 16 KiB
