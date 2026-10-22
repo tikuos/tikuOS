@@ -30,4 +30,7 @@ int tiku_p4_clock_pll_init(void);
  * @note SRAM diagnostic only; no active DMA or clock-dependent peripherals.
  */
 int tiku_p4_clock_set_mhz(unsigned mhz);
+/** @brief Register @p follower (the PSRAM bus), called with the target
+ *         clock before a step down and with the CPU clock after a switch. */
+void tiku_p4_clock_follow(void (*follower)(unsigned mhz));
 #endif

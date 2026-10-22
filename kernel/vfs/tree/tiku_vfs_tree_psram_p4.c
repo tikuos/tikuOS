@@ -33,10 +33,11 @@ static int size_read(char *out, size_t size)
 {
     return snprintf(out, size, "%lu\n", (unsigned long)tiku_p4_psram_size());
 }
-/** @brief Report the qualified interface clock, or zero when not initialized. */
+/** @brief Report the bus clock, which follows the CPU clock, or zero when
+ *         not initialized. */
 static int hz_read(char *out, size_t size)
 {
-    return snprintf(out, size, "%lu\n", tiku_p4_psram_size() ? 80000000UL : 0UL);
+    return snprintf(out, size, "%lu\n", (unsigned long)tiku_p4_psram_hz());
 }
 /** @brief Report the last completed initialization stage without hardware writes. */
 static int stage_read(char *out, size_t size)

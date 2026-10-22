@@ -231,7 +231,7 @@ the source, and written back and invalidated over the destination, which is
 invalidated again before the callback; `tiku_cpu_dcache_clean()` and
 `tiku_cpu_dcache_invalidate()` act on HP SRAM through the L1 as well as on
 PSRAM. SRAM to SRAM runs at about 140 MB/s. This revision's AHB DMA reaches
-PSRAM without bursts: about 18 MB/s writing it and 9 MB/s reading it.
+PSRAM without bursts: about 27 MB/s writing it and 12 MB/s reading it.
 
 The LED PWM controller drives up to eight pins for `tiku_pwm_arch_*()`
 (`tiku_pwm_arch.c`) from four timers on the 40 MHz crystal; pins at one
@@ -300,13 +300,12 @@ it back unless the context was already dirty, so a context that only
 copies keeps its initial state and its interrupts save nothing; a copy
 from an interrupt leaves the interrupted context's registers to the trap
 frame. Copies within PSRAM run at the PSRAM's rate: a VGA frame takes
-17 ms (36 MB/s; 25 ms before), and the DW-GDMA moves the same frame in
-9.7 ms.
+10.4 ms (59 MB/s), and the DW-GDMA moves the same frame in 4.5 ms.
 
 The media blocks move pixels through the 2D-DMA (`tiku_dma2d_arch.c`),
 with the caches kept coherent as for the AHB DMA. `tiku_p4_dma2d_copy()`
 copies a block of 1- to 4-byte pixels between pictures in HP SRAM or PSRAM:
-a 640x480 RGB565 frame from PSRAM to PSRAM takes 9.1 ms.
+a 640x480 RGB565 frame from PSRAM to PSRAM takes 4.5 ms.
 `tiku_p4_dma2d_convert()` copies with the out channel's colour converter on
 the way: RGB888 to and from RGB565 (widening repeats a channel's low bits),
 RGB888 to and from YUV444 and YUV422 (BT.601 limited range, the engine's own
@@ -317,23 +316,23 @@ ARGB8888, RGB888 and RGB565 pictures; a turn is a counter-clockwise quarter,
 a mirror applies to the turned block, and scaling is bilinear in sixteenths.
 A blend input may be a 1-byte picture of indices into a 256-entry ARGB8888
 table loaded with `tiku_p4_ppa_lut()`, and `tiku_p4_ppa_blend_keyed()`
-decides each pixel by colour keys first. A VGA fill takes 2.5 ms, doubling
-320x240 to 640x480 8.8 ms. The JPEG codec (`tiku_jpeg_arch.c`) encodes
+decides each pixel by colour keys first. A VGA fill takes 1.7 ms, doubling
+320x240 to 640x480 5.9 ms. The JPEG codec (`tiku_jpeg_arch.c`) encodes
 RGB888, RGB565 and grey at 4:4:4, 4:2:2 or 4:2:0, and YUV422 (U, Y, V, Y)
 at 4:2:2, into a JFIF with the standard tables, its headers written in
 software, and decodes baseline files of one or three components, restart
 intervals and motion JPEG without Huffman tables included, to RGB888,
 RGB565 or grey, or to the file's own full-range samples (V, U, Y, or U, Y,
 V, Y); in channel 0 turns the decoder's YCbCr into RGB with JFIF's
-full-range matrix. A VGA RGB565 frame encodes in 8 ms and
-decodes in 4.5 ms. Each of these operations also has an `_async` form that
+full-range matrix. A VGA RGB565 frame encodes in 5.2 ms and
+decodes in 3.6 ms. Each of these operations also has an `_async` form that
 returns once the engine runs and calls back from the completion interrupt
 (the 2D-DMA in channels' lines; a PPA parameter error or a JPEG codec error
 ends the job through the block's own line), the engine staying claimed until
 then. `tiku_dwgdma_arch.c` drives the DesignWare AXI DMA behind the MIPI
 bridges and the ISP for contiguous memory-to-memory copies, the beat width
 from the buffers' alignment, waited for or interrupt-completed: a VGA frame
-PSRAM to PSRAM in 9.7 ms. Its channels 2 and 3 move blocks between memory
+PSRAM to PSRAM in 4.5 ms. Its channels 2 and 3 move blocks between memory
 and the CSI bridge's FIFO under the hardware handshake of the ISP and the
 bridge (`tiku_p4_dwgdma_chan_start()`).
 
@@ -357,7 +356,7 @@ from PLL240 and takes its input in bursts of four 64-bit words (bursts of
 eight from HP SRAM fill its input FIFO and stall the frame); the output
 comes back in 512-word bursts, the last one short. Both modules are reset
 before every frame, since a frame started on what the previous one left
-stalls. A VGA RAW8 frame to RGB565 takes 10.7 ms. Frames are 8 x 8 to
+stalls. A VGA RAW8 frame to RGB565 takes 7.5 ms. Frames are 8 x 8 to
 1920 x 1280 pixels, widths a multiple of 8 and heights even (fewer than 8
 rows never leave the pipeline), buffers 8-byte aligned.
 
@@ -404,7 +403,7 @@ of each; `diag peek <hex> [words]` reads memory.
 | `0x4ff00000`–`0x4ff2bbd0` | Internal code/statics, durable SRAM mirror, separate retained data; remaining tail is allocator span 1 |
 | `0x4ff40000`–`0x4ff9bfc0` | Allocator span 0: 376,768 bytes |
 | `0x4ff9bfc0`–`0x4ffa0000` | 64-byte guard and 16 KiB foreground stack |
-| PSRAM at `0x48000000` | 32 MiB mapped, 80 MHz, volatile; external requests can allocate it; supplied by LDO VO2 at 1.8 V, which the PSRAM start enables |
+| PSRAM at `0x48000000` | 32 MiB mapped, 200 MHz under a 360 MHz CPU, volatile; external requests can allocate it; supplied by LDO VO2 at 1.8 V, which the PSRAM start enables |
 | Flash `0x000000`–`0x400000` | Reserved boot/code area, including the paired XIP window at offset `0x100000` |
 | Flash `0x400000`–`0xff0000` | 12,517,376-byte configurable NVM region; default tier 32 KiB, remainder `/data` |
 | Flash `0xff0000`–`0xff8000` | Two 16 KiB durable slots, each with a 16-byte header |
@@ -417,10 +416,36 @@ inside the file extent; `df` reports it separately from user content. The
 build can address up to 4,096 slots. Internal statics vary with build options.
 Use `/sys/mem/sram_map`, `nvm_map` and `tiers` for the running build.
 
-`/sys/psram/{state,size,hz,stage}` reports the native driver's status. Default
-working-memory requests stay internal; explicitly allow or require external
-memory to use PSRAM. Flash programming closes external access with dirty
-PSRAM writeback and flash-cache invalidation. DMA consumers are not qualified.
+`/sys/psram/{state,size,hz,stage}` reports the native driver's status; `hz`
+is the bus clock now. Default working-memory requests stay internal;
+explicitly allow or require external memory to use PSRAM. Flash
+programming closes external access with dirty PSRAM writeback and
+flash-cache invalidation.
+
+The PSRAM bus runs from the 400 MHz MPLL. Start-up sets the device's mode
+registers at 20 MHz (read latency 14 cycles, write latency 7), writes a
+128-byte reference at offset 0x80, then at 200 MHz sweeps the strobe phase
+(0 to 3) and the 31 data/strobe delay entries, reading the reference back
+100 times at each entry, and keeps the first phase of the longest passing
+run and the middle entry of the longest passing delay window (on this
+board: every phase, entries 5 to 27, entry 16 kept).
+`tiku_p4_psram_calibration()` returns both sweeps. The bus never runs
+faster than the CPU: `tiku_p4_clock_set_mhz()` lowers it before slowing
+the CPU and sets it after every switch, giving 200, 100, 66 and 40 MHz
+under 360, 180, 90 and 40 MHz, each change made with L1 written back, L2
+suspended and the controller idle; a light sleep leaves and regains the
+PLL through that switch. A DW-GDMA copy within PSRAM under a
+40 MHz CPU with the bus left at 200 MHz loses most of its words. With a
+360 MHz CPU, 4 MB within PSRAM moves at:
+
+| Transfer | 80 MHz bus | 200 MHz bus |
+| --- | --- | --- |
+| CPU read | 83 MB/s | 111 MB/s |
+| CPU write (written back) | 43 MB/s | 85 MB/s |
+| CPU copy (`memcpy`) | 37 MB/s | 60 MB/s |
+| DW-GDMA copy | 63 MB/s | 137 MB/s |
+| HP SRAM to PSRAM, 32 KB | 54-60 MB/s | 80-92 MB/s |
+| PSRAM to HP SRAM, 32 KB | 77-88 MB/s | 105-127 MB/s |
 
 `/sys/cpu/freq_available` advertises 40, 90, 180 and 360 MHz in Hz. Writing
 `/sys/cpu/freq_target` saves a next-boot preference; it does not change the
@@ -857,7 +882,8 @@ this build. `make flash` and whole-chip erase remain refused.
 
 `P4_PROFILE=kernel-test P4_PSRAM_TEST=1` builds an independent SRAM-only
 image under `build/esp32p4/kernel-test-psram/`. The driver initializes MPLL,
-the dedicated pads and SPI2/SPI3 controllers for an 80 MHz x16 interface.
+the dedicated pads and SPI2/SPI3 controllers for a 200 MHz x16 interface
+and calibrates the strobe phase and delay lines.
 It requires the fitted AP 32 MiB part, checks mode-register readback and direct
 transfers, and maps exactly 512 64-KiB pages. Initialization checks the mapped
 low byte lanes against the direct-controller pattern before publishing capacity.
@@ -884,8 +910,8 @@ The explicit `P` command destroys unallocated PSRAM contents. It refuses a
 currently attached external tier. Use the guarded loader, which requires a
 matching PSRAM-test image before opening the port. The test covers:
 
-- Four complete 32 MiB write/read patterns, at 40/90/180/360 MHz CPU rates,
-  with advancing timer interrupts. Writing the complete range before reading
+- Four complete 32 MiB write/read patterns, at 40/90/180/360 MHz CPU rates
+  (the bus at 40, 66, 100 and 200 MHz), with advancing timer interrupts. Writing the complete range before reading
   exceeds the cache capacity and checks for address aliasing.
 - Byte and halfword updates across cache lines, 64 KiB pages, the 16 MiB
   midpoint and the last bytes, followed by cache-evicting reads.

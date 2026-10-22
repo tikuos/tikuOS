@@ -529,10 +529,11 @@ uint32_t tiku_p4_light_sleep(uint64_t us)
     s = TIKU_P4_IRQ_SAVE();
 
     /* The PMU moves the system clock to the crystal asleep and leaves it
-     * there awake: the core leaves the CPLL first and goes back after.  The
-     * kernel's watchdog (MWDT0) holds while the core sleeps; the PMU no
+     * there awake: the core leaves the CPLL first, through the clock switch
+     * so the PSRAM bus comes down to 40 MHz with it, and goes back after.
+     * The kernel's watchdog (MWDT0) holds while the core sleeps; the PMU no
      * longer pauses it in a sleep the LP watchdog guards. */
-    (void)tiku_p4_clock_xtal_init();
+    (void)tiku_p4_clock_set_mhz(40u);
     tiku_watchdog_arch_pause();
     pmu_light_config(hz, us != 0ULL);
     if (us != 0ULL) {

@@ -8,7 +8,7 @@
  * tiku_pmu_arch.h - P4 v1.3 calibrated power and 360 MHz CPLL startup.
  *
  * Both PLL calls run with the CPU on the 40 MHz crystal and leave it there;
- * the 320 MHz MPLL clocks the 80 MHz PSRAM bus.
+ * the 400 MHz MPLL clocks the 200 MHz PSRAM bus.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,7 +21,7 @@
  * or -3 on calibration timeout. Errors leave the CPU root on XTAL.
  */
 int tiku_p4_pmu_cpll_init(void);
-/** @brief Initialize the v1.3 MPLL at 320 MHz for an 80 MHz PSRAM bus.
+/** @brief Initialize the v1.3 MPLL at 400 MHz for a 200 MHz PSRAM bus.
  * @note Requires CPU0 at 40 MHz, masked IRQs and no active MPLL consumers.
  * @return Zero on success, negative on identity, readback or calibration failure.
  */

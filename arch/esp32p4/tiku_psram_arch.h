@@ -26,6 +26,15 @@
 int tiku_p4_psram_init(void);
 /** @brief Return capacity after identity, PIO and mapped checks, or zero. */
 uint32_t tiku_p4_psram_size(void);
+/** @brief Set the bus clock for a CPU at @p cpu_mhz: 200 MHz under 360,
+ *         then 100, 66 and 40 MHz, never above the CPU clock. */
+void tiku_p4_psram_follow_cpu(unsigned cpu_mhz);
+/** @brief The bus clock in Hz, 0 without PSRAM. */
+uint32_t tiku_p4_psram_hz(void);
+/** @brief The calibration: the strobe phases (4 bits) and delay entries
+ *         (31 bits) that read the pattern back, and the two chosen. */
+void tiku_p4_psram_calibration(uint32_t *phases, uint32_t *delays,
+                               unsigned *phase, unsigned *delay);
 /** @brief Return the last completed initialization stage for diagnostics. */
 unsigned tiku_p4_psram_stage(void);
 #endif

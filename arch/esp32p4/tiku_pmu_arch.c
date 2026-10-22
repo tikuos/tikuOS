@@ -260,7 +260,7 @@ int tiku_p4_pmu_mpll_init(void)
     if (!analog_field(0x63, 3, 0x30, 0x30) &&
         !analog_field(0x63, 1, 0x20, 0) &&
         !analog_field(0x63, 1, 0x20, 0x20) &&
-        !analog_write(0x63, 2, 0x79)) {
+        !analog_write(0x63, 2, 0x99)) {
         result = -3;
         for (tries = 0; tries < 10000; tries++) {
             if (TIKU_P4_REG_READ(TIKU_P4_PLL_CAL) & (1u << 8)) {
