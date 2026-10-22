@@ -26,4 +26,13 @@ uint16_t tiku_cpu_p4_reset_reason(void);
 /** @brief Reset the SoC from internal SRAM with interrupts disabled, after
  *  writing back the L1 data cache so retained data reaches HP SRAM. */
 void tiku_cpu_p4_restart(void) __attribute__((noreturn));
+
+/* Driver code that executes from the flash XIP window instead of SRAM:
+ * paths no interrupt handler takes.  A flash operation masks interrupts,
+ * so a caller in the window is never running during one. */
+#if defined(__riscv)
+#define TIKU_P4_XIP_TEXT __attribute__((section(".p4.xip.text")))
+#else
+#define TIKU_P4_XIP_TEXT
+#endif
 #endif

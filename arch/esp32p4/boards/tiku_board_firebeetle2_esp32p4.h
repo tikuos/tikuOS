@@ -76,6 +76,13 @@
 #define TIKU_BOARD_OW_PIN 48u
 #endif
 
+/* The MSM261DGT003 PDM microphone: its clock from GPIO12, its data on
+ * GPIO9, select tied low (the left slot).  tiku_pdm_arch.c alone drives
+ * them; the GPIO owner table reports them as "microphone". */
+#define TIKU_BOARD_PDM_AVAILABLE 1
+#define TIKU_BOARD_PDM_CLK_PIN  12u
+#define TIKU_BOARD_PDM_DATA_PIN 9u
+
 /* 6, 14-19, 54: the ESP32-C6's SDIO link, EN and WAKEUP.  9, 12: the PDM
  * microphone.  24, 25: the console.  39-45: the TF slot and its power switch
  * (GPIO45 low powers the card).  3, 35: the LED and the button. */

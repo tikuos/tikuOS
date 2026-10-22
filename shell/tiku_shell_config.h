@@ -279,6 +279,14 @@
 #define TIKU_SHELL_CMD_JPEG   0
 #endif
 #endif
+#ifndef TIKU_SHELL_CMD_MIC
+/* The FireBeetle 2's PDM microphone. */
+#if defined(TIKU_BOARD_FIREBEETLE2_ESP32P4)
+#define TIKU_SHELL_CMD_MIC    1  /**< mic    - PDM microphone capture */
+#else
+#define TIKU_SHELL_CMD_MIC    0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_USBMSC
 #if defined(TIKU_USBHS_MSC)
 #define TIKU_SHELL_CMD_USBMSC 1  /**< usbmsc - present the board as a disk */

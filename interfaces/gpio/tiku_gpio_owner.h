@@ -27,6 +27,10 @@
 /** @brief Longest owner name tiku_gpio_claim() accepts, in bytes. */
 #define TIKU_GPIO_OWNER_NAME_MAX    23u
 
+/** @brief The label of a board's microphone pads: a reservation, never a
+ *         claim; the microphone driver alone configures them. */
+#define TIKU_GPIO_OWNER_MICROPHONE "microphone"
+
 /**
  * @brief Claim a pin for a driver.
  *
@@ -61,8 +65,8 @@ int tiku_gpio_release(uint8_t port, uint8_t pin, const char *owner);
  *
  * @param port  Port number as the raw GPIO interface takes it
  * @param pin   Pin within the port
- * @return NULL for a free pin; otherwise "console" or "wifi" for a board
- *         reservation, the claiming driver's name, "peripheral" for a pin
+ * @return NULL for a free pin; otherwise "console", "wifi" or "microphone"
+ *         for a board reservation, the claiming driver's name, "peripheral" for a pin
  *         routed to a peripheral, "unreadable" when the architecture check
  *         cannot read the pin, or "invalid" outside the platform geometry
  * @note Scheduler context only: the claim table is read without locking.

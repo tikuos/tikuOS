@@ -29,6 +29,7 @@ SECTIONS {
         */TikuBench/tests/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         */kernel/vfs/tree/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         */tikukits/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *(.p4.xip.text .p4.xip.rodata)
         *(.rodata.tiku_lpcore_image)
         . = ALIGN(4);
     } > XIP

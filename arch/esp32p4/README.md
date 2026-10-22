@@ -21,7 +21,9 @@ make MCU=esp32p4 P4_PROFILE=firmware \
 Artifacts are `build/esp32p4/firmware/main.bin`, `main.paired.elf` and
 `xip.bin`. The unpaired `main.elf` is for symbols and debugging. The loader
 requires the paired ELF. Shell, BASIC, application and kit code, the VFS
-tree's node handlers and tables, and their constants execute from flash. The
+tree's node handlers and tables, their constants, and driver functions
+marked `TIKU_P4_XIP_TEXT` (the microphone's, apart from its interrupt
+handler) execute from flash. The
 rest of the kernel, cache/flash controller operations and their dependencies
 execute from internal SRAM; a flash operation runs there with interrupts
 masked, so no flash-resident code runs during one. The profile uses a 16 KiB
@@ -128,6 +130,27 @@ takes JTAG over USB. Every other pad, the header pins among them, accepts
 `gpio`, `/dev/gpio` writes and `irq` edges on GPIO_INTR0 (matrix source 74,
 CLIC line 3), each edge broadcast as `TIKU_EVENT_GPIO`. While the LP core
 drives GPIO3, `/dev/led0` writes do not reach the pad.
+
+The board's MSM261DGT003 PDM microphone takes its clock from GPIO12 and
+returns its bit stream on GPIO9, its select pin tied low. `tiku_pdm_arch.c`
+runs it through I2S0, the one I2S instance with the PDM-to-PCM filter:
+the receive clock comes from the 40 MHz crystal through the fractional
+divider in `HP_SYS_CLKRST`, the microphone clock is the sample rate times
+the decimation (64 from 15625 Hz up, 128 below, so the clock stays at
+1 MHz or more), and the filter's 35.5 Hz high-pass removes the offset.
+AHB DMA channel 2 (peripheral 3, CLIC line 12, source 58) fills a ring of
+eight 1 KB buffers of 16-bit mono samples, taken from the SRAM tier's high
+span at start and given back at stop, refusing a buffer the core has
+not handed back, so an overrun stops the engine and is counted; the next
+read that finds the ring empty restarts the stream. `tiku_p4_pdm_start()`
+takes 8000-39000 Hz and the left, right or both slots,
+`tiku_p4_pdm_read()` blocks for up to a given time, and the owner table
+reports the two pads as `microphone`: no other driver or the `gpio`
+command can take them. The `mic` command starts and stops it, prints the
+level of the last buffer, the counters and a run of samples. The board
+test `pdm-p4` measures the rate against the system timer; which slot the
+microphone's data lands in, and the clock edge the silicon samples it on,
+are what the board confirms.
 
 UART0 drives GPIO37 (TX) and GPIO38 (RX), header P1 pins 17 and 18, in
 their IO MUX function, 8N1 at 300 to 3000000 baud from the 40 MHz crystal

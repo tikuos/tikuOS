@@ -188,6 +188,9 @@
 #if TIKU_SHELL_CMD_JPEG
 #include "commands/tiku_shell_cmd_jpeg.h"
 #endif
+#if TIKU_SHELL_CMD_MIC
+#include "commands/tiku_shell_cmd_mic.h"
+#endif
 #if TIKU_SHELL_CMD_USBMSC
 #include "commands/tiku_shell_cmd_usbmsc.h"
 #endif
@@ -675,6 +678,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_JPEG
     {"jpeg",    "JPEG codec and PPA test card", tiku_shell_cmd_jpeg},
+#endif
+#if TIKU_SHELL_CMD_MIC
+    {"mic",     "PDM microphone capture", tiku_shell_cmd_mic},
 #endif
 #if TIKU_SHELL_CMD_USBMSC
     {"usbmsc",  "USB mass storage disk",       tiku_shell_cmd_usbmsc},

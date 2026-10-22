@@ -26,6 +26,9 @@
 /** @brief Completion callback; runs in the DMA interrupt when a copy ends. */
 typedef void (*tiku_dma_done_cb_t)(void *ctx);
 
+/** @brief Clock the engine, release its reset and open its address range;
+ *         every channel's user calls it, a repeat changes nothing. */
+void tiku_p4_ahb_dma_power(void);
 /** @brief Clock the engine, put pair 1 in memory mode, route its interrupt;
  *         a repeat call does nothing. */
 void tiku_dma_arch_init(void);

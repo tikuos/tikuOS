@@ -37,7 +37,8 @@ static gpio_claim_t claims[TIKU_GPIO_CLAIM_LIMIT];
 
 /** @brief Labels tiku_gpio_owner() or /dev/gpio_owner report; unclaimable. */
 static const char *const reserved_names[] = {
-    "free", "console", "peripheral", "unreadable", "invalid", "wifi"
+    "free", "console", "peripheral", "unreadable", "invalid", "wifi",
+    TIKU_GPIO_OWNER_MICROPHONE
 };
 
 /**
@@ -105,11 +106,12 @@ name_valid(const char *owner)
  * @brief Board function holding a pin, or NULL.
  *
  * Covers the console UART's pins on every platform but the MSP430, whose mux
- * check reports them, and the Pico 2 W radio wiring when its driver is built.
+ * check reports them, the Pico 2 W radio wiring when its driver is built,
+ * and the FireBeetle 2's microphone pads.
  *
  * @param port  Port number
  * @param pin   Pin within the port
- * @return "console", "wifi" or NULL
+ * @return "console", "wifi", "microphone" or NULL
  */
 static const char *
 board_owner(uint8_t port, uint8_t pin)
@@ -155,6 +157,13 @@ board_owner(uint8_t port, uint8_t pin)
 #if defined(TIKU_BOARD_USB_DM_PIN)
     if (IS_BANKED_PIN(port, pin, TIKU_BOARD_USB_DM_PIN) ||
         IS_BANKED_PIN(port, pin, TIKU_BOARD_USB_DP_PIN)) { return "console"; }
+#endif
+#if defined(TIKU_BOARD_PDM_CLK_PIN)
+    /* The PDM microphone's clock and data, driven by tiku_pdm_arch.c. */
+    if (IS_BANKED_PIN(port, pin, TIKU_BOARD_PDM_CLK_PIN) ||
+        IS_BANKED_PIN(port, pin, TIKU_BOARD_PDM_DATA_PIN)) {
+        return TIKU_GPIO_OWNER_MICROPHONE;
+    }
 #endif
     if (port >= 1 && port <= 7 && pin < 8 &&
         ((TIKU_BOARD_GPIO_RESERVED >> ((port - 1u) * 8u + pin)) & 1u)) { return "peripheral"; }

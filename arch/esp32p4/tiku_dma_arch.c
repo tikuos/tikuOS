@@ -5,11 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_dma_arch.c - ESP32-P4 memory-to-memory copy on AHB DMA pair 1.
- *
+ * tiku_dma_arch.c - ESP32-P4 memory-to-memory copy on AHB DMA pair 1, and
+ * the engine's power-up shared with the PDM receiver on channel 2.
  * Register fields follow ESP-IDF 4d59230 ahb_dma_reg.h, ahb_dma_ll.h,
- * gdma_ll.h and hp_sys_clkrst_reg.h (hw_ver1); pair 1 copies memory on every
- * silicon revision.
+ * gdma_ll.h and hp_sys_clkrst_reg.h (hw_ver1).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -194,6 +193,16 @@ static void dma_isr(void)
     }
 }
 
+void tiku_p4_ahb_dma_power(void)
+{
+    put_bits(CLK_SYS, CLK_SYS_DMA, CLK_SYS_DMA);
+    put_bits(RESET_DMA, RESET_DMA_AHB, 0u);
+    put_bits(DMA_MISC, MISC_CLK_EN, MISC_CLK_EN);
+    /* The engine may reach flash, PSRAM and HP SRAM (ahb_dma_ll.h). */
+    TIKU_P4_REG_WRITE(DMA_MEM_START, 0x40000000u);
+    TIKU_P4_REG_WRITE(DMA_MEM_END, 0x4FFC0000u);
+}
+
 void tiku_dma_arch_init(void)
 {
     uint32_t state;
@@ -202,12 +211,7 @@ void tiku_dma_arch_init(void)
         return;
     }
     state = TIKU_P4_IRQ_SAVE();
-    put_bits(CLK_SYS, CLK_SYS_DMA, CLK_SYS_DMA);
-    put_bits(RESET_DMA, RESET_DMA_AHB, 0u);
-    put_bits(DMA_MISC, MISC_CLK_EN, MISC_CLK_EN);
-    /* The engine may reach flash, PSRAM and HP SRAM (ahb_dma_ll.h). */
-    TIKU_P4_REG_WRITE(DMA_MEM_START, 0x40000000u);
-    TIKU_P4_REG_WRITE(DMA_MEM_END, 0x4FFC0000u);
+    tiku_p4_ahb_dma_power();
     dma_halt();
     TIKU_P4_REG_WRITE(DMA_IN_CONF0, IN_MEM_TRANS | IN_DSCR_BURST |
                                         IN_DATA_BURST);
