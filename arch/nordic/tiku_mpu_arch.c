@@ -123,12 +123,15 @@ void tiku_mpu_arch_enable_irq(void) {
  * HardFault, as the bus fault of a store through the closed WEN gate does.
  */
 
+/* A host model defines NRF_SCS_MPU_CTRL and the rest over its own words. */
+#ifndef NRF_SCS_MPU_CTRL
 #define NRF_SCS_MPU_TYPE   (*(volatile uint32_t *)0xE000ED90UL)
 #define NRF_SCS_MPU_CTRL   (*(volatile uint32_t *)0xE000ED94UL)
 #define NRF_SCS_MPU_RNR    (*(volatile uint32_t *)0xE000ED98UL)
 #define NRF_SCS_MPU_RBAR   (*(volatile uint32_t *)0xE000ED9CUL)
 #define NRF_SCS_MPU_RLAR   (*(volatile uint32_t *)0xE000EDA0UL)
 #define NRF_SCS_MPU_MAIR0  (*(volatile uint32_t *)0xE000EDC0UL)
+#endif
 
 #define NRF_MPU_CTRL_ENABLE      (1UL << 0)
 #define NRF_MPU_CTRL_PRIVDEFENA  (1UL << 2)

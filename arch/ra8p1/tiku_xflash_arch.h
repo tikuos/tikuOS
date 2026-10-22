@@ -34,8 +34,11 @@ struct tiku_nvm_backend;
 #define TIKU_RA8P1_XFLASH_ID1   0x86U
 #define TIKU_RA8P1_XFLASH_ID2   0x3AU
 
-/** @brief Mapped window and capacity of the board's part. */
+/** @brief Mapped window and capacity of the board's part; a host model
+ *         defines the window to its own memory. */
+#ifndef TIKU_RA8P1_XFLASH_ADDR
 #define TIKU_RA8P1_XFLASH_ADDR   0x90000000UL   /* OSPI0 CS1 */
+#endif
 #define TIKU_RA8P1_XFLASH_BYTES  (64UL * 1024UL * 1024UL)
 
 /** @brief Bring up OSPI0 and its pins, and reset the flash into single-bit

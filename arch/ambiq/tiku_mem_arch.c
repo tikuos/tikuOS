@@ -49,7 +49,9 @@ extern uint32_t __tiku_nvm_mram_start[]; /* base of the mirror page (linker
  * dst_word_offset, num_words).  MRAM needs no erase before a program.
  */
 typedef int (*nv_program_main2_t)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+#ifndef NV_PROGRAM_MAIN2        /* a host model defines its own */
 #define NV_PROGRAM_MAIN2  ((nv_program_main2_t)(0x0200ff20UL + 1UL))
+#endif
 
 /**
  * @brief Page-sized SSRAM staging buffer for MRAM programming
@@ -58,8 +60,11 @@ typedef int (*nv_program_main2_t)(uint32_t, uint32_t, uint32_t, uint32_t, uint32
  * bootrom MRAM programmer requires.  Layout: words 0-3 = mirror header, then
  * the .uninit image, 0xFF padding to a 16-byte boundary.
  */
+#ifndef TIKU_AMBIQ_SNAP_SECTION /* a host model defines its own */
+#define TIKU_AMBIQ_SNAP_SECTION __attribute__((section(".ssram")))
+#endif
 static uint32_t g_nvm_snap[TIKU_NVM_MRAM_BYTES / 4U]
-    __attribute__((section(".ssram"), aligned(16)));
+    TIKU_AMBIQ_SNAP_SECTION __attribute__((aligned(16)));
 
 /* Successful mirror programs: flushes whose dirty check found a change.
  * Read by the mrambench self-test, which expects an idle flush to leave it
@@ -291,9 +296,11 @@ void tiku_mem_arch_nvm_flush(void)
  * addresses SysTick.  SysTick reloads every kernel tick, too short a span to
  * time a program of up to milliseconds in one read, so the bench uses the
  * 32-bit DWT counter and calibrates its rate against the SysTick delay. */
+#ifndef TIKU_DWT_CTRL           /* a host model defines its own */
 #define TIKU_DWT_CTRL    (*(volatile uint32_t *)0xE0001000UL)
 #define TIKU_DWT_CYCCNT  (*(volatile uint32_t *)0xE0001004UL)
 #define TIKU_SCB_DEMCR   (*(volatile uint32_t *)0xE000EDFCUL)
+#endif
 
 uint8_t tiku_mem_arch_nvm_bench(tiku_mem_nvm_bench_row_t *rows, uint8_t max,
                                 unsigned long *dwt_hz_out)

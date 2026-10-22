@@ -24,7 +24,9 @@
  * @brief Direct register addresses used by the bare-metal STIMER driver.
  * @{
  */
+#ifndef NVIC_ISER                 /* a host model defines its own */
 #define NVIC_ISER ((volatile uint32_t *)0xE000E100UL)
+#endif
 #define AMBIQ_IRQ_STIMER_CMPR0  32
 #define AMBIQ_IRQ_STIMER_CMPR1  33   /**< periodic kernel tick (compare-B) */
 
@@ -309,6 +311,13 @@ static int stimer_verify_counting(void) {
     return stimer_counter() != c0;
 }
 
+/* The trace enable and the DWT cycle counter; a host model defines its own. */
+#ifndef TIKU_AMBIQ_DEMCR_PTR
+#define TIKU_AMBIQ_DEMCR_PTR   ((volatile uint32_t *)0xE000EDFCUL)
+#define TIKU_AMBIQ_DWTCTL_PTR  ((volatile uint32_t *)0xE0001000UL)
+#define TIKU_AMBIQ_CYCCNT_PTR  ((volatile uint32_t *)0xE0001004UL)
+#endif
+
 /**
  * @brief Measure the actual LFRC rate against the DWT cycle counter.
  *
@@ -319,9 +328,9 @@ static int stimer_verify_counting(void) {
  * @return measured Hz, or 900 when the result is outside 500..2000 Hz
  */
 static uint32_t stimer_lfrc_calibrate(void) {
-    volatile uint32_t *demcr  = (volatile uint32_t *)0xE000EDFCUL;
-    volatile uint32_t *dwtctl = (volatile uint32_t *)0xE0001000UL;
-    volatile uint32_t *cyccnt = (volatile uint32_t *)0xE0001004UL;
+    volatile uint32_t *demcr  = TIKU_AMBIQ_DEMCR_PTR;
+    volatile uint32_t *dwtctl = TIKU_AMBIQ_DWTCTL_PTR;
+    volatile uint32_t *cyccnt = TIKU_AMBIQ_CYCCNT_PTR;
     uint32_t demcr0 = *demcr, ctl0 = *dwtctl;
     uint32_t c0, cyc0, cyc1, hz, spin;
     unsigned long core = tiku_cpu_ambiq_clock_get_hz();

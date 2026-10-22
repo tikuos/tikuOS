@@ -113,7 +113,10 @@ struct tiku_mpu_diag {
 };
 
 /** @brief Warm-durable diagnostic block instance in .mpu_diag */
-__attribute__((section(".mpu_diag")))
+#ifndef TIKU_AMBIQ_DIAG_SECTION /* a host model defines its own */
+#define TIKU_AMBIQ_DIAG_SECTION __attribute__((section(".mpu_diag")))
+#endif
+TIKU_AMBIQ_DIAG_SECTION
 static volatile struct tiku_mpu_diag mpu_diag;
 
 /*---------------------------------------------------------------------------*/
@@ -627,6 +630,8 @@ static void ambiq_hard_fault_body(const uint32_t *frame) {
  * memory. EXC_RETURN bit 2 selects which stack holds the exception frame.
  */
 
+/* The host build compiles the C bodies above without these Arm shims. */
+#if !defined(TIKU_TEST_HOST)
 /** @brief MemManage handler; overrides the weak crt_early alias. */
 __attribute__((naked))
 void tiku_ambiq_mem_fault_handler(void) {
@@ -662,6 +667,7 @@ void tiku_ambiq_hard_fault_handler(void) {
         "b     ambiq_hard_fault_body  \n\t"
     );
 }
+#endif
 
 /**
  * @brief Flip the module execution window between writable and executable.

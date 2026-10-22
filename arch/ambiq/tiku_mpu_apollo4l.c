@@ -98,7 +98,10 @@ struct tiku_mpu_diag {
     uint32_t violation_flags;  /**< MMFSR flags retained across warm reset. */
 };
 
-__attribute__((section(".mpu_diag")))
+#ifndef TIKU_AMBIQ_DIAG_SECTION /* a host model defines its own */
+#define TIKU_AMBIQ_DIAG_SECTION __attribute__((section(".mpu_diag")))
+#endif
+TIKU_AMBIQ_DIAG_SECTION
 static volatile struct tiku_mpu_diag mpu_diag;
 
 /** CFSR/MMFSR bit 7: MMFAR holds a valid fault address */
@@ -434,6 +437,8 @@ static void ambiq_hard_fault_body(const uint32_t *frame) {
  * from memory. EXC_RETURN bit 2 selects which stack holds the exception frame.
  */
 
+/* The host build compiles the C bodies above without these Arm shims. */
+#if !defined(TIKU_TEST_HOST)
 /** @brief MemManage handler; overrides the weak crt_early alias. */
 __attribute__((naked))
 void tiku_ambiq_mem_fault_handler(void) {
@@ -469,6 +474,7 @@ void tiku_ambiq_hard_fault_handler(void) {
         "b     ambiq_hard_fault_body  \n\t"
     );
 }
+#endif
 
 /** @brief Apollo4 modules execute in place from read-only MRAM. */
 void tiku_mpu_arch_module_window_exec(int enable)

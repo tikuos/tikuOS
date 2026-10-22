@@ -19,7 +19,9 @@
 #include "kernel/timers/tiku_htimer.h"
 #include "apollo4l.h"       /* CMSIS register map (STIMER, MCUCTRL) */
 
+#ifndef NVIC_ISER                 /* a host model defines its own */
 #define NVIC_ISER ((volatile uint32_t *)0xE000E100UL)
+#endif
 #define AMBIQ_IRQ_STIMER_CMPR0  32
 #define AMBIQ_IRQ_STIMER_CMPR1  33   /**< periodic kernel tick (compare-B) */
 

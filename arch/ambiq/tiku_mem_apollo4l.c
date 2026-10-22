@@ -49,7 +49,9 @@ extern uint32_t __tiku_nvm_mram_start[]; /* base of the mirror page (linker
  * Thumb bit.  Arguments: (key, op, src_addr, dst_word_offset, num_words).
  */
 typedef int (*nv_program_main2_t)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+#ifndef NV_PROGRAM_MAIN2        /* a host model defines its own */
 #define NV_PROGRAM_MAIN2  ((nv_program_main2_t)0x0800006DUL)
+#endif
 
 /**
  * @brief TCM staging buffer for MRAM programming
@@ -260,9 +262,11 @@ void tiku_mem_arch_nvm_flush(void)
  * kernel tick, too short a span to time a program of up to milliseconds in one
  * read, so the bench uses the 32-bit DWT counter (wraps after ~44 s at 96 MHz)
  * and calibrates its rate. */
+#ifndef TIKU_DWT_CTRL           /* a host model defines its own */
 #define TIKU_DWT_CTRL    (*(volatile uint32_t *)0xE0001000UL)
 #define TIKU_DWT_CYCCNT  (*(volatile uint32_t *)0xE0001004UL)
 #define TIKU_SCB_DEMCR   (*(volatile uint32_t *)0xE000EDFCUL)
+#endif
 
 uint8_t tiku_mem_arch_nvm_bench(tiku_mem_nvm_bench_row_t *rows, uint8_t max,
                                 unsigned long *dwt_hz_out)

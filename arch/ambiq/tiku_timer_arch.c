@@ -28,9 +28,11 @@
  * variant (M0/M3/M33/M55).
  * @{
  */
+#ifndef SYST_CSR                  /* a host model defines its own */
 #define SYST_CSR  (*(volatile uint32_t *)0xE000E010UL)
 #define SYST_RVR  (*(volatile uint32_t *)0xE000E014UL)
 #define SYST_CVR  (*(volatile uint32_t *)0xE000E018UL)
+#endif
 #define SYST_CSR_ENABLE     (1u << 0)
 #define SYST_CSR_TICKINT    (1u << 1)
 #define SYST_CSR_CLKSOURCE  (1u << 2)   /* processor clock */

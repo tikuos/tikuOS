@@ -107,7 +107,9 @@ uint8_t tiku_cpu_nordic_unique_id(uint8_t *buf, uint8_t len)
 /* Reset reason (RESETREAS -> MSP430-compatible code)                        */
 /*---------------------------------------------------------------------------*/
 
+#ifndef TIKU_NORDIC_RESETREAS                   /* a host model's own word */
 #define TIKU_NORDIC_RESETREAS   (*(volatile uint32_t *)0x5010E600UL)
+#endif
 #define TIKU_RESETREAS_RESETPIN (1UL << 0)
 #define TIKU_RESETREAS_DOG0     (1UL << 1)
 #define TIKU_RESETREAS_DOG1     (1UL << 2)
