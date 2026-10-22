@@ -15,7 +15,9 @@
 #ifndef TIKU_P4_MMAP_ARCH_H_
 #define TIKU_P4_MMAP_ARCH_H_
 #include <stdint.h>
+#ifndef TIKU_P4_FLASH_VIRTUAL
 #define TIKU_P4_FLASH_VIRTUAL 0x40000000u
+#endif
 /** @brief Map the fitted 16 MiB flash through SPI0 and the fixed L2 cache.
  * @note CPU0 SRAM execution, parked secondary cores and exclusive MSPI
  * ownership are required. Flash mutations must use the SRAM MSPI cache guard.

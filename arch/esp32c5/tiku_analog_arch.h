@@ -16,6 +16,10 @@
 #define TIKU_ESP32C5_ANALOG_ARCH_H_
 #include <stdint.h>
 
+/** @brief The analog block's input selection register; the TRNG saves and
+ *         restores it around a read. */
+#define TIKU_C5_ANA_SELECT 0x600AF81Cu
+
 enum {
     TIKU_C5_ANALOG_NONE,
     TIKU_C5_ANALOG_ENTROPY,

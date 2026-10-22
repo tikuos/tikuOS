@@ -20,8 +20,11 @@
 #ifndef TIKU_P4_XIP_FENCE
 #define TIKU_P4_XIP_FENCE() __asm__ volatile("fence.i" ::: "memory")
 #endif
+#ifndef TIKU_P4_XIP_EXPECTED_SECTION
+#define TIKU_P4_XIP_EXPECTED_SECTION __attribute__((section(".p4.expected")))
+#endif
 
-__attribute__((section(".p4.expected"), used, aligned(4)))
+TIKU_P4_XIP_EXPECTED_SECTION __attribute__((used, aligned(4)))
 const uint32_t tiku_p4_xip_expected[16] = {0x554b4954u, 0x50583450u, 1};
 
 int tiku_p4_xip_validate(const uint32_t *expected, const uint8_t *mapped,

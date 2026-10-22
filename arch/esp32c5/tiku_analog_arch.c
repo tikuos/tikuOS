@@ -18,7 +18,6 @@
 #include "tiku_esp32c5_regs.h"
 
 #define C5_ANA          0x600AF800u
-#define C5_ANA_SELECT   (C5_ANA + 0x1Cu)
 #define C5_ANA_MUX      (C5_ANA + 0x20u)
 #define C5_ANA_SPINS    200000u
 
@@ -87,7 +86,7 @@ int tiku_c5_analog_sar_reg(uint8_t reg, uint8_t *value, int write)
     if (analog_idle(address)) {
         return -1;
     }
-    TIKU_C5_REG_WRITE(C5_ANA_SELECT, 0xFFFFFFu & ~(1u << 9));
+    TIKU_C5_REG_WRITE(TIKU_C5_ANA_SELECT, 0xFFFFFFu & ~(1u << 9));
     if (write) {
         command |= (1u << 24) | ((uint32_t)*value << 16);
     }

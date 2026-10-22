@@ -21,7 +21,11 @@
 #define TIKU_C5_XIP_FENCE() __asm__ volatile("fence.i" ::: "memory")
 #endif
 
-__attribute__((section(".c5.expected"), used))
+#ifndef TIKU_C5_XIP_EXPECTED_SECTION
+#define TIKU_C5_XIP_EXPECTED_SECTION __attribute__((section(".c5.expected")))
+#endif
+
+TIKU_C5_XIP_EXPECTED_SECTION __attribute__((used))
 const uint32_t tiku_c5_xip_expected[16] = {0x554B4954u, 0x50583543u, 1u};
 
 int tiku_c5_xip_validate(const uint32_t *expected, const uint8_t *mapped,

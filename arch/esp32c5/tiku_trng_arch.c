@@ -24,7 +24,6 @@
 #define C5_SAR_CLOCK  0x6009608Cu
 #define C5_SAR_DIV    0x60096148u
 #define C5_ANA_CLOCK  0x600AF018u
-#define C5_ANA_SELECT 0x600AF81Cu
 #define C5_SAR_POWER  0x600B0158u
 #define C5_RNG_CLOCK  0x600B2800u
 #define C5_RNG_RESET  0x600B2804u
@@ -37,7 +36,7 @@
 
 static const uint32_t saved_regs[] = {
     C5_SAR_BUS,   C5_SAR_CLOCK,  C5_SAR_DIV,    C5_ANA_CLOCK,
-    C5_SAR_POWER, C5_ANA_SELECT, C5_RNG_CLOCK,  C5_RNG_CFG,
+    C5_SAR_POWER, TIKU_C5_ANA_SELECT, C5_RNG_CLOCK, C5_RNG_CFG,
     C5_SAR,       C5_SAR + 4,    C5_SAR + 0x18, C5_SAR + 0x1C};
 static const uint8_t analog_regs[] = {0, 1, 3, 4, 7, 8};
 

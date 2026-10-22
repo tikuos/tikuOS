@@ -18,7 +18,9 @@
 #include <stdint.h>
 
 #define TIKU_FLASH_SIZE_BYTES     0x400000UL
+#ifndef TIKU_FLASH_MMAP_BASE
 #define TIKU_FLASH_MMAP_BASE      0x42000000UL
+#endif
 #define TIKU_FLASH_SECTOR_SIZE    4096u
 #define TIKU_FLASH_PAGE_SIZE      256u
 #define TIKU_FLASH_BOOT_BYTES     0x100000UL
