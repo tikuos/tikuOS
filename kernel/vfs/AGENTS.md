@@ -33,15 +33,15 @@ The other modules under `tree/` serve /sys/mem/layout, /sys/net,
 `tiku_vfs_tree_init(config)` builds the core namespace; a NULL config
 selects no optional providers.  `boot/tiku_boot_vfs.c` selects them: the
 shell's `/sys/rules` and `/sys/jobs` (`shell/tiku_shell_vfs.c`), the init
-table's `/sys/init` (`services/init/tiku_init_vfs.c`), BASIC's
-`/data/basic` (`basic/tiku_basic_vfs.c`) and the applications overlay's
-`/gui`.  Provider nodes and child tables must have static lifetime.  Rules,
+table's `/sys/init` (`services/init/tiku_init_vfs.c`), tinymcp's
+`/sys/mcp` (`services/tinymcp/tiku_mcp_vfs.c`), BASIC's `/data/basic`
+(`basic/tiku_basic_vfs.c`) and the applications overlay's `/gui`.  Provider nodes and child tables must have static lifetime.  Rules,
 jobs and init are mounts and list after the static `/sys` children; BASIC
 is a static `/data` child ahead of the dynamic files; a runtime mount under
 a dynamic directory is refused (EACCES).  An invalid configuration, a
 failed mount or a failed NVM relock leaves no root published and halts
 boot before the drivers start.  The mount table has `TIKU_VFS_MOUNT_MAX`
-(21) entries: 17 for the driver registry and four for the providers.
+(22) entries: 17 for the driver registry and five for the providers.
 Subtree hardware initialization runs once; a later call rebuilds the
 namespace.  `tiku_boot_vfs_restore()` rebuilds it and remounts the drivers
 without reinitializing hardware, shell state or the GUI channel.

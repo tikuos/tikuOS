@@ -39,6 +39,10 @@
 #include "services/init/tiku_init.h"
 #endif
 
+#if TIKU_MCP_ENABLE
+#include "services/tinymcp/tiku_mcp.h"
+#endif
+
 #ifdef TIKU_BASIC_EMBEDDED
 #include "basic/tiku_basic.h"
 extern const char tiku_basic_embedded_src[];
@@ -104,6 +108,11 @@ int main(void) {
 
 #if TIKU_SHELL_ENABLE
   tiku_shell_init();
+#endif
+#if TIKU_MCP_ENABLE
+  /* The console channel, the shell pump that runs requests, and the
+   * process that reports watched nodes; /sys/mcp is a boot mount below. */
+  tiku_mcp_init();
 #endif
 
 #ifdef TIKU_BASIC_EMBEDDED

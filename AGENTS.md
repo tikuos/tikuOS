@@ -93,8 +93,9 @@ per-platform semantics and the NVM region layout.
 - Before `git commit`, present the subject, author and body and wait for
   approval.  Push only when asked.  Check `git branch -r --contains`
   before amending.
-- Each nested checkout (`TikuBench/`, `tikukits/`, `applications/`,
-  `drivers/`, `experiment/`) is its own repository: commit inside it.
+- Each nested checkout (`TikuBench/`, `tikukits/`, `tinymcp/`,
+  `applications/`, `drivers/`, `experiment/`) is its own repository: commit
+  inside it.
   Changes that span repositories are pushed together.
 - Never committed: the gitignored local directories (`kintsugi/`,
   `experiment/`, `temp/`, `setup-guides/`), board captures and ledgers.
@@ -107,6 +108,7 @@ per-platform semantics and the NVM region layout.
 | memory tiers, NVM region, `/data`, layout knobs | `kernel/memory/AGENTS.md` |
 | the console line, frames and channels | `services/console/AGENTS.md` |
 | message links over the console, IP or BLE | `services/link/AGENTS.md` |
+| tinymcp, the board as an MCP server | `services/tinymcp/AGENTS.md` |
 | the shell, a new command, an I/O backend | `shell/AGENTS.md` |
 | BASIC, modules, the module layout | `basic/AGENTS.md` |
 | drivers and the driver registry | `drivers.md`, `drivers/README.md` |

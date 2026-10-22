@@ -23,6 +23,9 @@
 #if TIKU_INIT_ENABLE
 #include <services/init/tiku_init_vfs.h>
 #endif
+#if TIKU_MCP_ENABLE
+#include <services/tinymcp/tiku_mcp_vfs.h>
+#endif
 #if TIKU_SHELL_ENABLE && TIKU_SHELL_CMD_BASIC
 #include <basic/tiku_basic_vfs.h>
 #endif
@@ -53,6 +56,11 @@ static int assemble(void)
 #if TIKU_INIT_ENABLE
     nodes[config.node_count++] = (tiku_vfs_boot_node_t){
         "/sys", tiku_init_vfs_get()
+    };
+#endif
+#if TIKU_MCP_ENABLE
+    nodes[config.node_count++] = (tiku_vfs_boot_node_t){
+        "/sys", tiku_mcp_vfs_get()
     };
 #endif
 #if TIKU_SHELL_ENABLE && TIKU_SHELL_CMD_BASIC

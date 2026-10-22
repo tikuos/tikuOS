@@ -64,6 +64,16 @@ tikuOS:/> write /dev/led0 1
 tikuOS:/> every 1 toggle /dev/led0
 ```
 
+An agent reaches the same namespace over the Model Context Protocol: a
+board built with `TIKU_MCP_ENABLE=1` is an MCP server on its console
+line, its nodes the resources and `read`, `write`, `ls` and `shell` the
+tools, through the [tinymcp](http://tinymcp.org) library and its bridge
+from a client's stdio to the port:
+
+```
+claude mcp add nrf54l15 -- python3 tinymcp/bridge/tinymcp.py /dev/cu.usbmodem0010577569363
+```
+
 TikuOS also has a BASIC interpreter. With agents writing the C, it is the
 simplest way for a person to program a device by hand, a few lines at the
 board rather than a C program. Programs save to `/data` and survive a

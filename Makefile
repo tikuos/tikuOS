@@ -92,7 +92,7 @@ TIKU_THREADS_ENABLE ?= 1
 TIKU_SHELL_BASIC_ENABLE ?= 1
 P4_REQUESTED_FEATURES := $(strip $(foreach v,$(filter TIKU_%_ENABLE,$(.VARIABLES)),\
     $(if $(filter 1,$($(v))),$(v))))
-P4_REQUESTED_FEATURES := $(filter-out TIKU_SHELL_ENABLE TIKU_THREADS_ENABLE TIKU_SHELL_BASIC_ENABLE,$(P4_REQUESTED_FEATURES))
+P4_REQUESTED_FEATURES := $(filter-out TIKU_SHELL_ENABLE TIKU_THREADS_ENABLE TIKU_SHELL_BASIC_ENABLE TIKU_MCP_ENABLE,$(P4_REQUESTED_FEATURES))
 ifneq ($(strip $(APP) $(BASIC_PROGRAM)),)
 $(error ESP32-P4 firmware does not include APP or BASIC_PROGRAM payloads)
 endif
@@ -111,7 +111,7 @@ TIKU_PLATFORM := esp32c5
 C5_REQUESTED_FEATURES := $(strip $(foreach v,$(filter TIKU_%_ENABLE,$(.VARIABLES)),\
     $(if $(filter 1,$($(v))),$(v))))
 ifneq ($(MINIMAL),1)
-C5_REQUESTED_FEATURES := $(filter-out TIKU_SHELL_ENABLE TIKU_THREADS_ENABLE TIKU_SHELL_BASIC_ENABLE TIKU_DRV_PHY_C5_ENABLE TIKU_DRV_WIFI_ESP_ENABLE TIKU_DRV_BLE_ESP_ENABLE TIKU_DRV_SDR_ESP_ENABLE TIKU_DRV_SDR_ESP_TX_ENABLE TIKU_DRV_154_C5_ENABLE TIKU_KIT_CRYPTO_ENABLE TIKU_MEM_RECLAIM_ENABLE,$(C5_REQUESTED_FEATURES))
+C5_REQUESTED_FEATURES := $(filter-out TIKU_SHELL_ENABLE TIKU_THREADS_ENABLE TIKU_SHELL_BASIC_ENABLE TIKU_DRV_PHY_C5_ENABLE TIKU_DRV_WIFI_ESP_ENABLE TIKU_DRV_BLE_ESP_ENABLE TIKU_DRV_SDR_ESP_ENABLE TIKU_DRV_SDR_ESP_TX_ENABLE TIKU_DRV_154_C5_ENABLE TIKU_KIT_CRYPTO_ENABLE TIKU_MEM_RECLAIM_ENABLE TIKU_MCP_ENABLE,$(C5_REQUESTED_FEATURES))
 endif
 ifneq ($(C5_REQUESTED_FEATURES),)
 $(error ESP32-C5 profile does not include optional features: $(C5_REQUESTED_FEATURES))
@@ -3045,6 +3045,40 @@ CFLAGS += -DTIKU_INIT_ENABLE=1
 SRCS += kernel/memory/tiku_nvm_map.c
 SRCS += services/init/tiku_init.c
 SRCS += shell/commands/tiku_shell_cmd_init.c
+endif
+
+# ---------------------------------------------------------------------------
+# tinymcp: the board as a Model Context Protocol server on console channel
+# 0xF3 (services/tinymcp/).  The protocol is the tinymcp library, a sibling
+# checkout at TINYMCP (tinymcp/ beside tikukits/, gitignored) that only a
+# build with the flag on needs; its TINYMCP_API must be the one this binding
+# was written against.  The tools run from the shell's pump, so the shell is
+# required.  The ESP32-C61 and P4 buffers hold a frame of their PSRAM-sized
+# replies.
+# ---------------------------------------------------------------------------
+TIKU_MCP_ENABLE ?= 0
+TINYMCP         ?= tinymcp
+TINYMCP_API_BOUND := 1
+ifeq ($(TIKU_MCP_ENABLE),1)
+ifneq ($(TIKU_SHELL_ENABLE),1)
+$(error TIKU_MCP_ENABLE=1 needs the shell: the tools run from its pump)
+endif
+ifeq ($(wildcard $(TINYMCP)/tinymcp.h),)
+$(error TIKU_MCP_ENABLE=1 needs the tinymcp library at $(TINYMCP)/: git clone https://github.com/tikuos/tinymcp $(TINYMCP))
+endif
+TINYMCP_API_HAVE := $(shell awk '$$2 == "TINYMCP_API" && $$1 ~ /define/ { print $$3 }' $(TINYMCP)/tinymcp.h)
+ifneq ($(TINYMCP_API_HAVE),$(TINYMCP_API_BOUND))
+$(error tinymcp at $(TINYMCP) is API $(TINYMCP_API_HAVE); services/tinymcp binds API $(TINYMCP_API_BOUND): update the checkout or the binding)
+endif
+CFLAGS += -DTIKU_MCP_ENABLE=1 -I$(TINYMCP)
+ifneq ($(filter esp32c61 esp32p4,$(TIKU_PLATFORM)),)
+CFLAGS += -DTIKU_MCP_IN_CAP=2048u -DTIKU_MCP_OUT_CAP=8192u -DTIKU_MCP_SCRATCH=4098u
+endif
+SRCS += $(TINYMCP)/tinymcp.c $(TINYMCP)/tinymcp_json.c
+SRCS += services/tinymcp/tiku_mcp.c
+SRCS += services/tinymcp/tiku_mcp_console.c
+SRCS += services/tinymcp/tiku_mcp_vfs.c
+SRCS += shell/commands/tiku_shell_cmd_mcp.c
 endif
 
 # ---------------------------------------------------------------------------

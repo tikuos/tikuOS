@@ -76,6 +76,8 @@ typedef struct {
     uint8_t (*rx_ready)(void);      /**< non-zero when getc has a byte */
     int     (*getc)(void);          /**< one byte, or -1 when none */
     uint8_t   escape_nul;           /**< send a NUL as ESC ESC_NUL */
+    void    (*flush)(void);         /**< push what putc buffered onto the
+                                         line; NULL when putc writes through */
 } tiku_console_wire_t;
 
 /** @brief Install @p wire, or the boot console again for NULL. */
@@ -83,6 +85,9 @@ void tiku_console_set_wire(const tiku_console_wire_t *wire);
 
 /** @brief The wire in use. */
 const tiku_console_wire_t *tiku_console_wire(void);
+
+/** @brief The wire's flush, for a sender whose frame must leave now. */
+void tiku_console_flush(void);
 
 /*---------------------------------------------------------------------------*/
 /* CHANNELS                                                                  */

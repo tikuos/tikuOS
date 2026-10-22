@@ -69,6 +69,9 @@
 #endif
 #if TIKU_SHELL_CMD_CONSOLE
 #include "commands/tiku_shell_cmd_console.h"
+#if TIKU_SHELL_CMD_MCP
+#include "commands/tiku_shell_cmd_mcp.h"
+#endif
 #endif
 #if TIKU_SHELL_CMD_TIMER
 #include "commands/tiku_shell_cmd_timer.h"
@@ -501,6 +504,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_CONSOLE
     {"console", "The line's channels, counters", tiku_shell_cmd_console},
+#endif
+#if TIKU_SHELL_CMD_MCP
+    {"mcp",     "The tinymcp server's state",   tiku_shell_cmd_mcp},
 #endif
 #if TIKU_SHELL_CMD_FREE
     {"free",    "Memory usage (SRAM/" TIKU_DEVICE_NVM_LABEL ")", tiku_shell_cmd_free},

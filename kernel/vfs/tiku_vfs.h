@@ -346,7 +346,7 @@ void tiku_vfs_init(const tiku_vfs_node_t *root);
  * plus four optional providers selected by boot.
  */
 #ifndef TIKU_VFS_MOUNT_MAX
-#define TIKU_VFS_MOUNT_MAX 21
+#define TIKU_VFS_MOUNT_MAX 22
 #endif
 
 /**

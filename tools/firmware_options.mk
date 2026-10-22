@@ -50,6 +50,8 @@ $(eval $(call tiku_option,TIKU_SHELL_BASIC_ENABLE,bool,System,all,\
   Tiku BASIC interpreter in the shell))
 $(eval $(call tiku_option,TIKU_INIT_ENABLE,bool,System,all,\
   Init system: boot configuration kept in NVM (needs the shell)))
+$(eval $(call tiku_option,TIKU_MCP_ENABLE,bool,System,all,\
+  tinymcp: the board as a Model Context Protocol server on the console))
 $(eval $(call tiku_option,TIKU_THREADS_ENABLE,bool,System,arm,\
   Preemptive worker threads))
 $(eval $(call tiku_option,TIKU_SHELL_COLOR,bool,System,all,Colour in the shell))

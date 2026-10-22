@@ -53,16 +53,19 @@ typedef struct {
  * (TIKU_CONSOLE=usb on RP2350 or nRF54LM20), and the UART everywhere else,
  * TIKU_CONSOLE=both included. */
 #if defined(TIKU_CONSOLE_JTAG)
+/* The Serial/JTAG port packetises: a frame waits in its buffer for a
+ * newline or the next poll unless it is flushed. */
 static const tiku_console_wire_t boot_wire = {
-    tiku_serial_jtag_putc, tiku_serial_jtag_rx_ready, tiku_usb_serial_jtag_getc, 1u
+    tiku_serial_jtag_putc, tiku_serial_jtag_rx_ready, tiku_usb_serial_jtag_getc, 1u,
+    tiku_serial_jtag_flush
 };
 #elif defined(TIKU_CONSOLE_USB) && !defined(TIKU_CONSOLE_BOTH)
 static const tiku_console_wire_t boot_wire = {
-    tiku_usb_cdc_putc, tiku_usb_cdc_rx_ready, tiku_usb_cdc_getc, 1u
+    tiku_usb_cdc_putc, tiku_usb_cdc_rx_ready, tiku_usb_cdc_getc, 1u, (void (*)(void))0
 };
 #else
 static const tiku_console_wire_t boot_wire = {
-    tiku_uart_putc, tiku_uart_rx_ready, tiku_uart_getc, 1u
+    tiku_uart_putc, tiku_uart_rx_ready, tiku_uart_getc, 1u, (void (*)(void))0
 };
 #endif
 
@@ -209,6 +212,14 @@ const tiku_console_wire_t *
 tiku_console_wire(void)
 {
     return wire;
+}
+
+void
+tiku_console_flush(void)
+{
+    if (wire->flush != (void (*)(void))0) {
+        wire->flush();
+    }
 }
 
 /*---------------------------------------------------------------------------*/

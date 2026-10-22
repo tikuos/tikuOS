@@ -20,7 +20,7 @@
 #include "tiku_vfs.h"
 
 /** @brief Most subtrees a tree config mounts under "/" or "/sys". */
-#define TIKU_VFS_BOOT_NODES_MAX 4u
+#define TIKU_VFS_BOOT_NODES_MAX 5u
 /** @brief Most static children a tree config places under /data. */
 #define TIKU_VFS_DATA_CHILDREN_MAX 1u
 
