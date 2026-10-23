@@ -86,6 +86,21 @@ directory's files left out, as `path type perms meta cap id` (`manifest_rev`
 The manifest pages from any line (`read /sys/vfs/manifest <line> <bytes>`)
 because a link reply is bounded.
 
+## Streamed read
+
+`tiku_vfs_read_at(path, offset, buf, max, &total)` copies a node's bytes
+from `offset` on, with no NUL, and reports the full length; 0 bytes means
+the end.  A node whose descriptor carries a `read_at` producer
+(`TIKU_VFS_DESC_STREAM`) and a dynamic file whose directory has a `read_at`
+op serve every offset, so a reader holding one small buffer walks content
+of any length.  `/sys/vfs/manifest` (`tiku_vfs_manifest_at()`) and the
+`/data` files (through `tiku_tfs_map()`) do.  Any other node is rendered
+whole into the caller's buffer: offset 0 always reads, a later offset only
+when all of it fit, else `TIKU_VFS_ENOTSUP`; such a node whose read drains or has
+an effect refuses every offset past 0 without rendering.  The producer
+serves the same bytes the text handler renders, and the read cache is not
+consulted.
+
 ## Persistent nodes
 
 Declare the value in durable memory, then its gate and descriptor with
@@ -105,5 +120,8 @@ cell.
 ## Proof
 
 Host: `TikuBench/tests/host/kernel/test_vfs_assembly.c` (built per
-profile), `test_vfs*.c`.  Board: the `vfs-c-core`, `vfs-c-tree`,
-`vfs-c-watch`, `vfs-tree`, `vfs-observe` and `vfs-events` suites.
+profile), `test_vfs*.c`; `mutations/vfs.py` lists the source mutations the
+streamed-read checks in `test_vfs_model.c` and `test_vfs_data.c` must catch
+(`python3 mutate.py --port vfs`).  Board: the `vfs-c-core` (with
+`test_vfs_stream.c`), `vfs-c-tree`, `vfs-c-watch`, `vfs-tree`,
+`vfs-observe` and `vfs-events` suites.

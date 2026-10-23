@@ -321,6 +321,11 @@ _Static_assert(sizeof(tiku_vfs_tree_watch_children) /
  */
 #define TIKU_VFS_MANIFEST_REV  4u
 
+/* /sys/vfs/manifest serves any byte range through tiku_vfs_read_at(). */
+static const tiku_vfs_desc_t desc_manifest = TIKU_VFS_DESC_STREAM(
+    TIKU_VFS_T_STR, TIKU_VFS_U_NONE, TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE,
+    tiku_vfs_manifest_at);
+
 /* Reading /sys/vfs/events drains the change ring. */
 static const tiku_vfs_desc_t desc_events = TIKU_VFS_DESC_FLAGS(
     TIKU_VFS_T_STR, TIKU_VFS_U_NONE, TIKU_VFS_FRESH_CACHED, TIKU_VFS_E_FREE,
@@ -347,7 +352,8 @@ static int vfs_manifest_rev_read(char *buf, size_t max)
 const tiku_vfs_node_t tiku_vfs_tree_vfs_children[] = {
     { "nodes",        TIKU_VFS_FILE, vfs_nodes_read,        NULL, NULL, 0 },
     { "depth",        TIKU_VFS_FILE, vfs_depth_read,        NULL, NULL, 0 },
-    { "manifest",     TIKU_VFS_FILE, vfs_manifest_read,     NULL, NULL, 0 },
+    { "manifest",     TIKU_VFS_FILE, vfs_manifest_read,     NULL, NULL, 0,
+      &desc_manifest },
     { "manifest_rev", TIKU_VFS_FILE, vfs_manifest_rev_read, NULL, NULL, 0 },
     { "events",       TIKU_VFS_FILE, vfs_events_read,       NULL, NULL, 0,
       &desc_events },

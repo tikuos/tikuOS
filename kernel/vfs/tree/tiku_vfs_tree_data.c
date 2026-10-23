@@ -590,9 +590,43 @@ data_dyn_list_dir(const char *prefix, tiku_vfs_dyn_list_cb cb, void *ctx)
     (void)tiku_tfs_list_dir(&data_fs, prefix, data_list_thunk, &w);
 }
 
+/**
+ * @brief Streamed read op for /data/<name>: the file's bytes from @p offset
+ *        on, copied from the store's mapping of the file.
+ * @return The bytes copied, 0 at or past the end; TIKU_VFS_ENOTSUP while the
+ *         store is not mounted, or the store's failure as a VFS status
+ */
+static int
+data_dyn_read_at(const char *name, uint32_t offset, char *buf, size_t max,
+                 uint32_t *total)
+{
+    const void *p = NULL;
+    size_t len = 0;
+    size_t n;
+    int rc;
+
+    if (data_tfs_ensure() != 0) {
+        return TIKU_VFS_ENOTSUP;
+    }
+    rc = tiku_tfs_map(&data_fs, name, &p, &len);
+    if (rc != TFS_OK) {
+        return data_status(rc);
+    }
+    *total = (uint32_t)len;
+    if ((uint32_t)len <= offset) {
+        return 0;
+    }
+    n = (size_t)((uint32_t)len - offset);
+    if (n > max) {
+        n = max;
+    }
+    memcpy(buf, (const char *)p + offset, n);
+    return (int)n;
+}
+
 static const tiku_vfs_dynops_t data_dynops = {
     data_dyn_list, data_dyn_read, data_dyn_write, data_dyn_unlink,
-    data_dyn_list_dir
+    data_dyn_list_dir, data_dyn_read_at
 };
 
 /*---------------------------------------------------------------------------*/

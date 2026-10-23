@@ -124,6 +124,19 @@ typedef int (*tiku_vfs_read_fn)(char *buf, size_t max);
  */
 typedef int (*tiku_vfs_write_fn)(const char *buf, size_t len);
 
+/**
+ * @brief Streamed producer: a node's content from byte @p offset on.
+ *
+ * Serves the bytes the node's text handler renders, from any offset, with no
+ * NUL; tiku_vfs_serving() names the node.  @p max is at least 1.
+ *
+ * @param total  Out: the content's full length at the time of the call
+ * @return Bytes copied, at most @p max and more than 0 unless @p offset is at
+ *         or past *total, or a negative TIKU_VFS_* status
+ */
+typedef int (*tiku_vfs_read_at_fn)(uint32_t offset, char *buf, size_t max,
+                                   uint32_t *total);
+
 /*---------------------------------------------------------------------------*/
 /* TYPE DESCRIPTORS                                                          */
 /*---------------------------------------------------------------------------*/
@@ -227,22 +240,29 @@ typedef struct tiku_vfs_desc {
     int32_t  vmin;        /**< Range low  (valid iff DF_RANGE) */
     int32_t  vmax;        /**< Range high (valid iff DF_RANGE) */
     int (*read_val)(tiku_vfs_val_t *out); /**< Native producer, or NULL */
+    tiku_vfs_read_at_fn read_at;  /**< Streamed producer for
+                                       tiku_vfs_read_at(), or NULL */
 } tiku_vfs_desc_t;
 
 /** @brief Build a plain descriptor (no range, no caching, text-decoded). */
 #define TIKU_VFS_DESC(vt, un, fr, ec)                                       \
     { (uint8_t)(vt), (uint8_t)(un), (uint8_t)(fr), (uint8_t)(ec),           \
-      TIKU_VFS_DF_NONE, 0u, 0, 0, 0, 0 }
+      TIKU_VFS_DF_NONE, 0u, 0, 0, 0, 0, 0 }
 
 /** @brief Build a plain descriptor carrying TIKU_VFS_DF_* flags @p fl. */
 #define TIKU_VFS_DESC_FLAGS(vt, un, fr, ec, fl)                             \
     { (uint8_t)(vt), (uint8_t)(un), (uint8_t)(fr), (uint8_t)(ec),           \
-      (fl), 0u, 0, 0, 0, 0 }
+      (fl), 0u, 0, 0, 0, 0, 0 }
+
+/** @brief Build a plain descriptor whose content streams through @p at. */
+#define TIKU_VFS_DESC_STREAM(vt, un, fr, ec, at)                            \
+    { (uint8_t)(vt), (uint8_t)(un), (uint8_t)(fr), (uint8_t)(ec),           \
+      TIKU_VFS_DF_NONE, 0u, 0, 0, 0, 0, (at) }
 
 /** @brief Build a ranged descriptor (DF_RANGE set; vmin..vmax meaningful). */
 #define TIKU_VFS_DESC_R(vt, un, fr, ec, lo, hi)                             \
     { (uint8_t)(vt), (uint8_t)(un), (uint8_t)(fr), (uint8_t)(ec),           \
-      TIKU_VFS_DF_RANGE, 0u, 0, (int32_t)(lo), (int32_t)(hi), 0 }
+      TIKU_VFS_DF_RANGE, 0u, 0, (int32_t)(lo), (int32_t)(hi), 0, 0 }
 
 /**
  * @brief Build a ranged descriptor with a freshness/cache window.
@@ -255,7 +275,8 @@ typedef struct tiku_vfs_desc {
  */
 #define TIKU_VFS_DESC_RF(vt, un, fr, ec, lo, hi, ticks)                     \
     { (uint8_t)(vt), (uint8_t)(un), (uint8_t)(fr), (uint8_t)(ec),           \
-      TIKU_VFS_DF_RANGE, (uint16_t)(ticks), 0, (int32_t)(lo), (int32_t)(hi), 0 }
+      TIKU_VFS_DF_RANGE, (uint16_t)(ticks), 0, (int32_t)(lo), (int32_t)(hi), \
+      0, 0 }
 
 /*---------------------------------------------------------------------------*/
 /* DYNAMIC DIRECTORIES                                                       */
@@ -288,6 +309,11 @@ typedef struct tiku_vfs_dynops {
      *  "logs/" = a sub-folder), with a trailing '/' on virtual folders.  NULL
      *  on a flat store, which has no sub-folders and is listed with list(). */
     void (*list_dir)(const char *prefix, tiku_vfs_dyn_list_cb cb, void *ctx);
+    /** Optional: copy at most max bytes of a child from byte offset on and
+     *  set *total to its length; the bytes copied, 0 at or past the end, or
+     *  a negative status.  NULL: tiku_vfs_read_at() reads through read(). */
+    int  (*read_at)(const char *name, uint32_t offset, char *buf, size_t max,
+                    uint32_t *total);
 } tiku_vfs_dynops_t;
 
 /*---------------------------------------------------------------------------*/
@@ -507,6 +533,37 @@ int tiku_vfs_read_node(const tiku_vfs_node_t *node, char *buf, size_t max);
  * @return The node being served, or NULL outside a handler call
  */
 const tiku_vfs_node_t *tiku_vfs_serving(void);
+
+/**
+ * @brief Read a node's content from byte @p offset on, as raw bytes.
+ *
+ * A node whose descriptor has a read_at producer, and a dynamic file whose
+ * directory has a read_at op, serve every offset.  Any other node is rendered
+ * whole into @p buf and serves an offset past 0 only when all of it fits.
+ *
+ * @param path    Absolute path to a FILE node, static or dynamic
+ * @param offset  First byte wanted
+ * @param buf     Output buffer; no NUL is added
+ * @param max     Buffer capacity, at least 1; above INT_MAX, INT_MAX is used
+ * @param total   Out: the content's full length, 0 on an error; may be NULL
+ * @return Bytes copied, 0 when @p offset is at or past the end;
+ *         TIKU_VFS_EINVAL for a NULL @p buf or a zero @p max; TIKU_VFS_ENOENT;
+ *         TIKU_VFS_EACCES for a node that is not a readable file;
+ *         TIKU_VFS_ENOTSUP for an offset past 0 that the node cannot serve;
+ *         or the handler's or producer's negative status
+ * @note A static text that does not fit gives max - 1 bytes at offset 0, as
+ *       tiku_vfs_read() does.  A node whose read has an effect or consumes is
+ *       rendered at offset 0 only.  The read cache is not consulted.
+ */
+int tiku_vfs_read_at(const char *path, uint32_t offset, char *buf,
+                     size_t max, uint32_t *total);
+
+/**
+ * @brief By-node form of tiku_vfs_read_at() for a static or mounted node.
+ * @return As tiku_vfs_read_at(); TIKU_VFS_ENOENT for a NULL @p node
+ */
+int tiku_vfs_read_at_node(const tiku_vfs_node_t *node, uint32_t offset,
+                          char *buf, size_t max, uint32_t *total);
 
 /*---------------------------------------------------------------------------*/
 /* TYPED ACCESS                                                              */
@@ -879,6 +936,14 @@ int tiku_vfs_manifest(char *buf, size_t max);
  * @return The length of the lines rendered, snprintf-style.
  */
 int tiku_vfs_manifest_from(char *buf, size_t max, unsigned long first);
+
+/**
+ * @brief The manifest's bytes from @p offset on, with no NUL: the read_at
+ *        producer of /sys/vfs/manifest.
+ * @return As tiku_vfs_read_at_fn
+ */
+int tiku_vfs_manifest_at(uint32_t offset, char *buf, size_t max,
+                         uint32_t *total);
 
 /**
  * @brief Read node @p path from line @p first on, as whole lines.

@@ -22,8 +22,9 @@
 #include "tiku_vfs_cache.h"
 #include <kernel/process/tiku_process.h>
 #include <hal/tiku_cpu.h>
+#include <limits.h>   /* INT_MAX */
 #include <stdio.h>
-#include <string.h>   /* memcpy, memset, strcmp, strlen */
+#include <string.h>   /* memcpy, memmove, memset, strcmp, strlen */
 
 /*---------------------------------------------------------------------------*/
 /* PRIVATE STATE                                                             */
@@ -562,6 +563,129 @@ int tiku_vfs_read_total(const char *path, char *buf, size_t max,
         *total = full;
     }
     return rc;
+}
+
+/*---------------------------------------------------------------------------*/
+/* STREAMED READ                                                             */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Serve @p offset on from a content of @p len bytes rendered into
+ *        @p buf, of which the first @p kept bytes are there.
+ * @return The bytes moved to the start of @p buf, 0 at or past the end, or
+ *         TIKU_VFS_ENOTSUP for an offset past 0 into a content cut short
+ */
+static int vfs_slice(char *buf, size_t kept, uint32_t len, uint32_t offset)
+{
+    if (offset == 0u) {
+        return (int)kept;
+    }
+    if ((uint32_t)kept < len) {
+        return TIKU_VFS_ENOTSUP;
+    }
+    if (offset >= len) {
+        return 0;
+    }
+    memmove(buf, buf + offset, (size_t)(len - offset));
+    return (int)(len - offset);
+}
+
+/**
+ * @brief Keep a producer's count within @p max and set @p total.
+ * @return @p rc, cut to @p max
+ */
+static int vfs_read_at_done(int rc, size_t max, uint32_t full,
+                            uint32_t *total)
+{
+    if (rc > 0 && (size_t)rc > max) {
+        rc = (int)max;
+    }
+    if (total != NULL) {
+        *total = (rc < 0) ? 0u : full;
+    }
+    return rc;
+}
+
+int tiku_vfs_read_at_node(const tiku_vfs_node_t *node, uint32_t offset,
+                          char *buf, size_t max, uint32_t *total)
+{
+    const tiku_vfs_desc_t *d;
+    const tiku_vfs_node_t *outer = vfs_serving;
+    uint32_t full = 0u;
+    int rc;
+
+    if (total != NULL) {
+        *total = 0u;
+    }
+    if (node == NULL) {
+        return TIKU_VFS_ENOENT;
+    }
+    if (buf == NULL || max == 0u) {
+        return TIKU_VFS_EINVAL;
+    }
+    if (node->type != TIKU_VFS_FILE || node->read == NULL) {
+        return TIKU_VFS_EACCES;
+    }
+    if (max > (size_t)INT_MAX) {
+        max = (size_t)INT_MAX;
+    }
+    d = node->desc;
+    vfs_serving = node;
+    if (d != NULL && d->read_at != NULL) {
+        rc = d->read_at(offset, buf, max, &full);
+    } else if (offset > 0u && d != NULL &&
+               (d->flags & (TIKU_VFS_DF_READ_EFFECT |
+                            TIKU_VFS_DF_READ_CONSUMES)) != 0u) {
+        rc = TIKU_VFS_ENOTSUP;     /* a second render repeats the effect */
+    } else {
+        rc = node->read(buf, max);
+        if (rc >= 0) {
+            full = (uint32_t)rc;
+            rc = vfs_slice(buf, ((size_t)rc < max) ? (size_t)rc : max - 1u,
+                           full, offset);
+        }
+    }
+    vfs_serving = outer;
+    return vfs_read_at_done(rc, max, full, total);
+}
+
+int tiku_vfs_read_at(const char *path, uint32_t offset, char *buf,
+                     size_t max, uint32_t *total)
+{
+    const tiku_vfs_node_t *node = tiku_vfs_resolve(path);
+    const tiku_vfs_node_t *par;
+    const char *name = NULL;
+    uint32_t full = 0u;
+    int rc;
+
+    if (node != NULL) {
+        return tiku_vfs_read_at_node(node, offset, buf, max, total);
+    }
+    if (total != NULL) {
+        *total = 0u;
+    }
+    par = vfs_parent_of(path, &name);
+    if (par == NULL || par->dyn == NULL ||
+        (par->dyn->read == NULL && par->dyn->read_at == NULL)) {
+        return TIKU_VFS_ENOENT;
+    }
+    if (buf == NULL || max == 0u) {
+        return TIKU_VFS_EINVAL;
+    }
+    if (max > (size_t)INT_MAX) {
+        max = (size_t)INT_MAX;
+    }
+    if (par->dyn->read_at != NULL) {
+        rc = par->dyn->read_at(name, offset, buf, max, &full);
+    } else {
+        rc = par->dyn->read(name, buf, max);    /* copies at most max bytes */
+        if (rc >= 0) {
+            full = (uint32_t)rc;
+            rc = vfs_slice(buf, ((size_t)rc < max) ? (size_t)rc : max,
+                           full, offset);
+        }
+    }
+    return vfs_read_at_done(rc, max, full, total);
 }
 
 const char *tiku_vfs_read_policy(const tiku_vfs_node_t *node)
@@ -1391,14 +1515,38 @@ uint8_t tiku_vfs_depth(void)
  * listed but its runtime children are not.  Only node metadata is read: a
  * manifest calls no handler.
  */
-/** @brief Output buffer and running length of a manifest render. */
+/** @brief Output window and running length of a manifest render. */
 typedef struct {
-    char  *out;   /**< output buffer                              */
-    size_t max;   /**< capacity of @ref out                       */
-    size_t off;   /**< running length; may exceed max (truncated) */
-    unsigned long skip;  /**< lines left out before the first written */
-    unsigned long line;  /**< lines rendered so far, written or not   */
+    char    *out;   /**< output buffer                                  */
+    size_t   cap;   /**< bytes @ref out takes, from byte @ref from on    */
+    uint32_t from;  /**< first byte of the rendering copied to @ref out  */
+    uint32_t off;   /**< bytes rendered so far, copied or not           */
+    unsigned long skip;  /**< lines left out before the first rendered */
+    unsigned long line;  /**< lines seen so far, rendered or not       */
 } vfs_manifest_sink_t;
+
+/**
+ * @brief Append @p n bytes to the rendering; the part that falls inside the
+ *        window [from, from + cap) is copied to its place in the buffer.
+ */
+static void manifest_put(vfs_manifest_sink_t *s, const char *src, size_t n)
+{
+    uint32_t lo = s->off;
+    uint32_t hi = s->off + (uint32_t)n;
+    uint32_t end = s->from + (uint32_t)s->cap;
+
+    if (lo < s->from) {
+        lo = s->from;
+    }
+    if (hi > end) {
+        hi = end;
+    }
+    if (lo < hi) {
+        memcpy(s->out + (lo - s->from), src + (lo - s->off),
+               (size_t)(hi - lo));
+    }
+    s->off += (uint32_t)n;
+}
 
 /**
  * @brief Manifest token for a node's required write capability.
@@ -1427,8 +1575,7 @@ static void manifest_line(vfs_manifest_sink_t *s, const char *path,
                      : n->write              ? "-w"
                      :                         "--";
     char   meta[72];   /* packed descriptor, read policy, secret flag */
-    size_t room = (s->off < s->max) ? (s->max - s->off) : 0u;
-    char  *dst  = s->out + ((s->off < s->max) ? s->off : s->max);
+    char   cols[24];   /* the short columns around meta */
     int    m;
 
     if (s->line++ < s->skip) {
@@ -1461,14 +1608,16 @@ static void manifest_line(vfs_manifest_sink_t *s, const char *path,
                        (d->flags & TIKU_VFS_DF_SECRET) ? ";secret" : "");
     }
 
+    manifest_put(s, path, strlen(path));
+    m = snprintf(cols, sizeof cols, "\t%c\t%s\t",
+                 (n->type == TIKU_VFS_DIR) ? 'd' : 'f', perm);
+    manifest_put(s, cols, (m > 0) ? (size_t)m : 0u);
+    manifest_put(s, meta, strlen(meta));
     /* The id is the token /sys/vfs/events reports for the same node. */
-    m = snprintf(dst, room, "%s\t%c\t%s\t%s\t%s\t%08lx\n",
-                 path, (n->type == TIKU_VFS_DIR) ? 'd' : 'f', perm, meta,
+    m = snprintf(cols, sizeof cols, "\t%s\t%08lx\n",
                  vfs_cap_name(n->req_cap),
                  (unsigned long)tiku_vfs_node_id(n));
-    if (m > 0) {
-        s->off += (size_t)m;
-    }
+    manifest_put(s, cols, (m > 0) ? (size_t)m : 0u);
 }
 
 /**
@@ -1501,42 +1650,70 @@ static void manifest_rec(vfs_manifest_sink_t *s, const tiku_vfs_node_t *node,
     }
 }
 
+/**
+ * @brief Render the manifest from line @p first on into the window of @p s.
+ * @return The length of the lines rendered
+ */
+static uint32_t manifest_render(vfs_manifest_sink_t *s, unsigned long first)
+{
+    static const char header[] =
+        "# path\ttype\tperms\tmeta(vtype,unit,fresh,cost[,lo..hi])"
+        "\tcap\tid\n";
+    char path[TIKU_VFS_PATH_MAX];
+
+    s->off = 0u;
+    s->skip = first;
+    s->line = 0u;
+    if (vfs_root == NULL) {
+        return 0u;
+    }
+    /* Self-describing header row: line 0. */
+    if (s->line++ >= s->skip) {
+        manifest_put(s, header, sizeof header - 1u);
+    }
+    path[0] = '\0';
+    manifest_rec(s, vfs_root, path, sizeof path, 0u);
+    return s->off;
+}
+
 int tiku_vfs_manifest_from(char *buf, size_t max, unsigned long first)
 {
     vfs_manifest_sink_t s;
-    char path[TIKU_VFS_PATH_MAX];
-    int  m;
+    uint32_t len;
 
     s.out = buf;
-    s.max = max;
-    s.off = 0;
-    s.skip = first;
-    s.line = 0;
+    s.cap = (buf != NULL && max > 0u) ? max - 1u : 0u;  /* room for a NUL */
+    s.from = 0u;
+    len = manifest_render(&s, first);
     if (buf != NULL && max > 0u) {
-        buf[0] = '\0';
+        buf[(len < (uint32_t)s.cap) ? (size_t)len : s.cap] = '\0';
     }
-    if (vfs_root == NULL) {
-        return 0;
-    }
-
-    /* Self-describing header row: line 0. */
-    if (s.line++ >= s.skip) {
-        m = snprintf(buf, max,
-                     "# path\ttype\tperms\tmeta(vtype,unit,fresh,cost[,lo..hi])"
-                     "\tcap\tid\n");
-        if (m > 0) {
-            s.off += (size_t)m;
-        }
-    }
-
-    path[0] = '\0';
-    manifest_rec(&s, vfs_root, path, sizeof path, 0u);
-    return (int)s.off;
+    return (int)len;
 }
 
 int tiku_vfs_manifest(char *buf, size_t max)
 {
     return tiku_vfs_manifest_from(buf, max, 0ul);
+}
+
+int tiku_vfs_manifest_at(uint32_t offset, char *buf, size_t max,
+                         uint32_t *total)
+{
+    vfs_manifest_sink_t s;
+    uint32_t len;
+
+    s.out = buf;
+    s.cap = (buf != NULL) ? max : 0u;
+    s.from = offset;
+    len = manifest_render(&s, 0ul);
+    if (total != NULL) {
+        *total = len;
+    }
+    if (offset >= len) {
+        return 0;
+    }
+    return (int)(((len - offset) < (uint32_t)s.cap) ? (len - offset)
+                                                     : (uint32_t)s.cap);
 }
 
 int tiku_vfs_read_lines(const char *path, unsigned long first, char *buf,
