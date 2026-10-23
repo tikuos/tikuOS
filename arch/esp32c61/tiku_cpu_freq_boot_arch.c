@@ -19,6 +19,11 @@
 #include "tiku_irq_arch.h"
 #include "tiku_sleep_arch.h"
 
+/* Wait for an interrupt; a host model defines its own. */
+#ifndef TIKU_ESP32C61_IDLE_WFI
+#define TIKU_ESP32C61_IDLE_WFI() __asm__ volatile ("wfi" ::: "memory")
+#endif
+
 static unsigned long cpu_hz = TIKU_ESP32C61_CPU_HZ;
 static int           cpu_hz_fault = 1;
 static uint8_t       wdt_found;
@@ -142,7 +147,7 @@ void tiku_cpu_boot_esp32c61_init(void) {
 void tiku_cpu_boot_esp32c61_power_wfi_enter(void) {
     /* Entered with MIE off by the scheduler: a pending enabled line still
      * ends the wfi, and is taken once the caller's atomic section closes. */
-    __asm__ volatile ("wfi" ::: "memory");
+    TIKU_ESP32C61_IDLE_WFI();
 }
 
 unsigned long tiku_cpu_esp32c61_clock_get_hz(void) {

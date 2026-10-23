@@ -46,6 +46,12 @@
 #define _RP2350_REG_XOR(addr, m)  (*(volatile uint32_t *)((addr) + RP2350_REG_ALIAS_XOR) = (m))
 #endif
 
+/* A byte-wide register, such as an SCB priority field; a host model defines
+ * it first too. */
+#ifndef _RP2350_REG8
+#define _RP2350_REG8(addr)        (*(volatile uint8_t *)(addr))
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* PERIPHERAL BASE ADDRESSES                                                 */
 /*---------------------------------------------------------------------------*/
@@ -718,10 +724,12 @@
  * reports the fault type; MMFAR holds the faulting address when
  * MMARVALID is set.
  */
-/* AIRCR: application interrupt and reset control; SHCSR: system handler
- * control and state; CFSR: configurable fault status; HFSR: HardFault
- * status; MMFAR: MemManage fault address. */
+/* AIRCR: application interrupt and reset control; SHPR1: system handler
+ * priorities, MemManage in byte 0; SHCSR: system handler control and state;
+ * CFSR: configurable fault status; HFSR: HardFault status; MMFAR: MemManage
+ * fault address. */
 #define RP2350_SCB_AIRCR            (RP2350_SCB_BASE + 0x0CU)
+#define RP2350_SCB_SHPR1            (RP2350_SCB_BASE + 0x18U)
 #define RP2350_SCB_SHCSR            (RP2350_SCB_BASE + 0x24U)
 #define RP2350_SCB_CFSR             (RP2350_SCB_BASE + 0x28U)
 #define RP2350_SCB_HFSR             (RP2350_SCB_BASE + 0x2CU)

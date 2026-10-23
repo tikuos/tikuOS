@@ -114,7 +114,10 @@ struct tiku_mpu_diag {
  *  HardFault handlers can write to it unconditionally.  volatile, because
  *  handlers at exception priority modify it outside normal call paths.
  */
-__attribute__((section(".mpu_diag")))
+#ifndef TIKU_RP2350_MPU_DIAG_SECTION     /* a host model defines its own */
+#define TIKU_RP2350_MPU_DIAG_SECTION __attribute__((section(".mpu_diag")))
+#endif
+TIKU_RP2350_MPU_DIAG_SECTION
 static volatile struct tiku_mpu_diag mpu_diag;
 
 /*---------------------------------------------------------------------------*/
@@ -460,7 +463,7 @@ void tiku_mpu_arch_init_segments(void) {
      * 0xE000ED18), and enabled below, so an MPU fault from Thread mode is
      * taken as MemManage (IPSR 4) and not escalated to HardFault
      * (HFSR.FORCED, IPSR 3). */
-    *(volatile uint8_t *)0xE000ED18U = 0U;
+    _RP2350_REG8(RP2350_SCB_SHPR1) = 0U;
 
     /* MemManage is enabled here at init;
      * tiku_mpu_arch_enable_violation_nmi() sets the same bit. */

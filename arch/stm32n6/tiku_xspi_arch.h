@@ -46,9 +46,12 @@ typedef struct {
  * @brief Base of the memory-mapped read window tiku_xspi_mmap_enable() opens.
  *
  * Erase and program run indirect; the NVM region, the durable mirror and the
- * driver's cache invalidations address the flash through this base.
+ * driver's cache invalidations address the flash through this base.  A host
+ * model defines it to its own memory.
  */
+#ifndef TIKU_XSPI_MMAP_BASE
 #define TIKU_XSPI_MMAP_BASE     0x70000000UL
+#endif
 
 /* Flash layout of the 64 MB device:
  *

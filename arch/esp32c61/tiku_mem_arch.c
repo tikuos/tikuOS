@@ -27,6 +27,11 @@
 extern uint32_t __uninit_start;
 extern uint32_t __uninit_end;
 
+/* Order the stores before what follows; a host model defines its own. */
+#ifndef TIKU_ESP32C61_MEM_FENCE
+#define TIKU_ESP32C61_MEM_FENCE() __asm__ volatile ("fence" ::: "memory")
+#endif
+
 #define MIRROR_IMAGE_MAX  (TIKU_FLASH_MIRROR_BYTES - TIKU_NVM_MIRROR_HDR_BYTES)
 #define MIRROR_NONE       TIKU_FLASH_MIRROR_SLOTS   /* no slot checks */
 
@@ -161,7 +166,7 @@ void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len) {
     while (len-- > 0U) {
         *p++ = 0U;
     }
-    __asm__ volatile ("fence" ::: "memory");
+    TIKU_ESP32C61_MEM_FENCE();
 }
 
 void tiku_mem_arch_nvm_read(uint8_t *dst, const uint8_t *src,
@@ -183,7 +188,7 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
     while (len-- > 0U) {
         *dst++ = *src++;
     }
-    __asm__ volatile ("fence" ::: "memory");
+    TIKU_ESP32C61_MEM_FENCE();
 }
 
 int tiku_mem_arch_nvm_flush_status(void) {

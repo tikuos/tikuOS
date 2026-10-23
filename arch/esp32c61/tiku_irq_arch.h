@@ -45,6 +45,8 @@ typedef void (*tiku_esp32c61_isr_t)(void);
 /** @brief A switching handler: given the saved frame, the frame to resume. */
 typedef uint32_t *(*tiku_esp32c61_switch_t)(uint32_t *frame);
 
+/* A host model defines its own pair over a modelled mstatus. */
+#ifndef TIKU_ESP32C61_MIE_HOOKS
 /** @brief mstatus.MIE off. @return Its previous state, for _mie_restore() */
 static inline uint32_t tiku_esp32c61_mie_off(void) {
     uint32_t s;
@@ -60,6 +62,7 @@ static inline void tiku_esp32c61_mie_restore(uint32_t s) {
         __asm__ volatile ("csrs mstatus, %0" :: "r" (s) : "memory");
     }
 }
+#endif
 
 /** @brief Unroute every source and quiet every line; MIE is left off. */
 void tiku_esp32c61_irq_init(void);

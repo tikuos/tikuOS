@@ -46,10 +46,12 @@ static unsigned long stm32n6_spin_per_ms;
  * @brief Run @p iters iterations of the delay loop.
  *
  * The cycles per iteration depend on alignment and cache hits;
- * cpu_measure_hz() times the loop against LPTIM1.
+ * cpu_measure_hz() times the loop against LPTIM1.  A host model defines
+ * TIKU_STM32N6_CAL_SPIN to run its own.
  *
  * @param iters  Iterations to run; must not be 0
  */
+#ifndef TIKU_STM32N6_CAL_SPIN
 static void cpu_cal_spin(unsigned long iters) {
     __asm__ volatile (
         "1: subs %0, %0, #1\n"
@@ -58,6 +60,9 @@ static void cpu_cal_spin(unsigned long iters) {
         :
         : "cc");
 }
+#else
+#define cpu_cal_spin(iters) TIKU_STM32N6_CAL_SPIN(iters)
+#endif
 
 /** @brief Read the LPTIM1 counter until two reads agree; it is asynchronous. */
 static uint32_t cpu_lptim_count(void) {

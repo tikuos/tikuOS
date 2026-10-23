@@ -20,6 +20,12 @@
 #include "tiku_esp32c61_regs.h"
 #include "tiku_psram_arch.h"
 
+/* Order instruction fetches after the PMA change; a host model defines
+ * its own. */
+#ifndef TIKU_ESP32C61_FENCE_I
+#define TIKU_ESP32C61_FENCE_I() __asm__ volatile ("fence.i" ::: "memory")
+#endif
+
 /** @brief The WRITE bits of the three SAM segment fields. */
 #define TIKU_MPU_SAM_WRITE_BITS  0x0222U
 
@@ -105,5 +111,5 @@ void tiku_mpu_arch_module_window_exec(int enable) {
                         (TIKU_ESP32C61_MODULE_WINDOW_BYTES / 2UL - 1UL)) >> 2);
     ESP32C61_CSR_WRITE(ESP32C61_CSR_PMACFG12, enable ? ESP32C61_PMA_NAPOT_RX
                                                      : ESP32C61_PMA_NAPOT_RW);
-    __asm__ volatile ("fence.i" ::: "memory");
+    TIKU_ESP32C61_FENCE_I();
 }

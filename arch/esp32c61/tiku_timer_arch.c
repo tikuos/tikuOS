@@ -28,6 +28,11 @@
 #include <kernel/timers/tiku_clock.h>
 #endif
 
+/* Wait for an interrupt; a host model defines its own. */
+#ifndef TIKU_ESP32C61_TICK_WFI
+#define TIKU_ESP32C61_TICK_WFI() __asm__ volatile ("wfi")
+#endif
+
 /* 125000 counts per tick halve to fit the unsigned short fine value. */
 #define FINE_SHIFT  1U
 
@@ -180,7 +185,7 @@ void tiku_clock_arch_wait(tiku_clock_arch_time_t t) {
         return;
     }
     while ((long)(target - g_ticks) > 0) {
-        __asm__ volatile ("wfi");
+        TIKU_ESP32C61_TICK_WFI();
     }
 }
 
