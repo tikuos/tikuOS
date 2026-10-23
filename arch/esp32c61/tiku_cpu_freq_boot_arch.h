@@ -80,9 +80,8 @@ void tiku_cpu_esp32c61_clock_probe(tiku_esp32c61_clock_t *out);
  * @brief Move the core onto the crystal at 40 MHz for a sleep that stops the
  *        PLL.
  *
- * The measured rate is not updated: tiku_cpu_esp32c61_clock_get_hz() keeps
- * the rate from before the park, so a delay run while parked is scaled by
- * the ratio of the two rates.
+ * tiku_cpu_esp32c61_clock_get_hz() reports 40 MHz until the unpark, so a
+ * delay run while parked keeps its length.
  *
  * @return The clock tree as it was, for tiku_cpu_esp32c61_clock_unpark()
  */
@@ -91,7 +90,8 @@ uint32_t tiku_cpu_esp32c61_clock_park(void);
 /**
  * @brief Restore the clock tree tiku_cpu_esp32c61_clock_park() returned.
  *
- * The rate measured before the park stands; no 2 ms re-measurement runs.
+ * The reported rate becomes the one the restored tree implies; no 2 ms
+ * re-measurement runs.
  */
 void tiku_cpu_esp32c61_clock_unpark(uint32_t saved);
 
