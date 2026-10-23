@@ -30,6 +30,20 @@ extern char __uninit_end[];
 /* The software segment mask's write bits (MSP430 SAM layout). */
 #define SAM_WRITE_BITS 0x0222u
 
+/* The PMA and PMP CSR accesses; the PMA address writes take no memory
+ * clobber.  A host model defines these over its own words. */
+#ifndef TIKU_P4_MPU_CSR_READ
+#define TIKU_P4_MPU_CSR_READ(csr, out) \
+    __asm__ volatile("csrr %0, " #csr : "=r"(out))
+#define TIKU_P4_MPU_CSR_WRITE(csr, value) \
+    __asm__ volatile("csrw " #csr ", %0" ::"r"(value) : "memory")
+#define TIKU_P4_MPU_CSR_WRITE_ADDR(csr, value) \
+    __asm__ volatile("csrw " #csr ", %0" ::"r"(value))
+#define TIKU_P4_MPU_CSR_ZERO2(first, second) \
+    __asm__ volatile("csrw " #first ", zero\n\tcsrw " #second ", zero" \
+                     ::: "memory")
+#endif
+
 static uint16_t permissions = TIKU_MPU_DEFAULT_SAM;
 static uint16_t control;
 
@@ -42,7 +56,7 @@ static void apply(void)
     if (permissions & SAM_WRITE_BITS) {
         cfg |= PMA_W;
     }
-    __asm__ volatile("csrw 0xBC1, %0" ::"r"(cfg) : "memory");
+    TIKU_P4_MPU_CSR_WRITE(0xBC1, cfg);
 }
 
 uint16_t tiku_mpu_arch_get_sam(void)
@@ -81,18 +95,17 @@ void tiku_mpu_arch_init_segments(void)
 
     /* PMP entry 0, locked with no permissions, faults any access below 4 KB;
      * the lock holds until reset. */
-    __asm__ volatile("csrr %0, pmpcfg0" : "=r"(config));
-    __asm__ volatile("csrw pmpaddr0, %0" ::"r"(511u) : "memory");
-    __asm__ volatile("csrw pmpcfg0, %0" ::"r"((config & ~255u) | 0x98u)
-                     : "memory");
+    TIKU_P4_MPU_CSR_READ(pmpcfg0, config);
+    TIKU_P4_MPU_CSR_WRITE(pmpaddr0, 511u);
+    TIKU_P4_MPU_CSR_WRITE(pmpcfg0, (config & ~255u) | 0x98u);
     /* PMA entry 0 holds the span's start for entry 1's top-of-range; the
      * default mask then arms the span read-only.  tiku_mem_arch_init()
      * restored the span from its mirror before this. */
     tiku_p4_mpu_latch[TIKU_P4_MPU_LATCH_START] = (uint32_t)__uninit_start;
     tiku_p4_mpu_latch[TIKU_P4_MPU_LATCH_END] = (uint32_t)__uninit_end;
-    __asm__ volatile("csrw 0xBC1, zero\n\tcsrw 0xBC0, zero" ::: "memory");
-    __asm__ volatile("csrw 0xBD0, %0" ::"r"((uint32_t)__uninit_start >> 2));
-    __asm__ volatile("csrw 0xBD1, %0" ::"r"((uint32_t)__uninit_end >> 2));
+    TIKU_P4_MPU_CSR_ZERO2(0xBC1, 0xBC0);
+    TIKU_P4_MPU_CSR_WRITE_ADDR(0xBD0, (uint32_t)__uninit_start >> 2);
+    TIKU_P4_MPU_CSR_WRITE_ADDR(0xBD1, (uint32_t)__uninit_end >> 2);
     tiku_mpu_arch_set_sam(TIKU_MPU_DEFAULT_SAM);
 }
 
@@ -135,7 +148,7 @@ uint8_t tiku_mpu_arch_nvm_region_ro(void)
 {
     uint32_t cfg;
 
-    __asm__ volatile("csrr %0, 0xBC1" : "=r"(cfg));
+    TIKU_P4_MPU_CSR_READ(0xBC1, cfg);
     return (cfg & (PMA_EN | PMA_W)) == PMA_EN;
 }
 

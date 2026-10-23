@@ -30,6 +30,22 @@ extern char __uninit_end[];
 /* The software segment mask's write bits (MSP430 SAM layout). */
 #define SAM_WRITE_BITS 0x0222u
 
+/* The PMA and PMP CSR accesses; the PMA address writes take no memory
+ * clobber.  A host model defines these over its own words. */
+#ifndef TIKU_C5_MPU_CSR_READ
+#define TIKU_C5_MPU_CSR_READ(csr, out) \
+    __asm__ volatile("csrr %0, " #csr : "=r"(out))
+#define TIKU_C5_MPU_CSR_WRITE(csr, value) \
+    __asm__ volatile("csrw " #csr ", %0" ::"r"(value) : "memory")
+#define TIKU_C5_MPU_CSR_WRITE_ADDR(csr, value) \
+    __asm__ volatile("csrw " #csr ", %0" ::"r"(value))
+#define TIKU_C5_MPU_CSR_ZERO(csr) \
+    __asm__ volatile("csrw " #csr ", zero" ::: "memory")
+#define TIKU_C5_MPU_CSR_ZERO2(first, second) \
+    __asm__ volatile("csrw " #first ", zero\n\tcsrw " #second ", zero" \
+                     ::: "memory")
+#endif
+
 static uint16_t permissions = TIKU_MPU_DEFAULT_SAM;
 static uint16_t control;
 
@@ -42,12 +58,12 @@ static void apply(void)
     if (permissions & SAM_WRITE_BITS) {
         cfg |= PMA_W;
     }
-    __asm__ volatile("csrw 0xBCB, %0" ::"r"(cfg) : "memory");
+    TIKU_C5_MPU_CSR_WRITE(0xBCB, cfg);
 }
 
 void tiku_c5_durable_guard_off(void)
 {
-    __asm__ volatile("csrw 0xBCB, zero\n\tcsrw 0xBCA, zero" ::: "memory");
+    TIKU_C5_MPU_CSR_ZERO2(0xBCB, 0xBCA);
 }
 
 uint16_t tiku_mpu_arch_get_sam(void)
@@ -84,17 +100,16 @@ void tiku_mpu_arch_init_segments(void)
 
     /* PMP entry 0, locked with no permissions, faults any access below 4 KB;
      * the lock holds until reset. */
-    __asm__ volatile("csrr %0, pmpcfg0" : "=r"(config));
-    __asm__ volatile("csrw pmpaddr0, %0" ::"r"(511u) : "memory");
-    __asm__ volatile("csrw pmpcfg0, %0" ::"r"((config & ~255u) | 0x98u)
-                     : "memory");
+    TIKU_C5_MPU_CSR_READ(pmpcfg0, config);
+    TIKU_C5_MPU_CSR_WRITE(pmpaddr0, 511u);
+    TIKU_C5_MPU_CSR_WRITE(pmpcfg0, (config & ~255u) | 0x98u);
     /* PMA entry 10 holds the durable span's start for entry 11's
      * top-of-range; the default mask then arms the span read-only.
      * tiku_mem_arch_init() switches the guard off for its restore, so this
      * runs after it. */
-    __asm__ volatile("csrw 0xBCA, zero" ::: "memory");
-    __asm__ volatile("csrw 0xBDA, %0" ::"r"((uint32_t)__uninit_start >> 2));
-    __asm__ volatile("csrw 0xBDB, %0" ::"r"((uint32_t)__uninit_end >> 2));
+    TIKU_C5_MPU_CSR_ZERO(0xBCA);
+    TIKU_C5_MPU_CSR_WRITE_ADDR(0xBDA, (uint32_t)__uninit_start >> 2);
+    TIKU_C5_MPU_CSR_WRITE_ADDR(0xBDB, (uint32_t)__uninit_end >> 2);
     tiku_mpu_arch_set_sam(TIKU_MPU_DEFAULT_SAM);
 }
 void tiku_mpu_arch_set_default_protection(void)
