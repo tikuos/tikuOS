@@ -5,10 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_isp_arch.c - P4 ISP fed from memory: DW-GDMA channel 2 pushes the
- * RAW frame into the ISP, channel 3 takes the processed frame out of the
- * CSI bridge; one frame at a time, waited for or ended from the DMA
- * interrupt.  Register layout from ESP-IDF's isp_reg.h (hw_ver1).
+ * tiku_isp_arch.c - P4 ISP: DW-GDMA channel 2 pushes a RAW frame from
+ * memory into the ISP, or the CSI-2 receiver passes one on; channel 3 takes
+ * the processed frame out of the CSI bridge; one frame at a time, waited
+ * for or ended from the DMA interrupt.  Register layout from ESP-IDF's
+ * isp_reg.h and mipi_csi_bridge_reg.h (hw_ver1).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -30,6 +31,9 @@
 #define PERI_CLK_CTRL26 0x500E60ACu
 #define ISP_CLK_DIV     0xFFu                   /* divider - 1 */
 #define ISP_CLK_DIV_3   2u
+#define ISP_CLK_DIV_1   0u                      /* 240 MHz: a pixel a cycle
+                                                 * outruns a 2-lane 912 Mbit/s
+                                                 * RAW10 line (182.4 Mpixel/s) */
 #define SOC_CLK_CTRL1   0x500E6018u
 #define BRG_SYS_CLK_EN  (1u << 10)
 #define RST_EN0         0x500E60C0u
@@ -80,6 +84,7 @@
 #define I_YUV_FORMAT    (ISP_BASE + 0x234u)
 
 /* CNTL bits. */
+#define CNTL_MIPI_DATA  (1u << 0)                /* input from the receiver */
 #define CNTL_EN         (1u << 1)
 #define CNTL_BF         (1u << 4)
 #define CNTL_DEMOSAIC   (1u << 6)
@@ -113,7 +118,12 @@
 #define BRG_BASE        0x5009F800u
 #define B_CSI_EN        (BRG_BASE + 0x04u)
 #define B_DMA_REQ_CFG   (BRG_BASE + 0x08u)
+#define B_BUF_FLOW_CTL  (BRG_BASE + 0x0Cu)      /* almost-full threshold [13:0] */
+#define B_DATA_TYPE_CFG (BRG_BASE + 0x10u)      /* min [5:0], max [13:8] */
 #define B_FRAME_CFG     (BRG_BASE + 0x14u)
+#define B_ENDIAN_MODE   (BRG_BASE + 0x18u)
+#define B_AFULL_960     960u
+#define B_TYPES_RX      (0x12u | (0x2Fu << 8))  /* the YUV, RGB and RAW types */
 #define B_INT_RAW       (BRG_BASE + 0x1Cu)
 #define B_INT_CLR       (BRG_BASE + 0x20u)
 #define B_HOST_CTRL     (BRG_BASE + 0x40u)
@@ -171,13 +181,15 @@ uint32_t tiku_p4_isp_out_bytes(uint32_t width, uint32_t height,
 
 /** @brief Clock and reset the ISP and the bridge, the bridge's own clock
  *         and the ISP's register clock on: before every frame, since a
- *         frame started on what the previous one left stalls. */
+ *         frame started on what the previous one left stalls.  The ISP
+ *         runs at 80 MHz from memory and at 240 MHz behind the receiver. */
 TIKU_P4_XIP_TEXT
-static void isp_init(void)
+static void isp_init(uint8_t source)
 {
     put_bits(PERI_CLK_CTRL25, ISP_CLK_SRC | ISP_CLK_EN,
              ISP_CLK_PLL240 | ISP_CLK_EN);
-    put_bits(PERI_CLK_CTRL26, ISP_CLK_DIV, ISP_CLK_DIV_3);
+    put_bits(PERI_CLK_CTRL26, ISP_CLK_DIV,
+             source == TIKU_P4_ISP_SRC_CSI ? ISP_CLK_DIV_1 : ISP_CLK_DIV_3);
     put_bits(SOC_CLK_CTRL1, BRG_SYS_CLK_EN, BRG_SYS_CLK_EN);
     put_bits(RST_EN0, RST_ISP | RST_BRG, RST_ISP | RST_BRG);
     put_bits(RST_EN0, RST_ISP | RST_BRG, 0u);
@@ -205,7 +217,8 @@ static int job_ok(const struct tiku_p4_isp_job *j)
     uint32_t in_bytes, out_bytes, i;
     uintptr_t a, b;
 
-    if (j == NULL || j->in == NULL || j->out == NULL ||
+    if (j == NULL || j->out == NULL || j->source > TIKU_P4_ISP_SRC_CSI ||
+        (j->source == TIKU_P4_ISP_SRC_MEMORY && j->in == NULL) ||
         (((uintptr_t)j->in | (uintptr_t)j->out) & 7u) != 0u ||
         j->width < 8u || j->width > TIKU_P4_ISP_WIDTH_MAX || (j->width & 7u) ||
         j->height < TIKU_P4_ISP_HEIGHT_MIN || j->height > TIKU_P4_ISP_HEIGHT_MAX ||
@@ -216,16 +229,18 @@ static int job_ok(const struct tiku_p4_isp_job *j)
     }
     in_bits = (uint64_t)j->width * j->height * bits_per_pixel(j->raw);
     out_bits = (uint64_t)j->width * j->height * out_bits_per_pixel(j->out_format);
-    if ((in_bits & 63u) || (out_bits & 63u) || (in_bits >> 6) > 0x3FFFFFu) {
+    if ((out_bits & 63u) || (j->source == TIKU_P4_ISP_SRC_MEMORY &&
+                             ((in_bits & 63u) || (in_bits >> 6) > 0x3FFFFFu))) {
         return 0;
     }
     in_bytes = (uint32_t)(in_bits / 8u);
     out_bytes = (uint32_t)(out_bits / 8u);
     a = (uintptr_t)j->in;
     b = (uintptr_t)j->out;
-    if (!tiku_p4_dwgdma_reachable(j->in, in_bytes) ||
-        !tiku_p4_dwgdma_reachable(j->out, out_bytes) ||
-        (a < b + out_bytes && b < a + in_bytes)) {
+    if (!tiku_p4_dwgdma_reachable(j->out, out_bytes) ||
+        (j->source == TIKU_P4_ISP_SRC_MEMORY &&
+         (!tiku_p4_dwgdma_reachable(j->in, in_bytes) ||
+          (a < b + out_bytes && b < a + in_bytes)))) {
         return 0;
     }
     if (j->bf_on && j->bf_level > 63u) {
@@ -307,7 +322,8 @@ static void program_isp(const struct tiku_p4_isp_job *j)
      * the surrounding pixels. */
     TIKU_P4_REG_WRITE(I_DEMOSAIC_GRAD, 1u << 4);
     TIKU_P4_REG_WRITE(I_DEMOSAIC_MAT, 0u);
-    cntl = CNTL_DEMOSAIC | CNTL_RGB2YUV | CNTL_DATA_TYPE(j->raw) | CNTL_IN_DMA |
+    cntl = CNTL_DEMOSAIC | CNTL_RGB2YUV | CNTL_DATA_TYPE(j->raw) |
+           (j->source == TIKU_P4_ISP_SRC_CSI ? CNTL_MIPI_DATA : CNTL_IN_DMA) |
            CNTL_OUT_TYPE(OUT_TYPE_CODE(j->out_format)) |
            (rgb_out ? CNTL_YUV2RGB | CNTL_COLOR : 0u);
     if (j->bf_on) {
@@ -395,11 +411,13 @@ static void program_isp(const struct tiku_p4_isp_job *j)
      * bursts of 4 beats and a request every cycle (an interval of 0 never
      * asks), applied before the frame.  The input FIFO holds 8 beats: with
      * bursts of 8 from HP SRAM it fills and the frame stalls. */
-    TIKU_P4_REG_WRITE(I_DMA_RAW_DATA, in64 | DMA_RAW_SET);
-    TIKU_P4_REG_WRITE(I_DMA_CNTL, DMA_DATA_TYPE(j->raw) | DMA_BURST_LEN |
-                                  DMA_INTERVAL_1);
-    put_bits(I_DMA_CNTL, DMA_UPDATE, DMA_UPDATE);
-    for (n = 0u; n < 1000u && (TIKU_P4_REG_READ(I_DMA_CNTL) & DMA_UPDATE); n++) {
+    if (j->source == TIKU_P4_ISP_SRC_MEMORY) {
+        TIKU_P4_REG_WRITE(I_DMA_RAW_DATA, in64 | DMA_RAW_SET);
+        TIKU_P4_REG_WRITE(I_DMA_CNTL, DMA_DATA_TYPE(j->raw) | DMA_BURST_LEN |
+                                      DMA_INTERVAL_1);
+        put_bits(I_DMA_CNTL, DMA_UPDATE, DMA_UPDATE);
+        for (n = 0u; n < 1000u && (TIKU_P4_REG_READ(I_DMA_CNTL) & DMA_UPDATE); n++) {
+        }
     }
     TIKU_P4_REG_WRITE(I_INT_CLR, INT_ALL);
     TIKU_P4_REG_WRITE(I_CNTL, cntl | CNTL_EN);
@@ -417,6 +435,13 @@ static void program_bridge(const struct tiku_p4_isp_job *j)
     TIKU_P4_REG_WRITE(B_FRAME_CFG, (j->height & 0xFFFu) |
                                    ((j->width & 0xFFFu) << 12));
     TIKU_P4_REG_WRITE(B_DMA_REQ_CFG, B_BURST_512);
+    /* Behind the receiver: the packet types let through, the input
+     * buffer's almost-full mark, bytes in arrival order. */
+    if (j->source == TIKU_P4_ISP_SRC_CSI) {
+        TIKU_P4_REG_WRITE(B_DATA_TYPE_CFG, B_TYPES_RX);
+        TIKU_P4_REG_WRITE(B_BUF_FLOW_CTL, B_AFULL_960);
+        TIKU_P4_REG_WRITE(B_ENDIAN_MODE, 0u);
+    }
     TIKU_P4_REG_WRITE(B_INT_CLR, B_INT_ALL);
     TIKU_P4_REG_WRITE(B_CSI_EN, 1u);
 }
@@ -512,15 +537,18 @@ static int process(const struct tiku_p4_isp_job *j, tiku_p4_isp_done_t done,
     }
     busy = 1u;
     TIKU_P4_IRQ_RESTORE(state);
-    isp_init();
+    isp_init(j->source);
     in_bytes = tiku_p4_isp_in_bytes(j->width, j->height, j->raw);
     out_bytes = tiku_p4_isp_out_bytes(j->width, j->height, j->out_format);
     run.job = j;
     run.done = done;
     run.ctx = ctx;
-    run.pending = (1u << IN_CHAN) | (1u << OUT_CHAN);
+    run.pending = (uint8_t)((j->source == TIKU_P4_ISP_SRC_CSI ? 0u : 1u << IN_CHAN) |
+                            (1u << OUT_CHAN));
     run.fault = 0u;
-    tiku_cpu_dcache_clean(j->in, in_bytes);
+    if (j->source == TIKU_P4_ISP_SRC_MEMORY) {
+        tiku_cpu_dcache_clean(j->in, in_bytes);
+    }
     tiku_cpu_dcache_invalidate(j->out, out_bytes);
     program_isp(j);
     program_bridge(j);
@@ -558,12 +586,15 @@ static int process(const struct tiku_p4_isp_job *j, tiku_p4_isp_done_t done,
     in.src_status_addr = 0u;
     if (tiku_p4_dwgdma_chan_start(OUT_CHAN, &out, done ? chan_done : NULL, NULL)
             != TIKU_P4_DWGDMA_OK ||
-        tiku_p4_dwgdma_chan_start(IN_CHAN, &in, done ? chan_done : NULL, NULL)
-            != TIKU_P4_DWGDMA_OK) {
+        (j->source == TIKU_P4_ISP_SRC_MEMORY &&
+         tiku_p4_dwgdma_chan_start(IN_CHAN, &in, done ? chan_done : NULL, NULL)
+            != TIKU_P4_DWGDMA_OK)) {
         run.done = NULL;
         return finish(TIKU_P4_ISP_ERR_FAULT);
     }
-    put_bits(I_DMA_CNTL, DMA_EN, DMA_EN);
+    if (j->source == TIKU_P4_ISP_SRC_MEMORY) {
+        put_bits(I_DMA_CNTL, DMA_EN, DMA_EN);
+    }
     if (done != NULL) {
         return TIKU_P4_ISP_OK;
     }
@@ -591,6 +622,9 @@ static int process(const struct tiku_p4_isp_job *j, tiku_p4_isp_done_t done,
 TIKU_P4_XIP_TEXT
 int tiku_p4_isp_process(const struct tiku_p4_isp_job *job)
 {
+    if (job != NULL && job->source == TIKU_P4_ISP_SRC_CSI) {
+        return TIKU_P4_ISP_ERR_PARAM;
+    }
     return process(job, NULL, NULL);
 }
 
@@ -602,6 +636,22 @@ int tiku_p4_isp_process_async(const struct tiku_p4_isp_job *job,
         return TIKU_P4_ISP_ERR_PARAM;
     }
     return process(job, done, ctx);
+}
+
+TIKU_P4_XIP_TEXT
+int tiku_p4_isp_abort(void)
+{
+    uint32_t state = TIKU_P4_IRQ_SAVE();
+    int rc = TIKU_P4_ISP_OK;
+
+    /* Under the mask, so the frame cannot end from the interrupt between
+     * the test and the finish. */
+    if (busy) {
+        run.done = NULL;
+        rc = finish(TIKU_P4_ISP_ERR_TIMEOUT);
+    }
+    TIKU_P4_IRQ_RESTORE(state);
+    return rc;
 }
 
 TIKU_P4_XIP_TEXT

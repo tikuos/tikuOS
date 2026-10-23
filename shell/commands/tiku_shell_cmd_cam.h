@@ -16,14 +16,14 @@
 #include <stdint.h>
 
 /**
- * @brief Power the OV5640, capture one QVGA frame and show it on the panel.
+ * @brief On the RA8P1, power the OV5640, capture a QVGA frame and show it on
+ *        the panel (a build without a display reports it only); on the
+ *        ESP32-P4, the IMX219 subcommands of tiku_shell_cmd_cam_p4.c.
  *
- * A build without a display captures the frame and reports it only.
- *
- * @param argc  Argument count (unused)
- * @param argv  Arguments (unused)
- * @note Defined only when TIKU_SHELL_CMD_CAM is set: an RA8P1 build with
- *       TIKU_DRV_CAM_ENABLE=1.
+ * @param argc  Argument count (unused on the RA8P1)
+ * @param argv  Arguments (unused on the RA8P1)
+ * @note Defined only when TIKU_SHELL_CMD_CAM is set: an RA8P1 or FireBeetle 2
+ *       ESP32-P4 build with TIKU_DRV_CAM_ENABLE=1.
  */
 void tiku_shell_cmd_cam(uint8_t argc, const char *argv[]);
 

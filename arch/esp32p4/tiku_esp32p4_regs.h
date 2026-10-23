@@ -107,6 +107,9 @@
 /* PMU external LDO VO2, the PSRAM supply (ldo_ll.h unit 1, ext_ldo[3]). */
 #define TIKU_P4_PSRAM_LDO      0x501151d0UL
 #define TIKU_P4_PSRAM_LDO_ANA  0x501151d4UL
+/* PMU external LDO VO3, the MIPI D-PHY supply (ldo_ll.h unit 2, ext_ldo[1]). */
+#define TIKU_P4_MIPI_LDO       0x501151c0UL
+#define TIKU_P4_MIPI_LDO_ANA   0x501151c4UL
 
 #define TIKU_P4_IRQ_LINES 32u
 #define TIKU_P4_IRQ_SOURCES 128u

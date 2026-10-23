@@ -5,9 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_isp_arch.h - P4 ISP fed from memory: a RAW Bayer frame pushed in
- * by the DW-GDMA, demosaiced and processed, and brought back through the
- * CSI bridge, with the AE and AWB statistics of the frame.
+ * tiku_isp_arch.h - P4 ISP: a RAW Bayer frame pushed in from memory by the
+ * DW-GDMA or passed on by the MIPI CSI-2 receiver, demosaiced and
+ * processed, and brought back through the CSI bridge, with the AE and AWB
+ * statistics of the frame.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -37,6 +38,10 @@
 #define TIKU_P4_ISP_OUT_RGB888  1u
 #define TIKU_P4_ISP_OUT_YUV422  2u
 #define TIKU_P4_ISP_OUT_YUV420  3u
+/** @brief Frame sources: memory through the DW-GDMA, or the next frame the
+ *         MIPI CSI-2 receiver passes on. */
+#define TIKU_P4_ISP_SRC_MEMORY  0u
+#define TIKU_P4_ISP_SRC_CSI     1u
 
 #define TIKU_P4_ISP_WIDTH_MAX   1920u
 #define TIKU_P4_ISP_HEIGHT_MAX  1280u
@@ -106,6 +111,9 @@ struct tiku_p4_isp_job {
     uint16_t awb_rg_min, awb_rg_max;     /**< R/G in 2.8 fixed point */
     uint16_t awb_bg_min, awb_bg_max;     /**< B/G in 2.8 fixed point */
     struct tiku_p4_isp_stats *stats;    /**< filled after the frame, or NULL */
+    uint8_t source;             /**< TIKU_P4_ISP_SRC_*; with CSI, in is not
+                                 *   read and the frame is the next one the
+                                 *   receiver passes on */
 };
 
 /** @brief Completion callback of an asynchronous frame, run from the
@@ -119,13 +127,20 @@ uint32_t tiku_p4_isp_out_bytes(uint32_t width, uint32_t height,
                                uint8_t out_format);
 /** @brief Run @p job and wait: TIKU_P4_ISP_OK or an error; on success
  *         the output holds the frame and job->stats, if given, the
- *         measurements. */
+ *         measurements.  A CSI job is refused with TIKU_P4_ISP_ERR_PARAM:
+ *         its frame starts when the sensor streams, so it runs only
+ *         asynchronously. */
 int tiku_p4_isp_process(const struct tiku_p4_isp_job *job);
 /** @brief Run @p job and leave it to the engines: @p done runs from the
  *         interrupt; until then the core leaves both buffers and @p job
  *         alone. */
 int tiku_p4_isp_process_async(const struct tiku_p4_isp_job *job,
                               tiku_p4_isp_done_t done, void *ctx);
+/** @brief End the frame in flight with TIKU_P4_ISP_ERR_TIMEOUT, its
+ *         callback not run: for a CSI frame that never came.
+ *  @return TIKU_P4_ISP_ERR_TIMEOUT, or TIKU_P4_ISP_OK when none was in
+ *          flight. */
+int tiku_p4_isp_abort(void);
 /** @brief Frames completed and failed since boot. */
 void tiku_p4_isp_counts(uint32_t *frames, uint32_t *failed);
 #endif

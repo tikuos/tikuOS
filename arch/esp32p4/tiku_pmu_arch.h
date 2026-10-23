@@ -31,6 +31,11 @@ int tiku_p4_pmu_mpll_init(void);
  * @return Zero once the LDO reads back enabled at the setting, -2 otherwise.
  */
 int tiku_p4_pmu_psram_ldo_init(void);
+/** @brief Power the MIPI D-PHY's supply, LDO VO3, at @p mv with the eFuse
+ *         calibration of the unit; the caller waits 200 us for it to settle.
+ * @return Zero once the LDO reads back enabled at the setting, -2 otherwise.
+ */
+int tiku_p4_pmu_mipi_ldo_init(unsigned int mv);
 /** @brief The brownout level ESP-IDF selects by default: about 2.6 V. */
 #define TIKU_P4_BROWNOUT_LEVEL 7u
 /**

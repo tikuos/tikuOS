@@ -33,6 +33,15 @@ SRCS += arch/esp32p4/tiku_h264_arch.c arch/esp32p4/tiku_h264_stream_arch.c
 ifeq ($(TIKU_SHELL_ENABLE),1)
 SRCS += shell/commands/tiku_shell_cmd_h264.c
 endif
+# TIKU_DRV_CAM_ENABLE=1: a Raspberry Pi Camera v2 (IMX219) on the CSI
+# connector, its CSI-2 receiver, and with the shell the cam command.
+ifeq ($(TIKU_DRV_CAM_ENABLE),1)
+SRCS += arch/esp32p4/tiku_csi_arch.c arch/esp32p4/tiku_camera_arch.c
+CFLAGS += -DTIKU_HAS_CAM=1
+ifeq ($(TIKU_SHELL_ENABLE),1)
+SRCS += shell/commands/tiku_shell_cmd_cam_p4.c
+endif
+endif
 endif
 ifeq ($(TIKU_SHELL_ENABLE),1)
 SRCS += shell/commands/tiku_shell_cmd_diag.c

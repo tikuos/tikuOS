@@ -240,6 +240,69 @@ int tiku_p4_pmu_psram_ldo_init(void)
     return 0;
 }
 
+/**
+ * @brief The dref and mul codes nearest @p mv, after ldo_ll.h's
+ *        ldo_ll_voltage_to_dref_mul(): Vout = Vref(dref) x (1 + mul / 4)
+ *        with the unit's eFuse gain, offset and step corrections, every
+ *        constant scaled by 1000.
+ */
+static uint32_t ldo_vo3_setting(uint32_t mv)
+{
+    uint32_t sys2 = TIKU_P4_REG_READ(TIKU_P4_EFUSE_BLOCK_VERSION);
+    uint32_t sys3 = TIKU_P4_REG_READ(TIKU_P4_EFUSE_SYS3);
+    uint32_t version = ((sys2 >> 11) & 3u) * 100u + ((sys2 >> 8) & 7u);
+    uint32_t k = (sys3 >> 6) & 0xFFu, vos = (sys3 >> 14) & 0x3Fu;
+    uint32_t c = (sys3 >> 20) & 0x3Fu, dref, mul, best_dref = 0u, best_mul = 0u;
+    int32_t k1000 = 1000, vos1000 = 0, c1000 = 1000, best = 0x7FFFFFFF;
+
+    if (version >= 1u) {
+        if (k != 0u) {
+            k1000 = (k & 0x80u) ? 975 - (int32_t)(k & 0x7Fu) : 975 + (int32_t)k;
+        }
+        if (vos != 0u) {
+            vos1000 = (vos & 0x20u) ? -(int32_t)(vos & 0x1Fu) - 3 : (int32_t)vos - 3;
+        }
+        if (c != 0u) {
+            c1000 = (c & 0x20u) ? 990 - (int32_t)(c & 0x1Fu) : 990 + (int32_t)c;
+        }
+    }
+    for (dref = 0u; dref < 16u; dref++) {
+        int32_t vref20 = dref < 9u ? 10 + (int32_t)dref : 20 + 2 * ((int32_t)dref - 9);
+
+        for (mul = 0u; mul < 8u; mul++) {
+            int32_t out = (vref20 * k1000 + 20 * vos1000) *
+                          (4000 + (int32_t)mul * c1000);
+            int32_t diff = (int32_t)mv * 80000 - out;
+
+            diff = diff < 0 ? -diff : diff;
+            if (diff < best) {
+                best = diff;
+                best_dref = dref;
+                best_mul = mul;
+            }
+        }
+    }
+    return (best_dref << LDO_DREF_POS) | (best_mul << LDO_MUL_POS);
+}
+
+int tiku_p4_pmu_mipi_ldo_init(unsigned int mv)
+{
+    uint32_t setting = ldo_vo3_setting(mv);
+
+    /* esp_ldo_acquire_channel(): current limit on across the change. */
+    field(TIKU_P4_MIPI_LDO_ANA, LDO_SETTING | LDO_EN_CUR_LIM,
+          setting | LDO_EN_CUR_LIM);
+    field(TIKU_P4_MIPI_LDO, LDO_TIEH | LDO_TIEH_SEL | LDO_FORCE_TIEH_SEL,
+          LDO_FORCE_TIEH_SEL);
+    field(TIKU_P4_MIPI_LDO_ANA, LDO_EN_VDET, LDO_EN_VDET);
+    field(TIKU_P4_MIPI_LDO, LDO_XPD, LDO_XPD);
+    field(TIKU_P4_MIPI_LDO_ANA, LDO_EN_CUR_LIM, 0);
+    if (!(TIKU_P4_REG_READ(TIKU_P4_MIPI_LDO) & LDO_XPD) ||
+        (TIKU_P4_REG_READ(TIKU_P4_MIPI_LDO_ANA) & LDO_SETTING) != setting)
+        return -2;
+    return 0;
+}
+
 int tiku_p4_pmu_mpll_init(void)
 {
     uint32_t gate, conf1, conf2, clock, tries;
