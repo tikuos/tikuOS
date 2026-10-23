@@ -8,7 +8,7 @@
  * tiku_cpu_freq_boot_arch.c - MSP430 CPU frequency configuration.
  *
  * Clock-system setup plus the frequency set and get paths, for the CS_A
- * module of the FR5969, FR5994 and FR6989 and the clock system of the FR2433.
+ * module of the FR5969, FR5994 and FR6989.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -71,7 +71,7 @@ static void cpu_freq_msp430_init(unsigned int freq_mhz, unsigned int sfreq_div, 
  void tiku_cpu_boot_msp430_pins_init_low(void)
  {
     /* TIKU_DEVICE_HAS_PORTn picks the ports.  PnIE is cleared only where
-     * <msp430.h> defines it: the FR2433 P3, for one, has no P3IE. */
+     * <msp430.h> defines it. */
 
 #if TIKU_DEVICE_HAS_PORT1
     P1DIR = 0xFF; P1OUT = 0x00; P1IE = 0x00;
@@ -292,9 +292,6 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
         CSCTL5 &= ~LFXTOFFG;
 #elif TIKU_DEVICE_HAS_HFXT
         CSCTL5 &= ~HFXTOFFG;
-#else
-        /* FR2433: clear DCO fault flag only */
-        CSCTL7 &= ~DCOFFG;
 #endif
 
         SFRIFG1 &= ~OFIFG;                 /* summary fault flag */
@@ -327,13 +324,9 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
                                          tiku_clk_div_t sfreq_div,
                                          tiku_aclk_source_t aclk_source)
  {
-#if defined(TIKU_DEVICE_CS_TYPE_FR2X33)
-     aclk_source = TIKU_ACLK_REFO;
-#else
      if (aclk_source == TIKU_ACLK_REFO || aclk_source == TIKU_ACLK_DCO) {
          aclk_source = TIKU_ACLK_LFMODCLK;
      }
-#endif
      /* Validate input parameters */
      if (freq < CPU_FREQ_MIN_MHZ || freq > CPU_FREQ_8MHZ) {
          freq = CPU_FREQ_8MHZ;  /* Default/clamp to 8MHz */
@@ -359,79 +352,6 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
      /* DCO FREQUENCY CONFIGURATION                                          */
      /*-----------------------------------------------------------------------*/
 
-#if defined(TIKU_DEVICE_CS_TYPE_FR2X33)
-     /*
-      * FR2433 CS: the FLL locks DCOCLKDIV to 32768 * (FLLN + 1) Hz from REFO
-      * within the DCO range DCORSEL selects; SLAU445 gives the ranges
-      * 0..7 = 1, 2, 4, 8, 12, 16, 20 and 24 MHz. Each target uses the
-      * nearest supported range at or above its nominal rate. SCG0 holds the
-      * FLL off while CSCTL1 and CSCTL2 change.
-      */
-     __bis_SR_register(SCG0);  /* Disable FLL */
-
-     CSCTL3 = SELREF__REFOCLK; /* FLL reference = REFO (32768 Hz) */
-
-    switch (freq) {
-        case TIKU_CLK_FREQ_1MHZ:
-            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_0;
-            CSCTL2 = FLLD_0 + 30;   /* 32768*(30+1) = 1,015,808 Hz */
-            clk.freq = TIKU_CLK_FREQ_1MHZ;
-            break;
-        case TIKU_CLK_FREQ_2_677MHZ:
-            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_2;
-            CSCTL2 = FLLD_0 + 81;   /* 32768*(81+1) = 2,686,976 Hz */
-            clk.freq = TIKU_CLK_FREQ_2_677MHZ;
-            break;
-        case TIKU_CLK_FREQ_3_5MHZ:
-            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_2;
-            CSCTL2 = FLLD_0 + 106;  /* 32768*(106+1) = 3,506,176 Hz */
-            clk.freq = TIKU_CLK_FREQ_3_5MHZ;
-            break;
-        case TIKU_CLK_FREQ_4MHZ:
-            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_2;
-            CSCTL2 = FLLD_0 + 121;  /* 32768*(121+1) = 3,997,696 Hz */
-            clk.freq = TIKU_CLK_FREQ_4MHZ;
-            break;
-        case TIKU_CLK_FREQ_5_33MHZ:
-            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_3;
-            CSCTL2 = FLLD_0 + 162;  /* 32768*(162+1) = 5,341,184 Hz */
-            clk.freq = TIKU_CLK_FREQ_5_33MHZ;
-            break;
-        case TIKU_CLK_FREQ_7MHZ:
-            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_3;
-            CSCTL2 = FLLD_0 + 213;  /* 32768*(213+1) = 7,012,352 Hz */
-            clk.freq = TIKU_CLK_FREQ_7MHZ;
-            break;
-        case TIKU_CLK_FREQ_8MHZ:
-            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_3;
-            CSCTL2 = FLLD_0 + 243;  /* 32768*(243+1) = 7,995,392 Hz */
-            clk.freq = TIKU_CLK_FREQ_8MHZ;
-            break;
-        default:
-            CSCTL1 = DCOFTRIMEN | DCOFTRIM_3 | DCORSEL_3;
-            CSCTL2 = FLLD_0 + 243;
-            clk.freq = TIKU_CLK_FREQ_8MHZ;
-            break;
-    }
-
-     __delay_cycles(3);
-     __bic_SR_register(SCG0);  /* Re-enable FLL */
-
-     /* Clear DCO fault, then wait for FLL to lock (bounded) */
-     CSCTL7 &= ~DCOFFG;
-     __delay_cycles(200000);   /* ~25 ms at 8 MHz for FLL to settle */
-     {
-         unsigned long fllWait = 500000UL;
-         while ((CSCTL7 & (FLLUNLOCK0 | FLLUNLOCK1)) && --fllWait)
-             ;
-     }
-
-     /* SCG0 holds the FLL off again, so the DCO stays at the locked tap; a
-      * running FLL keeps retuning the DCO, and that jitter corrupts UART
-      * bytes. */
-     __bis_SR_register(SCG0);
-
-#else
      /* FR5969/FR5994/FR6989 CS_A: the DCO is set by DCOFSEL and DCORSEL.
       * DCOFSEL values: 0=1MHz, 1=2.67MHz, 2=3.5MHz, 3=4MHz (low range)
       * With DCORSEL=1: 0=1MHz, 1=5.33MHz, 2=7MHz, 3=8MHz, 4=16MHz, 6=24MHz
@@ -470,7 +390,6 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
             clk.freq = TIKU_CLK_FREQ_8MHZ;
             break;
     }
-#endif /* TIKU_DEVICE_CS_TYPE_FR2X33 */
 
     /* Allow DCO to stabilize after frequency change */
     __delay_cycles(250);
@@ -481,50 +400,6 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
      /* CLOCK SOURCE AND DIVIDER CONFIGURATION                               */
      /*-----------------------------------------------------------------------*/
 
-#if defined(TIKU_DEVICE_CS_TYPE_FR2X33)
-     /*
-      * FR2433 CS module:
-      *   CSCTL4: SELMS (MCLK+SMCLK source, bits 0-2), SELA (ACLK source, bit 8)
-      *   CSCTL5: DIVM (MCLK divider, bits 0-2), DIVS (SMCLK divider, bits 4-5)
-      */
-    {
-        unsigned int selms_val = SELMS__DCOCLKDIV; /* MCLK+SMCLK = DCOCLKDIV */
-        unsigned int sela_val;
-
-        switch(aclk_source) {
-            case TIKU_ACLK_REFO:
-                sela_val = SELA__REFOCLK;
-                break;
-            case TIKU_ACLK_VLO:
-            case TIKU_ACLK_DCO:
-            default:
-                /* SELA selects XT1CLK or REFOCLK on this part; every
-                 * request gets REFOCLK. */
-                sela_val = SELA__REFOCLK;
-                break;
-        }
-
-        CSCTL4 = sela_val | selms_val;
-
-        CPU_FREQ_PRINTF("Clock sources configured\n");
-
-        /* Configure clock dividers in CSCTL5 */
-        unsigned int divs = 0;
-
-        switch(sfreq_div) {
-            case 1:   divs = DIVS__1; clk.smclk_div = TIKU_CLK_DIV_1; break;
-            case 2:   divs = DIVS__2; clk.smclk_div = TIKU_CLK_DIV_2; break;
-            case 4:   divs = DIVS__4; clk.smclk_div = TIKU_CLK_DIV_4; break;
-            case 8:   divs = DIVS__8; clk.smclk_div = TIKU_CLK_DIV_8; break;
-            default:  divs = DIVS__1; clk.smclk_div = TIKU_CLK_DIV_1; break;
-        }
-
-        CSCTL5 = divs | DIVM__1;
-
-        CPU_FREQ_PRINTF("Clock dividers applied\n");
-    }
-
-#else
      /* FR5969/FR5994/FR6989 CS_A:
       *   CSCTL2: SELA, SELS, SELM (independent source selects)
       *   CSCTL3: DIVA, DIVS, DIVM (independent dividers)
@@ -575,7 +450,6 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
 
         CPU_FREQ_PRINTF("Clock dividers applied\n");
     }
-#endif /* TIKU_DEVICE_CS_TYPE_FR2X33 */
 
      /*-----------------------------------------------------------------------*/
      /* FREQUENCY CACHE UPDATE                                               */
@@ -609,12 +483,9 @@ static bool wait_for_all_fault_clear(unsigned long timeout)
      CSCTL5 &= ~(LFXTOFFG | HFXTOFFG);
 #elif TIKU_DEVICE_HAS_LFXT
      CSCTL5 &= ~LFXTOFFG;
-#elif !defined(TIKU_DEVICE_CS_TYPE_FR2X33)
+#else
      /* CS_A part without LFXT: OFIFG only */
      SFRIFG1 &= ~OFIFG;
-#else
-     /* FR2433: clear DCO fault flag */
-     CSCTL7 &= ~DCOFFG;
 #endif
      SFRIFG1 &= ~OFIFG;
 
@@ -837,8 +708,6 @@ tiku_clock_result_t tiku_cpu_msp430_hfxt_init(bool bypass, unsigned long freq_hz
          CSCTL5 &= ~(LFXTOFFG | HFXTOFFG);
 #elif TIKU_DEVICE_HAS_LFXT
          CSCTL5 &= ~LFXTOFFG;
-#elif defined(TIKU_DEVICE_CS_TYPE_FR2X33)
-         CSCTL7 &= ~DCOFFG;
 #endif
          SFRIFG1 &= ~OFIFG;                      /* summary fault */
 
@@ -967,7 +836,7 @@ static void cpu_freq_msp430_init(unsigned int freq_mhz, unsigned int sfreq_div, 
 
         CPU_FREQ_PRINTF("Initializing Microcontroller without LFXT crystal. Sfreq divider: %d\n", sfreq_div);
 
-        /* REFO on FR2433; LFMODCLK on CS_A parts. */
+        /* CS_A parts have no REFO: ACLK runs from LFMODCLK. */
         tiku_cpu_msp430_clock_set_advanced(freq_mhz, sfreq_div, TIKU_ACLK_REFO);
 
     }
@@ -1006,15 +875,11 @@ tiku_clk_div_t tiku_cpu_msp430_clock_get_sfreq_div(void)
  */
 tiku_aclk_source_t tiku_cpu_msp430_clock_get_aclk_source(void)
 {
-#if defined(TIKU_DEVICE_CS_TYPE_FR2X33)
-    return (CSCTL4 & SELA__REFOCLK) ? TIKU_ACLK_REFO : TIKU_ACLK_LFXT;
-#else
     switch (CSCTL2 & SELA_7) {
     case MSP430_SELA__XT1CLK: return TIKU_ACLK_LFXT;
     case MSP430_SELA__LFMODCLK: return TIKU_ACLK_LFMODCLK;
     default: return TIKU_ACLK_VLO;
     }
-#endif
 }
 
 void tiku_cpu_boot_msp430_setup(void)
@@ -1039,11 +904,7 @@ void tiku_cpu_msp430_boot_divide(unsigned long hz)
     default: return;
     }
     TIKU_CS_UNLOCK();
-#if defined(TIKU_DEVICE_CS_TYPE_FR2X33)
-    CSCTL5 = (CSCTL5 & ~0x0007U) | div;
-#else
     CSCTL3 = (CSCTL3 & ~0x0007U) | div;
-#endif
     TIKU_CS_LOCK();
     g_mclk_hz = hz;
 }

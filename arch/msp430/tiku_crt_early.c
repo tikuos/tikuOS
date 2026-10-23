@@ -40,17 +40,12 @@
  */
 /*
  * The instruction writes WDTPW | WDTHOLD (0x5A00 | 0x0080 = 0x5A80) to
- * WDTCTL at 0x015C, its address on the FR5969, FR5994 and FR6989; the
- * FR2433 branch uses its WDTCTL address, 0x01CC.
+ * WDTCTL at 0x015C, its address on the FR5969, FR5994 and FR6989.
  */
 __attribute__((naked, used, section(".crt_0050early")))
 void __tiku_crt_early_disable_wdt(void)
 {
-#if defined(TIKU_DEVICE_MSP430FR2433)
-    __asm__ volatile("mov.w #0x5A80, &0x01CC" ::: "memory");
-#else
     __asm__ volatile("mov.w #0x5A80, &0x015C" ::: "memory");
-#endif
 }
 
 #endif /* PLATFORM_MSP430 */

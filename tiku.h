@@ -48,7 +48,7 @@
 /*
  * Device selection, passed as -DTIKU_DEVICE_<PART>=1 from the Makefile.  CCS
  * passes -D__MSP430FRxxxx__ instead, so those are mapped automatically, and an
- * MSP430 build with no device named defaults to the FR2433.
+ * MSP430 build with no device named defaults to the FR5994.
  */
 #if defined(PLATFORM_MSP430)
 
@@ -58,15 +58,12 @@
 #define TIKU_DEVICE_MSP430FR5994 1
 #elif defined(__MSP430FR6989__) && !defined(TIKU_DEVICE_MSP430FR6989)
 #define TIKU_DEVICE_MSP430FR6989 1
-#elif defined(__MSP430FR2433__) && !defined(TIKU_DEVICE_MSP430FR2433)
-#define TIKU_DEVICE_MSP430FR2433 1
 #endif
 
 #if !defined(TIKU_DEVICE_MSP430FR5969) && \
     !defined(TIKU_DEVICE_MSP430FR5994) && \
-    !defined(TIKU_DEVICE_MSP430FR6989) && \
-    !defined(TIKU_DEVICE_MSP430FR2433)
-#define TIKU_DEVICE_MSP430FR2433 1
+    !defined(TIKU_DEVICE_MSP430FR6989)
+#define TIKU_DEVICE_MSP430FR5994 1
 #endif
 
 #elif defined(PLATFORM_RP2350)

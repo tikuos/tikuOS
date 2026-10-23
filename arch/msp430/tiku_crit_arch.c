@@ -9,7 +9,7 @@
  *
  * Implements the two hooks in hal/tiku_crit_hal.h.  Each register is masked
  * only where its OFS_<reg> macro exists, so one file serves the FR5969,
- * FR5994, FR6989 and FR2433.
+ * FR5994 and FR6989.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

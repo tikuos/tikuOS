@@ -176,7 +176,6 @@ endif
 # ---------------------------------------------------------------------------
 
 # MCU -> its default board.
-DEFAULT_BOARD_msp430fr2433  := fr2433_launchpad
 DEFAULT_BOARD_msp430fr5969  := fr5969_launchpad
 DEFAULT_BOARD_msp430fr5994  := fr5994_launchpad
 DEFAULT_BOARD_msp430fr6989  := fr6989_launchpad
@@ -202,13 +201,12 @@ DEFAULT_BOARD_esp32p4       := olimex_esp32p4_pc
 # BOARD -> the macro that selects its header, and the platform it belongs to.
 # A new board goes in KNOWN_BOARDS, gets a row in each table here and in
 # BOARD_CAPS_ below, and gets a board header.
-KNOWN_BOARDS := fr2433_launchpad fr5969_launchpad fr5994_launchpad \
-                fr6989_launchpad pico2 pico2w apollo4l_evb apollo4p_evb \
+KNOWN_BOARDS := fr5969_launchpad fr5994_launchpad fr6989_launchpad \
+                pico2 pico2w apollo4l_evb apollo4p_evb \
                 apollo510_evb apollo510b_evb nrf54l15_dk nrf54lm20_dk \
                 nrf54lv10_dk nucleo_n657x0q ek_ra8p1 esp32c61_devkitc esp32c5_devkitc1 olimex_esp32p4_pc \
                 firebeetle2_esp32p4 tiku_bare
 
-BOARD_DEFINE_fr2433_launchpad  := TIKU_BOARD_FR2433_LAUNCHPAD
 BOARD_DEFINE_fr5969_launchpad  := TIKU_BOARD_FR5969_LAUNCHPAD
 BOARD_DEFINE_fr5994_launchpad  := TIKU_BOARD_FR5994_LAUNCHPAD
 BOARD_DEFINE_fr6989_launchpad  := TIKU_BOARD_FR6989_LAUNCHPAD
@@ -231,7 +229,6 @@ BOARD_DEFINE_esp32c5_devkitc1  := TIKU_BOARD_ESP32C5_DEVKITC1
 BOARD_DEFINE_olimex_esp32p4_pc := TIKU_BOARD_OLIMEX_ESP32P4_PC
 BOARD_DEFINE_firebeetle2_esp32p4 := TIKU_BOARD_FIREBEETLE2_ESP32P4
 
-BOARD_PLATFORM_fr2433_launchpad  := msp430
 BOARD_PLATFORM_fr5969_launchpad  := msp430
 BOARD_PLATFORM_fr5994_launchpad  := msp430
 BOARD_PLATFORM_fr6989_launchpad  := msp430
@@ -278,7 +275,6 @@ BOARD_CAPS_pico2w              := CYW43
 BOARD_CAPS_pico2               :=
 BOARD_CAPS_apollo4l_evb        :=
 BOARD_CAPS_apollo4p_evb        :=
-BOARD_CAPS_fr2433_launchpad    :=
 BOARD_CAPS_fr5969_launchpad    :=
 BOARD_CAPS_fr5994_launchpad    :=
 # The FR6989 LaunchPad has a segment LCD wired to LCD_C.  Its LCD cap defines
@@ -1000,14 +996,13 @@ MSP430_LTO ?= 1
 # MSP430 build guards
 # ---------------------------------------------------------------------------
 ifeq ($(TIKU_PLATFORM),msp430)
-# 0. Parts without HIFRAM (FR5969, FR2433 and smaller) are refused: the
+# 0. Parts without HIFRAM (FR5969 and smaller) are refused: the
 #    kernel and the VFS do not fit the lower FRAM a small-model image can
-#    address.  Their device headers, board headers and linker scripts stay in
-#    the tree.
+#    address.  The FR5969's device and board headers stay in the tree.
 ifneq ($(DEVICE_HAS_HIFRAM),1)
 $(error MCU=$(MCU) is not a supported TikuOS target: the core (kernel + VFS) \
 does not fit a 64-KB-or-smaller MSP430.  Supported MSP430 parts are \
-msp430fr5994 (256 KB) and msp430fr6989 (128 KB).  The FR5969/FR2433 arch code \
+msp430fr5994 (256 KB) and msp430fr6989 (128 KB).  The FR5969 arch code \
 remains in-tree for reference)
 endif
 

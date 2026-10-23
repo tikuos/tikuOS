@@ -42,7 +42,7 @@ typedef unsigned int  tiku_clock_arch_counter_t;
 /** Clock tick frequency, in ticks per second */
 #define TIKU_CLOCK_ARCH_SECOND TIKU_CLOCK_ARCH_CONF_SECOND
 
-/** ACLK in Hz: the LFXT crystal, or REFO on the FR2433. */
+/** ACLK in Hz: the LFXT crystal. */
 #define TIKU_CLOCK_ARCH_ACLK_FREQ 32768
 
 /** ACLK cycles per tick: the Timer A0 count between interrupts */
@@ -56,7 +56,7 @@ typedef unsigned int  tiku_clock_arch_counter_t;
 /**
  * @brief Initialize the architecture-specific system clock
  *
- * Starts ACLK (LFXT, or REFO on the FR2433) and Timer A0 at
+ * Starts ACLK on the LFXT crystal and Timer A0 at
  * TIKU_CLOCK_ARCH_SECOND ticks per second, from a count of 0.
  *
  * @note Call once during system initialization.

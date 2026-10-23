@@ -35,9 +35,9 @@
 
 /*
  * TIKU_BOARD_UART_MODULE picks the eUSCI_A behind the kernel UART: 0
- * (eUSCI_A0, the default, used by the FR5969, FR5994 and FR2433
- * LaunchPads) or 1 (eUSCI_A1, which the FR6989 board header selects for
- * its eZ-FET backchannel on P3.4/P3.5).
+ * (eUSCI_A0, the default, used by the FR5969 and FR5994 LaunchPads) or 1
+ * (eUSCI_A1, which the FR6989 board header selects for its eZ-FET
+ * backchannel on P3.4/P3.5).
  */
 #ifndef TIKU_BOARD_UART_MODULE
 #define TIKU_BOARD_UART_MODULE 0

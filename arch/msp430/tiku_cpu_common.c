@@ -117,7 +117,7 @@ tiku_cpu_msp430_reset_reason(void)
 uint8_t
 tiku_cpu_msp430_unique_id(uint8_t *buf, uint8_t len)
 {
-    /* TLV die-record base address (same on FR2433/FR5969/FR5994) */
+    /* TLV die-record base address (same on the FR5969 and FR5994) */
     const uint8_t *die = (const uint8_t *)0x01A0AU;
     uint8_t n = (len < 8) ? len : 8;
 

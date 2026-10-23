@@ -27,8 +27,6 @@
 #define TIKU_DEVICE_MSP430FR5994 1
 #elif defined(__MSP430FR6989__) && !defined(TIKU_DEVICE_MSP430FR6989)
 #define TIKU_DEVICE_MSP430FR6989 1
-#elif defined(__MSP430FR2433__) && !defined(TIKU_DEVICE_MSP430FR2433)
-#define TIKU_DEVICE_MSP430FR2433 1
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -41,8 +39,6 @@
 #include <arch/msp430/devices/tiku_device_fr5994.h>
 #elif defined(TIKU_DEVICE_MSP430FR6989)
 #include <arch/msp430/devices/tiku_device_fr6989.h>
-#elif defined(TIKU_DEVICE_MSP430FR2433)
-#include <arch/msp430/devices/tiku_device_fr2433.h>
 #else
 #error "No TikuOS device selected. Define TIKU_DEVICE_MSP430FR5994 (or another supported device) in tiku.h"
 #endif
@@ -57,8 +53,7 @@
 
 #if !defined(TIKU_BOARD_FR5969_LAUNCHPAD) && \
     !defined(TIKU_BOARD_FR5994_LAUNCHPAD) && \
-    !defined(TIKU_BOARD_FR6989_LAUNCHPAD) && \
-    !defined(TIKU_BOARD_FR2433_LAUNCHPAD)
+    !defined(TIKU_BOARD_FR6989_LAUNCHPAD)
 
 #if defined(TIKU_DEVICE_MSP430FR5969)
 #define TIKU_BOARD_FR5969_LAUNCHPAD 1
@@ -66,8 +61,6 @@
 #define TIKU_BOARD_FR5994_LAUNCHPAD 1
 #elif defined(TIKU_DEVICE_MSP430FR6989)
 #define TIKU_BOARD_FR6989_LAUNCHPAD 1
-#elif defined(TIKU_DEVICE_MSP430FR2433)
-#define TIKU_BOARD_FR2433_LAUNCHPAD 1
 #endif
 
 #endif
@@ -82,8 +75,6 @@
 #include <arch/msp430/boards/tiku_board_fr5994_launchpad.h>
 #elif defined(TIKU_BOARD_FR6989_LAUNCHPAD)
 #include <arch/msp430/boards/tiku_board_fr6989_launchpad.h>
-#elif defined(TIKU_BOARD_FR2433_LAUNCHPAD)
-#include <arch/msp430/boards/tiku_board_fr2433_launchpad.h>
 #else
 #error "No TikuOS board selected. Pass BOARD=<name> to make (see KNOWN_BOARDS in the Makefile)."
 #endif

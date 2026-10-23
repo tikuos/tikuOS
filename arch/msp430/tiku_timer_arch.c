@@ -101,9 +101,8 @@ tiku_arch_read_tar(void)
 /**
  * @brief Configure clock source for Timer A0.
  *
- * Parts with LFXT run ACLK from the 32.768 kHz crystal, or from VLOCLK with
- * fault code TIKU_CLOCK_ARCH_FAULT_LFXT_VLO when it still faults after 50000
- * polls.  The FR2433 runs ACLK from REFOCLK (32.768 kHz internal).
+ * ACLK runs from the 32.768 kHz LFXT crystal, or from VLOCLK with fault code
+ * TIKU_CLOCK_ARCH_FAULT_LFXT_VLO when it still faults after 50000 polls.
  */
 static void tiku_configure_aclk_source(void)
 {
@@ -142,16 +141,7 @@ static void tiku_configure_aclk_source(void)
     CLOCK_PRINTF("XT1 crystal configured (32.768 kHz)\n");
 
 #else
-    /* No crystal: ACLK runs from REFOCLK (32.768 kHz internal reference)
-     * and MCLK and SMCLK stay on DCOCLKDIV. */
-    TIKU_CS_UNLOCK();
-
-    CSCTL4 = SELA__REFOCLK | SELMS__DCOCLKDIV;
-    g_aclk_hz = REFO_FREQ_HZ;
-
-    TIKU_CS_LOCK();
-
-    CLOCK_PRINTF("REFOCLK configured for ACLK (32.768 kHz internal)\n");
+#error "Timer A0 runs ACLK from the LFXT crystal, which every supported part has"
 #endif
 }
 
