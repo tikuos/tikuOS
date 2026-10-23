@@ -163,7 +163,18 @@ static uint32_t bits_per_pixel(uint8_t raw)
 static uint32_t out_bits_per_pixel(uint8_t f)
 {
     return f == TIKU_P4_ISP_OUT_RGB888 ? 24u : f == TIKU_P4_ISP_OUT_YUV420
-                                                   ? 12u : 16u;
+                                                   ? 12u : f == TIKU_P4_ISP_OUT_RAW
+                                                   ? 0u : 16u;
+}
+
+/** @brief Bytes @p j writes: the input's when bypassed.  Runs from the
+ *         interrupt's finish(), so it calls nothing in flash. */
+static uint32_t job_out_bytes(const struct tiku_p4_isp_job *j)
+{
+    return j->out_format == TIKU_P4_ISP_OUT_RAW
+               ? (uint32_t)(((uint64_t)j->width * j->height *
+                             bits_per_pixel(j->raw)) / 8u)
+               : tiku_p4_isp_out_bytes(j->width, j->height, j->out_format);
 }
 
 TIKU_P4_XIP_TEXT
@@ -217,6 +228,17 @@ static int job_ok(const struct tiku_p4_isp_job *j)
     uint32_t in_bytes, out_bytes, i;
     uintptr_t a, b;
 
+    if (j != NULL && j->out_format == TIKU_P4_ISP_OUT_RAW) {
+        in_bits = (uint64_t)j->width * j->height * bits_per_pixel(j->raw);
+        return j->source == TIKU_P4_ISP_SRC_CSI && j->out != NULL &&
+               ((uintptr_t)j->out & 7u) == 0u && j->width >= 8u &&
+               j->width <= TIKU_P4_ISP_RAW_MAX && (j->width & 7u) == 0u &&
+               j->height >= TIKU_P4_ISP_HEIGHT_MIN &&
+               j->height <= TIKU_P4_ISP_RAW_MAX && (j->height & 1u) == 0u &&
+               j->raw <= TIKU_P4_ISP_RAW12 && (in_bits & 63u) == 0u &&
+               (in_bits >> 6) <= 0x3FFFFFu &&
+               tiku_p4_dwgdma_reachable(j->out, (uint32_t)(in_bits / 8u));
+    }
     if (j == NULL || j->out == NULL || j->source > TIKU_P4_ISP_SRC_CSI ||
         (j->source == TIKU_P4_ISP_SRC_MEMORY && j->in == NULL) ||
         (((uintptr_t)j->in | (uintptr_t)j->out) & 7u) != 0u ||
@@ -313,6 +335,16 @@ static void program_isp(const struct tiku_p4_isp_job *j)
                   j->out_format == TIKU_P4_ISP_OUT_RGB888;
 
     TIKU_P4_REG_WRITE(I_CNTL, 0u);
+    /* Bypassed: the receiver's words go to the bridge as they came, the
+     * line counted in 32-bit words, the ISP itself off. */
+    if (j->out_format == TIKU_P4_ISP_OUT_RAW) {
+        n = (j->width * bits_per_pixel(j->raw) + 31u) / 32u;
+        TIKU_P4_REG_WRITE(I_FRAME_CFG, ((j->height - 1u) & 0xFFFu) |
+                                       (((n - 1u) & 0xFFFu) << 12));
+        TIKU_P4_REG_WRITE(I_INT_CLR, INT_ALL);
+        TIKU_P4_REG_WRITE(I_CNTL, CNTL_MIPI_DATA | CNTL_DATA_TYPE(j->raw));
+        return;
+    }
     TIKU_P4_REG_WRITE(I_FRAME_CFG, ((j->height - 1u) & 0xFFFu) |
                                    (((j->width - 1u) & 0xFFFu) << 12) |
                                    ((uint32_t)j->bayer << 27));
@@ -483,8 +515,7 @@ static int finish(int rc)
     TIKU_P4_REG_WRITE(B_INT_CLR, B_INT_ALL);
     TIKU_P4_REG_WRITE(B_CSI_EN, 0u);
     put_bits(I_CNTL, CNTL_EN, 0u);
-    tiku_cpu_dcache_invalidate(j->out, tiku_p4_isp_out_bytes(j->width, j->height,
-                                                             j->out_format));
+    tiku_cpu_dcache_invalidate(j->out, job_out_bytes(j));
     if (rc == TIKU_P4_ISP_OK) {
         frames_done++;
     } else {
@@ -539,7 +570,7 @@ static int process(const struct tiku_p4_isp_job *j, tiku_p4_isp_done_t done,
     TIKU_P4_IRQ_RESTORE(state);
     isp_init(j->source);
     in_bytes = tiku_p4_isp_in_bytes(j->width, j->height, j->raw);
-    out_bytes = tiku_p4_isp_out_bytes(j->width, j->height, j->out_format);
+    out_bytes = job_out_bytes(j);
     run.job = j;
     run.done = done;
     run.ctx = ctx;

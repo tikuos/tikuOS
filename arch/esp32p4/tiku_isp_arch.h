@@ -38,6 +38,10 @@
 #define TIKU_P4_ISP_OUT_RGB888  1u
 #define TIKU_P4_ISP_OUT_YUV422  2u
 #define TIKU_P4_ISP_OUT_YUV420  3u
+/** @brief The frame as the receiver sent it, the ISP bypassed: a CSI job
+ *         only, up to TIKU_P4_ISP_RAW_MAX a side, the blocks and the
+ *         statistics not run, the output tiku_p4_isp_in_bytes() long. */
+#define TIKU_P4_ISP_OUT_RAW     4u
 /** @brief Frame sources: memory through the DW-GDMA, or the next frame the
  *         MIPI CSI-2 receiver passes on. */
 #define TIKU_P4_ISP_SRC_MEMORY  0u
@@ -46,6 +50,7 @@
 #define TIKU_P4_ISP_WIDTH_MAX   1920u
 #define TIKU_P4_ISP_HEIGHT_MAX  1280u
 #define TIKU_P4_ISP_HEIGHT_MIN  8u      /* fewer rows never leave the pipeline */
+#define TIKU_P4_ISP_RAW_MAX     4095u   /**< a bypassed frame's width and height */
 #define TIKU_P4_ISP_CCM_ONE     1024    /**< 1.0 in the matrix's 2.10 fixed
                                          *   point; magnitudes below 4.0 */
 
@@ -75,7 +80,8 @@ struct tiku_p4_isp_job {
     uint8_t raw;                /**< TIKU_P4_ISP_RAW* */
     uint8_t bayer;              /**< TIKU_P4_ISP_BGGR .. RGGB */
     void *out;                  /**< the processed frame, 8-byte aligned */
-    uint8_t out_format;         /**< TIKU_P4_ISP_OUT_* */
+    uint8_t out_format;         /**< TIKU_P4_ISP_OUT_*; OUT_RAW ignores the
+                                 *   fields below */
     uint8_t yuv_bt709;          /**< 1: BT.709 instead of BT.601 */
     uint8_t yuv_limited;        /**< 1: limited range (16..235) */
 
@@ -122,7 +128,8 @@ typedef void (*tiku_p4_isp_done_t)(void *ctx, int rc);
 
 /** @brief Bytes of a @p width x @p height input frame at @p raw depth. */
 uint32_t tiku_p4_isp_in_bytes(uint32_t width, uint32_t height, uint8_t raw);
-/** @brief Bytes of the output frame in @p out_format. */
+/** @brief Bytes of the output frame in @p out_format; 0 for
+ *         TIKU_P4_ISP_OUT_RAW, whose size is the input's. */
 uint32_t tiku_p4_isp_out_bytes(uint32_t width, uint32_t height,
                                uint8_t out_format);
 /** @brief Run @p job and wait: TIKU_P4_ISP_OK or an error; on success
