@@ -336,7 +336,7 @@ KERNEL_CHECKS = (
     "L2 partition agrees with SRAM map",
     "two SRAM allocator spans", "SRAM linker and telemetry agree",
     "ROM cache TCM and LP SRAM excluded",
-    "absent NVM PSRAM and hardware protection reported",
+    "absent NVM and PSRAM reported, page-zero guard armed",
     "aggregate free cannot cross SRAM gap", "entire low and high SRAM reserved",
     "full SRAM patterns and span alias check",
     "allocator initialization preserves live reservations",
