@@ -102,13 +102,20 @@ per-platform semantics and the NVM region layout.
 
 ## Bugs
 
-- A bug found by a test, a model, a review or a board run gets a GitHub
-  issue before it is fixed (`gh issue create`), in the repository that
-  holds the faulty code: what fails, the input that shows it, and where
-  in the code.
-- The fix comes with a test seen failing on the old code.  Once the fix is
-  pushed, close the issue with a comment naming the commits and how they
-  were checked.
+- File a GitHub issue before fixing a reproduced defect in existing
+  committed code (`gh issue create`), in the repository that holds it.
+  Name the affected revision, the failing input and the faulty code.
+- Defects introduced by the current unfinished implementation are fixed
+  and tested locally. Do not open GitHub issues for bugs in that
+  uncommitted work, its new tests or its integration. Keep regression
+  inputs and qualification evidence with the work.
+- When new work exposes a suspected defect in existing code, reproduce it
+  against the committed revision before filing an issue.
+- A fix comes with a test seen failing on the input it guards. For a
+  committed-code defect, close its issue after the fix is pushed, with a
+  comment naming the commits and checks. Close an issue opened only for
+  unfinished development with that explanation; do not claim a published
+  fix.
 - A finding that the code's documented contract or a build-time check
   rules out is not a bug; an issue opened for one is closed with that
   reason.
