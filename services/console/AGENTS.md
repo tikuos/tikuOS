@@ -20,14 +20,18 @@ every frame met on the way; a telnet client's bytes bypass it.
 `tiku_console_inject()` feeds text ahead of the wire (the link-carried
 shell uses it).
 
-## Without a shell
+## Autonomous pumping
 
-A build with `TIKU_SHELL_ENABLE=0` runs a `Console` process of the
+A build with `TIKU_SHELL_ENABLE=0` or `TIKU_IPC_CONSOLE_ENABLE=1` runs a `Console` process of the
 console's own that calls `tiku_console_pump()` every
 `TIKU_CONSOLE_POLL_TICKS` while a channel or a text sink is registered: the
 first registrant starts it, the last removal ends it, so an image that
 registers nothing runs no process and arms no timer
-(`tiku_console_pumping()` reports it).
+(`tiku_console_pumping()` reports it). With a shell and the IPC console
+carrier, the process services frames during a shell-owned nested wait.
+Physical text is buffered in the injection ring with its physical origin;
+GUI-injected text retains its separate origin. A full text ring stops the
+pump until the shell consumes bytes.
 
 ## Decoder rules that must not change
 

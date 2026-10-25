@@ -76,6 +76,7 @@ void tiku_lpagent_run(tiku_lpcore_shared_t *sh, uint32_t now)
     uint32_t i;
 
     for (i = 0u; i < TIKU_LPAGENT_JOBS; i++) {
+        tiku_lpcore_stream_step();
         tiku_lpagent_job_t *j = &sh->jobs[i];
         uint32_t kind = j->kind;
         int32_t value;

@@ -27,7 +27,7 @@
 #include <arch/arm-rp2350/tiku_usb_cdc_arch.h>
 #endif
 #endif
-#if !TIKU_SHELL_ENABLE
+#if !TIKU_SHELL_ENABLE || (TIKU_IPC_CONSOLE_ENABLE + 0)
 #include <kernel/process/tiku_process.h>
 #include <kernel/timers/tiku_timer.h>
 #endif
@@ -92,16 +92,12 @@ static struct {
 /* THE PUMP WITHOUT A SHELL                                                  */
 /*---------------------------------------------------------------------------*/
 
-#if !TIKU_SHELL_ENABLE
+#if !TIKU_SHELL_ENABLE || (TIKU_IPC_CONSOLE_ENABLE + 0)
 
 /*
- * A build with a shell reads the wire from the shell's poll loop, and every
- * frame met on the way is dispatched there.  Without one, this process
- * drains the wire at the same cadence for as long as a channel or a text
- * sink is registered, so a build with no line editor still carries a
- * desktop's window session; a poll drains it at once.  The first listener
- * starts it and the last to leave ends it, so a build that registers
- * nothing runs no process and arms no timer.
+ * A registered listener starts this process without a shell or with the IPC
+ * console carrier. It services frames while a shell-owned nested wait excludes
+ * the shell. The last listener's removal ends the process and its timer.
  */
 static struct tiku_timer pump_timer;
 
@@ -500,6 +496,9 @@ sort_byte(uint8_t b)
 static uint8_t  inject_ring[INJECT_CAP];
 static uint16_t inject_head, inject_tail;
 static uint8_t  from_inject;
+#if TIKU_SHELL_ENABLE && (TIKU_IPC_CONSOLE_ENABLE + 0)
+static uint8_t inject_origin[INJECT_CAP / 8u];
+#endif
 
 size_t
 tiku_console_inject(const uint8_t *bytes, size_t len)
@@ -513,6 +512,9 @@ tiku_console_inject(const uint8_t *bytes, size_t len)
             break;
         }
         inject_ring[inject_head] = bytes[i];
+#if TIKU_SHELL_ENABLE && (TIKU_IPC_CONSOLE_ENABLE + 0)
+        inject_origin[inject_head / 8u] |= (uint8_t)(1u << (inject_head % 8u));
+#endif
         inject_head = next;
     }
     return i;
@@ -530,8 +532,12 @@ tiku_console_getc(void)
     if (inject_head != inject_tail) {
         uint8_t c = inject_ring[inject_tail];
 
-        inject_tail = (uint16_t)((inject_tail + 1u) % INJECT_CAP);
+#if TIKU_SHELL_ENABLE && (TIKU_IPC_CONSOLE_ENABLE + 0)
+        from_inject = (uint8_t)((inject_origin[inject_tail / 8u] >> (inject_tail % 8u)) & 1u);
+#else
         from_inject = 1u;
+#endif
+        inject_tail = (uint16_t)((inject_tail + 1u) % INJECT_CAP);
         return (int)c;
     }
     if (wire->getc == (int (*)(void))0) {
@@ -570,13 +576,21 @@ tiku_console_pump(void)
         return;
     }
     while (wire->rx_ready()) {
-        int ch = wire->getc();
-
-        if (ch < 0) {
-            break;
-        }
-        if (!sort_byte((uint8_t)ch) && text_fn != (tiku_console_text_fn)0) {
-            (void)text_fn(text_ctx, ch);
+        int ch;
+#if TIKU_SHELL_ENABLE && (TIKU_IPC_CONSOLE_ENABLE + 0)
+        if (!text_fn && (uint16_t)((inject_head+1u)%INJECT_CAP) == inject_tail) break;
+#endif
+        ch = wire->getc();
+        if (ch < 0) break;
+        if (!sort_byte((uint8_t)ch)) {
+            if (text_fn) (void)text_fn(text_ctx,ch);
+#if TIKU_SHELL_ENABLE && (TIKU_IPC_CONSOLE_ENABLE + 0)
+            else {
+                inject_ring[inject_head] = (uint8_t)ch;
+                inject_origin[inject_head / 8u] &= (uint8_t)~(1u << (inject_head % 8u));
+                inject_head = (uint16_t)((inject_head+1u)%INJECT_CAP);
+            }
+#endif
         }
     }
 }

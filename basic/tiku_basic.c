@@ -25,6 +25,9 @@
 #include <kernel/memory/tiku_mem.h>
 #include <kernel/memory/tiku_reclaim.h>
 #include <kernel/timers/tiku_clock.h>
+#if (TIKU_IPC_ENABLE + 0)
+#include <kernel/scheduler/tiku_sched.h>
+#endif
 #include <hal/tiku_cpu.h>                /* SLEEP enters low-power idle */
 #include <stdio.h>
 #include <stdarg.h>

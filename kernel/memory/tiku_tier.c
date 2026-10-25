@@ -85,7 +85,7 @@ extern uint8_t __tier_sram_extra_end;
  * Other boards take the tier from the carved region; a board with neither
  * has no NVM tier, and a request for one fails.
  */
-#ifdef PLATFORM_MSP430
+#if defined(PLATFORM_MSP430) && TIKU_MEM_NVM_ENABLE
 static TIKU_DURABLE uint8_t __attribute__((aligned(TIKU_MEM_ARCH_ALIGNMENT)))
     tier_nvm_buf[TIKU_TIER_NVM_SIZE] = {0};
 #endif
@@ -215,8 +215,31 @@ typedef struct {
     tiku_mem_owner_t owner;
     uint16_t owner_slot;
     uint8_t kind, state, allocation_class, tier;
+#if TIKU_IPC_ENABLE
+    uint16_t pins;
+#endif
 } backing_record_t;
 static backing_record_t reservations[TIKU_MEM_MAX_RESERVATIONS];
+
+#if TIKU_IPC_ENABLE
+static int span_pinned(const tier_pool_state_t *span)
+{
+    unsigned i;
+    for (i = 0; i < TIKU_MEM_MAX_RESERVATIONS; i++)
+        if (reservations[i].state && reservations[i].pins &&
+            (span == NULL || reservations[i].span == span)) return 1;
+    return 0;
+}
+
+int tiku_backing_pinned(tiku_mem_backing_t h)
+{
+    if (!h.slot_plus_one || h.slot_plus_one > TIKU_MEM_MAX_RESERVATIONS)
+        return 0;
+    return reservations[h.slot_plus_one - 1u].state &&
+        reservations[h.slot_plus_one - 1u].generation == h.generation &&
+        reservations[h.slot_plus_one - 1u].pins != 0;
+}
+#endif
 
 /**
  * @brief Free every record on @p span, or on every span when NULL.
@@ -294,12 +317,33 @@ int tiku_backing_valid(const void *descriptor, tiku_mem_backing_t h, uint8_t kin
     return 0;
 }
 
+#if TIKU_IPC_ENABLE
+tiku_mem_err_t tiku_backing_pin(const void *descriptor,
+    tiku_mem_backing_t h, uint8_t kind, int retain)
+{
+    backing_record_t *r = record_get(descriptor, h, kind);
+    if (r == NULL || r->allocation_class != TIKU_MEM_TRANSIENT ||
+        !tiku_backing_valid(descriptor, h, kind)) return TIKU_MEM_ERR_INVALID;
+    if (retain) {
+        if (r->pins == UINT16_MAX) return TIKU_MEM_ERR_FULL;
+        r->pins++;
+    } else {
+        if (!r->pins) return TIKU_MEM_ERR_INVALID;
+        r->pins--;
+    }
+    return TIKU_MEM_OK;
+}
+#endif
+
 tiku_mem_err_t tiku_backing_release(const void *descriptor,
         tiku_mem_backing_t h, uint8_t kind)
 {
     backing_record_t *r = record_get(descriptor, h, kind);
     unsigned i;
     if (r == NULL) return TIKU_MEM_ERR_INVALID;
+#if TIKU_IPC_ENABLE
+    if (r->pins) return TIKU_MEM_ERR_BUSY;
+#endif
 #if TIKU_MEM_RECLAIM_ENABLE
     if (r->span->fenced) return TIKU_MEM_ERR_BUSY;
 #endif
@@ -440,6 +484,9 @@ tiku_mem_err_t tiku_tier_attach_psram(void *base, tiku_mem_arch_size_t size)
 tiku_mem_err_t tiku_tier_detach_psram(int force)
 {
     TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
+#if TIKU_IPC_ENABLE
+    if (span_pinned(&tier_state[TIKU_MEM_PSRAM])) return TIKU_MEM_ERR_BUSY;
+#endif
 #if TIKU_MEM_RECLAIM_ENABLE
     if (tier_state[TIKU_MEM_PSRAM].fenced && !force) return TIKU_MEM_ERR_BUSY;
     if (force) tiku_reclaim_detached(TIKU_MEM_PSRAM, 0);
@@ -523,6 +570,11 @@ static void tier_wire_all(void)
     }
 #endif
 
+#if !TIKU_MEM_NVM_ENABLE
+    tier_state[TIKU_MEM_NVM].buf = NULL;
+    tier_state[TIKU_MEM_NVM].capacity = 0;
+    tier_state[TIKU_MEM_NVM].initialized = 0;
+#else
 #ifdef PLATFORM_MSP430
     /* MSP430: the NVM tier is the durable FRAM array above. */
     tier_state[TIKU_MEM_NVM].buf         = tier_nvm_buf;
@@ -556,6 +608,7 @@ static void tier_wire_all(void)
         }
     }
 #endif
+#endif
     tier_state[TIKU_MEM_NVM].used      = 0;
     tier_state[TIKU_MEM_NVM].peak        = 0;
     tier_state[TIKU_MEM_NVM].alloc_count = 0;
@@ -587,6 +640,9 @@ tiku_mem_err_t tiku_tier_init(void)
 tiku_mem_err_t tiku_tier_reset(void)
 {
     TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
+#if TIKU_IPC_ENABLE
+    if (span_pinned(NULL)) return TIKU_MEM_ERR_BUSY;
+#endif
 #if TIKU_MEM_RECLAIM_ENABLE
     if (tiku_reclaim_any_fence() || tiku_reclaim_reset_busy()) return TIKU_MEM_ERR_BUSY;
 #endif
@@ -816,6 +872,9 @@ static tiku_mem_backing_t work_commit(int slot, const work_reservation_t *w,
     r->kind = kind;
     r->tier = (uint8_t)w->tier;
     r->state = 1;
+#if TIKU_IPC_ENABLE
+    r->pins = 0;
+#endif
     w->span->used += w->length;
     return (tiku_mem_backing_t){r->generation, (uint16_t)(slot + 1)};
 }
@@ -1472,6 +1531,10 @@ tiku_mem_err_t tiku_tier_nvm_write(void *dst, const void *src,
     if (dst == NULL || src == NULL) {
         return TIKU_MEM_ERR_INVALID;
     }
+#if !TIKU_MEM_NVM_ENABLE
+    (void)len;
+    return TIKU_MEM_ERR_NOT_FOUND;
+#else
     /* A backend owns only its validated address range. */
     {
         const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
@@ -1512,5 +1575,6 @@ tiku_mem_err_t tiku_tier_nvm_write(void *dst, const void *src,
      * for the write to go. */
     (void)len;
     return TIKU_MEM_ERR_INVALID;
+#endif
 #endif
 }

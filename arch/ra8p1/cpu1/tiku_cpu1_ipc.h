@@ -123,4 +123,16 @@ _Static_assert(TIKU_CPU1_SHARED_OFF + sizeof(tiku_cpu1_shared_t) <=
                TIKU_CPU1_AREA_SIZE,
                "cpu1: the shared page runs past the image area");
 
+#if (TIKU_IPC_ENABLE + 0)
+#include <hal/tiku_ipc_shared.h>
+#define TIKU_CPU1_STREAM_OFF \
+    (TIKU_CPU1_SHARED_OFF + sizeof(tiku_cpu1_shared_t))
+#define TIKU_CPU1_STREAM_ADDR (TIKU_CPU1_AREA_ADDR + TIKU_CPU1_STREAM_OFF)
+#define TIKU_CPU1_STREAM ((tiku_ipc_shared_t *)(uintptr_t)TIKU_CPU1_STREAM_ADDR)
+_Static_assert(TIKU_CPU1_STREAM_OFF % TIKU_IPC_SHARED_LINE == 0,
+               "CPU1 IPC stream starts on a writer line");
+_Static_assert(TIKU_CPU1_STREAM_OFF + sizeof(tiku_ipc_shared_t) + 2048u <=
+               TIKU_CPU1_STACK_OFF, "CPU1 IPC stream leaves the payload stack");
+#endif
+
 #endif /* TIKU_RA8P1_CPU1_IPC_H_ */

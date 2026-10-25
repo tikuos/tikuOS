@@ -63,6 +63,10 @@ typedef struct {
     uint8_t     paced_synced;  /**< paced_expect is meaningful */
     uint8_t     plain_expect;  /**< the next seq of the unpaced stream */
     uint8_t     plain_seen;    /**< plain_expect is meaningful */
+#if (TIKU_IPC_ENABLE + 0)
+    int (*emit)(void *, uint8_t, const uint8_t *, size_t);
+    void *emit_context;
+#endif
 } tiku_link_console_t;
 
 /** @brief Counters over every console link since boot. */
@@ -99,5 +103,13 @@ void tiku_link_console_stats_reset(void);
 
 /** @brief CRC-16/CCITT-FALSE continued from @p crc; start it at 0xFFFF. */
 uint16_t tiku_link_console_crc(uint16_t crc, const void *bytes, size_t len);
+
+#if (TIKU_IPC_ENABLE + 0)
+/** @brief Open the console envelope codec on a caller-owned framed carrier. */
+tiku_link_t *tiku_link_console_external(tiku_link_console_t *state, uint8_t marker,
+    int (*emit)(void *, uint8_t, const uint8_t *, size_t), void *context);
+/** @brief Validate and dispatch a decoded envelope from an external carrier. */
+void tiku_link_console_accept(tiku_link_console_t *state, uint8_t *data, size_t length);
+#endif
 
 #endif /* TIKU_LINK_CONSOLE_H_ */

@@ -1,0 +1,38 @@
+OUTPUT_ARCH(riscv)
+ENTRY(c6_native_entry)
+MEMORY { NATIVE (rwx) : ORIGIN = @BASE@, LENGTH = 64K }
+SECTIONS {
+    .text : {
+        __native_image_start = .;
+        KEEP(*(.text.entry))
+        . = ALIGN(256);
+        KEEP(*(.text.vectors))
+        *(.text .text.*)
+        *(.rodata .rodata.* .srodata .srodata.*)
+        . = ALIGN(4);
+    } > NATIVE
+    .data : {
+        __global_pointer$ = . + 0x800;
+        *(.data .data.* .sdata .sdata.*)
+        . = ALIGN(4);
+        __native_image_end = .;
+    } > NATIVE
+    .bss (NOLOAD) : {
+        __bss_start = .;
+        *(.bss .bss.* .sbss .sbss.* COMMON)
+        . = ALIGN(16);
+        __bss_end = .;
+    } > NATIVE
+    .tier (NOLOAD) : ALIGN(8) {
+        __tier_sram_start = .; . += 4096; __tier_sram_end = .;
+    } > NATIVE
+    .irq_stack (NOLOAD) : {
+        __native_irq_bottom = .; . += 2048; __native_irq_top = .;
+    } > NATIVE
+    .stack (NOLOAD) : {
+        native_stack_guard = .; . += 64;
+        __native_stack_bottom = .; . += 8192; __native_stack_top = .;
+    } > NATIVE
+    ASSERT(__native_stack_top <= ORIGIN(NATIVE)+LENGTH(NATIVE), "C6 native arena overflow")
+    /DISCARD/ : { *(.comment .note .note.* .eh_frame .eh_frame.*) }
+}

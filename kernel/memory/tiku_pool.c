@@ -448,6 +448,10 @@ tiku_mem_err_t tiku_pool_reset(tiku_pool_t *pool)
     tiku_mem_err_t err;
     TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
     if (!pool_valid(pool)) return TIKU_MEM_ERR_INVALID;
+#if TIKU_IPC_ENABLE
+    if (tiku_backing_pinned != NULL && tiku_backing_pinned(pool->backing))
+        return TIKU_MEM_ERR_BUSY;
+#endif
     if (!tiku_backing_can_mutate(pool->backing)) return TIKU_MEM_ERR_BUSY;
     err = build_freelist(pool);
     pool->reset_failed = (err != TIKU_MEM_OK);

@@ -9,23 +9,27 @@
  *
  * Lists internal SRAM as SRAM and, in the firmware profile, the durable
  * image the flash mirrors hold as NVM; reports the foreground stack bottom.
- * ROM workspace, cache, TCM and LP SRAM are absent from this registry.
+ * IPC builds classify LP SRAM as a shared carve outside the ordinary tiers.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <kernel/memory/tiku_mem.h>
 #include <kernel/cpu/tiku_stack.h>
+#include <kernel/ipc/tiku_ipc_config.h>
 
 extern uint8_t __stack_bottom[];
 #if defined(TIKU_P4_FIRMWARE)
 extern uint8_t __uninit_start[], __uninit_end[];
-static tiku_mem_region_t regions[4];
+static tiku_mem_region_t regions[4 + TIKU_IPC_ENABLE];
 #else
 static const tiku_mem_region_t regions[] = {
     {(const uint8_t *)TIKU_P4_SRAM_LOW_START,
      TIKU_P4_SRAM_LOW_END - TIKU_P4_SRAM_LOW_START, TIKU_MEM_REGION_SRAM},
     {(const uint8_t *)TIKU_P4_SRAM_HIGH_START,
-     TIKU_P4_SRAM_HIGH_END - TIKU_P4_SRAM_HIGH_START, TIKU_MEM_REGION_SRAM}
+     TIKU_P4_SRAM_HIGH_END - TIKU_P4_SRAM_HIGH_START, TIKU_MEM_REGION_SRAM},
+#if TIKU_IPC_ENABLE
+    {(const uint8_t *)0x50108000u, 32768u, TIKU_MEM_REGION_SHARED}
+#endif
 };
 #endif
 
@@ -50,6 +54,10 @@ tiku_region_arch_get_table(tiku_mem_arch_size_t *count)
         (tiku_mem_arch_size_t)(TIKU_P4_SRAM_LOW_END - end), TIKU_MEM_REGION_SRAM};
     regions[n++] = (tiku_mem_region_t){(const uint8_t *)TIKU_P4_SRAM_HIGH_START,
         TIKU_P4_SRAM_HIGH_END - TIKU_P4_SRAM_HIGH_START, TIKU_MEM_REGION_SRAM};
+#if TIKU_IPC_ENABLE
+    regions[n++] = (tiku_mem_region_t){(const uint8_t *)0x50108000u,
+        32768u, TIKU_MEM_REGION_SHARED};
+#endif
     if (count) *count = n;
     return regions;
 }

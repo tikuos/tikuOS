@@ -29,6 +29,9 @@
 #define TIKU_NPU_ERR_MODEL      -2  /**< no such model, or not for this part */
 #define TIKU_NPU_ERR_TIMEOUT    -3  /**< submitted, never reached the end   */
 #define TIKU_NPU_ERR_FAULT      -4  /**< the accelerator rejected the work  */
+#define TIKU_NPU_ERR_BUSY       -5  /**< another job retains engine storage */
+#define TIKU_NPU_ERR_CANCELLED  -6  /**< cancelled before output publication */
+#define TIKU_NPU_PENDING         1  /**< accepted job has no terminal result */
 
 /** @brief Models are named files in the store. */
 #define TIKU_NPU_F_STORE_MODEL  (1u << 0)
@@ -42,6 +45,9 @@ typedef enum {
     TIKU_NPU_IDLE,          /**< released, nothing loaded         */
     TIKU_NPU_READY,         /**< a model is loaded and runnable   */
     TIKU_NPU_FAULTED        /**< a run failed; reload to recover  */
+#if (TIKU_IPC_ENABLE + 0)
+    ,TIKU_NPU_RUNNING       /**< an asynchronous job retains the tensors */
+#endif
 } tiku_npu_state_t;
 
 /** @brief What the accelerator is, and what the loaded model asks of it. */
@@ -124,5 +130,28 @@ int tiku_npu_run(void);
  * @return The count
  */
 uint32_t tiku_npu_runs(void);
+
+#if (TIKU_IPC_ENABLE + 0)
+#include <kernel/ipc/tiku_ipc.h>
+/** @brief Caller-owned asynchronous job; initialize to zero before submission. */
+typedef struct {
+    tiku_ipc_endpoint_t endpoint;
+    uint32_t token, session;
+} tiku_npu_job_t;
+/**
+ * @brief Run over the prepared engine-owned input without blocking.
+ * @note Input stays unchanged until completion; output is published on OK.
+ * The submitting process owns the job. General caller pointers are not imported.
+ */
+int tiku_npu_submit(tiku_npu_job_t *job);
+/** @brief Return PENDING or a terminal result; terminal results release the job. */
+int tiku_npu_poll(tiku_npu_job_t *job);
+/** @brief Request cancellation; poll until terminal before using engine storage. */
+int tiku_npu_cancel(tiku_npu_job_t *job);
+/** @brief Stop after confirmed abort; BUSY retains engine storage on failure. */
+int tiku_npu_stop_checked(void);
+/** @brief Submit and wait while servicing other processes and IPC deadlines. */
+int tiku_npu_wait_run(void);
+#endif
 
 #endif /* TIKU_NPU_H_ */

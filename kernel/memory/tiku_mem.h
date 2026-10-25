@@ -17,6 +17,11 @@
 #ifndef TIKU_MEM_H_
 #define TIKU_MEM_H_
 
+/** @brief Publish the NVM tier and its write path; zero selects SRAM-only allocation. */
+#ifndef TIKU_MEM_NVM_ENABLE
+#define TIKU_MEM_NVM_ENABLE 1
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* INCLUDES                                                                  */
 /*---------------------------------------------------------------------------*/
@@ -342,7 +347,8 @@ typedef enum {
     TIKU_MEM_REGION_SRAM,       /**< Volatile SRAM */
     TIKU_MEM_REGION_NVM,        /**< Non-volatile memory */
     TIKU_MEM_REGION_PERIPHERAL, /**< Memory-mapped peripheral registers */
-    TIKU_MEM_REGION_FLASH       /**< Read-only flash (code, constants) */
+    TIKU_MEM_REGION_FLASH,      /**< Read-only flash (code, constants) */
+    TIKU_MEM_REGION_SHARED      /**< Peer-owned carve; not an arena tier */
 } tiku_mem_region_type_t;
 
 /**
@@ -521,6 +527,8 @@ tiku_mem_err_t tiku_arena_create(tiku_arena_t *arena, uint8_t *buf,
  * @return TIKU_MEM_OK; TIKU_MEM_ERR_INVALID if arena or buf is NULL or
  *         alignment leaves no room; TIKU_MEM_ERR_BUSY while @p arena holds a
  *         tracked reservation
+ * @note The caller owns the range; raw admission does not check other claims
+ *       or protect mappings loaned to another subsystem.
  */
 tiku_mem_err_t tiku_arena_create_raw(tiku_arena_t *arena, uint8_t *buf,
                                       tiku_mem_arch_size_t size);
@@ -548,7 +556,8 @@ void *tiku_arena_alloc(tiku_arena_t *arena, tiku_mem_arch_size_t size);
  *
  * @param arena    Arena to reset
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID for an invalid
- *         arena, TIKU_MEM_ERR_BUSY while a reclaim job holds its owner
+ *         arena, TIKU_MEM_ERR_BUSY while a reclaim job holds its owner or
+ *         IPC retains the backing
  */
 tiku_mem_err_t tiku_arena_reset(tiku_arena_t *arena);
 
@@ -561,7 +570,8 @@ tiku_mem_err_t tiku_arena_reset(tiku_arena_t *arena);
  * @param arena  Arena to destroy, already reset
  * @return TIKU_MEM_OK; TIKU_MEM_ERR_INVALID for an invalid arena;
  *         TIKU_MEM_ERR_BUSY while it holds allocations, or while a reclaim
- *         fence or a fixed reservation above it blocks the release; or the
+ *         fence, an IPC backing reference or a fixed reservation above it
+ *         blocks the release; or the
  *         region-unclaim error
  * @note Stop every user of the arena before resetting and destroying it.
  */
@@ -576,7 +586,8 @@ tiku_mem_err_t tiku_arena_destroy(tiku_arena_t *arena);
  *
  * @param arena    Arena to securely reset
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_INVALID for an invalid
- *         arena, TIKU_MEM_ERR_BUSY while a reclaim job holds its owner
+ *         arena, TIKU_MEM_ERR_BUSY while a reclaim job holds its owner or
+ *         IPC retains the backing
  */
 tiku_mem_err_t tiku_arena_secure_reset(tiku_arena_t *arena);
 
@@ -654,6 +665,8 @@ typedef struct {
  *         misaligned, or a size is 0; TIKU_MEM_ERR_BUSY while @p pool holds
  *         a tracked reservation; TIKU_MEM_ERR_NOMEM when the blocks overflow
  *         the address space
+ * @note The caller owns the backing range. Pool constructors do not consult
+ *       region claims and may not target another subsystem's carve or loan.
  */
 tiku_mem_err_t tiku_pool_create(tiku_pool_t *pool, uint8_t *buf,
                                  tiku_mem_arch_size_t block_size,
@@ -721,7 +734,8 @@ void *tiku_pool_alloc(tiku_pool_t *pool);
  * @return TIKU_MEM_OK; TIKU_MEM_ERR_INVALID for a NULL, out-of-buffer,
  *         off-boundary or already free pointer, an invalid pool, a pool with
  *         no block allocated or one whose last reset failed;
- *         TIKU_MEM_ERR_BUSY while a reclaim job holds the pool's owner; or
+ *         TIKU_MEM_ERR_BUSY while reclaim holds the owner or IPC retains
+ *         the backing; or
  *         the tiku_tier_nvm_write() error of an NVM pool
  */
 tiku_mem_err_t tiku_pool_free(tiku_pool_t *pool, void *ptr);
@@ -763,7 +777,8 @@ tiku_mem_err_t tiku_pool_reset(tiku_pool_t *pool);
  * @param pool  Pool to destroy
  * @return TIKU_MEM_OK; TIKU_MEM_ERR_INVALID for an invalid pool;
  *         TIKU_MEM_ERR_BUSY while blocks are allocated, or while a reclaim
- *         fence or a fixed reservation above it blocks the release
+ *         fence, an IPC backing reference or a fixed reservation above it
+ *         blocks the release
  */
 tiku_mem_err_t tiku_pool_destroy(tiku_pool_t *pool);
 
@@ -1681,6 +1696,7 @@ tiku_mem_err_t tiku_tier_attach_psram(void *base, tiku_mem_arch_size_t size);
  * @return TIKU_MEM_OK, also when the tier is not attached, or
  *         TIKU_MEM_ERR_BUSY
  * @note Stop every user of PSRAM before a forced detach.
+ * @note IPC backing references refuse forced detach too.
  */
 tiku_mem_err_t tiku_tier_detach_psram(int force);
 
@@ -1703,7 +1719,8 @@ tiku_mem_err_t tiku_tier_suspend_psram(int suspended);
  * isolation.  NVM backing is not zeroed.
  *
  * @return TIKU_MEM_OK, TIKU_MEM_ERR_BUSY while a reclaim fence, job or ticket
- *         is live, or TIKU_MEM_ERR_INVALID outside kernel context
+ *         is live or IPC retains backing, or TIKU_MEM_ERR_INVALID outside
+ *         kernel context
  */
 tiku_mem_err_t tiku_tier_reset(void);
 

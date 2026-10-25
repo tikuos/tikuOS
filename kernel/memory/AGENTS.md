@@ -3,7 +3,8 @@
 All data is statically allocated; there is no heap.  Memory is tiered:
 one API places an allocation in SRAM, HIFRAM (MSP430) or NVM by policy,
 with a bump allocator per tier.  `tiku_tier_init()` is idempotent;
-`tiku_tier_reset()` empties every tier.
+`tiku_tier_reset()` empties the tiers when no IPC backing pin or reclaim
+fence/reset operation holds them; otherwise it returns `TIKU_MEM_ERR_BUSY`.
 
 ## Durable placement
 
@@ -69,6 +70,10 @@ The file store derives its capacity from the linker carve at mount; there
 is no per-part file-count table.
 
 ## SRAM tier carve
+
+`TIKU_MEM_NVM_ENABLE` defaults to 1. The C6 resident profile sets it to 0:
+the tier publishes no NVM backing, an NVM allocation is refused and
+`tiku_tier_nvm_write()` returns `TIKU_MEM_ERR_NOT_FOUND`.
 
 The SRAM tier is carved by one linker fragment (`arch/common/`) on every
 ARM part; the floor is single-authored on the make line

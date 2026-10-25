@@ -20,6 +20,9 @@
 #include "tiku_cpu1_sha256.h"
 #include "tiku_cpu1_cache.h"
 #include <tikukits/crypto/p256/tiku_kits_crypto_p256.h>
+#if (TIKU_IPC_ENABLE + 0)
+static void cpu1_ipc_barrier(void) { __asm__ volatile ("dmb" ::: "memory"); }
+#endif
 
 /** @brief PC bits cleared to find the image base; INITVTOR ignores bits
  *         [6:0], so the base is 128-byte aligned. */
@@ -78,6 +81,9 @@ static void cpu1_cache_on(uint32_t base)
 {
     uint32_t lo = base + TIKU_CPU1_SHARED_OFF;
     uint32_t hi = lo + (uint32_t)sizeof(tiku_cpu1_shared_t);
+#if (TIKU_IPC_ENABLE + 0)
+    hi = TIKU_CPU1_STREAM_ADDR + (uint32_t)sizeof(tiku_ipc_shared_t);
+#endif
 
     CPU1_R32(CPU1_MPU_CTRL) = 0UL;
     __asm__ volatile ("dsb\n\tisb" ::: "memory");
@@ -399,6 +405,9 @@ void cpu1_reset(void)
 
     sh->parked = 0U;
     sh->heartbeat = 0U;
+#if (TIKU_IPC_ENABLE + 0)
+    tiku_ipc_shared_peer_boot(TIKU_CPU1_STREAM, cpu1_ipc_barrier);
+#endif
     sh->magic = TIKU_CPU1_MAGIC;
 
     /* Order the magic before the first heartbeat: the M85 reads a moving
@@ -409,6 +418,9 @@ void cpu1_reset(void)
 
     for (;;) {
         uint32_t seq;
+#if (TIKU_IPC_ENABLE + 0)
+        tiku_ipc_shared_peer_step(TIKU_CPU1_STREAM, cpu1_ipc_barrier);
+#endif
 
         /* The halt protocol: spin while halt is set, re-reading it every
          * pass. The acknowledgement is published after the job returns. */

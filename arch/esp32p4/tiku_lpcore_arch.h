@@ -59,6 +59,7 @@ int tiku_p4_lpcore_start(void);
 /**
  * @brief Ask a running payload to park and wait for it; hold the core in
  *        reset when it does not answer, or when it faulted.
+ * @note IPC builds return the board's I2C pads to HP when gating the core clock.
  * @return 0 once parked or stopped, -1 when a running payload ignored the
  *         park and was held in reset
  */

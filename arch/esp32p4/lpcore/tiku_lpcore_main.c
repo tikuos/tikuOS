@@ -244,9 +244,15 @@ int32_t tiku_lpcore_i2c_get(uint32_t addr, uint32_t arg)
  * @brief Take TIKU_LPCORE_CMD_I2C_SCAN: probe 0x08..0x77 on SDA arg[0] and
  *        SCL arg[1] with the internal pull-ups, then give both pads back.
  */
+#if (TIKU_IPC_LP_STRETCH_TEST + 0) || (TIKU_IPC_LP_STUCK_SCL_TEST + 0)
+static uint32_t i2c_scan_pads(tiku_lpcore_shared_t *sh,uint32_t sda,uint32_t scl)
+{
+    uint32_t addr,i;
+#else
 static uint32_t i2c_scan_command(tiku_lpcore_shared_t *sh)
 {
     uint32_t sda = sh->arg[0], scl = sh->arg[1], addr, i;
+#endif
     i2c_pads_t saved;
     int r = 0;
 
@@ -261,6 +267,7 @@ static uint32_t i2c_scan_command(tiku_lpcore_shared_t *sh)
     sh->i2c_scl_stuck = 0u;
     i2c_bus_take(sda, scl, &saved);
     for (addr = 0x08u; addr <= 0x77u; addr++) {
+        tiku_lpcore_stream_step();
         r = tiku_lpcore_i2c_probe(sda, scl, addr);
         if (r < 0) {
             sh->i2c_scl_stuck = 1u;
@@ -275,6 +282,11 @@ static uint32_t i2c_scan_command(tiku_lpcore_shared_t *sh)
     i2c_bus_give(sda, scl, &saved);
     return TIKU_LPCORE_RSP_DONE;
 }
+#if (TIKU_IPC_LP_STRETCH_TEST + 0) || (TIKU_IPC_LP_STUCK_SCL_TEST + 0)
+/** @brief Execute an explicit scan using the host-published command arguments. */
+static uint32_t i2c_scan_command(tiku_lpcore_shared_t *sh)
+{return i2c_scan_pads(sh,sh->arg[0],sh->arg[1]);}
+#endif
 
 /**
  * @brief Take TIKU_LPCORE_CMD_WAKE: arm a one-shot HP wake on LP timer
@@ -384,10 +396,14 @@ void tiku_lpcore_main(void)
     sh->sar_lp_busy = 0u;
     sh->boots = sh->boots + 1u;
     sh->heartbeat = 0u;
+#if (TIKU_IPC_ENABLE + 0)
+    tiku_ipc_shared_peer_boot(TIKU_LPCORE_STREAM, tiku_lpcore_stream_barrier);
+#endif
     __asm__ volatile ("fence" ::: "memory");
     sh->magic = TIKU_LPCORE_MAGIC;
 
     for (;;) {
+        tiku_lpcore_stream_step();
         /* The parked wait polls: no interrupt is enabled on this core. */
         if (sh->cmd == TIKU_LPCORE_CMD_PARK) {
             sh->rsp = TIKU_LPCORE_RSP_PARKED;
@@ -414,6 +430,15 @@ void tiku_lpcore_main(void)
         publish_counters(sh);
         wake_check(sh);
         tiku_lpagent_run(sh, sh->lp_ticks_lo);
+#if (TIKU_IPC_LP_STRETCH_TEST + 0) || (TIKU_IPC_LP_STUCK_SCL_TEST + 0)
+        {
+            static unsigned scan_pace;
+            if(TIKU_LPCORE_STREAM->host.control_sequence&&++scan_pace>=16u){
+                scan_pace=0;(void)i2c_scan_pads(sh,7,8);
+            }
+        }
+#endif
+        tiku_lpcore_stream_step();
         sh->heartbeat = sh->heartbeat + 1u;
         for (pace = 0u; pace < LPCORE_PACE; pace++) {
         }

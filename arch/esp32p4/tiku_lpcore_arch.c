@@ -16,6 +16,9 @@
 #include "tiku_lpcore_arch.h"
 #include "tiku_esp32p4_regs.h"
 #include "lpcore/tiku_lpcore_ipc.h"
+#if (TIKU_IPC_ENABLE + 0)
+#include <tiku.h>
+#endif
 
 #ifndef TIKU_P4_FENCE
 #define TIKU_P4_FENCE() __asm__ volatile("fence iorw, iorw" ::: "memory")
@@ -55,6 +58,14 @@ static void lpcore_hold(void)
 {
     reg_bits(TIKU_P4_LP_RESET, TIKU_P4_LP_CORE_BIT, 1);
     reg_bits(TIKU_P4_LP_CLK, TIKU_P4_LP_CORE_BIT, 0);
+#if (TIKU_IPC_ENABLE + 0) && defined(TIKU_BOARD_I2C_SDA_PIN)
+    TIKU_P4_FENCE();
+    /* A reset can interrupt an I2C step before its saved mux is restored. */
+    if(TIKU_BOARD_I2C_SDA_PIN<16u&&TIKU_BOARD_I2C_SCL_PIN<16u){
+        reg_bits(0x5012b008u+4u*TIKU_BOARD_I2C_SDA_PIN,1u<<4,0);
+        reg_bits(0x5012b008u+4u*TIKU_BOARD_I2C_SCL_PIN,1u<<4,0);
+    }
+#endif
     lpcore_launched = 0u;
 }
 

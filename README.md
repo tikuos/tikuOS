@@ -50,6 +50,10 @@ commit before making it.
 | | Olimex ESP32-P4-PC · 360 MHz | 768 KB + 32 MB PSRAM | 16 MB flash |
 | | DFRobot FireBeetle 2 ESP32-P4 · 360 MHz | 768 KB + 32 MB PSRAM | 16 MB flash |
 
+The FireBeetle's attached C6 also runs the [native resident kernel](arch/esp32c6/README.md)
+in a 64 KiB arena. P4 and C6 exchange copied messages and streamed objects
+over SDIO through the [IPC interface](kernel/ipc/README.md).
+
 ## 🐚 Interacting with TikuOS boards
 
 Every part of the operating system and the hardware is represented as a

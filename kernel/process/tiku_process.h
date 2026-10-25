@@ -25,6 +25,7 @@
 #include "tiku_proto.h"
 #include <kernel/timers/tiku_clock.h>
 #include <stdint.h>
+#include <kernel/ipc/tiku_ipc_config.h>
 
 /*---------------------------------------------------------------------------*/
 /* CONSTANTS AND MACROS                                                      */
@@ -61,6 +62,9 @@
 #define TIKU_EVENT_USER         0x10  /**< First application event id */
 #define TIKU_EVENT_TIMER        0x88  /**< Timer expired; data is the timer */
 #define TIKU_EVENT_GPIO         0x89  /**< GPIO edge; data packs port/pin */
+#if TIKU_IPC_ENABLE
+#define TIKU_EVENT_IPC          0x8B  /**< Inspect IPC queues; data is NULL */
+#endif
 #define TIKU_EVENT_VFS          0x8A  /**< Watched VFS node changed — data
                                            carries the const tiku_vfs_node_t*
                                            (see tiku_vfs_watch()) */
@@ -263,6 +267,9 @@ typedef struct tiku_process {
     struct pt pt;                   /**< Protothread control state */
     uint8_t is_running;             /**< Non-zero if process is active */
     uint8_t generation;             /**< Fresh-instance tag for queued events */
+#if TIKU_PROCESS_OBSERVERS_ENABLE
+    uint32_t instance;              /**< Non-wrapping dispatch lifetime */
+#endif
     void *local;                    /**< Per-process local state (a static
                                          struct of the caller's), or NULL */
     /* --- Observability fields --- */
@@ -284,6 +291,32 @@ typedef struct tiku_process {
     tiku_clock_time_t restart_at;   /**< tick of the last restart */
     tiku_event_data_t init_data;    /**< INIT payload, replayed on restart */
 } tiku_process_t;
+
+#if TIKU_PROCESS_OBSERVERS_ENABLE
+/** @brief Kernel bookkeeping transitions; callbacks may run with IRQs masked. */
+typedef enum {
+    TIKU_PROCESS_BEFORE,
+    TIKU_PROCESS_AFTER,
+    TIKU_PROCESS_DISCARDED,
+    TIKU_PROCESS_EXITING
+} tiku_process_transition_t;
+
+/** @brief Captured identity; remains the old instance after a handler restart. */
+typedef struct {
+    struct tiku_process *process;
+    uint32_t instance;
+    tiku_event_t event;
+    tiku_process_transition_t transition;
+} tiku_process_observation_t;
+
+/** @brief Nonblocking kernel callback; must not allocate or dispatch events. */
+typedef void (*tiku_process_observer_t)(
+    const tiku_process_observation_t *record, void *context);
+
+/** @brief Install a boot observer; returns zero for NULL or a full table. */
+uint8_t tiku_process_observer_add(tiku_process_observer_t observer,
+                                  void *context);
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* CHANNEL STRUCTURE                                                         */

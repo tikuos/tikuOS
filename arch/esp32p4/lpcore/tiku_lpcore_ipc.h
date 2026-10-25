@@ -251,4 +251,31 @@ _Static_assert(TIKU_LPCORE_SHARED_ADDR + TIKU_LPCORE_SHARED_SIZE <=
                TIKU_LPCORE_FAULT_RECORD,
                "lpcore: the shared page overlaps the HP fault record");
 
+#if (TIKU_IPC_ENABLE + 0)
+#include <hal/tiku_ipc_shared.h>
+#define TIKU_LPCORE_STREAM_OFF \
+    ((sizeof(tiku_lpcore_shared_t) + TIKU_IPC_SHARED_LINE - 1u) & \
+     ~(TIKU_IPC_SHARED_LINE - 1u))
+#define TIKU_LPCORE_STREAM_ADDR (TIKU_LPCORE_SHARED_ADDR + TIKU_LPCORE_STREAM_OFF)
+#define TIKU_LPCORE_STREAM \
+    ((tiku_ipc_shared_t *)TIKU_LPCORE_PTR(TIKU_LPCORE_STREAM_ADDR))
+_Static_assert(TIKU_LPCORE_STREAM_OFF + sizeof(tiku_ipc_shared_t) <=
+               TIKU_LPCORE_SHARED_SIZE, "LP IPC stream exceeds the shared page");
+
+static inline void tiku_lpcore_stream_barrier(void)
+{
+    __asm__ volatile ("fence" ::: "memory");
+}
+
+static inline void tiku_lpcore_stream_step(void)
+{
+    uint32_t cycles;
+    __asm__ volatile ("csrr %0, mcycle" : "=r" (cycles));
+    tiku_ipc_shared_peer_sample(TIKU_LPCORE_STREAM, cycles);
+    tiku_ipc_shared_peer_step(TIKU_LPCORE_STREAM, tiku_lpcore_stream_barrier);
+}
+#else
+#define tiku_lpcore_stream_step() ((void)0)
+#endif
+
 #endif /* TIKU_LPCORE_IPC_H_ */

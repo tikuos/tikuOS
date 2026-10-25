@@ -34,7 +34,9 @@ MCU := $(shell echo $(MCU) | tr '[:upper:]' '[:lower:]')
 P4_ARCH := -march=rv32imafc_zicsr_zifencei -mabi=ilp32f
 P4_LPCORE_ARCH := -march=rv32imac_zicsr_zifencei -mabi=ilp32
 P4_DIAGNOSTIC_BUILD := $(if $(filter esp32p4,$(MCU)),$(if $(filter firmware,$(P4_PROFILE)),,1))
-ifeq ($(P4_DIAGNOSTIC_BUILD),1)
+ifeq ($(MCU),esp32c6)
+include arch/esp32c6/port.mk
+else ifeq ($(P4_DIAGNOSTIC_BUILD),1)
 include arch/esp32p4/port.mk
 else
 
@@ -111,7 +113,7 @@ TIKU_PLATFORM := esp32c5
 C5_REQUESTED_FEATURES := $(strip $(foreach v,$(filter TIKU_%_ENABLE,$(.VARIABLES)),\
     $(if $(filter 1,$($(v))),$(v))))
 ifneq ($(MINIMAL),1)
-C5_REQUESTED_FEATURES := $(filter-out TIKU_SHELL_ENABLE TIKU_THREADS_ENABLE TIKU_SHELL_BASIC_ENABLE TIKU_DRV_PHY_C5_ENABLE TIKU_DRV_WIFI_ESP_ENABLE TIKU_DRV_BLE_ESP_ENABLE TIKU_DRV_SDR_ESP_ENABLE TIKU_DRV_SDR_ESP_TX_ENABLE TIKU_DRV_154_C5_ENABLE TIKU_KIT_CRYPTO_ENABLE TIKU_MEM_RECLAIM_ENABLE TIKU_MCP_ENABLE,$(C5_REQUESTED_FEATURES))
+C5_REQUESTED_FEATURES := $(filter-out TIKU_SHELL_ENABLE TIKU_THREADS_ENABLE TIKU_SHELL_BASIC_ENABLE TIKU_DRV_PHY_C5_ENABLE TIKU_DRV_WIFI_ESP_ENABLE TIKU_DRV_BLE_ESP_ENABLE TIKU_DRV_SDR_ESP_ENABLE TIKU_DRV_SDR_ESP_TX_ENABLE TIKU_DRV_154_C5_ENABLE TIKU_KIT_CRYPTO_ENABLE TIKU_MEM_RECLAIM_ENABLE TIKU_MCP_ENABLE TIKU_IPC_ENABLE TIKU_IPC_CONSOLE_ENABLE,$(C5_REQUESTED_FEATURES))
 endif
 ifneq ($(C5_REQUESTED_FEATURES),)
 $(error ESP32-C5 profile does not include optional features: $(C5_REQUESTED_FEATURES))
@@ -2247,13 +2249,18 @@ CFLAGS += -DTIKU_DRV_CPU1_ENABLE=1
 CFLAGS += -DTIKU_HAS_COPROC=1 -DTIKU_COPROC_MSG_CAP=192u
 # The Cortex-M33 payload is a separate link with the same toolchain and its
 # own flags.  -mfloat-abi=soft: CPACR is zero out of reset, so the FPU is off
-# and an FP instruction faults.  -Os: code and .bss must end below offset
-# 0x1800, where the HardFault handler sits, and tiku_cpu1.ld asserts it.
+# and an FP instruction faults. Code ends before the fault handler at 0x1800.
+# IPC builds place .bss after the shared ring; other builds keep it below
+# the handler. The linker checks both layouts and the stack floor.
 CPU1_BUILD    = $(BUILD_DIR)/cpu1
 CPU1_CFLAGS   = -mcpu=cortex-m33 -mthumb -mfloat-abi=soft -Os -Wall -Wextra \
                 -Werror -ffreestanding -fno-builtin -fno-common -nostdlib \
                 -nostartfiles -ffunction-sections -fdata-sections -MMD -MP \
                 -I$(PROJ_DIR)
+ifeq ($(TIKU_IPC_ENABLE),1)
+CPU1_CFLAGS += -DTIKU_IPC_ENABLE=1
+CPU1_IPC_LDFLAGS = -Wl,--defsym=__tiku_ipc_shared_size=1536
+endif
 CPU1_OBJS     = $(CPU1_BUILD)/tiku_cpu1_payload.o \
                 $(CPU1_BUILD)/tiku_cpu1_sha256.o \
                 $(CPU1_BUILD)/tiku_cpu1_libc.o \
@@ -2553,6 +2560,93 @@ SRCS += kernel/process/tiku_process.c
 SRCS += kernel/process/tiku_proc_vfs.c
 SRCS += kernel/process/tiku_lc_persist.c
 SRCS += kernel/scheduler/tiku_sched.c
+TIKU_IPC_ENABLE ?= 0
+TIKU_IPC_CONSOLE_ENABLE ?= 0
+ifneq ($(filter 1,$(TIKU_SDIO_C6_ENABLE) $(TIKU_IPC_PERIPHERAL_TARGET_ENABLE)),)
+ifneq ($(TIKU_IPC_ENABLE),1)
+$(error SDIO and peripheral IPC targets require TIKU_IPC_ENABLE=1)
+endif
+endif
+ifneq ($(filter 1,$(TIKU_IPC_LP_STUCK_SCL_TEST) $(TIKU_IPC_LP_STRETCH_TEST)),)
+ifneq ($(TIKU_PLATFORM)$(BOARD)$(TIKU_IPC_ENABLE)$(TIKU_LPCORE_ENABLE),esp32p4firebeetle2_esp32p411)
+$(error LP I2C diagnostic profiles require FireBeetle P4 IPC and its LP payload)
+endif
+ifeq ($(TIKU_IPC_LP_STUCK_SCL_TEST),1)
+CFLAGS += -DTIKU_IPC_LP_STUCK_SCL_TEST=1
+endif
+ifeq ($(TIKU_IPC_LP_STRETCH_TEST),1)
+CFLAGS += -DTIKU_IPC_LP_STRETCH_TEST=1
+endif
+ifeq ($(TIKU_IPC_LP_STUCK_SCL_TEST)$(TIKU_IPC_LP_STRETCH_TEST),11)
+$(error Select one LP I2C diagnostic input profile)
+endif
+endif
+ifeq ($(TIKU_IPC_ENABLE),1)
+CFLAGS += -DTIKU_IPC_ENABLE=1
+SRCS += kernel/ipc/tiku_ipc.c kernel/ipc/tiku_ipc_stream.c
+SRCS += kernel/memory/tiku_ipc_buffer.c
+SRCS += kernel/vfs/tree/tiku_vfs_tree_ipc.c boot/tiku_boot_ipc.c
+SRCS += services/ipc/tiku_ipc_wire.c services/ipc/tiku_ipc_bus.c
+SRCS += hal/tiku_ipc_packet_hal.c services/link/tiku_link_uart.c
+SRCS += hal/tiku_ipc_target_hal.c services/ipc/tiku_ipc_controller.c
+SRCS += services/ipc/tiku_ipc_sdio.c services/ipc/tiku_ipc_sdio_packet.c
+SRCS += services/ipc/tiku_ipc_mux.c
+ifeq ($(TIKU_IPC_PERIPHERAL_TARGET_ENABLE),1)
+ifneq ($(TIKU_PLATFORM),rp2350)
+$(error TIKU_IPC_PERIPHERAL_TARGET_ENABLE=1 requires MCU=rp2350)
+endif
+CFLAGS += -DTIKU_HAS_IPC_TARGET=1
+SRCS += arch/arm-rp2350/tiku_ipc_target_arch.c
+endif
+ifeq ($(TIKU_PLATFORM)$(BOARD),esp32p4firebeetle2_esp32p4)
+SRCS += arch/esp32p4/tiku_uart_port_arch.c
+ifeq ($(TIKU_SHELL_ENABLE),1)
+CFLAGS += -DTIKU_HAS_IPC_UART=1
+SRCS += shell/commands/tiku_shell_cmd_ipc_uart.c
+endif
+endif
+ifneq ($(filter arch/esp32p4/tiku_coproc_arch.c arch/ra8p1/tiku_coproc_arch.c arch/nordic/tiku_coproc_arch.c,$(SRCS)),)
+SRCS += interfaces/coproc/tiku_coproc_ipc.c services/ipc/tiku_ipc_coproc.c
+endif
+ifeq ($(TIKU_SDIO_C6_ENABLE),1)
+ifneq ($(TIKU_PLATFORM)$(BOARD),esp32p4firebeetle2_esp32p4)
+$(error TIKU_SDIO_C6_ENABLE=1 requires the FireBeetle 2 ESP32-P4 firmware)
+endif
+ifeq ($(TIKU_EXP_C6_ACCESS),1)
+$(error Native SDMMC and the experimental C6 GPIO probe cannot own the same bus)
+endif
+CFLAGS += -DTIKU_HAS_SDIO_C6=1
+SRCS += arch/esp32p4/tiku_sdmmc_arch.c arch/esp32p4/tiku_sdio_owner_arch.c boot/tiku_boot_c6.c
+ifeq ($(TIKU_SHELL_ENABLE),1)
+SRCS += shell/commands/tiku_shell_cmd_ipc_sdio.c
+endif
+endif
+ifeq ($(TIKU_IPC_CONSOLE_ENABLE),1)
+CFLAGS += -DTIKU_IPC_CONSOLE_ENABLE=1
+endif
+ifneq ($(filter 1,$(TIKU_SDIO_C6_ENABLE) $(TIKU_IPC_CONSOLE_ENABLE)),)
+SRCS += hal/tiku_ipc_epoch_hal.c
+endif
+ifeq ($(TIKU_PLATFORM)$(P4_PROFILE),esp32p4firmware)
+TIKU_IPC_VFS_NODES_MAX ?= $(if $(filter 1,$(TIKU_SDIO_C6_ENABLE)),50,40)
+CFLAGS += -DTIKU_IPC_VFS_NODES_MAX=$(TIKU_IPC_VFS_NODES_MAX)
+endif
+ifeq ($(TIKU_PLATFORM)$(TIKU_NPU_ENABLE),ra8p11)
+CFLAGS += -DTIKU_IPC_HAS_NPU=1
+SRCS += services/ipc/tiku_ipc_npu.c interfaces/npu/tiku_npu_async.c
+endif
+ifeq ($(TIKU_SHELL_ENABLE),1)
+SRCS += shell/commands/tiku_shell_cmd_ipc.c
+endif
+ifeq ($(TIKU_PLATFORM)$(TIKU_LPCORE_ENABLE),esp32p41)
+CFLAGS += -DTIKU_IPC_HAS_SHARED=1
+SRCS += services/ipc/tiku_ipc_shared.c arch/esp32p4/tiku_ipc_arch.c
+endif
+ifeq ($(TIKU_PLATFORM)$(TIKU_DRV_CPU1_ENABLE),ra8p11)
+CFLAGS += -DTIKU_IPC_HAS_SHARED=1
+SRCS += services/ipc/tiku_ipc_shared.c arch/ra8p1/tiku_ipc_arch.c
+endif
+endif
 # The console line: one SLIP decoder dispatching whole frames by channel
 # (the IP stack, a desktop's window session) beside the shell's text.
 SRCS += services/console/tiku_console.c
@@ -4257,7 +4351,7 @@ $(CPU1_BUILD)/tiku_kits_crypto_p256.o: tikukits/crypto/p256/tiku_kits_crypto_p25
 	$(CC) $(CPU1_CFLAGS) -c -o $@ $<
 
 $(CPU1_BUILD)/tiku_cpu1.elf: $(CPU1_OBJS) arch/ra8p1/cpu1/tiku_cpu1.ld
-	$(CC) $(CPU1_CFLAGS) -T arch/ra8p1/cpu1/tiku_cpu1.ld \
+	$(CC) $(CPU1_CFLAGS) $(CPU1_IPC_LDFLAGS) -T arch/ra8p1/cpu1/tiku_cpu1.ld \
 	    -Wl,--gc-sections -o $@ $(CPU1_OBJS)
 
 $(CPU1_BUILD)/tiku_cpu1.bin: $(CPU1_BUILD)/tiku_cpu1.elf

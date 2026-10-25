@@ -49,7 +49,45 @@ struct event_item {
     struct tiku_process *p;     /**< Target process, or BROADCAST (NULL) */
     uint8_t generation;         /**< Target generation when event was posted */
     tiku_event_t ev;            /**< Event identifier (TIKU_EVENT_*) */
+#if TIKU_PROCESS_OBSERVERS_ENABLE
+    uint32_t instance;
+#endif
 };
+
+#if TIKU_PROCESS_OBSERVERS_ENABLE
+static struct {
+    tiku_process_observer_t call;
+    void *context;
+} observers[TIKU_PROCESS_OBSERVERS_MAX];
+
+static void observe(struct tiku_process *p, uint32_t instance,
+                    tiku_event_t ev, tiku_process_transition_t transition)
+{
+    unsigned i;
+    const tiku_process_observation_t record = {p, instance, ev, transition};
+    for (i = 0; i < TIKU_PROCESS_OBSERVERS_MAX; i++) {
+        if (observers[i].call != NULL)
+            observers[i].call(&record, observers[i].context);
+    }
+}
+
+uint8_t tiku_process_observer_add(tiku_process_observer_t call, void *context)
+{
+    unsigned i;
+    if (call == NULL || TIKU_THIS() != NULL) return 0;
+    for (i = 0; i < TIKU_PROCESS_OBSERVERS_MAX; i++) {
+        if (observers[i].call == NULL) {
+            observers[i].context = context;
+            observers[i].call = call;
+            return 1;
+        }
+    }
+    return 0;
+}
+#define OBSERVE(p, instance, ev, transition) observe(p, instance, ev, transition)
+#else
+#define OBSERVE(p, instance, ev, transition) ((void)0)
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* PRIVATE VARIABLES                                                         */
@@ -125,7 +163,10 @@ static void queue_purge_process_locked(const struct tiku_process *p)
     for (i = 0; i < old_len; i++) {
         uint8_t old_idx = (uint8_t)((q_head + i) % TIKU_QUEUE_SIZE);
 
-        if (queue[old_idx].p != p) {
+        if (queue[old_idx].p == p) {
+            OBSERVE(queue[old_idx].p, queue[old_idx].instance,
+                    queue[old_idx].ev, TIKU_PROCESS_DISCARDED);
+        } else {
             uint8_t new_idx = (uint8_t)((q_head + new_len) % TIKU_QUEUE_SIZE);
             if (new_idx != old_idx) {
                 queue[new_idx] = queue[old_idx];
@@ -192,7 +233,11 @@ static uint8_t queue_has_dispatchable_except_locked(
         const struct event_item *item =
             &queue[(q_head + i) % TIKU_QUEUE_SIZE];
 
-        if (event_is_stale(item->p, item->generation)) {
+        if (event_is_stale(item->p, item->generation)
+#if TIKU_PROCESS_OBSERVERS_ENABLE
+            || (item->p != NULL && item->instance != item->p->instance)
+#endif
+            ) {
             return 1u;              /* stale work can be discarded */
         }
         if (item->p != skip) {
@@ -270,6 +315,9 @@ void tiku_process_init(void)
     q_head = 0;
     q_len = 0;
     q_dropped = 0;
+#if TIKU_PROCESS_OBSERVERS_ENABLE
+    memset(observers, 0, sizeof observers);
+#endif
 
     for (i = 0; i < TIKU_PROCESS_MAX; i++) {
         registry[i] = NULL;
@@ -285,6 +333,9 @@ void tiku_process_start(struct tiku_process *p, tiku_event_data_t data)
     if (p->is_running) {
         return;
     }
+#if TIKU_PROCESS_OBSERVERS_ENABLE
+    if (p->instance == UINT32_MAX) return;
+#endif
 #if TIKU_MEM_RECLAIM_ENABLE
     if (!tiku_mem_reclaim_process_start_allowed(p)) return;
 #endif
@@ -292,6 +343,9 @@ void tiku_process_start(struct tiku_process *p, tiku_event_data_t data)
     tiku_atomic_enter();
 
     PT_INIT(&p->pt);
+#if TIKU_PROCESS_OBSERVERS_ENABLE
+    p->instance++;
+#endif
     p->generation++;
     if (p->generation == 0u) {
         p->generation = 1u;
@@ -362,6 +416,7 @@ void tiku_process_exit(struct tiku_process *p)
     tiku_atomic_enter();
 
     p->is_running = 0;
+    OBSERVE(p, p->instance, TIKU_EVENT_EXIT, TIKU_PROCESS_EXITING);
     p->state = TIKU_PROCESS_STATE_STOPPED;
 
     if (tiku_process_list_head == p) {
@@ -511,6 +566,9 @@ uint8_t tiku_process_post(struct tiku_process *p, tiku_event_t ev,
         queue[idx].data = data;
         queue[idx].p = p;
         queue[idx].generation = event_generation(p);
+#if TIKU_PROCESS_OBSERVERS_ENABLE
+        queue[idx].instance = p != NULL ? p->instance : 0;
+#endif
         q_len++;
         ret = 1;
     } else {
@@ -620,6 +678,9 @@ uint8_t tiku_process_run(void)
     tiku_event_data_t data;
     struct tiku_process *receiver;
     uint8_t generation;
+#if TIKU_PROCESS_OBSERVERS_ENABLE
+    uint32_t instance;
+#endif
 
     tiku_atomic_enter();
 
@@ -632,6 +693,9 @@ uint8_t tiku_process_run(void)
     data = queue[q_head].data;
     receiver = queue[q_head].p;
     generation = queue[q_head].generation;
+#if TIKU_PROCESS_OBSERVERS_ENABLE
+    instance = queue[q_head].instance;
+#endif
     q_head = (q_head + 1) % TIKU_QUEUE_SIZE;
     q_len--;
 
@@ -639,8 +703,15 @@ uint8_t tiku_process_run(void)
 
     /* Dispatch outside atomic section to avoid long interrupt latency */
     if (event_is_stale(receiver, generation)) {
+        OBSERVE(receiver, instance, ev, TIKU_PROCESS_DISCARDED);
         return 1;
     }
+#if TIKU_PROCESS_OBSERVERS_ENABLE
+    if (receiver != NULL && receiver->instance != instance) {
+        OBSERVE(receiver, instance, ev, TIKU_PROCESS_DISCARDED);
+        return 1;
+    }
+#endif
     if (receiver == TIKU_PROCESS_BROADCAST) {
         struct tiku_process *p, *next;
         for (p = tiku_process_list_head; p != NULL; p = next) {
@@ -675,6 +746,10 @@ uint8_t tiku_process_run_except(const struct tiku_process *skip)
             &queue[(q_head + i) % TIKU_QUEUE_SIZE];
 
         if (event_is_stale(candidate->p, candidate->generation) ||
+#if TIKU_PROCESS_OBSERVERS_ENABLE
+            (candidate->p != NULL &&
+             candidate->p->instance != candidate->instance) ||
+#endif
             candidate->p != skip ||
             candidate->ev == TIKU_EVENT_POLL) {
             queue_remove_locked(i, &item);
@@ -688,10 +763,16 @@ uint8_t tiku_process_run_except(const struct tiku_process *skip)
     if (!found) {
         return 0;
     }
-    if (event_is_stale(item.p, item.generation)) {
+    if (event_is_stale(item.p, item.generation)
+#if TIKU_PROCESS_OBSERVERS_ENABLE
+        || (item.p != NULL && item.p->instance != item.instance)
+#endif
+        ) {
+        OBSERVE(item.p, item.instance, item.ev, TIKU_PROCESS_DISCARDED);
         return 1;                         /* stale unicast discarded */
     }
     if (item.p == skip) {
+        OBSERVE(item.p, item.instance, item.ev, TIKU_PROCESS_DISCARDED);
         return 1;                         /* only POLL reaches this path */
     }
     if (item.p == TIKU_PROCESS_BROADCAST) {
@@ -737,7 +818,11 @@ void tiku_process_poll(struct tiku_process *p)
     for (i = 0; i < q_len; i++) {
         idx = (q_head + i) % TIKU_QUEUE_SIZE;
         if (queue[idx].ev == TIKU_EVENT_POLL && queue[idx].p == p &&
-            !event_is_stale(p, queue[idx].generation)) {
+            !event_is_stale(p, queue[idx].generation)
+#if TIKU_PROCESS_OBSERVERS_ENABLE
+            && (p == NULL || queue[idx].instance == p->instance)
+#endif
+            ) {
             tiku_atomic_exit();
 #if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
             tiku_thread_kernel_wake();
@@ -755,6 +840,9 @@ void tiku_process_poll(struct tiku_process *p)
         queue[idx].data = NULL;
         queue[idx].p    = p;
         queue[idx].generation = event_generation(p);
+#if TIKU_PROCESS_OBSERVERS_ENABLE
+        queue[idx].instance = p != NULL ? p->instance : 0;
+#endif
         q_len++;
     } else {
         q_dropped++;
@@ -788,17 +876,25 @@ static void call_process(struct tiku_process *p, tiku_event_t ev,
                          tiku_event_data_t data)
 {
     char ret;
+#if TIKU_PROCESS_OBSERVERS_ENABLE
+    uint32_t instance = p->instance;
+#endif
 
     if (p->is_running && p->thread) {
 #if TIKU_MEM_RECLAIM_ENABLE
-        if (!tiku_mem_reclaim_process_dispatch(p, ev)) return;
+        if (!tiku_mem_reclaim_process_dispatch(p, ev)) {
+            OBSERVE(p, instance, ev, TIKU_PROCESS_DISCARDED);
+            return;
+        }
 #endif
+        OBSERVE(p, instance, ev, TIKU_PROCESS_BEFORE);
         if (ev == TIKU_EVENT_FORCE_EXIT) {
             if (tiku_current_process == p) {
                 tiku_current_process = NULL;
             }
             p->exit_reason = (uint8_t)TIKU_EXIT_DONE;
             tiku_process_exit(p);
+            OBSERVE(p, instance, ev, TIKU_PROCESS_AFTER);
             return;
         }
 
@@ -841,6 +937,9 @@ static void call_process(struct tiku_process *p, tiku_event_t ev,
             }
             tiku_current_process = NULL;
         }
+        OBSERVE(p, instance, ev, TIKU_PROCESS_AFTER);
+    } else {
+        OBSERVE(p, instance, ev, TIKU_PROCESS_DISCARDED);
     }
 }
 

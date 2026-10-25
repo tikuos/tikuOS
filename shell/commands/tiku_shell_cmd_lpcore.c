@@ -92,6 +92,11 @@ static void lpcore_i2c(uint8_t argc, const char *argv[])
     uint8_t found[16];
     int n, answer;
 
+    if(argc==3&&tiku_cmd_streq(argv[2],"last")){
+        n=tiku_p4_lpcore_i2c_result(found);
+        SHELL_PRINTF("i2c snapshot count=%d\n",n);return;
+    }
+
     if (argc >= 4u) {
         sda = tiku_cmd_parse_u32(argv[2]);
         scl = tiku_cmd_parse_u32(argv[3]);

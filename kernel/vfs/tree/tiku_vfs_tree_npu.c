@@ -28,10 +28,13 @@ static int npu_state_read(char *buf, size_t max)
 {
     static const char *const names[] = {
         "absent", "gated", "idle", "ready", "faulted"
+#if (TIKU_IPC_ENABLE + 0)
+        ,"running"
+#endif
     };
     tiku_npu_state_t st = tiku_npu_state();
 
-    if ((unsigned)st > (unsigned)TIKU_NPU_FAULTED) {
+    if ((unsigned)st >= sizeof names / sizeof names[0]) {
         st = TIKU_NPU_ABSENT;
     }
     return snprintf(buf, max, "%s\n", names[st]);

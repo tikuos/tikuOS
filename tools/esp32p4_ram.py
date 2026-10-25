@@ -145,7 +145,10 @@ def validate_elf(data, image):
             (address, size) in ((guard, 64), (KERNEL_STACK - stack_size, stack_size)))
         retained = kind == 8 and flags == 3 and (address, size) == (FAULT_START, FAULT_SIZE)
         fault_section |= retained
-        if not (stack_section or retained) and (address < RAM_START or address + size >
+        device_stage = (firmware and kind == 8 and flags == 3 and
+                        address == KERNEL_HIGH_START and size % 64 == 0 and
+                        size <= 32768)
+        if not (stack_section or retained or device_stage) and (address < RAM_START or address + size >
                                   (KERNEL_LOW_END if kernel else RAM_LIMIT)):
             raise ValueError("allocated ELF section overlaps reserved memory")
         if any(address < end and address + size > start
@@ -197,8 +200,19 @@ def validate_kernel_layout(data, allocated, segments, firmware=False):
                 symbols[name] = value
     stack_size = 16384 if firmware else 4096
     guard_address = KERNEL_STACK - stack_size - 64
+    device_start = symbols.get(b"__ipc_device_start", KERNEL_HIGH_START)
+    device_end = symbols.get(b"__ipc_device_end", KERNEL_HIGH_START)
+    if (device_start != KERNEL_HIGH_START or device_end % 64 or
+            not device_start <= device_end <= device_start + (32768 if firmware else 0) or
+            (device_end > device_start and (device_start, device_end) not in allocated)):
+        raise ValueError("IPC device carve disagrees with its SRAM reservation")
+    if b"tiku_p4_sdmmc_start" in symbols:
+        descriptor=symbols.get(b"__sdmmc_descriptor_start",0)
+        if (descriptor%64 or not device_start<=descriptor<=device_end-64 or
+                symbols.get(b"__sdmmc_descriptor_end")!=descriptor+64):
+            raise ValueError("SDMMC descriptor is outside the retained device carve")
     required = {
-        b"__tier_sram_start": KERNEL_HIGH_START,
+        b"__tier_sram_start": device_end,
         b"__tier_sram_end": guard_address,
         b"__tier_sram_extra_end": KERNEL_LOW_END,
         b"__stack_guard": guard_address,
@@ -234,7 +248,7 @@ def validate_kernel_layout(data, allocated, segments, firmware=False):
             symbols.get(b"tiku_p4_isr_stack") != guard + 64 or
             symbols.get(b"tiku_p4_isr_stack_end") != guard + 64 + 2048):
         raise ValueError("ISR stack/guard outside BSS")
-    return {"high": guard_address - KERNEL_HIGH_START,
+    return {"high": guard_address - device_end,
             "low": KERNEL_LOW_END - statics_end, "statics": statics_end - RAM_START}
 
 

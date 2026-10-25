@@ -83,6 +83,10 @@ void tiku_rp2350_uart0_isr(void)         __attribute__((weak, alias("rp2350_defa
 void tiku_rp2350_io_bank0_isr(void)      __attribute__((weak, alias("rp2350_default_handler")));
 void tiku_rp2350_pio0_irq0_handler(void) __attribute__((weak, alias("rp2350_default_handler")));
 void tiku_rp2350_dma_irq0_handler(void)  __attribute__((weak, alias("rp2350_default_handler")));
+#if (TIKU_HAS_IPC_TARGET + 0)
+extern void tiku_rp2350_spi1_isr(void);
+extern void tiku_rp2350_i2c1_isr(void);
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* RESET HANDLER                                                             */
@@ -192,8 +196,16 @@ __attribute__((section(".vectors"), used)) = {
     [16 +  5 ... 16 +  9] = rp2350_default_handler,
     [16 + 11 ... 16 + 14] = rp2350_default_handler,
     [16 + 16 ... 16 + 20] = rp2350_default_handler,
+#if (TIKU_HAS_IPC_TARGET + 0)
+    [16 + 22 ... 16 + 31] = rp2350_default_handler,
+    [16 + 32] = tiku_rp2350_spi1_isr,
+    [16 + 34 ... 16 + 36] = rp2350_default_handler,
+    [16 + 37] = tiku_rp2350_i2c1_isr,
+    [16 + 38 ... 16 + 63] = rp2350_default_handler,
+#else
     [16 + 22 ... 16 + 32] = rp2350_default_handler,
     [16 + 34 ... 16 + 63] = rp2350_default_handler,
+#endif
 };
 
 /*---------------------------------------------------------------------------*/

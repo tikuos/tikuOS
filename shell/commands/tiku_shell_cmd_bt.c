@@ -37,6 +37,9 @@
 #include <kernel/cpu/tiku_watchdog.h>        /* the loop's check-in */
 #if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
 #include <kernel/process/tiku_process.h>     /* the others' events */
+#if (TIKU_IPC_ENABLE + 0)
+#include <kernel/scheduler/tiku_sched.h>
+#endif
 #include <kernel/threads/tiku_thread.h>      /* the CPU to the workers */
 #endif
 #endif
@@ -1050,7 +1053,11 @@ static void bt_uart(uint8_t argc, const char *argv[])
          * other processes run their events here, and while none can, the
          * workers (the ESP32-C61's controller tasks among them) get the CPU
          * until the next tick or event. */
+#if (TIKU_IPC_ENABLE + 0)
+        while (tiku_sched_run_once_except(owner)) { }
+#else
         while (tiku_process_run_except(owner)) { }
+#endif
         tiku_current_process = owner;
         tiku_atomic_enter();
         if (!tiku_process_queue_dispatchable_except(owner) &&

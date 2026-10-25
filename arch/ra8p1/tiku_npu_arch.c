@@ -17,6 +17,12 @@
 #include "tiku_ra8p1_regs.h"
 #include "tiku_cpu_common.h"
 #include "tiku_cpu_freq_boot_arch.h"
+#include <kernel/ipc/tiku_ipc_config.h>
+#if TIKU_IPC_ENABLE
+#include <hal/tiku_npu_job_hal.h>
+static uint8_t npu_async_active, npu_output_valid, npu_async_faulted;
+static uint32_t npu_async_started, npu_model_generation = 1;
+#endif
 
 /** @brief Iteration bound on each power-gating and soft-reset wait. */
 #define NPU_POWER_SPINS     100000UL
@@ -228,6 +234,10 @@ int tiku_ra8p1_npu_init(void)
 
 void tiku_ra8p1_npu_stop(void)
 {
+#if TIKU_IPC_ENABLE
+    if (npu_async_active) return;
+    npu_output_valid = 0;
+#endif
     if (npu_ready != 0U) {
         npu_power_down();
     }
@@ -358,6 +368,10 @@ static uint16_t npu_rd16(const uint8_t *p)
 
 int tiku_ra8p1_npu_load(const char *name)
 {
+#if TIKU_IPC_ENABLE
+    if (npu_async_active || npu_model_generation == UINT32_MAX)
+        return TIKU_RA8P1_NPU_ERR_IMAGE;
+#endif
     tiku_tfs_t   *fs = tiku_vfs_tree_data_store();
     tiku_model_t  m;
     const uint8_t *h;
@@ -437,6 +451,11 @@ int tiku_ra8p1_npu_load(const char *name)
     }
     npu_model = g;
     npu_model_from_store = 1U;
+#if TIKU_IPC_ENABLE
+    npu_model_generation++;
+    npu_output_valid = 0;
+    npu_async_faulted = 0;
+#endif
     return TIKU_RA8P1_NPU_OK;
 }
 
@@ -491,6 +510,9 @@ static void npu_reference(const int8_t *ifm, int8_t *ofm)
  */
 static int npu_run(uint32_t *status_out)
 {
+#if TIKU_IPC_ENABLE
+    if (npu_async_active) return TIKU_RA8P1_NPU_ERR_IMAGE;
+#endif
     unsigned long spins;
     uint32_t sta = 0UL;
 
@@ -585,6 +607,9 @@ static int npu_run(uint32_t *status_out)
 static int npu_selftest_run(uint32_t seed, uint32_t *status_out,
                             int tamper, int maint)
 {
+#if TIKU_IPC_ENABLE
+    if (npu_async_active) return TIKU_RA8P1_NPU_ERR_IMAGE;
+#endif
     int8_t  *ifm = (int8_t *)&npu_arena[npu_model.ifm_off];
     int8_t  *ofm = (int8_t *)&npu_arena[npu_model.ofm_off];
     unsigned ifm_n = (unsigned)npu_model.ifm_dim * npu_model.ifm_dim *
@@ -687,6 +712,9 @@ uint32_t tiku_ra8p1_npu_runs(void)
 
 int tiku_ra8p1_npu_run(uint32_t *status_out)
 {
+#if TIKU_IPC_ENABLE
+    if (npu_async_active) return TIKU_RA8P1_NPU_ERR_IMAGE;
+#endif
     int rc = tiku_ra8p1_npu_init();
 
     if (rc != TIKU_RA8P1_NPU_OK) {
@@ -723,6 +751,9 @@ int tiku_ra8p1_npu_run(uint32_t *status_out)
 
 int tiku_ra8p1_npu_bench(uint32_t rounds, uint32_t *npu_us, uint32_t *cpu_us)
 {
+#if TIKU_IPC_ENABLE
+    if (npu_async_active) return TIKU_RA8P1_NPU_ERR_IMAGE;
+#endif
     unsigned long mhz = tiku_cpu_ra8p1_clock_get_hz() / 1000000UL;
     int8_t  *ifm;
     uint32_t t0, npu_c, cpu_c;
@@ -819,3 +850,123 @@ int tiku_ra8p1_npu_selftest_noirq(uint32_t seed)
     __asm__ volatile ("dsb\n\tisb" ::: "memory");
     return rc;
 }
+
+#if TIKU_IPC_ENABLE
+/** @brief Snapshot validated engine storage while no job can modify it. */
+static tiku_ipc_err_t npu_job_spans(void *unused, tiku_npu_tensor_spans_t *out)
+{
+    (void)unused;
+    if (npu_async_active) return TIKU_IPC_BUSY;
+    if (!npu_ready || !npu_model.cms_len) return TIKU_IPC_DOWN;
+    out->input = &npu_arena[npu_model.ifm_off];
+    out->output = &npu_arena[npu_model.ofm_off];
+    out->input_bytes = (uint32_t)npu_model.ifm_dim * npu_model.ifm_dim * npu_model.channels;
+    out->output_bytes = (uint32_t)npu_model.ofm_dim * npu_model.ofm_dim * npu_model.channels;
+    out->generation = npu_model_generation;
+    return TIKU_IPC_OK;
+}
+
+/** @brief Clean staged tensors and publish the run request without waiting. */
+static tiku_ipc_err_t npu_job_begin(void *unused)
+{
+    (void)unused;
+    if (npu_async_active) return TIKU_IPC_AGAIN;
+    if (!npu_ready || !npu_model.cms_len) return TIKU_IPC_DOWN;
+#if (TIKU_NPU_EMBED_MODEL + 0)
+    if (!npu_model_from_store)
+        for (unsigned i = 0; i < npu_model.cms_len; i++) npu_cms[i] = tiku_npu_mp_cms[i];
+#endif
+    tiku_ra8p1_dcache_clean(npu_cms, npu_model.cms_len);
+    if (npu_model.wts_len) tiku_ra8p1_dcache_clean(npu_wts, npu_model.wts_len);
+    tiku_ra8p1_dcache_clean(npu_arena, npu_model.arena);
+    __asm__ volatile ("dsb" ::: "memory");
+    if (npu_reset_and_configure() != TIKU_RA8P1_NPU_OK) {
+        return TIKU_IPC_IO;
+    }
+
+    /* Region 0 holds the weights and scales, region 1 the tensors, and the
+     * other six bases point at the arena.  A base left at zero points its
+     * region at unmapped memory, and a stream that touches it, even with an
+     * empty weight fetch, faults. */
+    {
+        unsigned r;
+
+        for (r = 0U; r < 8U; r++) {
+            TIKU_REG32(RA8P1_NPU_BASEP(r))     = (uint32_t)npu_arena;
+            TIKU_REG32(RA8P1_NPU_BASEP(r) + 4) = 0UL;
+        }
+        TIKU_REG32(RA8P1_NPU_BASEP(0)) = (uint32_t)npu_wts;
+    }
+
+    /* QBASE is an absolute address.  QCONFIG selects the AXI limit set the
+     * queue's own fetches use. */
+    TIKU_REG32(RA8P1_NPU_QBASE)    = (uint32_t)npu_cms;
+    TIKU_REG32(RA8P1_NPU_QBASE_HI) = 0UL;
+    TIKU_REG32(RA8P1_NPU_QSIZE)    = npu_model.cms_len;
+    __asm__ volatile ("dsb" ::: "memory");
+
+    /* CLK_Q_EN and PWR_Q_EN are written back as read: they are the block's
+     * Q-channel state, and a submission only adds the run request. */
+    npu_done = 0u;
+    TIKU_REG32(RA8P1_NPU_CMD) =
+        (TIKU_REG32(RA8P1_NPU_CMD) & (RA8P1_NPU_CMD_CLK_Q_EN |
+                                      RA8P1_NPU_CMD_PWR_Q_EN)) |
+        RA8P1_NPU_CMD_RUN;
+
+
+    npu_async_started = npu_cycles();
+    npu_async_active = 1;
+    npu_output_valid = 0;
+    npu_async_faulted = 0;
+    return TIKU_IPC_OK;
+}
+
+/** @brief Poll completion and publish output after cache invalidation. */
+static tiku_ipc_err_t npu_job_poll(void *unused)
+{
+    uint32_t status;
+    (void)unused;
+    if (!npu_async_active) return TIKU_IPC_INVALID;
+    if (!npu_done) {
+        if ((uint32_t)(npu_cycles() - npu_async_started) >
+            tiku_cpu_ra8p1_clock_get_hz() / 20u) {
+            npu_async_faulted = 1;
+            return TIKU_IPC_TIMEOUT;
+        }
+        return TIKU_IPC_AGAIN;
+    }
+    status = TIKU_REG32(RA8P1_NPU_STATUS);
+    if ((status & (RA8P1_NPU_STATUS_PARSE | RA8P1_NPU_STATUS_BUSERR)) ||
+        !(status & RA8P1_NPU_STATUS_END)) {
+        npu_async_faulted = 1;
+        return TIKU_IPC_IO;
+    }
+    tiku_ra8p1_dcache_invalidate(npu_arena, npu_model.arena);
+    __asm__ volatile ("dsb" ::: "memory");
+    npu_async_active = 0;
+    npu_output_valid = 1;
+    npu_run_count++;
+    return TIKU_IPC_OK;
+}
+
+/** @brief Retain working storage if the bounded soft reset does not finish. */
+static uint8_t npu_job_abort(void *unused)
+{
+    (void)unused;
+    if (!npu_async_active) return 1;
+    if (npu_reset_and_configure() != TIKU_RA8P1_NPU_OK) return 0;
+    tiku_ra8p1_dcache_invalidate(npu_arena, npu_model.arena);
+    __asm__ volatile ("dsb" ::: "memory");
+    npu_async_active = npu_output_valid = npu_done = 0;
+    npu_irq_arm();
+    return 1;
+}
+
+int tiku_ra8p1_npu_job_busy(void) { return npu_async_active != 0; }
+int tiku_ra8p1_npu_output_valid(void) { return npu_output_valid != 0; }
+int tiku_ra8p1_npu_job_faulted(void) { return npu_async_faulted != 0; }
+
+const tiku_npu_engine_ops_t tiku_npu_engine_ops = {
+    npu_job_spans, npu_job_begin, npu_job_poll, npu_job_abort
+};
+#endif

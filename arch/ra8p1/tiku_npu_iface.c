@@ -16,6 +16,10 @@
 #include <interfaces/npu/tiku_npu.h>
 
 #include "tiku_npu_arch.h"
+#if (TIKU_IPC_ENABLE + 0)
+#include <kernel/ipc/tiku_ipc.h>
+#include <string.h>
+#endif
 
 /** @brief Set when a run times out or faults; a successful load clears it. */
 static uint8_t npu_iface_faulted;
@@ -32,6 +36,10 @@ tiku_npu_state_t tiku_npu_state(void)
     if (!tiku_ra8p1_npu_ready()) {
         return TIKU_NPU_GATED;
     }
+#if (TIKU_IPC_ENABLE + 0)
+    if (tiku_ra8p1_npu_job_faulted()) return TIKU_NPU_FAULTED;
+    if (tiku_ra8p1_npu_job_busy()) return TIKU_NPU_RUNNING;
+#endif
     if (npu_iface_faulted) {
         return TIKU_NPU_FAULTED;
     }
@@ -47,11 +55,30 @@ int tiku_npu_start(void)
 
 void tiku_npu_stop(void)
 {
+#if (TIKU_IPC_ENABLE + 0)
+    (void)tiku_npu_stop_checked();
+#else
     tiku_ra8p1_npu_stop();
+#endif
 }
+
+#if (TIKU_IPC_ENABLE + 0)
+int tiku_npu_stop_checked(void)
+{
+    for (uint16_t i = 0; i < tiku_ipc_endpoint_count(); i++)
+        if (!strcmp(tiku_ipc_endpoint_name(i), "npu/inference"))
+            if (tiku_ipc_reset(i) != TIKU_IPC_OK) return TIKU_NPU_ERR_BUSY;
+    if (tiku_ra8p1_npu_job_busy()) return TIKU_NPU_ERR_BUSY;
+    tiku_ra8p1_npu_stop();
+    return tiku_ra8p1_npu_ready() ? TIKU_NPU_ERR_FAULT : TIKU_NPU_OK;
+}
+#endif
 
 int tiku_npu_load(const char *name)
 {
+#if (TIKU_IPC_ENABLE + 0)
+    if (tiku_ra8p1_npu_job_busy()) return TIKU_NPU_ERR_BUSY;
+#endif
     int rc = tiku_ra8p1_npu_load(name);
 
     if (rc != TIKU_RA8P1_NPU_OK) {
@@ -78,6 +105,9 @@ int tiku_npu_info(tiku_npu_info_t *out)
 
 void *tiku_npu_input(uint32_t *len)
 {
+#if (TIKU_IPC_ENABLE + 0)
+    if (tiku_ra8p1_npu_job_busy()) { if (len) *len = 0; return NULL; }
+#endif
     const tiku_ra8p1_npu_model_t *m = tiku_ra8p1_npu_model();
 
     if (len != 0) {
@@ -88,6 +118,12 @@ void *tiku_npu_input(uint32_t *len)
 
 const void *tiku_npu_output(uint32_t *len)
 {
+#if (TIKU_IPC_ENABLE + 0)
+    if (tiku_ra8p1_npu_job_busy() || !tiku_ra8p1_npu_output_valid()) {
+        if (len) *len = 0;
+        return NULL;
+    }
+#endif
     const tiku_ra8p1_npu_model_t *m = tiku_ra8p1_npu_model();
 
     if (len != 0) {
@@ -98,6 +134,12 @@ const void *tiku_npu_output(uint32_t *len)
 
 int tiku_npu_run(void)
 {
+#if (TIKU_IPC_ENABLE + 0)
+    int result = tiku_npu_wait_run();
+    if (result == TIKU_NPU_ERR_TIMEOUT || result == TIKU_NPU_ERR_FAULT)
+        npu_iface_faulted = 1;
+    return result;
+#else
     int rc = tiku_ra8p1_npu_run((uint32_t *)0);
 
     switch (rc) {
@@ -112,6 +154,7 @@ int tiku_npu_run(void)
         npu_iface_faulted = 1u;
         return TIKU_NPU_ERR_FAULT;
     }
+#endif
 }
 
 uint32_t tiku_npu_runs(void)

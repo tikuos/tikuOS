@@ -38,6 +38,9 @@
 #include "kernel/memory/tiku_mem.h"
 #include "kernel/timers/tiku_clock.h"
 #include "kernel/scheduler/tiku_sched.h"
+#if TIKU_IPC_ENABLE
+#include "tiku_boot_ipc.h"
+#endif
 #include "hal/tiku_cpu.h"        /* tiku_cpu_irq_enable() at boot-complete */
 #if defined(PLATFORM_MSP430)
 #include "arch/msp430/tiku_uart_arch.h"
@@ -314,6 +317,10 @@ tiku_boot_init_services(void)
 {
     /* Starts the process subsystem, the htimer and the software timers. */
     tiku_sched_init();
+#if TIKU_IPC_ENABLE
+    if (tiku_boot_ipc_init() != 0)
+        return TIKU_BOOT_ERROR;
+#endif
 
     return TIKU_BOOT_SUCCESS;
 }

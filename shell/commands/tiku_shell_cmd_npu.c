@@ -20,6 +20,9 @@
 
 #include <shell/tiku_shell_io.h>
 #include <arch/ra8p1/tiku_npu_arch.h>
+#if (TIKU_IPC_ENABLE + 0)
+#include <interfaces/npu/tiku_npu.h>
+#endif
 #include "tiku_shell_cmd_util.h"
 
 /** @brief Short text for a TIKU_RA8P1_NPU_ERR_* code, or "unknown". */
@@ -68,7 +71,13 @@ void tiku_shell_cmd_npu(uint8_t argc, const char *argv[])
         return;
     }
     if (argc >= 2u && argv[1][0] == 'o' && argv[1][1] == 'f') {
+#if (TIKU_IPC_ENABLE + 0)
+        if (tiku_npu_stop_checked() != TIKU_NPU_OK) {
+            SHELL_PRINTF("npu: engine retains active storage\n"); return;
+        }
+#else
         tiku_ra8p1_npu_stop();
+#endif
         SHELL_PRINTF("npu: gated\n");
         return;
     }

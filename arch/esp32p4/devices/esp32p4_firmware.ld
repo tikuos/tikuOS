@@ -28,6 +28,15 @@ SECTIONS {
         */applications/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         */TikuBench/tests/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         */kernel/vfs/tree/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        */services/ipc/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *tiku_ipc_stream.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *tiku_sdio_owner_arch.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *tiku_sdmmc_arch.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *tiku_link_uart.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *tiku_uart_port_arch.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *tiku_boot_ipc.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *tiku_boot_c6.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        */interfaces/coproc/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         */tikukits/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         *(.p4.xip.text .p4.xip.rodata)
         *(.rodata.tiku_lpcore_image)
@@ -88,12 +97,21 @@ SECTIONS {
     __tier_sram_extra_end = ORIGIN(LOW) + LENGTH(LOW);
     __stack = ORIGIN(HIGH) + LENGTH(HIGH);
     __stack_bottom = __stack - 16K;
+    .ipc_device ORIGIN(HIGH) (NOLOAD) : ALIGN(64) {
+        __ipc_device_start = .;
+        __sdmmc_descriptor_start = .;
+        *(.p4.ipc.sdmmc_descriptor)
+        __sdmmc_descriptor_end = .;
+        *(.p4.ipc .p4.ipc.*)
+        . = ALIGN(64);
+        __ipc_device_end = .;
+    } > HIGH
     .stack_guard (__stack_bottom - 64) (NOLOAD) : {
         __stack_guard = .;
         . += 64;
     } > HIGH
     .stack __stack_bottom (NOLOAD) : { . += 16K; } > HIGH
-    __tiku_tier_span_start = ORIGIN(HIGH);
+    __tiku_tier_span_start = __ipc_device_end;
     __tiku_tier_span_limit = __stack_guard;
     __tiku_tier_reserve_default = 0;
     __tiku_tier_floor_default = 256K;

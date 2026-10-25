@@ -216,4 +216,12 @@ uint32_t tiku_ra8p1_npu_runs(void);
  */
 int tiku_ra8p1_npu_bench(uint32_t rounds, uint32_t *npu_us, uint32_t *cpu_us);
 
+#if (TIKU_IPC_ENABLE + 0)
+/** @brief Engine spans remain reserved while a job or unconfirmed abort exists. */
+int tiku_ra8p1_npu_job_busy(void);
+/** @brief The last asynchronous job completed and its output is coherent. */
+int tiku_ra8p1_npu_output_valid(void);
+/** @brief The asynchronous completion or timeout reported an engine fault. */
+int tiku_ra8p1_npu_job_faulted(void);
+#endif
 #endif /* TIKU_RA8P1_NPU_ARCH_H_ */

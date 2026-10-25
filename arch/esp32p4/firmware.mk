@@ -70,5 +70,14 @@ LPCORE_CFLAGS = $(ESP32P4_LPCORE_ARCH) -Os -Wall -Wextra -Werror -ffreestanding 
                 -MMD -MP
 LPCORE_OBJS = $(LPCORE_BUILD)/tiku_lpcore_crt0.o $(LPCORE_BUILD)/tiku_lpcore_main.o \
               $(LPCORE_BUILD)/tiku_lpagent_jobs.o $(LPCORE_BUILD)/tiku_lpcore_i2c.o
+ifeq ($(TIKU_IPC_ENABLE),1)
+LPCORE_CFLAGS += -DTIKU_IPC_ENABLE=1 -I$(PROJ_DIR)
+endif
+ifeq ($(TIKU_IPC_LP_STUCK_SCL_TEST),1)
+LPCORE_CFLAGS += -DTIKU_IPC_LP_STUCK_SCL_TEST=1
+endif
+ifeq ($(TIKU_IPC_LP_STRETCH_TEST),1)
+LPCORE_CFLAGS += -DTIKU_IPC_LP_STRETCH_TEST=1
+endif
 TIKU_LPCORE_IMG_O = $(LPCORE_BUILD)/tiku_lpcore_img.o
 endif

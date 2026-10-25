@@ -23,7 +23,16 @@ static int scl_high(uint32_t scl)
 
     tiku_lpcore_io_set(scl, 1u);
     for (i = 0u; i < I2C_RISE; i++) {
-        if (tiku_lpcore_io_get(scl)) {
+        uint32_t high=tiku_lpcore_io_get(scl);
+#if (TIKU_IPC_LP_STUCK_SCL_TEST + 0)
+        /* The timing profile retains the pad read and forces SCL8 samples low. */
+        if(scl==8u)high=0;
+#endif
+#if (TIKU_IPC_LP_STRETCH_TEST + 0)
+        /* The CPU timing profile takes the last allowed rise sample on SCL8. */
+        if(scl==8u&&i<I2C_RISE-1u)high=0;
+#endif
+        if (high) {
             return 1;
         }
     }
@@ -80,6 +89,10 @@ static int i2c_write(uint32_t sda, uint32_t scl, uint32_t byte)
     }
     tiku_lpcore_i2c_delay();
     ack = tiku_lpcore_io_get(sda) == 0u;
+#if (TIKU_IPC_LP_STRETCH_TEST + 0)
+    /* Synthetic acknowledgements exercise the complete two-byte read path. */
+    if(sda==7u)ack=1;
+#endif
     tiku_lpcore_io_set(scl, 0u);
     return ack;
 }

@@ -19,6 +19,9 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_sched.h"
+#if TIKU_IPC_ENABLE
+#include <kernel/ipc/tiku_ipc.h>
+#endif
 #include "kernel/memory/tiku_reclaim_internal.h"
 #include "../timers/tiku_htimer.h"
 #include <hal/tiku_cpu.h>
@@ -93,8 +96,26 @@ uint8_t tiku_sched_run_once(void)
 #if TIKU_MEM_RECLAIM_ENABLE
     tiku_mem_reclaim_poll();
 #endif
+#if TIKU_IPC_ENABLE
+    tiku_ipc_progress(TIKU_IPC_PROGRESS_BUDGET);
+#endif
     return tiku_process_run();
 }
+
+#if TIKU_IPC_ENABLE
+uint8_t tiku_sched_run_once_except(const struct tiku_process *skip)
+{
+    struct tiku_process *owner = TIKU_THIS();
+    uint8_t ran;
+#if TIKU_MEM_RECLAIM_ENABLE
+    tiku_mem_reclaim_poll();
+#endif
+    tiku_ipc_progress(TIKU_IPC_PROGRESS_BUDGET);
+    ran = tiku_process_run_except(skip);
+    tiku_current_process = owner;
+    return ran;
+}
+#endif
 
 /*---------------------------------------------------------------------------*/
 
@@ -146,6 +167,9 @@ void tiku_sched_loop(void)
         tiku_atomic_enter();
 
         if (!tiku_sched_has_pending() &&
+#if TIKU_IPC_ENABLE
+            !tiku_ipc_pending() &&
+#endif
             (idle_tick_wakes || (!tiku_timer_any_pending()
 #if TIKU_MEM_RECLAIM_ENABLE
                                 && !tiku_mem_reclaim_pending()

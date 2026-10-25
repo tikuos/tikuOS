@@ -98,6 +98,10 @@
 #define TIKU_SHELL_CMD_CPU1    0
 #endif
 #endif
+#ifndef TIKU_SHELL_CMD_IPC
+#define TIKU_SHELL_CMD_IPC (TIKU_IPC_ENABLE + 0)
+#endif
+
 #ifndef TIKU_SHELL_CMD_LPCORE
 /* On where the build carries the ESP32-P4 LP core payload
  * (TIKU_LPCORE_ENABLE, a -D from the Makefile); off elsewhere. */

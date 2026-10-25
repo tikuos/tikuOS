@@ -47,6 +47,7 @@
  * nor reclaim work pending.  It returns, and the scheduler re-checks for work.
  *
  * @note The scheduler calls it inside an atomic section, interrupts masked.
+ * @note Immediate IPC readiness also prevents idle when IPC is enabled.
  */
 typedef void (*tiku_sched_idle_hook_t)(void);
 
@@ -78,13 +79,25 @@ void tiku_sched_start(struct tiku_process *p, tiku_event_data_t data);
 /**
  * @brief Run one scheduler iteration
  *
- * Runs the memory-reclaim poll when TIKU_MEM_RECLAIM_ENABLE, then dispatches
- * one event from the process event queue (tiku_process_run()).
+ * Runs enabled memory-reclaim and bounded IPC progress, then dispatches one
+ * event from the process event queue (tiku_process_run()).
  *
  * @return 1 if an event was dequeued, a stale one dropped included, 0 if the
  *         queue was empty
  */
 uint8_t tiku_sched_run_once(void);
+
+#if TIKU_IPC_ENABLE
+/**
+ * @brief Service reclaim/IPC, dispatch others and restore the caller context.
+ *
+ * The excluded process is not reentered. Reclaim keeps its current-process
+ * guard. IPC rejects recursive pumping while a backend is being serviced.
+ */
+uint8_t tiku_sched_run_once_except(const struct tiku_process *skip);
+#else
+#define tiku_sched_run_once_except(skip) tiku_process_run_except(skip)
+#endif
 
 /**
  * @brief Run the main scheduler loop until tiku_sched_stop().

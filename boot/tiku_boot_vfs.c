@@ -17,6 +17,9 @@
 #include "tiku_boot_vfs.h"
 #include <kernel/vfs/tiku_vfs_tree.h>
 #include <kernel/drivers/tiku_drv_registry.h>
+#if (TIKU_IPC_ENABLE + 0)
+#include <kernel/vfs/tree/tiku_vfs_tree_ipc.h>
+#endif
 #if TIKU_SHELL_ENABLE
 #include <shell/tiku_shell_vfs.h>
 #endif
@@ -45,6 +48,11 @@ static int assemble(void)
     tiku_vfs_tree_config_t config = {0};
 
     config.nodes = nodes;
+#if (TIKU_IPC_ENABLE + 0)
+    nodes[config.node_count++] = (tiku_vfs_boot_node_t){
+        "/sys", tiku_vfs_tree_ipc_get()
+    };
+#endif
 #if TIKU_SHELL_ENABLE
     nodes[config.node_count++] = (tiku_vfs_boot_node_t){
         "/sys", tiku_shell_vfs_rules()

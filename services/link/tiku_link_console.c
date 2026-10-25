@@ -15,6 +15,9 @@
 #include "tiku_link_console.h"
 #include <services/console/tiku_console.h>
 #include <kernel/vfs/tiku_vfs.h>          /* TIKU_VFS_CAP_ALL */
+#if (TIKU_IPC_ENABLE + 0)
+#include <string.h>
+#endif
 
 #define CRC_INIT 0xFFFFu
 
@@ -64,6 +67,14 @@ send_ack(const tiku_link_console_t *lc, uint8_t seq)
     c = tiku_link_console_crc(CRC_INIT, hdr, sizeof hdr);
     crc[0] = (uint8_t)(c >> 8);
     crc[1] = (uint8_t)c;
+#if (TIKU_IPC_ENABLE + 0)
+    if (lc->emit) {
+        uint8_t frame[4] = {hdr[0],hdr[1],crc[0],crc[1]};
+        (void)lc->emit(lc->emit_context,lc->marker,frame,sizeof frame);
+        stats.acked++;
+        return;
+    }
+#endif
     (void)tiku_console_send_frame(lc->marker, hdr, sizeof hdr, crc,
                                   sizeof crc);
     stats.acked++;
@@ -81,6 +92,11 @@ console_send(tiku_link_t *l, const void *head, size_t hlen,
     uint8_t hdr[2], crc[2];
     uint16_t c;
 
+#if (TIKU_IPC_ENABLE + 0)
+    if (lc->emit && (hlen > TIKU_LINK_CONSOLE_SESSION_MTU ||
+        blen > TIKU_LINK_CONSOLE_SESSION_MTU-hlen ||
+        (hlen && !head) || (blen && !body))) return -1;
+#endif
     hdr[0] = TIKU_LINK_CONSOLE_DATA;
     hdr[1] = lc->tx_seq;
     c = tiku_link_console_crc(CRC_INIT, hdr, sizeof hdr);
@@ -88,6 +104,18 @@ console_send(tiku_link_t *l, const void *head, size_t hlen,
     c = tiku_link_console_crc(c, body, blen);
     crc[0] = (uint8_t)(c >> 8);
     crc[1] = (uint8_t)c;
+#if (TIKU_IPC_ENABLE + 0)
+    if (lc->emit) {
+        uint8_t frame[TIKU_LINK_CONSOLE_SESSION_MTU + TIKU_LINK_CONSOLE_OVERHEAD];
+        frame[0] = hdr[0]; frame[1] = hdr[1];
+        if (hlen) memcpy(frame+2,head,hlen);
+        if (blen) memcpy(frame+2+hlen,body,blen);
+        frame[2+hlen+blen] = crc[0]; frame[3+hlen+blen] = crc[1];
+        if (lc->emit(lc->emit_context,lc->marker,frame,hlen+blen+4)) return -1;
+        lc->tx_seq++; stats.tx++;
+        return 0;
+    }
+#endif
     if (tiku_console_frame_begin(lc->marker) != 0) {
         return -1;
     }
@@ -197,7 +225,10 @@ console_close(tiku_link_t *l)
 {
     tiku_link_console_t *lc = (tiku_link_console_t *)l->ctx;
 
-    tiku_console_remove_channel(lc->marker, 0xFFu);
+#if (TIKU_IPC_ENABLE + 0)
+    if (!lc->emit)
+#endif
+        tiku_console_remove_channel(lc->marker, 0xFFu);
     l->recv = (tiku_link_recv_fn)0;
 }
 
@@ -218,6 +249,10 @@ tiku_link_console_open(tiku_link_console_t *lc, uint8_t marker,
     lc->paced_synced = 0u;
     lc->plain_expect = 0u;
     lc->plain_seen = 0u;
+#if (TIKU_IPC_ENABLE + 0)
+    lc->emit = NULL;
+    lc->emit_context = NULL;
+#endif
     lc->link.ops = &console_ops;
     lc->link.ctx = lc;
     lc->link.cap = TIKU_VFS_CAP_ALL;
@@ -229,6 +264,24 @@ tiku_link_console_open(tiku_link_console_t *lc, uint8_t marker,
     }
     return &lc->link;
 }
+
+#if (TIKU_IPC_ENABLE + 0)
+tiku_link_t *tiku_link_console_external(tiku_link_console_t *lc, uint8_t marker,
+    int (*emit)(void *, uint8_t, const uint8_t *, size_t), void *context)
+{
+    if (!lc || !emit) return NULL;
+    *lc = (tiku_link_console_t){0};
+    lc->marker = marker;
+    lc->emit = emit;
+    lc->emit_context = context;
+    lc->link = (tiku_link_t){.ops=&console_ops,.ctx=lc};
+    return &lc->link;
+}
+void tiku_link_console_accept(tiku_link_console_t *lc, uint8_t *data, size_t length)
+{
+    if (lc && lc->emit && data) on_frame(lc,data,length);
+}
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* OBSERVABILITY                                                             */

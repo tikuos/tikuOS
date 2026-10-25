@@ -408,7 +408,11 @@ static int basic_https_offload(int (*fn)(void *), void *arg)
     dl = BASIC_HTTPS_DEADLINE();
     while (basic_crypto_worker.state != TIKU_THREAD_DONE) {
         basic_https_pump();                          /* net + WDT stay alive */
+#if (TIKU_IPC_ENABLE + 0)
+        while (tiku_sched_run_once_except(owner)) { }
+#else
         while (tiku_process_run_except(owner)) { }   /* others' timers/rules */
+#endif
         tiku_atomic_enter();
         if (!tiku_process_queue_dispatchable_except(owner) &&
             tiku_thread_worker_ready()) {

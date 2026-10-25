@@ -12,7 +12,8 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#include <interfaces/coproc/tiku_coproc.h>
+#define TIKU_COPROC_DRIVER_IMPLEMENTATION
+#include <interfaces/coproc/tiku_coproc_driver.h>
 #include "tiku_lpcore_arch.h"
 #include "lpcore/tiku_lpcore_ipc.h"
 

@@ -16,11 +16,13 @@
 #define TIKU_MEM_INTERNAL_H_
 
 #include "tiku_mem.h"
+#include <kernel/ipc/tiku_ipc_config.h>
 
 /** @brief Reservation kind of an arena control block. */
 #define TIKU_BACKING_ARENA 1u
 /** @brief Reservation kind of a pool control block. */
 #define TIKU_BACKING_POOL  2u
+
 
 /**
  * @brief Link attribute of the hooks: strong in tiku_tier.c, weak elsewhere.
@@ -33,6 +35,14 @@
 #define TIKU_BACKING_LINK
 #else
 #define TIKU_BACKING_LINK __attribute__((weak))
+#endif
+
+#if TIKU_IPC_ENABLE
+/** @brief Retain TRANSIENT backing; refuses a stale record or count overflow. */
+tiku_mem_err_t tiku_backing_pin(const void *descriptor,
+    tiku_mem_backing_t handle, uint8_t kind, int retain);
+/** @brief Nonzero while reset or destruction would invalidate a live loan. */
+int tiku_backing_pinned(tiku_mem_backing_t handle) TIKU_BACKING_LINK;
 #endif
 
 /** @brief Non-zero while any reservation record names @p descriptor. */

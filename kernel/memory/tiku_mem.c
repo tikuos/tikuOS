@@ -195,6 +195,11 @@ tiku_mem_err_t tiku_arena_reset(tiku_arena_t *arena)
     }
     if (!tiku_backing_can_mutate(arena->backing)) return TIKU_MEM_ERR_BUSY;
 
+#if TIKU_IPC_ENABLE
+    if (tiku_backing_pinned != NULL && tiku_backing_pinned(arena->backing))
+        return TIKU_MEM_ERR_BUSY;
+#endif
+
     arena->offset = 0;
     arena->count  = 0;
 
@@ -208,6 +213,10 @@ tiku_mem_err_t tiku_arena_secure_reset(tiku_arena_t *arena)
         return TIKU_MEM_ERR_INVALID;
     }
     if (!tiku_backing_can_mutate(arena->backing)) return TIKU_MEM_ERR_BUSY;
+#if TIKU_IPC_ENABLE
+    if (tiku_backing_pinned != NULL && tiku_backing_pinned(arena->backing))
+        return TIKU_MEM_ERR_BUSY;
+#endif
 
     tiku_mem_arch_secure_wipe(arena->buf, arena->capacity);
 

@@ -34,12 +34,14 @@ SECTIONS
 
     /* .bss lies inside the carve, which the loader zero-fills; the payload
      * has no startup code to clear it. */
-    .bss (NOLOAD) : ALIGN(8) {
+    .bss (DEFINED(__tiku_ipc_shared_size) ? BASE + 0x2100 : ALIGN(8)) (NOLOAD) : {
         __bss_start = .;
         *(.bss*) *(COMMON)
         __bss_end = .;
     }
-    __text_end = __bss_end;
+    __text_end = DEFINED(__tiku_ipc_shared_size) ?
+                 ADDR(.text) + SIZEOF(.text) : __bss_end;
+    ASSERT(__bss_end <= BASE + 16384 - 2048, "cpu1: bss overruns the stack floor")
 
     /* HardFault handler, pinned where the loader points vector 3. */
     .fault BASE + 0x1800 : { KEEP(*(.cpu1_fault)) }
@@ -54,7 +56,11 @@ SECTIONS
 
     /* The shared page, at TIKU_CPU1_SHARED_OFF; the loader zero-fills it.
      * tiku_cpu1_ipc.h asserts that its two halves use separate cache lines. */
-    .shared BASE + 0x1900 (NOLOAD) : { . = . + 0x1C0; }
+    .shared BASE + 0x1900 (NOLOAD) : {
+        . = . + 0x1C0;
+        . = . + (DEFINED(__tiku_ipc_shared_size) ? __tiku_ipc_shared_size : 0);
+    }
+    ASSERT(. <= BASE + 16384 - 2048, "cpu1: shared IPC overruns the stack floor")
 
     /DISCARD/ : { *(.ARM.*) *(.comment) *(.debug*) *(.note*) }
 }
