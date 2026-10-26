@@ -15,6 +15,13 @@
 #include <kernel/timers/tiku_timer.h>
 #include <kernel/timers/tiku_clock.h>
 #include <hal/tiku_cpu.h>
+#if TIKU_THREADS_ENABLE
+#include "tiku_thread_arch.h"
+#include <kernel/threads/tiku_thread.h>
+#endif
+#if TIKU_C6_THREAD_TEST
+#include <TikuBench/tests/esp32c6/test_threads.h>
+#endif
 
 #define TIMER_BIT (1u<<23)
 static const uint32_t timer_registers[]={0,0x24,0x28,0x38,0x64};
@@ -125,11 +132,20 @@ void native_hardware_restore(void)
 uint32_t *native_trap_dispatch(uint32_t *frame)
 {
     uint32_t cause=frame[34];
+#if TIKU_THREADS_ENABLE
+    if(cause==((1u<<31)|C6_SWITCH_IRQ))return tiku_c6_thread_dispatch(frame);
+#endif
     if(cause==((1u<<31)|C6_CPU_IRQ) && (C6_REG(C6_SYSTIMER+0x68)&2)){
         uint64_t now=native_time();
         uint32_t due=now>=deadline?(uint32_t)((now-deadline)/C6_TICK_COUNTS)+1:1;
         native_irqs++;native_ticks+=due;deadline+=(uint64_t)due*C6_TICK_COUNTS;
         arm_tick(deadline);tiku_timer_request_poll();
+#if TIKU_THREADS_ENABLE
+        tiku_thread_kernel_wake();
+#endif
+#if TIKU_C6_THREAD_TEST
+        tiku_c6_threads_test_tick();
+#endif
     }else if(cause==2 && frame[32]==(uint32_t)(uintptr_t)native_probe_illegal){
         native_report[20]++;native_report[21]=cause;native_report[22]=frame[32];native_report[23]=frame[35];
         frame[32]=(uint32_t)(uintptr_t)native_probe_after_illegal;

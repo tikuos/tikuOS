@@ -103,9 +103,9 @@ tests the free tier with two address-dependent patterns before admitting it
 to the allocator. `memtest`, `memsize`, `tiersize`, `workers` and `radio`
 are native diagnostic commands through `ipc sdio console`.
 
-This profile provides the cooperative core and SDIO diagnostic application.
-It rejects enabled shell, BASIC and worker build flags. Its worker and radio
-reservations do not enable those subsystems. Native code, handlers and DMA
+This profile provides the cooperative core, worker backend and SDIO diagnostic
+application. It rejects enabled shell and BASIC build flags. The radio
+reservation does not enable a radio driver. Native code, handlers and DMA
 stages reside in SRAM. During installation the native kernel is stopped;
 the preserved SDK recovery and factory applications perform flash operations
 using their own flash/cache handling. No native XIP mapping is configured.
@@ -182,6 +182,63 @@ after SDIO transmission of OTA_END completes, before accepting its reply;
 it does not select an internal flash-instruction boundary. These are EN
 reset tests, with the factory and bootloader preserved. Physical power cuts
 during a flash operation require separate qualification.
+
+## Preemptive workers
+
+The firmware profile defaults to `TIKU_THREADS_ENABLE=1`. It uses the shared
+`kernel/threads/tiku_thread.c` policy: cooperative kernel work has priority;
+ready workers run round-robin when the kernel has no pending process or IPC
+work. Each timer interrupt wakes the kernel, including when no software timer
+is armed. A worker can compute, post events and use the worker wait API.
+Allocator mutators retain their worker-context refusal checks.
+
+The C6 backend routes CPU software interrupt zero (source 22) to CPU line
+18; the timer uses line 17. The software request is acknowledged before the
+shared scheduler chooses the return frame. Interrupts are masked throughout
+dispatch on the dedicated 2 KiB IRQ stack. Context frames preserve the RV32
+integer registers, `mepc` and `mstatus`; entry frames select machine mode
+with interrupts enabled on exception return. This RV32IMAC profile has no
+floating-point context. It links freestanding routines and no newlib runtime.
+
+`TIKU_THREAD(name, bytes)` places C6 worker stacks in the linker's 32 KiB
+worker reservation through `TIKU_THREAD_STACK_ATTR`, with 16-byte alignment.
+Their combined size must fit that reservation. The shared API requires at
+least 512 bytes per stack. Canary checks detect a changed bottom word at a
+switch; the port provides no worker stack memory-protection boundary.
+
+The default diagnostic application starts no workers. Applications use
+`tiku_thread_start()` and the shared wait, wake, budget, join and forget APIs.
+`TIKU_THREADS_ENABLE=0` builds the firmware core without workers. Resident
+and cold profiles require workers disabled and retain their SRAM limits.
+
+Build the worker qualification application with:
+
+```sh
+make MCU=esp32c6 C6_PROFILE=firmware C6_THREAD_TEST=1 C6_BUILD=42 \
+    firmware-image C6_RECOVERY_IMAGE=/path/to/tiku_c6_access.bin
+```
+
+Install that package with the checked installer. The qualification profile
+runs startup checks for lifecycle, capacity, timer preemption, register
+preservation, nested atomic sections, kernel priority, waits, cycle budgets,
+stack canaries and allocator confinement. Its startup wait test sets the
+tick counter near wrap before admitting diagnostic/IPC service. The test
+records one intentional canary fault and one refused worker allocation.
+Those hooks and the tick adjustment are absent when `C6_THREAD_TEST=0`.
+
+```sh
+python3 -B tools/esp32c6_threads_qualify.py \
+    --port /dev/serial/by-id/your-p4 --p4-serial your-usb-serial \
+    --build 42 --output /path/to/new-capture --seconds 3600
+```
+
+The host checks the startup result, starts three non-yielding workers with
+assembly register sentinels, and transfers repeated image/sensor/slow/corrupt
+objects while checking timer progress and unchanged guard counts. The result
+distinguishes a shorter diagnostic run from the one-hour qualification.
+`thrtest`, `thrsoak` and `thr 0` through `thr 9` expose this test profile's
+failure bitmap, soak start and observations; they are absent from the
+ordinary diagnostic application. Restore an ordinary package after testing.
 
 ## Build and update
 
@@ -300,6 +357,7 @@ has a valid IPCE reply; another diagnostic response has no startup trace.
 
 ```sh
 make -C TikuBench/tests/host/kernel ipc ipc-transports c6-sdio p4-sdmmc
+make -C TikuBench/tests/host/kernel c6-threads
 python3 TikuBench/tests/host/kernel/test_esp32c6_resident.py
 python3 -B TikuBench/tests/host/kernel/test_esp32c6_firmware.py
 python3 tools/esp32c6_sdio_qualify.py --port /dev/serial/by-id/your-p4 \

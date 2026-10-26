@@ -84,12 +84,16 @@ typedef struct tiku_thread {
  * @def TIKU_THREAD(name, stack_bytes)
  * @brief Statically declare a worker thread and its stack.
  *
- * The stack is an 8-byte-aligned .bss array of @p stack_bytes / 4 words.
+ * The stack has @p stack_bytes / 4 words, aligned to at least eight bytes.
+ * TIKU_THREAD_STACK_ATTR selects a port's stack section and stronger alignment.
  * Start the thread with tiku_thread_start(&name, entry, arg).
  */
+#ifndef TIKU_THREAD_STACK_ATTR
+#define TIKU_THREAD_STACK_ATTR
+#endif
 #define TIKU_THREAD(name, stack_bytes)                                       \
     static uint32_t name##_stack[(stack_bytes) / 4u]                         \
-        __attribute__((aligned(8)));                                        \
+        __attribute__((aligned(8))) TIKU_THREAD_STACK_ATTR;                  \
     tiku_thread_t name = {                                                   \
         NULL, name##_stack, (stack_bytes), NULL, NULL,                       \
         TIKU_THREAD_UNUSED, #name, 0, 0, 0                                   \

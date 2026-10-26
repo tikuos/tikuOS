@@ -16,7 +16,10 @@
 #define PLATFORM_ESP32C6 1
 #define TIKU_CLOCK_CONF_TIME_T unsigned long
 #define TIKU_CLOCK_ARCH_SECOND 128UL
+#ifndef TIKU_THREADS_ENABLE
 #define TIKU_THREADS_ENABLE 0
+#endif
+#define TIKU_THREAD_STACK_ATTR __attribute__((section(".c6.worker_stacks"),aligned(16)))
 #define TIKU_MEM_ARCH_ALIGNMENT 8U
 #define TIKU_MEM_NVM_ENABLE 0
 #define TIKU_TIER_SRAM_DERIVED 1

@@ -21,6 +21,13 @@
 #include <hal/tiku_ipc_test_pattern.h>
 #include <kernel/ipc/tiku_ipc_stream.h>
 #include <string.h>
+#if TIKU_THREADS_ENABLE
+#include <kernel/threads/tiku_thread.h>
+#include <hal/tiku_cpu.h>
+#endif
+#if TIKU_C6_THREAD_TEST
+#include <TikuBench/tests/esp32c6/test_threads.h>
+#endif
 
 static tiku_ipc_wire_t wire;
 static tiku_ipc_bus_t bus;
@@ -118,6 +125,12 @@ static size_t command(const uint8_t *data,size_t length,uint8_t out[24])
     else if(equal(data,length,"irq"))value=native_irqs;
     else if(equal(data,length,"proc"))value=tiku_process_count();
     else if(equal(data,length,"build"))value=TIKU_C6_BUILD;
+#if TIKU_C6_THREAD_TEST
+    else if(equal(data,length,"thrtest"))value=tiku_c6_threads_test_result();
+    else if(equal(data,length,"thrsoak"))value=tiku_c6_threads_test_soak();
+    else if(length==5&&!memcmp(data,"thr ",4)&&data[4]>='0'&&data[4]<='9')
+        value=tiku_c6_threads_test_observe(data[4]-'0');
+#endif
 #if TIKU_C6_FIRMWARE
     else if(equal(data,length,"memtest"))value=memory_ok;
     else if(equal(data,length,"memsize"))value=C6_ARENA_BYTES;
@@ -241,6 +254,9 @@ uint32_t native_main(uint32_t *report)
     tiku_console_set_wire(tiku_c6_console_io());tiku_console_set_text_sink(text_receive,NULL);
     if(native_hardware_start())return 0;
     __asm__ volatile("csrsi mstatus,8":::"memory");
+#if TIKU_C6_THREAD_TEST
+    tiku_c6_threads_test_run();
+#endif
     for(;;){
         uint64_t epoch=tiku_c6_sdio_epoch();
         tiku_watchdog_kick();tiku_link_pump(diagnostic);tiku_console_pump();
@@ -257,6 +273,12 @@ uint32_t native_main(uint32_t *report)
         uint32_t cycle=native_cycles();
         (void)tiku_sched_run_once();
         work_cycles+=(uint32_t)(native_cycles()-cycle);
+#if TIKU_THREADS_ENABLE
+        tiku_atomic_enter();
+        if(!tiku_sched_has_pending()&&!tiku_ipc_pending()&&tiku_thread_worker_ready())
+            tiku_thread_kernel_block();
+        tiku_atomic_exit();
+#endif
         if(epoch_ack&&bus.active&&host_epoch==tiku_c6_sdio_epoch()){
             tiku_ipc_status_t status;
             if(!tiku_ipc_status(2,&status)&&status.open&&!tiku_link_send(diagnostic,"IPCE",4))

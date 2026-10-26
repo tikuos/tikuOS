@@ -40,7 +40,11 @@ SECTIONS {
         __tier_sram_end = .;
     } > NATIVE
     .workers (NOLOAD) : {
-        __worker_reserve_start = .; . += 32768; __worker_reserve_end = .;
+        __worker_reserve_start = .;
+        *(.c6.worker_stacks)
+        __worker_stacks_end = .;
+        . = __worker_reserve_start+32768;
+        __worker_reserve_end = .;
     } > NATIVE
     .radio (NOLOAD) : {
         __radio_reserve_start = .; . += 65536; __radio_reserve_end = .;
@@ -58,6 +62,7 @@ SECTIONS {
     __c6_firmware_build = @BUILD@;
     __c6_tier_floor = @TIER_FLOOR@;
     ASSERT(__tier_sram_end-__tier_sram_start >= __c6_tier_floor, "C6 SRAM tier below declared floor")
+    ASSERT(__worker_stacks_end-__worker_reserve_start <= 32768, "C6 worker stacks exceed reservation")
     ASSERT(__native_stack_top == 0x4086d000, "C6 cold-entry stack overlap")
     ASSERT(__native_image_end-__native_image_start <= 131072, "C6 initialized image exceeds budget")
     ASSERT(__native_arena_end <= 0x4086e000, "C6 bootloader SRAM overlap")

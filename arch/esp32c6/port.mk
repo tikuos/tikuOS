@@ -8,6 +8,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 C6_PROFILE ?= resident
+TIKU_THREADS_ENABLE ?= $(if $(filter firmware,$(C6_PROFILE)),1,0)
 BOARD ?= firebeetle2_esp32p4_c6
 ifeq ($(filter $(C6_PROFILE),resident cold firmware),)
 $(error ESP32-C6 supports C6_PROFILE=resident, cold or firmware)
@@ -19,6 +20,7 @@ ROOT := $(CURDIR)
 BUILD_DIR ?= build/esp32c6/$(C6_PROFILE)
 C6_RAM_BASE ?= 0x4080a000
 C6_BUILD ?= 1
+C6_THREAD_TEST ?= 0
 C6_PYTHON ?= python3
 C6_BANK ?= 0
 C6_UPDATE_LOG_DIR ?= $(BUILD_DIR)/update-$(shell date +%Y%m%dT%H%M%S)
@@ -29,7 +31,7 @@ OBJCOPY := $(TOOLCHAIN_DIR)/bin/$(TOOLCHAIN_PREFIX)objcopy
 SIZE := $(TOOLCHAIN_DIR)/bin/$(TOOLCHAIN_PREFIX)size
 CFLAGS := -march=rv32imac_zicsr_zifencei -mabi=ilp32 -Os -g -Wall -Wextra -Werror \
  -ffreestanding -fno-builtin -fno-pic -ffunction-sections -fdata-sections \
- -DTIKU_CLOCK_ARCH_SECOND=128UL -DTIKU_LC_PERSISTENT=0 -DTIKU_THREADS_ENABLE=0 \
+ -DTIKU_CLOCK_ARCH_SECOND=128UL -DTIKU_LC_PERSISTENT=0 -DTIKU_THREADS_ENABLE=$(TIKU_THREADS_ENABLE) \
  -include $(ROOT)/arch/esp32c6/include/tiku.h -DTIKU_C6_BUILD=$(C6_BUILD) -I$(ROOT)/arch/esp32c6/include -I$(ROOT)
 CFLAGS += $(EXTRA_CFLAGS)
 C6_SRCS := arch/esp32c6/tiku_native_arch.c arch/esp32c6/tiku_runtime_arch.c \
@@ -45,6 +47,21 @@ C6_SRCS := arch/esp32c6/tiku_native_arch.c arch/esp32c6/tiku_runtime_arch.c \
  services/ipc/tiku_ipc_wire.c services/ipc/tiku_ipc_bus.c \
  hal/tiku_ipc_packet_hal.c services/link/tiku_link.c services/console/tiku_console.c
 C6_ASMS := arch/esp32c6/tiku_crt_early.S arch/esp32c6/tiku_irq_probe.S
+ifeq ($(TIKU_THREADS_ENABLE),1)
+ifneq ($(C6_PROFILE),firmware)
+$(error C6 workers require C6_PROFILE=firmware)
+endif
+C6_SRCS += arch/esp32c6/tiku_thread_arch.c kernel/threads/tiku_thread.c
+CFLAGS += -Wno-missing-field-initializers
+endif
+ifeq ($(C6_THREAD_TEST),1)
+ifneq ($(TIKU_THREADS_ENABLE),1)
+$(error C6_THREAD_TEST requires TIKU_THREADS_ENABLE=1)
+endif
+CFLAGS += -DTIKU_C6_THREAD_TEST=1
+C6_SRCS += TikuBench/tests/esp32c6/test_threads.c
+C6_TEST_ASMS := TikuBench/tests/esp32c6/test_thread_regs.S
+endif
 ifneq ($(filter $(C6_PROFILE),cold firmware),)
 ifneq ($(C6_RAM_BASE),0x4080a000)
 $(error The C6 cold profile requires C6_RAM_BASE=0x4080a000)
@@ -55,13 +72,13 @@ C6_ASMS := arch/esp32c6/tiku_cold_entry.S arch/esp32c6/tiku_irq_probe.S
 CFLAGS += -DC6_SDK_ENTRY=$(C6_SDK_ENTRY) -Wl,--wrap=native_main,--wrap=tiku_c6_qualify,--entry=c6_cold_entry
 endif
 ifeq ($(C6_PROFILE),firmware)
-ifneq ($(filter 1,$(TIKU_SHELL_ENABLE) $(TIKU_SHELL_BASIC_ENABLE) $(TIKU_THREADS_ENABLE)),)
-$(error C6_PROFILE=firmware provides the core; shell, BASIC and workers require their ports)
+ifneq ($(filter 1,$(TIKU_SHELL_ENABLE) $(TIKU_SHELL_BASIC_ENABLE)),)
+$(error C6_PROFILE=firmware provides the core; shell and BASIC require their ports)
 endif
 C6_TIER_MIN ?= 196608
 CFLAGS += -DTIKU_C6_FIRMWARE=1 -DTIKU_C6_TIER_FLOOR=$(C6_TIER_MIN)
 endif
-C6_OBJS := $(addprefix $(BUILD_DIR)/,$(C6_SRCS:.c=.o) $(C6_ASMS:.S=.o))
+C6_OBJS := $(addprefix $(BUILD_DIR)/,$(C6_SRCS:.c=.o) $(C6_ASMS:.S=.o) $(C6_TEST_ASMS:.S=.o))
 .PHONY: all clean flash FORCE
 FORCE:
 $(BUILD_DIR)/.flags: FORCE

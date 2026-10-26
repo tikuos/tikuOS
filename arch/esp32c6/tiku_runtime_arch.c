@@ -13,6 +13,7 @@
 #include <stddef.h>
 #include <kernel/process/tiku_process.h>
 #include <kernel/timers/tiku_timer.h>
+#include <hal/tiku_cpu.h>
 
 volatile uint8_t tiku_crit_held;
 uint32_t native_saved_context;
@@ -29,6 +30,10 @@ void tiku_atomic_exit(void)
 {
     if(atomic_depth && !--atomic_depth){native_irq_restore(atomic_state);}
 }
+/** @brief Wait for a pending interrupt with the caller's machine interrupt mask. */
+static void idle_wait(void){__asm__ volatile("wfi":::"memory");}
+tiku_cpu_idle_enter_t tiku_cpu_idle_hook(tiku_cpu_idle_mode_t mode)
+{return mode==TIKU_CPU_IDLE_LIGHT?idle_wait:NULL;}
 void tiku_vfs_unwatch_all(struct tiku_process *process)
 {
     /* This profile creates no VFS nodes or watches. */

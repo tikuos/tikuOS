@@ -49,6 +49,16 @@ c6_native_entry:
     addi t0,t0,4
     j 1b
 2:
+#if TIKU_THREADS_ENABLE
+    la t0,__worker_reserve_start
+    la t1,__worker_stacks_end
+7:
+    bgeu t0,t1,8f
+    sw zero,0(t0)
+    addi t0,t0,4
+    j 7b
+8:
+#endif
     la t0,__native_irq_bottom
     la t1,__native_irq_top
     li t2,0xa5a5a5a5
