@@ -20,6 +20,9 @@ its stderr.
 
 ## What the library sees
 
+- Identity: `serverInfo.name` is `/sys/device/name`, read again before
+  each request, so a renamed board is renamed at once; `title` is
+  "tikuOS on <device>"; `version` is `TIKU_VERSION`.
 - Resources: `tiku://shell/commands` (the command table, one `name  help`
   line each), every readable file of `/sys/vfs/manifest` as
   `tiku:///<path>` with the manifest's meta column as its description,
@@ -35,11 +38,27 @@ its stderr.
   command, `watch`, `basic`, `ping`, `ntp`, `dns`, `mqtt`, `slip` or
   `telnet`, is refused).  The capture backend carries `TIKU_VFS_CAP_ALL`:
   the console is the owner's cable.
+- Prompts: each `/data/prompt.<name>` file is the prompt `<name>`.  Its
+  first line is the description, its `{{argument}}` places are its
+  required arguments (`tinymcp_placeholders()`), and `prompts/get`
+  returns the whole file with the arguments filled in
+  (`tinymcp_render()`).  A file is read through `tiku_vfs_read_at()` up to
+  `TIKU_MCP_SCRATCH` less one byte; one page of `prompts/list` holds up to
+  `TIKU_MCP_PROMPTS_MAX` (16) prompts.
+- Completion: the argument `path` of either node template, or of any
+  prompt, completes against the namespace: the value up to its last slash
+  names a directory, the rest is a prefix of a child's name, and a
+  directory's completion ends in a slash.  A template's path has no
+  leading slash; a prompt's may.
 - Watches: `tiku_vfs_watch()` under the `tinymcp` process, up to
   `TIKU_MCP_WATCH_MAX` (8) across streams, each a (stream, slot) the
-  library named; `TIKU_EVENT_VFS` becomes `tinymcp_updated()`.  A
-  `/data` change is not observable this way: the directory is not a
-  FILE node.
+  library named; `TIKU_EVENT_VFS` becomes `tinymcp_updated()`.  The
+  process also watches `/data`, from its first run, after the boot has
+  assembled the tree: a write or a delete there is hashed against the
+  names and the prompt files it saw last, and a change in the names sends
+  `tinymcp_listchanged()`, a change in the prompts
+  `tinymcp_prompts_changed()`.  That watch holds one of the kernel's
+  `TIKU_VFS_WATCH_MAX` slots for the boot.
 
 ## Execution
 
@@ -63,6 +82,8 @@ of code, the library 11.0 KB, 13.3 KB of SRAM in all.
 ## Proof
 
 `tinymcp/tests/board_smoke.py <port>` drives a board through the bridge
-with the official `mcp` SDK client in both eras: discover, list, read,
-write the LED, subscribe and see the change, a shell line, a refused mode
-command, and the error codes.
+with the official `mcp` SDK client in both eras: discover and the board's
+identity, list, read, write the LED, subscribe and see the change, a shell
+line, a refused mode command, a prompt written to `/data` got and heard
+going, path completion, and the error codes.  TikuBench's `tinymcp` suite
+runs it.

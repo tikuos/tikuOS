@@ -88,6 +88,7 @@ tiku_mcp_console_pump(void)
 
         queue_head = (uint8_t)((queue_head + 1u) % QUEUE);
         queue_count--;
+        tiku_mcp_identity();
         tinymcp_handle(&stream, queue[slot], queue_len[slot]);
     }
 }

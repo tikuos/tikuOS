@@ -38,6 +38,8 @@
 #define TIKU_MCP_SUBS 4u       /**< subscription slots per stream */
 #endif
 #define TIKU_MCP_WATCH_MAX 8u  /**< watches across every stream */
+#define TIKU_MCP_PROMPTS_MAX 16u /**< prompt files in one page of prompts/list */
+#define TIKU_MCP_NAME_MAX 32u  /**< a /data file name, with its terminator */
 
 #define TIKU_MCP_CHANNEL 0xF3u /**< the console channel marker */
 
@@ -63,6 +65,9 @@ void tiku_mcp_init(void);
 
 /** @brief The counters and state. */
 void tiku_mcp_status(tiku_mcp_status_t *out);
+
+/** @brief Read /sys/device/name again as the server's name. */
+void tiku_mcp_identity(void);
 
 /** @brief The console transport: its stream, registration and pump. */
 void       tiku_mcp_console_init(void);

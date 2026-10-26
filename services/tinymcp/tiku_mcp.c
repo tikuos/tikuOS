@@ -6,8 +6,9 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mcp.c - the host table: the namespace as resources and the read,
- * write, ls and shell tools; the process that turns watches into updates.
+ * tiku_mcp.c - the host table: the namespace as resources, the read, write,
+ * ls and shell tools, /data/prompt.* as prompts, path completion; the
+ * process that turns watches into updates.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -32,7 +33,19 @@
 static char scratch[TIKU_MCP_SCRATCH];
 
 /* The server's instructions, filled at init with the board's name. */
-static char instructions[400];
+static char instructions[480];
+
+/* serverInfo: /sys/device/name, read again before each request, and the
+ * device model. */
+static char board_name[40];
+static char board_title[48];
+
+/* Prompt files taken from one /data listing, read after it ends. */
+static char prompt_names[TIKU_MCP_PROMPTS_MAX][TIKU_MCP_NAME_MAX];
+
+/* /data, watched for the resource and prompt lists, and what each held. */
+static const tiku_vfs_node_t *data_dir;
+static uint32_t data_names_hash, prompts_hash;
 
 /* Where the shell tool's captured output goes while a command runs. */
 static tinymcp_sink_t *capture;
@@ -54,6 +67,8 @@ TIKU_PROCESS(tiku_mcp_process, "tinymcp");
 #define URI_ROOT_LEN  7u
 #define URI_COMMANDS  "tiku://shell/commands"
 #define DATA_CURSOR   0x40000000u          /* cursors from here index /data */
+#define PROMPT_PREFIX "prompt."            /* /data/prompt.<name> is a prompt */
+#define PROMPT_PREFIX_LEN 7u
 
 /*---------------------------------------------------------------------------*/
 /* TEXT                                                                      */
@@ -337,6 +352,238 @@ read_resource(void *ctx, const char *uri, unsigned line, unsigned bytes,
 }
 
 /*---------------------------------------------------------------------------*/
+/* PROMPTS                                                                   */
+/*---------------------------------------------------------------------------*/
+
+/** @brief The prompt's name when @p file is a prompt file, else NULL. */
+static const char *
+prompt_of(const char *file)
+{
+    if (strncmp(file, PROMPT_PREFIX, PROMPT_PREFIX_LEN) != 0 ||
+        file[PROMPT_PREFIX_LEN] == 0) {
+        return (const char *)0;
+    }
+    return file + PROMPT_PREFIX_LEN;
+}
+
+/**
+ * @brief Read /data/prompt.<name> into the scratch, terminated.
+ * @return Its length, at most the scratch less one, or -1
+ */
+static int
+prompt_text(const char *name)
+{
+    char path[TIKU_VFS_PATH_MAX];
+    uint32_t total;
+    int n;
+
+    if (strchr(name, '/') != (char *)0 ||
+        snprintf(path, sizeof path, "/data/" PROMPT_PREFIX "%s", name) >=
+            (int)sizeof path) {
+        return -1;
+    }
+    n = tiku_vfs_read_at(path, 0u, scratch, sizeof scratch - 1u, &total);
+    if (n < 0) {
+        return -1;
+    }
+    scratch[n] = 0;
+    return n;
+}
+
+typedef struct {
+    unsigned skip;      /* prompt files passed over before the first kept */
+    unsigned seen;      /* prompt files listed */
+    unsigned kept;      /* names in prompt_names */
+    uint32_t names;     /* FNV-1a of every /data name */
+} prompt_scan_t;
+
+/** @brief FNV-1a of @p n bytes into @p h. */
+static uint32_t
+fnv(uint32_t h, const char *p, size_t n)
+{
+    size_t i;
+
+    for (i = 0; i < n; i++) {
+        h = (h ^ (uint8_t)p[i]) * 16777619u;
+    }
+    return h;
+}
+
+/** @brief One /data child: hash its name; keep it when it is a prompt. */
+static void
+prompt_scan_entry(const tiku_vfs_node_t *node, void *ctx)
+{
+    prompt_scan_t *ps = ctx;
+
+    ps->names = fnv(ps->names, node->name, strlen(node->name) + 1u);
+    if (node->type != TIKU_VFS_FILE || prompt_of(node->name) == (char *)0 ||
+        strlen(node->name) >= TIKU_MCP_NAME_MAX) {
+        return;
+    }
+    if (ps->seen++ < ps->skip || ps->kept == TIKU_MCP_PROMPTS_MAX) {
+        return;
+    }
+    (void)strcpy(prompt_names[ps->kept++], node->name);
+}
+
+/** @brief The /data listing into @p ps, prompts from the @p skip-th on. */
+static void
+prompt_scan(prompt_scan_t *ps, unsigned skip)
+{
+    ps->skip = skip;
+    ps->seen = 0u;
+    ps->kept = 0u;
+    ps->names = 2166136261u;
+    (void)tiku_vfs_list("/data", prompt_scan_entry, ps);
+}
+
+/**
+ * @brief The prompts from @p cursor on: each prompt file, its first line
+ *        the description, its {{placeholders}} its required arguments.
+ */
+static int
+list_prompts(void *ctx, unsigned cursor, tinymcp_list_t *list)
+{
+    static char ph[TINYMCP_ARGS_MAX][TINYMCP_PNAME_MAX];
+    static tinymcp_prompt_arg_t args[TINYMCP_ARGS_MAX];
+    char desc[96];
+    prompt_scan_t ps;
+    unsigned i, j, nargs;
+    int n;
+
+    (void)ctx;
+    prompt_scan(&ps, cursor);
+    for (i = 0; i < ps.kept; i++) {
+        const char *name = prompt_of(prompt_names[i]);
+
+        n = prompt_text(name);
+        if (n < 0) {
+            continue;
+        }
+        (void)snprintf(desc, sizeof desc, "%.*s",
+                       (int)strcspn(scratch, "\r\n"), scratch);
+        nargs = tinymcp_placeholders(scratch, (size_t)n, ph, TINYMCP_ARGS_MAX);
+        for (j = 0; j < nargs; j++) {
+            args[j].name = ph[j];
+            args[j].description = (const char *)0;
+            args[j].required = 1u;
+        }
+        if (tinymcp_prompt_add(list, name, desc[0] ? desc : (const char *)0,
+                               args, nargs) != 0) {
+            return (cursor + i) != 0u ? (int)(cursor + i) : TINYMCP_EFULL;
+        }
+    }
+    /* Prompt files past the names kept start the next page. */
+    return ps.seen > cursor + ps.kept ? (int)(cursor + ps.kept) : 0;
+}
+
+static int
+get_prompt(void *ctx, const char *name, const tinymcp_args_t *args,
+           tinymcp_sink_t *text)
+{
+    int n;
+
+    (void)ctx;
+    n = prompt_text(name);
+    if (n < 0) {
+        return TINYMCP_ENOENT;
+    }
+    return tinymcp_render(text, scratch, (size_t)n, args);
+}
+
+/*---------------------------------------------------------------------------*/
+/* COMPLETION                                                                */
+/*---------------------------------------------------------------------------*/
+
+typedef struct {
+    tinymcp_completion_t *c;
+    const char           *dir;      /* the value up to its last slash */
+    size_t                dir_len;
+    const char           *prefix;   /* the last component typed so far */
+    size_t                prefix_len;
+} path_complete_t;
+
+/** @brief A child whose name starts with the prefix, as a whole value. */
+static void
+path_entry(const tiku_vfs_node_t *node, void *ctx)
+{
+    path_complete_t *pc = ctx;
+    char value[TIKU_VFS_PATH_MAX + 1];
+    size_t n = strlen(node->name);
+    int dir = node->type == TIKU_VFS_DIR && n > 0u && node->name[n - 1u] != '/';
+
+    if (strncmp(node->name, pc->prefix, pc->prefix_len) != 0 ||
+        pc->dir_len + n + 2u > sizeof value) {
+        return;
+    }
+    memcpy(value, pc->dir, pc->dir_len);
+    memcpy(value + pc->dir_len, node->name, n);
+    value[pc->dir_len + n] = '/';
+    value[pc->dir_len + n + (dir ? 1u : 0u)] = 0;
+    (void)tinymcp_complete_add(pc->c, value);
+}
+
+/**
+ * @brief The children of the directory @p value names, whose names start
+ *        with its last component; a value without a leading slash is a
+ *        template's path and its completions have none either.
+ */
+static void
+complete_path(const char *value, tinymcp_completion_t *c)
+{
+    char dir[TIKU_VFS_PATH_MAX];
+    const char *slash = strrchr(value, '/');
+    path_complete_t pc;
+    size_t dl;
+
+    pc.c = c;
+    pc.dir = value;
+    pc.dir_len = slash ? (size_t)(slash - value) + 1u : 0u;
+    pc.prefix = value + pc.dir_len;
+    pc.prefix_len = strlen(pc.prefix);
+    dl = pc.dir_len;
+    if (value[0] == '/') {
+        if (dl >= sizeof dir) {
+            return;
+        }
+        memcpy(dir, value, dl);
+    } else {
+        if (dl + 1u >= sizeof dir) {
+            return;
+        }
+        dir[0] = '/';
+        memcpy(dir + 1, value, dl);
+        dl++;
+    }
+    if (dl > 1u) {
+        dl--;                          /* the directory without its slash */
+    }
+    dir[dl] = 0;
+    (void)tiku_vfs_list(dir, path_entry, &pc);
+}
+
+static int
+complete(void *ctx, int is_prompt, const char *ref, const char *arg,
+         const char *value, const tinymcp_args_t *context,
+         tinymcp_completion_t *c)
+{
+    (void)ctx;
+    (void)context;
+    if (is_prompt) {
+        if (prompt_text(ref) < 0) {
+            return TINYMCP_ENOENT;
+        }
+    } else if (strcmp(ref, URI_ROOT "/{+path}") != 0 &&
+               strcmp(ref, URI_ROOT "/{+path}{?line,bytes}") != 0) {
+        return TINYMCP_ENOENT;
+    }
+    if (strcmp(arg, "path") == 0) {
+        complete_path(value, c);
+    }
+    return TINYMCP_OK;
+}
+
+/*---------------------------------------------------------------------------*/
 /* TOOLS                                                                     */
 /*---------------------------------------------------------------------------*/
 
@@ -567,16 +814,72 @@ unwatch(void *ctx, unsigned slot)
     }
 }
 
-/** @brief A changed node to every stream and slot that watches it. */
+/**
+ * @brief Hash /data's names into @p names and its prompt files' names and
+ *        text into @p prompts.
+ */
+static void
+data_hashes(uint32_t *names, uint32_t *prompts)
+{
+    prompt_scan_t ps;
+    uint32_t h = 2166136261u;
+    unsigned i;
+    int n;
+
+    prompt_scan(&ps, 0u);
+    for (i = 0; i < ps.kept; i++) {
+        h = fnv(h, prompt_names[i], strlen(prompt_names[i]) + 1u);
+        n = prompt_text(prompt_of(prompt_names[i]));
+        if (n > 0) {
+            h = fnv(h, scratch, (size_t)n);
+        }
+    }
+    *names = ps.names;
+    *prompts = fnv(h, (const char *)&ps.seen, sizeof ps.seen);
+}
+
+/** @brief /data changed: tell the streams which lists did. */
+static void
+data_changed(void)
+{
+    uint32_t names, prompts;
+
+    data_hashes(&names, &prompts);
+    if (names != data_names_hash) {
+        tinymcp_listchanged(tiku_mcp_console_stream());
+    }
+    if (prompts != prompts_hash) {
+        tinymcp_prompts_changed(tiku_mcp_console_stream());
+    }
+    data_names_hash = names;
+    prompts_hash = prompts;
+}
+
+/**
+ * @brief A changed node to every stream and slot that watches it.
+ *
+ * The first run, the INIT event, comes after the boot has assembled the
+ * tree, so /data is watched from here.
+ */
 TIKU_PROCESS_THREAD(tiku_mcp_process, ev, data)
 {
     TIKU_PROCESS_BEGIN();
+    data_dir = tiku_vfs_resolve("/data");
+    if (data_dir != (const tiku_vfs_node_t *)0 &&
+        tiku_vfs_watch("/data", &tiku_mcp_process) >= 0) {
+        data_hashes(&data_names_hash, &prompts_hash);
+    } else {
+        data_dir = (const tiku_vfs_node_t *)0;
+    }
     for (;;) {
         TIKU_PROCESS_WAIT_EVENT();
         if (ev == TIKU_EVENT_VFS) {
             const tiku_vfs_node_t *changed = tiku_event_node(ev, data);
             unsigned i;
 
+            if (changed == data_dir && data_dir != (const tiku_vfs_node_t *)0) {
+                data_changed();
+            }
             for (i = 0; i < TIKU_MCP_WATCH_MAX; i++) {
                 if (watches[i].used && watches[i].node == changed) {
                     tinymcp_updated(watches[i].stream, watches[i].slot);
@@ -601,15 +904,31 @@ send(void *ctx, const char *msg, size_t len)
 }
 
 const tinymcp_host_t tiku_mcp_host = {
-    "tinymcp", TINYMCP_VERSION, instructions,
+    board_name, TIKU_VERSION, instructions,
     tools, sizeof tools / sizeof tools[0],
     templates, sizeof templates / sizeof templates[0],
-    list_resources, read_resource, call_tool, watch, unwatch, send
+    list_resources, read_resource, call_tool, watch, unwatch, send,
+    board_title, list_prompts, get_prompt, complete
 };
+
+void
+tiku_mcp_identity(void)
+{
+    int n = tiku_vfs_read("/sys/device/name", board_name, sizeof board_name);
+
+    while (n > 0 && (board_name[n - 1] == '\n' || board_name[n - 1] == '\r')) {
+        board_name[--n] = 0;
+    }
+    if (n <= 0) {
+        (void)strcpy(board_name, "tiku");
+    }
+}
 
 void
 tiku_mcp_init(void)
 {
+    (void)snprintf(board_title, sizeof board_title, "tikuOS on %s",
+                   TIKU_DEVICE_NAME);
     (void)snprintf(instructions, sizeof instructions,
                    "tikuOS on %s.  The namespace is the API: a resource "
                    "tiku:///<path> is a node of the board, read as text; "
@@ -617,7 +936,9 @@ tiku_mcp_init(void)
                    "pages a long node (line, bytes); write changes a node or "
                    "a /data file; ls lists a directory; shell runs one "
                    "command line, and tiku://shell/commands is its "
-                   "vocabulary.", TIKU_DEVICE_NAME);
+                   "vocabulary.  The owner's prompts are the files "
+                   "/data/prompt.<name>; paths complete.", TIKU_DEVICE_NAME);
+    (void)strcpy(board_name, "tiku");
     tiku_mcp_console_init();
     tiku_process_start(&tiku_mcp_process, (tiku_event_data_t)0);
 }
