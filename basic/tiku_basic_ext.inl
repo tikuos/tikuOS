@@ -201,6 +201,70 @@ tiku_basic_ext_print(const char *s)
     }
 }
 
+static int basic_wait_can_yield(void);   /* tiku_basic_stmt.inl */
+
+int
+tiku_basic_ext_wait(int (*ready)(void *ctx), void *ctx, unsigned long seconds)
+{
+    unsigned long chunk;
+
+    if (ready == NULL || !basic_wait_can_yield()) {
+        return -1;
+    }
+    if (seconds > 86400ul) {
+        seconds = 86400ul;               /* the 24 h bound SLEEP keeps */
+    }
+    chunk = (seconds > 10ul) ? 10ul : seconds;
+    basic_wait_ready     = ready;
+    basic_wait_ready_ctx = ctx;
+    basic_wait_unbounded = (seconds == 0ul) ? 1u : 0u;
+    basic_wait_rerun     = 1u;
+    basic_wait_start     = tiku_clock_time();
+    basic_wait_ticks     =
+        (tiku_clock_time_t)((tiku_clock_time_t)chunk * TIKU_CLOCK_SECOND);
+    basic_wait_sleep_s   = (long)(seconds - chunk);
+    basic_wait_pending   = 1u;
+    return 0;
+}
+
+int
+tiku_basic_ext_waited(void)
+{
+    return basic_wait_outcome;
+}
+
+int
+tiku_basic_ext_let_str(const char **p, const char *s)
+{
+    int  idx;
+    int  is_string = 0;
+    long v;
+    const char *q;
+
+    if (!parse_var_full(p, &idx, &is_string)) {
+        if (!basic_error) {
+            basic_throw(TIKU_BASIC_ERR_SYNTAX, "variable expected");
+        }
+        return -1;
+    }
+#if TIKU_BASIC_STRVARS_ENABLE
+    if (is_string) {
+        basic_strvars[idx] = basic_str_alloc(s, strlen(s));
+        if (basic_strvars[idx] == NULL) {
+            basic_throw(TIKU_BASIC_ERR_NOMEM, "out of string heap");
+            return -1;
+        }
+        return 0;
+    }
+#endif
+    (void)is_string;
+    q = s;
+    v = (*q != '\0') ? parse_expr(&q) : 0;
+    if (basic_error) return -1;
+    basic_vars[idx] = v;
+    return 0;
+}
+
 int
 tiku_basic_ext_expect(const char **p, char ch)
 {

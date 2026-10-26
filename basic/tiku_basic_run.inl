@@ -102,6 +102,9 @@ basic_run_begin(void)
     basic_error       = 0;
     basic_wait_pending = 0;             /* no parked wait from a prior run */
     basic_wait_sleep_s = 0;
+    basic_wait_ready   = NULL;
+    basic_wait_rerun   = 0;
+    basic_wait_outcome = 0;
     basic_stmt_depth   = 0;
     basic_in_reactive  = 0;
     gosub_sp          = 0;
@@ -154,17 +157,24 @@ basic_run_step(void)
     if (basic_error)    return BASIC_STEP_BROKEN;
 
     if (basic_wait_pending) {
-        /* Parked on a yielding DELAY / SLEEP.  Stay parked until the
-         * deadline (Ctrl-C arrives via the mode feed path); then either
-         * re-arm the next SLEEP chunk or resume the interrupted line's
-         * remainder.  Reactive polls stay suppressed while parked, as in
-         * the blocking wait; pending ON CHANGE marks fire at the first
-         * statement boundary after the resume. */
-        if ((tiku_clock_time_t)(tiku_clock_time() - basic_wait_start) <
+        /* Parked on a yielding DELAY / SLEEP, or an extension's wait.  Stay
+         * parked until the deadline or, for an extension, its ready
+         * (Ctrl-C arrives via the mode feed path); then either re-arm the
+         * next chunk or resume the interrupted line.  Reactive polls stay
+         * suppressed while parked, as in the blocking wait; pending ON
+         * CHANGE marks fire at the first statement boundary after the
+         * resume. */
+        int ready = basic_wait_ready != NULL &&
+                    basic_wait_ready(basic_wait_ready_ctx) != 0;
+
+        if (!ready && basic_wait_ready != NULL && basic_wait_unbounded) {
+            return BASIC_STEP_RUNNING;
+        }
+        if (!ready && (tiku_clock_time_t)(tiku_clock_time() - basic_wait_start) <
             basic_wait_ticks) {
             return BASIC_STEP_RUNNING;
         }
-        if (basic_wait_sleep_s > 0) {
+        if (!ready && basic_wait_sleep_s > 0) {
             long chunk = (basic_wait_sleep_s > 10L) ? 10L
                                                     : basic_wait_sleep_s;
             (void)basic_ticks();     /* keep the EVERY clock within a wrap */
@@ -174,6 +184,11 @@ basic_run_step(void)
                 ((tiku_clock_time_t)chunk * TIKU_CLOCK_SECOND);
             return BASIC_STEP_RUNNING;
         }
+        if (basic_wait_ready != NULL) {
+            basic_wait_outcome = ready ? BASIC_WAITED_READY : BASIC_WAITED_LATE;
+            basic_wait_ready = NULL;
+        }
+        basic_wait_sleep_s = 0;
         basic_wait_pending = 0;
         idx = prog_find_exact(basic_wait_line);
         if (idx < 0) {
@@ -292,6 +307,9 @@ basic_run_end(void)
     basic_running      = 0;
     basic_wait_pending = 0;      /* a Ctrl-C break may land mid-park */
     basic_wait_sleep_s = 0;
+    basic_wait_ready   = NULL;
+    basic_wait_rerun   = 0;
+    basic_wait_outcome = 0;
 }
 
 /**
@@ -321,6 +339,9 @@ basic_run_resume(void)
     basic_wait_pending = 0;      /* waits are not checkpointed: a power cut
                                   * mid-park replays the line from its start */
     basic_wait_sleep_s = 0;
+    basic_wait_ready   = NULL;
+    basic_wait_rerun   = 0;
+    basic_wait_outcome = 0;
     basic_stmt_depth   = 0;
     basic_in_reactive  = 0;
     basic_debug_begin();         /* the debugger watches a resumed run too */

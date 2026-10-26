@@ -58,6 +58,13 @@ ESP32-C61, SRAM on RP2350 (the refuse-NVM-arena guard keeps it off flash).
   through `tiku_basic_vfs_get()` (`kernel/vfs/AGENTS.md`).
 - A builtin that blocks must kick the hang watchdog's pump; long crypto
   runs on the worker thread where the part has one.
+- An extension statement that waits for something outside the program
+  parks the run with `tiku_basic_ext_wait()` instead of spinning: the RUN
+  loop calls its ready function each step until it returns nonzero or the
+  deadline passes, then runs the statement again from its start, and
+  `tiku_basic_ext_waited()` says why.  Only a statement on the main line of
+  a RUN parks; inside an IF-THEN, an EVERY body or at the prompt the call
+  returns -1.  tinymcp's `ASK` is the model (`services/tinymcp/`).
 
 ## Native modules
 

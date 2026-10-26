@@ -541,9 +541,9 @@ exec_stmt(const char **p)
 /**
  * @brief Execute a colon-separated list of statements in turn.
  *
- * Stops at end of line, on an error, when a statement set the PC (GOTO,
- * GOSUB, RETURN, a NEXT jump, a bare-line IF), when END/STOP ends a RUN, or
- * when DELAY/SLEEP parks the machine.  @p p is left where the walk stopped.
+ * Stops at end of line, on an error, when a statement set the PC, when
+ * END/STOP ends a RUN, or when a wait parks the machine.  @p p is left where
+ * the walk stopped: past a DELAY or SLEEP, before an extension's wait.
  *
  * @note basic_running is 1 only inside RUN, so only its 1-to-0 transition
  *       stops the walk; immediate mode runs with it 0 throughout.
@@ -554,14 +554,23 @@ exec_stmts(const char **p)
     int was_running = basic_running;
     basic_stmt_depth++;
     while (1) {
+        const char *stmt;
         skip_ws(p);
         if (cur_peek(p) == '\0') break;
         /* Empty statement (e.g. `A=1 : : B=2`) -- skip the colon. */
         if (cur_peek(p) == ':') { cur_advance(p); continue; }
+        stmt = cur_mark(p);
         exec_stmt(p);
+        basic_wait_outcome = 0;      /* only the re-run statement sees it */
         if (basic_error)   break;
         if (basic_pc_set)  break;
         if (was_running && !basic_running) break;
+        if (basic_wait_pending && basic_wait_rerun) {
+            /* An extension statement waits: it runs again from here. */
+            basic_wait_rerun = 0;
+            cur_rewind(p, stmt);
+            break;
+        }
         if (basic_wait_pending) {
             /* DELAY/SLEEP parked the machine: stop here with *p at the
              * line's unconsumed remainder so the step machine can resume

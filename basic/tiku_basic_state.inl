@@ -301,6 +301,19 @@ static tiku_clock_time_t basic_wait_ticks;
 static uint16_t          basic_wait_line;    /* line to resume             */
 static uint16_t          basic_wait_off;     /* byte offset into its text  */
 static long              basic_wait_sleep_s; /* SLEEP: remaining seconds   */
+
+/* An extension statement's wait (tiku_basic_ext_wait()): the park also ends
+ * when basic_wait_ready returns nonzero, has no deadline when
+ * basic_wait_unbounded is set, and resumes at the parked statement's own
+ * start, so the statement runs again and reads basic_wait_outcome through
+ * tiku_basic_ext_waited(). */
+static int             (*basic_wait_ready)(void *ctx);
+static void              *basic_wait_ready_ctx;
+static uint8_t           basic_wait_unbounded;
+static uint8_t           basic_wait_rerun;
+static uint8_t           basic_wait_outcome; /* BASIC_WAITED_*             */
+#define BASIC_WAITED_READY 1                 /* the wait's ready returned 1 */
+#define BASIC_WAITED_LATE  2                 /* its deadline passed first  */
 static uint8_t           basic_stmt_depth;   /* exec_stmts nesting         */
 static uint8_t           basic_in_reactive;  /* inside basic_poll_reactive */
 

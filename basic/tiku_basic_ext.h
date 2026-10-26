@@ -125,4 +125,41 @@ void tiku_basic_ext_print(const char *s);
  */
 int tiku_basic_ext_expect(const char **p, char ch);
 
+/*---------------------------------------------------------------------------*/
+/* WAITING AND ASSIGNING (kernel services only)                              */
+/*---------------------------------------------------------------------------*/
+
+/* Not part of the native-module ABI: tiku_basic_syscalls_t does not carry
+ * these. */
+
+/**
+ * @brief Park the running program until @p ready returns nonzero or
+ *        @p seconds pass, then run the calling statement again.
+ *
+ * The statement handler returns at once after a 0; on the run again,
+ * tiku_basic_ext_waited() says why it ended.  The shell loop, events and
+ * Ctrl-C keep running while parked; @p ready is called from the RUN loop.
+ *
+ * @param seconds  The deadline; 0 waits for @p ready alone, past 86400 is
+ *                 86400
+ * @return 0 when parked; -1 when nothing could park: a statement nested in
+ *         an IF-THEN, an EVERY body, or one typed outside a RUN
+ */
+int tiku_basic_ext_wait(int (*ready)(void *ctx), void *ctx,
+                        unsigned long seconds);
+
+/**
+ * @brief Why the statement runs again: 0 when it did not wait, 1 when its
+ *        ready returned nonzero, 2 when its deadline passed first.
+ */
+int tiku_basic_ext_waited(void);
+
+/**
+ * @brief Parse a variable at the cursor and set it from @p s: a string
+ *        variable to the text, a numeric one to the expression it spells
+ *        (0 when empty).
+ * @return 0, or -1 after raising an error
+ */
+int tiku_basic_ext_let_str(const char **p, const char *s);
+
 #endif /* TIKU_BASIC_EXT_H_ */
