@@ -19,6 +19,18 @@ int tiku_boot_c6_init(uint16_t endpoint);
 tiku_ipc_sdio_t *tiku_boot_c6_owner(void);
 /** @brief Copy the validated unsolicited loader INFO packet; zero if unavailable. */
 uint16_t tiku_boot_c6_loader_info(void *out,uint16_t capacity);
+/** @brief Copy the last factory packet while its exclusive physical mode is ready. */
+uint16_t tiku_boot_c6_factory_info(void *out,uint16_t capacity);
+/** @brief Byte length of the last completed factory FIFO read. */
+uint16_t tiku_boot_c6_factory_length(void);
+/** @brief Attach to the recovery app started by factory OTA without another peer reset. */
+tiku_ipc_err_t tiku_boot_c6_adopt_loader(void);
+/** @brief Hold factory liveness checks through its bounded delayed peer restart. */
+void tiku_boot_c6_factory_wait_restart(void);
+/** @brief Arm a qualification reset after factory transmit DMA has completed. */
+void tiku_boot_c6_factory_cut(void);
+/** @brief Count factory transfers interrupted by qualification after transmit completion. */
+uint32_t tiku_boot_c6_factory_cuts(void);
 /** @brief Diagnostic corruption of every Nth INPUT packet; zero disables it. */
 void tiku_boot_c6_fault_every(uint32_t interval);
 /** @brief Number of accepted packets corrupted by the current diagnostic profile. */

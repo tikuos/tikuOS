@@ -29,6 +29,7 @@ static uint8_t loader_rx[512] __attribute__((section(".p4.ipc"),aligned(64)));
 static uint8_t bridge_frame[512] __attribute__((section(".p4.ipc"),aligned(64)));
 static uint16_t bridge_length;
 static uint32_t bridge_errors;
+static uint8_t bridge_factory,bridge_cancel;
 /** @brief Run eligible processes while retaining the shell's current binding. */
 static void service(void)
 {
@@ -290,32 +291,64 @@ cleanup:
 static void bridge_receive(void *unused,uint8_t *data,size_t length)
 {
     (void)unused;
-    if(bridge_length||length<32||length>512||
-        !tiku_c6_response(data,(uint16_t)length,data[5],tiku_c6_get32(data+8))||
-        !tiku_c6_get32(data+8)||tiku_c6_get32(data+20)){
+    uint8_t valid=length>=32&&length<=512&&
+        tiku_c6_response(data,(uint16_t)length,data[5],tiku_c6_get32(data+8))&&
+        tiku_c6_get32(data+8)&&!tiku_c6_get32(data+20);
+    if(valid&&bridge_factory&&data[5]==21&&length==32){
+        bridge_cancel=1;(void)tiku_ipc_sdio_mode(tiku_boot_c6_owner(),TIKU_SDIO_FACTORY);return;
+    }
+    if(bridge_length||!valid){
         bridge_errors++;return;
     }
     memset(loader_tx,0,sizeof loader_tx);memcpy(loader_tx,data,length);
     bridge_length=(uint16_t)length;
 }
 /** @brief Forward update jobs through the same owner as native control and bulk. */
-static tiku_ipc_err_t loader_bridge(void)
+static tiku_ipc_err_t loader_bridge(uint8_t factory)
 {
     tiku_ipc_sdio_t *c=tiku_boot_c6_owner();
     tiku_clock_time_t began=tiku_clock_time();
     tiku_ipc_err_t result;uint32_t exchanges=0;uint16_t length;
-    result=tiku_ipc_sdio_mode(c,TIKU_SDIO_LOADER);if(result)return result;
-    result=wait_mode(TIKU_SDIO_LOADER);if(result)return result;
-    bridge_length=0;bridge_errors=0;
+    tiku_sdio_mode_t mode=factory?TIKU_SDIO_FACTORY:TIKU_SDIO_LOADER;
+    result=tiku_ipc_sdio_mode(c,mode);if(result)return result;
+    result=wait_mode(mode);if(result)return result;
+    bridge_length=0;bridge_errors=0;bridge_factory=factory;bridge_cancel=0;
     if(tiku_console_add_channel(0xf5,0xff,0,bridge_receive,NULL,bridge_frame,sizeof bridge_frame))
         return TIKU_IPC_BUSY;
     SHELL_PRINTF("C6 loader bridge ready channel=f5 ticks=%u\n",64u*TIKU_CLOCK_SECOND);
-    length=tiku_boot_c6_loader_info(loader_rx,sizeof loader_rx);
+    if(factory){
+        length=tiku_boot_c6_factory_info(loader_tx,480);
+        if(length){
+            tiku_c6_packet(loader_rx,19,1,0,0,loader_tx,length);
+            tiku_c6_put32(loader_rx+8,0);tiku_c6_put32(loader_rx+28,0);
+            tiku_c6_put32(loader_rx+28,tiku_c6_crc(loader_rx,32u+length,1));length+=32;
+        }
+    }else length=tiku_boot_c6_loader_info(loader_rx,sizeof loader_rx);
     if(!length){tiku_console_remove_channel(0xf5,0xff);return TIKU_IPC_IO;}
     (void)tiku_console_send_frame(0xf5,loader_rx,length,NULL,0);
     while((tiku_clock_time_t)(tiku_clock_time()-began)<64u*TIKU_CLOCK_SECOND){
         tiku_console_pump();service();
+        if(bridge_cancel){result=TIKU_IPC_DOWN;break;}
         if(!bridge_length)continue;
+        if(factory){
+            uint32_t seq=tiku_c6_get32(loader_tx+8);
+            uint32_t bytes=tiku_c6_get32(loader_tx+24);
+            uint32_t cut=tiku_c6_get32(loader_tx+12),before=tiku_boot_c6_factory_cuts();
+            if(loader_tx[5]==20){tiku_boot_c6_factory_wait_restart();result=TIKU_IPC_OK;break;}
+            if(loader_tx[5]!=19||bytes>480){result=TIKU_IPC_INVALID;break;}
+            if(cut)tiku_boot_c6_factory_cut();
+            memmove(loader_tx,loader_tx+32,bytes);if(!bytes)loader_tx[0]=0;
+            result=exchange(TIKU_SDIO_UPDATE,loader_tx,bytes?(uint16_t)bytes:1,loader_rx,512);
+            bridge_length=0;
+            if(cut)SHELL_PRINTF("C6 factory cut=%lu\n",(unsigned long)(tiku_boot_c6_factory_cuts()-before));
+            if(result)break;
+            length=tiku_boot_c6_factory_length();
+            if(length>480){result=TIKU_IPC_IO;break;}
+            memcpy(loader_tx,loader_rx,length);
+            tiku_c6_packet(loader_rx,19,seq,0,0,loader_tx,length);
+            (void)tiku_console_send_frame(0xf5,loader_rx,32u+length,NULL,0);exchanges++;
+            continue;
+        }
         result=exchange(TIKU_SDIO_UPDATE,loader_tx,bridge_length,loader_rx,512);
         bridge_length=0;if(result)break;
         length=(uint16_t)(32u+tiku_c6_get32(loader_rx+24));
@@ -328,6 +361,7 @@ static tiku_ipc_err_t loader_bridge(void)
         }
     }
     tiku_console_remove_channel(0xf5,0xff);
+    bridge_factory=bridge_cancel=0;
     SHELL_PRINTF("C6 loader bridge done result=%d exchanges=%lu rejected=%lu\n",result,
         (unsigned long)exchanges,(unsigned long)bridge_errors);
     return result;
@@ -355,7 +389,7 @@ void tiku_shell_ipc_sdio(uint8_t argc,const char *argv[])
     tiku_ipc_err_t r=TIKU_IPC_INVALID;tiku_p4_sdmmc_status_t status;
     tiku_ipc_sdio_t *c=tiku_boot_c6_owner();
     if(argc<3||argc>4){
-        SHELL_PRINTF("ipc sdio probe|reset|loader|bridge|qualify|stream|image|sensor|slow|corrupt|interrupt|pause|resume\n");
+        SHELL_PRINTF("ipc sdio probe|reset|loader|bridge|factory|attach|qualify|stream|image|sensor|slow|corrupt|interrupt|pause|resume\n");
 #if TIKU_C6_COLD_BOOT_ENABLE
         SHELL_PRINTF("ipc sdio native\n");
 #endif
@@ -372,7 +406,11 @@ void tiku_shell_ipc_sdio(uint8_t argc,const char *argv[])
 #endif
     else if(argc==4&&!strcmp(argv[2],"run")&&strlen(argv[3])==1&&argv[3][0]>='0'&&argv[3][0]<='1')
         r=run_bank((unsigned)(argv[3][0]-'0'));
-    else if(argc==3&&!strcmp(argv[2],"bridge"))r=loader_bridge();
+    else if(argc==3&&!strcmp(argv[2],"bridge"))r=loader_bridge(0);
+    else if(argc==3&&!strcmp(argv[2],"attach")){
+        r=tiku_boot_c6_adopt_loader();if(!r)r=loader_bridge(0);
+    }
+    else if(argc==3&&!strcmp(argv[2],"factory"))r=loader_bridge(1);
     else if(argc==3&&!strcmp(argv[2],"pause"))r=tiku_boot_c6_packet_gate(0);
     else if(argc==3&&!strcmp(argv[2],"resume"))r=tiku_boot_c6_packet_gate(1);
     else if(argc==3&&!strcmp(argv[2],"stream"))r=stream_test();

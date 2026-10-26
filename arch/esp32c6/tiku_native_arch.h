@@ -12,6 +12,7 @@
 #ifndef TIKU_C6_NATIVE_H
 #define TIKU_C6_NATIVE_H
 #include <stdint.h>
+#include "tiku_layout_arch.h"
 #ifndef C6_REG
 #define C6_REG(addr) (*(volatile uint32_t *)(uintptr_t)(addr))
 #endif

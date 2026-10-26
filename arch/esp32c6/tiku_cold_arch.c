@@ -27,7 +27,7 @@ uint32_t __wrap_tiku_c6_qualify(uint32_t *report)
 /** @brief Record startup progress inside the reserved native SRAM arena. */
 static void stage(unsigned value)
 {
-    C6_REG(0x40819f04u)=value;
+    C6_REG(C6_COLD_LOG+4u)=value;
 }
 
 /** @brief Initialize timer/watchdog ownership before entering the native kernel. */
@@ -35,7 +35,7 @@ uint32_t __wrap_native_main(uint32_t *report)
 {
     const uint32_t key=0x50d83aa1u;
     reset_reason=((uint32_t (*)(uint32_t))0x40000018u)(0);
-    C6_REG(0x40819f20u)=reset_reason;
+    C6_REG(C6_COLD_LOG+32u)=reset_reason;
     __asm__ volatile("csrw 0x7e1,zero\n\tcsrw 0x7e2,zero\n\tcsrw 0x7e0,%0\n\tcsrw 0x7e1,%0"::"r"(1u):"memory");
     stage(2);
     dma_security=C6_REG(0x6009800cu);

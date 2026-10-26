@@ -13,8 +13,9 @@
 #define TIKU_SDIO_OWNER_HAL_H_
 #include <hal/tiku_ipc_packet_hal.h>
 #if TIKU_IPC_ENABLE
-/** @brief Wire protocols remain separate across native and resident-loader modes. */
-typedef enum { TIKU_SDIO_OFF, TIKU_SDIO_NATIVE, TIKU_SDIO_LOADER } tiku_sdio_mode_t;
+/** @brief Protocol selection for native, resident-loader and factory exchanges. */
+typedef enum { TIKU_SDIO_OFF, TIKU_SDIO_NATIVE, TIKU_SDIO_LOADER,
+               TIKU_SDIO_FACTORY } tiku_sdio_mode_t;
 typedef enum { TIKU_SDIO_CONTROL, TIKU_SDIO_BULK, TIKU_SDIO_UPDATE } tiku_sdio_class_t;
 /**
  * @brief One driver owns the controller and pins across protocol modes.

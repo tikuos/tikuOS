@@ -59,10 +59,10 @@ def checked(data):
         raise ValueError('C6 image integrity')
     return Application(struct.unpack_from('<I',data,4)[0],segments)
 
-def compose(recovery,native):
+def compose(recovery,native,*,limit=LIMIT,max_native=49152):
     """Append native bytes without relocating recovery flash-mapped segments."""
     image=checked(recovery)
-    if not 256<=len(native)<=49152 or len(native)%4:
+    if not 256<=len(native)<=max_native or len(native)%4:
         raise ValueError('native initialized image bounds')
     if image.entrypoint<0x40800000 or image.entrypoint>=BASE:
         raise ValueError('recovery entry outside preserved SRAM')
@@ -72,7 +72,7 @@ def compose(recovery,native):
     if b'tiku-c6-access-1\0' not in recovery[:512]:
         raise ValueError('recovery application identity')
     for segment in image.segments:
-        if segment.addr< LIMIT and segment.addr+len(segment.data)>BASE:
+        if segment.addr<limit and segment.addr+len(segment.data)>BASE:
             raise ValueError('recovery segment overlaps native arena')
     out=bytearray(recovery[:24]);out[1]+=1
     struct.pack_into('<I',out,4,BASE)

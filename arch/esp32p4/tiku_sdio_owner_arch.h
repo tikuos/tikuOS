@@ -20,10 +20,11 @@ typedef struct {
     uint64_t token, epoch;
     uint32_t consumed, rca, available, sent;
     uint32_t recovery[4]; /**< Request marker, ready marker, credits and offered bytes before reset. */
+    uint32_t factory_cuts;
     uint32_t trace[5]; /**< Native epoch-reply padding sampled before peer reset. */
     tiku_clock_time_t reset_until;
     uint16_t tx_length, rx_length, offset;
-    uint8_t selected, enumeration, phase, kind, resetting, booting, go, identity;
+    uint8_t selected, enumeration, phase, kind, resetting, booting, go, identity, factory, adopt, cut;
 } tiku_p4_sdio_owner_t;
 /** @brief Single hardware SDMMC lease across native, recovery and loader modes. */
 extern const tiku_sdio_owner_ops_t tiku_p4_sdio_owner_ops;

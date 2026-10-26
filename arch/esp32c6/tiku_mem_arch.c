@@ -16,7 +16,7 @@ extern unsigned char __tier_sram_start[],__tier_sram_end[];
 static tiku_mem_region_t region;
 const struct tiku_mem_region *tiku_region_arch_get_table(tiku_mem_arch_size_t *count)
 {
-    region=(tiku_mem_region_t){__native_image_start,65536,TIKU_MEM_REGION_SRAM};
+    region=(tiku_mem_region_t){__native_image_start,C6_ARENA_BYTES,TIKU_MEM_REGION_SRAM};
     *count=1;return &region;
 }
 void tiku_mem_arch_init(void) {}

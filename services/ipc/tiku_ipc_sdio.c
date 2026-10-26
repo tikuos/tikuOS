@@ -49,7 +49,8 @@ tiku_ipc_err_t tiku_ipc_sdio_open(tiku_ipc_sdio_t *c, const tiku_sdio_owner_ops_
     tiku_ipc_err_t result;
     if (!c || c->claimed || !ops || !ops->claim || !ops->release || !ops->start ||
         !ops->poll || !ops->abort || !ops->ready || !ops->reset_to || !ops->negotiate ||
-        !profile || !session || (initial != TIKU_SDIO_NATIVE && initial != TIKU_SDIO_LOADER) ||
+        !profile || !session || (initial != TIKU_SDIO_NATIVE && initial != TIKU_SDIO_LOADER &&
+        initial != TIKU_SDIO_FACTORY) ||
         !interval(profile->burst) || !interval(profile->detect) || !interval(profile->abort) ||
         !interval(profile->boot) || !interval(profile->negotiate)) return TIKU_IPC_INVALID;
     if (c->ops && !tiku_ipc_sdio_reusable(c)) return TIKU_IPC_BUSY;
@@ -166,7 +167,9 @@ void tiku_ipc_sdio_step(tiku_ipc_sdio_t *c)
     }
     {
         unsigned index = UINT8_MAX;
-        if (c->mode == TIKU_SDIO_LOADER) { if (c->jobs[3].state == QUEUED) index = 3; }
+        if (c->mode == TIKU_SDIO_LOADER || c->mode == TIKU_SDIO_FACTORY) {
+            if (c->jobs[3].state == QUEUED) index = 3;
+        }
         else if (c->jobs[0].state == QUEUED) index = 0;
         else for (unsigned n = 0; n < 2; n++) {
             unsigned candidate = 1u+((c->cursor+n)%2u);
@@ -221,7 +224,7 @@ tiku_ipc_err_t tiku_ipc_sdio_submit(tiku_ipc_sdio_t *c, tiku_sdio_class_t kind,
         if (c->mode != TIKU_SDIO_NATIVE) return TIKU_IPC_DOWN;
         first = 1; last = 3;
     } else if (kind == TIKU_SDIO_UPDATE) {
-        if (c->mode != TIKU_SDIO_LOADER) return TIKU_IPC_DOWN;
+        if (c->mode != TIKU_SDIO_LOADER && c->mode != TIKU_SDIO_FACTORY) return TIKU_IPC_DOWN;
         first = 3; last = 4;
     } else return TIKU_IPC_INVALID;
     for (index = first; index < last; index++)
@@ -264,7 +267,7 @@ tiku_ipc_err_t tiku_ipc_sdio_take(tiku_ipc_sdio_t *c, tiku_sdio_job_t job,
 tiku_ipc_err_t tiku_ipc_sdio_mode(tiku_ipc_sdio_t *c, tiku_sdio_mode_t wanted)
 {
     if (!c || !c->claimed || (wanted != TIKU_SDIO_OFF && wanted != TIKU_SDIO_NATIVE &&
-        wanted != TIKU_SDIO_LOADER)) return TIKU_IPC_INVALID;
+        wanted != TIKU_SDIO_LOADER && wanted != TIKU_SDIO_FACTORY)) return TIKU_IPC_INVALID;
     recover(c,wanted);
     return TIKU_IPC_OK;
 }

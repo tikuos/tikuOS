@@ -9,6 +9,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
+#include "tiku_layout_arch.h"
     .section .text.entry,"ax",@progbits
     .global c6_cold_entry
     .global __c6_recovery_entry
@@ -30,7 +31,7 @@ c6_cold_entry:
     csrw mie,zero
     li t0,0x1880
     csrs mstatus,t0
-    li t0,0x40819f00
+    li t0,C6_COLD_LOG
     li t1,0xc6c01d01
     sw t1,0(t0)
     li t1,1
@@ -51,7 +52,7 @@ c6_cold_entry:
     ori t1,t1,1
     andi t1,t1,-3
     sw t1,0(t0)
-    li t0,0x40819f00
+    li t0,C6_COLD_LOG
     li t1,0x600c2000
     lw t2,0(t1)
     sw t2,24(t0)
@@ -59,7 +60,7 @@ c6_cold_entry:
     sw t2,0(t1)
     la t1,c6_cold_trap
     csrw mtvec,t1
-    li sp,0x40819f00
+    li sp,C6_COLD_LOG
     addi sp,sp,-256
     mv a0,sp
     call c6_native_entry
@@ -70,7 +71,7 @@ c6_cold_recovery:
     .balign 4
 c6_cold_trap:
     csrci mstatus,8
-    li t0,0x40819f00
+    li t0,C6_COLD_LOG
     csrr t1,mcause
     sw t1,8(t0)
     csrr t1,mepc

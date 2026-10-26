@@ -75,6 +75,114 @@ Warm-reset evidence uses EN and the existing controller owner. Cold-power
 qualification requires removing board power and repeating the heartbeat,
 self-test and P4-console checks after reconnection.
 
+## Firmware memory and downstream installation
+
+`C6_PROFILE=firmware` runs the native core in the 400 KiB SRAM interval
+`[0x4080a000,0x4086e000)`. The lower 40 KiB remain available to the preserved
+SDK recovery image. The upper SRAM beyond the native arena is excluded for
+the bootloader and ROM. LP SRAM is excluded. P4 PSRAM is peer storage
+reachable through IPC; the C6 cannot address it as local memory.
+
+The linker assigns initialized code/data and static storage first, followed
+by the SRAM allocator tier and these fixed reservations:
+
+| Reservation | Bytes |
+|-------------|------:|
+| Worker stacks | 32,768 |
+| Radio storage | 65,536 |
+| IRQ stack | 2,048 |
+| Main stack and guard | 8,256 |
+| Cold-entry caller stack and fault record | 4,096 |
+
+The initialized image budget is 131,072 bytes. `C6_TIER_MIN` sets the
+allocator floor, default 196,608 bytes. Linker assertions reject a footprint
+below that floor or beyond the arena. `firmware.json` records the ELF and
+image hashes, build identity and SRAM spans; the package validator checks
+the ELF's allocated sections, reservations and initialized bytes. Startup
+tests the free tier with two address-dependent patterns before admitting it
+to the allocator. `memtest`, `memsize`, `tiersize`, `workers` and `radio`
+are native diagnostic commands through `ipc sdio console`.
+
+This profile provides the cooperative core and SDIO diagnostic application.
+It rejects enabled shell, BASIC and worker build flags. Its worker and radio
+reservations do not enable those subsystems. Native code, handlers and DMA
+stages reside in SRAM. During installation the native kernel is stopped;
+the preserved SDK recovery and factory applications perform flash operations
+using their own flash/cache handling. No native XIP mapping is configured.
+
+Build the package with a preserved recovery image from the target board:
+
+```sh
+make MCU=esp32c6 C6_PROFILE=firmware C6_BUILD=1 firmware-image \
+    C6_RECOVERY_IMAGE=/path/to/tiku_c6_access.bin
+```
+
+Outputs in `build/esp32c6/firmware` are `main.bin`, `main.elf`, `app.bin`
+and `firmware.json`. Keep the ELF, application and JSON report together.
+Install through the P4 with its matching shell/SDIO firmware and an idle USB
+console; the Python interpreter needs pyserial:
+
+```sh
+make MCU=esp32c6 C6_PROFILE=firmware C6_BUILD=1 flash \
+    C6_RECOVERY_IMAGE=/path/to/tiku_c6_access.bin \
+    C6_P4_PORT=/dev/serial/by-id/your-p4 C6_P4_SERIAL=your-usb-serial \
+    C6_PEER_MAC=aa:bb:cc:dd:ee:ff C6_PYTHON=/path/to/python-with-pyserial \
+    C6_UPDATE_LOG_DIR=/path/to/new-capture
+```
+
+The installer requires the FireBeetle C6 revision 0.2, 4 MiB flash,
+unencrypted/unsigned operation, the existing partition table and a valid
+MAC-bound resident ownership record. It changes no security fuses. The
+versioned flash map retains these regions:
+
+| Region | Interval | Installer policy |
+|--------|----------|------------------|
+| Bootloader and partition table | `[0,0x9000)` | Preserve |
+| NVS | `[0x9000,0xd000)` | No installer writes; SDK calibration can update it |
+| OTA selection | `[0xd000,0xf000)` | SDK selects application |
+| PHY | `[0xf000,0x10000)` | Preserve |
+| Factory application | `[0x10000,0x190000)` | Preserve |
+| Native/recovery application | `[0x190000,0x310000)` | Update |
+| Resident owner and banks | `[0x310000,0x331000)` | Preserve |
+| File-store candidate | `[0x331000,0x3fc000)` | Unclaimed; preserve contents |
+| Durable-mirror candidate | `[0x3fc000,0x400000)` | Unclaimed; preserve contents |
+
+The installer does not migrate partitions or format storage. It saves the
+previous application and a flushed host transaction journal before selecting
+the factory fallback. Factory identity is checked before OTA begins. The
+new application's recovery prefix must match the installed recovery bytes.
+After OTA, readback checks the installed image and protected regions before
+the recovery application marks the image kept and starts the native core.
+Native self-test, build identity, memory test and budgets must pass.
+
+Use `tools/esp32c6_install.py` directly with the same image, ELF and metadata
+to check the target without updating it, or resume an interrupted transaction:
+
+```sh
+python3 -B tools/esp32c6_install.py \
+    --port /dev/serial/by-id/your-p4 --p4-serial your-usb-serial \
+    --peer-mac aa:bb:cc:dd:ee:ff \
+    --image build/esp32c6/firmware/app.bin \
+    --elf build/esp32c6/firmware/main.elf \
+    --metadata build/esp32c6/firmware/firmware.json \
+    --output /path/to/new-capture --check-only
+```
+
+Replace `--check-only` with `--resume` and supply the interrupted capture
+directory to continue. Resume checks the recorded identities, image and
+previous-application backup. It verifies an already installed image or
+restarts the factory update. The journal and backup must remain together.
+`ipc sdio factory` opens the owned factory transport; `ipc sdio attach`
+adopts the SDK recovery transport after factory OTA without another EN reset.
+The updater waits for the factory's delayed restart before attachment.
+
+The installer's `--interrupt before-erase`, `--interrupt payload` and
+`--interrupt selection` options exercise reset/retry paths. The last resets
+after SDIO transmission of OTA_END completes, before accepting its reply;
+it does not select an internal flash-instruction boundary. These are EN
+reset tests, with the factory and bootloader preserved. Physical power cuts
+during a flash operation require separate qualification.
+
 ## Build and update
 
 Build with the xPack RISC-V toolchain named by `TOOLCHAIN_DIR` and
@@ -193,6 +301,7 @@ has a valid IPCE reply; another diagnostic response has no startup trace.
 ```sh
 make -C TikuBench/tests/host/kernel ipc ipc-transports c6-sdio p4-sdmmc
 python3 TikuBench/tests/host/kernel/test_esp32c6_resident.py
+python3 -B TikuBench/tests/host/kernel/test_esp32c6_firmware.py
 python3 tools/esp32c6_sdio_qualify.py --port /dev/serial/by-id/your-p4 \
     --output /path/to/new-capture --recovery
 cd TikuBench

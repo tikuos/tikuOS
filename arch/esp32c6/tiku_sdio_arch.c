@@ -121,7 +121,7 @@ int tiku_c6_sdio_init(void)
     C6_REG(SLC+0x70)&=~0x70u;C6_REG(SLC+0xa8)|=1u;
     C6_REG(SLC+0x64)=1u<<12;C6_REG(SLC+0xf4)=1u<<20;
     engine.sent=0;engine.active=0;
-    domain=(tiku_ipc_access_domain_t){(uintptr_t)__native_image_start,65536,1,1,64,0,3};
+    domain=(tiku_ipc_access_domain_t){(uintptr_t)__native_image_start,C6_ARENA_BYTES,1,1,64,0,3};
     io=(tiku_ipc_packet_io_t){start,poll,abort_transfer,NULL,&domain,1,1,128,listening};
     committed_epoch=0;
     return 0;

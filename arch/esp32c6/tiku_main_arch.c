@@ -76,6 +76,26 @@ static const tiku_ipc_endpoint_config_t endpoints[]={
     {"local0",NULL,NULL,1},{"local1",NULL,NULL,0},
     {"c6/bulk",&tiku_ipc_wire_ops,&wire,0}
 };
+#if TIKU_C6_FIRMWARE
+static uint8_t memory_ok;
+extern unsigned char __worker_reserve_start[],__worker_reserve_end[];
+extern unsigned char __radio_reserve_start[],__radio_reserve_end[];
+/** @brief Check the unused SRAM tier with address-dependent patterns before admission. */
+static uint8_t memory_check(void)
+{
+    volatile uint32_t *begin=(volatile uint32_t *)(void *)__tier_sram_start;
+    volatile uint32_t *end=(volatile uint32_t *)(void *)__tier_sram_end;
+    for(unsigned pass=0;pass<2;pass++){
+        for(volatile uint32_t *p=begin;p<end;p++){
+            *p=(uint32_t)(uintptr_t)p^(pass?0xa5a5a5a5u:0x5a5a5a5au);
+            if(!((uintptr_t)p&16383u))tiku_watchdog_kick();
+        }
+        for(volatile uint32_t *p=begin;p<end;p++)
+            if(*p!=((uint32_t)(uintptr_t)p^(pass?0xa5a5a5a5u:0x5a5a5a5au)))return 0;
+    }
+    return 1;
+}
+#endif
 /** @brief Convert an unsigned counter to decimal without formatted-I/O storage. */
 static size_t number(uint8_t *out,uint32_t value)
 {
@@ -98,6 +118,13 @@ static size_t command(const uint8_t *data,size_t length,uint8_t out[24])
     else if(equal(data,length,"irq"))value=native_irqs;
     else if(equal(data,length,"proc"))value=tiku_process_count();
     else if(equal(data,length,"build"))value=TIKU_C6_BUILD;
+#if TIKU_C6_FIRMWARE
+    else if(equal(data,length,"memtest"))value=memory_ok;
+    else if(equal(data,length,"memsize"))value=C6_ARENA_BYTES;
+    else if(equal(data,length,"tiersize"))value=(uint32_t)(__tier_sram_end-__tier_sram_start);
+    else if(equal(data,length,"workers"))value=(uint32_t)(__worker_reserve_end-__worker_reserve_start);
+    else if(equal(data,length,"radio"))value=(uint32_t)(__radio_reserve_end-__radio_reserve_start);
+#endif
     else if(equal(data,length,"bytes"))value=bytes;
     else if(equal(data,length,"crc"))value=~checksum;
     else if(equal(data,length,"bad"))value=bad+tiku_c6_diag_link_bad();
@@ -197,12 +224,18 @@ uint32_t native_main(uint32_t *report)
     const tiku_mem_region_t *table;
     tiku_c6_sdio_init();tiku_watchdog_kick();
     (void)tiku_c6_qualify(report);
+#if TIKU_C6_FIRMWARE
+    memory_ok=memory_check();if(!memory_ok)return 0;
+#endif
     table=tiku_region_arch_get_table(&count);
     if(tiku_region_init(table,count)!=TIKU_MEM_OK||
         tiku_region_claim(__native_image_start,(uint32_t)(__tier_sram_start-__native_image_start),0xe2)!=TIKU_MEM_OK||
         tiku_region_claim(__tier_sram_end,(uint32_t)(__native_stack_top-__tier_sram_end),0xe3)!=TIKU_MEM_OK||
         tiku_tier_init()!=TIKU_MEM_OK||tiku_ipc_init(endpoints,3)!=TIKU_IPC_OK)return 0;
     report[62]=TIKU_C6_BUILD;report[63]=0x52455331u;
+#if TIKU_C6_FIRMWARE
+    if(tiku_region_claim(__native_stack_top,4096,0xe4)!=TIKU_MEM_OK)return 0;
+#endif
     diagnostic=tiku_c6_diag_link();tiku_link_on_recv(diagnostic,diagnostic_receive,NULL);
     carrier=tiku_ipc_bus_open(&bus,tiku_c6_sdio_io());if(!carrier)return 0;
     tiku_console_set_wire(tiku_c6_console_io());tiku_console_set_text_sink(text_receive,NULL);

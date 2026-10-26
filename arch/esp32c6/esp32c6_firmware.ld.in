@@ -1,0 +1,65 @@
+/*
+ * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * esp32c6_firmware.ld.in - Native SRAM ownership and application budgets.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+OUTPUT_ARCH(riscv)
+ENTRY(c6_cold_entry)
+MEMORY { NATIVE (rwx) : ORIGIN = @BASE@, LENGTH = 400K }
+SECTIONS {
+    .text : {
+        __native_image_start = .;
+        KEEP(*(.text.entry))
+        . = ALIGN(256);
+        KEEP(*(.text.vectors))
+        *(.text .text.*)
+        *(.rodata .rodata.* .srodata .srodata.*)
+        . = ALIGN(4);
+    } > NATIVE
+    .data : {
+        __global_pointer$ = . + 0x800;
+        *(.data .data.* .sdata .sdata.*)
+        . = ALIGN(4);
+        __native_image_end = .;
+    } > NATIVE
+    .bss (NOLOAD) : {
+        __bss_start = .;
+        *(.bss .bss.* .sbss .sbss.* COMMON)
+        . = ALIGN(16);
+        __bss_end = .;
+    } > NATIVE
+    .tier (NOLOAD) : ALIGN(64) {
+        __tier_sram_start = .;
+        . = ORIGIN(NATIVE)+LENGTH(NATIVE)-4096-32768-65536-2048-64-8192;
+        __tier_sram_end = .;
+    } > NATIVE
+    .workers (NOLOAD) : {
+        __worker_reserve_start = .; . += 32768; __worker_reserve_end = .;
+    } > NATIVE
+    .radio (NOLOAD) : {
+        __radio_reserve_start = .; . += 65536; __radio_reserve_end = .;
+    } > NATIVE
+    .irq_stack (NOLOAD) : {
+        __native_irq_bottom = .; . += 2048; __native_irq_top = .;
+    } > NATIVE
+    .stack (NOLOAD) : {
+        native_stack_guard = .; . += 64;
+        __native_stack_bottom = .; . += 8192; __native_stack_top = .;
+    } > NATIVE
+    __native_arena_end = ORIGIN(NATIVE)+LENGTH(NATIVE);
+    __c6_layout_version = 2;
+    __c6_board_id = 0x50344336;
+    __c6_firmware_build = @BUILD@;
+    __c6_tier_floor = @TIER_FLOOR@;
+    ASSERT(__tier_sram_end-__tier_sram_start >= __c6_tier_floor, "C6 SRAM tier below declared floor")
+    ASSERT(__native_stack_top == 0x4086d000, "C6 cold-entry stack overlap")
+    ASSERT(__native_image_end-__native_image_start <= 131072, "C6 initialized image exceeds budget")
+    ASSERT(__native_arena_end <= 0x4086e000, "C6 bootloader SRAM overlap")
+    /DISCARD/ : { *(.comment .note .note.* .eh_frame .eh_frame.*) }
+}

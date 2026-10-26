@@ -124,6 +124,27 @@ int tiku_boot_c6_init(uint16_t endpoint)
     return 0;
 }
 tiku_ipc_sdio_t *tiku_boot_c6_owner(void){return &c6.owner;}
+uint16_t tiku_boot_c6_factory_length(void){return c6.driver.available;}
+void tiku_boot_c6_factory_cut(void){c6.driver.cut=1;}
+uint32_t tiku_boot_c6_factory_cuts(void){return c6.driver.factory_cuts;}
+tiku_ipc_err_t tiku_boot_c6_adopt_loader(void)
+{
+    if(!c6.owner.claimed||c6.owner.mode!=TIKU_SDIO_FACTORY)return TIKU_IPC_INVALID;
+    c6.driver.adopt=1;return TIKU_IPC_OK;
+}
+void tiku_boot_c6_factory_wait_restart(void)
+{
+    if(c6.owner.state!=TIKU_SDIO_READY||c6.owner.mode!=TIKU_SDIO_FACTORY)return;
+    c6.driver.booting=1;c6.driver.reset_until=tiku_clock_time()+10u*TIKU_CLOCK_SECOND;
+    c6.owner.lost_at=c6.driver.reset_until+c6.owner.profile.detect;
+}
+uint16_t tiku_boot_c6_factory_info(void *out,uint16_t capacity)
+{
+    uint16_t size=tiku_boot_c6_factory_length();
+    if(!out||size>capacity||c6.owner.state!=TIKU_SDIO_READY||
+       c6.owner.mode!=TIKU_SDIO_FACTORY)return 0;
+    memcpy(out,c6.driver.scratch,size);return size;
+}
 uint16_t tiku_boot_c6_loader_info(void *out,uint16_t capacity)
 {
     uint32_t bytes=tiku_c6_get32(c6.driver.scratch+24);

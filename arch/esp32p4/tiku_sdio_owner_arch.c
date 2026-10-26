@@ -73,6 +73,7 @@ static tiku_ipc_err_t claim(void *context)
     tiku_ipc_err_t r=tiku_p4_sdmmc_open();
     if(r){if(r!=TIKU_IPC_BUSY)(void)tiku_p4_sdmmc_close();return r;}
     c->selected=c->enumeration=c->phase=c->resetting=c->booting=c->go=c->identity=0;
+    c->factory=c->adopt=c->cut=0;c->factory_cuts=0;
     c->consumed=c->sent=0;return TIKU_IPC_OK;
 }
 /** @brief Release pads and clocks after the owner has confirmed quiescence. */
@@ -99,6 +100,14 @@ static tiku_ipc_err_t ready(void *context,tiku_sdio_mode_t mode)
 static tiku_ipc_err_t reset_to(void *context,tiku_sdio_mode_t mode)
 {
     tiku_p4_sdio_owner_t *c=context;
+    c->factory=mode==TIKU_SDIO_FACTORY;
+    c->cut=0;
+    if(mode==TIKU_SDIO_LOADER&&c->adopt){
+        c->adopt=0;c->selected=0;c->enumeration=1;
+        c->phase=c->identity=c->go=0;c->consumed=c->sent=0;
+        c->booting=1;c->reset_until=tiku_clock_time()+2u*TIKU_CLOCK_SECOND;
+        return tiku_p4_sdmmc_clock(400000);
+    }
     if(mode==TIKU_SDIO_NATIVE){
 #if TIKU_C6_COLD_BOOT_ENABLE
         tiku_p4_sdmmc_peer_recovery(0);
@@ -202,6 +211,9 @@ static tiku_ipc_err_t negotiate(void *context,tiku_sdio_mode_t mode,uint32_t ses
     }
     r=tiku_p4_sdmmc_poll();if(r){return r;}
     c->consumed+=c->available;c->phase=0;
+    if(mode==TIKU_SDIO_FACTORY)
+        return c->available>=12&&c->available<=480&&
+               c->scratch[0]!= 'T'?TIKU_IPC_OK:TIKU_IPC_IO;
     return tiku_c6_response(c->scratch,(uint16_t)c->available,TIKU_C6_INFO,0)&&
         !tiku_c6_get32(c->scratch+20)?TIKU_IPC_OK:TIKU_IPC_IO;
 }
@@ -213,7 +225,8 @@ static tiku_ipc_err_t start(void *context,tiku_sdio_mode_t mode,tiku_sdio_class_
     if(c->phase)return TIKU_IPC_BUSY;
     if((kind==TIKU_SDIO_CONTROL&&(mode!=TIKU_SDIO_NATIVE||tx_length!=20||rx_length!=32))||
        (kind==TIKU_SDIO_BULK&&(mode!=TIKU_SDIO_NATIVE||tx_length!=320||rx_length!=320))||
-       (kind==TIKU_SDIO_UPDATE&&(mode!=TIKU_SDIO_LOADER||tx_length<32||tx_length>512||rx_length!=512)))
+       (kind==TIKU_SDIO_UPDATE&&((mode!=TIKU_SDIO_LOADER&&mode!=TIKU_SDIO_FACTORY)||
+        (mode==TIKU_SDIO_LOADER&&tx_length<32)||!tx_length||tx_length>512||rx_length!=512)))
         return TIKU_IPC_INVALID;
     c->tx=tx;c->rx=rx;c->tx_length=tx_length;c->rx_length=rx_length;
     c->token=token;c->kind=(uint8_t)kind;c->offset=0;c->phase=10;
@@ -261,12 +274,16 @@ static tiku_ipc_err_t poll(void *context,uint64_t *token)
         c->phase=0;return TIKU_IPC_OK;
     }
     if(c->phase==10){
+        if(c->factory&&c->tx_length==1&&c->tx[0]==0){c->phase=12;return TIKU_IPC_AGAIN;}
         uint8_t registers[4];r=read_bytes(0x44,registers,4);if(r){return r;}
         if(!(((tiku_c6_get32(registers)>>16)-c->sent)&0xfffu))return TIKU_IPC_AGAIN;
         r=tiku_p4_sdmmc_start(1,1,0x1f800u-c->tx_length,1,(void *)c->tx,c->tx_length,512);
         if(r){return r;}c->phase=11;return TIKU_IPC_AGAIN;
     }
-    if(c->phase==11){r=tiku_p4_sdmmc_poll();if(r){return r;}c->sent=(c->sent+1)&0xfffu;c->phase=12;}
+    if(c->phase==11){
+        r=tiku_p4_sdmmc_poll();if(r){return r;}c->sent=(c->sent+1)&0xfffu;c->phase=12;
+        if(c->factory&&c->cut){c->cut=0;c->factory_cuts++;return TIKU_IPC_TIMEOUT;}
+    }
     if(c->phase==12){
         r=pending(c,&count);if(r){return r;}if(!count)return TIKU_IPC_AGAIN;
         if(count>c->rx_length)return TIKU_IPC_IO;
@@ -277,7 +294,7 @@ static tiku_ipc_err_t poll(void *context,uint64_t *token)
     }
     r=tiku_p4_sdmmc_poll();if(r){return r;}
     c->consumed+=c->available;
-    if(c->kind==TIKU_SDIO_UPDATE){
+    if(c->kind==TIKU_SDIO_UPDATE&&!c->factory){
         if(!tiku_c6_response(c->rx,(uint16_t)c->available,c->tx[5],tiku_c6_get32(c->tx+8)))return TIKU_IPC_IO;
         if(c->tx[5]==TIKU_C6_GO&&!tiku_c6_get32(c->rx+20))c->go=1;
     }
