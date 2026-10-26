@@ -14,6 +14,7 @@
  */
 
 #include "tiku_mcp.h"
+#include "tiku_mcp_ask.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -33,7 +34,7 @@
 static char scratch[TIKU_MCP_SCRATCH];
 
 /* The server's instructions, filled at init with the board's name. */
-static char instructions[480];
+static char instructions[704];
 
 /* serverInfo: /sys/device/name, read again before each request, and the
  * device model. */
@@ -49,6 +50,9 @@ static uint32_t data_names_hash, prompts_hash;
 
 /* Where the shell tool's captured output goes while a command runs. */
 static tinymcp_sink_t *capture;
+
+/* The client a tool runs for, while it runs; NULL is the board itself. */
+static const char *actor;
 
 /* A watch the library asked for: the stream and slot it reports under. */
 typedef struct {
@@ -683,14 +687,49 @@ mode_command(const char *line)
     return (const char *)0;
 }
 
+const char *
+tiku_mcp_actor(void)
+{
+    return actor != (const char *)0 ? actor : "board";
+}
+
+static int run_tool(const char *name, const tinymcp_args_t *args,
+                    tinymcp_sink_t *text);
+
+/** @brief A journal entry for a tool that changes the board. */
+static void
+journal_tool(const char *verb, const char *a, const char *b)
+{
+    char line[TIKU_MCP_JOURNAL_TEXT];
+
+    /* The ask nodes and the journal write their own entries. */
+    if (strncmp(a, "/sys/mcp/", 9u) == 0) {
+        return;
+    }
+    (void)snprintf(line, sizeof line, "%s %s%s%s", verb, a, b ? " " : "",
+                   b ? b : "");
+    tiku_mcp_journal(tiku_mcp_actor(), line);
+}
+
 static int
 call_tool(void *ctx, const char *name, const tinymcp_args_t *args,
           tinymcp_sink_t *text)
 {
+    const char *client = tinymcp_client((const tinymcp_t *)ctx);
+    int rc;
+
+    actor = client[0] ? client : "agent";
+    rc = run_tool(name, args, text);
+    actor = (const char *)0;
+    return rc;
+}
+
+static int
+run_tool(const char *name, const tinymcp_args_t *args, tinymcp_sink_t *text)
+{
     const char *path = tinymcp_arg_str(args, "path");
     int rc;
 
-    (void)ctx;
     if (strcmp(name, "shell") == 0) {
         const char *line = tinymcp_arg_str(args, "line");
         const char *mode;
@@ -709,6 +748,7 @@ call_tool(void *ctx, const char *name, const tinymcp_args_t *args,
                                           "node instead of watch");
             return TINYMCP_TOOL_ERROR;
         }
+        journal_tool("shell", line, (const char *)0);
         run_line(line, text);
         return TINYMCP_OK;
     }
@@ -725,6 +765,9 @@ call_tool(void *ctx, const char *name, const tinymcp_args_t *args,
             return TINYMCP_EINVAL;
         }
         rc = tiku_vfs_write(path, value, strlen(value));
+        if (rc == TIKU_VFS_OK) {
+            journal_tool("write", path, value);
+        }
     } else if (strcmp(name, "ls") == 0) {
         rc = tiku_vfs_list(path, ls_entry, text) == 0 ? TIKU_VFS_OK
                                                        : TIKU_VFS_ENOENT;
@@ -937,8 +980,13 @@ tiku_mcp_init(void)
                    "a /data file; ls lists a directory; shell runs one "
                    "command line, and tiku://shell/commands is its "
                    "vocabulary.  The owner's prompts are the files "
-                   "/data/prompt.<name>; paths complete.", TIKU_DEVICE_NAME);
+                   "/data/prompt.<name>; paths complete.  The board asks: "
+                   "subscribe to tiku:///sys/mcp/ask/question, read it when "
+                   "it changes, and answer by writing /sys/mcp/ask/answer; "
+                   "/sys/mcp/journal records who asked, answered and "
+                   "changed what.", TIKU_DEVICE_NAME);
     (void)strcpy(board_name, "tiku");
+    tiku_mcp_ask_init();
     tiku_mcp_console_init();
     tiku_process_start(&tiku_mcp_process, (tiku_event_data_t)0);
 }

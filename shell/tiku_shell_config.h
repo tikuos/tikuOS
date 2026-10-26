@@ -495,6 +495,13 @@
 #ifndef TIKU_SHELL_CMD_INIT
 #define TIKU_SHELL_CMD_INIT    TIKU_INIT_ENABLE  /**< init - NVM boot entries */
 #endif
+#ifndef TIKU_SHELL_CMD_ASK
+#if TIKU_MCP_ENABLE
+#define TIKU_SHELL_CMD_ASK     1  /**< ask - ask the board's agent a question */
+#else
+#define TIKU_SHELL_CMD_ASK     0
+#endif
+#endif
 #ifndef TIKU_SHELL_CMD_MCP
 #if TIKU_MCP_ENABLE
 #define TIKU_SHELL_CMD_MCP     1  /**< mcp - the tinymcp server's state */

@@ -9,11 +9,12 @@ and the shell and carries it on the console line.  Built with
 ```
 tiku_mcp.h/.c          the host table: resources, tools, watches, the process
 tiku_mcp_console.c     channel 0xF3: the queue, the pump, the frame out
+tiku_mcp_ask.h/.c      /sys/mcp/ask, the journal, BASIC's ASK
 tiku_mcp_vfs.h/.c      /sys/mcp, a boot mount
 ```
 
 The `mcp` shell command (`shell/commands/tiku_shell_cmd_mcp.c`) prints
-what `/sys/mcp` holds.  The host side is `tinymcp/bridge/tinymcp.py`,
+what `/sys/mcp` holds; `ask` (`tiku_shell_cmd_ask.c`) asks a question.  The host side is `tinymcp/bridge/tinymcp.py`,
 which turns an MCP client's stdio into frames on the port; the text
 around the frames, the banner and a person's shell session, stays on
 its stderr.
@@ -50,6 +51,25 @@ its stderr.
   names a directory, the rest is a prefix of a child's name, and a
   directory's completion ends in a slash.  A template's path has no
   leading slash; a prompt's may.
+- Asking: `/sys/mcp/ask/` holds one question at a time.  `question` is
+  written by `ask <words...>`, by a rule whose action is `ask ...`, by
+  BASIC's `ASK q$, A$[, seconds]` or by any writer; each write grows `seq`,
+  clears the answer and sets `state` to `asked`, and subscribers of
+  `tiku:///sys/mcp/ask/question` hear it.  `answer` takes one answer to
+  the question waiting; a leading `#<seq> ` names that question, and an
+  answer to an older one, or a second answer, is `EINVAL`.  `asked_by`
+  and `answered_by` hold the writer: the client's name
+  (`tinymcp_client()`) while one of its tools runs, `board` otherwise
+  (`tiku_mcp_actor()`).  BASIC's `ASK` parks the program through
+  `tiku_basic_ext_wait()` until the answer comes, a later question
+  replaces it, or the seconds pass; the variable is empty in the last two
+  cases.  `tinymcp/bridge/attend.py` answers for an owner who leaves the
+  board with no agent attached.
+- Journal: `/sys/mcp/journal`, a RAM ring of `TIKU_MCP_JOURNAL_MAX` (16)
+  entries, one line each, `<seconds> <who> <what>`: questions, answers,
+  the `write` and `shell` tools (not those under `/sys/mcp/`, which write
+  their own), and any text a writer adds.  It streams through
+  `tiku_vfs_read_at()` and a change notifies its subscribers.
 - Watches: `tiku_vfs_watch()` under the `tinymcp` process, up to
   `TIKU_MCP_WATCH_MAX` (8) across streams, each a (stream, slot) the
   library named; `TIKU_EVENT_VFS` becomes `tinymcp_updated()`.  The
@@ -76,8 +96,9 @@ frame that ends without a newline.
 `TIKU_MCP_IN_CAP` and `TIKU_MCP_OUT_CAP` (1024 and 4608; 2048 and 8192
 on the ESP32-C61 and P4; 256 and 512 on MSP430) size the channel buffer,
 the two queue slots and the reply; `TIKU_MCP_SCRATCH` (4098) holds one
-page of a node.  Measured on the nRF54L15 at `-Os`: the binding 5.4 KB
-of code, the library 11.0 KB, 13.3 KB of SRAM in all.
+page of a node.  Measured on the nRF54L15 at `-Os`, from the object
+files: the binding with `ask` 9.2 KB of code, the library 13.7 KB, 17.0 KB
+of SRAM in all (the ask module 2.2 KB of it, the journal most).
 
 ## Proof
 
@@ -85,5 +106,8 @@ of code, the library 11.0 KB, 13.3 KB of SRAM in all.
 with the official `mcp` SDK client in both eras: discover and the board's
 identity, list, read, write the LED, subscribe and see the change, a shell
 line, a refused mode command, a prompt written to `/data` got and heard
-going, path completion, and the error codes.  TikuBench's `tinymcp` suite
-runs it.
+going, path completion, the board asking and an answer refused when stale,
+and the error codes.  `tinymcp/tests/board_ask.py <port>` runs a BASIC
+program whose `ASK` it answers over the same port, lets one run out of
+time, has a rule ask, and runs `attend.py` against a stub of the Messages
+API.  TikuBench's `tinymcp` suite runs both, with BASIC built in.

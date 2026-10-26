@@ -69,6 +69,12 @@ void tiku_mcp_status(tiku_mcp_status_t *out);
 /** @brief Read /sys/device/name again as the server's name. */
 void tiku_mcp_identity(void);
 
+/**
+ * @brief Who is changing the board: the client's name while one of its tool
+ *        calls runs ("agent" when it gave none), "board" otherwise.
+ */
+const char *tiku_mcp_actor(void);
+
 /** @brief The console transport: its stream, registration and pump. */
 void       tiku_mcp_console_init(void);
 void       tiku_mcp_console_pump(void);

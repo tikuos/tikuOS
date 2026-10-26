@@ -69,6 +69,9 @@
 #endif
 #if TIKU_SHELL_CMD_CONSOLE
 #include "commands/tiku_shell_cmd_console.h"
+#if TIKU_SHELL_CMD_ASK
+#include "commands/tiku_shell_cmd_ask.h"
+#endif
 #if TIKU_SHELL_CMD_MCP
 #include "commands/tiku_shell_cmd_mcp.h"
 #endif
@@ -507,6 +510,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_CONSOLE
     {"console", "The line's channels, counters", tiku_shell_cmd_console},
+#endif
+#if TIKU_SHELL_CMD_ASK
+    {"ask",     "Ask the board's agent",        tiku_shell_cmd_ask},
 #endif
 #if TIKU_SHELL_CMD_MCP
     {"mcp",     "The tinymcp server's state",   tiku_shell_cmd_mcp},
