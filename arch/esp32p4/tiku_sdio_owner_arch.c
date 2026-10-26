@@ -24,11 +24,21 @@ static tiku_ipc_err_t read_bytes(uint32_t address,uint8_t *p,unsigned length)
     }
     return TIKU_IPC_OK;
 }
+/** @brief Accept a cumulative counter after two matching masked CMD52 samples. */
+static tiku_ipc_err_t read_counter(uint32_t address,uint32_t mask,uint32_t *value)
+{
+    uint8_t first[4],second[4];
+    tiku_ipc_err_t r=read_bytes(address,first,4);if(r)return r;
+    r=read_bytes(address,second,4);if(r)return r;
+    uint32_t a=tiku_c6_get32(first)&mask,b=tiku_c6_get32(second)&mask;
+    if(a!=b)return TIKU_IPC_AGAIN;
+    *value=b;return TIKU_IPC_OK;
+}
 /** @brief Read the cumulative peer FIFO byte count. */
 static tiku_ipc_err_t pending(tiku_p4_sdio_owner_t *c,uint32_t *count)
 {
-    uint8_t b[4];tiku_ipc_err_t r=read_bytes(0x60,b,4);
-    if(!r)*count=(tiku_c6_get32(b)-c->consumed)&0xfffffu;
+    uint32_t offered;tiku_ipc_err_t r=read_counter(0x60,0xfffffu,&offered);
+    if(!r)*count=(offered-c->consumed)&0xfffffu;
     return r;
 }
 /** @brief Advance cold enumeration or attach to an already selected function. */
@@ -166,10 +176,10 @@ static tiku_ipc_err_t negotiate(void *context,tiku_sdio_mode_t mode,uint32_t ses
     tiku_ipc_err_t r;uint8_t value;uint32_t count;
     if(mode==TIKU_SDIO_NATIVE){
         if(c->phase==20){
-            uint8_t credits[4];
-            r=read_bytes(0x44,credits,4);if(r){return r;}
+            uint32_t credits;
+            r=read_counter(0x44,0x0fff0000u,&credits);if(r){return r;}
             r=pending(c,&count);if(r){return r;}
-            if(!((tiku_c6_get32(credits)>>16)&0xfffu)||count!=320)return TIKU_IPC_AGAIN;
+            if(!((credits>>16)&0xfffu)||count!=320)return TIKU_IPC_AGAIN;
             c->phase=0;
             if(c->identity)return TIKU_IPC_OK;
             memset(c->scratch,0,512);c->scratch[0]=2;c->scratch[1]=4;
@@ -275,8 +285,8 @@ static tiku_ipc_err_t poll(void *context,uint64_t *token)
     }
     if(c->phase==10){
         if(c->factory&&c->tx_length==1&&c->tx[0]==0){c->phase=12;return TIKU_IPC_AGAIN;}
-        uint8_t registers[4];r=read_bytes(0x44,registers,4);if(r){return r;}
-        if(!(((tiku_c6_get32(registers)>>16)-c->sent)&0xfffu))return TIKU_IPC_AGAIN;
+        uint32_t credits;r=read_counter(0x44,0x0fff0000u,&credits);if(r){return r;}
+        if(!(((credits>>16)-c->sent)&0xfffu))return TIKU_IPC_AGAIN;
         r=tiku_p4_sdmmc_start(1,1,0x1f800u-c->tx_length,1,(void *)c->tx,c->tx_length,512);
         if(r){return r;}c->phase=11;return TIKU_IPC_AGAIN;
     }
