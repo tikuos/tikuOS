@@ -3153,7 +3153,7 @@ ifneq ($(TIKU_SHELL_ENABLE),1)
 $(error TIKU_MCP_ENABLE=1 needs the shell: the tools run from its pump)
 endif
 ifeq ($(wildcard $(TINYMCP)/tinymcp.h),)
-$(error TIKU_MCP_ENABLE=1 needs the tinymcp library at $(TINYMCP)/: git clone https://github.com/tikuos/tinymcp $(TINYMCP))
+$(error TIKU_MCP_ENABLE=1 needs the tinymcp library at $(TINYMCP)/: git clone https://github.com/weiserlab/tinymcp $(TINYMCP))
 endif
 TINYMCP_API_HAVE := $(shell awk '$$2 == "TINYMCP_API" && $$1 ~ /define/ { print $$3 }' $(TINYMCP)/tinymcp.h)
 ifneq ($(TINYMCP_API_HAVE),$(TINYMCP_API_BOUND))
