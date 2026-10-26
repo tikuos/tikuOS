@@ -1204,6 +1204,8 @@ tiku_layout_held_name(uint8_t held)
 #include <arch/stm32n6/tiku_trng_arch.h>
 #elif defined(PLATFORM_ESP32C61)
 #include <arch/esp32c61/tiku_trng_arch.h>
+#elif defined(PLATFORM_ESP32C6)
+#include <arch/esp32c6/tiku_trng_arch.h>
 #elif defined(PLATFORM_ESP32C5)
 #include <arch/esp32c5/tiku_trng_arch.h>
 #elif defined(PLATFORM_ESP32P4)

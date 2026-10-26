@@ -21,6 +21,11 @@ BUILD_DIR ?= build/esp32c6/$(C6_PROFILE)
 C6_RAM_BASE ?= 0x4080a000
 C6_BUILD ?= 1
 C6_THREAD_TEST ?= 0
+C6_STORAGE_TEST ?= 0
+C6_STORAGE ?= 0
+ifneq ($(filter $(C6_STORAGE),0 1),$(C6_STORAGE))
+$(error C6_STORAGE must be 0 or 1)
+endif
 C6_PYTHON ?= python3
 C6_BANK ?= 0
 C6_UPDATE_LOG_DIR ?= $(BUILD_DIR)/update-$(shell date +%Y%m%dT%H%M%S)
@@ -47,6 +52,25 @@ C6_SRCS := arch/esp32c6/tiku_native_arch.c arch/esp32c6/tiku_runtime_arch.c \
  services/ipc/tiku_ipc_wire.c services/ipc/tiku_ipc_bus.c \
  hal/tiku_ipc_packet_hal.c services/link/tiku_link.c services/console/tiku_console.c
 C6_ASMS := arch/esp32c6/tiku_crt_early.S arch/esp32c6/tiku_irq_probe.S
+ifeq ($(C6_STORAGE),1)
+ifneq ($(C6_PROFILE),firmware)
+$(error C6_STORAGE requires C6_PROFILE=firmware)
+endif
+CFLAGS += -DTIKU_C6_STORAGE=1 -DTIKU_CELL_TABLE=1
+C6_SRCS += arch/esp32c6/tiku_flash_arch.c arch/esp32c6/tiku_nvm_arch.c \
+ arch/esp32c6/tiku_nvm_region_arch.c arch/esp32c6/tiku_mpu_arch.c \
+ arch/esp32c6/tiku_trng_arch.c kernel/memory/tiku_mpu.c \
+ kernel/memory/tiku_layout.c kernel/memory/tiku_persist.c \
+ kernel/memory/tiku_persist_move.c kernel/fs/tiku_tfs.c
+endif
+ifeq ($(C6_STORAGE_TEST),1)
+ifneq ($(C6_PROFILE),firmware)
+$(error C6_STORAGE_TEST requires C6_PROFILE=firmware)
+endif
+CFLAGS += -DTIKU_C6_STORAGE_TEST=1
+C6_SRCS += TikuBench/tests/esp32c6/test_storage.c
+C6_STORAGE_ASMS := TikuBench/tests/esp32c6/test_storage_regs.S
+endif
 ifeq ($(TIKU_THREADS_ENABLE),1)
 ifneq ($(C6_PROFILE),firmware)
 $(error C6 workers require C6_PROFILE=firmware)
@@ -78,7 +102,7 @@ endif
 C6_TIER_MIN ?= 196608
 CFLAGS += -DTIKU_C6_FIRMWARE=1 -DTIKU_C6_TIER_FLOOR=$(C6_TIER_MIN)
 endif
-C6_OBJS := $(addprefix $(BUILD_DIR)/,$(C6_SRCS:.c=.o) $(C6_ASMS:.S=.o) $(C6_TEST_ASMS:.S=.o))
+C6_OBJS := $(addprefix $(BUILD_DIR)/,$(C6_SRCS:.c=.o) $(C6_ASMS:.S=.o) $(C6_TEST_ASMS:.S=.o) $(C6_STORAGE_ASMS:.S=.o))
 .PHONY: all clean flash FORCE
 FORCE:
 $(BUILD_DIR)/.flags: FORCE
@@ -100,7 +124,7 @@ ifeq ($(C6_PROFILE),firmware)
 $(BUILD_DIR)/native.ld: arch/esp32c6/esp32c6_firmware.ld.in
 	@mkdir -p $(dir $@)
 	sed -e 's/@BASE@/$(C6_RAM_BASE)/g' -e 's/@BUILD@/$(C6_BUILD)/g' \
-	 -e 's/@TIER_FLOOR@/$(C6_TIER_MIN)/g' $< > $@
+	 -e 's/@TIER_FLOOR@/$(C6_TIER_MIN)/g' -e 's/@STORAGE@/$(C6_STORAGE)/g' $< > $@
 else
 $(BUILD_DIR)/native.ld: arch/esp32c6/esp32c6_resident.ld.in
 	@mkdir -p $(dir $@)

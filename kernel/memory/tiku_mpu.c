@@ -58,6 +58,8 @@ void tiku_mpu_set_permissions(tiku_mpu_seg_t seg, tiku_mpu_perm_t perm)
  *   RA8P1               in a record that survives the reset it then forces.
  *   ESP32-C5            store access fault (PMA entries 10 and 11 hold the
  *                       durable span read-only); the trap handler records it.
+ *   ESP32-C6            store access fault (PMA entries 13 and 14); the trap
+ *                       handler records it and enters native abort.
  *   ESP32-P4            store access fault (PMA entries 0 and 1); the trap
  *                       entry latches flags, a count and the address, skips
  *                       the store and resumes.

@@ -16,7 +16,7 @@
 #if TIKU_IPC_ENABLE
 #define TIKU_SDIO_JOBS 4u
 #define TIKU_SDIO_STAGE 512u
-/** @brief Native burst and recovery bounds; loader jobs use their admitted timeout. */
+/** @brief Bulk burst and recovery bounds; control and loader jobs use their admitted timeout. */
 typedef struct {
     tiku_clock_time_t burst, detect, abort, boot, negotiate;
 } tiku_sdio_profile_t;

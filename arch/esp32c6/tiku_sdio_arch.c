@@ -60,6 +60,7 @@ static tiku_ipc_err_t start(void *unused,const void *tx,void *rx,uint16_t capaci
     tx_desc.address=(uint32_t)(uintptr_t)tx;
     tx_desc.control=OWN|EOF_BIT|capacity|((uint32_t)capacity<<14);
     engine.capacity=capacity;engine.rx_done=engine.tx_done=0;engine.active=1;
+    C6_REG(HOST+0x88)=0;
     C6_REG(SLC+0x10)=RX_DONE|TX_DONE;
     barrier();
     C6_REG(SLC+0x48)=(uint32_t)(uintptr_t)&rx_desc;
@@ -67,8 +68,8 @@ static tiku_ipc_err_t start(void *unused,const void *tx,void *rx,uint16_t capaci
     C6_REG(SLC+0x64)=(1u<<14)|1u;
     C6_REG(SLC+0x40)=(uint32_t)(uintptr_t)&tx_desc;
     C6_REG(SLC+0x3c)=START;
-    engine.sent=(engine.sent+capacity)&0xfffffu;
-    C6_REG(SLC+0xf4)=(1u<<20)|engine.sent;
+    engine.sent+=capacity;
+    C6_REG(SLC+0xf4)=(1u<<20)|(engine.sent&0xfffffu);
     return TIKU_IPC_OK;
 }
 /** @brief Attest both DMA descriptors have returned before packet copy-out. */
@@ -79,7 +80,10 @@ static tiku_ipc_err_t poll(void *unused)
     if(!engine.active)return TIKU_IPC_INVALID;
     events=C6_REG(SLC+4);barrier();
     if((events&RX_DONE)&&!(rx_desc.control&OWN))engine.rx_done=1;
-    if((events&TX_DONE)&&!(tx_desc.control&OWN))engine.tx_done=1;
+    uint32_t consumed=C6_REG(HOST+0x88);
+    if(!(tx_desc.control&OWN)&&((events&TX_DONE)||
+        (committed_epoch&&consumed==tiku_sdio_consumed_tag(engine.sent,committed_epoch))))
+        engine.tx_done=1;
     if(!engine.rx_done||!engine.tx_done)return TIKU_IPC_AGAIN;
     if(((rx_desc.control>>14)&0x3fffu)!=engine.capacity)return TIKU_IPC_IO;
     C6_REG(SLC+0x10)=RX_DONE|TX_DONE;

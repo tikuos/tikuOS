@@ -157,6 +157,8 @@
  * second object, their order would depend on link order.
  */
 #define TIKU_DURABLE_FIRST  TIKU_SECTION(".persistent.layout")
+/** @brief Port recovery control at a linker-defined durable-image offset. */
+#define TIKU_DURABLE_ARCH TIKU_SECTION(".persistent.arch")
 
 /**
  * @brief MSP430 capacity spill for large working buffers; not durable.

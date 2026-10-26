@@ -83,6 +83,9 @@
 /* Not linker-carved: follows TIKU_FLASH_REGION_BYTES in
  * arch/esp32c5/tiku_flash_arch.h. */
 #define TIKU_NVM_REGION_BYTES  (2012u * 1024u)
+#elif defined(PLATFORM_ESP32C6)
+/* Follows the REGION range in arch/esp32c6/tiku_flash_arch.h. */
+#define TIKU_NVM_REGION_BYTES (812u * 1024u)
 #elif defined(PLATFORM_ESP32P4)
 /* Not linker-carved: follows the REGION range in
  * arch/esp32p4/flash_layout.def. */

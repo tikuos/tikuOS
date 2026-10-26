@@ -21,7 +21,10 @@
 #endif
 #define TIKU_THREAD_STACK_ATTR __attribute__((section(".c6.worker_stacks"),aligned(16)))
 #define TIKU_MEM_ARCH_ALIGNMENT 8U
-#define TIKU_MEM_NVM_ENABLE 0
+#ifndef TIKU_C6_STORAGE
+#define TIKU_C6_STORAGE 0
+#endif
+#define TIKU_MEM_NVM_ENABLE TIKU_C6_STORAGE
 #define TIKU_TIER_SRAM_DERIVED 1
 #define TIKU_IPC_BUFFERS_MAX 2
 #define TIKU_PROCESS_MAX 8

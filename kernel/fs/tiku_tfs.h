@@ -38,7 +38,9 @@
  * an extent beyond the ceiling goes partly unused.  2048 slots address 8 MB
  * of 4 KB slots for 256 bytes of allocation bitmap.
  */
-#  if defined(PLATFORM_ESP32P4)
+#  if defined(PLATFORM_ESP32C6)
+#    define TIKU_TFS_MAX_SLOTS 256
+#  elif defined(PLATFORM_ESP32P4)
 #    define TIKU_TFS_MAX_SLOTS  4096
 #  elif defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
       defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
@@ -60,6 +62,8 @@
 #  if defined(AM_PART_APOLLO510) || defined(PLATFORM_RP2350) || \
       defined(PLATFORM_STM32N6) || defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32P4)
 #    define TIKU_TFS_MIN_SLOTS  512
+#  elif defined(PLATFORM_ESP32C6)
+#    define TIKU_TFS_MIN_SLOTS 128
 #  elif defined(PLATFORM_ESP32C5)
 #    define TIKU_TFS_MIN_SLOTS  256
 #  elif defined(PLATFORM_AMBIQ) || defined(TIKU_DEVICE_NRF54LM20A) || \
@@ -88,7 +92,7 @@
  * a neighbour's sector.  MSP430 and host use 512-byte slots.
  */
 #  if defined(PLATFORM_RP2350) || defined(PLATFORM_STM32N6) || \
-      defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32P4)
+      defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32C6) || defined(PLATFORM_ESP32P4)
 #    define TIKU_TFS_SLOT_DATA  4092   /**< + 4 B length = one 4 KB sector */
 #  elif defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC) || \
        defined(PLATFORM_RA8P1)
@@ -107,7 +111,7 @@
  */
 #ifndef TIKU_TFS_SECT
 #  if defined(PLATFORM_RP2350) || defined(PLATFORM_STM32N6) || \
-      defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32P4)
+      defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32C6) || defined(PLATFORM_ESP32P4)
 #    define TIKU_TFS_SECT  4096u
 #  else
 #    define TIKU_TFS_SECT  4u

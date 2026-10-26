@@ -302,11 +302,21 @@ static tiku_ipc_err_t poll(void *context,uint64_t *token)
         r=tiku_p4_sdmmc_start(0,1,0x1f800u-count,1,c->rx,(uint16_t)count,512);
         if(r){return r;}c->phase=13;return TIKU_IPC_AGAIN;
     }
-    r=tiku_p4_sdmmc_poll();if(r){return r;}
-    c->consumed+=c->available;
-    if(c->kind==TIKU_SDIO_UPDATE&&!c->factory){
-        if(!tiku_c6_response(c->rx,(uint16_t)c->available,c->tx[5],tiku_c6_get32(c->tx+8)))return TIKU_IPC_IO;
-        if(c->tx[5]==TIKU_C6_GO&&!tiku_c6_get32(c->rx+20))c->go=1;
+    if(c->phase==13){
+        r=tiku_p4_sdmmc_poll();if(r){return r;}
+        c->consumed+=c->available;
+        if(c->kind==TIKU_SDIO_UPDATE&&!c->factory){
+            if(!tiku_c6_response(c->rx,(uint16_t)c->available,c->tx[5],tiku_c6_get32(c->tx+8)))return TIKU_IPC_IO;
+            if(c->tx[5]==TIKU_C6_GO&&!tiku_c6_get32(c->rx+20))c->go=1;
+        }
+        if(c->kind!=TIKU_SDIO_BULK){c->phase=0;return TIKU_IPC_OK;}
+        c->offset=0;c->phase=14;
+    }
+    uint8_t ack[4];tiku_c6_put32(ack,tiku_sdio_consumed_tag(c->consumed,c->epoch));
+    unsigned end=4;
+    for(;c->offset<end;c->offset++){
+        value=ack[c->offset];r=tiku_p4_sdmmc_byte(1,1,tiku_sdio_diag_address(24+c->offset),&value);
+        if(r)return r;
     }
     c->phase=0;return TIKU_IPC_OK;
 }

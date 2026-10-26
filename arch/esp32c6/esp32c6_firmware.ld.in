@@ -26,6 +26,9 @@ SECTIONS {
         __global_pointer$ = . + 0x800;
         *(.data .data.* .sdata .sdata.*)
         . = ALIGN(4);
+        __tiku_cells_start = .;
+        KEEP(*(.tiku_cells))
+        __tiku_cells_end = .;
         __native_image_end = .;
     } > NATIVE
     .bss (NOLOAD) : {
@@ -34,6 +37,28 @@ SECTIONS {
         . = ALIGN(16);
         __bss_end = .;
     } > NATIVE
+    .uninit (NOLOAD) : ALIGN(16) {
+        __uninit_start = .;
+        KEEP(*(.persistent.layout))
+        ASSERT(. <= __uninit_start+1024, "C6 layout control exceeds fixed prefix");
+        . = __uninit_start+(@STORAGE@ ? 1024 : 0);
+        __c6_recovery_start = .;
+        KEEP(*(.persistent.arch))
+        __c6_recovery_end = .;
+        ASSERT(__c6_recovery_end-__c6_recovery_start == (@STORAGE@ ? 4112 : 0), "C6 recovery control size changed");
+        *(.persistent .persistent.* .uninit .uninit.*)
+        . = ALIGN(16);
+        __uninit_end = .;
+    } > NATIVE
+    ASSERT(@STORAGE@ || SIZEOF(.uninit)==0, "C6 durable placement requires storage")
+    .retained (NOLOAD) : ALIGN(16) {
+        __retained_start = .;
+        *(.retained .retained.*)
+        . = ALIGN(16);
+        __retained_end = .;
+    } > NATIVE
+    ASSERT(__uninit_end-__uninit_start <= 8176, "C6 durable mirror capacity exceeded")
+    ASSERT(__retained_end-__retained_start <= 4096, "C6 retained budget exceeded")
     .tier (NOLOAD) : ALIGN(64) {
         __tier_sram_start = .;
         . = ORIGIN(NATIVE)+LENGTH(NATIVE)-4096-32768-65536-2048-64-8192;

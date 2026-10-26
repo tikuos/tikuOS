@@ -193,7 +193,7 @@ void tiku_ipc_sdio_step(tiku_ipc_sdio_t *c)
                 memcpy(c->native_request,c->jobs[0].tx,20);
             }
             c->active = (uint8_t)index; c->jobs[index].state = ACTIVE;
-            c->active_until = index == 3 ? c->jobs[index].deadline :
+            c->active_until = (index == 0 || index == 3) ? c->jobs[index].deadline :
                 (tiku_clock_time_t)(now+c->profile.burst);
             if (TIKU_CLOCK_LT(c->jobs[index].deadline,c->active_until))
                 c->active_until = c->jobs[index].deadline;

@@ -21,12 +21,22 @@
 #include <hal/tiku_ipc_test_pattern.h>
 #include <kernel/ipc/tiku_ipc_stream.h>
 #include <string.h>
+#if TIKU_C6_STORAGE
+#include "tiku_flash_arch.h"
+#include "tiku_nvm_arch.h"
+#include <kernel/memory/tiku_layout.h>
+extern unsigned char __uninit_start[],__uninit_end[];
+static uint8_t storage_status;
+#endif
 #if TIKU_THREADS_ENABLE
 #include <kernel/threads/tiku_thread.h>
 #include <hal/tiku_cpu.h>
 #endif
 #if TIKU_C6_THREAD_TEST
 #include <TikuBench/tests/esp32c6/test_threads.h>
+#endif
+#if TIKU_C6_STORAGE_TEST
+#include <TikuBench/tests/esp32c6/test_storage.h>
 #endif
 
 static tiku_ipc_wire_t wire;
@@ -125,6 +135,16 @@ static size_t command(const uint8_t *data,size_t length,uint8_t out[24])
     else if(equal(data,length,"irq"))value=native_irqs;
     else if(equal(data,length,"proc"))value=tiku_process_count();
     else if(equal(data,length,"build"))value=TIKU_C6_BUILD;
+#if TIKU_C6_STORAGE
+    else if(equal(data,length,"storage"))value=storage_status;
+    else if(equal(data,length,"nvmsaved"))value=tiku_c6_nvm_commits();
+    else if(equal(data,length,"nvmrest"))value=tiku_mem_arch_nvm_restore_status();
+    else if(equal(data,length,"held"))value=tiku_layout_state()->held;
+    else if(equal(data,length,"nvmtier"))value=tiku_layout_state()->tier;
+#endif
+#if TIKU_C6_STORAGE_TEST
+    else if(tiku_c6_storage_test_command(data,length,&value)){}
+#endif
 #if TIKU_C6_THREAD_TEST
     else if(equal(data,length,"thrtest"))value=tiku_c6_threads_test_result();
     else if(equal(data,length,"thrsoak"))value=tiku_c6_threads_test_soak();
@@ -240,11 +260,32 @@ uint32_t native_main(uint32_t *report)
 #if TIKU_C6_FIRMWARE
     memory_ok=memory_check();if(!memory_ok)return 0;
 #endif
+#if TIKU_C6_STORAGE
+    storage_status=tiku_c6_durable_guard_off()?5:tiku_c6_flash_init()?2:tiku_c6_nvm_init()?3:1;
+    if(storage_status!=5){tiku_mpu_init();if(!tiku_c6_mpu_ready())storage_status=5;}
+    if(storage_status==1&&tiku_c6_region_recover())storage_status=6;
+    if(storage_status==1){
+        tiku_persist_move_boot();if(tiku_persist_moved()<0)storage_status=4;
+    }
+    if(storage_status!=1)tiku_layout_restore_complete(-1);
+#endif
+#if TIKU_C6_STORAGE_TEST
+    tiku_c6_storage_test_boot();
+#endif
     table=tiku_region_arch_get_table(&count);
     if(tiku_region_init(table,count)!=TIKU_MEM_OK||
+#if TIKU_C6_STORAGE
+        tiku_region_claim(__native_image_start,(uint32_t)(__uninit_start-__native_image_start),0xe2)!=TIKU_MEM_OK||
+        tiku_region_claim(__uninit_start,(uint32_t)(__uninit_end-__uninit_start),0xe2)!=TIKU_MEM_OK||
+        (&__tier_sram_start[0]!=&__uninit_end[0]&&tiku_region_claim(__uninit_end,(uint32_t)(__tier_sram_start-__uninit_end),0xe2)!=TIKU_MEM_OK)||
+#else
         tiku_region_claim(__native_image_start,(uint32_t)(__tier_sram_start-__native_image_start),0xe2)!=TIKU_MEM_OK||
+#endif
         tiku_region_claim(__tier_sram_end,(uint32_t)(__native_stack_top-__tier_sram_end),0xe3)!=TIKU_MEM_OK||
         tiku_tier_init()!=TIKU_MEM_OK||tiku_ipc_init(endpoints,3)!=TIKU_IPC_OK)return 0;
+#if TIKU_C6_STORAGE
+    tiku_c6_region_seal();
+#endif
     report[62]=TIKU_C6_BUILD;report[63]=0x52455331u;
 #if TIKU_C6_FIRMWARE
     if(tiku_region_claim(__native_stack_top,4096,0xe4)!=TIKU_MEM_OK)return 0;
@@ -260,6 +301,9 @@ uint32_t native_main(uint32_t *report)
     for(;;){
         uint64_t epoch=tiku_c6_sdio_epoch();
         tiku_watchdog_kick();tiku_link_pump(diagnostic);tiku_console_pump();
+#if TIKU_C6_STORAGE_TEST
+        tiku_c6_storage_test_pump();
+#endif
         if(epoch&&epoch!=host_epoch){
             if(!host_epoch){
                 if(tiku_ipc_wire_init(&wire,carrier,"c6/bulk",2,epoch,256,&sink)!=TIKU_IPC_OK)return 0;

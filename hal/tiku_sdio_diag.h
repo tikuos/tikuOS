@@ -24,6 +24,14 @@ static inline uint16_t tiku_sdio_diag_address(unsigned index)
 {
     return index < 64 ? (uint16_t)(0x6c+index+(index>23?4:0)+(index>31?12:0)) : UINT16_MAX;
 }
+/** @brief Encode a consumed counter and epoch check in communication register W6.
+ * The low 20 bits carry the byte count; bit 31 marks a published word.
+ */
+static inline uint32_t tiku_sdio_consumed_tag(uint32_t count,uint64_t epoch)
+{
+    uint32_t check=count^(count>>20)^(uint32_t)epoch^(uint32_t)(epoch>>32)^0x3641434bu;
+    return 0x80000000u|((check&0x7ffu)<<20)|(count&0xfffffu);
+}
 /** @brief CRC-16/CCITT-FALSE over sequence, length, used payload and session. */
 /* data spans limit+8 bytes and its payload length does not exceed limit. */
 static inline uint16_t tiku_sdio_diag_crc(const uint8_t *data, unsigned limit)

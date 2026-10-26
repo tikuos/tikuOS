@@ -38,6 +38,9 @@ static inline int tiku_mem_arch_in_exception(void)
     return ipsr != 0u;
 }
 #define TIKU_MEM_ARCH_IN_EXCEPTION() tiku_mem_arch_in_exception()
+#elif defined(PLATFORM_ESP32C6)
+extern volatile uint8_t tiku_c6_in_trap;
+#define TIKU_MEM_ARCH_IN_EXCEPTION() (tiku_c6_in_trap!=0)
 #elif defined(PLATFORM_ESP32P4)
 #include "arch/esp32p4/tiku_irq_arch.h"
 #define TIKU_MEM_ARCH_IN_EXCEPTION() tiku_p4_in_isr()

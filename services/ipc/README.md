@@ -156,11 +156,15 @@ Each owner profile supplies separate positive half-range clock intervals:
 
 | Parameter | Driver/service obligation |
 |-----------|---------------------------|
-| `burst` | Finish one started physical exchange or begin recovery |
+| `burst` | Finish one started bulk exchange or begin recovery |
 | `detect` | Report loss when ready/liveness ceases |
 | `abort` | Confirm final local access or report FAILED with quarantined stages |
 | `boot` | Reset into the selected mode and reach its ready indication |
 | `negotiate` | Bind that mode to the fresh local session |
+
+CONTROL and UPDATE jobs retain the absolute deadline admitted at submission.
+The P4 diagnostic client submits a two-second control deadline. A bulk job
+also has a submission deadline; its active exchange is bounded by `burst`.
 
 Callbacks perform bounded non-dispatching steps. The owner passes a full
 64-bit session/serial token to start, poll and abort. A delayed old token cannot

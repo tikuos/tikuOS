@@ -36,6 +36,15 @@ section attributes in `kernel/`, `interfaces/`, `drivers/`, `boot/`, `hal/`,
 `apps/`, `services/`, `shell/` and `basic/`, except in `tiku_mem.h` and the
 `mrambench` command; it does not scan `arch/`.
 
+The C6 firmware profile with `C6_STORAGE=1` uses PMA entries 13 and 14 to
+protect its durable SRAM span. An unbracketed store faults and enters the
+native abort path. Its 8176-byte mirror image includes a fixed layout prefix
+and a 4112-byte sector undo record. `TIKU_DURABLE_ARCH` places that port
+recovery record at the linker-defined offset; application data uses
+`TIKU_DURABLE` and persist cells.
+Its retained SRAM survives ROM software reset within the same linked image;
+EN-driven restart is excluded from that retention contract.
+
 Ambiq's `.persistent` is physically SRAM mirrored to MRAM by a flush; it is
 not a place for high-churn buffers.  RP2350 allocations that fall to the
 NVM tier are flash and fault on write; `TIKU_TIER_SRAM_SIZE` and the
@@ -71,7 +80,9 @@ is no per-part file-count table.
 
 ## SRAM tier carve
 
-`TIKU_MEM_NVM_ENABLE` defaults to 1. The C6 resident profile sets it to 0:
+`TIKU_MEM_NVM_ENABLE` defaults to 1. The C6 profiles set it to `C6_STORAGE`,
+which defaults to zero and requires the firmware profile when enabled.
+With it disabled,
 the tier publishes no NVM backing, an NVM allocation is refused and
 `tiku_tier_nvm_write()` returns `TIKU_MEM_ERR_NOT_FOUND`.
 

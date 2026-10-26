@@ -108,7 +108,8 @@ application. It rejects enabled shell and BASIC build flags. The radio
 reservation does not enable a radio driver. Native code, handlers and DMA
 stages reside in SRAM. During installation the native kernel is stopped;
 the preserved SDK recovery and factory applications perform flash operations
-using their own flash/cache handling. No native XIP mapping is configured.
+using their own flash/cache handling. `C6_STORAGE=0` leaves native flash
+mapping and durable storage disabled.
 
 Build the package with a preserved recovery image from the target board:
 
@@ -144,8 +145,8 @@ versioned flash map retains these regions:
 | Factory application | `[0x10000,0x190000)` | Preserve |
 | Native/recovery application | `[0x190000,0x310000)` | Update |
 | Resident owner and banks | `[0x310000,0x331000)` | Preserve |
-| File-store candidate | `[0x331000,0x3fc000)` | Unclaimed; preserve contents |
-| Durable-mirror candidate | `[0x3fc000,0x400000)` | Unclaimed; preserve contents |
+| NVM region | `[0x331000,0x3fc000)` | Preserve; native storage uses it with `C6_STORAGE=1` |
+| Durable mirrors | `[0x3fc000,0x400000)` | Preserve; native storage uses them with `C6_STORAGE=1` |
 
 The installer does not migrate partitions or format storage. It saves the
 previous application and a flushed host transaction journal before selecting
@@ -353,11 +354,89 @@ until another diagnostic reply replaces it.
 P4 recovery interprets those observations only when the captured envelope
 has a valid IPCE reply; another diagnostic response has no startup trace.
 
+## Durable storage
+
+`C6_STORAGE=1` enables native storage in the firmware profile. It defaults
+to zero. The installed 4 MiB geometry, ROM chip record and resident ownership
+record must match the port's flash map before writes are admitted. Native
+code and flash staging remain in SRAM. Reads use the mapping at `0x42000000`;
+SPI1 programs pages of at most 256 bytes and erases 4 KiB sectors with
+interrupts masked and the cache suspended. Readback verifies each operation.
+An I/O failure disables further flash writes until reset. ISR calls,
+non-SRAM program sources and writes below `0x331000` are refused.
+
+The NVM region has 812 KiB. The shared layout service assigns its first
+32 KiB to the NVM allocator by default and derives file-store capacity from
+the remaining extent: 192 files and 193 data slots with this split. A slot
+occupies one 4 KiB sector and carries 4092 payload bytes; files may span
+contiguous slots. Mount does not format. Blank-region provisioning and
+foreign or malformed ownership follow the shared layout contract.
+
+Two alternating 8 KiB mirrors store the durable SRAM image. Each has a
+16-byte CRC, size, generation and magic header; magic is programmed last.
+The live image is limited to 8176 bytes, including the layout prefix and a
+4112-byte sector undo record at image offset 1024. The linker and package
+validator enforce these bounds. The remaining durable capacity depends on
+the linked persist-cell registry and application objects.
+
+Region writes preserve bytes outside their range. Before a sector erase
+or aligned four-byte update, the backend commits the old sector to the
+durable mirror. It clears that undo record durably before returning success.
+Startup replays a pending record before cell migration or layout admission.
+Multi-sector raw writes can persist a prefix; TFS provides its file commit
+contract above the backend. Invalid mirror generations, CRC failures without
+a valid alternate, and malformed undo records hold storage.
+
+PMA entries 13 and 14 make the durable SRAM span read-only outside an NVM
+write window. An unbracketed store raises a store access fault and enters
+the native abort path. Persist-cell commits return the mirror flush status.
+Unchanged mirror images and page ranges do not issue program commands.
+Changed images erase the alternate mirror; sector undo adds mirror commits.
+This backend has no wear leveling. Use SRAM for frequently changing buffers.
+
+The P4 publishes a consumed-packet word in communication register W6 only
+after its receive DMA completes. The C6 checks the encoded byte count and
+epoch check bits before accepting that acknowledgement as send completion. Both DMA
+descriptors must have returned before buffers can be reused. Host interrupt
+register W7 is excluded from acknowledgement writes. CONTROL requests use
+their admitted deadline; the P4 diagnostic client admits two seconds.
+Storage transactions require the matching P4 acknowledgement and control
+deadline implementation.
+
+Build and exercise the storage test profile:
+
+```sh
+make MCU=esp32c6 C6_PROFILE=firmware C6_STORAGE=1 C6_STORAGE_TEST=1 \
+    C6_BUILD=1 firmware-image C6_RECOVERY_IMAGE=/path/to/tiku_c6_access.bin
+python3 -B tools/esp32c6_storage_qualify.py \
+    --port /dev/serial/by-id/your-p4 --p4-serial your-usb-serial \
+    --build 1 --output /path/to/new-capture --allow-fixture-writes
+```
+
+The qualifier writes and removes `_m4_packet` and changes its test persist
+cell. `--fill-empty-store` requires an empty store and creates, verifies
+capacity refusal, and removes `_m4_NNN` fixtures. `--pause-packets` records
+storage tests with packet pumping disabled. These are separate from tests
+with concurrent packet traffic. EN reset preserves flash supply; physical
+power interruption requires a separate fixture or operator test.
+Retained SRAM is qualified across ROM software reset within the same
+linked image. An EN-driven restart has no SRAM retention guarantee.
+
+`esp32c6_storage_reset_qualify.py` uses the same port, identity, build,
+output and fixture-write arguments. It requires a P4 built with
+`EXTRA_CFLAGS=-DTIKU_SHELL_CMD_DELAY=1`. It checks software-reset retention
+and interrupts cell/file commits after selected completed flash operations.
+The P4 delay prevents its automatic recovery from changing C6 reset cause
+before the native boot records it. Byte-level interruption coverage is in
+the host model; this board test does not interrupt a flash instruction or
+remove flash power.
+
 ## Checks
 
 ```sh
 make -C TikuBench/tests/host/kernel ipc ipc-transports c6-sdio p4-sdmmc
 make -C TikuBench/tests/host/kernel c6-threads
+make -C TikuBench/tests/host/kernel c6-storage
 python3 TikuBench/tests/host/kernel/test_esp32c6_resident.py
 python3 -B TikuBench/tests/host/kernel/test_esp32c6_firmware.py
 python3 tools/esp32c6_sdio_qualify.py --port /dev/serial/by-id/your-p4 \

@@ -48,6 +48,13 @@ def native_layout(elf,native):
         lo=names.get(start,0);hi=names.get(end,0)
         if not BASE<=lo<hi<=END-4096:raise ValueError('invalid SRAM span: '+name)
         spans[name]={'start':lo,'bytes':hi-lo}
+    for name,start,end,ceiling in [('durable','__uninit_start','__uninit_end',8176),
+                                   ('retained','__retained_start','__retained_end',4096)]:
+        if start not in names and end not in names:continue
+        lo=names.get(start,0);hi=names.get(end,0)
+        if not BASE<=lo<=hi<=END-4096 or hi-lo>ceiling:
+            raise ValueError('invalid SRAM span: '+name)
+        if hi>lo:spans[name]={'start':lo,'bytes':hi-lo}
     ordered=sorted((x['start'],x['start']+x['bytes']) for x in spans.values())
     if any(a[1]>b[0] for a,b in zip(ordered,ordered[1:])):raise ValueError('SRAM overlap')
     if (spans['workers']['bytes']!=32768 or spans['radio']['bytes']!=65536 or
@@ -56,6 +63,11 @@ def native_layout(elf,native):
             names.get('__c6_tier_floor',0)<65536 or
             names.get('__native_stack_top')!=END-4096):
         raise ValueError('C6 firmware reservation or tier budget')
+    if '__c6_recovery_start' in names or '__c6_recovery_end' in names:
+        lo=names.get('__c6_recovery_start',0);hi=names.get('__c6_recovery_end',0)
+        if hi!=lo and (lo!=names.get('__uninit_start',0)+1024 or hi-lo!=4112 or
+                       hi>names.get('__uninit_end',0)):
+            raise ValueError('C6 durable recovery-control layout')
     allocated=[]
     for _,kind,flags,address,offset,length,*_ in sections:
         if not flags&2 or not length:continue

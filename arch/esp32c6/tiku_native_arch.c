@@ -22,6 +22,9 @@
 #if TIKU_C6_THREAD_TEST
 #include <TikuBench/tests/esp32c6/test_threads.h>
 #endif
+#if TIKU_C6_STORAGE_TEST
+#include <TikuBench/tests/esp32c6/test_storage.h>
+#endif
 
 #define TIMER_BIT (1u<<23)
 static const uint32_t timer_registers[]={0,0x24,0x28,0x38,0x64};
@@ -129,9 +132,12 @@ void native_hardware_restore(void)
     hardware_owned=0;
 }
 
-uint32_t *native_trap_dispatch(uint32_t *frame)
+static uint32_t *dispatch(uint32_t *frame)
 {
     uint32_t cause=frame[34];
+#if TIKU_C6_STORAGE_TEST
+    if(tiku_c6_storage_test_trap(frame))return frame;
+#endif
 #if TIKU_THREADS_ENABLE
     if(cause==((1u<<31)|C6_SWITCH_IRQ))return tiku_c6_thread_dispatch(frame);
 #endif
@@ -258,4 +264,10 @@ uint32_t tiku_c6_qualify(uint32_t *report)
                report[20]==1 && report[21]==2 && report[27]==1 && report[28]==2 &&
                !report[29] && !report[32] && report[50]==(1u<<C6_CPU_IRQ) && report[56]==report[57];
     return report[31]?0x43364b52u:0;
+}
+
+volatile uint8_t tiku_c6_in_trap;
+uint32_t *native_trap_dispatch(uint32_t *frame)
+{
+    tiku_c6_in_trap=1;frame=dispatch(frame);tiku_c6_in_trap=0;return frame;
 }
