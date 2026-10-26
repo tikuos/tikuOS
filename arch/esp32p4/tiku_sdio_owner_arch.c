@@ -95,11 +95,23 @@ static tiku_ipc_err_t ready(void *context,tiku_sdio_mode_t mode)
     r=tiku_p4_sdmmc_byte(0,0,3,b);
     return !r&&(b[0]&2)?TIKU_IPC_OK:TIKU_IPC_AGAIN;
 }
-/** @brief Reset into the resident loader, or adopt an explicitly requested GO. */
+/** @brief Select recovery or native entry and reset, retaining resident GO adoption. */
 static tiku_ipc_err_t reset_to(void *context,tiku_sdio_mode_t mode)
 {
     tiku_p4_sdio_owner_t *c=context;
     if(mode==TIKU_SDIO_NATIVE){
+#if TIKU_C6_COLD_BOOT_ENABLE
+        tiku_p4_sdmmc_peer_recovery(0);
+        if(!c->go){
+            if(!c->resetting){
+                tiku_p4_sdmmc_peer_enable(0);c->resetting=1;
+                c->reset_until=tiku_clock_time()+2;return TIKU_IPC_AGAIN;
+            }
+            if(TIKU_CLOCK_LT(tiku_clock_time(),c->reset_until))return TIKU_IPC_AGAIN;
+            tiku_p4_sdmmc_peer_enable(1);c->resetting=0;
+            c->go=1;
+        }
+#endif
         if(!c->go)return TIKU_IPC_UNSUPPORTED;
         /* Native resets the target peripheral; CMD0 clears the inherited SDIO bus state. */
         c->go=0;c->selected=0;c->enumeration=1;
@@ -107,6 +119,9 @@ static tiku_ipc_err_t reset_to(void *context,tiku_sdio_mode_t mode)
         c->booting=1;c->reset_until=tiku_clock_time()+2u*TIKU_CLOCK_SECOND;
         return tiku_p4_sdmmc_clock(400000);
     }
+#if TIKU_C6_COLD_BOOT_ENABLE
+    tiku_p4_sdmmc_peer_recovery(1);
+#endif
     if(!c->resetting){
         tiku_p4_sdmmc_status_t hardware;
         tiku_p4_sdmmc_status(&hardware);

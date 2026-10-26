@@ -2616,6 +2616,13 @@ ifeq ($(TIKU_EXP_C6_ACCESS),1)
 $(error Native SDMMC and the experimental C6 GPIO probe cannot own the same bus)
 endif
 CFLAGS += -DTIKU_HAS_SDIO_C6=1
+TIKU_C6_COLD_BOOT_ENABLE ?= 0
+ifneq ($(filter $(TIKU_C6_COLD_BOOT_ENABLE),0 1),$(TIKU_C6_COLD_BOOT_ENABLE))
+$(error TIKU_C6_COLD_BOOT_ENABLE must be 0 or 1)
+endif
+ifeq ($(TIKU_C6_COLD_BOOT_ENABLE),1)
+CFLAGS += -DTIKU_C6_COLD_BOOT_ENABLE=1
+endif
 SRCS += arch/esp32p4/tiku_sdmmc_arch.c arch/esp32p4/tiku_sdio_owner_arch.c boot/tiku_boot_c6.c
 ifeq ($(TIKU_SHELL_ENABLE),1)
 SRCS += shell/commands/tiku_shell_cmd_ipc_sdio.c

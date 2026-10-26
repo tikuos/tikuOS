@@ -30,6 +30,9 @@ static struct {
     tiku_ipc_packet_io_t io;
     uint32_t fault_every,attempts,faults;
     uint8_t packets;
+#if TIKU_C6_COLD_BOOT_ENABLE
+    uint8_t startup;
+#endif
 } c6 __attribute__((section(".p4.ipc"),aligned(64)));
 
 /** @brief Invalidate logical work when the physical owner's mode or session changes. */
@@ -70,6 +73,14 @@ static tiku_ipc_err_t start(void *unused,uint16_t endpoint,const tiku_ipc_transf
 static void progress(void *unused,uint16_t endpoint,uint16_t budget)
 {
     (void)unused;
+#if TIKU_C6_COLD_BOOT_ENABLE
+    if(!c6.startup){
+        c6.startup=1;
+        (void)tiku_ipc_sdio_mode(&c6.owner,TIKU_SDIO_NATIVE);
+    }
+    if(c6.owner.state==TIKU_SDIO_FAILED&&c6.owner.wanted==TIKU_SDIO_NATIVE)
+        (void)tiku_ipc_sdio_mode(&c6.owner,TIKU_SDIO_LOADER);
+#endif
     tiku_ipc_sdio_step(&c6.owner);
     if(c6.packets&&c6.owner.state==TIKU_SDIO_READY&&c6.owner.mode==TIKU_SDIO_NATIVE)
         tiku_ipc_wire_pump(&c6.wire,budget);
@@ -96,6 +107,9 @@ int tiku_boot_c6_init(uint16_t endpoint)
     /* Four bounded register steps fit one burst; recovery has distinct budgets. */
     const tiku_sdio_profile_t profile={64,128,8,512,256};
     c6.packets=1;
+#if TIKU_C6_COLD_BOOT_ENABLE
+    c6.startup=0;
+#endif
     if(tiku_ipc_epoch_fresh(&epoch)!=TIKU_IPC_OK)return -1;
     session=(uint32_t)epoch;if(!session||session==UINT32_MAX)session=1;
     c6.dma=(tiku_ipc_access_domain_t){(uintptr_t)__ipc_device_start,

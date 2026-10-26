@@ -347,6 +347,17 @@ void tiku_p4_sdmmc_peer_enable(uint8_t enabled)
     TIKU_P4_REG_WRITE(0x500e0030u,BIT(54));
 }
 
+void tiku_p4_sdmmc_peer_recovery(uint8_t recovery)
+{
+    TIKU_P4_REG_WRITE(0x500e0028u,BIT(6));
+    bits(0x5012b020u,1u<<4,0);
+    TIKU_P4_REG_WRITE(PIN_OUT(6),256u);
+    bits(PIN_CFG(6),(1u<<2)|(7u<<7)|(31u<<13),0);
+    bits(PIN_MUX(6),(7u<<12)|(1u<<7)|(1u<<8),(1u<<12)|(1u<<9));
+    TIKU_P4_REG_WRITE(recovery?0x500e0008u:0x500e000cu,BIT(6));
+    TIKU_P4_REG_WRITE(0x500e0024u,BIT(6));
+}
+
 tiku_ipc_err_t tiku_p4_sdmmc_close(void)
 {
     if(!state.opened)return TIKU_IPC_OK;

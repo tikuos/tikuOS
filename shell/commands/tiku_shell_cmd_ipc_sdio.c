@@ -356,12 +356,20 @@ void tiku_shell_ipc_sdio(uint8_t argc,const char *argv[])
     tiku_ipc_sdio_t *c=tiku_boot_c6_owner();
     if(argc<3||argc>4){
         SHELL_PRINTF("ipc sdio probe|reset|loader|bridge|qualify|stream|image|sensor|slow|corrupt|interrupt|pause|resume\n");
+#if TIKU_C6_COLD_BOOT_ENABLE
+        SHELL_PRINTF("ipc sdio native\n");
+#endif
         SHELL_PRINTF("ipc sdio console <command>|run <bank>\n");return;
     }
     if(!(tiku_vfs_caller_cap_get()&TIKU_VFS_CAP_SYS)){
         SHELL_PRINTF("SDMMC SYS capability required\n");return;
     }
     if(argc==4&&!strcmp(argv[2],"console"))r=native_command(argv[3]);
+#if TIKU_C6_COLD_BOOT_ENABLE
+    else if(argc==3&&!strcmp(argv[2],"native")){
+        r=tiku_ipc_sdio_mode(c,TIKU_SDIO_NATIVE);if(!r)r=wait_mode(TIKU_SDIO_NATIVE);
+    }
+#endif
     else if(argc==4&&!strcmp(argv[2],"run")&&strlen(argv[3])==1&&argv[3][0]>='0'&&argv[3][0]<='1')
         r=run_bank((unsigned)(argv[3][0]-'0'));
     else if(argc==3&&!strcmp(argv[2],"bridge"))r=loader_bridge();

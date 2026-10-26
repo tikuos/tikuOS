@@ -1,4 +1,4 @@
-# ESP32-C6 resident kernel
+# ESP32-C6 native kernel
 
 `MCU=esp32c6` builds a native RV32IMAC kernel for the C6 attached to the
 FireBeetle 2 ESP32-P4. The resident profile runs in a 64 KiB SRAM interval
@@ -13,6 +13,67 @@ The diagnostic application can be replaced with another wire sink. The
 profile has no VFS, durable-memory tier, threads or radio driver. Its USB
 console needs a connection to the C6's USB signals; the FireBeetle's P4 USB
 connector carries the SDIO diagnostic console.
+
+## Native flash entry
+
+`C6_PROFILE=cold` builds a native SRAM application entered by the board's
+installed ESP application bootloader. It initializes traps, timer and
+watchdog ownership, a wrapping CPU cycle counter and the SDIO DMA master's
+trusted access to SRAM. The native path starts TikuOS without entering the
+SDK application or issuing a resident GO. The bootloader runs at 80 MHz;
+the resident profile inherits the loader's CPU frequency.
+
+The application also preserves the installed `tiku-c6-access-1` recovery
+segments and their flash offsets. C6 GPIO2 samples the board WAKE wire at
+entry: low selects TikuOS, high selects the preserved SDK recovery entry.
+P4 GPIO6 drives WAKE and GPIO54 drives C6 EN. These are board-reserved
+signals. Recovery selection remains available when the native kernel fails
+before SDIO initialization. This route requires a valid combined app and
+bootloader; GPIO9 ROM-download selection remains a separate physical route.
+
+Build the native image and compose it with a preserved recovery application:
+
+```sh
+make MCU=esp32c6 C6_PROFILE=cold cold-image \
+    C6_RECOVERY_IMAGE=/path/to/tiku_c6_access.bin
+```
+
+Outputs reside in `build/esp32c6/cold`. `main.bin` is the native SRAM
+payload and `app.bin` is the ESP application-slot image. The composer checks
+the native ELF, recovery entry, segment bounds, checksum and SHA-256. It
+retains recovery segment bytes and positions, and refuses overlaps with
+the native 64 KiB arena. The upper 4 KiB are reserved for the entry caller
+stack and bounded early-stage/trap observations. That SRAM record has no
+reset-retention guarantee. Report words 58..61 expose the ROM reset reason,
+`0x434f4c44` cold-entry identity, inherited HP access filters and inherited
+SDIO security mode.
+
+The cold profile's `flash` target refuses resident-bank installation.
+`app.bin` belongs in a compatible application slot, with the factory image,
+boot prefix and resident banks preserved. Its creation does not modify a
+board. The recovery image must match the board's partition geometry and the
+compiled recovery entry, default `0x40800896`; another entry requires
+`C6_SDK_ENTRY` and a matching validated recovery image.
+
+Build the matching P4 firmware with
+`TIKU_IPC_ENABLE=1 TIKU_SDIO_C6_ENABLE=1 TIKU_C6_COLD_BOOT_ENABLE=1`.
+Its first SDIO service resets C6 into native entry. A native startup failure
+selects recovery-high and performs a bounded loader transition. A failed
+recovery attempt remains failed; the service does not retry indefinitely.
+The explicit `ipc sdio native` command resets into native flash entry.
+`ipc sdio loader` selects SDK recovery. The P4 cold-boot option requires an
+installed WAKE-selectable application; use the resident option for boards
+whose installed image requires selected-bank GO.
+
+```sh
+python3 tools/esp32c6_sdio_qualify.py --port /dev/serial/by-id/your-p4 \
+    --output /path/to/new-capture --cold-boot --warm-resets 10 \
+    --soak 65 --profiles image --recovery
+```
+
+Warm-reset evidence uses EN and the existing controller owner. Cold-power
+qualification requires removing board power and repeating the heartbeat,
+self-test and P4-console checks after reconnection.
 
 ## Build and update
 
@@ -76,7 +137,7 @@ through a second control
 exchange before publishing native-ready. Wire negotiation confirms both
 epochs before admitting payloads. The P4 can quiesce and reset into the
 loader without a native acknowledgement.
-Returning to native mode requires an explicit selected-bank GO.
+The resident profile returns to native mode through selected-bank GO.
 After GO the host starts enumeration with CMD0, then CMD5/3/7 and function
 configuration. The target peripheral reset invalidates the loader's bus
 state even when the CCCR version remains readable.

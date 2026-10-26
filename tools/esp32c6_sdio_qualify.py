@@ -24,6 +24,13 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'TikuBench'))
 from tikubench.core.ipc_sdio import expected_crc,validate_stream,validate_recovery
 
 
+def command_complete(text,value):
+    """Accept a completed SDMMC reply and prompt when command echo is absent."""
+    if not value:return 'tikuOS:/> ' in text
+    marker=text.rfind('SDMMC result=')
+    return marker>=0 and 'tikuOS:/> ' in text[marker:]
+
+
 def main():
     """Run selected profiles on an explicitly named, idle P4 USB console."""
     parser=argparse.ArgumentParser(description=__doc__)
@@ -31,7 +38,13 @@ def main():
     parser.add_argument('--output',required=True,type=Path)
     parser.add_argument('--profiles',nargs='+',choices=('raw','image','sensor','slow','corrupt'),default=['image','sensor','slow','corrupt'])
     parser.add_argument('--recovery',action='store_true')
+    parser.add_argument('--cold-boot',action='store_true')
+    parser.add_argument('--warm-resets',type=int,default=0)
+    parser.add_argument('--soak',type=int,default=0,metavar='SECONDS')
     args=parser.parse_args()
+    if (not 0<=args.warm_resets<=100 or not 0<=args.soak<=3600 or
+            (args.warm_resets and not args.cold_boot)):
+        parser.error('warm resets require --cold-boot; counts 0..100, soak 0..3600')
     args.output.mkdir(parents=True,exist_ok=False)
     sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'TikuBench'))
     from tikubench.core.frames import Splitter
@@ -50,8 +63,7 @@ def main():
             start=len(text);wire.write((value+'\n').encode());until=time.monotonic()+timeout
             while True:
                 pump();part=text[start:]
-                echo=value+'\r\n'
-                if echo in part and 'tikuOS:/> ' in part[part.index(echo)+len(echo):]:return part
+                if command_complete(part,value):return part
                 if time.monotonic()>until:raise TimeoutError(part[-2000:])
         def native(value):
             result=command('ipc sdio console "'+value+'"',15)
@@ -69,6 +81,28 @@ def main():
         observations['clock_khz']=[int(native('buskhz')) for _ in range(5)]
         if any(not 9500<=n<=10500 for n in observations['clock_khz']):raise ValueError('SDIO clock outside 10 MHz profile')
         observations['cpu_mhz']=int(native('r 7'))
+        boot_command='ipc sdio native' if args.cold_boot else 'ipc sdio run 0'
+        if args.cold_boot:
+            if int(native('r 59'))!=0x434f4c44:raise ValueError('cold-entry report missing')
+            observations['reset_reason']=int(native('r 58'))
+            observations['warm_resets']=[]
+            for index in range(args.warm_resets):
+                began=time.monotonic();result=command(boot_command,15)
+                if 'SDMMC result=0 state=2 mode=1 ' not in result or native('test')!='1':
+                    raise ValueError('native warm reset failed')
+                if int(native('r 59'))!=0x434f4c44:raise ValueError('reset used resident entry')
+                observations['warm_resets'].append(time.monotonic()-began)
+                print('native warm reset '+str(index+1)+' passed',flush=True)
+        if args.soak:
+            before=cycles();first_tick=int(native('ticks'));began=time.monotonic()
+            while time.monotonic()-began<args.soak:
+                time.sleep(max(0,min(5,args.soak-(time.monotonic()-began))))
+                if native('test')!='1' or int(native('r 12')):
+                    raise ValueError('native soak self-test/IRQ error')
+            elapsed=time.monotonic()-began;last_tick=int(native('ticks'));after=cycles()
+            if not last_tick>first_tick or not after>before:raise ValueError('native counters stopped')
+            observations['soak']={'seconds':elapsed,'ticks':last_tick-first_tick,
+                                  'scheduler_cycles':after-before}
         for profile in args.profiles:
             before=cycles();output=command('ipc sdio '+('stream' if profile=='raw' else profile))
             result=validate_stream(output,profile);after=cycles()
@@ -91,7 +125,7 @@ def main():
             if 'SDIO reset pending_dma=1 ready_loader=1 ' not in interrupted or 'result=0 live=0 free=4 quarantined=0' not in interrupted:
                 raise ValueError('DMA interruption failed: '+interrupted)
             observations['dma_interruption']=interrupted
-            boot=command('ipc sdio run 0',15)
+            boot=command(boot_command,15)
             if 'SDMMC result=0 state=2 mode=1 ' not in boot:raise ValueError('native restart after DMA interruption failed')
             began=time.monotonic();failure=command('ipc sdio console hang',15)
             if 'SDMMC result=-7 ' not in failure:raise ValueError('hung native did not time out')
@@ -100,7 +134,7 @@ def main():
                 elapsed=validate_recovery(time.monotonic()-began)
                 if 'state=2 mode=2 ' in probe:break
             observations['hung_native_loader_seconds']=elapsed
-            boot=command('ipc sdio run 0',15)
+            boot=command(boot_command,15)
             if 'SDMMC result=0 state=2 mode=1 ' not in boot or native('test')!='1':raise ValueError('explicit native recovery failed')
         observations['passed']=True
     print(json.dumps(observations,indent=2))

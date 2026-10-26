@@ -51,6 +51,8 @@ tiku_ipc_err_t tiku_p4_sdmmc_poll(void);
 uint8_t tiku_p4_sdmmc_abort(void);
 /** @brief Drive the wired C6 EN pad; callers provide bounded reset/boot timing. */
 void tiku_p4_sdmmc_peer_enable(uint8_t enabled);
+/** @brief Drive the board-reserved WAKE wire high for recovery or low for native entry. */
+void tiku_p4_sdmmc_peer_recovery(uint8_t recovery);
 /** @brief Copy cached observations without command execution. */
 void tiku_p4_sdmmc_status(tiku_p4_sdmmc_status_t *);
 #endif
