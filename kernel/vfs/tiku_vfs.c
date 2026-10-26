@@ -345,8 +345,8 @@ static int vfs_dyn_read(const char *path, char *buf, size_t max)
 /**
  * @brief Write or create a dynamic child through its directory's dyn ops.
  *
- * On success the directory is notified, which records a CHANGED event for
- * it; a directory has no watchers, since tiku_vfs_watch() takes files only.
+ * On success the directory is notified: the change ring records a CHANGED
+ * event for it and its watchers receive TIKU_EVENT_VFS.
  *
  * @return The write op's result, or TIKU_VFS_ENOENT when no dynamic directory
  *         holds @p path
@@ -1189,7 +1189,10 @@ int8_t tiku_vfs_watch(const char *path, struct tiku_process *p)
         return -1;
     }
     node = tiku_vfs_resolve(path);
-    if (node == NULL || node->type != TIKU_VFS_FILE) {
+    /* A file, or a directory whose children are dynamic: a write or an
+     * unlink of a child notifies the directory. */
+    if (node == NULL ||
+        (node->type != TIKU_VFS_FILE && node->dyn == NULL)) {
         return -1;
     }
 

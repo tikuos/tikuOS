@@ -688,12 +688,15 @@ int tiku_vfs_is_dir(const char *path);
 /*---------------------------------------------------------------------------*/
 
 /*
- * A process subscribes to a FILE node and receives TIKU_EVENT_VFS (data =
- * the node pointer) whenever the node changes.  Two paths notify a node:
+ * A process subscribes to a FILE node, or to a directory with dynamic
+ * children (/data), and receives TIKU_EVENT_VFS (data = the node pointer)
+ * whenever the node changes.  Three paths notify a node:
  *
  *   1. Every successful tiku_vfs_write() to it.
  *   2. A driver whose value changes without a write (a GPIO edge, a radio
  *      scan) calls tiku_vfs_notify().
+ *   3. For a dynamic directory, every successful write or unlink of one of
+ *      its children.
  *
  * The node pointer is the subscription key: static and mounted nodes are
  * never moved or freed, so their addresses are stable for the boot.  The
@@ -719,16 +722,16 @@ struct tiku_process;
 #endif
 
 /**
- * @brief Subscribe a process to changes of a FILE node.
+ * @brief Subscribe a process to changes of a FILE node or dynamic directory.
  *
  * Resolves @p path now and stores the (node, process) pair in a free slot;
  * subscribing the same pair twice returns the existing slot.  Thereafter each
  * write and each tiku_vfs_notify() posts TIKU_EVENT_VFS to @p p, node as data.
  *
- * @param path  Absolute path to a FILE node
+ * @param path  Absolute path to a FILE node or a directory with dyn ops
  * @param p     Receiving process
- * @return Slot index (>= 0), or -1 on bad path, non-FILE node,
- *         NULL process, or full table
+ * @return Slot index (>= 0), or -1 on bad path, a directory without dyn
+ *         ops, NULL process, or full table
  * @note Process context only.
  */
 int8_t tiku_vfs_watch(const char *path, struct tiku_process *p);

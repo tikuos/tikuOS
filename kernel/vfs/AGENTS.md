@@ -72,7 +72,9 @@ without reinitializing hardware, shell state or the GUI channel.
 `tiku_vfs_watch(path, &proc)` makes every successful `tiku_vfs_write()` to
 that node post `TIKU_EVENT_VFS` (data = the `const tiku_vfs_node_t *`) to
 the process; a driver whose value changes without a write calls
-`tiku_vfs_notify(node)` (ISR-safe).  `unwatch` and `unwatch_all` release;
+`tiku_vfs_notify(node)` (ISR-safe).  A directory with dynamic children
+(`/data`) can be watched too: a write or an unlink of a child posts the
+event with the directory as its node.  `unwatch` and `unwatch_all` release;
 subscribing is idempotent; the table is `TIKU_VFS_WATCH_MAX` (8) SRAM slots,
 per boot.  An event means "touched, re-read for the value": no coalescing,
 and a write of an unchanged value still posts one.  The shell's rules and
@@ -121,7 +123,8 @@ cell.
 
 Host: `TikuBench/tests/host/kernel/test_vfs_assembly.c` (built per
 profile), `test_vfs*.c`; `mutations/vfs.py` lists the source mutations the
-streamed-read checks in `test_vfs_model.c` and `test_vfs_data.c` must catch
-(`python3 mutate.py --port vfs`).  Board: the `vfs-c-core` (with
-`test_vfs_stream.c`), `vfs-c-tree`, `vfs-c-watch`, `vfs-tree`,
+streamed-read and dynamic-directory watch checks in `test_vfs_model.c` and
+`test_vfs_data.c` must catch (`python3 mutate.py --port vfs`).  Board: the
+`vfs-c-core` (with `test_vfs_stream.c`), `vfs-c-tree`, `vfs-c-watch` (with
+`/data` watched in `test_vfs_watch.c`), `vfs-tree`,
 `vfs-observe` and `vfs-events` suites.
