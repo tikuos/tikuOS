@@ -26,6 +26,10 @@ static const tiku_console_wire_t io={.putc=putc_byte,.rx_ready=ready,.getc=getc_
 const tiku_console_wire_t *tiku_c6_console_io(void){return &io;}
 unsigned tiku_c6_console_drops(void){return drops;}
 
+#if !TIKU_SHELL_ENABLE
 void tiku_uart_putc(char ch){putc_byte(ch);}
 uint8_t tiku_uart_rx_ready(void){return ready();}
 int tiku_uart_getc(void){return getc_byte();}
+
+unsigned int tiku_uart_overrun_count(void){return drops;}
+#endif

@@ -9,7 +9,7 @@
 # esp32c6_transport.py - Exclusive P4 console and checked C6 bridge exchanges.
 #
 # SPDX-License-Identifier: Apache-2.0
-"""Carry bounded loader and factory requests over the P4's owned SDIO path."""
+"""Carry loader, factory and remote shell frames through the owned P4 console."""
 import json
 from pathlib import Path
 import re
@@ -35,8 +35,8 @@ class Console:
         try:self.log=(Path(directory)/'console.log').open('a')
         except Exception:
             self.wire.close();raise
-        self.split=Splitter(markers=(0xf4,0xf5));self.frame=frame
-        self.text='';self.incoming=[];self.sequence=0;self.active=False
+        self.split=Splitter(markers=(0xf4,0xf5,0xf6));self.frame=frame
+        self.text='';self.incoming=[];self.remote_incoming=[];self.sequence=0;self.active=False
         try:acquire_prompt(self.wire,self.pump,lambda:'tikuOS:/> ' in self.text)
         except Exception:
             self.wire.close();self.log.close();raise
@@ -47,6 +47,7 @@ class Console:
         self.text+=got;self.log.write(got);self.log.flush()
         for mark,data in self.split.take_frames():
             if mark==0xf5:self.incoming.append(response(data))
+            elif mark==0xf6:self.remote_incoming.append(bytes(data))
 
     def wait(self,condition,timeout=15):
         until=time.monotonic()+timeout

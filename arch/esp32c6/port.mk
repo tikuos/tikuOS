@@ -8,6 +8,17 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 C6_PROFILE ?= resident
+ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
+TIKU_SHELL_ENABLE ?= 1
+ifneq ($(TIKU_SHELL_ENABLE),1)
+$(error C6 BASIC requires TIKU_SHELL_ENABLE=1)
+endif
+endif
+ifneq ($(C6_PROFILE),firmware)
+ifneq ($(filter 1,$(TIKU_SHELL_ENABLE) $(TIKU_SHELL_BASIC_ENABLE)),)
+$(error The C6 shell requires C6_PROFILE=firmware)
+endif
+endif
 TIKU_THREADS_ENABLE ?= $(if $(filter firmware,$(C6_PROFILE)),1,0)
 BOARD ?= firebeetle2_esp32p4_c6
 ifeq ($(filter $(C6_PROFILE),resident cold firmware),)
@@ -20,6 +31,12 @@ ROOT := $(CURDIR)
 BUILD_DIR ?= build/esp32c6/$(C6_PROFILE)
 C6_RAM_BASE ?= 0x4080a000
 C6_BUILD ?= 1
+C6_PERIPHERAL_TEST ?= 0
+ifeq ($(C6_PERIPHERAL_TEST),1)
+ifneq ($(C6_PROFILE),firmware)
+$(error C6_PERIPHERAL_TEST requires C6_PROFILE=firmware)
+endif
+endif
 C6_THREAD_TEST ?= 0
 C6_STORAGE_TEST ?= 0
 C6_STORAGE ?= 0
@@ -96,8 +113,13 @@ C6_ASMS := arch/esp32c6/tiku_cold_entry.S arch/esp32c6/tiku_irq_probe.S
 CFLAGS += -DC6_SDK_ENTRY=$(C6_SDK_ENTRY) -Wl,--wrap=native_main,--wrap=tiku_c6_qualify,--entry=c6_cold_entry
 endif
 ifeq ($(C6_PROFILE),firmware)
-ifneq ($(filter 1,$(TIKU_SHELL_ENABLE) $(TIKU_SHELL_BASIC_ENABLE)),)
-$(error C6_PROFILE=firmware provides the core; shell and BASIC require their ports)
+include $(ROOT)/arch/esp32c6/firmware.mk
+ifeq ($(C6_PERIPHERAL_TEST),1)
+ifneq ($(TIKU_SHELL_ENABLE)$(C6_STORAGE),11)
+$(error C6_PERIPHERAL_TEST requires the shell and storage profile)
+endif
+CFLAGS += -DTIKU_C6_PERIPHERAL_TEST=1
+C6_SRCS += TikuBench/tests/esp32c6/test_peripherals.c
 endif
 C6_TIER_MIN ?= 196608
 CFLAGS += -DTIKU_C6_FIRMWARE=1 -DTIKU_C6_TIER_FLOOR=$(C6_TIER_MIN)
@@ -124,7 +146,7 @@ ifeq ($(C6_PROFILE),firmware)
 $(BUILD_DIR)/native.ld: arch/esp32c6/esp32c6_firmware.ld.in
 	@mkdir -p $(dir $@)
 	sed -e 's/@BASE@/$(C6_RAM_BASE)/g' -e 's/@BUILD@/$(C6_BUILD)/g' \
-	 -e 's/@TIER_FLOOR@/$(C6_TIER_MIN)/g' -e 's/@STORAGE@/$(C6_STORAGE)/g' $< > $@
+	 -e 's/@SHELL@/$(if $(filter 1,$(TIKU_SHELL_ENABLE)),1,0)/g' -e 's/@TIER_FLOOR@/$(C6_TIER_MIN)/g' -e 's/@STORAGE@/$(C6_STORAGE)/g' $< > $@
 else
 $(BUILD_DIR)/native.ld: arch/esp32c6/esp32c6_resident.ld.in
 	@mkdir -p $(dir $@)
@@ -135,10 +157,10 @@ endif
 endif
 $(BUILD_DIR)/main.elf: $(C6_OBJS) $(BUILD_DIR)/native.ld
 	$(CC) $(CFLAGS) -nostdlib -nostartfiles -Wl,--gc-sections,--build-id=none,-Map=$(BUILD_DIR)/main.map \
-	 -T$(BUILD_DIR)/native.ld -o $@ $(C6_OBJS) -lgcc
+	 -T$(BUILD_DIR)/native.ld -o $@ $(C6_OBJS) $(C6_LIBS) -lgcc
 	$(SIZE) $@
 $(BUILD_DIR)/main.bin: $(BUILD_DIR)/main.elf
-	$(OBJCOPY) -O binary $< $@
+	$(OBJCOPY) -O binary --remove-section=.xip $< $@
 $(BUILD_DIR)/manifest.bin: $(BUILD_DIR)/main.bin tools/esp32c6_resident_image.py
 	python3 tools/esp32c6_resident_image.py --elf $(BUILD_DIR)/main.elf \
 	 --image $< --base $(C6_RAM_BASE) --build $(C6_BUILD) --output $@
@@ -155,10 +177,12 @@ cold-image: all
 endif
 ifeq ($(C6_PROFILE),firmware)
 .PHONY: firmware-image
-firmware-image: all
+$(BUILD_DIR)/xip.bin: $(BUILD_DIR)/main.elf
+	$(OBJCOPY) -O binary --only-section=.xip $< $@
+firmware-image: all $(BUILD_DIR)/xip.bin
 	@test -n '$(C6_RECOVERY_IMAGE)' || { echo 'Set C6_RECOVERY_IMAGE to the preserved recovery application'; exit 1; }
 	$(C6_PYTHON) tools/esp32c6_firmware_image.py --recovery '$(C6_RECOVERY_IMAGE)' \
-	 --native $(BUILD_DIR)/main.bin --elf $(BUILD_DIR)/main.elf \
+	 --native $(BUILD_DIR)/main.bin --elf $(BUILD_DIR)/main.elf --xip $(BUILD_DIR)/xip.bin \
 	 --output $(BUILD_DIR)/app.bin --metadata $(BUILD_DIR)/firmware.json
 flash: firmware-image
 	@test -n '$(C6_P4_PORT)' -a -n '$(C6_P4_SERIAL)' -a -n '$(C6_PEER_MAC)' || \

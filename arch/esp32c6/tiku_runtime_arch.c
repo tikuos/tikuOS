@@ -34,6 +34,7 @@ void tiku_atomic_exit(void)
 static void idle_wait(void){__asm__ volatile("wfi":::"memory");}
 tiku_cpu_idle_enter_t tiku_cpu_idle_hook(tiku_cpu_idle_mode_t mode)
 {return mode==TIKU_CPU_IDLE_LIGHT?idle_wait:NULL;}
+#if !TIKU_SHELL_ENABLE
 void tiku_vfs_unwatch_all(struct tiku_process *process)
 {
     /* This profile creates no VFS nodes or watches. */
@@ -45,6 +46,7 @@ void tiku_watchdog_kick(void)
     C6_REG(0x60008060u)=1;
     C6_REG(0x60008064u)=0;
 }
+#endif
 void tiku_clock_arch_init(void) {}
 unsigned long tiku_clock_arch_time(void) {return native_ticks;}
 unsigned long tiku_clock_arch_seconds(void) {return native_ticks/128u;}
@@ -94,3 +96,8 @@ char *strchr(const char *text,int ch)
     do{if((unsigned char)*text==(unsigned char)ch)return (char *)text;}while(*text++);
     return NULL;
 }
+
+#if TIKU_SHELL_ENABLE
+/** @brief Refuse libc heap allocation; kernel tiers own application memory. */
+void *_sbrk(int increment){(void)increment;return (void *)-1;}
+#endif

@@ -77,6 +77,13 @@ extern char __tiku_xip_start;
 extern char __tiku_xip_end;
 extern char __tiku_flash_payload_bytes;
 #endif
+#if defined(PLATFORM_ESP32C6)
+extern unsigned char __native_image_start[];
+extern unsigned char __worker_reserve_start[],__worker_reserve_end[];
+extern unsigned char __radio_reserve_start[],__radio_reserve_end[];
+extern unsigned char __native_irq_bottom[],__native_irq_top[];
+extern unsigned char __native_stack_top[],__native_arena_end[];
+#endif
 #if defined(PLATFORM_ESP32C5)
 extern char __tiku_flash_payload_bytes;
 #endif
@@ -151,7 +158,7 @@ stack_used(void)
         return (used > 0xFFFFU) ? 0xFFFFU : (uint16_t)used;
     }
     return 0;
-#elif defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5)
+#elif defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32C6)
     uintptr_t sp;
     uintptr_t top = (uintptr_t)&__stack;
     __asm__ volatile ("mv %0, sp" : "=r"(sp));
@@ -228,11 +235,16 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
     fram_used = (unsigned long)(uintptr_t)&__tiku_flash_payload_bytes;
 #endif
 
+#if defined(PLATFORM_ESP32C6)
+    sram_static=(unsigned long)((uintptr_t)&_end-(uintptr_t)__native_image_start);
+    fram_used=fram_total;
+#endif
+
     /* ---- Compile-time (fixed at link) ---- */
     SHELL_PRINTF(SH_YELLOW "--- Compile-time ---" SH_RST "\n");
     SHELL_PRINTF(SH_BOLD "SRAM" SH_RST "  %5lu total\n",
                  (unsigned long)sram_total);
-#if defined(PLATFORM_ESP32C5)
+#if defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32C6)
     SHELL_PRINTF("  image+static %5lu\n", (unsigned long)sram_static);
 #else
     SHELL_PRINTF("  .data+.bss  %5lu\n", (unsigned long)sram_static);
@@ -252,6 +264,21 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
             SHELL_PRINTF("  tier bank%u  %5lu\n", primary ? 1u : 2u,
                          (unsigned long)st.total_bytes);
             if (primary) { sram_static += st.total_bytes; }
+        }
+    }
+#endif
+#if defined(PLATFORM_ESP32C6)
+    {
+        const struct {const char *name;const unsigned char *lo,*hi;} spans[]={
+            {"workers",__worker_reserve_start,__worker_reserve_end},
+            {"radio",__radio_reserve_start,__radio_reserve_end},
+            {"irq stack",__native_irq_bottom,__native_irq_top},
+            {"cold entry",__native_stack_top,__native_arena_end},
+            {"alignment",(unsigned char *)&_end,(unsigned char *)&__tier_sram_start}
+        };
+        for(unsigned n=0;n<sizeof spans/sizeof spans[0];n++){
+            unsigned long bytes=(uintptr_t)spans[n].hi-(uintptr_t)spans[n].lo;
+            SHELL_PRINTF("  %-12s %5lu\n",spans[n].name,bytes);sram_static+=bytes;
         }
     }
 #endif
@@ -275,9 +302,13 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
                  (unsigned long)fram_total);
     /* in use = fram_used without the IVT: on MSP430 code, rodata, persistent
      * and data-init (plus .lower.text in the large model). */
+#if defined(PLATFORM_ESP32C6)
+    SHELL_PRINTF("  reserved    %5lu\n",fram_used);
+#else
     SHELL_PRINTF("  in use      %5lu\n",
                  (unsigned long)(fram_used > TIKU_FREE_IVT_BYTES
                  ? (fram_used - TIKU_FREE_IVT_BYTES) : 0));
+#endif
 #if defined(PLATFORM_MSP430)
     /* Only on MSP430 is the interrupt-vector table inside the NVM window;
      * elsewhere TIKU_FREE_IVT_BYTES is 0 and no ivt row prints. */

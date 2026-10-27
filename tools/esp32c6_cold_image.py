@@ -96,6 +96,34 @@ def compose(recovery,native,*,limit=LIMIT,max_native=49152):
             raise ValueError('preserved recovery segment changed')
     return bytes(out)
 
+def append_xip(app, payload):
+    """Append ignored segment bytes at physical 0x210000 inside application OTA1."""
+    original=checked(app)
+    if not payload or len(payload)%4 or len(payload)>0x40000:
+        raise ValueError('C6 XIP payload bounds')
+    # The ROM ignores address-zero padding segments. The flash map is linear:
+    # OTA1 base 0x190000 + payload offset 0x80000 = physical 0x210000.
+    offset=0x80000
+    out=bytearray(app[:24]);out[1]+=1
+    if out[1]>16:raise ValueError('no segment slots for C6 XIP')
+    pos=24;checksum=0xef
+    for segment in original.segments:
+        size=8+len(segment.data)
+        out.extend(app[pos:pos+size]);pos+=size
+        for value in segment.data:checksum^=value
+    padding=offset-len(out)-8
+    if padding<0 or padding%4:raise ValueError('C6 XIP padding bounds')
+    out.extend(struct.pack('<II',0,padding+len(payload)));out.extend(bytes(padding))
+    out.extend(payload)
+    for value in payload:checksum^=value
+    out.extend(bytes(15-len(out)%16));out.append(checksum)
+    out.extend(hashlib.sha256(out).digest())
+    result=checked(bytes(out))
+    if result.segments[-1].file_offs+padding!=offset:raise ValueError('C6 XIP physical address')
+    if sum(0x42000000<=s.addr<0x43000000 for s in result.segments)>2:
+        raise ValueError('C6 bootloader flash-mapped segment limit')
+    return bytes(out)
+
 def main():
     """Check the native ELF and recovery geometry before creating an image."""
     parser=argparse.ArgumentParser(description=__doc__)

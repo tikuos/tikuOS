@@ -141,6 +141,10 @@ static uint32_t *dispatch(uint32_t *frame)
 #if TIKU_THREADS_ENABLE
     if(cause==((1u<<31)|C6_SWITCH_IRQ))return tiku_c6_thread_dispatch(frame);
 #endif
+#if TIKU_SHELL_ENABLE
+    extern int tiku_c6_irq_trap(uint32_t cause);
+    if(tiku_c6_irq_trap(cause))return frame;
+#endif
     if(cause==((1u<<31)|C6_CPU_IRQ) && (C6_REG(C6_SYSTIMER+0x68)&2)){
         uint64_t now=native_time();
         uint32_t due=now>=deadline?(uint32_t)((now-deadline)/C6_TICK_COUNTS)+1:1;

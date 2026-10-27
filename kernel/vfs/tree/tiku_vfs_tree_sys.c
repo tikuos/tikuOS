@@ -441,9 +441,8 @@ mem_free_read(char *buf, size_t max)
     __asm__ volatile ("mov %0, sp" : "=r"(sp));
     return snprintf(buf, max, "%lu\n",
                     sp > bottom ? (unsigned long)(sp - bottom) : 0UL);
-#elif defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32P4)
-    /* The tier span ends where the stack's reserve begins, so the headroom
-     * is SP down to that edge, not down to _end. */
+#elif defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32P4) || defined(PLATFORM_ESP32C6)
+    /* Measure live headroom above the port's declared stack floor. */
     uintptr_t sp;
     uintptr_t bottom = (uintptr_t)tiku_stack_arch_bottom();
     __asm__ volatile ("mv %0, sp" : "=r"(sp));
@@ -922,6 +921,41 @@ sram_map_read(char *buf, size_t max)
              assigned < TIKU_DEVICE_RAM_USABLE ? TIKU_DEVICE_RAM_USABLE - assigned : 0, 0, 0);
     map_line(buf, max, &at, "stack\t%lu\t%lu\n", stack, tiku_stack_free(), 0);
     return (int)at;
+#elif defined(PLATFORM_ESP32C6)
+    extern unsigned char __native_image_start[],__native_image_end[];
+    extern unsigned char __bss_start[],__bss_end[],__uninit_start[],__uninit_end[];
+    extern unsigned char __retained_start[],__retained_end[];
+    extern unsigned char __worker_reserve_start[],__worker_reserve_end[];
+    extern unsigned char __radio_reserve_start[],__radio_reserve_end[];
+    extern unsigned char __native_irq_bottom[],__native_irq_top[];
+    extern unsigned char __native_stack_bottom[],__native_stack_top[];
+    extern unsigned char __native_arena_end[];
+    const struct {const char *name;const unsigned char *lo,*hi;} spans[]={
+        {"initialized",__native_image_start,__native_image_end},
+        {"static",__bss_start,__bss_end},
+        {"durable",__uninit_start,__uninit_end},
+        {"retained",__retained_start,__retained_end},
+        {"tier",(unsigned char *)&__tier_sram_start,(unsigned char *)&__tier_sram_end},
+        {"workers",__worker_reserve_start,__worker_reserve_end},
+        {"radio",__radio_reserve_start,__radio_reserve_end},
+        {"irq_stack",__native_irq_bottom,__native_irq_top},
+        {"stack",__native_stack_bottom,__native_stack_top},
+        {"cold_entry",__native_stack_top,__native_arena_end}
+    };
+    size_t at=0;unsigned long assigned=64u;
+    if(!max)return 0;
+    buf[0]='\0';
+    map_line(buf,max,&at,"bank\t%lu\n",TIKU_DEVICE_RAM_USABLE,0,0);
+    for(unsigned i=0;i<sizeof spans/sizeof spans[0];i++){
+        unsigned long bytes=(uintptr_t)spans[i].hi-(uintptr_t)spans[i].lo;
+        int n=snprintf(at<max?buf+at:NULL,at<max?max-at:0,"%s\t%lu\n",spans[i].name,bytes);
+        if(n>0)at+=(size_t)n;
+        assigned+=bytes;
+    }
+    map_line(buf,max,&at,"guard\t%lu\n",64,0,0);
+    map_line(buf,max,&at,"alignment\t%lu\n",assigned<=TIKU_DEVICE_RAM_USABLE?TIKU_DEVICE_RAM_USABLE-assigned:0,0,0);
+    return (int)at;
+
 #else
     size_t at = 0u;
     unsigned long lo = (unsigned long)(uintptr_t)&__sram_start;

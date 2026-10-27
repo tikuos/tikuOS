@@ -1265,6 +1265,7 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
     cli.esc_state = 0;
     cli.hist_age  = -1;
 
+    if (tiku_shell_io_get_backend() == NULL) {
 #if TIKU_SHELL_TCP_ENABLE
     tiku_shell_io_tcp_init();
 #if TIKU_SHELL_NET_TEST
@@ -1294,6 +1295,8 @@ TIKU_PROCESS_THREAD(tiku_shell_process, ev, data)
     tiku_shell_io_set_backend(&tiku_shell_io_uart);
 #endif
 #endif
+
+    }
 
 #if !TIKU_SHELL_TCP_ENABLE || TIKU_SHELL_NET_TEST
     /* Boot banner: shown whenever there is a local console at boot, which is

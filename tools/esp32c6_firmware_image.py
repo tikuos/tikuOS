@@ -15,7 +15,7 @@ import hashlib
 import json
 from pathlib import Path
 from esp32c6_resident_image import symbols
-from esp32c6_cold_image import BASE,checked,compose
+from esp32c6_cold_image import BASE,checked,compose,append_xip
 
 END=0x4086e000
 BOARD='firebeetle2_esp32p4_c6'
@@ -26,7 +26,7 @@ FLASH=[('boot',0,0x9000,'preserve'),('nvs',0x9000,0x4000,'preserve'),
        ('durable_mirror',0x3fc000,0x4000,'unclaimed')]
 
 
-def native_layout(elf,native):
+def native_layout(elf,native,xip=b''):
     """Require ordered owned SRAM intervals and exact initialized ELF bytes."""
     entry,sections,names=symbols(elf)
     if (entry!=BASE or names.get('c6_cold_entry')!=BASE or
@@ -37,6 +37,15 @@ def native_layout(elf,native):
             not 256<=len(native)<=131072 or len(native)%4 or
             not 0<names.get('__c6_firmware_build',0)<=0xffffffff):
         raise ValueError('C6 firmware target, entry or initialized extent')
+    shell=names.get('__c6_shell_profile',0)
+    if shell not in (0,1):raise ValueError('unknown C6 shell profile')
+    if xip:
+        if (not shell or names.get('__c6_xip_start')!=0x42210000 or
+                names.get('__c6_xip_end')!=0x42210000+len(xip) or
+                not 0<len(xip)<=0x40000 or len(xip)%4):
+            raise ValueError('C6 XIP declaration mismatch')
+    elif names.get('__c6_xip_end',0)!=names.get('__c6_xip_start',0):
+        raise ValueError('missing C6 XIP payload')
     spans={}
     for name,start,end in [('initialized','__native_image_start','__native_image_end'),
                            ('static','__bss_start','__bss_end'),
@@ -49,7 +58,7 @@ def native_layout(elf,native):
         if not BASE<=lo<hi<=END-4096:raise ValueError('invalid SRAM span: '+name)
         spans[name]={'start':lo,'bytes':hi-lo}
     for name,start,end,ceiling in [('durable','__uninit_start','__uninit_end',8176),
-                                   ('retained','__retained_start','__retained_end',4096)]:
+                                   ('retained','__retained_start','__retained_end',8192 if shell else 4096)]:
         if start not in names and end not in names:continue
         lo=names.get(start,0);hi=names.get(end,0)
         if not BASE<=lo<=hi<=END-4096 or hi-lo>ceiling:
@@ -71,6 +80,12 @@ def native_layout(elf,native):
     allocated=[]
     for _,kind,flags,address,offset,length,*_ in sections:
         if not flags&2 or not length:continue
+        if xip and 0x42210000<=address<0x42250000:
+            if (kind!=1 or address+length>0x42210000+len(xip) or
+                    elf[offset:offset+length]!=xip[address-0x42210000:address-0x42210000+length]):
+                raise ValueError('ELF/XIP payload mismatch')
+            allocated.append((address,address+length))
+            continue
         if not BASE<=address<=address+length<=END-4096:
             raise ValueError('allocated section outside application SRAM')
         allocated.append((address,address+length))
@@ -88,12 +103,13 @@ def native_layout(elf,native):
     return names,spans
 
 
-def package(recovery,elf,native):
+def package(recovery,elf,native,xip=b''):
     """Retain recovery flash mapping and bind the application to its memory report."""
-    names,spans=native_layout(elf,native)
+    names,spans=native_layout(elf,native,xip)
     if names.get('__c6_recovery_entry')!=checked(recovery).entrypoint:
         raise ValueError('recovery entry mismatch')
     app=compose(recovery,native,limit=END,max_native=131072)
+    if xip:app=append_xip(app,xip)
     metadata={'format':'tiku-c6-firmware','version':2,'board':BOARD,'chip':13,
               'revision_min':2,'revision_max':2,'flash_bytes':0x400000,
               'secure_boot':0,'flash_encrypted':0,'build':names['__c6_firmware_build'],
@@ -104,6 +120,8 @@ def package(recovery,elf,native):
               'native_bytes':len(native),'native_sha256':hashlib.sha256(native).hexdigest(),
               'recovery_sha256':hashlib.sha256(recovery).hexdigest(),
               'memory':spans,'flash':[dict(name=n,start=p,bytes=s,policy=k) for n,p,s,k in FLASH]}
+    if xip:
+        metadata['xip']={'address':0x42210000,'offset':0x80000,'bytes':len(xip),'sha256':hashlib.sha256(xip).hexdigest()}
     return app,metadata
 
 
@@ -119,7 +137,22 @@ def validate_package(app,metadata):
             metadata.get('image_sha256')!=hashlib.sha256(app).hexdigest() or
             metadata.get('flash')!=[dict(name=n,start=p,bytes=s,policy=k) for n,p,s,k in FLASH] or
             image.entrypoint!=BASE):raise ValueError('firmware package identity/layout mismatch')
-    native=image.segments[-1]
+    natives=[s for s in image.segments if s.addr==BASE]
+    if len(natives)!=1:raise ValueError('C6 native segment count')
+    native=natives[0]
+    if 'xip' in metadata:
+        ignored=image.segments[-1];info=metadata['xip']
+        padding=0x80000-ignored.file_offs
+        xip=ignored.data[padding:] if padding>=0 else b''
+        if (ignored.addr!=0 or padding<0 or any(ignored.data[:padding]) or
+                not 0<len(xip)<=0x40000 or len(xip)%4 or
+                info!={'address':0x42210000,'offset':0x80000,'bytes':len(xip),
+                       'sha256':hashlib.sha256(xip).hexdigest()} or
+                image.segments[-2] is not native):
+            raise ValueError('C6 XIP image pair mismatch')
+    elif image.segments[-1] is not native:raise ValueError('undeclared C6 XIP segment')
+    if sum(0x42000000<=s.addr<0x43000000 for s in image.segments)>2:
+        raise ValueError('C6 bootloader flash-mapped segment limit')
     if (native.addr!=BASE or metadata.get('native_bytes')!=len(native.data) or
             metadata.get('native_sha256')!=hashlib.sha256(native.data).hexdigest()):
         raise ValueError('firmware/native image pair mismatch')
@@ -131,7 +164,11 @@ def validate_pair(app,metadata,elf):
     validate_package(app,metadata)
     if metadata.get('elf_sha256')!=hashlib.sha256(elf).hexdigest():
         raise ValueError('firmware/ELF identity mismatch')
-    names,spans=native_layout(elf,checked(app).segments[-1].data)
+    image=checked(app)
+    native=next(s.data for s in image.segments if s.addr==BASE)
+    last=image.segments[-1]
+    xip=last.data[0x80000-last.file_offs:] if 'xip' in metadata else b''
+    names,spans=native_layout(elf,native,xip)
     if (spans!=metadata.get('memory') or names['__c6_firmware_build']!=metadata.get('build') or
             names['__c6_recovery_entry']!=metadata.get('recovery_entry') or
             names['__c6_tier_floor']!=metadata.get('tier_floor')):
@@ -144,8 +181,9 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     for key in ('recovery','elf','native','output','metadata'):
         parser.add_argument('--'+key,required=True,type=Path)
+    parser.add_argument('--xip',type=Path)
     args=parser.parse_args()
-    app,meta=package(args.recovery.read_bytes(),args.elf.read_bytes(),args.native.read_bytes())
+    app,meta=package(args.recovery.read_bytes(),args.elf.read_bytes(),args.native.read_bytes(),args.xip.read_bytes() if args.xip else b'')
     validate_pair(app,meta,args.elf.read_bytes())
     args.output.write_bytes(app);args.metadata.write_text(json.dumps(meta,indent=2)+'\n')
     print(json.dumps(meta,indent=2))

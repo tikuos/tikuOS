@@ -16,9 +16,15 @@
 #include <string.h>
 #if TIKU_C6_STORAGE_TEST
 #include <TikuBench/tests/esp32c6/test_storage.h>
-#define FLASH_STEP() tiku_c6_storage_test_flash_step()
+#define FLASH_TEST_STEP() tiku_c6_storage_test_flash_step()
 #else
-#define FLASH_STEP() ((void)0)
+#define FLASH_TEST_STEP() ((void)0)
+#endif
+#if TIKU_SHELL_ENABLE
+extern void tiku_c6_control_progress(void);
+#define FLASH_STEP() do { FLASH_TEST_STEP(); tiku_c6_control_progress(); } while(0)
+#else
+#define FLASH_STEP() FLASH_TEST_STEP()
 #endif
 
 /* C6 rev 0.2 cache, mapping and boot-read ROM addresses at ESP-IDF 4d59230.

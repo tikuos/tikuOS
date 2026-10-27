@@ -104,9 +104,10 @@ to the allocator. `memtest`, `memsize`, `tiersize`, `workers` and `radio`
 are native diagnostic commands through `ipc sdio console`.
 
 This profile provides the cooperative core, worker backend and SDIO diagnostic
-application. It rejects enabled shell and BASIC build flags. The radio
-reservation does not enable a radio driver. Native code, handlers and DMA
-stages reside in SRAM. During installation the native kernel is stopped;
+application. `TIKU_SHELL_ENABLE=1 C6_STORAGE=1` adds the remote shell and VFS;
+`TIKU_SHELL_BASIC_ENABLE=1` adds BASIC. The radio reservation does not enable
+a radio driver. Core code, handlers and DMA stages reside in SRAM. Shell
+and interpreter code use a separate flash mapping. During installation the native kernel is stopped;
 the preserved SDK recovery and factory applications perform flash operations
 using their own flash/cache handling. `C6_STORAGE=0` leaves native flash
 mapping and durable storage disabled.
@@ -199,7 +200,8 @@ shared scheduler chooses the return frame. Interrupts are masked throughout
 dispatch on the dedicated 2 KiB IRQ stack. Context frames preserve the RV32
 integer registers, `mepc` and `mstatus`; entry frames select machine mode
 with interrupts enabled on exception return. This RV32IMAC profile has no
-floating-point context. It links freestanding routines and no newlib runtime.
+floating-point context. The core links freestanding routines. The shell
+profile links newlib-nano and libm; `_sbrk` refuses libc heap allocation.
 
 `TIKU_THREAD(name, bytes)` places C6 worker stacks in the linker's 32 KiB
 worker reservation through `TIKU_THREAD_STACK_ATTR`, with 16-byte alignment.
@@ -419,6 +421,8 @@ capacity refusal, and removes `_m4_NNN` fixtures. `--pause-packets` records
 storage tests with packet pumping disabled. These are separate from tests
 with concurrent packet traffic. EN reset preserves flash supply; physical
 power interruption requires a separate fixture or operator test.
+Retained writes through the architecture NVM-copy API stay in SRAM; the
+port admits the linked durable and retained ranges and refuses other destinations.
 Retained SRAM is qualified across ROM software reset within the same
 linked image. An EN-driven restart has no SRAM retention guarantee.
 
@@ -431,13 +435,135 @@ before the native boot records it. Byte-level interruption coverage is in
 the host model; this board test does not interrupt a flash instruction or
 remove flash power.
 
+## Remote shell, VFS and BASIC
+
+The firmware shell mounts `/sys`, `/dev`, `/proc` and `/data` through the
+boot provider table. The RAM console backend reaches C6 through P4's
+`ipc sdio shell` bridge, USB frame channel `0xf6` and the existing SDIO
+control owner. Board checks cover shell commands, namespace providers,
+memory reports, file storage, BASIC execution and software reboot. A C6 GPIO9-to-GND contact is required for
+ROM recovery if a combined image cannot enter either application path.
+
+```sh
+make MCU=esp32c6 C6_PROFILE=firmware C6_STORAGE=1 \
+    TIKU_SHELL_ENABLE=1 TIKU_SHELL_BASIC_ENABLE=1 C6_BUILD=1 \
+    firmware-image C6_RECOVERY_IMAGE=/path/to/tiku_c6_access.bin
+python3 -B tools/esp32c6_shell.py \
+    --port /dev/serial/by-id/your-p4 --p4-serial your-usb-serial \
+    --peer-mac aa:bb:cc:dd:ee:ff --output /path/to/new-capture \
+    --command 'ls /' --command 'free' --command 'ps'
+```
+
+Install the matching P4 firmware with the shell, IPC console, IPC and SDIO
+C6 owner enabled. The downstream tool checks the C6 factory MAC and prints
+its build identity. A session carries a 32-bit identifier and nonwrapping
+16-bit request sequence. Exact retries return the cached response. Input
+has backpressure; output loss is an explicit error. The input/output rings
+hold 127/4095 bytes. A one-byte zero frame closes the P4 bridge. Idle sessions expire after 30 seconds; close or expiry
+cancels a partial shell command. Open a new session before 65,535 requests.
+The remote backend grants the same shell capabilities as the local board
+console. It provides identity selection, without an authentication layer.
+
+Flash operations service console control after restoring cache and interrupt
+state. This path copies console bytes through RAM queues and refuses other
+diagnostics while a flash operation is in progress. It does not enter the
+shell, interpreter or filesystem recursively.
+
+The shell's default SRAM tier floor is 65,536 bytes; the core retains its
+196,608-byte floor. The shell retained-state budget is 8192 bytes. BASIC
+has 100 program lines. `/sys/mem/sram_map` reports the linked reservations.
+The package records the flash section's bytes, address and hash. Its address
+is `0x42210000`, at OTA1 file offset `0x80000`. An ignored ESP image segment
+carries those bytes; the recovery image's two mapped segments retain their
+positions. The native flash driver installs the mapping before shell entry. The shell
+profile refuses startup if native flash or durable-state admission fails;
+the P4 can then select the preserved recovery application.
+
+The P4 object-stream diagnostics register the remote channel while the bulk
+stream advances. A bulk exchange starts between successive remote requests.
+The console qualifier checks malformed frames and exact retries, command
+responses during a 600 KiB object, independent payload CRCs, returned buffers
+and the 256-tick control bound. The slowed sensor stream with remote commands
+is board tested. It records the command interval and measured
+latencies in its result file.
+
+```sh
+python3 -B tools/esp32c6_console_qualify.py \
+    --port /dev/serial/by-id/your-p4 --p4-serial your-usb-serial \
+    --peer-mac aa:bb:cc:dd:ee:ff --profile slow --interval 2 \
+    --output /path/to/new-capture
+```
+
+## Peripheral capabilities
+
+The native HAL sources are part of the shell firmware profile. Register
+models check their programming sequences; they do not qualify electrical
+behavior. The table distinguishes those checks from board measurements.
+Strap reservations follow the [C6 datasheet](https://documentation.espressif.com/esp32-c6_datasheet_en.html).
+Chip block presence is recorded against ESP-IDF commit
+`4d59230ddff16327812782151ef0afef202dc6d7` and its C6 SOC capability headers.
+
+| Block | Native implementation and verification | FireBeetle C6 wiring / remaining qualification |
+|-------|-----------------------------------------|-----------------------------------------------|
+| SDIO slave | Controller ownership, copied IPC messages and bulk streams; board tested | Wired to P4 GPIOs; reserved from application GPIO |
+| SYSTIMER tick and CPU interrupts | Native tick, traps and workers; board tested | Internal; target0 count rate and interrupt callback board tested |
+| GPIO and edge IRQ | HAL and pin ownership; reserved-pad refusal board tested; register models | C6 signals are not exposed on P4 headers; edge fixture pending |
+| UART0 | 8N1, bounded TX, interrupt RX, internal loopback; register models | GPIO16/17 reserved; 256-byte internal loopback with IRQ receive board tested; external-pad tests require a fixture |
+| I2C0 | 100/400 kHz, repeated START, ACK/NACK, bounded errors; register models | Default pins255 refuse init; pads, pull-ups and target fixture required |
+| SPI2 | Polled master, modes0..3, bit order, bounded transfers; register models | Default pins255 refuse init; pads and peer fixture required |
+| ADC1 | Raw one-shot GPIO0..6, ground trim, state restoration; register models | `C6_ADC_PIN_MASK=0` refuses external channels; voltage fixture pending |
+| Watchdog | TG0 native boot watchdog board tested; HAL configure/pause/resume register models | Internal; HAL-triggered TG0 reset and SDIO recovery board tested |
+| Entropy | Internal SAR completion checks and hardware RNG; native storage UUID path board tested | Internal; active ADC, temperature or continuous conversion refuses acquisition |
+| CPU clock | Reports ROM clock; fixed inherited rate, 80 MHz on the native cold path | Clock changes are unavailable through this profile |
+| Idle and wake | WFI hook, armed-source query; query register models | Tick, alarm, GPIO and UART query; measured WFI entries and SDIO shell continuity board tested |
+| LEDC / MCPWM | Present in silicon; C6 driver absent | PWM pins require module-pad access; no shared PWM HAL is implemented |
+| I2S / TWAI / RMT / PCNT / PARLIO | Present in silicon; general C6 drivers absent | PCNT0 is borrowed by the SDIO clock diagnostic; application fixtures pending |
+| Wi-Fi / BLE / IEEE 802.15.4 | Present in silicon; native drivers absent | Antenna on C6 module |
+| SDR | Native driver absent; silicon support unqualified | No SDR qualification for C6 |
+| PSRAM / deep sleep / USB OTG | PSRAM and deep-sleep integration absent; USB OTG unsupported by C6 silicon | C6 has no local PSRAM; USB Serial/JTAG signals are not on P4 USB connector |
+
+Raw GPIO uses one-based eight-pin ports, GPIO0..30. GPIO2 is WAKE; GPIO4/5/8/9/15
+are straps; GPIO12/13 are USB Serial/JTAG; GPIO16/17 are UART0; GPIO18..23
+are SDIO; GPIO24..30 are flash. Mutation of these pads is refused. GPIO4..7
+include JTAG signals; GPIO6/7 refuse mutation while that mux remains active. Peripheral input
+and output routes and software pin claims prevent application reassignment.
+The P4 board's headers expose P4 GPIOs; their numbers do not name C6 pins.
+
+SPI and I2C require board-selected `TIKU_BOARD_SPI_*_PIN` and
+`TIKU_BOARD_I2C_*_PIN` constants. ADC reference names select attenuation,
+not calibrated voltages: readings are raw 8/10/12-bit counts. Internal
+ADC channels30/31 are unavailable through this driver. Entropy reads require
+foreground context, an idle SAR and working analog access. They mask
+interrupts, wait for new reserved-channel conversions, restore hardware,
+and clear the destination on failure. They do not require Wi-Fi startup.
+
+WFI keeps the peripheral domains and SDIO ownership active. Deep sleep and
+power-domain shutdown have no native resume implementation. External I2C,
+SPI, ADC and GPIO tests require access to C6 module signals. Host models
+and UART internal loopback do not establish those paths.
+
+The internal qualification profile enables `C6_PERIPHERAL_TEST=1` with the
+shell and storage. Build the C6 with `TIKU_SHELL_CMD_HTIMER=1` and
+`TIKU_SHELL_CMD_SLEEP=1` in `EXTRA_CFLAGS`, and build P4 with
+`TIKU_SHELL_CMD_DELAY=1`. The test uses UART hardware loopback, refuses
+protected GPIO claims, samples entropy, measures the alarm, checks actual
+WFI entries and deliberately stops feeding TG0. A durable test cell records
+the ROM reset reason before the P4 recovery path changes it. The ordinary
+firmware omits these test hooks.
+
+```sh
+python3 -B tools/esp32c6_peripheral_qualify.py \
+    --port /dev/serial/by-id/your-p4 --p4-serial your-usb-serial \
+    --peer-mac aa:bb:cc:dd:ee:ff --build 42 --output /path/to/new-capture
+```
+
 ## Checks
 
 ```sh
 make -C TikuBench/tests/host/kernel ipc ipc-transports c6-sdio p4-sdmmc
 make -C TikuBench/tests/host/kernel c6-threads
-make -C TikuBench/tests/host/kernel c6-storage
-python3 TikuBench/tests/host/kernel/test_esp32c6_resident.py
+make -C TikuBench/tests/host/kernel c6-storage console-remote c6-peripherals
+python3 -B TikuBench/tests/host/kernel/test_esp32c6_resident.py
 python3 -B TikuBench/tests/host/kernel/test_esp32c6_firmware.py
 python3 tools/esp32c6_sdio_qualify.py --port /dev/serial/by-id/your-p4 \
     --output /path/to/new-capture --recovery

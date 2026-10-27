@@ -148,6 +148,9 @@ board_owner(uint8_t port, uint8_t pin)
         return "wifi";
     }
 #endif
+#elif defined(PLATFORM_ESP32C6)
+    /* The architecture protects SDIO, wake, flash and strapping pins. */
+    return NULL;
 #elif defined(PLATFORM_ESP32C61)
     if (IS_BANKED_PIN(port, pin, TIKU_BOARD_UART0_TX_GPIO) ||
         IS_BANKED_PIN(port, pin, TIKU_BOARD_UART0_RX_GPIO)) {

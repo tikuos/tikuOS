@@ -21,6 +21,9 @@
 #include <hal/tiku_ipc_test_pattern.h>
 #include <kernel/ipc/tiku_ipc_stream.h>
 #include <string.h>
+#if TIKU_SHELL_ENABLE
+#include <services/console/tiku_console_remote.h>
+#endif
 #if TIKU_C6_STORAGE
 #include "tiku_flash_arch.h"
 #include "tiku_nvm_arch.h"
@@ -35,6 +38,9 @@ static uint8_t storage_status;
 #if TIKU_C6_THREAD_TEST
 #include <TikuBench/tests/esp32c6/test_threads.h>
 #endif
+#if TIKU_C6_PERIPHERAL_TEST
+#include <TikuBench/tests/esp32c6/test_peripherals.h>
+#endif
 #if TIKU_C6_STORAGE_TEST
 #include <TikuBench/tests/esp32c6/test_storage.h>
 #endif
@@ -47,6 +53,10 @@ static uint64_t host_epoch;
 static tiku_ipc_endpoint_t bulk;
 static tiku_ipc_received_t message;
 static uint8_t pending;
+#if TIKU_SHELL_ENABLE
+static uint8_t diagnostic_active,control_progress;
+static uint32_t idle_entries;
+#endif
 static uint8_t epoch_ack;
 static struct tiku_timer app_timer;
 static uint8_t text_input[12],text_length;
@@ -134,6 +144,9 @@ static size_t command(const uint8_t *data,size_t length,uint8_t out[24])
     else if(equal(data,length,"ticks"))value=native_ticks;
     else if(equal(data,length,"irq"))value=native_irqs;
     else if(equal(data,length,"proc"))value=tiku_process_count();
+#if TIKU_SHELL_ENABLE
+    else if(equal(data,length,"idles"))value=idle_entries;
+#endif
     else if(equal(data,length,"build"))value=TIKU_C6_BUILD;
 #if TIKU_C6_STORAGE
     else if(equal(data,length,"storage"))value=storage_status;
@@ -141,6 +154,9 @@ static size_t command(const uint8_t *data,size_t length,uint8_t out[24])
     else if(equal(data,length,"nvmrest"))value=tiku_mem_arch_nvm_restore_status();
     else if(equal(data,length,"held"))value=tiku_layout_state()->held;
     else if(equal(data,length,"nvmtier"))value=tiku_layout_state()->tier;
+#endif
+#if TIKU_C6_PERIPHERAL_TEST
+    else if(tiku_c6_peripherals_test_command(data,length,&value)){}
 #endif
 #if TIKU_C6_STORAGE_TEST
     else if(tiku_c6_storage_test_command(data,length,&value)){}
@@ -212,15 +228,42 @@ static size_t command(const uint8_t *data,size_t length,uint8_t out[24])
     memcpy(out,text,n);return n;
 }
 /** @brief Serve the preserved native diagnostic mailbox through its whole-message link. */
-static void diagnostic_receive(void *unused,uint8_t *data,size_t length)
+static void diagnostic_execute(void *unused,uint8_t *data,size_t length)
 {
     uint8_t out[24];(void)unused;
+#if TIKU_SHELL_ENABLE
+    if(control_progress&&(!length||data[0]!=TIKU_CONSOLE_REMOTE_MAGIC)){
+        (void)tiku_link_send(diagnostic,"busy",4);return;
+    }
+#endif
     uint64_t epoch=tiku_sdio_diag_epoch(data,length);
     if(epoch&&!tiku_c6_sdio_commit_epoch(epoch)){
         epoch_ack=1;return;
     }
-    size_t n=command(data,length,out);(void)tiku_link_send(diagnostic,out,n);
+#if TIKU_SHELL_ENABLE
+    size_t n=tiku_console_remote_request(data,length,out);
+    if(n){(void)tiku_link_send(diagnostic,out,n);return;}
+#endif
+    size_t count=command(data,length,out);(void)tiku_link_send(diagnostic,out,count);
 }
+/** @brief Dispatch one diagnostic without nested command execution. */
+static void diagnostic_receive(void *unused,uint8_t *data,size_t length)
+{
+#if TIKU_SHELL_ENABLE
+    diagnostic_active=1;
+#endif
+    diagnostic_execute(unused,data,length);
+#if TIKU_SHELL_ENABLE
+    diagnostic_active=0;
+#endif
+}
+#if TIKU_SHELL_ENABLE
+void tiku_c6_control_progress(void)
+{
+    if(!diagnostic||diagnostic_active||control_progress)return;
+    control_progress=1;tiku_link_pump(diagnostic);control_progress=0;
+}
+#endif
 /** @brief Accumulate a USB text line and use the diagnostic command vocabulary. */
 static int text_receive(void *unused,int ch)
 {
@@ -268,6 +311,12 @@ uint32_t native_main(uint32_t *report)
         tiku_persist_move_boot();if(tiku_persist_moved()<0)storage_status=4;
     }
     if(storage_status!=1)tiku_layout_restore_complete(-1);
+#if TIKU_SHELL_ENABLE
+    if(storage_status!=1)return 0;
+#endif
+#endif
+#if TIKU_C6_PERIPHERAL_TEST
+    tiku_c6_peripherals_test_boot();
 #endif
 #if TIKU_C6_STORAGE_TEST
     tiku_c6_storage_test_boot();
@@ -290,10 +339,17 @@ uint32_t native_main(uint32_t *report)
 #if TIKU_C6_FIRMWARE
     if(tiku_region_claim(__native_stack_top,4096,0xe4)!=TIKU_MEM_OK)return 0;
 #endif
+#if !TIKU_SHELL_ENABLE
     diagnostic=tiku_c6_diag_link();tiku_link_on_recv(diagnostic,diagnostic_receive,NULL);
+#endif
     carrier=tiku_ipc_bus_open(&bus,tiku_c6_sdio_io());if(!carrier)return 0;
     tiku_console_set_wire(tiku_c6_console_io());tiku_console_set_text_sink(text_receive,NULL);
     if(native_hardware_start())return 0;
+#if TIKU_SHELL_ENABLE
+    extern int tiku_boot_c6_services(void);
+    if(tiku_boot_c6_services())return 0;
+    diagnostic=tiku_c6_diag_link();tiku_link_on_recv(diagnostic,diagnostic_receive,NULL);
+#endif
     __asm__ volatile("csrsi mstatus,8":::"memory");
 #if TIKU_C6_THREAD_TEST
     tiku_c6_threads_test_run();
@@ -301,6 +357,9 @@ uint32_t native_main(uint32_t *report)
     for(;;){
         uint64_t epoch=tiku_c6_sdio_epoch();
         tiku_watchdog_kick();tiku_link_pump(diagnostic);tiku_console_pump();
+#if TIKU_C6_PERIPHERAL_TEST
+        tiku_c6_peripherals_test_pump();
+#endif
 #if TIKU_C6_STORAGE_TEST
         tiku_c6_storage_test_pump();
 #endif
@@ -314,6 +373,9 @@ uint32_t native_main(uint32_t *report)
             }
             host_epoch=epoch;
         }
+#if TIKU_SHELL_ENABLE
+        tiku_console_remote_pump();
+#endif
         uint32_t cycle=native_cycles();
         (void)tiku_sched_run_once();
         work_cycles+=(uint32_t)(native_cycles()-cycle);
@@ -333,5 +395,18 @@ uint32_t native_main(uint32_t *report)
                 tiku_c6_sdio_observe(2),tiku_c6_sdio_observe(3),native_ticks};
             tiku_c6_diag_trace(trace);
         }
+#if TIKU_SHELL_ENABLE
+        tiku_atomic_enter();
+        tiku_sched_idle_hook_t idle=tiku_sched_get_idle_hook();
+        if(idle&&!tiku_sched_has_pending()&&!tiku_ipc_pending()
+#if TIKU_THREADS_ENABLE
+            &&!tiku_thread_worker_ready()
+#endif
+        ){
+            idle_entries++;
+            idle();
+        }
+        tiku_atomic_exit();
+#endif
     }
 }

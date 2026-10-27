@@ -51,6 +51,8 @@
 /* GPIO0..GPIO29 in banks of eight, numbered as on the RP2350. */
 #define TIKU_GPIO_PORTS(X) X(1, 8) X(2, 8) X(3, 8) X(4, 6)
 
+#elif defined(PLATFORM_ESP32C6)
+#define TIKU_GPIO_PORTS(X) X(1, 8) X(2, 8) X(3, 8) X(4, 7)
 #elif defined(PLATFORM_ESP32C5)
 #define TIKU_GPIO_PORTS(X) X(1, 8) X(2, 8) X(3, 8) X(4, 5)
 #elif defined(PLATFORM_ESP32P4)

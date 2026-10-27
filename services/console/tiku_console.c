@@ -520,6 +520,24 @@ tiku_console_inject(const uint8_t *bytes, size_t len)
     return i;
 }
 
+void tiku_console_inject_clear(void)
+{
+#if TIKU_SHELL_ENABLE && (TIKU_IPC_CONSOLE_ENABLE + 0)
+    uint16_t read=inject_tail,write=inject_tail;
+    while(read!=inject_head){
+        if(!(inject_origin[read/8u]&(1u<<(read%8u)))){
+            inject_ring[write]=inject_ring[read];
+            inject_origin[write/8u]&=(uint8_t)~(1u<<(write%8u));
+            write=(uint16_t)((write+1u)%INJECT_CAP);
+        }
+        read=(uint16_t)((read+1u)%INJECT_CAP);
+    }
+    inject_head=write;
+#else
+    inject_head=inject_tail;
+#endif
+}
+
 uint8_t
 tiku_console_from_inject(void)
 {

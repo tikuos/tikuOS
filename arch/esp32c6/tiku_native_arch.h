@@ -49,6 +49,13 @@ uint32_t *native_trap_dispatch(uint32_t *frame);
 uint32_t tiku_c6_qualify(uint32_t *report);
 /** @brief Start the resident native kernel and service IPC until reset. */
 uint32_t native_main(uint32_t *report);
+#if TIKU_SHELL_ENABLE
+/** @brief Pump remote-console control after a flash step restores cache and IRQs.
+ * @note Foreground only. Non-console diagnostics receive busy during a flash
+ * step; an active diagnostic callback is never entered recursively.
+ */
+void tiku_c6_control_progress(void);
+#endif
 /** @brief Check caller and callee registers across IRQs for cycles CPU cycles; return 0 on success. */
 int native_irq_frame_probe(uint32_t cycles);
 /** @brief Execute the deliberate illegal instruction handled by the native trap vector. */

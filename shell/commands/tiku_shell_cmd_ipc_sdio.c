@@ -62,10 +62,10 @@ static tiku_ipc_err_t exchange(tiku_sdio_class_t kind,const void *tx,uint16_t le
     return result.quarantined?TIKU_IPC_BUSY:result.status;
 }
 /** @brief Preserve native envelope layout under the shared controller owner. */
-static tiku_ipc_err_t native_exchange(const char *command,uint8_t reply[32])
+static tiku_ipc_err_t native_bytes(const uint8_t *command,size_t length,uint8_t reply[32])
 {
     tiku_ipc_sdio_t *c=tiku_boot_c6_owner();
-    uint8_t request[20]={0};size_t length=strlen(command);
+    uint8_t request[20]={0};
     tiku_ipc_err_t r;
     if(length>12)return TIKU_IPC_INVALID;
     r=wait_mode(TIKU_SDIO_NATIVE);if(r)return r;
@@ -74,6 +74,54 @@ static tiku_ipc_err_t native_exchange(const char *command,uint8_t reply[32])
     tiku_c6_put32(request+16,c->session);
     if(tiku_sdio_diag_seal(request,20,12))return TIKU_IPC_INVALID;
     return exchange(TIKU_SDIO_CONTROL,request,20,reply,32);
+}
+/** @brief Carry a bounded text diagnostic through the native envelope. */
+static tiku_ipc_err_t native_exchange(const char *command,uint8_t reply[32])
+{return native_bytes((const uint8_t *)command,strlen(command),reply);}
+static uint8_t remote_frame[12],remote_pending[12],remote_length,remote_end;
+static tiku_clock_time_t remote_received;
+/** @brief Admit a single framed remote-console request without blocking USB. */
+static void remote_receive(void *unused,uint8_t *data,size_t length)
+{
+    (void)unused;
+    if(length==1&&!data[0]){remote_end=1;return;}
+    if(remote_length||length>sizeof remote_pending||data[0]!=0xa6)return;
+    memcpy(remote_pending,data,length);remote_length=(uint8_t)length;remote_received=tiku_clock_time();
+}
+/** @brief Exchange one pending remote request through the control queue. */
+static tiku_ipc_err_t remote_forward(void)
+{
+    uint8_t reply[32];
+    tiku_ipc_err_t result=native_bytes(remote_pending,remote_length,reply);
+    remote_length=0;
+    if(result)return result;
+    if(reply[1]<9||reply[1]>24||reply[4]!=0xa6)return TIKU_IPC_IO;
+    return tiku_console_send_frame(0xf6,reply+4,reply[1],NULL,0)?TIKU_IPC_IO:TIKU_IPC_OK;
+}
+/** @brief Pump a registered remote channel until exit or its idle lease. */
+static tiku_ipc_err_t remote_wait(void)
+{
+    tiku_clock_time_t last=tiku_clock_time();
+    while(!remote_end&&(tiku_clock_time_t)(tiku_clock_time()-last)<30u*TIKU_CLOCK_SECOND){
+        tiku_console_pump();service();
+        if(remote_length){
+            tiku_ipc_err_t result=remote_forward();if(result)return result;
+            last=tiku_clock_time();
+        }
+    }
+    return TIKU_IPC_OK;
+}
+/** @brief Forward leased USB frames through the controller's control queue. */
+static tiku_ipc_err_t remote_bridge(void)
+{
+    tiku_ipc_err_t result=wait_mode(TIKU_SDIO_NATIVE);
+    if(result)return result;
+    remote_length=remote_end=0;
+    if(tiku_console_add_channel(0xf6,0xff,0,remote_receive,NULL,remote_frame,sizeof remote_frame))return TIKU_IPC_BUSY;
+    SHELL_PRINTF("C6 shell bridge ready channel=f6 lease=30\n");
+    result=remote_wait();
+    tiku_console_remove_channel(0xf6,0xff);
+    SHELL_PRINTF("C6 shell bridge done result=%d\n",result);return result;
 }
 /** @brief Print one complete native reply received through the owner. */
 static tiku_ipc_err_t native_command(const char *command)
@@ -179,9 +227,11 @@ static tiku_ipc_err_t object_test(unsigned profile,uint8_t slow)
 {
     tiku_ipc_endpoint_t endpoint={0};tiku_ipc_stream_t stream={0};
     tiku_ipc_status_t status;tiku_ipc_received_t received;
-    uint8_t payload[TIKU_IPC_STREAM_CHUNK],reply[32],sent=0,pending=0;
+    uint8_t payload[TIKU_IPC_STREAM_CHUNK],reply[32],sent=0,pending=0,remote_attached=0;
     uint32_t produced=0,chunks=0,controls=0,failures=0,max_control=0,crc=UINT32_MAX;
-    uint32_t peer_bytes=0,peer_crc=0,next_progress=65536;
+    uint32_t peer_bytes=0,peer_crc=0,next_progress=65536,remote_requests=0,max_remote=0;
+    uint32_t remote_serial=0;
+    tiku_ipc_sdio_t *owner=tiku_boot_c6_owner();
     tiku_clock_time_t began=tiku_clock_time(),last=began,deadline=began+640;
     tiku_ipc_err_t r=wait_mode(TIKU_SDIO_NATIVE);if(r)return r;
     if(native_exchange("clear",reply)||native_exchange(profile==1?"image":"sensor",reply)||
@@ -196,10 +246,25 @@ static tiku_ipc_err_t object_test(unsigned profile,uint8_t slow)
         failures++;goto cleanup;
     }
     if(tiku_ipc_stream_open(&stream,endpoint,profile,614400)!=TIKU_IPC_OK){failures++;goto cleanup;}
+    remote_length=remote_end=0;
+    if(tiku_console_add_channel(0xf6,0xff,0,remote_receive,NULL,remote_frame,sizeof remote_frame)){
+        failures++;goto cleanup;
+    }
+    remote_attached=1;
+    SHELL_PRINTF("SDIO remote ready channel=f6\n");
     began=tiku_clock_time();deadline=began+10u*TIKU_CLOCK_SECOND;
     SHELL_PRINTF("SDIO object profile=%u slow=%u bytes=614400 window=2 payload=484 control_bound=256ticks\n",profile,slow);
     while(!tiku_ipc_stream_done(&stream)){
-        tiku_ipc_completion_t completion;service();
+        tiku_ipc_completion_t completion;service();tiku_console_pump();
+        if(remote_length&&!remote_end&&(!remote_requests||owner->serial!=remote_serial)){
+            tiku_clock_time_t before=remote_received;
+            if(remote_forward()){failures++;goto cleanup;}
+            uint32_t elapsed=(tiku_clock_time_t)(tiku_clock_time()-before);
+            if(elapsed>max_remote)max_remote=elapsed;
+            if(elapsed>256){failures++;goto cleanup;}
+            remote_requests++;
+            remote_serial=owner->serial;
+        }
         if(pending&&(tiku_clock_time_t)(tiku_clock_time()-last)>256){failures++;goto cleanup;}
         if(produced<614400){
             uint16_t length=(uint16_t)(614400-produced>sizeof payload?sizeof payload:614400-produced);
@@ -216,7 +281,10 @@ static tiku_ipc_err_t object_test(unsigned profile,uint8_t slow)
             controls++;pending=0;
         }
         while(tiku_ipc_completion(endpoint,&completion)==TIKU_IPC_OK){
-            if(tiku_ipc_stream_finish(&stream,&completion)!=TIKU_IPC_OK||completion.quarantined)failures++;
+            if(tiku_ipc_stream_finish(&stream,&completion)!=TIKU_IPC_OK||completion.quarantined){
+                SHELL_PRINTF("SDIO object completion status=%d quarantined=%u\n",completion.status,completion.quarantined);
+                failures++;
+            }
             chunks++;deadline=tiku_clock_time()+10u*TIKU_CLOCK_SECOND;
         }
         if(produced>=next_progress){
@@ -237,6 +305,12 @@ cleanup:
         profile,(unsigned long)produced,(unsigned long)peer_bytes,(unsigned long)~crc,(unsigned long)peer_crc,
         (unsigned long)chunks,(unsigned long)controls,(unsigned long)max_control,
         (unsigned long)(tiku_clock_time()-began),(unsigned long)failures);
+    if(remote_attached){
+        SHELL_PRINTF("SDIO remote requests=%lu max_control=%lu\n",(unsigned long)remote_requests,(unsigned long)max_remote);
+        if(remote_requests&&!remote_end&&remote_wait())failures++;
+        tiku_console_remove_channel(0xf6,0xff);
+        SHELL_PRINTF("C6 shell bridge done result=%d\n",failures?TIKU_IPC_IO:TIKU_IPC_OK);
+    }
     return failures?TIKU_IPC_IO:TIKU_IPC_OK;
 }
 /** @brief Reset the peer while the local descriptor engine owns a bulk stage. */
@@ -342,6 +416,7 @@ static tiku_ipc_err_t loader_bridge(uint8_t factory)
             bridge_length=0;
             if(cut)SHELL_PRINTF("C6 factory cut=%lu\n",(unsigned long)(tiku_boot_c6_factory_cuts()-before));
             if(result)break;
+            began=tiku_clock_time();
             length=tiku_boot_c6_factory_length();
             if(length>480){result=TIKU_IPC_IO;break;}
             memcpy(loader_tx,loader_rx,length);
@@ -389,7 +464,7 @@ void tiku_shell_ipc_sdio(uint8_t argc,const char *argv[])
     tiku_ipc_err_t r=TIKU_IPC_INVALID;tiku_p4_sdmmc_status_t status;
     tiku_ipc_sdio_t *c=tiku_boot_c6_owner();
     if(argc<3||argc>4){
-        SHELL_PRINTF("ipc sdio probe|reset|loader|bridge|factory|attach|qualify|stream|image|sensor|slow|corrupt|interrupt|pause|resume\n");
+        SHELL_PRINTF("ipc sdio probe|reset|loader|bridge|shell|factory|attach|qualify|stream|image|sensor|slow|corrupt|interrupt|pause|resume\n");
 #if TIKU_C6_COLD_BOOT_ENABLE
         SHELL_PRINTF("ipc sdio native\n");
 #endif
@@ -406,6 +481,7 @@ void tiku_shell_ipc_sdio(uint8_t argc,const char *argv[])
 #endif
     else if(argc==4&&!strcmp(argv[2],"run")&&strlen(argv[3])==1&&argv[3][0]>='0'&&argv[3][0]<='1')
         r=run_bank((unsigned)(argv[3][0]-'0'));
+    else if(argc==3&&!strcmp(argv[2],"shell"))r=remote_bridge();
     else if(argc==3&&!strcmp(argv[2],"bridge"))r=loader_bridge(0);
     else if(argc==3&&!strcmp(argv[2],"attach")){
         r=tiku_boot_c6_adopt_loader();if(!r)r=loader_bridge(0);

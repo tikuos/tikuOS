@@ -151,9 +151,10 @@ def main():
             with (args.output/'previous-app.bin').open('wb') as backup:
                 backup.write(previous);backup.flush();os.fsync(backup.fileno())
             state['previous_sha256']=hashlib.sha256(previous).hexdigest()
-            original=checked(previous);prefix=original.segments[-1].file_offs-8
+            original=checked(previous);prefix=next(s.file_offs-8 for s in original.segments if s.addr==0x4080a000)
             candidate=checked(image)
-            if candidate.segments[-1].file_offs-8!=prefix or image[:prefix]!=previous[:prefix]:
+            if (next(s.file_offs-8 for s in candidate.segments if s.addr==0x4080a000)!=prefix or
+                    image[2:prefix]!=previous[2:prefix] or image[0]!=previous[0]):
                 raise ValueError('update changes preserved recovery segments')
             save(args.output/'transaction.json',state)
             if args.check_only:

@@ -11,15 +11,24 @@
  */
 OUTPUT_ARCH(riscv)
 ENTRY(c6_cold_entry)
-MEMORY { NATIVE (rwx) : ORIGIN = @BASE@, LENGTH = 400K }
+MEMORY { NATIVE (rwx) : ORIGIN = @BASE@, LENGTH = 400K
+ XIP (rx) : ORIGIN = 0x42210000, LENGTH = 256K }
 SECTIONS {
+    .xip : {
+        __c6_xip_start = .;
+        *tiku_shell*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *tiku_basic.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        . = ALIGN(4);
+        __c6_xip_end = .;
+    } > XIP
+
     .text : {
         __native_image_start = .;
         KEEP(*(.text.entry))
         . = ALIGN(256);
         KEEP(*(.text.vectors))
-        *(.text .text.*)
-        *(.rodata .rodata.* .srodata .srodata.*)
+        *(EXCLUDE_FILE (*tiku_basic.o) .text .text.*)
+        *(EXCLUDE_FILE (*tiku_basic.o) .rodata .rodata.* .srodata .srodata.*)
         . = ALIGN(4);
     } > NATIVE
     .data : {
@@ -58,7 +67,7 @@ SECTIONS {
         __retained_end = .;
     } > NATIVE
     ASSERT(__uninit_end-__uninit_start <= 8176, "C6 durable mirror capacity exceeded")
-    ASSERT(__retained_end-__retained_start <= 4096, "C6 retained budget exceeded")
+    ASSERT(__retained_end-__retained_start <= (@SHELL@ ? 8192 : 4096), "C6 retained budget exceeded")
     .tier (NOLOAD) : ALIGN(64) {
         __tier_sram_start = .;
         . = ORIGIN(NATIVE)+LENGTH(NATIVE)-4096-32768-65536-2048-64-8192;
@@ -83,6 +92,15 @@ SECTIONS {
     } > NATIVE
     __native_arena_end = ORIGIN(NATIVE)+LENGTH(NATIVE);
     __c6_layout_version = 2;
+    __c6_shell_profile = @SHELL@;
+    __datastart = ADDR(.data);
+    _end = __retained_end;
+    _etext = __native_image_end;
+    __stack = __native_stack_top;
+    __sram_start = ORIGIN(NATIVE);
+    __sram_end = ORIGIN(NATIVE)+LENGTH(NATIVE);
+    __tiku_stack_bottom = __native_stack_bottom;
+    __tiku_stack_guard_start = native_stack_guard;
     __c6_board_id = 0x50344336;
     __c6_firmware_build = @BUILD@;
     __c6_tier_floor = @TIER_FLOOR@;

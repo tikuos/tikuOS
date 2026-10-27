@@ -182,6 +182,12 @@ typedef int (*tiku_console_text_fn)(void *ctx, int ch);
  */
 size_t tiku_console_inject(const uint8_t *bytes, size_t len);
 
+/** @brief Discard queued injected text while preserving queued physical text.
+ * @note Foreground context only. The frame decoder and last-byte origin are
+ * unchanged. A remote session calls this before admitting its cancel byte.
+ */
+void tiku_console_inject_clear(void);
+
 /** @brief Whether the last byte tiku_console_getc() returned was injected. */
 uint8_t tiku_console_from_inject(void);
 
