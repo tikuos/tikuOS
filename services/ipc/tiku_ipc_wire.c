@@ -311,7 +311,10 @@ void tiku_ipc_wire_pump(tiku_ipc_wire_t *c, uint16_t budget)
     }
     for(unsigned i=1;i<3&&budget;i++)
         if(c->inbox[i].length){budget--;inbox_step(c,i);}
-    for (unsigned i = 0; c->ready && i < 2; i++) {
+    /* Rotate accepted bulk frames across a carrier's shared queue slot. */
+    unsigned first = c->client_cursor;
+    for (unsigned n = 0; c->ready && n < 2; n++) {
+        unsigned i = (first + n) % 2u;
         uint16_t amount, offset;
         if (!c->client[i].busy || TIKU_CLOCK_LT(now,c->client[i].retry)) continue;
         offset = c->client[i].offset;
@@ -323,6 +326,7 @@ void tiku_ipc_wire_pump(tiku_ipc_wire_t *c, uint16_t budget)
             (uint8_t *)c->client[i].transfer.data+offset,
             c->client[i].transfer.direction == TIKU_IPC_INPUT ? amount : 0);
         c->client[i].retry = (tiku_clock_time_t)(now+(sent ? 1u : RETRY_TICKS));
+        if (!sent) c->client_cursor = (uint8_t)((i + 1u) % 2u);
     }
     (void)tiku_ipc_service_at(c->endpoint,1);
 }

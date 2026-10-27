@@ -43,7 +43,7 @@ typedef struct {
     uint64_t epoch, peer_epoch;
     uint32_t local_session, serial, bad, stale, duplicate, failed, delivered;
     uint16_t endpoint, frame_size, peer_frame, peer_message, peer_buffer;
-    uint8_t peer_directions, ready, hello_reply, retired, initialized;
+    uint8_t peer_directions, ready, hello_reply, retired, initialized, client_cursor;
     tiku_clock_time_t hello_at;
     tiku_ipc_wire_inbox_t inbox[3];
     struct {
