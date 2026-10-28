@@ -89,6 +89,30 @@ void tiku_basic_mode_set_stream(const struct tiku_shell_io *io);
 /** @brief Non-zero while the mode is driven from a stream, not the console. */
 int tiku_basic_mode_streamed(void);
 
+#define TIKU_BASIC_JOB_NONE    0  /**< no job has run since boot */
+#define TIKU_BASIC_JOB_RUNNING 1
+#define TIKU_BASIC_JOB_DONE    2  /**< END, STOP or past the last line */
+#define TIKU_BASIC_JOB_ERROR   3  /**< an error the program did not trap */
+#define TIKU_BASIC_JOB_STOPPED 4  /**< tiku_basic_job_stop() */
+
+/**
+ * @brief Run @p program, numbered lines one per line of text, as a job: a
+ *        headless run of the mode driven from @p io, which takes its output.
+ *
+ * A job has no console: INPUT, REBOOT and POKE are errors in it, and its VFS
+ * writes carry @p io's capability.  The program replaces the one in memory.
+ * @return 0 when it runs; -1 when the mode is in use (nothing written), or
+ *         when a line has no number or does not fit or the program is empty,
+ *         with the reason written to @p io
+ */
+int tiku_basic_job_start(const char *program, const struct tiku_shell_io *io);
+
+/** @brief End the running job where it stands; its state becomes STOPPED. */
+void tiku_basic_job_stop(void);
+
+/** @brief The job running, or how the last one ended (TIKU_BASIC_JOB_*). */
+int tiku_basic_job_state(void);
+
 /**
  * @brief Run up to one batch (TIKU_BASIC_MODE_BATCH) of program steps
  *        (poll-loop hook).

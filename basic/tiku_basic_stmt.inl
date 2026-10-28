@@ -357,6 +357,10 @@ exec_input(const char **p)
         return;
     }
 
+    if (basic_mode_job) {
+        basic_throw(TIKU_BASIC_ERR_IO, "INPUT has no console in a job");
+        return;
+    }
     SHELL_PRINTF("? ");
     if (read_line(buf, sizeof(buf)) < 0) {
         basic_error = 1;
@@ -1097,6 +1101,10 @@ exec_i2cwrite(const char **p)
 static void
 exec_reboot(void)
 {
+    if (basic_mode_job) {
+        basic_throw(TIKU_BASIC_ERR_GENERAL, "REBOOT is not allowed in a job");
+        return;
+    }
     SHELL_PRINTF(SH_YELLOW "Rebooting..." SH_RST "\n");
 #if defined(PLATFORM_ESP32C61)
     tiku_cpu_esp32c61_restart(1);       /* as the shell's reboot does */
@@ -1362,8 +1370,13 @@ exec_fwrite(const char **p)
 static void
 exec_poke(const char **p)
 {
-    long addr = parse_expr(p);
+    long addr;
     long val;
+    if (basic_mode_job) {
+        basic_throw(TIKU_BASIC_ERR_GENERAL, "POKE is not allowed in a job");
+        return;
+    }
+    addr = parse_expr(p);
     if (basic_error) return;
     skip_ws(p);
     if (cur_peek(p) != ',') {

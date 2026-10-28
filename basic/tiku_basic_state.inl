@@ -263,6 +263,11 @@ static int          basic_quit;        /* 1 when BYE is typed */
 static uint8_t      basic_mode_on;
 static uint8_t      basic_mode_interactive;
 
+/* 1 while the mode runs a job (tiku_basic_job_start()): INPUT, REBOOT and
+ * POKE refuse; tiku_basic_job_state() reads basic_job_state. */
+static uint8_t      basic_mode_job;
+static uint8_t      basic_job_state;
+
 /* Checkpoint arming (tiku_basic_ckpt.inl).  1 while PERSIST is on: the run
  * loop checkpoints the execution state at yield boundaries, and RUN RESUME
  * continues from the checkpoint after a reset or power cut.  The dispatcher,

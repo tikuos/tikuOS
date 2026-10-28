@@ -7,9 +7,9 @@
  *
  * tiku_basic_mode.inl - BASIC as a non-blocking shell-loop mode.
  *
- * `basic` enters the mode and returns; the shell poll loop then runs a batch of
- * program steps per tick, and the scheduler runs between batches, so other
- * processes keep running during a RUN.  The mode puts no cap on a run's steps.
+ * `basic` enters the mode and returns; the shell loop runs a batch of steps
+ * per tick, the scheduler between batches, and a RUN has no step cap.  A job
+ * is a headless RUN of a program handed over as text, driven from a stream.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -59,8 +59,10 @@ basic_mode_leave(void)
     basic_run_end();
     basic_mode_on         = 0;
     basic_run_shell_mode  = 0;
-    basic_mode_exit_pending = 1;   /* shell restores its prompt this pass */
+    /* The shell restores its prompt this pass; a job never took it. */
+    basic_mode_exit_pending = basic_mode_job ? 0 : 1;
 }
+
 
 int
 tiku_basic_mode_take_exit(void)
@@ -159,6 +161,13 @@ tiku_basic_mode_streamed(void)
 }
 
 
+/** @brief The stream a job drives the mode from, NULL for none. */
+static void
+stream_set(const struct tiku_shell_io *io)
+{
+    basic_stream = io;
+}
+
 /** @brief Put the stream in front for the length of one hook. */
 static void
 stream_take(void)
@@ -202,7 +211,133 @@ tiku_basic_mode_streamed(void)
 
 static void stream_take(void) { }
 static void stream_give(void) { }
+static void stream_set(const struct tiku_shell_io *io) { (void)io; }
 #endif
+
+/*---------------------------------------------------------------------------*/
+/* JOBS                                                                       */
+/*---------------------------------------------------------------------------*/
+
+/** @brief After a hook: a job whose mode has ended lets go of its stream. */
+static void
+basic_job_release(void)
+{
+    if (basic_mode_job && !basic_mode_on) {
+        basic_mode_job = 0;
+        stream_set((const struct tiku_shell_io *)0);
+    }
+}
+
+/**
+ * @brief Store one "<number> <statement>" line of a job's program.
+ * @return 0, or -1 with the reason printed
+ */
+static int
+basic_job_line(const char *line, unsigned n)
+{
+    const char *p = line;
+    long ln;
+
+    skip_ws(&p);
+    if (*p == '\0') {
+        return 0;
+    }
+    if (!is_digit(*p) || !parse_unum(&p, &ln) || ln <= 0 || ln >= 0xFFFE) {
+        SHELL_PRINTF("? line %u: a job's lines start with a line number\n", n);
+        return -1;
+    }
+    skip_ws(&p);
+    if (prog_store((uint16_t)ln, p) < 0) {
+        SHELL_PRINTF("? program full (%u lines)\n",
+                     (unsigned)TIKU_BASIC_PROGRAM_LINES);
+        return -1;
+    }
+    return 0;
+}
+
+/** @brief Load @p program, line by line, into an empty program. */
+static int
+basic_job_load(const char *program)
+{
+    char     line[TIKU_BASIC_LINE_MAX];
+    unsigned n = 0;
+
+    prog_clear();
+    basic_clear_vars();
+    while (*program != '\0') {
+        size_t len = strcspn(program, "\r\n");
+
+        n++;
+        if (len >= sizeof line) {
+            SHELL_PRINTF("? line %u is longer than %u bytes\n", n,
+                         (unsigned)(sizeof line - 1u));
+            return -1;
+        }
+        memcpy(line, program, len);
+        line[len] = '\0';
+        if (basic_job_line(line, n) != 0) {
+            return -1;
+        }
+        program += len;
+        if (*program == '\r') {
+            program++;
+        }
+        if (*program == '\n') {
+            program++;
+        }
+    }
+    return 0;
+}
+
+int
+tiku_basic_job_start(const char *program, const struct tiku_shell_io *io)
+{
+    int rc = -1;
+
+    if (basic_mode_on || io == (const struct tiku_shell_io *)0) {
+        return -1;
+    }
+    stream_set(io);
+    stream_take();
+    if (basic_session_begin() == 0 && basic_job_load(program) == 0) {
+        basic_debug_reset();
+        basic_ckpt_armed = 0;          /* the owner's checkpoint stays theirs */
+        if (basic_run_begin() == 0) {
+            basic_mode_interactive  = 0;
+            basic_mode_pos          = 0;
+            basic_mode_on           = 1;
+            basic_run_shell_mode    = 1;
+            basic_mode_exit_pending = 0;
+            basic_mode_job          = 1;
+            basic_job_state         = TIKU_BASIC_JOB_RUNNING;
+            rc = 0;
+        }
+    }
+    stream_give();
+    if (rc != 0) {
+        stream_set((const struct tiku_shell_io *)0);
+    }
+    return rc;
+}
+
+void
+tiku_basic_job_stop(void)
+{
+    if (!basic_mode_job || !basic_mode_on) {
+        return;
+    }
+    stream_take();
+    SHELL_PRINTF("stopped at line %u\n", (unsigned)basic_pc);
+    basic_job_state = TIKU_BASIC_JOB_STOPPED;
+    basic_mode_leave();
+    stream_give();
+    basic_job_release();
+}
+int
+tiku_basic_job_state(void)
+{
+    return basic_job_state;
+}
 
 void
 tiku_basic_mode_feed_char(int ch)
@@ -344,6 +479,7 @@ tiku_basic_mode_tick(void)
     stream_take();
     basic_mode_tick_inner();
     stream_give();
+    basic_job_release();
 #if BASIC_RECLAIM_ENABLE
     basic_reclaim_entered--;
 #endif
@@ -354,6 +490,7 @@ static void
 basic_mode_tick_inner(void)
 {
     int budget;
+    int step = BASIC_STEP_RUNNING;
 
 #if TIKU_BASIC_ONCHG_EVENT
     /* Self-heal: the shell's rules engine does a wholesale unwatch_all() on
@@ -370,7 +507,8 @@ basic_mode_tick_inner(void)
 #endif
     for (budget = TIKU_BASIC_MODE_BATCH; budget > 0 && basic_running; budget--) {
         if (basic_debug_before_step()) { break; }
-        if (basic_run_step() != BASIC_STEP_RUNNING) {
+        step = basic_run_step();
+        if (step != BASIC_STEP_RUNNING) {
             basic_run_end();
             break;
         }
@@ -397,6 +535,10 @@ basic_mode_tick_inner(void)
          * leaving the last checkpoint live for RUN RESUME. */
         if (basic_ckpt_armed) {
             basic_ckpt_invalidate();
+        }
+        if (basic_mode_job) {
+            basic_job_state = step == BASIC_STEP_BROKEN ? TIKU_BASIC_JOB_ERROR
+                                                        : TIKU_BASIC_JOB_DONE;
         }
         basic_mode_after_program();
     }

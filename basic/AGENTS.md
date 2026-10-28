@@ -65,6 +65,13 @@ ESP32-C61, SRAM on RP2350 (the refuse-NVM-arena guard keeps it off flash).
   `tiku_basic_ext_waited()` says why.  Only a statement on the main line of
   a RUN parks; inside an IF-THEN, an EVERY body or at the prompt the call
   returns -1.  tinymcp's `ASK` is the model (`services/tinymcp/`).
+- A job (`tiku_basic_job_start()`) is a headless run of a program handed
+  over as text, every line numbered, driven from a stream that takes its
+  output and carries its capability.  It reads no console: `INPUT`,
+  `REBOOT` and `POKE` throw in a job, and a new statement that reads the
+  console or resets the board throws there too.
+  `tiku_basic_job_state()` says how the last one ended; a job's end
+  leaves the shell's prompt alone.  tinymcp's `basic` tool is its user.
 
 ## Native modules
 
