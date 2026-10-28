@@ -598,6 +598,18 @@ int tiku_vfs_read_val(const char *path, tiku_vfs_val_t *out);
 int tiku_vfs_read_val_node(const tiku_vfs_node_t *node, tiku_vfs_val_t *out);
 
 /**
+ * @brief Decode @p text, a rendering of @p node already read, per the
+ *        node's descriptor, without reading the node again.
+ * @return TIKU_VFS_OK; TIKU_VFS_ERR for an untyped or STR node or text that
+ *         does not decode; TIKU_VFS_EINVAL for a NULL @p out or @p text
+ */
+int tiku_vfs_val_from_text(const tiku_vfs_node_t *node, const char *text,
+                           tiku_vfs_val_t *out);
+
+/** @brief A unit's short name ("Hz", "mV"), "" for none, "?" past the table. */
+const char *tiku_vfs_unit_name(unsigned unit);
+
+/**
  * @brief Render a node's descriptor as a one-line human/manifest string.
  *
  * e.g. "u32 Hz cost=free fresh=static read=poll\n", or "i32 mC cost=periph

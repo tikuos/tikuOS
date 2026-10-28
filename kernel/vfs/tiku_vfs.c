@@ -915,6 +915,29 @@ int tiku_vfs_read_val(const char *path, tiku_vfs_val_t *out)
     return tiku_vfs_read_val_node(tiku_vfs_resolve(path), out);
 }
 
+int tiku_vfs_val_from_text(const tiku_vfs_node_t *node, const char *text,
+                           tiku_vfs_val_t *out)
+{
+    if (out == NULL || text == NULL) {
+        return TIKU_VFS_EINVAL;
+    }
+    out->vtype = TIKU_VFS_T_NONE;
+    out->unit = TIKU_VFS_U_NONE;
+    out->scale = 0;
+    out->as.u = 0;
+    if (node == NULL || node->desc == NULL) {
+        return TIKU_VFS_ERR;
+    }
+    out->unit = node->desc->unit;
+    out->scale = node->desc->scale;
+    return vfs_decode_text(text, node->desc, out);
+}
+
+const char *tiku_vfs_unit_name(unsigned unit)
+{
+    return VFS_NAME_OF(vfs_unit_names, unit);
+}
+
 const tiku_vfs_desc_t *tiku_vfs_desc_of(const tiku_vfs_node_t *node)
 {
     return (node != NULL) ? node->desc : NULL;
