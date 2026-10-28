@@ -3170,7 +3170,7 @@ CFLAGS += -DTIKU_MCP_ENABLE=1 -I$(TINYMCP)
 ifneq ($(filter esp32c61 esp32p4,$(TIKU_PLATFORM)),)
 CFLAGS += -DTIKU_MCP_IN_CAP=2048u -DTIKU_MCP_OUT_CAP=8192u -DTIKU_MCP_SCRATCH=4098u
 endif
-SRCS += $(TINYMCP)/tinymcp.c $(TINYMCP)/tinymcp_json.c
+SRCS += $(TINYMCP)/tinymcp.c $(TINYMCP)/tinymcp_json.c $(TINYMCP)/tinymcp_http.c
 SRCS += services/tinymcp/tiku_mcp.c
 SRCS += services/tinymcp/tiku_mcp_console.c
 SRCS += services/tinymcp/tiku_mcp_vfs.c

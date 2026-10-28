@@ -856,8 +856,8 @@ run_tool(tinymcp_t *stream, const char *name, const tinymcp_args_t *args,
     if (!owner && strcmp(name, "read") != 0 && strcmp(name, "ls") != 0) {
         (void)tinymcp_sink_puts(text, "this connection only reads: the owner "
                                       "sets a key at /sys/mcp/key, and a "
-                                      "client sends it in _meta "
-                                      TIKU_MCP_KEY_META);
+                                      "client sends it as its HTTP bearer "
+                                      "token or in _meta " TIKU_MCP_KEY_META);
         return TINYMCP_TOOL_ERROR;
     }
     if (strcmp(name, "shell") == 0) {
@@ -1054,18 +1054,20 @@ data_changed(void)
     uint32_t names, prompts;
 
     data_hashes(&names, &prompts);
-    tinymcp_t *tcp = tiku_mcp_tcp_stream();
+    unsigned i;
 
-    if (names != data_names_hash) {
-        tinymcp_listchanged(tiku_mcp_console_stream());
-        if (tcp != (tinymcp_t *)0) {
-            tinymcp_listchanged(tcp);
+    for (i = 0u; i <= TIKU_MCP_TCP_SLOTS; i++) {
+        tinymcp_t *s = i == 0u ? tiku_mcp_console_stream()
+                               : tiku_mcp_tcp_stream(i - 1u);
+
+        if (s == (tinymcp_t *)0) {
+            continue;
         }
-    }
-    if (prompts != prompts_hash) {
-        tinymcp_prompts_changed(tiku_mcp_console_stream());
-        if (tcp != (tinymcp_t *)0) {
-            tinymcp_prompts_changed(tcp);
+        if (names != data_names_hash) {
+            tinymcp_listchanged(s);
+        }
+        if (prompts != prompts_hash) {
+            tinymcp_prompts_changed(s);
         }
     }
     data_names_hash = names;
@@ -1128,8 +1130,8 @@ send_part(void *ctx, const char *bytes, size_t len, int last)
     if (ctx == (void *)tiku_mcp_console_stream()) {
         return tiku_mcp_console_send_part(bytes, len, last);
     }
-    if (ctx != (void *)0 && ctx == (void *)tiku_mcp_tcp_stream()) {
-        return tiku_mcp_tcp_send_part(bytes, len, last);
+    if (tiku_mcp_tcp_owns((const tinymcp_t *)ctx)) {
+        return tiku_mcp_tcp_send_part((tinymcp_t *)ctx, bytes, len, last);
     }
     return -1;
 }
@@ -1140,8 +1142,8 @@ send(void *ctx, const char *msg, size_t len)
     if (ctx == (void *)tiku_mcp_console_stream()) {
         return tiku_mcp_console_send(msg, len);
     }
-    if (ctx != (void *)0 && ctx == (void *)tiku_mcp_tcp_stream()) {
-        return tiku_mcp_tcp_send(msg, len);
+    if (tiku_mcp_tcp_owns((const tinymcp_t *)ctx)) {
+        return tiku_mcp_tcp_send((tinymcp_t *)ctx, msg, len);
     }
     return -1;
 }
@@ -1186,8 +1188,8 @@ tiku_mcp_init(void)
                    "/sys/mcp/journal records who asked, answered and "
                    "changed what.  Rebooting, sleep, powering down, the CPU "
                    "clock and the memory layout ask the owner first; over "
-                   "TCP a request without the owner's key in _meta "
-                   TIKU_MCP_KEY_META " only reads.  The "
+                   "TCP a request without the owner's key (an HTTP bearer "
+                   "token, or _meta " TIKU_MCP_KEY_META ") only reads.  The "
                    "basic tool runs a BASIC program as a job, waiting for its "
                    "end with progress, or in the background under "
                    "/sys/mcp/job.",

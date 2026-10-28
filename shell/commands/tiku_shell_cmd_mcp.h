@@ -18,7 +18,7 @@
 
 /**
  * @brief "mcp" command handler: the server's era, counters, watches and
- *        TCP port; "mcp listen <port>|off" opens or closes that port.
+ *        TCP ports; "mcp listen|http <port>|off" opens or closes a port.
  *
  * @param argc  Argument count
  * @param argv  Argument vector

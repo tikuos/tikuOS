@@ -12,7 +12,7 @@ tiku_mcp_console.c     channel 0xF3: the queue, the pump, the frame out
 tiku_mcp_ask.h/.c      /sys/mcp/ask, the journal, BASIC's ASK
 tiku_mcp_consent.h/.c  which actions ask the owner, and the open question
 tiku_mcp_job.h/.c      the basic tool: one BASIC job, its output, /sys/mcp/job
-tiku_mcp_tcp.h/.c      mcp listen: one TCP connection, /sys/mcp/key and tcp
+tiku_mcp_tcp.h/.c      mcp listen and http: TCP connections, /sys/mcp/key and tcp
 tiku_mcp_vfs.h/.c      /sys/mcp, a boot mount
 ```
 
@@ -117,28 +117,37 @@ its stderr.
   `tinymcp_prompts_changed()`.  That watch holds one of the kernel's
   `TIKU_VFS_WATCH_MAX` slots for the boot.
 
-## TCP and the key
+## TCP, HTTP and the key
 
 With the full net kit (`TIKU_KIT_NET_ENABLE=1`, not `TIKU_KIT_NET_MIN`)
-`mcp listen <port>` serves a second stream on that TCP port, one
-connection at a time, newline-delimited; `mcp listen off` stops it.  On a
-board without Wi-Fi the port is reached over the console line once `slip`
-is on.  A connection's in and out buffers are an arena leased from the
-SRAM tier when it connects; a closed or failed connection is released from
-the pump, where no request is being served, its arena zeroed and given
-back.  A reply goes out in segments of the connection's MSS; while the TX
+`mcp listen <port>` serves newline-delimited MCP on a TCP port, one
+connection at a time, and `mcp http <port>` serves Streamable HTTP at
+`/mcp` through the library's `tinymcp_http.c`, `TIKU_MCP_HTTP_CONNS` (2)
+connections at once; `off` stops either.  Each connection has its own
+`tinymcp_t`, so an HTTP client's listen stream and a waited-for job each
+hold one while another carries requests, and a client that closes its
+connection cancels what it kept.  On a board without Wi-Fi the ports are
+reached over the console line once `slip` is on.  A connection's
+instance, HTTP parser, segment stage and buffers (7.5 KB on the
+nRF54L15) are an arena
+leased from the SRAM tier when it connects; a closed or failed connection
+is released from the pump, where no request is being served, its arena
+zeroed and given back.  A reply goes out in segments of the connection's MSS; while the TX
 pool is full the console is pumped so acknowledgements come in, and after
-`TIKU_MCP_TCP_SEND_MS` (3000) the connection is aborted.  The pump also
+`TIKU_MCP_TCP_SEND_MS` (3000) the connection is aborted; an HTTP
+response's end flushes the stage.  The pump also
 runs the TCP stack's timers about 20 times a second while it listens,
 except in the `TIKU_SHELL_NET_TEST` build, whose shell runs them.  A
 request has the owner's authority (`tiku_mcp_owner()`) on the console, or
-over TCP when its `_meta` member `org.tinymcp/key` equals the key in
+over TCP when its HTTP bearer token or its `_meta` member
+`org.tinymcp/key` equals the key in
 `/sys/mcp/key` (a persist cell of 8 to 32 characters, written with the
 system capability, read back as `set` or `none`, compared byte by byte to
 the end).  Without it `write`, `shell` and `basic` are refused, `read`
 refuses a secret node or one whose read acts, and the request's VFS
-writes carry no capability.  `/sys/mcp/tcp` says `off`, `listening <port>`
-or `connected <port> <peer>`, with the connections accepted and refused.
+writes carry no capability.  `/sys/mcp/tcp` says each port's state, the
+lines connection's peer, how many HTTP connections are open, and the
+connections accepted and refused, with the last refusal's reason.
 
 ## Execution
 
@@ -162,10 +171,11 @@ frame is open; text written there lands inside it.
 on the ESP32-C61 and P4; 256 and 512 on MSP430) size the channel buffer,
 the two queue slots and the reply; `TIKU_MCP_SCRATCH` (4098) holds one
 page of a node.  Measured on the nRF54L15 at `-Os`, from the object
-files on 2026-10-28, with the net kit: the binding 16.9 KB of code (the
-job module 2.1 KB, the TCP stream 1.4 KB), the library 17.3 KB, 20.5 KB of
-SRAM in all (the ask module 2.2 KB of it, the journal most; the job's ring
-and state 1.3 KB), and while a TCP connection is open its 5.6 KB arena.
+files on 2026-10-28, with the net kit: the binding 17.6 KB of code (the
+job module 2.1 KB, the TCP connections 2.0 KB), the library 21.7 KB (its
+HTTP layer 4.4 KB), 19.6 KB of SRAM in all (the ask module 2.2 KB of it,
+the journal most; the job's ring and state 1.3 KB), and 7.5 KB more for
+each TCP connection while it is open.
 
 ## Proof
 
@@ -183,7 +193,12 @@ runs `mcp listen 7000`, and drives the same SDK through the bridge's
 `--tcp` to `tests/slip_tcp.py`, a TCP client over the board's console line:
 one connection at a time, reads and a 16 KB read, the refusals without the
 key, a subscription's update, writes and consent with it, a wrong key, the
-handshake era, and the arena given back.  `tinymcp/tests/board_ask.py <port>` runs a BASIC
+handshake era, and the arena given back.  `tinymcp/tests/board_http.py
+<port>` runs `mcp http 8080` and the SDK's own Streamable HTTP client with
+no bridge, through the same relay: the 16 KB read in chunks, the refusals
+without a bearer token, an update on a listen's event stream, writes, a
+job's progress and its cancel by closing the POST, consent, a wrong token,
+a web origin and a GET refused, and the arenas given back.  `tinymcp/tests/board_ask.py <port>` runs a BASIC
 program whose `ASK` it answers over the same port, lets one run out of
 time, has a rule ask, and runs `attend.py` against a stub of the Messages
 API.  TikuBench's `tinymcp` suite runs both, with BASIC built in.

@@ -515,7 +515,7 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
     {"ask",     "Ask the board's agent",        tiku_shell_cmd_ask},
 #endif
 #if TIKU_SHELL_CMD_MCP
-    {"mcp",     "The tinymcp server; mcp listen <port>|off", tiku_shell_cmd_mcp},
+    {"mcp",     "The tinymcp server; mcp listen|http <port>|off", tiku_shell_cmd_mcp},
 #endif
 #if TIKU_SHELL_CMD_FREE
     {"free",    "Memory usage (SRAM/" TIKU_DEVICE_NVM_LABEL ")", tiku_shell_cmd_free},

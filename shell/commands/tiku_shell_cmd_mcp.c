@@ -21,33 +21,37 @@
 #include <stdlib.h>
 #include <string.h>
 
-/** @brief "mcp listen <port>|off": MCP on a TCP port, or not. */
+/**
+ * @brief "mcp listen|http <port>|off": MCP as lines, or Streamable HTTP, on
+ *        a TCP port, or not.
+ */
 static void
-listen_cmd(const char *arg)
+listen_cmd(const char *what, const char *arg)
 {
     long p = strcmp(arg, "off") == 0 ? 0L : strtol(arg, (char **)0, 10);
-    char line[96];
+    char line[160];
 
     if (p < 0L || p > 65535L || (p == 0L && strcmp(arg, "off") != 0)) {
-        SHELL_PRINTF("usage: mcp listen <port>|off\n");
+        SHELL_PRINTF("usage: mcp %s <port>|off\n", what);
         return;
     }
-    if (tiku_mcp_tcp_listen((uint16_t)p) != 0) {
+    if (tiku_mcp_tcp_listen((uint16_t)p, strcmp(what, "http") == 0) != 0) {
         SHELL_PRINTF("mcp: no TCP listener on %ld\n", p);
         return;
     }
     (void)tiku_mcp_tcp_read(line, sizeof line);
-    SHELL_PRINTF("tcp %s", line);
+    SHELL_PRINTF("%s", line);
 }
 
 void
 tiku_shell_cmd_mcp(uint8_t argc, const char *argv[])
 {
     tiku_mcp_status_t s;
-    char line[96];
+    char line[160];
 
-    if (argc >= 3u && strcmp(argv[1], "listen") == 0) {
-        listen_cmd(argv[2]);
+    if (argc >= 3u && (strcmp(argv[1], "listen") == 0 ||
+                       strcmp(argv[1], "http") == 0)) {
+        listen_cmd(argv[1], argv[2]);
         return;
     }
     tiku_mcp_status(&s);
@@ -60,5 +64,5 @@ tiku_shell_cmd_mcp(uint8_t argc, const char *argv[])
     SHELL_PRINTF("watches %u of %u\n", (unsigned)s.subs,
                  (unsigned)TIKU_MCP_WATCH_MAX);
     (void)tiku_mcp_tcp_read(line, sizeof line);
-    SHELL_PRINTF("tcp %s", line);
+    SHELL_PRINTF("%s", line);
 }

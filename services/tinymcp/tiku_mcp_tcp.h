@@ -6,8 +6,8 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mcp_tcp.h - the MCP server on a TCP port, one connection at a time,
- * and the key that gives a connection the owner's authority.
+ * tiku_mcp_tcp.h - the MCP server on TCP: newline-delimited on one port,
+ * Streamable HTTP on another, and the key that gives the owner's authority.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,28 +27,37 @@
 #ifndef TIKU_MCP_TCP_SEND_MS
 #define TIKU_MCP_TCP_SEND_MS 3000u /**< a reply's wait for a free TX segment */
 #endif
+#ifndef TIKU_MCP_HTTP_CONNS
+#define TIKU_MCP_HTTP_CONNS 2u     /**< HTTP connections open at once */
+#endif
+/** Connections at once: one of lines, the rest HTTP. */
+#define TIKU_MCP_TCP_SLOTS (1u + TIKU_MCP_HTTP_CONNS)
 
 /**
- * @brief Listen for MCP on @p port, or stop with 0; an open connection
- *        stays until it closes.
+ * @brief Listen for MCP on @p port, lines (@p http 0) or Streamable HTTP at
+ *        /mcp (@p http 1), or stop with port 0; open connections stay.
  * @return 0, or -1 when this build has no TCP or the stack refused
  */
-int tiku_mcp_tcp_listen(uint16_t port);
+int tiku_mcp_tcp_listen(uint16_t port, int http);
 
-/** @brief The TCP connection's stream, or NULL while none is open. */
-tinymcp_t *tiku_mcp_tcp_stream(void);
+/** @brief Connection @p i's stream, or NULL while it is closed. */
+tinymcp_t *tiku_mcp_tcp_stream(unsigned i);
+
+/** @brief 1 when @p stream is one of the TCP connections'. */
+int tiku_mcp_tcp_owns(const tinymcp_t *stream);
 
 /**
  * @brief 1 when the request being served on @p stream carries the key the
- *        owner set; 0 for none, a wrong one, or no key set.
+ *        owner set, as its HTTP bearer token or in _meta; 0 otherwise.
  */
 int tiku_mcp_tcp_keyed(tinymcp_t *stream);
 
-/** @brief The TCP stream's reply, whole or in pieces, newline-ended. */
-int tiku_mcp_tcp_send(const char *msg, size_t len);
-int tiku_mcp_tcp_send_part(const char *bytes, size_t len, int last);
+/** @brief A TCP stream's reply, whole or in pieces. */
+int tiku_mcp_tcp_send(tinymcp_t *stream, const char *msg, size_t len);
+int tiku_mcp_tcp_send_part(tinymcp_t *stream, const char *bytes, size_t len,
+                           int last);
 
-/** @brief From the shell's pump: the connection's requests. */
+/** @brief From the shell's pump: the connections' requests. */
 void tiku_mcp_tcp_pump(void);
 
 /** @brief The key cell, once at boot. */
@@ -58,9 +67,5 @@ void tiku_mcp_tcp_init(void);
 int tiku_mcp_key_read(char *buf, size_t max);
 int tiku_mcp_key_write(const char *buf, size_t len);
 int tiku_mcp_tcp_read(char *buf, size_t max);
-
-/** @brief Connections taken and refused since boot. */
-uint32_t tiku_mcp_tcp_accepted(void);
-uint32_t tiku_mcp_tcp_refused(void);
 
 #endif /* TIKU_MCP_TCP_H_ */
