@@ -82,12 +82,13 @@ TIKU_PROCESS(tiku_mcp_process, "tinymcp");
 
 /**
  * @brief The node's text from line @p first, at most @p bytes when set,
- *        into the sink, page by page.
+ *        into the sink, page by page; the first page's start into @p head
+ *        when it is set.
  * @return 0, or the first negative TIKU_VFS_* status
  */
 static int
 node_text(const char *path, unsigned first, unsigned bytes,
-          tinymcp_sink_t *text)
+          tinymcp_sink_t *text, char *head, size_t head_cap)
 {
     size_t limit = bytes ? (size_t)bytes : (size_t)-1;
     size_t total = 0u;
@@ -108,6 +109,12 @@ node_text(const char *path, unsigned first, unsigned bytes,
             if (scratch[i] == '\n') {
                 lines++;
             }
+        }
+        if (head != (char *)0 && total == 0u) {
+            size_t k = (size_t)n < head_cap ? (size_t)n : head_cap - 1u;
+
+            memcpy(head, scratch, k);
+            head[k] = 0;
         }
         take = (size_t)n;
         if (total + take > limit) {
@@ -354,7 +361,7 @@ read_resource(void *ctx, const char *uri, unsigned line, unsigned bytes,
             return TINYMCP_ENOENT;
         }
     }
-    return from_status(node_text(path, line, bytes, text));
+    return from_status(node_text(path, line, bytes, text, (char *)0, 0u));
 }
 
 /*---------------------------------------------------------------------------*/
@@ -597,27 +604,29 @@ static const tinymcp_tool_t tools[] = {
     { "read",
       "Read a node of the board's namespace as text, for example /sys/uptime; "
       "a long node from line, within bytes.  Reads a node even when reading "
-      "it acts.",
+      "it acts.  A typed node's value comes as structured content too: "
+      "value, a number with its scale applied, and unit.",
       "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},"
       "\"line\":{\"type\":\"integer\"},\"bytes\":{\"type\":\"integer\"}},"
-      "\"required\":[\"path\"]}" },
+      "\"required\":[\"path\"]}", (const char *)0 },
     { "write",
       "Write a value to a node, as the shell's write does: write /dev/led0 1 "
       "lights the LED; a path under /data creates or replaces a file.",
       "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},"
-      "\"value\":{\"type\":\"string\"}},\"required\":[\"path\",\"value\"]}" },
+      "\"value\":{\"type\":\"string\"}},\"required\":[\"path\",\"value\"]}",
+      (const char *)0 },
     { "ls",
       "List a directory of the namespace: one line per child, name, d or f, "
       "and perms.",
       "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},"
-      "\"required\":[\"path\"]}" },
+      "\"required\":[\"path\"]}", (const char *)0 },
     { "shell",
       "Run one command line as a person types it at tikuOS:/> and return "
       "what it printed.  The vocabulary is the resource tiku://shell/commands; "
       "commands that stay in a mode (watch, basic, ping, ntp, dns, mqtt, slip) "
       "are refused.",
       "{\"type\":\"object\",\"properties\":{\"line\":{\"type\":\"string\"}},"
-      "\"required\":[\"line\"]}" },
+      "\"required\":[\"line\"]}", (const char *)0 },
 #if TIKU_SHELL_CMD_BASIC
     { "basic",
       "Run a Tiku BASIC program, numbered lines one per line of text, as "
@@ -629,7 +638,7 @@ static const tinymcp_tool_t tools[] = {
       "are errors in a job, and it cannot write the system's nodes.",
       "{\"type\":\"object\",\"properties\":{\"program\":{\"type\":\"string\"},"
       "\"background\":{\"type\":\"boolean\"},\"seconds\":{\"type\":"
-      "\"integer\"}},\"required\":[\"program\"]}" },
+      "\"integer\"}},\"required\":[\"program\"]}", (const char *)0 },
 #endif
 };
 
@@ -710,6 +719,69 @@ tiku_mcp_actor(void)
 
 static int run_tool(tinymcp_t *stream, const char *name,
                     const tinymcp_args_t *args, tinymcp_sink_t *text);
+
+/** @brief "<raw * 10^scale>" as a JSON number into @p buf. */
+static void
+fixed_text(char *buf, size_t cap, int32_t raw, int scale)
+{
+    unsigned long mag = raw < 0 ? 0ul - (unsigned long)raw : (unsigned long)raw;
+    unsigned long div = 1ul;
+    int k;
+
+    if (scale >= 0) {
+        for (k = 0; k < scale && k < 9; k++) {
+            mag *= 10ul;
+        }
+        (void)snprintf(buf, cap, "%s%lu", raw < 0 ? "-" : "", mag);
+        return;
+    }
+    for (k = 0; k < -scale && k < 9; k++) {
+        div *= 10ul;
+    }
+    (void)snprintf(buf, cap, "%s%lu.%0*lu", raw < 0 ? "-" : "", mag / div,
+                   k, mag % div);
+}
+
+/**
+ * @brief {"value":..,"unit":".."} for a typed node whose text @p head
+ *        decodes, from the text already read; NULL for any other.
+ */
+static const char *
+typed_value(const tiku_vfs_node_t *node, const char *head)
+{
+    static char json[64];
+    tiku_vfs_val_t v;
+    const char *unit;
+    char num[24];
+
+    if (tiku_vfs_val_from_text(node, head, &v) != TIKU_VFS_OK) {
+        return (const char *)0;
+    }
+    switch (v.vtype) {
+    case TIKU_VFS_T_U32:
+        (void)snprintf(num, sizeof num, "%lu", (unsigned long)v.as.u);
+        break;
+    case TIKU_VFS_T_I32:
+        (void)snprintf(num, sizeof num, "%ld", (long)v.as.i);
+        break;
+    case TIKU_VFS_T_BOOL:
+        (void)snprintf(num, sizeof num, "%s", v.as.u ? "true" : "false");
+        break;
+    case TIKU_VFS_T_FIXED:
+        fixed_text(num, sizeof num, v.as.i, v.scale);
+        break;
+    default:
+        return (const char *)0;
+    }
+    unit = tiku_vfs_unit_name(v.unit);
+    if (unit[0] == 0 || v.unit == TIKU_VFS_U_BOOL) {
+        (void)snprintf(json, sizeof json, "{\"value\":%s}", num);
+    } else {
+        (void)snprintf(json, sizeof json, "{\"value\":%s,\"unit\":\"%s\"}",
+                       num, unit);
+    }
+    return json;
+}
 
 /** @brief A journal entry for a tool that changes the board. */
 static void
@@ -801,8 +873,18 @@ run_tool(tinymcp_t *stream, const char *name, const tinymcp_args_t *args,
         return TINYMCP_EINVAL;
     }
     if (strcmp(name, "read") == 0) {
-        rc = node_text(path, (unsigned)tinymcp_arg_int(args, "line", 0),
-                       (unsigned)tinymcp_arg_int(args, "bytes", 0), text);
+        unsigned line = (unsigned)tinymcp_arg_int(args, "line", 0);
+        unsigned bytes = (unsigned)tinymcp_arg_int(args, "bytes", 0);
+        char head[24];
+
+        rc = node_text(path, line, bytes, text, head, sizeof head);
+        if (rc == TIKU_VFS_OK && line == 0u && bytes == 0u) {
+            const char *json = typed_value(tiku_vfs_resolve(path), head);
+
+            if (json != (const char *)0) {
+                tinymcp_structured(stream, json);
+            }
+        }
     } else if (strcmp(name, "write") == 0) {
         const char *value = tinymcp_arg_str(args, "value");
 
@@ -999,6 +1081,15 @@ cancel_call(void *ctx, unsigned call)
 }
 
 static int
+send_part(void *ctx, const char *bytes, size_t len, int last)
+{
+    if (ctx == (void *)tiku_mcp_console_stream()) {
+        return tiku_mcp_console_send_part(bytes, len, last);
+    }
+    return -1;
+}
+
+static int
 send(void *ctx, const char *msg, size_t len)
 {
     if (ctx == (void *)tiku_mcp_console_stream()) {
@@ -1012,7 +1103,7 @@ const tinymcp_host_t tiku_mcp_host = {
     tools, sizeof tools / sizeof tools[0],
     templates, sizeof templates / sizeof templates[0],
     list_resources, read_resource, call_tool, watch, unwatch, send,
-    board_title, list_prompts, get_prompt, complete, cancel_call
+    board_title, list_prompts, get_prompt, complete, cancel_call, send_part
 };
 
 void

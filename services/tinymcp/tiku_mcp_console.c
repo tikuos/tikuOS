@@ -17,6 +17,7 @@
 
 #include <string.h>
 
+#include <kernel/cpu/tiku_watchdog.h>
 #include <services/console/tiku_console.h>
 #include <shell/tiku_shell.h>
 
@@ -34,6 +35,7 @@ static char      queue[QUEUE][TIKU_MCP_IN_CAP];
 static size_t    queue_len[QUEUE];
 static uint8_t   queue_head, queue_count;
 static uint32_t  busy_count;
+static uint8_t   in_frame;       /* a reply's frame is open on the wire */
 
 /** @brief Refuse a request that found the queue full, by its id. */
 static void
@@ -58,7 +60,8 @@ busy(const uint8_t *buf, size_t len)
         tinymcp_jw_rawn(&w, id.at, id.len);
     }
     tinymcp_jw_raw(&w, ",\"error\":{\"code\":-32603,\"message\":\"busy\"}}");
-    if (!w.full) {
+    /* Inside an open frame it would split the reply: it is dropped. */
+    if (!w.full && !in_frame) {
         (void)tiku_mcp_console_send(reply, w.len);
     }
     busy_count++;
@@ -104,6 +107,27 @@ tiku_mcp_console_send(const char *msg, size_t len)
     tiku_console_frame_put(msg, len);
     tiku_console_frame_end();
     tiku_console_flush();
+    return 0;
+}
+
+/* A reply in pieces: the frame opens at the first and closes at the last;
+ * the wire is slow beside the hang detector, so each piece kicks it. */
+int
+tiku_mcp_console_send_part(const char *bytes, size_t len, int last)
+{
+    tiku_watchdog_kick();
+    if (!in_frame) {
+        if (tiku_console_frame_begin((uint8_t)TIKU_MCP_CHANNEL) != 0) {
+            return -1;
+        }
+        in_frame = 1u;
+    }
+    tiku_console_frame_put(bytes, len);
+    if (last) {
+        tiku_console_frame_end();
+        tiku_console_flush();
+        in_frame = 0u;
+    }
     return 0;
 }
 

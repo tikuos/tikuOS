@@ -3154,7 +3154,7 @@ endif
 # ---------------------------------------------------------------------------
 TIKU_MCP_ENABLE ?= 0
 TINYMCP         ?= tinymcp
-TINYMCP_API_BOUND := 3
+TINYMCP_API_BOUND := 4
 ifeq ($(TIKU_MCP_ENABLE),1)
 ifneq ($(TIKU_SHELL_ENABLE),1)
 $(error TIKU_MCP_ENABLE=1 needs the shell: the tools run from its pump)

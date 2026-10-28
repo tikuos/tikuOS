@@ -80,6 +80,7 @@ void       tiku_mcp_console_init(void);
 void       tiku_mcp_console_pump(void);
 tinymcp_t *tiku_mcp_console_stream(void);
 int        tiku_mcp_console_send(const char *msg, size_t len);
+int        tiku_mcp_console_send_part(const char *bytes, size_t len, int last);
 uint32_t   tiku_mcp_console_busy(void);
 
 #endif /* TIKU_MCP_H_ */

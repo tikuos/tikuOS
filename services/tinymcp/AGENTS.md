@@ -35,7 +35,9 @@ its stderr.
   is refused as a resource and offered through the `read` tool; a secret
   node is not listed and reads as missing.
 - Tools: `read` (`path`, `line`, `bytes`: pages through
-  `tiku_vfs_read_lines()`), `write` (`path`, `value`: `tiku_vfs_write()`,
+  `tiku_vfs_read_lines()`; a whole read of a typed node also returns
+  `structuredContent` `{value, unit}`, decoded from the text read by
+  `tiku_vfs_val_from_text()`, a FIXED value with its scale applied), `write` (`path`, `value`: `tiku_vfs_write()`,
   the status name on failure), `ls` (`path`), `shell` (`line`: the parser
   with a capture backend whose `putc` is `tinymcp_sink_putc()`; a mode
   command, `watch`, `basic`, `ping`, `ntp`, `dns`, `mqtt`, `slip` or
@@ -120,10 +122,15 @@ The decoder hands a frame over inside `tiku_console_getc()`, from the
 line editor or a running command, so `on_frame()` copies it into one of
 two queue slots and the pump handles it with `tinymcp_handle()` between
 command lines, where rules and jobs run.  A third request while two
-wait is answered `-32603` "busy" from the callback.  A reply is one
-frame through `tiku_console_frame_begin/put/end()` and then
+wait is answered `-32603` "busy" from the callback, unless a reply's
+frame is open, when the refusal is dropped.  A reply that fits the out
+buffer is one frame through `tiku_console_frame_begin/put/end()` and then
 `tiku_console_flush()`, which the USB Serial/JTAG wire needs to send a
-frame that ends without a newline.
+frame that ends without a newline.  A longer one, a node's text or a
+tool's output, streams through `send_part`: the frame opens at the first
+piece and ends at the last, each piece kicking the watchdog, so a read
+returns the whole node.  Nothing else may write to the wire while that
+frame is open; text written there lands inside it.
 
 ## Memory
 
@@ -131,8 +138,8 @@ frame that ends without a newline.
 on the ESP32-C61 and P4; 256 and 512 on MSP430) size the channel buffer,
 the two queue slots and the reply; `TIKU_MCP_SCRATCH` (4098) holds one
 page of a node.  Measured on the nRF54L15 at `-Os`, from the object
-files on 2026-10-28: the binding 14.2 KB of code (the job module 2.1 KB
-of it), the library 16.0 KB, 19.3 KB of SRAM in all (the ask module
+files on 2026-10-28: the binding 14.9 KB of code (the job module 2.1 KB
+of it), the library 17.2 KB, 19.4 KB of SRAM in all (the ask module
 2.2 KB of it, the journal most; the job's ring and state 1.3 KB).
 
 ## Proof
@@ -144,7 +151,9 @@ line, a refused mode command, a prompt written to `/data` got and heard
 going, path completion, the board asking and an answer refused when stale,
 a reboot refused and a clock target allowed by the owner, BASIC jobs
 (waited for with progress, read meanwhile, in the background, stopped,
-cancelled, past their seconds, confined), and the error codes.  `tinymcp/tests/board_ask.py <port>` runs a BASIC
+cancelled, past their seconds, confined), the manifest past the reply
+buffer in one read, `/sys/cpu/freq` as a value in Hz, and the error
+codes.  `tinymcp/tests/board_ask.py <port>` runs a BASIC
 program whose `ASK` it answers over the same port, lets one run out of
 time, has a rule ask, and runs `attend.py` against a stub of the Messages
 API.  TikuBench's `tinymcp` suite runs both, with BASIC built in.
