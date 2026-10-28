@@ -20,6 +20,7 @@
 #include "tiku_mcp.h"
 #include "tiku_mcp_ask.h"
 #include "tiku_mcp_consent.h"
+#include "tiku_mcp_job.h"
 
 static int mcp_era_read(char *buf, size_t max)
 {
@@ -81,6 +82,9 @@ static const tiku_vfs_node_t mcp_children[] = {
       .desc = &tiku_mcp_journal_desc },
     { .name = "consent",   .type = TIKU_VFS_FILE,
       .read = tiku_mcp_consent_read, .write = tiku_mcp_consent_grant },
+    { .name = "job",       .type = TIKU_VFS_DIR,
+      .children = tiku_mcp_job_nodes,
+      .child_count = (uint8_t)TIKU_MCP_JOB_NODES },
 };
 
 static const tiku_vfs_node_t mcp_dir = {

@@ -11,6 +11,7 @@ tiku_mcp.h/.c          the host table: resources, tools, watches, the process
 tiku_mcp_console.c     channel 0xF3: the queue, the pump, the frame out
 tiku_mcp_ask.h/.c      /sys/mcp/ask, the journal, BASIC's ASK
 tiku_mcp_consent.h/.c  which actions ask the owner, and the open question
+tiku_mcp_job.h/.c      the basic tool: one BASIC job, its output, /sys/mcp/job
 tiku_mcp_vfs.h/.c      /sys/mcp, a boot mount
 ```
 
@@ -38,8 +39,9 @@ its stderr.
   the status name on failure), `ls` (`path`), `shell` (`line`: the parser
   with a capture backend whose `putc` is `tinymcp_sink_putc()`; a mode
   command, `watch`, `basic`, `ping`, `ntp`, `dns`, `mqtt`, `slip` or
-  `telnet`, is refused).  The capture backend carries `TIKU_VFS_CAP_ALL`:
-  the console is the owner's cable.
+  `telnet`, is refused), `basic` (`program`, `background`, `seconds`;
+  below).  The capture backend carries `TIKU_VFS_CAP_ALL`: the console is
+  the owner's cable.
 - Prompts: each `/data/prompt.<name>` file is the prompt `<name>`.  Its
   first line is the description, its `{{argument}}` places are its
   required arguments (`tinymcp_placeholders()`), and `prompts/get`
@@ -79,6 +81,24 @@ its stderr.
   `TIKU_MCP_CONSENT_TTL_S` (60).  One question is open at a time, and a new
   one replaces it.  The console's own commands never ask: the person at it
   is the owner.
+- Jobs: the `basic` tool hands its `program`, numbered lines one per line
+  of text, to `tiku_basic_job_start()` with a backend whose `putc` fills a
+  `TIKU_MCP_JOB_OUT` (1024) byte ring, ANSI escapes dropped; one job runs
+  at a time, and not while a person is in BASIC at the console.  The call
+  is kept with `tinymcp_defer()` and answered from the pump when the job
+  ends, with the ring and, past its `seconds` (`TIKU_MCP_JOB_BUDGET_S`,
+  60), a line saying it was stopped; each whole line printed goes out
+  through `tinymcp_progress()`, at most one per `TIKU_MCP_JOB_NOTE_MS`
+  (250).
+  With `background` true the call answers at once.  `/sys/mcp/job/` holds
+  `seq`, `state` (`idle`, `running`, `done`, `error`, `stopped`), `by`,
+  `out` (the ring, streamed, notified with the notes) and `stop` (any
+  write ends the job; `EINVAL` with none).  A `notifications/cancelled`
+  for the kept call stops its job through the host's `cancel`.  The
+  backend's capability is `TIKU_VFS_CAP_ALL` without `TIKU_VFS_CAP_SYS`,
+  so a job's writes to the clock target, power, the layout and the
+  watchdog are `EPERM`; BASIC refuses `INPUT`, `REBOOT` and `POKE` in a
+  job.  The journal records each start, stop, cancel and end.
 - Journal: `/sys/mcp/journal`, a RAM ring of `TIKU_MCP_JOURNAL_MAX` (16)
   entries, one line each, `<seconds> <who> <what>`: questions, answers,
   the `write` and `shell` tools (not those under `/sys/mcp/`, which write
@@ -111,9 +131,9 @@ frame that ends without a newline.
 on the ESP32-C61 and P4; 256 and 512 on MSP430) size the channel buffer,
 the two queue slots and the reply; `TIKU_MCP_SCRATCH` (4098) holds one
 page of a node.  Measured on the nRF54L15 at `-Os`, from the object
-files: the binding with `ask` and consent 11.5 KB of code, the library
-14.8 KB, 17.6 KB of SRAM in all (the ask module 2.2 KB of it, the journal
-most).
+files on 2026-10-28: the binding 14.2 KB of code (the job module 2.1 KB
+of it), the library 16.0 KB, 19.3 KB of SRAM in all (the ask module
+2.2 KB of it, the journal most; the job's ring and state 1.3 KB).
 
 ## Proof
 
@@ -122,8 +142,9 @@ with the official `mcp` SDK client in both eras: discover and the board's
 identity, list, read, write the LED, subscribe and see the change, a shell
 line, a refused mode command, a prompt written to `/data` got and heard
 going, path completion, the board asking and an answer refused when stale,
-a reboot refused and a clock target allowed by the owner, and the error
-codes.  `tinymcp/tests/board_ask.py <port>` runs a BASIC
+a reboot refused and a clock target allowed by the owner, BASIC jobs
+(waited for with progress, read meanwhile, in the background, stopped,
+cancelled, past their seconds, confined), and the error codes.  `tinymcp/tests/board_ask.py <port>` runs a BASIC
 program whose `ASK` it answers over the same port, lets one run out of
 time, has a rule ask, and runs `attend.py` against a stub of the Messages
 API.  TikuBench's `tinymcp` suite runs both, with BASIC built in.

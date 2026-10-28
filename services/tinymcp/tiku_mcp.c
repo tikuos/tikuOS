@@ -7,8 +7,8 @@
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
  * tiku_mcp.c - the host table: the namespace as resources, the read, write,
- * ls and shell tools, /data/prompt.* as prompts, path completion; the
- * process that turns watches into updates.
+ * ls, shell and basic tools, /data/prompt.* as prompts, path completion;
+ * the process that turns watches into updates.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -16,6 +16,7 @@
 #include "tiku_mcp.h"
 #include "tiku_mcp_ask.h"
 #include "tiku_mcp_consent.h"
+#include "tiku_mcp_job.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -35,7 +36,7 @@
 static char scratch[TIKU_MCP_SCRATCH];
 
 /* The server's instructions, filled at init with the board's name. */
-static char instructions[800];
+static char instructions[1024];
 
 /* serverInfo: /sys/device/name, read again before each request, and the
  * device model. */
@@ -617,6 +618,19 @@ static const tinymcp_tool_t tools[] = {
       "are refused.",
       "{\"type\":\"object\",\"properties\":{\"line\":{\"type\":\"string\"}},"
       "\"required\":[\"line\"]}" },
+#if TIKU_SHELL_CMD_BASIC
+    { "basic",
+      "Run a Tiku BASIC program, numbered lines one per line of text, as "
+      "the board's one job.  The call answers when it ends, with its output, "
+      "and stops it after seconds (60); progress carries each line it prints. "
+      "With background true it answers at once and the job runs on: "
+      "tiku:///sys/mcp/job/out holds its output, /sys/mcp/job/state says when "
+      "it ends, a write to /sys/mcp/job/stop ends it.  INPUT, REBOOT and POKE "
+      "are errors in a job, and it cannot write the system's nodes.",
+      "{\"type\":\"object\",\"properties\":{\"program\":{\"type\":\"string\"},"
+      "\"background\":{\"type\":\"boolean\"},\"seconds\":{\"type\":"
+      "\"integer\"}},\"required\":[\"program\"]}" },
+#endif
 };
 
 static const tinymcp_template_t templates[] = {
@@ -764,8 +778,11 @@ run_tool(tinymcp_t *stream, const char *name, const tinymcp_args_t *args,
         mode = mode_command(line);
         if (mode != (const char *)0) {
             (void)tinymcp_sink_puts(text, mode);
-            (void)tinymcp_sink_puts(text, " stays in a mode; subscribe to the "
-                                          "node instead of watch");
+            (void)tinymcp_sink_puts(text, strcmp(mode, "basic") == 0
+                                    ? " stays in a mode; the basic tool runs "
+                                      "a program"
+                                    : " stays in a mode; subscribe to the "
+                                      "node instead of watch");
             return TINYMCP_TOOL_ERROR;
         }
         rc = consent(stream, 's', line, (const char *)0,
@@ -776,6 +793,9 @@ run_tool(tinymcp_t *stream, const char *name, const tinymcp_args_t *args,
         journal_tool("shell", line, (const char *)0);
         run_line(line, text);
         return TINYMCP_OK;
+    }
+    if (strcmp(name, "basic") == 0) {
+        return tiku_mcp_job_tool(stream, args, text);
     }
     if (path == (const char *)0 || path[0] != '/') {
         return TINYMCP_EINVAL;
@@ -967,6 +987,17 @@ TIKU_PROCESS_THREAD(tiku_mcp_process, ev, data)
 /* THE HOST                                                                  */
 /*---------------------------------------------------------------------------*/
 
+/** @brief A cancelled call: its job stops, journaled under its client. */
+static void
+cancel_call(void *ctx, unsigned call)
+{
+    const char *client = tinymcp_client((const tinymcp_t *)ctx);
+
+    actor = client[0] ? client : "agent";
+    tiku_mcp_job_cancel(call);
+    actor = (const char *)0;
+}
+
 static int
 send(void *ctx, const char *msg, size_t len)
 {
@@ -981,7 +1012,7 @@ const tinymcp_host_t tiku_mcp_host = {
     tools, sizeof tools / sizeof tools[0],
     templates, sizeof templates / sizeof templates[0],
     list_resources, read_resource, call_tool, watch, unwatch, send,
-    board_title, list_prompts, get_prompt, complete
+    board_title, list_prompts, get_prompt, complete, cancel_call
 };
 
 void
@@ -1015,7 +1046,10 @@ tiku_mcp_init(void)
                    "it changes, and answer by writing /sys/mcp/ask/answer; "
                    "/sys/mcp/journal records who asked, answered and "
                    "changed what.  Rebooting, sleep, powering down, the CPU "
-                   "clock and the memory layout ask the owner first.",
+                   "clock and the memory layout ask the owner first.  The "
+                   "basic tool runs a BASIC program as a job, waiting for its "
+                   "end with progress, or in the background under "
+                   "/sys/mcp/job.",
                    TIKU_DEVICE_NAME);
     (void)strcpy(board_name, "tiku");
     tiku_mcp_ask_init();
