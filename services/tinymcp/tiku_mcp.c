@@ -17,6 +17,7 @@
 #include "tiku_mcp_ask.h"
 #include "tiku_mcp_consent.h"
 #include "tiku_mcp_job.h"
+#include "tiku_mcp_tcp.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -55,6 +56,9 @@ static tinymcp_sink_t *capture;
 
 /* The client a tool runs for, while it runs; NULL is the board itself. */
 static const char *actor;
+
+/* Whether that tool call has the owner's authority (tiku_mcp_owner()). */
+static uint8_t owner;
 
 /* A watch the library asked for: the stream and slot it reports under. */
 typedef struct {
@@ -803,12 +807,25 @@ call_tool(void *ctx, const char *name, const tinymcp_args_t *args,
           tinymcp_sink_t *text)
 {
     const char *client = tinymcp_client((const tinymcp_t *)ctx);
+    tiku_vfs_cap_t prev;
     int rc;
 
+    /* A connection without the owner's key writes nothing, whatever the
+     * tool: its VFS writes carry no capability. */
+    owner = tiku_mcp_owner((tinymcp_t *)ctx);
+    prev = tiku_vfs_caller_cap_set(owner ? TIKU_VFS_CAP_ALL
+                                         : TIKU_VFS_CAP_NONE);
     actor = client[0] ? client : "agent";
     rc = run_tool((tinymcp_t *)ctx, name, args, text);
     actor = (const char *)0;
+    (void)tiku_vfs_caller_cap_set(prev);
     return rc;
+}
+
+int
+tiku_mcp_owner(tinymcp_t *stream)
+{
+    return stream == tiku_mcp_console_stream() || tiku_mcp_tcp_keyed(stream);
 }
 
 /**
@@ -836,6 +853,13 @@ run_tool(tinymcp_t *stream, const char *name, const tinymcp_args_t *args,
     const char *path = tinymcp_arg_str(args, "path");
     int rc;
 
+    if (!owner && strcmp(name, "read") != 0 && strcmp(name, "ls") != 0) {
+        (void)tinymcp_sink_puts(text, "this connection only reads: the owner "
+                                      "sets a key at /sys/mcp/key, and a "
+                                      "client sends it in _meta "
+                                      TIKU_MCP_KEY_META);
+        return TINYMCP_TOOL_ERROR;
+    }
     if (strcmp(name, "shell") == 0) {
         const char *line = tinymcp_arg_str(args, "line");
         const char *mode;
@@ -875,11 +899,21 @@ run_tool(tinymcp_t *stream, const char *name, const tinymcp_args_t *args,
     if (strcmp(name, "read") == 0) {
         unsigned line = (unsigned)tinymcp_arg_int(args, "line", 0);
         unsigned bytes = (unsigned)tinymcp_arg_int(args, "bytes", 0);
+        const tiku_vfs_node_t *n = tiku_vfs_resolve(path);
         char head[24];
 
+        /* A read that acts, or a secret, is the owner's. */
+        if (!owner && n != (const tiku_vfs_node_t *)0 &&
+            n->desc != (const tiku_vfs_desc_t *)0 &&
+            (n->desc->flags & (TIKU_VFS_DF_SECRET | TIKU_VFS_DF_READ_EFFECT |
+                               TIKU_VFS_DF_READ_CONSUMES))) {
+            (void)tinymcp_sink_puts(text, "reading it acts or reveals a "
+                                          "secret; this connection only reads");
+            return TINYMCP_TOOL_ERROR;
+        }
         rc = node_text(path, line, bytes, text, head, sizeof head);
         if (rc == TIKU_VFS_OK && line == 0u && bytes == 0u) {
-            const char *json = typed_value(tiku_vfs_resolve(path), head);
+            const char *json = typed_value(n, head);
 
             if (json != (const char *)0) {
                 tinymcp_structured(stream, json);
@@ -1020,11 +1054,19 @@ data_changed(void)
     uint32_t names, prompts;
 
     data_hashes(&names, &prompts);
+    tinymcp_t *tcp = tiku_mcp_tcp_stream();
+
     if (names != data_names_hash) {
         tinymcp_listchanged(tiku_mcp_console_stream());
+        if (tcp != (tinymcp_t *)0) {
+            tinymcp_listchanged(tcp);
+        }
     }
     if (prompts != prompts_hash) {
         tinymcp_prompts_changed(tiku_mcp_console_stream());
+        if (tcp != (tinymcp_t *)0) {
+            tinymcp_prompts_changed(tcp);
+        }
     }
     data_names_hash = names;
     prompts_hash = prompts;
@@ -1086,6 +1128,9 @@ send_part(void *ctx, const char *bytes, size_t len, int last)
     if (ctx == (void *)tiku_mcp_console_stream()) {
         return tiku_mcp_console_send_part(bytes, len, last);
     }
+    if (ctx != (void *)0 && ctx == (void *)tiku_mcp_tcp_stream()) {
+        return tiku_mcp_tcp_send_part(bytes, len, last);
+    }
     return -1;
 }
 
@@ -1094,6 +1139,9 @@ send(void *ctx, const char *msg, size_t len)
 {
     if (ctx == (void *)tiku_mcp_console_stream()) {
         return tiku_mcp_console_send(msg, len);
+    }
+    if (ctx != (void *)0 && ctx == (void *)tiku_mcp_tcp_stream()) {
+        return tiku_mcp_tcp_send(msg, len);
     }
     return -1;
 }
@@ -1137,13 +1185,16 @@ tiku_mcp_init(void)
                    "it changes, and answer by writing /sys/mcp/ask/answer; "
                    "/sys/mcp/journal records who asked, answered and "
                    "changed what.  Rebooting, sleep, powering down, the CPU "
-                   "clock and the memory layout ask the owner first.  The "
+                   "clock and the memory layout ask the owner first; over "
+                   "TCP a request without the owner's key in _meta "
+                   TIKU_MCP_KEY_META " only reads.  The "
                    "basic tool runs a BASIC program as a job, waiting for its "
                    "end with progress, or in the background under "
                    "/sys/mcp/job.",
                    TIKU_DEVICE_NAME);
     (void)strcpy(board_name, "tiku");
     tiku_mcp_ask_init();
+    tiku_mcp_tcp_init();
     tiku_mcp_console_init();
     tiku_process_start(&tiku_mcp_process, (tiku_event_data_t)0);
 }

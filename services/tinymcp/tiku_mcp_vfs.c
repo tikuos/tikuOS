@@ -21,6 +21,7 @@
 #include "tiku_mcp_ask.h"
 #include "tiku_mcp_consent.h"
 #include "tiku_mcp_job.h"
+#include "tiku_mcp_tcp.h"
 
 static int mcp_era_read(char *buf, size_t max)
 {
@@ -64,6 +65,11 @@ MCP_COUNTER(dropped)
 MCP_COUNTER(busy)
 MCP_COUNTER(subs)
 
+/* The key reads as set or none and is never listed. */
+static const tiku_vfs_desc_t key_desc = TIKU_VFS_DESC_FLAGS(
+    TIKU_VFS_T_STR, TIKU_VFS_U_NONE, TIKU_VFS_FRESH_STATIC, TIKU_VFS_E_FREE,
+    TIKU_VFS_DF_SECRET);
+
 static const tiku_vfs_node_t mcp_children[] = {
     { .name = "era",       .type = TIKU_VFS_FILE, .read = mcp_era_read },
     { .name = "transport", .type = TIKU_VFS_FILE, .read = mcp_transport_read },
@@ -82,6 +88,10 @@ static const tiku_vfs_node_t mcp_children[] = {
       .desc = &tiku_mcp_journal_desc },
     { .name = "consent",   .type = TIKU_VFS_FILE,
       .read = tiku_mcp_consent_read, .write = tiku_mcp_consent_grant },
+    { .name = "key",       .type = TIKU_VFS_FILE,
+      .read = tiku_mcp_key_read, .write = tiku_mcp_key_write,
+      .desc = &key_desc, .req_cap = TIKU_VFS_CAP_SYS },
+    { .name = "tcp",       .type = TIKU_VFS_FILE, .read = tiku_mcp_tcp_read },
     { .name = "job",       .type = TIKU_VFS_DIR,
       .children = tiku_mcp_job_nodes,
       .child_count = (uint8_t)TIKU_MCP_JOB_NODES },

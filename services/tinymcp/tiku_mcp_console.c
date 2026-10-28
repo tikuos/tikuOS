@@ -14,6 +14,7 @@
 
 #include "tiku_mcp.h"
 #include "tiku_mcp_job.h"
+#include "tiku_mcp_tcp.h"
 
 #include <string.h>
 
@@ -95,6 +96,7 @@ tiku_mcp_console_pump(void)
         tiku_mcp_identity();
         tinymcp_handle(&stream, queue[slot], queue_len[slot]);
     }
+    tiku_mcp_tcp_pump();
     tiku_mcp_job_tick();
 }
 

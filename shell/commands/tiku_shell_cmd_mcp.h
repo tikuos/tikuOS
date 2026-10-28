@@ -17,8 +17,8 @@
 #include <stdint.h>
 
 /**
- * @brief "mcp" command handler: the transport, era, counters and watches
- *        of the Model Context Protocol server on the console channel.
+ * @brief "mcp" command handler: the server's era, counters, watches and
+ *        TCP port; "mcp listen <port>|off" opens or closes that port.
  *
  * @param argc  Argument count
  * @param argv  Argument vector

@@ -3177,6 +3177,14 @@ SRCS += services/tinymcp/tiku_mcp_vfs.c
 SRCS += services/tinymcp/tiku_mcp_ask.c
 SRCS += services/tinymcp/tiku_mcp_consent.c
 SRCS += services/tinymcp/tiku_mcp_job.c
+SRCS += services/tinymcp/tiku_mcp_tcp.c
+# With the full net kit (TIKU_KIT_NET_ENABLE=1, not TIKU_KIT_NET_MIN) the
+# server also listens on a TCP port, through `mcp listen <port>`.
+ifeq ($(TIKU_KIT_NET_ENABLE),1)
+ifneq ($(TIKU_KIT_NET_MIN),1)
+CFLAGS += -DTIKU_MCP_TCP_ENABLE=1
+endif
+endif
 SRCS += shell/commands/tiku_shell_cmd_mcp.c
 SRCS += shell/commands/tiku_shell_cmd_ask.c
 endif

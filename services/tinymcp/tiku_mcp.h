@@ -75,6 +75,12 @@ void tiku_mcp_identity(void);
  */
 const char *tiku_mcp_actor(void);
 
+/**
+ * @brief 1 when the request being served on @p stream has the owner's
+ *        authority: the console's, or a TCP request carrying the key.
+ */
+int tiku_mcp_owner(tinymcp_t *stream);
+
 /** @brief The console transport: its stream, registration and pump. */
 void       tiku_mcp_console_init(void);
 void       tiku_mcp_console_pump(void);
