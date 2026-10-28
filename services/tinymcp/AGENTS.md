@@ -10,6 +10,7 @@ and the shell and carries it on the console line.  Built with
 tiku_mcp.h/.c          the host table: resources, tools, watches, the process
 tiku_mcp_console.c     channel 0xF3: the queue, the pump, the frame out
 tiku_mcp_ask.h/.c      /sys/mcp/ask, the journal, BASIC's ASK
+tiku_mcp_consent.h/.c  which actions ask the owner, and the open question
 tiku_mcp_vfs.h/.c      /sys/mcp, a boot mount
 ```
 
@@ -65,6 +66,19 @@ its stderr.
   replaces it, or the seconds pass; the variable is empty in the last two
   cases.  `tinymcp/bridge/attend.py` answers for an owner who leaves the
   board with no agent attached.
+- Consent: before an agent reboots the board, changes the sleep mode,
+  powers a part down (`power ... off|down`), changes the CPU clock
+  (`freq <mhz>`, a write under `/sys/cpu/freq`) or the memory layout
+  (`layout stage|recover`, a write to `/sys/mem/layout/stage` or
+  `recover`), the `write` and `shell` tools ask the owner; a command that
+  `once`, `every` or `on` would run later is judged as itself.  A client
+  that declared elicitation gets an `input_required` form whose state
+  names the question; its retry with a yes acts, with a no does nothing.
+  Any other client gets a six-digit token in the tool error; writing it to
+  `/sys/mcp/consent` grants the same call from the same client within
+  `TIKU_MCP_CONSENT_TTL_S` (60).  One question is open at a time, and a new
+  one replaces it.  The console's own commands never ask: the person at it
+  is the owner.
 - Journal: `/sys/mcp/journal`, a RAM ring of `TIKU_MCP_JOURNAL_MAX` (16)
   entries, one line each, `<seconds> <who> <what>`: questions, answers,
   the `write` and `shell` tools (not those under `/sys/mcp/`, which write
@@ -97,8 +111,9 @@ frame that ends without a newline.
 on the ESP32-C61 and P4; 256 and 512 on MSP430) size the channel buffer,
 the two queue slots and the reply; `TIKU_MCP_SCRATCH` (4098) holds one
 page of a node.  Measured on the nRF54L15 at `-Os`, from the object
-files: the binding with `ask` 9.2 KB of code, the library 13.7 KB, 17.0 KB
-of SRAM in all (the ask module 2.2 KB of it, the journal most).
+files: the binding with `ask` and consent 11.5 KB of code, the library
+14.8 KB, 17.6 KB of SRAM in all (the ask module 2.2 KB of it, the journal
+most).
 
 ## Proof
 
@@ -107,7 +122,8 @@ with the official `mcp` SDK client in both eras: discover and the board's
 identity, list, read, write the LED, subscribe and see the change, a shell
 line, a refused mode command, a prompt written to `/data` got and heard
 going, path completion, the board asking and an answer refused when stale,
-and the error codes.  `tinymcp/tests/board_ask.py <port>` runs a BASIC
+a reboot refused and a clock target allowed by the owner, and the error
+codes.  `tinymcp/tests/board_ask.py <port>` runs a BASIC
 program whose `ASK` it answers over the same port, lets one run out of
 time, has a rule ask, and runs `attend.py` against a stub of the Messages
 API.  TikuBench's `tinymcp` suite runs both, with BASIC built in.

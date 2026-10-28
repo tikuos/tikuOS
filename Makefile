@@ -3175,6 +3175,7 @@ SRCS += services/tinymcp/tiku_mcp.c
 SRCS += services/tinymcp/tiku_mcp_console.c
 SRCS += services/tinymcp/tiku_mcp_vfs.c
 SRCS += services/tinymcp/tiku_mcp_ask.c
+SRCS += services/tinymcp/tiku_mcp_consent.c
 SRCS += shell/commands/tiku_shell_cmd_mcp.c
 SRCS += shell/commands/tiku_shell_cmd_ask.c
 endif

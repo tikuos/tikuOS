@@ -15,6 +15,7 @@
 
 #include "tiku_mcp.h"
 #include "tiku_mcp_ask.h"
+#include "tiku_mcp_consent.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -34,7 +35,7 @@
 static char scratch[TIKU_MCP_SCRATCH];
 
 /* The server's instructions, filled at init with the board's name. */
-static char instructions[704];
+static char instructions[800];
 
 /* serverInfo: /sys/device/name, read again before each request, and the
  * device model. */
@@ -693,8 +694,8 @@ tiku_mcp_actor(void)
     return actor != (const char *)0 ? actor : "board";
 }
 
-static int run_tool(const char *name, const tinymcp_args_t *args,
-                    tinymcp_sink_t *text);
+static int run_tool(tinymcp_t *stream, const char *name,
+                    const tinymcp_args_t *args, tinymcp_sink_t *text);
 
 /** @brief A journal entry for a tool that changes the board. */
 static void
@@ -719,13 +720,32 @@ call_tool(void *ctx, const char *name, const tinymcp_args_t *args,
     int rc;
 
     actor = client[0] ? client : "agent";
-    rc = run_tool(name, args, text);
+    rc = run_tool((tinymcp_t *)ctx, name, args, text);
     actor = (const char *)0;
     return rc;
 }
 
+/**
+ * @brief The owner's yes for @p desc, when there is one to ask for.
+ * @return TIKU_MCP_CONSENT_GO, or the tool's return code with its reason
+ */
 static int
-run_tool(const char *name, const tinymcp_args_t *args, tinymcp_sink_t *text)
+consent(tinymcp_t *stream, char kind, const char *a, const char *b,
+        const char *desc, tinymcp_sink_t *text)
+{
+    char action[TIKU_SHELL_LINE_SIZE + 8u];
+
+    if (desc == (const char *)0) {
+        return TIKU_MCP_CONSENT_GO;
+    }
+    (void)snprintf(action, sizeof action, "%c %s%s%s", kind, a,
+                   b ? " " : "", b ? b : "");
+    return tiku_mcp_consent(stream, action, desc, text);
+}
+
+static int
+run_tool(tinymcp_t *stream, const char *name, const tinymcp_args_t *args,
+         tinymcp_sink_t *text)
 {
     const char *path = tinymcp_arg_str(args, "path");
     int rc;
@@ -748,6 +768,11 @@ run_tool(const char *name, const tinymcp_args_t *args, tinymcp_sink_t *text)
                                           "node instead of watch");
             return TINYMCP_TOOL_ERROR;
         }
+        rc = consent(stream, 's', line, (const char *)0,
+                     tiku_mcp_consent_line(line), text);
+        if (rc != TIKU_MCP_CONSENT_GO) {
+            return rc;
+        }
         journal_tool("shell", line, (const char *)0);
         run_line(line, text);
         return TINYMCP_OK;
@@ -763,6 +788,11 @@ run_tool(const char *name, const tinymcp_args_t *args, tinymcp_sink_t *text)
 
         if (value == (const char *)0) {
             return TINYMCP_EINVAL;
+        }
+        rc = consent(stream, 'w', path, value, tiku_mcp_consent_write(path),
+                     text);
+        if (rc != TIKU_MCP_CONSENT_GO) {
+            return rc;
         }
         rc = tiku_vfs_write(path, value, strlen(value));
         if (rc == TIKU_VFS_OK) {
@@ -984,7 +1014,9 @@ tiku_mcp_init(void)
                    "subscribe to tiku:///sys/mcp/ask/question, read it when "
                    "it changes, and answer by writing /sys/mcp/ask/answer; "
                    "/sys/mcp/journal records who asked, answered and "
-                   "changed what.", TIKU_DEVICE_NAME);
+                   "changed what.  Rebooting, sleep, powering down, the CPU "
+                   "clock and the memory layout ask the owner first.",
+                   TIKU_DEVICE_NAME);
     (void)strcpy(board_name, "tiku");
     tiku_mcp_ask_init();
     tiku_mcp_console_init();

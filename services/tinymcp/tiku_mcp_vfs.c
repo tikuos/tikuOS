@@ -7,8 +7,8 @@
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
  * tiku_mcp_vfs.c - /sys/mcp: era, transport, library and the counters,
- * one node each, read from the status the service keeps; the ask directory
- * and the journal (tiku_mcp_ask.c).
+ * one node each, read from the status the service keeps; the ask directory,
+ * the journal (tiku_mcp_ask.c) and consent (tiku_mcp_consent.c).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,6 +19,7 @@
 
 #include "tiku_mcp.h"
 #include "tiku_mcp_ask.h"
+#include "tiku_mcp_consent.h"
 
 static int mcp_era_read(char *buf, size_t max)
 {
@@ -78,6 +79,8 @@ static const tiku_vfs_node_t mcp_children[] = {
     { .name = "journal",   .type = TIKU_VFS_FILE,
       .read = tiku_mcp_journal_read, .write = tiku_mcp_journal_write,
       .desc = &tiku_mcp_journal_desc },
+    { .name = "consent",   .type = TIKU_VFS_FILE,
+      .read = tiku_mcp_consent_read, .write = tiku_mcp_consent_grant },
 };
 
 static const tiku_vfs_node_t mcp_dir = {
