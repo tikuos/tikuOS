@@ -7,9 +7,9 @@
  *
  * xip_code.ld - C5 application code and constants mapped from flash.
  *
- * BASIC, the shell, the radio drivers and libraries, the Bluetooth and crypto
- * kits, and the /sys and /sys/boot nodes.  The rest stays in SRAM, the BLE
- * controller's .high_perf_code_iram1 and the arbiter's .coexiram included.
+ * BASIC, the shell, tinymcp and its binding, the radio drivers and libraries,
+ * the Bluetooth, crypto, IPv4, HTTP, MQTT and Wi-Fi kits, the VFS tree nodes;
+ * SRAM keeps the rest, .high_perf_code_iram1 (BLE) and .coexiram included.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -31,8 +31,13 @@
     *libcoexist.a:*(.text .text.* .rodata .rodata.* .srodata .srodata.* .iram1 .iram1.*)
     @TIKU_C5_OBJECT_ROOT@/tikukits/net/bluetooth/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
     @TIKU_C5_OBJECT_ROOT@/tikukits/crypto/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
-    @TIKU_C5_OBJECT_ROOT@/kernel/vfs/tree/tiku_vfs_tree_sys.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
-    @TIKU_C5_OBJECT_ROOT@/kernel/vfs/tree/tiku_vfs_tree_boot.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+    @TIKU_C5_OBJECT_ROOT@/tikukits/net/ipv4/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+    @TIKU_C5_OBJECT_ROOT@/tikukits/net/http/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+    @TIKU_C5_OBJECT_ROOT@/tikukits/net/mqtt/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+    @TIKU_C5_OBJECT_ROOT@/tikukits/net/wifi/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+    @TIKU_C5_OBJECT_ROOT@/tinymcp/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+    @TIKU_C5_OBJECT_ROOT@/services/tinymcp/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+    @TIKU_C5_OBJECT_ROOT@/kernel/vfs/tree/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
     . = ALIGN(4);
     __tiku_c5_xip_end = .;
 } > XIP

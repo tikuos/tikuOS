@@ -4,7 +4,8 @@ The C5 target runs the kernel, VFS, shell, file store and optional worker
 threads over its native USB Serial/JTAG port. A lean BASIC interpreter is
 available with `TIKU_SHELL_BASIC_ENABLE=1`.
 The default profile runs code and working data from HP SRAM. Optional XIP
-places BASIC and shell commands in flash. CPU rates of 40, 80 and 240 MHz
+places BASIC, the shell commands, tinymcp, the network kits other than SLIP
+and the VFS tree nodes in flash. CPU rates of 40, 80 and 240 MHz
 can be saved through VFS and applied on reboot. UART0 is an optional console;
 its internal loopback is tested, but an external adapter is not qualified.
 An I2C0 backend is available through the C bus API; its external-device
@@ -12,6 +13,9 @@ transfers still require hardware qualification. An optional C5 PHY driver
 supports calibration and RF lifecycle diagnostics. Cached PSRAM and an opt-in
 native Wi-Fi, BLE and SDR RX/TX adapters are implemented; their
 qualification limits are described below and in the C5 driver README.
+In a build with the IP kit (`TIKU_KIT_NET_ENABLE=1`), SLIP rides the USB
+console; with the Wi-Fi adapter and `TIKU_KITS_NET_WIFI_ENABLE=1` the same
+stack runs over Wi-Fi, `wifi up` taking a DHCP lease.
 Deep and light sleep, GPIO edge interrupts, an SPI master, the SAR ADC and
 a 1-Wire master are described below. Requests for unsupported optional
 features fail at build selection; a C61 platform macro is not a substitute.
@@ -114,10 +118,12 @@ Add `TIKU_ESP32C5_XIP_CODE=1` to a shell/BASIC build. This produces
 `ESP_PYTHON=/path/to/venv/bin/python` for the packer and installer. A missing
 companion is a pre-write error; the RAM loader refuses XIP builds.
 
-Startup, architecture code, kernel, console transport and interrupt
-handlers remain in SRAM. The linker moves BASIC, shell-command and optional
-vendor radio ordinary code and constants to `0x42100000`, backed by flash
-offset `0x100000`. Vendor IRAM sections stay in SRAM. Their
+Startup, architecture code, the kernel apart from its VFS tree nodes, console
+transport and interrupt handlers remain in SRAM. The linker moves the
+ordinary code and constants of BASIC, the shell commands, tinymcp and its
+binding, the Bluetooth, crypto, IPv4, HTTP, MQTT and Wi-Fi kits, the VFS tree
+nodes and the optional radio drivers with their vendor libraries to
+`0x42100000`, backed by flash offset `0x100000`. Vendor IRAM sections stay in SRAM. Their
 writable state stays in SRAM. The packer checks allocated ELF section ranges,
 the two stacks and named startup, exception, validation and flash routines.
 The firmware's flash driver copies each write page into SRAM before suspending
