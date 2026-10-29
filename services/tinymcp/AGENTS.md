@@ -129,8 +129,9 @@ hold one while another carries requests, and a client that closes its
 connection cancels what it kept.  On a board without Wi-Fi the ports are
 reached over the console line once `slip` is on.  A connection's
 instance, HTTP parser, segment stage and buffers (7.5 KB on the
-nRF54L15) are an arena
-leased from the SRAM tier when it connects; a closed or failed connection
+nRF54L15) are an arena leased when it connects, from SRAM while it fits
+there and from external memory (the ESP32-C61's PSRAM) once SRAM is
+short; a closed or failed connection
 is released from the pump, where no request is being served, its arena
 zeroed and given back.  A reply goes out in segments of the connection's MSS; while the TX
 pool is full the console is pumped so acknowledgements come in, and after
@@ -175,7 +176,10 @@ files on 2026-10-28, with the net kit: the binding 17.6 KB of code (the
 job module 2.1 KB, the TCP connections 2.0 KB), the library 21.7 KB (its
 HTTP layer 4.4 KB), 19.6 KB of SRAM in all (the ask module 2.2 KB of it,
 the journal most; the job's ring and state 1.3 KB), and 7.5 KB more for
-each TCP connection while it is open.
+each TCP connection while it is open.  On the ESP32-C61, with
+`TIKU_ESP32C61_XIP_CODE=1`, the library and the binding run from flash
+(`arch/esp32c61/xip_code.ld`); with the radio on, its libraries' heap
+leaves the SRAM tier 7 KB, so each connection lives in PSRAM.
 
 ## Proof
 
@@ -198,7 +202,9 @@ handshake era, and the arena given back.  `tinymcp/tests/board_http.py
 no bridge, through the same relay: the 16 KB read in chunks, the refusals
 without a bearer token, an update on a listen's event stream, writes, a
 job's progress and its cancel by closing the POST, consent, a wrong token,
-a web origin and a GET refused, and the arenas given back.  `tinymcp/tests/board_ask.py <port>` runs a BASIC
+a web origin and a GET refused, and the arenas given back; given the
+board's address as well, it dials the board over its LAN instead.
+`tinymcp/tests/board_ask.py <port>` runs a BASIC
 program whose `ASK` it answers over the same port, lets one run out of
 time, has a rule ask, and runs `attend.py` against a stub of the Messages
 API.  TikuBench's `tinymcp` suite runs both, with BASIC built in.

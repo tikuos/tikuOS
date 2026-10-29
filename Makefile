@@ -2376,8 +2376,8 @@ SRCS += arch/esp32c61/tiku_psram_arch.c
 SRCS += arch/esp32c61/tiku_dma_arch.c
 SRCS += arch/esp32c61/tiku_xip_arch.c
 # TIKU_ESP32C61_XIP_CODE=1 runs the code and constants of BASIC, the shell
-# commands, crypto, TLS, the IPv4, HTTP, MQTT and Wi-Fi kits and the BLE host
-# from flash through the XIP window (xip_code.ld).
+# commands, crypto, TLS, the IPv4, HTTP, MQTT and Wi-Fi kits, the BLE host and
+# tinymcp from flash through the XIP window (xip_code.ld).
 # TIKU_ESP32C61_PSRAM_DATA=1 puts the TLS and crypto .bss and BASIC's large
 # buffers in PSRAM (psram_data.ld).  Both free SRAM for large profiles such
 # as HTTPS, and both are off unless set, but for XIP in a BLE build: the

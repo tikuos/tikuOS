@@ -8,8 +8,8 @@
  * xip_code.ld - ESP32-C61 kernel code that runs from flash.
  *
  * With TIKU_ESP32C61_XIP_CODE=1: code and constants of BASIC, shell commands,
- * the crypto, IPv4, HTTP, MQTT, TLS, WiFi and Bluetooth kits, and the /sys,
- * /sys/boot and Wi-Fi VFS nodes.  Their data stays in SRAM.
+ * the crypto, IPv4, HTTP, MQTT, TLS, WiFi and Bluetooth kits, tinymcp and its
+ * binding, and the /sys, /sys/boot and Wi-Fi VFS nodes; data stays in SRAM.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -33,6 +33,7 @@
     *tikukits/net/tls/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
     *tikukits/net/wifi/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
     *tikukits/net/bluetooth/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+    *tinymcp/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
     *shell/tiku_shell_vfs.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
     *kernel/vfs/tree/tiku_vfs_tree_sys.o(.text .text.* .rodata .rodata.*
                                          .srodata .srodata.*)

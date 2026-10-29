@@ -7,8 +7,8 @@
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
  * tiku_mcp_tcp.c - MCP on TCP: one connection of newline-delimited lines,
- * Streamable HTTP connections beside it, each one's state leased from the
- * SRAM tier while it is open, and /sys/mcp/key.
+ * Streamable HTTP connections beside it, each one's state leased while it
+ * is open, and /sys/mcp/key.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -107,12 +107,14 @@ key_equals(const char *sent, size_t n)
 #include <services/console/tiku_console.h>
 #include <tikukits/net/tiku_kits_net.h>
 #include <tikukits/net/ipv4/tiku_kits_net_tcp.h>
+#if defined(PLATFORM_ESP32C61)
+#include <arch/esp32c61/tiku_psram_arch.h>
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* THE CONNECTIONS                                                           */
 /*---------------------------------------------------------------------------*/
 
-#define ARENA_ID 0x4Du             /* 'M' */
 #define PEND_MAX 256u              /* bytes read past an HTTP request owed */
 
 /* What one connection holds while it is open, all of it in its arena. */
@@ -219,6 +221,7 @@ accept_conn(tiku_kits_net_tcp_conn_t *c)
 {
     int http = c->local_port == http_port && http_port != 0u;
     unsigned first = http ? 1u : 0u, last = http ? TIKU_MCP_TCP_SLOTS : 1u;
+    tiku_mem_request_t lease = TIKU_MEM_REQUEST_DEFAULT;
     slot_t *s = (slot_t *)0;
     unsigned i;
 
@@ -233,8 +236,13 @@ accept_conn(tiku_kits_net_tcp_conn_t *c)
         why = "busy";
         return;
     }
-    if (tiku_tier_arena_create(&s->arena, TIKU_MEM_SRAM,
-                               sizeof(conn_mem_t) + 8u, ARENA_ID) !=
+    /* SRAM while the connection fits there, external memory once it is
+     * short; the ESP32-C61 attaches its PSRAM on first need. */
+#if defined(PLATFORM_ESP32C61)
+    (void)tiku_esp32c61_psram_attach();
+#endif
+    lease.flags = TIKU_MEM_ALLOW_EXTERNAL;
+    if (tiku_mem_arena_create(&s->arena, sizeof(conn_mem_t) + 8u, &lease) !=
             TIKU_MEM_OK ||
         (s->m = tiku_arena_alloc(&s->arena, sizeof(conn_mem_t))) ==
             (conn_mem_t *)0) {
@@ -243,7 +251,7 @@ accept_conn(tiku_kits_net_tcp_conn_t *c)
         s->m = (conn_mem_t *)0;
         tiku_kits_net_tcp_abort(c);
         refused++;
-        why = "no SRAM";
+        why = "no memory";
         return;
     }
     s->tcb = c;
