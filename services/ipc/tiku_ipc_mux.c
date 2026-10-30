@@ -11,6 +11,13 @@
  */
 #include "tiku_ipc_mux.h"
 #include <string.h>
+#if (TIKU_DRV_WIFI_IPC_ENABLE + 0) || (TIKU_C6_RADIO_SERVICE_ENABLE + 0)
+#include <interfaces/wireless/tiku_wireless_ipc.h>
+#define RADIO_SCRUB(p,n) tiku_radio_wipe(p,n)
+#else
+#define RADIO_SCRUB(p,n) ((void)0)
+#endif
+
 #if TIKU_IPC_ENABLE
 /** @brief Copy the channel prefix and both message parts before carrier admission. */
 static int send(tiku_link_t *link, const void *head, size_t hn, const void *body, size_t bn)
@@ -21,7 +28,9 @@ static int send(tiku_link_t *link, const void *head, size_t hn, const void *body
     frame[0] = c->id;
     if (hn) memcpy(frame+1,head,hn);
     if (bn) memcpy(frame+1+hn,body,bn);
-    return tiku_link_send(c->owner->physical,frame,hn+bn+1);
+    int sent=tiku_link_send(c->owner->physical,frame,hn+bn+1);
+    RADIO_SCRUB(frame,sizeof frame);
+    return sent;
 }
 /** @brief Service the shared physical carrier from cooperative kernel context. */
 static void pump(tiku_link_t *link)

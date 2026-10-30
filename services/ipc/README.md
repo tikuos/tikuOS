@@ -199,3 +199,58 @@ wrap. SPI/I²C tests connect controller exchanges to the common target hooks;
 UART tests cover partial transfers and framing recovery. Mutation tests require
 assertion failures when the matching ownership or integrity guard is removed.
 Physical controller, target, cache and timing qualification is port-specific.
+
+## P4/C6 radio service
+
+`TIKU_C6_RADIO_SERVICE_ENABLE=1` on C6 and `TIKU_DRV_WIFI_IPC_ENABLE=1`
+on P4 select three mux channels over the native mailbox: `c6/bulk` on 0,
+`c6/radio` on 1 and `c6/wifi` on 2. Radio control is pumped before the two
+data channels; bulk and Wi-Fi alternate their order. A diagnostic `IPR1`
+request selects this profile before packet traffic starts. Its reply must
+match before the P4 admits mux traffic. A C6 service image also accepts the
+legacy `IPCE` profile when selected first. Changing packet profiles requires
+a physical session restart.
+
+The radio control header is 16 bytes, followed by at most 48 payload bytes.
+Credential objects use a managed block and may reach 114 bytes.
+
+| Offset | Bytes | Field |
+|--------|-------|-------|
+| 0 | 2 | ASCII `RW` |
+| 2 | 1 | Version 1 |
+| 3 | 1 | Operation; bit 7 marks a response |
+| 4 | 4 | Nonzero request identifier, little-endian |
+| 8 | 4 | Claim generation, little-endian |
+| 12 | 1 | Service result; zero in requests |
+| 13 | 1 | Payload length |
+| 14 | 2 | Reserved, zero |
+
+Operations 1 through 12 are discovery, claim, renew, release, status, power,
+scan, AP result, credentials, connect, disconnect and forget. Responses use
+service result numbers rather than native driver errors. The server caches
+the last control request and response. Credentials are staged separately,
+committed by a connect request with the same identifier, and wiped after
+that call. SHA-256 fingerprints detect changed credential retries without
+retaining their secret payload after commit. The wired channel and packet
+CRC do not authenticate a peer.
+
+Discovery returns capability bits 0 (open station) and 1 (WPA2-PSK station),
+the C6 build, maximum Ethernet frame 1514, queue depth two and lease duration
+ten seconds. A claim belongs to its control session; renewals occur every
+two seconds. Status has two pages, and scan results carry a generation so
+an AP index cannot silently refer to a later scan.
+
+Ethernet frames use the existing 28-byte managed stream header with up to
+484 payload bytes per 512-byte block. C6 has two whole-frame slots per
+direction; the P4 application profile has four. A partial frame occupies one.
+Reassembly publishes only a complete,
+validated frame and expires partial input after two seconds. The sender
+retains its managed loans through final completion or confirmed cancellation.
+Transport staging is scrubbed after final access in the radio profiles.
+Physical readiness or session loss invalidates the three logical wires before
+their next packet pump. The SDIO owner retains the last explicitly requested
+mode separately from its automatic loader recovery, so P4 can retry a failed
+native service without interrupting a requested loader or factory session.
+
+The [P4 wireless driver](../../drivers/wifi/ipc/README.md) describes the build,
+application interface, ownership and qualification commands.

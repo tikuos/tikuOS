@@ -11,6 +11,13 @@
  */
 #include "tiku_ipc_wire.h"
 #include <string.h>
+#if (TIKU_DRV_WIFI_IPC_ENABLE + 0) || (TIKU_C6_RADIO_SERVICE_ENABLE + 0)
+#include <interfaces/wireless/tiku_wireless_ipc.h>
+#define RADIO_SCRUB(p,n) tiku_radio_wipe(p,n)
+#else
+#define RADIO_SCRUB(p,n) ((void)0)
+#endif
+
 #if TIKU_IPC_ENABLE
 enum { HELLO = 1, HELLO_ACK, COPY, COPY_ACK, INPUT, INPUT_ACK, OUTPUT, OUTPUT_DATA };
 #define RETRY_TICKS 4u
@@ -53,7 +60,9 @@ static int emit(tiku_ipc_wire_t *c, uint8_t kind, uint32_t id, uint16_t offset,
     put(frame+32, length, 2); put(frame+34, (uint16_t)(int16_t)result, 2);
     if (length) memcpy(frame+TIKU_IPC_WIRE_HEADER, data, length);
     put(frame+36, ~crc(crc(UINT32_MAX, frame, 36), frame+40, length), 4);
-    return tiku_link_send(c->link, frame, (size_t)length + TIKU_IPC_WIRE_HEADER);
+    int sent=tiku_link_send(c->link, frame, (size_t)length + TIKU_IPC_WIRE_HEADER);
+    RADIO_SCRUB(frame,sizeof frame);
+    return sent;
 }
 /** @brief Reserve control and each bulk lane's separate receive frame. */
 static void receive(void *context, uint8_t *frame, size_t length)
@@ -89,6 +98,7 @@ static void lose(tiku_ipc_wire_t *c)
         memset(&c->server[i], 0, sizeof c->server[i]);
     }
     c->control.busy = c->ready = 0;
+    RADIO_SCRUB(c->control.data,sizeof c->control.data);
     c->control_seen = 0;
     (void)tiku_ipc_peer_reset(c->endpoint);
     {
@@ -216,6 +226,7 @@ static int request(tiku_ipc_wire_t *c, const uint8_t *p)
         if (result == TIKU_IPC_AGAIN) return 0;
         c->server[lane].result = result;
         c->server[lane].done = 1;
+        if(p[5]==INPUT)RADIO_SCRUB(c->server[lane].data,sizeof c->server[lane].data);
     }
     if (p[5] == INPUT)
         return emit(c,INPUT_ACK,id,c->server[lane].offset,total,
@@ -277,6 +288,7 @@ static void inbox_step(tiku_ipc_wire_t *c,unsigned i)
     else if (p[5] == COPY_ACK || p[5] == INPUT_ACK || p[5] == OUTPUT_DATA) response(c,p);
     else c->bad++;
     c->inbox[i].length=0;
+    RADIO_SCRUB(c->inbox[i].data,sizeof c->inbox[i].data);
 }
 
 void tiku_ipc_wire_pump(tiku_ipc_wire_t *c, uint16_t budget)

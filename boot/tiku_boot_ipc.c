@@ -24,6 +24,9 @@ extern uint8_t __ipc_device_start[],__ipc_device_end[];
 #if (TIKU_HAS_SDIO_C6 + 0)
 #include "tiku_boot_c6.h"
 #include <arch/esp32p4/tiku_sdmmc_arch.h>
+#if TIKU_DRV_WIFI_IPC_ENABLE
+static uint8_t c6_radio_channel=1,c6_wifi_channel=2;
+#endif
 #endif
 #if (TIKU_HAS_COPROC + 0)
 #include <services/ipc/tiku_ipc_coproc.h>
@@ -55,6 +58,10 @@ TIKU_WEAK const tiku_ipc_endpoint_config_t tiku_ipc_backend_table[] = {
     {"local1", NULL, NULL, 0},
 #if (TIKU_HAS_SDIO_C6 + 0)
     {"c6/bulk", &tiku_boot_c6_ops, NULL, 0},
+#if TIKU_DRV_WIFI_IPC_ENABLE
+    {"c6/radio", &tiku_boot_c6_ops, &c6_radio_channel, 0},
+    {"c6/wifi", &tiku_boot_c6_ops, &c6_wifi_channel, 0},
+#endif
 #endif
 #if defined(PLATFORM_NORDIC) && (TIKU_HAS_COPROC + 0)
     {"flpr", &coproc_ops, NULL, 0},
@@ -98,7 +105,7 @@ int tiku_boot_ipc_init(void)
         return -1;
 #if (TIKU_HAS_SDIO_C6 + 0)
     for(uint16_t e=0;e<tiku_ipc_backend_count;e++)
-        if(tiku_ipc_backend_table[e].ops==&tiku_boot_c6_ops&&tiku_boot_c6_init(e))return -1;
+        if(!strcmp(tiku_ipc_backend_table[e].name,"c6/bulk")&&tiku_boot_c6_init(e))return -1;
 #endif
 #if (TIKU_HAS_COPROC + 0)
     {

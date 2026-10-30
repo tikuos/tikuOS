@@ -32,6 +32,9 @@
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/cpu/tiku_watchdog.h>    /* tiku_watchdog_kick() */
 #include <services/console/tiku_console.h> /* tiku_console_getc(), _pump() */
+#if (TIKU_DRV_WIFI_IPC_ENABLE + 0)
+#include <interfaces/wireless/tiku_wireless.h>
+#endif
 #if TIKU_SHELL_CMD_JOBS
 #include "tiku_shell_jobs.h"
 #endif
@@ -385,6 +388,11 @@ tiku_shell_net_getc(void)
      * poll).  The kick is also the hang detector's check-in; without it the
      * detector warm-resets the board after TIKU_HANG_THRESHOLD_TICKS. */
     tiku_watchdog_kick();
+#if (TIKU_DRV_WIFI_IPC_ENABLE + 0)
+    /* Advance peer services while a blocking console reader owns the shell
+     * dispatch. The proxy poll excludes the caller from nested scheduling. */
+    (void)tiku_wireless_rx_poll();
+#endif
     return shell_getc();
 }
 

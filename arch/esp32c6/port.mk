@@ -136,6 +136,17 @@ endif
 ifeq ($(C6_PROFILE),firmware)
 include $(ROOT)/arch/esp32c6/firmware.mk
 include $(wildcard $(ROOT)/drivers/wifi/esp/c6/build.mk)
+ifeq ($(TIKU_C6_RADIO_SERVICE_ENABLE),1)
+ifneq ($(TIKU_DRV_WIFI_ESP_ENABLE),1)
+$(error C6 radio service requires the native Wi-Fi driver)
+endif
+ifeq ($(TIKU_KIT_NET_ENABLE),1)
+$(error C6 radio service owns Ethernet; local C6 IP must be disabled)
+endif
+CFLAGS += -DTIKU_C6_RADIO_SERVICE_ENABLE=1 -DTIKU_IPC_BUFFERS_MAX=8
+C6_SRCS += services/ipc/tiku_ipc_mux.c services/ipc/tiku_ipc_radio_codec.c \
+ services/ipc/tiku_ipc_radio_frames.c services/ipc/tiku_ipc_radio_server.c
+endif
 ifeq ($(C6_WIFI_TEST),1)
 C6_SRCS += TikuBench/tests/esp32c6/test_wifi.c
 endif

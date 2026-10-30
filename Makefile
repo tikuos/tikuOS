@@ -2654,6 +2654,13 @@ CFLAGS += -DTIKU_IPC_HAS_SHARED=1
 SRCS += services/ipc/tiku_ipc_shared.c arch/ra8p1/tiku_ipc_arch.c
 endif
 endif
+ifeq ($(TIKU_P4_RADIO_TEST),1)
+ifneq ($(TIKU_DRV_WIFI_IPC_ENABLE):$(TIKU_KIT_NET_ENABLE):$(TIKU_KITS_NET_WIFI_ENABLE):$(TIKU_KITS_NET_TCP_ENABLE),1:1:1:1)
+$(error P4 radio tests require the IPC wireless and Wi-Fi network profile)
+endif
+CFLAGS += -DTIKU_P4_RADIO_TEST=1
+SRCS += TikuBench/tests/esp32p4/test_radio.c
+endif
 # The console line: one SLIP decoder dispatching whole frames by channel
 # (the IP stack, a desktop's window session) beside the shell's text.
 SRCS += services/console/tiku_console.c
@@ -2734,9 +2741,9 @@ endif
 ifeq (,$(findstring TIKU_SHELL_CMD_HISTORY=0,$(EXTRA_CFLAGS)))
 SRCS += shell/commands/tiku_shell_cmd_history.c
 endif
-# The wifi command is compiled only with a Wi-Fi driver (CYW43439 or the
-# ESP32-C61's own); tiku_shell_config.h drops its table entry otherwise.
-ifneq ($(filter 1,$(TIKU_DRV_WIFI_CYW43_ENABLE) $(TIKU_DRV_WIFI_ESP_ENABLE)),)
+# The wifi command is compiled with a local or IPC Wi-Fi provider;
+# tiku_shell_config.h drops its table entry otherwise.
+ifneq ($(filter 1,$(TIKU_DRV_WIFI_CYW43_ENABLE) $(TIKU_DRV_WIFI_ESP_ENABLE) $(TIKU_DRV_WIFI_IPC_ENABLE)),)
 SRCS += shell/commands/tiku_shell_cmd_wifi.c
 endif
 ifeq ($(TIKU_DRV_SDR_ESP_ENABLE),1)
@@ -3493,7 +3500,7 @@ endif
 # transport both use (for example BASIC MQTTPUB or HTTPGET$ on a lean Wi-Fi
 # profile), and each adds its own kit below.  The http kit runs over TLS
 # only, so it needs TIKU_KIT_CRYPTO_ENABLE=1 HAS_TLS=1 as well.
-ifneq ($(filter 1,$(TIKU_KITS_NET_MQTT_ENABLE) $(TIKU_KITS_NET_HTTP_ENABLE) \
+ifneq ($(filter 1,$(TIKU_KITS_NET_TCP_ENABLE) $(TIKU_KITS_NET_MQTT_ENABLE) $(TIKU_KITS_NET_HTTP_ENABLE) \
                  $(TIKU_SHELL_NET_TEST)),)
 CFLAGS += -DTIKU_KITS_NET_TCP_ENABLE=1
 SRCS   += tikukits/net/ipv4/tiku_kits_net_tcp.c
@@ -3502,7 +3509,7 @@ endif
 # TIKU_KITS_NET_TCP_ENABLE=0 removes IPv4's call into it; tiku_kits_net.h
 # defaults the flag to 1, which would leave tiku_kits_net_tcp_input()
 # undefined at link time.
-ifeq ($(filter 1,$(TIKU_KITS_NET_MQTT_ENABLE) $(TIKU_KITS_NET_HTTP_ENABLE) \
+ifeq ($(filter 1,$(TIKU_KITS_NET_TCP_ENABLE) $(TIKU_KITS_NET_MQTT_ENABLE) $(TIKU_KITS_NET_HTTP_ENABLE) \
                  $(TIKU_KITS_NET_LINK_IP_ENABLE) $(TIKU_SHELL_NET_TEST)),)
 CFLAGS += -DTIKU_KITS_NET_TCP_ENABLE=0
 endif
@@ -3542,9 +3549,8 @@ ifeq ($(TIKU_KITS_NET_HTTP_ENABLE),1)
 CFLAGS += -DTIKU_KITS_NET_HTTP_ENABLE=1
 endif
 endif
-# WiFi link backend: the net kit over tiku_wireless, with either radio driver
-# (the CYW43439 or the ESP32-C61's own).
-ifneq ($(filter 1,$(TIKU_DRV_WIFI_CYW43_ENABLE) $(TIKU_DRV_WIFI_ESP_ENABLE)),)
+# WiFi link backend: the net kit over a local or IPC wireless provider.
+ifneq ($(filter 1,$(TIKU_DRV_WIFI_CYW43_ENABLE) $(TIKU_DRV_WIFI_ESP_ENABLE) $(TIKU_DRV_WIFI_IPC_ENABLE)),)
 ifeq ($(TIKU_KITS_NET_WIFI_ENABLE),1)
 CFLAGS += -DTIKU_KITS_NET_WIFI_ENABLE=1
 SRCS   += $(wildcard tikukits/net/wifi/*.c)

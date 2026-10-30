@@ -28,6 +28,7 @@ SECTIONS {
         */applications/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         */TikuBench/tests/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         */kernel/vfs/tree/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        */drivers/wifi/ipc/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         */services/ipc/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         *tiku_ipc_stream.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         *tiku_sdio_owner_arch.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)

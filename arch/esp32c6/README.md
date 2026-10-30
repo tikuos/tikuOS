@@ -519,6 +519,7 @@ Chip block presence is recorded against ESP-IDF commit
 | LEDC / MCPWM | Present in silicon; C6 driver absent | PWM pins require module-pad access; no shared PWM HAL is implemented |
 | I2S / TWAI / RMT / PCNT / PARLIO | Present in silicon; general C6 drivers absent | PCNT0 is borrowed by the SDIO clock diagnostic; application fixtures pending |
 | Wi-Fi | Opt-in native station adapter; open/WPA2, DHCP, UDP/TCP and reconnect board tested | See [C6 driver](../../drivers/wifi/esp/c6/README.md) for qualification limits |
+| P4 Wi-Fi service | Exclusive station claim, capability discovery and Ethernet frames over the native mailbox | The [IPC station profile](../../drivers/wifi/ipc/README.md) runs IP on P4 and excludes local C6 IP ownership |
 | BLE / IEEE 802.15.4 | Present in silicon; native drivers absent | Antenna on C6 module |
 | SDR | Native driver absent; silicon support unqualified | No SDR qualification for C6 |
 | PSRAM / deep sleep / USB OTG | PSRAM and deep-sleep integration absent; USB OTG unsupported by C6 silicon | C6 has no local PSRAM; USB Serial/JTAG signals are not on P4 USB connector |

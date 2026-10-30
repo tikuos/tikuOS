@@ -42,6 +42,9 @@
 
 #if PUMP_HAS_TCP
 #include <tikukits/net/ipv4/tiku_kits_net_tcp.h>
+#if (TIKU_DRV_WIFI_IPC_ENABLE + 0) && (TIKU_KITS_NET_WIFI_ENABLE + 0)
+#include <tikukits/net/wifi/tiku_kits_net_wifi.h>
+#endif
 #endif
 #if (TIKU_DRV_WIFI_CYW43_ENABLE + 0) || (TIKU_DRV_WIFI_ESP_ENABLE + 0)
 #include <interfaces/wireless/tiku_wireless.h>
@@ -77,7 +80,11 @@ int tiku_shell_pump_net(void (*periodic)(void))
         if ((tiku_clock_time_t)(now - last) >=
             (tiku_clock_time_t)(TIKU_CLOCK_SECOND / 8)) {
             last = now;
+#if (TIKU_DRV_WIFI_IPC_ENABLE + 0) && (TIKU_KITS_NET_WIFI_ENABLE + 0)
+            tiku_kits_net_wifi_periodic();
+#else
             tiku_kits_net_tcp_periodic();
+#endif
             if (periodic != (void (*)(void))0) {
                 periodic();
             }

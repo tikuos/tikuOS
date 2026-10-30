@@ -35,6 +35,7 @@ FAULT_START = 0x5010FA40
 FAULT_SIZE = 64
 KERNEL_LOW_END = 0x4FF2BBD0
 KERNEL_HIGH_START = 0x4FF40000
+FIRMWARE_IPC_MAX = 48 * 1024
 KERNEL_STACK = 0x4FFA0000
 KERNEL_GUARD = KERNEL_STACK - 4096 - 64
 FLASH_SIZE = 16 * 1024 * 1024
@@ -147,7 +148,7 @@ def validate_elf(data, image):
         fault_section |= retained
         device_stage = (firmware and kind == 8 and flags == 3 and
                         address == KERNEL_HIGH_START and size % 64 == 0 and
-                        size <= 32768)
+                        size <= FIRMWARE_IPC_MAX)
         if not (stack_section or retained or device_stage) and (address < RAM_START or address + size >
                                   (KERNEL_LOW_END if kernel else RAM_LIMIT)):
             raise ValueError("allocated ELF section overlaps reserved memory")
@@ -203,7 +204,7 @@ def validate_kernel_layout(data, allocated, segments, firmware=False):
     device_start = symbols.get(b"__ipc_device_start", KERNEL_HIGH_START)
     device_end = symbols.get(b"__ipc_device_end", KERNEL_HIGH_START)
     if (device_start != KERNEL_HIGH_START or device_end % 64 or
-            not device_start <= device_end <= device_start + (32768 if firmware else 0) or
+            not device_start <= device_end <= device_start + (FIRMWARE_IPC_MAX if firmware else 0) or
             (device_end > device_start and (device_start, device_end) not in allocated)):
         raise ValueError("IPC device carve disagrees with its SRAM reservation")
     if b"tiku_p4_sdmmc_start" in symbols:

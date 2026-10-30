@@ -216,10 +216,11 @@
 #endif
 #endif
 #ifndef TIKU_SHELL_CMD_WIFI
-/* Auto-on when a Wi-Fi driver (CYW43 or ESP32-C61) is enabled; otherwise
+/* Auto-on when a local or IPC Wi-Fi provider is enabled; otherwise
  * off. Override with -DTIKU_SHELL_CMD_WIFI=0 to drop the command. */
 #if (defined(TIKU_DRV_WIFI_CYW43_ENABLE) && (TIKU_DRV_WIFI_CYW43_ENABLE == 1)) || \
-    (defined(TIKU_DRV_WIFI_ESP_ENABLE) && (TIKU_DRV_WIFI_ESP_ENABLE == 1))
+    (defined(TIKU_DRV_WIFI_ESP_ENABLE) && (TIKU_DRV_WIFI_ESP_ENABLE == 1)) || \
+    (TIKU_DRV_WIFI_IPC_ENABLE + 0)
 #define TIKU_SHELL_CMD_WIFI    1  /**< wifi    - Wi-Fi radio control */
 #else
 #define TIKU_SHELL_CMD_WIFI    0
@@ -642,7 +643,7 @@
 /* wifi drives a Wi-Fi driver, bt the BLE host stack over any controller;
  * ble probes the EM9305 directly. */
 #if TIKU_SHELL_CMD_WIFI && !(TIKU_DRV_WIFI_CYW43_ENABLE + 0) && \
-    !(TIKU_DRV_WIFI_ESP_ENABLE + 0)
+    !(TIKU_DRV_WIFI_ESP_ENABLE + 0) && !(TIKU_DRV_WIFI_IPC_ENABLE + 0)
 #undef  TIKU_SHELL_CMD_WIFI
 #define TIKU_SHELL_CMD_WIFI 0
 #endif

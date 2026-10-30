@@ -14,6 +14,13 @@
 #include "tiku_console_arch.h"
 #include <kernel/ipc/tiku_ipc_backend.h>
 #include <services/ipc/tiku_ipc_wire.h>
+#if TIKU_C6_RADIO_SERVICE_ENABLE
+#include <services/ipc/tiku_ipc_mux.h>
+#include <services/ipc/tiku_ipc_radio.h>
+static tiku_ipc_mux_t radio_mux;
+static tiku_ipc_wire_t radio_control,radio_data;
+static uint8_t radio_mode;
+#endif
 #include <kernel/scheduler/tiku_sched.h>
 #include <kernel/memory/tiku_mem.h>
 #include <hal/tiku_ipc_shared.h>
@@ -105,6 +112,10 @@ static const tiku_ipc_wire_sink_t sink={consume,produce,NULL};
 static const tiku_ipc_endpoint_config_t endpoints[]={
     {"local0",NULL,NULL,1},{"local1",NULL,NULL,0},
     {"c6/bulk",&tiku_ipc_wire_ops,&wire,0}
+#if TIKU_C6_RADIO_SERVICE_ENABLE
+    ,{"c6/radio",&tiku_ipc_wire_ops,&radio_control,0}
+    ,{"c6/wifi",&tiku_ipc_wire_ops,&radio_data,0}
+#endif
 };
 #if TIKU_C6_FIRMWARE
 static uint8_t memory_ok;
@@ -250,6 +261,14 @@ static void diagnostic_execute(void *unused,uint8_t *data,size_t length)
     }
 #endif
     uint64_t epoch=tiku_sdio_diag_epoch(data,length);
+#if TIKU_C6_RADIO_SERVICE_ENABLE
+    if(length==12&&!memcmp(data,"IPR1",4)){
+        uint8_t request[12];memcpy(request,data,12);memcpy(request,"IPCE",4);
+        epoch=tiku_sdio_diag_epoch(request,length);
+        if(epoch&&!host_epoch)radio_mode=1;
+        else if(!radio_mode)epoch=0;
+    }else if(epoch&&radio_mode){epoch=0;}
+#endif
     if(epoch&&!tiku_c6_sdio_commit_epoch(epoch)){
         epoch_ack=1;return;
     }
@@ -344,7 +363,7 @@ uint32_t native_main(uint32_t *report)
         tiku_region_claim(__native_image_start,(uint32_t)(__tier_sram_start-__native_image_start),0xe2)!=TIKU_MEM_OK||
 #endif
         tiku_region_claim(__tier_sram_end,(uint32_t)(__native_stack_top-__tier_sram_end),0xe3)!=TIKU_MEM_OK||
-        tiku_tier_init()!=TIKU_MEM_OK||tiku_ipc_init(endpoints,3)!=TIKU_IPC_OK)return 0;
+        tiku_tier_init()!=TIKU_MEM_OK||tiku_ipc_init(endpoints,sizeof endpoints/sizeof endpoints[0])!=TIKU_IPC_OK)return 0;
 #if TIKU_C6_STORAGE
     tiku_c6_region_seal();
 #endif
@@ -378,10 +397,28 @@ uint32_t native_main(uint32_t *report)
 #endif
         if(epoch&&epoch!=host_epoch){
             if(!host_epoch){
+#if TIKU_C6_RADIO_SERVICE_ENABLE
+                if(radio_mode){
+                    if(tiku_ipc_mux_init(&radio_mux,carrier))return 0;
+                    tiku_link_t *b=tiku_ipc_mux_open(&radio_mux,0,NULL,NULL);
+                    tiku_link_t *c=tiku_ipc_mux_open(&radio_mux,1,NULL,NULL);
+                    tiku_link_t *d=tiku_ipc_mux_open(&radio_mux,2,NULL,NULL);
+                    if(tiku_ipc_wire_init(&wire,b,"c6/bulk",2,epoch,255,&sink)||
+                       tiku_ipc_wire_init(&radio_control,c,"c6/radio",3,epoch,255,&tiku_radio_control_sink)||
+                       tiku_ipc_wire_init(&radio_data,d,"c6/wifi",4,epoch,255,&tiku_radio_data_sink))return 0;
+                    tiku_radio_service_start(&radio_control,&radio_data);
+                }else
+#endif
                 if(tiku_ipc_wire_init(&wire,carrier,"c6/bulk",2,epoch,256,&sink)!=TIKU_IPC_OK)return 0;
                 tiku_process_start(&ipc_process,NULL);
             }else{
                 (void)tiku_ipc_wire_ops.reset(&wire,2);wire.epoch=epoch;
+#if TIKU_C6_RADIO_SERVICE_ENABLE
+                if(radio_mode){
+                    (void)tiku_ipc_wire_ops.reset(&radio_control,3);radio_control.epoch=epoch;
+                    (void)tiku_ipc_wire_ops.reset(&radio_data,4);radio_data.epoch=epoch;
+                }
+#endif
                 tiku_process_exit(&ipc_process);pending=0;tiku_process_start(&ipc_process,NULL);
             }
             host_epoch=epoch;
@@ -400,7 +437,11 @@ uint32_t native_main(uint32_t *report)
 #endif
         if(epoch_ack&&bus.active&&host_epoch==tiku_c6_sdio_epoch()){
             tiku_ipc_status_t status;
-            if(!tiku_ipc_status(2,&status)&&status.open&&!tiku_link_send(diagnostic,"IPCE",4))
+            const char *ack="IPCE";
+#if TIKU_C6_RADIO_SERVICE_ENABLE
+            if(radio_mode)ack="IPR1";
+#endif
+            if(!tiku_ipc_status(2,&status)&&status.open&&!tiku_link_send(diagnostic,ack,4))
                 epoch_ack=0;
         }
         {

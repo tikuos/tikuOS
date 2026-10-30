@@ -579,8 +579,10 @@ direction/output changes and GPIO IRQs are refused because its board header
 reserves every pad. The FireBeetle 2 drives its free pads (above).
 Ethernet, microSD, USB host, HDMI, audio and camera drivers are not provided
 by this profile. Their wiring and attached accessories require confirmation
-before external pins or power rails are driven. Wi-Fi/BLE are not integrated
-P4 capabilities. CPU1 jobs are not enabled. Do not
+before external pins or power rails are driven. FireBeetle 2 Wi-Fi is available
+through the opt-in [C6 IPC station driver](../../drivers/wifi/ipc/README.md).
+It runs the IPv4 stack on P4 and carries Ethernet frames through the existing
+SDIO mailbox. BLE is not integrated. CPU1 jobs are not enabled. Do not
 interpret this as complete board-peripheral support.
 
 ## Storage-free diagnostic

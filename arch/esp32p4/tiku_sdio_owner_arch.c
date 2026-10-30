@@ -12,6 +12,11 @@
 #include "tiku_sdio_owner_arch.h"
 #include "tiku_sdmmc_arch.h"
 #include <hal/tiku_sdio_diag.h>
+#if TIKU_DRV_WIFI_IPC_ENABLE
+#define NATIVE_PROFILE "IPR1"
+#else
+#define NATIVE_PROFILE "IPCE"
+#endif
 #include <hal/tiku_c6_loader_hal.h>
 #include <hal/tiku_ipc_epoch_hal.h>
 #include <string.h>
@@ -155,7 +160,7 @@ static tiku_ipc_err_t reset_to(void *context,tiku_sdio_mode_t mode)
         uint8_t reply[32];uint8_t traced=readable;
         for(unsigned n=0;n<32&&traced;n++)
             traced=!read_bytes(tiku_sdio_diag_address(32+n),reply+n,1);
-        traced=traced&&tiku_sdio_diag_valid(reply,32,24)&&reply[1]==4&&!memcmp(reply+4,"IPCE",4);
+        traced=traced&&tiku_sdio_diag_valid(reply,32,24)&&reply[1]==4&&!memcmp(reply+4,NATIVE_PROFILE,4);
         for(unsigned n=0;n<5;n++)c->trace[n]=traced?tiku_c6_get32(reply+8+4*n):UINT32_MAX;
         tiku_p4_sdmmc_peer_enable(0);c->resetting=1;
         c->reset_until=tiku_clock_time()+2;return TIKU_IPC_AGAIN;
@@ -196,7 +201,7 @@ static tiku_ipc_err_t negotiate(void *context,tiku_sdio_mode_t mode,uint32_t ses
             if(!sid)sid=1;
             r=tiku_ipc_epoch_fresh(&c->epoch);if(r){return r;}
             memset(c->scratch,0,512);c->scratch[0]=1;c->scratch[1]=12;
-            memcpy(c->scratch+4,"IPCE",4);
+            memcpy(c->scratch+4,NATIVE_PROFILE,4);
             for(unsigned n=0;n<8;n++)c->scratch[8+n]=(uint8_t)(c->epoch>>(8u*n));
             tiku_c6_put32(c->scratch+16,sid);
             if(tiku_sdio_diag_seal(c->scratch,20,12))return TIKU_IPC_INVALID;
@@ -207,7 +212,7 @@ static tiku_ipc_err_t negotiate(void *context,tiku_sdio_mode_t mode,uint32_t ses
         r=poll(c,&token);if(r){return r;}
         if(c->identity){
             if(c->scratch[65]!=sizeof "TikuOS C6 resident IPC"-1||memcmp(c->scratch+68,"TikuOS C6 resident IPC",sizeof "TikuOS C6 resident IPC"-1))return TIKU_IPC_IO;
-        }else if(c->scratch[65]!=4||memcmp(c->scratch+68,"IPCE",4))return TIKU_IPC_IO;
+        }else if(c->scratch[65]!=4||memcmp(c->scratch+68,NATIVE_PROFILE,4))return TIKU_IPC_IO;
         c->phase=20;return TIKU_IPC_AGAIN;
     }
     if(!c->phase){value=3;r=tiku_p4_sdmmc_byte(1,0,4,&value);if(r){return r;}

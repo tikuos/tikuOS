@@ -22,10 +22,10 @@
 /**
  * @brief 1 when a Wi-Fi radio driver is built, else 0.
  *
- * The subtree uses only the tiku_wireless_* interface, so either driver the
- * #if names (TIKU_DRV_WIFI_CYW43_ENABLE, TIKU_DRV_WIFI_ESP_ENABLE) serves it.
+ * The subtree uses the tiku_wireless_* interface supplied by the selected driver.
  */
-#if (TIKU_DRV_WIFI_CYW43_ENABLE + 0) || (TIKU_DRV_WIFI_ESP_ENABLE + 0)
+#if (TIKU_DRV_WIFI_CYW43_ENABLE + 0) || (TIKU_DRV_WIFI_ESP_ENABLE + 0) || \
+    (TIKU_DRV_WIFI_IPC_ENABLE + 0)
 #define TIKU_VFS_NET_WIFI 1
 #else
 #define TIKU_VFS_NET_WIFI 0

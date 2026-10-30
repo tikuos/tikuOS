@@ -11,6 +11,13 @@
  */
 #include "tiku_ipc_bus.h"
 #include <string.h>
+#if (TIKU_DRV_WIFI_IPC_ENABLE + 0) || (TIKU_C6_RADIO_SERVICE_ENABLE + 0)
+#include <interfaces/wireless/tiku_wireless_ipc.h>
+#define RADIO_SCRUB(p,n) tiku_radio_wipe(p,n)
+#else
+#define RADIO_SCRUB(p,n) ((void)0)
+#endif
+
 #if TIKU_IPC_ENABLE
 /** @brief Copy accepted frames behind a two-byte length in private staging. */
 static int send(tiku_link_t *link, const void *head, size_t hn,
@@ -50,13 +57,16 @@ static void pump(tiku_link_t *link)
             else if (length) c->failed++;
         }
     }
-    if (c->closing) return;
+    if (c->closing) {
+        RADIO_SCRUB(c->tx,sizeof c->tx);RADIO_SCRUB(c->rx,sizeof c->rx);return;
+    }
     memset(c->tx,0,sizeof c->tx);
     if (c->queued) memcpy(c->tx,c->pending,sizeof c->pending);
     memset(c->rx,0,sizeof c->rx);
     result = c->io->start(c->io->context,c->tx,c->rx,sizeof c->tx);
     if (result == TIKU_IPC_OK) {
         c->queued = 0;
+        RADIO_SCRUB(c->pending,sizeof c->pending);
         c->active = 1;
         c->deadline = (tiku_clock_time_t)(tiku_clock_time()+c->io->burst_ticks);
     } else if (result != TIKU_IPC_AGAIN) c->failed++;
@@ -66,11 +76,16 @@ static void close(tiku_link_t *link)
 {
     tiku_ipc_bus_t *c = link->ctx;
     c->closing = 1;
+    RADIO_SCRUB(c->pending,sizeof c->pending);
     c->queued = 0;
     tiku_link_on_recv(link,NULL,NULL);
     if (c->active) {
         if (c->io->abort(c->io->context)) c->active = c->quarantined = 0;
         else c->quarantined = 1;
+    }
+    if (!c->active) {
+        RADIO_SCRUB(c->tx,sizeof c->tx);
+        RADIO_SCRUB(c->rx,sizeof c->rx);
     }
 }
 static const tiku_link_ops_t ops = {.send=send,.pump=pump,.close=close};

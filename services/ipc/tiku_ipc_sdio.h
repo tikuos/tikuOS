@@ -39,6 +39,7 @@ typedef struct {
     uint32_t engine, peer, session, serial, stale;
     uint64_t exchange;
     tiku_sdio_mode_t mode, wanted;
+    tiku_sdio_mode_t requested; /**< Last explicit mode; retained through automatic recovery. */
     tiku_sdio_state_t state;
     tiku_clock_time_t deadline, lost_at, active_until;
     uint8_t active, cursor, claimed;

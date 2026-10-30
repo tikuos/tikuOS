@@ -11,6 +11,13 @@
  */
 #include "tiku_ipc_sdio.h"
 #include <string.h>
+#if (TIKU_DRV_WIFI_IPC_ENABLE + 0) || (TIKU_C6_RADIO_SERVICE_ENABLE + 0)
+#include <interfaces/wireless/tiku_wireless_ipc.h>
+#define RADIO_SCRUB(p,n) tiku_radio_wipe(p,n)
+#else
+#define RADIO_SCRUB(p,n) ((void)0)
+#endif
+
 #if TIKU_IPC_ENABLE
 enum { FREE, QUEUED, ACTIVE, DONE, QUARANTINED };
 /** @brief Validate a relative tick deadline against the clock's half range. */
@@ -21,6 +28,10 @@ static void finish(tiku_ipc_sdio_t *c, unsigned index, tiku_ipc_err_t result)
 {
     c->jobs[index].result = result;
     c->jobs[index].state = c->jobs[index].reported ? FREE : DONE;
+    if(c->jobs[index].reported){
+        RADIO_SCRUB(c->jobs[index].tx,sizeof c->jobs[index].tx);
+        RADIO_SCRUB(c->jobs[index].rx,sizeof c->jobs[index].rx);
+    }
 }
 /** @brief Cancel unstarted work and establish a fresh local-quiescence deadline. */
 static void recover(tiku_ipc_sdio_t *c, tiku_sdio_mode_t wanted)
@@ -64,7 +75,7 @@ tiku_ipc_err_t tiku_ipc_sdio_open(tiku_ipc_sdio_t *c, const tiku_sdio_owner_ops_
     result = ops->claim(driver);
     if (result != TIKU_IPC_OK) return result;
     c->ops = ops; c->driver = driver; c->domain = domain; c->engine = engine; c->peer = peer;
-    c->session = session; c->profile = *profile; c->wanted = initial;
+    c->session = session; c->profile = *profile; c->wanted = c->requested = initial;
     c->serial = 0;
     c->native_sequence = 0;
     memset(c->native_request,0,sizeof c->native_request);
@@ -260,7 +271,11 @@ tiku_ipc_err_t tiku_ipc_sdio_take(tiku_ipc_sdio_t *c, tiku_sdio_job_t job,
     if (result->status == TIKU_IPC_OK && c->jobs[index].rx_length)
         memcpy(out,c->jobs[index].rx,c->jobs[index].rx_length);
     c->jobs[index].reported = 1;
-    if (!result->quarantined) c->jobs[index].state = FREE;
+    if (!result->quarantined) {
+        c->jobs[index].state = FREE;
+        RADIO_SCRUB(c->jobs[index].tx,sizeof c->jobs[index].tx);
+        RADIO_SCRUB(c->jobs[index].rx,sizeof c->jobs[index].rx);
+    }
     return TIKU_IPC_OK;
 }
 
@@ -268,6 +283,7 @@ tiku_ipc_err_t tiku_ipc_sdio_mode(tiku_ipc_sdio_t *c, tiku_sdio_mode_t wanted)
 {
     if (!c || !c->claimed || (wanted != TIKU_SDIO_OFF && wanted != TIKU_SDIO_NATIVE &&
         wanted != TIKU_SDIO_LOADER && wanted != TIKU_SDIO_FACTORY)) return TIKU_IPC_INVALID;
+    c->requested = wanted;
     recover(c,wanted);
     return TIKU_IPC_OK;
 }
@@ -281,8 +297,11 @@ tiku_ipc_err_t tiku_ipc_sdio_discard(tiku_ipc_sdio_t *c, tiku_sdio_job_t job)
     if (c->jobs[index].state == FREE || c->jobs[index].generation != job.generation)
         return TIKU_IPC_INVALID;
     c->jobs[index].reported = 1;
-    if (c->jobs[index].state == QUEUED || c->jobs[index].state == DONE)
+    if (c->jobs[index].state == QUEUED || c->jobs[index].state == DONE) {
         c->jobs[index].state = FREE;
+        RADIO_SCRUB(c->jobs[index].tx,sizeof c->jobs[index].tx);
+        RADIO_SCRUB(c->jobs[index].rx,sizeof c->jobs[index].rx);
+    }
     return TIKU_IPC_OK;
 }
 uint8_t tiku_ipc_sdio_reusable(const tiku_ipc_sdio_t *c)
