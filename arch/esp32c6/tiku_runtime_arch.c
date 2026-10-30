@@ -61,13 +61,26 @@ void tiku_clock_arch_delay(unsigned int us)
     while(native_time()-began<(uint64_t)us*16u){}
 }
 unsigned char tiku_clock_arch_fault(void) {return native_errors?1:0;}
+typedef uint32_t memory_word_t __attribute__((__may_alias__));
+/** @brief Fill aligned words, then remaining bytes, with the low byte of value. */
 void *memset(void *out,int value,size_t size)
 {
-    uint8_t *p=out;while(size--){*p++=(uint8_t)value;}return out;
+    uint8_t *p=out;
+    uint32_t word=(uint8_t)value*0x01010101u;
+    while(size && ((uintptr_t)p&3u)){*p++=(uint8_t)value;size--;}
+    while(size>=4){*(memory_word_t *)p=word;p+=4;size-=4;}
+    while(size--){*p++=(uint8_t)value;}
+    return out;
 }
+/** @brief Copy aligned words and byte tails; aligned hardware windows receive word accesses. */
 void *memcpy(void *out,const void *in,size_t size)
 {
-    uint8_t *p=out;const uint8_t *q=in;while(size--){*p++=*q++;}return out;
+    uint8_t *p=out;const uint8_t *q=in;
+    if(!(((uintptr_t)p|(uintptr_t)q)&3u)){
+        while(size>=4){*(memory_word_t *)p=*(const memory_word_t *)q;p+=4;q+=4;size-=4;}
+    }
+    while(size--){*p++=*q++;}
+    return out;
 }
 int memcmp(const void *a,const void *b,size_t size)
 {

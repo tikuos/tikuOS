@@ -106,7 +106,7 @@ are native diagnostic commands through `ipc sdio console`.
 This profile provides the cooperative core, worker backend and SDIO diagnostic
 application. `TIKU_SHELL_ENABLE=1 C6_STORAGE=1` adds the remote shell and VFS;
 `TIKU_SHELL_BASIC_ENABLE=1` adds BASIC. The radio reservation does not enable
-a radio driver. Core code, handlers and DMA stages reside in SRAM. Shell
+a radio driver. The default profile keeps core code, handlers and DMA stages in SRAM. Shell
 and interpreter code use a separate flash mapping. During installation the native kernel is stopped;
 the preserved SDK recovery and factory applications perform flash operations
 using their own flash/cache handling. `C6_STORAGE=0` leaves native flash
@@ -518,7 +518,8 @@ Chip block presence is recorded against ESP-IDF commit
 | Idle and wake | WFI hook, armed-source query; query register models | Tick, alarm, GPIO and UART query; measured WFI entries and SDIO shell continuity board tested |
 | LEDC / MCPWM | Present in silicon; C6 driver absent | PWM pins require module-pad access; no shared PWM HAL is implemented |
 | I2S / TWAI / RMT / PCNT / PARLIO | Present in silicon; general C6 drivers absent | PCNT0 is borrowed by the SDIO clock diagnostic; application fixtures pending |
-| Wi-Fi / BLE / IEEE 802.15.4 | Present in silicon; native drivers absent | Antenna on C6 module |
+| Wi-Fi | Opt-in native station adapter; open/WPA2, DHCP, UDP/TCP and reconnect board tested | See [C6 driver](../../drivers/wifi/esp/c6/README.md) for qualification limits |
+| BLE / IEEE 802.15.4 | Present in silicon; native drivers absent | Antenna on C6 module |
 | SDR | Native driver absent; silicon support unqualified | No SDR qualification for C6 |
 | PSRAM / deep sleep / USB OTG | PSRAM and deep-sleep integration absent; USB OTG unsupported by C6 silicon | C6 has no local PSRAM; USB Serial/JTAG signals are not on P4 USB connector |
 
@@ -532,10 +533,13 @@ The P4 board's headers expose P4 GPIOs; their numbers do not name C6 pins.
 SPI and I2C require board-selected `TIKU_BOARD_SPI_*_PIN` and
 `TIKU_BOARD_I2C_*_PIN` constants. ADC reference names select attenuation,
 not calibrated voltages: readings are raw 8/10/12-bit counts. Internal
-ADC channels30/31 are unavailable through this driver. Entropy reads require
-foreground context, an idle SAR and working analog access. They mask
-interrupts, wait for new reserved-channel conversions, restore hardware,
-and clear the destination on failure. They do not require Wi-Fi startup.
+ADC channels30/31 are unavailable through this driver. ADC transactions
+refuse access while the modem front end is clocked. Entropy reads require
+foreground context. They mask interrupts, use calibrated RF noise while
+the PHY owns the analog bus, and acquire the idle SAR otherwise. PHY
+transitions refuse reads. SAR reads wait for new reserved-channel conversions
+and restore hardware. Errors clear the destination. Wi-Fi startup is not
+required for SAR entropy.
 
 WFI keeps the peripheral domains and SDIO ownership active. Deep sleep and
 power-domain shutdown have no native resume implementation. External I2C,

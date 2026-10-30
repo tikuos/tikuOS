@@ -99,7 +99,7 @@ def compose(recovery,native,*,limit=LIMIT,max_native=49152):
 def append_xip(app, payload):
     """Append ignored segment bytes at physical 0x210000 inside application OTA1."""
     original=checked(app)
-    if not payload or len(payload)%4 or len(payload)>0x40000:
+    if not payload or len(payload)%4 or len(payload)>0xfffd0:
         raise ValueError('C6 XIP payload bounds')
     # The ROM ignores address-zero padding segments. The flash map is linear:
     # OTA1 base 0x190000 + payload offset 0x80000 = physical 0x210000.

@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_trng_arch.c - C6 internal-SAR entropy with conversion-completion checks.
+ * tiku_trng_arch.c - C6 SAR completion checks and bounded RF entropy reads.
  *
  * Register sequence: ESP-IDF 4d59230 bootloader_random_esp32c6.c,
  * C6 adc_ll.h, rng_ll.h and regi2c_impl.c (Apache-2.0).
@@ -22,6 +22,12 @@
 static const uint32_t saved_regs[]={0x60096080u,0x60096084u,0x600af018u,
     0x600b0154u,ANA+0x1c,0x600b2800u,SAR,SAR+4,SAR+0x18,SAR+0x1c};
 static const uint8_t analog_regs[]={0,1,3,4,7};
+static tiku_c6_trng_radio_t radio_source;
+
+void tiku_c6_trng_radio_set(tiku_c6_trng_radio_t source)
+{
+    uint32_t state=native_irq_save();radio_source=source;native_irq_restore(state);
+}
 
 /** @brief Replace a register field, preserving neighboring bits. */
 static void field(uint32_t at,uint32_t mask,uint32_t value)
@@ -57,7 +63,21 @@ int tiku_trng_arch_read_bytes(uint8_t *out,size_t length)
     if(!length)return TIKU_TRNG_OK;
     for(size_t n=0;n<length;n++)out[n]=0;
     state=native_irq_save();
-    if(TIKU_MEM_ARCH_IN_EXCEPTION()||(C6_REG(SAR)&2u)||
+    if(TIKU_MEM_ARCH_IN_EXCEPTION()||radio_source==TIKU_C6_TRNG_RADIO_BUSY)goto done;
+    if(radio_source==TIKU_C6_TRNG_RADIO_RF){
+        for(size_t n=0;n<length;n++){
+            if(!(n&3u)){
+                uint32_t errors=native_errors;
+                uint64_t start=native_time();unsigned polls;
+                for(polls=0;polls<200000&&native_time()-start<32u;polls++){}
+                if(polls==200000||native_errors!=errors){result=TIKU_TRNG_ERR_TIMEOUT;goto done;}
+                word=C6_REG(RNG);
+            }
+            out[n]=(uint8_t)word;word>>=8;
+        }
+        result=TIKU_TRNG_OK;goto done;
+    }
+    if((C6_REG(SAR)&2u)||
         (C6_REG(SAR+4)&(1u<<24))||(C6_REG(SAR+0x20)&(7u<<29))||
         (C6_REG(SAR+0x58)&(1u<<22))||C6_REG(SAR+0x40))goto done;
     for(unsigned n=0;n<sizeof saved/sizeof saved[0];n++)saved[n]=C6_REG(saved_regs[n]);

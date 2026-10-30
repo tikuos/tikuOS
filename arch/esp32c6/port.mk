@@ -8,6 +8,19 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 C6_PROFILE ?= resident
+ifeq ($(TIKU_DRV_WIFI_ESP_ENABLE),1)
+ifeq ($(wildcard drivers/wifi/esp/c6/build.mk),)
+$(error C6 Wi-Fi requires the drivers checkout with wifi/esp/c6/build.mk)
+endif
+ifneq ($(C6_PROFILE),firmware)
+$(error C6 Wi-Fi requires C6_PROFILE=firmware)
+endif
+endif
+ifeq ($(TIKU_KIT_NET_ENABLE),1)
+ifneq ($(TIKU_DRV_WIFI_ESP_ENABLE),1)
+$(error C6 IP networking requires TIKU_DRV_WIFI_ESP_ENABLE=1)
+endif
+endif
 ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
 TIKU_SHELL_ENABLE ?= 1
 ifneq ($(TIKU_SHELL_ENABLE),1)
@@ -32,6 +45,13 @@ BUILD_DIR ?= build/esp32c6/$(C6_PROFILE)
 C6_RAM_BASE ?= 0x4080a000
 C6_BUILD ?= 1
 C6_PERIPHERAL_TEST ?= 0
+C6_WIFI_TEST ?= 0
+ifeq ($(C6_WIFI_TEST),1)
+ifneq ($(C6_PROFILE):$(TIKU_DRV_WIFI_ESP_ENABLE):$(TIKU_KIT_NET_ENABLE),firmware:1:1)
+$(error C6_WIFI_TEST requires native Wi-Fi and IP networking)
+endif
+CFLAGS_C6_WIFI_TEST := -DTIKU_C6_WIFI_TEST=1 -DTIKU_SHELL_CMD_TRNG=1
+endif
 ifeq ($(C6_PERIPHERAL_TEST),1)
 ifneq ($(C6_PROFILE),firmware)
 $(error C6_PERIPHERAL_TEST requires C6_PROFILE=firmware)
@@ -56,6 +76,7 @@ CFLAGS := -march=rv32imac_zicsr_zifencei -mabi=ilp32 -Os -g -Wall -Wextra -Werro
  -DTIKU_CLOCK_ARCH_SECOND=128UL -DTIKU_LC_PERSISTENT=0 -DTIKU_THREADS_ENABLE=$(TIKU_THREADS_ENABLE) \
  -include $(ROOT)/arch/esp32c6/include/tiku.h -DTIKU_C6_BUILD=$(C6_BUILD) -I$(ROOT)/arch/esp32c6/include -I$(ROOT)
 CFLAGS += $(EXTRA_CFLAGS)
+CFLAGS += $(CFLAGS_C6_WIFI_TEST)
 C6_SRCS := arch/esp32c6/tiku_native_arch.c arch/esp32c6/tiku_runtime_arch.c \
  arch/esp32c6/tiku_main_arch.c arch/esp32c6/tiku_mem_arch.c \
  arch/esp32c6/tiku_console_arch.c arch/esp32c6/tiku_sdio_arch.c \
@@ -114,6 +135,10 @@ CFLAGS += -DC6_SDK_ENTRY=$(C6_SDK_ENTRY) -Wl,--wrap=native_main,--wrap=tiku_c6_q
 endif
 ifeq ($(C6_PROFILE),firmware)
 include $(ROOT)/arch/esp32c6/firmware.mk
+include $(wildcard $(ROOT)/drivers/wifi/esp/c6/build.mk)
+ifeq ($(C6_WIFI_TEST),1)
+C6_SRCS += TikuBench/tests/esp32c6/test_wifi.c
+endif
 ifeq ($(C6_PERIPHERAL_TEST),1)
 ifneq ($(TIKU_SHELL_ENABLE)$(C6_STORAGE),11)
 $(error C6_PERIPHERAL_TEST requires the shell and storage profile)
@@ -146,6 +171,8 @@ ifeq ($(C6_PROFILE),firmware)
 $(BUILD_DIR)/native.ld: arch/esp32c6/esp32c6_firmware.ld.in
 	@mkdir -p $(dir $@)
 	sed -e 's/@BASE@/$(C6_RAM_BASE)/g' -e 's/@BUILD@/$(C6_BUILD)/g' \
+	 -e 's|@RADIO_XIP@|$(if $(filter 1,$(TIKU_DRV_WIFI_ESP_ENABLE)),INCLUDE drivers/wifi/esp/c6/wifi_c6_xip.ld,)|g' \
+	 -e 's/@XIP_BYTES@/$(if $(filter 1,$(TIKU_DRV_WIFI_ESP_ENABLE)),0xfffd0,0x40000)/g' \
 	 -e 's/@SHELL@/$(if $(filter 1,$(TIKU_SHELL_ENABLE)),1,0)/g' -e 's/@TIER_FLOOR@/$(C6_TIER_MIN)/g' -e 's/@STORAGE@/$(C6_STORAGE)/g' $< > $@
 else
 $(BUILD_DIR)/native.ld: arch/esp32c6/esp32c6_resident.ld.in
@@ -155,9 +182,9 @@ ifeq ($(C6_PROFILE),cold)
 	printf '%s\n' 'ASSERT(__native_stack_top <= 0x40819000, "C6 cold-entry stack overlap")' >> $@
 endif
 endif
-$(BUILD_DIR)/main.elf: $(C6_OBJS) $(BUILD_DIR)/native.ld
+$(BUILD_DIR)/main.elf: $(C6_OBJS) $(BUILD_DIR)/native.ld $(C6_LINK_DEPS)
 	$(CC) $(CFLAGS) -nostdlib -nostartfiles -Wl,--gc-sections,--build-id=none,-Map=$(BUILD_DIR)/main.map \
-	 -T$(BUILD_DIR)/native.ld -o $@ $(C6_OBJS) $(C6_LIBS) -lgcc
+	 -T$(BUILD_DIR)/native.ld -o $@ $(C6_OBJS) $(C6_LDFLAGS) $(C6_LIBS) -lgcc
 	$(SIZE) $@
 $(BUILD_DIR)/main.bin: $(BUILD_DIR)/main.elf
 	$(OBJCOPY) -O binary --remove-section=.xip $< $@

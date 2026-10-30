@@ -42,7 +42,7 @@ def native_layout(elf,native,xip=b''):
     if xip:
         if (not shell or names.get('__c6_xip_start')!=0x42210000 or
                 names.get('__c6_xip_end')!=0x42210000+len(xip) or
-                not 0<len(xip)<=0x40000 or len(xip)%4):
+                not 0<len(xip)<=0xfffd0 or len(xip)%4):
             raise ValueError('C6 XIP declaration mismatch')
     elif names.get('__c6_xip_end',0)!=names.get('__c6_xip_start',0):
         raise ValueError('missing C6 XIP payload')
@@ -80,7 +80,7 @@ def native_layout(elf,native,xip=b''):
     allocated=[]
     for _,kind,flags,address,offset,length,*_ in sections:
         if not flags&2 or not length:continue
-        if xip and 0x42210000<=address<0x42250000:
+        if xip and 0x42210000<=address<0x4230ffd0:
             if (kind!=1 or address+length>0x42210000+len(xip) or
                     elf[offset:offset+length]!=xip[address-0x42210000:address-0x42210000+length]):
                 raise ValueError('ELF/XIP payload mismatch')
@@ -145,7 +145,7 @@ def validate_package(app,metadata):
         padding=0x80000-ignored.file_offs
         xip=ignored.data[padding:] if padding>=0 else b''
         if (ignored.addr!=0 or padding<0 or any(ignored.data[:padding]) or
-                not 0<len(xip)<=0x40000 or len(xip)%4 or
+                not 0<len(xip)<=0xfffd0 or len(xip)%4 or
                 info!={'address':0x42210000,'offset':0x80000,'bytes':len(xip),
                        'sha256':hashlib.sha256(xip).hexdigest()} or
                 image.segments[-2] is not native):

@@ -12,10 +12,11 @@
 OUTPUT_ARCH(riscv)
 ENTRY(c6_cold_entry)
 MEMORY { NATIVE (rwx) : ORIGIN = @BASE@, LENGTH = 400K
- XIP (rx) : ORIGIN = 0x42210000, LENGTH = 256K }
+ XIP (rx) : ORIGIN = 0x42210000, LENGTH = @XIP_BYTES@ }
 SECTIONS {
     .xip : {
         __c6_xip_start = .;
+        @RADIO_XIP@
         *tiku_shell*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         *tiku_basic.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         . = ALIGN(4);
@@ -27,6 +28,7 @@ SECTIONS {
         KEEP(*(.text.entry))
         . = ALIGN(256);
         KEEP(*(.text.vectors))
+        *(.iram1 .iram1.*)
         *(EXCLUDE_FILE (*tiku_basic.o) .text .text.*)
         *(EXCLUDE_FILE (*tiku_basic.o) .rodata .rodata.* .srodata .srodata.*)
         . = ALIGN(4);
@@ -34,6 +36,7 @@ SECTIONS {
     .data : {
         __global_pointer$ = . + 0x800;
         *(.data .data.* .sdata .sdata.*)
+        *(.dram1 .dram1.*)
         . = ALIGN(4);
         __tiku_cells_start = .;
         KEEP(*(.tiku_cells))

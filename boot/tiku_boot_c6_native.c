@@ -19,6 +19,13 @@
 #include <kernel/timers/tiku_htimer.h>
 #include <kernel/vfs/tree/tiku_vfs_tree_ipc.h>
 #include <services/console/tiku_console_remote.h>
+#if HAS_DRIVERS
+#include <kernel/drivers/tiku_drv_registry.h>
+#endif
+#if TIKU_KIT_NET_ENABLE
+#include <kernel/process/tiku_process.h>
+#include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>
+#endif
 static uint8_t complete;
 /** @brief Initialize CPU services, namespace providers and the remote shell.
  * @return Zero after shell startup, or -1 if namespace admission fails. */
@@ -33,6 +40,13 @@ int tiku_boot_c6_services(void)
     if (tiku_boot_vfs_init())
         return -1;
     tiku_console_remote_init(TIKU_C6_BUILD);
+#if TIKU_KIT_NET_ENABLE
+    if (tiku_process_register("net", &tiku_kits_net_process) < 0)
+        return -1;
+#endif
+#if HAS_DRIVERS
+    tiku_drv_init_all();
+#endif
     tiku_shell_init();
     complete = 1;
     return 0;

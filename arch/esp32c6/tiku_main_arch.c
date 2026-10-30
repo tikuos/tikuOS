@@ -41,6 +41,9 @@ static uint8_t storage_status;
 #if TIKU_C6_PERIPHERAL_TEST
 #include <TikuBench/tests/esp32c6/test_peripherals.h>
 #endif
+#if TIKU_C6_WIFI_TEST
+#include <TikuBench/tests/esp32c6/test_wifi.h>
+#endif
 #if TIKU_C6_STORAGE_TEST
 #include <TikuBench/tests/esp32c6/test_storage.h>
 #endif
@@ -144,6 +147,13 @@ static size_t command(const uint8_t *data,size_t length,uint8_t out[24])
     else if(equal(data,length,"ticks"))value=native_ticks;
     else if(equal(data,length,"irq"))value=native_irqs;
     else if(equal(data,length,"proc"))value=tiku_process_count();
+    else if(equal(data,length,"errors"))value=native_errors;
+#if TIKU_THREADS_ENABLE
+    else if(equal(data,length,"thrlive")){
+        for(unsigned i=0;i<tiku_thread_count();i++)value+=tiku_thread_get(i)!=NULL;
+    }
+    else if(equal(data,length,"thrfault"))value=tiku_thread_canary_faults();
+#endif
 #if TIKU_SHELL_ENABLE
     else if(equal(data,length,"idles"))value=idle_entries;
 #endif
@@ -157,6 +167,9 @@ static size_t command(const uint8_t *data,size_t length,uint8_t out[24])
 #endif
 #if TIKU_C6_PERIPHERAL_TEST
     else if(tiku_c6_peripherals_test_command(data,length,&value)){}
+#endif
+#if TIKU_C6_WIFI_TEST
+    else if(tiku_c6_wifi_test_command(data,length,&value)){}
 #endif
 #if TIKU_C6_STORAGE_TEST
     else if(tiku_c6_storage_test_command(data,length,&value)){}

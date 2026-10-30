@@ -89,7 +89,8 @@ static int end(void)
 /** @brief Acquire an idle SAR and preserve its power, clocks and analog state. */
 static int begin(void)
 {
-    if (poisoned || TIKU_MEM_ARCH_IN_EXCEPTION() || (TIKU_C6_REG_READ(SAR) & 2u) ||
+    if (poisoned || TIKU_MEM_ARCH_IN_EXCEPTION() || (TIKU_C6_REG_READ(0x600a9814u) & 0x1e000u) ||
+        (TIKU_C6_REG_READ(SAR) & 2u) ||
         (TIKU_C6_REG_READ(SAR + 4) & (1u << 24)) || (TIKU_C6_REG_READ(SAR + 0x20) & (7u << 29)) ||
         (TIKU_C6_REG_READ(SAR + 0x58) & (1u << 22)) || TIKU_C6_REG_READ(SAR + 0x40))
         return -1;

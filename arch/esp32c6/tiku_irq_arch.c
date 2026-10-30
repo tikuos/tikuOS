@@ -29,10 +29,10 @@ static struct {
     tiku_c6_isr_t handler;
     uint32_t priority, type;
     unsigned source, previous_route;
-} slots[5];
+} slots[TIKU_C6_IRQ_LAST - 19u + 1u];
 int tiku_c6_irq_attach(unsigned line, unsigned source, unsigned priority, tiku_c6_isr_t handler)
 {
-    if (line < 19 || line > 23 || source >= C6_MAP_COUNT || priority < 1 || priority > 7 ||
+    if (line < 19 || line > TIKU_C6_IRQ_LAST || source >= C6_MAP_COUNT || priority < 1 || priority > 7 ||
         !handler)
         return -1;
     uint32_t state = TIKU_C6_IRQ_SAVE(), bit = 1u << line;
@@ -41,7 +41,7 @@ int tiku_c6_irq_attach(unsigned line, unsigned source, unsigned priority, tiku_c
     if (slots[slot].handler || (TIKU_C6_REG_READ(C6_PLIC) & bit) || (TIKU_C6_MIE_READ() & bit) ||
         route >= 32 ||
         (route && ((TIKU_C6_REG_READ(C6_PLIC) | TIKU_C6_MIE_READ()) & (1u << route))) ||
-        (route >= 19 && route <= 23 && slots[route - 19].handler)) {
+        (route >= 19 && route <= TIKU_C6_IRQ_LAST && slots[route - 19].handler)) {
         TIKU_C6_IRQ_RESTORE(state);
         return -1;
     }
@@ -63,12 +63,12 @@ int tiku_c6_irq_attach(unsigned line, unsigned source, unsigned priority, tiku_c
 }
 int tiku_c6_irq_owned(unsigned line, unsigned source, tiku_c6_isr_t handler)
 {
-    return line >= 19 && line <= 23 && slots[line - 19].handler == handler && handler &&
+    return line >= 19 && line <= TIKU_C6_IRQ_LAST && slots[line - 19].handler == handler && handler &&
            slots[line - 19].source == source && TIKU_C6_REG_READ(C6_INTMTX + 4 * source) == line;
 }
 int tiku_c6_irq_enable(unsigned line, int enabled)
 {
-    if (line < 19 || line > 23 || !slots[line - 19].handler)
+    if (line < 19 || line > TIKU_C6_IRQ_LAST || !slots[line - 19].handler)
         return -1;
     uint32_t state = TIKU_C6_IRQ_SAVE(), bit = 1u << line;
     uint32_t value = TIKU_C6_REG_READ(C6_PLIC);
@@ -82,7 +82,7 @@ int tiku_c6_irq_enable(unsigned line, int enabled)
 }
 void tiku_c6_irq_detach(unsigned line)
 {
-    if (line < 19 || line > 23 || !slots[line - 19].handler)
+    if (line < 19 || line > TIKU_C6_IRQ_LAST || !slots[line - 19].handler)
         return;
     uint32_t state = TIKU_C6_IRQ_SAVE();
     unsigned slot = line - 19;
@@ -96,7 +96,7 @@ void tiku_c6_irq_detach(unsigned line)
 }
 int tiku_c6_irq_trap(uint32_t cause)
 {
-    if (cause < ((1u << 31) | 19u) || cause > ((1u << 31) | 23u))
+    if (cause < ((1u << 31) | 19u) || cause > ((1u << 31) | TIKU_C6_IRQ_LAST))
         return 0;
     unsigned slot = (cause & 31u) - 19;
     if (!slots[slot].handler)
