@@ -20,6 +20,10 @@
 static tiku_ipc_mux_t radio_mux;
 static tiku_ipc_wire_t radio_control,radio_data;
 static uint8_t radio_mode;
+#if TIKU_C6_BLE_SERVICE_ENABLE
+#include <services/ipc/tiku_ipc_ble.h>
+static tiku_ipc_wire_t ble_wire;
+#endif
 #endif
 #include <kernel/scheduler/tiku_sched.h>
 #include <kernel/memory/tiku_mem.h>
@@ -115,6 +119,9 @@ static const tiku_ipc_endpoint_config_t endpoints[]={
 #if TIKU_C6_RADIO_SERVICE_ENABLE
     ,{"c6/radio",&tiku_ipc_wire_ops,&radio_control,0}
     ,{"c6/wifi",&tiku_ipc_wire_ops,&radio_data,0}
+#if TIKU_C6_BLE_SERVICE_ENABLE
+    ,{"c6/ble",&tiku_ipc_wire_ops,&ble_wire,0}
+#endif
 #endif
 };
 #if TIKU_C6_FIRMWARE
@@ -407,6 +414,11 @@ uint32_t native_main(uint32_t *report)
                        tiku_ipc_wire_init(&radio_control,c,"c6/radio",3,epoch,255,&tiku_radio_control_sink)||
                        tiku_ipc_wire_init(&radio_data,d,"c6/wifi",4,epoch,255,&tiku_radio_data_sink))return 0;
                     tiku_radio_service_start(&radio_control,&radio_data);
+#if TIKU_C6_BLE_SERVICE_ENABLE
+                    tiku_link_t *ble=tiku_ipc_mux_open(&radio_mux,3,NULL,NULL);
+                    if(tiku_ipc_wire_init(&ble_wire,ble,"c6/ble",5,epoch,255,&tiku_ble_service_sink))return 0;
+                    tiku_ble_service_start(&ble_wire);
+#endif
                 }else
 #endif
                 if(tiku_ipc_wire_init(&wire,carrier,"c6/bulk",2,epoch,256,&sink)!=TIKU_IPC_OK)return 0;
@@ -417,6 +429,9 @@ uint32_t native_main(uint32_t *report)
                 if(radio_mode){
                     (void)tiku_ipc_wire_ops.reset(&radio_control,3);radio_control.epoch=epoch;
                     (void)tiku_ipc_wire_ops.reset(&radio_data,4);radio_data.epoch=epoch;
+#if TIKU_C6_BLE_SERVICE_ENABLE
+                    (void)tiku_ipc_wire_ops.reset(&ble_wire,5);ble_wire.epoch=epoch;
+#endif
                 }
 #endif
                 tiku_process_exit(&ipc_process);pending=0;tiku_process_start(&ipc_process,NULL);

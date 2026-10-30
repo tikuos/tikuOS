@@ -8,12 +8,17 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 C6_PROFILE ?= resident
-ifeq ($(TIKU_DRV_WIFI_ESP_ENABLE),1)
+ifeq ($(TIKU_C6_BLE_SERVICE_ENABLE),1)
+ifneq ($(C6_PROFILE):$(TIKU_C6_RADIO_SERVICE_ENABLE):$(TIKU_DRV_BLE_ESP_ENABLE),firmware:1:1)
+$(error C6 BLE service requires firmware, radio service and BLE controller)
+endif
+endif
+ifneq ($(filter 1,$(TIKU_DRV_WIFI_ESP_ENABLE) $(TIKU_DRV_BLE_ESP_ENABLE)),)
 ifeq ($(wildcard drivers/wifi/esp/c6/build.mk),)
-$(error C6 Wi-Fi requires the drivers checkout with wifi/esp/c6/build.mk)
+$(error C6 radios require the drivers checkout with wifi/esp/c6/build.mk)
 endif
 ifneq ($(C6_PROFILE),firmware)
-$(error C6 Wi-Fi requires C6_PROFILE=firmware)
+$(error C6 radios require C6_PROFILE=firmware)
 endif
 endif
 ifeq ($(TIKU_KIT_NET_ENABLE),1)
@@ -147,6 +152,10 @@ CFLAGS += -DTIKU_C6_RADIO_SERVICE_ENABLE=1 -DTIKU_IPC_BUFFERS_MAX=8
 C6_SRCS += services/ipc/tiku_ipc_mux.c services/ipc/tiku_ipc_radio_codec.c \
  services/ipc/tiku_ipc_radio_frames.c services/ipc/tiku_ipc_radio_server.c
 endif
+ifeq ($(TIKU_C6_BLE_SERVICE_ENABLE),1)
+CFLAGS += -DTIKU_C6_BLE_SERVICE_ENABLE=1
+C6_SRCS += services/ipc/tiku_ipc_ble_packets.c services/ipc/tiku_ipc_ble_server.c
+endif
 ifeq ($(C6_WIFI_TEST),1)
 C6_SRCS += TikuBench/tests/esp32c6/test_wifi.c
 endif
@@ -182,8 +191,8 @@ ifeq ($(C6_PROFILE),firmware)
 $(BUILD_DIR)/native.ld: arch/esp32c6/esp32c6_firmware.ld.in
 	@mkdir -p $(dir $@)
 	sed -e 's/@BASE@/$(C6_RAM_BASE)/g' -e 's/@BUILD@/$(C6_BUILD)/g' \
-	 -e 's|@RADIO_XIP@|$(if $(filter 1,$(TIKU_DRV_WIFI_ESP_ENABLE)),INCLUDE drivers/wifi/esp/c6/wifi_c6_xip.ld,)|g' \
-	 -e 's/@XIP_BYTES@/$(if $(filter 1,$(TIKU_DRV_WIFI_ESP_ENABLE)),0xfffd0,0x40000)/g' \
+	 -e 's|@RADIO_XIP@|$(if $(filter 1,$(TIKU_DRV_WIFI_ESP_ENABLE) $(TIKU_DRV_BLE_ESP_ENABLE)),INCLUDE drivers/wifi/esp/c6/wifi_c6_xip.ld,)|g' \
+	 -e 's/@XIP_BYTES@/$(if $(filter 1,$(TIKU_DRV_WIFI_ESP_ENABLE) $(TIKU_DRV_BLE_ESP_ENABLE)),0xfffd0,0x40000)/g' \
 	 -e 's/@SHELL@/$(if $(filter 1,$(TIKU_SHELL_ENABLE)),1,0)/g' -e 's/@TIER_FLOOR@/$(C6_TIER_MIN)/g' -e 's/@STORAGE@/$(C6_STORAGE)/g' $< > $@
 else
 $(BUILD_DIR)/native.ld: arch/esp32c6/esp32c6_resident.ld.in

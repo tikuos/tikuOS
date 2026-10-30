@@ -18,6 +18,9 @@
 #if TIKU_DRV_WIFI_IPC_ENABLE
 #include <services/ipc/tiku_ipc_mux.h>
 #include <services/ipc/tiku_ipc_radio.h>
+#if TIKU_DRV_BLE_IPC_ENABLE
+#include <services/ipc/tiku_ipc_ble.h>
+#endif
 #endif
 #include <hal/tiku_ipc_epoch_hal.h>
 #include <hal/tiku_c6_loader_hal.h>
@@ -32,6 +35,9 @@ static struct {
     tiku_ipc_wire_t wire;
 #if TIKU_DRV_WIFI_IPC_ENABLE
     tiku_ipc_wire_t control,data;
+#if TIKU_DRV_BLE_IPC_ENABLE
+    tiku_ipc_wire_t ble;
+#endif
     tiku_ipc_mux_t mux;
     uint8_t cursor,physical_ready,service_seen,retries;
     uint32_t physical_session;
@@ -52,6 +58,9 @@ static tiku_ipc_wire_t *endpoint_wire(uint16_t endpoint)
 #if TIKU_DRV_WIFI_IPC_ENABLE
     if(endpoint==c6.control.endpoint)return &c6.control;
     if(endpoint==c6.data.endpoint)return &c6.data;
+#if TIKU_DRV_BLE_IPC_ENABLE
+    if(endpoint==c6.ble.endpoint)return &c6.ble;
+#endif
 #else
     (void)endpoint;
 #endif
@@ -64,6 +73,9 @@ static void lost(void *unused)
 #if TIKU_DRV_WIFI_IPC_ENABLE
     if(c6.control.initialized)(void)tiku_ipc_wire_ops.reset(&c6.control,c6.control.endpoint);
     if(c6.data.initialized)(void)tiku_ipc_wire_ops.reset(&c6.data,c6.data.endpoint);
+#if TIKU_DRV_BLE_IPC_ENABLE
+    if(c6.ble.initialized)(void)tiku_ipc_wire_ops.reset(&c6.ble,c6.ble.endpoint);
+#endif
 #endif
     if(c6.wire.initialized)(void)tiku_ipc_wire_ops.reset(&c6.wire,c6.wire.endpoint);
 }
@@ -143,6 +155,9 @@ static void progress(void *unused,uint16_t endpoint,uint16_t budget)
     {
 #if TIKU_DRV_WIFI_IPC_ENABLE
         tiku_ipc_wire_pump(&c6.control,budget);
+#if TIKU_DRV_BLE_IPC_ENABLE
+        tiku_ipc_wire_pump(&c6.ble,budget);
+#endif
         if(c6.cursor++&1){tiku_ipc_wire_pump(&c6.data,budget);tiku_ipc_wire_pump(&c6.wire,budget);}
         else {tiku_ipc_wire_pump(&c6.wire,budget);tiku_ipc_wire_pump(&c6.data,budget);}
 #else
@@ -162,6 +177,9 @@ static void status(void *context,tiku_ipc_status_t *out)
     const uint8_t *channel=context;
     if(channel&&*channel==1)wire=&c6.control;
     if(channel&&*channel==2)wire=&c6.data;
+#if TIKU_DRV_BLE_IPC_ENABLE
+    if(channel&&*channel==3)wire=&c6.ble;
+#endif
 #else
     (void)context;
 #endif
@@ -204,6 +222,12 @@ int tiku_boot_c6_init(uint16_t endpoint)
        tiku_ipc_wire_init(&c6.control,control_link,"c6/radio",endpoint+1,epoch,255,&tiku_radio_control_sink)||
        tiku_ipc_wire_init(&c6.data,data_link,"c6/wifi",endpoint+2,epoch,255,&tiku_radio_data_sink))return -1;
     tiku_radio_service_start(&c6.control,&c6.data);
+#if TIKU_DRV_BLE_IPC_ENABLE
+    tiku_link_t *ble_link=tiku_ipc_mux_open(&c6.mux,3,NULL,NULL);
+    if(tiku_ipc_wire_init(&c6.ble,ble_link,"c6/ble",endpoint+3,epoch,255,
+                          &tiku_ble_service_sink))return -1;
+    tiku_ble_service_start(&c6.ble);
+#endif
 #else
     if(!link||tiku_ipc_wire_init(&c6.wire,link,"c6/bulk",endpoint,epoch,256,NULL)!=TIKU_IPC_OK)return -1;
 #endif

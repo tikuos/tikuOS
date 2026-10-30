@@ -582,7 +582,9 @@ by this profile. Their wiring and attached accessories require confirmation
 before external pins or power rails are driven. FireBeetle 2 Wi-Fi is available
 through the opt-in [C6 IPC station driver](../../drivers/wifi/ipc/README.md).
 It runs the IPv4 stack on P4 and carries Ethernet frames through the existing
-SDIO mailbox. BLE is not integrated. CPU1 jobs are not enabled. Do not
+SDIO mailbox. The [BLE IPC driver](../../drivers/ble/ipc/README.md) runs the
+Bluetooth host on P4 and carries HCI to the native C6 controller through
+another mailbox endpoint. CPU1 jobs are not enabled. Do not
 interpret this as complete board-peripheral support.
 
 ## Storage-free diagnostic

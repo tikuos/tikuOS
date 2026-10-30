@@ -20,6 +20,73 @@
 #include <stdint.h>
 #include "kernel/drivers/tiku_drv.h"
 
+/** @brief Extended GAP commands and reports on the P4/C6 radio profile. */
+#ifndef TIKU_BT_EXTENDED
+#if defined(PLATFORM_ESP32P4) || defined(PLATFORM_ESP32C6)
+#define TIKU_BT_EXTENDED 1
+#else
+#define TIKU_BT_EXTENDED 0
+#endif
+#endif
+
+#if (TIKU_BT_EXTENDED + 0)
+/** @brief Maximum extended advertising payload supported by this host. */
+#define TIKU_BT_EXT_ADV_MAX 251U
+/** @brief Scan or initiation PHY masks; combine 1M and Coded for scanning. */
+#define TIKU_BT_SCAN_1M     0x01U
+#define TIKU_BT_SCAN_CODED  0x04U
+
+/**
+ * @brief Start connectable extended advertising with a name and optional UUID.
+ * @param name       Nonempty local name, capped at TIKU_BT_ADV_NAME_MAX
+ * @param uuid128    Optional service UUID, 16 bytes little-endian
+ * @param primary    1 for 1M or 3 for Coded
+ * @param secondary  1 for 1M, 2 for 2M or 3 for Coded
+ * @return Driver status; unsupported PHYs are rejected before changing state.
+ * @note Uses advertising set 0. Coded advertising uses the controller's coding.
+ */
+int tiku_bt_advertise_extended(const char *name, const uint8_t *uuid128,
+                                uint8_t primary, uint8_t secondary);
+
+/**
+ * @brief Start extended advertising with caller-supplied AD records.
+ * @param connectable  1 for connectable, 0 for nonconnectable; both nonscannable
+ * @param primary      1 for 1M or 3 for Coded
+ * @param secondary    1 for 1M, 2 for 2M or 3 for Coded
+ * @param interval_ms  Advertising interval, clamped to 20..10240 ms
+ * @param ad           AD bytes, copied to the controller before return
+ * @param ad_len       Length, at most TIKU_BT_EXT_ADV_MAX
+ * @return Driver status; raw advertising does not restart after disconnect.
+ * @note Connectable data must also fit one controller advertising PDU.
+ */
+int tiku_bt_advertise_extended_raw(uint8_t connectable, uint8_t primary,
+                                    uint8_t secondary, uint16_t interval_ms,
+                                    const uint8_t *ad, uint8_t ad_len);
+
+/**
+ * @brief Scan on a nonempty combination of TIKU_BT_SCAN_1M and CODED.
+ * @param phys         PHY mask
+ * @param active       1 requests scan responses; 0 listens passively
+ * @param interval_ms  Per-PHY interval, clamped to 3..10240 ms
+ * @param window_ms    Per-PHY window, clamped to 3..interval_ms
+ * @return Driver status; unsupported PHYs leave the existing scan unchanged.
+ * @note Reassembles two simultaneous reports of at most 251 bytes. Truncated
+ *       or oversized data is discarded. Exhaustion stops the scan.
+ */
+int tiku_bt_scan_extended(uint8_t phys, uint8_t active,
+                           uint16_t interval_ms, uint16_t window_ms);
+
+/**
+ * @brief Initiate a connection using 1M or Coded discovery.
+ * @param peer_addr       Six-byte address in MSB-first display order
+ * @param peer_addr_type  0 public or 1 random
+ * @param phy             1 for 1M or 3 for Coded
+ * @return Driver status; refuses another initiation or an occupied profile.
+ */
+int tiku_bt_connect_phy(const uint8_t peer_addr[6], uint8_t peer_addr_type,
+                          uint8_t phy);
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -162,8 +229,8 @@ int tiku_bt_advertise_start(const char *name);
 /**
  * @brief Stop advertising.
  *
- * Issues LE_Set_Advertising_Enable(0) and ignores a non-zero controller
- * status, so a call while advertising is off returns TIKU_DRV_OK.
+ * Disables advertising. Extended-capable profiles check controller status;
+ * the legacy command path ignores a non-zero controller status.
  *
  * @return TIKU_DRV_OK, TIKU_DRV_ERR_NOT_PRESENT if BT isn't up, or a
  *         transport rc.
@@ -199,10 +266,9 @@ int tiku_bt_advertise_raw(uint8_t adv_type, uint16_t interval_ms,
                           const uint8_t *ad, uint8_t ad_len);
 
 /**
- * @brief Read the controller's advertising TX power in dBm (it is fixed over
- *        HCI).
- * @return TIKU_DRV_OK, TIKU_DRV_ERR_NOT_PRESENT if BT isn't up, or an error
- *         when the controller does not answer.
+ * @brief Read advertising TX power in dBm, cached after extended setup.
+ * @return TIKU_DRV_OK, NOT_PRESENT before bring-up or extended setup,
+ *         or a transport/controller error on the legacy query.
  */
 int tiku_bt_adv_tx_power(int8_t *dbm);
 
@@ -218,7 +284,7 @@ int tiku_bt_is_advertising(void);
 #define TIKU_BT_SCAN_MAX         16U
 
 /**
- * @brief Called with every advertising report while a scan runs: the HCI
+ * @brief Called with each legacy advertising report while a scan runs: the HCI
  *        event type (0 ADV_IND, 1 ADV_DIRECT_IND, 2 ADV_SCAN_IND,
  *        3 ADV_NONCONN_IND, 4 SCAN_RSP), the address and its type, the AD
  *        data and the RSSI.  @p addr is in on-air (little-endian) order.
@@ -247,12 +313,19 @@ typedef struct {
     int8_t   rssi_dbm;
     uint8_t  name_len;
     char     name[TIKU_BT_SCAN_NAME_MAX];
+#if (TIKU_BT_EXTENDED + 0)
+    uint8_t  primary_phy;
+    uint8_t  secondary_phy;
+    uint8_t  sid;               /**< 0..15, or 255 without an advertising SID */
+    uint8_t  extended;          /**< 1 for extended advertising PDUs */
+#endif
 } tiku_bt_scan_entry_t;
 
 /**
  * @brief Start an LE scan; clears any cached results from a prior scan.
  *
- * Issues LE_Set_Scan_Parameters then LE_Set_Scan_Enable(1, filter=1).
+ * Uses 1M scanning with duplicate filtering. Extended-capable profiles use
+ * extended HCI commands and also receive extended advertisements on 1M.
  *
  * @param active        1 = active scan (sends SCAN_REQ to scannable
  *                      advertisers and collects SCAN_RSP), 0 = passive
@@ -269,8 +342,8 @@ int tiku_bt_scan_start(uint8_t active, uint16_t interval_ms,
 /**
  * @brief Stop the LE scan (LE_Set_Scan_Enable(0)).
  *
- * The controller's status is not checked, so a call with no scan running
- * returns TIKU_DRV_OK.
+ * Extended-capable profiles check controller status before clearing the
+ * active state. The legacy command path does not check status.
  *
  * @return TIKU_DRV_OK, TIKU_DRV_ERR_NOT_PRESENT if BT isn't up, or a
  *         transport rc.
@@ -291,16 +364,16 @@ uint8_t tiku_bt_scan_count(void);
  *        from the next report on; NULL or "" caches every device.
  *
  * The filter stays until it is changed: `bt scan [prefix]` sets it at
- * each scan.  The advertising-report hook still sees every report.
+ * each scan. The legacy advertising-report hook bypasses this filter.
  */
 void tiku_bt_scan_filter(const char *prefix);
 
 /**
  * @brief Copy the cached scan results into @p out.
  *
- * Each BD_ADDR appears at most once, later sightings updating its RSSI
- * and name in place; once the cache is full, a device heard louder than
- * the weakest entry takes that entry's place.
+ * Extended profiles key entries by address, type and SID; others by address.
+ * Sightings update RSSI and name. When full, a louder device replaces
+ * the weakest entry.
  *
  * @param out  Destination array, sized for @p max entries
  * @param max  Capacity of @p out; slots beyond the cached count are left
@@ -339,8 +412,8 @@ void tiku_bt_poll(void);
 #endif
 #endif
 
-/** @brief Each new link asks for 251-byte link-layer packets and the 2M PHY
- *         where the controller supports them, and a central asks for a
+/** @brief Each new link asks for 251-byte link-layer packets and a 1M link
+ *         asks for 2M where supported; a central asks for a
  *         247-byte ATT MTU; tiku_bt_set_phy() and tiku_bt_set_data_length()
  *         change a link's later. */
 #ifndef TIKU_BT_LINK_UPDATE
@@ -437,10 +510,16 @@ int tiku_bt_disconnect(uint16_t handle);
  */
 int tiku_bt_pair(uint16_t handle);
 
-#if (TIKU_BT_LINK_UPDATE + 0)
-/** @brief tiku_bt_set_phy() values, and tiku_bt_connection_t's PHYs. */
+/** @brief PHY values for discovery and connected links. */
 #define TIKU_BT_PHY_1M           1U
 #define TIKU_BT_PHY_2M           2U
+#define TIKU_BT_PHY_CODED        3U
+
+#if (TIKU_BT_LINK_UPDATE + 0)
+/** @brief Local transmitter coding preferences for tiku_bt_set_coded_phy(). */
+#define TIKU_BT_CODED_ANY        0U
+#define TIKU_BT_CODED_S2         1U
+#define TIKU_BT_CODED_S8         2U
 
 /**
  * @brief Ask the controller to move a link to @p phy both ways; the LE PHY
@@ -448,10 +527,22 @@ int tiku_bt_pair(uint16_t handle);
  * @param handle  The link's connection handle, or 0xFFFF for the first
  * @return TIKU_DRV_OK once the controller takes the request,
  *         TIKU_DRV_ERR_NOT_PRESENT if BT isn't up, no link is active or the
- *         controller lacks the 2M PHY, TIKU_DRV_ERR_INVALID for an unknown
+ *         controller lacks the requested PHY, TIKU_DRV_ERR_INVALID for an unknown
  *         handle, another @p phy or a refused request
+ * @note Coded requests use no coding preference. Completion reports Coded,
+ * not the S=2/S=8 coding selected by the controller.
  */
 int tiku_bt_set_phy(uint16_t handle, uint8_t phy);
+
+/**
+ * @brief Request Coded PHY both ways with a local transmit coding preference.
+ * @param handle The connection handle, or 0xFFFF for the first connection
+ * @param coding TIKU_BT_CODED_ANY, TIKU_BT_CODED_S2 or TIKU_BT_CODED_S8
+ * @return As tiku_bt_set_phy(); INVALID also for an unknown coding value
+ * @note The controller may override the preference. The peer chooses its
+ * own transmit coding; PHY completion events do not report either coding.
+ */
+int tiku_bt_set_coded_phy(uint16_t handle, uint8_t coding);
 
 /**
  * @brief Ask the controller to send @p octets (27..251) of link-layer

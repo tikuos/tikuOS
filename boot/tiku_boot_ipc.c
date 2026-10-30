@@ -26,6 +26,9 @@ extern uint8_t __ipc_device_start[],__ipc_device_end[];
 #include <arch/esp32p4/tiku_sdmmc_arch.h>
 #if TIKU_DRV_WIFI_IPC_ENABLE
 static uint8_t c6_radio_channel=1,c6_wifi_channel=2;
+#if TIKU_DRV_BLE_IPC_ENABLE
+static uint8_t c6_ble_channel=3;
+#endif
 #endif
 #endif
 #if (TIKU_HAS_COPROC + 0)
@@ -61,6 +64,9 @@ TIKU_WEAK const tiku_ipc_endpoint_config_t tiku_ipc_backend_table[] = {
 #if TIKU_DRV_WIFI_IPC_ENABLE
     {"c6/radio", &tiku_boot_c6_ops, &c6_radio_channel, 0},
     {"c6/wifi", &tiku_boot_c6_ops, &c6_wifi_channel, 0},
+#if TIKU_DRV_BLE_IPC_ENABLE
+    {"c6/ble", &tiku_boot_c6_ops, &c6_ble_channel, 0},
+#endif
 #endif
 #endif
 #if defined(PLATFORM_NORDIC) && (TIKU_HAS_COPROC + 0)

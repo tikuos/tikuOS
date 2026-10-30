@@ -29,6 +29,8 @@ SECTIONS {
         */TikuBench/tests/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         */kernel/vfs/tree/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         */drivers/wifi/ipc/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        */drivers/ble/ipc/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        */interfaces/bluetooth/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         */services/ipc/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         *tiku_ipc_stream.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         *tiku_sdio_owner_arch.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
@@ -68,7 +70,7 @@ SECTIONS {
     __datastart = ORIGIN(LOW);
     .bss (NOLOAD) : ALIGN(16) {
         __bss_start = .;
-        *(.bss .bss.* .sbss .sbss.* COMMON)
+        EXCLUDE_FILE (*tiku_bt.o *tiku_drv_ble_ipc.o *tiku_ble_serial.o *tiku_ble_adv_hci.o *test_radio.o) *(.bss .bss.* .sbss .sbss.* COMMON)
         . = ALIGN(16);
         __uninit_start = .;
         KEEP(*(.persistent.layout))
@@ -104,6 +106,11 @@ SECTIONS {
         *(.p4.ipc.sdmmc_descriptor)
         __sdmmc_descriptor_end = .;
         *(.p4.ipc .p4.ipc.*)
+        *tiku_bt.o(.bss .bss.* .sbss .sbss.*)
+        *tiku_drv_ble_ipc.o(.bss .bss.* .sbss .sbss.*)
+        *tiku_ble_serial.o(.bss .bss.* .sbss .sbss.*)
+        *tiku_ble_adv_hci.o(.bss .bss.* .sbss .sbss.*)
+        *test_radio.o(.bss .bss.* .sbss .sbss.*)
         . = ALIGN(64);
         __ipc_device_end = .;
     } > HIGH

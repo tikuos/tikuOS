@@ -3811,10 +3811,10 @@ endif
 # chip.
 TIKU_BT_HOST := $(if $(filter 1,$(TIKU_DRV_WIFI_CYW43_BT_ENABLE) \
                   $(TIKU_DRV_BLE_ESP_ENABLE) $(TIKU_DRV_BLE_EM9305_ENABLE) \
-                  $(TIKU_DRV_BLE_FLPR_ENABLE)),1,0)
+                  $(TIKU_DRV_BLE_FLPR_ENABLE) $(TIKU_DRV_BLE_IPC_ENABLE)),1,0)
 TIKU_BT_ON_DEMAND := $(if $(filter 1,$(TIKU_DRV_BLE_ESP_ENABLE) \
                        $(TIKU_DRV_BLE_EM9305_ENABLE) \
-                       $(TIKU_DRV_BLE_FLPR_ENABLE)),1,0)
+                       $(TIKU_DRV_BLE_FLPR_ENABLE) $(TIKU_DRV_BLE_IPC_ENABLE)),1,0)
 # Pairing's AES and P-256 in software, for a controller without the LE crypto
 # commands; the CYW43439, the ESP32-C61 and the EM9305 all answer them, so it
 # is off unless a build asks for it.

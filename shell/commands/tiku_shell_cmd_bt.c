@@ -114,7 +114,12 @@ static void bt_help(void)
     SHELL_PRINTF("bt confirm yes|no       Answer the numeric comparison\n");
 #endif
 #if (TIKU_BT_LINK_UPDATE + 0)
-    SHELL_PRINTF("bt phy 1m|2m [N]        Ask for link N's PHY\n");
+#if (TIKU_BT_EXTENDED + 0)
+    SHELL_PRINTF("bt advertise-ext <name> 1m|coded [1m|2m|coded]\n");
+    SHELL_PRINTF("bt scan-ext 1m|coded|both [prefix]\n");
+    SHELL_PRINTF("bt connect <addr> public|random [1m|coded]\n");
+#endif
+    SHELL_PRINTF("bt phy 1m|2m|coded|coded-s2|coded-s8 [N]\n");
     SHELL_PRINTF("bt dle <27..251> [N]    Ask for link N's packet length\n");
     SHELL_PRINTF("bt bench [KB]           Time KB of notifications to the "
                  "subscriber\n");
@@ -369,6 +374,57 @@ static void bt_scan(uint8_t argc, const char *argv[])
     }
 }
 
+#if (TIKU_BT_EXTENDED + 0)
+/** @brief Parse a PHY name, returning zero for an unknown name. */
+static uint8_t bt_phy_arg(const char *name)
+{
+    if (str_eq(name, "1m")) return 1U;
+    if (str_eq(name, "2m")) return 2U;
+    if (str_eq(name, "coded")) return 3U;
+    return 0U;
+}
+
+/** @brief Start connectable extended advertising on the selected PHYs. */
+static void bt_advertise_ext(uint8_t argc, const char *argv[])
+{
+    uint8_t primary, secondary;
+    int rc;
+    if (argc < 4U || argc > 5U) {
+        SHELL_PRINTF("usage: bt advertise-ext <name> 1m|coded [1m|2m|coded]\n");
+        return;
+    }
+    primary = bt_phy_arg(argv[3]);
+    secondary = argc == 5U ? bt_phy_arg(argv[4]) : primary;
+    if ((primary != 1U && primary != 3U) || secondary == 0U) {
+        SHELL_PRINTF("bt: invalid advertising PHY\n");
+        return;
+    }
+    rc = tiku_bt_advertise_extended(argv[2], (const uint8_t *)0,
+                                     primary, secondary);
+    SHELL_PRINTF("bt: extended advertising rc=%d\n", rc);
+}
+
+/** @brief Start an extended scan with an optional local-name prefix. */
+static void bt_scan_ext(uint8_t argc, const char *argv[])
+{
+    uint8_t phys;
+    int rc;
+    if (argc < 3U || argc > 4U) {
+        SHELL_PRINTF("usage: bt scan-ext 1m|coded|both [prefix]\n");
+        return;
+    }
+    phys = str_eq(argv[2], "both") ? 5U :
+           str_eq(argv[2], "coded") ? 4U : str_eq(argv[2], "1m") ? 1U : 0U;
+    if (phys == 0U) {
+        SHELL_PRINTF("bt: invalid scan PHY\n");
+        return;
+    }
+    tiku_bt_scan_filter(argc == 4U ? argv[3] : (const char *)0);
+    rc = tiku_bt_scan_extended(phys, 1U, 100U, 50U);
+    SHELL_PRINTF("bt: extended scan rc=%d\n", rc);
+}
+#endif
+
 /**
  * @brief Map an LE advertising event-type code to a short label.
  */
@@ -538,6 +594,9 @@ static void bt_connect_cmd(uint8_t argc, const char *argv[])
 {
     uint8_t addr[6];
     uint8_t addr_type = 0U;
+#if (TIKU_BT_EXTENDED + 0)
+    uint8_t phy = 1U;
+#endif
     int     rc;
 
     if (argc < 3U) {
@@ -550,6 +609,20 @@ static void bt_connect_cmd(uint8_t argc, const char *argv[])
          * it. */
         addr_type = 1U;
         if (argc >= 4U && str_eq(argv[3], "public")) addr_type = 0U;
+#if (TIKU_BT_EXTENDED + 0)
+        if (argc > 5U || (argc >= 4U && !str_eq(argv[3], "public")
+                          && !str_eq(argv[3], "random"))) {
+            SHELL_PRINTF("usage: bt connect <addr> public|random [1m|coded]\n");
+            return;
+        }
+        if (argc == 5U) {
+            phy = bt_phy_arg(argv[4]);
+            if (phy != 1U && phy != 3U) {
+                SHELL_PRINTF("bt: invalid discovery PHY\n");
+                return;
+            }
+        }
+#endif
     } else {
         uint16_t slot;
         tiku_bt_scan_entry_t entries[TIKU_BT_SCAN_MAX];
@@ -570,9 +643,22 @@ static void bt_connect_cmd(uint8_t argc, const char *argv[])
             uint8_t k;
             for (k = 0U; k < 6U; ++k) addr[k] = entries[slot - 1U].addr[k];
             addr_type = entries[slot - 1U].addr_type;
+#if (TIKU_BT_EXTENDED + 0)
+            phy = entries[slot - 1U].primary_phy == 3U ? 3U : 1U;
+            if (entries[slot - 1U].evt_type != 0U
+                && entries[slot - 1U].evt_type != 1U
+                && entries[slot - 1U].evt_type != 4U) {
+                SHELL_PRINTF("bt: scan entry is not connectable\n");
+                return;
+            }
+#endif
         }
     }
+#if (TIKU_BT_EXTENDED + 0)
+    rc = tiku_bt_connect_phy(addr, addr_type, phy);
+#else
     rc = tiku_bt_connect_to(addr, addr_type);
+#endif
     if (rc == 0) {
         SHELL_PRINTF("bt: connect requested (wait for "
                      "'*** connected ***' log)\n");
@@ -867,6 +953,14 @@ static void bt_list(void)
         } else {
             SHELL_PRINTF("-");
         }
+#if (TIKU_BT_EXTENDED + 0)
+        {
+            static const char *const phy[] = {"-", "1M", "2M", "Coded"};
+            SHELL_PRINTF(" [%s %s/%s SID=%u]", entries[i].extended ? "EXT" : "legacy",
+                         phy[entries[i].primary_phy & 3U],
+                         phy[entries[i].secondary_phy & 3U], entries[i].sid);
+        }
+#endif
         tiku_shell_io_putc('\n');
     }
 }
@@ -1172,15 +1266,19 @@ static void bt_probe(void)
 
 #if (TIKU_BT_LINK_UPDATE + 0)
 /**
- * @brief Handle "bt phy 1m|2m [N]": ask for link N's PHY both ways.
+ * @brief Request a connection PHY and optional local Coded transmit preference.
  */
 static void bt_phy_cmd(uint8_t argc, const char *argv[])
 {
     uint16_t h;
     int      rc;
+    uint8_t  phy, coding = TIKU_BT_CODED_ANY;
 
-    if (argc < 3U || (!str_eq(argv[2], "1m") && !str_eq(argv[2], "2m"))) {
-        SHELL_PRINTF("usage: bt phy 1m|2m [N]\n");
+    if (argc < 3U || argc > 4U ||
+        (!str_eq(argv[2], "1m") && !str_eq(argv[2], "2m") &&
+         !str_eq(argv[2], "coded") && !str_eq(argv[2], "coded-s2") &&
+         !str_eq(argv[2], "coded-s8"))) {
+        SHELL_PRINTF("usage: bt phy 1m|2m|coded|coded-s2|coded-s8 [N]\n");
         return;
     }
     h = pick_conn_handle(argc, argv, 3U);
@@ -1188,8 +1286,12 @@ static void bt_phy_cmd(uint8_t argc, const char *argv[])
         SHELL_PRINTF("bt: no connection\n");
         return;
     }
-    rc = tiku_bt_set_phy(h, str_eq(argv[2], "2m") ? TIKU_BT_PHY_2M
-                                                  : TIKU_BT_PHY_1M);
+    phy = str_eq(argv[2], "1m") ? TIKU_BT_PHY_1M :
+          str_eq(argv[2], "2m") ? TIKU_BT_PHY_2M : TIKU_BT_PHY_CODED;
+    if (str_eq(argv[2], "coded-s2")) coding = TIKU_BT_CODED_S2;
+    if (str_eq(argv[2], "coded-s8")) coding = TIKU_BT_CODED_S8;
+    rc = phy == TIKU_BT_PHY_CODED ? tiku_bt_set_coded_phy(h, coding)
+                                 : tiku_bt_set_phy(h, phy);
     SHELL_PRINTF(rc == 0 ? "bt: PHY %s asked for on handle 0x%04x\n"
                          : "bt: PHY %s on handle 0x%04x FAILED rc=%d\n",
                  argv[2], h, rc);
@@ -1419,6 +1521,16 @@ void tiku_shell_cmd_bt(uint8_t argc, const char *argv[])
         bt_status();
         return;
     }
+#if (TIKU_BT_EXTENDED + 0)
+    if (str_eq(argv[1], "advertise-ext")) {
+        bt_advertise_ext(argc, argv);
+        return;
+    }
+    if (str_eq(argv[1], "scan-ext")) {
+        bt_scan_ext(argc, argv);
+        return;
+    }
+#endif
     if (str_eq(argv[1], "advertise") || str_eq(argv[1], "adv")) {
         bt_advertise(argc, argv);
         return;

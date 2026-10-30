@@ -254,3 +254,24 @@ native service without interrupting a requested loader or factory session.
 
 The [P4 wireless driver](../../drivers/wifi/ipc/README.md) describes the build,
 application interface, ownership and qualification commands.
+
+## BLE controller service
+
+`TIKU_C6_BLE_SERVICE_ENABLE=1` and `TIKU_DRV_BLE_IPC_ENABLE=1` add channel 3,
+`c6/ble`, to the radio-service profile. The endpoint uses the radio control
+header above with discovery, claim, renew, release, status and power
+operations. Discovery returns capability bits 0–3 for legacy advertising,
+scanning, connections and HCI transport, followed by the C6 build and maximum
+H4 packet length, each as a little-endian 32-bit value. Power accepts one
+byte with value 1; release shuts down the controller and ends its lease.
+The host reads extended-advertising and Coded-PHY capability through HCI
+LE Read Local Supported Features after claiming the controller.
+
+Managed messages contain a four-byte little-endian claim and one complete
+H4 command/ACL packet toward C6, or event/ACL packet toward P4. The maximum
+H4 packet length is 260 bytes. Two slots in each direction apply
+backpressure; no partial HCI packet reaches the host or controller.
+The ten-second lease is renewed every two seconds. Session changes,
+controller overflow and failed transfers end admission and discard queued
+packets. The [P4 Bluetooth driver](../../drivers/ble/ipc/README.md) describes
+application access and ownership.
