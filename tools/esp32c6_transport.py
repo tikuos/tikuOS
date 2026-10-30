@@ -19,6 +19,10 @@ from esp32c6_resident_update import packet,response,acquire_prompt
 from esp32c6_sdio_qualify import command_complete
 
 
+class BridgeClosed(ValueError):
+    """The P4 returned to its prompt before an RPC response arrived."""
+
+
 class Console:
     """Own one identified P4 console until close and retain its text/frame evidence."""
     def __init__(self,port,serial_number,directory):
@@ -37,6 +41,7 @@ class Console:
             self.wire.close();raise
         self.split=Splitter(markers=(0xf4,0xf5,0xf6));self.frame=frame
         self.text='';self.incoming=[];self.remote_incoming=[];self.sequence=0;self.active=False
+        self.loader_identity=None
         try:acquire_prompt(self.wire,self.pump,lambda:'tikuOS:/> ' in self.text)
         except Exception:
             self.wire.close();self.log.close();raise
@@ -75,6 +80,7 @@ class Console:
         found=next((p for p in self.incoming if p['sequence']==0),None)
         if not found or found['status']:raise ValueError('bridge discovery: '+self.text[start:])
         self.incoming.remove(found);self.active=True;self.kind=kind
+        if kind!='factory':self.loader_identity=found['payload']
         return found['payload']
 
     def send(self,op,offset=0,length=0,payload=b''):
@@ -89,19 +95,34 @@ class Console:
                   command_complete(self.text[start:],'rpc'),30)
         p=next((p for p in self.incoming if p['sequence']==seq),None)
         if p is None:
-            self.active=False;raise ValueError('bridge closed: '+self.text[start:])
+            self.active=False;raise BridgeClosed('bridge closed: '+self.text[start:])
         self.incoming.remove(p)
         if (p['op'],p['offset'],p['length'],p['status'])!=(op,offset,length,0):
             raise ValueError('C6 RPC refused: '+str({k:v for k,v in p.items() if k!='payload'}))
         return p['payload']
 
     def read(self,offset,size):
+        """Read exact flash bytes, renewing an expired read-only loader lease once per chunk."""
         out=bytearray()
         for at in range(0,size,384):
-            count=min(384,size-at);block=self.rpc(2,offset+at,count)
+            count=min(384,size-at)
+            try:block=self.rpc(2,offset+at,count)
+            except BridgeClosed:
+                identity=self.loader_identity
+                if self.active or self.kind=='factory' or not identity:raise
+                renewed=self.renew_read_bridge()
+                if json.loads(identity)!=json.loads(renewed):
+                    raise ValueError('C6 loader identity changed during flash read')
+                block=self.rpc(2,offset+at,count)
             if len(block)!=count:raise ValueError('short flash read')
             out.extend(block)
         return bytes(out)
+
+    def renew_read_bridge(self):
+        """Finish any expired RPC bytes at the P4 prompt before reattaching."""
+        start=len(self.text)
+        acquire_prompt(self.wire,self.pump,lambda:'tikuOS:/> ' in self.text[start:])
+        return self.bridge()
 
     def stop_factory(self):
         start=len(self.text);self.send(20)
