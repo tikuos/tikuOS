@@ -149,6 +149,23 @@ static void mic_dump(uint32_t want)
 void tiku_shell_cmd_mic(uint8_t argc, const char *argv[])
 {
 #if TIKU_MEDIA_FS_ENABLE && TIKU_P4_SDCARD_ENABLE
+#if TIKU_MEDIA_OPUS_ENABLE
+    if (argc == 4u && tiku_cmd_streq(argv[1], "opus")) {
+        tiku_media_record_result_t result;
+        uint32_t seconds=tiku_cmd_parse_u32(argv[3]);
+        SHELL_PRINTF("mic: Opus %lu seconds, 16000 Hz mono, 24 kbit/s to %s\n",
+                     (unsigned long)seconds,argv[2]);
+        int rc=tiku_media_record_opus(argv[2],seconds,&result);
+        SHELL_PRINTF("mic: result=%d samples=%lu bytes=%lu elapsed_ms=%lu peak=%lu clipped=%lu overruns=%lu faults=%lu\n",
+                     rc,(unsigned long)result.samples,(unsigned long)result.bytes,
+                     (unsigned long)result.elapsed_ms,(unsigned long)result.peak,
+                     (unsigned long)result.clipped,(unsigned long)result.overruns,(unsigned long)result.faults);
+        SHELL_PRINTF("mic: frames=%lu encode_mean_us=%lu encode_max_us=%lu write_max_us=%lu\n",
+                     (unsigned long)result.frames,(unsigned long)result.encode_us_mean,
+                     (unsigned long)result.encode_us_max,(unsigned long)result.write_us_max);
+        return;
+    }
+#endif
     if ((argc == 4u || argc == 5u) && tiku_cmd_streq(argv[1], "record")) {
         tiku_media_record_result_t result;
         uint32_t seconds=tiku_cmd_parse_u32(argv[3]);
@@ -178,6 +195,9 @@ void tiku_shell_cmd_mic(uint8_t argc, const char *argv[])
         SHELL_PRINTF("Usage: mic start [rate] [left|right|both]\n"
                      "       mic stop | level | stats | dump <samples>\n");
 #if TIKU_MEDIA_FS_ENABLE && TIKU_P4_SDCARD_ENABLE
+#if TIKU_MEDIA_OPUS_ENABLE
+        SHELL_PRINTF("       mic opus NAME SECONDS (16 kHz mono, 24 kbit/s)\n");
+#endif
         SHELL_PRINTF("       mic record NAME SECONDS [rate] (mounted media, PSRAM)\n");
 #endif
     }

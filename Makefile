@@ -2632,6 +2632,16 @@ SRCS += arch/esp32p4/tiku_mfs_block_arch.c services/storage/tiku_media_card.c
 ifeq ($(TIKU_SHELL_ENABLE),1)
 SRCS += shell/commands/tiku_shell_cmd_media.c services/storage/tiku_media_transfer.c
 SRCS += services/storage/tiku_media_transfer_server.c services/storage/tiku_media_record.c
+TIKU_MEDIA_OPUS_ENABLE ?= 1
+ifeq ($(TIKU_MEDIA_OPUS_ENABLE),1)
+TIKU_P4_PDM_BUFFERS ?= 32
+CFLAGS += -DTIKU_MEDIA_OPUS_ENABLE=1 -DTIKU_P4_PDM_BUFFERS=$(TIKU_P4_PDM_BUFFERS)
+include third_party/opus/sources.mk
+SRCS += $(OPUS_PORT_SOURCES) services/audio/tiku_opus.c services/storage/tiku_media_record_opus.c
+CFLAGS += -Ithird_party/opus/include
+$(BUILD_DIR)/third_party/opus/%.o: CFLAGS += -DHAVE_CONFIG_H -Iservices/audio -Ithird_party/opus/celt -Ithird_party/opus/silk -Ithird_party/opus/silk/fixed -Ithird_party/opus/src -Wno-error -fwrapv -fstack-usage -g0
+endif
+
 endif
 endif
 endif

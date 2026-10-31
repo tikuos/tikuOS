@@ -261,7 +261,8 @@ sample rate; the hardware sample clock determines elapsed capture time.
 
 Capture runs synchronously and requires a stopped microphone and an unused
 file name. The recorder reserves the complete WAV size in PSRAM, rounded to
-four bytes, and the driver reserves an 8.5 KiB DMA ring in high SRAM. It
+four bytes. The driver reserves a DMA ring in high SRAM: 34 KiB with Opus
+enabled, 8.5 KiB in the default PCM-only build. It
 consumes 4096 startup samples before retaining the recording. The watchdog
 is serviced during capture and storage; other shell commands wait until the
 recording operation returns.
@@ -293,3 +294,63 @@ The host checks cover both SRAM span orders, WAV header and sample bytes,
 startup discard, allocation/start/read failures, DMA loss, refusal to overwrite
 and buffer cleanup. Mutation checks require altered WAV lengths, omitted
 capture-loss checks and shortened startup discard to fail these checks.
+
+### Compressed microphone recordings
+
+P4 builds with the shell and native SD media include fixed-point Opus 1.6.1.
+Set `TIKU_MEDIA_OPUS_ENABLE=0` to omit the encoder. The PCM WAV command
+remains available.
+
+Run on **TikuOS**:
+
+```text
+media mount 20000000
+media off
+mic opus audio/microphone-60s.opus 60
+media stat audio/microphone-60s.opus
+```
+
+`mic opus NAME SECONDS` captures mono 16 kHz PCM and encodes 20 ms frames
+at 24 kbit/s CBR, complexity zero. It writes standard Ogg Opus, including
+pre-skip, page checksums, end-of-stream and final sample trimming. One
+minute occupies 184,805 bytes, including container headers. Playback has
+exactly the requested number of samples at the nominal rate. Compression
+is lossy; the WAV command retains the captured PCM values.
+
+The recorder reserves encoder state and 120000 bytes of checked scratch
+space in SRAM, plus a fixed PSRAM workspace holding a 32 KiB compressed
+buffer, a page buffer and PCM frame storage. Memory use does not grow with
+duration. The Opus build selects 32 DMA buffers (`TIKU_P4_PDM_BUFFERS`), occupying
+34 KiB of high SRAM and holding 1.024 seconds of mono 16 kHz PCM. The codec owns one
+shared scratch context; calls run serially in the foreground. The command
+consumes 4096 startup samples, then encodes while capture continues. It
+checkpoints compressed batches during recording and finalizes after capture
+stops. `media off` releases transfer-service buffers before recording.
+
+SD writes must finish before the DMA ring fills. A slow or failing card,
+capture timeout, codec error or DMA loss stops the operation and releases
+its writer and buffers. An error does not mark the file complete; a
+checkpointed prefix may remain under the requested name. A reset loses
+the current RAM batch. Record to an unused name and check `result=0` and
+`complete=1` before treating a recording as complete.
+
+The command reports mean and maximum encoder wall time per frame in
+microseconds, maximum append/checkpoint time, captured sample count,
+clipping and DMA errors. These timings include interrupt activity and do
+not measure battery energy. Other shell commands wait for recording to
+finish.
+
+Download on the **computer**:
+
+```sh
+python3 tools/tiku_media_transfer.py --serial /dev/ttyACM0 get audio/microphone-60s.opus microphone-60s.opus
+make -C TikuBench/tests/host/kernel media-opus
+```
+
+The host test uses the production encoder and recorder with simulated
+capture and media. It checks streaming writes, allocation and capture
+failures, storage errors and cleanup. An independent system `libopusfile`
+installation is required for the Ogg and exact-duration decode checks.
+Mutation tests reduce arena alignment and remove startup discard,
+capture-loss rejection, writer release and end trimming; each altered
+implementation must fail.

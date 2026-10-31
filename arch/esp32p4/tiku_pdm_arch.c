@@ -126,7 +126,7 @@
 #define DESC_EOF        (1u << 30)
 #define DESC_LEN(dw0)   (((dw0) >> 12) & 0xFFFu)
 #define BUF_BYTES       1024u                        /* 512 samples */
-#define BUFS            8u
+#define BUFS            TIKU_P4_PDM_BUFFERS
 #define POLL_US         50u
 #define TICKS_PER_MS    16000u
 
@@ -141,7 +141,7 @@ typedef struct {
 _Static_assert(sizeof(dma_desc_t) == 64u, "a descriptor fills a cache line");
 
 /* The ring lives in the SRAM tier's high span, taken at start and given
- * back at stop: no image carries its 8.5 KB among the low-SRAM statics. */
+ * back at stop; descriptors and samples share the allocation. */
 #define RING_BYTES      (BUFS * sizeof(dma_desc_t) + BUFS * BUF_BYTES)
 #define RING_ARENA_ID   71u
 static tiku_arena_t ring_arena;

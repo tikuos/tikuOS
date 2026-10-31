@@ -29,7 +29,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # git tracks but this check skips: build output and the nested repositories.
 SKIP_DIRS = {"build", ".git"}
 NESTED = {"drivers", "TikuBench", "tikukits", "hygiene"}
-SKIP_PATHS = ("arch/ambiq/cmsis", "arch/nordic/mdk",
+SKIP_PATHS = ("arch/ambiq/cmsis", "arch/nordic/mdk", "third_party/opus/",
               # This file quotes the banned patterns in order to define them.
               "tools/check_comment_style.py")
 

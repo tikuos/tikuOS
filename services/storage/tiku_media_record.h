@@ -13,6 +13,7 @@
 typedef struct {
     uint64_t id;
     uint32_t samples, bytes, elapsed_ms, peak, clipped, overruns, faults;
+    uint32_t encode_us_max, encode_us_mean, write_us_max, frames;
 } tiku_media_record_result_t;
 /**
  * @brief Capture left-slot mono PCM into PSRAM, then publish a WAV on mounted media.
@@ -24,5 +25,13 @@ typedef struct {
  * or -21 for a capture with DMA overruns/faults.
  */
 int tiku_media_record_wave(const char *name,uint32_t seconds,uint32_t rate,
+                           tiku_media_record_result_t *result);
+/**
+ * @brief Record mono 16 kHz audio as 24 kbit/s Ogg Opus, using bounded buffers.
+ * @note Foreground call; mounted media and stopped microphone required. DMA loss,
+ * codec errors (-22) and storage errors leave an incomplete stream. No overwrite.
+ * The result includes encoder timings and the longest append/sync interval.
+ */
+int tiku_media_record_opus(const char *name,uint32_t seconds,
                            tiku_media_record_result_t *result);
 #endif

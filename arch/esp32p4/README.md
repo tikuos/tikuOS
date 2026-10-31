@@ -140,7 +140,7 @@ divider in `HP_SYS_CLKRST`, the microphone clock is the sample rate times
 the decimation (64 from 15625 Hz up, 128 below, so the clock stays at
 1 MHz or more), and the filter's 35.5 Hz high-pass removes the offset.
 AHB DMA channel 2 (peripheral 3, CLIC line 12, source 58) fills a ring of
-eight 1 KB buffers of 16-bit mono samples, taken from the SRAM tier's high
+1 KiB buffers of 16-bit mono samples, taken from the SRAM tier's high
 span at start and given back at stop. The driver selects the span by its
 address because the RAM and firmware linker layouts order the spans
 differently. It refuses a buffer the core has
@@ -161,6 +161,13 @@ mounted SD volume. It discards the microphone filter startup interval and
 refuses to publish a capture with DMA overruns or faults. See
 [media recording](../../kernel/fs/media.md#microphone-recording) for memory,
 power-loss and transfer behavior.
+
+`mic opus audio/sample.opus 60` encodes during capture and checkpoints
+compressed batches to SD. It produces mono 16 kHz Ogg Opus at 24 kbit/s,
+using fixed-point libopus 1.6.1 and a 32-buffer DMA ring. The command reports
+encoder timings and capture errors. `TIKU_MEDIA_OPUS_ENABLE=0` omits Opus
+from native-media shell builds. See [compressed recordings](../../kernel/fs/media.md#compressed-microphone-recordings)
+for buffering, failure handling and host decode checks.
 
 UART0 drives GPIO37 (TX) and GPIO38 (RX), header P1 pins 17 and 18, in
 their IO MUX function, 8N1 at 300 to 3000000 baud from the 40 MHz crystal

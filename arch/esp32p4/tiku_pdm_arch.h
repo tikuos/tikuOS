@@ -22,6 +22,14 @@
 #define TIKU_P4_PDM_ERR_TIMEOUT  -4   /**< no buffer within the time given */
 #define TIKU_P4_PDM_ERR_NOMEM    -5   /**< no SRAM for the buffer ring */
 
+/** @brief Number of 512-sample DMA buffers, each with a 64-byte descriptor. */
+#ifndef TIKU_P4_PDM_BUFFERS
+#define TIKU_P4_PDM_BUFFERS 8u
+#endif
+#if TIKU_P4_PDM_BUFFERS < 8 || TIKU_P4_PDM_BUFFERS > 64
+#error "TIKU_P4_PDM_BUFFERS must be 8..64"
+#endif
+
 #define TIKU_P4_PDM_RATE_MIN   8000u  /**< the PDM clock stays at 1 MHz or more */
 #define TIKU_P4_PDM_RATE_MAX  39000u  /**< the module clock stays under half the crystal */
 #define TIKU_P4_PDM_SLOT_LEFT    2u   /**< the device whose select pin is low */
