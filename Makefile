@@ -2630,7 +2630,8 @@ SRCS += services/storage/tiku_media_vfs.c
 ifeq ($(TIKU_P4_SDCARD_ENABLE),1)
 SRCS += arch/esp32p4/tiku_mfs_block_arch.c services/storage/tiku_media_card.c
 ifeq ($(TIKU_SHELL_ENABLE),1)
-SRCS += shell/commands/tiku_shell_cmd_media.c
+SRCS += shell/commands/tiku_shell_cmd_media.c services/storage/tiku_media_transfer.c
+SRCS += services/storage/tiku_media_transfer_server.c
 endif
 endif
 endif

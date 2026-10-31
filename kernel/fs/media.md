@@ -233,3 +233,8 @@ and sparse SDXC image export with an independent 128-file decoder check. Mutatio
 publication and integrity guards and require assertion failures. These
 models assume completed barriers preserve prior sectors; they do not
 qualify a physical card's internal flash controller.
+
+## Computer transfers
+
+The P4 USB console and Wi-Fi TCP service provide uploads, downloads and
+listing through [the computer transfer tool](../../services/storage/media-transfer.md).

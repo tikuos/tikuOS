@@ -14,6 +14,7 @@
 #include "tiku_shell_cmd_media.h"
 #include <shell/tiku_shell_io.h>
 #include <services/storage/tiku_media_card.h>
+#include <services/storage/tiku_media_transfer_server.h>
 #include <string.h>
 #define MEDIA_CLIENT 0x4d465301u
 /** @brief Decode a decimal count without accepting overflow or trailing text. */
@@ -60,6 +61,13 @@ static void result(int rc){SHELL_PRINTF("media: result=%d\n",rc);}
 void tiku_shell_cmd_media(uint8_t argc,const char *argv[])
 {
     uint64_t value=0;int rc=TIKU_MFS_ARG;uint8_t bytes[128];
+    if(argc==2&&!strcmp(argv[1],"usb")){result(tiku_media_transfer_server_start(0,NULL));return;}
+    if(argc==2&&!strcmp(argv[1],"off")){result(tiku_media_transfer_server_stop());return;}
+    if(argc==4&&!strcmp(argv[1],"serve")){
+        uint8_t key[32];
+        if(number(argv[2],&value)||!value||value>65535||hex(argv[3],key,32)!=32){result(rc);return;}
+        result(tiku_media_transfer_server_start((uint16_t)value,key));memset(key,0,sizeof key);return;
+    }
     if(argc>=2&&!strcmp(argv[1],"mount")&&argc<=3){
         value=4000000;if(argc==3&&number(argv[2],&value)){result(rc);return;}
         if(value>20000000){result(rc);return;}
@@ -74,6 +82,7 @@ void tiku_shell_cmd_media(uint8_t argc,const char *argv[])
         result(tiku_media_card_mount(cid,uuid,(uint32_t)value));return;
     }
     if(argc<2){
+        SHELL_PRINTF("media usb | serve PORT KEY_HEX | off\n");
         SHELL_PRINTF("media mount [hz] | format CID UUID [hz] | info | ls [prefix] | uploads\n");
         SHELL_PRINTF("media begin NAME [length SHA256] | append HEX | sync | finish | release | resume ID\n");
         SHELL_PRINTF("media stat NAME | read NAME offset bytes | rm NAME | abort ID | gc\n");return;
