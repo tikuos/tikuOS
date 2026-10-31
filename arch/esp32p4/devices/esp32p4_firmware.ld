@@ -40,6 +40,12 @@ SECTIONS {
         *tiku_fat.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         *tiku_sd_fat.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         *tiku_sd_vfs.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *tiku_mfs.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *tiku_mfs_copy.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *tiku_mfs_block_arch.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *tiku_media_card.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *tiku_media_store.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *tiku_media_vfs.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         *tiku_link_uart.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         *tiku_uart_port_arch.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         *tiku_boot_ipc.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
@@ -75,7 +81,7 @@ SECTIONS {
     __datastart = ORIGIN(LOW);
     .bss (NOLOAD) : ALIGN(16) {
         __bss_start = .;
-        EXCLUDE_FILE (*/tikukits/net/*.o *tiku_drv_wifi_ipc.o *tiku_drv_ble_ipc.o *tiku_ble_serial.o *tiku_ble_adv_hci.o *test_radio.o) *(.bss .bss.* .sbss .sbss.* COMMON)
+        EXCLUDE_FILE (*/tikukits/net/*.o *tiku_drv_wifi_ipc.o *tiku_drv_ble_ipc.o *tiku_ble_serial.o *tiku_ble_adv_hci.o *test_radio.o *tiku_media_card.o) *(.bss .bss.* .sbss .sbss.* COMMON)
         . = ALIGN(16);
         __uninit_start = .;
         KEEP(*(.persistent.layout))
@@ -119,6 +125,7 @@ SECTIONS {
         *tiku_ble_serial.o(.bss .bss.* .sbss .sbss.*)
         *tiku_ble_adv_hci.o(.bss .bss.* .sbss .sbss.*)
         *test_radio.o(.bss .bss.* .sbss .sbss.*)
+        *tiku_media_card.o(.bss .bss.* .sbss .sbss.*)
         . = ALIGN(64);
         __ipc_device_end = .;
     } > HIGH

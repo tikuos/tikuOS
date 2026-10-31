@@ -2608,6 +2608,11 @@ endif
 ifneq ($(filter arch/esp32p4/tiku_coproc_arch.c arch/ra8p1/tiku_coproc_arch.c arch/nordic/tiku_coproc_arch.c,$(SRCS)),)
 SRCS += interfaces/coproc/tiku_coproc_ipc.c services/ipc/tiku_ipc_coproc.c
 endif
+ifeq ($(TIKU_SHELL_CMD_MEDIA),1)
+ifneq ($(TIKU_P4_SDCARD_ENABLE):$(TIKU_MEDIA_FS_ENABLE),1:1)
+$(warning media command requires P4 SD and media filesystem support; command disabled)
+endif
+endif
 ifeq ($(TIKU_SHELL_CMD_SD),1)
 ifneq ($(TIKU_P4_SDCARD_ENABLE),1)
 $(warning sd command requires TIKU_P4_SDCARD_ENABLE=1; command disabled)
@@ -2616,6 +2621,17 @@ endif
 ifeq ($(TIKU_SHELL_CMD_FAT),1)
 ifeq ($(filter 1,$(TIKU_DRV_EMMC_ENABLE) $(TIKU_P4_SDCARD_ENABLE)),)
 $(warning fat command requires eMMC or P4 SD support; command disabled)
+endif
+endif
+ifeq ($(TIKU_MEDIA_FS_ENABLE),1)
+CFLAGS += -DTIKU_MEDIA_FS_ENABLE=1
+SRCS += kernel/fs/tiku_mfs.c kernel/fs/tiku_mfs_copy.c services/storage/tiku_media_store.c
+SRCS += services/storage/tiku_media_vfs.c
+ifeq ($(TIKU_P4_SDCARD_ENABLE),1)
+SRCS += arch/esp32p4/tiku_mfs_block_arch.c services/storage/tiku_media_card.c
+ifeq ($(TIKU_SHELL_ENABLE),1)
+SRCS += shell/commands/tiku_shell_cmd_media.c
+endif
 endif
 endif
 ifeq ($(TIKU_P4_SDCARD_ENABLE),1)

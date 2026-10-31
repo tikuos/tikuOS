@@ -206,6 +206,9 @@
 #if TIKU_SHELL_CMD_SD
 #include "commands/tiku_shell_cmd_sd.h"
 #endif
+#if TIKU_SHELL_CMD_MEDIA
+#include "commands/tiku_shell_cmd_media.h"
+#endif
 #if TIKU_SHELL_CMD_H264
 #include "commands/tiku_shell_cmd_h264.h"
 #endif
@@ -720,6 +723,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_SD
     {"sd",      "Read-only card probe", tiku_shell_cmd_sd},
+#endif
+#if TIKU_SHELL_CMD_MEDIA
+    {"media",   "Native SD files: mount, format, read, write", tiku_shell_cmd_media},
 #endif
 #if TIKU_SHELL_CMD_H264
     {"h264",    "H.264 encoder test stream",   tiku_shell_cmd_h264},

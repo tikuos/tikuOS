@@ -143,3 +143,13 @@ streamed-read and dynamic-directory watch checks in `test_vfs_model.c` and
 `vfs-c-core` (with `test_vfs_stream.c`), `vfs-c-tree`, `vfs-c-watch` (with
 `/data` watched in `test_vfs_watch.c`), `vfs-tree`,
 `vfs-observe` and `vfs-events` suites.
+
+## Native media objects
+
+`TIKU_MEDIA_FS_ENABLE=1` adds `/media` and `/sys/media` through boot providers,
+with two additional mount and provider slots. `tiku_media_vfs_attach()` binds
+an explicitly initialized storage service. The provider exposes committed
+objects with read-only VFS operations and rejects lengths above the VFS's
+32-bit range. Native creation, append, publication and 64-bit range access
+use `services/storage/tiku_media_store.h`. Format and recovery details are
+in `kernel/fs/media.md`.

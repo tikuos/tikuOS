@@ -380,11 +380,15 @@ void tiku_vfs_init(const tiku_vfs_node_t *root);
 #ifndef TIKU_SD_FAT_ENABLE
 #define TIKU_SD_FAT_ENABLE 0
 #endif
+/** @brief Include native media providers in the boot mount capacity. */
+#ifndef TIKU_MEDIA_FS_ENABLE
+#define TIKU_MEDIA_FS_ENABLE 0
+#endif
 #ifndef TIKU_VFS_MOUNT_MAX
 #if (TIKU_IPC_ENABLE + 0)
-#define TIKU_VFS_MOUNT_MAX (23 + 2 * TIKU_SD_FAT_ENABLE)
+#define TIKU_VFS_MOUNT_MAX (23 + 2 * (TIKU_SD_FAT_ENABLE + TIKU_MEDIA_FS_ENABLE))
 #else
-#define TIKU_VFS_MOUNT_MAX (22 + 2 * TIKU_SD_FAT_ENABLE)
+#define TIKU_VFS_MOUNT_MAX (22 + 2 * (TIKU_SD_FAT_ENABLE + TIKU_MEDIA_FS_ENABLE))
 #endif
 #endif
 

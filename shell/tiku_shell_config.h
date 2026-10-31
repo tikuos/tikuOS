@@ -102,6 +102,15 @@
 #define TIKU_SHELL_CMD_IPC (TIKU_IPC_ENABLE + 0)
 #endif
 
+/** @brief Native SD volume and object operations on the P4. */
+#ifndef TIKU_SHELL_CMD_MEDIA
+#define TIKU_SHELL_CMD_MEDIA ((TIKU_P4_SDCARD_ENABLE + 0) && (TIKU_MEDIA_FS_ENABLE + 0))
+#endif
+#if !(TIKU_P4_SDCARD_ENABLE + 0) || !(TIKU_MEDIA_FS_ENABLE + 0)
+#undef TIKU_SHELL_CMD_MEDIA
+#define TIKU_SHELL_CMD_MEDIA 0
+#endif
+
 #ifndef TIKU_SHELL_CMD_SD
 #define TIKU_SHELL_CMD_SD (TIKU_P4_SDCARD_ENABLE + 0)
 #endif

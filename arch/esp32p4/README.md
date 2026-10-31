@@ -601,6 +601,27 @@ operation.
 sd probe
 ```
 
+### Native media storage
+
+`TIKU_MEDIA_FS_ENABLE=1` builds the native media filesystem, queued storage
+service and `/media` providers. The P4 block backend verifies the selected
+card CID and sector extent before enabling writes. It supports one through
+eight sectors per transfer, a one-bit clock selected from 400 kHz through
+20 MHz, automatic stop for multi-block transfers, and programming/status
+completion before acknowledging writes. The service restores C6 controller
+ownership after each operation.
+
+`media mount [hz]` discovers a native whole-card volume and attaches `/media`.
+`media format CID UUID [hz]` replaces the whole card's volume and partition
+table after checking its CID; UUID is a new nonzero 32-digit hex identity.
+The default clock is 4 MHz. Bitmaps use an SRAM-tier arena sized to capacity;
+mount refuses insufficient memory. Mounting and formatting are explicit,
+and `/media` requires remounting after reboot. Applications obtain the mounted
+service through `tiku_media_card_store()` or bind an independent service to
+an explicitly selected extent. The existing probe and FAT APIs
+retain their read-only behavior. See [the media filesystem contract](../../kernel/fs/media.md)
+for the format, service API, desktop image tools and qualification limits.
+
 ### FAT32 files on microSD
 
 The SD build also provides `fat mount`, `fat ls [path [entry]]`, and
