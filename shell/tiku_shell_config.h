@@ -102,6 +102,14 @@
 #define TIKU_SHELL_CMD_IPC (TIKU_IPC_ENABLE + 0)
 #endif
 
+#ifndef TIKU_SHELL_CMD_SD
+#define TIKU_SHELL_CMD_SD (TIKU_P4_SDCARD_ENABLE + 0)
+#endif
+#if !(TIKU_P4_SDCARD_ENABLE + 0)
+#undef TIKU_SHELL_CMD_SD
+#define TIKU_SHELL_CMD_SD 0
+#endif
+
 #ifndef TIKU_SHELL_CMD_LPCORE
 /* On where the build carries the ESP32-P4 LP core payload
  * (TIKU_LPCORE_ENABLE, a -D from the Makefile); off elsewhere. */
@@ -207,13 +215,16 @@
 #endif
 #endif
 #ifndef TIKU_SHELL_CMD_FAT
-/* Auto-on wherever the eMMC driver is built: the card is the only FAT32
- * volume in the system, so the command has nothing to read without it. */
-#if defined(TIKU_DRV_EMMC_ENABLE)
+/* Auto-on for the Apollo eMMC or P4 SD card reader. */
+#if defined(TIKU_DRV_EMMC_ENABLE) || (TIKU_P4_SDCARD_ENABLE + 0)
 #define TIKU_SHELL_CMD_FAT 1  /**< fat - read the card's FAT32 volume */
 #else
 #define TIKU_SHELL_CMD_FAT 0
 #endif
+#endif
+#if !(TIKU_DRV_EMMC_ENABLE + 0) && !(TIKU_P4_SDCARD_ENABLE + 0)
+#undef TIKU_SHELL_CMD_FAT
+#define TIKU_SHELL_CMD_FAT 0
 #endif
 #ifndef TIKU_SHELL_CMD_WIFI
 /* Auto-on when a local or IPC Wi-Fi provider is enabled; otherwise

@@ -32,6 +32,9 @@
 #if TIKU_SHELL_ENABLE && TIKU_SHELL_CMD_BASIC
 #include <basic/tiku_basic_vfs.h>
 #endif
+#if TIKU_SD_FAT_ENABLE
+#include <services/storage/tiku_sd_vfs.h>
+#endif
 #if TIKU_APPL_GUI
 #include "tiku_gui.h"
 #include "tiku_draw.h"
@@ -79,6 +82,10 @@ static int assemble(void)
     nodes[config.node_count++] = (tiku_vfs_boot_node_t){
         "/", tiku_gui_vfs_get()
     };
+#endif
+#if TIKU_SD_FAT_ENABLE
+    nodes[config.node_count++] = (tiku_vfs_boot_node_t){"/", tiku_sd_vfs_files()};
+    nodes[config.node_count++] = (tiku_vfs_boot_node_t){"/sys", tiku_sd_vfs_status()};
 #endif
     return tiku_vfs_tree_init(&config);
 }

@@ -58,6 +58,7 @@ static struct {
     uint32_t control,size,address,next,padding[12];
 } descriptor __attribute__((section(".p4.ipc.sdmmc_descriptor"),aligned(64)));
 static tiku_p4_sdmmc_status_t state;
+static uint8_t card_claimed;
 static void *stage;
 static uint16_t stage_capacity,stage_length;
 static uint8_t stage_write;
@@ -195,6 +196,7 @@ tiku_ipc_err_t tiku_p4_sdmmc_open(void)
 tiku_ipc_err_t tiku_p4_sdmmc_clock(uint32_t hz)
 {
     unsigned divider;
+    if(card_claimed)return TIKU_IPC_BUSY;
     if(!state.opened||state.active||hz<400000||hz>20000000)return TIKU_IPC_INVALID;
     divider=(40000000u+2u*hz-1u)/(2u*hz);
     TIKU_P4_REG_WRITE(REG(0x10),0);
@@ -212,6 +214,7 @@ tiku_ipc_err_t tiku_p4_sdmmc_command(uint8_t index,uint32_t arg,uint32_t *reply)
 {
     uint64_t began,now;
     uint32_t status=0,flags=START|SLOT|WAIT_DATA;
+    if(card_claimed)return TIKU_IPC_BUSY;
     if(!state.opened||state.active||index>63||!reply)return TIKU_IPC_INVALID;
     if(index)flags|=(1u<<6)|(index==5?0:1u<<8);
     else flags|=1u<<15;
@@ -247,6 +250,7 @@ tiku_ipc_err_t tiku_p4_sdmmc_byte(uint8_t write,uint8_t function,uint32_t addres
 
 tiku_ipc_err_t tiku_p4_sdmmc_width(uint8_t width)
 {
+    if(card_claimed)return TIKU_IPC_BUSY;
     if(!state.opened||state.active||(width!=1&&width!=4))return TIKU_IPC_INVALID;
     TIKU_P4_REG_WRITE(REG(0x18),width==4?2u:0);
     state.width=width;return TIKU_IPC_OK;
@@ -284,6 +288,7 @@ tiku_ipc_err_t tiku_p4_sdmmc_start(uint8_t write,uint8_t function,uint32_t addre
     uint8_t increment,void *buffer,uint16_t length,uint16_t capacity)
 {
     uintptr_t a=(uintptr_t)buffer;
+    if(card_claimed)return TIKU_IPC_BUSY;
     if(!state.opened||state.active||write>1||function>7||address>0x1ffffu||increment>1||
         !buffer||!length||length>512||length>capacity||capacity>512||!capacity||
         (capacity%64u)||(a%64u)||a<0x4ff00000u||a>=0x4ffa0000u||
@@ -331,6 +336,7 @@ tiku_ipc_err_t tiku_p4_sdmmc_poll(void)
 
 uint8_t tiku_p4_sdmmc_abort(void)
 {
+    if(card_claimed)return 0;
     if(!state.opened)return 1;
     bits(BMOD,1u<<7,0);
     bits(CTRL,7u|(1u<<25)|(1u<<5),7u);
@@ -370,3 +376,14 @@ tiku_ipc_err_t tiku_p4_sdmmc_close(void)
 }
 void tiku_p4_sdmmc_status(tiku_p4_sdmmc_status_t *out)
 { if(out)*out=state; }
+
+tiku_ipc_err_t tiku_p4_sdmmc_card_claim(void)
+{
+    if(!state.opened)return TIKU_IPC_INVALID;
+    if(card_claimed||state.active||(TIKU_P4_REG_READ(CMD)&START)||
+       (TIKU_P4_REG_READ(REG(0x48))&(1u<<10)))return TIKU_IPC_BUSY;
+    card_claimed=1;return TIKU_IPC_OK;
+}
+
+void tiku_p4_sdmmc_card_release(void)
+{ card_claimed=0; }

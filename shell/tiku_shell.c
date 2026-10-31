@@ -203,6 +203,9 @@
 #if TIKU_SHELL_CMD_MIC
 #include "commands/tiku_shell_cmd_mic.h"
 #endif
+#if TIKU_SHELL_CMD_SD
+#include "commands/tiku_shell_cmd_sd.h"
+#endif
 #if TIKU_SHELL_CMD_H264
 #include "commands/tiku_shell_cmd_h264.h"
 #endif
@@ -678,7 +681,11 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
                 tiku_shell_cmd_reclaim},
 #endif
 #if TIKU_SHELL_CMD_FAT
-    {"fat",     "FAT32 on the eMMC: mount|ls|hash|runs", tiku_shell_cmd_fat},
+#if (TIKU_P4_SDCARD_ENABLE + 0)
+    {"fat",     "FAT32 on SD: mount|ls|read|cat", tiku_shell_cmd_fat},
+#else
+    {"fat",     "FAT32 on eMMC: mount|ls|hash|runs", tiku_shell_cmd_fat},
+#endif
 #endif
 #if (TIKU_DRV_PSRAM_ENABLE + 0)
 #if defined(TIKU_EXP_LLM)
@@ -710,6 +717,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_MIC
     {"mic",     "PDM microphone capture", tiku_shell_cmd_mic},
+#endif
+#if TIKU_SHELL_CMD_SD
+    {"sd",      "Read-only card probe", tiku_shell_cmd_sd},
 #endif
 #if TIKU_SHELL_CMD_H264
     {"h264",    "H.264 encoder test stream",   tiku_shell_cmd_h264},

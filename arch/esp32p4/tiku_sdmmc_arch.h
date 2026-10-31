@@ -55,4 +55,8 @@ void tiku_p4_sdmmc_peer_enable(uint8_t enabled);
 void tiku_p4_sdmmc_peer_recovery(uint8_t recovery);
 /** @brief Copy cached observations without command execution. */
 void tiku_p4_sdmmc_status(tiku_p4_sdmmc_status_t *);
+/** @brief Lease the idle controller for a synchronous slot0 probe; BUSY changes nothing. */
+tiku_ipc_err_t tiku_p4_sdmmc_card_claim(void);
+/** @brief Release the slot0 lease after restoring registers and stopping its transfer. */
+void tiku_p4_sdmmc_card_release(void);
 #endif

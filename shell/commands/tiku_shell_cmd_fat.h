@@ -5,8 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_shell_cmd_fat.h - "fat" command: read and stage files from a FAT32
- * volume on the eMMC.
+ * tiku_shell_cmd_fat.h - FAT32 file commands for Apollo eMMC and P4 SD cards.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,14 +16,16 @@
 #include <stdint.h>
 
 /**
- * @brief "fat" command: read the FAT32 volume on the eMMC.
+ * @brief "fat" command: read a FAT32 volume on eMMC or an SD card.
  *
- * Subcommands: mount, ls [path], hash <path>, runs <path> and, with
- * TIKU_DRV_PSRAM_ENABLE, stage <path>.  All but mount need `fat mount` first.
+ * Apollo subcommands: mount, ls [path], hash <path>, runs <path> and, with
+ * TIKU_DRV_PSRAM_ENABLE, stage <path>. Apollo file commands need `fat mount` first.
  *
  * @param argc  Argument count
  * @param argv  Argument vector
- * @note Defined only when TIKU_SHELL_CMD_FAT is set (eMMC builds).
+ * @note P4 SD builds provide mount, ls [path [entry]], and read|cat <path>
+ * [offset [bytes]]. Each P4 command opens and closes its own read-only session.
+ * @note Defined only when TIKU_SHELL_CMD_FAT is set.
  */
 void tiku_shell_cmd_fat(uint8_t argc, const char *argv[]);
 

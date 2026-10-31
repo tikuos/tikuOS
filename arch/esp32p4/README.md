@@ -565,6 +565,96 @@ refuse them.
 TikuBench's `coproc` and `lpcore` suites and the `deep-sleep-wake`,
 `light-sleep` and `hibernate` kernel categories run on `firebeetle2_p4`.
 
+### Read-only microSD probe
+
+`TIKU_P4_SDCARD_ENABLE=1` adds `sd probe` to FireBeetle 2 firmware built
+with `TIKU_SDIO_C6_ENABLE=1`. It identifies SDHC/SDXC cards on slot 0 at
+400 kHz in one-bit mode, reads the CID/CSD and capacity, and examines the
+partition table and filesystem boot sectors. GPIO39–42 carry data, GPIO43
+the clock, GPIO44 commands, and GPIO45 enables card power when low. LDO
+channel 4 supplies the 3.3 V I/O bank and pull-ups.
+
+The probe leases the idle SDMMC controller and reads one sector through
+the driver's 4 KiB SRAM DMA stage. The shell advances pending C6 transfers through their owner before
+trying the lease again. A busy controller returns `sd: controller busy`.
+Probe completion restores controller registers, pad routing and LDO state;
+a transfer that cannot be stopped retains the lease until reboot.
+
+The partition parser accepts primary MBR partitions, whole-device volumes,
+and a primary GPT with checked header and entry-array CRCs. It bounds reads
+by the CSD capacity and rejects overlapping partitions. Its limits are
+512-byte media sectors, 128 GPT entries of 128 bytes, and 16 populated
+partitions. Extended MBR chains and other GPT entry layouts report an
+unsupported result.
+
+FAT12/16/32 and exFAT identification checks boot-sector geometry. Apple MBR
+partitions and unrecognized GPT partitions also get an HFS+/HFSX header
+check at byte 1024; HFS and NTFS are reported by signature. This does not
+mount a filesystem or validate
+allocation tables, directory entries, files, or the exFAT boot-region
+checksum. Probe sessions keep write authorization disabled and issue
+identification and single-block read commands. The separate block API
+requires an explicit writable extent; it provides no erase or voltage-switch
+operation.
+
+```text
+sd probe
+```
+
+### FAT32 files on microSD
+
+The SD build also provides `fat mount`, `fat ls [path [entry]]`, and
+`fat read|cat <path> [offset [bytes]]`. It uses the read-only FAT32 parser
+shared with Apollo510. The media probe selects the first FAT32 volume
+with valid header geometry from a primary MBR, primary GPT, or whole-device
+filesystem. Each command identifies the card, validates the volume and
+releases the controller after its operation. `fat mount` reports geometry;
+it does not retain an open controller session.
+
+`fat ls` prints at most 32 entries and reports the next entry offset when
+the page is full. The starting entry is limited to 512. `fat read` prints
+hexadecimal bytes; `fat cat` prints text with control bytes escaped, except
+newline and tab. File windows contain at most 512 bytes. Each command has
+a budget of 64 physical sector reads and 512 sector requests, including
+cache hits. Long directory or cluster-chain walks can exhaust that budget
+and report an incomplete operation. File reads do not validate the whole
+allocation chain.
+
+The build publishes a read-only `/sd` directory at boot. Applications use
+`tiku_vfs_read_at()` for binary file windows and the full 32-bit file size;
+each call returns at most 512 bytes. `tiku_vfs_read()` returns `E2BIG` when
+its requested prefix needs more than one window or the file length exceeds
+`INT_MAX`. The service in `services/storage/tiku_sd_fat.h` also provides
+file windows, geometry, exact directory lookup and paged directory entries.
+It releases the controller before returning data or invoking VFS listing
+callbacks. It performs no card access during namespace assembly.
+
+`ls /sd` and nested directory listings return at most 32 entries. A listing
+with further entries or a name outside the VFS path limit returns `E2BIG`;
+use `fat ls <path> <entry>` for subsequent pages. Empty directories have an
+exact type lookup. `/sys/sd` reports the result, filesystem, budget limit
+and controller restoration status of the most recent VFS SD operation.
+Unsupported media returns `ENOTSUP`, controller contention returns `EBUSY`,
+and writes and unlink operations return `EACCES` for callers with filesystem
+capability. A listing failure is returned to its caller, including failures
+after partial output. File-read buffers must be discarded after an error.
+
+The computer can populate FAT32 files through a card reader. TikuOS reads
+them after insertion. The FAT32 commands do not write or format volumes. The P4 USB
+mass-storage implementation exposes its RAM disk, not this card. FAT32
+files are limited to 4 GiB minus one byte. HFS+, exFAT and FAT12/16 volumes
+are identified by `sd probe` but rejected by the FAT32 file commands.
+
+```text
+fat mount
+fat ls /
+fat cat /NOTE.TXT 0 128
+fat read /DATA.BIN 512 64
+ls /sd
+cat /sd/NOTE.TXT
+cat /sys/sd
+```
+
 ### Qualification limits
 
 Normal firmware, files, BASIC, PSRAM attachment, clock persistence through
@@ -577,7 +667,7 @@ lowered to trip it. Physical BOOT release/power cycling requires local access.
 On the Olimex all 55 GPIO inputs can be observed through read-only nodes;
 direction/output changes and GPIO IRQs are refused because its board header
 reserves every pad. The FireBeetle 2 drives its free pads (above).
-Ethernet, microSD, USB host, HDMI, audio and camera drivers are not provided
+Ethernet, USB host, HDMI, audio and camera drivers are not provided
 by this profile. Their wiring and attached accessories require confirmation
 before external pins or power rails are driven. FireBeetle 2 Wi-Fi is available
 through the opt-in [C6 IPC Wi-Fi driver](../../drivers/wifi/ipc/README.md).

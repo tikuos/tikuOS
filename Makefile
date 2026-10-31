@@ -2608,6 +2608,29 @@ endif
 ifneq ($(filter arch/esp32p4/tiku_coproc_arch.c arch/ra8p1/tiku_coproc_arch.c arch/nordic/tiku_coproc_arch.c,$(SRCS)),)
 SRCS += interfaces/coproc/tiku_coproc_ipc.c services/ipc/tiku_ipc_coproc.c
 endif
+ifeq ($(TIKU_SHELL_CMD_SD),1)
+ifneq ($(TIKU_P4_SDCARD_ENABLE),1)
+$(warning sd command requires TIKU_P4_SDCARD_ENABLE=1; command disabled)
+endif
+endif
+ifeq ($(TIKU_SHELL_CMD_FAT),1)
+ifeq ($(filter 1,$(TIKU_DRV_EMMC_ENABLE) $(TIKU_P4_SDCARD_ENABLE)),)
+$(warning fat command requires eMMC or P4 SD support; command disabled)
+endif
+endif
+ifeq ($(TIKU_P4_SDCARD_ENABLE),1)
+ifneq ($(MCU):$(P4_PROFILE):$(BOARD):$(TIKU_SDIO_C6_ENABLE),esp32p4:firmware:firebeetle2_esp32p4:1)
+$(error TIKU_P4_SDCARD_ENABLE=1 requires FireBeetle 2 P4 firmware with TIKU_SDIO_C6_ENABLE=1)
+endif
+CFLAGS += -DTIKU_P4_SDCARD_ENABLE=1 -DTIKU_SD_FAT_ENABLE=1
+SRCS += arch/esp32p4/tiku_sdcard_arch.c kernel/fs/tiku_media_probe.c
+SRCS += kernel/fs/tiku_fat.c services/storage/tiku_sd_fat.c services/storage/tiku_sd_vfs.c
+ifeq ($(TIKU_SHELL_ENABLE),1)
+SRCS += shell/commands/tiku_shell_cmd_sd.c
+SRCS += shell/commands/tiku_shell_cmd_sd_fat.c
+endif
+endif
+
 ifeq ($(TIKU_SDIO_C6_ENABLE),1)
 ifneq ($(TIKU_PLATFORM)$(BOARD),esp32p4firebeetle2_esp32p4)
 $(error TIKU_SDIO_C6_ENABLE=1 requires the FireBeetle 2 ESP32-P4 firmware)

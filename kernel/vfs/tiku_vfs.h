@@ -294,7 +294,7 @@ typedef void (*tiku_vfs_dyn_list_cb)(const char *name, void *ctx);
 
 /** @brief Runtime child operations for a dynamic directory. */
 typedef struct tiku_vfs_dynops {
-    /** Enumerate every child by name. */
+    /** Enumerate children by name; list_checked takes precedence. */
     void (*list)  (tiku_vfs_dyn_list_cb cb, void *ctx);
     /** Read a child into at most max bytes; its full length, or a negative
      *  status that tiku_vfs_read() returns unchanged (TIKU_VFS_ENOENT: no
@@ -314,6 +314,12 @@ typedef struct tiku_vfs_dynops {
      *  a negative status.  NULL: tiku_vfs_read_at() reads through read(). */
     int  (*read_at)(const char *name, uint32_t offset, char *buf, size_t max,
                     uint32_t *total);
+    /** Optional directory enumeration with a status result. Takes precedence
+     * over list_dir/list; a negative result also marks partial output. */
+    int (*list_checked)(const char *prefix, tiku_vfs_dyn_list_cb cb, void *ctx);
+    /** Optional exact type lookup: 1 directory, 0 file, negative status. */
+    int (*is_dir)(const char *name);
+    uint8_t read_only; /**< Refuse writes/unlinks and mark listed files read-only. */
 } tiku_vfs_dynops_t;
 
 /*---------------------------------------------------------------------------*/
@@ -369,13 +375,16 @@ void tiku_vfs_init(const tiku_vfs_node_t *root);
  *
  * The default fits the driver registry: /sys/drivers, one /dev/<class>
  * directory for each of the eight driver classes, and eight drivers,
- * plus four optional providers selected by boot.
+ * plus optional providers selected by boot, IPC and SD FAT.
  */
+#ifndef TIKU_SD_FAT_ENABLE
+#define TIKU_SD_FAT_ENABLE 0
+#endif
 #ifndef TIKU_VFS_MOUNT_MAX
 #if (TIKU_IPC_ENABLE + 0)
-#define TIKU_VFS_MOUNT_MAX 23
+#define TIKU_VFS_MOUNT_MAX (23 + 2 * TIKU_SD_FAT_ENABLE)
 #else
-#define TIKU_VFS_MOUNT_MAX 22
+#define TIKU_VFS_MOUNT_MAX (22 + 2 * TIKU_SD_FAT_ENABLE)
 #endif
 #endif
 
@@ -675,20 +684,22 @@ int tiku_vfs_unlink(const char *path);
  * @brief List directory contents
  *
  * Static children and mounts come first, then a dynamic directory's children.
- * Under a store with list_dir, every sub-path lists as a directory.
+ * Legacy list_dir stores accept sub-paths as directories; is_dir and
+ * list_checked providers return exact type and enumeration errors.
  *
  * @param path      Absolute path to a DIR node
  * @param callback  Called once per child; NULL only tests the path
  * @param ctx       User context passed to callback
- * @return 0 on success, -1 on error (not found or not a directory)
+ * @return 0 on success, a checked provider's negative status, or -1 for an
+ *         unresolved directory. A negative result may follow partial output.
  */
 int tiku_vfs_list(const char *path, tiku_vfs_list_fn callback, void *ctx);
 
 /**
  * @brief Is @p path a directory?
  *
- * True for a static DIR node and for a virtual sub-folder of a dynamic store
- * (path-as-name): a path with at least one child under it, or an mkdir marker.
+ * True for a static directory or a provider's exact is_dir result.
+ * Legacy stores use a mkdir marker or children under the path.
  * False for a file or a non-existent path.
  *
  * @return 1 if @p path is a directory, 0 otherwise.

@@ -41,7 +41,9 @@ is a static `/data` child ahead of the dynamic files; a runtime mount under
 a dynamic directory is refused (EACCES).  An invalid configuration, a
 failed mount or a failed NVM relock leaves no root published and halts
 boot before the drivers start.  The mount table has `TIKU_VFS_MOUNT_MAX`
-(22) entries: 17 for the driver registry and five for the providers.
+entries: 22 by default, one additional slot for IPC and two for SD FAT
+providers. Seventeen slots cover the driver registry; five cover the other
+boot providers.
 Subtree hardware initialization runs once; a later call rebuilds the
 namespace.  `tiku_boot_vfs_restore()` rebuilds it and remounts the drivers
 without reinitializing hardware, shell state or the GUI channel.
@@ -66,6 +68,19 @@ without reinitializing hardware, shell state or the GUI channel.
 3. Add the `.c` to the VFS block of the root `Makefile`.
 4. A module with boot-time setup gets an init function called from
    `tiku_vfs_tree_init()` (boot, dev and sys are the examples).
+
+## Removable read-only stores
+
+A dynamic directory can set `read_only` to refuse writes and unlink and
+render listed files without a write handler. `list_checked` takes precedence
+over `list_dir` and `list`; its negative result reaches `tiku_vfs_list()`,
+including when some entries have already been emitted. `is_dir` resolves an
+exact child type, including empty directories, without probing file contents.
+Existing providers can leave these optional fields zero.
+
+The SD FAT service publishes `/sd` and `/sys/sd` through boot providers when
+`TIKU_SD_FAT_ENABLE=1`. The core holds their nodes; the service owns media
+access and its bounded read and directory-page operations.
 
 ## Watch
 

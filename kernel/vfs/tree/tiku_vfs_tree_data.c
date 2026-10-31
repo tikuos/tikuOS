@@ -625,8 +625,8 @@ data_dyn_read_at(const char *name, uint32_t offset, char *buf, size_t max,
 }
 
 static const tiku_vfs_dynops_t data_dynops = {
-    data_dyn_list, data_dyn_read, data_dyn_write, data_dyn_unlink,
-    data_dyn_list_dir, data_dyn_read_at
+    .list=data_dyn_list, .read=data_dyn_read, .write=data_dyn_write,
+    .unlink=data_dyn_unlink, .list_dir=data_dyn_list_dir, .read_at=data_dyn_read_at
 };
 
 /*---------------------------------------------------------------------------*/
