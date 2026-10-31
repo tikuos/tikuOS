@@ -401,7 +401,7 @@ of each; `diag peek <hex> [words]` reads memory.
 | --- | --- |
 | HP SRAM, 768 KiB physical | 572,368 bytes after excluding ROM workspace and the 128 KiB L2 cache |
 | `0x4ff00000`–`0x4ff2bbd0` | Internal code/statics, durable SRAM mirror, separate retained data; remaining tail is allocator span 1 |
-| `0x4ff40000`–`0x4ff9bfc0` | Allocator span 0: 376,768 bytes |
+| `0x4ff40000`–`0x4ff9bfc0` | 376,768 bytes shared by device/network staging (up to 64 KiB) and allocator span 0 |
 | `0x4ff9bfc0`–`0x4ffa0000` | 64-byte guard and 16 KiB foreground stack |
 | PSRAM at `0x48000000` | 32 MiB mapped, 200 MHz under a 360 MHz CPU, volatile; external requests can allocate it; supplied by LDO VO2 at 1.8 V, which the PSRAM start enables |
 | Flash `0x000000`–`0x400000` | Reserved boot/code area, including the paired XIP window at offset `0x100000` |
@@ -580,9 +580,16 @@ reserves every pad. The FireBeetle 2 drives its free pads (above).
 Ethernet, microSD, USB host, HDMI, audio and camera drivers are not provided
 by this profile. Their wiring and attached accessories require confirmation
 before external pins or power rails are driven. FireBeetle 2 Wi-Fi is available
-through the opt-in [C6 IPC station driver](../../drivers/wifi/ipc/README.md).
+through the opt-in [C6 IPC Wi-Fi driver](../../drivers/wifi/ipc/README.md).
 It runs the IPv4 stack on P4 and carries Ethernet frames through the existing
-SDIO mailbox. The [BLE IPC driver](../../drivers/ble/ipc/README.md) runs the
+SDIO mailbox. Station mode and a four-client open/WPA2/WPA3 access point
+share the radio claim and can run simultaneously. AP mode serves four DHCP
+leases at `192.168.4.1/24`; `wifi route on` enables IPv4 NAT and DNS forwarding
+in simultaneous mode. `wifi save PASSPHRASE` encrypts both profiles;
+`wifi unlock PASSPHRASE` restores them after reboot. The record remains
+locked until that command succeeds. `wifi connect3` and `wifi ap start3` select
+SAE H2E group 19 with required PMF. Secured APs renew group keys every hour.
+The [BLE IPC driver](../../drivers/ble/ipc/README.md) runs the
 Bluetooth host on P4 and carries HCI to the native C6 controller through
 another mailbox endpoint. CPU1 jobs are not enabled. Do not
 interpret this as complete board-peripheral support.

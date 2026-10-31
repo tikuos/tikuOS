@@ -137,6 +137,8 @@ tiku_shell_history_record(const char *line)
     uint8_t new_count;
     char buf[TIKU_SHELL_LINE_SIZE];
 
+    /* Wi-Fi commands can carry network and vault passwords. */
+    if (line && strstr(line, "wifi")) return;
     hist_ensure_init();
 
     if (line == NULL || line[0] == '\0') {

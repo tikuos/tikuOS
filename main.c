@@ -30,6 +30,10 @@
 
 #include "boot/tiku_boot_vfs.h"
 
+#if TIKU_DRV_WIFI_IPC_ENABLE && TIKU_KITS_NET_WIFI_ENABLE
+#include "tikukits/net/wifi/tiku_kits_net_wifi.h"
+#endif
+
 #if TIKU_SHELL_ENABLE
 #include "shell/tiku_shell.h"
 #endif
@@ -145,6 +149,10 @@ int main(void) {
     extern void tiku_drv_init_all(void);
     tiku_drv_init_all();
   }
+
+#if TIKU_DRV_WIFI_IPC_ENABLE && TIKU_KITS_NET_WIFI_ENABLE
+  (void)tiku_kits_net_wifi_init();
+#endif
 
 #if TEST_ENABLE
   test_run_all();

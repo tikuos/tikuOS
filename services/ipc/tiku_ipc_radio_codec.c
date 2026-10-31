@@ -30,7 +30,7 @@ int tiku_radio_valid(const void *data, size_t length, uint8_t response)
         return 0;
     unsigned op = p[3] & 127u;
     return p[0] == 'R' && p[1] == 'W' && p[2] == TIKU_RADIO_VERSION &&
-           !!(p[3] & 128u) == !!response && op >= TIKU_RADIO_DISCOVER && op <= TIKU_RADIO_FORGET &&
+           !!(p[3] & 128u) == !!response && op >= TIKU_RADIO_DISCOVER && op <= TIKU_RADIO_MODE &&
            tiku_radio_get32(p + 4) && !p[14] && !p[15] && p[13] == length - TIKU_RADIO_HEADER &&
            (response ? p[12] <= TIKU_RADIO_FAILED : p[12] == 0) &&
            (op == TIKU_RADIO_CREDENTIAL || length <= TIKU_RADIO_CONTROL);

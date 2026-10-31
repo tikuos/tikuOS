@@ -11,9 +11,9 @@
  */
 #include "tiku_ipc_radio_frames.h"
 #include <string.h>
-tiku_ipc_err_t tiku_radio_frame_push(tiku_radio_frames_t *q, const void *p, uint16_t n)
+tiku_ipc_err_t tiku_radio_frame_push_if(tiku_radio_frames_t *q, uint8_t interface, const void *p, uint16_t n)
 {
-    if (!q || !p || n < 14 || n > TIKU_RADIO_FRAME_MAX)
+    if (!q || !p || interface > 1 || (interface && !q->tagged) || n < 14 || n > TIKU_RADIO_FRAME_MAX)
         return TIKU_IPC_INVALID;
     if (q->count == TIKU_RADIO_LOCAL_QUEUE) {
         q->drops++;
@@ -22,10 +22,13 @@ tiku_ipc_err_t tiku_radio_frame_push(tiku_radio_frames_t *q, const void *p, uint
     unsigned i = (q->head + q->count) % TIKU_RADIO_LOCAL_QUEUE;
     memcpy(q->data[i], p, n);
     q->length[i] = n;
+    q->interface[i] = interface;
     q->complete[i] = 1;
     q->count++;
     return TIKU_IPC_OK;
 }
+tiku_ipc_err_t tiku_radio_frame_push(tiku_radio_frames_t *q, const void *p, uint16_t n)
+{ return tiku_radio_frame_push_if(q, 0, p, n); }
 const uint8_t *tiku_radio_frame_peek(tiku_radio_frames_t *q, uint16_t *n)
 {
     if (!q || !n || !q->count || !q->complete[q->head])
@@ -94,6 +97,7 @@ tiku_ipc_err_t tiku_radio_frame_consume(void *context, const void *p, uint16_t n
     q->deadline = tiku_clock_time() + 2 * TIKU_CLOCK_SECOND;
     if (next.offset == next.total) {
         q->length[q->assembly] = (uint16_t)next.total;
+        q->interface[q->assembly] = q->tagged ? next.object & 1u : 0;
         q->complete[q->assembly] = 1;
         q->assembling = 0;
     }
@@ -146,11 +150,13 @@ void tiku_radio_sender_step(tiku_radio_sender_t *s, tiku_ipc_endpoint_t ep)
     if (!p)
         return;
     if (!s->active) {
-        if (s->serial == UINT32_MAX)
+        if (s->serial >= UINT32_MAX - 2)
             return;
-        if (tiku_ipc_stream_open(&s->stream, ep, s->serial + 1, length) != TIKU_IPC_OK)
+        uint32_t object = s->serial + 1;
+        if (s->frames.tagged) object = ((s->serial + 2) & ~1u) | s->frames.interface[s->frames.head];
+        if (tiku_ipc_stream_open(&s->stream, ep, object, length) != TIKU_IPC_OK)
             return;
-        s->serial++;
+        s->serial = object;
         s->active = 1;
         s->stream.discontinuity = 1;
     }

@@ -18,6 +18,12 @@
 #include <shell/tiku_shell.h>
 #include <kernel/timers/tiku_clock.h>
 #include <interfaces/wireless/tiku_wireless.h>
+#if TIKU_WIRELESS_AP_ENABLE
+#include <interfaces/wireless/tiku_wireless_ap.h>
+#if TIKU_DRV_WIFI_IPC_ENABLE
+#include <tikukits/net/wifi/tiku_kits_net_router.h>
+#endif
+#endif
 
 #if defined(TIKU_KITS_NET_WIFI_ENABLE)
 /* `wifi up` brings the net stack up over the joined radio with DHCP.  It
@@ -76,6 +82,18 @@ static void wifi_help(void)
     SHELL_PRINTF("wifi disconnect          Leave the current network\n");
     SHELL_PRINTF("wifi forget              Clear stored credentials "
                  "(disable cold-boot rejoin)\n");
+#if TIKU_WIRELESS_AP_ENABLE
+    SHELL_PRINTF("wifi ap start SSID PSK [channel]  Start WPA2/open AP\n");
+    SHELL_PRINTF("wifi ap start3 SSID PSK [channel] Start SAE/PMF AP (channel 1..11)\n");
+    SHELL_PRINTF("wifi ap stop | status    Stop AP or read its state\n");
+#endif
+#if TIKU_DRV_WIFI_IPC_ENABLE
+    SHELL_PRINTF("wifi dual on|off         Select simultaneous station/AP mode while idle\n");
+    SHELL_PRINTF("wifi route on|off|status Control AP IPv4 forwarding\n");
+    SHELL_PRINTF("wifi save PASSPHRASE     Encrypt active profiles (12..128 bytes)\n");
+    SHELL_PRINTF("wifi unlock PASSPHRASE   Unlock saved profiles after reboot\n");
+    SHELL_PRINTF("wifi saved               Show saved SSID and storage result\n");
+#endif
     SHELL_PRINTF("wifi help                This help\n");
 }
 
@@ -278,6 +296,13 @@ static void wifi_up(void)
         SHELL_PRINTF("wifi: could not install the WiFi link backend\n");
         return;
     }
+#if TIKU_WIRELESS_AP_ENABLE
+    tiku_wireless_ap_status_t ap;
+    if (!tiku_wireless_ap_status(&ap) && ap.active) {
+        SHELL_PRINTF("wifi: AP IP service at 192.168.4.1\n");
+        return;
+    }
+#endif
     /* DHCP binds UDP port 68; tiku_kits_net_udp_init() is idempotent. */
     tiku_kits_net_udp_init();
     tiku_kits_net_dhcp_init();
@@ -313,6 +338,55 @@ static void wifi_power(uint8_t on)
     }
 }
 
+#if TIKU_WIRELESS_AP_ENABLE
+/** @brief Start or stop an AP, or print its channel and client count. */
+static void wifi_ap(uint8_t argc, const char *argv[])
+{
+    int r;
+    if (argc == 3 && str_eq(argv[2], "status")) {
+        tiku_wireless_ap_status_t a;
+        if (!tiku_wireless_ap_status(&a))
+            SHELL_PRINTF("AP: %s channel=%u clients=%u auth=%s\n", a.active ? "up" : "down",
+                         a.channel, a.clients, a.secured == 2 ? "SAE/PMF" : a.secured ? "WPA2" : "open");
+        return;
+    }
+    if (argc == 3 && str_eq(argv[2], "stop")) r = tiku_wireless_ap_stop();
+    else if ((argc == 5 || argc == 6) &&
+             (str_eq(argv[2], "start") || str_eq(argv[2], "start3"))) {
+        unsigned channel = 6;
+        if (argc == 6) {
+            channel = 0;
+            const char *p = argv[5];
+            if (!*p) { wifi_help(); return; }
+            while (*p) {
+                if (*p < '0' || *p > '9' || channel > 11) { wifi_help(); return; }
+                channel = channel * 10 + (unsigned)(*p++ - '0');
+            }
+            if (!channel || channel > 11) { wifi_help(); return; }
+        }
+        r = tiku_wireless_ap_start_auth(argv[3], argv[4], (uint8_t)channel,
+            str_eq(argv[2], "start3") ? TIKU_WIRELESS_AUTH_WPA3_SAE : TIKU_WIRELESS_AUTH_WPA2_PSK);
+#if TIKU_DRV_WIFI_IPC_ENABLE && TIKU_KITS_NET_WIFI_ENABLE
+        if (!r) r = tiku_kits_net_wifi_init();
+#endif
+    } else { wifi_help(); return; }
+    SHELL_PRINTF("wifi: AP request %s (rc=%d)\n", r ? "failed" : "queued", r);
+}
+#endif
+#if TIKU_DRV_WIFI_IPC_ENABLE
+/** @brief Print the saved profile without its passphrase. */
+static void wifi_saved(void)
+{
+    tiku_wireless_saved_profile_t p;
+    if (tiku_wireless_saved_profile(&p)) return;
+    SHELL_PRINTF("Saved: %s", !p.valid ? "none" : !p.ssid[0] ? "encrypted (locked)" : "encrypted ");
+    if (p.valid) for (unsigned i = 0; i < 32 && p.ssid[i]; i++)
+        tiku_shell_io_putc(p.ssid[i] >= 32 && p.ssid[i] < 127 ? p.ssid[i] : '.');
+    SHELL_PRINTF(" mode=%s channel=%u store_result=%d\n",
+                 p.dual ? "dual" : p.access_point ? "ap" : "station", p.channel, p.last_store_result);
+}
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* PUBLIC HANDLER                                                            */
 /*---------------------------------------------------------------------------*/
@@ -321,6 +395,34 @@ void
 tiku_shell_cmd_wifi(uint8_t argc, const char *argv[])
 {
     if (argc < 2U) { wifi_help(); return; }
+#if TIKU_WIRELESS_AP_ENABLE
+    if (str_eq(argv[1], "ap")) { wifi_ap(argc, argv); return; }
+#endif
+#if TIKU_DRV_WIFI_IPC_ENABLE
+    if (str_eq(argv[1], "dual") && argc == 3) {
+        int rc = str_eq(argv[2], "on") ? tiku_wireless_dual(1) :
+                 str_eq(argv[2], "off") ? tiku_wireless_dual(0) : TIKU_DRV_ERR_INVALID;
+        SHELL_PRINTF("wifi: dual request rc=%d\n", rc); return;
+    }
+#if defined(TIKU_KITS_NET_WIFI_ENABLE)
+    if (str_eq(argv[1], "route") && argc == 3) {
+        if (str_eq(argv[2], "on")) tiku_kits_net_router_enable(1);
+        else if (str_eq(argv[2], "off")) tiku_kits_net_router_enable(0);
+        else if (!str_eq(argv[2], "status")) { wifi_help(); return; }
+        uint8_t on, up, count; uint32_t drops;
+        tiku_kits_net_router_status(&on, &up, &count, &drops);
+        SHELL_PRINTF("wifi: route=%u uplink=%u flows=%u drops=%lu\n", on, up, count, (unsigned long)drops);
+        return;
+    }
+#endif
+    if ((str_eq(argv[1], "save") || str_eq(argv[1], "unlock")) && argc == 3) {
+        int r = str_eq(argv[1], "save") ? tiku_wireless_save_encrypted(argv[2]) :
+                tiku_wireless_unlock_profile(argv[2]);
+        SHELL_PRINTF("wifi: profile %s (rc=%d)\n", r ? "failed" : "complete", r);
+        return;
+    }
+    if (str_eq(argv[1], "saved") && argc == 2) { wifi_saved(); return; }
+#endif
 
 #if defined(TIKU_KITS_NET_WIFI_ENABLE)
     if (str_eq(argv[1], "up")) { wifi_up(); return; }

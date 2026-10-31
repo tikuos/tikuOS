@@ -196,6 +196,9 @@ typedef struct {
     uint8_t valid;                 /**< 1 if a profile is stored           */
     uint8_t auth;                  /**< its tiku_wireless_auth_t           */
     char    ssid[TIKU_WIRELESS_SSID_MAX + 1U]; /**< NUL-terminated         */
+    uint8_t access_point;          /**< 1 for an AP profile, 0 for a station. */
+    uint8_t channel;               /**< Saved AP channel; zero for a station. */
+    uint8_t dual;                  /**< 1 when simultaneous mode is saved. */
     int     last_store_result;     /**< TIKU_DRV_OK, or the last failed
                                     *   save or forget this boot          */
 } tiku_wireless_saved_profile_t;

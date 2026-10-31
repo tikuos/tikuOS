@@ -70,11 +70,13 @@ SECTIONS {
     __datastart = ORIGIN(LOW);
     .bss (NOLOAD) : ALIGN(16) {
         __bss_start = .;
-        EXCLUDE_FILE (*tiku_bt.o *tiku_drv_ble_ipc.o *tiku_ble_serial.o *tiku_ble_adv_hci.o *test_radio.o) *(.bss .bss.* .sbss .sbss.* COMMON)
+        EXCLUDE_FILE (*/tikukits/net/*.o *tiku_drv_wifi_ipc.o *tiku_drv_ble_ipc.o *tiku_ble_serial.o *tiku_ble_adv_hci.o *test_radio.o) *(.bss .bss.* .sbss .sbss.* COMMON)
         . = ALIGN(16);
         __uninit_start = .;
         KEEP(*(.persistent.layout))
-        KEEP(*(.persistent .persistent.*))
+        /* Append Wi-Fi settings without moving existing durable records. */
+        KEEP(*(EXCLUDE_FILE (*tiku_drv_wifi_ipc.o) .persistent .persistent.*))
+        KEEP(*tiku_drv_wifi_ipc.o(.persistent .persistent.*))
         __uninit_end = .;
         . = ALIGN(16);
         __bss_end = .;
@@ -106,7 +108,8 @@ SECTIONS {
         *(.p4.ipc.sdmmc_descriptor)
         __sdmmc_descriptor_end = .;
         *(.p4.ipc .p4.ipc.*)
-        *tiku_bt.o(.bss .bss.* .sbss .sbss.*)
+        *tiku_drv_wifi_ipc.o(.bss .bss.* .sbss .sbss.*)
+        */tikukits/net/*.o(.bss .bss.* .sbss .sbss.*)
         *tiku_drv_ble_ipc.o(.bss .bss.* .sbss .sbss.*)
         *tiku_ble_serial.o(.bss .bss.* .sbss .sbss.*)
         *tiku_ble_adv_hci.o(.bss .bss.* .sbss .sbss.*)
@@ -126,6 +129,7 @@ SECTIONS {
     INCLUDE arch/common/tiku_sram_layout.ld
     ASSERT(__tier_sram_extra_start <= __tier_sram_extra_end,
            "P4 low SRAM statics overlap ROM workspace")
+    ASSERT(SIZEOF(.ipc_device) <= 64K, "P4 device staging exceeds firmware validator budget")
     ASSERT(SIZEOF(.fault_record) == 64, "P4 fault record must be 64 bytes")
     ASSERT(__uninit_start == tiku_layout_pin, "P4 layout record must open mirror")
     ASSERT(__uninit_end - __uninit_start <= 16K - 16,

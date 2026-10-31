@@ -11,6 +11,7 @@
  */
 #include "tiku_ipc_radio.h"
 #include <interfaces/wireless/tiku_wireless.h>
+#include <interfaces/wireless/tiku_wireless_ap.h>
 #include <string.h>
 #include <tikukits/crypto/sha256/tiku_kits_crypto_sha256.h>
 #include <kernel/timers/tiku_timer.h>
@@ -48,7 +49,10 @@ static tiku_ipc_err_t credentials(void *unused, const void *data, uint16_t lengt
         tiku_radio_get32(p + 8) != claim || length < 19)
         return TIKU_IPC_INVALID;
     unsigned sl = p[17], pl = p[18];
-    if (p[16] || !sl || sl > 32 || (pl && (pl < 8 || pl > 63)) || length != 19 + sl + pl ||
+    if (p[16] > TIKU_WIRELESS_AUTH_WPA3_SAE ||
+        (p[16] && !(TIKU_RADIO_CAPABILITIES & TIKU_RADIO_CAP_SAE_PMF)) ||
+        !sl || sl > 32 || pl > 63 || (p[16] ? !pl : (pl && pl < 8)) ||
+        length != 19 + sl + pl ||
         memchr(p + 19, 0, sl + pl))
         return TIKU_IPC_INVALID;
     uint32_t id = tiku_radio_get32(p + 4);
@@ -70,12 +74,15 @@ static tiku_ipc_err_t credentials(void *unused, const void *data, uint16_t lengt
     return TIKU_IPC_OK;
 }
 /** @brief Admit peer Ethernet chunks only while the claimed station is joined. */
+static uint8_t dual_mode;
 static tiku_ipc_err_t frame_input(void *unused, const void *data, uint16_t length)
 {
     tiku_wireless_status_t status;
     (void)unused;
-    if (!owned() || tiku_wireless_status(&status) || status.link_state != TIKU_WIRELESS_LINK_JOINED)
-        return TIKU_IPC_DOWN;
+    tiku_wireless_ap_status_t a = {0};
+    if (dual_mode) (void)tiku_wireless_ap_status(&a);
+    if (!owned() || tiku_wireless_status(&status) ||
+        (status.link_state != TIKU_WIRELESS_LINK_JOINED && !a.active)) return TIKU_IPC_DOWN;
     return tiku_radio_frame_consume(&receiver, data, length);
 }
 const tiku_ipc_wire_sink_t tiku_radio_control_sink = {credentials, NULL, NULL};
@@ -86,6 +93,12 @@ static void radio_rx(const uint8_t *p, uint16_t n, void *unused)
     (void)unused;
     if (owned())
         (void)tiku_radio_frame_push(&sender.frames, p, n);
+}
+/** @brief Copy interface-tagged packets while the current claim owns the radio. */
+static void radio_rx_if(uint8_t interface, const uint8_t *p, uint16_t n, void *unused)
+{
+    (void)unused;
+    if (owned()) (void)tiku_radio_frame_push_if(&sender.frames, interface, p, n);
 }
 /** @brief Translate public driver outcomes to versioned service results. */
 static uint8_t result(int r)
@@ -127,6 +140,8 @@ static unsigned status_page(uint8_t *p, uint8_t page)
 static void revoke(void)
 {
     claim = 0;
+    dual_mode = 0;
+    sender.frames.tagged = 0;
     shutting_down = 1;
     (void)tiku_wireless_set_rx(NULL, NULL);
     tiku_radio_sender_cancel(&sender, data_endpoint);
@@ -135,7 +150,7 @@ static void revoke(void)
     (void)tiku_wireless_power(0);
     tiku_radio_wipe(credential, sizeof credential);
     credential_length = 0;
-    memset(&receiver, 0, sizeof receiver);
+    memset(&receiver, 0, sizeof receiver); receiver.tagged = dual_mode;
     shutting_down = 0;
 }
 /** @brief Execute one validated request and cache its terminal response. */
@@ -187,6 +202,7 @@ static void execute(const uint8_t *p, uint16_t length)
                 break;
             }
             (void)tiku_wireless_power(0);
+            dual_mode = 0; sender.frames.tagged = receiver.tagged = 0;
             claim = ++generation;
             session = control_wire->local_session;
             expires = tiku_clock_time() + TIKU_RADIO_LEASE_SECONDS * TIKU_CLOCK_SECOND;
@@ -219,9 +235,11 @@ static void execute(const uint8_t *p, uint16_t length)
                 break;
             }
             r = result(tiku_wireless_power(p[16]));
-            if (!p[16]) {
+            if (!p[16] && !r) {
+                dual_mode = 0; sender.frames.tagged = 0;
+                (void)tiku_wireless_set_rx(radio_rx, NULL);
                 tiku_radio_sender_cancel(&sender, data_endpoint);
-                memset(&receiver, 0, sizeof receiver);
+                memset(&receiver, 0, sizeof receiver); receiver.tagged = dual_mode;
             }
             break;
         case TIKU_RADIO_SCAN:
@@ -252,8 +270,38 @@ static void execute(const uint8_t *p, uint16_t length)
                 out = 42;
             }
             break;
+        case TIKU_RADIO_MODE:
+            if (n != 1 || p[16] > 1) { r = TIKU_RADIO_INVALID; break; }
+            if (sender.active || sender.frames.count || receiver.count) { r = TIKU_RADIO_BUSY; break; }
+            r = result(tiku_wireless_dual(p[16]));
+            if (!r) {
+                dual_mode = p[16]; sender.frames.tagged = receiver.tagged = dual_mode;
+                if (dual_mode) (void)tiku_wireless_set_rx_if(radio_rx_if, NULL);
+                else (void)tiku_wireless_set_rx(radio_rx, NULL);
+            }
+            break;
+        case TIKU_RADIO_SOFTAP_STATUS: {
+            tiku_wireless_ap_status_t a;
+            if (n) { r = TIKU_RADIO_INVALID; break; }
+            r = result(tiku_wireless_ap_status(&a));
+            if (!r) {
+                payload[0] = a.active; payload[1] = a.channel;
+                payload[2] = a.clients; payload[3] = a.secured; out = 4;
+                if (dual_mode) {
+                    r = result(tiku_wireless_ap_mac(payload + 4)); out = 10;
+                }
+            }
+            break;
+        }
+        case TIKU_RADIO_SOFTAP_STOP:
+            if (n) { r = TIKU_RADIO_INVALID; break; }
+            r = result(tiku_wireless_ap_stop());
+            tiku_radio_sender_cancel(&sender, data_endpoint);
+            memset(&receiver, 0, sizeof receiver); receiver.tagged = dual_mode;
+            break;
+        case TIKU_RADIO_SOFTAP_START:
         case TIKU_RADIO_CONNECT:
-            if (n || credential_id != id || !credential_length) {
+            if ((op == TIKU_RADIO_CONNECT ? n != 0 : (n != 1 || p[16] < 1 || p[16] > 11)) || credential_id != id || !credential_length) {
                 r = TIKU_RADIO_INVALID;
                 break;
             }
@@ -261,7 +309,8 @@ static void execute(const uint8_t *p, uint16_t length)
                 char ssid[33] = {0}, psk[64] = {0};
                 memcpy(ssid, credential + 19, credential[17]);
                 memcpy(psk, credential + 19 + credential[17], credential[18]);
-                r = result(tiku_wireless_connect(ssid, psk));
+                r = result(op == TIKU_RADIO_SOFTAP_START ? tiku_wireless_ap_start_auth(ssid, psk, p[16], credential[16])
+                                                         : tiku_wireless_connect_auth(ssid, psk, credential[16]));
                 tiku_radio_wipe(psk, sizeof psk);
                 tiku_radio_wipe(ssid, sizeof ssid);
                 tiku_radio_wipe(credential, sizeof credential);
@@ -336,21 +385,22 @@ TIKU_PROCESS_THREAD(radio_server, ev, data)
         if (owned()) {
             tiku_wireless_status_t status;
             (void)tiku_wireless_status(&status);
-            if (last_link == TIKU_WIRELESS_LINK_JOINED && status.link_state != last_link) {
+            if (!dual_mode && last_link == TIKU_WIRELESS_LINK_JOINED && status.link_state != last_link) {
                 tiku_radio_sender_cancel(&sender, data_endpoint);
-                memset(&receiver, 0, sizeof receiver);
+                memset(&receiver, 0, sizeof receiver); receiver.tagged = dual_mode;
                 if (data_wire && data_wire->initialized)
                     (void)tiku_ipc_wire_ops.reset(data_wire, data_wire->endpoint);
             }
             last_link = status.link_state;
             uint16_t n;
             const uint8_t *p = tiku_radio_frame_peek(&receiver, &n);
-            if (p && tiku_wireless_tx_eth(p, n) != TIKU_DRV_ERR_TIMEOUT)
+            if (p && (dual_mode ? tiku_wireless_tx_if(receiver.interface[receiver.head], p, n) :
+                      tiku_wireless_tx_eth(p, n)) != TIKU_DRV_ERR_TIMEOUT)
                 tiku_radio_frame_pop(&receiver);
             tiku_radio_frame_expire(&receiver, tiku_clock_time());
         }
         if (!owned() && !sender.active)
-            sender.frames = (tiku_radio_frames_t){0};
+            sender.frames = (tiku_radio_frames_t){.tagged = dual_mode};
         tiku_radio_sender_step(&sender, data_endpoint);
         tiku_timer_set_event(&timer, 1);
         TIKU_PROCESS_WAIT_EVENT();

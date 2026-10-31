@@ -34,7 +34,11 @@ enum {
     TIKU_RADIO_CREDENTIAL,
     TIKU_RADIO_CONNECT,
     TIKU_RADIO_DISCONNECT,
-    TIKU_RADIO_FORGET
+    TIKU_RADIO_FORGET,
+    TIKU_RADIO_SOFTAP_START,
+    TIKU_RADIO_SOFTAP_STOP,
+    TIKU_RADIO_SOFTAP_STATUS,
+    TIKU_RADIO_MODE
 };
 /** @brief Service results are independent of native driver error numbers. */
 enum {
@@ -45,8 +49,21 @@ enum {
     TIKU_RADIO_UNSUPPORTED,
     TIKU_RADIO_FAILED
 };
-/** @brief Station capabilities; persistent credentials and other radios are absent. */
-#define TIKU_RADIO_CAPABILITIES 0x00000003u
+/** @brief Open/WPA2 station support required by the P4 client. */
+#define TIKU_RADIO_CAP_STATION 0x00000003u
+/** @brief Open/WPA2 access point service. */
+#define TIKU_RADIO_CAP_SOFTAP 0x00000004u
+/** @brief SAE hash-to-element group 19 with required PMF, station and AP. */
+#define TIKU_RADIO_CAP_SAE_PMF 0x00000008u
+/** @brief Simultaneous STA/AP with interface ids in stream object low bits. */
+#define TIKU_RADIO_CAP_DUAL 0x00000010u
+/** @brief Four independent AP station handshakes. */
+#define TIKU_RADIO_CAP_MULTI_AP 0x00000020u
+#if TIKU_ESP_SAE_ENABLE
+#define TIKU_RADIO_CAPABILITIES (TIKU_RADIO_CAP_DUAL | TIKU_RADIO_CAP_MULTI_AP | TIKU_RADIO_CAP_STATION | TIKU_RADIO_CAP_SOFTAP | TIKU_RADIO_CAP_SAE_PMF)
+#else
+#define TIKU_RADIO_CAPABILITIES (TIKU_RADIO_CAP_DUAL | TIKU_RADIO_CAP_MULTI_AP | TIKU_RADIO_CAP_STATION | TIKU_RADIO_CAP_SOFTAP)
+#endif
 /** @brief Read a little-endian 32-bit word from four accessible bytes. */
 static inline uint32_t tiku_radio_get32(const uint8_t *p)
 {
