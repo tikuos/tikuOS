@@ -18,6 +18,10 @@
 #include "tiku_shell_cmd_util.h"
 #include <arch/esp32p4/tiku_pdm_arch.h>
 
+#if TIKU_MEDIA_FS_ENABLE && TIKU_P4_SDCARD_ENABLE
+#include <services/storage/tiku_media_record.h>
+#endif
+
 #define DEFAULT_RATE  16000u
 #define LEVEL_SAMPLES 512u            /* one of the driver's buffers */
 #define CHUNK         64u             /* samples a read, on the stack */
@@ -144,6 +148,21 @@ static void mic_dump(uint32_t want)
 
 void tiku_shell_cmd_mic(uint8_t argc, const char *argv[])
 {
+#if TIKU_MEDIA_FS_ENABLE && TIKU_P4_SDCARD_ENABLE
+    if ((argc == 4u || argc == 5u) && tiku_cmd_streq(argv[1], "record")) {
+        tiku_media_record_result_t result;
+        uint32_t seconds=tiku_cmd_parse_u32(argv[3]);
+        uint32_t rate=argc==5u?tiku_cmd_parse_u32(argv[4]):DEFAULT_RATE;
+        SHELL_PRINTF("mic: recording %lu seconds at %lu Hz to %s\n",
+                     (unsigned long)seconds,(unsigned long)rate,argv[2]);
+        int rc=tiku_media_record_wave(argv[2],seconds,rate,&result);
+        SHELL_PRINTF("mic: result=%d samples=%lu bytes=%lu elapsed_ms=%lu peak=%lu clipped=%lu overruns=%lu faults=%lu\n",
+                     rc,(unsigned long)result.samples,(unsigned long)result.bytes,
+                     (unsigned long)result.elapsed_ms,(unsigned long)result.peak,
+                     (unsigned long)result.clipped,(unsigned long)result.overruns,(unsigned long)result.faults);
+        return;
+    }
+#endif
     if (argc >= 2u && tiku_cmd_streq(argv[1], "start")) {
         mic_start(argc, argv);
     } else if (argc == 2u && tiku_cmd_streq(argv[1], "stop")) {
@@ -158,5 +177,8 @@ void tiku_shell_cmd_mic(uint8_t argc, const char *argv[])
     } else {
         SHELL_PRINTF("Usage: mic start [rate] [left|right|both]\n"
                      "       mic stop | level | stats | dump <samples>\n");
+#if TIKU_MEDIA_FS_ENABLE && TIKU_P4_SDCARD_ENABLE
+        SHELL_PRINTF("       mic record NAME SECONDS [rate] (mounted media, PSRAM)\n");
+#endif
     }
 }

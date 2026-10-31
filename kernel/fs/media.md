@@ -238,3 +238,58 @@ qualify a physical card's internal flash controller.
 
 The P4 USB console and Wi-Fi TCP service provide uploads, downloads and
 listing through [the computer transfer tool](../../services/storage/media-transfer.md).
+
+## Microphone recording
+
+The FireBeetle 2 P4 shell includes `mic record NAME SECONDS [rate]` when
+`TIKU_MEDIA_FS_ENABLE=1`, `TIKU_P4_SDCARD_ENABLE=1` and the microphone command
+are enabled. Mount the card, then run these commands in **TikuOS**:
+
+```text
+media mount
+mic record audio/microphone-60s.wav 60
+media stat audio/microphone-60s.wav
+ls /media/audio
+```
+
+The default rate is 16000 Hz; supported rates are 8000..39000 Hz. A recording
+contains exactly `SECONDS * rate` samples in a mono, signed 16-bit PCM WAV.
+One minute at 16 kHz occupies 1,920,044 bytes. The command reports the sample
+count, elapsed capture time, peak level, clipped samples and DMA error
+counters. Its duration is the requested sample count divided by the nominal
+sample rate; the hardware sample clock determines elapsed capture time.
+
+Capture runs synchronously and requires a stopped microphone and an unused
+file name. The recorder reserves the complete WAV size in PSRAM, rounded to
+four bytes, and the driver reserves an 8.5 KiB DMA ring in high SRAM. It
+consumes 4096 startup samples before retaining the recording. The watchdog
+is serviced during capture and storage; other shell commands wait until the
+recording operation returns.
+
+The microphone stops before SD writes begin. This keeps card write latency
+outside the capture interval. A reset or power loss during capture loses the
+PSRAM recording. After capture, the recorder writes and commits batches of
+at most 64 KiB through the native media service; finalization marks the WAV
+complete and records its SHA-256. A storage failure can leave an incomplete
+file with the requested name. A capture timeout or DMA overrun/fault creates
+no file. The recorder releases its PSRAM buffer and microphone on completion
+or capture failure.
+
+Download the completed WAV on the **computer**:
+
+```sh
+python3 tools/tiku_media_transfer.py --serial /dev/ttyACM0 get audio/microphone-60s.wav microphone-60s.wav
+```
+
+The host tool checks SHA-256 before publishing the local file. The same
+`get` command works through the Wi-Fi transport described in
+[computer transfers](../../services/storage/media-transfer.md).
+
+```sh
+make -C TikuBench/tests/host/kernel media-record
+```
+
+The host checks cover both SRAM span orders, WAV header and sample bytes,
+startup discard, allocation/start/read failures, DMA loss, refusal to overwrite
+and buffer cleanup. Mutation checks require altered WAV lengths, omitted
+capture-loss checks and shortened startup discard to fail these checks.

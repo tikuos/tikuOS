@@ -143,7 +143,6 @@ _Static_assert(sizeof(dma_desc_t) == 64u, "a descriptor fills a cache line");
 /* The ring lives in the SRAM tier's high span, taken at start and given
  * back at stop: no image carries its 8.5 KB among the low-SRAM statics. */
 #define RING_BYTES      (BUFS * sizeof(dma_desc_t) + BUFS * BUF_BYTES)
-#define RING_SPAN       1u                           /* 0x4ff40000 */
 #define RING_ARENA_ID   71u
 static tiku_arena_t ring_arena;
 static dma_desc_t *ring;
@@ -362,6 +361,25 @@ static int claim_pads(void)
     return TIKU_P4_PDM_OK;
 }
 
+/** @brief Reserve a cache-aligned ring from a high-SRAM span in either linker layout. */
+TIKU_P4_XIP_TEXT
+static int allocate_ring(void)
+{
+    const uint8_t *base;
+    tiku_mem_stats_t space;
+    if (tiku_tier_init() != TIKU_MEM_OK) return TIKU_P4_PDM_ERR_NOMEM;
+    for (unsigned i = 0; i < 256u; i++) {
+        if (tiku_tier_span_stats(TIKU_MEM_SRAM, (uint8_t)i, &base, &space) != TIKU_MEM_OK) break;
+        uintptr_t address = (uintptr_t)base;
+        if (address < 0x4ff40000u || address >= 0x4ffa0000u ||
+            space.total_bytes > 0x4ffa0000u - address) continue;
+        if (tiku_tier_arena_create_span(&ring_arena, TIKU_MEM_SRAM, (uint8_t)i,
+                                       RING_BYTES, 64u, RING_ARENA_ID) == TIKU_MEM_OK)
+            return TIKU_P4_PDM_OK;
+    }
+    return TIKU_P4_PDM_ERR_NOMEM;
+}
+
 TIKU_P4_XIP_TEXT
 int tiku_p4_pdm_start(uint32_t rate_hz, uint32_t slot_mask)
 {
@@ -379,9 +397,7 @@ int tiku_p4_pdm_start(uint32_t rate_hz, uint32_t slot_mask)
     if (rc != TIKU_P4_PDM_OK) {
         return rc;
     }
-    if (tiku_tier_arena_create_span(&ring_arena, TIKU_MEM_SRAM, RING_SPAN,
-                                    RING_BYTES, 64u, RING_ARENA_ID) !=
-        TIKU_MEM_OK) {
+    if (allocate_ring() != TIKU_P4_PDM_OK) {
         release_pads();
         return TIKU_P4_PDM_ERR_NOMEM;
     }

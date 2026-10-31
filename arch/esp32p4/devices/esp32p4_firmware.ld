@@ -45,6 +45,7 @@ SECTIONS {
         *tiku_mfs_block_arch.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         *tiku_media_transfer.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         *tiku_media_transfer_server.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *tiku_media_record.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         *tiku_media_card.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         *tiku_media_store.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         *tiku_media_vfs.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)

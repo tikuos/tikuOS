@@ -141,7 +141,9 @@ the decimation (64 from 15625 Hz up, 128 below, so the clock stays at
 1 MHz or more), and the filter's 35.5 Hz high-pass removes the offset.
 AHB DMA channel 2 (peripheral 3, CLIC line 12, source 58) fills a ring of
 eight 1 KB buffers of 16-bit mono samples, taken from the SRAM tier's high
-span at start and given back at stop, refusing a buffer the core has
+span at start and given back at stop. The driver selects the span by its
+address because the RAM and firmware linker layouts order the spans
+differently. It refuses a buffer the core has
 not handed back, so an overrun stops the engine and is counted; the next
 read that finds the ring empty restarts the stream. `tiku_p4_pdm_start()`
 takes 8000-39000 Hz and the left, right or both slots,
@@ -152,6 +154,13 @@ level of the last buffer, the counters and a run of samples. The board
 test `pdm-p4` measures the rate against the system timer; which slot the
 microphone's data lands in, and the clock edge the silicon samples it on,
 are what the board confirms.
+
+With native media storage enabled, `mic record audio/sample.wav 60` captures
+a minute of mono 16-bit PCM at 16 kHz into PSRAM, then writes a WAV to the
+mounted SD volume. It discards the microphone filter startup interval and
+refuses to publish a capture with DMA overruns or faults. See
+[media recording](../../kernel/fs/media.md#microphone-recording) for memory,
+power-loss and transfer behavior.
 
 UART0 drives GPIO37 (TX) and GPIO38 (RX), header P1 pins 17 and 18, in
 their IO MUX function, 8N1 at 300 to 3000000 baud from the 40 MHz crystal
