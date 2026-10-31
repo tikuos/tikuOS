@@ -51,7 +51,9 @@ class Console:
         got=self.split.take_text().decode(errors='replace')
         self.text+=got;self.log.write(got);self.log.flush()
         for mark,data in self.split.take_frames():
-            if mark==0xf5:self.incoming.append(response(data))
+            if mark==0xf5:
+                if not getattr(self,'discard_loader_frames',False):
+                    self.incoming.append(response(data))
             elif mark==0xf6:self.remote_incoming.append(bytes(data))
 
     def wait(self,condition,timeout=15):
@@ -79,7 +81,7 @@ class Console:
                   command_complete(self.text[start:],'ipc sdio '+kind))
         found=next((p for p in self.incoming if p['sequence']==0),None)
         if not found or found['status']:raise ValueError('bridge discovery: '+self.text[start:])
-        self.incoming.remove(found);self.active=True;self.kind=kind
+        self.incoming.remove(found);self.active=True;self.kind=kind;self.bridge_start=start
         if kind!='factory':self.loader_identity=found['payload']
         return found['payload']
 
@@ -89,7 +91,9 @@ class Console:
         return self.sequence
 
     def rpc(self,op,offset=0,length=0,payload=b''):
-        start=len(self.text)
+        start=self.bridge_start
+        if command_complete(self.text[start:],'rpc'):
+            self.active=False;raise BridgeClosed('bridge closed: '+self.text[start:])
         seq=self.send(op,offset,length,payload)
         self.wait(lambda:any(p['sequence']==seq for p in self.incoming) or
                   command_complete(self.text[start:],'rpc'),30)
@@ -121,7 +125,9 @@ class Console:
     def renew_read_bridge(self):
         """Finish any expired RPC bytes at the P4 prompt before reattaching."""
         start=len(self.text)
-        acquire_prompt(self.wire,self.pump,lambda:'tikuOS:/> ' in self.text[start:])
+        self.discard_loader_frames=True
+        try:acquire_prompt(self.wire,self.pump,lambda:'tikuOS:/> ' in self.text[start:])
+        finally:self.discard_loader_frames=False
         return self.bridge()
 
     def stop_factory(self):
