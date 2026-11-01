@@ -24,7 +24,9 @@ requires the paired ELF. Shell, BASIC, application and kit code, the VFS
 tree's node handlers and tables, their constants, and driver functions
 marked `TIKU_P4_XIP_TEXT` (the microphone's, the ISP's, the JPEG
 codec's, the PPA's, the 2D-DMA's and the H.264 encoder's, apart from
-what their interrupt paths call) execute from flash. The
+what their interrupt paths call) execute from flash. The camera, CSI and
+I2C driver code and constants also execute from flash, along with MIPI
+power initialization and DW-GDMA channel setup. The
 rest of the kernel, cache/flash controller operations and their dependencies
 execute from internal SRAM; a flash operation runs there with interrupts
 masked, so no flash-resident code runs during one. The profile uses a 16 KiB
@@ -637,6 +639,17 @@ service through `tiku_media_card_store()` or bind an independent service to
 an explicitly selected extent. The existing probe and FAT APIs
 retain their read-only behavior. See [the media filesystem contract](../../kernel/fs/media.md)
 for the format, service API, desktop image tools and qualification limits.
+
+### Camera images on microSD
+
+`TIKU_DRV_CAM_ENABLE=1` includes the IMX219 camera driver and `cam` command.
+With the shell and native media enabled, `cam auto` captures an exposed and
+white-balanced frame, `cam jpeg 85` encodes it in hardware, and
+`cam save images/photo.jpg` saves that JPEG under an unused name on the
+mounted SD volume. Mode 0 is 640x480; mode 1 is 1640x1232. Storage publishes
+the file after checking its complete length and SHA-256. See
+[camera snapshots](../../kernel/fs/media.md#camera-snapshots) for commands,
+private-upload recovery and computer downloads.
 
 ### FAT32 files on microSD
 

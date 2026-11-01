@@ -9,7 +9,7 @@
  * identified and set to a mode, one frame captured into PSRAM with its luma
  * statistics and the receiver's errors, frames streamed, a RAW10 frame
  * taken past the ISP, a frame through the JPEG encoder and frames through
- * the H.264 encoder, each dumped in base64 for the host to save.
+ * the H.264 encoder, and JPEG snapshots saved on native SD media.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -28,6 +28,9 @@
 #include <arch/esp32p4/tiku_jpeg_arch.h>
 #include <arch/esp32p4/tiku_h264_arch.h>
 #include <arch/esp32p4/tiku_systimer_arch.h>
+#if TIKU_MEDIA_FS_ENABLE && TIKU_P4_SDCARD_ENABLE
+#include <services/storage/tiku_media_save.h>
+#endif
 
 #define ARENA_ID    86u
 #define FRAME_BYTES (1640u * 1232u * 2u)        /* the largest RGB565 mode */
@@ -589,12 +592,33 @@ static void set_tune(uint8_t argc, const char *argv[])
                  tune.gamma);
 }
 
+#if TIKU_MEDIA_FS_ENABLE && TIKU_P4_SDCARD_ENABLE
+/** @brief Save the last encoded JPEG without recapturing or replacing a name. */
+static void save_jpeg(const char *name)
+{
+    if(!coded_bytes||coded_h264){
+        SHELL_PRINTF("cam: no JPEG (cam auto, then cam jpeg)\n");
+        return;
+    }
+    tiku_media_save_result_t result;
+    int rc=tiku_media_save_buffer(name,(uint8_t *)arena.buf+CODED,coded_bytes,&result);
+    SHELL_PRINTF("cam: save result=%d bytes=%lu name=%s\n",rc,(unsigned long)result.bytes,name);
+    if(rc&&result.id)SHELL_PRINTF("cam: inspect media stat and media uploads after an error\n");
+}
+#endif
+
 void tiku_shell_cmd_cam(uint8_t argc, const char *argv[])
 {
     uint16_t model = 0u;
     uint32_t frames, failed;
     int rc;
 
+#if TIKU_MEDIA_FS_ENABLE && TIKU_P4_SDCARD_ENABLE
+    if (argc == 3u && tiku_cmd_streq(argv[1], "save")) {
+        save_jpeg(argv[2]);
+        return;
+    }
+#endif
     if (argc == 2u && tiku_cmd_streq(argv[1], "id")) {
         rc = tiku_p4_cam_identify(&model);
         if (rc == TIKU_P4_CAM_OK) {
@@ -653,6 +677,9 @@ void tiku_shell_cmd_cam(uint8_t argc, const char *argv[])
                      "<lines> | gain <0..232> | dump [step] | stream <n | Ns> "
                      "[auto] | raw | rawdump | jpeg [quality] | jpegdump | "
                      "h264 <frames> | h264dump | tune [...] | info\n");
+#if TIKU_MEDIA_FS_ENABLE && TIKU_P4_SDCARD_ENABLE
+        SHELL_PRINTF("       cam save NAME (last JPEG, mounted media, unused name)\n");
+#endif
     }
 }
 

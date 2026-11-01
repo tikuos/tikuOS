@@ -354,3 +354,65 @@ installation is required for the Ogg and exact-duration decode checks.
 Mutation tests reduce arena alignment and remove startup discard,
 capture-loss rejection, writer release and end trimming; each altered
 implementation must fail.
+
+## Camera snapshots
+
+FireBeetle 2 P4 builds with `TIKU_DRV_CAM_ENABLE=1`, the shell and native SD
+media can save IMX219 camera images as JPEG files. Capture and hardware JPEG
+encoding finish in PSRAM before storage begins.
+
+Run on **TikuOS**, using an unused file name:
+
+```text
+media mount 20000000
+media off
+cam id
+cam mode 0
+cam auto
+cam jpeg 85
+cam save images/photo.jpg
+media stat images/photo.jpg
+ls /media/images
+```
+
+Mode 0 captures 640x480 RGB565; mode 1 captures 1640x1232 RGB565. `cam auto`
+sets exposure and white balance, then retains a processed frame. `cam jpeg`
+encodes that frame at quality 1..100 (default 85). It uses 4:2:0 sampling
+when both dimensions are multiples of 16, otherwise 4:4:4. Mode 2 captures
+RAW10 and cannot be encoded by this JPEG command.
+
+`cam save NAME` writes the most recently encoded JPEG. It neither captures
+another frame nor changes the JPEG quality. Names are relative to `/media`.
+The command refuses a missing JPEG and an existing visible name. A successful
+save reports `result=0`; `media stat` reports `complete=1` and its SHA-256.
+The camera command retains its PSRAM workspace for subsequent captures.
+
+`services/storage/tiku_media_save.h` exposes the foreground buffer-save
+service to applications. It hashes the immutable caller-owned buffer,
+creates a private atomic upload, appends and checkpoints batches of at most
+64 KiB, then publishes the name after length and SHA-256 verification.
+An interrupted save leaves a private upload or a complete verified file.
+Publication can commit before an I/O error is reported, so inspect
+`media stat NAME` and `media uploads` after an error. Remove an unwanted
+private upload with `media abort ID`. A storage I/O error can require
+remounting or reboot.
+
+Download on the **computer**:
+
+```sh
+python3 tools/tiku_media_transfer.py --serial /dev/ttyACM0 get images/photo.jpg photo.jpg
+```
+
+The downloader verifies SHA-256 before publishing the local file. After a
+board reboot, run `media mount` before reading or downloading stored photos.
+
+```sh
+make -C TikuBench/tests/host/kernel media-save
+```
+
+The host checks cover exact contents across multiple append batches,
+private visibility until completion, digest mismatch, overwrite refusal,
+missing media, active writers and failures during begin, append, checkpoint
+and finalization, including an error reported after publication. Mutation
+checks require weakened publication, length,
+overwrite and writer-release guards to fail.
