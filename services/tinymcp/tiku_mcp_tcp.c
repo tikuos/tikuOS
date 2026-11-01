@@ -110,6 +110,10 @@ key_equals(const char *sent, size_t n)
 #if defined(PLATFORM_ESP32C61)
 #include <arch/esp32c61/tiku_psram_arch.h>
 #endif
+#if (TIKU_DRV_WIFI_CYW43_ENABLE + 0) || (TIKU_DRV_WIFI_ESP_ENABLE + 0)
+#include <interfaces/wireless/tiku_wireless.h>
+#define MCP_TCP_WIFI 1
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* THE CONNECTIONS                                                           */
@@ -309,8 +313,29 @@ tiku_mcp_tcp_listen(uint16_t p, int http)
 /*---------------------------------------------------------------------------*/
 
 /**
+ * @brief The stack's timers, about 20 times a second: retransmission,
+ *        TIME_WAIT and the reaper of half-closed connections.  The net
+ *        test build's shell runs them itself.
+ */
+static void
+timers(void)
+{
+#if !TIKU_SHELL_NET_TEST
+    static tiku_clock_time_t last;
+    tiku_clock_time_t now = tiku_clock_time();
+
+    if ((tiku_clock_time_t)(now - last) >=
+        (tiku_clock_time_t)(TIKU_CLOCK_SECOND / 20)) {
+        last = now;
+        tiku_kits_net_tcp_periodic();
+    }
+#endif
+}
+
+/**
  * @brief The staged bytes as one segment.  While the TX pool is full the
- *        console is pumped, so the peer's acknowledgements come in.
+ *        console and the radio are polled and the stack's timers run, so
+ *        the peer's acknowledgements come in and a lost segment goes again.
  * @return 0, or -1 when the connection went or no segment came free within
  *         TIKU_MCP_TCP_SEND_MS, in which case it is aborted
  */
@@ -336,6 +361,10 @@ flush_stage(slot_t *s)
         }
         tiku_watchdog_kick();
         tiku_console_pump();
+#if defined(MCP_TCP_WIFI)
+        (void)tiku_wireless_rx_poll();
+#endif
+        timers();
     }
     return 0;
 }
@@ -412,26 +441,6 @@ tiku_mcp_tcp_send(tinymcp_t *stream, const char *msg, size_t len)
 /*---------------------------------------------------------------------------*/
 /* THE PUMP                                                                  */
 /*---------------------------------------------------------------------------*/
-
-/**
- * @brief The stack's timers, about 20 times a second: retransmission,
- *        TIME_WAIT and the reaper of half-closed connections.  The net
- *        test build's shell runs them itself.
- */
-static void
-timers(void)
-{
-#if !TIKU_SHELL_NET_TEST
-    static tiku_clock_time_t last;
-    tiku_clock_time_t now = tiku_clock_time();
-
-    if ((tiku_clock_time_t)(now - last) >=
-        (tiku_clock_time_t)(TIKU_CLOCK_SECOND / 20)) {
-        last = now;
-        tiku_kits_net_tcp_periodic();
-    }
-#endif
-}
 
 /** @brief A line connection's requests, as they come. */
 static void
