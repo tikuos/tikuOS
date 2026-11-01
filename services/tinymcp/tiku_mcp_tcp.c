@@ -22,6 +22,9 @@
 #include "tiku_mcp.h"
 #include "tiku_mcp_ask.h"
 #include <kernel/memory/tiku_mem.h>
+#if TIKU_MCP_TLS_ENABLE
+#include "tiku_mcp_tls.h"
+#endif
 #include <kernel/vfs/tiku_vfs.h>
 #include <tinymcp_http.h>
 
@@ -39,6 +42,9 @@ void
 tiku_mcp_tcp_init(void)
 {
     (void)tiku_persist_cell_init(&key_cell);
+#if TIKU_MCP_TLS_ENABLE
+    tiku_mcp_tls_init();
+#endif
 }
 
 /** @brief Whether the owner has set a key. */
@@ -114,6 +120,10 @@ key_equals(const char *sent, size_t n)
 #include <interfaces/wireless/tiku_wireless.h>
 #define MCP_TCP_WIFI 1
 #endif
+#if TIKU_MCP_TLS_ENABLE
+#define TLS_HEAD TIKU_KITS_CRYPTO_TLS_SERVER_HEAD
+#define TLS_OVER TIKU_KITS_CRYPTO_TLS_SERVER_OVERHEAD
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* THE CONNECTIONS                                                           */
@@ -133,15 +143,30 @@ typedef struct {
     char           out[TIKU_MCP_OUT_CAP];
 } conn_mem_t;
 
+#if TIKU_MCP_TLS_ENABLE
+/* An HTTPS connection's TLS state and record buffer, after its conn_mem_t
+ * in the same arena. */
+typedef struct {
+    tiku_kits_crypto_tls_server_t s;
+    uint8_t                       rec[TIKU_MCP_TLS_REC];
+} tls_mem_t;
+#endif
+
 typedef struct {
     tiku_kits_net_tcp_conn_t *tcb;    /* the TCB, NULL once it went */
     conn_mem_t               *m;      /* in arena while open, else NULL */
     tiku_arena_t              arena;
     uint8_t                   http;   /* Streamable HTTP, not lines */
+#if TIKU_MCP_TLS_ENABLE
+    tls_mem_t                *tls;    /* HTTPS: in the arena; NULL for HTTP */
+#endif
 } slot_t;
 
 static slot_t      slots[TIKU_MCP_TCP_SLOTS];  /* [0] lines, the rest HTTP */
 static uint16_t    line_port, http_port;       /* listening on, 0: not */
+#if TIKU_MCP_TLS_ENABLE
+static uint16_t    https_port;
+#endif
 static uint32_t    accepted, refused;
 static const char *why = "";                    /* the last refusal's reason */
 
@@ -181,6 +206,13 @@ tiku_mcp_tcp_keyed(tinymcp_t *stream)
     if (s == (slot_t *)0) {
         return 0;
     }
+#if TIKU_MCP_TLS_ENABLE
+    /* Once the board can serve HTTPS, the key crosses the network only
+     * inside TLS. */
+    if (s->tls == (tls_mem_t *)0 && tiku_mcp_tls_cred() != (const void *)0) {
+        return 0;
+    }
+#endif
     if (s->http) {
         const char *b = tinymcp_http_bearer(&s->m->h);
 
@@ -218,16 +250,36 @@ tcp_recv(tiku_kits_net_tcp_conn_t *c, uint16_t available)
 }
 
 static int http_write(void *ctx, const char *bytes, size_t n);
+#if TIKU_MCP_TLS_ENABLE
+static int tls_out(void *ctx, const uint8_t *bytes, size_t n);
+#endif
 
 /** @brief A connection made: a free slot of its kind, or refused. */
 static void
 accept_conn(tiku_kits_net_tcp_conn_t *c)
 {
     int http = c->local_port == http_port && http_port != 0u;
-    unsigned first = http ? 1u : 0u, last = http ? TIKU_MCP_TCP_SLOTS : 1u;
+    int tls = 0;
+    unsigned first, last;
+    size_t need = sizeof(conn_mem_t);
     tiku_mem_request_t lease = TIKU_MEM_REQUEST_DEFAULT;
     slot_t *s = (slot_t *)0;
     unsigned i;
+
+#if TIKU_MCP_TLS_ENABLE
+    if (c->local_port == https_port && https_port != 0u) {
+        if (tiku_mcp_tls_cred() == (const void *)0) {
+            tiku_kits_net_tcp_abort(c);
+            refused++;
+            why = "no certificate";
+            return;
+        }
+        http = tls = 1;
+        need += sizeof(tls_mem_t);
+    }
+#endif
+    first = http ? 1u : 0u;
+    last = http ? TIKU_MCP_TCP_SLOTS : 1u;
 
     for (i = first; i < last && s == (slot_t *)0; i++) {
         if (slots[i].m == (conn_mem_t *)0) {
@@ -246,8 +298,7 @@ accept_conn(tiku_kits_net_tcp_conn_t *c)
     (void)tiku_esp32c61_psram_attach();
 #endif
     lease.flags = TIKU_MEM_ALLOW_EXTERNAL;
-    if (tiku_mem_arena_create(&s->arena, sizeof(conn_mem_t) + 8u, &lease) !=
-            TIKU_MEM_OK ||
+    if (tiku_mem_arena_create(&s->arena, need + 16u, &lease) != TIKU_MEM_OK ||
         (s->m = tiku_arena_alloc(&s->arena, sizeof(conn_mem_t))) ==
             (conn_mem_t *)0) {
         (void)tiku_arena_reset(&s->arena);
@@ -260,6 +311,28 @@ accept_conn(tiku_kits_net_tcp_conn_t *c)
     }
     s->tcb = c;
     s->http = (uint8_t)http;
+#if TIKU_MCP_TLS_ENABLE
+    s->tls = (tls_mem_t *)0;
+    if (tls) {
+        s->tls = tiku_arena_alloc(&s->arena, sizeof(tls_mem_t));
+        if (s->tls == (tls_mem_t *)0 ||
+            tiku_kits_crypto_tls_server_init(&s->tls->s, tiku_mcp_tls_cred(),
+                                             tiku_mcp_tls_rng, tls_out, s,
+                                             s->tls->rec,
+                                             (uint16_t)sizeof s->tls->rec) != 0) {
+            (void)tiku_arena_reset(&s->arena);
+            (void)tiku_arena_destroy(&s->arena);
+            s->m = (conn_mem_t *)0;
+            s->tcb = (tiku_kits_net_tcp_conn_t *)0;
+            tiku_kits_net_tcp_abort(c);
+            refused++;
+            why = "no memory";
+            return;
+        }
+    }
+#else
+    (void)tls;
+#endif
     s->m->staged = 0u;
     s->m->npend = 0u;
     tinymcp_init(&s->m->t, &tiku_mcp_host, &s->m->t, s->m->in,
@@ -287,10 +360,19 @@ tcp_event(tiku_kits_net_tcp_conn_t *c, uint8_t event)
 }
 
 int
-tiku_mcp_tcp_listen(uint16_t p, int http)
+tiku_mcp_tcp_listen(uint16_t p, int kind)
 {
-    uint16_t *port = http ? &http_port : &line_port;
+    uint16_t *port = kind == TIKU_MCP_TCP_HTTP ? &http_port : &line_port;
 
+#if TIKU_MCP_TLS_ENABLE
+    if (kind == TIKU_MCP_TCP_HTTPS) {
+        port = &https_port;
+    }
+#else
+    if (kind == TIKU_MCP_TCP_HTTPS) {
+        return p == 0u ? 0 : -1;
+    }
+#endif
     if (*port != 0u) {
         (void)tiku_kits_net_tcp_unlisten(*port);
         *port = 0u;
@@ -299,11 +381,19 @@ tiku_mcp_tcp_listen(uint16_t p, int http)
         return 0;
     }
     tiku_kits_net_tcp_init();
-    if (p == (http ? line_port : http_port) ||
+    if (p == line_port || p == http_port ||
+#if TIKU_MCP_TLS_ENABLE
+        p == https_port ||
+#endif
         tiku_kits_net_tcp_listen(p, tcp_recv, tcp_event) !=
             TIKU_KITS_NET_OK) {
         return -1;
     }
+#if TIKU_MCP_TLS_ENABLE
+    if (kind == TIKU_MCP_TCP_HTTPS) {
+        tiku_mcp_tls_seed();       /* no client waits on the TRNG yet */
+    }
+#endif
     *port = p;
     return 0;
 }
@@ -333,24 +423,24 @@ timers(void)
 }
 
 /**
- * @brief The staged bytes as one segment.  While the TX pool is full the
- *        console and the radio are polled and the stack's timers run, so
- *        the peer's acknowledgements come in and a lost segment goes again.
+ * @brief The first @p len bytes of the stage as one segment.  While the TX
+ *        pool is full the console and the radio are polled and the stack's
+ *        timers run, so the peer's acknowledgements come in and a lost
+ *        segment goes again.
  * @return 0, or -1 when the connection went or no segment came free within
  *         TIKU_MCP_TCP_SEND_MS, in which case it is aborted
  */
 static int
-flush_stage(slot_t *s)
+send_stage(slot_t *s, uint16_t len)
 {
     tiku_clock_time_t start = tiku_clock_time();
 
-    while (s->m->staged > 0u) {
+    for (;;) {
         if (s->tcb == (tiku_kits_net_tcp_conn_t *)0) {
             return -1;
         }
-        if (tiku_kits_net_tcp_send(s->tcb, s->m->stage, s->m->staged) ==
+        if (tiku_kits_net_tcp_send(s->tcb, s->m->stage, len) ==
             TIKU_KITS_NET_OK) {
-            s->m->staged = 0u;
             return 0;
         }
         if ((tiku_clock_time_t)(tiku_clock_time() - start) >=
@@ -366,24 +456,68 @@ flush_stage(slot_t *s)
 #endif
         timers();
     }
-    return 0;
 }
 
-/** @brief @p len bytes into the stage, a segment sent each time it fills. */
+/**
+ * @brief The staged bytes as one segment, sealed as one TLS record on an
+ *        HTTPS connection.
+ * @return 0, or -1 when the connection went (see send_stage())
+ */
+static int
+flush_stage(slot_t *s)
+{
+    uint16_t len = s->m->staged;
+
+    if (len == 0u) {
+        return 0;
+    }
+    s->m->staged = 0u;
+#if TIKU_MCP_TLS_ENABLE
+    if (s->tls != (tls_mem_t *)0) {
+        int r = tiku_kits_crypto_tls_server_seal(&s->tls->s, s->m->stage, len);
+
+        if (r < 0) {
+            return -1;
+        }
+        len = (uint16_t)r;
+    }
+#endif
+    return send_stage(s, len);
+}
+
+/**
+ * @brief @p len bytes into the stage, a segment sent each time it fills;
+ *        on HTTPS the stage holds a record's plaintext after its header.
+ */
 static int
 put(slot_t *s, const char *p, size_t len)
 {
+    uint16_t head = 0u, over = 0u;
+
+#if TIKU_MCP_TLS_ENABLE
+    if (s->tls != (tls_mem_t *)0) {
+        head = TLS_HEAD;
+        over = TLS_OVER;
+    }
+#endif
     while (len > 0u) {
         uint16_t room, take;
 
         if (s->tcb == (tiku_kits_net_tcp_conn_t *)0) {
             return -1;
         }
-        room = s->tcb->snd_mss < sizeof s->m->stage
-                   ? s->tcb->snd_mss : (uint16_t)sizeof s->m->stage;
+        room = (uint16_t)((s->tcb->snd_mss < sizeof s->m->stage
+                               ? s->tcb->snd_mss : (uint16_t)sizeof s->m->stage) -
+                          over);
+#if TIKU_MCP_TLS_ENABLE
+        if (s->tls != (tls_mem_t *)0 &&
+            room > tiku_kits_crypto_tls_server_room(&s->tls->s)) {
+            room = tiku_kits_crypto_tls_server_room(&s->tls->s);
+        }
+#endif
         take = (uint16_t)(len < (size_t)(room - s->m->staged)
                               ? len : (size_t)(room - s->m->staged));
-        memcpy(s->m->stage + s->m->staged, p, take);
+        memcpy(s->m->stage + head + s->m->staged, p, take);
         s->m->staged = (uint16_t)(s->m->staged + take);
         p += take;
         len -= take;
@@ -393,6 +527,40 @@ put(slot_t *s, const char *p, size_t len)
     }
     return 0;
 }
+
+#if TIKU_MCP_TLS_ENABLE
+/**
+ * @brief The TLS layer's records, as they are, a segment at a time.  The
+ *        pump empties the stage before the layer runs, so nothing staged is
+ *        overwritten or sent after a record sealed later.
+ */
+static int
+tls_out(void *ctx, const uint8_t *bytes, size_t n)
+{
+    slot_t *s = ctx;
+
+    if (s->m->staged != 0u) {
+        return -1;
+    }
+    while (n > 0u) {
+        uint16_t room, take;
+
+        if (s->tcb == (tiku_kits_net_tcp_conn_t *)0) {
+            return -1;
+        }
+        room = s->tcb->snd_mss < sizeof s->m->stage
+                   ? s->tcb->snd_mss : (uint16_t)sizeof s->m->stage;
+        take = (uint16_t)(n < room ? n : room);
+        memcpy(s->m->stage, bytes, take);
+        if (send_stage(s, take) != 0) {
+            return -1;
+        }
+        bytes += take;
+        n -= take;
+    }
+    return 0;
+}
+#endif
 
 /** @brief The HTTP layer's bytes; NULL ends a response or an event. */
 static int
@@ -488,12 +656,93 @@ pump_http(slot_t *s)
     }
 }
 
+#if TIKU_MCP_TLS_ENABLE
+/**
+ * @brief An HTTPS connection: bytes from TCP through TLS, its plaintext
+ *        into the HTTP layer, while either moves; closed with close_notify
+ *        when the layer or the client ends it.
+ */
+static void
+pump_https(slot_t *s)
+{
+    conn_mem_t *m = s->m;
+    tiku_kits_crypto_tls_server_t *t = &s->tls->s;
+    int moved;
+
+    if (flush_stage(s) != 0) {
+        return;
+    }
+    do {
+        const uint8_t *d;
+        size_t n, used;
+
+        moved = 0;
+        if (s->tcb != (tiku_kits_net_tcp_conn_t *)0 && m->npend < PEND_MAX) {
+            m->npend = (uint16_t)(m->npend +
+                       tiku_kits_net_tcp_read(s->tcb, (uint8_t *)m->pend + m->npend,
+                                              (uint16_t)(PEND_MAX - m->npend)));
+        }
+        if (m->npend > 0u && s->tcb != (tiku_kits_net_tcp_conn_t *)0) {
+            used = tiku_kits_crypto_tls_server_feed(t, (const uint8_t *)m->pend,
+                                                    m->npend);
+            memmove(m->pend, m->pend + used, m->npend - used);
+            m->npend = (uint16_t)(m->npend - used);
+            moved = used > 0u;
+        }
+        d = tiku_kits_crypto_tls_server_data(t, &n);
+        if (n > 0u && s->tcb != (tiku_kits_net_tcp_conn_t *)0) {
+            tiku_mcp_identity();
+            used = tinymcp_http_feed(&m->h, (const char *)d, n);
+            if (s->m != m) {
+                return;
+            }
+            tiku_kits_crypto_tls_server_take(t, used);
+            moved |= used > 0u;
+        }
+    } while (moved && s->tcb != (tiku_kits_net_tcp_conn_t *)0);
+    if (s->tcb != (tiku_kits_net_tcp_conn_t *)0 &&
+        (t->state >= TIKU_KITS_CRYPTO_TLS_SERVER_CLOSED ||
+         m->h.state == TINYMCP_HTTP_S_CLOSE)) {
+        if (t->state != TIKU_KITS_CRYPTO_TLS_SERVER_FAILED &&
+            flush_stage(s) == 0) {
+            tiku_kits_crypto_tls_server_close(t);
+        }
+        if (s->tcb != (tiku_kits_net_tcp_conn_t *)0) {
+            (void)tiku_kits_net_tcp_close(s->tcb);
+            s->tcb = (tiku_kits_net_tcp_conn_t *)0;
+        }
+    }
+}
+
+/** @brief 1 while some HTTPS connection is between ClientHello and open. */
+static int
+handshaking(void)
+{
+    unsigned i;
+
+    for (i = 1u; i < TIKU_MCP_TCP_SLOTS; i++) {
+        if (slots[i].m != (conn_mem_t *)0 && slots[i].tls != (tls_mem_t *)0 &&
+            slots[i].tls->s.state < TIKU_KITS_CRYPTO_TLS_SERVER_OPEN) {
+            return 1;
+        }
+    }
+    return 0;
+}
+#endif
+
 void
 tiku_mcp_tcp_pump(void)
 {
     unsigned i;
 
+#if TIKU_MCP_TLS_ENABLE
+    if (https_port != 0u && !handshaking()) {
+        tiku_mcp_tls_seed();
+    }
+    if (line_port == 0u && http_port == 0u && https_port == 0u) {
+#else
     if (line_port == 0u && http_port == 0u) {
+#endif
         for (i = 0u; i < TIKU_MCP_TCP_SLOTS && slots[i].m == (conn_mem_t *)0;
              i++) {
         }
@@ -514,6 +763,11 @@ tiku_mcp_tcp_pump(void)
             (void)tiku_kits_net_tcp_close(s->tcb);
             s->tcb = (tiku_kits_net_tcp_conn_t *)0;
         }
+#if TIKU_MCP_TLS_ENABLE
+        if (s->tls != (tls_mem_t *)0) {
+            pump_https(s);
+        } else
+#endif
         if (s->http) {
             pump_http(s);
         } else {
@@ -547,7 +801,11 @@ tiku_mcp_tcp_read(char *buf, size_t max)
     }
     at = (size_t)n;
     for (i = 1u; i < TIKU_MCP_TCP_SLOTS; i++) {
-        if (slots[i].m != (conn_mem_t *)0) {
+        if (slots[i].m != (conn_mem_t *)0
+#if TIKU_MCP_TLS_ENABLE
+            && slots[i].tls == (tls_mem_t *)0
+#endif
+            ) {
             open++;
         }
     }
@@ -561,6 +819,24 @@ tiku_mcp_tcp_read(char *buf, size_t max)
         return n < 0 ? n : (int)(at + (size_t)n);
     }
     at += (size_t)n;
+#if TIKU_MCP_TLS_ENABLE
+    for (open = 0u, i = 1u; i < TIKU_MCP_TCP_SLOTS; i++) {
+        if (slots[i].m != (conn_mem_t *)0 && slots[i].tls != (tls_mem_t *)0) {
+            open++;
+        }
+    }
+    if (https_port != 0u) {
+        n = snprintf(buf + at, max - at, "https %u /mcp, %u of %u connected\n",
+                     (unsigned)https_port, open, (unsigned)TIKU_MCP_HTTP_CONNS);
+    } else {
+        n = snprintf(buf + at, max - at, "https off%s\n",
+                     tiku_mcp_tls_cred() ? "" : ", no certificate");
+    }
+    if (n < 0 || (size_t)n >= max - at) {
+        return n < 0 ? n : (int)(at + (size_t)n);
+    }
+    at += (size_t)n;
+#endif
     n = snprintf(buf + at, max - at, "accepted %lu refused %lu%s%s\n",
                  (unsigned long)accepted, (unsigned long)refused,
                  why[0] ? ", last: " : "", why);
@@ -570,9 +846,9 @@ tiku_mcp_tcp_read(char *buf, size_t max)
 #else
 
 int
-tiku_mcp_tcp_listen(uint16_t p, int http)
+tiku_mcp_tcp_listen(uint16_t p, int kind)
 {
-    (void)http;
+    (void)kind;
     return p == 0u ? 0 : -1;
 }
 

@@ -94,7 +94,7 @@ TIKU_THREADS_ENABLE ?= 1
 TIKU_SHELL_BASIC_ENABLE ?= 1
 P4_REQUESTED_FEATURES := $(strip $(foreach v,$(filter TIKU_%_ENABLE,$(.VARIABLES)),\
     $(if $(filter 1,$($(v))),$(v))))
-P4_REQUESTED_FEATURES := $(filter-out TIKU_SHELL_ENABLE TIKU_THREADS_ENABLE TIKU_SHELL_BASIC_ENABLE TIKU_MCP_ENABLE,$(P4_REQUESTED_FEATURES))
+P4_REQUESTED_FEATURES := $(filter-out TIKU_SHELL_ENABLE TIKU_THREADS_ENABLE TIKU_SHELL_BASIC_ENABLE TIKU_MCP_ENABLE TIKU_MCP_TLS_ENABLE,$(P4_REQUESTED_FEATURES))
 ifneq ($(strip $(APP) $(BASIC_PROGRAM)),)
 $(error ESP32-P4 firmware does not include APP or BASIC_PROGRAM payloads)
 endif
@@ -113,7 +113,7 @@ TIKU_PLATFORM := esp32c5
 C5_REQUESTED_FEATURES := $(strip $(foreach v,$(filter TIKU_%_ENABLE,$(.VARIABLES)),\
     $(if $(filter 1,$($(v))),$(v))))
 ifneq ($(MINIMAL),1)
-C5_REQUESTED_FEATURES := $(filter-out TIKU_SHELL_ENABLE TIKU_THREADS_ENABLE TIKU_SHELL_BASIC_ENABLE TIKU_DRV_PHY_C5_ENABLE TIKU_DRV_WIFI_ESP_ENABLE TIKU_DRV_BLE_ESP_ENABLE TIKU_DRV_SDR_ESP_ENABLE TIKU_DRV_SDR_ESP_TX_ENABLE TIKU_DRV_154_C5_ENABLE TIKU_KIT_CRYPTO_ENABLE TIKU_KIT_NET_ENABLE TIKU_KITS_NET_WIFI_ENABLE TIKU_KITS_NET_DHCP_ENABLE TIKU_KITS_NET_DNS_ENABLE TIKU_MEM_RECLAIM_ENABLE TIKU_MCP_ENABLE TIKU_IPC_ENABLE TIKU_IPC_CONSOLE_ENABLE,$(C5_REQUESTED_FEATURES))
+C5_REQUESTED_FEATURES := $(filter-out TIKU_SHELL_ENABLE TIKU_THREADS_ENABLE TIKU_SHELL_BASIC_ENABLE TIKU_DRV_PHY_C5_ENABLE TIKU_DRV_WIFI_ESP_ENABLE TIKU_DRV_BLE_ESP_ENABLE TIKU_DRV_SDR_ESP_ENABLE TIKU_DRV_SDR_ESP_TX_ENABLE TIKU_DRV_154_C5_ENABLE TIKU_KIT_CRYPTO_ENABLE TIKU_KIT_NET_ENABLE TIKU_KITS_NET_WIFI_ENABLE TIKU_KITS_NET_DHCP_ENABLE TIKU_KITS_NET_DNS_ENABLE TIKU_MEM_RECLAIM_ENABLE TIKU_MCP_ENABLE TIKU_MCP_TLS_ENABLE TIKU_IPC_ENABLE TIKU_IPC_CONSOLE_ENABLE,$(C5_REQUESTED_FEATURES))
 endif
 ifneq ($(C5_REQUESTED_FEATURES),)
 $(error ESP32-C5 profile does not include optional features: $(C5_REQUESTED_FEATURES))
@@ -3237,10 +3237,31 @@ SRCS += services/tinymcp/tiku_mcp_job.c
 SRCS += services/tinymcp/tiku_mcp_tcp.c
 # With the full net kit (TIKU_KIT_NET_ENABLE=1, not TIKU_KIT_NET_MIN) the
 # server also listens on a TCP port, through `mcp listen <port>`.
+TIKU_MCP_TCP_BUILT := 0
 ifeq ($(TIKU_KIT_NET_ENABLE),1)
 ifneq ($(TIKU_KIT_NET_MIN),1)
 CFLAGS += -DTIKU_MCP_TCP_ENABLE=1
+TIKU_MCP_TCP_BUILT := 1
 endif
+endif
+# TIKU_MCP_TLS_ENABLE=1 adds HTTPS (`mcp https <port>`): the kits' TLS 1.3
+# server, the board's P-256 key made from its TRNG and the certificate the
+# owner's CA signs, under /sys/mcp/tls.
+TIKU_MCP_TLS_ENABLE ?= 0
+ifeq ($(TIKU_MCP_TLS_ENABLE),1)
+ifneq ($(TIKU_MCP_TCP_BUILT),1)
+$(error TIKU_MCP_TLS_ENABLE=1 needs MCP on TCP: TIKU_KIT_NET_ENABLE=1 without TIKU_KIT_NET_MIN)
+endif
+CFLAGS += -DTIKU_MCP_TLS_ENABLE=1
+# The echo service on port 7 and the three `mcp` listeners.
+CFLAGS += -DTIKU_KITS_NET_TCP_MAX_LISTENERS=4
+SRCS += services/tinymcp/tiku_mcp_tls.c
+SRCS += $(wildcard tikukits/net/tls/server/*.c)
+SRCS += $(wildcard tikukits/crypto/p256/*.c) $(wildcard tikukits/crypto/x25519/*.c)
+SRCS += $(wildcard tikukits/crypto/gcm/*.c) $(wildcard tikukits/crypto/aes128/*.c)
+SRCS += $(wildcard tikukits/crypto/hkdf/*.c) $(wildcard tikukits/crypto/base64/*.c)
+SRCS += tikukits/crypto/hmac/tiku_kits_crypto_hmac.c
+SRCS += tikukits/crypto/sha256/tiku_kits_crypto_sha256.c
 endif
 SRCS += shell/commands/tiku_shell_cmd_mcp.c
 SRCS += shell/commands/tiku_shell_cmd_ask.c

@@ -8,7 +8,7 @@
  * xip_code.ld - C5 application code and constants mapped from flash.
  *
  * BASIC, the shell, tinymcp and its binding, the radio drivers and libraries,
- * the Bluetooth, crypto, IPv4, HTTP, MQTT and Wi-Fi kits, the VFS tree nodes;
+ * the Bluetooth, crypto, IPv4, HTTP, MQTT, TLS and Wi-Fi kits, the VFS tree nodes;
  * SRAM keeps the rest, .high_perf_code_iram1 (BLE) and .coexiram included.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -34,6 +34,7 @@
     @TIKU_C5_OBJECT_ROOT@/tikukits/net/ipv4/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
     @TIKU_C5_OBJECT_ROOT@/tikukits/net/http/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
     @TIKU_C5_OBJECT_ROOT@/tikukits/net/mqtt/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+    @TIKU_C5_OBJECT_ROOT@/tikukits/net/tls/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
     @TIKU_C5_OBJECT_ROOT@/tikukits/net/wifi/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
     @TIKU_C5_OBJECT_ROOT@/tinymcp/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
     @TIKU_C5_OBJECT_ROOT@/services/tinymcp/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)

@@ -12,7 +12,8 @@ tiku_mcp_console.c     channel 0xF3: the queue, the pump, the frame out
 tiku_mcp_ask.h/.c      /sys/mcp/ask, the journal, BASIC's ASK
 tiku_mcp_consent.h/.c  which actions ask the owner, and the open question
 tiku_mcp_job.h/.c      the basic tool: one BASIC job, its output, /sys/mcp/job
-tiku_mcp_tcp.h/.c      mcp listen and http: TCP connections, /sys/mcp/key and tcp
+tiku_mcp_tcp.h/.c      mcp listen, http, https: TCP connections, /sys/mcp/key and tcp
+tiku_mcp_tls.h/.c      the board's TLS key and certificate, /sys/mcp/tls, the DRBG
 tiku_mcp_vfs.h/.c      /sys/mcp, a boot mount
 ```
 
@@ -144,11 +145,44 @@ over TCP when its HTTP bearer token or its `_meta` member
 `org.tinymcp/key` equals the key in
 `/sys/mcp/key` (a persist cell of 8 to 32 characters, written with the
 system capability, read back as `set` or `none`, compared byte by byte to
-the end).  Without it `write`, `shell` and `basic` are refused, `read`
+the end).  Once the board has a TLS certificate the key counts only on an
+HTTPS connection: on `mcp listen` and `mcp http` every request reads only.
+Without it `write`, `shell` and `basic` are refused, `read`
 refuses a secret node or one whose read acts, and the request's VFS
 writes carry no capability.  `/sys/mcp/tcp` says each port's state, the
 lines connection's peer, how many HTTP connections are open, and the
 connections accepted and refused, with the last refusal's reason.
+
+## HTTPS
+
+`TIKU_MCP_TLS_ENABLE=1` adds `mcp https <port>`: the same Streamable HTTP
+inside TLS 1.3, served by the kits' server
+(`tikukits/net/tls/server/`), sharing the `TIKU_MCP_HTTP_CONNS` slots.
+The board's identity is under `/sys/mcp/tls/`:
+
+- `key`: `new` makes a P-256 private key from the TRNG (`none` removes
+  it), and either drops the certificate; it reads as `set` or `none` and
+  no node returns it.  A persist cell, written with the system capability.
+- `pub`: the public point, 130 hex digits, for the owner's CA to sign.
+- `cert`: the certificate's DER, written as base64 in pieces of whole
+  four-character groups, one write per shell line; it takes effect once
+  the DER is whole and holds the board's public point, and reads as its
+  length and SHA-256.  `none` removes it.
+
+`tinymcp/bridge/tlsca.py` is the owner's CA: `init` makes it,
+`provision <port>` signs the board's key for `<name>.local` and its
+address and writes the result over the console.  A connection's arena
+grows by the TLS state and its `TIKU_MCP_TLS_REC` (2560) record buffer,
+which bounds the largest record a client may send.  Each record the board
+sends is one TCP segment: the stage holds its plaintext after the 5-byte
+header and is sealed in place.  The pump empties the stage before TLS
+runs, so the handshake's records, a key update and close_notify go out in
+order.  Handshake randomness is an HMAC-DRBG seeded from the TRNG when
+`mcp https` starts and again after `TIKU_MCP_TLS_RESEED` (64) outputs,
+between handshakes.  The build raises the TCP stack's listeners
+(`TIKU_KITS_NET_TCP_MAX_LISTENERS`) from two to four: the kit's echo
+service on port 7 holds one, and `mcp listen`, `mcp http` and
+`mcp https` may each hold another.
 
 ## Execution
 
@@ -203,8 +237,12 @@ no bridge, through the same relay: the 16 KB read in chunks, the refusals
 without a bearer token, an update on a listen's event stream, writes, a
 job's progress and its cancel by closing the POST, consent, a wrong token,
 a web origin and a GET refused, and the arenas given back; given the
-board's address as well, it dials the board over its LAN instead.
+board's address as well, it dials the board over its LAN instead.  With
+`--tls` a throwaway CA signs the board's key, and the same checks run over
+`mcp https`, then the certificate presented, a client trusting another
+CA and a TLS 1.2 client refused, and the key refused over plain HTTP.
 `tinymcp/tests/board_ask.py <port>` runs a BASIC
 program whose `ASK` it answers over the same port, lets one run out of
 time, has a rule ask, and runs `attend.py` against a stub of the Messages
-API.  TikuBench's `tinymcp` suite runs both, with BASIC built in.
+API.  TikuBench's `tinymcp` suite runs them all, with BASIC and TLS built
+in.

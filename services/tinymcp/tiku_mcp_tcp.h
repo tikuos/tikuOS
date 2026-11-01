@@ -33,12 +33,17 @@
 /** Connections at once: one of lines, the rest HTTP. */
 #define TIKU_MCP_TCP_SLOTS (1u + TIKU_MCP_HTTP_CONNS)
 
+#define TIKU_MCP_TCP_LINES 0       /**< newline-delimited JSON-RPC */
+#define TIKU_MCP_TCP_HTTP  1       /**< Streamable HTTP at /mcp */
+#define TIKU_MCP_TCP_HTTPS 2       /**< the same inside TLS */
+
 /**
- * @brief Listen for MCP on @p port, lines (@p http 0) or Streamable HTTP at
- *        /mcp (@p http 1), or stop with port 0; open connections stay.
- * @return 0, or -1 when this build has no TCP or the stack refused
+ * @brief Listen for MCP on @p port as @p kind (TIKU_MCP_TCP_*), or stop
+ *        with port 0; open connections stay.
+ * @return 0, or -1 when this build has no TCP or no TLS for HTTPS, or the
+ *         stack refused
  */
-int tiku_mcp_tcp_listen(uint16_t port, int http);
+int tiku_mcp_tcp_listen(uint16_t port, int kind);
 
 /** @brief Connection @p i's stream, or NULL while it is closed. */
 tinymcp_t *tiku_mcp_tcp_stream(unsigned i);
@@ -48,7 +53,8 @@ int tiku_mcp_tcp_owns(const tinymcp_t *stream);
 
 /**
  * @brief 1 when the request being served on @p stream carries the key the
- *        owner set, as its HTTP bearer token or in _meta; 0 otherwise.
+ *        owner set, as its HTTP bearer token or in _meta; 0 otherwise, and
+ *        0 outside TLS once the board has a TLS certificate.
  */
 int tiku_mcp_tcp_keyed(tinymcp_t *stream);
 

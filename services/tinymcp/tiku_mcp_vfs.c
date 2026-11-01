@@ -22,6 +22,9 @@
 #include "tiku_mcp_consent.h"
 #include "tiku_mcp_job.h"
 #include "tiku_mcp_tcp.h"
+#if TIKU_MCP_TLS_ENABLE
+#include "tiku_mcp_tls.h"
+#endif
 
 static int mcp_era_read(char *buf, size_t max)
 {
@@ -70,6 +73,19 @@ static const tiku_vfs_desc_t key_desc = TIKU_VFS_DESC_FLAGS(
     TIKU_VFS_T_STR, TIKU_VFS_U_NONE, TIKU_VFS_FRESH_STATIC, TIKU_VFS_E_FREE,
     TIKU_VFS_DF_SECRET);
 
+#if TIKU_MCP_TLS_ENABLE
+/* The board's TLS identity: its key reads as set or none. */
+static const tiku_vfs_node_t tls_children[] = {
+    { .name = "cert",      .type = TIKU_VFS_FILE,
+      .read = tiku_mcp_tls_cert_read, .write = tiku_mcp_tls_cert_write,
+      .req_cap = TIKU_VFS_CAP_SYS },
+    { .name = "key",       .type = TIKU_VFS_FILE,
+      .read = tiku_mcp_tls_key_read, .write = tiku_mcp_tls_key_write,
+      .desc = &key_desc, .req_cap = TIKU_VFS_CAP_SYS },
+    { .name = "pub",       .type = TIKU_VFS_FILE, .read = tiku_mcp_tls_pub_read },
+};
+#endif
+
 static const tiku_vfs_node_t mcp_children[] = {
     { .name = "era",       .type = TIKU_VFS_FILE, .read = mcp_era_read },
     { .name = "transport", .type = TIKU_VFS_FILE, .read = mcp_transport_read },
@@ -92,6 +108,11 @@ static const tiku_vfs_node_t mcp_children[] = {
       .read = tiku_mcp_key_read, .write = tiku_mcp_key_write,
       .desc = &key_desc, .req_cap = TIKU_VFS_CAP_SYS },
     { .name = "tcp",       .type = TIKU_VFS_FILE, .read = tiku_mcp_tcp_read },
+#if TIKU_MCP_TLS_ENABLE
+    { .name = "tls",       .type = TIKU_VFS_DIR,
+      .children = tls_children,
+      .child_count = (uint8_t)(sizeof tls_children / sizeof tls_children[0]) },
+#endif
     { .name = "job",       .type = TIKU_VFS_DIR,
       .children = tiku_mcp_job_nodes,
       .child_count = (uint8_t)TIKU_MCP_JOB_NODES },
