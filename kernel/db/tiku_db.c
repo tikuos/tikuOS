@@ -156,6 +156,26 @@ uint32_t tiku_db_identity(const tiku_db_t *db)
     return (db != NULL && db->mounted) ? db->identity : 0u;
 }
 
+const char *tiku_db_err_name(int rc)
+{
+    switch (rc) {
+    case TIKU_DB_OK:           return "ok";
+    case TIKU_DB_ERR_INVAL:    return "invalid";
+    case TIKU_DB_ERR_IO:       return "io";
+    case TIKU_DB_ERR_NOSTORE:  return "no-store";
+    case TIKU_DB_ERR_CORRUPT:  return "corrupt";
+    case TIKU_DB_ERR_NOSPACE:  return "no-space";
+    case TIKU_DB_ERR_EXISTS:   return "exists";
+    case TIKU_DB_ERR_NOTFOUND: return "not-found";
+    case TIKU_DB_ERR_FULL:     return "full";
+    case TIKU_DB_ERR_BUSY:     return "busy";
+    case TIKU_DB_ERR_LIFE:     return "outlived";
+    case TIKU_DB_ERR_MEDIA:    return "other-medium";
+    case TIKU_DB_ERR_TYPE:     return "type";
+    default:                   return "unknown";
+    }
+}
+
 /*---------------------------------------------------------------------------*/
 /* TABLES                                                                    */
 /*---------------------------------------------------------------------------*/

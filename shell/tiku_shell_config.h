@@ -348,6 +348,9 @@
 #ifndef TIKU_SHELL_CMD_LAYOUT
 #define TIKU_SHELL_CMD_LAYOUT  1  /**< layout  - memory budgets for next boot */
 #endif
+#ifndef TIKU_SHELL_CMD_DB
+#define TIKU_SHELL_CMD_DB      1  /**< db      - tables in place on NVM */
+#endif
 #ifndef TIKU_SHELL_CMD_SLEEP
 #define TIKU_SHELL_CMD_SLEEP   1  /**< sleep   - Enter low-power idle mode */
 #endif
@@ -670,6 +673,12 @@
 #if TIKU_SHELL_CMD_BT && !(TIKU_BT_HOST + 0)
 #undef  TIKU_SHELL_CMD_BT
 #define TIKU_SHELL_CMD_BT 0
+#endif
+
+/* db needs the database built in. */
+#if TIKU_SHELL_CMD_DB && !(TIKU_DB_ENABLE + 0)
+#undef  TIKU_SHELL_CMD_DB
+#define TIKU_SHELL_CMD_DB 0
 #endif
 
 /* layout divides the carved NVM region, which MSP430 does not have. */

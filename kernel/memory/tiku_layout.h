@@ -32,10 +32,17 @@
 /** @brief Bytes of the record's ownership identity. */
 #define TIKU_LAYOUT_ID_BYTES  16u
 
-/** @brief Knob identities; stored in the record, so never renumbered. */
+/**
+ * @brief Knob identities; stored in the record, so never renumbered.
+ *
+ * Every knob after the first reads as its default from a record that does not
+ * list it, so a build that adds one keeps every existing record.
+ */
 typedef enum {
     TIKU_KNOB_NONE     = 0,
-    TIKU_KNOB_NVM_TIER = 1      /**< bytes of the region the NVM tier takes */
+    TIKU_KNOB_NVM_TIER = 1,     /**< bytes of the region the NVM tier takes   */
+    TIKU_KNOB_NVM_DB   = 2      /**< bytes of the region's top the database
+                                     extent takes; 0 by default             */
 } tiku_layout_knob_id_t;
 
 /** @brief What a knob's change touches. */
@@ -178,6 +185,7 @@ typedef struct {
     uint16_t files;         /**< files in /data that a rewrite would lose */
     uint32_t bytes;         /**< their content bytes                      */
     uint32_t nearest;       /**< a value that passes, for RANGE and STEP  */
+    uint16_t tables;        /**< database tables a rewrite would lose     */
 } tiku_layout_plan_t;
 
 /** @brief A knob's published bounds. */
@@ -217,6 +225,13 @@ typedef struct {
      *  wherever its durable variables left room.  NULL: none. */
     const uint8_t *durable;
     size_t         durable_len;
+    /** Live tables in the database extent at region offset @p off; 0 when it
+     *  holds no store.  NULL: an extent is never counted. */
+    int (*extent_live)(void *ctx, size_t off, size_t len);
+    /** Write an empty database extent at region offset @p off: 0 on success.
+     *  NULL: the nvm.db knob is absent. */
+    int (*extent_format)(void *ctx, size_t off, size_t len);
+    void *extent_ctx;
 } tiku_layout_env_t;
 
 /*---------------------------------------------------------------------------*/
@@ -266,6 +281,16 @@ int tiku_layout_resume_env(const tiku_layout_env_t *env,
  */
 int tiku_layout_recover_env(const tiku_layout_env_t *env,
                             tiku_layout_state_t *st, uint32_t base);
+
+/**
+ * @brief tiku_layout_recover_env() for a store that ends @p db bytes short of
+ *        the region's top, where a database extent lies.
+ *
+ * The extent itself is left as it is; the record names it applied.
+ */
+int tiku_layout_recover_db_env(const tiku_layout_env_t *env,
+                               tiku_layout_state_t *st, uint32_t base,
+                               uint32_t db);
 
 /** @brief Knob @p i's bounds on this environment; 0 past the last knob. */
 int tiku_layout_knob_env(const tiku_layout_env_t *env, unsigned i,
@@ -364,6 +389,25 @@ int tiku_layout_resume(uint32_t op);
 
 /** @brief tiku_layout_recover_env() on this board's environment and state. */
 int tiku_layout_recover(uint32_t base);
+
+/** @brief tiku_layout_recover_db_env() on this board. */
+int tiku_layout_recover_db(uint32_t base, uint32_t db);
+
+/**
+ * @brief Bytes the applied record carves from the region's top for the
+ *        database extent; 0 without a usable record.
+ *
+ * /data ends this far short of the region's top, held or not.
+ */
+uint32_t tiku_layout_db_bytes(void);
+
+/**
+ * @brief The database extent this boot applied: region offset and bytes.
+ *
+ * @return 1 with @p off and @p len set while the store is ready and the
+ *         applied nvm.db is not 0; 0 otherwise
+ */
+int tiku_layout_db_extent(uint32_t *off, uint32_t *len);
 
 /** @brief Render an identity into a 33-byte lowercase hexadecimal string. */
 void tiku_layout_identity_text(const uint8_t id[TIKU_LAYOUT_ID_BYTES], char out[33]);

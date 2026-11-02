@@ -75,14 +75,17 @@ data_bind(tiku_nvm_backend_t *region, size_t *base)
 {
     const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
     size_t at = (size_t)tiku_layout_base();
+    size_t db = (size_t)tiku_layout_db_bytes();
 
-    if (rgn == NULL || rgn->base == NULL || rgn->size <= at) {
+    if (rgn == NULL || rgn->base == NULL || rgn->size <= at ||
+        db >= rgn->size - at) {
         return 0;
     }
-    /* The tier takes the front of the region up to the layout's base and the
-     * store everything behind it; the mount enforces the store's floor. */
+    /* The tier takes the front of the region up to the layout's base, the
+     * database extent its top, and the store everything between; the mount
+     * enforces the store's floor. */
     data_be.base  = rgn->base + at;
-    data_be.size  = rgn->size - at;
+    data_be.size  = rgn->size - at - db;
     data_be.write = data_be_write;
     data_be.erase = NULL;
     data_be.ctx   = NULL;
@@ -94,7 +97,8 @@ data_bind(tiku_nvm_backend_t *region, size_t *base)
 /**
  * @brief Report how the carved region is divided, for `df`.
  *
- * The tier and the store tile the region, so `idle_bytes` is always 0.
+ * The tier, the store and the database extent tile the region, so
+ * `idle_bytes` is always 0.
  *
  * @param out  Snapshot to fill in (extent fields only).
  */
@@ -103,10 +107,13 @@ data_fill_extents(tiku_data_df_t *out)
 {
     const tiku_nvm_backend_t *rgn = tiku_nvm_backend_get();
     uint32_t at = tiku_layout_base();
+    uint32_t db = tiku_layout_db_bytes();
 
     out->region_bytes = (rgn != NULL) ? (uint32_t)rgn->size : 0u;
     out->tier_bytes   = (out->region_bytes > at) ? at : out->region_bytes;
-    out->fs_bytes     = out->region_bytes - out->tier_bytes;
+    out->db_bytes     = (out->region_bytes - out->tier_bytes > db)
+                      ? db : 0u;
+    out->fs_bytes     = out->region_bytes - out->tier_bytes - out->db_bytes;
     out->idle_bytes   = 0u;
 }
 
@@ -258,6 +265,7 @@ data_fill_extents(tiku_data_df_t *out)
     out->tier_bytes   = 0u;
     out->fs_bytes     = (uint32_t)sizeof data_tfs_region;
     out->idle_bytes   = 0u;
+    out->db_bytes     = 0u;
 }
 
 /** @brief Create the store only in a wholly, uniformly blank static array. */

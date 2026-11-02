@@ -257,6 +257,21 @@ int tiku_db_mount(tiku_db_t *db, tiku_nvm_backend_t *be,
 /** @brief The identity the extent was formatted with; 0 when not mounted. */
 uint32_t tiku_db_identity(const tiku_db_t *db);
 
+/**
+ * @brief Count the live tables of the extent at @p be without mounting it.
+ *
+ * Reads the header and the table entries only.
+ *
+ * @param tables  Receives the count
+ * @return TIKU_DB_OK, TIKU_DB_ERR_INVAL, TIKU_DB_ERR_NOSTORE,
+ *         TIKU_DB_ERR_MEDIA or TIKU_DB_ERR_CORRUPT
+ */
+int tiku_db_probe(const tiku_nvm_backend_t *be, const tiku_db_media_t *media,
+                  uint8_t *tables);
+
+/** @brief A short word for a result code; "unknown" for any other value. */
+const char *tiku_db_err_name(int rc);
+
 /*---------------------------------------------------------------------------*/
 /* TABLES                                                                    */
 /*---------------------------------------------------------------------------*/

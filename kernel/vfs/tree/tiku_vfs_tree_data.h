@@ -60,7 +60,8 @@ typedef struct {
     uint32_t    region_bytes;  /**< region the linker carved            */
     uint32_t    tier_bytes;    /**< NVM tier extent (region front)      */
     uint32_t    fs_bytes;      /**< file-store extent                   */
-    uint32_t    idle_bytes;    /**< region - (tier + fs); always 0      */
+    uint32_t    idle_bytes;    /**< region - (tier + fs + db); always 0 */
+    uint32_t    db_bytes;      /**< database extent (region top)        */
 } tiku_data_df_t;
 
 /**

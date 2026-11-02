@@ -4,7 +4,9 @@ Tables of fixed-size records in place on byte-addressable NVM (FRAM, MRAM,
 RRAM).  One API, `tiku_db.h`; the medium under it is a descriptor the port
 fills in, `tiku_db_media.h`; the extent layout and the write order are
 `tiku_db_inplace.c`; the verbs, cursors and the transaction rule are
-`tiku_db.c`.  Nothing here includes `shell/`, `basic/` or `services/`.
+`tiku_db.c`; the board's medium and extent are `tiku_db_board.c`.  Nothing
+here includes `shell/`, `basic/` or `services/`.  `make TIKU_DB_ENABLE=1`
+builds it, with the `db` shell command; a sector-flash port refuses it.
 
 ## The medium
 
@@ -63,6 +65,34 @@ and writes `CLOSED` before it does its own work.  `commit` refuses it.
 `ring` retention overwrites the record in the next slot; `keep` refuses
 the insert while that slot is live (`TIKU_DB_ERR_FULL`).
 
+## On a board
+
+`tiku_db_board()` mounts the database at its first call and again when the
+extent moves.  On the nRF54L, Apollo and RA8P1 parts the extent is the
+region's top that the layout service carves with `nvm.db`
+(`kernel/memory/AGENTS.md`), written through `tiku_tier_nvm_write()`; the
+layout service formats it whenever it rewrites the store and counts its
+tables as loss.  On MSP430 it is a `TIKU_DURABLE` array of
+`TIKU_DB_ARRAY_BYTES` (16 KB), formatted at the first call when every byte
+is 0x00 or every byte 0xFF.  Each port's descriptor is in
+`tiku_db_board.c`: RRAM and MRAM lines of 16 bytes (32 on RA8P1, its program
+buffer) that a cut may leave unreadable, with the RRAM rated for 10⁴
+programs a line; FRAM by the 16-bit word.
+
+```
+db status                               the medium, the extent, the tables
+db create temps t:t64 temp:q3 src:i32 cap=4096 ring rate=1/s life=10y
+db insert temps now 21.5 2              t64 takes "now": microseconds since boot
+db last temps 10 | db scan temps 10 | db where temps temp > 30 [last 5]
+db range temps t <lo> <hi> | db agg temps temp [src = 2]
+db delete temps <seq> | db delete temps where src = 2
+db begin|commit|abort|schema|stat|drop temps
+db bench [n] [pad]                      [BM] lines named by record size
+```
+
+Rows print one a line, tab-separated, sequence number first; q3 prints with
+three decimals.
+
 ## Proof
 
 Host: `make -C TikuBench/tests/host/kernel db` runs `test_db.c` on four
@@ -82,6 +112,14 @@ add exactly itself.  The test is built with UBSan, so an index past an
 array stops it.  `mutations/kernel.py` lists the source mutations it must
 catch (`python3 mutate.py --port kernel --model db`); `mutate.py --generate
 kernel/db/tiku_db.c --binary test_db` lists the generated ones it does not.
+`make db-shell` runs the `db` command over the engine on a host array;
+`make memory-layout` runs the layout service with the `nvm.db` knob
+(`test_layout_db`, every write of an extent change cut) and the shell,
+`/data` and the extent together (`test_layout_integration_db`).
 
-The engine is in no port's build: no layout knob carves an extent and no
-shell command, VFS node or BASIC word calls it.
+Board: `python -m tikubench run db --board nrf54l15 --port <console>` makes
+tables through the shell, reboots across an open transaction, and records
+`db bench` as `[BM]` metrics.  Where the board has no extent and `/data`
+holds no files it stages `nvm.db=64K` first.
+
+No VFS node, BASIC word or MCP resource calls the engine.

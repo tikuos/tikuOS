@@ -331,6 +331,50 @@ int tiku_db_mount(tiku_db_t *db, tiku_nvm_backend_t *be,
     return TIKU_DB_OK;
 }
 
+int tiku_db_probe(const tiku_nvm_backend_t *be, const tiku_db_media_t *m,
+                  uint8_t *tables)
+{
+    const uint8_t *b;
+    uint32_t v;
+    uint16_t v16;
+    uint8_t i, n = 0;
+
+    if (be == NULL || be->base == NULL || m == NULL || tables == NULL ||
+        !media_ok(m) || be->size < TDB_DYN_OFF + 64u) {
+        return TIKU_DB_ERR_INVAL;
+    }
+    *tables = 0;
+    b = be->base;
+    memcpy(&v, b + TDB_H_MAGIC, sizeof v);
+    if (v != TDB_MAGIC) {
+        return TIKU_DB_ERR_NOSTORE;
+    }
+    memcpy(&v16, b + TDB_H_VERSION, sizeof v16);
+    memcpy(&v, b + TDB_H_CHECK, sizeof v);
+    if (v16 != TDB_VERSION || fnv(b + 4u, TDB_HDR_BYTES - 8u) != v) {
+        return TIKU_DB_ERR_CORRUPT;
+    }
+    memcpy(&v16, b + TDB_H_LINE, sizeof v16);
+    memcpy(&v, b + TDB_H_EXTENT, sizeof v);
+    if (v16 != m->line || b[TDB_H_TEAR] != m->tear ||
+        b[TDB_H_TABLES] != TIKU_DB_TABLES_MAX || v != (uint32_t)be->size) {
+        return TIKU_DB_ERR_MEDIA;
+    }
+    for (i = 0; i < TIKU_DB_TABLES_MAX; ++i) {
+        const uint8_t *e = b + tent_off(i);
+        memcpy(&v, e + TDB_T_GATE, sizeof v);
+        if (v == TDB_TABLE_LIVE) {
+            memcpy(&v, e + TDB_T_CHECK, sizeof v);
+            if (fnv(e + 4u, TDB_TENT_BYTES - 8u) != v) {
+                return TIKU_DB_ERR_CORRUPT;
+            }
+            n++;
+        }
+    }
+    *tables = n;
+    return TIKU_DB_OK;
+}
+
 /*---------------------------------------------------------------------------*/
 /* FORMAT                                                                    */
 /*---------------------------------------------------------------------------*/

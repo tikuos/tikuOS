@@ -3202,6 +3202,30 @@ SRCS += shell/commands/tiku_shell_cmd_init.c
 endif
 
 # ---------------------------------------------------------------------------
+# The database (kernel/db): tables in place on byte-addressable NVM, in the
+# extent the layout service carves from the region's top (nvm.db), or in a
+# TIKU_DB_ARRAY_BYTES array on MSP430.  The in-place engine needs FRAM, MRAM or
+# RRAM, so a sector-flash port refuses it.
+# ---------------------------------------------------------------------------
+TIKU_DB_ENABLE ?= 0
+ifeq ($(TIKU_DB_ENABLE),1)
+ifeq ($(filter nordic ambiq ra8p1 msp430,$(TIKU_PLATFORM)),)
+$(error TIKU_DB_ENABLE=1 needs byte-addressable NVM (nRF54L, Apollo, RA8P1, MSP430); $(TIKU_PLATFORM) has sector flash)
+endif
+ifeq ($(MCU),msp430fr6989)
+$(error TIKU_DB_ENABLE=1 does not fit the MSP430FR6989's FRAM; the FR5994 takes it)
+endif
+CFLAGS += -DTIKU_DB_ENABLE=1
+ifneq ($(TIKU_DB_ARRAY_BYTES),)
+CFLAGS += -DTIKU_DB_ARRAY_BYTES=$(TIKU_DB_ARRAY_BYTES)
+endif
+SRCS += kernel/db/tiku_db.c kernel/db/tiku_db_inplace.c kernel/db/tiku_db_board.c
+ifeq ($(TIKU_SHELL_ENABLE),1)
+SRCS += shell/commands/tiku_shell_cmd_db.c
+endif
+endif
+
+# ---------------------------------------------------------------------------
 # tinymcp: the board as a Model Context Protocol server on console channel
 # 0xF3 (services/tinymcp/).  The protocol is the tinymcp library, a sibling
 # checkout at TINYMCP (tinymcp/ beside tikukits/, gitignored) that only a

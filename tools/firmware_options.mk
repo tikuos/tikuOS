@@ -52,6 +52,8 @@ $(eval $(call tiku_option,TIKU_INIT_ENABLE,bool,System,all,\
   Init system: boot configuration kept in NVM (needs the shell)))
 $(eval $(call tiku_option,TIKU_MCP_ENABLE,bool,System,all,\
   tinymcp: the board as a Model Context Protocol server on the console))
+$(eval $(call tiku_option,TIKU_DB_ENABLE,bool,System,plat:nordic+ambiq+ra8p1+msp430,\
+  Database: tables in place on byte-addressable NVM and the db command))
 $(eval $(call tiku_option,TIKU_THREADS_ENABLE,bool,System,arm,\
   Preemptive worker threads))
 $(eval $(call tiku_option,TIKU_SHELL_COLOR,bool,System,all,Colour in the shell))

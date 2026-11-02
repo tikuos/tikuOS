@@ -174,6 +174,9 @@
 #if TIKU_SHELL_CMD_LAYOUT
 #include "commands/tiku_shell_cmd_layout.h"
 #endif
+#if TIKU_SHELL_CMD_DB
+#include "commands/tiku_shell_cmd_db.h"
+#endif
 #if TIKU_MEM_RECLAIM_ENABLE
 #include "commands/tiku_shell_cmd_reclaim.h"
 #endif
@@ -678,6 +681,10 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #if TIKU_SHELL_CMD_LAYOUT
     {"layout",  "Memory budgets: layout [show|limits|plan|stage|...]",
      tiku_shell_cmd_layout},
+#endif
+#if TIKU_SHELL_CMD_DB
+    {"db",      "Tables on NVM: db [status|tables|create|insert|last|...]",
+     tiku_shell_cmd_db},
 #endif
 #if TIKU_MEM_RECLAIM_ENABLE
     {"mem", "Reconstruction: mem reclaim [status|last|pending|owners|stats|mode|retry|cancel]",

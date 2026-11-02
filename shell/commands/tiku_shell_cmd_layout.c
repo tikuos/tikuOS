@@ -28,6 +28,7 @@
 #include <kernel/fs/tiku_tfs.h>
 #include <kernel/vfs/tree/tiku_vfs_tree_data.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 /*---------------------------------------------------------------------------*/
@@ -148,8 +149,9 @@ layout_refusal(const char *verb, int rc, const tiku_layout_plan_t *plan)
         break;
     case TIKU_LAYOUT_E_LOSS:
         SHELL_PRINTF(SH_RED "layout %s: /data holds %u files (%lu bytes) "
-                     "that the change erases" SH_RST "\n", verb,
-                     (unsigned)plan->files, (unsigned long)plan->bytes);
+                     "and the database %u tables that the change erases"
+                     SH_RST "\n", verb, (unsigned)plan->files,
+                     (unsigned long)plan->bytes, (unsigned)plan->tables);
         SHELL_PRINTF("  add --erase to discard them\n");
         break;
     case TIKU_LAYOUT_E_STALE:
@@ -341,6 +343,10 @@ layout_request(uint8_t argc, const char *argv[], int stage)
             SHELL_PRINTF("/data is rewritten at the next boot; it holds no "
                          "files\n");
         }
+        if (plan.tables != 0u) {
+            SHELL_PRINTF("the database extent is rewritten too: %u tables "
+                         "are erased\n", (unsigned)plan.tables);
+        }
     }
     if (stage) {
         SHELL_PRINTF("staged operation %lu; reboot to apply, or "
@@ -402,15 +408,30 @@ tiku_shell_cmd_layout(uint8_t argc, const char *argv[])
         SHELL_PRINTF("%d candidate(s)%s\n", n, n > 8 ? " (first 8 shown)" : "");
     } else if (strcmp(sub, "recover") == 0) {
         tiku_layout_request_t q;
-        if (argc != 4u || strcmp(argv[3], "--accept-layout") != 0 ||
-            tiku_layout_parse(argv[2], &q) != 0 || q.n != 1u ||
-            q.kv[0].id != TIKU_KNOB_NVM_TIER) {
+        char text[64];
+        uint32_t tier = 0u, db = 0u;
+
+        /* nvm.tier names the store's offset; nvm.db, when the store was
+         * formatted around a database extent, that extent's size. */
+        text[0] = '\0';
+        if (argc == 5u) {
+            snprintf(text, sizeof text, "%s %s", argv[2], argv[3]);
+        } else if (argc == 4u) {
+            snprintf(text, sizeof text, "%s", argv[2]);
+        }
+        if ((argc != 4u && argc != 5u) ||
+            strcmp(argv[argc - 1u], "--accept-layout") != 0 ||
+            tiku_layout_parse(text, &q) != 0 || q.n != argc - 3u ||
+            (tier = tiku_layout_kv_get(q.kv, q.n, TIKU_KNOB_NVM_TIER, 0u)) == 0u ||
+            (q.n == 2u && (db = tiku_layout_kv_get(q.kv, q.n, TIKU_KNOB_NVM_DB,
+                                                   0u)) == 0u)) {
             SHELL_PRINTF("Usage: layout recover nvm.tier=<known-store-offset> "
-                         "--accept-layout\nNo files are formatted. Verify the "
-                         "offset from your previous layout, not a scan alone.\n");
+                         "[nvm.db=<extent-bytes>] --accept-layout\nNo files are "
+                         "formatted. Verify the offset from your previous "
+                         "layout, not a scan alone.\n");
             return;
         }
-        rc = tiku_layout_recover(q.kv[0].value);
+        rc = tiku_layout_recover_db(tier, db);
         SHELL_PRINTF("layout recover: %s%s\n", tiku_layout_err_name(rc),
                      rc == TIKU_LAYOUT_OK ? "; reboot to activate" : "");
     } else if (strcmp(sub, "plan") == 0) {

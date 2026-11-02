@@ -74,6 +74,14 @@ consumer allocates.  Rules that must hold:
   `rewriting` before the old header is retired, so a cut leaves the store
   held until `layout resume <op>`; nothing formats on its own after a cut.
 - A held store publishes no NVM tier.  MSP430 has no knob (fixed arrays).
+- With `TIKU_DB_ENABLE=1` a second knob, `nvm.db` (default 0, 4 KB steps),
+  carves the database extent from the region's top; `/data` ends where it
+  begins.  The record keeps schema 2, and its contract hashes the first
+  knob only, so a record without `nvm.db` reads as 0 and an image without
+  the knob holds a record that names it.  Any store change rewrites `/data`
+  and formats the extent; tables count as loss beside files.  A lost record
+  is not re-provisioned while an extent at the top holds tables; recovery
+  names it: `layout recover nvm.tier=<off> nvm.db=<bytes> --accept-layout`.
 
 The file store derives its capacity from the linker carve at mount; there
 is no per-part file-count table.

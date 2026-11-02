@@ -104,10 +104,10 @@ tiku_shell_cmd_df(uint8_t argc, const char *argv[])
                  (unsigned)s.used_slots, (unsigned)s.total_slots, st,
                  (unsigned)s.slot_bytes);
 
-    /* The NVM tier and this store tile the carved NVM region; an idle
-     * remainder, region space neither of them uses, prints in red.  A part
-     * whose store has its own backing array reports region_bytes 0 and prints
-     * no region line. */
+    /* The NVM tier, this store and the database extent tile the carved NVM
+     * region; an idle remainder, region space none of them uses, prints in
+     * red.  A part whose store has its own backing array reports
+     * region_bytes 0 and prints no region line. */
     if (s.region_bytes != 0u) {
         char rg[12], ti[12], fx[12], id[12];
         df_hsize(rg, sizeof rg, s.region_bytes);
@@ -115,6 +115,11 @@ tiku_shell_cmd_df(uint8_t argc, const char *argv[])
         df_hsize(fx, sizeof fx, s.fs_bytes);
         df_hsize(id, sizeof id, s.idle_bytes);
         SHELL_PRINTF("  region %s = tier %s + fs %s", rg, ti, fx);
+        if (s.db_bytes != 0u) {
+            char dbx[12];
+            df_hsize(dbx, sizeof dbx, s.db_bytes);
+            SHELL_PRINTF(" + db %s", dbx);
+        }
         if (s.idle_bytes != 0u) {
             SHELL_PRINTF(SH_RED " + idle %s" SH_RST "\n", id);
         } else {

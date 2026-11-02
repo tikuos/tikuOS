@@ -21,6 +21,10 @@
 /* MSP430 keeps its store and NVM tier in fixed arrays; no knob moves them. */
 #if !defined(PLATFORM_MSP430)
 
+#ifndef TIKU_DB_ENABLE
+#define TIKU_DB_ENABLE 0
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* KNOBS                                                                     */
 /*---------------------------------------------------------------------------*/
@@ -42,6 +46,29 @@ nvm_tier_bounds(const tiku_layout_env_t *e, tiku_layout_knob_t *k)
     return k->ceiling >= k->floor;
 }
 
+#if TIKU_DB_ENABLE
+/**
+ * @brief Bounds of the database extent at the region's top: whole steps from
+ *        0, leaving the store its floor and the tier one step.
+ */
+static int
+nvm_db_bounds(const tiku_layout_env_t *e, tiku_layout_knob_t *k)
+{
+    size_t size = e->region.size;
+    size_t min_store = tiku_tfs_region_size();
+
+    if (e->region.base == NULL || e->step == 0u || e->extent_format == NULL ||
+        size <= min_store + e->step) {
+        return 0;
+    }
+    k->step    = e->step;
+    k->floor   = 0u;
+    k->ceiling = (uint32_t)(((size - min_store - e->step) / e->step) * e->step);
+    k->dflt    = 0u;
+    return 1;
+}
+#endif
+
 typedef struct {
     uint8_t     id;
     uint8_t     effect;
@@ -49,9 +76,14 @@ typedef struct {
     int       (*bounds)(const tiku_layout_env_t *e, tiku_layout_knob_t *k);
 } knob_desc_t;
 
+/* The tier is knob 0: base_valid() and the contract read it by index. */
 static const knob_desc_t knobs[] = {
     { TIKU_KNOB_NVM_TIER, TIKU_LAYOUT_EFFECT_STORE, "nvm.tier",
       nvm_tier_bounds },
+#if TIKU_DB_ENABLE
+    { TIKU_KNOB_NVM_DB, TIKU_LAYOUT_EFFECT_STORE, "nvm.db",
+      nvm_db_bounds },
+#endif
 };
 
 #define KNOB_COUNT  (sizeof knobs / sizeof knobs[0])
@@ -176,7 +208,6 @@ static uint32_t
 contract_of(const tiku_layout_env_t *e)
 {
     uint32_t h = 2166136261u;
-    unsigned i;
 
     h = fnv(h, TIKU_LAYOUT_SCHEMA);
     h = fnv(h, (uint32_t)e->region.size);
@@ -185,9 +216,9 @@ contract_of(const tiku_layout_env_t *e)
     h = fnv(h, e->default_tier);
     h = fnv(h, (uint32_t)tiku_tfs_region_size());
     h = fnv(h, (uint32_t)TIKU_TFS_SLOT_BYTES);
-    for (i = 0u; i < KNOB_COUNT; i++) {
-        h = fnv(h, ((uint32_t)knobs[i].id << 8) | knobs[i].effect);
-    }
+    /* Only the first knob: a later one reads as its default from a record
+     * that does not list it, so adding one changes no record's contract. */
+    h = fnv(h, ((uint32_t)knobs[0].id << 8) | knobs[0].effect);
     return h;
 }
 
@@ -273,15 +304,20 @@ sub_write(tiku_nvm_backend_t *be, size_t off, const void *src, size_t len)
     return c->e->write(c->e->write_ctx, c->off + off, src, len);
 }
 
-/** @brief A backend for the store whose header sits at @p off. */
+/**
+ * @brief A backend for the store whose header sits at @p off and which ends
+ *        @p db bytes short of the region's top.
+ *
+ * @note The caller has checked that @p off + @p db lies inside the region.
+ */
 static void
-sub_backend(const tiku_layout_env_t *e, size_t off, sub_ctx_t *c,
+sub_backend(const tiku_layout_env_t *e, size_t off, size_t db, sub_ctx_t *c,
             tiku_nvm_backend_t *be)
 {
     c->e   = e;
     c->off = off;
     be->base  = e->region.base + off;
-    be->size  = e->region.size - off;
+    be->size  = e->region.size - off - db;
     be->write = sub_write;
     be->erase = NULL;
     be->ctx   = c;
@@ -294,27 +330,29 @@ region_present(const tiku_layout_env_t *e)
     return e->region.base != NULL && e->region.size > tiku_tfs_region_size();
 }
 
-/** @brief Probe the store at offset @p off of the region. */
+/** @brief Probe the store at offset @p off, ending @p db short of the top. */
 static void
-probe_at(const tiku_layout_env_t *e, size_t off, tiku_tfs_probe_t *p)
+probe_at(const tiku_layout_env_t *e, size_t off, size_t db,
+         tiku_tfs_probe_t *p)
 {
     tiku_nvm_backend_t be;
     sub_ctx_t c;
 
     memset(p, 0, sizeof *p);
-    if (off >= e->region.size) {
+    if (off >= e->region.size || db >= e->region.size - off) {
         p->kind = TFS_PROBE_TOOSMALL;
         return;
     }
-    sub_backend(e, off, &c, &be);
+    sub_backend(e, off, db, &c, &be);
     (void)tiku_tfs_probe(&be, p);
 }
 
 /** @brief Whether the store at @p off can be rewritten without losing files. */
 static int
-store_empty(const tiku_layout_env_t *e, size_t off, tiku_tfs_probe_t *p)
+store_empty(const tiku_layout_env_t *e, size_t off, size_t db,
+            tiku_tfs_probe_t *p)
 {
-    probe_at(e, off, p);
+    probe_at(e, off, db, p);
     if (p->kind == TFS_PROBE_COMPATIBLE) {
         return p->live == 0u;
     }
@@ -332,6 +370,50 @@ applied_tier(const tiku_layout_env_t *e, const tiku_layout_record_t *r)
 {
     return tiku_layout_kv_get(r->applied, r->n_applied, TIKU_KNOB_NVM_TIER,
                               e->default_tier);
+}
+
+/** @brief The applied database extent: the record's, or 0. */
+static uint32_t
+applied_db(const tiku_layout_record_t *r)
+{
+    return tiku_layout_kv_get(r->applied, r->n_applied, TIKU_KNOB_NVM_DB, 0u);
+}
+
+/** @brief Whether a tier of @p tier and an extent of @p db leave the store
+ *         its floor. */
+static int
+split_fits(const tiku_layout_env_t *e, uint32_t tier, uint32_t db)
+{
+    return (uint64_t)tier + db + tiku_tfs_region_size() <=
+           (uint64_t)e->region.size;
+}
+
+/** @brief Live tables in @p r's applied database extent; 0 without one. */
+static uint16_t
+extent_tables(const tiku_layout_env_t *e, const tiku_layout_record_t *r)
+{
+    uint32_t db = applied_db(r);
+    int n;
+
+    if (db == 0u || e->extent_live == NULL || db > e->region.size) {
+        return 0u;
+    }
+    n = e->extent_live(e->extent_ctx, e->region.size - db, db);
+    return (n <= 0) ? 0u : (n > 0xFFFF ? 0xFFFFu : (uint16_t)n);
+}
+
+/** @brief Whether knob @p id is named in @p n entries of @p kv. */
+static int
+kv_has(const tiku_layout_kv_t *kv, uint8_t n, uint8_t id)
+{
+    uint8_t i;
+
+    for (i = 0u; i < n && i < TIKU_LAYOUT_KNOBS_MAX; i++) {
+        if (kv[i].id == id) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 /**
@@ -381,6 +463,22 @@ check_kvs(const tiku_layout_env_t *e, const tiku_layout_record_t *r,
             plan->effect = k.effect;
         }
     }
+    {
+        uint32_t tier = tiku_layout_kv_get(kv, n, TIKU_KNOB_NVM_TIER,
+                                           applied_tier(e, r));
+        uint32_t db = tiku_layout_kv_get(kv, n, TIKU_KNOB_NVM_DB,
+                                         applied_db(r));
+        if (!split_fits(e, tier, db)) {
+            uint8_t id = kv_has(kv, n, TIKU_KNOB_NVM_DB) ? TIKU_KNOB_NVM_DB
+                                                          : TIKU_KNOB_NVM_TIER;
+            uint64_t other = (id == TIKU_KNOB_NVM_DB) ? tier : db;
+            uint64_t room = (uint64_t)e->region.size - tiku_tfs_region_size();
+            room = (room > other) ? room - other : 0u;
+            plan->bad_knob = id;
+            plan->nearest  = (uint32_t)((room / e->step) * e->step);
+            return TIKU_LAYOUT_E_RANGE;
+        }
+    }
     return TIKU_LAYOUT_OK;
 }
 
@@ -398,7 +496,36 @@ base_valid(const tiku_layout_env_t *e, uint32_t base)
 }
 
 /**
- * @brief Whether @p r is a valid record for this image with one valid tier.
+ * @brief Whether every applied knob after the tier is one this build has, in
+ *        its bounds and on its step, named once, with a split that fits.
+ */
+static int
+applied_valid(const tiku_layout_env_t *e, const tiku_layout_record_t *r)
+{
+    uint8_t i, j;
+
+    for (i = 1u; i < r->n_applied; i++) {
+        tiku_layout_knob_t k;
+        int idx = knob_index(r->applied[i].id);
+        uint32_t v = r->applied[i].value;
+
+        if (idx <= 0 || !tiku_layout_knob_env(e, (unsigned)idx, &k) ||
+            v < k.floor || v > k.ceiling ||
+            (k.step > 1u && v % k.step != 0u)) {
+            return 0;
+        }
+        for (j = 1u; j < i; j++) {
+            if (r->applied[j].id == r->applied[i].id) {
+                return 0;
+            }
+        }
+    }
+    return split_fits(e, r->applied[0].value, applied_db(r));
+}
+
+/**
+ * @brief Whether @p r is a valid record for this image: the tier first and
+ *        valid, and every other applied knob one this build has.
  *
  * @return TIKU_LAYOUT_OK, TIKU_LAYOUT_E_STALE for another image's record, or
  *         TIKU_LAYOUT_E_RECOVERY
@@ -412,8 +539,8 @@ record_usable(const tiku_layout_env_t *e, const tiku_layout_record_t *r)
     if (r->contract != contract_of(e)) {
         return TIKU_LAYOUT_E_STALE;
     }
-    if (r->n_applied != 1u || r->applied[0].id != TIKU_KNOB_NVM_TIER ||
-        !base_valid(e, r->applied[0].value)) {
+    if (r->n_applied < 1u || r->applied[0].id != TIKU_KNOB_NVM_TIER ||
+        !base_valid(e, r->applied[0].value) || !applied_valid(e, r)) {
         return TIKU_LAYOUT_E_RECOVERY;
     }
     return TIKU_LAYOUT_OK;
@@ -426,7 +553,7 @@ tiku_layout_plan_env(const tiku_layout_env_t *e,
 {
     tiku_layout_record_t r;
     tiku_tfs_probe_t p;
-    int rc;
+    int rc, lose;
 
     if (e == NULL || e->rec == NULL || req == NULL || plan == NULL) {
         return TIKU_LAYOUT_E_INVAL;
@@ -444,12 +571,16 @@ tiku_layout_plan_env(const tiku_layout_env_t *e,
     if (rc != TIKU_LAYOUT_OK || plan->effect != TIKU_LAYOUT_EFFECT_STORE) {
         return rc;
     }
-    if (!store_empty(e, applied_tier(e, &r), &p)) {
+    /* A rewrite formats /data and the database extent both. */
+    lose = !store_empty(e, applied_tier(e, &r), applied_db(&r), &p);
+    if (lose) {
         plan->files = p.live;
         plan->bytes = p.bytes;
-        if (req->method != TIKU_LAYOUT_METHOD_ERASE) {
-            return TIKU_LAYOUT_E_LOSS;
-        }
+    }
+    plan->tables = extent_tables(e, &r);
+    if ((lose || plan->tables != 0u) &&
+        req->method != TIKU_LAYOUT_METHOD_ERASE) {
+        return TIKU_LAYOUT_E_LOSS;
     }
     return TIKU_LAYOUT_OK;
 }
@@ -593,7 +724,7 @@ refuse(const tiku_layout_env_t *e, tiku_layout_record_t *r,
 
 /**
  * @brief Carry out a consumed rewrite: retire the old header, format the new
- *        store, then record the operation as finished.
+ *        store and the database extent, then record the operation finished.
  *
  * Runs at boot and on resume.  A failure leaves the record saying rewriting,
  * so the store stays held until an explicit resume.
@@ -607,12 +738,15 @@ finish_rewrite(const tiku_layout_env_t *e, tiku_layout_record_t *r,
     tiku_nvm_backend_t be;
     sub_ctx_t c;
     uint32_t dst = r->dst_base;
+    uint32_t db = applied_db(r);
     tiku_layout_record_t done;
 
+    /* The base may stay where it was when only the extent changed. */
     if (record_usable(e, r) != TIKU_LAYOUT_OK ||
         !base_valid(e, r->src_base) || !base_valid(e, dst) ||
-        applied_tier(e, r) != dst || r->src_base == dst ||
-        r->op == 0u || r->n_pending != 0u || e->write == NULL) {
+        applied_tier(e, r) != dst ||
+        r->op == 0u || r->n_pending != 0u || e->write == NULL ||
+        (db != 0u && e->extent_format == NULL)) {
         return TIKU_LAYOUT_E_STALE;
     }
 
@@ -629,8 +763,12 @@ finish_rewrite(const tiku_layout_env_t *e, tiku_layout_record_t *r,
         e->write(e->write_ctx, r->src_base, zero, sizeof zero) != 0) {
         return TIKU_LAYOUT_E_IO;
     }
-    sub_backend(e, dst, &c, &be);
+    sub_backend(e, dst, db, &c, &be);
     if (tiku_tfs_init(&fs, &be) != TFS_OK) {
+        return TIKU_LAYOUT_E_IO;
+    }
+    if (db != 0u &&
+        e->extent_format(e->extent_ctx, e->region.size - db, db) != 0) {
         return TIKU_LAYOUT_E_IO;
     }
     done = *r;
@@ -660,9 +798,9 @@ boot_request(const tiku_layout_env_t *e, tiku_layout_record_t *r,
     tiku_layout_plan_t plan;
     tiku_layout_record_t w;
     tiku_tfs_probe_t p;
-    uint32_t src, dst;
+    uint32_t src, dst, src_db, dst_db;
     uint8_t i;
-    int rc;
+    int rc, change;
 
     memset(&plan, 0, sizeof plan);
     rc = check_kvs(e, r, r->pending, r->n_pending, &plan);
@@ -676,9 +814,14 @@ boot_request(const tiku_layout_env_t *e, tiku_layout_record_t *r,
     }
     src = applied_tier(e, r);
     dst = tiku_layout_kv_get(r->pending, r->n_pending, TIKU_KNOB_NVM_TIER, src);
-    if (src != dst && !store_empty(e, src, &p) &&
-        r->method != TIKU_LAYOUT_METHOD_ERASE) {
-        refuse(e, r, st, TIKU_LAYOUT_E_LOSS);  /* files arrived since staging */
+    src_db = applied_db(r);
+    dst_db = tiku_layout_kv_get(r->pending, r->n_pending, TIKU_KNOB_NVM_DB,
+                                src_db);
+    change = (src != dst || src_db != dst_db);
+    /* Files or tables may have arrived since staging. */
+    if (change && r->method != TIKU_LAYOUT_METHOD_ERASE &&
+        (!store_empty(e, src, src_db, &p) || extent_tables(e, r) != 0u)) {
+        refuse(e, r, st, TIKU_LAYOUT_E_LOSS);
         return;
     }
     w = *r;
@@ -687,7 +830,7 @@ boot_request(const tiku_layout_env_t *e, tiku_layout_record_t *r,
     }
     w.n_pending = 0u;
     w.generation++;
-    if (src == dst) {
+    if (!change) {
         w.receipt    = TIKU_LAYOUT_OK;
         w.receipt_op = r->op;
         w.op         = 0u;
@@ -735,7 +878,7 @@ boot_store(const tiku_layout_env_t *e, tiku_layout_record_t *r,
     tiku_tfs_probe_t p;
     uint32_t base = applied_tier(e, r);
 
-    probe_at(e, base, &p);
+    probe_at(e, base, applied_db(r), &p);
     if (p.kind == TFS_PROBE_COMPATIBLE) {
         st->tier  = base;
         st->store = TIKU_LAYOUT_STORE_READY;
@@ -780,7 +923,7 @@ finish_provision(const tiku_layout_env_t *e, tiku_layout_record_t *r,
     st->held    = TIKU_LAYOUT_HELD_IO;
     st->tier    = 0u;
     st->outcome = TIKU_LAYOUT_E_IO;
-    sub_backend(e, base, &c, &be);
+    sub_backend(e, base, applied_db(r), &c, &be);
     if (tiku_tfs_init(&fs, &be) != TFS_OK) {
         return;
     }
@@ -796,7 +939,29 @@ finish_provision(const tiku_layout_env_t *e, tiku_layout_record_t *r,
 }
 
 /**
- * @brief An empty store at the default base in an otherwise blank region.
+ * @brief Whether a database extent holding tables ends the region at a whole
+ *        step: a record lost after nvm.db was applied leaves one.
+ */
+static int
+extent_found(const tiku_layout_env_t *e)
+{
+    size_t db;
+
+    if (e->extent_live == NULL || e->step == 0u) {
+        return 0;
+    }
+    for (db = e->step; db + tiku_tfs_region_size() < e->region.size;
+         db += e->step) {
+        if (e->extent_live(e->extent_ctx, e->region.size - db, db) > 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * @brief An empty store at the default base in an otherwise blank region,
+ *        with no database extent holding tables at its top.
  *
  * Only a provisioning whose last record write was cut leaves this: the store
  * holds no file, so writing it again loses nothing.
@@ -808,10 +973,10 @@ provision_cut(const tiku_layout_env_t *e)
     size_t i;
 
     if (!base_valid(e, e->default_tier) ||
-        tiku_tfs_locate(&e->region, e->step, NULL, 0) != 1) {
+        tiku_tfs_locate(&e->region, e->step, NULL, 0) != 1 || extent_found(e)) {
         return 0;
     }
-    probe_at(e, e->default_tier, &p);
+    probe_at(e, e->default_tier, 0u, &p);
     if (p.kind != TFS_PROBE_COMPATIBLE || p.live != 0u) {
         return 0;
     }
@@ -943,13 +1108,25 @@ int
 tiku_layout_recover_env(const tiku_layout_env_t *e, tiku_layout_state_t *st,
                         uint32_t base)
 {
+    return tiku_layout_recover_db_env(e, st, base, 0u);
+}
+
+int
+tiku_layout_recover_db_env(const tiku_layout_env_t *e, tiku_layout_state_t *st,
+                           uint32_t base, uint32_t db)
+{
     tiku_layout_record_t r;
+    tiku_layout_knob_t k;
     tiku_nvm_backend_t be;
     tiku_tfs_t fs;
     sub_ctx_t c;
+    int idx = knob_index(TIKU_KNOB_NVM_DB);
     int rc;
 
-    if (e == NULL || e->rec == NULL || st == NULL || !base_valid(e, base)) {
+    if (e == NULL || e->rec == NULL || st == NULL || !base_valid(e, base) ||
+        !split_fits(e, base, db) ||
+        (db != 0u && (idx < 0 || !tiku_layout_knob_env(e, (unsigned)idx, &k) ||
+                      db > k.ceiling || db % k.step != 0u))) {
         return TIKU_LAYOUT_E_RANGE;
     }
     if ((st->store != TIKU_LAYOUT_STORE_PROVISION &&
@@ -959,7 +1136,7 @@ tiku_layout_recover_env(const tiku_layout_env_t *e, tiku_layout_state_t *st,
          (e->rec->phase != TIKU_LAYOUT_PHASE_NONE || e->rec->n_pending != 0u))) {
         return TIKU_LAYOUT_E_BUSY;
     }
-    sub_backend(e, base, &c, &be);
+    sub_backend(e, base, db, &c, &be);
     if (tiku_tfs_mount(&fs, &be) != TFS_OK) {
         return TIKU_LAYOUT_E_RECOVERY;
     }
@@ -967,6 +1144,9 @@ tiku_layout_recover_env(const tiku_layout_env_t *e, tiku_layout_state_t *st,
     rc = fresh_identity(e, &r);
     if (rc != TIKU_LAYOUT_OK) { return rc; }
     kv_set(r.applied, &r.n_applied, TIKU_KNOB_NVM_TIER, base);
+    if (db != 0u) {
+        kv_set(r.applied, &r.n_applied, TIKU_KNOB_NVM_DB, db);
+    }
     rc = commit(e, &r);
     if (rc != TIKU_LAYOUT_OK) {
         st->held = TIKU_LAYOUT_HELD_IO;
@@ -1193,6 +1373,9 @@ tiku_layout_held_name(uint8_t held)
 
 #include "tiku_mem.h"
 #include "tiku_nvm_region.h"
+#if TIKU_DB_ENABLE
+#include "kernel/db/tiku_db_board.h"
+#endif
 
 #if defined(PLATFORM_AMBIQ)
 #include <arch/ambiq/tiku_trng_arch.h>
@@ -1372,6 +1555,10 @@ tiku_layout_boot(void)
     board_env.random       = board_random;
     board_env.default_tier = (uint32_t)TIKU_NVM_TIER_BYTES;
     board_env.step         = (uint32_t)TIKU_TFS_LOCATE_STEP;
+#if TIKU_DB_ENABLE
+    board_env.extent_live   = tiku_db_board_live;
+    board_env.extent_format = tiku_db_board_carve;
+#endif
     if (rgn != NULL && rgn->base != NULL) {
         board_env.region.base = rgn->base;
         board_env.region.size = rgn->size;
@@ -1468,6 +1655,42 @@ int tiku_layout_recover(uint32_t base)
 {
     tiku_layout_boot();
     return tiku_layout_recover_env(&board_env, &board_state, base);
+}
+
+int tiku_layout_recover_db(uint32_t base, uint32_t db)
+{
+    tiku_layout_boot();
+    return tiku_layout_recover_db_env(&board_env, &board_state, base, db);
+}
+
+uint32_t
+tiku_layout_db_bytes(void)
+{
+    tiku_layout_boot();
+    if (record_usable(&board_env, board_env.rec) != TIKU_LAYOUT_OK) {
+        return 0u;
+    }
+    return applied_db(board_env.rec);
+}
+
+int
+tiku_layout_db_extent(uint32_t *off, uint32_t *len)
+{
+    uint32_t db;
+
+    tiku_layout_boot();
+    if (off == NULL || len == NULL ||
+        board_state.store != TIKU_LAYOUT_STORE_READY ||
+        record_usable(&board_env, board_env.rec) != TIKU_LAYOUT_OK) {
+        return 0;
+    }
+    db = applied_db(board_env.rec);
+    if (db == 0u) {
+        return 0;
+    }
+    *off = (uint32_t)board_env.region.size - db;
+    *len = db;
+    return 1;
 }
 
 #endif /* !TIKU_LAYOUT_CORE_ONLY */

@@ -309,8 +309,8 @@ layout_resume_write(const char *buf, size_t len)
 }
 
 /**
- * @brief recover: "nvm.tier=V confirm=accept-layout" names the store's
- *        offset; it never searches for a store or formats one.
+ * @brief recover: "nvm.tier=V [nvm.db=D] confirm=accept-layout" names the
+ *        store's offset and the extent it ends at; it never searches or formats.
  */
 static int
 layout_recover_write(const char *buf, size_t len)
@@ -329,12 +329,15 @@ layout_recover_write(const char *buf, size_t len)
         return TIKU_VFS_EINVAL;
     }
     text[n - (sizeof suffix - 1u)] = '\0';
-    if (tiku_layout_parse(text, &q) != 0 || q.n != 1u ||
-        q.kv[0].id != TIKU_KNOB_NVM_TIER || q.op != 0u ||
-        q.has_expect || q.method != TIKU_LAYOUT_METHOD_NONE) {
+    if (tiku_layout_parse(text, &q) != 0 || q.n < 1u || q.n > 2u ||
+        tiku_layout_kv_get(q.kv, q.n, TIKU_KNOB_NVM_TIER, 0u) == 0u ||
+        (q.n == 2u && tiku_layout_kv_get(q.kv, q.n, TIKU_KNOB_NVM_DB, 0u) == 0u) ||
+        q.op != 0u || q.has_expect || q.method != TIKU_LAYOUT_METHOD_NONE) {
         return TIKU_VFS_EINVAL;
     }
-    return layout_vfs_err(tiku_layout_recover(q.kv[0].value));
+    return layout_vfs_err(tiku_layout_recover_db(
+        tiku_layout_kv_get(q.kv, q.n, TIKU_KNOB_NVM_TIER, 0u),
+        tiku_layout_kv_get(q.kv, q.n, TIKU_KNOB_NVM_DB, 0u)));
 }
 
 /*---------------------------------------------------------------------------*/
