@@ -479,6 +479,15 @@ positions. The native flash driver installs the mapping before shell entry. The 
 profile refuses startup if native flash or durable-state admission fails;
 the P4 can then select the preserved recovery application.
 
+A firmware ELF can declare `__c6_headless_xip=1` with
+`__c6_shell_profile=0` to use XIP without the shell. This profile requires
+an XIP payload and a declared SRAM tier floor of at least 32,768 bytes.
+The packager rejects other flag values, a simultaneous shell declaration,
+a missing payload and a tier smaller than its declared floor. Its boot
+path must install the native flash mapping before calling XIP functions
+and dispatch registered peripheral interrupts. Existing profiles retain
+their tier-floor checks.
+
 The P4 object-stream diagnostics register the remote channel while the bulk
 stream advances. A bulk exchange starts between successive remote requests.
 The console qualifier checks malformed frames and exact retries, command

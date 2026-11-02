@@ -39,8 +39,11 @@ def native_layout(elf,native,xip=b''):
         raise ValueError('C6 firmware target, entry or initialized extent')
     shell=names.get('__c6_shell_profile',0)
     if shell not in (0,1):raise ValueError('unknown C6 shell profile')
+    headless=names.get('__c6_headless_xip',0)
+    if headless not in (0,1) or (headless and (shell or not xip)):
+        raise ValueError('invalid C6 headless XIP profile')
     if xip:
-        if (not shell or names.get('__c6_xip_start')!=0x42210000 or
+        if (not (shell or headless) or names.get('__c6_xip_start')!=0x42210000 or
                 names.get('__c6_xip_end')!=0x42210000+len(xip) or
                 not 0<len(xip)<=0xfffd0 or len(xip)%4):
             raise ValueError('C6 XIP declaration mismatch')
@@ -69,7 +72,7 @@ def native_layout(elf,native,xip=b''):
     if (spans['workers']['bytes']!=32768 or spans['radio']['bytes']!=65536 or
             spans['irq_stack']['bytes']!=2048 or spans['main_stack']['bytes']!=8192 or
             spans['tier']['bytes']<names.get('__c6_tier_floor',196608) or
-            names.get('__c6_tier_floor',0)<65536 or
+            names.get('__c6_tier_floor',0)<(32768 if headless else 65536) or
             names.get('__native_stack_top')!=END-4096):
         raise ValueError('C6 firmware reservation or tier budget')
     if '__c6_recovery_start' in names or '__c6_recovery_end' in names:

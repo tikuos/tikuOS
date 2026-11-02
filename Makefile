@@ -3971,6 +3971,7 @@ endif # MINIMAL
 # Feature overlays are platform-independent, like application overlays.
 SRCS   += $(EXP_SRCS)
 CFLAGS += $(EXP_CFLAGS)
+LDFLAGS += $(EXP_LDFLAGS)
 SRCS   += $(APPL_SRCS)
 CFLAGS += $(APPL_CFLAGS)
 # $(sort) also removes duplicates.  Some files are added by two blocks

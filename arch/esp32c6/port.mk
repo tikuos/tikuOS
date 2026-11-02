@@ -7,6 +7,7 @@
 # port.mk - ESP32-C6 native kernel in a resident-loader SRAM arena.
 #
 # SPDX-License-Identifier: Apache-2.0
+-include experiment/experiment.mk
 C6_PROFILE ?= resident
 ifeq ($(TIKU_C6_BLE_SERVICE_ENABLE),1)
 ifneq ($(C6_PROFILE):$(TIKU_C6_RADIO_SERVICE_ENABLE):$(TIKU_DRV_BLE_ESP_ENABLE),firmware:1:1)
@@ -169,6 +170,10 @@ endif
 C6_TIER_MIN ?= 196608
 CFLAGS += -DTIKU_C6_FIRMWARE=1 -DTIKU_C6_TIER_FLOOR=$(C6_TIER_MIN)
 endif
+C6_SRCS += $(EXP_SRCS)
+CFLAGS += $(EXP_CFLAGS)
+C6_LDFLAGS += $(EXP_LDFLAGS)
+C6_LIBS += $(EXP_LIBS)
 C6_OBJS := $(addprefix $(BUILD_DIR)/,$(C6_SRCS:.c=.o) $(C6_ASMS:.S=.o) $(C6_TEST_ASMS:.S=.o) $(C6_STORAGE_ASMS:.S=.o))
 .PHONY: all clean flash FORCE
 FORCE:
@@ -188,7 +193,8 @@ $(BUILD_DIR)/%.o: %.S
 	@mkdir -p $(dir $@)
 	$(CC) $(filter-out -include $(ROOT)/arch/esp32c6/include/tiku.h,$(CFLAGS)) -MMD -MP -c $< -o $@
 ifeq ($(C6_PROFILE),firmware)
-$(BUILD_DIR)/native.ld: arch/esp32c6/esp32c6_firmware.ld.in
+C6_FIRMWARE_LD := $(if $(TIKU_EXP_C6_FIRMWARE_LD),$(TIKU_EXP_C6_FIRMWARE_LD),arch/esp32c6/esp32c6_firmware.ld.in)
+$(BUILD_DIR)/native.ld: $(C6_FIRMWARE_LD)
 	@mkdir -p $(dir $@)
 	sed -e 's/@BASE@/$(C6_RAM_BASE)/g' -e 's/@BUILD@/$(C6_BUILD)/g' \
 	 -e 's|@RADIO_XIP@|$(if $(filter 1,$(TIKU_DRV_WIFI_ESP_ENABLE) $(TIKU_DRV_BLE_ESP_ENABLE)),INCLUDE drivers/wifi/esp/c6/wifi_c6_xip.ld,)|g' \
