@@ -1,8 +1,9 @@
 # kernel/db/
 
 Tables of fixed-size records in place on byte-addressable NVM (FRAM, MRAM,
-RRAM).  One API, `tiku_db.h`; the medium under it is a descriptor the port
-fills in, `tiku_db_media.h`; the extent layout and the write order are
+RRAM).  One API, `tiku_db.h`; the medium under it is the kernel's
+descriptor (`kernel/memory/tiku_nvm_media.h`), which `tiku_db_media.h`
+names for the engine; the extent layout and the write order are
 `tiku_db_inplace.c`; the verbs, cursors and the transaction rule are
 `tiku_db.c`; the board's medium and extent are `tiku_db_board.c`.  Nothing
 here includes `shell/`, `basic/` or `services/`.  `make TIKU_DB_ENABLE=1`
@@ -10,10 +11,12 @@ builds it, with the `db` shell command; a sector-flash port refuses it.
 
 ## The medium
 
-`tiku_db_media_t {line, tear, endurance}`.  `line` is the program granule
-(a 16-byte line on RRAM and MRAM, the architecture word on FRAM); a record
-is padded to whole lines and never shares a line with another record.  `tear`
-says what a power cut during a program leaves in the line being written:
+`tiku_db_media_t` is `tiku_nvm_media_t {unit, tear, endurance,
+erase_unit}`.  `unit` is the program granule (a 16-byte line on RRAM and
+MRAM, 32 on the RA8P1, the architecture word on FRAM); a record is padded to
+whole units and never shares a unit with another record.  The engine builds
+where `erase_unit` is 0.  `tear` says what a power cut during a program
+leaves in the unit being written:
 
 - `TIKU_DB_TEAR_NONE`: the line lands whole or stays as it was.  The gate
   and the echo share lines with columns; a record of one line is one
@@ -23,10 +26,10 @@ says what a power cut during a program leaves in the line being written:
   the echo the last.
 - `TIKU_DB_TEAR_LINE`: every byte of the line may read as anything.  As
   `TEAR_BYTE`, and the echo's line also holds the echo's complement; an
-  echo without it is not a sequence number.  `line` is at least 8.
+  echo without it is not a sequence number.  `unit` is at least 8.
 
-`endurance` is the programs one line is rated for (Nordic rates the
-nRF54L RRAM at 10⁴); 0 means no limit.  `tiku_db_create()` refuses a table whose ring,
+`endurance` is the programs one unit is rated for (the nRF54L RRAM 10⁴,
+the Apollo and RA8P1 MRAM 10⁵); 0 means no limit.  `tiku_db_create()` refuses a table whose ring,
 at its declared `rate` (inserts per hour) over its declared `life` (days),
 would program a line more often than that, and names the capacity that
 would do.
@@ -74,10 +77,9 @@ region's top that the layout service carves with `nvm.db`
 layout service formats it whenever it rewrites the store and counts its
 tables as loss.  On MSP430 it is a `TIKU_DURABLE` array of
 `TIKU_DB_ARRAY_BYTES` (16 KB), formatted at the first call when every byte
-is 0x00 or every byte 0xFF.  Each port's descriptor is in
-`tiku_db_board.c`: RRAM and MRAM lines of 16 bytes (32 on RA8P1, its program
-buffer) that a cut may leave unreadable, with the RRAM rated for 10⁴
-programs a line; FRAM by the 16-bit word.
+is 0x00 or every byte 0xFF.  The medium is the port's descriptor from
+`kernel/memory/tiku_nvm_media.h`; a port whose descriptor has an erase unit
+does not build the engine.
 
 ```
 db status                               the medium, the extent, the tables

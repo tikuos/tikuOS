@@ -125,7 +125,7 @@ per-platform semantics and the NVM region layout.
 | Working on | Read |
 |------------|------|
 | the VFS, nodes, watch, rules, persist cells | `kernel/vfs/AGENTS.md` |
-| memory tiers, NVM region, `/data`, layout knobs | `kernel/memory/AGENTS.md` |
+| memory tiers, NVM region, `/data`, layout knobs, the medium descriptor | `kernel/memory/AGENTS.md` |
 | database tables in place on NVM, the media descriptor | `kernel/db/AGENTS.md` |
 | the console line, frames and channels | `services/console/AGENTS.md` |
 | message links over the console, IP or BLE | `services/link/AGENTS.md` |

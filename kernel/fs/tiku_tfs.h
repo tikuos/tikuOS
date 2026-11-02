@@ -21,6 +21,7 @@
 #include <stdint.h>
 
 #include "tiku_nvm_backend.h"
+#include "kernel/memory/tiku_nvm_media.h"
 
 /*---------------------------------------------------------------------------*/
 /* COMPILE-TIME LIMITS                                                       */
@@ -87,18 +88,16 @@
  * @brief Payload bytes of one slot; a file may span several slots
  *        (TIKU_TFS_FILE_MAX), except on MSP430, which keeps one per file.
  *
- * On flash parts a slot, its 4-byte length word included, is one 4 KB erase
- * sector (TIKU_TFS_SECT), so a power cut during one file's write cannot reach
- * a neighbour's sector.  MSP430 and host use 512-byte slots.
+ * Where the medium has an erase unit (tiku_nvm_media.h) a slot, its 4-byte
+ * length word included, is one sector (TIKU_TFS_SECT), so a cut during one
+ * file's write cannot reach a neighbour's.  MSP430 and host use 512 bytes.
  */
-#  if defined(PLATFORM_RP2350) || defined(PLATFORM_STM32N6) || \
-      defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32C6) || defined(PLATFORM_ESP32P4)
-#    define TIKU_TFS_SLOT_DATA  4092   /**< + 4 B length = one 4 KB sector */
-#  elif defined(PLATFORM_AMBIQ) || defined(PLATFORM_NORDIC) || \
-       defined(PLATFORM_RA8P1)
-#    define TIKU_TFS_SLOT_DATA  4096   /**< MRAM/RRAM: no erase granule */
-#  else
+#  if TIKU_NVM_MEDIA_ERASE != 0u
+#    define TIKU_TFS_SLOT_DATA  (TIKU_NVM_MEDIA_ERASE - 4u)  /**< + 4 B length = one sector */
+#  elif defined(PLATFORM_MSP430) || defined(TIKU_NVM_MEDIA_HOST)
 #    define TIKU_TFS_SLOT_DATA  512    /**< MSP430 and host */
+#  else
+#    define TIKU_TFS_SLOT_DATA  4096   /**< MRAM/RRAM: no erase granule */
 #  endif
 #endif
 
@@ -107,12 +106,11 @@
  *
  * Each data slot owns whole erase sectors and the directory/data boundary is
  * sector-aligned, so a power cut during one file's write cannot corrupt a
- * neighbour.  Byte-writable media (FRAM, MRAM, RRAM) use 4-byte alignment.
+ * neighbour.  A medium rewritten in place is aligned to 4 bytes.
  */
 #ifndef TIKU_TFS_SECT
-#  if defined(PLATFORM_RP2350) || defined(PLATFORM_STM32N6) || \
-      defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32C6) || defined(PLATFORM_ESP32P4)
-#    define TIKU_TFS_SECT  4096u
+#  if TIKU_NVM_MEDIA_ERASE != 0u
+#    define TIKU_TFS_SECT  TIKU_NVM_MEDIA_ERASE
 #  else
 #    define TIKU_TFS_SECT  4u
 #  endif

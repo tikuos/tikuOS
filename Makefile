@@ -2536,6 +2536,7 @@ SRCS += kernel/memory/tiku_mem.c
 SRCS += kernel/memory/tiku_pool.c
 SRCS += kernel/memory/tiku_mpu.c
 SRCS += kernel/memory/tiku_persist.c
+SRCS += kernel/memory/tiku_nvm_media.c
 SRCS += kernel/memory/tiku_persist_move.c
 SRCS += kernel/memory/tiku_region.c
 SRCS += kernel/memory/tiku_tier.c
@@ -3204,14 +3205,12 @@ endif
 # ---------------------------------------------------------------------------
 # The database (kernel/db): tables in place on byte-addressable NVM, in the
 # extent the layout service carves from the region's top (nvm.db), or in a
-# TIKU_DB_ARRAY_BYTES array on MSP430.  The in-place engine needs FRAM, MRAM or
-# RRAM, so a sector-flash port refuses it.
+# TIKU_DB_ARRAY_BYTES array on MSP430.  The in-place engine needs a medium
+# rewritten in place, so kernel/db/tiku_db_board.c refuses a port whose
+# descriptor (kernel/memory/tiku_nvm_media.h) has an erase unit.
 # ---------------------------------------------------------------------------
 TIKU_DB_ENABLE ?= 0
 ifeq ($(TIKU_DB_ENABLE),1)
-ifeq ($(filter nordic ambiq ra8p1 msp430,$(TIKU_PLATFORM)),)
-$(error TIKU_DB_ENABLE=1 needs byte-addressable NVM (nRF54L, Apollo, RA8P1, MSP430); $(TIKU_PLATFORM) has sector flash)
-endif
 ifeq ($(MCU),msp430fr6989)
 $(error TIKU_DB_ENABLE=1 does not fit the MSP430FR6989's FRAM; the FR5994 takes it)
 endif

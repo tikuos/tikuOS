@@ -441,7 +441,7 @@ static void verb_status(void)
     tiku_db_t *db;
     int i, tables = 0;
 
-    SHELL_PRINTF("medium: line %u B; %s\n", (unsigned)m->line,
+    SHELL_PRINTF("medium: line %u B; %s\n", (unsigned)m->unit,
                  m->tear == TIKU_DB_TEAR_NONE ? "a cut leaves a line whole or old" :
                  m->tear == TIKU_DB_TEAR_BYTE ? "a cut lands a prefix of a write" :
                  "a cut can leave a line unreadable");

@@ -46,6 +46,7 @@
 #endif
 #include "tiku_vfs_tree_boot.h"
 #include <kernel/cpu/tiku_stack.h>   /* /sys/mem/stack_free */
+#include <kernel/memory/tiku_nvm_media.h>  /* /sys/mem/media */
 #include "tiku_vfs_tree_timer.h"
 #include "tiku_vfs_tree_watchdog.h"
 #include "tiku_vfs_tree_power.h"
@@ -231,6 +232,26 @@ nvm_read(char *buf, size_t max)
 {
     return snprintf(buf, max, "%lu\n",
                     (unsigned long)TIKU_DEVICE_FRAM_SIZE);
+}
+
+/**
+ * @brief Read handler for /sys/mem/media: the port's medium descriptor.
+ *
+ * One fact a line: the program unit in bytes, what a cut leaves in it
+ * (none, byte, line), the programs a unit is rated for (0: no limit) and
+ * the erase unit in bytes (0: rewritten in place).
+ */
+static int
+media_read(char *buf, size_t max)
+{
+    static const char *const tear[] = { "none", "byte", "line" };
+    const tiku_nvm_media_t *m = tiku_nvm_media();
+
+    return snprintf(buf, max,
+                    "unit\t%u\ntear\t%s\nendurance\t%lu\nerase\t%lu\n",
+                    (unsigned)m->unit,
+                    m->tear <= TIKU_NVM_TEAR_LINE ? tear[m->tear] : "?",
+                    (unsigned long)m->endurance, (unsigned long)m->erase_unit);
 }
 
 /**
@@ -1140,6 +1161,7 @@ nvm_map_read(char *buf, size_t max)
 static const tiku_vfs_node_t sys_mem_children[] = {
     { "sram", TIKU_VFS_FILE, sram_read,      NULL, NULL, 0, &desc_mem_static },
     { "nvm",  TIKU_VFS_FILE, nvm_read,       NULL, NULL, 0, &desc_mem_static },
+    { "media", TIKU_VFS_FILE, media_read,    NULL, NULL, 0, &desc_mem_map },
     { "kind", TIKU_VFS_FILE, mem_kind_read,  NULL, NULL, 0, &desc_mem_kind },
     { "free", TIKU_VFS_FILE, mem_free_read,  NULL, NULL, 0, &desc_mem_live },
     { "used", TIKU_VFS_FILE, mem_used_read,  NULL, NULL, 0, &desc_mem_live },

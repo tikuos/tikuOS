@@ -24,30 +24,18 @@
 /* THE MEDIUM                                                                */
 /*---------------------------------------------------------------------------*/
 
-#if defined(PLATFORM_NORDIC)
-/* RRAM: a 16-byte line is programmed as a unit and rated for 10^4 programs;
- * a cut during a program is taken to leave the line unreadable. */
-static const tiku_db_media_t board_media = { 16u, TIKU_DB_TEAR_LINE, 0u, 10000u };
-#elif defined(PLATFORM_AMBIQ)
-/* MRAM: the boot ROM programs 16-byte lines read-modify-write; a cut during
- * one is taken to leave the line unreadable. */
-static const tiku_db_media_t board_media = { 16u, TIKU_DB_TEAR_LINE, 0u, 0u };
-#elif defined(PLATFORM_RA8P1)
-/* MRAM behind a 32-byte program buffer that a cut loses or leaves half
- * drained. */
-static const tiku_db_media_t board_media = { 32u, TIKU_DB_TEAR_LINE, 0u, 0u };
-#elif defined(PLATFORM_MSP430)
-/* FRAM: a 16-bit store is the unit; a cut splits a longer write at any byte. */
-static const tiku_db_media_t board_media = { 2u, TIKU_DB_TEAR_BYTE, 0u, 0u };
-#elif defined(TIKU_TEST_HOST)
-static const tiku_db_media_t board_media = { 4u, TIKU_DB_TEAR_BYTE, 0u, 0u };
-#else
+/* The port's descriptor (kernel/memory/tiku_nvm_media.h).  The in-place
+ * engine rewrites a unit where it stands, so a medium with an erase unit
+ * does not build. */
+#if !TIKU_NVM_MEDIA_IN_PLACE
 #error "tiku_db: this port's NVM is sector flash; the in-place engine needs byte-addressable NVM"
+#elif TIKU_NVM_MEDIA_UNIT > 64u
+#error "tiku_db: the engine takes a program unit of 2 to 64 bytes"
 #endif
 
 const tiku_db_media_t *tiku_db_board_media(void)
 {
-    return &board_media;
+    return tiku_nvm_media();
 }
 
 /*---------------------------------------------------------------------------*/
@@ -115,7 +103,7 @@ int tiku_db_board_live(void *ctx, size_t off, size_t len)
 
     (void)ctx;
     if (!bind(&be, off, len) ||
-        tiku_db_probe(&be, &board_media, &n) != TIKU_DB_OK) {
+        tiku_db_probe(&be, tiku_nvm_media(), &n) != TIKU_DB_OK) {
         return 0;
     }
     return n;
@@ -128,7 +116,7 @@ int tiku_db_board_carve(void *ctx, size_t off, size_t len)
     if (!bind(&board_be, off, len)) {
         return -1;
     }
-    return tiku_db_format(&board_db, &board_be, &board_media,
+    return tiku_db_format(&board_db, &board_be, tiku_nvm_media(),
                           board_identity()) == TIKU_DB_OK ? 0 : -1;
 }
 
@@ -155,7 +143,7 @@ tiku_db_t *tiku_db_board(void)
         board_why = "the extent lies outside the region";
         return NULL;
     }
-    rc = tiku_db_mount(&board_db, &board_be, &board_media);
+    rc = tiku_db_mount(&board_db, &board_be, tiku_nvm_media());
     if (rc != TIKU_DB_OK) {
         board_why = tiku_db_err_name(rc);
         return NULL;
@@ -247,9 +235,9 @@ tiku_db_t *tiku_db_board(void)
     board_be.write = board_write;
     board_be.erase = NULL;
     board_be.ctx   = NULL;
-    rc = tiku_db_mount(&board_db, &board_be, &board_media);
+    rc = tiku_db_mount(&board_db, &board_be, tiku_nvm_media());
     if (rc == TIKU_DB_ERR_NOSTORE && array_blank()) {
-        rc = tiku_db_format(&board_db, &board_be, &board_media, 0u);
+        rc = tiku_db_format(&board_db, &board_be, tiku_nvm_media(), 0u);
     }
     if (rc != TIKU_DB_OK) {
         board_why = tiku_db_err_name(rc);
@@ -272,7 +260,7 @@ int tiku_db_board_format(void)
     board_be.write = board_write;
     board_be.erase = NULL;
     board_be.ctx   = NULL;
-    rc = tiku_db_format(&board_db, &board_be, &board_media, 0u);
+    rc = tiku_db_format(&board_db, &board_be, tiku_nvm_media(), 0u);
     board_mounted = (rc == TIKU_DB_OK);
     return rc;
 }

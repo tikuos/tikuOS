@@ -50,6 +50,25 @@ not a place for high-churn buffers.  RP2350 allocations that fall to the
 NVM tier are flash and fault on write; `TIKU_TIER_SRAM_SIZE` and the
 refuse-NVM-arena guard keep BASIC's arena in SRAM there.
 
+## The medium
+
+`tiku_nvm_media.h` holds the port's four facts, stated once in
+`arch/<port>/tiku_nvm_media_arch.h`: `TIKU_NVM_MEDIA_UNIT`, the program
+granule; `TIKU_NVM_MEDIA_TEAR`, what a power cut leaves in it (whole or
+old, a byte prefix, or anything); `TIKU_NVM_MEDIA_ENDURANCE`, the programs
+one unit is rated for, 0 where the medium states no limit; and
+`TIKU_NVM_MEDIA_ERASE`, the bytes erased as one, 0 where a unit is
+rewritten in place.  `tiku_nvm_media()` returns them as a struct and
+`/sys/mem/media` prints them one a line.  Values, each header naming its
+datasheet: RRAM 16 B, line, 10⁴; Apollo MRAM 16 B, line, 10⁵; RA8P1 MRAM
+32 B, line, 10⁵; MSP430 FRAM 2 B, byte prefix, no limit; the flash ports a
+256 B page, line, 10⁵, erased by 4 KB.  A host build with no platform macro
+reads a 4-byte word that tears byte by byte, with no limit.  Derived from
+the facts, not kept in platform tables: `TIKU_NVM_MEDIA_IN_PLACE`, which
+`kernel/db` requires to build; the file store's slot and sector geometry
+(`kernel/fs/tiku_tfs.h`); and `TIKU_PERSIST_WEAR_THRESHOLD`, half the
+rating.  A write timing is not a fact here: the kernel observes it.
+
 ## NVM region layout
 
 On the ARM ports the on-chip NVM is three estates: code, a carved region,

@@ -391,7 +391,7 @@ int tiku_db_stat(const tiku_db_t *db, int table, tiku_db_stat_t *st)
     st->max_seq = t->max_seq;
     st->laps = (t->max_seq + t->capacity - 1u) / t->capacity;
     st->rec_size = t->rec_size;
-    st->lines = (uint16_t)(t->rec_size / db->media.line);
+    st->lines = (uint16_t)(t->rec_size / db->media.unit);
     st->txn_open = t->open;
     st->recovering = t->recover;
     st->rate = t->rate;

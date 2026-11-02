@@ -92,7 +92,7 @@ C6_SRCS := arch/esp32c6/tiku_native_arch.c arch/esp32c6/tiku_runtime_arch.c \
  kernel/scheduler/tiku_sched.c kernel/ipc/tiku_ipc.c kernel/ipc/tiku_ipc_stream.c \
  kernel/memory/tiku_mem.c kernel/memory/tiku_pool.c kernel/memory/tiku_tier.c \
  kernel/memory/tiku_region.c kernel/memory/tiku_ipc_buffer.c \
- kernel/memory/tiku_nvm_region.c \
+ kernel/memory/tiku_nvm_region.c kernel/memory/tiku_nvm_media.c \
  services/ipc/tiku_ipc_wire.c services/ipc/tiku_ipc_bus.c \
  hal/tiku_ipc_packet_hal.c services/link/tiku_link.c services/console/tiku_console.c
 C6_ASMS := arch/esp32c6/tiku_crt_early.S arch/esp32c6/tiku_irq_probe.S

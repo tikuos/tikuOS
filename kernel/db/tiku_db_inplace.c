@@ -102,7 +102,7 @@ uint8_t tiku_db_eng_type_bytes(uint8_t type, uint8_t size)
 int tiku_db_eng_layout(const tiku_db_media_t *media, const uint8_t *schema,
                        uint8_t ncols, uint16_t *rec_size, uint16_t *col_off)
 {
-    uint32_t unit = umax(media->line, 4u);
+    uint32_t unit = umax(media->unit, 4u);
     uint32_t off = (media->tear == TIKU_DB_TEAR_NONE) ? 4u : unit;
     uint32_t total;
     uint8_t i;
@@ -135,7 +135,7 @@ int tiku_db_eng_layout(const tiku_db_media_t *media, const uint8_t *schema,
 static uint32_t ring_rel(const tiku_db_t *db)
 {
     return TDB_ALIGN((uint32_t)db->commits * db->stride + TDB_SCHEMA_BYTES,
-                     db->media.line);
+                     db->media.unit);
 }
 
 uint32_t tiku_db_eng_block_len(const tiku_db_t *db, uint32_t capacity,
@@ -152,7 +152,7 @@ uint32_t tiku_db_eng_block_len(const tiku_db_t *db, uint32_t capacity,
 /** @brief Whether @p m describes a medium the engine can lay an extent on. */
 static int media_ok(const tiku_db_media_t *m)
 {
-    uint16_t l = m->line;
+    uint16_t l = m->unit;
     return l >= 2u && l <= 64u && (l & (l - 1u)) == 0u &&
            (m->tear == TIKU_DB_TEAR_NONE || m->tear == TIKU_DB_TEAR_BYTE ||
             (m->tear == TIKU_DB_TEAR_LINE && l >= 8u));
@@ -175,8 +175,8 @@ static int attach(tiku_db_t *db, tiku_nvm_backend_t *be,
     db->be = be;
     db->media = *m;
     db->extent = (uint32_t)be->size;
-    db->unit = (uint16_t)umax(m->line, 4u);
-    db->stride = (uint16_t)umax(m->line, TDB_CENT_BYTES);
+    db->unit = (uint16_t)umax(m->unit, 4u);
+    db->stride = (uint16_t)umax(m->unit, TDB_CENT_BYTES);
     db->identity = 0;
     memset(db->t, 0, sizeof db->t);
     return TIKU_DB_OK;
@@ -301,7 +301,7 @@ int tiku_db_mount(tiku_db_t *db, tiku_nvm_backend_t *be,
         fnv(db->be->base + 4u, TDB_HDR_BYTES - 8u) != tdb_rd32(db, TDB_H_CHECK)) {
         return TIKU_DB_ERR_CORRUPT;
     }
-    if (tdb_rd16(db, TDB_H_LINE) != m->line ||
+    if (tdb_rd16(db, TDB_H_LINE) != m->unit ||
         db->be->base[TDB_H_TEAR] != m->tear ||
         db->be->base[TDB_H_TABLES] != TIKU_DB_TABLES_MAX ||
         db->be->base[TDB_H_COMMITS] == 0u ||
@@ -356,7 +356,7 @@ int tiku_db_probe(const tiku_nvm_backend_t *be, const tiku_db_media_t *m,
     }
     memcpy(&v16, b + TDB_H_LINE, sizeof v16);
     memcpy(&v, b + TDB_H_EXTENT, sizeof v);
-    if (v16 != m->line || b[TDB_H_TEAR] != m->tear ||
+    if (v16 != m->unit || b[TDB_H_TEAR] != m->tear ||
         b[TDB_H_TABLES] != TIKU_DB_TABLES_MAX || v != (uint32_t)be->size) {
         return TIKU_DB_ERR_MEDIA;
     }
@@ -405,7 +405,7 @@ int tiku_db_format(tiku_db_t *db, tiku_nvm_backend_t *be,
     }
     memset(hdr, 0, sizeof hdr);
     put16(hdr + TDB_H_VERSION, TDB_VERSION);
-    put16(hdr + TDB_H_LINE, m->line);
+    put16(hdr + TDB_H_LINE, m->unit);
     hdr[TDB_H_TEAR] = m->tear;
     hdr[TDB_H_TABLES] = TIKU_DB_TABLES_MAX;
     hdr[TDB_H_COMMITS] = TIKU_DB_COMMIT_LINES;

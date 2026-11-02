@@ -30,6 +30,7 @@
 #include "hal/tiku_mem_hal.h"
 #include "hal/tiku_mpu_hal.h"
 #include "hal/tiku_region_hal.h"
+#include "kernel/memory/tiku_nvm_media.h"
 
 /*---------------------------------------------------------------------------*/
 /* HIFRAM PLACEMENT MACROS                                                   */
@@ -808,9 +809,10 @@ tiku_mem_err_t tiku_pool_destroy(tiku_pool_t *pool);
 /** Magic number written into valid entries to distinguish from NVM garbage */
 #define TIKU_PERSIST_MAGIC  0x544B5553U
 
-/** Default NVM write-endurance warning threshold (cycles) */
+/** Writes to one key at which the wear check warns: half the medium's
+ *  rating (tiku_nvm_media.h); 0 where the medium states no limit. */
 #ifndef TIKU_PERSIST_WEAR_THRESHOLD
-#define TIKU_PERSIST_WEAR_THRESHOLD  1000000000UL
+#define TIKU_PERSIST_WEAR_THRESHOLD  TIKU_NVM_WEAR_THRESHOLD
 #endif
 
 /**
@@ -943,7 +945,8 @@ tiku_mem_err_t tiku_persist_delete(tiku_persist_store_t *store,
  * @param key         Key to check
  * @param write_count Output: number of writes to this key (may be NULL)
  * @return 1 once write_count reaches TIKU_PERSIST_WEAR_THRESHOLD, 0 below
- *         it, or a negative tiku_mem_err_t on error
+ *         it or where the medium states no limit, or a negative
+ *         tiku_mem_err_t on error
  */
 int tiku_persist_wear_check(tiku_persist_store_t *store,
                              const char *key,
