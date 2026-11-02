@@ -19,6 +19,8 @@
 #include <stddef.h>
 
 #include "kernel/memory/tiku_nvm_region.h"
+#include "kernel/memory/tiku_nvm_meter.h"
+#include "kernel/memory/tiku_nvm_media.h"
 
 /* Region size in bytes. */
 #ifndef TIKU_NVMFS_MSP430_BYTES
@@ -51,10 +53,16 @@ static uint8_t __attribute__((section(".persistent")))
 static int region_write(tiku_nvm_backend_t *be, size_t off,
                         const void *src, size_t len)
 {
+    tiku_nvm_mark_t t0;
+
     if (off > be->size || len > be->size - off) {
         return -1;
     }
+    t0 = tiku_nvm_meter_begin();
     memcpy(be->base + off, src, len);   /* FRAM in place; caller holds window */
+    tiku_nvm_meter_end(t0, (uint32_t)len,
+                       tiku_nvm_units((uintptr_t)(be->base + off), (uint32_t)len,
+                                      TIKU_NVM_MEDIA_UNIT), 0u);
     return 0;
 }
 

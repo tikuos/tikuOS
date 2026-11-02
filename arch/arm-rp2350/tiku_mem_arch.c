@@ -39,6 +39,8 @@ extern uint32_t __tiku_nvm_flash_size;
 #define RP2350_NVM_SECTOR_SIZE   0x1000U   /* 4 KB QSPI erase granule */
 #define RP2350_NVM_PAGE_SIZE     0x100U    /* 256-byte program page */
 #include "kernel/memory/tiku_nvm_mirror.h"
+#include "kernel/memory/tiku_nvm_meter.h"
+#include "kernel/memory/tiku_nvm_media.h"
 
 /*---------------------------------------------------------------------------*/
 /* BOOT-ROM FUNCTION LOOKUPS                                                 */
@@ -239,11 +241,15 @@ static int flash_commit_sector(uint32_t flash_offset,
                                 const uint8_t *src,
                                 size_t        len) {
     uint32_t primask;
+    tiku_nvm_mark_t t0;
 
     if (!rom_flash_ready()) {
         return -1;
     }
 
+    /* The meter runs from flash: it reads its clock outside the window in
+     * which XIP is off. */
+    t0 = tiku_nvm_meter_begin();
     /* Save and mask PRIMASK; restore at the end. */
     TIKU_RP2350_FLASH_IRQ_SAVE(primask);
 
@@ -257,6 +263,9 @@ static int flash_commit_sector(uint32_t flash_offset,
 
     /* Restore PRIMASK. */
     TIKU_RP2350_FLASH_IRQ_RESTORE(primask);
+    tiku_nvm_meter_end(t0, (uint32_t)len,
+                       tiku_nvm_units(flash_offset, (uint32_t)len,
+                                      TIKU_NVM_MEDIA_UNIT), 1u);
     /* ROM calls have no result; verify through XIP after cache flush/remap. */
     return memcmp((const void *)(uintptr_t)(RP2350_XIP_BASE + flash_offset),
                    src, len) == 0 ? 0 : -1;
@@ -308,10 +317,12 @@ int tiku_rp2350_flash_commit_sector_status(uint32_t flash_offset,
 void tiku_rp2350_flash_program(uint32_t flash_offset,
                                const uint8_t *src, size_t len) {
     uint32_t primask;
+    tiku_nvm_mark_t t0;
 
     if (!rom_flash_ready()) {
         return;
     }
+    t0 = tiku_nvm_meter_begin();
     TIKU_RP2350_FLASH_IRQ_SAVE(primask);
 
     g_rom_connect_flash();
@@ -321,6 +332,9 @@ void tiku_rp2350_flash_program(uint32_t flash_offset,
     g_rom_flash_enter_xip();
 
     TIKU_RP2350_FLASH_IRQ_RESTORE(primask);
+    tiku_nvm_meter_end(t0, (uint32_t)len,
+                       tiku_nvm_units(flash_offset, (uint32_t)len,
+                                      TIKU_NVM_MEDIA_UNIT), 0u);
 }
 
 /*---------------------------------------------------------------------------*/

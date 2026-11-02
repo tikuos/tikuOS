@@ -20,6 +20,7 @@
 
 #include "tiku_mem.h"
 #include "hal/tiku_cpu.h"
+#include "kernel/memory/tiku_nvm_meter.h"
 #include <string.h>
 
 /*---------------------------------------------------------------------------*/
@@ -315,6 +316,15 @@ int tiku_persist_wear_check(tiku_persist_store_t *store,
  * equally covered.
  */
 
+/* A direct aligned store into a cell: a program of the medium where
+ * TIKU_DURABLE is written in place, an SRAM store on a mirror port, where the
+ * relock's flush is what programs. */
+#if TIKU_DURABLE_IN_PLACE
+#define CELL_STORED(bytes)  tiku_nvm_meter_store(bytes)
+#else
+#define CELL_STORED(bytes)  ((void)0)
+#endif
+
 /** Zero source for the chunked zero-fill through the NVM HAL */
 static const uint8_t cell_zeros[16];
 
@@ -399,6 +409,7 @@ uint8_t tiku_persist_cell_init(const tiku_persist_cell_t *c)
                                 (const uint8_t *)c->def, n);
     }
     *c->gate = c->key;          /* commit point */
+    CELL_STORED(sizeof(uint32_t));
     /* Unchecked: init reports priming, not completion. */
     tiku_mpu_lock_nvm(saved);
     tiku_atomic_exit();
@@ -430,11 +441,13 @@ tiku_mem_err_t tiku_persist_cell_write_status(const tiku_persist_cell_t *c,
     saved = tiku_mpu_unlock_nvm();
     if (CELL_CAN_TEAR(len)) {
         *c->gate = 0;           /* invalidate: a tear re-primes      */
+        CELL_STORED(sizeof(uint32_t));
     }
     tiku_mem_arch_nvm_write((uint8_t *)c->data,
                             (const uint8_t *)src, len);
     if (CELL_CAN_TEAR(len)) {
         *c->gate = c->key;      /* revalidate: value fully written   */
+        CELL_STORED(sizeof(uint32_t));
     }
     status = tiku_mpu_lock_nvm_status(saved);
     tiku_atomic_exit();
@@ -460,10 +473,12 @@ tiku_mem_err_t tiku_persist_cell_commit_status(const tiku_persist_cell_t *c,
     if (CELL_CAN_TEAR(len)) {
         *c->gate = 0;           /* a previously-valid gate must not
                                  * survive a mid-value tear          */
+        CELL_STORED(sizeof(uint32_t));
     }
     tiku_mem_arch_nvm_write((uint8_t *)c->data,
                             (const uint8_t *)src, len);
     *c->gate = c->key;          /* commit point — after the data */
+    CELL_STORED(sizeof(uint32_t));
     status = tiku_mpu_lock_nvm_status(saved);
     tiku_atomic_exit();
     return status;
@@ -491,10 +506,13 @@ tiku_mem_err_t tiku_persist_cell_write_u32_status(const tiku_persist_cell_t *c,
          * aligned; TIKU_PERSIST_CELL does not check it. */
         if (CELL_CAN_TEAR(sizeof(uint32_t))) {
             *c->gate = 0;
+            CELL_STORED(sizeof(uint32_t));
         }
         *(uint32_t *)c->data = v;
+        CELL_STORED(sizeof(uint32_t));
         if (CELL_CAN_TEAR(sizeof(uint32_t))) {
             *c->gate = c->key;
+            CELL_STORED(sizeof(uint32_t));
         }
     } else {
         uint16_t n = (c->size < sizeof(uint32_t))
@@ -503,10 +521,12 @@ tiku_mem_err_t tiku_persist_cell_write_u32_status(const tiku_persist_cell_t *c,
         /* The same tear rule as tiku_persist_cell_write_status(). */
         if (CELL_CAN_TEAR(n)) {
             *c->gate = 0;
+            CELL_STORED(sizeof(uint32_t));
         }
         tiku_mem_arch_nvm_write((uint8_t *)c->data, (const uint8_t *)&v, n);
         if (CELL_CAN_TEAR(n)) {
             *c->gate = c->key;
+            CELL_STORED(sizeof(uint32_t));
         }
     }
     status = tiku_mpu_lock_nvm_status(saved);

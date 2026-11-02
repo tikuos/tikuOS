@@ -13,6 +13,8 @@
  */
 
 #include "tiku_mem_arch.h"
+#include "kernel/memory/tiku_nvm_meter.h"
+#include "kernel/memory/tiku_nvm_media.h"
 
 /*---------------------------------------------------------------------------*/
 /* tiku_mem_arch_init                                                        */
@@ -58,9 +60,13 @@ void tiku_mem_arch_nvm_read(uint8_t *dst, const uint8_t *src,
 void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
                               tiku_mem_arch_size_t len)
 {
+    tiku_nvm_mark_t t0 = tiku_nvm_meter_begin();
     tiku_mem_arch_size_t i;
 
     for (i = 0; i < len; i++) {
         dst[i] = src[i];
     }
+    tiku_nvm_meter_end(t0, (uint32_t)len,
+                       tiku_nvm_units((uintptr_t)dst, (uint32_t)len,
+                                      TIKU_NVM_MEDIA_UNIT), 0u);
 }

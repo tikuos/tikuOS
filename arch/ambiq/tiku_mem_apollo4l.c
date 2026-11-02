@@ -38,6 +38,8 @@ extern uint32_t __tiku_nvm_mram_start[]; /* base of the mirror page (linker
 #define AMBIQ_MRAM_PROGRAM_KEY  0x12344321UL  /* AM_HAL_MRAM_PROGRAM_KEY */
 #define AMBIQ_MRAM_OP_PROGRAM   1U            /* program main array */
 #include "kernel/memory/tiku_nvm_mirror.h"
+#include "kernel/memory/tiku_nvm_meter.h"
+#include "kernel/memory/tiku_nvm_media.h"
 #define TIKU_NVM_MRAM_BYTES     0x4000U       /* 16 KB: __tiku_nvm_mram_size */
 /** @} */
 
@@ -171,6 +173,7 @@ int tiku_mem_arch_nvm_flush_status(void) {
     uint32_t dst_word_off, primask;
     int      changed;
     int      rc = 0;
+    tiku_nvm_mark_t t0 = 0u;
 
     if (n > (TIKU_NVM_MRAM_BYTES - TIKU_NVM_MIRROR_HDR_BYTES)) {
         return -1;
@@ -225,6 +228,9 @@ int tiku_mem_arch_nvm_flush_status(void) {
     dst_word_off =
         ((uint32_t)(uintptr_t)__tiku_nvm_mram_start - AMBIQ_MRAM_BASE) >> 2;
 
+    if (changed) {
+        t0 = tiku_nvm_meter_begin();
+    }
     /* Interrupts masked: the helper runs from ROM, and an ISR fetched from
      * MRAM mid-program could fault. */
     __asm__ volatile ("mrs %0, primask" : "=r"(primask));
@@ -244,6 +250,9 @@ int tiku_mem_arch_nvm_flush_status(void) {
     if (changed) {
         tiku_cpu_dcache_invalidate((const void *)__tiku_nvm_mram_start, prog_bytes);
         if (rc == 0) { g_nvm_flush_programs++; }
+        /* The ROM programs the whole image, every 16-byte line of it. */
+        tiku_nvm_meter_end(t0, (uint32_t)prog_bytes,
+                           (uint32_t)(prog_bytes / TIKU_NVM_MEDIA_UNIT), 0u);
     }
     return rc == 0 ? 0 : -1;
 }

@@ -20,6 +20,8 @@
 
 #include "kernel/memory/tiku_nvm_region.h"
 #include "kernel/memory/tiku_mem.h"          /* tiku_mpu_unlock_nvm/lock_nvm */
+#include "kernel/memory/tiku_nvm_meter.h"
+#include "kernel/memory/tiku_nvm_media.h"
 
 /* Linker-carved region (arch/common/tiku_nvm_layout.ld).  __tiku_nvmfs_size
  * is an absolute symbol whose address is the size. */
@@ -38,6 +40,7 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
                         const void *src, size_t len)
 {
     uint16_t saved;
+    tiku_nvm_mark_t t0;
 
     if (off > be->size || len > be->size - off) {
         return -1;                          /* out of range */
@@ -46,7 +49,11 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
     /* Nest-safe: lock_nvm() restores the saved state, so a window the caller
      * already holds stays open. */
     saved = tiku_mpu_unlock_nvm();
+    t0 = tiku_nvm_meter_begin();
     memcpy(be->base + off, src, len);       /* MRAM in place, no erase */
+    tiku_nvm_meter_end(t0, (uint32_t)len,
+                       tiku_nvm_units((uintptr_t)(be->base + off), (uint32_t)len,
+                                      TIKU_NVM_MEDIA_UNIT), 0u);
     return tiku_mpu_lock_nvm_status(saved) == TIKU_MEM_OK ? 0 : -1;
 }
 

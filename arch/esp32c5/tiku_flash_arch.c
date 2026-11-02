@@ -17,6 +17,8 @@
 #include "tiku_rom_arch.h"
 #include "tiku_irq_arch.h"
 #include "tiku_esp32c5_regs.h"
+#include "kernel/memory/tiku_nvm_meter.h"
+#include "kernel/memory/tiku_nvm_media.h"
 
 /* C5 spi1_mem_reg.h: SPI1 user transactions, independent of SPI0's cache. */
 #define FLASH_COMMAND 0x60003000u
@@ -191,7 +193,8 @@ tiku_flash_err_t tiku_flash_read(uint32_t offset, void *data, uint32_t length)
     return TIKU_FLASH_OK;
 }
 
-tiku_flash_err_t tiku_flash_erase_sector(uint32_t offset)
+/** @brief tiku_flash_erase_sector() without the meter. */
+static tiku_flash_err_t flash_erase_raw(uint32_t offset)
 {
     uint32_t state, autoload, i;
     int result;
@@ -226,8 +229,20 @@ tiku_flash_err_t tiku_flash_erase_sector(uint32_t offset)
     return result == 0 ? TIKU_FLASH_OK : TIKU_FLASH_ERR_IO;
 }
 
-tiku_flash_err_t tiku_flash_program(uint32_t offset, const void *data,
-                                    uint32_t length)
+tiku_flash_err_t tiku_flash_erase_sector(uint32_t offset)
+{
+    tiku_nvm_mark_t t0 = tiku_nvm_meter_begin();
+    tiku_flash_err_t rc = flash_erase_raw(offset);
+
+    if (rc == TIKU_FLASH_OK) {
+        tiku_nvm_meter_end(t0, 0u, 0u, 1u);
+    }
+    return rc;
+}
+
+/** @brief tiku_flash_program() without the meter. */
+static tiku_flash_err_t flash_program_raw(uint32_t offset, const void *data,
+                                          uint32_t length)
 {
     const uint8_t *source = data;
     uint32_t state, autoload, i;
@@ -291,4 +306,17 @@ tiku_flash_err_t tiku_flash_program(uint32_t offset, const void *data,
     }
     release(state);
     return result == 0 ? TIKU_FLASH_OK : TIKU_FLASH_ERR_IO;
+}
+
+tiku_flash_err_t tiku_flash_program(uint32_t offset, const void *data,
+                                    uint32_t length)
+{
+    tiku_nvm_mark_t t0 = tiku_nvm_meter_begin();
+    tiku_flash_err_t rc = flash_program_raw(offset, data, length);
+
+    if (rc == TIKU_FLASH_OK) {
+        tiku_nvm_meter_end(t0, length,
+                           tiku_nvm_units(offset, length, TIKU_NVM_MEDIA_UNIT), 0u);
+    }
+    return rc;
 }

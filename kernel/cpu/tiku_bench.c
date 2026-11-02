@@ -97,12 +97,16 @@ tiku_bench_hz(void)
     if (s_backend != TIKU_BENCH_DWT) {
         return (uint32_t)TIKU_HTIMER_ARCH_SECOND;
     }
+#if defined(PLATFORM_RP2350) || defined(PLATFORM_AMBIQ)
     /* The DWT counts core cycles at the clock tiku_cpu_mclk_hz() reports.
      * TIKU_MAIN_CPU_HZ is the boot frequency, used when that returns 0. */
     {
         unsigned long hz = tiku_cpu_mclk_hz();
         return (hz != 0UL) ? (uint32_t)hz : (uint32_t)TIKU_MAIN_CPU_HZ;
     }
+#else
+    return (uint32_t)TIKU_HTIMER_ARCH_SECOND;
+#endif
 }
 
 uint32_t

@@ -47,6 +47,7 @@
 #include "tiku_vfs_tree_boot.h"
 #include <kernel/cpu/tiku_stack.h>   /* /sys/mem/stack_free */
 #include <kernel/memory/tiku_nvm_media.h>  /* /sys/mem/media */
+#include <kernel/memory/tiku_nvm_meter.h>  /* /sys/mem/nvm_writes */
 #include "tiku_vfs_tree_timer.h"
 #include "tiku_vfs_tree_watchdog.h"
 #include "tiku_vfs_tree_power.h"
@@ -252,6 +253,22 @@ media_read(char *buf, size_t max)
                     (unsigned)m->unit,
                     m->tear <= TIKU_NVM_TEAR_LINE ? tear[m->tear] : "?",
                     (unsigned long)m->endurance, (unsigned long)m->erase_unit);
+}
+
+/**
+ * @brief Read handler for /sys/mem/nvm_writes: the metered NVM writes since
+ *        boot, one total a line (bytes, programs, erases, busy_us).
+ */
+static int
+nvm_writes_read(char *buf, size_t max)
+{
+    tiku_nvm_spent_t s;
+
+    tiku_nvm_spent(&s);
+    return snprintf(buf, max,
+                    "bytes\t%lu\nprograms\t%lu\nerases\t%lu\nbusy_us\t%lu\n",
+                    (unsigned long)s.bytes, (unsigned long)s.programs,
+                    (unsigned long)s.erases, (unsigned long)s.busy_us);
 }
 
 /**
@@ -1162,6 +1179,7 @@ static const tiku_vfs_node_t sys_mem_children[] = {
     { "sram", TIKU_VFS_FILE, sram_read,      NULL, NULL, 0, &desc_mem_static },
     { "nvm",  TIKU_VFS_FILE, nvm_read,       NULL, NULL, 0, &desc_mem_static },
     { "media", TIKU_VFS_FILE, media_read,    NULL, NULL, 0, &desc_mem_map },
+    { "nvm_writes", TIKU_VFS_FILE, nvm_writes_read, NULL, NULL, 0, &desc_mem_map },
     { "kind", TIKU_VFS_FILE, mem_kind_read,  NULL, NULL, 0, &desc_mem_kind },
     { "free", TIKU_VFS_FILE, mem_free_read,  NULL, NULL, 0, &desc_mem_live },
     { "used", TIKU_VFS_FILE, mem_used_read,  NULL, NULL, 0, &desc_mem_live },

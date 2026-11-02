@@ -21,6 +21,8 @@
 #include "tiku_flash_arch.h"
 #include "tiku_irq_arch.h"
 #include "tiku_esp32c61_regs.h"
+#include "kernel/memory/tiku_nvm_meter.h"
+#include "kernel/memory/tiku_nvm_media.h"
 
 #define ROM_OK          0
 #define CMD_READ_ID     0x9FU
@@ -131,7 +133,8 @@ static uint32_t flash_quiet(void) {
                                   (1UL << TIKU_ESP32C61_LINE_SWITCH));
 }
 
-tiku_flash_err_t tiku_flash_erase_sector(uint32_t addr) {
+/** @brief tiku_flash_erase_sector() without the meter. */
+static tiku_flash_err_t flash_erase_raw(uint32_t addr) {
     uint32_t sector = addr / TIKU_FLASH_SECTOR_SIZE;
     uint32_t autoload, held;
     int rc;
@@ -150,6 +153,16 @@ tiku_flash_err_t tiku_flash_erase_sector(uint32_t addr) {
                                    TIKU_FLASH_SECTOR_SIZE);
     tiku_esp32c61_irq_release(held);
     return rc == ROM_OK ? TIKU_FLASH_OK : TIKU_FLASH_ERR_IO;
+}
+
+tiku_flash_err_t tiku_flash_erase_sector(uint32_t addr) {
+    tiku_nvm_mark_t t0 = tiku_nvm_meter_begin();
+    tiku_flash_err_t rc = flash_erase_raw(addr);
+
+    if (rc == TIKU_FLASH_OK) {
+        tiku_nvm_meter_end(t0, 0u, 0u, 1u);
+    }
+    return rc;
 }
 
 /**
@@ -192,6 +205,9 @@ static int in_sram(const void *p, uint32_t len) {
  * Each piece is copied to flash_piece with the cache on, then programmed as
  * an SRAM source.
  */
+static tiku_flash_err_t flash_program_raw(uint32_t addr, const void *buf,
+                                          uint32_t len);
+
 static tiku_flash_err_t program_pieces(uint32_t addr, const uint8_t *s,
                                        uint32_t len) {
     while (len > 0UL) {
@@ -199,7 +215,7 @@ static tiku_flash_err_t program_pieces(uint32_t addr, const uint8_t *s,
         tiku_flash_err_t rc;
 
         memcpy(flash_piece, s, n);
-        rc = tiku_flash_program(addr, flash_piece, n);
+        rc = flash_program_raw(addr, flash_piece, n);
         if (rc != TIKU_FLASH_OK) {
             return rc;
         }
@@ -210,7 +226,9 @@ static tiku_flash_err_t program_pieces(uint32_t addr, const uint8_t *s,
     return TIKU_FLASH_OK;
 }
 
-tiku_flash_err_t tiku_flash_program(uint32_t addr, const void *buf, uint32_t len) {
+/** @brief tiku_flash_program() without the meter. */
+static tiku_flash_err_t flash_program_raw(uint32_t addr, const void *buf,
+                                          uint32_t len) {
     const uint8_t *s = (const uint8_t *)buf;
     uint32_t start = addr, total = len;
     uint32_t autoload, held;
@@ -259,4 +277,15 @@ tiku_flash_err_t tiku_flash_program(uint32_t addr, const void *buf, uint32_t len
                                    ((start & 3UL) + total + 3UL) & ~3UL);
     tiku_esp32c61_irq_release(held);
     return rc == ROM_OK ? TIKU_FLASH_OK : TIKU_FLASH_ERR_IO;
+}
+
+tiku_flash_err_t tiku_flash_program(uint32_t addr, const void *buf, uint32_t len) {
+    tiku_nvm_mark_t t0 = tiku_nvm_meter_begin();
+    tiku_flash_err_t rc = flash_program_raw(addr, buf, len);
+
+    if (rc == TIKU_FLASH_OK) {
+        tiku_nvm_meter_end(t0, len, tiku_nvm_units(addr, len, TIKU_NVM_MEDIA_UNIT),
+                           0u);
+    }
+    return rc;
 }

@@ -20,6 +20,8 @@
 #include "tiku_cpu_freq_boot_arch.h"
 #include "tiku_gpio_arch.h"
 #include "tiku_stm32n6_regs.h"
+#include "kernel/memory/tiku_nvm_meter.h"
+#include "kernel/memory/tiku_nvm_media.h"
 
 /* IC3 divides the live PLL1 rate to at most 50 MHz.  Higher rates require
  * the VDDIO3_HSLV fuse. */
@@ -313,7 +315,8 @@ tiku_xspi_err_t tiku_xspi_read(uint32_t addr, void *buf, uint32_t len) {
     return xspi_xfer(CMD_READ_4B, addr, 1, buf, len, 0);
 }
 
-tiku_xspi_err_t tiku_xspi_erase_sector(uint32_t addr) {
+/** @brief tiku_xspi_erase_sector() without the meter. */
+static tiku_xspi_err_t xspi_erase_raw(uint32_t addr) {
     if (addr >= TIKU_XSPI_SIZE_BYTES) {
         return TIKU_XSPI_ERR_ARG;
     }
@@ -348,7 +351,18 @@ tiku_xspi_err_t tiku_xspi_erase_sector(uint32_t addr) {
     return rc;
 }
 
-tiku_xspi_err_t tiku_xspi_program(uint32_t addr, const void *buf, uint32_t len) {
+tiku_xspi_err_t tiku_xspi_erase_sector(uint32_t addr) {
+    tiku_nvm_mark_t t0 = tiku_nvm_meter_begin();
+    tiku_xspi_err_t rc = xspi_erase_raw(addr);
+
+    if (rc == TIKU_XSPI_OK) {
+        tiku_nvm_meter_end(t0, 0u, 0u, 1u);
+    }
+    return rc;
+}
+
+/** @brief tiku_xspi_program() without the meter. */
+static tiku_xspi_err_t xspi_program_raw(uint32_t addr, const void *buf, uint32_t len) {
     if (buf == NULL || len == 0U ||
         addr > TIKU_XSPI_SIZE_BYTES || len > (TIKU_XSPI_SIZE_BYTES - addr)) {
         return TIKU_XSPI_ERR_ARG;
@@ -397,6 +411,17 @@ tiku_xspi_err_t tiku_xspi_program(uint32_t addr, const void *buf, uint32_t len) 
         (const void *)(uintptr_t)(TIKU_XSPI_MMAP_BASE + start_addr),
         total_len);
     return TIKU_XSPI_OK;
+}
+
+tiku_xspi_err_t tiku_xspi_program(uint32_t addr, const void *buf, uint32_t len) {
+    tiku_nvm_mark_t t0 = tiku_nvm_meter_begin();
+    tiku_xspi_err_t rc = xspi_program_raw(addr, buf, len);
+
+    if (rc == TIKU_XSPI_OK) {
+        tiku_nvm_meter_end(t0, len, tiku_nvm_units(addr, len, TIKU_NVM_MEDIA_UNIT),
+                           0u);
+    }
+    return rc;
 }
 
 tiku_xspi_err_t tiku_xspi_mmap_enable(void) {

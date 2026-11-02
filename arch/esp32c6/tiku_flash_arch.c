@@ -13,6 +13,7 @@
 #include "tiku_native_arch.h"
 #include <kernel/memory/tiku_nvm_mirror.h>
 #include <hal/tiku_mem_hal.h>
+#include <kernel/memory/tiku_nvm_meter.h>
 #include <string.h>
 #if TIKU_C6_STORAGE_TEST
 #include <TikuBench/tests/esp32c6/test_storage.h>
@@ -106,8 +107,9 @@ int tiku_c6_flash_read(uint32_t off,void *data,uint32_t length)
 }
 int tiku_c6_flash_program(uint32_t off,const void *data,uint32_t length)
 {
-    const uint8_t *src=data;int rc=0;
+    const uint8_t *src=data;int rc=0;uint32_t pages=0,stored=0;
     if(!writable(off,length)||!sram(data,length)||!acquire())return -1;
+    tiku_nvm_mark_t t0=tiku_nvm_meter_begin();
     const uint8_t *old=(const uint8_t *)(uintptr_t)(TIKU_C6_FLASH_VIRTUAL+off);
     for(uint32_t n=0;n<length;n++)if((old[n]&src[n])!=src[n]){release();return -1;}
     while(length){
@@ -127,14 +129,17 @@ int tiku_c6_flash_program(uint32_t off,const void *data,uint32_t length)
         if(rc||memcmp((const void *)(uintptr_t)(TIKU_C6_FLASH_VIRTUAL+off),src,part)){
             identity=0;poisoned=1;rc=-1;break;
         }
+        pages++;stored+=part;
         off+=part;src+=part;length-=part;tiku_watchdog_kick();FLASH_STEP();
     }
+    tiku_nvm_meter_end(t0,stored,pages,0);
     release();return rc;
 }
 int tiku_c6_flash_erase_sector(uint32_t off)
 {
     int rc;
     if((off&4095u)||!writable(off,4096)||!acquire())return -1;
+    tiku_nvm_mark_t t0=tiku_nvm_meter_begin();
     uint32_t state=native_irq_save(),cache=ROM_SUSPEND();
     rc=SPI_WRITABLE();if(!rc)rc=SPI_ERASE(off/4096);
     ROM_RESUME(cache);
@@ -143,6 +148,7 @@ int tiku_c6_flash_erase_sector(uint32_t off)
     const uint32_t *p=(const uint32_t *)(uintptr_t)(TIKU_C6_FLASH_VIRTUAL+off);
     for(unsigned n=0;!rc&&n<1024;n++)if(p[n]!=UINT32_MAX)rc=-1;
     if(rc){identity=0;poisoned=1;}
+    tiku_nvm_meter_end(t0,0,0,rc?0u:1u);
     release();tiku_watchdog_kick();if(!rc)FLASH_STEP();return rc;
 }
 

@@ -190,6 +190,8 @@ tiku_p4_flash_err_t tiku_p4_flash_read(uint32_t offset, void *data,
 #include "tiku_systimer_arch.h"
 #include "tiku_mem_arch.h"
 #include "tiku_mspi_arch.h"
+#include "kernel/memory/tiku_nvm_meter.h"
+#include "kernel/memory/tiku_nvm_media.h"
 
 #define FLASH_TX_LENGTH (FLASH_BASE + 0x24u)
 static uint8_t write_stage[TIKU_P4_FLASH_SECTOR_SIZE];
@@ -355,7 +357,8 @@ static int finish_write(int ok)
     return ok && disabled;
 }
 
-tiku_p4_flash_err_t tiku_p4_flash_erase_sector(uint32_t offset)
+/** @brief tiku_p4_flash_erase_sector() without the meter. */
+static tiku_p4_flash_err_t p4_erase_raw(uint32_t offset)
 {
     uint8_t bytes[64];
     uint32_t at;
@@ -376,7 +379,19 @@ tiku_p4_flash_err_t tiku_p4_flash_erase_sector(uint32_t offset)
     return ok ? TIKU_P4_FLASH_OK : TIKU_P4_FLASH_IO;
 }
 
-tiku_p4_flash_err_t tiku_p4_flash_program(uint32_t offset, const void *data,
+tiku_p4_flash_err_t tiku_p4_flash_erase_sector(uint32_t offset)
+{
+    tiku_nvm_mark_t t0 = tiku_nvm_meter_begin();
+    tiku_p4_flash_err_t rc = p4_erase_raw(offset);
+
+    if (rc == TIKU_P4_FLASH_OK) {
+        tiku_nvm_meter_end(t0, 0u, 0u, 1u);
+    }
+    return rc;
+}
+
+/** @brief tiku_p4_flash_program() without the meter. */
+static tiku_p4_flash_err_t p4_program_raw(uint32_t offset, const void *data,
                                          uint32_t length)
 {
     const uint8_t *source = data;
@@ -415,5 +430,18 @@ tiku_p4_flash_err_t tiku_p4_flash_program(uint32_t offset, const void *data,
     ok = finish_write(ok);
     release();
     return ok ? TIKU_P4_FLASH_OK : TIKU_P4_FLASH_IO;
+}
+
+tiku_p4_flash_err_t tiku_p4_flash_program(uint32_t offset, const void *data,
+                                         uint32_t length)
+{
+    tiku_nvm_mark_t t0 = tiku_nvm_meter_begin();
+    tiku_p4_flash_err_t rc = p4_program_raw(offset, data, length);
+
+    if (rc == TIKU_P4_FLASH_OK) {
+        tiku_nvm_meter_end(t0, length,
+                           tiku_nvm_units(offset, length, TIKU_NVM_MEDIA_UNIT), 0u);
+    }
+    return rc;
 }
 #endif

@@ -8,8 +8,8 @@
  * tiku_nvm_region_nordic.c - nRF54L RRAM filestore region backend.
  *
  * RRAM is byte-writable in place behind the RRAMC WEN gate: the carved region
- * is a linker-reserved span, a write is a memcpy and a read a dereference.  A
- * write must run inside an NVM unlock/lock window.
+ * is a linker-reserved span, a write goes through the metered NVM write HAL
+ * and a read is a dereference.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,7 +19,7 @@
 #include <stddef.h>
 
 #include "kernel/memory/tiku_nvm_region.h"
-#include "arch/nordic/tiku_mem_arch.h"    /* tiku_mem_arch_nvm_flush() */
+#include "hal/tiku_mem_hal.h"             /* tiku_mem_arch_nvm_write() */
 
 /* Linker-carved region (arch/common/tiku_nvm_layout.ld).  __tiku_nvmfs_size
  * is an absolute symbol: its address is the size. */
@@ -38,10 +38,11 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
     if (off > be->size || len > be->size - off) {
         return -1;                          /* out of range */
     }
-    memcpy(be->base + off, src, len);       /* RRAM in place; WEN held */
-    /* Wait for RRAMC READY before the caller closes the WEN gate: closing it
-     * during a commit can truncate the last word written. */
-    tiku_mem_arch_nvm_flush();
+    /* The HAL stores byte by byte, as the library memcpy did, and waits for
+     * RRAMC READY before WEN closes: closing it during a commit can truncate
+     * the last word written. */
+    tiku_mem_arch_nvm_write(be->base + off, (const uint8_t *)src,
+                            (tiku_mem_arch_size_t)len);
     return 0;
 }
 

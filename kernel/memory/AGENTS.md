@@ -69,6 +69,20 @@ the facts, not kept in platform tables: `TIKU_NVM_MEDIA_IN_PLACE`, which
 (`kernel/fs/tiku_tfs.h`); and `TIKU_PERSIST_WEAR_THRESHOLD`, half the
 rating.  A write timing is not a fact here: the kernel observes it.
 
+`tiku_nvm_meter.h` observes it.  Each port charges the meter where it
+programs the medium: the Nordic write HAL (one program a byte stored outside
+SRAM, timed in 256-byte pieces), the Ambiq boot-ROM calls (every 16-byte
+line of the span or mirror image), the RA8P1 copies into MRAM and the MSP430
+copies (units touched), and the flash ports' erase and program routines
+(pages and sectors).  The write HAL also writes `TIKU_RETAINED` data in
+SRAM, such as the shell history, which programs nothing.  The persist
+cells charge their direct word stores where `TIKU_DURABLE_IN_PLACE` is 1.
+`/sys/mem/nvm_writes` prints bytes, programs, erases and `busy_us` since
+boot.  Not charged: stores a caller makes into `TIKU_DURABLE` data in its
+own unlock window without the HAL; time on a 16-bit timebase past one
+counter period (65 ms at 1 MHz) in a single operation; writes before the
+timebase runs, whose time reads as 0.
+
 ## NVM region layout
 
 On the ARM ports the on-chip NVM is three estates: code, a carved region,

@@ -150,6 +150,15 @@
  * to the 8 KB MPU region that write-protects it.
  */
 
+/** @brief 1 where a store to TIKU_DURABLE data programs the medium itself
+ *         (the "in place" rows above), else 0. */
+#if defined(PLATFORM_MSP430) || defined(PLATFORM_NORDIC) || \
+    defined(PLATFORM_RA8P1)
+#define TIKU_DURABLE_IN_PLACE  1
+#else
+#define TIKU_DURABLE_IN_PLACE  0
+#endif
+
 /**
  * @brief Placement for the layout record, at one place in every image.
  *

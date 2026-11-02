@@ -21,6 +21,8 @@
 #include "kernel/memory/tiku_nvm_region.h"
 #include "tiku_mem_arch.h"     /* tiku_nvm_mram_program prototype */
 #include <hal/tiku_cpu.h>      /* tiku_cpu_dcache_invalidate (CACHECTRL) */
+#include "kernel/memory/tiku_nvm_meter.h"
+#include "kernel/memory/tiku_nvm_media.h"
 
 /*---------------------------------------------------------------------------*/
 /* LINKER-CARVED REGION BOUNDS (apollo4l.ld)                                 */
@@ -76,14 +78,18 @@ static int mram_program_span(uintptr_t dst_addr, const uint32_t *src16,
     uint32_t primask;
     uint32_t dst_word_off = (uint32_t)((dst_addr - AMBIQ_MRAM_BASE) >> 2);
     int rc;
+    tiku_nvm_mark_t t0;
 
     /* MRAM program is uninterruptible: an ISR fetch could fault mid-program. */
+    t0 = tiku_nvm_meter_begin();
     __asm__ volatile ("mrs %0, primask" : "=r"(primask));
     __asm__ volatile ("cpsid i" ::: "memory");
     rc = NV_PROGRAM_MAIN2(AMBIQ_MRAM_PROGRAM_KEY, AMBIQ_MRAM_OP_PROGRAM,
                           (uint32_t)(uintptr_t)src16, dst_word_off,
                           (uint32_t)(len / 4U));
     __asm__ volatile ("msr primask, %0" : : "r"(primask) : "memory");
+    tiku_nvm_meter_end(t0, (uint32_t)len,
+                       (uint32_t)(len / TIKU_NVM_MEDIA_UNIT), 0u);
 
     /* Bootrom status: 0 = programmed.  A failure is returned to the caller,
      * as on the Apollo510 backend. */
