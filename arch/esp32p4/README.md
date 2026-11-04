@@ -731,7 +731,13 @@ locked until that command succeeds. `wifi connect3` and `wifi ap start3` select
 SAE H2E group 19 with required PMF. Secured APs renew group keys every hour.
 The [BLE IPC driver](../../drivers/ble/ipc/README.md) runs the
 Bluetooth host on P4 and carries HCI to the native C6 controller through
-another mailbox endpoint. CPU1 jobs are not enabled. Do not
+another mailbox endpoint. It supports four connections and one advertising
+set; two concurrent peers have board qualification. The
+[IEEE 802.15.4 IPC driver](../../drivers/ieee154/ipc/README.md) exposes the
+existing radio HAL through `c6/154`, including frame transfer, hardware ACKs,
+energy detection and clear-channel assessment. It requires exclusive radio
+ownership; stop Wi-Fi and BLE before entering 802.15.4 mode.
+CPU1 jobs are not enabled. Do not
 interpret this as complete board-peripheral support.
 
 ## Storage-free diagnostic

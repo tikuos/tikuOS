@@ -28,6 +28,7 @@ SECTIONS {
         */applications/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         */TikuBench/tests/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         */kernel/vfs/tree/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *tiku_proc_vfs.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         */drivers/wifi/ipc/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         */drivers/ble/ipc/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         */interfaces/bluetooth/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
@@ -66,6 +67,11 @@ SECTIONS {
         *tiku_boot_c6.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         */interfaces/coproc/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         */tikukits/*.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *tiku_drv_154_ipc.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *tiku_ipc_154_codec.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *tiku_154.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *tiku_154_frame.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
+        *tiku_shell_cmd_radio154.o(.text .text.* .rodata .rodata.* .srodata .srodata.*)
         *(.p4.xip.text .p4.xip.rodata)
         *(.rodata.tiku_lpcore_image)
         . = ALIGN(4);
@@ -95,13 +101,14 @@ SECTIONS {
     __datastart = ORIGIN(LOW);
     .bss (NOLOAD) : ALIGN(16) {
         __bss_start = .;
-        EXCLUDE_FILE (*/tikukits/net/*.o *tiku_drv_wifi_ipc.o *tiku_drv_ble_ipc.o *tiku_ble_serial.o *tiku_ble_adv_hci.o *test_radio.o *tiku_media_card.o *tiku_media_transfer_server.o *tiku_opus.o */third_party/opus/*.o) *(.bss .bss.* .sbss .sbss.* COMMON)
+        EXCLUDE_FILE (*/tikukits/net/*.o *tiku_drv_wifi_ipc.o *tiku_drv_ble_ipc.o *tiku_drv_154_ipc.o *tiku_154.o *tiku_ble_serial.o *tiku_ble_adv_hci.o *test_radio.o *tiku_media_card.o *tiku_media_transfer_server.o *tiku_opus.o */third_party/opus/*.o) *(.bss .bss.* .sbss .sbss.* COMMON)
         . = ALIGN(16);
         __uninit_start = .;
         KEEP(*(.persistent.layout))
-        /* Append Wi-Fi settings without moving existing durable records. */
-        KEEP(*(EXCLUDE_FILE (*tiku_drv_wifi_ipc.o) .persistent .persistent.*))
+        /* Keep Wi-Fi settings and the MAC counter after the earlier durable records. */
+        KEEP(*(EXCLUDE_FILE (*tiku_drv_wifi_ipc.o *tiku_154.o) .persistent .persistent.*))
         KEEP(*tiku_drv_wifi_ipc.o(.persistent .persistent.*))
+        KEEP(*tiku_154.o(.persistent .persistent.*))
         __uninit_end = .;
         . = ALIGN(16);
         __bss_end = .;
@@ -136,6 +143,8 @@ SECTIONS {
         *tiku_drv_wifi_ipc.o(.bss .bss.* .sbss .sbss.*)
         */tikukits/net/*.o(.bss .bss.* .sbss .sbss.*)
         *tiku_drv_ble_ipc.o(.bss .bss.* .sbss .sbss.*)
+        *tiku_drv_154_ipc.o(.bss .bss.* .sbss .sbss.*)
+        *tiku_154.o(.bss .bss.* .sbss .sbss.*)
         *tiku_ble_serial.o(.bss .bss.* .sbss .sbss.*)
         *tiku_ble_adv_hci.o(.bss .bss.* .sbss .sbss.*)
         *test_radio.o(.bss .bss.* .sbss .sbss.*)

@@ -158,6 +158,14 @@ ifeq ($(TIKU_C6_BLE_SERVICE_ENABLE),1)
 CFLAGS += -DTIKU_C6_BLE_SERVICE_ENABLE=1
 C6_SRCS += services/ipc/tiku_ipc_ble_packets.c services/ipc/tiku_ipc_ble_server.c
 endif
+ifeq ($(TIKU_C6_154_SERVICE_ENABLE),1)
+ifneq ($(TIKU_C6_BLE_SERVICE_ENABLE):$(TIKU_DRV_WIFI_ESP_ENABLE),1:1)
+$(error C6 IEEE 802.15.4 service requires the Wi-Fi and BLE mailbox profile)
+endif
+CFLAGS += -DTIKU_C6_154_SERVICE_ENABLE=1 -DTIKU_DRV_154_C6_ENABLE=1 -DTIKU_HAS_154=1
+C6_SRCS += drivers/wifi/esp/c6/ieee154_c6.c services/ipc/tiku_ipc_154_codec.c \
+ services/ipc/tiku_ipc_154_transactions.c services/ipc/tiku_ipc_154_server.c
+endif
 ifeq ($(C6_WIFI_TEST),1)
 C6_SRCS += TikuBench/tests/esp32c6/test_wifi.c
 endif

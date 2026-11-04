@@ -29,6 +29,9 @@ static uint8_t c6_radio_channel=1,c6_wifi_channel=2;
 #if TIKU_DRV_BLE_IPC_ENABLE
 static uint8_t c6_ble_channel=3;
 #endif
+#if TIKU_DRV_154_IPC_ENABLE
+static uint8_t c6_154_channel=5;
+#endif
 #endif
 #endif
 #if (TIKU_HAS_COPROC + 0)
@@ -66,6 +69,9 @@ TIKU_WEAK const tiku_ipc_endpoint_config_t tiku_ipc_backend_table[] = {
     {"c6/wifi", &tiku_boot_c6_ops, &c6_wifi_channel, 0},
 #if TIKU_DRV_BLE_IPC_ENABLE
     {"c6/ble", &tiku_boot_c6_ops, &c6_ble_channel, 0},
+#endif
+#if TIKU_DRV_154_IPC_ENABLE
+    {"c6/154", &tiku_boot_c6_ops, &c6_154_channel, 0},
 #endif
 #endif
 #endif

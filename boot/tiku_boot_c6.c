@@ -21,12 +21,18 @@
 #if TIKU_DRV_BLE_IPC_ENABLE
 #include <services/ipc/tiku_ipc_ble.h>
 #endif
+#if TIKU_DRV_154_IPC_ENABLE
+#include <services/ipc/tiku_ipc_154.h>
+#endif
 #endif
 #include <hal/tiku_ipc_epoch_hal.h>
 #include <hal/tiku_c6_loader_hal.h>
 #include <kernel/memory/tiku_mem.h>
 #include <string.h>
 extern uint8_t __ipc_device_start[],__ipc_device_end[];
+#if TIKU_DRV_154_IPC_ENABLE
+static tiku_ipc_wire_t c6_154;
+#endif
 static struct {
     tiku_ipc_sdio_t owner;
     tiku_p4_sdio_owner_t driver;
@@ -61,6 +67,9 @@ static tiku_ipc_wire_t *endpoint_wire(uint16_t endpoint)
 #if TIKU_DRV_BLE_IPC_ENABLE
     if(endpoint==c6.ble.endpoint)return &c6.ble;
 #endif
+#if TIKU_DRV_154_IPC_ENABLE
+    if(endpoint==c6_154.endpoint)return &c6_154;
+#endif
 #else
     (void)endpoint;
 #endif
@@ -75,6 +84,9 @@ static void lost(void *unused)
     if(c6.data.initialized)(void)tiku_ipc_wire_ops.reset(&c6.data,c6.data.endpoint);
 #if TIKU_DRV_BLE_IPC_ENABLE
     if(c6.ble.initialized)(void)tiku_ipc_wire_ops.reset(&c6.ble,c6.ble.endpoint);
+#endif
+#if TIKU_DRV_154_IPC_ENABLE
+    if(c6_154.initialized)(void)tiku_ipc_wire_ops.reset(&c6_154,c6_154.endpoint);
 #endif
 #endif
     if(c6.wire.initialized)(void)tiku_ipc_wire_ops.reset(&c6.wire,c6.wire.endpoint);
@@ -158,6 +170,9 @@ static void progress(void *unused,uint16_t endpoint,uint16_t budget)
 #if TIKU_DRV_BLE_IPC_ENABLE
         tiku_ipc_wire_pump(&c6.ble,budget);
 #endif
+#if TIKU_DRV_154_IPC_ENABLE
+        tiku_ipc_wire_pump(&c6_154,budget);
+#endif
         if(c6.cursor++&1){tiku_ipc_wire_pump(&c6.data,budget);tiku_ipc_wire_pump(&c6.wire,budget);}
         else {tiku_ipc_wire_pump(&c6.wire,budget);tiku_ipc_wire_pump(&c6.data,budget);}
 #else
@@ -179,6 +194,9 @@ static void status(void *context,tiku_ipc_status_t *out)
     if(channel&&*channel==2)wire=&c6.data;
 #if TIKU_DRV_BLE_IPC_ENABLE
     if(channel&&*channel==3)wire=&c6.ble;
+#endif
+#if TIKU_DRV_154_IPC_ENABLE
+    if(channel&&*channel==5)wire=&c6_154;
 #endif
 #else
     (void)context;
@@ -227,6 +245,11 @@ int tiku_boot_c6_init(uint16_t endpoint)
     if(tiku_ipc_wire_init(&c6.ble,ble_link,"c6/ble",endpoint+3,epoch,255,
                           &tiku_ble_service_sink))return -1;
     tiku_ble_service_start(&c6.ble);
+#endif
+#if TIKU_DRV_154_IPC_ENABLE
+    tiku_link_t *ieee154_link=tiku_ipc_mux_open(&c6.mux,5,NULL,NULL);
+    if(tiku_ipc_wire_init(&c6_154,ieee154_link,"c6/154",endpoint+4,epoch,255,NULL))return -1;
+    tiku_154_service_start(&c6_154);
 #endif
 #else
     if(!link||tiku_ipc_wire_init(&c6.wire,link,"c6/bulk",endpoint,epoch,256,NULL)!=TIKU_IPC_OK)return -1;
