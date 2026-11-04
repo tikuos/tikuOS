@@ -396,8 +396,17 @@ void tiku_bt_poll(void);
 /* CONNECTION MANAGEMENT                                                     */
 /*---------------------------------------------------------------------------*/
 
-/** @brief Simultaneous LE connections; the host-side state is sized for one. */
-#define TIKU_BT_CONN_MAX         1U
+/** @brief Maximum simultaneous LE connections in this host profile. */
+#ifndef TIKU_BT_CONN_MAX
+#if defined(PLATFORM_ESP32C6) || (TIKU_DRV_BLE_IPC_ENABLE + 0)
+#define TIKU_BT_CONN_MAX 4U
+#else
+#define TIKU_BT_CONN_MAX 1U
+#endif
+#endif
+#if TIKU_BT_CONN_MAX < 1 || TIKU_BT_CONN_MAX > 4
+#error TIKU_BT_CONN_MAX must be between 1 and 4
+#endif
 
 /* The switches below are on except on the RP2350, whose Pico 2 W BT image
  * has no room left under its code cap. */
@@ -847,9 +856,8 @@ int tiku_bt_notify_char(const tiku_bt_char_t *c, const uint8_t *value,
 int tiku_bt_subscribed(const tiku_bt_char_t *c);
 
 /**
- * @brief The largest notification value one packet carries on the first
- *        link: its ATT MTU less 3, within one link-layer payload.  0 with no
- *        link.
+ * @brief The smallest active-link notification limit: ATT MTU less 3,
+ *        within one link-layer payload. Return 0 with no active link.
  */
 uint16_t tiku_bt_notify_max(void);
 
