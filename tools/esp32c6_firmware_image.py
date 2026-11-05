@@ -49,6 +49,15 @@ def native_layout(elf,native,xip=b''):
             raise ValueError('C6 XIP declaration mismatch')
     elif names.get('__c6_xip_end',0)!=names.get('__c6_xip_start',0):
         raise ValueError('missing C6 XIP payload')
+    reclaim=names.get('__c6_reset_reclaim',0)
+    reclaim_low=names.get('__c6_reset_reclaim_start',0)
+    reclaim_high=names.get('__c6_reset_reclaim_end',0)
+    if reclaim not in (0,1) or (not reclaim and (reclaim_low or reclaim_high)):
+        raise ValueError('unknown reset-only SRAM declaration')
+    if reclaim and (not headless or shell or reclaim_low!=0x40800000 or
+                    not reclaim_low<reclaim_high<=BASE or reclaim_high%16 or
+                    not BASE<=names.get('__c6_reset_reclaim_init',0)<BASE+len(native)):
+        raise ValueError('invalid reset-only SRAM declaration')
     spans={}
     for name,start,end in [('initialized','__native_image_start','__native_image_end'),
                            ('static','__bss_start','__bss_end'),
@@ -81,8 +90,15 @@ def native_layout(elf,native,xip=b''):
                        hi>names.get('__uninit_end',0)):
             raise ValueError('C6 durable recovery-control layout')
     allocated=[]
+    reclaimed_sections=0
     for _,kind,flags,address,offset,length,*_ in sections:
         if not flags&2 or not length:continue
+        if reclaim and address==reclaim_low and address+length==reclaim_high:
+            if kind!=8 or flags&4:
+                raise ValueError('reset-only SRAM must be zero storage')
+            reclaimed_sections+=1
+            allocated.append((address,address+length))
+            continue
         if xip and 0x42210000<=address<0x4230ffd0:
             if (kind!=1 or address+length>0x42210000+len(xip) or
                     elf[offset:offset+length]!=xip[address-0x42210000:address-0x42210000+length]):
@@ -100,6 +116,9 @@ def native_layout(elf,native,xip=b''):
     allocated.sort()
     if any(a[1]>b[0] for a,b in zip(allocated,allocated[1:])):
         raise ValueError('allocated section overlap')
+    if reclaim:
+        if reclaimed_sections!=1:raise ValueError('missing reset-only SRAM section')
+        spans['reset_reclaim']={'start':reclaim_low,'bytes':reclaim_high-reclaim_low}
     if any(x in names for x in ('app_main','vTaskStartScheduler','xTaskCreate')):
         raise ValueError('SDK runtime in native kernel')
     spans['cold_entry']={'start':END-4096,'bytes':4096}
