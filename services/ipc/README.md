@@ -87,10 +87,16 @@ integer overflow, consumer identities and ownership of complete cache lines.
 It does not infer device visibility from an SRAM/PSRAM tier. A CPU-copy engine
 uses id zero. Ports declare narrower domains for DMA-capable stages.
 
-`tiku_ipc_bus` has separate 320-byte transmit and receive stages aligned to
+`tiku_ipc_bus` defaults to separate 320-byte transmit and receive stages aligned to
 64 bytes, plus a pending outgoing frame. A packet starts with a two-byte
 little-endian frame length, at most 256 bytes of frame data, and zero padding.
-One whole 320-byte exchange retains both stages until `poll()` succeeds or
+`TIKU_IPC_PACKET_SLOT` and `TIKU_IPC_PACKET_PAYLOAD` select the staging and
+frame limits at build time. The slot holds the two-byte length and payload,
+is a multiple of 64 bytes, and fits the packet HAL capacity field. Hardware
+ports validate their supported sizes. The P4 native owner accepts a
+320-byte peer or its configured slot size after the epoch and identity
+exchange; bulk admission and receive completion require that observed size.
+One whole packet exchange retains both stages until `poll()` succeeds or
 `abort()` confirms final hardware access. Successful polling includes cache
 synchronization. An error alone does not release the stages. Failed abort
 quarantines them; a late coherent completion can end access. The context may

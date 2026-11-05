@@ -419,7 +419,7 @@ of each; `diag peek <hex> [words]` reads memory.
 | --- | --- |
 | HP SRAM, 768 KiB physical | 572,368 bytes after excluding ROM workspace and the 128 KiB L2 cache |
 | `0x4ff00000`–`0x4ff2bbd0` | Internal code/statics, durable SRAM mirror, separate retained data; remaining tail is allocator span 1 |
-| `0x4ff40000`–`0x4ff9bfc0` | 376,768 bytes shared by device/network staging (up to 64 KiB) and allocator span 0 |
+| `0x4ff40000`–`0x4ff9bfc0` | 376,768 bytes shared by device/network staging (up to 68 KiB) and allocator span 0 |
 | `0x4ff9bfc0`–`0x4ffa0000` | 64-byte guard and 16 KiB foreground stack |
 | PSRAM at `0x48000000` | 32 MiB mapped, 200 MHz under a 360 MHz CPU, volatile; external requests can allocate it; supplied by LDO VO2 at 1.8 V, which the PSRAM start enables |
 | Flash `0x000000`–`0x400000` | Reserved boot/code area, including the paired XIP window at offset `0x100000` |

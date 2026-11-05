@@ -9,6 +9,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
+#include <services/ipc/tiku_ipc_bus.h>
 #include "tiku_sdio_owner_arch.h"
 #include "tiku_sdmmc_arch.h"
 #include <hal/tiku_sdio_diag.h>
@@ -20,6 +21,17 @@
 #include <hal/tiku_c6_loader_hal.h>
 #include <hal/tiku_ipc_epoch_hal.h>
 #include <string.h>
+#if TIKU_IPC_PACKET_SLOT != 320u && TIKU_IPC_PACKET_SLOT != 512u
+#error Native SDIO supports 320-byte or 512-byte packet staging
+#endif
+#if TIKU_IPC_PACKET_SLOT > 320u
+static uint16_t packet_size=320;
+uint16_t tiku_p4_sdio_packet_size(void){return packet_size;}
+#define NATIVE_PACKET_SIZE(c) ((c)->packet_size)
+#else
+uint16_t tiku_p4_sdio_packet_size(void){return 320;}
+#define NATIVE_PACKET_SIZE(c) 320u
+#endif
 
 /** @brief Read up to four card bytes without dispatching processes. */
 static tiku_ipc_err_t read_bytes(uint32_t address,uint8_t *p,unsigned length)
@@ -184,7 +196,12 @@ static tiku_ipc_err_t negotiate(void *context,tiku_sdio_mode_t mode,uint32_t ses
             uint32_t credits;
             r=read_counter(0x44,0x0fff0000u,&credits);if(r){return r;}
             r=pending(c,&count);if(r){return r;}
+#if TIKU_IPC_PACKET_SLOT > 320u
+            if(!((credits>>16)&0xfffu)||(count!=320 && count!=TIKU_IPC_PACKET_SLOT))return TIKU_IPC_AGAIN;
+            c->packet_size=packet_size=(uint16_t)count;
+#else
             if(!((credits>>16)&0xfffu)||count!=320)return TIKU_IPC_AGAIN;
+#endif
             c->phase=0;
             if(c->identity)return TIKU_IPC_OK;
             memset(c->scratch,0,512);c->scratch[0]=2;c->scratch[1]=4;
@@ -239,7 +256,7 @@ static tiku_ipc_err_t start(void *context,tiku_sdio_mode_t mode,tiku_sdio_class_
     tiku_p4_sdio_owner_t *c=context;
     if(c->phase)return TIKU_IPC_BUSY;
     if((kind==TIKU_SDIO_CONTROL&&(mode!=TIKU_SDIO_NATIVE||tx_length!=20||rx_length!=32))||
-       (kind==TIKU_SDIO_BULK&&(mode!=TIKU_SDIO_NATIVE||tx_length!=320||rx_length!=320))||
+       (kind==TIKU_SDIO_BULK&&(mode!=TIKU_SDIO_NATIVE||tx_length!=NATIVE_PACKET_SIZE(c)||rx_length!=NATIVE_PACKET_SIZE(c)))||
        (kind==TIKU_SDIO_UPDATE&&((mode!=TIKU_SDIO_LOADER&&mode!=TIKU_SDIO_FACTORY)||
         (mode==TIKU_SDIO_LOADER&&tx_length<32)||!tx_length||tx_length>512||rx_length!=512)))
         return TIKU_IPC_INVALID;
@@ -302,7 +319,7 @@ static tiku_ipc_err_t poll(void *context,uint64_t *token)
     if(c->phase==12){
         r=pending(c,&count);if(r){return r;}if(!count)return TIKU_IPC_AGAIN;
         if(count>c->rx_length)return TIKU_IPC_IO;
-        if(c->kind==TIKU_SDIO_BULK&&count!=320)return TIKU_IPC_IO;
+        if(c->kind==TIKU_SDIO_BULK&&count!=NATIVE_PACKET_SIZE(c))return TIKU_IPC_IO;
         c->available=count;
         r=tiku_p4_sdmmc_start(0,1,0x1f800u-count,1,c->rx,(uint16_t)count,512);
         if(r){return r;}c->phase=13;return TIKU_IPC_AGAIN;

@@ -14,12 +14,20 @@
 #include <services/link/tiku_link.h>
 #include <hal/tiku_ipc_packet_hal.h>
 #if TIKU_IPC_ENABLE
+#ifndef TIKU_IPC_PACKET_SLOT
 #define TIKU_IPC_PACKET_SLOT 320u
+#endif
+#ifndef TIKU_IPC_PACKET_PAYLOAD
+#define TIKU_IPC_PACKET_PAYLOAD 256u
+#endif
+#if !TIKU_IPC_PACKET_PAYLOAD || TIKU_IPC_PACKET_SLOT > 65535u || TIKU_IPC_PACKET_SLOT % 64u || TIKU_IPC_PACKET_SLOT < TIKU_IPC_PACKET_PAYLOAD + 2u
+#error Packet staging must hold its length and payload
+#endif
 /** @brief Fixed bus staging; no private IPC mapping is exposed to hardware. */
 typedef struct {
     uint8_t tx[TIKU_IPC_PACKET_SLOT] __attribute__((aligned(64)));
     uint8_t rx[TIKU_IPC_PACKET_SLOT] __attribute__((aligned(64)));
-    uint8_t pending[258];
+    uint8_t pending[TIKU_IPC_PACKET_PAYLOAD+2u];
     tiku_link_t link;
     const tiku_ipc_packet_io_t *io;
     tiku_clock_time_t deadline;

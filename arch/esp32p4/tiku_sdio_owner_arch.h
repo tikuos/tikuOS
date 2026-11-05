@@ -24,8 +24,13 @@ typedef struct {
     uint32_t trace[5]; /**< Native epoch-reply padding sampled before peer reset. */
     tiku_clock_time_t reset_until;
     uint16_t tx_length, rx_length, offset;
+#if TIKU_IPC_PACKET_SLOT > 320u
+    uint16_t packet_size;
+#endif
     uint8_t selected, enumeration, phase, kind, resetting, booting, go, identity, factory, adopt, cut;
 } tiku_p4_sdio_owner_t;
 /** @brief Single hardware SDMMC lease across native, recovery and loader modes. */
+/** @brief Return the packet width observed during native negotiation. */
+uint16_t tiku_p4_sdio_packet_size(void);
 extern const tiku_sdio_owner_ops_t tiku_p4_sdio_owner_ops;
 #endif

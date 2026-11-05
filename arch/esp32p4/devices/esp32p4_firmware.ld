@@ -167,7 +167,7 @@ SECTIONS {
     INCLUDE arch/common/tiku_sram_layout.ld
     ASSERT(__tier_sram_extra_start <= __tier_sram_extra_end,
            "P4 low SRAM statics overlap ROM workspace")
-    ASSERT(SIZEOF(.ipc_device) <= 64K, "P4 device staging exceeds firmware validator budget")
+    ASSERT(SIZEOF(.ipc_device) <= 68K, "P4 device staging exceeds firmware validator budget")
     ASSERT(SIZEOF(.fault_record) == 64, "P4 fault record must be 64 bytes")
     ASSERT(__uninit_start == tiku_layout_pin, "P4 layout record must open mirror")
     ASSERT(__uninit_end - __uninit_start <= 16K - 16,

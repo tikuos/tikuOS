@@ -25,7 +25,7 @@ static int send(tiku_link_t *link, const void *head, size_t hn,
 {
     tiku_ipc_bus_t *c = link->ctx;
     size_t length;
-    if (hn > 256 || bn > 256-hn || c->queued || c->closing ||
+    if (hn > TIKU_IPC_PACKET_PAYLOAD || bn > TIKU_IPC_PACKET_PAYLOAD-hn || c->queued || c->closing ||
         c->quarantined || (hn && !head) || (bn && !body)) return -1;
     length = hn+bn;
     if (!length) return -1;
@@ -53,7 +53,7 @@ static void pump(tiku_link_t *link)
         c->active = c->quarantined = 0;
         if (result == TIKU_IPC_OK && !c->closing) {
             uint16_t length = (uint16_t)(c->rx[0] | (uint16_t)c->rx[1] << 8);
-            if (length && length <= 256) tiku_link_deliver(link,c->rx+2,length);
+            if (length && length <= TIKU_IPC_PACKET_PAYLOAD) tiku_link_deliver(link,c->rx+2,length);
             else if (length) c->failed++;
         }
     }

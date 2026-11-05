@@ -10,6 +10,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_ipc_mux.h"
+#include "tiku_ipc_bus.h"
 #include <string.h>
 #if (TIKU_DRV_WIFI_IPC_ENABLE + 0) || (TIKU_C6_RADIO_SERVICE_ENABLE + 0)
 #include <interfaces/wireless/tiku_wireless_ipc.h>
@@ -23,8 +24,8 @@
 static int send(tiku_link_t *link, const void *head, size_t hn, const void *body, size_t bn)
 {
     tiku_ipc_mux_channel_t *c = link->ctx;
-    uint8_t frame[256];
-    if (!c->used || hn > 255 || bn > 255-hn || (hn && !head) || (bn && !body)) return -1;
+    uint8_t frame[TIKU_IPC_PACKET_PAYLOAD];
+    if (!c->used || hn >= TIKU_IPC_PACKET_PAYLOAD || bn > TIKU_IPC_PACKET_PAYLOAD-1u-hn || (hn && !head) || (bn && !body)) return -1;
     frame[0] = c->id;
     if (hn) memcpy(frame+1,head,hn);
     if (bn) memcpy(frame+1+hn,body,bn);
@@ -47,7 +48,7 @@ static const tiku_link_ops_t ops = {.send=send,.pump=pump,.close=close};
 static void receive(void *context, uint8_t *frame, size_t length)
 {
     tiku_ipc_mux_t *c = context;
-    if (!length || length > 256 || frame[0] >= TIKU_IPC_MUX_CHANNELS ||
+    if (!length || length > TIKU_IPC_PACKET_PAYLOAD || frame[0] >= TIKU_IPC_MUX_CHANNELS ||
         !c->channels[frame[0]].used) { c->dropped++; return; }
     tiku_link_deliver(&c->channels[frame[0]].link,frame+1,length-1);
 }
