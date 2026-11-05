@@ -15,6 +15,7 @@
  */
 
 #include "tiku_shell_cmd_bt.h"
+#include <string.h>
 #include <shell/tiku_shell.h>
 #include <interfaces/bluetooth/tiku_bt.h>
 #include <interfaces/bluetooth/tiku_ble_serial.h>  /* bt uart: the NUS pipe */
@@ -116,6 +117,7 @@ static void bt_help(void)
 #if (TIKU_BT_LINK_UPDATE + 0)
 #if (TIKU_BT_EXTENDED + 0)
     SHELL_PRINTF("bt advertise-ext <name> 1m|coded [1m|2m|coded]\n");
+    SHELL_PRINTF("bt advset [N stop | N name [1m|coded [1m|2m|coded]]]\n");
     SHELL_PRINTF("bt scan-ext 1m|coded|both [prefix]\n");
     SHELL_PRINTF("bt connect <addr> public|random [1m|coded]\n");
 #endif
@@ -555,6 +557,40 @@ static int parse_u16(const char *s, uint16_t *out)
     *out = (uint16_t)v;
     return 0;
 }
+
+#if (TIKU_BT_EXTENDED + 0)
+/** @brief Inspect advertising sets or control one independent beacon. */
+static void bt_advset(uint8_t argc, const char *argv[])
+{
+    uint16_t set;
+    uint8_t ad[31] = {2U, 1U, 6U}, primary = 1U, secondary = 1U;
+    unsigned n;
+    int rc;
+    if (argc == 2U) {
+        int limit = tiku_bt_advertising_sets();
+        SHELL_PRINTF("bt: advertising sets=%d\n", limit);
+        for (int i = 0; i < limit; ++i)
+            SHELL_PRINTF("  %d: %s\n", i, tiku_bt_advertise_set_active((uint8_t)i) ? "active" : "off");
+        return;
+    }
+    if (argc < 4U || argc > 6U || parse_u16(argv[2], &set) || set >= TIKU_BT_ADV_SET_MAX) {
+        SHELL_PRINTF("usage: bt advset [N stop | N name [1m|coded [1m|2m|coded]]]\n");
+        return;
+    }
+    if (str_eq(argv[3], "stop") && argc == 4U) {
+        rc = tiku_bt_advertise_set_stop((uint8_t)set);
+    } else {
+        if (argc >= 5U) primary = bt_phy_arg(argv[4]);
+        secondary = argc == 6U ? bt_phy_arg(argv[5]) : primary;
+        n = 0U;
+        while (argv[3][n] && n < sizeof ad - 5U) ++n;
+        ad[3] = (uint8_t)(n + 1U); ad[4] = 9U;
+        memcpy(ad + 5, argv[3], n);
+        rc = tiku_bt_advertise_set((uint8_t)set, primary, secondary, 100U, ad, (uint8_t)(n + 5U));
+    }
+    SHELL_PRINTF("bt: advertising set %u rc=%d\n", (unsigned)set, rc);
+}
+#endif
 
 /** @brief Handle of connection @p slot_1based (1-based), or 0xFFFF. */
 static uint16_t conn_handle_for_slot(uint8_t slot_1based)
@@ -1522,6 +1558,10 @@ void tiku_shell_cmd_bt(uint8_t argc, const char *argv[])
         return;
     }
 #if (TIKU_BT_EXTENDED + 0)
+    if (str_eq(argv[1], "advset")) {
+        bt_advset(argc, argv);
+        return;
+    }
     if (str_eq(argv[1], "advertise-ext")) {
         bt_advertise_ext(argc, argv);
         return;

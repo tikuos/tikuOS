@@ -20,6 +20,18 @@
 #include <stdint.h>
 #include "kernel/drivers/tiku_drv.h"
 
+/** @brief Advertising set budget; set zero is the connectable GAP advertiser. */
+#ifndef TIKU_BT_ADV_SET_MAX
+#if defined(PLATFORM_ESP32P4) || defined(PLATFORM_ESP32C6)
+#define TIKU_BT_ADV_SET_MAX 4
+#else
+#define TIKU_BT_ADV_SET_MAX 1
+#endif
+#endif
+#if TIKU_BT_ADV_SET_MAX < 1 || TIKU_BT_ADV_SET_MAX > 4
+#error "TIKU_BT_ADV_SET_MAX must be between 1 and 4"
+#endif
+
 /** @brief Extended GAP commands and reports on the P4/C6 radio profile. */
 #ifndef TIKU_BT_EXTENDED
 #if defined(PLATFORM_ESP32P4) || defined(PLATFORM_ESP32C6)
@@ -35,6 +47,27 @@
 /** @brief Scan or initiation PHY masks; combine 1M and Coded for scanning. */
 #define TIKU_BT_SCAN_1M     0x01U
 #define TIKU_BT_SCAN_CODED  0x04U
+
+/** @brief Return the usable advertising set count, or a negative driver status. */
+int tiku_bt_advertising_sets(void);
+/**
+ * @brief Start a nonconnectable set 1..N-1, with up to 251 bytes of AD data.
+ * @param set        Handle below the host and controller advertising set limits
+ * @param primary    1 for 1M or 3 for Coded
+ * @param secondary  1 for 1M, 2 for 2M or 3 for Coded
+ * @param interval_ms Advertising interval, clamped to the controller range
+ * @param ad         AD records; NULL requires a zero length
+ * @param ad_len     Length of the AD records
+ * @return Driver status. Invalid requests and failed stops preserve running state;
+ *         later setup failures leave this set disabled.
+ * Each set uses its own static random address, or a rotating RPA with privacy.
+ */
+int tiku_bt_advertise_set(uint8_t set, uint8_t primary, uint8_t secondary,
+    uint16_t interval_ms, const uint8_t *ad, uint8_t ad_len);
+/** @brief Stop one set; handle zero selects the GAP advertiser. */
+int tiku_bt_advertise_set_stop(uint8_t set);
+/** @brief Return whether the selected set is active; unknown handles return zero. */
+int tiku_bt_advertise_set_active(uint8_t set);
 
 /**
  * @brief Start connectable extended advertising with a name and optional UUID.
