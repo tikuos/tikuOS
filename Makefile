@@ -1602,6 +1602,14 @@ endif
 LDFLAGS += -Wl,--gc-sections
 ifeq ($(MSP430_LTO),1)
 LDFLAGS += -flto -Os
+# The FR6989 image needs both lower FRAM and HIFRAM for its code.  LTO
+# generates the code at link time, as one .either.text section per partition
+# unless -ffunction-sections is given there; with it, ld places each function
+# in whichever region has room.  The FR5994's code fits in HIFRAM, and its
+# .persistent origin, which this script does not pin, stays where it is.
+ifeq ($(MCU),msp430fr6989)
+LDFLAGS += -ffunction-sections
+endif
 endif
 # Link map in build/<mcu>/main.map, as on the ARM ports.
 LDFLAGS += -Wl,-Map=$(BUILD_DIR)/main.map
