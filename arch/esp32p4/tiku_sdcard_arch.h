@@ -39,4 +39,6 @@ int tiku_p4_sdcard_blocks(tiku_p4_sdcard_t *, uint8_t write, uint32_t lba,
 int tiku_p4_sdcard_sync(tiku_p4_sdcard_t *);
 /** @brief Set a slot0 clock at or below 400 kHz..20 MHz while holding the lease. */
 int tiku_p4_sdcard_clock(tiku_p4_sdcard_t *, uint32_t hz);
+/** @brief Check SCR support and select one or four data lines through ACMD6. */
+int tiku_p4_sdcard_width(tiku_p4_sdcard_t *, unsigned width);
 #endif

@@ -80,6 +80,7 @@ static tiku_ipc_err_t transfer(uint8_t index,uint32_t argument,uint32_t response
 {
     uint32_t flags=START|(1u<<13),raw=0,dma=0;
     unsigned writing=index==24||index==25,multi=index==18||index==25;
+    uint32_t bytes=index==51?8u:blocks*512u;
     uint32_t done=4u|(data?8u:0)|(multi?1u<<14:0);
     uint64_t begin,now;
     if(!claimed||!owner||!response)return TIKU_IPC_INVALID;
@@ -87,7 +88,13 @@ static tiku_ipc_err_t transfer(uint8_t index,uint32_t argument,uint32_t response
     case 0: if(argument||data)return TIKU_IPC_INVALID;flags|=1u<<15;break;
     case 2: case 9: flags|=(1u<<6)|(1u<<7)|(1u<<8);break;
     case 41: flags|=1u<<6;break;
+    case 6:
+        if(!selected||data||(argument!=0&&argument!=2))return TIKU_IPC_INVALID;
+        flags|=(1u<<6)|(1u<<8);break;
     case 3: case 7: case 8: case 13: case 55: flags|=(1u<<6)|(1u<<8);break;
+    case 51:
+        if(!selected||!data||blocks!=1||argument)return TIKU_IPC_INVALID;
+        flags|=(1u<<6)|(1u<<8)|(1u<<9);break;
     case 17: case 18: case 24: case 25:
         if(writing&&!writable)return TIKU_IPC_UNSUPPORTED;
         if(!selected||!data||!blocks||blocks>8||(uint64_t)argument>=owner->sectors||
@@ -97,20 +104,20 @@ static tiku_ipc_err_t transfer(uint8_t index,uint32_t argument,uint32_t response
         flags|=(1u<<6)|(1u<<8)|(1u<<9)|(writing?1u<<10:0)|(multi?1u<<12:0);break;
     default:return TIKU_IPC_UNSUPPORTED;
     }
-    if(index!=17&&index!=18&&index!=24&&index!=25&&data)return TIKU_IPC_INVALID;
+    if(index!=17&&index!=18&&index!=24&&index!=25&&index!=51&&data)return TIKU_IPC_INVALID;
     if(wait_clear(CMD,START,3000))return TIKU_IPC_TIMEOUT;
     if(data){
         field(CTRL,6u,6u);field(REG(0x80),1u,1u);
         if(wait_clear(CTRL,6u,3000)||wait_clear(REG(0x80),1u,3000))return TIKU_IPC_TIMEOUT;
         memset(&card_descriptor,0,sizeof card_descriptor);
         card_descriptor.control=(1u<<31)|(1u<<4)|(1u<<3)|(1u<<2);
-        card_descriptor.size=blocks*512;card_descriptor.address=(uint32_t)(uintptr_t)card_stage;
-        if(writing)memcpy(card_stage,data,blocks*512);
+        card_descriptor.size=bytes;card_descriptor.address=(uint32_t)(uintptr_t)card_stage;
+        if(writing)memcpy(card_stage,data,bytes);
         tiku_cpu_dcache_clean(card_stage,sizeof card_stage);
         if(!writing)tiku_cpu_dcache_invalidate(card_stage,sizeof card_stage);
         tiku_cpu_dcache_clean(&card_descriptor,sizeof card_descriptor);
         TIKU_P4_REG_WRITE(REG(0x8c),UINT32_MAX);
-        TIKU_P4_REG_WRITE(REG(0x1c),512);TIKU_P4_REG_WRITE(REG(0x20),blocks*512);
+        TIKU_P4_REG_WRITE(REG(0x1c),index==51?8:512);TIKU_P4_REG_WRITE(REG(0x20),bytes);
         TIKU_P4_REG_WRITE(REG(0x88),(uint32_t)(uintptr_t)&card_descriptor);
         field(CTRL,(1u<<25)|(1u<<5),(1u<<25)|(1u<<5));
         TIKU_P4_REG_WRITE(REG(0x80),(1u<<7)|(1u<<1));
@@ -141,10 +148,10 @@ static tiku_ipc_err_t transfer(uint8_t index,uint32_t argument,uint32_t response
     if(!tiku_p4_systimer_read(&now))owner->elapsed_us=(uint32_t)(((now-begin)&TIKU_P4_SYSTIMER_MASK)/16u);
     if((raw&ERRORS)||(raw&done)!=done||
        (data&&((dma&0x34u)||!(dma&(writing?1u:2u))||(card_descriptor.control&(1u<<31))))||wait_clear(CMD,START,3000))return TIKU_IPC_IO;
-    if((index==7||index==13||index==17||index==18||index==24||index==25||index==55)&&(response[0]&R1_ERRORS))return TIKU_IPC_IO;
+    if((index==6||index==7||index==13||index==17||index==18||index==24||index==25||index==51||index==55)&&(response[0]&R1_ERRORS))return TIKU_IPC_IO;
     if(data&&!writing){
         tiku_cpu_dcache_invalidate(card_stage,sizeof card_stage);
-        memcpy(data,card_stage,blocks*512);
+        memcpy(data,card_stage,bytes);
     }
     return TIKU_IPC_OK;
 }
@@ -318,4 +325,25 @@ int tiku_p4_sdcard_clock(tiku_p4_sdcard_t *card,uint32_t hz)
     field(REG(0x10),1u,0);if(clock_update())return TIKU_IPC_IO;
     field(REG(8),255u,divider);if(clock_update())return TIKU_IPC_IO;
     field(REG(0x10),1u,1u);return clock_update()?TIKU_IPC_IO:0;
+}
+
+int tiku_p4_sdcard_width(tiku_p4_sdcard_t *card,unsigned width)
+{
+    uint32_t r[4];
+    if(!selected||card!=owner||(width!=1&&width!=4))return TIKU_IPC_INVALID;
+    if(tiku_p4_sdcard_sync(card))return TIKU_IPC_IO;
+    if(width==4){
+        uint8_t scr[8];
+        int rc=command(55,card->rca,r,NULL);
+        if(rc||!(r[0]&(1u<<5)))return TIKU_IPC_IO;
+        rc=command(51,0,r,scr);if(rc)return rc;
+        if((scr[0]>>4)!=0||!(scr[1]&1u))return TIKU_IPC_IO;
+        if(!(scr[1]&4u))return TIKU_IPC_UNSUPPORTED;
+    }
+    int rc=command(55,card->rca,r,NULL);
+    if(rc||!(r[0]&(1u<<5)))return TIKU_IPC_IO;
+    rc=command(6,width==4?2:0,r,NULL);
+    if(rc){writable=0;return rc;}
+    field(REG(0x18),1u,width==4?1u:0u);
+    return 0;
 }

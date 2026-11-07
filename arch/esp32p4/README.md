@@ -624,9 +624,12 @@ sd probe
 `TIKU_MEDIA_FS_ENABLE=1` builds the native media filesystem, queued storage
 service and `/media` providers. The P4 block backend verifies the selected
 card CID and sector extent before enabling writes. It supports one through
-eight sectors per transfer, a one-bit clock selected from 400 kHz through
+eight sectors per transfer, a clock selected from 400 kHz through
 20 MHz, automatic stop for multi-block transfers, and programming/status
-completion before acknowledging writes. The service restores C6 controller
+completion before acknowledging writes. It reads SCR and selects four data
+lines through ACMD6 when the card advertises that width; other cards retain
+one data line. Identification and filesystem probing use one data line.
+The service restores C6 controller
 ownership after each operation.
 
 `media mount [hz]` discovers a native whole-card volume and attaches `/media`.

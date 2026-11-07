@@ -40,7 +40,7 @@ int tiku_media_transfer_close(tiku_media_transfer_t *s)
     int rc=0;tiku_media_request_t r={0};
     if(s->upload){r.op=TIKU_MEDIA_RELEASE;rc=request(s,&r);if(!rc)s->upload=s->staged=0;}
     if(s->reader){r.op=TIKU_MEDIA_CLOSE;r.id=s->reader;int e=request(s,&r);if(!e)s->reader=0;if(!rc)rc=e;}
-    s->authenticated=s->listing=0;return rc;
+    s->authenticated=s->listing=0;s->read_size=0;return rc;
 }
 /** @brief Decode a bounded name without embedded terminators. */
 static int name(char out[TIKU_MFS_NAME],const uint8_t *p,size_t n,int empty)
@@ -86,7 +86,7 @@ static int execute(tiku_media_transfer_t *s,unsigned op,unsigned flags,uint64_t 
             if(rc!=TIKU_MFS_NOENT)return rc;}
         r.op=TIKU_MEDIA_BEGIN;r.name=path;r.policy=TIKU_MFS_ATOMIC;r.offset=arg;memcpy(r.digest,in,32);
         if((rc=request(s,&r)))return rc;
-        s->upload=r.id;s->expected=arg;s->fault=0;s->staged=0;s->accepted=s->committed=0;*value=r.id;return 0;
+        s->read_size=0;s->upload=r.id;s->expected=arg;s->fault=0;s->staged=0;s->accepted=s->committed=0;*value=r.id;return 0;
     case TIKU_MT_RESUME:
         if(s->upload||n<41)return TIKU_MFS_ARG;
         if((rc=name(path,in+40,n-40,0)))return rc;
@@ -95,7 +95,7 @@ static int execute(tiku_media_transfer_t *s,unsigned op,unsigned flags,uint64_t 
         if(rc)return rc;
         if(strcmp(path,o.name)||o.expected!=u64(in)||memcmp(o.expected_digest,in+8,32))return TIKU_MFS_STALE;
         r.op=TIKU_MEDIA_RESUME;r.id=arg;if((rc=request(s,&r)))return rc;
-        s->upload=arg;s->expected=o.expected;s->fault=0;s->staged=0;s->accepted=s->committed=o.length;*value=o.length;return 0;
+        s->read_size=0;s->upload=arg;s->expected=o.expected;s->fault=0;s->staged=0;s->accepted=s->committed=o.length;*value=o.length;return 0;
     case TIKU_MT_DATA:
         if(!s->upload||s->fault||!n||arg!=s->accepted||n>TIKU_MFS_CHUNK-s->staged||arg>s->expected||n>s->expected-arg)return TIKU_MFS_STALE;
         memcpy(s->stage+s->staged,in,n);s->staged+=n;s->accepted+=n;
@@ -116,15 +116,29 @@ static int execute(tiku_media_transfer_t *s,unsigned op,unsigned flags,uint64_t 
         r.op=TIKU_MEDIA_STAT;r.name=path;if((rc=request(s,&r)))return rc;
         if(!o.complete)return TIKU_MFS_BUSY;
         r.op=TIKU_MEDIA_OPEN;if((rc=request(s,&r)))return rc;
-        s->reader=r.id;*size=metadata(out,&o);return 0;
+        s->reader=r.id;s->read_length=o.length;s->read_size=0;*size=metadata(out,&o);return 0;
     case TIKU_MT_READ:
         if(!s->reader||n!=4||u32(in)>TIKU_MEDIA_TRANSFER_CHUNK)return TIKU_MFS_ARG;
         r.op=TIKU_MEDIA_READ_AT;r.id=s->reader;r.offset=arg;r.length=u32(in);r.buffer=out;
+        if(!s->upload&&r.length&&arg<s->read_length){
+            unsigned take=r.length;
+            if(take>s->read_length-arg)take=(unsigned)(s->read_length-arg);
+            if(!s->read_size||arg<s->read_offset||arg-s->read_offset>s->read_size||
+               take>s->read_size-(arg-s->read_offset)){
+                s->read_size=0;r.buffer=s->stage;r.length=TIKU_MFS_CHUNK;
+                if(r.length>s->read_length-arg)r.length=(uint32_t)(s->read_length-arg);
+                rc=request(s,&r);if(rc<0)return rc;
+                s->read_offset=arg;s->read_size=(uint32_t)rc;
+            }
+            uint32_t offset=(uint32_t)(arg-s->read_offset);
+            if(offset>s->read_size||take>s->read_size-offset)return TIKU_MFS_IO;
+            memcpy(out,s->stage+offset,take);*size=take;*value=arg;return 0;
+        }
         rc=request(s,&r);if(rc<0)return rc;*size=(unsigned)rc;*value=arg;return 0;
     case TIKU_MT_CLOSE:
         if(n)return TIKU_MFS_ARG;
         r.op=TIKU_MEDIA_CLOSE;r.id=s->reader;rc=s->reader?request(s,&r):0;
-        if(!rc)s->reader=0;
+        if(!rc){s->reader=0;s->read_size=0;}
         return rc;
     case TIKU_MT_LIST:
         if((rc=name(s->prefix,in,n,1)))return rc;

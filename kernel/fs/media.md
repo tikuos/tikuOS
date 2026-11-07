@@ -134,7 +134,8 @@ eight sectors; multi-block transfers require automatic-stop completion.
 Writes check programming completion and CMD13 status. Optional SD cache
 is not enabled.
 
-The driver uses a one-bit bus and synchronous operations. Identification
+The driver uses four data lines when SCR advertises support, and one data
+line otherwise. Operations are synchronous and use DMA. Identification
 runs on each acquired session. A service step holds the SDMMC lease for
 one filesystem operation, including its barriers. The node budget limits
 collection traversal, not card busy time or checkpoint latency. Capture

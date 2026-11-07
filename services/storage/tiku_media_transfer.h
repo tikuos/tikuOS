@@ -26,6 +26,8 @@ typedef struct {
     tiku_media_store_t *store;
     uint32_t client,last_sequence;
     uint64_t upload,reader,accepted,committed,expected;
+    uint64_t read_length,read_offset;
+    uint32_t read_size;
     tiku_mfs_cursor_t cursor;
     char prefix[TIKU_MFS_NAME];
     uint8_t key[32],authenticated,listing,fault;

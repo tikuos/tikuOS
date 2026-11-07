@@ -1,7 +1,10 @@
 # Computer transfers
 
 `tools/tiku_media_transfer.py` lists, uploads and downloads objects in the
-mounted native media filesystem. The P4 shell build with
+mounted native media filesystem. Downloads read ahead in 64 KiB batches
+when the session has no active upload. The batch buffer is shared with
+upload staging; starting or resuming an upload invalidates cached reads.
+The P4 shell build with
 `TIKU_MEDIA_FS_ENABLE=1` and `TIKU_P4_SDCARD_ENABLE=1` includes its USB console
 service. Wi-Fi transfers also require `TIKU_KITS_NET_TCP_ENABLE=1` and a
 working Wi-Fi IP connection.

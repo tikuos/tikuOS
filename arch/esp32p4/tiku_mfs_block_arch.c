@@ -55,6 +55,10 @@ int tiku_p4_mfs_block_acquire(void *ctx)
     if(!rc&&(memcmp(s->cid,s->card.cid,sizeof s->cid)||s->first>=s->card.sectors||
        s->block.sectors>s->card.sectors-s->first))rc=TIKU_IPC_INVALID;
     if(!rc)rc=tiku_p4_sdcard_write_enable(&s->card,s->first,s->block.sectors);
+    if(!rc){
+        rc=tiku_p4_sdcard_width(&s->card,4);
+        if(rc==TIKU_IPC_UNSUPPORTED)rc=0;
+    }
     if(!rc)rc=tiku_p4_sdcard_clock(&s->card,s->hz);
     if(rc){int close=tiku_p4_sdcard_close();if(!close)s->active=0;if(close)return TIKU_MFS_IO;}
     return rc?TIKU_MFS_IO:0;
