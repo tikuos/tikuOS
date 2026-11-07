@@ -35,11 +35,12 @@ static void msc_up(void)
 {
     static const char *const why[] = {
         "disk presented", "core did not leave reset", "core never idle",
-        "interrupt line taken", "FIFO layout too large", "no SRAM for the disk"
+        "interrupt line taken", "FIFO layout too large", "no SRAM for the disk",
+        "USB controller owned by another service"
     };
     int r = tiku_p4_usbhs_msc_start();
 
-    SHELL_PRINTF("usbmsc: %s\n", why[r <= 0 && r >= -5 ? -r : 1]);
+    SHELL_PRINTF("usbmsc: %s\n", why[r <= 0 && r >= TIKU_P4_USBHS_ERR_BUSY ? -r : 1]);
 }
 
 /** @brief Print the PHY controls and the core's registers. */

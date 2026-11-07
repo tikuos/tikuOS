@@ -35,11 +35,13 @@
 #define TIKU_USBD_VID           0x1209u
 #define TIKU_USBD_PID_CONSOLE   0x0001u
 #define TIKU_USBD_PID_DISK      0x0002u
+#define TIKU_USBD_PID_BULK      0x0003u
 
 /** @brief The class a descriptor set presents; selects how class requests
  *         are decided. */
 #define TIKU_USBD_CLASS_CDC     1u
 #define TIKU_USBD_CLASS_MSC     2u
+#define TIKU_USBD_CLASS_VENDOR  3u
 
 /*---------------------------------------------------------------------------*/
 /* DESCRIPTOR BUILDERS                                                       */

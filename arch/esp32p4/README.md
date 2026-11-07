@@ -268,6 +268,20 @@ DMA past the L1 cache, so each buffer is cleaned or invalidated around it.
 <lba>` and `regs` print the counters, a block and the PHY and core
 registers. The shell stays on the USB Serial/JTAG Type-C.
 
+The same build supports an exclusively owned vendor bulk interface on that
+connector. `media usbhs` enables file transfers after `media mount`;
+`media off` releases it. The [computer transfer tool](../../services/storage/media-transfer.md)
+provides listing, upload, download and upload resume. The bulk interface and
+RAM disk cannot run together. USB reset invalidates queued records and the
+media session releases its handles before accepting a new HELLO. DMA stages
+and shell file-transfer buffers occupy high SRAM; interrupt code remains in
+SRAM while foreground USB entry points execute from flash.
+
+The combined radio, camera, media and USB build can exceed the image tool's
+4 MiB ELF input limit with full debug information. Append `-g1` to
+`EXTRA_CFLAGS` for line-table debug information in that build.
+
+
 The HP cores' single-precision FPU runs every `float` operation: 100k fused
 multiply-adds take 1.9 ms. `tiku_crt_early.S` turns it on at boot and saves
 f0-f31 and `fcsr` in the interrupt frame of a context that wrote them, so
@@ -419,7 +433,7 @@ of each; `diag peek <hex> [words]` reads memory.
 | --- | --- |
 | HP SRAM, 768 KiB physical | 572,368 bytes after excluding ROM workspace and the 128 KiB L2 cache |
 | `0x4ff00000`–`0x4ff2bbd0` | Internal code/statics, durable SRAM mirror, separate retained data; remaining tail is allocator span 1 |
-| `0x4ff40000`–`0x4ff9bfc0` | 376,768 bytes shared by device/network staging (up to 68 KiB) and allocator span 0 |
+| `0x4ff40000`–`0x4ff9bfc0` | 376,768 bytes shared by device/network staging (up to 96 KiB) and allocator span 0 |
 | `0x4ff9bfc0`–`0x4ffa0000` | 64-byte guard and 16 KiB foreground stack |
 | PSRAM at `0x48000000` | 32 MiB mapped, 200 MHz under a 360 MHz CPU, volatile; external requests can allocate it; supplied by LDO VO2 at 1.8 V, which the PSRAM start enables |
 | Flash `0x000000`–`0x400000` | Reserved boot/code area, including the paired XIP window at offset `0x100000` |

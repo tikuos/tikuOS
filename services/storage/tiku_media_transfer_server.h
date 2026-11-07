@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_media_transfer_server.h - Explicit USB-console and TCP transfer listeners.
+ * tiku_media_transfer_server.h - USB-console, high-speed bulk and TCP transfer listeners.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -14,6 +14,8 @@
 #include <stdint.h>
 /** @brief Start console channel 0xF7 when port is zero, or one keyed TCP listener. */
 int tiku_media_transfer_server_start(uint16_t port,const uint8_t *key);
+/** @brief Start the P4 high-speed USB bulk listener, with no console framing. */
+int tiku_media_transfer_server_usbhs(void);
 /** @brief Stop transports and release this server's file handles and SRAM arena. */
 int tiku_media_transfer_server_stop(void);
 #endif

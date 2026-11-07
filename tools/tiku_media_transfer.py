@@ -299,6 +299,7 @@ def main():
     transport = parser.add_mutually_exclusive_group(required=True)
     transport.add_argument('--serial', metavar='PORT')
     transport.add_argument('--tcp', metavar='HOST:PORT')
+    transport.add_argument('--usbhs', nargs='?', const='auto', metavar='USB_SERIAL')
     parser.add_argument('--key-file', type=Path, help='32-byte binary TCP access key')
     commands = parser.add_subparsers(dest='command', required=True)
     upload = commands.add_parser('put')
@@ -324,7 +325,11 @@ def main():
         key = args.key_file.read_bytes() if args.tcp else b''
         if args.tcp and (len(key) != 32 or not any(key)):
             raise ValueError('key file must contain a nonzero 32-byte key')
-        wire = USB(args.serial) if args.serial else TCP(args.tcp)
+        if args.usbhs:
+            from tiku_usb_bulk import Bulk
+            wire = Bulk(args.usbhs)
+        else:
+            wire = USB(args.serial) if args.serial else TCP(args.tcp)
         if args.command == 'serve':
             key = os.urandom(32)
             fd = os.open(args.key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

@@ -15,6 +15,7 @@
  */
 #include <stddef.h>
 #include "tiku_usbhs_arch.h"
+#include "tiku_cpu_common.h"
 #include "tiku_esp32p4_regs.h"
 #include "tiku_irq_arch.h"
 
@@ -85,7 +86,7 @@ static void usb_isr(void)
     tiku_p4_usbhs_msc_irq();
 }
 
-int tiku_p4_usbhs_up(void)
+TIKU_P4_XIP_TEXT int tiku_p4_usbhs_up(void)
 {
     uint32_t state = TIKU_P4_IRQ_SAVE(), id;
 
@@ -133,7 +134,7 @@ int tiku_p4_usbhs_up(void)
     return TIKU_P4_USBHS_OK;
 }
 
-void tiku_p4_usbhs_down(void)
+TIKU_P4_XIP_TEXT void tiku_p4_usbhs_down(void)
 {
     uint32_t state = TIKU_P4_IRQ_SAVE();
 
@@ -150,7 +151,7 @@ void tiku_p4_usbhs_down(void)
     TIKU_P4_IRQ_RESTORE(state);
 }
 
-void tiku_p4_usbhs_read(tiku_p4_usbhs_regs_t *out)
+TIKU_P4_XIP_TEXT void tiku_p4_usbhs_read(tiku_p4_usbhs_regs_t *out)
 {
     uint32_t rst = TIKU_P4_REG_READ(USB_CLKRST);
 

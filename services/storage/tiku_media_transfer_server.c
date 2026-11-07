@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_media_transfer_server.c - Deferred storage requests on console and TCP.
+ * tiku_media_transfer_server.c - Deferred storage requests on console, bulk USB and TCP.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,6 +20,26 @@
 #include <string.h>
 #if TIKU_KITS_NET_TCP_ENABLE
 #include <tikukits/net/ipv4/tiku_kits_net_tcp.h>
+#endif
+#if TIKU_P4_USBHS_BULK
+#include <arch/esp32p4/tiku_usbhs_arch.h>
+#include <kernel/process/tiku_process.h>
+static void pump(void);
+TIKU_PROCESS(media_usb_process,"Media USB");
+/** @brief Dispatch USB work in scheduler context after a controller interrupt. */
+TIKU_PROCESS_THREAD(media_usb_process,ev,data)
+{
+    (void)data;
+    TIKU_PROCESS_BEGIN();
+    while(1){
+        TIKU_PROCESS_WAIT_EVENT();
+        if(ev==TIKU_EVENT_POLL)pump();
+    }
+    TIKU_PROCESS_END();
+}
+#define HS_OWNER 0x4d465448u
+static uint8_t highspeed;
+static uint32_t generation;
 #endif
 #define CHANNEL 0xf7u
 #define CLIENT 0x4d465402u
@@ -117,6 +137,21 @@ static void pump(void)
     tiku_media_store_t *s=tiku_media_card_store();
     if(!s||memcmp(s->uuid,memory->volume,16)){(void)tiku_media_transfer_server_stop();return;}
     tiku_clock_time_t now=tiku_clock_time();
+#if TIKU_P4_USBHS_BULK
+    if(highspeed){
+        uint32_t epoch=tiku_p4_usbhs_bulk_generation(HS_OWNER);
+        if(epoch!=generation){
+            if(release_handles())return;
+            tiku_media_transfer_init(&memory->session,s,CLIENT,NULL);
+            memory->queued=memory->sending=memory->sent=0;generation=epoch;
+        }
+        if(!epoch)return;
+        if(!memory->queued&&!memory->sending){
+            int n=tiku_p4_usbhs_bulk_receive(HS_OWNER,memory->pending,TIKU_MEDIA_TRANSFER_PACKET);
+            if(n>0)memory->queued=(uint32_t)n;
+        }
+    }
+#endif
 #if TIKU_KITS_NET_TCP_ENABLE
     if(listen_port){
         if(connection&&connection->state==TIKU_KITS_NET_TCP_STATE_CLOSE_WAIT)drop();
@@ -142,8 +177,18 @@ static void pump(void)
         }
     }
     if(!listen_port&&memory->sending){
-        (void)tiku_console_send_frame(CHANNEL,memory->session.reply,memory->sending,NULL,0);
-        tiku_console_flush();memory->sending=0;
+#if TIKU_P4_USBHS_BULK
+        if(highspeed){
+            if(generation!=tiku_p4_usbhs_bulk_generation(HS_OWNER)){memory->sending=0;return;}
+            int sent=tiku_p4_usbhs_bulk_send(HS_OWNER,memory->session.reply,memory->sending);
+            if(sent>0)memory->sending=0;
+            else if(sent<0)(void)tiku_media_transfer_server_stop();
+        }else
+#endif
+        {
+            (void)tiku_console_send_frame(CHANNEL,memory->session.reply,memory->sending,NULL,0);
+            tiku_console_flush();memory->sending=0;
+        }
     }
 #if TIKU_KITS_NET_TCP_ENABLE
     if(listen_port)send_packet();
@@ -156,6 +201,13 @@ int tiku_media_transfer_server_stop(void)
     if(listening)(void)tiku_kits_net_tcp_unlisten(listen_port);
     if(connection)tiku_kits_net_tcp_abort(connection);
     connection=NULL;
+#endif
+#if TIKU_P4_USBHS_BULK
+    if(highspeed){
+        (void)tiku_p4_usbhs_bulk_stop(HS_OWNER);
+        tiku_process_exit(&media_usb_process);
+    }
+    highspeed=0;generation=0;
 #endif
     active=0;listen_port=0;lost=0;listening=0;
     int rc=release_handles();if(rc)return rc;
@@ -192,4 +244,21 @@ int tiku_media_transfer_server_start(uint16_t port,const uint8_t *key)
     if(!port&&tiku_console_add_channel(CHANNEL,0xff,0,frame,NULL,wire,sizeof wire)){
         (void)tiku_media_transfer_server_stop();return TIKU_MFS_BUSY;}
     active=1;return 0;
+}
+
+int tiku_media_transfer_server_usbhs(void)
+{
+#if TIKU_P4_USBHS_BULK
+    int rc=tiku_media_transfer_server_start(0,NULL);if(rc)return rc;
+    tiku_console_remove_channel(CHANNEL,0xff);
+    rc=tiku_p4_usbhs_bulk_start(HS_OWNER);
+    if(rc){(void)tiku_media_transfer_server_stop();return rc;}
+    highspeed=1;generation=0;
+    tiku_process_start(&media_usb_process,NULL);
+    rc=tiku_p4_usbhs_bulk_set_process(HS_OWNER,&media_usb_process);
+    if(rc){(void)tiku_media_transfer_server_stop();return rc;}
+    return 0;
+#else
+    return TIKU_MFS_ARG;
+#endif
 }

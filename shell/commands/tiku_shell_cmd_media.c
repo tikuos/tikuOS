@@ -61,6 +61,9 @@ static void result(int rc){SHELL_PRINTF("media: result=%d\n",rc);}
 void tiku_shell_cmd_media(uint8_t argc,const char *argv[])
 {
     uint64_t value=0;int rc=TIKU_MFS_ARG;uint8_t bytes[128];
+#if TIKU_P4_USBHS_BULK
+    if(argc==2&&!strcmp(argv[1],"usbhs")){result(tiku_media_transfer_server_usbhs());return;}
+#endif
     if(argc==2&&!strcmp(argv[1],"usb")){result(tiku_media_transfer_server_start(0,NULL));return;}
     if(argc==2&&!strcmp(argv[1],"off")){result(tiku_media_transfer_server_stop());return;}
     if(argc==4&&!strcmp(argv[1],"serve")){
@@ -82,6 +85,9 @@ void tiku_shell_cmd_media(uint8_t argc,const char *argv[])
         result(tiku_media_card_mount(cid,uuid,(uint32_t)value));return;
     }
     if(argc<2){
+#if TIKU_P4_USBHS_BULK
+        SHELL_PRINTF("media usbhs | off\n");
+#endif
         SHELL_PRINTF("media usb | serve PORT KEY_HEX | off\n");
         SHELL_PRINTF("media mount [hz] | format CID UUID [hz] | info | ls [prefix] | uploads\n");
         SHELL_PRINTF("media begin NAME [length SHA256] | append HEX | sync | finish | release | resume ID\n");

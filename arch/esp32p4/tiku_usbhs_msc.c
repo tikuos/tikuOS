@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_usbhs_msc.c - ESP32-P4 USB mass storage (Bulk-Only Transport).
+ * tiku_usbhs_msc.c - ESP32-P4 USB vendor records and Bulk-Only mass storage.
  *
  * A 64 KB RAM disk holding an empty FAT12 volume, on the DWC2 core in
  * buffer-DMA device mode.  The core's DMA bypasses the L1 cache, so buffers
@@ -18,9 +18,11 @@
 #include <hal/tiku_cpu.h>
 #include <kernel/cpu/tiku_common.h>
 #include <kernel/memory/tiku_mem.h>
+#include <kernel/process/tiku_process.h>
 #include <services/usb/tiku_usbd_ctrl.h>
 #include <services/usb/tiku_usbd_msc.h>
 #include "tiku_usbhs_arch.h"
+#include "tiku_cpu_common.h"
 #include "tiku_esp32p4_regs.h"
 #include "tiku_irq_arch.h"
 
@@ -69,6 +71,7 @@
 #define DCFG_DEVADDR_MASK   (0x7Fu << 4)
 #define DCTL_SFTDISCON      (1u << 1)
 #define DCTL_CGNPINNAK      (1u << 8)
+#define DCTL_SGOUTNAK       (1u << 9)
 #define DCTL_CGOUTNAK       (1u << 10)
 #define DEPCTL_USBACTEP     (1u << 15)
 #define DEPCTL_STALL        (1u << 21)
@@ -140,6 +143,19 @@ static uint32_t s_out_len;
 static uint32_t s_csw_tag, s_csw_residue;
 static uint8_t s_csw_status;
 static uint32_t n_cbw, n_rd, n_wr, n_bad, n_irq;
+static struct tiku_process *bulk_process;
+static uint32_t bulk_owner;
+static volatile uint32_t bulk_epoch, bulk_received;
+static volatile uint8_t bulk_pending, bulk_sending, bulk_zlp;
+static uint8_t bulk_rx[TIKU_P4_USBHS_BULK_CAP] __attribute__((aligned(LINE)));
+static uint8_t bulk_tx[TIKU_P4_USBHS_BULK_CAP] __attribute__((aligned(LINE)));
+
+/** @brief Invalidate pending records when the host resets or changes configuration. */
+static void bulk_reset(void)
+{
+    bulk_received=0;bulk_pending=bulk_sending=bulk_zlp=0;
+    if(++bulk_epoch==0)bulk_epoch=1;
+}
 
 /** @brief Wait for the bits of a GRSTCTL flush to clear (bounded). */
 static void flush_wait(uint32_t bits)
@@ -311,7 +327,39 @@ static void msc_endpoints_open(void)
     TIKU_P4_REG_WRITE(DAINTMSK, TIKU_P4_REG_READ(DAINTMSK) |
                                     DAINT_OUT(EP_BULK_OUT) | DAINT_IN(EP_BULK_IN));
     s_bot = BOT_CBW;
-    bulk_out_arm(cbw_buf, TIKU_USBD_MSC_BLOCK);
+    if(bulk_owner)bulk_out_arm(bulk_rx,sizeof bulk_rx);
+    else bulk_out_arm(cbw_buf, TIKU_USBD_MSC_BLOCK);
+}
+
+/** @brief Wait for a device handshake with an iteration bound. */
+static int bulk_wait(uint32_t reg,uint32_t mask)
+{
+    for(unsigned n=0;n<USB_SPINS;n++)if(TIKU_P4_REG_READ(reg)&mask)return 0;
+    return -1;
+}
+
+/** @brief Quiesce bulk DMA after NAK handshakes and clear endpoint completions. */
+static int bulk_disable(void)
+{
+    if(TIKU_P4_REG_READ(DOEPCTL(EP_BULK_OUT))&DEPCTL_EPENA){
+        ep_set(DCTL,DCTL_SGOUTNAK);
+        int failed=bulk_wait(GINTSTS,1u<<7);
+        if(!failed){
+            ep_set(DOEPCTL(EP_BULK_OUT),DEPCTL_EPDIS|DEPCTL_SNAK);
+            failed=bulk_wait(DOEPINT(EP_BULK_OUT),1u<<1);
+        }
+        ep_set(DCTL,DCTL_CGOUTNAK);
+        if(failed)return -1;
+    }
+    if(TIKU_P4_REG_READ(DIEPCTL(EP_BULK_IN))&DEPCTL_EPENA){
+        ep_set(DIEPCTL(EP_BULK_IN),DEPCTL_SNAK);
+        if(bulk_wait(DIEPINT(EP_BULK_IN),1u<<6))return -1;
+        ep_set(DIEPCTL(EP_BULK_IN),DEPCTL_EPDIS);
+        if(bulk_wait(DIEPINT(EP_BULK_IN),1u<<1))return -1;
+    }
+    TIKU_P4_REG_WRITE(DOEPINT(EP_BULK_OUT),UINT32_MAX);
+    TIKU_P4_REG_WRITE(DIEPINT(EP_BULK_IN),UINT32_MAX);
+    fifo_flush();return 0;
 }
 
 /** @brief Answer the SETUP in setup_buf through services/usb, applying its
@@ -330,6 +378,10 @@ static void ep0_setup(void)
                                     ((uint32_t)s_address << DCFG_DEVADDR_SHIFT));
     }
     if (d.effects & TIKU_USBD_FX_CONFIG) {
+        if(bulk_owner){
+            s_configured=0;bulk_reset();
+            if(bulk_disable()){s_ctrl.config=0;ep0_stall();return;}
+        }
         s_configured = d.config;
         if (s_configured != 0u) {
             msc_endpoints_open();
@@ -364,6 +416,7 @@ void tiku_p4_usbhs_msc_irq(void)
         tiku_usbd_ctrl_init(&s_ctrl, &s_set);
         s_address = 0u;
         s_configured = 0u;
+        bulk_reset();
         s_bot = BOT_CBW;
         TIKU_P4_REG_WRITE(DCFG, TIKU_P4_REG_READ(DCFG) & ~DCFG_DEVADDR_MASK);
         ep_set(DCTL, DCTL_CGNPINNAK | DCTL_CGOUTNAK);
@@ -400,7 +453,12 @@ void tiku_p4_usbhs_msc_irq(void)
                                 TSIZ_XFER_MASK;
 
                 tiku_cpu_dcache_invalidate(s_out_buf, s_out_len);
-                if (s_bot == BOT_CBW) {
+                if(bulk_owner){
+                    if(s_configured){
+                        bulk_received=left<=s_out_len?s_out_len-left:0;
+                        bulk_pending=1;
+                    }
+                } else if (s_bot == BOT_CBW) {
                     bot_on_cbw(TIKU_USBD_MSC_BLOCK - left);
                 } else if (s_bot == BOT_DATA_OUT) {
                     bot_send_csw();              /* the WRITE payload landed */
@@ -419,7 +477,10 @@ void tiku_p4_usbhs_msc_irq(void)
 
             TIKU_P4_REG_WRITE(DIEPINT(EP_BULK_IN), ii);
             if (ii & DEPINT_XFERCOMPL) {
-                if (s_bot == BOT_DATA_IN) {
+                if(bulk_owner){
+                    if(bulk_zlp){bulk_zlp=0;bulk_in_send(bulk_tx,0);}
+                    else bulk_sending=0;
+                } else if (s_bot == BOT_DATA_IN) {
                     bot_send_csw();              /* the READ or reply is out */
                 } else if (s_bot == BOT_CSW) {
                     s_bot = BOT_CBW;             /* the command is finished */
@@ -428,19 +489,24 @@ void tiku_p4_usbhs_msc_irq(void)
             }
         }
     }
+    if (bulk_process) tiku_process_poll(bulk_process);
     if (sts & (GINT_USBSUSP | GINT_WKUPINT)) {
         TIKU_P4_REG_WRITE(GINTSTS, GINT_USBSUSP | GINT_WKUPINT);
     }
 }
 
 /** @brief Build the descriptors and the control core's identity. */
-static void identity(void)
+static TIKU_P4_XIP_TEXT void identity(void)
 {
     uint8_t id[6];
     uint16_t n;
 
-    tiku_usbd_device_desc(dev_desc, TIKU_USBD_PID_DISK, 0, USB_EP0_MPS);
+    tiku_usbd_device_desc(dev_desc, bulk_owner?TIKU_USBD_PID_BULK:TIKU_USBD_PID_DISK, 0, USB_EP0_MPS);
     tiku_usbd_msc_config(conf_desc, EP_BULK_OUT, EP_BULK_IN, USB_BULK_MPS);
+    if(bulk_owner){
+        /* The interface uses vendor records over the two bulk endpoints. */
+        conf_desc[14]=0xff;conf_desc[15]=conf_desc[16]=0;
+    }
     s_set.device = dev_desc;
     s_set.config = conf_desc;
     s_set.config_len = sizeof conf_desc;
@@ -450,17 +516,18 @@ static void identity(void)
     s_set.string_len[1] = tiku_usbd_string_ascii(str_mfr, sizeof str_mfr, "TikuOS");
     s_set.string[2] = str_prod;
     s_set.string_len[2] = tiku_usbd_string_ascii(str_prod, sizeof str_prod,
-                                                 "TikuOS Disk");
+                                                 bulk_owner?"TikuOS Bulk":"TikuOS Disk");
     tiku_common_unique_id(id, 6u);
     s_set.string[3] = serial_buf;
     s_set.string_len[3] = tiku_usbd_string_serial(serial_buf, sizeof serial_buf,
                                                   id, 6u);
-    s_set.klass = TIKU_USBD_CLASS_MSC;
+    s_set.klass = bulk_owner?TIKU_USBD_CLASS_VENDOR:TIKU_USBD_CLASS_MSC;
     s_set.self_powered = 0u;
     tiku_usbd_ctrl_init(&s_ctrl, &s_set);
 }
 
-int tiku_p4_usbhs_msc_start(void)
+/** @brief Attach the selected descriptor set and initialize device DMA. */
+static TIKU_P4_XIP_TEXT int device_start(void)
 {
     tiku_mem_request_t req = TIKU_MEM_REQUEST_DEFAULT;
     uint32_t base, depth, state;
@@ -470,7 +537,7 @@ int tiku_p4_usbhs_msc_start(void)
         return TIKU_P4_USBHS_OK;
     }
     req.alignment = LINE;
-    if (msc_disk == NULL) {
+    if (!bulk_owner && msc_disk == NULL) {
         if (tiku_tier_arena_create_opts(&disk_arena, TIKU_MEM_SRAM,
                                         MSC_DISK_BYTES, MSC_ARENA_ID,
                                         &req) != TIKU_MEM_OK) {
@@ -527,11 +594,13 @@ int tiku_p4_usbhs_msc_start(void)
     return TIKU_P4_USBHS_OK;
 }
 
-void tiku_p4_usbhs_msc_stop(void)
+/** @brief Stop DMA before releasing the RAM disk backing. */
+static TIKU_P4_XIP_TEXT void device_stop(void)
 {
     tiku_p4_usbhs_down();
+    bulk_process=NULL;
     s_started = 0u;
-    s_configured = 0u;
+    s_configured=0;bulk_reset();
     s_address = 0u;
     if (msc_disk != NULL) {
         msc_disk = NULL;
@@ -539,7 +608,7 @@ void tiku_p4_usbhs_msc_stop(void)
     }
 }
 
-uint32_t tiku_p4_usbhs_msc_peek(uint32_t lba, uint8_t *dst, uint32_t n)
+TIKU_P4_XIP_TEXT uint32_t tiku_p4_usbhs_msc_peek(uint32_t lba, uint8_t *dst, uint32_t n)
 {
     if (msc_disk == NULL || lba >= MSC_DISK_BLOCKS || dst == NULL) {
         return 0u;
@@ -551,7 +620,7 @@ uint32_t tiku_p4_usbhs_msc_peek(uint32_t lba, uint8_t *dst, uint32_t n)
     return n;
 }
 
-void tiku_p4_usbhs_msc_stats(uint32_t *cbw, uint32_t *rd, uint32_t *wr,
+TIKU_P4_XIP_TEXT void tiku_p4_usbhs_msc_stats(uint32_t *cbw, uint32_t *rd, uint32_t *wr,
                              uint32_t *bad, uint32_t *irq, uint8_t *cfg,
                              uint32_t *speed)
 {
@@ -562,4 +631,68 @@ void tiku_p4_usbhs_msc_stats(uint32_t *cbw, uint32_t *rd, uint32_t *wr,
     if (irq != NULL)   { *irq = n_irq; }
     if (cfg != NULL)   { *cfg = s_configured; }
     if (speed != NULL) { *speed = s_speed; }
+}
+
+TIKU_P4_XIP_TEXT int tiku_p4_usbhs_msc_start(void)
+{
+    if(bulk_owner)return TIKU_P4_USBHS_ERR_BUSY;
+    return device_start();
+}
+TIKU_P4_XIP_TEXT void tiku_p4_usbhs_msc_stop(void)
+{
+    if(!bulk_owner)device_stop();
+}
+TIKU_P4_XIP_TEXT int tiku_p4_usbhs_bulk_start(uint32_t owner)
+{
+    if(!owner)return TIKU_P4_USBHS_ERR_PARAM;
+    if(bulk_owner==owner&&s_started)return 0;
+    if(s_started||bulk_owner)return TIKU_P4_USBHS_ERR_BUSY;
+    bulk_owner=owner;bulk_reset();
+    int rc=device_start();
+    if(rc){device_stop();bulk_owner=0;}
+    return rc;
+}
+TIKU_P4_XIP_TEXT int tiku_p4_usbhs_bulk_stop(uint32_t owner)
+{
+    if(!owner||owner!=bulk_owner)return TIKU_P4_USBHS_ERR_BUSY;
+    device_stop();bulk_owner=0;return 0;
+}
+TIKU_P4_XIP_TEXT int tiku_p4_usbhs_bulk_set_process(uint32_t owner,struct tiku_process *process)
+{
+    uint32_t state=TIKU_P4_IRQ_SAVE();
+    int rc=TIKU_P4_USBHS_ERR_BUSY;
+    if(owner&&owner==bulk_owner&&s_started){bulk_process=process;rc=0;}
+    TIKU_P4_IRQ_RESTORE(state);
+    return rc;
+}
+TIKU_P4_XIP_TEXT uint32_t tiku_p4_usbhs_bulk_generation(uint32_t owner)
+{
+    uint32_t state=TIKU_P4_IRQ_SAVE();
+    uint32_t value=owner&&owner==bulk_owner&&s_started&&s_configured?bulk_epoch:0;
+    TIKU_P4_IRQ_RESTORE(state);return value;
+}
+TIKU_P4_XIP_TEXT int tiku_p4_usbhs_bulk_receive(uint32_t owner,void *out,uint32_t capacity)
+{
+    if(!out||!capacity)return TIKU_P4_USBHS_ERR_PARAM;
+    uint32_t state=TIKU_P4_IRQ_SAVE();int result=0;
+    if(!owner||owner!=bulk_owner||!s_started)result=TIKU_P4_USBHS_ERR_BUSY;
+    else if(s_configured&&bulk_pending){
+        uint32_t n=bulk_received;
+        if(n>capacity)result=TIKU_P4_USBHS_ERR_PARAM;
+        else {memcpy(out,bulk_rx,n);result=(int)n;}
+        bulk_pending=0;bulk_received=0;bulk_out_arm(bulk_rx,sizeof bulk_rx);
+    }
+    TIKU_P4_IRQ_RESTORE(state);return result;
+}
+TIKU_P4_XIP_TEXT int tiku_p4_usbhs_bulk_send(uint32_t owner,const void *data,uint32_t length)
+{
+    if(!data||!length||length>sizeof bulk_tx)return TIKU_P4_USBHS_ERR_PARAM;
+    uint32_t state=TIKU_P4_IRQ_SAVE();int result=0;
+    if(!owner||owner!=bulk_owner||!s_started)result=TIKU_P4_USBHS_ERR_BUSY;
+    else if(s_configured&&!bulk_sending){
+        memcpy(bulk_tx,data,length);bulk_sending=1;
+        bulk_zlp=length<sizeof bulk_tx&&length%s_bulk_mps==0;
+        bulk_in_send(bulk_tx,length);result=(int)length;
+    }
+    TIKU_P4_IRQ_RESTORE(state);return result;
 }

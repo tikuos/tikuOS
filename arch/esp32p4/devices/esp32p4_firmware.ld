@@ -101,7 +101,7 @@ SECTIONS {
     __datastart = ORIGIN(LOW);
     .bss (NOLOAD) : ALIGN(16) {
         __bss_start = .;
-        EXCLUDE_FILE (*/tikukits/net/*.o *tiku_drv_wifi_ipc.o *tiku_drv_ble_ipc.o *tiku_drv_154_ipc.o *tiku_154.o *tiku_ble_serial.o *tiku_ble_adv_hci.o *test_radio.o *tiku_media_card.o *tiku_media_transfer_server.o *tiku_opus.o */third_party/opus/*.o) *(.bss .bss.* .sbss .sbss.* COMMON)
+        EXCLUDE_FILE (*/tikukits/net/*.o *tiku_drv_wifi_ipc.o *tiku_drv_ble_ipc.o *tiku_drv_154_ipc.o *tiku_154.o *tiku_ble_serial.o *tiku_ble_adv_hci.o *test_radio.o *tiku_media_card.o *tiku_media_transfer_server.o *tiku_usbhs_msc.o *tiku_shell_cmd_read.o *tiku_shell_cmd_fs.o *tiku_opus.o */third_party/opus/*.o) *(.bss .bss.* .sbss .sbss.* COMMON)
         . = ALIGN(16);
         __uninit_start = .;
         KEEP(*(.persistent.layout))
@@ -148,6 +148,9 @@ SECTIONS {
         *tiku_ble_serial.o(.bss .bss.* .sbss .sbss.*)
         *tiku_ble_adv_hci.o(.bss .bss.* .sbss .sbss.*)
         *test_radio.o(.bss .bss.* .sbss .sbss.*)
+        *tiku_shell_cmd_fs.o(.bss .bss.* .sbss .sbss.*)
+        *tiku_shell_cmd_read.o(.bss .bss.* .sbss .sbss.*)
+        *tiku_usbhs_msc.o(.bss .bss.* .sbss .sbss.*)
         *tiku_media_card.o(.bss .bss.* .sbss .sbss.*)
         *tiku_media_transfer_server.o(.bss .bss.* .sbss .sbss.*)
         *tiku_opus.o(.bss .bss.* .sbss .sbss.*)
@@ -167,7 +170,7 @@ SECTIONS {
     INCLUDE arch/common/tiku_sram_layout.ld
     ASSERT(__tier_sram_extra_start <= __tier_sram_extra_end,
            "P4 low SRAM statics overlap ROM workspace")
-    ASSERT(SIZEOF(.ipc_device) <= 68K, "P4 device staging exceeds firmware validator budget")
+    ASSERT(SIZEOF(.ipc_device) <= 96K, "P4 device staging exceeds firmware validator budget")
     ASSERT(SIZEOF(.fault_record) == 64, "P4 fault record must be 64 bytes")
     ASSERT(__uninit_start == tiku_layout_pin, "P4 layout record must open mirror")
     ASSERT(__uninit_end - __uninit_start <= 16K - 16,

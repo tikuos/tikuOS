@@ -27,6 +27,42 @@ control-line state needed to avoid a reset. It enables `media usb` when it
 opens the port. The service transfers binary data through console channel
 `0xF7`; the card does not appear as a computer disk drive.
 
+## High-speed USB
+
+Build the FireBeetle P4 with `TIKU_USBHS_MSC=1` in addition to the media
+flags. Connect both USB ports: Serial/JTAG carries the shell, and the OTG
+port carries vendor bulk records. Run in the TikuOS shell:
+
+```text
+media mount 20000000
+media usbhs
+```
+
+Then run on the computer with PyUSB and libusb installed:
+
+```sh
+python3 tools/tiku_media_transfer.py --usbhs auto ls
+python3 tools/tiku_media_transfer.py --usbhs auto put weights.bin models/weights.bin
+python3 tools/tiku_media_transfer.py --usbhs auto get models/weights.bin downloaded.bin
+```
+
+Replace `auto` with the bulk interface's USB serial when several devices
+are attached. The host account needs permission to claim USB device
+`1209:0003`. The tool refuses ambiguous devices and does not detach kernel
+drivers. `media off` stops the interface. This interface, the RAM-disk demo
+and an SDR bulk session claim the same USB controller exclusively. The
+native media volume remains owned by TikuOS and is not exposed as a host
+block device.
+
+Bulk OUT is endpoint `0x02`, IN is `0x83`, and interface zero has vendor
+class `0xff`. A record ends with a short packet or at 8192 bytes; aligned
+shorter records include a terminating zero-length packet. Media records
+carry the TMT1 header and payload directly, without SLIP or a length prefix.
+USB interrupts request a poll of the media process. Requests and storage
+operations run in scheduler context; the shell pump maintains idle cleanup.
+Bus reset or reconfiguration discards pending records and starts a new
+protocol session. Upload resume uses the durable prefix on the same volume.
+
 ## Wi-Fi
 
 Join a network with the TikuOS Wi-Fi commands, run `wifi up`, then use `ip`
@@ -98,7 +134,7 @@ Requests and replies have a 32-byte little-endian header:
 | 24 | Payload length, 32 bits, at most 1024 |
 | 28 | CRC32C over header bytes 0..27 followed by payload |
 
-USB uses the console SLIP envelope and channel marker `0xF7`. TCP prefixes
+The serial USB path uses the console SLIP envelope and channel marker `0xF7`. TCP prefixes
 packets with a four-byte little-endian length including the header. Each
 session has one outstanding request. An exact repeat of the last request
 returns the cached reply without executing the operation again. A conflicting

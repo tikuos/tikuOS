@@ -3027,6 +3027,7 @@ $(error TIKU_USBHS_MSC=1 on the ESP32-P4 needs BOARD=firebeetle2_esp32p4)
 endif
 SRCS   += arch/esp32p4/tiku_usbhs_arch.c
 SRCS   += arch/esp32p4/tiku_usbhs_msc.c
+CFLAGS += -DTIKU_P4_USBHS_BULK=1
 else
 ifeq ($(filter nrf54lm20a nrf54lm20b,$(MCU)),)
 $(error TIKU_USBHS_MSC=1 needs MCU=nrf54lm20a, nrf54lm20b or esp32p4)

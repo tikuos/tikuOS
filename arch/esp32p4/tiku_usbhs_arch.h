@@ -8,13 +8,14 @@
  * tiku_usbhs_arch.h - ESP32-P4 USB 2.0 high-speed device on the OTG port.
  *
  * The DWC2 core on the UTMI PHY: bring-up and register report
- * (tiku_usbhs_arch.c) and a mass-storage RAM disk (tiku_usbhs_msc.c).
+ * (tiku_usbhs_arch.c), vendor bulk records and a mass-storage RAM disk.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef TIKU_ESP32P4_USBHS_ARCH_H_
 #define TIKU_ESP32P4_USBHS_ARCH_H_
 #include <stdint.h>
+struct tiku_process;
 
 #define TIKU_P4_USBHS_OK          0
 #define TIKU_P4_USBHS_ERR_RESET  -1   /**< the core never finished its reset */
@@ -22,6 +23,27 @@
 #define TIKU_P4_USBHS_ERR_IRQ    -3   /**< interrupt line 6 is taken         */
 #define TIKU_P4_USBHS_ERR_FIFO   -4   /**< the FIFO layout exceeds the core's */
 #define TIKU_P4_USBHS_ERR_MEM    -5   /**< no SRAM for the disk              */
+#define TIKU_P4_USBHS_ERR_BUSY   -6   /**< another service owns the device   */
+#define TIKU_P4_USBHS_ERR_PARAM  -7   /**< invalid owner, length or buffer   */
+
+#define TIKU_P4_USBHS_BULK_CAP 8192u /**< maximum bulk record bytes */
+/** @brief Claim the OTG device for vendor bulk records; owner must be nonzero. */
+int tiku_p4_usbhs_bulk_start(uint32_t owner);
+/** @brief Detach and cancel DMA for the matching owner; refuse other owners. */
+int tiku_p4_usbhs_bulk_stop(uint32_t owner);
+/** @brief Set the matching owner's process polled after USB interrupts.
+ * @note The process must outlive the claim; NULL disables notifications.
+ */
+int tiku_p4_usbhs_bulk_set_process(uint32_t owner,struct tiku_process *process);
+/** @brief Copy one received record, zero if none is ready, or a negative error.
+ * @note Scheduler context. Records end with a short packet or at BULK_CAP bytes.
+ * A nonzero undersized destination discards the record and returns ERR_PARAM.
+ */
+int tiku_p4_usbhs_bulk_receive(uint32_t owner,void *out,uint32_t capacity);
+/** @brief Copy and queue one record, zero under backpressure, or a negative error. */
+int tiku_p4_usbhs_bulk_send(uint32_t owner,const void *data,uint32_t length);
+/** @brief Return the bus generation, or zero without a matching configured owner. */
+uint32_t tiku_p4_usbhs_bulk_generation(uint32_t owner);
 
 /** @brief A snapshot of the PHY controls and the DWC2 core. */
 typedef struct {
