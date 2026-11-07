@@ -40,4 +40,8 @@ void tiku_p4_pie_xacc_get(uint32_t *lo_hi);
 void tiku_p4_pie_xacc_set(uint32_t lo, uint32_t hi);
 /** @brief The PIE state CSR (0x7F2): 0 off, 1 initial, 2 clean, 3 dirty. */
 uint32_t tiku_p4_pie_state(void);
+/** @brief Read vector configuration; requires PIE enabled. */
+uint32_t tiku_p4_pie_cfg_get(void);
+/** @brief Write vector configuration; requires PIE enabled. */
+void tiku_p4_pie_cfg_set(uint32_t value);
 #endif

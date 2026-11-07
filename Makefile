@@ -902,6 +902,9 @@ TIKU_KIT_EPAPER_ENABLE  := 1
 endif
 
 # tikukits-library exercise demos (examples/kits/...).
+ifeq ($(TIKU_EXAMPLE_KITS_ML_DENSE),1)
+TIKU_KIT_ML_DENSE_ENABLE := 1
+endif
 ifneq ($(filter 1, $(TIKU_EXAMPLE_KITS_MATRIX) \
                   $(TIKU_EXAMPLE_KITS_STATISTICS) \
                   $(TIKU_EXAMPLE_KITS_DISTANCE)),)
@@ -2441,6 +2444,41 @@ SRCS += kernel/cpu/tiku_cpu_settings.c
 # (Cortex-M55, Cortex-M85), a bit-identical scalar path elsewhere.
 # --gc-sections drops the kernels nothing calls.
 SRCS += hal/tiku_simd.c
+# Shared arithmetic is independent of the optional kit checkout.
+ifeq ($(TIKU_KIT_ML_INFERENCE_ENABLE),1)
+TIKU_KIT_ML_DENSE_ENABLE := 1
+endif
+ifeq ($(TIKU_KIT_ML_CMSIS_NN_ENABLE),1)
+ifneq ($(TIKU_KIT_ML_DENSE_ENABLE),1)
+$(error TIKU_KIT_ML_CMSIS_NN_ENABLE requires TIKU_KIT_ML_DENSE_ENABLE=1)
+endif
+endif
+ifeq ($(TIKU_KIT_ML_DENSE_ENABLE),1)
+ifneq ($(HAS_TIKUKITS),1)
+$(error TIKU_KIT_ML_DENSE_ENABLE requires the TikuKits checkout)
+endif
+endif
+ifeq ($(TIKU_KIT_ML_ESP_NN_ENABLE),1)
+ifneq ($(TIKU_KIT_ML_DENSE_ENABLE):$(TIKU_COMPUTE_P4_REV),1:1)
+$(error ESP-NN requires TIKU_KIT_ML_DENSE_ENABLE=1 and TIKU_COMPUTE_P4_REV=1)
+endif
+ifeq ($(TIKU_KIT_ML_CMSIS_NN_ENABLE),1)
+$(error Select one dense vendor adapter)
+endif
+override TIKU_P4_HWLOOP_ENABLE := 1
+endif
+ifeq ($(TIKU_P4_HWLOOP_ENABLE),1)
+ifneq ($(TIKU_PLATFORM),esp32p4)
+$(error TIKU_P4_HWLOOP_ENABLE requires esp32p4)
+endif
+CFLAGS += -DTIKU_P4_HWLOOP_ENABLE=1
+endif
+
+ifneq ($(filter 1,$(TIKU_COMPUTE_ENABLE) $(TIKU_KIT_ML_DENSE_ENABLE)),)
+include hal/compute/sources.mk
+SRCS += $(TIKU_COMPUTE_SRCS)
+CFLAGS += $(TIKU_COMPUTE_FLAGS)
+endif
 SRCS += kernel/cpu/tiku_common.c
 SRCS += kernel/cpu/tiku_watchdog.c
 SRCS += kernel/cpu/tiku_hang.c
@@ -3449,7 +3487,11 @@ ifeq ($(TIKU_KIT_DS_ENABLE),1)
 SRCS += $(wildcard examples/kits/ds/*.c)
 endif
 ifeq ($(TIKU_KIT_ML_ENABLE),1)
-SRCS += $(wildcard examples/kits/ml/*.c)
+SRCS += $(filter-out examples/kits/ml/example_ml_dense.c,$(wildcard examples/kits/ml/*.c))
+endif
+ifeq ($(TIKU_EXAMPLE_KITS_ML_DENSE),1)
+SRCS += examples/kits/ml/example_ml_dense.c
+CFLAGS += -DTIKU_EXAMPLES_ENABLE=1 -DTIKU_EXAMPLE_KITS_ML_DENSE=1
 endif
 ifeq ($(TIKU_KIT_SENSORS_ENABLE),1)
 SRCS += $(wildcard examples/kits/sensors/*.c)
@@ -3801,6 +3843,20 @@ ifeq ($(TIKU_KIT_ML_ENABLE),1)
 CFLAGS += -DTIKU_KIT_ML_ENABLE=1
 SRCS   += $(wildcard tikukits/ml/regression/*.c)
 SRCS   += $(wildcard tikukits/ml/classification/*.c)
+endif
+
+ifeq ($(TIKU_KIT_ML_DENSE_ENABLE),1)
+SRCS += $(wildcard tikukits/ml/operators/*.c)
+ifeq ($(TIKU_KIT_ML_CMSIS_NN_ENABLE),1)
+include tikukits/ml/backends/cmsis_nn/sources.mk
+endif
+ifeq ($(TIKU_KIT_ML_ESP_NN_ENABLE),1)
+include tikukits/ml/backends/esp_nn/sources.mk
+endif
+endif
+
+ifeq ($(TIKU_KIT_ML_INFERENCE_ENABLE),1)
+SRCS += $(wildcard tikukits/ml/inference/*.c)
 endif
 
 ifeq ($(TIKU_KIT_SENSORS_ENABLE),1)

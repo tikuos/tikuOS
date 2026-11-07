@@ -314,8 +314,60 @@ against 148 µs in C. The trap entry saves q0-q7, the accumulators and the
 shift state behind a flag when the interrupted context had written them
 (CSR 0x7F2 reads dirty), as it does for the FPU, so workers and interrupts
 each keep their own vector state. On this silicon `esp.vadd.u32` and
-`esp.vadd.s32` saturate; the hardware-loop forms (`esp.lp.*`) are not in
-the macro file.
+`esp.vadd.s32` saturate.
+
+CFG is saved for each interrupted context, including initial or disabled
+PIE state. Context transfers and C interrupt handlers use CFG zero;
+return restores the interrupted configuration. The saved word occupies
+existing trap-frame padding. C code uses aligned PIE mode; vendor code
+that enables unaligned memory accesses restores CFG before returning.
+
+`TIKU_P4_HWLOOP_ENABLE=1` enables hardware loops and preserves their state
+across interrupts and worker switches. The option adds 32 bytes to each
+trap frame, holding CSR 0x7F1 and the start, end and count registers for
+both loops. The interrupt handler receives two empty loop slots. An
+interrupted caller with loops disabled resumes with them disabled.
+Enabled contexts with a remaining count resume with the state marked
+dirty, including on v1.x silicon with its loop-state erratum. The option
+defaults to zero; the shared PIE provider does not require it.
+
+Include `pie/tiku_pie.inc` followed by `pie/tiku_hwloop.inc` to use
+`tiku_p4_lp_setup slot, register, end_label`. It encodes `esp.lp.setup`;
+slot 0 is the inner loop and slot 1 is the outer loop. On v1.3 the count
+must be in 1–4095. The end label names the last loop instruction, with an
+even forward displacement of at most 8190 bytes. Disable linker relaxation
+over the loop with `.option norelax`. Branches and jumps must not be the
+last loop instruction. Register definitions and constraints follow the
+[v1.3 technical reference manual](https://documentation.espressif.com/esp32-p4-chip-revision-v1.3_technical_reference_manual_en.pdf).
+
+TikuBench's `compute-p4-hwloop` category checks nested counts, interrupt
+and worker preservation, and restoration of the disabled state. Its
+`compute-p4-loop-count-lost` mutation checks detection of an omitted count
+restore. The host encoding test compares both slots, 32 registers and four
+forward displacements with Espressif's assembler:
+
+```bash
+P4_TOOLCHAIN_PREFIX=/path/to/bin/riscv-none-elf- \
+ESP_P4_AS=/path/to/bin/riscv32-esp-elf-as-xespv2p1 \
+python3 TikuBench/tests/host/nonkernel/test_hwloop_encoding.py
+```
+
+The [shared compute HAL](../../hal/compute/README.md) exposes these
+operations through validated buffers and int64 reductions:
+
+| Operation | Provider and qualification |
+|---|---|
+| Signed int8/int16 dot product | PIE with bounded accumulation and scalar tails; shared calls pass on the FireBeetle 2 in foreground, worker and interrupt contexts. |
+| Saturating int32 vector add | PIE with aligned operand staging and in-place output; host and P4 tests pass. |
+| Signed int8 matrix-vector product | One int64 dot result per row; shared span and overlap validation. |
+| Quantized int8 dense inference | Optional TikuKits operator; reference and PIE fixtures pass. The measured SRAM 8×256 layer averages 166.2 µs in reference C and 89.3 µs with PIE at 360 MHz. |
+| Static quantized models | Optional TikuKits dense, Conv2D, pooling and reshape runtime; generated and TensorFlow Lite imported model fixtures pass. |
+| ESP-NN dense adapter | Optional pinned v1.4.2 kernel, bounded arithmetic and caller-owned CFG/loop snapshots; numerical and concurrent-call tests pass. |
+
+Select `TIKU_COMPUTE_ENABLE=1 TIKU_COMPUTE_BACKEND=p4
+TIKU_COMPUTE_P4_REV=1` for v1.x silicon. General arithmetic resides in
+TikuOS; ML metadata, quantization and vendor adapters reside in TikuKits.
+The existing TNN classifier retains its own arithmetic.
 
 `tiku_memcpy_arch.S` replaces newlib-nano's `memcpy`, `memset` and
 `memmove`, which move a byte at a time, with the vector unit: 16 bytes a

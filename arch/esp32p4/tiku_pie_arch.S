@@ -15,6 +15,20 @@
 
     .text
 
+    .global tiku_p4_pie_cfg_get
+    .type tiku_p4_pie_cfg_get, @function
+tiku_p4_pie_cfg_get:
+    esp_movx_r_cfg a0
+    ret
+    .size tiku_p4_pie_cfg_get, .-tiku_p4_pie_cfg_get
+
+    .global tiku_p4_pie_cfg_set
+    .type tiku_p4_pie_cfg_set, @function
+tiku_p4_pie_cfg_set:
+    esp_movx_w_cfg a0
+    ret
+    .size tiku_p4_pie_cfg_set, .-tiku_p4_pie_cfg_set
+
 /* int64_t tiku_p4_pie_dot_s16(const int16_t *a, const int16_t *b,
  *                             uint32_t n): 8 products an iteration into
  * the 40-bit xacc, returned sign-extended in a1:a0. */

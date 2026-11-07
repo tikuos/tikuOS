@@ -62,6 +62,15 @@ tiku_esp32p4_reset_handler:
     /* The PIE on, its state initial.  Threads start the same way. */
     li t0, 1
     csrw TIKU_P4_PIE_STATE_CSR, t0
+    li a1, 0
+    esp_movx_w_cfg a1
+    csrw TIKU_P4_PIE_STATE_CSR, t0
+#if TIKU_P4_HWLOOP_ENABLE
+    csrw TIKU_P4_HWLOOP_STATE_CSR, t0
+    csrw TIKU_P4_HWLOOP_COUNT0_CSR, zero
+    csrw TIKU_P4_HWLOOP_COUNT1_CSR, zero
+    csrw TIKU_P4_HWLOOP_STATE_CSR, t0
+#endif
 #if defined(TIKU_P4_KERNEL_TEST) || defined(TIKU_P4_FIRMWARE)
     call tiku_esp32p4_boot_park_cores
     call tiku_p4_cache_boot_init
@@ -156,6 +165,29 @@ tiku_esp32p4_diagnostic_trap:
      * stores need a base register from x8-x15 or x24-x31: t3, saved above. */
     sw zero, TIKU_P4_FRAME_PIE(sp)
     csrr t0, TIKU_P4_PIE_STATE_CSR
+    /* CFG is caller-owned; context transfers and C handlers use aligned loads. */
+    csrsi TIKU_P4_PIE_STATE_CSR, 1
+    esp_movx_r_cfg a1
+    sw a1, TIKU_P4_FRAME_PIE_CFG(sp)
+    li a1, 0
+    esp_movx_w_cfg a1
+    csrw TIKU_P4_PIE_STATE_CSR, t0
+#if TIKU_P4_HWLOOP_ENABLE
+    /* Save the interrupted loops and give the ISR two empty loop slots. */
+    csrrw t1, TIKU_P4_HWLOOP_STATE_CSR, zero
+    sw t1, TIKU_P4_FRAME_HWLOOP_STATE(sp)
+    csrwi TIKU_P4_HWLOOP_STATE_CSR, 2
+    .set hwlp_offset, TIKU_P4_FRAME_HWLOOP_REGS
+    .irp csr,0x7c6,0x7c7,0x7c8,0x7c9,0x7ca,0x7cb
+    csrr t1, \csr
+    sw t1, hwlp_offset(sp)
+    .set hwlp_offset, hwlp_offset+4
+    .endr
+    csrwi TIKU_P4_HWLOOP_STATE_CSR, 1
+    csrw TIKU_P4_HWLOOP_COUNT0_CSR, zero
+    csrw TIKU_P4_HWLOOP_COUNT1_CSR, zero
+    csrwi TIKU_P4_HWLOOP_STATE_CSR, 1
+#endif
     sw t0, TIKU_P4_FRAME_PIE_STATE(sp)
     andi t0, t0, 3
     addi t0, t0, -3
@@ -185,6 +217,7 @@ tiku_esp32p4_diagnostic_trap:
     li t0, 1
     sw t0, TIKU_P4_FRAME_PIE(sp)
 7:
+    csrsi TIKU_P4_PIE_STATE_CSR, 1
     mv a0, sp
     .option push
     .option norelax
@@ -196,6 +229,9 @@ tiku_esp32p4_diagnostic_trap:
     /* The PIE registers come back for a context that had them saved; its
      * state CSR comes back for every context, so one that never wrote the
      * vector unit stays initial and the next entry skips the save. */
+    csrsi TIKU_P4_PIE_STATE_CSR, 1
+    li a1, 0
+    esp_movx_w_cfg a1
     lw t0, TIKU_P4_FRAME_PIE(sp)
     beqz t0, 8f
     addi t3, sp, TIKU_P4_FRAME_PIE_REGS
@@ -220,8 +256,32 @@ tiku_esp32p4_diagnostic_trap:
     lbu a1, 6(t3)
     esp_movx_w_sar a1
 8:
+    lw a1, TIKU_P4_FRAME_PIE_CFG(sp)
+    esp_movx_w_cfg a1
     lw t0, TIKU_P4_FRAME_PIE_STATE(sp)
     csrw TIKU_P4_PIE_STATE_CSR, t0
+#if TIKU_P4_HWLOOP_ENABLE
+    /* Restore both loop slots before restoring their enable/state CSR. */
+    csrwi TIKU_P4_HWLOOP_STATE_CSR, 2
+    .set hwlp_offset, TIKU_P4_FRAME_HWLOOP_REGS
+    .irp csr,0x7c6,0x7c7,0x7c8,0x7c9,0x7ca,0x7cb
+    lw t1, hwlp_offset(sp)
+    csrw \csr, t1
+    .set hwlp_offset, hwlp_offset+4
+    .endr
+    lw t1, TIKU_P4_FRAME_HWLOOP_STATE(sp)
+    /* Enabled contexts with a remaining count resume in dirty state.
+     * v1.x does not update the loop state consistently at loop completion. */
+    andi t2, t1, 3
+    beqz t2, .Lhwlp_state_restored
+    lw t0, (TIKU_P4_FRAME_HWLOOP_REGS+8)(sp)
+    lw t2, (TIKU_P4_FRAME_HWLOOP_REGS+20)(sp)
+    or t2, t2, t0
+    beqz t2, .Lhwlp_state_restored
+    ori t1, t1, 3
+.Lhwlp_state_restored:
+    csrw TIKU_P4_HWLOOP_STATE_CSR, t1
+#endif
     /* A context with no saved FPU state never set fcsr: the interrupt may
      * have, so it goes back to its reset value.  Either write marks the state
      * dirty; the mstatus restore below puts the context's own FS back. */

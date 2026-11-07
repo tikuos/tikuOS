@@ -77,6 +77,9 @@ uint32_t *tiku_thread_arch_frame_init(uint32_t *top, void (*entry)(void *),
                                       TIKU_P4_MSTATUS_FS_INITIAL;
     frame[TIKU_P4_FRAME_CAUSE / 4] = (1u << 31) | (3u << 28) | (1u << 27);
     frame[TIKU_P4_FRAME_PIE_STATE / 4] = 1u;        /* the PIE on, initial */
+#if TIKU_P4_HWLOOP_ENABLE
+    frame[TIKU_P4_FRAME_HWLOOP_STATE / 4] = 1u;
+#endif
     return frame;
 }
 

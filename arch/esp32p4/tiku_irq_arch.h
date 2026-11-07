@@ -15,7 +15,14 @@
 #ifndef TIKU_ESP32P4_IRQ_ARCH_H_
 #define TIKU_ESP32P4_IRQ_ARCH_H_
 
+#ifndef TIKU_P4_HWLOOP_ENABLE
+#define TIKU_P4_HWLOOP_ENABLE 0
+#endif
+#if TIKU_P4_HWLOOP_ENABLE
+#define TIKU_P4_FRAME_SIZE   544
+#else
 #define TIKU_P4_FRAME_SIZE   512
+#endif
 #define TIKU_P4_FRAME_PC     128
 #define TIKU_P4_FRAME_STATUS 132
 #define TIKU_P4_FRAME_CAUSE  136
@@ -24,8 +31,18 @@
 #define TIKU_P4_FRAME_FCSR   272
 #define TIKU_P4_FRAME_PIE    276    /* 1 when the PIE registers follow */
 #define TIKU_P4_FRAME_PIE_STATE 280 /* CSR 0x7F2 at entry, written back */
+#define TIKU_P4_FRAME_PIE_CFG 284   /* vector load/store configuration */
 #define TIKU_P4_FRAME_PIE_REGS 288  /* q0-q7, qacc, ua_state, xacc: 216 B */
 #define TIKU_P4_PIE_STATE_CSR 0x7F2 /* 0 off, 1 initial, 2 clean, 3 dirty */
+#define TIKU_P4_FRAME_HWLOOP_STATE 512
+#define TIKU_P4_FRAME_HWLOOP_REGS 516 /* start, end, count for loops 0 and 1 */
+#define TIKU_P4_HWLOOP_STATE_CSR 0x7F1
+#define TIKU_P4_HWLOOP_START0_CSR 0x7C6
+#define TIKU_P4_HWLOOP_END0_CSR   0x7C7
+#define TIKU_P4_HWLOOP_COUNT0_CSR 0x7C8
+#define TIKU_P4_HWLOOP_START1_CSR 0x7C9
+#define TIKU_P4_HWLOOP_END1_CSR   0x7CA
+#define TIKU_P4_HWLOOP_COUNT1_CSR 0x7CB
 #define TIKU_P4_MSTATUS_FS   0x6000u    /* 1 initial, 2 clean, 3 dirty */
 #define TIKU_P4_MSTATUS_FS_INITIAL 0x2000u
 

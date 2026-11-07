@@ -124,6 +124,7 @@ per-platform semantics and the NVM region layout.
 
 | Working on | Read |
 |------------|------|
+| shared arithmetic and compute providers | `hal/compute/README.md` |
 | the VFS, nodes, watch, rules, persist cells | `kernel/vfs/AGENTS.md` |
 | memory tiers, NVM region, `/data`, layout knobs, the medium descriptor | `kernel/memory/AGENTS.md` |
 | database tables in place on NVM, the media descriptor | `kernel/db/AGENTS.md` |
