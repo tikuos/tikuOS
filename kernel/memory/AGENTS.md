@@ -70,8 +70,9 @@ the facts, not kept in platform tables: `TIKU_NVM_MEDIA_IN_PLACE`, which
 rating.  A write timing is not a fact here: the kernel observes it.
 
 `tiku_nvm_meter.h` observes it.  Each port charges the meter where it
-programs the medium: the Nordic write HAL (one program a byte stored outside
-SRAM, timed in 256-byte pieces), the Ambiq boot-ROM calls (every 16-byte
+programs the medium: the Nordic write HAL (one program for each 16-byte line
+outside SRAM whose bytes differ, stored through the RRAMC write buffer and
+committed in pieces of 16 lines), the Ambiq boot-ROM calls (every 16-byte
 line of the span or mirror image), the RA8P1 copies into MRAM and the MSP430
 copies (units touched), and the flash ports' erase and program routines
 (pages and sectors).  The write HAL also writes `TIKU_RETAINED` data in

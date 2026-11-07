@@ -38,9 +38,9 @@ static int region_write(tiku_nvm_backend_t *be, size_t off,
     if (off > be->size || len > be->size - off) {
         return -1;                          /* out of range */
     }
-    /* The HAL stores byte by byte, as the library memcpy did, and waits for
-     * RRAMC READY before WEN closes: closing it during a commit can truncate
-     * the last word written. */
+    /* The HAL programs each line the span changes once, through the RRAMC
+     * write buffer, and waits for RRAMC READY before WEN closes: closing it
+     * during a commit can truncate the last line written. */
     tiku_mem_arch_nvm_write(be->base + off, (const uint8_t *)src,
                             (tiku_mem_arch_size_t)len);
     return 0;

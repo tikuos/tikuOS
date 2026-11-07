@@ -988,9 +988,10 @@ int tiku_persist_wear_check(tiku_persist_store_t *store,
  * value: a cut leaves an invalid gate and the cell re-primes.  A single-word
  * cell_write() leaves the gate alone; cell_commit() stamps it either way.
  * Values are copied through tiku_mem_arch_nvm_write(), which stores byte by
- * byte where `.persistent` is written in place, so there a cut can tear even
- * a single-word cell_write().  The gate stores and the 4-byte path of
- * tiku_persist_cell_write_u32() are direct uint32_t stores.
+ * byte on MSP430 and RA8P1, so there a cut can tear even a single-word
+ * cell_write(); on the nRF54L it programs whole 16-byte lines.  The gate
+ * stores and the 4-byte path of tiku_persist_cell_write_u32() are direct
+ * uint32_t stores.
  *
  * Reads are plain variable reads: cells are memory-mapped, so a read
  * never opens the MPU window.
