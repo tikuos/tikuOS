@@ -37,7 +37,14 @@ there until the flush programs changed lines only.  `TIKU_PERSIST_COUNTER`
 reserves a window of values in a ring before handing them out, one write
 per window, and resumes above the reservation after a cut; the 802.15.4
 frame counter uses it.  The slot array is a cell, so a change of its slot
-count or value size re-primes it.  Writes to `TIKU_DURABLE`
+count or value size re-primes it.  `/data` spreads its writes on the same
+media (`TIKU_TFS_ROTATE`, `kernel/fs/tiku_tfs.h`): while two directory
+entries are free, a replace moves the file to the first free entry and the
+first free slot after its own, and a new file starts after the last one
+placed, or after a mount past the highest live one; one-slot files stay
+below the lowest longer file.  The new entry's
+gate is the commit point, and a mount clears an old entry a cut left live.
+Elsewhere a file takes the lowest free entry and slot.  Writes to `TIKU_DURABLE`
 data sit inside `tiku_mpu_unlock_nvm()`/`tiku_mpu_lock_nvm()`; an
 unbracketed write is silently dropped on MSP430, a bus fault on nRF54L, a
 MemManage reset on RP2350, Ambiq and RA8P1, a store access fault that halts
@@ -150,7 +157,9 @@ floor").  Shrink the static buffer that grew, or lower the floor on purpose.
 
 Host: `make -C TikuBench/tests/host/kernel memory-layout` (every write cut,
 recovery, replay), `persist-ring` (programs per ring write, spread over the
-slots, a cut after every byte, on four media) and the `memory-host` suite.  Board: the `filestore`
+slots, a cut after every byte, on four media), `tfs-wear` (the worst line
+over a thousand `/data` replaces and creates, on three media) and the
+`memory-host` suite.  Board: the `filestore`
 sweep after a fresh flash, `filestore --only refusal,layout
 --allow-destructive`, `linkcarve`, `persist-cells` (MSP430).  Guide:
 `TikuBench/docs/MEMORY_LAYOUT.md`.

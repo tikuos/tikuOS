@@ -152,6 +152,19 @@
 #define TIKU_TFS_EXTENT_FOR_SLOTS(n)                                            \
     (TIKU_TFS_DATA_OFF_FOR(n) + TIKU_TFS_SLOT_BYTES * (unsigned)((n) + 1u))
 
+/**
+ * @brief 1 where writes rotate over the directory and the one-slot runs: a
+ *        medium rewritten in place with a rated endurance (RRAM, MRAM).
+ *
+ * A replace moves the file to the first free entry and slot after its own; a
+ * new file starts after the last one placed, or after a mount past the highest
+ * live one.  Elsewhere a file takes the lowest free entry and slot.
+ */
+#ifndef TIKU_TFS_ROTATE
+#define TIKU_TFS_ROTATE \
+    ((TIKU_NVM_MEDIA_ERASE == 0u) && (TIKU_NVM_MEDIA_ENDURANCE != 0ul))
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* STATUS CODES                                                              */
 /*---------------------------------------------------------------------------*/
@@ -257,6 +270,8 @@ typedef struct tiku_tfs {
      *  nslots is only known at mount. */
     uint8_t  slot_used[(TIKU_TFS_MAX_SLOTS + 7u) / 8u];
     uint8_t  mounted;
+    uint16_t de_next;     /**< entry a new file tries first (rotating) */
+    uint16_t sl_next;     /**< slot a new file tries first (rotating)  */
 } tiku_tfs_t;
 
 /**
@@ -314,8 +329,8 @@ size_t tiku_tfs_region_size(void);
  * @brief Mount the store @p be holds.  Never formats.
  *
  * A missing header returns TFS_ERR_NOSTORE, and a header for another geometry
- * or version TFS_ERR_GEOMETRY; tiku_tfs_probe() classifies the extent.  Only
- * tiku_tfs_format() and tiku_tfs_init() write a store.
+ * or version TFS_ERR_GEOMETRY; tiku_tfs_probe() classifies the extent.  Its one
+ * write clears the old entry a cut left beside a moved file (TIKU_TFS_ROTATE).
  *
  * @return TFS_OK or a negative tfs_err_t.
  */
@@ -330,8 +345,9 @@ int tiku_tfs_init(tiku_tfs_t *fs, tiku_nvm_backend_t *be);
 /**
  * @brief Classify the store at the start of @p be without writing anything.
  *
- * Reads the header and counts live directory entries into out->live; live
- * entries without a header classify as TFS_PROBE_TORN.
+ * Reads the header and counts live directory entries into out->live, less any
+ * a mount would clear; live entries without a header classify as
+ * TFS_PROBE_TORN.
  *
  * @return TFS_OK, or TFS_ERR_INVAL for a NULL argument.
  */
@@ -370,7 +386,7 @@ int tiku_tfs_create(tiku_tfs_t *fs, const char *name);
  * @brief Create-or-overwrite @p name with @p len bytes (atomic overwrite).
  *
  * Runs as a one-chunk stream (tiku_tfs_open_w()).  A power cut before the
- * commit word lands (the run word of an existing file, the gate of a new one)
+ * commit word lands (the gate of a new or moved entry, else the run word)
  * leaves the old content; after it, the old run is freed.
  *
  * @param data  Source bytes; may be NULL only when @p len is 0
@@ -418,7 +434,9 @@ int tiku_tfs_write_chunk(tiku_tfs_wr_t *w, const void *data, size_t len);
  *
  * The dirent names only the slots the content reached.  The old run and the
  * reservation's unused tail are freed after the dirent update.
- * @return TFS_OK, or a negative error (the write stays open on failure).
+ * @return TFS_OK, or a negative error with the write still open; TFS_ERR_IO
+ *         with it closed when a moved file's old entry could not be cleared
+ *         (the content is committed; the next mount clears that entry).
  */
 int tiku_tfs_commit(tiku_tfs_wr_t *w);
 

@@ -156,6 +156,14 @@ static uint32_t rd32(tiku_tfs_t *fs, size_t off)
     return v;
 }
 
+/** @brief Alignment-safe 32-bit read at @p off from the extent at @p base. */
+static uint32_t rd32_at(const uint8_t *base, size_t off)
+{
+    uint32_t v;
+    memcpy(&v, base + off, sizeof v);
+    return v;
+}
+
 /**
  * @brief Backend write of @p n bytes at @p off; TFS_OK or TFS_ERR_IO.
  */
@@ -243,31 +251,77 @@ static int tfs_find(tiku_tfs_t *fs, const char *name)
 }
 
 /**
- * @brief Find the first unused directory entry.
+ * @brief Find the first non-live directory entry at or after @p from,
+ *        wrapping past the last entry to the first.
  *
- * @return  Index of the first non-live dirent, or -1 if the directory is full.
+ * @return  Its index, or -1 if the directory is full.
  */
-static int free_dirent(tiku_tfs_t *fs)
+static int free_dirent_from(tiku_tfs_t *fs, unsigned from)
 {
-    unsigned i;
-    for (i = 0; i < fs->nfiles; i++) {
+    unsigned i = (from < fs->nfiles) ? from : 0u;
+    unsigned k;
+
+    for (k = 0; k < fs->nfiles; k++) {
         if (de_gate(fs, i) != TFS_GATE) {
             return (int)i;
+        }
+        if (++i == fs->nfiles) {
+            i = 0u;
         }
     }
     return -1;
 }
 
 /**
+ * @brief Find the entry a new file takes: the lowest free one, or with
+ *        TIKU_TFS_ROTATE the first free one from fs->de_next, which follows
+ *        the last entry stamped or, after a mount, the highest live one.
+ *
+ * @return  Its index, or -1 if the directory is full.
+ */
+static int free_dirent(tiku_tfs_t *fs)
+{
+    return free_dirent_from(fs, TIKU_TFS_ROTATE ? fs->de_next : 0u);
+}
+
+/** @brief Whether at least two directory entries are free. */
+static int two_free_dirents(tiku_tfs_t *fs)
+{
+    unsigned i, n = 0u;
+
+    for (i = 0; i < fs->nfiles && n < 2u; i++) {
+        if (de_gate(fs, i) != TFS_GATE) {
+            n++;
+        }
+    }
+    return n >= 2u;
+}
+
+/** @brief First slot of the lowest live run longer than one slot; nslots if
+ *         there is none. */
+static unsigned long_floor(tiku_tfs_t *fs)
+{
+    unsigned i, lo = fs->nslots;
+
+    for (i = 0; i < fs->nfiles; i++) {
+        if (de_gate(fs, i) == TFS_GATE && de_span(fs, i) > 1u &&
+            de_first(fs, i) < lo) {
+            lo = de_first(fs, i);
+        }
+    }
+    return lo;
+}
+
+/**
  * @brief Find @p span contiguous free data slots.
  *
- * Double-ended: a one-slot run is taken from the bottom up, a longer run from
- * the top down, so one-slot files do not fragment the end where long runs
- * are placed.
+ * A longer run goes as high as it fits.  A one-slot run takes the lowest free
+ * slot; rotating, the first free one from @p from below every long run,
+ * wrapping, else the lowest free slot anywhere.
  *
  * @return  Index of the run's first slot, or -1 if no such run exists.
  */
-static int free_run(tiku_tfs_t *fs, unsigned span)
+static int free_run(tiku_tfs_t *fs, unsigned span, unsigned from)
 {
     unsigned s, k;
 
@@ -275,6 +329,19 @@ static int free_run(tiku_tfs_t *fs, unsigned span)
         return -1;
     }
     if (span == 1u) {
+        if (TIKU_TFS_ROTATE) {
+            unsigned top = long_floor(fs);
+
+            s = (from < top) ? from : 0u;
+            for (k = 0u; k < top; k++) {
+                if (!bm_get(fs->slot_used, s)) {
+                    return (int)s;
+                }
+                if (++s == top) {
+                    s = 0u;
+                }
+            }
+        }
         for (s = 0; s < fs->nslots; s++) {
             if (!bm_get(fs->slot_used, s)) {
                 return (int)s;
@@ -365,6 +432,58 @@ static int run_check(tiku_tfs_t *fs, unsigned i, unsigned *first, uint32_t *len)
         *len = n;
     }
     return TFS_OK;
+}
+
+/**
+ * @brief Stamp entry @p i: the run word and the name in one write, then the
+ *        gate, the commit point.  A cut before the gate leaves it not live.
+ *
+ * @param name  NUL-terminated, shorter than TIKU_TFS_NAME_MAX
+ * @return TFS_OK or TFS_ERR_IO
+ */
+static int de_stamp(tiku_tfs_t *fs, unsigned i, const char *name, uint32_t run)
+{
+    uint8_t b[4u + TIKU_TFS_NAME_MAX];
+
+    memcpy(b, &run, 4u);
+    memset(b + 4u, 0, TIKU_TFS_NAME_MAX);
+    memcpy(b + 4u, name, strlen(name));
+    if (wr(fs, dirent_off(i) + TFS_DE_SLOT, b, sizeof b) ||
+        wr32(fs, dirent_off(i) + TFS_DE_GATE, TFS_GATE)) {
+        return TFS_ERR_IO;
+    }
+    if (TIKU_TFS_ROTATE) {
+        fs->de_next = (uint16_t)((i + 1u < fs->nfiles) ? i + 1u : 0u);
+    }
+    return TFS_OK;
+}
+
+/**
+ * @brief Whether live entry @p k of the @p n at @p base is superseded: the
+ *        walk forward from it over consecutive live entries, wrapping, meets
+ *        an entry with its name.
+ *
+ * A rotating replace, made only while two entries are free, stamps the first
+ * free entry after the file's own and then clears the old one; after a cut
+ * between the two, only the walk from the older entry meets the other.
+ */
+static int de_superseded(const uint8_t *base, unsigned n, unsigned k)
+{
+    const char *name = (const char *)base + dirent_off(k) + TFS_DE_NAME;
+    unsigned j = k;
+
+    for (;;) {
+        if (++j == n) {
+            j = 0u;
+        }
+        if (j == k || rd32_at(base, dirent_off(j) + TFS_DE_GATE) != TFS_GATE) {
+            return 0;
+        }
+        if (strncmp(name, (const char *)base + dirent_off(j) + TFS_DE_NAME,
+                    TIKU_TFS_NAME_MAX) == 0) {
+            return 1;
+        }
+    }
 }
 
 /*---------------------------------------------------------------------------*/
@@ -534,6 +653,10 @@ int tiku_tfs_format(tiku_tfs_t *fs)
         return TFS_ERR_IO;
     }
     memset(fs->slot_used, 0, sizeof fs->slot_used);
+    if (TIKU_TFS_ROTATE) {
+        fs->de_next = 0u;
+        fs->sl_next = 0u;
+    }
     fs->mounted = 1;
     return TFS_OK;
 }
@@ -559,10 +682,26 @@ int tiku_tfs_mount(tiku_tfs_t *fs, tiku_nvm_backend_t *be)
     if (!tfs_sb_matches(fs)) {
         return TFS_ERR_GEOMETRY;
     }
+    /* A cut between a rotating replace's two gate writes leaves the file's old
+     * entry live beside the new one.  Its gate is cleared before the map is
+     * built, so its run reads as free. */
+    if (TIKU_TFS_ROTATE) {
+        for (i = 0; i < fs->nfiles; i++) {
+            if (de_gate(fs, i) == TFS_GATE &&
+                de_superseded(be->base, fs->nfiles, i) &&
+                wr32(fs, dirent_off(i) + TFS_DE_GATE, 0u)) {
+                return TFS_ERR_IO;
+            }
+        }
+    }
     /* Rebuild the data-slot allocation map from the live directory.  Every
      * run is bounds-checked and claimed slot by slot; two files that claim one
      * slot fail the mount with TFS_ERR_CORRUPT. */
     memset(fs->slot_used, 0, sizeof fs->slot_used);
+    if (TIKU_TFS_ROTATE) {
+        fs->de_next = 0u;
+        fs->sl_next = 0u;
+    }
     for (i = 0; i < fs->nfiles; i++) {
         if (de_gate(fs, i) == TFS_GATE) {
             unsigned first;
@@ -577,6 +716,11 @@ int tiku_tfs_mount(tiku_tfs_t *fs, tiku_nvm_backend_t *be)
                     return TFS_ERR_CORRUPT;     /* two names own one slot */
                 }
                 bm_set(fs->slot_used, first + k);
+            }
+            if (TIKU_TFS_ROTATE) {
+                /* New files start after the highest live entry and run. */
+                fs->de_next = (uint16_t)(i + 1u);
+                fs->sl_next = (uint16_t)(first + span);
             }
         }
     }
@@ -594,14 +738,6 @@ int tiku_tfs_init(tiku_tfs_t *fs, tiku_nvm_backend_t *be)
     fs->mounted = 0;
     fs->wr_open = 0;
     return tiku_tfs_format(fs);
-}
-
-/** @brief Alignment-safe 32-bit read at @p off from an unmounted extent. */
-static uint32_t rd32_at(const uint8_t *base, size_t off)
-{
-    uint32_t v;
-    memcpy(&v, base + off, sizeof v);
-    return v;
 }
 
 /**
@@ -653,6 +789,10 @@ static void tfs_classify(const uint8_t *base, size_t size, int full,
 
         if (rd32_at(base, de + TFS_DE_GATE) != TFS_GATE) {
             continue;
+        }
+        if (TIKU_TFS_ROTATE && out->kind == TFS_PROBE_COMPATIBLE &&
+            de_superseded(base, (unsigned)scan, (unsigned)k)) {
+            continue;                    /* mount clears it */
         }
         out->live++;
         if (out->kind == TFS_PROBE_COMPATIBLE) {
@@ -774,7 +914,6 @@ int tiku_tfs_create(tiku_tfs_t *fs, const char *name)
 {
     size_t nl;
     int i, s;
-    char nb[TIKU_TFS_NAME_MAX];
 
     if (fs == NULL || !fs->mounted || name == NULL) {
         return TFS_ERR_INVAL;
@@ -793,23 +932,18 @@ int tiku_tfs_create(tiku_tfs_t *fs, const char *name)
     if (i < 0) {
         return TFS_ERR_NOSPACE;
     }
-    s = free_run(fs, 1u);                       /* empty file: one slot */
+    s = free_run(fs, 1u, fs->sl_next);          /* empty file: one slot */
     if (s < 0) {
         return TFS_ERR_NOSPACE;
     }
-    if (wr32(fs, slot_off(fs, (unsigned)s) + TFS_SL_LEN, 0u)) {
-        return TFS_ERR_IO;
-    }
-    memset(nb, 0, sizeof nb);
-    memcpy(nb, name, nl);
-    /* name + run, then the gate last (the commit point). */
-    if (wr(fs, dirent_off((unsigned)i) + TFS_DE_NAME, nb, TIKU_TFS_NAME_MAX) ||
-        wr32(fs, dirent_off((unsigned)i) + TFS_DE_SLOT,
-             TFS_RUN_MAKE((unsigned)s, 1u)) ||
-        wr32(fs, dirent_off((unsigned)i) + TFS_DE_GATE, TFS_GATE)) {
+    if (wr32(fs, slot_off(fs, (unsigned)s) + TFS_SL_LEN, 0u) ||
+        de_stamp(fs, (unsigned)i, name, TFS_RUN_MAKE((unsigned)s, 1u))) {
         return TFS_ERR_IO;
     }
     bm_set(fs->slot_used, (unsigned)s);
+    if (TIKU_TFS_ROTATE) {
+        fs->sl_next = (uint16_t)(s + 1);
+    }
     return TFS_OK;
 }
 
@@ -818,7 +952,7 @@ int tiku_tfs_open_w(tiku_tfs_t *fs, tiku_tfs_wr_t *w,
 {
     unsigned span;
     size_t   nl;
-    int      r;
+    int      r, i;
 
     if (fs == NULL || !fs->mounted || w == NULL || name == NULL) {
         return TFS_ERR_INVAL;
@@ -832,7 +966,8 @@ int tiku_tfs_open_w(tiku_tfs_t *fs, tiku_tfs_wr_t *w,
     }
     /* A new name needs a free directory entry: a full directory fails here
      * with TFS_ERR_NOSPACE, and commit checks again. */
-    if (tfs_find(fs, name) < 0 && free_dirent(fs) < 0) {
+    i = tfs_find(fs, name);
+    if (i < 0 && free_dirent(fs) < 0) {
         return TFS_ERR_NOSPACE;
     }
     /*
@@ -859,9 +994,14 @@ int tiku_tfs_open_w(tiku_tfs_t *fs, tiku_tfs_wr_t *w,
         return TFS_ERR_TOOBIG;
     }
 #endif
-    r = free_run(fs, span);
+    /* A rotating replace looks for the slot after the file's own. */
+    r = free_run(fs, span, (TIKU_TFS_ROTATE && i >= 0)
+                           ? de_first(fs, (unsigned)i) + 1u : fs->sl_next);
     if (r < 0) {
         return TFS_ERR_NOSPACE;
+    }
+    if (TIKU_TFS_ROTATE && span == 1u) {
+        fs->sl_next = (uint16_t)(r + 1);
     }
     /* Reserve in the RAM map so nothing else takes the run mid-stream.  The
      * reservation is RAM-only: after a power cut before commit, the next mount
@@ -900,7 +1040,9 @@ int tiku_tfs_commit(tiku_tfs_wr_t *w)
 {
     tiku_tfs_t *fs;
     int         i;
+    int         rc = TFS_OK;
     unsigned    keep;
+    uint32_t    run;
 
     if (w == NULL || !w->active) {
         return TFS_ERR_INVAL;
@@ -911,35 +1053,48 @@ int tiku_tfs_commit(tiku_tfs_wr_t *w)
         return TFS_ERR_IO;
     }
     keep = run_span_for(w->off);        /* the slots the content reached */
+    run  = TFS_RUN_MAKE(w->first, keep);
     i = tfs_find(fs, w->name);
     if (i < 0) {
-        char nb[TIKU_TFS_NAME_MAX];
         i = free_dirent(fs);
         if (i < 0) {
             return TFS_ERR_NOSPACE;            /* directory filled mid-stream */
         }
         /* Create-with-content is one transaction: the content and its length
-         * word are durable, the name and run are written next, and the gate,
-         * written last, is the single commit point.  A power cut before the
-         * gate leaves no file. */
-        memset(nb, 0, sizeof nb);
-        memcpy(nb, w->name, strlen(w->name));
-        if (wr(fs, dirent_off((unsigned)i) + TFS_DE_NAME,
-               nb, TIKU_TFS_NAME_MAX) ||
-            wr32(fs, dirent_off((unsigned)i) + TFS_DE_SLOT,
-                 TFS_RUN_MAKE(w->first, keep)) ||
-            wr32(fs, dirent_off((unsigned)i) + TFS_DE_GATE, TFS_GATE)) {
+         * word are durable before the entry is stamped, and the entry's gate is
+         * the single commit point.  A power cut before the gate leaves no file. */
+        if (de_stamp(fs, (unsigned)i, w->name, run)) {
             return TFS_ERR_IO;
         }
     } else {
-        /* Atomic flip: one aligned word repoints the dirent at the new run.
-         * A power cut before it leaves the dirent on the old run. */
         uint32_t old = de_run(fs, (unsigned)i);
-        if (wr32(fs, dirent_off((unsigned)i) + TFS_DE_SLOT,
-                 TFS_RUN_MAKE(w->first, keep))) {
-            return TFS_ERR_IO;
+        int      j   = -1;
+
+        if (TIKU_TFS_ROTATE && two_free_dirents(fs)) {
+            j = free_dirent_from(fs, (unsigned)i + 1u);
         }
-        run_mark(fs, TFS_RUN_FIRST(old), TFS_RUN_SPAN(old), 0);  /* reclaim */
+        if (j >= 0) {
+            /* The file moves to the first free entry after its own, whose gate
+             * is the commit point; the old gate is cleared next.  After a cut
+             * between the two, mount clears the old entry. */
+            if (de_stamp(fs, (unsigned)j, w->name, run)) {
+                return TFS_ERR_IO;
+            }
+            if (wr32(fs, dirent_off((unsigned)i) + TFS_DE_GATE, 0u)) {
+                /* Committed, but the old entry stays live and keeps its run
+                 * until a remount clears it; a read may return either. */
+                rc = TFS_ERR_IO;
+            } else {
+                run_mark(fs, TFS_RUN_FIRST(old), TFS_RUN_SPAN(old), 0);
+            }
+        } else {
+            /* Atomic flip: one aligned word repoints the dirent at the new
+             * run.  A power cut before it leaves the dirent on the old run. */
+            if (wr32(fs, dirent_off((unsigned)i) + TFS_DE_SLOT, run)) {
+                return TFS_ERR_IO;
+            }
+            run_mark(fs, TFS_RUN_FIRST(old), TFS_RUN_SPAN(old), 0);
+        }
     }
     /* The reservation's unused tail is freed after the directory names the
      * short run.  The content starts at the run's first slot, so the tail is
@@ -950,7 +1105,7 @@ int tiku_tfs_commit(tiku_tfs_wr_t *w)
     }
     w->active = 0;
     fs->wr_open = 0;
-    return TFS_OK;
+    return rc;
 }
 
 void tiku_tfs_abort(tiku_tfs_wr_t *w)
