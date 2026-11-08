@@ -88,6 +88,17 @@ the facts, not kept in platform tables: `TIKU_NVM_MEDIA_IN_PLACE`, which
 (`kernel/fs/tiku_tfs.h`); and `TIKU_PERSIST_WEAR_THRESHOLD`, half the
 rating.  A write timing is not a fact here: the kernel observes it.
 
+The pace of a write is the memory layer's too.  `tiku_nvm_pace_s()` gives
+the shortest interval between writes that lets the medium last a number of
+days, from the programs a write puts on its busiest unit and the places the
+writes rotate over; `tiku_nvm_spread_for()` gives the places a declared
+rate needs.  A value whose owner declares no life lasts
+`TIKU_NVM_LIFE_DAYS`, ten years.  The database's capacity check
+(`rate=`, `life=`) is `tiku_nvm_spread_for()`, and the file store reports
+the pace of one file's replaces as the store stands (`tiku_tfs_pace_s()`):
+BASIC waits that long between `PERSIST ON` checkpoints, over
+`TIKU_BASIC_CKPT_LIFE_DAYS`, and at least `TIKU_BASIC_CKPT_INTERVAL_S`.
+
 `tiku_nvm_meter.h` observes it.  Each port charges the meter where it
 programs the medium: the Nordic write HAL (one program for each 16-byte line
 outside SRAM whose bytes differ, stored through the RRAMC write buffer and

@@ -183,14 +183,10 @@ const char *tiku_db_err_name(int rc)
 uint32_t tiku_db_capacity_for_life(const tiku_db_media_t *media,
                                    const tiku_db_spec_t *spec)
 {
-    uint64_t inserts;
-    if (media == NULL || spec == NULL || media->endurance == 0u ||
-        spec->rate == 0u || spec->life == 0u) {
-        return 0u;
-    }
-    inserts = (uint64_t)spec->rate * 24u * spec->life;
-    inserts = (inserts + media->endurance - 1u) / media->endurance;
-    return inserts > 0xFFFFFFFFu ? 0xFFFFFFFFu : (uint32_t)inserts;
+    /* An insert programs each line of its record once, and the inserts
+     * rotate over the ring's records. */
+    return (spec == NULL) ? 0u
+         : tiku_nvm_spread_for(media, 1u, spec->rate, spec->life);
 }
 
 /**

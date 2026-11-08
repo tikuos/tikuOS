@@ -632,19 +632,15 @@
 #define TIKU_BASIC_PERSIST_RUN_ENABLE 1
 #endif
 
-/* Checkpoint pacing.  0 checkpoints every yield batch, the finest resume
- * granularity, for media whose writes are byte stores with practically
- * unlimited endurance (MSP430 FRAM, rated ~1e15 cycles) and for the host.  A
- * nonzero interval paces media that wear or stall:
- *   Ambiq MRAM         no erase, but each save is a masked-IRQ bootrom
- *                      call: 5 s
- *   Nordic RRAM        no erase, but limited write endurance: 5 s
- *   RA8P1 MRAM         rated 1e5 programs per 32 bytes, like the RRAM: 5 s
- *   other ports        sector-erased flash (RP2350, ESP32-C61, STM32N6),
- *                      rated ~1e5 cycles per sector: 60 s
+/* Checkpoint pacing.  On region parts a checkpoint replaces /data/prog.ckpt
+ * no sooner than the store's pace for a checkpoint of the last size over
+ * TIKU_BASIC_CKPT_LIFE_DAYS (tiku_tfs_pace_s()), and no sooner than
+ * TIKU_BASIC_CKPT_INTERVAL_S: 5 s on Ambiq, whose saves run in a masked-IRQ
+ * boot-ROM call, and on Nordic and RA8P1; 60 s on the flash ports, whose
+ * saves erase sectors.  MSP430 FRAM and the host checkpoint every yield batch.
  * A longer interval lengthens the replay after a power cut: the program
  * re-runs at most the last interval's worth of lines. */
-/** Minimum seconds between run-state checkpoints while PERSIST is on; 0
+/** Fewest seconds between run-state checkpoints while PERSIST is on; 0
  *  checkpoints every yield batch. */
 #ifndef TIKU_BASIC_CKPT_INTERVAL_S
 #  if defined(PLATFORM_MSP430) || defined(TIKU_TEST_HOST)
@@ -655,6 +651,11 @@
 #  else
 #    define TIKU_BASIC_CKPT_INTERVAL_S 60
 #  endif
+#endif
+
+/** Days the /data store must last under checkpoints at their pace. */
+#ifndef TIKU_BASIC_CKPT_LIFE_DAYS
+#define TIKU_BASIC_CKPT_LIFE_DAYS TIKU_NVM_LIFE_DAYS
 #endif
 
 /* Where BASIC's saved program and run-state checkpoint live, keyed on the

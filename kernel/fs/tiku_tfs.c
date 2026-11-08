@@ -1350,3 +1350,35 @@ size_t tiku_tfs_free_files(tiku_tfs_t *fs)
     }
     return f;
 }
+
+uint32_t tiku_tfs_pace_s(tiku_tfs_t *fs, size_t bytes, uint32_t life_days)
+{
+    static const tiku_nvm_media_t media = TIKU_NVM_MEDIA_INIT;
+    unsigned s, top, slots = 0u;
+    size_t   entries;
+
+    if (fs == NULL || !fs->mounted) {
+        return 0u;
+    }
+    if (!TIKU_TFS_ROTATE || !two_free_dirents(fs) || run_span_for(bytes) > 1u) {
+        /* Every replace programs the entry's run-word line in place, or the
+         * first line of one of the two runs a long file alternates between
+         * twice (content, length word). */
+        return tiku_nvm_pace_s(&media, 1u, 1u, life_days);
+    }
+    /* The file cycles over its own entry and slot and the free ones, the
+     * slots below the lowest long run.  A visit programs the entry's first
+     * line three times (stamp, gate, clear) and a slot's first line, which
+     * may share a unit with the slot before it, at most three. */
+    entries = tiku_tfs_free_files(fs);
+    top = long_floor(fs);
+    for (s = 0u; s < top; s++) {
+        if (!bm_get(fs->slot_used, s)) {
+            slots++;
+        }
+    }
+    if ((size_t)slots < entries) {
+        entries = slots;
+    }
+    return tiku_nvm_pace_s(&media, 3u, (uint32_t)entries + 1u, life_days);
+}

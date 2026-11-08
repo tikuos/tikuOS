@@ -45,8 +45,12 @@ modules/                    mod_demo.c and its per-part linker scripts
 ```
 
 `tiku_basic_config.h` holds the profile knobs (arena size, line count,
-string heap).  The arena sits in the tier the part offers: PSRAM on the
-ESP32-C61, SRAM on RP2350 (the refuse-NVM-arena guard keeps it off flash).
+string heap, checkpoint pacing).  A `PERSIST ON` checkpoint on a part with
+a `/data` region waits the store's pace for the checkpoint's size over
+`TIKU_BASIC_CKPT_LIFE_DAYS` (ten years by default), and at least
+`TIKU_BASIC_CKPT_INTERVAL_S`; RUN RESUME replays at most that interval.
+The arena sits in the tier the part offers: PSRAM on the ESP32-C61, SRAM
+on RP2350 (the refuse-NVM-arena guard keeps it off flash).
 
 ## Rules
 

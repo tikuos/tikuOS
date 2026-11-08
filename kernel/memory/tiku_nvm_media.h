@@ -117,4 +117,62 @@ typedef struct {
 /** @brief This port's descriptor, the facts of TIKU_NVM_MEDIA_INIT. */
 const tiku_nvm_media_t *tiku_nvm_media(void);
 
+/*---------------------------------------------------------------------------*/
+/* PACE                                                                      */
+/*---------------------------------------------------------------------------*/
+
+/** @brief Days a durable value lasts where its owner declares no life: ten
+ *         years. */
+#ifndef TIKU_NVM_LIFE_DAYS
+#define TIKU_NVM_LIFE_DAYS  3650u
+#endif
+
+/**
+ * @brief Shortest interval, in seconds, between writes that lets @p m last
+ *        @p life_days.
+ *
+ * Each write programs its busiest unit @p per_visit times, and the writes
+ * rotate over @p spread places, so one place takes per_visit programs every
+ * spread writes; 0 for @p spread counts as 1.
+ *
+ * @return 0 where the medium states no limit; at most UINT32_MAX
+ */
+static inline uint32_t tiku_nvm_pace_s(const tiku_nvm_media_t *m,
+                                       uint32_t per_visit, uint32_t spread,
+                                       uint32_t life_days)
+{
+    uint64_t need, room;
+
+    if (m == 0 || m->endurance == 0u) {
+        return 0u;
+    }
+    need = (uint64_t)life_days * 86400u * per_visit;
+    room = (uint64_t)m->endurance * (spread ? spread : 1u);
+    need = (need + room - 1u) / room;
+    return (need > 0xFFFFFFFFu) ? 0xFFFFFFFFu : (uint32_t)need;
+}
+
+/**
+ * @brief Places that writes made @p per_hour times an hour must rotate over
+ *        for @p m to last @p life_days, each programming its place
+ *        @p per_visit times.
+ *
+ * @return 0 where the medium states no limit or the rate or the life is 0;
+ *         at most UINT32_MAX
+ */
+static inline uint32_t tiku_nvm_spread_for(const tiku_nvm_media_t *m,
+                                           uint32_t per_visit,
+                                           uint32_t per_hour,
+                                           uint32_t life_days)
+{
+    uint64_t n;
+
+    if (m == 0 || m->endurance == 0u || per_hour == 0u || life_days == 0u) {
+        return 0u;
+    }
+    n = (uint64_t)per_hour * 24u * life_days * per_visit;
+    n = (n + m->endurance - 1u) / m->endurance;
+    return (n > 0xFFFFFFFFu) ? 0xFFFFFFFFu : (uint32_t)n;
+}
+
 #endif /* TIKU_NVM_MEDIA_H_ */

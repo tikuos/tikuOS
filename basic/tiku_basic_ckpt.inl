@@ -24,7 +24,7 @@
  * while armed, and every orderly end (END, STOP, the last line, Ctrl-C, NEW,
  * PERSIST OFF) invalidates the checkpoint; a cut skips that, so RUN RESUME
  * finds the last one.  Resume replays what ran since it -- at most one batch,
- * or one TIKU_BASIC_CKPT_INTERVAL_S and a batch where saves are paced -- so
+ * or one checkpoint interval and a batch where saves are paced -- so
  * the side effects of those lines repeat.
  *
  * Storage follows BASIC_NVM_ON_REGION, as the saved program does:
@@ -160,6 +160,7 @@ _Static_assert(TIKU_BASIC_SAVE_BUF_BYTES <= TIKU_TFS_FILE_MAX_GUARANTEED,
                "BASIC's saved program exceeds the largest possible store file");
 
 static tiku_tfs_wr_t basic_ckpt_wr;    /* open while a save is in flight */
+static size_t basic_ckpt_bytes;        /* the last checkpoint saved, bytes */
 
 /** @brief The /data store, or NULL when none is mounted. */
 static tiku_tfs_t *
@@ -1025,6 +1026,7 @@ basic_ckpt_save(void)
         tiku_tfs_abort(&basic_ckpt_wr);
         return -1;
     }
+    basic_ckpt_bytes = (size_t)tr[1] + BASIC_CKPT_TRAILER;
     return 0;
 }
 
@@ -1148,20 +1150,41 @@ basic_ckpt_load(void)
 #if TIKU_BASIC_CKPT_INTERVAL_S > 0
 /* Second of the most recent save (or arming), from the kernel clock. */
 static unsigned long basic_ckpt_last_s;
+/* Seconds the next save waits, set when the interval restarts. */
+static unsigned long basic_ckpt_every_s = TIKU_BASIC_CKPT_INTERVAL_S;
+
+/**
+ * @brief Seconds between checkpoints: the store's pace for one of the last
+ *        size saved (none yet: one slot) over TIKU_BASIC_CKPT_LIFE_DAYS, or
+ *        TIKU_BASIC_CKPT_INTERVAL_S where that is longer.
+ */
+static unsigned long
+basic_ckpt_interval(void)
+{
+#if BASIC_NVM_ON_REGION
+    unsigned long pace = (unsigned long)tiku_tfs_pace_s(
+        basic_ckpt_fs(), basic_ckpt_bytes, TIKU_BASIC_CKPT_LIFE_DAYS);
+
+    return (pace > TIKU_BASIC_CKPT_INTERVAL_S) ? pace
+                                               : TIKU_BASIC_CKPT_INTERVAL_S;
+#else
+    return TIKU_BASIC_CKPT_INTERVAL_S;
+#endif
+}
 #endif
 
 /**
  * @brief 1 when a checkpoint is due at this yield boundary.
  *
- * Interval 0 checkpoints every batch; a nonzero TIKU_BASIC_CKPT_INTERVAL_S
- * allows at most one save per interval since PERSIST ON or the last save.
+ * Interval 0 checkpoints every batch; otherwise at most one save per
+ * basic_ckpt_interval() since PERSIST ON or the last save.
  */
 static int
 basic_ckpt_due(void)
 {
 #if TIKU_BASIC_CKPT_INTERVAL_S > 0
     return (unsigned long)(tiku_clock_seconds() - basic_ckpt_last_s)
-               >= (unsigned long)TIKU_BASIC_CKPT_INTERVAL_S;
+               >= basic_ckpt_every_s;
 #else
     return 1;
 #endif
@@ -1173,6 +1196,7 @@ basic_ckpt_mark(void)
 {
 #if TIKU_BASIC_CKPT_INTERVAL_S > 0
     basic_ckpt_last_s = tiku_clock_seconds();
+    basic_ckpt_every_s = basic_ckpt_interval();
 #endif
 }
 

@@ -505,4 +505,16 @@ size_t tiku_tfs_free_files(tiku_tfs_t *fs);
  *         not mounted. */
 size_t tiku_tfs_used_slots(tiku_tfs_t *fs);
 
+/**
+ * @brief Shortest interval, in seconds, between replaces of one file of
+ *        @p bytes that lets the store's busiest line last @p life_days.
+ *
+ * Read from the store as it stands, with the other files at rest: a rotating
+ * replace of a one-slot file spreads over the free entries and slots; a file
+ * replaced in place, or one of several slots, programs the same lines.
+ *
+ * @return 0 where the medium states no limit, or when not mounted
+ */
+uint32_t tiku_tfs_pace_s(tiku_tfs_t *fs, size_t bytes, uint32_t life_days);
+
 #endif /* TIKU_TFS_H_ */
