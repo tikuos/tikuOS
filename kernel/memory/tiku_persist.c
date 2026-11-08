@@ -8,8 +8,8 @@
  * tiku_persist.c - persistent NVM key-value store implementation.
  *
  * Maps short string keys to NVM-backed buffers and implements the persist
- * cells.  Value copies go through the NVM HAL; gate words, the u32 fast path
- * and entry metadata are direct stores inside the NVM window.
+ * cells, rings and counters.  Values and ring slots go through the NVM HAL;
+ * gate words, the u32 fast path and entry metadata are direct stores.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -298,8 +298,8 @@ int tiku_persist_wear_check(tiku_persist_store_t *store,
 
 /*
  * See TIKU_PERSIST_CELL in tiku_mem.h.  The functions below implement the
- * magic-gate / MPU-window / commit-ordering idiom that the boot counter,
- * lifetime accumulator, device name, RTC epoch and the other cells use.
+ * magic-gate / MPU-window / commit-ordering idiom that the device name, the
+ * RTC epoch, every ring's slot array and the other cells use.
  *
  * NVM access routing: variable-length data copies go through the
  * tiku_mem_arch_nvm_write() HAL so platforms with per-range write
@@ -559,4 +559,204 @@ uint8_t tiku_persist_cell_count(void)
 uint8_t tiku_persist_cell_primed(void)
 {
     return cell_primed;
+}
+
+uint8_t tiku_persist_cell_retire(const tiku_persist_cell_t *c)
+{
+    TIKU_MEM_KERNEL_ONLY(0);
+    uint16_t saved;
+    tiku_mem_err_t status;
+
+    if (c == NULL || c->gate == NULL || *c->gate != c->key) {
+        return 0;
+    }
+    tiku_atomic_enter();
+    saved = tiku_mpu_unlock_nvm();
+    *c->gate = 0;
+    CELL_STORED(sizeof(uint32_t));
+    status = tiku_mpu_lock_nvm_status(saved);
+    tiku_atomic_exit();
+    return (status == TIKU_MEM_OK) ? 1u : 0u;
+}
+
+/*---------------------------------------------------------------------------*/
+/* PERSISTENT RINGS AND COUNTERS                                             */
+/*---------------------------------------------------------------------------*/
+
+/* A slot: the sequence word (0 in a slot never written), the check word,
+ * then the value, padded with zeros to the stride. */
+#define SLOT_SEQ    0u
+#define SLOT_CHECK  4u
+
+/**
+ * @brief FNV-1a over the ring's key, a sequence number and a value.
+ *
+ * Binds a slot to its ring and to its own sequence, so a stale or torn slot
+ * does not read as valid.
+ */
+static uint32_t ring_check(uint32_t key, uint32_t seq,
+                           const uint8_t *value, uint16_t size)
+{
+    uint32_t h = 2166136261u;
+    uint16_t i;
+
+    for (i = 0; i < 4u; i++) {
+        h = (h ^ (uint8_t)(key >> (8u * i))) * 16777619u;
+    }
+    for (i = 0; i < 4u; i++) {
+        h = (h ^ (uint8_t)(seq >> (8u * i))) * 16777619u;
+    }
+    for (i = 0; i < size; i++) {
+        h = (h ^ value[i]) * 16777619u;
+    }
+    return h;
+}
+
+/**
+ * @brief Find the valid slot with the greatest sequence number.
+ *
+ * @param r    Ring descriptor
+ * @param seq  Its sequence number, 0 when no slot is valid
+ * @return Its index, or -1 when no slot is valid
+ */
+static int ring_newest(const tiku_persist_ring_t *r, uint32_t *seq)
+{
+    const uint8_t *base = (const uint8_t *)r->cell->data;
+    int best = -1;
+    uint16_t i;
+
+    *seq = 0u;
+    for (i = 0; i < r->slots; i++) {
+        const uint8_t *s = base + (size_t)i * r->stride;
+        uint32_t q, check;
+
+        memcpy(&q, s + SLOT_SEQ, sizeof q);
+        memcpy(&check, s + SLOT_CHECK, sizeof check);
+        if (q != 0u && q > *seq &&
+            check == ring_check(r->cell->key, q,
+                                s + TIKU_PERSIST_RING_HEAD, r->size)) {
+            *seq = q;
+            best = (int)i;
+        }
+    }
+    return best;
+}
+
+uint8_t tiku_persist_ring_init(const tiku_persist_ring_t *r)
+{
+    return (r != NULL) ? tiku_persist_cell_init(r->cell) : 0u;
+}
+
+int tiku_persist_ring_read(const tiku_persist_ring_t *r, void *dst)
+{
+    uint32_t seq;
+    int at;
+
+    if (r == NULL || dst == NULL) {
+        return 0;
+    }
+    memset(dst, 0, r->size);
+    if (!tiku_persist_cell_valid(r->cell)) {
+        return 0;
+    }
+    at = ring_newest(r, &seq);
+    if (at < 0) {
+        return 0;
+    }
+    memcpy(dst, (const uint8_t *)r->cell->data + (size_t)at * r->stride +
+                TIKU_PERSIST_RING_HEAD, r->size);
+    return 1;
+}
+
+tiku_mem_err_t tiku_persist_ring_write(const tiku_persist_ring_t *r,
+                                       const void *src)
+{
+    TIKU_MEM_KERNEL_ONLY(TIKU_MEM_ERR_INVALID);
+    uint8_t slot[TIKU_PERSIST_RING_STRIDE(TIKU_PERSIST_RING_VALUE_MAX)];
+    uint32_t seq, check;
+    uint16_t saved;
+    int at;
+    tiku_mem_err_t status;
+
+    if (r == NULL || src == NULL || r->stride > sizeof slot ||
+        !tiku_persist_cell_valid(r->cell)) {
+        return TIKU_MEM_ERR_INVALID;
+    }
+    at = ring_newest(r, &seq);
+    if (seq == 0xFFFFFFFFu) {
+        return TIKU_MEM_ERR_FULL;
+    }
+    at = (at < 0) ? 0 : (int)(((uint16_t)at + 1u) % r->slots);
+    seq++;
+
+    memset(slot, 0, r->stride);
+    memcpy(slot + SLOT_SEQ, &seq, sizeof seq);
+    memcpy(slot + TIKU_PERSIST_RING_HEAD, src, r->size);
+    check = ring_check(r->cell->key, seq, slot + TIKU_PERSIST_RING_HEAD,
+                       r->size);
+    memcpy(slot + SLOT_CHECK, &check, sizeof check);
+
+    tiku_atomic_enter();
+    saved = tiku_mpu_unlock_nvm();
+    tiku_mem_arch_nvm_write((uint8_t *)r->cell->data + (size_t)at * r->stride,
+                            slot, r->stride);
+    status = tiku_mpu_lock_nvm_status(saved);
+    tiku_atomic_exit();
+    return status;
+}
+
+/** @brief Load the counter's next value and limit once, from its ring, else
+ *  from the cell an older image reserved in. */
+static void counter_load(tiku_persist_counter_t *c)
+{
+    uint32_t hwm = 0u;
+
+    if (c->ready) {
+        return;
+    }
+    (void)tiku_persist_ring_init(c->ring);
+    if (!tiku_persist_ring_read(c->ring, &hwm) && c->from != NULL &&
+        c->from->size == sizeof(uint32_t) && tiku_persist_cell_valid(c->from)) {
+        memcpy(&hwm, c->from->data, sizeof hwm);
+    }
+    c->next = hwm;
+    c->limit = hwm;
+    c->ready = 1u;
+}
+
+tiku_mem_err_t tiku_persist_counter_next(tiku_persist_counter_t *c,
+                                         uint32_t window, uint32_t *out)
+{
+    tiku_mem_err_t err;
+
+    if (c == NULL || out == NULL || window == 0u) {
+        return TIKU_MEM_ERR_INVALID;
+    }
+    counter_load(c);
+    if (c->next >= c->limit) {
+        uint32_t limit = c->next + window;
+
+        if (limit < c->next) {
+            return TIKU_MEM_ERR_FULL;
+        }
+        err = tiku_persist_ring_write(c->ring, &limit);
+        if (err != TIKU_MEM_OK) {
+            return err;
+        }
+        c->limit = limit;
+        if (c->from != NULL) {
+            (void)tiku_persist_cell_retire(c->from);
+        }
+    }
+    *out = c->next++;
+    return TIKU_MEM_OK;
+}
+
+uint32_t tiku_persist_counter_peek(tiku_persist_counter_t *c)
+{
+    if (c == NULL) {
+        return 0u;
+    }
+    counter_load(c);
+    return c->next;
 }

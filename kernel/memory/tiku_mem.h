@@ -116,6 +116,16 @@
 #define TIKU_RETAINED  TIKU_SECTION(".retained")
 #endif
 
+/** @brief 1 where TIKU_RETAINED data is write-protected NVM (MSP430 FRAM),
+ *         so a store to it sits in a tiku_mpu_unlock_nvm() window, else 0.
+ *  @note  Where it is 0 a store needs no window, and opening one would flush
+ *         the mirror on the ports that keep retained data inside it. */
+#if defined(PLATFORM_MSP430)
+#define TIKU_RETAINED_GATED  1
+#else
+#define TIKU_RETAINED_GATED  0
+#endif
+
 /**
  * @brief Placement for state that survives a power cycle (`.persistent`).
  *
@@ -968,10 +978,10 @@ int tiku_persist_wear_check(tiku_persist_store_t *store,
 /*
  * The static counterpart to the key-value store above.  A cell is a
  * single value in the `.persistent` section paired with a magic-word
- * gate, declared at compile time and validated once at boot.  The boot
- * count, the device name and the RTC epoch are cells, among others; the
- * layout record and its pin word (tiku_layout.c) are cells declared without
- * TIKU_PERSIST_CELL.  Each follows three rules:
+ * gate, declared at compile time and validated once at boot.  The device
+ * name and the RTC epoch are cells, among others, and every ring's slot array
+ * is one; the layout record and its pin word (tiku_layout.c) are cells
+ * declared without TIKU_PERSIST_CELL.  Each follows three rules:
  *
  *   1. magic gate    — a sentinel beside the data distinguishes real
  *                      persisted state from virgin/corrupted NVM
@@ -1172,6 +1182,179 @@ uint8_t tiku_persist_cell_count(void);
  * @return Count of cell_init() calls that returned 1 since reset
  */
 uint8_t tiku_persist_cell_primed(void);
+
+/**
+ * @brief Clear a cell's gate, so its value reads as invalid.
+ *
+ * For a cell whose value has moved elsewhere, such as into a ring: the
+ * value stays in place but nothing takes it as real until the cell is
+ * primed again.  A gate that does not hold the key is left alone.
+ *
+ * @param c  Cell descriptor
+ * @return 1 when the gate was cleared, 0 when it did not hold the key, @p c
+ *         is NULL or the window did not close cleanly
+ */
+uint8_t tiku_persist_cell_retire(const tiku_persist_cell_t *c);
+
+/*---------------------------------------------------------------------------*/
+/* PERSISTENT RINGS AND COUNTERS                                             */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * A ring keeps a value that changes on a schedule or per event in a run of
+ * slots.  A slot is a sequence word, a check word and the value; a write
+ * stores the slot after the newest one with the next sequence number, and a
+ * read takes the valid slot with the greatest.  A slot whose check fails, a
+ * write cut short, is skipped, so a cut leaves the previous value.
+ *
+ * Where the medium rewrites a unit in place and states a rating (RRAM, MRAM:
+ * TIKU_PERSIST_RING_SPREADS), the ring has the slots it declares, 16-byte
+ * aligned, and its writes cycle through all of them: on the nRF54L one line
+ * program a write, on the RA8P1 one 32-byte block holding two slots.  Ambiq's
+ * relock programs its whole mirror image for any change.  Elsewhere a ring has
+ * two slots: flash erases a whole sector, and FRAM states no limit.  The slot
+ * array is a persist cell, so its gate marks it primed and boot carries it
+ * across a layout change by key; a change of the slot count or the value's
+ * size changes the cell's size, which re-primes it.
+ */
+
+/** @brief Non-zero where a ring's slots spread its writes: a medium with no
+ *         erase unit and a stated rating. */
+#define TIKU_PERSIST_RING_SPREADS \
+    (TIKU_NVM_MEDIA_ERASE == 0u && TIKU_NVM_MEDIA_ENDURANCE != 0ul)
+
+/** @brief Alignment of a ring and of its slot stride: the 16-byte line of RRAM
+ *         and Ambiq MRAM (two to the RA8P1's 32-byte block), else 2. */
+#define TIKU_PERSIST_RING_ALIGN  (TIKU_PERSIST_RING_SPREADS ? 16u : 2u)
+
+/** @brief Bytes of a slot ahead of its value: the sequence and check words. */
+#define TIKU_PERSIST_RING_HEAD   8u
+
+/** @brief Largest value a ring keeps. */
+#define TIKU_PERSIST_RING_VALUE_MAX  56u
+
+/** @brief Bytes from one slot to the next for a value of @p size bytes. */
+#define TIKU_PERSIST_RING_STRIDE(size)                                     \
+    ((TIKU_PERSIST_RING_HEAD + (size) + TIKU_PERSIST_RING_ALIGN - 1u) &    \
+     ~(TIKU_PERSIST_RING_ALIGN - 1u))
+
+/** @brief The slots a ring declared with @p n has on this medium. */
+#define TIKU_PERSIST_RING_SLOTS(n)  (TIKU_PERSIST_RING_SPREADS ? (n) : 2u)
+
+/** @brief Descriptor for one ring; TIKU_PERSIST_RING() declares it. */
+typedef struct {
+    const tiku_persist_cell_t *cell;  /**< the slot array and its gate   */
+    uint16_t size;                    /**< value bytes                   */
+    uint16_t stride;                  /**< bytes from one slot to the next */
+    uint16_t slots;                   /**< slots in the array            */
+} tiku_persist_ring_t;
+
+/**
+ * @brief Declare a ring of @p n slots holding a @p type, and its cell.
+ *
+ * @param ring     Descriptor identifier to define
+ * @param type     The value's type, at most TIKU_PERSIST_RING_VALUE_MAX bytes
+ * @param key_val  Gate key of the slot array, unique per cell; change it
+ *                 when the value's meaning changes
+ * @param n        Slots where they spread writes, at least 2 (two elsewhere)
+ */
+#define TIKU_PERSIST_RING(ring, type, key_val, n)                          \
+    _Static_assert(sizeof(type) <= TIKU_PERSIST_RING_VALUE_MAX &&          \
+                   (n) >= 2u, #ring ": a ring value too large, or n < 2"); \
+    static TIKU_DURABLE uint8_t ring##_slots[TIKU_PERSIST_RING_SLOTS(n)]   \
+        [TIKU_PERSIST_RING_STRIDE(sizeof(type))]                           \
+        __attribute__((aligned(TIKU_PERSIST_RING_ALIGN)));                 \
+    TIKU_PERSIST_CELL(ring##_cell, ring##_slots, (key_val), NULL, 0);      \
+    static const tiku_persist_ring_t ring = {                              \
+        &ring##_cell, (uint16_t)sizeof(type),                              \
+        (uint16_t)TIKU_PERSIST_RING_STRIDE(sizeof(type)),                  \
+        (uint16_t)TIKU_PERSIST_RING_SLOTS(n)                               \
+    }
+
+/**
+ * @brief Validate a ring's slot array; prime it empty on a virgin NVM.
+ * @return As tiku_persist_cell_init() for the slot array
+ * @note Call once at boot per ring, before the first read or write.
+ */
+uint8_t tiku_persist_ring_init(const tiku_persist_ring_t *r);
+
+/**
+ * @brief Copy the ring's newest valid value into @p dst.
+ *
+ * @param r    Ring descriptor
+ * @param dst  r->size bytes; zero-filled when the ring holds nothing
+ * @return 1 when a slot held a value, 0 when none did, the slot array is not
+ *         primed or an argument is NULL
+ */
+int tiku_persist_ring_read(const tiku_persist_ring_t *r, void *dst);
+
+/**
+ * @brief Store @p src in the slot after the newest, as one write.
+ *
+ * Stores the sequence word, the check word and the value through
+ * tiku_mem_arch_nvm_write() in one window: on RRAM one line program.
+ *
+ * @param r    Ring descriptor
+ * @param src  r->size bytes
+ * @return TIKU_MEM_OK; TIKU_MEM_ERR_INVALID for a NULL argument, a slot array
+ *         that is not primed or a caller outside kernel context;
+ *         TIKU_MEM_ERR_FULL when the sequence is spent; TIKU_MEM_ERR_IO when
+ *         the flush at relock fails
+ */
+tiku_mem_err_t tiku_persist_ring_write(const tiku_persist_ring_t *r,
+                                       const void *src);
+
+/**
+ * @brief A durable counter that programs once per window of values.
+ *
+ * It stores a reservation in a ring before it hands out values below it, so
+ * after a reset or a cut it resumes above every value it handed out and skips
+ * the rest of that window.  For frame counters and sequence numbers.
+ */
+typedef struct {
+    const tiku_persist_ring_t *ring;  /**< the reservations              */
+    const tiku_persist_cell_t *from;  /**< a uint32_t cell an older image
+                                           reserved in, or NULL          */
+    uint32_t next;                    /**< the value handed out next     */
+    uint32_t limit;                   /**< reserved below this           */
+    uint8_t  ready;                   /**< next and limit are loaded     */
+} tiku_persist_counter_t;
+
+/**
+ * @brief Declare a counter and its ring of @p n slots.
+ *
+ * @param ctr        Counter identifier to define (SRAM state)
+ * @param key_val    Gate key of the ring's slot array
+ * @param n          Ring slots, as TIKU_PERSIST_RING()
+ * @param from_cell  A uint32_t cell an older image kept the reservation in,
+ *                   or NULL: while the ring holds nothing the counter
+ *                   resumes above it, and the first reservation retires it
+ */
+#define TIKU_PERSIST_COUNTER(ctr, key_val, n, from_cell)                   \
+    TIKU_PERSIST_RING(ctr##_ring, uint32_t, (key_val), (n));               \
+    static tiku_persist_counter_t ctr = {                                  \
+        &ctr##_ring, (from_cell), 0u, 0u, 0u                               \
+    }
+
+/**
+ * @brief Hand out the next value, reserving @p window more when needed.
+ *
+ * @param c       Counter
+ * @param window  Values one reservation covers, at least 1
+ * @param out     The value handed out
+ * @return TIKU_MEM_OK; TIKU_MEM_ERR_INVALID for a NULL argument or a zero
+ *         window; TIKU_MEM_ERR_FULL when a reservation would pass 2^32 - 1;
+ *         a tiku_persist_ring_write() error when the reservation could not
+ *         be stored.  On an error nothing is handed out.
+ */
+tiku_mem_err_t tiku_persist_counter_next(tiku_persist_counter_t *c,
+                                         uint32_t window, uint32_t *out);
+
+/**
+ * @brief The value tiku_persist_counter_next() hands out next.
+ * @return That value, or 0 for a NULL @p c
+ */
+uint32_t tiku_persist_counter_peek(tiku_persist_counter_t *c);
 
 /*
  * Cells across a layout change.  A cell sits where link order put it, so an

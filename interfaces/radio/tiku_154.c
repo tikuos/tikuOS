@@ -30,7 +30,6 @@
 static uint8_t  mac_key[16];
 static uint8_t  mac_have_key;
 static uint8_t  mac_secure;                      /* secure outgoing frames    */
-static uint32_t mac_tx_ctr;                      /* frame security counter */
 
 /**
  * @brief 13-byte CCM* nonce = src ext addr (8, short mapped into the low 2) ||
@@ -50,37 +49,21 @@ static void mac_nonce(uint8_t n[13], uint16_t src, uint32_t ctr)
 
 /* Durable TX frame counter.  The nonce is src||counter||level with a fixed
  * key, so a counter that restarted at 0 after a power cycle would repeat a
- * keystream, which breaks CTR mode.  Counters are reserved ahead in durable
- * storage: a high-water mark is persisted WINDOW past what has been handed
- * out, so there is at most one durable write per WINDOW frames, and a reboot
- * resumes above every counter used (unused reserved counters are skipped). */
-#define MAC_CTR_MAGIC   0x15CC7201u
+ * keystream, which breaks CTR mode.  A reserved counter (tiku_mem.h) stores a
+ * reservation WINDOW past what it has handed out, so there is at most one
+ * durable write per WINDOW frames, cycling through the ring's slots, and a
+ * reboot resumes above every counter used (unused reserved counters are
+ * skipped). */
+#define MAC_CTR_KEY     0x15CC7202u
 #define MAC_CTR_WINDOW  64u
 
+/* The cell an image before the counter's ring reserved in: the counter
+ * resumes above it while the ring is empty, and retires it. */
+#define MAC_CTR_MAGIC   0x15CC7201u
 static TIKU_DURABLE uint32_t mac_ctr_hwm_persist;
 TIKU_PERSIST_CELL(mac_ctr_cell, mac_ctr_hwm_persist, MAC_CTR_MAGIC, NULL, 0);
-static uint8_t mac_ctr_ready;
 
-/**
- * @brief Next TX frame counter; reserves a further window in durable storage
- *        when the current one is used up.
- */
-static uint32_t mac_ctr_next(void)
-{
-    uint32_t c;
-    if (mac_ctr_ready == 0u) {
-        (void)tiku_persist_cell_init(&mac_ctr_cell);
-        mac_tx_ctr = mac_ctr_hwm_persist;        /* resume above all reserved */
-        mac_ctr_ready = 1u;
-    }
-    if (mac_tx_ctr >= mac_ctr_hwm_persist) {      /* window used: reserve */
-        tiku_persist_cell_write_u32(&mac_ctr_cell,
-                                    mac_tx_ctr + MAC_CTR_WINDOW);
-    }
-    c = mac_tx_ctr;
-    mac_tx_ctr++;
-    return c;
-}
+TIKU_PERSIST_COUNTER(mac_ctr, MAC_CTR_KEY, 16u, &mac_ctr_cell);
 
 /* RX anti-replay: per-source last-accepted counter; a frame whose counter is
  * not strictly greater is a replay/stale and dropped.  Small round-robin
@@ -142,12 +125,7 @@ void tiku_154_set_secure(int on)
 
 uint32_t tiku_154_tx_counter(void)
 {
-    if (mac_ctr_ready == 0u) {
-        (void)tiku_persist_cell_init(&mac_ctr_cell);
-        mac_tx_ctr = mac_ctr_hwm_persist;
-        mac_ctr_ready = 1u;
-    }
-    return mac_tx_ctr;
+    return tiku_persist_counter_peek(&mac_ctr);
 }
 
 static uint16_t mac_pan  = 0xABCDu;
@@ -260,7 +238,8 @@ static int mac_wait_ack(uint8_t seq)
  * AAD = MHR||ASH (authenticated, not encrypted); nonce = local addr || frame
  * counter || sec level.
  *
- * @return Frame length, or 0 when it does not fit or encryption fails
+ * @return Frame length, or 0 when it does not fit, no frame counter could be
+ *         reserved or encryption fails
  */
 static uint16_t mac_build_secured(uint8_t *frame, uint16_t dst,
                                   const uint8_t *payload, uint8_t len,
@@ -269,8 +248,14 @@ static uint16_t mac_build_secured(uint8_t *frame, uint16_t dst,
     tiku_154_mhr_t h;
     uint16_t hlen;
     uint8_t  nonce[13];
-    uint32_t ctr = mac_ctr_next();               /* durable, no reboot reuse  */
+    uint32_t ctr;
 
+    /* Durable, so a reboot never reuses one; none is handed out when the
+     * reservation cannot be stored. */
+    if (tiku_persist_counter_next(&mac_ctr, MAC_CTR_WINDOW, &ctr)
+            != TIKU_MEM_OK) {
+        return 0u;
+    }
     memset(&h, 0, sizeof(h));
     h.type = TIKU_154_FT_DATA;
     h.ack_req = (ack != 0u && dst != TIKU_154_ADDR_BCAST) ? 1u : 0u;

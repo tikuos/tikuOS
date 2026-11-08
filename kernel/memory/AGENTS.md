@@ -25,7 +25,19 @@ copies are how state has ended up silently volatile on some platforms.
   NVM tier, whose memory is written with `tiku_tier_nvm_write()`.
 
 Small durable scalars use `TIKU_PERSIST_CELL` and the cell API
-(`kernel/vfs/AGENTS.md`, "Persistent nodes").  Writes to `TIKU_DURABLE`
+(`kernel/vfs/AGENTS.md`, "Persistent nodes").  A value that changes on a
+schedule or per event uses a ring: `TIKU_PERSIST_RING(ring, type, key, n)`
+keeps it in `n` slots of sequence word, check word and value, a write goes
+to the slot after the newest and a read takes the newest valid one, so a
+cut leaves the previous value.  Where the medium has no erase unit and a
+stated rating (RRAM, MRAM) the slots are 16-byte aligned and a write
+programs one line; elsewhere a ring has two slots.  On Ambiq the relock
+programs the whole mirror image for any change, so its slots spread no wear
+there until the flush programs changed lines only.  `TIKU_PERSIST_COUNTER`
+reserves a window of values in a ring before handing them out, one write
+per window, and resumes above the reservation after a cut; the 802.15.4
+frame counter uses it.  The slot array is a cell, so a change of its slot
+count or value size re-primes it.  Writes to `TIKU_DURABLE`
 data sit inside `tiku_mpu_unlock_nvm()`/`tiku_mpu_lock_nvm()`; an
 unbracketed write is silently dropped on MSP430, a bus fault on nRF54L, a
 MemManage reset on RP2350, Ambiq and RA8P1, a store access fault that halts
@@ -137,7 +149,8 @@ floor").  Shrink the static buffer that grew, or lower the floor on purpose.
 ## Proof
 
 Host: `make -C TikuBench/tests/host/kernel memory-layout` (every write cut,
-recovery, replay) and the `memory-host` suite.  Board: the `filestore`
+recovery, replay), `persist-ring` (programs per ring write, spread over the
+slots, a cut after every byte, on four media) and the `memory-host` suite.  Board: the `filestore`
 sweep after a fresh flash, `filestore --only refusal,layout
 --allow-destructive`, `linkcarve`, `persist-cells` (MSP430).  Guide:
 `TikuBench/docs/MEMORY_LAYOUT.md`.

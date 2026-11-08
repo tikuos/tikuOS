@@ -134,6 +134,13 @@ layout change or NVM corruption.  `moved` reports the cells this boot moved
 to an updated image's places, and `manifest` where this image keeps each
 cell.
 
+A value that changes on a schedule or per event is a ring
+(`TIKU_PERSIST_RING`, `kernel/memory/AGENTS.md`), not a cell written in
+place; a counter that must never repeat is a `TIKU_PERSIST_COUNTER`.  The
+boot record behind `/sys/boot_count` and `/sys/cold_boots` is written once
+per boot and a read of either writes no NVM; a read of `/sys/cold_boots`
+notes the lifetime in `TIKU_RETAINED` memory for the next boot to store.
+
 ## Proof
 
 Host: `TikuBench/tests/host/kernel/test_vfs_assembly.c` (built per

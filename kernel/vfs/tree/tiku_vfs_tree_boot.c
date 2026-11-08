@@ -8,8 +8,8 @@
  * tiku_vfs_tree_boot.c - /sys/boot VFS nodes and boot bookkeeping.
  *
  * Exposes the decoded reset reason, boot count, boot stage, hang culprit,
- * clock rates and MPU diagnostics.  The boot counter and lifetime accumulator
- * are magic-gated persist cells.
+ * clock rates and MPU diagnostics.  The boot count and the lifetime uptime
+ * are one persist ring, written once per boot.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -100,29 +100,38 @@ boot_reason_read(char *buf, size_t max)
 }
 
 /*
- * Durable monotonic boot counter, which survives reset, brownout and power
- * loss.  It is a persist cell (TIKU_PERSIST_CELL), so the tiku_persist_cell
- * API handles the magic gate, first-boot priming and MPU-window writes.
- * Incremented in tiku_vfs_tree_boot_init(); reads serve the SRAM copy
- * boot_count_value.
+ * The boot record: the boots since the record was first written, and the
+ * seconds of uptime summed over them.  It is a ring (TIKU_PERSIST_RING) of 16
+ * slots where the medium spreads writes, written once per boot, so a boot
+ * costs one write and the record's writes cycle through its slots.
  */
+typedef struct {
+    uint32_t count;     /**< boots, 1 on the first */
+    uint32_t lifetime;  /**< seconds of uptime summed over them */
+} boot_record_t;
 
 /*
- * Gate key for the boot-counter cell; uninitialised memory matches it with
- * probability 2^-32.  The key changes with the cell's meaning: a new key
- * re-primes the cell to 0 at the next boot.
+ * Gate key for the record's slot array; uninitialised memory matches it with
+ * probability 2^-32.  A new key re-primes the record empty at the next boot.
+ */
+#define BOOT_RECORD_KEY  0xB007C002UL
+
+TIKU_PERSIST_RING(boot_ring, boot_record_t, BOOT_RECORD_KEY, 16u);
+
+/*
+ * The cells an image before the boot record kept the count and the lifetime
+ * in: read once to seed an empty record, then retired.
  */
 #define BOOT_COUNT_MAGIC  0xB007C001UL
-
-/** Durable cell: boots since first power-up (1 on the first) */
+#define LIFETIME_MAGIC    0x4C494645UL /* 'LIFE' */
 static TIKU_DURABLE uint32_t boot_count_persist;
-
-/** Gate + descriptor: defaults to 0, then pre-increments each boot */
 TIKU_PERSIST_CELL(boot_count_cell, boot_count_persist,
                   BOOT_COUNT_MAGIC, NULL, 0);
+static TIKU_DURABLE uint32_t lifetime_seconds_persist;
+TIKU_PERSIST_CELL(lifetime_cell, lifetime_seconds_persist,
+                  LIFETIME_MAGIC, NULL, 0);
 
-/** SRAM copy of boot_count_persist, set at init and served by the read
- *  handler. */
+/** This boot's count, served by the read handler. */
 static uint32_t boot_count_value;
 
 int
@@ -174,47 +183,55 @@ tiku_vfs_tree_boot_last_reset_read(char *buf, size_t max)
 /*---------------------------------------------------------------------------*/
 
 /*
- * Durable sum of uptime across every boot since the cell was first primed.
- * /sys/cold_boots renders it, despite its name, and each read saves it, so a
- * power loss loses only the time since the last read.
- *
- * Lifetime = lifetime_at_boot (snapshotted at init) + current uptime in
- * seconds.
+ * The lifetime, rendered by /sys/cold_boots despite its name, is the boot
+ * record's sum plus this run's uptime.  A read writes nothing durable: it
+ * notes the lifetime in a warm record (TIKU_RETAINED), and the next boot
+ * stores the noted lifetime in the boot record when a warm reset ended the
+ * run.  A power cut loses the run's uptime where retained data does not
+ * survive one.
  */
 
-/**
- * Gate key for the lifetime-accumulator cell ('LIFE'), distinct from
- * BOOT_COUNT_MAGIC so the two cells validate independently.
- */
-#define LIFETIME_MAGIC  0x4C494645UL /* 'LIFE' */
-
-/** Durable cell: lifetime seconds persisted up to the last save */
-static TIKU_DURABLE uint32_t lifetime_seconds_persist;
-
-/** Gate + descriptor: defaults to 0 on blank memory */
-TIKU_PERSIST_CELL(lifetime_cell, lifetime_seconds_persist,
-                  LIFETIME_MAGIC, NULL, 0);
-
-/*
- * Snapshot of lifetime_seconds_persist taken at init, before this run began
- * adding uptime.  Adding tiku_clock_seconds() yields the live lifetime.
- */
+/** Lifetime seconds as of the start of this boot. */
 static uint32_t lifetime_at_boot;
+
+/** Magic of a valid warm record ('WARM'). */
+#define BOOT_WARM_MAGIC  0x5741524DUL
+
+/** The lifetime noted by this run's last read, for the next boot. */
+static TIKU_RETAINED struct {
+    uint32_t magic;     /**< BOOT_WARM_MAGIC                     */
+    uint32_t count;     /**< the boot that noted it              */
+    uint32_t lifetime;  /**< seconds, as of the note             */
+    uint32_t check;     /**< count ^ lifetime ^ BOOT_WARM_MAGIC  */
+} boot_warm;
+
+/** @brief Note @p lifetime as boot @p count's, in the warm record. */
+static void
+warm_note(uint32_t count, uint32_t lifetime)
+{
+#if TIKU_RETAINED_GATED
+    uint16_t saved;
+
+    tiku_atomic_enter();
+    saved = tiku_mpu_unlock_nvm();
+#endif
+    boot_warm.magic = 0u;
+    boot_warm.count = count;
+    boot_warm.lifetime = lifetime;
+    boot_warm.check = count ^ lifetime ^ BOOT_WARM_MAGIC;
+    boot_warm.magic = BOOT_WARM_MAGIC;
+#if TIKU_RETAINED_GATED
+    tiku_mpu_lock_nvm(saved);
+    tiku_atomic_exit();
+#endif
+}
 
 int
 tiku_vfs_tree_boot_cold_boots_read(char *buf, size_t max)
 {
-    uint32_t now = (uint32_t)tiku_clock_seconds();
-    uint32_t lifetime = lifetime_at_boot + now;
+    uint32_t lifetime = lifetime_at_boot + (uint32_t)tiku_clock_seconds();
 
-    /* Save the fresh lifetime so a later power loss keeps the
-     * time covered by this run.  The cell write owns the MPU
-     * unlock window. */
-    if (tiku_persist_cell_write_u32_status(&lifetime_cell, lifetime)
-            != TIKU_MEM_OK) {
-        return TIKU_VFS_EIO;
-    }
-
+    warm_note(boot_count_value, lifetime);
     return snprintf(buf, max, "%lu\n", (unsigned long)lifetime);
 }
 
@@ -485,14 +502,34 @@ tiku_vfs_tree_boot_init(void)
      * record, so /sys/boot/hang reports it for this boot only. */
     tiku_hang_boot_init();
 
-    /* Validate or prime the cells, then bump the boot counter; the
-     * read handler serves the SRAM copy. */
-    (void)tiku_persist_cell_init(&boot_count_cell);
-    (void)tiku_persist_cell_init(&lifetime_cell);
+    /* The last boot's record, seeded from the older cells when the ring
+     * holds none; the lifetime the last run noted, when a warm reset ended
+     * it; then one write for this boot. */
+    {
+        boot_record_t rec;
 
-    /* Unchecked: boot continues if the counter cannot be saved. */
-    tiku_persist_cell_write_u32(&boot_count_cell,
-                                boot_count_persist + 1U);
-    boot_count_value = boot_count_persist;
-    lifetime_at_boot = lifetime_seconds_persist;
+        (void)tiku_persist_ring_init(&boot_ring);
+        if (!tiku_persist_ring_read(&boot_ring, &rec)) {
+            rec.count = tiku_persist_cell_valid(&boot_count_cell)
+                        ? boot_count_persist : 0u;
+            rec.lifetime = tiku_persist_cell_valid(&lifetime_cell)
+                           ? lifetime_seconds_persist : 0u;
+        }
+        if (boot_warm.magic == BOOT_WARM_MAGIC &&
+            boot_warm.check ==
+                (boot_warm.count ^ boot_warm.lifetime ^ BOOT_WARM_MAGIC) &&
+            boot_warm.count == rec.count && boot_warm.lifetime > rec.lifetime) {
+            rec.lifetime = boot_warm.lifetime;
+        }
+        rec.count++;
+        /* Boot continues if the record cannot be saved; the older cells are
+         * retired only once it is. */
+        if (tiku_persist_ring_write(&boot_ring, &rec) == TIKU_MEM_OK) {
+            (void)tiku_persist_cell_retire(&boot_count_cell);
+            (void)tiku_persist_cell_retire(&lifetime_cell);
+        }
+        boot_count_value = rec.count;
+        lifetime_at_boot = rec.lifetime;
+        warm_note(rec.count, rec.lifetime);
+    }
 }

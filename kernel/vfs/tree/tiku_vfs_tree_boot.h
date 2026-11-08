@@ -38,11 +38,11 @@
 extern const tiku_vfs_node_t tiku_vfs_tree_boot_children[];
 
 /**
- * @brief Capture the reset cause and bump the durable boot counter.
+ * @brief Capture the reset cause and write this boot's record.
  *
- * Latches the reset cause and the hang culprit (tiku_hang_boot_init()),
- * primes an invalid boot-counter or lifetime cell to 0, increments the
- * counter and snapshots the lifetime.  Other modules' cells do not need it.
+ * Latches the reset cause and the hang culprit (tiku_hang_boot_init()), then
+ * writes the boot record once: the count one past the last boot's, and the
+ * lifetime plus the uptime the last run noted when a warm reset ended it.
  *
  * @note Call before any other module init in tiku_vfs_tree_init(): on MSP430
  *       reading SYSRSTIV pops the highest pending cause, so an earlier read
@@ -79,16 +79,13 @@ int tiku_vfs_tree_boot_last_reset_read(char *buf, size_t max);
 /**
  * @brief Read handler for /sys/cold_boots: the lifetime uptime in seconds.
  *
- * Named cold_boots, it renders the seconds of uptime summed over every boot
- * since the cell was primed, not a boot count.  Each read saves the value to
- * its persist cell, so a power loss loses only the time since the last read.
+ * The seconds of uptime summed over every boot, not a boot count.  A read
+ * writes no NVM: it notes the value in TIKU_RETAINED memory, which the next
+ * boot adds after a warm reset; a power cut loses it except on MSP430 (FRAM).
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes
- * @return The full length of the text (snprintf-style), or TIKU_VFS_EIO when
- *         the cell cannot be saved
- * @note On MSP430 the save clears and re-sets the cell's gate around two word
- *       stores, so a power cut inside it re-primes the lifetime to 0.
+ * @return The full length of the text (snprintf-style)
  */
 int tiku_vfs_tree_boot_cold_boots_read(char *buf, size_t max);
 
