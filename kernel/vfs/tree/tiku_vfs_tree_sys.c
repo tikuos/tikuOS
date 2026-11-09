@@ -48,6 +48,7 @@
 #include <kernel/cpu/tiku_stack.h>   /* /sys/mem/stack_free */
 #include <kernel/memory/tiku_nvm_media.h>  /* /sys/mem/media */
 #include <kernel/memory/tiku_nvm_meter.h>  /* /sys/mem/nvm_writes */
+#include <kernel/memory/tiku_nvm_sync.h>   /* /sys/mem/sync */
 #include "tiku_vfs_tree_timer.h"
 #include "tiku_vfs_tree_watchdog.h"
 #include "tiku_vfs_tree_power.h"
@@ -270,6 +271,31 @@ nvm_writes_read(char *buf, size_t max)
                     (unsigned long)s.bytes, (unsigned long)s.programs,
                     (unsigned long)s.erases, (unsigned long)s.busy_us);
 }
+
+#if TIKU_NVM_SYNC_ENABLE
+/**
+ * @brief Read handler for /sys/mem/sync: the syncs since boot, the last
+ *        one's reason, then each hook's interval in seconds a line.
+ */
+static int
+mem_sync_read(char *buf, size_t max)
+{
+    const tiku_nvm_sync_hook_t *h;
+    size_t at;
+    int n;
+
+    n = snprintf(buf, max, "syncs\t%lu\nlast\t%s\n",
+                 (unsigned long)tiku_nvm_sync_count(),
+                 tiku_nvm_sync_reason_name(tiku_nvm_sync_last()));
+    at = (n > 0) ? (size_t)n : 0u;
+    for (h = tiku_nvm_sync_hooks(); h != NULL; h = h->next) {
+        n = snprintf(buf + (at < max ? at : max), at < max ? max - at : 0u,
+                     "%s\t%lu\n", h->name, (unsigned long)h->every_s);
+        at += (n > 0) ? (size_t)n : 0u;
+    }
+    return (int)at;
+}
+#endif
 
 /**
  * @brief Read handler for /sys/mem/nvmfree.
@@ -1180,6 +1206,9 @@ static const tiku_vfs_node_t sys_mem_children[] = {
     { "nvm",  TIKU_VFS_FILE, nvm_read,       NULL, NULL, 0, &desc_mem_static },
     { "media", TIKU_VFS_FILE, media_read,    NULL, NULL, 0, &desc_mem_map },
     { "nvm_writes", TIKU_VFS_FILE, nvm_writes_read, NULL, NULL, 0, &desc_mem_map },
+#if TIKU_NVM_SYNC_ENABLE
+    { "sync", TIKU_VFS_FILE, mem_sync_read,  NULL, NULL, 0, &desc_mem_map },
+#endif
     { "kind", TIKU_VFS_FILE, mem_kind_read,  NULL, NULL, 0, &desc_mem_kind },
     { "free", TIKU_VFS_FILE, mem_free_read,  NULL, NULL, 0, &desc_mem_live },
     { "used", TIKU_VFS_FILE, mem_used_read,  NULL, NULL, 0, &desc_mem_live },

@@ -9,7 +9,7 @@
  *
  * Exposes the decoded reset reason, boot count, boot stage, hang culprit,
  * clock rates and MPU diagnostics.  The boot count and the lifetime uptime
- * are one persist ring, written once per boot.
+ * are one persist ring, written once per boot and at each sync point.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,6 +23,7 @@
 #include <kernel/vfs/tiku_vfs_tree.h>
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/memory/tiku_mem.h>
+#include <kernel/memory/tiku_nvm_sync.h>
 #include <kernel/cpu/tiku_common.h>   /* tiku_common_reset_reason() */
 #include <kernel/cpu/tiku_hang.h>     /* check-in watchdog culprit */
 #include <boot/tiku_boot.h>
@@ -102,8 +103,8 @@ boot_reason_read(char *buf, size_t max)
 /*
  * The boot record: the boots since the record was first written, and the
  * seconds of uptime summed over them.  It is a ring (TIKU_PERSIST_RING) of 16
- * slots where the medium spreads writes, written once per boot, so a boot
- * costs one write and the record's writes cycle through its slots.
+ * slots where the medium spreads writes, written once per boot and at each
+ * sync point, so each costs one write and the writes cycle through its slots.
  */
 typedef struct {
     uint32_t count;     /**< boots, 1 on the first */
@@ -184,11 +185,13 @@ tiku_vfs_tree_boot_last_reset_read(char *buf, size_t max)
 
 /*
  * The lifetime, rendered by /sys/cold_boots despite its name, is the boot
- * record's sum plus this run's uptime.  A read writes nothing durable: it
- * notes the lifetime in a warm record (TIKU_RETAINED), and the next boot
- * stores the noted lifetime in the boot record when a warm reset ended the
- * run.  A power cut loses the run's uptime where retained data does not
- * survive one.
+ * record's sum plus this run's uptime.  Where the kernel runs sync points
+ * (tiku_nvm_sync.h), one stores it in the boot record: at the ring's pace for
+ * TIKU_NVM_SYNC_LIFE_DAYS, before a sleep that loses SRAM and before a reset
+ * the kernel starts.  A read writes nothing durable: it notes the lifetime in
+ * a warm record (TIKU_RETAINED), which the next boot takes when the note is
+ * this boot's and above the record.  A power cut loses the uptime since the
+ * last sync, or on MSP430, whose retained data is FRAM, since the last read.
  */
 
 /** Lifetime seconds as of the start of this boot. */
@@ -234,6 +237,26 @@ tiku_vfs_tree_boot_cold_boots_read(char *buf, size_t max)
     warm_note(boot_count_value, lifetime);
     return snprintf(buf, max, "%lu\n", (unsigned long)lifetime);
 }
+
+#if TIKU_NVM_SYNC_ENABLE
+/** @brief Sync hook: store this boot's record with the lifetime so far. */
+static void
+lifetime_save(uint8_t reason)
+{
+    boot_record_t rec;
+
+    (void)reason;
+    rec.count = boot_count_value;
+    rec.lifetime = lifetime_at_boot + (uint32_t)tiku_clock_seconds();
+    (void)tiku_persist_ring_write(&boot_ring, &rec);
+    warm_note(rec.count, rec.lifetime);
+}
+
+/** The lifetime's sync hook; its interval is set at boot from the ring. */
+static tiku_nvm_sync_hook_t lifetime_hook = {
+    "lifetime", lifetime_save, 0u, 0u, NULL
+};
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* BOOT STAGE                                                                */
@@ -523,7 +546,8 @@ tiku_vfs_tree_boot_init(void)
         }
         rec.count++;
         /* Boot continues if the record cannot be saved; the older cells are
-         * retired only once it is. */
+         * retired only once it is.  The clock is not read: the record holds
+         * the lifetime as the last run left it. */
         if (tiku_persist_ring_write(&boot_ring, &rec) == TIKU_MEM_OK) {
             (void)tiku_persist_cell_retire(&boot_count_cell);
             (void)tiku_persist_cell_retire(&lifetime_cell);
@@ -532,4 +556,9 @@ tiku_vfs_tree_boot_init(void)
         lifetime_at_boot = rec.lifetime;
         warm_note(rec.count, rec.lifetime);
     }
+#if TIKU_NVM_SYNC_ENABLE
+    lifetime_hook.every_s = tiku_persist_ring_pace_s(&boot_ring,
+                                                     TIKU_NVM_SYNC_LIFE_DAYS);
+    tiku_nvm_sync_register(&lifetime_hook);
+#endif
 }

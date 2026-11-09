@@ -7,9 +7,9 @@
  *
  * tiku_vfs_tree_boot.h - /sys/boot VFS nodes and boot bookkeeping.
  *
- * Owns the boot counter and the lifetime-uptime accumulator (persist cells)
- * and the reset-cause snapshot taken at init.  Also exports three top-level
- * /sys read handlers for the /sys assembly.
+ * Owns the boot record (the boot count and the lifetime uptime, one persist
+ * ring) and the reset-cause snapshot taken at init.  Also exports three
+ * top-level /sys read handlers for the /sys assembly.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -40,9 +40,9 @@ extern const tiku_vfs_node_t tiku_vfs_tree_boot_children[];
 /**
  * @brief Capture the reset cause and write this boot's record.
  *
- * Latches the reset cause and the hang culprit (tiku_hang_boot_init()), then
- * writes the boot record once: the count one past the last boot's, and the
- * lifetime plus the uptime the last run noted when a warm reset ended it.
+ * Latches the reset cause and the hang culprit (tiku_hang_boot_init()), writes
+ * the boot record (the count one past the last boot's, the lifetime a warm
+ * note raised) and registers its sync hook where there is one.
  *
  * @note Call before any other module init in tiku_vfs_tree_init(): on MSP430
  *       reading SYSRSTIV pops the highest pending cause, so an earlier read
@@ -80,8 +80,8 @@ int tiku_vfs_tree_boot_last_reset_read(char *buf, size_t max);
  * @brief Read handler for /sys/cold_boots: the lifetime uptime in seconds.
  *
  * The seconds of uptime summed over every boot, not a boot count.  A read
- * writes no NVM: it notes the value in TIKU_RETAINED memory, which the next
- * boot adds after a warm reset; a power cut loses it except on MSP430 (FRAM).
+ * writes no NVM: it notes the value in TIKU_RETAINED memory for the next boot
+ * to take.  A sync point stores it in the boot record (tiku_nvm_sync.h).
  *
  * @param buf  Output buffer for the rendered text
  * @param max  Capacity of @p buf in bytes

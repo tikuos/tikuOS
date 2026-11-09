@@ -26,6 +26,7 @@
 #include "../timers/tiku_htimer.h"
 #include <hal/tiku_cpu.h>
 #include <kernel/cpu/tiku_hang.h>          /* check-in watchdog heartbeat */
+#include <kernel/memory/tiku_nvm_sync.h>   /* interval sync points */
 #if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
 #include <kernel/threads/tiku_thread.h>   /* worker handoff in idle */
 #endif
@@ -147,6 +148,11 @@ void tiku_sched_loop(void)
         while (tiku_sched_run_once()) {
             tiku_hang_checkin();
         }
+
+        /* Store the values whose sync interval has passed
+         * (tiku_nvm_sync.h).  Polled, not timed: an armed timer would keep
+         * the CPU out of an idle mode the tick does not wake. */
+        tiku_nvm_sync_poll();
 
         /*
          * No more events — enter idle.

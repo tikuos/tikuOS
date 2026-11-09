@@ -705,6 +705,22 @@ tiku_mem_err_t tiku_persist_ring_write(const tiku_persist_ring_t *r,
     return status;
 }
 
+uint32_t tiku_persist_ring_pace_s(const tiku_persist_ring_t *r,
+                                  uint32_t life_days)
+{
+    static const tiku_nvm_media_t media = TIKU_NVM_MEDIA_INIT;
+    uint32_t per_visit = 1u, spread = 1u;
+
+    if (r == NULL) {
+        return 0u;
+    }
+#if TIKU_DURABLE_IN_PLACE && TIKU_PERSIST_RING_SPREADS
+    per_visit = (media.unit > r->stride) ? media.unit / r->stride : 1u;
+    spread = r->slots;
+#endif
+    return tiku_nvm_pace_s(&media, per_visit, spread, life_days);
+}
+
 /** @brief Load the counter's next value and limit once, from its ring, else
  *  from the cell an older image reserved in. */
 static void counter_load(tiku_persist_counter_t *c)

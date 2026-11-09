@@ -7,9 +7,9 @@
  *
  * tiku_cache.c - write-back cache for hot NVM regions.
  *
- * Absorbs rapid read-modify-write bursts in SRAM and flushes to NVM at
- * explicit sync points, cutting both write energy and cell wear.  Unflushed
- * data is volatile, so callers choose the sync points.
+ * Absorbs rapid read-modify-write bursts in SRAM and flushes to NVM when the
+ * caller asks and at the kernel's sync points where it runs them
+ * (tiku_nvm_sync.h).  Data written since the last flush is volatile.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,6 +19,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_mem.h"
+#include "kernel/memory/tiku_nvm_sync.h"
 #include <stddef.h>
 
 /*---------------------------------------------------------------------------*/
@@ -32,6 +33,21 @@
  */
 static tiku_cached_region_t *cache_table[TIKU_CACHE_MAX_REGIONS];
 static tiku_mem_arch_size_t  cache_count;
+
+#if TIKU_NVM_SYNC_ENABLE
+/** @brief Sync hook: flush every dirty region. */
+static void cache_save(uint8_t reason)
+{
+    (void)reason;
+    (void)tiku_cache_flush_all();
+}
+
+/*
+ * The regions' sync hook, registered with the first region.  A region is one
+ * place on the medium, so its interval is the rating's own pace.
+ */
+static tiku_nvm_sync_hook_t cache_hook = { "cache", cache_save, 0u, 0u, NULL };
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* PRIVATE HELPERS                                                           */
@@ -50,6 +66,15 @@ static tiku_mem_err_t table_add(tiku_cached_region_t *region)
 
     cache_table[cache_count] = region;
     cache_count++;
+#if TIKU_NVM_SYNC_ENABLE
+    if (cache_hook.every_s == 0u) {
+        static const tiku_nvm_media_t media = TIKU_NVM_MEDIA_INIT;
+
+        cache_hook.every_s = tiku_nvm_pace_s(&media, 1u, 1u,
+                                             TIKU_NVM_SYNC_LIFE_DAYS);
+        tiku_nvm_sync_register(&cache_hook);
+    }
+#endif
 
     return TIKU_MEM_OK;
 }

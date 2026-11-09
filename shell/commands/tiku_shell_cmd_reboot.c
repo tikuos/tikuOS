@@ -7,9 +7,8 @@
  *
  * tiku_shell_cmd_reboot.c - "reboot" command implementation
  *
- * Triggers a system reset by configuring the watchdog timer in watchdog
- * mode with the shortest available interval, then spinning until the
- * hardware resets.  ESP32-C61 resets through tiku_cpu_esp32c61_restart().
+ * Runs the shutdown sync point, then resets through the watchdog at its
+ * shortest interval; the ESP32 parts reset through their restart calls.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,6 +20,7 @@
 #include "tiku_shell_cmd_reboot.h"
 #include <shell/tiku_shell.h>             /* SHELL_PRINTF */
 #include <kernel/cpu/tiku_watchdog.h>
+#include <kernel/memory/tiku_nvm_sync.h>
 #if defined(PLATFORM_RP2350)
 extern void tiku_cpu_rp2350_reboot_to_bootsel(void);
 #endif
@@ -58,6 +58,7 @@ tiku_shell_cmd_reboot(uint8_t argc, const char *argv[])
         argv[1][0] == 'b' && argv[1][1] == 'o' && argv[1][2] == 'o' &&
         argv[1][3] == 't') {
         SHELL_PRINTF("Rebooting to BOOTSEL...\n");
+        tiku_nvm_sync(TIKU_NVM_SYNC_SHUTDOWN);
         tiku_cpu_rp2350_reboot_to_bootsel();
         /* A return means the bootrom call failed; the watchdog reset
          * below runs instead. */
@@ -67,6 +68,7 @@ tiku_shell_cmd_reboot(uint8_t argc, const char *argv[])
     (void)argv;
 
     SHELL_PRINTF("Rebooting...\n");
+    tiku_nvm_sync(TIKU_NVM_SYNC_SHUTDOWN);
 
 #if defined(PLATFORM_AMBIQ)
     /* Return to a power-on-equivalent state before the reset.  A warm

@@ -1305,6 +1305,19 @@ tiku_mem_err_t tiku_persist_ring_write(const tiku_persist_ring_t *r,
                                        const void *src);
 
 /**
+ * @brief Shortest interval, in seconds, between writes of @p r that lets the
+ *        medium last @p life_days (tiku_nvm_pace_s()).
+ *
+ * Where a store programs the medium in place and the slots spread writes,
+ * a unit holding k slots takes k programs every r->slots writes; elsewhere
+ * every write programs the same units: the mirror image or the sector.
+ *
+ * @return 0 where the medium states no limit or @p r is NULL
+ */
+uint32_t tiku_persist_ring_pace_s(const tiku_persist_ring_t *r,
+                                  uint32_t life_days);
+
+/**
  * @brief A durable counter that programs once per window of values.
  *
  * It stores a reservation in a ring before it hands out values below it, so
@@ -2074,8 +2087,10 @@ tiku_mem_err_t tiku_tier_nvm_write(void *dst, const void *src,
  *
  * NVM writes cost more energy than SRAM writes and wear the medium, so
  * frequently updated data (network stack state, sensor buffers, counters)
- * is worked on in an SRAM copy and flushed to NVM only before sleep or at
- * explicit sync points.
+ * is worked on in an SRAM copy and flushed to NVM when the caller flushes
+ * and, where the kernel runs sync points (tiku_nvm_sync.h), at the medium's
+ * pace for one place, before a sleep that loses SRAM and before a reset the
+ * kernel starts.
  *
  * Usage:
  *   static tiku_cached_region_t my_cache;
@@ -2086,8 +2101,7 @@ tiku_mem_err_t tiku_tier_nvm_write(void *dst, const void *src,
  *   p->field = value;
  *   tiku_cache_flush(&my_cache);
  *
- * The flush opens and closes the NVM window itself.  Callers flush every
- * region before a sleep that loses SRAM.
+ * The flush opens and closes the NVM window itself.
  */
 
 /** Maximum number of cached regions tracked by tiku_cache_flush_all() */
@@ -2179,7 +2193,7 @@ tiku_mem_err_t tiku_cache_flush(tiku_cached_region_t *region);
  *
  * @return TIKU_MEM_OK on success, TIKU_MEM_ERR_IO when the flush at relock
  *         fails
- * @note Call before a sleep that loses SRAM.
+ * @note The kernel's sync points call it, where it runs them.
  */
 tiku_mem_err_t tiku_cache_flush_all(void);
 

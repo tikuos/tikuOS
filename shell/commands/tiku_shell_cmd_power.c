@@ -20,6 +20,7 @@
 
 #include <shell/tiku_shell_io.h>
 #include <hal/tiku_cpu.h>
+#include <kernel/memory/tiku_nvm_sync.h>
 #include "tiku_shell_cmd_sleep.h"
 /* The emmc, psram, usb and nor verbs live in their own modules; `power`
  * forwards them. */
@@ -357,6 +358,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
          * wake is a reset.  On the DK, P14 measures the VDDM rail; current
          * left in System OFF is drawn by the board or the debug domain. */
         SHELL_PRINTF("entering System OFF -- wake by RESET only\n");
+        tiku_nvm_sync(TIKU_NVM_SYNC_SLEEP);     /* System OFF loses SRAM */
         tiku_cpu_nordic_delay_ms(20u);          /* let the line drain */
         tiku_nordic_system_off();               /* does not return */
     }
@@ -472,6 +474,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
             SHELL_PRINTF("deep sleep for %lu ms -- the wake is a reset\n",
                          (unsigned long)ms);
         }
+        tiku_nvm_sync(TIKU_NVM_SYNC_SLEEP);     /* the wake is a reset */
         tiku_esp32c61_deep_sleep((uint64_t)ms * 1000ULL);
     }
     SHELL_PRINTF("Usage: power [why | off [ms] | nap <ms> [pin]]\n");
@@ -542,6 +545,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
             SHELL_PRINTF("deep sleep for %lu ms -- the wake is a reset\n",
                          (unsigned long)ms);
         }
+        tiku_nvm_sync(TIKU_NVM_SYNC_SLEEP);     /* the wake is a reset */
         tiku_c5_deep_sleep((uint64_t)ms * 1000ULL);
     }
     SHELL_PRINTF("Usage: power [why | off [ms] | nap <ms> [pin]]\n");
@@ -606,6 +610,7 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
             SHELL_PRINTF("deep sleep for %lu ms -- the wake is a reset\n",
                          (unsigned long)ms);
         }
+        tiku_nvm_sync(TIKU_NVM_SYNC_SLEEP);     /* the wake is a reset */
         tiku_p4_deep_sleep((uint64_t)ms * 1000ULL);
     }
     SHELL_PRINTF("Usage: power [why | off [ms] | nap <ms>]\n");

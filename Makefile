@@ -2584,6 +2584,7 @@ SRCS += kernel/memory/tiku_mpu.c
 SRCS += kernel/memory/tiku_persist.c
 SRCS += kernel/memory/tiku_nvm_media.c
 SRCS += kernel/memory/tiku_nvm_meter.c
+SRCS += kernel/memory/tiku_nvm_sync.c
 SRCS += kernel/memory/tiku_persist_move.c
 SRCS += kernel/memory/tiku_region.c
 SRCS += kernel/memory/tiku_tier.c

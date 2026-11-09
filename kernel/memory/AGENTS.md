@@ -99,6 +99,20 @@ the pace of one file's replaces as the store stands (`tiku_tfs_pace_s()`):
 BASIC waits that long between `PERSIST ON` checkpoints, over
 `TIKU_BASIC_CKPT_LIFE_DAYS`, and at least `TIKU_BASIC_CKPT_INTERVAL_S`.
 
+Values kept in SRAM reach NVM at sync points (`tiku_nvm_sync.h`).  Their
+owner registers a hook with an interval: the boot record stores the
+lifetime at its ring's pace (`tiku_persist_ring_pace_s()`) and the
+write-back cache flushes its regions at the pace of one place, both over
+`TIKU_NVM_SYNC_LIFE_DAYS`, twice the declared life, and no sooner than
+`TIKU_NVM_SYNC_FLOOR_S`.  The scheduler polls the hooks on each pass of its
+loop, so no timer is armed for them.  `reboot` runs every hook before the
+reset, and `power off` before System OFF or a deep sleep.  `/sys/mem/sync`
+lists the syncs, the last one's reason and each hook's interval.  Nothing
+runs the hooks when the supply fails, so a power cut loses what changed
+since the last sync.  MSP430 builds no sync points
+(`TIKU_NVM_SYNC_ENABLE` is 0 there): its retained memory is FRAM, so the
+lifetime a read notes survives a power cut.
+
 `tiku_nvm_meter.h` observes it.  Each port charges the meter where it
 programs the medium: the Nordic write HAL (one program for each 16-byte line
 outside SRAM whose bytes differ, stored through the RRAMC write buffer and
@@ -168,7 +182,8 @@ floor").  Shrink the static buffer that grew, or lower the floor on purpose.
 
 Host: `make -C TikuBench/tests/host/kernel memory-layout` (every write cut,
 recovery, replay), `persist-ring` (programs per ring write, spread over the
-slots, a cut after every byte, on four media), `tfs-wear` (the worst line
+slots, a cut after every byte, the ring's pace, on four media), `nvm-sync`
+(each hook at its own interval), `tfs-wear` (the worst line
 over a thousand `/data` replaces and creates, on three media) and the
 `memory-host` suite.  Board: the `filestore`
 sweep after a fresh flash, `filestore --only refusal,layout
