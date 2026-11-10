@@ -120,10 +120,24 @@ write-back cache flushes its regions at the pace of one place, both over
 `TIKU_NVM_SYNC_LIFE_DAYS`, twice the declared life, and no sooner than
 `TIKU_NVM_SYNC_FLOOR_S`.  The scheduler polls the hooks on each pass of its
 loop, so no timer is armed for them.  `reboot` runs every hook before the
-reset, and `power off` before System OFF or a deep sleep.  `/sys/mem/sync`
-lists the syncs, the last one's reason and each hook's interval.  Nothing
-runs the hooks when the supply fails, so a power cut loses what changed
-since the last sync.  MSP430 builds no sync points
+reset, and `power off` before System OFF or a deep sleep.
+
+A hook whose save programs at most one unit sets `on_power_fail`: the boot
+record's does, the cache's does not.  The first such hook arms the port's
+supply warning (`tiku_mem_arch_power_fail_arm()`), which runs those hooks
+from its interrupt once a boot, and not while another sync runs.  The
+nRF54L ports arm the power-fail comparator at the highest step below the
+supply (VDD from 1.7 V in 0.1 V steps; VDDL from 0.90 V in 50 mV steps on
+the nRF54LV10A).  The nRF54L15 DK arms 1.7 V and programs about eight lines
+between the warning and the loss of the supply.  While the comparator reads
+below its threshold with its event on, the nRF54L15's RRAMC refuses a write
+with a bus fault, so the warning's interrupt, at priority 0, turns the
+comparator off before it calls the hooks.  The other ports arm no warning,
+and a power cut loses what changed since the last sync; the Apollo510 EVB
+programs no MRAM line after its brown-out warning.  `/sys/mem/sync` lists
+the syncs, the last one's reason, the level the warning is armed at
+(`warning_mv`, 0 where none is) and each hook's interval, tagged
+`power-fail` where the warning runs it.  MSP430 builds no sync points
 (`TIKU_NVM_SYNC_ENABLE` is 0 there): its retained memory is FRAM, so the
 lifetime a read notes survives a power cut.
 
@@ -202,9 +216,9 @@ floor").  Shrink the static buffer that grew, or lower the floor on purpose.
 Host: `make -C TikuBench/tests/host/kernel memory-layout` (every write cut,
 recovery, replay), `persist-ring` (programs per ring write, spread over the
 slots, a cut after every byte, the ring's pace, on four media), `nvm-sync`
-(each hook at its own interval), `tfs-wear` (the worst line
-over a thousand `/data` replaces and creates, on three media) and the
-`memory-host` suite.  Board: the `filestore`
+(each hook at its own interval, the flagged ones when the supply fails),
+`tfs-wear` (the worst line over a thousand `/data` replaces and creates, on
+three media) and the `memory-host` suite.  Board: the `filestore`
 sweep after a fresh flash, `filestore --only refusal,layout
 --allow-destructive`, `linkcarve`, `persist-cells` (MSP430).  Guide:
 `TikuBench/docs/MEMORY_LAYOUT.md`.

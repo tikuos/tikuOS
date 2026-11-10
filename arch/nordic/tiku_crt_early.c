@@ -118,6 +118,8 @@ void tiku_nordic_axons_isr(void)           __attribute__((weak, alias("nordic_de
  * (289, nRF54LM20 only -- past the nRF54L15's table). */
 void tiku_nordic_usbhs_isr(void)           __attribute__((weak, alias("nordic_default_handler")));
 void tiku_nordic_vregusb_isr(void)         __attribute__((weak, alias("nordic_default_handler")));
+/* CLOCK_POWER (270): the power-fail warning, in tiku_mem_arch.c. */
+void tiku_nordic_clock_power_isr(void)     __attribute__((weak, alias("nordic_default_handler")));
 
 /*---------------------------------------------------------------------------*/
 /* Factory trim application + silicon errata (minimal SystemInit)            */
@@ -421,13 +423,15 @@ __attribute__((section(".vectors"), used)) = {
     [16 + 219 ... 16 + 225] = nordic_default_handler,
     [16 + 227 ... 16 + 259] = nordic_default_handler,
     [16 + 261 ... 16 + 267] = nordic_default_handler,
+    [16 + 269] = nordic_default_handler,
+    [16 + 270] = tiku_nordic_clock_power_isr,  /* CLOCK_POWER     = 270 */
     /* Upper bound tracks the device IRQ count (271 on nRF54L15 and
      * nRF54LV10A, 289 on the nRF54LM20A) so every remaining external slot
      * is filled. */
 #if defined(TIKU_DEVICE_NRF54LM20A) || defined(TIKU_DEVICE_NRF54LM20B)
     [16 + 289] = tiku_nordic_vregusb_isr,      /* VREGUSB_IRQn    = 289       */
-    [16 + 269 ... 16 + 288] = nordic_default_handler,
+    [16 + 271 ... 16 + 288] = nordic_default_handler,
 #else
-    [16 + 269 ... 16 + (NORDIC_NUM_EXT_IRQS - 1)] = nordic_default_handler,
+    [16 + 271 ... 16 + (NORDIC_NUM_EXT_IRQS - 1)] = nordic_default_handler,
 #endif
 };

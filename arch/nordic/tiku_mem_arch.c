@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_mem_arch.c - nRF54L memory HAL (RRAM read/write).
+ * tiku_mem_arch.c - nRF54L memory HAL (RRAM read/write, supply warning).
  *
  * RRAM is memory-mapped with no erase cycle: a read is a plain copy, and a
  * write stores each changed 16-byte line through the RRAMC write buffer
@@ -17,6 +17,8 @@
 #include <hal/tiku_mem_hal.h>
 #include <hal/tiku_mpu_hal.h>
 #include <arch/nordic/tiku_nordic_mdk.h>
+#include <arch/nordic/tiku_nordic_core.h>
+#include <arch/nordic/tiku_cpu_common.h>    /* tiku_cpu_nordic_delay_us */
 #include "kernel/memory/tiku_nvm_media.h"
 #include "kernel/memory/tiku_nvm_meter.h"
 #include <string.h>
@@ -47,6 +49,28 @@ extern uint8_t __persistent_start[];
 extern uint8_t __persistent_end[];
 extern uint32_t __sram_start;
 extern uint32_t __sram_end;
+
+/* POFCON.THRESHOLD steps: VDD from 1.7 V in steps of 0.1 V, to 3.2 V; on
+ * the nRF54LV10A, VDDL from 0.90 V in steps of 50 mV, to 1.65 V. */
+#define POF_STEPS              16u
+#if defined(REGULATORS_POFCON_THRESHOLD_V090)
+#define POF_BASE_MV            900u
+#define POF_STEP_MV            50u
+#else
+#define POF_BASE_MV            1700u
+#define POF_STEP_MV            100u
+#endif
+/* Time the comparator takes to settle at a new threshold. */
+#define POF_SETTLE_US          200u
+/* CLOCK_POWER, the IRQ of the peripheral at 0x5010E000, on every nRF54L. */
+#define POF_IRQN               270
+/* Ahead of every other interrupt: until the warning's handler turns the
+ * comparator off, RRAMC refuses a write. */
+#define POF_PRIORITY           0u
+
+/* Writes of the HAL in progress; the warning calls nothing while one is. */
+static volatile uint8_t nvm_writing;
+static void (*power_fail_fn)(void);
 
 void tiku_mem_arch_init(void)
 {
@@ -119,6 +143,7 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
     if (dst == NULL || src == NULL) {
         return;
     }
+    nvm_writing++;
     /* The HAL also writes TIKU_RETAINED data in SRAM (the shell history):
      * a plain copy that programs nothing. */
     in_rram = !((uintptr_t)dst >= (uintptr_t)&__sram_start &&
@@ -167,6 +192,7 @@ void tiku_mem_arch_nvm_write(uint8_t *dst, const uint8_t *src,
                               (cfg & RRAMC_WRITEBUF_MSK);
     }
     tiku_mpu_arch_lock_nvm(gate);           /* restore WEN */
+    nvm_writing--;
 }
 
 int tiku_mem_arch_nvm_flush_status(void)
@@ -184,4 +210,70 @@ int tiku_mem_arch_nvm_flush_status(void)
 void tiku_mem_arch_nvm_flush(void)
 {
     (void)tiku_mem_arch_nvm_flush_status();
+}
+
+/** @brief POFCON with the comparator on at threshold step @p step, its
+ *         POFWARN event on or off. */
+static uint32_t pofcon(uint32_t step, uint32_t event_off)
+{
+    return REGULATORS_POFCON_POF_Enabled |
+           (step << REGULATORS_POFCON_THRESHOLD_Pos) |
+           (event_off << REGULATORS_POFCON_EVENTDISABLE_Pos);
+}
+
+uint16_t tiku_mem_arch_power_fail_arm(void (*fn)(void))
+{
+    uint32_t step;
+
+    /* Up the steps, the event off, to the first the supply reads below. */
+    for (step = 0u; step < POF_STEPS; step++) {
+        NRF_REGULATORS_S->POFCON =
+            pofcon(step, REGULATORS_POFCON_EVENTDISABLE_Disabled);
+        tiku_cpu_nordic_delay_us(POF_SETTLE_US);
+        if ((NRF_REGULATORS_S->POFSTAT &
+             REGULATORS_POFSTAT_COMPARATOR_Msk) != 0UL) {
+            break;
+        }
+    }
+    if (step == 0u) {
+        NRF_REGULATORS_S->POFCON = 0UL;
+        return 0u;
+    }
+    step--;
+
+    /* Settled at the level below the supply before the event goes on: the
+     * comparator reads below until it settles from the step above. */
+    NRF_REGULATORS_S->POFCON =
+        pofcon(step, REGULATORS_POFCON_EVENTDISABLE_Disabled);
+    tiku_cpu_nordic_delay_us(POF_SETTLE_US);
+    power_fail_fn = fn;
+    NRF_POWER_S->EVENTS_POFWARN = 0UL;
+    NRF_REGULATORS_S->POFCON =
+        pofcon(step, REGULATORS_POFCON_EVENTDISABLE_Enabled);
+    NRF_POWER_S->INTENSET = POWER_INTENSET_POFWARN_Msk;
+    tiku_nordic_nvic_clear_pending(POF_IRQN);
+    tiku_nordic_nvic_set_priority(POF_IRQN, POF_PRIORITY);
+    tiku_nordic_nvic_enable(POF_IRQN);
+    return (uint16_t)(POF_BASE_MV + POF_STEP_MV * step);
+}
+
+/**
+ * @brief CLOCK_POWER interrupt: the first POFWARN of the boot turns the
+ *        comparator off and calls the armed function, unless it interrupted
+ *        a write of the HAL.
+ *
+ * While the comparator reads the supply below its threshold with POFWARN
+ * on, RRAMC refuses a write with a bus fault; off, it writes down to the
+ * brown-out reset, below the lowest supply the part is specified for.
+ */
+void tiku_nordic_clock_power_isr(void)
+{
+    if (NRF_POWER_S->EVENTS_POFWARN == 0UL) {
+        return;
+    }
+    NRF_REGULATORS_S->POFCON = 0UL;
+    NRF_POWER_S->EVENTS_POFWARN = 0UL;
+    if (nvm_writing == 0u && power_fail_fn != NULL) {
+        power_fail_fn();
+    }
 }

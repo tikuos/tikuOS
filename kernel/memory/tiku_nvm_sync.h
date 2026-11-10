@@ -8,8 +8,8 @@
  * tiku_nvm_sync.h - the points where values kept in SRAM reach NVM.
  *
  * An owner of such values registers a hook that stores them.  The kernel runs
- * each hook at the owner's own pace from the scheduler loop, and every hook
- * before a sleep that loses SRAM and before a reset it starts.
+ * each hook at the owner's pace, every hook before a sleep that loses SRAM
+ * and a reset it starts, and the flagged hooks on the port's supply warning.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -38,7 +38,8 @@
 #define TIKU_NVM_SYNC_INTERVAL    0u  /**< the hook's own interval has passed  */
 #define TIKU_NVM_SYNC_SLEEP       1u  /**< a sleep that loses SRAM follows     */
 #define TIKU_NVM_SYNC_SHUTDOWN    2u  /**< a reset the kernel starts follows   */
-#define TIKU_NVM_SYNC_POWER_FAIL  3u  /**< the supply is failing               */
+#define TIKU_NVM_SYNC_POWER_FAIL  3u  /**< the supply is failing; runs only the
+                                           hooks with on_power_fail set     */
 
 /*---------------------------------------------------------------------------*/
 /* PACE                                                                      */
@@ -64,8 +65,9 @@
 /**
  * @brief One owner's values and how often they may be stored.
  *
- * The owner fills `name`, `save` and `every_s` and keeps the hook for as
- * long as the kernel runs; tiku_nvm_sync_register() sets the rest.
+ * The owner fills `name`, `save`, `every_s` and `on_power_fail` and keeps
+ * the hook while the kernel runs.  A flagged save also runs in the supply
+ * warning's interrupt, where it programs at most one unit.
  */
 typedef struct tiku_nvm_sync_hook {
     const char *name;                   /**< its line in /sys/mem/sync       */
@@ -73,6 +75,7 @@ typedef struct tiku_nvm_sync_hook {
     uint32_t every_s;                   /**< seconds between interval syncs  */
     uint32_t due_s;                     /**< uptime of the next interval sync */
     struct tiku_nvm_sync_hook *next;    /**< the next registered hook        */
+    uint8_t on_power_fail;              /**< non-zero: runs on the warning   */
 } tiku_nvm_sync_hook_t;
 
 #if TIKU_NVM_SYNC_ENABLE
@@ -81,14 +84,16 @@ typedef struct tiku_nvm_sync_hook {
  * @brief Add @p h to the hooks; its first interval sync is every_s from now.
  *
  * Raises every_s to TIKU_NVM_SYNC_FLOOR_S.  A hook registered twice is
- * listed once.
+ * listed once.  The first flagged hook arms the port's supply warning, which
+ * runs the flagged hooks once a boot, unless another sync is running.
  */
 void tiku_nvm_sync_register(tiku_nvm_sync_hook_t *h);
 
 /**
- * @brief Run every hook for @p reason, oldest registration first.
+ * @brief Run every hook for @p reason, oldest registration first; for
+ *        TIKU_NVM_SYNC_POWER_FAIL only the hooks with on_power_fail set.
  *
- * Each hook's next interval sync is then every_s from now.
+ * Each hook run has its next interval sync every_s from now.
  *
  * @param reason  TIKU_NVM_SYNC_SLEEP, _SHUTDOWN or _POWER_FAIL
  */
@@ -111,6 +116,10 @@ uint32_t tiku_nvm_sync_count(void);
 
 /** @brief The reason of the last sync, or 0xFF before the first. */
 uint8_t tiku_nvm_sync_last(void);
+
+/** @brief The supply level the armed warning fires at, in mV; 0 where none
+ *         is armed. */
+uint16_t tiku_nvm_sync_warning_mv(void);
 
 /** @brief Name of a TIKU_NVM_SYNC_* reason; "none" for anything else. */
 const char *tiku_nvm_sync_reason_name(uint8_t reason);

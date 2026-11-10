@@ -46,7 +46,7 @@ static void cache_save(uint8_t reason)
  * The regions' sync hook, registered with the first region.  A region is one
  * place on the medium, so its interval is the rating's own pace.
  */
-static tiku_nvm_sync_hook_t cache_hook = { "cache", cache_save, 0u, 0u, NULL };
+static tiku_nvm_sync_hook_t cache_hook = { "cache", cache_save, 0u, 0u, NULL, 0u };
 #endif
 
 /*---------------------------------------------------------------------------*/

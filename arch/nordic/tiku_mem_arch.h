@@ -22,6 +22,12 @@
 /** @brief Natural allocation alignment (32-bit Cortex-M33 word). */
 #define TIKU_MEM_ARCH_ALIGNMENT  4U
 
+/** @brief The power-fail comparator is the supply warning: VDD at 1.7 V to
+ *         3.2 V, VDDL at 0.90 V to 1.65 V on the nRF54LV10A.  While it reads
+ *         the supply below with its event on, the nRF54L15's RRAMC refuses
+ *         a write with a bus fault; the warning's interrupt turns it off. */
+#define TIKU_MEM_ARCH_POWER_FAIL  1
+
 #ifndef TIKU_MEM_ARCH_SIZE_T_DEFINED
 #define TIKU_MEM_ARCH_SIZE_T_DEFINED
 /** @brief Memory size / length type (32-bit address space). */

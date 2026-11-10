@@ -252,9 +252,10 @@ lifetime_save(uint8_t reason)
     warm_note(rec.count, rec.lifetime);
 }
 
-/** The lifetime's sync hook; its interval is set at boot from the ring. */
+/** The lifetime's sync hook; its interval is set at boot from the ring.  It
+ *  programs one slot, so it also runs when the supply fails. */
 static tiku_nvm_sync_hook_t lifetime_hook = {
-    "lifetime", lifetime_save, 0u, 0u, NULL
+    "lifetime", lifetime_save, 0u, 0u, NULL, 1u
 };
 #endif
 

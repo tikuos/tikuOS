@@ -279,7 +279,9 @@ nvm_writes_read(char *buf, size_t max)
 #if TIKU_NVM_SYNC_ENABLE
 /**
  * @brief Read handler for /sys/mem/sync: the syncs since boot, the last
- *        one's reason, then each hook's interval in seconds a line.
+ *        one's reason, the supply warning's level in mV (0 when none is
+ *        armed), then each hook's interval in seconds a line, tagged
+ *        power-fail where the warning runs it.
  */
 static int
 mem_sync_read(char *buf, size_t max)
@@ -288,13 +290,16 @@ mem_sync_read(char *buf, size_t max)
     size_t at;
     int n;
 
-    n = snprintf(buf, max, "syncs\t%lu\nlast\t%s\n",
+    n = snprintf(buf, max, "syncs\t%lu\nlast\t%s\nwarning_mv\t%u\n",
                  (unsigned long)tiku_nvm_sync_count(),
-                 tiku_nvm_sync_reason_name(tiku_nvm_sync_last()));
+                 tiku_nvm_sync_reason_name(tiku_nvm_sync_last()),
+                 (unsigned)tiku_nvm_sync_warning_mv());
     at = (n > 0) ? (size_t)n : 0u;
     for (h = tiku_nvm_sync_hooks(); h != NULL; h = h->next) {
         n = snprintf(buf + (at < max ? at : max), at < max ? max - at : 0u,
-                     "%s\t%lu\n", h->name, (unsigned long)h->every_s);
+                     "%s\t%lu%s\n", h->name, (unsigned long)h->every_s,
+                     (h->on_power_fail && tiku_nvm_sync_warning_mv() != 0u)
+                         ? "\tpower-fail" : "");
         at += (n > 0) ? (size_t)n : 0u;
     }
     return (int)at;

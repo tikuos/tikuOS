@@ -111,6 +111,12 @@ static inline int tiku_mem_arch_in_exception(void)
 typedef uint32_t tiku_mem_arch_size_t;
 #endif
 
+#ifndef TIKU_MEM_ARCH_POWER_FAIL
+/** 1 where the port has a supply warning tiku_mem_arch_power_fail_arm()
+ *  arms; 0 here */
+#define TIKU_MEM_ARCH_POWER_FAIL  0
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* REQUIRED PLATFORM FUNCTIONS                                               */
 /*---------------------------------------------------------------------------*/
@@ -174,6 +180,22 @@ const uint8_t *tiku_mem_arch_durable(size_t *len);
  * @param len  Out: its size in bytes
  */
 uint8_t *tiku_mem_arch_durable_live(size_t *len);
+#endif
+
+#if TIKU_MEM_ARCH_POWER_FAIL
+/**
+ * @brief Arm the supply warning at the highest level below the supply, to
+ *        call @p fn from its interrupt the first time the supply falls
+ *        below it.
+ *
+ * The warning calls nothing when it interrupts a tiku_mem_arch_nvm_write():
+ * a write @p fn makes would commit the line that one has half stored.
+ *
+ * @param fn  Called once a boot, in interrupt context
+ * @return The level in mV; 0 when the supply is below every level and
+ *         nothing is armed
+ */
+uint16_t tiku_mem_arch_power_fail_arm(void (*fn)(void));
 #endif
 
 #endif /* TIKU_MEM_HAL_H_ */
