@@ -33,6 +33,11 @@ commands/               one .h/.c pair per command
    macros are `-D` globals from the Makefile, never board or device header
    macros: those depend on include order.
 
+A profile without durable storage can set `TIKU_SHELL_ALIASES_ENABLE=0`
+to omit alias lookup and expansion from the parser and disable the alias
+command. The default is 1. This switch permits a parser build without
+`tiku_shell_alias.c`.
+
 ## Adding an I/O backend
 
 1. Fill a `tiku_shell_io_t` with putc, rx_ready and getc and its flags.

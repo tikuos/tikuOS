@@ -28,6 +28,11 @@
 #ifndef TIKU_SHELL_CONFIG_H_
 #define TIKU_SHELL_CONFIG_H_
 
+/** @brief Compile durable alias lookup and expansion into the parser. */
+#ifndef TIKU_SHELL_ALIASES_ENABLE
+#define TIKU_SHELL_ALIASES_ENABLE 1
+#endif
+
 /** @defgroup TIKU_SHELL_CMDS CLI Command Flags
  * @brief Set to 1 to include a command, 0 to exclude.
  * @{
@@ -372,6 +377,10 @@
 #endif
 #ifndef TIKU_SHELL_CMD_IRQ
 #define TIKU_SHELL_CMD_IRQ     1  /**< irq     - GPIO edge interrupt -> event */
+#endif
+#if !TIKU_SHELL_ALIASES_ENABLE
+#undef TIKU_SHELL_CMD_ALIAS
+#define TIKU_SHELL_CMD_ALIAS 0
 #endif
 #ifndef TIKU_SHELL_CMD_ALIAS
 #define TIKU_SHELL_CMD_ALIAS   1  /**< alias   - Durable shell shortcuts */

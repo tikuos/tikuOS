@@ -35,6 +35,7 @@
  */
 static const tiku_shell_cmd_t *cmd_table = (void *)0;
 
+#if TIKU_SHELL_ALIASES_ENABLE
 /**
  * @brief Maximum nesting depth for alias-of-alias expansion.
  *
@@ -51,6 +52,7 @@ static const tiku_shell_cmd_t *cmd_table = (void *)0;
  * whenever no alias body is being expanded.
  */
 static uint8_t alias_depth;
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* PRIVATE HELPERS                                                           */
@@ -74,6 +76,7 @@ cli_strcmp(const char *a, const char *b)
     return (unsigned char)*a - (unsigned char)*b;
 }
 
+#if TIKU_SHELL_ALIASES_ENABLE
 /* Forward decl for mutual recursion in the alias path. */
 static void execute_one(char *line);
 
@@ -129,6 +132,7 @@ dispatch_alias_body(const char *body)
 
     alias_depth--;
 }
+#endif
 
 /**
  * @brief Tokenise one command line in place and dispatch it.
@@ -147,7 +151,9 @@ execute_one(char *line)
     uint8_t argc = 0;
     char *p = line;
     const tiku_shell_cmd_t *cmd;
+#if TIKU_SHELL_ALIASES_ENABLE
     const char *alias_body;
+#endif
 
     if (!cmd_table) {
         return;
@@ -202,6 +208,7 @@ execute_one(char *line)
         }
     }
 
+#if TIKU_SHELL_ALIASES_ENABLE
     /* ---- Fall through to the alias table ---- */
     alias_body = tiku_shell_alias_lookup(argv[0]);
     if (alias_body != (const char *)0) {
@@ -209,6 +216,7 @@ execute_one(char *line)
         return;
     }
 
+#endif
     SHELL_PRINTF("Unknown command: %s\n", argv[0]);
     SHELL_PRINTF("Type 'help' for a list of commands.\n");
 }
