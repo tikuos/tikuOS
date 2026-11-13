@@ -55,6 +55,8 @@
 #define TIKU_GPIO_PORTS(X) X(1, 8) X(2, 8) X(3, 8) X(4, 7)
 #elif defined(PLATFORM_ESP32C5)
 #define TIKU_GPIO_PORTS(X) X(1, 8) X(2, 8) X(3, 8) X(4, 5)
+#elif defined(PLATFORM_ESP32S31)
+#define TIKU_GPIO_PORTS(X) X(1, 8) X(2, 8) X(3, 8) X(4, 8) X(5, 8) X(6, 8) X(7, 8) X(8, 6)
 #elif defined(PLATFORM_ESP32P4)
 #define TIKU_GPIO_PORTS(X) X(1, 8) X(2, 8) X(3, 8) X(4, 8) X(5, 8) X(6, 8) X(7, 7)
 

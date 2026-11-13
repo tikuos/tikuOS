@@ -113,6 +113,11 @@ since the last sync.  MSP430 builds no sync points
 (`TIKU_NVM_SYNC_ENABLE` is 0 there): its retained memory is FRAM, so the
 lifetime a read notes survives a power cut.
 
+A storage-free SRAM profile may define `TIKU_NVM_MEDIA_DISABLED`. It must
+set `TIKU_MEM_NVM_ENABLE=0` and use zero program and erase geometry. Such a
+profile has no writable medium; its linker rejects persistent and retained
+sections. The S31 SRAM profiles use this descriptor.
+
 `tiku_nvm_meter.h` observes it.  Each port charges the meter where it
 programs the medium: the Nordic write HAL (one program for each 16-byte line
 outside SRAM whose bytes differ, stored through the RRAMC write buffer and

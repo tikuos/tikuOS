@@ -36,7 +36,8 @@
  * Each port's header defines TIKU_NVM_MEDIA_UNIT (bytes, a power of two),
  * TIKU_NVM_MEDIA_TEAR, TIKU_NVM_MEDIA_ENDURANCE (programs one unit is rated
  * for; 0 when the medium states no limit) and TIKU_NVM_MEDIA_ERASE (bytes
- * erased as one, 0 where a unit is rewritten in place).
+ * erased as one, 0 where a unit is rewritten in place). A storage-free
+ * profile defines TIKU_NVM_MEDIA_DISABLED with zero geometry and NVM off.
  */
 #if defined(PLATFORM_NORDIC)
 #include "arch/nordic/tiku_nvm_media_arch.h"
@@ -58,6 +59,8 @@
 #include "arch/esp32p4/tiku_nvm_media_arch.h"
 #elif defined(PLATFORM_ESP32C6)
 #include "arch/esp32c6/tiku_nvm_media_arch.h"
+#elif defined(PLATFORM_ESP32S31)
+#include "arch/esp32s31/tiku_nvm_media_arch.h"
 #elif defined(__arm__) || defined(__riscv) || defined(__MSP430__)
 #error "tiku_nvm_media: this port has no arch/<port>/tiku_nvm_media_arch.h"
 #else
@@ -69,6 +72,12 @@
 #define TIKU_NVM_MEDIA_ERASE      0u
 #endif
 
+#if defined(TIKU_NVM_MEDIA_DISABLED)
+#if !defined(TIKU_MEM_NVM_ENABLE) || TIKU_MEM_NVM_ENABLE || \
+    TIKU_NVM_MEDIA_UNIT != 0u || TIKU_NVM_MEDIA_ERASE != 0u
+#error "tiku_nvm_media: an absent medium requires NVM off and zero geometry"
+#endif
+#else
 #if (TIKU_NVM_MEDIA_UNIT < 2u) || \
     ((TIKU_NVM_MEDIA_UNIT & (TIKU_NVM_MEDIA_UNIT - 1u)) != 0u)
 #error "tiku_nvm_media: the program unit is a power of two of at least 2"
@@ -79,13 +88,15 @@
 #if (TIKU_NVM_MEDIA_ERASE % TIKU_NVM_MEDIA_UNIT) != 0u
 #error "tiku_nvm_media: the erase unit is a multiple of the program unit"
 #endif
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* WHAT DERIVES FROM THEM                                                    */
 /*---------------------------------------------------------------------------*/
 
 /** @brief Non-zero where a unit is rewritten in place, with no erase. */
-#define TIKU_NVM_MEDIA_IN_PLACE  (TIKU_NVM_MEDIA_ERASE == 0u)
+#define TIKU_NVM_MEDIA_IN_PLACE \
+    (TIKU_NVM_MEDIA_UNIT != 0u && TIKU_NVM_MEDIA_ERASE == 0u)
 
 /** @brief Writes to one place at which the wear check warns: half the
  *         rating, or 0 where the medium states no limit. */

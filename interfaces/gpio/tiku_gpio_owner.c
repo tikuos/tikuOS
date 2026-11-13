@@ -191,6 +191,11 @@ board_owner(uint8_t port, uint8_t pin)
          pin == TIKU_BOARD_CONSOLE_RX_PIN)) {
         return "console";
     }
+#elif defined(PLATFORM_ESP32S31)
+    if (IS_BANKED_PIN(port, pin, TIKU_BOARD_UART_TX_PIN) ||
+        IS_BANKED_PIN(port, pin, TIKU_BOARD_UART_RX_PIN)) {
+        return "console";
+    }
 #elif defined(PLATFORM_MSP430)
     /* The console's eUSCI pins have PxSEL set and read as "peripheral". */
 #else

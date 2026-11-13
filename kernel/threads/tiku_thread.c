@@ -25,6 +25,8 @@
 #include <arch/esp32c5/tiku_thread_arch.h>
 #elif defined(PLATFORM_ESP32P4)
 #include <arch/esp32p4/tiku_thread_arch.h>
+#elif defined(PLATFORM_ESP32S31)
+#include <arch/esp32s31/tiku_runtime_arch.h>
 #endif
 #include <hal/tiku_cpu.h>            /* tiku_atomic_enter/exit */
 #include <kernel/timers/tiku_clock.h>  /* wait deadlines */
@@ -239,6 +241,8 @@ int tiku_thread_start(tiku_thread_t *t, void (*entry)(void *), void *arg)
     tiku_c5_reent_init((uint8_t)slot);
 #elif defined(PLATFORM_ESP32P4)
     tiku_p4_reent_init((uint8_t)slot);
+#elif defined(PLATFORM_ESP32S31)
+    tiku_s31_reent_init((uint8_t)slot);
 #endif
     t->slot  = (uint8_t)slot;
     t->timed = 0;

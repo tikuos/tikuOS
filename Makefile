@@ -36,6 +36,8 @@ P4_LPCORE_ARCH := -march=rv32imac_zicsr_zifencei -mabi=ilp32
 P4_DIAGNOSTIC_BUILD := $(if $(filter esp32p4,$(MCU)),$(if $(filter firmware,$(P4_PROFILE)),,1))
 ifeq ($(MCU),esp32c6)
 include arch/esp32c6/port.mk
+else ifeq ($(MCU),esp32s31)
+include arch/esp32s31/port.mk
 else ifeq ($(P4_DIAGNOSTIC_BUILD),1)
 include arch/esp32p4/port.mk
 else

@@ -122,6 +122,9 @@
 /* ESP32-C5                                                                  */
 /*---------------------------------------------------------------------------*/
 
+#elif defined(PLATFORM_ESP32S31)
+#include <arch/esp32s31/tiku_uart_arch.h>
+#define TIKU_PRINTF(...)
 #elif defined(PLATFORM_ESP32P4)
 /* Console over the native USB Serial/JTAG port; UART0 is a second port. */
 #include <arch/esp32p4/tiku_debug_arch.h>

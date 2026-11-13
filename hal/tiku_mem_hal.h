@@ -24,7 +24,7 @@
  * @def TIKU_MEM_ARCH_IN_EXCEPTION()
  * @brief Non-zero while an interrupt or exception handler runs.
  *
- * Cortex-M reads IPSR, C61/C5 read the CLIC level, and P4 reads its IRQ
+ * Cortex-M reads IPSR, C61/C5 read the CLIC level, and P4/S31 read their IRQ
  * dispatch state. MSP430 and host builds report 0.
  * @note A host test may define the macro first to supply its own check.
  */
@@ -41,6 +41,9 @@ static inline int tiku_mem_arch_in_exception(void)
 #elif defined(PLATFORM_ESP32C6)
 extern volatile uint8_t tiku_c6_in_trap;
 #define TIKU_MEM_ARCH_IN_EXCEPTION() (tiku_c6_in_trap!=0)
+#elif defined(PLATFORM_ESP32S31)
+extern volatile uint8_t tiku_s31_in_trap;
+#define TIKU_MEM_ARCH_IN_EXCEPTION() (tiku_s31_in_trap != 0)
 #elif defined(PLATFORM_ESP32P4)
 #include "arch/esp32p4/tiku_irq_arch.h"
 #define TIKU_MEM_ARCH_IN_EXCEPTION() tiku_p4_in_isr()
