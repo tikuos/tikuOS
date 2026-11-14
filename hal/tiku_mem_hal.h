@@ -92,6 +92,8 @@ static inline int tiku_mem_arch_in_exception(void)
 #include "arch/esp32c5/tiku_mem_arch.h"
 #elif defined(PLATFORM_ESP32P4)
 #include "arch/esp32p4/tiku_mem_arch.h"
+#elif defined(PLATFORM_ESP32S31)
+#include "arch/esp32s31/tiku_mem_arch.h"
 #endif
 
 /*---------------------------------------------------------------------------*/

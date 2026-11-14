@@ -200,12 +200,13 @@ failed:
 uint32_t tiku_s31_psram_size(void) { return capacity; }
 unsigned tiku_s31_psram_stage(void) { return stage; }
 
-int tiku_s31_psram_sync(void *address, uint32_t length, uint8_t invalidate)
+/** @brief Apply a cache command to an owned span, with a bounded completion wait. */
+static int cache_command(void *address, uint32_t length, unsigned command)
 {
     uintptr_t start = (uintptr_t)address;
     uint32_t irq;
     int result = 0;
-    if (!capacity || tiku_s31_in_trap || invalidate > 1 ||
+    if (!capacity || tiku_s31_in_trap ||
         !length || (start & 63u) || (length & 63u) ||
         start < TIKU_S31_PSRAM_BASE || start >= TIKU_S31_PSRAM_BASE + capacity ||
         length > TIKU_S31_PSRAM_BASE + capacity - start) return -1;
@@ -213,14 +214,24 @@ int tiku_s31_psram_sync(void *address, uint32_t length, uint8_t invalidate)
     REG(SYNC + 4) = 16;
     REG(SYNC + 8) = (uint32_t)start;
     REG(SYNC + 12) = length;
-    /* The S31 writeback operation requires two completed commands. */
-    for (unsigned pass = 0; pass < 2; pass++) {
-        REG(SYNC) = invalidate ? 8u : 4u;
+    /* S31 writeback requires two commands; invalidation requires one. */
+    for (unsigned pass = 0; pass < (command == 1 ? 1u : 2u); pass++) {
+        REG(SYNC) = command;
         if (wait_bits(SYNC, 16u, 16u)) { capacity = 0; result = -1; break; }
     }
     __asm__ volatile ("fence iorw,iorw" ::: "memory");
     if (irq & 8u) __asm__ volatile ("csrsi mstatus,8" ::: "memory");
     return result;
+}
+
+int tiku_s31_psram_sync(void *address, uint32_t length, uint8_t invalidate)
+{
+    return invalidate > 1 ? -1 : cache_command(address, length, invalidate ? 8u : 4u);
+}
+
+int tiku_s31_psram_invalidate(void *address, uint32_t length)
+{
+    return cache_command(address, length, 1);
 }
 
 #ifdef TIKU_S31_PSRAM_TEST

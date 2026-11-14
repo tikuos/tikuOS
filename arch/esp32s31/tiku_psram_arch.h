@@ -33,6 +33,13 @@ unsigned tiku_s31_psram_stage(void);
  * A timeout marks the backend unavailable; reset before further PSRAM use.
  */
 int tiku_s31_psram_sync(void *address, uint32_t length, uint8_t invalidate);
+/**
+ * @brief Discard owned cache lines after a DMA write; return zero on success.
+ * @note The span obeys sync's alignment, bounds and context rules. The caller
+ * writes back and invalidates before DMA, then excludes CPU writes until this
+ * operation completes. Dirty CPU data in the span is discarded.
+ */
+int tiku_s31_psram_invalidate(void *address, uint32_t length);
 #ifdef TIKU_S31_PSRAM_TEST
 /**
  * @brief Read 64 physical bytes into aligned SRAM without cache writeback.

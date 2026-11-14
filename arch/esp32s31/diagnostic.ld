@@ -29,6 +29,8 @@ SECTIONS
         __bss_end = .;
     } > SRAM
     __stack = ORIGIN(SRAM) + LENGTH(SRAM);
+    __tier_sram_start = ALIGN(__bss_end, 64);
+    __tier_sram_end = __stack - 4096;
     ASSERT(__bss_end <= __stack - 4096, "S31 diagnostic overlaps stack")
     .forbidden (NOLOAD) : {
         *(.persistent .persistent.* .retained .retained.*)
