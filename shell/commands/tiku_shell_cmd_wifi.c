@@ -90,6 +90,11 @@ static void wifi_help(void)
 #if TIKU_DRV_WIFI_IPC_ENABLE
     SHELL_PRINTF("wifi dual on|off         Select simultaneous station/AP mode while idle\n");
     SHELL_PRINTF("wifi route on|off|status Control AP IPv4 forwarding\n");
+#endif
+#if TIKU_DRV_WIFI_IPC_ENABLE || TIKU_ESP_PROFILE_ENABLE
+#if TIKU_ESP_PROFILE_ENABLE
+    SHELL_PRINTF("wifi save stops the radio; unlock requires radio off\n");
+#endif
     SHELL_PRINTF("wifi save PASSPHRASE     Encrypt active profiles (12..128 bytes)\n");
     SHELL_PRINTF("wifi unlock PASSPHRASE   Unlock saved profiles after reboot\n");
     SHELL_PRINTF("wifi saved               Show saved SSID and storage result\n");
@@ -373,7 +378,7 @@ static void wifi_ap(uint8_t argc, const char *argv[])
     SHELL_PRINTF("wifi: AP request %s (rc=%d)\n", r ? "failed" : "queued", r);
 }
 #endif
-#if TIKU_DRV_WIFI_IPC_ENABLE
+#if TIKU_DRV_WIFI_IPC_ENABLE || TIKU_ESP_PROFILE_ENABLE
 /** @brief Print the saved profile without its passphrase. */
 static void wifi_saved(void)
 {
@@ -415,6 +420,8 @@ tiku_shell_cmd_wifi(uint8_t argc, const char *argv[])
         return;
     }
 #endif
+#endif
+#if TIKU_DRV_WIFI_IPC_ENABLE || TIKU_ESP_PROFILE_ENABLE
     if ((str_eq(argv[1], "save") || str_eq(argv[1], "unlock")) && argc == 3) {
         int r = str_eq(argv[1], "save") ? tiku_wireless_save_encrypted(argv[2]) :
                 tiku_wireless_unlock_profile(argv[2]);

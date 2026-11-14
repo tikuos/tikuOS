@@ -46,6 +46,11 @@ static volatile uint32_t ticks, timer_irqs;
 static uint64_t deadline, seconds_epoch, tick_epoch;
 static unsigned long seconds_base;
 static uint32_t saved_ie[2];
+static struct {
+    void (*handler)(void);
+    uint32_t route, deliveries;
+    uint16_t source;
+} peripheral_irqs[12];
 extern char __global_pointer$;
 extern uint32_t *tiku_thread_switch(uint32_t *frame);
 
@@ -216,6 +221,11 @@ static uint32_t *dispatch(uint32_t *frame)
         tiku_htimer_run_next();
         return frame;
     }
+    if (id >= 20 && id < 32 && peripheral_irqs[id - 20].handler) {
+        peripheral_irqs[id - 20].deliveries++;
+        peripheral_irqs[id - 20].handler();
+        return frame;
+    }
     tiku_s31_report("irq", id);
     tiku_s31_fatal("unclaimed interrupt");
 }
@@ -313,6 +323,81 @@ void tiku_clock_arch_init(void)
 
 tiku_clock_arch_time_t tiku_clock_arch_time(void) { return ticks; }
 uint32_t tiku_s31_timer_interrupts(void) { return timer_irqs; }
+
+int tiku_s31_irq_claim(unsigned line, unsigned source, unsigned priority,
+                       void (*handler)(void))
+{
+    if (tiku_s31_in_trap || line < 20 || line >= 32 ||
+        source >= 169 || source == 9 || source == 33 || source == 34 ||
+        priority < 1 || priority > 7 || !handler) return -1;
+    uint32_t state = irq_save();
+    for (unsigned i = 0; i < 12; i++) {
+        if (peripheral_irqs[i].handler &&
+            (i == line - 20 || peripheral_irqs[i].source == source)) {
+            irq_restore(state); return -1;
+        }
+    }
+    unsigned slot = line - 20;
+    peripheral_irqs[slot].route = REG(0x20585000u + 4u * source);
+    peripheral_irqs[slot].source = source;
+    peripheral_irqs[slot].handler = handler;
+    REG(CLIC(line)) = ((priority * 32u + 31u) << 24) | 0xc00000u;
+    REG(0x20585000u + 4u * source) = line;
+    irq_restore(state);
+    return 0;
+}
+
+uint32_t tiku_s31_irq_deliveries(unsigned line)
+{
+    return line >= 20 && line < 32 ? peripheral_irqs[line - 20].deliveries : 0;
+}
+
+int tiku_s31_irq_enable(unsigned line, int enable)
+{
+    if (line < 20 || line >= 32 || (enable != 0 && enable != 1)) return -1;
+    uint32_t state = irq_save();
+    if (!peripheral_irqs[line - 20].handler) { irq_restore(state); return -1; }
+    REG(CLIC(line)) = (REG(CLIC(line)) & ~256u) | ((unsigned)enable << 8);
+    irq_restore(state);
+    return 0;
+}
+
+int tiku_s31_driver_alarm(uint64_t at, int enable)
+{
+    uint32_t state = irq_save();
+    unsigned i;
+    for (i = 0; i < 12; i++)
+        if (peripheral_irqs[i].handler && peripheral_irqs[i].source == 35) break;
+    if (i == 12 || (enable != 0 && enable != 1)) { irq_restore(state); return -1; }
+    REG(TIMER) &= ~(1u << 22);
+    REG(TIMER + 0x64u) &= ~4u;
+    REG(TIMER + 0x6cu) = 4u;
+    if (enable) {
+        uint64_t now = tiku_s31_time();
+        int64_t delta = (int64_t)((at - now) << 12) >> 12;
+        if (delta < 64) at = now + 64;
+        REG(TIMER + 0x3cu) = 0;
+        REG(TIMER + 0x64u) |= 4u;
+        alarm_arm(2, at & COUNTER_MASK);
+    }
+    irq_restore(state);
+    return 0;
+}
+
+int tiku_s31_irq_release(unsigned line, void (*handler)(void))
+{
+    if (tiku_s31_in_trap ||
+        line < 20 || line >= 32 || !handler) return -1;
+    uint32_t state = irq_save();
+    unsigned slot = line - 20;
+    if (peripheral_irqs[slot].handler != handler) { irq_restore(state); return -1; }
+    if (peripheral_irqs[slot].source == 35) (void)tiku_s31_driver_alarm(0, 0);
+    REG(CLIC(line)) &= ~256u;
+    REG(0x20585000u + 4u * peripheral_irqs[slot].source) = peripheral_irqs[slot].route;
+    memset(&peripheral_irqs[slot], 0, sizeof peripheral_irqs[slot]);
+    irq_restore(state);
+    return 0;
+}
 unsigned long tiku_clock_arch_seconds(void)
 {
     uint32_t state = irq_save();

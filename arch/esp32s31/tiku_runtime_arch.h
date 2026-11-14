@@ -39,5 +39,19 @@ void tiku_s31_fatal(const char *reason) __attribute__((noreturn));
 uint32_t tiku_s31_timer_interrupts(void);
 /** @brief Verify FPU register and control preservation across an ECALL. */
 uint32_t tiku_s31_fpu_probe(void);
+/** @brief Claim CPU0 line 20..31 and a source 0..168; return -1 on conflict.
+ * Calls require CPU0 thread context. Lines start disabled. The handler runs
+ * with machine interrupts masked and must acknowledge its peripheral.
+ */
+int tiku_s31_irq_claim(unsigned line, unsigned source, unsigned priority,
+                       void (*handler)(void));
+/** @brief Count handler entries since a line was claimed; invalid lines return zero. */
+uint32_t tiku_s31_irq_deliveries(unsigned line);
+/** @brief Enable a claimed line, or disable it; return -1 for an unowned line. */
+int tiku_s31_irq_enable(unsigned line, int enable);
+/** @brief Release a matching claim and restore its matrix route; return -1 on mismatch. */
+int tiku_s31_irq_release(unsigned line, void (*handler)(void));
+/** @brief Arm SYSTIMER comparator 2, owned through source 35; return -1 without a claim. */
+int tiku_s31_driver_alarm(uint64_t deadline, int enable);
 #endif
 #endif
