@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_psram_arch.c - Korvo octal PSRAM at 20 MHz from the 40 MHz crystal.
+ * tiku_psram_arch.c - Korvo octal PSRAM clocks, mapping and cache ownership.
  *
  * Register sequencing follows ESP-IDF 4d59230 AP octal, MSPI, PMA and cache.
  *
@@ -60,6 +60,41 @@ static int wait_bits(uint32_t address, uint32_t mask, uint32_t expected)
             break;
     }
     return -1;
+}
+
+#ifndef TIKU_S31_PSRAM_MHZ
+#define TIKU_S31_PSRAM_MHZ 20
+#endif
+#if TIKU_S31_PSRAM_MHZ != 20 && TIKU_S31_PSRAM_MHZ != 40 && TIKU_S31_PSRAM_MHZ != 80
+#error Unsupported S31 PSRAM clock
+#endif
+
+/** @brief Configure the mapped clock and retain 20 MHz PIO commands. */
+static int memory_clock(void)
+{
+#if TIKU_S31_PSRAM_MHZ != 20
+    uint32_t modem = REG(0x205871e0u);
+    field(0x205871e0u, 0x3fu, 0x25u);
+    uint32_t analog = REG(0x2010f018u);
+    REG(0x2010f018u) |= 4u;
+    REG(0x207040f4u) |= (1u << 23) | (1u << 27) | (1u << 19);
+    REG(0x20589000u) |= 1u << 29;
+    REG(0x2070401cu) |= (1u << 23) | (1u << 27);
+    field(0x2070104cu, 0xfffu, 0x81u);
+    REG(0x20587174u) &= ~8u;
+    int result = wait_bits(0x20587174u, 4u, 4u);
+    tiku_clock_arch_delay(10);
+    REG(0x20587174u) |= 8u;
+    REG(0x2010f018u) = analog;
+    REG(0x205871e0u) = modem;
+    if (result) return -1;
+    unsigned pio_div = TIKU_S31_PSRAM_MHZ / 10;
+    REG(PIO + 0x14) = ((pio_div - 1) << 16) |
+                     ((pio_div / 2 - 1) << 8) | (pio_div - 1);
+    field(CLOCK, (3u << 5) | (255u << 9),
+          (2u << 5) | ((160u / TIKU_S31_PSRAM_MHZ - 1) << 9));
+#endif
+    return 0;
 }
 
 /** @brief Transfer one 2..64-byte octal command while CPU mapping is closed. */
@@ -165,6 +200,7 @@ int tiku_s31_psram_init(void)
         transfer(0, 0, 18, received, 64, 0)) return -1;
     for (unsigned i = 0; i < 16; i++) if (pattern[i] != received[i]) return -1;
     stage = 3;
+    if (memory_clock()) return -1;
     ((uint32_t (*)(void))0x2f8006b4u)();
     if (mapping() || ((int (*)(unsigned, uint32_t, uint32_t))0x2f8005e8u)
         (16, TIKU_S31_PSRAM_BASE, TIKU_S31_PSRAM_BYTES)) goto failed;

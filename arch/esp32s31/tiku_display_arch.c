@@ -21,6 +21,10 @@
 #include "tiku_psram_arch.h"
 #include "tiku_runtime_arch.h"
 
+#if TIKU_S31_PSRAM_MHZ != 80
+#error S31 RGB scanout requires the qualified 80 MHz PSRAM clock
+#endif
+
 #define REG(a) (*(volatile uint32_t *)(uintptr_t)(a))
 #define LCD 0x20396000u
 #define DMA 0x20348000u
@@ -52,7 +56,7 @@ static tiku_display_t *active;
 static tiku_s31_display_stats_t counters;
 static unsigned claimed, hardware, shown_ring, paired, faulted;
 static void *shown_buffer;
-static uint32_t last_eof;
+static unsigned link_switched;
 static int context(void);
 static void halt(void);
 static int start(void);
@@ -95,7 +99,7 @@ int tiku_s31_display_poll(tiku_s31_display_stats_t *stats)
     uint32_t lcd = REG(LCD + 0x68), dma = REG(DMA + 0x138);
     counters.vsync += (lcd & 1u) != 0;
     counters.eof += (dma & 2u) != 0;
-    if (dma & 2u) last_eof = REG(DMA + 0x164);
+    if (dma & (1u << 10)) link_switched = 1;
     counters.underruns += (lcd & 16u) != 0;
     counters.dma_errors |= dma & 0x3f4u;
     REG(LCD + 0x70) = lcd & 0x13u;
@@ -191,14 +195,14 @@ static void make_ring(unsigned ring, void *buffer)
     descriptors[ring][COUNT - 1].control |= 1u << 30;
 }
 
-/** @brief Publish non-scanning cache lines in 256-byte batches and poll scanout. */
+/** @brief Publish non-scanning cache lines in 4096-byte batches and poll scanout. */
 static int publish(void *buffer, unsigned offset, unsigned bytes)
 {
     uintptr_t a = (uintptr_t)buffer + offset;
     unsigned count = (bytes + (a & 63u) + 63u) & ~63u;
     a &= ~(uintptr_t)63u;
     while (count) {
-        unsigned n = count > 256 ? 256 : count;
+        unsigned n = count > 4096 ? 4096 : count;
         if (tiku_s31_psram_sync((void *)a, n, 0) || tiku_s31_display_poll(NULL)) {
             halt(); faulted = 1;
             return TIKU_DISPLAY_ERR_STATE;
@@ -262,8 +266,8 @@ int tiku_display_arch_init(tiku_display_t *d)
     REG(DMA + 0x14c) = 1u << 12;
     REG(DMA + 0x17c) = 0;
     REG(0x20587154u) = 4u;
-    /* 40 MHz crystal / 8 = 5 MHz PCLK; LCD core runs at 40 MHz. */
-    REG(0x20587150u) = 4u | (7u << 3);
+    /* 40 MHz crystal / 2.5 = 16 MHz PCLK; LCD core runs at 40 MHz. */
+    REG(0x20587150u) = 4u | (1u << 3) | (1u << 11) | (2u << 19);
     REG(0x2058714cu) = 15u; REG(0x2058714cu) = 5u;
     hardware = 1;
     REG(0x20586264u) = 8u;
@@ -317,9 +321,27 @@ int tiku_display_arch_fill_rect(tiku_display_t *d, uint16_t x, uint16_t y,
     if (!writable(d)) return TIKU_DISPLAY_ERR_STATE;
     if (x > 800 || y > 480 || w > 800 - x || h > 480 - y) return TIKU_DISPLAY_ERR_INVALID;
     uint16_t c = ((colour >> 8) & 0xf800u) | ((colour >> 5) & 0x7e0u) | ((colour >> 3) & 31u);
+    if (x == 0 && w == 800 && h) {
+        if (tiku_s31_dma_fill((uint8_t *)d->fb + y * 1600u,
+                              c | ((uint32_t)c << 16), h * 1600u)) {
+            halt(); faulted = 1;
+            return TIKU_DISPLAY_ERR_STATE;
+        }
+        return 0;
+    }
     for (unsigned row = y; row < y + h; row++) {
         uint16_t *p = (uint16_t *)d->fb + row * 800u + x;
-        for (unsigned col = 0; col < w; col++) p[col] = c;
+        unsigned n = w;
+        if (((uintptr_t)p & 3u) && n) { *p++ = c; n--; }
+        uint32_t pair = c | ((uint32_t)c << 16);
+        uint32_t *words = (uint32_t *)p;
+        while (n >= 16) {
+            words[0] = pair; words[1] = pair; words[2] = pair; words[3] = pair;
+            words[4] = pair; words[5] = pair; words[6] = pair; words[7] = pair;
+            words += 8; n -= 16;
+        }
+        while (n >= 2) { *words++ = pair; n -= 2; }
+        if (n) *(uint16_t *)words = c;
     }
     return 0;
 }
@@ -355,8 +377,8 @@ int tiku_display_arch_set_scanout(tiku_display_t *d, void *fb)
     unsigned next = shown_ring ^ 1u;
     make_ring(next, fb);
     (void)tiku_s31_display_poll(NULL);
-    last_eof = 0;
-    REG(DMA + 0x144) = 2u;
+    link_switched = 0;
+    REG(DMA + 0x144) = 1u << 10;
     __asm__ volatile ("fence iorw,iorw" ::: "memory");
 #ifdef TIKU_S31_DISPLAY_TEST
     unsigned skip = fault == 3;
@@ -366,10 +388,13 @@ int tiku_display_arch_set_scanout(tiku_display_t *d, void *fb)
         descriptors[shown_ring][COUNT - 1].next = (uint32_t)(uintptr_t)descriptors[next];
     __asm__ volatile ("fence iorw,iorw" ::: "memory");
     uint64_t begin = tiku_s31_time();
-    uint32_t expected = (uint32_t)(uintptr_t)&descriptors[next][COUNT - 1];
+    REG(DMA + 0x2dc) |= 1u;
+    uint32_t expected = (uint32_t)(uintptr_t)descriptors[next];
     while (tiku_s31_time() - begin < 8000000u) {
         if (tiku_s31_display_poll(NULL)) break;
-        if (last_eof == expected) {
+        uint32_t current = REG(DMA + 0x16c);
+        if (link_switched && current >= expected &&
+            current < expected + sizeof(descriptors[next])) {
             shown_ring = next; shown_buffer = fb; paired = 1;
             return 0;
         }

@@ -33,6 +33,7 @@ _Static_assert(sizeof(descriptor_t) == 12, "AHB DMA descriptor size");
 static volatile descriptor_t rx[RING] __attribute__((aligned(64)));
 static volatile descriptor_t tx[RING] __attribute__((aligned(64)));
 static uint8_t ready, busy;
+static uint32_t fill_pattern[CHUNK / 4] __attribute__((aligned(64)));
 #ifdef TIKU_S31_MEMORY_TEST
 static unsigned fault;
 void tiku_s31_dma_test_fault(unsigned mode) { fault = mode; }
@@ -97,7 +98,7 @@ static int initialize(void)
 }
 
 /** @brief Transfer one descriptor batch with a 100 ms deadline and poll bound. */
-static int batch(void *destination, const void *source, uint32_t bytes)
+static int batch(void *destination, const void *source, uint32_t bytes, int repeat)
 {
     unsigned count = 0;
     uintptr_t dst = (uintptr_t)destination, src = (uintptr_t)source;
@@ -107,7 +108,8 @@ static int batch(void *destination, const void *source, uint32_t bytes)
         bytes -= n;
         rx[count] = (descriptor_t){n | OWNER, dst, (uint32_t)(uintptr_t)&rx[count + 1]};
         tx[count] = (descriptor_t){n | (n << 12) | OWNER, src, (uint32_t)(uintptr_t)&tx[count + 1]};
-        src += n; dst += n; count++;
+        if (!repeat) src += n;
+        dst += n; count++;
     } while (bytes);
     rx[count - 1].next = tx[count - 1].next = 0;
     tx[count - 1].control |= EOF_BIT;
@@ -150,26 +152,28 @@ static int batch(void *destination, const void *source, uint32_t bytes)
     return TIKU_S31_DMA_TIMEOUT;
 }
 
-int tiku_s31_dma_copy(void *destination, const void *source, uint32_t bytes)
+/** @brief Copy or repeat an SRAM pattern while holding pair zero. */
+static int transfer(void *destination, const void *source, uint32_t bytes, int repeat)
 {
     uintptr_t dst = (uintptr_t)destination, src = (uintptr_t)source;
-    unsigned dt = reachable(dst, bytes), st = reachable(src, bytes);
+    unsigned dt = reachable(dst, bytes), st = reachable(src, repeat ? CHUNK : bytes);
     int result = 0;
     if (tiku_s31_in_trap || !tiku_thread_in_kernel() || !dt || !st ||
-        (dst >= src ? dst - src < bytes : src - dst < bytes)) return TIKU_S31_DMA_INVALID;
-    if (busy) return TIKU_S31_DMA_BUSY;
-    busy = 1;
+        (dst < src + (repeat ? CHUNK : bytes) && src < dst + bytes)) return TIKU_S31_DMA_INVALID;
+
     result = initialize();
     if (result) goto done;
     if ((st == 2 && tiku_s31_psram_sync((void *)source, bytes, 0)) ||
-        (dt == 2 && tiku_s31_psram_sync(destination, bytes, 1))) {
+        (dt == 2 && (repeat ? tiku_s31_psram_invalidate(destination, bytes) :
+                    tiku_s31_psram_sync(destination, bytes, 1)))) {
         result = TIKU_S31_DMA_IO;
         goto done;
     }
     for (uint32_t offset = 0; offset < bytes;) {
         uint32_t n = bytes - offset;
         if (n > CHUNK * RING) n = CHUNK * RING;
-        result = batch((void *)(dst + offset), (const void *)(src + offset), n);
+        result = batch((void *)(dst + offset),
+                       (const void *)(src + (repeat ? 0 : offset)), n, repeat);
         if (result) break;
         offset += n;
     }
@@ -179,6 +183,27 @@ done:
 #ifdef TIKU_S31_MEMORY_TEST
     fault = 0;
 #endif
+    return result;
+}
+
+int tiku_s31_dma_copy(void *destination, const void *source, uint32_t bytes)
+{
+    if (tiku_s31_in_trap || !tiku_thread_in_kernel()) return TIKU_S31_DMA_INVALID;
+    if (busy) return TIKU_S31_DMA_BUSY;
+    busy = 1;
+    int result = transfer(destination, source, bytes, 0);
+    busy = 0;
+    return result;
+}
+
+int tiku_s31_dma_fill(void *destination, uint32_t value, uint32_t bytes)
+{
+    if (tiku_s31_in_trap || !tiku_thread_in_kernel() ||
+        !reachable((uintptr_t)destination, bytes)) return TIKU_S31_DMA_INVALID;
+    if (busy) return TIKU_S31_DMA_BUSY;
+    busy = 1;
+    for (unsigned i = 0; i < CHUNK / 4; i++) fill_pattern[i] = value;
+    int result = transfer(destination, fill_pattern, bytes, 1);
     busy = 0;
     return result;
 }

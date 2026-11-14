@@ -141,7 +141,7 @@ def check_memory_result(data, elapsed=None):
     """Require allocator placement, four DMA directions and fault recovery."""
     del elapsed
     required = (b"TIKU S31 memory test v1\r\n", b"psram_bytes=0x01000000\r\n",
-                b"memory_errors=0x00000000\r\n", b"dma_cases=0x00000038\r\n",
+                b"memory_errors=0x00000000\r\n", b"dma_fill_cases=0x0000000e\r\n", b"dma_cases=0x00000038\r\n",
                 b"dma_context_refusals=0x00000002\r\n", b"dma_sustained_frames=0x00000020\r\n",
                 b"dma_error_recovery=0x00000001\r\n", b"dma_timeout_recovery=0x00000001\r\n",
                 b"PASS S31 memory\r\n")
@@ -155,24 +155,28 @@ def check_display_result(data, elapsed=None, soak_seconds=0):
     if not 0 <= soak_seconds <= 1800:
         return False
     if b"FAIL" in data or any(data.count(marker) != 1 for marker in
-            (b"TIKU S31 display test v1\r\n", b"PASS S31 display\r\n")):
+            (b"TIKU S31 display test v2\r\n", b"PASS S31 display\r\n")):
         return False
     fixed = {b"lcd_underruns": 0, b"lcd_dma_errors": 0, b"lcd_touch_errors": 0,
-             b"lcd_updates": 8, b"lcd_refusals": 5, b"lcd_context_refusals": 2,
+             b"lcd_updates": 8, b"lcd_rectangle_cases": 19, b"lcd_refusals": 5, b"lcd_context_refusals": 2,
              b"lcd_fault_recovery": 1, b"display_errors": 0, b"lcd_pair_refusals": 5,
              b"lcd_flip_pad_errors": 0, b"lcd_flip_timeout": 1,
              b"lcd_flip_underruns": 0, b"lcd_flip_dma_errors": 0,
              b"lcd_soak_requested": soak_seconds}
     limits = [(name, value, value) for name, value in fixed.items()]
-    limits += [(b"lcd_vsync", 95, 110), (b"lcd_eof", 95, 110),
+    limits += [(b"lcd_vsync", 310, 325), (b"lcd_eof", 310, 325),
                (b"lcd_timer_ticks", 1270, 1290), (b"lcd_touch_polls", 990, 1010),
-               (b"lcd_pad_edges", 190, 205),
-               (b"lcd_flips", max(16, soak_seconds * 2), max(16, soak_seconds * 10)),
-               (b"lcd_flip_frames", max(16, soak_seconds * 9), max(100, soak_seconds * 11 + 50)),
-               (b"lcd_flip_period_min_us", 98000, 106000),
-               (b"lcd_flip_period_max_us", 98000, 106000),
-               (b"lcd_flip_us_max", 1, 500000),
-               (b"lcd_soak_seconds", max(1, soak_seconds), max(10, soak_seconds + 5))]
+               (b"lcd_pad_edges", 625, 635),
+               (b"lcd_flips", max(16, soak_seconds * 30), max(16, soak_seconds * 32 + 16)),
+               (b"lcd_flip_frames", max(14, soak_seconds * 30), max(32, soak_seconds * 32 + 50)),
+               (b"lcd_flip_period_min_us", 30000, 33500),
+               (b"lcd_flip_period_max_us", 30000, 33500),
+               (b"lcd_flip_us_max", 1, 40000),
+               (b"lcd_flip_us_mean", 1, 22000),
+               (b"lcd_draw_us_max", 1, 25000),
+               (b"lcd_draw_us_mean", 1, 20000),
+               (b"lcd_redraw_us_mean", 1, 33333),
+               (b"lcd_soak_seconds", soak_seconds, soak_seconds + 2)]
     for name, low, high in limits:
         values = re.findall(rb"(?:^|\r\n)" + name + rb"=0x([0-9a-f]{8})\r\n", data)
         if len(values) != 1 or not low <= int(values[0], 16) <= high:

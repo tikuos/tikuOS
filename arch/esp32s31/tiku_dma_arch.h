@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_dma_arch.h - S31 bounded memory copies on AHB DMA pair zero.
+ * tiku_dma_arch.h - S31 bounded memory copies and fills on AHB DMA pair zero.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -29,8 +29,15 @@
  * stop the engine halts the CPU, preventing reuse of memory it may still own.
  */
 int tiku_s31_dma_copy(void *destination, const void *source, uint32_t bytes);
+/**
+ * @brief Fill owned 64-byte lines with a repeated 32-bit word using AHB DMA.
+ * @note Destination, context, ownership and failure rules match tiku_s31_dma_copy.
+ * The destination cache lines are discarded before the complete overwrite.
+ * @return Zero on completion, negative on refusal, DMA error or timeout.
+ */
+int tiku_s31_dma_fill(void *destination, uint32_t value, uint32_t bytes);
 #ifdef TIKU_S31_MEMORY_TEST
-/** @brief Corrupt ownership (1) or suppress start (2) of the next test copy. */
+/** @brief Corrupt ownership (1) or suppress start (2) of the next test transfer. */
 void tiku_s31_dma_test_fault(unsigned mode);
 #endif
 #endif

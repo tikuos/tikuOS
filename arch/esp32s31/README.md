@@ -126,7 +126,12 @@ qualification.
 ## PSRAM ownership
 
 The PSRAM backend initializes the Korvo's AP octal 16 MiB device with its
-1.8 V supply and a 20 MHz bus derived from the 40 MHz crystal. It verifies
+1.8 V supply. `S31_PSRAM_MHZ` selects a 20, 40 or 80 MHz bus. Display
+profiles select 80 MHz; other profiles default to 20 MHz. The 20 MHz setting
+uses the 40 MHz crystal. The 40/80 MHz settings calibrate the 320 MHz CPLL
+and divide it for the mapped controller; PIO commands remain at 20 MHz.
+CPU, system and APB clocks remain at 40 MHz. CPLL configuration belongs to
+boot initialization and must not overlap another PLL user. The backend verifies
 mode registers, a physical transfer and 256 mapped 64 KiB pages. PMA entry
 0 grants cached read/write access to `0x50000000..0x50ffffff`; execution is
 disabled for that span. Initialization requires CPU0 boot with interrupts
@@ -158,17 +163,26 @@ invalidation follows completion. Eight SRAM descriptors per direction cover
 before a batch succeeds. Errors and a 100 ms batch timeout stop and reset the
 pair. Failure to establish parked links halts execution.
 
+`tiku_s31_dma_fill()` writes a repeated 32-bit word into an owned span with
+the same size, alignment and context requirements. Each TX descriptor reads
+a 4,032-byte SRAM pattern; RX descriptors advance through the destination.
+The complete overwrite discards destination cache lines before DMA and
+invalidates them after DMA. Dirty data outside the requested lines is retained.
+Copy and fill share the pair-zero reservation and failure handling.
+
 The AHB bus master uses TEE master 48 in trusted mode; initialization refuses
 a locked incompatible mode. Memory-region filters remain enabled. This
 privileged driver does not provide DMA isolation for untrusted callers.
-The copy path polls completion with timer interrupts enabled and does not
+The transfer path polls completion with timer interrupts enabled and does not
 provide asynchronous peripheral queues.
 
 Run `memory-test` with `--memory-test --seconds 30`, or use
 `flash-memory-test` and the same options with the flash runner. Its workload
 covers four source/destination memory combinations, descriptor boundaries,
 1 MiB transfers, canaries, worker/interrupt refusal, descriptor errors,
-timeout recovery and 32 repeated 800×480 RGB565-sized transfers. It verifies
+timeout recovery and 32 repeated 800×480 RGB565-sized transfers. Fill tests
+cover SRAM and PSRAM, dirty guard lines, batch boundaries and fault recovery.
+The test verifies
 memory contents; it does not drive a display.
 
 The qualification test writes two complementary address-dependent patterns
@@ -189,17 +203,18 @@ data on GPIO8..19 and GPIO33..36, PCLK on GPIO40, DE on GPIO43, HSYNC on
 GPIO44, VSYNC on GPIO45 and display enable on GPIO38. The display build
 sets `TIKU_GPIO_CLAIM_LIMIT=32` so I2C and LCD claims coexist.
 
-The pixel clock is 5 MHz from the crystal. Horizontal sync/back/front
-intervals are 40/40/48 clocks; vertical intervals are 23/32/13 lines.
-The 928×548 total frame gives about 9.83 Hz scanout. Higher pixel clocks
-require qualification with concurrent memory traffic. GPIO38 has no
-brightness control through this backend.
+The pixel clock is 16 MHz from the crystal with a fractional divider of
+2.5. Horizontal sync/back/front intervals are 40/40/48 clocks; vertical
+intervals are 23/32/13 lines. The 928×548 total frame gives 31.46 Hz scanout.
+The backend requires the 80 MHz PSRAM setting. GPIO38 has no brightness
+control through this backend.
 
 The caller retains its framebuffers and display structure until
 `tiku_s31_display_close()`. Initialization reserves a 768,000-byte PSRAM
 scanout surface and two rings of 191 SRAM descriptors, 6,112 bytes in total.
-In single-buffer mode, rectangle fills and clears write the caller's buffer.
-Present stops scanout and copies the cache-line-expanded span from the first
+Full-width rectangles and clears use AHB DMA fills. Other rectangles use
+paired RGB565 word stores with halfword edges and eight-word groups.
+In single-buffer mode, drawing writes the caller's buffer. Present stops scanout and copies the cache-line-expanded span from the first
 damaged pixel to the last through AHB DMA, including intervening rows. It
 restarts at the ring's beginning and waits for two frame boundaries with a
 300 ms deadline. Single-buffer updates interrupt refresh.
@@ -208,9 +223,12 @@ The backend advertises `TIKU_DISPLAY_CAP_FLIP`. Use
 `tiku_display_set_buffers()` with two disjoint, 64-byte-aligned, complete
 PSRAM surfaces. Drawing targets the back buffer; flushing records no
 scanout change. `tiku_display_flip()` publishes the back buffer's cache lines
-in 256-byte batches, redirects the current descriptor ring at its frame
-boundary and waits for the new ring's EOF before returning the old front
-buffer for drawing. Scanout stays active during publication and handoff.
+in 4,096-byte batches and redirects the current descriptor ring at its frame
+boundary. It requests the AXI DMA link-switch event and verifies that the
+current descriptor belongs to the new ring before returning the old front
+buffer for drawing. The old frame's final pixels can remain in the LCD
+pipeline after ownership returns. Scanout stays active during publication
+and handoff.
 The wait has a 500 ms deadline; a failed handoff stops DMA and requires close
 and reopen. Calls that draw into the current scanned surface are refused.
 Direct caller writes must obey the same ownership rule. The private surface
@@ -243,8 +261,14 @@ optional Goodix driver checkout and exercises 100 Hz touch polling during a
 ten-second scanout interval. It reads VSYNC, enable and RGB data through
 GPIO inputs, verifies copied framebuffer contents with scanout stopped,
 and checks 16 paired solid-color frames with touch polls between flips.
-A 1 kHz timer samples VSYNC across blocking handoffs. Tests also cover
-clipped drawing, full-screen clear, ownership conflicts, worker/interrupt
+The new color must appear within 33 ms of a handoff, followed by 64 matching
+active RGB samples. Each GPIO snapshot masks interrupts and must finish
+within the eight-microsecond horizontal blanking interval. A 1 kHz timer
+samples VSYNC across blocking handoffs.
+The test reports fill, flip and complete-redraw timings; its complete-redraw
+mean must remain within 33,333 microseconds. Tests also cover odd/even
+rectangle edges, zero width, full-width row guards, clipped drawing,
+full-screen clear, ownership conflicts, worker/interrupt
 refusal and recovery after injected descriptor, handoff and underrun faults.
 Use `flash-display-test` and the same runner options with the flash tool
 for bootloader qualification.

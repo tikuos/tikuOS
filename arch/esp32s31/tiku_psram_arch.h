@@ -16,9 +16,10 @@
 #define TIKU_S31_PSRAM_BYTES 0x01000000u
 #define TIKU_S31_PSRAM_LINE 64u
 /**
- * @brief Initialize 16 MiB AP PSRAM at 20 MHz; return zero on success.
+ * @brief Initialize 16 MiB AP PSRAM at the selected 20/40/80 MHz; return zero on success.
  * @note CPU0 boot, interrupts masked, HP1 parked, no DMA or previous PSRAM
- * users. Owns PMA entry 0 and the PSRAM supply/controller. Writes the first
+ * users. Owns PMA entry 0 and the PSRAM supply/controller; 40/80 MHz also
+ * configure CPLL before other PLL users start. Writes the first
  * 64 bytes before publishing capacity. Repeated successful calls do nothing.
  */
 int tiku_s31_psram_init(void);
@@ -34,10 +35,11 @@ unsigned tiku_s31_psram_stage(void);
  */
 int tiku_s31_psram_sync(void *address, uint32_t length, uint8_t invalidate);
 /**
- * @brief Discard owned cache lines after a DMA write; return zero on success.
+ * @brief Discard owned cache lines around a complete DMA overwrite; return zero on success.
  * @note The span obeys sync's alignment, bounds and context rules. The caller
- * writes back and invalidates before DMA, then excludes CPU writes until this
- * operation completes. Dirty CPU data in the span is discarded.
+ * excludes CPU writes throughout DMA ownership. Discard before DMA only
+ * when the transfer overwrites the complete span; invalidate after completion.
+ * Dirty CPU data in the span is discarded.
  */
 int tiku_s31_psram_invalidate(void *address, uint32_t length);
 #ifdef TIKU_S31_PSRAM_TEST

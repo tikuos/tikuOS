@@ -13,6 +13,7 @@ ifneq ($(BOARD),esp32s31_korvo1)
 $(error ESP32-S31 requires BOARD=esp32s31_korvo1)
 endif
 S31_PROFILE ?= kernel-test
+S31_PSRAM_MHZ ?= $(if $(filter display-test flash-display-test,$(S31_PROFILE)),80,20)
 ifeq ($(filter $(S31_PROFILE),firmware kernel-test board-test shell watchdog-test flash-shell psram-test flash-psram-test memory-test flash-memory-test display-test flash-display-test sd-test audio-test radio-os-test phy-test flash-wifi-test),)
 $(error S31_PROFILE must be firmware, kernel-test, board-test, shell, watchdog-test, flash-shell, psram-test, flash-psram-test, memory-test, flash-memory-test, display-test flash-display-test sd-test, audio-test, radio-os-test, phy-test or flash-wifi-test)
 endif
@@ -35,7 +36,7 @@ S31_FLAGS := $(S31_ARCH) -Os -g3 -Wall -Wextra -Werror \
     -Wno-missing-field-initializers -ffreestanding -fno-builtin \
     -ffunction-sections -fdata-sections -I. -DPLATFORM_ESP32S31=1 \
     -DTIKU_BOARD_ESP32S31_KORVO1=1 -DTIKU_THREADS_ENABLE=1 \
-    -DTIKU_MEM_NVM_ENABLE=0
+    -DTIKU_MEM_NVM_ENABLE=0 -DTIKU_S31_PSRAM_MHZ=$(S31_PSRAM_MHZ)
 S31_SRCS := arch/esp32s31/tiku_runtime_arch.c arch/esp32s31/tiku_watchdog_arch.c \
     arch/esp32s31/tiku_i2c_arch.c interfaces/bus/tiku_i2c_bus.c \
     interfaces/gpio/tiku_gpio_owner.c \
