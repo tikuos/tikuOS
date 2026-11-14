@@ -418,8 +418,13 @@ int tiku_i2c_arch_write_read(uint8_t addr, const uint8_t *tx, uint16_t tx_len,
 
 int tiku_gpio_arch_is_peripheral(uint8_t port, uint8_t pin)
 {
-    /* This profile exposes claims on the two Korvo I2C pads. */
-    if (port != 1 || pin > 1) return -1;
+    /* Korvo I2C, audio, RGB and card pads use GPIO matrix ownership checks. */
+    if (port < 1 || port > 8 || pin > 7) return -1;
+    unsigned pad = (port - 1u) * 8u + pin;
+    if (!(pad <= 1 || (pad >= 3 && pad <= 25) || (pad >= 33 && pad <= 36) ||
+          pad == 38 || pad == 39 || pad == 40 || (pad >= 43 && pad <= 45))) return -1;
+    if (pad >= 20 && pad <= 25 && (REG_READ(0x205883f4u) & 1u)) return 1;
+    pin = (uint8_t)pad;
     unsigned mux = (REG_READ(IO_MUX(pin)) >> 12) & 7u;
     if (mux > 1u || (REG_READ(PIN_ROUTE(pin)) & 511u) != 256u) return 1;
     for (unsigned signal = 0; signal < 256u; signal++) {
