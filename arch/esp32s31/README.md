@@ -496,6 +496,16 @@ The normal firmware accepts `S31_BLE_ENABLE=1` with the pinned external
 SDK and Bluetooth controller assets described in the
 [radio adapter contract](../../drivers/wifi/esp/s31/README.md#ble-controller-and-host).
 This enables the `bt` shell commands, central/peripheral GATT access,
-1M/2M/Coded PHYs and LE Secure Connections. Wi-Fi and BLE take turns owning
-the PHY; `wifi off` releases it for `bt on`, and `bt off` releases it for
-Wi-Fi. The controller archives are supplied separately.
+1M/2M/Coded PHYs and LE Secure Connections. The default build gives the PHY
+to one radio at a time; `wifi off` releases it for `bt on`, and `bt off`
+releases it for Wi-Fi. Add `S31_RADIO_COEX=1` to share an 88 KiB SRAM radio
+heap and the SDK coexistence arbiter. Each radio retains ownership through
+shutdown; the final owner restores shared clocks and DMA permissions.
+The controller archives are supplied separately.
+
+Software ECDH services native controller workers during scalar multiplication
+to maintain connections with short supervision timeouts. The host enables
+Encryption Key Refresh Complete events so a refreshed link releases its
+pairing state before another peer starts pairing. Hardware entropy health
+faults remain latched until reset; RF-load tests have observed such faults.
+See the radio adapter contract for the per-mode qualification limits.

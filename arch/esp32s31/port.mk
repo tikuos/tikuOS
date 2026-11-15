@@ -13,6 +13,12 @@ ifneq ($(BOARD),esp32s31_korvo1)
 $(error ESP32-S31 requires BOARD=esp32s31_korvo1)
 endif
 S31_PROFILE ?= kernel-test
+S31_RADIO_COEX ?= 0
+ifeq ($(S31_RADIO_COEX),1)
+ifneq ($(S31_BLE_ENABLE),1)
+$(error S31_RADIO_COEX=1 requires S31_BLE_ENABLE=1)
+endif
+endif
 S31_PSRAM_MHZ ?= $(if $(filter display-test flash-display-test,$(S31_PROFILE)),80,20)
 ifeq ($(filter $(S31_PROFILE),firmware kernel-test board-test shell watchdog-test flash-shell psram-test flash-psram-test memory-test flash-memory-test display-test flash-display-test sd-test audio-test radio-os-test phy-test flash-wifi-test),)
 $(error S31_PROFILE must be firmware, kernel-test, board-test, shell, watchdog-test, flash-shell, psram-test, flash-psram-test, memory-test, flash-memory-test, display-test flash-display-test sd-test, audio-test, radio-os-test, phy-test or flash-wifi-test)
