@@ -489,3 +489,13 @@ the transient profile for diagnosis.
 The client requires SAE with PMF on the WPA3 leg. Successful association
 and traffic test that admission policy; the fixture does not capture
 management frames or qualify every PMF exchange and attack scenario.
+
+## Optional native BLE
+
+The normal firmware accepts `S31_BLE_ENABLE=1` with the pinned external
+SDK and Bluetooth controller assets described in the
+[radio adapter contract](../../drivers/wifi/esp/s31/README.md#ble-controller-and-host).
+This enables the `bt` shell commands, central/peripheral GATT access,
+1M/2M/Coded PHYs and LE Secure Connections. Wi-Fi and BLE take turns owning
+the PHY; `wifi off` releases it for `bt on`, and `bt off` releases it for
+Wi-Fi. The controller archives are supplied separately.

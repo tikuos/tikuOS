@@ -27,7 +27,7 @@ STORAGE_START, STORAGE_END = 0xe40000, 0xff8000
 def validate_image(image, data, radio=False, firmware=False):
     """Require two mapped regions, a low-SRAM entry and application metadata."""
     radio = radio or firmware
-    limit = 1048576 if radio else 131072
+    limit = 2097152 if firmware else 1048576 if radio else 131072
     if image.chip_id != 32 or not 256 < len(data) <= limit:
         raise ValueError("requires an S31 flash image within the selected profile size")
     if data[32:36] != b"2T\xcd\xab":
@@ -42,7 +42,7 @@ def validate_image(image, data, radio=False, firmware=False):
         ranges.append((segment.addr, end))
         if radio and segment.addr == 0x40000020 and end > 0x40020000:
             raise ValueError("radio constants exceed their flash mapping")
-        if 0x40000020 <= segment.addr < end <= (0x400A0000 if radio else 0x40020000):
+        if 0x40000020 <= segment.addr < end <= (0x40120000 if firmware else 0x400A0000 if radio else 0x40020000):
             mapped.append(segment.addr)
         elif 0x2F000000 <= segment.addr < end <= (0x2F05C000 if firmware else 0x2F03F000 if radio else 0x2F00F000):
             loaded.append(segment)

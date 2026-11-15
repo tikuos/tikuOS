@@ -49,6 +49,9 @@ ifneq ($(filter firmware shell flash-shell,$(S31_PROFILE)),)
 S31_SHELL_COMMANDS := HELP PS TIMER QUEUE ECHO CALC HTIMER CLEAR
 ifeq ($(S31_PROFILE),firmware)
 S31_SHELL_COMMANDS += WIFI IP PING
+ifeq ($(S31_BLE_ENABLE),1)
+S31_SHELL_COMMANDS += BT
+endif
 include arch/esp32s31/services.mk
 endif
 S31_SHELL_FLAGS := $(shell awk '$$1 == sprintf("%cifndef",35) && $$2 ~ /^TIKU_SHELL_CMD_/ {print $$2}' shell/tiku_shell_config.h)
@@ -195,6 +198,9 @@ endif
 include drivers/wifi/esp/sae/sources.mk
 S31_SRCS += $(ESP_SAE_SRCS)
 $(addprefix $(S31_DIR)/,$(ESP_SAE_SRCS:.c=.o)): S31_FLAGS += $(ESP_SAE_FLAGS) -Wno-unused-parameter
+endif
+ifeq ($(S31_BLE_ENABLE),1)
+include drivers/wifi/esp/s31/ble.mk
 endif
 S31_SRCS := $(sort $(S31_SRCS))
 S31_ASM := arch/esp32s31/tiku_crt_arch.S

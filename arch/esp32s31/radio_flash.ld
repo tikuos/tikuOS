@@ -13,18 +13,30 @@ ENTRY(tiku_s31_diagnostic_entry)
 MEMORY {
     SRAM (rwx) : ORIGIN = 0x2f000000, LENGTH = DEFINED(S31_FIRMWARE) ? 384K : 256K
     DROM (r) : ORIGIN = 0x40000020, LENGTH = 128K - 32
-    IROM (rx) : ORIGIN = 0x40020020, LENGTH = 512K - 32
+    IROM (rx) : ORIGIN = 0x40020020, LENGTH = DEFINED(S31_BLE) ? 1024K - 32 : 512K - 32
 }
 SECTIONS
 {
     .flash.rodata : {
         KEEP(*(.app_desc))
-        *(.rodata* .srodata .srodata.*)
+        *(EXCLUDE_FILE (*tiku_bt.o *tiku_shell_cmd_bt.o) .rodata* .srodata .srodata.*)
         . = ALIGN(4);
         __tiku_cells_start = .; KEEP(*(.tiku_cells)) __tiku_cells_end = .;
     } > DROM
     .flash.text : {
         *(.flash.text)
+        *tiku_bt.o(.rodata* .srodata*)
+        *tiku_shell_cmd_bt.o(.rodata* .srodata*)
+        *libbtdm_common.a:(.text .text.*) *libble_app.a:(.text .text.*)
+        *libbtbb.a:(.text .text.*)
+        *porting_btdm/*.o(.text .text.*)
+        *btdm_broker.o(.text .text.*)
+        *tikukits/crypto/*.o(.text .text.*)
+        *tiku_bt.o(.text .text.*)
+        *tiku_ble*.o(.text .text.*)
+        *drivers/wifi/esp/sae/*.o(.text .text.*)
+        *esp_wpa.o(.text .text.*)
+        *esp_crypto.o(.text .text.*)
         *basic/*.o(.text .text.*)
         *kernel/vfs/*.o(.text .text.*)
         *shell/*.o(.text .text.*)
@@ -33,13 +45,13 @@ SECTIONS
     } > IROM
     .text : ALIGN(64) {
         KEEP(*(.text.entry))
-        *(.text .text.* .iram1 .iram1.* .wifi* )
+        *(.text .text.* .iram* .critical_iram* .wifi* )
         _etext = .;
     } > SRAM
     .data : ALIGN(4) {
         __datastart = ORIGIN(SRAM);
         __data_start = .;
-        *(.data .data.* .sdata .sdata.*)
+        *(.data .data.* .sdata .sdata.* .dram*)
         __global_pointer$ = . + 0x800;
     } > SRAM
     .bss (NOLOAD) : ALIGN(16) {

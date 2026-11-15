@@ -14,6 +14,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #define TIKU_TRNG_OK 0
+/** @brief Invalid input or unavailable entropy source. */
+#define TIKU_TRNG_ERR_INVALID (-1)
 /** @brief Configure the LP noise source with health tests; kernel foreground only.
  * Returns zero after startup checks, or -1 with the source disabled. This
  * port owns the RNG until reset; repeat initialization retains a latched fault.
