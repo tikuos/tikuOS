@@ -288,8 +288,11 @@ int tiku_persist_wear_check(tiku_persist_store_t *store,
         *write_count = entry->write_count;
     }
 
-    return (TIKU_PERSIST_WEAR_THRESHOLD != 0ul &&
-            entry->write_count >= TIKU_PERSIST_WEAR_THRESHOLD) ? 1 : 0;
+#if TIKU_PERSIST_WEAR_THRESHOLD != 0ul
+    return entry->write_count >= TIKU_PERSIST_WEAR_THRESHOLD ? 1 : 0;
+#else
+    return 0;
+#endif
 }
 
 /*---------------------------------------------------------------------------*/
