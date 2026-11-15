@@ -180,6 +180,13 @@ static uint32_t *dispatch(uint32_t *frame)
             frame[S31_FRAME_PC / 4] += 4;
             return frame;
         }
+#if TIKU_S31_SERVICES_TEST
+        extern int tiku_s31_services_fault(uint32_t *frame);
+        if (tiku_s31_services_fault(frame)) return frame;
+#endif
+        uint32_t fault_address;
+        __asm__ volatile ("csrr %0,mtval" : "=r"(fault_address));
+        tiku_s31_report("mtval", fault_address);
         tiku_s31_report("mcause", cause);
         tiku_s31_report("mepc", frame[S31_FRAME_PC / 4]);
         tiku_s31_fatal("exception");

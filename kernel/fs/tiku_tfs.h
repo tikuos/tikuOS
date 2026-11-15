@@ -39,7 +39,9 @@
  * an extent beyond the ceiling goes partly unused.  2048 slots address 8 MB
  * of 4 KB slots for 256 bytes of allocation bitmap.
  */
-#  if defined(PLATFORM_ESP32C6)
+#  if defined(PLATFORM_ESP32S31)
+#    define TIKU_TFS_MAX_SLOTS 512
+#  elif defined(PLATFORM_ESP32C6)
 #    define TIKU_TFS_MAX_SLOTS 256
 #  elif defined(PLATFORM_ESP32P4)
 #    define TIKU_TFS_MAX_SLOTS  4096
@@ -65,7 +67,7 @@
 #    define TIKU_TFS_MIN_SLOTS  512
 #  elif defined(PLATFORM_ESP32C6)
 #    define TIKU_TFS_MIN_SLOTS 128
-#  elif defined(PLATFORM_ESP32C5)
+#  elif defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32S31)
 #    define TIKU_TFS_MIN_SLOTS  256
 #  elif defined(PLATFORM_AMBIQ) || defined(TIKU_DEVICE_NRF54LM20A) || \
         defined(TIKU_DEVICE_NRF54LM20B)

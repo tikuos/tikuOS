@@ -12,7 +12,7 @@ preservation, per-context C-library state and a timer-group watchdog.
 Startup disables the bootloader LP watchdog and its flash-boot mode before
 the application selects its watchdog policy.
 PIE and hardware-loop context are not supported. Faults print their cause
-and PC through UART0 and halt with machine interrupts masked.
+PC and fault address through UART0 and halt with machine interrupts masked.
 
 UART0 uses GPIO58/59 at 115200 baud, 8N1, with an interrupt-fed receive queue
 holding 1,023 bytes. I2C0 uses the Korvo's pull-ups on SDA GPIO0 and SCL GPIO1
@@ -20,17 +20,19 @@ at configured rates of 100/400 kHz. Transfers preserve repeated START across
 FIFO batches and use bounded waits. The receive batches hold at most 31
 bytes so the final NACK can complete. Closing the bus restores its pin state.
 GPIO claims cover GPIO0/1, audio GPIO3..7, the 21 RGB-panel pads and card GPIO20..25/39. GPIO58/59 are reserved
-for the console; other pads report unreadable.
+for the console. The firmware namespace provides read-only GPIO inspection;
+raw pad reconfiguration is refused.
 
 The flash shell boots through the installed Korvo second-stage bootloader.
 It maps constants and an identity routine in two flash regions and loads
-the kernel into SRAM. The shell attaches 16 MiB of PSRAM to the kernel memory tiers. The memory
+the kernel into SRAM. The shell attaches PSRAM to the kernel memory tiers. The memory
 qualification profiles test allocation and AHB DMA transfers; the PSRAM
 profiles test the full device capacity. Display profiles exercise RGB scanout
 and touch polling. The SD profile exercises SPI2 and read-only SDHC/SDXC probing.
 The audio profile exercises stereo I2S and ES8389 capture into PSRAM.
 The `firmware` profile adds native station/AP Wi-Fi, DHCP, shell networking
-and encrypted credentials in a reserved 8 KiB flash region. RAM loading
+encrypted credentials in a reserved 8 KiB flash region, durable `/data`, VFS
+and BASIC. RAM loading
 and warm-reset tests do not qualify true cold boot. The peripheral profiles
 do not write flash or an SD card; the host flash qualification tool
 temporarily replaces application sectors and restores the supplied backup.
@@ -52,7 +54,7 @@ make MCU=esp32s31 BOARD=esp32s31_korvo1 S31_PROFILE=kernel-test \
 | `board-test` | Kernel checks plus the optional `drivers/input/gt1151` identity and touch-poll checks |
 | `watchdog-test` | Feed, pause, resume and disable checks followed by an intentional 250 ms watchdog reset |
 | `shell` | SRAM and PSRAM allocation, native shell with `help`, `ps`, `timer`, `queue`, `echo`, `calc`, `htimer` and `clear` |
-| `firmware` | Flash shell with native station/AP Wi-Fi, SAE/PMF, DHCP, `wifi`, `ip`, `ping` and encrypted profiles |
+| `firmware` | Durable `/data`, VFS, BASIC, native station/AP Wi-Fi, SAE/PMF, DHCP and encrypted profiles |
 | `flash-shell` | The shell with application metadata and two flash mappings for the factory bootloader |
 | `psram-test` | Full-capacity patterns and physical cache-visibility checks with timer interrupts active |
 | `flash-psram-test` | The PSRAM checks through the factory bootloader |
@@ -147,7 +149,8 @@ writing stale CPU contents back to the device.
 
 `tiku_s31_memory_init()` runs at boot with interrupts masked. It attaches
 PSRAM to `TIKU_MEM_PSRAM` and initializes a 64-byte-aligned SRAM backing span
-between the linked statics and the 4 KiB kernel stack. Repeated calls preserve
+between the linked statics and the kernel stack. Firmware reserves a 16 KiB
+stack; the SRAM shell reserves 4 KiB. Repeated calls preserve
 live reservations. Portable callers request PSRAM explicitly or permit it
 with `TIKU_MEM_ALLOW_EXTERNAL`; ordinary AUTO requests stay in internal memory.
 An allocation intended for DMA needs 64-byte-aligned backing and whole cache
@@ -302,7 +305,7 @@ code from flash. Its idle loop yields to radio workers before sleeping.
 Build with `S31_PROFILE=firmware S31_WIFI_COUNTRY=SG`, substituting the
 installed country's code. Use the guarded flash runner's `--firmware-test`
 option to exercise shell scanning, WPA2/SAE AP startup and the AP IP service;
-the runner restores the factory application afterward. This smoke test does
+the runner restores the factory application and storage reservation afterward. This smoke test does
 not write settings or establish client authentication. Add `--settings-test --runs 2` to save a fixture profile, verify locked reboot and wrong-key
 refusal, unlock and forget it. This mode requires erased settings sectors
 matching the backup and restores and verifies those sectors afterward.
@@ -311,6 +314,85 @@ reserve 0xffe000..0xffffff; preserve those sectors when backing up or replacing
 firmware. See the
 [native radio adapter](../../drivers/wifi/esp/s31/README.md) for asset
 verification, ownership and radio qualification commands.
+
+
+## Durable storage and desktop services
+
+The `firmware` profile provides the shared VFS, Tiku File Store and BASIC.
+It reserves these physical flash ranges:
+
+| Range | Use |
+| --- | --- |
+| `0xe40000..0xfeffff` | 1,728 KiB region: a 32 KiB NVM tier and the `/data` extent |
+| `0xff0000..0xff3fff` | First 16 KiB durable-SRAM mirror |
+| `0xff4000..0xff7fff` | Second 16 KiB durable-SRAM mirror |
+| `0xffe000..0xffffff` | Encrypted radio profiles, owned by the settings backend |
+
+The factory partitions and the additional image at `0xe10000` remain outside
+these reservations. Startup rejects a partition overlapping general storage.
+The first `0x1b8000` bytes of PSRAM cache the region and mirrors and are
+excluded from allocation and DMA backing. The remaining `0xe48000` bytes
+belong to the PSRAM tier. BASIC permits its arena in that tier.
+
+PMA entries 1 and 2 guard the durable SRAM span, with 4 KiB-aligned bounds.
+`tiku_mpu_unlock_nvm()` opens its write window; relock commits changed state
+to the alternate flash mirror and restores read-only access. A store outside
+the window faults. The mirror checksum covers generation, length and data;
+the commit word is programmed last. The fixed recovery record occupies
+4,112 bytes at durable offset 256; ordinary durable objects start at offset
+8,192. The linker bounds the complete durable span to 16,368 bytes.
+
+Region writes preserve the old sector in that recovery record before erase
+and clear the record after verified programming. Boot restores a pending
+sector before mounting the store. Writes are synchronous, require kernel
+foreground context and mask interrupts around ROM flash operations. Cache-
+disabled code and staging buffers reside in SRAM. Unknown nonblank media
+is held by the shared layout service; it is not automatically formatted.
+Flash endurance is reported as unspecified. The undo journal and complete
+mirror writes add erase/program work to each changed sector.
+
+The default store admits 419 file entries. These are TikuOS shell commands:
+
+```text
+write /data/hello.txt hello
+cat /data/hello.txt
+df
+basic
+10 PRINT 6 * 7
+SAVE
+BYE
+reboot
+basic
+LOAD
+RUN
+```
+
+`recv` and `send` transfer binary files using the shell's length and chunk
+handshake. `/data/basic` is the BASIC program bridge. The desktop storage
+kit mounts the serial namespace and supports file values and BASIC
+execution through its existing board backend. The optional window/BASIC
+channel is selected with `TIKU_APPL_GUI=1`; it requires the applications
+overlay. `S31_GUI_KITS=/path/to/Stomme/kits` selects the shared kit sources
+when the overlay's kits have moved to a separate checkout. With the overlay
+absent, a build that leaves application flags unset has no application sources.
+
+For service qualification, build `S31_PROFILE=firmware S31_SERVICES_TEST=1`
+and run `tools/esp32s31_flash.py --services-test --runs 2` with the same
+port, serial, image, backup, SHA256 and log arguments as flash qualification.
+The probe requires a guarded store fault and an unlocked store to complete.
+The runner creates a file, saves and runs BASIC, transfers an 8,193-byte
+binary file, and verifies them across EN and software resets. Retained SRAM
+is checked across software reset within the same linked image; EN restart
+and power loss are excluded from its retention contract.
+
+`--desktop-test /path/to/executable` runs an opt-in host test with `-p PORT`
+after releasing the serial handle, then reopens it for restoration. It can
+be repeated for the desktop's `test_boardbasic` and TikuBench's host-side
+`tests/esp32s31/desktop_services.c`, linked against the desktop storage,
+device, support and application libraries. A skipped host test fails the run.
+Every firmware qualification requires an erased general-storage reservation
+matching the backup and restores and verifies it afterward. The runner
+records restoration status before and after mutation.
 
 
 ## Read-only SD probing

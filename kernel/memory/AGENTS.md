@@ -64,6 +64,16 @@ recovery record at the linker-defined offset; application data uses
 Its retained SRAM survives ROM software reset within the same linked image;
 EN-driven restart is excluded from that retention contract.
 
+The S31 firmware profile reserves flash `0xe40000..0xff7fff` for the NVM
+region and two durable mirrors. Its PSRAM read shadow occupies
+`0x50000000..0x501b7fff` outside the allocatable PSRAM tier. PMA entries 1
+and 2 guard durable SRAM with 4 KiB-aligned bounds; an unbracketed store
+enters the native fault halt. The fixed layout prefix starts at offset 0,
+the 4,112-byte sector undo record at offset 256, and ordinary durable
+objects at offset 8,192. Boot replays pending sector undo before cell
+migration and layout admission. Retained SRAM survives ROM software reset
+within the same linked image; EN restart and power loss are excluded.
+
 Ambiq's `.persistent` is physically SRAM mirrored to MRAM by a flush; it is
 not a place for high-churn buffers.  RP2350 allocations that fall to the
 NVM tier are flash and fault on write; `TIKU_TIER_SRAM_SIZE` and the
@@ -81,7 +91,8 @@ rewritten in place.  `tiku_nvm_media()` returns them as a struct and
 `/sys/mem/media` prints them one a line.  Values, each header naming its
 datasheet: RRAM 16 B, line, 10⁴; Apollo MRAM 16 B, line, 10⁵; RA8P1 MRAM
 32 B, line, 10⁵; MSP430 FRAM 2 B, byte prefix, no limit; the flash ports a
-256 B page, line, 10⁵, erased by 4 KB.  A host build with no platform macro
+256 B page, line, 10⁵, erased by 4 KB, except S31, whose board flash
+endurance is unspecified and reported as zero.  A host build with no platform macro
 reads a 4-byte word that tears byte by byte, with no limit.  Derived from
 the facts, not kept in platform tables: `TIKU_NVM_MEDIA_IN_PLACE`, which
 `kernel/db` requires to build; the file store's slot and sector geometry

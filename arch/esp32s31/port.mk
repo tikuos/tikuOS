@@ -49,6 +49,7 @@ ifneq ($(filter firmware shell flash-shell,$(S31_PROFILE)),)
 S31_SHELL_COMMANDS := HELP PS TIMER QUEUE ECHO CALC HTIMER CLEAR
 ifeq ($(S31_PROFILE),firmware)
 S31_SHELL_COMMANDS += WIFI IP PING
+include arch/esp32s31/services.mk
 endif
 S31_SHELL_FLAGS := $(shell awk '$$1 == sprintf("%cifndef",35) && $$2 ~ /^TIKU_SHELL_CMD_/ {print $$2}' shell/tiku_shell_config.h)
 S31_FLAGS += -DTIKU_SHELL_ENABLE=1 -DTIKU_SHELL_ALIASES_ENABLE=0 \

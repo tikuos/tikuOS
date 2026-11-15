@@ -15,6 +15,17 @@
 #include <kernel/memory/tiku_mem.h>
 #include <kernel/threads/tiku_thread.h>
 #include <shell/tiku_shell.h>
+#if TIKU_MEM_NVM_ENABLE
+#include "tiku_boot.h"
+#include "tiku_boot_vfs.h"
+#include <kernel/cpu/tiku_stack.h>
+#include <kernel/memory/tiku_nvm_sync.h>
+#include <kernel/cpu/tiku_rtc.h>
+static unsigned services_ready;
+tiku_boot_stage_e tiku_boot_get_stage(void)
+{ return services_ready ? TIKU_BOOT_STAGE_COMPLETE : TIKU_BOOT_STAGE_SERVICES; }
+int tiku_boot_is_complete(void) { return services_ready; }
+#endif
 #if TIKU_S31_WIFI_ENABLE
 #include <drivers/wifi/esp/tiku_drv_wifi_esp.h>
 #include <tikukits/net/ipv4/tiku_kits_net_ipv4.h>
@@ -60,7 +71,15 @@ int main(void)
     tiku_s31_runtime_init();
     tiku_uart_init();
     tiku_clock_arch_delay(150000);
-    if (tiku_s31_memory_init()) tiku_s31_fatal("shell memory init");
+    int memory_result = tiku_s31_memory_init();
+    if (memory_result) {
+        tiku_s31_report("memory_result", (uint32_t)memory_result);
+        tiku_s31_fatal("shell memory init");
+    }
+#if TIKU_S31_SERVICES_TEST
+    extern void tiku_s31_services_test(void);
+    tiku_s31_services_test();
+#endif
     tiku_clock_init();
     tiku_sched_init();
     tiku_s31_puts("TIKU S31 SRAM shell v1\n");
@@ -72,6 +91,12 @@ int main(void)
     tiku_s31_puts("flash_project=");
     tiku_s31_puts(tiku_s31_image_project());
     tiku_s31_puts("\n");
+#endif
+#if TIKU_MEM_NVM_ENABLE
+    tiku_stack_paint();
+    tiku_rtc_init();
+    if (tiku_boot_vfs_init()) tiku_s31_fatal("namespace init");
+    services_ready = 1;
 #endif
     tiku_shell_init();
     tiku_watchdog_config(TIKU_WDT_MODE_WATCHDOG, TIKU_WDT_SRC_ACLK,
@@ -88,6 +113,9 @@ int main(void)
     for (;;) {
         while (tiku_sched_run_once()) { }
         tiku_watchdog_kick();
+#if TIKU_MEM_NVM_ENABLE
+        tiku_nvm_sync_poll();
+#endif
         tiku_atomic_enter();
         if (!tiku_sched_has_pending()) {
             if (tiku_thread_worker_ready()) tiku_thread_kernel_block();

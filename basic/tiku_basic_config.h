@@ -59,7 +59,7 @@
 
 #if defined(PLATFORM_AMBIQ) || defined(PLATFORM_RP2350) || \
     defined(PLATFORM_NORDIC) || defined(PLATFORM_STM32N6) || \
-    defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C61)
+    defined(PLATFORM_RA8P1) || defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32S31)
 /* On Nordic the LM20's arena has its own 256 KB SRAM bank (RAM2); the L15
  * shares its SRAM with TLS and the radio and takes a smaller PROGRAM_LINES
  * below. */
@@ -71,7 +71,7 @@
 /* The ESP32-C61 runs its image from its 320 KB SRAM, which leaves the SRAM
  * tier no room for a BIG arena: BASIC attaches the in-package PSRAM, and its
  * arena request admits external memory (TIKU_MEM_ALLOW_EXTERNAL). */
-#if defined(PLATFORM_ESP32C61)
+#if defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32S31)
 /** The arena may come from external memory. */
 #define TIKU_BASIC_ARENA_EXTERNAL     1
 /** Smallest PSRAM the part ships with: the arena's build-time bound. */

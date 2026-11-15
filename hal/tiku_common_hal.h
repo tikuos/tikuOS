@@ -108,6 +108,12 @@
 #define tiku_common_arch_delay_us(us) tiku_cpu_c6_delay_us(us)
 #define tiku_common_arch_unique_id(b,l) tiku_cpu_c6_unique_id((b),(l))
 #define tiku_common_arch_reset_reason() tiku_cpu_c6_reset_reason()
+#elif defined(PLATFORM_ESP32S31)
+#include "arch/esp32s31/tiku_cpu_common.h"
+#define tiku_common_arch_delay_ms(ms) tiku_cpu_s31_delay_ms(ms)
+#define tiku_common_arch_delay_us(us) tiku_cpu_s31_delay_us(us)
+#define tiku_common_arch_unique_id(b,l) tiku_cpu_s31_unique_id((b),(l))
+#define tiku_common_arch_reset_reason() tiku_cpu_s31_reset_reason()
 #elif defined(PLATFORM_ESP32C5)
 #include "arch/esp32c5/tiku_cpu_common.h"
 #define tiku_common_arch_delay_ms(ms) tiku_cpu_c5_delay_ms(ms)

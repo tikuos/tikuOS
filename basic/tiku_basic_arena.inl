@@ -93,6 +93,9 @@
 #if defined(PLATFORM_ESP32C61)
 #include <arch/esp32c61/tiku_psram_arch.h>
 #define BASIC_EXTERNAL_ATTACH() ((void)tiku_esp32c61_psram_attach())
+#elif defined(PLATFORM_ESP32S31)
+/* S31 boot attaches PSRAM before assembling services. */
+#define BASIC_EXTERNAL_ATTACH() ((void)0)
 #endif
 
 /*

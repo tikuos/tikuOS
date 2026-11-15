@@ -104,9 +104,13 @@ def check_shell_result(data, elapsed=None):
             and data.count(b"TIKU S31 SRAM shell v1\r\n") == 1)
 
 
-def capture_shell(wire, seconds):
+def capture_shell(wire, seconds, boot_seconds=1):
     """Capture boot, then exercise the parser and interrupt-fed UART receive."""
     boot, _ = capture(wire, 1)
+    deadline = time.monotonic() + max(0, boot_seconds - 1)
+    while boot_seconds > 1 and b"tikuOS:/>" not in boot and b"FAIL S31" not in boot and time.monotonic() < deadline:
+        chunk, _ = capture(wire, 0.25)
+        boot += chunk
     if b"TIKU S31 SRAM shell v1\r\n" not in boot:
         return boot, None
     commands = b"help\r\ncalc 7 * 9\r\nps\r\nhtimer\r\nnonexistent_s31\r\n"

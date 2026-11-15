@@ -20,16 +20,25 @@ SECTIONS
     .flash.rodata : {
         KEEP(*(.app_desc))
         *(.rodata* .srodata .srodata.*)
+        . = ALIGN(4);
+        __tiku_cells_start = .; KEEP(*(.tiku_cells)) __tiku_cells_end = .;
     } > DROM
     .flash.text : {
         *(.flash.text)
+        *basic/*.o(.text .text.*)
+        *kernel/vfs/*.o(.text .text.*)
+        *shell/*.o(.text .text.*)
+        *applications/*.o(.text .text.*)
         *libphy.a:(.text .text.*) *libnet80211.a:(.text .text.*) *libpp.a:(.text .text.*) *libcore.a:(.text .text.*)
     } > IROM
     .text : ALIGN(64) {
         KEEP(*(.text.entry))
         *(.text .text.* .iram1 .iram1.* .wifi* )
+        _etext = .;
     } > SRAM
     .data : ALIGN(4) {
+        __datastart = ORIGIN(SRAM);
+        __data_start = .;
         *(.data .data.* .sdata .sdata.*)
         __global_pointer$ = . + 0x800;
     } > SRAM
@@ -39,10 +48,28 @@ SECTIONS
         . = ALIGN(16);
         __bss_end = .;
     } > SRAM
+    .uninit (NOLOAD) : ALIGN(4096) {
+        __uninit_start = .;
+        KEEP(*(.persistent.layout))
+        . = __uninit_start + (DEFINED(S31_FIRMWARE) ? 256 : 0);
+        KEEP(*(.persistent.arch))
+        . = __uninit_start + (DEFINED(S31_FIRMWARE) ? 8192 : 0);
+        KEEP(*(.persistent .persistent.*))
+        . = ALIGN(4096);
+        __uninit_end = .;
+    } > SRAM
+    ASSERT(SIZEOF(.uninit) <= 16368, "S31 durable mirror capacity exceeded")
+    .retained (NOLOAD) : ALIGN(16) {
+        *(.retained .retained.*)
+        __retained_end = .;
+        _end = .;
+    } > SRAM
     __stack = ORIGIN(SRAM) + LENGTH(SRAM);
-    __tier_sram_start = ALIGN(__bss_end, 64);
-    __tier_sram_end = __stack - (DEFINED(S31_FIRMWARE) ? 8192 : 4096);
-    ASSERT(__bss_end <= __stack - (DEFINED(S31_FIRMWARE) ? 8192 : 4096), "S31 diagnostic overlaps stack")
+    __tier_sram_start = ALIGN(__retained_end, 64);
+    __tier_sram_end = __stack - (DEFINED(S31_FIRMWARE) ? 16384 : 4096);
+    __tiku_stack_bottom = __tier_sram_end;
+    __tiku_stack_guard_start = __tier_sram_end;
+    ASSERT(__retained_end <= __stack - (DEFINED(S31_FIRMWARE) ? 16384 : 4096), "S31 diagnostic overlaps stack")
     .forbidden (NOLOAD) : {
         *(.persistent .persistent.* .retained .retained.*)
     } > SRAM

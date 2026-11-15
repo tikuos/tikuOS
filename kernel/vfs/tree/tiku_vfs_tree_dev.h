@@ -19,8 +19,8 @@
 
 #include <kernel/vfs/tiku_vfs.h>
 
-/** @brief 1 when this build lists /dev/adc: every board but the Olimex P4. */
-#if defined(PLATFORM_ESP32C6) || (defined(PLATFORM_ESP32P4) && !defined(TIKU_BOARD_FIREBEETLE2_ESP32P4))
+/** @brief 1 when the build exposes the ADC subtree. */
+#if defined(PLATFORM_ESP32S31) || defined(PLATFORM_ESP32C6) || (defined(PLATFORM_ESP32P4) && !defined(TIKU_BOARD_FIREBEETLE2_ESP32P4))
 #define TIKU_VFS_DEV_ADC 0
 #else
 #define TIKU_VFS_DEV_ADC 1

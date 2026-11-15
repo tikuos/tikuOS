@@ -33,6 +33,9 @@ extern void tiku_cpu_rp2350_reboot_to_bootsel(void);
 #if defined(PLATFORM_ESP32C5)
 #include <arch/esp32c5/tiku_cpu_common.h>
 #endif
+#if defined(PLATFORM_ESP32S31)
+#include <arch/esp32s31/tiku_cpu_common.h>
+#endif
 #if defined(PLATFORM_ESP32P4)
 #include <arch/esp32p4/tiku_cpu_common.h>
 #endif
@@ -103,6 +106,9 @@ tiku_shell_cmd_reboot(uint8_t argc, const char *argv[])
 #endif
 #if defined(PLATFORM_ESP32C5)
     tiku_cpu_c5_restart();
+#endif
+#if defined(PLATFORM_ESP32S31)
+    tiku_cpu_s31_restart();
 #endif
 #if defined(PLATFORM_ESP32P4)
     tiku_cpu_p4_restart();

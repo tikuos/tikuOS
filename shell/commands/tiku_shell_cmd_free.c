@@ -158,7 +158,7 @@ stack_used(void)
         return (used > 0xFFFFU) ? 0xFFFFU : (uint16_t)used;
     }
     return 0;
-#elif defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32C6)
+#elif defined(PLATFORM_ESP32C61) || defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32C6) || defined(PLATFORM_ESP32S31)
     uintptr_t sp;
     uintptr_t top = (uintptr_t)&__stack;
     __asm__ volatile ("mv %0, sp" : "=r"(sp));
@@ -240,11 +240,15 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
     fram_used=fram_total;
 #endif
 
+#if defined(PLATFORM_ESP32S31)
+    /* Factory partitions and the fixed storage reservation own the flash. */
+    fram_used = fram_total;
+#endif
     /* ---- Compile-time (fixed at link) ---- */
     SHELL_PRINTF(SH_YELLOW "--- Compile-time ---" SH_RST "\n");
     SHELL_PRINTF(SH_BOLD "SRAM" SH_RST "  %5lu total\n",
                  (unsigned long)sram_total);
-#if defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32C6)
+#if defined(PLATFORM_ESP32C5) || defined(PLATFORM_ESP32C6) || defined(PLATFORM_ESP32S31)
     SHELL_PRINTF("  image+static %5lu\n", (unsigned long)sram_static);
 #else
     SHELL_PRINTF("  .data+.bss  %5lu\n", (unsigned long)sram_static);
@@ -302,7 +306,7 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
                  (unsigned long)fram_total);
     /* in use = fram_used without the IVT: on MSP430 code, rodata, persistent
      * and data-init (plus .lower.text in the large model). */
-#if defined(PLATFORM_ESP32C6)
+#if defined(PLATFORM_ESP32C6) || defined(PLATFORM_ESP32S31)
     SHELL_PRINTF("  reserved    %5lu\n",fram_used);
 #else
     SHELL_PRINTF("  in use      %5lu\n",
@@ -378,7 +382,7 @@ tiku_shell_cmd_free(uint8_t argc, const char *argv[])
     SHELL_PRINTF("  free now    " SH_BOLD "%5lu" SH_RST "\n",
                  (unsigned long)(fram_total > fram_used ? fram_total - fram_used : 0));
 
-#if (TIKU_DRV_PSRAM_ENABLE + 0)
+#if (TIKU_DRV_PSRAM_ENABLE + 0) || defined(PLATFORM_ESP32S31)
     /*
      * PSRAM is a late-attach tier: absent at boot, attached by `power psram
      * up` and detached by `down`.  It prints only while attached;

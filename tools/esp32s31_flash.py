@@ -13,11 +13,15 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import struct
+import subprocess
 import time
 
 import esp32s31_ram as ram
+
+STORAGE_START, STORAGE_END = 0xe40000, 0xff8000
 
 
 def validate_image(image, data, radio=False, firmware=False):
@@ -40,7 +44,7 @@ def validate_image(image, data, radio=False, firmware=False):
             raise ValueError("radio constants exceed their flash mapping")
         if 0x40000020 <= segment.addr < end <= (0x400A0000 if radio else 0x40020000):
             mapped.append(segment.addr)
-        elif 0x2F000000 <= segment.addr < end <= (0x2F05E000 if firmware else 0x2F03F000 if radio else 0x2F00F000):
+        elif 0x2F000000 <= segment.addr < end <= (0x2F05C000 if firmware else 0x2F03F000 if radio else 0x2F00F000):
             loaded.append(segment)
         else:
             raise ValueError("segment exceeds the flash-shell layout")
@@ -83,7 +87,7 @@ def check_firmware(data):
 
 def capture_firmware(wire, seconds):
     """Exercise normal shell commands using public fixture credentials."""
-    data, _ = ram.capture_shell(wire, seconds)
+    data, _ = ram.capture_shell(wire, seconds, boot_seconds=45)
     for command, delay in [
         (b"wifi on", 3), (b"wifi scan", 7), (b"wifi list", 1),
         (b"wifi ap start S31-Native-Test test-passphrase 6", 10),
@@ -99,7 +103,7 @@ def capture_firmware(wire, seconds):
 
 def capture_settings(wire, seconds, run):
     """Save on the first boot; reject a wrong key, unlock and forget on the second."""
-    data, _ = ram.capture_shell(wire, seconds)
+    data, _ = ram.capture_shell(wire, seconds, boot_seconds=45)
     commands = ([
         (b"wifi saved", 1), (b"wifi on", 3),
         (b"wifi ap start3 S31-Native-SAE test-passphrase 6", 15),
@@ -141,6 +145,83 @@ def check_settings(data, run):
             b"wifi: stored credentials cleared" in data)
 
 
+def read_until(wire, marker, seconds=30):
+    """Read through an exact serial marker with a bounded deadline."""
+    data = bytearray()
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        data += wire.read(1)
+        if data.endswith(marker):
+            return bytes(data)
+        if len(data) > 32768 or b"FAIL S31" in data:
+            break
+    raise RuntimeError(f"serial marker missing: {marker!r}; tail={bytes(data[-256:])!r}")
+
+
+def transfer_services(wire, run):
+    """Round-trip binary data across three file-store slots and a reboot."""
+    payload = bytes((i * 73 + 13) & 255 for i in range(8193))
+    if run == 0:
+        wire.write(b"recv /data/blob.bin 8193\r\n")
+        header = read_until(wire, b"recv: ready 8193 chunk ") + read_until(wire, b"\n")
+        match = re.search(rb"recv: ready 8193 chunk ([0-9]+)", header)
+        chunk = int(match[1]) if match else 0
+        if not 1 <= chunk <= 8192:
+            raise RuntimeError("invalid binary receive chunk")
+        for at in range(0, len(payload), chunk):
+            wire.write(payload[at:at + chunk])
+            if at + chunk < len(payload):
+                read_until(wire, b".")
+        read_until(wire, b"recv: 8193 bytes -> /data/blob.bin")
+        read_until(wire, b"tikuOS:/>")
+    wire.write(b"send /data/blob.bin\r\n")
+    read_until(wire, b"send: 8193\r\n")
+    received = bytearray()
+    deadline = time.monotonic() + 10
+    while len(received) < len(payload) and time.monotonic() < deadline:
+        received += wire.read(len(payload) - len(received))
+    if received != payload:
+        raise RuntimeError(f"binary file mismatch: {len(received)} bytes received")
+    read_until(wire, b"tikuOS:/>")
+    return b"\r\nHOST S31_BINARY_OK bytes=8193 sha256=" + hashlib.sha256(payload).hexdigest().encode() + b"\r\n"
+
+
+def capture_services(wire, seconds, run):
+    """Create files and a BASIC program, then read them on the next boot."""
+    data = b""
+    deadline = time.monotonic() + max(seconds, 45)
+    while time.monotonic() < deadline and b"tikuOS:/>" not in data and b"FAIL S31" not in data:
+        chunk, _ = ram.capture(wire, 0.25)
+        data += chunk
+    if b"tikuOS:/>" not in data:
+        return data, None
+    commands = [b"df", b"free", b"ls /", b"read /sys/persist/moved"]
+    if run == 0:
+        commands += [b"write /data/s31.txt S31_DURABLE_FILE", b"basic", b"NEW",
+                     b"10 PRINT 6 * 7", b"20 END", b"SAVE", b"BYE"]
+    commands += [b"read /data/s31.txt", b"basic", b"LOAD", b"RUN", b"BYE",
+                 b"read /sys/mem/nvm_writes", b"echo S31_SERVICES_END"]
+    for command in commands:
+        wire.write(command + b"\r\n")
+        chunk, _ = ram.capture(wire, 2 if command not in (b"SAVE", b"BYE") else 5)
+        data += chunk
+        if b"FAIL S31" in chunk:
+            break
+    if b"\r\nS31_SERVICES_END\r\n" in data:
+        data += transfer_services(wire, run)
+    return data, None
+
+
+def check_services(data, run):
+    """Require boot, durable file contents, BASIC execution and command completion."""
+    del run
+    return (data.count(b"ESP-ROM:esp32s31-") == 1 and
+            data.count(b"TIKU S31 SRAM shell v1") == 1 and
+            b"\r\nS31_DURABLE_FILE" in data and b"\r\n42\r\n" in data and
+            b"\r\nS31_SERVICES_END\r\n" in data and b"HOST S31_BINARY_OK" in data and
+            b"FAIL S31" not in data and b"Error" not in data)
+
+
 def save_journal(path, state):
     """Persist the restoration state before flash mutation and after verification."""
     with path.open("w") as stream:
@@ -164,7 +245,7 @@ def connect(esptool, wire):
     return chip
 
 
-def qualify(esptool, wire, image, backup, log, runs, seconds, state, journal, psram=False, memory=False, display=False, radio=False, radio_data=False, settings=False, firmware=False, peer=None):
+def qualify(esptool, wire, image, backup, log, runs, seconds, state, journal, psram=False, memory=False, display=False, radio=False, radio_data=False, settings=False, firmware=False, peer=None, services=False, desktop_tests=()):
     """Temporarily replace application sectors; restore them after any test result."""
     span = (len(image) + 4095) & ~4095
     original, table = backup[0x10000:0x10000 + span], backup[0x8000:0x9000]
@@ -174,6 +255,12 @@ def qualify(esptool, wire, image, backup, log, runs, seconds, state, journal, ps
         if (esptool.read_flash(esp, 0x10000, span, no_progress=True) != original or
                 esptool.read_flash(esp, 0x8000, 4096, no_progress=True) != table):
             raise ValueError("board application sectors or partition table differ from backup")
+        if firmware:
+            storage = backup[STORAGE_START:STORAGE_END]
+            if storage != b"\xff" * (STORAGE_END - STORAGE_START) or esptool.read_flash(
+                    esp, STORAGE_START, len(storage), no_progress=True) != storage:
+                raise ValueError("firmware qualification requires the erased factory storage reservation")
+            state["storage_restored"] = False
         if settings:
             tail = backup[0xffe000:0x1000000]
             if tail != b"\xff" * 8192 or esptool.read_flash(esp, 0xffe000, 8192, no_progress=True) != tail:
@@ -198,12 +285,34 @@ def qualify(esptool, wire, image, backup, log, runs, seconds, state, journal, ps
                     state["peer"] = peer.results
                     save_journal(journal, state)
             else:
-                data, _ = (capture_settings(wire, seconds, run) if firmware and settings else capture_firmware(wire, seconds) if firmware else ram.capture(wire, seconds) if psram or memory or display or radio else ram.capture_shell(wire, seconds))
+                data, _ = (capture_services(wire, seconds, run) if services else capture_settings(wire, seconds, run) if firmware and settings else capture_firmware(wire, seconds) if firmware else ram.capture(wire, seconds) if psram or memory or display or radio else ram.capture_shell(wire, seconds))
             log.write(f"RUN {run + 1}\n".encode() + data)
             log.flush()
-            passed = check_settings(data, run) if firmware and settings else check_boot(data, psram, memory, display, radio, radio_data, firmware)
+            passed = check_services(data, run) if services else check_settings(data, run) if firmware and settings else check_boot(data, psram, memory, display, radio, radio_data, firmware)
             if peer:
                 passed = passed and peer.passed()
+            if services and passed and run == runs - 1:
+                wire.write(b"reboot\r\n")
+                rebooted, _ = capture_services(wire, seconds, 1)
+                log.write(b"SOFTWARE RESET\n" + rebooted)
+                log.flush()
+                state["software_reset"] = (check_services(rebooted, 1) and
+                    b"retained_marker=0x00000000" not in rebooted)
+                passed = passed and state["software_reset"]
+            if services and passed and run == runs - 1 and desktop_tests:
+                wire.close()
+                try:
+                    for executable in desktop_tests:
+                        result = subprocess.run([str(executable), "-p", wire.port],
+                                                capture_output=True, timeout=240)
+                        log.write(result.stdout + result.stderr)
+                        log.flush()
+                        ok = (result.returncode == 0 and b"[PASS]" in result.stdout and
+                              b"[FAIL]" not in result.stdout and b"[SKIP]" not in result.stdout)
+                        state.setdefault("desktop", []).append(dict(executable=str(executable), passed=ok))
+                        passed = passed and ok
+                finally:
+                    wire.open()
             state["boots"].append(dict(run=run + 1, passed=passed))
             save_journal(journal, state)
             print(json.dumps(state["boots"][-1]), flush=True)
@@ -216,6 +325,10 @@ def qualify(esptool, wire, image, backup, log, runs, seconds, state, journal, ps
                     esp = connect(esptool, wire)
                     esptool.write_flash(esp, [(0x10000, original)], flash_size="16MB")
                     esptool.verify_flash(esp, [(0x10000, original), (0x8000, table)])
+                    if firmware:
+                        esptool.write_flash(esp, [(STORAGE_START, storage)], flash_size="16MB")
+                        esptool.verify_flash(esp, [(STORAGE_START, storage)])
+                        state["storage_restored"] = True
                     if settings:
                         esptool.write_flash(esp, [(0xffe000, tail)], flash_size="16MB")
                         esptool.verify_flash(esp, [(0xffe000, tail)])
@@ -252,8 +365,10 @@ def main():
     profile.add_argument("--display-test", action="store_true")
     profile.add_argument("--radio-test", action="store_true")
     profile.add_argument("--firmware-test", action="store_true")
+    profile.add_argument("--services-test", action="store_true")
     profile.add_argument("--ap-peer-test", action="store_true")
     parser.add_argument("--peer-interface")
+    parser.add_argument("--desktop-test", type=Path, action="append", default=[])
     parser.add_argument("--allow-uplink-interruption", action="store_true",
                         help="permit temporary use of an already connected peer Wi-Fi adapter")
     parser.add_argument("--settings-test", action="store_true",
@@ -263,6 +378,13 @@ def main():
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--seconds", type=float, default=15)
     args = parser.parse_args()
+    if args.desktop_test and not args.services_test:
+        parser.error("--desktop-test requires --services-test")
+    args.desktop_test = [p.resolve(strict=True) for p in args.desktop_test]
+    if args.services_test:
+        args.firmware_test = True
+        if args.runs != 2:
+            parser.error("--services-test requires --runs 2")
     if args.ap_peer_test:
         if args.runs != 1 or not args.peer_interface or args.settings_test:
             parser.error("--ap-peer-test requires --runs 1 --peer-interface and no settings test")
@@ -302,7 +424,7 @@ def main():
         wire.port = args.port
         try:
             wire.open()
-            qualify(esptool, wire, image, backup, log, args.runs, args.seconds, state, journal, args.psram_test, args.memory_test, args.display_test, args.radio_test, args.wifi_data_required, settings=args.settings_test, firmware=args.firmware_test, peer=peer)
+            qualify(esptool, wire, image, backup, log, args.runs, args.seconds, state, journal, args.psram_test, args.memory_test, args.display_test, args.radio_test, args.wifi_data_required, settings=args.settings_test, firmware=args.firmware_test, peer=peer, services=args.services_test, desktop_tests=args.desktop_test)
         finally:
             wire.close()
     return 0 if (state["restored"] and state.get("factory_booted") and

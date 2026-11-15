@@ -13,6 +13,14 @@
 #include "tiku_mem_arch.h"
 #include "tiku_psram_arch.h"
 #include "tiku_runtime_arch.h"
+#if TIKU_MEM_NVM_ENABLE
+#include "tiku_storage_arch.h"
+#include "tiku_mpu_arch.h"
+#include "tiku_trng_arch.h"
+#define PSRAM_RESERVED TIKU_S31_STORAGE_SHADOW
+#else
+#define PSRAM_RESERVED 0u
+#endif
 
 int tiku_s31_memory_init(void)
 {
@@ -21,12 +29,25 @@ int tiku_s31_memory_init(void)
     uint32_t state;
     __asm__ volatile ("csrr %0,mstatus" : "=r"(state));
     if ((state & 8u) || tiku_s31_in_trap || !tiku_thread_in_kernel()) return -1;
-    if (tiku_s31_psram_init() || tiku_tier_init() != TIKU_MEM_OK) return -1;
+    if (tiku_s31_psram_init()) return -2;
+#if TIKU_MEM_NVM_ENABLE
+    if (tiku_s31_trng_init()) return -8;
+    if (tiku_s31_durable_guard_off()) return -3;
+    if (tiku_s31_storage_init()) return -4;
+    tiku_mpu_init();
+    if (!tiku_s31_mpu_ready()) return -5;
+    tiku_persist_move_boot();
+    if (tiku_persist_moved() < 0) return -6;
+#endif
+    if (tiku_tier_init() != TIKU_MEM_OK) return -7;
+#if TIKU_MEM_NVM_ENABLE
+    tiku_s31_storage_seal();
+#endif
     if (tiku_tier_span_stats(TIKU_MEM_PSRAM, 0, &base, &stats) == TIKU_MEM_OK)
-        return (uintptr_t)base == TIKU_S31_PSRAM_BASE &&
-               stats.total_bytes == tiku_s31_psram_size() ? 0 : -1;
-    return tiku_tier_attach_psram((void *)TIKU_S31_PSRAM_BASE,
-                                 tiku_s31_psram_size()) == TIKU_MEM_OK ? 0 : -1;
+        return (uintptr_t)base == TIKU_S31_PSRAM_BASE + PSRAM_RESERVED &&
+               stats.total_bytes == tiku_s31_psram_size() - PSRAM_RESERVED ? 0 : -1;
+    return tiku_tier_attach_psram((void *)(TIKU_S31_PSRAM_BASE + PSRAM_RESERVED),
+                                 tiku_s31_psram_size() - PSRAM_RESERVED) == TIKU_MEM_OK ? 0 : -1;
 }
 
 void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len)

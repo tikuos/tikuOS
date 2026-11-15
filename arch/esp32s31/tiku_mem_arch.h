@@ -17,9 +17,11 @@
 typedef uint32_t tiku_mem_arch_size_t;
 #define TIKU_TIER_SRAM_DERIVED 1
 /**
- * @brief Initialize SRAM and attach qualified PSRAM; return zero on success.
+ * @brief Initialize SRAM, optional flash storage and PSRAM; return zero on success.
  * @note CPU0 boot, interrupts masked, no workers or DMA users. Repeated calls
  * preserve reservations. The SRAM tier occupies the linker gap below the stack.
+ * Errors: -1 context/attachment, -2 PSRAM, -3 PMA release, -4 storage restore,
+ * -5 PMA installation, -6 cell migration, -7 tier setup, -8 entropy startup.
  */
 int tiku_s31_memory_init(void);
 #endif

@@ -13,6 +13,7 @@
 #define TIKU_S31_TRNG_ARCH_H_
 #include <stddef.h>
 #include <stdint.h>
+#define TIKU_TRNG_OK 0
 /** @brief Configure the LP noise source with health tests; kernel foreground only.
  * Returns zero after startup checks, or -1 with the source disabled. This
  * port owns the RNG until reset; repeat initialization retains a latched fault.
