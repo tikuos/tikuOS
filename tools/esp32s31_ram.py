@@ -44,7 +44,7 @@ def validate_port(port, identity, ports):
         raise ValueError("port ownership check did not establish an unused port")
 
 
-def capture(wire, seconds, prefix=b"TIMER", end_marker=None, stream=None):
+def capture(wire, seconds, prefix=b"TIMER", end_marker=None, stream=None, stop_markers=()):
     """Capture UART bytes and host elapsed time between timer markers."""
     if end_marker is None:
         end_marker = prefix + b" end\r\n"
@@ -61,6 +61,8 @@ def capture(wire, seconds, prefix=b"TIMER", end_marker=None, stream=None):
             begin = time.monotonic()
         if finish is None and end_marker in data:
             finish = time.monotonic()
+        if any(marker in data for marker in stop_markers):
+            break
     elapsed = finish - begin if begin is not None and finish is not None else None
     return bytes(data), elapsed
 
@@ -326,6 +328,35 @@ def check_audio_result(data, elapsed=None):
     return checksum == value(b"audio_pcm_hash")
 
 
+def check_media_result(data, phase=0):
+    """Require complete file audits and the deterministic write fixture when selected."""
+    import hashlib
+    import re
+    if b"FATAL" in data or b"FAIL" in data or phase not in (0, 1, 2):
+        return False
+    required = (b"TIKU S31 media test v1\r\n", b"PASS S31 media\r\n",
+                b"media_errors=0x00000000\r\n",
+                f"media_test_phase=0x{phase:08x}\r\n".encode())
+    if any(data.count(marker) != 1 for marker in required):
+        return False
+    counts = re.findall(rb"^media_existing_files=0x([0-9a-f]{8})\r?$", data, re.M)
+    if len(counts) != (2 if phase else 1) or not int(counts[0], 16) or len(set(counts)) != 1:
+        return False
+    pairs = re.findall(rb"^media_file=([^\r\n]+)\r?\nmedia_sha256=([0-9a-f]{64})\r?$", data, re.M)
+    count = int(counts[0], 16)
+    if len(pairs) != count * (2 if phase else 1) + bool(phase):
+        return False
+    if len({name for name, _ in pairs[:count]}) != count:
+        return False
+    if phase:
+        expected = hashlib.sha256(bytes(((i*29+3) ^ (i>>8)) & 255 for i in range(131089))).hexdigest().encode()
+        if pairs[count][1] != expected or pairs[:count] != pairs[count+1:]:
+            return False
+        if data.count(b"media_test_bytes=0x00020011\r\n") != 1:
+            return False
+    return True
+
+
 def main():
     """Run requested warm-reset probes and restore the installed firmware."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -346,6 +377,9 @@ def main():
     profile.add_argument("--memory-test", action="store_true")
     profile.add_argument("--display-test", action="store_true")
     profile.add_argument("--sd-test", action="store_true")
+    profile.add_argument("--media-test", action="store_true")
+    parser.add_argument("--media-phase", type=int, choices=(0,1,2), default=0,
+                        help="0 reads only; 1 creates the CID-bound test file; 2 verifies and deletes it")
     profile.add_argument("--audio-test", action="store_true")
     profile.add_argument("--radio-os-test", action="store_true")
     profile.add_argument("--phy-test", action="store_true")
@@ -358,12 +392,16 @@ def main():
         parser.error("display soak must be 0..1800 seconds")
     if args.display_soak_seconds and (not args.display_test or args.runs != 1):
         parser.error("display soak requires --display-test and one run")
+    if args.media_phase and not args.media_test:
+        parser.error("--media-phase requires --media-test")
+    if args.media_test and args.runs != 1:
+        parser.error("media qualification requires one run per log")
     if args.audio_test and args.runs != 1:
         parser.error("audio qualification requires one run per log")
     minimum = 80 if args.audio_test else args.display_soak_seconds + 35 if args.display_soak_seconds else 3
-    maximum = 120 if args.audio_test else args.display_soak_seconds + 60
+    maximum = 600 if args.media_test else 120 if args.audio_test else args.display_soak_seconds + 60
     if not 1 <= args.runs <= 100 or not minimum <= args.seconds <= maximum:
-        parser.error("runs must be 1..100; capture must be 3..60 seconds, audio 80..120, or soak duration plus 35..60")
+        parser.error("runs must be 1..100; capture must be 3..60 seconds, audio 80..120, display soak plus 35..60, or media 3..600")
 
     import esptool
     from esptool.bin_image import LoadFirmwareImage
@@ -373,7 +411,11 @@ def main():
     if esptool.__version__ != "5.6.0":
         raise ValueError("requires esptool==5.6.0")
     data = args.image.read_bytes()
-    validate_image(LoadFirmwareImage("esp32s31", data), radio=args.radio_os_test or args.phy_test)
+    validate_image(LoadFirmwareImage("esp32s31", data), radio=args.radio_os_test or args.phy_test or args.media_test)
+    if args.media_test:
+        mode = (b"S31_MEDIA_READ_ONLY", b"S31_MEDIA_CREATE", b"S31_MEDIA_VERIFY_DELETE")[args.media_phase]
+        if mode not in data:
+            raise ValueError("media image mode does not match --media-phase")
     validate_port(args.port, args.serial, list(list_ports.comports()))
     summary_path = args.log.with_suffix(".json")
     factory_path = args.log.with_suffix(".factory.log")
@@ -398,7 +440,10 @@ def main():
                     raise ValueError("diagnostic is qualified for S31 revision 0.0")
                 esptool.load_ram(esp, data)
                 log.write(f"RUN {run + 1}\n".encode())
-                if args.display_soak_seconds:
+                if args.media_test:
+                    received, elapsed = capture(wire, args.seconds, stream=log,
+                                                stop_markers=(b"PASS S31 media\r\n", b"FATAL"))
+                elif args.display_soak_seconds:
                     received, elapsed = capture(wire, args.seconds, b"LCD_SOAK", stream=log)
                 elif args.audio_test:
                     received, elapsed = capture(wire, args.seconds, b"AUDIO_RECORD", stream=log)
@@ -409,7 +454,7 @@ def main():
                 else:
                     received, elapsed = capture(wire, args.seconds,
                                                 b"KERNEL" if args.kernel_test or args.board_test else b"TIMER")
-                if not args.display_soak_seconds and not args.audio_test:
+                if not args.display_soak_seconds and not args.audio_test and not args.media_test:
                     log.write(received)
                 log.flush()
                 checker = (check_phy_result if args.phy_test else check_radio_os_result if args.radio_os_test else
@@ -421,7 +466,8 @@ def main():
                            check_shell_result if args.shell_test else
                            check_board_result if args.board_test else
                            check_kernel_result if args.kernel_test else check_result)
-                passed = (check_display_result(received, elapsed, args.display_soak_seconds)
+                passed = (check_media_result(received,args.media_phase) if args.media_test else
+                          check_display_result(received, elapsed, args.display_soak_seconds)
                           if args.display_test else
                           check_sd_result(received, elapsed, args.allow_no_card_response)
                           if args.sd_test else checker(received, elapsed))

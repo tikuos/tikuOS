@@ -53,6 +53,7 @@ make MCU=esp32s31 BOARD=esp32s31_korvo1 S31_PROFILE=kernel-test \
 | `kernel-test` (default) | Process, worker, FPU, C-library, timer, interrupt-mask and populated-board I2C checks from TikuBench |
 | `board-test` | Kernel checks plus the optional `drivers/input/gt1151` identity and touch-poll checks |
 | `watchdog-test` | Feed, pause, resume and disable checks followed by an intentional 250 ms watchdog reset |
+| `trng-test` | LP entropy-source health soak in SRAM, with passive monitoring or bounded random reads |
 | `shell` | SRAM and PSRAM allocation, native shell with `help`, `ps`, `timer`, `queue`, `echo`, `calc`, `htimer` and `clear` |
 | `firmware` | Durable `/data`, VFS, BASIC, native station/AP Wi-Fi, SAE/PMF, DHCP and encrypted profiles |
 | `flash-shell` | The shell with application metadata and two flash mappings for the factory bootloader |
@@ -395,7 +396,7 @@ matching the backup and restores and verifies it afterward. The runner
 records restoration status before and after mutation.
 
 
-## Read-only SD probing
+## SD card and media storage
 
 The `sd-test` profile uses SPI2 at 400 kHz from the 40 MHz crystal. Its pins
 are GPIO24 SCK, GPIO25 MOSI, GPIO20 MISO and GPIO23 software CS. GPIO21/22
@@ -411,8 +412,65 @@ register and sector payloads require CRC16. Capacity uses a 64-bit sector
 count, including cards with 2^32 sectors. `tiku_s31_sdcard_read()` checks the
 LBA and copies a 512-byte sector to the caller after CRC validation.
 Transfer failures leave caller data intact and require close and reopen.
-The interface exposes no sector writes, erase operation or mount service.
+After identification, `tiku_s31_sdcard_clock()` selects 400 kHz..20 MHz,
+rounding down to a supported divider of the crystal clock. Writes require
+`tiku_s31_sdcard_write_enable()` to select an extent within the identified
+card. Each single-sector write sends CRC16, checks the data-response token,
+waits for programming completion and checks both CMD13 status bytes. The
+sync operation completes prior programming; no optional card cache is
+enabled. An I/O failure freezes transfers until close and reopen. Close
+retains ownership when pending programming cannot be quiesced.
 Native four-bit SDMMC and its MPLL clock are outside this SPI backend.
+
+The firmware profile enables `S31_MEDIA_ENABLE=1` by default. Set it to
+zero to omit the card service. The S31 block adapter validates CID and the
+selected extent each time it acquires the card. Completed sector transfers
+feed the watchdog during synchronous media requests; bounded error waits
+do not feed it. The shared media service
+allocates its two volume bitmaps in PSRAM and mounts the native filesystem
+without formatting. In the TikuOS shell:
+
+```text
+media mount 20000000
+media info
+ls /media
+cat /media/notes/hello.txt
+```
+
+`media mount` defaults to 4 MHz. `media begin`, `append`, `sync`, `finish`,
+`release`, `resume` and `rm` use the shared serialized media service.
+The VFS view supports listing and reads; mutation uses the media commands
+or transfer protocol. Formatting remains an explicit CID/UUID-bound
+operation. The media transfer staging arena also uses PSRAM on S31.
+
+`S31_PROFILE=media-test` mounts the existing volume at 20 MHz and reads
+complete objects, comparing SHA-256 against their catalog digests. Its
+default is read-only. An explicit `S31_MEDIA_TEST_HEADER` can define
+`TIKU_S31_MEDIA_TEST_PHASE` as 1 to create a 131,089-byte test object or 2
+to verify and delete it after another boot. That header must bind
+`TIKU_S31_MEDIA_TEST_CID` to four least-significant-word-first SD register
+words; `TIKU_S31_MEDIA_TEST_NAME` selects the test name. Creation refuses
+an occupied name. Both write phases audit the other complete files before
+and after the operation. Creation exercises synced-prefix release, remount
+and resume. The runner requires `--media-test --media-phase 1` or `2` to
+match a write image; phase zero is read-only. Captures can use
+`--seconds 240` for complete-file audits. The profile uses 128 KiB of low
+SRAM and PSRAM buffers; it does not initialize radios.
+
+Computer transfers use the UART bridge identity:
+
+```sh
+python3 tools/tiku_media_transfer.py --serial /dev/ttyUSB0 \
+    --bridge-serial BRIDGE_SERIAL ls
+```
+
+Replace `BRIDGE_SERIAL` with the CP2102N serial from host enumeration.
+The tool opens at 115200 baud with DTR and RTS asserted together and checks
+port ownership. This avoids a sequential deassertion pulse on the board reset circuit.
+The bridge transport uses 256-byte payloads to bound escaped UART frames. Mount from the TikuOS shell first, then close that terminal.
+`put` and `get` share the protocol documented in
+[computer transfers](../../services/storage/media-transfer.md).
+The S31 firmware's TCP stack is disabled; these transfers use the console.
 
 Run the RAM tool with `--sd-test --seconds 8`. Success requires card
 identification, partition/filesystem probing through `tiku_media_probe()`

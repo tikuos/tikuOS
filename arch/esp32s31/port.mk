@@ -20,8 +20,8 @@ $(error S31_RADIO_COEX=1 requires S31_BLE_ENABLE=1)
 endif
 endif
 S31_PSRAM_MHZ ?= $(if $(filter display-test flash-display-test,$(S31_PROFILE)),80,20)
-ifeq ($(filter $(S31_PROFILE),firmware kernel-test board-test shell watchdog-test flash-shell psram-test flash-psram-test memory-test flash-memory-test display-test flash-display-test sd-test audio-test radio-os-test phy-test flash-wifi-test),)
-$(error S31_PROFILE must be firmware, kernel-test, board-test, shell, watchdog-test, flash-shell, psram-test, flash-psram-test, memory-test, flash-memory-test, display-test flash-display-test sd-test, audio-test, radio-os-test, phy-test or flash-wifi-test)
+ifeq ($(filter $(S31_PROFILE),firmware kernel-test board-test shell watchdog-test flash-shell psram-test flash-psram-test memory-test flash-memory-test display-test flash-display-test sd-test media-test audio-test radio-os-test phy-test flash-wifi-test),)
+$(error S31_PROFILE must be firmware, kernel-test, board-test, shell, watchdog-test, flash-shell, psram-test, flash-psram-test, memory-test, flash-memory-test, display-test flash-display-test sd-test, media-test, audio-test, radio-os-test, phy-test or flash-wifi-test)
 endif
 S31_ENABLED := $(strip $(foreach v,$(filter TIKU_%_ENABLE,$(.VARIABLES)),\
     $(if $(filter 1,$($(v))),$(v))))
@@ -142,6 +142,19 @@ S31_SRCS += arch/esp32s31/tiku_audio_arch.c arch/esp32s31/tiku_psram_arch.c \
 ifeq ($(wildcard drivers/audio/es8389/tiku_drv_audio_es8389.c),)
 $(error audio-test requires the optional drivers/audio/es8389 checkout)
 endif
+else ifeq ($(S31_PROFILE),media-test)
+S31_FLAGS += -DTIKU_MEDIA_FS_ENABLE=1 -DTIKU_S31_SDCARD_ENABLE=1
+ifneq ($(strip $(S31_MEDIA_TEST_HEADER)),)
+S31_FLAGS += -include $(S31_MEDIA_TEST_HEADER)
+endif
+S31_SRCS += arch/esp32s31/tiku_spi_arch.c arch/esp32s31/tiku_sdcard_arch.c \
+    arch/esp32s31/tiku_mfs_block_arch.c arch/esp32s31/tiku_psram_arch.c \
+    arch/esp32s31/tiku_mem_arch.c kernel/memory/tiku_mem.c \
+    kernel/memory/tiku_tier.c kernel/memory/tiku_region.c \
+    kernel/fs/tiku_mfs.c kernel/fs/tiku_mfs_copy.c \
+    services/storage/tiku_media_card.c services/storage/tiku_media_store.c \
+    services/storage/tiku_media_vfs.c tikukits/crypto/sha256/tiku_kits_crypto_sha256.c \
+    TikuBench/tests/esp32s31/test_media.c
 else ifeq ($(S31_PROFILE),sd-test)
 S31_FLAGS += -DTIKU_S31_SD_TEST=1
 S31_SRCS += arch/esp32s31/tiku_spi_arch.c arch/esp32s31/tiku_sdcard_arch.c \
@@ -173,7 +186,7 @@ S31_FLAGS += -DS31_TOUCH_TEST=1
 S31_SRCS += drivers/input/gt1151/tiku_drv_input_gt1151.c
 endif
 S31_LINKER := arch/esp32s31/diagnostic.ld
-ifneq ($(filter radio-os-test phy-test,$(S31_PROFILE)),)
+ifneq ($(filter radio-os-test phy-test media-test,$(S31_PROFILE)),)
 S31_LINKER := arch/esp32s31/radio.ld
 endif
 ifneq ($(filter flash-shell flash-psram-test flash-memory-test flash-display-test,$(S31_PROFILE)),)
@@ -236,7 +249,7 @@ ifneq ($(filter flash-shell flash-psram-test flash-memory-test flash-display-tes
 	$(error flash profiles require the installed second-stage bootloader)
 endif
 	$(PYTHON) tools/esp32s31_ram.py --image $(S31_DIR)/kernel.bin \
-	    --port '$(PORT)' --serial '$(S31_SERIAL)' --$(if $(filter firmware shell flash-shell,$(S31_PROFILE)),shell-test,$(if $(filter watchdog-test board-test psram-test memory-test display-test sd-test audio-test radio-os-test phy-test,$(S31_PROFILE)),$(S31_PROFILE),kernel-test)) --seconds $(if $(filter audio-test,$(S31_PROFILE)),95,$(if $(filter psram-test memory-test display-test sd-test audio-test radio-os-test phy-test,$(S31_PROFILE)),60,6)) --log '$(LOG)'
+	    --port '$(PORT)' --serial '$(S31_SERIAL)' --$(if $(filter firmware shell flash-shell,$(S31_PROFILE)),shell-test,$(if $(filter watchdog-test board-test psram-test memory-test display-test sd-test media-test audio-test radio-os-test phy-test,$(S31_PROFILE)),$(S31_PROFILE),kernel-test)) --seconds $(if $(filter audio-test,$(S31_PROFILE)),95,$(if $(filter psram-test memory-test display-test sd-test media-test audio-test radio-os-test phy-test,$(S31_PROFILE)),60,6)) --log '$(LOG)'
 clean:
 	$(RM) $(S31_OBJS) $(S31_OBJS:.o=.d) $(S31_DIR)/kernel.elf \
 	    $(S31_DIR)/kernel.bin $(S31_DIR)/kernel.map $(S31_DIR)/.flags

@@ -42,3 +42,14 @@ ifeq ($(S31_SERVICES_TEST),1)
 S31_FLAGS += -DTIKU_S31_SERVICES_TEST=1
 S31_SRCS += TikuBench/tests/esp32s31/test_services.c
 endif
+
+S31_MEDIA_ENABLE ?= 1
+ifeq ($(S31_MEDIA_ENABLE),1)
+S31_FLAGS += -DTIKU_MEDIA_FS_ENABLE=1 -DTIKU_S31_SDCARD_ENABLE=1
+S31_SHELL_COMMANDS += MEDIA
+S31_SRCS += arch/esp32s31/tiku_sdcard_arch.c arch/esp32s31/tiku_mfs_block_arch.c \
+    kernel/fs/tiku_mfs.c kernel/fs/tiku_mfs_copy.c \
+    services/storage/tiku_media_card.c services/storage/tiku_media_store.c \
+    services/storage/tiku_media_vfs.c services/storage/tiku_media_transfer.c \
+    services/storage/tiku_media_transfer_server.c shell/commands/tiku_shell_cmd_media.c
+endif

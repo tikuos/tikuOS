@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_media_card.h - Whole-card native media sessions on FireBeetle 2.
+ * tiku_media_card.h - Whole-card native media sessions on supported SD ports.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

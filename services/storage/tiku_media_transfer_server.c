@@ -228,7 +228,12 @@ int tiku_media_transfer_server_start(uint16_t port,const uint8_t *key)
     int rc=tiku_media_transfer_server_stop();if(rc)return rc;
     tiku_media_store_t *s=tiku_media_card_store();if(!s)return TIKU_MFS_NOFS;
     tiku_mem_request_t opts={0};opts.allocation_class=TIKU_MEM_TRANSIENT;
-    if(tiku_tier_arena_create_opts(&arena,TIKU_MEM_SRAM,sizeof *memory,92,&opts))return TIKU_MFS_SPACE;
+#if PLATFORM_ESP32S31
+    tiku_mem_tier_t tier=TIKU_MEM_PSRAM;
+#else
+    tiku_mem_tier_t tier=TIKU_MEM_SRAM;
+#endif
+    if(tiku_tier_arena_create_opts(&arena,tier,sizeof *memory,92,&opts))return TIKU_MFS_SPACE;
     memory=tiku_arena_alloc(&arena,sizeof *memory);
     if(!memory){(void)tiku_arena_destroy(&arena);return TIKU_MFS_SPACE;}
     memset(memory,0,sizeof *memory);memcpy(memory->volume,s->uuid,16);

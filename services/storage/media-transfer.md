@@ -27,6 +27,27 @@ control-line state needed to avoid a reset. It enables `media usb` when it
 opens the port. The service transfers binary data through console channel
 `0xF7`; the card does not appear as a computer disk drive.
 
+## S31 UART bridge
+
+The S31 firmware profile with `S31_MEDIA_ENABLE=1` includes the media
+service over its CP2102N console. Mount the card from the TikuOS shell,
+close the terminal, then run on the computer:
+
+```sh
+python3 tools/tiku_media_transfer.py --serial /dev/ttyUSB0 --bridge-serial BRIDGE_SERIAL ls
+python3 tools/tiku_media_transfer.py --serial /dev/ttyUSB0 --bridge-serial BRIDGE_SERIAL put sound.opus audio/sound.opus
+python3 tools/tiku_media_transfer.py --serial /dev/ttyUSB0 --bridge-serial BRIDGE_SERIAL get audio/sound.opus downloaded.opus
+```
+
+Use the bridge serial identity reported by host enumeration. This explicit
+selection requires a matching CP2102N device and an unused port. The tool
+sets 115200 baud and holds DTR/RTS asserted together before opening to
+avoid a reset pulse from sequential control-line deassertion. Upload and
+download requests use 256-byte payloads on this bridge so an escaped upload
+frame fits within the 1,024-byte UART receive ring. S31 keeps media
+bitmaps and transfer staging in PSRAM. Its firmware profile disables TCP;
+the UART bridge carries these transfers.
+
 ## High-speed USB
 
 Build the FireBeetle P4 with `TIKU_USBHS_MSC=1` in addition to the media

@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_sdcard_arch.c - CRC-checked SDHC/SDXC identification and sector reads.
+ * tiku_sdcard_arch.c - CRC-checked SDHC/SDXC identification and sector transfers.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -28,7 +28,8 @@ static const unsigned pins[] = {21,22,23,39};
 static const char name[] = "sdcard";
 static tiku_s31_sdcard_t *active;
 static uint32_t saved[4][5];
-static unsigned claimed, spi_open, ready, failed;
+static unsigned claimed, spi_open, ready, failed, pending;
+static uint64_t write_first, write_sectors;
 static uint8_t staging[512];
 /** @brief Restrict card and controller operations to kernel foreground. */
 static int context(void) { return !tiku_s31_in_trap && tiku_thread_in_kernel(); }
@@ -63,7 +64,7 @@ static int byte(uint8_t tx, uint8_t *rx)
 /** @brief Release CS and send eight clocks before the next command. */
 static int deselect(void)
 { uint8_t ignored; REG(0x20583008u) = 1u << 23; return byte(255, &ignored); }
-/** @brief Issue one read/control command and retain CS for its response payload. */
+/** @brief Issue one command and retain CS for its response payload. */
 static int command(unsigned index, uint32_t argument)
 {
     uint8_t packet[6] = {64u | index, argument >> 24, argument >> 16, argument >> 8, argument, 0};
@@ -96,9 +97,24 @@ static int block(unsigned length)
     if (crc16(staging, length) != ((unsigned)crc[0] << 8 | crc[1])) return TIKU_S31_SD_IO;
     return deselect();
 }
+/** @brief Clock through a programming busy interval, bounded to one second. */
+static int quiesce(void)
+{
+    uint8_t value;
+    REG(0x2058300cu) = 1u << 23;
+    if (byte(255, &value)) return TIKU_S31_SD_IO;
+    uint64_t start = tiku_s31_time();
+    for (unsigned n = 0; n < 1000000; n++) {
+        if (byte(255, &value)) return TIKU_S31_SD_IO;
+        if (value == 255) { pending = 0; return 0; }
+        if (tiku_s31_time() - start >= 16000000u) break;
+    }
+    return TIKU_S31_SD_TIMEOUT;
+}
 int tiku_s31_sdcard_close(tiku_s31_sdcard_t *card)
 {
     if (!context() || !card || card != active) return TIKU_S31_SD_INVALID;
+    if (pending && quiesce()) return TIKU_S31_SD_BUSY;
     if (spi_open) {
         REG(0x20583008u) = 1u << 23;
         tiku_spi_arch_close();
@@ -112,7 +128,8 @@ int tiku_s31_sdcard_close(tiku_s31_sdcard_t *card)
         if (saved[i][3]) REG(p < 32 ? 0x20583038u : 0x20583044u) = bit;
         (void)tiku_gpio_release(p / 8 + 1, p % 8, name);
     }
-    active = NULL; claimed = spi_open = ready = failed = 0;
+    active = NULL; claimed = spi_open = ready = failed = pending = 0;
+    write_first = write_sectors = 0;
     return 0;
 }
 /** @brief Claim card-control pads and establish SPI mode with a power cycle. */
@@ -204,4 +221,58 @@ int tiku_s31_sdcard_read(uint32_t lba, void *buffer, void *handle)
     if (result) { failed = 1; (void)deselect(); return result; }
     memcpy(buffer, staging, 512); active->reads++;
     return 0;
+}
+
+int tiku_s31_sdcard_write_enable(tiku_s31_sdcard_t *card, uint64_t first, uint64_t sectors)
+{
+    if (!context() || !card || card != active || !ready || failed || !sectors ||
+        first >= card->sectors || sectors > card->sectors - first) return TIKU_S31_SD_INVALID;
+    write_first = first; write_sectors = sectors;
+    return 0;
+}
+int tiku_s31_sdcard_sync(tiku_s31_sdcard_t *card)
+{
+    if (!context() || !card || card != active || !ready || failed) return TIKU_S31_SD_INVALID;
+    int result = quiesce();
+    if (!result) result = command(13, 0);
+    uint8_t status = 255;
+    if (!result && (card->response || byte(255, &status) || status)) result = TIKU_S31_SD_IO;
+    if (deselect() && !result) result = TIKU_S31_SD_IO;
+    if (result) failed = 1;
+    return result;
+}
+int tiku_s31_sdcard_write(uint32_t lba, const void *buffer, tiku_s31_sdcard_t *card)
+{
+    if (!context() || !card || card != active || !ready || failed || !buffer ||
+        (uint64_t)lba < write_first || (uint64_t)lba - write_first >= write_sectors)
+        return TIKU_S31_SD_INVALID;
+    int result = command(24, lba);
+    if (!result && card->response) result = TIKU_S31_SD_IO;
+    if (!result) {
+        uint16_t sum = crc16(buffer, 512);
+        uint8_t crc[2] = {sum >> 8, sum}, value;
+        pending = 1;
+        if (byte(255, &value) || byte(254, &value) || tiku_spi_arch_write(buffer, 512) ||
+            tiku_spi_arch_write(crc, 2)) result = TIKU_S31_SD_IO;
+        if (!result) {
+            value = 255;
+            for (unsigned n = 0; n < 16; n++) {
+                if (byte(255, &value)) { result = TIKU_S31_SD_IO; break; }
+                if (value != 255) break;
+            }
+            if (!result && (value & 31u) != 5u) result = TIKU_S31_SD_IO;
+        }
+        if (!result) result = tiku_s31_sdcard_sync(card);
+    }
+    if (result) { failed = 1; (void)deselect(); }
+    return result;
+}
+int tiku_s31_sdcard_clock(tiku_s31_sdcard_t *card, uint32_t hz)
+{
+    if (!context() || !card || card != active || !ready || failed ||
+        hz < 400000 || hz > 20000000) return TIKU_S31_SD_INVALID;
+    int result = deselect();
+    if (!result && tiku_s31_spi_clock(hz)) result = TIKU_S31_SD_IO;
+    if (result) failed = 1;
+    return result;
 }

@@ -17,6 +17,10 @@
  * CS and card power belong to the caller. Reinitialization requires close.
  */
 int tiku_spi_arch_init(const tiku_spi_config_t *config);
+/** @brief Set 400 kHz..20 MHz after initialization, rounding down to a supported clock.
+ * @note Caller deasserts CS first. Transfer errors require closing the controller.
+ */
+int tiku_s31_spi_clock(uint32_t hz);
 /** @brief Reset SPI2, restore clock and pad state, and release its claims. */
 void tiku_spi_arch_close(void);
 /** @brief Exchange a byte; return 0xFF on failure. */

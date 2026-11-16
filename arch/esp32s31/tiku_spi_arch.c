@@ -109,6 +109,23 @@ int tiku_spi_arch_init(const tiku_spi_config_t *config)
     if (wait_clear(1u << 23)) { tiku_spi_arch_close(); return TIKU_SPI_ERR_TIMEOUT; }
     return 0;
 }
+int tiku_s31_spi_clock(uint32_t hz)
+{
+    if (!context() || !opened || failed || hz < 400000 || hz > 20000000)
+        return TIKU_SPI_ERR_PARAM;
+    unsigned divisor = UINT32_MAX, best_n = 0, best_pre = 0;
+    for (unsigned n = 2; n <= 64; n += 2) {
+        unsigned pre = (40000000u + hz*n - 1) / (hz*n);
+        if (pre && pre <= 16 && pre*n < divisor) {
+            divisor = pre*n; best_n = n; best_pre = pre;
+        }
+    }
+    REG(SPI + 0x0c) = (best_n - 1) | ((best_n/2 - 1) << 6) |
+                      ((best_n - 1) << 12) | ((best_pre - 1) << 18);
+    REG(SPI) = 1u << 23;
+    if (wait_clear(1u << 23)) { failed = 1; return TIKU_SPI_ERR_TIMEOUT; }
+    return 0;
+}
 /** @brief Exchange bounded FIFO batches; failure resets SPI and requires close. */
 static int run(const uint8_t *tx, uint8_t *rx, uint16_t length)
 {

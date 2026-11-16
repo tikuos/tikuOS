@@ -92,13 +92,21 @@ class TCP:
 
 
 class USB:
-    """Exclusive Espressif USB serial console with media channel demultiplexing."""
-    def __init__(self, port):
+    """Exclusive board console with media channel demultiplexing."""
+    def __init__(self, port, bridge_serial=None):
         import serial
         from serial.tools import list_ports
         from esp_usb_console import require_idle_usb_port, usb_console
-        require_idle_usb_port(port, list_ports.comports())
-        self.wire = usb_console(serial, port)
+        if bridge_serial is not None:
+            from esp32s31_ram import validate_port
+            validate_port(port, bridge_serial, list(list_ports.comports()))
+            self.wire = serial.Serial(port=None, baudrate=115200, timeout=0.1, exclusive=True)
+            self.wire.dtr = self.wire.rts = True
+            self.wire.port = port
+            self.chunk = 256
+        else:
+            require_idle_usb_port(port, list_ports.comports())
+            self.wire = usb_console(serial, port)
         self.wire.write_timeout = 30
         self.wire.open()
         self.frame = bytearray()
@@ -300,6 +308,7 @@ def main():
     transport.add_argument('--serial', metavar='PORT')
     transport.add_argument('--tcp', metavar='HOST:PORT')
     transport.add_argument('--usbhs', nargs='?', const='auto', metavar='USB_SERIAL')
+    parser.add_argument('--bridge-serial', help='expected S31 CP2102N serial identity; holds DTR/RTS asserted together')
     parser.add_argument('--key-file', type=Path, help='32-byte binary TCP access key')
     commands = parser.add_subparsers(dest='command', required=True)
     upload = commands.add_parser('put')
@@ -316,6 +325,8 @@ def main():
     serve = commands.add_parser('serve', help='enable TCP using the USB console and generate its key')
     serve.add_argument('--port', type=int, default=7331)
     args = parser.parse_args()
+    if args.bridge_serial is not None and (not args.serial or not args.bridge_serial):
+        parser.error('--bridge-serial requires --serial and a nonempty bridge identity')
     if args.command == 'serve' and (not args.serial or not args.key_file or not 1 <= args.port <= 65535):
         parser.error('serve requires --serial, --key-file and a port in 1..65535')
     if args.tcp and not args.key_file:
@@ -329,7 +340,7 @@ def main():
             from tiku_usb_bulk import Bulk
             wire = Bulk(args.usbhs)
         else:
-            wire = USB(args.serial) if args.serial else TCP(args.tcp)
+            wire = USB(args.serial, args.bridge_serial) if args.serial else TCP(args.tcp)
         if args.command == 'serve':
             key = os.urandom(32)
             fd = os.open(args.key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
