@@ -13,7 +13,7 @@ ENTRY(tiku_s31_diagnostic_entry)
 MEMORY {
     SRAM (rwx) : ORIGIN = 0x2f000000, LENGTH = DEFINED(S31_FIRMWARE) ? 384K : 256K
     DROM (r) : ORIGIN = 0x40000020, LENGTH = 128K - 32
-    IROM (rx) : ORIGIN = 0x40020020, LENGTH = DEFINED(S31_BLE) ? 1024K - 32 : 512K - 32
+    IROM (rx) : ORIGIN = 0x40020020, LENGTH = DEFINED(S31_FIRMWARE) ? 1024K - 32 : 512K - 32
 }
 SECTIONS
 {
@@ -44,6 +44,16 @@ SECTIONS
         *esp_crypto.o(.text .text.*)
         *basic/*.o(.text .text.*)
         *kernel/vfs/*.o(.text .text.*)
+        *kernel/process/tiku_proc_vfs.o(.text .text.*)
+        *kernel/memory/tiku_layout.o(.text .text.*)
+        *kernel/fs/tiku_tfs.o(.text .text.*)
+        *kernel/fs/tiku_mfs*.o(.text .text.*)
+        *services/storage/*.o(.text .text.*)
+        *tikukits/net/ipv4/*.o(.text .text.*)
+        *tikukits/net/wifi/*.o(.text .text.*)
+        *drivers/wifi/esp/tiku_drv_wifi_esp.o(.text .text.*)
+        *drivers/wifi/esp/esp_ap.o(.text .text.*)
+        *drivers/wifi/esp/s31/wifi_s31_profile.o(.text .text.*)
         *shell/*.o(.text .text.*)
         *applications/*.o(.text .text.*)
         *libphy.a:(.text .text.*) *libnet80211.a:(.text .text.*) *libpp.a:(.text .text.*) *libcore.a:(.text .text.*)

@@ -45,8 +45,9 @@ sets 115200 baud and holds DTR/RTS asserted together before opening to
 avoid a reset pulse from sequential control-line deassertion. Upload and
 download requests use 256-byte payloads on this bridge so an escaped upload
 frame fits within the 1,024-byte UART receive ring. S31 keeps media
-bitmaps and transfer staging in PSRAM. Its firmware profile disables TCP;
-the UART bridge carries these transfers.
+bitmaps and transfer staging in PSRAM. The firmware profile also enables
+TCP with volatile receive and retransmission buffers. Use the bridge to
+provision a Wi-Fi listener as described below.
 
 ## High-speed USB
 
@@ -104,6 +105,28 @@ or reboot disables that listener. USB and TCP listeners are selected one at a ti
 connection. Reply segments wait for acknowledgment before the next segment;
 the host sizes TCP chunks to fit the negotiated MSS, including framing.
 Sessions idle for 120 seconds release their file handles.
+
+On S31, join the network and mount the card in the TikuOS shell:
+
+```text
+wifi on
+wifi connect "NETWORK" "PASSPHRASE"
+ip
+media mount 20000000
+```
+
+Wait for `ip` to report a DHCP address, then close the terminal. Provision
+the listener through the CP2102N bridge on the computer:
+
+```sh
+python3 tools/tiku_media_transfer.py --serial /dev/ttyUSB0 --bridge-serial BRIDGE_SERIAL --key-file media.key serve --port 7331
+```
+
+Use the `--tcp` commands above with that address and key file for listing,
+uploads and downloads. The UART console remains available while TCP carries
+file data. The S31 network process services TCP timers; the shell pump runs
+storage requests. The listener is started explicitly and is not saved across
+reboots.
 
 The key authorizes listing, reading and uploading files. The protocol sends
 the key and file contents over plain TCP; use it on a trusted, secured LAN.

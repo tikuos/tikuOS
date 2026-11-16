@@ -201,7 +201,8 @@ ifeq ($(S31_PROFILE),firmware)
 S31_FLAGS += -DTIKU_S31_WIFI_ENABLE=1 -DTIKU_DRV_WIFI_ESP_ENABLE=1 -DTIKU_ESP_PROFILE_ENABLE=1 \
     -DTIKU_WIRELESS_AP_ENABLE=1 -DTIKU_ESP_SAE_ENABLE=1 \
     -DTIKU_KIT_NET_ENABLE=1 -DTIKU_KIT_NET_MIN=1 -DTIKU_KITS_NET_WIFI_ENABLE=1 \
-    -DTIKU_KITS_NET_DHCP_ENABLE=1 -DTIKU_KITS_NET_TCP_ENABLE=0 -DTIKU_KITS_NET_MTU=1500
+    -DTIKU_KITS_NET_DHCP_ENABLE=1 -DTIKU_KITS_NET_TCP_ENABLE=1 -DTIKU_KITS_NET_MTU=1500 \
+    -DTIKU_KITS_NET_TCP_BUF_PERSIST=0 -DTIKU_KITS_NET_TCP_RX_BUF_SIZE=2048
 S31_LDFLAGS += -Wl,--defsym=S31_FIRMWARE=1
 S31_SRCS += arch/esp32s31/tiku_settings_arch.c arch/esp32s31/tiku_settings_io.c drivers/wifi/esp/s31/wifi_s31_profile.c \
     tikukits/crypto/gcm/tiku_kits_crypto_gcm.c tikukits/crypto/pbkdf2/tiku_kits_crypto_pbkdf2_sha256.c \
@@ -209,7 +210,8 @@ S31_SRCS += arch/esp32s31/tiku_settings_arch.c arch/esp32s31/tiku_settings_io.c 
     shell/commands/tiku_shell_cmd_wifi.c shell/commands/tiku_shell_cmd_ip.c \
     shell/commands/tiku_shell_cmd_ping.c shell/commands/tiku_shell_cmd_slip.c \
     tikukits/net/wifi/tiku_kits_net_wifi.c tikukits/net/slip/tiku_kits_net_slip.c \
-    $(addprefix tikukits/net/ipv4/tiku_kits_net_,ipv4.c icmp.c udp.c dhcp.c dhcps.c)
+    $(addprefix tikukits/net/ipv4/tiku_kits_net_,ipv4.c icmp.c udp.c dhcp.c dhcps.c tcp.c) \
+    kernel/memory/tiku_pool.c
 S31_SAE_HASH := $(shell cd drivers/wifi/esp/sae && sha256sum -c SHA256SUMS >/dev/null 2>&1 && echo yes)
 ifneq ($(S31_SAE_HASH),yes)
 $(error S31 SAE vendor assets failed SHA256 verification)

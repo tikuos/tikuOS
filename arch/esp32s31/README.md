@@ -470,7 +470,24 @@ port ownership. This avoids a sequential deassertion pulse on the board reset ci
 The bridge transport uses 256-byte payloads to bound escaped UART frames. Mount from the TikuOS shell first, then close that terminal.
 `put` and `get` share the protocol documented in
 [computer transfers](../../services/storage/media-transfer.md).
-The S31 firmware's TCP stack is disabled; these transfers use the console.
+The firmware profile enables TCP with receive and retransmission buffers in
+SRAM. Media staging remains in PSRAM. Filesystem, network and radio-control
+foreground code executes from flash to leave SRAM for the shared radio heap.
+After Wi-Fi association and DHCP, provision a listener from the computer:
+
+```sh
+python3 tools/tiku_media_transfer.py --serial /dev/ttyUSB0 \
+    --bridge-serial BRIDGE_SERIAL --key-file media.key serve --port 7331
+python3 tools/tiku_media_transfer.py --tcp BOARD_IP:7331 \
+    --key-file media.key put recording.opus audio/recording.opus
+python3 tools/tiku_media_transfer.py --tcp BOARD_IP:7331 \
+    --key-file media.key get audio/recording.opus downloaded.opus
+```
+
+Replace `BOARD_IP` with the address reported by `ip` in the TikuOS shell.
+`media off` stops the listener. The access key and files travel over plain
+TCP; use a secured, trusted Wi-Fi network. Listener keys reside in RAM and
+must be provisioned again after reboot.
 
 Run the RAM tool with `--sd-test --seconds 8`. Success requires card
 identification, partition/filesystem probing through `tiku_media_probe()`
