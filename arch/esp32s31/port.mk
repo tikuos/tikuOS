@@ -75,7 +75,8 @@ S31_FLAGS += -DTIKU_S31_DISPLAY_TEST=1 -DTIKU_GPIO_CLAIM_LIMIT=32 \
 S31_SRCS += arch/esp32s31/tiku_psram_arch.c arch/esp32s31/tiku_mem_arch.c \
     arch/esp32s31/tiku_dma_arch.c arch/esp32s31/tiku_display_arch.c \
     kernel/memory/tiku_mem.c kernel/memory/tiku_tier.c kernel/memory/tiku_region.c \
-    interfaces/display/tiku_display.c TikuBench/tests/esp32s31/test_display.c \
+    interfaces/display/tiku_display.c interfaces/display/tiku_display_async.c \
+    TikuBench/tests/esp32s31/test_display.c \
     drivers/input/gt1151/tiku_drv_input_gt1151.c
 endif
 ifneq ($(filter firmware flash-wifi-test,$(S31_PROFILE)),)

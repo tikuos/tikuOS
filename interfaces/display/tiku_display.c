@@ -273,3 +273,34 @@ tiku_display_damage_bounds(const tiku_display_t *d, uint16_t *x, uint16_t *y,
     if (h != (uint16_t *)0) { *h = (uint16_t)(d->dy1 - d->dy0); }
     return 1;
 }
+
+int tiku_display_submit(tiku_display_t *d, uint64_t token, uint16_t x,
+                        uint16_t y, uint16_t w, uint16_t h)
+{
+    if (!d || !token || !w || !h || x >= d->w || y >= d->h ||
+        w > d->w - x || h > d->h - y) return TIKU_DISPLAY_ERR_INVALID;
+    if (!(tiku_display_arch_caps() & TIKU_DISPLAY_CAP_ASYNC))
+        return TIKU_DISPLAY_ERR_UNSUPPORTED;
+    return tiku_display_arch_submit(d, token, x, y, w, h);
+}
+
+int tiku_display_poll(tiku_display_t *d, uint64_t token)
+{
+    if (!d || !token) return TIKU_DISPLAY_ERR_INVALID;
+    if (!(tiku_display_arch_caps() & TIKU_DISPLAY_CAP_ASYNC))
+        return TIKU_DISPLAY_ERR_UNSUPPORTED;
+    return tiku_display_arch_poll(d, token);
+}
+
+int __attribute__((weak)) tiku_display_arch_submit(tiku_display_t *d, uint64_t token,
+    uint16_t x, uint16_t y, uint16_t w, uint16_t h)
+{
+    (void)d; (void)token; (void)x; (void)y; (void)w; (void)h;
+    return TIKU_DISPLAY_ERR_UNSUPPORTED;
+}
+
+int __attribute__((weak)) tiku_display_arch_poll(tiku_display_t *d, uint64_t token)
+{
+    (void)d; (void)token;
+    return TIKU_DISPLAY_ERR_UNSUPPORTED;
+}

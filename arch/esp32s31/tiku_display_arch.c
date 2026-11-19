@@ -13,6 +13,7 @@
 #include <stddef.h>
 #include <hal/tiku_clock_hal.h>
 #include <interfaces/display/tiku_display_arch.h>
+#include <interfaces/display/tiku_display_async.h>
 #include <interfaces/gpio/tiku_gpio_owner.h>
 #include <kernel/memory/tiku_mem.h>
 #include <kernel/threads/tiku_thread.h>
@@ -25,7 +26,13 @@
 #error S31 RGB scanout requires the qualified 80 MHz PSRAM clock
 #endif
 
-#define REG(a) (*(volatile uint32_t *)(uintptr_t)(a))
+#ifndef TIKU_S31_DISPLAY_REG
+#define TIKU_S31_DISPLAY_REG(a) (*(volatile uint32_t *)(uintptr_t)(a))
+#endif
+#ifndef TIKU_S31_DISPLAY_FENCE
+#define TIKU_S31_DISPLAY_FENCE() __asm__ volatile ("fence iorw,iorw" ::: "memory")
+#endif
+#define REG(a) TIKU_S31_DISPLAY_REG(a)
 #define LCD 0x20396000u
 #define DMA 0x20348000u
 #define BYTES 768000u
@@ -57,6 +64,7 @@ static tiku_s31_display_stats_t counters;
 static unsigned claimed, hardware, shown_ring, paired, faulted;
 static void *shown_buffer;
 static unsigned link_switched;
+static tiku_display_async_t submission;
 static int context(void);
 static void halt(void);
 static int start(void);
@@ -66,7 +74,7 @@ static unsigned fault;
 void tiku_s31_display_test_fault(unsigned mode) { fault = mode; }
 uint32_t tiku_s31_display_test_mismatches(void)
 {
-    if (!context() || !active) return UINT32_MAX;
+    if (!context() || !active || submission.phase) return UINT32_MAX;
     halt();
     const uint32_t *a = (const uint32_t *)active->fb;
     const uint32_t *b = (const uint32_t *)shown_buffer;
@@ -120,7 +128,7 @@ static void halt(void)
             REG(DMA + 0x148) |= 1u;
             REG(DMA + 0x148) &= ~1u;
             REG(LCD + 0x18) = MISC | (1u << 27);
-            __asm__ volatile ("fence iorw,iorw" ::: "memory");
+            TIKU_S31_DISPLAY_FENCE();
             return;
         }
     }
@@ -131,6 +139,7 @@ int tiku_s31_display_close(tiku_display_t *d)
 {
     if (!context() || d != active || !active) return TIKU_DISPLAY_ERR_STATE;
     halt();
+    tiku_display_async_reset(&submission);
     if (hardware) {
         REG(LCD + 0x64) = 0;
         REG(DMA + 0x140) = 0;
@@ -167,7 +176,7 @@ static int start(void)
 {
     REG(LCD + 0x70) = 0x13;
     REG(DMA + 0x144) = 0x7ff;
-    __asm__ volatile ("fence iorw,iorw" ::: "memory");
+    TIKU_S31_DISPLAY_FENCE();
     REG(DMA + 0x15c) = (uint32_t)(uintptr_t)descriptors[shown_ring];
     REG(DMA + 0x158) = 2u;
     tiku_clock_arch_delay(1);
@@ -215,9 +224,16 @@ static int publish(void *buffer, unsigned offset, unsigned bytes)
 /** @brief Refuse CPU writes to a paired framebuffer being read by DMA. */
 static int writable(const tiku_display_t *d)
 {
-    if (!context() || d != active || faulted || !surface(d)) return 0;
+    if (!context() || d != active || faulted || submission.phase || !surface(d)) return 0;
     uintptr_t a = (uintptr_t)d->fb, b = (uintptr_t)shown_buffer;
     return !paired || (a >= b ? a - b >= BYTES : b - a >= BYTES);
+}
+
+/** @brief Restrict AXI internal-memory accesses to the complete descriptor pair. */
+static void descriptor_window(void)
+{
+    REG(DMA + 0x27c) = (uint32_t)(uintptr_t)descriptors;
+    REG(DMA + 0x280) = (uint32_t)(uintptr_t)descriptors + sizeof descriptors - 1u;
 }
 
 int tiku_display_arch_init(tiku_display_t *d)
@@ -259,7 +275,7 @@ int tiku_display_arch_init(tiku_display_t *d)
     if (REG(0x20504100u) & 3u) goto fail;
     REG(0x20587078u) = (REG(0x20587078u) | 1u) & ~2u;
     REG(DMA + 0x2a8) |= 16u;
-    REG(DMA + 0x27c) = 0x2f000000u; REG(DMA + 0x280) = 0x2f00ffffu;
+    descriptor_window();
     REG(DMA + 0x284) = 0x50000000u; REG(DMA + 0x288) = 0x50ffffffu;
     REG(DMA + 0x140) = 0;
     REG(DMA + 0x148) = 1u; REG(DMA + 0x148) = (3u << 5) | (1u << 10);
@@ -311,7 +327,7 @@ fail:
     return TIKU_DISPLAY_ERR_STATE;
 }
 
-uint32_t tiku_display_arch_caps(void) { return TIKU_DISPLAY_CAP_FLIP; }
+uint32_t tiku_display_arch_caps(void) { return TIKU_DISPLAY_CAP_FLIP | TIKU_DISPLAY_CAP_ASYNC; }
 tiku_display_fmt_t tiku_display_arch_format(void) { return TIKU_DISPLAY_FMT_RGB565; }
 void tiku_display_arch_geometry(uint16_t *w, uint16_t *h)
 { if (w) *w = 800; if (h) *h = 480; }
@@ -366,7 +382,7 @@ int tiku_display_arch_present(tiku_display_t *d, uint16_t x, uint16_t y,
 }
 int tiku_display_arch_set_scanout(tiku_display_t *d, void *fb)
 {
-    if (!context() || !active || d != active || faulted) return TIKU_DISPLAY_ERR_STATE;
+    if (!context() || !active || d != active || faulted || submission.phase) return TIKU_DISPLAY_ERR_STATE;
     tiku_display_t candidate = *d;
     candidate.fb = fb;
     if (!surface(&candidate)) return TIKU_DISPLAY_ERR_INVALID;
@@ -379,14 +395,14 @@ int tiku_display_arch_set_scanout(tiku_display_t *d, void *fb)
     (void)tiku_s31_display_poll(NULL);
     link_switched = 0;
     REG(DMA + 0x144) = 1u << 10;
-    __asm__ volatile ("fence iorw,iorw" ::: "memory");
+    TIKU_S31_DISPLAY_FENCE();
 #ifdef TIKU_S31_DISPLAY_TEST
     unsigned skip = fault == 3;
     fault = 0;
     if (!skip)
 #endif
         descriptors[shown_ring][COUNT - 1].next = (uint32_t)(uintptr_t)descriptors[next];
-    __asm__ volatile ("fence iorw,iorw" ::: "memory");
+    TIKU_S31_DISPLAY_FENCE();
     uint64_t begin = tiku_s31_time();
     REG(DMA + 0x2dc) |= 1u;
     uint32_t expected = (uint32_t)(uintptr_t)descriptors[next];
@@ -407,3 +423,82 @@ int tiku_display_arch_fill_circle(tiku_display_t *d, int16_t x, int16_t y, uint1
 int tiku_display_arch_fill_rounded_rect(tiku_display_t *d, int16_t x, int16_t y,
                                       uint16_t w, uint16_t h, uint16_t r, uint32_t c)
 { (void)d; (void)x; (void)y; (void)w; (void)h; (void)r; (void)c; return TIKU_DISPLAY_ERR_UNSUPPORTED; }
+
+/** @brief Publish one cache batch while observing scanout errors. */
+static int async_publish(void *buffer, uint32_t offset, uint32_t bytes)
+{
+    return tiku_s31_display_poll(NULL) ||
+        tiku_s31_psram_sync((uint8_t *)buffer + offset, bytes, 0);
+}
+
+/** @brief Link the idle ring at the running frame's boundary and request switching. */
+static void async_switch_start(void *buffer)
+{
+    unsigned next = shown_ring ^ 1u;
+    make_ring(next, buffer);
+    (void)tiku_s31_display_poll(NULL);
+    link_switched = 0;
+    REG(DMA + 0x144) = 1u << 10;
+    TIKU_S31_DISPLAY_FENCE();
+#ifdef TIKU_S31_DISPLAY_TEST
+    unsigned skip = fault == 3;
+    fault = 0;
+    if (!skip)
+#endif
+        descriptors[shown_ring][COUNT - 1].next = (uint32_t)(uintptr_t)descriptors[next];
+    TIKU_S31_DISPLAY_FENCE();
+    REG(DMA + 0x2dc) |= 1u;
+}
+
+/** @brief Release the old ring after observing both switch status and its replacement. */
+static int async_switch_poll(void *buffer)
+{
+    if (tiku_s31_display_poll(NULL)) return TIKU_DISPLAY_ERR_STATE;
+    unsigned next = shown_ring ^ 1u;
+    uint32_t expected = (uint32_t)(uintptr_t)descriptors[next];
+    uint32_t current = REG(DMA + 0x16c);
+    if (!link_switched || current < expected || current >= expected + sizeof descriptors[next])
+        return TIKU_DISPLAY_PENDING;
+    shown_ring = next; shown_buffer = buffer;
+    return TIKU_DISPLAY_OK;
+}
+
+/** @brief Latch the fault and request stopped DMA without returning its storage. */
+static void async_stop_start(void)
+{
+    faulted = 1;
+    REG(LCD + 0x14) = USER | (1u << 21);
+    REG(DMA + 0x158) |= 1u;
+}
+
+/** @brief Reset the halted engine after both TX and its link have parked. */
+static int async_stop_poll(void)
+{
+    if (!(REG(DMA + 0x158) & 8u) || !(REG(DMA + 0x298) & 1u))
+        return TIKU_DISPLAY_PENDING;
+    REG(DMA + 0x148) |= 1u;
+    REG(DMA + 0x148) &= ~1u;
+    REG(LCD + 0x18) = MISC | (1u << 27);
+    TIKU_S31_DISPLAY_FENCE();
+    return TIKU_DISPLAY_OK;
+}
+
+/** @brief Use wrapping microseconds for subsecond handoff and retirement deadlines. */
+static uint32_t async_now_us(void) { return (uint32_t)(tiku_s31_time() / 16u); }
+/** @brief Retain DMA-reachable storage when stopped ownership cannot be established. */
+static void async_fail_stop(void) { tiku_s31_fatal("LCD asynchronous stop"); }
+
+int tiku_display_arch_submit(tiku_display_t *d, uint64_t token, uint16_t x,
+                             uint16_t y, uint16_t w, uint16_t h)
+{
+    if (!writable(d) || !paired || d->front != shown_buffer) return TIKU_DISPLAY_ERR_STATE;
+    return tiku_display_async_begin(&submission, d, token, x, y, w, h);
+}
+
+int tiku_display_arch_poll(tiku_display_t *d, uint64_t token)
+{
+    static const tiku_display_async_ops_t ops = {async_publish, async_switch_start,
+        async_switch_poll, async_stop_start, async_stop_poll, async_now_us, async_fail_stop};
+    if (!context() || !active || d != active) return TIKU_DISPLAY_ERR_STATE;
+    return tiku_display_async_step(&submission, d, token, &ops);
+}

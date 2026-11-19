@@ -110,4 +110,10 @@ int tiku_display_arch_set_scanout(tiku_display_t *d, void *fb);
 int tiku_display_arch_present(tiku_display_t *d, uint16_t x, uint16_t y,
                               uint16_t w, uint16_t h);
 
+/** @brief Accept a paired asynchronous submission under the public lifetime contract. */
+int tiku_display_arch_submit(tiku_display_t *d, uint64_t token, uint16_t x,
+                             uint16_t y, uint16_t w, uint16_t h);
+/** @brief Advance publication or handoff; terminal errors retire DMA ownership. */
+int tiku_display_arch_poll(tiku_display_t *d, uint64_t token);
+
 #endif /* TIKU_DISPLAY_ARCH_H_ */

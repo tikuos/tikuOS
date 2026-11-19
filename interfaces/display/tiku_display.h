@@ -24,6 +24,9 @@
 #define TIKU_DISPLAY_ERR_STATE      -1  /**< not initialised, or busy      */
 #define TIKU_DISPLAY_ERR_INVALID    -2  /**< geometry or buffer refused    */
 #define TIKU_DISPLAY_ERR_UNSUPPORTED -3 /**< backend has no such primitive */
+#define TIKU_DISPLAY_ERR_TOKEN      -4  /**< absent or stale submission    */
+#define TIKU_DISPLAY_ERR_RETIRED    -5  /**< failed request; DMA stopped   */
+#define TIKU_DISPLAY_PENDING         1  /**< submission retains buffers    */
 
 /** @brief Framebuffer pixel layout, which differs by part. */
 typedef enum {
@@ -39,6 +42,7 @@ typedef enum {
 #define TIKU_DISPLAY_CAP_CIRCLE   (1u << 0)  /**< fills circles            */
 #define TIKU_DISPLAY_CAP_ROUNDED  (1u << 1)  /**< fills rounded rectangles */
 #define TIKU_DISPLAY_CAP_FLIP     (1u << 2)  /**< can swap whole buffers  */
+#define TIKU_DISPLAY_CAP_ASYNC    (1u << 3)  /**< bounded submit/poll flip */
 
 /**
  * @brief One screen: its framebuffer and the damage pending on it.
@@ -173,6 +177,26 @@ int tiku_display_set_buffers(tiku_display_t *d, void *front, void *back);
  * @return TIKU_DISPLAY_OK, or TIKU_DISPLAY_ERR_UNSUPPORTED without CAP_FLIP
  */
 int tiku_display_flip(tiku_display_t *d);
+
+/**
+ * @brief Accept the paired back buffer and an on-screen damage rectangle.
+ * @return PENDING when accepted, or a negative refusal with no new retention.
+ * @note Kernel owner, serialized with drawing, polling and close. Tokens are
+ * nonzero and strictly increasing for the backend's lifetime, including reopen.
+ * Keep both complete buffers and the display unchanged until completion or close.
+ * Pixels outside damage must already match the desired frame in this back buffer.
+ */
+int tiku_display_submit(tiku_display_t *d, uint64_t token, uint16_t x,
+                        uint16_t y, uint16_t w, uint16_t h);
+
+/**
+ * @brief Advance one accepted submission without waiting for a frame boundary.
+ * @return PENDING, OK after swapping front/back, ERR_RETIRED after stopped DMA,
+ * or another negative result refusing this poll without changing ownership.
+ * @note OK and ERR_RETIRED consume the token. ERR_RETIRED requires close and
+ * reopen before submitting again. Refusal does not retire a pending request.
+ */
+int tiku_display_poll(tiku_display_t *d, uint64_t token);
 
 /**
  * @brief Make the damaged region visible and clear the damage.
