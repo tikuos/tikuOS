@@ -153,3 +153,43 @@ int tiku_media_card_request(tiku_media_request_t *request)
     }
     return request->result;
 }
+
+#if PLATFORM_ESP32S31 && TIKU_MEDIA_ASYNC_ENABLE
+#include "tiku_media_async.h"
+/** @brief Bounded read query and card session occupy caller-provided storage. */
+typedef struct {tiku_media_async_t queue;tiku_s31_mfs_async_t transport;} card_read_t;
+/** @brief Validate bitmap backing before accepting a polled card session. */
+static int read_acquire(void *ctx,void *backend_context)
+{
+    tiku_mem_stats_t stats;
+    if(backend_context!=&backend||tiku_arena_stats(&bitmap_arena,&stats)!=TIKU_MEM_OK||
+       stats.used_bytes!=2*bitmap_capacity)return TIKU_MFS_IO;
+    return tiku_s31_mfs_async_acquire(ctx,backend_context);
+}
+/** @brief Begin one extent-relative sector read without waiting. */
+static int read_sector(void *ctx,uint64_t lba,void *sector)
+{ return tiku_s31_mfs_async_read(ctx,lba,1,sector); }
+/** @brief Advance one card session phase. */
+static int read_poll(void *ctx) { return tiku_s31_mfs_async_poll(ctx); }
+/** @brief Release or cancel a retained read-only card session. */
+static int read_close(void *ctx) { return tiku_s31_mfs_async_close(ctx); }
+size_t tiku_media_card_read_size(void) { return sizeof(card_read_t); }
+void tiku_media_card_read_init(void *memory)
+{
+    static const tiku_media_async_ops_t ops={read_acquire,read_sector,read_poll,read_close};
+    card_read_t *r=memory;
+    memset(r,0,sizeof *r);tiku_media_async_init(&r->queue,&ops,&r->transport);
+}
+int tiku_media_card_read_step(void *memory,tiku_media_store_t *s)
+{
+    if(!memory||s!=&service)return TIKU_MFS_ARG;
+    return tiku_media_async_step(&((card_read_t *)memory)->queue,s);
+}
+int tiku_media_card_read_idle(const void *memory)
+{ return memory&&!((const card_read_t *)memory)->queue.phase; }
+int tiku_media_card_read_cancel(void *memory,tiku_media_store_t *s,tiku_media_request_t *request)
+{
+    if(!memory||s!=&service)return TIKU_MFS_ARG;
+    return tiku_media_async_cancel(&((card_read_t *)memory)->queue,s,request);
+}
+#endif

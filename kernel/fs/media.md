@@ -417,3 +417,46 @@ missing media, active writers and failures during begin, append, checkpoint
 and finalization, including an error reported after publication. Mutation
 checks require weakened publication, length,
 overwrite and writer-release guards to fail.
+
+## Versioned name enumeration
+
+`TIKU_MEDIA_NAMES_ENABLE=1` adds a boot-scoped version for visible names and
+object bindings. Mount/format and visible publication, finalization or deletion
+advance it. Content-only sync preserves it. Versions are distinct across context
+initialization within the boot; exhaustion refuses further version changes.
+The on-card format is unchanged.
+
+`tiku_mfs_enumerate()` checks an expected version, resolves an inclusive or
+exclusive lower-bound name, and returns one object, its zero-based catalog rank
+and the validated version in one serialized call. Version zero begins a view.
+`TIKU_MEDIA_ENUMERATE` exposes this operation through the service queue with READ
+permission. It does not expose a commit-sensitive cursor between seek and fetch.
+`TIKU_MEDIA_OPEN_VERSION` validates version, exact name and rank before acquiring
+a reader snapshot. With this feature enabled, CLOSE requests remain available
+on a failed service so accepted readers can retire without media access.
+
+One service step can perform multiple backend reads. The operation count does
+not establish a wall-clock bound for the backend's acquisition and I/O waits.
+
+
+## Resumable read queries
+
+`TIKU_MEDIA_ASYNC_ENABLE=1` requires namespace versions and adds caller-owned
+queries in `tiku_mfs_query.h`. Enumeration retains the mount, catalog sequence
+and visible-name version until completion. The caller serializes the filesystem
+while the query is active. Supply the requested 512-byte sector once, then
+advance a metadata or payload-checksum step. A step checks at most 512 payload
+bytes and copies at most one validated 4096-byte slice. Reads retain an existing
+snapshot token and accept up to 65536 output bytes. A later error can leave a
+validated prefix in output. A completed enumeration can pin its checked object
+without rereading metadata.
+
+`services/storage/tiku_media_async.h` drives ENUMERATE, OPEN_VERSION, READ_AT
+and CLOSE through the shared FIFO using a caller-provided polled transport.
+An active query excludes synchronous execution and permits enqueue. Transport
+release precedes result publication and snapshot acquisition. Cancellation
+retains request storage until close succeeds. Unsupported heads remain queued
+for their existing owner; the read worker does not execute writes or maintenance.
+On S31, `tiku_media_card_read_size/init/step/idle/cancel` bind this worker to
+CID-bound SD sessions in caller storage. Mount and write operations retain the
+synchronous API. Media format and default-disabled instruction paths are unchanged.

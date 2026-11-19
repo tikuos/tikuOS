@@ -10,6 +10,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_mfs.h"
+#include "tiku_mfs_query.h"
 #include <string.h>
 #include <limits.h>
 
@@ -184,6 +185,11 @@ static int object_decode(tiku_mfs_t *f,const uint8_t *p,tiku_mfs_object_t *o)
     return 0;
 }
 
+#if TIKU_MEDIA_NAMES_ENABLE
+/** @brief Boot-scoped namespace versions remain distinct across context initialization. */
+static uint64_t names_version;
+#endif
+
 size_t tiku_mfs_bitmap_bytes(uint64_t sectors)
 {
     if(sectors<8ull*TIKU_MFS_SEGMENT||sectors>(1ull<<32))return 0;
@@ -217,6 +223,10 @@ static int setup(tiku_mfs_t *f,const tiku_block_t *b,const uint8_t *uuid,
     if(!bytes||capacity<bytes||!nonzero||!f->next_token)return TIKU_MFS_ARG;
     f->mounted=f->failed=f->writing=f->collecting=0;
     if(f->generation==UINT64_MAX)return TIKU_MFS_LIMIT;
+#if TIKU_MEDIA_NAMES_ENABLE
+    if(names_version==UINT64_MAX)return TIKU_MFS_LIMIT;
+    f->names_epoch=++names_version;
+#endif
     f->generation++;f->catalog_write=0;
     memset(f->readers,0,sizeof f->readers);
     memset(&f->ids,0,sizeof f->ids);memset(&f->names,0,sizeof f->names);
@@ -287,11 +297,17 @@ static tiku_mfs_link_t node_link(const catalog_node_t *n)
     r.pending=n->child[0].pending+n->child[1].pending+(n->kind==CATALOG_NAMES&&n->pending!=0);
     return r;
 }
-/** @brief Read one catalog node and validate its bound subtree summaries. */
+/** @brief Validate a catalog node and its bound subtree summaries. */
+#if TIKU_MEDIA_ASYNC_ENABLE
+static int catalog_decode(tiku_mfs_t *f,tiku_mfs_link_t link,unsigned kind,catalog_node_t *n,const uint8_t p[512])
+{
+    if(!link_ok(f,link)||!link.ref.lba)return TIKU_MFS_CORRUPT;
+#else
 static int catalog_read(tiku_mfs_t *f,tiku_mfs_link_t link,unsigned kind,catalog_node_t *n)
 {
     uint8_t p[512];if(!link_ok(f,link)||!link.ref.lba)return TIKU_MFS_CORRUPT;
     int rc=rd(f,link.ref.lba,1,p);if(rc)return rc;
+#endif
     if(!valid(f,p,"MFI2")||get32(p+508)!=link.ref.crc||get32(p+24)!=kind)return TIKU_MFS_CORRUPT;
     memset(n,0,sizeof *n);n->kind=kind;n->child[0]=link_get(p+32);n->child[1]=link_get(p+64);
     n->key=get64(p+96);n->visible=get64(p+104);n->pending=get64(p+112);
@@ -306,6 +322,15 @@ static int catalog_read(tiku_mfs_t *f,tiku_mfs_link_t link,unsigned kind,catalog
        actual.pending!=link.pending)return TIKU_MFS_CORRUPT;
     return 0;
 }
+#if TIKU_MEDIA_ASYNC_ENABLE
+/** @brief Read and decode one catalog page through the synchronous block provider. */
+static int catalog_read(tiku_mfs_t *f,tiku_mfs_link_t link,unsigned kind,catalog_node_t *n)
+{
+    uint8_t p[512];if(!link_ok(f,link)||!link.ref.lba)return TIKU_MFS_CORRUPT;
+    int rc=rd(f,link.ref.lba,1,p);if(rc)return rc;
+    return catalog_decode(f,link,kind,n,p);
+}
+#endif
 /** @brief Compare catalog keys without reading the referenced object descriptor. */
 static int catalog_compare(const catalog_node_t *a,const catalog_node_t *b)
 { return a->kind==CATALOG_NAMES?strcmp(a->name,b->name):a->key<b->key?-1:a->key>b->key; }
@@ -595,7 +620,15 @@ static int change_catalog(tiku_mfs_t *f,const tiku_mfs_object_t *o,int remove)
     if(name.visible!=old_visible||name.pending!=old_pending){
         if((rc=catalog_set(f,names,&name,!name.visible&&!name.pending,&names)))return rc;
     }
+#if TIKU_MEDIA_NAMES_ENABLE
+    int changed=old_visible!=name.visible||(o->visible&&o->complete&&!remove);
+    if(changed&&names_version==UINT64_MAX)return TIKU_MFS_LIMIT;
+    rc=publish(f,ids,names);
+    if(!rc&&changed)f->names_epoch=++names_version;
+    return rc;
+#else
     return publish(f,ids,names);
+#endif
 }
 /** @brief Commit one object transaction using reserved metadata space. */
 static int commit(tiku_mfs_t *f,const tiku_mfs_object_t *o,int remove)
@@ -611,12 +644,19 @@ static tiku_mfs_ref_t ref_get(const uint8_t *p,unsigned index)
 /** @brief Store a checksummed child pointer. */
 static void ref_put(uint8_t *p,unsigned index,tiku_mfs_ref_t r)
 { put64(p+REF_AT+16*index,r.lba);put32(p+REF_AT+16*index+8,r.crc); }
-/** @brief Read and bind an extent-index page to its object, level and range. */
+/** @brief Bind an extent-index page to its object, level and range. */
+#if TIKU_MEDIA_ASYNC_ENABLE
+static int node_decode(tiku_mfs_t *f,const tiku_mfs_object_t *o,tiku_mfs_ref_t r,
+                       unsigned level,uint64_t base,const uint8_t p[512])
+{
+    if(!ref_ok(f,r)||!level||level>DEPTH)return TIKU_MFS_CORRUPT;
+#else
 static int node_read(tiku_mfs_t *f,const tiku_mfs_object_t *o,tiku_mfs_ref_t r,
                      unsigned level,uint64_t base,uint8_t p[512])
 {
     if(!ref_ok(f,r)||!level||level>DEPTH)return TIKU_MFS_CORRUPT;
     int rc=rd(f,r.lba,1,p);if(rc)return rc;
+#endif
     if(!valid(f,p,"MFN1")||get32(p+508)!=r.crc||get64(p+24)!=o->id||
        get64(p+32)!=base||get32(p+40)!=level)return TIKU_MFS_CORRUPT;
     for(unsigned i=0;i<FANOUT;i++){
@@ -625,6 +665,16 @@ static int node_read(tiku_mfs_t *f,const tiku_mfs_object_t *o,tiku_mfs_ref_t r,
     }
     return 0;
 }
+#if TIKU_MEDIA_ASYNC_ENABLE
+/** @brief Read and decode one extent page through the synchronous block provider. */
+static int node_read(tiku_mfs_t *f,const tiku_mfs_object_t *o,tiku_mfs_ref_t r,
+                     unsigned level,uint64_t base,uint8_t p[512])
+{
+    if(!ref_ok(f,r)||!level||level>DEPTH)return TIKU_MFS_CORRUPT;
+    int rc=rd(f,r.lba,1,p);if(rc)return rc;
+    return node_decode(f,o,r,level,base,p);
+}
+#endif
 /** @brief Look up one logical 64 KiB chunk through at most twelve index pages. */
 static int lookup(tiku_mfs_t *f,const tiku_mfs_object_t *o,uint64_t chunk,tiku_mfs_ref_t *out)
 {
@@ -670,6 +720,24 @@ static int index_set(tiku_mfs_t *f,tiku_mfs_object_t *o,uint64_t chunk,tiku_mfs_
     }
     o->root=data;o->height=(uint8_t)height;return 0;
 }
+#if TIKU_MEDIA_ASYNC_ENABLE
+/** @brief Validate a frame header, object binding and segment bounds. */
+static int frame_header_decode(tiku_mfs_t *f,const tiku_mfs_object_t *o,uint64_t chunk,
+                                tiku_mfs_ref_t r,const uint8_t header[512])
+{
+    uint32_t length=get32(header+40),sectors=(length+511)/512;
+    return !ref_ok(f,r)||!valid(f,header,"MFD1")||get32(header+508)!=r.crc||get64(header+24)!=o->id||
+        get64(header+32)!=chunk||!length||length>TIKU_MFS_CHUNK||
+        r.lba%TIKU_MFS_SEGMENT+sectors+2>TIKU_MFS_SEGMENT?TIKU_MFS_CORRUPT:0;
+}
+/** @brief Validate a footer against its header checksum and logical payload. */
+static int frame_footer_decode(tiku_mfs_t *f,const tiku_mfs_object_t *o,uint64_t chunk,
+                                uint32_t length,uint32_t checksum,const uint8_t footer[512])
+{
+    return !valid(f,footer,"MFE1")||get32(footer+508)!=checksum||get64(footer+24)!=o->id||
+        get64(footer+32)!=chunk||get32(footer+40)!=length?TIKU_MFS_CORRUPT:0;
+}
+#endif
 /** @brief Load a chunk header and its bound payload-checksum footer. */
 static int frame_read(tiku_mfs_t *f,const tiku_mfs_object_t *o,uint64_t chunk,
                       tiku_mfs_ref_t r,uint8_t header[512],uint8_t footer[512])
@@ -677,12 +745,20 @@ static int frame_read(tiku_mfs_t *f,const tiku_mfs_object_t *o,uint64_t chunk,
     if(!ref_ok(f,r))return TIKU_MFS_CORRUPT;
     int rc=rd(f,r.lba,1,header);if(rc)return rc;
     uint32_t length=get32(header+40),sectors=(length+511)/512;
+#if TIKU_MEDIA_ASYNC_ENABLE
+    if((rc=frame_header_decode(f,o,chunk,r,header)))return rc;
+#else
     if(!valid(f,header,"MFD1")||get32(header+508)!=r.crc||get64(header+24)!=o->id||
        get64(header+32)!=chunk||!length||length>TIKU_MFS_CHUNK||
        r.lba%TIKU_MFS_SEGMENT+sectors+2>TIKU_MFS_SEGMENT)return TIKU_MFS_CORRUPT;
+#endif
     if((rc=rd(f,r.lba+1+sectors,1,footer)))return rc;
+#if TIKU_MEDIA_ASYNC_ENABLE
+    if((rc=frame_footer_decode(f,o,chunk,length,get32(header+44),footer)))return rc;
+#else
     if(!valid(f,footer,"MFE1")||get32(footer+508)!=get32(header+44)||
        get64(footer+24)!=o->id||get64(footer+32)!=chunk||get32(footer+40)!=length)return TIKU_MFS_CORRUPT;
+#endif
     return 0;
 }
 /** @brief Read and verify one payload slice of up to 4096 bytes. */
@@ -873,6 +949,30 @@ int tiku_mfs_list_seek(tiku_mfs_t *f,const char *prefix,tiku_mfs_cursor_t *c)
     }
     *c=(tiku_mfs_cursor_t){f->generation,f->sequence,rank,1,0};return 0;
 }
+#if TIKU_MEDIA_NAMES_ENABLE
+uint64_t tiku_mfs_names_epoch(const tiku_mfs_t *f)
+{ return f&&f->mounted&&!f->failed?f->names_epoch:0; }
+
+int tiku_mfs_enumerate(tiku_mfs_t *f,const char *lower,int exclusive,
+                       uint64_t expected,tiku_mfs_object_t *out,uint64_t *rank,uint64_t *epoch)
+{
+    if(!f||!out||!rank||!epoch||(exclusive!=0&&exclusive!=1))return TIKU_MFS_ARG;
+    uint64_t version=tiku_mfs_names_epoch(f);
+    if(!version)return TIKU_MFS_IO;
+    if(expected&&expected!=version)return TIKU_MFS_STALE;
+    tiku_mfs_cursor_t cursor={0};
+    int rc=tiku_mfs_list_seek(f,lower,&cursor);if(rc)return rc;
+    uint64_t position=cursor.rank;
+    rc=tiku_mfs_list(f,&cursor,out);
+    if(!rc&&exclusive&&!strcmp(out->name,lower)) {
+        position=cursor.rank;
+        rc=tiku_mfs_list(f,&cursor,out);
+    }
+    if(!rc||rc==TIKU_MFS_NOENT){*rank=position;*epoch=version;}
+    return rc;
+}
+
+#endif
 int tiku_mfs_open_read(tiku_mfs_t *f,const char *name,uint64_t *token)
 {
     if(!f||!token)return TIKU_MFS_ARG;
@@ -1005,3 +1105,160 @@ int tiku_mfs_collect_step(tiku_mfs_t *f,unsigned budget)
     if(!rc)f->collecting=0;
     return rc;
 }
+
+#if TIKU_MEDIA_ASYNC_ENABLE
+/** @brief Resumable query phases, each consuming at most one supplied sector. */
+enum { QUERY_SEEK=1, QUERY_RANK, QUERY_ID, QUERY_OBJECT, QUERY_INDEX, QUERY_HEADER, QUERY_FOOTER, QUERY_PAYLOAD };
+/** @brief Publish a terminal result without retaining a sector request. */
+static int query_done(tiku_mfs_query_t *q,int result)
+{ q->result=result;q->done=1;q->waiting=q->have=0;return 0; }
+/** @brief Check the serialized mount/catalog state captured by a query. */
+static int query_current(tiku_mfs_t *f,const tiku_mfs_query_t *q)
+{
+    if(!f||!f->mounted||f->generation!=q->generation||f->sequence!=q->sequence)return TIKU_MFS_STALE;
+    return f->failed?TIKU_MFS_IO:0;
+}
+/** @brief Initialize a query without touching the block provider. */
+static int query_init(tiku_mfs_t *f,tiku_mfs_query_t *q)
+{
+    if(!f||!q||!f->mounted)return TIKU_MFS_ARG;
+    if(f->failed)return TIKU_MFS_IO;
+    memset(q,0,sizeof *q);q->generation=f->generation;q->sequence=f->sequence;
+    q->names_epoch=f->names_epoch;return 0;
+}
+int tiku_mfs_query_enumerate(tiku_mfs_t *f,tiku_mfs_query_t *q,const char *lower,int exclusive,uint64_t expected)
+{
+    if(!lower||(exclusive!=0&&exclusive!=1))return TIKU_MFS_ARG;
+    unsigned n=0;while(n<64&&lower[n])n++;
+    if(n==64)return TIKU_MFS_ARG;
+    int rc=query_init(f,q);if(rc)return rc;
+    if(expected&&expected!=f->names_epoch)return TIKU_MFS_STALE;
+    memcpy(q->lower,lower,n+1);q->exclusive=(uint8_t)exclusive;
+    q->link=f->names;q->phase=QUERY_SEEK;return 0;
+}
+/** @brief Select the extent root for the next checked slice. */
+static void query_index(tiku_mfs_query_t *q)
+{
+    q->chunk=q->offset/TIKU_MFS_CHUNK;q->base=0;
+    q->ref=q->object.root;q->level=q->object.height;q->phase=QUERY_INDEX;
+}
+int tiku_mfs_query_read(tiku_mfs_t *f,tiku_mfs_query_t *q,uint64_t token,uint64_t offset,void *output,uint32_t length)
+{
+    if((!output&&length)||length>TIKU_MFS_CHUNK)return TIKU_MFS_ARG;
+    tiku_mfs_reader_t *r=reader(f,token);if(!r)return TIKU_MFS_STALE;
+    int rc=query_init(f,q);if(rc)return rc;
+    q->mode=1;q->object=r->object;q->output=output;q->offset=offset;
+    if(offset>=q->object.length||!length){query_done(q,0);return 0;}
+    q->total=length;if(q->total>q->object.length-offset)q->total=(uint32_t)(q->object.length-offset);
+    query_index(q);return 0;
+}
+int tiku_mfs_query_supply(tiku_mfs_query_t *q,int result)
+{
+    if(!q||q->done||!q->waiting||result>0)return TIKU_MFS_ARG;
+    q->waiting=0;q->have=1;q->io_result=result;return 0;
+}
+/** @brief Ask the transport for one checked extent-relative sector. */
+static int query_sector(tiku_mfs_t *f,tiku_mfs_query_t *q,uint64_t lba)
+{
+    if(lba>=f->block.sectors)return query_done(q,TIKU_MFS_CORRUPT);
+    q->sector_lba=lba;q->waiting=1;return 1;
+}
+int tiku_mfs_query_step(tiku_mfs_t *f,tiku_mfs_query_t *q)
+{
+    if(!q)return TIKU_MFS_ARG;
+    if(q->done)return 0;
+    int rc=query_current(f,q);if(rc)return query_done(q,rc);
+    if(q->waiting)return 1;
+    if(q->have&&q->io_result){f->failed=1;return query_done(q,TIKU_MFS_IO);}
+    if(q->phase==QUERY_SEEK&&!q->link.ref.lba){
+        if(q->rank>=f->names.count)return query_done(q,TIKU_MFS_NOENT);
+        q->phase=QUERY_RANK;q->link=f->names;q->position=q->rank;q->depth=0;return 1;
+    }
+    if(!q->have){
+        uint64_t lba=q->phase<=QUERY_ID?q->link.ref.lba:q->ref.lba;
+        if(q->phase==QUERY_FOOTER)lba+=1+(q->frame_length+511)/512;
+        if(q->phase==QUERY_PAYLOAD)lba+=1+(q->offset%TIKU_MFS_CHUNK/4096)*8+q->slice_filled/512;
+        return query_sector(f,q,lba);
+    }
+    q->have=0;
+    if(q->phase<=QUERY_ID){
+        catalog_node_t node;
+        if(++q->depth>TIKU_MFS_CATALOG_DEPTH)return query_done(q,TIKU_MFS_CORRUPT);
+        rc=catalog_decode(f,q->link,q->phase==QUERY_ID?CATALOG_IDS:CATALOG_NAMES,&node,q->sector);
+        if(rc)return query_done(q,rc);
+        if(q->phase==QUERY_SEEK){
+            int cmp=strcmp(node.name,q->lower);
+            unsigned right=cmp<0||(!cmp&&q->exclusive);
+            if(right)q->rank+=node.child[0].count+!!node.visible;
+            q->link=node.child[right];
+        }else if(q->phase==QUERY_RANK){
+            uint64_t left=node.child[0].count;
+            if(q->position<left)q->link=node.child[0];
+            else if(q->position==left&&node.visible){
+                q->id=node.visible;memcpy(q->found,node.name,64);
+                q->link=f->ids;q->phase=QUERY_ID;q->depth=0;
+            }else {q->position-=left+!!node.visible;q->link=node.child[1];}
+        }else if(node.key==q->id){q->ref=node.object;q->phase=QUERY_OBJECT;}
+        else q->link=node.child[q->id>node.key];
+        return 1;
+    }
+    if(q->phase==QUERY_OBJECT){
+        if(get32(q->sector+508)!=q->ref.crc)return query_done(q,TIKU_MFS_CORRUPT);
+        rc=object_decode(f,q->sector,&q->object);
+        if(!rc&&(q->object.id!=q->id||q->id>=f->next_id||!q->object.visible||strcmp(q->object.name,q->found)))
+            rc=TIKU_MFS_CORRUPT;
+        return query_done(q,rc);
+    }
+    if(q->phase==QUERY_INDEX){
+        rc=node_decode(f,&q->object,q->ref,q->level,q->base,q->sector);
+        if(rc)return query_done(q,rc);
+        unsigned child=(unsigned)((q->chunk>>(4*(q->level-1)))&15u);
+        q->ref=ref_get(q->sector,child);q->base+=(uint64_t)child<<(4*(q->level-1));
+        if(!ref_ok(f,q->ref))return query_done(q,TIKU_MFS_CORRUPT);
+        if(!--q->level)q->phase=QUERY_HEADER;
+        return 1;
+    }
+    if(q->phase==QUERY_HEADER){
+        rc=frame_header_decode(f,&q->object,q->chunk,q->ref,q->sector);
+        if(rc)return query_done(q,rc);
+        q->frame_length=get32(q->sector+40);q->footer_crc=get32(q->sector+44);
+        uint64_t expected=q->object.length-q->chunk*TIKU_MFS_CHUNK;
+        if(expected>TIKU_MFS_CHUNK)expected=TIKU_MFS_CHUNK;
+        if(q->frame_length!=expected)return query_done(q,TIKU_MFS_CORRUPT);
+        q->phase=QUERY_FOOTER;return 1;
+    }
+    if(q->phase==QUERY_FOOTER){
+        rc=frame_footer_decode(f,&q->object,q->chunk,q->frame_length,q->footer_crc,q->sector);
+        if(rc)return query_done(q,rc);
+        unsigned slice=(unsigned)(q->offset%TIKU_MFS_CHUNK)/4096;
+        if(slice*4096>=q->frame_length)return query_done(q,TIKU_MFS_CORRUPT);
+        q->expected_crc=get32(q->sector+64+4*slice);
+        q->slice_length=q->frame_length-slice*4096;if(q->slice_length>4096)q->slice_length=4096;
+        q->slice_filled=0;q->slice_crc=UINT32_MAX;q->phase=QUERY_PAYLOAD;return 1;
+    }
+    if(q->phase==QUERY_PAYLOAD){
+        unsigned n=q->slice_length-q->slice_filled;if(n>512)n=512;
+        memcpy(q->slice+q->slice_filled,q->sector,n);q->slice_crc=crc_more(q->slice_crc,q->sector,n);
+        q->slice_filled+=n;
+        if(q->slice_filled<q->slice_length)return 1;
+        if(~q->slice_crc!=q->expected_crc)return query_done(q,TIKU_MFS_CORRUPT);
+        unsigned skip=(unsigned)(q->offset%4096),take=q->slice_length-skip;
+        if(take>q->total-q->copied)take=q->total-q->copied;
+        memcpy(q->output+q->copied,q->slice+skip,take);q->copied+=take;q->offset+=take;
+        if(q->copied==q->total)return query_done(q,(int)q->copied);
+        query_index(q);return 1;
+    }
+    return query_done(q,TIKU_MFS_ARG);
+}
+int tiku_mfs_query_open(tiku_mfs_t *f,tiku_mfs_query_t *q,uint64_t *token)
+{
+    if(!q||!token||!q->done||q->result||q->mode||q->pinned)return TIKU_MFS_ARG;
+    int rc=query_current(f,q);if(rc)return rc;
+    if(f->collecting)return TIKU_MFS_BUSY;
+    if(f->next_token==UINT64_MAX)return TIKU_MFS_LIMIT;
+    for(unsigned i=0;i<TIKU_MFS_READERS;i++)if(!f->readers[i].token){
+        f->readers[i].object=q->object;*token=f->readers[i].token=f->next_token++;q->pinned=1;return 0;
+    }
+    return TIKU_MFS_LIMIT;
+}
+#endif

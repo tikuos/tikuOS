@@ -46,4 +46,42 @@ int tiku_s31_sdcard_clock(tiku_s31_sdcard_t *card, uint32_t hz);
  * @note BUSY retains ownership when a pending write cannot be quiesced.
  */
 int tiku_s31_sdcard_close(tiku_s31_sdcard_t *card);
+#ifndef TIKU_S31_SD_ASYNC_ENABLE
+#define TIKU_S31_SD_ASYNC_ENABLE 0
+#endif
+#if TIKU_S31_SD_ASYNC_ENABLE
+#include "tiku_spi_arch.h"
+/** @brief Caller-owned read-only transport state retained through completion or cancellation. */
+typedef struct {
+    tiku_s31_spi_async_t spi;
+    tiku_s31_sdcard_t *card;
+    void *output;
+    uint64_t timer, block_timer;
+    uint32_t lba;
+    uint16_t crc, offset;
+    uint8_t packet[6], response[4], wire_crc[2], byte;
+    uint8_t state, command_phase, response_tries, block_phase, io_pending;
+} tiku_s31_sd_async_t;
+/** @brief Begin power-cycled identification without waiting; return 1 when accepted.
+ * @note Retain op and card unchanged until poll completes or cancel releases
+ * them. Kernel foreground only. A busy refusal acquires no resources.
+ */
+int tiku_s31_sd_open_begin(tiku_s31_sd_async_t *, tiku_s31_sdcard_t *);
+/** @brief Begin a CRC-checked sector read on the opened card; return 1 when accepted.
+ * @note Retain the 512-byte output until completion or cancellation. Output is
+ * unchanged on error. Other card operations are refused while this one runs.
+ */
+int tiku_s31_sd_read_begin(tiku_s31_sd_async_t *, tiku_s31_sdcard_t *, uint32_t lba, void *out);
+/** @brief Begin a 400 kHz..20 MHz clock change on the opened card without waiting. */
+int tiku_s31_sd_clock_begin(tiku_s31_sd_async_t *, tiku_s31_sdcard_t *, uint32_t hz);
+/** @brief Perform one bounded transport phase; return 1 pending, 0 complete or an error.
+ * @note This function does not wait for hardware or delay. Errors close the
+ * read-only session and release its pads. Invalid-call refusals retain ownership.
+ * Successful completion retains the
+ * opened card; the caller closes it or begins another operation.
+ */
+int tiku_s31_sd_poll(tiku_s31_sd_async_t *);
+/** @brief Abort an accepted read/open, reset SPI and close the card before releasing buffers. */
+int tiku_s31_sd_cancel(tiku_s31_sd_async_t *);
+#endif
 #endif

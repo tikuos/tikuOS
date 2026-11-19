@@ -14,7 +14,10 @@
 #include <kernel/threads/tiku_thread.h>
 #include "tiku_spi_arch.h"
 #include "tiku_runtime_arch.h"
-#define REG(a) (*(volatile uint32_t *)(uintptr_t)(a))
+#ifndef TIKU_S31_SPI_REG
+#define TIKU_S31_SPI_REG(a) (*(volatile uint32_t *)(uintptr_t)(a))
+#endif
+#define REG(a) TIKU_S31_SPI_REG(a)
 #define SPI 0x2038f000u
 #define CLOCK 0x2058706cu
 #define INPUT 0x205833ccu
@@ -26,6 +29,14 @@ static const unsigned pins[] = {24,25,20};
 static uint32_t saved[3][3], saved_enable, saved_input, saved_clock;
 static unsigned opened, failed;
 static const char owner[] = "spi2";
+#if TIKU_S31_SD_ASYNC_ENABLE
+static tiku_s31_spi_async_t *operation;
+#define ASYNC_BUSY (operation != NULL)
+#define ASYNC_GUARD || ASYNC_BUSY
+#else
+#define ASYNC_BUSY 0
+#define ASYNC_GUARD
+#endif
 #ifdef TIKU_S31_SD_TEST
 static unsigned timeout_fault;
 void tiku_s31_spi_test_loopback(unsigned enable)
@@ -54,6 +65,10 @@ void tiku_spi_arch_close(void)
 {
     if (!context() || !opened) return;
     REG(CLOCK) |= 4u;
+#if TIKU_S31_SD_ASYNC_ENABLE
+    if (operation) operation->phase = 0;
+    operation = NULL;
+#endif
     REG(0x2058303cu) = MASK;
     for (unsigned i = 0; i < 3; i++) {
         REG(ROUTE(pins[i])) = saved[i][1];
@@ -66,7 +81,12 @@ void tiku_spi_arch_close(void)
     REG(CLOCK) = saved_clock;
     opened = failed = 0;
 }
+#if TIKU_S31_SD_ASYNC_ENABLE
+/** @brief Configure the controller and optionally leave its update for polling. */
+static int initialize(const tiku_spi_config_t *config, unsigned deferred)
+#else
 int tiku_spi_arch_init(const tiku_spi_config_t *config)
+#endif
 {
     if (!context() || opened || !config || config->mode || config->bit_order ||
         config->prescaler != 100 || (REG(0x205883f4u) & 1u)) return TIKU_SPI_ERR_PARAM;
@@ -106,12 +126,23 @@ int tiku_spi_arch_init(const tiku_spi_config_t *config)
     REG(INPUT) = (1u << 9) | 20u;
     REG(0x20583038u) = (1u << 24) | (1u << 25);
     REG(SPI) = 1u << 23;
+#if TIKU_S31_SD_ASYNC_ENABLE
+    if (deferred) return 0;
+#endif
     if (wait_clear(1u << 23)) { tiku_spi_arch_close(); return TIKU_SPI_ERR_TIMEOUT; }
     return 0;
 }
+#if TIKU_S31_SD_ASYNC_ENABLE
+int tiku_spi_arch_init(const tiku_spi_config_t *config) { return initialize(config, 0); }
+#endif
+#if TIKU_S31_SD_ASYNC_ENABLE
+/** @brief Configure the clock divider and optionally leave update completion for polling. */
+static int clock_set(uint32_t hz, unsigned deferred)
+#else
 int tiku_s31_spi_clock(uint32_t hz)
+#endif
 {
-    if (!context() || !opened || failed || hz < 400000 || hz > 20000000)
+    if (!context() || !opened || failed ASYNC_GUARD || hz < 400000 || hz > 20000000)
         return TIKU_SPI_ERR_PARAM;
     unsigned divisor = UINT32_MAX, best_n = 0, best_pre = 0;
     for (unsigned n = 2; n <= 64; n += 2) {
@@ -123,13 +154,19 @@ int tiku_s31_spi_clock(uint32_t hz)
     REG(SPI + 0x0c) = (best_n - 1) | ((best_n/2 - 1) << 6) |
                       ((best_n - 1) << 12) | ((best_pre - 1) << 18);
     REG(SPI) = 1u << 23;
+#if TIKU_S31_SD_ASYNC_ENABLE
+    if (deferred) return 0;
+#endif
     if (wait_clear(1u << 23)) { failed = 1; return TIKU_SPI_ERR_TIMEOUT; }
     return 0;
 }
+#if TIKU_S31_SD_ASYNC_ENABLE
+int tiku_s31_spi_clock(uint32_t hz) { return clock_set(hz, 0); }
+#endif
 /** @brief Exchange bounded FIFO batches; failure resets SPI and requires close. */
 static int run(const uint8_t *tx, uint8_t *rx, uint16_t length)
 {
-    if (!context() || !opened || failed || !length) return TIKU_SPI_ERR_PARAM;
+    if (!context() || !opened || failed ASYNC_GUARD || !length) return TIKU_SPI_ERR_PARAM;
     for (unsigned done = 0; done < length;) {
         unsigned n = length - done;
         if (n > 64) n = 64;
@@ -162,3 +199,60 @@ int tiku_spi_arch_read(uint8_t *data, uint16_t length)
 { return data ? run(NULL, data, length) : TIKU_SPI_ERR_PARAM; }
 int tiku_spi_arch_write_read(const uint8_t *tx, uint8_t *rx, uint16_t length)
 { return tx && rx ? run(tx, rx, length) : TIKU_SPI_ERR_PARAM; }
+
+#if TIKU_S31_SD_ASYNC_ENABLE
+int tiku_s31_spi_init_begin(tiku_s31_spi_async_t *op, const tiku_spi_config_t *config)
+{
+    if (!op || ASYNC_BUSY) return TIKU_SPI_ERR_PARAM;
+    int rc = initialize(config, 1);
+    if (rc) return rc;
+    *op = (tiku_s31_spi_async_t){.started = tiku_s31_time(), .phase = 1};
+    operation = op;
+    return 1;
+}
+int tiku_s31_spi_clock_begin(tiku_s31_spi_async_t *op, uint32_t hz)
+{
+    if (!op || ASYNC_BUSY) return TIKU_SPI_ERR_PARAM;
+    int rc = clock_set(hz, 1);
+    if (rc) return rc;
+    *op = (tiku_s31_spi_async_t){.started = tiku_s31_time(), .phase = 1};
+    operation = op;
+    return 1;
+}
+int tiku_s31_spi_begin(tiku_s31_spi_async_t *op, const uint8_t *tx, uint8_t *rx, uint16_t length)
+{
+    if (!context() || !op || !opened || failed ASYNC_GUARD || !length || length > 64)
+        return TIKU_SPI_ERR_PARAM;
+    for (unsigned i = 0; i < (length + 3u) / 4; i++) {
+        uint32_t word = UINT32_MAX;
+        if (tx) for (unsigned j = 0; j < 4 && i * 4 + j < length; j++) {
+            word &= ~(255u << (j * 8)); word |= (uint32_t)tx[i * 4 + j] << (j * 8);
+        }
+        REG(SPI + 0x98 + i * 4) = word;
+    }
+    *op = (tiku_s31_spi_async_t){.started = tiku_s31_time(), .rx = rx, .length = length, .phase = 2};
+    operation = op;
+    REG(SPI + 0x1c) = length * 8 - 1;
+    REG(SPI) = 1u << 23;
+    return 1;
+}
+int tiku_s31_spi_poll(tiku_s31_spi_async_t *op)
+{
+    if (!context() || !op || operation != op) return TIKU_SPI_ERR_PARAM;
+    uint32_t bit = 1u << (op->phase == 3 ? 24 : 23);
+    if (REG(SPI) & bit) {
+        if (((tiku_s31_time() - op->started) & ((1ULL << 52) - 1)) < 80000u) return 1;
+        REG(CLOCK) |= 4u; failed = 1; operation = NULL; op->phase = 0;
+        return TIKU_SPI_ERR_TIMEOUT;
+    }
+    if (op->phase == 2) {
+        REG(SPI) = 1u << 24;
+        op->phase = 3; op->started = tiku_s31_time();
+        return 1;
+    }
+    if (op->phase == 3 && op->rx) for (unsigned i = 0; i < op->length; i++)
+        op->rx[i] = (uint8_t)(REG(SPI + 0x98 + (i / 4) * 4) >> ((i % 4) * 8));
+    operation = NULL; op->phase = 0;
+    return 0;
+}
+#endif

@@ -28,7 +28,7 @@ typedef enum {
     TIKU_MEDIA_STAT, TIKU_MEDIA_LIST, TIKU_MEDIA_CHECKPOINT,
     TIKU_MEDIA_COLLECT_BEGIN, TIKU_MEDIA_COLLECT_STEP,
     TIKU_MEDIA_COPY_BEGIN, TIKU_MEDIA_COPY_STEP, TIKU_MEDIA_COPY_ABORT,
-    TIKU_MEDIA_UPLOADS, TIKU_MEDIA_SEEK
+    TIKU_MEDIA_UPLOADS, TIKU_MEDIA_SEEK, TIKU_MEDIA_ENUMERATE, TIKU_MEDIA_OPEN_VERSION
 } tiku_media_op_t;
 /**
  * @brief Caller-owned request, including borrowed buffers and result storage.
@@ -40,6 +40,10 @@ typedef struct {
     tiku_media_op_t op;
     uint32_t client, permissions, length;
     uint64_t id, offset;
+#if TIKU_MEDIA_NAMES_ENABLE
+    uint64_t names_epoch, rank;
+    uint8_t exclusive;
+#endif
     const char *name;
     void *buffer;
     tiku_mfs_object_t *info;

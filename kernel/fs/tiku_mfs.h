@@ -12,6 +12,9 @@
 #ifndef TIKU_MFS_H_
 #define TIKU_MFS_H_
 #include "tiku_block.h"
+#ifndef TIKU_MEDIA_NAMES_ENABLE
+#define TIKU_MEDIA_NAMES_ENABLE 0
+#endif
 #include <stddef.h>
 #include <limits.h>
 #if INT_MAX < 2147483647L
@@ -84,6 +87,9 @@ typedef struct {
     size_t bitmap_bytes;
     uint8_t uuid[16];
     uint64_t sequence, epoch, next_id, next_token, tail, allocations, generation;
+#if TIKU_MEDIA_NAMES_ENABLE
+    uint64_t names_epoch;
+#endif
     uint32_t segments, bank_sectors, journal, cursor, free_segments;
     unsigned gc_reader, gc_depth, catalog_depth;
     uint8_t gc_phase, gc_active, catalog_write;
@@ -138,6 +144,14 @@ int tiku_mfs_list(tiku_mfs_t *, tiku_mfs_cursor_t *cursor, tiku_mfs_object_t *);
 int tiku_mfs_list_pending(tiku_mfs_t *, tiku_mfs_cursor_t *cursor, tiku_mfs_object_t *);
 /** @brief Position a visible listing at its first name at or after a byte prefix. */
 int tiku_mfs_list_seek(tiku_mfs_t *, const char *prefix, tiku_mfs_cursor_t *);
+/** @brief Read the boot-scoped visible-name version; zero means unavailable. */
+uint64_t tiku_mfs_names_epoch(const tiku_mfs_t *);
+/** @brief Resolve a lower-bound name and fetch one object in one serialized call.
+ * @note expected zero starts a view; otherwise visible-name changes return STALE.
+ * exclusive skips an equal name. rank is zero-based; epoch is set even at EOF.
+ */
+int tiku_mfs_enumerate(tiku_mfs_t *, const char *lower, int exclusive,
+                       uint64_t expected, tiku_mfs_object_t *, uint64_t *rank, uint64_t *epoch);
 /** @brief Pin a visible version and return a mount-scoped reader token. */
 int tiku_mfs_open_read(tiku_mfs_t *, const char *, uint64_t *token);
 /** @brief Read a checked range, at most 65536 bytes; returns the copied byte count. */

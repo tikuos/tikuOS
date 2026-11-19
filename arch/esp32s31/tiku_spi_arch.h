@@ -31,6 +31,32 @@ int tiku_spi_arch_write(const uint8_t *data, uint16_t length);
 int tiku_spi_arch_read(uint8_t *data, uint16_t length);
 /** @brief Exchange bytes in 64-byte batches; a prefix may remain on failure. */
 int tiku_spi_arch_write_read(const uint8_t *tx, uint8_t *rx, uint16_t length);
+#ifndef TIKU_S31_SD_ASYNC_ENABLE
+#define TIKU_S31_SD_ASYNC_ENABLE 0
+#endif
+#if TIKU_S31_SD_ASYNC_ENABLE
+/** @brief Caller-owned FIFO operation, retained unchanged until completion or close. */
+typedef struct {
+    uint64_t started;
+    uint8_t *rx;
+    uint16_t length;
+    uint8_t phase;
+} tiku_s31_spi_async_t;
+/** @brief Claim and configure SPI without waiting; return 1 when poll is required. */
+int tiku_s31_spi_init_begin(tiku_s31_spi_async_t *, const tiku_spi_config_t *);
+/** @brief Begin a clock-divider update without waiting; return 1 when poll is required. */
+int tiku_s31_spi_clock_begin(tiku_s31_spi_async_t *, uint32_t hz);
+/** @brief Submit 1..64 bytes on an idle controller; NULL tx emits FF, NULL rx discards input.
+ * @note Return 1 on acceptance; the receive buffer remains borrowed until poll
+ * completes or close aborts. Serialized kernel foreground calls are required.
+ */
+int tiku_s31_spi_begin(tiku_s31_spi_async_t *, const uint8_t *tx, uint8_t *rx, uint16_t length);
+/** @brief Observe one controller phase without waiting; return 1 pending, 0 complete or an error.
+ * @note A busy phase expires after 5 ms; timeout resets the controller and
+ * requires close. Close aborts a pending operation before releasing its buffer.
+ */
+int tiku_s31_spi_poll(tiku_s31_spi_async_t *);
+#endif
 #ifdef TIKU_S31_SD_TEST
 /** @brief Route MISO to the driven MOSI pad for electrical loopback qualification. */
 void tiku_s31_spi_test_loopback(unsigned enable);

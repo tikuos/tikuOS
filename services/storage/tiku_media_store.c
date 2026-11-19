@@ -11,6 +11,14 @@
  */
 #include "tiku_media_store.h"
 #include <string.h>
+#ifndef TIKU_MEDIA_ASYNC_ENABLE
+#define TIKU_MEDIA_ASYNC_ENABLE 0
+#endif
+#if TIKU_MEDIA_ASYNC_ENABLE
+#define ENQUEUE_RUNNING(s) ((s)->running == 1)
+#else
+#define ENQUEUE_RUNNING(s) ((s)->running)
+#endif
 
 int tiku_media_store_init(tiku_media_store_t *s,tiku_mfs_t *fs,const tiku_block_t *block,
                           const uint8_t uuid[16],void *used,void *mark,size_t capacity,
@@ -26,6 +34,9 @@ int tiku_media_store_init(tiku_media_store_t *s,tiku_mfs_t *fs,const tiku_block_
 /** @brief Map an operation to its required trusted-caller permission. */
 static uint32_t permission(tiku_media_op_t op)
 {
+#if TIKU_MEDIA_NAMES_ENABLE
+    if(op==TIKU_MEDIA_ENUMERATE||op==TIKU_MEDIA_OPEN_VERSION)return TIKU_MEDIA_READ;
+#endif
     if(op==TIKU_MEDIA_SEEK)return TIKU_MEDIA_READ;
     if(op==TIKU_MEDIA_MOUNT||op==TIKU_MEDIA_FORMAT||op>=TIKU_MEDIA_CHECKPOINT)return TIKU_MEDIA_ADMIN;
     if(op>=TIKU_MEDIA_OPEN&&op<=TIKU_MEDIA_LIST)return TIKU_MEDIA_READ;
@@ -33,10 +44,19 @@ static uint32_t permission(tiku_media_op_t op)
 }
 int tiku_media_store_submit(tiku_media_store_t *s,tiku_media_request_t *r)
 {
-    if(!s||!r||!s->fs||!r->client||r->op<TIKU_MEDIA_MOUNT||r->op>TIKU_MEDIA_SEEK||
+#if TIKU_MEDIA_NAMES_ENABLE
+    const tiku_media_op_t last=TIKU_MEDIA_OPEN_VERSION;
+#else
+    const tiku_media_op_t last=TIKU_MEDIA_SEEK;
+#endif
+    if(!s||!r||!s->fs||!r->client||r->op<TIKU_MEDIA_MOUNT||r->op>last||
        !(r->permissions&permission(r->op)))return TIKU_MFS_ARG;
+#if TIKU_MEDIA_NAMES_ENABLE
+    if(s->failed&&r->op!=TIKU_MEDIA_CLOSE)return TIKU_MFS_IO;
+#else
     if(s->failed)return TIKU_MFS_IO;
-    if(s->count==TIKU_MEDIA_QUEUE||s->running)return TIKU_MFS_BUSY;
+#endif
+    if(s->count==TIKU_MEDIA_QUEUE||ENQUEUE_RUNNING(s))return TIKU_MFS_BUSY;
     for(unsigned i=0;i<s->count;i++)if(s->queue[i]==r)return TIKU_MFS_BUSY;
     r->done=0;s->queue[s->count++]=r;return 0;
 }
@@ -73,6 +93,17 @@ static int execute(tiku_media_store_t *s,tiku_media_request_t *r)
     case TIKU_MEDIA_RELEASE:
         rc=tiku_mfs_release(s->fs);if(!rc)s->writer=0;return rc;
     case TIKU_MEDIA_DELETE:return tiku_mfs_delete(s->fs,r->id);
+#if TIKU_MEDIA_NAMES_ENABLE
+    case TIKU_MEDIA_OPEN_VERSION: {
+        uint64_t rank,epoch;
+        if(!r->names_epoch||!r->info)return TIKU_MFS_ARG;
+        rc=tiku_mfs_enumerate(s->fs,r->name,0,r->names_epoch,r->info,&rank,&epoch);
+        if(rc)return rc;
+        if(rank!=r->rank||strcmp(r->info->name,r->name))return TIKU_MFS_STALE;
+    }
+        /* The validated name and version remain serialized through reader acquisition. */
+        __attribute__((fallthrough));
+#endif
     case TIKU_MEDIA_OPEN:
         for(unsigned i=0;i<TIKU_MFS_READERS;i++)if(!s->readers[i].token){
             rc=tiku_mfs_open_read(s->fs,r->name,&r->id);
@@ -87,6 +118,13 @@ static int execute(tiku_media_store_t *s,tiku_media_request_t *r)
         rc=tiku_mfs_close_read(s->fs,r->id);if(!rc)s->readers[reader_index].token=0;return rc;
     case TIKU_MEDIA_STAT:return tiku_mfs_stat(s->fs,r->name,r->info);
     case TIKU_MEDIA_SEEK:return tiku_mfs_list_seek(s->fs,r->name,&r->cursor);
+#if TIKU_MEDIA_NAMES_ENABLE
+    case TIKU_MEDIA_ENUMERATE:
+        return tiku_mfs_enumerate(s->fs,r->name,r->exclusive,r->names_epoch,
+                                  r->info,&r->rank,&r->names_epoch);
+#else
+    case TIKU_MEDIA_ENUMERATE:case TIKU_MEDIA_OPEN_VERSION:return TIKU_MFS_ARG;
+#endif
     case TIKU_MEDIA_LIST:return tiku_mfs_list(s->fs,&r->cursor,r->info);
     case TIKU_MEDIA_UPLOADS:return tiku_mfs_list_pending(s->fs,&r->cursor,r->info);
     case TIKU_MEDIA_CHECKPOINT:return tiku_mfs_checkpoint(s->fs);
@@ -113,6 +151,9 @@ int tiku_media_store_step(tiku_media_store_t *s)
     if(!s->count)return 0;
     s->running=1;tiku_media_request_t *r=s->queue[0];
     int rc=s->failed?TIKU_MFS_IO:0;
+#if TIKU_MEDIA_NAMES_ENABLE
+    if(r->op==TIKU_MEDIA_CLOSE)rc=0;
+#endif
     int session=r->op!=TIKU_MEDIA_CLOSE&&r->op!=TIKU_MEDIA_RELEASE;
     if(!rc&&session&&s->acquire){
         rc=s->acquire(s->backend);
