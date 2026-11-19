@@ -23,7 +23,13 @@ static const struct {
 } image_descriptor __attribute__((section(".app_desc"), used)) = {
     .magic = 0xabcd5432u,
     .version = "0.06-s31-sram",
-#if TIKU_S31_WIFI_ENABLE
+#ifdef TIKU_APPLICATION_HEADER
+#if SURFACE_LCD_ENABLE
+    .project = "tikusurface_s31_lcd",
+#else
+    .project = "tikusurface_s31_diag",
+#endif
+#elif TIKU_S31_WIFI_ENABLE
     .project = "tikuos_s31_wifi",
 #elif defined(TIKU_S31_RADIO_TEST)
     .project = "tikuos_s31_radio",

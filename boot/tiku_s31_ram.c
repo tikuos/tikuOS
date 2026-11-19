@@ -60,6 +60,33 @@ TIKU_PROCESS_THREAD(s31_wifi_link, ev, data)
     }
     TIKU_PROCESS_END();
 }
+#ifdef TIKU_APPLICATION_HEADER
+TIKU_PROCESS(s31_wifi_start, "Wi-Fi startup");
+static struct tiku_timer startup_timer;
+/** @brief Start network services without holding the application/console boot path. */
+TIKU_PROCESS_THREAD(s31_wifi_start, ev, data)
+{
+    (void)ev; (void)data;
+    TIKU_PROCESS_BEGIN();
+    tiku_timer_set_event(&startup_timer, 1);
+    TIKU_PROCESS_WAIT_EVENT();
+    if (tiku_drv_wifi_esp.init()) {
+        tiku_s31_puts("Wi-Fi unavailable\n");
+        TIKU_PROCESS_EXIT();
+    }
+    tiku_process_start(&tiku_kits_net_process, NULL);
+    while (!tiku_kits_net_ipv4_get_link()) {
+        tiku_timer_set_event(&startup_timer, 1);
+        TIKU_PROCESS_WAIT_EVENT();
+    }
+    if (tiku_kits_net_wifi_init()) tiku_s31_puts("Wi-Fi IP unavailable\n");
+    else tiku_process_start(&s31_wifi_link, NULL);
+    TIKU_PROCESS_END();
+}
+#endif
+#endif
+#ifdef TIKU_APPLICATION_HEADER
+#include TIKU_APPLICATION_HEADER
 #endif
 #ifdef TIKU_S31_FLASH_BOOT
 #include <arch/esp32s31/tiku_image_desc.h>
@@ -102,12 +129,19 @@ int main(void)
     tiku_watchdog_config(TIKU_WDT_MODE_WATCHDOG, TIKU_WDT_SRC_ACLK,
                          65535u, 0, 1);
     tiku_cpu_irq_enable();
+#ifdef TIKU_APPLICATION_HEADER
+    tiku_s31_report("application_started", (uint32_t)tiku_application_start());
+#endif
 #if TIKU_S31_WIFI_ENABLE
+#ifdef TIKU_APPLICATION_HEADER
+    tiku_process_start(&s31_wifi_start, NULL);
+#else
     if (tiku_drv_wifi_esp.init()) tiku_s31_fatal("Wi-Fi init");
     tiku_process_start(&tiku_kits_net_process, NULL);
     while (!tiku_kits_net_ipv4_get_link()) (void)tiku_sched_run_once();
     if (tiku_kits_net_wifi_init()) tiku_s31_fatal("Wi-Fi IP init");
     tiku_process_start(&s31_wifi_link, NULL);
+#endif
 #endif
     tiku_sched_start(&tiku_shell_process, NULL);
     for (;;) {

@@ -13,15 +13,32 @@ ifneq ($(BOARD),esp32s31_korvo1)
 $(error ESP32-S31 requires BOARD=esp32s31_korvo1)
 endif
 S31_PROFILE ?= kernel-test
+ifneq ($(origin S31_APPLICATION_MANIFEST),undefined)
+ifeq ($(filter firmware s31-local s31-connected,$(S31_PROFILE)),)
+$(error S31_APPLICATION_MANIFEST requires a firmware application profile)
+endif
+endif
+S31_SURFACE := $(filter s31-local s31-connected,$(S31_PROFILE))
+ifneq ($(S31_SURFACE),)
+S31_APPLICATION_MANIFEST ?= tikuSurface/product/tikuos.mk
+ifeq ($(S31_BLE_ENABLE),1)
+$(error TikuSurface diagnostic profiles do not select BLE)
+endif
+ifneq ($(filter-out 80,$(S31_PSRAM_MHZ)),)
+$(error TikuSurface requires S31_PSRAM_MHZ=80)
+endif
+else ifeq ($(S31_UI_LTO),1)
+$(error S31_UI_LTO requires a TikuSurface profile)
+endif
 S31_RADIO_COEX ?= 0
 ifeq ($(S31_RADIO_COEX),1)
 ifneq ($(S31_BLE_ENABLE),1)
 $(error S31_RADIO_COEX=1 requires S31_BLE_ENABLE=1)
 endif
 endif
-S31_PSRAM_MHZ ?= $(if $(filter display-test flash-display-test,$(S31_PROFILE)),80,20)
-ifeq ($(filter $(S31_PROFILE),firmware kernel-test board-test shell watchdog-test flash-shell psram-test flash-psram-test memory-test flash-memory-test display-test flash-display-test sd-test media-test audio-test radio-os-test phy-test flash-wifi-test),)
-$(error S31_PROFILE must be firmware, kernel-test, board-test, shell, watchdog-test, flash-shell, psram-test, flash-psram-test, memory-test, flash-memory-test, display-test flash-display-test sd-test, media-test, audio-test, radio-os-test, phy-test or flash-wifi-test)
+S31_PSRAM_MHZ ?= $(if $(filter display-test flash-display-test s31-local s31-connected,$(S31_PROFILE)),80,20)
+ifeq ($(filter $(S31_PROFILE),s31-local s31-connected firmware kernel-test board-test shell watchdog-test flash-shell psram-test flash-psram-test memory-test flash-memory-test display-test flash-display-test sd-test media-test audio-test radio-os-test phy-test flash-wifi-test),)
+$(error S31_PROFILE must be s31-local, s31-connected, firmware, kernel-test, board-test, shell, watchdog-test, flash-shell, psram-test, flash-psram-test, memory-test, flash-memory-test, display-test flash-display-test sd-test, media-test, audio-test, radio-os-test, phy-test or flash-wifi-test)
 endif
 S31_ENABLED := $(strip $(foreach v,$(filter TIKU_%_ENABLE,$(.VARIABLES)),\
     $(if $(filter 1,$($(v))),$(v))))
@@ -51,12 +68,14 @@ S31_SRCS := arch/esp32s31/tiku_runtime_arch.c arch/esp32s31/tiku_watchdog_arch.c
     kernel/timers/tiku_htimer.c kernel/timers/tiku_crit.c \
     kernel/threads/tiku_thread.c kernel/vfs/tiku_vfs.c \
     kernel/cpu/tiku_hang.c
-ifneq ($(filter firmware shell flash-shell,$(S31_PROFILE)),)
+ifneq ($(filter firmware s31-local s31-connected shell flash-shell,$(S31_PROFILE)),)
 S31_SHELL_COMMANDS := HELP PS TIMER QUEUE ECHO CALC HTIMER CLEAR
-ifeq ($(S31_PROFILE),firmware)
+ifneq ($(filter firmware s31-local s31-connected,$(S31_PROFILE)),)
+ifneq ($(filter firmware s31-connected,$(S31_PROFILE)),)
 S31_SHELL_COMMANDS += WIFI IP PING
 ifeq ($(S31_BLE_ENABLE),1)
 S31_SHELL_COMMANDS += BT
+endif
 endif
 include arch/esp32s31/services.mk
 endif
@@ -79,7 +98,7 @@ S31_SRCS += arch/esp32s31/tiku_psram_arch.c arch/esp32s31/tiku_mem_arch.c \
     TikuBench/tests/esp32s31/test_display.c \
     drivers/input/gt1151/tiku_drv_input_gt1151.c
 endif
-ifneq ($(filter firmware flash-wifi-test,$(S31_PROFILE)),)
+ifneq ($(filter firmware s31-connected flash-wifi-test,$(S31_PROFILE)),)
 S31_WIFI_COUNTRY ?= 01
 S31_FLAGS += -DTIKU_S31_FLASH_BOOT=1 \
     -DTIKU_S31_WIFI_COUNTRY='"$(S31_WIFI_COUNTRY)"'
@@ -116,7 +135,7 @@ $(error S31 radio assets missing or invalid: run python3 drivers/wifi/esp/s31/fe
 endif
 S31_LDFLAGS += $(addprefix -T$(S31_RADIO_VENDOR)/esp32s31.rom,.ld .phy.ld .version.ld .api.ld .pp.ld .net80211.ld .coexist.ld)
 S31_LIBS += $(addprefix $(S31_RADIO_VENDOR)/,libnet80211.a libpp.a libcore.a libphy.a) -lm
-else ifneq ($(filter shell flash-shell display-test flash-display-test,$(S31_PROFILE)),)
+else ifneq ($(filter s31-local shell flash-shell display-test flash-display-test,$(S31_PROFILE)),)
 else ifeq ($(S31_PROFILE),phy-test)
 S31_SRCS += arch/esp32s31/tiku_trng_arch.c drivers/wifi/esp/s31/wifi_s31_arch.c \
     drivers/wifi/esp/s31/phy_s31.c TikuBench/tests/esp32s31/test_radio_phy.c
@@ -195,10 +214,10 @@ S31_FLAGS += -DTIKU_S31_FLASH_BOOT=1
 S31_LINKER := arch/esp32s31/flash.ld
 S31_SRCS += arch/esp32s31/tiku_image_desc.c
 endif
-ifneq ($(filter firmware flash-wifi-test,$(S31_PROFILE)),)
+ifneq ($(filter firmware s31-connected flash-wifi-test,$(S31_PROFILE)),)
 S31_LINKER := arch/esp32s31/radio_flash.ld
 endif
-ifeq ($(S31_PROFILE),firmware)
+ifneq ($(filter firmware s31-connected,$(S31_PROFILE)),)
 S31_FLAGS += -DTIKU_S31_WIFI_ENABLE=1 -DTIKU_DRV_WIFI_ESP_ENABLE=1 -DTIKU_ESP_PROFILE_ENABLE=1 \
     -DTIKU_WIRELESS_AP_ENABLE=1 -DTIKU_ESP_SAE_ENABLE=1 \
     -DTIKU_KIT_NET_ENABLE=1 -DTIKU_KIT_NET_MIN=1 -DTIKU_KITS_NET_WIFI_ENABLE=1 \
@@ -224,10 +243,24 @@ endif
 ifeq ($(S31_BLE_ENABLE),1)
 include drivers/wifi/esp/s31/ble.mk
 endif
+ifneq ($(S31_SURFACE),)
+ifeq ($(strip $(APPL_LINKER)),)
+$(error TikuSurface profile requires its application manifest and linker contract)
+endif
+S31_FLAGS += -DTIKU_GPIO_CLAIM_LIMIT=32 -fstack-usage
+S31_LINKER := $(APPL_LINKER)
+endif
+ifeq ($(S31_PROFILE),s31-local)
+S31_FLAGS += -DTIKU_S31_FLASH_BOOT=1
+S31_LDFLAGS += -Wl,--defsym=S31_FIRMWARE=1
+S31_SRCS += arch/esp32s31/tiku_trng_arch.c arch/esp32s31/tiku_image_desc.c \
+    arch/esp32s31/tiku_libc_heap.c
+S31_LDFLAGS += $(addprefix -Tdrivers/wifi/esp/s31/vendor/esp32s31.rom,.ld .version.ld .api.ld)
+endif
 S31_SRCS := $(sort $(S31_SRCS))
 S31_ASM := arch/esp32s31/tiku_crt_arch.S
 S31_OBJS := $(patsubst %.c,$(S31_DIR)/%.o,$(S31_SRCS)) \
-    $(patsubst %.S,$(S31_DIR)/%.o,$(S31_ASM))
+    $(patsubst %.S,$(S31_DIR)/%.o,$(S31_ASM)) $(APPL_EXTRA_OBJS)
 .PHONY: all ram-load clean FORCE
 all: $(S31_DIR)/kernel.bin
 $(S31_DIR)/.flags: FORCE
@@ -241,18 +274,19 @@ $(S31_DIR)/%.o: %.c $(S31_DIR)/.flags
 $(S31_DIR)/%.o: %.S $(S31_DIR)/.flags
 	@mkdir -p $(@D)
 	$(S31_CC) $(S31_FLAGS) -MMD -MP -c $< -o $@
-$(S31_DIR)/kernel.elf: $(S31_OBJS) $(S31_LINKER) arch/esp32s31/port.mk
+$(S31_DIR)/kernel.elf: $(S31_OBJS) $(S31_LINKER) arch/esp32s31/port.mk $(APPL_LINK_DEPS)
 	$(S31_CC) $(S31_ARCH) -nostdlib -Wl,--gc-sections,--build-id=none \
 	    -Wl,-Map=$(S31_DIR)/kernel.map -T$(S31_LINKER) \
 	    $(S31_LDFLAGS) $(S31_OBJS) -Wl,--start-group $(S31_LIBS) -lc -lnosys -lgcc -Wl,--end-group -o $@
+	$(APPL_CHECK_ELF)
 $(S31_DIR)/kernel.bin: $(S31_DIR)/kernel.elf
 	$(PYTHON) -m esptool --chip esp32s31 elf2image --flash-size 16MB -o $@ $<
 ram-load: all
-ifneq ($(filter flash-shell flash-psram-test flash-memory-test flash-display-test flash-wifi-test firmware,$(S31_PROFILE)),)
+ifneq ($(filter flash-shell flash-psram-test flash-memory-test flash-display-test flash-wifi-test firmware s31-local s31-connected,$(S31_PROFILE)),)
 	$(error flash profiles require the installed second-stage bootloader)
 endif
 	$(PYTHON) tools/esp32s31_ram.py --image $(S31_DIR)/kernel.bin \
-	    --port '$(PORT)' --serial '$(S31_SERIAL)' --$(if $(filter firmware shell flash-shell,$(S31_PROFILE)),shell-test,$(if $(filter watchdog-test board-test psram-test memory-test display-test sd-test media-test audio-test radio-os-test phy-test,$(S31_PROFILE)),$(S31_PROFILE),kernel-test)) --seconds $(if $(filter audio-test,$(S31_PROFILE)),95,$(if $(filter psram-test memory-test display-test sd-test media-test audio-test radio-os-test phy-test,$(S31_PROFILE)),60,6)) --log '$(LOG)'
+	    --port '$(PORT)' --serial '$(S31_SERIAL)' --$(if $(filter firmware s31-local s31-connected shell flash-shell,$(S31_PROFILE)),shell-test,$(if $(filter watchdog-test board-test psram-test memory-test display-test sd-test media-test audio-test radio-os-test phy-test,$(S31_PROFILE)),$(S31_PROFILE),kernel-test)) --seconds $(if $(filter audio-test,$(S31_PROFILE)),95,$(if $(filter psram-test memory-test display-test sd-test media-test audio-test radio-os-test phy-test,$(S31_PROFILE)),60,6)) --log '$(LOG)'
 clean:
 	$(RM) $(S31_OBJS) $(S31_OBJS:.o=.d) $(S31_DIR)/kernel.elf \
 	    $(S31_DIR)/kernel.bin $(S31_DIR)/kernel.map $(S31_DIR)/.flags

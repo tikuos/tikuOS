@@ -17,6 +17,9 @@
 #include "tiku_boot_vfs.h"
 #include <kernel/vfs/tiku_vfs_tree.h>
 #include <kernel/drivers/tiku_drv_registry.h>
+#ifdef TIKU_APPLICATION_HEADER
+#include TIKU_APPLICATION_HEADER
+#endif
 #if (TIKU_IPC_ENABLE + 0)
 #include <kernel/vfs/tree/tiku_vfs_tree_ipc.h>
 #endif
@@ -50,7 +53,11 @@
  */
 static int assemble(void)
 {
-    tiku_vfs_boot_node_t nodes[TIKU_VFS_BOOT_NODES_MAX];
+    tiku_vfs_boot_node_t nodes[TIKU_VFS_BOOT_NODES_MAX
+#ifdef TIKU_APPLICATION_HEADER
+        + 1u
+#endif
+    ];
     tiku_vfs_tree_config_t config = {0};
 
     config.nodes = nodes;
@@ -93,6 +100,11 @@ static int assemble(void)
 #if TIKU_MEDIA_FS_ENABLE
     nodes[config.node_count++] = (tiku_vfs_boot_node_t){"/", tiku_media_vfs_files()};
     nodes[config.node_count++] = (tiku_vfs_boot_node_t){"/sys", tiku_media_vfs_status()};
+#endif
+#ifdef TIKU_APPLICATION_HEADER
+    nodes[config.node_count++] = (tiku_vfs_boot_node_t){
+        "/", tiku_application_vfs_get()
+    };
 #endif
     return tiku_vfs_tree_init(&config);
 }

@@ -27,6 +27,11 @@ ifeq ($(MCU),)
 MCU = msp430fr5994          # the target of a bare `make`
 endif
 MCU := $(shell echo $(MCU) | tr '[:upper:]' '[:lower:]')
+ifneq ($(filter s31-local s31-connected,$(S31_PROFILE)),)
+ifneq ($(MCU),esp32s31)
+$(error S31 local application profiles require MCU=esp32s31)
+endif
+endif
 
 # The ESP32-P4's HP cores have a single-precision FPU and run hard-float
 # code; the LP core payload (arch/esp32p4/lpcore) has no FPU and keeps the

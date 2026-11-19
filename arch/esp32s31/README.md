@@ -56,6 +56,8 @@ make MCU=esp32s31 BOARD=esp32s31_korvo1 S31_PROFILE=kernel-test \
 | `trng-test` | LP entropy-source health soak in SRAM, with passive monitoring or bounded random reads |
 | `shell` | SRAM and PSRAM allocation, native shell with `help`, `ps`, `timer`, `queue`, `echo`, `calc`, `htimer` and `clear` |
 | `firmware` | Durable `/data`, VFS, BASIC, native station/AP Wi-Fi, SAE/PMF, DHCP and encrypted profiles |
+| `s31-local` | TikuSurface diagnostic runtime, VFS and BASIC; PSRAM allocation and deferred test presentation |
+| `s31-connected` | The local diagnostic runtime plus scheduled Wi-Fi startup |
 | `flash-shell` | The shell with application metadata and two flash mappings for the factory bootloader |
 | `psram-test` | Full-capacity patterns and physical cache-visibility checks with timer interrupts active |
 | `flash-psram-test` | The PSRAM checks through the factory bootloader |
@@ -125,6 +127,22 @@ table, NVS and asset partition in place. Flash constants remain accessible
 after TikuOS selects its 40 MHz clocks. Firmware flash writes, cache-off
 interrupts and booting through a TikuOS-owned bootloader require separate
 qualification.
+
+`--application-test /path/to/provider.py` selects a local Python qualification
+provider for a firmware application. The module exports
+`ApplicationQualification`: `project` is the descriptor name as bytes;
+`capture(wire, seconds, run)` returns console bytes and a secondary result;
+`passed()` reports the latest run; `results` holds JSON-serializable records;
+`console` retains raw bytes, including a failed capture. The runner records the
+provider's source hash and requires matching image and boot project names,
+successful application startup and one boot without a fatal marker.
+
+Application mode protects the general storage reservation and the settings
+tail as well as application sectors. Both reservations must be erased in the
+backup and on the board. The runner restores and verifies these regions after
+qualification or failure. Select this mode without `--firmware-test` or
+`--settings-test`; it enables both protections itself. Provider execution uses
+the runner's already-open UART. Board access requires an explicit request.
 
 ## PSRAM ownership
 
@@ -239,10 +257,41 @@ Direct caller writes must obey the same ownership rule. The private surface
 remains reserved until close, including in paired mode. Circle and
 rounded-rectangle acceleration are absent.
 
+The backend also advertises `TIKU_DISPLAY_CAP_ASYNC`. With a paired display,
+`tiku_display_submit()` retains the buffers under a nonzero, increasing token.
+Keep the display structure and both buffers unchanged until
+`tiku_display_poll()` returns a terminal result for that token. Tokens remain
+increasing across close and reopen. Pixels outside the submitted rectangle
+must already be correct in the back buffer.
+
+Each publication poll writes back at most 4,096 bytes. Dirty columns expand
+to 64-byte cache lines within each dirty row; full-stride rows coalesce into
+one span. Later polls request handoff and check both the switch event and
+the current descriptor's membership in the new ring. Completion swaps the
+public front/back pointers. Synchronous drawing and flipping are refused
+while a submission is pending. Existing synchronous clients retain their API.
+
+Publication errors and a 500 ms handoff timeout begin polled retirement.
+Buffers remain retained until both TX and its link report stopped.
+`TIKU_DISPLAY_ERR_RETIRED` reports that failure with stopped DMA and requires
+close and reopen. Other negative poll results refuse the call without
+changing ownership. Failure to prove retirement within 500 ms
+halts execution with storage retained. Close retains its synchronous stop
+contract. Batch size limits work per poll; board timing remains a separate
+qualification requirement.
+
 GPIO33/34 carry RGB data and also connect to the USB Serial/JTAG PHY.
 Initialization disables that PHY's pads and overrides its pull resistors
 while LCD owns the pins. Close restores the saved USB pad configuration.
 The UART0 console uses GPIO58/59.
+
+TikuSurface profiles select paired presentation with `S31_SURFACE_LCD=1` in
+the product manifest. Their default value, zero, selects diagnostic
+presentation. The LCD image reports `tikusurface_s31_lcd`; the diagnostic
+runtime runner refuses that identity. Product/display code is selected into
+IROM by the product linker while DMA descriptors remain in SRAM. Touch is
+not selected by this option. Physical timing and resource qualification are
+separate from target-link checks.
 
 Poll `tiku_s31_display_poll()` from the foreground more often than one frame
 period to collect VSYNC, DMA EOF, underrun and DMA-error observations.
@@ -257,7 +306,9 @@ open. Calls from workers or interrupt handlers are refused.
 AXI DMA uses trusted mode through TEE entry 64. SRAM descriptor faults from
 TX0 report bus ID 72. A locked incompatible mode is refused; memory-region
 filters remain enabled. The LCDCAM block and AXI TX0 belong exclusively to
-this backend in the display profiles. Camera sharing and general DMA-channel
+this backend in the display profiles. The AXI internal-memory window covers
+the complete descriptor array at its linked SRAM address; PSRAM pixels use
+the separately configured external-memory window. Camera sharing and general DMA-channel
 allocation are absent.
 
 Run `display-test` with `--display-test --seconds 35`. The test requires the
@@ -422,6 +473,28 @@ enabled. An I/O failure freezes transfers until close and reopen. Close
 retains ownership when pending programming cannot be quiesced.
 Native four-bit SDMMC and its MPLL clock are outside this SPI backend.
 
+`TIKU_S31_SD_ASYNC_ENABLE=1` adds caller-owned open, clock and read operations.
+`tiku_s31_sd_open_begin()` claims the card and starts SPI configuration;
+`tiku_s31_sd_poll()` advances one phase without a hardware wait or delay.
+The two power intervals use elapsed-clock checks. Command responses and data
+tokens advance through polled FIFO requests of at most 64 bytes. CRC checks
+precede copying a sector to the caller. Successful operations retain the open
+card for another operation. Errors close the read-only session; invalid-call
+refusals retain ownership. `tiku_s31_sd_cancel()` resets a pending SPI transfer
+and releases the pads before releasing borrowed buffers. Synchronous card
+operations are refused while an asynchronous operation owns the transport.
+
+`tiku_s31_mfs_async_acquire/read/poll/close` bind that transport to the observed
+CID and an explicitly selected block extent. Acquisition verifies card identity
+and capacity before selecting the requested clock. Reads accept 1..8 sectors,
+retain the session across calls, and never enable a write extent. Caller output
+can contain completed sectors if a later sector fails. The caller serializes
+the session with filesystem work and supplies its state storage. The existing
+queued store and block API remain synchronous; their clients must use a
+resumable filesystem operation to benefit from the asynchronous transport.
+The feature defaults off. TikuSurface LCD links select it and qualify placement;
+host transport fixtures do not establish board timing or service throughput.
+
 The firmware profile enables `S31_MEDIA_ENABLE=1` by default. Set it to
 zero to omit the card service. The S31 block adapter validates CID and the
 selected extent each time it acquires the card. Completed sector transfers
@@ -584,3 +657,61 @@ Encryption Key Refresh Complete events so a refreshed link releases its
 pairing state before another peer starts pairing. Hardware entropy health
 faults remain latched until reset; RF-load tests have observed such faults.
 See the radio adapter contract for the per-mode qualification limits.
+
+## Local application manifest
+
+The `s31-local` and `s31-connected` profiles select
+`tikuSurface/product/tikuos.mk` through `S31_APPLICATION_MANIFEST` and require
+the separate TikuSurface checkout and its exported S31 SDK. They use 80 MHz
+PSRAM and the firmware flash layout. The generated product linker contract
+checks UI code/constants and resident anchors in the final ELF.
+`S31_UI_LTO=1` selects UI/SDK LTO; use a separate `S31_DIR` for that build.
+
+These profiles run diagnostic presentation and an unavailable media provider.
+They do not select the LCD or touch driver. The connected profile starts its
+network process after application startup. The existing `firmware` profile
+keeps `applications/applications.mk` as its default application manifest.
+An explicitly selected missing manifest fails configuration.
+
+
+## Polled region writes
+
+`TIKU_S31_STORAGE_ASYNC_ENABLE=1` adds the caller-owned operations in
+`tiku_storage_async.h`. The default is zero. Begin accepts a mapped region
+view and immutable input, requires an established durable mirror and reserves
+region writes and mirror flushes. Calls run in the serialized kernel owner.
+Pending operations retain their context and input until poll reports terminal
+completion; a caller cancellation must drain accepted work.
+
+The writer advances undo copying and CRC work in 256-byte pieces, programs
+at most 64 bytes within a page, verifies the program on a later poll and
+commits the mirror magic after its body. Region shadow publication follows
+the durable mirror that clears the undo record. Boot uses the existing mirror
+selection and undo replay. A backend failure latches storage unavailable until
+boot recovery. The durable layout is unchanged.
+
+The radio flash linker exports `__tiku_s31_irom_start` and
+`__tiku_s31_irom_end` around the linked code segment. The driver option
+`TIKU_S31_RADIO_IMAGE_BOUNDS_ENABLE` checks station code against that mapped
+segment; it is disabled by default.
+
+The flash implementation checks JEDEC ID `46 40 18` and the SFDP basic-parameter
+suspend profile. SPI1 programs and erases with automatic suspension for SPI0
+cached reads. Automatic resume is disabled; the storage owner resumes a suspended
+operation on its next poll. It uses a command clock of at most 20 MHz, saves the
+controller configuration and restores it after retirement. Admission limits
+the SFDP program/erase resume intervals to 64/512 us and suspend latency to
+50 us. At 20 MHz the controller waits 64 us after program resume, 512 us after
+erase resume and 51.2 us after suspend; slower clocks lengthen these delays.
+Short command and
+progress deadlines halt on failure. Cached reads must stay outside the region
+being programmed or erased; DMA reads from flash during these operations are
+not part of this contract. Product code, constants and transaction state may
+remain in mapped memory. The synchronous storage busy check remains resident. Both general-storage and
+encrypted Wi-Fi-settings ROM access refuse a pending automatic operation before
+changing caches.
+
+Program/erase submissions charge the NVM operation counters once. Their busy
+time sample covers submission, excluding pending wall time and cache arbitration.
+Target timing, concurrent service behavior and physical flash interruption
+require qualification on the selected image and board.

@@ -111,3 +111,6 @@ arch/nordic/cracen_pk_microcode.h
 experiments/
 
 .main-elf-mcu
+
+# Separate graphical product repository.
+/tikuSurface

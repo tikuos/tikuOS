@@ -33,7 +33,13 @@ S31_SRCS += arch/esp32s31/tiku_storage_arch.c arch/esp32s31/tiku_storage_io.c \
     basic/tiku_basic.c basic/tiku_basic_module.c basic/tiku_basic_vfs.c
 S31_SRCS += $(addprefix kernel/vfs/tree/tiku_vfs_tree_,sys.c boot.c timer.c watchdog.c power.c net.c wifi.c persist.c layout.c watch.c dev.c gpio.c sensor.c data.c)
 S31_SRCS += $(addprefix shell/commands/tiku_shell_cmd_,ls.c cd.c write.c read.c fs.c free.c df.c layout.c name.c tree.c basic.c reboot.c console.c)
--include applications/applications.mk
+ifneq ($(origin S31_APPLICATION_MANIFEST),undefined)
+ifeq ($(wildcard $(S31_APPLICATION_MANIFEST)),)
+$(error Requested S31_APPLICATION_MANIFEST does not exist)
+endif
+endif
+S31_APPLICATION_MANIFEST ?= applications/applications.mk
+-include $(S31_APPLICATION_MANIFEST)
 S31_GUI_KITS ?= applications/kits
 S31_SRCS += $(patsubst applications/kits/%,$(S31_GUI_KITS)/%,$(APPL_SRCS))
 S31_FLAGS += $(subst -Iapplications/kits/,-I$(S31_GUI_KITS)/,$(APPL_CFLAGS))
