@@ -24,6 +24,7 @@ SECTIONS
         __tiku_cells_start = .; KEEP(*(.tiku_cells)) __tiku_cells_end = .;
     } > DROM
     .flash.text : {
+        __tiku_s31_irom_start = .;
         *(.flash.text)
         *tiku_bt.o(.rodata* .srodata*)
         *tiku_shell_cmd_bt.o(.rodata* .srodata*)
@@ -57,6 +58,7 @@ SECTIONS
         *shell/*.o(.text .text.*)
         *applications/*.o(.text .text.*)
         *libphy.a:(.text .text.*) *libnet80211.a:(.text .text.*) *libpp.a:(.text .text.*) *libcore.a:(.text .text.*)
+        __tiku_s31_irom_end = .;
     } > IROM
     .text : ALIGN(64) {
         KEEP(*(.text.entry))
