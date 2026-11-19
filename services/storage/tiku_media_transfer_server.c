@@ -267,3 +267,24 @@ int tiku_media_transfer_server_usbhs(void)
     return TIKU_MFS_ARG;
 #endif
 }
+
+#if TIKU_MEDIA_TRANSFER_STATUS_ENABLE
+int tiku_media_transfer_server_status(tiku_media_transfer_status_t *out)
+{
+    if (!out) return TIKU_MFS_ARG;
+    *out=(tiku_media_transfer_status_t){0};
+    if (!active) return 0;
+    if (!live()) return TIKU_MFS_STALE;
+    const tiku_media_transfer_t *session=&memory->session;
+    out->active=1;out->port=listen_port;
+#if TIKU_KITS_NET_TCP_ENABLE
+    out->connected=connection!=NULL;
+#endif
+    out->uploading=session->upload!=0;out->reading=session->reader!=0;
+    out->fault=session->fault || lost;
+    out->accepted=session->accepted;out->committed=session->committed;
+    out->expected=session->expected;out->read_offset=session->read_offset;
+    out->read_length=session->read_length;
+    return 0;
+}
+#endif

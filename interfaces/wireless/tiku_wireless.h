@@ -266,6 +266,23 @@ int tiku_wireless_disconnect(void);
  */
 int tiku_wireless_forget(void);
 
+#ifndef TIKU_WIRELESS_OBSERVE_ENABLE
+#define TIKU_WIRELESS_OBSERVE_ENABLE 0
+#endif
+#if TIKU_WIRELESS_OBSERVE_ENABLE
+/** @brief Cached connection flags without addresses, keys or signal queries. */
+typedef struct {
+    uint8_t up, scan_in_progress, disconnect_pending, link_state;
+} tiku_wireless_observation_t;
+/**
+ * @brief Copy cached flags from a provider implementing the observation feature.
+ * @return TIKU_DRV_OK, INVALID for NULL, or TIMEOUT outside the kernel owner.
+ * @note Requires serialized kernel-owner execution. No vendor calls, waits,
+ * allocation or radio I/O occur. A non-NULL output is zeroed on refusal.
+ */
+int tiku_wireless_observe(tiku_wireless_observation_t *out);
+#endif
+
 #ifdef __cplusplus
 }
 #endif
