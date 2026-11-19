@@ -17,8 +17,10 @@
 #include "tiku_i2c_arch.h"
 #include "tiku_runtime_arch.h"
 
+#ifndef REG_READ
 #define REG_READ(a) (*(volatile uint32_t *)(uintptr_t)(a))
 #define REG_WRITE(a, v) (REG_READ(a) = (v))
+#endif
 #include <interfaces/gpio/tiku_gpio_owner.h>
 
 #define I2C_BASE        0x20385000u
@@ -84,11 +86,32 @@ static uint32_t saved_enable[2];
 static uint8_t opened;
 static uint8_t faulted;
 
+#if TIKU_I2C_BUDGET_ENABLE
+static uint64_t budget_deadline;
+/** @brief Compare the 52-bit clock with the shared deadline across counter wrap. */
+static int budget_expired(void)
+{
+    return budget_deadline && ((tiku_s31_time() - budget_deadline) & I2C_TIME_MASK) < (1ULL << 51);
+}
+int tiku_i2c_arch_budget_begin(uint32_t microseconds)
+{
+    if (!microseconds || microseconds > 50000) return TIKU_I2C_ERR_PARAM;
+    if (budget_deadline) return TIKU_I2C_ERR_BUSY;
+    budget_deadline = (tiku_s31_time() + (uint64_t)microseconds * 16u) & I2C_TIME_MASK;
+    if (!budget_deadline) budget_deadline = 1;
+    return 0;
+}
+void tiku_i2c_arch_budget_end(void) { budget_deadline = 0; }
+#else
+#define budget_expired() 0
+#endif
+
 /** @brief Wait for self-clearing controller bits with a fixed poll limit. */
 static int sync_done(uint32_t bits)
 {
     unsigned n;
     for (n = 0; n < I2C_SYNC_SPINS; n++) {
+        if (budget_expired()) return TIKU_I2C_ERR_TIMEOUT;
         if (!(REG_READ(I2C_CTRL) & bits)) {
             return TIKU_I2C_OK;
         }
@@ -136,6 +159,7 @@ static int run_batch(int stop)
     uint64_t begin, now;
     unsigned n;
     uint32_t raw;
+    if (budget_expired()) return TIKU_I2C_ERR_TIMEOUT;
     int rc = error_status(REG_READ(I2C_RAW));
     if (rc != TIKU_I2C_OK) {
         return rc;
@@ -155,6 +179,7 @@ static int run_batch(int stop)
         if (raw & (stop ? (1u << 7) : (1u << 3))) {
             return TIKU_I2C_OK;
         }
+        if ((n & 63u) == 0u && budget_expired()) return TIKU_I2C_ERR_TIMEOUT;
         if ((n & 63u) == 0u &&
             ((now = tiku_s31_time()),
              ((now - begin) & I2C_TIME_MASK) >= I2C_WAIT_TICKS)) {

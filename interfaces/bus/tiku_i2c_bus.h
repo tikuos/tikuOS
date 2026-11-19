@@ -137,4 +137,12 @@ int tiku_i2c_write_read(uint8_t addr,
                          const uint8_t *tx_buf, uint16_t tx_len,
                          uint8_t *rx_buf, uint16_t rx_len);
 
+/** @brief Start a shared transaction deadline, in microseconds; zero succeeds.
+ * @note Serialized foreground only. The S31 budget-enabled provider supports
+ * 1..50000 us; unsupported ports refuse. End the budget after the last operation.
+ */
+int tiku_i2c_budget_begin(uint32_t microseconds);
+/** @brief End the caller's active transaction budget without changing bus ownership. */
+void tiku_i2c_budget_end(void);
+
 #endif /* TIKU_I2C_BUS_H_ */

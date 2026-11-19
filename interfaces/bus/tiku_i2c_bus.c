@@ -175,3 +175,11 @@ tiku_i2c_write_read(uint8_t addr,
 }
 
 #endif /* TIKU_BOARD_I2C_BRW_100K */
+
+#if defined(PLATFORM_ESP32S31) && TIKU_I2C_BUDGET_ENABLE
+int tiku_i2c_budget_begin(uint32_t microseconds) { return tiku_i2c_arch_budget_begin(microseconds); }
+void tiku_i2c_budget_end(void) { tiku_i2c_arch_budget_end(); }
+#else
+int tiku_i2c_budget_begin(uint32_t microseconds) { (void)microseconds; return TIKU_I2C_ERR_PARAM; }
+void tiku_i2c_budget_end(void) { }
+#endif

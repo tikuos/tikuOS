@@ -46,4 +46,8 @@ int tiku_i2c_arch_probe(uint8_t addr);
  */
 int tiku_i2c_arch_write_read(uint8_t addr, const uint8_t *tx, uint16_t tx_len,
                              uint8_t *rx, uint16_t rx_len);
+/** @brief Start a non-nesting deadline across bus operations; serialized foreground only. */
+int tiku_i2c_arch_budget_begin(uint32_t microseconds);
+/** @brief Clear the active deadline after the caller's bus operation sequence. */
+void tiku_i2c_arch_budget_end(void);
 #endif
