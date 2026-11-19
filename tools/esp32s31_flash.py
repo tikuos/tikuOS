@@ -11,6 +11,7 @@
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -74,6 +75,48 @@ def check_boot(data, psram=False, memory=False, display=False, radio=False, radi
     return (checker(data) and (not radio_data or ram.check_station_data_result(data)) and data.count(b"ESP-ROM:esp32s31-") == 1 and
             data.count(b"Loaded app from partition at offset 0x10000") == 1 and
             b"flash_project=" + project in data)
+
+
+def load_application(path):
+    """Load an explicitly selected local application qualification provider."""
+    path = path.resolve(strict=True)
+    spec = importlib.util.spec_from_file_location("s31_application_test", path)
+    if spec is None or spec.loader is None:
+        raise ValueError("application test must be a Python source file")
+    module = importlib.util.module_from_spec(spec)
+    source = path.read_bytes()
+    exec(compile(source, str(path), "exec"), module.__dict__)
+    application = module.ApplicationQualification()
+    project = application.project
+    if not isinstance(project, bytes) or not re.fullmatch(rb"[a-zA-Z0-9_-]{1,31}", project):
+        raise ValueError("invalid application project name")
+    if not callable(application.capture) or not callable(application.passed) or not isinstance(application.results, list) or not isinstance(application.console, (bytes, bytearray)):
+        raise ValueError("invalid application qualification interface")
+    return application, dict(path=str(path), sha256=hashlib.sha256(source).hexdigest(),
+                             project=project.decode("ascii"))
+
+
+def validate_application_image(data, project):
+    """Match the selected provider to the first segment's application descriptor."""
+    if data[80:112].split(b"\0", 1)[0] != project:
+        raise ValueError("image project does not match application test")
+
+
+def validate_application_runs(application, runs):
+    """Require the reset count declared by a multi-boot qualification provider."""
+    required = getattr(application, "required_runs", None)
+    if required is not None and (type(required) is not int or not 1 <= required <= 100 or runs != required):
+        raise ValueError("application test requires its declared run count")
+
+
+def check_application_boot(data, project):
+    """Require one product boot, successful startup and no recorded fatal/reset."""
+    return (data.count(b"ESP-ROM:esp32s31-") == 1 and
+            data.count(b"Loaded app from partition at offset 0x10000") == 1 and
+            data.count(b"TIKU S31 SRAM shell v1") == 1 and
+            b"flash_project=" + project + b"\r\n" in data and
+            b"application_started=0x00000001\r\n" in data and
+            b"FATAL" not in data and b"FAIL S31" not in data)
 
 
 def check_firmware(data):
@@ -245,8 +288,13 @@ def connect(esptool, wire):
     return chip
 
 
-def qualify(esptool, wire, image, backup, log, runs, seconds, state, journal, psram=False, memory=False, display=False, radio=False, radio_data=False, settings=False, firmware=False, peer=None, services=False, desktop_tests=()):
+def qualify(esptool, wire, image, backup, log, runs, seconds, state, journal, psram=False, memory=False, display=False, radio=False, radio_data=False, settings=False, firmware=False, peer=None, services=False, desktop_tests=(), application=None):
     """Temporarily replace application sectors; restore them after any test result."""
+    if application is not None:
+        if not firmware or not settings or peer or services or desktop_tests:
+            raise ValueError("application tests require protected firmware/storage/settings qualification")
+        validate_application_runs(application, runs)
+        validate_application_image(image, application.project)
     span = (len(image) + 4095) & ~4095
     original, table = backup[0x10000:0x10000 + span], backup[0x8000:0x9000]
     esp = None
@@ -273,7 +321,18 @@ def qualify(esptool, wire, image, backup, log, runs, seconds, state, journal, ps
         for run in range(runs):
             wire.baudrate = 115200
             esp.hard_reset()
-            if peer:
+            if application is not None:
+                try:
+                    data, _ = application.capture(wire, seconds, run)
+                except BaseException as error:
+                    state["application_error"] = str(error)
+                    raise
+                finally:
+                    log.write(bytes(application.console))
+                    log.flush()
+                    state["application"] = application.results
+                    save_journal(journal, state)
+            elif peer:
                 try:
                     data, _ = peer.capture(wire, seconds)
                 except Exception as error:
@@ -286,9 +345,9 @@ def qualify(esptool, wire, image, backup, log, runs, seconds, state, journal, ps
                     save_journal(journal, state)
             else:
                 data, _ = (capture_services(wire, seconds, run) if services else capture_settings(wire, seconds, run) if firmware and settings else capture_firmware(wire, seconds) if firmware else ram.capture(wire, seconds) if psram or memory or display or radio else ram.capture_shell(wire, seconds))
-            log.write(f"RUN {run + 1}\n".encode() + data)
+            log.write(f"RUN {run + 1}\n".encode() + (b"" if application is not None else data))
             log.flush()
-            passed = check_services(data, run) if services else check_settings(data, run) if firmware and settings else check_boot(data, psram, memory, display, radio, radio_data, firmware)
+            passed = (check_application_boot(data, application.project) and application.passed()) if application is not None else check_services(data, run) if services else check_settings(data, run) if firmware and settings else check_boot(data, psram, memory, display, radio, radio_data, firmware)
             if peer:
                 passed = passed and peer.passed()
             if services and passed and run == runs - 1:
@@ -367,6 +426,8 @@ def main():
     profile.add_argument("--firmware-test", action="store_true")
     profile.add_argument("--services-test", action="store_true")
     profile.add_argument("--ap-peer-test", action="store_true")
+    profile.add_argument("--application-test", type=Path,
+                         help="local Python provider for a protected application qualification")
     parser.add_argument("--peer-interface")
     parser.add_argument("--desktop-test", type=Path, action="append", default=[])
     parser.add_argument("--allow-uplink-interruption", action="store_true",
@@ -391,6 +452,13 @@ def main():
         args.firmware_test = True
     elif args.peer_interface or args.allow_uplink_interruption:
         parser.error("peer options require --ap-peer-test")
+    application, application_source = None, None
+    if args.application_test:
+        if args.settings_test:
+            parser.error("--application-test protects settings without --settings-test")
+        application, application_source = load_application(args.application_test)
+        validate_application_runs(application, args.runs)
+        args.firmware_test = True
     if args.settings_test and (not args.firmware_test or args.runs != 2):
         parser.error("--settings-test requires --firmware-test --runs 2")
     if args.wifi_data_required and not args.radio_test:
@@ -406,6 +474,8 @@ def main():
         raise ValueError("requires esptool==5.6.0")
     image, backup = args.image.read_bytes(), args.backup.read_bytes()
     validate_image(LoadFirmwareImage("esp32s31", image), image, args.radio_test, args.firmware_test)
+    if application is not None:
+        validate_application_image(image, application.project)
     validate_backup(backup, args.backup_sha256)
     ram.validate_port(args.port, args.serial, list(list_ports.comports()))
     peer = None
@@ -417,6 +487,8 @@ def main():
                  image_sha256=hashlib.sha256(image).hexdigest(),
                  backup=str(args.backup.resolve()), backup_sha256=args.backup_sha256,
                  mutation_started=False, restored=False, boots=[])
+    if application_source is not None:
+        state["application_source"] = application_source
     with args.log.open("xb") as log, journal.open("x"):
         save_journal(journal, state)
         wire = serial.Serial(port=None, baudrate=115200, timeout=0.05, exclusive=True)
@@ -424,7 +496,7 @@ def main():
         wire.port = args.port
         try:
             wire.open()
-            qualify(esptool, wire, image, backup, log, args.runs, args.seconds, state, journal, args.psram_test, args.memory_test, args.display_test, args.radio_test, args.wifi_data_required, settings=args.settings_test, firmware=args.firmware_test, peer=peer, services=args.services_test, desktop_tests=args.desktop_test)
+            qualify(esptool, wire, image, backup, log, args.runs, args.seconds, state, journal, args.psram_test, args.memory_test, args.display_test, args.radio_test, args.wifi_data_required, settings=args.settings_test or application is not None, firmware=args.firmware_test, peer=peer, services=args.services_test, desktop_tests=args.desktop_test, application=application)
         finally:
             wire.close()
     return 0 if (state["restored"] and state.get("factory_booted") and
