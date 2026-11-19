@@ -10,6 +10,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_settings_internal.h"
+#include "tiku_storage_async.h"
 #include "tiku_runtime_arch.h"
 #include <kernel/threads/tiku_thread.h>
 extern int esp_rom_spiflash_read(uint32_t address, uint32_t *buffer, int32_t length);
@@ -22,6 +23,9 @@ extern uint32_t Cache_Suspend_L1_DCache(void);
 extern void Cache_Resume_L1_DCache(uint32_t state);
 int tiku_s31_settings_io(unsigned operation, uint32_t address, void *buffer, size_t length)
 {
+#if TIKU_S31_STORAGE_ASYNC_ENABLE
+    if (tiku_s31_storage_io_busy()) return -1;
+#endif
     uintptr_t ptr = (uintptr_t)buffer;
     if (!tiku_s31_settings_context() || operation > 2 ||
         (operation == 1 ? (address & 4095u) || length != 0 :

@@ -10,6 +10,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_storage_arch.h"
+#include "tiku_storage_async.h"
 #include "tiku_psram_arch.h"
 #include <kernel/memory/tiku_mem.h>
 #include <kernel/memory/tiku_nvm_mirror.h>
@@ -244,3 +245,171 @@ int tiku_s31_storage_init(void)
     return 0;
 }
 void tiku_s31_storage_seal(void) { provisioning = 0; }
+
+#if TIKU_S31_STORAGE_ASYNC_ENABLE
+/** @brief Region publication follows a committed mirror with a cleared undo record. */
+enum {
+    WRITE_VALIDATE=1, WRITE_VALIDATE_CRC, WRITE_PREPARE, WRITE_UNDO,
+    WRITE_PENDING, WRITE_MIRROR, WRITE_MIRROR_CRC, WRITE_MIRROR_ERASE,
+    WRITE_MIRROR_PROGRAM, WRITE_MIRROR_GATE, WRITE_ERASE, WRITE_PROGRAM,
+    WRITE_CLEAR, WRITE_PUBLISH
+};
+static tiku_s31_storage_write_t *active_write;
+/** @brief Retire the transaction; failed writes require recovery from flash at boot. */
+static int write_retire(tiku_s31_storage_write_t *op, int result)
+{
+    if (result) failed=1;
+    op->phase=0; op->data=NULL; active_write=NULL; writing=flushing=0;
+    return result;
+}
+/** @brief Relock staged durable SRAM; the transaction owns its asynchronous mirror flush. */
+static void write_relock(uint16_t saved) { tiku_mpu_arch_lock_nvm(saved); }
+/** @brief Program and verify one page-bounded slice, retaining ownership across suspend. */
+static int write_program(tiku_s31_storage_write_t *op, uint32_t address,
+                          const uint8_t *source, size_t bytes)
+{
+    if (!op->pending && !op->verify && blank(source,bytes)) op->verify=1;
+    if (op->verify) {
+        if (tiku_s31_storage_io(0,address,scratch,bytes) || memcmp(scratch,source,bytes)) return -1;
+        op->verify=0; return 0;
+    }
+    memcpy(scratch,source,bytes);
+    int rc=tiku_s31_storage_slice(&op->flash,2,address,scratch,bytes,op->pending);
+    if (rc<0) return -1;
+    op->pending=rc!=0;
+    if (!rc) op->verify=1;
+    return 1;
+}
+/** @brief Choose a word-aligned transfer within the controller buffer and flash page. */
+static size_t write_chunk(uint32_t address, size_t bytes)
+{
+    size_t n=bytes<64u ? bytes : 64u;
+    return n<256u-(address&255u) ? n : 256u-(address&255u);
+}
+int tiku_s31_storage_write_begin(tiku_s31_storage_write_t *op, tiku_nvm_backend_t *be,
+                                  size_t off, const void *data, size_t len)
+{
+    uintptr_t view=(uintptr_t)TIKU_S31_STORAGE_VIEW, base=be ? (uintptr_t)be->base : 0;
+    uintptr_t input=(uintptr_t)data;
+    if (!op || !be || !data || !len || !tiku_s31_storage_context() ||
+        !ready || failed || selected<0 || provisioning || base<view || base-view>TIKU_S31_REGION_BYTES ||
+        be->size>TIKU_S31_REGION_BYTES-(base-view) || off>be->size || len>be->size-off ||
+        len>UINTPTR_MAX-input) return -1;
+    if (writing || flushing || active_write) return -2;
+    if (TIKU_S31_STORAGE_UNDO.pending) return -1;
+    off += base-view;
+    size_t first=off&~(size_t)(SECTOR-1u), end=(off+len+SECTOR-1u)&~(size_t)(SECTOR-1u);
+    if (input<view+end && input+len>view+first) return -1;
+    *op=(tiku_s31_storage_write_t){.data=data,.offset=off,.left=len,.phase=WRITE_VALIDATE};
+    active_write=op; writing=flushing=1;
+    return 1;
+}
+int tiku_s31_storage_write_poll(tiku_s31_storage_write_t *op)
+{
+    if (!op || op!=active_write || !tiku_s31_storage_context()) return -1;
+    uint32_t *h=(uint32_t *)mirror(op->target);
+    size_t n;
+    int rc;
+    uint16_t saved;
+    switch (op->phase) {
+    case WRITE_VALIDATE:
+        if (selected<0) {op->phase=WRITE_PREPARE;return 1;}
+        h=(uint32_t *)mirror((unsigned)selected);
+        if (h[0]!=MAGIC || h[2]>TIKU_S31_MIRROR_BYTES-HEADER || (h[2]&3u)) break;
+        op->cursor=0;op->crc=tiku_nvm_crc32_update(UINT32_MAX,h+2,8);
+        op->phase=WRITE_VALIDATE_CRC;return 1;
+    case WRITE_VALIDATE_CRC:
+        h=(uint32_t *)mirror((unsigned)selected);
+        n=h[2]-op->cursor;if(n>256)n=256;
+        op->crc=tiku_nvm_crc32_update(op->crc,(uint8_t *)(h+4)+op->cursor,n);op->cursor+=n;
+        if(op->cursor==h[2]) {
+            if((op->crc^UINT32_MAX)!=h[1])break;
+            op->phase=WRITE_PREPARE;
+        }
+        return 1;
+    case WRITE_PREPARE:
+        op->sector_offset=(uint32_t)(op->offset&~(size_t)(SECTOR-1u));
+        op->within=op->offset-op->sector_offset;
+        op->count=op->left<SECTOR-op->within ? op->left : SECTOR-op->within;
+        memcpy(sector,TIKU_S31_STORAGE_VIEW+op->sector_offset,SECTOR);
+        if (!memcmp((uint8_t *)sector+op->within,op->data,op->count)) {
+            op->phase=WRITE_PUBLISH;return 1;
+        }
+        memcpy((uint8_t *)sector+op->within,op->data,op->count);
+        op->cursor=0;op->crc=UINT32_MAX;op->phase=WRITE_UNDO;return 1;
+    case WRITE_UNDO:
+        n=SECTOR-op->cursor;if(n>256)n=256;
+        saved=tiku_mpu_unlock_nvm();
+        memcpy(TIKU_S31_STORAGE_UNDO.data+op->cursor,TIKU_S31_STORAGE_VIEW+op->sector_offset+op->cursor,n);
+        write_relock(saved);
+        op->crc=tiku_nvm_crc32_update(op->crc,TIKU_S31_STORAGE_UNDO.data+op->cursor,n);op->cursor+=n;
+        if(op->cursor==SECTOR)op->phase=WRITE_PENDING;
+        return 1;
+    case WRITE_PENDING:
+        saved=tiku_mpu_unlock_nvm();
+        TIKU_S31_STORAGE_UNDO.offset=op->sector_offset;TIKU_S31_STORAGE_UNDO.reserved=0;
+        TIKU_S31_STORAGE_UNDO.crc=op->crc^UINT32_MAX;TIKU_S31_STORAGE_UNDO.pending=PENDING;
+        write_relock(saved);
+        op->after_mirror=WRITE_ERASE;op->phase=WRITE_MIRROR;return 1;
+    case WRITE_MIRROR:
+        op->target=selected==0 ? 1u : 0u;h=(uint32_t *)mirror(op->target);
+        h[0]=MAGIC;h[2]=LIVE_BYTES;h[3]=generation+1u;
+        memcpy(h+4,LIVE,LIVE_BYTES);
+        memset((uint8_t *)(h+4)+LIVE_BYTES,255,TIKU_S31_MIRROR_BYTES-HEADER-LIVE_BYTES);
+        op->cursor=0;op->crc=tiku_nvm_crc32_update(UINT32_MAX,h+2,8);
+        op->phase=WRITE_MIRROR_CRC;return 1;
+    case WRITE_MIRROR_CRC:
+        n=LIVE_BYTES-op->cursor;if(n>256)n=256;
+        op->crc=tiku_nvm_crc32_update(op->crc,(uint8_t *)(h+4)+op->cursor,n);op->cursor+=n;
+        if(op->cursor==LIVE_BYTES) {
+            h[1]=op->crc^UINT32_MAX;op->cursor=0;op->phase=WRITE_MIRROR_ERASE;
+        }
+        return 1;
+    case WRITE_MIRROR_ERASE:
+        rc=tiku_s31_storage_slice(&op->flash,1,slots[op->target]+op->cursor,NULL,0,op->pending);
+        if(rc<0)break;
+        op->pending=rc!=0;
+        if(!rc) {
+            op->cursor+=SECTOR;
+            if(op->cursor==TIKU_S31_MIRROR_BYTES) {op->cursor=4;op->phase=WRITE_MIRROR_PROGRAM;}
+        }
+        return 1;
+    case WRITE_MIRROR_PROGRAM:
+        n=write_chunk(slots[op->target]+op->cursor,LIVE_BYTES+HEADER-op->cursor);
+        rc=write_program(op,slots[op->target]+op->cursor,mirror(op->target)+op->cursor,n);
+        if(rc<0)break;
+        if(!rc) {
+            op->cursor+=n;
+            if(op->cursor==LIVE_BYTES+HEADER)op->phase=WRITE_MIRROR_GATE;
+        }
+        return 1;
+    case WRITE_MIRROR_GATE:
+        rc=write_program(op,slots[op->target],mirror(op->target),4);
+        if(rc<0)break;
+        if(!rc) {selected=(int)op->target;generation=h[3];op->cursor=0;op->phase=op->after_mirror;}
+        return 1;
+    case WRITE_ERASE:
+        rc=tiku_s31_storage_slice(&op->flash,1,TIKU_S31_STORAGE_START+op->sector_offset,NULL,0,op->pending);
+        if(rc<0)break;
+        op->pending=rc!=0;
+        if(!rc) {op->cursor=0;op->phase=WRITE_PROGRAM;}
+        return 1;
+    case WRITE_PROGRAM:
+        n=write_chunk(TIKU_S31_STORAGE_START+op->sector_offset+op->cursor,SECTOR-op->cursor);
+        rc=write_program(op,TIKU_S31_STORAGE_START+op->sector_offset+op->cursor,(uint8_t *)sector+op->cursor,n);
+        if(rc<0)break;
+        if(!rc) {op->cursor+=n;if(op->cursor==SECTOR)op->phase=WRITE_CLEAR;}
+        return 1;
+    case WRITE_CLEAR:
+        saved=tiku_mpu_unlock_nvm();TIKU_S31_STORAGE_UNDO.pending=0;write_relock(saved);
+        op->after_mirror=WRITE_PUBLISH;op->phase=WRITE_MIRROR;return 1;
+    case WRITE_PUBLISH:
+        memcpy(TIKU_S31_STORAGE_VIEW+op->sector_offset,sector,SECTOR);
+        op->offset+=op->count;op->data+=op->count;op->left-=op->count;
+        if(!op->left)return write_retire(op,0);
+        op->phase=WRITE_PREPARE;return 1;
+    default: break;
+    }
+    return write_retire(op,-1);
+}
+#endif

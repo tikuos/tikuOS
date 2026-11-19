@@ -10,6 +10,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_storage_arch.h"
+#include "tiku_storage_async.h"
 #include "tiku_runtime_arch.h"
 #include <kernel/memory/tiku_nvm_meter.h>
 #include <kernel/cpu/tiku_watchdog.h>
@@ -24,6 +25,9 @@ extern uint32_t Cache_Suspend_L1_DCache(void);
 extern void Cache_Resume_L1_DCache(uint32_t state);
 int tiku_s31_storage_io(unsigned operation, uint32_t address, void *buffer, size_t length)
 {
+#if TIKU_S31_STORAGE_ASYNC_ENABLE
+    if (tiku_s31_storage_io_busy()) return -1;
+#endif
     uintptr_t ptr = (uintptr_t)buffer;
     if (!tiku_s31_storage_context() || operation > 2 ||
         (operation == 1 ? (address & 4095u) || length != 0 :

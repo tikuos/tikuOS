@@ -15,6 +15,7 @@
  */
 
 #include "tiku_tfs.h"
+#include "tiku_tfs_async.h"
 
 #include <string.h>
 
@@ -1382,3 +1383,185 @@ uint32_t tiku_tfs_pace_s(tiku_tfs_t *fs, size_t bytes, uint32_t life_days)
     }
     return tiku_nvm_pace_s(&media, 3u, (uint32_t)entries + 1u, life_days);
 }
+
+#if TIKU_TFS_ASYNC_ENABLE
+/** @brief The directory commit follows durable payload and metadata. */
+enum {
+    ASYNC_DATA = 1,
+    ASYNC_LENGTH,
+    ASYNC_ENTRY,
+    ASYNC_GATE,
+    ASYNC_REPLACE
+};
+
+/** @brief Retire ownership; an uncertain write result requires a remount. */
+static int async_finish(tiku_tfs_async_t *op, int result)
+{
+    tiku_tfs_t *fs = op->writer.fs;
+
+    if (result == TFS_ERR_IO) {
+        fs->mounted = 0;
+    }
+    if (result == TFS_OK) {
+        if (op->replacing) {
+            run_mark(fs, TFS_RUN_FIRST(op->old_run),
+                     TFS_RUN_SPAN(op->old_run), 0);
+        }
+        op->writer.active = 0;
+        fs->wr_open = 0;
+    } else if (op->committing) {
+        /* The commit may be durable despite a failed acknowledgement. */
+        op->writer.active = 0;
+        fs->wr_open = 0;
+    } else {
+        tiku_tfs_abort(&op->writer);
+    }
+    op->result = result;
+    op->phase = 0;
+    op->pending = 0;
+    op->data = NULL;
+    return 0;
+}
+
+int tiku_tfs_async_begin(tiku_tfs_t *fs, tiku_tfs_async_t *op,
+                         const char *name, const void *data, size_t length,
+                         const tiku_tfs_async_ops_t *ops, void *context)
+{
+    tiku_tfs_wr_t writer;
+    uint32_t run;
+    int rc, dir, replacing;
+
+    if (op == NULL || (data == NULL && length != 0u) || length > UINT32_MAX ||
+        ops == NULL || ops->begin == NULL || ops->poll == NULL || TIKU_TFS_ROTATE) {
+        return TFS_ERR_INVAL;
+    }
+    if (op->phase) {
+        return TFS_ERR_BUSY;
+    }
+    rc = tiku_tfs_open_w(fs, &writer, name, length);
+    if (rc != TFS_OK) {
+        return rc;
+    }
+    dir = tfs_find(fs, name);
+    replacing = dir >= 0;
+    if (dir < 0) {
+        dir = free_dirent(fs);
+    }
+    if (dir < 0) {
+        tiku_tfs_abort(&writer);
+        return TFS_ERR_NOSPACE;
+    }
+    *op = (tiku_tfs_async_t){
+        .writer = writer, .ops = ops, .context = context, .data = data,
+        .length = length, .dir = (unsigned)dir, .phase = ASYNC_DATA,
+        .replacing = (uint8_t)replacing
+    };
+    if (replacing) {
+        op->old_run = de_run(fs, (unsigned)dir);
+    }
+    run = TFS_RUN_MAKE(writer.first, writer.span);
+    memcpy(op->record, &run, 4u);
+    memcpy(op->record + 4u, writer.name, TIKU_TFS_NAME_MAX);
+    return TFS_OK;
+}
+
+int tiku_tfs_async_step(tiku_tfs_async_t *op)
+{
+    tiku_tfs_t *fs;
+    size_t offset, length;
+    const void *data;
+    int rc;
+
+    if (op == NULL) {
+        return TFS_ERR_INVAL;
+    }
+    if (!op->phase) {
+        return 0;
+    }
+    if (op->pending) {
+        rc = op->ops->poll(op->context);
+        if (rc == 1 || rc == TFS_ERR_BUSY) {
+            return 1;
+        }
+        op->pending = 0;
+        if (rc != TFS_OK) {
+            return async_finish(op, TFS_ERR_IO);
+        }
+        if (op->committing) {
+            return async_finish(op, TFS_OK);
+        }
+        if (op->cancelled) {
+            return async_finish(op, TIKU_TFS_ASYNC_CANCELLED);
+        }
+        if (op->phase == ASYNC_DATA) {
+            op->writer.off += op->chunk;
+        } else if (op->phase == ASYNC_LENGTH) {
+            op->phase = op->replacing ? ASYNC_REPLACE : ASYNC_ENTRY;
+        } else if (op->phase == ASYNC_ENTRY) {
+            op->phase = ASYNC_GATE;
+        }
+        return 1;
+    }
+    if (op->cancelled) {
+        return async_finish(op, TIKU_TFS_ASYNC_CANCELLED);
+    }
+    fs = op->writer.fs;
+    if (op->phase == ASYNC_DATA) {
+        if (op->writer.off == op->length) {
+            op->phase = ASYNC_LENGTH;
+            return 1;
+        }
+        length = op->length - op->writer.off;
+        if (length > 256u) {
+            length = 256u;
+        }
+        offset = slot_off(fs, op->writer.first) + TFS_SL_DATA + op->writer.off;
+        data = op->data + op->writer.off;
+        op->chunk = length;
+    } else if (op->phase == ASYNC_LENGTH) {
+        op->word = (uint32_t)op->length;
+        data = &op->word;
+        length = 4u;
+        offset = slot_off(fs, op->writer.first) + TFS_SL_LEN;
+    } else if (op->phase == ASYNC_ENTRY) {
+        data = op->record;
+        length = sizeof op->record;
+        offset = dirent_off(op->dir) + TFS_DE_SLOT;
+    } else if (op->phase == ASYNC_GATE) {
+        op->word = TFS_GATE;
+        data = &op->word;
+        length = 4u;
+        offset = dirent_off(op->dir) + TFS_DE_GATE;
+    } else if (op->phase == ASYNC_REPLACE) {
+        data = op->record;
+        length = 4u;
+        offset = dirent_off(op->dir) + TFS_DE_SLOT;
+    } else {
+        return async_finish(op, TFS_ERR_IO);
+    }
+    rc = op->ops->begin(op->context, fs->be, offset, data, length);
+    if (rc == TFS_ERR_BUSY) {
+        return 1;
+    }
+    if (rc != 1) {
+        return async_finish(op, TFS_ERR_IO);
+    }
+    op->pending = 1;
+    if (op->phase == ASYNC_GATE || op->phase == ASYNC_REPLACE) {
+        op->committing = 1;
+    }
+    return 1;
+}
+
+int tiku_tfs_async_cancel(tiku_tfs_async_t *op)
+{
+    if (op == NULL || !op->phase) {
+        return TFS_ERR_INVAL;
+    }
+    if (op->committing) {
+        return TFS_ERR_BUSY;
+    }
+    op->cancelled = 1;
+    return TFS_OK;
+}
+#endif
