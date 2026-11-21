@@ -22,6 +22,22 @@
 #define PSRAM_RESERVED 0u
 #endif
 
+/* An image may place zero-initialized statics in a section that ends at the
+ * top of PSRAM; the tier stops below it.  Undefined in other images. */
+extern char __surface_psram_bss_start[] __attribute__((weak));
+
+/** @brief Bytes at the top of PSRAM held by linker-placed statics, or -1 when
+ *         the section lies outside the mapped PSRAM above the shadow. */
+static long psram_statics(void)
+{
+    uintptr_t start = (uintptr_t)__surface_psram_bss_start;
+    uintptr_t end = TIKU_S31_PSRAM_BASE + tiku_s31_psram_size();
+
+    if (start == 0u) return 0;
+    if (start < TIKU_S31_PSRAM_BASE + PSRAM_RESERVED || start > end) return -1;
+    return (long)(end - start);
+}
+
 int tiku_s31_memory_init(void)
 {
     const uint8_t *base;
@@ -46,11 +62,13 @@ int tiku_s31_memory_init(void)
 #if TIKU_MEM_NVM_ENABLE
     tiku_s31_storage_seal();
 #endif
+    long statics = psram_statics();
+    if (statics < 0) return -10;
     if (tiku_tier_span_stats(TIKU_MEM_PSRAM, 0, &base, &stats) == TIKU_MEM_OK)
         return (uintptr_t)base == TIKU_S31_PSRAM_BASE + PSRAM_RESERVED &&
-               stats.total_bytes == tiku_s31_psram_size() - PSRAM_RESERVED ? 0 : -1;
+               stats.total_bytes == tiku_s31_psram_size() - PSRAM_RESERVED - (size_t)statics ? 0 : -1;
     return tiku_tier_attach_psram((void *)(TIKU_S31_PSRAM_BASE + PSRAM_RESERVED),
-                                 tiku_s31_psram_size() - PSRAM_RESERVED) == TIKU_MEM_OK ? 0 : -1;
+                                 tiku_s31_psram_size() - PSRAM_RESERVED - (size_t)statics) == TIKU_MEM_OK ? 0 : -1;
 }
 
 void tiku_mem_arch_secure_wipe(uint8_t *buf, tiku_mem_arch_size_t len)
