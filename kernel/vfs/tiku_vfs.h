@@ -411,6 +411,18 @@ void tiku_vfs_init(const tiku_vfs_node_t *root);
 int tiku_vfs_mount(const char *parent, const tiku_vfs_node_t *node);
 
 /**
+ * @brief Return one static or mounted child without enumerating dynamic entries.
+ * @param directory resolved node whose lifetime spans this call; NULL is allowed
+ * @param index zero-based index, static children before boot mounts
+ * @return Child metadata, or NULL for a file, NULL directory or end of children.
+ * @note The caller serializes tree rebuilds and mounts. The lookup visits at most
+ * TIKU_VFS_MOUNT_MAX mount records and calls no provider or read handler.
+ */
+const tiku_vfs_node_t *tiku_vfs_child_at(const tiku_vfs_node_t *directory,
+                                      unsigned index);
+
+
+/**
  * @brief Check a detached subtree before it is mounted.
  *
  * Checks node names, types, child tables, depth and path lengths; calls no

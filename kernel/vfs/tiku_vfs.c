@@ -77,6 +77,12 @@ static const tiku_vfs_node_t *vfs_child(const tiku_vfs_node_t *dir,
     return NULL;
 }
 
+const tiku_vfs_node_t *tiku_vfs_child_at(const tiku_vfs_node_t *directory,
+                                      unsigned index)
+{
+    return directory == NULL ? NULL : vfs_child(directory, index);
+}
+
 /**
  * @brief One watch subscription: each notify of @ref node posts
  *        TIKU_EVENT_VFS to @ref proc.
