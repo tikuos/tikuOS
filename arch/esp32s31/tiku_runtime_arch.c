@@ -521,3 +521,27 @@ void tiku_uart_overrun_reset(void)
     rx_overruns = 0;
     irq_restore(state);
 }
+
+#if TIKU_S31_CPU_MHZ == 160
+__attribute__((section(".flash.text")))
+int tiku_s31_runtime_clock_ready(void)
+{
+    if ((REG(0x2070104cu) & 0xfffu) != 0x81u ||
+        !(REG(0x20587174u) & 4u)) return -1;
+    /* CPLL divides by two for CPU; system and APB each divide by two. */
+    REG(CLOCK + 4u) = (REG(CLOCK + 4u) & ~0x3fffu) | 1u;
+    REG(CLOCK + 8u) &= ~1u;
+    REG(CLOCK + 12u) = (REG(CLOCK + 12u) & ~0x3fffu) | 1u;
+    REG(CLOCK + 16u) = (REG(CLOCK + 16u) & ~0x3fffu) | 1u;
+    REG(CLOCK) = (REG(CLOCK) & ~3u) | 1u;
+    REG(CLOCK + 0x14u) |= 1u;
+    unsigned i;
+    for (i = 0; i < 100000u && (REG(CLOCK + 0x14u) & 1u); ++i) { }
+    if (i == 100000u || (REG(CLOCK) & 3u) != 1u ||
+        (REG(CLOCK + 4u) & 0x3fffu) != 1u || (REG(CLOCK + 8u) & 1u) ||
+        (REG(CLOCK + 12u) & 0x3fffu) != 1u ||
+        (REG(CLOCK + 16u) & 0x3fffu) != 1u) return -1;
+    ((void (*)(unsigned))0x2f800044u)(160);
+    return 0;
+}
+#endif

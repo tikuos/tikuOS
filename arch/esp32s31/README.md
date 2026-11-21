@@ -2,9 +2,18 @@
 
 The port runs native TikuOS on CPU0 of the ESP32-S31-Korvo-1, silicon revision
 0.0. It builds for `rv32imafc_zicsr_zifencei` with the single-float ABI
-`ilp32f`. CPU, memory, system and APB clocks use the 40 MHz crystal. HP1 is
+`ilp32f`. CPU, memory, system and APB clocks initially use the 40 MHz crystal. HP1 is
 stalled and LP execution is disabled. The kernel-test linker uses 64 KiB of HP SRAM,
 including a 4 KiB kernel stack; it rejects persistent and retained sections.
+
+`S31_CPU_MHZ` defaults to 40. Flash firmware profiles also accept 160 with
+`S31_PSRAM_MHZ=40` or `80`. After PSRAM initializes CPLL, the runtime selects
+160 MHz CPU/memory, 80 MHz system and 40 MHz APB clocks. It verifies PLL
+configuration, bounds the clock-update wait, reads back the dividers and
+updates the ROM delay calibration. A refused transition stops memory
+initialization. Timer, UART and display clock sources retain their configured
+rates. Frequency control reports the selected fixed CPU rate; runtime changes
+are refused. The core TikuSurface LCD profile requires the 160 MHz selection.
 
 The runtime provides non-nested CLIC interrupts, a 128 Hz kernel clock,
 a 1 MHz hardware timer, processes, preemptible workers, integer/FPU context
@@ -151,7 +160,7 @@ The PSRAM backend initializes the Korvo's AP octal 16 MiB device with its
 profiles select 80 MHz; other profiles default to 20 MHz. The 20 MHz setting
 uses the 40 MHz crystal. The 40/80 MHz settings calibrate the 320 MHz CPLL
 and divide it for the mapped controller; PIO commands remain at 20 MHz.
-CPU, system and APB clocks remain at 40 MHz. CPLL configuration belongs to
+With `S31_CPU_MHZ=40`, CPU, system and APB clocks remain at 40 MHz. CPLL configuration belongs to
 boot initialization and must not overlap another PLL user. The backend verifies
 mode registers, a physical transfer and 256 mapped 64 KiB pages. PMA entry
 0 grants cached read/write access to `0x50000000..0x50ffffff`; execution is

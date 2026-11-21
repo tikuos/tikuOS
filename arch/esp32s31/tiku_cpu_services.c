@@ -21,7 +21,7 @@ extern uint8_t __tier_sram_end[];
 void tiku_cpu_boot_init(void) { }
 unsigned long tiku_cpu_mclk_hz(void)
 {
-    return 40000000UL;
+    return TIKU_S31_CPU_MHZ * 1000000UL;
 }
 unsigned long tiku_cpu_smclk_hz(void)
 {
@@ -49,7 +49,7 @@ unsigned long tiku_cpu_freq_available(unsigned int i)
 }
 unsigned long tiku_cpu_freq_target_hz(void)
 {
-    return 40000000UL;
+    return TIKU_S31_CPU_MHZ * 1000000UL;
 }
 int tiku_cpu_freq_target_set(unsigned long hz)
 {

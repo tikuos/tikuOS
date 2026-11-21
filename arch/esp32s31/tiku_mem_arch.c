@@ -30,6 +30,9 @@ int tiku_s31_memory_init(void)
     __asm__ volatile ("csrr %0,mstatus" : "=r"(state));
     if ((state & 8u) || tiku_s31_in_trap || !tiku_thread_in_kernel()) return -1;
     if (tiku_s31_psram_init()) return -2;
+#if TIKU_S31_CPU_MHZ == 160
+    if (tiku_s31_runtime_clock_ready()) return -9;
+#endif
 #if TIKU_MEM_NVM_ENABLE
     if (tiku_s31_trng_init()) return -8;
     if (tiku_s31_durable_guard_off()) return -3;
