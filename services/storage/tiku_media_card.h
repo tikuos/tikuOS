@@ -12,6 +12,11 @@
 #ifndef TIKU_MEDIA_CARD_H_
 #define TIKU_MEDIA_CARD_H_
 #include "tiku_media_store.h"
+/** @brief Milliseconds an S31 card stays initialized after a finished read,
+ *  for the next request to reuse; 0 closes it after every request. */
+#ifndef TIKU_S31_SD_PARK_MS
+#define TIKU_S31_SD_PARK_MS 0
+#endif
 /**
  * @brief Mount a whole-card volume, or explicitly format the matching CID.
  * @note Format requires both expected_cid and a fresh nonzero UUID. Mount
@@ -32,6 +37,11 @@ int tiku_media_card_read_step(void *,tiku_media_store_t *);
 int tiku_media_card_read_idle(const void *);
 /** @brief Cancel one queued request after releasing its transport, retaining ownership on BUSY. */
 int tiku_media_card_read_cancel(void *,tiku_media_store_t *,tiku_media_request_t *);
+/** @brief Close a read session parked for TIKU_S31_SD_PARK_MS or longer.
+ * @note With TIKU_S31_SD_PARK_MS nonzero a finished read leaves the card
+ * initialized and its pads claimed; the owner calls this on idle turns.
+ * Returns 0, or BUSY or IO from closing the card. */
+int tiku_media_card_park_expire(void);
 /** @brief Required eight-byte-aligned caller storage for polled file mutations. */
 size_t tiku_media_card_mutation_size(void);
 /** @brief Initialize unused mutation state without accessing or writing the card. */

@@ -104,11 +104,23 @@ static int buffers(size_t bytes)
     if(!tiku_arena_alloc(&bitmap_arena,2*bytes))return TIKU_MFS_SPACE;
     bitmap_capacity=bytes;return 0;
 }
+int tiku_media_card_park_expire(void)
+{
+#if PLATFORM_ESP32S31 && TIKU_S31_SD_ASYNC_ENABLE && TIKU_S31_SD_PARK_MS
+    /* tiku_s31_time() counts 16 ticks a microsecond. */
+    return tiku_s31_mfs_async_expire(&backend,(uint64_t)TIKU_S31_SD_PARK_MS*16000u);
+#else
+    return 0;
+#endif
+}
 int tiku_media_card_mount(const uint32_t *expected_cid,const uint8_t *format_uuid,uint32_t hz)
 {
     if((!!expected_cid!=!!format_uuid)||hz<400000||hz>20000000)return TIKU_MFS_ARG;
     if(service.running||service.count||service.writer||service.collector||backend.active)return TIKU_MFS_BUSY;
     for(unsigned i=0;i<TIKU_MFS_READERS;i++)if(service.readers[i].token)return TIKU_MFS_BUSY;
+#if PLATFORM_ESP32S31 && TIKU_S31_SD_ASYNC_ENABLE && TIKU_S31_SD_PARK_MS
+    if(tiku_s31_mfs_async_unpark(&backend))return TIKU_MFS_BUSY;
+#endif
     media_card_t card;int rc=card_open(&card);
     for(unsigned n=0;rc==CARD_BUSY&&n<128;n++){progress();rc=card_open(&card);}
     if(rc==CARD_BUSY)return TIKU_MFS_BUSY;
@@ -171,8 +183,16 @@ static int read_sector(void *ctx,uint64_t lba,void *sector)
 { return tiku_s31_mfs_async_read(ctx,lba,1,sector); }
 /** @brief Advance one card session phase. */
 static int read_poll(void *ctx) { return tiku_s31_mfs_async_poll(ctx); }
-/** @brief Release or cancel a retained read-only card session. */
-static int read_close(void *ctx) { return tiku_s31_mfs_async_close(ctx); }
+/** @brief Release or cancel a retained read-only card session; with
+ *  TIKU_S31_SD_PARK_MS an idle one is parked for the next request. */
+static int read_close(void *ctx)
+{
+#if TIKU_S31_SD_PARK_MS
+    return tiku_s31_mfs_async_park(ctx);
+#else
+    return tiku_s31_mfs_async_close(ctx);
+#endif
+}
 size_t tiku_media_card_read_size(void) { return sizeof(card_read_t); }
 void tiku_media_card_read_init(void *memory)
 {

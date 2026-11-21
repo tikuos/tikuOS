@@ -502,6 +502,17 @@ resumable filesystem operation to benefit from the asynchronous transport.
 The feature defaults off. An application manifest can enable it;
 host transport fixtures do not establish board timing or service throughput.
 
+`tiku_s31_mfs_async_park()` ends an idle, CID-checked read-only session
+without closing the card. The next acquire on the backend reads the CID again
+with `tiku_s31_sd_verify_begin()` instead of power-cycling the card; a card
+that refuses or fails that read is power-cycled and identified afresh.
+`tiku_s31_mfs_async_expire()` closes a session parked for a given number of
+`tiku_s31_time()` ticks, and the synchronous acquire and the card mount close
+a parked session first. The media card service parks its read sessions when
+`TIKU_S31_SD_PARK_MS` is nonzero, and its owner calls
+`tiku_media_card_park_expire()` on idle turns; the default, 0, closes the card
+after every request.
+
 The firmware profile enables `S31_MEDIA_ENABLE=1` by default. Set it to
 zero to omit the card service. The S31 block adapter validates CID and the
 selected extent each time it acquires the card. Completed sector transfers

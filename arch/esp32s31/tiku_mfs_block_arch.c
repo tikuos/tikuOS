@@ -10,6 +10,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "tiku_mfs_block_arch.h"
+#include "tiku_runtime_arch.h"
 #include "tiku_watchdog_arch.h"
 #include <kernel/fs/tiku_mfs.h>
 #include <string.h>
@@ -67,6 +68,10 @@ int tiku_s31_mfs_block_init(tiku_s31_mfs_block_t *s, uint64_t first, uint64_t se
 int tiku_s31_mfs_block_acquire(void *ctx)
 {
     tiku_s31_mfs_block_t *s = ctx;
+#if TIKU_S31_SD_ASYNC_ENABLE
+    /* A session parked by the polled path is closed first. */
+    if (s && s->parked && tiku_s31_mfs_async_unpark(s)) return TIKU_MFS_BUSY;
+#endif
     if (!s || s->active) return TIKU_MFS_IO;
     int rc = tiku_s31_sdcard_open(&s->card);
     if (rc == TIKU_S31_SD_BUSY) return TIKU_MFS_BUSY;
@@ -93,6 +98,17 @@ int tiku_s31_mfs_block_release(void *ctx)
 int tiku_s31_mfs_async_acquire(tiku_s31_mfs_async_t *op, tiku_s31_mfs_block_t *s)
 {
     if (!op || !s) return TIKU_MFS_ARG;
+    if (s->parked) {
+        /* The card is still initialized: the session reads its CID again,
+         * and poll checks it as it checks a fresh identification.  A card
+         * that refuses the read here, or fails it in poll, is identified
+         * afresh. */
+        *op = (tiku_s31_mfs_async_t){.backend = s, .phase = 7};
+        int rc = tiku_s31_sd_verify_begin(&op->transport, &s->card);
+        if (rc == 1) { s->parked = 0; s->active = 2; return 1; }
+        op->phase = 0; op->backend = NULL;
+        if ((rc = tiku_s31_mfs_async_unpark(s))) return rc;
+    }
     if (s->active) return TIKU_MFS_BUSY;
     *op = (tiku_s31_mfs_async_t){.backend = s, .phase = 1};
     int rc = tiku_s31_sd_open_begin(&op->transport, &s->card);
@@ -108,6 +124,29 @@ int tiku_s31_mfs_async_close(tiku_s31_mfs_async_t *op)
     if (rc) return rc == TIKU_S31_SD_BUSY ? TIKU_MFS_BUSY : TIKU_MFS_IO;
     op->backend->active = 0; op->backend = NULL; op->phase = 0;
     return 0;
+}
+int tiku_s31_mfs_async_park(tiku_s31_mfs_async_t *op)
+{
+    if (!op || !op->backend || !op->phase) return TIKU_MFS_ARG;
+    tiku_s31_mfs_block_t *s = op->backend;
+    if (op->phase != 3 || s->active != 2) return tiku_s31_mfs_async_close(op);
+    s->active = 0; s->parked = 1; s->parked_at = tiku_s31_time();
+    op->backend = NULL; op->phase = 0;
+    return 0;
+}
+int tiku_s31_mfs_async_unpark(tiku_s31_mfs_block_t *s)
+{
+    if (!s || !s->parked) return 0;
+    int rc = tiku_s31_sdcard_close(&s->card);
+    if (rc) return rc == TIKU_S31_SD_BUSY ? TIKU_MFS_BUSY : TIKU_MFS_IO;
+    s->parked = 0;
+    return 0;
+}
+int tiku_s31_mfs_async_expire(tiku_s31_mfs_block_t *s, uint64_t ticks)
+{
+    if (!s || !s->parked ||
+        ((tiku_s31_time() - s->parked_at) & ((1ULL << 52) - 1)) < ticks) return 0;
+    return tiku_s31_mfs_async_unpark(s);
 }
 int tiku_s31_mfs_async_read(tiku_s31_mfs_async_t *op, uint64_t lba, uint32_t count, void *output)
 {
@@ -156,12 +195,18 @@ int tiku_s31_mfs_async_poll(tiku_s31_mfs_async_t *op)
     if (rc == 1) return 1;
     if (rc < 0) {
         if (op->transport.state) return TIKU_MFS_ARG;
+        /* The failed transport released the card; a parked card whose CID
+         * read failed is power-cycled and identified afresh. */
+        if (op->phase == 7 && tiku_s31_sd_open_begin(&op->transport, &s->card) == 1) {
+            op->phase = 1;
+            return 1;
+        }
         s->active = 0; op->backend = NULL; op->phase = 0;
         return TIKU_MFS_IO;
     }
     unsigned phase = op->phase;
     op->phase = 3;
-    if (phase == 1) {
+    if (phase == 1 || phase == 7) {
         uint32_t cid[4]; tiku_s31_sdcard_identity(&s->card, cid);
         if (memcmp(cid, s->cid, sizeof cid) || s->first >= s->card.sectors ||
             s->block.sectors > s->card.sectors - s->first) {

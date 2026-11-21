@@ -412,6 +412,14 @@ int tiku_s31_sd_open_begin(tiku_s31_sd_async_t *op, tiku_s31_sdcard_t *card)
     op->timer = tiku_s31_time();
     return 1;
 }
+int tiku_s31_sd_verify_begin(tiku_s31_sd_async_t *op, tiku_s31_sdcard_t *card)
+{
+    if (!context() || !op || !card || active != card || !ready || failed) return TIKU_S31_SD_INVALID;
+    if (ASYNC_BUSY || pending) return TIKU_S31_SD_BUSY;
+    *op = (tiku_s31_sd_async_t){.card = card, .state = 15};
+    async_operation = op;
+    return 1;
+}
 int tiku_s31_sd_read_begin(tiku_s31_sd_async_t *op, tiku_s31_sdcard_t *card, uint32_t lba, void *out)
 {
     if (!context() || !op || !card || !out || active != card || !ready || failed || (uint64_t)lba >= card->sectors)

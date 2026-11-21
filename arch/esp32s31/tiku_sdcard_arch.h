@@ -67,6 +67,12 @@ typedef struct {
  * them. Kernel foreground only. A busy refusal acquires no resources.
  */
 int tiku_s31_sd_open_begin(tiku_s31_sd_async_t *, tiku_s31_sdcard_t *);
+/** @brief Begin reading the CID of the card already open on @p card.
+ * @note Requires an initialized idle card. The card is not reset; completion
+ * replaces the card's CID with the one it reports, and a card that no longer
+ * answers fails the operation. Returns 1 accepted.
+ */
+int tiku_s31_sd_verify_begin(tiku_s31_sd_async_t *op, tiku_s31_sdcard_t *card);
 /** @brief Begin a CRC-checked sector read on the opened card; return 1 when accepted.
  * @note Retain the 512-byte output until completion or cancellation. Output is
  * unchanged on error. Other card operations are refused while this one runs.

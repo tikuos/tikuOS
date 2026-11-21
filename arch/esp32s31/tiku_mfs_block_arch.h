@@ -20,6 +20,8 @@ typedef struct {
     uint64_t first;
     uint32_t cid[4], hz;
     uint8_t active;
+    uint8_t parked;             /**< a read-only session left open, idle */
+    uint64_t parked_at;         /**< tiku_s31_time() when it was parked */
 } tiku_s31_mfs_block_t;
 /** @brief Encode CID as four least-significant-word-first SD register words. */
 void tiku_s31_sdcard_identity(const tiku_s31_sdcard_t *, uint32_t cid[4]);
@@ -64,5 +66,18 @@ int tiku_s31_mfs_async_poll(tiku_s31_mfs_async_t *);
  * is sent, repeated close calls complete that sector before releasing ownership.
  */
 int tiku_s31_mfs_async_close(tiku_s31_mfs_async_t *);
+/**
+ * @brief End a session, leaving an idle read-only one open on its backend.
+ * @note An idle, CID-checked session that is not write-enabled is parked: the
+ * card stays initialized and its pads claimed, and the next acquire reads its
+ * CID again instead of power-cycling it; a card that fails that read is
+ * identified afresh. Any other session is closed as tiku_s31_mfs_async_close()
+ * closes it.
+ */
+int tiku_s31_mfs_async_park(tiku_s31_mfs_async_t *);
+/** @brief Close a parked session; 0 when none remains, BUSY or IO otherwise. */
+int tiku_s31_mfs_async_unpark(tiku_s31_mfs_block_t *);
+/** @brief Close a session parked for at least @p ticks of tiku_s31_time(). */
+int tiku_s31_mfs_async_expire(tiku_s31_mfs_block_t *, uint64_t ticks);
 #endif
 #endif
