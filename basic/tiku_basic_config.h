@@ -17,6 +17,11 @@
 #ifndef TIKU_BASIC_CONFIG_H_
 #define TIKU_BASIC_CONFIG_H_
 
+/** Caller-owned job completion and cancellation through serialized mode hooks. */
+#ifndef TIKU_BASIC_JOB_OWNER_ENABLE
+#define TIKU_BASIC_JOB_OWNER_ENABLE 0
+#endif
+
 /** Line debugger (the DEBUG command): fixed-size state; it evaluates no
  *  expression and writes no interpreter state. */
 #ifndef TIKU_BASIC_DEBUG_ENABLE

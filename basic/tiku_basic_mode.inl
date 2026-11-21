@@ -218,11 +218,21 @@ static void stream_set(const struct tiku_shell_io *io) { (void)io; }
 /* JOBS                                                                       */
 /*---------------------------------------------------------------------------*/
 
+#if TIKU_BASIC_JOB_OWNER_ENABLE
+static tiku_basic_job_t *basic_job_owner;
+#endif
+
 /** @brief After a hook: a job whose mode has ended lets go of its stream. */
 static void
 basic_job_release(void)
 {
     if (basic_mode_job && !basic_mode_on) {
+#if TIKU_BASIC_JOB_OWNER_ENABLE
+        if (basic_job_owner != (tiku_basic_job_t *)0) {
+            basic_job_owner->state = basic_job_state;
+            basic_job_owner = (tiku_basic_job_t *)0;
+        }
+#endif
         basic_mode_job = 0;
         stream_set((const struct tiku_shell_io *)0);
     }
@@ -319,6 +329,33 @@ tiku_basic_job_start(const char *program, const struct tiku_shell_io *io)
     }
     return rc;
 }
+
+#if TIKU_BASIC_JOB_OWNER_ENABLE
+int
+tiku_basic_job_start_owned(const char *program, const struct tiku_shell_io *io,
+                           tiku_basic_job_t *job)
+{
+    if (job == (tiku_basic_job_t *)0 || program == (const char *)0 ||
+        basic_mode_on || basic_job_owner != (tiku_basic_job_t *)0) {
+        return -1;
+    }
+    if (tiku_basic_job_start(program, io) != 0) {
+        job->state = TIKU_BASIC_JOB_ERROR;
+        return -1;
+    }
+    basic_job_owner = job;
+    job->state = TIKU_BASIC_JOB_RUNNING;
+    return 0;
+}
+
+void
+tiku_basic_job_stop_owned(tiku_basic_job_t *job)
+{
+    if (job != (tiku_basic_job_t *)0 && basic_job_owner == job) {
+        tiku_basic_job_stop();
+    }
+}
+#endif
 
 void
 tiku_basic_job_stop(void)

@@ -107,6 +107,21 @@ int tiku_basic_mode_streamed(void);
  */
 int tiku_basic_job_start(const char *program, const struct tiku_shell_io *io);
 
+/** @brief Caller-owned result retained through completion or owned stop. */
+typedef struct { int state; } tiku_basic_job_t;
+/**
+ * @brief Start a job and publish completion into caller storage.
+ * @param job zero-initialized result; keep it and io alive while RUNNING
+ * @return 0 on admission, -1 on refusal without changing an active result
+ * @note Requires TIKU_BASIC_JOB_OWNER_ENABLE. Calls serialize with mode hooks.
+ * Source text is consumed before return. A completed result survives later jobs.
+ */
+int tiku_basic_job_start_owned(const char *program,
+                             const struct tiku_shell_io *io,
+                             tiku_basic_job_t *job);
+/** @brief Stop the job belonging to this result; other owners are unaffected. */
+void tiku_basic_job_stop_owned(tiku_basic_job_t *job);
+
 /** @brief End the running job where it stands; its state becomes STOPPED. */
 void tiku_basic_job_stop(void);
 
