@@ -15,6 +15,7 @@
 #include <shell/tiku_shell_io.h>
 #include <services/storage/tiku_media_card.h>
 #include <services/storage/tiku_media_transfer_server.h>
+#include <services/storage/tiku_media_transfer_service.h>
 #include <string.h>
 #define MEDIA_CLIENT 0x4d465301u
 /** @brief Decode a decimal count without accepting overflow or trailing text. */
@@ -66,6 +67,29 @@ void tiku_shell_cmd_media(uint8_t argc,const char *argv[])
 #endif
     if(argc==2&&!strcmp(argv[1],"usb")){result(tiku_media_transfer_server_start(0,NULL));return;}
     if(argc==2&&!strcmp(argv[1],"off")){result(tiku_media_transfer_server_stop());return;}
+#if TIKU_MEDIA_TRANSFER_SERVICE_ENABLE
+    if(argc==4&&!strcmp(argv[1],"profile")){
+        uint8_t key[32];uint64_t generation;
+        if(number(argv[2],&value)||!value||value>65535||hex(argv[3],key,32)!=32){result(rc);return;}
+        rc=tiku_mt_service_configure((uint16_t)value,key,&generation);memset(key,0,sizeof key);
+        if(!rc){char text[21];SHELL_PRINTF("media: configuration=%s\n",decimal(generation,text));}
+        result(rc);return;
+    }
+    if(argc==2&&!strcmp(argv[1],"forget")){result(tiku_mt_service_forget());return;}
+    if(argc==2&&(!strcmp(argv[1],"ready")||!strcmp(argv[1],"transfers"))){
+        tiku_mt_service_snapshot_t state;rc=tiku_mt_service_observe(&state);
+        if(!rc){
+            if(!strcmp(argv[1],"transfers")){
+                char text[21];SHELL_PRINTF("media: state=%u ready=%u connected=%u configuration=%s error=%d\n",
+                    (unsigned)state.transfer.control.state,state.transfer.session.ready,state.transfer.session.connected,
+                    decimal(state.transfer.control.generation,text),state.transfer.control.error?state.transfer.control.error:state.transfer.session.error);
+            }else if(state.transfer.session.ready)rc=0;
+            else if(state.transfer.control.state==TIKU_MT_CONTROL_STARTING||state.transfer.session.recovering)rc=TIKU_MT_CONTROL_PENDING;
+            else rc=state.transfer.control.error?state.transfer.control.error:state.transfer.session.error?state.transfer.session.error:TIKU_MFS_NOFS;
+        }
+        result(rc);return;
+    }
+#endif
     if(argc==4&&!strcmp(argv[1],"serve")){
         uint8_t key[32];
         if(number(argv[2],&value)||!value||value>65535||hex(argv[3],key,32)!=32){result(rc);return;}
@@ -89,6 +113,9 @@ void tiku_shell_cmd_media(uint8_t argc,const char *argv[])
         SHELL_PRINTF("media usbhs | off\n");
 #endif
         SHELL_PRINTF("media usb | serve PORT KEY_HEX | off\n");
+#if TIKU_MEDIA_TRANSFER_SERVICE_ENABLE
+        SHELL_PRINTF("media profile PORT KEY_HEX | transfers | ready | forget\n");
+#endif
         SHELL_PRINTF("media mount [hz] | format CID UUID [hz] | info | ls [prefix] | uploads\n");
         SHELL_PRINTF("media begin NAME [length SHA256] | append HEX | sync | finish | release | resume ID\n");
         SHELL_PRINTF("media stat NAME | read NAME offset bytes | rm NAME | abort ID | gc\n");return;

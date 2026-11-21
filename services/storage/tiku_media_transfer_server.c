@@ -12,6 +12,7 @@
 #include "tiku_media_transfer_server.h"
 #include "tiku_media_transfer.h"
 #include "tiku_media_card.h"
+#include "tiku_media_transfer_service.h"
 #include <services/console/tiku_console.h>
 #include <shell/tiku_shell.h>
 #include <kernel/memory/tiku_mem.h>
@@ -215,10 +216,20 @@ int tiku_media_transfer_server_stop(void)
         memset(memory,0,sizeof *memory);
         if(tiku_arena_reset(&arena)||tiku_arena_destroy(&arena))return TIKU_MFS_BUSY;
     }
-    memory=NULL;memset(&arena,0,sizeof arena);return 0;
+    memory=NULL;memset(&arena,0,sizeof arena);
+#if TIKU_MEDIA_TRANSFER_SERVICE_ENABLE
+    return tiku_mt_service_stop();
+#else
+    return 0;
+#endif
 }
 int tiku_media_transfer_server_start(uint16_t port,const uint8_t *key)
 {
+#if TIKU_MEDIA_TRANSFER_SERVICE_ENABLE
+    if(port)return tiku_mt_service_start(port,key);
+    tiku_mt_service_snapshot_t state;
+    if(tiku_mt_service_observe(&state)||state.transfer.control.cleanup_required)return TIKU_MFS_BUSY;
+#endif
     if(port){unsigned nonzero=0;if(!key)return TIKU_MFS_ARG;
         for(unsigned i=0;i<32;i++)nonzero|=key[i];
         if(!nonzero)return TIKU_MFS_ARG;}
@@ -273,7 +284,18 @@ int tiku_media_transfer_server_status(tiku_media_transfer_status_t *out)
 {
     if (!out) return TIKU_MFS_ARG;
     *out=(tiku_media_transfer_status_t){0};
-    if (!active) return 0;
+    if (!active) {
+#if TIKU_MEDIA_TRANSFER_SERVICE_ENABLE
+        tiku_mt_service_snapshot_t state;int rc=tiku_mt_service_observe(&state);if(rc)return rc;
+        const tiku_mt_listener_snapshot_t *s=&state.transfer.session;
+        out->active=(uint8_t)state.transfer.control.cleanup_required;out->port=state.transfer.port;
+        out->connected=(uint8_t)s->connected;out->uploading=s->upload!=0;out->reading=(uint8_t)s->reading;
+        out->fault=(uint8_t)(s->fault||s->error||state.transfer.control.error);
+        out->accepted=s->accepted;out->committed=s->committed;out->expected=s->expected;
+        out->read_offset=s->read_offset;out->read_length=s->read_length;
+#endif
+        return 0;
+    }
     if (!live()) return TIKU_MFS_STALE;
     const tiku_media_transfer_t *session=&memory->session;
     out->active=1;out->port=listen_port;

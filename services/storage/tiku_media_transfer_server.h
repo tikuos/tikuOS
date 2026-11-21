@@ -12,11 +12,14 @@
 #ifndef TIKU_MEDIA_TRANSFER_SERVER_H_
 #define TIKU_MEDIA_TRANSFER_SERVER_H_
 #include <stdint.h>
-/** @brief Start console channel 0xF7 when port is zero, or one keyed TCP listener. */
+/** @brief Start console channel 0xF7 when port is zero, or one keyed TCP listener.
+ * @note With TRANSFER_SERVICE_ENABLE, TCP returns PENDING after command admission;
+ * observe the typed service until readiness or a terminal error. Console transfer
+ * remains synchronous and refuses an active provisioned TCP service. */
 int tiku_media_transfer_server_start(uint16_t port,const uint8_t *key);
 /** @brief Start the P4 high-speed USB bulk listener, with no console framing. */
 int tiku_media_transfer_server_usbhs(void);
-/** @brief Stop transports and release this server's file handles and SRAM arena. */
+/** @brief Stop transports and release legacy handles/backing; a paced TCP Stop returns PENDING. */
 int tiku_media_transfer_server_stop(void);
 #ifndef TIKU_MEDIA_TRANSFER_STATUS_ENABLE
 /** @brief Enable read-only transfer observations without adding a session. */

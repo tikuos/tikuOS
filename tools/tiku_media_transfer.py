@@ -113,7 +113,7 @@ class USB:
         self.started = self.escaped = False
         self.pending = bytearray()
 
-    def command(self, text):
+    def command(self, text, allow_pending=False):
         self.wire.write((text+'\n').encode())
         result = bytearray()
         deadline = time.monotonic()+30
@@ -121,9 +121,13 @@ class USB:
             result.extend(self.wire.read(1024))
             response = result
             if b'media: result=' in response and b'tikuOS:/> ' in response:
-                if b'media: result=0\r\n' not in response and b'media: result=0\n' not in response:
-                    raise RuntimeError('media command failed; mount the card and check the console')
-                return
+                lines = response.replace(b'\r\n', b'\n').splitlines()
+                codes = [line.removeprefix(b'media: result=') for line in lines if line.startswith(b'media: result=')]
+                if codes and codes[-1] == b'0':
+                    return 0
+                if allow_pending and codes and codes[-1] == b'1':
+                    return 1
+                raise RuntimeError('media command failed; mount the card and check the console')
         raise TimeoutError('media shell command timed out')
 
     def send(self, raw):
@@ -302,6 +306,18 @@ def get(client, name, destination, replace=False):
         client.call(CLOSE)
 
 
+def enable_tcp(wire, port, key):
+    """Wait for a provisioned listener's readiness after synchronous or paced admission."""
+    if not wire.command(f'media serve {port} {key.hex()}', allow_pending=True):
+        return
+    deadline = time.monotonic()+30
+    while time.monotonic() < deadline:
+        if not wire.command('media ready', allow_pending=True):
+            return
+        time.sleep(0.05)
+    raise TimeoutError('TCP listener did not become ready')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     transport = parser.add_mutually_exclusive_group(required=True)
@@ -324,11 +340,13 @@ def main():
     listing.add_argument('prefix', nargs='?', default='')
     serve = commands.add_parser('serve', help='enable TCP using the USB console and generate its key')
     serve.add_argument('--port', type=int, default=7331)
+    provision = commands.add_parser('provision', help='configure TCP for desktop Enable and generate its key')
+    provision.add_argument('--port', type=int, default=7331)
     args = parser.parse_args()
     if args.bridge_serial is not None and (not args.serial or not args.bridge_serial):
         parser.error('--bridge-serial requires --serial and a nonempty bridge identity')
-    if args.command == 'serve' and (not args.serial or not args.key_file or not 1 <= args.port <= 65535):
-        parser.error('serve requires --serial, --key-file and a port in 1..65535')
+    if args.command in ('serve', 'provision') and (not args.serial or not args.key_file or not 1 <= args.port <= 65535):
+        parser.error('serve/provision require --serial, --key-file and a port in 1..65535')
     if args.tcp and not args.key_file:
         parser.error('--tcp requires --key-file')
     wire = None
@@ -341,13 +359,17 @@ def main():
             wire = Bulk(args.usbhs)
         else:
             wire = USB(args.serial, args.bridge_serial) if args.serial else TCP(args.tcp)
-        if args.command == 'serve':
+        if args.command in ('serve', 'provision'):
             key = os.urandom(32)
             fd = os.open(args.key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, 'wb') as stream:
                 stream.write(key)
-            wire.command(f'media serve {args.port} {key.hex()}')
-            print(f'TCP listener enabled on port {args.port}; key saved to {args.key_file}')
+            if args.command == 'serve':
+                enable_tcp(wire, args.port, key)
+                print(f'TCP listener enabled on port {args.port}; key saved to {args.key_file}')
+            else:
+                wire.command(f'media profile {args.port} {key.hex()}')
+                print(f'TCP configured on port {args.port}; enable it from the desktop; key saved to {args.key_file}')
             return 0
         if args.serial:
             wire.command('media usb')
