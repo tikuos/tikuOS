@@ -105,7 +105,7 @@ int tiku_s31_mfs_async_close(tiku_s31_mfs_async_t *op)
     if (!op || !op->backend || !op->phase) return TIKU_MFS_ARG;
     int rc = op->phase == 3 ? tiku_s31_sdcard_close(&op->backend->card) :
         tiku_s31_sd_cancel(&op->transport);
-    if (rc) return TIKU_MFS_IO;
+    if (rc) return rc == TIKU_S31_SD_BUSY ? TIKU_MFS_BUSY : TIKU_MFS_IO;
     op->backend->active = 0; op->backend = NULL; op->phase = 0;
     return 0;
 }
@@ -118,6 +118,34 @@ int tiku_s31_mfs_async_read(tiku_s31_mfs_async_t *op, uint64_t lba, uint32_t cou
         (uint32_t)(op->backend->first + lba), output);
     if (rc != 1) return rc == TIKU_S31_SD_BUSY ? TIKU_MFS_BUSY : TIKU_MFS_IO;
     op->output = output; op->lba = lba; op->count = count; op->completed = 0; op->phase = 4;
+    return 1;
+}
+int tiku_s31_mfs_async_write_enable(tiku_s31_mfs_async_t *op)
+{
+    if (!op || !op->backend || op->phase != 3) return TIKU_MFS_ARG;
+    tiku_s31_mfs_block_t *s = op->backend;
+    int rc = tiku_s31_sdcard_write_enable(&s->card, s->first, s->block.sectors);
+    if (rc) return TIKU_MFS_IO;
+    s->active = 3;
+    return 0;
+}
+int tiku_s31_mfs_async_write(tiku_s31_mfs_async_t *op, uint64_t lba, uint32_t count, const void *input)
+{
+    if (!op || !op->backend || op->phase != 3 || op->backend->active != 3 || !input ||
+        !count || count > 8 || lba >= op->backend->block.sectors || count > op->backend->block.sectors-lba)
+        return TIKU_MFS_ARG;
+    int rc = tiku_s31_sd_write_begin(&op->transport, &op->backend->card,
+        (uint32_t)(op->backend->first+lba), input);
+    if (rc != 1) return rc == TIKU_S31_SD_BUSY ? TIKU_MFS_BUSY : TIKU_MFS_IO;
+    op->output = (uint8_t *)input; op->lba = lba; op->count = count; op->completed = 0; op->phase = 5;
+    return 1;
+}
+int tiku_s31_mfs_async_sync(tiku_s31_mfs_async_t *op)
+{
+    if (!op || !op->backend || op->phase != 3 || op->backend->active != 3) return TIKU_MFS_ARG;
+    int rc = tiku_s31_sd_sync_begin(&op->transport, &op->backend->card);
+    if (rc != 1) return rc == TIKU_S31_SD_BUSY ? TIKU_MFS_BUSY : TIKU_MFS_IO;
+    op->phase = 6;
     return 1;
 }
 int tiku_s31_mfs_async_poll(tiku_s31_mfs_async_t *op)
@@ -142,12 +170,14 @@ int tiku_s31_mfs_async_poll(tiku_s31_mfs_async_t *op)
         }
         rc = tiku_s31_sd_clock_begin(&op->transport, &s->card, s->hz);
         if (rc == 1) { op->phase = 2; return 1; }
-    } else if (phase == 2) return 0;
+    } else if (phase == 2 || phase == 6) return 0;
     else if (++op->completed == op->count) return 0;
     else {
-        rc = tiku_s31_sd_read_begin(&op->transport, &s->card,
-            (uint32_t)(s->first + op->lba + op->completed), op->output + 512 * op->completed);
-        if (rc == 1) { op->phase = 4; return 1; }
+        uint32_t lba = (uint32_t)(s->first + op->lba + op->completed);
+        uint8_t *buffer = op->output + 512 * op->completed;
+        rc = phase == 5 ? tiku_s31_sd_write_begin(&op->transport, &s->card, lba, buffer) :
+            tiku_s31_sd_read_begin(&op->transport, &s->card, lba, buffer);
+        if (rc == 1) { op->phase = (uint8_t)phase; return 1; }
     }
     (void)tiku_s31_mfs_async_close(op);
     return TIKU_MFS_IO;

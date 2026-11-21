@@ -421,6 +421,26 @@ int tiku_s31_sd_read_begin(tiku_s31_sd_async_t *op, tiku_s31_sdcard_t *card, uin
     async_operation = op;
     return 1;
 }
+int tiku_s31_sd_write_begin(tiku_s31_sd_async_t *op, tiku_s31_sdcard_t *card, uint32_t lba, const void *input)
+{
+    if (!context() || !op || !card || !input || active != card || !ready || failed ||
+        (uint64_t)lba < write_first || (uint64_t)lba - write_first >= write_sectors)
+        return TIKU_S31_SD_INVALID;
+    if (ASYNC_BUSY || pending) return TIKU_S31_SD_BUSY;
+    *op = (tiku_s31_sd_async_t){.card=card,.output=(void *)input,.lba=lba,.state=30};
+    async_operation = op;
+    return 1;
+}
+int tiku_s31_sd_sync_begin(tiku_s31_sd_async_t *op, tiku_s31_sdcard_t *card)
+{
+    if (!context() || !op || !card || active != card || !ready || failed) return TIKU_S31_SD_INVALID;
+    if (ASYNC_BUSY || pending) return TIKU_S31_SD_BUSY;
+    *op = (tiku_s31_sd_async_t){.card=card,.state=36,.block_timer=tiku_s31_time()};
+    async_operation = op;
+    REG(0x2058300cu) = 1u << 23;
+    pending = 1;
+    return 1;
+}
 int tiku_s31_sd_clock_begin(tiku_s31_sd_async_t *op, tiku_s31_sdcard_t *card, uint32_t hz)
 {
     if (!context() || !op || !card || active != card || !ready || failed || hz < 400000 || hz > 20000000)
@@ -433,6 +453,12 @@ int tiku_s31_sd_clock_begin(tiku_s31_sd_async_t *op, tiku_s31_sdcard_t *card, ui
 int tiku_s31_sd_cancel(tiku_s31_sd_async_t *op)
 {
     if (!context() || !op || async_operation != op) return TIKU_S31_SD_INVALID;
+    if (pending || op->state == 40) {
+        int rc = tiku_s31_sd_poll(op);
+        if (async_operation == op) return TIKU_S31_SD_BUSY;
+        if (active == op->card) return tiku_s31_sdcard_close(op->card);
+        return rc < 0 ? 0 : rc;
+    }
     return retire(op, 0);
 }
 int tiku_s31_sd_poll(tiku_s31_sd_async_t *op)
@@ -517,6 +543,74 @@ int tiku_s31_sd_poll(tiku_s31_sd_async_t *op)
             return 0;
         }
         break;
+    case 30:
+        rc = command_step(op, 24, op->lba);
+        if (!rc) {
+            if (op->card->response) rc = TIKU_S31_SD_IO;
+            else op->state = 31;
+        }
+        break;
+    case 31:
+        rc = exchange(op, NULL, &op->byte, 1);
+        if (!rc) op->state = 32;
+        break;
+    case 32:
+        op->packet[0] = 254;
+        pending = 1;
+        rc = exchange(op, op->packet, NULL, 1);
+        if (!rc) { op->offset = op->crc = 0; op->state = 33; }
+        break;
+    case 33:
+        rc = exchange(op, (const uint8_t *)op->output + op->offset, NULL, 64);
+        if (!rc) {
+            op->crc = crc16_extend(op->crc, (const uint8_t *)op->output + op->offset, 64);
+            op->offset += 64;
+            if (op->offset == 512) op->state = 34;
+        }
+        break;
+    case 34:
+        op->wire_crc[0] = (uint8_t)(op->crc >> 8); op->wire_crc[1] = (uint8_t)op->crc;
+        rc = exchange(op, op->wire_crc, NULL, 2);
+        if (!rc) { op->response_tries = 0; op->state = 35; }
+        break;
+    case 35:
+        rc = exchange(op, NULL, &op->byte, 1);
+        if (!rc) {
+            if (op->byte == 255 && ++op->response_tries < 16) break;
+            if ((op->byte & 31u) != 5u) rc = TIKU_S31_SD_IO;
+            else { op->block_timer = tiku_s31_time(); op->state = 36; }
+        }
+        break;
+    case 36:
+        rc = exchange(op, NULL, &op->byte, 1);
+        if (!rc) {
+            if (op->byte == 255) { pending = 0; op->state = 37; }
+            else if (elapsed(op->block_timer, 16000000u)) rc = TIKU_S31_SD_TIMEOUT;
+        }
+        break;
+    case 37:
+        rc = command_step(op, 13, 0);
+        if (!rc) {
+            if (op->card->response) rc = TIKU_S31_SD_IO;
+            else op->state = 38;
+        }
+        break;
+    case 38:
+        rc = exchange(op, NULL, &op->byte, 1);
+        if (!rc) {
+            if (op->byte) rc = TIKU_S31_SD_IO;
+            else op->state = 39;
+        }
+        break;
+    case 39:
+        REG(0x20583008u) = 1u << 23;
+        rc = exchange(op, NULL, &op->byte, 1);
+        if (!rc) { op->state = 0; async_operation = NULL; return 0; }
+        break;
+    case 40:
+        if (!elapsed(op->timer, 320000u)) return 1;
+        pending = 0;
+        return retire(op, (int32_t)op->lba);
     case 22:
         REG(0x20583008u) = 1u << 23;
         rc = exchange(op, NULL, &op->byte, 1);
@@ -533,6 +627,13 @@ int tiku_s31_sd_poll(tiku_s31_sd_async_t *op)
         if (!rc) { op->state = 0; async_operation = NULL; return 0; }
         break;
     default: rc = TIKU_S31_SD_INVALID; break;
+    }
+    if (rc < 0 && pending) {
+        if (spi_open) tiku_spi_arch_close();
+        spi_open = 0;
+        REG(0x20583014u) = 1u << 7;
+        op->lba = (uint32_t)rc; op->timer = tiku_s31_time(); op->state = 40; op->io_pending = 0;
+        return 1;
     }
     return rc < 0 ? retire(op, rc) : 1;
 }

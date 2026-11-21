@@ -192,4 +192,66 @@ int tiku_media_card_read_cancel(void *memory,tiku_media_store_t *s,tiku_media_re
     if(!memory||s!=&service)return TIKU_MFS_ARG;
     return tiku_media_async_cancel(&((card_read_t *)memory)->queue,s,request);
 }
+
+#include "tiku_media_mutation.h"
+/** @brief Caller-owned mutation queue, transport and deferred close result. */
+typedef struct {
+    tiku_media_mutation_t queue;
+    tiku_s31_mfs_async_t transport;
+    int closing;
+} card_mutation_t;
+/** @brief Validate bitmap backing and acquire an initially read-only session. */
+static int mutation_acquire(void *context,void *backend_context)
+{
+    card_mutation_t *m=context;m->closing=0;
+    return read_acquire(&m->transport,backend_context);
+}
+/** @brief Queue one sector read within the verified extent. */
+static int mutation_read(void *context,uint64_t lba,void *sector)
+{ return tiku_s31_mfs_async_read(&((card_mutation_t *)context)->transport,lba,1,sector); }
+/** @brief Queue one sector write within the explicitly enabled extent. */
+static int mutation_write(void *context,uint64_t lba,const void *sector)
+{ return tiku_s31_mfs_async_write(&((card_mutation_t *)context)->transport,lba,1,sector); }
+/** @brief Queue a polled programming/status barrier. */
+static int mutation_sync(void *context)
+{ return tiku_s31_mfs_async_sync(&((card_mutation_t *)context)->transport); }
+/** @brief Retire a session, retaining state while a sector is programming. */
+static int mutation_close(void *context)
+{ return tiku_s31_mfs_async_close(&((card_mutation_t *)context)->transport); }
+/** @brief Enable writes after identity/extent validation and pace subsequent I/O. */
+static int mutation_poll(void *context)
+{
+    card_mutation_t *m=context;
+    if(m->closing)return mutation_close(m)?TIKU_MFS_ARG:TIKU_MFS_IO;
+    int rc=tiku_s31_mfs_async_poll(&m->transport);
+    if(!rc&&m->transport.backend->active==2){
+        rc=tiku_s31_mfs_async_write_enable(&m->transport);
+        if(rc){m->closing=1;return 1;}
+    }
+    return rc;
+}
+/** @brief Align trailing opaque traversal state for its eight-byte fields. */
+static size_t mutation_offset(void){return (sizeof(card_mutation_t)+7u)&~(size_t)7u;}
+size_t tiku_media_card_mutation_size(void)
+{ return mutation_offset()+tiku_mfs_mutation_size(); }
+void tiku_media_card_mutation_init(void *memory)
+{
+    static const tiku_media_mutation_ops_t ops={mutation_acquire,mutation_read,mutation_write,
+        mutation_sync,mutation_poll,mutation_close};
+    card_mutation_t *m=memory;memset(m,0,sizeof *m);
+    tiku_mfs_mutation_t *core=tiku_mfs_mutation_init((uint8_t *)memory+mutation_offset(),tiku_mfs_mutation_size());
+    tiku_media_mutation_init(&m->queue,core,&ops,m);
+}
+int tiku_media_card_mutation_step(void *memory,tiku_media_store_t *s)
+{
+    if(!memory||s!=&service)return TIKU_MFS_ARG;
+    return tiku_media_mutation_step(&((card_mutation_t *)memory)->queue,s);
+}
+int tiku_media_card_mutation_idle(const void *memory)
+{ return memory&&!((const card_mutation_t *)memory)->queue.phase; }
+int tiku_media_card_mutation_cancel(void *memory,tiku_media_store_t *s,tiku_media_request_t *r)
+{
+    if(!memory||s!=&service)return TIKU_MFS_ARG;
+    return tiku_media_mutation_cancel(&((card_mutation_t *)memory)->queue,s,r);
+}
 #endif

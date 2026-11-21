@@ -15,6 +15,12 @@
 #ifndef TIKU_MEDIA_NAMES_ENABLE
 #define TIKU_MEDIA_NAMES_ENABLE 0
 #endif
+#ifndef TIKU_MEDIA_DIRECTORIES_ENABLE
+#define TIKU_MEDIA_DIRECTORIES_ENABLE 0
+#endif
+#if TIKU_MEDIA_DIRECTORIES_ENABLE && !TIKU_MEDIA_NAMES_ENABLE
+#error "Media directories require namespace versioning"
+#endif
 #include <stddef.h>
 #include <limits.h>
 #if INT_MAX < 2147483647L
@@ -32,10 +38,10 @@ typedef enum {
     TIKU_MFS_OK=0, TIKU_MFS_ARG=-1, TIKU_MFS_IO=-2,
     TIKU_MFS_CORRUPT=-3, TIKU_MFS_NOFS=-4, TIKU_MFS_SPACE=-5,
     TIKU_MFS_LIMIT=-6, TIKU_MFS_NOENT=-7, TIKU_MFS_BUSY=-8,
-    TIKU_MFS_DIGEST=-9, TIKU_MFS_STALE=-10
+    TIKU_MFS_DIGEST=-9, TIKU_MFS_STALE=-10, TIKU_MFS_UNSUPPORTED=-11
 } tiku_mfs_result_t;
 /** @brief Writer publication policy. */
-typedef enum { TIKU_MFS_STREAM=1, TIKU_MFS_ATOMIC=2 } tiku_mfs_policy_t;
+typedef enum { TIKU_MFS_STREAM=1, TIKU_MFS_ATOMIC=2, TIKU_MFS_DIRECTORY=3 } tiku_mfs_policy_t;
 /** @brief A checksummed sector reference; zero LBA denotes no reference. */
 typedef struct { uint64_t lba; uint32_t crc; } tiku_mfs_ref_t;
 /** @brief Incremental SHA-256 state, serialized with committed object metadata. */
@@ -94,6 +100,9 @@ typedef struct {
     unsigned gc_reader, gc_depth, catalog_depth;
     uint8_t gc_phase, gc_active, catalog_write;
     uint8_t bank, mounted, failed, writing, collecting, recovered;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    uint8_t features;
+#endif
 } tiku_mfs_t;
 /** @brief Return bitmap storage size, or zero for unsupported geometry. */
 size_t tiku_mfs_bitmap_bytes(uint64_t sectors);
@@ -108,6 +117,17 @@ void tiku_mfs_init(tiku_mfs_t *fs);
  */
 int tiku_mfs_format(tiku_mfs_t *, const tiku_block_t *, const uint8_t uuid[16],
                     void *used, void *mark, size_t bitmap_capacity);
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+/** @brief Explicitly format an authorized extent with mandatory directory support.
+ * @note Old implementations refuse its checkpoint feature word. This operation
+ * does not migrate an existing volume; its erasure contract matches format. */
+int tiku_mfs_format_directories(tiku_mfs_t *,const tiku_block_t *,const uint8_t uuid[16],
+                                void *used,void *mark,size_t bitmap_capacity);
+/** @brief Whether this mounted volume supports persistent directory objects. */
+int tiku_mfs_has_directories(const tiku_mfs_t *);
+/** @brief Nonzero while an interrupted feature transition blocks ordinary writes. */
+int tiku_mfs_directory_upgrade_pending(const tiku_mfs_t *);
+#endif
 /** @brief Recover a volume matching the expected UUID without writing to the medium. */
 int tiku_mfs_mount(tiku_mfs_t *, const tiku_block_t *, const uint8_t uuid[16],
                    void *used, void *mark, size_t bitmap_capacity);
@@ -136,6 +156,19 @@ int tiku_mfs_finalize(tiku_mfs_t *);
 int tiku_mfs_release(tiku_mfs_t *);
 /** @brief Delete a committed object by ID, including a private upload. */
 int tiku_mfs_delete(tiku_mfs_t *, uint64_t id);
+/**
+ * @brief Atomically rename a completed file to an unused relative path.
+ * @note The object ID and source name must still identify the visible file.
+ * Existing destinations, pending replacements and file/directory conflicts return
+ * BUSY. Readers retain their snapshots. No payload is copied. Directories are
+ * path prefixes; this operation does not rename a directory subtree.
+ */
+int tiku_mfs_rename(tiku_mfs_t *, uint64_t id, const char *source, const char *target);
+/** @brief Delete a completed visible file matching both ID and source path.
+ * @note Refuse active writers and pending replacements. Retained readers keep
+ * their snapshot. No directory subtree is removed.
+ */
+int tiku_mfs_delete_version(tiku_mfs_t *, uint64_t id, const char *source);
 /** @brief Find a visible name and copy its committed metadata. */
 int tiku_mfs_stat(tiku_mfs_t *, const char *, tiku_mfs_object_t *);
 /** @brief Enumerate visible names in byte order; NOENT denotes the end, STALE a mutation. */

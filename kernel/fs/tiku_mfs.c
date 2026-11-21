@@ -11,6 +11,8 @@
  */
 #include "tiku_mfs.h"
 #include "tiku_mfs_query.h"
+#include "tiku_mfs_checkpoint.h"
+#include "tiku_mfs_mutation.h"
 #include <string.h>
 #include <limits.h>
 
@@ -174,13 +176,21 @@ static int object_decode(tiku_mfs_t *f,const uint8_t *p,tiku_mfs_object_t *o)
     for(unsigned i=0;i<8;i++)o->hash.h[i]=get32(p+192+4*i);
     memcpy(o->hash.tail,p+224,64);
     if(!o->id){memset(o,0,sizeof *o);return 0;}
-    if(!name_ok(o->name)||(o->policy!=TIKU_MFS_STREAM&&o->policy!=TIKU_MFS_ATOMIC)||
+    if(!name_ok(o->name)||(o->policy!=TIKU_MFS_STREAM&&o->policy!=TIKU_MFS_ATOMIC
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+       &&o->policy!=TIKU_MFS_DIRECTORY
+#endif
+       )||
        o->complete>1||o->visible>1||o->height>DEPTH||o->length>UINT64_MAX/8||
        (o->length&&(!o->height||!ref_ok(f,o->root)))||
        (!o->length&&(o->height||o->root.lba))||
        (o->policy==TIKU_MFS_STREAM&&!o->visible)||
        (o->policy==TIKU_MFS_ATOMIC&&(o->length>o->expected||o->visible!=o->complete)))
         return TIKU_MFS_CORRUPT;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    if(o->policy==TIKU_MFS_DIRECTORY&&(!(f->features&1u)||o->length||o->expected||
+       !o->complete||!o->visible||o->root.crc))return TIKU_MFS_CORRUPT;
+#endif
     if(o->length&&((o->length-1)/TIKU_MFS_CHUNK)>>(4*o->height))return TIKU_MFS_CORRUPT;
     return 0;
 }
@@ -203,7 +213,13 @@ int tiku_mfs_identify(const tiku_block_t *b,uint8_t uuid[16])
     for(unsigned i=0;i<2;i++){
         if(b->read(b->context,i*bank,1,p))return TIKU_MFS_IO;
         if(memcmp(p,"MFC2",4)||crc(p,508)!=get32(p+508)||get64(p+32)!=b->sectors||
-           get32(p+84)!=2||get32(p+88)||get32(p+92)!=TIKU_MFS_SEGMENT||!get64(p+40))continue;
+           get32(p+84)!=2||
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+           (get32(p+88)&~1u)||
+#else
+           get32(p+88)||
+#endif
+           get32(p+92)!=TIKU_MFS_SEGMENT||!get64(p+40))continue;
         unsigned nonzero=0;for(unsigned j=0;j<16;j++)nonzero|=p[8+j];
         if(!nonzero)continue;
         if(valid_count&&memcmp(found,p+8,16))return TIKU_MFS_CORRUPT;
@@ -461,7 +477,13 @@ static int bank_load(tiku_mfs_t *f,unsigned bank,int load,uint64_t *epoch)
 {
     uint8_t h[512],p[512];uint64_t base=(uint64_t)bank*f->bank_sectors;
     int rc=rd(f,base,1,h);if(rc)return rc;
-    if(!valid(f,h,"MFC2")||get64(h+32)!=f->block.sectors||get32(h+88)!=0||
+    if(!valid(f,h,"MFC2")||get64(h+32)!=f->block.sectors||
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+       (get32(h+88)&~1u)||
+#else
+       get32(h+88)!=0||
+#endif
+
        get32(h+92)!=TIKU_MFS_SEGMENT||get32(h+84)!=2)return TIKU_MFS_NOFS;
     *epoch=get64(h+40);
     if(!*epoch||!get64(h+56)||get32(h+72)<1||get32(h+72)>=f->segments||
@@ -477,6 +499,9 @@ static int bank_load(tiku_mfs_t *f,unsigned bank,int load,uint64_t *epoch)
     }
     if(~c!=get32(h+76))return TIKU_MFS_CORRUPT;
     if(load){
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+        f->features=get32(h+88);
+#endif
         f->ids=ids;f->names=names;f->bank=(uint8_t)bank;f->epoch=*epoch;f->sequence=get64(h+48);
         f->next_id=get64(h+56);f->tail=get64(h+64);f->cursor=get32(h+72);
         f->allocations=get64(h+96);
@@ -490,6 +515,9 @@ int tiku_mfs_checkpoint(tiku_mfs_t *f)
     if(!f||!f->mounted)return TIKU_MFS_ARG;
     if(f->failed)return TIKU_MFS_IO;
     if(f->epoch==UINT64_MAX)return TIKU_MFS_LIMIT;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    if(f->features&2u)return TIKU_MFS_BUSY;
+#endif
     uint8_t h[512],p[512];unsigned bank=1u-f->bank;
     uint64_t base=(uint64_t)bank*f->bank_sectors;
     memset(p,0,512);int rc=wr(f,base,1,p);if(rc||(rc=barrier(f)))return rc;
@@ -503,14 +531,26 @@ int tiku_mfs_checkpoint(tiku_mfs_t *f)
     put64(h+48,f->sequence);put64(h+56,f->next_id);put64(h+64,f->tail);
     put32(h+72,f->cursor);put32(h+76,crc(f->used,f->bitmap_bytes));
     put32(h+84,2);put32(h+92,TIKU_MFS_SEGMENT);put64(h+96,f->allocations);
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    put32(h+88,f->features&1u);
+#endif
     roots_put(h,f->ids,f->names);seal(h);
     if((rc=wr(f,base,1,h))||(rc=barrier(f)))return rc;
     f->bank=(uint8_t)bank;f->epoch++;f->journal=0;f->recovered=0;return 0;
 }
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+/** @brief Format one new volume with the selected mandatory feature word. */
+static int format_features(tiku_mfs_t *f,const tiku_block_t *b,const uint8_t uuid[16],
+                           void *used,void *mark,size_t capacity,unsigned features)
+#else
 int tiku_mfs_format(tiku_mfs_t *f,const tiku_block_t *b,const uint8_t uuid[16],
                     void *used,void *mark,size_t capacity)
+#endif
 {
     int rc=setup(f,b,uuid,used,mark,capacity);if(rc)return rc;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    f->features=features;
+#endif
     uint8_t p[512];
     for(unsigned bank=0;bank<2;bank++){
         if((rc=rd(f,(uint64_t)bank*f->bank_sectors,1,p)))return rc;
@@ -524,6 +564,16 @@ int tiku_mfs_format(tiku_mfs_t *f,const tiku_block_t *b,const uint8_t uuid[16],
     if((rc=tiku_mfs_checkpoint(f)))return rc;
     return tiku_mfs_checkpoint(f);
 }
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+int tiku_mfs_format(tiku_mfs_t *f,const tiku_block_t *b,const uint8_t uuid[16],void *used,void *mark,size_t capacity)
+{return format_features(f,b,uuid,used,mark,capacity,0);}
+int tiku_mfs_format_directories(tiku_mfs_t *f,const tiku_block_t *b,const uint8_t uuid[16],void *used,void *mark,size_t capacity)
+{return format_features(f,b,uuid,used,mark,capacity,1);}
+int tiku_mfs_has_directories(const tiku_mfs_t *f)
+{return f&&f->mounted&&!f->failed&&f->features==1;}
+int tiku_mfs_directory_upgrade_pending(const tiku_mfs_t *f)
+{return f&&f->mounted&&!f->failed&&(f->features&2u); }
+#endif
 /** @brief Replay segment allocations in their rotating search order. */
 static int replay_alloc(tiku_mfs_t *f,uint64_t allocations,uint64_t tail,uint32_t cursor)
 {
@@ -555,7 +605,18 @@ int tiku_mfs_mount(tiku_mfs_t *f,const tiku_block_t *b,const uint8_t uuid[16],
     for(unsigned i=0;i<2;i++){good[i]=bank_load(f,i,0,&epochs[i]);if(good[i]==TIKU_MFS_IO)return good[i];}
     if(good[0]&&good[1])return good[0]==TIKU_MFS_NOFS&&good[1]==TIKU_MFS_NOFS?TIKU_MFS_NOFS:TIKU_MFS_CORRUPT;
     unsigned bank=good[0]?1:good[1]?0:epochs[1]>epochs[0];
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    unsigned transition=0;
+    if(!good[0]&&!good[1]){
+        uint8_t header[512];unsigned features[2];
+        for(unsigned i=0;i<2;++i){if((rc=rd(f,(uint64_t)i*f->bank_sectors,1,header)))return rc;features[i]=get32(header+88);}
+        if(features[0]!=features[1]){bank=features[0]?1:0;transition=2;}
+    }
+#endif
     if((rc=bank_load(f,bank,1,&epochs[bank])))return rc;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    f->features|=transition;
+#endif
     uint8_t p[512],c[512];f->journal=0;
     for(unsigned i=0;i<TIKU_MFS_JOURNAL;i++){
         if(f->sequence==UINT64_MAX)break;
@@ -799,9 +860,13 @@ static int frame_append(tiku_mfs_t *f,tiku_mfs_object_t *o,const uint8_t *data,u
     put32(h+44,get32(foot+508));seal(h);if((rc=wr(f,lba,1,h)))return rc;
     return index_set(f,o,chunk,(tiku_mfs_ref_t){lba,get32(h+508)});
 }
-/** @brief Refuse mutation while unmounted, failed or collecting. */
+/** @brief Refuse mutation while unmounted, failed, collecting or awaiting feature migration. */
 static int mutable(tiku_mfs_t *f)
-{ return !f||!f->mounted?TIKU_MFS_ARG:f->failed?TIKU_MFS_IO:f->collecting?TIKU_MFS_BUSY:0; }
+{ return !f||!f->mounted?TIKU_MFS_ARG:f->failed?TIKU_MFS_IO:
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    (f->features&2u)?TIKU_MFS_BUSY:
+#endif
+    f->collecting?TIKU_MFS_BUSY:0; }
 /** @brief Check parent files and child prefixes through the name index. */
 static int namespace_free(tiku_mfs_t *f,const char *name)
 {
@@ -809,6 +874,11 @@ static int namespace_free(tiku_mfs_t *f,const char *name)
     memcpy(prefix,name,length+1);
     for(size_t i=0;i<length;i++)if(prefix[i]=='/'){
         prefix[i]=0;rc=catalog_name(f,prefix,&n);prefix[i]='/';
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+        if(!rc&&n.visible&&!n.pending){tiku_mfs_object_t parent;
+            int result=catalog_object(f,n.visible,&parent);if(result)return result;
+            if(parent.policy==TIKU_MFS_DIRECTORY)continue;}
+#endif
         if(!rc)return TIKU_MFS_BUSY;
         if(rc!=TIKU_MFS_NOENT)return rc;
     }
@@ -829,6 +899,10 @@ int tiku_mfs_begin(tiku_mfs_t *f,const char *name,tiku_mfs_policy_t policy,
     catalog_node_t n;rc=catalog_name(f,name,&n);
     if(!rc&&(policy==TIKU_MFS_STREAM||n.pending))return TIKU_MFS_BUSY;
     if(rc&&rc!=TIKU_MFS_NOENT)return rc;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    if(!rc&&n.visible){tiku_mfs_object_t existing;rc=catalog_object(f,n.visible,&existing);if(rc)return rc;
+        if(existing.policy==TIKU_MFS_DIRECTORY)return TIKU_MFS_BUSY;}
+#endif
     if((rc=namespace_free(f,name)))return rc;
     if(f->next_id==UINT64_MAX)return TIKU_MFS_LIMIT;
     uint64_t available=(uint64_t)f->free_segments*TIKU_MFS_SEGMENT+
@@ -880,11 +954,87 @@ int tiku_mfs_finalize(tiku_mfs_t *f)
 }
 int tiku_mfs_release(tiku_mfs_t *f)
 { if(!f||!f->mounted)return TIKU_MFS_ARG;f->writing=0;return 0; }
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+/** @brief Refuse removing a directory that still has visible or pending children. */
+static int directory_empty(tiku_mfs_t *f,const tiku_mfs_object_t *o)
+{
+    if(o->policy!=TIKU_MFS_DIRECTORY)return 0;
+    size_t n=strlen(o->name);if(n+1>=64)return 0;
+    char prefix[64];memcpy(prefix,o->name,n);prefix[n++]='/';prefix[n]=0;
+    catalog_node_t child;int rc=catalog_lower(f,prefix,&child);
+    return rc==TIKU_MFS_NOENT?0:rc?rc:!strncmp(prefix,child.name,n)?TIKU_MFS_BUSY:0;
+}
+#endif
 int tiku_mfs_delete(tiku_mfs_t *f,uint64_t id)
 {
     int rc=mutable(f);if(rc)return rc;if(f->writing)return TIKU_MFS_BUSY;
     tiku_mfs_object_t o;if((rc=catalog_object(f,id,&o)))return rc;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    if((rc=directory_empty(f,&o)))return rc;
+#endif
     return commit(f,&o,1);
+}
+int tiku_mfs_delete_version(tiku_mfs_t *f,uint64_t id,const char *source)
+{
+    int rc=mutable(f);if(rc)return rc;
+    if(!id||!name_ok(source))return TIKU_MFS_ARG;
+    if(f->writing)return TIKU_MFS_BUSY;
+    tiku_mfs_object_t o;catalog_node_t name;
+    if((rc=catalog_object(f,id,&o)))return rc;
+    if(!o.visible||!o.complete||strcmp(o.name,source))return TIKU_MFS_STALE;
+    if((rc=catalog_name(f,source,&name)))return rc;
+    if(name.visible!=id)return TIKU_MFS_STALE;
+    if(name.pending)return TIKU_MFS_BUSY;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    if((rc=directory_empty(f,&o)))return rc;
+#endif
+    return commit(f,&o,1);
+}
+/** @brief Build renamed object and name roots, then publish their single transaction. */
+static int rename_catalog(tiku_mfs_t *f,tiku_mfs_object_t *o,catalog_node_t *old,const char *target)
+{
+    tiku_mfs_link_t ids=f->ids,names=f->names;
+    catalog_node_t key={0},name={0};uint8_t p[512];uint64_t lba;int rc;
+    memset(o->name,0,sizeof o->name);memcpy(o->name,target,strlen(target));
+    object_encode(f,p,o);
+    if((rc=allocate(f,1,&lba))||(rc=wr(f,lba,1,p)))return rc;
+    key.kind=CATALOG_IDS;key.key=o->id;key.object=(tiku_mfs_ref_t){lba,get32(p+508)};
+    if((rc=catalog_set(f,ids,&key,0,&ids)))return rc;
+    if((rc=catalog_set(f,names,old,1,&names)))return rc;
+    name.kind=CATALOG_NAMES;name.visible=o->id;memcpy(name.name,o->name,sizeof name.name);
+    if((rc=catalog_set(f,names,&name,0,&names)))return rc;
+    rc=publish(f,ids,names);
+#if TIKU_MEDIA_NAMES_ENABLE
+    if(!rc)f->names_epoch=++names_version;
+#endif
+    return rc;
+}
+int tiku_mfs_rename(tiku_mfs_t *f,uint64_t id,const char *source,const char *target)
+{
+    int rc=mutable(f);if(rc)return rc;
+    if(!id||!name_ok(source)||!name_ok(target))return TIKU_MFS_ARG;
+    if(f->writing)return TIKU_MFS_BUSY;
+    tiku_mfs_object_t o;catalog_node_t old,destination;
+    if((rc=catalog_object(f,id,&o)))return rc;
+    if(!o.visible||!o.complete||strcmp(o.name,source))return TIKU_MFS_STALE;
+    if((rc=catalog_name(f,source,&old)))return rc;
+    if(old.visible!=id)return TIKU_MFS_STALE;
+    if(old.pending)return TIKU_MFS_BUSY;
+    if(!strcmp(source,target))return 0;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    if((rc=directory_empty(f,&o)))return rc;
+    size_t source_length=strlen(source);
+    if(o.policy==TIKU_MFS_DIRECTORY&&!strncmp(source,target,source_length)&&target[source_length]=='/')return TIKU_MFS_BUSY;
+#endif
+    rc=catalog_name(f,target,&destination);
+    if(!rc)return TIKU_MFS_BUSY;
+    if(rc!=TIKU_MFS_NOENT)return rc;
+    if((rc=namespace_free(f,target)))return rc;
+#if TIKU_MEDIA_NAMES_ENABLE
+    if(names_version==UINT64_MAX)return TIKU_MFS_LIMIT;
+#endif
+    f->catalog_write=1;rc=rename_catalog(f,&o,&old,target);f->catalog_write=0;
+    return rc;
 }
 int tiku_mfs_stat(tiku_mfs_t *f,const char *name,tiku_mfs_object_t *out)
 {
@@ -980,6 +1130,9 @@ int tiku_mfs_open_read(tiku_mfs_t *f,const char *name,uint64_t *token)
     if(f->next_token==UINT64_MAX)return TIKU_MFS_LIMIT;
     for(unsigned i=0;i<TIKU_MFS_READERS;i++)if(!f->readers[i].token){
         int rc=tiku_mfs_stat(f,name,&f->readers[i].object);if(rc)return rc;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+        if(f->readers[i].object.policy==TIKU_MFS_DIRECTORY)return TIKU_MFS_ARG;
+#endif
         *token=f->readers[i].token=f->next_token++;return 0;
     }
     return TIKU_MFS_LIMIT;
@@ -1255,10 +1408,988 @@ int tiku_mfs_query_open(tiku_mfs_t *f,tiku_mfs_query_t *q,uint64_t *token)
     if(!q||!token||!q->done||q->result||q->mode||q->pinned)return TIKU_MFS_ARG;
     int rc=query_current(f,q);if(rc)return rc;
     if(f->collecting)return TIKU_MFS_BUSY;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    if(q->object.policy==TIKU_MFS_DIRECTORY)return TIKU_MFS_ARG;
+#endif
     if(f->next_token==UINT64_MAX)return TIKU_MFS_LIMIT;
     for(unsigned i=0;i<TIKU_MFS_READERS;i++)if(!f->readers[i].token){
         f->readers[i].object=q->object;*token=f->readers[i].token=f->next_token++;q->pinned=1;return 0;
     }
     return TIKU_MFS_LIMIT;
+}
+#endif
+
+#if TIKU_MEDIA_ASYNC_ENABLE
+/** @brief Complete a checkpoint without retaining transport output. */
+static int checkpoint_done(tiku_mfs_checkpoint_t *c,int result)
+{ c->result=result;c->done=1;c->waiting=c->have=0;return 0; }
+int tiku_mfs_checkpoint_begin(tiku_mfs_t *f,tiku_mfs_checkpoint_t *c)
+{
+    int rc=mutable(f);if(rc)return rc;
+    if(!c)return TIKU_MFS_ARG;
+    if(f->epoch==UINT64_MAX)return TIKU_MFS_LIMIT;
+    *c=(tiku_mfs_checkpoint_t){.generation=f->generation,.sequence=f->sequence,.epoch=f->epoch,
+        .base=(uint64_t)(1u-f->bank)*f->bank_sectors,.checksum=UINT32_MAX,.phase=1};
+    return 0;
+}
+int tiku_mfs_checkpoint_supply(tiku_mfs_checkpoint_t *c,int result)
+{
+    if(!c||c->done||!c->waiting||result>0)return TIKU_MFS_ARG;
+    c->waiting=0;c->have=1;c->io_result=result;return 0;
+}
+int tiku_mfs_checkpoint_cancel(tiku_mfs_t *f,tiku_mfs_checkpoint_t *c)
+{
+    if(!f||!c)return TIKU_MFS_ARG;
+    if(c->done)return 0;
+    if(c->waiting)return TIKU_MFS_BUSY;
+    if(c->changed)f->failed=1;
+    checkpoint_done(c,TIKU_MFS_STALE);return 0;
+}
+int tiku_mfs_checkpoint_step(tiku_mfs_t *f,tiku_mfs_checkpoint_t *c)
+{
+    if(!c)return TIKU_MFS_ARG;
+    if(c->done)return 0;
+    if(!f||!f->mounted||f->generation!=c->generation||f->sequence!=c->sequence||f->epoch!=c->epoch)
+        return checkpoint_done(c,TIKU_MFS_STALE);
+    if(f->failed)return checkpoint_done(c,TIKU_MFS_IO);
+    if(c->waiting)return 1;
+    if(c->have){
+        c->have=0;
+        if(c->io_result){f->failed=1;return checkpoint_done(c,TIKU_MFS_IO);}
+    }
+    switch(c->phase){
+    case 1:
+        memset(c->sector,0,512);c->sector_lba=c->base;c->changed=1;
+        c->waiting=TIKU_MFS_CHECKPOINT_WRITE;c->phase=2;return 1;
+    case 2:c->waiting=TIKU_MFS_CHECKPOINT_SYNC;c->phase=3;return 1;
+    case 3:
+        if(c->offset<f->bitmap_bytes){
+            size_t n=f->bitmap_bytes-c->offset;if(n>512)n=512;
+            memset(c->sector,0,512);memcpy(c->sector,f->used+c->offset,n);
+            c->checksum=crc_more(c->checksum,c->sector,n);
+            c->sector_lba=c->base+1+c->offset/512;c->offset+=n;
+            c->waiting=TIKU_MFS_CHECKPOINT_WRITE;return 1;
+        }
+        c->waiting=TIKU_MFS_CHECKPOINT_SYNC;c->phase=4;return 1;
+    case 4:
+        page(f,c->sector,"MFC2");put64(c->sector+32,f->block.sectors);put64(c->sector+40,f->epoch+1);
+        put64(c->sector+48,f->sequence);put64(c->sector+56,f->next_id);put64(c->sector+64,f->tail);
+        put32(c->sector+72,f->cursor);put32(c->sector+76,~c->checksum);
+        put32(c->sector+84,2);put32(c->sector+92,TIKU_MFS_SEGMENT);put64(c->sector+96,f->allocations);
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+        put32(c->sector+88,f->features&1u);
+#endif
+        roots_put(c->sector,f->ids,f->names);seal(c->sector);
+        c->sector_lba=c->base;c->waiting=TIKU_MFS_CHECKPOINT_WRITE;c->phase=5;return 1;
+    case 5:c->waiting=TIKU_MFS_CHECKPOINT_SYNC;c->phase=6;return 1;
+    case 6:
+        f->bank=(uint8_t)(1u-f->bank);f->epoch++;f->journal=0;f->recovered=0;
+        return checkpoint_done(c,0);
+    default:return checkpoint_done(c,TIKU_MFS_ARG);
+    }
+}
+#endif
+
+#if TIKU_MEDIA_ASYNC_ENABLE
+/** @brief Resumable copy-on-write AVL edit with bounded ancestor storage. */
+typedef struct {
+    tiku_mfs_link_t path[TIKU_MFS_CATALOG_DEPTH],root;
+    catalog_node_t value,node,successor,child,middle;
+    const catalog_node_t *write_node;
+    uint32_t scanned;
+    uint8_t directions[TIKU_MFS_CATALOG_DEPTH];
+    unsigned depth,replace_depth,phase,after_write,remove,heavy;
+} catalog_edit_t;
+/** @brief Retained extent path and checksums while appending one chunk. */
+typedef struct {
+    tiku_mfs_ref_t path[DEPTH],ref,data,old;
+    uint64_t bases[DEPTH],base,chunk;
+    uint32_t checksums[16],old_crc,footer_crc;
+    unsigned height,level,prefix,length,at,take;
+} mutation_frame_t;
+/** @brief Private state retained through the final barrier and transport retirement. */
+struct tiku_mfs_mutation {
+    union {
+        struct { catalog_edit_t edit; tiku_mfs_checkpoint_t checkpoint; };
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+        tiku_mfs_query_t copy_query;
+#endif
+        mutation_frame_t stream_frame;
+    };
+    tiku_mfs_object_t object;
+    catalog_node_t seek_key,seek_node,old_name;
+    tiku_mfs_link_t seek_link,ids,names;
+    uint64_t generation,sequence,epoch,id,sector_lba;
+    uint32_t root_crc,scanned,payload_size,payload_at,slice_crc;
+    uint64_t frame_lba;
+    const uint8_t *payload;
+    uint8_t footer[512];
+    char source[64],target[64],prefix[64];
+    uint8_t sector[512];
+    int result,io_result;
+    unsigned phase,seek_phase,seek_depth,seek_lower,seek_found,prefix_at;
+    uint8_t waiting,have,done,changed,remove,replace,stream;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    uint8_t directory,tree,tree_started,copy,copy_ready;
+    uint8_t copy_digest[32];
+    void *copy_buffer;
+    uint64_t copy_id,copy_prepared,copy_total;
+    uint64_t tree_id;
+    uint32_t tree_count;
+    char tree_source[64],tree_target[64];
+#endif
+};
+/** @brief Transaction phases, including validation before any allocation. */
+enum {
+    MUT_ID=1,MUT_OBJECT,MUT_SOURCE,MUT_TARGET,MUT_PARENT,MUT_CHILD,
+    MUT_PREPARE,MUT_CHECKPOINT,MUT_BUILD,MUT_DESCRIPTOR,MUT_IDS,MUT_OLD,
+    MUT_NEW,MUT_ROOT,MUT_ROOT_SYNC,MUT_COMMIT,MUT_COMMIT_SYNC,MUT_PUBLISH,
+    MUT_REPLACE_TARGET,MUT_FILE_ALLOC,MUT_FILE_HASH,MUT_FILE_DATA,MUT_FILE_FOOTER,
+    MUT_FILE_HEADER,MUT_FILE_INDEX,MUT_FILE_DESCRIPTOR,MUT_REPLACED,
+    MUT_PARENT_ID,MUT_PARENT_OBJECT,MUT_DIRECTORY_CHILD,
+    MUT_TREE_IMPLICIT,MUT_TREE_START,MUT_TREE_NEXT,MUT_TREE_END,MUT_COPY_READ,
+    MUT_STREAM_NAME,MUT_STREAM_FRAME,MUT_STREAM_DESCEND,MUT_STREAM_DECODE,
+    MUT_STREAM_HEADER,MUT_STREAM_FOOTER,MUT_STREAM_ALLOC,MUT_STREAM_SECTOR,
+    MUT_STREAM_HASH,MUT_STREAM_DATA,MUT_STREAM_END,MUT_STREAM_HEAD,
+    MUT_STREAM_ASCEND,MUT_STREAM_NODE,MUT_STREAM_NODE_ALLOC,MUT_STREAM_NODE_WRITTEN,
+    MUT_UPGRADE_INIT,MUT_UPGRADE_CHECKPOINT,MUT_UPGRADE_READ,MUT_UPGRADE_RETIRE,MUT_UPGRADE_SYNC,MUT_UPGRADE_DONE
+};
+size_t tiku_mfs_mutation_size(void){return sizeof(tiku_mfs_mutation_t);}
+tiku_mfs_mutation_t *tiku_mfs_mutation_init(void *memory,size_t size)
+{
+    if(!memory||size<sizeof(tiku_mfs_mutation_t)||(uintptr_t)memory%_Alignof(tiku_mfs_mutation_t))return NULL;
+    memset(memory,0,sizeof(tiku_mfs_mutation_t));return memory;
+}
+/** @brief Complete an operation, freezing an interrupted allocation/publication. */
+static int mutation_done(tiku_mfs_t *f,tiku_mfs_mutation_t *m,int result)
+{
+    if(result&&(m->changed
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+        ||m->directory==2
+#endif
+        )&&f&&f->generation==m->generation)f->failed=1;
+    m->result=result;m->done=1;m->waiting=m->have=0;return 0;
+}
+/** @brief Request one sector or barrier without invoking the block provider. */
+static int mutation_io(tiku_mfs_mutation_t *m,unsigned kind,uint64_t lba)
+{
+    m->sector_lba=lba;m->waiting=(uint8_t)kind;
+    if(kind!=TIKU_MFS_MUTATION_READ)m->changed=1;
+    return 1;
+}
+/** @brief Initialize an exact or lower-bound catalog lookup. */
+static void mutation_seek(tiku_mfs_mutation_t *m,tiku_mfs_link_t root,unsigned kind,
+                          uint64_t id,const char *name,int lower)
+{
+    m->seek_key=(catalog_node_t){.kind=kind,.key=id};
+    if(name)memcpy(m->seek_key.name,name,strlen(name)+1);
+    m->seek_link=root;m->seek_phase=m->seek_depth=m->seek_found=0;m->seek_lower=(unsigned)lower;
+}
+/** @brief Advance one lookup read or decode; return 1 pending, zero found, negative absent/error. */
+static int mutation_seek_step(tiku_mfs_t *f,tiku_mfs_mutation_t *m)
+{
+    if(!m->seek_phase){
+        if(!m->seek_link.ref.lba)return m->seek_found?0:TIKU_MFS_NOENT;
+        if(m->seek_depth++==TIKU_MFS_CATALOG_DEPTH)return TIKU_MFS_CORRUPT;
+        m->seek_phase=1;return mutation_io(m,TIKU_MFS_MUTATION_READ,m->seek_link.ref.lba);
+    }
+    catalog_node_t n;int rc=catalog_decode(f,m->seek_link,m->seek_key.kind,&n,m->sector);
+    if(rc)return rc;
+    int cmp=catalog_compare(&m->seek_key,&n);
+    #if TIKU_MEDIA_DIRECTORIES_ENABLE
+    if(!cmp&&m->seek_lower==2){m->seek_link=n.child[1];m->seek_phase=0;return 1;}
+#endif
+    if(!cmp){m->seek_node=n;return 0;}
+    if(m->seek_lower&&cmp<0){m->seek_node=n;m->seek_found=1;}
+    m->seek_link=n.child[cmp>0];m->seek_phase=0;return 1;
+}
+/** @brief Reserve contiguous sectors, inspecting at most 64 segment bits per call. */
+static int mutation_reserve(tiku_mfs_t *f,tiku_mfs_mutation_t *m,uint32_t *scanned,unsigned count,uint64_t *lba)
+{
+    m->changed=1;
+    unsigned left=f->tail%TIKU_MFS_SEGMENT?TIKU_MFS_SEGMENT-(unsigned)(f->tail%TIKU_MFS_SEGMENT):0;
+    if(left>=count){*lba=f->tail;f->tail+=count;return 0;}
+    if(f->allocations==UINT64_MAX)return TIKU_MFS_LIMIT;
+    for(unsigned n=0;n<64&&*scanned<f->segments-1;++n,++*scanned){
+        uint32_t s=f->cursor;f->cursor++;if(f->cursor==f->segments)f->cursor=1;
+        if(!bit(f->used,s)){
+            set(f->used,s);f->allocations++;f->free_segments--;
+            *lba=(uint64_t)s*TIKU_MFS_SEGMENT;f->tail=*lba+count;return 0;
+        }
+    }
+    return *scanned==f->segments-1?TIKU_MFS_SPACE:1;
+}
+/** @brief Reserve one catalog sector through the bounded allocator. */
+static int mutation_allocate(tiku_mfs_t *f,tiku_mfs_mutation_t *m,uint32_t *scanned,uint64_t *lba)
+{ return mutation_reserve(f,m,scanned,1,lba); }
+/** @brief Start an unpublished catalog edit. */
+static void mutation_edit(tiku_mfs_mutation_t *m,tiku_mfs_link_t root,const catalog_node_t *value,int remove)
+{
+    m->edit=(catalog_edit_t){.root=root,.value=*value,.remove=(unsigned)remove,
+        .replace_depth=TIKU_MFS_CATALOG_DEPTH,.phase=1};
+}
+/** @brief Schedule a node write and its continuation after I/O retirement. */
+static int mutation_edit_write(catalog_edit_t *e,const catalog_node_t *n,unsigned after)
+{ e->write_node=n;e->after_write=after;e->phase=20;e->scanned=0;return 1; }
+/** @brief Advance one catalog traversal, rotation, allocation slice or sector operation. */
+static int mutation_edit_step(tiku_mfs_t *f,tiku_mfs_mutation_t *m)
+{
+    catalog_edit_t *e=&m->edit;catalog_node_t *n=&e->node;int rc;
+    switch(e->phase){
+    case 1:
+        if(!e->root.ref.lba){
+            if(e->remove)return TIKU_MFS_NOENT;
+            *n=e->value;n->child[0]=n->child[1]=(tiku_mfs_link_t){0};
+            return mutation_edit_write(e,n,10);
+        }
+        if(e->depth==TIKU_MFS_CATALOG_DEPTH)return TIKU_MFS_CORRUPT;
+        e->phase=2;return mutation_io(m,TIKU_MFS_MUTATION_READ,e->root.ref.lba);
+    case 2:{
+        if((rc=catalog_decode(f,e->root,e->value.kind,n,m->sector)))return rc;
+        int cmp=catalog_compare(&e->value,n);
+        if(cmp){
+            e->path[e->depth]=e->root;e->directions[e->depth++]=(uint8_t)(cmp>0);
+            e->root=n->child[cmp>0];e->phase=1;return 1;
+        }
+        if(!e->remove){
+            tiku_mfs_link_t left=n->child[0],right=n->child[1];*n=e->value;n->child[0]=left;n->child[1]=right;
+            return mutation_edit_write(e,n,10);
+        }
+        if(!n->child[0].ref.lba||!n->child[1].ref.lba){
+            e->root=n->child[n->child[0].ref.lba?0:1];e->phase=10;return 1;
+        }
+        e->replace_depth=e->depth;e->path[e->depth]=e->root;e->directions[e->depth++]=1;
+        e->root=n->child[1];e->phase=3;return 1;
+    }
+    case 3:
+        if(e->depth==TIKU_MFS_CATALOG_DEPTH)return TIKU_MFS_CORRUPT;
+        e->phase=4;return mutation_io(m,TIKU_MFS_MUTATION_READ,e->root.ref.lba);
+    case 4:
+        if((rc=catalog_decode(f,e->root,e->value.kind,&e->successor,m->sector)))return rc;
+        if(!e->successor.child[0].ref.lba){e->root=e->successor.child[1];e->phase=10;return 1;}
+        e->path[e->depth]=e->root;e->directions[e->depth++]=0;e->root=e->successor.child[0];e->phase=3;return 1;
+    case 10:
+        if(!e->depth)return 0;
+        --e->depth;e->phase=11;return mutation_io(m,TIKU_MFS_MUTATION_READ,e->path[e->depth].ref.lba);
+    case 11:{
+        if((rc=catalog_decode(f,e->path[e->depth],e->value.kind,n,m->sector)))return rc;
+        if(e->depth==e->replace_depth){
+            n->key=e->successor.key;n->visible=e->successor.visible;n->pending=e->successor.pending;
+            n->object=e->successor.object;memcpy(n->name,e->successor.name,64);
+        }
+        n->child[e->directions[e->depth]]=e->root;
+        int balance=(int)n->child[0].height-(int)n->child[1].height;
+        if(balance>=-1&&balance<=1)return mutation_edit_write(e,n,10);
+        if(balance < -2||balance>2)return TIKU_MFS_CORRUPT;
+        e->heavy=balance>0?0:1;e->phase=12;
+        return mutation_io(m,TIKU_MFS_MUTATION_READ,n->child[e->heavy].ref.lba);
+    }
+    case 12:
+        if((rc=catalog_decode(f,n->child[e->heavy],e->value.kind,&e->child,m->sector)))return rc;
+        if(e->child.child[e->heavy].height>=e->child.child[1-e->heavy].height){
+            n->child[e->heavy]=e->child.child[1-e->heavy];return mutation_edit_write(e,n,13);
+        }
+        e->phase=14;return mutation_io(m,TIKU_MFS_MUTATION_READ,e->child.child[1-e->heavy].ref.lba);
+    case 13:
+        e->child.child[1-e->heavy]=e->root;return mutation_edit_write(e,&e->child,10);
+    case 14:
+        if((rc=catalog_decode(f,e->child.child[1-e->heavy],e->value.kind,&e->middle,m->sector)))return rc;
+        e->child.child[1-e->heavy]=e->middle.child[e->heavy];n->child[e->heavy]=e->middle.child[1-e->heavy];
+        return mutation_edit_write(e,&e->child,15);
+    case 15:e->middle.child[e->heavy]=e->root;return mutation_edit_write(e,n,16);
+    case 16:e->middle.child[1-e->heavy]=e->root;return mutation_edit_write(e,&e->middle,10);
+    case 20:{
+        tiku_mfs_link_t r=node_link(e->write_node);uint64_t lba;
+        if(r.height>TIKU_MFS_CATALOG_DEPTH||r.count+r.pending>f->block.sectors)return TIKU_MFS_LIMIT;
+        rc=mutation_allocate(f,m,&e->scanned,&lba);if(rc)return rc;
+        const catalog_node_t *w=e->write_node;uint8_t *p=m->sector;
+        page(f,p,"MFI2");put32(p+24,w->kind);link_put(p+32,w->child[0]);link_put(p+64,w->child[1]);
+        put64(p+96,w->key);put64(p+104,w->visible);put64(p+112,w->pending);
+        put64(p+120,w->object.lba);put32(p+128,w->object.crc);memcpy(p+144,w->name,64);seal(p);
+        r.ref=(tiku_mfs_ref_t){lba,get32(p+508)};e->root=r;e->phase=21;
+        return mutation_io(m,TIKU_MFS_MUTATION_WRITE,lba);
+    }
+    case 21:e->phase=e->after_write;return 1;
+    default:return TIKU_MFS_ARG;
+    }
+}
+int tiku_mfs_mutation_begin(tiku_mfs_t *f,tiku_mfs_mutation_t *m,uint64_t id,const char *source,const char *target)
+{
+    int rc=mutable(f);if(rc)return rc;
+    if(!m||!id||!name_ok(source)||(target&&!name_ok(target)))return TIKU_MFS_ARG;
+    if(f->writing||(m->phase&&!m->done))return TIKU_MFS_BUSY;
+    memset(m,0,sizeof *m);m->generation=f->generation;m->sequence=f->sequence;m->epoch=f->epoch;
+    m->id=id;m->ids=f->ids;m->names=f->names;m->remove=target==NULL;
+    memcpy(m->source,source,strlen(source)+1);if(target)memcpy(m->target,target,strlen(target)+1);
+    mutation_seek(m,f->ids,CATALOG_IDS,id,NULL,0);m->phase=MUT_ID;return 0;
+}
+int tiku_mfs_mutation_replace_begin(tiku_mfs_t *f,tiku_mfs_mutation_t *m,uint64_t expected_id,
+                                  const char *name,const void *payload,uint32_t bytes)
+{
+    int rc=mutable(f);if(rc)return rc;
+    if(!m||!name_ok(name)||bytes>TIKU_MFS_CHUNK||(bytes&&!payload))return TIKU_MFS_ARG;
+    if(f->writing||(m->phase&&!m->done))return TIKU_MFS_BUSY;
+    memset(m,0,sizeof *m);m->generation=f->generation;m->sequence=f->sequence;m->epoch=f->epoch;
+    m->id=expected_id;m->ids=f->ids;m->names=f->names;m->replace=1;m->payload=payload;m->payload_size=bytes;
+    memcpy(m->source,name,strlen(name)+1);memcpy(m->target,m->source,64);
+    mutation_seek(m,f->names,CATALOG_NAMES,0,name,0);m->phase=MUT_REPLACE_TARGET;return 0;
+}
+int tiku_mfs_mutation_upload_begin(tiku_mfs_t *f,tiku_mfs_mutation_t *m,uint64_t expected_id,
+                                  const char *name,tiku_mfs_policy_t policy,uint64_t expected,const uint8_t digest[32])
+{
+    if((policy!=TIKU_MFS_STREAM&&policy!=TIKU_MFS_ATOMIC)||
+       (policy==TIKU_MFS_STREAM&&expected_id)||
+       (policy==TIKU_MFS_ATOMIC&&(!digest||expected>UINT64_MAX/8)))return TIKU_MFS_ARG;
+    int rc=tiku_mfs_mutation_replace_begin(f,m,expected_id,name,NULL,0);if(rc)return rc;
+    m->stream=1;m->footer[0]=(uint8_t)policy;put64(m->footer+8,expected);
+    if(digest)memcpy(m->footer+16,digest,32);
+    return 0;
+}
+/** @brief Initialize a serialized writer operation without filesystem access. */
+static int mutation_writer_begin(tiku_mfs_t *f,tiku_mfs_mutation_t *m,unsigned operation)
+{
+    int rc=mutable(f);if(rc)return rc;
+    if(!m)return TIKU_MFS_ARG;
+    if((m->phase&&!m->done)||(operation==2?f->writing:!f->writing))return TIKU_MFS_BUSY;
+    memset(m,0,sizeof *m);m->generation=f->generation;m->sequence=f->sequence;m->epoch=f->epoch;
+    m->ids=f->ids;m->names=f->names;m->stream=(uint8_t)operation;return 0;
+}
+int tiku_mfs_mutation_resume_begin(tiku_mfs_t *f,tiku_mfs_mutation_t *m,uint64_t id)
+{
+    if(!id)return TIKU_MFS_ARG;
+    int rc=mutation_writer_begin(f,m,2);if(rc)return rc;
+    m->id=id;mutation_seek(m,f->ids,CATALOG_IDS,id,NULL,0);m->phase=MUT_ID;return 0;
+}
+int tiku_mfs_mutation_append_begin(tiku_mfs_t *f,tiku_mfs_mutation_t *m,const void *payload,uint32_t bytes)
+{
+    if(!payload||!bytes||bytes>TIKU_MFS_CHUNK)return TIKU_MFS_ARG;
+    int rc=mutable(f);if(rc)return rc;
+    if(!f->writing)return TIKU_MFS_ARG;
+    if(f->draft.length>UINT64_MAX/8||bytes>UINT64_MAX/8-f->draft.length||
+       (f->draft.policy==TIKU_MFS_ATOMIC&&(f->draft.length>f->draft.expected||bytes>f->draft.expected-f->draft.length)))return TIKU_MFS_LIMIT;
+    rc=mutation_writer_begin(f,m,3);if(rc)return rc;
+    m->object=f->draft;m->id=m->object.id;m->payload=payload;m->payload_size=bytes;
+    m->phase=MUT_STREAM_FRAME;return 0;
+}
+int tiku_mfs_mutation_flush_begin(tiku_mfs_t *f,tiku_mfs_mutation_t *m,int final)
+{
+    int rc=mutable(f);if(rc)return rc;
+    if(!f->writing)return TIKU_MFS_ARG;
+    rc=mutation_writer_begin(f,m,final?5:4);if(rc)return rc;
+    m->object=f->draft;m->id=m->object.id;memcpy(m->target,m->object.name,64);
+    if(final){
+        hash_end(m->object.hash,m->object.length,m->object.digest);
+        if(m->object.policy==TIKU_MFS_ATOMIC&&(m->object.length!=m->object.expected||
+           memcmp(m->object.digest,m->object.expected_digest,32))){mutation_done(f,m,TIKU_MFS_DIGEST);return TIKU_MFS_DIGEST;}
+        m->object.complete=m->object.visible=1;
+    }
+    mutation_seek(m,f->names,CATALOG_NAMES,0,m->target,0);m->phase=MUT_STREAM_NAME;return 0;
+}
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+int tiku_mfs_mutation_upgrade_begin(tiku_mfs_t *f,tiku_mfs_mutation_t *m)
+{
+    if(!f||!f->mounted||!m)return TIKU_MFS_ARG;
+    if(f->failed)return TIKU_MFS_IO;
+    if(f->writing||f->collecting||(m->phase&&!m->done))return TIKU_MFS_BUSY;
+    memset(m,0,sizeof *m);m->generation=f->generation;m->sequence=f->sequence;m->epoch=f->epoch;
+    m->directory=2;m->phase=MUT_UPGRADE_INIT;return 0;
+}
+int tiku_mfs_mutation_tree_begin(tiku_mfs_t *f,tiku_mfs_mutation_t *m,uint64_t id,const char *source,const char *target)
+{
+    int rc=mutable(f);if(rc)return rc;
+    if(!m||!name_ok(source)||(target&&!name_ok(target)))return TIKU_MFS_ARG;
+    if(f->writing||(m->phase&&!m->done))return TIKU_MFS_BUSY;
+    size_t n=strlen(source);
+    if(target&&!strncmp(source,target,n)&&target[n]=='/')return TIKU_MFS_BUSY;
+    if(id){rc=tiku_mfs_mutation_begin(f,m,id,source,target);if(rc)return rc;}
+    else {
+        memset(m,0,sizeof *m);m->generation=f->generation;m->sequence=f->sequence;m->epoch=f->epoch;
+        m->ids=f->ids;m->names=f->names;m->remove=target==NULL;
+        memcpy(m->source,source,n+1);if(target)memcpy(m->target,target,strlen(target)+1);
+        mutation_seek(m,f->names,CATALOG_NAMES,0,source,0);m->phase=MUT_TREE_IMPLICIT;
+    }
+    m->tree=1;m->tree_id=id;memcpy(m->tree_source,m->source,64);memcpy(m->tree_target,m->target,64);return 0;
+}
+int tiku_mfs_mutation_tree_copy_begin(tiku_mfs_t *f,tiku_mfs_mutation_t *m,uint64_t id,
+                                      const char *source,const char *target,void *buffer,uint32_t capacity)
+{
+    if(!source||!target||!buffer||capacity<TIKU_MFS_CHUNK)return TIKU_MFS_ARG;
+    if(!strcmp(source,target))return TIKU_MFS_BUSY;
+    int rc=tiku_mfs_mutation_tree_begin(f,m,id,source,target);if(rc)return rc;
+    m->copy=1;m->copy_buffer=buffer;return 0;
+}
+int tiku_mfs_mutation_progress(const tiku_mfs_mutation_t *m,uint64_t *prepared,uint64_t *total)
+{
+    if(!m||!prepared||!total||!m->copy)return TIKU_MFS_ARG;
+    *prepared=m->copy_prepared;*total=m->tree==1?0:m->copy_total;return 0;
+}
+int tiku_mfs_mutation_mkdir_begin(tiku_mfs_t *f,tiku_mfs_mutation_t *m,const char *name)
+{
+    if(!f||!f->mounted)return TIKU_MFS_ARG;
+    if(!tiku_mfs_has_directories(f))return TIKU_MFS_UNSUPPORTED;
+    int rc=tiku_mfs_mutation_replace_begin(f,m,0,name,NULL,0);if(!rc)m->directory=1;return rc;
+}
+#endif
+int tiku_mfs_mutation_io(tiku_mfs_mutation_t *m,uint64_t *lba,void **sector)
+{
+    if(!m||!lba||!sector||m->done)return 0;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    if(m->phase==MUT_COPY_READ){*lba=m->copy_query.sector_lba;*sector=m->copy_query.sector;
+        return m->copy_query.waiting?TIKU_MFS_MUTATION_READ:0;}
+#endif
+    if((m->phase==MUT_CHECKPOINT
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+        ||m->phase==MUT_UPGRADE_CHECKPOINT
+#endif
+        )){
+        *lba=m->checkpoint.sector_lba;*sector=m->checkpoint.sector;
+        return m->checkpoint.waiting==TIKU_MFS_CHECKPOINT_WRITE?TIKU_MFS_MUTATION_WRITE:
+            m->checkpoint.waiting==TIKU_MFS_CHECKPOINT_SYNC?TIKU_MFS_MUTATION_SYNC:0;
+    }
+    *lba=m->sector_lba;*sector=m->sector;return m->waiting;
+}
+int tiku_mfs_mutation_supply(tiku_mfs_mutation_t *m,int result)
+{
+    if(!m||m->done||result>0)return TIKU_MFS_ARG;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    if(m->phase==MUT_COPY_READ)return tiku_mfs_query_supply(&m->copy_query,result);
+#endif
+    if((m->phase==MUT_CHECKPOINT
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+        ||m->phase==MUT_UPGRADE_CHECKPOINT
+#endif
+        ))return tiku_mfs_checkpoint_supply(&m->checkpoint,result);
+    if(!m->waiting)return TIKU_MFS_ARG;
+    m->waiting=0;m->have=1;m->io_result=result;return 0;
+}
+int tiku_mfs_mutation_result(const tiku_mfs_mutation_t *m)
+{ return !m?TIKU_MFS_ARG:m->done?m->result:TIKU_MFS_BUSY; }
+uint64_t tiku_mfs_mutation_id(const tiku_mfs_mutation_t *m)
+{ return m&&m->done&&!m->result&&!m->remove?m->id:0; }
+int tiku_mfs_mutation_cancel(tiku_mfs_t *f,tiku_mfs_mutation_t *m)
+{
+    if(!f||!m)return TIKU_MFS_ARG;
+    if(m->done)return 0;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    if(m->phase==MUT_COPY_READ&&m->copy_query.waiting)return TIKU_MFS_BUSY;
+#endif
+    if(m->waiting||((m->phase==MUT_CHECKPOINT
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+        ||m->phase==MUT_UPGRADE_CHECKPOINT
+#endif
+        )&&m->checkpoint.waiting))return TIKU_MFS_BUSY;
+    if((m->phase==MUT_CHECKPOINT
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+        ||m->phase==MUT_UPGRADE_CHECKPOINT
+#endif
+        )&&m->checkpoint.changed)m->changed=1;
+    mutation_done(f,m,TIKU_MFS_STALE);return 0;
+}
+/** @brief Select the next parent-file check, then the target's first possible child. */
+static void mutation_parent(tiku_mfs_t *f,tiku_mfs_mutation_t *m)
+{
+    size_t length=strlen(m->target);memcpy(m->prefix,m->target,length+1);
+    for(unsigned i=m->prefix_at;i<length;++i)if(m->target[i]=='/'){
+        m->prefix_at=i+1;m->prefix[i]=0;
+        mutation_seek(m,f->names,CATALOG_NAMES,0,m->prefix,0);m->phase=MUT_PARENT;return;
+    }
+    if(length+1<64){
+        m->prefix[length]='/';m->prefix[length+1]=0;
+        mutation_seek(m,f->names,CATALOG_NAMES,0,m->prefix,1);m->phase=MUT_CHILD;
+    }else m->phase=MUT_PREPARE;
+}
+/** @brief Start publication of the new visible name into the candidate catalog. */
+static void mutation_new_name(tiku_mfs_mutation_t *m)
+{
+    catalog_node_t key={.kind=CATALOG_NAMES,.visible=m->id};memcpy(key.name,m->target,64);
+    if(m->stream){
+        key=m->old_name;key.kind=CATALOG_NAMES;memcpy(key.name,m->target,64);
+        if(m->object.visible){key.visible=m->id;if(key.pending==m->id)key.pending=0;}
+        else key.pending=m->id;
+    }
+    mutation_edit(m,m->names,&key,0);m->phase=MUT_NEW;
+}
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+/** @brief Seek the next original descendant without retaining a catalog-sized list. */
+static void mutation_tree_next(tiku_mfs_t *f,tiku_mfs_mutation_t *m)
+{
+    size_t n=strlen(m->tree_source);
+    if(!strcmp(m->source,m->tree_source)){
+        if(n==63){m->phase=MUT_TREE_END;return;}
+        memcpy(m->prefix,m->tree_source,n);m->prefix[n++]='/';m->prefix[n]=0;
+        mutation_seek(m,f->names,CATALOG_NAMES,0,m->prefix,1);
+    }else mutation_seek(m,f->names,CATALOG_NAMES,0,m->source,2);
+    m->phase=MUT_TREE_NEXT;
+}
+#endif
+/** @brief Descend one extent level after selecting its child. */
+static void mutation_frame_down(mutation_frame_t *c)
+{
+    c->base+=((c->chunk>>(4*(c->level-1)))&15u)<<(4*(c->level-1));
+    --c->level;
+}
+/** @brief Advance an append by one extent phase, sector or 64 payload bytes. */
+static int mutation_append_step(tiku_mfs_t *f,tiku_mfs_mutation_t *m)
+{
+    mutation_frame_t *c=&m->stream_frame;uint8_t *p=m->sector;int rc;
+    switch(m->phase){
+    case MUT_STREAM_FRAME:{
+        memset(c,0,sizeof *c);c->chunk=m->object.length/TIKU_MFS_CHUNK;
+        c->prefix=(unsigned)(m->object.length%TIKU_MFS_CHUNK);
+        c->take=m->payload_size-m->payload_at;if(c->take>TIKU_MFS_CHUNK-c->prefix)c->take=TIKU_MFS_CHUNK-c->prefix;
+        c->length=c->prefix+c->take;c->height=m->object.height?m->object.height:1;
+        while(c->height<=DEPTH&&(c->chunk>>(4*c->height)))++c->height;
+        if(c->height>DEPTH)return mutation_done(f,m,TIKU_MFS_LIMIT);
+        unsigned left=f->tail%TIKU_MFS_SEGMENT?TIKU_MFS_SEGMENT-(unsigned)(f->tail%TIKU_MFS_SEGMENT):0;
+        if((uint64_t)f->free_segments*TIKU_MFS_SEGMENT+left<
+           (c->length+511)/512+2u+c->height+CATALOG_RESERVE)return mutation_done(f,m,TIKU_MFS_SPACE);
+        c->ref=m->object.root;c->level=c->height;m->phase=MUT_STREAM_DESCEND;return 1;
+    }
+    case MUT_STREAM_DESCEND:
+        if(!c->level){
+            if(c->prefix){
+                c->old=c->ref;if(!ref_ok(f,c->old))return mutation_done(f,m,TIKU_MFS_CORRUPT);
+                m->phase=MUT_STREAM_HEADER;return mutation_io(m,TIKU_MFS_MUTATION_READ,c->old.lba);
+            }
+            m->phase=MUT_STREAM_ALLOC;return 1;
+        }
+        c->bases[c->level-1]=c->base;
+        if(c->level>m->object.height){
+            if((c->chunk>>(4*(c->level-1)))&15u)c->ref=(tiku_mfs_ref_t){0};
+        }else {
+            c->path[c->level-1]=c->ref;
+            if(c->ref.lba){m->phase=MUT_STREAM_DECODE;return mutation_io(m,TIKU_MFS_MUTATION_READ,c->ref.lba);}
+        }
+        mutation_frame_down(c);return 1;
+    case MUT_STREAM_DECODE:
+        rc=node_decode(f,&m->object,c->ref,c->level,c->base,p);if(rc)return mutation_done(f,m,rc);
+        c->ref=ref_get(p,(unsigned)((c->chunk>>(4*(c->level-1)))&15u));
+        mutation_frame_down(c);m->phase=MUT_STREAM_DESCEND;return 1;
+    case MUT_STREAM_HEADER:
+        rc=frame_header_decode(f,&m->object,c->chunk,c->old,p);if(rc)return mutation_done(f,m,rc);
+        if(get32(p+40)!=c->prefix)return mutation_done(f,m,TIKU_MFS_CORRUPT);
+        c->footer_crc=get32(p+44);m->phase=MUT_STREAM_FOOTER;
+        return mutation_io(m,TIKU_MFS_MUTATION_READ,c->old.lba+1+(c->prefix+511)/512);
+    case MUT_STREAM_FOOTER:
+        rc=frame_footer_decode(f,&m->object,c->chunk,c->prefix,c->footer_crc,p);if(rc)return mutation_done(f,m,rc);
+        for(unsigned i=0;i<16;++i)c->checksums[i]=get32(p+64+4*i);
+        m->phase=MUT_STREAM_ALLOC;return 1;
+    case MUT_STREAM_ALLOC:
+        rc=mutation_reserve(f,m,&m->scanned,(c->length+511)/512+2,&m->frame_lba);
+        if(rc==1)return 1;
+        if(rc)return mutation_done(f,m,rc);
+        m->scanned=0;m->slice_crc=c->old_crc=UINT32_MAX;
+        page(f,m->footer,"MFE1");put64(m->footer+24,m->id);put64(m->footer+32,c->chunk);put32(m->footer+40,c->length);
+        m->phase=MUT_STREAM_SECTOR;return 1;
+    case MUT_STREAM_SECTOR:
+        m->phase=MUT_STREAM_HASH;
+        if(c->at<c->prefix)return mutation_io(m,TIKU_MFS_MUTATION_READ,c->old.lba+1+c->at/512);
+        memset(p,0,512);return 1;
+    case MUT_STREAM_HASH:{
+        unsigned n=c->length-c->at;if(n>64)n=64;
+        if(n>512-c->at%512)n=512-c->at%512;
+        uint8_t *bytes=p+c->at%512;
+        if(c->at<c->prefix){
+            if(n>c->prefix-c->at)n=c->prefix-c->at;
+            c->old_crc=crc_more(c->old_crc,bytes,n);
+            if(!((c->at+n)%4096)||c->at+n==c->prefix){
+                if(~c->old_crc!=c->checksums[c->at/4096])return mutation_done(f,m,TIKU_MFS_CORRUPT);
+                c->old_crc=UINT32_MAX;
+            }
+        }else {
+            memcpy(bytes,m->payload+m->payload_at,n);
+            hash_add(&m->object.hash,m->object.length+c->at-c->prefix,bytes,n);m->payload_at+=n;
+        }
+        m->slice_crc=crc_more(m->slice_crc,bytes,n);c->at+=n;
+        if(!(c->at%4096)||c->at==c->length){
+            put32(m->footer+64+4*((c->at-1)/4096),~m->slice_crc);m->slice_crc=UINT32_MAX;
+        }
+        if(!(c->at%512)||c->at==c->length){
+            if(c->at%512)memset(p+c->at%512,0,512-c->at%512);
+            m->phase=MUT_STREAM_DATA;return mutation_io(m,TIKU_MFS_MUTATION_WRITE,m->frame_lba+1+(c->at-1)/512);
+        }
+        return 1;
+    }
+    case MUT_STREAM_DATA:m->phase=c->at<c->length?MUT_STREAM_SECTOR:MUT_STREAM_END;return 1;
+    case MUT_STREAM_END:
+        seal(m->footer);c->footer_crc=get32(m->footer+508);memcpy(p,m->footer,512);m->phase=MUT_STREAM_HEAD;
+        return mutation_io(m,TIKU_MFS_MUTATION_WRITE,m->frame_lba+1+(c->length+511)/512);
+    case MUT_STREAM_HEAD:
+        page(f,p,"MFD1");put64(p+24,m->id);put64(p+32,c->chunk);put32(p+40,c->length);put32(p+44,c->footer_crc);seal(p);
+        c->data=(tiku_mfs_ref_t){m->frame_lba,get32(p+508)};c->level=1;m->phase=MUT_STREAM_ASCEND;
+        return mutation_io(m,TIKU_MFS_MUTATION_WRITE,m->frame_lba);
+    case MUT_STREAM_ASCEND:
+        if(c->level>c->height){
+            m->object.root=c->data;m->object.height=(uint8_t)c->height;m->object.length+=c->take;
+            if(m->payload_at<m->payload_size){m->phase=MUT_STREAM_FRAME;return 1;}
+            f->draft=m->object;return mutation_done(f,m,0);
+        }
+        m->phase=MUT_STREAM_NODE;
+        if(c->path[c->level-1].lba)return mutation_io(m,TIKU_MFS_MUTATION_READ,c->path[c->level-1].lba);
+        page(f,p,"MFN1");put64(p+24,m->id);put64(p+32,c->bases[c->level-1]);put32(p+40,c->level);
+        if(c->level==(unsigned)m->object.height+1&&m->object.root.lba)ref_put(p,0,m->object.root);
+        return 1;
+    case MUT_STREAM_NODE:
+        if(c->path[c->level-1].lba){
+            rc=node_decode(f,&m->object,c->path[c->level-1],c->level,c->bases[c->level-1],p);
+            if(rc)return mutation_done(f,m,rc);
+        }
+        ref_put(p,(unsigned)((c->chunk>>(4*(c->level-1)))&15u),c->data);seal(p);
+        m->phase=MUT_STREAM_NODE_ALLOC;return 1;
+    case MUT_STREAM_NODE_ALLOC:{
+        uint64_t lba;rc=mutation_allocate(f,m,&m->scanned,&lba);if(rc==1)return 1;if(rc)return mutation_done(f,m,rc);
+        m->scanned=0;c->data=(tiku_mfs_ref_t){lba,get32(p+508)};m->phase=MUT_STREAM_NODE_WRITTEN;
+        return mutation_io(m,TIKU_MFS_MUTATION_WRITE,lba);
+    }
+    case MUT_STREAM_NODE_WRITTEN:++c->level;m->phase=MUT_STREAM_ASCEND;return 1;
+    default:return mutation_done(f,m,TIKU_MFS_ARG);
+    }
+}
+int tiku_mfs_mutation_step(tiku_mfs_t *f,tiku_mfs_mutation_t *m)
+{
+    if(!m)return TIKU_MFS_ARG;
+    if(m->done)return 0;
+    if(!f||!f->mounted||f->generation!=m->generation||f->sequence!=m->sequence||f->epoch!=m->epoch)
+        return mutation_done(f,m,TIKU_MFS_STALE);
+    if(f->failed)return mutation_done(f,m,TIKU_MFS_IO);
+    if(m->waiting)return 1;
+    if(m->have){m->have=0;if(m->io_result){f->failed=1;return mutation_done(f,m,TIKU_MFS_IO);}}
+    int rc;uint8_t *p=m->sector;
+    if(m->phase>=MUT_STREAM_FRAME&&m->phase<=MUT_STREAM_NODE_WRITTEN)return mutation_append_step(f,m);
+    switch(m->phase){
+    case MUT_STREAM_NAME:
+        rc=mutation_seek_step(f,m);if(rc==1)return 1;if(rc)return mutation_done(f,m,rc);
+        m->old_name=m->seek_node;
+        if(m->object.policy==TIKU_MFS_ATOMIC?m->old_name.pending!=m->id:m->old_name.visible!=m->id)
+            return mutation_done(f,m,TIKU_MFS_STALE);
+        m->phase=MUT_PREPARE;return 1;
+    case MUT_REPLACE_TARGET:
+        rc=mutation_seek_step(f,m);if(rc==1)return 1;
+        if(rc==TIKU_MFS_NOENT){if(m->id)return mutation_done(f,m,TIKU_MFS_STALE);mutation_parent(f,m);return 1;}
+        if(rc)return mutation_done(f,m,rc);
+        if(m->seek_node.pending)return mutation_done(f,m,TIKU_MFS_BUSY);
+        if(!m->id)return mutation_done(f,m,TIKU_MFS_BUSY);
+        if(m->seek_node.visible!=m->id)return mutation_done(f,m,TIKU_MFS_STALE);
+        mutation_seek(m,f->ids,CATALOG_IDS,m->id,NULL,0);m->phase=MUT_ID;return 1;
+    case MUT_ID:
+        rc=mutation_seek_step(f,m);if(rc==1)return 1;if(rc)return mutation_done(f,m,rc);
+        m->phase=MUT_OBJECT;return mutation_io(m,TIKU_MFS_MUTATION_READ,m->seek_node.object.lba);
+    case MUT_OBJECT:
+        if(get32(p+508)!=m->seek_node.object.crc)return mutation_done(f,m,TIKU_MFS_CORRUPT);
+        rc=object_decode(f,p,&m->object);if(rc)return mutation_done(f,m,rc);
+        if(m->object.id!=m->id||m->id>=f->next_id)return mutation_done(f,m,TIKU_MFS_CORRUPT);
+        if(m->stream==2){
+            if(m->object.complete)return mutation_done(f,m,TIKU_MFS_ARG);
+            f->draft=m->object;f->writing=1;return mutation_done(f,m,0);
+        }
+        if(!m->object.visible||!m->object.complete||strcmp(m->object.name,m->source))return mutation_done(f,m,TIKU_MFS_STALE);
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+        if(m->tree&&m->id==m->tree_id&&m->object.policy!=TIKU_MFS_DIRECTORY)return mutation_done(f,m,TIKU_MFS_ARG);
+        if(m->replace&&m->object.policy==TIKU_MFS_DIRECTORY)return mutation_done(f,m,TIKU_MFS_BUSY);
+#endif
+        mutation_seek(m,f->names,CATALOG_NAMES,0,m->source,0);m->phase=MUT_SOURCE;return 1;
+    case MUT_SOURCE:
+        rc=mutation_seek_step(f,m);if(rc==1)return 1;if(rc)return mutation_done(f,m,rc);
+        m->old_name=m->seek_node;
+        if(m->old_name.visible!=m->id)return mutation_done(f,m,TIKU_MFS_STALE);
+        if(m->old_name.pending)return mutation_done(f,m,TIKU_MFS_BUSY);
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+        if(m->object.policy==TIKU_MFS_DIRECTORY&&!m->remove){size_t n=strlen(m->source);
+            if(!strncmp(m->source,m->target,n)&&m->target[n]=='/')return mutation_done(f,m,TIKU_MFS_BUSY);}
+        if(!m->tree&&m->object.policy==TIKU_MFS_DIRECTORY&&(m->remove||strcmp(m->source,m->target))){
+            size_t n=strlen(m->source);if(n+1<64){memcpy(m->prefix,m->source,n);m->prefix[n++]='/';m->prefix[n]=0;
+                mutation_seek(m,f->names,CATALOG_NAMES,0,m->prefix,1);m->phase=MUT_DIRECTORY_CHILD;return 1;}
+        }
+#endif
+        if(m->remove||m->replace){m->phase=MUT_PREPARE;return 1;}
+        if(!strcmp(m->source,m->target))return mutation_done(f,m,0);
+        mutation_seek(m,f->names,CATALOG_NAMES,0,m->target,0);m->phase=MUT_TARGET;return 1;
+    case MUT_TARGET:case MUT_PARENT:
+        rc=mutation_seek_step(f,m);if(rc==1)return 1;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+        if(!rc&&m->phase==MUT_PARENT&&m->seek_node.visible&&!m->seek_node.pending){
+            mutation_seek(m,f->ids,CATALOG_IDS,m->seek_node.visible,NULL,0);m->phase=MUT_PARENT_ID;return 1;}
+#endif
+        if(rc!=TIKU_MFS_NOENT)return mutation_done(f,m,rc?rc:TIKU_MFS_BUSY);
+        mutation_parent(f,m);return 1;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    case MUT_PARENT_ID:
+        rc=mutation_seek_step(f,m);if(rc==1)return 1;if(rc)return mutation_done(f,m,rc);
+        m->phase=MUT_PARENT_OBJECT;return mutation_io(m,TIKU_MFS_MUTATION_READ,m->seek_node.object.lba);
+    case MUT_PARENT_OBJECT:{
+        tiku_mfs_object_t parent;if(get32(p+508)!=m->seek_node.object.crc)return mutation_done(f,m,TIKU_MFS_CORRUPT);
+        rc=object_decode(f,p,&parent);if(rc)return mutation_done(f,m,rc);
+        if(parent.id!=m->seek_node.key||strcmp(parent.name,m->prefix))return mutation_done(f,m,TIKU_MFS_CORRUPT);
+        if(parent.policy!=TIKU_MFS_DIRECTORY)return mutation_done(f,m,TIKU_MFS_BUSY);
+        mutation_parent(f,m);return 1;
+    }
+    case MUT_DIRECTORY_CHILD:
+        rc=mutation_seek_step(f,m);if(rc==1)return 1;if(rc&&rc!=TIKU_MFS_NOENT)return mutation_done(f,m,rc);
+        if(!rc&&!strncmp(m->prefix,m->seek_node.name,strlen(m->prefix)))return mutation_done(f,m,TIKU_MFS_BUSY);
+        if(m->remove){m->phase=MUT_PREPARE;return 1;}
+        mutation_seek(m,f->names,CATALOG_NAMES,0,m->target,0);m->phase=MUT_TARGET;return 1;
+#endif
+    case MUT_CHILD:
+        rc=mutation_seek_step(f,m);if(rc==1)return 1;
+        if(rc&&rc!=TIKU_MFS_NOENT)return mutation_done(f,m,rc);
+        if(!rc&&!strncmp(m->prefix,m->seek_node.name,strlen(m->prefix)))return mutation_done(f,m,TIKU_MFS_BUSY);
+        m->phase=MUT_PREPARE;return 1;
+    case MUT_PREPARE:
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+        if(m->tree==1){
+            if(m->id){
+                if(m->tree_count==UINT32_MAX)return mutation_done(f,m,TIKU_MFS_LIMIT);
+                m->tree_count++;
+                if(m->copy){
+                    if(m->object.length>TIKU_MFS_CHUNK||UINT64_MAX-m->copy_total<m->object.length)
+                        return mutation_done(f,m,TIKU_MFS_LIMIT);
+                    m->copy_total+=m->object.length;
+                }
+            }
+            mutation_tree_next(f,m);return 1;
+        }
+        if(m->tree==2&&m->tree_started){m->phase=MUT_BUILD;return 1;}
+#endif
+        if(m->replace){
+            if(f->next_id==UINT64_MAX)return mutation_done(f,m,TIKU_MFS_LIMIT);
+            unsigned left=f->tail%TIKU_MFS_SEGMENT?TIKU_MFS_SEGMENT-(unsigned)(f->tail%TIKU_MFS_SEGMENT):0;
+            if((uint64_t)f->free_segments*TIKU_MFS_SEGMENT+left<
+               (m->payload_size+511)/512+3u+CATALOG_RESERVE)return mutation_done(f,m,TIKU_MFS_SPACE);
+        }
+        if(f->sequence==UINT64_MAX||names_version==UINT64_MAX)return mutation_done(f,m,TIKU_MFS_LIMIT);
+        if(f->recovered||f->journal==TIKU_MFS_JOURNAL){
+            rc=tiku_mfs_checkpoint_begin(f,&m->checkpoint);if(rc)return mutation_done(f,m,rc);
+            m->phase=MUT_CHECKPOINT;
+        }else m->phase=MUT_BUILD;
+        return 1;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    case MUT_UPGRADE_CHECKPOINT:
+#endif
+    case MUT_CHECKPOINT:
+        rc=tiku_mfs_checkpoint_step(f,&m->checkpoint);if(m->checkpoint.changed)m->changed=1;
+        if(rc)return rc;
+        if(m->checkpoint.result)return mutation_done(f,m,m->checkpoint.result);
+        m->epoch=f->epoch;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+        if(m->phase==MUT_UPGRADE_CHECKPOINT)m->phase=MUT_UPGRADE_READ;else
+#endif
+        m->phase=MUT_BUILD;
+        return 1;
+    case MUT_BUILD:
+        if(m->stream==1){
+            m->changed=1;m->id=f->next_id++;
+            m->object=(tiku_mfs_object_t){.id=m->id,.policy=m->footer[0],.expected=get64(m->footer+8)};
+            m->object.visible=m->object.policy==TIKU_MFS_STREAM;
+            if(m->object.visible)m->object.expected=0;
+            memcpy(m->object.expected_digest,m->footer+16,32);hash_init(&m->object.hash);
+            m->phase=MUT_FILE_DESCRIPTOR;return 1;
+        }
+        if(m->stream){m->phase=MUT_FILE_DESCRIPTOR;return 1;}
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+        if(m->tree)m->tree_started=1;
+        if(m->copy&&!m->copy_ready){
+            unsigned left=f->tail%TIKU_MFS_SEGMENT?TIKU_MFS_SEGMENT-(unsigned)(f->tail%TIKU_MFS_SEGMENT):0;
+            if((uint64_t)f->free_segments*TIKU_MFS_SEGMENT+left<
+               (m->object.length+511)/512+3u+CATALOG_RESERVE)return mutation_done(f,m,TIKU_MFS_SPACE);
+            memcpy(m->copy_digest,m->object.digest,32);
+            m->directory=m->object.policy==TIKU_MFS_DIRECTORY;
+            m->payload=m->copy_buffer;m->payload_size=(uint32_t)m->object.length;m->payload_at=0;
+            if(m->payload_size){
+                rc=query_init(f,&m->copy_query);if(rc)return mutation_done(f,m,rc);
+                m->copy_query.mode=1;m->copy_query.object=m->object;m->copy_query.output=m->copy_buffer;
+                m->copy_query.total=m->payload_size;query_index(&m->copy_query);m->phase=MUT_COPY_READ;return 1;
+            }
+            m->copy_ready=1;
+        }
+#endif
+        if(m->replace
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+           ||m->copy
+#endif
+           ){
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+            if(m->copy&&f->next_id==UINT64_MAX)return mutation_done(f,m,TIKU_MFS_LIMIT);
+#endif
+            m->changed=1;m->id=f->next_id++;m->object=(tiku_mfs_object_t){.id=m->id,
+                .length=m->payload_size,.expected=m->payload_size,.policy=TIKU_MFS_ATOMIC,.visible=1,.complete=1};
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+            if(m->directory)m->object.policy=TIKU_MFS_DIRECTORY;
+            if(m->copy&&!strcmp(m->source,m->tree_source))m->copy_id=m->id;
+#endif
+            memcpy(m->object.name,m->target,64);hash_init(&m->object.hash);
+            if(m->payload_size)m->phase=MUT_FILE_ALLOC;
+            else {hash_end(m->object.hash,0,m->object.digest);memcpy(m->object.expected_digest,m->object.digest,32);m->phase=MUT_FILE_DESCRIPTOR;}
+            return 1;
+        }
+        /* Namespace-only operations retain their existing object metadata. */
+        m->phase=MUT_FILE_DESCRIPTOR;return 1;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    case MUT_COPY_READ:
+        rc=tiku_mfs_query_step(f,&m->copy_query);if(rc)return rc;
+        if(m->copy_query.result!=(int)m->payload_size)
+            return mutation_done(f,m,m->copy_query.result<0?m->copy_query.result:TIKU_MFS_CORRUPT);
+        m->copy_ready=1;m->phase=MUT_BUILD;return 1;
+#endif
+    case MUT_FILE_DESCRIPTOR:{
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+        if(m->copy&&memcmp(m->object.digest,m->copy_digest,32))return mutation_done(f,m,TIKU_MFS_CORRUPT);
+#endif
+        catalog_node_t key={.kind=CATALOG_IDS,.key=m->id};
+        if(m->remove){mutation_edit(m,m->ids,&key,1);m->phase=MUT_IDS;return 1;}
+        uint64_t lba;rc=mutation_allocate(f,m,&m->scanned,&lba);if(rc==1)return 1;if(rc)return mutation_done(f,m,rc);
+        memset(m->object.name,0,64);memcpy(m->object.name,m->target,strlen(m->target));object_encode(f,p,&m->object);
+        key.object=(tiku_mfs_ref_t){lba,get32(p+508)};mutation_edit(m,m->ids,&key,0);
+        m->phase=MUT_DESCRIPTOR;return mutation_io(m,TIKU_MFS_MUTATION_WRITE,lba);
+    }
+    case MUT_FILE_ALLOC:
+        rc=mutation_reserve(f,m,&m->scanned,(m->payload_size+511)/512+2,&m->frame_lba);
+        if(rc==1)return 1;
+        if(rc)return mutation_done(f,m,rc);
+        m->scanned=0;m->slice_crc=UINT32_MAX;
+        page(f,m->footer,"MFE1");put64(m->footer+24,m->id);put32(m->footer+40,m->payload_size);
+        m->phase=MUT_FILE_HASH;return 1;
+    case MUT_FILE_HASH:{
+        unsigned bytes=m->payload_size-m->payload_at;if(bytes>64)bytes=64;
+        if(!(m->payload_at%512))memset(p,0,512);
+        memcpy(p+m->payload_at%512,m->payload+m->payload_at,bytes);
+        hash_add(&m->object.hash,m->payload_at,m->payload+m->payload_at,bytes);
+        m->slice_crc=crc_more(m->slice_crc,m->payload+m->payload_at,bytes);m->payload_at+=bytes;
+        if(!(m->payload_at%4096)||m->payload_at==m->payload_size){
+            put32(m->footer+64+4*((m->payload_at-1)/4096),~m->slice_crc);m->slice_crc=UINT32_MAX;
+        }
+        if(!(m->payload_at%512)||m->payload_at==m->payload_size){
+            m->phase=MUT_FILE_DATA;return mutation_io(m,TIKU_MFS_MUTATION_WRITE,m->frame_lba+1+(m->payload_at-1)/512);
+        }
+        return 1;
+    }
+    case MUT_FILE_DATA:
+        if(m->payload_at<m->payload_size)m->phase=MUT_FILE_HASH;
+        else {hash_end(m->object.hash,m->payload_size,m->object.digest);memcpy(m->object.expected_digest,m->object.digest,32);m->phase=MUT_FILE_FOOTER;}
+        return 1;
+    case MUT_FILE_FOOTER:
+        seal(m->footer);m->root_crc=get32(m->footer+508);memcpy(p,m->footer,512);m->phase=MUT_FILE_HEADER;
+        return mutation_io(m,TIKU_MFS_MUTATION_WRITE,m->frame_lba+1+(m->payload_size+511)/512);
+    case MUT_FILE_HEADER:
+        page(f,p,"MFD1");put64(p+24,m->id);put32(p+40,m->payload_size);put32(p+44,m->root_crc);seal(p);
+        m->object.root=(tiku_mfs_ref_t){m->frame_lba,get32(p+508)};m->phase=MUT_FILE_INDEX;
+        return mutation_io(m,TIKU_MFS_MUTATION_WRITE,m->frame_lba);
+    case MUT_FILE_INDEX:{
+        uint64_t lba;rc=mutation_allocate(f,m,&m->scanned,&lba);if(rc==1)return 1;if(rc)return mutation_done(f,m,rc);
+        m->scanned=0;page(f,p,"MFN1");put64(p+24,m->id);put32(p+40,1);ref_put(p,0,m->object.root);seal(p);
+        m->object.root=(tiku_mfs_ref_t){lba,get32(p+508)};m->object.height=1;m->phase=MUT_FILE_DESCRIPTOR;
+        return mutation_io(m,TIKU_MFS_MUTATION_WRITE,lba);
+    }
+    case MUT_DESCRIPTOR:m->phase=MUT_IDS;return 1;
+    case MUT_IDS:
+        rc=mutation_edit_step(f,m);if(rc==1)return 1;if(rc)return mutation_done(f,m,rc);
+        m->ids=m->edit.root;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+        if(m->copy){mutation_new_name(m);return 1;}
+#endif
+        if(m->stream){
+            if(m->object.visible&&m->old_name.visible&&m->old_name.visible!=m->id){
+                catalog_node_t key={.kind=CATALOG_IDS,.key=m->old_name.visible};
+                mutation_edit(m,m->ids,&key,1);m->phase=MUT_REPLACED;
+            }else if(m->stream==4)m->phase=MUT_ROOT;
+            else mutation_new_name(m);
+            return 1;
+        }
+        if(m->replace){
+            if(m->old_name.visible){catalog_node_t key={.kind=CATALOG_IDS,.key=m->old_name.visible};mutation_edit(m,m->ids,&key,1);m->phase=MUT_REPLACED;}
+            else mutation_new_name(m);
+        }else {mutation_edit(m,m->names,&m->old_name,1);m->phase=MUT_OLD;}
+        return 1;
+    case MUT_REPLACED:
+        rc=mutation_edit_step(f,m);if(rc==1)return 1;if(rc)return mutation_done(f,m,rc);
+        m->ids=m->edit.root;mutation_new_name(m);return 1;
+    case MUT_OLD:
+        rc=mutation_edit_step(f,m);if(rc==1)return 1;if(rc)return mutation_done(f,m,rc);
+        m->names=m->edit.root;
+        if(m->remove){
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+            if(m->tree)mutation_tree_next(f,m);else
+#endif
+            m->phase=MUT_ROOT;
+        }else mutation_new_name(m);
+        return 1;
+    case MUT_NEW:
+        rc=mutation_edit_step(f,m);if(rc==1)return 1;if(rc)return mutation_done(f,m,rc);
+        m->names=m->edit.root;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+        if(m->copy)m->copy_prepared+=m->payload_size;
+        if(m->tree)mutation_tree_next(f,m);else
+#endif
+        m->phase=MUT_ROOT;
+        return 1;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    case MUT_UPGRADE_INIT:{
+        if(f->features==1)return mutation_done(f,m,0);
+        unsigned features=f->features;f->features&=1u;
+        rc=tiku_mfs_checkpoint_begin(f,&m->checkpoint);f->features=(uint8_t)features;
+        if(rc)return mutation_done(f,m,rc);
+        f->features=3;m->phase=MUT_UPGRADE_CHECKPOINT;return 1;
+    }
+    case MUT_UPGRADE_READ:
+        m->phase=MUT_UPGRADE_RETIRE;return mutation_io(m,TIKU_MFS_MUTATION_READ,(uint64_t)(1u-f->bank)*f->bank_sectors);
+    case MUT_UPGRADE_RETIRE:
+        if(valid(f,p,"MFC2")&&!get32(p+88)){
+            put32(p+88,1);seal(p);m->phase=MUT_UPGRADE_SYNC;
+            return mutation_io(m,TIKU_MFS_MUTATION_WRITE,(uint64_t)(1u-f->bank)*f->bank_sectors);
+        }
+        m->phase=MUT_UPGRADE_DONE;return 1;
+    case MUT_UPGRADE_SYNC:m->phase=MUT_UPGRADE_DONE;return mutation_io(m,TIKU_MFS_MUTATION_SYNC,0);
+    case MUT_UPGRADE_DONE:f->features=1;return mutation_done(f,m,0);
+    case MUT_TREE_IMPLICIT:
+        rc=mutation_seek_step(f,m);if(rc==1)return 1;
+        if(rc!=TIKU_MFS_NOENT)return mutation_done(f,m,rc?rc:TIKU_MFS_STALE);
+        m->phase=MUT_TREE_START;return 1;
+    case MUT_TREE_START:
+        if(m->remove||!strcmp(m->source,m->target))mutation_tree_next(f,m);
+        else {mutation_seek(m,f->names,CATALOG_NAMES,0,m->target,0);m->phase=MUT_TARGET;}
+        return 1;
+    case MUT_TREE_NEXT:{
+        rc=mutation_seek_step(f,m);if(rc==1)return 1;
+        if(rc&&rc!=TIKU_MFS_NOENT)return mutation_done(f,m,rc);
+        size_t n=strlen(m->tree_source);
+        if(rc==TIKU_MFS_NOENT||strncmp(m->seek_node.name,m->tree_source,n)||m->seek_node.name[n]!='/'){
+            m->phase=MUT_TREE_END;return 1;
+        }
+        if(m->seek_node.pending||!m->seek_node.visible)return mutation_done(f,m,TIKU_MFS_BUSY);
+        size_t tail=strlen(m->seek_node.name+n),target=strlen(m->tree_target);
+        if(!m->remove&&target+tail>=64)return mutation_done(f,m,TIKU_MFS_LIMIT);
+        m->copy_ready=0;m->directory=0;
+        m->id=m->seek_node.visible;memcpy(m->source,m->seek_node.name,64);
+        memset(m->target,0,64);if(!m->remove){memcpy(m->target,m->tree_target,target);memcpy(m->target+target,m->source+n,tail+1);}
+        m->scanned=m->prefix_at=0;mutation_seek(m,f->ids,CATALOG_IDS,m->id,NULL,0);m->phase=MUT_ID;return 1;
+    }
+    case MUT_TREE_END:
+        if(m->tree==1){
+            if(!m->tree_count)return mutation_done(f,m,TIKU_MFS_NOENT);
+            if(m->copy&&UINT64_MAX-f->next_id<m->tree_count)return mutation_done(f,m,TIKU_MFS_LIMIT);
+            if(!m->remove&&!strcmp(m->tree_source,m->tree_target))return mutation_done(f,m,0);
+            m->tree=2;m->id=m->tree_id;m->scanned=m->prefix_at=0;
+            memcpy(m->source,m->tree_source,64);memcpy(m->target,m->tree_target,64);
+            if(m->tree_id){mutation_seek(m,f->ids,CATALOG_IDS,m->id,NULL,0);m->phase=MUT_ID;}
+            else mutation_tree_next(f,m);
+        }else {m->id=m->copy?m->copy_id:m->tree_id;m->phase=MUT_ROOT;}
+        return 1;
+#endif
+    case MUT_ROOT:
+        page(f,p,"MFR2");roots_put(p,m->ids,m->names);seal(p);m->root_crc=get32(p+508);
+        m->phase=MUT_ROOT_SYNC;return mutation_io(m,TIKU_MFS_MUTATION_WRITE,journal_lba(f,f->bank)+2*f->journal);
+    case MUT_ROOT_SYNC:m->phase=MUT_COMMIT;return mutation_io(m,TIKU_MFS_MUTATION_SYNC,0);
+    case MUT_COMMIT:
+        page(f,p,"MFT2");put64(p+24,f->epoch);put64(p+32,f->sequence+1);put64(p+40,f->sequence);
+        put32(p+48,m->root_crc);put64(p+64,f->tail);put64(p+72,f->next_id);put32(p+80,f->cursor);
+        put64(p+88,f->allocations);seal(p);m->phase=MUT_COMMIT_SYNC;
+        return mutation_io(m,TIKU_MFS_MUTATION_WRITE,journal_lba(f,f->bank)+2*f->journal+1);
+    case MUT_COMMIT_SYNC:m->phase=MUT_PUBLISH;return mutation_io(m,TIKU_MFS_MUTATION_SYNC,0);
+    case MUT_PUBLISH:
+        f->ids=m->ids;f->names=m->names;f->sequence++;f->journal++;
+        if(!m->stream||m->stream==5||(m->stream==1&&m->object.visible))f->names_epoch=++names_version;
+        if(m->stream){f->draft=m->object;f->writing=m->stream!=5;}
+        return mutation_done(f,m,0);
+    default:return mutation_done(f,m,TIKU_MFS_ARG);
+    }
 }
 #endif

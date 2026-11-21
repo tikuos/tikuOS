@@ -51,7 +51,7 @@ int tiku_s31_sdcard_close(tiku_s31_sdcard_t *card);
 #endif
 #if TIKU_S31_SD_ASYNC_ENABLE
 #include "tiku_spi_arch.h"
-/** @brief Caller-owned read-only transport state retained through completion or cancellation. */
+/** @brief Caller-owned transport state retained through completion or cancellation. */
 typedef struct {
     tiku_s31_spi_async_t spi;
     tiku_s31_sdcard_t *card;
@@ -72,16 +72,29 @@ int tiku_s31_sd_open_begin(tiku_s31_sd_async_t *, tiku_s31_sdcard_t *);
  * unchanged on error. Other card operations are refused while this one runs.
  */
 int tiku_s31_sd_read_begin(tiku_s31_sd_async_t *, tiku_s31_sdcard_t *, uint32_t lba, void *out);
+/** @brief Begin one extent-authorized 512-byte write; return 1 when accepted.
+ * @note Retain the input unchanged through completion or cancellation. Each poll
+ * transfers at most 64 payload bytes. Completion includes busy and CMD13 checks.
+ * Errors may leave the sector changed; remount before further filesystem work.
+ */
+int tiku_s31_sd_write_begin(tiku_s31_sd_async_t *, tiku_s31_sdcard_t *, uint32_t lba, const void *input);
+/** @brief Begin programming completion and CMD13 status checks without waiting. */
+int tiku_s31_sd_sync_begin(tiku_s31_sd_async_t *, tiku_s31_sdcard_t *);
 /** @brief Begin a 400 kHz..20 MHz clock change on the opened card without waiting. */
 int tiku_s31_sd_clock_begin(tiku_s31_sd_async_t *, tiku_s31_sdcard_t *, uint32_t hz);
 /** @brief Perform one bounded transport phase; return 1 pending, 0 complete or an error.
  * @note This function does not wait for hardware or delay. Errors close the
- * read-only session and release its pads. Invalid-call refusals retain ownership.
+ * session and release its pads. A failed programming operation first holds card
+ * power off for 20 ms, advancing through later polls. Invalid-call refusals retain ownership.
  * Successful completion retains the
  * opened card; the caller closes it or begins another operation.
  */
 int tiku_s31_sd_poll(tiku_s31_sd_async_t *);
-/** @brief Abort an accepted read/open, reset SPI and close the card before releasing buffers. */
+/** @brief Cancel a read/open immediately, or advance an accepted write toward retirement.
+ * @note BUSY retains operation, card and buffers; repeat cancel or poll. Once a
+ * data token was sent, cancellation finishes that sector before releasing the
+ * card. It does not undo a write. Failed writes reset the owned card before release.
+ */
 int tiku_s31_sd_cancel(tiku_s31_sd_async_t *);
 #endif
 #endif

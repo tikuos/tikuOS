@@ -32,4 +32,14 @@ int tiku_media_card_read_step(void *,tiku_media_store_t *);
 int tiku_media_card_read_idle(const void *);
 /** @brief Cancel one queued request after releasing its transport, retaining ownership on BUSY. */
 int tiku_media_card_read_cancel(void *,tiku_media_store_t *,tiku_media_request_t *);
+/** @brief Required eight-byte-aligned caller storage for polled file mutations. */
+size_t tiku_media_card_mutation_size(void);
+/** @brief Initialize unused mutation state without accessing or writing the card. */
+void tiku_media_card_mutation_init(void *);
+/** @brief Advance one rename/delete phase under shared queue serialization. */
+int tiku_media_card_mutation_step(void *,tiku_media_store_t *);
+/** @brief Report whether caller state owns no mutation or transport. */
+int tiku_media_card_mutation_idle(const void *);
+/** @brief Cancel after retiring borrowed storage; BUSY requires retaining caller memory. */
+int tiku_media_card_mutation_cancel(void *,tiku_media_store_t *,tiku_media_request_t *);
 #endif

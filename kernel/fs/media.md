@@ -460,3 +460,57 @@ for their existing owner; the read worker does not execute writes or maintenance
 On S31, `tiku_media_card_read_size/init/step/idle/cancel` bind this worker to
 CID-bound SD sessions in caller storage. Mount and write operations retain the
 synchronous API. Media format and default-disabled instruction paths are unchanged.
+
+## File rename
+
+`tiku_mfs_rename()` changes one completed visible file's relative path in one
+catalog publication. The caller supplies its object ID, expected source name
+and unused destination. An existing destination, a file/directory prefix
+conflict or a pending replacement returns `TIKU_MFS_BUSY`. A source ID/name
+mismatch returns `TIKU_MFS_STALE`; a missing ID returns `TIKU_MFS_NOENT`.
+The object ID, extent root and payload digest remain unchanged. Existing readers
+retain their snapshots. Successful publication invalidates listing cursors and,
+when enabled, advances the visible namespace version. Recovery selects either
+the previous catalog roots or the renamed roots through the existing journal.
+
+`TIKU_MEDIA_RENAME` queues the operation with WRITE permission. The request's
+`id` and `name` identify the expected source; `buffer` borrows the terminated
+destination path until completion. The synchronous store owner executes it in
+one call; the polled mutation owner advances it across sector operations. The
+read owner leaves write requests queued for a mutation owner. Directory subtrees,
+empty directories and overwrite confirmation are not part of this operation.
+
+## Polled checkpoints and file mutations
+
+`TIKU_MEDIA_ASYNC_ENABLE=1` enables caller-owned checkpoint and mutation
+state. `tiku_mfs_checkpoint.h` publishes one bitmap sector or barrier per
+step. `tiku_mfs_mutation.h` renames or deletes one completed visible file
+matching its ID and source path. Rename refuses occupied destinations and
+file/directory-prefix conflicts. Both operations refuse active writers and
+pending replacements at the source. Snapshot readers retain their contents.
+
+Mutation traversal and AVL rotations issue one sector request at a time.
+Allocation examines at most 64 segment bits per step. Checkpoint rollover,
+root records and commit barriers use the same sector protocol. The caller
+performs the requested read, write or barrier and supplies its result after
+retiring the borrowed sector. Core progression does not call a block provider.
+The caller serializes the filesystem through completion or cancellation.
+
+An interrupted allocation or write freezes the mount until remount. Once a
+commit reaches the medium, cancellation cannot undo it. Transport ownership
+must retire before cancellation releases caller memory. Recovery selects the
+old or new transaction using the existing on-disk format.
+
+`services/storage/tiku_media_checkpoint.h` owns queued CHECKPOINT requests.
+`services/storage/tiku_media_mutation.h` owns RENAME and DELETE_VERSION. Each
+service step invokes at most one transport callback. Other clients may enqueue
+while an owner runs; synchronous queue stepping is excluded. DELETE_VERSION
+requires WRITE permission and checks both the expected ID and source path.
+The existing DELETE operation retains its ID-only semantics.
+
+The S31 card mutation binding verifies the configured CID and extent, then
+explicitly enables writes. CMD24 payloads advance in 64-byte SPI batches;
+programming and CMD13 status checks are polled. Cancellation after a data token
+retains the input while programming completes. Failed programming powers the
+card off for 20 ms before releasing its pins. These interfaces do not mount,
+format or select a different card on behalf of a caller.

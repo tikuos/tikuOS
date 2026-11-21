@@ -28,13 +28,18 @@ typedef enum {
     TIKU_MEDIA_STAT, TIKU_MEDIA_LIST, TIKU_MEDIA_CHECKPOINT,
     TIKU_MEDIA_COLLECT_BEGIN, TIKU_MEDIA_COLLECT_STEP,
     TIKU_MEDIA_COPY_BEGIN, TIKU_MEDIA_COPY_STEP, TIKU_MEDIA_COPY_ABORT,
-    TIKU_MEDIA_UPLOADS, TIKU_MEDIA_SEEK, TIKU_MEDIA_ENUMERATE, TIKU_MEDIA_OPEN_VERSION
+    TIKU_MEDIA_UPLOADS, TIKU_MEDIA_SEEK, TIKU_MEDIA_ENUMERATE, TIKU_MEDIA_OPEN_VERSION,
+    TIKU_MEDIA_RENAME, TIKU_MEDIA_DELETE_VERSION, TIKU_MEDIA_REPLACE, TIKU_MEDIA_MKDIR, TIKU_MEDIA_TREE_RENAME, TIKU_MEDIA_TREE_DELETE, TIKU_MEDIA_DIRECTORY_UPGRADE, TIKU_MEDIA_TREE_COPY
 } tiku_media_op_t;
 /**
  * @brief Caller-owned request, including borrowed buffers and result storage.
  * @note Keep this object, name and buffer unchanged until done is set. The caller
  * maps external capabilities to permissions; client is a nonzero ownership ID.
  * Submit and step run in serialized scheduler context, outside capture interrupts.
+ * REPLACE requires the asynchronous mutation owner: id is zero for creation or
+ * the expected visible ID for replacement, and becomes the published ID on
+ * success. Its maximum length is TIKU_MFS_CHUNK; cancellation retains borrowed
+ * data until done. The synchronous step leaves this request queued with BUSY.
  */
 typedef struct {
     tiku_media_op_t op;
@@ -44,8 +49,12 @@ typedef struct {
     uint64_t names_epoch, rank;
     uint8_t exclusive;
 #endif
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    const char *destination; /**< TREE_COPY borrows an absent destination path */
+    uint64_t prepared,total; /**< copied payload bytes staged and validated total */
+#endif
     const char *name;
-    void *buffer;
+    void *buffer; /**< RENAME borrows a destination; REPLACE borrows length immutable payload bytes */
     tiku_mfs_object_t *info;
     uint8_t digest[32];
     tiku_mfs_policy_t policy;
