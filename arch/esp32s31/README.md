@@ -13,7 +13,7 @@ configuration, bounds the clock-update wait, reads back the dividers and
 updates the ROM delay calibration. A refused transition stops memory
 initialization. Timer, UART and display clock sources retain their configured
 rates. Frequency control reports the selected fixed CPU rate; runtime changes
-are refused. The core TikuSurface LCD profile requires the 160 MHz selection.
+are refused.
 
 The runtime provides non-nested CLIC interrupts, a 128 Hz kernel clock,
 a 1 MHz hardware timer, processes, preemptible workers, integer/FPU context
@@ -65,8 +65,8 @@ make MCU=esp32s31 BOARD=esp32s31_korvo1 S31_PROFILE=kernel-test \
 | `trng-test` | LP entropy-source health soak in SRAM, with passive monitoring or bounded random reads |
 | `shell` | SRAM and PSRAM allocation, native shell with `help`, `ps`, `timer`, `queue`, `echo`, `calc`, `htimer` and `clear` |
 | `firmware` | Durable `/data`, VFS, BASIC, native station/AP Wi-Fi, SAE/PMF, DHCP and encrypted profiles |
-| `s31-local` | TikuSurface diagnostic runtime, VFS and BASIC; PSRAM allocation and deferred test presentation |
-| `s31-connected` | The local diagnostic runtime plus scheduled Wi-Fi startup |
+| `s31-local` | The application named by `S31_APPLICATION_MANIFEST` with the shell, VFS and BASIC in the firmware flash layout, without radio |
+| `s31-connected` | The `s31-local` contents plus Wi-Fi, started after the application |
 | `flash-shell` | The shell with application metadata and two flash mappings for the factory bootloader |
 | `psram-test` | Full-capacity patterns and physical cache-visibility checks with timer interrupts active |
 | `flash-psram-test` | The PSRAM checks through the factory bootloader |
@@ -294,13 +294,11 @@ Initialization disables that PHY's pads and overrides its pull resistors
 while LCD owns the pins. Close restores the saved USB pad configuration.
 The UART0 console uses GPIO58/59.
 
-TikuSurface profiles select paired presentation with `S31_SURFACE_LCD=1` in
-the product manifest. Their default value, zero, selects diagnostic
-presentation. The LCD image reports `tikusurface_s31_lcd`; the diagnostic
-runtime runner refuses that identity. Product/display code is selected into
-IROM by the product linker while DMA descriptors remain in SRAM. Touch is
-not selected by this option. Physical timing and resource qualification are
-separate from target-link checks.
+An application profile links paired presentation when its manifest adds the
+display sources. The manifest's linker script places the application's
+display code in IROM while DMA descriptors remain in SRAM. Touch is selected
+separately. Physical timing and resource qualification are separate from
+target-link checks.
 
 Poll `tiku_s31_display_poll()` from the foreground more often than one frame
 period to collect VSYNC, DMA EOF, underrun and DMA-error observations.
@@ -501,7 +499,7 @@ can contain completed sectors if a later sector fails. The caller serializes
 the session with filesystem work and supplies its state storage. The existing
 queued store and block API remain synchronous; their clients must use a
 resumable filesystem operation to benefit from the asynchronous transport.
-The feature defaults off. TikuSurface LCD links select it and qualify placement;
+The feature defaults off. An application manifest can enable it;
 host transport fixtures do not establish board timing or service throughput.
 
 The firmware profile enables `S31_MEDIA_ENABLE=1` by default. Set it to
@@ -669,17 +667,26 @@ See the radio adapter contract for the per-mode qualification limits.
 
 ## Local application manifest
 
-The `s31-local` and `s31-connected` profiles select
-`tikuSurface/product/tikuos.mk` through `S31_APPLICATION_MANIFEST` and require
-the separate TikuSurface checkout and its exported S31 SDK. They use 80 MHz
-PSRAM and the firmware flash layout. The generated product linker contract
-checks UI code/constants and resident anchors in the final ELF.
-`S31_UI_LTO=1` selects UI/SDK LTO; use a separate `S31_DIR` for that build.
+The `s31-local` and `s31-connected` profiles build an application kept
+outside this tree. `S31_APPLICATION_MANIFEST` names its make fragment and has
+no default for these profiles. The manifest sets `APPL_SRCS`, `APPL_CFLAGS`
+and `APPL_LINKER`, the linker script for the image. `APPL_EXTRA_OBJS` adds
+objects built by the manifest's own rules, `APPL_LINK_DEPS` link
+prerequisites and `APPL_CHECK_ELF` a command run on the linked ELF.
+`APPL_CFLAGS` defines
+`TIKU_APPLICATION_HEADER`, the header that declares `tiku_application_start()`
+and `tiku_application_vfs_get()`, and `TIKU_APPLICATION_PROJECT`, the project
+name in the image descriptor. The profiles use 80 MHz PSRAM and the firmware
+flash layout. `S31_UI_LTO` is refused outside them and read by the manifest.
 
-These profiles run diagnostic presentation and an unavailable media provider.
-They do not select the LCD or touch driver. The connected profile starts its
-network process after application startup. The existing `firmware` profile
-keeps `applications/applications.mk` as its default application manifest.
+These profiles select no LCD or touch driver of their own; the manifest adds
+the drivers its application uses. The connected profile starts its
+network process after application startup. The `firmware` profile keeps
+`applications/applications.mk` as its default application manifest.
+
+A manifest may place zero-initialized statics in a section ending at the top
+of PSRAM and define `__tiku_s31_psram_statics_start` at its start; the PSRAM
+tier is then attached below that address.
 An explicitly selected missing manifest fails configuration.
 
 

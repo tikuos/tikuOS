@@ -24,13 +24,13 @@
 
 /* An image may place zero-initialized statics in a section that ends at the
  * top of PSRAM; the tier stops below it.  Undefined in other images. */
-extern char __surface_psram_bss_start[] __attribute__((weak));
+extern char __tiku_s31_psram_statics_start[] __attribute__((weak));
 
 /** @brief Bytes at the top of PSRAM held by linker-placed statics, or -1 when
  *         the section lies outside the mapped PSRAM above the shadow. */
 static long psram_statics(void)
 {
-    uintptr_t start = (uintptr_t)__surface_psram_bss_start;
+    uintptr_t start = (uintptr_t)__tiku_s31_psram_statics_start;
     uintptr_t end = TIKU_S31_PSRAM_BASE + tiku_s31_psram_size();
 
     if (start == 0u) return 0;

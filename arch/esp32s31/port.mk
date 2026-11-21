@@ -18,17 +18,19 @@ ifeq ($(filter firmware s31-local s31-connected,$(S31_PROFILE)),)
 $(error S31_APPLICATION_MANIFEST requires a firmware application profile)
 endif
 endif
-S31_SURFACE := $(filter s31-local s31-connected,$(S31_PROFILE))
-ifneq ($(S31_SURFACE),)
-S31_APPLICATION_MANIFEST ?= tikuSurface/product/tikuos.mk
+S31_APPLICATION := $(filter s31-local s31-connected,$(S31_PROFILE))
+ifneq ($(S31_APPLICATION),)
+ifeq ($(origin S31_APPLICATION_MANIFEST),undefined)
+$(error $(S31_PROFILE) requires S31_APPLICATION_MANIFEST, the make fragment of the application to build)
+endif
 ifeq ($(S31_BLE_ENABLE),1)
-$(error TikuSurface diagnostic profiles do not select BLE)
+$(error Application profiles do not select BLE)
 endif
 ifneq ($(filter-out 80,$(S31_PSRAM_MHZ)),)
-$(error TikuSurface requires S31_PSRAM_MHZ=80)
+$(error Application profiles require S31_PSRAM_MHZ=80)
 endif
 else ifeq ($(S31_UI_LTO),1)
-$(error S31_UI_LTO requires a TikuSurface profile)
+$(error S31_UI_LTO requires an application profile)
 endif
 S31_RADIO_COEX ?= 0
 ifeq ($(S31_RADIO_COEX),1)
@@ -258,9 +260,9 @@ endif
 ifeq ($(S31_BLE_ENABLE),1)
 include drivers/wifi/esp/s31/ble.mk
 endif
-ifneq ($(S31_SURFACE),)
+ifneq ($(S31_APPLICATION),)
 ifeq ($(strip $(APPL_LINKER)),)
-$(error TikuSurface profile requires its application manifest and linker contract)
+$(error The application manifest must set APPL_LINKER, its linker script)
 endif
 S31_FLAGS += -DTIKU_GPIO_CLAIM_LIMIT=32 -fstack-usage
 S31_LINKER := $(APPL_LINKER)
