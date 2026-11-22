@@ -78,6 +78,73 @@ int tiku_posix_closedir(DIR *dir);
 /** @brief Non-zero when @p dir is a stream of this library. */
 int tiku_posix_is_dir_stream(const DIR *dir);
 
+/*---------------------------------------------------------------------------*/
+/* THREADS, MUTEXES AND CONDITION VARIABLES                                  */
+/*---------------------------------------------------------------------------*/
+
+/** @brief Threads the library starts at once; each is a kernel worker, so
+ *         TIKU_THREADS_MAX bounds them with every other worker. */
+#ifndef TIKU_POSIX_THREADS
+#define TIKU_POSIX_THREADS 2
+#endif
+/** @brief Mutexes and condition variables live at once. */
+#ifndef TIKU_POSIX_MUTEXES
+#define TIKU_POSIX_MUTEXES 16
+#endif
+#ifndef TIKU_POSIX_CONDS
+#define TIKU_POSIX_CONDS 8
+#endif
+
+/** @brief Mutex types: a second lock by the holder is EDEADLK for NORMAL
+ *         and ERRORCHECK, another hold for RECURSIVE. */
+#define TIKU_POSIX_MUTEX_NORMAL     0
+#define TIKU_POSIX_MUTEX_RECURSIVE  1
+#define TIKU_POSIX_MUTEX_ERRORCHECK 2
+
+/*
+ * Handles are 32-bit: 0 or 0xFFFFFFFF (the C library's static initialiser)
+ * has no object yet and takes one at first use.  These return 0 or an error
+ * number and set no errno, as the pthread calls do.  None allocates.  A call
+ * that would wait on the kernel thread returns EAGAIN there instead; on a
+ * worker it waits on a kernel wait queue.  Call none inside an atomic
+ * section.
+ */
+
+/** @brief The caller's identity: its control block's address, or 1 for the
+ *         kernel thread. */
+uint32_t tiku_posix_self(void);
+int tiku_posix_mutex_init(uint32_t *h, int type);
+int tiku_posix_mutex_destroy(uint32_t *h);
+/** @brief Take @p h, waiting while another holds it unless @p try_only, when
+ *         that is EBUSY. */
+int tiku_posix_mutex_lock(uint32_t *h, int try_only);
+/** @brief EPERM unless the caller holds @p h. */
+int tiku_posix_mutex_unlock(uint32_t *h);
+int tiku_posix_cond_init(uint32_t *h);
+int tiku_posix_cond_destroy(uint32_t *h);
+/** @brief Release @p mh, wait for a signal, and take @p mh again; the caller
+ *         holds @p mh once.  A wakeup without a signal is possible. */
+int tiku_posix_cond_wait(uint32_t *ch, uint32_t *mh);
+/** @brief Wake one waiter, or every waiter with @p all. */
+int tiku_posix_cond_signal(uint32_t *h, int all);
+/**
+ * @brief The memory thread stacks are carved from: TIKU_POSIX_THREADS equal
+ *        parts of @p bytes from @p base, 16-byte aligned.  The library has
+ *        no other; until it is given, thread creation is EAGAIN.
+ * @return 0; EINVAL for a part below TIKU_THREAD_STACK_MIN; EBUSY while a
+ *         thread lives.
+ */
+int tiku_posix_thread_memory(void *base, size_t bytes);
+/** @brief Start @p fn(@p arg) on a kernel worker; @p stack is the least it
+ *         needs, 0 for any.  EAGAIN with no memory, part or worker slot. */
+int tiku_posix_thread_create(uint32_t *id, size_t stack, int detached,
+                             void *(*fn)(void *), void *arg);
+/** @brief Wait for @p id to finish and take its result; its slot is free. */
+int tiku_posix_thread_join(uint32_t id, void **result);
+int tiku_posix_thread_detach(uint32_t id);
+/** @brief End the calling thread with @p result; does not return. */
+void tiku_posix_thread_exit(void *result);
+
 /**
  * @brief The VFS caller capability (TIKU_VFS_CAP_* bits) the library's calls
  *        run under, set for each call and the caller's restored on every

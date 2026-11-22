@@ -9,8 +9,8 @@ above `kernel/`: `kernel/`, `hal/` and `arch/` include nothing from it, and
 `make lint` (`tools/check_kernel_dependencies.py`) refuses an include that
 does.
 
-The time group and the read group are implemented. The other calls are in
-TikuSurface's
+The time group, the read group and the threads group are implemented. The
+other calls are in TikuSurface's
 `desktop/posix.c`, over a tree in the desktop's heap, and move here a group
 at a time with their backing changed to the kernel's services. The rules
 below hold for each group as it lands.
@@ -97,6 +97,35 @@ with `S31_PROFILE=s31-local` and that directory's `posix_app.mk` as the
 application manifest, installed in the application span, judged by its
 `check.py` from the console log.
 
+## The threads group
+
+`tiku_posix_thread.c` keeps threads, mutexes and condition variables behind
+32-bit handles on kernel workers and wait queues; `tiku_posix_pthread.c`
+gives them newlib's pthread names, whose `pthread_t`, `pthread_mutex_t` and
+`pthread_cond_t` are 32-bit handles.  Nothing allocates: mutexes
+(`TIKU_POSIX_MUTEXES`, 16) and conditions (`TIKU_POSIX_CONDS`, 8) come from
+tables, and a handle still holding the static initialiser takes an object at
+its first use.
+
+| Call | Kernel operation | Supports | Errors |
+| --- | --- | --- | --- |
+| `pthread_create`, `_join`, `_detach`, `_exit`, `_self`, `_equal`, `pthread_attr_*` (detach state, stack size) | `tiku_thread_start()` through `tiku_thread_call()`; the join waits on a wait queue | `TIKU_POSIX_THREADS` (2) threads, on stacks carved from the memory given to `tiku_posix_thread_memory()`; a slot is reused once the kernel marks its worker done | `EAGAIN` with no memory, part or worker slot, `ESRCH`, `EINVAL` for a detached thread, `EDEADLK` joining oneself |
+| `pthread_mutex_init`, `_destroy`, `_lock`, `_trylock`, `_unlock`, `pthread_mutexattr_*` | a wait queue, under `tiku_atomic_enter()` | normal, recursive, error-checking | `EBUSY` (trylock, destroy while held), `EDEADLK` for a second normal or error-checking lock, `EPERM` unlocking another's, `EAGAIN` with the table full |
+| `pthread_cond_init`, `_destroy`, `_wait`, `_signal`, `_broadcast` | a wait queue and a signal count | a wakeup without a signal is possible, as POSIX allows | `EPERM` waiting without the mutex, `EBUSY` destroying one waited on |
+
+On the kernel thread a call that would wait, a held mutex's lock, a
+condition wait or the join of a running thread, returns `EAGAIN` and
+changes nothing; a process waits for a thread with `TIKU_WAIT_WORKER()` on
+its control block (`pthread_t` is that block's address).  None of these is
+called inside an atomic section.  `errno` is per thread through the port.
+
+Tests: TikuBench `test_posix_thread.c` over stand-in workers (`make posix`,
+`mutations/posix.py`), and the threads phase of the S31 application in
+`tests/esp32s31/posix_app/`: refusals on the kernel thread, two threads
+taking one mutex 200 times each across yields with no overlap, a producer
+handing a consumer 100 values through a condition, each thread's `errno`
+its own.
+
 ## Calls from a worker
 
 A worker's call reaches the kernel thread through `tiku_thread_call()`
@@ -114,7 +143,8 @@ threads. A call made on a worker hands its request to the kernel thread,
 which runs it and wakes the worker with the result. From the kernel thread
 only a call that completes without waiting is allowed, such as a read of a
 VFS node or of a stored file; any other returns `EAGAIN` there and changes
-nothing. The time and read groups have no call that waits.
+nothing. In the time and read groups no call waits; in the threads group a
+contended lock, a condition wait and a join do.
 
 ## Memory
 
