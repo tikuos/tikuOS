@@ -547,7 +547,10 @@ static int build_record(tiku_db_t *db, const tiku_db_tstate_t *t,
             if (v->len > tdb_col_size(db, t, i) || (v->len != 0u && v->p == NULL)) {
                 return TIKU_DB_ERR_INVAL;
             }
-            memcpy(p, v->p, v->len);
+            /* An empty value may carry a NULL pointer: no copy for it. */
+            if (v->len != 0u) {
+                memcpy(p, v->p, v->len);
+            }
             break;
         }
     }
