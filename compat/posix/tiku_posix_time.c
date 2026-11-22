@@ -6,15 +6,9 @@
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
  * tiku_posix_time.c - clock_gettime, clock_getres and gettimeofday over the
- * kernel's clocks.
- *
- * The monotonic clocks read tiku_clock_usec(), microseconds since the clock
- * started.  The real-time clocks read the kernel's wall clock, in whole
- * seconds, while it holds a time (tiku_rtc_read() not TIKU_RTC_UNSET);
- * while it does not, they read 1970-01-01 plus the time since start, a
- * moving value no reader takes for the date.  Whether a set time is current is the kernel's
- * tiku_rtc_state(), not a POSIX question.  None of these calls waits, so
- * the kernel thread and worker threads may both make them.
+ * kernel's clocks: monotonic from tiku_clock_usec(), real time from the wall
+ * clock in whole seconds while it holds a time, else the time since start.
+ * None waits; compat/posix/AGENTS.md lists the results.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

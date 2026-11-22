@@ -9,10 +9,20 @@ above `kernel/`: `kernel/`, `hal/` and `arch/` include nothing from it, and
 `make lint` (`tools/check_kernel_dependencies.py`) refuses an include that
 does.
 
-No call is implemented here yet. The calls are in TikuSurface's
+The time group is implemented. The other calls are in TikuSurface's
 `desktop/posix.c`, over a tree in the desktop's heap, and move here a group
 at a time with their backing changed to the kernel's services. The rules
 below hold for each group as it lands.
+
+## Building
+
+`posix.mk` lists the sources by group. A port's makefile includes it when
+`TIKU_POSIX_ENABLE` is 1 and adds `POSIX_SRCS` to its sources; with the
+variable unset the image is the one built without this directory. The
+S31 refuses `TIKU_*_ENABLE` on the make command line: its `posix-test`
+profile sets the variable, and an application manifest such as
+TikuSurface's sets it for its image. The time group needs the port's
+microsecond clock (`TIKU_CLOCK_ARCH_USEC` in its `tiku_timer_arch.h`).
 
 ## Groups
 
@@ -25,6 +35,27 @@ library does not support returns its documented error if a program links
 it; it never succeeds without doing its work. A constant process id, a lock
 that does nothing or an `fsync` that writes nothing is not an
 implementation.
+
+## The time group
+
+`tiku_posix_time.c`. None of these calls waits: a process and a worker
+thread may make each of them.
+
+| Call | newlib hook | Kernel operation | Supports | Errors |
+| --- | --- | --- | --- | --- |
+| `clock_gettime` | itself (libnosys has a weak one returning `ENOSYS`) | `CLOCK_MONOTONIC`, `_RAW`, `_COARSE`: `tiku_clock_usec()`. `CLOCK_REALTIME`, `_COARSE`: `tiku_rtc_read()`, whole seconds, while the wall clock is set or resumed; while it is unset, the time since start | microseconds; real time in seconds | `EINVAL` for another clock or a NULL result, which is not written |
+| `clock_getres` | itself | none | 1 µs monotonic, 1 s real time | `EINVAL` for another clock |
+| `gettimeofday`, `time` | `_gettimeofday` | `clock_gettime(CLOCK_REALTIME)` | microseconds; `tz` ignored | none; a NULL `tv` is not written |
+
+POSIX has no word for a wall clock that is set but not current. A program
+that shows the date as current asks the kernel: `tiku_rtc_state()` is
+`TIKU_RTC_SET` only for a time set during this boot, and
+`TIKU_RTC_RESUMED` for one carried over a reset.
+
+Tests: TikuBench `tests/host/kernel/test_posix_time.c` and
+`test_rtc_state.c` (`make posix rtc-state`, mutation list
+`mutations/posix.py`), and the S31 `posix-test` profile through
+`make ram-load` (`tools/esp32s31_ram.py --posix-test`).
 
 ## Calling context
 

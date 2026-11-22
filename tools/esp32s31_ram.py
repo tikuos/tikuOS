@@ -11,6 +11,7 @@
 
 import argparse
 import json
+import re
 import os
 from pathlib import Path
 import subprocess
@@ -86,6 +87,18 @@ def check_kernel_result(data, elapsed):
                 b"worker_b=0x00000040\r\n", b"PASS S31 kernel test\r\n")
     return (all(marker in data for marker in required) and b"FAIL" not in data
             and elapsed is not None and 1.8 < elapsed < 2.2)
+
+
+def check_posix_result(data, elapsed):
+    """Require the time group's checks from a process and a worker, and a
+    monotonic interval that matches the host's within 20 ms."""
+    required = (b"TIKU S31 posix test v1\r\n", b"failures=0x00000000\r\n",
+                b"checks=0x00000013\r\n", b"wall_moves=0x00000018\r\n",
+                b"worker_reads_nonzero=0x00000001\r\n", b"PASS S31 posix test\r\n")
+    interval = re.search(rb"\r\ninterval_us=0x([0-9a-f]{8})\r\n", data)
+    return (all(marker in data for marker in required) and b"FAIL" not in data
+            and interval is not None and elapsed is not None and 0.9 < elapsed < 1.1
+            and abs(int(interval.group(1), 16) / 1e6 - elapsed) < 0.02)
 
 
 def check_board_result(data, elapsed):
@@ -373,6 +386,7 @@ def main():
     profile.add_argument("--board-test", action="store_true")
     profile.add_argument("--shell-test", action="store_true")
     profile.add_argument("--watchdog-test", action="store_true")
+    profile.add_argument("--posix-test", action="store_true")
     profile.add_argument("--psram-test", action="store_true")
     profile.add_argument("--memory-test", action="store_true")
     profile.add_argument("--display-test", action="store_true")
@@ -453,6 +467,7 @@ def main():
                     received, elapsed = capture(wire, args.seconds, b"WDT", b"(HP_SYS_HP_WDT0_RESET)")
                 else:
                     received, elapsed = capture(wire, args.seconds,
+                                                b"POSIX" if args.posix_test else
                                                 b"KERNEL" if args.kernel_test or args.board_test else b"TIMER")
                 if not args.display_soak_seconds and not args.audio_test and not args.media_test:
                     log.write(received)
@@ -465,6 +480,7 @@ def main():
                            check_watchdog_result if args.watchdog_test else
                            check_shell_result if args.shell_test else
                            check_board_result if args.board_test else
+                           check_posix_result if args.posix_test else
                            check_kernel_result if args.kernel_test else check_result)
                 passed = (check_media_result(received,args.media_phase) if args.media_test else
                           check_display_result(received, elapsed, args.display_soak_seconds)

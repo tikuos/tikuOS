@@ -62,6 +62,7 @@ make MCU=esp32s31 BOARD=esp32s31_korvo1 S31_PROFILE=kernel-test \
 | `kernel-test` (default) | Process, worker, FPU, C-library, timer, interrupt-mask and populated-board I2C checks from TikuBench |
 | `board-test` | Kernel checks plus the optional `drivers/input/gt1151` identity and touch-poll checks |
 | `watchdog-test` | Feed, pause, resume and disable checks followed by an intentional 250 ms watchdog reset |
+| `posix-test` | `compat/posix`'s time calls from a process and a worker while a timer moves the wall clock, with the monotonic interval timed against the host |
 | `trng-test` | LP entropy-source health soak in SRAM, with passive monitoring or bounded random reads |
 | `shell` | SRAM and PSRAM allocation, native shell with `help`, `ps`, `timer`, `queue`, `echo`, `calc`, `htimer` and `clear` |
 | `firmware` | Durable `/data`, VFS, BASIC, native station/AP Wi-Fi, SAE/PMF, DHCP and encrypted profiles |
@@ -101,8 +102,8 @@ python tools/esp32s31_ram.py \
 ```
 
 Use `--kernel-test`, `--shell-test`, `--watchdog-test`, `--psram-test` or
-`--memory-test`, `--display-test`, `--sd-test` or `--audio-test`
-for those profiles;
+`--memory-test`, `--display-test`, `--sd-test`, `--audio-test` or
+`--posix-test` for those profiles;
 omit the profile flag for the integer diagnostic. `make ... ram-load`
 selects the flag and takes `PORT`, `S31_SERIAL` and `LOG`. The shell runner
 sends commands and checks 16 distinct echo replies from a queued burst.

@@ -51,8 +51,8 @@ ifeq ($(filter $(S31_PSRAM_MHZ),40 80),)
 $(error S31_CPU_MHZ=160 requires CPLL-backed PSRAM at 40 or 80 MHz)
 endif
 endif
-ifeq ($(filter $(S31_PROFILE),s31-local s31-connected firmware kernel-test board-test shell watchdog-test flash-shell psram-test flash-psram-test memory-test flash-memory-test display-test flash-display-test sd-test media-test audio-test radio-os-test phy-test flash-wifi-test),)
-$(error S31_PROFILE must be s31-local, s31-connected, firmware, kernel-test, board-test, shell, watchdog-test, flash-shell, psram-test, flash-psram-test, memory-test, flash-memory-test, display-test flash-display-test sd-test, media-test, audio-test, radio-os-test, phy-test or flash-wifi-test)
+ifeq ($(filter $(S31_PROFILE),s31-local s31-connected firmware kernel-test board-test shell watchdog-test flash-shell psram-test flash-psram-test memory-test flash-memory-test display-test flash-display-test sd-test media-test audio-test radio-os-test phy-test flash-wifi-test posix-test),)
+$(error S31_PROFILE must be s31-local, s31-connected, firmware, kernel-test, board-test, shell, watchdog-test, flash-shell, psram-test, flash-psram-test, memory-test, flash-memory-test, display-test flash-display-test sd-test, media-test, audio-test, radio-os-test, phy-test, flash-wifi-test or posix-test)
 endif
 S31_ENABLED := $(strip $(foreach v,$(filter TIKU_%_ENABLE,$(.VARIABLES)),\
     $(if $(filter 1,$($(v))),$(v))))
@@ -207,6 +207,13 @@ S31_FLAGS += -DTIKU_S31_PSRAM_TEST=1
 S31_SRCS += arch/esp32s31/tiku_psram_arch.c TikuBench/tests/esp32s31/test_psram.c
 else ifeq ($(S31_PROFILE),watchdog-test)
 S31_SRCS += TikuBench/tests/esp32s31/test_watchdog.c
+else ifeq ($(S31_PROFILE),posix-test)
+# compat/posix's calls from a process and a worker thread, over the kernel's
+# clocks.  The image is storage-free: the test compiles tiku_rtc.c in with
+# the wall clock's durable cell in SRAM.
+TIKU_POSIX_ENABLE := 1
+S31_FLAGS += -DTIKU_RTC_TEST_HOOKS=1
+S31_SRCS += TikuBench/tests/esp32s31/test_posix.c kernel/memory/tiku_persist.c
 else
 S31_SRCS += TikuBench/tests/esp32s31/test_kernel.c TikuBench/tests/esp32s31/test_i2c.c
 endif
@@ -274,6 +281,13 @@ S31_SRCS += arch/esp32s31/tiku_trng_arch.c arch/esp32s31/tiku_image_desc.c \
     arch/esp32s31/tiku_libc_heap.c
 S31_LDFLAGS += $(addprefix -Tdrivers/wifi/esp/s31/vendor/esp32s31.rom,.ld .version.ld .api.ld)
 endif
+# compat/posix: POSIX calls answered by the kernel's services, for programs
+# written for POSIX.  Off unless TIKU_POSIX_ENABLE=1, here or in the
+# application manifest read above; with it off nothing here changes the image.
+ifeq ($(TIKU_POSIX_ENABLE),1)
+include compat/posix/posix.mk
+S31_SRCS += $(POSIX_SRCS)
+endif
 S31_SRCS := $(sort $(S31_SRCS))
 S31_ASM := arch/esp32s31/tiku_crt_arch.S
 S31_OBJS := $(patsubst %.c,$(S31_DIR)/%.o,$(S31_SRCS)) \
@@ -303,7 +317,7 @@ ifneq ($(filter flash-shell flash-psram-test flash-memory-test flash-display-tes
 	$(error flash profiles require the installed second-stage bootloader)
 endif
 	$(PYTHON) tools/esp32s31_ram.py --image $(S31_DIR)/kernel.bin \
-	    --port '$(PORT)' --serial '$(S31_SERIAL)' --$(if $(filter firmware s31-local s31-connected shell flash-shell,$(S31_PROFILE)),shell-test,$(if $(filter watchdog-test board-test psram-test memory-test display-test sd-test media-test audio-test radio-os-test phy-test,$(S31_PROFILE)),$(S31_PROFILE),kernel-test)) --seconds $(if $(filter audio-test,$(S31_PROFILE)),95,$(if $(filter psram-test memory-test display-test sd-test media-test audio-test radio-os-test phy-test,$(S31_PROFILE)),60,6)) --log '$(LOG)'
+	    --port '$(PORT)' --serial '$(S31_SERIAL)' --$(if $(filter firmware s31-local s31-connected shell flash-shell,$(S31_PROFILE)),shell-test,$(if $(filter watchdog-test board-test psram-test memory-test display-test sd-test media-test audio-test radio-os-test phy-test posix-test,$(S31_PROFILE)),$(S31_PROFILE),kernel-test)) --seconds $(if $(filter audio-test,$(S31_PROFILE)),95,$(if $(filter psram-test memory-test display-test sd-test media-test audio-test radio-os-test phy-test,$(S31_PROFILE)),60,6)) --log '$(LOG)'
 clean:
 	$(RM) $(S31_OBJS) $(S31_OBJS:.o=.d) $(S31_DIR)/kernel.elf \
 	    $(S31_DIR)/kernel.bin $(S31_DIR)/kernel.map $(S31_DIR)/.flags
