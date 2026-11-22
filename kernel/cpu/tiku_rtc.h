@@ -39,7 +39,8 @@ void tiku_rtc_init(void);
  * @brief Return current wall-clock seconds since the Unix epoch
  *        (or whatever epoch the caller last set).
  *
- * Equivalent to `epoch_base + (uptime - uptime_base)`.  Opens no MPU window.
+ * Equivalent to `epoch_base + (uptime - uptime_base)`.  Opens no MPU window;
+ * callable from any context, a worker thread included.
  *
  * @return Wall-clock seconds; 0 while the gate is invalid or the baseline is
  *         0, as before the first set
@@ -75,6 +76,38 @@ int tiku_rtc_set_seconds_status(uint32_t epoch_seconds);
  */
 int tiku_rtc_is_set(void);
 
+/** @brief What the wall clock's time is worth. */
+typedef enum {
+    TIKU_RTC_UNSET = 0,  /**< never set, or set to 0: the clock reads 0 */
+    TIKU_RTC_SET,        /**< set during this boot: the time is current */
+    TIKU_RTC_RESUMED     /**< set before this boot: the stored epoch plus
+                          *   this boot's uptime, behind the present by the
+                          *   time between that set and this boot */
+} tiku_rtc_state_t;
+
+/**
+ * @brief Whether the wall clock is unset, set during this boot, or resumed
+ *        from a set made before it.
+ *
+ * tiku_rtc_is_set() is true for both of the last two.  A reader that shows
+ * the time as current needs TIKU_RTC_SET.  Reads only; callable from any
+ * context, a worker thread included.
+ */
+tiku_rtc_state_t tiku_rtc_state(void);
+
+/**
+ * @brief The wall clock and its state, read together.
+ *
+ * Reads only, inside one atomic section, so a set made by the kernel
+ * thread is seen whole or not at all; callable from any context, a worker
+ * thread included.
+ *
+ * @param seconds Out: what tiku_rtc_get_seconds() returns, 0 when the
+ *                state is TIKU_RTC_UNSET (NULL to skip)
+ * @return The state those seconds belong to
+ */
+tiku_rtc_state_t tiku_rtc_read(uint32_t *seconds);
+
 #if defined(TIKU_RTC_TEST_HOOKS) && TIKU_RTC_TEST_HOOKS
 /**
  * @brief Test-only hook: capture the wall clock and its persist gate.
@@ -90,9 +123,9 @@ void tiku_rtc_test_snapshot(uint32_t *epoch, uint32_t *gate);
 /**
  * @brief Test-only hook: put back a snapshotted clock/gate pair.
  *
- * Writes both into the cell in one unlock window, then re-pairs the baseline
- * with the current uptime.  Restoring a gate other than the magic re-creates
- * the never-set state, so a later init re-primes.
+ * Writes both into the cell in one unlock window and re-pairs the baseline
+ * with the current uptime.  A gate other than the magic re-creates the
+ * never-set state; a restored clock counts as resumed, not set this boot.
  *
  * @param epoch  Epoch baseline to store
  * @param gate   Gate word to store (the cell magic marks it valid)

@@ -19,6 +19,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_rtc.h"
+#include <hal/tiku_cpu.h>
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/memory/tiku_mem.h>
 
@@ -43,6 +44,8 @@ static TIKU_DURABLE uint32_t rtc_epoch_base;
 /** Uptime paired with rtc_epoch_base in this boot only. */
 static uint32_t rtc_uptime_base;
 static uint8_t rtc_boot_initialized;
+/** 1 once a set saved its baseline in this boot. */
+static uint8_t rtc_set_this_boot;
 
 /** Gate + descriptor: defaults to 0 (clock never set) */
 TIKU_PERSIST_CELL(rtc_cell, rtc_epoch_base, TIKU_RTC_MAGIC, NULL, 0);
@@ -61,15 +64,35 @@ tiku_rtc_init(void)
     }
 }
 
+tiku_rtc_state_t
+tiku_rtc_read(uint32_t *seconds)
+{
+    tiku_rtc_state_t state = TIKU_RTC_UNSET;
+    uint32_t value = 0;
+
+    /* A set runs on the kernel thread, which preempts a worker: the
+     * baseline, its uptime pairing and the flag are read with nothing
+     * able to run in between. */
+    tiku_atomic_enter();
+    if (tiku_persist_cell_valid(&rtc_cell) && rtc_epoch_base != 0U) {
+        value = rtc_epoch_base +
+                ((uint32_t)tiku_clock_seconds() - rtc_uptime_base);
+        state = rtc_set_this_boot ? TIKU_RTC_SET : TIKU_RTC_RESUMED;
+    }
+    tiku_atomic_exit();
+    if (seconds != 0) {
+        *seconds = value;
+    }
+    return state;
+}
+
 uint32_t
 tiku_rtc_get_seconds(void)
 {
-    uint32_t now;
-    if (!tiku_persist_cell_valid(&rtc_cell) || rtc_epoch_base == 0U) {
-        return 0;
-    }
-    now = (uint32_t)tiku_clock_seconds();
-    return rtc_epoch_base + (now - rtc_uptime_base);
+    uint32_t seconds;
+
+    (void)tiku_rtc_read(&seconds);
+    return seconds;
 }
 
 int
@@ -81,6 +104,7 @@ tiku_rtc_set_seconds_status(uint32_t epoch_seconds)
         &rtc_cell, &epoch_seconds, (uint16_t)sizeof(epoch_seconds));
     rtc_uptime_base = now;
     rtc_boot_initialized = 1U;
+    rtc_set_this_boot = (status == TIKU_MEM_OK) ? 1U : 0U;
     return status == TIKU_MEM_OK ? 0 : -1;
 }
 
@@ -93,6 +117,12 @@ int
 tiku_rtc_is_set(void)
 {
     return tiku_persist_cell_valid(&rtc_cell) && rtc_epoch_base != 0;
+}
+
+tiku_rtc_state_t
+tiku_rtc_state(void)
+{
+    return tiku_rtc_read(0);
 }
 
 #if defined(TIKU_RTC_TEST_HOOKS) && TIKU_RTC_TEST_HOOKS
@@ -112,5 +142,6 @@ tiku_rtc_test_restore(uint32_t epoch, uint32_t gate)
     tiku_mpu_lock_nvm(saved);
     rtc_uptime_base = (uint32_t)tiku_clock_seconds();
     rtc_boot_initialized = gate == TIKU_RTC_MAGIC ? 1U : 0U;
+    rtc_set_this_boot = 0U;
 }
 #endif
