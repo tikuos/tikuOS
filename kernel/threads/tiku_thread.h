@@ -182,6 +182,37 @@ void tiku_thread_wake_one(tiku_waitq_t *q);
 void tiku_thread_wake_all(tiku_waitq_t *q);
 
 /*---------------------------------------------------------------------------*/
+/* CALLS INTO THE KERNEL                                                     */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Run @p fn(@p arg) on the kernel thread and return its result.
+ *
+ * A worker's call waits while the kernel's dispatch runs @p fn with no
+ * current process; @p arg stays the waiting worker's.  The queue holds a
+ * call per worker at most.  On the kernel thread @p fn runs at once.
+ *
+ * @param fn  Kernel work: it must not wait, yield or call this again from
+ *            a worker's stack
+ * @return @p fn's result; -1 for a NULL @p fn
+ * @note The thread API cannot stop a waiting worker, so a queued call always
+ *       runs and its worker always resumes.
+ */
+int tiku_thread_call(int (*fn)(void *arg), void *arg);
+
+/**
+ * @brief Run every queued worker call, oldest first, and wake the workers
+ *        that made them.  The scheduler's dispatch and tiku_thread_join()
+ *        call it.
+ * @return 1 when a call ran, 0 when none was queued
+ * @note Kernel thread only.
+ */
+uint8_t tiku_thread_call_service(void);
+
+/** @brief Non-zero while a worker's call waits for the kernel thread. */
+int tiku_thread_call_pending(void);
+
+/*---------------------------------------------------------------------------*/
 /* INTROSPECTION                                                             */
 /*---------------------------------------------------------------------------*/
 

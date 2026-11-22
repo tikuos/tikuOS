@@ -315,8 +315,11 @@ int tiku_thread_join(tiku_thread_t *t)
     }
     /* Kernel-context wait: repeatedly hand the CPU to the workers.
      * The tick wakes the kernel every tick (tiku_sched_notify()), so
-     * this loop re-checks at tick granularity. */
+     * this loop re-checks at tick granularity.  A worker waiting on a
+     * call is served here: the scheduler's dispatch does not run until
+     * this returns. */
     while (t->state != TIKU_THREAD_DONE) {
+        (void)tiku_thread_call_service();
         tiku_atomic_enter();
         if (tiku_thread_worker_ready()) {
             tiku_thread_kernel_block();
@@ -599,6 +602,84 @@ void tiku_thread_wake_all(tiku_waitq_t *q)
         waitq_release(q, q->waiters);
     }
     tiku_atomic_exit();
+}
+
+/*---------------------------------------------------------------------------*/
+/* CALLS INTO THE KERNEL                                                     */
+/*---------------------------------------------------------------------------*/
+
+/* A worker's call, on its own stack while it waits for the kernel. */
+typedef struct thread_call {
+    int (*fn)(void *arg);
+    void *arg;
+    int result;
+    volatile uint8_t done;
+    struct thread_call *next;
+} thread_call_t;
+
+static thread_call_t *s_calls;          /* queued calls, oldest first */
+static tiku_waitq_t s_call_done;        /* workers whose call is queued */
+
+int tiku_thread_call(int (*fn)(void *arg), void *arg)
+{
+    thread_call_t call, **tail;
+
+    if (fn == (int (*)(void *))0) {
+        return -1;
+    }
+    if (tiku_thread_in_kernel()) {
+        return fn(arg);
+    }
+    call.fn = fn;
+    call.arg = arg;
+    call.result = 0;
+    call.done = 0u;
+    call.next = (thread_call_t *)0;
+    tiku_atomic_enter();
+    for (tail = &s_calls; *tail != (thread_call_t *)0; tail = &(*tail)->next) {
+    }
+    *tail = &call;
+    tiku_atomic_exit();
+    /* The kernel preempts at the next unmasked instant and may finish the
+     * call before this worker waits; done is tested before every wait. */
+    tiku_thread_kernel_wake();
+    tiku_atomic_enter();
+    while (!call.done) {
+        (void)tiku_thread_wait(&s_call_done, 0u);
+    }
+    tiku_atomic_exit();
+    return call.result;
+}
+
+uint8_t tiku_thread_call_service(void)
+{
+    thread_call_t *call;
+    uint8_t ran = 0u;
+
+    for (;;) {
+        tiku_atomic_enter();
+        call = s_calls;
+        if (call != (thread_call_t *)0) {
+            s_calls = call->next;
+        }
+        tiku_atomic_exit();
+        if (call == (thread_call_t *)0) {
+            return ran;
+        }
+        call->result = call->fn(call->arg);
+        /* The record lives on the worker's stack: nothing touches it after
+         * done is set. */
+        tiku_atomic_enter();
+        call->done = 1u;
+        tiku_thread_wake_all(&s_call_done);
+        tiku_atomic_exit();
+        ran = 1u;
+    }
+}
+
+int tiku_thread_call_pending(void)
+{
+    return s_calls != (thread_call_t *)0;
 }
 
 /*---------------------------------------------------------------------------*/

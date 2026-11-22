@@ -100,7 +100,16 @@ uint8_t tiku_sched_run_once(void)
 #if TIKU_IPC_ENABLE
     tiku_ipc_progress(TIKU_IPC_PROGRESS_BUDGET);
 #endif
+#if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
+    {
+        /* Workers' calls into the kernel run between processes. */
+        uint8_t called = tiku_thread_call_service();
+
+        return (uint8_t)(tiku_process_run() | called);
+    }
+#else
     return tiku_process_run();
+#endif
 }
 
 #if TIKU_IPC_ENABLE
@@ -261,6 +270,12 @@ uint8_t tiku_sched_has_pending(void)
     if (tiku_timer_work_pending()) {
         return 1;
     }
+
+#if defined(TIKU_THREADS_ENABLE) && TIKU_THREADS_ENABLE
+    if (tiku_thread_call_pending()) {
+        return 1;
+    }
+#endif
 
     return 0;
 }

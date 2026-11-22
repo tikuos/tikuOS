@@ -79,11 +79,12 @@ void tiku_sched_start(struct tiku_process *p, tiku_event_data_t data);
 /**
  * @brief Run one scheduler iteration
  *
- * Runs enabled memory-reclaim and bounded IPC progress, then dispatches one
- * event from the process event queue (tiku_process_run()).
+ * Runs enabled memory-reclaim and bounded IPC progress, then the workers'
+ * queued calls into the kernel (tiku_thread_call_service()), then dispatches
+ * one event from the process event queue (tiku_process_run()).
  *
- * @return 1 if an event was dequeued, a stale one dropped included, 0 if the
- *         queue was empty
+ * @return 1 if a worker's call ran or an event was dequeued, a stale one
+ *         dropped included; 0 if neither
  */
 uint8_t tiku_sched_run_once(void);
 
@@ -119,9 +120,9 @@ void tiku_sched_stop(void);
 /**
  * @brief Check if there is pending work.
  *
- * Non-zero when the event queue is non-empty or a software timer is due.  A
- * timer armed for a future deadline is not pending work: the tick ISR wakes the
- * CPU when it arrives.
+ * Non-zero when the event queue is non-empty, a software timer is due, or a
+ * worker's call into the kernel is queued.  A timer armed for a future
+ * deadline is not pending work: the tick ISR wakes the CPU when it arrives.
  *
  * @return 1 when there is work, 0 otherwise
  */
