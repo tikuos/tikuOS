@@ -17,6 +17,8 @@
 #ifndef TIKU_CLOCK_HAL_H_
 #define TIKU_CLOCK_HAL_H_
 
+#include <stdint.h>
+
 /*---------------------------------------------------------------------------*/
 /* TYPE DEFINITIONS                                                          */
 /*---------------------------------------------------------------------------*/
@@ -59,6 +61,14 @@ unsigned long tiku_clock_arch_seconds(void);
  * @param sec Seconds value to set
  */
 void tiku_clock_arch_set_seconds(unsigned long sec);
+
+/**
+ * @brief Microseconds since the clock started, from the port's fine counter
+ * @return A count that only grows, until the port's counter wraps
+ * @note Provided only by a port whose tiku_timer_arch.h defines
+ *       TIKU_CLOCK_ARCH_USEC as 1; callable from any context.
+ */
+uint64_t tiku_clock_arch_usec(void);
 
 /**
  * @brief Busy-wait for specified clock ticks

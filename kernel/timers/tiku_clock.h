@@ -133,6 +133,18 @@ tiku_clock_time_t tiku_clock_time(void);
 unsigned long tiku_clock_seconds(void);
 
 /**
+ * @brief Microseconds since the clock started
+ *
+ * Read from the port's fine counter, not from the tick count.  Defined only
+ * on ports whose tiku_timer_arch.h defines TIKU_CLOCK_ARCH_USEC as 1; on
+ * other ports a call does not link.
+ *
+ * @return A count that only grows, until the port's counter wraps; callable
+ *         from any context, a worker thread included
+ */
+uint64_t tiku_clock_usec(void);
+
+/**
  * @brief Busy-wait for specified clock ticks
  *
  * Spins for at least @p t ticks.

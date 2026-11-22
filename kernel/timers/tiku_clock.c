@@ -46,6 +46,15 @@ unsigned long tiku_clock_seconds(void)
     return tiku_clock_arch_seconds();
 }
 
+#if defined(TIKU_CLOCK_ARCH_USEC) && TIKU_CLOCK_ARCH_USEC
+/*---------------------------------------------------------------------------*/
+
+uint64_t tiku_clock_usec(void)
+{
+    return tiku_clock_arch_usec();
+}
+#endif
+
 /*---------------------------------------------------------------------------*/
 
 void tiku_clock_wait(tiku_clock_time_t t)

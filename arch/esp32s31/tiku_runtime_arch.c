@@ -405,6 +405,11 @@ int tiku_s31_irq_release(unsigned line, void (*handler)(void))
     irq_restore(state);
     return 0;
 }
+uint64_t tiku_clock_arch_usec(void)
+{
+    /* The counter is 52 bits at 16 MHz: it wraps after about 8.9 years. */
+    return tiku_s31_time() / 16u;
+}
 unsigned long tiku_clock_arch_seconds(void)
 {
     uint32_t state = irq_save();
