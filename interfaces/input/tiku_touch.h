@@ -13,9 +13,15 @@
 #define TIKU_TOUCH_MAX_CONTACTS 10u
 /** @brief Raw contact identity and controller coordinates, before calibration. */
 typedef struct { uint16_t x, y; uint8_t id; } tiku_touch_contact_t;
-/** @brief Complete sample; cancel requires consumers to abandon active interaction. */
+/**
+ * @brief One poll's result; cancel requires consumers to abandon active interaction.
+ * @note fresh is 1 for a report the controller made since the poll before:
+ * count is the contacts on the panel, 0 once the last has lifted. fresh is 0
+ * when the controller made none: count is 0 whatever touches the panel, and
+ * the consumer keeps the contacts it has.
+ */
 typedef struct {
-    uint8_t count, cancel;
+    uint8_t count, cancel, fresh;
     tiku_touch_contact_t contacts[TIKU_TOUCH_MAX_CONTACTS];
 } tiku_touch_report_t;
 /** @brief Probe the provider on an already-open bus; zero succeeds. */

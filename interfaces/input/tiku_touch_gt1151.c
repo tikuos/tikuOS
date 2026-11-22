@@ -28,6 +28,7 @@ int tiku_touch_poll(tiku_touch_report_t *out)
         return result ? result : TIKU_DRV_ERR_INVALID;
     }
     out->count = raw.count;
+    out->fresh = raw.fresh;
     for (unsigned i = 0; i < raw.count; ++i) {
         out->contacts[i].x = raw.points[i].x;
         out->contacts[i].y = raw.points[i].y;
