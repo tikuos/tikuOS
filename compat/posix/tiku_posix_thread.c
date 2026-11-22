@@ -52,11 +52,17 @@ typedef struct {
     tiku_waitq_t joiners;
 } posix_thread_t;
 
+_Static_assert(sizeof(posix_mutex_t) <= sizeof(tiku_posix_lock_t),
+               "a lock holds a mutex");
+_Static_assert(_Alignof(posix_mutex_t) <= _Alignof(tiku_posix_lock_t),
+               "a lock is aligned for a mutex");
+
 static posix_mutex_t mutexes[TIKU_POSIX_MUTEXES];
 static posix_cond_t conds[TIKU_POSIX_CONDS];
 static posix_thread_t threads[TIKU_POSIX_THREADS];
 static uint8_t *stack_memory;
 static size_t stack_each;
+static unsigned refused;        /* objects not taken: their table was full */
 
 uint32_t tiku_posix_self(void)
 {
@@ -84,6 +90,7 @@ static posix_mutex_t *mutex_of(uint32_t *h, int type)
                 return &mutexes[i];
             }
         }
+        refused++;
         return NULL;
     }
     if (*h > TIKU_POSIX_MUTEXES || !mutexes[*h - 1u].used) return NULL;
@@ -141,6 +148,20 @@ static int mutex_take(posix_mutex_t *m, uint32_t self)
     return EDEADLK;
 }
 
+/** @brief Take @p m for @p self, waiting on a worker while another holds
+ *         it unless @p try_only.  The kernel thread does not wait: a held
+ *         mutex is EAGAIN there.  @note Inside an atomic section. */
+static int mutex_take_waiting(posix_mutex_t *m, uint32_t self, int try_only)
+{
+    int r = mutex_take(m, self);
+
+    while (r == EBUSY && !try_only && self != KERNEL_ID) {
+        (void)tiku_thread_wait(&m->waiters, 0u);
+        r = mutex_take(m, self);
+    }
+    return (r == EBUSY && !try_only) ? EAGAIN : r;
+}
+
 int tiku_posix_mutex_lock(uint32_t *h, int try_only)
 {
     uint32_t self = tiku_posix_self();
@@ -154,14 +175,9 @@ int tiku_posix_mutex_lock(uint32_t *h, int try_only)
         tiku_atomic_exit();
         return UNSET(*h) ? EAGAIN : EINVAL;
     }
-    r = mutex_take(m, self);
-    /* The kernel thread does not wait: a held mutex is EAGAIN there. */
-    while (r == EBUSY && !try_only && self != KERNEL_ID) {
-        (void)tiku_thread_wait(&m->waiters, 0u);
-        r = mutex_take(m, self);
-    }
+    r = mutex_take_waiting(m, self, try_only);
     tiku_atomic_exit();
-    return (r == EBUSY && !try_only) ? EAGAIN : r;
+    return r;
 }
 
 /** @brief Release @p m held by @p self.  @note Inside an atomic section. */
@@ -188,6 +204,43 @@ int tiku_posix_mutex_unlock(uint32_t *h)
     return r;
 }
 
+void tiku_posix_thread_use(unsigned *mutexes_used, unsigned *conds_used, unsigned *refusals)
+{
+    unsigned m = 0, c = 0;
+
+    tiku_atomic_enter();
+    for (unsigned i = 0; i < TIKU_POSIX_MUTEXES; i++) m += mutexes[i].used;
+    for (unsigned i = 0; i < TIKU_POSIX_CONDS; i++) c += conds[i].used;
+    if (mutexes_used != NULL) *mutexes_used = m;
+    if (conds_used != NULL) *conds_used = c;
+    if (refusals != NULL) *refusals = refused;
+    tiku_atomic_exit();
+}
+
+int tiku_posix_lock_acquire(tiku_posix_lock_t *lock, int try_only)
+{
+    posix_mutex_t *m = (posix_mutex_t *)(void *)lock;
+    int r;
+
+    if (lock == NULL) return EINVAL;
+    tiku_atomic_enter();
+    m->type = TIKU_POSIX_MUTEX_RECURSIVE;
+    r = mutex_take_waiting(m, tiku_posix_self(), try_only);
+    tiku_atomic_exit();
+    return r;
+}
+
+int tiku_posix_lock_release(tiku_posix_lock_t *lock)
+{
+    int r;
+
+    if (lock == NULL) return EINVAL;
+    tiku_atomic_enter();
+    r = mutex_give((posix_mutex_t *)(void *)lock, tiku_posix_self());
+    tiku_atomic_exit();
+    return r;
+}
+
 /*---------------------------------------------------------------------------*/
 /* CONDITION VARIABLES                                                       */
 /*---------------------------------------------------------------------------*/
@@ -203,6 +256,7 @@ static posix_cond_t *cond_of(uint32_t *h)
                 return &conds[i];
             }
         }
+        refused++;
         return NULL;
     }
     if (*h > TIKU_POSIX_CONDS || !conds[*h - 1u].used) return NULL;

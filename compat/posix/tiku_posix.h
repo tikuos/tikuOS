@@ -94,6 +94,11 @@ int tiku_posix_is_dir_stream(const DIR *dir);
 #ifndef TIKU_POSIX_CONDS
 #define TIKU_POSIX_CONDS 8
 #endif
+/** @brief Locks the C library makes for its streams; past them its streams
+ *         share one. */
+#ifndef TIKU_POSIX_LOCKS
+#define TIKU_POSIX_LOCKS 16
+#endif
 
 /** @brief Mutex types: a second lock by the holder is EDEADLK for NORMAL
  *         and ERRORCHECK, another hold for RECURSIVE. */
@@ -113,6 +118,23 @@ int tiku_posix_is_dir_stream(const DIR *dir);
 /** @brief The caller's identity: its control block's address, or 1 for the
  *         kernel thread. */
 uint32_t tiku_posix_self(void);
+
+/** @brief Mutexes and condition variables in use, and the objects refused
+ *         because their table was full.  A caller that ignores a refused
+ *         lock runs unlocked, so a program shows the count; any argument
+ *         may be NULL. */
+void tiku_posix_thread_use(unsigned *mutexes, unsigned *conds, unsigned *refused);
+
+/** @brief A recursive lock kept in the caller's storage rather than the
+ *         table: all zeros is a free lock, so a static one needs no setup. */
+typedef struct {
+    uint32_t opaque[3];
+} tiku_posix_lock_t;
+/** @brief Take @p lock, or hold it once more; EBUSY with @p try_only while
+ *         another holds it. */
+int tiku_posix_lock_acquire(tiku_posix_lock_t *lock, int try_only);
+/** @brief Release one hold; EPERM unless the caller holds @p lock. */
+int tiku_posix_lock_release(tiku_posix_lock_t *lock);
 int tiku_posix_mutex_init(uint32_t *h, int type);
 int tiku_posix_mutex_destroy(uint32_t *h);
 /** @brief Take @p h, waiting while another holds it unless @p try_only, when

@@ -8,7 +8,8 @@
 # TIKU_POSIX_FILE_HOOKS to 0 and calls the tiku_posix_* names itself.
 TIKU_POSIX_FILE_HOOKS ?= 1
 POSIX_SRCS := compat/posix/tiku_posix_time.c compat/posix/tiku_posix_vfs.c \
-    compat/posix/tiku_posix_thread.c compat/posix/tiku_posix_pthread.c
+    compat/posix/tiku_posix_thread.c compat/posix/tiku_posix_pthread.c \
+    compat/posix/tiku_posix_lock.c
 ifeq ($(TIKU_POSIX_FILE_HOOKS),1)
 POSIX_SRCS += compat/posix/tiku_posix_hooks.c
 endif

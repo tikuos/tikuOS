@@ -118,13 +118,29 @@ condition wait or the join of a running thread, returns `EAGAIN` and
 changes nothing; a process waits for a thread with `TIKU_WAIT_WORKER()` on
 its control block (`pthread_t` is that block's address).  None of these is
 called inside an atomic section.  `errno` is per thread through the port.
+A program that ignores a lock's `EAGAIN` for a full table runs unlocked:
+`tiku_posix_thread_use()` gives the objects in use and the refusals, for a
+program to show.
+
+`tiku_posix_lock.c` defines newlib's retargetable locks, which its stdio
+streams, environment, time zone and exit handlers take, as recursive locks
+kept in the lock objects themselves (`tiku_posix_lock_t`), not in the
+mutex table.  Defining all of them keeps newlib's own, which do nothing,
+out of the link.  Each stream newlib opens takes one of
+`TIKU_POSIX_LOCKS` (16); streams opened past them share one lock.  The
+kernel thread cannot wait for a worker holding one of these locks, and
+running on would break what it guards, so that acquire traps
+(`__builtin_trap()`; the S31 reports the trap and stops): the kernel thread
+does not use the C library's streams, environment or time zone while
+workers do.
 
 Tests: TikuBench `test_posix_thread.c` over stand-in workers (`make posix`,
 `mutations/posix.py`), and the threads phase of the S31 application in
 `tests/esp32s31/posix_app/`: refusals on the kernel thread, two threads
 taking one mutex 200 times each across yields with no overlap, a producer
 handing a consumer 100 values through a condition, each thread's `errno`
-its own.
+its own, and `getenv()` and a stream's lock each waiting while another
+thread holds them.
 
 ## Calls from a worker
 
