@@ -13,6 +13,10 @@ works; read it before changing files there.
   (`tools/check_kernel_dependencies.py`) refuses an include or a symbol
   reference that does.
 - `services/`: console framing, links, USB device classes, the init table.
+- `compat/posix/`: the POSIX library, POSIX calls answered by the VFS, the
+  stores, the kernel clock and kernel threads, for programs written for
+  POSIX.  It sits above the kernel: `kernel/`, `hal/` and `arch/` include
+  nothing from it, and `make lint` refuses an include that does.
 - `shell/` and `basic/`: the shell with its commands; the interpreter with
   its native modules.
 - `boot/` and `main.c` choose the components and assemble the VFS
@@ -136,4 +140,5 @@ per-platform semantics and the NVM region layout.
 | drivers and the driver registry | `drivers.md`, `drivers/README.md` |
 | the ESP32-C61 radios | `drivers/wifi/esp/README.md` |
 | tests, suites, the board runner | `TikuBench/docs/RUNNER.md` |
+| POSIX calls for programs written for POSIX | `compat/posix/AGENTS.md` |
 | the desktop and board GUI | `applications/README.md` |

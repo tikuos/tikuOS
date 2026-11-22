@@ -6,18 +6,19 @@
 #
 # Authors: Ambuj Varshney <ambuj@tiku-os.org>
 #
-# check_kernel_dependencies.py - kernel and compute dependency boundaries.
+# check_kernel_dependencies.py - kernel, compute and compat dependency boundaries.
 #
 # SPDX-License-Identifier: Apache-2.0
-"""Reject optional kernel/compute dependencies and platform includes in
-portable radio, compute and ML code."""
+"""Reject optional kernel/compute dependencies, platform includes in
+portable radio, compute and ML code, and includes of the compat layer below
+it."""
 import argparse
 import pathlib
 import re
 import sys
 
 OPTIONAL = re.compile(
-    r'(?:^|/)(?:shell|basic|services|applications|console|link|usb|init)/'
+    r'(?:^|/)(?:shell|basic|services|applications|console|link|usb|init|compat)/'
     r'|(?:^|/)tiku_(?:shell|basic|init|gui|draw|link|console|usbd)(?:_|\.)')
 # Portable consumers and shared compute code exclude project arch headers.
 PORTABLE = ("interfaces/radio", "hal/compute", "tikukits/ml/operators",
@@ -32,6 +33,9 @@ COMPUTE_SYMBOL = re.compile(
     r'\b(?:tiku_(?:kits|exp|llm|asr|vit)_|esp_nn_|'
     r'arm_(?:nn_|convolve_|depthwise_|fully_connected_|max_pool_|avgpool_|softmax_))'
     r'[A-Za-z0-9_]+\b')
+# compat/ sits above the kernel: kernel/, hal/ and arch/ include nothing from it.
+COMPAT = re.compile(r'(?:^|/)compat/')
+BELOW_COMPAT = ("hal", "arch")
 TOKEN = re.compile(r'/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'',
                    re.S)
 
@@ -61,6 +65,14 @@ def inspect(path):
     code = TOKEN.sub(lambda m: "\n" * m[0].count("\n"), clean)
     for match in SYMBOL.finditer(code):
         yield code.count("\n", 0, match.start()) + 1, "optional symbol " + match[0]
+
+
+def inspect_below_compat(path):
+    """Yield each include of a compat/ header."""
+    for line, text in enumerate(without_comments(path).splitlines(), 1):
+        match = re.match(r'\s*#\s*include\s*[<"]([^>"]+)', text)
+        if match and COMPAT.search(match[1]):
+            yield line, "compat include " + match[1]
 
 
 def inspect_compute(path):
@@ -96,6 +108,8 @@ def main():
     compute_roots = [args.root / "hal/compute"] + list((args.root / "arch").glob("*/compute"))
     compute = [p for d in compute_roots for p in d.rglob("*")
                if p.suffix in (".c", ".h", ".inl", ".S") and not args.kits_only]
+    below = [p for d in BELOW_COMPAT for p in (args.root / d).rglob("*")
+             if p.suffix in (".c", ".h", ".inl", ".S") and not args.kits_only]
     failures = 0
     for path in sorted(files):
         for line, message in inspect(path):
@@ -109,7 +123,11 @@ def main():
         for line, message in inspect_compute(path):
             print(f"{path.relative_to(args.root)}:{line}: {message}")
             failures += 1
-    print(f"kernel dependency check: {len(set(files + portable + compute))} files, "
+    for path in sorted(below):
+        for line, message in inspect_below_compat(path):
+            print(f"{path.relative_to(args.root)}:{line}: {message}")
+            failures += 1
+    print(f"kernel dependency check: {len(set(files + portable + compute + below))} files, "
           f"{failures} violations")
     return int(failures != 0)
 
