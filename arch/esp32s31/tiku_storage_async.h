@@ -19,7 +19,7 @@
 #endif
 /** @brief Controller configuration retained in PSRAM until an automatic flash operation retires. */
 typedef struct {
-    uint32_t saved[15], address, started;
+    uint32_t saved[17], address, started;
     unsigned operation;
 } tiku_s31_flash_t;
 /** @brief Caller-owned region transaction; retain it and immutable input until poll retires it. */

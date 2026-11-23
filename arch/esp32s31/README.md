@@ -730,7 +730,11 @@ operation on its next poll. It uses a command clock of at most 20 MHz, saves the
 controller configuration and restores it after retirement. Admission limits
 the SFDP program/erase resume intervals to 64/512 us and suspend latency to
 50 us. At 20 MHz the controller waits 64 us after program resume, 512 us after
-erase resume and 51.2 us after suspend; slower clocks lengthen these delays.
+erase resume and 51.2 us after suspend; slower clocks lengthen these delays. A
+cached read waits for the suspend, which the resume interval may hold off,
+up to 562 us; the core's instruction- and data-bus timeouts of 65,535 cycles
+are shorter above 116 MHz, so they are off while an operation owns the
+controller and restored when it retires.
 Short command and
 progress deadlines halt on failure. Cached reads must stay outside the region
 being programmed or erased; DMA reads from flash during these operations are

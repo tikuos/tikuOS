@@ -21,9 +21,13 @@
 #define REG(off) TIKU_S31_FLASH_REG(SPI1 + (off))
 static tiku_s31_flash_t *active_flash;
 static unsigned profile_valid;
-static const uint32_t saved_registers[15]={
+/* The core's instruction- and data-bus timeout controls (HP_SYSTEM). */
+#define CORE_IBUS_TIMEOUT 0x20586124u
+#define CORE_DBUS_TIMEOUT 0x20586128u
+static const uint32_t saved_registers[17]={
     SPI1+4,SPI1+8,SPI1+0xc,SPI1+0x14,SPI1+0x18,SPI1+0x1c,SPI1+0x20,
-    SPI1+0x24,SPI1+0x28,SPI1+0x98,SPI1+0x9c,SPI1+0xa0,SPI1+0xa4,0x20500010u,0x20500054u
+    SPI1+0x24,SPI1+0x28,SPI1+0x98,SPI1+0x9c,SPI1+0xa0,SPI1+0xa4,0x20500010u,0x20500054u,
+    CORE_IBUS_TIMEOUT,CORE_DBUS_TIMEOUT
 };
 /** @brief Read the wrapping microsecond clock. */
 static uint32_t flash_time(void) { return (uint32_t)(tiku_s31_time() >> 4); }
@@ -74,7 +78,7 @@ static int flash_profile(void)
 /** @brief Restore controller configuration after idle or a refused command. */
 static int flash_retire(tiku_s31_flash_t *op,int result)
 {
-    for(unsigned i=0;i<15;i++)TIKU_S31_FLASH_REG(saved_registers[i])=op->saved[i];
+    for(unsigned i=0;i<17;i++)TIKU_S31_FLASH_REG(saved_registers[i])=op->saved[i];
     op->operation=0;active_flash=NULL;return result;
 }
 /** @brief Set a <=20 MHz clock and the admitted program/erase suspend/resume delays. */
@@ -90,6 +94,11 @@ static int flash_configure(unsigned operation)
     unsigned div=(mhz+19u)/20u;
     REG(0x14)=div==1 ? 1u<<31 : (div-1u)|((div-1u)/2u<<8)|((div-1u)<<16);
     if(!operation)return 0;
+    /* A cached read waits for the suspend, which the resume interval may hold
+     * off: up to 562 us, past the core's bus timeout of 65,535 cycles above
+     * 116 MHz.  The timeouts stay off until the operation retires. */
+    TIKU_S31_FLASH_REG(CORE_IBUS_TIMEOUT)&=~1u;
+    TIKU_S31_FLASH_REG(CORE_DBUS_TIMEOUT)&=~1u;
     unsigned resume=operation==2 ? 10u : 80u;
     REG(0xc)=(REG(0xc)&~0x3ffffcu)|(8u<<2)|(resume<<12);
     REG(0x98)=(5u<<16)|1u;
@@ -125,7 +134,7 @@ int tiku_s31_storage_slice(tiku_s31_flash_t *op,unsigned operation,uint32_t addr
     }
     if(active_flash || op->operation)return -1;
     if(REG(0))return -1;
-    for(unsigned i=0;i<15;i++)op->saved[i]=TIKU_S31_FLASH_REG(saved_registers[i]);
+    for(unsigned i=0;i<17;i++)op->saved[i]=TIKU_S31_FLASH_REG(saved_registers[i]);
     active_flash=op;
     if(flash_configure(0))return flash_retire(op,-1);
     if(!profile_valid) {
