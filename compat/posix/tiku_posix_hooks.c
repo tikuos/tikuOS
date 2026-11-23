@@ -56,6 +56,28 @@ int _stat(const char *path, struct stat *st)
 
 /** @brief No descriptor of this library is a terminal; a number it did not
  *         open is EBADF. */
+#if TIKU_POSIX_STORE
+_ssize_t _write(int fd, const void *buf, size_t n)
+{
+    return tiku_posix_write(fd, buf, n);
+}
+
+int _rename(const char *from, const char *to)
+{
+    return tiku_posix_rename(from, to);
+}
+
+int _unlink(const char *path)
+{
+    return tiku_posix_unlink(path);
+}
+
+int fsync(int fd)
+{
+    return tiku_posix_fsync(fd);
+}
+#endif
+
 int _isatty(int fd)
 {
     errno = tiku_posix_is_open(fd) ? ENOTTY : EBADF;

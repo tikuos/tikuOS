@@ -72,6 +72,20 @@ int tiku_tfs_async_begin(tiku_tfs_t *, tiku_tfs_async_t *, const char *name,
 int tiku_tfs_async_rename(tiku_tfs_t *, tiku_tfs_async_t *, const char *from, const char *to,
                           const tiku_tfs_async_ops_t *, void *context);
 
+/** @brief Begin a delete of @p name without I/O; return 0 accepted or the error
+ * tiku_tfs_delete() returns.
+ * @note One request, the entry's gate, which commits, so cancellation is refused once it is
+ * issued; the file's slots are free on success.  Serialization as tiku_tfs_async_begin().
+ */
+int tiku_tfs_async_delete(tiku_tfs_t *, tiku_tfs_async_t *, const char *name,
+                          const tiku_tfs_async_ops_t *, void *context);
+
+/** @brief The port's polled writes to its store backend, and their context in @p context.
+ * @note A port that defines none gets writes through the backend's own write, each
+ * durable when its begin returns; the S31 defines one over its sector journal.
+ */
+const tiku_tfs_async_ops_t *tiku_tfs_async_port(void **context);
+
 /** @brief Advance one memory phase or one backend callback; 1 pending, 0 done, negative misuse.
  * @note Backend requests contain at most 256 payload bytes or one metadata record.
  * Read result only after completion: 0 durable, CANCELLED, or TFS_ERR_IO requiring remount.

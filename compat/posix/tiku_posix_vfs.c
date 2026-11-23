@@ -19,6 +19,9 @@
 #include <string.h>
 #include <unistd.h>
 #include "tiku_posix.h"
+#if TIKU_POSIX_STORE
+#include "tiku_posix_store.h"
+#endif
 #include <kernel/threads/tiku_thread.h>
 #include <kernel/vfs/tiku_vfs.h>
 
@@ -376,10 +379,33 @@ static int call(posix_op_t op, struct posix_call *c)
     return r;
 }
 
+#if TIKU_POSIX_STORE
+uint32_t tiku_posix_node_number(const char *path)
+{
+    return node_id(path, NULL);
+}
+
+/* With the store group linked, its paths and descriptors are its own, but
+ * for a static node under its directory. */
+#define TO_STORE_PATH(path, call) \
+    do { \
+        if (tiku_posix_store_path(path)) { \
+            int to_store = (call); \
+            if (to_store != TIKU_POSIX_STORE_FOREIGN) return to_store; \
+        } \
+    } while (0)
+#define TO_STORE_FD(fd, call) \
+    do { if (tiku_posix_store_fd(fd)) return call; } while (0)
+#else
+#define TO_STORE_PATH(path, call) do { } while (0)
+#define TO_STORE_FD(fd, call) do { } while (0)
+#endif
+
 int tiku_posix_open(const char *path, int flags)
 {
     struct posix_call c = { 0 };
 
+    TO_STORE_PATH(path, tiku_posix_store_open(path, flags));
     c.path = path;
     c.flags = flags;
     return call(op_open, &c);
@@ -389,6 +415,7 @@ ssize_t tiku_posix_read(int fd, void *buf, size_t n)
 {
     struct posix_call c = { 0 };
 
+    TO_STORE_FD(fd, tiku_posix_store_read(fd, buf, n));
     if (buf == NULL && n != 0u) {
         errno = EFAULT;
         return -1;
@@ -403,6 +430,7 @@ off_t tiku_posix_lseek(int fd, off_t offset, int whence)
 {
     struct posix_call c = { 0 };
 
+    TO_STORE_FD(fd, tiku_posix_store_lseek(fd, offset, whence));
     c.fd = fd;
     c.offset = offset;
     c.whence = whence;
@@ -413,6 +441,7 @@ int tiku_posix_close(int fd)
 {
     struct posix_call c = { 0 };
 
+    TO_STORE_FD(fd, tiku_posix_store_close(fd));
     c.fd = fd;
     return call(op_close, &c);
 }
@@ -421,6 +450,7 @@ int tiku_posix_fcntl(int fd, int cmd)
 {
     struct posix_call c = { 0 };
 
+    TO_STORE_FD(fd, tiku_posix_store_fcntl(fd, cmd));
     c.fd = fd;
     c.cmd = cmd;
     return call(op_fcntl, &c);
@@ -430,6 +460,7 @@ int tiku_posix_fstat(int fd, struct stat *st)
 {
     struct posix_call c = { 0 };
 
+    TO_STORE_FD(fd, tiku_posix_store_fstat(fd, st));
     if (st == NULL) {
         errno = EFAULT;
         return -1;
@@ -443,6 +474,7 @@ int tiku_posix_stat(const char *path, struct stat *st)
 {
     struct posix_call c = { 0 };
 
+    TO_STORE_PATH(path, tiku_posix_store_stat(path, st));
     if (st == NULL) {
         errno = EFAULT;
         return -1;
@@ -456,6 +488,7 @@ int tiku_posix_is_open(int fd)
 {
     struct posix_call c = { 0 };
 
+    TO_STORE_FD(fd, tiku_posix_store_is_open(fd));
     c.fd = fd;
     return call(op_is_open, &c) > 0;
 }

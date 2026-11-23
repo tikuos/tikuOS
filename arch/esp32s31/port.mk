@@ -287,6 +287,12 @@ endif
 ifeq ($(TIKU_POSIX_ENABLE),1)
 include compat/posix/posix.mk
 S31_SRCS += $(POSIX_SRCS)
+S31_FLAGS += $(POSIX_FLAGS)
+ifeq ($(TIKU_POSIX_STORE),1)
+# The store group publishes with the polled sector writes.
+S31_FLAGS += -DTIKU_S31_STORAGE_ASYNC_ENABLE=1
+S31_SRCS += arch/esp32s31/tiku_storage_async_io.c
+endif
 endif
 S31_SRCS := $(sort $(S31_SRCS))
 S31_ASM := arch/esp32s31/tiku_crt_arch.S

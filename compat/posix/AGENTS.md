@@ -9,8 +9,8 @@ above `kernel/`: `kernel/`, `hal/` and `arch/` include nothing from it, and
 `make lint` (`tools/check_kernel_dependencies.py`) refuses an include that
 does.
 
-The time group, the read group, the threads group and the heap group are
-implemented. The other calls are in TikuSurface's
+The time group, the read group, the threads group, the heap group and the
+store group are implemented. The other calls are in TikuSurface's
 `desktop/posix.c`, over a tree in the desktop's heap, and move here a group
 at a time with their backing changed to the kernel's services. The rules
 below hold for each group as it lands.
@@ -175,6 +175,61 @@ with none handed out twice, growth past the heap is refused and counted, a
 stream on a kernel node, the kernel thread allocating while a thread is
 inside the allocator, and the timer on time while `realloc` copies 1 MiB
 blocks.
+
+## The store group
+
+`tiku_posix_store.c`, selected with `TIKU_POSIX_STORE=1` (off by default;
+with it off the image does not change). Paths under `/data/` are files of
+the kernel's file store, named by the rest of the path, at most
+`TIKU_TFS_NAME_MAX` - 1 (23) bytes; a static node the boot configuration
+adds under `/data`, such as BASIC's `/data/basic`, stays the read group's.
+A name followed by `/` in another file's name is a directory. With the
+group linked the read group hands it these paths and its descriptors, which
+are numbered from `TIKU_POSIX_STORE_FD_BASE` (11).
+
+A descriptor that writes keeps the file's bytes in a private stage of
+`TIKU_POSIX_STAGE_MAX` (4096) bytes from memory the program gives; nothing
+reaches the store until `fsync()`, a close after writes, or a create's or a
+truncation's close publishes the stage with `tiku_tfs_async_begin()`. A
+rename is `tiku_tfs_async_rename()` (one write commits it, `kernel/fs/tiku_tfs.h`)
+and an unlink `tiku_tfs_async_delete()`, through the port's polled writes
+(`tiku_tfs_async_port()`; the S31's sector journal, elsewhere the backend's
+own write). Each returns once its change is durable. The calling worker
+makes the change in kernel turns of up to `TIKU_POSIX_STORE_BUDGET_US`
+(1000) of store work and yields between them, so other workers run while a
+flash sector is erased. One change is in flight at a time; another waits
+for it, and for a writer or a lease outside the library only
+`TIKU_POSIX_STORE_WAIT_US` (10 s), then fails with `EBUSY`. When a request
+fails, the store is remounted, which finishes or undoes the change, and the
+call's result is what the store then holds: 0 if the change is there.
+
+| Call | Kernel operation | Supports | Errors |
+| --- | --- | --- | --- |
+| `tiku_posix_store_memory(base, bytes)` | none | once; one stage per `TIKU_POSIX_STAGE_MAX` bytes, at most `TIKU_POSIX_STORE_FDS` (4) | `EINVAL`, `EBUSY` when given already |
+| `open` | `tiku_tfs_stat()`, `tiku_tfs_read()` into the stage, `tiku_tfs_list()` for a directory | `O_RDONLY`, `O_WRONLY`, `O_RDWR`, `O_CREAT`, `O_EXCL`, `O_TRUNC`, `O_APPEND`, `O_DIRECTORY`; one descriptor that writes a file at a time; a created file exists for the library from the open, in the store from its publication | `ENOENT`, `EEXIST`, `EISDIR`, `ENOTDIR`, `ENAMETOOLONG`, `EBUSY` for a second writer, `EFBIG` for a file larger than a stage, `ENFILE` with no stage free, `EMFILE`, `EIO` without a mountable store |
+| `read`, `lseek`, `fstat`, `stat`, `fcntl` | `tiku_tfs_map()`, or the stage | a file's content for the library is its writer's stage while one is open; `SEEK_END`; the real size; mode 0644, a directory 0755; `st_ino` as the read group gives it | `EBADF`, `EISDIR`, `EINVAL` |
+| `write` | none: into the stage | at the offset or with `O_APPEND` at the end, as much as the stage holds | `EFBIG` at the stage's end, `EBADF`, `EBUSY` while the stage is being published |
+| `fsync`, `close` | `tiku_tfs_async_begin()` and `_step()` | publishes the stage once; nothing to publish is 0 at once; a directory's fsync is 0 while the store is mounted | `EAGAIN` on the kernel thread with a stage to publish (close keeps the descriptor), `ENOSPC`, `EFBIG`, `EBUSY`, `EIO`; a read group's descriptor: `EINVAL` |
+| `rename` | `tiku_tfs_async_rename()` | over an existing file; to its own name, 0 | `ENOENT`, `EISDIR`, `EBUSY` with a writer open on either name, `EXDEV` across the store's edge, `EROFS` outside it, `EAGAIN` on the kernel thread, `EIO` |
+| `unlink` | `tiku_tfs_async_delete()` | a file | as rename |
+| `tiku_posix_store_use()` | none | changes made, and those a remount decided | none |
+
+With `TIKU_POSIX_FILE_HOOKS` the group also defines the C library's
+`_write`, `_rename`, `_unlink` and `fsync`.
+
+On the S31, saving a 600-byte record the way a settings file is saved (a
+temporary created, written, synced and closed, renamed over the record, its
+directory synced) took 2.19 s and 72 erases: eight store writes, each one
+sector of the store and both 16 KB durable mirrors, which hold its undo
+record. A file's data goes to the store 256 bytes a request.
+
+Tests: TikuBench `test_posix_store.c` over the real file store on RAM with
+polled writes that stay pending and fail at each request (`make posix`,
+`mutations/posix.py`), and the store phase of the S31 application in
+`tests/esp32s31/posix_app/`: the previous boot's record read back whole,
+the kernel thread refused, saves from two workers at once, and an `fsync`
+refused while a stream holds the store; `check.py LOG PREVIOUS` compares a
+boot with the one before it.
 
 ## Calls from a worker
 

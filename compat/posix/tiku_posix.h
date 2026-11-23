@@ -79,6 +79,67 @@ int tiku_posix_closedir(DIR *dir);
 int tiku_posix_is_dir_stream(const DIR *dir);
 
 /*---------------------------------------------------------------------------*/
+/* THE STORE GROUP                                                           */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * Files under TIKU_POSIX_STORE_PREFIX are files of the kernel's file store,
+ * named by the rest of the path.  A descriptor that writes keeps the file's
+ * bytes in a private stage; fsync() and a close after writes publish the
+ * stage as the file's new content, and rename() gives a file another name,
+ * replacing one; each returns once its change is durable.  The calls that
+ * publish wait, so on the kernel thread they return EAGAIN and change
+ * nothing.  With the group linked (TIKU_POSIX_STORE) the read group's calls
+ * hand these paths and descriptors to it.
+ */
+
+/** @brief The path prefix of the store's files. */
+#define TIKU_POSIX_STORE_PREFIX "/data/"
+/** @brief Descriptors open on the store at once, numbered after the read
+ *         group's. */
+#ifndef TIKU_POSIX_STORE_FDS
+#define TIKU_POSIX_STORE_FDS 4
+#endif
+#define TIKU_POSIX_STORE_FD_BASE (TIKU_POSIX_FD_BASE + TIKU_POSIX_FDS)
+/** @brief The largest file a descriptor writes: the size of one stage. */
+#ifndef TIKU_POSIX_STAGE_MAX
+#define TIKU_POSIX_STAGE_MAX 4096u
+#endif
+/** @brief Microseconds of store work one kernel turn gives a waiting call. */
+#ifndef TIKU_POSIX_STORE_BUDGET_US
+#define TIKU_POSIX_STORE_BUDGET_US 1000u
+#endif
+/** @brief Microseconds a change waits while a writer or a lease outside the
+ *         library holds the store, before EBUSY; it waits for the library's
+ *         own changes without a limit. */
+#ifndef TIKU_POSIX_STORE_WAIT_US
+#define TIKU_POSIX_STORE_WAIT_US 10000000u
+#endif
+
+/**
+ * @brief Give the store group memory for its stages, TIKU_POSIX_STAGE_MAX
+ *        bytes each, one for each descriptor that writes.
+ * @return 0; EINVAL for NULL or less than one stage; EBUSY when given already
+ */
+int tiku_posix_store_memory(void *base, size_t bytes);
+/** @brief Write into a descriptor's stage at its offset, or its end with
+ *         O_APPEND; as much as the stage holds, then EFBIG. */
+ssize_t tiku_posix_write(int fd, const void *buf, size_t n);
+/** @brief Publish a descriptor's unpublished writes; 0 at once when there
+ *         are none.  For a directory of the store, 0 while the store is
+ *         mounted. */
+int tiku_posix_fsync(int fd);
+/** @brief Give @p from's content the name @p to, replacing a file there;
+ *         both in the store. */
+int tiku_posix_rename(const char *from, const char *to);
+/** @brief Delete a file of the store. */
+int tiku_posix_unlink(const char *path);
+/** @brief Changes the group made durable, and those of them whose result
+ *         a remount of the store decided after a failed request; either
+ *         argument may be NULL. */
+void tiku_posix_store_use(unsigned *published, unsigned *settled);
+
+/*---------------------------------------------------------------------------*/
 /* THREADS, MUTEXES AND CONDITION VARIABLES                                  */
 /*---------------------------------------------------------------------------*/
 

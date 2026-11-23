@@ -1789,6 +1789,65 @@ int tiku_tfs_async_rename(tiku_tfs_t *fs, tiku_tfs_async_t *op,
     return TFS_OK;
 }
 
+int tiku_tfs_async_delete(tiku_tfs_t *fs, tiku_tfs_async_t *op, const char *name,
+                          const tiku_tfs_async_ops_t *ops, void *context)
+{
+    int i;
+
+    if (op == NULL || ops == NULL || ops->begin == NULL || ops->poll == NULL ||
+        TIKU_TFS_ROTATE) {
+        return TFS_ERR_INVAL;
+    }
+    if (op->phase) {
+        return TFS_ERR_BUSY;
+    }
+    if (fs == NULL || !fs->mounted || name == NULL) {
+        return TFS_ERR_INVAL;
+    }
+    if (fs->wr_open || tfs_held(fs)) {
+        return TFS_ERR_BUSY;
+    }
+    i = tfs_find(fs, name);
+    if (i < 0) {
+        return TFS_ERR_NOTFOUND;
+    }
+    /* The entry's own gate is the one request and the commit; its run is
+     * freed on success as a replaced run is. */
+    *op = (tiku_tfs_async_t){
+        .writer = { .fs = fs, .active = 1 }, .ops = ops, .context = context,
+        .dir = (unsigned)i, .source = (unsigned)i, .replacing = 1, .renaming = 1,
+        .old_run = de_run(fs, (unsigned)i), .phase = ASYNC_CLEAR_SOURCE
+    };
+    fs->wr_open = 1;
+    return TFS_OK;
+}
+
+/** @brief The fallback backend: one write through be->write, durable when it
+ *         returns. */
+static int port_begin(void *context, tiku_nvm_backend_t *be, size_t offset,
+                      const void *data, size_t length)
+{
+    (void)context;
+    return be->write(be, offset, data, length) == 0 ? 1 : TFS_ERR_IO;
+}
+
+/** @brief The fallback backend's write is durable once begin returned. */
+static int port_poll(void *context)
+{
+    (void)context;
+    return TFS_OK;
+}
+
+__attribute__((weak)) const tiku_tfs_async_ops_t *tiku_tfs_async_port(void **context)
+{
+    static const tiku_tfs_async_ops_t ops = { port_begin, port_poll };
+
+    if (context != NULL) {
+        *context = NULL;
+    }
+    return &ops;
+}
+
 int tiku_tfs_async_step(tiku_tfs_async_t *op)
 {
     tiku_tfs_t *fs;
@@ -1891,8 +1950,9 @@ int tiku_tfs_async_step(tiku_tfs_async_t *op)
         return async_finish(op, TFS_ERR_IO);
     }
     op->pending = 1;
-    if (op->phase == ASYNC_GATE || op->phase == ASYNC_REPLACE) {
-        op->committing = 1;
+    if (op->phase == ASYNC_GATE || op->phase == ASYNC_REPLACE ||
+        (op->phase == ASYNC_CLEAR_SOURCE && op->dir == op->source)) {
+        op->committing = 1;             /* a delete commits at its one clear */
     }
     return 1;
 }

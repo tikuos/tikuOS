@@ -11,6 +11,7 @@
  */
 #include "tiku_storage_arch.h"
 #include "tiku_storage_async.h"
+#include <kernel/fs/tiku_tfs_async.h>
 #include "tiku_psram_arch.h"
 #include <kernel/memory/tiku_mem.h>
 #include <kernel/memory/tiku_nvm_mirror.h>
@@ -411,5 +412,25 @@ int tiku_s31_storage_write_poll(tiku_s31_storage_write_t *op)
     default: break;
     }
     return write_retire(op,-1);
+}
+
+static tiku_s31_storage_write_t port_write;
+/** @brief One sector-journalled write as a store request; a busy region is not accepted. */
+static int port_begin(void *context, tiku_nvm_backend_t *be, size_t off, const void *data, size_t n)
+{
+    int rc = tiku_s31_storage_write_begin(context, be, off, data, n);
+    return rc == -2 ? TFS_ERR_BUSY : rc < 0 ? TFS_ERR_IO : rc;
+}
+/** @brief Durable once the transaction has retired its undo record. */
+static int port_poll(void *context)
+{
+    int rc = tiku_s31_storage_write_poll(context);
+    return rc < 0 ? TFS_ERR_IO : rc;
+}
+const tiku_tfs_async_ops_t *tiku_tfs_async_port(void **context)
+{
+    static const tiku_tfs_async_ops_t ops = {port_begin, port_poll};
+    if (context) *context = &port_write;
+    return &ops;
 }
 #endif
