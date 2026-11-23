@@ -86,6 +86,23 @@ void tiku_nordic_gpio_init_input_pullup(uint8_t port, uint8_t pin)
         (GPIO_PIN_CNF_PULL_Pullup   << GPIO_PIN_CNF_PULL_Pos);
 }
 
+void tiku_nordic_gpio_init_wake(uint8_t port, uint8_t pin, uint8_t high)
+{
+    NRF_GPIO_Type *g = tiku_nordic_gpio_base(port);
+
+    if (g == (NRF_GPIO_Type *)0) {
+        return;
+    }
+    g->DIRCLR = 1UL << (pin & 0x1Fu);          /* an input, then its config */
+    g->PIN_CNF[pin & 0x1Fu] =
+        (GPIO_PIN_CNF_DIR_Input     << GPIO_PIN_CNF_DIR_Pos)   |
+        (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
+        ((high ? GPIO_PIN_CNF_PULL_Pulldown : GPIO_PIN_CNF_PULL_Pullup)
+         << GPIO_PIN_CNF_PULL_Pos) |
+        ((high ? GPIO_PIN_CNF_SENSE_High : GPIO_PIN_CNF_SENSE_Low)
+         << GPIO_PIN_CNF_SENSE_Pos);
+}
+
 void tiku_nordic_gpio_set(uint8_t port, uint8_t pin, uint8_t level)
 {
     NRF_GPIO_Type *g = tiku_nordic_gpio_base(port);

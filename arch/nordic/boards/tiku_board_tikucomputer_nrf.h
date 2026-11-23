@@ -70,6 +70,18 @@
 #define TIKU_BOARD_BTN_COUNT        0
 
 /*---------------------------------------------------------------------------*/
+/* WAKE LINE                                                                 */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief P0.02, from MSP430 P3.7 through 1 kOhm: a high level wakes the part
+ *        from System OFF, which tiku_nordic_system_off() arms.
+ */
+#define TIKU_BOARD_WAKE_PORT        0u
+#define TIKU_BOARD_WAKE_PIN         2u
+#define TIKU_BOARD_WAKE_HIGH        1u
+
+/*---------------------------------------------------------------------------*/
 /* CONSOLE UART                                                              */
 /*---------------------------------------------------------------------------*/
 

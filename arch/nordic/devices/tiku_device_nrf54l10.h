@@ -106,7 +106,8 @@
  *        (VPR RISC-V) coprocessor carve at 0x2002B000 and the 4 KB above it.
  *
  * Every build reserves both, and memory reports use this figure.  It must
- * equal LENGTH(SRAM) in nrf54lv10a.ld.
+ * equal LENGTH(SRAM) in nrf54lv10a.ld.  On this part no MPC00 override covers
+ * the top 4 KB, which reads and writes as plain SRAM.
  */
 #define TIKU_DEVICE_RAM_USABLE      (172UL * 1024UL)
 #define TIKU_DEVICE_RAM_START       0x20000000UL

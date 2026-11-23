@@ -37,6 +37,12 @@ void tiku_nordic_gpio_init_output(uint8_t port, uint8_t pin, uint8_t init_level)
 void tiku_nordic_gpio_init_input_pullup(uint8_t port, uint8_t pin);
 
 /**
+ * @brief Make a pin an input that wakes the part from System OFF: pulled
+ *        toward its idle level, SENSE on the other (@p high: wake on high).
+ */
+void tiku_nordic_gpio_init_wake(uint8_t port, uint8_t pin, uint8_t high);
+
+/**
  * @brief Drive an output pin to a level.
  *
  * @param port  Physical port (0=P0, 1=P1, 2=P2, 3=P3 when present).

@@ -357,7 +357,14 @@ void tiku_shell_cmd_power(uint8_t argc, const char *argv[])
          * tiku_nordic_system_off() disarms the GRTC compares first, and any
          * wake is a reset.  On the DK, P14 measures the VDDM rail; current
          * left in System OFF is drawn by the board or the debug domain. */
+#if defined(TIKU_BOARD_WAKE_PORT)
+        SHELL_PRINTF("entering System OFF -- wake by RESET or P%u.%02u %s\n",
+                     (unsigned)TIKU_BOARD_WAKE_PORT,
+                     (unsigned)TIKU_BOARD_WAKE_PIN,
+                     TIKU_BOARD_WAKE_HIGH ? "high" : "low");
+#else
         SHELL_PRINTF("entering System OFF -- wake by RESET only\n");
+#endif
         tiku_nvm_sync(TIKU_NVM_SYNC_SLEEP);     /* System OFF loses SRAM */
         tiku_cpu_nordic_delay_ms(20u);          /* let the line drain */
         tiku_nordic_system_off();               /* does not return */

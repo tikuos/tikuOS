@@ -530,6 +530,11 @@ void tiku_nordic_system_off(void)
         NRF_GRTC_S->CC[i].CCEN = 0u;
     }
     NRF_GRTC_S->INTENCLR0 = 0xFFFFFFFFu;
+#if defined(TIKU_BOARD_WAKE_PORT)
+    /* The board's wake line: its active level ends System OFF in a reset. */
+    tiku_nordic_gpio_init_wake(TIKU_BOARD_WAKE_PORT, TIKU_BOARD_WAKE_PIN,
+                               TIKU_BOARD_WAKE_HIGH);
+#endif
     __asm__ volatile ("dsb 0xF" ::: "memory");
 
     NRF_REGULATORS_S->SYSTEMOFF = 1u;
