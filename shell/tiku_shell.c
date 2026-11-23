@@ -292,6 +292,9 @@
 #if TIKU_SHELL_CMD_BOARD
 #include "commands/tiku_shell_cmd_board.h"
 #endif
+#if TIKU_SHELL_CMD_UART
+#include "commands/tiku_shell_cmd_uart.h"
+#endif
 #if TIKU_SHELL_CMD_TREE
 #include "commands/tiku_shell_cmd_tree.h"
 #endif
@@ -828,6 +831,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_BOARD
     {"board",   "Rail, bus and coprocessor",   tiku_shell_cmd_board},
+#endif
+#if TIKU_SHELL_CMD_UART
+    {"uart",    "Link UART to the other side", tiku_shell_cmd_uart},
 #endif
 #if TIKU_SHELL_CMD_PEEK
     {"peek",    "Read N bytes from address",   tiku_shell_cmd_peek},

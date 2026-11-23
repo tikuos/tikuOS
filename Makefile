@@ -314,14 +314,15 @@ BOARD_CAPS_fr5994_launchpad    :=
 # switches, reachable from either processor.
 # Its MSP430 also switches the sensor rail, the bus switches and the nRF's
 # supply, reset and wake line (BOARD_CTL, interfaces/board/tiku_board_ctl.h).
-BOARD_CAPS_tikucomputer_msp    := FRAM_SPI FRAM_I2C BOARD_CTL
+# A UART joins the two processors (LINK_UART, hal/tiku_uart_port_hal.h).
+BOARD_CAPS_tikucomputer_msp    := FRAM_SPI FRAM_I2C BOARD_CTL LINK_UART
 # The FR6989 LaunchPad has a segment LCD wired to LCD_C.  Its LCD cap defines
 # TIKU_BOARD_HAS_LCD=1, which the LCD driver and the shell's lcd command test.
 BOARD_CAPS_fr6989_launchpad    := LCD
 BOARD_CAPS_nrf54l15_dk         :=
 BOARD_CAPS_nrf54lm20_dk        :=
 BOARD_CAPS_nrf54lv10_dk        :=
-BOARD_CAPS_tikucomputer_nrf    := FRAM_SPI FRAM_I2C
+BOARD_CAPS_tikucomputer_nrf    := FRAM_SPI FRAM_I2C LINK_UART
 BOARD_CAPS_nucleo_n657x0q      :=
 # EK-RA8P1: USBHS is the USB high-speed connector (J7), which
 # TIKU_DRV_USBHS_ENABLE requires.  The board's other parts (Ethernet PHY, OSPI
@@ -1928,6 +1929,7 @@ SRCS += arch/nordic/tiku_gpio_irq_arch.c
 SRCS += arch/nordic/tiku_adc_arch.c
 SRCS += arch/nordic/tiku_i2c_arch.c
 SRCS += arch/nordic/tiku_spi_arch.c
+SRCS += arch/nordic/tiku_uart_link_arch.c
 SRCS += arch/nordic/tiku_onewire_arch.c
 SRCS += arch/nordic/tiku_trng_arch.c
 SRCS += arch/nordic/tiku_crypto_arch.c
@@ -2619,6 +2621,7 @@ SRCS += interfaces/bus/tiku_i2c_bus.c
 SRCS += interfaces/bus/tiku_spi_bus.c
 ifeq ($(TIKU_PLATFORM),msp430)
 SRCS += arch/msp430/tiku_spi_arch.c
+SRCS += arch/msp430/tiku_uart_link_arch.c
 endif
 SRCS += interfaces/adc/tiku_adc.c
 SRCS += interfaces/onewire/tiku_onewire.c
@@ -3111,6 +3114,9 @@ SRCS += shell/commands/tiku_shell_cmd_fram.c
 endif
 ifneq (,$(call board_has,BOARD_CTL))
 SRCS += shell/commands/tiku_shell_cmd_board.c
+endif
+ifneq (,$(call board_has,LINK_UART))
+SRCS += shell/commands/tiku_shell_cmd_uart.c
 endif
 ifneq (,$(findstring TIKU_SHELL_CMD_DELAY=1,$(EXTRA_CFLAGS)))
 SRCS += shell/commands/tiku_shell_cmd_delay.c

@@ -117,6 +117,27 @@
 #define TIKU_BOARD_UART_PINS_INIT() do { } while (0)
 
 /*---------------------------------------------------------------------------*/
+/* LINK UART TO THE MSP430                                                   */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @name UARTE30 on P0.00 (TXD) and P0.01 (RXD) as the link UART, 115200 8N1
+ * arch/nordic/tiku_uart_link_arch.c drives it when the console is elsewhere
+ * (TIKU_BOARD_CONSOLE_SEL 20, or the RTT console).
+ * @{
+ */
+#if TIKU_BOARD_CONSOLE_SEL != 30
+#define TIKU_BOARD_LINK_UARTE       NRF_UARTE30_S
+#define TIKU_BOARD_LINK_UARTE_IRQN  260  /* SERIAL30_IRQn (MDK enum)        */
+#define TIKU_BOARD_LINK_UARTE_ISR   tiku_nordic_serial30_isr
+#define TIKU_BOARD_LINK_TX_PORT     0u
+#define TIKU_BOARD_LINK_TX_PIN      0u
+#define TIKU_BOARD_LINK_RX_PORT     0u
+#define TIKU_BOARD_LINK_RX_PIN      1u
+#endif
+/** @} */
+
+/*---------------------------------------------------------------------------*/
 /* SENSOR-PORT BUSES                                                         */
 /*---------------------------------------------------------------------------*/
 

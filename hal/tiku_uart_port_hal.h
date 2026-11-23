@@ -23,4 +23,18 @@ typedef struct {
     int (*write)(void *, const uint8_t *, size_t);
     void *context;
 } tiku_uart_port_io_t;
+/**
+ * @brief Open the board's link UART, the one wired to its other processor.
+ * @return Its byte operations, or NULL when the board refuses (the other
+ *         processor unpowered) or has none.
+ * @note Implemented by ports whose board declares a link UART (BOARD_CAPS
+ *       LINK_UART) that the console does not use.  A second open while open
+ *       returns the same operations.
+ */
+const tiku_uart_port_io_t *tiku_uart_link_open(void);
+/** @brief Close the link UART and park its pins; buffered bytes are dropped. */
+void tiku_uart_link_close(void);
+/** @brief Received bytes lost or damaged since open: ring overflows, overruns,
+ *         framing and parity errors. */
+uint16_t tiku_uart_link_errors(void);
 #endif

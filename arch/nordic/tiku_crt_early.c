@@ -86,6 +86,19 @@ void tiku_nordic_grtc_isr(void)            __attribute__((weak, alias("nordic_de
 /* Console UARTE RX -- SERIAL20 (198, UARTE20) or SERIAL30 (260, UARTE30); the
  * table wires both, only the selected console's line is NVIC-enabled. */
 void tiku_nordic_uart_console_isr(void)    __attribute__((weak, alias("nordic_default_handler")));
+#if (TIKU_BOARD_HAS_LINK_UART + 0)
+/* SERIAL30 (260) on a board with a link UART (BOARD_CAPS LINK_UART): the
+ * link driver defines this handler for UARTE30; with the console on UARTE30
+ * instead, this one hands the line to the console's. */
+void tiku_nordic_serial30_isr(void)        __attribute__((weak));
+void tiku_nordic_serial30_isr(void)
+{
+    tiku_nordic_uart_console_isr();
+}
+#define TIKU_NORDIC_SERIAL30_ISR  tiku_nordic_serial30_isr
+#else
+#define TIKU_NORDIC_SERIAL30_ISR  tiku_nordic_uart_console_isr
+#endif
 /* Hardware one-shot htimer -- TIMER20 COMPARE (IRQn 202). */
 void tiku_nordic_timer20_isr(void)         __attribute__((weak, alias("nordic_default_handler")));
 /* GPIO edge interrupts -- GPIOTE20 line 0 (218, P1/P2), GPIOTE30 line 0
@@ -389,7 +402,7 @@ __attribute__((section(".vectors"), used)) = {
     [16 + 202] = tiku_nordic_timer20_isr,      /* TIMER20_IRQn = 202 (htimer) */
     [16 + 218] = tiku_nordic_gpiote20_isr,     /* GPIOTE20_0 = 218 (P1/P2)    */
     [16 + 226] = tiku_nordic_grtc_isr,         /* GRTC_0_IRQn     = 226 */
-    [16 + 260] = tiku_nordic_uart_console_isr, /* SERIAL30_IRQn   = 260 */
+    [16 + 260] = TIKU_NORDIC_SERIAL30_ISR,     /* SERIAL30_IRQn   = 260 */
     [16 + 268] = tiku_nordic_gpiote30_isr,     /* GPIOTE30_0 = 268 (P0)       */
 
     /* Fill every remaining external slot with the default handler so no

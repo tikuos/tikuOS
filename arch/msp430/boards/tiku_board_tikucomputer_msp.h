@@ -43,14 +43,22 @@
 /** @} */
 
 /*---------------------------------------------------------------------------*/
-/* CONSOLE UART - TXD P2.0, RXD P2.1 (eUSCI_A0), HEADER J11                  */
+/* CONSOLE UART                                                              */
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Hand P2.0 (UCA0TXD) and P2.1 (UCA0RXD) to eUSCI_A0.
- *
- * eUSCI_A0 is the secondary function on these pins (PxSEL1 = 1, PxSEL0 = 0).
+ * @brief Console UART, picked by TIKU_BOARD_CONSOLE_SEL: 0 (default) is
+ *        eUSCI_A0 on P2.0/P2.1, header J11; 1 is eUSCI_A1 on P2.5/P2.6, the
+ *        UART to the nRF54L, which an nRF image relays (uart relay).
+ * @note With 1, the nRF's supply goes on at boot, the link UART is not
+ *       available, and the baud defaults to 115200.  Both are the pins'
+ *       secondary function (PxSEL1 = 1, PxSEL0 = 0).
  */
+#ifndef TIKU_BOARD_CONSOLE_SEL
+#define TIKU_BOARD_CONSOLE_SEL      0
+#endif
+
+#if TIKU_BOARD_CONSOLE_SEL == 0
 #define TIKU_BOARD_UART_PINS_INIT()                                            \
     do {                                                                       \
         P2DIR |= BIT0;                                                         \
@@ -60,11 +68,29 @@
         P2SEL1 |= BIT0 | BIT1;                                                 \
         P2SEL0 &= (uint8_t)~(BIT0 | BIT1);                                     \
     } while(0)
+#elif TIKU_BOARD_CONSOLE_SEL == 1
+#define TIKU_BOARD_UART_MODULE      1
+#define TIKU_BOARD_UART_PINS_INIT()                                            \
+    do {                                                                       \
+        P2DIR |= BIT5;                                                         \
+        P2DIR &= (uint8_t)~BIT6;                                               \
+        P2REN &= (uint8_t)~(BIT5 | BIT6);                                      \
+        P2OUT &= (uint8_t)~BIT5;                                               \
+        P2SEL1 |= BIT5 | BIT6;                                                 \
+        P2SEL0 &= (uint8_t)~(BIT5 | BIT6);                                     \
+    } while(0)
+#ifndef TIKU_BOARD_UART_BAUD
+#define TIKU_BOARD_UART_BAUD        115200
+#endif
+#else
+#error "Unsupported TIKU_BOARD_CONSOLE_SEL (expected 0 or 1)"
+#endif
 
 /*
  * Baud-rate settings for an 8 MHz SMCLK, oversampled, from TI SLAU367 Table
  * 30-5.  TIKU_BOARD_UART_BAUD is 9600 unless the build sets it (make
- * UART_BAUD=...); 19200, 38400, 57600 and 115200 are the other rates here.
+ * UART_BAUD=...) or the console is on the nRF link (115200); 19200, 38400
+ * and 57600 are the other rates here.
  */
 
 /** UART clock source: SMCLK. */
@@ -105,6 +131,42 @@
 #endif
 
 /*---------------------------------------------------------------------------*/
+/* LINK UART TO THE nRF - TXD P2.5, RXD P2.6 (eUSCI_A1)                      */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @name The UART to the nRF54L (its UARTE30), 115200 8N1
+ * arch/msp430/tiku_uart_link_arch.c drives it while the console is on J11.
+ * Opening it is refused while the nRF is unpowered, since the idle-high TX
+ * line would feed the unpowered chip; closing it parks TX low and RX pulled
+ * down.
+ * @{
+ */
+#if TIKU_BOARD_CONSOLE_SEL == 0
+#define TIKU_BOARD_LINK_UART_MODULE 1
+#endif
+/*  N = 8000000/115200 = 69.44 → BRW=4, BRF=5, BRS=0x55 */
+#define TIKU_BOARD_LINK_UART_BRW    4
+#define TIKU_BOARD_LINK_UART_MCTLW  ((0x55 << 8) | UCOS16 | (0x05 << 4))
+#define TIKU_BOARD_LINK_UART_ALLOWED()  ((P3DIR & P3OUT & BIT4) != 0u)
+#define TIKU_BOARD_LINK_UART_PINS_INIT()                                       \
+    do {                                                                       \
+        P2REN &= (uint8_t)~BIT6;                                               \
+        P2SEL1 |= BIT5 | BIT6;                                                 \
+        P2SEL0 &= (uint8_t)~(BIT5 | BIT6);                                     \
+    } while(0)
+#define TIKU_BOARD_LINK_UART_PINS_PARK()                                       \
+    do {                                                                       \
+        P2OUT &= (uint8_t)~(BIT5 | BIT6);                                      \
+        P2SEL1 &= (uint8_t)~(BIT5 | BIT6);                                     \
+        P2SEL0 &= (uint8_t)~(BIT5 | BIT6);                                     \
+        P2DIR |= BIT5;                                                         \
+        P2DIR &= (uint8_t)~BIT6;                                               \
+        P2REN |= BIT6;                                                         \
+    } while(0)
+/** @} */
+
+/*---------------------------------------------------------------------------*/
 /* BUTTON - P5.6 (ACTIVE LOW)                                                */
 /*---------------------------------------------------------------------------*/
 
@@ -123,7 +185,8 @@
  * Every pin is driven low first: rails and nRF supply off, link outputs low,
  * bus to the MSP430.  Then P2.6 (pulled down) and P3.6 become inputs, the
  * nRF reset P3.5 is released, and both chip selects go high.
- * @note P3.5 is only ever driven low or left an input.
+ * @note P3.5 is only ever driven low or left an input.  With
+ *       TIKU_BOARD_CONSOLE_SEL 1 the nRF's supply also goes on.
  */
 #define TIKU_BOARD_PINS_SAFE_INIT()                                            \
     do {                                                                       \
@@ -133,7 +196,16 @@
         P3DIR &= (uint8_t)~(BIT5 | BIT6);                                      \
         P4OUT |= BIT0;                                                         \
         P5OUT |= BIT3;                                                         \
+        TIKU_BOARD_CONSOLE_NRF_ON();                                           \
     } while(0)
+
+/** @brief With the console relayed by the nRF (TIKU_BOARD_CONSOLE_SEL 1),
+ *         its supply goes on at boot, before the console UART drives TX. */
+#if TIKU_BOARD_CONSOLE_SEL == 1
+#define TIKU_BOARD_CONSOLE_NRF_ON() do { P3OUT |= BIT4; } while(0)
+#else
+#define TIKU_BOARD_CONSOLE_NRF_ON() do { } while(0)
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* I2C ON eUSCI_B2 - P7.0 = SDA, P7.1 = SCL (SENSOR PORT, THROUGH U7)        */

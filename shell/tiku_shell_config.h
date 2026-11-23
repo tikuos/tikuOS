@@ -523,6 +523,15 @@
 #    define TIKU_SHELL_CMD_BOARD 0
 #  endif
 #endif
+/* `uart` drives the UART wired to a board's other processor (BOARD_CAPS
+ * LINK_UART); -DTIKU_SHELL_CMD_UART=0 drops it. */
+#ifndef TIKU_SHELL_CMD_UART
+#  if (TIKU_BOARD_HAS_LINK_UART + 0)
+#    define TIKU_SHELL_CMD_UART 1  /**< uart   - Link UART to the other side */
+#  else
+#    define TIKU_SHELL_CMD_UART 0
+#  endif
+#endif
 #ifndef TIKU_SHELL_CMD_TREE
 #define TIKU_SHELL_CMD_TREE   1  /**< tree   - Recursive VFS dump */
 #endif
@@ -736,6 +745,12 @@
 #if TIKU_SHELL_CMD_BOARD && !(TIKU_BOARD_HAS_BOARD_CTL + 0)
 #undef  TIKU_SHELL_CMD_BOARD
 #define TIKU_SHELL_CMD_BOARD 0
+#endif
+
+/* uart drives the board's link UART (a board capability). */
+#if TIKU_SHELL_CMD_UART && !(TIKU_BOARD_HAS_LINK_UART + 0)
+#undef  TIKU_SHELL_CMD_UART
+#define TIKU_SHELL_CMD_UART 0
 #endif
 
 /* lcd drives the segment-LCD controller (a board capability). */
