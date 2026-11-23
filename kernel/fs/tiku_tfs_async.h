@@ -87,7 +87,8 @@ int tiku_tfs_async_delete(tiku_tfs_t *, tiku_tfs_async_t *, const char *name,
 const tiku_tfs_async_ops_t *tiku_tfs_async_port(void **context);
 
 /** @brief Advance one memory phase or one backend callback; 1 pending, 0 done, negative misuse.
- * @note Backend requests contain at most 256 payload bytes or one metadata record.
+ * @note A backend request holds one metadata record, or payload up to the end of an erase
+ * sector (TIKU_TFS_SECT), or of a 256-byte block where the medium has no erase unit.
  * Read result only after completion: 0 durable, CANCELLED, or TFS_ERR_IO requiring remount.
  */
 int tiku_tfs_async_step(tiku_tfs_async_t *);

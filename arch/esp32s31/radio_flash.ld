@@ -84,6 +84,8 @@ SECTIONS
         KEEP(*(.persistent.arch))
         . = __uninit_start + (DEFINED(S31_FIRMWARE) ? 8192 : 0);
         KEEP(*(.persistent .persistent.*))
+        . = ALIGN(16);
+        __uninit_used = .;  /* the durable mirrors hold the bytes up to here */
         . = ALIGN(4096);
         __uninit_end = .;
     } > SRAM

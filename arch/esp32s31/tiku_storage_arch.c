@@ -23,9 +23,11 @@
 #define PENDING 0x31553354u
 #ifndef TIKU_S31_STORAGE_VIEW
 #define TIKU_S31_STORAGE_VIEW ((uint8_t *)TIKU_S31_PSRAM_BASE)
-extern uint8_t __uninit_start[], __uninit_end[];
+/* The durable bytes up to the last object; the page padding after it, which
+ * the protection bounds include, is never read. */
+extern uint8_t __uninit_start[], __uninit_used[];
 #define LIVE __uninit_start
-#define LIVE_BYTES ((size_t)(__uninit_end - __uninit_start))
+#define LIVE_BYTES ((size_t)(__uninit_used - __uninit_start))
 #endif
 /** @brief The fixed-offset undo record restored with durable SRAM. */
 typedef struct { uint32_t pending, offset, crc, reserved; uint8_t data[SECTOR]; } undo_t;
@@ -39,6 +41,10 @@ static uint32_t generation;
 static unsigned ready, attempted, failed, writing, flushing, provisioning;
 static int restore_status = TIKU_NVM_RESTORE_CRC_FAIL;
 static const uint32_t slots[] = {TIKU_S31_MIRROR_A, TIKU_S31_MIRROR_B};
+/** @brief The sectors a mirror flush erases: those its header and the durable
+ *         bytes reach.  The rest of the mirror is never read. */
+static size_t mirror_span(void)
+{ return (LIVE_BYTES + HEADER + SECTOR - 1u) & ~(size_t)(SECTOR - 1u); }
 /** @brief Return one cached flash mirror, outside the allocatable PSRAM span. */
 static uint8_t *mirror(unsigned slot)
 { return TIKU_S31_STORAGE_VIEW + TIKU_S31_REGION_BYTES + slot * TIKU_S31_MIRROR_BYTES; }
@@ -101,7 +107,7 @@ int tiku_mem_arch_nvm_flush_status(void)
     memset(h, 255, TIKU_S31_MIRROR_BYTES);
     h[0] = MAGIC; h[2] = LIVE_BYTES; h[3] = generation + 1u;
     memcpy(h + 4, LIVE, LIVE_BYTES); h[1] = checksum(h);
-    for (unsigned at = 0; at < TIKU_S31_MIRROR_BYTES; at += SECTOR)
+    for (size_t at = 0; at < mirror_span(); at += SECTOR)
         if (tiku_s31_storage_io(1, slots[target] + at, NULL, 0)) goto fail;
     if (program(slots[target] + 4, h + 1, LIVE_BYTES + HEADER - 4) ||
         program(slots[target], h, 4)) goto fail;
@@ -372,7 +378,7 @@ int tiku_s31_storage_write_poll(tiku_s31_storage_write_t *op)
         op->pending=rc!=0;
         if(!rc) {
             op->cursor+=SECTOR;
-            if(op->cursor==TIKU_S31_MIRROR_BYTES) {op->cursor=4;op->phase=WRITE_MIRROR_PROGRAM;}
+            if(op->cursor>=mirror_span()) {op->cursor=4;op->phase=WRITE_MIRROR_PROGRAM;}
         }
         return 1;
     case WRITE_MIRROR_PROGRAM:

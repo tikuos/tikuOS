@@ -219,9 +219,11 @@ With `TIKU_POSIX_FILE_HOOKS` the group also defines the C library's
 
 On the S31, saving a 600-byte record the way a settings file is saved (a
 temporary created, written, synced and closed, renamed over the record, its
-directory synced) took 2.19 s and 72 erases: eight store writes, each one
-sector of the store and both 16 KB durable mirrors, which hold its undo
-record. A file's data goes to the store 256 bytes a request.
+directory synced) takes 1.36 s and 42 erases: six store writes (the data,
+its length, the new entry's record and gate, the rename's flip and clear),
+each one sector of the store and two flushes of a three-sector durable
+mirror, which holds the undo record. The application's `check.py` holds a
+save to 42.
 
 Tests: TikuBench `test_posix_store.c` over the real file store on RAM with
 polled writes that stay pending and fail at each request (`make posix`,

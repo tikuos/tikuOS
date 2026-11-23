@@ -1660,6 +1660,11 @@ uint32_t tiku_tfs_pace_s(tiku_tfs_t *fs, size_t bytes, uint32_t life_days)
 }
 
 #if TIKU_TFS_ASYNC_ENABLE
+/* The payload of one data request: an erase sector, which a request may not
+ * cross, so each sector is programmed once; 256 bytes where the medium is
+ * rewritten in place (TIKU_TFS_SECT 4). */
+#define TFS_ASYNC_CHUNK ((TIKU_TFS_SECT > 4u) ? TIKU_TFS_SECT : 256u)
+
 /** @brief The directory commit follows durable payload and metadata; a
  *         rename's clears follow its commit. */
 enum {
@@ -1904,10 +1909,10 @@ int tiku_tfs_async_step(tiku_tfs_async_t *op)
             return 1;
         }
         length = op->length - op->writer.off;
-        if (length > 256u) {
-            length = 256u;
-        }
         offset = slot_off(fs, op->writer.first) + TFS_SL_DATA + op->writer.off;
+        if (length > TFS_ASYNC_CHUNK - offset % TFS_ASYNC_CHUNK) {
+            length = TFS_ASYNC_CHUNK - offset % TFS_ASYNC_CHUNK;
+        }
         data = op->data + op->writer.off;
         op->chunk = length;
     } else if (op->phase == ASYNC_LENGTH) {

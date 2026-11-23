@@ -70,7 +70,10 @@ region and two durable mirrors. Its PSRAM read shadow occupies
 and 2 guard durable SRAM with 4 KiB-aligned bounds; an unbracketed store
 enters the native fault halt. The fixed layout prefix starts at offset 0,
 the 4,112-byte sector undo record at offset 256, and ordinary durable
-objects at offset 8,192. Boot replays pending sector undo before cell
+objects at offset 8,192. A mirror holds the bytes up to the last object
+(`__uninit_used`), and its flush erases only the sectors those reach. Each
+journalled write to the region flushes a mirror twice, before and after
+the sector. Boot replays pending sector undo before cell
 migration and layout admission. Retained SRAM survives ROM software reset
 within the same linked image; EN restart and power loss are excluded.
 
