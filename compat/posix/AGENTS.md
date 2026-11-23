@@ -68,23 +68,26 @@ Tests: TikuBench `tests/host/kernel/test_posix_time.c` and
 
 ## The read group
 
-`tiku_posix_vfs.c` over the kernel VFS: `tiku_vfs_read_at()` for reads and
-`tiku_vfs_list()` for directory streams.  Every node is read-only.  None of
-these calls waits.  Paths are absolute VFS paths shorter than
+`tiku_posix_vfs.c` over the kernel VFS: `tiku_vfs_read_at()` for reads,
+`tiku_vfs_write()` for a node's value and `tiku_vfs_list()` for directory
+streams.  None of these calls waits.  Paths are absolute VFS paths shorter than
 `TIKU_VFS_PATH_MAX` (64); there is no working directory.
 
 | Call | Kernel operation | Supports | Errors |
 | --- | --- | --- | --- |
-| `open` | `tiku_vfs_is_dir()`, `tiku_vfs_resolve()`; a dynamic directory's child by a 1-byte read | `O_RDONLY`, on a file or a directory, `O_DIRECTORY`; `TIKU_POSIX_FDS` (8) descriptors from 3, over every caller | `ENOENT` (relative path too), `ENAMETOOLONG`, `EROFS` for a write mode, `O_CREAT`, `O_TRUNC` or `O_APPEND`, `EISDIR` for a directory opened to write, `EACCES` for a node with no read, `ENOTDIR`, `EMFILE` |
-| `read` | `tiku_vfs_read_at()` at the descriptor's offset | up to `TIKU_POSIX_READ_MAX` (256) bytes a call; a node the kernel renders whole gives its first 255 bytes | `EBADF`, `EISDIR`, `EIO` past a whole render's end, the node's error mapped |
+| `open` | `tiku_vfs_is_dir()`, `tiku_vfs_resolve()`; a dynamic directory's child by a 1-byte read | `O_RDONLY`, on a file or a directory, `O_DIRECTORY`; `O_WRONLY` or `O_RDWR` on a node with a write handler, `O_CREAT` and `O_TRUNC` accepted there; on `/sys/vfs/events`, a reader of its own (`tiku_vfs_events_join()`); `TIKU_POSIX_FDS` (8) descriptors from 3, over every caller | `ENOENT` (relative path too), `ENAMETOOLONG`, `EROFS` for `O_CREAT` of a missing name and a write mode on a dynamic directory's child, `EACCES` for a write mode on a node with no write or a read mode on one with no read, `EINVAL` for `O_APPEND`, `EISDIR` for a directory opened to write, `ENOTDIR`, `EMFILE` |
+| `read` | `tiku_vfs_read_at()` at the descriptor's offset; on `/sys/vfs/events`, `tiku_vfs_events_read()` | up to `TIKU_POSIX_READ_MAX` (256) bytes a call; a node the kernel renders whole gives its first 255 bytes; the change records after the reader's place, in the lines the node renders, whole lines only, then `# <n> read, <lost> lost`, the records lost to it in total | `EBADF` (also opened to write only), `EISDIR`, `EIO` past a whole render's end, `EINVAL` for an events read under 56 bytes, the node's error mapped |
+| `write` | `tiku_vfs_write()` with the bytes of the call | each call one value; 0 bytes write nothing; a store descriptor's to the store group | `EBADF` (also opened to read only), `EPERM` without the node's capability in the library's authority, the node's error mapped |
 | `lseek` | none | `SEEK_SET`, `SEEK_CUR` | `EBADF`, `EINVAL` for `SEEK_END`, a negative offset or a directory |
 | `close` | none | its number is free for the next open | `EBADF` |
-| `fcntl` | none | `F_GETFL` (`O_RDONLY`), `F_GETFD`, `F_SETFD` | `EBADF`, `EINVAL` |
-| `fstat`, `stat` | as `open` | mode, `st_ino` a number from the path, the same as `readdir`'s `d_ino`; size and `st_dev` 0 | as `open` |
+| `fcntl` | none | `F_GETFL` (the open's access mode), `F_GETFD`, `F_SETFD` | `EBADF`, `EINVAL` |
+| `fstat`, `stat` | as `open` | mode: a node's read and write handlers as 0444 and 0200; `st_ino` a number from the path, the same as `readdir`'s `d_ino`; size and `st_dev` 0 | as `open` |
 | `opendir`, `readdir`, `rewinddir`, `closedir` | `tiku_vfs_list()`, from the start for each entry | `TIKU_POSIX_DIRS` (4) streams; static children and mounts, then a dynamic directory's | `ENOENT`, `ENOTDIR`, `EMFILE`, `EBADF`; the end leaves `errno` |
 
-Opening a static node does not read it, so a node whose read consumes,
-such as `/sys/vfs/events`, is untouched until `read`.  A descriptor number
+Opening a static node does not read it, so a node whose read consumes is
+untouched until `read`.  `/sys/vfs/events` read through the library never
+consumes: each descriptor reads every record from its own place, and the
+console's read of the node keeps its own records.  A descriptor number
 closed by one thread can be opened again by another before the first
 thread's next call.  Each call runs under the library's VFS authority,
 `tiku_posix_authority_set()` (none until set), and the caller's is back on
@@ -206,13 +209,17 @@ call's result is what the store then holds: 0 if the change is there.
 | Call | Kernel operation | Supports | Errors |
 | --- | --- | --- | --- |
 | `tiku_posix_store_memory(base, bytes)` | none | once; one stage per `TIKU_POSIX_STAGE_MAX` bytes, at most `TIKU_POSIX_STORE_FDS` (4) | `EINVAL`, `EBUSY` when given already |
-| `open` | `tiku_tfs_stat()`, `tiku_tfs_read()` into the stage, `tiku_tfs_list()` for a directory | `O_RDONLY`, `O_WRONLY`, `O_RDWR`, `O_CREAT`, `O_EXCL`, `O_TRUNC`, `O_APPEND`, `O_DIRECTORY`; one descriptor that writes a file at a time; a created file exists for the library from the open, in the store from its publication | `ENOENT`, `EEXIST`, `EISDIR`, `ENOTDIR`, `ENAMETOOLONG`, `EBUSY` for a second writer, `EFBIG` for a file larger than a stage, `ENFILE` with no stage free, `EMFILE`, `EIO` without a mountable store |
+| `open` | `tiku_tfs_stat()`, `tiku_tfs_read()` into the stage, `tiku_tfs_list()` for a directory | `O_RDONLY`, `O_WRONLY`, `O_RDWR`, `O_CREAT`, `O_EXCL`, `O_TRUNC`, `O_APPEND`, `O_DIRECTORY`; one descriptor that writes a file at a time; a created file exists for the library from the open, in the store from its publication | `ENOENT`, `EEXIST`, `EISDIR`, `ENOTDIR`, `ENAMETOOLONG`, `EPERM` for a write mode without `TIKU_VFS_CAP_FS` in the library's authority, `EBUSY` for a second writer, `EFBIG` for a file larger than a stage, `ENFILE` with no stage free, `EMFILE`, `EIO` without a mountable store |
 | `read`, `lseek`, `fstat`, `stat`, `fcntl` | `tiku_tfs_map()`, or the stage | a file's content for the library is its writer's stage while one is open; `SEEK_END`; the real size; mode 0644, a directory 0755; `st_ino` as the read group gives it | `EBADF`, `EISDIR`, `EINVAL` |
 | `write` | none: into the stage | at the offset or with `O_APPEND` at the end, as much as the stage holds | `EFBIG` at the stage's end, `EBADF`, `EBUSY` while the stage is being published |
 | `fsync`, `close` | `tiku_tfs_async_begin()` and `_step()` | publishes the stage once; nothing to publish is 0 at once; a directory's fsync is 0 while the store is mounted | `EAGAIN` on the kernel thread with a stage to publish (close keeps the descriptor), `ENOSPC`, `EFBIG`, `EBUSY`, `EIO`; a read group's descriptor: `EINVAL` |
-| `rename` | `tiku_tfs_async_rename()` | over an existing file; to its own name, 0 | `ENOENT`, `EISDIR`, `EBUSY` with a writer open on either name, `EXDEV` across the store's edge, `EROFS` outside it, `EAGAIN` on the kernel thread, `EIO` |
+| `rename` | `tiku_tfs_async_rename()` | over an existing file; to its own name, 0 | `EPERM` without `TIKU_VFS_CAP_FS` in the library's authority, `ENOENT`, `EISDIR`, `EBUSY` with a writer open on either name, `EXDEV` across the store's edge, `EROFS` outside it, `EAGAIN` on the kernel thread, `EIO` |
 | `unlink` | `tiku_tfs_async_delete()` | a file | as rename |
 | `tiku_posix_store_use()` | none | changes made, and those a remount decided | none |
+
+A write, rename or delete in the store needs `TIKU_VFS_CAP_FS` in the
+library's authority (`tiku_posix_authority_set()`), as a VFS write or
+unlink under `/data` does; reads need none.
 
 With `TIKU_POSIX_FILE_HOOKS` the group also defines the C library's
 `_write`, `_rename`, `_unlink` and `fsync`.

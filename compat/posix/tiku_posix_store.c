@@ -21,6 +21,7 @@
 #include "tiku_posix_store.h"
 #include <kernel/fs/tiku_tfs_async.h>
 #include <kernel/threads/tiku_thread.h>
+#include <kernel/vfs/tiku_vfs.h>
 #include <kernel/timers/tiku_clock.h>
 #include <kernel/vfs/tiku_vfs.h>
 #include <kernel/vfs/tree/tiku_vfs_tree_data.h>
@@ -265,6 +266,7 @@ static int op_open(struct store_call *c)
     r = path_name(c->path, &name);
     if (r != 0) return r;
     if (foreign(c->path)) return TIKU_POSIX_STORE_FOREIGN;
+    if (write && !(tiku_posix_authority() & TIKU_VFS_CAP_FS)) return -EPERM;
     fs = store_get(&r);
     if (fs == NULL) return r;
     dir = name_is_dir(fs, name);
@@ -566,6 +568,9 @@ static int op_change(struct store_call *c)
     int r = 0;
 
     if (!c->begun) {
+        if (c->kind != CHANGE_PUBLISH && !(tiku_posix_authority() & TIKU_VFS_CAP_FS)) {
+            return -EPERM;
+        }
         fs = store_get(&r);
         if (fs == NULL) return r;
         r = change_begin(c, fs);
@@ -717,14 +722,10 @@ int tiku_posix_store_is_open(int fd)
     return call(op_is_open, &c) > 0;
 }
 
-ssize_t tiku_posix_write(int fd, const void *buf, size_t n)
+ssize_t tiku_posix_store_write(int fd, const void *buf, size_t n)
 {
     struct store_call c = { 0 };
 
-    if (!tiku_posix_store_fd(fd)) {
-        errno = EBADF;
-        return -1;
-    }
     if (buf == NULL && n != 0u) {
         errno = EFAULT;
         return -1;

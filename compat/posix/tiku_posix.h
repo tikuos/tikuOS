@@ -43,21 +43,30 @@
  * Each call below runs its kernel work on the kernel thread: from a worker
  * through tiku_thread_call(), from the kernel thread at once.  None of them
  * waits.  Paths are absolute kernel VFS paths under TIKU_VFS_PATH_MAX bytes;
- * every node is read-only.  Failures return -1 (NULL for the directory
+ * a node with a write handler takes writes, as one value each, under the
+ * library's authority.  Failures return -1 (NULL for the directory
  * calls) with errno set; compat/posix/AGENTS.md lists each result.  This
  * header names only C library types, so a file layer built without the
  * kernel's include paths can include it.
  */
 
-/** @brief Open @p path for reading: a readable file, or a directory. */
+/** @brief Open @p path: a file or a directory to read, or a node with a
+ *         write handler to write (not O_APPEND). */
 int tiku_posix_open(const char *path, int flags);
-/** @brief Read up to @p n bytes at the descriptor's offset and advance it. */
+/** @brief Read up to @p n bytes at the descriptor's offset and advance it.
+ *         A descriptor on /sys/vfs/events reads, from its own place in the
+ *         change ring, the records pushed since its open (whole lines). */
 ssize_t tiku_posix_read(int fd, void *buf, size_t n);
+/** @brief Write @p n bytes: into a store file's stage (the store group), or
+ *         as one value of a writable node, through tiku_vfs_write() under
+ *         the library's authority.  0 bytes write nothing. */
+ssize_t tiku_posix_write(int fd, const void *buf, size_t n);
 /** @brief Move a file descriptor's offset: SEEK_SET or SEEK_CUR. */
 off_t tiku_posix_lseek(int fd, off_t offset, int whence);
 /** @brief Close a descriptor; its number may be returned by a later open. */
 int tiku_posix_close(int fd);
-/** @brief F_GETFL (O_RDONLY), F_GETFD and F_SETFD (no flags kept). */
+/** @brief F_GETFL (the open's access mode), F_GETFD and F_SETFD (no flags
+ *         kept). */
 int tiku_posix_fcntl(int fd, int cmd);
 /** @brief An open descriptor's node: its mode, and st_ino a number derived
  *         from its path, which readdir()'s d_ino gives too.  The size and
@@ -122,9 +131,6 @@ int tiku_posix_is_dir_stream(const DIR *dir);
  * @return 0; EINVAL for NULL or less than one stage; EBUSY when given already
  */
 int tiku_posix_store_memory(void *base, size_t bytes);
-/** @brief Write into a descriptor's stage at its offset, or its end with
- *         O_APPEND; as much as the stage holds, then EFBIG. */
-ssize_t tiku_posix_write(int fd, const void *buf, size_t n);
 /** @brief Publish a descriptor's unpublished writes; 0 at once when there
  *         are none.  For a directory of the store, 0 while the store is
  *         mounted. */

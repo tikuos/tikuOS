@@ -31,6 +31,11 @@ int tiku_posix_store_fd(int fd);
  * errno and returns -1 on failure, as the public call does. */
 int tiku_posix_store_open(const char *path, int flags);
 ssize_t tiku_posix_store_read(int fd, void *buf, size_t n);
+ssize_t tiku_posix_store_write(int fd, const void *buf, size_t n);
+/** @brief The library's VFS authority (tiku_posix_authority_set()); a write,
+ *         rename or delete in the store needs TIKU_VFS_CAP_FS in it, as a
+ *         VFS write to /data does.  On the kernel thread. */
+uint8_t tiku_posix_authority(void);
 off_t tiku_posix_store_lseek(int fd, off_t offset, int whence);
 int tiku_posix_store_close(int fd);
 int tiku_posix_store_fcntl(int fd, int cmd);

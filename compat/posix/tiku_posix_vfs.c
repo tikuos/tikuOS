@@ -15,6 +15,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
@@ -27,10 +28,14 @@
 
 /* The tables, the read buffer and the authority are touched only on the
  * kernel thread, inside a call. */
+/* A descriptor on /sys/vfs/events holds its own reader of the change ring;
+ * one opened to write a node holds writes. */
 typedef struct {
     uint8_t used;
     uint8_t dir;
+    uint8_t reads, writes, events;
     uint32_t offset;
+    tiku_vfs_reader_t reader;
     char path[TIKU_VFS_PATH_MAX];
 } posix_fd_t;
 
@@ -88,9 +93,15 @@ static int path_ok(const char *path)
     return 0;
 }
 
-/** @brief What @p path names: 1 a directory, 0 a readable file, or a negative
- *         errno.  A static node is not read, so a read with an effect is
- *         not made. */
+/** @brief Whether static node @p node can be read. */
+static int node_reads(const tiku_vfs_node_t *node)
+{
+    return node->read != NULL || (node->desc != NULL && node->desc->read_at != NULL);
+}
+
+/** @brief What @p path names: 1 a directory, 0 a file, or a negative errno.
+ *         A static node is not read, so a read with an effect is not made;
+ *         a dynamic directory's child must be readable. */
 static int node_kind(const char *path)
 {
     const tiku_vfs_node_t *node;
@@ -98,10 +109,7 @@ static int node_kind(const char *path)
 
     if (tiku_vfs_is_dir(path)) return 1;
     node = tiku_vfs_resolve(path);
-    if (node != NULL) {
-        return (node->read != NULL ||
-                (node->desc != NULL && node->desc->read_at != NULL)) ? 0 : -EACCES;
-    }
+    if (node != NULL) return 0;
     /* A dynamic directory's child: its first byte, from the store. */
     r = tiku_vfs_read_at(path, 0u, scratch, 1u, NULL);
     return r < 0 ? -vfs_errno(r) : 0;
@@ -158,37 +166,86 @@ static uint32_t node_id(const char *path, const char *child)
     return h != 0u ? h : 1u;
 }
 
+/** @brief A stat of @p path: a directory, or a file whose mode bits are its
+ *         node's handlers, read 0444 and write 0200; a dynamic directory's
+ *         child is 0444. */
 static void fill_stat(struct stat *st, int dir, const char *path)
 {
+    const tiku_vfs_node_t *node = dir ? NULL : tiku_vfs_resolve(path);
+
     memset(st, 0, sizeof *st);
-    st->st_mode = dir ? (S_IFDIR | 0555) : (S_IFREG | 0444);
+    st->st_mode = dir ? (S_IFDIR | 0555)
+                : node == NULL ? (S_IFREG | 0444)
+                : (mode_t)(S_IFREG | (node_reads(node) ? 0444 : 0) |
+                           (node->write != NULL ? 0200 : 0));
     st->st_nlink = 1;
     st->st_ino = (ino_t)node_id(path, NULL);
 }
 
 static int op_open(struct posix_call *c)
 {
-    int kind = path_ok(c->path), write = (c->flags & O_ACCMODE) != O_RDONLY ||
-               (c->flags & (O_CREAT | O_TRUNC | O_APPEND)) != 0;
+    int acc = c->flags & O_ACCMODE, kind = path_ok(c->path),
+        write = acc != O_RDONLY || (c->flags & (O_CREAT | O_TRUNC | O_APPEND)) != 0,
+        read = acc != O_WRONLY;
+    const tiku_vfs_node_t *node;
 
     if (kind == 0) kind = node_kind(c->path);
     if (kind == -ENOENT && (c->flags & O_CREAT)) return -EROFS;
     if (kind < 0) return kind;
-    if (kind == 1 && (c->flags & O_ACCMODE) != O_RDONLY) return -EISDIR;
-    if (write) return -EROFS;
+    if (kind == 1 && acc != O_RDONLY) return -EISDIR;
 #ifdef O_DIRECTORY
     if ((c->flags & O_DIRECTORY) && kind != 1) return -ENOTDIR;
 #endif
+    node = kind == 1 ? NULL : tiku_vfs_resolve(c->path);
+    if (write) {
+        /* A static node's value is replaced by each write: it is not
+         * appended to, and a dynamic directory's child is not written. */
+        if (kind == 1 || node == NULL) return -EROFS;
+        if (node->write == NULL) return -EACCES;
+        if (c->flags & O_APPEND) return -EINVAL;
+    }
+    if (read && node != NULL && !node_reads(node)) return -EACCES;
     for (int i = 0; i < TIKU_POSIX_FDS; i++) {
         if (!fds[i].used) {
-            fds[i].used = 1u;
-            fds[i].dir = (uint8_t)kind;
-            fds[i].offset = 0u;
+            fds[i] = (posix_fd_t){ .used = 1u, .dir = (uint8_t)kind,
+                                   .reads = (uint8_t)read, .writes = (uint8_t)write };
+            fds[i].events = node != NULL && node == tiku_vfs_resolve("/sys/vfs/events");
+            if (fds[i].events) tiku_vfs_events_join(&fds[i].reader);
             strcpy(fds[i].path, c->path);
             return TIKU_POSIX_FD_BASE + i;
         }
     }
     return -EMFILE;
+}
+
+/* A record's line, "<op>\t<id>\t<seq>\n", is at most this long, and the
+ * closing "# <n> read, <lost> lost\n" line this. */
+#define EVENT_LINE_MAX 24u
+#define EVENT_END_MAX 32u
+
+/** @brief Render the records after @p f's reader position as /sys/vfs/events
+ *         renders its own, whole lines only, then "# <n> read, <lost>
+ *         lost": the records lost to this reader in total. */
+static int events_read(posix_fd_t *f, struct posix_call *c)
+{
+    tiku_vfs_change_t rec[TIKU_VFS_EVENTS_MAX];
+    size_t room = c->n < sizeof scratch ? c->n : sizeof scratch, want;
+    uint8_t n, i;
+    int off = 0;
+
+    if (room < EVENT_LINE_MAX + EVENT_END_MAX) return -EINVAL;
+    want = (room - EVENT_END_MAX) / EVENT_LINE_MAX;
+    if (want > TIKU_VFS_EVENTS_MAX) want = TIKU_VFS_EVENTS_MAX;
+    n = tiku_vfs_events_read(&f->reader, rec, (uint8_t)want);
+    for (i = 0; i < n; i++) {
+        off += snprintf(scratch + off, sizeof scratch - (size_t)off, "%s\t%08lx\t%u\n",
+                        tiku_vfs_op_name(rec[i].op),
+                        (unsigned long)tiku_vfs_node_id(rec[i].node), (unsigned)rec[i].seq);
+    }
+    off += snprintf(scratch + off, sizeof scratch - (size_t)off, "# %u read, %lu lost\n",
+                    (unsigned)n, (unsigned long)f->reader.lost);
+    memcpy(c->buf, scratch, (size_t)off);
+    return off;
 }
 
 static int op_read(struct posix_call *c)
@@ -197,15 +254,29 @@ static int op_read(struct posix_call *c)
     int r;
     size_t m;
 
-    if (f == NULL) return -EBADF;
+    if (f == NULL || !f->reads) return -EBADF;
     if (f->dir) return -EISDIR;
     if (c->n == 0u) return 0;
+    if (f->events) return events_read(f, c);
     r = tiku_vfs_read_at(f->path, f->offset, scratch, sizeof scratch, NULL);
     if (r < 0) return -vfs_errno(r);
     m = ((size_t)r < c->n) ? (size_t)r : c->n;
     memcpy(c->buf, scratch, m);
     f->offset += (uint32_t)m;
     return (int)m;
+}
+
+/** @brief One write of a node's value: the node's handler takes the bytes
+ *         whole, under the library's authority. */
+static int op_write(struct posix_call *c)
+{
+    posix_fd_t *f = fd_slot(c->fd);
+    int r;
+
+    if (f == NULL || !f->writes) return -EBADF;
+    if (c->n == 0u) return 0;
+    r = tiku_vfs_write(f->path, (const char *)c->buf, c->n);
+    return r < 0 ? -vfs_errno(r) : (int)c->n;
 }
 
 static int op_lseek(struct posix_call *c)
@@ -234,8 +305,10 @@ static int op_close(struct posix_call *c)
 
 static int op_fcntl(struct posix_call *c)
 {
-    if (fd_slot(c->fd) == NULL) return -EBADF;
-    if (c->cmd == F_GETFL) return O_RDONLY;
+    posix_fd_t *f = fd_slot(c->fd);
+
+    if (f == NULL) return -EBADF;
+    if (c->cmd == F_GETFL) return f->reads ? (f->writes ? O_RDWR : O_RDONLY) : O_WRONLY;
     if (c->cmd == F_GETFD || c->cmd == F_SETFD) return 0;
     return -EINVAL;
 }
@@ -426,6 +499,21 @@ ssize_t tiku_posix_read(int fd, void *buf, size_t n)
     return call(op_read, &c);
 }
 
+ssize_t tiku_posix_write(int fd, const void *buf, size_t n)
+{
+    struct posix_call c = { 0 };
+
+    TO_STORE_FD(fd, tiku_posix_store_write(fd, buf, n));
+    if (buf == NULL && n != 0u) {
+        errno = EFAULT;
+        return -1;
+    }
+    c.fd = fd;
+    c.buf = (void *)buf;
+    c.n = n;
+    return call(op_write, &c);
+}
+
 off_t tiku_posix_lseek(int fd, off_t offset, int whence)
 {
     struct posix_call c = { 0 };
@@ -532,6 +620,13 @@ int tiku_posix_is_dir_stream(const DIR *dir)
     c.dir = (DIR *)(uintptr_t)dir;
     return call(op_is_dir_stream, &c) > 0;
 }
+
+#if TIKU_POSIX_STORE
+uint8_t tiku_posix_authority(void)
+{
+    return authority;
+}
+#endif
 
 uint8_t tiku_posix_authority_set(uint8_t cap)
 {
