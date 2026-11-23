@@ -37,6 +37,7 @@ commit before making it.
 | **Nordic**<br><sub>32-bit · Cortex-M33</sub> | nRF54L15 DK | 256 KB | 1.5 MB RRAM |
 | | nRF54LM20-DK · 128 MHz + Axon NPU | 512 KB | 2 MB RRAM |
 | | nRF54LV10-DK · 128 MHz · 1.2–1.7 V supply | 192 KB | 1012 KB RRAM |
+| | TikuComputer-nRF · nRF54L10 · 128 MHz · RTT console | 192 KB | 1012 KB RRAM |
 
 ### 🧩 Others
 

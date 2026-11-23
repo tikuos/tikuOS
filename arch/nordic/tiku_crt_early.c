@@ -134,8 +134,8 @@ static void tiku_nordic_apply_trims(void)
 
 /* FICR silicon-identification words that gate revision-specific errata
  * (nRF54L errata sheet 4503_401 + the MDK's nrf54l_erratas.h convention):
- * 0x00FFC340 = part marker (0x1C on nRF54L15, 0x29 on nRF54LM20A, 0x27 on
- * nRF54LV10A),
+ * 0x00FFC340 = part marker (0x1C on nRF54L15, 0x2E on nRF54L10, 0x29 on
+ * nRF54LM20A, 0x27 on nRF54LV10A),
  * 0x00FFC344 = revision code (0x01/0x02 on nRF54L15), 0x00FFC334 = trim
  * version (extra gate on erratum 32). */
 #define NORDIC_FICR_PART  (*(volatile uint32_t *)0x00FFC340ul)
