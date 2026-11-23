@@ -129,8 +129,8 @@
       * scales with PROGRAM_LINES, so RAM2 is the bound: each line takes 148
       * arena bytes on top of the fixed working set. */
 #    define TIKU_BASIC_PROGRAM_LINES 1400
-#  elif defined(TIKU_DEVICE_NRF54LV10A)
-     /* The LV10A has 172 KB of app SRAM, 68 KB less than the L15: 192 lines
+#  elif defined(TIKU_DEVICE_NRF54LV10A) || defined(TIKU_DEVICE_NRF54L10)
+     /* These parts have 172 KB of app SRAM, 68 KB less than the L15: 192 lines
       * keep the arena inside the 80 KB tier floor (Makefile) with room
       * beside it for process memory. */
 #    define TIKU_BASIC_PROGRAM_LINES 192

@@ -34,7 +34,7 @@
  * scripts (nrf54l15.ld, nrf54lm20a.ld, nrf54lv10a.ld) and the base the
  * Makefile hands tiku_flpr.ld repeat these values and must match.  The base
  * is 4 KB-aligned: MPC00 overrides it at 4 KB granularity. */
-#if defined(TIKU_DEVICE_NRF54LV10A)
+#if defined(TIKU_DEVICE_NRF54LV10A) || defined(TIKU_DEVICE_NRF54L10)
 #define TIKU_FLPR_RAM_BASE   0x2002B000u
 #else
 #define TIKU_FLPR_RAM_BASE   0x2003C000u

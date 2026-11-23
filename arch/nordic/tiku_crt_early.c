@@ -213,17 +213,20 @@ static void tiku_nordic_debug_unlock(void)
 
 /**
  * @brief Errata workarounds that run after the factory trims: the ES-PDK
- *        regulator prime and errata 31/32/40, on the nRF54L15 only.
+ *        regulator prime on the nRF54L15 and nRF54L10, errata 31/32/40 on the
+ *        nRF54L15 and erratum 31 on the nRF54L10.
  */
 static void tiku_nordic_sysinit_errata(void)
 {
-#if defined(TIKU_DEVICE_NRF54L15)
+#if defined(TIKU_DEVICE_NRF54L15) || defined(TIKU_DEVICE_NRF54L10)
     /* ES-PDK regulator configuration (MDK SystemInit, nRF54L05/L10/L15 only):
      * prime 0x50120440 when it reads as unprogrammed. */
     if (*(volatile uint32_t *)0x50120440ul == 0ul) {
         *(volatile uint32_t *)0x50120440ul = 0xC8ul;
     }
+#endif
 
+#if defined(TIKU_DEVICE_NRF54L15)
     if (NORDIC_FICR_PART != 0x1Cul || NORDIC_FICR_REV != 0x01ul) {
         return;                        /* remaining pokes are rev-1-gated   */
     }
@@ -242,6 +245,14 @@ static void tiku_nordic_sysinit_errata(void)
      * start-up, before any DC/DC use). */
     *(volatile uint32_t *)0x50120624ul = (20ul | (1ul << 5));
     *(volatile uint32_t *)0x5012063Cul &= ~(1ul << 19);
+#elif defined(TIKU_DEVICE_NRF54L10)
+    /* Part 0x2E: erratum 31 at revision 1; errata 32 and 40 do not apply to
+     * this part (see nrf54l_erratas.h). */
+    (void)NORDIC_FICR_TRIMV;
+    if (NORDIC_FICR_PART == 0x2Eul && NORDIC_FICR_REV == 0x01ul) {
+        *(volatile uint32_t *)0x50120624ul = (20ul | (1ul << 5));
+        *(volatile uint32_t *)0x5012063Cul &= ~(1ul << 19);
+    }
 #else
     /* nRF54LM20A/B and nRF54LV10A: errata 31/32/40 and the ES-PDK regulator
      * prime do not apply to parts 0x29 and 0x27 (see nrf54l_erratas.h);

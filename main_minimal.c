@@ -108,9 +108,9 @@ volatile uint32_t g_nordic_loop_count;
  *   T3  WEN set, immediate store, no waits
  *   T4  store, close WEN with no wait or commit, read back with WEN closed
  * The scratch target, 0x17B000, is inside the persist partition on the
- * nRF54L15 and inside the NVM region on the nRF54LM20; on the nRF54LV10A it
- * is 0xFB000, inside the persist partition.  The probe overwrites durable
- * words a kernel image keeps there.
+ * nRF54L15 and inside the NVM region on the nRF54LM20; on the nRF54LV10A and
+ * nRF54L10 it is 0xFB000, inside the persist partition.  The probe overwrites
+ * durable words a kernel image keeps there.
  */
 #include "arch/nordic/tiku_nordic_mdk.h"   /* per-device MDK router */
 
@@ -118,6 +118,10 @@ volatile uint32_t g_nordic_loop_count;
 #define RRAM_TEST_ADDR   0x000FB000UL      /* LV10A: persist partition */
 #define RRAMC_BUF        (16UL << 8)       /* WRITEBUFSIZE = 16, the maximum */
 #define RRAMC_BUF_WORDS  "16"
+#elif defined(TIKU_DEVICE_NRF54L10)
+#define RRAM_TEST_ADDR   0x000FB000UL      /* L10: persist partition */
+#define RRAMC_BUF        (32UL << 8)               /* WRITEBUFSIZE = 32 */
+#define RRAMC_BUF_WORDS  "32"
 #else
 #define RRAM_TEST_ADDR   0x0017B000UL      /* L15: persist partition;
                                             * LM20: NVM region */
@@ -262,8 +266,10 @@ int main(void)
      * delays program SysTick on each call. */
     tiku_cpu_boot_nordic_init();
 
+#if TIKU_BOARD_LED_COUNT >= 2
     /* LED2 starts off and blinks in the loop below. */
     TIKU_BOARD_LED2_INIT();
+#endif
 
     /* Console UARTE at TIKU_BOARD_UART_BAUD on the board-selected pins. */
     tiku_uart_init();
@@ -292,8 +298,13 @@ int main(void)
             (unsigned int)clk,
             fault);
 
-        /* LED2 blinks = the loop (and the delay path) is alive. */
+        /* A blink = the loop (and the delay path) is alive: LED2, or LED1
+         * on a board with one LED. */
+#if TIKU_BOARD_LED_COUNT >= 2
         TIKU_BOARD_LED2_TOGGLE();
+#else
+        TIKU_BOARD_LED1_TOGGLE();
+#endif
         tiku_cpu_nordic_delay_ms(500u);
         g_nordic_loop_count++;      /* progress marker (read over debugger) */
         i++;

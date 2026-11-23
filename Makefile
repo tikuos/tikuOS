@@ -70,6 +70,11 @@ else ifeq ($(MCU),apollo510b)
 TIKU_PLATFORM := ambiq
 else ifeq ($(MCU),nrf54l15)
 TIKU_PLATFORM := nordic
+else ifeq ($(MCU),nrf54l10)
+# nRF54L10 (TikuComputer-nRF, Minew ME54BS01 module): the nRF54L15 with
+# 1012 KB RRAM and 192 KB SRAM.  It takes the nRF54L15's register headers and
+# the nRF54LV10A's memory map.
+TIKU_PLATFORM := nordic
 else ifeq ($(MCU),nrf54lm20a)
 TIKU_PLATFORM := nordic
 else ifeq ($(MCU),nrf54lm20b)
@@ -196,6 +201,7 @@ DEFAULT_BOARD_apollo4p      := apollo4p_evb
 DEFAULT_BOARD_apollo510     := apollo510_evb
 DEFAULT_BOARD_apollo510b    := apollo510b_evb
 DEFAULT_BOARD_nrf54l15      := nrf54l15_dk
+DEFAULT_BOARD_nrf54l10      := tikucomputer_nrf
 # Both LM20 variants default to the nRF54LM20-DK, which carries the LM20B; an
 # nrf54lm20a image runs on it as well.
 DEFAULT_BOARD_nrf54lm20a    := nrf54lm20_dk
@@ -213,7 +219,7 @@ DEFAULT_BOARD_esp32p4       := olimex_esp32p4_pc
 KNOWN_BOARDS := fr5969_launchpad fr5994_launchpad fr6989_launchpad \
                 pico2 pico2w apollo4l_evb apollo4p_evb \
                 apollo510_evb apollo510b_evb nrf54l15_dk nrf54lm20_dk \
-                nrf54lv10_dk nucleo_n657x0q ek_ra8p1 esp32c61_devkitc esp32c5_devkitc1 olimex_esp32p4_pc \
+                nrf54lv10_dk tikucomputer_nrf nucleo_n657x0q ek_ra8p1 esp32c61_devkitc esp32c5_devkitc1 olimex_esp32p4_pc \
                 firebeetle2_esp32p4 tiku_bare
 
 BOARD_DEFINE_fr5969_launchpad  := TIKU_BOARD_FR5969_LAUNCHPAD
@@ -231,6 +237,9 @@ BOARD_DEFINE_tiku_bare         := TIKU_BOARD_TIKU_BARE
 BOARD_DEFINE_nrf54l15_dk       := TIKU_BOARD_NRF54L15_DK
 BOARD_DEFINE_nrf54lm20_dk      := TIKU_BOARD_NRF54LM20_DK
 BOARD_DEFINE_nrf54lv10_dk      := TIKU_BOARD_NRF54LV10_DK
+# tikucomputer_nrf: the TikuComputer-nRF board's Minew ME54BS01 module, an
+# nRF54L10 or, on the board's other variant, an nRF54L15.
+BOARD_DEFINE_tikucomputer_nrf  := TIKU_BOARD_TIKUCOMPUTER_NRF
 BOARD_DEFINE_nucleo_n657x0q    := TIKU_BOARD_NUCLEO_N657X0Q
 BOARD_DEFINE_ek_ra8p1          := TIKU_BOARD_EK_RA8P1
 BOARD_DEFINE_esp32c61_devkitc  := TIKU_BOARD_ESP32C61_DEVKITC
@@ -251,6 +260,7 @@ BOARD_PLATFORM_tiku_bare         := ambiq
 BOARD_PLATFORM_nrf54l15_dk       := nordic
 BOARD_PLATFORM_nrf54lm20_dk      := nordic
 BOARD_PLATFORM_nrf54lv10_dk      := nordic
+BOARD_PLATFORM_tikucomputer_nrf  := nordic
 BOARD_PLATFORM_nucleo_n657x0q    := stm32n6
 BOARD_PLATFORM_ek_ra8p1          := ra8p1
 BOARD_PLATFORM_esp32c61_devkitc  := esp32c61
@@ -292,6 +302,7 @@ BOARD_CAPS_fr6989_launchpad    := LCD
 BOARD_CAPS_nrf54l15_dk         :=
 BOARD_CAPS_nrf54lm20_dk        :=
 BOARD_CAPS_nrf54lv10_dk        :=
+BOARD_CAPS_tikucomputer_nrf    :=
 BOARD_CAPS_nucleo_n657x0q      :=
 # EK-RA8P1: USBHS is the USB high-speed connector (J7), which
 # TIKU_DRV_USBHS_ENABLE requires.  The board's other parts (Ethernet PHY, OSPI
@@ -1198,8 +1209,8 @@ CFLAGS += -ffunction-sections -fdata-sections -fno-common
 
 else ifeq ($(TIKU_PLATFORM),nordic)
 
-# Cortex-M33 (nRF54L15, nRF54LM20A/B, nRF54LV10A) with a single-precision
-# FPU, built for the softfp ABI as on rp2350.
+# Cortex-M33 (nRF54L15, nRF54L10, nRF54LM20A/B, nRF54LV10A) with a
+# single-precision FPU, built for the softfp ABI as on rp2350.
 CFLAGS  = -mcpu=cortex-m33 -mthumb
 CFLAGS += -mfloat-abi=softfp -mfpu=fpv5-sp-d16
 CFLAGS += -Os -Wall -Wextra
@@ -1216,14 +1227,14 @@ CFLAGS += -ffunction-sections -fdata-sections -fno-common
 # the AXON statics, on the L15 the primary bank between .bss and the stack
 # guard.  TIKU_TIER_SRAM_MIN is the guaranteed minimum.  It must cover
 # BASIC_ARENA_BYTES (basic/tiku_basic_arena.inl), which grows by
-# 148 bytes per program line; the LM20 has 1400 lines, the L15 256 and the
-# LV10A 192.  The floor does not change with TIKU_THREADS_ENABLE: thread
+# 148 bytes per program line; the LM20 has 1400 lines, the L15 256, and the
+# LV10A and L10 192.  The floor does not change with TIKU_THREADS_ENABLE: thread
 # stacks and TLS state are .bss and stack, not tier allocations.
 ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
 ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
 TIKU_TIER_SRAM_MIN ?= 253952
-else ifeq ($(MCU),nrf54lv10a)
-# LV10A: 80 KB, in the 172 KB of app SRAM below the FLPR carve.
+else ifneq (,$(filter nrf54lv10a nrf54l10,$(MCU)))
+# LV10A and L10: 80 KB, in the 172 KB of app SRAM below the FLPR carve.
 TIKU_TIER_SRAM_MIN ?= 81920
 else
 # L15: 92 KB.  The primary bank also holds the reservation table
@@ -1406,10 +1417,10 @@ ifeq ($(TIKU_THREADS_ENABLE),1)
 ifeq ($(TIKU_PLATFORM),msp430)
 $(error TIKU_THREADS_ENABLE=1 is not supported on MSP430; use a supported ARM or RISC-V MCU)
 endif
-ifeq ($(filter apollo510 apollo510b apollo4l apollo4p rp2350 nrf54l15 nrf54lm20a nrf54lm20b nrf54lv10a ra8p1 esp32c61 esp32c5 esp32p4,$(MCU)),)
+ifeq ($(filter apollo510 apollo510b apollo4l apollo4p rp2350 nrf54l15 nrf54l10 nrf54lm20a nrf54lm20b nrf54lv10a ra8p1 esp32c61 esp32c5 esp32p4,$(MCU)),)
 $(error TIKU_THREADS_ENABLE=1 needs a supported part -- \
 apollo510/apollo510b (M55), apollo4l/apollo4p (M4F), rp2350 or \
-nrf54l15/nrf54lm20a/nrf54lm20b/nrf54lv10a (M33), ra8p1 (M85), esp32c61 (RISC-V); $(MCU) has no \
+nrf54l15/nrf54l10/nrf54lm20a/nrf54lm20b/nrf54lv10a (M33), ra8p1 (M85), esp32c61 (RISC-V); $(MCU) has no \
 thread backend. The Cortex-M switcher is generic asm \
 (kernel/threads/tiku_thread_cortexm.inl); \
 adding a part = a two-line shim that names its PendSV vector symbol (plus a \
@@ -1512,7 +1523,9 @@ LDFLAGS += --specs=nano.specs --specs=nosys.specs -nostartfiles
 ifneq (,$(filter nrf54lm20a nrf54lm20b,$(MCU)))
 # The LM20B's memory map is the LM20A's, so both link with nrf54lm20a.ld.
 LDFLAGS += -Tarch/nordic/devices/nrf54lm20a.ld
-else ifeq ($(MCU),nrf54lv10a)
+else ifneq (,$(filter nrf54lv10a nrf54l10,$(MCU)))
+# The nRF54L10's memory map is the nRF54LV10A's, so both link with
+# nrf54lv10a.ld.
 LDFLAGS += -Tarch/nordic/devices/nrf54lv10a.ld
 else
 LDFLAGS += -Tarch/nordic/devices/nrf54l15.ld
@@ -1702,7 +1715,7 @@ MINIMAL ?= 0
 
 ifeq ($(MINIMAL),1)
 ifeq ($(filter $(TIKU_PLATFORM),rp2350 ambiq nordic stm32n6 ra8p1 esp32c61 esp32c5),)
-$(error MINIMAL=1 supports rp2350, apollo510, apollo510b, apollo4l, apollo4p, nrf54l15, nrf54lm20a, nrf54lm20b, nrf54lv10a, stm32n6, ra8p1, esp32c61 and esp32c5)
+$(error MINIMAL=1 supports rp2350, apollo510, apollo510b, apollo4l, apollo4p, nrf54l15, nrf54l10, nrf54lm20a, nrf54lm20b, nrf54lv10a, stm32n6, ra8p1, esp32c61 and esp32c5)
 endif
 
 # The minimal entry point and the arch files it needs.
@@ -1917,7 +1930,8 @@ ifeq ($(TIKU_FLPR_ENABLE),1)
 # MPC00 at 0x50041000, the same SPU10/SPU20 slots.  Its memory is a 16 KB
 # SRAM carve: the top of the lower bank (0x2003C000-0x2003FFFF) on the
 # nRF54L15 and nRF54LM20A/B, whose RAM2 tier is outside it, and
-# 0x2002B000-0x2002EFFF on the nRF54LV10A, whose SRAM ends at 0x20030000.
+# 0x2002B000-0x2002EFFF on the nRF54LV10A and nRF54L10, whose SRAM ends at
+# 0x20030000.
 # tiku_flpr_ipc.h picks the base by device; FLPR_LDFLAGS hands the same base
 # to tiku_flpr.ld.  Each part's app linker script reserves the carve in
 # every build, so the layout does not change with TIKU_FLPR_ENABLE.
@@ -1943,7 +1957,7 @@ FLPR_CFLAGS   = -march=rv32emc_zicsr -mabi=ilp32e -Os -Wall -Wextra \
 # in tiku_flpr_ipc.h.
 FLPR_CFLAGS  += -D$(DEVICE_DEFINE)=1
 FLPR_LDFLAGS  =
-ifeq ($(MCU),nrf54lv10a)
+ifneq (,$(filter nrf54lv10a nrf54l10,$(MCU)))
 FLPR_LDFLAGS += -Wl,--defsym=__tiku_flpr_base_override=0x2002B000
 endif
 FLPR_OBJS     = $(FLPR_BUILD)/tiku_flpr_crt0.o $(FLPR_BUILD)/tiku_flpr_main.o
@@ -2908,9 +2922,9 @@ endif
 # and embedded in the firmware.  tiku_basic_module.c installs a module from
 # its /data file, and writes that file from the embedded image when it is
 # missing.  The slot address, install method and CPU per device:
-#   nrf54lm20a/b, nrf54l15, nrf54lv10a: RRAM slot 0x58000, Cortex-M33
-#                         (byte-writable XIP); one address for the whole
-#                         Nordic family
+#   nrf54lm20a/b, nrf54l15, nrf54l10, nrf54lv10a: RRAM slot 0x58000,
+#                         Cortex-M33 (byte-writable XIP); one address for
+#                         the whole Nordic family
 #   apollo510/apollo510b: no slot; the image is copied from /data into an
 #                         ITCM window at 0x1000 at every activate (Cortex-M55)
 #   apollo4l/apollo4p:    MRAM slot 0x70000,   Cortex-M4  (bootrom-programmed)
@@ -2934,7 +2948,7 @@ MOD_WRAP_ARCH  = arm
 # MSP430 and the ESP32-C61 set MOD_EMBED=carray: tools/mod_embed.py turns
 # the image into a C array compiled with the firmware's own CFLAGS.
 MOD_EMBED      = objcopy
-ifneq (,$(filter nrf54lm20a nrf54lm20b nrf54lv10a,$(MCU)))
+ifneq (,$(filter nrf54lm20a nrf54lm20b nrf54lv10a nrf54l10,$(MCU)))
 MOD_CPU_FLAGS  = -mcpu=cortex-m33 -mthumb -mfloat-abi=soft
 MOD_LDS        = basic/modules/mod_demo.ld
 else ifeq ($(MCU),nrf54l15)
@@ -2972,7 +2986,7 @@ MOD_LDS        = basic/modules/mod_demo_esp32c61.ld
 MOD_EMBED      = carray
 else
 $(error TIKU_BASIC_MODULE_ENABLE=1: no module slot for MCU=$(MCU) \
-        (supported: nrf54lm20a nrf54lm20b nrf54l15 nrf54lv10a rp2350 apollo510 \
+        (supported: nrf54lm20a nrf54lm20b nrf54l15 nrf54l10 nrf54lv10a rp2350 apollo510 \
         apollo510b apollo4l apollo4p msp430fr5994 msp430fr6989 esp32c61))
 endif
 # The slot is the top 32 KB of the code window, reserved at link time only
@@ -4764,6 +4778,8 @@ else ifeq ($(MCU),nrf54lm20b)
 JLINK_DEVICE_NORDIC ?= nRF54LM20B_M33
 else ifeq ($(MCU),nrf54lv10a)
 JLINK_DEVICE_NORDIC ?= nRF54LV10A_M33
+else ifeq ($(MCU),nrf54l10)
+JLINK_DEVICE_NORDIC ?= nRF54L10_M33
 else
 JLINK_DEVICE_NORDIC ?= nRF54L15_M33
 endif

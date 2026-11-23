@@ -16,7 +16,7 @@
 #ifndef TIKU_NORDIC_MDK_H_
 #define TIKU_NORDIC_MDK_H_
 
-#if defined(TIKU_DEVICE_NRF54L15)
+#if defined(TIKU_DEVICE_NRF54L15) || defined(TIKU_DEVICE_NRF54L10)
 #include <arch/nordic/mdk/nrf54l15.h>
 #elif defined(TIKU_DEVICE_NRF54LM20A)
 #include <arch/nordic/mdk/nrf54lm20a.h>
@@ -25,7 +25,7 @@
 #elif defined(TIKU_DEVICE_NRF54LV10A)
 #include <arch/nordic/mdk/nrf54lv10a.h>
 #else
-#error "No TikuOS Nordic device selected. Define TIKU_DEVICE_NRF54L15, TIKU_DEVICE_NRF54LM20A, TIKU_DEVICE_NRF54LM20B or TIKU_DEVICE_NRF54LV10A."
+#error "No TikuOS Nordic device selected. Define TIKU_DEVICE_NRF54L15, TIKU_DEVICE_NRF54L10, TIKU_DEVICE_NRF54LM20A, TIKU_DEVICE_NRF54LM20B or TIKU_DEVICE_NRF54LV10A."
 #endif
 
 #endif /* TIKU_NORDIC_MDK_H_ */

@@ -105,8 +105,9 @@
  * board define. With no nordic device selected the build falls back to the
  * nRF54L15, so a bare PLATFORM_NORDIC build still resolves a device.
  */
-#if !defined(TIKU_DEVICE_NRF54L15) && !defined(TIKU_DEVICE_NRF54LM20A) && \
-    !defined(TIKU_DEVICE_NRF54LM20B) && !defined(TIKU_DEVICE_NRF54LV10A)
+#if !defined(TIKU_DEVICE_NRF54L15) && !defined(TIKU_DEVICE_NRF54L10) && \
+    !defined(TIKU_DEVICE_NRF54LM20A) && !defined(TIKU_DEVICE_NRF54LM20B) && \
+    !defined(TIKU_DEVICE_NRF54LV10A)
 #define TIKU_DEVICE_NRF54L15 1
 #endif
 

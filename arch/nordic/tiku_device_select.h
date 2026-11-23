@@ -30,6 +30,8 @@
  */
 #if defined(TIKU_DEVICE_NRF54L15)
 #include <arch/nordic/devices/tiku_device_nrf54l15.h>
+#elif defined(TIKU_DEVICE_NRF54L10)
+#include <arch/nordic/devices/tiku_device_nrf54l10.h>
 #elif defined(TIKU_DEVICE_NRF54LM20A)
 #include <arch/nordic/devices/tiku_device_nrf54lm20a.h>
 #elif defined(TIKU_DEVICE_NRF54LM20B)
@@ -37,7 +39,7 @@
 #elif defined(TIKU_DEVICE_NRF54LV10A)
 #include <arch/nordic/devices/tiku_device_nrf54lv10a.h>
 #else
-#error "No TikuOS Nordic device selected. Define TIKU_DEVICE_NRF54L15, TIKU_DEVICE_NRF54LM20A, TIKU_DEVICE_NRF54LM20B or TIKU_DEVICE_NRF54LV10A."
+#error "No TikuOS Nordic device selected. Define TIKU_DEVICE_NRF54L15, TIKU_DEVICE_NRF54L10, TIKU_DEVICE_NRF54LM20A, TIKU_DEVICE_NRF54LM20B or TIKU_DEVICE_NRF54LV10A."
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -47,9 +49,9 @@
 /**
  * @brief Route the board-level pin-assignment header.
  *
- * TIKU_BOARD_NRF54L15_DK, _NRF54LM20_DK and _NRF54LV10_DK select the PCA10156,
- * PCA10184 and PCA10188 DKs.  When no board is defined, each device falls
- * back to its own DK as the primary board.
+ * TIKU_BOARD_NRF54L15_DK, _NRF54LM20_DK and _NRF54LV10_DK select the three
+ * DKs and TIKU_BOARD_TIKUCOMPUTER_NRF the TikuComputer-nRF board.  With no
+ * board defined, a device takes its DK, and the nRF54L10 TikuComputer-nRF.
  */
 #if defined(TIKU_BOARD_NRF54L15_DK)
 #include <arch/nordic/boards/tiku_board_nrf54l15_dk.h>
@@ -57,6 +59,11 @@
 #include <arch/nordic/boards/tiku_board_nrf54lm20_dk.h>
 #elif defined(TIKU_BOARD_NRF54LV10_DK)
 #include <arch/nordic/boards/tiku_board_nrf54lv10_dk.h>
+#elif defined(TIKU_BOARD_TIKUCOMPUTER_NRF)
+#include <arch/nordic/boards/tiku_board_tikucomputer_nrf.h>
+#elif defined(TIKU_DEVICE_NRF54L10)
+#define TIKU_BOARD_TIKUCOMPUTER_NRF 1
+#include <arch/nordic/boards/tiku_board_tikucomputer_nrf.h>
 #elif defined(TIKU_DEVICE_NRF54LV10A)
 #define TIKU_BOARD_NRF54LV10_DK 1
 #include <arch/nordic/boards/tiku_board_nrf54lv10_dk.h>
