@@ -22,6 +22,9 @@
 #endif
 #if (TIKU_IPC_ENABLE + 0)
 #include <kernel/vfs/tree/tiku_vfs_tree_ipc.h>
+#if (TIKU_PEER_ENABLE + 0)
+#include <services/peer/tiku_peer_vfs.h>
+#endif
 #endif
 #if TIKU_SHELL_ENABLE
 #include <shell/tiku_shell_vfs.h>
@@ -64,6 +67,11 @@ static int assemble(void)
 #if (TIKU_IPC_ENABLE + 0)
     nodes[config.node_count++] = (tiku_vfs_boot_node_t){
         "/sys", tiku_vfs_tree_ipc_get()
+    };
+#endif
+#if (TIKU_PEER_ENABLE + 0)
+    nodes[config.node_count++] = (tiku_vfs_boot_node_t){
+        "/sys", tiku_peer_vfs_get()
     };
 #endif
 #if TIKU_SHELL_ENABLE

@@ -144,6 +144,7 @@ per-platform semantics and the NVM region layout.
 | database tables in place on NVM, the media descriptor | `kernel/db/AGENTS.md` |
 | the console line, frames and channels | `services/console/AGENTS.md` |
 | message links over the console, IP or BLE | `services/link/AGENTS.md` |
+| peers: a board's other processors and their endpoints | `services/peer/AGENTS.md` |
 | tinymcp, the board as an MCP server | `services/tinymcp/AGENTS.md` |
 | the shell, a new command, an I/O backend | `shell/AGENTS.md` |
 | BASIC, modules, the module layout | `basic/AGENTS.md` |

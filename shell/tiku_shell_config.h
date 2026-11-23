@@ -532,6 +532,11 @@
 #    define TIKU_SHELL_CMD_UART 0
 #  endif
 #endif
+/* `peer` lists and switches the board's peers; it comes with
+ * TIKU_PEER_ENABLE=1, a Makefile -D. */
+#ifndef TIKU_SHELL_CMD_PEER
+#define TIKU_SHELL_CMD_PEER (TIKU_PEER_ENABLE + 0)  /**< peer - Other processors */
+#endif
 #ifndef TIKU_SHELL_CMD_TREE
 #define TIKU_SHELL_CMD_TREE   1  /**< tree   - Recursive VFS dump */
 #endif
@@ -751,6 +756,12 @@
 #if TIKU_SHELL_CMD_UART && !(TIKU_BOARD_HAS_LINK_UART + 0)
 #undef  TIKU_SHELL_CMD_UART
 #define TIKU_SHELL_CMD_UART 0
+#endif
+
+/* peer needs the board's peers in the build. */
+#if TIKU_SHELL_CMD_PEER && !(TIKU_PEER_ENABLE + 0)
+#undef  TIKU_SHELL_CMD_PEER
+#define TIKU_SHELL_CMD_PEER 0
 #endif
 
 /* lcd drives the segment-LCD controller (a board capability). */

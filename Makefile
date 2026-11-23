@@ -314,15 +314,16 @@ BOARD_CAPS_fr5994_launchpad    :=
 # switches, reachable from either processor.
 # Its MSP430 also switches the sensor rail, the bus switches and the nRF's
 # supply, reset and wake line (BOARD_CTL, interfaces/board/tiku_board_ctl.h).
-# A UART joins the two processors (LINK_UART, hal/tiku_uart_port_hal.h).
-BOARD_CAPS_tikucomputer_msp    := FRAM_SPI FRAM_I2C BOARD_CTL LINK_UART
+# A UART joins the two processors (LINK_UART, hal/tiku_uart_port_hal.h), and
+# each is the other's peer (PEER, interfaces/peer/tiku_peer.h).
+BOARD_CAPS_tikucomputer_msp    := FRAM_SPI FRAM_I2C BOARD_CTL LINK_UART PEER
 # The FR6989 LaunchPad has a segment LCD wired to LCD_C.  Its LCD cap defines
 # TIKU_BOARD_HAS_LCD=1, which the LCD driver and the shell's lcd command test.
 BOARD_CAPS_fr6989_launchpad    := LCD
 BOARD_CAPS_nrf54l15_dk         :=
 BOARD_CAPS_nrf54lm20_dk        :=
 BOARD_CAPS_nrf54lv10_dk        :=
-BOARD_CAPS_tikucomputer_nrf    := FRAM_SPI FRAM_I2C LINK_UART
+BOARD_CAPS_tikucomputer_nrf    := FRAM_SPI FRAM_I2C LINK_UART PEER
 BOARD_CAPS_nucleo_n657x0q      :=
 # EK-RA8P1: USBHS is the USB high-speed connector (J7), which
 # TIKU_DRV_USBHS_ENABLE requires.  The board's other parts (Ethernet PHY, OSPI
@@ -389,6 +390,19 @@ endif
 # -DTIKU_BOARD_HAS_* reaches the compiler, while the board_has gates, which
 # expand where they are used, still pass.
 BOARD_CAP_DEFINES := $(foreach c,$(BOARD_CAPS_$(BOARD)),-DTIKU_BOARD_HAS_$(c)=1)
+
+# TIKU_PEER_ENABLE=1 builds the board's peers (interfaces/peer/tiku_peer.h):
+# its other processors, each with a lifecycle and kernel IPC endpoints named
+# <peer>/<service>.  It needs a board that declares one (BOARD_CAPS PEER) and
+# switches kernel IPC on.  Default 0.
+TIKU_PEER_ENABLE ?= 0
+ifeq ($(TIKU_PEER_ENABLE),1)
+ifeq (,$(call board_has,PEER))
+$(error TIKU_PEER_ENABLE=1 needs a board that declares a peer (BOARD_CAPS \
+PEER); BOARD=$(BOARD) declares none)
+endif
+override TIKU_IPC_ENABLE := 1
+endif
 
 # A part the board declares (EMMC, PSRAM, NOR) gets its driver by default;
 # TIKU_DRV_<PART>_ENABLE=0 leaves it out.  Set before the overlays are
@@ -2815,6 +2829,23 @@ SRCS += services/ipc/tiku_ipc_npu.c interfaces/npu/tiku_npu_async.c
 endif
 ifeq ($(TIKU_SHELL_ENABLE),1)
 SRCS += shell/commands/tiku_shell_cmd_ipc.c
+endif
+ifeq ($(TIKU_PEER_ENABLE),1)
+CFLAGS += -DTIKU_PEER_ENABLE=1
+# Where the board's console is on the UART to its peer, the peer's frames
+# ride the console line, and the console's own pump serves them.
+PEER_CONSOLE_SEL_tikucomputer_msp := 1
+PEER_CONSOLE_SEL_tikucomputer_nrf := 30
+ifneq (,$(filter -DTIKU_BOARD_CONSOLE_SEL=$(PEER_CONSOLE_SEL_$(BOARD)),$(EXTRA_CFLAGS)))
+CFLAGS += -DTIKU_PEER_ON_CONSOLE=1
+endif
+SRCS += services/peer/tiku_peer.c services/peer/tiku_peer_wire.c
+SRCS += services/peer/tiku_peer_uart.c services/peer/tiku_peer_vfs.c
+SRCS += boot/tiku_boot_peer.c
+SRCS += hal/tiku_ipc_epoch_hal.c
+ifeq ($(TIKU_SHELL_ENABLE),1)
+SRCS += shell/commands/tiku_shell_cmd_peer.c
+endif
 endif
 ifeq ($(TIKU_PLATFORM)$(TIKU_LPCORE_ENABLE),esp32p41)
 CFLAGS += -DTIKU_IPC_HAS_SHARED=1

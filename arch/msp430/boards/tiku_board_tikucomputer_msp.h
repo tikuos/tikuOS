@@ -313,6 +313,22 @@
 /** @} */
 
 /*---------------------------------------------------------------------------*/
+/* PEER                                                                      */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @name The nRF54L as this side's peer (TIKU_PEER_ENABLE=1)
+ * Its services ride the link UART, or the console line when the console is
+ * on that UART (TIKU_BOARD_CONSOLE_SEL 1).
+ * @{
+ */
+#define TIKU_BOARD_PEER_NAME        "nrf"
+#if TIKU_BOARD_CONSOLE_SEL == 1
+#define TIKU_BOARD_PEER_ON_CONSOLE  1
+#endif
+/** @} */
+
+/*---------------------------------------------------------------------------*/
 /* FRAM PARTS                                                                */
 /*---------------------------------------------------------------------------*/
 

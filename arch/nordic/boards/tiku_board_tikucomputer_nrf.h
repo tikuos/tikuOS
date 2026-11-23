@@ -150,6 +150,19 @@
 /** @} */
 
 /*---------------------------------------------------------------------------*/
+/* PEER                                                                      */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief The MSP430 as this side's peer (TIKU_PEER_ENABLE=1): its services
+ *        ride the link UART, or the console line when the console is UARTE30.
+ */
+#define TIKU_BOARD_PEER_NAME        "msp"
+#if TIKU_BOARD_CONSOLE_SEL == 30
+#define TIKU_BOARD_PEER_ON_CONSOLE  1
+#endif
+
+/*---------------------------------------------------------------------------*/
 /* SENSOR-PORT BUSES                                                         */
 /*---------------------------------------------------------------------------*/
 

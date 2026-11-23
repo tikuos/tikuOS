@@ -57,6 +57,9 @@ static tiku_ipc_npu_context_t npu = { .ops = &tiku_npu_engine_ops };
 #include <services/ipc/tiku_ipc_shared.h>
 static tiku_ipc_shared_context_t shared;
 #endif
+#if (TIKU_PEER_ENABLE + 0)
+#include "tiku_boot_peer.h"
+#endif
 
 #if TIKU_IPC_ENABLE
 TIKU_WEAK const tiku_ipc_endpoint_config_t tiku_ipc_backend_table[] = {
@@ -91,6 +94,9 @@ TIKU_WEAK const tiku_ipc_endpoint_config_t tiku_ipc_backend_table[] = {
 #if (TIKU_IPC_CONSOLE_ENABLE + 0)
     {"console/ipc", &tiku_ipc_wire_ops, &console_wire, 0},
 #endif
+#if (TIKU_PEER_ENABLE + 0)
+    TIKU_BOOT_PEER_ROWS
+#endif
 };
 TIKU_WEAK const uint16_t tiku_ipc_backend_count =
     sizeof tiku_ipc_backend_table / sizeof tiku_ipc_backend_table[0];
@@ -113,8 +119,14 @@ int tiku_boot_ipc_init(void)
     if (tiku_ipc_shared_init(&shared, tiku_ipc_hal_shared(), 0xe0) != TIKU_IPC_OK)
         return -1;
 #endif
+#if (TIKU_PEER_ENABLE + 0)
+    if (tiku_peer_prepare_all() != TIKU_PEER_OK) return -1;
+#endif
     if (tiku_ipc_init(tiku_ipc_backend_table, tiku_ipc_backend_count) != TIKU_IPC_OK)
         return -1;
+#if (TIKU_PEER_ENABLE + 0)
+    if (tiku_peer_bind_all() != TIKU_PEER_OK) return -1;
+#endif
 #if (TIKU_HAS_SDIO_C6 + 0)
     for(uint16_t e=0;e<tiku_ipc_backend_count;e++)
         if(!strcmp(tiku_ipc_backend_table[e].name,"c6/bulk")&&tiku_boot_c6_init(e))return -1;
