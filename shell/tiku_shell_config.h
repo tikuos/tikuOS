@@ -514,6 +514,15 @@
 #    define TIKU_SHELL_CMD_FRAM 0
 #  endif
 #endif
+/* `board` switches the rail, the bus and the coprocessor on a board that has
+ * those controls (BOARD_CAPS BOARD_CTL); -DTIKU_SHELL_CMD_BOARD=0 drops it. */
+#ifndef TIKU_SHELL_CMD_BOARD
+#  if (TIKU_BOARD_HAS_BOARD_CTL + 0)
+#    define TIKU_SHELL_CMD_BOARD 1  /**< board  - Rail, bus, coprocessor */
+#  else
+#    define TIKU_SHELL_CMD_BOARD 0
+#  endif
+#endif
 #ifndef TIKU_SHELL_CMD_TREE
 #define TIKU_SHELL_CMD_TREE   1  /**< tree   - Recursive VFS dump */
 #endif
@@ -721,6 +730,12 @@
     !(TIKU_BOARD_HAS_FRAM_I2C + 0)
 #undef  TIKU_SHELL_CMD_FRAM
 #define TIKU_SHELL_CMD_FRAM 0
+#endif
+
+/* board drives the board's controls (a board capability). */
+#if TIKU_SHELL_CMD_BOARD && !(TIKU_BOARD_HAS_BOARD_CTL + 0)
+#undef  TIKU_SHELL_CMD_BOARD
+#define TIKU_SHELL_CMD_BOARD 0
 #endif
 
 /* lcd drives the segment-LCD controller (a board capability). */

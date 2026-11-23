@@ -204,6 +204,20 @@
 #define TIKU_BOARD_ADC_AVAILABLE    1
 
 /*---------------------------------------------------------------------------*/
+/* BOARD CONTROLS                                                            */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @name Words the board command uses for the two processors
+ * tiku_board_tikucomputer_msp.c implements interfaces/board/tiku_board_ctl.h
+ * on this board's control lines.
+ * @{
+ */
+#define TIKU_BOARD_CTL_HOST_NAME    "msp"
+#define TIKU_BOARD_CTL_COPROC_NAME  "nrf"
+/** @} */
+
+/*---------------------------------------------------------------------------*/
 /* FRAM PARTS                                                                */
 /*---------------------------------------------------------------------------*/
 

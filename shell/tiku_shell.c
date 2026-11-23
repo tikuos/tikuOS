@@ -289,6 +289,9 @@
 #if TIKU_SHELL_CMD_FRAM
 #include "commands/tiku_shell_cmd_fram.h"
 #endif
+#if TIKU_SHELL_CMD_BOARD
+#include "commands/tiku_shell_cmd_board.h"
+#endif
 #if TIKU_SHELL_CMD_TREE
 #include "commands/tiku_shell_cmd_tree.h"
 #endif
@@ -822,6 +825,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_FRAM
     {"fram",    "External FRAM parts",         tiku_shell_cmd_fram},
+#endif
+#if TIKU_SHELL_CMD_BOARD
+    {"board",   "Rail, bus and coprocessor",   tiku_shell_cmd_board},
 #endif
 #if TIKU_SHELL_CMD_PEEK
     {"peek",    "Read N bytes from address",   tiku_shell_cmd_peek},

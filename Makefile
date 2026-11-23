@@ -312,7 +312,9 @@ BOARD_CAPS_fr5969_launchpad    :=
 BOARD_CAPS_fr5994_launchpad    :=
 # TikuComputer-nRF: the FM25V10 (U12) and FM24V02A (U13) behind the bus
 # switches, reachable from either processor.
-BOARD_CAPS_tikucomputer_msp    := FRAM_SPI FRAM_I2C
+# Its MSP430 also switches the sensor rail, the bus switches and the nRF's
+# supply, reset and wake line (BOARD_CTL, interfaces/board/tiku_board_ctl.h).
+BOARD_CAPS_tikucomputer_msp    := FRAM_SPI FRAM_I2C BOARD_CTL
 # The FR6989 LaunchPad has a segment LCD wired to LCD_C.  Its LCD cap defines
 # TIKU_BOARD_HAS_LCD=1, which the LCD driver and the shell's lcd command test.
 BOARD_CAPS_fr6989_launchpad    := LCD
@@ -2624,6 +2626,9 @@ SRCS += interfaces/onewire/tiku_onewire.c
 ifneq (,$(call board_has,FRAM_SPI)$(call board_has,FRAM_I2C))
 SRCS += interfaces/fram/tiku_fram.c
 endif
+ifeq ($(BOARD),tikucomputer_msp)
+SRCS += arch/msp430/boards/tiku_board_tikucomputer_msp.c
+endif
 # Segment-LCD interface: tiku_lcd.c is always compiled, and its calls do
 # nothing when TIKU_BOARD_HAS_LCD is 0.  The MSP430 driver below compiles to
 # an empty translation unit unless the device has an LCD_C controller
@@ -3103,6 +3108,9 @@ SRCS += shell/commands/tiku_shell_cmd_spi.c
 endif
 ifneq (,$(call board_has,FRAM_SPI)$(call board_has,FRAM_I2C))
 SRCS += shell/commands/tiku_shell_cmd_fram.c
+endif
+ifneq (,$(call board_has,BOARD_CTL))
+SRCS += shell/commands/tiku_shell_cmd_board.c
 endif
 ifneq (,$(findstring TIKU_SHELL_CMD_DELAY=1,$(EXTRA_CFLAGS)))
 SRCS += shell/commands/tiku_shell_cmd_delay.c
