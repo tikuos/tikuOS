@@ -365,6 +365,41 @@ These checks do not establish visible color order, panel image quality,
 touch-coordinate alignment or touch latency. They do not qualify true cold
 boot or simultaneous audio, SD and radio traffic.
 
+## Pixel Processing Accelerator
+
+`tiku_ppa_arch.c` converts a block of an ARGB8888 picture into a block of an
+RGB565 picture through the PPA's scale-rotate-mirror engine at scale 1, fed
+by 2D-DMA TX channel 3 and RX channel 2. Each channel keeps its top bits, as
+the CPU conversion `((c >> 8) & 0xf800) | ((c >> 5) & 0x07e0) | ((c >> 3) &
+0x001f)` does. `tiku_s31_ppa_convert()` starts a job and `tiku_s31_ppa_poll()`
+reports it; one job runs at a time, from the kernel thread. Pictures lie in
+internal SRAM or PSRAM, and an output in PSRAM starts on a 64-byte line.
+
+The first job puts TEE master 81, the 2D-DMA, in trusted mode. In the mode
+the boot leaves it, the channels read no descriptor from SRAM or PSRAM and
+report descriptor errors. Initialization refuses a mode the boot locked. The
+same job enables and resets both engines' clocks, leaves their memories'
+power to the PMU and resets the 2D-DMA's AXI FIFOs. The descriptors are
+statics in internal SRAM, which the S31 does not cache.
+
+Before a job, the input block's PSRAM lines are written back and the
+output's written back and dropped, in commands of at most 16 KiB with
+interrupts masked; after it, the output's lines are dropped again. Neither
+picture changes until the poll reports the end. A job ends with the in
+channel's end of frame, a descriptor or FIFO fault, the scaler's parameter
+error, whose flags `tiku_s31_ppa_errors()` returns, or a timeout of 20 ms and
+1 µs for every 8 output bytes.
+
+The channels move 128-byte bursts. At 320 MHz with 80 MHz PSRAM a full
+800×480 frame takes 28 ms on the engine and 46 ms in the CPU loop; starting
+the job, the cache commands among it, takes 0.3 ms. Build
+`TikuBench/tests/esp32s31/ppa_app/ppa_app.mk` as the `s31-local`
+application manifest and judge its console log with
+`TikuBench/tests/esp32s31/ppa_app/check.py`: it compares the engine's output
+with the CPU conversion over full frames, odd blocks, single pixels and rows,
+an SRAM input and dirty or cached lines, and checks the refusals. The host
+model is `TikuBench/tests/host/kernel/test_esp32s31_ppa.c`.
+
 ## Register sources
 
 Register definitions and clock behavior were checked against ESP-IDF
