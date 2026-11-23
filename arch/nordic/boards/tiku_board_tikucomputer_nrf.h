@@ -74,16 +74,32 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Console on UARTE20, P1.09 (TXD) and P1.10 (RXD), 115200 8N1.
+ * @brief Console UARTE, 115200 8N1, picked by TIKU_BOARD_CONSOLE_SEL.
  *
- * Both pins are on header J5, for a 3.3 V USB-serial adapter.
+ * 20 (default) is UARTE20 on P1.09 (TXD) and P1.10 (RXD), header J5; 30 is
+ * UARTE30 on P0.00 (TXD) and P0.01 (RXD), the board's UART to its MSP430.
  */
+#ifndef TIKU_BOARD_CONSOLE_SEL
+#define TIKU_BOARD_CONSOLE_SEL      20
+#endif
+
+#if TIKU_BOARD_CONSOLE_SEL == 20
 #define TIKU_BOARD_CONSOLE_UARTE    NRF_UARTE20_S
 #define TIKU_BOARD_CONSOLE_UARTE_IRQN 198  /* SERIAL20_IRQn (MDK enum)        */
 #define TIKU_BOARD_UART_TX_PORT     1u
 #define TIKU_BOARD_UART_TX_PIN      9u
 #define TIKU_BOARD_UART_RX_PORT     1u
 #define TIKU_BOARD_UART_RX_PIN      10u
+#elif TIKU_BOARD_CONSOLE_SEL == 30
+#define TIKU_BOARD_CONSOLE_UARTE    NRF_UARTE30_S
+#define TIKU_BOARD_CONSOLE_UARTE_IRQN 260  /* SERIAL30_IRQn (MDK enum)        */
+#define TIKU_BOARD_UART_TX_PORT     0u
+#define TIKU_BOARD_UART_TX_PIN      0u
+#define TIKU_BOARD_UART_RX_PORT     0u
+#define TIKU_BOARD_UART_RX_PIN      1u
+#else
+#error "Unsupported TIKU_BOARD_CONSOLE_SEL (expected 20 or 30)"
+#endif
 
 /** @brief No-op: the UARTE driver routes the pins through its PSEL regs. */
 #define TIKU_BOARD_UART_PINS_INIT() do { } while (0)
