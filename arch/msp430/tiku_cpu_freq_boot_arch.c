@@ -771,6 +771,11 @@ void tiku_cpu_boot_msp430_init(void)
      CPU_FREQ_PRINTF("Initializing all pins as outputs and driven low\n");
      tiku_cpu_boot_msp430_pins_init_low();
 
+#ifdef TIKU_BOARD_PINS_SAFE_INIT
+     /* Board lines whose safe level is not output-low. */
+     TIKU_BOARD_PINS_SAFE_INIT();
+#endif
+
      /* Clearing LOCKLPM5 applies the port settings above to the pins; clock
       * setup runs after this. */
      PM5CTL0 &= ~LOCKLPM5;

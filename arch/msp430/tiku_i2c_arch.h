@@ -8,7 +8,7 @@
  * tiku_i2c_arch.h - I2C master driver for MSP430 eUSCI_B (architecture layer)
  *
  * Declares the architecture-specific I2C functions implemented by
- * tiku_i2c_arch.c using the eUSCI_B0 peripheral. These are called
+ * tiku_i2c_arch.c on the eUSCI_B module the board names. These are called
  * by the platform-independent bus layer (interfaces/bus/tiku_i2c_bus.c).
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -30,9 +30,9 @@
 /**
  * @brief Architecture-specific I2C initialization.
  *
- * Configures eUSCI_B0 for I2C master mode from SMCLK and sets up SDA/SCL
- * pins via board macros.  TIKU_I2C_SPEED_FAST takes the board's 400 kHz
- * prescaler; any other speed takes its 100 kHz one.
+ * Configures the board's eUSCI_B module (TIKU_BOARD_I2C_MODULE) as an I2C
+ * master from SMCLK on the board's SDA/SCL pins.  TIKU_I2C_SPEED_FAST takes
+ * the board's 400 kHz prescaler; any other speed takes its 100 kHz one.
  *
  * @param config  Pointer to I2C configuration
  * @return TIKU_I2C_OK
@@ -42,7 +42,7 @@ int tiku_i2c_arch_init(const tiku_i2c_config_t *config);
 /**
  * @brief Architecture-specific I2C shutdown.
  *
- * Places eUSCI_B0 in software reset.
+ * Places the eUSCI_B module in software reset.
  */
 void tiku_i2c_arch_close(void);
 

@@ -226,7 +226,7 @@ DEFAULT_BOARD_esp32p4       := olimex_esp32p4_pc
 # BOARD -> the macro that selects its header, and the platform it belongs to.
 # A new board goes in KNOWN_BOARDS, gets a row in each table here and in
 # BOARD_CAPS_ below, and gets a board header.
-KNOWN_BOARDS := fr5969_launchpad fr5994_launchpad fr6989_launchpad \
+KNOWN_BOARDS := fr5969_launchpad fr5994_launchpad fr6989_launchpad tikucomputer_msp \
                 pico2 pico2w apollo4l_evb apollo4p_evb \
                 apollo510_evb apollo510b_evb nrf54l15_dk nrf54lm20_dk \
                 nrf54lv10_dk tikucomputer_nrf nucleo_n657x0q ek_ra8p1 esp32c61_devkitc esp32c5_devkitc1 olimex_esp32p4_pc \
@@ -235,6 +235,9 @@ KNOWN_BOARDS := fr5969_launchpad fr5994_launchpad fr6989_launchpad \
 BOARD_DEFINE_fr5969_launchpad  := TIKU_BOARD_FR5969_LAUNCHPAD
 BOARD_DEFINE_fr5994_launchpad  := TIKU_BOARD_FR5994_LAUNCHPAD
 BOARD_DEFINE_fr6989_launchpad  := TIKU_BOARD_FR6989_LAUNCHPAD
+# tikucomputer_msp: the TikuComputer-nRF board's MSP430FR5994, the side that
+# powers the nRF54L module and owns the sensor port.
+BOARD_DEFINE_tikucomputer_msp  := TIKU_BOARD_TIKUCOMPUTER_MSP
 BOARD_DEFINE_pico2             := TIKU_BOARD_RPI_PICO2
 BOARD_DEFINE_pico2w            := TIKU_BOARD_RPI_PICO2_W
 BOARD_DEFINE_apollo4l_evb      := TIKU_BOARD_APOLLO4L_EVB
@@ -260,6 +263,7 @@ BOARD_DEFINE_firebeetle2_esp32p4 := TIKU_BOARD_FIREBEETLE2_ESP32P4
 BOARD_PLATFORM_fr5969_launchpad  := msp430
 BOARD_PLATFORM_fr5994_launchpad  := msp430
 BOARD_PLATFORM_fr6989_launchpad  := msp430
+BOARD_PLATFORM_tikucomputer_msp  := msp430
 BOARD_PLATFORM_pico2             := rp2350
 BOARD_PLATFORM_pico2w            := rp2350
 BOARD_PLATFORM_apollo4l_evb      := ambiq
@@ -306,6 +310,7 @@ BOARD_CAPS_apollo4l_evb        :=
 BOARD_CAPS_apollo4p_evb        :=
 BOARD_CAPS_fr5969_launchpad    :=
 BOARD_CAPS_fr5994_launchpad    :=
+BOARD_CAPS_tikucomputer_msp    :=
 # The FR6989 LaunchPad has a segment LCD wired to LCD_C.  Its LCD cap defines
 # TIKU_BOARD_HAS_LCD=1, which the LCD driver and the shell's lcd command test.
 BOARD_CAPS_fr6989_launchpad    := LCD
@@ -1077,6 +1082,16 @@ endif
 ifneq ($(BASIC_PROGRAM),)
 override TIKU_SHELL_BASIC_ENABLE := 1
 override MEMORY_MODEL := large
+endif
+
+# 4. The TikuComputer-nRF's MSP430 takes no BASIC.  It is the board's
+#    always-on supervisor, its FRAM is kept for the pair's state, and the
+#    interpreter runs on the board's nRF54L.
+ifeq ($(BOARD)$(TIKU_SHELL_BASIC_ENABLE),tikucomputer_msp1)
+$(error BOARD=tikucomputer_msp builds without BASIC: the MSP430 is the \
+board's always-on supervisor and its FRAM is kept for the pair's state. \
+BASIC runs on the board's nRF54L (MCU=nrf54l10 TIKU_SHELL_BASIC_ENABLE=1). \
+Drop TIKU_SHELL_BASIC_ENABLE and BASIC_PROGRAM from this build)
 endif
 
 # ---------------------------------------------------------------------------

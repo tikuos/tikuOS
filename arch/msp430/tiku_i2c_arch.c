@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_i2c_arch.c - I2C master driver for MSP430 eUSCI_B0.
+ * tiku_i2c_arch.c - I2C master driver for an MSP430 eUSCI_B module.
  *
- * Blocking master transactions, with pin routing and clock prescaler taken
- * from the board header's TIKU_BOARD_I2C_* macros.  Every busy-wait gives up
+ * Blocking master transactions, with the module, pin routing and clock
+ * prescaler taken from the board header's TIKU_BOARD_I2C_* macros.  Every busy-wait gives up
  * after I2C_TIMEOUT polls, so a stuck bus cannot hang the caller.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -24,6 +24,38 @@
 #ifdef TIKU_BOARD_I2C_BRW_100K  /* Board supports I2C */
 
 /*---------------------------------------------------------------------------*/
+/* MODULE SELECTION                                                          */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * The board header's TIKU_BOARD_I2C_MODULE picks the eUSCI_B module behind
+ * the bus: 0 (eUSCI_B0, the default) or 2 (eUSCI_B2).
+ */
+#ifndef TIKU_BOARD_I2C_MODULE
+#define TIKU_BOARD_I2C_MODULE 0
+#endif
+
+#if TIKU_BOARD_I2C_MODULE == 0
+#define TIKU_I2C_CTLW0   UCB0CTLW0
+#define TIKU_I2C_CTLW1   UCB0CTLW1
+#define TIKU_I2C_BRW     UCB0BRW
+#define TIKU_I2C_I2CSA   UCB0I2CSA
+#define TIKU_I2C_IFG     UCB0IFG
+#define TIKU_I2C_RXBUF   UCB0RXBUF
+#define TIKU_I2C_TXBUF   UCB0TXBUF
+#elif TIKU_BOARD_I2C_MODULE == 2
+#define TIKU_I2C_CTLW0   UCB2CTLW0
+#define TIKU_I2C_CTLW1   UCB2CTLW1
+#define TIKU_I2C_BRW     UCB2BRW
+#define TIKU_I2C_I2CSA   UCB2I2CSA
+#define TIKU_I2C_IFG     UCB2IFG
+#define TIKU_I2C_RXBUF   UCB2RXBUF
+#define TIKU_I2C_TXBUF   UCB2TXBUF
+#else
+#error "TIKU_BOARD_I2C_MODULE must be 0 (eUSCI_B0) or 2 (eUSCI_B2)"
+#endif
+
+/*---------------------------------------------------------------------------*/
 /* CONSTANTS                                                                 */
 /*---------------------------------------------------------------------------*/
 
@@ -35,7 +67,7 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Wait for a flag in UCB0IFG with timeout and NACK detection.
+ * @brief Wait for a flag in TIKU_I2C_IFG with timeout and NACK detection.
  *
  * A NACK sends STOP, waits up to I2C_TIMEOUT polls for it to complete and
  * returns TIKU_I2C_ERR_NACK; a timeout requests STOP and returns
@@ -49,18 +81,18 @@ i2c_wait_flag(uint16_t flag)
 {
     uint16_t timeout = I2C_TIMEOUT;
 
-    while (!(UCB0IFG & flag)) {
-        if (UCB0IFG & UCNACKIFG) {
-            UCB0IFG &= ~UCNACKIFG;
-            UCB0CTLW0 |= UCTXSTP;
+    while (!(TIKU_I2C_IFG & flag)) {
+        if (TIKU_I2C_IFG & UCNACKIFG) {
+            TIKU_I2C_IFG &= ~UCNACKIFG;
+            TIKU_I2C_CTLW0 |= UCTXSTP;
             timeout = I2C_TIMEOUT;
-            while ((UCB0CTLW0 & UCTXSTP) && --timeout != 0) {
+            while ((TIKU_I2C_CTLW0 & UCTXSTP) && --timeout != 0) {
                 /* wait for STOP to complete */
             }
             return TIKU_I2C_ERR_NACK;
         }
         if (--timeout == 0) {
-            UCB0CTLW0 |= UCTXSTP;
+            TIKU_I2C_CTLW0 |= UCTXSTP;
             return TIKU_I2C_ERR_TIMEOUT;
         }
     }
@@ -78,7 +110,7 @@ i2c_wait_stop(void)
 {
     uint16_t timeout = I2C_TIMEOUT;
 
-    while (UCB0CTLW0 & UCTXSTP) {
+    while (TIKU_I2C_CTLW0 & UCTXSTP) {
         if (--timeout == 0) {
             return TIKU_I2C_ERR_TIMEOUT;
         }
@@ -97,24 +129,24 @@ tiku_i2c_arch_init(const tiku_i2c_config_t *config)
     /* Select I2C function on board-specific SDA/SCL pins */
     TIKU_BOARD_I2C_PINS_INIT();
 
-    /* Put eUSCI_B0 in reset before configuration */
-    UCB0CTLW0 = UCSWRST;
+    /* Put the module in reset before configuration */
+    TIKU_I2C_CTLW0 = UCSWRST;
 
     /* I2C master mode, synchronous, SMCLK source */
-    UCB0CTLW0 |= UCMODE_3 | UCMST | UCSSEL__SMCLK | UCSYNC;
+    TIKU_I2C_CTLW0 |= UCMODE_3 | UCMST | UCSSEL__SMCLK | UCSYNC;
 
     /* Set clock prescaler for requested speed */
     if (config->speed == TIKU_I2C_SPEED_FAST) {
-        UCB0BRW = TIKU_BOARD_I2C_BRW_400K;
+        TIKU_I2C_BRW = TIKU_BOARD_I2C_BRW_400K;
     } else {
-        UCB0BRW = TIKU_BOARD_I2C_BRW_100K;
+        TIKU_I2C_BRW = TIKU_BOARD_I2C_BRW_100K;
     }
 
     /* UCASTP_0: no automatic STOP; the driver sends STOP itself */
-    UCB0CTLW1 = UCASTP_0;
+    TIKU_I2C_CTLW1 = UCASTP_0;
 
     /* Release from reset — I2C is now active */
-    UCB0CTLW0 &= ~UCSWRST;
+    TIKU_I2C_CTLW0 &= ~UCSWRST;
 
     I2C_PRINTF("init: speed=%s\n",
                config->speed == TIKU_I2C_SPEED_FAST ? "400k" : "100k");
@@ -125,7 +157,7 @@ tiku_i2c_arch_init(const tiku_i2c_config_t *config)
 void
 tiku_i2c_arch_close(void)
 {
-    UCB0CTLW0 |= UCSWRST;
+    TIKU_I2C_CTLW0 |= UCSWRST;
     I2C_PRINTF("close\n");
 }
 
@@ -136,13 +168,13 @@ tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len)
     int rc;
 
     /* Clear stale interrupt flags from any previous transaction */
-    UCB0IFG = 0;
+    TIKU_I2C_IFG = 0;
 
     /* Set slave address */
-    UCB0I2CSA = addr;
+    TIKU_I2C_I2CSA = addr;
 
     /* Transmitter mode, generate START + address */
-    UCB0CTLW0 |= UCTR | UCTXSTT;
+    TIKU_I2C_CTLW0 |= UCTR | UCTXSTT;
 
     for (i = 0; i < len; i++) {
         /* Wait for TX buffer ready */
@@ -152,7 +184,7 @@ tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len)
         }
 
         /* Load next byte */
-        UCB0TXBUF = buf[i];
+        TIKU_I2C_TXBUF = buf[i];
     }
 
     /* Wait for final byte to shift out */
@@ -162,7 +194,7 @@ tiku_i2c_arch_write(uint8_t addr, const uint8_t *buf, uint16_t len)
     }
 
     /* Generate STOP */
-    UCB0CTLW0 |= UCTXSTP;
+    TIKU_I2C_CTLW0 |= UCTXSTP;
 
     return i2c_wait_stop();
 }
@@ -175,14 +207,14 @@ tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len)
     int rc;
 
     /* Clear stale interrupt flags from any previous transaction */
-    UCB0IFG = 0;
+    TIKU_I2C_IFG = 0;
 
     /* Set slave address */
-    UCB0I2CSA = addr;
+    TIKU_I2C_I2CSA = addr;
 
     /* Receiver mode, generate START + address */
-    UCB0CTLW0 &= ~UCTR;
-    UCB0CTLW0 |= UCTXSTT;
+    TIKU_I2C_CTLW0 &= ~UCTR;
+    TIKU_I2C_CTLW0 |= UCTXSTT;
 
     if (len == 1) {
         /*
@@ -190,19 +222,19 @@ tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len)
          * while the byte is being received, so only one byte is clocked.
          */
         timeout = I2C_TIMEOUT;
-        while ((UCB0CTLW0 & UCTXSTT) && !(UCB0IFG & UCNACKIFG)) {
+        while ((TIKU_I2C_CTLW0 & UCTXSTT) && !(TIKU_I2C_IFG & UCNACKIFG)) {
             if (--timeout == 0) {
-                UCB0CTLW0 |= UCTXSTP;
+                TIKU_I2C_CTLW0 |= UCTXSTP;
                 return TIKU_I2C_ERR_TIMEOUT;
             }
         }
-        UCB0CTLW0 |= UCTXSTP;
+        TIKU_I2C_CTLW0 |= UCTXSTP;
 
         rc = i2c_wait_flag(UCRXIFG0);
         if (rc != TIKU_I2C_OK) {
             return rc;
         }
-        buf[0] = (uint8_t)UCB0RXBUF;
+        buf[0] = (uint8_t)TIKU_I2C_RXBUF;
 
         return i2c_wait_stop();
     }
@@ -211,14 +243,14 @@ tiku_i2c_arch_read(uint8_t addr, uint8_t *buf, uint16_t len)
     for (i = 0; i < len; i++) {
         /* Issue STOP before reading the last byte */
         if (i == len - 1) {
-            UCB0CTLW0 |= UCTXSTP;
+            TIKU_I2C_CTLW0 |= UCTXSTP;
         }
 
         rc = i2c_wait_flag(UCRXIFG0);
         if (rc != TIKU_I2C_OK) {
             return rc;
         }
-        buf[i] = (uint8_t)UCB0RXBUF;
+        buf[i] = (uint8_t)TIKU_I2C_RXBUF;
     }
 
     return i2c_wait_stop();
@@ -230,29 +262,29 @@ tiku_i2c_arch_probe(uint8_t addr)
     int rc;
 
     /* Clear stale interrupt flags from any previous transaction */
-    UCB0IFG = 0;
+    TIKU_I2C_IFG = 0;
 
     /* Set slave address */
-    UCB0I2CSA = addr;
+    TIKU_I2C_I2CSA = addr;
 
     /* Transmitter mode, generate START + address (no data follows) */
-    UCB0CTLW0 |= UCTR | UCTXSTT;
+    TIKU_I2C_CTLW0 |= UCTR | UCTXSTT;
 
     {
         uint16_t timeout = I2C_TIMEOUT;
-        while ((UCB0CTLW0 & UCTXSTT) && !(UCB0IFG & UCNACKIFG)) {
+        while ((TIKU_I2C_CTLW0 & UCTXSTT) && !(TIKU_I2C_IFG & UCNACKIFG)) {
             if (--timeout == 0u) {
-                UCB0CTLW0 |= UCTXSTP;
+                TIKU_I2C_CTLW0 |= UCTXSTP;
                 return TIKU_I2C_ERR_TIMEOUT;
             }
         }
     }
-    rc = (UCB0IFG & UCNACKIFG) ? TIKU_I2C_ERR_NACK : TIKU_I2C_OK;
-    UCB0CTLW0 |= UCTXSTP;
+    rc = (TIKU_I2C_IFG & UCNACKIFG) ? TIKU_I2C_ERR_NACK : TIKU_I2C_OK;
+    TIKU_I2C_CTLW0 |= UCTXSTP;
     if (i2c_wait_stop() != TIKU_I2C_OK) {
         return rc == TIKU_I2C_ERR_NACK ? rc : TIKU_I2C_ERR_TIMEOUT;
     }
-    if (UCB0IFG & UCNACKIFG) {
+    if (TIKU_I2C_IFG & UCNACKIFG) {
         rc = TIKU_I2C_ERR_NACK;
     }
     return rc;
@@ -268,21 +300,21 @@ tiku_i2c_arch_write_read(uint8_t addr,
     int rc;
 
     /* Clear stale interrupt flags from any previous transaction */
-    UCB0IFG = 0;
+    TIKU_I2C_IFG = 0;
 
     /* --- Write phase --------------------------------------------------- */
 
-    UCB0I2CSA = addr;
+    TIKU_I2C_I2CSA = addr;
 
     /* Transmitter mode, generate START */
-    UCB0CTLW0 |= UCTR | UCTXSTT;
+    TIKU_I2C_CTLW0 |= UCTR | UCTXSTT;
 
     for (i = 0; i < tx_len; i++) {
         rc = i2c_wait_flag(UCTXIFG0);
         if (rc != TIKU_I2C_OK) {
             return rc;
         }
-        UCB0TXBUF = tx_buf[i];
+        TIKU_I2C_TXBUF = tx_buf[i];
     }
 
     /* Wait for last TX byte to finish */
@@ -294,25 +326,25 @@ tiku_i2c_arch_write_read(uint8_t addr,
     /* --- Repeated START into read phase -------------------------------- */
 
     /* Switch to receiver mode and issue repeated START */
-    UCB0CTLW0 &= ~UCTR;
-    UCB0CTLW0 |= UCTXSTT;
+    TIKU_I2C_CTLW0 &= ~UCTR;
+    TIKU_I2C_CTLW0 |= UCTXSTT;
 
     if (rx_len == 1) {
         /* Single-byte read: STOP right after address phase */
         timeout = I2C_TIMEOUT;
-        while (UCB0CTLW0 & UCTXSTT) {
+        while (TIKU_I2C_CTLW0 & UCTXSTT) {
             if (--timeout == 0) {
-                UCB0CTLW0 |= UCTXSTP;
+                TIKU_I2C_CTLW0 |= UCTXSTP;
                 return TIKU_I2C_ERR_TIMEOUT;
             }
         }
-        UCB0CTLW0 |= UCTXSTP;
+        TIKU_I2C_CTLW0 |= UCTXSTP;
 
         rc = i2c_wait_flag(UCRXIFG0);
         if (rc != TIKU_I2C_OK) {
             return rc;
         }
-        rx_buf[0] = (uint8_t)UCB0RXBUF;
+        rx_buf[0] = (uint8_t)TIKU_I2C_RXBUF;
 
         return i2c_wait_stop();
     }
@@ -320,14 +352,14 @@ tiku_i2c_arch_write_read(uint8_t addr,
     /* Multi-byte read */
     for (i = 0; i < rx_len; i++) {
         if (i == rx_len - 1) {
-            UCB0CTLW0 |= UCTXSTP;
+            TIKU_I2C_CTLW0 |= UCTXSTP;
         }
 
         rc = i2c_wait_flag(UCRXIFG0);
         if (rc != TIKU_I2C_OK) {
             return rc;
         }
-        rx_buf[i] = (uint8_t)UCB0RXBUF;
+        rx_buf[i] = (uint8_t)TIKU_I2C_RXBUF;
     }
 
     return i2c_wait_stop();

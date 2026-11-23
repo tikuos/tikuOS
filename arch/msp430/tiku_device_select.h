@@ -53,7 +53,8 @@
 
 #if !defined(TIKU_BOARD_FR5969_LAUNCHPAD) && \
     !defined(TIKU_BOARD_FR5994_LAUNCHPAD) && \
-    !defined(TIKU_BOARD_FR6989_LAUNCHPAD)
+    !defined(TIKU_BOARD_FR6989_LAUNCHPAD) && \
+    !defined(TIKU_BOARD_TIKUCOMPUTER_MSP)
 
 #if defined(TIKU_DEVICE_MSP430FR5969)
 #define TIKU_BOARD_FR5969_LAUNCHPAD 1
@@ -75,6 +76,8 @@
 #include <arch/msp430/boards/tiku_board_fr5994_launchpad.h>
 #elif defined(TIKU_BOARD_FR6989_LAUNCHPAD)
 #include <arch/msp430/boards/tiku_board_fr6989_launchpad.h>
+#elif defined(TIKU_BOARD_TIKUCOMPUTER_MSP)
+#include <arch/msp430/boards/tiku_board_tikucomputer_msp.h>
 #else
 #error "No TikuOS board selected. Pass BOARD=<name> to make (see KNOWN_BOARDS in the Makefile)."
 #endif

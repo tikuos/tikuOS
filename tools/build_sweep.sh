@@ -38,7 +38,8 @@ done
 SHELL_FLAGS="TIKU_SHELL_ENABLE=1 TIKU_SHELL_BASIC_ENABLE=1"
 
 # "<mcu>|<extra make flags>".  fr6989 builds without BASIC: BASIC's arena does
-# not fit in that part's 128 KB of FRAM.
+# not fit in that part's 128 KB of FRAM.  The TikuComputer-nRF's MSP430 takes
+# no BASIC: the Makefile refuses it for that board.
 TARGETS="
 nrf54lm20a|$SHELL_FLAGS
 nrf54lm20b|$SHELL_FLAGS
@@ -56,6 +57,7 @@ ra8p1|$SHELL_FLAGS
 esp32c61|$SHELL_FLAGS
 esp32c5|$SHELL_FLAGS
 msp430fr5994|$SHELL_FLAGS
+msp430fr5994|TIKU_SHELL_ENABLE=1 BOARD=tikucomputer_msp
 msp430fr6989|TIKU_SHELL_ENABLE=1
 "
 

@@ -1,0 +1,223 @@
+/*
+ * Tiku Operating System v0.06
+ * Simple. Persistent. Intelligent.
+ * http://tiku-os.org
+ *
+ * Authors: Ambuj Varshney <ambuj@tiku-os.org>
+ *
+ * tiku_board_tikucomputer_msp.h - TikuComputer-nRF board, MSP430 side.
+ *
+ * Pins of the MSP430FR5994 on the TikuComputer-nRF board: one LED, one
+ * button, the console on header J11, the sensor-port buses behind the three
+ * bus switches, and the lines that power, reset and wake the nRF54L module.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#ifndef TIKU_BOARD_TIKUCOMPUTER_MSP_H_
+#define TIKU_BOARD_TIKUCOMPUTER_MSP_H_
+
+/*---------------------------------------------------------------------------*/
+/* BOARD IDENTIFICATION                                                      */
+/*---------------------------------------------------------------------------*/
+
+/** Human-readable board name. */
+#define TIKU_BOARD_NAME             "TikuComputer-nRF (MSP430)"
+
+/*---------------------------------------------------------------------------*/
+/* LED - P1.0                                                                */
+/*---------------------------------------------------------------------------*/
+
+/** Number of on-board LEDs; interfaces/led indexes them from 0. */
+#define TIKU_BOARD_LED_COUNT        1
+
+/**
+ * @name LED on P1.0, lit when the pin is high
+ * INIT makes the pin an output and turns the LED off.
+ * @{
+ */
+#define TIKU_BOARD_LED1_INIT()      do { P1DIR |= BIT0; P1OUT &= ~BIT0; } while(0)
+#define TIKU_BOARD_LED1_ON()        do { P1OUT |= BIT0; } while(0)
+#define TIKU_BOARD_LED1_OFF()       do { P1OUT &= ~BIT0; } while(0)
+#define TIKU_BOARD_LED1_TOGGLE()    do { P1OUT ^= BIT0; } while(0)
+/** @} */
+
+/*---------------------------------------------------------------------------*/
+/* CONSOLE UART - TXD P2.0, RXD P2.1 (eUSCI_A0), HEADER J11                  */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Hand P2.0 (UCA0TXD) and P2.1 (UCA0RXD) to eUSCI_A0.
+ *
+ * eUSCI_A0 is the secondary function on these pins (PxSEL1 = 1, PxSEL0 = 0).
+ */
+#define TIKU_BOARD_UART_PINS_INIT()                                            \
+    do {                                                                       \
+        P2DIR |= BIT0;                                                         \
+        P2DIR &= (uint8_t)~BIT1;                                               \
+        P2REN &= (uint8_t)~(BIT0 | BIT1);                                      \
+        P2OUT &= (uint8_t)~BIT0;                                               \
+        P2SEL1 |= BIT0 | BIT1;                                                 \
+        P2SEL0 &= (uint8_t)~(BIT0 | BIT1);                                     \
+    } while(0)
+
+/*
+ * Baud-rate settings for an 8 MHz SMCLK, oversampled, from TI SLAU367 Table
+ * 30-5.  TIKU_BOARD_UART_BAUD is 9600 unless the build sets it (make
+ * UART_BAUD=...); 19200, 38400, 57600 and 115200 are the other rates here.
+ */
+
+/** UART clock source: SMCLK. */
+#define TIKU_BOARD_UART_CLK_SEL     UCSSEL__SMCLK
+
+#ifndef TIKU_BOARD_UART_BAUD
+/** Console baud rate; any value without a row below fails the build. */
+#define TIKU_BOARD_UART_BAUD        9600
+#endif
+
+#if   TIKU_BOARD_UART_BAUD == 9600
+/*  N = 8000000/9600 = 833.33  → BRW=52, BRF=1, BRS=0x49 */
+#define TIKU_BOARD_UART_BRW         52
+#define TIKU_BOARD_UART_MCTLW       ((0x49 << 8) | UCOS16 | (0x01 << 4))
+
+#elif TIKU_BOARD_UART_BAUD == 19200
+/*  N = 8000000/19200 = 416.67 → BRW=26, BRF=0, BRS=0xB6 */
+#define TIKU_BOARD_UART_BRW         26
+#define TIKU_BOARD_UART_MCTLW       ((0xB6 << 8) | UCOS16 | (0x00 << 4))
+
+#elif TIKU_BOARD_UART_BAUD == 38400
+/*  N = 8000000/38400 = 208.33 → BRW=13, BRF=0, BRS=0x84 */
+#define TIKU_BOARD_UART_BRW         13
+#define TIKU_BOARD_UART_MCTLW       ((0x84 << 8) | UCOS16 | (0x00 << 4))
+
+#elif TIKU_BOARD_UART_BAUD == 57600
+/*  N = 8000000/57600 = 138.89 → BRW=8, BRF=10, BRS=0xF7 */
+#define TIKU_BOARD_UART_BRW         8
+#define TIKU_BOARD_UART_MCTLW       ((0xF7 << 8) | UCOS16 | (0x0A << 4))
+
+#elif TIKU_BOARD_UART_BAUD == 115200
+/*  N = 8000000/115200 = 69.44 → BRW=4, BRF=5, BRS=0x55 */
+#define TIKU_BOARD_UART_BRW         4
+#define TIKU_BOARD_UART_MCTLW       ((0x55 << 8) | UCOS16 | (0x05 << 4))
+
+#else
+#error "Unsupported TIKU_BOARD_UART_BAUD (use 9600/19200/38400/57600/115200)"
+#endif
+
+/*---------------------------------------------------------------------------*/
+/* BUTTON - P5.6 (ACTIVE LOW)                                                */
+/*---------------------------------------------------------------------------*/
+
+/** Make P5.6 an input with its pull-up enabled; the button pulls it to GND. */
+#define TIKU_BOARD_BTN1_INIT()      do { P5DIR &= ~BIT6; P5REN |= BIT6; P5OUT |= BIT6; } while(0)
+/** Non-zero while the button is pressed (P5.6 reads low). */
+#define TIKU_BOARD_BTN1_PRESSED()   (!(P5IN & BIT6))
+
+/*---------------------------------------------------------------------------*/
+/* SAFE STATE AT BOOT                                                        */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Board lines that differ from the boot default of output-low.
+ *
+ * Every pin is driven low first: rails and nRF supply off, link outputs low,
+ * bus to the MSP430.  Then P2.6 (pulled down) and P3.6 become inputs, the
+ * nRF reset P3.5 is released, and both chip selects go high.
+ * @note P3.5 is only ever driven low or left an input.
+ */
+#define TIKU_BOARD_PINS_SAFE_INIT()                                            \
+    do {                                                                       \
+        P2DIR &= (uint8_t)~BIT6;                                               \
+        P2OUT &= (uint8_t)~BIT6;                                               \
+        P2REN |= BIT6;                                                         \
+        P3DIR &= (uint8_t)~(BIT5 | BIT6);                                      \
+        P4OUT |= BIT0;                                                         \
+        P5OUT |= BIT3;                                                         \
+    } while(0)
+
+/*---------------------------------------------------------------------------*/
+/* I2C ON eUSCI_B2 - P7.0 = SDA, P7.1 = SCL (SENSOR PORT, THROUGH U7)        */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief eUSCI_B module that arch/msp430/tiku_i2c_arch.c drives: 2.
+ *
+ * The 4.7 kohm pull-ups sit on the sensor side of the bus switch, powered by
+ * the sensor rail, so the bus idles high only with the rail on and the
+ * switches set to the MSP430.
+ */
+#define TIKU_BOARD_I2C_MODULE       2
+
+/**
+ * @brief Hand P7.0 and P7.1 to eUSCI_B2 I2C, their primary function.
+ *
+ * PxSEL0 = 1, PxSEL1 = 0 (FR5994 datasheet, port P7 functions).
+ */
+#define TIKU_BOARD_I2C_PINS_INIT() \
+    do { P7SEL0 |= BIT0 | BIT1; P7SEL1 &= ~(BIT0 | BIT1); } while(0)
+
+/** I2C clock prescaler for 100 kHz from 8 MHz SMCLK: 8000000/100000 = 80. */
+#define TIKU_BOARD_I2C_BRW_100K     80
+
+/** I2C clock prescaler for 400 kHz from 8 MHz SMCLK: 8000000/400000 = 20. */
+#define TIKU_BOARD_I2C_BRW_400K     20
+
+/*---------------------------------------------------------------------------*/
+/* SPI ON eUSCI_B1 - P5.0 = SIMO, P5.1 = SOMI, P5.2 = CLK (THROUGH U8)       */
+/*---------------------------------------------------------------------------*/
+
+/** @brief eUSCI module that arch/msp430/tiku_spi_arch.c drives: 1 = eUSCI_B1. */
+#define TIKU_BOARD_SPI_MODULE       1
+
+/**
+ * @brief Hand P5.0-P5.2 to eUSCI_B1 SPI, their primary function.
+ *
+ * PxSEL0 = 1, PxSEL1 = 0.  The secondary function is Timer_B0 capture/output:
+ * with it selected, SPI writes reach TB0 and the bus never clocks.
+ */
+#define TIKU_BOARD_SPI_PINS_INIT() \
+    do { P5SEL0 |=  (BIT0 | BIT1 | BIT2); \
+         P5SEL1 &= ~(BIT0 | BIT1 | BIT2); } while(0)
+
+/** SPI prescaler for 4 MHz from 8 MHz SMCLK: 8000000/4000000 = 2. */
+#define TIKU_BOARD_SPI_BRW_4MHZ     2
+
+/** SPI prescaler for 2 MHz from 8 MHz SMCLK: 8000000/2000000 = 4. */
+#define TIKU_BOARD_SPI_BRW_2MHZ     4
+
+/** SPI prescaler for 1 MHz from 8 MHz SMCLK: 8000000/1000000 = 8. */
+#define TIKU_BOARD_SPI_BRW_1MHZ     8
+
+/** SPI prescaler for 500 kHz from 8 MHz SMCLK: 8000000/500000 = 16. */
+#define TIKU_BOARD_SPI_BRW_500KHZ   16
+
+/*---------------------------------------------------------------------------*/
+/* ADC12_B                                                                   */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @brief 1: ADC12_B is usable on this board.
+ *
+ * The sensor port's AIN line is channel A12 (P3.0), through bus switch U7.
+ * Channel 30 is the temperature sensor, 31 the battery monitor.
+ */
+#define TIKU_BOARD_ADC_AVAILABLE    1
+
+/*---------------------------------------------------------------------------*/
+/* BIT-BANG PIN                                                              */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @name Default pin for tiku_bitbang transmitters: P1.4 on header J8
+ * A -D on the command line overrides either macro.
+ * @{
+ */
+#ifndef TIKU_BOARD_BSCAT_PORT
+#define TIKU_BOARD_BSCAT_PORT       1
+#endif
+#ifndef TIKU_BOARD_BSCAT_PIN
+#define TIKU_BOARD_BSCAT_PIN        4
+#endif
+/** @} */
+
+#endif /* TIKU_BOARD_TIKUCOMPUTER_MSP_H_ */
