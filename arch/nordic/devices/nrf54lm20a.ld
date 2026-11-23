@@ -159,6 +159,14 @@ SECTIONS
     .ARM.extab : { *(.ARM.extab*) } > RRAM
     .ARM.exidx : { __exidx_start = .; *(.ARM.exidx*) __exidx_end = .; } > RRAM
 
+    /* The SEGGER RTT block of a TIKU_CONSOLE=rtt build, first in SRAM: one
+     * address in every image, so a J-Link never finds a block an earlier
+     * image left elsewhere.  Empty, moving nothing, in any other build. */
+    .rtt (NOLOAD) : ALIGN(4)
+    {
+        KEEP(*(.rtt))
+    } > SRAM
+
     /* -------- 3. Initialised data (LMA in RRAM, VMA in SRAM) ---------- */
     __data_load = LOADADDR(.data);
     .data : ALIGN(4)

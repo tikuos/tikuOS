@@ -86,8 +86,8 @@
 /*---------------------------------------------------------------------------*/
 
 #elif defined(PLATFORM_NORDIC)
-/* Console over UARTE (polled EasyDMA); debug printf goes straight to the
- * UARTE backend. */
+/* Console over UARTE (polled EasyDMA), or SEGGER RTT behind the same
+ * functions with TIKU_CONSOLE=rtt; debug printf goes straight to it. */
 #include <arch/nordic/tiku_uart_arch.h>
 #define TIKU_PRINTF(...) tiku_uart_printf(__VA_ARGS__)
 

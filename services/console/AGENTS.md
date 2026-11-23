@@ -1,8 +1,9 @@
 # services/console/
 
-The console line (the UART, or the USB CDC port on a native-USB build)
-carries the shell's text and, between `0xC0` delimiters, SLIP-escaped
-frames whose first byte names a channel.  `tiku_console.c` is the one
+The console line (the UART, the USB CDC port on a native-USB build, or
+SEGGER RTT over the debugger on a Nordic `TIKU_CONSOLE=rtt` build) carries
+the shell's text and, between `0xC0` delimiters, SLIP-escaped frames whose
+first byte names a channel.  `tiku_console.c` is the one
 decoder and encoder: it un-escapes a frame once and hands it whole to the
 channel registered for its first byte; bytes outside a frame are text.
 Nothing here includes a kit header: a registrant brings its handler and

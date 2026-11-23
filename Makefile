@@ -139,12 +139,14 @@ endif
 
 # ---------------------------------------------------------------------------
 # Console channel: uart (the default: the board's console UART) | usb (native
-# USB CDC-ACM) | both (mirrored to UART and USB). C5 defaults to fixed-function
-# USB Serial/JTAG; its kernel also accepts uart. Other usb/both builds need rp2350,
+# USB CDC-ACM) | both (mirrored to UART and USB) | rtt (Nordic parts: SEGGER
+# RTT over the debugger's SWD link). C5 defaults to fixed-function USB
+# Serial/JTAG; its kernel also accepts uart. Other usb/both builds need rp2350,
 # nrf54lm20a or nrf54lm20b; they compile the port's USB CDC stack and define
 # TIKU_CONSOLE_USB, and both also defines TIKU_CONSOLE_BOTH.  The printf HAL
 # (hal/tiku_printf_hal.h), the shell I/O backend, the console and boot read
-# those macros.
+# those macros.  rtt builds arch/nordic/tiku_rtt_arch.c in place of the UARTE
+# driver, behind the same functions, and defines TIKU_CONSOLE_RTT.
 # ---------------------------------------------------------------------------
 ifeq ($(MCU),esp32p4)
 TIKU_CONSOLE ?= usb
@@ -164,8 +166,16 @@ endif
 else
 TIKU_CONSOLE ?= uart
 endif
-ifeq ($(filter uart usb both,$(TIKU_CONSOLE)),)
-$(error TIKU_CONSOLE must be uart, usb, or both (got '$(TIKU_CONSOLE)'))
+ifeq ($(filter uart usb both rtt,$(TIKU_CONSOLE)),)
+$(error TIKU_CONSOLE must be uart, usb, both or rtt (got '$(TIKU_CONSOLE)'))
+endif
+ifeq ($(TIKU_CONSOLE),rtt)
+ifneq ($(TIKU_PLATFORM),nordic)
+$(error TIKU_CONSOLE=rtt is supported on the Nordic parts; this build is $(MCU))
+endif
+NORDIC_CONSOLE_SRC := arch/nordic/tiku_rtt_arch.c
+else
+NORDIC_CONSOLE_SRC := arch/nordic/tiku_uart_arch.c
 endif
 ifneq ($(filter usb both,$(TIKU_CONSOLE)),)
 ifeq ($(filter rp2350 nrf54lm20a nrf54lm20b esp32c5 esp32p4,$(MCU)),)
@@ -1751,7 +1761,7 @@ SRCS += arch/nordic/tiku_cpu_freq_boot_arch.c
 SRCS += arch/nordic/tiku_cpu_settings_arch.c
 SRCS += arch/nordic/tiku_cpu_common.c
 SRCS += arch/nordic/tiku_power_arch.c
-SRCS += arch/nordic/tiku_uart_arch.c
+SRCS += $(NORDIC_CONSOLE_SRC)
 SRCS += arch/nordic/tiku_gpio_arch.c
 else ifeq ($(TIKU_PLATFORM),stm32n6)
 SRCS += arch/stm32n6/tiku_crt_early.c
@@ -1877,13 +1887,16 @@ ifeq ($(TIKU_CONSOLE),both)
 CFLAGS += -DTIKU_CONSOLE_BOTH=1
 endif
 endif
+ifeq ($(TIKU_CONSOLE),rtt)
+CFLAGS += -DTIKU_CONSOLE_RTT=1
+endif
 SRCS += arch/nordic/tiku_crt_early.c
 SRCS += arch/nordic/tiku_cpu_freq_boot_arch.c
 SRCS += arch/nordic/tiku_cpu_settings_arch.c
 SRCS += arch/nordic/tiku_power_arch.c
 SRCS += arch/nordic/tiku_timer_arch.c
 SRCS += arch/nordic/tiku_gpio_arch.c
-SRCS += arch/nordic/tiku_uart_arch.c
+SRCS += $(NORDIC_CONSOLE_SRC)
 SRCS += arch/nordic/tiku_crit_arch.c
 SRCS += arch/nordic/tiku_wake_arch.c
 SRCS += arch/nordic/tiku_mem_arch.c

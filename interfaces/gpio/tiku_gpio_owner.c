@@ -120,13 +120,15 @@ board_owner(uint8_t port, uint8_t pin)
     (void)port;
     (void)pin;
 #if defined(PLATFORM_NORDIC)
-    /* Virtual port n is physical port n - 1. */
+#if !defined(TIKU_CONSOLE_RTT)
+    /* Virtual port n is physical port n - 1.  An RTT console uses no pins. */
     if ((port == TIKU_BOARD_UART_TX_PORT + 1u &&
          pin == TIKU_BOARD_UART_TX_PIN) ||
         (port == TIKU_BOARD_UART_RX_PORT + 1u &&
          pin == TIKU_BOARD_UART_RX_PIN)) {
         return "console";
     }
+#endif
 #elif defined(PLATFORM_AMBIQ)
     if (IS_BANKED_PIN(port, pin, TIKU_BOARD_UART_TX_PIN) ||
         IS_BANKED_PIN(port, pin, TIKU_BOARD_UART_RX_PIN)) {
