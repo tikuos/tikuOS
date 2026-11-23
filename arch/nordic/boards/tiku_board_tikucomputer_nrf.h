@@ -86,13 +86,23 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @brief Console UARTE, 115200 8N1, picked by TIKU_BOARD_CONSOLE_SEL.
+ * @brief Console UARTE, 8N1, picked by TIKU_BOARD_CONSOLE_SEL.
  *
  * 20 (default) is UARTE20 on P1.09 (TXD) and P1.10 (RXD), header J5; 30 is
  * UARTE30 on P0.00 (TXD) and P0.01 (RXD), the board's UART to its MSP430.
+ * @note With 30 the console's baud is the link's, TIKU_BOARD_LINK_BAUD.
  */
 #ifndef TIKU_BOARD_CONSOLE_SEL
 #define TIKU_BOARD_CONSOLE_SEL      20
+#endif
+
+/**
+ * @brief Baud of UARTE30, the UART to the MSP430, as the link UART and as
+ *        the console on it; the MSP430 side's must equal it (make
+ *        LINK_BAUD=...).
+ */
+#ifndef TIKU_BOARD_LINK_BAUD
+#define TIKU_BOARD_LINK_BAUD        9600
 #endif
 
 #if TIKU_BOARD_CONSOLE_SEL == 20
@@ -109,6 +119,8 @@
 #define TIKU_BOARD_UART_TX_PIN      0u
 #define TIKU_BOARD_UART_RX_PORT     0u
 #define TIKU_BOARD_UART_RX_PIN      1u
+#undef  TIKU_BOARD_UART_BAUD
+#define TIKU_BOARD_UART_BAUD        TIKU_BOARD_LINK_BAUD
 #else
 #error "Unsupported TIKU_BOARD_CONSOLE_SEL (expected 20 or 30)"
 #endif
@@ -121,9 +133,9 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @name UARTE30 on P0.00 (TXD) and P0.01 (RXD) as the link UART, 115200 8N1
- * arch/nordic/tiku_uart_link_arch.c drives it when the console is elsewhere
- * (TIKU_BOARD_CONSOLE_SEL 20, or the RTT console).
+ * @name UARTE30 on P0.00 (TXD) and P0.01 (RXD) as the link UART, 8N1
+ * arch/nordic/tiku_uart_link_arch.c drives it at TIKU_BOARD_LINK_BAUD when
+ * the console is elsewhere (TIKU_BOARD_CONSOLE_SEL 20, or the RTT console).
  * @{
  */
 #if TIKU_BOARD_CONSOLE_SEL != 30

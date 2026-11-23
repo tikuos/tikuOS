@@ -1467,6 +1467,14 @@ ifneq ($(UART_BAUD),)
 CFLAGS += -DTIKU_BOARD_UART_BAUD=$(UART_BAUD)
 endif
 
+# LINK_BAUD= sets the baud of a board's link UART to its other processor
+# (TIKU_BOARD_LINK_BAUD); both sides are built with the same value.  Empty
+# keeps the board header's.
+LINK_BAUD ?=
+ifneq ($(LINK_BAUD),)
+CFLAGS += -DTIKU_BOARD_LINK_BAUD=$(LINK_BAUD)
+endif
+
 # EXTRA_CFLAGS= on the make line is added to CFLAGS; the flag-change guard
 # fingerprints it with the other command-line variables.
 CFLAGS += $(EXTRA_CFLAGS)

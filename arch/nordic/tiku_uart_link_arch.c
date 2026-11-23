@@ -22,7 +22,18 @@
 #if defined(TIKU_BOARD_LINK_UARTE)
 
 #define LINK              TIKU_BOARD_LINK_UARTE
-#define LINK_BAUDRATE     0x01D60000UL        /* 115200 at the 16 MHz clock */
+/* Nordic's BAUDRATE constants at the 16 MHz UARTE reference clock. */
+#if   TIKU_BOARD_LINK_BAUD == 9600
+#define LINK_BAUDRATE     0x00275000UL
+#elif TIKU_BOARD_LINK_BAUD == 19200
+#define LINK_BAUDRATE     0x004EA000UL
+#elif TIKU_BOARD_LINK_BAUD == 38400
+#define LINK_BAUDRATE     0x009D0000UL
+#elif TIKU_BOARD_LINK_BAUD == 115200
+#define LINK_BAUDRATE     0x01D60000UL
+#else
+#error "Unsupported TIKU_BOARD_LINK_BAUD (use 9600/19200/38400/115200)"
+#endif
 #define LINK_ENABLE_VAL   0x8UL               /* UARTE_ENABLE_ENABLE_Enabled */
 #define LINK_PSEL(port, pin)  (((uint32_t)(port) << 5) | ((uint32_t)(pin)))
 

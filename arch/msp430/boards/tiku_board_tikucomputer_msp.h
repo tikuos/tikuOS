@@ -51,11 +51,21 @@
  *        eUSCI_A0 on P2.0/P2.1, header J11; 1 is eUSCI_A1 on P2.5/P2.6, the
  *        UART to the nRF54L, which an nRF image relays (uart relay).
  * @note With 1, the nRF's supply goes on at boot, the link UART is not
- *       available, and the baud defaults to 115200.  Both are the pins'
+ *       available, and the baud defaults to the link's.  Both are the pins'
  *       secondary function (PxSEL1 = 1, PxSEL0 = 0).
  */
 #ifndef TIKU_BOARD_CONSOLE_SEL
 #define TIKU_BOARD_CONSOLE_SEL      0
+#endif
+
+/**
+ * @brief Baud of the UART to the nRF54L, as the link UART and as the console
+ *        on it; the nRF side's must equal it (make LINK_BAUD=...).
+ * @note 9600 is the rate at which this part's interrupt-driven receiver keeps
+ *       every byte while kernel IPC runs; raw bytes pass at 115200.
+ */
+#ifndef TIKU_BOARD_LINK_BAUD
+#define TIKU_BOARD_LINK_BAUD        9600
 #endif
 
 #if TIKU_BOARD_CONSOLE_SEL == 0
@@ -80,7 +90,7 @@
         P2SEL0 &= (uint8_t)~(BIT5 | BIT6);                                     \
     } while(0)
 #ifndef TIKU_BOARD_UART_BAUD
-#define TIKU_BOARD_UART_BAUD        115200
+#define TIKU_BOARD_UART_BAUD        TIKU_BOARD_LINK_BAUD
 #endif
 #else
 #error "Unsupported TIKU_BOARD_CONSOLE_SEL (expected 0 or 1)"
@@ -89,8 +99,8 @@
 /*
  * Baud-rate settings for an 8 MHz SMCLK, oversampled, from TI SLAU367 Table
  * 30-5.  TIKU_BOARD_UART_BAUD is 9600 unless the build sets it (make
- * UART_BAUD=...) or the console is on the nRF link (115200); 19200, 38400
- * and 57600 are the other rates here.
+ * UART_BAUD=...) or the console is on the nRF link (the link's baud); 19200,
+ * 38400, 57600 and 115200 are the other rates here.
  */
 
 /** UART clock source: SMCLK. */
@@ -135,7 +145,7 @@
 /*---------------------------------------------------------------------------*/
 
 /**
- * @name The UART to the nRF54L (its UARTE30), 115200 8N1
+ * @name The UART to the nRF54L (its UARTE30), TIKU_BOARD_LINK_BAUD 8N1
  * arch/msp430/tiku_uart_link_arch.c drives it while the console is on J11.
  * Opening it is refused while the nRF is unpowered, since the idle-high TX
  * line would feed the unpowered chip; closing it parks TX low and RX pulled
@@ -145,9 +155,22 @@
 #if TIKU_BOARD_CONSOLE_SEL == 0
 #define TIKU_BOARD_LINK_UART_MODULE 1
 #endif
-/*  N = 8000000/115200 = 69.44 → BRW=4, BRF=5, BRS=0x55 */
+/* 8 MHz SMCLK, oversampled (TI SLAU367 Table 30-5), as the console's rows. */
+#if   TIKU_BOARD_LINK_BAUD == 9600
+#define TIKU_BOARD_LINK_UART_BRW    52
+#define TIKU_BOARD_LINK_UART_MCTLW  ((0x49 << 8) | UCOS16 | (0x01 << 4))
+#elif TIKU_BOARD_LINK_BAUD == 19200
+#define TIKU_BOARD_LINK_UART_BRW    26
+#define TIKU_BOARD_LINK_UART_MCTLW  ((0xB6 << 8) | UCOS16 | (0x00 << 4))
+#elif TIKU_BOARD_LINK_BAUD == 38400
+#define TIKU_BOARD_LINK_UART_BRW    13
+#define TIKU_BOARD_LINK_UART_MCTLW  ((0x84 << 8) | UCOS16 | (0x00 << 4))
+#elif TIKU_BOARD_LINK_BAUD == 115200
 #define TIKU_BOARD_LINK_UART_BRW    4
 #define TIKU_BOARD_LINK_UART_MCTLW  ((0x55 << 8) | UCOS16 | (0x05 << 4))
+#else
+#error "Unsupported TIKU_BOARD_LINK_BAUD (use 9600/19200/38400/115200)"
+#endif
 #define TIKU_BOARD_LINK_UART_ALLOWED()  ((P3DIR & P3OUT & BIT4) != 0u)
 #define TIKU_BOARD_LINK_UART_PINS_INIT()                                       \
     do {                                                                       \
