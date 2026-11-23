@@ -283,6 +283,9 @@
 #if TIKU_SHELL_CMD_I2C
 #include "commands/tiku_shell_cmd_i2c.h"
 #endif
+#if TIKU_SHELL_CMD_SPI
+#include "commands/tiku_shell_cmd_spi.h"
+#endif
 #if TIKU_SHELL_CMD_TREE
 #include "commands/tiku_shell_cmd_tree.h"
 #endif
@@ -810,6 +813,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_I2C
     {"i2c",     "I2C scan/read/write",         tiku_shell_cmd_i2c},
+#endif
+#if TIKU_SHELL_CMD_SPI
+    {"spi",     "SPI transfer, GPIO select",   tiku_shell_cmd_spi},
 #endif
 #if TIKU_SHELL_CMD_PEEK
     {"peek",    "Read N bytes from address",   tiku_shell_cmd_peek},

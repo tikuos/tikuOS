@@ -500,6 +500,10 @@
 #ifndef TIKU_SHELL_CMD_I2C
 #define TIKU_SHELL_CMD_I2C    0  /**< i2c    - Bus scan / read / write */
 #endif
+/* SPI is opt-in the same way: EXTRA_CFLAGS="-DTIKU_SHELL_CMD_SPI=1". */
+#ifndef TIKU_SHELL_CMD_SPI
+#define TIKU_SHELL_CMD_SPI    0  /**< spi    - Transfers with a GPIO select */
+#endif
 #ifndef TIKU_SHELL_CMD_TREE
 #define TIKU_SHELL_CMD_TREE   1  /**< tree   - Recursive VFS dump */
 #endif

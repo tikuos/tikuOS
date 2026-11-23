@@ -3077,6 +3077,9 @@ SRCS += shell/commands/tiku_shell_cmd_unalias.c
 ifneq (,$(findstring TIKU_SHELL_CMD_I2C=1,$(EXTRA_CFLAGS)))
 SRCS += shell/commands/tiku_shell_cmd_i2c.c
 endif
+ifneq (,$(findstring TIKU_SHELL_CMD_SPI=1,$(EXTRA_CFLAGS)))
+SRCS += shell/commands/tiku_shell_cmd_spi.c
+endif
 ifneq (,$(findstring TIKU_SHELL_CMD_DELAY=1,$(EXTRA_CFLAGS)))
 SRCS += shell/commands/tiku_shell_cmd_delay.c
 endif
