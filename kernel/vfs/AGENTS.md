@@ -95,6 +95,14 @@ per boot.  An event means "touched, re-read for the value": no coalescing,
 and a write of an unchanged value still posts one.  The shell's rules and
 `watch` command sit on this primitive (`shell/AGENTS.md`).
 
+Every notify also appends `{node, op, seq}` to a change ring that keeps
+the last `TIKU_VFS_EVENTS_MAX` (16) records.  Reading `/sys/vfs/events`
+drains it (`tiku_vfs_events_take()`): each record once, with drops counted
+when 16 records wait.  A reader joined with `tiku_vfs_events_join()` reads
+every record from its own position (`tiku_vfs_events_read()`) whatever the
+drain and other readers take, and counts in `lost` the records overwritten
+before it reached them; it needs no watch slot.
+
 ## Manifest and ids
 
 `/sys/vfs/manifest` lists every node, boot mounts included and a dynamic

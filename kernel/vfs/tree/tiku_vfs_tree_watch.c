@@ -235,11 +235,6 @@ vfs_cache_misses_read(char *buf, size_t max)
  * means records were lost between them.
  */
 
-/** Op names, indexed by tiku_vfs_op_t. */
-static const char *const vfs_op_names[] = {
-    "changed", "created", "removed", "moved"
-};
-
 /** @brief Read handler for /sys/vfs/events: drains the change ring. */
 static int
 vfs_events_read(char *buf, size_t max)
@@ -250,12 +245,8 @@ vfs_events_read(char *buf, size_t max)
 
     n = tiku_vfs_events_take(rec, (uint8_t)(sizeof rec / sizeof rec[0]));
     for (i = 0; i < n; i++) {
-        const char *op = (rec[i].op < (sizeof vfs_op_names /
-                                       sizeof vfs_op_names[0]))
-                             ? vfs_op_names[rec[i].op] : "?";
-
         off += snprintf(buf + off, (off < (int)max) ? max - (size_t)off : 0u,
-                        "%s\t%08lx\t%u\n", op,
+                        "%s\t%08lx\t%u\n", tiku_vfs_op_name(rec[i].op),
                         (unsigned long)tiku_vfs_node_id(rec[i].node),
                         (unsigned)rec[i].seq);
     }

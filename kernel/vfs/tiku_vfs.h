@@ -813,8 +813,14 @@ void tiku_vfs_notify(const tiku_vfs_node_t *node);
 /*---------------------------------------------------------------------------*/
 /*
  * Each notify appends a record {node, opcode, sequence} to a fixed ring in
- * SRAM, which tiku_vfs_events_take() drains.  A full ring drops its oldest
- * record and counts the drop (tiku_vfs_events_dropped()).
+ * SRAM that holds the last TIKU_VFS_EVENTS_MAX records.  The records are
+ * read two ways.  tiku_vfs_events_take() drains them, as reading
+ * /sys/vfs/events does: each record once, and a push that meets
+ * TIKU_VFS_EVENTS_MAX records not yet taken drops the oldest of them and
+ * counts the drop (tiku_vfs_events_dropped()).  A reader joined with
+ * tiku_vfs_events_join() reads every record from its own position, whatever
+ * the drain and other readers take, and counts the records overwritten
+ * before it reached them.
  *
  * tiku_vfs_notify() records TIKU_VFS_OP_CHANGED, and nothing in the core
  * passes another opcode: a file created or deleted in a dynamic directory is
@@ -855,8 +861,9 @@ void tiku_vfs_notify_op(const tiku_vfs_node_t *node, tiku_vfs_op_t op);
 /**
  * @brief Take the pending change records, oldest first.
  *
- * Draining is destructive: a record is delivered once, to whichever reader
- * takes it first.  Reading /sys/vfs/events drains the same ring.
+ * Draining is destructive: a record is delivered once, to whichever caller
+ * takes it first.  Reading /sys/vfs/events drains the same ring; a reader's
+ * records are not affected.
  *
  * @param out  Destination array (NULL to discard)
  * @param max  Capacity of @p out
@@ -879,6 +886,38 @@ uint8_t tiku_vfs_events_pending(void);
  * @return Cumulative drops since boot
  */
 uint16_t tiku_vfs_events_dropped(void);
+
+/** @brief The name /sys/vfs/events gives @p op (a tiku_vfs_op_t): "changed",
+ *         "created", "removed" or "moved"; "?" for any other value. */
+const char *tiku_vfs_op_name(uint8_t op);
+
+/** @brief One reader's position in the change ring. */
+typedef struct {
+    uint32_t next;   /**< records pushed since boot before its next one     */
+    uint32_t lost;   /**< records overwritten before it read them, in total */
+} tiku_vfs_reader_t;
+
+/**
+ * @brief Start @p r at the ring's end: it reads the records pushed after
+ *        this call, and has lost none.  ISR-safe.
+ */
+void tiku_vfs_events_join(tiku_vfs_reader_t *r);
+
+/**
+ * @brief Copy the records after @p r's position, oldest first, and move it
+ *        past them.
+ *
+ * Records overwritten before @p r reached them add to @p r->lost; a rise
+ * means the records read do not cover every change.  Draining and other
+ * readers do not change what @p r reads.  ISR-safe.
+ *
+ * @param r    A joined reader
+ * @param out  Destination array (NULL to skip the records)
+ * @param max  Capacity of @p out
+ * @return Records copied
+ */
+uint8_t tiku_vfs_events_read(tiku_vfs_reader_t *r, tiku_vfs_change_t *out,
+                             uint8_t max);
 
 /**
  * @brief The stable identity of @p node, an opaque token.

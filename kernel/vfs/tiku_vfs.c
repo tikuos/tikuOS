@@ -1307,14 +1307,18 @@ void tiku_vfs_unwatch_all(struct tiku_process *p)
 /*---------------------------------------------------------------------------*/
 
 /*
- * A fixed ring in SRAM.  When it is full the oldest record is dropped and
- * vfs_ev_dropped counts it.  GPIO ISRs push through tiku_vfs_notify(), so
- * every update of the ring runs with interrupts masked.
+ * A fixed ring in SRAM holding the last TIKU_VFS_EVENTS_MAX records.  The
+ * drain takes each record once; when a push meets TIKU_VFS_EVENTS_MAX
+ * records it has not taken, the oldest of them is dropped and
+ * vfs_ev_dropped counts it.  A reader keeps its own position in the ring.
+ * GPIO ISRs push through tiku_vfs_notify(), so every update of the ring
+ * runs with interrupts masked.
  */
 static tiku_vfs_change_t vfs_events[TIKU_VFS_EVENTS_MAX];
 static uint8_t  vfs_ev_head;      /* next write slot                       */
-static uint8_t  vfs_ev_count;
-static uint16_t vfs_ev_seq;
+static uint8_t  vfs_ev_count;     /* records the drain has not taken       */
+static uint8_t  vfs_ev_kept;      /* records in the ring, taken or not     */
+static uint32_t vfs_ev_total;     /* records pushed since boot             */
 static uint16_t vfs_ev_dropped;
 
 uint32_t tiku_vfs_node_id(const tiku_vfs_node_t *node)
@@ -1337,9 +1341,12 @@ static void vfs_events_push(const tiku_vfs_node_t *node, uint8_t op)
     r = &vfs_events[vfs_ev_head];
     r->node = node;
     r->op = op;
-    r->seq = vfs_ev_seq++;
+    r->seq = (uint16_t)vfs_ev_total++;
     vfs_ev_head = (uint8_t)((vfs_ev_head + 1u) % TIKU_VFS_EVENTS_MAX);
     vfs_ev_count++;
+    if (vfs_ev_kept < TIKU_VFS_EVENTS_MAX) {
+        vfs_ev_kept++;
+    }
     tiku_atomic_exit();
 }
 
@@ -1375,6 +1382,51 @@ uint8_t tiku_vfs_events_pending(void)
 uint16_t tiku_vfs_events_dropped(void)
 {
     return vfs_ev_dropped;
+}
+
+const char *tiku_vfs_op_name(uint8_t op)
+{
+    static const char *const names[] = { "changed", "created", "removed", "moved" };
+
+    return op < sizeof names / sizeof names[0] ? names[op] : "?";
+}
+
+void tiku_vfs_events_join(tiku_vfs_reader_t *r)
+{
+    tiku_atomic_enter();
+    r->next = vfs_ev_total;
+    r->lost = 0u;
+    tiku_atomic_exit();
+}
+
+uint8_t tiku_vfs_events_read(tiku_vfs_reader_t *r, tiku_vfs_change_t *out,
+                             uint8_t max)
+{
+    uint8_t n = 0;
+    uint32_t behind;
+
+    /* Masked one record at a time, as for the drain. */
+    for (;;) {
+        tiku_atomic_enter();
+        behind = vfs_ev_total - r->next;
+        if (behind > vfs_ev_kept) {
+            r->lost += behind - vfs_ev_kept;
+            r->next = vfs_ev_total - vfs_ev_kept;
+            behind = vfs_ev_kept;
+        }
+        if (behind == 0u || n >= max) {
+            tiku_atomic_exit();
+            break;
+        }
+        if (out != NULL) {
+            out[n] = vfs_events[(vfs_ev_head + TIKU_VFS_EVENTS_MAX - behind) %
+                                TIKU_VFS_EVENTS_MAX];
+        }
+        r->next++;
+        tiku_atomic_exit();
+        n++;
+    }
+    return n;
 }
 
 void tiku_vfs_notify_op(const tiku_vfs_node_t *node, tiku_vfs_op_t op)
