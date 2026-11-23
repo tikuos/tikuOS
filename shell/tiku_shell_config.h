@@ -504,6 +504,16 @@
 #ifndef TIKU_SHELL_CMD_SPI
 #define TIKU_SHELL_CMD_SPI    0  /**< spi    - Transfers with a GPIO select */
 #endif
+/* `fram` reads and writes the board's external FRAM parts.  It defaults from
+ * TIKU_BOARD_HAS_FRAM_SPI and TIKU_BOARD_HAS_FRAM_I2C, Makefile BOARD_CAPS
+ * -D flags; -DTIKU_SHELL_CMD_FRAM=0 drops it. */
+#ifndef TIKU_SHELL_CMD_FRAM
+#  if (TIKU_BOARD_HAS_FRAM_SPI + 0) || (TIKU_BOARD_HAS_FRAM_I2C + 0)
+#    define TIKU_SHELL_CMD_FRAM 1  /**< fram   - External FRAM parts */
+#  else
+#    define TIKU_SHELL_CMD_FRAM 0
+#  endif
+#endif
 #ifndef TIKU_SHELL_CMD_TREE
 #define TIKU_SHELL_CMD_TREE   1  /**< tree   - Recursive VFS dump */
 #endif
@@ -704,6 +714,13 @@
 #if TIKU_SHELL_CMD_MRAMBENCH && !defined(PLATFORM_AMBIQ)
 #undef  TIKU_SHELL_CMD_MRAMBENCH
 #define TIKU_SHELL_CMD_MRAMBENCH 0
+#endif
+
+/* fram drives the board's FRAM parts (board capabilities). */
+#if TIKU_SHELL_CMD_FRAM && !(TIKU_BOARD_HAS_FRAM_SPI + 0) && \
+    !(TIKU_BOARD_HAS_FRAM_I2C + 0)
+#undef  TIKU_SHELL_CMD_FRAM
+#define TIKU_SHELL_CMD_FRAM 0
 #endif
 
 /* lcd drives the segment-LCD controller (a board capability). */

@@ -310,14 +310,16 @@ BOARD_CAPS_apollo4l_evb        :=
 BOARD_CAPS_apollo4p_evb        :=
 BOARD_CAPS_fr5969_launchpad    :=
 BOARD_CAPS_fr5994_launchpad    :=
-BOARD_CAPS_tikucomputer_msp    :=
+# TikuComputer-nRF: the FM25V10 (U12) and FM24V02A (U13) behind the bus
+# switches, reachable from either processor.
+BOARD_CAPS_tikucomputer_msp    := FRAM_SPI FRAM_I2C
 # The FR6989 LaunchPad has a segment LCD wired to LCD_C.  Its LCD cap defines
 # TIKU_BOARD_HAS_LCD=1, which the LCD driver and the shell's lcd command test.
 BOARD_CAPS_fr6989_launchpad    := LCD
 BOARD_CAPS_nrf54l15_dk         :=
 BOARD_CAPS_nrf54lm20_dk        :=
 BOARD_CAPS_nrf54lv10_dk        :=
-BOARD_CAPS_tikucomputer_nrf    :=
+BOARD_CAPS_tikucomputer_nrf    := FRAM_SPI FRAM_I2C
 BOARD_CAPS_nucleo_n657x0q      :=
 # EK-RA8P1: USBHS is the USB high-speed connector (J7), which
 # TIKU_DRV_USBHS_ENABLE requires.  The board's other parts (Ethernet PHY, OSPI
@@ -2618,6 +2620,10 @@ SRCS += arch/msp430/tiku_spi_arch.c
 endif
 SRCS += interfaces/adc/tiku_adc.c
 SRCS += interfaces/onewire/tiku_onewire.c
+# The external FRAM parts, on boards that declare one (FRAM_SPI, FRAM_I2C).
+ifneq (,$(call board_has,FRAM_SPI)$(call board_has,FRAM_I2C))
+SRCS += interfaces/fram/tiku_fram.c
+endif
 # Segment-LCD interface: tiku_lcd.c is always compiled, and its calls do
 # nothing when TIKU_BOARD_HAS_LCD is 0.  The MSP430 driver below compiles to
 # an empty translation unit unless the device has an LCD_C controller
@@ -3094,6 +3100,9 @@ SRCS += shell/commands/tiku_shell_cmd_i2c.c
 endif
 ifneq (,$(findstring TIKU_SHELL_CMD_SPI=1,$(EXTRA_CFLAGS)))
 SRCS += shell/commands/tiku_shell_cmd_spi.c
+endif
+ifneq (,$(call board_has,FRAM_SPI)$(call board_has,FRAM_I2C))
+SRCS += shell/commands/tiku_shell_cmd_fram.c
 endif
 ifneq (,$(findstring TIKU_SHELL_CMD_DELAY=1,$(EXTRA_CFLAGS)))
 SRCS += shell/commands/tiku_shell_cmd_delay.c

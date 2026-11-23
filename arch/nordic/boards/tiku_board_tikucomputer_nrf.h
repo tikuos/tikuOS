@@ -152,4 +152,24 @@
 #define TIKU_BOARD_I2C_BRW_100K     1   /* symbolic: not read on this port */
 #define TIKU_BOARD_OW_AVAILABLE     0
 
+/*---------------------------------------------------------------------------*/
+/* FRAM PARTS                                                                */
+/*---------------------------------------------------------------------------*/
+
+/**
+ * @name The two FRAM parts behind the bus switches
+ * The FM25V10 (U12, 128 KB) on SPI with its chip select on P2.07 (GPIO
+ * interface port 3), and the FM24V02A (U13, 32 KB) on I2C at 0x50.  Both are
+ * powered by the sensor rail and reach this side only while the MSP430 has
+ * switched the bus to it.
+ * @{
+ */
+#define TIKU_BOARD_FRAM_SPI_SIZE        131072UL
+#define TIKU_BOARD_FRAM_SPI_ADDR_BYTES  3u
+#define TIKU_BOARD_FRAM_SPI_CS_PORT     3u
+#define TIKU_BOARD_FRAM_SPI_CS_PIN      7u
+#define TIKU_BOARD_FRAM_I2C_SIZE        32768UL
+#define TIKU_BOARD_FRAM_I2C_ADDR        0x50u
+/** @} */
+
 #endif /* TIKU_BOARD_TIKUCOMPUTER_NRF_H_ */
