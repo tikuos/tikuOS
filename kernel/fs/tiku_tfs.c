@@ -92,7 +92,11 @@ int tiku_tfs_release(tiku_tfs_hold_t *hold)
  * differs and does not reformat.  The derived data offset is recorded beside
  * its inputs, so no two layouts share a descriptor.
  */
-#define TFS_FMT_VERSION  5u        /* on-NVM format version */
+#define TFS_FMT_VERSION  5u        /* the version format writes */
+/* A store whose run words may carry a rename tag (below); the first rename
+ * on a version-5 store records it before it writes a tag, so firmware that
+ * reads only version 5 refuses such a store as another version. */
+#define TFS_FMT_RENAMED  6u
 
 /* Descriptor word indices.  Word 0 is the magic and is written last. */
 #define TFS_SB_MAGIC_W   0u
@@ -128,17 +132,41 @@ int tiku_tfs_release(tiku_tfs_hold_t *hold)
 #define TFS_SL_DATA  4u
 
 /*
- * Run word: first slot in the low 16 bits, span in the high 16.  The first
- * typedef fails the build if TIKU_TFS_MAX_SLOTS outgrows a half, which would
- * alias two runs onto one word; the second if the floor reaches the ceiling,
- * since a store holds at most TIKU_TFS_MAX_SLOTS - 1 files (tfs_fit()).
+ * Run word: first slot in bits 0-13, a rename tag in bits 14-15, span in the
+ * high 16.  The first typedef fails the build if TIKU_TFS_MAX_SLOTS outgrows
+ * the first-slot field, which would alias two runs onto one word; the second
+ * if the floor reaches the ceiling, since a store holds at most
+ * TIKU_TFS_MAX_SLOTS - 1 files (tfs_fit()).
+ *
+ * The tag orders the two entries a rename leaves sharing one run until its
+ * source is cleared: the rename writes its result's run word with the
+ * source's tag plus one, modulo 4 (TFS_RUN_NEXT), and mount clears the entry
+ * whose tag the other's follows (tfs_settle()).  A create or a replace writes
+ * tag 0; only the two entries of one rename ever share a run.
  */
-typedef char tfs_maxslots_check[(TIKU_TFS_MAX_SLOTS <= 0xFFFFu) ? 1 : -1];
+typedef char tfs_maxslots_check[(TIKU_TFS_MAX_SLOTS <= 0x4000u) ? 1 : -1];
 typedef char tfs_floor_check[(TIKU_TFS_MIN_SLOTS < TIKU_TFS_MAX_SLOTS) ? 1 : -1];
 
 #define TFS_RUN_MAKE(first, span)  ((uint32_t)(first) | ((uint32_t)(span) << 16))
-#define TFS_RUN_FIRST(w)           ((unsigned)((w) & 0xFFFFu))
+#define TFS_RUN_FIRST(w)           ((unsigned)((w) & 0x3FFFu))
 #define TFS_RUN_SPAN(w)            ((unsigned)((w) >> 16))
+#define TFS_RUN_TAG(w)             ((unsigned)(((w) >> 14) & 3u))
+/** @brief The run word without its tag: first slot and span. */
+#define TFS_RUN_BODY(w)            ((uint32_t)(w) & ~(uint32_t)0xC000u)
+/** @brief The run word a rename's result takes from its source's @p w. */
+#define TFS_RUN_NEXT(w) \
+    (TFS_RUN_BODY(w) | ((uint32_t)((TFS_RUN_TAG(w) + 1u) & 3u) << 14))
+
+/*
+ * How a rename over an existing name commits.  Where an aligned 4-byte write
+ * lands whole (every medium but a byte-tearing one, tiku_nvm_media.h), the
+ * target's run word is flipped to the source's run: one write commits, a
+ * second clears the source.  Where a write can land as a byte prefix, a
+ * flip could land its first slot without its tag, so the result is stamped
+ * into a free entry instead, whose gate commits; the target and then the
+ * source are cleared after it.
+ */
+#define TFS_RENAME_FLIP  (TIKU_NVM_MEDIA_TEAR != TIKU_NVM_TEAR_BYTE)
 
 /** @brief Content bytes a run of @p span slots holds (span 1: SLOT_DATA). */
 #define TFS_RUN_CAP(span)  ((size_t)(span) * TFS_SLOT_BYTES - TFS_SL_DATA)
@@ -436,6 +464,36 @@ static int run_check(tiku_tfs_t *fs, unsigned i, unsigned *first, uint32_t *len)
 }
 
 /**
+ * @brief Write entry @p i's run word and name in one write; its gate is not
+ *        touched, so a free entry stays free.
+ *
+ * @param name  NUL-terminated, shorter than TIKU_TFS_NAME_MAX
+ * @return TFS_OK or TFS_ERR_IO
+ */
+static int de_record(tiku_tfs_t *fs, unsigned i, const char *name, uint32_t run)
+{
+    uint8_t b[4u + TIKU_TFS_NAME_MAX];
+
+    memcpy(b, &run, 4u);
+    memset(b + 4u, 0, TIKU_TFS_NAME_MAX);
+    memcpy(b + 4u, name, strlen(name));
+    return wr(fs, dirent_off(i) + TFS_DE_SLOT, b, sizeof b) ? TFS_ERR_IO : TFS_OK;
+}
+
+/** @brief Write entry @p i's gate, the commit point of a stamp. @return TFS_OK
+ *         or TFS_ERR_IO */
+static int de_open(tiku_tfs_t *fs, unsigned i)
+{
+    if (wr32(fs, dirent_off(i) + TFS_DE_GATE, TFS_GATE)) {
+        return TFS_ERR_IO;
+    }
+    if (TIKU_TFS_ROTATE) {
+        fs->de_next = (uint16_t)((i + 1u < fs->nfiles) ? i + 1u : 0u);
+    }
+    return TFS_OK;
+}
+
+/**
  * @brief Stamp entry @p i: the run word and the name in one write, then the
  *        gate, the commit point.  A cut before the gate leaves it not live.
  *
@@ -444,19 +502,7 @@ static int run_check(tiku_tfs_t *fs, unsigned i, unsigned *first, uint32_t *len)
  */
 static int de_stamp(tiku_tfs_t *fs, unsigned i, const char *name, uint32_t run)
 {
-    uint8_t b[4u + TIKU_TFS_NAME_MAX];
-
-    memcpy(b, &run, 4u);
-    memset(b + 4u, 0, TIKU_TFS_NAME_MAX);
-    memcpy(b + 4u, name, strlen(name));
-    if (wr(fs, dirent_off(i) + TFS_DE_SLOT, b, sizeof b) ||
-        wr32(fs, dirent_off(i) + TFS_DE_GATE, TFS_GATE)) {
-        return TFS_ERR_IO;
-    }
-    if (TIKU_TFS_ROTATE) {
-        fs->de_next = (uint16_t)((i + 1u < fs->nfiles) ? i + 1u : 0u);
-    }
-    return TFS_OK;
+    return (de_record(fs, i, name, run) || de_open(fs, i)) ? TFS_ERR_IO : TFS_OK;
 }
 
 /**
@@ -485,6 +531,130 @@ static int de_superseded(const uint8_t *base, unsigned n, unsigned k)
             return 1;
         }
     }
+}
+
+/** @brief Whether entry @p i of the store at @p base is live. */
+static int de_live_at(const uint8_t *base, unsigned i)
+{
+    return rd32_at(base, dirent_off(i) + TFS_DE_GATE) == TFS_GATE;
+}
+
+/** @brief The run word of entry @p i of the store at @p base. */
+static uint32_t de_run_at(const uint8_t *base, unsigned i)
+{
+    return rd32_at(base, dirent_off(i) + TFS_DE_SLOT);
+}
+
+/** @brief Whether entries @p a and @p b of the store at @p base share a name. */
+static int de_same_name(const uint8_t *base, unsigned a, unsigned b)
+{
+    return strncmp((const char *)base + dirent_off(a) + TFS_DE_NAME,
+                   (const char *)base + dirent_off(b) + TFS_DE_NAME,
+                   TIKU_TFS_NAME_MAX) == 0;
+}
+
+/**
+ * @brief Whether live entry @p k of the @p n at @p base is a cut rename's
+ *        result: another live entry shares its run with the tag before its own.
+ */
+static int de_rename_result(const uint8_t *base, unsigned n, unsigned k)
+{
+    uint32_t rk = de_run_at(base, k);
+    unsigned j;
+
+    for (j = 0u; j < n; j++) {
+        if (j != k && de_live_at(base, j) && rk == TFS_RUN_NEXT(de_run_at(base, j))) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * @brief Whether live entry @p k of the @p n at @p base is one a cut rename
+ *        replaces: the rename's source, or the old entry of its result's name.
+ *
+ * Read by the probe, which writes nothing; mount clears these entries
+ * (tfs_settle()).
+ */
+static int de_rename_loser(const uint8_t *base, unsigned n, unsigned k)
+{
+    uint32_t next = TFS_RUN_NEXT(de_run_at(base, k));
+    unsigned j;
+
+    for (j = 0u; j < n; j++) {
+        if (j == k || !de_live_at(base, j)) {
+            continue;
+        }
+        if (de_run_at(base, j) == next ||
+            (de_same_name(base, j, k) && de_rename_result(base, n, j))) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * @brief Finish a rename a power cut interrupted after its commit: of two
+ *        live entries sharing a run, the one whose tag follows the other's is
+ *        the result.
+ *
+ * Another live entry with the result's name is cleared, then the source, in
+ * the rename's own order; a pair whose tags do not follow is left for the map
+ * build to refuse.  fs->slot_used is scratch here; the map build clears it.
+ *
+ * @return TFS_OK, or TFS_ERR_IO when a gate could not be cleared
+ */
+static int tfs_settle(tiku_tfs_t *fs)
+{
+    const uint8_t *base = fs->be->base;
+    unsigned i, j, k, f, src, res;
+    uint32_t ri, rj;
+
+    memset(fs->slot_used, 0, sizeof fs->slot_used);
+    for (i = 0u; i < fs->nfiles; i++) {
+        if (!de_live_at(base, i)) {
+            continue;
+        }
+        f = de_first(fs, i);
+        if (f >= fs->nslots) {
+            continue;                     /* the map build refuses the run */
+        }
+        if (!bm_get(fs->slot_used, f)) {
+            bm_set(fs->slot_used, f);
+            continue;
+        }
+        for (j = 0u; j < i; j++) {
+            if (de_live_at(base, j) && de_first(fs, j) == f) {
+                break;
+            }
+        }
+        if (j == i) {
+            continue;                     /* its claimant was cleared here */
+        }
+        ri = de_run(fs, i);
+        rj = de_run(fs, j);
+        if (ri == TFS_RUN_NEXT(rj)) {
+            res = i;
+            src = j;
+        } else if (rj == TFS_RUN_NEXT(ri)) {
+            res = j;
+            src = i;
+        } else {
+            continue;                     /* the map build refuses the pair */
+        }
+        for (k = 0u; k < fs->nfiles; k++) {
+            if (k != res && k != src && de_live_at(base, k) &&
+                de_same_name(base, k, res) &&
+                wr32(fs, dirent_off(k) + TFS_DE_GATE, 0u)) {
+                return TFS_ERR_IO;
+            }
+        }
+        if (wr32(fs, dirent_off(src) + TFS_DE_GATE, 0u)) {
+            return TFS_ERR_IO;
+        }
+    }
+    return TFS_OK;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -591,8 +761,9 @@ static uint32_t tfs_sb_word(tiku_tfs_t *fs, unsigned w)
  * @brief Whether the stored descriptor matches the geometry this build derives.
  *
  * Compared word by word; mount returns TFS_ERR_GEOMETRY on any difference.
- * The magic is excluded: it is the separate "formatted" flag, written last so
- * a torn format does not look complete.
+ * The version word may also read TFS_FMT_RENAMED.  The magic is excluded: it
+ * is the separate "formatted" flag, written last so a torn format does not
+ * look complete.
  *
  * @return 1 on a match, 0 otherwise.
  */
@@ -600,7 +771,9 @@ static int tfs_sb_matches(tiku_tfs_t *fs)
 {
     unsigned w;
     for (w = 1u; w < TFS_SB_WORDS; w++) {
-        if (rd32(fs, w * 4u) != tfs_sb_word(fs, w)) {
+        uint32_t v = rd32(fs, w * 4u);
+        if (v != tfs_sb_word(fs, w) &&
+            !(w == TFS_SB_VER_W && v == TFS_FMT_RENAMED)) {
             return 0;
         }
     }
@@ -682,6 +855,9 @@ int tiku_tfs_mount(tiku_tfs_t *fs, tiku_nvm_backend_t *be)
     }
     if (!tfs_sb_matches(fs)) {
         return TFS_ERR_GEOMETRY;
+    }
+    if (rd32(fs, TFS_SB_VER_W * 4u) == TFS_FMT_RENAMED && tfs_settle(fs) != TFS_OK) {
+        return TFS_ERR_IO;
     }
     /* A cut between a rotating replace's two gate writes leaves the file's old
      * entry live beside the new one.  Its gate is cleared before the map is
@@ -765,7 +941,8 @@ static void tfs_classify(const uint8_t *base, size_t size, int full,
     }
     for (i = 0u; i < TFS_SB_WORDS; i++) {
         w[i] = rd32_at(base, (size_t)i * 4u);
-        if (i != TFS_SB_MAGIC_W && w[i] != tfs_word_for(&g, i)) {
+        if (i != TFS_SB_MAGIC_W && w[i] != tfs_word_for(&g, i) &&
+            !(i == TFS_SB_VER_W && w[i] == TFS_FMT_RENAMED)) {
             match = 0;
         }
     }
@@ -773,7 +950,8 @@ static void tfs_classify(const uint8_t *base, size_t size, int full,
     if (w[TFS_SB_MAGIC_W] == TFS_MAGIC) {
         out->version = w[TFS_SB_VER_W];
         out->nfiles  = w[TFS_SB_FILES_W];
-        out->kind = (w[TFS_SB_VER_W] != TFS_FMT_VERSION) ? TFS_PROBE_VERSION
+        out->kind = (w[TFS_SB_VER_W] != TFS_FMT_VERSION &&
+                     w[TFS_SB_VER_W] != TFS_FMT_RENAMED) ? TFS_PROBE_VERSION
                   : match ? TFS_PROBE_COMPATIBLE : TFS_PROBE_GEOMETRY;
         scan = ((size_t)w[TFS_SB_FILES_W] < fits) ? (size_t)w[TFS_SB_FILES_W]
                                                    : fits;
@@ -793,6 +971,10 @@ static void tfs_classify(const uint8_t *base, size_t size, int full,
         }
         if (TIKU_TFS_ROTATE && out->kind == TFS_PROBE_COMPATIBLE &&
             de_superseded(base, (unsigned)scan, (unsigned)k)) {
+            continue;                    /* mount clears it */
+        }
+        if (out->kind == TFS_PROBE_COMPATIBLE && w[TFS_SB_VER_W] == TFS_FMT_RENAMED &&
+            de_rename_loser(base, (unsigned)scan, (unsigned)k)) {
             continue;                    /* mount clears it */
         }
         out->live++;
@@ -1224,6 +1406,100 @@ int tiku_tfs_delete(tiku_tfs_t *fs, const char *name)
     return TFS_OK;
 }
 
+/**
+ * @brief Where a rename to @p to commits.
+ *
+ * @param t      Out: the live entry named @p to, or -1
+ * @param entry  Out: the entry whose write commits: @p t when its run word is
+ *               flipped, else a free entry stamped with the result
+ * @return TFS_OK, or TFS_ERR_NOSPACE when a stamp finds no free entry
+ */
+static int rename_entry(tiku_tfs_t *fs, const char *to, int *t, int *entry)
+{
+    *t = tfs_find(fs, to);
+    *entry = *t;
+    if (*t < 0 || !TFS_RENAME_FLIP) {
+        *entry = free_dirent(fs);
+        if (*entry < 0) {
+            return TFS_ERR_NOSPACE;
+        }
+    }
+    return TFS_OK;
+}
+
+/**
+ * @brief Check a rename's arguments.
+ *
+ * @param s  Out: the live entry named @p from
+ * @return TFS_OK, or the error tiku_tfs_rename() returns for them
+ */
+static int rename_check(tiku_tfs_t *fs, const char *from, const char *to, int *s)
+{
+    size_t nl;
+
+    if (fs == NULL || !fs->mounted || from == NULL || to == NULL) {
+        return TFS_ERR_INVAL;
+    }
+    if (fs->wr_open || tfs_held(fs)) {
+        return TFS_ERR_BUSY;
+    }
+    nl = strlen(to);
+    if (nl == 0u || nl >= TIKU_TFS_NAME_MAX) {
+        return TFS_ERR_NAMELEN;
+    }
+    *s = tfs_find(fs, from);
+    return (*s < 0) ? TFS_ERR_NOTFOUND : TFS_OK;
+}
+
+int tiku_tfs_rename(tiku_tfs_t *fs, const char *from, const char *to)
+{
+    int      s, t, j, rc;
+    uint32_t run, old = 0u;
+
+    rc = rename_check(fs, from, to, &s);
+    if (rc != TFS_OK || strcmp(from, to) == 0) {
+        return rc;
+    }
+    rc = rename_entry(fs, to, &t, &j);
+    if (rc != TFS_OK) {
+        return rc;
+    }
+    /* Recorded before any tag is written; nothing is published yet. */
+    if (rd32(fs, TFS_SB_VER_W * 4u) != TFS_FMT_RENAMED &&
+        wr32(fs, TFS_SB_VER_W * 4u, TFS_FMT_RENAMED)) {
+        return TFS_ERR_IO;
+    }
+    run = TFS_RUN_NEXT(de_run(fs, (unsigned)s));
+    if (t >= 0) {
+        old = de_run(fs, (unsigned)t);
+    }
+    if (j == t) {
+        if (wr32(fs, dirent_off((unsigned)t) + TFS_DE_SLOT, run)) {
+            goto unsure;
+        }
+    } else {
+        if (de_record(fs, (unsigned)j, to, run)) {
+            return TFS_ERR_IO;            /* the entry's gate is still clear */
+        }
+        if (de_open(fs, (unsigned)j) ||
+            (t >= 0 && wr32(fs, dirent_off((unsigned)t) + TFS_DE_GATE, 0u))) {
+            goto unsure;
+        }
+    }
+    if (wr32(fs, dirent_off((unsigned)s) + TFS_DE_GATE, 0u)) {
+        goto unsure;
+    }
+    if (t >= 0) {
+        run_mark(fs, TFS_RUN_FIRST(old), TFS_RUN_SPAN(old), 0);
+    }
+    return TFS_OK;
+unsure:
+    /* The commit may have landed and the allocation map no longer follows the
+     * directory: the store stays unmounted until tiku_tfs_mount() settles it. */
+    fs->mounted = 0;
+    return TFS_ERR_IO;
+}
+
 int tiku_tfs_stat(tiku_tfs_t *fs, const char *name, size_t *len)
 {
     int i, rc;
@@ -1385,13 +1661,17 @@ uint32_t tiku_tfs_pace_s(tiku_tfs_t *fs, size_t bytes, uint32_t life_days)
 }
 
 #if TIKU_TFS_ASYNC_ENABLE
-/** @brief The directory commit follows durable payload and metadata. */
+/** @brief The directory commit follows durable payload and metadata; a
+ *         rename's clears follow its commit. */
 enum {
     ASYNC_DATA = 1,
     ASYNC_LENGTH,
     ASYNC_ENTRY,
     ASYNC_GATE,
-    ASYNC_REPLACE
+    ASYNC_REPLACE,
+    ASYNC_VERSION,
+    ASYNC_CLEAR_TARGET,
+    ASYNC_CLEAR_SOURCE
 };
 
 /** @brief Retire ownership; an uncertain write result requires a remount. */
@@ -1465,6 +1745,51 @@ int tiku_tfs_async_begin(tiku_tfs_t *fs, tiku_tfs_async_t *op,
     return TFS_OK;
 }
 
+int tiku_tfs_async_rename(tiku_tfs_t *fs, tiku_tfs_async_t *op,
+                          const char *from, const char *to,
+                          const tiku_tfs_async_ops_t *ops, void *context)
+{
+    int s, t, j, rc;
+    uint32_t run;
+
+    if (op == NULL || ops == NULL || ops->begin == NULL || ops->poll == NULL ||
+        TIKU_TFS_ROTATE) {
+        return TFS_ERR_INVAL;
+    }
+    if (op->phase) {
+        return TFS_ERR_BUSY;
+    }
+    rc = rename_check(fs, from, to, &s);
+    if (rc != TFS_OK) {
+        return rc;
+    }
+    if (strcmp(from, to) == 0) {
+        *op = (tiku_tfs_async_t){ .writer = { .fs = fs }, .result = TFS_OK };
+        return TFS_OK;
+    }
+    rc = rename_entry(fs, to, &t, &j);
+    if (rc != TFS_OK) {
+        return rc;
+    }
+    *op = (tiku_tfs_async_t){
+        .writer = { .fs = fs, .active = 1 }, .ops = ops, .context = context,
+        .dir = (unsigned)j, .source = (unsigned)s,
+        .target = (unsigned)(t >= 0 ? t : 0), .replacing = (uint8_t)(t >= 0),
+        .renaming = 1,
+        .phase = rd32(fs, TFS_SB_VER_W * 4u) != TFS_FMT_RENAMED ? ASYNC_VERSION
+               : j == t ? ASYNC_REPLACE : ASYNC_ENTRY
+    };
+    memcpy(op->writer.name, to, strlen(to));
+    if (t >= 0) {
+        op->old_run = de_run(fs, (unsigned)t);
+    }
+    run = TFS_RUN_NEXT(de_run(fs, (unsigned)s));
+    memcpy(op->record, &run, 4u);
+    memcpy(op->record + 4u, op->writer.name, TIKU_TFS_NAME_MAX);
+    fs->wr_open = 1;
+    return TFS_OK;
+}
+
 int tiku_tfs_async_step(tiku_tfs_async_t *op)
 {
     tiku_tfs_t *fs;
@@ -1488,7 +1813,14 @@ int tiku_tfs_async_step(tiku_tfs_async_t *op)
             return async_finish(op, TFS_ERR_IO);
         }
         if (op->committing) {
-            return async_finish(op, TFS_OK);
+            if (!op->renaming || op->phase == ASYNC_CLEAR_SOURCE) {
+                return async_finish(op, TFS_OK);
+            }
+            /* After a stamp the old entry of the name goes first, then the
+             * source (tfs_settle() clears them in that order). */
+            op->phase = (op->phase == ASYNC_GATE && op->replacing)
+                      ? ASYNC_CLEAR_TARGET : ASYNC_CLEAR_SOURCE;
+            return 1;
         }
         if (op->cancelled) {
             return async_finish(op, TIKU_TFS_ASYNC_CANCELLED);
@@ -1499,6 +1831,8 @@ int tiku_tfs_async_step(tiku_tfs_async_t *op)
             op->phase = op->replacing ? ASYNC_REPLACE : ASYNC_ENTRY;
         } else if (op->phase == ASYNC_ENTRY) {
             op->phase = ASYNC_GATE;
+        } else if (op->phase == ASYNC_VERSION) {
+            op->phase = (op->replacing && TFS_RENAME_FLIP) ? ASYNC_REPLACE : ASYNC_ENTRY;
         }
         return 1;
     }
@@ -1536,6 +1870,17 @@ int tiku_tfs_async_step(tiku_tfs_async_t *op)
         data = op->record;
         length = 4u;
         offset = dirent_off(op->dir) + TFS_DE_SLOT;
+    } else if (op->phase == ASYNC_VERSION) {
+        op->word = TFS_FMT_RENAMED;
+        data = &op->word;
+        length = 4u;
+        offset = TFS_SB_VER_W * 4u;
+    } else if (op->phase == ASYNC_CLEAR_TARGET || op->phase == ASYNC_CLEAR_SOURCE) {
+        op->word = 0u;
+        data = &op->word;
+        length = 4u;
+        offset = dirent_off(op->phase == ASYNC_CLEAR_TARGET ? op->target : op->source)
+               + TFS_DE_GATE;
     } else {
         return async_finish(op, TFS_ERR_IO);
     }

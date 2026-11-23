@@ -5,7 +5,8 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_tfs_async.h - Caller-owned file replacement with polled durable writes.
+ * tiku_tfs_async.h - Caller-owned file replacement and rename with polled
+ * durable writes.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -45,10 +46,10 @@ typedef struct {
     const uint8_t *data;
     size_t length, chunk;
     uint32_t word, old_run;
-    unsigned dir;
+    unsigned dir, source, target;
     uint8_t record[4u + TIKU_TFS_NAME_MAX];
     int result;
-    uint8_t phase, pending, cancelled, committing, replacing;
+    uint8_t phase, pending, cancelled, committing, replacing, renaming;
 } tiku_tfs_async_t;
 
 /** @brief Reserve a whole-file replacement without I/O; return 0 accepted or a TFS error.
@@ -58,6 +59,18 @@ typedef struct {
  */
 int tiku_tfs_async_begin(tiku_tfs_t *, tiku_tfs_async_t *, const char *name,
                          const void *data, size_t length, const tiku_tfs_async_ops_t *, void *context);
+
+/** @brief Begin a rename of @p from to @p to without I/O, replacing a file named @p to;
+ * return 0 accepted or the error tiku_tfs_rename() returns.
+ * @note Writes as tiku_tfs_rename() does, one backend request each; a rename to its own
+ * name completes at once with result 0.  Supports nonrotating stores, with the interlock
+ * and serialization of tiku_tfs_async_begin().  The commit is the target's run word or a
+ * new entry's gate; the source's clear follows it, so cancellation is refused from the
+ * commit on.  TFS_ERR_IO leaves the store unmounted; tiku_tfs_mount() then finds the old
+ * names, or the new one wherever the commit landed.
+ */
+int tiku_tfs_async_rename(tiku_tfs_t *, tiku_tfs_async_t *, const char *from, const char *to,
+                          const tiku_tfs_async_ops_t *, void *context);
 
 /** @brief Advance one memory phase or one backend callback; 1 pending, 0 done, negative misuse.
  * @note Backend requests contain at most 256 payload bytes or one metadata record.

@@ -7,9 +7,9 @@
  *
  * tiku_tfs.h - Tiku File Store: bounded, power-cut-safe files over NVM.
  *
- * Flat namespace, whole-file replacement, fixed-size slots; a file may span
- * several contiguous slots.  Every commit is a single aligned 32-bit write,
- * and a power cut before it leaves the previous contents.
+ * Flat namespace, whole-file replacement and rename, fixed-size slots; a file
+ * may span several contiguous slots.  Every commit is a single aligned 32-bit
+ * write, and a power cut before it leaves the previous contents.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -331,10 +331,11 @@ size_t tiku_tfs_region_size(void);
  * @brief Mount the store @p be holds.  Never formats.
  *
  * A missing header returns TFS_ERR_NOSTORE, and a header for another geometry
- * or version TFS_ERR_GEOMETRY; tiku_tfs_probe() classifies the extent.  Its one
- * write clears the old entry a cut left beside a moved file (TIKU_TFS_ROTATE).
+ * or version TFS_ERR_GEOMETRY; tiku_tfs_probe() classifies the extent.  Its
+ * writes clear the entries a cut left: beside a moved file (TIKU_TFS_ROTATE),
+ * and the source and old target of a rename past its commit.
  *
- * @return TFS_OK or a negative tfs_err_t.
+ * @return TFS_OK or a negative tfs_err_t; TFS_ERR_IO when such a clear fails.
  */
 int tiku_tfs_mount(tiku_tfs_t *fs, tiku_nvm_backend_t *be);
 
@@ -475,6 +476,27 @@ int tiku_tfs_map(tiku_tfs_t *fs, const char *name,
 
 /** @brief Delete a file. */
 int tiku_tfs_delete(tiku_tfs_t *fs, const char *name);
+
+/**
+ * @brief Give @p from's content the name @p to, replacing a file named @p to,
+ *        without copying it; a rename to the same name writes nothing.
+ *
+ * One write commits: the target's run word, or on a byte-tearing medium the
+ * gate of a free entry stamped with the result.  A cut before it leaves both
+ * names as they were; after it, the next mount finishes the rename.
+ *
+ * @note The first rename records format version 6, which firmware that reads
+ *       only version 5 refuses (TFS_PROBE_VERSION).
+ *
+ * @return TFS_OK; TFS_ERR_NOTFOUND without @p from; TFS_ERR_NAMELEN for an
+ *         empty @p to or one of TIKU_TFS_NAME_MAX or more; TFS_ERR_NOSPACE
+ *         when a stamp finds no free entry; TFS_ERR_BUSY while a stream or a
+ *         lease is open; TFS_ERR_INVAL when unmounted or for NULL arguments;
+ *         TFS_ERR_IO, with the store still mounted when nothing was published,
+ *         or unmounted when the commit may have landed, which tiku_tfs_mount()
+ *         then settles
+ */
+int tiku_tfs_rename(tiku_tfs_t *fs, const char *from, const char *to);
 
 /** @brief Stat a file's length. */
 int tiku_tfs_stat(tiku_tfs_t *fs, const char *name, size_t *len);
