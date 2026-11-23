@@ -13,7 +13,7 @@ S31_FLAGS += -DTIKU_MEM_NVM_ENABLE=1 -DTIKU_CELL_TABLE=1 -DTIKU_SHELL_BASIC_ENAB
     -DTIKU_BASIC_GPIO_ENABLE=0 -DTIKU_BASIC_ADC_ENABLE=0 \
     -DTIKU_BASIC_LED_ENABLE=0 -DTIKU_BASIC_NET_ENABLE=0 \
     -DTIKU_BASIC_JSON_ENABLE=0 -DTIKU_BASIC_CRYPTO_ENABLE=0
-S31_SHELL_COMMANDS += LS CD WRITE READ FS FREE DF LAYOUT NAME TREE CAT BASIC REBOOT CONSOLE
+S31_SHELL_COMMANDS += LS CD WRITE READ FS FREE DF LAYOUT NAME TREE CAT BASIC REBOOT CONSOLE FREQ
 S31_SRCS += arch/esp32s31/tiku_storage_arch.c arch/esp32s31/tiku_storage_io.c \
     arch/esp32s31/tiku_mpu_arch.c arch/esp32s31/tiku_cpu_services.c \
     kernel/memory/tiku_nvm_region.c kernel/memory/tiku_nvm_media.c \
@@ -32,7 +32,7 @@ S31_SRCS += arch/esp32s31/tiku_storage_arch.c arch/esp32s31/tiku_storage_io.c \
     arch/esp32s31/tiku_spi_arch.c \
     basic/tiku_basic.c basic/tiku_basic_module.c basic/tiku_basic_vfs.c
 S31_SRCS += $(addprefix kernel/vfs/tree/tiku_vfs_tree_,sys.c boot.c timer.c watchdog.c power.c net.c wifi.c persist.c layout.c watch.c dev.c gpio.c sensor.c data.c)
-S31_SRCS += $(addprefix shell/commands/tiku_shell_cmd_,ls.c cd.c write.c read.c fs.c free.c df.c layout.c name.c tree.c basic.c reboot.c console.c)
+S31_SRCS += $(addprefix shell/commands/tiku_shell_cmd_,ls.c cd.c write.c read.c fs.c free.c df.c layout.c name.c tree.c basic.c reboot.c console.c freq.c)
 ifneq ($(origin S31_APPLICATION_MANIFEST),undefined)
 ifeq ($(wildcard $(S31_APPLICATION_MANIFEST)),)
 $(error Requested S31_APPLICATION_MANIFEST does not exist)

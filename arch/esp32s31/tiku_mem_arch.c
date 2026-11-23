@@ -13,6 +13,7 @@
 #include "tiku_mem_arch.h"
 #include "tiku_psram_arch.h"
 #include "tiku_runtime_arch.h"
+#include "tiku_clock_arch.h"
 #if TIKU_MEM_NVM_ENABLE
 #include "tiku_storage_arch.h"
 #include "tiku_mpu_arch.h"
@@ -46,8 +47,9 @@ int tiku_s31_memory_init(void)
     __asm__ volatile ("csrr %0,mstatus" : "=r"(state));
     if ((state & 8u) || tiku_s31_in_trap || !tiku_thread_in_kernel()) return -1;
     if (tiku_s31_psram_init()) return -2;
-#if TIKU_S31_CPU_MHZ == 160
-    if (tiku_s31_runtime_clock_ready()) return -9;
+#if TIKU_S31_CPU_MHZ != 40
+    /* PSRAM's initialization calibrated the CPLL the boot rate runs from. */
+    if (tiku_s31_clock_set(TIKU_S31_CPU_MHZ)) return -9;
 #endif
 #if TIKU_MEM_NVM_ENABLE
     if (tiku_s31_trng_init()) return -8;

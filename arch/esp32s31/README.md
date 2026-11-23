@@ -6,14 +6,34 @@ The port runs native TikuOS on CPU0 of the ESP32-S31-Korvo-1, silicon revision
 stalled and LP execution is disabled. The kernel-test linker uses 64 KiB of HP SRAM,
 including a 4 KiB kernel stack; it rejects persistent and retained sections.
 
-`S31_CPU_MHZ` defaults to 40. Flash firmware profiles also accept 160 with
-`S31_PSRAM_MHZ=40` or `80`. After PSRAM initializes CPLL, the runtime selects
-160 MHz CPU/memory, 80 MHz system and 40 MHz APB clocks. It verifies PLL
-configuration, bounds the clock-update wait, reads back the dividers and
-updates the ROM delay calibration. A refused transition stops memory
-initialization. Timer, UART and display clock sources retain their configured
-rates. Frequency control reports the selected fixed CPU rate; runtime changes
-are refused.
+`S31_CPU_MHZ` sets the boot rate: 40 (the default, the crystal), or 80, 160
+or 320 on flash firmware profiles with `S31_PSRAM_MHZ=40` or `80`, which run
+from the 320 MHz CPLL that PSRAM initialization calibrates. Memory
+initialization applies the boot rate; a refused switch stops it.
+
+`tiku_clock_arch.c` switches the CPU at run time, on the kernel thread, through
+`tiku_cpu_freq_init()` and the shell's `freq <mhz>`; `freq probe` counts the CPU
+against the system timer. Each rate sets the root and the CPU, memory, system
+and APB dividers ESP-IDF's `rtc_clk.c` uses, and one update commits them:
+
+| CPU | Root | Memory | System | APB |
+| --- | --- | --- | --- | --- |
+| 320 MHz | CPLL / 1 | 160 MHz | 106.7 MHz | 53.3 MHz |
+| 160 MHz | CPLL / 2 | 160 MHz | 80 MHz | 40 MHz |
+| 80 MHz | CPLL / 4 | 80 MHz | 80 MHz | 40 MHz |
+| 40 MHz | crystal | 40 MHz | 40 MHz | 40 MHz |
+
+A rate is offered only at or above three quarters of the PSRAM bus rate, so
+40 MHz needs PSRAM at 40 MHz or less, and a CPLL rate needs the CPLL locked.
+The switch masks interrupts, waits for the console to send what it holds,
+commits, reads the dividers back and updates the ROM delay calibration; a
+switch that does not read back restores the previous rate and sets
+`tiku_cpu_clock_has_fault()`. `/sys/cpu/freq` gives the rate in force and
+`freq_available` the rates offered; `freq_change_mode` is `fixed`, the next
+boot running the build's rate. The system timer, UART, I2C, watchdog, display
+and PSRAM keep their own clock sources and rates; the system clock drives the
+DMA engines. Thread cycle counts and worker budgets count CPU cycles at the
+rate in force.
 
 The runtime provides non-nested CLIC interrupts, a 128 Hz kernel clock,
 a 1 MHz hardware timer, processes, preemptible workers, integer/FPU context

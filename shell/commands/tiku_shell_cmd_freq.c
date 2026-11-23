@@ -36,6 +36,9 @@
 #include <arch/ra8p1/tiku_ra8p1_regs.h>           /* CAC clock selectors */
 #endif
 
+#if defined(PLATFORM_ESP32S31)
+#include <arch/esp32s31/tiku_clock_arch.h>   /* live rate, APB, measurement */
+#endif
 #if defined(PLATFORM_ESP32C61)
 #include <arch/esp32c61/tiku_cpu_freq_boot_arch.h> /* clock-tree read-back */
 #endif
@@ -207,6 +210,18 @@ static void freq_cmd_probe_c61(void)
 }
 #endif /* PLATFORM_ESP32C61 */
 
+#if defined(PLATFORM_ESP32S31)
+/** @brief The rate in force, the APB clock, and the CPU counted against the
+ *  16 MHz system timer, which runs from the crystal at every rate. */
+static void freq_cmd_probe_s31(void)
+{
+    SHELL_PRINTF("  CPU       %lu Hz, %lu Hz measured\n", tiku_cpu_mclk_hz(),
+                 tiku_s31_clock_measure_hz());
+    SHELL_PRINTF("  APB       %lu Hz\n", tiku_s31_clock_apb_hz());
+    SHELL_PRINTF("  fault     %d\n", tiku_s31_clock_fault());
+}
+#endif /* PLATFORM_ESP32S31 */
+
 #if defined(PLATFORM_RA8P1)
 /*
  * PCLKB is the measurable proxy for the core: the CAC cannot count CPUCLK0
@@ -293,6 +308,12 @@ tiku_shell_cmd_freq(uint8_t argc, const char *argv[])
         return;
     }
 #endif
+#if defined(PLATFORM_ESP32S31)
+    if (strcmp(argv[1], "probe") == 0) {
+        freq_cmd_probe_s31();
+        return;
+    }
+#endif
 
     /* Parse the requested core frequency in MHz (decimal). */
     p   = argv[1];
@@ -326,6 +347,10 @@ tiku_shell_cmd_freq(uint8_t argc, const char *argv[])
         SHELL_PRINTF("  no arg: show the core clock; <mhz>: 40, 90, 180 or 360.\n");
 #elif defined(PLATFORM_ESP32C5)
         SHELL_PRINTF("  no arg: show the core clock; <mhz>: 40, 80 or 240.\n");
+#elif defined(PLATFORM_ESP32S31)
+        SHELL_PRINTF("  no arg: show the core clock; probe: measure it;\n");
+        SHELL_PRINTF("  <mhz>: 80, 160 or 320 (the 320 MHz CPLL), or 40 (crystal) "
+                     "with PSRAM at 40 MHz or less.\n");
 #elif defined(PLATFORM_MSP430)
         SHELL_PRINTF("  no arg: show the core clock; <mhz>: 8, 4, 2 or 1 "
                      "(MCLK divided from the 8 MHz DCO).\n");

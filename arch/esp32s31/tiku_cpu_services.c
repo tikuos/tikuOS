@@ -11,6 +11,8 @@
  */
 #include "tiku_cpu_common.h"
 #include "tiku_runtime_arch.h"
+#include "tiku_clock_arch.h"
+#include <kernel/threads/tiku_thread.h>
 #include <hal/tiku_cpu.h>
 #include <hal/tiku_wake_hal.h>
 #include <hal/tiku_clock_hal.h>
@@ -21,11 +23,11 @@ extern uint8_t __tier_sram_end[];
 void tiku_cpu_boot_init(void) { }
 unsigned long tiku_cpu_mclk_hz(void)
 {
-    return TIKU_S31_CPU_MHZ * 1000000UL;
+    return tiku_s31_clock_mhz() * 1000000UL;
 }
 unsigned long tiku_cpu_smclk_hz(void)
 {
-    return 40000000UL;
+    return tiku_s31_clock_apb_hz();
 }
 unsigned long tiku_cpu_aclk_hz(void)
 {
@@ -33,19 +35,40 @@ unsigned long tiku_cpu_aclk_hz(void)
 }
 int tiku_cpu_clock_has_fault(void)
 {
-    return 0;
+    return tiku_s31_clock_fault();
 }
+/* The running rate changes on the kernel thread only; the build's rate is
+ * the boot rate, and an unoffered rate changes nothing. */
 void tiku_cpu_freq_init(unsigned int mhz)
 {
-    (void)mhz;
+    if (tiku_thread_in_kernel() && !tiku_s31_in_trap) (void)tiku_s31_clock_set(mhz);
 }
+unsigned long tiku_s31_clock_measure_hz(void)
+{
+    uint64_t start = tiku_s31_time(), now;
+    uint32_t c0, c1;
+
+    __asm__ volatile ("csrr %0, mcycle" : "=r"(c0));
+    do {
+        now = tiku_s31_time();
+    } while (now - start < 160000u);
+    __asm__ volatile ("csrr %0, mcycle" : "=r"(c1));
+    return (unsigned long)((uint64_t)(c1 - c0) * 16000000u / (now - start));
+}
+/* "fixed": the next boot runs the build's rate; freq_init() changes the
+ * running one. */
 const char *tiku_cpu_freq_change_mode(void)
 {
     return "fixed";
 }
 unsigned long tiku_cpu_freq_available(unsigned int i)
 {
-    return i ? 0 : tiku_cpu_mclk_hz();
+    static const unsigned mhz[] = { 40u, 80u, 160u, 320u };
+
+    for (unsigned k = 0; k < sizeof mhz / sizeof mhz[0]; k++) {
+        if (tiku_s31_clock_offers(mhz[k]) && i-- == 0u) return mhz[k] * 1000000UL;
+    }
+    return 0;
 }
 unsigned long tiku_cpu_freq_target_hz(void)
 {

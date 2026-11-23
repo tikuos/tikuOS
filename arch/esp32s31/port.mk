@@ -40,15 +40,15 @@ endif
 endif
 S31_PSRAM_MHZ ?= $(if $(filter display-test flash-display-test s31-local s31-connected,$(S31_PROFILE)),80,20)
 S31_CPU_MHZ ?= 40
-ifeq ($(filter $(S31_CPU_MHZ),40 160),)
-$(error S31_CPU_MHZ must be 40 or 160)
+ifeq ($(filter $(S31_CPU_MHZ),40 80 160 320),)
+$(error S31_CPU_MHZ must be 40, 80, 160 or 320)
 endif
-ifeq ($(S31_CPU_MHZ),160)
+ifneq ($(S31_CPU_MHZ),40)
 ifeq ($(filter firmware s31-local s31-connected,$(S31_PROFILE)),)
-$(error S31_CPU_MHZ=160 requires a flash firmware profile)
+$(error S31_CPU_MHZ=$(S31_CPU_MHZ) requires a flash firmware profile)
 endif
 ifeq ($(filter $(S31_PSRAM_MHZ),40 80),)
-$(error S31_CPU_MHZ=160 requires CPLL-backed PSRAM at 40 or 80 MHz)
+$(error S31_CPU_MHZ=$(S31_CPU_MHZ) requires CPLL-backed PSRAM at 40 or 80 MHz)
 endif
 endif
 ifeq ($(filter $(S31_PROFILE),s31-local s31-connected firmware kernel-test board-test shell watchdog-test flash-shell psram-test flash-psram-test memory-test flash-memory-test display-test flash-display-test sd-test media-test audio-test radio-os-test phy-test flash-wifi-test posix-test),)
@@ -73,11 +73,10 @@ S31_FLAGS := $(S31_ARCH) -Os -g3 -Wall -Wextra -Werror \
     -Wno-missing-field-initializers -ffreestanding -fno-builtin \
     -ffunction-sections -fdata-sections -I. -DPLATFORM_ESP32S31=1 \
     -DTIKU_BOARD_ESP32S31_KORVO1=1 -DTIKU_THREADS_ENABLE=1 \
-    -DTIKU_MEM_NVM_ENABLE=0 -DTIKU_S31_PSRAM_MHZ=$(S31_PSRAM_MHZ)
-ifeq ($(S31_CPU_MHZ),160)
-S31_FLAGS += -DTIKU_S31_CPU_MHZ=160
-endif
-S31_SRCS := arch/esp32s31/tiku_runtime_arch.c arch/esp32s31/tiku_watchdog_arch.c \
+    -DTIKU_MEM_NVM_ENABLE=0 -DTIKU_S31_PSRAM_MHZ=$(S31_PSRAM_MHZ) \
+    -DTIKU_S31_CPU_MHZ=$(S31_CPU_MHZ)
+S31_SRCS := arch/esp32s31/tiku_runtime_arch.c arch/esp32s31/tiku_clock_arch.c \
+    arch/esp32s31/tiku_watchdog_arch.c \
     arch/esp32s31/tiku_i2c_arch.c interfaces/bus/tiku_i2c_bus.c \
     interfaces/gpio/tiku_gpio_owner.c \
     kernel/process/tiku_process.c kernel/scheduler/tiku_sched.c \

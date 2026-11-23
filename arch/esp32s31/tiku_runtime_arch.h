@@ -28,13 +28,6 @@ extern volatile uint8_t tiku_s31_in_trap;
 void tiku_s31_reent_init(uint8_t slot);
 /** @brief Initialize CPU0 clocks, interrupt routing and the system timer. */
 void tiku_s31_runtime_init(void);
-#if TIKU_S31_CPU_MHZ == 160
-/** @brief Select 160 MHz CPU/memory, 80 MHz system and 40 MHz APB clocks.
- * Requires CPU0 boot with interrupts masked and initialized CPLL-backed PSRAM.
- * Returns -1 for an unavailable CPLL, update timeout or divider mismatch.
- */
-int tiku_s31_runtime_clock_ready(void);
-#endif
 /** @brief Return the wrapping 52-bit crystal-derived counter. */
 uint64_t tiku_s31_time(void);
 /** @brief Dispatch a non-nested machine trap and return its resume frame. */
