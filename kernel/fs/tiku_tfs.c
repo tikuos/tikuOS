@@ -760,10 +760,9 @@ static uint32_t tfs_sb_word(tiku_tfs_t *fs, unsigned w)
 /**
  * @brief Whether the stored descriptor matches the geometry this build derives.
  *
- * Compared word by word; mount returns TFS_ERR_GEOMETRY on any difference.
- * The version word may also read TFS_FMT_RENAMED.  The magic is excluded: it
- * is the separate "formatted" flag, written last so a torn format does not
- * look complete.
+ * Compared word by word (the version may also read TFS_FMT_RENAMED); mount
+ * returns TFS_ERR_GEOMETRY on any difference.  The magic, the "formatted"
+ * flag written last so a torn format does not look complete, is excluded.
  *
  * @return 1 on a match, 0 otherwise.
  */

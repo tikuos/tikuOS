@@ -330,10 +330,9 @@ size_t tiku_tfs_region_size(void);
 /**
  * @brief Mount the store @p be holds.  Never formats.
  *
- * A missing header returns TFS_ERR_NOSTORE, and a header for another geometry
- * or version TFS_ERR_GEOMETRY; tiku_tfs_probe() classifies the extent.  Its
- * writes clear the entries a cut left: beside a moved file (TIKU_TFS_ROTATE),
- * and the source and old target of a rename past its commit.
+ * A missing header returns TFS_ERR_NOSTORE, another geometry or version
+ * TFS_ERR_GEOMETRY (tiku_tfs_probe() classifies the extent).  Its writes clear
+ * the entries a cut left beside a moved file or a committed rename's result.
  *
  * @return TFS_OK or a negative tfs_err_t; TFS_ERR_IO when such a clear fails.
  */
