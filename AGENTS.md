@@ -71,6 +71,16 @@ system is and does, in the project's voice, with every command, path and
 claim checked against the code; its Banned table lists the words of
 reassurance, praise and hedging it leaves out.  `make lint` matches them.
 
+## No heap in the kernel
+
+The kernel and its services call no allocator, and none is added to them:
+`kernel/memory` has arenas and pools, and the C library's `_sbrk()` refuses.
+A program written for POSIX that needs `malloc` selects `compat/posix`'s
+heap group (`TIKU_POSIX_HEAP=1`) and gives it memory it holds from the
+kernel (`tiku_posix_heap_memory()`); the allocator is that program's.
+Operating-system state stays out of that heap.  `compat/posix/AGENTS.md`
+has the group.
+
 ## Durable data
 
 Never write a raw `__attribute__((section(".persistent")))` outside

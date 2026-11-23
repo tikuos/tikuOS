@@ -167,6 +167,38 @@ int tiku_posix_thread_detach(uint32_t id);
 /** @brief End the calling thread with @p result; does not return. */
 void tiku_posix_thread_exit(void *result);
 
+/*---------------------------------------------------------------------------*/
+/* THE HEAP                                                                  */
+/*---------------------------------------------------------------------------*/
+
+/*
+ * The kernel keeps no general heap.  A program written for POSIX gives the
+ * library memory it holds from the kernel, and the library's heap group
+ * (TIKU_POSIX_HEAP=1) hands it to the C library's allocator as the heap,
+ * with the allocator's lock: a short interrupt-masked section, so any
+ * thread, the kernel thread included, may allocate.  These return 0 or an
+ * error number and set no errno; none waits.
+ */
+
+/** @brief The least heap tiku_posix_heap_memory() takes, after alignment. */
+#define TIKU_POSIX_HEAP_MIN 4096u
+
+/**
+ * @brief Make @p bytes at @p base the heap, from its first 16-byte boundary;
+ *        until then every growth is refused.
+ * @return 0; EINVAL for NULL or less than TIKU_POSIX_HEAP_MIN bytes; EBUSY
+ *         when the heap was given already.
+ */
+int tiku_posix_heap_memory(void *base, size_t bytes);
+/** @brief Move the heap's break by @p increment bytes.
+ *  @return The break before the move; (void *)-1, changing nothing, when no
+ *          heap was given or the move would leave it.  A refused growth is
+ *          counted. */
+void *tiku_posix_heap_grow(intptr_t increment);
+/** @brief Bytes below the break, bytes given, growths refused and the
+ *         largest of them; any argument may be NULL. */
+void tiku_posix_heap_use(size_t *used, size_t *limit, uint32_t *refused, size_t *largest);
+
 /**
  * @brief The VFS caller capability (TIKU_VFS_CAP_* bits) the library's calls
  *        run under, set for each call and the caller's restored on every

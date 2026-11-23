@@ -9,8 +9,8 @@ above `kernel/`: `kernel/`, `hal/` and `arch/` include nothing from it, and
 `make lint` (`tools/check_kernel_dependencies.py`) refuses an include that
 does.
 
-The time group, the read group and the threads group are implemented. The
-other calls are in TikuSurface's
+The time group, the read group, the threads group and the heap group are
+implemented. The other calls are in TikuSurface's
 `desktop/posix.c`, over a tree in the desktop's heap, and move here a group
 at a time with their backing changed to the kernel's services. The rules
 below hold for each group as it lands.
@@ -142,6 +142,40 @@ handing a consumer 100 values through a condition, each thread's `errno`
 its own, and `getenv()` and a stream's lock each waiting while another
 thread holds them.
 
+## The heap group
+
+The kernel keeps no heap: `kernel/memory` has arenas, freed whole, and pools
+of fixed blocks, and the C library's `_sbrk()` refuses
+(`kernel/memory/tiku_noheap.c`; the S31's own in
+`arch/esp32s31/tiku_libc_heap.c`). A program written for POSIX that frees
+blocks of any size one at a time runs the C library's allocator inside one
+arena it holds from the kernel; that heap is the program's runtime, as its
+stack is. Selected with `TIKU_POSIX_HEAP=1` (off by default; with it off
+the image does not change).
+
+| Call | Kernel operation | Supports | Errors |
+| --- | --- | --- | --- |
+| `tiku_posix_heap_memory(base, bytes)` | none: the program gives memory it holds, such as a `tiku_tier_arena_create_span()` arena | once; from the first 16-byte boundary; at least `TIKU_POSIX_HEAP_MIN` (4096) bytes | `EINVAL`, `EBUSY` when given already |
+| `_sbrk_r` (`tiku_posix_sbrk.c`), reached by `malloc` and the calls that allocate | `tiku_posix_heap_grow()`, inside an atomic section | growth and shrinking inside the memory given | `ENOMEM` past it or before the memory is given; a refused growth is counted |
+| `__malloc_lock`, `__malloc_unlock` (`tiku_posix_sbrk.c`) | `tiku_atomic_enter()`, `tiku_atomic_exit()` | nested | none |
+| `tiku_posix_heap_use()` | none | bytes below the break, bytes given, refused growths and the largest; does not wait | none |
+
+The allocator's lock is an interrupt-masked section, not one of the
+library's locks: the kernel thread cannot wait for a thread, and with the
+masked section any thread, the kernel thread included, may allocate.
+newlib's `malloc` and `free` update their lists inside it; its `realloc`
+copies outside it. In TikuSurface's desktop the longest hold seen over
+1.85 million allocations was 750 µs; one lock and release costs 1.25 µs on
+the S31, against 7.3 µs for the library's recursive lock.
+
+Tests: TikuBench `test_posix_heap.c` (`make posix`, `mutations/posix.py`),
+and the heap phase of the S31 application in `tests/esp32s31/posix_app/`:
+`malloc` fails before memory is given, two threads allocate 600 blocks each
+with none handed out twice, growth past the heap is refused and counted, a
+stream on a kernel node, the kernel thread allocating while a thread is
+inside the allocator, and the timer on time while `realloc` copies 1 MiB
+blocks.
+
 ## Calls from a worker
 
 A worker's call reaches the kernel thread through `tiku_thread_call()`
@@ -164,11 +198,11 @@ contended lock, a condition wait and a join do.
 
 ## Memory
 
-The library allocates nothing from the C library's heap, which TikuOS
-refuses (`kernel/memory/tiku_noheap.c`). Its descriptor, mount and
-directory-stream tables are static, with sizes set by build options. A
-program that wants calls which allocate, such as `fopen` or `tmpfile`,
-brings its own heap, as the desktop does with a PSRAM tier arena.
+The library allocates nothing. Its descriptor, mount and directory-stream
+tables are static, with sizes set by build options. A program that wants
+calls which allocate, such as `fopen` or `tmpfile`, selects the heap group
+and gives it memory, as TikuSurface's desktop does with part of its PSRAM
+tier arena.
 
 ## Threads
 

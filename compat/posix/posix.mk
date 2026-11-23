@@ -7,9 +7,15 @@
 # with its own file layer, which keeps the C library's file hooks, sets
 # TIKU_POSIX_FILE_HOOKS to 0 and calls the tiku_posix_* names itself.
 TIKU_POSIX_FILE_HOOKS ?= 1
+# The heap group: a program that sets TIKU_POSIX_HEAP to 1 gives the library
+# memory for the C library's heap (tiku_posix_heap_memory()).
+TIKU_POSIX_HEAP ?= 0
 POSIX_SRCS := compat/posix/tiku_posix_time.c compat/posix/tiku_posix_vfs.c \
     compat/posix/tiku_posix_thread.c compat/posix/tiku_posix_pthread.c \
     compat/posix/tiku_posix_lock.c
 ifeq ($(TIKU_POSIX_FILE_HOOKS),1)
 POSIX_SRCS += compat/posix/tiku_posix_hooks.c
+endif
+ifeq ($(TIKU_POSIX_HEAP),1)
+POSIX_SRCS += compat/posix/tiku_posix_heap.c compat/posix/tiku_posix_sbrk.c
 endif
