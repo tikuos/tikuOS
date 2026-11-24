@@ -204,7 +204,11 @@ flash sector is erased. One change is in flight at a time; another waits
 for it, and for a writer or a lease outside the library only
 `TIKU_POSIX_STORE_WAIT_US` (10 s), then fails with `EBUSY`. When a request
 fails, the store is remounted, which finishes or undoes the change, and the
-call's result is what the store then holds: 0 if the change is there.
+call's result is what the store then holds: 0 if the change is there. A
+change in the store is then a record of `/data` in the change ring
+(`tiku_vfs_notify()`), as a VFS write of one of its files is, so the
+console and every joined reader see it; a change refused or with nothing to
+do makes none.
 
 | Call | Kernel operation | Supports | Errors |
 | --- | --- | --- | --- |

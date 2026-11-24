@@ -551,6 +551,13 @@ static int change_step(struct store_call *c, tiku_tfs_t *fs)
     if (rc < 0) return -EIO;
     r = change.result == TFS_OK ? 0 : change_settle(c, fs);
     if (r == 0) {
+        /* A record of /data, as the VFS makes for a write of one of its
+         * files, so the change ring's readers see the library's changes. */
+        char root[PREFIX_LEN];
+
+        memcpy(root, TIKU_POSIX_STORE_PREFIX, PREFIX_LEN - 1u);
+        root[PREFIX_LEN - 1u] = '\0';
+        tiku_vfs_notify(tiku_vfs_resolve(root));
         published++;
         if (f != NULL) {
             f->dirty = 0u;
