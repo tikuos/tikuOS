@@ -17,8 +17,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Register access, the cache, the time and the calling context; a host
- * model defines its own before including this file. */
+/* Register access, the cache, the time, the calling context and the
+ * interrupt line; a host model defines its own before including this file. */
 #ifndef TIKU_S31_PPA_REG_READ
 #include "tiku_psram_arch.h"
 #include "tiku_runtime_arch.h"
@@ -31,6 +31,8 @@
 #define TIKU_S31_PPA_NOW_US() (tiku_s31_time() / 16u)
 #define TIKU_S31_PPA_PSRAM_BYTES() tiku_s31_psram_size()
 #define TIKU_S31_PPA_CONTEXT() (!tiku_s31_in_trap && tiku_thread_in_kernel())
+#define TIKU_S31_PPA_IRQ_CLAIM(l, s, p, f) tiku_s31_irq_claim((l), (s), (p), (f))
+#define TIKU_S31_PPA_IRQ_ENABLE(l, e) tiku_s31_irq_enable((l), (e))
 #endif
 
 #define PSRAM_BASE      0x50000000u
@@ -109,11 +111,18 @@
 #define IN_RESET_AVAIL  (1u << 23)
 #define IN_SUC_EOF      (1u << 1)
 #define IN_FAULTS       ((1u << 2) | (1u << 3) | (0x3Fu << 4) | (1u << 10))
+#define IN_ENDS         ((1u << 1) | (1u << 2) | (1u << 3))  /* eof, error eof, descriptor */
 #define IN_ALL          0x3FFFu
 #define OUT_ALL         0x1FFFu
 #define CSC_NONE_OUT    0x3Au
 #define PERI_SRM        1u
 #define PERI_NONE       7u
+/* CPU0 line 31, the last the BLE driver takes, for the in channel's
+ * interrupt at the lowest priority.  Its source is 107, the matrix map
+ * register at 0x1AC (interrupt_core0_reg.h). */
+#define IRQ_LINE        31u
+#define IRQ_SOURCE      107u
+#define IRQ_PRIORITY    1u
 #define PORT_BLOCK      34u             /* for the 32 x 32 macro block (ppa_ll.h) */
 #define D0_FLAGS        ((1u << 31) | (1u << 30) | (1u << 29))  /* owner, eof, 2D */
 #define CODE_4          5u              /* the descriptor's pixel size codes */
@@ -133,7 +142,8 @@ typedef struct {
 
 static desc_t desc_in __attribute__((aligned(8)));
 static desc_t desc_out __attribute__((aligned(8)));
-static uint8_t ready, busy;
+static uint8_t ready, busy, irq_claimed;
+static void (*volatile notify_fn)(void);
 static uint8_t *out_at;            /* the running job's output lines */
 static uint32_t out_len, budget_us, errors;
 static uint64_t started_us;
@@ -271,6 +281,16 @@ static void describe(desc_t *d, const tiku_s31_picture_t *p, uint16_t x, uint16_
     d->pad = 0u;
 }
 
+/** @brief The in channel's interrupt: masked again, its raw status kept
+ *         for the poll that ends the job, then the caller told. */
+static void ppa_isr(void)
+{
+    void (*fn)(void) = notify_fn;
+
+    TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + INT_ENA, 0u);
+    if (fn != NULL) fn();
+}
+
 /** @brief End the job with @p rc: a fault stops both links and resets the
  *         scaler; the channels leave the scaler; the output lines leave the
  *         cache; the engine is free. */
@@ -281,6 +301,7 @@ static int finish(int rc)
         put_bits(TX(CH_OUT) + LINK_CONF, OUT_STOP, OUT_STOP);
         srm_reset();
     }
+    TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + INT_ENA, 0u);
     TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + INT_CLR, IN_ALL);
     TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + IN_PERI_SEL, PERI_NONE);
     TIKU_S31_PPA_REG_WRITE(TX(CH_OUT) + INT_CLR, OUT_ALL);
@@ -334,8 +355,8 @@ int tiku_s31_ppa_convert(const tiku_s31_picture_t *out, uint16_t ox, uint16_t oy
     TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + IN_PERI_SEL, PERI_SRM);
     TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + CONF0, CONF_PORT);
     put_bits(RX(CH_IN) + LINK_CONF, IN_AUTO_RET, 0u);
-    TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + INT_ENA, 0u);
     TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + INT_CLR, IN_ALL);
+    TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + INT_ENA, notify_fn != NULL ? IN_ENDS : 0u);
     TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + LINK_ADDR, (uint32_t)(uintptr_t)&desc_out);
     put_bits(TX(CH_OUT) + LINK_CONF, OUT_START, OUT_START);
     put_bits(RX(CH_IN) + LINK_CONF, IN_START, IN_START);
@@ -372,4 +393,16 @@ int tiku_s31_ppa_poll(void)
 uint32_t tiku_s31_ppa_errors(void)
 {
     return errors;
+}
+
+int tiku_s31_ppa_notify(void (*fn)(void))
+{
+    if (!TIKU_S31_PPA_CONTEXT()) return -1;
+    if (fn != NULL && !irq_claimed) {
+        if (TIKU_S31_PPA_IRQ_CLAIM(IRQ_LINE, IRQ_SOURCE, IRQ_PRIORITY, ppa_isr) != 0) return -1;
+        if (TIKU_S31_PPA_IRQ_ENABLE(IRQ_LINE, 1) != 0) return -1;
+        irq_claimed = 1u;
+    }
+    notify_fn = fn;
+    return 0;
 }

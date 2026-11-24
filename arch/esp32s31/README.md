@@ -390,6 +390,14 @@ channel's end of frame, a descriptor or FIFO fault, the scaler's parameter
 error, whose flags `tiku_s31_ppa_errors()` returns, or a timeout of 20 ms and
 1 µs for every 8 output bytes.
 
+`tiku_s31_ppa_notify()` sets a function the in channel's interrupt calls
+when a job ends with its end of frame or a descriptor error; the next poll
+still ends the job. The first call claims CPU0 line 31, the last line the
+BLE driver takes, for source 107, the 2D-DMA's RX channel 2 at matrix map
+register `0x1AC`; ESP-IDF's `interrupts.h` numbers that source 99. A taken
+line leaves jobs to the poll. A scaler parameter error raises no interrupt;
+the poll finds it.
+
 The channels move 128-byte bursts. At 320 MHz with 80 MHz PSRAM a full
 800×480 frame takes 28 ms on the engine and 46 ms in the CPU loop; starting
 the job, the cache commands among it, takes 0.3 ms. Build
@@ -397,7 +405,8 @@ the job, the cache commands among it, takes 0.3 ms. Build
 application manifest and judge its console log with
 `TikuBench/tests/esp32s31/ppa_app/check.py`: it compares the engine's output
 with the CPU conversion over full frames, odd blocks, single pixels and rows,
-an SRAM input and dirty or cached lines, and checks the refusals. The host
+an SRAM input and dirty or cached lines, checks the refusals, and times the
+interrupt at a full frame's end, 28.5 ms after the start. The host
 model is `TikuBench/tests/host/kernel/test_esp32s31_ppa.c`.
 
 ## Register sources

@@ -58,4 +58,15 @@ int tiku_s31_ppa_poll(void);
  *         had none. */
 uint32_t tiku_s31_ppa_errors(void);
 
+/**
+ * @brief Call @p fn from an interrupt when a job's in channel ends it, with
+ *        its end of frame or a descriptor error; NULL stops the calls.  Kernel
+ *        thread only.
+ * @note @p fn runs with interrupts masked; the job still ends at the next
+ *       tiku_s31_ppa_poll().  The first call with a function claims CPU0
+ *       line 31; without it, jobs are only polled.
+ * @return 0, or -1 when the line is taken or the context is wrong
+ */
+int tiku_s31_ppa_notify(void (*fn)(void));
+
 #endif /* TIKU_S31_PPA_ARCH_H_ */
