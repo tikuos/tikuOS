@@ -25,6 +25,17 @@ tiku_mfs_mutation_t *tiku_mfs_mutation_init(void *,size_t);
  * the filesystem until completion or cancellation. Reuse only a retired owner.
  */
 int tiku_mfs_mutation_begin(tiku_mfs_t *,tiku_mfs_mutation_t *,uint64_t id,const char *source,const char *target);
+/** @brief Begin removing unfinished object @p id named @p name: a pending
+ *  atomic upload, whose name keeps its visible version, or a stream never
+ *  finalized.  Admission and serialization match tiku_mfs_mutation_begin(). */
+int tiku_mfs_mutation_discard_begin(tiku_mfs_t *,tiku_mfs_mutation_t *,uint64_t id,const char *name);
+/** @brief Begin renaming file @p id from @p source to @p target, removing the
+ *  target's visible file @p replaced in the same transaction.
+ * @note @p replaced must be the target's current visible ID, with no upload
+ * pending there, or the rename refuses with STALE or BUSY; zero requires an
+ * absent target as tiku_mfs_mutation_begin() does. Directories refuse. */
+int tiku_mfs_mutation_rename_over_begin(tiku_mfs_t *,tiku_mfs_mutation_t *,uint64_t id,
+                                        const char *source,const char *target,uint64_t replaced);
 /** @brief Create or replace one complete file of at most TIKU_MFS_CHUNK bytes.
  * @note An expected ID of zero requires an absent name; a nonzero ID must match
  * the completed visible file. Pending uploads and namespace conflicts refuse

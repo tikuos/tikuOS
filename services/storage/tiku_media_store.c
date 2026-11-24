@@ -39,7 +39,8 @@ static uint32_t permission(tiku_media_op_t op)
     if(op==TIKU_MEDIA_DIRECTORY_UPGRADE)return TIKU_MEDIA_ADMIN;
     if(op==TIKU_MEDIA_MKDIR||op==TIKU_MEDIA_TREE_RENAME||op==TIKU_MEDIA_TREE_DELETE)return TIKU_MEDIA_WRITE;
 #endif
-    if(op==TIKU_MEDIA_RENAME||op==TIKU_MEDIA_DELETE_VERSION||op==TIKU_MEDIA_REPLACE)return TIKU_MEDIA_WRITE;
+    if(op==TIKU_MEDIA_RENAME||op==TIKU_MEDIA_DELETE_VERSION||op==TIKU_MEDIA_REPLACE||
+       op==TIKU_MEDIA_DISCARD||op==TIKU_MEDIA_RENAME_OVER)return TIKU_MEDIA_WRITE;
 #if TIKU_MEDIA_NAMES_ENABLE
     if(op==TIKU_MEDIA_ENUMERATE||op==TIKU_MEDIA_OPEN_VERSION)return TIKU_MEDIA_READ;
 #endif
@@ -48,10 +49,21 @@ static uint32_t permission(tiku_media_op_t op)
     if(op>=TIKU_MEDIA_OPEN&&op<=TIKU_MEDIA_LIST)return TIKU_MEDIA_READ;
     return TIKU_MEDIA_WRITE;
 }
+/** @brief Whether this build serves operation @p op. */
+static int served(tiku_media_op_t op)
+{
+    if(op>=TIKU_MEDIA_MOUNT&&op<=TIKU_MEDIA_REPLACE)return 1;
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+    if(op>=TIKU_MEDIA_MKDIR&&op<=TIKU_MEDIA_TREE_COPY)return 1;
+#endif
+#if TIKU_MEDIA_ASYNC_ENABLE
+    if(op==TIKU_MEDIA_DISCARD||op==TIKU_MEDIA_RENAME_OVER)return 1;
+#endif
+    return 0;
+}
 int tiku_media_store_submit(tiku_media_store_t *s,tiku_media_request_t *r)
 {
-    const tiku_media_op_t last=TIKU_MEDIA_DIRECTORIES_ENABLE?TIKU_MEDIA_TREE_COPY:TIKU_MEDIA_REPLACE;
-    if(!s||!r||!s->fs||!r->client||r->op<TIKU_MEDIA_MOUNT||r->op>last||
+    if(!s||!r||!s->fs||!r->client||!served(r->op)||
        !(r->permissions&permission(r->op)))return TIKU_MFS_ARG;
 #if TIKU_MEDIA_DIRECTORIES_ENABLE
     if(r->op==TIKU_MEDIA_TREE_COPY&&(r->permissions&(TIKU_MEDIA_READ|TIKU_MEDIA_WRITE))!=(TIKU_MEDIA_READ|TIKU_MEDIA_WRITE))return TIKU_MFS_ARG;
@@ -112,7 +124,7 @@ static int execute(tiku_media_store_t *s,tiku_media_request_t *r)
         rc=tiku_mfs_release(s->fs);if(!rc)s->writer=0;return rc;
     case TIKU_MEDIA_DELETE:return tiku_mfs_delete(s->fs,r->id);
     case TIKU_MEDIA_DELETE_VERSION:return tiku_mfs_delete_version(s->fs,r->id,r->name);
-    case TIKU_MEDIA_REPLACE:
+    case TIKU_MEDIA_REPLACE:case TIKU_MEDIA_DISCARD:case TIKU_MEDIA_RENAME_OVER:
 #if TIKU_MEDIA_DIRECTORIES_ENABLE
     case TIKU_MEDIA_MKDIR:case TIKU_MEDIA_TREE_RENAME:case TIKU_MEDIA_TREE_DELETE:case TIKU_MEDIA_DIRECTORY_UPGRADE:case TIKU_MEDIA_TREE_COPY:
 #endif
@@ -175,7 +187,7 @@ int tiku_media_store_step(tiku_media_store_t *s)
     if(!s||!s->fs)return TIKU_MFS_ARG;
     if(s->running)return TIKU_MFS_BUSY;
     if(!s->count)return 0;
-    if(s->queue[0]->op==TIKU_MEDIA_REPLACE
+    if(s->queue[0]->op==TIKU_MEDIA_REPLACE||s->queue[0]->op==TIKU_MEDIA_DISCARD||s->queue[0]->op==TIKU_MEDIA_RENAME_OVER
 #if TIKU_MEDIA_DIRECTORIES_ENABLE
        ||s->queue[0]->op==TIKU_MEDIA_MKDIR||s->queue[0]->op==TIKU_MEDIA_TREE_RENAME||s->queue[0]->op==TIKU_MEDIA_TREE_DELETE||s->queue[0]->op==TIKU_MEDIA_DIRECTORY_UPGRADE||s->queue[0]->op==TIKU_MEDIA_TREE_COPY
 #endif

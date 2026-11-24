@@ -489,6 +489,17 @@ matching its ID and source path. Rename refuses occupied destinations and
 file/directory-prefix conflicts. Both operations refuse active writers and
 pending replacements at the source. Snapshot readers retain their contents.
 
+`tiku_mfs_mutation_rename_over_begin()` renames a completed file onto a name
+whose visible file has the caller's expected ID, and removes that file's ID in
+the same publication. A different visible ID, or none, returns
+`TIKU_MFS_STALE`; an upload pending at the destination returns
+`TIKU_MFS_BUSY`; a directory at either end is refused. After a cut, recovery
+shows the old destination with the source still present, or the moved file
+alone. `tiku_mfs_mutation_discard_begin()` removes an unfinished object: an
+atomic upload pending at its name, whose visible file stays, or a stream that
+was never finalized. A completed file returns `TIKU_MFS_STALE`. Neither
+operation changes the on-disk format.
+
 Mutation traversal and AVL rotations issue one sector request at a time.
 Allocation examines at most 64 segment bits per step. Checkpoint rollover,
 root records and commit barriers use the same sector protocol. The caller
@@ -502,7 +513,9 @@ must retire before cancellation releases caller memory. Recovery selects the
 old or new transaction using the existing on-disk format.
 
 `services/storage/tiku_media_checkpoint.h` owns queued CHECKPOINT requests.
-`services/storage/tiku_media_mutation.h` owns RENAME and DELETE_VERSION. Each
+`services/storage/tiku_media_mutation.h` owns RENAME, DELETE_VERSION,
+REPLACE, DISCARD and RENAME_OVER. RENAME_OVER borrows the destination in
+`buffer` and takes the expected destination ID in `offset`. Each
 service step invokes at most one transport callback. Other clients may enqueue
 while an owner runs; synchronous queue stepping is excluded. DELETE_VERSION
 requires WRITE permission and checks both the expected ID and source path.

@@ -1520,6 +1520,7 @@ struct tiku_mfs_mutation {
     catalog_node_t seek_key,seek_node,old_name;
     tiku_mfs_link_t seek_link,ids,names;
     uint64_t generation,sequence,epoch,id,sector_lba;
+    uint64_t over;          /* the visible ID a rename replaces at its target */
     uint32_t root_crc,scanned,payload_size,payload_at,slice_crc;
     uint64_t frame_lba;
     const uint8_t *payload;
@@ -1528,7 +1529,7 @@ struct tiku_mfs_mutation {
     uint8_t sector[512];
     int result,io_result;
     unsigned phase,seek_phase,seek_depth,seek_lower,seek_found,prefix_at;
-    uint8_t waiting,have,done,changed,remove,replace,stream;
+    uint8_t waiting,have,done,changed,remove,replace,stream,discard;
 #if TIKU_MEDIA_DIRECTORIES_ENABLE
     uint8_t directory,tree,tree_started,copy,copy_ready;
     uint8_t copy_digest[32];
@@ -1546,7 +1547,7 @@ enum {
     MUT_NEW,MUT_ROOT,MUT_ROOT_SYNC,MUT_COMMIT,MUT_COMMIT_SYNC,MUT_PUBLISH,
     MUT_REPLACE_TARGET,MUT_FILE_ALLOC,MUT_FILE_HASH,MUT_FILE_DATA,MUT_FILE_FOOTER,
     MUT_FILE_HEADER,MUT_FILE_INDEX,MUT_FILE_DESCRIPTOR,MUT_REPLACED,
-    MUT_PARENT_ID,MUT_PARENT_OBJECT,MUT_DIRECTORY_CHILD,
+    MUT_PARENT_ID,MUT_PARENT_OBJECT,MUT_DIRECTORY_CHILD,MUT_OVER,MUT_OVER_ID,MUT_OVER_OBJECT,
     MUT_TREE_IMPLICIT,MUT_TREE_START,MUT_TREE_NEXT,MUT_TREE_END,MUT_COPY_READ,
     MUT_STREAM_NAME,MUT_STREAM_FRAME,MUT_STREAM_DESCEND,MUT_STREAM_DECODE,
     MUT_STREAM_HEADER,MUT_STREAM_FOOTER,MUT_STREAM_ALLOC,MUT_STREAM_SECTOR,
@@ -1722,6 +1723,18 @@ int tiku_mfs_mutation_begin(tiku_mfs_t *f,tiku_mfs_mutation_t *m,uint64_t id,con
     m->id=id;m->ids=f->ids;m->names=f->names;m->remove=target==NULL;
     memcpy(m->source,source,strlen(source)+1);if(target)memcpy(m->target,target,strlen(target)+1);
     mutation_seek(m,f->ids,CATALOG_IDS,id,NULL,0);m->phase=MUT_ID;return 0;
+}
+int tiku_mfs_mutation_discard_begin(tiku_mfs_t *f,tiku_mfs_mutation_t *m,uint64_t id,const char *name)
+{
+    int rc=tiku_mfs_mutation_begin(f,m,id,name,NULL);if(rc)return rc;
+    m->discard=1;return 0;
+}
+int tiku_mfs_mutation_rename_over_begin(tiku_mfs_t *f,tiku_mfs_mutation_t *m,uint64_t id,
+                                        const char *source,const char *target,uint64_t replaced)
+{
+    if(!target)return TIKU_MFS_ARG;
+    int rc=tiku_mfs_mutation_begin(f,m,id,source,target);if(rc)return rc;
+    m->over=replaced;return 0;
 }
 int tiku_mfs_mutation_replace_begin(tiku_mfs_t *f,tiku_mfs_mutation_t *m,uint64_t expected_id,
                                   const char *name,const void *payload,uint32_t bytes)
@@ -2082,15 +2095,23 @@ int tiku_mfs_mutation_step(tiku_mfs_t *f,tiku_mfs_mutation_t *m)
             if(m->object.complete)return mutation_done(f,m,TIKU_MFS_ARG);
             f->draft=m->object;f->writing=1;return mutation_done(f,m,0);
         }
-        if(!m->object.visible||!m->object.complete||strcmp(m->object.name,m->source))return mutation_done(f,m,TIKU_MFS_STALE);
+        if(m->discard?m->object.complete||strcmp(m->object.name,m->source):
+           !m->object.visible||!m->object.complete||strcmp(m->object.name,m->source))return mutation_done(f,m,TIKU_MFS_STALE);
 #if TIKU_MEDIA_DIRECTORIES_ENABLE
         if(m->tree&&m->id==m->tree_id&&m->object.policy!=TIKU_MFS_DIRECTORY)return mutation_done(f,m,TIKU_MFS_ARG);
-        if(m->replace&&m->object.policy==TIKU_MFS_DIRECTORY)return mutation_done(f,m,TIKU_MFS_BUSY);
+        if((m->replace||m->over)&&m->object.policy==TIKU_MFS_DIRECTORY)return mutation_done(f,m,TIKU_MFS_BUSY);
 #endif
         mutation_seek(m,f->names,CATALOG_NAMES,0,m->source,0);m->phase=MUT_SOURCE;return 1;
     case MUT_SOURCE:
         rc=mutation_seek_step(f,m);if(rc==1)return 1;if(rc)return mutation_done(f,m,rc);
         m->old_name=m->seek_node;
+        /* An unfinished object is its name's pending upload, or its visible
+         * stream when the name has no upload pending. */
+        if(m->discard){
+            if(m->old_name.pending!=m->id&&(m->old_name.visible!=m->id||m->old_name.pending))
+                return mutation_done(f,m,TIKU_MFS_STALE);
+            m->phase=MUT_PREPARE;return 1;
+        }
         if(m->old_name.visible!=m->id)return mutation_done(f,m,TIKU_MFS_STALE);
         if(m->old_name.pending)return mutation_done(f,m,TIKU_MFS_BUSY);
 #if TIKU_MEDIA_DIRECTORIES_ENABLE
@@ -2106,6 +2127,17 @@ int tiku_mfs_mutation_step(tiku_mfs_t *f,tiku_mfs_mutation_t *m)
         mutation_seek(m,f->names,CATALOG_NAMES,0,m->target,0);m->phase=MUT_TARGET;return 1;
     case MUT_TARGET:case MUT_PARENT:
         rc=mutation_seek_step(f,m);if(rc==1)return 1;
+        /* A rename over a target finds the version it was told to replace. */
+        if(m->phase==MUT_TARGET&&m->over){
+            if(rc)return mutation_done(f,m,rc==TIKU_MFS_NOENT?TIKU_MFS_STALE:rc);
+            if(m->seek_node.pending)return mutation_done(f,m,TIKU_MFS_BUSY);
+            if(m->seek_node.visible!=m->over)return mutation_done(f,m,TIKU_MFS_STALE);
+#if TIKU_MEDIA_DIRECTORIES_ENABLE
+            mutation_seek(m,f->ids,CATALOG_IDS,m->over,NULL,0);m->phase=MUT_OVER_ID;return 1;
+#else
+            mutation_parent(f,m);return 1;
+#endif
+        }
 #if TIKU_MEDIA_DIRECTORIES_ENABLE
         if(!rc&&m->phase==MUT_PARENT&&m->seek_node.visible&&!m->seek_node.pending){
             mutation_seek(m,f->ids,CATALOG_IDS,m->seek_node.visible,NULL,0);m->phase=MUT_PARENT_ID;return 1;}
@@ -2121,6 +2153,16 @@ int tiku_mfs_mutation_step(tiku_mfs_t *f,tiku_mfs_mutation_t *m)
         rc=object_decode(f,p,&parent);if(rc)return mutation_done(f,m,rc);
         if(parent.id!=m->seek_node.key||strcmp(parent.name,m->prefix))return mutation_done(f,m,TIKU_MFS_CORRUPT);
         if(parent.policy!=TIKU_MFS_DIRECTORY)return mutation_done(f,m,TIKU_MFS_BUSY);
+        mutation_parent(f,m);return 1;
+    }
+    case MUT_OVER_ID:
+        rc=mutation_seek_step(f,m);if(rc==1)return 1;if(rc)return mutation_done(f,m,rc);
+        m->phase=MUT_OVER_OBJECT;return mutation_io(m,TIKU_MFS_MUTATION_READ,m->seek_node.object.lba);
+    case MUT_OVER_OBJECT:{
+        tiku_mfs_object_t replaced;if(get32(p+508)!=m->seek_node.object.crc)return mutation_done(f,m,TIKU_MFS_CORRUPT);
+        rc=object_decode(f,p,&replaced);if(rc)return mutation_done(f,m,rc);
+        if(replaced.id!=m->over||strcmp(replaced.name,m->target))return mutation_done(f,m,TIKU_MFS_CORRUPT);
+        if(replaced.policy==TIKU_MFS_DIRECTORY)return mutation_done(f,m,TIKU_MFS_BUSY);
         mutation_parent(f,m);return 1;
     }
     case MUT_DIRECTORY_CHILD:
@@ -2297,8 +2339,15 @@ int tiku_mfs_mutation_step(tiku_mfs_t *f,tiku_mfs_mutation_t *m)
         if(m->replace){
             if(m->old_name.visible){catalog_node_t key={.kind=CATALOG_IDS,.key=m->old_name.visible};mutation_edit(m,m->ids,&key,1);m->phase=MUT_REPLACED;}
             else mutation_new_name(m);
+        }else if(m->over){
+            catalog_node_t key={.kind=CATALOG_IDS,.key=m->over};mutation_edit(m,m->ids,&key,1);m->phase=MUT_OVER;
+        }else if(m->discard&&m->old_name.pending==m->id&&m->old_name.visible){
+            catalog_node_t name=m->old_name;name.pending=0;mutation_edit(m,m->names,&name,0);m->phase=MUT_OLD;
         }else {mutation_edit(m,m->names,&m->old_name,1);m->phase=MUT_OLD;}
         return 1;
+    case MUT_OVER:
+        rc=mutation_edit_step(f,m);if(rc==1)return 1;if(rc)return mutation_done(f,m,rc);
+        m->ids=m->edit.root;mutation_edit(m,m->names,&m->old_name,1);m->phase=MUT_OLD;return 1;
     case MUT_REPLACED:
         rc=mutation_edit_step(f,m);if(rc==1)return 1;if(rc)return mutation_done(f,m,rc);
         m->ids=m->edit.root;mutation_new_name(m);return 1;

@@ -56,7 +56,8 @@ int tiku_media_mutation_step(tiku_media_mutation_t *a,tiku_media_store_t *s)
             mutation_finish(a,s,0,rc);return 1;
         }
         unsigned streaming=r->op>=TIKU_MEDIA_BEGIN&&r->op<=TIKU_MEDIA_FINALIZE;
-        if(!streaming&&r->op!=TIKU_MEDIA_RENAME&&r->op!=TIKU_MEDIA_DELETE_VERSION&&r->op!=TIKU_MEDIA_REPLACE
+        if(!streaming&&r->op!=TIKU_MEDIA_RENAME&&r->op!=TIKU_MEDIA_DELETE_VERSION&&r->op!=TIKU_MEDIA_REPLACE&&
+           r->op!=TIKU_MEDIA_DISCARD&&r->op!=TIKU_MEDIA_RENAME_OVER
 #if TIKU_MEDIA_DIRECTORIES_ENABLE
             &&r->op!=TIKU_MEDIA_MKDIR&&r->op!=TIKU_MEDIA_TREE_RENAME&&r->op!=TIKU_MEDIA_TREE_DELETE&&r->op!=TIKU_MEDIA_DIRECTORY_UPGRADE&&r->op!=TIKU_MEDIA_TREE_COPY
 #endif
@@ -80,6 +81,9 @@ int tiku_media_mutation_step(tiku_media_mutation_t *a,tiku_media_store_t *s)
             r->op==TIKU_MEDIA_APPEND?tiku_mfs_mutation_append_begin(s->fs,a->mutation,r->buffer,r->length):
             (r->op==TIKU_MEDIA_SYNC||r->op==TIKU_MEDIA_FINALIZE)?tiku_mfs_mutation_flush_begin(s->fs,a->mutation,r->op==TIKU_MEDIA_FINALIZE):
             r->op==TIKU_MEDIA_REPLACE?tiku_mfs_mutation_replace_begin(s->fs,a->mutation,r->id,r->name,r->buffer,r->length):
+            r->op==TIKU_MEDIA_DISCARD?tiku_mfs_mutation_discard_begin(s->fs,a->mutation,r->id,r->name):
+            r->op==TIKU_MEDIA_RENAME_OVER?(!r->buffer?TIKU_MFS_ARG:
+                tiku_mfs_mutation_rename_over_begin(s->fs,a->mutation,r->id,r->name,r->buffer,r->offset)):
             tiku_mfs_mutation_begin(s->fs,a->mutation,r->id,r->name,r->op==TIKU_MEDIA_RENAME?r->buffer:NULL);
 #if TIKU_MEDIA_DIRECTORIES_ENABLE
         r->prepared=r->total=0;
