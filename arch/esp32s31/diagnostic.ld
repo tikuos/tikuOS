@@ -11,6 +11,10 @@
  */
 ENTRY(tiku_s31_diagnostic_entry)
 MEMORY { SRAM (rwx) : ORIGIN = 0x2f000000, LENGTH = 64K }
+/* The SRAM's bounds, which /sys/mem/sram_map measures the bank and places
+ * the tier by. */
+__sram_start = ORIGIN(SRAM);
+__sram_end = ORIGIN(SRAM) + LENGTH(SRAM);
 SECTIONS
 {
     .text : ALIGN(64) {

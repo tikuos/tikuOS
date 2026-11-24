@@ -15,6 +15,10 @@ MEMORY {
     DROM (r) : ORIGIN = 0x40000020, LENGTH = 64K - 32
     IROM (rx) : ORIGIN = 0x40010020, LENGTH = 64K - 32
 }
+/* The SRAM's bounds, which /sys/mem/sram_map measures the bank and places
+ * the tier by. */
+__sram_start = ORIGIN(SRAM);
+__sram_end = ORIGIN(SRAM) + LENGTH(SRAM);
 SECTIONS
 {
     .flash.rodata : {
