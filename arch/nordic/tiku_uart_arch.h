@@ -40,6 +40,16 @@ uint8_t  tiku_uart_rx_ready(void);
  *         empty (does not block). */
 int      tiku_uart_getc(void);
 
+#if !(TIKU_CONSOLE_RTT + 0)
+/** @brief The UARTE driver calls a hook from its receive interrupt; the RTT
+ *         console, which is polled, has none. */
+#define TIKU_UART_HAS_RX_HOOK 1
+
+/** @brief Call @p fn, in interrupt context, for a byte queued into an empty
+ *         ring; NULL ends the calls. */
+void     tiku_uart_rx_hook(void (*fn)(void));
+#endif
+
 /** @brief Bytes lost to a full ring or a hardware overrun since init or
  *         the last reset; saturates at 0xFFFF. */
 uint16_t tiku_uart_overrun_count(void);

@@ -34,6 +34,13 @@ Physical text is buffered in the injection ring with its physical origin;
 GUI-injected text retains its separate origin. A full text ring stops the
 pump until the shell consumes bytes.
 
+On a port whose UART driver reports received bytes
+(`TIKU_UART_HAS_RX_HOOK`: MSP430, and the nRF54L's UARTE), the driver's
+receive interrupt polls the `Console` process for a byte queued into an
+empty ring, so a frame is served when it arrives and the timer is the
+fallback.  The process sets the hook when it starts and clears it when it
+ends.
+
 ## Decoder rules that must not change
 
 - An END is a delimiter, never a toggle.

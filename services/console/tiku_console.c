@@ -103,6 +103,23 @@ static struct tiku_timer pump_timer;
 
 TIKU_PROCESS(tiku_console_process, "Console");
 
+/* The wire is the UART and its driver reports a received byte from its
+ * interrupt: the pump runs on that report, and the timer is what remains
+ * for a wire a test installed or a byte the report missed. */
+#if defined(TIKU_UART_HAS_RX_HOOK) && !defined(TIKU_CONSOLE_JTAG) && \
+    !(defined(TIKU_CONSOLE_USB) && !defined(TIKU_CONSOLE_BOTH))
+#define CONSOLE_RX_HOOK 1
+
+/** @brief In the UART's receive interrupt: a byte waits, so poll the pump. */
+static void
+rx_arrived(void)
+{
+    tiku_process_poll(&tiku_console_process);
+}
+#else
+#define CONSOLE_RX_HOOK 0
+#endif
+
 /** @brief Whether anyone would take what the wire carries. */
 static uint8_t
 listening(void)
@@ -122,7 +139,8 @@ service(void)
 
 /**
  * @brief The pump: drain the wire every TIKU_CONSOLE_POLL_TICKS and on a
- *        poll, until no one listens.
+ *        poll, until no one listens.  A UART that reports received bytes
+ *        polls it for the time it runs.
  */
 TIKU_PROCESS_THREAD(tiku_console_process, ev, data)
 {
@@ -130,6 +148,11 @@ TIKU_PROCESS_THREAD(tiku_console_process, ev, data)
 
     TIKU_PROCESS_BEGIN();
     tiku_timer_set_event(&pump_timer, TIKU_CONSOLE_POLL_TICKS);
+#if CONSOLE_RX_HOOK
+    /* The poll takes the bytes that came before the hook was set. */
+    tiku_uart_rx_hook(rx_arrived);
+    tiku_process_poll(&tiku_console_process);
+#endif
     while (listening()) {
         TIKU_PROCESS_WAIT_EVENT();
         if (ev == TIKU_EVENT_TIMER) {
@@ -141,6 +164,9 @@ TIKU_PROCESS_THREAD(tiku_console_process, ev, data)
         }
         service();
     }
+#if CONSOLE_RX_HOOK
+    tiku_uart_rx_hook((void (*)(void))0);
+#endif
     tiku_timer_stop(&pump_timer);
     TIKU_PROCESS_END();
 }

@@ -69,10 +69,21 @@ Makefile sets `TIKU_PEER_ON_CONSOLE`, and the console's own pump serves its
 frames while the shell is inside a command.
 
 The link runs at `TIKU_BOARD_LINK_BAUD`, 9600 unless `make LINK_BAUD=` says
-otherwise, the same on both sides.  With kernel IPC running, the MSP430's
-interrupt-driven receiver loses bytes above that: measured on the board,
-about 1 % of the frames it received were damaged at 9600, 11 % at 19200,
-39 % at 38400 and 99 % at 115200.
+otherwise, the same on both sides.  Measured on the board with the peer on
+the MSP430's console line:
+
+| Baud | Frames the MSP430 received damaged | Round trip of a 32-byte message |
+|------|------------------------------------|---------------------------------|
+| 9600 | 0 of 504 | 0.48 s |
+| 19200 | 3 of 89 | 0.22 s |
+| 38400 | 8 of 87 | 0.14 s |
+
+A damaged frame is sent again.  What damages one is a hardware overrun: the
+eUSCI holds one received byte, and with kernel IPC running the receive
+interrupt is at times held off for longer than a byte takes, 260 us at
+38400.  At 115200 a byte takes 87 us and most frames are damaged.  With the
+MSP430's console on J11 the peer rides the link UART, which kernel IPC
+drains every tick: 40 of 40 messages came back at 38400, 0.19 s each.
 
 The epoch needs no random source on the MSP430: `hal/tiku_ipc_epoch_hal.c`
 builds it from the die's ID and a durable count.

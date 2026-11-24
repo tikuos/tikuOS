@@ -70,6 +70,8 @@ static volatile uint8_t  tiku_uart_rxring[TIKU_UART_RX_RING];
 static volatile uint16_t tiku_uart_rx_head;
 static volatile uint16_t tiku_uart_rx_tail;
 static volatile uint16_t tiku_uart_overruns;
+/* Called by the ISR for a byte queued into an empty ring; NULL: no one. */
+static void (*volatile tiku_uart_hook)(void);
 
 /*---------------------------------------------------------------------------*/
 /* INIT                                                                      */
@@ -170,6 +172,7 @@ void tiku_uart_printf(const char *fmt, ...)
 void tiku_nordic_uart_console_isr(void)
 {
     if (TIKU_UARTE->EVENTS_DMA.RX.END != 0UL) {
+        void (*hook)(void) = (void (*)(void))0;
         uint16_t next;
         uint32_t err;
 
@@ -183,6 +186,9 @@ void tiku_nordic_uart_console_isr(void)
 
         next = (uint16_t)((tiku_uart_rx_head + 1u) % TIKU_UART_RX_RING);
         if (next != tiku_uart_rx_tail) {
+            if (tiku_uart_rx_head == tiku_uart_rx_tail) {
+                hook = tiku_uart_hook;            /* first into an empty ring */
+            }
             tiku_uart_rxring[tiku_uart_rx_head] = tiku_uart_rxb;
             tiku_uart_rx_head = next;
         } else if (tiku_uart_overruns != 0xFFFFu) {
@@ -201,6 +207,11 @@ void tiku_nordic_uart_console_isr(void)
                 tiku_uart_overruns != 0xFFFFu) {
                 tiku_uart_overruns++;
             }
+        }
+
+        /* After the re-arm, so the hook's time is not the receiver's. */
+        if (hook != (void (*)(void))0) {
+            hook();
         }
     }
 }
@@ -272,6 +283,11 @@ int tiku_uart_getc(void)
     c = tiku_uart_rxring[tiku_uart_rx_tail];
     tiku_uart_rx_tail = (uint16_t)((tiku_uart_rx_tail + 1u) % TIKU_UART_RX_RING);
     return (int)c;
+}
+
+void tiku_uart_rx_hook(void (*fn)(void))
+{
+    tiku_uart_hook = fn;
 }
 
 uint16_t tiku_uart_overrun_count(void)

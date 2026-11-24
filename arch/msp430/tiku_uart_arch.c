@@ -99,8 +99,14 @@ rx_lost(void)
     }
 }
 
-/** @brief RX ISR: counts overruns and queues the byte; a full ring drops
- *         and counts it. */
+/** Called by the RX ISR for a byte queued into an empty ring; NULL: no one. */
+static void (*volatile rx_hook)(void);
+
+/**
+ * @brief RX ISR: counts overruns and queues the byte; a full ring drops and
+ *        counts it.  A byte into an empty ring calls the hook and leaves
+ *        LPM3 on exit.
+ */
 TIKU_ISR(TIKU_UART_VECTOR, tiku_uart_isr)
 {
     if (TIKU_UART_IFG & UCRXIFG) {
@@ -114,8 +120,15 @@ TIKU_ISR(TIKU_UART_VECTOR, tiku_uart_isr)
         uint8_t byte = TIKU_UART_RXBUF;  /* read clears UCRXIFG + UCOE */
         uint8_t next = (rx.head + 1) & TIKU_UART_RXBUF_MASK;
         if (next != rx.tail) {
+            void (*hook)(void) = rx_hook;
+            uint8_t was_empty = (rx.head == rx.tail);
+
             rx.buf[rx.head] = byte;
             rx.head = next;
+            if (was_empty && hook != (void (*)(void))0) {
+                hook();
+                __bic_SR_register_on_exit(LPM3_bits);
+            }
         } else {
             rx_lost();
         }
@@ -331,6 +344,18 @@ tiku_uart_getc(void)
     return (int)c;
 }
 
+void
+tiku_uart_rx_hook(void (*fn)(void))
+{
+    /* A function pointer can be two words: UCRXIE is clear for the store,
+     * so the RX ISR never reads half of it. */
+    uint16_t enabled = TIKU_UART_IE & UCRXIE;
+
+    TIKU_UART_IE &= (uint8_t)~UCRXIE;
+    rx_hook = fn;
+    TIKU_UART_IE |= enabled;
+}
+
 uint16_t
 tiku_uart_overrun_count(void)
 {
@@ -375,6 +400,7 @@ void tiku_uart_puts(const char *s) { (void)s; }
 void tiku_uart_printf(const char *fmt, ...) { (void)fmt; }
 uint8_t tiku_uart_rx_ready(void) { return 0; }
 int tiku_uart_getc(void) { return -1; }
+void tiku_uart_rx_hook(void (*fn)(void)) { (void)fn; }
 uint16_t tiku_uart_overrun_count(void) { return 0; }
 void tiku_uart_overrun_reset(void) { }
 #ifdef HAS_TESTS

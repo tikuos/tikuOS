@@ -76,6 +76,18 @@ uint8_t tiku_uart_rx_ready(void);
  */
 int tiku_uart_getc(void);
 
+/** @brief This driver calls a hook from its receive interrupt. */
+#define TIKU_UART_HAS_RX_HOOK 1
+
+/**
+ * @brief Call @p fn from the receive interrupt for a byte queued into an
+ *        empty ring; NULL ends the calls.
+ *
+ * @p fn runs in interrupt context.  The interrupt that called it leaves
+ * LPM3 on exit, so the scheduler loop runs what @p fn asked for.
+ */
+void tiku_uart_rx_hook(void (*fn)(void));
+
 /**
  * @brief Return the number of received bytes lost since init.
  *
