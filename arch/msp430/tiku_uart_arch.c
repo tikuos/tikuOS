@@ -87,10 +87,20 @@ static struct {
     volatile uint8_t  buf[TIKU_UART_RXBUF_SIZE];
     volatile uint8_t  head;           /* ISR writes here   */
     volatile uint8_t  tail;           /* getc reads here   */
-    volatile uint16_t overrun_count;  /* UCOE events       */
+    volatile uint16_t overrun_count;  /* UCOE events and full-ring drops */
 } rx;
 
-/** @brief RX ISR: counts overruns and queues the byte; a full ring drops it. */
+/** @brief Count one lost byte; the count stops at 0xFFFF. */
+static void
+rx_lost(void)
+{
+    if (rx.overrun_count != 0xFFFFu) {
+        rx.overrun_count++;
+    }
+}
+
+/** @brief RX ISR: counts overruns and queues the byte; a full ring drops
+ *         and counts it. */
 TIKU_ISR(TIKU_UART_VECTOR, tiku_uart_isr)
 {
     if (TIKU_UART_IFG & UCRXIFG) {
@@ -98,7 +108,7 @@ TIKU_ISR(TIKU_UART_VECTOR, tiku_uart_isr)
          * register before RXBUF could be read).  Reading RXBUF clears
          * UCOE, so sample it first. */
         if (TIKU_UART_STATW & UCOE) {
-            rx.overrun_count++;
+            rx_lost();
         }
 
         uint8_t byte = TIKU_UART_RXBUF;  /* read clears UCRXIFG + UCOE */
@@ -106,6 +116,8 @@ TIKU_ISR(TIKU_UART_VECTOR, tiku_uart_isr)
         if (next != rx.tail) {
             rx.buf[rx.head] = byte;
             rx.head = next;
+        } else {
+            rx_lost();
         }
     }
 }

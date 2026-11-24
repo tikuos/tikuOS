@@ -77,13 +77,12 @@ uint8_t tiku_uart_rx_ready(void);
 int tiku_uart_getc(void);
 
 /**
- * @brief Return the number of hardware UART overruns since init.
+ * @brief Return the number of received bytes lost since init.
  *
- * An overrun is a byte that arrived before the previous one was read from
- * RXBUF; the RX ISR counts each one.  Bytes dropped because the software
- * ring was full are not counted.
+ * The RX ISR counts a hardware overrun (a byte that arrived before the
+ * previous one was read from RXBUF) and a byte that found the ring full.
  *
- * @return Cumulative overrun count (reset to 0 by tiku_uart_init)
+ * @return Cumulative count, stopping at 0xFFFF (reset to 0 by tiku_uart_init)
  */
 uint16_t tiku_uart_overrun_count(void);
 
