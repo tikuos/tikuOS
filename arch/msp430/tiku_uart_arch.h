@@ -70,47 +70,50 @@ uint8_t tiku_uart_rx_ready(void);
 /**
  * @brief Read one character from the UART (non-blocking).
  *
- * Takes the oldest byte from the RX ring that the UART ISR fills.
+ * Takes the oldest byte from the RX ring, which a DMA channel fills from
+ * the receive register (tiku_uart_dma_arch.h).
  *
  * @return The received character (0-255), or -1 if none available
  */
 int tiku_uart_getc(void);
 
-/** @brief This driver calls a hook from its receive interrupt. */
+/** @brief This driver calls a hook from an interrupt when bytes wait. */
 #define TIKU_UART_HAS_RX_HOOK 1
 
 /**
- * @brief Call @p fn from the receive interrupt for a byte queued into an
- *        empty ring; NULL ends the calls.
+ * @brief Call @p fn when received bytes wait in the ring; NULL ends the
+ *        calls.
  *
- * @p fn runs in interrupt context.  The interrupt that called it leaves
- * LPM3 on exit, so the scheduler loop runs what @p fn asked for.
+ * The call comes once the line has been quiet for a byte after a start bit,
+ * and at each start bit while the ring is half full.
+ * @note @p fn runs in interrupt context, and that interrupt leaves LPM3 on
+ *       exit.  The wake is timed by Timer A0, so it needs the system tick.
  */
 void tiku_uart_rx_hook(void (*fn)(void));
 
 /**
  * @brief Return the number of received bytes lost since init.
  *
- * The RX ISR counts a hardware overrun (a byte that arrived before the
- * previous one was read from RXBUF) and a byte that found the ring full.
+ * Bytes are lost when the ring's writer passes its reader: the unread ones
+ * are dropped and counted, by this call too.  The DMA takes each byte from
+ * RXBUF, so none is lost to a late interrupt.
  *
  * @return Cumulative count, stopping at 0xFFFF (reset to 0 by tiku_uart_init)
  */
 uint16_t tiku_uart_overrun_count(void);
 
 /**
- * @brief Zero the overrun counter without re-initialising the UART.
+ * @brief Zero the count of lost bytes without re-initialising the UART.
  *
- * Lets a test count overruns from a point of its choosing.  UCRXIE is
- * cleared for the store, so the RX ISR cannot interleave, and set after.
+ * Lets a test count from a point of its choosing.
  */
 void tiku_uart_overrun_reset(void);
 
 /**
- * @brief Inject one byte into the RX ring buffer (test only).
+ * @brief Hand the receive path one byte without the hardware (test only).
  *
- * Feeds the receive path without the ISR or the hardware; the byte then
- * reads back as a received one would.  A full ring drops it.
+ * The byte reads back as a received one would, ahead of the line's.  It is
+ * dropped when 63 injected bytes are unread.
  *
  * @note Built only with HAS_TESTS; the TI build compiles it to a stub.
  *

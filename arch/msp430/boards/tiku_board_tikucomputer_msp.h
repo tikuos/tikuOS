@@ -61,8 +61,8 @@
 /**
  * @brief Baud of the UART to the nRF54L, as the link UART and as the console
  *        on it; the nRF side's must equal it (make LINK_BAUD=...).
- * @note 9600 is the rate at which this part's interrupt-driven receiver keeps
- *       every byte while kernel IPC runs; raw bytes pass at 115200.
+ * @note A DMA channel receives (tiku_uart_dma_arch.h), so no rate here
+ *       loses a byte to a late interrupt.
  */
 #ifndef TIKU_BOARD_LINK_BAUD
 #define TIKU_BOARD_LINK_BAUD        9600

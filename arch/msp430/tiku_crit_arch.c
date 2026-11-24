@@ -40,6 +40,7 @@
  */
 static struct {
     uint16_t ta0_ccie;
+    uint16_t ta0_gap_ccie;
     uint16_t ta1_ccie;
 #if defined(OFS_UCA0IE)
     uint16_t uca0_ie;
@@ -106,6 +107,12 @@ tiku_crit_arch_mask_irqs(uint8_t preserve_mask)
     }
     if (!(preserve_mask & TIKU_CRIT_PRESERVE_HTIMER)) {
         TA1CCTL0 &= ~CCIE;
+    }
+    /* Timer A0's compare 1 times the console UART's wake after a burst
+     * (tiku_uart_arch.c); it is masked with the UART. */
+    crit_ie_saved.ta0_gap_ccie = TA0CCTL1 & CCIE;
+    if (!(preserve_mask & TIKU_CRIT_PRESERVE_UART)) {
+        TA0CCTL1 &= ~CCIE;
     }
 
 #if defined(OFS_UCA0IE) || defined(OFS_UCA1IE)
@@ -228,6 +235,7 @@ void
 tiku_crit_arch_unmask_irqs(void)
 {
     TA0CCTL0 = (TA0CCTL0 & ~CCIE) | crit_ie_saved.ta0_ccie;
+    TA0CCTL1 = (TA0CCTL1 & ~CCIE) | crit_ie_saved.ta0_gap_ccie;
     TA1CCTL0 = (TA1CCTL0 & ~CCIE) | crit_ie_saved.ta1_ccie;
 
 #if defined(OFS_UCA0IE)

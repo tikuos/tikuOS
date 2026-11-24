@@ -45,15 +45,17 @@ tiku_wake_arch_query(tiku_wake_sources_t *out)
         out->sources |= TIKU_WAKE_HTIMER;
     }
 
-    /* UART RX on the board's console module. */
+    /* UART RX on the board's console module: its start-bit interrupt, which
+     * the console driver enables while a hook is set (the DMA takes the
+     * bytes). */
 #if (TIKU_BOARD_UART_MODULE + 0) == 1
-#if defined(OFS_UCA1IE) && defined(UCRXIE)
-    if ((UCA1IE & UCRXIE) != 0) {
+#if defined(OFS_UCA1IE) && defined(UCSTTIE)
+    if ((UCA1IE & UCSTTIE) != 0) {
         out->sources |= TIKU_WAKE_UART_RX;
     }
 #endif
-#elif defined(OFS_UCA0IE) && defined(UCRXIE)
-    if ((UCA0IE & UCRXIE) != 0) {
+#elif defined(OFS_UCA0IE) && defined(UCSTTIE)
+    if ((UCA0IE & UCSTTIE) != 0) {
         out->sources |= TIKU_WAKE_UART_RX;
     }
 #endif

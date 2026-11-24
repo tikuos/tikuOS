@@ -8,7 +8,8 @@
  * tiku_timer_arch.h - MSP430 timer architecture interface
  *
  * The system clock on Timer A0 from ACLK: tick and second counts, sub-tick
- * reads, busy-wait delays and tick conversions.
+ * reads, busy-wait delays and tick conversions.  The timer's compare 1 is
+ * the console UART's, which times its wake with it (tiku_uart_arch.c).
  *
  * SPDX-License-Identifier: Apache-2.0
  */

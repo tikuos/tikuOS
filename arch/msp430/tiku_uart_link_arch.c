@@ -7,9 +7,9 @@
  *
  * tiku_uart_link_arch.c - the board's link UART on a second eUSCI_A module.
  *
- * The link calls of hal/tiku_uart_port_hal.h on TIKU_BOARD_LINK_UART_MODULE,
- * both directions interrupt-driven through small rings.  On a board without
- * a link module, tiku_uart_link_open() returns NULL.
+ * The link calls of hal/tiku_uart_port_hal.h on TIKU_BOARD_LINK_UART_MODULE:
+ * a DMA channel fills the receive ring and an interrupt feeds the transmitter.
+ * On a board without a link module, tiku_uart_link_open() returns NULL.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,6 +17,7 @@
 #include "tiku.h"
 #include <hal/tiku_uart_port_hal.h>
 #include "hal/tiku_compiler.h"
+#include "tiku_uart_dma_arch.h"
 
 #if defined(TIKU_BOARD_LINK_UART_MODULE)
 
@@ -63,9 +64,15 @@
 /* RINGS                                                                     */
 /*---------------------------------------------------------------------------*/
 
+/** DMA channel that moves received bytes into the ring; the console
+ *  driver's is channel 0. */
+#ifndef TIKU_UART_LINK_DMA_CHANNEL
+#define TIKU_UART_LINK_DMA_CHANNEL  1
+#endif
+
 /* Ring sizes: powers of two, at most 256 (the indices are 8-bit). */
 #ifndef TIKU_UART_LINK_RX_RING
-#define TIKU_UART_LINK_RX_RING  128u
+#define TIKU_UART_LINK_RX_RING  256u
 #endif
 #ifndef TIKU_UART_LINK_TX_RING
 #define TIKU_UART_LINK_TX_RING  64u
@@ -76,47 +83,16 @@
 #endif
 
 static volatile uint8_t  rx_ring[TIKU_UART_LINK_RX_RING];
-static volatile uint8_t  rx_head, rx_tail;   /* ISR writes head          */
+static tiku_uart_dma_t   rx;                 /* the DMA writes the ring  */
 static volatile uint8_t  tx_ring[TIKU_UART_LINK_TX_RING];
 static volatile uint8_t  tx_head, tx_tail;   /* ISR reads at tail        */
-static volatile uint16_t link_errors;
 static uint8_t           link_open;
 
-#define RX_MASK  ((uint8_t)(TIKU_UART_LINK_RX_RING - 1u))
 #define TX_MASK  ((uint8_t)(TIKU_UART_LINK_TX_RING - 1u))
 
-/** @brief Count one lost or damaged byte, saturating. */
-static void
-link_error(void)
-{
-    if (link_errors != 0xFFFFu) {
-        link_errors++;
-    }
-}
-
-/**
- * @brief Link ISR: queue each received byte, counting a full ring and the
- *        receiver's error flags; feed the transmitter from the TX ring.
- */
+/** @brief Link ISR: feed the transmitter from the TX ring. */
 TIKU_ISR(LINK_VECTOR, tiku_uart_link_isr)
 {
-    if ((LINK_IFG & UCRXIFG) != 0u) {
-        uint8_t next;
-        uint8_t byte;
-
-        /* Sample the error flags first: reading RXBUF clears them. */
-        if ((LINK_STATW & (UCOE | UCFE | UCPE)) != 0u) {
-            link_error();
-        }
-        byte = (uint8_t)LINK_RXBUF;
-        next = (uint8_t)((rx_head + 1u) & RX_MASK);
-        if (next != rx_tail) {
-            rx_ring[rx_head] = byte;
-            rx_head = next;
-        } else {
-            link_error();
-        }
-    }
     if ((LINK_IE & UCTXIE) != 0u && (LINK_IFG & UCTXIFG) != 0u) {
         if (tx_tail != tx_head) {
             LINK_TXBUF = tx_ring[tx_tail];
@@ -141,9 +117,13 @@ link_read(void *unused, uint8_t *out, size_t length)
     if (link_open == 0u || (out == (uint8_t *)0 && length != 0u)) {
         return -1;
     }
-    while (n < length && rx_tail != rx_head) {
-        out[n++] = rx_ring[rx_tail];
-        rx_tail = (uint8_t)((rx_tail + 1u) & RX_MASK);
+    while (n < length) {
+        int c = tiku_uart_dma_getc(&rx);
+
+        if (c < 0) {
+            break;
+        }
+        out[n++] = (uint8_t)c;
     }
     return (int)n;
 }
@@ -197,15 +177,14 @@ tiku_uart_link_open(void)
     LINK_BRW   = TIKU_BOARD_LINK_UART_BRW;
     LINK_MCTLW = TIKU_BOARD_LINK_UART_MCTLW;
     LINK_STATW = 0;
-    rx_head = rx_tail = 0u;
     tx_head = tx_tail = 0u;
-    link_errors = 0u;
+    /* The channel is started while the module is in reset, which holds the
+     * receive flag down: the first byte after the release raises it. */
+    tiku_uart_dma_open(&rx, TIKU_UART_LINK_DMA_CHANNEL,
+                       TIKU_BOARD_LINK_UART_MODULE, rx_ring,
+                       TIKU_UART_LINK_RX_RING);
     LINK_CTLW0 &= (uint16_t)~UCSWRST;
-    while ((LINK_IFG & UCRXIFG) != 0u) {
-        (void)LINK_RXBUF;
-    }
     link_open = 1u;
-    LINK_IE |= UCRXIE;
     return &link_io;
 }
 
@@ -214,6 +193,7 @@ tiku_uart_link_close(void)
 {
     LINK_IE = 0;
     LINK_CTLW0 = UCSWRST;
+    tiku_uart_dma_close(&rx);
     link_open = 0u;
     TIKU_BOARD_LINK_UART_PINS_PARK();
 }
@@ -221,7 +201,7 @@ tiku_uart_link_close(void)
 uint16_t
 tiku_uart_link_errors(void)
 {
-    return link_errors;
+    return tiku_uart_dma_lost(&rx);
 }
 
 #else /* no link UART on this board, or the console holds it */

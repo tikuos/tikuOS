@@ -19,6 +19,7 @@
 /*---------------------------------------------------------------------------*/
 
 #include "tiku_uart_arch.h"
+#include "tiku_uart_dma_arch.h"
 #include "tiku.h"
 #include "hal/tiku_compiler.h"
 #include <stdarg.h>
@@ -52,6 +53,7 @@
 #define TIKU_UART_STATW     UCA1STATW
 #define TIKU_UART_RXBUF     UCA1RXBUF
 #define TIKU_UART_TXBUF     UCA1TXBUF
+#define TIKU_UART_IV        UCA1IV
 #define TIKU_UART_VECTOR    USCI_A1_VECTOR
 #elif TIKU_BOARD_UART_MODULE == 0
 #define TIKU_UART_IE        UCA0IE
@@ -62,75 +64,102 @@
 #define TIKU_UART_STATW     UCA0STATW
 #define TIKU_UART_RXBUF     UCA0RXBUF
 #define TIKU_UART_TXBUF     UCA0TXBUF
+#define TIKU_UART_IV        UCA0IV
 #define TIKU_UART_VECTOR    USCI_A0_VECTOR
 #else
 #error "TIKU_BOARD_UART_MODULE must be 0 (eUSCI_A0) or 1 (eUSCI_A1)"
 #endif
 
 /*---------------------------------------------------------------------------*/
-/* RX RING BUFFER (interrupt-driven)                                         */
+/* RX: A RING THE DMA FILLS, AND A WAKE FOR ITS READER                       */
 /*---------------------------------------------------------------------------*/
 
-/* RX ring size: a power of two, at most 256 (head and tail are 8-bit). */
+/* RX ring size: a power of two, at most 256. */
 #ifndef TIKU_UART_RXBUF_SIZE
 #define TIKU_UART_RXBUF_SIZE  256
 #endif
 
-#if (TIKU_UART_RXBUF_SIZE & (TIKU_UART_RXBUF_SIZE - 1)) != 0
-#error "TIKU_UART_RXBUF_SIZE must be a power of two"
+#if (TIKU_UART_RXBUF_SIZE & (TIKU_UART_RXBUF_SIZE - 1)) != 0 || \
+    TIKU_UART_RXBUF_SIZE > 256
+#error "TIKU_UART_RXBUF_SIZE must be a power of two, at most 256"
 #endif
 
-#define TIKU_UART_RXBUF_MASK  (TIKU_UART_RXBUF_SIZE - 1)
+/** DMA channel that moves received bytes into the ring. */
+#ifndef TIKU_UART_DMA_CHANNEL
+#define TIKU_UART_DMA_CHANNEL  0
+#endif
 
-/** RX ring and overrun count, shared with the RX ISR. */
-static struct {
-    volatile uint8_t  buf[TIKU_UART_RXBUF_SIZE];
-    volatile uint8_t  head;           /* ISR writes here   */
-    volatile uint8_t  tail;           /* getc reads here   */
-    volatile uint16_t overrun_count;  /* UCOE events and full-ring drops */
-} rx;
+/* Values the interrupt vector registers give: the eUSCI's start bit, and
+ * Timer A0's compare 1. */
+#define UART_IV_START_BIT  0x0006u
+#define TA0_IV_COMPARE_1   0x0002u
 
-/** @brief Count one lost byte; the count stops at 0xFFFF. */
-static void
-rx_lost(void)
-{
-    if (rx.overrun_count != 0xFFFFu) {
-        rx.overrun_count++;
-    }
-}
+/*
+ * ACLK counts from a start bit until its byte is in the ring: eleven bit
+ * times rounded up, and one count for the count in progress.  It stays
+ * inside one tick period, which is as far as Timer A0 counts.
+ */
+#define RX_GAP_FULL  ((11UL * TIKU_CLOCK_ARCH_ACLK_FREQ +                      \
+                       TIKU_BOARD_UART_BAUD - 1UL) / TIKU_BOARD_UART_BAUD + 1UL)
+#define RX_GAP       ((uint16_t)((RX_GAP_FULL < TIKU_CLOCK_ARCH_INTERVAL)       \
+                                 ? RX_GAP_FULL                                  \
+                                 : (TIKU_CLOCK_ARCH_INTERVAL - 1UL)))
 
-/** Called by the RX ISR for a byte queued into an empty ring; NULL: no one. */
+static volatile uint8_t rx_ring[TIKU_UART_RXBUF_SIZE];
+static tiku_uart_dma_t  rx;
+
+/** Called from an interrupt when received bytes wait; NULL: no one. */
 static void (*volatile rx_hook)(void);
 
+#ifdef HAS_TESTS
+/* Bytes a test hands in; they are read ahead of the line's. */
+static uint8_t inject_ring[64];
+static uint8_t inject_head, inject_tail;
+#endif
+
 /**
- * @brief RX ISR: counts overruns and queues the byte; a full ring drops and
- *        counts it.  A byte into an empty ring calls the hook and leaves
- *        LPM3 on exit.
+ * @brief eUSCI ISR: a start bit.  It sets Timer A0's compare 1 to the moment
+ *        the byte is in the ring, and calls the hook at once when the ring
+ *        is half full.
+ * @note Reading the vector register clears the flag it reports; the start
+ *       bit is the one interrupt this driver enables.
  */
 TIKU_ISR(TIKU_UART_VECTOR, tiku_uart_isr)
 {
-    if (TIKU_UART_IFG & UCRXIFG) {
-        /* Check for hardware overrun (byte lost inside the UART shift
-         * register before RXBUF could be read).  Reading RXBUF clears
-         * UCOE, so sample it first. */
-        if (TIKU_UART_STATW & UCOE) {
-            rx_lost();
+    if (TIKU_UART_IV == UART_IV_START_BIT) {
+        void (*hook)(void) = rx_hook;
+        uint16_t now = TA0R;
+        uint16_t again;
+
+        /* Timer A0 runs on ACLK, not this clock: read until two agree. */
+        while (now != (again = TA0R)) {
+            now = again;
         }
+        TA0CCR1 = (uint16_t)((now + RX_GAP) % TIKU_CLOCK_ARCH_INTERVAL);
+        TA0CCTL1 = CCIE;
 
-        uint8_t byte = TIKU_UART_RXBUF;  /* read clears UCRXIFG + UCOE */
-        uint8_t next = (rx.head + 1) & TIKU_UART_RXBUF_MASK;
-        if (next != rx.tail) {
-            void (*hook)(void) = rx_hook;
-            uint8_t was_empty = (rx.head == rx.tail);
+        if (hook != (void (*)(void))0 &&
+            tiku_uart_dma_fill(&rx) >= (TIKU_UART_RXBUF_SIZE / 2)) {
+            hook();
+            __bic_SR_register_on_exit(LPM3_bits);
+        }
+    }
+}
 
-            rx.buf[rx.head] = byte;
-            rx.head = next;
-            if (was_empty && hook != (void (*)(void))0) {
-                hook();
-                __bic_SR_register_on_exit(LPM3_bits);
-            }
-        } else {
-            rx_lost();
+/**
+ * @brief Timer A0 compare 1 ISR: the line has been quiet since the last
+ *        start bit's byte.  Bytes that wait are reported to the hook, and
+ *        the interrupt then leaves LPM3 on exit.
+ */
+TIKU_ISR(TIMER0_A1_VECTOR, tiku_uart_gap_isr)
+{
+    if (TA0IV == TA0_IV_COMPARE_1) {
+        void (*hook)(void) = rx_hook;
+
+        TA0CCTL1 = 0;
+        if (hook != (void (*)(void))0 && tiku_uart_dma_fill(&rx) != 0u) {
+            hook();
+            __bic_SR_register_on_exit(LPM3_bits);
         }
     }
 }
@@ -156,20 +185,25 @@ tiku_uart_init(void)
     TIKU_UART_BRW = TIKU_BOARD_UART_BRW;
     TIKU_UART_MCTLW = TIKU_BOARD_UART_MCTLW;
 
-    /* Clear status and RX data left from boot or flash-tool traffic. */
+    /* Clear status left from boot or flash-tool traffic. */
     TIKU_UART_STATW = 0;
-    while (TIKU_UART_IFG & UCRXIFG) {
-        (void)TIKU_UART_RXBUF;
-    }
+
+    /* The channel is started while the module is in reset, which holds the
+     * receive flag down: the first byte after the release raises it. */
+    TA0CCTL1 = 0;
+    tiku_uart_dma_open(&rx, TIKU_UART_DMA_CHANNEL, TIKU_BOARD_UART_MODULE,
+                       rx_ring, TIKU_UART_RXBUF_SIZE);
+#ifdef HAS_TESTS
+    inject_head = inject_tail = 0;
+#endif
 
     /* Release from reset — UART is now active */
     TIKU_UART_CTLW0 &= ~UCSWRST;
 
-    /* Reset ring buffer, overrun counter, and enable RX interrupt */
-    rx.head = 0;
-    rx.tail = 0;
-    rx.overrun_count = 0;
-    TIKU_UART_IE |= UCRXIE;
+    /* The start bit is watched only for a hook. */
+    if (rx_hook != (void (*)(void))0) {
+        TIKU_UART_IE |= UCSTTIE;
+    }
 }
 
 void
@@ -330,60 +364,65 @@ tiku_uart_printf(const char *fmt, ...)
 uint8_t
 tiku_uart_rx_ready(void)
 {
-    return (rx.head != rx.tail) ? 1 : 0;
+#ifdef HAS_TESTS
+    if (inject_head != inject_tail) {
+        return 1;
+    }
+#endif
+    return (tiku_uart_dma_waiting(&rx) != 0u) ? 1 : 0;
 }
 
 int
 tiku_uart_getc(void)
 {
-    if (rx.head == rx.tail) {
-        return -1;
+#ifdef HAS_TESTS
+    if (inject_head != inject_tail) {
+        uint8_t c = inject_ring[inject_tail];
+
+        inject_tail = (uint8_t)((inject_tail + 1u) % sizeof inject_ring);
+        return (int)c;
     }
-    uint8_t c = rx.buf[rx.tail];
-    rx.tail = (rx.tail + 1) & TIKU_UART_RXBUF_MASK;
-    return (int)c;
+#endif
+    return tiku_uart_dma_getc(&rx);
 }
 
 void
 tiku_uart_rx_hook(void (*fn)(void))
 {
-    /* A function pointer can be two words: UCRXIE is clear for the store,
-     * so the RX ISR never reads half of it. */
-    uint16_t enabled = TIKU_UART_IE & UCRXIE;
-
-    TIKU_UART_IE &= (uint8_t)~UCRXIE;
+    /* Both interrupts that call the hook are off for the store: a function
+     * pointer can be two words.  A start bit seen meanwhile stays flagged,
+     * so setting a hook also reports the bytes that came before it. */
+    TIKU_UART_IE &= (uint16_t)~UCSTTIE;
+    TA0CCTL1 = 0;
     rx_hook = fn;
-    TIKU_UART_IE |= enabled;
+    if (fn != (void (*)(void))0) {
+        TIKU_UART_IE |= UCSTTIE;
+    }
 }
 
 uint16_t
 tiku_uart_overrun_count(void)
 {
-    return rx.overrun_count;
+    /* The count is kept by the reader's looks: look, so it is current. */
+    (void)tiku_uart_dma_waiting(&rx);
+    return tiku_uart_dma_lost(&rx);
 }
 
 void
 tiku_uart_overrun_reset(void)
 {
-    TIKU_UART_IE &= (uint8_t)~UCRXIE;
-    rx.overrun_count = 0;
-    TIKU_UART_IE |= UCRXIE;
+    tiku_uart_dma_lost_reset(&rx);
 }
 
-/**
- * @brief Inject a byte into the RX ring buffer without the ISR.
- *
- * Used by unit tests to feed the SLIP decoder when interrupts
- * are not yet enabled.
- */
 #ifdef HAS_TESTS
 void
 tiku_uart_test_inject(uint8_t byte)
 {
-    uint8_t next = (rx.head + 1) & TIKU_UART_RXBUF_MASK;
-    if (next != rx.tail) {
-        rx.buf[rx.head] = byte;
-        rx.head = next;
+    uint8_t next = (uint8_t)((inject_head + 1u) % sizeof inject_ring);
+
+    if (next != inject_tail) {
+        inject_ring[inject_head] = byte;
+        inject_head = next;
     }
 }
 #endif

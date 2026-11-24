@@ -56,7 +56,8 @@
  * without runs a process of the console's own at this cadence, for as long
  * as a channel or a text sink is registered.
  * @note A UART driver with TIKU_UART_HAS_RX_HOOK also polls that process
- *       from its receive interrupt, so this cadence is the fallback there.
+ *       from an interrupt when bytes arrive, so this cadence is the fallback
+ *       there.
  */
 #ifndef TIKU_CONSOLE_POLL_TICKS
 #define TIKU_CONSOLE_POLL_TICKS (TIKU_CLOCK_SECOND / 20)

@@ -34,7 +34,8 @@ typedef struct {
 const tiku_uart_port_io_t *tiku_uart_link_open(void);
 /** @brief Close the link UART and park its pins; buffered bytes are dropped. */
 void tiku_uart_link_close(void);
-/** @brief Received bytes lost or damaged since open: ring overflows, overruns,
- *         framing and parity errors. */
+/** @brief Received bytes the port saw lost or damaged since open: ring
+ *         overflows, and the overruns, framing and parity errors its receiver
+ *         reports (the MSP430's, which DMA reads, reports none). */
 uint16_t tiku_uart_link_errors(void);
 #endif

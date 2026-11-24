@@ -103,14 +103,14 @@ static struct tiku_timer pump_timer;
 
 TIKU_PROCESS(tiku_console_process, "Console");
 
-/* The wire is the UART and its driver reports a received byte from its
+/* The wire is the UART and its driver reports received bytes from an
  * interrupt: the pump runs on that report, and the timer is what remains
  * for a wire a test installed or a byte the report missed. */
 #if defined(TIKU_UART_HAS_RX_HOOK) && !defined(TIKU_CONSOLE_JTAG) && \
     !(defined(TIKU_CONSOLE_USB) && !defined(TIKU_CONSOLE_BOTH))
 #define CONSOLE_RX_HOOK 1
 
-/** @brief In the UART's receive interrupt: a byte waits, so poll the pump. */
+/** @brief In an interrupt of the UART driver: bytes wait, so poll the pump. */
 static void
 rx_arrived(void)
 {
