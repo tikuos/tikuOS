@@ -499,12 +499,17 @@ static void fll_queue_ctrl(uint8_t op, const uint8_t *d, uint8_t dl)
     fll_queue_raw(3u, p, (uint8_t)(1u + dl));
 }
 
-/** @brief Answer a received control PDU: queued now when the slot is free
- *         and nothing waits, else after the PDUs ahead of it. */
+/** @brief Answer a received control PDU: queued now when the slot is free,
+ *         nothing waits and no encryption start is under way, else after
+ *         the PDUs ahead of it, once the start has ended. */
 static void fll_reply_ctrl(uint8_t op, const uint8_t *d, uint8_t dl)
 {
     uint8_t i, s;
-    if (fll_tx_len == 0u && fll_cw_n == 0u) {
+    /* A plaintext reply sent during the start can reach a peer that
+     * already decrypts, which ends the link on a MIC failure. */
+    if (fll_tx_len == 0u && fll_cw_n == 0u &&
+        ((fll_enc == FLL_ENC_OFF && !fll_enc_refresh) ||
+         fll_enc == FLL_ENC_ON)) {
         fll_queue_ctrl(op, d, dl);
         return;
     }
@@ -862,6 +867,9 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     fll_term_sent = 0u;
     fll_reason = 0x16u;                          /* ended here, unless ...    */
     fll_enc = FLL_ENC_OFF;                       /* every link starts clear   */
+    /* A start the host asked for counts from this link on: the peripheral's
+     * count, or a request left from an earlier link, starts none here. */
+    fll_enc_seq = sh->enc_start_seq;
     fll_enc_refresh = 0u;
     fll_rx_enc = 0u;
     fll_tx_enc = 0u;
