@@ -328,8 +328,6 @@ peer_speed(const char *name, const char *bits_text)
 void
 tiku_shell_cmd_peer(uint8_t argc, const char *argv[])
 {
-    int index, rc;
-
     if (argc < 2) {
         uint8_t i;
 
@@ -359,36 +357,9 @@ tiku_shell_cmd_peer(uint8_t argc, const char *argv[])
         peer_speed(argv[2], argv[3]);
         return;
     }
-    if (argc != 3) {
-        SHELL_PRINTF("Usage: peer [start|stop|reset <name> | "
-                     "speed <name> <bits> | "
-                     "send <endpoint> <word>... | listen <endpoint> <seconds> "
-                     "| ping <endpoint> <count>]\n");
-        return;
-    }
-    index = tiku_peer_find(argv[2]);
-    if (index < 0) {
-        SHELL_PRINTF("peer: no peer '%s'\n", argv[2]);
-        return;
-    }
-    if (strcmp(argv[1], "start") == 0) {
-        rc = tiku_peer_start((uint8_t)index);
-    } else if (strcmp(argv[1], "stop") == 0) {
-        rc = tiku_peer_stop((uint8_t)index);
-    } else if (strcmp(argv[1], "reset") == 0) {
-        rc = tiku_peer_reset((uint8_t)index);
-    } else {
-        SHELL_PRINTF("peer: unknown '%s'\n", argv[1]);
-        return;
-    }
-    if (rc == TIKU_PEER_OK) {
-        peer_show((uint8_t)index);
-    } else {
-        SHELL_PRINTF("peer: %s (%d)\n",
-                     rc == TIKU_PEER_ERR_ROLE  ? "this side has no such control" :
-                     rc == TIKU_PEER_ERR_STATE ? "not possible for this peer" :
-                                                 "its driver refused", rc);
-    }
+    SHELL_PRINTF("Usage: peer [speed <name> <bits> | "
+                 "send <endpoint> <word>... | listen <endpoint> <seconds> "
+                 "| ping <endpoint> <count>]\n");
 }
 
 #endif /* TIKU_SHELL_CMD_PEER */

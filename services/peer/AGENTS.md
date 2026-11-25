@@ -21,17 +21,21 @@ and `reset` are refused there.  A peer whose start cannot be undone carries
 computer with carries `TIKU_PEER_F_AUTOSTART`: its supervisor starts it at
 boot.
 
-A supervisor switches its peer at run time:
+A supervisor switches its peer at run time by writing its state file:
 
 ```text
-peer start nrf
-peer stop nrf
-peer reset nrf
+write /sys/peer/nrf/state off
+write /sys/peer/nrf/state on
+write /sys/peer/nrf/state reset
+read /sys/peer/nrf/state
 ```
 
-`tiku_peer_start()`, `tiku_peer_stop()` and `tiku_peer_reset()` are the
-calls under them.  A stop ends the sessions, parks the medium and takes the
-peer's power; a start gives it back and the sessions say hello again.
+The read gives `off`, `starting`, `ready` or `lost`.  `tiku_peer_stop()`,
+`tiku_peer_start()` and `tiku_peer_reset()` are the calls under the three
+writes.  A stop ends the sessions, parks the medium and takes the peer's
+power; a start gives it back and the sessions say hello again.  The write
+needs the system-control capability, returns `ENOTSUP` on the worker's side,
+and is refused to the peer itself through the mount.
 
 A board lists its peers in `tiku_peer_table`, which boot assembly defines.
 A peer's services take consecutive rows of the endpoint table, in the order
@@ -56,8 +60,8 @@ tiku_peer_mount_serve.c  one request answered from this side's tree
 
 `boot/tiku_boot_peer.c` is the table of a board with one peer on a UART; it
 serves both sides of the TikuComputer-nRF.  The `peer` shell command lists
-the peers, calls the lifecycle, sets the link's speed, and sends, listens
-and pings on an endpoint.
+the peers, sets the link's speed, and sends, listens and pings on an
+endpoint.
 
 Through the mount the MSP430 of a TikuComputer-nRF uses the nRF54L10's
 radio as files: the nRF's `sys/radio/154` sends and receives 802.15.4

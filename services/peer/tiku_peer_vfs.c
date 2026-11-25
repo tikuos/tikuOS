@@ -43,6 +43,35 @@ peer_state_read(uint8_t i, char *buf, size_t max)
                     (s.state == TIKU_PEER_LOST && s.why < 5u) ? why[s.why] : "");
 }
 
+/**
+ * @brief Switch peer @p i: "on" starts it, "off" stops it, "reset" resets it.
+ * @return TIKU_VFS_OK; TIKU_VFS_EINVAL for another word; TIKU_VFS_ENOTSUP
+ *         where this side has no such control of it; TIKU_VFS_EIO when its
+ *         driver refuses
+ */
+static int
+peer_state_write(uint8_t i, const char *buf, size_t len)
+{
+    int rc;
+
+    while (len != 0u && (buf[len - 1u] == '\n' || buf[len - 1u] == ' ')) {
+        len--;
+    }
+    if (len == 2u && memcmp(buf, "on", 2u) == 0) {
+        rc = tiku_peer_start(i);
+    } else if (len == 3u && memcmp(buf, "off", 3u) == 0) {
+        rc = tiku_peer_stop(i);
+    } else if (len == 5u && memcmp(buf, "reset", 5u) == 0) {
+        rc = tiku_peer_reset(i);
+    } else {
+        return TIKU_VFS_EINVAL;
+    }
+    if (rc == TIKU_PEER_OK) {
+        return TIKU_VFS_OK;
+    }
+    return (rc == TIKU_PEER_ERR_DRIVER) ? TIKU_VFS_EIO : TIKU_VFS_ENOTSUP;
+}
+
 /** @brief Render this side's role toward peer @p i. */
 static int
 peer_role_read(uint8_t i, char *buf, size_t max)
@@ -126,6 +155,7 @@ peer_speed_write(uint8_t i, const char *buf, size_t len)
 /* A handler set per peer index: a VFS read handler takes no context. */
 #define PEER_VFS_FUNCS(N)                                                      \
 static int state_##N(char *b, size_t m)    { return peer_state_read(N, b, m); }    \
+static int state_w_##N(const char *b, size_t l) { return peer_state_write(N, b, l); } \
 static int role_##N(char *b, size_t m)     { return peer_role_read(N, b, m); }     \
 static int carrier_##N(char *b, size_t m)  { return peer_carrier_read(N, b, m); }  \
 static int restarts_##N(char *b, size_t m) { return peer_restarts_read(N, b, m); } \
@@ -136,7 +166,8 @@ PEER_VFS_FUNCS(0)
 PEER_VFS_FUNCS(1)
 
 #define PEER_VFS_ROW(N)                                                        \
-    { { "state",    TIKU_VFS_FILE, state_##N,    NULL, NULL, 0 },               \
+    { { "state",    TIKU_VFS_FILE, state_##N, state_w_##N, NULL, 0, NULL, NULL,   \
+        TIKU_VFS_CAP_SYS },                                                    \
       { "role",     TIKU_VFS_FILE, role_##N,     NULL, NULL, 0 },               \
       { "carrier",  TIKU_VFS_FILE, carrier_##N,  NULL, NULL, 0 },               \
       { "restarts", TIKU_VFS_FILE, restarts_##N, NULL, NULL, 0 },              \

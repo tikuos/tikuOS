@@ -19,7 +19,7 @@
  * @brief "peer" command -- the peers of interfaces/peer/tiku_peer.h.
  *
  * With no arguments it lists each peer: role, carrier, state and services.
- * `start|stop|reset <name>` acts on one where this side has that control.
+ * `speed <name> <bits>` asks for its link's speed.
  * @note `send <endpoint> <word>...`, `listen <endpoint> <seconds>` and
  *       `ping <endpoint> <count>` move messages on one of its endpoints.
  */
