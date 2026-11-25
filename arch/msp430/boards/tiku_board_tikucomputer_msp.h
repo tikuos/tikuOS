@@ -329,6 +329,9 @@
 #if TIKU_BOARD_CONSOLE_SEL == 1
 #define TIKU_BOARD_PEER_ON_CONSOLE  1
 #endif
+/** @brief The MSP430 starts the nRF54L at boot: the two are one computer.
+ *         tiku_peer_stop() and tiku_peer_start() switch it off and on. */
+#define TIKU_BOARD_PEER_AUTOSTART   1
 /** @} */
 
 /*---------------------------------------------------------------------------*/

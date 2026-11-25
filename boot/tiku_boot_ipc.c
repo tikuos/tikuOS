@@ -130,6 +130,8 @@ int tiku_boot_ipc_init(void)
     if (tiku_peer_bind_all() != TIKU_PEER_OK) return -1;
     tiku_peer_mount_start();
     tiku_peer_ctl_start();
+    /* A peer that does not start shows as off or lost; boot goes on. */
+    (void)tiku_peer_start_all();
 #endif
 #if (TIKU_HAS_SDIO_C6 + 0)
     for(uint16_t e=0;e<tiku_ipc_backend_count;e++)

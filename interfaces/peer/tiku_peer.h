@@ -46,6 +46,8 @@ typedef enum {
 #define TIKU_PEER_F_SUPERVISOR  (1u << 0)
 /** A start cannot be undone until the board resets. */
 #define TIKU_PEER_F_ONESHOT     (1u << 1)
+/** This side starts the peer at boot: the board is one computer with it. */
+#define TIKU_PEER_F_AUTOSTART   (1u << 2)
 /** @} */
 
 /** @defgroup TIKU_PEER_STATUS Return codes
@@ -182,5 +184,12 @@ int tiku_peer_prepare_all(void);
  * @return TIKU_PEER_OK, ERR_NAME when a peer's row is missing, or ERR_DRIVER
  */
 int tiku_peer_bind_all(void);
+
+/**
+ * @brief Start every peer flagged TIKU_PEER_F_AUTOSTART, after the bind.
+ * @return TIKU_PEER_OK, or what tiku_peer_start() returned for the last
+ *         one that did not start; the others are started all the same
+ */
+int tiku_peer_start_all(void);
 
 #endif /* TIKU_PEER_H_ */

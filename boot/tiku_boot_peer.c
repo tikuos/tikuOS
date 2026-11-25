@@ -126,7 +126,12 @@ static const tiku_peer_wire_board_t peer_board = {
     peer_link, PEER_CARRIER, peer_power, peer_reset, peer_powered, PEER_ATTEND,
     PEER_SPEED, PEER_HEARD
 };
+/* A board that is one computer with its peer has it started at boot. */
+#if (TIKU_BOARD_PEER_AUTOSTART + 0)
+#define PEER_FLAGS  (TIKU_PEER_F_SUPERVISOR | TIKU_PEER_F_AUTOSTART)
+#else
 #define PEER_FLAGS  TIKU_PEER_F_SUPERVISOR
+#endif
 #else
 static const tiku_peer_wire_board_t peer_board = {
     peer_link, PEER_CARRIER, 0, 0, 0, PEER_ATTEND, PEER_SPEED, PEER_HEARD

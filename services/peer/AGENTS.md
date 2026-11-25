@@ -17,13 +17,29 @@ kernel IPC on.
 The side that switches the other's power or reset is its supervisor
 (`TIKU_PEER_F_SUPERVISOR`); the other side is the worker, and `start`, `stop`
 and `reset` are refused there.  A peer whose start cannot be undone carries
-`TIKU_PEER_F_ONESHOT`, and `stop` is refused.
+`TIKU_PEER_F_ONESHOT`, and `stop` is refused.  A peer the board is one
+computer with carries `TIKU_PEER_F_AUTOSTART`: its supervisor starts it at
+boot.
+
+A supervisor switches its peer at run time:
+
+```text
+peer start nrf
+peer stop nrf
+peer reset nrf
+```
+
+`tiku_peer_start()`, `tiku_peer_stop()` and `tiku_peer_reset()` are the
+calls under them.  A stop ends the sessions, parks the medium and takes the
+peer's power; a start gives it back and the sessions say hello again.
 
 A board lists its peers in `tiku_peer_table`, which boot assembly defines.
 A peer's services take consecutive rows of the endpoint table, in the order
 of its service list.  `tiku_peer_prepare_all()` runs before kernel IPC
 starts and `tiku_peer_bind_all()` after it; the second finds the row named
-`<peer>/<first service>` and hands it to the driver.
+`<peer>/<first service>` and hands it to the driver.  `tiku_peer_start_all()`
+then starts the peers flagged for it; one that does not start shows as off
+or lost, and boot goes on.
 
 ## Files
 
@@ -210,6 +226,9 @@ scheduler: while it runs, that side serves no request.
 |------|------|------|---------|
 | MSP430 | `nrf` | supervisor, through the board controls | the link UART; the console line with `TIKU_BOARD_CONSOLE_SEL=1` |
 | nRF54L | `msp` | worker | the link UART |
+
+The MSP430 starts the nRF54L at boot (`TIKU_BOARD_PEER_AUTOSTART` in its
+board header), with its console on J11 as with its console on the link.
 
 Both have the services `ctl`, for the pair's own control messages such as
 the link's speed, `msg`, for applications, and `vfs`, for the mount.  Where the peer rides the console line the

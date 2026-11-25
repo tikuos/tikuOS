@@ -175,4 +175,22 @@ tiku_peer_bind_all(void)
     return TIKU_PEER_OK;
 }
 
+int
+tiku_peer_start_all(void)
+{
+    uint8_t i;
+    int rc = TIKU_PEER_OK;
+
+    for (i = 0; i < tiku_peer_count; i++) {
+        if ((tiku_peer_table[i]->flags & TIKU_PEER_F_AUTOSTART) != 0u) {
+            int r = tiku_peer_start(i);
+
+            if (r != TIKU_PEER_OK) {
+                rc = r;
+            }
+        }
+    }
+    return rc;
+}
+
 #endif /* TIKU_PEER_ENABLE */
