@@ -19,9 +19,9 @@
 
 #include "tiku_vfs.h"
 
-/** @brief /sys/peer, mounted by a build with the board's peers. */
+/** @brief /sys/peer and /peer, mounted by a build with the board's peers. */
 #if (TIKU_PEER_ENABLE + 0)
-#define TIKU_VFS_BOOT_PEER_NODES 1u
+#define TIKU_VFS_BOOT_PEER_NODES 2u
 #else
 #define TIKU_VFS_BOOT_PEER_NODES 0u
 #endif

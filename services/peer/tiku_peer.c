@@ -46,6 +46,23 @@ tiku_peer_find(const char *name)
 }
 
 int
+tiku_peer_service(uint8_t index, const char *service)
+{
+    const tiku_peer_t *p = tiku_peer_get(index);
+    uint8_t i;
+
+    if (p == (const tiku_peer_t *)0 || service == (const char *)0) {
+        return TIKU_PEER_ERR_NAME;
+    }
+    for (i = 0; i < p->service_count; i++) {
+        if (strcmp(p->services[i].name, service) == 0) {
+            return (int)i;
+        }
+    }
+    return TIKU_PEER_ERR_NAME;
+}
+
+int
 tiku_peer_start(uint8_t index)
 {
     const tiku_peer_t *p = tiku_peer_get(index);

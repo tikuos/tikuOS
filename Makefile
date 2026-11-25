@@ -2847,6 +2847,8 @@ CFLAGS += -DTIKU_IPC_WIRE_FRAME=128 -DTIKU_IPC_WIRE_BLOCK=16
 endif
 SRCS += services/peer/tiku_peer.c services/peer/tiku_peer_wire.c
 SRCS += services/peer/tiku_peer_uart.c services/peer/tiku_peer_vfs.c
+SRCS += services/peer/tiku_peer_mount.c services/peer/tiku_peer_mount_serve.c
+SRCS += services/peer/tiku_peer_mount_proc.c
 SRCS += boot/tiku_boot_peer.c
 SRCS += hal/tiku_ipc_epoch_hal.c
 ifeq ($(TIKU_SHELL_ENABLE),1)

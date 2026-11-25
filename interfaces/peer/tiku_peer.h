@@ -119,6 +119,10 @@ int tiku_peer_find(const char *name);
 /** @brief The peer at @p index, or NULL past the table. */
 const tiku_peer_t *tiku_peer_get(uint8_t index);
 
+/** @brief Position of the service named @p service in the list of the peer
+ *         at @p index, or TIKU_PEER_ERR_NAME for no such peer or service. */
+int tiku_peer_service(uint8_t index, const char *service);
+
 /**
  * @brief Start a peer: power or launch it and open its carrier.
  * @return TIKU_PEER_OK, or ERR_NAME, ERR_ROLE (no start on this side) or

@@ -375,7 +375,7 @@ void tiku_vfs_init(const tiku_vfs_node_t *root);
  *
  * The default fits the driver registry: /sys/drivers, one /dev/<class>
  * directory for each of the eight driver classes, and eight drivers,
- * plus optional providers selected by boot, IPC and SD FAT.
+ * plus optional providers selected by boot, IPC, the peers and SD FAT.
  */
 #ifndef TIKU_SD_FAT_ENABLE
 #define TIKU_SD_FAT_ENABLE 0
@@ -384,9 +384,16 @@ void tiku_vfs_init(const tiku_vfs_node_t *root);
 #ifndef TIKU_MEDIA_FS_ENABLE
 #define TIKU_MEDIA_FS_ENABLE 0
 #endif
+/** @brief Mounts a build with the board's peers adds: /sys/peer and /peer. */
+#if (TIKU_PEER_ENABLE + 0)
+#define TIKU_VFS_PEER_MOUNTS 2
+#else
+#define TIKU_VFS_PEER_MOUNTS 0
+#endif
 #ifndef TIKU_VFS_MOUNT_MAX
 #if (TIKU_IPC_ENABLE + 0)
-#define TIKU_VFS_MOUNT_MAX (23 + 2 * (TIKU_SD_FAT_ENABLE + TIKU_MEDIA_FS_ENABLE))
+#define TIKU_VFS_MOUNT_MAX (23 + TIKU_VFS_PEER_MOUNTS + \
+    2 * (TIKU_SD_FAT_ENABLE + TIKU_MEDIA_FS_ENABLE))
 #else
 #define TIKU_VFS_MOUNT_MAX (22 + 2 * (TIKU_SD_FAT_ENABLE + TIKU_MEDIA_FS_ENABLE))
 #endif

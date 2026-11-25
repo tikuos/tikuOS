@@ -26,7 +26,7 @@
  *        control messages, msg for applications.  The channel is also the
  *        service's index.
  */
-#define TIKU_BOOT_PEER_SERVICES(X)  X("ctl", 0) X("msg", 1)
+#define TIKU_BOOT_PEER_SERVICES(X)  X("ctl", 0) X("msg", 1) X("vfs", 2)
 
 /** @brief The peer's driver state; its wire sessions back the rows below. */
 extern tiku_peer_wire_t tiku_boot_peer_wire;

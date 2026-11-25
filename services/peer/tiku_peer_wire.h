@@ -26,7 +26,7 @@
 
 /** @brief Most services one wire peer carries. */
 #ifndef TIKU_PEER_WIRE_SERVICES
-#define TIKU_PEER_WIRE_SERVICES  2u
+#define TIKU_PEER_WIRE_SERVICES  3u
 #endif
 
 /**

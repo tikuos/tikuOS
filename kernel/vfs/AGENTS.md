@@ -26,7 +26,9 @@ The other modules under `tree/` serve /sys/mem/layout, /sys/net,
 /sys/net/wifi, /sys/usb, /sys/store, /sys/psram, /sys/gpu, /sys/flash,
 /sys/emmc, /sys/npu, /sys/coproc and /dev/sensors where the build has them.
 
-`/proc` is `kernel/process/tiku_proc_vfs.c`.
+`/proc` is `kernel/process/tiku_proc_vfs.c`.  `/peer/<name>`, another
+processor's tree, is `services/peer/tiku_peer_mount.c`
+(`services/peer/AGENTS.md`).
 
 ## Boot assembly
 
@@ -41,8 +43,8 @@ is a static `/data` child ahead of the dynamic files; a runtime mount under
 a dynamic directory is refused (EACCES).  An invalid configuration, a
 failed mount or a failed NVM relock leaves no root published and halts
 boot before the drivers start.  The mount table has `TIKU_VFS_MOUNT_MAX`
-entries: 22 by default, one additional slot for IPC and two for SD FAT
-providers. Seventeen slots cover the driver registry; five cover the other
+entries: 22 by default, one additional slot for IPC, two for a board's
+peers (`/sys/peer` and `/peer`) and two for SD FAT providers. Seventeen slots cover the driver registry; five cover the other
 boot providers.
 Subtree hardware initialization runs once; a later call rebuilds the
 namespace.  `tiku_boot_vfs_restore()` rebuilds it and remounts the drivers

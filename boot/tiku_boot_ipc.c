@@ -59,6 +59,7 @@ static tiku_ipc_shared_context_t shared;
 #endif
 #if (TIKU_PEER_ENABLE + 0)
 #include "tiku_boot_peer.h"
+#include <services/peer/tiku_peer_mount.h>
 #endif
 
 #if TIKU_IPC_ENABLE
@@ -126,6 +127,7 @@ int tiku_boot_ipc_init(void)
         return -1;
 #if (TIKU_PEER_ENABLE + 0)
     if (tiku_peer_bind_all() != TIKU_PEER_OK) return -1;
+    tiku_peer_mount_start();
 #endif
 #if (TIKU_HAS_SDIO_C6 + 0)
     for(uint16_t e=0;e<tiku_ipc_backend_count;e++)
