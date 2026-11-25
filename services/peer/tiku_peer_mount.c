@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_peer_mount.c - /peer/<name>: a peer's file tree as a directory here.
+ * tiku_peer_mount.c - /mnt/<name>: a peer's file tree as a directory here.
  *
- * Each mounted peer is a dynamic directory.  Its operations turn a VFS
- * call into requests (tiku_peer_mount.h) and wait for the answers, so
- * they return what the same call returns on the peer.
+ * /mnt is a dynamic directory with an entry for each peer that is ready
+ * and mounted.  Its operations turn a VFS call into requests and wait for
+ * the answers, so they return what the same call returns on the peer.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -264,63 +264,160 @@ mount_list(uint8_t peer, const char *prefix, tiku_vfs_dyn_list_cb cb,
 }
 
 /*---------------------------------------------------------------------------*/
-/* THE NODES                                                                 */
+/* THE DIRECTORY                                                             */
 /*---------------------------------------------------------------------------*/
 
-/* A set of operations per peer index: a dynamic directory's operations
- * take no context. */
-#define MOUNT_OPS(N)                                                           \
-static int read_##N(const char *n, char *b, size_t m)                          \
-    { return mount_read(N, n, b, m); }                                         \
-static int write_##N(const char *n, const char *b, size_t l)                   \
-    { return mount_write(N, n, b, l); }                                        \
-static int unlink_##N(const char *n) { return mount_unlink(N, n); }            \
-static int read_at_##N(const char *n, uint32_t o, char *b, size_t m,           \
-                       uint32_t *t)                                            \
-    { return mount_read_at(N, n, o, b, m, t); }                                \
-static int list_##N(const char *p, tiku_vfs_dyn_list_cb cb, void *ctx)         \
-    { return mount_list(N, p, cb, ctx); }                                      \
-static int is_dir_##N(const char *n) { return mount_is_dir(N, n); }            \
-static const tiku_vfs_dynops_t ops_##N = {                                     \
-    .read = read_##N, .write = write_##N, .unlink = unlink_##N,                \
-    .read_at = read_at_##N, .list_checked = list_##N, .is_dir = is_dir_##N     \
+/** @brief A bit for each peer taken out of /mnt by tiku_peer_mount_set(). */
+static uint8_t mount_out;
+
+int
+tiku_peer_mount_present(uint8_t index)
+{
+    tiku_peer_status_t st;
+
+    return index < TIKU_PEER_MOUNT_PEERS && index < tiku_peer_count &&
+           (mount_out & (uint8_t)(1u << index)) == 0u &&
+           tiku_peer_service(index, "vfs") >= 0 &&
+           tiku_peer_status(index, &st) == TIKU_PEER_OK &&
+           st.state == TIKU_PEER_READY;
+}
+
+int
+tiku_peer_mount_set(uint8_t index, uint8_t mounted)
+{
+    if (index >= TIKU_PEER_MOUNT_PEERS || index >= tiku_peer_count ||
+        tiku_peer_service(index, "vfs") < 0) {
+        return -1;
+    }
+    if (mounted != 0u) {
+        mount_out &= (uint8_t)~(1u << index);
+    } else {
+        mount_out |= (uint8_t)(1u << index);
+    }
+    return 0;
+}
+
+/**
+ * @brief Find the peer whose tree @p name is in: its first part is the name
+ *        of a peer that is in /mnt.
+ * @param rest  Receives the path under that peer; "" for its root
+ * @return The peer's index, or -1
+ */
+static int
+mount_route(const char *name, const char **rest)
+{
+    uint8_t i;
+
+    for (i = 0; i < tiku_peer_count && i < TIKU_PEER_MOUNT_PEERS; i++) {
+        const char *pn = tiku_peer_table[i]->name;
+        size_t n = strlen(pn);
+
+        if (strncmp(name, pn, n) == 0 && (name[n] == '\0' || name[n] == '/') &&
+            tiku_peer_mount_present(i)) {
+            *rest = (name[n] == '/') ? name + n + 1u : name + n;
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/** @brief Read a file of a peer in /mnt. */
+static int
+mnt_read(const char *name, char *buf, size_t max)
+{
+    const char *rest;
+    int i = mount_route(name, &rest);
+
+    return (i < 0) ? TIKU_VFS_ENOENT : mount_read((uint8_t)i, rest, buf, max);
+}
+
+/** @brief Write a file of a peer in /mnt. */
+static int
+mnt_write(const char *name, const char *buf, size_t len)
+{
+    const char *rest;
+    int i = mount_route(name, &rest);
+
+    return (i < 0) ? TIKU_VFS_ENOENT : mount_write((uint8_t)i, rest, buf, len);
+}
+
+/** @brief Delete a file of a peer in /mnt. */
+static int
+mnt_unlink(const char *name)
+{
+    const char *rest;
+    int i = mount_route(name, &rest);
+
+    return (i < 0) ? TIKU_VFS_ENOENT : mount_unlink((uint8_t)i, rest);
+}
+
+/** @brief Read a file of a peer in /mnt from an offset. */
+static int
+mnt_read_at(const char *name, uint32_t offset, char *buf, size_t max,
+            uint32_t *total)
+{
+    const char *rest;
+    int i = mount_route(name, &rest);
+
+    return (i < 0) ? TIKU_VFS_ENOENT
+                   : mount_read_at((uint8_t)i, rest, offset, buf, max, total);
+}
+
+/** @brief List /mnt, the peers in it, or a directory of one of them. */
+static int
+mnt_list(const char *prefix, tiku_vfs_dyn_list_cb cb, void *ctx)
+{
+    const char *rest;
+    int i;
+
+    if (prefix[0] == '\0') {
+        uint8_t p;
+
+        for (p = 0; p < tiku_peer_count && p < TIKU_PEER_MOUNT_PEERS; p++) {
+            if (tiku_peer_mount_present(p)) {
+                char entry[TIKU_PEER_MOUNT_DATA + 1u];
+                size_t n = strlen(tiku_peer_table[p]->name);
+
+                if (n + 2u > sizeof(entry)) {
+                    continue;
+                }
+                memcpy(entry, tiku_peer_table[p]->name, n);
+                entry[n] = '/';
+                entry[n + 1u] = '\0';
+                cb(entry, ctx);
+            }
+        }
+        return TIKU_VFS_OK;
+    }
+    i = mount_route(prefix, &rest);
+    return (i < 0) ? TIKU_VFS_ENOENT : mount_list((uint8_t)i, rest, cb, ctx);
+}
+
+/** @brief 1 for a peer in /mnt or a directory of its tree, 0 for a file. */
+static int
+mnt_is_dir(const char *name)
+{
+    const char *rest;
+    int i = mount_route(name, &rest);
+
+    if (i < 0) {
+        return TIKU_VFS_ENOENT;
+    }
+    return (rest[0] == '\0') ? 1 : mount_is_dir((uint8_t)i, rest);
+}
+
+static const tiku_vfs_dynops_t mnt_ops = {
+    .read = mnt_read, .write = mnt_write, .unlink = mnt_unlink,
+    .read_at = mnt_read_at, .list_checked = mnt_list, .is_dir = mnt_is_dir
 };
 
-MOUNT_OPS(0)
-#if TIKU_PEER_MOUNT_PEERS > 1
-MOUNT_OPS(1)
-#endif
-
-static const tiku_vfs_dynops_t *const mount_ops[TIKU_PEER_MOUNT_PEERS] = {
-    &ops_0,
-#if TIKU_PEER_MOUNT_PEERS > 1
-    &ops_1
-#endif
+static const tiku_vfs_node_t mount_root = {
+    .name = "mnt", .type = TIKU_VFS_DIR, .dyn = &mnt_ops
 };
-
-static tiku_vfs_node_t mount_dirs[TIKU_PEER_MOUNT_PEERS];
-static tiku_vfs_node_t mount_root;
 
 const tiku_vfs_node_t *
 tiku_peer_mount_get(void)
 {
-    uint8_t i, n = 0u;
-
-    if (mount_root.name == (const char *)0) {
-        for (i = 0; i < tiku_peer_count && i < TIKU_PEER_MOUNT_PEERS; i++) {
-            if (tiku_peer_service(i, "vfs") < 0) {
-                continue;
-            }
-            mount_dirs[n].name = tiku_peer_table[i]->name;
-            mount_dirs[n].type = TIKU_VFS_DIR;
-            mount_dirs[n].dyn = mount_ops[i];
-            n++;
-        }
-        mount_root.type = TIKU_VFS_DIR;
-        mount_root.children = mount_dirs;
-        mount_root.child_count = n;
-        mount_root.name = "peer";
-    }
     return &mount_root;
 }
 

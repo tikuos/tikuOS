@@ -28,7 +28,7 @@ The other modules under `tree/` serve /sys/mem/layout, /sys/net,
 build has them.  `/dev/mic` and `/sys/audio/mic` are the microphone
 service's (`services/audio/AGENTS.md`).
 
-`/proc` is `kernel/process/tiku_proc_vfs.c`.  `/peer/<name>`, another
+`/proc` is `kernel/process/tiku_proc_vfs.c`.  `/mnt/<name>`, another
 processor's tree, is `services/peer/tiku_peer_mount.c`
 (`services/peer/AGENTS.md`).
 
@@ -54,7 +54,7 @@ a dynamic directory is refused (EACCES).  An invalid configuration, a
 failed mount or a failed NVM relock leaves no root published and halts
 boot before the drivers start.  The mount table has `TIKU_VFS_MOUNT_MAX`
 entries: 22 by default, one additional slot for IPC, two for a board's
-peers (`/sys/peer` and `/peer`), two for SD FAT providers, two for the
+peers (`/sys/peer` and `/mnt`), two for SD FAT providers, two for the
 native media store's and two for the microphone's. Seventeen slots cover the driver registry; five cover the other
 boot providers.
 Subtree hardware initialization runs once; a later call rebuilds the

@@ -391,7 +391,7 @@ void tiku_vfs_init(const tiku_vfs_node_t *root);
 #ifndef TIKU_MIC_ENABLE
 #define TIKU_MIC_ENABLE 0
 #endif
-/** @brief Mounts a build with the board's peers adds: /sys/peer and /peer. */
+/** @brief Mounts a build with the board's peers adds: /sys/peer and /mnt. */
 #if (TIKU_PEER_ENABLE + 0)
 #define TIKU_VFS_PEER_MOUNTS 2
 #else

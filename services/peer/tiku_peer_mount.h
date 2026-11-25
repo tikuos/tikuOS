@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_peer_mount.h - a peer's file tree under /peer/<name>.
+ * tiku_peer_mount.h - a peer's file tree under /mnt/<name>.
  *
  * A peer with a service named "vfs" serves its own tree to the other side
- * and is given the other side's under /peer/<name>.  A request and its
+ * and is given the other side's under /mnt/<name>.  A request and its
  * answer are one kernel IPC message each on <peer>/vfs.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -122,7 +122,7 @@ typedef struct {
 } tiku_peer_mount_server_t;
 
 /**
- * @brief Answer one request from this side's tree, /peer left out of it.
+ * @brief Answer one request from this side's tree, /mnt left out of it.
  *
  * @param s        The peer's state, zeroed before its first request apart
  *                 from cap
@@ -157,10 +157,19 @@ int tiku_peer_mount_call(uint8_t peer, uint8_t *request, uint8_t length,
                          uint8_t *answer, uint8_t *answer_length);
 
 /**
- * @brief The directory "peer", one child for each peer that has the service.
+ * @brief The directory "mnt": an entry for each peer that has the service,
+ *        is ready, and was not taken out with tiku_peer_mount_set().
  * @return The node, for boot assembly to mount under "/"
  */
 const tiku_vfs_node_t *tiku_peer_mount_get(void);
+
+/** @brief Put the tree of the peer at @p index in /mnt (1), where it shows
+ *         while the peer is ready, or take it out (0).
+ *  @return 0, or -1 for a peer without the service */
+int tiku_peer_mount_set(uint8_t index, uint8_t mounted);
+
+/** @brief 1 while the tree of the peer at @p index shows in /mnt. */
+int tiku_peer_mount_present(uint8_t index);
 
 /** @brief Start the process that serves and carries requests; once, at boot,
  *         after kernel IPC and the peers are bound. */

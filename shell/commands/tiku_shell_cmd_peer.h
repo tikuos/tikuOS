@@ -25,4 +25,12 @@
  */
 void tiku_shell_cmd_peer(uint8_t argc, const char *argv[]);
 
+/** @brief "mount" command: with no argument, the peers' trees under /mnt
+ *         and whether each shows; with /mnt/<name>, puts that one back. */
+void tiku_shell_cmd_mount(uint8_t argc, const char *argv[]);
+
+/** @brief "umount /mnt/<name>" command: takes that peer's tree out of /mnt;
+ *         the peer keeps running. */
+void tiku_shell_cmd_umount(uint8_t argc, const char *argv[]);
+
 #endif /* TIKU_SHELL_CMD_PEER_H_ */

@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_peer_mount_proc.c - the process behind /peer/<name>.
+ * tiku_peer_mount_proc.c - the process behind /mnt/<name>.
  *
  * It owns each peer's <peer>/vfs endpoint: it answers the peer's requests
  * from this side's tree and carries this side's requests out.  A caller

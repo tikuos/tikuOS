@@ -53,7 +53,7 @@ tiku_peer_wire.c         a driver for a carrier of whole messages
 tiku_peer_uart.c         the board's link UART as that driver's carrier
 tiku_peer_vfs.c          /sys/peer/<name>/state, role, carrier, restarts, speed
 tiku_peer_ctl.c          the process that owns <peer>/ctl: the link's speed
-tiku_peer_mount.c        /peer/<name>: a VFS call turned into requests
+tiku_peer_mount.c        /mnt/<name>: a VFS call turned into requests
 tiku_peer_mount_proc.c   the process that owns <peer>/vfs
 tiku_peer_mount_serve.c  one request answered from this side's tree
 ```
@@ -61,7 +61,7 @@ tiku_peer_mount_serve.c  one request answered from this side's tree
 `boot/tiku_boot_peer.c` is the table of a board with one peer on a UART; it
 serves both sides of the TikuComputer-nRF.  The `peer` shell command lists
 the peers, sets the link's speed, and sends, listens and pings on an
-endpoint.
+endpoint; `mount` and `umount` are beside it.
 
 Through the mount the MSP430 of a TikuComputer-nRF uses the nRF54L10's
 radio as files: the nRF's `sys/radio/154` sends and receives 802.15.4
@@ -162,19 +162,33 @@ hears its hellos garbled and comes back too; the peer counts it as a
 restart.  A receiver faster than its sender sees only breaks, so both link
 UART drivers put a break in their ring as a zero byte.
 
-## The mount: /peer/<name>
+## The mount: /mnt/<name>
 
 A peer that lists a service named `vfs` is mounted.  Its file tree is the
-directory `/peer/<name>` here, and this side's tree is under `/peer` there:
+directory `/mnt/<name>` here, and this side's tree is under `/mnt` there:
 
 ```text
-read /peer/msp/sys/uptime
-write /peer/msp/dev/led0 1
-ls /peer/nrf/data
+read /mnt/msp/sys/uptime
+write /mnt/msp/dev/led0 1
+ls /mnt/nrf/data
 ```
 
+The directory is in `/mnt` while the peer is ready, and not while it is
+off, starting or lost: a path under it is then no path (`ENOENT`).  The
+peer's files come and go with its state, with no command.  Two commands take
+a peer's tree out of `/mnt` and put it back while the peer runs on:
+
+```text
+mount
+umount /mnt/nrf
+mount /mnt/nrf
+```
+
+`mount` alone lists the peers' trees and whether each shows;
+`tiku_peer_mount_set()` is the call under the other two.
+
 `ls`, `read`, `write`, `rm` and every other caller of the VFS take such a
-path as they take a local one.  `/peer/<name>` is a dynamic directory
+path as they take a local one.  `/mnt` is a dynamic directory
 (`kernel/vfs/AGENTS.md`); its operations send requests on `<peer>/vfs` and
 return what the same call returns on the peer.  A request and its answer are
 one copied message each, 64 bytes at most; `tiku_peer_mount.h` has the
@@ -193,11 +207,11 @@ What holds on both sides:
 - One request is out at a time.  Its caller runs the scheduler until the
   answer is in, so the processor stays awake for that time; a second caller
   meanwhile gets `EBUSY`, and so does the mount's own process.
-- A peer that is not ready answers nothing: every call returns `ENOTSUP`
-  and sends no request.  The mount does not start a peer.  No answer within
+- A peer that is not ready is not in `/mnt`, and no request is sent for
+  it.  The mount does not start a peer.  No answer within
   `TIKU_PEER_MOUNT_WAIT_S` (3 s), or a peer that restarts or is lost
   meanwhile, returns `EIO`.
-- The serving side leaves `/peer` out of what it serves, so two sides that
+- The serving side leaves `/mnt` out of what it serves, so two sides that
   mount each other form no loop, and it does not read a node marked secret.
 - A peer's writes and deletes run under `TIKU_PEER_MOUNT_CAP`: hardware and
   the file store by default, not system control or network settings.
@@ -283,7 +297,7 @@ tree on itself through the VFS core and the mount's three files.  On the board, 
 firmware test `TEST_UART_PEER` starts the peer and waits for ready, and
 `peer ping <endpoint> <count>` against the other side's `ipc echo` checks
 messages both ways.  For the mount, the paths above from the nRF54L's shell,
-and from the MSP430 a `once` job that writes and reads under `/peer/nrf`
+and from the MSP430 a `once` job that writes and reads under `/mnt/nrf`
 after the relay has ended.  For the speed, `peer speed msp` through every
 row from the nRF54L's shell with the MSP430's peer on its link UART; a
 reset of the nRF54L at 460800, after which the link came back at 460800;

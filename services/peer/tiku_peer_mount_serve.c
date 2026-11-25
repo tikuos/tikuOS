@@ -8,7 +8,7 @@
  * tiku_peer_mount_serve.c - this side's file tree, served to a peer.
  *
  * One request in, one answer out, through the VFS calls a local reader
- * uses.  /peer is left out, so two sides that mount each other form no
+ * uses.  /mnt is left out, so two sides that mount each other form no
  * loop, and a secret node is not read.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -51,13 +51,13 @@ past_slashes(const char *path)
     return path;
 }
 
-/** @brief 1 for /peer and what is under it: this side's own mounts. */
+/** @brief 1 for /mnt and what is under it: this side's own mounts. */
 static uint8_t
 hidden(const char *path)
 {
     path = past_slashes(path);
-    return (uint8_t)(strncmp(path, "peer", 4) == 0 &&
-                     (path[4] == '\0' || path[4] == '/'));
+    return (uint8_t)(strncmp(path, "mnt", 3) == 0 &&
+                     (path[3] == '\0' || path[3] == '/'));
 }
 
 /*---------------------------------------------------------------------------*/
@@ -69,7 +69,7 @@ typedef struct {
     uint8_t *out;      /* the answer's data */
     uint8_t  used;
     uint8_t  full;     /* an entry did not fit: it and the rest wait */
-    uint8_t  root;     /* listing "/": the entry "peer" is left out */
+    uint8_t  root;     /* listing "/": the entry "mnt" is left out */
     uint32_t skip;     /* entries still to pass over */
     uint32_t passed;   /* entries this answer accounts for */
 } list_t;
@@ -88,7 +88,7 @@ list_one(const tiku_vfs_node_t *node, void *ctx)
         l->full != 0u) {
         return;
     }
-    if (l->root != 0u && strcmp(node->name, "peer") == 0) {
+    if (l->root != 0u && strcmp(node->name, "mnt") == 0) {
         return;
     }
     if (l->skip != 0u) {

@@ -17,6 +17,7 @@
 #include <shell/tiku_shell.h>
 #include <interfaces/peer/tiku_peer.h>
 #include <services/peer/tiku_peer_ctl.h>
+#include <services/peer/tiku_peer_mount.h>
 #include <kernel/ipc/tiku_ipc.h>
 #include <kernel/scheduler/tiku_sched.h>
 #include <kernel/timers/tiku_clock.h>
@@ -360,6 +361,64 @@ tiku_shell_cmd_peer(uint8_t argc, const char *argv[])
     SHELL_PRINTF("Usage: peer [speed <name> <bits> | "
                  "send <endpoint> <word>... | listen <endpoint> <seconds> "
                  "| ping <endpoint> <count>]\n");
+}
+
+/*---------------------------------------------------------------------------*/
+/* MOUNT AND UMOUNT                                                          */
+/*---------------------------------------------------------------------------*/
+
+/** @brief The peer @p path names as /mnt/<name>, or -1 with a line why. */
+static int
+mount_peer(const char *path)
+{
+    int index = (strncmp(path, "/mnt/", 5u) == 0) ? tiku_peer_find(path + 5)
+                                                  : -1;
+
+    if (index < 0) {
+        SHELL_PRINTF("no peer at '%s'\n", path);
+    }
+    return index;
+}
+
+void
+tiku_shell_cmd_mount(uint8_t argc, const char *argv[])
+{
+    static const char *const state[] = { "off", "starting", "ready", "lost" };
+    tiku_peer_status_t s;
+    int index;
+    uint8_t i;
+
+    if (argc < 2) {
+        for (i = 0; i < tiku_peer_count; i++) {
+            if (tiku_peer_status(i, &s) != TIKU_PEER_OK ||
+                tiku_peer_service(i, "vfs") < 0) {
+                continue;
+            }
+            SHELL_PRINTF("/mnt/%-6s %s (%s is %s)\n", tiku_peer_get(i)->name,
+                         tiku_peer_mount_present(i) ? "mounted" : "not mounted",
+                         tiku_peer_get(i)->name, state[s.state & 3u]);
+        }
+        return;
+    }
+    index = mount_peer(argv[1]);
+    if (index >= 0 && tiku_peer_mount_set((uint8_t)index, 1u) != 0) {
+        SHELL_PRINTF("mount: '%s' serves no files\n", argv[1]);
+    }
+}
+
+void
+tiku_shell_cmd_umount(uint8_t argc, const char *argv[])
+{
+    int index;
+
+    if (argc != 2) {
+        SHELL_PRINTF("Usage: umount /mnt/<name>\n");
+        return;
+    }
+    index = mount_peer(argv[1]);
+    if (index >= 0 && tiku_peer_mount_set((uint8_t)index, 0u) != 0) {
+        SHELL_PRINTF("umount: '%s' serves no files\n", argv[1]);
+    }
 }
 
 #endif /* TIKU_SHELL_CMD_PEER */

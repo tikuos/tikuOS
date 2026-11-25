@@ -846,6 +846,8 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_PEER
     {"peer",    "The board's other processors", tiku_shell_cmd_peer},
+    {"mount",   "Peers' files under /mnt",     tiku_shell_cmd_mount},
+    {"umount",  "Take a peer's files out",     tiku_shell_cmd_umount},
 #endif
 #if TIKU_SHELL_CMD_PEEK
     {"peek",    "Read N bytes from address",   tiku_shell_cmd_peek},
