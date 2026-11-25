@@ -154,7 +154,10 @@ int tiku_ieee154_arch_rx(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
     uint8_t  got = 0u;
 
     RADIO->PACKETPTR = (uint32_t)rx_frame;
-    RADIO->SHORTS = ((uint32_t)1u << RADIO_SHORTS_READY_START_Pos);
+    /* RSSI is measured at the frame's start delimiter (ADDRESS), so the
+     * sample read after END belongs to the frame. */
+    RADIO->SHORTS = ((uint32_t)1u << RADIO_SHORTS_READY_START_Pos) |
+                    ((uint32_t)1u << RADIO_SHORTS_ADDRESS_RSSISTART_Pos);
     RADIO->EVENTS_END      = 0u;
     RADIO->EVENTS_CRCOK    = 0u;
     RADIO->EVENTS_CRCERROR = 0u;
@@ -169,9 +172,6 @@ int tiku_ieee154_arch_rx(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
             break;
         }
         spin++;
-        if ((spin & 0x3FFu) == 0u) {
-            RADIO->TASKS_RSSISTART = 1u;        /* keep a fresh RSSI sample   */
-        }
         if ((spin & 0xFFFFu) == 0u) {           /* ~every 64k iters           */
             tiku_radio_arch_hfclk_kick();       /* re-arm HFXO across listen  */
             tiku_watchdog_kick();
@@ -278,6 +278,7 @@ int tiku_ieee154_arch_rx_ack(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
     RADIO->PACKETPTR = (uint32_t)rx_frame;
     /* RX with the turnaround pre-armed; commit or abort inside the window. */
     RADIO->SHORTS = ((uint32_t)1u << RADIO_SHORTS_READY_START_Pos) |
+                    ((uint32_t)1u << RADIO_SHORTS_ADDRESS_RSSISTART_Pos) |
                     ((uint32_t)1u << RADIO_SHORTS_PHYEND_DISABLE_Pos) |
                     ((uint32_t)1u << 2);         /* DISABLED_TXEN             */
     RADIO->EVENTS_END      = 0u;
@@ -295,9 +296,6 @@ int tiku_ieee154_arch_rx_ack(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
             break;
         }
         spin++;
-        if ((spin & 0x3FFu) == 0u) {
-            RADIO->TASKS_RSSISTART = 1u;
-        }
         if ((spin & 0xFFFFu) == 0u) {
             tiku_radio_arch_hfclk_kick();
             tiku_watchdog_kick();
