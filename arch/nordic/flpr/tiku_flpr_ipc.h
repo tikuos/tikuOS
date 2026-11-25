@@ -59,20 +59,23 @@
 #define TIKU_FLPR_MSG_CAP  240u
 
 /**
- * @brief Largest LL data-PDU payload the controller offers in LL_LENGTH_RSP.
+ * @brief Largest LL data-PDU payload the controller offers in LL_LENGTH_RSP,
+ *        the most the spec allows.
  *
- * 80 octets carry the 69-byte SMP Public Key and a 68-byte long-read
- * response in one PDU.  It sets the RADIO MAXLEN and bounds the connection
- * RX/TX buffers.
+ * It sets the RADIO MAXLEN (on a link, plus the 4-octet MIC) and bounds the
+ * connection RX/TX buffers.
  */
-#define TIKU_FLPR_DLE_MAX_OCTETS  80u
+#define TIKU_FLPR_DLE_MAX_OCTETS  251u
 /** @brief Air time of that payload on 1M PHY, in us: (octets + 14) * 8, the
  *         14 being preamble 1 + access address 4 + header 2 + MIC 4 + CRC 3.
  *         The formula gives the spec's 2120 us for 251 octets. */
 #define TIKU_FLPR_DLE_MAX_TIME    ((TIKU_FLPR_DLE_MAX_OCTETS + 14u) * 8u)
 /** @brief Buffer for a whole radio packet: S0 + LENGTH + S1 + payload (up to
- *         MAXLEN) + slack, word-aligned. */
-#define TIKU_FLPR_DLE_BUF_SIZE    96u
+ *         MAXLEN, 255 with the MIC) + slack, word-aligned. */
+#define TIKU_FLPR_DLE_BUF_SIZE    260u
+/** @brief Bytes in each mailbox: a coprocessor message (TIKU_FLPR_MSG_CAP)
+ *         or one LL data payload, the larger. */
+#define TIKU_FLPR_MAILBOX_BYTES   256u
 
 /** @brief The shared page at TIKU_FLPR_SHARED_ADDR. */
 typedef struct {
@@ -84,12 +87,12 @@ typedef struct {
     /* app -> flpr mailbox */
     volatile uint32_t a2f_seq;
     volatile uint32_t a2f_len;
-    volatile uint8_t  a2f_buf[TIKU_FLPR_MSG_CAP];
+    volatile uint8_t  a2f_buf[TIKU_FLPR_MAILBOX_BYTES];
 
     /* flpr -> app mailbox (doorbell: VPR EVENTS_TRIGGERED[16] -> IRQ 76) */
     volatile uint32_t f2a_seq;
     volatile uint32_t f2a_len;
-    volatile uint8_t  f2a_buf[TIKU_FLPR_MSG_CAP];
+    volatile uint8_t  f2a_buf[TIKU_FLPR_MAILBOX_BYTES];
 
     /* Beacon offload: bursts sent since TIKU_FLPR_CMD_BEACON. */
     volatile uint32_t beacon_bursts;
@@ -268,7 +271,20 @@ typedef struct {
     volatile uint32_t phy_allow;        /* M33: the peer's choice, HCI mask   */
     volatile uint32_t phy_done_seq;     /* FLPR: an update ended or switched  */
     volatile uint32_t phy_status;       /* FLPR: 0, or an HCI error code      */
+    /* Data length.  The M33 puts the octets it wants to send in len_want
+     * and bumps len_req_seq; the FLPR sends LL_LENGTH_REQ.  When an
+     * LL_LENGTH_REQ or LL_LENGTH_RSP changes the octets each way, the FLPR
+     * puts them in len_tx and len_rx (27 to TIKU_FLPR_DLE_MAX_OCTETS) and
+     * bumps len_done_seq. */
+    volatile uint32_t len_req_seq;      /* M33: an LL_LENGTH_REQ wanted       */
+    volatile uint32_t len_want;         /* M33: the octets to send            */
+    volatile uint32_t len_done_seq;     /* FLPR: len_tx or len_rx changed     */
+    volatile uint32_t len_tx;           /* FLPR: octets a PDU sends           */
+    volatile uint32_t len_rx;           /* FLPR: octets a PDU receives        */
 } tiku_flpr_shared_t;
+
+_Static_assert(sizeof(tiku_flpr_shared_t) <= 0x400u,
+               "the shared page is the carve's top 1 KB");
 
 /**
  * @brief TIKU_FLPR_CMD_CONN_ADV input, in a2f_buf: the connectable ADV PDU,

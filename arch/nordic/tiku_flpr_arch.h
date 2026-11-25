@@ -324,6 +324,14 @@ uint32_t tiku_flpr_arch_conn_phy(uint32_t *at_evt);
  *         counts its end. */
 void tiku_flpr_arch_phy_request(uint32_t want);
 
+/** @brief Ask the FLPR to send LL_LENGTH_REQ offering to send @p octets
+ *         (27 to TIKU_FLPR_DLE_MAX_OCTETS) a PDU. */
+void tiku_flpr_arch_len_request(uint32_t octets);
+
+/** @brief Data length changes so far; @p tx and @p rx (may be NULL) get the
+ *         octets a PDU carries each way now. */
+uint32_t tiku_flpr_arch_len_done(uint32_t *tx, uint32_t *rx);
+
 /** @brief The PHYs (HCI mask, 0 for all) a link takes until the host asks
  *         for others on it. */
 void tiku_flpr_arch_phy_allow(uint32_t mask);

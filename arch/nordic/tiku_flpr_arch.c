@@ -873,6 +873,26 @@ void tiku_flpr_arch_phy_request(uint32_t want)
     sh->phy_req_seq = sh->phy_req_seq + 1u;      /* the FLPR takes it next    */
 }
 
+void tiku_flpr_arch_len_request(uint32_t octets)
+{
+    tiku_flpr_shared_t *sh = TIKU_FLPR_SHARED;
+
+    sh->len_want = octets;
+    __asm__ volatile ("dmb 0xF" ::: "memory");
+    sh->len_req_seq = sh->len_req_seq + 1u;      /* the FLPR takes it next    */
+}
+
+uint32_t tiku_flpr_arch_len_done(uint32_t *tx, uint32_t *rx)
+{
+    if (tx != (uint32_t *)0) {
+        *tx = TIKU_FLPR_SHARED->len_tx;
+    }
+    if (rx != (uint32_t *)0) {
+        *rx = TIKU_FLPR_SHARED->len_rx;
+    }
+    return TIKU_FLPR_SHARED->len_done_seq;
+}
+
 void tiku_flpr_arch_phy_allow(uint32_t mask)
 {
     TIKU_FLPR_SHARED->phy_allow = mask & 0x07u;
@@ -1115,9 +1135,9 @@ int tiku_flpr_arch_conn_recv(uint8_t *buf, uint32_t cap, uint8_t *llid)
     return (int)n;
 }
 
-/* Hand one L2CAP fragment (at most 32 bytes; longer ones are cut) to the
- * controller for TX on a2f, tagged with @p llid (2 = start of an L2CAP PDU,
- * 1 = continuation).  Returns the bytes queued, -2 while the previous
+/* Hand one L2CAP fragment (at most TIKU_FLPR_DLE_MAX_OCTETS bytes; longer
+ * ones are cut) to the controller for TX on a2f, tagged with @p llid (2 =
+ * start of an L2CAP PDU, 1 = continuation).  Returns the bytes queued, -2 while the previous
  * fragment is unconsumed (a2f_ack != a2f_seq), or -1 with no link or no
  * buffer. */
 int tiku_flpr_arch_conn_send(const uint8_t *buf, uint32_t len, uint8_t llid)
@@ -1131,8 +1151,8 @@ int tiku_flpr_arch_conn_send(const uint8_t *buf, uint32_t len, uint8_t llid)
     if (sh->a2f_ack != sh->a2f_seq) {
         return -2;                             /* TX slot busy: retry later  */
     }
-    if (len > 32u) {
-        len = 32u;                             /* one fragment / data PDU    */
+    if (len > TIKU_FLPR_DLE_MAX_OCTETS) {
+        len = TIKU_FLPR_DLE_MAX_OCTETS;        /* one fragment / data PDU    */
     }
     for (i = 0u; i < len; i++) {
         sh->a2f_buf[i] = buf[i];

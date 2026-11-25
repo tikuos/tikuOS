@@ -63,10 +63,10 @@
 #define INIT_SCA                5u
 #define INIT_MS                 10000u
 
-/* The one link's handle, and the host's ACL buffers: a data PDU's 27
- * octets each, held here until the mailbox takes them. */
+/* The one link's handle, and the host's ACL buffers: a data PDU's payload
+ * each, held here until the mailbox takes them. */
 #define HCI_HANDLE              0x0000u
-#define ACL_LEN                 27u
+#define ACL_LEN                 TIKU_FLPR_DLE_MAX_OCTETS
 #define ACL_BUFS                4u
 
 /* What waits for the host's recv(), whole: events and received ACL. */
@@ -103,6 +103,8 @@ static uint8_t  s_linked;               /* LE Connection Complete sent    */
 static uint8_t  s_initiating;           /* LE Create Connection in flight */
 static uint32_t s_enc_seen;             /* the FLPR's encryption starts   */
 static uint32_t s_phy_seen;             /* ... and its PHY updates        */
+static uint32_t s_len_seen;             /* ... and its data length changes */
+static uint8_t  s_len_default[4] = { 27u, 0u, 0x48u, 0x01u };  /* 27, 328 us */
 static uint8_t  s_scanning;             /* the observer runs for the host */
 static uint8_t  s_scan_sent;            /* its table's entries reported   */
 static uint16_t s_scan_named;           /* ... with their names, by index */
@@ -256,6 +258,27 @@ phy_event(uint8_t status)
     e[7] = phy;
     e[8] = phy;
     rxq_push(e, 9u);
+}
+
+/** @brief LE Data Length Change with @p tx and @p rx octets a PDU and
+ *         their times on the 1M PHY. */
+static void
+len_event(uint32_t tx, uint32_t rx)
+{
+    uint8_t  e[14];
+    uint32_t txt = (tx + 14u) * 8u, rxt = (rx + 14u) * 8u;
+
+    e[0] = HCI_EVT;
+    e[1] = EVT_LE_META;
+    e[2] = 11u;
+    e[3] = 0x07u;                           /* LE Data Length Change */
+    e[4] = (uint8_t)(HCI_HANDLE & 0xFFu);
+    e[5] = (uint8_t)(HCI_HANDLE >> 8);
+    e[6] = (uint8_t)tx;   e[7] = (uint8_t)(tx >> 8);
+    e[8] = (uint8_t)txt;  e[9] = (uint8_t)(txt >> 8);
+    e[10] = (uint8_t)rx;  e[11] = (uint8_t)(rx >> 8);
+    e[12] = (uint8_t)rxt; e[13] = (uint8_t)(rxt >> 8);
+    rxq_push(e, 14u);
 }
 
 /** @brief The PHYs (HCI mask) LE Set PHY or LE Set Default PHY asks for
@@ -612,6 +635,7 @@ link_follow(void)
         s_linked = 1u;
         s_enc_seen = 0u;
         s_phy_seen = tiku_flpr_arch_phy_done((uint32_t *)0);
+        s_len_seen = tiku_flpr_arch_len_done((uint32_t *)0, (uint32_t *)0);
         if (s_initiating) {
             s_initiating = 0u;
         } else {
@@ -621,9 +645,15 @@ link_follow(void)
     } else if (st == 1u && s_linked) {
         uint32_t status;
         uint32_t seq = tiku_flpr_arch_phy_done(&status);
+        uint32_t tx, rx;
         if (seq != s_phy_seen) {
             s_phy_seen = seq;
             phy_event((uint8_t)status);
+        }
+        seq = tiku_flpr_arch_len_done(&tx, &rx);
+        if (seq != s_len_seen) {
+            s_len_seen = seq;
+            len_event(tx, rx);
         }
     } else if (st == 2u || st == 3u) {
         if (s_linked) {
@@ -871,8 +901,52 @@ command(uint16_t op, const uint8_t *p, uint8_t n)
         return;
     case 0x2003u:                             /* LE Read Local Features */
         memset(r, 0, 9u);
-        r[1] = 0x01u;                         /* LE Encryption */
+        r[1] = 0x21u;                         /* LE Encryption, data length */
         r[2] = 0x09u;                         /* LE 2M PHY, LE Coded PHY */
+        cmd_complete(op, r, 9u);
+        return;
+    case 0x2022u:                             /* LE Set Data Length */
+        memset(r, 0, 3u);
+        if (n < 6u) {
+            r[0] = ST_INVALID_PARAMS;
+        } else if (!s_linked ||
+                   (uint16_t)(p[0] | ((uint16_t)(p[1] & 0x0Fu) << 8)) !=
+                       HCI_HANDLE) {
+            r[0] = ST_UNKNOWN_CONN;
+        } else {
+            uint32_t octets = (uint32_t)(p[2] | ((uint32_t)p[3] << 8));
+            if (octets < 27u || octets > TIKU_FLPR_DLE_MAX_OCTETS) {
+                r[0] = ST_INVALID_PARAMS;
+            } else {
+                tiku_flpr_arch_len_request(octets);
+            }
+            r[1] = p[0];
+            r[2] = (uint8_t)(p[1] & 0x0Fu);
+        }
+        cmd_complete(op, r, 3u);
+        return;
+    case 0x2023u:                             /* LE Read Suggested Default */
+        r[0] = ST_OK;                         /* Data Length */
+        memcpy(&r[1], s_len_default, 4u);
+        cmd_complete(op, r, 5u);
+        return;
+    case 0x2024u:                             /* LE Write Suggested Default */
+        /* Kept for reading back; a link offers the most the controller
+         * takes until the host asks for less on it. */
+        if (n < 4u) {
+            cmd_done(op, ST_INVALID_PARAMS);
+        } else {
+            memcpy(s_len_default, p, 4u);
+            cmd_done(op, ST_OK);
+        }
+        return;
+    case 0x202Fu:                             /* LE Read Maximum Data Length */
+        r[0] = ST_OK;
+        r[1] = (uint8_t)TIKU_FLPR_DLE_MAX_OCTETS;
+        r[2] = 0u;
+        r[3] = (uint8_t)TIKU_FLPR_DLE_MAX_TIME;
+        r[4] = (uint8_t)(TIKU_FLPR_DLE_MAX_TIME >> 8);
+        memcpy(&r[5], &r[1], 4u);
         cmd_complete(op, r, 9u);
         return;
     case 0x2030u:                             /* LE Read PHY */

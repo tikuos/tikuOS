@@ -335,6 +335,13 @@ static uint8_t  fll_phy_answer;        /* LL_PHY_UPDATE_IND owed (central)   */
 static uint8_t  fll_phy_peer;          /* the peer's PHYs, both ways         */
 static uint8_t  fll_phy_pref;          /* the host's PHYs for this link, 0 none */
 static uint32_t fll_phy_seen;          /* phy_req_seq taken                  */
+/* Data length: this side's LL_LENGTH_REQ out, the host's last request
+ * taken, the octets it asked to send on this link (0 none), and the octets
+ * a PDU carries each way. */
+static uint8_t  fll_len_out;           /* this side's LL_LENGTH_REQ is out   */
+static uint32_t fll_len_seen;          /* len_req_seq taken                  */
+static uint16_t fll_len_want;          /* the host's octets, 0 none          */
+static uint16_t fll_len_tx, fll_len_rx;
 
 /** @brief Queue one PDU with @p llid unless a PDU is already pending. */
 /* LL encryption, the peripheral's side.  The central's LL_ENC_REQ goes to
@@ -577,6 +584,54 @@ static uint32_t fll_phy_mine(const tiku_flpr_shared_t *sh)
     return (sh->phy_allow != 0u) ? (sh->phy_allow & 0x07u) : 0x07u;
 }
 
+/** @brief The octets this side may send in a PDU: the host's request on
+ *         the link, else the most the controller takes. */
+static uint16_t fll_len_mine(void)
+{
+    return (fll_len_want != 0u) ? fll_len_want
+                                : (uint16_t)TIKU_FLPR_DLE_MAX_OCTETS;
+}
+
+/** @brief LL_LENGTH_REQ's or LL_LENGTH_RSP's CtrData for this side:
+ *         MaxRxOctets, MaxRxTime, MaxTxOctets, MaxTxTime, little-endian,
+ *         the times those octets take on the 1M PHY. */
+static void fll_len_ctrdata(uint8_t d[8])
+{
+    uint16_t tx = fll_len_mine();
+    uint16_t rxt = (uint16_t)TIKU_FLPR_DLE_MAX_TIME;
+    uint16_t txt = (uint16_t)((tx + 14u) * 8u);
+
+    d[0] = (uint8_t)TIKU_FLPR_DLE_MAX_OCTETS; d[1] = 0u;
+    d[2] = (uint8_t)rxt; d[3] = (uint8_t)(rxt >> 8);
+    d[4] = (uint8_t)tx;  d[5] = (uint8_t)(tx >> 8);
+    d[6] = (uint8_t)txt; d[7] = (uint8_t)(txt >> 8);
+}
+
+/** @brief The peer's LL_LENGTH_REQ or LL_LENGTH_RSP CtrData @p c: the
+ *         octets each way become the smaller of the two sides', at least 27;
+ *         a change goes to the M33. */
+static void fll_len_take(tiku_flpr_shared_t *sh, const uint8_t *c)
+{
+    uint16_t peer_rx = (uint16_t)(c[0] | ((uint16_t)c[1] << 8));
+    uint16_t peer_tx = (uint16_t)(c[4] | ((uint16_t)c[5] << 8));
+    uint16_t tx = fll_len_mine();
+    uint16_t rx = (uint16_t)TIKU_FLPR_DLE_MAX_OCTETS;
+
+    if (peer_rx < tx) { tx = peer_rx; }
+    if (peer_tx < rx) { rx = peer_tx; }
+    if (tx < 27u) { tx = 27u; }
+    if (rx < 27u) { rx = 27u; }
+    if (tx != fll_len_tx || rx != fll_len_rx) {
+        fll_len_tx = tx;
+        fll_len_rx = rx;
+        sh->len_tx = tx;
+        sh->len_rx = rx;
+        sh->dle_max = tx;
+        sh->len_done_seq = sh->len_done_seq + 1u;
+        flpr_doorbell_to_app();
+    }
+}
+
 /**
  * @brief The central's side of LL control: the peripheral's requests are
  *        answered or refused, and the encryption start it drives moves on
@@ -647,10 +702,8 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
         return;
     }
     if (llid == 0x02u || llid == 0x01u) {       /* L2CAP fragment -> host    */
-        uint8_t n = buf[1], i;                  /* len>0 (empty PDU returned) */
-        if (n > TIKU_FLPR_MSG_CAP) {
-            n = TIKU_FLPR_MSG_CAP;
-        }
+        /* len>0 (empty PDU returned); a length byte fits the mailbox. */
+        uint8_t n = buf[1], i;
         for (i = 0u; i < n; i++) {
             sh->f2a_buf[i] = buf[3u + i];       /* payload starts at buf[3]  */
         }
@@ -680,15 +733,29 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
         fll_reply_ctrl(0x13u, (const uint8_t *)0, 0u);
     } else if (op == 0x08u || op == 0x0Eu) {    /* FEATURE_REQ -> RSP       */
         /* Octet 0 of FeatureSet is the AND of both sides' features; this LL
-         * offers bit 0 there, LE Encryption, alone.  A central that reads it
-         * clear does not start encryption on the link.  Octet 1 offers the
-         * 2M and Coded PHYs (bits 8 and 11). */
+         * offers bit 0 there, LE Encryption, and bit 5, data length
+         * extension.  A central that reads bit 0 clear does not start
+         * encryption on the link.  Octet 1 offers the 2M and Coded PHYs
+         * (bits 8 and 11). */
         uint8_t feat[8] = { 0u };
         if (buf[1] >= 9u) {
-            feat[0] = (uint8_t)(buf[4] & 0x01u);
+            feat[0] = (uint8_t)(buf[4] & 0x21u);
         }
         feat[1] = 0x09u;
         fll_reply_ctrl(0x09u, feat, 8u);
+    } else if (op == 0x14u || op == 0x15u) {    /* LL_LENGTH_REQ / _RSP      */
+        /* Either side may ask; a request is answered with this side's
+         * octets, and both settle the octets each way. */
+        if (buf[1] >= 9u) {
+            if (op == 0x14u) {
+                uint8_t d[8];
+                fll_len_ctrdata(d);
+                fll_reply_ctrl(0x15u, d, 8u);
+            } else {
+                fll_len_out = 0u;
+            }
+            fll_len_take(sh, &buf[4]);
+        }
     } else if ((op == 0x07u && buf[1] >= 2u && buf[4] == 0x16u) ||
                (op == 0x11u && buf[1] >= 3u && buf[4] == 0x16u)) {
         /* The peer refused this side's LL_PHY_REQ: LL_UNKNOWN_RSP, or
@@ -752,26 +819,6 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
     } else if (op == 0x0Bu) {                   /* LL_PAUSE_ENC_RSP          */
         if (fll_enc == FLL_ENC_PAUSED) {
             fll_enc = FLL_ENC_OFF;              /* the LL_ENC_REQ comes next */
-        }
-    } else if (op == 0x14u) {                   /* LL_LENGTH_REQ (DLE)      */
-        /* Reply with the local maximum and publish the effective TX size,
-         * min(peer MaxRxOctets, TIKU_FLPR_DLE_MAX_OCTETS) and at least 27,
-         * for the M33 host's L2CAP fragmentation.  CtrData: MaxRxOctets[2]
-         * MaxRxTime[2] MaxTxOctets[2] MaxTxTime[2] (LE) at buf[4..11]. */
-        if (buf[1] >= 9u) {
-            uint16_t peer_rx = (uint16_t)(buf[4] | ((uint16_t)buf[5] << 8));
-            uint32_t eff = (peer_rx < TIKU_FLPR_DLE_MAX_OCTETS)
-                         ? peer_rx : TIKU_FLPR_DLE_MAX_OCTETS;
-            uint8_t rsp[8];
-            rsp[0] = (uint8_t)TIKU_FLPR_DLE_MAX_OCTETS; rsp[1] = 0u;
-            rsp[2] = (uint8_t)TIKU_FLPR_DLE_MAX_TIME;
-            rsp[3] = (uint8_t)(TIKU_FLPR_DLE_MAX_TIME >> 8);
-            rsp[4] = (uint8_t)TIKU_FLPR_DLE_MAX_OCTETS; rsp[5] = 0u;
-            rsp[6] = (uint8_t)TIKU_FLPR_DLE_MAX_TIME;
-            rsp[7] = (uint8_t)(TIKU_FLPR_DLE_MAX_TIME >> 8);
-            fll_reply_ctrl(0x15u, rsp, 8u);     /* LL_LENGTH_RSP            */
-            if (eff < 27u) { eff = 27u; }
-            sh->dle_max = eff;                  /* publish to the M33 host  */
         }
     } else if (op == 0x16u) {                   /* LL_PHY_REQ (PHY update)  */
         /* The PHYs this side takes, both ways; the central chooses, and its
@@ -861,6 +908,10 @@ static uint32_t conn_widen(uint32_t dt)
 
 /** @brief Wait for @p mask in EVENTS_DISABLED-style register @p ev, at most
  *         @p n polls; 1 when it came. */
+/* Polls for a data packet's end: enough for the longest, 251 octets with
+ * the MIC at 1M or a Coded S8 packet, about 2.7 ms. */
+#define CONN_PKT_SPINS  400000u
+
 static uint8_t conn_wait(volatile uint32_t *ev, uint32_t n)
 {
     uint32_t i;
@@ -942,6 +993,15 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     fll_phy_answer = 0u;
     fll_phy_pref = 0u;                           /* the default until asked   */
     fll_phy_seen = sh->phy_req_seq;              /* from this link on         */
+    fll_len_out = 0u;
+    fll_len_want = 0u;
+    fll_len_seen = sh->len_req_seq;
+    fll_len_tx = 27u;
+    fll_len_rx = 27u;
+    sh->len_tx = 27u;
+    sh->len_rx = 27u;
+    /* MAXLEN takes the longest payload with its MIC. */
+    r->PCNF1 = (r->PCNF1 & ~0xFFu) | (TIKU_FLPR_DLE_MAX_OCTETS + 4u);
     sh->conn_phy = 0u; sh->conn_phy_evt = 0u;
     sh->conn_phy_mode = 0u;                      /* PHY-switch telemetry      */
     sh->conn_phy_addr = 0u; sh->conn_phy_crcok = 0u;
@@ -1109,10 +1169,11 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
                 fll_enc = FLL_CENC_SENT;
             }
         }
-        /* PHY update: the central's LL_PHY_UPDATE_IND owed, else a request
-         * the host made, when the slot is free, nothing waits and neither an
-         * encryption start nor a PHY switch is under way.  The instant is
-         * six events after the one the indication goes out in. */
+        /* PHY update and data length: the central's LL_PHY_UPDATE_IND owed,
+         * else a PHY or length request the host made, when the slot is free,
+         * nothing waits and neither an encryption start nor a PHY switch is
+         * under way.  The instant is six events after the one the
+         * indication goes out in. */
         if (fll_tx_len == 0u && fll_cw_n == 0u && !fll_phy_pending &&
             ((fll_enc == FLL_ENC_OFF && !fll_enc_refresh) ||
              fll_enc == FLL_ENC_ON)) {
@@ -1145,6 +1206,13 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
                 req[1] = req[0];
                 fll_phy_proc = 1u;
                 fll_queue_ctrl(0x16u, req, 2u);  /* LL_PHY_REQ                */
+            } else if (!fll_len_out && sh->len_req_seq != fll_len_seen) {
+                uint8_t d[8];
+                fll_len_seen = sh->len_req_seq;
+                fll_len_want = (uint16_t)sh->len_want;
+                fll_len_ctrdata(d);
+                fll_len_out = 1u;
+                fll_queue_ctrl(0x14u, d, 8u);    /* LL_LENGTH_REQ             */
             }
         }
         /* The host's next L2CAP fragment, when the pending slot is free
@@ -1153,15 +1221,15 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
         if (fll_tx_len == 0u && sh->a2f_seq != fll_a2f_seen &&
             ((fll_enc == FLL_ENC_OFF && !fll_enc_refresh) ||
              fll_enc == FLL_ENC_ON)) {
-            uint8_t n = (uint8_t)sh->a2f_len, fr[32];
+            uint32_t n = sh->a2f_len;
             fll_a2f_seen = sh->a2f_seq;
-            if (n > sizeof(fr)) {
-                n = (uint8_t)sizeof(fr);
+            if (n > fll_len_tx) {
+                n = fll_len_tx;                   /* the link's PDU payload   */
             }
-            for (i = 0u; i < n; i++) {
-                fr[i] = sh->a2f_buf[i];
-            }
-            fll_queue_raw((uint8_t)sh->a2f_llid, fr, n);  /* 2 start / 1 cont */
+            /* Copied into the pending PDU before a2f_ack frees the slot. */
+            fll_queue_raw((uint8_t)sh->a2f_llid,
+                          (const uint8_t *)(uintptr_t)sh->a2f_buf,
+                          (uint8_t)n);            /* 2 start / 1 cont         */
             sh->a2f_ack = sh->a2f_seq;            /* slot free for the host   */
         }
 
@@ -1211,7 +1279,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
                 break;
             }
             (void)conn_wait(&r->EVENTS_DISABLED,
-                            (sh->conn_phy == 2u) ? 400000u : 40000u);
+                            CONN_PKT_SPINS);
             fll_tx_sent = (uint8_t)(fll_tx_len != 0u);
             t_end = t->CC[3];                        /* this packet's end */
             /* The answer: RX at once, its ADDRESS due T_IFS plus the
@@ -1234,7 +1302,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
             }
             if (got_rx) {
                 (void)conn_wait(&r->EVENTS_PHYEND,
-                                (sh->conn_phy == 2u) ? 400000u : 40000u);
+                                CONN_PKT_SPINS);
             }
             r->TASKS_DISABLE = 1u;
             (void)conn_wait(&r->EVENTS_DISABLED, 8000u);
@@ -1362,7 +1430,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
         /* A packet: its end arms the reply 150 us later through
          * COMPARE[0]; the CRC verdict follows the end. */
         (void)conn_wait(&r->EVENTS_PHYEND,
-                        (sh->conn_phy == 2u) ? 400000u : 40000u);
+                        CONN_PKT_SPINS);
         t_end = t->CC[3];
         t->CC[0] = t_end + CONN_REPLY_TICKS;
         t->EVENTS_COMPARE[0] = 0u;
