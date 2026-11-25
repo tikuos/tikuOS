@@ -27,6 +27,10 @@ int tiku_s31_psram_init(void);
 uint32_t tiku_s31_psram_size(void);
 /** @brief Return the last initialization stage, 0..5; 5 means initialization completed. */
 unsigned tiku_s31_psram_stage(void);
+/** @brief At 200 MHz, the read tuning chosen at init: the DQS phase in bits
+ *  17:16, the first passing delay setting in 15:8 and the number passing in
+ *  a row in 7:0; 0 at other rates or before init. */
+uint32_t tiku_s31_psram_tuning(void);
 /**
  * @brief Write back owned 64-byte lines; optionally invalidate them afterward.
  * @note Nonempty aligned span within mapped PSRAM, foreground CPU0 context.

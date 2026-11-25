@@ -7,8 +7,8 @@ stalled and LP execution is disabled. The kernel-test linker uses 64 KiB of HP S
 including a 4 KiB kernel stack; it rejects persistent and retained sections.
 
 `S31_CPU_MHZ` sets the boot rate: 40 (the default, the crystal), or 80, 160
-or 320 on flash firmware profiles with `S31_PSRAM_MHZ=40` or `80`, which run
-from the 320 MHz CPLL that PSRAM initialization calibrates. Memory
+or 320 on flash firmware profiles with `S31_PSRAM_MHZ=40`, `80` or `200`,
+which run from the 320 MHz CPLL that PSRAM initialization calibrates. Memory
 initialization applies the boot rate; a refused switch stops it.
 
 `tiku_clock_arch.c` switches the CPU at run time, on the kernel thread, through
@@ -24,7 +24,8 @@ and APB dividers ESP-IDF's `rtc_clk.c` uses, and one update commits them:
 | 40 MHz | crystal | 40 MHz | 40 MHz | 40 MHz |
 
 A rate is offered only at or above three quarters of the PSRAM bus rate, so
-40 MHz needs PSRAM at 40 MHz or less, and a CPLL rate needs the CPLL locked.
+40 MHz needs PSRAM at 40 MHz or less, 200 MHz PSRAM leaves 160 and 320 MHz,
+and a CPLL rate needs the CPLL locked.
 The switch masks interrupts, waits for the console to send what it holds,
 commits, reads the dividers back and updates the ROM delay calibration; a
 switch that does not read back restores the previous rate and sets
@@ -178,10 +179,21 @@ the runner's already-open UART. Board access requires an explicit request.
 ## PSRAM ownership
 
 The PSRAM backend initializes the Korvo's AP octal 16 MiB device with its
-1.8 V supply. `S31_PSRAM_MHZ` selects a 20, 40 or 80 MHz bus. Display
-profiles select 80 MHz; other profiles default to 20 MHz. The 20 MHz setting
-uses the 40 MHz crystal. The 40/80 MHz settings calibrate the 320 MHz CPLL
-and divide it for the mapped controller; PIO commands remain at 20 MHz.
+1.8 V supply. `S31_PSRAM_MHZ` selects a 20, 40, 80 or 200 MHz double-rate
+bus. The display, camera and application profiles select 200 MHz; other
+profiles default to 20 MHz. The 20 MHz setting uses the 40 MHz crystal. The
+40/80 MHz settings calibrate the 320 MHz CPLL and divide it for the mapped
+controller. The 200 MHz setting also calibrates the CPLL for the CPU, then
+powers the MSPI PLL, locks it at 400 MHz through the analog I2C master as
+ESP-IDF's `clk_ll_mpll_set_config()` does, and clocks the controller from it
+undivided. It sets the device's read latency code 4 and write latency code
+1 with the controller's matching dummy cycles, and tunes reads as ESP-IDF's
+DQS scheme does: PIO round trips of a 128-byte pattern at the bus rate pick
+the first DQS phase of the longest passing run of four, then the middle of
+the longest passing run of 31 pad delay settings. `tiku_s31_psram_tuning()`
+reports the choice; the Korvo passes 20 settings at the first DQS phase. PIO commands
+remain at 20 MHz. At 80 MHz, RGB scanout underruns while the camera streams
+and the desktop converts pictures; at 200 MHz it does not.
 With `S31_CPU_MHZ=40`, CPU, system and APB clocks remain at 40 MHz. CPLL configuration belongs to
 boot initialization and must not overlap another PLL user. The backend verifies
 mode registers, a physical transfer and 256 mapped 64 KiB pages. PMA entry

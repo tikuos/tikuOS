@@ -26,8 +26,8 @@ endif
 ifeq ($(S31_BLE_ENABLE),1)
 $(error Application profiles do not select BLE)
 endif
-ifneq ($(filter-out 80,$(S31_PSRAM_MHZ)),)
-$(error Application profiles require S31_PSRAM_MHZ=80)
+ifneq ($(filter-out 80 200,$(S31_PSRAM_MHZ)),)
+$(error Application profiles require S31_PSRAM_MHZ=80 or 200)
 endif
 else ifeq ($(S31_UI_LTO),1)
 $(error S31_UI_LTO requires an application profile)
@@ -38,7 +38,7 @@ ifneq ($(S31_BLE_ENABLE),1)
 $(error S31_RADIO_COEX=1 requires S31_BLE_ENABLE=1)
 endif
 endif
-S31_PSRAM_MHZ ?= $(if $(filter display-test flash-display-test camera-test s31-local s31-connected,$(S31_PROFILE)),80,20)
+S31_PSRAM_MHZ ?= $(if $(filter display-test flash-display-test camera-test s31-local s31-connected,$(S31_PROFILE)),200,20)
 S31_CPU_MHZ ?= 40
 ifeq ($(filter $(S31_CPU_MHZ),40 80 160 320),)
 $(error S31_CPU_MHZ must be 40, 80, 160 or 320)
@@ -47,8 +47,8 @@ ifneq ($(S31_CPU_MHZ),40)
 ifeq ($(filter firmware s31-local s31-connected,$(S31_PROFILE)),)
 $(error S31_CPU_MHZ=$(S31_CPU_MHZ) requires a flash firmware profile)
 endif
-ifeq ($(filter $(S31_PSRAM_MHZ),40 80),)
-$(error S31_CPU_MHZ=$(S31_CPU_MHZ) requires CPLL-backed PSRAM at 40 or 80 MHz)
+ifeq ($(filter $(S31_PSRAM_MHZ),40 80 200),)
+$(error S31_CPU_MHZ=$(S31_CPU_MHZ) requires PLL-backed PSRAM at 40, 80 or 200 MHz)
 endif
 endif
 ifeq ($(filter $(S31_PROFILE),s31-local s31-connected firmware kernel-test board-test shell watchdog-test flash-shell psram-test flash-psram-test memory-test flash-memory-test display-test flash-display-test camera-test sd-test media-test audio-test radio-os-test phy-test flash-wifi-test posix-test),)

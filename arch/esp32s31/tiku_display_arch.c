@@ -23,8 +23,8 @@
 #include "tiku_psram_arch.h"
 #include "tiku_runtime_arch.h"
 
-#if TIKU_S31_PSRAM_MHZ != 80
-#error S31 RGB scanout requires the qualified 80 MHz PSRAM clock
+#if TIKU_S31_PSRAM_MHZ != 80 && TIKU_S31_PSRAM_MHZ != 200
+#error S31 RGB scanout requires the qualified 80 or 200 MHz PSRAM clock
 #endif
 
 #ifndef TIKU_S31_DISPLAY_REG
