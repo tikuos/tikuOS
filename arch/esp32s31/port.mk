@@ -38,7 +38,7 @@ ifneq ($(S31_BLE_ENABLE),1)
 $(error S31_RADIO_COEX=1 requires S31_BLE_ENABLE=1)
 endif
 endif
-S31_PSRAM_MHZ ?= $(if $(filter display-test flash-display-test s31-local s31-connected,$(S31_PROFILE)),80,20)
+S31_PSRAM_MHZ ?= $(if $(filter display-test flash-display-test camera-test s31-local s31-connected,$(S31_PROFILE)),80,20)
 S31_CPU_MHZ ?= 40
 ifeq ($(filter $(S31_CPU_MHZ),40 80 160 320),)
 $(error S31_CPU_MHZ must be 40, 80, 160 or 320)
@@ -51,8 +51,8 @@ ifeq ($(filter $(S31_PSRAM_MHZ),40 80),)
 $(error S31_CPU_MHZ=$(S31_CPU_MHZ) requires CPLL-backed PSRAM at 40 or 80 MHz)
 endif
 endif
-ifeq ($(filter $(S31_PROFILE),s31-local s31-connected firmware kernel-test board-test shell watchdog-test flash-shell psram-test flash-psram-test memory-test flash-memory-test display-test flash-display-test sd-test media-test audio-test radio-os-test phy-test flash-wifi-test posix-test),)
-$(error S31_PROFILE must be s31-local, s31-connected, firmware, kernel-test, board-test, shell, watchdog-test, flash-shell, psram-test, flash-psram-test, memory-test, flash-memory-test, display-test flash-display-test sd-test, media-test, audio-test, radio-os-test, phy-test, flash-wifi-test or posix-test)
+ifeq ($(filter $(S31_PROFILE),s31-local s31-connected firmware kernel-test board-test shell watchdog-test flash-shell psram-test flash-psram-test memory-test flash-memory-test display-test flash-display-test camera-test sd-test media-test audio-test radio-os-test phy-test flash-wifi-test posix-test),)
+$(error S31_PROFILE must be s31-local, s31-connected, firmware, kernel-test, board-test, shell, watchdog-test, flash-shell, psram-test, flash-psram-test, memory-test, flash-memory-test, display-test, flash-display-test, camera-test, sd-test, media-test, audio-test, radio-os-test, phy-test, flash-wifi-test or posix-test)
 endif
 S31_ENABLED := $(strip $(foreach v,$(filter TIKU_%_ENABLE,$(.VARIABLES)),\
     $(if $(filter 1,$($(v))),$(v))))
@@ -109,10 +109,19 @@ S31_FLAGS += -DTIKU_S31_DISPLAY_TEST=1 -DTIKU_GPIO_CLAIM_LIMIT=32 \
     -DTIKU_S31_DISPLAY_SOAK_SECONDS=$(S31_DISPLAY_SOAK_SECONDS)
 S31_SRCS += arch/esp32s31/tiku_psram_arch.c arch/esp32s31/tiku_mem_arch.c \
     arch/esp32s31/tiku_dma_arch.c arch/esp32s31/tiku_display_arch.c \
+    arch/esp32s31/tiku_lcdcam_arch.c \
     kernel/memory/tiku_mem.c kernel/memory/tiku_tier.c kernel/memory/tiku_region.c \
     interfaces/display/tiku_display.c interfaces/display/tiku_display_async.c \
     TikuBench/tests/esp32s31/test_display.c \
     drivers/input/gt1151/tiku_drv_input_gt1151.c
+else ifeq ($(S31_PROFILE),camera-test)
+S31_FLAGS += -DTIKU_GPIO_CLAIM_LIMIT=40
+S31_SRCS += arch/esp32s31/tiku_psram_arch.c arch/esp32s31/tiku_mem_arch.c \
+    arch/esp32s31/tiku_dma_arch.c arch/esp32s31/tiku_display_arch.c \
+    arch/esp32s31/tiku_lcdcam_arch.c arch/esp32s31/tiku_camera_arch.c \
+    kernel/memory/tiku_mem.c kernel/memory/tiku_tier.c kernel/memory/tiku_region.c \
+    interfaces/display/tiku_display.c interfaces/display/tiku_display_async.c \
+    TikuBench/tests/esp32s31/test_camera.c
 endif
 ifneq ($(filter firmware s31-connected flash-wifi-test,$(S31_PROFILE)),)
 S31_WIFI_COUNTRY ?= 01
@@ -151,7 +160,7 @@ $(error S31 radio assets missing or invalid: run python3 drivers/wifi/esp/s31/fe
 endif
 S31_LDFLAGS += $(addprefix -T$(S31_RADIO_VENDOR)/esp32s31.rom,.ld .phy.ld .version.ld .api.ld .pp.ld .net80211.ld .coexist.ld)
 S31_LIBS += $(addprefix $(S31_RADIO_VENDOR)/,libnet80211.a libpp.a libcore.a libphy.a) -lm
-else ifneq ($(filter s31-local shell flash-shell display-test flash-display-test,$(S31_PROFILE)),)
+else ifneq ($(filter s31-local shell flash-shell display-test flash-display-test camera-test,$(S31_PROFILE)),)
 else ifeq ($(S31_PROFILE),phy-test)
 S31_SRCS += arch/esp32s31/tiku_trng_arch.c drivers/wifi/esp/s31/wifi_s31_arch.c \
     drivers/wifi/esp/s31/phy_s31.c TikuBench/tests/esp32s31/test_radio_phy.c
@@ -322,7 +331,7 @@ ifneq ($(filter flash-shell flash-psram-test flash-memory-test flash-display-tes
 	$(error flash profiles require the installed second-stage bootloader)
 endif
 	$(PYTHON) tools/esp32s31_ram.py --image $(S31_DIR)/kernel.bin \
-	    --port '$(PORT)' --serial '$(S31_SERIAL)' --$(if $(filter firmware s31-local s31-connected shell flash-shell,$(S31_PROFILE)),shell-test,$(if $(filter watchdog-test board-test psram-test memory-test display-test sd-test media-test audio-test radio-os-test phy-test posix-test,$(S31_PROFILE)),$(S31_PROFILE),kernel-test)) --seconds $(if $(filter audio-test,$(S31_PROFILE)),95,$(if $(filter psram-test memory-test display-test sd-test media-test audio-test radio-os-test phy-test,$(S31_PROFILE)),60,6)) --log '$(LOG)'
+	    --port '$(PORT)' --serial '$(S31_SERIAL)' --$(if $(filter firmware s31-local s31-connected shell flash-shell,$(S31_PROFILE)),shell-test,$(if $(filter watchdog-test board-test psram-test memory-test display-test camera-test sd-test media-test audio-test radio-os-test phy-test posix-test,$(S31_PROFILE)),$(S31_PROFILE),kernel-test)) --seconds $(if $(filter audio-test,$(S31_PROFILE)),95,$(if $(filter psram-test memory-test display-test camera-test sd-test media-test audio-test radio-os-test phy-test,$(S31_PROFILE)),60,6)) --log '$(LOG)'
 clean:
 	$(RM) $(S31_OBJS) $(S31_OBJS:.o=.d) $(S31_DIR)/kernel.elf \
 	    $(S31_DIR)/kernel.bin $(S31_DIR)/kernel.map $(S31_DIR)/.flags

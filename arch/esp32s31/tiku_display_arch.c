@@ -19,6 +19,7 @@
 #include <kernel/threads/tiku_thread.h>
 #include "tiku_display_arch.h"
 #include "tiku_dma_arch.h"
+#include "tiku_lcdcam_arch.h"
 #include "tiku_psram_arch.h"
 #include "tiku_runtime_arch.h"
 
@@ -146,8 +147,7 @@ int tiku_s31_display_close(tiku_display_t *d)
         REG(DMA + 0x17c) = 63u;
         REG(LCD + 0x3c) = 0;
         REG(0x20587150u) &= ~4u;
-        REG(0x20587154u) &= ~4u;
-        REG(0x2058714cu) = 10u;
+        tiku_s31_lcdcam_release();
     }
     for (unsigned i = 0; i < claimed; i++) {
         unsigned p = pins[i];
@@ -281,11 +281,10 @@ int tiku_display_arch_init(tiku_display_t *d)
     REG(DMA + 0x148) = 1u; REG(DMA + 0x148) = (3u << 5) | (1u << 10);
     REG(DMA + 0x14c) = 1u << 12;
     REG(DMA + 0x17c) = 0;
-    REG(0x20587154u) = 4u;
+    tiku_s31_lcdcam_claim();
+    hardware = 1;
     /* 40 MHz crystal / 2.5 = 16 MHz PCLK; LCD core runs at 40 MHz. */
     REG(0x20587150u) = 4u | (1u << 3) | (1u << 11) | (2u << 19);
-    REG(0x2058714cu) = 15u; REG(0x2058714cu) = 5u;
-    hardware = 1;
     REG(0x20586264u) = 8u;
     REG(LCD + 0x64) = 0;
     REG(LCD + 0x14) = 1u << 28;

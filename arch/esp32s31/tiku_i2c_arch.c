@@ -443,11 +443,12 @@ int tiku_i2c_arch_write_read(uint8_t addr, const uint8_t *tx, uint16_t tx_len,
 
 int tiku_gpio_arch_is_peripheral(uint8_t port, uint8_t pin)
 {
-    /* Korvo I2C, audio, RGB and card pads use GPIO matrix ownership checks. */
+    /* Korvo I2C, audio, RGB, card and camera pads use GPIO matrix ownership
+     * checks. */
     if (port < 1 || port > 8 || pin > 7) return -1;
     unsigned pad = (port - 1u) * 8u + pin;
     if (!(pad <= 1 || (pad >= 3 && pad <= 25) || (pad >= 33 && pad <= 36) ||
-          pad == 38 || pad == 39 || pad == 40 || (pad >= 43 && pad <= 45))) return -1;
+          pad == 38 || pad == 39 || pad == 40 || (pad >= 43 && pad <= 57))) return -1;
     if (pad >= 20 && pad <= 25 && (REG_READ(0x205883f4u) & 1u)) return 1;
     pin = (uint8_t)pad;
     unsigned mux = (REG_READ(IO_MUX(pin)) >> 12) & 7u;

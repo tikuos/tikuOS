@@ -95,6 +95,7 @@ make MCU=esp32s31 BOARD=esp32s31_korvo1 S31_PROFILE=kernel-test \
 | `flash-memory-test` | The memory checks through the factory bootloader |
 | `display-test` | RGB565 scanout, GPIO readback, drawing, touch and fault recovery |
 | `flash-display-test` | The display checks through the factory bootloader |
+| `camera-test` | SC101IOT frames beside RGB scanout, refusals, close and reopen, and capture after the display closes |
 | `sd-test` | SPI2 loopback, timeout recovery and read-only SDHC/SDXC inspection |
 | `audio-test` | I2S loopback, queue recovery, ES8389 control and a minute of PSRAM capture |
 
@@ -335,11 +336,13 @@ open. Calls from workers or interrupt handlers are refused.
 
 AXI DMA uses trusted mode through TEE entry 64. SRAM descriptor faults from
 TX0 report bus ID 72. A locked incompatible mode is refused; memory-region
-filters remain enabled. The LCDCAM block and AXI TX0 belong exclusively to
-this backend in the display profiles. The AXI internal-memory window covers
-the complete descriptor array at its linked SRAM address; PSRAM pixels use
-the separately configured external-memory window. Camera sharing and general DMA-channel
-allocation are absent.
+filters remain enabled. The display owns the LCDCAM block's LCD half and
+AXI TX0; the camera owns its camera half and AXI RX0. The block's bus clocks,
+reset and 40 MHz core clock are shared through `tiku_lcdcam_arch.c`: the
+first of the two to open ungates and resets the block, and the last to close
+gates it. The AXI internal-memory window covers the complete descriptor array at
+its linked SRAM address; PSRAM pixels use the separately configured
+external-memory window. General DMA-channel allocation is absent.
 
 Run `display-test` with `--display-test --seconds 35`. The test requires the
 optional Goodix driver checkout and exercises 100 Hz touch polling during a
@@ -357,6 +360,30 @@ full-screen clear, ownership conflicts, worker/interrupt
 refusal and recovery after injected descriptor, handoff and underrun faults.
 Use `flash-display-test` and the same runner options with the flash tool
 for bootloader qualification.
+
+## DVP camera
+
+`tiku_camera_arch.c` drives the SmartSens SC101IOT on the J4 socket. Its
+supplies come from regulators enabled by pull-ups, RESET is pulled high and
+PWDN low, so the module runs whenever the board does. Open claims GPIO46-57,
+puts the sensor clock on GPIO55 (the 40 MHz crystal divided by 4 or 5), reads
+the sensor ID `0xDA4A` at I2C address 0x68 on the bus shared with the touch
+controller, writes Espressif's 1280x720 UYVY register table and starts the
+sensor streaming. Espressif's table gives a 19 MHz pixel clock at a 10 MHz
+sensor clock, under half of the 40 MHz LCDCAM core clock; six back-to-back
+captures take 1.15 s on the board.
+
+A capture receives one 1,843,200-byte frame through AXI RX0 into a 64-byte
+aligned PSRAM buffer the caller owns; its 458 descriptors sit in a PSRAM tier
+arena. VSYNC ends the frame. A frame that ends short or overruns the buffer
+is dropped and the receiver re-armed; a whole frame leaves the buffer's cache
+lines invalidated. Calls are refused outside kernel context.
+
+Run `camera-test` with `--camera-test --seconds 30`. It checks refusals, six
+whole frames while the display scans out with no display underrun, a
+luma range of at least 16, close and reopen, and a capture after the display
+closes under the open camera. The runner writes a 160x90 luma thumbnail
+beside the log as `<log>.1.pgm`.
 
 For a timed run, build `display-test` with `S31_DISPLAY_SOAK_SECONDS=1800`
 and run the RAM tool with `--display-test --display-soak-seconds 1800

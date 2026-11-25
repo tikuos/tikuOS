@@ -371,6 +371,37 @@ def check_media_result(data, phase=0):
     return True
 
 
+def check_camera_result(data, elapsed=None):
+    """Require the SC101IOT, whole frames beside scanout, refusals and reopen."""
+    import re
+    del elapsed
+    if b"FAIL" in data or any(data.count(marker) != 1 for marker in
+            (b"TIKU S31 camera test v1\r\n", b"PASS S31 camera\r\n")):
+        return False
+    fixed = {b"cam_open": 0, b"cam_model": 0xda4a, b"cam_refusals": 9, b"cam_whole": 6,
+             b"cam_frames": 6, b"cam_dma_errors": 0, b"cam_lcd_underruns": 0,
+             b"cam_lcd_dma_errors": 0, b"cam_reopen": 1, b"cam_alone": 1, b"camera_errors": 0}
+    limits = [(name, value, value) for name, value in fixed.items()]
+    limits += [(b"cam_frame_us_max", 100000, 400000), (b"cam_y_max", 16, 255)]
+    for name, low, high in limits:
+        values = re.findall(rb"(?:^|\r\n)" + name + rb"=0x([0-9a-f]{8})\r\n", data)
+        if len(values) != 1 or not low <= int(values[0], 16) <= high:
+            return False
+    return len(camera_thumbnail(data)) == 90
+
+
+def camera_thumbnail(data):
+    """Return the luma thumbnail's rows of 160 samples, or [] when absent."""
+    begin, end = data.find(b"CAM_THUMB begin\r\n"), data.find(b"CAM_THUMB end\r\n")
+    if begin < 0 or end < begin:
+        return []
+    rows = data[begin:end].split(b"\r\n")[1:-1]
+    try:
+        return [bytes.fromhex(row.decode()) for row in rows if len(row) == 320]
+    except ValueError:
+        return []
+
+
 def main():
     """Run requested warm-reset probes and restore the installed firmware."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -391,6 +422,7 @@ def main():
     profile.add_argument("--psram-test", action="store_true")
     profile.add_argument("--memory-test", action="store_true")
     profile.add_argument("--display-test", action="store_true")
+    profile.add_argument("--camera-test", action="store_true")
     profile.add_argument("--sd-test", action="store_true")
     profile.add_argument("--media-test", action="store_true")
     parser.add_argument("--media-phase", type=int, choices=(0,1,2), default=0,
@@ -476,6 +508,7 @@ def main():
                 checker = (check_phy_result if args.phy_test else check_radio_os_result if args.radio_os_test else
                            check_audio_result if args.audio_test else
                            check_display_result if args.display_test else
+                           check_camera_result if args.camera_test else
                            check_memory_result if args.memory_test else
                            check_psram_result if args.psram_test else
                            check_watchdog_result if args.watchdog_test else
@@ -501,6 +534,11 @@ def main():
                     results[-1]["wav_excerpt"] = str(wav_path)
                 if args.sd_test:
                     results[-1]["card_qualified"] = check_sd_result(received)
+                rows = camera_thumbnail(received) if args.camera_test else []
+                if rows:
+                    thumb = args.log.with_suffix(f".{run + 1}.pgm")
+                    thumb.write_bytes(b"P5 160 90 255\n" + b"".join(rows))
+                    results[-1]["thumbnail"] = str(thumb)
                 print(json.dumps(results[-1]), flush=True)
                 if not passed:
                     preview = received.split(b"AUDIO PCM begin\r\n")[0] if args.audio_test else received
