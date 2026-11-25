@@ -12,7 +12,8 @@ Source support is selected by `TIKU_IPC_ENABLE=1`.
 The link copies an accepted send and delivers borrowed receive bytes in kernel
 process context. The wire receiver copies a bounded frame before returning.
 Initialization requires a static endpoint name, a fresh nonzero 64-bit local
-epoch and a frame size from 80 through 256 bytes. Peer identity is a channel
+epoch and a frame size from 80 through `TIKU_IPC_WIRE_FRAME` bytes, 256
+unless the build sets it lower. Peer identity is a channel
 binding, without an authentication claim.
 
 The 40-byte header is little-endian:
@@ -35,7 +36,9 @@ The 40-byte header is little-endian:
 Kinds 1–8 are HELLO, HELLO_ACK, COPY, COPY_ACK, INPUT, INPUT_ACK, OUTPUT and
 OUTPUT_DATA. HELLO negotiates the endpoint name, frame capacity, copied-message
 limit, block limit and supported loan directions. Limits are bounded by the
-local context: 64 copied bytes and 512 block bytes. QUERY status exposes the
+local context: 64 copied bytes and `TIKU_IPC_WIRE_BLOCK` block bytes, 512
+unless the build sets it lower. Both ends are built with the same frame and
+block sizes: a hello that names larger ones is refused. QUERY status exposes the
 negotiated message/block limits after the handshake. There is one reserved
 copied-control inbox and two bulk inboxes. The transaction id's low two bits
 select control lane 0 or bulk lane 1/2; the remaining serial retires before

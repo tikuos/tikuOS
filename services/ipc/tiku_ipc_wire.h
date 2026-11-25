@@ -15,8 +15,24 @@
 #include <services/link/tiku_link.h>
 #if TIKU_IPC_ENABLE
 #define TIKU_IPC_WIRE_HEADER 40u
+/**
+ * @brief Largest frame a session takes and largest block it stages; each
+ *        session holds three frames and two blocks.
+ * @note Both ends are built with the same two values: a hello that names a
+ *       larger frame or block is refused.  A build whose sessions carry
+ *       copied messages only sets the frame to its carrier's and the block
+ *       to a few bytes.
+ */
+#ifndef TIKU_IPC_WIRE_FRAME
 #define TIKU_IPC_WIRE_FRAME 256u
+#endif
+#ifndef TIKU_IPC_WIRE_BLOCK
 #define TIKU_IPC_WIRE_BLOCK 512u
+#endif
+#if TIKU_IPC_WIRE_FRAME < 80 || TIKU_IPC_WIRE_FRAME > 256 || \
+    TIKU_IPC_WIRE_BLOCK < 1 || TIKU_IPC_WIRE_BLOCK > 65535
+#error "TIKU_IPC_WIRE_FRAME is 80 to 256 and TIKU_IPC_WIRE_BLOCK 1 to 65535"
+#endif
 
 /**
  * @brief Process one staged block; callbacks retain no pointer on return.

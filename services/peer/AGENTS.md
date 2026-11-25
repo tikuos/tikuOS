@@ -56,6 +56,13 @@ it, and on the supervisor side the power and reset controls.  The link is
 opened once, at bind, and stays open: a parked UART reads nothing and takes
 what is written, so a stop and the next start need no new link.
 
+A session holds three frames of `TIKU_IPC_WIRE_FRAME` bytes and two blocks
+of `TIKU_IPC_WIRE_BLOCK` (`services/ipc/tiku_ipc_wire.h`).  A peer's sessions
+carry copied messages only, so a build with peers and without `console/ipc`
+sets them to 128 and 16 (the Makefile's peer block): 696 bytes a session
+on the nRF54L, where the defaults take 2,072.  Both sides are built with
+the same two values; a session refuses a hello that names larger ones.
+
 ## The TikuComputer-nRF
 
 | Side | Peer | Role | Carrier |

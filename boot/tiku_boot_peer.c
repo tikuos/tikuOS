@@ -35,6 +35,10 @@
 #define TIKU_BOARD_PEER_FRAME  128u
 #endif
 
+#if TIKU_BOARD_PEER_FRAME > TIKU_IPC_WIRE_FRAME
+#error "TIKU_BOARD_PEER_FRAME is larger than the sessions' TIKU_IPC_WIRE_FRAME"
+#endif
+
 /** @brief Seconds a started peer may stay silent before it counts as lost. */
 #ifndef TIKU_BOARD_PEER_START_S
 #define TIKU_BOARD_PEER_START_S  10u

@@ -2839,6 +2839,12 @@ PEER_CONSOLE_SEL_tikucomputer_nrf := 30
 ifneq (,$(filter -DTIKU_BOARD_CONSOLE_SEL=$(PEER_CONSOLE_SEL_$(BOARD)),$(EXTRA_CFLAGS)))
 CFLAGS += -DTIKU_PEER_ON_CONSOLE=1
 endif
+# A peer's sessions carry copied messages only, in frames of the board's peer
+# frame (128 bytes, boot/tiku_boot_peer.c): each is built to hold those and
+# a token block.  A build that also has console/ipc keeps the full sizes.
+ifneq ($(TIKU_IPC_CONSOLE_ENABLE),1)
+CFLAGS += -DTIKU_IPC_WIRE_FRAME=128 -DTIKU_IPC_WIRE_BLOCK=16
+endif
 SRCS += services/peer/tiku_peer.c services/peer/tiku_peer_wire.c
 SRCS += services/peer/tiku_peer_uart.c services/peer/tiku_peer_vfs.c
 SRCS += boot/tiku_boot_peer.c
