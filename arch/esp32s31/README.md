@@ -326,8 +326,10 @@ period to collect VSYNC, DMA EOF, underrun and DMA-error observations.
 Polling can coalesce events when delayed; the counts are observations, not
 hardware cumulative counters. An error stays latched until close and reopen.
 Close stops requests and establishes a parked DMA link before releasing
-storage and restoring pad state. Failure to establish stopped DMA or to
-release its owned reservation halts execution. Memory-tier resets, forced
+storage and restoring pad state. Initialization reserves the driver's own
+768,000-byte scanout buffer in the PSRAM tier; the first handoff to paired
+buffers returns it, since scanout then reads only the pair. Failure to
+establish stopped DMA or to release its owned reservation halts execution. Memory-tier resets, forced
 detach and direct access to the private scanout surface are forbidden while
 open. Calls from workers or interrupt handlers are refused.
 

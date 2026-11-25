@@ -179,6 +179,7 @@ def check_display_result(data, elapsed=None, soak_seconds=0):
     fixed = {b"lcd_underruns": 0, b"lcd_dma_errors": 0, b"lcd_touch_errors": 0,
              b"lcd_updates": 8, b"lcd_rectangle_cases": 19, b"lcd_refusals": 5, b"lcd_context_refusals": 2,
              b"lcd_fault_recovery": 1, b"display_errors": 0, b"lcd_pair_refusals": 5,
+             b"lcd_scanout_released": 1,
              b"lcd_flip_pad_errors": 0, b"lcd_flip_timeout": 1,
              b"lcd_flip_underruns": 0, b"lcd_flip_dma_errors": 0,
              b"lcd_soak_requested": soak_seconds}

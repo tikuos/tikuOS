@@ -412,6 +412,10 @@ int tiku_display_arch_set_scanout(tiku_display_t *d, void *fb)
         if (link_switched && current >= expected &&
             current < expected + sizeof(descriptors[next])) {
             shown_ring = next; shown_buffer = fb; paired = 1;
+            /* Paired buffers are scanned from now on, and the driver's own
+             * is not read again: it goes back to the PSRAM tier. */
+            if (scanout.buf && tiku_arena_destroy(&scanout) != TIKU_MEM_OK)
+                tiku_s31_fatal("LCD storage release");
             return 0;
         }
     }
