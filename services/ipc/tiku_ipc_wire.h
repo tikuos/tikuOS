@@ -85,6 +85,7 @@ typedef struct {
     } control;
     uint32_t control_seen;
     tiku_ipc_err_t control_result;
+    uint32_t rate;
 } tiku_ipc_wire_t;
 
 /**
@@ -96,6 +97,14 @@ typedef struct {
 tiku_ipc_err_t tiku_ipc_wire_init(tiku_ipc_wire_t *context, tiku_link_t *link,
     const char *name, uint16_t endpoint, uint64_t epoch, uint16_t frame_size,
     const tiku_ipc_wire_sink_t *sink);
+/**
+ * @brief Tell a session its carrier's speed, in message bytes a second.
+ * @note With a rate, a frame is sent again only after the time that frame,
+ * its answer and one frame of the peer's take at it, and a copied message's
+ * deadline grows by twice that time.  0, the value after init, keeps the
+ * fixed waits, for a carrier that moves a frame within a clock tick.
+ */
+void tiku_ipc_wire_rate(tiku_ipc_wire_t *context, uint32_t rate);
 /** @brief Service a peer with no local submissions; budget bounds frame handling. */
 void tiku_ipc_wire_pump(tiku_ipc_wire_t *context, uint16_t budget);
 extern const tiku_ipc_backend_ops_t tiku_ipc_wire_ops;

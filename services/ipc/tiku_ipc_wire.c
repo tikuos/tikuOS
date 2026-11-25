@@ -45,6 +45,16 @@ static uint32_t crc(uint32_t value, const uint8_t *data, uint16_t length)
     }
     return value;
 }
+/** @brief Ticks a carrier with a set rate takes for a frame of length payload
+ *         bytes, its answer and one frame of the peer's; 0 with no rate. */
+static tiku_clock_time_t carry(const tiku_ipc_wire_t *c, uint16_t length)
+{
+    uint32_t bytes = (uint32_t)length + 2u*TIKU_IPC_WIRE_HEADER + c->frame_size;
+    uint32_t ticks, most = (uint32_t)4u*TIKU_CLOCK_SECOND;
+    if (!c->rate) return 0;
+    ticks = (bytes*TIKU_CLOCK_SECOND + c->rate - 1u)/c->rate;
+    return (tiku_clock_time_t)(ticks > most ? most : ticks);
+}
 /** @brief Copy one frame to the carrier; refusal retains the source state. */
 static int emit(tiku_ipc_wire_t *c, uint8_t kind, uint32_t id, uint16_t offset,
                 uint16_t total, tiku_ipc_err_t result, const void *data, uint16_t length)
@@ -64,7 +74,9 @@ static int emit(tiku_ipc_wire_t *c, uint8_t kind, uint32_t id, uint16_t offset,
     RADIO_SCRUB(frame,sizeof frame);
     return sent;
 }
-/** @brief Reserve control and each bulk lane's separate receive frame. */
+static void response(tiku_ipc_wire_t *c, const uint8_t *p);
+/** @brief Reserve control and each bulk lane's separate receive frame; a
+ *         copied message's acknowledgement is applied at once and takes none. */
 static void receive(void *context, uint8_t *frame, size_t length)
 {
     tiku_ipc_wire_t *c = context;
@@ -78,6 +90,12 @@ static void receive(void *context, uint8_t *frame, size_t length)
     id = (uint32_t)get(frame+24,4);
     lane = frame[5] <= COPY_ACK ? 0u : id & 3u;
     if (lane > 2 || (frame[5] > COPY_ACK && !lane)) { c->bad++; return; }
+    if (frame[5] == COPY_ACK) {
+        if (!c->ready || get(frame+8,8) != c->peer_epoch ||
+            get(frame+16,8) != c->epoch) c->stale++;
+        else response(c,frame);
+        return;
+    }
     if (c->inbox[lane].length) {
         if (!lane || !c->ready || get(frame+8,8) != c->peer_epoch ||
             get(frame+16,8) != c->epoch ||
@@ -291,6 +309,11 @@ static void inbox_step(tiku_ipc_wire_t *c,unsigned i)
     RADIO_SCRUB(c->inbox[i].data,sizeof c->inbox[i].data);
 }
 
+void tiku_ipc_wire_rate(tiku_ipc_wire_t *c, uint32_t rate)
+{
+    if (c) c->rate = rate;
+}
+
 void tiku_ipc_wire_pump(tiku_ipc_wire_t *c, uint16_t budget)
 {
     tiku_clock_time_t now = tiku_clock_time();
@@ -310,7 +333,7 @@ void tiku_ipc_wire_pump(tiku_ipc_wire_t *c, uint16_t budget)
     tiku_link_pump(c->link);
     if (!c->ready && !TIKU_CLOCK_LT(now,c->hello_at)) {
         (void)hello(c,HELLO);
-        c->hello_at = (tiku_clock_time_t)(now+RETRY_TICKS);
+        c->hello_at = (tiku_clock_time_t)(now+RETRY_TICKS+carry(c,0));
     }
     if(budget&&c->inbox[0].length){budget--;inbox_step(c,0);}
     if (c->hello_reply && hello(c,HELLO_ACK) == 0) c->hello_reply = 0;
@@ -319,6 +342,8 @@ void tiku_ipc_wire_pump(tiku_ipc_wire_t *c, uint16_t budget)
         else {
             int sent = emit(c,COPY,c->control.id,0,0,TIKU_IPC_OK,c->control.data,c->control.length);
             c->control.retry = (tiku_clock_time_t)(now+(sent ? 1u : RETRY_TICKS));
+            if (!sent) c->control.retry = (tiku_clock_time_t)(c->control.retry+
+                carry(c,c->control.length));
         }
     }
     for(unsigned i=1;i<3&&budget;i++)
@@ -337,7 +362,8 @@ void tiku_ipc_wire_pump(tiku_ipc_wire_t *c, uint16_t budget)
             c->client[i].id,offset,c->client[i].transfer.length,TIKU_IPC_OK,
             (uint8_t *)c->client[i].transfer.data+offset,
             c->client[i].transfer.direction == TIKU_IPC_INPUT ? amount : 0);
-        c->client[i].retry = (tiku_clock_time_t)(now+(sent ? 1u : RETRY_TICKS));
+        c->client[i].retry = (tiku_clock_time_t)(now+(sent ? 1u :
+            RETRY_TICKS+carry(c,amount)));
         if (!sent) c->client_cursor = (uint8_t)((i + 1u) % 2u);
     }
     (void)tiku_ipc_service_at(c->endpoint,1);
@@ -378,7 +404,8 @@ static tiku_ipc_err_t send(void *context, uint16_t endpoint, uint32_t session,
     c->control.id = ++c->serial << 2;
     c->control.session = session;
     c->control.retry = tiku_clock_time();
-    c->control.deadline = (tiku_clock_time_t)(tiku_clock_time()+COPY_TICKS);
+    c->control.deadline = (tiku_clock_time_t)(tiku_clock_time()+COPY_TICKS+
+        2u*carry(c,length));
     c->control.busy = 1;
     (void)tiku_ipc_service_at(endpoint,0);
     return TIKU_IPC_OK;

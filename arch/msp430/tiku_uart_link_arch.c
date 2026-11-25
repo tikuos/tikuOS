@@ -204,6 +204,15 @@ tiku_uart_link_errors(void)
     return tiku_uart_dma_lost(&rx);
 }
 
+/* The DMA takes each received byte with no interrupt, so nothing here calls
+ * a hook: the link is read on the tick. */
+void
+tiku_uart_link_on_event(void (*hook)(void), uint8_t end)
+{
+    (void)hook;
+    (void)end;
+}
+
 #else /* no link UART on this board, or the console holds it */
 
 const tiku_uart_port_io_t *
@@ -221,6 +230,13 @@ uint16_t
 tiku_uart_link_errors(void)
 {
     return 0u;
+}
+
+void
+tiku_uart_link_on_event(void (*hook)(void), uint8_t end)
+{
+    (void)hook;
+    (void)end;
 }
 
 #endif /* TIKU_BOARD_LINK_UART_MODULE */

@@ -34,6 +34,15 @@ typedef struct {
 const tiku_uart_port_io_t *tiku_uart_link_open(void);
 /** @brief Close the link UART and park its pins; buffered bytes are dropped. */
 void tiku_uart_link_close(void);
+/**
+ * @brief Name a function for the link UART's interrupt to call when it has
+ *        received the byte @p end, and when it has sent what a write took.
+ * @param hook the function, or NULL for none; it runs in the interrupt
+ * @param end  the byte that ends a frame on this link
+ * @note A port whose receiver has no interrupt per byte keeps the hook and
+ *       calls nothing: its link is read on the tick.
+ */
+void tiku_uart_link_on_event(void (*hook)(void), uint8_t end);
 /** @brief Received bytes the port saw lost or damaged since open: ring
  *         overflows, and the overruns, framing and parity errors its receiver
  *         reports (the MSP430's, which DMA reads, reports none). */

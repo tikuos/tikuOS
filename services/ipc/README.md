@@ -40,9 +40,19 @@ local context: 64 copied bytes and `TIKU_IPC_WIRE_BLOCK` block bytes, 512
 unless the build sets it lower. Both ends are built with the same frame and
 block sizes: a hello that names larger ones is refused. QUERY status exposes the
 negotiated message/block limits after the handshake. There is one reserved
-copied-control inbox and two bulk inboxes. The transaction id's low two bits
+copied-control inbox and two bulk inboxes. A COPY_ACK is applied when the
+link delivers it and takes no inbox, so the frame that follows it finds the
+control inbox free. The transaction id's low two bits
 select control lane 0 or bulk lane 1/2; the remaining serial retires before
 wrap.
+
+An unanswered HELLO, COPY or loan fragment is sent again after four ticks,
+and a copied message fails once 128 ticks have passed without its COPY_ACK.
+`tiku_ipc_wire_rate()` gives a session its carrier's speed in message bytes a
+second. With a rate, the wait before a frame is sent again also covers the
+time that frame, its answer and one frame of the peer's take at that speed,
+four seconds at most, and the copied message's deadline grows by twice that
+time. A session with no rate set keeps the fixed waits.
 
 Copied messages occupy one frame, so their usable limit also fits both frame
 payload capacities. An 80-byte frame carries at most 40 copied bytes. Peer
@@ -128,8 +138,11 @@ peripheral register configuration or IRQ routing.
 `tiku_link_uart` owns an independent byte port with partial reads/writes. It
 reuses the console envelope's CRC-16, sequence, acknowledgements and pacing,
 including SLIP END, ESC and NUL escaping. The port callbacks retain no supplied
-span. Each pump performs bounded byte work; pending acknowledgements do not
-split an outgoing frame. The caller owns UART configuration and buffering
+span. A frame is offered to the port whole when it is queued, and what the
+port did not take is offered at each pump after it; pending acknowledgements do
+not split an outgoing frame. A pump reads the port until it returns fewer
+bytes than asked, ten reads of 64 bytes at most, and passes up each frame
+they end. The caller owns UART configuration and buffering
 below the byte-port interface.
 
 ## SDIO owner and recovery

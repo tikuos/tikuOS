@@ -17,6 +17,7 @@
 #include "tiku_peer_wire.h"
 #include <services/link/tiku_link_uart.h>
 #include <hal/tiku_uart_port_hal.h>
+#include <kernel/ipc/tiku_ipc_backend.h>
 
 #if (TIKU_PEER_ENABLE + 0) && (TIKU_BOARD_HAS_LINK_UART + 0)
 
@@ -55,6 +56,23 @@ tiku_link_t *
 tiku_peer_uart_link(void)
 {
     return tiku_link_uart_open(&peer_uart, &gate_io, PEER_UART_MARKER);
+}
+
+static uint16_t peer_endpoint;
+
+/** @brief From the UART's interrupt: service the peer's first session, whose
+ *         pass reads and writes the link, at the next scheduler pass. */
+static void
+peer_uart_event(void)
+{
+    (void)tiku_ipc_service_at(peer_endpoint, 0);
+}
+
+void
+tiku_peer_uart_attend(uint16_t endpoint)
+{
+    peer_endpoint = endpoint;
+    tiku_uart_link_on_event(peer_uart_event, 0xC0u);
 }
 
 int

@@ -39,6 +39,14 @@
 #error "TIKU_BOARD_PEER_FRAME is larger than the sessions' TIKU_IPC_WIRE_FRAME"
 #endif
 
+/** @brief Message bytes a second the carrier moves: a UART byte is ten
+ *         bits, and a quarter of the line goes to framing and escapes. */
+#ifdef TIKU_BOARD_LINK_BAUD
+#define PEER_BYTE_RATE  ((uint32_t)(TIKU_BOARD_LINK_BAUD) * 3u / 40u)
+#else
+#define PEER_BYTE_RATE  0u
+#endif
+
 /** @brief Seconds a started peer may stay silent before it counts as lost. */
 #ifndef TIKU_BOARD_PEER_START_S
 #define TIKU_BOARD_PEER_START_S  10u
@@ -70,10 +78,12 @@ peer_link(void)
                                   sizeof(peer_console_frame));
 }
 #define PEER_CARRIER       0
+#define PEER_ATTEND        0
 #define PEER_CARRIER_NAME  "console"
 #else
 #define peer_link          tiku_peer_uart_link
 #define PEER_CARRIER       tiku_peer_uart_carrier
+#define PEER_ATTEND        tiku_peer_uart_attend
 #define PEER_CARRIER_NAME  "uart"
 #endif
 
@@ -107,12 +117,12 @@ peer_powered(void)
 }
 
 static const tiku_peer_wire_board_t peer_board = {
-    peer_link, PEER_CARRIER, peer_power, peer_reset, peer_powered
+    peer_link, PEER_CARRIER, peer_power, peer_reset, peer_powered, PEER_ATTEND
 };
 #define PEER_FLAGS  TIKU_PEER_F_SUPERVISOR
 #else
 static const tiku_peer_wire_board_t peer_board = {
-    peer_link, PEER_CARRIER, 0, 0, 0
+    peer_link, PEER_CARRIER, 0, 0, 0, PEER_ATTEND
 };
 #define PEER_FLAGS  0u
 #endif
@@ -125,7 +135,8 @@ static const tiku_peer_t peer;
 
 tiku_peer_wire_t tiku_boot_peer_wire = {
     &peer, &peer_board, TIKU_BOARD_PEER_FRAME,
-    (tiku_clock_time_t)(TIKU_BOARD_PEER_START_S * TIKU_CLOCK_SECOND)
+    (tiku_clock_time_t)(TIKU_BOARD_PEER_START_S * TIKU_CLOCK_SECOND),
+    PEER_BYTE_RATE
 };
 
 static const tiku_peer_t peer = {

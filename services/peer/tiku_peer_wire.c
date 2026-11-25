@@ -92,10 +92,14 @@ wire_bind(void *context, uint16_t first_endpoint)
                                w->frame_size, 0) != TIKU_IPC_OK) {
             return -1;
         }
+        tiku_ipc_wire_rate(&w->wire[i], w->byte_rate);
     }
     w->first_endpoint = first_endpoint;
     w->waiting_since = tiku_clock_time();
     w->bound = 1u;
+    if (w->board->attend != 0) {
+        w->board->attend(first_endpoint);
+    }
     if (wire_powered(w) != 0u) {
         return wire_carrier(w, 1u);
     }

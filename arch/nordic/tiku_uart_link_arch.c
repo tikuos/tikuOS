@@ -42,16 +42,23 @@
 #define TIKU_UART_LINK_RX_RING  1024u
 #endif
 
-/** @brief Most bytes one TX transfer carries. */
-#define LINK_TX_BYTES     64u
+/** @brief Most bytes one TX transfer carries: a 128-byte message's frame
+ *         with every byte escaped. */
+#define LINK_TX_BYTES     288u
+
+/* INTENSET bits of the two events the ISR serves. */
+#define LINK_INT_RX_END   (1UL << 19)         /* DMARXEND                 */
+#define LINK_INT_TX_END   (1UL << 26)         /* DMATXEND                 */
 
 static volatile uint8_t  rx_byte __attribute__((aligned(4)));
 static volatile uint8_t  rx_ring[TIKU_UART_LINK_RX_RING];
 static volatile uint16_t rx_head, rx_tail;    /* ISR writes head          */
 static volatile uint16_t link_errors;
 static uint8_t           tx_buf[LINK_TX_BYTES] __attribute__((aligned(4)));
-static uint8_t           tx_busy;
+static volatile uint8_t  tx_busy;             /* ISR clears it            */
 static uint8_t           link_open;
+static void            (*volatile link_hook)(void);
+static uint8_t           link_end;
 
 /** @brief Count one lost or damaged byte, saturating. */
 static void
@@ -64,22 +71,28 @@ link_error(void)
 
 /**
  * @brief Link UARTE ISR: move the DMA'd byte into the ring, re-arm, and
- *        count a full ring and the receiver's error sources.
+ *        count a full ring and the receiver's error sources; mark a
+ *        finished TX transfer.  The hook is called for the byte that ends a
+ *        frame and for a finished transfer.
  *
  * Overrides the start-up file's weak handler of the UARTE's interrupt line.
  */
 void
 TIKU_BOARD_LINK_UARTE_ISR(void)
 {
+    void (*hook)(void) = link_hook;
+    uint8_t tell = 0u;
+
     if (LINK->EVENTS_DMA.RX.END != 0UL) {
         uint16_t next;
         uint32_t err;
+        uint8_t byte = rx_byte;
 
         LINK->EVENTS_DMA.RX.END = 0UL;
         (void)LINK->EVENTS_DMA.RX.END;           /* flush the clear */
         next = (uint16_t)((rx_head + 1u) % TIKU_UART_LINK_RX_RING);
         if (next != rx_tail) {
-            rx_ring[rx_head] = rx_byte;
+            rx_ring[rx_head] = byte;
             rx_head = next;
         } else {
             link_error();
@@ -90,6 +103,18 @@ TIKU_BOARD_LINK_UARTE_ISR(void)
             LINK->ERRORSRC = err;                /* W1C */
             link_error();
         }
+        if (byte == link_end) {
+            tell = 1u;
+        }
+    }
+    if (LINK->EVENTS_DMA.TX.END != 0UL) {
+        LINK->EVENTS_DMA.TX.END = 0UL;
+        (void)LINK->EVENTS_DMA.TX.END;           /* flush the clear */
+        tx_busy = 0u;
+        tell = 1u;
+    }
+    if (tell != 0u && hook != (void (*)(void))0) {
+        hook();
     }
 }
 
@@ -121,24 +146,17 @@ link_write(void *unused, const uint8_t *data, size_t length)
     if (link_open == 0u || (data == (const uint8_t *)0 && length != 0u)) {
         return -1;
     }
-    if (tx_busy != 0u) {
-        if (LINK->EVENTS_DMA.TX.END == 0UL) {
-            return 0;
-        }
-        tx_busy = 0u;
-    }
-    if (length == 0u) {
+    if (tx_busy != 0u || length == 0u) {
         return 0;
     }
     n = (length > LINK_TX_BYTES) ? LINK_TX_BYTES : length;
     for (i = 0; i < n; i++) {
         tx_buf[i] = data[i];
     }
-    LINK->EVENTS_DMA.TX.END = 0UL;
     LINK->DMA.TX.PTR    = (uint32_t)tx_buf;
     LINK->DMA.TX.MAXCNT = (uint32_t)n;
+    tx_busy = 1u;                                /* the ISR clears it */
     LINK->TASKS_DMA.TX.START = 1UL;
-    tx_busy = 1u;
     return (int)n;
 }
 
@@ -169,7 +187,8 @@ tiku_uart_link_open(void)
     LINK->DMA.RX.PTR    = (uint32_t)(&rx_byte);
     LINK->DMA.RX.MAXCNT = 1UL;
     LINK->EVENTS_DMA.RX.END = 0UL;
-    LINK->INTENSET = (1UL << 19);                /* DMARXEND */
+    LINK->EVENTS_DMA.TX.END = 0UL;
+    LINK->INTENSET = LINK_INT_RX_END | LINK_INT_TX_END;
     tiku_nordic_nvic_clear_pending(TIKU_BOARD_LINK_UARTE_IRQN);
     tiku_nordic_nvic_set_priority(TIKU_BOARD_LINK_UARTE_IRQN, 2u);
     tiku_nordic_nvic_enable(TIKU_BOARD_LINK_UARTE_IRQN);
@@ -200,6 +219,14 @@ tiku_uart_link_errors(void)
     return link_errors;
 }
 
+void
+tiku_uart_link_on_event(void (*hook)(void), uint8_t end)
+{
+    link_hook = (void (*)(void))0;
+    link_end = end;
+    link_hook = hook;
+}
+
 #else /* no link UART on this board, or the console holds it */
 
 const tiku_uart_port_io_t *
@@ -217,6 +244,13 @@ uint16_t
 tiku_uart_link_errors(void)
 {
     return 0u;
+}
+
+void
+tiku_uart_link_on_event(void (*hook)(void), uint8_t end)
+{
+    (void)hook;
+    (void)end;
 }
 
 #endif /* TIKU_BOARD_LINK_UARTE */

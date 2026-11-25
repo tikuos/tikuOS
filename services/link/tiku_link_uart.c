@@ -21,7 +21,29 @@ static void escape(uint8_t *out, uint16_t *length, uint8_t byte)
         out[(*length)++] = byte == 0 ? 0xde : byte == 0xc0 ? 0xdc : 0xdd;
     } else out[(*length)++] = byte;
 }
-/** @brief Queue one envelope, reserving a separate bounded ACK frame. */
+/** @brief Offer the port the frame in hand, or the next one queued: an ACK
+ *         first.  The port takes what it can; the rest is offered again. */
+static void flush(tiku_link_uart_t *c)
+{
+    uint8_t *data;
+    uint16_t *length;
+    size_t amount;
+    int n;
+    if (!c->active) {
+        if (c->ack_length) c->active = 2;
+        else if (c->tx_length) c->active = 1;
+    }
+    if (!c->active) return;
+    data = c->active == 2 ? c->ack : c->tx;
+    length = c->active == 2 ? &c->ack_length : &c->tx_length;
+    amount = (size_t)(*length-c->tx_offset);
+    n = c->io->write(c->io->context,data+c->tx_offset,amount);
+    if (n < 0 || (size_t)n > amount) { c->closed = 1; return; }
+    c->tx_offset = (uint16_t)(c->tx_offset+n);
+    if (c->tx_offset == *length) { *length = c->tx_offset = c->active = 0; }
+}
+/** @brief Queue one envelope, reserving a separate bounded ACK frame, and
+ *         start sending it when no other frame is on its way. */
 static int emit(void *context, uint8_t marker, const uint8_t *data, size_t length)
 {
     tiku_link_uart_t *c = context;
@@ -40,6 +62,7 @@ static int emit(void *context, uint8_t marker, const uint8_t *data, size_t lengt
     escape(out,used,marker);
     for (size_t i = 0; i < length; i++) escape(out,used,data[i]);
     out[(*used)++] = 0xc0;
+    flush(c);
     return 0;
 }
 /** @brief Forward accepted decoded envelopes through the public UART link. */
@@ -79,32 +102,23 @@ static int send(tiku_link_t *link, const void *head, size_t hn, const void *body
     if (c->closed) return -1;
     return tiku_link_send2(&c->codec.link,head,hn,body,bn);
 }
-/** @brief Bound each pass to one 64-byte receive and one 64-byte transmit. */
+/** @brief Most reads of the port in one pass, 64 bytes each. */
+#define PUMP_READS 10u
+/** @brief Read the port until it has no more bytes, PUMP_READS reads at
+ *         most, passing up each frame they end; then offer it the frame to
+ *         send. */
 static void pump(tiku_link_t *link)
 {
     tiku_link_uart_t *c = link->ctx;
     uint8_t incoming[64];
-    uint8_t *data;
-    uint16_t *length;
-    size_t amount;
-    int n;
     if (c->closed) return;
-    n = c->io->read(c->io->context,incoming,sizeof incoming);
-    if (n < 0 || n > (int)sizeof incoming) { c->closed = 1; return; }
-    for (int i = 0; i < n; i++) decode(c,incoming[i]);
-    if (!c->active) {
-        if (c->ack_length) c->active = 2;
-        else if (c->tx_length) c->active = 1;
+    for (unsigned reads = 0; reads < PUMP_READS; reads++) {
+        int n = c->io->read(c->io->context,incoming,sizeof incoming);
+        if (n < 0 || n > (int)sizeof incoming) { c->closed = 1; return; }
+        for (int i = 0; i < n; i++) decode(c,incoming[i]);
+        if (n < (int)sizeof incoming) break;
     }
-    if (!c->active) return;
-    data = c->active == 2 ? c->ack : c->tx;
-    length = c->active == 2 ? &c->ack_length : &c->tx_length;
-    amount = *length-c->tx_offset;
-    if (amount > 64) amount = 64;
-    n = c->io->write(c->io->context,data+c->tx_offset,amount);
-    if (n < 0 || (size_t)n > amount) { c->closed = 1; return; }
-    c->tx_offset = (uint16_t)(c->tx_offset+n);
-    if (c->tx_offset == *length) { *length = c->tx_offset = c->active = 0; }
+    flush(c);
 }
 /** @brief End callbacks; byte operations retain no DMA mappings. */
 static void close(tiku_link_t *link)

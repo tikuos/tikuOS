@@ -66,6 +66,20 @@ sets them to 128 and 16 (the Makefile's peer block): 696 bytes a session
 on the nRF54L, where the defaults take 2,072.  Both sides are built with
 the same two values; a session refuses a hello that names larger ones.
 
+Each session is told the carrier's speed in message bytes a second
+(`byte_rate` of `tiku_peer_wire_t`; on a UART `TIKU_BOARD_LINK_BAUD` × 3/40,
+a quarter of the line going to framing and escapes).  It sends an unanswered
+frame again only after the time the frame, its answer and one frame of the
+peer's take at that speed, so a slow link carries each frame once.
+
+The board may name a call the driver makes at bind with the peer's first
+endpoint (`attend`).  With the link UART it registers a hook
+(`tiku_uart_link_on_event()`): on the nRF54L the UART's interrupt requests
+that endpoint's service when a frame's last byte is in and when a write has
+been sent, and the session's pass then reads and writes the link.  The
+MSP430's link UART has no such interrupt and is read on the tick; its
+console line wakes its own reader when a burst has landed.
+
 ## The mount: /peer/<name>
 
 A peer that lists a service named `vfs` is mounted.  Its file tree is the
@@ -121,8 +135,10 @@ serving, in seconds from the Enter key to the last byte of output:
 
 | Baud | `read` of a counter | `write` of an LED | 220-byte file written | read | `ls` of 26 entries |
 |------|------|------|------|------|------|
-| 9600 | 0.3 | 0.5 | 2.1 | 2.0 | 1.9 |
-| 115200 | 0.12 | 0.13 | 0.63 | 0.44 | 0.42 |
+| 9600 | 0.3 | 0.3 | 1.8 | 1.5 | 1.5 |
+| 115200 | 0.09 | 0.08 | 0.34 | 0.28 | 0.27 |
+
+No frame was sent twice in these runs.
 
 The nRF54L's `uart relay` reads the link itself and does not run the
 scheduler: while it runs, that side serves no request.
@@ -143,11 +159,14 @@ The link runs at `TIKU_BOARD_LINK_BAUD`, 9600 unless `make LINK_BAUD=` says
 otherwise, the same on both sides.  Measured on the board with the peer on
 the MSP430's console line, 100 messages at each rate:
 
-| Baud | Frames the MSP430 received damaged | Round trip of a 32-byte message |
-|------|------------------------------------|---------------------------------|
-| 9600 | 0 of 473 | 0.44 s |
-| 38400 | 0 of 324 | 0.13 s |
-| 115200 | 0 of 406 | 0.11 s |
+| Baud | Frames the MSP430 received damaged |
+|------|------------------------------------|
+| 9600 | 0 of 473 |
+| 38400 | 0 of 324 |
+| 115200 | 0 of 406 |
+
+At 9600, 40 round trips of a 32-byte message took 0.36 s each, with no
+frame sent twice.
 
 The MSP430's eUSCI holds one received byte.  A DMA channel moves each into
 the driver's ring (`arch/msp430/tiku_uart_dma_arch.h`), so none is lost

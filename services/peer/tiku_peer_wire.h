@@ -42,6 +42,9 @@ typedef struct {
     int          (*power)(uint8_t on);
     int          (*reset)(void);
     uint8_t      (*powered)(void);
+    /** Called at bind with the peer's first endpoint, for a medium whose
+     *  interrupt requests that endpoint's service; NULL: none. */
+    void         (*attend)(uint16_t first_endpoint);
 } tiku_peer_wire_board_t;
 
 /** @brief One wire peer: what it is, then its state. */
@@ -50,6 +53,9 @@ typedef struct {
     const tiku_peer_wire_board_t *board;
     uint16_t                      frame_size;   /**< wire frame, 80 to 256 */
     tiku_clock_time_t             start_ticks;  /**< unanswered this long: LOST */
+    uint32_t                      byte_rate;    /**< message bytes a second the
+                                                     carrier moves; 0 for one
+                                                     faster than the tick */
 
     tiku_ipc_mux_t                mux;
     tiku_ipc_wire_t               wire[TIKU_PEER_WIRE_SERVICES];
@@ -74,6 +80,10 @@ tiku_link_t *tiku_peer_uart_link(void);
 
 /** @brief Open (1) or park (0) the board's link UART.  @return 0 or -1 */
 int tiku_peer_uart_carrier(uint8_t up);
+
+/** @brief Have the link UART's interrupt request service of @p endpoint when
+ *         a frame's last byte is in and when a write has been sent. */
+void tiku_peer_uart_attend(uint16_t endpoint);
 
 #endif /* TIKU_PEER_ENABLE */
 #endif /* TIKU_PEER_WIRE_H_ */
