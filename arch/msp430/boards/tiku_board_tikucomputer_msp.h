@@ -52,15 +52,16 @@
  *        UART to the nRF54L, which an nRF image relays (uart relay).
  * @note With 1, the nRF's supply goes on at boot, the link UART is not
  *       available, and the baud defaults to the link's.  Both are the pins'
- *       secondary function (PxSEL1 = 1, PxSEL0 = 0).
+ *       secondary function (PxSEL1 = 1, PxSEL0 = 0).  With 0, RX on J11 is
+ *       pulled up, so a header with nothing plugged in reads idle.
  */
 #ifndef TIKU_BOARD_CONSOLE_SEL
 #define TIKU_BOARD_CONSOLE_SEL      0
 #endif
 
 /**
- * @brief Baud of the UART to the nRF54L, as the link UART and as the console
- *        on it; the nRF side's must equal it (make LINK_BAUD=...).
+ * @brief Starting baud of the UART to the nRF54L, as the link UART and as
+ *        the console on it; the nRF side's must equal it (make LINK_BAUD=...).
  * @note A DMA channel receives (tiku_uart_dma_arch.h), so no rate here
  *       loses a byte to a late interrupt.
  */
@@ -73,8 +74,10 @@
     do {                                                                       \
         P2DIR |= BIT0;                                                         \
         P2DIR &= (uint8_t)~BIT1;                                               \
-        P2REN &= (uint8_t)~(BIT0 | BIT1);                                      \
+        P2REN &= (uint8_t)~BIT0;                                               \
         P2OUT &= (uint8_t)~BIT0;                                               \
+        P2OUT |= BIT1;                                                         \
+        P2REN |= BIT1;                                                         \
         P2SEL1 |= BIT0 | BIT1;                                                 \
         P2SEL0 &= (uint8_t)~(BIT0 | BIT1);                                     \
     } while(0)
