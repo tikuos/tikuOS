@@ -41,20 +41,13 @@
 #define LINE            64u
 #define CACHE_STEP      16384u          /* bytes per interrupt-masked command */
 
-/* HP_SYS_CLKRST and HP_SYSTEM: each engine's clock (bit 0) and reset
- * (bit 1), and its memory's power control. */
-#define CLK_DMA2D       0x205870B0u
+/* HP_SYS_CLKRST and HP_SYSTEM: the PPA's clock (bit 0) and reset (bit 1),
+ * and its memory's power control. */
 #define CLK_PPA         0x205870B4u
 #define CLK_EN          (1u << 0)
 #define RST_EN          (1u << 1)
-#define MEM_DMA2D       0x20586210u
 #define MEM_PPA         0x2058629Cu
 #define MEM_AWAKE       2u              /* lp_mode 2, lp_en and force_ctrl 0 */
-/* TEE master 81, the 2D-DMA, reads and writes SRAM and PSRAM only in
- * trusted mode (mode 0); the boot leaves it in mode 3. */
-#define TEE_DMA2D       0x20504144u
-#define TEE_MODE        3u
-#define TEE_LOCK        (1u << 2)
 
 #define PPA_BASE        0x20345000u
 #define PPA_INT_RAW     (PPA_BASE + 0x10u)
@@ -73,9 +66,8 @@
 #define MODE_RGB565     2u
 #define ALPHA_KEPT      0x80u
 
-#define D2D_BASE        0x20346000u
-#define TX(n)           (D2D_BASE + 0x100u * (n))
-#define RX(n)           (D2D_BASE + 0x500u + 0x100u * (n))
+#define TX(n)           TIKU_S31_DMA2D_TX(n)
+#define RX(n)           TIKU_S31_DMA2D_RX(n)
 #define CH_OUT          3u              /* the highest channels, as ESP-IDF */
 #define CH_IN           2u
 #define CONF0           0x00u
@@ -84,31 +76,20 @@
 #define INT_CLR         0x10u
 #define LINK_CONF       0x1Cu
 #define LINK_ADDR       0x20u
-#define STATE           0x24u
 #define OUT_PERI_SEL    0x38u
 #define IN_PERI_SEL     0x3Cu
 #define OUT_CSC         0x48u
 #define OUT_SCRAMBLE    0x4Cu
 #define OUT_PORT_BLK    0x6Cu           /* width [13:0], height [27:14] */
-#define RST_CONF        (D2D_BASE + 0xA04u)
-#define OUT_ARB_CONFIG  (D2D_BASE + 0xA18u)
-#define IN_ARB_CONFIG   (D2D_BASE + 0xA1Cu)
-#define RST_AXI_RD      (1u << 0)
-#define RST_AXI_WR      (1u << 1)
-#define RST_CLK_EN      (1u << 2)
 #define OUT_EOF_MODE    (1u << 1)
 /* Both channels: descriptor bursts, 128-byte data bursts, no macro-block
  * order, the scaler sizes the blocks, bursts kept inside page bounds. */
 #define CONF_PORT       ((1u << 2) | (4u << 6) | (3u << 9) | (1u << 11) | (1u << 12))
-#define CHAN_RST        (1u << 24)
-#define CMD_DISABLE     (1u << 25)
 #define OUT_STOP        (1u << 20)
 #define OUT_START       (1u << 21)
 #define IN_AUTO_RET     (1u << 20)
 #define IN_STOP         (1u << 21)
 #define IN_START        (1u << 22)
-#define OUT_RESET_AVAIL (1u << 24)
-#define IN_RESET_AVAIL  (1u << 23)
 #define IN_SUC_EOF      (1u << 1)
 #define IN_FAULTS       ((1u << 2) | (1u << 3) | (0x3Fu << 4) | (1u << 10))
 #define IN_ENDS         ((1u << 1) | (1u << 2) | (1u << 3))  /* eof, error eof, descriptor */
@@ -153,55 +134,17 @@ static void put_bits(uint32_t reg, uint32_t bits, uint32_t value)
     TIKU_S31_PPA_REG_WRITE(reg, (TIKU_S31_PPA_REG_READ(reg) & ~bits) | (value & bits));
 }
 
-/** @brief Give the 2D-DMA trusted access to memory, clock both engines,
- *         pulse their resets, power their memories and empty the 2D-DMA's
- *         AXI FIFOs, the first time only.
- *  @return 0, or -1 when the boot locked the 2D-DMA out of trusted mode
- *          or the mode did not take */
+/** @brief Bring the 2D-DMA up, then clock the PPA, pulse its reset and
+ *         power its memory, the first time only.
+ *  @return 0, or -1 when the boot locked the 2D-DMA out of trusted mode */
 static int engines_init(void)
 {
-    uint32_t mode = TIKU_S31_PPA_REG_READ(TEE_DMA2D);
-
-    if ((mode & TEE_LOCK) && (mode & TEE_MODE)) return -1;
-    TIKU_S31_PPA_REG_WRITE(TEE_DMA2D, mode & ~TEE_MODE);
-    if (TIKU_S31_PPA_REG_READ(TEE_DMA2D) & TEE_MODE) return -1;
-    put_bits(CLK_DMA2D, CLK_EN, CLK_EN);
-    put_bits(CLK_DMA2D, RST_EN, RST_EN);
-    put_bits(CLK_DMA2D, RST_EN, 0u);
+    if (tiku_s31_dma2d_init() != 0) return -1;
     put_bits(CLK_PPA, CLK_EN, CLK_EN);
     put_bits(CLK_PPA, RST_EN, RST_EN);
     put_bits(CLK_PPA, RST_EN, 0u);
-    put_bits(MEM_DMA2D, 0xFu, MEM_AWAKE);
     put_bits(MEM_PPA, 0xFu, MEM_AWAKE);
-    put_bits(RST_CONF, RST_CLK_EN, RST_CLK_EN);
-    put_bits(RST_CONF, RST_AXI_RD, RST_AXI_RD);
-    put_bits(RST_CONF, RST_AXI_RD, 0u);
-    put_bits(RST_CONF, RST_AXI_WR, RST_AXI_WR);
-    put_bits(RST_CONF, RST_AXI_WR, 0u);
-    TIKU_S31_PPA_REG_WRITE(OUT_ARB_CONFIG, 0u);
-    TIKU_S31_PPA_REG_WRITE(IN_ARB_CONFIG, 0u);
     ready = 1u;
-    return 0;
-}
-
-/** @brief Stop channel @p ch (out: @p in 0) and reset it once the engine
- *         allows.  @return 0, or -1 when it never did */
-static int chan_reset(uint32_t ch, int in)
-{
-    uint32_t avail = in ? IN_RESET_AVAIL : OUT_RESET_AVAIL;
-    unsigned n;
-
-    put_bits(ch + LINK_CONF, in ? IN_STOP : OUT_STOP, ~0u);
-    put_bits(ch + CONF0, CMD_DISABLE, CMD_DISABLE);
-    for (n = 0u; !(TIKU_S31_PPA_REG_READ(ch + STATE) & avail); n++) {
-        if (n == 100000u) {
-            put_bits(ch + CONF0, CMD_DISABLE, 0u);
-            return -1;
-        }
-    }
-    put_bits(ch + CONF0, CHAN_RST, CHAN_RST);
-    put_bits(ch + CONF0, CHAN_RST, 0u);
-    put_bits(ch + CONF0, CMD_DISABLE, 0u);
     return 0;
 }
 
@@ -341,7 +284,8 @@ int tiku_s31_ppa_convert(const tiku_s31_picture_t *out, uint16_t ox, uint16_t oy
     describe(&desc_in, in, ix, iy, w, h);
     /* The scaler sizes the output block; this one only must not be 0. */
     describe(&desc_out, out, ox, oy, 2u, 2u);
-    if (chan_reset(TX(CH_OUT), 0) != 0 || chan_reset(RX(CH_IN), 1) != 0) {
+    if (tiku_s31_dma2d_chan_reset(TX(CH_OUT), 0) != 0 ||
+        tiku_s31_dma2d_chan_reset(RX(CH_IN), 1) != 0) {
         return finish(TIKU_S31_PPA_ERR_FAULT);
     }
     TIKU_S31_PPA_REG_WRITE(TX(CH_OUT) + OUT_PERI_SEL, PERI_SRM);

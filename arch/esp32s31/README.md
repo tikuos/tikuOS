@@ -95,7 +95,7 @@ make MCU=esp32s31 BOARD=esp32s31_korvo1 S31_PROFILE=kernel-test \
 | `flash-memory-test` | The memory checks through the factory bootloader |
 | `display-test` | RGB565 scanout, GPIO readback, drawing, touch and fault recovery |
 | `flash-display-test` | The display checks through the factory bootloader |
-| `camera-test` | SC101IOT frames beside RGB scanout, refusals, close and reopen, and capture after the display closes |
+| `camera-test` | SC101IOT frames beside RGB scanout, refusals, close and reopen, capture after the display closes, and a frame through the JPEG encoder |
 | `sd-test` | SPI2 loopback, timeout recovery and read-only SDHC/SDXC inspection |
 | `audio-test` | I2S loopback, queue recovery, ES8389 control and a minute of PSRAM capture |
 
@@ -404,12 +404,15 @@ the CPU conversion `((c >> 8) & 0xf800) | ((c >> 5) & 0x07e0) | ((c >> 3) &
 reports it; one job runs at a time, from the kernel thread. Pictures lie in
 internal SRAM or PSRAM, and an output in PSRAM starts on a 64-byte line.
 
-The first job puts TEE master 81, the 2D-DMA, in trusted mode. In the mode
-the boot leaves it, the channels read no descriptor from SRAM or PSRAM and
-report descriptor errors. Initialization refuses a mode the boot locked. The
-same job enables and resets both engines' clocks, leaves their memories'
-power to the PMU and resets the 2D-DMA's AXI FIFOs. The descriptors are
-statics in internal SRAM, which the S31 does not cache.
+The first job brings the 2D-DMA up through `tiku_dma2d_arch.c`, which the
+JPEG encoder shares and which runs once: it puts TEE master 81, the 2D-DMA's
+master for the PPA, in trusted mode, enables and resets the 2D-DMA's clock,
+leaves its memory's power to the PMU and resets its AXI FIFOs. In the mode
+the boot leaves master 81, the channels read no descriptor from SRAM or
+PSRAM and report descriptor errors. A mode the boot locked is refused. The
+job then enables and resets the PPA's clock and leaves its memory to the
+PMU. The descriptors are statics in internal SRAM, which the S31 does not
+cache.
 
 Before a job, the input block's PSRAM lines are written back and the
 output's written back and dropped, in commands of at most 16 KiB with
@@ -437,6 +440,36 @@ with the CPU conversion over full frames, odd blocks, single pixels and rows,
 an SRAM input and dirty or cached lines, checks the refusals, and times the
 interrupt at a full frame's end, 28.5 ms after the start. The host
 model is `TikuBench/tests/host/kernel/test_esp32s31_ppa.c`.
+
+## JPEG encoder
+
+`tiku_jpeg_arch.c` encodes a UYVY picture at 4:2:2 into a baseline JFIF
+with the standard tables, the P4 port's encoder with the S31's differences:
+
+- The codec's configuration register has no linked-list mode bit, so the
+  quantisation FIFO enable, the two table selects and the colour space sit
+  one bit lower than on the P4, and the colour space has three bits.
+- With `JPEG_PIXEL_REV` clear the codec reads U, Y, V, Y; the manual's
+  table lists that order for the bit set.
+- The 2D-DMA's transfers for the codec run as TEE master 80, a different
+  master from the PPA's 81. Left in the boot's mode, both channels report
+  descriptor errors and the codec raises nothing. The first job puts it in
+  trusted mode and refuses a locked mode.
+
+Out channel 0, the one that reorders macro blocks, reads the picture in
+64 × 8 blocks for 16 × 8 macro blocks; in channel 1 writes the scan into a
+1D descriptor after a 640-byte header the CPU writes, whole cache lines.
+`tiku_s31_jpeg_encode()` writes the input's and the header's PSRAM lines
+back, drops the scan area's and starts the job; `tiku_s31_jpeg_poll()` ends
+it with the in channel's end of frame, a full output (`ERR_ROOM`), a codec
+or DMA fault, or a timeout of 50 ms and 1 µs for every 4 input bytes. A
+1280 × 720 camera frame at quality 80 is about 64 KB and takes 56 ms from
+the start to the end, the cache commands on its 1.8 MB included.
+
+The camera test encodes a captured frame and prints it in base64; the
+runner checks its markers, frame header and stuffing and saves it beside
+the log as `<log>.1.jpg`. The host model is
+`TikuBench/tests/host/kernel/test_esp32s31_jpeg.c`.
 
 ## Register sources
 

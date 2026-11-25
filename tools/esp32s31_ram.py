@@ -372,7 +372,8 @@ def check_media_result(data, phase=0):
 
 
 def check_camera_result(data, elapsed=None):
-    """Require the SC101IOT, whole frames beside scanout, refusals and reopen."""
+    """Require the SC101IOT, whole frames beside scanout, refusals, reopen
+    and the frame's JPEG file."""
     import re
     del elapsed
     if b"FAIL" in data or any(data.count(marker) != 1 for marker in
@@ -380,14 +381,58 @@ def check_camera_result(data, elapsed=None):
         return False
     fixed = {b"cam_open": 0, b"cam_model": 0xda4a, b"cam_refusals": 9, b"cam_whole": 6,
              b"cam_frames": 6, b"cam_dma_errors": 0, b"cam_lcd_underruns": 0,
-             b"cam_lcd_dma_errors": 0, b"cam_reopen": 1, b"cam_alone": 1, b"camera_errors": 0}
+             b"cam_lcd_dma_errors": 0, b"cam_reopen": 1, b"cam_alone": 1, b"camera_errors": 0,
+             b"jpeg_room": 1, b"jpeg_refusals": 5, b"jpeg_rc": 0, b"jpeg_again": 1}
     limits = [(name, value, value) for name, value in fixed.items()]
-    limits += [(b"cam_frame_us_max", 100000, 400000), (b"cam_y_max", 16, 255)]
+    limits += [(b"cam_frame_us_max", 100000, 400000), (b"cam_y_max", 16, 255),
+               (b"jpeg_len", 10000, 524288), (b"jpeg_us", 1, 2000000)]
     for name, low, high in limits:
         values = re.findall(rb"(?:^|\r\n)" + name + rb"=0x([0-9a-f]{8})\r\n", data)
         if len(values) != 1 or not low <= int(values[0], 16) <= high:
             return False
-    return len(camera_thumbnail(data)) == 90
+    length = int(re.findall(rb"(?:^|\r\n)jpeg_len=0x([0-9a-f]{8})\r\n", data)[0], 16)
+    jpeg = camera_jpeg(data)
+    return len(camera_thumbnail(data)) == 90 and len(jpeg) == length and jpeg_frame(jpeg) == (1280, 720)
+
+
+def camera_jpeg(data):
+    """Return the base64 JPEG between its markers, or b"" when absent or bad."""
+    import base64
+    import binascii
+    begin, end = data.find(b"CAM_JPEG begin\r\n"), data.find(b"CAM_JPEG end\r\n")
+    if begin < 0 or end < begin:
+        return b""
+    try:
+        return base64.b64decode(b"".join(data[begin:end].split(b"\r\n")[1:-1]), validate=True)
+    except (ValueError, binascii.Error):
+        return b""
+
+
+def jpeg_frame(jpeg):
+    """Return a baseline colour 4:2:2 file's (width, height), or None: SOI,
+    marker segments up to the scan, SOF0 with luma 2x1 and chroma 1x1, a
+    scan whose 0xFF bytes are stuffed or restart markers, then EOI."""
+    if jpeg[:2] != b"\xff\xd8" or jpeg[-2:] != b"\xff\xd9":
+        return None
+    at, size = 2, None
+    while at + 4 <= len(jpeg):
+        if jpeg[at] != 0xFF:
+            return None
+        marker, length = jpeg[at + 1], int.from_bytes(jpeg[at + 2:at + 4], "big")
+        if marker == 0xC0:
+            seg = jpeg[at + 4:at + 2 + length]
+            if len(seg) != 15 or seg[0] != 8 or seg[5] != 3 or seg[7] != 0x21 or \
+                    seg[10] != 0x11 or seg[13] != 0x11:
+                return None
+            size = (int.from_bytes(seg[3:5], "big"), int.from_bytes(seg[1:3], "big"))
+        at += 2 + length
+        if marker == 0xDA:
+            scan = jpeg[at:-2]
+            for i in range(len(scan) - 1):
+                if scan[i] == 0xFF and scan[i + 1] != 0 and not 0xD0 <= scan[i + 1] <= 0xD7:
+                    return None
+            return size if scan and scan[-1] != 0xFF else None
+    return None
 
 
 def camera_thumbnail(data):
@@ -534,6 +579,11 @@ def main():
                     results[-1]["wav_excerpt"] = str(wav_path)
                 if args.sd_test:
                     results[-1]["card_qualified"] = check_sd_result(received)
+                jpeg = camera_jpeg(received) if args.camera_test else b""
+                if jpeg:
+                    photo = args.log.with_suffix(f".{run + 1}.jpg")
+                    photo.write_bytes(jpeg)
+                    results[-1]["photo"] = str(photo)
                 rows = camera_thumbnail(received) if args.camera_test else []
                 if rows:
                     thumb = args.log.with_suffix(f".{run + 1}.pgm")

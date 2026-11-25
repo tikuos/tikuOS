@@ -14,6 +14,7 @@
 #ifndef TIKU_S31_PPA_ARCH_H_
 #define TIKU_S31_PPA_ARCH_H_
 #include <stdint.h>
+#include "tiku_dma2d_arch.h"
 
 #define TIKU_S31_PPA_OK           0
 #define TIKU_S31_PPA_RUNNING      1    /**< the job has not ended yet       */
@@ -21,15 +22,6 @@
 #define TIKU_S31_PPA_ERR_BUSY    -2    /**< a job holds the engine           */
 #define TIKU_S31_PPA_ERR_TIMEOUT -3    /**< no end of frame in time          */
 #define TIKU_S31_PPA_ERR_FAULT   -4    /**< a DMA or scaler parameter error  */
-
-/** @brief A picture: rows of @p width pixels of @p bpp bytes, no gaps, in
- *         internal SRAM or PSRAM.  4 bytes is ARGB8888 (B, G, R, A in
- *         memory), 2 bytes RGB565 (little endian). */
-typedef struct {
-    void *base;
-    uint16_t width, height;
-    uint8_t bpp;
-} tiku_s31_picture_t;
 
 /**
  * @brief Start converting the @p w x @p h block of ARGB8888 picture @p in at

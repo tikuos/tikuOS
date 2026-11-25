@@ -119,6 +119,7 @@ S31_FLAGS += -DTIKU_GPIO_CLAIM_LIMIT=40
 S31_SRCS += arch/esp32s31/tiku_psram_arch.c arch/esp32s31/tiku_mem_arch.c \
     arch/esp32s31/tiku_dma_arch.c arch/esp32s31/tiku_display_arch.c \
     arch/esp32s31/tiku_lcdcam_arch.c arch/esp32s31/tiku_camera_arch.c \
+    arch/esp32s31/tiku_dma2d_arch.c arch/esp32s31/tiku_jpeg_arch.c \
     kernel/memory/tiku_mem.c kernel/memory/tiku_tier.c kernel/memory/tiku_region.c \
     interfaces/display/tiku_display.c interfaces/display/tiku_display_async.c \
     TikuBench/tests/esp32s31/test_camera.c
