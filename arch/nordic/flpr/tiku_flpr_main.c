@@ -320,6 +320,15 @@ static uint16_t fll_cu_interval;        /* new interval, 1.25 ms             */
 static uint16_t fll_cu_timeout;         /* new supervision, 10 ms            */
 static uint16_t fll_cu_winoffset;       /* its transmit window, 1.25 ms      */
 static uint8_t  fll_cu_winsize;
+static uint16_t fll_cu_latency;         /* new latency, events               */
+/* Connection update on request: this side's update out (1 the central's
+ * LL_CONNECTION_UPDATE_IND, 2 the peripheral's LL_CONNECTION_PARAM_REQ),
+ * the central's indication owed for a peer's request with its values, and
+ * the host's last request taken. */
+static uint8_t  fll_cu_out;
+static uint8_t  fll_cu_owed;
+static uint16_t fll_cuo_interval, fll_cuo_latency, fll_cuo_timeout;
+static uint32_t fll_cu_seen;
 static uint8_t  fll_terminate;          /* LL_TERMINATE_IND: end after reply */
 static uint8_t  fll_reason;             /* why the link ends, an HCI reason  */
 static uint8_t  fll_term_sent;          /* the host's queued: end when acked */
@@ -567,6 +576,40 @@ static void fll_phy_done(tiku_flpr_shared_t *sh, uint8_t status)
     flpr_doorbell_to_app();
 }
 
+/** @brief Tell the M33 a connection update applied, or the peer refused
+ *         one, with @p status 0 or an HCI error code. */
+static void fll_cu_done(tiku_flpr_shared_t *sh, uint8_t status)
+{
+    sh->cu_status = status;
+    sh->cu_done_seq = sh->cu_done_seq + 1u;
+    flpr_doorbell_to_app();
+}
+
+/** @brief The central's LL_CONNECTION_UPDATE_IND for @p interval, @p latency
+ *         and @p timeout, its window at the old anchor and its instant six
+ *         events after event @p cec; the switch is armed for the instant. */
+static void fll_cu_indicate(uint16_t interval, uint16_t latency,
+                            uint16_t timeout, uint16_t cec)
+{
+    uint8_t  ind[11];
+    uint16_t at = (uint16_t)(cec + 6u);
+
+    ind[0] = 1u;                                /* WinSize: 1.25 ms          */
+    ind[1] = 0u; ind[2] = 0u;                   /* WinOffset                 */
+    ind[3] = (uint8_t)interval; ind[4] = (uint8_t)(interval >> 8);
+    ind[5] = (uint8_t)latency;  ind[6] = (uint8_t)(latency >> 8);
+    ind[7] = (uint8_t)timeout;  ind[8] = (uint8_t)(timeout >> 8);
+    ind[9] = (uint8_t)at;       ind[10] = (uint8_t)(at >> 8);
+    fll_cu_winsize = 1u;
+    fll_cu_winoffset = 0u;
+    fll_cu_interval = interval;
+    fll_cu_latency = latency;
+    fll_cu_timeout = timeout;
+    fll_cu_instant = at;
+    fll_cu_pending = 1u;
+    fll_queue_ctrl(0x00u, ind, 11u);            /* LL_CONNECTION_UPDATE_IND  */
+}
+
 /** @brief The PHY (0 1M, 1 2M, 2 Coded) to take from a non-empty HCI mask
  *         @p m: 2M first, then Coded, else 1M. */
 static uint8_t fll_phy_pick(uint32_t m)
@@ -683,8 +726,17 @@ static void fll_handle_rx_central(const uint8_t *buf, tiku_flpr_shared_t *sh,
             fll_phy_answer = 1u;
         }
     } else if (op == 0x0Fu) {                   /* LL_CONNECTION_PARAM_REQ  */
-        static const uint8_t rej[2] = { 0x0Fu, 0x1Au };
-        fll_reply_ctrl(0x11u, rej, 2u);         /* kept as they are         */
+        /* CtrData: IntervalMin, IntervalMax, Latency, Timeout (2 each) at
+         * buf[4..11]: the event loop indicates the least interval asked
+         * for, at least 7.5 ms. */
+        if (buf[1] >= 9u) {
+            uint16_t lo = (uint16_t)(buf[4] | ((uint16_t)buf[5] << 8));
+            uint16_t hi = (uint16_t)(buf[6] | ((uint16_t)buf[7] << 8));
+            fll_cuo_interval = (lo < 6u) ? ((hi < 6u) ? 6u : hi) : lo;
+            fll_cuo_latency = (uint16_t)(buf[8] | ((uint16_t)buf[9] << 8));
+            fll_cuo_timeout = (uint16_t)(buf[10] | ((uint16_t)buf[11] << 8));
+            fll_cu_owed = 1u;
+        }
     } else if (op != 0x09u && op != 0x13u && op != 0x07u &&
                op != 0x15u && op != 0x17u) {
         fll_reply_ctrl(0x07u, &op, 1u);         /* LL_UNKNOWN_RSP           */
@@ -733,13 +785,13 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
         fll_reply_ctrl(0x13u, (const uint8_t *)0, 0u);
     } else if (op == 0x08u || op == 0x0Eu) {    /* FEATURE_REQ -> RSP       */
         /* Octet 0 of FeatureSet is the AND of both sides' features; this LL
-         * offers bit 0 there, LE Encryption, and bit 5, data length
-         * extension.  A central that reads bit 0 clear does not start
-         * encryption on the link.  Octet 1 offers the 2M and Coded PHYs
-         * (bits 8 and 11). */
+         * offers bit 0 there, LE Encryption, bit 1, the connection
+         * parameters request procedure, and bit 5, data length extension.
+         * A central that reads bit 0 clear does not start encryption on the
+         * link.  Octet 1 offers the 2M and Coded PHYs (bits 8 and 11). */
         uint8_t feat[8] = { 0u };
         if (buf[1] >= 9u) {
-            feat[0] = (uint8_t)(buf[4] & 0x21u);
+            feat[0] = (uint8_t)(buf[4] & 0x23u);
         }
         feat[1] = 0x09u;
         fll_reply_ctrl(0x09u, feat, 8u);
@@ -756,13 +808,20 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
             }
             fll_len_take(sh, &buf[4]);
         }
-    } else if ((op == 0x07u && buf[1] >= 2u && buf[4] == 0x16u) ||
-               (op == 0x11u && buf[1] >= 3u && buf[4] == 0x16u)) {
-        /* The peer refused this side's LL_PHY_REQ: LL_UNKNOWN_RSP, or
-         * LL_REJECT_EXT_IND with its code. */
-        if (fll_phy_proc) {
+    } else if ((op == 0x07u && buf[1] >= 2u &&
+                (buf[4] == 0x16u || buf[4] == 0x0Fu)) ||
+               (op == 0x11u && buf[1] >= 3u &&
+                (buf[4] == 0x16u || buf[4] == 0x0Fu))) {
+        /* The peer refused this side's LL_PHY_REQ or
+         * LL_CONNECTION_PARAM_REQ: LL_UNKNOWN_RSP, or LL_REJECT_EXT_IND
+         * with its code. */
+        uint8_t code = (op == 0x07u) ? 0x1Au : buf[5];
+        if (buf[4] == 0x16u && fll_phy_proc) {
             fll_phy_proc = 0u;
-            fll_phy_done(sh, (op == 0x07u) ? 0x1Au : buf[5]);
+            fll_phy_done(sh, code);
+        } else if (buf[4] == 0x0Fu && fll_cu_out == 2u) {
+            fll_cu_out = 0u;
+            fll_cu_done(sh, code);
         }
     } else if (fll_central) {
         fll_handle_rx_central(buf, sh, op);
@@ -786,9 +845,16 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
             fll_cu_winsize   = buf[4];
             fll_cu_winoffset = (uint16_t)(buf[5] | ((uint16_t)buf[6] << 8));
             fll_cu_interval = (uint16_t)(buf[7] | ((uint16_t)buf[8] << 8));
+            fll_cu_latency  = (uint16_t)(buf[9] | ((uint16_t)buf[10] << 8));
             fll_cu_timeout  = (uint16_t)(buf[11] | ((uint16_t)buf[12] << 8));
             fll_cu_instant  = (uint16_t)(buf[13] | ((uint16_t)buf[14] << 8));
             fll_cu_pending  = 1u;
+        }
+    } else if (op == 0x0Fu) {                   /* LL_CONNECTION_PARAM_REQ  */
+        /* The central asks: accepted as asked, and its
+         * LL_CONNECTION_UPDATE_IND follows. */
+        if (buf[1] >= 24u) {
+            fll_reply_ctrl(0x10u, &buf[4], 23u); /* LL_CONNECTION_PARAM_RSP */
         }
     } else if (op == 0x03u) {                   /* LL_ENC_REQ               */
         /* CtrData Rand[8] EDIV[2] SKDm[8] IVm[4] at buf[4..25], posted for
@@ -993,6 +1059,9 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     fll_phy_answer = 0u;
     fll_phy_pref = 0u;                           /* the default until asked   */
     fll_phy_seen = sh->phy_req_seq;              /* from this link on         */
+    fll_cu_out = 0u;
+    fll_cu_owed = 0u;
+    fll_cu_seen = sh->cu_req_seq;
     fll_len_out = 0u;
     fll_len_want = 0u;
     fll_len_seen = sh->len_req_seq;
@@ -1038,8 +1107,11 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
             to = (uint32_t)fll_cu_timeout * 10000u * T10_PER_US;
             sh->conn_interval = fll_cu_interval;
             sh->conn_timeout  = fll_cu_timeout;
+            sh->conn_latency  = fll_cu_latency;
             fll_cu_pending = 0u;
+            fll_cu_out = 0u;
             sh->conn_cu = sh->conn_cu + 1u;
+            fll_cu_done(sh, 0u);
         }
         if (fll_phy_pending &&
             (uint16_t)(cec - fll_phy_instant) < 0x8000u) {
@@ -1175,9 +1247,41 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
          * under way.  The instant is six events after the one the
          * indication goes out in. */
         if (fll_tx_len == 0u && fll_cw_n == 0u && !fll_phy_pending &&
+            !fll_cu_pending &&
             ((fll_enc == FLL_ENC_OFF && !fll_enc_refresh) ||
              fll_enc == FLL_ENC_ON)) {
-            if (fll_central && fll_phy_answer) {
+            if (fll_central && fll_cu_owed) {
+                fll_cu_owed = 0u;
+                fll_cu_indicate(fll_cuo_interval, fll_cuo_latency,
+                                fll_cuo_timeout, cec);
+            } else if (!fll_cu_out && sh->cu_req_seq != fll_cu_seen) {
+                fll_cu_seen = sh->cu_req_seq;
+                if (fll_central) {
+                    fll_cu_out = 1u;
+                    fll_cu_indicate((uint16_t)sh->cu_want_interval,
+                                    (uint16_t)sh->cu_want_latency,
+                                    (uint16_t)sh->cu_want_timeout, cec);
+                } else {
+                    uint8_t req[23];
+                    uint8_t k;
+                    req[0] = (uint8_t)sh->cu_want_interval;
+                    req[1] = (uint8_t)(sh->cu_want_interval >> 8);
+                    req[2] = req[0];
+                    req[3] = req[1];
+                    req[4] = (uint8_t)sh->cu_want_latency;
+                    req[5] = (uint8_t)(sh->cu_want_latency >> 8);
+                    req[6] = (uint8_t)sh->cu_want_timeout;
+                    req[7] = (uint8_t)(sh->cu_want_timeout >> 8);
+                    req[8] = 0u;                 /* PreferredPeriodicity      */
+                    req[9] = (uint8_t)cec;       /* ReferenceConnEventCount   */
+                    req[10] = (uint8_t)(cec >> 8);
+                    for (k = 11u; k < 23u; k++) {
+                        req[k] = 0xFFu;          /* Offset0..5: none          */
+                    }
+                    fll_cu_out = 2u;
+                    fll_queue_ctrl(0x0Fu, req, 23u);
+                }
+            } else if (fll_central && fll_phy_answer) {
                 uint8_t ind[4] = { 0u, 0u, 0u, 0u };
                 uint32_t both = fll_phy_peer & fll_phy_mine(sh);
                 /* Nothing in common keeps the PHY as it is. */

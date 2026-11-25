@@ -873,6 +873,26 @@ void tiku_flpr_arch_phy_request(uint32_t want)
     sh->phy_req_seq = sh->phy_req_seq + 1u;      /* the FLPR takes it next    */
 }
 
+void tiku_flpr_arch_cu_request(uint32_t interval, uint32_t latency,
+                               uint32_t timeout)
+{
+    tiku_flpr_shared_t *sh = TIKU_FLPR_SHARED;
+
+    sh->cu_want_interval = interval;
+    sh->cu_want_latency  = latency;
+    sh->cu_want_timeout  = timeout;
+    __asm__ volatile ("dmb 0xF" ::: "memory");
+    sh->cu_req_seq = sh->cu_req_seq + 1u;        /* the FLPR takes it next    */
+}
+
+uint32_t tiku_flpr_arch_cu_done(uint32_t *status)
+{
+    if (status != (uint32_t *)0) {
+        *status = TIKU_FLPR_SHARED->cu_status;
+    }
+    return TIKU_FLPR_SHARED->cu_done_seq;
+}
+
 void tiku_flpr_arch_len_request(uint32_t octets)
 {
     tiku_flpr_shared_t *sh = TIKU_FLPR_SHARED;

@@ -281,6 +281,18 @@ typedef struct {
     volatile uint32_t len_done_seq;     /* FLPR: len_tx or len_rx changed     */
     volatile uint32_t len_tx;           /* FLPR: octets a PDU sends           */
     volatile uint32_t len_rx;           /* FLPR: octets a PDU receives        */
+    /* Connection update.  The M33 puts the interval it wants (1.25 ms),
+     * the latency and the supervision timeout (10 ms) in cu_want_* and
+     * bumps cu_req_seq; the FLPR sends LL_CONNECTION_UPDATE_IND as central
+     * and LL_CONNECTION_PARAM_REQ as peripheral.  It bumps cu_done_seq,
+     * with cu_status 0 or an HCI error code, when an update applies (this
+     * side's or the peer's) and when the peer refuses a request. */
+    volatile uint32_t cu_req_seq;       /* M33: an update wanted              */
+    volatile uint32_t cu_want_interval; /* M33: 1.25 ms units                 */
+    volatile uint32_t cu_want_latency;  /* M33: events the peripheral skips   */
+    volatile uint32_t cu_want_timeout;  /* M33: 10 ms units                   */
+    volatile uint32_t cu_done_seq;      /* FLPR: an update applied or refused */
+    volatile uint32_t cu_status;        /* FLPR: 0, or an HCI error code      */
 } tiku_flpr_shared_t;
 
 _Static_assert(sizeof(tiku_flpr_shared_t) <= 0x400u,

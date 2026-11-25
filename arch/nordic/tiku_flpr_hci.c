@@ -104,6 +104,7 @@ static uint8_t  s_initiating;           /* LE Create Connection in flight */
 static uint32_t s_enc_seen;             /* the FLPR's encryption starts   */
 static uint32_t s_phy_seen;             /* ... and its PHY updates        */
 static uint32_t s_len_seen;             /* ... and its data length changes */
+static uint32_t s_cu_seen;              /* ... and its connection updates  */
 static uint8_t  s_len_default[4] = { 27u, 0u, 0x48u, 0x01u };  /* 27, 328 us */
 static uint8_t  s_scanning;             /* the observer runs for the host */
 static uint8_t  s_scan_sent;            /* its table's entries reported   */
@@ -258,6 +259,28 @@ phy_event(uint8_t status)
     e[7] = phy;
     e[8] = phy;
     rxq_push(e, 9u);
+}
+
+/** @brief LE Connection Update Complete with @p status and the link's
+ *         interval, latency and supervision timeout. */
+static void
+cu_event(uint8_t status)
+{
+    tiku_flpr_conn_params_t cp;
+    uint8_t e[13];
+
+    tiku_flpr_arch_conn_params(&cp);
+    e[0] = HCI_EVT;
+    e[1] = EVT_LE_META;
+    e[2] = 10u;
+    e[3] = 0x03u;                           /* LE Connection Update Complete */
+    e[4] = status;
+    e[5] = (uint8_t)(HCI_HANDLE & 0xFFu);
+    e[6] = (uint8_t)(HCI_HANDLE >> 8);
+    e[7] = (uint8_t)cp.interval;  e[8] = (uint8_t)(cp.interval >> 8);
+    e[9] = (uint8_t)cp.latency;   e[10] = (uint8_t)(cp.latency >> 8);
+    e[11] = (uint8_t)cp.timeout;  e[12] = (uint8_t)(cp.timeout >> 8);
+    rxq_push(e, 13u);
 }
 
 /** @brief LE Data Length Change with @p tx and @p rx octets a PDU and
@@ -636,6 +659,7 @@ link_follow(void)
         s_enc_seen = 0u;
         s_phy_seen = tiku_flpr_arch_phy_done((uint32_t *)0);
         s_len_seen = tiku_flpr_arch_len_done((uint32_t *)0, (uint32_t *)0);
+        s_cu_seen = tiku_flpr_arch_cu_done((uint32_t *)0);
         if (s_initiating) {
             s_initiating = 0u;
         } else {
@@ -654,6 +678,11 @@ link_follow(void)
         if (seq != s_len_seen) {
             s_len_seen = seq;
             len_event(tx, rx);
+        }
+        seq = tiku_flpr_arch_cu_done(&status);
+        if (seq != s_cu_seen) {
+            s_cu_seen = seq;
+            cu_event((uint8_t)status);
         }
     } else if (st == 2u || st == 3u) {
         if (s_linked) {
@@ -904,6 +933,28 @@ command(uint16_t op, const uint8_t *p, uint8_t n)
         r[1] = 0x21u;                         /* LE Encryption, data length */
         r[2] = 0x09u;                         /* LE 2M PHY, LE Coded PHY */
         cmd_complete(op, r, 9u);
+        return;
+    case 0x2013u:                             /* LE Connection Update */
+        /* Handle, interval min and max (1.25 ms), latency, supervision
+         * timeout (10 ms), CE lengths: the least interval asked for. */
+        if (n < 14u) {
+            cmd_status(op, ST_INVALID_PARAMS);
+        } else if (!s_linked ||
+                   (uint16_t)(p[0] | ((uint16_t)(p[1] & 0x0Fu) << 8)) !=
+                       HCI_HANDLE) {
+            cmd_status(op, ST_UNKNOWN_CONN);
+        } else {
+            uint16_t lo = (uint16_t)(p[2] | ((uint16_t)p[3] << 8));
+            uint16_t hi = (uint16_t)(p[4] | ((uint16_t)p[5] << 8));
+            uint16_t lat = (uint16_t)(p[6] | ((uint16_t)p[7] << 8));
+            uint16_t to = (uint16_t)(p[8] | ((uint16_t)p[9] << 8));
+            if (lo < 6u || hi > 3200u || lo > hi || to < 10u || to > 3200u) {
+                cmd_status(op, ST_INVALID_PARAMS);
+            } else {
+                cmd_status(op, ST_OK);
+                tiku_flpr_arch_cu_request(lo, lat, to);
+            }
+        }
         return;
     case 0x2022u:                             /* LE Set Data Length */
         memset(r, 0, 3u);

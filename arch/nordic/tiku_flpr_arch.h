@@ -324,6 +324,16 @@ uint32_t tiku_flpr_arch_conn_phy(uint32_t *at_evt);
  *         counts its end. */
 void tiku_flpr_arch_phy_request(uint32_t want);
 
+/** @brief Ask the FLPR to update the link to @p interval (1.25 ms units),
+ *         @p latency (events) and @p timeout (10 ms units): as central it
+ *         indicates them, as peripheral it asks the central. */
+void tiku_flpr_arch_cu_request(uint32_t interval, uint32_t latency,
+                               uint32_t timeout);
+
+/** @brief Connection updates applied or refused so far; @p status (may be
+ *         NULL) gets the last one's, 0 or an HCI error code. */
+uint32_t tiku_flpr_arch_cu_done(uint32_t *status);
+
 /** @brief Ask the FLPR to send LL_LENGTH_REQ offering to send @p octets
  *         (27 to TIKU_FLPR_DLE_MAX_OCTETS) a PDU. */
 void tiku_flpr_arch_len_request(uint32_t octets);

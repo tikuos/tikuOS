@@ -123,6 +123,7 @@ static void bt_help(void)
 #endif
     SHELL_PRINTF("bt phy 1m|2m|coded|coded-s2|coded-s8 [N]\n");
     SHELL_PRINTF("bt dle <27..251> [N]    Ask for link N's packet length\n");
+    SHELL_PRINTF("bt interval <ms> [N]    Ask for link N's interval, 7.5..4000\n");
     SHELL_PRINTF("bt bench [KB]           Time KB of notifications to the "
                  "subscriber\n");
 #endif
@@ -1334,6 +1335,49 @@ static void bt_phy_cmd(uint8_t argc, const char *argv[])
 }
 
 /**
+ * @brief Handle "bt interval <ms> [N]": ask for link N's connection
+ *        interval, in milliseconds with up to two decimals ("7.5").
+ */
+static void bt_interval_cmd(uint8_t argc, const char *argv[])
+{
+    const char *s = (argc >= 3U) ? argv[2] : "";
+    uint32_t    us = 0UL, scale = 1000UL;
+    uint16_t    h;
+    int         rc, frac = -1;
+
+    for (; *s != '\0'; ++s) {
+        if (*s == '.' && frac < 0) {
+            frac = 0;
+        } else if (*s >= '0' && *s <= '9' && us <= 4000000UL &&
+                   (frac < 0 || frac < 2)) {
+            if (frac < 0) {
+                us = us * 10UL + (uint32_t)(*s - '0') * 1000UL;
+            } else {
+                scale /= 10UL;
+                us += (uint32_t)(*s - '0') * scale;
+                frac++;
+            }
+        } else {
+            us = 0UL;
+            break;
+        }
+    }
+    if (argc < 3U || argc > 4U || us < 7500UL || us > 4000000UL) {
+        SHELL_PRINTF("usage: bt interval <7.5..4000 ms> [N]\n");
+        return;
+    }
+    h = pick_conn_handle(argc, argv, 3U);
+    if (h == 0xFFFFU) {
+        SHELL_PRINTF("bt: no connection\n");
+        return;
+    }
+    rc = tiku_bt_set_interval(h, (uint16_t)((us + 625UL) / 1250UL));
+    SHELL_PRINTF(rc == 0 ? "bt: interval %s ms asked for on handle 0x%04x\n"
+                         : "bt: interval %s ms on handle 0x%04x FAILED rc=%d\n",
+                 argv[2], h, rc);
+}
+
+/**
  * @brief Handle "bt dle <27..251> [N]": ask for link N's link-layer packet
  *        length.
  */
@@ -1648,6 +1692,10 @@ void tiku_shell_cmd_bt(uint8_t argc, const char *argv[])
 #if (TIKU_BT_LINK_UPDATE + 0)
     if (str_eq(argv[1], "phy")) {
         bt_phy_cmd(argc, argv);
+        return;
+    }
+    if (str_eq(argv[1], "interval")) {
+        bt_interval_cmd(argc, argv);
         return;
     }
     if (str_eq(argv[1], "dle")) {

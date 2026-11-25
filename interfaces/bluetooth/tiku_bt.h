@@ -596,6 +596,15 @@ int tiku_bt_set_coded_phy(uint16_t handle, uint8_t coding);
 int tiku_bt_set_data_length(uint16_t handle, uint16_t octets);
 
 /**
+ * @brief Ask for a link's connection interval to become @p units of
+ *        1.25 ms (6..3200, 7.5 ms to 4 s), its latency kept and its
+ *        supervision timeout raised where the interval needs it; the LE
+ *        Connection Update Complete event updates tiku_bt_connections().
+ * @return As tiku_bt_set_phy()
+ */
+int tiku_bt_set_interval(uint16_t handle, uint16_t units);
+
+/**
  * @brief Send @p bytes of notifications of the built-in uptime
  *        characteristic, each as long as one link-layer packet carries, to
  *        the client subscribed to it, as fast as the link takes them.
