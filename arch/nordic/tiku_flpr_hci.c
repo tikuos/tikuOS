@@ -26,8 +26,8 @@
 #include <string.h>
 
 /* The controller has no public address (the host sets a random static
- * one); the FLPR holds one link in either role and runs LL encryption's
- * start with the host's LTK.  Beacons stay with the broadcast facade on
+ * one, or a resolvable private one with privacy on); the FLPR holds one
+ * link in either role and runs LL encryption's start with the host's LTK.  Beacons stay with the broadcast facade on
  * the M33's radio, and a scan is that facade's observer. */
 
 /* HCI packet types, and the events this controller raises. */
@@ -722,8 +722,10 @@ command(uint16_t op, const uint8_t *p, uint8_t n)
         cmd_complete(op, r, 7u);              /* random static address */
         return;
     case 0x2005u:                             /* LE Set Random Address */
-        if (n < 6u || (p[5] & 0xC0u) != 0xC0u) {
-            cmd_done(op, ST_INVALID_PARAMS);  /* static addresses only */
+        /* A static address (top bits 11) or a resolvable private one (01),
+         * which the host makes and renews itself. */
+        if (n < 6u || ((p[5] & 0xC0u) != 0xC0u && (p[5] & 0xC0u) != 0x40u)) {
+            cmd_done(op, ST_INVALID_PARAMS);
         } else if (s_adv_on) {
             cmd_done(op, ST_DISALLOWED);
         } else {
