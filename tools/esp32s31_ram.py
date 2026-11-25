@@ -372,8 +372,8 @@ def check_media_result(data, phase=0):
 
 
 def check_camera_result(data, elapsed=None):
-    """Require the SC101IOT, whole frames beside scanout, refusals, reopen
-    and the frame's JPEG file."""
+    """Require the SC101IOT, whole frames and a picture stream beside
+    scanout, refusals, reopen and the frame's JPEG file."""
     import re
     del elapsed
     if b"FAIL" in data or any(data.count(marker) != 1 for marker in
@@ -382,10 +382,14 @@ def check_camera_result(data, elapsed=None):
     fixed = {b"cam_open": 0, b"cam_model": 0xda4a, b"cam_refusals": 9, b"cam_whole": 6,
              b"cam_frames": 6, b"cam_dma_errors": 0, b"cam_lcd_underruns": 0,
              b"cam_lcd_dma_errors": 0, b"cam_reopen": 1, b"cam_alone": 1, b"camera_errors": 0,
-             b"jpeg_room": 1, b"jpeg_refusals": 5, b"jpeg_rc": 0, b"jpeg_again": 1}
+             b"jpeg_room": 1, b"jpeg_refusals": 5, b"jpeg_rc": 0, b"jpeg_again": 1,
+             b"stream_rc": 0, b"stream_notify_ok": 1, b"stream_halves_ok": 1,
+             b"stream_dma_errors": 0, b"stream_lcd_underruns": 0, b"stream_switch": 1,
+             b"stream_refusals": 3}
     limits = [(name, value, value) for name, value in fixed.items()]
     limits += [(b"cam_frame_us_max", 100000, 400000), (b"cam_y_max", 16, 255),
-               (b"jpeg_len", 10000, 524288), (b"jpeg_us", 1, 2000000)]
+               (b"jpeg_len", 10000, 524288), (b"jpeg_us", 1, 2000000),
+               (b"stream_pictures", 25, 40), (b"stream_diff", 0, 16)]
     for name, low, high in limits:
         values = re.findall(rb"(?:^|\r\n)" + name + rb"=0x([0-9a-f]{8})\r\n", data)
         if len(values) != 1 or not low <= int(values[0], 16) <= high:

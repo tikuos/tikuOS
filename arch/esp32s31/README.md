@@ -377,25 +377,35 @@ for bootloader qualification.
 
 `tiku_camera_arch.c` drives the SmartSens SC101IOT on the J4 socket. Its
 supplies come from regulators enabled by pull-ups, RESET is pulled high and
-PWDN low, so the module runs whenever the board does. Open claims GPIO46-57,
-puts the sensor clock on GPIO55 (the 40 MHz crystal divided by 4 or 5), reads
-the sensor ID `0xDA4A` at I2C address 0x68 on the bus shared with the touch
-controller, writes Espressif's 1280x720 UYVY register table and starts the
-sensor streaming. Espressif's table gives a 19 MHz pixel clock at a 10 MHz
-sensor clock, under half of the 40 MHz LCDCAM core clock; six back-to-back
-captures take 1.15 s on the board.
+PWDN low, so the module runs whenever the board does. Open claims GPIO46-57
+and CPU0 interrupt line 30, puts the sensor clock on GPIO55 (the 40 MHz
+crystal divided by 2 to 5), reads the sensor ID `0xDA4A` at I2C address 0x68
+on the bus shared with the touch controller, writes Espressif's 1280x720
+UYVY register table and starts the sensor streaming. At a 20 MHz sensor
+clock the table gives a 38 MHz pixel clock and 10.4 frames a second, with
+the LCD_CAM core on the 40 MHz crystal; a 3-minute stream on the board
+dropped no frame and kept the lines in place.
 
-A capture receives one 1,843,200-byte frame through AXI RX0 into a 64-byte
-aligned PSRAM buffer the caller owns; its 458 descriptors sit in a PSRAM tier
-arena. VSYNC ends the frame. A frame that ends short or overruns the buffer
-is dropped and the receiver re-armed; a whole frame leaves the buffer's cache
-lines invalidated. Calls are refused outside kernel context.
+The receiver runs from AXI RX0's end-of-frame interrupt (source 48, the
+matrix map register at 0xc0). A capture receives one 1,843,200-byte frame
+into a 64-byte aligned PSRAM buffer the caller owns through 458 descriptors.
+A stream receives pictures, every other line of a frame (1280x360, 921,600
+bytes), into the buffer's two halves in turn through a ring of one
+descriptor a line; the odd lines land in a spare PSRAM line, since the AXI
+DMA does not reach internal SRAM. The interrupt records each whole picture
+and calls the stream's notifier; a picture or frame that started inside a
+frame is dropped and the receiver re-armed at that frame's end. A capture
+asked while streaming starts at the next frame. The descriptors and the
+spare line sit in a PSRAM tier arena. Calls are refused outside kernel
+context.
 
-Run `camera-test` with `--camera-test --seconds 30`. It checks refusals, six
-whole frames while the display scans out with no display underrun, a
-luma range of at least 16, close and reopen, and a capture after the display
-closes under the open camera. The runner writes a 160x90 luma thumbnail
-beside the log as `<log>.1.pgm`.
+Run `camera-test` with `--camera-test --seconds 60`. It checks refusals, six
+whole frames while the display scans out with no display underrun, a luma
+range of at least 16, a 3-second stream (pictures, halves in turn, the
+notifier, no underrun), a streamed picture against the next whole frame's
+even lines, a capture taken while streaming, close and reopen, and a
+capture after the display closes under the open camera. The runner writes a
+160x90 luma thumbnail beside the log as `<log>.1.pgm`.
 
 For a timed run, build `display-test` with `S31_DISPLAY_SOAK_SECONDS=1800`
 and run the RAM tool with `--display-test --display-soak-seconds 1800

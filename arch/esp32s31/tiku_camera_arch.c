@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_camera_arch.c - SC101IOT set up over the shared I2C bus, its DVP
- * frames received by LCD_CAM through AXI DMA RX channel 0 into PSRAM.
- * Register fields follow ESP-IDF 4d59230 S31 LCDCAM, AXI DMA and GPIO
- * definitions; the sensor table is Espressif's esp_cam_sensor SC101IOT
- * 1280x720 UYVY table (Apache-2.0).
+ * tiku_camera_arch.c - SC101IOT set up over the shared I2C bus; whole DVP
+ * frames or half-height pictures into PSRAM through AXI DMA RX 0, kept in
+ * step by its end-of-frame interrupt.  Registers follow ESP-IDF 4d59230;
+ * the sensor table is Espressif's esp_cam_sensor 1280x720 UYVY table
+ * (Apache-2.0).
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,7 +24,12 @@
 #include "tiku_psram_arch.h"
 #include "tiku_runtime_arch.h"
 
-#define REG(a) (*(volatile uint32_t *)(uintptr_t)(a))
+/* Register access; a host model defines its own before including this
+ * file. */
+#ifndef TIKU_S31_CAM_REG
+#define TIKU_S31_CAM_REG(a) (*(volatile uint32_t *)(uintptr_t)(a))
+#endif
+#define REG(a) TIKU_S31_CAM_REG(a)
 #define LCD 0x20396000u
 #define CAM_CTRL (LCD + 0x04u)      /* vs_eof_en 8, update 4 */
 #define CAM_CTRL1 (LCD + 0x08u)     /* start 29, reset 30, FIFO reset 31 */
@@ -32,13 +37,14 @@
 #define CAM_UPDATE (1u << 4)
 #define CAM_START (1u << 29)
 #define DMA 0x20348000u
-#define IN_RAW (DMA + 0x00u)
+#define IN_ST (DMA + 0x04u)
 #define IN_ENA (DMA + 0x08u)
 #define IN_CLR (DMA + 0x0cu)
 #define IN_CONF0 (DMA + 0x10u)
 #define IN_CONF1 (DMA + 0x14u)
 #define IN_LINK1 (DMA + 0x20u)      /* stop 1, start 2 */
 #define IN_LINK2 (DMA + 0x24u)
+#define IN_EOF_AT (DMA + 0x2cu)     /* the descriptor that took the last EOF */
 #define IN_PERI (DMA + 0x44u)
 #define IN_RESET_AVAIL (DMA + 0x28cu)
 #define RAW_EOF (1u << 1)
@@ -58,6 +64,14 @@
 #define COUNT ((TIKU_S31_CAM_FRAME_BYTES + CHUNK - 1u) / CHUNK)
 #define OWNER (1u << 31)
 #define SUC_EOF (1u << 30)
+#define LINE_BYTES (TIKU_S31_CAM_W * 2u)
+/* A stream descriptor a line: even lines into a half, odd lines into the
+ * spare line; two halves, the second linked back to the first. */
+#define STREAM_COUNT (2u * TIKU_S31_CAM_H)
+#define IRQ_LINE 30u
+#define IRQ_SOURCE 48u              /* AXI DMA RX 0: matrix map register 0xc0 */
+#define IRQ_PRIORITY 1u
+#define IRQ_EVENTS (RAW_EOF | RAW_ERRORS | RAW_EMPTY)
 /* SC101IOT: 8-bit registers in 256-byte pages, the page in register 0xf0. */
 #define PAGE 0xf0u
 #define PINS 12u
@@ -67,8 +81,11 @@
 /** @brief AXI DMA descriptor: size 0-11, length 12-23, EOF 30, owner 31. */
 typedef struct { uint32_t control, buffer, next, reserved; } descriptor_t;
 _Static_assert(sizeof(descriptor_t) == 16, "AXI descriptor size");
-/* The descriptors, rounded up to whole cache lines. */
-#define RING_BYTES ((COUNT * sizeof(descriptor_t) + 63u) & ~63u)
+/* The frame's descriptors, the stream's and the spare line, each on whole
+ * cache lines; the AXI DMA reaches PSRAM, not internal SRAM. */
+#define FRAME_DESC_BYTES ((COUNT * sizeof(descriptor_t) + 63u) & ~63u)
+#define STREAM_DESC_BYTES ((STREAM_COUNT * sizeof(descriptor_t) + 63u) & ~63u)
+#define RING_BYTES (FRAME_DESC_BYTES + STREAM_DESC_BYTES + LINE_BYTES)
 
 /* D0-D7, PCLK, VSYNC and HREF in, XCLK out last. */
 static const uint8_t pins[PINS] = {46,47,48,49,50,51,52,53,54,56,57,55};
@@ -108,12 +125,23 @@ static const uint8_t sensor_table[][2] = {
     {0x0e, 0x02}, {0x0f, 0xee}, {0xf0, 0x36}, {0xea, 0x09}, {0xeb, 0xf5}, {0xec, 0x11},
     {0xed, 0x27}, {0xe9, 0x20}, {0xf0, 0x01}, {0x79, 0x02}, {0xf0, 0x31}, {0x00, 0x00},
 };
+/* What the receiver does: IDLE; STREAMING pictures; SWITCHING from the
+ * stream to a capture at the next frame's end; CAPTURING one frame; and
+ * CAPTURED or FAILED until the poll reports it.  The interrupt moves
+ * STREAMING, SWITCHING and CAPTURING on, and stops a stream after a DMA
+ * error. */
+enum { IDLE, STREAMING, SWITCHING, CAPTURING, CAPTURED, FAILED };
 static uint32_t saved[PINS][4], saved_input[INPUTS];
-static unsigned claimed, held, opened, armed;
+static unsigned claimed, held, opened, irq;
+static volatile unsigned mode;
+/* The newest whole picture: its sequence number times two plus its half;
+ * 0 before the first. */
+static volatile uint32_t newest;
+static void (*volatile notify)(void);
 static tiku_arena_t ring;
 static void *frame_buffer;
 static uint64_t began;
-static tiku_s31_camera_stats_t counters;
+static volatile tiku_s31_camera_stats_t counters;
 static const char owner[] = "cam";
 
 static int context(void) { return !tiku_s31_in_trap && tiku_thread_in_kernel(); }
@@ -146,9 +174,15 @@ static void halt(void)
     REG(IN_LINK1) = 1u << 1;
 }
 
-/** @brief Reset the RX channel and the receiver, and start one frame into
- *  frame_buffer. A whole frame ends with its EOF on the last descriptor. */
-static int arm(void)
+static volatile descriptor_t *frame_chain(void) { return (volatile descriptor_t *)ring.buf; }
+static volatile descriptor_t *stream_chain(void)
+{
+    return (volatile descriptor_t *)((uint8_t *)ring.buf + FRAME_DESC_BYTES);
+}
+
+/** @brief Reset the RX channel and the receiver and start receiving into
+ *  the chain at @p first; interrupt or kernel context. */
+static int restart(volatile descriptor_t *first)
 {
     halt();
     for (unsigned n = 0; !(REG(IN_RESET_AVAIL) & 1u); n++)
@@ -156,27 +190,100 @@ static int arm(void)
     REG(IN_CONF0) |= 1u;
     REG(IN_CONF0) &= ~1u;
     REG(CAM_CTRL1) |= (1u << 30) | (1u << 31);
-    volatile descriptor_t *d = (volatile descriptor_t *)ring.buf;
-    for (unsigned i = 0, offset = 0; i < COUNT; i++) {
-        unsigned n = TIKU_S31_CAM_FRAME_BYTES - offset;
-        if (n > CHUNK) n = CHUNK;
-        d[i] = (descriptor_t){n | OWNER, (uint32_t)(uintptr_t)frame_buffer + offset,
-                              i + 1u < COUNT ? (uint32_t)(uintptr_t)&d[i + 1] : 0u, 0};
-        offset += n;
-    }
-    if (tiku_s31_psram_sync(ring.buf, RING_BYTES, 1)) return TIKU_S31_CAM_ERR_FAULT;
     REG(IN_CLR) = 0x7ffu;
-    REG(IN_LINK2) = (uint32_t)(uintptr_t)ring.buf;
+    REG(IN_LINK2) = (uint32_t)(uintptr_t)first;
     REG(IN_LINK1) = 1u << 2;
     REG(CAM_CTRL) |= CAM_UPDATE;
     REG(CAM_CTRL1) |= CAM_START;
     return 0;
 }
 
+/** @brief Lay out the frame chain over @p buffer: CHUNK-byte descriptors,
+ *  the last ending the chain, so a whole frame ends with its EOF on it. */
+static void build_frame(uint8_t *buffer)
+{
+    volatile descriptor_t *d = frame_chain();
+    for (unsigned i = 0, offset = 0; i < COUNT; i++) {
+        unsigned n = TIKU_S31_CAM_FRAME_BYTES - offset;
+        if (n > CHUNK) n = CHUNK;
+        d[i] = (descriptor_t){n | OWNER, (uint32_t)(uintptr_t)buffer + offset,
+                              i + 1u < COUNT ? (uint32_t)(uintptr_t)&d[i + 1] : 0u, 0};
+        offset += n;
+    }
+}
+
+/** @brief Lay out the stream ring over @p buffer: line 2k of a frame into
+ *  line k of the half, the odd lines into the spare line, the second half
+ *  linked back to the first; a whole picture ends with its EOF on its
+ *  half's last descriptor. */
+static void build_stream(uint8_t *buffer)
+{
+    volatile descriptor_t *d = stream_chain();
+    uint32_t spare = (uint32_t)(uintptr_t)ring.buf + FRAME_DESC_BYTES + STREAM_DESC_BYTES;
+    for (unsigned i = 0; i < STREAM_COUNT; i++) {
+        unsigned half = i / TIKU_S31_CAM_H, line = i % TIKU_S31_CAM_H;
+        uint32_t at = (line & 1u) ? spare :
+            (uint32_t)(uintptr_t)buffer + half * TIKU_S31_CAM_PREVIEW_BYTES + (line / 2u) * LINE_BYTES;
+        d[i] = (descriptor_t){LINE_BYTES | OWNER, at,
+                              (uint32_t)(uintptr_t)&d[(i + 1u) % STREAM_COUNT], 0};
+    }
+}
+
+/** @brief The end-of-frame interrupt: record a whole picture or frame, or
+ *  re-arm at this frame's end when the last one started inside a frame;
+ *  move a pending capture onto the frame chain. */
+static void received(void)
+{
+    uint32_t events = REG(IN_ST);
+    uintptr_t at = REG(IN_EOF_AT);
+    volatile descriptor_t *s = stream_chain(), *f = frame_chain();
+    REG(IN_CLR) = events;
+    if (events & RAW_ERRORS) {
+        /* A stream stops; a capture fails at its poll. */
+        counters.dma_errors++;
+        halt();
+        mode = mode == STREAMING ? IDLE : FAILED;
+    } else if (events & RAW_EMPTY) {
+        counters.long_frames++;
+        if (mode == CAPTURING && restart(f)) mode = FAILED;
+    } else if (!(events & RAW_EOF)) {
+        return;
+    } else if (mode == SWITCHING) {
+        mode = restart(f) ? FAILED : CAPTURING;
+        return;
+    } else if (mode == STREAMING) {
+        if (at == (uintptr_t)&s[TIKU_S31_CAM_H - 1u] || at == (uintptr_t)&s[STREAM_COUNT - 1u]) {
+            newest = ((newest >> 1) + 1u) << 1 | (at == (uintptr_t)&s[STREAM_COUNT - 1u]);
+            counters.frames++;
+        } else {
+            counters.short_frames++;
+            if (restart(s)) mode = FAILED;
+            return;
+        }
+    } else if (mode == CAPTURING) {
+        if (at != (uintptr_t)&f[COUNT - 1u]) {
+            counters.short_frames++;
+            if (restart(f)) mode = FAILED;
+            return;
+        }
+        halt();
+        counters.frames++;
+        mode = CAPTURED;
+    } else {
+        return;
+    }
+    if (notify) notify();
+}
+
 /** @brief Release what open took, in reverse order; also undoes a partial
  *  open. */
 static void teardown(void)
 {
+    if (irq) {
+        (void)tiku_s31_irq_enable(IRQ_LINE, 0);
+        (void)tiku_s31_irq_release(IRQ_LINE, received);
+        irq = 0;
+    }
     if (held) {
         halt();
         REG(IN_PERI) = 63u;
@@ -198,7 +305,10 @@ static void teardown(void)
     if (ring.buf && tiku_arena_destroy(&ring) != TIKU_MEM_OK)
         tiku_s31_fatal("camera storage release");
     ring.buf = NULL;
-    opened = armed = 0;
+    opened = 0;
+    mode = IDLE;
+    newest = 0;
+    notify = NULL;
 }
 
 int tiku_s31_camera_open(unsigned xclk_div)
@@ -207,8 +317,11 @@ int tiku_s31_camera_open(unsigned xclk_div)
     if (xclk_div < TIKU_S31_CAM_XCLK_DIV_MIN || xclk_div > TIKU_S31_CAM_XCLK_DIV_MAX)
         return TIKU_S31_CAM_ERR_PARAM;
     counters = (tiku_s31_camera_stats_t){0};
+    if (tiku_s31_irq_claim(IRQ_LINE, IRQ_SOURCE, IRQ_PRIORITY, received)) return TIKU_S31_CAM_ERR_STATE;
+    irq = 1;
     if (tiku_tier_arena_create_span(&ring, TIKU_MEM_PSRAM, 0, RING_BYTES, 64, 0x43) != TIKU_MEM_OK) {
         ring.buf = NULL;
+        teardown();
         return TIKU_S31_CAM_ERR_STATE;
     }
     for (unsigned i = 0; i < PINS; i++) {
@@ -252,7 +365,7 @@ int tiku_s31_camera_open(unsigned xclk_div)
     REG(IN_PERI) = 0;
     REG(IN_CONF0) = 1u;
     REG(IN_CONF0) = (3u << 4) | (1u << 9);
-    REG(IN_CONF1) = 1u << 12;
+    REG(IN_CONF1) = 0u;            /* no owner check: the stream ring wraps */
     REG(IN_CLR) = 0x7ffu;
     tiku_clock_arch_delay(20000);
     uint8_t high = 0, low = 0;
@@ -275,72 +388,109 @@ int tiku_s31_camera_open(unsigned xclk_div)
     return 0;
 }
 
+/** @brief Whether @p buffer of @p bytes is 64-byte aligned mapped PSRAM
+ *  that holds a whole frame. */
+static int frame_fits(const void *buffer, uint32_t bytes)
+{
+    uintptr_t a = (uintptr_t)buffer;
+    return !(a & 63u) && a >= PSRAM && bytes >= TIKU_S31_CAM_FRAME_BYTES &&
+           a - PSRAM + TIKU_S31_CAM_FRAME_BYTES <= tiku_s31_psram_size();
+}
+
+/** @brief Whether a capture is armed or waits to be polled. */
+static int capturing(void)
+{
+    return mode == SWITCHING || mode == CAPTURING || mode == CAPTURED || mode == FAILED;
+}
+
+int tiku_s31_camera_stream(void *buffer, uint32_t bytes, void (*fn)(void))
+{
+    if (!context() || !opened || capturing()) return TIKU_S31_CAM_ERR_STATE;
+    (void)tiku_s31_irq_enable(IRQ_LINE, 0);
+    halt();
+    REG(IN_ENA) = 0;
+    mode = IDLE;
+    newest = 0;
+    notify = NULL;
+    if (!buffer) return 0;
+    if (!frame_fits(buffer, bytes)) return TIKU_S31_CAM_ERR_PARAM;
+    build_stream(buffer);
+    if (tiku_s31_psram_sync(ring.buf, RING_BYTES, 1) ||
+        tiku_s31_psram_sync(buffer, TIKU_S31_CAM_FRAME_BYTES, 1))
+        return TIKU_S31_CAM_ERR_FAULT;
+    notify = fn;
+    mode = STREAMING;
+    if (restart(stream_chain())) { halt(); mode = IDLE; return TIKU_S31_CAM_ERR_FAULT; }
+    REG(IN_ENA) = IRQ_EVENTS;
+    (void)tiku_s31_irq_enable(IRQ_LINE, 1);
+    return 0;
+}
+
+int tiku_s31_camera_latest(uint32_t *sequence)
+{
+    uint32_t n = newest;
+    if (sequence) *sequence = n >> 1;
+    return mode == STREAMING && n ? (int)(n & 1u) : -1;
+}
+
 int tiku_s31_camera_capture(void *frame, uint32_t bytes)
 {
-    uintptr_t a = (uintptr_t)frame;
-    if (!context() || !opened || armed) return TIKU_S31_CAM_ERR_STATE;
-    if ((a & 63u) || a < PSRAM || bytes < TIKU_S31_CAM_FRAME_BYTES ||
-        a - PSRAM + TIKU_S31_CAM_FRAME_BYTES > tiku_s31_psram_size())
-        return TIKU_S31_CAM_ERR_PARAM;
+    if (!context() || !opened || capturing()) return TIKU_S31_CAM_ERR_STATE;
+    if (!frame_fits(frame, bytes)) return TIKU_S31_CAM_ERR_PARAM;
+    (void)tiku_s31_irq_enable(IRQ_LINE, 0);
     frame_buffer = frame;
-    if (tiku_s31_psram_sync(frame, TIKU_S31_CAM_FRAME_BYTES, 1)) return TIKU_S31_CAM_ERR_FAULT;
-    int rc = arm();
-    if (rc) { halt(); return rc; }
+    build_frame(frame);
+    if (tiku_s31_psram_sync(ring.buf, FRAME_DESC_BYTES, 1) ||
+        tiku_s31_psram_sync(frame, TIKU_S31_CAM_FRAME_BYTES, 1)) {
+        if (mode == STREAMING) (void)tiku_s31_irq_enable(IRQ_LINE, 1);
+        return TIKU_S31_CAM_ERR_FAULT;
+    }
     began = tiku_s31_time();
-    armed = 1;
+    if (mode == STREAMING) {
+        mode = SWITCHING;
+    } else {
+        mode = CAPTURING;
+        if (restart(frame_chain())) { halt(); mode = IDLE; return TIKU_S31_CAM_ERR_FAULT; }
+    }
+    REG(IN_ENA) = IRQ_EVENTS;
+    (void)tiku_s31_irq_enable(IRQ_LINE, 1);
     return TIKU_S31_CAM_BUSY;
 }
 
 int tiku_s31_camera_poll(tiku_s31_camera_stats_t *stats)
 {
     int rc = TIKU_S31_CAM_BUSY;
-    if (!context() || !opened || !armed) {
+    if (!context() || !opened || !capturing()) {
         rc = TIKU_S31_CAM_ERR_STATE;
-        goto out;
+    } else if (mode == CAPTURED) {
+        (void)tiku_s31_irq_enable(IRQ_LINE, 0);
+        REG(IN_ENA) = 0;
+        mode = IDLE;
+        counters.frame_us = (uint32_t)((tiku_s31_time() - began) / 16u);
+        rc = tiku_s31_psram_invalidate(frame_buffer, TIKU_S31_CAM_FRAME_BYTES) ?
+             TIKU_S31_CAM_ERR_FAULT : 0;
+    } else if (mode == FAILED ||
+               tiku_s31_time() - began > (uint64_t)TIKU_S31_CAM_WAIT_US * 16u) {
+        (void)tiku_s31_irq_enable(IRQ_LINE, 0);
+        halt();
+        REG(IN_ENA) = 0;
+        rc = mode == FAILED ? TIKU_S31_CAM_ERR_FAULT : TIKU_S31_CAM_ERR_TIMEOUT;
+        mode = IDLE;
     }
-    uint32_t raw = REG(IN_RAW);
-    if (raw & RAW_ERRORS) {
-        counters.dma_errors++;
-        rc = TIKU_S31_CAM_ERR_FAULT;
-    } else if (raw & RAW_EOF) {
-        uint32_t received = 0;
-        volatile descriptor_t *d = (volatile descriptor_t *)ring.buf;
-        if (tiku_s31_psram_invalidate(ring.buf, RING_BYTES)) { rc = TIKU_S31_CAM_ERR_FAULT; goto stop; }
-        for (unsigned i = 0; i < COUNT; i++) {
-            received += (d[i].control >> 12) & 0xfffu;
-            if (d[i].control & SUC_EOF) break;
-        }
-        if (received == TIKU_S31_CAM_FRAME_BYTES) {
-            halt();
-            if (tiku_s31_psram_invalidate(frame_buffer, TIKU_S31_CAM_FRAME_BYTES)) {
-                rc = TIKU_S31_CAM_ERR_FAULT;
-                goto stop;
-            }
-            counters.frames++;
-            counters.frame_us = (uint32_t)((tiku_s31_time() - began) / 16u);
-            armed = 0;
-            rc = 0;
-            goto out;
-        }
-        counters.short_frames++;
-        if (arm()) rc = TIKU_S31_CAM_ERR_FAULT;
-    } else if (raw & RAW_EMPTY) {
-        counters.long_frames++;
-        if (arm()) rc = TIKU_S31_CAM_ERR_FAULT;
+    if (stats) {
+        (void)tiku_s31_irq_enable(IRQ_LINE, 0);
+        *stats = counters;
+        if (mode == STREAMING || capturing()) (void)tiku_s31_irq_enable(IRQ_LINE, 1);
     }
-    if (rc == TIKU_S31_CAM_BUSY && tiku_s31_time() - began > (uint64_t)TIKU_S31_CAM_WAIT_US * 16u)
-        rc = TIKU_S31_CAM_ERR_TIMEOUT;
-stop:
-    if (rc < 0) { halt(); armed = 0; }
-out:
-    if (stats) *stats = counters;
     return rc;
 }
 
 int tiku_s31_camera_close(void)
 {
     if (!context() || !opened) return TIKU_S31_CAM_ERR_STATE;
+    (void)tiku_s31_irq_enable(IRQ_LINE, 0);
     halt();
+    REG(IN_ENA) = 0;
     (void)sensor_bit(0x00, 0);
     teardown();
     return 0;
