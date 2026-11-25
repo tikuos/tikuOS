@@ -864,6 +864,28 @@ uint32_t tiku_flpr_arch_conn_phy(uint32_t *at_evt)
     return TIKU_FLPR_SHARED->conn_phy;
 }
 
+void tiku_flpr_arch_phy_request(uint32_t want)
+{
+    tiku_flpr_shared_t *sh = TIKU_FLPR_SHARED;
+
+    sh->phy_want = want & 0x07u;
+    __asm__ volatile ("dmb 0xF" ::: "memory");
+    sh->phy_req_seq = sh->phy_req_seq + 1u;      /* the FLPR takes it next    */
+}
+
+void tiku_flpr_arch_phy_allow(uint32_t mask)
+{
+    TIKU_FLPR_SHARED->phy_allow = mask & 0x07u;
+}
+
+uint32_t tiku_flpr_arch_phy_done(uint32_t *status)
+{
+    if (status != (uint32_t *)0) {
+        *status = TIKU_FLPR_SHARED->phy_status;
+    }
+    return TIKU_FLPR_SHARED->phy_done_seq;
+}
+
 /* PHY-switch telemetry: RADIO->MODE read back at the switch (4 = 2M) and the
  * ADDRESS and CRCOK events caught on the new PHY.  mode != 4 after a 2M
  * switch means the write did not take; mode == 4 with addr == 0 means the

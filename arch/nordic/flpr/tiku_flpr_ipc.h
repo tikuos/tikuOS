@@ -256,6 +256,18 @@ typedef struct {
      * another advertiser. */
     volatile uint32_t adv_crcbad;
     volatile uint32_t adv_connother;
+    /* PHY update on request.  The M33 puts the PHYs it wants in phy_want
+     * (bit 0 1M, 1 2M, 2 Coded: HCI's mask) and bumps phy_req_seq; the FLPR
+     * runs the procedure in its role.  It bumps phy_done_seq, with
+     * phy_status 0 or an HCI error code, when that procedure ends and when
+     * an update the peer started switches the PHY.  phy_allow is the set the
+     * FLPR takes on a link until the host asks on it (LE Set Default PHY;
+     * 0: all three); after that, the PHYs it asked for. */
+    volatile uint32_t phy_req_seq;      /* M33: a PHY update wanted           */
+    volatile uint32_t phy_want;         /* M33: its PHYs, HCI mask            */
+    volatile uint32_t phy_allow;        /* M33: the peer's choice, HCI mask   */
+    volatile uint32_t phy_done_seq;     /* FLPR: an update ended or switched  */
+    volatile uint32_t phy_status;       /* FLPR: 0, or an HCI error code      */
 } tiku_flpr_shared_t;
 
 /**

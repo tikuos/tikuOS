@@ -327,6 +327,14 @@ static uint8_t  fll_term_sent;          /* the host's queued: end when acked */
 static uint8_t  fll_phy_pending;       /* LL_PHY_UPDATE_IND armed            */
 static uint8_t  fll_phy_new;           /* target: 0 1M, 1 2M, 2 Coded S8     */
 static uint16_t fll_phy_instant;       /* connEventCount to switch at        */
+/* PHY update on request: this side's LL_PHY_REQ out, the central's
+ * LL_PHY_UPDATE_IND owed for the PHYs the peer takes (HCI mask), and the
+ * host's last request taken. */
+static uint8_t  fll_phy_proc;          /* this side's LL_PHY_REQ is out      */
+static uint8_t  fll_phy_answer;        /* LL_PHY_UPDATE_IND owed (central)   */
+static uint8_t  fll_phy_peer;          /* the peer's PHYs, both ways         */
+static uint8_t  fll_phy_pref;          /* the host's PHYs for this link, 0 none */
+static uint32_t fll_phy_seen;          /* phy_req_seq taken                  */
 
 /** @brief Queue one PDU with @p llid unless a PDU is already pending. */
 /* LL encryption, the peripheral's side.  The central's LL_ENC_REQ goes to
@@ -543,6 +551,32 @@ static uint8_t fll_build_tx(uint8_t *out)
     return 3u;
 }
 
+/** @brief Tell the M33 a PHY update ended, or a switch happened, with
+ *         @p status 0 or an HCI error code. */
+static void fll_phy_done(tiku_flpr_shared_t *sh, uint8_t status)
+{
+    sh->phy_status = status;
+    sh->phy_done_seq = sh->phy_done_seq + 1u;
+    flpr_doorbell_to_app();
+}
+
+/** @brief The PHY (0 1M, 1 2M, 2 Coded) to take from a non-empty HCI mask
+ *         @p m: 2M first, then Coded, else 1M. */
+static uint8_t fll_phy_pick(uint32_t m)
+{
+    return ((m & 0x02u) != 0u) ? 1u : ((m & 0x04u) != 0u) ? 2u : 0u;
+}
+
+/** @brief The PHYs this side takes on the link, HCI mask: those of the
+ *         host's last request on it, else its default (all three for none). */
+static uint32_t fll_phy_mine(const tiku_flpr_shared_t *sh)
+{
+    if (fll_phy_pref != 0u) {
+        return fll_phy_pref;
+    }
+    return (sh->phy_allow != 0u) ? (sh->phy_allow & 0x07u) : 0x07u;
+}
+
 /**
  * @brief The central's side of LL control: the peripheral's requests are
  *        answered or refused, and the encryption start it drives moves on
@@ -586,9 +620,13 @@ static void fll_handle_rx_central(const uint8_t *buf, tiku_flpr_shared_t *sh,
             fll_enc = FLL_ENC_OFF;
             flpr_doorbell_to_app();
         }
-    } else if (op == 0x16u) {                   /* LL_PHY_REQ: no change    */
-        static const uint8_t same[4] = { 0u, 0u, 0u, 0u };
-        fll_reply_ctrl(0x18u, same, 4u);        /* LL_PHY_UPDATE_IND        */
+    } else if (op == 0x16u || (op == 0x17u && fll_phy_proc)) {
+        /* LL_PHY_REQ, or LL_PHY_RSP to this side's: the PHYs the peer takes
+         * both ways.  The event loop answers with LL_PHY_UPDATE_IND. */
+        if (buf[1] >= 3u) {
+            fll_phy_peer = (uint8_t)(buf[4] & buf[5] & 0x07u);
+            fll_phy_answer = 1u;
+        }
     } else if (op == 0x0Fu) {                   /* LL_CONNECTION_PARAM_REQ  */
         static const uint8_t rej[2] = { 0x0Fu, 0x1Au };
         fll_reply_ctrl(0x11u, rej, 2u);         /* kept as they are         */
@@ -642,13 +680,23 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
         fll_reply_ctrl(0x13u, (const uint8_t *)0, 0u);
     } else if (op == 0x08u || op == 0x0Eu) {    /* FEATURE_REQ -> RSP       */
         /* Octet 0 of FeatureSet is the AND of both sides' features; this LL
-         * offers bit 0, LE Encryption, alone.  A central that reads it clear
-         * does not start encryption on the link. */
+         * offers bit 0 there, LE Encryption, alone.  A central that reads it
+         * clear does not start encryption on the link.  Octet 1 offers the
+         * 2M and Coded PHYs (bits 8 and 11). */
         uint8_t feat[8] = { 0u };
         if (buf[1] >= 9u) {
             feat[0] = (uint8_t)(buf[4] & 0x01u);
         }
+        feat[1] = 0x09u;
         fll_reply_ctrl(0x09u, feat, 8u);
+    } else if ((op == 0x07u && buf[1] >= 2u && buf[4] == 0x16u) ||
+               (op == 0x11u && buf[1] >= 3u && buf[4] == 0x16u)) {
+        /* The peer refused this side's LL_PHY_REQ: LL_UNKNOWN_RSP, or
+         * LL_REJECT_EXT_IND with its code. */
+        if (fll_phy_proc) {
+            fll_phy_proc = 0u;
+            fll_phy_done(sh, (op == 0x07u) ? 0x1Au : buf[5]);
+        }
     } else if (fll_central) {
         fll_handle_rx_central(buf, sh, op);
     } else if (op == 0x01u) {                   /* LL_CHANNEL_MAP_UPDATE_IND*/
@@ -726,17 +774,29 @@ static void fll_handle_rx(const uint8_t *buf, tiku_flpr_shared_t *sh)
             sh->dle_max = eff;                  /* publish to the M33 host  */
         }
     } else if (op == 0x16u) {                   /* LL_PHY_REQ (PHY update)  */
-        static const uint8_t rsp[2] = { 0x07u, 0x07u };  /* 1M + 2M + Coded */
+        /* The PHYs this side takes, both ways; the central chooses, and its
+         * LL_PHY_UPDATE_IND settles this side's request as well. */
+        uint8_t rsp[2];
+        rsp[0] = (uint8_t)fll_phy_mine(sh);
+        rsp[1] = rsp[0];
         fll_reply_ctrl(0x17u, rsp, 2u);         /* LL_PHY_RSP              */
     } else if (op == 0x18u) {                   /* LL_PHY_UPDATE_IND        */
         /* CtrData: PHY_C_TO_P[1] PHY_P_TO_C[1] Instant[2] at buf[4..7].
          * Symmetric switch: the RX (C->P) and TX (P->C) take the same PHY;
          * apply RADIO MODE/PCNF0 at the Instant.  0=1M 1=2M 2=Coded S8. */
-        if (buf[1] >= 5u) {
-            fll_phy_new = ((buf[4] & 0x04u) != 0u) ? 2u
-                        : ((buf[4] & 0x02u) != 0u) ? 1u : 0u;
+        if (buf[1] >= 5u && (buf[4] | buf[5]) == 0u) {
+            /* No change: this side's request ends here. */
+            if (fll_phy_proc) {
+                fll_phy_proc = 0u;
+                fll_phy_done(sh, 0u);
+            }
+        } else if (buf[1] >= 5u) {
+            uint8_t to = (buf[4] != 0u) ? buf[4] : buf[5];
+            fll_phy_new = ((to & 0x04u) != 0u) ? 2u
+                        : ((to & 0x02u) != 0u) ? 1u : 0u;
             fll_phy_instant = (uint16_t)(buf[6] | ((uint16_t)buf[7] << 8));
             fll_phy_pending = 1u;
+            fll_phy_proc = 0u;                  /* reported at the switch    */
         }
     } else if (op != 0x09u && op != 0x13u && op != 0x07u &&
                op != 0x15u && op != 0x17u) {
@@ -878,6 +938,10 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
     sh->enc_on = 0u;
     sh->dle_max = 0u;                            /* 0 = 27 octets, pre-DLE    */
     fll_phy_pending = 0u;                        /* 1M until an update        */
+    fll_phy_proc = 0u;
+    fll_phy_answer = 0u;
+    fll_phy_pref = 0u;                           /* the default until asked   */
+    fll_phy_seen = sh->phy_req_seq;              /* from this link on         */
     sh->conn_phy = 0u; sh->conn_phy_evt = 0u;
     sh->conn_phy_mode = 0u;                      /* PHY-switch telemetry      */
     sh->conn_phy_addr = 0u; sh->conn_phy_crcok = 0u;
@@ -936,6 +1000,7 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
             sh->conn_phy = fll_phy_new;
             sh->conn_phy_evt = sh->conn_events;  /* events at the switch      */
             sh->conn_phy_mode = r->MODE;         /* MODE read back            */
+            fll_phy_done(sh, 0u);
         }
 
         /* A control PDU that waited goes out first, when the slot is free
@@ -1006,7 +1071,8 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
                 fll_enc_refresh = 1u;
                 fll_enc = FLL_ENC_PAUSED;
             } else if (fll_central && fll_enc == FLL_ENC_OFF &&
-                       sh->enc_start_seq != fll_enc_seq) {
+                       sh->enc_start_seq != fll_enc_seq &&
+                       !fll_phy_proc && !fll_phy_answer) {
                 /* The host's LE Enable Encryption: LL_ENC_REQ with its
                  * Rand, EDIV, SKDm and IVm; data waits for the outcome. */
                 uint8_t req[22];
@@ -1041,6 +1107,44 @@ static void flpr_conn_hold(tiku_flpr_shared_t *sh)
                 fll_rx_ctr = 0u;
                 fll_queue_ctrl(0x06u, (const uint8_t *)0, 0u);
                 fll_enc = FLL_CENC_SENT;
+            }
+        }
+        /* PHY update: the central's LL_PHY_UPDATE_IND owed, else a request
+         * the host made, when the slot is free, nothing waits and neither an
+         * encryption start nor a PHY switch is under way.  The instant is
+         * six events after the one the indication goes out in. */
+        if (fll_tx_len == 0u && fll_cw_n == 0u && !fll_phy_pending &&
+            ((fll_enc == FLL_ENC_OFF && !fll_enc_refresh) ||
+             fll_enc == FLL_ENC_ON)) {
+            if (fll_central && fll_phy_answer) {
+                uint8_t ind[4] = { 0u, 0u, 0u, 0u };
+                uint32_t both = fll_phy_peer & fll_phy_mine(sh);
+                /* Nothing in common keeps the PHY as it is. */
+                uint8_t c = (both != 0u) ? fll_phy_pick(both)
+                                         : (uint8_t)sh->conn_phy;
+                fll_phy_answer = 0u;
+                if (c != (uint8_t)sh->conn_phy) {
+                    uint16_t at = (uint16_t)(cec + 6u);
+                    ind[0] = (uint8_t)(1u << c);
+                    ind[1] = ind[0];
+                    ind[2] = (uint8_t)at;
+                    ind[3] = (uint8_t)(at >> 8);
+                    fll_phy_new = c;
+                    fll_phy_instant = at;
+                    fll_phy_pending = 1u;
+                } else if (fll_phy_proc) {
+                    fll_phy_done(sh, 0u);        /* nothing to change         */
+                }
+                fll_phy_proc = 0u;
+                fll_queue_ctrl(0x18u, ind, 4u);  /* LL_PHY_UPDATE_IND         */
+            } else if (!fll_phy_proc && sh->phy_req_seq != fll_phy_seen) {
+                uint8_t req[2];
+                fll_phy_seen = sh->phy_req_seq;
+                fll_phy_pref = (uint8_t)(sh->phy_want & 0x07u);
+                req[0] = fll_phy_pref;
+                req[1] = req[0];
+                fll_phy_proc = 1u;
+                fll_queue_ctrl(0x16u, req, 2u);  /* LL_PHY_REQ                */
             }
         }
         /* The host's next L2CAP fragment, when the pending slot is free

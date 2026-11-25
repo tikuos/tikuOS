@@ -319,6 +319,19 @@ uint32_t tiku_flpr_arch_dle_max(void);
  *         conn_events at the switch. */
 uint32_t tiku_flpr_arch_conn_phy(uint32_t *at_evt);
 
+/** @brief Ask the FLPR to update the link's PHY to one of @p want (HCI
+ *         mask: bit 0 1M, 1 2M, 2 Coded); tiku_flpr_arch_phy_done() then
+ *         counts its end. */
+void tiku_flpr_arch_phy_request(uint32_t want);
+
+/** @brief The PHYs (HCI mask, 0 for all) a link takes until the host asks
+ *         for others on it. */
+void tiku_flpr_arch_phy_allow(uint32_t mask);
+
+/** @brief PHY updates ended or switched so far; @p status (may be NULL)
+ *         gets the last one's, 0 or an HCI error code. */
+uint32_t tiku_flpr_arch_phy_done(uint32_t *status);
+
 /** @brief PHY-switch telemetry: MODE read back at the switch, and ADDRESS
  *         and CRCOK events caught off the 1M PHY.  Any pointer may be NULL. */
 void tiku_flpr_arch_conn_phy_diag(uint32_t *mode, uint32_t *addr,

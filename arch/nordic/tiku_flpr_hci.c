@@ -102,6 +102,7 @@ static uint8_t  s_claimed;              /* the FLPR holds the radio       */
 static uint8_t  s_linked;               /* LE Connection Complete sent    */
 static uint8_t  s_initiating;           /* LE Create Connection in flight */
 static uint32_t s_enc_seen;             /* the FLPR's encryption starts   */
+static uint32_t s_phy_seen;             /* ... and its PHY updates        */
 static uint8_t  s_scanning;             /* the observer runs for the host */
 static uint8_t  s_scan_sent;            /* its table's entries reported   */
 static uint16_t s_scan_named;           /* ... with their names, by index */
@@ -235,6 +236,37 @@ link_failed_event(uint8_t status)
     e[3] = LE_CONN_COMPLETE;
     e[4] = status;
     rxq_push(e, 22u);
+}
+
+/** @brief LE PHY Update Complete with @p status and the link's PHY both
+ *         ways (1 1M, 2 2M, 3 Coded). */
+static void
+phy_event(uint8_t status)
+{
+    uint8_t e[9];
+    uint8_t phy = (uint8_t)(tiku_flpr_arch_conn_phy((uint32_t *)0) + 1u);
+
+    e[0] = HCI_EVT;
+    e[1] = EVT_LE_META;
+    e[2] = 6u;
+    e[3] = 0x0Cu;                           /* LE PHY Update Complete */
+    e[4] = status;
+    e[5] = (uint8_t)(HCI_HANDLE & 0xFFu);
+    e[6] = (uint8_t)(HCI_HANDLE >> 8);
+    e[7] = phy;
+    e[8] = phy;
+    rxq_push(e, 9u);
+}
+
+/** @brief The PHYs (HCI mask) LE Set PHY or LE Set Default PHY asks for
+ *         both ways: @p all bit 0 and bit 1 leave TX and RX free. */
+static uint32_t
+phy_mask(uint8_t all, uint8_t tx, uint8_t rx)
+{
+    uint32_t t = ((all & 1u) != 0u) ? 0x07u : tx;
+    uint32_t r = ((all & 2u) != 0u) ? 0x07u : rx;
+
+    return t & r & 0x07u;
 }
 
 /** @brief Disconnection Complete, with the FLPR's reason. */
@@ -579,12 +611,20 @@ link_follow(void)
     if (st == 1u && !s_linked) {
         s_linked = 1u;
         s_enc_seen = 0u;
+        s_phy_seen = tiku_flpr_arch_phy_done((uint32_t *)0);
         if (s_initiating) {
             s_initiating = 0u;
         } else {
             s_adv_on = 0u;                    /* a connection ends ADV_IND */
         }
         link_up_event();
+    } else if (st == 1u && s_linked) {
+        uint32_t status;
+        uint32_t seq = tiku_flpr_arch_phy_done(&status);
+        if (seq != s_phy_seen) {
+            s_phy_seen = seq;
+            phy_event((uint8_t)status);
+        }
     } else if (st == 2u || st == 3u) {
         if (s_linked) {
             s_linked = 0u;
@@ -828,6 +868,46 @@ command(uint16_t op, const uint8_t *p, uint8_t n)
         r[1] = p[0];
         r[2] = p[1];
         cmd_complete(op, r, 3u);
+        return;
+    case 0x2003u:                             /* LE Read Local Features */
+        memset(r, 0, 9u);
+        r[1] = 0x01u;                         /* LE Encryption */
+        r[2] = 0x09u;                         /* LE 2M PHY, LE Coded PHY */
+        cmd_complete(op, r, 9u);
+        return;
+    case 0x2030u:                             /* LE Read PHY */
+        memset(r, 0, 5u);
+        if (n < 2u || !s_linked ||
+            (uint16_t)(p[0] | ((uint16_t)(p[1] & 0x0Fu) << 8)) !=
+                HCI_HANDLE) {
+            r[0] = ST_UNKNOWN_CONN;
+        } else {
+            r[1] = p[0];
+            r[2] = (uint8_t)(p[1] & 0x0Fu);
+            r[3] = (uint8_t)(tiku_flpr_arch_conn_phy((uint32_t *)0) + 1u);
+            r[4] = r[3];
+        }
+        cmd_complete(op, r, 5u);
+        return;
+    case 0x2031u:                             /* LE Set Default PHY */
+        if (n < 3u || phy_mask(p[0], p[1], p[2]) == 0u) {
+            cmd_done(op, ST_INVALID_PARAMS);
+        } else {
+            tiku_flpr_arch_phy_allow(phy_mask(p[0], p[1], p[2]));
+            cmd_done(op, ST_OK);
+        }
+        return;
+    case 0x2032u:                             /* LE Set PHY */
+        if (n < 7u || phy_mask(p[2], p[3], p[4]) == 0u) {
+            cmd_status(op, ST_INVALID_PARAMS);
+        } else if (!s_linked ||
+                   (uint16_t)(p[0] | ((uint16_t)(p[1] & 0x0Fu) << 8)) !=
+                       HCI_HANDLE) {
+            cmd_status(op, ST_UNKNOWN_CONN);
+        } else {
+            cmd_status(op, ST_OK);
+            tiku_flpr_arch_phy_request(phy_mask(p[2], p[3], p[4]));
+        }
         return;
     case 0x0406u:                             /* Disconnect */
         if (n < 3u || !s_linked ||
