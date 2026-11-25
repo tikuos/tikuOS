@@ -280,7 +280,7 @@ ifneq ($(S31_APPLICATION),)
 ifeq ($(strip $(APPL_LINKER)),)
 $(error The application manifest must set APPL_LINKER, its linker script)
 endif
-S31_FLAGS += -DTIKU_GPIO_CLAIM_LIMIT=32 -fstack-usage
+S31_FLAGS += -DTIKU_GPIO_CLAIM_LIMIT=48 -fstack-usage
 S31_LINKER := $(APPL_LINKER)
 endif
 ifeq ($(S31_PROFILE),s31-local)
