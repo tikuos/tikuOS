@@ -49,6 +49,12 @@
 #error "TIKU_BOARD_LINK_UART_MODULE must be 0 (eUSCI_A0) or 1 (eUSCI_A1)"
 #endif
 
+/* The board's starting speed is one of its rows. */
+#define LINK_RATE_IS(baud, brw, mctlw)  + ((TIKU_BOARD_LINK_BAUD) == (baud))
+#if (0 TIKU_BOARD_LINK_UART_RATES(LINK_RATE_IS)) != 1
+#error "TIKU_BOARD_LINK_BAUD has no row in TIKU_BOARD_LINK_UART_RATES"
+#endif
+
 /* The console driver's module; a link on the same module would share its
  * vector and registers. */
 #ifndef TIKU_BOARD_UART_MODULE
@@ -87,6 +93,7 @@ static tiku_uart_dma_t   rx;                 /* the DMA writes the ring  */
 static volatile uint8_t  tx_ring[TIKU_UART_LINK_TX_RING];
 static volatile uint8_t  tx_head, tx_tail;   /* ISR reads at tail        */
 static uint8_t           link_open;
+static uint32_t          link_baud = TIKU_BOARD_LINK_BAUD;
 
 #define TX_MASK  ((uint8_t)(TIKU_UART_LINK_TX_RING - 1u))
 
@@ -155,6 +162,22 @@ link_write(void *unused, const uint8_t *data, size_t length)
 
 static const tiku_uart_port_io_t link_io = { link_read, link_write, 0 };
 
+/** @brief Find @p baud's register values in the board's rows.
+ *  @return 1, or 0 when it has none */
+static int
+link_rate(uint32_t baud, uint16_t *brw, uint16_t *mctlw)
+{
+#define LINK_RATE_ROW(b, r, m)                                                 \
+    if (baud == (b)) {                                                         \
+        *brw = (uint16_t)(r);                                                  \
+        *mctlw = (uint16_t)(m);                                                \
+        return 1;                                                              \
+    }
+    TIKU_BOARD_LINK_UART_RATES(LINK_RATE_ROW)
+#undef LINK_RATE_ROW
+    return 0;
+}
+
 /*---------------------------------------------------------------------------*/
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
@@ -173,9 +196,17 @@ tiku_uart_link_open(void)
     LINK_IE = 0;
     LINK_CTLW0 = UCSWRST;
     TIKU_BOARD_LINK_UART_PINS_INIT();
-    LINK_CTLW0 |= UCSSEL__SMCLK;
-    LINK_BRW   = TIKU_BOARD_LINK_UART_BRW;
-    LINK_MCTLW = TIKU_BOARD_LINK_UART_MCTLW;
+    /* A character with an error, or a break, still reaches the ring: from a
+     * peer at a slower speed nothing else does, and the frames' checks drop
+     * it. */
+    LINK_CTLW0 |= UCSSEL__SMCLK | UCRXEIE | UCBRKIE;
+    {
+        uint16_t brw = 0u, mctlw = 0u;
+
+        (void)link_rate(link_baud, &brw, &mctlw);
+        LINK_BRW   = brw;
+        LINK_MCTLW = mctlw;
+    }
     LINK_STATW = 0;
     tx_head = tx_tail = 0u;
     /* The channel is started while the module is in reset, which holds the
@@ -213,6 +244,42 @@ tiku_uart_link_on_event(void (*hook)(void), uint8_t end)
     (void)end;
 }
 
+int
+tiku_uart_link_set_baud(uint32_t baud)
+{
+    uint16_t brw, mctlw;
+
+    if (!link_rate(baud, &brw, &mctlw)) {
+        return -1;
+    }
+    if (link_open != 0u) {
+        /* The module is busy while it sends or receives a byte. */
+        if (tx_head != tx_tail || (LINK_STATW & UCBUSY) != 0u) {
+            return 1;
+        }
+        LINK_CTLW0 |= UCSWRST;
+        LINK_BRW   = brw;
+        LINK_MCTLW = mctlw;
+        LINK_CTLW0 &= (uint16_t)~UCSWRST;
+    }
+    link_baud = baud;
+    return 0;
+}
+
+int
+tiku_uart_link_baud_ok(uint32_t baud)
+{
+    uint16_t brw, mctlw;
+
+    return link_rate(baud, &brw, &mctlw);
+}
+
+uint32_t
+tiku_uart_link_baud(void)
+{
+    return link_baud;
+}
+
 #else /* no link UART on this board, or the console holds it */
 
 const tiku_uart_port_io_t *
@@ -237,6 +304,26 @@ tiku_uart_link_on_event(void (*hook)(void), uint8_t end)
 {
     (void)hook;
     (void)end;
+}
+
+int
+tiku_uart_link_set_baud(uint32_t baud)
+{
+    (void)baud;
+    return -1;
+}
+
+int
+tiku_uart_link_baud_ok(uint32_t baud)
+{
+    (void)baud;
+    return 0;
+}
+
+uint32_t
+tiku_uart_link_baud(void)
+{
+    return 0u;
 }
 
 #endif /* TIKU_BOARD_LINK_UART_MODULE */

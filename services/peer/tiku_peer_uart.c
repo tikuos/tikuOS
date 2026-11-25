@@ -26,16 +26,23 @@
 
 static tiku_link_uart_t peer_uart;
 static const tiku_uart_port_io_t *peer_port;   /* NULL while parked */
+static uint32_t peer_heard;                    /* bytes read from the UART */
 
 /** @brief Bytes from the UART, or none while it is parked. */
 static int
 gate_read(void *unused, uint8_t *out, size_t length)
 {
+    int n;
+
     (void)unused;
     if (peer_port == (const tiku_uart_port_io_t *)0) {
         return 0;
     }
-    return peer_port->read(peer_port->context, out, length);
+    n = peer_port->read(peer_port->context, out, length);
+    if (n > 0) {
+        peer_heard += (uint32_t)n;
+    }
+    return n;
 }
 
 /** @brief Bytes to the UART; a parked one takes them and sends nothing, so
@@ -73,6 +80,26 @@ tiku_peer_uart_attend(uint16_t endpoint)
 {
     peer_endpoint = endpoint;
     tiku_uart_link_on_event(peer_uart_event, 0xC0u);
+}
+
+int
+tiku_peer_uart_speed(uint32_t bits, uint8_t apply)
+{
+    if (apply == 0u) {
+        return tiku_uart_link_baud_ok(bits) ? 0 : -1;
+    }
+    /* A frame the link has not yet handed to the UART goes at the old speed. */
+    if (tiku_uart_link_baud_ok(bits) &&
+        (peer_uart.tx_length != 0u || peer_uart.ack_length != 0u)) {
+        return 1;
+    }
+    return tiku_uart_link_set_baud(bits);
+}
+
+uint32_t
+tiku_peer_uart_heard(void)
+{
+    return peer_heard;
 }
 
 int

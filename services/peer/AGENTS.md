@@ -31,7 +31,8 @@ starts and `tiku_peer_bind_all()` after it; the second finds the row named
 tiku_peer.c              lookup, the lifecycle calls, boot binding; no state
 tiku_peer_wire.c         a driver for a carrier of whole messages
 tiku_peer_uart.c         the board's link UART as that driver's carrier
-tiku_peer_vfs.c          /sys/peer/<name>/state, role, carrier, restarts
+tiku_peer_vfs.c          /sys/peer/<name>/state, role, carrier, restarts, speed
+tiku_peer_ctl.c          the process that owns <peer>/ctl: the link's speed
 tiku_peer_mount.c        /peer/<name>: a VFS call turned into requests
 tiku_peer_mount_proc.c   the process that owns <peer>/vfs
 tiku_peer_mount_serve.c  one request answered from this side's tree
@@ -39,7 +40,8 @@ tiku_peer_mount_serve.c  one request answered from this side's tree
 
 `boot/tiku_boot_peer.c` is the table of a board with one peer on a UART; it
 serves both sides of the TikuComputer-nRF.  The `peer` shell command lists
-the peers, calls the lifecycle, and sends, listens and pings on an endpoint.
+the peers, calls the lifecycle, sets the link's speed, and sends, listens
+and pings on an endpoint.
 
 ## The wire driver
 
@@ -79,6 +81,55 @@ that endpoint's service when a frame's last byte is in and when a write has
 been sent, and the session's pass then reads and writes the link.  The
 MSP430's link UART has no such interrupt and is read on the tick; its
 console line wakes its own reader when a burst has landed.
+
+## The link's speed
+
+The link starts at the board's speed, `TIKU_BOARD_LINK_BAUD`, and changes at
+run time, by either side:
+
+```text
+peer speed msp 460800
+write /sys/peer/msp/speed 460800
+```
+
+`tiku_peer_set_speed()` is the call under both; `/sys/peer/<name>/speed`
+reads the link's speed, then the one asked for when the two differ.  A
+speed is one of the link UART's rows: 9600, 19200, 38400, 115200, 230400,
+250000, 460800, 500000, 921600 and 1000000 bits a second on both chips of
+the TikuComputer-nRF.  A peer on the console line keeps the console's speed,
+and the call returns `TIKU_PEER_ERR_DRIVER` there.
+
+The change is made on `<peer>/ctl` by the "Peer control" process
+(`tiku_peer_ctl.c`, messages in `tiku_peer_ctl.h`):
+
+| Step | Asker | Answerer |
+|------|-------|----------|
+| 1 | sends ASK with the speed | answers yes, no (no setting) or busy |
+| 2 | on yes, switches once its link has nothing left to send | switches once its answer and the asker's receipt of it are through |
+| 3 | sends CHECK at the new speed | answers CHECKED, and keeps the speed |
+| 4 | on CHECKED, keeps the speed | |
+
+What holds:
+
+- One change runs at a time.  Asked while asking, the worker drops its own
+  change and the supervisor answers busy.
+- No answer in 3 s, no CHECKED 3 s after the switch, or no CHECK 4 s after
+  it: the change fails, and a side that switched goes back to the starting
+  speed.
+- Both sides keep the speed and ask for it again 5 s after the link has
+  another, so a restart of either side brings the link back to it.  Three
+  failed tries in a row give it up.
+- The asked speed is RAM: a board that resets both chips starts again at
+  `TIKU_BOARD_LINK_BAUD`, and its setup code calls `tiku_peer_set_speed()`
+  again.
+
+The wire driver watches what the medium hears away from the starting speed
+(`TIKU_PEER_WIRE_GUARD_S`): 16 bytes or more outside whole frames for 3 s
+mean the peer talks at another speed, as a restarted peer does.  The driver
+then goes back to the starting speed and renews the sessions, so the peer
+hears its hellos garbled and comes back too; the peer counts it as a
+restart.  A receiver faster than its sender sees only breaks, so both link
+UART drivers put a break in their ring as a zero byte.
 
 ## The mount: /peer/<name>
 
@@ -138,7 +189,17 @@ serving, in seconds from the Enter key to the last byte of output:
 | 9600 | 0.3 | 0.3 | 1.8 | 1.5 | 1.5 |
 | 115200 | 0.09 | 0.08 | 0.34 | 0.28 | 0.27 |
 
-No frame was sent twice in these runs.
+No frame was sent twice in these runs.  With the MSP430's peer on its link
+UART and the speed set at run time:
+
+| Speed | `read` of a counter | `write` of an LED | 220-byte file written | read | `ls` of 26 entries |
+|------|------|------|------|------|------|
+| 115200 | 0.10 | 0.08 | 0.34 | 0.35 | 0.35 |
+| 460800 | 0.09 | 0.08 | 0.33 | 0.29 | 0.32 |
+| 1000000 | 0.09 | 0.08 | 0.28 | 0.27 | 0.31 |
+
+Above 115200 the time goes to the MSP430, which reads its link UART on the
+tick.
 
 The nRF54L's `uart relay` reads the link itself and does not run the
 scheduler: while it runs, that side serves no request.
@@ -150,14 +211,14 @@ scheduler: while it runs, that side serves no request.
 | MSP430 | `nrf` | supervisor, through the board controls | the link UART; the console line with `TIKU_BOARD_CONSOLE_SEL=1` |
 | nRF54L | `msp` | worker | the link UART |
 
-Both have the services `ctl`, for the pair's own control messages, `msg`,
-for applications, and `vfs`, for the mount.  Where the peer rides the console line the
+Both have the services `ctl`, for the pair's own control messages such as
+the link's speed, `msg`, for applications, and `vfs`, for the mount.  Where the peer rides the console line the
 Makefile sets `TIKU_PEER_ON_CONSOLE`, and the console's own pump serves its
 frames while the shell is inside a command.
 
-The link runs at `TIKU_BOARD_LINK_BAUD`, 9600 unless `make LINK_BAUD=` says
-otherwise, the same on both sides.  Measured on the board with the peer on
-the MSP430's console line, 100 messages at each rate:
+The link starts at `TIKU_BOARD_LINK_BAUD`, 9600 unless `make LINK_BAUD=`
+says otherwise, the same on both sides.  Measured on the board with the peer
+on the MSP430's console line, 100 messages at each rate:
 
 | Baud | Frames the MSP430 received damaged |
 |------|------------------------------------|
@@ -180,13 +241,17 @@ builds it from the die's ID and a durable count.
 
 ## Proof
 
-Host tests `test_peer` and `test_peer_mount` with the `peer` and
-`peer-mount` mutations
-(`TikuBench/tests/host/kernel/mutations/interfaces.py`); the second mounts
-this side's tree on itself through the VFS core and the mount's three
-files.  On the board, the
+Host tests `test_peer`, `test_peer_ctl` and `test_peer_mount` with the
+`peer`, `peer-ctl` and `peer-mount` mutations
+(`TikuBench/tests/host/kernel/mutations/interfaces.py`); the second answers
+the control process as a scripted peer, and the third mounts this side's
+tree on itself through the VFS core and the mount's three files.  On the board, the
 firmware test `TEST_UART_PEER` starts the peer and waits for ready, and
 `peer ping <endpoint> <count>` against the other side's `ipc echo` checks
 messages both ways.  For the mount, the paths above from the nRF54L's shell,
 and from the MSP430 a `once` job that writes and reads under `/peer/nrf`
-after the relay has ended.
+after the relay has ended.  For the speed, `peer speed msp` through every
+row from the nRF54L's shell with the MSP430's peer on its link UART; a
+reset of the nRF54L at 460800, after which the link came back at 460800;
+and the nRF54L's UART set to another speed behind its driver with the
+J-Link, after which both sides fell back and the link came back.

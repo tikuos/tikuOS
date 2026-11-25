@@ -53,6 +53,145 @@ wire_renew(tiku_peer_wire_t *w)
     w->waiting_since = tiku_clock_time();
 }
 
+/*---------------------------------------------------------------------------*/
+/* SPEED                                                                     */
+/*---------------------------------------------------------------------------*/
+
+/** @brief Note the medium's speed: every session paces to it, and the watch
+ *         starts afresh. */
+static void
+wire_rate(tiku_peer_wire_t *w, uint32_t bits)
+{
+    uint32_t rate = w->byte_rate;
+    uint8_t i;
+
+    if (w->speed >= 100u) {
+        rate = (bits / 100u) * w->byte_rate / (w->speed / 100u);
+    }
+    w->now_speed = bits;
+    for (i = 0; i < w->peer->service_count; i++) {
+        tiku_ipc_wire_rate(&w->wire[i], rate);
+    }
+    w->heard_at = (w->board->heard != 0) ? w->board->heard() : 0u;
+    w->clean_since = tiku_clock_time();
+}
+
+/** @brief Back to the starting speed, the sessions renewed, so a peer at
+ *         another speed hears its hellos garbled and comes back too.
+ *  @return 0, or 1 while the medium is still sending */
+static int
+wire_fall_back(tiku_peer_wire_t *w)
+{
+    int rc = w->board->speed(w->speed, 1u);
+
+    if (rc != 0) {
+        return rc;
+    }
+    wire_rate(w, w->speed);
+    wire_renew(w);
+    if (w->fallbacks != 0xFFFFu) {
+        w->fallbacks++;
+    }
+    return 0;
+}
+
+/**
+ * @brief After a pass over the medium, away from the starting speed: bytes
+ *        heard outside whole frames for TIKU_PEER_WIRE_GUARD_S mean the peer
+ *        talks at another speed, such as a restarted peer at its first one.
+ */
+static void
+wire_watch(tiku_peer_wire_t *w)
+{
+    uint32_t heard;
+    tiku_clock_time_t now = tiku_clock_time();
+
+    if (w->now_speed == w->speed || w->board->heard == 0) {
+        return;
+    }
+    heard = w->board->heard();
+    if (w->framed != 0u || heard == w->heard_at) {
+        w->framed = 0u;
+        w->heard_at = heard;
+        w->clean_since = now;
+        return;
+    }
+    if (heard - w->heard_at >= TIKU_PEER_WIRE_GUARD_BYTES &&
+        (tiku_clock_time_t)(now - w->clean_since) >=
+        (tiku_clock_time_t)(TIKU_PEER_WIRE_GUARD_S * TIKU_CLOCK_SECOND)) {
+        (void)wire_fall_back(w);
+    }
+}
+
+/** @brief The medium's send, as the channels use it. */
+static int
+watch_send(tiku_link_t *l, const void *head, size_t hlen, const void *body,
+           size_t blen)
+{
+    return tiku_link_send2(((tiku_peer_wire_t *)l->ctx)->medium, head, hlen,
+                           body, blen);
+}
+
+/** @brief A pass over the medium, then the watch on what it heard. */
+static void
+watch_pump(tiku_link_t *l)
+{
+    tiku_peer_wire_t *w = l->ctx;
+
+    tiku_link_pump(w->medium);
+    wire_watch(w);
+}
+
+/** @brief Close the medium. */
+static void
+watch_close(tiku_link_t *l)
+{
+    tiku_link_close(((tiku_peer_wire_t *)l->ctx)->medium);
+}
+
+/** @brief A whole frame from the medium, passed to the channels. */
+static void
+watch_recv(void *context, uint8_t *msg, size_t len)
+{
+    tiku_peer_wire_t *w = context;
+
+    w->framed = 1u;
+    tiku_link_deliver(&w->watch, msg, len);
+}
+
+static const tiku_link_ops_t watch_ops = { watch_send, watch_pump, watch_close };
+
+/** @brief Put the medium at the starting speed for a peer that is about to
+ *         start at it; a medium still sending is caught by the watch. */
+static void
+wire_first_speed(tiku_peer_wire_t *w)
+{
+    if (w->board->speed != 0 && w->speed != 0u && w->now_speed != w->speed &&
+        w->board->speed(w->speed, 1u) == 0) {
+        wire_rate(w, w->speed);
+    }
+}
+
+/** @brief The driver's speed call (tiku_peer_ops_t). */
+static int
+wire_speed(void *context, uint32_t bits, uint8_t what)
+{
+    tiku_peer_wire_t *w = context;
+    int rc;
+
+    if (w->bound == 0u || w->board->speed == 0 || w->speed == 0u) {
+        return -1;
+    }
+    if (what == TIKU_PEER_SPEED_START) {
+        return wire_fall_back(w);
+    }
+    rc = w->board->speed(bits, (what == TIKU_PEER_SPEED_SET) ? 1u : 0u);
+    if (rc == 0 && what == TIKU_PEER_SPEED_SET) {
+        wire_rate(w, bits);
+    }
+    return rc;
+}
+
 /**
  * @brief Open the link, a channel per service and a wire session on each.
  *
@@ -73,8 +212,13 @@ wire_bind(void *context, uint16_t first_endpoint)
         return -1;
     }
     physical = w->board->link();
-    if (physical == (tiku_link_t *)0 ||
-        tiku_ipc_mux_init(&w->mux, physical) != 0 ||
+    if (physical == (tiku_link_t *)0) {
+        return -1;
+    }
+    w->medium = physical;
+    w->watch = (tiku_link_t){ &watch_ops, w, physical->cap, 0, 0 };
+    tiku_link_on_recv(physical, watch_recv, w);
+    if (tiku_ipc_mux_init(&w->mux, &w->watch) != 0 ||
         tiku_ipc_epoch_fresh(&epoch) != TIKU_IPC_OK) {
         return -1;
     }
@@ -92,8 +236,8 @@ wire_bind(void *context, uint16_t first_endpoint)
                                w->frame_size, 0) != TIKU_IPC_OK) {
             return -1;
         }
-        tiku_ipc_wire_rate(&w->wire[i], w->byte_rate);
     }
+    wire_rate(w, w->speed);
     w->first_endpoint = first_endpoint;
     w->waiting_since = tiku_clock_time();
     w->bound = 1u;
@@ -115,6 +259,7 @@ wire_start(void *context)
     if (w->bound == 0u) {
         return -1;
     }
+    wire_first_speed(w);
     if (w->board->power != 0 && w->board->power(1u) != 0) {
         return -1;
     }
@@ -136,6 +281,7 @@ wire_stop(void *context)
     }
     wire_renew(w);
     (void)wire_carrier(w, 0u);
+    wire_first_speed(w);
     return (w->board->power(0u) == 0) ? 0 : -1;
 }
 
@@ -145,7 +291,11 @@ wire_reset(void *context)
 {
     tiku_peer_wire_t *w = context;
 
-    if (w->bound == 0u || w->board->reset == 0 || w->board->reset() != 0) {
+    if (w->bound == 0u || w->board->reset == 0) {
+        return -1;
+    }
+    wire_first_speed(w);
+    if (w->board->reset() != 0) {
         return -1;
     }
     wire_renew(w);
@@ -165,6 +315,7 @@ wire_status(void *context, tiku_peer_status_t *out)
     out->restarts = w->restarts;
     out->mode = 0u;
     out->why = TIKU_PEER_WHY_NONE;
+    out->speed = (w->board->speed != 0) ? w->now_speed : 0u;
     if (w->bound == 0u || out->powered == 0u) {
         out->state = TIKU_PEER_OFF;
         w->waiting_since = now;
@@ -192,7 +343,7 @@ wire_status(void *context, tiku_peer_status_t *out)
 }
 
 const tiku_peer_ops_t tiku_peer_wire_ops = {
-    0, wire_bind, wire_start, wire_stop, wire_reset, wire_status
+    0, wire_bind, wire_start, wire_stop, wire_reset, wire_status, wire_speed
 };
 
 #endif /* TIKU_PEER_ENABLE */

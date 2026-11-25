@@ -68,7 +68,16 @@ typedef struct {
     uint8_t  mode;      /**< In READY, the driver's mode; 0 is normal service */
     uint8_t  powered;   /**< 1 while the peer has power, as far as known */
     uint16_t restarts;  /**< Times it came back as a new instance since boot */
+    uint32_t speed;     /**< Carrier speed in bits a second; 0: not set here */
 } tiku_peer_status_t;
+
+/** @defgroup TIKU_PEER_SPEED What a driver's speed call does
+ * @{ */
+#define TIKU_PEER_SPEED_CHECK  0u  /**< Only say whether the speed is possible */
+#define TIKU_PEER_SPEED_SET    1u  /**< Set the speed */
+#define TIKU_PEER_SPEED_START  2u  /**< Go back to the starting speed and renew
+                                        the services; the speed is ignored */
+/** @} */
 
 /** @brief One service: its name on the carrier, equal on both sides, and
  *         its channel there. */
@@ -92,6 +101,9 @@ typedef struct {
     int  (*stop)(void *context);
     int  (*reset)(void *context);
     void (*status)(void *context, tiku_peer_status_t *out);
+    /** This side's carrier speed, as TIKU_PEER_SPEED_* says: 0 done, 1 not
+     *  yet (call again), -1 no setting for it; NULL for a fixed speed. */
+    int  (*speed)(void *context, uint32_t bits, uint8_t what);
 } tiku_peer_ops_t;
 
 /** @brief One peer of this board. */
@@ -143,6 +155,19 @@ int tiku_peer_reset(uint8_t index);
 
 /** @brief Read a peer's state.  @return TIKU_PEER_OK or ERR_NAME */
 int tiku_peer_status(uint8_t index, tiku_peer_status_t *out);
+
+/**
+ * @brief Keep the link to a peer at @p bits a second, agreed with the peer
+ *        once it is ready and again after it restarts.  A change the two do
+ *        not confirm leaves the link at its starting speed.
+ * @return TIKU_PEER_OK, ERR_NAME, or ERR_DRIVER for a speed this side's
+ *         carrier has no setting for
+ */
+int tiku_peer_set_speed(uint8_t index, uint32_t bits);
+
+/** @brief The speed asked for the link to the peer at @p index, in bits a
+ *         second; 0 for no such peer or a carrier without a setting. */
+uint32_t tiku_peer_speed_wanted(uint8_t index);
 
 /** @brief Run every driver's prepare, before kernel IPC starts.
  *  @return TIKU_PEER_OK, or ERR_DRIVER at the first that fails */

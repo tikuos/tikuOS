@@ -155,22 +155,22 @@
 #if TIKU_BOARD_CONSOLE_SEL == 0
 #define TIKU_BOARD_LINK_UART_MODULE 1
 #endif
-/* 8 MHz SMCLK, oversampled (TI SLAU367 Table 30-5), as the console's rows. */
-#if   TIKU_BOARD_LINK_BAUD == 9600
-#define TIKU_BOARD_LINK_UART_BRW    52
-#define TIKU_BOARD_LINK_UART_MCTLW  ((0x49 << 8) | UCOS16 | (0x01 << 4))
-#elif TIKU_BOARD_LINK_BAUD == 19200
-#define TIKU_BOARD_LINK_UART_BRW    26
-#define TIKU_BOARD_LINK_UART_MCTLW  ((0xB6 << 8) | UCOS16 | (0x00 << 4))
-#elif TIKU_BOARD_LINK_BAUD == 38400
-#define TIKU_BOARD_LINK_UART_BRW    13
-#define TIKU_BOARD_LINK_UART_MCTLW  ((0x84 << 8) | UCOS16 | (0x00 << 4))
-#elif TIKU_BOARD_LINK_BAUD == 115200
-#define TIKU_BOARD_LINK_UART_BRW    4
-#define TIKU_BOARD_LINK_UART_MCTLW  ((0x55 << 8) | UCOS16 | (0x05 << 4))
-#else
-#error "Unsupported TIKU_BOARD_LINK_BAUD (use 9600/19200/38400/115200)"
-#endif
+/**
+ * @brief The link UART's speeds as X(baud, UCAxBRW, UCAxMCTLW) at the 8 MHz
+ *        SMCLK, the console's rows (TI SLAU367 Table 30-5); it starts at
+ *        TIKU_BOARD_LINK_BAUD, and tiku_uart_link_set_baud() picks another.
+ */
+#define TIKU_BOARD_LINK_UART_RATES(X)                                          \
+    X(9600UL,    52u, ((0x49u << 8) | UCOS16 | (0x01u << 4)))                   \
+    X(19200UL,   26u, ((0xB6u << 8) | UCOS16 | (0x00u << 4)))                   \
+    X(38400UL,   13u, ((0x84u << 8) | UCOS16 | (0x00u << 4)))                   \
+    X(115200UL,   4u, ((0x55u << 8) | UCOS16 | (0x05u << 4)))                   \
+    X(230400UL,   2u, ((0xBBu << 8) | UCOS16 | (0x02u << 4)))                   \
+    X(250000UL,   2u, (UCOS16))                                                 \
+    X(460800UL,  17u, (0x4Au << 8))                                             \
+    X(500000UL,   1u, (UCOS16))                                                 \
+    X(921600UL,   8u, (0xD6u << 8))                                             \
+    X(1000000UL,  8u, (0u))
 #define TIKU_BOARD_LINK_UART_ALLOWED()  ((P3DIR & P3OUT & BIT4) != 0u)
 #define TIKU_BOARD_LINK_UART_PINS_INIT()                                       \
     do {                                                                       \

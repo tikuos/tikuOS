@@ -16,6 +16,7 @@
 #include "tiku_shell_cmd_peer.h"
 #include <shell/tiku_shell.h>
 #include <interfaces/peer/tiku_peer.h>
+#include <services/peer/tiku_peer_ctl.h>
 #include <kernel/ipc/tiku_ipc.h>
 #include <kernel/scheduler/tiku_sched.h>
 #include <kernel/timers/tiku_clock.h>
@@ -44,6 +45,15 @@ peer_show(uint8_t index)
                  p->carrier, state[s.state & 3u],
                  (s.state == TIKU_PEER_LOST && s.why < 5u) ? why[s.why] : "",
                  (unsigned)s.restarts);
+    if (s.speed != 0u) {
+        uint32_t want = tiku_peer_speed_wanted(index);
+
+        SHELL_PRINTF("       speed: %lu bits a second", (unsigned long)s.speed);
+        if (want != s.speed) {
+            SHELL_PRINTF(", %lu asked", (unsigned long)want);
+        }
+        SHELL_PRINTF("\n");
+    }
     SHELL_PRINTF("       services:");
     for (i = 0; i < p->service_count; i++) {
         SHELL_PRINTF(" %s/%s", p->name, p->services[i].name);
@@ -270,6 +280,47 @@ peer_ping(const char *name, uint32_t count)
                  (unsigned long)(tiku_clock_time_t)(tiku_clock_time() - start));
 }
 
+/** @brief Seconds `peer speed` waits for the link to reach the speed. */
+#define PEER_SPEED_WAIT_S  8u
+
+/** @brief Ask for the link speed of the peer named @p name, then wait for
+ *         the link to reach it or the change to fail. */
+static void
+peer_speed(const char *name, const char *bits_text)
+{
+    int index = tiku_peer_find(name);
+    uint32_t bits = peer_number(bits_text, 100000000UL);
+    tiku_peer_status_t s;
+    tiku_clock_time_t t0;
+    uint16_t failed;
+
+    if (index < 0) {
+        SHELL_PRINTF("peer: no peer '%s'\n", name);
+        return;
+    }
+    if (bits == 0u) {
+        SHELL_PRINTF("peer: give the speed in bits a second\n");
+        return;
+    }
+    failed = tiku_peer_ctl_failures((uint8_t)index);
+    if (tiku_peer_set_speed((uint8_t)index, bits) != TIKU_PEER_OK) {
+        SHELL_PRINTF("peer: no setting for %lu here\n", (unsigned long)bits);
+        return;
+    }
+    t0 = tiku_clock_time();
+    while (tiku_peer_status((uint8_t)index, &s) == TIKU_PEER_OK &&
+           (s.speed != bits || s.state != TIKU_PEER_READY) &&
+           tiku_peer_ctl_failures((uint8_t)index) == failed &&
+           (tiku_clock_time_t)(tiku_clock_time() - t0) <
+           (tiku_clock_time_t)(PEER_SPEED_WAIT_S * TIKU_CLOCK_SECOND)) {
+        peer_service();
+    }
+    if (tiku_peer_ctl_failures((uint8_t)index) != failed) {
+        SHELL_PRINTF("peer: the change did not go through\n");
+    }
+    peer_show((uint8_t)index);
+}
+
 /*---------------------------------------------------------------------------*/
 /* PUBLIC HANDLER                                                            */
 /*---------------------------------------------------------------------------*/
@@ -304,8 +355,13 @@ tiku_shell_cmd_peer(uint8_t argc, const char *argv[])
         }
         return;
     }
+    if (argc == 4 && strcmp(argv[1], "speed") == 0) {
+        peer_speed(argv[2], argv[3]);
+        return;
+    }
     if (argc != 3) {
         SHELL_PRINTF("Usage: peer [start|stop|reset <name> | "
+                     "speed <name> <bits> | "
                      "send <endpoint> <word>... | listen <endpoint> <seconds> "
                      "| ping <endpoint> <count>]\n");
         return;

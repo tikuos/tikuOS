@@ -45,6 +45,11 @@ typedef struct {
     /** Called at bind with the peer's first endpoint, for a medium whose
      *  interrupt requests that endpoint's service; NULL: none. */
     void         (*attend)(uint16_t first_endpoint);
+    /** Check (apply 0) or set (1) the medium's speed in bits a second: 0,
+     *  1 while it is still sending, -1 for no setting; NULL: fixed. */
+    int          (*speed)(uint32_t bits, uint8_t apply);
+    /** Bytes the medium has received since boot; NULL: not counted. */
+    uint32_t     (*heard)(void);
 } tiku_peer_wire_board_t;
 
 /** @brief One wire peer: what it is, then its state. */
@@ -53,19 +58,38 @@ typedef struct {
     const tiku_peer_wire_board_t *board;
     uint16_t                      frame_size;   /**< wire frame, 80 to 256 */
     tiku_clock_time_t             start_ticks;  /**< unanswered this long: LOST */
-    uint32_t                      byte_rate;    /**< message bytes a second the
-                                                     carrier moves; 0 for one
-                                                     faster than the tick */
+    uint32_t                      byte_rate;    /**< message bytes a second
+                                                     at speed; 0: one faster
+                                                     than the tick */
+    uint32_t                      speed;        /**< starting speed in bits a
+                                                     second; 0: fixed */
 
     tiku_ipc_mux_t                mux;
     tiku_ipc_wire_t               wire[TIKU_PEER_WIRE_SERVICES];
+    tiku_link_t                   watch;        /**< the medium's link as the
+                                                     channels use it */
+    tiku_link_t                  *medium;
     uint64_t                      seen_epoch;   /**< the peer instance last seen */
     tiku_clock_time_t             waiting_since;
+    tiku_clock_time_t             clean_since;  /**< last time every byte heard
+                                                     was in a whole frame */
+    uint32_t                      now_speed;
+    uint32_t                      heard_at;     /**< bytes heard at the last
+                                                     whole frame */
     uint16_t                      first_endpoint;
     uint16_t                      restarts;
+    uint16_t                      fallbacks;    /**< returns to speed */
     uint8_t                       bound;
     uint8_t                       carrier_up;
+    uint8_t                       framed;       /**< a whole frame came in */
 } tiku_peer_wire_t;
+
+/** @brief Seconds and bytes of what the medium hears with no whole frame in
+ *         it, away from the starting speed, before the driver goes back. */
+#ifndef TIKU_PEER_WIRE_GUARD_S
+#define TIKU_PEER_WIRE_GUARD_S      3u
+#endif
+#define TIKU_PEER_WIRE_GUARD_BYTES  16u
 
 /** @brief The driver; a peer's context is its tiku_peer_wire_t. */
 extern const tiku_peer_ops_t tiku_peer_wire_ops;
@@ -84,6 +108,13 @@ int tiku_peer_uart_carrier(uint8_t up);
 /** @brief Have the link UART's interrupt request service of @p endpoint when
  *         a frame's last byte is in and when a write has been sent. */
 void tiku_peer_uart_attend(uint16_t endpoint);
+
+/** @brief The board's speed call on the link UART: the board's speed member
+ *         of tiku_peer_wire_board_t; it waits for frames the link holds. */
+int tiku_peer_uart_speed(uint32_t bits, uint8_t apply);
+
+/** @brief Bytes read from the link UART since boot. */
+uint32_t tiku_peer_uart_heard(void);
 
 #endif /* TIKU_PEER_ENABLE */
 #endif /* TIKU_PEER_WIRE_H_ */

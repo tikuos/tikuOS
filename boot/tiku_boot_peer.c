@@ -79,11 +79,17 @@ peer_link(void)
 }
 #define PEER_CARRIER       0
 #define PEER_ATTEND        0
+#define PEER_SPEED         0
+#define PEER_HEARD         0
+#define PEER_FIRST_SPEED   0u
 #define PEER_CARRIER_NAME  "console"
 #else
 #define peer_link          tiku_peer_uart_link
 #define PEER_CARRIER       tiku_peer_uart_carrier
 #define PEER_ATTEND        tiku_peer_uart_attend
+#define PEER_SPEED         tiku_peer_uart_speed
+#define PEER_HEARD         tiku_peer_uart_heard
+#define PEER_FIRST_SPEED   ((uint32_t)(TIKU_BOARD_LINK_BAUD))
 #define PEER_CARRIER_NAME  "uart"
 #endif
 
@@ -117,12 +123,13 @@ peer_powered(void)
 }
 
 static const tiku_peer_wire_board_t peer_board = {
-    peer_link, PEER_CARRIER, peer_power, peer_reset, peer_powered, PEER_ATTEND
+    peer_link, PEER_CARRIER, peer_power, peer_reset, peer_powered, PEER_ATTEND,
+    PEER_SPEED, PEER_HEARD
 };
 #define PEER_FLAGS  TIKU_PEER_F_SUPERVISOR
 #else
 static const tiku_peer_wire_board_t peer_board = {
-    peer_link, PEER_CARRIER, 0, 0, 0, PEER_ATTEND
+    peer_link, PEER_CARRIER, 0, 0, 0, PEER_ATTEND, PEER_SPEED, PEER_HEARD
 };
 #define PEER_FLAGS  0u
 #endif
@@ -136,7 +143,7 @@ static const tiku_peer_t peer;
 tiku_peer_wire_t tiku_boot_peer_wire = {
     &peer, &peer_board, TIKU_BOARD_PEER_FRAME,
     (tiku_clock_time_t)(TIKU_BOARD_PEER_START_S * TIKU_CLOCK_SECOND),
-    PEER_BYTE_RATE
+    PEER_BYTE_RATE, PEER_FIRST_SPEED
 };
 
 static const tiku_peer_t peer = {

@@ -17,13 +17,15 @@
 #include "tiku_peer_vfs.h"
 #include <interfaces/peer/tiku_peer.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #if (TIKU_PEER_ENABLE + 0)
 
 /** @brief Most peers the tree shows; a read handler set exists for each. */
 #define PEER_VFS_PEERS  2u
 /** @brief Files in a peer's directory. */
-#define PEER_VFS_FILES  4u
+#define PEER_VFS_FILES  5u
 
 /** @brief Render the state of peer @p i. */
 static int
@@ -78,12 +80,57 @@ peer_restarts_read(uint8_t i, char *buf, size_t max)
     return snprintf(buf, max, "%u\n", (unsigned)s.restarts);
 }
 
+/** @brief Render the link speed of peer @p i in bits a second, then the
+ *         speed asked for when it differs. */
+static int
+peer_speed_read(uint8_t i, char *buf, size_t max)
+{
+    tiku_peer_status_t s;
+    uint32_t want;
+
+    if (tiku_peer_status(i, &s) != TIKU_PEER_OK) {
+        return -1;
+    }
+    want = tiku_peer_speed_wanted(i);
+    if (want != s.speed) {
+        return snprintf(buf, max, "%lu asked %lu\n", (unsigned long)s.speed,
+                        (unsigned long)want);
+    }
+    return snprintf(buf, max, "%lu\n", (unsigned long)s.speed);
+}
+
+/** @brief Ask for the link speed of peer @p i: a number of bits a second. */
+static int
+peer_speed_write(uint8_t i, const char *buf, size_t len)
+{
+    char text[12];
+    char *end;
+    unsigned long v;
+
+    if (len == 0u || len >= sizeof(text)) {
+        return TIKU_VFS_EINVAL;
+    }
+    memcpy(text, buf, len);
+    text[len] = '\0';
+    if (text[len - 1u] == '\n') {
+        text[len - 1u] = '\0';
+    }
+    v = strtoul(text, &end, 10);
+    if (end == text || *end != '\0' || v == 0UL) {
+        return TIKU_VFS_EINVAL;
+    }
+    return (tiku_peer_set_speed(i, (uint32_t)v) == TIKU_PEER_OK)
+           ? TIKU_VFS_OK : TIKU_VFS_ERANGE;
+}
+
 /* A handler set per peer index: a VFS read handler takes no context. */
 #define PEER_VFS_FUNCS(N)                                                      \
 static int state_##N(char *b, size_t m)    { return peer_state_read(N, b, m); }    \
 static int role_##N(char *b, size_t m)     { return peer_role_read(N, b, m); }     \
 static int carrier_##N(char *b, size_t m)  { return peer_carrier_read(N, b, m); }  \
-static int restarts_##N(char *b, size_t m) { return peer_restarts_read(N, b, m); }
+static int restarts_##N(char *b, size_t m) { return peer_restarts_read(N, b, m); } \
+static int speed_##N(char *b, size_t m)    { return peer_speed_read(N, b, m); }    \
+static int speed_w_##N(const char *b, size_t l) { return peer_speed_write(N, b, l); }
 
 PEER_VFS_FUNCS(0)
 PEER_VFS_FUNCS(1)
@@ -92,7 +139,9 @@ PEER_VFS_FUNCS(1)
     { { "state",    TIKU_VFS_FILE, state_##N,    NULL, NULL, 0 },               \
       { "role",     TIKU_VFS_FILE, role_##N,     NULL, NULL, 0 },               \
       { "carrier",  TIKU_VFS_FILE, carrier_##N,  NULL, NULL, 0 },               \
-      { "restarts", TIKU_VFS_FILE, restarts_##N, NULL, NULL, 0 } }
+      { "restarts", TIKU_VFS_FILE, restarts_##N, NULL, NULL, 0 },              \
+      { "speed",    TIKU_VFS_FILE, speed_##N, speed_w_##N, NULL, 0, NULL, NULL,   \
+        TIKU_VFS_CAP_SYS } }
 
 static const tiku_vfs_node_t peer_files[PEER_VFS_PEERS][PEER_VFS_FILES] = {
     PEER_VFS_ROW(0), PEER_VFS_ROW(1)

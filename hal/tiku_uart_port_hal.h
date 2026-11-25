@@ -47,4 +47,18 @@ void tiku_uart_link_on_event(void (*hook)(void), uint8_t end);
  *         overflows, and the overruns, framing and parity errors its receiver
  *         reports (the MSP430's, which DMA reads, reports none). */
 uint16_t tiku_uart_link_errors(void);
+/**
+ * @brief Set the link UART's speed in bits a second.  A closed port keeps it
+ *        for its next open; an open one changes once it has sent what its
+ *        writes took, and a byte arriving meanwhile may be lost.
+ * @return 0 once set, 1 while it is still sending (call again), or -1 for a
+ *         speed the port has no setting for
+ */
+int tiku_uart_link_set_baud(uint32_t baud);
+/** @brief 1 when the link UART has a setting for @p baud, else 0. */
+int tiku_uart_link_baud_ok(uint32_t baud);
+/** @brief The link UART's speed in bits a second: the board's
+ *         TIKU_BOARD_LINK_BAUD until tiku_uart_link_set_baud() changes it,
+ *         and 0 on a board without a link UART. */
+uint32_t tiku_uart_link_baud(void);
 #endif
