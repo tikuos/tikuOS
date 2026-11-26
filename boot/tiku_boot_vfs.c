@@ -45,6 +45,9 @@
 #if TIKU_MEDIA_FS_ENABLE
 #include <services/storage/tiku_media_vfs.h>
 #endif
+#if TIKU_MIC_ENABLE
+#include <services/audio/tiku_mic_vfs.h>
+#endif
 #if TIKU_APPL_GUI
 #include "tiku_gui.h"
 #include "tiku_draw.h"
@@ -112,6 +115,10 @@ static int assemble(void)
 #if TIKU_MEDIA_FS_ENABLE
     nodes[config.node_count++] = (tiku_vfs_boot_node_t){"/", tiku_media_vfs_files()};
     nodes[config.node_count++] = (tiku_vfs_boot_node_t){"/sys", tiku_media_vfs_status()};
+#endif
+#if TIKU_MIC_ENABLE
+    nodes[config.node_count++] = (tiku_vfs_boot_node_t){"/dev", tiku_mic_vfs_dev()};
+    nodes[config.node_count++] = (tiku_vfs_boot_node_t){"/sys", tiku_mic_vfs_sys()};
 #endif
 #ifdef TIKU_APPLICATION_HEADER
     nodes[config.node_count++] = (tiku_vfs_boot_node_t){

@@ -782,6 +782,19 @@ SD recording, compression, shell recording command or normal UI integration.
 Its GPIO amplifier test does not establish acoustic playback, and digital
 loopback does not establish microphone position or analog fidelity.
 
+### The microphone service
+
+`S31_MIC=1` in an application profile adds this backend, the ES8389
+driver and `services/audio`'s microphone service, which publishes
+`/dev/mic` and `/sys/audio/mic` (`services/audio/AGENTS.md`).
+`tiku_mic_s31.c` opens I2S0 and the codec, starts the rings with silence
+on the output and the amplifier off, sets both microphone inputs' PGA to
+`/sys/audio/mic/gain` (30 dB at boot; the codec opens at 0 dB, where a
+quiet room reads one or two counts), and averages each stereo frame into
+one mono sample. Writing `1` to `/sys/audio/mic/enable` claims GPIO3..7
+and the codec until `0` is written; the codec shares I2C0 with touch and
+the camera. The selection requires the optional ES8389 driver checkout.
+
 ## Independent AP client qualification
 
 The flash runner's `--ap-peer-test --runs 1 --peer-interface IFACE` uses

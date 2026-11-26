@@ -50,6 +50,21 @@ S31_FLAGS += -DTIKU_S31_SERVICES_TEST=1
 S31_SRCS += TikuBench/tests/esp32s31/test_services.c
 endif
 
+# The microphones as /dev/mic and /sys/audio/mic, over I2S0 and the ES8389;
+# an application manifest selects them with S31_MIC=1.
+S31_MIC ?= 0
+ifeq ($(filter $(S31_MIC),0 1),)
+$(error S31_MIC must be 0 or 1)
+endif
+ifeq ($(S31_MIC),1)
+ifeq ($(wildcard drivers/audio/es8389/tiku_drv_audio_es8389.c),)
+$(error S31_MIC=1 requires the optional drivers/audio/es8389 checkout)
+endif
+S31_FLAGS += -DTIKU_MIC_ENABLE=1
+S31_SRCS += arch/esp32s31/tiku_audio_arch.c drivers/audio/es8389/tiku_drv_audio_es8389.c \
+    services/audio/tiku_mic.c services/audio/tiku_mic_vfs.c services/audio/tiku_mic_s31.c
+endif
+
 S31_MEDIA_ENABLE ?= 1
 ifeq ($(S31_MEDIA_ENABLE),1)
 S31_FLAGS += -DTIKU_MEDIA_FS_ENABLE=1 -DTIKU_S31_SDCARD_ENABLE=1

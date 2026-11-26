@@ -386,6 +386,11 @@ void tiku_vfs_init(const tiku_vfs_node_t *root);
 #ifndef TIKU_MEDIA_FS_ENABLE
 #define TIKU_MEDIA_FS_ENABLE 0
 #endif
+/** @brief Include the microphone's /dev and /sys nodes in the boot mount
+ *  capacity (services/audio/tiku_mic_vfs.h). */
+#ifndef TIKU_MIC_ENABLE
+#define TIKU_MIC_ENABLE 0
+#endif
 /** @brief Mounts a build with the board's peers adds: /sys/peer and /peer. */
 #if (TIKU_PEER_ENABLE + 0)
 #define TIKU_VFS_PEER_MOUNTS 2
@@ -395,9 +400,10 @@ void tiku_vfs_init(const tiku_vfs_node_t *root);
 #ifndef TIKU_VFS_MOUNT_MAX
 #if (TIKU_IPC_ENABLE + 0)
 #define TIKU_VFS_MOUNT_MAX (23 + TIKU_VFS_PEER_MOUNTS + \
-    2 * (TIKU_SD_FAT_ENABLE + TIKU_MEDIA_FS_ENABLE))
+    2 * (TIKU_SD_FAT_ENABLE + TIKU_MEDIA_FS_ENABLE + TIKU_MIC_ENABLE))
 #else
-#define TIKU_VFS_MOUNT_MAX (22 + 2 * (TIKU_SD_FAT_ENABLE + TIKU_MEDIA_FS_ENABLE))
+#define TIKU_VFS_MOUNT_MAX (22 + 2 * (TIKU_SD_FAT_ENABLE + TIKU_MEDIA_FS_ENABLE + \
+    TIKU_MIC_ENABLE))
 #endif
 #endif
 

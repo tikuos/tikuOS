@@ -29,9 +29,10 @@
 /** @brief Most subtrees a tree config mounts under "/", "/sys" or "/dev". */
 #if (TIKU_IPC_ENABLE + 0)
 #define TIKU_VFS_BOOT_NODES_MAX (6u + TIKU_VFS_BOOT_PEER_NODES + \
-    2u * (TIKU_SD_FAT_ENABLE + TIKU_MEDIA_FS_ENABLE))
+    2u * (TIKU_SD_FAT_ENABLE + TIKU_MEDIA_FS_ENABLE + TIKU_MIC_ENABLE))
 #else
-#define TIKU_VFS_BOOT_NODES_MAX (5u + 2u * (TIKU_SD_FAT_ENABLE + TIKU_MEDIA_FS_ENABLE))
+#define TIKU_VFS_BOOT_NODES_MAX (5u + 2u * (TIKU_SD_FAT_ENABLE + TIKU_MEDIA_FS_ENABLE + \
+    TIKU_MIC_ENABLE))
 #endif
 /** @brief Most static children a tree config places under /data. */
 #define TIKU_VFS_DATA_CHILDREN_MAX 1u

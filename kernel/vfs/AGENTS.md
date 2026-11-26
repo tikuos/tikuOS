@@ -25,7 +25,8 @@ tree/tiku_vfs_tree_data.c     /data (the file store) and /sys/fs/data
 The other modules under `tree/` serve /sys/mem/layout, /sys/net,
 /sys/net/wifi, /sys/radio/154, /sys/usb, /sys/store, /sys/psram, /sys/gpu,
 /sys/flash, /sys/emmc, /sys/npu, /sys/coproc and /dev/sensors where the
-build has them.
+build has them.  `/dev/mic` and `/sys/audio/mic` are the microphone
+service's (`services/audio/AGENTS.md`).
 
 `/proc` is `kernel/process/tiku_proc_vfs.c`.  `/peer/<name>`, another
 processor's tree, is `services/peer/tiku_peer_mount.c`
@@ -43,16 +44,18 @@ selects no optional providers.  `boot/tiku_boot_vfs.c` selects them: the
 shell's `/sys/rules` and `/sys/jobs` (`shell/tiku_shell_vfs.c`), the init
 table's `/sys/init` (`services/init/tiku_init_vfs.c`), tinymcp's
 `/sys/mcp` (`services/tinymcp/tiku_mcp_vfs.c`), BASIC's `/data/basic`
-(`basic/tiku_basic_vfs.c`) and the applications overlay's `/gui`.  A boot
-node mounts under `/`, `/sys` or `/dev`; a name a static child of that
-parent holds is refused (ECONFLICT).  Provider nodes and child tables must have static lifetime.  Rules,
+(`basic/tiku_basic_vfs.c`), the applications overlay's `/gui` and the
+microphone's `/dev/mic` and `/sys/audio` (`services/audio/tiku_mic_vfs.c`).
+A boot node mounts under `/`, `/sys` or `/dev`; a name a static child of
+that parent holds is refused (ECONFLICT).  Provider nodes and child tables must have static lifetime.  Rules,
 jobs and init are mounts and list after the static `/sys` children; BASIC
 is a static `/data` child ahead of the dynamic files; a runtime mount under
 a dynamic directory is refused (EACCES).  An invalid configuration, a
 failed mount or a failed NVM relock leaves no root published and halts
 boot before the drivers start.  The mount table has `TIKU_VFS_MOUNT_MAX`
 entries: 22 by default, one additional slot for IPC, two for a board's
-peers (`/sys/peer` and `/peer`) and two for SD FAT providers. Seventeen slots cover the driver registry; five cover the other
+peers (`/sys/peer` and `/peer`), two for SD FAT providers, two for the
+native media store's and two for the microphone's. Seventeen slots cover the driver registry; five cover the other
 boot providers.
 Subtree hardware initialization runs once; a later call rebuilds the
 namespace.  `tiku_boot_vfs_restore()` rebuilds it and remounts the drivers
