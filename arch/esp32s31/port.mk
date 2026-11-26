@@ -297,6 +297,11 @@ ifeq ($(TIKU_POSIX_ENABLE),1)
 include compat/posix/posix.mk
 S31_SRCS += $(POSIX_SRCS)
 S31_FLAGS += $(POSIX_FLAGS)
+ifeq ($(TIKU_POSIX_MEDIA),1)
+S31_FLAGS += -DTIKU_S31_SD_ASYNC_ENABLE=1
+S31_LDFLAGS += -Wl,-u,tiku_media_card_mutation_size,-u,tiku_media_card_mutation_init,-u,tiku_media_card_mutation_step,-u,tiku_media_card_mutation_idle,-u,tiku_media_card_mutation_cancel,-u,tiku_media_checkpoint_step,-u,tiku_media_checkpoint_cancel
+S31_LDFLAGS += -Wl,-u,tiku_s31_sd_open_begin,-u,tiku_s31_sd_read_begin,-u,tiku_s31_sd_clock_begin,-u,tiku_s31_sd_poll,-u,tiku_s31_sd_cancel,-u,tiku_s31_mfs_async_acquire,-u,tiku_s31_mfs_async_read,-u,tiku_s31_mfs_async_poll,-u,tiku_s31_mfs_async_close
+endif
 ifeq ($(TIKU_POSIX_STORE),1)
 # The store group publishes with the polled sector writes.
 S31_FLAGS += -DTIKU_S31_STORAGE_ASYNC_ENABLE=1

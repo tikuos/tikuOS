@@ -9,8 +9,7 @@ above `kernel/`: `kernel/`, `hal/` and `arch/` include nothing from it, and
 `make lint` (`tools/check_kernel_dependencies.py`) refuses an include that
 does.
 
-The time group, the read group, the threads group, the heap group and the
-store group are implemented. The other calls are in TikuSurface's
+The time, read, threads, heap, store and media groups are implemented. The other calls are in TikuSurface's
 `desktop/posix.c`, over a tree in the desktop's heap, and move here a group
 at a time with their backing changed to the kernel's services. The rules
 below hold for each group as it lands.
@@ -243,6 +242,39 @@ polled writes that stay pending and fail at each request (`make posix`,
 the kernel thread refused, saves from two workers at once, and an `fsync`
 refused while a stream holds the store; `check.py LOG PREVIOUS` compares a
 boot with the one before it.
+
+## The media group
+
+Select `TIKU_POSIX_MEDIA=1` in an application manifest to use
+`tiku_posix_media.h` on an SD volume mounted by `tiku_media_card_mount`.
+Names are relative to the volume and hold up to 63 bytes. The application
+binds its volume once in kernel context with `tiku_posix_media_connect`,
+a distinct nonzero media client ID, permission bits from
+`services/storage/tiku_media_store.h` and eight-byte-aligned queue storage
+of `tiku_posix_media_queue_size()` bytes. The worker calls below yield
+between bounded kernel turns. A blocking request from a process returns
+`EAGAIN`. A client already using its queue returns `EBUSY`.
+A product with its own scheduling supplies a blocking request callback and
+uses the same queue through `tiku_posix_media_queue_submit` and
+`tiku_posix_media_queue_poll`. A submitted record and its data buffers
+belong to the queue until poll reports completion.
+
+| Volume operation | Behavior |
+| --- | --- |
+| `opendir`, `readdir` | A caller-owned cursor over immediate children at one names epoch. A native folder keeps its object ID. A slash in an object name supplies an implied folder when the catalog has no directory object. A directory's hidden `.folder` object supplies its marker ID. A concurrent catalog change returns `ESTALE` and the caller restarts the listing. |
+| `seek`, `stat`, `open`, `pread`, `close` | Seek finds the next catalog object and stat finds an exact name. Open retries a stale catalog position once. A reader token pins the version read. Reads split at 64 KiB and return the bytes transferred before EOF or a later error. |
+| `replace`, `rename`, `unlink` | Publish up to 64 KiB, rename or delete against an expected object ID. Rename can require an unused destination or an exact destination version. |
+| `flush`, `discard` | Append up to 64 KiB per call and sync or finalize a stream. A failed append or finalize releases its writer and returns the original error. The stream ID identifies the object for recovery. |
+| `space` | Total volume bytes and bytes available to writers after the catalog reserve. |
+| `changed`, `changes` | The namespace publishes directory IDs into a 64-record journal. Each reader supplies its own sequence. A reader that falls behind gets the oldest retained records and a cleared completeness flag. |
+
+An application maps its mount paths and owns its descriptors and staging
+buffers. TikuSurface maps the card at `/Card` and maps its home prefix
+at `/home`. A headless application can use relative names directly.
+The group allocates no memory. TikuBench exercises the client with
+`make posix` and the `posix-media` mutations. Its S31 program in
+`tests/esp32s31/posix_media/` reads a populated card on a worker and
+checks the refusal in process context.
 
 ## Calls from a worker
 

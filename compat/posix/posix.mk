@@ -14,6 +14,7 @@ TIKU_POSIX_HEAP ?= 0
 # gives (tiku_posix_store_memory()) and published with the file store's
 # polled writes.  POSIX_FLAGS carries it to the read group and the hooks.
 TIKU_POSIX_STORE ?= 0
+TIKU_POSIX_MEDIA ?= 0
 POSIX_SRCS := compat/posix/tiku_posix_time.c compat/posix/tiku_posix_vfs.c \
     compat/posix/tiku_posix_thread.c compat/posix/tiku_posix_pthread.c \
     compat/posix/tiku_posix_lock.c
@@ -27,4 +28,10 @@ POSIX_FLAGS :=
 ifeq ($(TIKU_POSIX_STORE),1)
 POSIX_SRCS += compat/posix/tiku_posix_store.c
 POSIX_FLAGS += -DTIKU_POSIX_STORE=1 -DTIKU_TFS_ASYNC_ENABLE=1
+endif
+ifeq ($(TIKU_POSIX_MEDIA),1)
+POSIX_SRCS += compat/posix/tiku_posix_media.c compat/posix/tiku_posix_media_io.c \
+    compat/posix/tiku_posix_media_worker.c services/storage/tiku_media_async.c \
+    services/storage/tiku_media_mutation.c services/storage/tiku_media_checkpoint.c
+POSIX_FLAGS += -DTIKU_MEDIA_NAMES_ENABLE=1 -DTIKU_MEDIA_ASYNC_ENABLE=1
 endif
