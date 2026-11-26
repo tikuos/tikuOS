@@ -621,12 +621,10 @@ int tiku_posix_is_dir_stream(const DIR *dir)
     return call(op_is_dir_stream, &c) > 0;
 }
 
-#if TIKU_POSIX_STORE
 uint8_t tiku_posix_authority(void)
 {
     return authority;
 }
-#endif
 
 uint8_t tiku_posix_authority_set(uint8_t cap)
 {

@@ -274,4 +274,7 @@ void tiku_posix_heap_use(size_t *used, size_t *limit, uint32_t *refused, size_t 
  */
 uint8_t tiku_posix_authority_set(uint8_t cap);
 
+/** @brief Read the library's current VFS authority in kernel context. */
+uint8_t tiku_posix_authority(void);
+
 #endif /* TIKU_POSIX_H_ */
