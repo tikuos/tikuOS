@@ -23,8 +23,9 @@ tree/tiku_vfs_tree_data.c     /data (the file store) and /sys/fs/data
 ```
 
 The other modules under `tree/` serve /sys/mem/layout, /sys/net,
-/sys/net/wifi, /sys/usb, /sys/store, /sys/psram, /sys/gpu, /sys/flash,
-/sys/emmc, /sys/npu, /sys/coproc and /dev/sensors where the build has them.
+/sys/net/wifi, /sys/radio/154, /sys/usb, /sys/store, /sys/psram, /sys/gpu,
+/sys/flash, /sys/emmc, /sys/npu, /sys/coproc and /dev/sensors where the
+build has them.
 
 `/proc` is `kernel/process/tiku_proc_vfs.c`.  `/peer/<name>`, another
 processor's tree, is `services/peer/tiku_peer_mount.c`

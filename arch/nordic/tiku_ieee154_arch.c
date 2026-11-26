@@ -34,6 +34,7 @@
 static uint8_t tx_frame[1u + TIKU_154_MAX_FRAME] __attribute__((aligned(4)));
 static uint8_t rx_frame[1u + TIKU_154_MAX_FRAME] __attribute__((aligned(4)));
 static uint8_t cur_chan = TIKU_154_CHAN_MIN;
+static uint8_t listening;                   /* background RX armed       */
 
 int tiku_ieee154_arch_available(void)
 {
@@ -78,16 +79,40 @@ static void radio_154_linkcfg(uint8_t channel)
     RADIO->SHORTS = 0u;
 }
 
+/**
+ * @brief End a background listen: disable the radio, which every other
+ *        operation here starts from.
+ */
+static void listen_end(void)
+{
+    uint32_t spin;
+
+    if (!listening) {
+        return;
+    }
+    listening = 0u;
+    RADIO->SHORTS = 0u;
+    RADIO->EVENTS_DISABLED = 0u;
+    RADIO->TASKS_DISABLE = 1u;
+    for (spin = 0u; spin < 200000u; spin++) {
+        if (RADIO->EVENTS_DISABLED != 0u) {
+            break;
+        }
+    }
+}
+
 /* The RADIO is shared with BLE: 15.4 mode replaces the BLE link config, and
  * the caller's radio claim (tiku_ble_adv_154_claim) keeps BLE off it. */
 int tiku_ieee154_arch_mode_154(uint8_t channel)
 {
+    listen_end();
     radio_154_linkcfg(channel);
     return 0;
 }
 
 void tiku_ieee154_arch_leave(void)
 {
+    listen_end();
     tiku_radio_arch_init();                     /* restore BLE link config    */
 }
 
@@ -123,6 +148,7 @@ int tiku_ieee154_arch_tx(const uint8_t *psdu, uint8_t len)
     if (len > TIKU_154_MAX_PSDU) {
         return -1;
     }
+    listen_end();
     tx_frame[0] = (uint8_t)(len + 2u);          /* PHR: payload + 2-byte FCS  */
     if (len != 0u) {
         memcpy(&tx_frame[1], psdu, len);
@@ -153,6 +179,7 @@ int tiku_ieee154_arch_rx(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
     uint32_t spin = 0u;
     uint8_t  got = 0u;
 
+    listen_end();
     RADIO->PACKETPTR = (uint32_t)rx_frame;
     /* RSSI is measured at the frame's start delimiter (ADDRESS), so the
      * sample read after END belongs to the frame. */
@@ -215,6 +242,7 @@ int tiku_ieee154_arch_ed(uint8_t channel, int8_t *dbm)
     uint32_t spin;
     int lvl = -1;
 
+    listen_end();
     radio_154_linkcfg(channel);
     /* EDPERIOD is fixed at 0x20 (128 us) on this silicon (Min==Max==Default);
      * leaving it 0 makes every ED period zero-length and EDEND never fires. */
@@ -274,6 +302,7 @@ int tiku_ieee154_arch_rx_ack(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
     uint32_t spin = 0u;
     uint8_t  got = 0u, ack = 0u;
 
+    listen_end();
     RADIO->TIFS = 192u;                          /* aTurnaroundTime (12 sym)  */
     RADIO->PACKETPTR = (uint32_t)rx_frame;
     /* RX with the turnaround pre-armed; commit or abort inside the window. */
@@ -381,6 +410,7 @@ int tiku_ieee154_arch_cca(void)
     uint32_t spin;
     int idle = 0;
 
+    listen_end();
     /* Energy-detect CCA against a fixed ED threshold of 20; the
      * RXREADY_CCASTART short starts the measurement when the ramp ends. */
     RADIO->CCACTRL =
@@ -411,4 +441,59 @@ int tiku_ieee154_arch_cca(void)
         }
     }
     return idle;
+}
+
+/*
+ * Background listen: one frame at a time into rx_frame.  With READY_START
+ * and no END short the radio rests in RXIDLE after a frame until take()
+ * copies it and starts the next, so a frame that ends before the take is
+ * not received.
+ */
+int tiku_ieee154_arch_listen(void)
+{
+    if (RADIO->MODE != RADIO_MODE_MODE_Ieee802154_250Kbit) {
+        return -1;
+    }
+    listen_end();
+    RADIO->PACKETPTR = (uint32_t)rx_frame;
+    RADIO->SHORTS = ((uint32_t)1u << RADIO_SHORTS_READY_START_Pos) |
+                    ((uint32_t)1u << RADIO_SHORTS_ADDRESS_RSSISTART_Pos);
+    RADIO->EVENTS_END      = 0u;
+    RADIO->EVENTS_DISABLED = 0u;
+    tiku_radio_arch_hfclk_kick();
+    RADIO->TASKS_RXEN = 1u;
+    listening = 1u;
+    return 0;
+}
+
+int tiku_ieee154_arch_listen_take(uint8_t *buf, uint8_t cap, int8_t *rssi)
+{
+    int n = -1;
+
+    if (!listening || RADIO->EVENTS_END == 0u) {
+        return 0;
+    }
+    RADIO->EVENTS_END = 0u;
+    if (RADIO->CRCSTATUS == RADIO_CRCSTATUS_CRCSTATUS_CRCOk) {
+        uint8_t phr  = rx_frame[0];
+        uint8_t plen = (phr >= 2u) ? (uint8_t)(phr - 2u) : 0u;
+        if (plen > cap) {
+            plen = cap;
+        }
+        if (plen != 0u) {
+            memcpy(buf, &rx_frame[1], plen);
+        }
+        if (rssi != 0) {
+            *rssi = (int8_t)(-(int)(RADIO->RSSISAMPLE & 0x7Fu));
+        }
+        n = (int)plen;
+    }
+    tiku_radio_arch_hfclk_kick();
+    RADIO->TASKS_START = 1u;                    /* RXIDLE -> RX: next frame  */
+    return n;
+}
+
+void tiku_ieee154_arch_listen_stop(void)
+{
+    listen_end();
 }

@@ -1971,11 +1971,12 @@ SRCS += $(wildcard tikukits/crypto/p256/*.c)
 # IEEE 802.15.4 on the same on-die RADIO: the PHY (tiku_ieee154_arch.c), the
 # frame layer and the MAC (tiku_154.c).  Code tests the TIKU_HAS_154
 # capability, not the chip; TIKU_CAP_154 lets the radio154 shell command
-# build when it is requested.
+# build when it is requested.  The PHY listens in the background
+# (TIKU_HAS_154_LISTEN), which /sys/radio/154 needs.
 SRCS += arch/nordic/tiku_ieee154_arch.c
 SRCS += interfaces/radio/tiku_154_frame.c
 SRCS += interfaces/radio/tiku_154.c
-CFLAGS += -DTIKU_HAS_154=1
+CFLAGS += -DTIKU_HAS_154=1 -DTIKU_HAS_154_LISTEN=1
 TIKU_CAP_154 := 1
 # FLPR (the VPR RISC-V coprocessor), opt-in: builds the FLPR firmware
 # (arch/nordic/flpr/) with the xPack riscv-none-elf toolchain under the
@@ -2900,6 +2901,7 @@ SRCS += kernel/vfs/tree/tiku_vfs_tree_power.c
 SRCS += kernel/cpu/tiku_power_policy.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_net.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_wifi.c
+SRCS += kernel/vfs/tree/tiku_vfs_tree_radio154.c  # /sys/radio/154 (154 listen)
 SRCS += kernel/vfs/tree/tiku_vfs_tree_persist.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_layout.c
 SRCS += kernel/vfs/tree/tiku_vfs_tree_watch.c

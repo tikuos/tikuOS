@@ -84,4 +84,74 @@ int tiku_154_send(uint16_t dst, const uint8_t *payload, uint8_t len,
 int tiku_154_recv(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
                   tiku_154_rx_t *info);
 
+#if (TIKU_HAS_154_LISTEN + 0)
+/*
+ * Raw frames and a background listen, where the PHY listens in the
+ * background (TIKU_HAS_154_LISTEN): the frames are PSDUs as the PHY sends and
+ * receives them, with no MAC header added or removed.  The listen holds the
+ * radio from tiku_154_listen(1) to tiku_154_listen(0); a send or an energy
+ * measurement meanwhile pauses it.  Received frames with a good FCS are held
+ * in a ring of TIKU_154_HELD_BYTES bytes, two more than each frame, until
+ * tiku_154_take() takes them; a frame that does not fit is dropped.
+ */
+
+/** @brief Bytes of the ring of held frames. */
+#ifndef TIKU_154_HELD_BYTES
+#define TIKU_154_HELD_BYTES  256u
+#endif
+
+/**
+ * @brief Start (@p on non-zero) or end the background listen on the channel
+ *        tiku_154_channel() names.
+ * @return 0, or -1 when the radio cannot be taken
+ */
+int tiku_154_listen(int on);
+
+/** @brief 1 while the background listen runs. */
+int tiku_154_listening(void);
+
+/** @brief The channel the raw frames and the listen use (11..26). */
+uint8_t tiku_154_channel(void);
+
+/**
+ * @brief Set the channel (clamped 11..26), the one the MAC also uses; a
+ *        running listen moves to it.
+ */
+void tiku_154_tune(uint8_t channel);
+
+/**
+ * @brief Send one raw frame on tiku_154_channel(), with no CCA.
+ * @param psdu  The frame without its FCS, which the PHY appends
+ * @param len   1..TIKU_154_MAX_PSDU
+ * @return 0 sent, -1 bad length, -2 the radio cannot be taken or the
+ *         transmission timed out
+ */
+int tiku_154_send_raw(const uint8_t *psdu, uint8_t len);
+
+/**
+ * @brief Measure the energy on tiku_154_channel().
+ * @param dbm  Out, optional: the level in dBm
+ * @return the raw ED level (0..255), or -1 when the radio cannot be taken or
+ *         the measurement times out
+ */
+int tiku_154_energy(int8_t *dbm);
+
+/**
+ * @brief Take the oldest held frame.
+ * @param cap   Size of @p buf; a longer frame is cut to it and the rest lost
+ * @param rssi  Out, optional: its level in dBm
+ * @return the bytes copied, 0 when no frame is held
+ */
+int tiku_154_take(uint8_t *buf, uint8_t cap, int8_t *rssi);
+
+/** @brief The number of frames held. */
+uint8_t tiku_154_held(void);
+
+/**
+ * @brief Call @p fn, outside interrupt context, after a drain of the listen
+ *        that held at least one frame; NULL removes it.
+ */
+void tiku_154_set_rx_notify(void (*fn)(void));
+#endif /* TIKU_HAS_154_LISTEN */
+
 #endif /* TIKU_154_H_ */

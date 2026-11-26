@@ -19,6 +19,12 @@
 #include <hal/tiku_ieee154_hal.h>              /* PHY, hold, AES-CCM*        */
 #include "tiku.h"                              /* the platform's tick, clock */
 #include <kernel/memory/tiku_mem.h>            /* durable frame-counter cell  */
+#if (TIKU_HAS_154_LISTEN + 0)
+#include <kernel/timers/tiku_timer.h>          /* the listen's drain timer   */
+#if (TIKU_HAS_BLE_ADV + 0)
+#include <interfaces/bluetooth/tiku_ble_adv.h> /* radio arbiter              */
+#endif
+#endif
 #include <string.h>
 
 /* Link security: level 6 (ENC-MIC-64) AES-CCM*, key-id-mode 0 (implicit). */
@@ -450,3 +456,246 @@ int tiku_154_recv(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
     tiku_ieee154_arch_hold(0);
     return ret;
 }
+
+#if (TIKU_HAS_154_LISTEN + 0)
+/*---------------------------------------------------------------------------*/
+/* RAW FRAMES AND THE BACKGROUND LISTEN                                      */
+/*---------------------------------------------------------------------------*/
+/*
+ * A callback timer drains the PHY's listen every tick into the ring, each
+ * frame held as [length][rssi][bytes].  Where the radio is shared with BLE
+ * (TIKU_HAS_BLE_ADV) the arbiter's 802.15.4 claim is held while the radio is
+ * in 15.4 mode.
+ */
+
+static uint8_t  held_ring[TIKU_154_HELD_BYTES];
+static uint16_t held_head;                       /* oldest byte              */
+static uint16_t held_used;                       /* bytes in the ring        */
+static uint8_t  held_frames;
+static uint8_t  listen_on;
+static struct tiku_timer listen_timer;
+static void   (*listen_notify)(void);
+
+/** @brief Claim the radio for 802.15.4 from its arbiter, where it has one.
+ *  @return 0, or -1 when another owner holds it */
+static int radio_claim(void)
+{
+#if (TIKU_HAS_BLE_ADV + 0)
+    return tiku_ble_adv_154_claim();
+#else
+    return 0;
+#endif
+}
+
+/** @brief Give the claim back. */
+static void radio_release(void)
+{
+#if (TIKU_HAS_BLE_ADV + 0)
+    tiku_ble_adv_154_release();
+#endif
+}
+
+/** @brief Take the radio and put it in 15.4 mode on mac_chan.
+ *  @return 0, or -1 when it cannot be taken */
+static int radio_take(void)
+{
+    if (radio_claim() != 0) {
+        return -1;
+    }
+    if (tiku_ieee154_arch_mode_154(mac_chan) != 0) {
+        radio_release();
+        return -1;
+    }
+    tiku_ieee154_arch_hold(1);
+    return 0;
+}
+
+/** @brief Hand the radio back after radio_take(). */
+static void radio_give(void)
+{
+    tiku_ieee154_arch_hold(0);
+    tiku_ieee154_arch_leave();
+    radio_release();
+}
+
+/** @brief Append one byte to the ring; the caller checked the room. */
+static void held_put(uint8_t b)
+{
+    held_ring[(uint16_t)((held_head + held_used) % TIKU_154_HELD_BYTES)] = b;
+    held_used++;
+}
+
+/** @brief Remove the oldest byte of the ring. */
+static uint8_t held_get(void)
+{
+    uint8_t b = held_ring[held_head];
+    held_head = (uint16_t)((held_head + 1u) % TIKU_154_HELD_BYTES);
+    held_used--;
+    return b;
+}
+
+/**
+ * @brief Move the frames the PHY's listen holds into the ring.
+ * @return 1 when a frame was held
+ */
+static uint8_t listen_drain(void)
+{
+    uint8_t frame[TIKU_154_MAX_PSDU];
+    uint8_t got = 0u, tries;
+
+    for (tries = 0u; tries < 4u; tries++) {
+        int8_t rssi = 0;
+        int n = tiku_ieee154_arch_listen_take(frame, sizeof(frame), &rssi);
+        uint8_t i;
+
+        if (n == 0) {
+            break;
+        }
+        if (n < 0 || (uint16_t)(TIKU_154_HELD_BYTES - held_used) <
+                         (uint16_t)((uint16_t)n + 2u)) {
+            continue;                    /* bad FCS, or no room: dropped     */
+        }
+        held_put((uint8_t)n);
+        held_put((uint8_t)rssi);
+        for (i = 0u; i < (uint8_t)n; i++) {
+            held_put(frame[i]);
+        }
+        held_frames++;
+        got = 1u;
+    }
+    return got;
+}
+
+/** @brief The listen's timer: drain, call the notify hook, run again. */
+static void listen_tick(void *ptr)
+{
+    (void)ptr;
+    if (!listen_on) {
+        return;
+    }
+    if (listen_drain() && listen_notify != (void (*)(void))0) {
+        listen_notify();
+    }
+    tiku_timer_reset(&listen_timer);
+}
+
+int tiku_154_listen(int on)
+{
+    if (on == 0) {
+        if (listen_on) {
+            listen_on = 0u;
+            tiku_timer_stop(&listen_timer);
+            (void)listen_drain();
+            tiku_ieee154_arch_listen_stop();
+            radio_give();
+        }
+        return 0;
+    }
+    if (listen_on) {
+        return 0;
+    }
+    if (radio_take() != 0) {
+        return -1;
+    }
+    if (tiku_ieee154_arch_listen() != 0) {
+        radio_give();
+        return -1;
+    }
+    listen_on = 1u;
+    tiku_timer_set_callback(&listen_timer, 1u, listen_tick, (void *)0);
+    return 0;
+}
+
+int tiku_154_listening(void)
+{
+    return listen_on;
+}
+
+uint8_t tiku_154_channel(void)
+{
+    return mac_chan;
+}
+
+void tiku_154_tune(uint8_t channel)
+{
+    mac_chan = clamp_chan(channel);
+    if (listen_on) {
+        (void)listen_drain();
+        tiku_ieee154_arch_listen_stop();
+        tiku_ieee154_arch_set_channel(mac_chan);
+        (void)tiku_ieee154_arch_listen();
+    }
+}
+
+int tiku_154_send_raw(const uint8_t *psdu, uint8_t len)
+{
+    int rc;
+
+    if (len == 0u || len > TIKU_154_MAX_PSDU) {
+        return -1;
+    }
+    if (listen_on) {
+        (void)listen_drain();            /* the transmission ends the listen */
+    } else if (radio_take() != 0) {
+        return -2;
+    }
+    rc = tiku_ieee154_arch_tx(psdu, len);
+    if (listen_on) {
+        (void)tiku_ieee154_arch_listen();
+    } else {
+        radio_give();
+    }
+    return (rc == 0) ? 0 : -2;
+}
+
+int tiku_154_energy(int8_t *dbm)
+{
+    int lvl;
+
+    if (listen_on) {
+        (void)listen_drain();
+    } else if (radio_take() != 0) {
+        return -1;
+    }
+    lvl = tiku_ieee154_arch_ed(mac_chan, dbm);
+    if (listen_on) {
+        (void)tiku_ieee154_arch_listen();
+    } else {
+        radio_give();
+    }
+    return lvl;
+}
+
+int tiku_154_take(uint8_t *buf, uint8_t cap, int8_t *rssi)
+{
+    uint8_t len, i;
+    int8_t  level;
+
+    if (held_frames == 0u) {
+        return 0;
+    }
+    len = held_get();
+    level = (int8_t)held_get();
+    for (i = 0u; i < len; i++) {
+        uint8_t b = held_get();
+        if (i < cap) {
+            buf[i] = b;
+        }
+    }
+    held_frames--;
+    if (rssi != 0) {
+        *rssi = level;
+    }
+    return (int)((len < cap) ? len : cap);
+}
+
+uint8_t tiku_154_held(void)
+{
+    return held_frames;
+}
+
+void tiku_154_set_rx_notify(void (*fn)(void))
+{
+    listen_notify = fn;
+}
+#endif /* TIKU_HAS_154_LISTEN */

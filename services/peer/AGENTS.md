@@ -59,6 +59,11 @@ serves both sides of the TikuComputer-nRF.  The `peer` shell command lists
 the peers, calls the lifecycle, sets the link's speed, and sends, listens
 and pings on an endpoint.
 
+Through the mount the MSP430 of a TikuComputer-nRF uses the nRF54L10's
+radio as files: the nRF's `sys/radio/154` sends and receives 802.15.4
+frames, and its `sys/bt/scan` starts a Bluetooth scan and lists what it
+found.
+
 ## The wire driver
 
 One physical link, a channel of `tiku_ipc_mux` per service, and on each

@@ -417,6 +417,12 @@ uint8_t tiku_bt_scan_results(tiku_bt_scan_entry_t *out,
                                    uint8_t max);
 
 /**
+ * @brief Copy cached scan result @p index (0 .. count() - 1) into @p out.
+ * @return 1 when there is one, 0 otherwise
+ */
+int tiku_bt_scan_entry(uint8_t index, tiku_bt_scan_entry_t *out);
+
+/**
  * @brief Drain pending HCI events and ACL packets from the transport.
  *
  * Handles at most 8 packets per call and returns at once while nothing is on

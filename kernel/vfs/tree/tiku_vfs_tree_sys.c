@@ -29,6 +29,10 @@
 #endif
 #if (TIKU_BT_HOST + 0)
 #include <interfaces/bluetooth/tiku_bt.h>  /* /sys/bt, /sys/radio/backend */
+#include <string.h>                        /* memcmp: /sys/bt/scan write  */
+#endif
+#if (TIKU_HAS_154_LISTEN + 0)
+#include "tiku_vfs_tree_radio154.h"        /* /sys/radio/154              */
 #endif
 #if (TIKU_HAS_COPROC + 0)
 #include "tiku_vfs_tree_coproc.h"
@@ -1558,7 +1562,13 @@ radio_caps_read(char *buf, size_t max)
 #endif
 }
 
+#endif /* TIKU_HAS_BLE_ADV */
+
+#if (TIKU_HAS_BLE_ADV + 0) || (TIKU_HAS_154_LISTEN + 0)
+/* /sys/radio: the broadcast facade's files where the build has it, and the
+ * 802.15.4 radio's under 154 where its PHY listens in the background. */
 static const tiku_vfs_node_t sys_radio_children[] = {
+#if (TIKU_HAS_BLE_ADV + 0)
     { "beacon",  TIKU_VFS_FILE, radio_beacon_read, radio_beacon_write,
       NULL, 0 },
     { "bursts",  TIKU_VFS_FILE, radio_bursts_read,  NULL, NULL, 0 },
@@ -1569,8 +1579,13 @@ static const tiku_vfs_node_t sys_radio_children[] = {
     { "scan",    TIKU_VFS_FILE, radio_scan_read,    NULL, NULL, 0 },
     { "txpower", TIKU_VFS_FILE, radio_txpower_read, radio_txpower_write,
       NULL, 0 },
+#endif
+#if (TIKU_HAS_154_LISTEN + 0)
+    { "154",     TIKU_VFS_DIR,  NULL, NULL, tiku_vfs_tree_radio154_children,
+      TIKU_VFS_TREE_RADIO154_NCHILD },
+#endif
 };
-#endif /* TIKU_HAS_BLE_ADV */
+#endif
 
 #if (TIKU_BT_HOST + 0)
 /*---------------------------------------------------------------------------*/
@@ -1646,12 +1661,64 @@ bt_power_write(const char *buf, size_t len)
 }
 #endif
 
-/** @brief Read handler for /sys/bt/scan: devices=N, the scan cache's count. */
+/**
+ * @brief Read handler for /sys/bt/scan: devices=N, the scan cache's count,
+ *        then each device's address, address type, RSSI in dBm and name.
+ * @return The length of the text kept in @p buf, at most @p max - 1, not
+ *         its full length
+ */
 static int
 bt_scan_read(char *buf, size_t max)
 {
-    return snprintf(buf, max, "devices=%u\n",
-                    tiku_bt_is_ready() ? (unsigned)tiku_bt_scan_count() : 0u);
+    tiku_bt_scan_entry_t e;
+    uint8_t n = tiku_bt_is_ready() ? tiku_bt_scan_count() : 0u;
+    uint8_t i;
+    size_t  at = (size_t)snprintf(buf, max, "devices=%u\n", (unsigned)n);
+    for (i = 0u; i < n && at < max && tiku_bt_scan_entry(i, &e); ++i) {
+        at = bt_put_addr(buf, max, at, e.addr);
+        if (at < max) {
+            int w = snprintf(buf + at, max - at, " %s %d%s%.*s\n",
+                             e.addr_type ? "random" : "public",
+                             (int)e.rssi_dbm, e.name_len ? " " : "",
+                             (int)e.name_len, e.name);
+            at += (w > 0) ? (size_t)w : 0u;
+        }
+    }
+    return (int)((at < max) ? at : max - 1u);
+}
+
+/**
+ * @brief Write handler for /sys/bt/scan: "on" starts an active scan, as
+ *        `bt scan` does, "on PREFIX" caches only the names that start with
+ *        PREFIX, and "off" stops it.
+ * @return 0, TIKU_VFS_EINVAL for another value, or TIKU_VFS_EIO when the
+ *         controller is off or refuses
+ */
+static int
+bt_scan_write(const char *buf, size_t len)
+{
+    char   prefix[TIKU_BT_SCAN_NAME_MAX + 1u];
+    size_t plen;
+
+    while (len > 0u && (buf[len - 1u] == '\n' || buf[len - 1u] == '\r')) {
+        --len;
+    }
+    if (len == 3u && memcmp(buf, "off", 3u) == 0) {
+        return (tiku_bt_scan_stop() == 0) ? 0 : TIKU_VFS_EIO;
+    }
+    if (len < 2u || memcmp(buf, "on", 2u) != 0 ||
+        (len > 2u && buf[2] != ' ')) {
+        return TIKU_VFS_EINVAL;
+    }
+    plen = (len > 3u) ? len - 3u : 0u;
+    if (plen > TIKU_BT_SCAN_NAME_MAX) {
+        return TIKU_VFS_EINVAL;
+    }
+    memcpy(prefix, buf + 3, plen);
+    prefix[plen] = '\0';
+    tiku_bt_scan_filter(prefix);
+    /* Active, 100 ms interval, 50 ms window, as `bt scan` asks. */
+    return (tiku_bt_scan_start(1u, 100u, 50u) == 0) ? 0 : TIKU_VFS_EIO;
 }
 
 /** @brief Read handler for /sys/bt/version: the controller's HCI and LMP
@@ -1741,7 +1808,8 @@ static const tiku_vfs_node_t sys_bt_children[] = {
 #else
     { "power",       TIKU_VFS_FILE, bt_power_read,       NULL, NULL, 0 },
 #endif
-    { "scan",        TIKU_VFS_FILE, bt_scan_read,        NULL, NULL, 0 },
+    { "scan",        TIKU_VFS_FILE, bt_scan_read, bt_scan_write, NULL, 0,
+      NULL, NULL, TIKU_VFS_CAP_HW },
     { "connections", TIKU_VFS_FILE, bt_connections_read, NULL, NULL, 0 },
     { "bonds",       TIKU_VFS_FILE, bt_bonds_read,       NULL, NULL, 0 },
     { "version",     TIKU_VFS_FILE, bt_version_read,     NULL, NULL, 0 },
@@ -2068,8 +2136,9 @@ static const tiku_vfs_node_t sys_children[] = {
 #if TIKU_CRYPTO_HW
     { "crypto",   TIKU_VFS_DIR,  NULL, NULL, sys_crypto_children, 3 },
 #endif
-#if (TIKU_HAS_BLE_ADV + 0)
-    { "radio",    TIKU_VFS_DIR,  NULL, NULL, sys_radio_children,  8 },
+#if (TIKU_HAS_BLE_ADV + 0) || (TIKU_HAS_154_LISTEN + 0)
+    { "radio",    TIKU_VFS_DIR,  NULL, NULL, sys_radio_children,
+      sizeof(sys_radio_children) / sizeof(sys_radio_children[0]) },
 #endif
 #if (TIKU_BT_HOST + 0)
     { "bt",       TIKU_VFS_DIR,  NULL, NULL, sys_bt_children,     7 },
@@ -2132,5 +2201,8 @@ tiku_vfs_tree_sys_init(void)
     /* New background-observer scan data notifies /sys/radio/scan, which
      * `watch` and the rules engine subscribe to. */
     tiku_ble_adv_set_scan_notify(radio_scan_notify_hook);
+#endif
+#if (TIKU_HAS_154_LISTEN + 0)
+    tiku_vfs_tree_radio154_init();
 #endif
 }

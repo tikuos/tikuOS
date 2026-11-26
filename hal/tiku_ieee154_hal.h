@@ -109,6 +109,32 @@ int tiku_ieee154_arch_rx_ack(uint8_t *buf, uint8_t cap, uint32_t timeout_ms,
                              uint8_t *did_ack);
 
 /**
+ * @brief Listen on the current channel in the background and return at once.
+ *
+ * Keeps one frame for tiku_ieee154_arch_listen_take().  Needs 15.4 mode and a
+ * port that sets TIKU_HAS_154_LISTEN; a transmit, receive, energy detect, CCA
+ * or leave ends it.
+ *
+ * @return 0, or -1 when the radio is not in 15.4 mode
+ */
+int tiku_ieee154_arch_listen(void);
+
+/**
+ * @brief Take the frame the background listen received, and listen again.
+ *
+ * @param buf   Out: the frame with its FCS stripped
+ * @param cap   Size of @p buf; a longer frame is truncated to it
+ * @param rssi  Out, optional: the frame's level in dBm; written only when a
+ *              frame is returned
+ * @return bytes copied, 0 when no frame has ended or the listen has ended,
+ *         -1 for a frame with a bad FCS
+ */
+int tiku_ieee154_arch_listen_take(uint8_t *buf, uint8_t cap, int8_t *rssi);
+
+/** @brief End a background listen; the radio stays in 15.4 mode, idle. */
+void tiku_ieee154_arch_listen_stop(void);
+
+/**
  * @brief Hold the radio's timing path ready across a burst of operations
  *        (@p on non-zero), then release it.  A port that needs no such hold
  *        does nothing.
