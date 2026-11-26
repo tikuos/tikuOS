@@ -83,7 +83,7 @@ def check_result(data, elapsed):
 def check_kernel_result(data, elapsed):
     """Require completed worker and kernel assertions with a two-second run."""
     required = (b"TIKU S31 kernel test v1\r\n", b"failures=0x00000000\r\n",
-                b"checks=0x00000010\r\n", b"worker_a=0x00000040\r\n",
+                b"checks=0x00000012\r\n", b"worker_a=0x00000040\r\n",
                 b"worker_b=0x00000040\r\n", b"PASS S31 kernel test\r\n")
     return (all(marker in data for marker in required) and b"FAIL" not in data
             and elapsed is not None and 1.8 < elapsed < 2.2)

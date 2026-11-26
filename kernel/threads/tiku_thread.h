@@ -248,6 +248,20 @@ uint16_t tiku_thread_canary_faults(void);
 int tiku_thread_in_kernel(void);
 
 /**
+ * @brief Sample a READY worker during a kernel dispatch.
+ *
+ * @param out Up to @p capacity addresses: PC, return address, then code
+ *        candidates from the next @p scan_words stack words.
+ * @return Address count, or zero if the worker or port cannot be sampled.
+ */
+size_t tiku_thread_sample(const tiku_thread_t *worker, uintptr_t *out,
+                          size_t capacity, size_t scan_words);
+
+/** @brief Port hook to decode a saved frame within @p bytes of stack. */
+size_t tiku_thread_arch_sample(const uint32_t *frame, size_t bytes,
+                               uintptr_t *out, size_t capacity, size_t scan_words);
+
+/**
  * @brief Number of worker slots to iterate (TIKU_THREADS_MAX); an empty one
  *        reads NULL from tiku_thread_get().
  */

@@ -20,6 +20,7 @@ SECTIONS
     .text : ALIGN(64) {
         KEEP(*(.text.entry))
         *(.text .text.*)
+        _etext = .;
         *(.rodata .rodata.* .srodata .srodata.*)
     } > SRAM
     .data : ALIGN(4) {

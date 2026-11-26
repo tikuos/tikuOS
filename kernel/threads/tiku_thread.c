@@ -364,6 +364,29 @@ tiku_thread_t *tiku_thread_self(void)
     return s_current;
 }
 
+extern size_t tiku_thread_arch_sample(const uint32_t *, size_t, uintptr_t *,
+                                      size_t, size_t) __attribute__((weak));
+
+size_t tiku_thread_sample(const tiku_thread_t *worker, uintptr_t *out,
+                          size_t capacity, size_t scan_words)
+{
+    uintptr_t base, frame;
+    size_t used;
+
+    /* While the kernel is dispatching, the switcher keeps it on the CPU. */
+    if (worker == NULL || out == NULL || capacity == 0 || s_current != NULL ||
+        !s_kernel_ready || worker->slot >= TIKU_THREADS_MAX ||
+        s_threads[worker->slot] != worker || worker->state != TIKU_THREAD_READY ||
+        tiku_thread_arch_sample == NULL) return 0;
+    base = (uintptr_t)worker->stack_base;
+    frame = (uintptr_t)worker->sp;
+    if (base == 0 || frame <= base || frame % sizeof(uint32_t) != 0) return 0;
+    used = frame - base;
+    if (used >= worker->stack_size) return 0;
+    return tiku_thread_arch_sample(worker->sp, worker->stack_size - used,
+                                   out, capacity, scan_words);
+}
+
 int tiku_thread_next_deadline(unsigned long *at)
 {
     tiku_clock_time_t now = tiku_clock_time();

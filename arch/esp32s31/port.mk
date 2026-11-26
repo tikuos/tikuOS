@@ -75,7 +75,7 @@ S31_FLAGS := $(S31_ARCH) -Os -g3 -Wall -Wextra -Werror \
     -DTIKU_BOARD_ESP32S31_KORVO1=1 -DTIKU_THREADS_ENABLE=1 \
     -DTIKU_MEM_NVM_ENABLE=0 -DTIKU_S31_PSRAM_MHZ=$(S31_PSRAM_MHZ) \
     -DTIKU_S31_CPU_MHZ=$(S31_CPU_MHZ)
-S31_SRCS := arch/esp32s31/tiku_runtime_arch.c arch/esp32s31/tiku_clock_arch.c \
+S31_SRCS := arch/esp32s31/tiku_thread_sample.c arch/esp32s31/tiku_runtime_arch.c arch/esp32s31/tiku_clock_arch.c \
     arch/esp32s31/tiku_watchdog_arch.c \
     arch/esp32s31/tiku_i2c_arch.c interfaces/bus/tiku_i2c_bus.c \
     interfaces/gpio/tiku_gpio_owner.c \

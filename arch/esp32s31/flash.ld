@@ -26,11 +26,14 @@ SECTIONS
         *(.rodata .rodata.* .srodata .srodata.*)
     } > DROM
     .flash.text : {
+        __tiku_s31_irom_start = .;
         *(.flash.text)
+        __tiku_s31_irom_end = .;
     } > IROM
     .text : ALIGN(64) {
         KEEP(*(.text.entry))
         *(.text .text.*)
+        _etext = .;
     } > SRAM
     .data : ALIGN(4) {
         *(.data .data.* .sdata .sdata.*)
