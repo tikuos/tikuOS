@@ -43,7 +43,9 @@ selects no optional providers.  `boot/tiku_boot_vfs.c` selects them: the
 shell's `/sys/rules` and `/sys/jobs` (`shell/tiku_shell_vfs.c`), the init
 table's `/sys/init` (`services/init/tiku_init_vfs.c`), tinymcp's
 `/sys/mcp` (`services/tinymcp/tiku_mcp_vfs.c`), BASIC's `/data/basic`
-(`basic/tiku_basic_vfs.c`) and the applications overlay's `/gui`.  Provider nodes and child tables must have static lifetime.  Rules,
+(`basic/tiku_basic_vfs.c`) and the applications overlay's `/gui`.  A boot
+node mounts under `/`, `/sys` or `/dev`; a name a static child of that
+parent holds is refused (ECONFLICT).  Provider nodes and child tables must have static lifetime.  Rules,
 jobs and init are mounts and list after the static `/sys` children; BASIC
 is a static `/data` child ahead of the dynamic files; a runtime mount under
 a dynamic directory is refused (EACCES).  An invalid configuration, a
@@ -123,7 +125,9 @@ because a link reply is bounded.
 
 `tiku_vfs_read_at(path, offset, buf, max, &total)` copies a node's bytes
 from `offset` on, with no NUL, and reports the full length; 0 bytes means
-the end.  A node whose descriptor carries a `read_at` producer
+the end.  It reads only a file with a text `read` handler: a node that has
+a producer and no text handler is refused (EACCES), so a character device
+carries both.  A node whose descriptor carries a `read_at` producer
 (`TIKU_VFS_DESC_STREAM`) and a dynamic file whose directory has a `read_at`
 op serve every offset, so a reader holding one small buffer walks content
 of any length.  `/sys/vfs/manifest` (`tiku_vfs_manifest_at()`) and the

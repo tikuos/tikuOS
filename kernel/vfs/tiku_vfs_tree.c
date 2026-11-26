@@ -59,7 +59,8 @@ static int config_valid(const tiku_vfs_tree_config_t *config)
             return TIKU_VFS_EINVAL;
         }
         at_root = strcmp(entry->parent, "/") == 0;
-        if (!at_root && strcmp(entry->parent, "/sys") != 0) {
+        if (!at_root && strcmp(entry->parent, "/sys") != 0 &&
+            strcmp(entry->parent, "/dev") != 0) {
             return TIKU_VFS_EINVAL;
         }
         if (tiku_vfs_validate_node(entry->node, at_root ? 0u : 4u) != 0) {
@@ -72,7 +73,8 @@ static int config_valid(const tiku_vfs_tree_config_t *config)
                 return TIKU_VFS_ECONFLICT;
             }
         } else {
-            parent = tiku_vfs_tree_sys_get();
+            parent = strcmp(entry->parent, "/dev") == 0 ?
+                tiku_vfs_tree_dev_get() : tiku_vfs_tree_sys_get();
             for (j = 0; j < parent->child_count; j++) {
                 if (!strcmp(entry->node->name, parent->children[j].name)) {
                     return TIKU_VFS_ECONFLICT;

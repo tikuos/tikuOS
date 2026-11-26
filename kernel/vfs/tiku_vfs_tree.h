@@ -26,7 +26,7 @@
 #define TIKU_VFS_BOOT_PEER_NODES 0u
 #endif
 
-/** @brief Most subtrees a tree config mounts under "/" or "/sys". */
+/** @brief Most subtrees a tree config mounts under "/", "/sys" or "/dev". */
 #if (TIKU_IPC_ENABLE + 0)
 #define TIKU_VFS_BOOT_NODES_MAX (6u + TIKU_VFS_BOOT_PEER_NODES + \
     2u * (TIKU_SD_FAT_ENABLE + TIKU_MEDIA_FS_ENABLE))
@@ -36,9 +36,9 @@
 /** @brief Most static children a tree config places under /data. */
 #define TIKU_VFS_DATA_CHILDREN_MAX 1u
 
-/** @brief Optional subtree attached under "/" or "/sys" at boot. */
+/** @brief Optional subtree attached under "/", "/sys" or "/dev" at boot. */
 typedef struct {
-    const char *parent;            /**< "/" or "/sys"                      */
+    const char *parent;            /**< "/", "/sys" or "/dev"              */
     const tiku_vfs_node_t *node;   /**< subtree root, its name free there  */
 } tiku_vfs_boot_node_t;
 
