@@ -30,6 +30,36 @@
 #include <interfaces/bus/tiku_i2c_bus.h>
 #include <interfaces/bus/tiku_spi_bus.h>
 #include <stdio.h>
+#ifdef TIKU_VFS_TRNG_HEADER
+#include TIKU_VFS_TRNG_HEADER
+
+/** @brief Read one word for the text interface. */
+static int random_text(char *buf, size_t max)
+{
+    uint32_t word;
+
+    if (tiku_trng_arch_read_u32(&word) != TIKU_TRNG_OK) return TIKU_VFS_EIO;
+    return snprintf(buf, max, "%08lx\n", (unsigned long)word);
+}
+
+/** @brief One sample of up to 64 bytes per kernel call. */
+static int random_bytes(uint32_t offset, char *buf, size_t max, uint32_t *total)
+{
+    size_t n = max < 64u ? max : 64u;
+
+    if (total != NULL) *total = 0;
+    if (offset != 0) return 0;
+    if (tiku_trng_arch_read_bytes((uint8_t *)buf, n) != TIKU_TRNG_OK)
+        return TIKU_VFS_EIO;
+    if (total != NULL) *total = (uint32_t)n;
+    return (int)n;
+}
+
+static const tiku_vfs_desc_t random_desc = {
+    .fresh = TIKU_VFS_FRESH_LIVE, .ecost = TIKU_VFS_E_PERIPH,
+    .flags = TIKU_VFS_DF_CHAR | TIKU_VFS_DF_READ_CONSUMES, .read_at = random_bytes
+};
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* LED STATE                                                                 */
@@ -554,6 +584,10 @@ static const tiku_vfs_node_t dev_children[] = {
     { "console",  TIKU_VFS_FILE, console_read, console_write, NULL, 0,
       &desc_console },
     { "null",     TIKU_VFS_FILE, devnull_read, devnull_write, NULL, 0 },
+#ifdef TIKU_VFS_TRNG_HEADER
+    { "random",   TIKU_VFS_FILE, random_text, NULL, NULL, 0, &random_desc },
+    { "urandom",  TIKU_VFS_FILE, random_text, NULL, NULL, 0, &random_desc },
+#endif
     { "zero",     TIKU_VFS_FILE, devzero_read, NULL, NULL, 0 },
     { "gpio",     TIKU_VFS_DIR,  NULL, NULL,
       tiku_vfs_tree_gpio_children,     TIKU_VFS_TREE_GPIO_NPORTS },

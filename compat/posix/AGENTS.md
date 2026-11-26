@@ -44,6 +44,11 @@ it; it never succeeds without doing its work. A constant process id, a lock
 that does nothing or an `fsync` that writes nothing is not an
 implementation.
 
+On the S31, `/dev/random` and `/dev/urandom` are read-only character
+devices. Each POSIX read returns up to 64 fresh hardware bytes. A source
+fault returns `EIO`. Seeking returns `ESPIPE`. A zero-length read consumes
+no entropy. A process and a worker use the same VFS nodes.
+
 ## The time group
 
 `tiku_posix_time.c`. None of these calls waits: a process and a worker

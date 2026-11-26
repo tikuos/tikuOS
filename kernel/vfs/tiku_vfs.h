@@ -205,6 +205,8 @@ typedef enum {
 #define TIKU_VFS_DF_READ_EFFECT   0x0008u
 /** Read removes data from a stream or queue */
 #define TIKU_VFS_DF_READ_CONSUMES 0x0010u
+/** Character device: each POSIX read calls read_at at offset zero. */
+#define TIKU_VFS_DF_CHAR          0x0020u
 
 /**
  * @brief A decoded, machine-usable node value.

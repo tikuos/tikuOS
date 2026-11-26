@@ -30,6 +30,11 @@ The other modules under `tree/` serve /sys/mem/layout, /sys/net,
 processor's tree, is `services/peer/tiku_peer_mount.c`
 (`services/peer/AGENTS.md`).
 
+The S31 registers `/dev/random` and `/dev/urandom` under `/dev`. A text
+read renders a hardware word in hex. A byte read at offset zero samples
+up to 64 bytes. A positive offset ends that sample. Both nodes carry
+`TIKU_VFS_DF_READ_CONSUMES` and `TIKU_VFS_DF_CHAR`.
+
 ## Boot assembly
 
 `tiku_vfs_tree_init(config)` builds the core namespace; a NULL config

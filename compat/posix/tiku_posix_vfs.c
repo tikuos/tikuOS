@@ -33,7 +33,7 @@
 typedef struct {
     uint8_t used;
     uint8_t dir;
-    uint8_t reads, writes, events;
+    uint8_t reads, writes, events, character;
     uint32_t offset;
     tiku_vfs_reader_t reader;
     char path[TIKU_VFS_PATH_MAX];
@@ -166,6 +166,11 @@ static uint32_t node_id(const char *path, const char *child)
     return h != 0u ? h : 1u;
 }
 
+static int node_character(const tiku_vfs_node_t *node)
+{
+    return node != NULL && node->desc != NULL && (node->desc->flags & TIKU_VFS_DF_CHAR);
+}
+
 /** @brief A stat of @p path: a directory, or a file whose mode bits are its
  *         node's handlers, read 0444 and write 0200; a dynamic directory's
  *         child is 0444. */
@@ -176,7 +181,7 @@ static void fill_stat(struct stat *st, int dir, const char *path)
     memset(st, 0, sizeof *st);
     st->st_mode = dir ? (S_IFDIR | 0555)
                 : node == NULL ? (S_IFREG | 0444)
-                : (mode_t)(S_IFREG | (node_reads(node) ? 0444 : 0) |
+                : (mode_t)((node_character(node) ? S_IFCHR : S_IFREG) | (node_reads(node) ? 0444 : 0) |
                            (node->write != NULL ? 0200 : 0));
     st->st_nlink = 1;
     st->st_ino = (ino_t)node_id(path, NULL);
@@ -209,6 +214,7 @@ static int op_open(struct posix_call *c)
         if (!fds[i].used) {
             fds[i] = (posix_fd_t){ .used = 1u, .dir = (uint8_t)kind,
                                    .reads = (uint8_t)read, .writes = (uint8_t)write };
+            fds[i].character = (uint8_t)node_character(node);
             fds[i].events = node != NULL && node == tiku_vfs_resolve("/sys/vfs/events");
             if (fds[i].events) tiku_vfs_events_join(&fds[i].reader);
             strcpy(fds[i].path, c->path);
@@ -257,6 +263,10 @@ static int op_read(struct posix_call *c)
     if (f == NULL || !f->reads) return -EBADF;
     if (f->dir) return -EISDIR;
     if (c->n == 0u) return 0;
+    if (f->character) {
+        r = tiku_vfs_read_at(f->path, 0, c->buf, c->n, NULL);
+        return r < 0 ? -vfs_errno(r) : r;
+    }
     if (f->events) return events_read(f, c);
     r = tiku_vfs_read_at(f->path, f->offset, scratch, sizeof scratch, NULL);
     if (r < 0) return -vfs_errno(r);
@@ -285,6 +295,7 @@ static int op_lseek(struct posix_call *c)
     long long to;
 
     if (f == NULL) return -EBADF;
+    if (f->character) return -ESPIPE;
     if (f->dir) return -EINVAL;
     if (c->whence == SEEK_SET) to = (long long)c->offset;
     else if (c->whence == SEEK_CUR) to = (long long)f->offset + (long long)c->offset;
@@ -370,7 +381,8 @@ static void pick_child(const tiku_vfs_node_t *node, void *ctx)
     if (p->seen++ != p->want) return;
     strncpy(p->d->entry.d_name, node->name, sizeof p->d->entry.d_name - 1u);
     p->d->entry.d_name[sizeof p->d->entry.d_name - 1u] = '\0';
-    p->d->entry.d_type = (node->type == TIKU_VFS_DIR) ? DT_DIR : DT_REG;
+    p->d->entry.d_type = (node->type == TIKU_VFS_DIR) ? DT_DIR :
+                         node_character(node) ? DT_CHR : DT_REG;
     p->d->entry.d_ino = (ino_t)node_id(p->d->path, p->d->entry.d_name);
     p->found = 1u;
 }
