@@ -5,10 +5,11 @@ TikuOS is an operating system for ubiquitous computers, designed around the micr
   <tr>
     <td width="50%" align="center" valign="top">
       <img src=".github/images/tikusurface-desktop.png" alt="TikuSurface desktop with Tracker open on the SD card" width="100%"><br>
-      <em>The ESP32-S31-Korvo-1 runs the TikuSurface graphical desktop locally on TikuOS.</em>
+      <sub><em>The ESP32-S31-Korvo-1 runs the TikuSurface graphical desktop locally on TikuOS.</em></sub>
     </td>
     <td width="50%" align="center" valign="top">
-      <img src=".github/images/tikuos-shell.png" alt="TikuOS serial shell showing flash storage usage on the ESP32-S31" width="100%">
+      <img src=".github/images/tikuos-shell.png" alt="TikuOS serial shell showing flash storage usage on the ESP32-S31" width="100%"><br>
+      <sub><em>The TikuOS shell provides a common command-line interface across supported boards.</em></sub>
     </td>
   </tr>
 </table>
