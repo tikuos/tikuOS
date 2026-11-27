@@ -41,6 +41,9 @@
 #if TIKU_IPC_ENABLE
 #include "tiku_boot_ipc.h"
 #endif
+#if (TIKU_MAILBOX_ENABLE + 0)
+#include <services/mailbox/tiku_mailbox_vfs.h>
+#endif
 #include "hal/tiku_cpu.h"        /* tiku_cpu_irq_enable() at boot-complete */
 #if defined(PLATFORM_MSP430)
 #include "arch/msp430/tiku_uart_arch.h"
@@ -320,6 +323,10 @@ tiku_boot_init_services(void)
 #if TIKU_IPC_ENABLE
     if (tiku_boot_ipc_init() != 0)
         return TIKU_BOOT_ERROR;
+#endif
+#if (TIKU_MAILBOX_ENABLE + 0)
+    /* After the peers start, so the bus goes to a peer already powered. */
+    tiku_mailbox_start();
 #endif
 
     return TIKU_BOOT_SUCCESS;

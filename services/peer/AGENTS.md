@@ -120,6 +120,12 @@ speed is one of the link UART's rows: 9600, 19200, 38400, 115200, 230400,
 the TikuComputer-nRF.  A peer on the console line keeps the console's speed,
 and the call returns `TIKU_PEER_ERR_DRIVER` there.
 
+`<peer>/ctl` also carries notices: one message saying that something on a
+topic changed, which `tiku_peer_ctl_notice()` sends to every peer and
+`tiku_peer_ctl_on_notice()` hands to a hook on the other side.  Notices on
+one topic not yet sent become one.  The shared mailbox
+(`services/mailbox/AGENTS.md`) is the topic in use.
+
 The change is made on `<peer>/ctl` by the "Peer control" process
 (`tiku_peer_ctl.c`, messages in `tiku_peer_ctl.h`):
 

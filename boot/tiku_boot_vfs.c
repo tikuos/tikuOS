@@ -27,6 +27,9 @@
 #include <services/peer/tiku_peer_mount.h>
 #endif
 #endif
+#if (TIKU_MAILBOX_ENABLE + 0)
+#include <services/mailbox/tiku_mailbox_vfs.h>
+#endif
 #if TIKU_SHELL_ENABLE
 #include <shell/tiku_shell_vfs.h>
 #endif
@@ -79,6 +82,11 @@ static int assemble(void)
     };
     nodes[config.node_count++] = (tiku_vfs_boot_node_t){
         "/", tiku_peer_mount_get()
+    };
+#endif
+#if (TIKU_MAILBOX_ENABLE + 0)
+    nodes[config.node_count++] = (tiku_vfs_boot_node_t){
+        "/", tiku_mailbox_vfs_get()
     };
 #endif
 #if TIKU_SHELL_ENABLE

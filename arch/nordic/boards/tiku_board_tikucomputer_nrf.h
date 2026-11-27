@@ -81,6 +81,16 @@
 #define TIKU_BOARD_WAKE_PIN         2u
 #define TIKU_BOARD_WAKE_HIGH        1u
 
+/**
+ * @brief The shared bus's handshake, in GPIO interface numbers (1 = P0).
+ *        This side holds the bus by default: P0.03 (to MSP430 P3.6) is its
+ *        busy line, and P0.02, the wake line above, the MSP430's request.
+ */
+#define TIKU_BOARD_SHARE_REQ_PORT   1u
+#define TIKU_BOARD_SHARE_REQ_PIN    2u
+#define TIKU_BOARD_SHARE_BUSY_PORT  1u
+#define TIKU_BOARD_SHARE_BUSY_PIN   3u
+
 /*---------------------------------------------------------------------------*/
 /* CONSOLE UART                                                              */
 /*---------------------------------------------------------------------------*/

@@ -36,6 +36,14 @@
 /** @brief Length of the reset pulse, in microseconds. */
 #define CTL_RESET_US  100u
 
+/** @brief Microseconds a raised request settles before the busy line is
+ *         read: longer than the trip through both pins, so the two sides
+ *         never both read the other's line low. */
+#define CTL_SETTLE_US 2u
+
+/** @brief Microseconds between reads of the busy line. */
+#define CTL_POLL_US   10u
+
 /** @brief Owner name of the claimed control pins. */
 static const char ctl_owner[] = "board";
 
@@ -44,6 +52,10 @@ static struct {
     uint8_t sel0, sel1, dir, ren, out;
     uint8_t valid;
 } link_saved;
+
+/** @brief The owner the bus goes back to, and 1 while a borrow holds it. */
+static uint8_t bus_default = TIKU_BOARD_BUS_HOST;
+static uint8_t borrowed;
 
 /*---------------------------------------------------------------------------*/
 /* HELPERS                                                                   */
@@ -114,6 +126,18 @@ ctl_bus_set(uint8_t owner)
     P4OUT &= (uint8_t)~CTL_EN_N;
 }
 
+/** @brief Give the bus to the coprocessor when it is the default owner and
+ *         the rail, its supply and no borrow are in the way. */
+static void
+ctl_bus_settle(void)
+{
+    if (bus_default == TIKU_BOARD_BUS_COPROC && borrowed == 0u &&
+        ctl_rail_on() != 0u && ctl_power_on() != 0u &&
+        ctl_bus_now() != TIKU_BOARD_BUS_COPROC) {
+        ctl_bus_set(TIKU_BOARD_BUS_COPROC);
+    }
+}
+
 /*---------------------------------------------------------------------------*/
 /* PUBLIC FUNCTIONS                                                          */
 /*---------------------------------------------------------------------------*/
@@ -130,6 +154,7 @@ tiku_board_ctl_rail(uint8_t on)
         P5DIR |= BIT3;
         P3DIR |= CTL_RAIL;
         P3OUT |= CTL_RAIL;
+        ctl_bus_settle();
         return TIKU_BOARD_CTL_OK;
     }
     /* The switch controls go low with the rail: the bus back to the MSP430,
@@ -181,6 +206,7 @@ tiku_board_ctl_coproc_power(uint8_t on)
             P2SEL0 = (uint8_t)((P2SEL0 & ~CTL_LINK) | link_saved.sel0);
             link_saved.valid = 0u;
         }
+        ctl_bus_settle();
         return TIKU_BOARD_CTL_OK;
     }
     if (ctl_bus_now() == TIKU_BOARD_BUS_COPROC) {
@@ -224,6 +250,7 @@ tiku_board_ctl_coproc_reset(void)
     P3DIR |= CTL_RST;
     tiku_cpu_msp430_delay_us(CTL_RESET_US);
     P3DIR &= (uint8_t)~CTL_RST;
+    ctl_bus_settle();
     return TIKU_BOARD_CTL_OK;
 }
 
@@ -241,6 +268,62 @@ tiku_board_ctl_wake(uint8_t level)
         P3OUT &= (uint8_t)~CTL_WAKE_OUT;
     }
     return TIKU_BOARD_CTL_OK;
+}
+
+int
+tiku_board_ctl_bus_default(uint8_t owner)
+{
+    ctl_claim();
+    if (owner != TIKU_BOARD_BUS_HOST && owner != TIKU_BOARD_BUS_COPROC) {
+        return TIKU_BOARD_CTL_ERR_PARAM;
+    }
+    bus_default = owner;
+    if (owner == TIKU_BOARD_BUS_HOST && borrowed == 0u &&
+        ctl_bus_now() == TIKU_BOARD_BUS_COPROC) {
+        ctl_bus_set(TIKU_BOARD_BUS_HOST);
+    }
+    ctl_bus_settle();
+    return TIKU_BOARD_CTL_OK;
+}
+
+int
+tiku_board_ctl_borrow(void)
+{
+    uint32_t waited = 0UL;
+
+    ctl_claim();
+    if (ctl_rail_on() == 0u) {
+        return TIKU_BOARD_CTL_ERR_ORDER;
+    }
+    if (ctl_bus_now() == TIKU_BOARD_BUS_COPROC && ctl_power_on() != 0u) {
+        P3OUT |= CTL_WAKE_OUT;                  /* request */
+        P3DIR |= CTL_WAKE_OUT;
+        tiku_cpu_msp430_delay_us(CTL_SETTLE_US);
+        while ((P3IN & CTL_WAKE_IN) != 0u) {    /* the coprocessor is busy */
+            if (waited >= TIKU_BOARD_CTL_BORROW_US) {
+                P3OUT &= (uint8_t)~CTL_WAKE_OUT;
+                return TIKU_BOARD_CTL_ERR_BUSY;
+            }
+            tiku_cpu_msp430_delay_us(CTL_POLL_US);
+            waited += CTL_POLL_US;
+        }
+    }
+    if (ctl_bus_now() != TIKU_BOARD_BUS_HOST) {
+        ctl_bus_set(TIKU_BOARD_BUS_HOST);
+    }
+    borrowed = 1u;
+    return TIKU_BOARD_CTL_OK;
+}
+
+void
+tiku_board_ctl_borrow_end(void)
+{
+    if (borrowed == 0u) {
+        return;
+    }
+    borrowed = 0u;
+    ctl_bus_settle();
+    P3OUT &= (uint8_t)~CTL_WAKE_OUT;
 }
 
 void

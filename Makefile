@@ -315,15 +315,16 @@ BOARD_CAPS_fr5994_launchpad    :=
 # Its MSP430 also switches the sensor rail, the bus switches and the nRF's
 # supply, reset and wake line (BOARD_CTL, interfaces/board/tiku_board_ctl.h).
 # A UART joins the two processors (LINK_UART, hal/tiku_uart_port_hal.h), and
-# each is the other's peer (PEER, interfaces/peer/tiku_peer.h).
-BOARD_CAPS_tikucomputer_msp    := FRAM_SPI FRAM_I2C BOARD_CTL LINK_UART PEER
+# each is the other's peer (PEER, interfaces/peer/tiku_peer.h).  The SPI FRAM
+# is their shared mailbox (MAILBOX, services/mailbox/AGENTS.md).
+BOARD_CAPS_tikucomputer_msp    := FRAM_SPI FRAM_I2C BOARD_CTL LINK_UART PEER MAILBOX
 # The FR6989 LaunchPad has a segment LCD wired to LCD_C.  Its LCD cap defines
 # TIKU_BOARD_HAS_LCD=1, which the LCD driver and the shell's lcd command test.
 BOARD_CAPS_fr6989_launchpad    := LCD
 BOARD_CAPS_nrf54l15_dk         :=
 BOARD_CAPS_nrf54lm20_dk        :=
 BOARD_CAPS_nrf54lv10_dk        :=
-BOARD_CAPS_tikucomputer_nrf    := FRAM_SPI FRAM_I2C LINK_UART PEER
+BOARD_CAPS_tikucomputer_nrf    := FRAM_SPI FRAM_I2C LINK_UART PEER MAILBOX
 BOARD_CAPS_nucleo_n657x0q      :=
 # EK-RA8P1: USBHS is the USB high-speed connector (J7), which
 # TIKU_DRV_USBHS_ENABLE requires.  The board's other parts (Ethernet PHY, OSPI
@@ -402,6 +403,16 @@ $(error TIKU_PEER_ENABLE=1 needs a board that declares a peer (BOARD_CAPS \
 PEER); BOARD=$(BOARD) declares none)
 endif
 override TIKU_IPC_ENABLE := 1
+endif
+
+# The shared FRAM mailbox: /mailbox on a board whose processors share an SPI
+# FRAM (BOARD_CAPS MAILBOX), services/mailbox/AGENTS.md.  Default 0.
+TIKU_MAILBOX_ENABLE ?= 0
+ifeq ($(TIKU_MAILBOX_ENABLE),1)
+ifeq (,$(call board_has,MAILBOX))
+$(error TIKU_MAILBOX_ENABLE=1 needs a board with a shared FRAM (BOARD_CAPS \
+MAILBOX); BOARD=$(BOARD) declares none)
+endif
 endif
 
 # A part the board declares (EMMC, PSRAM, NOR) gets its driver by default;
@@ -3160,6 +3171,11 @@ SRCS += shell/commands/tiku_shell_cmd_spi.c
 endif
 ifneq (,$(call board_has,FRAM_SPI)$(call board_has,FRAM_I2C))
 SRCS += shell/commands/tiku_shell_cmd_fram.c
+endif
+ifeq ($(TIKU_MAILBOX_ENABLE),1)
+CFLAGS += -DTIKU_MAILBOX_ENABLE=1
+SRCS += services/mailbox/tiku_mailbox.c services/mailbox/tiku_mailbox_vfs.c
+SRCS += shell/commands/tiku_shell_cmd_mailbox.c
 endif
 ifneq (,$(call board_has,BOARD_CTL))
 SRCS += shell/commands/tiku_shell_cmd_board.c

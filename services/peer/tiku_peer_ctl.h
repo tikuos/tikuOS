@@ -31,6 +31,12 @@
 #define TIKU_PEER_CTL_ANSWER    2u  /**< The result: yes, no or busy */
 #define TIKU_PEER_CTL_CHECK     3u  /**< Sent at the new speed by the asker */
 #define TIKU_PEER_CTL_CHECKED   4u  /**< Its answer: the change holds */
+#define TIKU_PEER_CTL_NOTICE    5u  /**< Something changed; id names what */
+/** @} */
+
+/** @defgroup TIKU_PEER_CTL_TOPICS What a notice is about: 1 to 8
+ * @{ */
+#define TIKU_PEER_CTL_TOPIC_MAILBOX  1u  /**< A file of the shared mailbox */
 /** @} */
 
 /** @defgroup TIKU_PEER_CTL_RESULTS Answers to an ASK
@@ -66,6 +72,17 @@
 /*---------------------------------------------------------------------------*/
 /* FUNCTIONS                                                                 */
 /*---------------------------------------------------------------------------*/
+
+/**
+ * @brief Tell every peer the service handles that @p topic (1 to 8) changed.
+ *        The notice goes out when the link takes it; notices on one topic
+ *        that are not yet out become one.
+ */
+void tiku_peer_ctl_notice(uint8_t topic);
+
+/** @brief Call @p fn, in the service's process, with each notice a peer
+ *         sends; NULL removes it. */
+void tiku_peer_ctl_on_notice(void (*fn)(uint8_t index, uint8_t topic));
 
 /** @brief Failed changes of speed with the peer at @p index since boot. */
 uint16_t tiku_peer_ctl_failures(uint8_t index);

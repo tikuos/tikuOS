@@ -46,6 +46,7 @@ typedef struct {
     uint8_t  tries;             /* failed tries toward want in a row */
     uint8_t  out_len;           /* a message waits to be sent */
     uint8_t  out[TIKU_PEER_CTL_MSG];
+    uint8_t  notice;            /* topics with a notice to send, a bit each */
     uint16_t restarts;          /* the peer's restart count last seen */
     uint16_t failures;
     uint32_t want;              /* the speed asked for; 0: none */
@@ -56,6 +57,7 @@ typedef struct {
 
 static side_t side[TIKU_PEER_CTL_PEERS];
 static struct tiku_timer retry_timer;
+static void (*notice_fn)(uint8_t index, uint8_t topic);
 
 TIKU_PROCESS(tiku_peer_ctl_process, "Peer control");
 
@@ -142,6 +144,12 @@ ctl_take(side_t *s, uint8_t i, const uint8_t *d)
                     ((uint32_t)d[6] << 16) | ((uint32_t)d[7] << 24);
     uint8_t op = d[1], id = d[2];
 
+    if (op == TIKU_PEER_CTL_NOTICE) {
+        if (notice_fn != 0) {
+            notice_fn(i, id);
+        }
+        return;
+    }
     if (op == TIKU_PEER_CTL_ASK) {
         /* Asked while asking: the supervisor's change goes first. */
         if (s->step == STEP_ASKED &&
@@ -307,13 +315,22 @@ side_work(uint8_t i)
         }
     }
     ctl_step(s, i, &st);
+    if (s->out_len == 0u && s->notice != 0u) {
+        uint8_t t = 1u;
+
+        while ((s->notice & (1u << (t - 1u))) == 0u) {
+            t++;
+        }
+        s->notice &= (uint8_t)~(1u << (t - 1u));
+        ctl_put(s, TIKU_PEER_CTL_NOTICE, t, 0u, 0UL);
+    }
     if (s->out_len != 0u) {
         rc = tiku_ipc_send(s->ep, s->out, s->out_len);
         if (rc != TIKU_IPC_AGAIN) {
             s->out_len = 0u;
         }
     }
-    if (s->step != STEP_IDLE || s->out_len != 0u) {
+    if (s->step != STEP_IDLE || s->out_len != 0u || s->notice != 0u) {
         return 1u;
     }
     return (s->want != 0u && s->tries < TIKU_PEER_CTL_TRIES) ? 3u : 0u;
@@ -387,6 +404,28 @@ tiku_peer_speed_wanted(uint8_t index)
         return side[index].want;
     }
     return (tiku_peer_status(index, &st) == TIKU_PEER_OK) ? st.speed : 0u;
+}
+
+void
+tiku_peer_ctl_notice(uint8_t topic)
+{
+    uint8_t i;
+
+    if (topic < 1u || topic > 8u) {
+        return;
+    }
+    for (i = 0; i < TIKU_PEER_CTL_PEERS; i++) {
+        if (side[i].present != 0u) {
+            side[i].notice |= (uint8_t)(1u << (topic - 1u));
+        }
+    }
+    tiku_process_poll(&tiku_peer_ctl_process);
+}
+
+void
+tiku_peer_ctl_on_notice(void (*fn)(uint8_t index, uint8_t topic))
+{
+    notice_fn = fn;
 }
 
 uint16_t

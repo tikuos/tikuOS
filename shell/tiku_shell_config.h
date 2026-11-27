@@ -532,6 +532,11 @@
 #    define TIKU_SHELL_CMD_UART 0
 #  endif
 #endif
+/* `mailbox` formats and checks the shared FRAM mailbox; it comes with
+ * TIKU_MAILBOX_ENABLE=1, a Makefile -D. */
+#ifndef TIKU_SHELL_CMD_MAILBOX
+#define TIKU_SHELL_CMD_MAILBOX (TIKU_MAILBOX_ENABLE + 0)  /**< mailbox */
+#endif
 /* `peer` lists and switches the board's peers; it comes with
  * TIKU_PEER_ENABLE=1, a Makefile -D. */
 #ifndef TIKU_SHELL_CMD_PEER
@@ -756,6 +761,12 @@
 #if TIKU_SHELL_CMD_UART && !(TIKU_BOARD_HAS_LINK_UART + 0)
 #undef  TIKU_SHELL_CMD_UART
 #define TIKU_SHELL_CMD_UART 0
+#endif
+
+/* mailbox needs the mailbox in the build. */
+#if TIKU_SHELL_CMD_MAILBOX && !(TIKU_MAILBOX_ENABLE + 0)
+#undef  TIKU_SHELL_CMD_MAILBOX
+#define TIKU_SHELL_CMD_MAILBOX 0
 #endif
 
 /* peer needs the board's peers in the build. */

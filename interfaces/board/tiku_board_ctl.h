@@ -31,7 +31,14 @@
 #define TIKU_BOARD_CTL_OK          0   /**< Done */
 #define TIKU_BOARD_CTL_ERR_ORDER (-1)  /**< Refused: it would break a rule */
 #define TIKU_BOARD_CTL_ERR_PARAM (-2)  /**< Unknown bus owner */
+#define TIKU_BOARD_CTL_ERR_BUSY  (-3)  /**< The coprocessor kept the bus */
 /** @} */
+
+/** @brief Microseconds a borrow waits for the coprocessor to finish with the
+ *         bus before it gives up. */
+#ifndef TIKU_BOARD_CTL_BORROW_US
+#define TIKU_BOARD_CTL_BORROW_US  1000000UL
+#endif
 
 /** @brief The board's controls as the pin registers show them. */
 typedef struct {
@@ -81,6 +88,26 @@ int tiku_board_ctl_coproc_reset(void);
  * A high level is refused while the coprocessor is unpowered.
  */
 int tiku_board_ctl_wake(uint8_t level);
+
+/**
+ * @brief Name the owner the bus goes back to.  TIKU_BOARD_BUS_COPROC gives it
+ *        to the coprocessor at once, and after its power-on, its reset and a
+ *        borrow, while the rail and its supply are on.  HOST is the default.
+ */
+int tiku_board_ctl_bus_default(uint8_t owner);
+
+/**
+ * @brief Take the bus for one operation.  From a powered coprocessor that
+ *        holds it, the wake lines become a handshake: this side raises its
+ *        line and switches once the coprocessor's line, its busy flag, is low.
+ * @return TIKU_BOARD_CTL_OK, ERR_ORDER with the rail off, or ERR_BUSY when
+ *         the coprocessor stayed busy for TIKU_BOARD_CTL_BORROW_US
+ */
+int tiku_board_ctl_borrow(void);
+
+/** @brief End a borrow: the bus back to its default owner, then this side's
+ *         line low. */
+void tiku_board_ctl_borrow_end(void);
 
 /** @brief Read the controls back from the pin registers. */
 void tiku_board_ctl_state(tiku_board_ctl_state_t *s);

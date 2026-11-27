@@ -397,13 +397,19 @@ void tiku_vfs_init(const tiku_vfs_node_t *root);
 #else
 #define TIKU_VFS_PEER_MOUNTS 0
 #endif
+/** @brief The mount a build with the shared FRAM mailbox adds: /mailbox. */
+#if (TIKU_MAILBOX_ENABLE + 0)
+#define TIKU_VFS_MAILBOX_MOUNTS 1
+#else
+#define TIKU_VFS_MAILBOX_MOUNTS 0
+#endif
 #ifndef TIKU_VFS_MOUNT_MAX
 #if (TIKU_IPC_ENABLE + 0)
-#define TIKU_VFS_MOUNT_MAX (23 + TIKU_VFS_PEER_MOUNTS + \
+#define TIKU_VFS_MOUNT_MAX (23 + TIKU_VFS_PEER_MOUNTS + TIKU_VFS_MAILBOX_MOUNTS + \
     2 * (TIKU_SD_FAT_ENABLE + TIKU_MEDIA_FS_ENABLE + TIKU_MIC_ENABLE))
 #else
-#define TIKU_VFS_MOUNT_MAX (22 + 2 * (TIKU_SD_FAT_ENABLE + TIKU_MEDIA_FS_ENABLE + \
-    TIKU_MIC_ENABLE))
+#define TIKU_VFS_MOUNT_MAX (22 + TIKU_VFS_MAILBOX_MOUNTS + \
+    2 * (TIKU_SD_FAT_ENABLE + TIKU_MEDIA_FS_ENABLE + TIKU_MIC_ENABLE))
 #endif
 #endif
 

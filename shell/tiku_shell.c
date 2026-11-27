@@ -295,6 +295,9 @@
 #if TIKU_SHELL_CMD_UART
 #include "commands/tiku_shell_cmd_uart.h"
 #endif
+#if TIKU_SHELL_CMD_MAILBOX
+#include "commands/tiku_shell_cmd_mailbox.h"
+#endif
 #if TIKU_SHELL_CMD_PEER
 #include "commands/tiku_shell_cmd_peer.h"
 #endif
@@ -837,6 +840,9 @@ static const tiku_shell_cmd_t tiku_shell_commands[] = {
 #endif
 #if TIKU_SHELL_CMD_UART
     {"uart",    "Link UART to the other side", tiku_shell_cmd_uart},
+#endif
+#if TIKU_SHELL_CMD_MAILBOX
+    {"mailbox", "Shared FRAM: check, format",  tiku_shell_cmd_mailbox},
 #endif
 #if TIKU_SHELL_CMD_PEER
     {"peer",    "The board's other processors", tiku_shell_cmd_peer},
