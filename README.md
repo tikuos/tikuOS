@@ -1,10 +1,17 @@
 # TikuOS
 TikuOS is an operating system for ubiquitous computers, designed around the microwatt computer that runs for years on a coin cell or indefinitely on harvested energy. We designed it from scratch to interact with the physical world, work alongside AI agents that both use and program it, and sustain long-term operation. The software stack supports sub-milliwatt wireless communication, IP networking, and on-device intelligence, and even runs on feeble energy harvested from the environment for devices with tiny or no batteries.
 
-<p align="center">
-  <img src=".github/images/tikusurface-desktop.png" alt="TikuSurface desktop with Tracker open on the SD card" width="49%">
-  <img src=".github/images/tikuos-shell.png" alt="TikuOS serial shell showing flash storage usage on the ESP32-S31" width="49%">
-</p>
+<table>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <img src=".github/images/tikusurface-desktop.png" alt="TikuSurface desktop with Tracker open on the SD card" width="100%"><br>
+      <em>The ESP32-S31-Korvo-1 runs the TikuSurface graphical desktop locally on TikuOS.</em>
+    </td>
+    <td width="50%" align="center" valign="top">
+      <img src=".github/images/tikuos-shell.png" alt="TikuOS serial shell showing flash storage usage on the ESP32-S31" width="100%">
+    </td>
+  </tr>
+</table>
 
 ## 🚀 Getting started
 
