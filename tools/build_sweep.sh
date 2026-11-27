@@ -37,8 +37,8 @@ done
 
 SHELL_FLAGS="TIKU_SHELL_ENABLE=1 TIKU_SHELL_BASIC_ENABLE=1"
 
-# "<mcu>|<extra make flags>".  The TikuComputer-nRF's MSP430 takes no BASIC:
-# the Makefile refuses it for that board.
+# "<mcu>|<extra make flags>".  The MSP430 takes no BASIC: the Makefile
+# refuses it there.
 TARGETS="
 nrf54lm20a|$SHELL_FLAGS
 nrf54lm20b|$SHELL_FLAGS
@@ -55,7 +55,7 @@ stm32n6|$SHELL_FLAGS
 ra8p1|$SHELL_FLAGS
 esp32c61|$SHELL_FLAGS
 esp32c5|$SHELL_FLAGS
-msp430fr5994|$SHELL_FLAGS
+msp430fr5994|TIKU_SHELL_ENABLE=1
 msp430fr5994|TIKU_SHELL_ENABLE=1 BOARD=tikucomputer_msp
 msp430fr5994|TIKU_SHELL_ENABLE=1 BOARD=tikucomputer_msp EXTRA_CFLAGS=-DTIKU_BOARD_CONSOLE_SEL=1
 "

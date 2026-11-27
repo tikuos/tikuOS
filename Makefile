@@ -1098,26 +1098,7 @@ endif
 endif
 endif
 
-# 2. BASIC on MSP430 needs MEMORY_MODEL=large: a small-model shell image
-#    with BASIC overflows the lower FRAM.  TIKU_SHELL_BASIC_ALLOW_SMALL=1
-#    skips the check.
-ifeq ($(TIKU_PLATFORM),msp430)
-ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
-ifneq ($(MEMORY_MODEL),large)
-ifneq ($(TIKU_SHELL_BASIC_ALLOW_SMALL),1)
-$(error TIKU_SHELL_BASIC_ENABLE=1 requires MEMORY_MODEL=large \
-(only available on the FR5994).  BASIC adds ~3.5 KB of code \
-which overflows the 48 KB lower-FRAM cap in small-model builds. \
-Re-run with: 'make ... MCU=msp430fr5994 TIKU_SHELL_ENABLE=1 \
-TIKU_SHELL_BASIC_ENABLE=1 MEMORY_MODEL=large'. To override (only if \
-you know your part has lower-FRAM headroom), pass \
-TIKU_SHELL_BASIC_ALLOW_SMALL=1)
-endif
-endif
-endif
-endif
-
-# 3. BASIC_PROGRAM=foo.bas compiles a BASIC program into the image
+# 2. BASIC_PROGRAM=foo.bas compiles a BASIC program into the image
 #    (tools/bas_to_c.py turns it into a C string) and main.c runs it at
 #    boot.  It forces TIKU_SHELL_BASIC_ENABLE=1 and MEMORY_MODEL=large.
 ifneq ($(BASIC_PROGRAM),)
@@ -1125,13 +1106,14 @@ override TIKU_SHELL_BASIC_ENABLE := 1
 override MEMORY_MODEL := large
 endif
 
-# 4. The TikuComputer-nRF's MSP430 takes no BASIC.  It is the board's
-#    always-on supervisor, its FRAM is kept for the pair's state, and the
-#    interpreter runs on the board's nRF54L.
-ifeq ($(BOARD)$(TIKU_SHELL_BASIC_ENABLE),tikucomputer_msp1)
-$(error BOARD=tikucomputer_msp builds without BASIC: the MSP430 is the \
-board's always-on supervisor and its FRAM is kept for the pair's state. \
-BASIC runs on the board's nRF54L (MCU=nrf54l10 TIKU_SHELL_BASIC_ENABLE=1). \
+# 3. The MSP430 takes no BASIC.  It runs the kernel and the shell, as the
+#    TikuComputer-nRF's always-on supervisor among others, and the
+#    interpreter runs on the 32-bit parts.  BASIC's MSP430 code stays in the
+#    tree, outside the build.
+ifeq ($(TIKU_PLATFORM)$(TIKU_SHELL_BASIC_ENABLE),msp4301)
+$(error TIKU_SHELL_BASIC_ENABLE=1 is not built for the MSP430: it runs the \
+kernel and the shell, and BASIC runs on the 32-bit parts (the \
+TikuComputer-nRF's nRF54L: MCU=nrf54l10 TIKU_SHELL_BASIC_ENABLE=1). \
 Drop TIKU_SHELL_BASIC_ENABLE and BASIC_PROGRAM from this build)
 endif
 

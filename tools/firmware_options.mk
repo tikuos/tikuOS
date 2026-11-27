@@ -46,7 +46,7 @@ opt_value = $(strip \
 # --- System ------------------------------------------------------------------
 $(eval $(call tiku_option,TIKU_SHELL_ENABLE,bool,System,all,\
   Interactive shell on the console))
-$(eval $(call tiku_option,TIKU_SHELL_BASIC_ENABLE,bool,System,all,\
+$(eval $(call tiku_option,TIKU_SHELL_BASIC_ENABLE,bool,System,arm,\
   Tiku BASIC interpreter in the shell))
 $(eval $(call tiku_option,TIKU_INIT_ENABLE,bool,System,all,\
   Init system: boot configuration kept in NVM (needs the shell)))

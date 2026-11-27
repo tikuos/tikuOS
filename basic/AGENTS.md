@@ -5,8 +5,8 @@ and string variables, arrays, `DEF FN`, multi-line `IF`, `SELECT CASE`,
 subroutines with parameters and locals, `ON ERROR`, reactive `EVERY` and
 `ON ... CHANGE`, `SAVE`/`LOAD` to `/data`, and builtins for HTTP(S), MQTT,
 BLE, JSON, SHA-256/HMAC/Base64 and the clock.  `make
-TIKU_SHELL_BASIC_ENABLE=1` builds it (on MSP430 with `MEMORY_MODEL=large`,
-enforced by the Makefile; Ambiq parts default it on).
+TIKU_SHELL_BASIC_ENABLE=1` builds it on the 32-bit parts; Ambiq parts default
+it on, and the Makefile refuses it for the MSP430.
 
 ## Layout
 

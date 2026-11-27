@@ -1847,14 +1847,14 @@ tiku_mem_err_t tiku_mem_workspace_close(tiku_mem_workspace_t *workspace);
  * @brief Size in bytes of the HIFRAM tier array.
  *
  * Compiled in only for a large-model build on a part with HIFRAM; below 64 KB
- * (tiku_mem_arch_size_t is 16-bit on MSP430).  26 KB on the FR5994: BASIC's
- * 22.4 KB arena and a process arena beside it.  4 KB on the FR6989.
+ * (tiku_mem_arch_size_t is 16-bit on MSP430).  32 KB on the FR5994, for
+ * process arenas; 4 KB on the FR6989.
  */
 #ifndef TIKU_TIER_HIFRAM_SIZE
 #if defined(TIKU_DEVICE_MSP430FR6989)
 #define TIKU_TIER_HIFRAM_SIZE  (4U * 1024U)
 #else
-#define TIKU_TIER_HIFRAM_SIZE  (26U * 1024U)
+#define TIKU_TIER_HIFRAM_SIZE  (32U * 1024U)
 #endif
 #endif
 
