@@ -42,7 +42,6 @@ commit before making it.
 | Family | Board · core | RAM | NVM |
 |--------|--------------|-----|-----|
 | **MSP430**<br><sub>16-bit · FRAM</sub> | FR5994 LaunchPad | 8 KB | 256 KB |
-| | FR6989 LaunchPad | 2 KB | 128 KB |
 | | TikuComputer-nRF · FR5994, the always-on side | 8 KB | 256 KB |
 | **Ambiq Apollo**<br><sub>32-bit · Cortex-M</sub> | Apollo510 EVB · M55 96/250 MHz | 512 KB | 4 MB MRAM |
 | | Apollo4 Lite EVB · M4F 96/192 MHz | 384 KB | 2 MB MRAM |

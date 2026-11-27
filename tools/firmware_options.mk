@@ -156,7 +156,8 @@ $(foreach o,$(C5_UNAVAILABLE_OPTIONS),$(eval opt_where_$(o) := unavailable))
 endif
 
 # The boards this platform builds for, the one this build targets first.
-opt_boards = $(BOARD) $(filter-out $(BOARD),$(foreach b,$(KNOWN_BOARDS), \
+opt_boards = $(BOARD) $(filter-out $(BOARD) $(REFUSED_BOARDS), \
+  $(foreach b,$(KNOWN_BOARDS), \
   $(if $(filter $(TIKU_PLATFORM),$(BOARD_PLATFORM_$(b))),$(b))))
 
 TAB := $(shell printf '\t')

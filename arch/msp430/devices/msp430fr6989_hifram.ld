@@ -5,10 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * msp430fr6989_hifram.ld - Fixed persistent data and HIFRAM reservations.
+ * msp430fr6989_hifram.ld - FR6989 persistent data and HIFRAM (deprecated).
  *
- * Pins the .persistent origin in lower FRAM, holds back the top of HIFRAM
- * for the NVM backend and the module slot, and fixes the high-bss clear size.
+ * Kept for reference; the Makefile refuses MCU=msp430fr6989.  Pins the
+ * .persistent origin in lower FRAM, holds back the top of HIFRAM for the NVM
+ * backend and the module slot, and fixes the high-bss clear size.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

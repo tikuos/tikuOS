@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_lcd_arch.c - MSP430 LCD_C peripheral driver.
+ * tiku_lcd_arch.c - MSP430 LCD_C peripheral driver (FR6989, deprecated).
  *
- * Drives LCD_C with the board's pin mask and per-position LCDMEM bytes,
- * built only where the device has LCD_C and the build defines
+ * Drives LCD_C with the board's pin mask and per-position LCDMEM bytes where
+ * the device has LCD_C, only the FR6989, and the build defines
  * TIKU_BOARD_HAS_LCD.  The 14-segment font suits the FH-1138P glass.
  *
  * SPDX-License-Identifier: Apache-2.0

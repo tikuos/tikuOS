@@ -231,6 +231,9 @@ KNOWN_BOARDS := fr5969_launchpad fr5994_launchpad fr6989_launchpad tikucomputer_
                 apollo510_evb apollo510b_evb nrf54l15_dk nrf54lm20_dk \
                 nrf54lv10_dk tikucomputer_nrf nucleo_n657x0q ek_ra8p1 esp32c61_devkitc esp32c5_devkitc1 olimex_esp32p4_pc \
                 firebeetle2_esp32p4 tiku_bare
+# Boards of the MCUs the MSP430 guards refuse (FR5969, FR6989): their tables
+# stay checked, and `make options` leaves them out of the boards it offers.
+REFUSED_BOARDS := fr5969_launchpad fr6989_launchpad
 
 BOARD_DEFINE_fr5969_launchpad  := TIKU_BOARD_FR5969_LAUNCHPAD
 BOARD_DEFINE_fr5994_launchpad  := TIKU_BOARD_FR5994_LAUNCHPAD
@@ -1069,9 +1072,17 @@ ifeq ($(TIKU_PLATFORM),msp430)
 #    address.  The FR5969's device and board headers stay in the tree.
 ifneq ($(DEVICE_HAS_HIFRAM),1)
 $(error MCU=$(MCU) is not a supported TikuOS target: the core (kernel + VFS) \
-does not fit a 64-KB-or-smaller MSP430.  Supported MSP430 parts are \
-msp430fr5994 (256 KB) and msp430fr6989 (128 KB).  The FR5969 arch code \
-remains in-tree for reference)
+does not fit a 64-KB-or-smaller MSP430.  The supported MSP430 part is \
+msp430fr5994 (256 KB).  The FR5969 arch code remains in-tree for reference)
+endif
+# 0b. The FR6989 is deprecated: the default image does not fit its 128 KB of
+#     FRAM and 2 KB of SRAM.  Its device, board, linker and LCD files stay in
+#     the tree, and its branches below stay in this Makefile.
+ifneq ($(filter msp430fr6989,$(MCU))$(filter fr6989_launchpad,$(BOARD)),)
+$(error MCU=msp430fr6989 is deprecated: the default image does not fit its \
+128 KB of FRAM and 2 KB of SRAM.  The smallest supported MSP430 is \
+msp430fr5994 (256 KB FRAM, 8 KB SRAM).  The FR6989 arch code remains \
+in-tree for reference)
 endif
 
 # 1. MEMORY_MODEL=large needs HIFRAM to place code and data in.  Guard 0
@@ -1080,7 +1091,7 @@ endif
 ifeq ($(MEMORY_MODEL),large)
 ifneq ($(DEVICE_HAS_HIFRAM),1)
 $(error MEMORY_MODEL=large is only supported on MCUs with HIFRAM \
-(FR5994, FR6989). $(MCU) has only a single 64-KB-or-smaller FRAM \
+(FR5994). $(MCU) has only a single 64-KB-or-smaller FRAM \
 region, so large model just inflates code by ~20% with nowhere to \
 spill. Use MEMORY_MODEL=small (the default) on this part)
 endif
@@ -1095,7 +1106,7 @@ ifeq ($(TIKU_SHELL_BASIC_ENABLE),1)
 ifneq ($(MEMORY_MODEL),large)
 ifneq ($(TIKU_SHELL_BASIC_ALLOW_SMALL),1)
 $(error TIKU_SHELL_BASIC_ENABLE=1 requires MEMORY_MODEL=large \
-(only available on FR5994 / FR6989).  BASIC adds ~3.5 KB of code \
+(only available on the FR5994).  BASIC adds ~3.5 KB of code \
 which overflows the 48 KB lower-FRAM cap in small-model builds. \
 Re-run with: 'make ... MCU=msp430fr5994 TIKU_SHELL_ENABLE=1 \
 TIKU_SHELL_BASIC_ENABLE=1 MEMORY_MODEL=large'. To override (only if \

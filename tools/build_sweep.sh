@@ -37,9 +37,8 @@ done
 
 SHELL_FLAGS="TIKU_SHELL_ENABLE=1 TIKU_SHELL_BASIC_ENABLE=1"
 
-# "<mcu>|<extra make flags>".  fr6989 builds without BASIC: BASIC's arena does
-# not fit in that part's 128 KB of FRAM.  The TikuComputer-nRF's MSP430 takes
-# no BASIC: the Makefile refuses it for that board.
+# "<mcu>|<extra make flags>".  The TikuComputer-nRF's MSP430 takes no BASIC:
+# the Makefile refuses it for that board.
 TARGETS="
 nrf54lm20a|$SHELL_FLAGS
 nrf54lm20b|$SHELL_FLAGS
@@ -59,7 +58,6 @@ esp32c5|$SHELL_FLAGS
 msp430fr5994|$SHELL_FLAGS
 msp430fr5994|TIKU_SHELL_ENABLE=1 BOARD=tikucomputer_msp
 msp430fr5994|TIKU_SHELL_ENABLE=1 BOARD=tikucomputer_msp EXTRA_CFLAGS=-DTIKU_BOARD_CONSOLE_SEL=1
-msp430fr6989|TIKU_SHELL_ENABLE=1
 "
 
 # The `... | while read` loop below runs in a subshell, where a counter does

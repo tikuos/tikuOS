@@ -37,7 +37,6 @@ BASELINE="${2:-tools/board_split_baseline.txt}"
 # parts.  STM32N6, RA8P1 and ESP32-C61 have no row.
 MATRIX="
 msp430fr5994-bare        | MCU=msp430fr5994
-msp430fr6989-bare        | MCU=msp430fr6989
 rp2350-pico2w            | MCU=rp2350 BOARD=pico2w TIKU_SHELL_ENABLE=1
 rp2350-pico2             | MCU=rp2350 BOARD=pico2 TIKU_SHELL_ENABLE=1
 nrf54l15-shell           | MCU=nrf54l15 TIKU_SHELL_ENABLE=1

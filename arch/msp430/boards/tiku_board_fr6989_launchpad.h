@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_board_fr6989_launchpad.h - MSP430FR6989 LaunchPad board definitions.
+ * tiku_board_fr6989_launchpad.h - MSP430FR6989 LaunchPad board (deprecated).
  *
- * PCB-level GPIO assignments for the MSP-EXP430FR6989 per TI SLAU627: LEDs,
- * buttons, UART, I2C, ADC and the on-board LCD glass.  The UART transport
- * choices are documented at TIKU_BOARD_UART_MODULE below.
+ * The Makefile refuses MCU=msp430fr6989: the default image does not fit the
+ * part's 128 KB of FRAM.  Kept for reference: the MSP-EXP430FR6989's GPIO
+ * assignments per TI SLAU627 (LEDs, buttons, UART, I2C, ADC, LCD glass).
  *
  * SPDX-License-Identifier: Apache-2.0
  */

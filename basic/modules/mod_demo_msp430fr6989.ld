@@ -5,10 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * mod_demo_msp430fr6989.ld - loadable native module script (MSP430FR6989).
+ * mod_demo_msp430fr6989.ld - module script for the MSP430FR6989 (deprecated).
  *
- * Links the module at its FRAM slot, so VMA == LMA and every internal
- * reference resolves at run address.
+ * Unused while the Makefile refuses MCU=msp430fr6989.  Links the module at
+ * its FRAM slot, so VMA == LMA and every internal reference resolves at run
+ * address.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

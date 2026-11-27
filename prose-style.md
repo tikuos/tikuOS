@@ -33,7 +33,7 @@ A focus is one phrase: `designed around the microwatt computer that runs
 for years on a coin cell`. It is not followed by a clause that covers the
 other cases (`but it runs on larger boards too`): the sentence before it
 already named the wider class. If a qualifier is needed, it is a fact
-(`the FR6989 has no BASIC`), not a hedge (`in most cases`, `for the most
+(`the TikuComputer's MSP430 has no BASIC`), not a hedge (`in most cases`, `for the most
 part`).
 
 ## The author's voice

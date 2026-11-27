@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_device_fr6989.h - MSP430FR6989 silicon-level constants.
+ * tiku_device_fr6989.h - MSP430FR6989 silicon-level constants (deprecated).
  *
- * GPIO ports, crystal pin routing, memory sizes and peripheral availability;
- * PCB definitions belong in the board header.  HFXT is on PJ.6/PJ.7, and the
- * part carries an on-chip LCD_C driver.
+ * The Makefile refuses MCU=msp430fr6989: the default image does not fit its
+ * 128 KB of FRAM.  Kept for reference: GPIO ports, HFXT on PJ.6/PJ.7, memory
+ * sizes and peripherals, the on-chip LCD_C driver among them.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
