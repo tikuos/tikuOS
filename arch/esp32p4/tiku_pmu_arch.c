@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_pmu_arch.c - Calibrated P4 v1.3 regulators, PSRAM LDO, CPLL and MPLL.
+ * tiku_pmu_arch.c - Calibrated P4 regulators, PSRAM LDO, CPLL and MPLL.
  *
  * CPLL startup first sets the eFuse-calibrated HP and LP regulators.
  * Sequence and settings derived from ESP-IDF 4d59230d rtc_clk_init/clk_tree_ll.
@@ -327,7 +327,7 @@ int tiku_p4_pmu_mpll_init(void)
     uint32_t gate, conf1, conf2, clock, tries;
     int result = -2;
     if (TIKU_P4_REG_READ(TIKU_P4_ROM_CHIP_ID) != 18u ||
-        TIKU_P4_REG_READ(TIKU_P4_ROM_ECO) != 2u ||
+        TIKU_P4_REG_READ(TIKU_P4_ROM_ECO) != CPLL_ROM_ECO ||
         (TIKU_P4_REG_READ(TIKU_P4_ROOT_SELECT) & 3u) != 0 ||
         (TIKU_P4_REG_READ(TIKU_P4_ROOT_DIV0) & 0x1ffffff0u) != 0) return -1;
     gate = TIKU_P4_REG_READ(TIKU_P4_LP_CLK);

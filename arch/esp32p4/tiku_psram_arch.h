@@ -27,7 +27,8 @@ int tiku_p4_psram_init(void);
 /** @brief Return capacity after identity, PIO and mapped checks, or zero. */
 uint32_t tiku_p4_psram_size(void);
 /** @brief Set the bus clock for a CPU at @p cpu_mhz: 200 MHz under 360,
- *         then 100, 66 and 40 MHz, never above the CPU clock. */
+ *         then 100, 66 and 40 MHz, never above the CPU clock.  Does nothing
+ *         on a Function EV Board whose bus runs from SPLL at 80 MHz. */
 void tiku_p4_psram_follow_cpu(unsigned cpu_mhz);
 /** @brief The bus clock in Hz, 0 without PSRAM. */
 uint32_t tiku_p4_psram_hz(void);

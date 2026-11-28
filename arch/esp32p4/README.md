@@ -32,6 +32,13 @@ LDO is released. With CPU0 at 400 MHz the memory and system clocks run at
 200 MHz and APB at 100 MHz. The panel reset and sleep-out delays use SYSTIMER.
 The TikuSurface RAM desktop selects 400 MHz by default.
 
+A build for 400 MHz starts the MPLL at PSRAM power-up, calibrates the PSRAM
+bus at 200 MHz and steps it with the CPU rate, as the v1.3 port does: 40 MHz
+on the crystal, 200 MHz once the CPU PLL is selected. A build for 40 MHz
+runs the bus from SPLL at 80 MHz without calibration, and a 400 MHz build
+whose MPLL or calibration fails falls back to that bus with the pad delays
+it started with. `tiku_p4_psram_hz()` reports the rate.
+
 The build checks the binary revision, digest, ELF ABI and SRAM bounds.
 With the board's USB Serial/JTAG port available, the loader runs from
 RAM, queries the device twice and returns it to its installed firmware.

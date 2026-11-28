@@ -21,7 +21,8 @@
  * or -3 on calibration timeout. Errors leave the CPU root on XTAL.
  */
 int tiku_p4_pmu_cpll_init(void);
-/** @brief Initialize the v1.3 MPLL at 400 MHz for a 200 MHz PSRAM bus.
+/** @brief Initialize the MPLL at 400 MHz for a 200 MHz PSRAM bus, on the
+ *         ROM revision the board is built for.
  * @note Requires CPU0 at 40 MHz, masked IRQs and no active MPLL consumers.
  * @return Zero on success, negative on identity, readback or calibration failure.
  */

@@ -7,8 +7,8 @@
  *
  * tiku_psram_arch.c - AP x16 PSRAM power, register setup and memory mapping.
  *
- * The v1.3 port calibrates the 200 MHz MPLL bus and follows CPU rates.
- * The Function EV Board sets registers at 20 MHz and runs from SPLL at 80 MHz.
+ * The v1.3 port, and the Function EV Board at 400 MHz, calibrate the 200 MHz
+ * MPLL bus and follow CPU rates.  Otherwise the board runs SPLL at 80 MHz.
  *
  * SPDX-FileCopyrightText: 2023-2026 Espressif Systems (Shanghai) CO LTD
  * SPDX-License-Identifier: Apache-2.0
@@ -326,6 +326,35 @@ failed:
 }
 
 #if defined(TIKU_BOARD_ESP32_P4X_FUNCTION_EV_BOARD)
+/* Non-zero once the bus runs from the calibrated MPLL; zero on SPLL480. */
+static unsigned fast;
+
+#if defined(MAIN_CPU_FREQ) && MAIN_CPU_FREQ == 400
+/** @brief Start the MPLL, calibrate the bus at 200 MHz and map the memory.
+ *         A failure puts back the pad registers it found.
+ *  @return 1 with the memory mapped, 0 with the pads as they were. */
+static int function_ev_fast(void)
+{
+    uint32_t pads[PS_PADS_N];
+    unsigned n;
+    int ok = 0;
+
+    for (n = 0; n < PS_PADS_N; n++) pads[n] = TIKU_P4_REG_READ(PS_PAD(n));
+    if (!tiku_p4_pmu_mpll_init() && controller(0xd000u, PS_DIV_SETUP)) {
+        stage = 2;
+        if (device() && calibrate()) {
+            stage = 4;
+            ok = mapping();
+        }
+    }
+    if (!ok) {
+        for (n = 0; n < PS_PADS_N; n++) TIKU_P4_REG_WRITE(PS_PAD(n), pads[n]);
+        stage = 1;
+    }
+    return ok;
+}
+#endif
+
 static int function_ev_init(void)
 {
     if (capacity) return 0;
@@ -335,8 +364,12 @@ static int function_ev_init(void)
     int ok = 0;
     if (!tiku_p4_pmu_psram_ldo_init()) {
         stage = 1;
+#if defined(MAIN_CPU_FREQ) && MAIN_CPU_FREQ == 400
+        ok = function_ev_fast();
+        fast = ok != 0;
+#endif
         /* SPLL480 divided by 24 for register setup, by six for scanout. */
-        if (controller(0xe000u, 24u)) {
+        if (!ok && controller(0xe000u, 24u)) {
             stage = 2;
             if (device()) {
                 TIKU_P4_REG_WRITE(PS_SYS + 0x50, bus_clock(6));
@@ -349,6 +382,13 @@ static int function_ev_init(void)
     if (ok) { capacity = TIKU_P4_PSRAM_BYTES; stage = 5; }
     else if (stage) field(PS_SYS + 0x3c, PS_CLOSE | 1, PS_CLOSE);
     TIKU_P4_IRQ_RESTORE(irq);
+#if defined(MAIN_CPU_FREQ) && MAIN_CPU_FREQ == 400
+    if (ok && fast) {
+        /* The MPLL started on the crystal, so the CPU is at 40 MHz here. */
+        tiku_p4_clock_follow(tiku_p4_psram_follow_cpu);
+        tiku_p4_psram_follow_cpu(40);
+    }
+#endif
     return ok ? 0 : -1;
 }
 #endif
@@ -408,8 +448,8 @@ static unsigned divider_for(unsigned cpu_mhz)
 void tiku_p4_psram_follow_cpu(unsigned cpu_mhz)
 {
 #if defined(TIKU_BOARD_ESP32_P4X_FUNCTION_EV_BOARD)
-    /* The P4X panel profile keeps SPLL480 divided by six. */
-    return;
+    /* On SPLL480 the bus keeps its divider of six at every CPU rate. */
+    if (!fast) return;
 #endif
     uint32_t word, state, autoload;
     unsigned tries;
@@ -436,7 +476,7 @@ uint32_t tiku_p4_psram_hz(void)
 {
     uint32_t div = ((TIKU_P4_REG_READ(PS_SYS + 0x50) >> 16) & 255u) + 1u;
 #if defined(TIKU_BOARD_ESP32_P4X_FUNCTION_EV_BOARD)
-    return capacity ? 480000000u / div : 0;
+    return capacity ? (fast ? PS_MPLL_MHZ * 1000000u : 480000000u) / div : 0;
 #else
     return capacity ? PS_MPLL_MHZ * 1000000u / div : 0;
 #endif
