@@ -129,6 +129,11 @@ P4_SRCS += kernel/vfs/tiku_vfs.c kernel/process/tiku_process.c kernel/scheduler/
 P4_SRCS += kernel/timers/tiku_clock.c kernel/timers/tiku_timer.c kernel/timers/tiku_htimer.c kernel/timers/tiku_crit.c
 P4_SRCS += arch/esp32p4/tiku_thread_arch.c arch/esp32p4/tiku_cpu_arch.c arch/esp32p4/tiku_timer_arch.c
 P4_SRCS += arch/esp32p4/tiku_libc_arch.c compat/posix/tiku_posix_vfs.c kernel/vfs/tree/tiku_vfs_tree_timer.c
+ifeq ($(P4X_MIC),1)
+P4_FLAGS += -DTIKU_MIC_ENABLE=1 -DTIKU_DRV_AUDIO_ES8311_ENABLE=1
+P4_SRCS += services/audio/tiku_mic.c services/audio/tiku_mic_vfs.c services/audio/tiku_mic_p4x.c
+P4_SRCS += arch/esp32p4/tiku_pdm_arch.c arch/esp32p4/tiku_dma_arch.c drivers/audio/es8311/tiku_drv_audio_es8311.c
+endif
 # The 512-byte CPU0 trap frame shares the worker stack with its canary and locals.
 P4_FLAGS += -DTIKU_THREAD_STACK_MIN=1024u
 P4X_CPU_MHZ ?= 40

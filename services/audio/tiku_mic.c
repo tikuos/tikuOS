@@ -39,7 +39,7 @@ TIKU_PROCESS(tiku_mic_process, "microphone");
 /** @brief Release the ring and its arena. */
 static void release(void)
 {
-    if (mic.ring != NULL) (void)tiku_arena_destroy(&mic.arena);
+    if (mic.ring != NULL) (void)tiku_mem_workspace_close(&mic.arena);
     mic.ring = NULL;
     mic.head = mic.tail = 0;
 }

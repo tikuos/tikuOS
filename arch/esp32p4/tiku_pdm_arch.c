@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_pdm_arch.c - P4 PDM microphone on I2S0 and AHB DMA channel 2.
+ * tiku_pdm_arch.c - P4 I2S0 microphone receiver and AHB DMA channel 2.
  *
  * Registers follow ESP-IDF i2s_reg.h, i2s_ll.h, i2s_pdm.c (PDM RX),
  * hp_sys_clkrst_reg.h, lp_clkrst_reg.h, ahb_dma_reg.h and gpio_sig_map.h
@@ -21,6 +21,7 @@
 #include <interfaces/gpio/tiku_gpio_owner.h>
 #include <tiku.h>
 #include "tiku_pdm_arch.h"
+#include "tiku_i2s_rx_arch.h"
 #include "tiku_cpu_common.h"
 #include "tiku_dma_arch.h"
 #include "tiku_esp32p4_regs.h"
@@ -39,6 +40,9 @@
 #define RX_FIFO_RESET   (1u << 1)
 #define RX_START        (1u << 2)
 #define RX_UPDATE       (1u << 8)
+#define RX_MONO         (1u << 6)
+#define RX_MONO_FIRST   (1u << 9)
+#define RX_TDM_EN       (1u << 19)
 #define RX_PCM_CONF     (1u << 10)
 #define RX_PCM_BYPASS   (1u << 12)
 #define RX_MSB_SHIFT    (1u << 13)
@@ -93,10 +97,11 @@
 #define MUX_FUN_IE      (1u << 9)
 #define MUX_PULLS       (3u << 7)
 #define IN_SEL_MATRIX   (1u << 7)
+#define SIG_MCLK_OUT    26u
+#define SIG_BCLK_OUT    29u
 #define SIG_WS_OUT      30u                          /* I2S0_I_WS_PAD_OUT */
 #define SIG_SD_IN       28u                          /* I2S0_I_SD_PAD_IN */
-#define PIN_CLK         TIKU_BOARD_PDM_CLK_PIN
-#define PIN_DATA        TIKU_BOARD_PDM_DATA_PIN
+
 /* AHB DMA channel 2, receiving from peripheral 3 (I2S0). */
 #define DMA_BASE        0x50085000u
 #define DMA_IN_ST       (DMA_BASE + 0x24u)
@@ -153,8 +158,18 @@ static uint32_t rate, slot;
 static uint32_t rd_idx, rd_pos, rd_len;
 static tiku_p4_pdm_stats_t stats;
 static uint32_t last_peak, last_rms;
-static uint32_t saved_mux[2], saved_route, saved_config[2], saved_input;
-static uint32_t saved_enable[2];
+/* Output matrix signal, or -1 for the serial input. */
+static const struct { uint8_t pin; int signal; } pads[] = {
+#ifdef TIKU_BOARD_I2S_MCLK_PIN
+    {TIKU_BOARD_I2S_MCLK_PIN, SIG_MCLK_OUT}, {TIKU_BOARD_I2S_BCLK_PIN, SIG_BCLK_OUT},
+    {TIKU_BOARD_I2S_WS_PIN, SIG_WS_OUT}, {TIKU_BOARD_I2S_DIN_PIN, -1}
+#else
+    {TIKU_BOARD_PDM_CLK_PIN, SIG_WS_OUT}, {TIKU_BOARD_PDM_DATA_PIN, -1}
+#endif
+};
+#define PAD_COUNT (sizeof pads / sizeof pads[0])
+static struct { uint32_t mux, route, config, enabled; } saved[PAD_COUNT];
+static uint32_t saved_input;
 
 /** @brief Set @p bits of register @p reg to their values in @p value. */
 static void put_bits(uint32_t reg, uint32_t bits, uint32_t value)
@@ -180,19 +195,18 @@ uint32_t tiku_p4_pdm_clock_hz(uint32_t rate_hz, uint32_t *decimation)
 }
 
 /**
- * @brief The RX clock tree for @p rate_hz: mclk = PDM clock x 8 out of the
- *        crystal through N + b/a, the fraction the closest with a <= 512.
+ * @brief Set the receive master clock to @p mclk Hz using the crystal and
+ *        a fractional divider with denominator up to 512.
  *
  * Returns the module clock in Hz, 0 for a rate the divider cannot reach.
  */
 TIKU_P4_XIP_TEXT
-static uint32_t set_clock(uint32_t rate_hz)
+static uint32_t set_clock(uint32_t mclk)
 {
-    uint32_t decimation, mclk, n, rem, a, b, best_a = 1u, best_b = 0u;
+    uint32_t n, rem, a, b, best_a = 1u, best_b = 0u;
     uint64_t best_err = ~0ull, err;
     uint32_t x = 0u, y = 0u, z = 0u, yn1 = 0u;
 
-    mclk = tiku_p4_pdm_clock_hz(rate_hz, &decimation) * BCK_DIV;
     if (mclk == 0u || XTAL_HZ < 2u * mclk) {
         return 0u;
     }
@@ -228,8 +242,6 @@ static uint32_t set_clock(uint32_t rate_hz)
     put_bits(CLK_MST, CLK_MST_SEL, 0u);
     put_bits(CLK_RX_DIV_Z, CLK_RX_DIV_Z_MSK, z | (yn1 << 9));
     put_bits(CLK_RX_DIV_NXY, 0x03FFFFFFu, n | (x << 8) | (y << 17));
-    put_bits(I2S_RX_PDM2PCM, PDM_DSR_128, decimation == 128u ? PDM_DSR_128
-                                                            : 0u);
     return mclk;
 }
 
@@ -302,62 +314,50 @@ static void resync(void)
     TIKU_P4_IRQ_RESTORE(state);
 }
 
-/** @brief Pads back as they were found and the ownership returned. */
+/** @brief Restore the board microphone pads and serial input route. */
 TIKU_P4_XIP_TEXT
 static void release_pads(void)
 {
-    TIKU_P4_REG_WRITE(PIN_ROUTE(PIN_CLK), saved_route);
-    TIKU_P4_REG_WRITE(PIN_CONFIG(PIN_CLK), saved_config[0]);
-    TIKU_P4_REG_WRITE(IO_MUX(PIN_CLK), saved_mux[0]);
-    if (saved_enable[0]) {
-        TIKU_P4_REG_WRITE(PIN_ENABLE_SET(PIN_CLK), PIN_BIT(PIN_CLK));
-    } else {
-        TIKU_P4_REG_WRITE(PIN_ENABLE_CLR(PIN_CLK), PIN_BIT(PIN_CLK));
-    }
     TIKU_P4_REG_WRITE(PIN_INPUT(SIG_SD_IN), saved_input);
-    TIKU_P4_REG_WRITE(PIN_CONFIG(PIN_DATA), saved_config[1]);
-    TIKU_P4_REG_WRITE(IO_MUX(PIN_DATA), saved_mux[1]);
-    if (saved_enable[1]) {
-        TIKU_P4_REG_WRITE(PIN_ENABLE_SET(PIN_DATA), PIN_BIT(PIN_DATA));
+    for (unsigned i = 0; i < PAD_COUNT; ++i) {
+        unsigned pin = pads[i].pin;
+        TIKU_P4_REG_WRITE(PIN_ROUTE(pin), saved[i].route);
+        TIKU_P4_REG_WRITE(PIN_CONFIG(pin), saved[i].config);
+        TIKU_P4_REG_WRITE(IO_MUX(pin), saved[i].mux);
+        TIKU_P4_REG_WRITE(saved[i].enabled ? PIN_ENABLE_SET(pin) : PIN_ENABLE_CLR(pin), PIN_BIT(pin));
     }
 }
 
-/** @brief GPIO12 the clock out of the matrix, GPIO9 the data in; both
- *         must be the board's microphone pads in the ownership table. */
+/** @brief Route the clocks out and serial data in after securing the pads. */
 TIKU_P4_XIP_TEXT
 static int claim_pads(void)
 {
-    const char *clk = tiku_gpio_owner(PIN_CLK / 8u + 1u, PIN_CLK % 8u);
-    const char *data = tiku_gpio_owner(PIN_DATA / 8u + 1u, PIN_DATA % 8u);
-
-    if (clk == NULL || data == NULL ||
-        strcmp(clk, TIKU_GPIO_OWNER_MICROPHONE) != 0 ||
-        strcmp(data, TIKU_GPIO_OWNER_MICROPHONE) != 0) {
-        return TIKU_P4_PDM_ERR_BUSY;
+    for (unsigned i = 0; i < PAD_COUNT; ++i) {
+        unsigned pin = pads[i].pin;
+        const char *owner = tiku_gpio_owner(pin / 8u + 1u, pin % 8u);
+        if (!owner || strcmp(owner, TIKU_GPIO_OWNER_MICROPHONE)) {
+            return TIKU_P4_PDM_ERR_BUSY;
+        }
     }
-    saved_mux[0] = TIKU_P4_REG_READ(IO_MUX(PIN_CLK));
-    saved_route = TIKU_P4_REG_READ(PIN_ROUTE(PIN_CLK));
-    saved_config[0] = TIKU_P4_REG_READ(PIN_CONFIG(PIN_CLK));
-    saved_enable[0] = TIKU_P4_REG_READ(PIN_ENABLE(PIN_CLK)) & PIN_BIT(PIN_CLK);
-    saved_mux[1] = TIKU_P4_REG_READ(IO_MUX(PIN_DATA));
-    saved_config[1] = TIKU_P4_REG_READ(PIN_CONFIG(PIN_DATA));
     saved_input = TIKU_P4_REG_READ(PIN_INPUT(SIG_SD_IN));
-    saved_enable[1] = TIKU_P4_REG_READ(PIN_ENABLE(PIN_DATA)) &
-                      PIN_BIT(PIN_DATA);
-    /* The clock: a push-pull matrix output, pulls off, drive kept. */
-    TIKU_P4_REG_WRITE(IO_MUX(PIN_CLK),
-                      (saved_mux[0] & ~(MUX_SEL_MSK | MUX_PULLS)) |
-                          MUX_SEL_GPIO);
-    TIKU_P4_REG_WRITE(PIN_CONFIG(PIN_CLK), 0u);
-    TIKU_P4_REG_WRITE(PIN_ROUTE(PIN_CLK), SIG_WS_OUT);
-    TIKU_P4_REG_WRITE(PIN_ENABLE_SET(PIN_CLK), PIN_BIT(PIN_CLK));
-    /* The data: an input through the matrix, no output driver. */
-    TIKU_P4_REG_WRITE(PIN_ENABLE_CLR(PIN_DATA), PIN_BIT(PIN_DATA));
-    TIKU_P4_REG_WRITE(IO_MUX(PIN_DATA),
-                      (saved_mux[1] & ~(MUX_SEL_MSK | MUX_PULLS)) |
-                          MUX_SEL_GPIO | MUX_FUN_IE);
-    TIKU_P4_REG_WRITE(PIN_CONFIG(PIN_DATA), 0u);
-    TIKU_P4_REG_WRITE(PIN_INPUT(SIG_SD_IN), IN_SEL_MATRIX | PIN_DATA);
+    for (unsigned i = 0; i < PAD_COUNT; ++i) {
+        unsigned pin = pads[i].pin;
+        int signal = pads[i].signal;
+        saved[i].mux = TIKU_P4_REG_READ(IO_MUX(pin));
+        saved[i].route = TIKU_P4_REG_READ(PIN_ROUTE(pin));
+        saved[i].config = TIKU_P4_REG_READ(PIN_CONFIG(pin));
+        saved[i].enabled = TIKU_P4_REG_READ(PIN_ENABLE(pin)) & PIN_BIT(pin);
+        TIKU_P4_REG_WRITE(IO_MUX(pin), (saved[i].mux & ~(MUX_SEL_MSK | MUX_PULLS)) |
+                          MUX_SEL_GPIO | (signal < 0 ? MUX_FUN_IE : 0));
+        TIKU_P4_REG_WRITE(PIN_CONFIG(pin), 0u);
+        if (signal < 0) {
+            TIKU_P4_REG_WRITE(PIN_ENABLE_CLR(pin), PIN_BIT(pin));
+            TIKU_P4_REG_WRITE(PIN_INPUT(SIG_SD_IN), IN_SEL_MATRIX | pin);
+        } else {
+            TIKU_P4_REG_WRITE(PIN_ROUTE(pin), (uint32_t)signal);
+            TIKU_P4_REG_WRITE(PIN_ENABLE_SET(pin), PIN_BIT(pin));
+        }
+    }
     return TIKU_P4_PDM_OK;
 }
 
@@ -381,7 +381,7 @@ static int allocate_ring(void)
 }
 
 TIKU_P4_XIP_TEXT
-int tiku_p4_pdm_start(uint32_t rate_hz, uint32_t slot_mask)
+static int capture_start(uint32_t rate_hz, uint32_t slot_mask)
 {
     uint32_t state;
     int rc;
@@ -413,6 +413,7 @@ int tiku_p4_pdm_start(uint32_t rate_hz, uint32_t slot_mask)
         }
     }
     if (!dma_ready) {
+        (void)tiku_arena_destroy(&ring_arena);
         release_pads();
         TIKU_P4_IRQ_RESTORE(state);
         return TIKU_P4_PDM_ERR_BUSY;
@@ -422,15 +423,31 @@ int tiku_p4_pdm_start(uint32_t rate_hz, uint32_t slot_mask)
     put_bits(LP_HP_CLK, LP_HP_I2S0_MCLK, LP_HP_I2S0_MCLK);
     put_bits(RST_EN2, RST_EN2_I2S0, RST_EN2_I2S0);
     put_bits(RST_EN2, RST_EN2_I2S0, 0u);
-    TIKU_P4_REG_WRITE(I2S_RX_CONF, RX_CONF_PDM | RX_RESET);
-    TIKU_P4_REG_WRITE(I2S_RX_CONF, RX_CONF_PDM);
-    TIKU_P4_REG_WRITE(I2S_RX_CONF1, RX_CONF1_16BIT);
-    TIKU_P4_REG_WRITE(I2S_RX_PDM2PCM, PDM2PCM_CONF);
-    TIKU_P4_REG_WRITE(I2S_RX_TDM_CTRL, slot_mask);
+#ifdef TIKU_BOARD_I2S_MCLK_PIN
+    /* Philips I2S, two 16-bit slots, capture the codec's left channel.
+     * MCLK = 256 fs, BCLK = 32 fs. */
+    uint32_t mclk = rate_hz * 256u;
+    uint32_t conf = RX_PCM_BYPASS | RX_MSB_SHIFT | RX_LEFT_ALIGN | RX_BCK_DIV(8u) |
+                    RX_TDM_EN | RX_MONO | RX_MONO_FIRST;
+    uint32_t conf1 = RX_CONF1_16BIT | 15u;
+    uint32_t filter = 0, channels = (1u << 16) | 1u; /* two slots, left slot enabled */
+#else
+    uint32_t decimation;
+    uint32_t mclk = tiku_p4_pdm_clock_hz(rate_hz, &decimation) * BCK_DIV;
+    uint32_t conf = RX_CONF_PDM, conf1 = RX_CONF1_16BIT;
+    uint32_t filter = PDM2PCM_CONF | (decimation == 128u ? PDM_DSR_128 : 0u);
+    uint32_t channels = slot_mask;
+#endif
+    TIKU_P4_REG_WRITE(I2S_RX_CONF, conf | RX_RESET);
+    TIKU_P4_REG_WRITE(I2S_RX_CONF, conf);
+    TIKU_P4_REG_WRITE(I2S_RX_CONF1, conf1);
+    TIKU_P4_REG_WRITE(I2S_RX_PDM2PCM, filter);
+    TIKU_P4_REG_WRITE(I2S_RX_TDM_CTRL, channels);
     TIKU_P4_REG_WRITE(I2S_RX_EOF_NUM, BUF_BYTES);
     TIKU_P4_REG_WRITE(I2S_INT_CLR, I2S_INT_ALL);
-    if (set_clock(rate_hz) == 0u) {
+    if (set_clock(mclk) == 0u) {
         put_bits(CLK_SOC2, CLK_SOC2_I2S0, 0u);
+        (void)tiku_arena_destroy(&ring_arena);
         release_pads();
         TIKU_P4_IRQ_RESTORE(state);
         return TIKU_P4_PDM_ERR_PARAM;
@@ -466,7 +483,7 @@ int tiku_p4_pdm_start(uint32_t rate_hz, uint32_t slot_mask)
 }
 
 TIKU_P4_XIP_TEXT
-void tiku_p4_pdm_stop(void)
+static void capture_stop(void)
 {
     uint32_t state;
 
@@ -554,7 +571,7 @@ static void buffer_done(void)
 }
 
 TIKU_P4_XIP_TEXT
-int32_t tiku_p4_pdm_read(int16_t *buf, uint32_t n, uint32_t timeout_ms)
+static int32_t capture_read(int16_t *buf, uint32_t n, uint32_t timeout_ms)
 {
     uint64_t deadline = now16() + (uint64_t)timeout_ms * TICKS_PER_MS;
     uint32_t got = 0u, take, i;
@@ -601,6 +618,23 @@ int32_t tiku_p4_pdm_read(int16_t *buf, uint32_t n, uint32_t timeout_ms)
     return (int32_t)got;
 }
 
+#ifdef TIKU_BOARD_I2S_MCLK_PIN
+int tiku_p4_i2s_rx_start(void) { return capture_start(16000u, 1u); }
+void tiku_p4_i2s_rx_stop(void) { capture_stop(); }
+int tiku_p4_i2s_rx_read(int16_t *out, unsigned n)
+{
+    if (stalled) return -1;
+    return capture_read(out, n, 0);
+}
+#else
+TIKU_P4_XIP_TEXT
+int tiku_p4_pdm_start(uint32_t hz, uint32_t mask) { return capture_start(hz, mask); }
+TIKU_P4_XIP_TEXT
+void tiku_p4_pdm_stop(void) { capture_stop(); }
+TIKU_P4_XIP_TEXT
+int32_t tiku_p4_pdm_read(int16_t *buf, uint32_t n, uint32_t timeout_ms)
+{ return capture_read(buf, n, timeout_ms); }
+
 TIKU_P4_XIP_TEXT
 int tiku_p4_pdm_running(void)
 {
@@ -639,3 +673,4 @@ void tiku_p4_pdm_level(uint32_t *peak, uint32_t *rms)
         *rms = last_rms;
     }
 }
+#endif

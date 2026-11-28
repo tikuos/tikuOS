@@ -61,6 +61,12 @@ and display driver. Its VFS also exposes the P4 SAR entropy source as
 `/dev/random` and `/dev/urandom`. The product's `tests/p4x/ram.mk` links
 the desktop and its volatile file store.
 
+The desktop selects the onboard analog microphone with `P4X_MIC=1`.
+I2S0 supplies MCLK on GPIO13, BCLK on GPIO12 and word select on GPIO10.
+The ES8311 at I2C address `0x18` returns mono 16 kHz PCM16 on GPIO11.
+The microphone service exposes samples at `/dev/mic` and capture controls
+under `/sys/audio/mic`.
+
 
 ## Normal firmware
 

@@ -31,6 +31,9 @@ a worker reaches them through the POSIX library.  A port supplies
 `tiku_mic_s31.c` averages the Korvo's two microphones from I2S0 and the
 ES8389 and sets the codec's input PGA (`tiku_drv_audio_es8389_input()`); the
 S31 build selects it with `S31_MIC=1` (`arch/esp32s31/README.md`).
+On the P4X Function EV board, `P4X_MIC=1` selects `tiku_mic_p4x.c`.
+The ES8311 samples the analog microphone and sends the left I2S slot to
+I2S0. Its input gain uses the analog PGA in 3 dB steps with digital trim.
 
 ## Opus (`tiku_opus.c`)
 
