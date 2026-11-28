@@ -327,15 +327,19 @@ int tiku_p4_dwgdma_chan_start(unsigned ch, const struct tiku_p4_dwgdma_block *b,
 {
     uint32_t ctl0, ctl1, cfg1, src, dst;
 
-    if ((ch != 2u && ch != 3u) || b == NULL || b->beats == 0u ||
+    if (!b) return TIKU_P4_DWGDMA_ERR_PARAM;
+    int dsi = (uintptr_t)b->dst == TIKU_P4_DWGDMA_DSI_FIFO &&
+              b->dst_periph == TIKU_P4_DWGDMA_PERIPH_DSI &&
+              b->flow == TIKU_P4_DWGDMA_FLOW_M2P_DMA && b->dst_fixed;
+    if ((ch != 2u && ch != 3u) || b->beats == 0u ||
         b->beats > (1u << 22) || b->src_msize > 9u || b->dst_msize > 9u ||
         b->src_outstanding < 1u || b->src_outstanding > 16u ||
         b->dst_outstanding < 1u || b->dst_outstanding > 16u ||
-        (b->flow != TIKU_P4_DWGDMA_FLOW_M2P_DST &&
+        (!dsi && b->flow != TIKU_P4_DWGDMA_FLOW_M2P_DST &&
          b->flow != TIKU_P4_DWGDMA_FLOW_P2M_SRC) ||
         (b->src != TIKU_P4_DWGDMA_BRIDGE_PTR &&
          !tiku_p4_dwgdma_reachable(b->src, b->beats * 8u)) ||
-        (b->dst != TIKU_P4_DWGDMA_BRIDGE_PTR &&
+        (!dsi && b->dst != TIKU_P4_DWGDMA_BRIDGE_PTR &&
          !tiku_p4_dwgdma_reachable(b->dst, b->beats * 8u))) {
         return TIKU_P4_DWGDMA_ERR_PARAM;
     }
@@ -351,7 +355,7 @@ int tiku_p4_dwgdma_chan_start(unsigned ch, const struct tiku_p4_dwgdma_block *b,
     /* CTL0: master 0 for the bridge FIFO, 1 for memory; fixed or
      * incrementing addresses; 64-bit beats; burst sizes. */
     ctl0 = (src == TIKU_P4_DWGDMA_BRIDGE_MEM ? 0u : 1u) |
-           ((dst == TIKU_P4_DWGDMA_BRIDGE_MEM ? 0u : 1u) << 2) |
+           (((dsi || dst == TIKU_P4_DWGDMA_BRIDGE_MEM) ? 0u : 1u) << 2) |
            ((uint32_t)(b->src_fixed ? 1u : 0u) << 4) |
            ((uint32_t)(b->dst_fixed ? 1u : 0u) << 6) |
            (3u << 8) | (3u << 11) |
@@ -389,6 +393,12 @@ uint32_t tiku_p4_dwgdma_chan_status(unsigned ch)
         return 0u;
     }
     return TIKU_P4_REG_READ(CHN_INT_ST(ch)) & (INT_TFR_DONE | INT_ERRORS);
+}
+
+int tiku_p4_dwgdma_chan_idle(unsigned ch)
+{
+    return (ch == 2u || ch == 3u) &&
+           !(TIKU_P4_REG_READ(CHEN0) & (1u << (ch - 1u)));
 }
 
 void tiku_p4_dwgdma_chan_stop(unsigned ch)

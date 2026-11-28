@@ -138,7 +138,7 @@ int tiku_i2c_write_read(uint8_t addr,
                          uint8_t *rx_buf, uint16_t rx_len);
 
 /** @brief Start a shared transaction deadline, in microseconds; zero succeeds.
- * @note Serialized foreground only. The S31 budget-enabled provider supports
+ * @note Serialized foreground only. The P4 and S31 budget-enabled providers support
  * 1..50000 us; unsupported ports refuse. End the budget after the last operation.
  */
 int tiku_i2c_budget_begin(uint32_t microseconds);

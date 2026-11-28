@@ -7,15 +7,17 @@
  *
  * esp32p4_diagnostic.ld - Storage-free native diagnostic in low HP SRAM.
  *
- * The whole image links into 64 KiB of HP SRAM at 0x4ff00000 with a 4 KiB
+ * The image links into the board-selected span of HP SRAM with a 4 KiB
  * stack at its top; the 64-byte fault record sits below the LP ROM data at
  * 0x5010fa80.  Any other .persistent or .retained section fails the link.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 ENTRY(tiku_esp32p4_reset_handler)
+PROVIDE(__p4_diagnostic_base = 0x4ff00000);
+PROVIDE(__p4_diagnostic_size = 64K);
 MEMORY {
-    SRAM (rwx) : ORIGIN = 0x4ff00000, LENGTH = 64K
+    SRAM (rwx) : ORIGIN = __p4_diagnostic_base, LENGTH = __p4_diagnostic_size
     /* LP ROM stack/data starts at 0x5010fa80; the LP core stays in reset. */
     FAULT (rw) : ORIGIN = 0x5010fa40, LENGTH = 64
 }

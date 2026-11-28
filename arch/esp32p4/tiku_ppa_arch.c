@@ -7,8 +7,8 @@
  *
  * tiku_ppa_arch.c - ESP32-P4 PPA: fill and blend on its blend engine,
  * scale/rotate/mirror on its SRM engine, pixels moved by the 2D-DMA.
- * Fields and order follow ESP-IDF ppa_reg.h (hw_ver1), ppa_ll.h and the ppa
- * driver for silicon before revision 3.0.
+ * The scaler uses 32-pixel macro blocks on the revision 3.2 P4X board
+ * and 16-pixel macro blocks on the revision 1.3 boards.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -76,7 +76,12 @@
 #define CH_OUT_A          2u                    /* SRM input, blend background */
 #define CH_OUT_B          1u                    /* blend foreground */
 #define CH_IN             1u
-#define SRM_BLOCK         18u                   /* 16-pixel macro block and apron */
+#if defined(TIKU_BOARD_ESP32_P4X_FUNCTION_EV_BOARD)
+#define SRM_MACRO_SIDE    32u
+#else
+#define SRM_MACRO_SIDE    16u
+#endif
+#define SRM_BLOCK         (SRM_MACRO_SIDE + 2u) /* RGB block including the scaler apron */
 #define SIDE_MAX_SRM      8191u
 
 _Static_assert(TIKU_P4_PPA_ERR_BUSY == TIKU_P4_DMA2D_ERR_BUSY &&
@@ -233,6 +238,7 @@ static int ppa_end(int rc)
         ppa_bits(SR_SCAL_ROTATE, SR_RST, SR_RST);
         ppa_bits(SR_SCAL_ROTATE, SR_RST, 0u);
     }
+    if (!ppa_job.srm && rc != TIKU_P4_DMA2D_OK) blend_reset();
     TIKU_P4_REG_WRITE(PPA_INT_CLR, INT_ALL);
     tiku_p4_dma2d_unclaim();
     return rc;
@@ -250,8 +256,34 @@ static void ppa_finish(int rc)
     ppa_job.done = NULL;
     tiku_p4_dma2d_in_disarm(CH_IN);
     TIKU_P4_REG_WRITE(PPA_INT_ENA, 0u);
+    if (rc == TIKU_P4_DMA2D_ERR_TIMEOUT) {
+        tiku_p4_dma2d_reset_claimed();
+    }
     rc = ppa_end(rc);
     done(ppa_job.ctx, rc);
+}
+
+static int expire(tiku_p4_dma2d_done_t done, void *ctx, int scaler_only)
+{
+    uint32_t state = TIKU_P4_IRQ_SAVE();
+    int matches = done != NULL && (!scaler_only || ppa_job.srm) && ppa_job.done == done &&
+                  ppa_job.ctx == ctx;
+
+    if (matches) {
+        ppa_finish(TIKU_P4_DMA2D_ERR_TIMEOUT);
+    }
+    TIKU_P4_IRQ_RESTORE(state);
+    return matches;
+}
+
+int tiku_p4_ppa_srm_expire(tiku_p4_dma2d_done_t done, void *ctx)
+{
+    return expire(done, ctx, 1);
+}
+
+int tiku_p4_ppa_expire(tiku_p4_dma2d_done_t done, void *ctx)
+{
+    return expire(done, ctx, 0);
 }
 
 static void ppa_done(void *ctx, int rc)
@@ -569,16 +601,16 @@ static int srm_bypass(uint32_t w, uint32_t h, uint32_t sx, uint32_t sy,
     uint32_t bw = (rotate & 1u) ? h : w, bh = (rotate & 1u) ? w : h;
     uint32_t sw = (rotate & 1u) ? sy : sx, shh = (rotate & 1u) ? sx : sy;
     uint32_t w_out = scaled(bw, sw), w_div = out_bpp >= 3u ? 32u : 64u;
-    uint32_t w_left = w_out % w_div, h_in = bh % 16u, h_left;
+    uint32_t w_left = w_out % w_div, h_in = bh % SRM_MACRO_SIDE, h_left;
 
     if (w_left == 0u) {
         w_left = w_div;
     }
     if (h_in == 0u) {
-        h_in = 16u;
+        h_in = SRM_MACRO_SIDE;
     }
     h_left = scaled(h_in, shh);
-    return (w_out > w_div || bh > 16u) &&
+    return (w_out > w_div || bh > SRM_MACRO_SIDE) &&
            w_left * h_left * out_bpp * 8u < 12u * 128u;
 }
 

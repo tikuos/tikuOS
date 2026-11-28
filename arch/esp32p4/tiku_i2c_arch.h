@@ -16,6 +16,12 @@
 #define TIKU_ESP32P4_I2C_ARCH_H_
 #include <interfaces/bus/tiku_i2c_bus.h>
 
+#if TIKU_I2C_BUDGET_ENABLE
+/** @brief Bound subsequent I2C batches to one 1..50000 microsecond interval. */
+int tiku_i2c_arch_budget_begin(uint32_t microseconds);
+/** @brief Release the time budget after the last transaction. */
+void tiku_i2c_arch_budget_end(void);
+#endif
 /** @brief Claim SDA/SCL and configure 100/400 kHz from the 40 MHz crystal.
  * @return OK, PARAM, BUSY for owned pins or routed signals, or TIMEOUT on
  * sync failure.

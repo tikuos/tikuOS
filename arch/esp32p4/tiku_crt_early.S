@@ -15,7 +15,33 @@
  */
 #include "tiku_irq_arch.h"
 #include "tiku_fault_arch.h"
+#if defined(TIKU_BOARD_ESP32_P4X_FUNCTION_EV_BOARD)
+    .option arch, +xespv
+#define esp_ld_qacc_h_h_128_ip esp.ld.qacc.h.h.128.ip
+#define esp_ld_qacc_h_l_128_ip esp.ld.qacc.h.l.128.ip
+#define esp_ld_qacc_l_h_128_ip esp.ld.qacc.l.h.128.ip
+#define esp_ld_qacc_l_l_128_ip esp.ld.qacc.l.l.128.ip
+#define esp_ld_ua_state_ip esp.ld.ua.state.ip
+#define esp_ld_xacc_ip esp.ld.xacc.ip
+#define esp_movx_r_cfg esp.movx.r.cfg
+#define esp_movx_r_fft_bit_width esp.movx.r.fft.bit.width
+#define esp_movx_r_sar esp.movx.r.sar
+#define esp_movx_r_sar_bytes esp.movx.r.sar.bytes
+#define esp_movx_w_cfg esp.movx.w.cfg
+#define esp_movx_w_fft_bit_width esp.movx.w.fft.bit.width
+#define esp_movx_w_sar esp.movx.w.sar
+#define esp_movx_w_sar_bytes esp.movx.w.sar.bytes
+#define esp_st_qacc_h_h_128_ip esp.st.qacc.h.h.128.ip
+#define esp_st_qacc_h_l_128_ip esp.st.qacc.h.l.128.ip
+#define esp_st_qacc_l_h_128_ip esp.st.qacc.l.h.128.ip
+#define esp_st_qacc_l_l_128_ip esp.st.qacc.l.l.128.ip
+#define esp_st_u_xacc_ip esp.st.u.xacc.ip
+#define esp_st_ua_state_ip esp.st.ua.state.ip
+#define esp_vld_128_ip esp.vld.128.ip
+#define esp_vst_128_ip esp.vst.128.ip
+#else
 #include "pie/tiku_pie.inc"
+#endif
 
     .section .text.entry,"ax",@progbits
     .global tiku_esp32p4_reset_handler
@@ -109,6 +135,19 @@ tiku_esp32p4_diagnostic_trap:
     bgeu t1, t2, .Lpark
     andi t2, sp, 15
     bnez t2, .Lbad_sp
+#if defined(TIKU_BOARD_ESP32_P4X_FUNCTION_EV_BOARD) && TIKU_THREADS_ENABLE
+    /* A foreground worker may run on a stack leased from external RAM. */
+    bnez t1, .Linternal_sp
+    la t2, tiku_p4_worker_sp_bounds
+    lw t2, 4(t2)
+    beqz t2, .Linternal_sp
+    bltu t2, sp, .Lbad_sp
+    la t2, tiku_p4_worker_sp_bounds
+    lw t2, 0(t2)
+    bltu sp, t2, .Lbad_sp
+    j .Lsp_ok
+.Linternal_sp:
+#endif
     la t2, __bss_start
     addi t2, t2, TIKU_P4_FRAME_SIZE
     bltu sp, t2, .Lbad_sp

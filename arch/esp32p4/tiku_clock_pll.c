@@ -5,11 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_clock_pll.c - P4 v1.3 SRAM-only CPU frequency selection.
+ * tiku_clock_pll.c - P4 CPU frequency selection from SRAM.
  *
- * Starts the CPLL through the PMU and switches the CPU among 40, 90, 180
- * and 360 MHz.  Each change returns to the crystal first and loads dividers
- * that hold memory at 180 MHz or below and APB at 90 MHz or below.
+ * Starts the CPLL through the PMU and loads the bus dividers on XTAL
+ * before switching the CPU to the board CPLL.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -41,14 +40,15 @@ void tiku_p4_clock_follow(void (*follower)(unsigned mhz))
 static unsigned current_mhz(void)
 {
     if ((TIKU_P4_REG_READ(TIKU_P4_ROOT_SELECT) & 3u) == 0) return 40u;
-    return 360u / (1u + ((TIKU_P4_REG_READ(TIKU_P4_ROOT_DIV0) >> 5) & 255u));
+    return TIKU_P4_CPLL_MHZ / (1u + ((TIKU_P4_REG_READ(TIKU_P4_ROOT_DIV0) >> 5) & 255u));
 }
 
 int tiku_p4_clock_set_mhz(unsigned mhz)
 {
     uint32_t state, root, divider, cpu_div, mem_div, apb_div, tries;
     int result = -2;
-    if (mhz != 40u && mhz != 90u && mhz != 180u && mhz != 360u) return -1;
+    if (mhz != 40u && mhz != TIKU_P4_CPLL_MHZ / 4u &&
+        mhz != TIKU_P4_CPLL_MHZ / 2u && mhz != TIKU_P4_CPLL_MHZ) return -1;
     if (mhz != 40u && !pll_ready) return -1;
     /* The follower slows before the CPU does and then takes the clock the
      * CPU ended on, which is the crystal after a failed switch. */
@@ -59,11 +59,10 @@ int tiku_p4_clock_set_mhz(unsigned mhz)
         result = 0;
         goto done;
     }
-    cpu_div = 360u / mhz;
-    mem_div = mhz == 360u ? 2u : 1u;
-    apb_div = mhz == 90u ? 1u : 2u;
-    /* Dividers are loaded on XTAL before selecting CPLL: MEM/SYS <=180 MHz,
-     * APB <=90 MHz, including transitions between two CPLL rates. */
+    cpu_div = TIKU_P4_CPLL_MHZ / mhz;
+    mem_div = cpu_div == 1u ? 2u : 1u;
+    apb_div = cpu_div == 4u ? 1u : 2u;
+    /* Load the memory and APB dividers on XTAL before selecting CPLL. */
     divider = TIKU_P4_REG_READ(TIKU_P4_ROOT_DIV0) & ~0x1ffffff0u;
     divider |= (cpu_div - 1u) << 5;
     TIKU_P4_REG_WRITE(TIKU_P4_ROOT_DIV0, divider);

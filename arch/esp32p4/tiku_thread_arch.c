@@ -29,12 +29,29 @@ static struct _reent workers[TIKU_THREADS_MAX], interrupt_reent;
 static struct _reent *kernel_reent;
 static uint8_t reent_ready[TIKU_THREADS_MAX];
 
+#if defined(TIKU_BOARD_ESP32_P4X_FUNCTION_EV_BOARD)
+/* The foreground worker's admissible pre-trap SP range, including frame
+ * space above its canary. A zero upper bound selects the kernel stack. */
+uintptr_t tiku_p4_worker_sp_bounds[2];
+#endif
+
 /** @brief Acknowledge the software request before choosing a resume frame. */
 static uint32_t *switch_context(uint32_t *frame)
 {
     TIKU_P4_REG_WRITE(P4_SWITCH_REQUEST, 0);
     (void)TIKU_P4_REG_READ(P4_SWITCH_REQUEST);
-    return tiku_thread_switch(frame);
+    uint32_t *resume = tiku_thread_switch(frame);
+#if defined(TIKU_BOARD_ESP32_P4X_FUNCTION_EV_BOARD)
+    tiku_thread_t *worker = tiku_thread_self();
+    if (worker) {
+        uintptr_t base = (uintptr_t)worker->stack_base;
+        tiku_p4_worker_sp_bounds[0] = base + sizeof(uint32_t) + TIKU_P4_FRAME_SIZE;
+        tiku_p4_worker_sp_bounds[1] = base + worker->stack_size;
+    } else {
+        tiku_p4_worker_sp_bounds[1] = 0;
+    }
+#endif
+    return resume;
 }
 
 void tiku_thread_arch_boot(void)

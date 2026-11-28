@@ -31,6 +31,8 @@ REVISION = 103
 ROM_ECO = 2
 RAM_START = 0x4FF00000
 RAM_LIMIT = 0x4FF0F000
+P4X_RAM_START = 0x4FF50000
+P4X_RAM_LIMIT = 0x4FF8F000  # final 4 KiB reserved for the stack
 FAULT_START = 0x5010FA40
 FAULT_SIZE = 64
 KERNEL_LOW_END = 0x4FF2BBD0
@@ -61,10 +63,13 @@ def has_storage_writer(image):
     return sum(payload.count(STORAGE_TEST_MARKER) for _, payload in image["segments"])
 
 
-def validate_image(data, kernel_test=False):
-    """Check the exact P4 v1.3 SRAM profile, checksum and appended digest."""
-    limit = KERNEL_LOW_END if kernel_test else RAM_LIMIT
-    if not 24 <= len(data) <= limit - RAM_START + 256:
+def validate_image(data, kernel_test=False, *, revision=REVISION):
+    """Check the selected P4 SRAM profile, checksum and appended digest."""
+    if kernel_test and revision != REVISION:
+        raise ValueError("unsupported P4 kernel profile revision")
+    start = P4X_RAM_START if revision == 302 else RAM_START
+    limit = KERNEL_LOW_END if kernel_test else (P4X_RAM_LIMIT if revision == 302 else RAM_LIMIT)
+    if not 24 <= len(data) <= limit - start + 256:
         raise ValueError("invalid P4 diagnostic image size")
     magic, count, mode, geometry, entry = struct.unpack_from("<BBBBI", data)
     if magic != 0xE9 or not 1 <= count <= 16:
@@ -73,8 +78,8 @@ def validate_image(data, kernel_test=False):
         raise ValueError("diagnostic requires DIO, 40 MHz, 16 MiB header")
     if struct.unpack_from("<H", data, 12)[0] != CHIP_ID:
         raise ValueError("image must target ESP32-P4")
-    if struct.unpack_from("<HH", data, 15) != (REVISION, REVISION):
-        raise ValueError("image must target exactly P4 silicon v1.3")
+    if struct.unpack_from("<HH", data, 15) != (revision, revision):
+        raise ValueError(f"image must target exactly P4 silicon v{revision // 100}.{revision % 100}")
     if data[23] != 1:
         raise ValueError("image requires an appended SHA-256")
     offset, checksum, segments = 24, 0xEF, []
@@ -83,7 +88,7 @@ def validate_image(data, kernel_test=False):
             raise ValueError("truncated segment header")
         address, size = struct.unpack_from("<II", data, offset)
         offset += 8
-        if (not size or address % 4 or size % 4 or address < RAM_START or
+        if (not size or address % 4 or size % 4 or address < start or
                 address + size > limit or offset + size > len(data)):
             raise ValueError("segment outside diagnostic SRAM or malformed")
         if any(address < base + len(payload) and address + size > base
@@ -104,7 +109,7 @@ def validate_image(data, kernel_test=False):
         raise ValueError("invalid checksum or nonzero padding")
     if hashlib.sha256(data[:digest_at]).digest() != data[digest_at:]:
         raise ValueError("SHA-256 mismatch")
-    return {"entry": entry, "segments": segments, "kernel_test": kernel_test}
+    return {"entry": entry, "segments": segments, "kernel_test": kernel_test, "ram_start": start}
 
 
 def validate_elf(data, image):
@@ -122,6 +127,8 @@ def validate_elf(data, image):
     fault_section = False
     kernel = image.get("kernel_test", False)
     firmware = image.get("firmware", False)
+    start = image.get("ram_start", RAM_START)
+    limit = KERNEL_LOW_END if kernel else (P4X_RAM_LIMIT if start == P4X_RAM_START else RAM_LIMIT)
     stack_size = 16384 if firmware else 4096
     guard = KERNEL_STACK - stack_size - 64
     if firmware and (not kernel or has_firmware(image) != 1):
@@ -149,8 +156,7 @@ def validate_elf(data, image):
         device_stage = (firmware and kind == 8 and flags == 3 and
                         address == KERNEL_HIGH_START and size % 64 == 0 and
                         size <= FIRMWARE_IPC_MAX)
-        if not (stack_section or retained or device_stage) and (address < RAM_START or address + size >
-                                  (KERNEL_LOW_END if kernel else RAM_LIMIT)):
+        if not (stack_section or retained or device_stage) and (address < start or address + size > limit):
             raise ValueError("allocated ELF section overlaps reserved memory")
         if any(address < end and address + size > start
                for start, end in allocated):
@@ -264,16 +270,16 @@ def require_port(port, serial_number, ports):
     require_idle_usb_port(port, ports)
 
 
-def validate_target(esp):
-    """Require the measured v1.3/ECO2 unsecured P4 ROM, never a stub."""
+def validate_target(esp, *, revision=REVISION, eco=ROM_ECO):
+    """Require the selected P4 silicon revision and its unsecured ROM loader."""
     if (esp.CHIP_NAME != "ESP32-P4" or esp.IS_STUB or
             esp.secure_download_mode):
         raise ValueError("requires unsecured ESP32-P4 ROM loader")
     if (esp.read_reg(0x4FC00010) != CHIP_ID or
-            esp.read_reg(0x4FC00014) != ROM_ECO or
+            esp.read_reg(0x4FC00014) != eco or
             esp.get_major_chip_version() * 100 +
-            esp.get_minor_chip_version() != REVISION):
-        raise ValueError("only P4 silicon v1.3 and ROM ECO2 are supported")
+            esp.get_minor_chip_version() != revision):
+        raise ValueError(f"requires P4 v{revision // 100}.{revision % 100} and ROM ECO{eco}")
     security = esp.get_security_info()
     if (security["chip_id"] != CHIP_ID or security["flags"] != 0 or
             security["flash_crypt_cnt"] != 0):

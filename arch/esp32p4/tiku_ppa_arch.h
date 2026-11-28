@@ -160,4 +160,14 @@ int tiku_p4_ppa_srm_async(const tiku_p4_picture_t *out, uint16_t ox,
                           unsigned mirror, tiku_p4_dma2d_done_t done,
                           void *ctx);
 
+/** @brief Retire the outstanding scaler job matching @p done and @p ctx.
+ *  @return 1 after the DMA reset and timeout callback, 0 if no job matched.
+ *  @note Call from the owner on CPU0. Completion and expiry are exclusive. */
+int tiku_p4_ppa_srm_expire(tiku_p4_dma2d_done_t done, void *ctx);
+
+/** @brief Retire a pending fill, blend or scaler operation owned by the callback.
+ *  @return 1 after reset and timeout notification, 0 if no operation matched.
+ *  @note Called on CPU0. */
+int tiku_p4_ppa_expire(tiku_p4_dma2d_done_t done, void *ctx);
+
 #endif /* TIKU_ESP32P4_PPA_ARCH_H_ */

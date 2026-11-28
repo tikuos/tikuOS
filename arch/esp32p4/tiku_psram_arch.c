@@ -5,10 +5,10 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_psram_arch.c - AP x16 PSRAM on P4 v1.3, its bus at up to 200 MHz.
+ * tiku_psram_arch.c - AP x16 PSRAM power, register setup and memory mapping.
  *
- * LDO VO2, the MPLL, device setup at 20 MHz, strobe calibration at 200 MHz,
- * 32 MiB mapped; the bus follows the CPU.  ESP-IDF 4d59230d and 383dda6c.
+ * The v1.3 port calibrates the 200 MHz MPLL bus and follows CPU rates.
+ * The Function EV Board sets registers at 20 MHz and runs from SPLL at 80 MHz.
  *
  * SPDX-FileCopyrightText: 2023-2026 Espressif Systems (Shanghai) CO LTD
  * SPDX-License-Identifier: Apache-2.0
@@ -141,11 +141,11 @@ static uint32_t bus_clock(unsigned div)
 
 /** @brief Configure dedicated PSRAM pads and both SPI2/SPI3 clock dividers
  *         at the 20 MHz the setup runs at. */
-static int controller(void)
+static int controller(unsigned clock, unsigned divider)
 {
     unsigned offset;
     field(TIKU_P4_SOC_CLK0, 1u << 31, 1u << 31);
-    field(PS_CLOCK, 0x00fff000u, 0x0000d000u);
+    field(PS_CLOCK, 0x00fff000u, clock);
     field(TIKU_P4_HP_RESET0, (1u << 23) | (1u << 25), (1u << 23) | (1u << 25));
     field(TIKU_P4_HP_RESET0, 1u << 25, 0);
     field(TIKU_P4_HP_RESET0, 1u << 23, 0);
@@ -158,12 +158,12 @@ static int controller(void)
     field(PS_PADS + 0x68, 1, 1);
     field(PS_SYS + 0x1a0, 0xfe01ffffu, 0x8400018fu);
     field(PS_SYS + 0x174, 0x001c0000u, 3u << 18);
-    TIKU_P4_REG_WRITE(PS_SYS + 0x50, bus_clock(PS_DIV_SETUP));
-    TIKU_P4_REG_WRITE(PS_PIO + 0x14, bus_clock(PS_DIV_SETUP));
+    TIKU_P4_REG_WRITE(PS_SYS + 0x50, bus_clock(divider));
+    TIKU_P4_REG_WRITE(PS_PIO + 0x14, bus_clock(divider));
     field(PS_SYS + 0x190, 1u << 5, 1u << 5);
     field(PS_SYS + 0x180, 1u << 5, 1u << 5);
-    return (TIKU_P4_REG_READ(PS_CLOCK) & 0x00fff000u) == 0xd000u &&
-           TIKU_P4_REG_READ(PS_PIO + 0x14) == bus_clock(PS_DIV_SETUP);
+    return (TIKU_P4_REG_READ(PS_CLOCK) & 0x00fff000u) == clock &&
+           TIKU_P4_REG_READ(PS_PIO + 0x14) == bus_clock(divider);
 }
 
 /** @brief Set the 200 MHz latencies (fixed) and x16 bursts, then require
@@ -325,8 +325,39 @@ failed:
     return 0;
 }
 
+#if defined(TIKU_BOARD_ESP32_P4X_FUNCTION_EV_BOARD)
+static int function_ev_init(void)
+{
+    if (capacity) return 0;
+    if (attempted || tiku_p4_in_isr() || tiku_p4_cache_boot_init()) return -1;
+    attempted = 1;
+    uint32_t irq = TIKU_P4_IRQ_SAVE();
+    int ok = 0;
+    if (!tiku_p4_pmu_psram_ldo_init()) {
+        stage = 1;
+        /* SPLL480 divided by 24 for register setup, by six for scanout. */
+        if (controller(0xe000u, 24u)) {
+            stage = 2;
+            if (device()) {
+                TIKU_P4_REG_WRITE(PS_SYS + 0x50, bus_clock(6));
+                TIKU_P4_REG_WRITE(PS_PIO + 0x14, bus_clock(6));
+                stage = 4;
+                ok = mapping();
+            }
+        }
+    }
+    if (ok) { capacity = TIKU_P4_PSRAM_BYTES; stage = 5; }
+    else if (stage) field(PS_SYS + 0x3c, PS_CLOSE | 1, PS_CLOSE);
+    TIKU_P4_IRQ_RESTORE(irq);
+    return ok ? 0 : -1;
+}
+#endif
+
 int tiku_p4_psram_init(void)
 {
+#if defined(TIKU_BOARD_ESP32_P4X_FUNCTION_EV_BOARD)
+    return function_ev_init();
+#endif
     uint32_t irq;
     unsigned mhz;
     int ok = 0;
@@ -342,7 +373,7 @@ int tiku_p4_psram_init(void)
     irq = TIKU_P4_IRQ_SAVE();
     if (!tiku_p4_pmu_psram_ldo_init() && !tiku_p4_pmu_mpll_init()) {
         stage = 1;
-        if (controller()) {
+        if (controller(0xd000u, PS_DIV_SETUP)) {
             stage = 2;
             if (device() && calibrate()) {
                 stage = 4;
@@ -376,6 +407,10 @@ static unsigned divider_for(unsigned cpu_mhz)
 
 void tiku_p4_psram_follow_cpu(unsigned cpu_mhz)
 {
+#if defined(TIKU_BOARD_ESP32_P4X_FUNCTION_EV_BOARD)
+    /* The P4X panel profile keeps SPLL480 divided by six. */
+    return;
+#endif
     uint32_t word, state, autoload;
     unsigned tries;
 
@@ -400,7 +435,11 @@ void tiku_p4_psram_follow_cpu(unsigned cpu_mhz)
 uint32_t tiku_p4_psram_hz(void)
 {
     uint32_t div = ((TIKU_P4_REG_READ(PS_SYS + 0x50) >> 16) & 255u) + 1u;
+#if defined(TIKU_BOARD_ESP32_P4X_FUNCTION_EV_BOARD)
+    return capacity ? 480000000u / div : 0;
+#else
     return capacity ? PS_MPLL_MHZ * 1000000u / div : 0;
+#endif
 }
 
 void tiku_p4_psram_calibration(uint32_t *phases, uint32_t *delays,

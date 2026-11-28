@@ -35,7 +35,9 @@
  * On Cortex-M a switch with live FP state saves 51 words (204 bytes): the
  * 26-word extended hardware frame, then r4-r11, EXC_RETURN and S16-S31.
  */
+#ifndef TIKU_THREAD_STACK_MIN
 #define TIKU_THREAD_STACK_MIN   512u
+#endif
 
 /*---------------------------------------------------------------------------*/
 /* TYPES                                                                     */

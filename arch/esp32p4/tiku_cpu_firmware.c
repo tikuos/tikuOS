@@ -42,8 +42,17 @@ const char tiku_p4_firmware_identity[] = "TIKU-P4-FIRMWARE-v1:00400000:00bf8000"
 void tiku_p4_fatal(const char *reason)
 {
     (void)TIKU_P4_IRQ_SAVE();
+#if defined(TIKU_MINIMAL)
+    const char *p = reason;
+    while (*p) {
+        if (tiku_usb_serial_jtag_write((const uint8_t *)p, 1)) ++p;
+        tiku_usb_serial_jtag_poll();
+    }
+    for (;;) tiku_usb_serial_jtag_poll();
+#else
     tiku_debug_arch_printf("P4 FATAL: %s\n", reason);
     for (;;) tiku_serial_jtag_poll();
+#endif
 }
 
 void tiku_cpu_boot_init(void)
@@ -71,7 +80,7 @@ unsigned long tiku_cpu_mclk_hz(void)
 {
     unsigned root = TIKU_P4_REG_READ(TIKU_P4_ROOT_SELECT) & 3u;
     unsigned div = ((TIKU_P4_REG_READ(TIKU_P4_ROOT_DIV0) >> 5) & 255u) + 1u;
-    return (root == 1u ? 360000000UL : 40000000UL) / div;
+    return (root == 1u ? TIKU_P4_CPLL_MHZ * 1000000UL : 40000000UL) / div;
 }
 
 unsigned long tiku_cpu_smclk_hz(void)
@@ -89,12 +98,14 @@ int tiku_cpu_clock_has_fault(void)
 
 void tiku_cpu_freq_init(unsigned int mhz)
 {
-    if (mhz != 40 && mhz != 90 && mhz != 180 && mhz != 360) return;
+    if (mhz != 40 && mhz != TIKU_P4_CPLL_MHZ / 4u &&
+        mhz != TIKU_P4_CPLL_MHZ / 2u && mhz != TIKU_P4_CPLL_MHZ) return;
     if (tiku_p4_clock_set_mhz(mhz)) tiku_p4_fatal("CPU frequency");
 }
 unsigned long tiku_cpu_freq_available(unsigned int index)
 {
-    static const unsigned long rates[] = {40000000, 90000000, 180000000, 360000000};
+    static const unsigned long rates[] = {40000000UL, TIKU_P4_CPLL_MHZ * 250000UL,
+                                          TIKU_P4_CPLL_MHZ * 500000UL, TIKU_P4_CPLL_MHZ * 1000000UL};
     return index < sizeof rates / sizeof rates[0] ? rates[index] : 0;
 }
 const char *tiku_cpu_freq_change_mode(void) { return "reboot"; }

@@ -15,6 +15,11 @@
  */
 #include "tiku_boot_arch.h"
 #include "tiku_esp32p4_regs.h"
+#if defined(TIKU_BOARD_ESP32_P4X_FUNCTION_EV_BOARD)
+#include "boards/tiku_board_p4x_function_ev.h"
+#include "tiku_irq_arch.h"
+#include <string.h>
+#endif
 
 void tiku_esp32p4_boot_park_cores(void)
 {
@@ -52,3 +57,43 @@ void tiku_esp32p4_boot_watchdogs_disable(void)
                                               TIKU_P4_SWD_AUTO_FEED);
     TIKU_P4_REG_WRITE(TIKU_P4_SWD_PROTECT, 0u);
 }
+
+#if defined(TIKU_BOARD_ESP32_P4X_FUNCTION_EV_BOARD)
+int tiku_p4x_boot_read(uint32_t offset, void *dest, uint32_t size)
+{
+    /* The ECO7 ROM SPI reader takes an internal SRAM destination. */
+    int (*const read_flash)(uint32_t, uint32_t *, int32_t) =
+        (int (*)(uint32_t, uint32_t *, int32_t))0x4fc00158u;
+    uint32_t block[128];
+    uint8_t *out = dest;
+    if (!out || ((offset | size) & 3u) || offset > 0x1000000u ||
+        size > 0x1000000u - offset) return -1;
+    while (size) {
+        unsigned n = size > sizeof block ? sizeof block : size;
+        uint32_t irq = TIKU_P4_IRQ_SAVE();
+        int rc = read_flash(offset, block, n);
+        TIKU_P4_IRQ_RESTORE(irq);
+        if (rc) return -1;
+        memcpy(out, block, n);
+        offset += n;
+        out += n;
+        size -= n;
+    }
+    return 0;
+}
+
+void tiku_p4x_boot_i2c_pads(void)
+{
+    const unsigned pads[] = {TIKU_BOARD_I2C_SDA_PIN, TIKU_BOARD_I2C_SCL_PIN};
+    for (unsigned i = 0; i < 2; ++i) {
+        const unsigned pin = pads[i];
+        const uintptr_t mux = 0x500e1004u + 4u * pin;
+        /* USB download leaves these pads on the SPI2 slave function. */
+        if (((TIKU_P4_REG_READ(mux) >> 12) & 7u) == 3u) {
+            TIKU_P4_REG_WRITE(0x500e0028u, 1u << pin);
+            TIKU_P4_REG_WRITE(mux, (TIKU_P4_REG_READ(mux) & ~(7u << 12)) |
+                                   (1u << 12));
+        }
+    }
+}
+#endif

@@ -50,6 +50,8 @@ void tiku_p4_dwgdma_stats(uint32_t *done, uint32_t *failed);
 #define TIKU_P4_DWGDMA_BRIDGE_MEM   0x50104000u
 #define TIKU_P4_DWGDMA_BRIDGE_PTR   ((void *)(uintptr_t)TIKU_P4_DWGDMA_BRIDGE_MEM)
 /** @brief Hardware-handshake peripherals (CFG1 src_per / dst_per). */
+#define TIKU_P4_DWGDMA_DSI_FIFO     0x50105000u
+#define TIKU_P4_DWGDMA_FLOW_M2P_DMA 1u
 #define TIKU_P4_DWGDMA_PERIPH_DSI   0u
 #define TIKU_P4_DWGDMA_PERIPH_CSI   1u
 #define TIKU_P4_DWGDMA_PERIPH_ISP   2u
@@ -98,4 +100,6 @@ int tiku_p4_dwgdma_chan_start(unsigned ch, const struct tiku_p4_dwgdma_block *bl
 uint32_t tiku_p4_dwgdma_chan_status(unsigned ch);
 /** @brief Abort channel @p ch if it still runs and clear its status. */
 void tiku_p4_dwgdma_chan_stop(unsigned ch);
+/** @brief Return one when the hardware has disabled channel 2 or 3. */
+int tiku_p4_dwgdma_chan_idle(unsigned ch);
 #endif

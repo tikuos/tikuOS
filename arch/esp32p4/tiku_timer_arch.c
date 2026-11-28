@@ -50,6 +50,11 @@ tiku_clock_arch_time_t tiku_clock_arch_time(void)
     return tiku_p4_systimer_ticks();
 }
 
+uint64_t tiku_clock_arch_usec(void)
+{
+    return now() / 16u;
+}
+
 unsigned long tiku_clock_arch_seconds(void)
 {
     uint32_t state = TIKU_P4_IRQ_SAVE();

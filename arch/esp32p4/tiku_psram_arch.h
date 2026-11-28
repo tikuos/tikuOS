@@ -18,7 +18,7 @@
 #include <stdint.h>
 #define TIKU_P4_PSRAM_BASE 0x48000000u
 #define TIKU_P4_PSRAM_BYTES 0x02000000u
-/** @brief Initialize the fitted AP 32 MiB PSRAM at 80 MHz; zero means success.
+/** @brief Initialize the fitted AP 32 MiB PSRAM at the board-selected speed; zero means success.
  * @note CPU0 SRAM execution, parked other cores, no mapped flash/PSRAM users
  * or DMA. Failure requires reset before retry. Initialization writes 64 low-lane
  * bytes in the first 128 bytes; the caller must reserve that range until return.

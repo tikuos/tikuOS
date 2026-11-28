@@ -136,10 +136,8 @@ static void put_bits(uint32_t reg, uint32_t bits, uint32_t value)
     TIKU_P4_REG_WRITE(reg, (TIKU_P4_REG_READ(reg) & ~bits) | (value & bits));
 }
 
-/** @brief Clock the engine, pulse its reset, force its register clock on
- *         and empty the AXI FIFOs (dma2d_ll_hw_enable). */
 TIKU_P4_XIP_TEXT
-static void d2d_init(void)
+void tiku_p4_dma2d_reset_claimed(void)
 {
     put_bits(CLK_SYS, CLK_SYS_D2D, CLK_SYS_D2D);
     put_bits(RESET_D2D_REG, RESET_D2D, RESET_D2D);
@@ -235,7 +233,7 @@ int tiku_p4_dma2d_claim(void)
     d2d_busy = 1u;
     TIKU_P4_IRQ_RESTORE(state);
     if (!d2d_ready) {
-        d2d_init();
+        tiku_p4_dma2d_reset_claimed();
     }
     return TIKU_P4_DMA2D_OK;
 }

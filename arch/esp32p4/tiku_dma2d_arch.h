@@ -129,6 +129,9 @@ void tiku_p4_dma2d_desc_block(tiku_p4_dma2d_desc_t *d,
 /** @brief Take the engine for one transfer, bringing it up the first time.
  *  @return TIKU_P4_DMA2D_OK or TIKU_P4_DMA2D_ERR_BUSY */
 int tiku_p4_dma2d_claim(void);
+/** @brief Reset the exclusively held DMA engine and its AXI FIFOs.
+ *  @note The caller must hold the claim and disarm its pending callbacks. */
+void tiku_p4_dma2d_reset_claimed(void);
 /** @brief Hand the engine back after tiku_p4_dma2d_claim(). */
 void tiku_p4_dma2d_unclaim(void);
 /**

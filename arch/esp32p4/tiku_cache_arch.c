@@ -33,8 +33,12 @@ int tiku_p4_cache_layout_ok(void)
 
 int tiku_p4_cache_boot_init(void)
 {
-    if (TIKU_P4_REG_READ(TIKU_P4_ROM_CHIP_ID) != 18 ||
-        TIKU_P4_REG_READ(TIKU_P4_ROM_ECO) != 2) return -1;
+    if (TIKU_P4_REG_READ(TIKU_P4_ROM_CHIP_ID) != 18) return -1;
+#if defined(TIKU_BOARD_ESP32_P4X_FUNCTION_EV_BOARD)
+    if (TIKU_P4_REG_READ(TIKU_P4_ROM_ECO) != 7) return -1;
+#else
+    if (TIKU_P4_REG_READ(TIKU_P4_ROM_ECO) != 2) return -1;
+#endif
     initial_size = TIKU_P4_REG_READ(TIKU_P4_L2_SIZE);
     TIKU_P4_CACHE_SET_MODE(9, 8, 3);
     if (TIKU_P4_CACHE_INVALIDATE(1u << 5) != 0) return -1;

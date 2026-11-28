@@ -15,6 +15,7 @@
 #ifndef TIKU_ESP32P4_TIMER_ARCH_H_
 #define TIKU_ESP32P4_TIMER_ARCH_H_
 #include <hal/tiku_clock_hal.h>
+#define TIKU_CLOCK_ARCH_USEC 1
 #define TIKU_CLOCK_ARCH_SECOND 128u
 #define TIKU_HTIMER_ARCH_SECOND 1000000UL
 #define TIKU_CLOCK_ARCH_MS_TO_TICKS(ms) \

@@ -9,11 +9,20 @@ TIKU_PLATFORM := esp32p4
 BOARD ?= olimex_esp32p4_pc
 P4_BOARD_DEFINE_olimex_esp32p4_pc := TIKU_BOARD_OLIMEX_ESP32P4_PC
 P4_BOARD_DEFINE_firebeetle2_esp32p4 := TIKU_BOARD_FIREBEETLE2_ESP32P4
+P4_BOARD_DEFINE_esp32_p4x_function_ev_board := TIKU_BOARD_ESP32_P4X_FUNCTION_EV_BOARD
 P4_BOARD_DEFINE := $(P4_BOARD_DEFINE_$(BOARD))
 ifeq ($(P4_BOARD_DEFINE),)
-$(error The P4 RAM profiles require BOARD=olimex_esp32p4_pc or firebeetle2_esp32p4)
+$(error Unknown ESP32-P4 RAM board $(BOARD))
 endif
 P4_PROFILE ?= diagnostic
+P4_IMAGE_REV := 103
+ifeq ($(BOARD),esp32_p4x_function_ev_board)
+ifneq ($(P4_PROFILE),diagnostic)
+$(error The P4X revision 3.2 RAM target supports P4_PROFILE=diagnostic)
+endif
+P4_IMAGE_REV := 302
+P4_LDFLAGS += -Wl,--defsym=__p4_diagnostic_base=0x4ff50000,--defsym=__p4_diagnostic_size=0x40000
+endif
 ifeq ($(P4_PROFILE),diagnostic)
 ifneq ($(MINIMAL),1)
 $(error Select MINIMAL=1, P4_PROFILE=kernel-test, or P4_PROFILE=firmware)
@@ -82,7 +91,7 @@ ifneq ($(P4_PROFILE):$(P4_FLASH_WRITE_TEST):$(P4_XIP_TEST):$(P4_PSRAM_TEST),kern
 $(error Storage qualification requires an exclusive SRAM-only kernel-test profile)
 endif
 endif
-BUILD_DIR ?= build/esp32p4/$(P4_PROFILE)$(if $(filter 1,$(P4_FLASH_WRITE_TEST)),-write)$(if $(filter 1,$(P4_XIP_TEST)),-xip)$(if $(filter 1,$(P4_PSRAM_TEST)),-psram)$(if $(filter 1,$(P4_STORAGE_TEST)),-storage)
+BUILD_DIR ?= build/esp32p4/$(if $(filter 302,$(P4_IMAGE_REV)),p4x/)$(P4_PROFILE)$(if $(filter 1,$(P4_FLASH_WRITE_TEST)),-write)$(if $(filter 1,$(P4_XIP_TEST)),-xip)$(if $(filter 1,$(P4_PSRAM_TEST)),-psram)$(if $(filter 1,$(P4_STORAGE_TEST)),-storage)
 TOOLCHAIN_PREFIX ?= riscv-none-elf-
 P4_TOOL := $(if $(TOOLCHAIN_DIR),$(TOOLCHAIN_DIR)/bin/)$(TOOLCHAIN_PREFIX)
 P4_CC := $(P4_TOOL)gcc
@@ -108,6 +117,29 @@ P4_ASM := arch/esp32p4/tiku_crt_early.S arch/esp32p4/tiku_irq_probe.S
 ifeq ($(P4_PROFILE),diagnostic)
 P4_FLAGS += -DTIKU_MINIMAL=1
 P4_LIBS := -lgcc
+ifeq ($(BOARD),esp32_p4x_function_ev_board)
+P4_SRCS := $(filter-out arch/esp32p4/tiku_boot_diagnostic.c TikuBench/tests/esp32p4/test_flash.c,$(P4_SRCS))
+P4_SRCS += TikuBench/tests/esp32p4/test_p4x_panel.c arch/esp32p4/tiku_i2c_arch.c arch/esp32p4/tiku_gpio_arch.c interfaces/gpio/tiku_gpio_owner.c
+P4_SRCS += interfaces/bus/tiku_i2c_bus.c interfaces/input/tiku_touch_gt911.c drivers/input/gt911/tiku_drv_input_gt911.c
+P4_SRCS += arch/esp32p4/tiku_cpu_firmware.c arch/esp32p4/tiku_dwgdma_arch.c
+P4_SRCS += arch/esp32p4/tiku_cache_arch.c arch/esp32p4/tiku_psram_arch.c
+P4_SRCS += interfaces/display/tiku_display.c interfaces/display/tiku_display_async.c arch/esp32p4/tiku_display_arch.c
+P4_SRCS += arch/esp32p4/tiku_dsi_arch.c arch/esp32p4/boards/tiku_p4x_panel.c
+P4_SRCS += kernel/vfs/tiku_vfs.c kernel/process/tiku_process.c kernel/scheduler/tiku_sched.c kernel/threads/tiku_thread.c
+P4_SRCS += kernel/timers/tiku_clock.c kernel/timers/tiku_timer.c kernel/timers/tiku_htimer.c kernel/timers/tiku_crit.c
+P4_SRCS += arch/esp32p4/tiku_thread_arch.c arch/esp32p4/tiku_cpu_arch.c arch/esp32p4/tiku_timer_arch.c
+P4_SRCS += arch/esp32p4/tiku_libc_arch.c compat/posix/tiku_posix_vfs.c kernel/vfs/tree/tiku_vfs_tree_timer.c
+# The 512-byte CPU0 trap frame shares the worker stack with its canary and locals.
+P4_FLAGS += -DTIKU_THREAD_STACK_MIN=1024u
+P4X_CPU_MHZ ?= 40
+ifneq ($(P4X_CPU_MHZ),40)
+ifneq ($(P4X_CPU_MHZ),400)
+$(error P4X_CPU_MHZ must be 40 or 400)
+endif
+endif
+P4_FLAGS += -Wno-missing-field-initializers -DMAIN_CPU_FREQ=$(P4X_CPU_MHZ) -DTIKU_I2C_BUDGET_ENABLE=1 -DTIKU_THREADS_ENABLE=1
+P4_LIBS := -Wl,--start-group -lc -lnosys -lgcc -Wl,--end-group
+endif
 P4_LINKER := arch/esp32p4/devices/esp32p4_diagnostic.ld
 else
 P4_FLAGS += -DTIKU_P4_KERNEL_TEST=1 -DTIKU_THREADS_ENABLE=1 \
@@ -155,7 +187,7 @@ P4_OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(P4_SRCS)) \
     $(patsubst %.S,$(BUILD_DIR)/%.o,$(P4_ASM))
 P4_ELF := $(BUILD_DIR)/diagnostic.elf
 P4_BIN := $(BUILD_DIR)/diagnostic.bin
-P4_LOADER := tools/esp32p4_ram.py
+P4_LOADER := $(if $(filter 302,$(P4_IMAGE_REV)),tools/esp32p4x_ram.py,tools/esp32p4_ram.py)
 ifeq ($(P4_FLASH_WRITE_TEST),1)
 P4_LOADER := tools/esp32p4_flash_test.py
 endif
@@ -189,8 +221,8 @@ $(P4_BIN) $(BUILD_DIR)/xip.bin $(BUILD_DIR)/diagnostic.paired.elf &: $(P4_ELF) \
 else
 $(P4_BIN): $(P4_ELF)
 	$(ESPTOOL) --chip esp32p4 elf2image --flash-mode dio \
-	    --flash-freq 40m --flash-size 16MB --min-rev-full 103 \
-	    --max-rev-full 103 -o $@ $<
+	    --flash-freq 40m --flash-size 16MB --min-rev-full $(P4_IMAGE_REV) \
+	    --max-rev-full $(P4_IMAGE_REV) -o $@ $<
 endif
 check-image: $(P4_BIN)
 ifeq ($(P4_XIP_TEST),1)

@@ -17,6 +17,14 @@
 #include "tiku_esp32p4_regs.h"
 #include "tiku_irq_arch.h"
 
+#if defined(TIKU_BOARD_ESP32_P4X_FUNCTION_EV_BOARD)
+#define CPLL_ROM_ECO 7u
+#define CPLL_ANALOG_DIV 10u
+#else
+#define CPLL_ROM_ECO 2u
+#define CPLL_ANALOG_DIV 9u
+#endif
+
 /* LP_ANALOG_PERI: brownout mode 0 (the level set here, a reset after a
  * wait) and mode 1 (the fixed analog reset, under eFuse control by
  * default). */
@@ -139,6 +147,10 @@ static int regulators_init(void)
     field(TIKU_P4_PMU_LP_REGULATOR, 31u << 27, lp << 27);
     dcm = (TIKU_P4_REG_READ(TIKU_P4_PMU_HP_REGULATOR) >> 9) & 31u;
     if (dcm < 27u) dcm = 27u;
+#if defined(TIKU_BOARD_ESP32_P4X_FUNCTION_EV_BOARD)
+    /* Hold the DCDC feedback resistor down until the digital trim is selected. */
+    field(TIKU_P4_PMU_DCDC, 1u << 11, 1u << 11);
+#endif
     field(TIKU_P4_PMU_DCDC, 1u << 7, 0);
     field(TIKU_P4_PMU_DCDC, 1u, 1u);
     field(TIKU_P4_PMU_DCDC_SWITCH, 3u, 0);
@@ -151,6 +163,13 @@ static int regulators_init(void)
         !(TIKU_P4_REG_READ(TIKU_P4_PMU_HP_REGULATOR) &
           TIKU_P4_PMU_DBIAS_SELECT)) return -2;
     TIKU_P4_DELAY_XTAL_US(1000);
+#if defined(TIKU_BOARD_ESP32_P4X_FUNCTION_EV_BOARD)
+    field(TIKU_P4_LP_SYSTEM_CTRL, 255u << 21, 0xefu << 21);
+    field(TIKU_P4_PMU_DCDC, 1u << 11, 0);
+    TIKU_P4_DELAY_XTAL_US(10);
+    if (((TIKU_P4_REG_READ(TIKU_P4_LP_SYSTEM_CTRL) >> 21) & 255u) != 0xefu ||
+        (TIKU_P4_REG_READ(TIKU_P4_PMU_DCDC) & (1u << 11))) return -2;
+#endif
     field(TIKU_P4_PMU_HP_REGULATOR, TIKU_P4_HP_LDO_ENABLE, 0);
     return 0;
 }
@@ -160,7 +179,7 @@ int tiku_p4_pmu_cpll_init(void)
     uint32_t gate, conf1, conf2, clock, tries;
     int result;
     if (TIKU_P4_REG_READ(TIKU_P4_ROM_CHIP_ID) != 18u ||
-        TIKU_P4_REG_READ(TIKU_P4_ROM_ECO) != 2u ||
+        TIKU_P4_REG_READ(TIKU_P4_ROM_ECO) != CPLL_ROM_ECO ||
         (TIKU_P4_REG_READ(TIKU_P4_ROOT_SELECT) & 3u) != 0 ||
         (TIKU_P4_REG_READ(TIKU_P4_ROOT_DIV0) & 0x1ffffff0u) != 0) return -1;
     gate = TIKU_P4_REG_READ(TIKU_P4_LP_CLK);
@@ -175,7 +194,7 @@ int tiku_p4_pmu_cpll_init(void)
         TIKU_P4_REG_WRITE(TIKU_P4_PMU_CLOCK_POWER, TIKU_P4_CPLL_CLOCK_UP);
         field(TIKU_P4_PLL_CAL, TIKU_P4_CPLL_CAL_STOP, 0);
         result = analog_write(0x67, 2, 0x50);
-        if (result == 0) result = analog_write(0x67, 3, 9);
+        if (result == 0) result = analog_write(0x67, 3, CPLL_ANALOG_DIV);
         if (result == 0) result = analog_write(0x67, 6, 0x73);
         if (result == 0) {
             result = -3;

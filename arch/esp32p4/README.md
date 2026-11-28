@@ -1,5 +1,67 @@
 # ESP32-P4 native firmware and qualification profiles
 
+## ESP32-P4X-Function-EV-Board
+
+The P4X panel diagnostic runs on CPU0 of silicon v3.2 (ROM ECO7). Its
+256 KiB SRAM region starts at `0x4ff50000` and reserves its final 4 KiB
+for the kernel stack. It checks the system tick,
+the 32 MiB PSRAM at `0x48000000`, the two-lane DSI host and GT911 touch
+reports on GPIO7 and GPIO8. The USB ROM loader retains the installed
+flash image. The desktop firmware profiles below target silicon v1.3.
+
+Connect the LCD adapter J3 to the board's MIPI DSI connector with the
+reverse-direction ribbon. With power disconnected, connect main-board
+J1 GPIO27 to adapter J6 RST_LCD and GPIO26 to J6 PWM. Supply the adapter
+through its J1 USB-C port or through J6 5V and GND from the main board.
+Espressif provides the header diagram and photographs in the
+[P4X hardware setup](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32p4/esp32-p4x-function-ev-board/user_guide.html#hardware-setup).
+
+Build with the Espressif RISC-V assembler for revision 3 PIE instructions
+and esptool 5.6.0. The TikuBench and drivers checkouts supply the panel
+fixture and touch provider.
+
+```sh
+make MCU=esp32p4 BOARD=esp32_p4x_function_ev_board MINIMAL=1 \
+    TOOLCHAIN_PREFIX=riscv32-esp-elf- ESPTOOL=esptool all
+```
+
+The panel diagnostic defaults to the 40 MHz crystal. Set `P4X_CPU_MHZ=400`
+to select the CPU PLL after PSRAM power-up and before display DMA. On revision
+3.2 the regulator switches to digital feedback trim before the high-performance
+LDO is released. With CPU0 at 400 MHz the memory and system clocks run at
+200 MHz and APB at 100 MHz. The panel reset and sleep-out delays use SYSTIMER.
+The TikuSurface RAM desktop selects 400 MHz by default.
+
+The build checks the binary revision, digest, ELF ABI and SRAM bounds.
+With the board's USB Serial/JTAG port available, the loader runs from
+RAM, queries the device twice and returns it to its installed firmware.
+
+```sh
+image=build/esp32p4/p4x/diagnostic/diagnostic
+python3 tools/esp32p4x_ram.py --elf "$image.elf" --image "$image.bin" \
+    --port "$PORT" --serial "$P4_SERIAL" --observe-seconds 30
+```
+
+`--observe-seconds` holds the host's color bars for visual inspection.
+`--frame-test` scans a 1024 by 600 RGB565 framebuffer from PSRAM over
+60 refresh intervals. The 40 MHz pixel clock gives about 45 Hz.
+`--observe-frame` repeats the same image for 2700 intervals. An eight-pixel
+white border marks the four edges. Both checks report DMA completions,
+VSYNCs and the number of intervals with a FIFO underrun. `--flip-test`
+alternates two buffers after frame DMA completes. `--display-test` exercises
+30 submissions through the kernel display API, checks stale tokens and draws
+through the last pixel of the back buffer.
+`--worker-test` starts a kernel worker on a PSRAM stack. The worker reads
+`/sys/clock/ticks` through POSIX and makes three synchronous calls to the
+kernel thread. The P4X accepts worker stacks of at least 1024 bytes,
+including the 512-byte trap frame. The test checks the return values, stack canary and worker exit.
+`--read-panel` requests the gamma register that startup programmed over DSI.
+The TikuSurface RAM desktop uses the same board startup, kernel clock tree
+and display driver. Its VFS also exposes the P4 SAR entropy source as
+`/dev/random` and `/dev/urandom`. The product's `tests/p4x/ram.mk` links
+the desktop and its volatile file store.
+
+
 ## Normal firmware
 
 `P4_PROFILE=firmware` builds native CPU0 TikuOS with the shell, VFS, BASIC,
@@ -398,6 +460,11 @@ pair's first pixel and V from its second), and an R/B swap. The PPA
 (`tiku_ppa_arch.c`) fills, alpha-blends, and scales, turns and mirrors
 ARGB8888, RGB888 and RGB565 pictures; a turn is a counter-clockwise quarter,
 a mirror applies to the turned block, and scaling is bilinear in sixteenths.
+The revision 3.2 P4X scaler uses 32 by 32 macro blocks and fetches 34 by 34
+RGB blocks through the 2D-DMA. Revision 1.3 uses 16 by 16 and 18 by 18.
+An owner can expire its outstanding scaler request with
+`tiku_p4_ppa_srm_expire()`. The driver stops the transfer, resets the
+claimed DMA engine and delivers the timeout before the owner reuses either buffer.
 A blend input may be a 1-byte picture of indices into a 256-entry ARGB8888
 table loaded with `tiku_p4_ppa_lut()`, and `tiku_p4_ppa_blend_keyed()`
 decides each pixel by colour keys first. A VGA fill takes 1.7 ms, doubling

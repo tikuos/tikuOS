@@ -84,6 +84,32 @@ static uint32_t saved_enable[2];
 static uint8_t opened;
 static uint8_t faulted;
 
+#if TIKU_I2C_BUDGET_ENABLE
+static uint64_t budget_start;
+static uint32_t budget_ticks;
+
+int tiku_i2c_arch_budget_begin(uint32_t microseconds)
+{
+    if (!microseconds || microseconds > 50000u) return TIKU_I2C_ERR_PARAM;
+    if (budget_ticks) return TIKU_I2C_ERR_BUSY;
+    if (tiku_p4_systimer_read(&budget_start)) return TIKU_I2C_ERR_TIMEOUT;
+    budget_ticks = 16u * microseconds;
+    return TIKU_I2C_OK;
+}
+
+void tiku_i2c_arch_budget_end(void)
+{
+    budget_ticks = 0;
+}
+
+static int budget_expired(uint64_t value)
+{
+    return budget_ticks && ((value - budget_start) & I2C_TIME_MASK) >= budget_ticks;
+}
+#else
+#define budget_expired(value) 0
+#endif
+
 /** @brief Wait for self-clearing controller bits with a fixed poll limit. */
 static int sync_done(uint32_t bits)
 {
@@ -140,7 +166,7 @@ static int run_batch(int stop)
     if (rc != TIKU_I2C_OK) {
         return rc;
     }
-    if (tiku_p4_systimer_read(&begin) != 0) {
+    if (tiku_p4_systimer_read(&begin) != 0 || budget_expired(begin)) {
         return TIKU_I2C_ERR_TIMEOUT;
     }
     TIKU_P4_REG_WRITE(I2C_CTRL, I2C_MASTER | I2C_SYNC);
@@ -158,7 +184,7 @@ static int run_batch(int stop)
             return TIKU_I2C_OK;
         }
         if ((n & 63u) == 0u &&
-            (tiku_p4_systimer_read(&now) != 0 ||
+            (tiku_p4_systimer_read(&now) != 0 || budget_expired(now) ||
              ((now - begin) & I2C_TIME_MASK) >= I2C_WAIT_TICKS)) {
             return TIKU_I2C_ERR_TIMEOUT;
         }

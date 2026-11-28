@@ -107,7 +107,7 @@ name_valid(const char *owner)
  *
  * Covers the console UART's pins on every platform but the MSP430, whose mux
  * check reports them, the Pico 2 W radio wiring when its driver is built,
- * and the FireBeetle 2's microphone pads.
+ * and the P4 boards' microphone pads.
  *
  * @param port  Port number
  * @param pin   Pin within the port
@@ -162,6 +162,14 @@ board_owner(uint8_t port, uint8_t pin)
 #if defined(TIKU_BOARD_USB_DM_PIN)
     if (IS_BANKED_PIN(port, pin, TIKU_BOARD_USB_DM_PIN) ||
         IS_BANKED_PIN(port, pin, TIKU_BOARD_USB_DP_PIN)) { return "console"; }
+#endif
+#if defined(TIKU_BOARD_I2S_MCLK_PIN)
+    if (IS_BANKED_PIN(port, pin, TIKU_BOARD_I2S_MCLK_PIN) ||
+        IS_BANKED_PIN(port, pin, TIKU_BOARD_I2S_BCLK_PIN) ||
+        IS_BANKED_PIN(port, pin, TIKU_BOARD_I2S_WS_PIN) ||
+        IS_BANKED_PIN(port, pin, TIKU_BOARD_I2S_DIN_PIN)) {
+        return TIKU_GPIO_OWNER_MICROPHONE;
+    }
 #endif
 #if defined(TIKU_BOARD_PDM_CLK_PIN)
     /* The PDM microphone's clock and data, driven by tiku_pdm_arch.c. */
