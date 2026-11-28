@@ -5,9 +5,9 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_ppa_arch.h - ESP32-S31 Pixel Processing Accelerator: a block of an
- * ARGB8888 picture converted into an RGB565 picture through the scaler at
- * scale 1, fed by the 2D-DMA, started and then polled.
+ * tiku_ppa_arch.h - asynchronous ESP32-S31 pixel operations. The blend
+ * engine fills ARGB8888 rectangles. The scaler copies ARGB8888 pixels
+ * or converts them to RGB565 for the LCD.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -39,6 +39,24 @@ int tiku_s31_ppa_convert(const tiku_s31_picture_t *out, uint16_t ox, uint16_t oy
                          uint16_t w, uint16_t h);
 
 /**
+ * @brief Start a solid 32-bit fill on the blend engine. The first pixel
+ * is 64-byte aligned and the width and row stride are in groups of 16
+ * pixels (expressed in pixels). The caller owns the span between the first
+ * and last filled pixels through completion, including gaps between rows.
+ * @return TIKU_S31_PPA_OK when started; poll with tiku_s31_ppa_poll().
+ */
+int tiku_s31_ppa_fill(uint32_t *first, unsigned stride, unsigned width,
+                      unsigned height, uint32_t color);
+
+/** @brief Copy a rectangle of 32-bit pixels through the scaler at scale one.
+ * Strides and sizes are in pixels. Destination alignment and lifetime
+ * match fill. The disjoint source span stays unchanged through completion.
+ * @return TIKU_S31_PPA_OK when started, or a negative error.
+ */
+int tiku_s31_ppa_blit(uint32_t *to, unsigned dst_stride, const uint32_t *from,
+                      unsigned src_stride, unsigned width, unsigned height);
+
+/**
  * @brief The running job's state: TIKU_S31_PPA_RUNNING, or its end, which
  *        drops the output block from the cache and frees the engine.
  * @return TIKU_S31_PPA_RUNNING, TIKU_S31_PPA_OK, TIKU_S31_PPA_ERR_TIMEOUT or
@@ -46,7 +64,7 @@ int tiku_s31_ppa_convert(const tiku_s31_picture_t *out, uint16_t ox, uint16_t oy
  */
 int tiku_s31_ppa_poll(void);
 
-/** @brief The scaler's parameter error flags of the last job; 0 when it
+/** @brief The active engine's parameter error flags of the last job; 0 when it
  *         had none. */
 uint32_t tiku_s31_ppa_errors(void);
 

@@ -426,6 +426,14 @@ the CPU conversion `((c >> 8) & 0xf800) | ((c >> 5) & 0x07e0) | ((c >> 3) &
 reports it; one job runs at a time, from the kernel thread. Pictures lie in
 internal SRAM or PSRAM, and an output in PSRAM starts on a 64-byte line.
 
+The same driver provides a 32-bit rectangle fill through the blend engine
+and a 32-bit rectangle copy through the scaler at scale one. Both use RX2
+and share the conversion job slot. Source and destination strides are in
+pixels. Destinations use whole cache lines. A strided operation writes
+dirty pixels between rows back before giving the span to DMA. A fill
+covering consecutive complete lines discards the old contents. The fill
+engine uses TEE master 82. A locked incompatible mode refuses the fill.
+
 The first job brings the 2D-DMA up through `tiku_dma2d_arch.c`, which the
 JPEG encoder shares and which runs once: it puts TEE master 81, the 2D-DMA's
 master for the PPA, in trusted mode, enables and resets the 2D-DMA's clock,

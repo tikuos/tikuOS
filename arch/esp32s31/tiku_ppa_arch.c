@@ -5,11 +5,11 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_ppa_arch.c - ESP32-S31 Pixel Processing Accelerator: ARGB8888 to
- * RGB565 through the scaler at scale 1, fed by the 2D-DMA, polled.  The
- * sequence is ESP-IDF's ppa_srm.c and dma2d_ll.h for the S31, as the P4
- * port's tiku_ppa_arch.c runs it, with the S31's trusted mode for the
- * 2D-DMA, clocks, resets, memory power and 32 x 32 macro block.
+ * tiku_ppa_arch.c - ESP32-S31 pixel fills, copies and RGB565 conversion.
+ * The blend engine writes solid rectangles through DMA receive channel 2.
+ * The scaler reads and writes picture blocks through the 2D-DMA.
+ * A poll retires each operation and releases its buffers. The receive
+ * channel can interrupt the caller on completion.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -28,6 +28,7 @@
 #define TIKU_S31_PPA_CLEAN(a, n) tiku_s31_psram_sync((a), (n), 0u)
 #define TIKU_S31_PPA_FLUSH(a, n) tiku_s31_psram_sync((a), (n), 1u)
 #define TIKU_S31_PPA_DROP(a, n) tiku_s31_psram_invalidate((a), (n))
+#define TIKU_S31_PPA_HALT() tiku_s31_fatal("PPA DMA stop")
 #define TIKU_S31_PPA_NOW_US() (tiku_s31_time() / 16u)
 #define TIKU_S31_PPA_PSRAM_BYTES() tiku_s31_psram_size()
 #define TIKU_S31_PPA_CONTEXT() (!tiku_s31_in_trap && tiku_thread_in_kernel())
@@ -58,13 +59,30 @@
 #define SRM_SCAL_ROTATE (PPA_BASE + 0x64u)
 #define SRM_PARAM_ERR_ST (PPA_BASE + 0x78u)
 #define SRM_PARAM_ERR   (1u << 2)              /* PPA_INT_RAW */
-#define PPA_INT_ALL     7u
+#define PPA_INT_ALL     15u
 #define SRM_RST         (1u << 26)
 #define SRM_START       (1u << 27)
 #define SRM_SCALE_1     ((1u << 0) | (1u << 12))   /* x and y: 1 + 0/16 */
 #define MODE_ARGB8888   0u
 #define MODE_RGB565     2u
 #define ALPHA_KEPT      0x80u
+
+#define BLEND_PARAM_ERR  (1u << 3)
+#define BLEND_STATUS     (PPA_BASE + 0x74u)
+#define BLEND_COLOR_MODE (PPA_BASE + 0x24u)
+#define BLEND_MODE       (PPA_BASE + 0x34u)
+#define BLEND_SIZE       (PPA_BASE + 0x3cu)
+#define BLEND_PIXEL      (PPA_BASE + 0x4cu)
+#define BLEND_RESET      (1u << 4)
+#define BLEND_UPDATE     (1u << 3)
+#define BLEND_FILL       (1u << 2)
+#define BLEND_ENABLE     1u
+#define PERI_BLEND       2u
+#define BLEND_BYPASS     (1u << 1)
+#define DESC_PORT        (1u << 11)
+#define TEE_BLEND        0x20504148u   /* RX transactions from the blend engine */
+#define TEE_MODE_BITS    3u
+#define TEE_MODE_LOCK    4u
 
 #define TX(n)           TIKU_S31_DMA2D_TX(n)
 #define RX(n)           TIKU_S31_DMA2D_RX(n)
@@ -123,7 +141,7 @@ typedef struct {
 
 static desc_t desc_in __attribute__((aligned(8)));
 static desc_t desc_out __attribute__((aligned(8)));
-static uint8_t ready, busy, irq_claimed;
+static uint8_t ready, blend_ready, busy, filling, links_started, irq_claimed;
 static void (*volatile notify_fn)(void);
 static uint8_t *out_at;            /* the running job's output lines */
 static uint32_t out_len, budget_us, errors;
@@ -234,15 +252,22 @@ static void ppa_isr(void)
     if (fn != NULL) fn();
 }
 
-/** @brief End the job with @p rc: a fault stops both links and resets the
- *         scaler; the channels leave the scaler; the output lines leave the
- *         cache; the engine is free. */
+/** @brief Retire the job and invalidate its output. On fault reset the
+ * active engine and wait for its DMA channels to release their buffers. */
 static int finish(int rc)
 {
     if (rc != TIKU_S31_PPA_OK) {
         put_bits(RX(CH_IN) + LINK_CONF, IN_STOP, IN_STOP);
         put_bits(TX(CH_OUT) + LINK_CONF, OUT_STOP, OUT_STOP);
-        srm_reset();
+        if (filling) {
+            put_bits(BLEND_MODE, BLEND_RESET, BLEND_RESET);
+            put_bits(BLEND_MODE, BLEND_RESET, 0u);
+        } else {
+            srm_reset();
+        }
+        if (links_started && (tiku_s31_dma2d_chan_reset(RX(CH_IN), 1) != 0 ||
+            (!filling && tiku_s31_dma2d_chan_reset(TX(CH_OUT), 0) != 0)))
+            TIKU_S31_PPA_HALT();
     }
     TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + INT_ENA, 0u);
     TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + INT_CLR, IN_ALL);
@@ -253,11 +278,70 @@ static int finish(int rc)
         rc = TIKU_S31_PPA_ERR_FAULT;
     }
     TIKU_S31_PPA_REG_WRITE(PPA_INT_CLR, PPA_INT_ALL);
+    filling = links_started = 0u;
     busy = 0u;
     return rc;
 }
 
-int tiku_s31_ppa_convert(const tiku_s31_picture_t *out, uint16_t ox, uint16_t oy,
+/** @brief Route the shared output descriptor to RX2 and arm completion. */
+static void receive_block(uint32_t peripheral)
+{
+    TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + IN_PERI_SEL, peripheral);
+    /* The scaler supplies the block size on the descriptor port. The
+     * blend engine takes the dimensions in the SRAM descriptor. */
+    uint32_t config = peripheral == PERI_SRM ? CONF_PORT : CONF_PORT & ~DESC_PORT;
+    TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + CONF0, config);
+    put_bits(RX(CH_IN) + LINK_CONF, IN_AUTO_RET, 0u);
+    TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + INT_CLR, IN_ALL);
+    TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + INT_ENA, notify_fn != NULL ? IN_ENDS : 0u);
+    TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + LINK_ADDR, (uint32_t)(uintptr_t)&desc_out);
+}
+
+int tiku_s31_ppa_fill(uint32_t *first, unsigned stride, unsigned width,
+                      unsigned height, uint32_t color)
+{
+    if (!TIKU_S31_PPA_CONTEXT() || !first || ((uintptr_t)first & (LINE - 1u)) ||
+        !width || width > stride || stride > SIDE_MAX || !height || height > SIDE_MAX ||
+        ((stride | width) & 15u)) return TIKU_S31_PPA_ERR_PARAM;
+    tiku_s31_picture_t out = {first, (uint16_t)stride, (uint16_t)height, 4};
+    if (!block_ok(&out, 4u, 0, 0, width, height)) return TIKU_S31_PPA_ERR_PARAM;
+    if (busy) return TIKU_S31_PPA_ERR_BUSY;
+    if (!ready && engines_init() != 0) return TIKU_S31_PPA_ERR_FAULT;
+    if (!blend_ready) {
+        uint32_t mode = TIKU_S31_PPA_REG_READ(TEE_BLEND);
+        if ((mode & TEE_MODE_LOCK) && (mode & TEE_MODE_BITS)) return TIKU_S31_PPA_ERR_FAULT;
+        if (mode & TEE_MODE_BITS) {
+            TIKU_S31_PPA_REG_WRITE(TEE_BLEND, mode & ~TEE_MODE_BITS);
+            if (TIKU_S31_PPA_REG_READ(TEE_BLEND) & TEE_MODE_BITS) return TIKU_S31_PPA_ERR_FAULT;
+        }
+        blend_ready = 1u;
+    }
+    if (tiku_s31_dma2d_chan_reset(RX(CH_IN), 1) != 0)
+        return TIKU_S31_PPA_ERR_FAULT;
+    lines(&out, 0, 0, width, height, &out_at, &out_len);
+    if (cache(out_at, out_len, width == stride ? 2u : 1u) != 0)
+        return TIKU_S31_PPA_ERR_FAULT;
+    busy = filling = 1u;
+    errors = 0u;
+    TIKU_S31_PPA_REG_WRITE(PPA_INT_CLR, PPA_INT_ALL);
+    put_bits(BLEND_MODE, BLEND_RESET, BLEND_RESET);
+    put_bits(BLEND_MODE, BLEND_RESET, 0u);
+    describe(&desc_out, &out, 0, 0, width, height);
+    receive_block(PERI_BLEND);
+    links_started = 1u;
+    put_bits(RX(CH_IN) + LINK_CONF, IN_START, IN_START);
+    TIKU_S31_PPA_REG_WRITE(BLEND_PIXEL, color);
+    TIKU_S31_PPA_REG_WRITE(BLEND_COLOR_MODE, MODE_ARGB8888 << 8);
+    TIKU_S31_PPA_REG_WRITE(BLEND_SIZE, width | (height << 14));
+    put_bits(BLEND_MODE, BLEND_FILL | BLEND_BYPASS, BLEND_FILL);
+    put_bits(BLEND_MODE, BLEND_ENABLE, BLEND_ENABLE);
+    put_bits(BLEND_MODE, BLEND_UPDATE, BLEND_UPDATE);
+    started_us = TIKU_S31_PPA_NOW_US();
+    budget_us = 20000u + width * height / 2u;
+    return TIKU_S31_PPA_OK;
+}
+
+static int scale_one(const tiku_s31_picture_t *out, unsigned output_bpp, uint16_t ox, uint16_t oy,
                          const tiku_s31_picture_t *in, uint16_t ix, uint16_t iy,
                          uint16_t w, uint16_t h)
 {
@@ -265,7 +349,7 @@ int tiku_s31_ppa_convert(const tiku_s31_picture_t *out, uint16_t ox, uint16_t oy
     uint32_t in_len;
 
     if (!TIKU_S31_PPA_CONTEXT() || !block_ok(in, 4u, ix, iy, w, h) ||
-        !block_ok(out, 2u, ox, oy, w, h) ||
+        !block_ok(out, output_bpp, ox, oy, w, h) ||
         ((uintptr_t)out->base >= PSRAM_BASE && ((uintptr_t)out->base & (LINE - 1u)))) {
         return TIKU_S31_PPA_ERR_PARAM;
     }
@@ -296,24 +380,43 @@ int tiku_s31_ppa_convert(const tiku_s31_picture_t *out, uint16_t ox, uint16_t oy
     TIKU_S31_PPA_REG_WRITE(TX(CH_OUT) + INT_CLR, OUT_ALL);
     TIKU_S31_PPA_REG_WRITE(TX(CH_OUT) + LINK_ADDR, (uint32_t)(uintptr_t)&desc_in);
     TIKU_S31_PPA_REG_WRITE(TX(CH_OUT) + OUT_PORT_BLK, PORT_BLOCK | (PORT_BLOCK << 14));
-    TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + IN_PERI_SEL, PERI_SRM);
-    TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + CONF0, CONF_PORT);
-    put_bits(RX(CH_IN) + LINK_CONF, IN_AUTO_RET, 0u);
-    TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + INT_CLR, IN_ALL);
-    TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + INT_ENA, notify_fn != NULL ? IN_ENDS : 0u);
-    TIKU_S31_PPA_REG_WRITE(RX(CH_IN) + LINK_ADDR, (uint32_t)(uintptr_t)&desc_out);
+    receive_block(PERI_SRM);
+    links_started = 1u;
     put_bits(TX(CH_OUT) + LINK_CONF, OUT_START, OUT_START);
     put_bits(RX(CH_IN) + LINK_CONF, IN_START, IN_START);
     TIKU_S31_PPA_REG_WRITE(PPA_INT_CLR, PPA_INT_ALL);
-    TIKU_S31_PPA_REG_WRITE(SRM_COLOR_MODE, MODE_ARGB8888 | (MODE_RGB565 << 4));
+    TIKU_S31_PPA_REG_WRITE(SRM_COLOR_MODE, output_bpp == 4u ? MODE_ARGB8888 : MODE_RGB565 << 4);
     TIKU_S31_PPA_REG_WRITE(SRM_FIX_ALPHA, ALPHA_KEPT);
     TIKU_S31_PPA_REG_WRITE(SRM_BYTE_ORDER, 0u);
     TIKU_S31_PPA_REG_WRITE(SRM_SCAL_ROTATE, SRM_SCALE_1);
     TIKU_S31_PPA_REG_WRITE(SRM_SCAL_ROTATE, SRM_SCALE_1 | SRM_START);
     /* 20 ms, and a microsecond for every 8 output bytes. */
-    budget_us = 20000u + ((uint32_t)w * h * 2u) / 8u;
+    budget_us = 20000u + ((uint32_t)w * h * output_bpp) / 8u;
     started_us = TIKU_S31_PPA_NOW_US();
     return TIKU_S31_PPA_OK;
+}
+
+int tiku_s31_ppa_convert(const tiku_s31_picture_t *out, uint16_t ox, uint16_t oy,
+                         const tiku_s31_picture_t *in, uint16_t ix, uint16_t iy,
+                         uint16_t w, uint16_t h)
+{
+    return scale_one(out, 2u, ox, oy, in, ix, iy, w, h);
+}
+
+int tiku_s31_ppa_blit(uint32_t *to, unsigned dst_stride, const uint32_t *from,
+                      unsigned src_stride, unsigned width, unsigned height)
+{
+    uintptr_t a = (uintptr_t)to, b = (uintptr_t)from;
+    if (!to || !from || (a & (LINE - 1u)) || (b & 3u) || !width ||
+        ((dst_stride | width) & 15u) || width > dst_stride || width > src_stride ||
+        dst_stride > SIDE_MAX || src_stride > SIDE_MAX || !height || height > SIDE_MAX)
+        return TIKU_S31_PPA_ERR_PARAM;
+    uint32_t dst_bytes = ((height - 1u) * dst_stride + width) * 4u;
+    uint32_t src_bytes = ((height - 1u) * src_stride + width) * 4u;
+    if (a <= b ? b - a < dst_bytes : a - b < src_bytes) return TIKU_S31_PPA_ERR_PARAM;
+    tiku_s31_picture_t out = {to, (uint16_t)dst_stride, (uint16_t)height, 4};
+    tiku_s31_picture_t in = {(void *)from, (uint16_t)src_stride, (uint16_t)height, 4};
+    return scale_one(&out, 4u, 0, 0, &in, 0, 0, width, height);
 }
 
 int tiku_s31_ppa_poll(void)
@@ -321,8 +424,8 @@ int tiku_s31_ppa_poll(void)
     uint32_t raw;
 
     if (!busy) return TIKU_S31_PPA_ERR_PARAM;
-    if (TIKU_S31_PPA_REG_READ(PPA_INT_RAW) & SRM_PARAM_ERR) {
-        errors = TIKU_S31_PPA_REG_READ(SRM_PARAM_ERR_ST);
+    if (TIKU_S31_PPA_REG_READ(PPA_INT_RAW) & (filling ? BLEND_PARAM_ERR : SRM_PARAM_ERR)) {
+        errors = TIKU_S31_PPA_REG_READ(filling ? BLEND_STATUS : SRM_PARAM_ERR_ST);
         return finish(TIKU_S31_PPA_ERR_FAULT);
     }
     raw = TIKU_S31_PPA_REG_READ(RX(CH_IN) + INT_RAW);
