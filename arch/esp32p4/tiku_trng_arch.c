@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_trng_arch.c - Native P4 ECO2 SAR noise source and bounded RNG reads.
+ * tiku_trng_arch.c - Native P4 SAR noise source and bounded RNG reads.
  *
  * Each read samples an internal SAR channel, then restores its registers.
  * Sequence: ESP-IDF 4d59230 bootloader_random_esp32p4.c and adc_ll.h.

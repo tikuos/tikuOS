@@ -5,7 +5,7 @@
  *
  * Authors: Ambuj Varshney <ambuj@tiku-os.org>
  *
- * tiku_trng_arch.h - P4 ECO2 RNG with internal SAR entropy.
+ * tiku_trng_arch.h - P4 RNG with internal SAR entropy.
  *
  * The RNG mixes noise from an internal SAR ADC channel; no board pin is
  * routed or sampled.  Calls return TIKU_TRNG_OK or a TIKU_TRNG_ERR_* code.

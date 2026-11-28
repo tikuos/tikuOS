@@ -32,7 +32,7 @@ S31_SRCS += arch/esp32s31/tiku_storage_arch.c arch/esp32s31/tiku_storage_io.c \
     interfaces/led/tiku_led.c interfaces/button/tiku_button.c \
     arch/esp32s31/tiku_spi_arch.c \
     basic/tiku_basic.c basic/tiku_basic_module.c basic/tiku_basic_vfs.c
-S31_SRCS += $(addprefix kernel/vfs/tree/tiku_vfs_tree_,sys.c boot.c timer.c watchdog.c power.c net.c wifi.c persist.c layout.c watch.c dev.c gpio.c sensor.c data.c)
+S31_SRCS += $(addprefix kernel/vfs/tree/tiku_vfs_tree_,sys.c boot.c timer.c watchdog.c power.c net.c wifi.c persist.c layout.c watch.c dev.c random.c gpio.c sensor.c data.c)
 S31_SRCS += $(addprefix shell/commands/tiku_shell_cmd_,ls.c cd.c write.c read.c fs.c free.c df.c layout.c name.c tree.c basic.c reboot.c console.c freq.c)
 ifneq ($(origin S31_APPLICATION_MANIFEST),undefined)
 ifeq ($(wildcard $(S31_APPLICATION_MANIFEST)),)
